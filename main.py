@@ -2,7 +2,6 @@
 
 import random
 import sys
-from typing import Optional
 
 from game import GAME_TITLE, VERSION
 from game.combat import do_combat_round, spawn_enemy
