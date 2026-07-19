@@ -2,12 +2,33 @@ import { chromium, Browser, Page, request as pwRequest } from "playwright";
 import { spawn, ChildProcess } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import { existsSync } from "node:fs";
+import assert from "node:assert/strict";
+import { GameMap, mulberry32 } from "../src/map/gameMap";
+import { placeResourceTiles, RESOURCES } from "../src/map/resourceTiles";
 
 const WEB_PORT = 4173;
 const API_PORT = 3001;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 const API_URL = `http://localhost:${API_PORT}`;
 const GAME_NAME = "default";
+
+function runDeterminismChecks() {
+  const m1 = new GameMap(42);
+  const m2 = new GameMap(42);
+  assert.deepEqual(m1.resourceTiles, m2.resourceTiles, "resourceTiles differ across same seed");
+  const total = m1.resourceTiles.filter((t): t is NonNullable<typeof t> => Boolean(t)).length;
+  assert(total > 20 && total < 100, `resource count out of band: ${total}`);
+  const goldCount = m1.resourceTiles.filter((t) => t?.resource === "gold").length;
+  assert(goldCount > 5 && goldCount < 50, `gold count out of band: ${goldCount}`);
+  for (const res of RESOURCES) {
+    const count = m1.resourceTiles.filter((t) => t?.resource === res).length;
+    assert(count >= 0, `negative count for ${res}`);
+  }
+  const sample = placeResourceTiles(new GameMap(7), mulberry32(99));
+  assert(sample.length > 0, "expected at least one resource tile on seed 7");
+}
+
+runDeterminismChecks();
 
 async function ensureBuilt() {
   if (!existsSync("dist/index.html")) {

@@ -1,8 +1,12 @@
 import { Faction } from "../entities/hero";
 import { CastleLevel } from "../entities/settlement";
+import { ResourceType } from "../map/resourceTiles";
 
 const castleImages: Partial<Record<CastleLevel, HTMLImageElement>> = {};
 const castleReady: Partial<Record<CastleLevel, boolean>> = {};
+
+const resourceImages: Partial<Record<ResourceType, HTMLImageElement>> = {};
+const resourceReady: Partial<Record<ResourceType, boolean>> = {};
 
 export function preloadCastleSprites() {
   for (const lvl of [1, 2, 3] as CastleLevel[]) {
@@ -123,4 +127,34 @@ function drawDemon(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: 
 
   ctx.fillStyle = "#3a0000";
   ctx.fillRect(cx - r * 0.2, cy + r * 0.25, r * 0.4, r * 0.05);
+}
+
+export function preloadResourceSprites() {
+  for (const res of ["gold", "wood", "stone", "iron", "arcane"] as ResourceType[]) {
+    if (resourceImages[res]) continue;
+    const img = new Image();
+    img.src = `src/resources/resource-${res}.png`;
+    resourceImages[res] = img;
+    resourceReady[res] = false;
+    img.onload = () => {
+      resourceReady[res] = true;
+    };
+  }
+}
+
+export function drawResourceIcon(
+  ctx: CanvasRenderingContext2D,
+  resource: ResourceType,
+  cx: number,
+  cy: number,
+  hexSize: number
+) {
+  const img = resourceImages[resource];
+  if (!img || !resourceReady[resource] || img.naturalWidth === 0) return;
+  ctx.imageSmoothingEnabled = false;
+  const targetW = hexSize * 0.9;
+  const aspect = img.naturalWidth / img.naturalHeight;
+  const w = targetW;
+  const h = targetW / aspect;
+  ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
 }

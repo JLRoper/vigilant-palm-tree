@@ -3,7 +3,7 @@ import { GameMap } from "./map/gameMap";
 import { Renderer } from "./render/renderer";
 import { Camera } from "./render/camera";
 import { api, type Game } from "./io/api";
-import { preloadCastleSprites } from "./render/sprites";
+import { preloadCastleSprites, preloadResourceSprites } from "./render/sprites";
 import { rng } from "./core/rng";
 import { AdventureView, ENEMY_START, GAME_NAME, MAP_SEED } from "./views/adventureView";
 import { updateHud } from "./views/hud";
@@ -11,6 +11,7 @@ import { onHeroArrived, type ArrivalState } from "./systems/movement";
 import { tickEnemyWander } from "./systems/enemyWander";
 
 preloadCastleSprites();
+preloadResourceSprites();
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;

@@ -20,6 +20,11 @@
     <div class="cell"><canvas id="l1" width="96"  height="80"></canvas>  <div class="lbl">L1 small town 96x80</div></div>
     <div class="cell"><canvas id="l2" width="112" height="112"></canvas><div class="lbl">L2 fortified town 112x112</div></div>
     <div class="cell"><canvas id="l3" width="128" height="160"></canvas><div class="lbl">L3 castle 128x160</div></div>
+    <div class="cell"><canvas id="resource-gold"   width="32" height="32"></canvas><div class="lbl">resource-gold 32x32</div></div>
+    <div class="cell"><canvas id="resource-wood"   width="32" height="32"></canvas><div class="lbl">resource-wood 32x32</div></div>
+    <div class="cell"><canvas id="resource-stone"  width="32" height="32"></canvas><div class="lbl">resource-stone 32x32</div></div>
+    <div class="cell"><canvas id="resource-iron"   width="32" height="32"></canvas><div class="lbl">resource-iron 32x32</div></div>
+    <div class="cell"><canvas id="resource-arcane" width="32" height="32"></canvas><div class="lbl">resource-arcane 32x32</div></div>
   </div>
 <script>
 // ---------- helpers ----------
@@ -75,6 +80,37 @@ function T(ctx, cx, topY, hwBottom, bottomY, fill, outline) {
 function SH(ctx, x, w, yTop, h, c0, c1) {
   R(ctx, x, yTop, w, h, c0);
   R(ctx, x - 4, yTop + h, w + 8, 2, c1);
+}
+
+// ---------- theme: alchemical rune stones ----------
+// 5 small carved tablets, one per resource. Same silhouette across the set
+// (24x24 stone, 1px outline, 1px carved inner frame), differentiated by stone
+// color + glowing alchemical glyph at center. See docs/art-style.md.
+const RESOURCE_PAL = {
+  gold:   { stone:"#c8a868", stoneDk:"#7a5a30", stoneHi:"#ecd49a", outline:"#1a1208", rune:"#ffd84a", glow:"#fff200" },
+  wood:   { stone:"#8aa66c", stoneDk:"#4a5a30", stoneHi:"#b8c898", outline:"#10180a", rune:"#a8e860", glow:"#e8ffb0" },
+  stone:  { stone:"#a8a8a0", stoneDk:"#585850", stoneHi:"#d0d0c8", outline:"#101010", rune:"#e8e8e0", glow:"#ffffff" },
+  iron:   { stone:"#787886", stoneDk:"#383848", stoneHi:"#a0a0b0", outline:"#0a0a0e", rune:"#e87a5a", glow:"#ffb070" },
+  arcane: { stone:"#5a4878", stoneDk:"#2a1838", stoneHi:"#8870a0", outline:"#08040a", rune:"#d098ff", glow:"#f8d8ff" },
+};
+
+// Shared stone tablet frame. 24x24 at (4,4)-(27,27), chipped top-left and
+// bottom-right corners for a hand-carved feel. Rune is drawn afterward at
+// center (16,16) inside the carved inner frame.
+function drawStone(ctx, p) {
+  R(ctx, 4, 4, 24, 24, p.stone);
+  O(ctx, 4, 4, 24, 24, p.outline);
+  // chip two corners
+  ctx.clearRect(4, 4, 1, 1);
+  ctx.clearRect(27, 27, 1, 1);
+  // bevel: top highlight, bottom shadow
+  R(ctx, 5, 5, 22, 1, p.stoneHi);
+  R(ctx, 5, 26, 22, 1, p.stoneDk);
+  // carved inner frame, inset 3px
+  R(ctx, 7, 7, 18, 1, p.stoneDk);
+  R(ctx, 7, 23, 18, 1, p.stoneDk);
+  R(ctx, 7, 7, 1, 17, p.stoneDk);
+  R(ctx, 24, 7, 1, 17, p.stoneDk);
 }
 
 // ---------- L1: small town ----------
@@ -365,10 +401,83 @@ function drawTower(ctx, x, yTop, w, h, fill, outline) {
   ctx.fillRect(x + (w>>1) - 0, yTop + 24, 1, 10);
 }
 
+// ---------- resource icons ----------
+function drawResourceGold(ctx) {
+  const p = RESOURCE_PAL.gold;
+  drawStone(ctx, p);
+  // Sun glyph ☉: disc with 4 cardinal rays + glow tips
+  R(ctx, 16, 10, 1, 1, p.glow); R(ctx, 16, 22, 1, 1, p.glow);
+  R(ctx, 10, 16, 1, 1, p.glow); R(ctx, 22, 16, 1, 1, p.glow);
+  R(ctx, 16, 11, 1, 2, p.rune); R(ctx, 16, 20, 1, 2, p.rune);
+  R(ctx, 11, 16, 2, 1, p.rune); R(ctx, 20, 16, 2, 1, p.rune);
+  R(ctx, 14, 14, 5, 5, p.rune);          // disc
+  R(ctx, 15, 15, 2, 2, p.glow);          // inner ring
+  R(ctx, 16, 15, 1, 1, "#ffffff");       // bright core
+}
+
+function drawResourceWood(ctx) {
+  const p = RESOURCE_PAL.wood;
+  drawStone(ctx, p);
+  // Leaf with stem glyph: 5-wide leaf body + 4px stem
+  R(ctx, 15, 12, 3, 1, p.rune);
+  R(ctx, 14, 13, 5, 1, p.rune);
+  R(ctx, 14, 14, 5, 1, p.rune);
+  R(ctx, 14, 15, 5, 1, p.rune);
+  R(ctx, 15, 16, 3, 1, p.rune);
+  R(ctx, 16, 13, 1, 3, p.glow);          // central vein
+  R(ctx, 16, 17, 1, 4, p.rune);          // stem
+  R(ctx, 15, 12, 1, 1, p.glow);          // leaf tip highlight
+}
+
+function drawResourceStone(ctx) {
+  const p = RESOURCE_PAL.stone;
+  drawStone(ctx, p);
+  // Earth glyph ⊕: square outline with interior cross
+  R(ctx, 13, 13, 7, 1, p.rune);
+  R(ctx, 13, 19, 7, 1, p.rune);
+  R(ctx, 13, 13, 1, 7, p.rune);
+  R(ctx, 19, 13, 1, 7, p.rune);
+  R(ctx, 16, 14, 1, 5, p.rune);
+  R(ctx, 14, 16, 5, 1, p.rune);
+  R(ctx, 14, 14, 1, 1, p.glow);          // corner highlight
+}
+
+function drawResourceIron(ctx) {
+  const p = RESOURCE_PAL.iron;
+  drawStone(ctx, p);
+  // Mars-style glyph ♂: upward arrow with horizontal crossbar
+  R(ctx, 16, 10, 1, 1, p.glow);          // tip glow
+  R(ctx, 16, 11, 1, 1, p.rune);
+  R(ctx, 15, 12, 3, 1, p.rune);
+  R(ctx, 14, 13, 5, 1, p.rune);
+  R(ctx, 16, 14, 1, 8, p.rune);          // shaft
+  R(ctx, 11, 15, 9, 1, p.rune);          // crossbar
+  R(ctx, 11, 16, 1, 1, p.glow);          // left edge glow
+}
+
+function drawResourceArcane(ctx) {
+  const p = RESOURCE_PAL.arcane;
+  drawStone(ctx, p);
+  // 4-pointed star ✦: plus-sign with diamond core + 4 glow tips
+  R(ctx, 16, 9, 1, 1, p.glow); R(ctx, 16, 23, 1, 1, p.glow);
+  R(ctx, 9, 16, 1, 1, p.glow); R(ctx, 23, 16, 1, 1, p.glow);
+  R(ctx, 16, 10, 1, 13, p.rune);         // vertical bar
+  R(ctx, 10, 16, 13, 1, p.rune);         // horizontal bar
+  R(ctx, 15, 15, 3, 3, p.rune);          // diamond core
+  R(ctx, 16, 16, 1, 1, "#ffffff");       // bright core
+  R(ctx, 14, 14, 1, 1, p.glow);          // sparkle
+  R(ctx, 18, 18, 1, 1, p.glow);          // sparkle
+}
+
 // ---------- run ----------
 drawL1(makeCtx(document.getElementById("l1")));
 drawL2(makeCtx(document.getElementById("l2")));
 drawL3(makeCtx(document.getElementById("l3")));
+drawResourceGold(makeCtx(document.getElementById("resource-gold")));
+drawResourceWood(makeCtx(document.getElementById("resource-wood")));
+drawResourceStone(makeCtx(document.getElementById("resource-stone")));
+drawResourceIron(makeCtx(document.getElementById("resource-iron")));
+drawResourceArcane(makeCtx(document.getElementById("resource-arcane")));
 </script>
 </body>
 </html>

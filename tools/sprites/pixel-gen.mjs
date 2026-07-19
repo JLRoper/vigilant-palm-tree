@@ -9,17 +9,29 @@ const htmlPath = path.resolve(__dirname, "pixel-art.html");
 const outDir = path.resolve(__dirname, "..", "..", "src", "resources");
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } });
 await page.goto("file://" + htmlPath.replace(/\\/g, "/"));
-await page.waitForFunction(() => document.querySelectorAll("canvas").length === 3);
+await page.waitForFunction(() => document.querySelectorAll("canvas").length === 8);
 
-for (const lvl of [1, 2, 3]) {
-  const dataUrl = await page.evaluate((id) => {
-    const c = document.getElementById(id);
+// canvas id -> output filename
+const sprites = [
+  { id: "l1",            file: "castle-l1.png" },
+  { id: "l2",            file: "castle-l2.png" },
+  { id: "l3",            file: "castle-l3.png" },
+  { id: "resource-gold",   file: "resource-gold.png" },
+  { id: "resource-wood",   file: "resource-wood.png" },
+  { id: "resource-stone",  file: "resource-stone.png" },
+  { id: "resource-iron",   file: "resource-iron.png" },
+  { id: "resource-arcane", file: "resource-arcane.png" },
+];
+
+for (const { id, file } of sprites) {
+  const dataUrl = await page.evaluate((cid) => {
+    const c = document.getElementById(cid);
     return c.toDataURL("image/png");
-  }, "l" + lvl);
+  }, id);
   const base64 = dataUrl.slice("data:image/png;base64,".length);
-  const out = path.join(outDir, "castle-l" + lvl + ".png");
+  const out = path.join(outDir, file);
   writeFileSync(out, Buffer.from(base64, "base64"));
   console.log("wrote", out);
 }

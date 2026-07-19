@@ -31,5 +31,7 @@ export function updateHud(
   }
   const t = map.get(hover.q, hover.r);
   const tile = `Tile (${hover.q}, ${hover.r}) · ${t ?? "void"}`;
-  hud.textContent = `${tile} · ${heroInfo} · ${status} · ${dbInfo} · ${base}`;
+  const resourceInfo = map.resourceTileAt(hover.q, hover.r);
+  const resourceLine = resourceInfo ? ` · Resource: ${resourceInfo.resource}` : "";
+  hud.textContent = `${tile}${resourceLine} · ${heroInfo} · ${status} · ${dbInfo} · ${base}`;
 }

@@ -5,6 +5,7 @@ import { drawHeroSprite, drawCastleSprite } from "./sprites";
 import { Castle, CASTLES } from "../entities/settlement";
 import { GameMap } from "../map/gameMap";
 import { TERRAIN_COLORS, Terrain } from "../map/terrain";
+import { drawResourceIcons } from "./overlays/resourceIcon";
 
 export class Renderer {
   constructor(
@@ -32,6 +33,8 @@ export class Renderer {
         this.drawDecoration(q, r, x, y, t);
       }
     }
+
+    drawResourceIcons(ctx, this.map);
 
     for (const c of castles) {
       const { x, y } = axialToPixel(c.tile.q, c.tile.r);
@@ -151,6 +154,23 @@ export class Renderer {
         if (!t) continue;
         ctx.fillStyle = TERRAIN_COLORS[t].fill;
         ctx.fillRect(x0 + q * cellW, y0 + r * cellH, cellW + 0.5, cellH + 0.5);
+      }
+    }
+
+    ctx.fillStyle = "#ffa500";
+    for (let r = 0; r < this.map.height; r++) {
+      for (let q = 0; q < this.map.width; q++) {
+        const t = this.map.resourceTileAt(q, r);
+        if (!t) continue;
+        ctx.beginPath();
+        ctx.arc(
+          x0 + (q + 0.78) * cellW,
+          y0 + (r + 0.22) * cellH,
+          Math.min(cellW, cellH) * 0.22,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
       }
     }
 
