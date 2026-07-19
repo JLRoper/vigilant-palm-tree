@@ -1,5 +1,5 @@
-import { Faction } from "./hero";
-import { CastleLevel } from "./castles";
+import { Faction } from "../entities/hero";
+import { CastleLevel } from "../entities/settlement";
 
 const castleImages: Partial<Record<CastleLevel, HTMLImageElement>> = {};
 const castleReady: Partial<Record<CastleLevel, boolean>> = {};

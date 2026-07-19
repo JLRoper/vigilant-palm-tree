@@ -1,4 +1,4 @@
-import { Axial } from "./hex";
+import { Axial } from "../core/hex";
 
 export type CastleLevel = 1 | 2 | 3;
 

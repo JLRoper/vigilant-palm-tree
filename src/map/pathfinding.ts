@@ -1,5 +1,5 @@
-import { Axial, hexDistance } from "./hex";
-import { GameMap } from "./renderer";
+import { Axial, hexDistance } from "../core/hex";
+import { GameMap } from "./gameMap";
 
 const NEIGHBOR_DIRS: Axial[] = [
   { q: 1, r: 0 },

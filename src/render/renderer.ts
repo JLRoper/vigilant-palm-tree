@@ -1,85 +1,10 @@
-import { Axial, axialToPixel, hexCorners, pixelToAxial, HEX_SIZE } from "./hex";
+import { Axial, axialToPixel, hexCorners, pixelToAxial, HEX_SIZE } from "../core/hex";
 import { Camera } from "./camera";
-import { Hero } from "./hero";
+import { Hero } from "../entities/hero";
 import { drawHeroSprite, drawCastleSprite } from "./sprites";
-import { Castle, CASTLES } from "./castles";
-
-export type Terrain = "grass" | "dirt" | "water" | "forest";
-
-const TERRAIN_COLORS: Record<Terrain, { fill: string; stroke: string }> = {
-  grass: { fill: "#3a6b3a", stroke: "#2a4a2a" },
-  dirt: { fill: "#8a6b3a", stroke: "#5a4a2a" },
-  water: { fill: "#2a5a8a", stroke: "#1a3a5a" },
-  forest: { fill: "#1f4a2a", stroke: "#0f2a1a" },
-};
-
-export const TERRAIN_COST: Record<Terrain, number> = {
-  grass: 1,
-  dirt: 1.2,
-  forest: 1.6,
-  water: Infinity,
-};
-
-export class GameMap {
-  width = 24;
-  height = 18;
-  tiles: Terrain[] = [];
-
-  constructor(seed = 1) {
-    const rng = mulberry32(seed);
-    for (let r = 0; r < this.height; r++) {
-      for (let q = 0; q < this.width; q++) {
-        const t = pickTerrain(rng, q, r);
-        this.tiles.push(t);
-      }
-    }
-  }
-
-  index(q: number, r: number): number {
-    return r * this.width + q;
-  }
-
-  get(q: number, r: number): Terrain | undefined {
-    if (q < 0 || q >= this.width || r < 0 || r >= this.height) return undefined;
-    return this.tiles[this.index(q, r)];
-  }
-
-  isPassable(q: number, r: number): boolean {
-    const t = this.get(q, r);
-    if (!t) return false;
-    return TERRAIN_COST[t] !== Infinity;
-  }
-
-  cost(q: number, r: number): number {
-    const t = this.get(q, r);
-    if (!t) return Infinity;
-    return TERRAIN_COST[t];
-  }
-}
-
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function pickTerrain(_rng: () => number, q: number, r: number): Terrain {
-  const noise = Math.sin(q * 12.9898 + r * 78.233) * 43758.5453;
-  const n = noise - Math.floor(noise);
-  if (n < 0.12) return "water";
-  if (n < 0.2) return "forest";
-  if (n < 0.35) return "dirt";
-  return "grass";
-}
-
-function decorationSeed(q: number, r: number): number {
-  return Math.sin(q * 91.71 + r * 43.17) * 43758.5453;
-}
+import { Castle, CASTLES } from "../entities/settlement";
+import { GameMap } from "../map/gameMap";
+import { TERRAIN_COLORS, Terrain } from "../map/terrain";
 
 export class Renderer {
   constructor(
@@ -259,4 +184,8 @@ export class Renderer {
     if (q < 0 || q >= this.map.width || r < 0 || r >= this.map.height) return null;
     return { q, r };
   }
+}
+
+function decorationSeed(q: number, r: number): number {
+  return Math.sin(q * 91.71 + r * 43.17) * 43758.5453;
 }

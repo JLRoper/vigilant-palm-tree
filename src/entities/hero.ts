@@ -1,4 +1,4 @@
-import { Axial, axialToPixel } from "./hex";
+import { Axial, axialToPixel } from "../core/hex";
 
 export type Faction = "player" | "enemy";
 
