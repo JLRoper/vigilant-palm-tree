@@ -1,0 +1,374 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Castle pixel-art generator (transparent)</title>
+<style>
+  body { background:#0a0a0a; margin:0; padding:16px; font-family:monospace; color:#ccc; }
+  h1 { font-size:14px; color:#ffcc00; margin:0 0 12px; }
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .cell { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  canvas { image-rendering:pixelated; image-rendering:crisp-edges; background:
+      repeating-conic-gradient(#202020 0% 25%, #2a2a2a 0% 50%) 50% / 8px 8px;
+      width:auto; height:auto; }
+  .lbl { font-size:12px; color:#bbb; }
+</style>
+</head>
+<body>
+  <h1>Transparent pixel-art sprites — checker shows where alpha is transparent</h1>
+  <div class="grid">
+    <div class="cell"><canvas id="l1" width="96"  height="80"></canvas>  <div class="lbl">L1 small town 96x80</div></div>
+    <div class="cell"><canvas id="l2" width="112" height="112"></canvas><div class="lbl">L2 fortified town 112x112</div></div>
+    <div class="cell"><canvas id="l3" width="128" height="160"></canvas><div class="lbl">L3 castle 128x160</div></div>
+  </div>
+<script>
+// ---------- helpers ----------
+function makeCtx(canvas) {
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  // No background fill — alpha stays transparent.
+  return ctx;
+}
+function R(ctx, x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); }
+// outline rect (1px border, no fill)
+function O(ctx, x, y, w, h, c) {
+  ctx.fillStyle = c;
+  ctx.fillRect(x, y, w, 1);     // top
+  ctx.fillRect(x, y+h-1, w, 1); // bottom
+  ctx.fillRect(x, y, 1, h);     // left
+  ctx.fillRect(x+w-1, y, 1, h); // right
+}
+// window: yellow square with cross frame
+function W(ctx, x, y, s, glow) {
+  R(ctx, x, y, s, s, glow);
+  ctx.fillStyle = "#3a2010";
+  ctx.fillRect(x, y, s, 1);
+  ctx.fillRect(x, y+s-1, s, 1);
+  ctx.fillRect(x, y, 1, s);
+  ctx.fillRect(x+s-1, y, 1, s);
+  if (s >= 5) {
+    ctx.fillRect(x+(s>>1), y, 1, s);
+    ctx.fillRect(x, y+(s>>1), s, 1);
+  }
+}
+// triangle roof, apex at (cx, topY), base half-width hw at bottomY
+function T(ctx, cx, topY, hwBottom, bottomY, fill, outline) {
+  const span = bottomY - topY;
+  for (let y = topY; y <= bottomY; y++) {
+    const t = (y - topY) / span;
+    const hw = Math.round(hwBottom * t);
+    if (hw < 0) continue;
+    R(ctx, cx - hw, y, hw * 2 + 1, 1, fill);
+  }
+  if (outline) {
+    ctx.fillStyle = outline;
+    for (let y = topY; y <= bottomY; y++) {
+      const t = (y - topY) / span;
+      const hw = Math.round(hwBottom * t);
+      // left/right edges
+      ctx.fillRect(cx - hw - 1, y, 1, 1);
+      ctx.fillRect(cx + hw + 1, y, 1, 1);
+    }
+  }
+}
+// ground shadow band
+function SH(ctx, x, w, yTop, h, c0, c1) {
+  R(ctx, x, yTop, w, h, c0);
+  R(ctx, x - 4, yTop + h, w + 8, 2, c1);
+}
+
+// ---------- L1: small town ----------
+function drawL1(ctx) {
+  // ground shadow
+  SH(ctx, 12, 76, 72, 4, "rgba(0,0,0,0.30)", "rgba(0,0,0,0.16)");
+
+  // BACK HALL (center, biggest)
+  R(ctx, 40, 44, 20, 28, "#a07848");
+  O(ctx, 40, 44, 20, 28, "#3a2010");
+  // timber framing
+  ctx.fillStyle = "#3a2010";
+  ctx.fillRect(40, 54, 20, 1);
+  ctx.fillRect(40, 62, 20, 1);
+  ctx.fillRect(49, 44, 1, 28);
+  // thatched roof
+  T(ctx, 49, 26, 11, 44, "#c9a76b", "#4a2a10");
+  // thatch lines
+  ctx.fillStyle = "#8a5a2a";
+  ctx.fillRect(45, 32, 1, 9);
+  ctx.fillRect(53, 32, 1, 9);
+  // upper window
+  W(ctx, 42, 48, 5, "#ffe066");
+  // door
+  R(ctx, 52, 62, 6, 10, "#1a0a00");
+  ctx.fillStyle = "#c0a040";
+  ctx.fillRect(56, 67, 1, 1);
+
+  // LEFT COTTAGE
+  R(ctx, 10, 50, 18, 22, "#9a6c3c");
+  O(ctx, 10, 50, 18, 22, "#3a2010");
+  ctx.fillStyle = "#3a2010";
+  ctx.fillRect(10, 58, 18, 1);
+  ctx.fillRect(19, 50, 1, 22);
+  T(ctx, 19, 38, 10, 50, "#c9a76b", "#4a2a10");
+  W(ctx, 13, 54, 5, "#ffe066");
+  R(ctx, 21, 64, 5, 8, "#1a0a00");
+
+  // RIGHT COTTAGE
+  R(ctx, 66, 46, 20, 26, "#b08050");
+  O(ctx, 66, 46, 20, 26, "#3a2010");
+  ctx.fillStyle = "#3a2010";
+  ctx.fillRect(66, 56, 20, 1);
+  ctx.fillRect(76, 46, 1, 26);
+  T(ctx, 76, 34, 12, 46, "#c9a76b", "#4a2a10");
+  // chimney
+  R(ctx, 81, 24, 4, 8, "#5a4a3a");
+  O(ctx, 81, 24, 4, 8, "#2a1a10");
+  // smoke (semi-transparent — fine on alpha canvas)
+  R(ctx, 82, 21, 2, 2, "rgba(204,204,204,0.70)");
+  R(ctx, 84, 18, 2, 2, "rgba(204,204,204,0.50)");
+  R(ctx, 86, 15, 2, 2, "rgba(204,204,204,0.30)");
+  W(ctx, 69, 50, 4, "#ffe066");
+  W(ctx, 79, 50, 4, "#ffe066");
+  R(ctx, 74, 62, 5, 10, "#1a0a00");
+
+  // foreground dirt path
+  ctx.fillStyle = "#7a5a3a";
+  for (let x = 14; x <= 80; x++) {
+    const y = 75 + Math.round(1.5 * Math.sin((x - 14) / 66 * Math.PI));
+    ctx.fillRect(x, y, 1, 2);
+  }
+  ctx.fillStyle = "#9a7a4a";
+  for (let x = 16; x <= 78; x += 2) {
+    const y = 76 + Math.round(1.5 * Math.sin((x - 14) / 66 * Math.PI));
+    ctx.fillRect(x, y, 1, 1);
+  }
+
+  // barrel bottom-left
+  R(ctx, 8, 70, 7, 5, "#7a4a20");
+  O(ctx, 8, 70, 7, 5, "#2a1a10");
+  ctx.fillStyle = "#5a3a18";
+  ctx.fillRect(9, 71, 5, 1);
+  ctx.fillRect(9, 73, 5, 1);
+}
+
+// ---------- L2: fortified town ----------
+function drawL2(ctx) {
+  SH(ctx, 14, 88, 104, 4, "rgba(0,0,0,0.32)", "rgba(0,0,0,0.18)");
+
+  // Two inner cottages (drawn first so wall overlaps their lower halves)
+  // left inner cottage
+  R(ctx, 30, 64, 18, 30, "#a07848");
+  O(ctx, 30, 64, 18, 30, "#3a2010");
+  ctx.fillStyle = "#3a2010";
+  ctx.fillRect(30, 74, 18, 1);
+  ctx.fillRect(39, 64, 1, 30);
+  T(ctx, 39, 50, 11, 64, "#c9a76b", "#4a2a10");
+  W(ctx, 33, 68, 5, "#ffe066");
+  W(ctx, 42, 68, 4, "#ffe066");
+  R(ctx, 38, 84, 5, 10, "#1a0a00");
+
+  // right inner cottage
+  R(ctx, 64, 64, 18, 30, "#b08050");
+  O(ctx, 64, 64, 18, 30, "#3a2010");
+  ctx.fillStyle = "#3a2010";
+  ctx.fillRect(64, 74, 18, 1);
+  ctx.fillRect(73, 64, 1, 30);
+  T(ctx, 73, 50, 11, 64, "#c9a76b", "#4a2a10");
+  W(ctx, 67, 68, 4, "#ffe066");
+  W(ctx, 76, 68, 4, "#ffe066");
+  R(ctx, 72, 84, 5, 10, "#1a0a00");
+
+  // WATCHTOWER (left corner, taller)
+  R(ctx, 12, 60, 14, 44, "#7a5a3a");
+  O(ctx, 12, 60, 14, 44, "#3a2010");
+  ctx.fillStyle = "#3a2010";
+  ctx.fillRect(12, 72, 14, 1);
+  ctx.fillRect(12, 84, 14, 1);
+  ctx.fillRect(18, 60, 1, 44);
+  // tower roof (red-tiled to read as "watchtower")
+  T(ctx, 19, 44, 9, 60, "#9a3a2a", "#3a1010");
+  // arrow slit
+  ctx.fillStyle = "#1a0a00";
+  ctx.fillRect(18, 80, 1, 6);
+  // banner pole
+  ctx.fillStyle = "#3a2010";
+  ctx.fillRect(19, 30, 1, 14);
+  // flag
+  R(ctx, 20, 30, 8, 6, "#ffcc00");
+  O(ctx, 20, 30, 8, 6, "#3a2a00");
+  ctx.fillStyle = "#7a1a1a";
+  ctx.fillRect(22, 32, 1, 2);
+  ctx.fillRect(24, 32, 1, 2);
+
+  // RIGHT CORNER post (shorter, capped)
+  R(ctx, 86, 78, 14, 26, "#7a5a3a");
+  O(ctx, 86, 78, 14, 26, "#3a2010");
+  ctx.fillStyle = "#3a2010";
+  ctx.fillRect(86, 88, 14, 1);
+  T(ctx, 93, 70, 9, 78, "#9a3a2a", "#3a1010");
+  W(ctx, 90, 92, 4, "#ffe066");
+
+  // FRONT PALISADE WALL (vertical logs) — skip the gate opening in the middle
+  const logColor = "#7a4a20";
+  const logTop = 90;
+  const logBot = 104;
+  for (let x = 26; x < 86; x += 4) {
+    if (x >= 48 && x < 64) continue; // gate gap
+    R(ctx, x, logTop, 3, logBot - logTop + 1, logColor);
+    ctx.fillStyle = "#3a2010";
+    ctx.fillRect(x, logTop, 3, 1);
+    ctx.fillRect(x, logBot - 1, 3, 1);
+    // log shading
+    ctx.fillStyle = "#5a3a18";
+    ctx.fillRect(x, logTop + 1, 1, logBot - logTop - 1);
+  }
+  // horizontal tie beam across palisade (broken at gate)
+  ctx.fillStyle = "#5a3a18";
+  ctx.fillRect(26, 96, 22, 1);
+  ctx.fillRect(64, 96, 22, 1);
+
+  // GATE (two leaves + arch)
+  R(ctx, 48, 92, 16, 12, "#5a3a18");
+  O(ctx, 48, 92, 16, 12, "#2a1a10");
+  ctx.fillStyle = "#3a2010";
+  ctx.fillRect(55, 92, 1, 12);
+  // iron studs
+  ctx.fillStyle = "#2a2a2a";
+  ctx.fillRect(50, 96, 1, 1);
+  ctx.fillRect(50, 100, 1, 1);
+  ctx.fillRect(61, 96, 1, 1);
+  ctx.fillRect(61, 100, 1, 1);
+
+  // dirt path out of gate
+  ctx.fillStyle = "#7a5a3a";
+  for (let x = 50; x <= 62; x++) {
+    ctx.fillRect(x, 106, 1, 4);
+  }
+}
+
+// ---------- L3: castle with inner keep ----------
+function drawL3(ctx) {
+  // ground shadow (only at base — tower top leak is fully transparent above)
+  SH(ctx, 12, 104, 152, 6, "rgba(0,0,0,0.32)", "rgba(0,0,0,0.18)");
+
+  // CURTAIN WALL (front), with towers left/right + gate
+  // Front wall body
+  R(ctx, 22, 120, 84, 32, "#888070");
+  O(ctx, 22, 120, 84, 32, "#3a3020");
+  // crenellations along top of wall (merlons)
+  ctx.fillStyle = "#888070";
+  for (let x = 22; x < 106; x += 8) {
+    ctx.fillRect(x, 116, 4, 4);
+  }
+  ctx.fillStyle = "#3a3020";
+  for (let x = 22; x < 106; x += 8) {
+    ctx.fillRect(x, 116, 4, 1);
+    ctx.fillRect(x, 119, 4, 1);
+    ctx.fillRect(x, 116, 1, 4);
+    ctx.fillRect(x + 3, 116, 1, 4);
+  }
+  // gate opening in middle
+  R(ctx, 52, 132, 24, 20, "#2a1a10");
+  O(ctx, 52, 132, 24, 20, "#3a2010");
+  // arch top
+  ctx.fillStyle = "#2a1a10";
+  for (let dy = 0; dy < 6; dy++) {
+    const w = 24 - dy * 4;
+    if (w <= 0) break;
+    ctx.fillRect(52 + (24 - w) / 2, 132 - 1 - dy, w, 1);
+  }
+  // gate wood (portcullis-like ribs)
+  ctx.fillStyle = "#5a3a18";
+  ctx.fillRect(54, 134, 1, 18);
+  ctx.fillRect(60, 134, 1, 18);
+  ctx.fillRect(66, 134, 1, 18);
+  ctx.fillRect(72, 134, 1, 18);
+  ctx.fillRect(58, 138, 16, 1);
+  ctx.fillRect(58, 144, 16, 1);
+  // iron studs
+  ctx.fillStyle = "#2a2a2a";
+  ctx.fillRect(56, 136, 1, 1); ctx.fillRect(70, 136, 1, 1);
+  ctx.fillRect(56, 148, 1, 1); ctx.fillRect(70, 148, 1, 1);
+
+  // LEFT TOWER (corner, taller than wall)
+  drawTower(ctx, 14, 90, 18, 62, "#9a9080", "#3a3020");
+
+  // RIGHT TOWER
+  drawTower(ctx, 96, 90, 18, 62, "#9a9080", "#3a3020");
+
+  // INNER KEEP (center, tallest — leaks up into hex above)
+  // Keep body
+  R(ctx, 50, 60, 28, 60, "#a09888");
+  O(ctx, 50, 60, 28, 60, "#3a3020");
+  // keep corner stones
+  ctx.fillStyle = "#3a3020";
+  ctx.fillRect(52, 62, 4, 4);
+  ctx.fillRect(72, 62, 4, 4);
+  ctx.fillRect(52, 60+56-6, 4, 4);
+  ctx.fillRect(72, 60+56-6, 4, 4);
+  // keep windows
+  W(ctx, 54, 72, 4, "#ffe066");
+  W(ctx, 70, 72, 4, "#ffe066");
+  W(ctx, 54, 84, 4, "#ffe066");
+  W(ctx, 70, 84, 4, "#ffe066");
+  // keep door
+  R(ctx, 60, 104, 8, 16, "#2a1a10");
+  O(ctx, 60, 104, 8, 16, "#3a2010");
+  ctx.fillStyle = "#5a3a18";
+  ctx.fillRect(64, 104, 1, 16);
+
+  // KEEP ROOF — red conical, tall (the leak part)
+  T(ctx, 64, 18, 18, 60, "#a8321e", "#3a1010");
+  // roof shading
+  ctx.fillStyle = "#7a1a10";
+  for (let y = 18; y < 60; y++) {
+    const t = (y - 18) / 42;
+    const hw = Math.round(18 * t);
+    ctx.fillRect(64 + hw - 1, y, 1, 1); // right edge shading
+  }
+  // batten lines on roof
+  ctx.fillStyle = "#7a1a10";
+  for (let y = 22; y < 58; y += 4) {
+    const t = (y - 18) / 42;
+    const hw = Math.round(18 * t);
+    ctx.fillRect(64 - hw + 2, y, 1, 1);
+  }
+  // flagpole on keep
+  ctx.fillStyle = "#3a2010";
+  ctx.fillRect(64, 4, 1, 16);
+  // banner (yellow with red cross) — small at very top, reads as "depth leak crown"
+  R(ctx, 65, 4, 10, 7, "#ffcc00");
+  O(ctx, 65, 4, 10, 7, "#3a2a00");
+  ctx.fillStyle = "#7a1a1a";
+  ctx.fillRect(68, 6, 4, 1);
+  ctx.fillRect(69, 5, 2, 5);
+}
+
+function drawTower(ctx, x, yTop, w, h, fill, outline) {
+  R(ctx, x, yTop, w, h, fill);
+  O(ctx, x, yTop, w, h, outline);
+  // crenellations on tower top
+  ctx.fillStyle = fill;
+  for (let i = 0; i < w; i += 6) {
+    ctx.fillRect(x + i, yTop - 4, 3, 4);
+  }
+  ctx.fillStyle = outline;
+  for (let i = 0; i < w; i += 6) {
+    ctx.fillRect(x + i, yTop - 4, 3, 1);
+    ctx.fillRect(x + i, yTop - 1, 3, 1);
+    ctx.fillRect(x + i, yTop - 4, 1, 4);
+    ctx.fillRect(x + i + 2, yTop - 4, 1, 4);
+  }
+  // arrow slits
+  ctx.fillStyle = "#1a0a00";
+  ctx.fillRect(x + (w>>1) - 0, yTop + 8, 1, 8);
+  ctx.fillRect(x + (w>>1) - 0, yTop + 24, 1, 10);
+}
+
+// ---------- run ----------
+drawL1(makeCtx(document.getElementById("l1")));
+drawL2(makeCtx(document.getElementById("l2")));
+drawL3(makeCtx(document.getElementById("l3")));
+</script>
+</body>
+</html>

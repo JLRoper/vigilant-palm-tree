@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS games (
+  id SERIAL PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  seed INTEGER NOT NULL,
+  hero_q INTEGER NOT NULL,
+  hero_r INTEGER NOT NULL,
+  turn INTEGER NOT NULL DEFAULT 1,
+  gold INTEGER NOT NULL DEFAULT 0,
+  enemy_positions JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS game_events (
+  id BIGSERIAL PRIMARY KEY,
+  game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS game_events_game_id_idx ON game_events(game_id);

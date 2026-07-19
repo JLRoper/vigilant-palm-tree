@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: game_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: game_poc
+      POSTGRES_USER: gameuser
+      POSTGRES_PASSWORD: gamepass
+    ports:
+      - "5432:5432"
+    volumes:
+      - game_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gameuser -d game_poc"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  adminer:
+    image: adminer:latest
+    container_name: game_adminer
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+volumes:
+  game_db_data:

@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin:0; padding:0; background:#000; }
+  canvas { display:block; image-rendering: pixelated; image-rendering: crisp-edges; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+
+const PAL = {
+  grass:    '#4a6b2a',
+  grass_d:  '#2a4a1a',
+  grass_l:  '#6a8b3a',
+  dirt:     '#8a6a3a',
+  dirt_d:   '#5a4020',
+  dirt_l:   '#a88a5a',
+  wood_lt:  '#b89060',
+  wood:     '#8a5a30',
+  wood_dk:  '#4a2a10',
+  wood_dk2: '#2a1808',
+  thatch:   '#d4b070',
+  thatch_d: '#a07840',
+  thatch_l: '#e8cc90',
+  plaster:  '#e8d4a8',
+  plaster_d:'#b89870',
+  plaster_s:'#8a7858',
+  stone:    '#7a7a7a',
+  stone_l:  '#a0a0a0',
+  stone_d:  '#4a4a4a',
+  stone_d2: '#2a2a2a',
+  stone_h:  '#c0c0c0',
+  roof_red: '#8a3030',
+  roof_red_d:'#5a1010',
+  roof_red_l:'#b04848',
+  roof_dk:  '#4a2010',
+  roof_gry: '#5a5a5a',
+  window:   '#ffd84a',
+  window_d: '#c08020',
+  door:     '#2a1808',
+  door_lt:  '#6a4a20',
+  iron:     '#3a3a3a',
+  iron_l:   '#6a6a6a',
+  banner_r: '#cc1a1a',
+  banner_b: '#1a4a8a',
+  flag_y:   '#e8c040',
+  smoke:    '#cccccc',
+  out:      '#1a0a00',
+  shadow:   'rgba(0,0,0,0.35)',
+};
+
+function px(x, y, col) {
+  if (col.startsWith('rgba')) {
+    ctx.fillStyle = col;
+    ctx.fillRect(x, y, 1, 1);
+    return;
+  }
+  ctx.fillStyle = col;
+  ctx.fillRect(x, y, 1, 1);
+}
+function box(x, y, w, h, col) {
+  ctx.fillStyle = col;
+  ctx.fillRect(x, y, w, h);
+}
+function out(x, y, w, h, col, lw=1) {
+  ctx.fillStyle = col;
+  ctx.fillRect(x, y, w, lw);
+  ctx.fillRect(x, y+h-lw, w, lw);
+  ctx.fillRect(x, y, lw, h);
+  ctx.fillRect(x+w-lw, y, lw, h);
+}
+function lineH(x, y, w, col) { box(x, y, w, 1, col); }
+function lineV(x, y, h, col) { box(x, y, 1, h, col); }
+function triFlat(topX, topY, baseY, halfW, col) {
+  for (let y = topY; y <= baseY; y++) {
+    const t = (y - topY) / (baseY - topY);
+    const w = Math.round(halfW * (1 - t));
+    if (w <= 0) continue;
+    lineH(topX - w, y, w * 2, col);
+  }
+}
+function triFill(x1, y1, x2, y2, x3, y3, col) {
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3);
+  ctx.closePath(); ctx.fill();
+}
+
+// ============ LEVEL 1 — Small Town (96 x 80) ============
+function drawL1() {
+  c.width = 96; c.height = 80;
+  ctx.clearRect(0,0,96,80);
+  const GROUND = 64;
+
+  // Sky / distant grass backdrop (just in case)
+  box(0, 0, 96, GROUND, PAL.grass);
+  // darker patch / path behind
+  for (let x = 4; x < 92; x += 7) {
+    box(x, GROUND - 4, 5, 1, PAL.grass_d);
+  }
+  // Dirt ground
+  box(0, GROUND, 96, 16, PAL.dirt);
+  box(0, GROUND, 96, 1, PAL.dirt_l);
+  box(0, GROUND + 4, 96, 1, PAL.dirt_d);
+  box(0, GROUND + 9, 96, 1, PAL.dirt_d);
+  // pebbles
+  px(8, GROUND+3, PAL.stone_d);
+  px(22, GROUND+11, PAL.stone_d);
+  px(70, GROUND+6, PAL.stone_d);
+  px(86, GROUND+12, PAL.stone_d);
+
+  // -------- BACK HALL (centered, behind) --------
+  // wall x:36..60, y:32..GROUND
+  const bx1 = 36, bx2 = 60;
+  const by1 = 32;
+  box(bx1, by1, bx2-bx1, GROUND-by1, PAL.plaster);
+  // timber frame
+  lineV(48, by1, GROUND-by1, PAL.wood_dk);
+  lineH(bx1, by1+8, bx2-bx1, PAL.wood_dk);
+  lineH(bx1, by1+18, bx2-bx1, PAL.wood_dk);
+  // plaster shading
+  lineV(bx2-1, by1, GROUND-by1, PAL.plaster_d);
+  lineV(bx1, by1, GROUND-by1, PAL.plaster_s);
+  // outline
+  out(bx1, by1, bx2-bx1, GROUND-by1, PAL.out);
+  // thatched roof triangle: peak at (48, 16), base at (bx1-2, by1) and (bx2+2, by1)
+  triFlat(48, 16, by1-1, 14, PAL.thatch);
+  // roof shading (right side darker)
+  for (let y = 16; y < by1; y++) {
+    const t = (y - 16) / (by1 - 16);
+    const half = Math.round(14 * (1 - t));
+    if (half <= 0) continue;
+    lineH(48, y, half, PAL.thatch_d);
+  }
+  // roof outline
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(48, 16); ctx.lineTo(34, by1); ctx.lineTo(62, by1); ctx.closePath(); ctx.fill();
+  // re-fill thatch lighter side
+  ctx.fillStyle = PAL.thatch;
+  ctx.beginPath();
+  ctx.moveTo(48, 16); ctx.lineTo(34, by1); ctx.lineTo(48, by1); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.thatch_d;
+  ctx.beginPath();
+  ctx.moveTo(48, 16); ctx.lineTo(62, by1); ctx.lineTo(48, by1); ctx.closePath(); ctx.fill();
+  // thatch strokes
+  for (let y = 18; y < by1-1; y += 3) {
+    const t = (y - 16) / (by1 - 16);
+    const half = Math.round(14 * (1 - t));
+    lineH(48-half+2, y, half*2-4, PAL.thatch);
+  }
+  // window (upper)
+  box(40, 36, 5, 5, PAL.window);
+  lineV(42, 36, 5, PAL.wood_dk);
+  lineH(40, 38, 5, PAL.wood_dk);
+  out(40, 36, 5, 5, PAL.out);
+  // door
+  box(45, 48, 6, GROUND-48, PAL.door);
+  lineV(45, 48, GROUND-48, PAL.out);
+  lineV(51, 48, GROUND-48, PAL.out);
+  lineH(45, 48, 6, PAL.out);
+  px(49, 56, PAL.door_lt);
+
+  // -------- LEFT COTTAGE --------
+  const lx1=10, lx2=28, ly1=42;
+  box(lx1, ly1, lx2-lx1, GROUND-ly1, PAL.plaster);
+  lineV(lx1+9, ly1, GROUND-ly1, PAL.wood_dk);
+  lineH(lx1, ly1+10, lx2-lx1, PAL.wood_dk);
+  lineV(lx2-1, ly1, GROUND-ly1, PAL.plaster_d);
+  out(lx1, ly1, lx2-lx1, GROUND-ly1, PAL.out);
+  // roof peak at (19, 30)
+  ctx.fillStyle = PAL.thatch;
+  ctx.beginPath();
+  ctx.moveTo(19, 30); ctx.lineTo(8, 42); ctx.lineTo(30, 42); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.thatch_d;
+  ctx.beginPath();
+  ctx.moveTo(19, 30); ctx.lineTo(30, 42); ctx.lineTo(19, 42); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(19, 30); ctx.lineTo(8, 42); ctx.lineTo(30, 42); ctx.closePath(); ctx.stroke();
+  // thatch strokes
+  lineH(13, 36, 12, PAL.thatch);
+  // window
+  box(13, 46, 4, 4, PAL.window);
+  out(13, 46, 4, 4, PAL.out);
+  // door
+  box(20, 54, 4, GROUND-54, PAL.door);
+  out(20, 54, 4, GROUND-54, PAL.out);
+
+  // -------- RIGHT COTTAGE (with chimney) --------
+  const rx1=66, rx2=88, ry1=34;
+  box(rx1, ry1, rx2-rx1, GROUND-ry1, PAL.plaster);
+  lineV(rx1+11, ry1, GROUND-ry1, PAL.wood_dk);
+  lineH(rx1, ry1+10, rx2-rx1, PAL.wood_dk);
+  lineH(rx1, ry1+20, rx2-rx1, PAL.wood_dk);
+  lineV(rx2-1, ry1, GROUND-ry1, PAL.plaster_d);
+  out(rx1, ry1, rx2-rx1, GROUND-ry1, PAL.out);
+  // roof peak (77, 18)
+  ctx.fillStyle = PAL.thatch;
+  ctx.beginPath();
+  ctx.moveTo(77, 18); ctx.lineTo(63, 34); ctx.lineTo(91, 34); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.thatch_d;
+  ctx.beginPath();
+  ctx.moveTo(77, 18); ctx.lineTo(91, 34); ctx.lineTo(77, 34); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(77, 18); ctx.lineTo(63, 34); ctx.lineTo(91, 34); ctx.closePath(); ctx.stroke();
+  // thatch strokes
+  lineH(69, 26, 16, PAL.thatch);
+  // chimney
+  box(82, 22, 4, 8, PAL.stone);
+  box(82, 22, 4, 1, PAL.stone_d);
+  box(85, 22, 1, 8, PAL.stone_l);
+  out(82, 22, 4, 8, PAL.out);
+  // smoke puffs
+  box(85, 18, 3, 2, PAL.smoke);
+  box(86, 15, 4, 2, PAL.smoke);
+  box(87, 12, 3, 2, PAL.smoke);
+  // windows
+  box(69, 40, 4, 4, PAL.window);
+  out(69, 40, 4, 4, PAL.out);
+  box(80, 40, 4, 4, PAL.window);
+  out(80, 40, 4, 4, PAL.out);
+  // door
+  box(74, 54, 5, GROUND-54, PAL.door);
+  out(74, 54, 5, GROUND-54, PAL.out);
+  px(78, 58, PAL.door_lt);
+
+  // -------- BARREL (foreground left) --------
+  box(4, GROUND+6, 5, 6, PAL.wood);
+  lineH(4, GROUND+8, 5, PAL.wood_dk);
+  lineH(4, GROUND+11, 5, PAL.wood_dk);
+  lineV(6, GROUND+6, 6, PAL.wood_dk2);
+  out(4, GROUND+6, 5, 6, PAL.out);
+
+  // -------- FOREGROUND SHADOW BAND --------
+  box(0, GROUND-1, 96, 1, 'rgba(0,0,0,0.25)');
+
+  // outline ground bottom
+  box(0, 79, 96, 1, PAL.out);
+}
+
+// ============ LEVEL 2 — Fortified Town (112 x 112) ============
+function drawL2() {
+  c.width = 112; c.height = 112;
+  ctx.clearRect(0,0,112,112);
+  const GROUND = 88;
+
+  // backdrop grass (will mostly be covered by palisade)
+  box(0, 0, 112, GROUND, PAL.grass);
+  // dirt
+  box(0, GROUND, 112, 24, PAL.dirt);
+  box(0, GROUND, 112, 1, PAL.dirt_l);
+  box(0, GROUND+5, 112, 1, PAL.dirt_d);
+  box(0, GROUND+11, 112, 1, PAL.dirt_d);
+
+  // -------- BUILDINGS INSIDE --------
+  // BACK HALL (centered, smaller than L1)
+  const bx1=46, bx2=66, by1=46;
+  box(bx1, by1, bx2-bx1, GROUND-by1, PAL.plaster);
+  lineV(56, by1, GROUND-by1, PAL.wood_dk);
+  lineH(bx1, by1+10, bx2-bx1, PAL.wood_dk);
+  lineH(bx1, by1+22, bx2-bx1, PAL.wood_dk);
+  lineV(bx2-1, by1, GROUND-by1, PAL.plaster_d);
+  out(bx1, by1, bx2-bx1, GROUND-by1, PAL.out);
+  // thatched roof
+  ctx.fillStyle = PAL.thatch;
+  ctx.beginPath();
+  ctx.moveTo(56, 32); ctx.lineTo(43, 46); ctx.lineTo(69, 46); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.thatch_d;
+  ctx.beginPath();
+  ctx.moveTo(56, 32); ctx.lineTo(69, 46); ctx.lineTo(56, 46); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(56, 32); ctx.lineTo(43, 46); ctx.lineTo(69, 46); ctx.closePath(); ctx.stroke();
+  // door
+  box(54, 76, 5, GROUND-76, PAL.door);
+  out(54, 76, 5, GROUND-76, PAL.out);
+  px(58, 80, PAL.door_lt);
+
+  // LEFT COTTAGE
+  const lx1=24, lx2=40, ly1=56;
+  box(lx1, ly1, lx2-lx1, GROUND-ly1, PAL.plaster);
+  lineV(lx1+8, ly1, GROUND-ly1, PAL.wood_dk);
+  lineH(lx1, ly1+8, lx2-lx1, PAL.wood_dk);
+  lineV(lx2-1, ly1, GROUND-ly1, PAL.plaster_d);
+  out(lx1, ly1, lx2-lx1, GROUND-ly1, PAL.out);
+  // roof
+  ctx.fillStyle = PAL.thatch;
+  ctx.beginPath();
+  ctx.moveTo(32, 46); ctx.lineTo(21, 56); ctx.lineTo(43, 56); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.thatch_d;
+  ctx.beginPath();
+  ctx.moveTo(32, 46); ctx.lineTo(43, 56); ctx.lineTo(32, 56); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(32, 46); ctx.lineTo(21, 56); ctx.lineTo(43, 56); ctx.closePath(); ctx.stroke();
+  // door
+  box(30, 80, 5, GROUND-80, PAL.door);
+  out(30, 80, 5, GROUND-80, PAL.out);
+
+  // RIGHT COTTAGE
+  const rx1=72, rx2=90, ry1=50;
+  box(rx1, ry1, rx2-rx1, GROUND-ry1, PAL.plaster);
+  lineV(rx1+9, ry1, GROUND-ry1, PAL.wood_dk);
+  lineH(rx1, ry1+10, rx2-rx1, PAL.wood_dk);
+  lineV(rx2-1, ry1, GROUND-ry1, PAL.plaster_d);
+  out(rx1, ry1, rx2-rx1, GROUND-ry1, PAL.out);
+  // roof
+  ctx.fillStyle = PAL.thatch;
+  ctx.beginPath();
+  ctx.moveTo(81, 40); ctx.lineTo(69, 50); ctx.lineTo(93, 50); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.thatch_d;
+  ctx.beginPath();
+  ctx.moveTo(81, 40); ctx.lineTo(93, 50); ctx.lineTo(81, 50); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(81, 40); ctx.lineTo(69, 50); ctx.lineTo(93, 50); ctx.closePath(); ctx.stroke();
+  // windows
+  box(75, 56, 4, 4, PAL.window);
+  out(75, 56, 4, 4, PAL.out);
+  box(83, 56, 4, 4, PAL.window);
+  out(83, 56, 4, 4, PAL.out);
+  // door
+  box(78, 78, 5, GROUND-78, PAL.door);
+  out(78, 78, 5, GROUND-78, PAL.out);
+
+  // -------- PALISADE WALLS --------
+  // Helper: vertical log
+  function log(x, y, h=12) {
+    // pointed top
+    ctx.fillStyle = PAL.wood;
+    ctx.fillRect(x-1, y, 2, h);
+    ctx.fillStyle = PAL.thatch; // pointed top color = light wood
+    ctx.beginPath();
+    ctx.moveTo(x-1, y+2); ctx.lineTo(x, y-2); ctx.lineTo(x+1, y+2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = PAL.wood_dk;
+    ctx.fillRect(x-1, y+h-1, 2, 1);
+    ctx.fillRect(x-1, y+2, 1, h-3);
+    ctx.fillStyle = PAL.out;
+    ctx.fillRect(x-1, y, 1, h);
+    ctx.fillRect(x, y-2, 1, 4);
+  }
+
+  // BACK wall — horizontal beam + row of pointed logs
+  // beam from x=20 to x=92, at y=20..24
+  box(20, 24, 72, 4, PAL.wood);
+  lineH(20, 27, 72, PAL.wood_dk);
+  out(20, 24, 72, 4, PAL.out);
+  // pointed logs on top
+  for (let x = 22; x <= 90; x += 3) log(x, 24);
+
+  // LEFT wall — vertical beam along left side
+  // from (16, 28) to (16, GROUND-2)
+  box(16, 28, 4, GROUND-30, PAL.wood);
+  lineV(19, 28, GROUND-30, PAL.wood_dk);
+  out(16, 28, 4, GROUND-30, PAL.out);
+  for (let y = 30; y <= GROUND-4; y += 3) {
+    log(18, y);
+  }
+
+  // RIGHT wall
+  box(92, 28, 4, GROUND-30, PAL.wood);
+  lineV(92, 28, GROUND-30, PAL.wood_dk);
+  out(92, 28, 4, GROUND-30, PAL.out);
+  for (let y = 30; y <= GROUND-4; y += 3) {
+    log(94, y);
+  }
+
+  // FRONT wall — two segments + gate in middle
+  // left segment
+  box(20, GROUND-4, 30, 4, PAL.wood);
+  lineH(20, GROUND-2, 30, PAL.wood_dk);
+  out(20, GROUND-4, 30, 4, PAL.out);
+  for (let x = 22; x <= 48; x += 3) log(x, GROUND-4);
+  // right segment
+  box(62, GROUND-4, 30, 4, PAL.wood);
+  lineH(62, GROUND-2, 30, PAL.wood_dk);
+  out(62, GROUND-4, 30, 4, PAL.out);
+  for (let x = 64; x <= 90; x += 3) log(x, GROUND-4);
+
+  // -------- GATE (front center) --------
+  // arch
+  box(50, GROUND-22, 12, 22, PAL.wood);
+  // pointed logs above gate
+  for (let x = 52; x <= 60; x += 3) log(x, GROUND-22);
+  // arch top
+  ctx.fillStyle = PAL.wood;
+  ctx.beginPath();
+  ctx.moveTo(50, GROUND-22); ctx.lineTo(56, GROUND-26); ctx.lineTo(62, GROUND-22); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(50, GROUND-22); ctx.lineTo(56, GROUND-26); ctx.lineTo(62, GROUND-22); ctx.closePath(); ctx.stroke();
+  // door planks
+  box(51, GROUND-8, 10, 8, PAL.door);
+  lineV(53, GROUND-8, 8, PAL.wood_dk);
+  lineV(55, GROUND-8, 8, PAL.wood_dk);
+  lineV(57, GROUND-8, 8, PAL.wood_dk);
+  lineV(59, GROUND-8, 8, PAL.wood_dk);
+  out(51, GROUND-8, 10, 8, PAL.out);
+  // gate outline
+  out(50, GROUND-22, 12, 22, PAL.out);
+
+  // -------- LEFT WATCHTOWER --------
+  // tower body sits on left front corner
+  const ltx1=8, ltx2=20, lty1=40;
+  box(ltx1, lty1, ltx2-ltx1, GROUND-lty1, PAL.wood);
+  lineV(ltx1+6, lty1, GROUND-lty1, PAL.wood_dk);
+  lineH(ltx1, lty1+10, ltx2-ltx1, PAL.wood_dk);
+  lineH(ltx1, lty1+24, ltx2-ltx1, PAL.wood_dk);
+  lineV(ltx2-1, lty1, GROUND-lty1, PAL.wood_dk);
+  out(ltx1, lty1, ltx2-ltx1, GROUND-lty1, PAL.out);
+  // arrow slit
+  box(13, lty1+14, 2, 6, PAL.door);
+  box(13, lty1+30, 2, 6, PAL.door);
+  // crenellated top
+  box(ltx1-1, lty1-4, 14, 4, PAL.wood);
+  out(ltx1-1, lty1-4, 14, 4, PAL.out);
+  for (let x = ltx1; x < ltx2; x += 4) {
+    box(x, lty1-8, 2, 4, PAL.wood);
+    out(x, lty1-8, 2, 4, PAL.out);
+  }
+  // roof above crenellations — small peaked
+  ctx.fillStyle = PAL.wood;
+  ctx.beginPath();
+  ctx.moveTo(ltx1-1, lty1-4); ctx.lineTo(ltx1+6, lty1-12); ctx.lineTo(ltx2+1, lty1-4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(ltx1-1, lty1-4); ctx.lineTo(ltx1+6, lty1-12); ctx.lineTo(ltx2+1, lty1-4); ctx.closePath(); ctx.stroke();
+
+  // -------- RIGHT WATCHTOWER --------
+  const rtx1=92, rtx2=104, rty1=40;
+  box(rtx1, rty1, rtx2-rtx1, GROUND-rty1, PAL.wood);
+  lineV(rtx1+6, rty1, GROUND-rty1, PAL.wood_dk);
+  lineH(rtx1, rty1+10, rtx2-rtx1, PAL.wood_dk);
+  lineH(rtx1, rty1+24, rtx2-rtx1, PAL.wood_dk);
+  lineV(rtx2-1, rty1, GROUND-rty1, PAL.wood_dk);
+  out(rtx1, rty1, rtx2-rtx1, GROUND-rty1, PAL.out);
+  box(97, rty1+14, 2, 6, PAL.door);
+  box(97, rty1+30, 2, 6, PAL.door);
+  box(rtx1-1, rty1-4, 14, 4, PAL.wood);
+  out(rtx1-1, rty1-4, 14, 4, PAL.out);
+  for (let x = rtx1+1; x < rtx2; x += 4) {
+    box(x, rty1-8, 2, 4, PAL.wood);
+    out(x, rty1-8, 2, 4, PAL.out);
+  }
+  ctx.fillStyle = PAL.wood;
+  ctx.beginPath();
+  ctx.moveTo(rtx1-1, rty1-4); ctx.lineTo(rtx1+6, rty1-12); ctx.lineTo(rtx2+1, rty1-4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(rtx1-1, rty1-4); ctx.lineTo(rtx1+6, rty1-12); ctx.lineTo(rtx2+1, rty1-4); ctx.closePath(); ctx.stroke();
+  // banner pole + flag on right tower
+  lineV(rtx1+6, rty1-22, 14, PAL.wood_dk);
+  // flag
+  box(rtx1+6, rty1-22, 7, 5, PAL.banner_r);
+  box(rtx1+6, rty1-22, 7, 1, '#ff5050');
+  out(rtx1+6, rty1-22, 7, 5, PAL.out);
+  // flag tail
+  ctx.fillStyle = PAL.banner_r;
+  ctx.beginPath();
+  ctx.moveTo(rtx1+13, rty1-22); ctx.lineTo(rtx1+15, rty1-19); ctx.lineTo(rtx1+13, rty1-17); ctx.closePath(); ctx.fill();
+
+  // ground bottom outline
+  box(0, 111, 112, 1, PAL.out);
+}
+
+// ============ LEVEL 3 — Stone Castle with Inner Keep (128 x 160) ============
+function drawL3() {
+  c.width = 128; c.height = 160;
+  ctx.clearRect(0,0,128,160);
+  const GROUND = 128;
+
+  // sky / backdrop
+  box(0, 0, 128, GROUND, PAL.grass);
+  // dirt
+  box(0, GROUND, 128, 32, PAL.dirt);
+  box(0, GROUND, 128, 1, PAL.dirt_l);
+  box(0, GROUND+6, 128, 1, PAL.dirt_d);
+  box(0, GROUND+14, 128, 1, PAL.dirt_d);
+
+  // ====== STONE CURTAIN WALLS ======
+  // Outer footprint: x:8..120, y:64..GROUND
+  // Back wall (highest visual point)
+  // We'll draw in this order: back wall, side walls (left/right), front wall with gatehouse, then keep (front-center, tall)
+
+  // BACK WALL — solid stone, crenellated top
+  const backX1=16, backX2=112, backY1=64, backY2=GROUND;
+  box(backX1, backY1, backX2-backX1, backY2-backY1, PAL.stone);
+  // stone block lines
+  for (let y = backY1+4; y < backY2-2; y += 6) {
+    const off = ((y - backY1) / 6) % 2 === 0 ? 0 : 6;
+    for (let x = backX1 + off; x < backX2-6; x += 12) {
+      lineV(x, y, 5, PAL.stone_d);
+    }
+  }
+  // shading
+  lineV(backX2-1, backY1, backY2-backY1, PAL.stone_d);
+  lineH(backX1, backY2-1, backX2-backX1, PAL.stone_d2);
+  // crenellations on top
+  for (let x = backX1; x < backX2; x += 6) {
+    box(x, backY1-5, 3, 5, PAL.stone);
+    out(x, backY1-5, 3, 5, PAL.out);
+  }
+  // gaps (crenel notches)
+  for (let x = backX1+3; x < backX2; x += 6) {
+    box(x, backY1-3, 3, 3, PAL.grass);
+  }
+  out(backX1, backY1, backX2-backX1, backY2-backY1, PAL.out);
+
+  // BACK TOWERS at corners (rising above the wall)
+  // Left back tower (at x=backX1)
+  const bltx1=8, bltx2=24;
+  box(bltx1, backY1-22, bltx2-bltx1, backY2-bltx1+backY1+22-(backY1-22), PAL.stone);
+  // stone blocks
+  for (let y = backY1-20; y < GROUND-2; y += 6) {
+    const off = ((y - (backY1-22)) / 6) % 2 === 0 ? 0 : 5;
+    for (let x = bltx1 + off; x < bltx2-3; x += 10) {
+      lineV(x, y, 4, PAL.stone_d);
+    }
+  }
+  lineV(bltx2-1, backY1-22, GROUND-(backY1-22), PAL.stone_d);
+  out(bltx1, backY1-22, bltx2-bltx1, GROUND-(backY1-22), PAL.out);
+  // crenellated top
+  for (let x = bltx1; x < bltx2; x += 4) {
+    box(x, backY1-28, 2, 6, PAL.stone);
+    out(x, backY1-28, 2, 6, PAL.out);
+  }
+  for (let x = bltx1+2; x < bltx2; x += 4) {
+    box(x, backY1-26, 2, 4, PAL.grass);
+  }
+  // arrow slits
+  box(14, backY1-12, 2, 5, PAL.door);
+  box(14, backY1+4, 2, 5, PAL.door);
+  box(14, backY1+20, 2, 5, PAL.door);
+  // pointed cap (conical roof)
+  ctx.fillStyle = PAL.roof_red;
+  ctx.beginPath();
+  ctx.moveTo(bltx1-1, backY1-22); ctx.lineTo(bltx1+8, backY1-40); ctx.lineTo(bltx2+1, backY1-22); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.roof_red_d;
+  ctx.beginPath();
+  ctx.moveTo(bltx1+8, backY1-40); ctx.lineTo(bltx2+1, backY1-22); ctx.lineTo(bltx1+8, backY1-22); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(bltx1-1, backY1-22); ctx.lineTo(bltx1+8, backY1-40); ctx.lineTo(bltx2+1, backY1-22); ctx.closePath(); ctx.stroke();
+  // roof tile lines
+  lineH(bltx1+2, backY1-30, 13, PAL.roof_red_d);
+
+  // Right back tower
+  const brtx1=104, brtx2=120;
+  box(brtx1, backY1-22, brtx2-brtx1, GROUND-(backY1-22), PAL.stone);
+  for (let y = backY1-20; y < GROUND-2; y += 6) {
+    const off = ((y - (backY1-22)) / 6) % 2 === 0 ? 0 : 5;
+    for (let x = brtx1 + off; x < brtx2-3; x += 10) {
+      lineV(x, y, 4, PAL.stone_d);
+    }
+  }
+  lineV(brtx2-1, backY1-22, GROUND-(backY1-22), PAL.stone_d);
+  out(brtx1, backY1-22, brtx2-brtx1, GROUND-(backY1-22), PAL.out);
+  for (let x = brtx1; x < brtx2; x += 4) {
+    box(x, backY1-28, 2, 6, PAL.stone);
+    out(x, backY1-28, 2, 6, PAL.out);
+  }
+  for (let x = brtx1+2; x < brtx2; x += 4) {
+    box(x, backY1-26, 2, 4, PAL.grass);
+  }
+  box(110, backY1-12, 2, 5, PAL.door);
+  box(110, backY1+4, 2, 5, PAL.door);
+  box(110, backY1+20, 2, 5, PAL.door);
+  ctx.fillStyle = PAL.roof_red;
+  ctx.beginPath();
+  ctx.moveTo(brtx1-1, backY1-22); ctx.lineTo(brtx1+8, backY1-40); ctx.lineTo(brtx2+1, backY1-22); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.roof_red_d;
+  ctx.beginPath();
+  ctx.moveTo(brtx1+8, backY1-40); ctx.lineTo(brtx2+1, backY1-22); ctx.lineTo(brtx1+8, backY1-22); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(brtx1-1, backY1-22); ctx.lineTo(brtx1+8, backY1-40); ctx.lineTo(brtx2+1, backY1-22); ctx.closePath(); ctx.stroke();
+  lineH(brtx1+2, backY1-30, 13, PAL.roof_red_d);
+
+  // ====== INNER KEEP (center, tall — leaks ABOVE) ======
+  // Keep base x:48..80, y:32..GROUND
+  const kx1=48, kx2=80, ky1=32;
+  box(kx1, ky1, kx2-kx1, GROUND-ky1, PAL.stone);
+  for (let y = ky1+4; y < GROUND-2; y += 6) {
+    const off = ((y - ky1) / 6) % 2 === 0 ? 0 : 6;
+    for (let x = kx1 + off; x < kx2-6; x += 12) {
+      lineV(x, y, 4, PAL.stone_d);
+    }
+  }
+  lineV(kx2-1, ky1, GROUND-ky1, PAL.stone_d);
+  lineH(kx1, GROUND-1, kx2-kx1, PAL.stone_d2);
+  out(kx1, ky1, kx2-kx1, GROUND-ky1, PAL.out);
+  // keep windows (arched)
+  // row 1 (high)
+  for (let x = kx1+3; x < kx2-3; x += 8) {
+    box(x, ky1+6, 4, 6, PAL.window);
+    lineV(x+2, ky1+6, 6, PAL.stone_d);
+    out(x, ky1+6, 4, 6, PAL.out);
+  }
+  // row 2
+  for (let x = kx1+3; x < kx2-3; x += 8) {
+    box(x, ky1+22, 4, 6, PAL.window);
+    lineV(x+2, ky1+22, 6, PAL.stone_d);
+    out(x, ky1+22, 4, 6, PAL.out);
+  }
+  // row 3
+  for (let x = kx1+3; x < kx2-3; x += 8) {
+    box(x, ky1+44, 4, 6, PAL.window);
+    lineV(x+2, ky1+44, 6, PAL.stone_d);
+    out(x, ky1+44, 4, 6, PAL.out);
+  }
+  // crenellated top of keep
+  for (let x = kx1; x < kx2; x += 5) {
+    box(x, ky1-6, 3, 6, PAL.stone);
+    out(x, ky1-6, 3, 6, PAL.out);
+  }
+  for (let x = kx1+2; x < kx2; x += 5) {
+    box(x, ky1-4, 3, 4, PAL.grass);
+  }
+  // keep door
+  box(60, GROUND-14, 8, 14, PAL.door);
+  lineV(60, GROUND-14, 14, PAL.out);
+  lineV(68, GROUND-14, 14, PAL.out);
+  lineH(60, GROUND-14, 8, PAL.out);
+  // door arch above
+  ctx.fillStyle = PAL.stone;
+  ctx.beginPath();
+  ctx.moveTo(60, GROUND-14); ctx.lineTo(64, GROUND-20); ctx.lineTo(68, GROUND-14); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(60, GROUND-14); ctx.lineTo(64, GROUND-20); ctx.lineTo(68, GROUND-14); ctx.closePath(); ctx.stroke();
+  // portcullis bars
+  lineV(62, GROUND-12, 10, PAL.iron);
+  lineV(64, GROUND-12, 10, PAL.iron);
+  lineV(66, GROUND-12, 10, PAL.iron);
+
+  // ====== KEEP CENTRAL SPIRE (tallest — leaks above hex) ======
+  // Spire base on top of keep, x:58..70, y:6..ky1
+  const sx1=58, sx2=70, sy1=8;
+  box(sx1, sy1, sx2-sx1, ky1-sy1, PAL.stone);
+  lineV(sx2-1, sy1, ky1-sy1, PAL.stone_d);
+  out(sx1, sy1, sx2-sx1, ky1-sy1, PAL.out);
+  // spire windows
+  box(60, sy1+4, 3, 5, PAL.window);
+  out(60, sy1+4, 3, 5, PAL.out);
+  box(65, sy1+4, 3, 5, PAL.window);
+  out(65, sy1+4, 3, 5, PAL.out);
+  box(60, sy1+12, 3, 5, PAL.window);
+  out(60, sy1+12, 3, 5, PAL.out);
+  box(65, sy1+12, 3, 5, PAL.window);
+  out(65, sy1+12, 3, 5, PAL.out);
+  // conical spire roof
+  ctx.fillStyle = PAL.roof_red;
+  ctx.beginPath();
+  ctx.moveTo(sx1, sy1); ctx.lineTo(64, 0); ctx.lineTo(sx2, sy1); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.roof_red_d;
+  ctx.beginPath();
+  ctx.moveTo(64, 0); ctx.lineTo(sx2, sy1); ctx.lineTo(64, sy1); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(sx1, sy1); ctx.lineTo(64, 0); ctx.lineTo(sx2, sy1); ctx.closePath(); ctx.stroke();
+  // spire tile lines
+  lineH(sx1+2, sy1+4, 9, PAL.roof_red_d);
+  lineH(sx1+3, sy1+8, 7, PAL.roof_red_d);
+  // spire finial (flag pole + banner)
+  lineV(64, 0, 8, PAL.wood_dk);
+  // banner
+  box(64, -7, 7, 5, PAL.banner_b);
+  out(64, -7, 7, 5, PAL.out);
+  ctx.fillStyle = PAL.banner_b;
+  ctx.beginPath();
+  ctx.moveTo(71, -7); ctx.lineTo(73, -4); ctx.lineTo(71, -2); ctx.closePath(); ctx.fill();
+  // emblem on banner (small cross)
+  box(66, -6, 1, 3, PAL.flag_y);
+  box(65, -5, 3, 1, PAL.flag_y);
+
+  // ====== FRONT CURTAIN WALL with GATEHOUSE ======
+  // Front wall segments left and right of gatehouse
+  // Left front segment
+  box(24, GROUND-12, 26, 12, PAL.stone);
+  for (let y = GROUND-10; y < GROUND-2; y += 4) {
+    const off = ((y - (GROUND-12)) / 4) % 2 === 0 ? 0 : 5;
+    for (let x = 24 + off; x < 50-3; x += 10) {
+      lineV(x, y, 3, PAL.stone_d);
+    }
+  }
+  out(24, GROUND-12, 26, 12, PAL.out);
+  // crenellations
+  for (let x = 24; x < 50; x += 5) {
+    box(x, GROUND-18, 3, 6, PAL.stone);
+    out(x, GROUND-18, 3, 6, PAL.out);
+  }
+  for (let x = 26; x < 50; x += 5) {
+    box(x, GROUND-16, 3, 4, PAL.grass);
+  }
+  // Right front segment
+  box(78, GROUND-12, 26, 12, PAL.stone);
+  for (let y = GROUND-10; y < GROUND-2; y += 4) {
+    const off = ((y - (GROUND-12)) / 4) % 2 === 0 ? 0 : 5;
+    for (let x = 78 + off; x < 104-3; x += 10) {
+      lineV(x, y, 3, PAL.stone_d);
+    }
+  }
+  out(78, GROUND-12, 26, 12, PAL.out);
+  for (let x = 78; x < 104; x += 5) {
+    box(x, GROUND-18, 3, 6, PAL.stone);
+    out(x, GROUND-18, 3, 6, PAL.out);
+  }
+  for (let x = 80; x < 104; x += 5) {
+    box(x, GROUND-16, 3, 4, PAL.grass);
+  }
+
+  // GATEHOUSE — center, taller than front wall
+  // x:50..78, y:GROUND-32..GROUND
+  const ghx1=50, ghx2=78, ghy1=GROUND-32;
+  box(ghx1, ghy1, ghx2-ghx1, GROUND-ghy1, PAL.stone);
+  for (let y = ghy1+4; y < GROUND-2; y += 6) {
+    const off = ((y - ghy1) / 6) % 2 === 0 ? 0 : 6;
+    for (let x = ghx1 + off; x < ghx2-6; x += 12) {
+      lineV(x, y, 4, PAL.stone_d);
+    }
+  }
+  lineV(ghx2-1, ghy1, GROUND-ghy1, PAL.stone_d);
+  out(ghx1, ghy1, ghx2-ghx1, GROUND-ghy1, PAL.out);
+  // crenellations
+  for (let x = ghx1; x < ghx2; x += 5) {
+    box(x, ghy1-6, 3, 6, PAL.stone);
+    out(x, ghy1-6, 3, 6, PAL.out);
+  }
+  for (let x = ghx1+2; x < ghx2; x += 5) {
+    box(x, ghy1-4, 3, 4, PAL.grass);
+  }
+  // gatehouse twin towers (small ones flanking the gate)
+  box(50, GROUND-38, 5, 38, PAL.stone);
+  lineV(50, GROUND-38, 38, PAL.stone_d);
+  out(50, GROUND-38, 5, 38, PAL.out);
+  box(73, GROUND-38, 5, 38, PAL.stone);
+  lineV(73, GROUND-38, 38, PAL.stone_d);
+  out(73, GROUND-38, 5, 38, PAL.out);
+  // crenels on mini-towers
+  box(50, GROUND-42, 2, 4, PAL.stone);
+  out(50, GROUND-42, 2, 4, PAL.out);
+  box(53, GROUND-42, 2, 4, PAL.stone);
+  out(53, GROUND-42, 2, 4, PAL.out);
+  box(73, GROUND-42, 2, 4, PAL.stone);
+  out(73, GROUND-42, 2, 4, PAL.out);
+  box(76, GROUND-42, 2, 4, PAL.stone);
+  out(76, GROUND-42, 2, 4, PAL.out);
+  // gate arch
+  ctx.fillStyle = PAL.stone;
+  ctx.beginPath();
+  ctx.moveTo(58, GROUND); ctx.lineTo(64, GROUND-14); ctx.lineTo(70, GROUND); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.out;
+  ctx.beginPath();
+  ctx.moveTo(58, GROUND); ctx.lineTo(64, GROUND-14); ctx.lineTo(70, GROUND); ctx.closePath(); ctx.stroke();
+  // gate opening (dark)
+  box(58, GROUND-12, 12, 12, PAL.door);
+  // portcullis
+  lineV(60, GROUND-10, 10, PAL.iron);
+  lineV(62, GROUND-10, 10, PAL.iron);
+  lineV(64, GROUND-10, 10, PAL.iron);
+  lineV(66, GROUND-10, 10, PAL.iron);
+  lineV(68, GROUND-10, 10, PAL.iron);
+  lineH(58, GROUND-6, 12, PAL.iron);
+  // gatehouse banner
+  lineV(64, ghy1-14, 8, PAL.wood_dk);
+  box(64, ghy1-14, 6, 4, PAL.banner_r);
+  out(64, ghy1-14, 6, 4, PAL.out);
+  ctx.fillStyle = PAL.banner_r;
+  ctx.beginPath();
+  ctx.moveTo(70, ghy1-14); ctx.lineTo(72, ghy1-11); ctx.lineTo(70, ghy1-10); ctx.closePath(); ctx.fill();
+
+  // ground bottom outline
+  box(0, 159, 128, 1, PAL.out);
+}
+
+// expose drawing functions
+window.drawL1 = drawL1;
+window.drawL2 = drawL2;
+window.drawL3 = drawL3;
+window.PAL = PAL;
+</script>
+</body>
+</html>

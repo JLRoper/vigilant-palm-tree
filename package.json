@@ -1,0 +1,31 @@
+{
+  "name": "heroes-js",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n web,api -c green,cyan \"vite\" \"tsx watch server/index.ts\"",
+    "dev:web": "vite",
+    "dev:api": "tsx watch server/index.ts",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "test": "tsx test/smoke.ts"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/pg": "^8.20.0",
+    "concurrently": "^9.1.2",
+    "playwright": "^1.61.1",
+    "tsx": "^4.23.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "pg": "^8.22.0"
+  }
+}
