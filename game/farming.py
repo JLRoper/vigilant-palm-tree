@@ -1,14 +1,19 @@
 """Farming module for Fallows of Elysium."""
 
+from __future__ import annotations
+
 import random
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from game.player import Player
 
 
 FIELD_PLOTS = ["North Field", "South Field", "East Field"]
 HARVEST_TURNS = 3  # turns to wait between planting and harvesting
 
 
-def plant(player, plot_name: str) -> str:
+def plant(player: Player, plot_name: str) -> str:
     """Plant seeds on a plot. Returns status message."""
     if plot_name not in FIELD_PLOTS:
         return f"'{plot_name}' is not a valid plot. Available: {', '.join(FIELD_PLOTS)}"
@@ -18,7 +23,7 @@ def plant(player, plot_name: str) -> str:
     return f"You plant seeds in {plot_name}. Come back in {HARVEST_TURNS} turns to harvest."
 
 
-def harvest(player, plot_name: str) -> str:
+def harvest(player: Player, plot_name: str) -> str:
     """Attempt to harvest a planted plot. Returns status message."""
     if plot_name not in FIELD_PLOTS:
         return f"'{plot_name}' is not a valid plot."
@@ -38,7 +43,7 @@ def harvest(player, plot_name: str) -> str:
     return f"You harvest {yield_amount} grain from {plot_name}!{bonus_msg} (Total grain: {player.grain})"
 
 
-def advance_crops(player) -> Optional[str]:  # type: ignore[return]
+def advance_crops(player: Player) -> Optional[str]:
     """Called each game turn to advance crop growth. Returns notice if any crop matures."""
     matured = []
     for plot in list(player.fields.keys()):
@@ -50,7 +55,7 @@ def advance_crops(player) -> Optional[str]:  # type: ignore[return]
     return None
 
 
-def field_status(player) -> str:
+def field_status(player: Player) -> str:
     """Return a summary of all field plots."""
     lines = []
     for plot in FIELD_PLOTS:

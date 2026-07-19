@@ -1,8 +1,13 @@
 """Combat module for Fallows of Elysium."""
 
+from __future__ import annotations
+
 import random
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import TYPE_CHECKING, List, Tuple
+
+if TYPE_CHECKING:
+    from game.player import Player
 
 
 @dataclass
@@ -50,7 +55,7 @@ def spawn_enemy(difficulty: int = 1) -> Enemy:
     )
 
 
-def do_combat_round(player, enemy: Enemy) -> Tuple[str, bool]:
+def do_combat_round(player: Player, enemy: Enemy) -> Tuple[str, bool]:
     """
     Execute one full combat round (player attacks, then enemy attacks if alive).
     Returns (log_text, combat_over).

@@ -1,7 +1,12 @@
 """Items and shop module for Fallows of Elysium."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Dict
+from typing import TYPE_CHECKING, Dict
+
+if TYPE_CHECKING:
+    from game.player import Player
 
 
 @dataclass
@@ -34,7 +39,7 @@ SHOP_ITEMS: Dict[str, Item] = {
 }
 
 
-def use_item(item_name: str, player) -> str:  # type: ignore[no-untyped-def]
+def use_item(item_name: str, player: Player) -> str:
     """Use a consumable item from the player's inventory. Returns result message."""
     if item_name not in player.inventory:
         return f"You don't have a {item_name}."
