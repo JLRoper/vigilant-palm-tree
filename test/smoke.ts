@@ -219,6 +219,7 @@ async function queryDbRow(name: string): Promise<{
   active_player_id: number;
   players: Array<{ id: number; gold: number; faction: string; settlementIds?: string[] }>;
   heroes: Record<string, { id: string; ownerId: number; q: number; r: number }>;
+  settlements: Record<string, { id: string; ownerId: number | null; population: number; goldTax: number }>;
 }> {
   const pool = new Pool({
     host: process.env.PGHOST ?? "localhost",
@@ -233,8 +234,9 @@ async function queryDbRow(name: string): Promise<{
       active_player_id: number;
       players: any[];
       heroes: Record<string, any>;
+      settlements: Record<string, any>;
     }>(
-      `SELECT round, active_player_id, players, heroes FROM games WHERE name = $1`,
+      `SELECT round, active_player_id, players, heroes, settlements FROM games WHERE name = $1`,
       [name]
     );
     if (r.rowCount === 0) throw new Error(`game ${name} not found in DB`);
@@ -244,6 +246,7 @@ async function queryDbRow(name: string): Promise<{
       active_player_id: row.active_player_id,
       players: row.players,
       heroes: row.heroes,
+      settlements: row.settlements,
     };
   } finally {
     await pool.end();
@@ -398,7 +401,7 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
       hasNeutral: text.includes("Neutral"),
       hasPopulation: text.includes("Population"),
       hasResourceRates: text.includes("Resource rates") || text.includes("/turn"),
-      hasGoldTax: text.includes("Gold/tax"),
+      hasIncome: text.includes("Income/turn"),
       snippet: text.slice(0, 400),
     };
   });
@@ -409,8 +412,8 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   if (!settlementPanel.hasPopulation) {
     throw new Error(`Settlement panel missing Population: ${settlementPanel.snippet}`);
   }
-  if (!settlementPanel.hasGoldTax) {
-    throw new Error(`Settlement panel missing Gold/tax: ${settlementPanel.snippet}`);
+  if (!settlementPanel.hasIncome) {
+    throw new Error(`Settlement panel missing Income/turn: ${settlementPanel.snippet}`);
   }
   if (!settlementPanel.hasResourceRates) {
     throw new Error(`Settlement panel missing Resource rates: ${settlementPanel.snippet}`);
@@ -483,6 +486,20 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   const endTurnBtn = page.locator("#toolbar button:has-text('End Turn')");
   if (!(await endTurnBtn.isVisible())) throw new Error("End Turn button not visible in toolbar");
   if (!(await endTurnBtn.isEnabled())) throw new Error("End Turn button disabled during PLAYER_TURN");
+
+  const preTurnRow = await queryDbRow(activeName);
+  const preTurnPlayer0 = preTurnRow.players.find((p) => p.id === 0);
+  if (!preTurnPlayer0) throw new Error("players[0] missing before end-turn");
+  const preTurnGold = preTurnPlayer0.gold;
+  const ownedSettlementIds = preTurnPlayer0.settlementIds ?? [];
+  const expectedIncome = ownedSettlementIds.reduce((acc, sid) => {
+    const s = preTurnRow.settlements[sid];
+    if (!s) return acc;
+    if (s.ownerId !== 0) return acc;
+    return acc + (s.population ?? 0) * (s.goldTax ?? 0);
+  }, 0);
+  console.log(`>> pre-turn: players[0].gold=${preTurnGold}, expected income=${expectedIncome}`);
+
   await endTurnBtn.click();
 
   await wait(300);
@@ -514,10 +531,22 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   }
   const player0 = dbRow.players.find((p) => p.id === 0);
   if (!player0) throw new Error("players[0] missing in DB row");
-  if (player0.gold < 1) {
-    throw new Error(`Expected players[0].gold >= 1 (one settlement owned), got ${player0.gold}`);
+  const goldDelta = player0.gold - preTurnGold;
+  console.log(`>> DB confirms round=2 active=0 players[0].gold=${player0.gold} (delta=${goldDelta})`);
+  if (goldDelta !== expectedIncome) {
+    throw new Error(
+      `Expected players[0].gold delta=${expectedIncome} (Σ population×goldTax), got ${goldDelta}`
+    );
   }
-  console.log(`>> DB confirms round=2 active=0 players[0].gold=${player0.gold}`);
+
+  const toolbarText = await page
+    .locator("#toolbar button:has-text('End Turn')")
+    .first()
+    .evaluate((btn) => btn.parentElement?.parentElement?.textContent ?? "");
+  if (!toolbarText.match(/Income\s*\+\d+g\/turn/)) {
+    throw new Error(`Toolbar menu missing "Income +Xg/turn" display: ${toolbarText}`);
+  }
+  console.log(`>> Toolbar shows Income +Xg/turn`);
 
   const settingsOpen = await page.evaluate(() => {
     const gear = document.querySelector("#toolbar button[title='Settings']");

@@ -40,6 +40,7 @@ import {
   type GameState,
   type HeroId,
 } from "./state/gameState";
+import { playerIncome } from "./economy/income";
 import type { CalendarSnapshot } from "./views/toolbar";
 import { TurnController } from "./state/turnController";
 import { showBattleModal } from "./views/battleModal";
@@ -99,6 +100,7 @@ function buildCalendarSnapshot(state: GameState): CalendarSnapshot | null {
     monthName: monthName(cal.month),
     activePlayerName: activePlayer.name,
     activePlayerColor: activePlayer.color,
+    nextTurnGold: playerIncome(state, activePlayer.id),
   };
 }
 

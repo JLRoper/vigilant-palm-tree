@@ -405,11 +405,16 @@ router.post("/games/:name/end-turn", async (req, res) => {
         gold: Number.isFinite(p.gold) ? p.gold : 0,
       }));
 
-      // Award 1 gold per settlement owned by the player whose turn just ended.
+      // Award gold based on each owned settlement's population × goldTax.
+      // Use the DB row's gold as the authoritative base (incomingState.players may
+      // already include a client-side mirror of this same income).
       const endingPlayer = players.find((p) => p.id === row.active_player_id);
-      if (endingPlayer) {
-        const settlementCount = endingPlayer.settlementIds.length;
-        endingPlayer.gold += settlementCount;
+      const dbEndingPlayer = row.players.find((p) => p.id === row.active_player_id);
+      if (endingPlayer && dbEndingPlayer) {
+        const goldEarned = Object.values(incomingState.settlements)
+          .filter((s) => s.ownerId === endingPlayer.id)
+          .reduce((acc, s) => acc + s.population * s.goldTax, 0);
+        endingPlayer.gold = Number(dbEndingPlayer.gold) + goldEarned;
       }
 
       // Advance active_player_id; wrap when we go past the last player, incrementing round + day.

@@ -20,6 +20,7 @@ export interface CalendarSnapshot {
   monthName: string;
   activePlayerName: string;
   activePlayerColor: string;
+  nextTurnGold: number;
 }
 
 export interface ToolbarState {
@@ -178,6 +179,22 @@ export class Toolbar {
     this.calendarActiveEl.appendChild(activeLabel);
     this.calendarEl.appendChild(this.calendarActiveEl);
 
+    const incomeRow = document.createElement("div");
+    Object.assign(incomeRow.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      fontSize: "11px",
+      opacity: "0.85",
+      paddingTop: "2px",
+    });
+    const incomeLabel = document.createElement("span");
+    incomeLabel.textContent = "Income";
+    incomeRow.appendChild(incomeLabel);
+    const incomeValue = document.createElement("span");
+    incomeValue.id = "toolbar-income-value";
+    incomeRow.appendChild(incomeValue);
+    this.calendarEl.appendChild(incomeRow);
+
     this.menu.body.appendChild(this.calendarEl);
 
     this.newBtn = this.makeButton("New Game", false);
@@ -232,13 +249,15 @@ export class Toolbar {
     const monthEl = this.menu.root.querySelector<HTMLElement>("#toolbar-month-value");
     const swatchEl = this.menu.root.querySelector<HTMLElement>("#toolbar-active-swatch");
     const activeEl = this.menu.root.querySelector<HTMLElement>("#toolbar-active-label");
-    if (!dayEl || !weekEl || !monthEl || !swatchEl || !activeEl) return;
+    const incomeEl = this.menu.root.querySelector<HTMLElement>("#toolbar-income-value");
+    if (!dayEl || !weekEl || !monthEl || !swatchEl || !activeEl || !incomeEl) return;
     if (!cal) {
       dayEl.textContent = "—";
       weekEl.textContent = "—";
       monthEl.textContent = "—";
       swatchEl.style.background = "#888";
       activeEl.textContent = "—";
+      incomeEl.textContent = "—";
       return;
     }
     dayEl.textContent = `${cal.day} (d${cal.dayOfWeek})`;
@@ -246,6 +265,7 @@ export class Toolbar {
     monthEl.textContent = `${cal.monthName} ${cal.month} (d${cal.dayOfMonth})`;
     swatchEl.style.background = cal.activePlayerColor;
     activeEl.textContent = `${cal.activePlayerName}'s turn`;
+    incomeEl.textContent = `+${cal.nextTurnGold}g/turn`;
   }
 
   applyGameState(_state: GameState): void {

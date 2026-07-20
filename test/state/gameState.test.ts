@@ -353,20 +353,20 @@ test("applyEndOfTurn resets movement to 7 for current player heroes", () => {
   assert.equal(next.heroes.h1.movementRemaining, 3);
 });
 
-test("applyEndOfTurn adds 1 gold per owned settlement", () => {
+test("applyEndOfTurn awards population*goldTax for current player's settlements", () => {
   const s = makeState({
     players: [
       makePlayer(0, "player", "Human", ["h0"], ["s0", "s0b"], 5),
       makePlayer(1, "ai", "AI", ["h1"], ["s1"], 10),
     ],
     settlements: [
-      { id: "s0", ownerId: 0, q: 2, r: 2, level: 1 },
-      { id: "s0b", ownerId: 0, q: 3, r: 3, level: 1 },
-      { id: "s1", ownerId: 1, q: 18, r: 4, level: 1 },
+      { id: "s0", ownerId: 0, q: 2, r: 2, level: 1, population: 500, goldTax: 1 },
+      { id: "s0b", ownerId: 0, q: 3, r: 3, level: 1, population: 500, goldTax: 1 },
+      { id: "s1", ownerId: 1, q: 18, r: 4, level: 1, population: 500, goldTax: 1 },
     ],
   });
   const next = applyEndOfTurn(s);
-  assert.equal(next.players[0].gold, 7);
+  assert.equal(next.players[0].gold, 1005);
   assert.equal(next.players[1].gold, 10);
   assert.equal(next.dirty, true);
 });

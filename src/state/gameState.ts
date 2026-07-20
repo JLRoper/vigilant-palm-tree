@@ -408,7 +408,9 @@ export function applyEndOfTurn(state: GameState): GameState {
   if (!player) {
     return { ...state, heroes: newHeroes, dirty: true };
   }
-  const goldEarned = player.settlementIds.length;
+  const goldEarned = Object.values(state.settlements)
+    .filter((s) => s.ownerId === playerId)
+    .reduce((acc, s) => acc + s.population * s.goldTax, 0);
   const newPlayers = state.players.map((p) =>
     p.id === playerId ? { ...p, gold: p.gold + goldEarned } : p,
   );

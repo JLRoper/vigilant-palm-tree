@@ -179,7 +179,7 @@ export class SettlementPanel {
     card.appendChild(popRow.row);
 
     const incomeRow = makeRow();
-    incomeRow.left.textContent = "Gold/tax";
+    incomeRow.left.textContent = "Income/turn";
     incomeRow.right.textContent = `${s.population * s.goldTax}g`;
     card.appendChild(incomeRow.row);
 
