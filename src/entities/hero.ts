@@ -1,5 +1,6 @@
 import { Axial, axialToPixel } from "../core/hex";
 import type { Faction as StateFaction, HeroId, HeroState, PlayerId } from "../state/gameState";
+import { settings } from "../state/settings";
 
 export type Faction = "player" | "enemy";
 
@@ -10,11 +11,11 @@ export class Hero {
   moveProgress = 1;
   moving = false;
   pixelOffset = { x: 0, y: 0 };
-  moveDurationMs = 220;
   faction: Faction;
   id: string;
   ownerId: PlayerId;
   movementRemaining: number;
+  trail: Axial[];
 
   constructor(
     id: string,
@@ -22,7 +23,8 @@ export class Hero {
     r: number,
     faction: Faction,
     ownerId: PlayerId,
-    movementRemaining = 7
+    movementRemaining = 7,
+    trail?: Axial[]
   ) {
     this.id = id;
     this.tile = { q, r };
@@ -31,6 +33,11 @@ export class Hero {
     this.faction = faction;
     this.ownerId = ownerId;
     this.movementRemaining = movementRemaining;
+    this.trail = trail ?? [{ q, r }];
+  }
+
+  get moveDurationMs(): number {
+    return settings().moveDurationMs;
   }
 
   startMoveTo(target: Axial) {
@@ -65,8 +72,19 @@ export class Hero {
   syncFromState(s: HeroState): void {
     this.ownerId = s.ownerId;
     this.movementRemaining = s.movementRemaining;
-    if (!this.moving) {
-      this.tile = { q: s.q, r: s.r };
+    this.trail = (s.trail ?? []).map((p) => ({ q: p.q, r: p.r }));
+    if (this.moving) {
+      if (s.q === this.toTile.q && s.r === this.toTile.r) return;
+      this.fromTile = { ...this.toTile };
+      this.tile = { ...this.toTile };
+    }
+    const sameTile = s.q === this.tile.q && s.r === this.tile.r;
+    if (!sameTile) {
+      this.fromTile = { ...this.tile };
+      this.toTile = { q: s.q, r: s.r };
+      this.moveProgress = 0;
+      this.moving = true;
+    } else {
       this.fromTile = { q: s.q, r: s.r };
       this.toTile = { q: s.q, r: s.r };
     }
@@ -82,12 +100,21 @@ export class Hero {
       previousQ: null,
       previousR: null,
       previousMovementRemaining: null,
+      trail: this.trail.map((p) => ({ q: p.q, r: p.r })),
     };
   }
 
   static fromGameState(s: HeroState): Hero {
     const faction: Faction = mapFactionFromOwner(s.ownerId);
-    return new Hero(s.id, s.q, s.r, faction, s.ownerId, s.movementRemaining);
+    return new Hero(
+      s.id,
+      s.q,
+      s.r,
+      faction,
+      s.ownerId,
+      s.movementRemaining,
+      (s.trail ?? []).map((p) => ({ q: p.q, r: p.r }))
+    );
   }
 }
 

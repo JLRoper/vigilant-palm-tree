@@ -23,6 +23,7 @@ export interface HeroState {
   previousQ: number | null;
   previousR: number | null;
   previousMovementRemaining: number | null;
+  trail: { q: number; r: number }[];
 }
 
 export interface SettlementState {
@@ -120,8 +121,8 @@ function defaultPlayers(): Player[] {
 
 function defaultHeroes(): Record<HeroId, HeroState> {
   return {
-    h0: { id: "h0", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null },
-    h1: { id: "h1", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null },
+    h0: { id: "h0", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }] },
+    h1: { id: "h1", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }] },
   };
 }
 
@@ -247,6 +248,7 @@ export function startMove(
     previousQ: hero.q,
     previousR: hero.r,
     previousMovementRemaining: hero.movementRemaining,
+    trail: [...(hero.trail ?? []), toTile],
   };
   return {
     state: { ...state, heroes: { ...state.heroes, [heroId]: updatedHero }, dirty: true },
@@ -398,6 +400,7 @@ export function applyEndOfTurn(state: GameState): GameState {
         previousQ: null,
         previousR: null,
         previousMovementRemaining: null,
+        trail: [{ q: hero.q, r: hero.r }],
       };
     }
   }
@@ -421,6 +424,7 @@ export function advanceRound(state: GameState): GameState {
       previousQ: null,
       previousR: null,
       previousMovementRemaining: null,
+      trail: [{ q: hero.q, r: hero.r }],
     };
   }
   return {

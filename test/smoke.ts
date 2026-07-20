@@ -320,6 +320,19 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   }
   console.log(`>> Player hero moved to (${moved.q},${moved.r})`);
 
+  if (!Array.isArray(moved.trail) || moved.trail.length < 2) {
+    throw new Error(`Hero trail missing or too short: ${JSON.stringify(moved.trail)}`);
+  }
+  const trailStart = moved.trail[0];
+  const trailEnd = moved.trail[moved.trail.length - 1];
+  if (trailStart.q !== PLAYER_SPAWN.q || trailStart.r !== PLAYER_SPAWN.r) {
+    throw new Error(`Trail start should be ${PLAYER_SPAWN.q},${PLAYER_SPAWN.r}, got ${trailStart.q},${trailStart.r}`);
+  }
+  if (trailEnd.q !== moved.q || trailEnd.r !== moved.r) {
+    throw new Error(`Trail end should be ${moved.q},${moved.r}, got ${trailEnd.q},${trailEnd.r}`);
+  }
+  console.log(`>> Trail: ${moved.trail.length} steps from (${trailStart.q},${trailStart.r}) to (${trailEnd.q},${trailEnd.r})`);
+
   const hudAfterMove = await page.locator("#hud").textContent();
   console.log(`>> HUD after move: ${hudAfterMove}`);
   const moveMatch = hudAfterMove?.match(/Movement:\s*(\d+(?:\.\d+)?)\/7/);
@@ -412,6 +425,61 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
     throw new Error(`Settlement panel missing Neutral section: ${settlementPanel.snippet}`);
   }
 
+  const heroBeforeClamp = await page.evaluate(() => {
+    const dbg = (window as any).__gameDebug;
+    const heroes = dbg?.getHeroes?.() ?? [];
+    return heroes.find((h: any) => h.ownerId === 0);
+  });
+  const movementLeft = heroBeforeClamp?.movementRemaining ?? 0;
+  const clampedTarget = await page.evaluate(
+    ({ q, r, look }) => {
+      const dbg = (window as any).__gameDebug;
+      const hero = (dbg?.getHeroes?.() ?? []).find((h: any) => h.ownerId === 0);
+      if (!hero) return null;
+      const W = 24, H = 18;
+      let best = { q: hero.q, r: hero.r, dist: 0 };
+      for (let dq = -look; dq <= look; dq++) {
+        for (let dr = -look; dr <= look; dr++) {
+          if (Math.abs(dq + dr) > look) continue;
+          const nq = q + dq;
+          const nr = r + dr;
+          if (nq < 0 || nq >= W || nr < 0 || nr >= H) continue;
+          if (!dbg.isPassable(nq, nr)) continue;
+          const d = Math.max(Math.abs(nq - hero.q), Math.abs(nr - hero.r), Math.abs((nq + nr) - (hero.q + hero.r)));
+          if (d > best.dist) best = { q: nq, r: nr, dist: d };
+        }
+      }
+      return { tile: best };
+    },
+    { q: heroBeforeClamp?.q ?? 0, r: heroBeforeClamp?.r ?? 0, look: Math.max(8, Math.ceil(movementLeft) + 4) }
+  );
+  if (clampedTarget) {
+    const ok = await page.evaluate(
+      ({ id, q, r }) => (window as any).__gameDebug.requestMove(id, q, r),
+      { id: heroBeforeClamp?.id, q: clampedTarget.tile.q, r: clampedTarget.tile.r }
+    );
+    await wait(800);
+    const heroAfterClamp = await page.evaluate(() => {
+      const dbg = (window as any).__gameDebug;
+      const heroes = dbg?.getHeroes?.() ?? [];
+      return heroes.find((h: any) => h.ownerId === 0);
+    });
+    console.log(
+      `>> Clamp: was (${heroBeforeClamp?.q},${heroBeforeClamp?.r}) m=${movementLeft}; requested (${clampedTarget.tile.q},${clampedTarget.tile.r}); ok=${ok}; now at (${heroAfterClamp?.q},${heroAfterClamp?.r}) m=${heroAfterClamp?.movementRemaining}`
+    );
+    if (!ok) {
+      throw new Error(`Clamped requestMove returned false`);
+    }
+    if (
+      heroAfterClamp &&
+      heroAfterClamp.movementRemaining >= 0 &&
+      heroAfterClamp.q === heroBeforeClamp?.q &&
+      heroAfterClamp.r === heroBeforeClamp?.r
+    ) {
+      throw new Error(`Hero did not move on out-of-range request`);
+    }
+  }
+
   const endTurnBtn = page.locator("#toolbar button:has-text('End Turn')");
   if (!(await endTurnBtn.isVisible())) throw new Error("End Turn button not visible in toolbar");
   if (!(await endTurnBtn.isEnabled())) throw new Error("End Turn button disabled during PLAYER_TURN");
@@ -450,6 +518,63 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
     throw new Error(`Expected players[0].gold >= 1 (one settlement owned), got ${player0.gold}`);
   }
   console.log(`>> DB confirms round=2 active=0 players[0].gold=${player0.gold}`);
+
+  const settingsOpen = await page.evaluate(() => {
+    const gear = document.querySelector("#toolbar button[title='Settings']");
+    if (!gear) return false;
+    (gear as HTMLButtonElement).click();
+    return true;
+  });
+  if (!settingsOpen) throw new Error("Settings gear button not found in toolbar");
+  await wait(300);
+
+  const settingsModal = await page.evaluate(() => {
+    const popups = Array.from(document.body.children);
+    const modal = popups.find((el) => el.textContent?.includes("Hero movement speed"));
+    if (!modal) return null;
+    const slider = modal.querySelector("input[type=range]") as HTMLInputElement | null;
+    return {
+      hasSlider: !!slider,
+      value: slider?.value ?? null,
+      max: slider?.max ?? null,
+      min: slider?.min ?? null,
+    };
+  });
+  console.log(`>> Settings modal: ${JSON.stringify(settingsModal)}`);
+  if (!settingsModal || !settingsModal.hasSlider) {
+    throw new Error("Settings modal did not open with a slider");
+  }
+  if (settingsModal.value !== "220") {
+    throw new Error(`Default speed should be 220ms, got ${settingsModal.value}`);
+  }
+  if (settingsModal.max !== "1000") {
+    throw new Error(`Settings max should be 1000ms, got ${settingsModal.max}`);
+  }
+
+  await page.evaluate(() => {
+    const popups = Array.from(document.body.children);
+    const modal = popups.find((el) => el.textContent?.includes("Hero movement speed"));
+    const slider = modal?.querySelector("input[type=range]") as HTMLInputElement | null;
+    if (!slider) return;
+    slider.value = "1000";
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await wait(150);
+  const speedAfter = await page.evaluate(() => (window as any).__gameDebug?.getMoveDurationMs?.());
+  console.log(`>> Speed after slider drag to 1000: ${speedAfter}`);
+  if (speedAfter !== 1000) {
+    throw new Error(`Expected moveDurationMs=1000 after slider, got ${speedAfter}`);
+  }
+
+  await page.evaluate(() => {
+    const popups = Array.from(document.body.children);
+    const modal = popups.find((el) => el.textContent?.includes("Hero movement speed"));
+    const closeBtn = Array.from(modal?.querySelectorAll("button") ?? []).find(
+      (b) => b.textContent === "Close"
+    );
+    (closeBtn as HTMLButtonElement | undefined)?.click();
+  });
+  await wait(200);
 }
 
 async function runSettlementCaptureChecks(page: Page, ctx: any, activeName: string) {

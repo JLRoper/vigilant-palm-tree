@@ -147,18 +147,39 @@ export class AdventureView {
         this.lastClickDebug.reason = "empty path";
         return;
       }
+      let cumulative = 0;
+      let reachableIdx = 0;
+      let actualCost = 0;
+      let clamped = false;
+      for (let i = 0; i < newPath.length; i++) {
+        const step = newPath[i];
+        const terrain = this.opts.map.get(step.q, step.r);
+        const stepCost = terrain ? TERRAIN_COST[terrain] : 1;
+        if (!Number.isFinite(stepCost) || stepCost <= 0) break;
+        if (cumulative + stepCost > startTile.movementRemaining) {
+          clamped = true;
+          break;
+        }
+        cumulative += stepCost;
+        reachableIdx = i + 1;
+        actualCost = cumulative;
+      }
       this.path = newPath;
       this.opts.onPathChanged(this.path);
-      let cost = 0;
-      for (const step of newPath) {
-        const terrain = this.opts.map.get(step.q, step.r);
-        if (terrain) cost += TERRAIN_COST[terrain];
-        else cost += 1;
+      if (reachableIdx === 0) {
+        this.lastClickDebug.reason = "impassable first step";
+        return;
       }
+      const dest = newPath[reachableIdx - 1];
       const tc = this.opts.getTurnController();
-      const ok = tc.requestMove(selectedId, t, cost);
+      const ok = tc.requestMove(selectedId, dest, actualCost);
       this.opts.onStateChanged?.();
       this.lastClickDebug.moved = ok;
+      this.lastClickDebug.reason = ok
+        ? clamped
+          ? `clamped to ${dest.q},${dest.r}`
+          : ""
+        : "requestMove rejected";
       this.opts.onHudUpdate();
       this.opts.onRedraw();
     });

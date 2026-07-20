@@ -141,11 +141,7 @@ function syncHeroVisualsToState(): void {
   for (const [id, h] of Object.entries(gameState.heroes)) {
     const v = heroes[id];
     if (!v) continue;
-    if (!v.moving) {
-      v.tile = { q: h.q, r: h.r };
-    }
-    v.ownerId = h.ownerId;
-    v.movementRemaining = h.movementRemaining;
+    v.syncFromState(h);
   }
 }
 
@@ -501,13 +497,22 @@ function initialize(): void {
       if (!hero) return false;
       const goal = { q, r };
       const newPath = findPath(gameMap, { q: hero.q, r: hero.r }, goal);
-      let cost = 0;
-      for (const step of newPath) {
-        const t = gameMap.get(step.q, step.r);
-        if (t) cost += TERRAIN_COST[t];
-        else cost += 1;
+      if (newPath.length === 0) return false;
+      let cumulative = 0;
+      let reachableIdx = 0;
+      let actualCost = 0;
+      for (let i = 0; i < newPath.length; i++) {
+        const t = gameMap.get(newPath[i].q, newPath[i].r);
+        const stepCost = t ? TERRAIN_COST[t] : 1;
+        if (!Number.isFinite(stepCost) || stepCost <= 0) break;
+        if (cumulative + stepCost > hero.movementRemaining) break;
+        cumulative += stepCost;
+        reachableIdx = i + 1;
+        actualCost = cumulative;
       }
-      const ok = turnController.requestMove(id, goal, cost);
+      if (reachableIdx === 0) return false;
+      const dest = newPath[reachableIdx - 1];
+      const ok = turnController.requestMove(id, dest, actualCost);
       if (ok) syncStateFromController();
       return ok;
     },
@@ -560,6 +565,7 @@ function initialize(): void {
         r: h.tile.r,
         ownerId: h.ownerId,
         movementRemaining: h.movementRemaining,
+        trail: h.trail.map((p) => ({ q: p.q, r: p.r })),
       })),
     getSettlements: () =>
       getCastlesArray().map((c) => ({
@@ -571,6 +577,9 @@ function initialize(): void {
       })),
     get hover() {
       return view ? view.hover : null;
+    },
+    get lastClick() {
+      return view ? view.lastClickDebug : null;
     },
     get phase() {
       return gameState.phase;
@@ -589,6 +598,11 @@ function initialize(): void {
         const { x: wx, y: wy } = axialToPixel(q, r);
         return { x: wx * camera.zoom + camera.x, y: wy * camera.zoom + camera.y };
       };
+    },
+    isPassable: (q: number, r: number) => gameMap.isPassable(q, r),
+    getMoveDurationMs: () => {
+      const hero = Object.values(heroes)[0];
+      return hero ? hero.moveDurationMs : 0;
     },
   };
 }

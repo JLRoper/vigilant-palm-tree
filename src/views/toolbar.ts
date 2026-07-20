@@ -2,6 +2,7 @@ import type { Game } from "../io/api";
 import { api } from "../io/api";
 import { forgetGame, listUserGames, type UserGameEntry } from "../io/userGames";
 import type { GameState } from "../state/gameState";
+import { openSettingsMenu } from "./settingsMenu";
 import {
   PopupMenu,
   menuTheme,
@@ -66,6 +67,33 @@ export class Toolbar {
       closeable: false,
       draggable: true,
     });
+
+    const gear = document.createElement("button");
+    gear.textContent = "\u2699";
+    gear.title = "Settings";
+    Object.assign(gear.style, {
+      position: "absolute",
+      top: "6px",
+      right: "8px",
+      width: "22px",
+      height: "22px",
+      padding: "0",
+      fontSize: "14px",
+      lineHeight: "1",
+      cursor: "pointer",
+      background: "transparent",
+      border: "1px solid rgba(255,255,255,0.20)",
+      borderRadius: "3px",
+      color: menuTheme.panel.color,
+      fontFamily: menuTheme.font,
+      zIndex: "1",
+    });
+    gear.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openSettingsMenu(document.body);
+    });
+    gear.addEventListener("mousedown", (e) => e.stopPropagation());
+    this.menu.root.appendChild(gear);
 
     this.calendarEl = document.createElement("div");
     Object.assign(this.calendarEl.style, {
