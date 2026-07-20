@@ -6,13 +6,15 @@ import { SpriteProvider } from "../assets";
 export function drawResourceIcons(
   ctx: CanvasRenderingContext2D,
   sprites: SpriteProvider,
-  map: GameMap
+  map: GameMap,
+  visible?: Set<string>
 ) {
   ctx.imageSmoothingEnabled = false;
   for (let r = 0; r < map.height; r++) {
     for (let q = 0; q < map.width; q++) {
       const tile = map.resourceTileAt(q, r);
       if (!tile) continue;
+      if (visible && !visible.has(`${q},${r}`)) continue;
       const { x, y } = axialToPixel(q, r);
       drawResourceIcon(ctx, sprites, tile.resource, x, y, HEX_SIZE);
     }

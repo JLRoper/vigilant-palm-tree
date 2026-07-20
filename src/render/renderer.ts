@@ -7,12 +7,17 @@ import { GameMap } from "../map/gameMap";
 import { TERRAIN_COLORS, Terrain } from "../map/terrain";
 import { drawResourceIcons } from "./overlays/resourceIcon";
 import { SpriteProvider } from "./assets";
+import { computeVision, isVisible } from "./fog";
 
 export interface RenderOptions {
   selectedHeroId: string | null;
   selectedSettlementId: string | null;
   colorForOwner: (ownerId: number | null) => string;
+  viewPlayerId: number;
 }
+
+const FOG_FILL = "rgba(8, 10, 16, 0.78)";
+const FOG_EDGE = "rgba(8, 10, 16, 0.55)";
 
 export class Renderer {
   constructor(
@@ -35,6 +40,8 @@ export class Renderer {
     ctx.fillStyle = "#0a0a0a";
     ctx.fillRect(0, 0, w, h);
 
+    const visible = computeVision(heroes, castles, opts.viewPlayerId);
+
     ctx.save();
     this.camera.apply(ctx);
 
@@ -45,44 +52,50 @@ export class Renderer {
         const { x, y } = axialToPixel(q, r);
         this.drawHex(x, y, t);
         this.drawDecoration(q, r, x, y, t);
+        if (!isVisible(visible, q, r)) {
+          this.drawFogHex(x, y);
+        }
       }
     }
 
-    drawResourceIcons(ctx, this.sprites, this.map);
+    drawResourceIcons(ctx, this.sprites, this.map, visible);
 
     for (const c of castles) {
+      const canSee =
+        c.ownerId === opts.viewPlayerId || isVisible(visible, c.tile.q, c.tile.r);
+      if (!canSee) continue;
       const { x, y } = axialToPixel(c.tile.q, c.tile.r);
       drawCastleSprite(ctx, this.sprites, c.level, x, y, HEX_SIZE);
       this.drawCastleBorder(x, y, c, opts);
     }
 
     if (path.length > 0 && heroes.length > 0) {
-      const player = heroes.find((h) => h.faction === "player");
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = "rgba(255, 204, 0, 0.7)";
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.beginPath();
+      const player = heroes.find((h) => h.ownerId === opts.viewPlayerId);
       if (player) {
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(255, 204, 0, 0.7)";
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
         const start = axialToPixel(player.tile.q, player.tile.r);
         ctx.moveTo(start.x, start.y);
-      }
-      for (const t of path) {
-        const p = axialToPixel(t.q, t.r);
-        ctx.lineTo(p.x, p.y);
-      }
-      ctx.stroke();
+        for (const t of path) {
+          const p = axialToPixel(t.q, t.r);
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
 
-      for (const t of path) {
-        const p = axialToPixel(t.q, t.r);
-        ctx.fillStyle = "rgba(255, 204, 0, 0.5)";
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-        ctx.fill();
+        for (const t of path) {
+          const p = axialToPixel(t.q, t.r);
+          ctx.fillStyle = "rgba(255, 204, 0, 0.5)";
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
 
-    if (hover) {
+    if (hover && isVisible(visible, hover.q, hover.r)) {
       const { x, y } = axialToPixel(hover.q, hover.r);
       ctx.lineWidth = 3;
       ctx.strokeStyle = "#ffcc00";
@@ -95,6 +108,9 @@ export class Renderer {
     }
 
     for (const hero of heroes) {
+      const canSee =
+        hero.ownerId === opts.viewPlayerId || isVisible(visible, hero.tile.q, hero.tile.r);
+      if (!canSee) continue;
       const { x, y } = axialToPixel(hero.tile.q, hero.tile.r);
       drawHeroSprite(ctx, this.sprites, hero.faction, x + hero.pixelOffset.x, y + hero.pixelOffset.y);
       const color = opts.colorForOwner(hero.ownerId);
@@ -116,7 +132,21 @@ export class Renderer {
 
     ctx.restore();
 
-    this.drawMinimap(heroes, path, opts);
+    this.drawMinimap(heroes, path, opts, visible);
+  }
+
+  private drawFogHex(cx: number, cy: number): void {
+    const ctx = this.ctx;
+    const corners = hexCorners(cx, cy);
+    ctx.beginPath();
+    ctx.moveTo(corners[0].x, corners[0].y);
+    for (let i = 1; i < 6; i++) ctx.lineTo(corners[i].x, corners[i].y);
+    ctx.closePath();
+    ctx.fillStyle = FOG_FILL;
+    ctx.fill();
+    ctx.strokeStyle = FOG_EDGE;
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
 
   private drawCastleBorder(
@@ -215,7 +245,12 @@ export class Renderer {
     }
   }
 
-  private drawMinimap(heroes: Hero[], path: Axial[], opts: RenderOptions) {
+  private drawMinimap(
+    heroes: Hero[],
+    path: Axial[],
+    opts: RenderOptions,
+    visible: Set<string>,
+  ) {
     const ctx = this.ctx;
     const mmW = 180;
     const mmH = (this.map.height / this.map.width) * mmW;
@@ -234,7 +269,11 @@ export class Renderer {
       for (let q = 0; q < this.map.width; q++) {
         const t = this.map.get(q, r);
         if (!t) continue;
-        ctx.fillStyle = TERRAIN_COLORS[t].fill;
+        if (isVisible(visible, q, r)) {
+          ctx.fillStyle = TERRAIN_COLORS[t].fill;
+        } else {
+          ctx.fillStyle = "rgba(0,0,0,0.85)";
+        }
         ctx.fillRect(x0 + q * cellW, y0 + r * cellH, cellW + 0.5, cellH + 0.5);
       }
     }
@@ -244,6 +283,7 @@ export class Renderer {
       for (let q = 0; q < this.map.width; q++) {
         const t = this.map.resourceTileAt(q, r);
         if (!t) continue;
+        if (!isVisible(visible, q, r)) continue;
         ctx.beginPath();
         ctx.arc(
           x0 + (q + 0.78) * cellW,
@@ -264,6 +304,7 @@ export class Renderer {
     }
 
     for (const hero of heroes) {
+      if (hero.ownerId !== opts.viewPlayerId && !isVisible(visible, hero.tile.q, hero.tile.r)) continue;
       ctx.fillStyle = opts.colorForOwner(hero.ownerId);
       ctx.fillRect(
         x0 + hero.tile.q * cellW - 1,

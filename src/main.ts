@@ -215,6 +215,7 @@ function draw(): void {
     selectedHeroId: gameState.selectedHeroId,
     selectedSettlementId: gameState.selectedSettlementId,
     colorForOwner,
+    viewPlayerId: 0,
   });
 }
 
