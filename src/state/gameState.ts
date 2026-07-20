@@ -287,6 +287,48 @@ export function detectAdjacentEnemy(state: GameState, moverId: HeroId): HeroId |
   return null;
 }
 
+export const CAPTURE_GOLD_REWARD = 100;
+
+export interface CaptureResult {
+  state: GameState;
+  captured: boolean;
+  previousOwnerId: PlayerId | null;
+}
+
+export function captureSettlement(
+  state: GameState,
+  heroId: HeroId,
+  settlementId: SettlementId,
+): CaptureResult {
+  const hero = state.heroes[heroId];
+  const settlement = state.settlements[settlementId];
+  if (!hero || !settlement) return { state, captured: false, previousOwnerId: null };
+  if (hero.ownerId === settlement.ownerId) {
+    return { state, captured: false, previousOwnerId: settlement.ownerId };
+  }
+  const newOwnerId = hero.ownerId;
+  const previousOwnerId = settlement.ownerId;
+  const newSettlements: Record<SettlementId, SettlementState> = {
+    ...state.settlements,
+    [settlementId]: { ...settlement, ownerId: newOwnerId },
+  };
+  const newPlayers = state.players.map((p) => {
+    if (p.id === newOwnerId) {
+      if (p.settlementIds.includes(settlementId)) return p;
+      return { ...p, settlementIds: [...p.settlementIds, settlementId], gold: p.gold + CAPTURE_GOLD_REWARD };
+    }
+    if (p.id === previousOwnerId) {
+      return { ...p, settlementIds: p.settlementIds.filter((id) => id !== settlementId) };
+    }
+    return p;
+  });
+  return {
+    state: { ...state, settlements: newSettlements, players: newPlayers, dirty: true },
+    captured: true,
+    previousOwnerId,
+  };
+}
+
 export function startBattle(state: GameState, attackerId: HeroId, defenderId: HeroId): GameState {
   if (state.phase.kind === "BATTLE") return state;
   return {

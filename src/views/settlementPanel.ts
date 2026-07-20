@@ -1,4 +1,4 @@
-import type { GameState, ResourceType, SettlementState } from "../state/gameState";
+import type { GameState, ResourceType, SettlementId, SettlementState } from "../state/gameState";
 import { RESOURCES } from "../map/resourceTiles";
 import { PopupMenu, menuTheme } from "./menu";
 
@@ -29,13 +29,16 @@ function makeRow(): { row: HTMLDivElement; left: HTMLSpanElement; right: HTMLSpa
 
 export interface SettlementPanelOptions {
   parent: HTMLElement;
+  onSelect?: (settlementId: SettlementId) => void;
 }
 
 export class SettlementPanel {
   private menu: PopupMenu;
   private body: HTMLElement;
+  private onSelect?: (settlementId: SettlementId) => void;
 
   constructor(opts: SettlementPanelOptions) {
+    this.onSelect = opts.onSelect;
     this.menu = new PopupMenu({
       parent: opts.parent,
       title: "Settlements",
@@ -61,18 +64,20 @@ export class SettlementPanel {
     for (const player of state.players) {
       const bucket = grouped.get(player.id);
       if (bucket && Object.keys(bucket).length > 0) {
-        this.renderOwnerGroup(player.name, bucket);
+        this.renderOwnerGroup(player.name, player.color, bucket, state.selectedSettlementId);
       }
     }
     const neutral = grouped.get(null);
     if (neutral && Object.keys(neutral).length > 0) {
-      this.renderOwnerGroup("Neutral", neutral);
+      this.renderOwnerGroup("Neutral", "#888888", neutral, state.selectedSettlementId);
     }
   }
 
   private renderOwnerGroup(
     label: string,
+    color: string,
     settlements: Record<string, SettlementState>,
+    selectedId: SettlementId | null,
   ): void {
     const section = document.createElement("div");
     Object.assign(section.style, {
@@ -83,34 +88,64 @@ export class SettlementPanel {
     });
 
     const header = document.createElement("div");
-    header.textContent = label;
     Object.assign(header.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
       fontSize: "11px",
       letterSpacing: "0.08em",
       textTransform: "uppercase",
-      opacity: "0.6",
-      paddingBottom: "2px",
+      paddingBottom: "4px",
       borderBottom: "1px solid rgba(255,255,255,0.08)",
+      marginBottom: "2px",
     });
+    const swatch = document.createElement("span");
+    Object.assign(swatch.style, {
+      display: "inline-block",
+      width: "12px",
+      height: "12px",
+      borderRadius: "2px",
+      background: color,
+      border: "1px solid rgba(0,0,0,0.5)",
+      flex: "0 0 auto",
+    });
+    header.appendChild(swatch);
+    const labelEl = document.createElement("span");
+    labelEl.textContent = label;
+    labelEl.style.opacity = "0.85";
+    header.appendChild(labelEl);
     section.appendChild(header);
 
     for (const s of Object.values(settlements)) {
-      section.appendChild(this.renderSettlement(s));
+      section.appendChild(this.renderSettlement(s, color, selectedId));
     }
     this.body.appendChild(section);
   }
 
-  private renderSettlement(s: SettlementState): HTMLDivElement {
+  private renderSettlement(
+    s: SettlementState,
+    ownerColor: string,
+    selectedId: SettlementId | null,
+  ): HTMLDivElement {
+    const isSelected = selectedId === s.id;
     const card = document.createElement("div");
     Object.assign(card.style, {
-      padding: "6px 8px",
-      background: "rgba(255,255,255,0.04)",
-      border: "1px solid rgba(255,255,255,0.08)",
+      padding: "6px 8px 6px 10px",
+      background: isSelected
+        ? "rgba(255,255,255,0.10)"
+        : "rgba(255,255,255,0.04)",
+      border: "1px solid rgba(255,255,255,0.10)",
+      borderLeft: `4px solid ${ownerColor}`,
       borderRadius: "3px",
       display: "flex",
       flexDirection: "column",
       gap: "3px",
+      cursor: this.onSelect ? "pointer" : "default",
+      boxShadow: isSelected ? `0 0 0 1px ${ownerColor}` : "none",
     });
+    if (this.onSelect) {
+      card.addEventListener("click", () => this.onSelect?.(s.id));
+    }
 
     const titleRow = document.createElement("div");
     Object.assign(titleRow.style, {

@@ -1,9 +1,12 @@
-import type { GameState, HeroId } from "./gameState";
+import type { GameState, HeroId, SettlementId } from "./gameState";
 import {
   selectHero as selectHeroReducer,
+  selectSettlement as selectSettlementReducer,
   clearSelection as clearSelectionReducer,
+  clearSettlementSelection as clearSettlementSelectionReducer,
   startMove as startMoveReducer,
   cancelMove as cancelMoveReducer,
+  captureSettlement as captureSettlementReducer,
   startBattle as startBattleReducer,
   resolveBattle as resolveBattleReducer,
   endTurn as endTurnReducer,
@@ -43,6 +46,14 @@ export class TurnController {
     this.state = selectHeroReducer(this.state, heroId);
   }
 
+  selectSettlement(settlementId: SettlementId): void {
+    this.state = selectSettlementReducer(this.state, settlementId);
+  }
+
+  clearSettlementSelection(): void {
+    this.state = clearSettlementSelectionReducer(this.state);
+  }
+
   clearSelection(): void {
     this.state = clearSelectionReducer(this.state);
   }
@@ -59,6 +70,7 @@ export class TurnController {
       type: "move_completed",
       payload: { heroId, to: toTile, cost },
     });
+    this.tryCaptureAt(heroId, toTile.q, toTile.r);
     const defenderId = detectAdjacentEnemyFn(this.state, heroId);
     if (defenderId) {
       this.enterBattle(heroId, defenderId);
@@ -66,8 +78,33 @@ export class TurnController {
     return true;
   }
 
+  private tryCaptureAt(heroId: HeroId, q: number, r: number): void {
+    for (const [sid, s] of Object.entries(this.state.settlements)) {
+      if (s.q === q && s.r === r && s.ownerId !== this.state.heroes[heroId]?.ownerId) {
+        this.captureSettlement(heroId, sid);
+        return;
+      }
+    }
+  }
+
   cancelMove(heroId: HeroId): void {
     this.state = cancelMoveReducer(this.state, heroId);
+  }
+
+  captureSettlement(heroId: HeroId, settlementId: SettlementId): boolean {
+    const result = captureSettlementReducer(this.state, heroId, settlementId);
+    if (!result.captured) return false;
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "settlement_captured",
+      payload: {
+        heroId,
+        settlementId,
+        newOwnerId: this.state.heroes[heroId]?.ownerId,
+        previousOwnerId: result.previousOwnerId,
+      },
+    });
+    return true;
   }
 
   enterBattle(attackerId: HeroId, defenderId: HeroId): void {
@@ -150,6 +187,7 @@ export class TurnController {
         type: "move_completed",
         payload: { heroId, to: move.toTile, cost: move.cost },
       });
+      this.tryCaptureAt(heroId, move.toTile.q, move.toTile.r);
       this.aiAwaitingPersist = true;
       void this.hooks.onAiMove(this.state, heroId, move.toTile).finally(() => {
         this.aiAwaitingPersist = false;

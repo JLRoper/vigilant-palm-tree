@@ -420,7 +420,14 @@ function initialize(): void {
   hudHandles = buildHud(hud);
 
   heroInfoMenu = new HeroInfoMenu({ parent: document.body });
-  settlementPanel = new SettlementPanel({ parent: document.body });
+  settlementPanel = new SettlementPanel({
+    parent: document.body,
+    onSelect: (id) => {
+      turnController.selectSettlement(id);
+      gameState = turnController.getState();
+      refreshAll();
+    },
+  });
 
   toolbar = new Toolbar({
     parent: toolbarEl,
@@ -507,6 +514,12 @@ function initialize(): void {
       turnController.enterBattle(attackerId, defenderId);
       syncStateFromController();
       maybeAutoResolveBattle();
+    },
+    captureSettlement: (heroId: HeroId, settlementId: string) => {
+      const ok = turnController.captureSettlement(heroId, settlementId);
+      syncStateFromController();
+      refreshAll();
+      return ok;
     },
     teleportHero: (id: HeroId, q: number, r: number) => {
       const state = turnController.getState();

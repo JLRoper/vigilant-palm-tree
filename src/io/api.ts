@@ -53,6 +53,7 @@ export type SpendMovementAction = {
   fromTile: Axial;
   toTile: Axial;
   cost: number;
+  settlements?: Record<string, SettlementState>;
 };
 
 export type GamePatch = LegacyGamePatch | SpendMovementAction;
@@ -183,7 +184,13 @@ export async function endTurn(
 
 export async function spendMovement(
   name: string,
-  payload: { heroId: string; fromTile: Axial; toTile: Axial; cost: number }
+  payload: {
+    heroId: string;
+    fromTile: Axial;
+    toTile: Axial;
+    cost: number;
+    settlements?: Record<string, SettlementState>;
+  }
 ): Promise<HeroState> {
   const res = await fetchWithTimeout(
     `${BASE}/games/${encodeURIComponent(name)}`,

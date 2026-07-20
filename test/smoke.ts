@@ -217,7 +217,7 @@ async function runNewLoadSaveFlow(
 async function queryDbRow(name: string): Promise<{
   round: number;
   active_player_id: number;
-  players: Array<{ id: number; gold: number; faction: string }>;
+  players: Array<{ id: number; gold: number; faction: string; settlementIds?: string[] }>;
   heroes: Record<string, { id: string; ownerId: number; q: number; r: number }>;
 }> {
   const pool = new Pool({
@@ -245,6 +245,29 @@ async function queryDbRow(name: string): Promise<{
       players: row.players,
       heroes: row.heroes,
     };
+  } finally {
+    await pool.end();
+  }
+}
+
+async function queryLastEvent(name: string): Promise<{ kind: string; payload: any } | null> {
+  const pool = new Pool({
+    host: process.env.PGHOST ?? "localhost",
+    port: Number(process.env.PGPORT ?? 5432),
+    user: process.env.PGUSER ?? "gameuser",
+    password: process.env.PGPASSWORD ?? "gamepass",
+    database: process.env.PGDATABASE ?? "game_poc",
+  });
+  try {
+    const r = await pool.query<{ kind: string; payload: any }>(
+      `SELECT e.kind, e.payload
+         FROM game_events e JOIN games g ON g.id = e.game_id
+        WHERE g.name = $1
+        ORDER BY e.id DESC LIMIT 1`,
+      [name]
+    );
+    if (r.rowCount === 0) return null;
+    return { kind: r.rows[0].kind, payload: r.rows[0].payload };
   } finally {
     await pool.end();
   }
@@ -427,6 +450,90 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
     throw new Error(`Expected players[0].gold >= 1 (one settlement owned), got ${player0.gold}`);
   }
   console.log(`>> DB confirms round=2 active=0 players[0].gold=${player0.gold}`);
+}
+
+async function runSettlementCaptureChecks(page: Page, ctx: any, activeName: string) {
+  console.log(">> Capture flow: teleport player onto AI castle, capture");
+
+  const target = await page.evaluate(() => {
+    const dbg = (window as any).__gameDebug;
+    const settlements = dbg?.getSettlements?.() ?? [];
+    const enemySettlement = settlements.find((s: any) => s.ownerId !== 0 && s.ownerId !== null);
+    if (!enemySettlement) return null;
+    return { id: enemySettlement.id, q: enemySettlement.q, r: enemySettlement.r };
+  });
+  if (!target) {
+    console.log(">> No enemy settlement available to capture, skipping");
+    return;
+  }
+
+  const before = await page.evaluate(
+    ({ id }) => {
+      const dbg = (window as any).__gameDebug;
+      const playerHero = dbg?.getHeroes?.().find((h: any) => h.ownerId === 0);
+      const state = dbg?.getGameState?.();
+      const settlement = state?.settlements?.[id];
+      const player = state?.players?.find((p: any) => p.id === 0);
+      return {
+        heroId: playerHero?.id ?? null,
+        heroQ: playerHero?.q ?? null,
+        heroR: playerHero?.r ?? null,
+        ownerId: settlement?.ownerId ?? null,
+        playerGold: player?.gold ?? null,
+      };
+    },
+    { id: target.id }
+  );
+  console.log(`>> Before capture: hero=${before.heroId} at (${before.heroQ},${before.heroR}); settlement owner=${before.ownerId}; gold=${before.playerGold}`);
+
+  const teleported = await page.evaluate(
+    ({ id, q, r }) => (window as any).__gameDebug.teleportHero?.(id, q, r),
+    { id: before.heroId, q: target.q, r: target.r }
+  );
+  if (!teleported) throw new Error("teleportHero for capture failed");
+
+  await page.evaluate(
+    ({ settlementId, heroId }) => {
+      const dbg = (window as any).__gameDebug;
+      if (typeof dbg.captureSettlement === "function") {
+        dbg.captureSettlement(heroId, settlementId);
+      }
+    },
+    { settlementId: target.id, heroId: before.heroId }
+  );
+  await wait(300);
+
+  const after = await page.evaluate(
+    ({ id }) => {
+      const dbg = (window as any).__gameDebug;
+      const state = dbg?.getGameState?.();
+      const settlement = state?.settlements?.[id];
+      const player = state?.players?.find((p: any) => p.id === 0);
+      return {
+        ownerId: settlement?.ownerId ?? null,
+        playerGold: player?.gold ?? null,
+        playerSettlements: (player?.settlementIds ?? []).length,
+      };
+    },
+    { id: target.id }
+  );
+  console.log(`>> After capture: settlement owner=${after.ownerId}; gold=${after.playerGold}; player owns ${after.playerSettlements} settlements`);
+
+  if (after.ownerId !== 0) {
+    throw new Error(`Capture failed: settlement ownerId is ${after.ownerId}, expected 0`);
+  }
+  if ((after.playerGold ?? 0) <= (before.playerGold ?? 0)) {
+    throw new Error(`Capture did not award gold: before=${before.playerGold} after=${after.playerGold}`);
+  }
+  if (after.playerSettlements <= (await queryDbRow(activeName)).players?.[0]?.settlementIds?.length) {
+    console.log(">> Note: DB settlementIds may not have updated until next save");
+  }
+
+  const lastEvent = await queryLastEvent(activeName);
+  if (lastEvent?.kind !== "settlement_captured") {
+    throw new Error(`Last event should be settlement_captured, got ${lastEvent?.kind}`);
+  }
+  console.log(`>> Last event: ${lastEvent.kind}`);
 }
 
 async function runBattleChecks(page: Page, ctx: any, activeName: string) {
@@ -710,6 +817,8 @@ async function run() {
     await runNewLoadSaveFlow(page, ctx, activeName, (gameBody as any).updated_at);
 
     await runTurnFlowChecks(page, ctx, activeName);
+
+    await runSettlementCaptureChecks(page, ctx, activeName);
 
     await runBattleChecks(page, ctx, activeName);
 

@@ -1,7 +1,7 @@
 import { api, endTurn, spendMovement, resolveBattle } from "../io/api";
 import type { GameState, HeroId } from "../state/gameState";
 import type { TurnControllerHooks } from "../state/turnController";
-import { pickAiWanderTarget } from "../systems/enemyWander";
+import { pickAiMove as pickAiMoveBrain } from "../ai/aiBrain";
 import type { GameMap } from "../map/gameMap";
 import type { Axial } from "../core/hex";
 
@@ -41,6 +41,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
           fromTile: { q: hero.q, r: hero.r },
           toTile,
           cost: previousCost > 0 ? previousCost : 1,
+          settlements: state.settlements,
         });
       } catch (e) {
         console.warn("[turnHooks] spendMovement failed:", e);
@@ -68,7 +69,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       }
     },
     pickAiMove: (state: GameState, heroId: HeroId) => {
-      return pickAiWanderTarget(state, heroId, opts.gameMap(), opts.rng);
+      return pickAiMoveBrain(state, heroId, opts.gameMap(), opts.rng);
     },
     logEvent: (event: { type: string; payload: Record<string, unknown> }) => {
       const name = opts.gameName();
