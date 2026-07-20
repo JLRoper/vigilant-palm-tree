@@ -6,6 +6,7 @@ import type {
   HeroState,
   Player,
   SettlementState,
+  WarehouseResource,
 } from "../state/gameState";
 
 export type {
@@ -240,4 +241,29 @@ export async function transferGold(
     }
   );
   return json<TransferGoldResult>(res);
+}
+
+export type TradeResourcesResult = {
+  from: SettlementState;
+  to: SettlementState;
+};
+
+export async function tradeResources(
+  name: string,
+  payload: {
+    fromSettlementId: string;
+    toSettlementId: string;
+    resource: WarehouseResource;
+    amount: number;
+  }
+): Promise<TradeResourcesResult> {
+  const res = await fetchWithTimeout(
+    `${BASE}/games/${encodeURIComponent(name)}/trade`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  return json<TradeResourcesResult>(res);
 }

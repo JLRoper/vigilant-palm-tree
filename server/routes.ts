@@ -3,12 +3,14 @@ import { pool, withTransaction } from "./db";
 import { GameMap } from "../src/map/gameMap";
 import { mulberry32 } from "../src/core/rng";
 import { makeInitialStatePayload } from "../src/game/initState";
+import { tradeResources as tradeResourcesReducer } from "../src/state/gameState";
 import type { PoolClient } from "pg";
 import type {
   GameState,
   HeroState,
   Player,
   SettlementState,
+  WarehouseResource,
 } from "../src/state/gameState";
 
 export const router = Router();
@@ -418,13 +420,18 @@ router.post("/games/:name/end-turn", async (req, res) => {
 
       // Award gold into each owned settlement's treasury based on population × goldTax.
       // Income stays at the settlement — never auto-routes to a hero.
+      // Also accumulate resource production into each settlement's warehouse.
       const newSettlements: Record<string, SettlementState> = {};
       for (const [id, s] of Object.entries(incomingState.settlements)) {
-        if (s.ownerId === row.active_player_id) {
-          newSettlements[id] = { ...s, gold: (Number(s.gold) || 0) + s.population * s.goldTax };
-        } else {
-          newSettlements[id] = s;
+        const baseGold = s.ownerId === row.active_player_id
+          ? (Number(s.gold) || 0) + s.population * s.goldTax
+          : (Number(s.gold) || 0);
+        const newWarehouse = { ...(s.warehouse ?? { wood: 0, stone: 0, iron: 0, arcane: 0 }) };
+        for (const r of ["wood", "stone", "iron", "arcane"] as const) {
+          const rate = s.resourceRates?.[r] ?? 0;
+          if (rate > 0) newWarehouse[r] = (newWarehouse[r] ?? 0) + rate;
         }
+        newSettlements[id] = { ...s, gold: baseGold, warehouse: newWarehouse };
       }
 
       // Advance active_player_id; wrap when we go past the last player, incrementing round + day.
@@ -433,6 +440,21 @@ router.post("/games/:name/end-turn", async (req, res) => {
       const nextActive = playerCount === 0 ? 0 : (row.active_player_id + 1) % playerCount;
       const newRound = wrapped ? row.round + 1 : row.round;
       const newDay = wrapped ? (incomingState.day ?? row.day) + 1 : (incomingState.day ?? row.day);
+
+      // Apply weekly upkeep when wrapping into a new round on a day divisible by 7.
+      let workingHeroes: Record<string, HeroState> = incomingState.heroes;
+      if (wrapped && newDay % 7 === 0) {
+        const updated: Record<string, HeroState> = { ...incomingState.heroes };
+        for (const [id, h] of Object.entries(incomingState.heroes)) {
+          const cost = (h.troops ?? 1) * 1;
+          if ((Number(h.gold) || 0) >= cost) {
+            updated[id] = { ...h, gold: (Number(h.gold) || 0) - cost };
+          } else {
+            updated[id] = { ...h, gold: 0, troops: (Number(h.gold) || 0) };
+          }
+        }
+        workingHeroes = updated;
+      }
 
       // Legacy `gold` column is the sum of all players' purses (backward compat).
       const legacyGold = sumPlayerGold(players, incomingState.heroes, newSettlements);
@@ -453,7 +475,7 @@ router.post("/games/:name/end-turn", async (req, res) => {
           newDay,
           nextActive,
           JSON.stringify(players),
-          JSON.stringify(incomingState.heroes),
+          JSON.stringify(workingHeroes),
           JSON.stringify(newSettlements),
           legacyGold,
           row.id,
@@ -739,6 +761,94 @@ router.post("/games/:name/transfer", async (req, res) => {
     res.json(result.result);
   } catch (err) {
     console.error("[api] POST /games/:name/transfer threw:", err);
+    res.status(500).json({
+      error: "internal",
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post("/games/:name/trade", async (req, res) => {
+  const body = req.body ?? {};
+  const { fromSettlementId, toSettlementId, resource, amount } = body;
+  const VALID_RESOURCES: WarehouseResource[] = ["wood", "stone", "iron", "arcane"];
+  if (
+    typeof fromSettlementId !== "string" ||
+    typeof toSettlementId !== "string" ||
+    typeof resource !== "string" ||
+    !VALID_RESOURCES.includes(resource as WarehouseResource) ||
+    typeof amount !== "number" ||
+    !Number.isInteger(amount) ||
+    amount <= 0
+  ) {
+    res.status(400).json({ error: "invalid trade payload" });
+    return;
+  }
+  try {
+    const result = await withTransaction(async (client) => {
+      const gr = await client.query<FullGameRow>(
+        `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
+        [req.params.name]
+      );
+      if (gr.rowCount === 0) return { status: 404 as const, error: "game not found" };
+      const row = gr.rows[0];
+
+      const tradeResult = tradeResourcesReducer(
+        { ...row, dirty: false } as GameState,
+        fromSettlementId,
+        toSettlementId,
+        resource as WarehouseResource,
+        amount,
+      );
+      if (!tradeResult.ok) {
+        return { status: 409 as const, error: tradeResult.reason };
+      }
+
+      const newSettlements = tradeResult.state.settlements;
+      const legacyGold = sumPlayerGold(row.players, row.heroes, newSettlements);
+
+      await client.query(
+        `UPDATE games SET
+           settlements = $1::jsonb,
+           gold = $2,
+           updated_at = now()
+         WHERE id = $3`,
+        [
+          JSON.stringify(newSettlements),
+          legacyGold,
+          row.id,
+        ]
+      );
+
+      await client.query(
+        `INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3::jsonb)`,
+        [
+          row.id,
+          "resources_traded",
+          JSON.stringify({ fromSettlementId, toSettlementId, resource, amount }),
+        ]
+      );
+
+      return {
+        status: 200 as const,
+        result: {
+          from: newSettlements[fromSettlementId],
+          to: newSettlements[toSettlementId],
+        },
+      };
+    });
+
+    if (result.status === 404) {
+      res.status(404).json({ error: result.error });
+      return;
+    }
+    if (result.status === 409) {
+      res.status(409).json({ error: result.error });
+      return;
+    }
+    res.json(result.result);
+  } catch (err) {
+    console.error("[api] POST /games/:name/trade threw:", err);
     res.status(500).json({
       error: "internal",
       message: err instanceof Error ? err.message : String(err),

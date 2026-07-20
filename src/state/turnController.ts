@@ -1,4 +1,4 @@
-import type { GameState, HeroId, SettlementId, TransferDirection } from "./gameState";
+import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource } from "./gameState";
 import {
   selectHero as selectHeroReducer,
   selectSettlement as selectSettlementReducer,
@@ -14,6 +14,7 @@ import {
   advanceRound as advanceRoundReducer,
   detectAdjacentEnemy as detectAdjacentEnemyFn,
   transferGold as transferGoldReducer,
+  tradeResources as tradeResourcesReducer,
 } from "./gameState";
 
 export interface TurnControllerHooks {
@@ -131,6 +132,22 @@ export class TurnController {
     this.hooks.logEvent({
       type: "transfer_gold",
       payload: { heroId, settlementId, direction, amount },
+    });
+    return { ok: true, reason: "" };
+  }
+
+  tradeResources(
+    fromId: SettlementId,
+    toId: SettlementId,
+    resource: WarehouseResource,
+    amount: number,
+  ): { ok: boolean; reason: string } {
+    const result = tradeResourcesReducer(this.state, fromId, toId, resource, amount);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "resources_traded",
+      payload: { fromId, toId, resource, amount },
     });
     return { ok: true, reason: "" };
   }

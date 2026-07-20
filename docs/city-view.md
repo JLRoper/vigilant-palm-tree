@@ -1,6 +1,14 @@
 # City View
 
-When the player double-clicks a friendly [settlement](./settlements.md), the camera zooms into a **10×10 square grid** — the settlement's interior. Here the player finds scattered resource spots and builds **mines** on top of them to actually collect those resources.
+When the player double-clicks a friendly [settlement](./settlements.md), the camera zooms into a **square grid** — the settlement's interior. The grid size scales with castle level:
+
+| Castle level | Tier label | Grid size |
+|--------------|------------|-----------|
+| 1            | Settlement | 5×5       |
+| 2            | Town       | 10×10     |
+| 3            | Castle     | 15×15     |
+
+The grid is rendered as an isometric diamond (rotated 45°, tilted ~26.5°), and the player finds scattered resource spots and builds **mines** on top of them to actually collect those resources.
 
 ## Status
 
@@ -12,7 +20,9 @@ The adventure map tile under a settlement only tells the player **what kind** of
 
 ## Grid
 
-- **10×10 square grid**, distinct from the adventure map's hex grid.
+- **Square grid** sized per castle tier (5×5 / 10×10 / 15×15), distinct from the adventure map's hex grid.
+- Rendered isometrically (diamond orientation, ~26.5° tilt).
+- Camera framing: fixed cell size for 5×5 and 10×10, fit-to-viewport for 15×15.
 - Each cell can hold:
   - **Empty** (buildable)
   - **Resource spot** (one of the 5 [resource types](./resources.md))
@@ -20,11 +30,13 @@ The adventure map tile under a settlement only tells the player **what kind** of
   - **Wall / fortification** (future)
   - **Building slot** (future — town hall, mage guild, etc.)
 
+See [city-view-impl-plan.md](./city-view-impl-plan.md) for the full implementation plan.
+
 ## Resource spots inside
 
 When a settlement is first founded, the city grid is populated with a small number of resource spots:
 
-- **~4–6 spots total**, distributed randomly across the 10×10 grid.
+- **~4–6 spots total**, distributed randomly across the grid (count may scale with tier — see impl plan).
 - Spot types drawn from the full resource pool (Gold, Wood, Stone, Iron Ore, Arcane Dust) — **not** constrained to match the adventure map tile's resource.
 - Same spot can yield different amounts depending on its underlying "vein size" (small/medium/large).
 
@@ -75,7 +87,7 @@ city_mines JSONB NOT NULL DEFAULT '[]'::jsonb
 
 The player noted: "We'll have to keep it simple for now." For v1 of city view, ship the minimum:
 
-1. 10×10 grid renders when settlement is opened.
+1. The tier-appropriate grid (5×5 / 10×10 / 15×15) renders when settlement is opened, isometrically.
 2. Resource spots are visible (no fog).
 3. Player can build one mine type per spot.
 4. Mine production adds to per-turn yield.

@@ -83,6 +83,7 @@ function makeHeroes(
       previousMovementRemaining: null,
       trail: [{ q: castle.tile.q, r: castle.tile.r }],
       gold: 0,
+      troops: 1,
     });
   }
   return heroes;
@@ -108,6 +109,7 @@ function makeSettlements(
       resourceRates: computed.rates,
       foundedOnResource: computed.foundedOn,
       gold: 0,
+      warehouse: emptyWarehouse(),
     };
   });
 }
@@ -197,11 +199,16 @@ function backfillHero(h: Partial<HeroState> & { id: HeroId; ownerId: number; q: 
     previousMovementRemaining: h.previousMovementRemaining ?? null,
     trail: h.trail ?? [{ q: h.q, r: h.r }],
     gold: h.gold ?? 0,
+    troops: h.troops ?? 1,
     id: h.id,
     ownerId: h.ownerId,
     q: h.q,
     r: h.r,
   };
+}
+
+function emptyWarehouse(): SettlementState["warehouse"] {
+  return { wood: 0, stone: 0, iron: 0, arcane: 0 };
 }
 
 function backfillSettlement(s: Partial<SettlementState> & { id: string; q: number; r: number; level: 1 | 2 | 3 }): SettlementState {
@@ -213,6 +220,7 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     resourceRates: s.resourceRates ?? {},
     foundedOnResource: s.foundedOnResource ?? null,
     gold: s.gold ?? 0,
+    warehouse: s.warehouse ?? emptyWarehouse(),
     q: s.q,
     r: s.r,
     level: s.level,

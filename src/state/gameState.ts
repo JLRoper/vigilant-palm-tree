@@ -4,6 +4,22 @@ export type HeroId = string;
 export type SettlementId = string;
 export type ResourceType = "gold" | "wood" | "stone" | "iron" | "arcane";
 
+export const WAREHOUSE_RESOURCES = [
+  "wood",
+  "stone",
+  "iron",
+  "arcane",
+] as const;
+
+export type WarehouseResource = (typeof WAREHOUSE_RESOURCES)[number];
+
+export type Warehouse = {
+  wood: number;
+  stone: number;
+  iron: number;
+  arcane: number;
+};
+
 export interface Player {
   id: PlayerId;
   faction: Faction;
@@ -24,6 +40,7 @@ export interface HeroState {
   previousMovementRemaining: number | null;
   trail: { q: number; r: number }[];
   gold: number;
+  troops: number;
 }
 
 export interface SettlementState {
@@ -38,6 +55,7 @@ export interface SettlementState {
   resourceRates: Partial<Record<ResourceType, number>>;
   foundedOnResource: ResourceType | null;
   gold: number;
+  warehouse: Warehouse;
 }
 
 export type GamePhase =
@@ -121,9 +139,13 @@ function defaultPlayers(): Player[] {
 
 function defaultHeroes(): Record<HeroId, HeroState> {
   return {
-    h0: { id: "h0", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 0 },
-    h1: { id: "h1", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 0 },
+    h0: { id: "h0", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 0, troops: 1 },
+    h1: { id: "h1", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 0, troops: 1 },
   };
+}
+
+function emptyWarehouse(): Warehouse {
+  return { wood: 0, stone: 0, iron: 0, arcane: 0 };
 }
 
 function defaultSettlements(): Record<SettlementId, SettlementState> {
@@ -140,6 +162,7 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       resourceRates: {},
       foundedOnResource: null,
       gold: 0,
+      warehouse: emptyWarehouse(),
     },
     s1: {
       id: "s1",
@@ -153,6 +176,7 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       resourceRates: {},
       foundedOnResource: null,
       gold: 0,
+      warehouse: emptyWarehouse(),
     },
   };
 }
@@ -416,8 +440,27 @@ export function applyEndOfTurn(state: GameState): GameState {
         gold: s.gold + s.population * s.goldTax,
       };
     }
+    const newWarehouse: Warehouse = { ...s.warehouse };
+    for (const r of WAREHOUSE_RESOURCES) {
+      const rate = s.resourceRates[r] ?? 0;
+      if (rate > 0) newWarehouse[r] += rate;
+    }
+    newSettlements[s.id] = { ...newSettlements[s.id], warehouse: newWarehouse };
   }
   return { ...state, heroes: newHeroes, settlements: newSettlements, dirty: true };
+}
+
+export function applyWeeklyUpkeep(state: GameState): GameState {
+  const newHeroes: Record<HeroId, HeroState> = { ...state.heroes };
+  for (const hero of Object.values(newHeroes)) {
+    const cost = hero.troops * 1;
+    if (hero.gold >= cost) {
+      newHeroes[hero.id] = { ...hero, gold: hero.gold - cost };
+    } else {
+      newHeroes[hero.id] = { ...hero, gold: 0, troops: hero.gold };
+    }
+  }
+  return { ...state, heroes: newHeroes, dirty: true };
 }
 
 export function advanceRound(state: GameState): GameState {
@@ -432,16 +475,19 @@ export function advanceRound(state: GameState): GameState {
       trail: [{ q: hero.q, r: hero.r }],
     };
   }
-  return {
+  const nextDay = state.day + 1;
+  const withDay: GameState = {
     ...state,
     round: state.round + 1,
-    day: state.day + 1,
+    day: nextDay,
     activePlayerId: 0,
     phase: { kind: "PLAYER_TURN", playerId: 0 },
     heroes: newHeroes,
     selectedHeroId: null,
     selectedSettlementId: null,
   };
+  if (nextDay % 7 === 0) return applyWeeklyUpkeep(withDay);
+  return withDay;
 }
 
 export function markSaved(state: GameState): GameState {
@@ -502,4 +548,53 @@ export function transferGold(
     };
   }
   return { state, ok: false, reason: "invalid_direction" };
+}
+
+export interface TradeResult {
+  state: GameState;
+  ok: boolean;
+  reason: string;
+}
+
+export function tradeResources(
+  state: GameState,
+  fromSettlementId: SettlementId,
+  toSettlementId: SettlementId,
+  resource: WarehouseResource,
+  amount: number,
+): TradeResult {
+  if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
+    return { state, ok: false, reason: "invalid_amount" };
+  }
+  const from = state.settlements[fromSettlementId];
+  const to = state.settlements[toSettlementId];
+  if (!from) return { state, ok: false, reason: "no_from_settlement" };
+  if (!to) return { state, ok: false, reason: "no_to_settlement" };
+  if (from.ownerId === null || to.ownerId === null) {
+    return { state, ok: false, reason: "unowned_settlement" };
+  }
+  if (from.ownerId !== to.ownerId) {
+    return { state, ok: false, reason: "different_owners" };
+  }
+  if (from.warehouse[resource] < amount) {
+    return { state, ok: false, reason: "insufficient_resource" };
+  }
+  if (from.gold < amount) {
+    return { state, ok: false, reason: "insufficient_gold" };
+  }
+  const newFromWarehouse: Warehouse = { ...from.warehouse, [resource]: from.warehouse[resource] - amount };
+  const newToWarehouse: Warehouse = { ...to.warehouse, [resource]: to.warehouse[resource] + amount };
+  return {
+    state: {
+      ...state,
+      settlements: {
+        ...state.settlements,
+        [fromSettlementId]: { ...from, gold: from.gold - amount, warehouse: newFromWarehouse },
+        [toSettlementId]: { ...to, warehouse: newToWarehouse },
+      },
+      dirty: true,
+    },
+    ok: true,
+    reason: "",
+  };
 }

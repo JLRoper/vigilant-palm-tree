@@ -1,7 +1,11 @@
 import { Axial } from "../core/hex";
-import type { PlayerId, ResourceType, SettlementState } from "../state/gameState";
+import type { PlayerId, ResourceType, SettlementState, Warehouse } from "../state/gameState";
 
 export type CastleLevel = 1 | 2 | 3;
+
+function emptyWarehouse(): Warehouse {
+  return { wood: 0, stone: 0, iron: 0, arcane: 0 };
+}
 
 export class Castle {
   tile: Axial;
@@ -14,6 +18,7 @@ export class Castle {
   resourceRates: Partial<Record<ResourceType, number>>;
   foundedOnResource: ResourceType | null;
   gold: number;
+  warehouse: Warehouse;
 
   constructor(
     id: string,
@@ -26,6 +31,7 @@ export class Castle {
     resourceRates: Partial<Record<ResourceType, number>>,
     foundedOnResource: ResourceType | null,
     gold = 0,
+    warehouse?: Warehouse,
   ) {
     this.id = id;
     this.tile = tile;
@@ -37,6 +43,7 @@ export class Castle {
     this.resourceRates = resourceRates;
     this.foundedOnResource = foundedOnResource;
     this.gold = gold;
+    this.warehouse = warehouse ?? emptyWarehouse();
   }
 
   toGameState(): SettlementState {
@@ -52,6 +59,7 @@ export class Castle {
       resourceRates: { ...this.resourceRates },
       foundedOnResource: this.foundedOnResource,
       gold: this.gold,
+      warehouse: { ...this.warehouse },
     };
   }
 
@@ -67,6 +75,7 @@ export class Castle {
       s.resourceRates ?? {},
       s.foundedOnResource ?? null,
       s.gold ?? 0,
+      s.warehouse ?? emptyWarehouse(),
     );
   }
 }
