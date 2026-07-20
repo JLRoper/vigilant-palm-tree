@@ -45,7 +45,7 @@ export function drawHeroSprite(
 function drawWithDescriptor(
   ctx: CanvasRenderingContext2D,
   drawable: CanvasImageSource,
-  desc: { anchor: "bottom" | "center"; sizing: { kind: "abs"; size: number } | { kind: "fitHeight"; hexSizeMul: number } | { kind: "fitWidth"; hexSizeMul: number } },
+  desc: import("./assetDescriptors").SpriteDescriptor,
   cx: number,
   cy: number,
   hexSize: number
