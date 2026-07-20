@@ -1,4 +1,5 @@
 import { Axial, axialToPixel } from "../core/hex";
+import type { Faction as StateFaction, HeroId, HeroState, PlayerId } from "../state/gameState";
 
 export type Faction = "player" | "enemy";
 
@@ -12,13 +13,24 @@ export class Hero {
   moveDurationMs = 220;
   faction: Faction;
   id: string;
+  ownerId: PlayerId;
+  movementRemaining: number;
 
-  constructor(id: string, q: number, r: number, faction: Faction) {
+  constructor(
+    id: string,
+    q: number,
+    r: number,
+    faction: Faction,
+    ownerId: PlayerId,
+    movementRemaining = 7
+  ) {
     this.id = id;
     this.tile = { q, r };
     this.fromTile = { q, r };
     this.toTile = { q, r };
     this.faction = faction;
+    this.ownerId = ownerId;
+    this.movementRemaining = movementRemaining;
   }
 
   startMoveTo(target: Axial) {
@@ -49,6 +61,42 @@ export class Hero {
       this.pixelOffset = { x: 0, y: 0 };
     }
   }
+
+  syncFromState(s: HeroState): void {
+    this.ownerId = s.ownerId;
+    this.movementRemaining = s.movementRemaining;
+    if (!this.moving) {
+      this.tile = { q: s.q, r: s.r };
+      this.fromTile = { q: s.q, r: s.r };
+      this.toTile = { q: s.q, r: s.r };
+    }
+  }
+
+  toGameState(): HeroState {
+    return {
+      id: this.id as HeroId,
+      ownerId: this.ownerId,
+      q: this.tile.q,
+      r: this.tile.r,
+      movementRemaining: this.movementRemaining,
+      previousQ: null,
+      previousR: null,
+      previousMovementRemaining: null,
+    };
+  }
+
+  static fromGameState(s: HeroState): Hero {
+    const faction: Faction = mapFactionFromOwner(s.ownerId);
+    return new Hero(s.id, s.q, s.r, faction, s.ownerId, s.movementRemaining);
+  }
+}
+
+function mapFactionFromOwner(ownerId: PlayerId): Faction {
+  return ownerId === 0 ? "player" : "enemy";
+}
+
+export function factionForOwner(faction: StateFaction): Faction {
+  return faction === "player" ? "player" : "enemy";
 }
 
 function easeInOutQuad(t: number): number {

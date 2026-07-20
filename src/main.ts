@@ -5,13 +5,25 @@ import { Camera } from "./render/camera";
 import { api, type Game, type TileRow } from "./io/api";
 import { preloadCastleSprites, preloadResourceSprites } from "./render/sprites";
 import { rng } from "./core/rng";
-import { AdventureView, ENEMY_START, MAP_SEED } from "./views/adventureView";
-import { updateHud } from "./views/hud";
-import { onHeroArrived, type ArrivalState } from "./systems/movement";
-import { tickEnemyWander } from "./systems/enemyWander";
+import { AdventureView, MAP_SEED } from "./views/adventureView";
+import { findPath } from "./map/pathfinding";
+import { TERRAIN_COST } from "./map/terrain";
+import {
+  attachHudCallbacks,
+  buildHud,
+  type HudHandles,
+  updateHud,
+} from "./views/hud";
 import { Toolbar } from "./views/toolbar";
-import { listUserGames, rememberGame, forgetGame } from "./io/userGames";
+import { listUserGames, rememberGame } from "./io/userGames";
 import { axialToPixel } from "./core/hex";
+import { Castle } from "./entities/settlement";
+import { buildInitialGameState, hydrateGameState, playerHeroId } from "./game/initState";
+import { buildTurnHooks } from "./game/turnHooks";
+import { TurnController } from "./state/turnController";
+import type { GameState, HeroId } from "./state/gameState";
+import { markSaved } from "./state/gameState";
+import { showBattleModal } from "./views/battleModal";
 
 preloadCastleSprites();
 preloadResourceSprites();
@@ -22,236 +34,465 @@ const hud = document.getElementById("hud")!;
 const toolbarEl = document.getElementById("toolbar")!;
 
 const camera = new Camera();
-let map = new GameMap(MAP_SEED);
-const player = new Hero("player", 2, 2, "player");
-const enemies: Hero[] = ENEMY_START.map(
-  (p, i) => new Hero(`enemy_${i}`, p.q, p.r, "enemy")
-);
-const heroes: Hero[] = [player, ...enemies];
-const renderer = new Renderer(ctx, map, camera);
+let gameMap = new GameMap(MAP_SEED);
+let renderer: Renderer;
+let view: AdventureView;
+let hudHandles: HudHandles;
+let toolbar: Toolbar;
 
-let path: { q: number; r: number }[] = [];
+let gameState: GameState;
+let turnController: TurnController;
+let heroes: Record<string, Hero> = {};
+let settlements: Record<string, Castle> = {};
+
 let saveStatus: "idle" | "saving" | "saved" | "error" = "idle";
 let backendOk = false;
 let activeGameId: number | null = null;
 let activeGameName: string | null = null;
 let lastSavedAt: string | null = null;
-let turn = 1;
-let gold = 0;
-let combat = false;
-let combatTile: { q: number; r: number } | null = null;
-const wanderState = { timer: 0, cooldownMs: 1800 };
+let battleInFlight = false;
 
-function refreshHud() {
-  updateHud(hud, player, enemies, view.hover, map, camera, turn, gold, combat, backendOk, saveStatus, lastSavedAt);
+function getActiveGameName(): string | null {
+  return activeGameName;
 }
 
-function draw() {
-  renderer.draw(view.hover, heroes, view.path);
+function buildHooks() {
+  return buildTurnHooks({
+    gameName: getActiveGameName,
+    gameMap: () => gameMap,
+    rng,
+  });
 }
 
-const view = new AdventureView({
-  canvas,
-  hud,
-  renderer,
-  map,
-  camera,
-  player,
-  isInCombat: () => combat,
-  onPathChanged: (p) => {
-    path = p;
-  },
-  onHudUpdate: refreshHud,
-  onRedraw: draw,
-  onMoveStarted: (newPath) => {
-    if (backendOk && activeGameName) {
-      void api.logEvent(activeGameName, "move_started", {
-        from: { q: player.tile.q, r: player.tile.r },
-        to: newPath[newPath.length - 1],
-        steps: newPath.length,
-      });
+function rebuildHeroesFromState(): void {
+  const next: Record<string, Hero> = {};
+  for (const [id, h] of Object.entries(gameState.heroes)) {
+    const existing = heroes[id];
+    if (existing) {
+      existing.syncFromState(h);
+      existing.tile = { q: h.q, r: h.r };
+      existing.fromTile = { q: h.q, r: h.r };
+      existing.toTile = { q: h.q, r: h.r };
+      existing.moving = false;
+      existing.pixelOffset = { x: 0, y: 0 };
+      next[id] = existing;
+    } else {
+      next[id] = Hero.fromGameState(h);
     }
-  },
-});
-
-(window as unknown as { __gameDebug: unknown }).__gameDebug = {
-  get player() { return { q: player.tile.q, r: player.tile.r }; },
-  get moving() { return player.moving; },
-  get hover() { return view.hover; },
-  get click() { return view.lastClickDebug; },
-  get turn() { return turn; },
-  get gold() { return gold; },
-  get enemies() { return enemies.map((e) => ({ q: e.tile.q, r: e.tile.r })); },
-  get combat() { return combat; },
-  get activeGameId() { return activeGameId; },
-  get activeGameName() { return activeGameName; },
-  get screenFor() {
-    return (q: number, r: number) => {
-      const { x: wx, y: wy } = axialToPixel(q, r);
-      return { x: wx * camera.zoom + camera.x, y: wy * camera.zoom + camera.y };
-    };
-  },
-};
-
-function resetTransientState() {
-  path = [];
-  combat = false;
-  combatTile = null;
-  wanderState.timer = 0;
-  lastSavedAt = null;
+  }
+  heroes = next;
 }
 
-function loadGameIntoState(loaded: Game, tiles: TileRow[]) {
-  activeGameId = loaded.id;
-  activeGameName = loaded.name;
-  rememberGame(loaded.id, loaded.name);
-  map = GameMap.fromTiles(tiles);
-  (renderer as unknown as { map: GameMap }).map = map;
-  player.tile = { q: loaded.hero_q, r: loaded.hero_r };
-  player.fromTile = { ...player.tile };
-  player.toTile = { ...player.tile };
-  for (let i = 0; i < enemies.length; i++) {
-    const pos = loaded.enemy_positions[i] ?? ENEMY_START[i] ?? { q: 0, r: 0 };
-    enemies[i].tile = { q: pos.q, r: pos.r };
-    enemies[i].fromTile = { ...enemies[i].tile };
-    enemies[i].toTile = { ...enemies[i].tile };
+function rebuildSettlementsFromState(): void {
+  const next: Record<string, Castle> = {};
+  for (const [id, s] of Object.entries(gameState.settlements)) {
+    next[id] = Castle.fromGameState(s);
   }
-  turn = loaded.turn;
-  gold = loaded.gold;
-  resetTransientState();
-  view.centerOn(player.tile.q, player.tile.r);
-  toolbar.refresh();
+  settlements = next;
+}
+
+function getHeroesArray(): Hero[] {
+  return Object.values(heroes);
+}
+
+function getCastlesArray(): Castle[] {
+  return Object.values(settlements);
+}
+
+function syncHeroVisualsToState(): void {
+  for (const [id, h] of Object.entries(gameState.heroes)) {
+    const v = heroes[id];
+    if (!v) continue;
+    if (!v.moving) {
+      v.tile = { q: h.q, r: h.r };
+    }
+    v.ownerId = h.ownerId;
+    v.movementRemaining = h.movementRemaining;
+  }
+}
+
+function syncStateFromController(): void {
+  if (!turnController) return;
+  const next = turnController.getState();
+  if (next !== gameState) {
+    gameState = next;
+    syncHeroVisualsToState();
+    maybeAutoResolveBattle();
+  }
+}
+
+function refreshHud(): void {
+  if (!hudHandles) return;
+  updateHud(
+    hud,
+    gameState,
+    heroes,
+    settlements,
+    view.hover,
+    gameMap,
+    camera,
+    backendOk,
+    saveStatus,
+    lastSavedAt,
+    hudHandles
+  );
+}
+
+function draw(): void {
+  if (!renderer) return;
+  renderer.map = gameMap;
+  renderer.draw(view.hover, getHeroesArray(), view.path, getCastlesArray());
+}
+
+function drawGame(): void {
+  syncHeroVisualsToState();
+  draw();
+}
+
+function refreshAll(): void {
   refreshHud();
   draw();
 }
 
-async function startFreshStarter() {
+function replaceTurnControllerState(next: GameState): void {
+  gameState = next;
+  turnController = new TurnController(next, buildHooks());
+}
+
+async function startBattleFlow(): Promise<void> {
+  if (gameState.phase.kind !== "BATTLE") return;
+  if (battleInFlight) return;
+  battleInFlight = true;
+  try {
+    const { attackerId, defenderId } = gameState.phase;
+    const attackerName = heroes[attackerId]?.id ?? attackerId;
+    const defenderName = heroes[defenderId]?.id ?? defenderId;
+    const result = await showBattleModal({
+      attackerName: `Hero ${attackerName}`,
+      defenderName: `Hero ${defenderName}`,
+    });
+    if (result === "resolve") {
+      await turnController.resolveCurrentBattle();
+      gameState = turnController.getState();
+    } else {
+      turnController.cancelMove(attackerId);
+      gameState = turnController.getState();
+    }
+  } finally {
+    battleInFlight = false;
+    rebuildHeroesFromState();
+    syncHeroVisualsToState();
+    refreshAll();
+  }
+}
+
+function maybeAutoResolveBattle(): void {
+  if (gameState.phase.kind === "BATTLE" && !battleInFlight) {
+    void startBattleFlow();
+  }
+}
+
+async function endHumanTurn(): Promise<void> {
+  const phase = gameState.phase;
+  if (phase.kind !== "PLAYER_TURN") return;
+  if (gameState.players.find((p) => p.id === phase.playerId)?.faction !== "player") return;
+  await turnController.endHumanTurn();
+  gameState = turnController.getState();
+  saveStatus = "saved";
+  lastSavedAt = new Date().toISOString();
+  rebuildHeroesFromState();
+  syncHeroVisualsToState();
+  refreshAll();
+  maybeAutoResolveBattle();
+}
+
+async function manualSave(): Promise<void> {
+  if (!backendOk || !activeGameName) return;
+  saveStatus = "saving";
+  refreshHud();
+  try {
+    const playerHero = heroes[playerHeroId()];
+    const updated = await api.patchGame(activeGameName, {
+      hero_q: playerHero?.tile.q ?? 0,
+      hero_r: playerHero?.tile.r ?? 0,
+      turn: gameState.round,
+      gold: gameState.players[0]?.gold ?? 0,
+      enemy_positions: getHeroesArray()
+        .filter((h) => h.ownerId !== 0)
+        .map((h) => ({ q: h.tile.q, r: h.tile.r })),
+    });
+    lastSavedAt = updated.updated_at;
+    saveStatus = "saved";
+    replaceTurnControllerState(markSaved(gameState));
+    setTimeout(() => {
+      if (saveStatus === "saved" || saveStatus === "error") saveStatus = "idle";
+      refreshHud();
+    }, 1500);
+  } catch (e) {
+    console.warn("manual save failed:", e);
+    saveStatus = "error";
+  }
+  refreshHud();
+}
+
+async function loadGameIntoState(loaded: Game, tiles: TileRow[]): Promise<void> {
+  activeGameId = loaded.id;
+  activeGameName = loaded.name;
+  rememberGame(loaded.id, loaded.name);
+  gameMap = GameMap.fromTiles(tiles);
+  const hydrated = hydrateGameState(loaded);
+  replaceTurnControllerState(hydrated);
+  rebuildHeroesFromState();
+  rebuildSettlementsFromState();
+  if (renderer) {
+    (renderer as unknown as { map: GameMap }).map = gameMap;
+  }
+  syncHeroVisualsToState();
+  const center = heroes[playerHeroId()]?.tile ?? { q: 6, r: 5 };
+  view.centerOn(center.q, center.r);
+  toolbar?.refresh();
+  refreshAll();
+  maybeAutoResolveBattle();
+}
+
+async function startFreshStarter(): Promise<void> {
   const name = `starter-${Date.now().toString(36)}`;
   try {
-    const created = await api.createGame(name, MAP_SEED, player.tile.q, player.tile.r, ENEMY_START);
+    const created = await api.createGame(
+      name,
+      MAP_SEED,
+      6,
+      5,
+      [{ q: 14, r: 8 }, { q: 17, r: 9 }]
+    );
     const tiles = await api.getTiles(created.name);
-    loadGameIntoState(created, tiles);
-    await api.logEvent(created.name, "session_start", { seed: created.seed, turn: 1, gold: 0 });
+    await loadGameIntoState(created, tiles);
+    await api.logEvent(created.name, "session_start", { seed: created.seed, round: 1 });
   } catch (e) {
     console.warn("failed to start starter game:", e);
     saveStatus = "error";
   }
 }
 
-const toolbar = new Toolbar({
-  container: toolbarEl,
-  backendOk: () => backendOk,
-  hasActiveGame: () => activeGameId !== null,
-  onNew: async ({ name, seed }) => {
-    const created = await api.createGame(name, seed, player.tile.q, player.tile.r, ENEMY_START);
-    const tiles = await api.getTiles(created.name);
-    loadGameIntoState(created, tiles);
-    await api.logEvent(created.name, "new_game", { seed });
-  },
-  onLoad: async (loaded, tiles) => {
-    loadGameIntoState(loaded, tiles);
-    await api.logEvent(loaded.name, "load_game", {});
-  },
-  onSave: async () => {
-    if (!backendOk || !activeGameName) return;
-    saveStatus = "saving";
-    refreshHud();
-    try {
-      const updated = await api.patchGame(activeGameName, {
-        hero_q: player.tile.q,
-        hero_r: player.tile.r,
-        turn,
-        gold,
-        enemy_positions: enemies.map((e) => ({ q: e.tile.q, r: e.tile.r })),
-      });
-      lastSavedAt = updated.updated_at;
-      saveStatus = "saved";
-      setTimeout(() => {
-        if (saveStatus === "saved" || saveStatus === "error") saveStatus = "idle";
-        refreshHud();
-      }, 1500);
-    } catch (e) {
-      console.warn("manual save failed:", e);
-      saveStatus = "error";
-    }
-    refreshHud();
-  },
-  onForget: (id) => {
-    forgetGame(id);
-    if (activeGameId === id) {
-      activeGameId = null;
-      activeGameName = null;
-      toolbar.refresh();
-      refreshHud();
-    }
-  },
-});
-
-async function initBackend() {
+async function initBackend(): Promise<void> {
   try {
     await api.health();
     backendOk = true;
   } catch (e) {
     backendOk = false;
     console.warn("backend offline:", e);
-    toolbar.refresh();
+    toolbar?.refresh();
     return;
   }
-  toolbar.refresh();
+  toolbar?.refresh();
   const cached = listUserGames();
   if (cached.length === 0) {
     await startFreshStarter();
   }
 }
 
-function resize() {
+function resize(): void {
   const dpr = window.devicePixelRatio || 1;
   view.resize(dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   draw();
 }
 
+function initialize(): void {
+  gameState = buildInitialGameState();
+  rebuildHeroesFromState();
+  rebuildSettlementsFromState();
+
+  renderer = new Renderer(ctx, gameMap, camera);
+
+  turnController = new TurnController(gameState, buildHooks());
+
+  view = new AdventureView({
+    canvas,
+    hud,
+    renderer,
+    map: gameMap,
+    camera,
+    heroes: () => heroes,
+    getGameState: () => gameState,
+    getTurnController: () => turnController,
+    onStateChanged: syncStateFromController,
+    onPathChanged: () => {
+      // path is read from view.path on next draw
+    },
+    onHudUpdate: refreshHud,
+    onRedraw: draw,
+  });
+
+  hudHandles = buildHud({ buttonContainer: hud });
+  attachHudCallbacks(hudHandles, {
+    onEndTurn: () => void endHumanTurn(),
+  });
+
+  toolbar = new Toolbar({
+    parent: toolbarEl,
+    state: {
+      backendOk: () => backendOk,
+      hasActiveGame: () => activeGameId !== null,
+    },
+    callbacks: {
+      onNew: async ({ name, seed }) => {
+        const created = await api.createGame(
+          name,
+          seed,
+          6,
+          5,
+          [{ q: 14, r: 8 }, { q: 17, r: 9 }]
+        );
+        const tiles = await api.getTiles(created.name);
+        await loadGameIntoState(created, tiles);
+        await api.logEvent(created.name, "new_game", { seed });
+      },
+      onLoad: async (loaded, tiles) => {
+        await loadGameIntoState(loaded, tiles);
+        await api.logEvent(loaded.name, "load_game", {});
+      },
+      onSave: () => manualSave(),
+      onForget: (id) => {
+        if (activeGameId === id) {
+          activeGameId = null;
+          activeGameName = null;
+          toolbar?.refresh();
+        }
+      },
+    },
+  });
+
+  const center = heroes[playerHeroId()]?.tile ?? { q: 6, r: 5 };
+  view.centerOn(center.q, center.r);
+
+  (window as unknown as { __gameDebug: unknown }).__gameDebug = {
+    getState: () => turnController?.getState() ?? gameState,
+    getGameState: () => gameState,
+    getTurnController: () => turnController,
+    endTurn: () => void endHumanTurn(),
+    setSelectedHero: (id: HeroId) => turnController.selectHero(id),
+    requestMove: (id: HeroId, q: number, r: number) => {
+      const state = turnController.getState();
+      const hero = state.heroes[id];
+      if (!hero) return false;
+      const goal = { q, r };
+      const newPath = findPath(gameMap, { q: hero.q, r: hero.r }, goal);
+      let cost = 0;
+      for (const step of newPath) {
+        const t = gameMap.get(step.q, step.r);
+        if (t) cost += TERRAIN_COST[t];
+        else cost += 1;
+      }
+      const ok = turnController.requestMove(id, goal, cost);
+      if (ok) syncStateFromController();
+      return ok;
+    },
+    enterBattle: (attackerId: HeroId, defenderId: HeroId) => {
+      turnController.enterBattle(attackerId, defenderId);
+      syncStateFromController();
+      maybeAutoResolveBattle();
+    },
+    teleportHero: (id: HeroId, q: number, r: number) => {
+      const state = turnController.getState();
+      const existing = state.heroes[id];
+      if (!existing) return false;
+      replaceTurnControllerState({
+        ...state,
+        heroes: {
+          ...state.heroes,
+          [id]: {
+            ...existing,
+            q,
+            r,
+            previousQ: null,
+            previousR: null,
+            previousMovementRemaining: null,
+          },
+        },
+        dirty: true,
+      });
+      const hero = heroes[id];
+      if (hero) {
+        hero.tile = { q, r };
+        hero.fromTile = { q, r };
+        hero.toTile = { q, r };
+        hero.moving = false;
+        hero.pixelOffset = { x: 0, y: 0 };
+      }
+      rebuildHeroesFromState();
+      refreshAll();
+      return true;
+    },
+    getHeroes: () =>
+      getHeroesArray().map((h) => ({
+        id: h.id,
+        q: h.tile.q,
+        r: h.tile.r,
+        ownerId: h.ownerId,
+        movementRemaining: h.movementRemaining,
+      })),
+    getSettlements: () =>
+      getCastlesArray().map((c) => ({
+        id: c.id,
+        q: c.tile.q,
+        r: c.tile.r,
+        level: c.level,
+        ownerId: c.ownerId,
+      })),
+    get hover() {
+      return view ? view.hover : null;
+    },
+    get phase() {
+      return gameState.phase;
+    },
+    get round() {
+      return gameState.round;
+    },
+    get activeGameId() {
+      return activeGameId;
+    },
+    get activeGameName() {
+      return activeGameName;
+    },
+    get screenFor() {
+      return (q: number, r: number) => {
+        const { x: wx, y: wy } = axialToPixel(q, r);
+        return { x: wx * camera.zoom + camera.x, y: wy * camera.zoom + camera.y };
+      };
+    },
+  };
+}
+
 window.addEventListener("resize", resize);
 
 let lastTime = performance.now();
-let wasMoving = false;
-function loop(now: number) {
+function loop(now: number): void {
   const dt = now - lastTime;
   lastTime = now;
-  player.update(dt);
-  tickEnemyWander(map, enemies, rng, dt, wanderState);
-  if (wasMoving && !player.moving) {
-    const arrivalState: ArrivalState = {
-      player,
-      enemies,
-      path,
-      gold,
-      turn,
-      combat,
-      combatTile,
-      saveStatus,
-      backendOk,
-      activeGameName,
-      onSaved: (updatedAt) => {
-        lastSavedAt = updatedAt;
-      },
-    };
-    void onHeroArrived(arrivalState, { onHudUpdate: refreshHud }).then(() => {
-      gold = arrivalState.gold;
-      turn = arrivalState.turn;
-      combat = arrivalState.combat;
-      combatTile = arrivalState.combatTile;
-      saveStatus = arrivalState.saveStatus;
-    });
+  for (const hero of getHeroesArray()) {
+    hero.update(dt);
   }
-  wasMoving = player.moving;
-  draw();
+  if (turnController) {
+    turnController.tick(dt);
+    const nextState = turnController.getState();
+    if (nextState !== gameState) {
+      gameState = nextState;
+      syncHeroVisualsToState();
+      maybeAutoResolveBattle();
+    }
+  }
+  drawGame();
+  refreshHud();
   requestAnimationFrame(loop);
 }
 
+initialize();
 resize();
 void initBackend().then(() => {
   refreshHud();
   draw();
 });
 requestAnimationFrame(loop);
+
+export {};

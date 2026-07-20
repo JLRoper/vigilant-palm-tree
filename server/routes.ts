@@ -2,6 +2,12 @@ import { Router } from "express";
 import { pool, withTransaction } from "./db";
 import { GameMap } from "../src/map/gameMap";
 import type { PoolClient } from "pg";
+import type {
+  GameState,
+  HeroState,
+  Player,
+  SettlementState,
+} from "../src/state/gameState";
 
 export const router = Router();
 
@@ -24,6 +30,20 @@ type TileRow = {
   terrain: string;
   resource: string | null;
 };
+
+type FullGameRow = GameRow & {
+  round: number;
+  active_player_id: number;
+  players: Player[];
+  heroes: Record<string, HeroState>;
+  settlements: Record<string, SettlementState>;
+};
+
+const GAME_COLUMNS =
+  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, active_player_id, players, heroes, settlements, created_at, updated_at";
+
+const LEGACY_GAME_COLUMNS =
+  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, created_at, updated_at";
 
 async function generateAndInsertTiles(
   client: PoolClient,
@@ -55,6 +75,10 @@ async function generateAndInsertTiles(
   );
 }
 
+function sumPlayerGold(players: Player[]): number {
+  return players.reduce((acc, p) => acc + (Number.isFinite(p.gold) ? p.gold : 0), 0);
+}
+
 router.get("/health", async (_req, res) => {
   const r = await pool.query("SELECT 1 AS ok");
   res.json({ ok: r.rows[0].ok === 1 });
@@ -62,14 +86,14 @@ router.get("/health", async (_req, res) => {
 
 router.get("/games", async (_req, res) => {
   const r = await pool.query<GameRow>(
-    "SELECT id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, created_at, updated_at FROM games ORDER BY id DESC"
+    `SELECT ${LEGACY_GAME_COLUMNS} FROM games ORDER BY id DESC`
   );
   res.json(r.rows);
 });
 
 router.get("/games/:name", async (req, res) => {
   const r = await pool.query<GameRow>(
-    "SELECT id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, created_at, updated_at FROM games WHERE name = $1",
+    `SELECT ${LEGACY_GAME_COLUMNS} FROM games WHERE name = $1`,
     [req.params.name]
   );
   if (r.rowCount === 0) {
@@ -103,7 +127,7 @@ router.post("/games", async (req, res) => {
                hero_r = EXCLUDED.hero_r,
                enemy_positions = EXCLUDED.enemy_positions,
                updated_at = now()
-         RETURNING id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, created_at, updated_at`,
+         RETURNING ${LEGACY_GAME_COLUMNS}`,
         [name, seed, hero_q, hero_r, JSON.stringify(enemy_positions)]
       );
       const row = r.rows[0];
@@ -121,7 +145,88 @@ router.post("/games", async (req, res) => {
 });
 
 router.patch("/games/:name", async (req, res) => {
-  const { hero_q, hero_r, turn, gold, enemy_positions } = req.body ?? {};
+  const body = req.body ?? {};
+
+  // New action: spend_movement
+  if (body && body.action === "spend_movement") {
+    const { heroId, fromTile, toTile, cost } = body;
+    if (
+      typeof heroId !== "string" ||
+      !fromTile ||
+      typeof fromTile.q !== "number" ||
+      typeof fromTile.r !== "number" ||
+      !toTile ||
+      typeof toTile.q !== "number" ||
+      typeof toTile.r !== "number" ||
+      typeof cost !== "number"
+    ) {
+      res.status(400).json({ error: "invalid spend_movement payload" });
+      return;
+    }
+    try {
+      const result = await withTransaction(async (client) => {
+        const gr = await client.query<FullGameRow>(
+          `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
+          [req.params.name]
+        );
+        if (gr.rowCount === 0) return { status: 404 as const };
+        const row = gr.rows[0];
+        const hero = row.heroes[heroId];
+        if (!hero) return { status: 404 as const, error: "hero not found" };
+        if (hero.q !== fromTile.q || hero.r !== fromTile.r) {
+          return { status: 409 as const, error: "hero not at fromTile" };
+        }
+        // V1: human movement allowed any time; AI movement only during AI turn.
+        const activePlayer = row.players.find((p) => p.id === row.active_player_id);
+        if (hero.ownerId !== row.active_player_id && activePlayer?.faction === "ai") {
+          return { status: 409 as const, error: "not AI turn" };
+        }
+        const updatedHero: HeroState = {
+          ...hero,
+          q: toTile.q,
+          r: toTile.r,
+          movementRemaining: hero.movementRemaining - cost,
+        };
+        const newHeroes = { ...row.heroes, [heroId]: updatedHero };
+        await client.query(
+          `UPDATE games SET heroes = $1::jsonb, updated_at = now() WHERE id = $2`,
+          [JSON.stringify(newHeroes), row.id]
+        );
+        await client.query(
+          `INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3::jsonb)`,
+          [
+            row.id,
+            "move_completed",
+            JSON.stringify({ heroId, fromTile, toTile, cost }),
+          ]
+        );
+        return { status: 200 as const, hero: updatedHero };
+      });
+      if (result.status === 404) {
+        if ("error" in result && result.error) {
+          res.status(404).json({ error: result.error });
+        } else {
+          res.status(404).json({ error: "not found" });
+        }
+        return;
+      }
+      if (result.status === 409) {
+        res.status(409).json({ error: result.error });
+        return;
+      }
+      res.json(result.hero);
+    } catch (err) {
+      console.error("[api] PATCH /games/:name spend_movement threw:", err);
+      res.status(500).json({
+        error: "internal",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return;
+  }
+
+  // Legacy patch behavior
+  const { hero_q, hero_r, turn, gold, enemy_positions } = body;
   const sets: string[] = [];
   const vals: unknown[] = [];
   let i = 1;
@@ -153,7 +258,7 @@ router.patch("/games/:name", async (req, res) => {
   vals.push(req.params.name);
   const r = await pool.query<GameRow>(
     `UPDATE games SET ${sets.join(", ")} WHERE name = $${i}
-     RETURNING id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, created_at, updated_at`,
+     RETURNING ${LEGACY_GAME_COLUMNS}`,
     vals
   );
   if (r.rowCount === 0) {
@@ -233,4 +338,244 @@ router.get("/games/:name/tiles", async (req, res) => {
     [gameRow.id]
   );
   res.json(tiles.rows);
+});
+
+router.post("/games/:name/end-turn", async (req, res) => {
+  const body = req.body ?? {};
+  const incomingState = body.state as GameState | undefined;
+  if (
+    !incomingState ||
+    typeof incomingState !== "object" ||
+    typeof incomingState.activePlayerId !== "number" ||
+    !Array.isArray(incomingState.players) ||
+    typeof incomingState.heroes !== "object" ||
+    typeof incomingState.settlements !== "object"
+  ) {
+    res.status(400).json({ error: "state payload required" });
+    return;
+  }
+  try {
+    const result = await withTransaction(async (client) => {
+      const gr = await client.query<FullGameRow>(
+        `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
+        [req.params.name]
+      );
+      if (gr.rowCount === 0) return { status: 404 as const };
+      const row = gr.rows[0];
+
+      if (incomingState.activePlayerId !== row.active_player_id) {
+        return {
+          status: 409 as const,
+          error: "activePlayerId mismatch",
+          serverActivePlayerId: row.active_player_id,
+        };
+      }
+
+      const players: Player[] = incomingState.players.map((p) => ({
+        id: p.id,
+        faction: p.faction,
+        name: p.name,
+        heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
+        settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
+        gold: Number.isFinite(p.gold) ? p.gold : 0,
+      }));
+
+      // Award 1 gold per settlement owned by the player whose turn just ended.
+      const endingPlayer = players.find((p) => p.id === row.active_player_id);
+      if (endingPlayer) {
+        const settlementCount = endingPlayer.settlementIds.length;
+        endingPlayer.gold += settlementCount;
+      }
+
+      // Advance active_player_id; wrap when we go past the last player, incrementing round.
+      const playerCount = players.length;
+      const wrapped = playerCount > 0 && row.active_player_id + 1 >= playerCount;
+      const nextActive = playerCount === 0 ? 0 : (row.active_player_id + 1) % playerCount;
+      const newRound = wrapped ? row.round + 1 : row.round;
+
+      // Legacy `gold` column is the sum of all players' gold (backward compat).
+      const legacyGold = sumPlayerGold(players);
+
+      await client.query(
+        `UPDATE games SET
+           round = $1,
+           active_player_id = $2,
+           players = $3::jsonb,
+           heroes = $4::jsonb,
+           settlements = $5::jsonb,
+           gold = $6,
+           updated_at = now()
+         WHERE id = $7`,
+        [
+          newRound,
+          nextActive,
+          JSON.stringify(players),
+          JSON.stringify(incomingState.heroes),
+          JSON.stringify(incomingState.settlements),
+          legacyGold,
+          row.id,
+        ]
+      );
+
+      const events: Array<{ kind: string; payload: Record<string, unknown> }> = [
+        {
+          kind: "turn_ended",
+          payload: {
+            playerId: row.active_player_id,
+            round: row.round,
+          },
+        },
+      ];
+      if (wrapped) {
+        events.push({ kind: "round_ended", payload: { round: row.round } });
+        events.push({ kind: "round_started", payload: { round: newRound } });
+      }
+      const nextPlayer = players.find((p) => p.id === nextActive);
+      if (nextPlayer && nextPlayer.faction === "ai") {
+        events.push({
+          kind: "ai_turn_started",
+          payload: { playerId: nextActive, round: newRound },
+        });
+      }
+      for (const ev of events) {
+        await client.query(
+          `INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3::jsonb)`,
+          [row.id, ev.kind, JSON.stringify(ev.payload)]
+        );
+      }
+
+      return {
+        status: 200 as const,
+        result: {
+          round: newRound,
+          activePlayerId: nextActive,
+          players,
+        },
+      };
+    });
+
+    if (result.status === 404) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+    if (result.status === 409) {
+      res.status(409).json({
+        error: result.error,
+        serverActivePlayerId: result.serverActivePlayerId,
+      });
+      return;
+    }
+    res.json(result.result);
+  } catch (err) {
+    console.error("[api] POST /games/:name/end-turn threw:", err);
+    res.status(500).json({
+      error: "internal",
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post("/games/:name/resolve-battle", async (req, res) => {
+  const body = req.body ?? {};
+  const { attackerId, defenderId, state } = body;
+  if (
+    typeof attackerId !== "string" ||
+    typeof defenderId !== "string" ||
+    !state ||
+    typeof state !== "object" ||
+    !Array.isArray(state.players) ||
+    typeof state.heroes !== "object"
+  ) {
+    res.status(400).json({ error: "invalid resolve-battle payload" });
+    return;
+  }
+  try {
+    const result = await withTransaction(async (client) => {
+      const gr = await client.query<FullGameRow>(
+        `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
+        [req.params.name]
+      );
+      if (gr.rowCount === 0) return { status: 404 as const };
+      const row = gr.rows[0];
+
+      const attackersHero = row.heroes[attackerId];
+      const defendersHero = row.heroes[defenderId];
+      if (!attackersHero || !defendersHero) {
+        return { status: 404 as const, error: "hero not found" };
+      }
+
+      const players: Player[] = (state.players as Player[]).map((p) => ({
+        id: p.id,
+        faction: p.faction,
+        name: p.name,
+        heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
+        settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
+        gold: Number.isFinite(p.gold) ? p.gold : 0,
+      }));
+      const heroes: Record<string, HeroState> = { ...row.heroes };
+      delete heroes[defenderId];
+
+      // Remove defender from its owner's heroIds; award +50 gold to attacker's owner.
+      for (const p of players) {
+        if (p.id === defendersHero.ownerId) {
+          p.heroIds = p.heroIds.filter((id) => id !== defenderId);
+        }
+        if (p.id === attackersHero.ownerId) {
+          p.gold += 50;
+        }
+      }
+
+      const legacyGold = sumPlayerGold(players);
+
+      await client.query(
+        `UPDATE games SET
+           players = $1::jsonb,
+           heroes = $2::jsonb,
+           gold = $3,
+           updated_at = now()
+         WHERE id = $4`,
+        [
+          JSON.stringify(players),
+          JSON.stringify(heroes),
+          legacyGold,
+          row.id,
+        ]
+      );
+
+      await client.query(
+        `INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3::jsonb)`,
+        [
+          row.id,
+          "combat_won",
+          JSON.stringify({
+            attackerId,
+            defenderId,
+            attackerOwnerId: attackersHero.ownerId,
+            rewardGold: 50,
+          }),
+        ]
+      );
+
+      return {
+        status: 200 as const,
+        result: { players, heroes },
+      };
+    });
+
+    if (result.status === 404) {
+      if ("error" in result && result.error) {
+        res.status(404).json({ error: result.error });
+      } else {
+        res.status(404).json({ error: "not found" });
+      }
+      return;
+    }
+    res.json(result.result);
+  } catch (err) {
+    console.error("[api] POST /games/:name/resolve-battle threw:", err);
+    res.status(500).json({
+      error: "internal",
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
 });

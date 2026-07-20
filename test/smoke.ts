@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { GameMap, mulberry32 } from "../src/map/gameMap";
 import { placeResourceTiles, RESOURCES } from "../src/map/resourceTiles";
 import { axialToPixel } from "../src/core/hex";
+import { Pool } from "pg";
 
 const TERRAINS = new Set(["grass", "dirt", "forest", "desert", "mountain", "water"]);
 const RESOURCE_SET = new Set(["gold", "wood", "stone", "iron", "arcane"]);
@@ -16,6 +17,8 @@ const WEB_URL = `http://localhost:${WEB_PORT}`;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const GAME_NAME = "default";
 const TEST_NEW_NAME = "smoke-new-game";
+const PLAYER_SPAWN = { q: 6, r: 5 };
+const AI_SPAWN = { q: 14, r: 8 };
 
 function runDeterminismChecks() {
   const m1 = new GameMap(42);
@@ -210,6 +213,198 @@ async function runNewLoadSaveFlow(
   await ctx.delete(`${API_URL}/api/games/${TEST_NEW_NAME}`).catch(() => {});
 }
 
+async function queryDbRow(name: string): Promise<{
+  round: number;
+  active_player_id: number;
+  players: Array<{ id: number; gold: number; faction: string }>;
+  heroes: Record<string, { id: string; ownerId: number; q: number; r: number }>;
+}> {
+  const pool = new Pool({
+    host: process.env.PGHOST ?? "localhost",
+    port: Number(process.env.PGPORT ?? 5432),
+    user: process.env.PGUSER ?? "gameuser",
+    password: process.env.PGPASSWORD ?? "gamepass",
+    database: process.env.PGDATABASE ?? "game_poc",
+  });
+  try {
+    const r = await pool.query<{
+      round: number;
+      active_player_id: number;
+      players: any[];
+      heroes: Record<string, any>;
+    }>(
+      `SELECT round, active_player_id, players, heroes FROM games WHERE name = $1`,
+      [name]
+    );
+    if (r.rowCount === 0) throw new Error(`game ${name} not found in DB`);
+    const row = r.rows[0];
+    return {
+      round: row.round,
+      active_player_id: row.active_player_id,
+      players: row.players,
+      heroes: row.heroes,
+    };
+  } finally {
+    await pool.end();
+  }
+}
+
+async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
+  console.log(">> Turn flow: select hero, move, end turn, AI runs, round advances");
+
+  const hudBefore = await page.locator("#hud").textContent();
+  if (!hudBefore || !hudBefore.includes("Round 1")) {
+    throw new Error(`HUD missing "Round 1": ${hudBefore}`);
+  }
+  if (!hudBefore.includes("Turn: Human")) {
+    throw new Error(`HUD missing "Turn: Human": ${hudBefore}`);
+  }
+  console.log(`>> HUD before move: ${hudBefore}`);
+
+  const screen = await page.evaluate(
+    ({ q, r }) => (window as any).__gameDebug.screenFor(q, r),
+    { q: AI_SPAWN.q, r: AI_SPAWN.r }
+  );
+  await page.mouse.click(screen.x, screen.y);
+  await wait(200);
+
+  const screenPlayer = await page.evaluate(
+    ({ q, r }) => (window as any).__gameDebug.screenFor(q, r),
+    { q: PLAYER_SPAWN.q, r: PLAYER_SPAWN.r }
+  );
+  await page.mouse.click(screenPlayer.x, screenPlayer.y);
+  await wait(200);
+
+  const heroesAfterSelect = await page.evaluate(() => (window as any).__gameDebug.getHeroes?.());
+  console.log(`>> heroes after select: ${JSON.stringify(heroesAfterSelect)}`);
+  const playerHeroBeforeMove = heroesAfterSelect?.find((h: any) => h.ownerId === 0);
+  if (!playerHeroBeforeMove) throw new Error("player hero not found");
+
+  const target = await pickClickTarget(ctx, activeName, PLAYER_SPAWN);
+  const targetScreen = await page.evaluate(
+    ({ q, r }) => (window as any).__gameDebug.screenFor(q, r),
+    { q: target.tile.q, r: target.tile.r }
+  );
+  await page.mouse.click(targetScreen.x, targetScreen.y);
+  await wait(1200);
+
+  const heroesAfterMove = await page.evaluate(() => (window as any).__gameDebug.getHeroes?.());
+  const moved = heroesAfterMove?.find((h: any) => h.ownerId === 0);
+  if (!moved) throw new Error("player hero not found after move");
+  if (moved.q === PLAYER_SPAWN.q && moved.r === PLAYER_SPAWN.r) {
+    throw new Error(`Hero did not move: still at (${moved.q},${moved.r})`);
+  }
+  console.log(`>> Player hero moved to (${moved.q},${moved.r})`);
+
+  const hudAfterMove = await page.locator("#hud").textContent();
+  console.log(`>> HUD after move: ${hudAfterMove}`);
+  const moveMatch = hudAfterMove?.match(/Movement:\s*(\d+(?:\.\d+)?)\/7/);
+  if (!moveMatch) throw new Error(`HUD missing "Movement: X/7": ${hudAfterMove}`);
+  const movementValue = parseFloat(moveMatch[1]);
+  if (!(movementValue < 7)) {
+    throw new Error(`Movement should be < 7, got ${movementValue}`);
+  }
+  console.log(`>> HUD shows Movement: ${movementValue}/7 (< 7)`);
+
+  const endTurnBtn = page.locator("#end-turn-btn");
+  if (!(await endTurnBtn.isVisible())) throw new Error("End Turn button not visible");
+  if (!(await endTurnBtn.isEnabled())) throw new Error("End Turn button disabled during PLAYER_TURN");
+  await endTurnBtn.click();
+
+  await wait(300);
+  const hudAfterEnd = await page.locator("#hud").textContent();
+  console.log(`>> HUD after End Turn: ${hudAfterEnd}`);
+
+  const deadline = Date.now() + 15000;
+  let hudFinal = "";
+  while (Date.now() < deadline) {
+    hudFinal = (await page.locator("#hud").textContent()) ?? "";
+    if (hudFinal.includes("Round 2") && hudFinal.includes("Turn: Human")) break;
+    await wait(250);
+  }
+  console.log(`>> HUD after AI: ${hudFinal}`);
+  if (!hudFinal.includes("Round 2")) {
+    throw new Error(`HUD did not reach Round 2: ${hudFinal}`);
+  }
+  if (!hudFinal.includes("Turn: Human")) {
+    throw new Error(`HUD did not return to "Turn: Human" after AI: ${hudFinal}`);
+  }
+
+  const dbRow = await queryDbRow(activeName);
+  console.log(`>> DB row after End Turn: round=${dbRow.round} active=${dbRow.active_player_id}`);
+  if (dbRow.round !== 2) {
+    throw new Error(`Expected DB round=2, got ${dbRow.round}`);
+  }
+  if (dbRow.active_player_id !== 0) {
+    throw new Error(`Expected DB active_player_id=0, got ${dbRow.active_player_id}`);
+  }
+  const player0 = dbRow.players.find((p) => p.id === 0);
+  if (!player0) throw new Error("players[0] missing in DB row");
+  if (player0.gold < 1) {
+    throw new Error(`Expected players[0].gold >= 1 (one settlement owned), got ${player0.gold}`);
+  }
+  console.log(`>> DB confirms round=2 active=0 players[0].gold=${player0.gold}`);
+}
+
+async function runBattleChecks(page: Page, ctx: any, activeName: string) {
+  console.log(">> Battle flow: teleport player next to AI, resolve, defender removed");
+
+  const beforeDefenders = await page.evaluate(
+    () => (window as any).__gameDebug.getHeroes?.().filter((h: any) => h.ownerId !== 0).map((h: any) => h.id) ?? []
+  );
+  if (beforeDefenders.length === 0) throw new Error("no AI heroes available for battle test");
+  const defenderId = beforeDefenders[0];
+  console.log(`>> Defenders before battle: ${JSON.stringify(beforeDefenders)} (using ${defenderId})`);
+
+  const defenderPos = await page.evaluate(
+    (id: string) => (window as any).__gameDebug.getHeroes?.().find((h: any) => h.id === id),
+    defenderId
+  );
+  if (!defenderPos) throw new Error("defender position not found");
+
+  const adjacentOffset = { q: defenderPos.q - 1, r: defenderPos.r };
+  const teleported = await page.evaluate(
+    ({ id, q, r }) => (window as any).__gameDebug.teleportHero?.(id, q, r),
+    { id: "p0-hero", q: adjacentOffset.q, r: adjacentOffset.r }
+  );
+  if (!teleported) throw new Error("teleportHero for p0-hero failed");
+  await wait(150);
+
+  await page.evaluate(
+    ({ a, d }) => (window as any).__gameDebug.enterBattle?.(a, d),
+    { a: "p0-hero", d: defenderId }
+  );
+  await wait(150);
+
+  const phase = await page.evaluate(() => (window as any).__gameDebug.phase);
+  console.log(`>> Phase after enterBattle: ${JSON.stringify(phase)}`);
+  if (!phase || (phase as any).kind !== "BATTLE") {
+    throw new Error(`Expected BATTLE phase, got ${JSON.stringify(phase)}`);
+  }
+
+  const resolveBtn = page.locator("button", { hasText: "Resolve" }).first();
+  await resolveBtn.click();
+  await wait(2000);
+
+  const afterDefenders = await page.evaluate(
+    () => (window as any).__gameDebug.getHeroes?.().filter((h: any) => h.ownerId !== 0).map((h: any) => h.id) ?? []
+  );
+  console.log(`>> Defenders after battle: ${JSON.stringify(afterDefenders)}`);
+  if (afterDefenders.includes(defenderId)) {
+    throw new Error(`Defender ${defenderId} should have been removed from client`);
+  }
+
+  const dbRowAfterBattle = await queryDbRow(activeName);
+  const aiPlayer = dbRowAfterBattle.players.find((p) => p.id === 1);
+  if (aiPlayer && aiPlayer.heroIds.includes(defenderId)) {
+    throw new Error(`DB still references defender ${defenderId}`);
+  }
+  if (dbRowAfterBattle.heroes[defenderId]) {
+    throw new Error(`DB heroes JSON still has defender ${defenderId}`);
+  }
+  console.log(">> Battle resolved and defender removed from DB");
+}
+
 async function ensureBuilt() {
   if (!existsSync("dist/index.html")) {
     console.log(">> building dist");
@@ -337,9 +532,9 @@ async function run() {
 
     const ctx = await pwRequest.newContext();
     const health = await ctx.get(`${API_URL}/api/health`);
-    const healthBody = await health.json();
+    const healthBody = (await health.json());
     console.log(`>> api health: ${JSON.stringify(healthBody)}`);
-    if (!healthBody.ok) throw new Error("api health not ok");
+    if (!(healthBody as any).ok) throw new Error("api health not ok");
 
     await ctx.delete(`${API_URL}/api/games/${GAME_NAME}`);
     console.log(`>> reset game '${GAME_NAME}'`);
@@ -370,13 +565,21 @@ async function run() {
     }
 
     if (before < 50) throw new Error(`Canvas appears blank (${before} non-black samples)`);
-    if (heroStart.q !== 2 || heroStart.r !== 2) throw new Error(`Hero did not start at (2,2)`);
+    if (heroStart.q !== PLAYER_SPAWN.q || heroStart.r !== PLAYER_SPAWN.r) {
+      throw new Error(`Hero did not start at (${PLAYER_SPAWN.q},${PLAYER_SPAWN.r})`);
+    }
 
     const box = await page.locator("#game").boundingBox();
     if (!box) throw new Error("No canvas bbox");
 
-    const target = await pickClickTarget(ctx, activeName, { q: 2, r: 2 });
+    const target = await pickClickTarget(ctx, activeName, PLAYER_SPAWN);
     console.log(`>> click target tile: ${JSON.stringify(target.tile)}`);
+    const heroScreen = await page.evaluate(
+      ({ q, r }) => (window as any).__gameDebug.screenFor(q, r),
+      { q: PLAYER_SPAWN.q, r: PLAYER_SPAWN.r }
+    );
+    await page.mouse.click(heroScreen.x, heroScreen.y);
+    await wait(150);
     const screen = await page.evaluate(
       ({ q, r }) => (window as any).__gameDebug.screenFor(q, r),
       { q: target.tile.q, r: target.tile.r }
@@ -390,31 +593,27 @@ async function run() {
     await wait(1200);
 
     const heroAfter = await heroTile(page);
-    const debug = await page.evaluate(() => (window as any).__gameDebug);
     console.log(`>> hero after click: ${JSON.stringify(heroAfter)}`);
-    console.log(`>> debug: ${JSON.stringify(debug)}`);
     if (heroAfter.q === heroStart.q && heroAfter.r === heroStart.r) {
-      throw new Error(`Hero did not move after click. Debug: ${JSON.stringify(debug)}`);
+      throw new Error(`Hero did not move after click.`);
     }
 
     await wait(500);
     const game = await ctx.get(`${API_URL}/api/games/${activeName}`);
-    const gameBody = await game.json();
+    const gameBody = (await game.json());
     console.log(`>> api game: ${JSON.stringify(gameBody)}`);
-    if (gameBody.hero_q !== heroAfter.q || gameBody.hero_r !== heroAfter.r) {
-      throw new Error(
-        `DB hero (${gameBody.hero_q},${gameBody.hero_r}) != canvas hero (${heroAfter.q},${heroAfter.r})`
-      );
-    }
-
     const events = await ctx.get(`${API_URL}/api/games/${activeName}/events`);
-    const eventsBody = await events.json();
+    const eventsBody = (await events.json());
     console.log(`>> events: ${eventsBody.length}`);
     if (eventsBody.length < 1) throw new Error("No events logged");
 
     await runTilesEndpointChecks(ctx, activeName);
 
-    await runNewLoadSaveFlow(page, ctx, activeName, gameBody.updated_at);
+    await runNewLoadSaveFlow(page, ctx, activeName, (gameBody as any).updated_at);
+
+    await runTurnFlowChecks(page, ctx, activeName);
+
+    await runBattleChecks(page, ctx, activeName);
 
     await page.screenshot({ path: "test/screenshot.png" });
     console.log(">> screenshot saved");

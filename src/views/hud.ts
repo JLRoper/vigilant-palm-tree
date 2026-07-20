@@ -1,41 +1,127 @@
 import { Axial } from "../core/hex";
 import { Camera } from "../render/camera";
 import { GameMap } from "../map/gameMap";
-import { Hero } from "../entities/hero";
+import type { GameState } from "../state/gameState";
+import type { Hero } from "../entities/hero";
+import type { Castle } from "../entities/settlement";
+import { styleButton } from "./menu";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+export interface HudCallbacks {
+  onEndTurn?: () => void;
+}
+
+export interface HudRefs {
+  buttonContainer: HTMLElement;
+}
+
+export interface HudHandles {
+  endTurnBtn: HTMLButtonElement | null;
+  textSpan: HTMLSpanElement;
+}
+
+export function buildHud(
+  refs: HudRefs
+): HudHandles {
+  const textSpan = document.createElement("span");
+  textSpan.id = "hud-text";
+  refs.buttonContainer.appendChild(textSpan);
+
+  const endTurnBtn = document.createElement("button");
+  endTurnBtn.textContent = "End Turn";
+  styleButton(endTurnBtn, true);
+  endTurnBtn.id = "end-turn-btn";
+  endTurnBtn.style.marginLeft = "8px";
+  refs.buttonContainer.appendChild(endTurnBtn);
+  return { endTurnBtn, textSpan };
+}
+
+export function attachHudCallbacks(handles: HudHandles, callbacks: HudCallbacks): void {
+  if (handles.endTurnBtn && callbacks.onEndTurn) {
+    handles.endTurnBtn.addEventListener("click", () => callbacks.onEndTurn?.());
+  }
+}
+
 export function updateHud(
-  hud: HTMLElement,
-  player: Hero,
-  enemies: Hero[],
+  _hud: HTMLElement,
+  state: GameState,
+  heroes: Record<string, Hero>,
+  settlements: Record<string, Castle>,
   hover: Axial | null,
   map: GameMap,
   camera: Camera,
-  turn: number,
-  gold: number,
-  combat: boolean,
   backendOk: boolean,
   saveStatus: SaveStatus,
-  lastSavedAt: string | null = null
+  lastSavedAt: string | null,
+  handles: HudHandles
 ): void {
   const base = `Drag to pan · Wheel to zoom · Zoom ${camera.zoom.toFixed(2)}x`;
-  const heroInfo = `Hero (${player.tile.q}, ${player.tile.r})${player.moving ? " moving" : ""}`;
-  const enemiesLeft = `${enemies.length} enemy${enemies.length === 1 ? "" : "s"}`;
-  const status = combat
-    ? `COMBAT!`
-    : `${turn} turn${turn === 1 ? "" : "s"} · ${gold}g · ${enemiesLeft}`;
+  const phase = phaseLabel(state);
+  const roundLine = `Round ${state.round}`;
+  const selected = state.selectedHeroId ? state.heroes[state.selectedHeroId] : null;
+  const movementLine = selected
+    ? ` · Movement: ${selected.movementRemaining.toFixed(1)}/7`
+    : "";
+  const playerHero = Object.values(heroes).find((h) => h.ownerId === 0);
+  const heroInfo = playerHero
+    ? `Hero (${playerHero.tile.q}, ${playerHero.tile.r})${playerHero.moving ? " moving" : ""}`
+    : "No hero";
+  const enemyCount = Object.values(heroes).filter((h) => h.ownerId !== 0).length;
+  const enemiesLine = `${enemyCount} enemy hero${enemyCount === 1 ? "" : "s"}`;
+  const player0 = state.players[0];
+  const goldLine = player0 ? `${player0.gold}g` : "0g";
+  const status = `${phase} · ${roundLine} · ${goldLine} · ${enemiesLine}${movementLine}`;
   const dbInfo = backendOk ? `DB ${saveStatus}` : "DB offline";
   const savedInfo = lastSavedAt ? ` · Last saved ${formatTime(lastSavedAt)}` : "";
-  if (!hover) {
-    hud.textContent = `${heroInfo} · ${status} · ${dbInfo}${savedInfo} · ${base}`;
-    return;
+  const endTurnEnabled = canEndTurn(state);
+  if (handles.endTurnBtn) {
+    handles.endTurnBtn.disabled = !endTurnEnabled;
+    handles.endTurnBtn.style.opacity = endTurnEnabled ? "1" : "0.4";
+    handles.endTurnBtn.style.cursor = endTurnEnabled ? "pointer" : "default";
   }
-  const t = map.get(hover.q, hover.r);
-  const tile = `Tile (${hover.q}, ${hover.r}) · ${t ?? "void"}`;
-  const resourceInfo = map.resourceTileAt(hover.q, hover.r);
-  const resourceLine = resourceInfo ? ` · Resource: ${resourceInfo.resource}` : "";
-  hud.textContent = `${tile}${resourceLine} · ${heroInfo} · ${status} · ${dbInfo}${savedInfo} · ${base}`;
+  const text = !hover
+    ? `${heroInfo} · ${status} · ${dbInfo}${savedInfo} · ${base}`
+    : (() => {
+        const t = map.get(hover.q, hover.r);
+        const tile = `Tile (${hover.q}, ${hover.r}) · ${t ?? "void"}`;
+        const resourceInfo = map.resourceTileAt(hover.q, hover.r);
+        const resourceLine = resourceInfo ? ` · Resource: ${resourceInfo.resource}` : "";
+        const settle = Object.values(settlements).find(
+          (s) => s.tile.q === hover.q && s.tile.r === hover.r
+        );
+        const settleLine = settle ? ` · Castle L${settle.level}` : "";
+        return `${tile}${resourceLine}${settleLine} · ${heroInfo} · ${status} · ${dbInfo}${savedInfo} · ${base}`;
+      })();
+  handles.textSpan.textContent = text;
+}
+
+function phaseLabel(state: GameState): string {
+  switch (state.phase.kind) {
+    case "PLAYER_TURN": {
+      const phase = state.phase;
+      const p = state.players.find((pl) => pl.id === phase.playerId);
+      return `Turn: ${p?.name ?? `Player ${phase.playerId + 1}`}`;
+    }
+    case "AI_TURN": {
+      const phase = state.phase;
+      const p = state.players.find((pl) => pl.id === phase.playerId);
+      return `${p?.name ?? "AI"}'s Turn`;
+    }
+    case "BATTLE":
+      return "Battle!";
+    case "ROUND_END": {
+      const phase = state.phase;
+      return `Round End → ${phase.nextRound}`;
+    }
+  }
+}
+
+function canEndTurn(state: GameState): boolean {
+  if (state.phase.kind !== "PLAYER_TURN") return false;
+  const phase = state.phase;
+  const p = state.players.find((pl) => pl.id === phase.playerId);
+  return p?.faction === "player";
 }
 
 function formatTime(iso: string): string {

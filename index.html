@@ -37,22 +37,38 @@
         border-radius: 4px;
         font-size: 12px;
         pointer-events: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        max-width: calc(100vw - 240px);
+      }
+      #hud > span:first-child {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #end-turn-btn {
+        pointer-events: auto;
+        flex: 0 0 auto;
       }
       #toolbar {
         position: fixed;
-        top: 8px;
-        right: 8px;
-        padding: 6px;
-        background: rgba(0, 0, 0, 0.5);
-        border-radius: 4px;
-        font-size: 12px;
+        top: 0;
+        left: 0;
+        pointer-events: none;
+        font-family: system-ui, sans-serif;
+      }
+      #toolbar > * {
+        pointer-events: auto;
       }
     </style>
   </head>
   <body>
     <div id="app">
       <canvas id="game"></canvas>
-      <div id="hud">Drag to pan · Wheel to zoom · Hover a tile</div>
+      <div id="hud"><span>Drag to pan · Wheel to zoom · Hover a tile</span></div>
       <div id="toolbar"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>

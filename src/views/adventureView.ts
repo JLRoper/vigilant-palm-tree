@@ -1,15 +1,14 @@
-import { Axial } from "../core/hex";
+import { Axial, axialToPixel } from "../core/hex";
 import { Camera } from "../render/camera";
 import { GameMap } from "../map/gameMap";
 import { Renderer } from "../render/renderer";
 import { Hero } from "../entities/hero";
 import { findPath } from "../map/pathfinding";
+import type { GameState, HeroId } from "../state/gameState";
+import type { TurnController } from "../state/turnController";
+import { TERRAIN_COST } from "../map/terrain";
 
 export const MAP_SEED = 42;
-export const ENEMY_START: { q: number; r: number }[] = [
-  { q: 18, r: 4 },
-  { q: 20, r: 10 },
-];
 
 export interface LastClickDebug {
   hover: Axial | null;
@@ -24,12 +23,13 @@ export interface AdventureViewOptions {
   renderer: Renderer;
   map: GameMap;
   camera: Camera;
-  player: Hero;
-  isInCombat: () => boolean;
+  heroes: () => Record<string, Hero>;
+  getGameState: () => GameState;
+  getTurnController: () => TurnController;
+  onStateChanged?: () => void;
   onPathChanged: (path: Axial[]) => void;
   onHudUpdate: () => void;
   onRedraw: () => void;
-  onMoveStarted: (path: Axial[]) => void;
 }
 
 export class AdventureView {
@@ -46,6 +46,14 @@ export class AdventureView {
 
   constructor(private opts: AdventureViewOptions) {
     this.attach();
+  }
+
+  private get state(): GameState {
+    return this.opts.getGameState();
+  }
+
+  private isPlayerTurn(): boolean {
+    return this.state.phase.kind === "PLAYER_TURN" && this.state.activePlayerId === 0;
   }
 
   private attach(): void {
@@ -74,8 +82,20 @@ export class AdventureView {
         }
       }
       this.hover = this.opts.renderer.hoverFromScreen(e.clientX, e.clientY);
-      if (!this.dragging && this.hover) {
-        this.path = findPath(this.opts.map, this.opts.player.tile, this.hover);
+      if (!this.dragging && this.hover && this.isPlayerTurn()) {
+        const selectedId = this.state.selectedHeroId;
+        const startTile = selectedId ? this.state.heroes[selectedId] : null;
+        const start: Axial = startTile
+          ? { q: startTile.q, r: startTile.r }
+          : { q: -1, r: -1 };
+        if (start.q >= 0 && this.opts.map.isPassable(this.hover.q, this.hover.r)) {
+          this.path = findPath(this.opts.map, start, this.hover);
+        } else {
+          this.path = [];
+        }
+        this.opts.onPathChanged(this.path);
+      } else {
+        this.path = [];
         this.opts.onPathChanged(this.path);
       }
       this.opts.onHudUpdate();
@@ -88,8 +108,8 @@ export class AdventureView {
         this.lastClickDebug.reason = "movedDuringDrag";
         return;
       }
-      if (this.opts.isInCombat()) {
-        this.lastClickDebug.reason = "combat";
+      if (!this.isPlayerTurn()) {
+        this.lastClickDebug.reason = "not_player_turn";
         return;
       }
       const t = this.opts.renderer.hoverFromScreen(e.clientX, e.clientY);
@@ -98,16 +118,49 @@ export class AdventureView {
         this.lastClickDebug.reason = "no hover";
         return;
       }
-      const newPath = findPath(this.opts.map, this.opts.player.tile, t);
+      const heroes = this.opts.heroes();
+      const clickedHero = Object.values(heroes).find(
+        (h) => h.tile.q === t.q && h.tile.r === t.r
+      );
+      if (clickedHero && clickedHero.ownerId === 0) {
+        const tc = this.opts.getTurnController();
+        tc.selectHero(clickedHero.id as HeroId);
+        this.opts.onStateChanged?.();
+        this.lastClickDebug.moved = false;
+        this.lastClickDebug.reason = "select";
+        this.opts.onHudUpdate();
+        return;
+      }
+      const selectedId = this.state.selectedHeroId;
+      if (!selectedId) {
+        this.lastClickDebug.reason = "no selection";
+        return;
+      }
+      const startTile = this.state.heroes[selectedId];
+      if (!startTile) {
+        this.lastClickDebug.reason = "no hero";
+        return;
+      }
+      const newPath = findPath(this.opts.map, { q: startTile.q, r: startTile.r }, t);
       this.lastClickDebug.path = newPath;
       if (newPath.length === 0) {
         this.lastClickDebug.reason = "empty path";
         return;
       }
       this.path = newPath;
-      this.opts.player.startMoveTo(newPath[newPath.length - 1]);
-      this.lastClickDebug.moved = true;
-      this.opts.onMoveStarted(newPath);
+      this.opts.onPathChanged(this.path);
+      let cost = 0;
+      for (const step of newPath) {
+        const terrain = this.opts.map.get(step.q, step.r);
+        if (terrain) cost += TERRAIN_COST[terrain];
+        else cost += 1;
+      }
+      const tc = this.opts.getTurnController();
+      const ok = tc.requestMove(selectedId, t, cost);
+      this.opts.onStateChanged?.();
+      this.lastClickDebug.moved = ok;
+      this.opts.onHudUpdate();
+      this.opts.onRedraw();
     });
 
     this.opts.canvas.addEventListener(
@@ -144,4 +197,14 @@ export class AdventureView {
     this.opts.camera.setDpr(dpr);
     this.centerOnMap();
   }
+
+  getSelectedHeroScreen(): Axial | null {
+    const id = this.state.selectedHeroId;
+    if (!id) return null;
+    const h = this.state.heroes[id];
+    if (!h) return null;
+    return { q: h.q, r: h.r };
+  }
 }
+
+export { axialToPixel };
