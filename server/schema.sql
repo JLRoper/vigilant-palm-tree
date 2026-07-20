@@ -20,3 +20,15 @@ CREATE TABLE IF NOT EXISTS game_events (
 );
 
 CREATE INDEX IF NOT EXISTS game_events_game_id_idx ON game_events(game_id);
+
+CREATE TABLE IF NOT EXISTS tiles (
+  id          SERIAL PRIMARY KEY,
+  game_id     INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  q           INTEGER NOT NULL,
+  r           INTEGER NOT NULL,
+  terrain     TEXT NOT NULL,
+  resource    TEXT,
+  UNIQUE (game_id, q, r)
+);
+
+CREATE INDEX IF NOT EXISTS tiles_game_idx ON tiles (game_id);

@@ -130,6 +130,38 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(cx + ox, cy + oy, 4, 0.2 * Math.PI, 0.9 * Math.PI);
       ctx.stroke();
+    } else if (t === "desert") {
+      ctx.strokeStyle = "rgba(80,60,30,0.55)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx + ox - 7, cy + oy - 2);
+      ctx.lineTo(cx + ox - 3, cy + oy - 5);
+      ctx.moveTo(cx + ox + 2, cy + oy + 3);
+      ctx.lineTo(cx + ox + 6, cy + oy + 1);
+      ctx.moveTo(cx + ox - 5, cy + oy + 5);
+      ctx.lineTo(cx + ox - 1, cy + oy + 3);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(120,90,50,0.6)";
+      ctx.beginPath();
+      ctx.arc(cx + ox + 9, cy + oy + 4, 1, 0, Math.PI * 2);
+      ctx.arc(cx + ox - 10, cy + oy - 6, 1, 0, Math.PI * 2);
+      ctx.arc(cx + ox + 3, cy + oy - 9, 1, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (t === "mountain") {
+      ctx.fillStyle = "#5a5a64";
+      ctx.beginPath();
+      ctx.moveTo(cx + ox, cy + oy - 14);
+      ctx.lineTo(cx + ox - 14, cy + oy + 8);
+      ctx.lineTo(cx + ox + 14, cy + oy + 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#f4f4f8";
+      ctx.beginPath();
+      ctx.moveTo(cx + ox, cy + oy - 14);
+      ctx.lineTo(cx + ox - 4, cy + oy - 6);
+      ctx.lineTo(cx + ox + 4, cy + oy - 6);
+      ctx.closePath();
+      ctx.fill();
     }
   }
 

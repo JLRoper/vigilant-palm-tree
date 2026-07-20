@@ -5,7 +5,6 @@ import { Renderer } from "../render/renderer";
 import { Hero } from "../entities/hero";
 import { findPath } from "../map/pathfinding";
 
-export const GAME_NAME = "default";
 export const MAP_SEED = 42;
 export const ENEMY_START: { q: number; r: number }[] = [
   { q: 18, r: 4 },
@@ -123,17 +122,19 @@ export class AdventureView {
     );
   }
 
-  centerOnMap(): void {
-    const map = this.opts.map;
+  centerOn(q: number, r: number): void {
     const camera = this.opts.camera;
-    const cx = (map.width - 1) / 2;
-    const cy = (map.height - 1) / 2;
     const SQRT3 = Math.sqrt(3);
     const size = 32;
-    const wx = size * (SQRT3 * cx + (SQRT3 / 2) * cy);
-    const wy = size * (1.5 * cy);
+    const wx = size * (SQRT3 * q + (SQRT3 / 2) * r);
+    const wy = size * (1.5 * r);
     camera.x = window.innerWidth / 2 - wx * camera.zoom;
     camera.y = window.innerHeight / 2 - wy * camera.zoom;
+  }
+
+  centerOnMap(): void {
+    const map = this.opts.map;
+    this.centerOn((map.width - 1) / 2, (map.height - 1) / 2);
   }
 
   resize(dpr: number): void {

@@ -1,6 +1,5 @@
 import { Axial, hexDistance } from "../core/hex";
 import { api } from "../io/api";
-import { GAME_NAME } from "../views/adventureView";
 import { Hero } from "../entities/hero";
 
 export interface ArrivalState {
@@ -13,6 +12,8 @@ export interface ArrivalState {
   combatTile: Axial | null;
   saveStatus: "idle" | "saving" | "saved" | "error";
   backendOk: boolean;
+  activeGameName: string | null;
+  onSaved: (updatedAt: string) => void;
 }
 
 export interface ArrivalHooks {
@@ -38,11 +39,12 @@ export async function onHeroArrived(state: ArrivalState, hooks: ArrivalHooks): P
     }
   }
   hooks.onHudUpdate();
-  if (!state.backendOk) return;
+  if (!state.backendOk || !state.activeGameName) return;
   state.saveStatus = "saving";
   hooks.onHudUpdate();
   try {
-    await api.patchGame(GAME_NAME, {
+    const gameName = state.activeGameName;
+    const updated = await api.patchGame(gameName, {
       hero_q: state.player.tile.q,
       hero_r: state.player.tile.r,
       turn: state.turn,
@@ -50,7 +52,7 @@ export async function onHeroArrived(state: ArrivalState, hooks: ArrivalHooks): P
       enemy_positions: state.enemies.map((e) => ({ q: e.tile.q, r: e.tile.r })),
     });
     await api.logEvent(
-      GAME_NAME,
+      gameName,
       state.combat ? "combat_won" : "move_completed",
       {
         to: { q: state.player.tile.q, r: state.player.tile.r },
@@ -61,6 +63,7 @@ export async function onHeroArrived(state: ArrivalState, hooks: ArrivalHooks): P
       }
     );
     state.saveStatus = "saved";
+    state.onSaved(updated.updated_at);
   } catch (e) {
     console.warn("save failed:", e);
     state.saveStatus = "error";

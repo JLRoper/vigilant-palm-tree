@@ -6,19 +6,50 @@
 
 Ordered from most common (most tiles) to rarest (fewest tiles). Rarer resources yield more per turn but are harder to find and more contested.
 
-| # | Resource | Tile density | Yield / turn | Icon idea | Used for |
-|---|----------|--------------|--------------|-----------|----------|
-| 1 | **Gold** | ~5% | +20 | Coin stack | Recruitment, trading, building upkeep |
-| 2 | **Wood** | ~4% | +15 | Log pile | Construction, basic units |
-| 3 | **Stone** | ~3% | +12 | Bricks | Fortifications, walls |
-| 4 | **Iron Ore** | ~1.5% | +8 | Ore chunks | Weapons, war machines, siege |
-| 5 | **Arcane Dust** | ~0.5% | +5 | Glowing vial | Magic, spells, mana, arcane units |
+| # | Resource      | Yield / turn | Icon idea     | Used for |
+|---|---------------|--------------|---------------|----------|
+| 1 | **Gold**      | +20          | Coin stack    | Recruitment, trading, building upkeep |
+| 2 | **Wood**      | +15          | Log pile      | Construction, basic units |
+| 3 | **Stone**     | +12          | Bricks        | Fortifications, walls |
+| 4 | **Iron Ore**  | +8           | Ore chunks    | Weapons, war machines, siege |
+| 5 | **Arcane Dust**| +5          | Glowing vial  | Magic, spells, mana, arcane units |
 
-Total: **~14% of map tiles** carry a resource.
+Yields are unchanged. The biome-correlation (where each resource spawns) is the new bit — see below.
 
 ## Status
 
-✅ **Locked.** Won't revisit before implementation.
+🟡 **Updated.** Densities are now per-terrain (biome-aware), not a single flat rate per resource. The locked list of 5 resource types is unchanged.
+
+## Food — deferred
+
+⏸️ Food is **not** in the v1 resource list. Food-terrain correlation (food on green plains) is planned for the [army milestone](./army.md), which introduces food as a unit upkeep cost. The biome-correlation pattern documented here will be reused when food lands.
+
+## Biome-aware density matrix
+
+Each resource has a density per terrain type. The placer picks the density for each tile by its terrain. Water and impassable mountain are excluded from resource placement entirely.
+
+| Resource ↓ \ Terrain → | Grass | Dirt | Forest | Desert | Mountain |
+|------------------------|-------|------|--------|--------|----------|
+| **Gold**               | 6%    | 5%   | 1%     | 1%     | 0%       |
+| **Wood**               | 2%    | 1%   | **18%**| 0.5%   | 0%       |
+| **Stone**              | 2%    | 6%   | 1%     | 1%     | **35%**  |
+| **Iron Ore**           | 0.5%  | 3%   | 0%     | 0%     | **12%**  |
+| **Arcane Dust**        | 0%    | 2%   | 0%     | **8%** | 0%       |
+| **Total per terrain**  | ~10.5%| ~17% | ~20%   | ~10.5% | ~47%     |
+
+(Totals per terrain are the sum across resources; mountain's high total reflects that adjacent-to-mountain tiles (grass/dirt) get boosted stone density from spillover in the placement algorithm.)
+
+### Rationale per resource
+
+- **Gold** — found everywhere people walk. Slight bias toward grass (plains trade routes) and dirt (old roads). Almost absent from forests and deserts.
+- **Wood** — heavily concentrated in **forests** (18% of forest tiles carry wood). Reduced on grass; vanishing on desert/mountain.
+- **Stone** — quarried from **mountains** primarily (35% of mountain *border* tiles — see note below). Some surface deposits on dirt (rocky outcrops).
+- **Iron Ore** — similar to stone but rarer, concentrated on mountain borders.
+- **Arcane Dust** — concentrated in **deserts** (8% of desert tiles). Thematically: ancient buried ruins leaking residual magic. Surface traces on dirt (collapsed sites).
+
+### Mountain-spillover rule
+
+Mountain tiles themselves are impassable and can't carry resources (no path to a settlement). Stone and Iron density therefore "spills over" onto adjacent passable tiles (grass/dirt) — the placer detects an adjacent mountain and boosts the density table for that one tile by 50%. This keeps stone/iron findable even though mountain tiles can't hold them directly.
 
 ## Open questions
 
@@ -26,7 +57,7 @@ None. All decisions made.
 
 ## Cross-references
 
-- Where these resources live on the map: [map.md](./map.md)
+- Where these resources live on the map and how the placer uses these densities: [map.md](./map.md) — see "Resource tile placement" and "Data model"
 - How they're collected: [settlements.md](./settlements.md)
 - How they flow into the economy loop: [economy.md](./economy.md)
 - Why food is missing from this list: [army.md](./army.md) (deferred)
