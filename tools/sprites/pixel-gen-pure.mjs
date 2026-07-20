@@ -2,9 +2,10 @@ import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { ASSETS_DIR, RESOURCE_SPRITES } from "./manifest.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const outDir = path.resolve(__dirname, "..", "..", "src", "resources");
+const outDir = path.resolve(__dirname, "..", "..", ASSETS_DIR);
 
 // ---------- pixel buffer ----------
 function makeBuf(w, h) {
@@ -183,19 +184,26 @@ function encodePng(buf) {
 }
 
 // ---------- run ----------
-const sprites = [
-  { name: "resource-gold",   w: 32, h: 32, draw: drawGold },
-  { name: "resource-wood",   w: 32, h: 32, draw: drawWood },
-  { name: "resource-stone",  w: 32, h: 32, draw: drawStone2 },
-  { name: "resource-iron",   w: 32, h: 32, draw: drawIron },
-  { name: "resource-arcane", w: 32, h: 32, draw: drawArcane },
-];
+const drawForResource = {
+  gold: drawGold,
+  wood: drawWood,
+  stone: drawStone2,
+  iron: drawIron,
+  arcane: drawArcane,
+};
+
+const sprites = Object.entries(RESOURCE_SPRITES).map(([key, filename]) => ({
+  filename,
+  w: 32,
+  h: 32,
+  draw: drawForResource[key],
+}));
 
 for (const s of sprites) {
   const buf = makeBuf(s.w, s.h);
   s.draw(buf);
   const png = encodePng(buf);
-  const out = path.join(outDir, s.name + ".png");
+  const out = path.join(outDir, s.filename);
   writeFileSync(out, png);
   console.log("wrote", out, png.length, "bytes");
 }

@@ -19,7 +19,7 @@
   .lbl { font-size:12px; color:#bbb; }
   .title { font-size:13px; color:#ffcc00; margin: 16px 0 8px; }
   img.pixel { image-rendering: pixelated; image-rendering: crisp-edges; }
-  img.s1 { width:auto; height:48px; }     /* actual game scale */
+  img.s1 { width:auto; height:48px; }
   img.s2 { width:auto; height:96px; }
   img.s3 { width:auto; height:160px; }
   img.s4 { width:auto; height:240px; }
@@ -37,7 +37,7 @@
 </head>
 <body>
   <h1>Castle Sprite Preview</h1>
-  <div class="sub">Pixel-art PNG sprites for the hex map. Designed at native resolution; shown with image-rendering: pixelated.</div>
+  <div class="sub">Auto-generated from tools/sprites/manifest.mjs. Do not edit by hand.</div>
 
   <div class="title">In-game hex scale (1x — sprite drawn over a 55x48 hex)</div>
   <div class="stage">
@@ -59,45 +59,45 @@
 
   <div class="title">2x preview</div>
   <div class="row">
-    <div class="cell"><img class="pixel s2" src="src/resources/castle-l1.png"/><div class="lbl">L1 — small town</div></div>
-    <div class="cell"><img class="pixel s2" src="src/resources/castle-l2.png"/><div class="lbl">L2 — fortified town</div></div>
-    <div class="cell"><img class="pixel s2" src="src/resources/castle-l3.png"/><div class="lbl">L3 — castle with keep</div></div>
+    <div class="cell"><img class="pixel s2" src="src/resources/castle-l1.png" style="height:96px"/><div class="lbl">L1 — small town</div></div>
+    <div class="cell"><img class="pixel s2" src="src/resources/castle-l2.png" style="height:96px"/><div class="lbl">L2 — fortified town</div></div>
+    <div class="cell"><img class="pixel s2" src="src/resources/castle-l3.png" style="height:96px"/><div class="lbl">L3 — castle with keep</div></div>
   </div>
 
   <div class="title">3x detail</div>
   <div class="row">
-    <div class="cell"><img class="pixel s3" src="src/resources/castle-l1.png"/><div class="lbl">L1 (96x80)</div></div>
-    <div class="cell"><img class="pixel s3" src="src/resources/castle-l2.png"/><div class="lbl">L2 (112x112)</div></div>
-    <div class="cell"><img class="pixel s3" src="src/resources/castle-l3.png"/><div class="lbl">L3 (128x160)</div></div>
+    <div class="cell"><img class="pixel s3" src="src/resources/castle-l1.png" style="height:160px"/><div class="lbl">L1 (96x80)</div></div>
+    <div class="cell"><img class="pixel s3" src="src/resources/castle-l2.png" style="height:160px"/><div class="lbl">L2 (112x112)</div></div>
+    <div class="cell"><img class="pixel s3" src="src/resources/castle-l3.png" style="height:160px"/><div class="lbl">L3 (128x160)</div></div>
   </div>
 
   <div class="title">Resource tile icons (32x32, transparent, in-game at hex centre)</div>
   <div class="row">
-    <div class="cell"><img class="pixel" style="height:48px;" src="src/resources/resource-gold.png"/><div class="lbl">gold — alchemical sun rune</div></div>
-    <div class="cell"><img class="pixel" style="height:48px;" src="src/resources/resource-wood.png"/><div class="lbl">wood — leaf rune</div></div>
-    <div class="cell"><img class="pixel" style="height:48px;" src="src/resources/resource-stone.png"/><div class="lbl">stone — earth rune</div></div>
-    <div class="cell"><img class="pixel" style="height:48px;" src="src/resources/resource-iron.png"/><div class="lbl">iron — mars rune</div></div>
-    <div class="cell"><img class="pixel" style="height:48px;" src="src/resources/resource-arcane.png"/><div class="lbl">arcane — star rune</div></div>
+    <div class="cell"><img class="pixel" src="src/resources/resource-gold.png" style="height:48px"/><div class="lbl">gold — alchemical sun rune</div></div>
+    <div class="cell"><img class="pixel" src="src/resources/resource-wood.png" style="height:48px"/><div class="lbl">wood — leaf rune</div></div>
+    <div class="cell"><img class="pixel" src="src/resources/resource-stone.png" style="height:48px"/><div class="lbl">stone — earth rune</div></div>
+    <div class="cell"><img class="pixel" src="src/resources/resource-iron.png" style="height:48px"/><div class="lbl">iron — mars rune</div></div>
+    <div class="cell"><img class="pixel" src="src/resources/resource-arcane.png" style="height:48px"/><div class="lbl">arcane — star rune</div></div>
   </div>
   <div class="row">
     <div class="cell" style="position:relative;">
-      <div class="hex-frame" style="width:96px; height:84px;"><img class="pixel" style="height:36px;" src="src/resources/resource-gold.png"/></div>
+      <div class="hex-frame" style="width:96px; height:84px;"><img class="pixel" src="src/resources/resource-gold.png" style="height:36px"/></div>
       <div class="lbl">in hex (gold)</div>
     </div>
     <div class="cell" style="position:relative;">
-      <div class="hex-frame" style="width:96px; height:84px;"><img class="pixel" style="height:36px;" src="src/resources/resource-wood.png"/></div>
+      <div class="hex-frame" style="width:96px; height:84px;"><img class="pixel" src="src/resources/resource-wood.png" style="height:36px"/></div>
       <div class="lbl">in hex (wood)</div>
     </div>
     <div class="cell" style="position:relative;">
-      <div class="hex-frame" style="width:96px; height:84px;"><img class="pixel" style="height:36px;" src="src/resources/resource-stone.png"/></div>
+      <div class="hex-frame" style="width:96px; height:84px;"><img class="pixel" src="src/resources/resource-stone.png" style="height:36px"/></div>
       <div class="lbl">in hex (stone)</div>
     </div>
     <div class="cell" style="position:relative;">
-      <div class="hex-frame" style="width:96px; height:84px;"><img class="pixel" style="height:36px;" src="src/resources/resource-iron.png"/></div>
+      <div class="hex-frame" style="width:96px; height:84px;"><img class="pixel" src="src/resources/resource-iron.png" style="height:36px"/></div>
       <div class="lbl">in hex (iron)</div>
     </div>
     <div class="cell" style="position:relative;">
-      <div class="hex-frame" style="width:96px; height:84px;"><img class="pixel" style="height:36px;" src="src/resources/resource-arcane.png"/></div>
+      <div class="hex-frame" style="width:96px; height:84px;"><img class="pixel" src="src/resources/resource-arcane.png" style="height:36px"/></div>
       <div class="lbl">in hex (arcane)</div>
     </div>
   </div>
@@ -105,13 +105,10 @@
   <div class="title">Depth leak demo — L3 tower extending into hex above</div>
   <div class="stage" style="position:relative; padding:30px; background:transparent; border:none;">
     <div style="position:relative; width:340px; height:340px;">
-      <!-- Hex above (drawn first, behind) -->
       <div class="hex-bg hex-up" style="position:absolute; left:60px; top:0px;"></div>
       <div class="hexlbl" style="position:absolute; left:60px; top:60px;">hex (r-1) — above</div>
-      <!-- Current hex (drawn second) -->
       <div class="hex-bg hex-cur" style="position:absolute; left:0px; top:120px;"></div>
       <div class="hexlbl" style="position:absolute; left:0px; top:200px;">current hex</div>
-      <!-- L3 sprite — bottom anchored at current hex center -->
       <img class="pixel" src="src/resources/castle-l3.png" style="position:absolute; left:-46px; top:0px; width:240px; height:300px;"/>
     </div>
   </div>

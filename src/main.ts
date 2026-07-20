@@ -3,7 +3,8 @@ import { GameMap } from "./map/gameMap";
 import { Renderer } from "./render/renderer";
 import { Camera } from "./render/camera";
 import { api, type Game, type TileRow } from "./io/api";
-import { preloadCastleSprites, preloadResourceSprites } from "./render/sprites";
+import { createDefaultProvider, SpriteProvider } from "./render/assets";
+import { HERO_PROCEDURAL_DRAWERS } from "./render/sprites";
 import { rng } from "./core/rng";
 import { AdventureView, ENEMY_START, MAP_SEED } from "./views/adventureView";
 import { updateHud } from "./views/hud";
@@ -13,8 +14,8 @@ import { Toolbar } from "./views/toolbar";
 import { listUserGames, rememberGame, forgetGame } from "./io/userGames";
 import { axialToPixel } from "./core/hex";
 
-preloadCastleSprites();
-preloadResourceSprites();
+const spriteProvider: SpriteProvider = createDefaultProvider(HERO_PROCEDURAL_DRAWERS);
+spriteProvider.preload();
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
@@ -28,7 +29,7 @@ const enemies: Hero[] = ENEMY_START.map(
   (p, i) => new Hero(`enemy_${i}`, p.q, p.r, "enemy")
 );
 const heroes: Hero[] = [player, ...enemies];
-const renderer = new Renderer(ctx, map, camera);
+const renderer = new Renderer(ctx, map, camera, spriteProvider);
 
 let path: { q: number; r: number }[] = [];
 let saveStatus: "idle" | "saving" | "saved" | "error" = "idle";
