@@ -17,6 +17,7 @@ import {
 } from "./views/hud";
 import { Toolbar } from "./views/toolbar";
 import { HeroInfoMenu } from "./views/heroInfoMenu";
+import { SettlementPanel } from "./views/settlementPanel";
 import { listUserGames, rememberGame } from "./io/userGames";
 import { axialToPixel } from "./core/hex";
 import { Castle } from "./entities/settlement";
@@ -47,6 +48,7 @@ let turnController: TurnController;
 let heroes: Record<string, Hero> = {};
 let settlements: Record<string, Castle> = {};
 let heroInfoMenu: HeroInfoMenu;
+let settlementPanel: SettlementPanel;
 
 let saveStatus: "idle" | "saving" | "saved" | "error" = "idle";
 let backendOk = false;
@@ -140,7 +142,13 @@ function refreshHud(): void {
     hudHandles
   );
   refreshHeroInfoMenu();
+  refreshSettlementPanel();
   toolbar?.refresh();
+}
+
+function refreshSettlementPanel(): void {
+  if (!settlementPanel) return;
+  settlementPanel.update(gameState);
 }
 
 function refreshHeroInfoMenu(): void {
@@ -269,7 +277,7 @@ async function loadGameIntoState(loaded: Game, tiles: TileRow[]): Promise<void> 
   activeGameName = loaded.name;
   rememberGame(loaded.id, loaded.name);
   gameMap = GameMap.fromTiles(tiles);
-  const hydrated = hydrateGameState(loaded);
+  const hydrated = hydrateGameState(loaded, gameMap, rng);
   replaceTurnControllerState(hydrated);
   rebuildHeroesFromState();
   rebuildSettlementsFromState();
@@ -328,7 +336,7 @@ function resize(): void {
 }
 
 function initialize(): void {
-  gameState = buildInitialGameState();
+  gameState = buildInitialGameState(gameMap, rng);
   rebuildHeroesFromState();
   rebuildSettlementsFromState();
 
@@ -356,6 +364,7 @@ function initialize(): void {
   hudHandles = buildHud(hud);
 
   heroInfoMenu = new HeroInfoMenu({ parent: document.body });
+  settlementPanel = new SettlementPanel({ parent: document.body });
 
   toolbar = new Toolbar({
     parent: toolbarEl,

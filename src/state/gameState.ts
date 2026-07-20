@@ -2,6 +2,7 @@ export type PlayerId = number;
 export type Faction = "player" | "ai";
 export type HeroId = string;
 export type SettlementId = string;
+export type ResourceType = "gold" | "wood" | "stone" | "iron" | "arcane";
 
 export interface Player {
   id: PlayerId;
@@ -25,10 +26,15 @@ export interface HeroState {
 
 export interface SettlementState {
   id: SettlementId;
+  name: string;
   ownerId: PlayerId | null;
   q: number;
   r: number;
   level: 1 | 2 | 3;
+  population: number;
+  goldTax: number;
+  resourceRates: Partial<Record<ResourceType, number>>;
+  foundedOnResource: ResourceType | null;
 }
 
 export type GamePhase =
@@ -84,8 +90,30 @@ function defaultHeroes(): Record<HeroId, HeroState> {
 
 function defaultSettlements(): Record<SettlementId, SettlementState> {
   return {
-    s0: { id: "s0", ownerId: 0, q: 2, r: 2, level: 1 },
-    s1: { id: "s1", ownerId: 1, q: 18, r: 4, level: 1 },
+    s0: {
+      id: "s0",
+      name: "Test Keep",
+      ownerId: 0,
+      q: 2,
+      r: 2,
+      level: 1,
+      population: 500,
+      goldTax: 1,
+      resourceRates: {},
+      foundedOnResource: null,
+    },
+    s1: {
+      id: "s1",
+      name: "AI Spire",
+      ownerId: 1,
+      q: 18,
+      r: 4,
+      level: 1,
+      population: 500,
+      goldTax: 1,
+      resourceRates: {},
+      foundedOnResource: null,
+    },
   };
 }
 

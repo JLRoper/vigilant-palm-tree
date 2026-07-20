@@ -16,7 +16,7 @@ export class Renderer {
     private sprites: SpriteProvider
   ) {}
 
-  draw(hover: Axial | null, heroes: Hero[], path: Axial[], castles: Castle[] = CASTLES) {
+  draw(hover: Axial | null, heroes: Hero[], path: Axial[], castles: readonly Castle[] = CASTLES) {
     const ctx = this.ctx;
     const w = window.innerWidth;
     const h = window.innerHeight;

@@ -6,12 +6,32 @@ import {
   type Player,
   type SettlementState,
 } from "../state/gameState";
-import { CASTLES } from "../entities/settlement";
 import type { Game } from "../io/api";
+import type { GameMap } from "../map/gameMap";
+import {
+  computeSettlementRates,
+  defaultPopulation,
+  generateSettlementName,
+  SETTLEMENT_GOLD_TAX,
+} from "../economy/settlementRates";
 
 const PLAYER_HERO_ID: HeroId = "p0-hero";
 const AI_HERO_ID: HeroId = "p1-hero";
 const EXTRA_AI_HERO_ID: HeroId = "p1-hero-2";
+
+interface SeedCastle {
+  id: string;
+  q: number;
+  r: number;
+  level: 1 | 2 | 3;
+  ownerId: number | null;
+}
+
+const SEED_CASTLES: SeedCastle[] = [
+  { id: "castle-l1", q: 6, r: 5, level: 1, ownerId: 0 },
+  { id: "castle-l2", q: 14, r: 8, level: 2, ownerId: 1 },
+  { id: "castle-l3", q: 10, r: 12, level: 3, ownerId: null },
+];
 
 function makePlayers(settlementIds: Record<string, string[]>): Player[] {
   return [
@@ -34,15 +54,15 @@ function makePlayers(settlementIds: Record<string, string[]>): Player[] {
   ];
 }
 
-function makeHeroes(map = CASTLES): HeroState[] {
-  const l1 = map.find((c) => c.id === "castle-l1")!;
-  const l2 = map.find((c) => c.id === "castle-l2")!;
+function makeHeroes(seed: SeedCastle[]): HeroState[] {
+  const l1 = seed.find((c) => c.id === "castle-l1")!;
+  const l2 = seed.find((c) => c.id === "castle-l2")!;
   return [
     {
       id: PLAYER_HERO_ID,
       ownerId: 0,
-      q: l1.tile.q,
-      r: l1.tile.r,
+      q: l1.q,
+      r: l1.r,
       movementRemaining: 7,
       previousQ: null,
       previousR: null,
@@ -51,8 +71,8 @@ function makeHeroes(map = CASTLES): HeroState[] {
     {
       id: AI_HERO_ID,
       ownerId: 1,
-      q: l2.tile.q,
-      r: l2.tile.r,
+      q: l2.q,
+      r: l2.r,
       movementRemaining: 7,
       previousQ: null,
       previousR: null,
@@ -61,8 +81,8 @@ function makeHeroes(map = CASTLES): HeroState[] {
     {
       id: EXTRA_AI_HERO_ID,
       ownerId: 1,
-      q: l2.tile.q + 3,
-      r: l2.tile.r + 1,
+      q: l2.q + 3,
+      r: l2.r + 1,
       movementRemaining: 7,
       previousQ: null,
       previousR: null,
@@ -71,28 +91,66 @@ function makeHeroes(map = CASTLES): HeroState[] {
   ];
 }
 
-function makeSettlements(): SettlementState[] {
-  return CASTLES.map((c) => c.toGameState());
+function makeSettlements(
+  map: GameMap,
+  rng: () => number,
+  seed: SeedCastle[] = SEED_CASTLES,
+): SettlementState[] {
+  return seed.map((c) => {
+    const computed = computeSettlementRates(map, c.q, c.r, c.level);
+    return {
+      id: c.id,
+      name: generateSettlementName(rng, c.ownerId),
+      ownerId: c.ownerId,
+      q: c.q,
+      r: c.r,
+      level: c.level,
+      population: defaultPopulation(c.level),
+      goldTax: SETTLEMENT_GOLD_TAX[c.level],
+      resourceRates: computed.rates,
+      foundedOnResource: computed.foundedOn,
+    };
+  });
 }
 
-export function buildInitialGameState(): GameState {
-  const settlements = makeSettlements();
-  const settlementIds: Record<string, string[]> = {};
+function splitByOwner(settlements: SettlementState[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
   for (const s of settlements) {
     const key = s.ownerId === 0 ? "p0" : s.ownerId === 1 ? "p1" : "neutral";
-    if (!settlementIds[key]) settlementIds[key] = [];
-    settlementIds[key].push(s.id);
+    if (!out[key]) out[key] = [];
+    out[key].push(s.id);
   }
+  return out;
+}
+
+export function buildInitialGameState(map: GameMap, rng: () => number): GameState {
+  const settlements = makeSettlements(map, rng);
+  const settlementIds = splitByOwner(settlements);
   return createInitialState({
     seedPlayers: makePlayers(settlementIds),
-    seedHeroes: makeHeroes(),
+    seedHeroes: makeHeroes(SEED_CASTLES),
     seedSettlements: settlements,
     seedRound: 1,
     seedActivePlayerId: 0,
   });
 }
 
-export function hydrateGameState(row: Game): GameState {
+function backfillSettlement(s: Partial<SettlementState> & { id: string; q: number; r: number; level: 1 | 2 | 3 }): SettlementState {
+  return {
+    name: s.name ?? s.id,
+    ownerId: s.ownerId ?? null,
+    population: s.population ?? defaultPopulation(s.level),
+    goldTax: s.goldTax ?? SETTLEMENT_GOLD_TAX[s.level],
+    resourceRates: s.resourceRates ?? {},
+    foundedOnResource: s.foundedOnResource ?? null,
+    q: s.q,
+    r: s.r,
+    level: s.level,
+    id: s.id,
+  };
+}
+
+export function hydrateGameState(row: Game, map: GameMap, rng: () => number): GameState {
   if (
     typeof row.round === "number" &&
     typeof row.active_player_id === "number" &&
@@ -103,12 +161,16 @@ export function hydrateGameState(row: Game): GameState {
     row.settlements &&
     Object.keys(row.settlements).length > 0
   ) {
+    const settlementsRecord: Record<string, SettlementState> = {};
+    for (const [id, raw] of Object.entries(row.settlements)) {
+      settlementsRecord[id] = backfillSettlement({ ...raw, id });
+    }
     return {
       round: row.round,
       activePlayerId: row.active_player_id,
       players: row.players,
       heroes: row.heroes,
-      settlements: row.settlements,
+      settlements: settlementsRecord,
       phase:
         row.players.find((p) => p.id === row.active_player_id)?.faction === "ai"
           ? { kind: "AI_TURN", playerId: row.active_player_id }
@@ -118,13 +180,8 @@ export function hydrateGameState(row: Game): GameState {
     };
   }
 
-  const settlements = makeSettlements();
-  const settlementIds: Record<string, string[]> = {};
-  for (const s of settlements) {
-    const key = s.ownerId === 0 ? "p0" : s.ownerId === 1 ? "p1" : "neutral";
-    if (!settlementIds[key]) settlementIds[key] = [];
-    settlementIds[key].push(s.id);
-  }
+  const settlements = makeSettlements(map, rng);
+  const settlementIds = splitByOwner(settlements);
   const players = makePlayers(settlementIds);
   const heroQ = row.hero_q;
   const heroR = row.hero_r;
@@ -155,13 +212,13 @@ export function hydrateGameState(row: Game): GameState {
       previousMovementRemaining: null,
     };
   }
+  const l2 = SEED_CASTLES.find((c) => c.id === "castle-l2")!;
   if (!heroes[AI_HERO_ID]) {
-    const l2 = CASTLES.find((c) => c.id === "castle-l2")!;
     heroes[AI_HERO_ID] = {
       id: AI_HERO_ID,
       ownerId: 1,
-      q: l2.tile.q,
-      r: l2.tile.r,
+      q: l2.q,
+      r: l2.r,
       movementRemaining: 7,
       previousQ: null,
       previousR: null,
@@ -169,12 +226,11 @@ export function hydrateGameState(row: Game): GameState {
     };
   }
   if (!heroes[EXTRA_AI_HERO_ID]) {
-    const l2 = CASTLES.find((c) => c.id === "castle-l2")!;
     heroes[EXTRA_AI_HERO_ID] = {
       id: EXTRA_AI_HERO_ID,
       ownerId: 1,
-      q: l2.tile.q + 3,
-      r: l2.tile.r + 1,
+      q: l2.q + 3,
+      r: l2.r + 1,
       movementRemaining: 7,
       previousQ: null,
       previousR: null,
@@ -197,7 +253,7 @@ export function hydrateGameState(row: Game): GameState {
 }
 
 export function defaultHeroesRecord(): HeroState[] {
-  return makeHeroes();
+  return makeHeroes(SEED_CASTLES);
 }
 
 export function playerHeroId(): HeroId {
@@ -206,4 +262,8 @@ export function playerHeroId(): HeroId {
 
 export function aiHeroIds(): HeroId[] {
   return [AI_HERO_ID, EXTRA_AI_HERO_ID];
+}
+
+export function seedCastlePositions(): { id: string; q: number; r: number; level: 1 | 2 | 3; ownerId: number | null }[] {
+  return SEED_CASTLES.map((c) => ({ ...c }));
 }

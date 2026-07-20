@@ -330,6 +330,37 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
     throw new Error(`Hero info menu missing "Movement": ${heroInfoVisible.text}`);
   }
 
+  const settlementPanel = await page.evaluate(() => {
+    const els = Array.from(document.body.children);
+    const popup = els.find((el) => el.textContent?.startsWith("Settlements"));
+    if (!popup) return null;
+    const text = popup.textContent ?? "";
+    return {
+      hasSettlementsHeader: text.includes("Settlements"),
+      hasNeutral: text.includes("Neutral"),
+      hasPopulation: text.includes("Population"),
+      hasResourceRates: text.includes("Resource rates") || text.includes("/turn"),
+      hasGoldTax: text.includes("Gold/tax"),
+      snippet: text.slice(0, 400),
+    };
+  });
+  console.log(`>> Settlement panel: ${JSON.stringify(settlementPanel)}`);
+  if (!settlementPanel || !settlementPanel.hasSettlementsHeader) {
+    throw new Error("Settlement panel not visible");
+  }
+  if (!settlementPanel.hasPopulation) {
+    throw new Error(`Settlement panel missing Population: ${settlementPanel.snippet}`);
+  }
+  if (!settlementPanel.hasGoldTax) {
+    throw new Error(`Settlement panel missing Gold/tax: ${settlementPanel.snippet}`);
+  }
+  if (!settlementPanel.hasResourceRates) {
+    throw new Error(`Settlement panel missing Resource rates: ${settlementPanel.snippet}`);
+  }
+  if (!settlementPanel.hasNeutral) {
+    throw new Error(`Settlement panel missing Neutral section: ${settlementPanel.snippet}`);
+  }
+
   const endTurnBtn = page.locator("#toolbar button:has-text('End Turn')");
   if (!(await endTurnBtn.isVisible())) throw new Error("End Turn button not visible in toolbar");
   if (!(await endTurnBtn.isEnabled())) throw new Error("End Turn button disabled during PLAYER_TURN");
