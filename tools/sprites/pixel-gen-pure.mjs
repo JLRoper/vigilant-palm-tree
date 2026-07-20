@@ -192,12 +192,16 @@ const drawForResource = {
   arcane: drawArcane,
 };
 
-const sprites = Object.entries(RESOURCE_SPRITES).map(([key, filename]) => ({
-  filename,
-  w: 32,
-  h: 32,
-  draw: drawForResource[key],
-}));
+const sprites = Object.entries(RESOURCE_SPRITES).map(([key, filename]) => {
+  const draw = drawForResource[key];
+  if (!draw) throw new Error(`No drawer registered for resource '${key}'`);
+  return {
+    filename,
+    w: 32,
+    h: 32,
+    draw,
+  };
+});
 
 for (const s of sprites) {
   const buf = makeBuf(s.w, s.h);
