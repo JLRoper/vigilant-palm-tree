@@ -20,7 +20,7 @@ import { HeroInfoMenu } from "./views/heroInfoMenu";
 import { SettlementPanel } from "./views/settlementPanel";
 import { colorForOwner } from "./state/playerColors";
 import { listUserGames, rememberGame } from "./io/userGames";
-import { axialToPixel } from "./core/hex";
+import { axialToPixel, type Axial } from "./core/hex";
 import { Castle } from "./entities/settlement";
 import {
   buildInitialGameState,
@@ -141,7 +141,20 @@ function syncHeroVisualsToState(): void {
   for (const [id, h] of Object.entries(gameState.heroes)) {
     const v = heroes[id];
     if (!v) continue;
-    v.syncFromState(h);
+    v.movementRemaining = h.movementRemaining;
+    v.trail = (h.trail ?? []).map((p) => ({ q: p.q, r: p.r }));
+    if (v.moving) continue;
+    if (v.tile.q === h.q && v.tile.r === h.r) continue;
+    const start: Axial = { ...v.tile };
+    const end: Axial = { q: h.q, r: h.r };
+    const partialPath = findPath(gameMap, start, end);
+    if (partialPath.length > 0) {
+      v.startMoveToPath([start, ...partialPath]);
+    } else {
+      v.tile = end;
+      v.fromTile = end;
+      v.toTile = end;
+    }
   }
 }
 
