@@ -4,43 +4,18 @@ import { GameMap } from "../map/gameMap";
 import type { GameState } from "../state/gameState";
 import type { Hero } from "../entities/hero";
 import type { Castle } from "../entities/settlement";
-import { styleButton } from "./menu";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
-export interface HudCallbacks {
-  onEndTurn?: () => void;
-}
-
-export interface HudRefs {
-  buttonContainer: HTMLElement;
-}
-
 export interface HudHandles {
-  endTurnBtn: HTMLButtonElement | null;
   textSpan: HTMLSpanElement;
 }
 
-export function buildHud(
-  refs: HudRefs
-): HudHandles {
+export function buildHud(buttonContainer: HTMLElement): HudHandles {
   const textSpan = document.createElement("span");
   textSpan.id = "hud-text";
-  refs.buttonContainer.appendChild(textSpan);
-
-  const endTurnBtn = document.createElement("button");
-  endTurnBtn.textContent = "End Turn";
-  styleButton(endTurnBtn, true);
-  endTurnBtn.id = "end-turn-btn";
-  endTurnBtn.style.marginLeft = "8px";
-  refs.buttonContainer.appendChild(endTurnBtn);
-  return { endTurnBtn, textSpan };
-}
-
-export function attachHudCallbacks(handles: HudHandles, callbacks: HudCallbacks): void {
-  if (handles.endTurnBtn && callbacks.onEndTurn) {
-    handles.endTurnBtn.addEventListener("click", () => callbacks.onEndTurn?.());
-  }
+  buttonContainer.appendChild(textSpan);
+  return { textSpan };
 }
 
 export function updateHud(
@@ -74,12 +49,6 @@ export function updateHud(
   const status = `${phase} · ${roundLine} · ${goldLine} · ${enemiesLine}${movementLine}`;
   const dbInfo = backendOk ? `DB ${saveStatus}` : "DB offline";
   const savedInfo = lastSavedAt ? ` · Last saved ${formatTime(lastSavedAt)}` : "";
-  const endTurnEnabled = canEndTurn(state);
-  if (handles.endTurnBtn) {
-    handles.endTurnBtn.disabled = !endTurnEnabled;
-    handles.endTurnBtn.style.opacity = endTurnEnabled ? "1" : "0.4";
-    handles.endTurnBtn.style.cursor = endTurnEnabled ? "pointer" : "default";
-  }
   const text = !hover
     ? `${heroInfo} · ${status} · ${dbInfo}${savedInfo} · ${base}`
     : (() => {
@@ -94,6 +63,13 @@ export function updateHud(
         return `${tile}${resourceLine}${settleLine} · ${heroInfo} · ${status} · ${dbInfo}${savedInfo} · ${base}`;
       })();
   handles.textSpan.textContent = text;
+}
+
+export function canEndTurn(state: GameState): boolean {
+  if (state.phase.kind !== "PLAYER_TURN") return false;
+  const phase = state.phase;
+  const p = state.players.find((pl) => pl.id === phase.playerId);
+  return p?.faction === "player";
 }
 
 function phaseLabel(state: GameState): string {
@@ -115,13 +91,6 @@ function phaseLabel(state: GameState): string {
       return `Round End → ${phase.nextRound}`;
     }
   }
-}
-
-function canEndTurn(state: GameState): boolean {
-  if (state.phase.kind !== "PLAYER_TURN") return false;
-  const phase = state.phase;
-  const p = state.players.find((pl) => pl.id === phase.playerId);
-  return p?.faction === "player";
 }
 
 function formatTime(iso: string): string {

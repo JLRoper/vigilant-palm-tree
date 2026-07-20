@@ -1,6 +1,7 @@
 import type { Game } from "../io/api";
 import { api } from "../io/api";
 import { forgetGame, listUserGames, type UserGameEntry } from "../io/userGames";
+import type { GameState } from "../state/gameState";
 import {
   PopupMenu,
   menuTheme,
@@ -12,12 +13,14 @@ import {
 export interface ToolbarState {
   backendOk: () => boolean;
   hasActiveGame: () => boolean;
+  canEndTurnNow: () => boolean;
 }
 
 export interface ToolbarCallbacks {
   onNew: (opts: { name: string; seed: number }) => void | Promise<void>;
   onLoad: (game: Game, tiles: Awaited<ReturnType<typeof api.getTiles>>) => void | Promise<void>;
   onSave: () => void | Promise<void>;
+  onEndTurn: () => void | Promise<void>;
   onForget?: (id: number) => void;
 }
 
@@ -32,6 +35,7 @@ export class Toolbar {
   private newBtn: HTMLButtonElement;
   private loadBtn: HTMLButtonElement;
   private saveBtn: HTMLButtonElement;
+  private endTurnBtn: HTMLButtonElement;
   private busy = false;
 
   constructor(private opts: ToolbarOptions) {
@@ -47,6 +51,7 @@ export class Toolbar {
     this.newBtn = this.makeButton("New Game", false);
     this.loadBtn = this.makeButton("Load Game", false);
     this.saveBtn = this.makeButton("Save Game", false);
+    this.endTurnBtn = this.makeButton("End Turn", true);
 
     this.newBtn.addEventListener("click", () => {
       if (this.busy) return;
@@ -62,19 +67,33 @@ export class Toolbar {
         await this.opts.callbacks.onSave();
       });
     });
+    this.endTurnBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      if (!this.opts.state.canEndTurnNow()) return;
+      void this.runAsync(async () => {
+        await this.opts.callbacks.onEndTurn();
+      });
+    });
 
     this.menu.appendContent(this.newBtn);
     this.menu.appendContent(this.loadBtn);
     this.menu.appendContent(this.saveBtn);
+    this.menu.appendContent(this.endTurnBtn);
     this.refresh();
   }
 
   refresh(): void {
     const ok = this.opts.state.backendOk();
     const active = this.opts.state.hasActiveGame();
+    const endTurnOk = this.opts.state.canEndTurnNow();
     this.setEnabled(this.newBtn, ok && !this.busy);
     this.setEnabled(this.loadBtn, ok && !this.busy);
     this.setEnabled(this.saveBtn, ok && active && !this.busy);
+    this.setEnabled(this.endTurnBtn, endTurnOk && !this.busy);
+  }
+
+  applyGameState(_state: GameState): void {
+    this.refresh();
   }
 
   setBusy(value: boolean): void {

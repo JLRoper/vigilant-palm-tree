@@ -20,6 +20,7 @@ export class ImageSpriteSource implements SpriteSource {
       img.onload = () => this.ready.set(key, true);
       img.onerror = () => this.ready.set(key, false);
       img.src = url;
+    }
   }
 
   resolve(key: string): { drawable: HTMLImageElement; ready: boolean } | undefined {

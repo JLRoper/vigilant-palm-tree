@@ -306,8 +306,32 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   }
   console.log(`>> HUD shows Movement: ${movementValue}/7 (< 7)`);
 
-  const endTurnBtn = page.locator("#end-turn-btn");
-  if (!(await endTurnBtn.isVisible())) throw new Error("End Turn button not visible");
+  const heroInfoMenuText = await page
+    .locator("#toolbar button:has-text('End Turn')")
+    .first()
+    .evaluate((btn) => btn.parentElement?.parentElement?.textContent ?? "");
+  console.log(`>> Toolbar menu text: ${heroInfoMenuText}`);
+  if (!heroInfoMenuText.includes("End Turn")) {
+    throw new Error("End Turn button missing from toolbar menu");
+  }
+
+  const heroInfoVisible = await page.evaluate(() => {
+    const els = Array.from(document.body.children);
+    const popup = els.find((el) => el.textContent?.includes("Stats & Army"));
+    if (!popup) return null;
+    const style = (popup as HTMLElement).style;
+    return { display: style.display, text: popup.textContent ?? "" };
+  });
+  console.log(`>> Hero info menu visible: ${JSON.stringify(heroInfoVisible)}`);
+  if (!heroInfoVisible || heroInfoVisible.display === "none") {
+    throw new Error("Hero info menu not visible while hero is selected");
+  }
+  if (!heroInfoVisible.text.includes("Movement")) {
+    throw new Error(`Hero info menu missing "Movement": ${heroInfoVisible.text}`);
+  }
+
+  const endTurnBtn = page.locator("#toolbar button:has-text('End Turn')");
+  if (!(await endTurnBtn.isVisible())) throw new Error("End Turn button not visible in toolbar");
   if (!(await endTurnBtn.isEnabled())) throw new Error("End Turn button disabled during PLAYER_TURN");
   await endTurnBtn.click();
 

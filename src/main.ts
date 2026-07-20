@@ -10,12 +10,13 @@ import { AdventureView, MAP_SEED } from "./views/adventureView";
 import { findPath } from "./map/pathfinding";
 import { TERRAIN_COST } from "./map/terrain";
 import {
-  attachHudCallbacks,
   buildHud,
   type HudHandles,
   updateHud,
+  canEndTurn,
 } from "./views/hud";
 import { Toolbar } from "./views/toolbar";
+import { HeroInfoMenu } from "./views/heroInfoMenu";
 import { listUserGames, rememberGame } from "./io/userGames";
 import { axialToPixel } from "./core/hex";
 import { Castle } from "./entities/settlement";
@@ -45,6 +46,7 @@ let gameState: GameState;
 let turnController: TurnController;
 let heroes: Record<string, Hero> = {};
 let settlements: Record<string, Castle> = {};
+let heroInfoMenu: HeroInfoMenu;
 
 let saveStatus: "idle" | "saving" | "saved" | "error" = "idle";
 let backendOk = false;
@@ -137,6 +139,32 @@ function refreshHud(): void {
     lastSavedAt,
     hudHandles
   );
+  refreshHeroInfoMenu();
+  toolbar?.refresh();
+}
+
+function refreshHeroInfoMenu(): void {
+  if (!heroInfoMenu) return;
+  const selectedId = gameState.selectedHeroId;
+  if (!selectedId) {
+    heroInfoMenu.hide();
+    return;
+  }
+  const hero = heroes[selectedId];
+  if (!hero) {
+    heroInfoMenu.hide();
+    return;
+  }
+  const player = gameState.players.find((p) => p.id === hero.ownerId);
+  if (!player) {
+    heroInfoMenu.hide();
+    return;
+  }
+  if (heroInfoMenu.getCurrentHeroId() !== selectedId) {
+    heroInfoMenu.show(hero, player);
+  } else {
+    heroInfoMenu.update(hero, player);
+  }
 }
 
 function draw(): void {
@@ -325,16 +353,16 @@ function initialize(): void {
     onRedraw: draw,
   });
 
-  hudHandles = buildHud({ buttonContainer: hud });
-  attachHudCallbacks(hudHandles, {
-    onEndTurn: () => void endHumanTurn(),
-  });
+  hudHandles = buildHud(hud);
+
+  heroInfoMenu = new HeroInfoMenu({ parent: document.body });
 
   toolbar = new Toolbar({
     parent: toolbarEl,
     state: {
       backendOk: () => backendOk,
       hasActiveGame: () => activeGameId !== null,
+      canEndTurnNow: () => canEndTurn(gameState),
     },
     callbacks: {
       onNew: async ({ name, seed }) => {
@@ -354,6 +382,7 @@ function initialize(): void {
         await api.logEvent(loaded.name, "load_game", {});
       },
       onSave: () => manualSave(),
+      onEndTurn: () => endHumanTurn(),
       onForget: (id) => {
         if (activeGameId === id) {
           activeGameId = null;
