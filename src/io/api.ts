@@ -1,5 +1,19 @@
+import type { Axial } from "../core/hex";
 import type { Terrain } from "../map/terrain";
 import type { ResourceType } from "../map/resourceTiles";
+import type {
+  GameState,
+  HeroState,
+  Player,
+  SettlementState,
+} from "../state/gameState";
+
+export type {
+  GameState,
+  HeroState,
+  Player,
+  SettlementState,
+} from "../state/gameState";
 
 export type EnemyPos = { q: number; r: number };
 
@@ -14,6 +28,11 @@ export type Game = {
   enemy_positions: EnemyPos[];
   created_at: string;
   updated_at: string;
+  round?: number;
+  active_player_id?: number;
+  players?: Player[];
+  heroes?: Record<string, HeroState>;
+  settlements?: Record<string, SettlementState>;
 };
 
 export type TileRow = {
@@ -21,6 +40,31 @@ export type TileRow = {
   r: number;
   terrain: Terrain;
   resource: ResourceType | null;
+};
+
+export type LegacyGamePatch = Partial<
+  Pick<Game, "hero_q" | "hero_r" | "turn" | "gold" | "enemy_positions">
+>;
+
+export type SpendMovementAction = {
+  action: "spend_movement";
+  heroId: string;
+  fromTile: Axial;
+  toTile: Axial;
+  cost: number;
+};
+
+export type GamePatch = LegacyGamePatch | SpendMovementAction;
+
+export type EndTurnResult = {
+  round: number;
+  activePlayerId: number;
+  players: Player[];
+};
+
+export type ResolveBattleResult = {
+  players: Player[];
+  heroes: Record<string, HeroState>;
 };
 
 const BASE = "/api";
@@ -60,6 +104,24 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function patchGameImpl(
+  name: string,
+  patch: GamePatch
+): Promise<Game | HeroState> {
+  const res = await fetchWithTimeout(
+    `${BASE}/games/${encodeURIComponent(name)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }
+  );
+  if ("action" in patch && patch.action === "spend_movement") {
+    return json<HeroState>(res);
+  }
+  return json<Game>(res);
+}
+
 export const api = {
   health: () =>
     fetchWithTimeout(`${BASE}/health`, {}, 3_000).then((r) => json<{ ok: boolean }>(r)),
@@ -81,15 +143,12 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions }),
     }).then((r) => json<Game>(r)),
-  patchGame: (
-    name: string,
-    patch: Partial<Pick<Game, "hero_q" | "hero_r" | "turn" | "gold" | "enemy_positions">>
-  ) =>
-    fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    }).then((r) => json<Game>(r)),
+  patchGame: ((name: string, patch: GamePatch) =>
+    patchGameImpl(name, patch)) as {
+    (name: string, patch: SpendMovementAction): Promise<HeroState>;
+    (name: string, patch: LegacyGamePatch): Promise<Game>;
+    (name: string, patch: GamePatch): Promise<Game | HeroState>;
+  },
   logEvent: (name: string, kind: string, payload: Record<string, unknown> = {}) =>
     fetchWithTimeout(
       `${BASE}/games/${encodeURIComponent(name)}/events`,
@@ -105,3 +164,48 @@ export const api = {
       json<TileRow[]>(r)
     ),
 };
+
+export async function endTurn(
+  name: string,
+  state: GameState
+): Promise<EndTurnResult> {
+  const res = await fetchWithTimeout(
+    `${BASE}/games/${encodeURIComponent(name)}/end-turn`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state }),
+    }
+  );
+  return json<EndTurnResult>(res);
+}
+
+export async function spendMovement(
+  name: string,
+  payload: { heroId: string; fromTile: Axial; toTile: Axial; cost: number }
+): Promise<HeroState> {
+  const res = await fetchWithTimeout(
+    `${BASE}/games/${encodeURIComponent(name)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "spend_movement", ...payload }),
+    }
+  );
+  return json<HeroState>(res);
+}
+
+export async function resolveBattle(
+  name: string,
+  payload: { attackerId: string; defenderId: string; state: GameState }
+): Promise<ResolveBattleResult> {
+  const res = await fetchWithTimeout(
+    `${BASE}/games/${encodeURIComponent(name)}/resolve-battle`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  return json<ResolveBattleResult>(res);
+}

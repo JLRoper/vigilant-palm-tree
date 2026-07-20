@@ -16,6 +16,11 @@ export const pool = new Pool({
 export async function initSchema(): Promise<void> {
   const sql = readFileSync(join(__dirname, "schema.sql"), "utf8");
   await pool.query(sql);
+  const migration = readFileSync(
+    join(__dirname, "migrations", "001_turn_state.sql"),
+    "utf8"
+  );
+  await pool.query(migration);
 }
 
 export async function withTransaction<T>(

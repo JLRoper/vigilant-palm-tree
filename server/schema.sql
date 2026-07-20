@@ -7,6 +7,11 @@ CREATE TABLE IF NOT EXISTS games (
   turn INTEGER NOT NULL DEFAULT 1,
   gold INTEGER NOT NULL DEFAULT 0,
   enemy_positions JSONB NOT NULL DEFAULT '[]'::jsonb,
+  round INT NOT NULL DEFAULT 1,
+  active_player_id INT NOT NULL DEFAULT 0,
+  players JSONB NOT NULL DEFAULT '[]'::jsonb,
+  heroes JSONB NOT NULL DEFAULT '{}'::jsonb,
+  settlements JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
