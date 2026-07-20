@@ -10,10 +10,22 @@ import {
   styleInput,
 } from "./menu";
 
+export interface CalendarSnapshot {
+  day: number;
+  week: number;
+  dayOfWeek: number;
+  month: number;
+  dayOfMonth: number;
+  monthName: string;
+  activePlayerName: string;
+  activePlayerColor: string;
+}
+
 export interface ToolbarState {
   backendOk: () => boolean;
   hasActiveGame: () => boolean;
   canEndTurnNow: () => boolean;
+  getCalendar: () => CalendarSnapshot | null;
 }
 
 export interface ToolbarCallbacks {
@@ -41,6 +53,8 @@ export class Toolbar {
   private loadBtn: HTMLButtonElement;
   private saveBtn: HTMLButtonElement;
   private endTurnBtn: HTMLButtonElement;
+  private calendarEl: HTMLElement;
+  private calendarActiveEl: HTMLElement;
   private busy = false;
 
   constructor(private opts: ToolbarOptions) {
@@ -48,10 +62,95 @@ export class Toolbar {
       parent: opts.parent,
       title: "Heroes of JS",
       initialPosition: { x: 16, y: 16 },
-      width: 200,
+      width: 220,
       closeable: false,
       draggable: true,
     });
+
+    this.calendarEl = document.createElement("div");
+    Object.assign(this.calendarEl.style, {
+      display: "flex",
+      flexDirection: "column",
+      gap: "2px",
+      paddingBottom: "8px",
+      borderBottom: "1px solid rgba(255,255,255,0.08)",
+      marginBottom: "4px",
+      fontFamily: menuTheme.font,
+      color: menuTheme.panel.color,
+    });
+    const calendarTopRow = document.createElement("div");
+    Object.assign(calendarTopRow.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "baseline",
+      fontSize: "14px",
+      fontWeight: "600",
+    });
+    const dayLabel = document.createElement("span");
+    dayLabel.textContent = "Day";
+    calendarTopRow.appendChild(dayLabel);
+    const dayValue = document.createElement("span");
+    dayValue.id = "toolbar-day-value";
+    calendarTopRow.appendChild(dayValue);
+    this.calendarEl.appendChild(calendarTopRow);
+
+    const subRow = document.createElement("div");
+    Object.assign(subRow.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      fontSize: "11px",
+      opacity: "0.7",
+    });
+    const weekLabel = document.createElement("span");
+    weekLabel.textContent = "Week";
+    subRow.appendChild(weekLabel);
+    const weekValue = document.createElement("span");
+    weekValue.id = "toolbar-week-value";
+    subRow.appendChild(weekValue);
+    this.calendarEl.appendChild(subRow);
+
+    const monthRow = document.createElement("div");
+    Object.assign(monthRow.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      fontSize: "11px",
+      opacity: "0.7",
+    });
+    const monthLabel = document.createElement("span");
+    monthLabel.textContent = "Month";
+    monthRow.appendChild(monthLabel);
+    const monthValue = document.createElement("span");
+    monthValue.id = "toolbar-month-value";
+    monthRow.appendChild(monthValue);
+    this.calendarEl.appendChild(monthRow);
+
+    this.calendarActiveEl = document.createElement("div");
+    Object.assign(this.calendarActiveEl.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "6px",
+      fontSize: "11px",
+      opacity: "0.85",
+      paddingTop: "4px",
+    });
+    const swatch = document.createElement("span");
+    swatch.id = "toolbar-active-swatch";
+    Object.assign(swatch.style, {
+      display: "inline-block",
+      width: "10px",
+      height: "10px",
+      borderRadius: "50%",
+      background: "#888",
+      border: "1px solid rgba(0,0,0,0.4)",
+    });
+    this.calendarActiveEl.appendChild(swatch);
+    const activeLabel = document.createElement("span");
+    activeLabel.id = "toolbar-active-label";
+    activeLabel.textContent = "—";
+    this.calendarActiveEl.appendChild(activeLabel);
+    this.calendarEl.appendChild(this.calendarActiveEl);
+
+    this.menu.body.appendChild(this.calendarEl);
 
     this.newBtn = this.makeButton("New Game", false);
     this.loadBtn = this.makeButton("Load Game", false);
@@ -95,6 +194,30 @@ export class Toolbar {
     this.setEnabled(this.loadBtn, ok && !this.busy);
     this.setEnabled(this.saveBtn, ok && active && !this.busy);
     this.setEnabled(this.endTurnBtn, endTurnOk && !this.busy);
+    this.refreshCalendar();
+  }
+
+  private refreshCalendar(): void {
+    const cal = this.opts.state.getCalendar();
+    const dayEl = this.menu.root.querySelector<HTMLElement>("#toolbar-day-value");
+    const weekEl = this.menu.root.querySelector<HTMLElement>("#toolbar-week-value");
+    const monthEl = this.menu.root.querySelector<HTMLElement>("#toolbar-month-value");
+    const swatchEl = this.menu.root.querySelector<HTMLElement>("#toolbar-active-swatch");
+    const activeEl = this.menu.root.querySelector<HTMLElement>("#toolbar-active-label");
+    if (!dayEl || !weekEl || !monthEl || !swatchEl || !activeEl) return;
+    if (!cal) {
+      dayEl.textContent = "—";
+      weekEl.textContent = "—";
+      monthEl.textContent = "—";
+      swatchEl.style.background = "#888";
+      activeEl.textContent = "—";
+      return;
+    }
+    dayEl.textContent = `${cal.day} (d${cal.dayOfWeek})`;
+    weekEl.textContent = `${cal.week}`;
+    monthEl.textContent = `${cal.monthName} ${cal.month} (d${cal.dayOfMonth})`;
+    swatchEl.style.background = cal.activePlayerColor;
+    activeEl.textContent = `${cal.activePlayerName}'s turn`;
   }
 
   applyGameState(_state: GameState): void {

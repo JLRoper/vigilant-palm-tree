@@ -8,6 +8,12 @@ import { TERRAIN_COLORS, Terrain } from "../map/terrain";
 import { drawResourceIcons } from "./overlays/resourceIcon";
 import { SpriteProvider } from "./assets";
 
+export interface RenderOptions {
+  selectedHeroId: string | null;
+  selectedSettlementId: string | null;
+  colorForOwner: (ownerId: number | null) => string;
+}
+
 export class Renderer {
   constructor(
     private ctx: CanvasRenderingContext2D,
@@ -16,7 +22,13 @@ export class Renderer {
     private sprites: SpriteProvider
   ) {}
 
-  draw(hover: Axial | null, heroes: Hero[], path: Axial[], castles: readonly Castle[]) {
+  draw(
+    hover: Axial | null,
+    heroes: Hero[],
+    path: Axial[],
+    castles: readonly Castle[],
+    opts: RenderOptions,
+  ) {
     const ctx = this.ctx;
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -41,6 +53,7 @@ export class Renderer {
     for (const c of castles) {
       const { x, y } = axialToPixel(c.tile.q, c.tile.r);
       drawCastleSprite(ctx, this.sprites, c.level, x, y, HEX_SIZE);
+      this.drawCastleBorder(x, y, c, opts);
     }
 
     if (path.length > 0 && heroes.length > 0) {
@@ -84,15 +97,50 @@ export class Renderer {
     for (const hero of heroes) {
       const { x, y } = axialToPixel(hero.tile.q, hero.tile.r);
       drawHeroSprite(ctx, this.sprites, hero.faction, x + hero.pixelOffset.x, y + hero.pixelOffset.y);
-      ctx.fillStyle = hero.faction === "player" ? "#ffcc00" : "#ff4444";
+      const color = opts.colorForOwner(hero.ownerId);
+      ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(x + hero.pixelOffset.x, y + hero.pixelOffset.y + 22, 3, 0, Math.PI * 2);
+      ctx.arc(x + hero.pixelOffset.x, y + hero.pixelOffset.y + 22, 3.5, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.55)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      if (opts.selectedHeroId === hero.id) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(x + hero.pixelOffset.x, y + hero.pixelOffset.y, 14, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
 
     ctx.restore();
 
-    this.drawMinimap(heroes, path);
+    this.drawMinimap(heroes, path, opts);
+  }
+
+  private drawCastleBorder(
+    cx: number,
+    cy: number,
+    castle: Castle,
+    opts: RenderOptions,
+  ): void {
+    const ctx = this.ctx;
+    const color = opts.colorForOwner(castle.ownerId);
+    const isSelected = opts.selectedSettlementId === castle.id;
+    const radius = isSelected ? HEX_SIZE * 1.05 : HEX_SIZE * 0.95;
+    ctx.beginPath();
+    ctx.arc(cx, cy + HEX_SIZE * 0.55, radius, 0, Math.PI * 2);
+    if (castle.ownerId === null) {
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.setLineDash([4, 4]);
+    } else {
+      ctx.strokeStyle = color;
+      ctx.setLineDash([]);
+    }
+    ctx.lineWidth = isSelected ? 3 : 2;
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   private drawHex(cx: number, cy: number, t: Terrain) {
@@ -167,7 +215,7 @@ export class Renderer {
     }
   }
 
-  private drawMinimap(heroes: Hero[], path: Axial[]) {
+  private drawMinimap(heroes: Hero[], path: Axial[], opts: RenderOptions) {
     const ctx = this.ctx;
     const mmW = 180;
     const mmH = (this.map.height / this.map.width) * mmW;
@@ -216,7 +264,7 @@ export class Renderer {
     }
 
     for (const hero of heroes) {
-      ctx.fillStyle = hero.faction === "player" ? "#ffcc00" : "#ff4444";
+      ctx.fillStyle = opts.colorForOwner(hero.ownerId);
       ctx.fillRect(
         x0 + hero.tile.q * cellW - 1,
         y0 + hero.tile.r * cellH - 1,

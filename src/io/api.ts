@@ -29,6 +29,7 @@ export type Game = {
   created_at: string;
   updated_at: string;
   round: number;
+  day: number;
   active_player_id: number;
   players: Player[];
   heroes: Record<string, HeroState>;

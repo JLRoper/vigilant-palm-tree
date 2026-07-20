@@ -8,6 +8,7 @@ export interface Player {
   id: PlayerId;
   faction: Faction;
   name: string;
+  color: string;
   heroIds: HeroId[];
   settlementIds: SettlementId[];
   gold: number;
@@ -45,15 +46,47 @@ export type GamePhase =
 
 export interface GameState {
   round: number;
+  day: number;
   activePlayerId: PlayerId;
   players: Player[];
   heroes: Record<HeroId, HeroState>;
   settlements: Record<SettlementId, SettlementState>;
   phase: GamePhase;
   selectedHeroId: HeroId | null;
+  selectedSettlementId: SettlementId | null;
   dirty: boolean;
   castleSeed: number;
   castleCount: number;
+}
+
+export const DAYS_PER_WEEK = 7;
+export const DAYS_PER_MONTH = 30;
+
+export interface CalendarParts {
+  week: number;
+  dayOfWeek: number;
+  month: number;
+  dayOfMonth: number;
+}
+
+export function calendarFromDay(day: number): CalendarParts {
+  const d = Math.max(1, Math.floor(day));
+  return {
+    week: Math.floor((d - 1) / DAYS_PER_WEEK) + 1,
+    dayOfWeek: ((d - 1) % DAYS_PER_WEEK) + 1,
+    month: Math.floor((d - 1) / DAYS_PER_MONTH) + 1,
+    dayOfMonth: ((d - 1) % DAYS_PER_MONTH) + 1,
+  };
+}
+
+const MONTH_NAMES: readonly string[] = [
+  "Frostmoon", "Thawmist", "Greenrise", "Bloomtide", "Sunpeak", "Goldfall",
+  "Harvest", "Emberveil", "Hollowmoon", "Stillrime", "Longnight", "Stormwane",
+];
+
+export function monthName(month: number): string {
+  if (month < 1) return MONTH_NAMES[0];
+  return MONTH_NAMES[(month - 1) % MONTH_NAMES.length];
 }
 
 export const MOVEMENT_PER_TURN = 7;
@@ -80,8 +113,8 @@ export interface InitialStateOptions {
 
 function defaultPlayers(): Player[] {
   return [
-    { id: 0, faction: "player", name: "Human", heroIds: ["h0"], settlementIds: ["s0"], gold: 0 },
-    { id: 1, faction: "ai", name: "AI", heroIds: ["h1"], settlementIds: ["s1"], gold: 0 },
+    { id: 0, faction: "player", name: "Human", color: "#d62828", heroIds: ["h0"], settlementIds: ["s0"], gold: 0 },
+    { id: 1, faction: "ai", name: "AI", color: "#1d7dd1", heroIds: ["h1"], settlementIds: ["s1"], gold: 0 },
   ];
 }
 
@@ -144,9 +177,11 @@ export function createInitialState(opts?: InitialStateOptions): GameState {
     settlements: settlementsRecord,
     phase: { kind: "PLAYER_TURN", playerId: activePlayerId },
     selectedHeroId: null,
+    selectedSettlementId: null,
     dirty: false,
     castleSeed: opts?.seedCastleSeed ?? 0,
     castleCount: opts?.seedCastleCount ?? 3,
+    day: 1,
   };
 }
 
@@ -162,8 +197,19 @@ export function selectHero(state: GameState, heroId: HeroId): GameState {
 }
 
 export function clearSelection(state: GameState): GameState {
-  if (state.selectedHeroId === null) return state;
-  return { ...state, selectedHeroId: null };
+  if (state.selectedHeroId === null && state.selectedSettlementId === null) return state;
+  return { ...state, selectedHeroId: null, selectedSettlementId: null };
+}
+
+export function selectSettlement(state: GameState, settlementId: SettlementId): GameState {
+  if (!state.settlements[settlementId]) return state;
+  if (state.selectedSettlementId === settlementId) return state;
+  return { ...state, selectedSettlementId: settlementId, selectedHeroId: null };
+}
+
+export function clearSettlementSelection(state: GameState): GameState {
+  if (state.selectedSettlementId === null) return state;
+  return { ...state, selectedSettlementId: null };
 }
 
 export type StartMoveResult =
@@ -247,6 +293,7 @@ export function startBattle(state: GameState, attackerId: HeroId, defenderId: He
     ...state,
     phase: { kind: "BATTLE", attackerId, defenderId },
     selectedHeroId: null,
+    selectedSettlementId: null,
   };
 }
 
@@ -281,6 +328,7 @@ export function endTurn(state: GameState): GameState {
       ...state,
       phase: { kind: "ROUND_END", nextRound: state.round + 1 },
       selectedHeroId: null,
+      selectedSettlementId: null,
     };
   }
   const nextPlayer = state.players[currentIdx + 1];
@@ -293,6 +341,7 @@ export function endTurn(state: GameState): GameState {
     activePlayerId: nextPlayer.id,
     phase: newPhase,
     selectedHeroId: null,
+    selectedSettlementId: null,
   };
 }
 
@@ -335,10 +384,12 @@ export function advanceRound(state: GameState): GameState {
   return {
     ...state,
     round: state.round + 1,
+    day: state.day + 1,
     activePlayerId: 0,
     phase: { kind: "PLAYER_TURN", playerId: 0 },
     heroes: newHeroes,
     selectedHeroId: null,
+    selectedSettlementId: null,
   };
 }
 

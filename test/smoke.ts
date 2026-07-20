@@ -315,6 +315,27 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   if (!heroInfoMenuText.includes("End Turn")) {
     throw new Error("End Turn button missing from toolbar menu");
   }
+  if (!heroInfoMenuText.match(/Day\s*\d+/)) {
+    throw new Error(`Toolbar menu missing Day counter: ${heroInfoMenuText}`);
+  }
+  if (!heroInfoMenuText.match(/Week\s*\d+/)) {
+    throw new Error(`Toolbar menu missing Week counter: ${heroInfoMenuText}`);
+  }
+  if (!heroInfoMenuText.match(/Month/)) {
+    throw new Error(`Toolbar menu missing Month display: ${heroInfoMenuText}`);
+  }
+  if (!heroInfoMenuText.includes("turn")) {
+    throw new Error(`Toolbar menu missing active turn indicator: ${heroInfoMenuText}`);
+  }
+
+  const playerCount = await page.evaluate(() => {
+    const state = (window as any).__gameDebug?.getGameState?.();
+    return state?.players?.length ?? 0;
+  });
+  if (playerCount !== 3) {
+    throw new Error(`Expected 3 players, got ${playerCount}`);
+  }
+  console.log(`>> Player count: ${playerCount}`);
 
   const heroInfoVisible = await page.evaluate(() => {
     const els = Array.from(document.body.children);
@@ -358,7 +379,13 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   if (!settlementPanel.hasResourceRates) {
     throw new Error(`Settlement panel missing Resource rates: ${settlementPanel.snippet}`);
   }
-  if (!settlementPanel.hasNeutral) {
+
+  const hasNeutralSettlement = await page.evaluate(() => {
+    const dbg = (window as any).__gameDebug;
+    const settlements = dbg?.getSettlements?.() ?? [];
+    return settlements.some((s: any) => s.ownerId === null);
+  });
+  if (hasNeutralSettlement && !settlementPanel.hasNeutral) {
     throw new Error(`Settlement panel missing Neutral section: ${settlementPanel.snippet}`);
   }
 

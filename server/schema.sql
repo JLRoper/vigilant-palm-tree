@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS games (
   gold INTEGER NOT NULL DEFAULT 0,
   enemy_positions JSONB NOT NULL DEFAULT '[]'::jsonb,
   round INT NOT NULL DEFAULT 1,
+  day INT NOT NULL DEFAULT 1,
   active_player_id INT NOT NULL DEFAULT 0,
   players JSONB NOT NULL DEFAULT '[]'::jsonb,
   heroes JSONB NOT NULL DEFAULT '{}'::jsonb,

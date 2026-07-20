@@ -31,6 +31,7 @@ type FullGameRow = {
   gold: number;
   enemy_positions: EnemyPos[];
   round: number;
+  day: number;
   active_player_id: number;
   players: Player[];
   heroes: Record<string, HeroState>;
@@ -40,7 +41,7 @@ type FullGameRow = {
 };
 
 const GAME_COLUMNS =
-  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, active_player_id, players, heroes, settlements, created_at, updated_at";
+  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, created_at, updated_at";
 
 async function generateAndInsertTiles(
   client: PoolClient,
@@ -120,10 +121,10 @@ router.post("/games", async (req, res) => {
       const r = await client.query<FullGameRow>(
         `INSERT INTO games (
             name, seed, hero_q, hero_r, enemy_positions,
-            round, active_player_id, players, heroes, settlements
+            round, day, active_player_id, players, heroes, settlements
           ) VALUES (
             $1, $2, $3, $4, $5::jsonb,
-            $6, $7, $8::jsonb, $9::jsonb, $10::jsonb
+            $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb
           )
           ON CONFLICT (name) DO UPDATE
             SET seed = EXCLUDED.seed,
@@ -131,6 +132,7 @@ router.post("/games", async (req, res) => {
                 hero_r = EXCLUDED.hero_r,
                 enemy_positions = EXCLUDED.enemy_positions,
                 round = EXCLUDED.round,
+                day = EXCLUDED.day,
                 active_player_id = EXCLUDED.active_player_id,
                 players = EXCLUDED.players,
                 heroes = EXCLUDED.heroes,
@@ -144,6 +146,7 @@ router.post("/games", async (req, res) => {
           hero_r,
           JSON.stringify(enemy_positions),
           initial.round,
+          initial.day,
           initial.active_player_id,
           JSON.stringify(initial.players),
           JSON.stringify(initial.heroes),
@@ -407,11 +410,12 @@ router.post("/games/:name/end-turn", async (req, res) => {
         endingPlayer.gold += settlementCount;
       }
 
-      // Advance active_player_id; wrap when we go past the last player, incrementing round.
+      // Advance active_player_id; wrap when we go past the last player, incrementing round + day.
       const playerCount = players.length;
       const wrapped = playerCount > 0 && row.active_player_id + 1 >= playerCount;
       const nextActive = playerCount === 0 ? 0 : (row.active_player_id + 1) % playerCount;
       const newRound = wrapped ? row.round + 1 : row.round;
+      const newDay = wrapped ? (incomingState.day ?? row.day) + 1 : (incomingState.day ?? row.day);
 
       // Legacy `gold` column is the sum of all players' gold (backward compat).
       const legacyGold = sumPlayerGold(players);
@@ -419,15 +423,17 @@ router.post("/games/:name/end-turn", async (req, res) => {
       await client.query(
         `UPDATE games SET
            round = $1,
-           active_player_id = $2,
-           players = $3::jsonb,
-           heroes = $4::jsonb,
-           settlements = $5::jsonb,
-           gold = $6,
+           day = $2,
+           active_player_id = $3,
+           players = $4::jsonb,
+           heroes = $5::jsonb,
+           settlements = $6::jsonb,
+           gold = $7,
            updated_at = now()
-         WHERE id = $7`,
+         WHERE id = $8`,
         [
           newRound,
+          newDay,
           nextActive,
           JSON.stringify(players),
           JSON.stringify(incomingState.heroes),
@@ -468,6 +474,7 @@ router.post("/games/:name/end-turn", async (req, res) => {
         status: 200 as const,
         result: {
           round: newRound,
+          day: newDay,
           activePlayerId: nextActive,
           players,
         },

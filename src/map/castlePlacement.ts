@@ -12,6 +12,7 @@ export const MIN_CASTLE_SPACING = 4;
 
 export interface CastlePlacementOptions {
   castleSeed: number;
+  playerCount: number;
   castleCount: number;
 }
 
@@ -73,9 +74,8 @@ function levelForIndex(idx: number): CastleLevel {
   return 3;
 }
 
-function ownerForIndex(idx: number): number | null {
-  if (idx === 0) return 0;
-  if (idx === 1) return 1;
+function ownerForIndex(idx: number, playerCount: number): number | null {
+  if (idx < playerCount) return idx;
   return null;
 }
 
@@ -118,7 +118,7 @@ export function generateCastles(
       for (let i = 0; i < placed.length; i++) {
         const p = placed[i];
         const level = levelForIndex(i);
-        const ownerId = ownerForIndex(i);
+        const ownerId = ownerForIndex(i, opts.playerCount);
         const id = `castle-${level}-${p.q}-${p.r}`;
         castles.push(
           new Castle(id, { q: p.q, r: p.r }, level, ownerId, id, 0, 0, {}, null),
@@ -131,7 +131,7 @@ export function generateCastles(
   const fallback: Castle[] = [];
   for (let i = 0; i < count; i++) {
     const level = levelForIndex(i);
-    const ownerId = ownerForIndex(i);
+    const ownerId = ownerForIndex(i, opts.playerCount);
     const q = i % map.width;
     const r = Math.floor(i / map.width);
     const id = `castle-${level}-${q}-${r}`;

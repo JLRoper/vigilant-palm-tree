@@ -18,6 +18,7 @@ import {
 import { Toolbar } from "./views/toolbar";
 import { HeroInfoMenu } from "./views/heroInfoMenu";
 import { SettlementPanel } from "./views/settlementPanel";
+import { colorForOwner } from "./state/playerColors";
 import { listUserGames, rememberGame } from "./io/userGames";
 import { axialToPixel } from "./core/hex";
 import { Castle } from "./entities/settlement";
@@ -32,9 +33,15 @@ import {
   generateCastles,
 } from "./map/castlePlacement";
 import { buildTurnHooks } from "./game/turnHooks";
+import {
+  calendarFromDay,
+  monthName,
+  markSaved,
+  type GameState,
+  type HeroId,
+} from "./state/gameState";
+import type { CalendarSnapshot } from "./views/toolbar";
 import { TurnController } from "./state/turnController";
-import type { GameState, HeroId } from "./state/gameState";
-import { markSaved } from "./state/gameState";
 import { showBattleModal } from "./views/battleModal";
 
 const spriteProvider: SpriteProvider = createDefaultProvider(HERO_PROCEDURAL_DRAWERS);
@@ -76,6 +83,23 @@ function buildHooks() {
     gameMap: () => gameMap,
     rng,
   });
+}
+
+function buildCalendarSnapshot(state: GameState): CalendarSnapshot | null {
+  if (!state.players.length) return null;
+  const cal = calendarFromDay(state.day);
+  const activePlayer =
+    state.players.find((p) => p.id === state.activePlayerId) ?? state.players[0];
+  return {
+    day: state.day,
+    week: cal.week,
+    dayOfWeek: cal.dayOfWeek,
+    month: cal.month,
+    dayOfMonth: cal.dayOfMonth,
+    monthName: monthName(cal.month),
+    activePlayerName: activePlayer.name,
+    activePlayerColor: activePlayer.color,
+  };
 }
 
 function rebuildHeroesFromState(): void {
@@ -187,7 +211,11 @@ function refreshHeroInfoMenu(): void {
 function draw(): void {
   if (!renderer) return;
   renderer.map = gameMap;
-  renderer.draw(view.hover, getHeroesArray(), view.path, getCastlesArray());
+  renderer.draw(view.hover, getHeroesArray(), view.path, getCastlesArray(), {
+    selectedHeroId: gameState.selectedHeroId,
+    selectedSettlementId: gameState.selectedSettlementId,
+    colorForOwner,
+  });
 }
 
 function drawGame(): void {
@@ -311,6 +339,7 @@ async function startFreshStarter(): Promise<void> {
     const castleSeed = defaultCastleSeedFromMapSeed(MAP_SEED);
     const castles = generateCastles(gameMap, {
       castleSeed,
+      playerCount: 3,
       castleCount: CASTLE_COUNT_DEFAULT,
     });
     const playerCastle = castles.find((c) => c.ownerId === 0);
@@ -399,6 +428,7 @@ function initialize(): void {
       backendOk: () => backendOk,
       hasActiveGame: () => activeGameId !== null,
       canEndTurnNow: () => canEndTurn(gameState),
+      getCalendar: () => buildCalendarSnapshot(gameState),
     },
     callbacks: {
       onNew: async ({ name, seed, castleSeed, castleCount }) => {
@@ -407,19 +437,18 @@ function initialize(): void {
             ? castleSeed
             : defaultCastleSeedFromMapSeed(seed);
         const effectiveCastleCount = castleCount ?? CASTLE_COUNT_DEFAULT;
+        const playerCount = 3;
         const castles = generateCastles(gameMap, {
           castleSeed: effectiveCastleSeed,
-          castleCount: effectiveCastleCount,
+          playerCount,
+          castleCount: Math.max(effectiveCastleCount, playerCount),
         });
         const playerCastle = castles.find((c) => c.ownerId === 0);
-        const aiCastle = castles.find((c) => c.ownerId === 1);
+        const aiCastles = castles.filter((c) => c.ownerId !== null && c.ownerId !== 0);
         const heroQ = playerCastle?.tile.q ?? 6;
         const heroR = playerCastle?.tile.r ?? 5;
-        const enemyPositions = aiCastle
-          ? [
-              { q: aiCastle.tile.q, r: aiCastle.tile.r },
-              { q: aiCastle.tile.q + 3, r: aiCastle.tile.r + 1 },
-            ]
+        const enemyPositions = aiCastles.length
+          ? aiCastles.map((c) => ({ q: c.tile.q, r: c.tile.r }))
           : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
         const created = await api.createGame(name, seed, heroQ, heroR, enemyPositions);
         const tiles = await api.getTiles(created.name);
