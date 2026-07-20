@@ -11,7 +11,9 @@
     "preview": "vite preview",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "test": "tsx test/smoke.ts"
+    "test": "tsx test/smoke.ts",
+    "sprites:generate": "node tools/sprites/pixel-gen.mjs",
+    "sprites:preview": "node tools/sprites/generate-preview.mjs"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

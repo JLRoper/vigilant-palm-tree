@@ -6,12 +6,14 @@ import { Castle, CASTLES } from "../entities/settlement";
 import { GameMap } from "../map/gameMap";
 import { TERRAIN_COLORS, Terrain } from "../map/terrain";
 import { drawResourceIcons } from "./overlays/resourceIcon";
+import { SpriteProvider } from "./assets";
 
 export class Renderer {
   constructor(
     private ctx: CanvasRenderingContext2D,
     public map: GameMap,
-    private camera: Camera
+    private camera: Camera,
+    private sprites: SpriteProvider
   ) {}
 
   draw(hover: Axial | null, heroes: Hero[], path: Axial[], castles: Castle[] = CASTLES) {
@@ -34,11 +36,11 @@ export class Renderer {
       }
     }
 
-    drawResourceIcons(ctx, this.map);
+    drawResourceIcons(ctx, this.sprites, this.map);
 
     for (const c of castles) {
       const { x, y } = axialToPixel(c.tile.q, c.tile.r);
-      drawCastleSprite(ctx, c.level, x, y, HEX_SIZE);
+      drawCastleSprite(ctx, this.sprites, c.level, x, y, HEX_SIZE);
     }
 
     if (path.length > 0 && heroes.length > 0) {
@@ -81,7 +83,7 @@ export class Renderer {
 
     for (const hero of heroes) {
       const { x, y } = axialToPixel(hero.tile.q, hero.tile.r);
-      drawHeroSprite(ctx, x + hero.pixelOffset.x, y + hero.pixelOffset.y, 18, hero.faction);
+      drawHeroSprite(ctx, this.sprites, hero.faction, x + hero.pixelOffset.x, y + hero.pixelOffset.y);
       ctx.fillStyle = hero.faction === "player" ? "#ffcc00" : "#ff4444";
       ctx.beginPath();
       ctx.arc(x + hero.pixelOffset.x, y + hero.pixelOffset.y + 22, 3, 0, Math.PI * 2);

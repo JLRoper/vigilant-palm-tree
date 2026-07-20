@@ -3,7 +3,8 @@ import { GameMap } from "./map/gameMap";
 import { Renderer } from "./render/renderer";
 import { Camera } from "./render/camera";
 import { api, type Game, type TileRow } from "./io/api";
-import { preloadCastleSprites, preloadResourceSprites } from "./render/sprites";
+import { createDefaultProvider, SpriteProvider } from "./render/assets";
+import { HERO_PROCEDURAL_DRAWERS } from "./render/sprites";
 import { rng } from "./core/rng";
 import { AdventureView, MAP_SEED } from "./views/adventureView";
 import { findPath } from "./map/pathfinding";
@@ -25,8 +26,8 @@ import type { GameState, HeroId } from "./state/gameState";
 import { markSaved } from "./state/gameState";
 import { showBattleModal } from "./views/battleModal";
 
-preloadCastleSprites();
-preloadResourceSprites();
+const spriteProvider: SpriteProvider = createDefaultProvider(HERO_PROCEDURAL_DRAWERS);
+spriteProvider.preload();
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
@@ -303,7 +304,7 @@ function initialize(): void {
   rebuildHeroesFromState();
   rebuildSettlementsFromState();
 
-  renderer = new Renderer(ctx, gameMap, camera);
+  renderer = new Renderer(ctx, gameMap, camera, spriteProvider);
 
   turnController = new TurnController(gameState, buildHooks());
 
