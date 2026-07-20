@@ -51,6 +51,7 @@ export class HeroInfoMenu {
 
   private onTransfer?: TransferHandler;
   private settlementAtTile: SettlementState | null = null;
+  private troopsEl: HTMLElement;
 
   constructor(opts: HeroInfoMenuOptions) {
     this.onTransfer = opts.onTransfer;
@@ -187,6 +188,23 @@ export class HeroInfoMenu {
 
     body.appendChild(movementSection);
 
+    const troopsRow = document.createElement("div");
+    Object.assign(troopsRow.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "baseline",
+      fontSize: "11px",
+      opacity: "0.85",
+      marginTop: "4px",
+    });
+    const troopsLabel = document.createElement("span");
+    troopsLabel.textContent = "Troops";
+    troopsRow.appendChild(troopsLabel);
+    this.troopsEl = document.createElement("span");
+    this.troopsEl.style.fontVariantNumeric = "tabular-nums";
+    troopsRow.appendChild(this.troopsEl);
+    body.appendChild(troopsRow);
+
     const statsBlock = document.createElement("div");
     Object.assign(statsBlock.style, {
       marginTop: "4px",
@@ -259,6 +277,7 @@ export class HeroInfoMenu {
     const pct = Math.max(0, Math.min(1, remaining / MOVEMENT_PER_TURN)) * 100;
     this.movementFill.style.width = `${pct}%`;
     this.movementLabel.textContent = `${remaining.toFixed(1)} / ${MOVEMENT_PER_TURN}`;
+    this.troopsEl.textContent = `${hero.troops}  ·  Upkeep: ${hero.troops}g/week`;
 
     this.settlementAtTile = null;
     for (const s of Object.values(state.settlements)) {

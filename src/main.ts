@@ -453,6 +453,17 @@ function initialize(): void {
       gameState = turnController.getState();
       refreshAll();
     },
+    onTrade: (fromId, toId, resource, amount) => {
+      if (resource === "gold") {
+        return { ok: false, reason: "gold_not_tradeable" };
+      }
+      const result = turnController.tradeResources(fromId, toId, resource, amount);
+      if (result.ok) {
+        gameState = turnController.getState();
+        refreshAll();
+      }
+      return result;
+    },
   });
 
   toolbar = new Toolbar({
@@ -555,6 +566,17 @@ function initialize(): void {
       syncStateFromController();
       refreshAll();
       return ok;
+    },
+    tradeResources: (
+      fromId: string,
+      toId: string,
+      resource: "wood" | "stone" | "iron" | "arcane",
+      amount: number,
+    ) => {
+      const result = turnController.tradeResources(fromId, toId, resource, amount);
+      syncStateFromController();
+      refreshAll();
+      return result;
     },
     teleportHero: (id: HeroId, q: number, r: number) => {
       const state = turnController.getState();

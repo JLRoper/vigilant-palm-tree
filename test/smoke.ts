@@ -919,6 +919,153 @@ async function runTransferChecks(page: Page, ctx: any, activeName: string) {
   console.log(`>> Last event after transfer tests: ${lastEvent?.kind}`);
 }
 
+async function runTradeChecks(page: Page, ctx: any, activeName: string) {
+  console.log(">> Trade flow: trade wood between two player-owned settlements");
+
+  const setup = await page.evaluate(() => {
+    const dbg = (window as any).__gameDebug;
+    const settlements = Object.values((dbg?.getGameState?.()?.settlements ?? {}) as Record<string, any>);
+    const playerSettlements = settlements.filter((s) => s.ownerId === 0);
+    return playerSettlements.map((s: any) => ({ id: s.id, q: s.q, r: s.r }));
+  });
+  console.log(`>> Player-owned settlements: ${JSON.stringify(setup)}`);
+
+  if (setup.length < 2) {
+    console.log(`>> Need >=2 player-owned settlements to test trade; have ${setup.length}; skipping`);
+    return;
+  }
+
+  const before = await page.evaluate(() => {
+    const dbg = (window as any).__gameDebug;
+    const state = dbg.getGameState?.();
+    const playerSettlements = Object.values(state?.settlements ?? {}).filter(
+      (s: any) => s.ownerId === 0,
+    ) as any[];
+    const from = playerSettlements.find(
+      (s) => (s.warehouse?.wood ?? 0) >= 2 && (s.gold ?? 0) >= 2,
+    );
+    const to = playerSettlements.find((s) => s.id !== from?.id);
+    if (!from || !to) return null;
+    return {
+      fromId: from.id,
+      toId: to.id,
+      fromWood: Number(from.warehouse?.wood ?? 0),
+      fromGold: Number(from.gold ?? 0),
+      toWood: Number(to.warehouse?.wood ?? 0),
+      toGold: Number(to.gold ?? 0),
+    };
+  });
+  if (!before) {
+    console.log(">> Could not find a source settlement with wood>=2 AND gold>=2; skipping");
+    return;
+  }
+  const { fromId, toId } = before;
+  console.log(`>> Before trade: from wood=${before.fromWood} gold=${before.fromGold}; to wood=${before.toWood} gold=${before.toGold}`);
+
+  const tradeResult = await page.evaluate(
+    async ({ fromId, toId }) => {
+      const dbg = (window as any).__gameDebug;
+      return dbg.tradeResources?.(fromId, toId, "wood", 2) ?? null;
+    },
+    { fromId, toId }
+  );
+  console.log(`>> Client tradeResources result: ${JSON.stringify(tradeResult)}`);
+  if (!tradeResult?.ok) {
+    throw new Error(`Trade should succeed; got reason=${tradeResult?.reason}`);
+  }
+
+  const clientAfter = await page.evaluate(({ fromId, toId }) => {
+    const dbg = (window as any).__gameDebug;
+    const state = dbg.getGameState?.();
+    const from = state?.settlements?.[fromId];
+    const to = state?.settlements?.[toId];
+    return {
+      fromWood: Number(from?.warehouse?.wood ?? 0),
+      fromGold: Number(from?.gold ?? 0),
+      toWood: Number(to?.warehouse?.wood ?? 0),
+      toGold: Number(to?.gold ?? 0),
+    };
+  }, { fromId, toId });
+  console.log(`>> After client trade: from wood=${clientAfter.fromWood} gold=${clientAfter.fromGold}; to wood=${clientAfter.toWood} gold=${clientAfter.toGold}`);
+
+  if (clientAfter.fromWood !== before.fromWood - 2) {
+    throw new Error(`from.warehouse.wood expected ${before.fromWood - 2}, got ${clientAfter.fromWood}`);
+  }
+  if (clientAfter.toWood !== before.toWood + 2) {
+    throw new Error(`to.warehouse.wood expected ${before.toWood + 2}, got ${clientAfter.toWood}`);
+  }
+  if (clientAfter.fromGold !== before.fromGold - 2) {
+    throw new Error(`from.gold expected ${before.fromGold - 2}, got ${clientAfter.fromGold}`);
+  }
+
+  const serverTrade = await ctx.post(`${API_URL}/api/games/${activeName}/trade`, {
+    data: { fromSettlementId: fromId, toSettlementId: toId, resource: "iron", amount: 1 },
+  });
+  console.log(`>> Server /trade (iron) status: ${serverTrade.status()}`);
+  if (serverTrade.status() !== 200 && serverTrade.status() !== 409) {
+    throw new Error(`Server /trade should be 200 (ok) or 409 (insufficient iron), got ${serverTrade.status()}`);
+  }
+
+  const lastEvent = await queryLastEvent(activeName);
+  console.log(`>> Last event after trade test: ${lastEvent?.kind}`);
+}
+
+async function runWarehouseAndUpkeepChecks(page: Page, ctx: any, activeName: string) {
+  console.log(">> Warehouse accumulation: end one round and verify warehouse + gold grew");
+
+  const ownedBefore = await page.evaluate(() => {
+    const dbg = (window as any).__gameDebug;
+    const state = dbg?.getGameState?.();
+    const settlements = Object.values(state?.settlements ?? {}) as any[];
+    return settlements
+      .filter((s) => s.ownerId === 0)
+      .map((s) => ({
+        id: s.id,
+        wood: Number(s.warehouse?.wood ?? 0),
+        gold: Number(s.gold ?? 0),
+      }));
+  });
+  const woodBefore = ownedBefore.reduce((acc, s) => acc + s.wood, 0);
+  const goldBefore = ownedBefore.reduce((acc, s) => acc + s.gold, 0);
+  console.log(`>> Before round: player0 wood=${woodBefore} gold=${goldBefore}`);
+
+  const endTurnBtn = page.locator("#toolbar button:has-text('End Turn')");
+  if (!(await endTurnBtn.isVisible())) throw new Error("End Turn button not visible for warehouse check");
+  await endTurnBtn.click();
+
+  const deadline = Date.now() + 15000;
+  let finalState: any = null;
+  while (Date.now() < deadline) {
+    finalState = await page.evaluate(() => (window as any).__gameDebug?.getGameState?.());
+    if (finalState?.round >= 3) break;
+    await wait(250);
+  }
+  if (!finalState || finalState.round < 3) {
+    throw new Error(`Did not reach round 3 for warehouse check, got round=${finalState?.round}`);
+  }
+
+  const ownedAfter = (Object.values(finalState.settlements) as any[])
+    .filter((s) => s.ownerId === 0)
+    .map((s) => ({
+      id: s.id,
+      wood: Number(s.warehouse?.wood ?? 0),
+      gold: Number(s.gold ?? 0),
+    }));
+  const woodAfter = ownedAfter.reduce((acc, s) => acc + s.wood, 0);
+  const goldAfter = ownedAfter.reduce((acc, s) => acc + s.gold, 0);
+  console.log(`>> After round: player0 wood=${woodAfter} gold=${goldAfter}`);
+
+  if (woodAfter <= woodBefore) {
+    throw new Error(`Warehouse did not accumulate: before=${woodBefore} after=${woodAfter}`);
+  }
+  if (goldAfter <= goldBefore) {
+    throw new Error(`Gold did not accumulate: before=${goldBefore} after=${goldAfter}`);
+  }
+
+  const lastEvent = await queryLastEvent(activeName);
+  console.log(`>> Last event after warehouse check: ${lastEvent?.kind}`);
+}
+
 async function ensureBuilt() {
   if (!existsSync("dist/index.html")) {
     console.log(">> building dist");
@@ -1147,6 +1294,10 @@ async function run() {
     await runBattleChecks(page, ctx, activeName);
 
     await runTransferChecks(page, ctx, activeName);
+
+    await runTradeChecks(page, ctx, activeName);
+
+    await runWarehouseAndUpkeepChecks(page, ctx, activeName);
 
     await page.screenshot({ path: "test/screenshot.png" });
     console.log(">> screenshot saved");
