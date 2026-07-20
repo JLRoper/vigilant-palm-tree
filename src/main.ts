@@ -40,7 +40,7 @@ import {
   type GameState,
   type HeroId,
 } from "./state/gameState";
-import { playerIncome } from "./economy/income";
+import { playerIncome, playerWealth } from "./economy/income";
 import type { CalendarSnapshot } from "./views/toolbar";
 import { TurnController } from "./state/turnController";
 import { showBattleModal } from "./views/battleModal";
@@ -101,6 +101,7 @@ function buildCalendarSnapshot(state: GameState): CalendarSnapshot | null {
     activePlayerName: activePlayer.name,
     activePlayerColor: activePlayer.color,
     nextTurnGold: playerIncome(state, activePlayer.id),
+    wealth: playerWealth(state, activePlayer.id),
   };
 }
 
@@ -145,6 +146,7 @@ function syncHeroVisualsToState(): void {
     if (!v) continue;
     v.movementRemaining = h.movementRemaining;
     v.trail = (h.trail ?? []).map((p) => ({ q: p.q, r: p.r }));
+    v.gold = h.gold ?? 0;
     if (v.moving) continue;
     if (v.tile.q === h.q && v.tile.r === h.r) continue;
     const start: Axial = { ...v.tile };
@@ -213,9 +215,9 @@ function refreshHeroInfoMenu(): void {
     return;
   }
   if (heroInfoMenu.getCurrentHeroId() !== selectedId) {
-    heroInfoMenu.show(hero, player);
+    heroInfoMenu.show(hero, player, gameState);
   } else {
-    heroInfoMenu.update(hero, player);
+    heroInfoMenu.update(hero, gameState);
   }
 }
 
@@ -302,7 +304,7 @@ async function manualSave(): Promise<void> {
       hero_q: playerHero?.tile.q ?? 0,
       hero_r: playerHero?.tile.r ?? 0,
       turn: gameState.round,
-      gold: gameState.players[0]?.gold ?? 0,
+      gold: playerWealth(gameState, 0),
       enemy_positions: getHeroesArray()
         .filter((h) => h.ownerId !== 0)
         .map((h) => ({ q: h.tile.q, r: h.tile.r })),
@@ -431,7 +433,19 @@ function initialize(): void {
 
   hudHandles = buildHud(hud);
 
-  heroInfoMenu = new HeroInfoMenu({ parent: document.body });
+  heroInfoMenu = new HeroInfoMenu({
+    parent: document.body,
+    onTransfer: (heroId, settlementId, direction) => {
+      const result = turnController.transferGold(heroId, settlementId, direction);
+      if (result.ok) {
+        gameState = turnController.getState();
+        rebuildHeroesFromState();
+        syncHeroVisualsToState();
+        refreshAll();
+      }
+      return result;
+    },
+  });
   settlementPanel = new SettlementPanel({
     parent: document.body,
     onSelect: (id) => {
@@ -581,6 +595,7 @@ function initialize(): void {
         ownerId: h.ownerId,
         movementRemaining: h.movementRemaining,
         trail: h.trail.map((p) => ({ q: p.q, r: p.r })),
+        gold: h.gold,
       })),
     getSettlements: () =>
       getCastlesArray().map((c) => ({

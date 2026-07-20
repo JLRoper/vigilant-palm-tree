@@ -217,3 +217,27 @@ export async function resolveBattle(
   );
   return json<ResolveBattleResult>(res);
 }
+
+export type TransferGoldResult = {
+  hero: HeroState;
+  settlement: SettlementState;
+};
+
+export async function transferGold(
+  name: string,
+  payload: {
+    heroId: string;
+    settlementId: string;
+    direction: "deposit" | "withdraw";
+  }
+): Promise<TransferGoldResult> {
+  const res = await fetchWithTimeout(
+    `${BASE}/games/${encodeURIComponent(name)}/transfer`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  return json<TransferGoldResult>(res);
+}

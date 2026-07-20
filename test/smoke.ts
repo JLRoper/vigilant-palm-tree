@@ -217,9 +217,9 @@ async function runNewLoadSaveFlow(
 async function queryDbRow(name: string): Promise<{
   round: number;
   active_player_id: number;
-  players: Array<{ id: number; gold: number; faction: string; settlementIds?: string[] }>;
-  heroes: Record<string, { id: string; ownerId: number; q: number; r: number }>;
-  settlements: Record<string, { id: string; ownerId: number | null; population: number; goldTax: number }>;
+  players: Array<{ id: number; faction: string; settlementIds?: string[]; heroIds?: string[] }>;
+  heroes: Record<string, { id: string; ownerId: number; q: number; r: number; gold?: number }>;
+  settlements: Record<string, { id: string; ownerId: number | null; population: number; goldTax: number; gold?: number }>;
 }> {
   const pool = new Pool({
     host: process.env.PGHOST ?? "localhost",
@@ -490,7 +490,6 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   const preTurnRow = await queryDbRow(activeName);
   const preTurnPlayer0 = preTurnRow.players.find((p) => p.id === 0);
   if (!preTurnPlayer0) throw new Error("players[0] missing before end-turn");
-  const preTurnGold = preTurnPlayer0.gold;
   const ownedSettlementIds = preTurnPlayer0.settlementIds ?? [];
   const expectedIncome = ownedSettlementIds.reduce((acc, sid) => {
     const s = preTurnRow.settlements[sid];
@@ -498,7 +497,13 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
     if (s.ownerId !== 0) return acc;
     return acc + (s.population ?? 0) * (s.goldTax ?? 0);
   }, 0);
-  console.log(`>> pre-turn: players[0].gold=${preTurnGold}, expected income=${expectedIncome}`);
+  const preSettlementGold: Record<string, number> = {};
+  for (const sid of ownedSettlementIds) {
+    preSettlementGold[sid] = Number(preTurnRow.settlements[sid]?.gold ?? 0);
+  }
+  console.log(
+    `>> pre-turn: expected income=${expectedIncome}; pre-treasury=${JSON.stringify(preSettlementGold)}`
+  );
 
   await endTurnBtn.click();
 
@@ -531,13 +536,37 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   }
   const player0 = dbRow.players.find((p) => p.id === 0);
   if (!player0) throw new Error("players[0] missing in DB row");
-  const goldDelta = player0.gold - preTurnGold;
-  console.log(`>> DB confirms round=2 active=0 players[0].gold=${player0.gold} (delta=${goldDelta})`);
-  if (goldDelta !== expectedIncome) {
+
+  let treasuryDelta = 0;
+  for (const sid of ownedSettlementIds) {
+    const before = preSettlementGold[sid] ?? 0;
+    const after = Number(dbRow.settlements[sid]?.gold ?? 0);
+    const expected = before + expectedIncome / ownedSettlementIds.length;
+    if (Math.abs(after - expected) > 1) {
+      throw new Error(
+        `Treasury mismatch for ${sid}: expected ~${expected}, got ${after} (before=${before})`
+      );
+    }
+    treasuryDelta += after - before;
+  }
+  console.log(
+    `>> DB treasury delta for owned settlements: ${treasuryDelta} (expected ${expectedIncome})`
+  );
+  if (Math.abs(treasuryDelta - expectedIncome) > ownedSettlementIds.length) {
     throw new Error(
-      `Expected players[0].gold delta=${expectedIncome} (Σ population×goldTax), got ${goldDelta}`
+      `Expected treasury delta=${expectedIncome}, got ${treasuryDelta}`
     );
   }
+
+  const playerHeroWealth = Object.values(dbRow.heroes)
+    .filter((h) => h.ownerId === 0)
+    .reduce((acc, h) => acc + (Number(h.gold) || 0), 0);
+  const playerSettlementWealth = Object.values(dbRow.settlements)
+    .filter((s) => s.ownerId === 0)
+    .reduce((acc, s) => acc + (Number(s.gold) || 0), 0);
+  console.log(
+    `>> Player0 wealth: heroPurses=${playerHeroWealth} + treasuries=${playerSettlementWealth} = ${playerHeroWealth + playerSettlementWealth}`
+  );
 
   const toolbarText = await page
     .locator("#toolbar button:has-text('End Turn')")
@@ -546,7 +575,10 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   if (!toolbarText.match(/Income\s*\+\d+g\/turn/)) {
     throw new Error(`Toolbar menu missing "Income +Xg/turn" display: ${toolbarText}`);
   }
-  console.log(`>> Toolbar shows Income +Xg/turn`);
+  if (!toolbarText.match(/Wealth\s*\d+/)) {
+    throw new Error(`Toolbar menu missing "Wealth: X" display: ${toolbarText}`);
+  }
+  console.log(`>> Toolbar shows Income +Xg/turn and Wealth: Xg`);
 
   const settingsOpen = await page.evaluate(() => {
     const gear = document.querySelector("#toolbar button[title='Settings']");
@@ -627,18 +659,17 @@ async function runSettlementCaptureChecks(page: Page, ctx: any, activeName: stri
       const playerHero = dbg?.getHeroes?.().find((h: any) => h.ownerId === 0);
       const state = dbg?.getGameState?.();
       const settlement = state?.settlements?.[id];
-      const player = state?.players?.find((p: any) => p.id === 0);
       return {
         heroId: playerHero?.id ?? null,
         heroQ: playerHero?.q ?? null,
         heroR: playerHero?.r ?? null,
+        heroGold: playerHero?.gold ?? 0,
         ownerId: settlement?.ownerId ?? null,
-        playerGold: player?.gold ?? null,
       };
     },
     { id: target.id }
   );
-  console.log(`>> Before capture: hero=${before.heroId} at (${before.heroQ},${before.heroR}); settlement owner=${before.ownerId}; gold=${before.playerGold}`);
+  console.log(`>> Before capture: hero=${before.heroId} at (${before.heroQ},${before.heroR}); settlement owner=${before.ownerId}; heroPurse=${before.heroGold}`);
 
   const teleported = await page.evaluate(
     ({ id, q, r }) => (window as any).__gameDebug.teleportHero?.(id, q, r),
@@ -660,24 +691,25 @@ async function runSettlementCaptureChecks(page: Page, ctx: any, activeName: stri
   const after = await page.evaluate(
     ({ id }) => {
       const dbg = (window as any).__gameDebug;
+      const playerHero = dbg?.getHeroes?.().find((h: any) => h.ownerId === 0);
       const state = dbg?.getGameState?.();
       const settlement = state?.settlements?.[id];
       const player = state?.players?.find((p: any) => p.id === 0);
       return {
         ownerId: settlement?.ownerId ?? null,
-        playerGold: player?.gold ?? null,
+        heroGold: playerHero?.gold ?? 0,
         playerSettlements: (player?.settlementIds ?? []).length,
       };
     },
     { id: target.id }
   );
-  console.log(`>> After capture: settlement owner=${after.ownerId}; gold=${after.playerGold}; player owns ${after.playerSettlements} settlements`);
+  console.log(`>> After capture: settlement owner=${after.ownerId}; heroPurse=${after.heroGold}; player owns ${after.playerSettlements} settlements`);
 
   if (after.ownerId !== 0) {
     throw new Error(`Capture failed: settlement ownerId is ${after.ownerId}, expected 0`);
   }
-  if ((after.playerGold ?? 0) <= (before.playerGold ?? 0)) {
-    throw new Error(`Capture did not award gold: before=${before.playerGold} after=${after.playerGold}`);
+  if ((after.heroGold ?? 0) <= (before.heroGold ?? 0)) {
+    throw new Error(`Capture did not award gold to hero purse: before=${before.heroGold} after=${after.heroGold}`);
   }
   if (after.playerSettlements <= (await queryDbRow(activeName)).players?.[0]?.settlementIds?.length) {
     console.log(">> Note: DB settlementIds may not have updated until next save");
@@ -705,6 +737,43 @@ async function runBattleChecks(page: Page, ctx: any, activeName: string) {
     defenderId
   );
   if (!defenderPos) throw new Error("defender position not found");
+
+  // Give the defender some gold so we can verify winner-takes-all persists.
+  // Teleport defender to its own settlement and call the server transfer endpoint
+  // so the gold is persisted (client-only transfers don't survive to battle resolution).
+  const defenderSettlement = await page.evaluate(
+    (id: string) => {
+      const dbg = (window as any).__gameDebug;
+      const state = dbg?.getGameState?.();
+      const hero = state?.heroes?.[id];
+      if (!hero) return null;
+      for (const s of Object.values(state.settlements ?? {})) {
+        if (s.ownerId === hero.ownerId) return { id: s.id, q: s.q, r: s.r };
+      }
+      return null;
+    },
+    defenderId
+  );
+  if (defenderSettlement) {
+    const teleDef = await page.evaluate(
+      ({ id, q, r }) => (window as any).__gameDebug.teleportHero?.(id, q, r),
+      { id: defenderId, q: defenderSettlement.q, r: defenderSettlement.r }
+    );
+    if (!teleDef) throw new Error("teleportHero for defender failed");
+    await wait(150);
+    const withdrawRes = await ctx.post(`${API_URL}/api/games/${activeName}/transfer`, {
+      data: { heroId: defenderId, settlementId: defenderSettlement.id, direction: "withdraw" },
+    });
+    if (!withdrawRes.ok()) {
+      throw new Error(`Server transfer (defender withdraw) failed: ${withdrawRes.status()}`);
+    }
+    console.log(`>> Defender withdraw persisted via API`);
+  }
+
+  const preBattleDb = await queryDbRow(activeName);
+  const defenderGoldBeforeBattle = Number(preBattleDb.heroes[defenderId]?.gold ?? 0);
+  const attackerGoldBeforeBattle = Number(preBattleDb.heroes["p0-hero"]?.gold ?? 0);
+  console.log(`>> DB before battle: attacker=${attackerGoldBeforeBattle} defender=${defenderGoldBeforeBattle}`);
 
   const adjacentOffset = { q: defenderPos.q - 1, r: defenderPos.r };
   const teleported = await page.evaluate(
@@ -746,7 +815,108 @@ async function runBattleChecks(page: Page, ctx: any, activeName: string) {
   if (dbRowAfterBattle.heroes[defenderId]) {
     throw new Error(`DB heroes JSON still has defender ${defenderId}`);
   }
-  console.log(">> Battle resolved and defender removed from DB");
+  const attackerAfter = dbRowAfterBattle.heroes["p0-hero"];
+  const expectedAttackerGold = attackerGoldBeforeBattle + defenderGoldBeforeBattle;
+  console.log(
+    `>> Battle loot: attacker purse ${attackerGoldBeforeBattle} + defender purse ${defenderGoldBeforeBattle} = expected ${expectedAttackerGold}; got ${attackerAfter?.gold ?? "n/a"}`
+  );
+  if (!attackerAfter || Number(attackerAfter.gold ?? 0) !== expectedAttackerGold) {
+    throw new Error(
+      `Combat loot mismatch: expected attacker.gold=${expectedAttackerGold}, got ${attackerAfter?.gold ?? "n/a"}`
+    );
+  }
+  console.log(">> Battle resolved, defender removed, loot transferred to attacker (winner takes all)");
+}
+
+async function runTransferChecks(page: Page, ctx: any, activeName: string) {
+  console.log(">> Transfer flow: teleport player hero onto own settlement, withdraw");
+
+  const settlementInfo = await page.evaluate(() => {
+    const dbg = (window as any).__gameDebug;
+    const settlements = dbg?.getSettlements?.() ?? [];
+    return settlements
+      .filter((s: any) => s.ownerId === 0)
+      .map((s: any) => ({ id: s.id, q: s.q, r: s.r }));
+  });
+  if (settlementInfo.length === 0) {
+    console.log(">> No owned settlement to test transfer against, skipping");
+    return;
+  }
+  const target = settlementInfo[0];
+
+  const pre = await page.evaluate(
+    ({ id }) => {
+      const dbg = (window as any).__gameDebug;
+      const state = dbg?.getGameState?.();
+      const hero = state?.heroes?.["p0-hero"];
+      const settlement = state?.settlements?.[id];
+      return { heroGold: Number(hero?.gold ?? 0), treasuryGold: Number(settlement?.gold ?? 0) };
+    },
+    { id: target.id }
+  );
+  console.log(`>> Before transfer: hero=${pre.heroGold} treasury=${pre.treasuryGold}`);
+
+  const teleported = await page.evaluate(
+    ({ q, r }) => (window as any).__gameDebug.teleportHero?.("p0-hero", q, r),
+    { q: target.q, r: target.r }
+  );
+  if (!teleported) throw new Error("teleportHero for transfer failed");
+
+  const transferResult = await page.evaluate(
+    async ({ id }) => {
+      const dbg = (window as any).__gameDebug;
+      const tc = dbg?.getTurnController?.();
+      if (!tc) return { ok: false, reason: "no_tc" };
+      const heroState = dbg.getState?.()?.heroes?.["p0-hero"];
+      if (!heroState) return { ok: false, reason: "no_hero" };
+      const before = Number(heroState.gold ?? 0);
+      const result = tc.transferGold("p0-hero", id, "deposit");
+      const after = Number(dbg.getState?.()?.heroes?.["p0-hero"]?.gold ?? 0);
+      return { ok: result.ok, reason: result.reason ?? "", before, after };
+    },
+    { id: target.id }
+  );
+  console.log(`>> Deposit transfer: ${JSON.stringify(transferResult)}`);
+  if (!transferResult.ok) {
+    throw new Error(`Transfer (deposit) failed: ${transferResult.reason}`);
+  }
+  if (transferResult.after !== 0) {
+    throw new Error(`Hero purse should be 0 after deposit, got ${transferResult.after}`);
+  }
+
+  const withdrawResult = await page.evaluate(
+    async ({ id }) => {
+      const dbg = (window as any).__gameDebug;
+      const tc = dbg?.getTurnController?.();
+      if (!tc) return { ok: false, reason: "no_tc" };
+      const heroState = dbg.getState?.()?.heroes?.["p0-hero"];
+      const before = Number(heroState?.gold ?? 0);
+      const result = tc.transferGold("p0-hero", id, "withdraw");
+      const after = Number(dbg.getState?.()?.heroes?.["p0-hero"]?.gold ?? 0);
+      return { ok: result.ok, reason: result.reason ?? "", before, after };
+    },
+    { id: target.id }
+  );
+  console.log(`>> Withdraw transfer: ${JSON.stringify(withdrawResult)}`);
+  if (!withdrawResult.ok) {
+    throw new Error(`Transfer (withdraw) failed: ${withdrawResult.reason}`);
+  }
+  const preWithdrawHeroGold = transferResult.after;
+  const treasuryGainedFromDeposit = transferResult.before - transferResult.after;
+  const expectedAfter = preWithdrawHeroGold + (pre.treasuryGold + treasuryGainedFromDeposit);
+  if (withdrawResult.after !== expectedAfter) {
+    throw new Error(
+      `Withdraw wrong: before=${withdrawResult.before} after=${withdrawResult.after} expected ${expectedAfter}`
+    );
+  }
+  console.log(`>> Withdraw drained full treasury into hero purse: ${expectedAfter}g`);
+
+  await ctx.post(`${API_URL}/api/games/${activeName}/transfer`, {
+    data: { heroId: "p0-hero", settlementId: target.id, direction: "withdraw" },
+  }).catch(() => {});
+
+  const lastEvent = await queryLastEvent(activeName);
+  console.log(`>> Last event after transfer tests: ${lastEvent?.kind}`);
 }
 
 async function ensureBuilt() {
@@ -975,6 +1145,8 @@ async function run() {
     await runSettlementCaptureChecks(page, ctx, activeName);
 
     await runBattleChecks(page, ctx, activeName);
+
+    await runTransferChecks(page, ctx, activeName);
 
     await page.screenshot({ path: "test/screenshot.png" });
     console.log(">> screenshot saved");

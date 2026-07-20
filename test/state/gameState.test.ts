@@ -13,8 +13,8 @@ import {
   applyEndOfTurn,
   advanceRound,
   markSaved,
+  transferGold,
   MOVEMENT_PER_TURN,
-  BATTLE_GOLD_REWARD,
   type GameState,
   type Player,
   type HeroState,
@@ -24,12 +24,27 @@ import {
   type GamePhase,
 } from "../../src/state/gameState";
 
-function makePlayer(id: PlayerId, faction: Player["faction"], name: string, heroIds: HeroId[], settlementIds: string[], gold = 0): Player {
-  return { id, faction, name, heroIds, settlementIds, gold };
+function makePlayer(id: PlayerId, faction: Player["faction"], name: string, heroIds: HeroId[], settlementIds: string[]): Player {
+  return { id, faction, name, heroIds, settlementIds };
 }
 
-function makeHero(id: HeroId, ownerId: PlayerId, q: number, r: number, movementRemaining = MOVEMENT_PER_TURN): HeroState {
-  return { id, ownerId, q, r, movementRemaining, previousQ: null, previousR: null, previousMovementRemaining: null };
+function makeHero(id: HeroId, ownerId: PlayerId, q: number, r: number, movementRemaining = MOVEMENT_PER_TURN, gold = 0): HeroState {
+  return { id, ownerId, q, r, movementRemaining, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q, r }], gold };
+}
+
+function makeSettlement(id: string, ownerId: PlayerId | null, q: number, r: number, opts: Partial<Pick<SettlementState, "population" | "goldTax" | "gold">> = {}): SettlementState {
+  return {
+    id,
+    ownerId,
+    q,
+    r,
+    level: 1,
+    population: opts.population ?? 0,
+    goldTax: opts.goldTax ?? 0,
+    resourceRates: {},
+    foundedOnResource: null,
+    gold: opts.gold ?? 0,
+  };
 }
 
 interface StateOverrides {
@@ -44,16 +59,16 @@ interface StateOverrides {
 
 function makeState(overrides: StateOverrides = {}): GameState {
   const players = overrides.players ?? [
-    makePlayer(0, "player", "Human", ["h0"], ["s0"], 0),
-    makePlayer(1, "ai", "AI", ["h1"], ["s1"], 0),
+    makePlayer(0, "player", "Human", ["h0"], ["s0"]),
+    makePlayer(1, "ai", "AI", ["h1"], ["s1"]),
   ];
   const heroes = overrides.heroes ?? [
     makeHero("h0", 0, 2, 2),
     makeHero("h1", 1, 18, 4),
   ];
   const settlements = overrides.settlements ?? [
-    { id: "s0", ownerId: 0, q: 2, r: 2, level: 1 },
-    { id: "s1", ownerId: 1, q: 18, r: 4, level: 1 },
+    makeSettlement("s0", 0, 2, 2),
+    makeSettlement("s1", 1, 18, 4),
   ];
   const initial = createInitialState({
     seedPlayers: players,
@@ -84,16 +99,16 @@ test("createInitialState defaults", () => {
 
 test("createInitialState with seeds", () => {
   const s = createInitialState({
-    seedPlayers: [makePlayer(0, "player", "P", ["h0"], ["s0"], 100)],
-    seedHeroes: [makeHero("h0", 0, 5, 5, 3)],
-    seedSettlements: [{ id: "s0", ownerId: 0, q: 5, r: 5, level: 2 }],
+    seedPlayers: [makePlayer(0, "player", "P", ["h0"], ["s0"])],
+    seedHeroes: [makeHero("h0", 0, 5, 5, 3, 50)],
+    seedSettlements: [makeSettlement("s0", 0, 5, 5)],
     seedRound: 7,
     seedActivePlayerId: 0,
   });
   assert.equal(s.round, 7);
-  assert.equal(s.players[0].gold, 100);
+  assert.equal(s.heroes.h0.gold, 50);
   assert.equal(s.heroes.h0.movementRemaining, 3);
-  assert.equal(s.settlements.s0.level, 2);
+  assert.equal(s.settlements.s0.level, 1);
 });
 
 test("selectHero accepts owned hero of active human player", () => {
@@ -240,8 +255,8 @@ test("detectAdjacentEnemy returns null when friendly adjacent", () => {
       makeHero("h1", 1, 18, 4),
     ],
     settlements: [
-      { id: "s0", ownerId: 0, q: 2, r: 2, level: 1 },
-      { id: "s1", ownerId: 1, q: 18, r: 4, level: 1 },
+      makeSettlement("s0", 0, 2, 2),
+      makeSettlement("s1", 1, 18, 4),
     ],
   });
   assert.equal(detectAdjacentEnemy(s, "h0"), null);
@@ -263,16 +278,17 @@ test("startBattle transitions to BATTLE phase", () => {
   assert.equal(next.selectedHeroId, null);
 });
 
-test("resolveBattle removes defender, returns to PLAYER_TURN, sets dirty", () => {
+test("resolveBattle transfers defender.gold to attacker.gold (winner takes all)", () => {
   const s = makeState({
-    players: [makePlayer(0, "player", "Human", ["h0"], ["s0"], 0), makePlayer(1, "ai", "AI", ["h1"], ["s1"], 0)],
+    players: [makePlayer(0, "player", "Human", ["h0"], ["s0"]), makePlayer(1, "ai", "AI", ["h1"], ["s1"])],
+    heroes: [makeHero("h0", 0, 2, 2, 7, 10), makeHero("h1", 1, 3, 2, 7, 75)],
     phase: { kind: "BATTLE", attackerId: "h0", defenderId: "h1" },
   });
   const next = resolveBattle(s);
   assert.equal(next.heroes.h1, undefined);
+  assert.equal(next.heroes.h0.gold, 85);
   assert.equal(next.phase.kind, "PLAYER_TURN");
   assert.equal(next.dirty, true);
-  assert.equal(next.players[0].gold, BATTLE_GOLD_REWARD);
 });
 
 test("resolveBattle is no-op outside BATTLE phase", () => {
@@ -309,9 +325,9 @@ test("endTurn advances to next human player in 3-player game", () => {
     ],
     heroes: [makeHero("h0", 0, 0, 0), makeHero("h1", 1, 10, 10), makeHero("h2", 2, 20, 20)],
     settlements: [
-      { id: "s0", ownerId: 0, q: 0, r: 0, level: 1 },
-      { id: "s1", ownerId: 1, q: 10, r: 10, level: 1 },
-      { id: "s2", ownerId: 2, q: 20, r: 20, level: 1 },
+      makeSettlement("s0", 0, 0, 0),
+      makeSettlement("s1", 1, 10, 10),
+      makeSettlement("s2", 2, 20, 20),
     ],
     activePlayerId: 1,
     phase: { kind: "AI_TURN", playerId: 1 },
@@ -330,9 +346,9 @@ test("endTurn from last player wraps to ROUND_END regardless of faction", () => 
     ],
     heroes: [makeHero("h0", 0, 0, 0), makeHero("h1", 1, 10, 10), makeHero("h2", 2, 20, 20)],
     settlements: [
-      { id: "s0", ownerId: 0, q: 0, r: 0, level: 1 },
-      { id: "s1", ownerId: 1, q: 10, r: 10, level: 1 },
-      { id: "s2", ownerId: 2, q: 20, r: 20, level: 1 },
+      makeSettlement("s0", 0, 0, 0),
+      makeSettlement("s1", 1, 10, 10),
+      makeSettlement("s2", 2, 20, 20),
     ],
     activePlayerId: 2,
     phase: { kind: "PLAYER_TURN", playerId: 2 },
@@ -353,22 +369,34 @@ test("applyEndOfTurn resets movement to 7 for current player heroes", () => {
   assert.equal(next.heroes.h1.movementRemaining, 3);
 });
 
-test("applyEndOfTurn awards population*goldTax for current player's settlements", () => {
+test("applyEndOfTurn awards population*goldTax into each owned settlement's treasury", () => {
   const s = makeState({
     players: [
-      makePlayer(0, "player", "Human", ["h0"], ["s0", "s0b"], 5),
-      makePlayer(1, "ai", "AI", ["h1"], ["s1"], 10),
+      makePlayer(0, "player", "Human", ["h0"], ["s0", "s0b"]),
+      makePlayer(1, "ai", "AI", ["h1"], ["s1"]),
     ],
     settlements: [
-      { id: "s0", ownerId: 0, q: 2, r: 2, level: 1, population: 500, goldTax: 1 },
-      { id: "s0b", ownerId: 0, q: 3, r: 3, level: 1, population: 500, goldTax: 1 },
-      { id: "s1", ownerId: 1, q: 18, r: 4, level: 1, population: 500, goldTax: 1 },
+      makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 100 }),
+      makeSettlement("s0b", 0, 3, 3, { population: 500, goldTax: 1, gold: 0 }),
+      makeSettlement("s1", 1, 18, 4, { population: 500, goldTax: 1, gold: 50 }),
     ],
   });
   const next = applyEndOfTurn(s);
-  assert.equal(next.players[0].gold, 1005);
-  assert.equal(next.players[1].gold, 10);
+  assert.equal(next.settlements.s0.gold, 600);
+  assert.equal(next.settlements.s0b.gold, 500);
+  assert.equal(next.settlements.s1.gold, 50);
   assert.equal(next.dirty, true);
+  assert.equal(next.heroes.h0.gold, 0);
+  assert.equal(next.heroes.h1.gold, 0);
+});
+
+test("applyEndOfTurn never awards gold to heroes", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 42), makeHero("h1", 1, 18, 4, 7, 99)],
+  });
+  const next = applyEndOfTurn(s);
+  assert.equal(next.heroes.h0.gold, 42);
+  assert.equal(next.heroes.h1.gold, 99);
 });
 
 test("advanceRound increments round, resets all heroes' movement, sets activePlayerId 0, phase PLAYER_TURN", () => {
@@ -415,4 +443,81 @@ test("state is immutable: reducers return new objects", () => {
   } else {
     assert.fail("expected ok");
   }
+});
+
+test("transferGold deposit moves all hero purse into settlement treasury", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 250), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2, { gold: 100 }), makeSettlement("s1", 1, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s0", "deposit");
+  assert.equal(next.ok, true);
+  if (next.ok) {
+    assert.equal(next.state.heroes.h0.gold, 0);
+    assert.equal(next.state.settlements.s0.gold, 350);
+    assert.equal(next.state.dirty, true);
+  }
+});
+
+test("transferGold withdraw moves all settlement treasury to hero purse", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 10), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2, { gold: 800 }), makeSettlement("s1", 1, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s0", "withdraw");
+  assert.equal(next.ok, true);
+  if (next.ok) {
+    assert.equal(next.state.heroes.h0.gold, 810);
+    assert.equal(next.state.settlements.s0.gold, 0);
+  }
+});
+
+test("transferGold rejects when hero is not at settlement tile", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 5, 5, 7, 50), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2, { gold: 100 }), makeSettlement("s1", 1, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s0", "deposit");
+  assert.equal(next.ok, false);
+  if (!next.ok) assert.equal(next.reason, "hero_not_at_settlement");
+});
+
+test("transferGold rejects at enemy-owned settlement", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 50), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s1", 1, 2, 2, { gold: 100 }), makeSettlement("s0", 0, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s1", "deposit");
+  assert.equal(next.ok, false);
+  if (!next.ok) assert.equal(next.reason, "not_owned_settlement");
+});
+
+test("transferGold rejects at neutral settlement", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 50), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s_neutral", null, 2, 2, { gold: 100 }), makeSettlement("s0", 0, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s_neutral", "deposit");
+  assert.equal(next.ok, false);
+  if (!next.ok) assert.equal(next.reason, "not_owned_settlement");
+});
+
+test("transferGold rejects deposit when hero purse is empty", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 0), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2, { gold: 100 }), makeSettlement("s1", 1, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s0", "deposit");
+  assert.equal(next.ok, false);
+  if (!next.ok) assert.equal(next.reason, "nothing_to_deposit");
+});
+
+test("transferGold rejects withdraw when settlement treasury is empty", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 50), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2, { gold: 0 }), makeSettlement("s1", 1, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s0", "withdraw");
+  assert.equal(next.ok, false);
+  if (!next.ok) assert.equal(next.reason, "nothing_to_withdraw");
 });

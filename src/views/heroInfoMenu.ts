@@ -1,11 +1,18 @@
-import type { Player } from "../state/gameState";
+import type { GameState, Player, SettlementState } from "../state/gameState";
 import type { Hero } from "../entities/hero";
 import { PopupMenu, menuTheme } from "./menu";
 
 const MOVEMENT_PER_TURN = 7;
 
+export type TransferHandler = (
+  heroId: string,
+  settlementId: string,
+  direction: "deposit" | "withdraw",
+) => { ok: boolean; reason: string };
+
 export interface HeroInfoMenuOptions {
   parent: HTMLElement;
+  onTransfer?: TransferHandler;
 }
 
 function makeRow(label: string): { row: HTMLDivElement; value: HTMLSpanElement } {
@@ -37,9 +44,16 @@ export class HeroInfoMenu {
   private foodEl: HTMLElement;
   private movementFill: HTMLElement;
   private movementLabel: HTMLElement;
+  private transferRow: HTMLDivElement;
+  private withdrawBtn: HTMLButtonElement;
+  private depositBtn: HTMLButtonElement;
   private statValues: Record<string, HTMLSpanElement>;
 
+  private onTransfer?: TransferHandler;
+  private settlementAtTile: SettlementState | null = null;
+
   constructor(opts: HeroInfoMenuOptions) {
+    this.onTransfer = opts.onTransfer;
     this.statValues = {};
 
     this.menu = new PopupMenu({
@@ -105,6 +119,30 @@ export class HeroInfoMenu {
     resourcesRow.appendChild(foodWrap);
 
     body.appendChild(resourcesRow);
+
+    this.transferRow = document.createElement("div");
+    Object.assign(this.transferRow.style, {
+      display: "flex",
+      gap: "6px",
+      marginTop: "6px",
+    });
+    this.withdrawBtn = document.createElement("button");
+    this.withdrawBtn.textContent = "Withdraw all";
+    this.withdrawBtn.style.flex = "1";
+    this.withdrawBtn.style.padding = "5px 6px";
+    this.withdrawBtn.style.fontSize = "11px";
+    this.withdrawBtn.style.cursor = "pointer";
+    this.withdrawBtn.addEventListener("click", () => this.handleTransfer("withdraw"));
+    this.transferRow.appendChild(this.withdrawBtn);
+    this.depositBtn = document.createElement("button");
+    this.depositBtn.textContent = "Deposit all";
+    this.depositBtn.style.flex = "1";
+    this.depositBtn.style.padding = "5px 6px";
+    this.depositBtn.style.fontSize = "11px";
+    this.depositBtn.style.cursor = "pointer";
+    this.depositBtn.addEventListener("click", () => this.handleTransfer("deposit"));
+    this.transferRow.appendChild(this.depositBtn);
+    body.appendChild(this.transferRow);
 
     const movementSection = document.createElement("div");
     Object.assign(movementSection.style, {
@@ -187,10 +225,10 @@ export class HeroInfoMenu {
     this.menu.root.style.display = "none";
   }
 
-  show(hero: Hero, player: Player): void {
+  show(hero: Hero, player: Player, state: GameState): void {
     this.currentHeroId = hero.id;
     this.menu.setTitle(`Hero — ${player.name}`);
-    this.update(hero, player);
+    this.update(hero, state);
     if (!this.visible) {
       this.menu.root.style.display = "";
       this.visible = true;
@@ -213,13 +251,40 @@ export class HeroInfoMenu {
     return this.currentHeroId;
   }
 
-  update(hero: Hero, player: Player): void {
+  update(hero: Hero, state: GameState): void {
     this.nameEl.textContent = hero.id;
-    this.goldEl.textContent = `${player.gold}g`;
+    this.goldEl.textContent = `${hero.gold}g`;
     this.foodEl.textContent = "0 food";
     const remaining = Math.max(0, hero.movementRemaining);
     const pct = Math.max(0, Math.min(1, remaining / MOVEMENT_PER_TURN)) * 100;
     this.movementFill.style.width = `${pct}%`;
     this.movementLabel.textContent = `${remaining.toFixed(1)} / ${MOVEMENT_PER_TURN}`;
+
+    this.settlementAtTile = null;
+    for (const s of Object.values(state.settlements)) {
+      if (s.q === hero.tile.q && s.r === hero.tile.r) {
+        this.settlementAtTile = s;
+        break;
+      }
+    }
+    const settlementGold = this.settlementAtTile?.gold ?? 0;
+    const canTransfer =
+      this.settlementAtTile !== null &&
+      this.settlementAtTile.ownerId === hero.ownerId;
+    this.withdrawBtn.disabled = !canTransfer || settlementGold <= 0;
+    this.depositBtn.disabled = !canTransfer || hero.gold <= 0;
+    this.withdrawBtn.style.opacity = this.withdrawBtn.disabled ? "0.4" : "1";
+    this.depositBtn.style.opacity = this.depositBtn.disabled ? "0.4" : "1";
+    this.withdrawBtn.style.cursor = this.withdrawBtn.disabled ? "default" : "pointer";
+    this.depositBtn.style.cursor = this.depositBtn.disabled ? "default" : "pointer";
+  }
+
+  private handleTransfer(direction: "deposit" | "withdraw"): void {
+    if (!this.settlementAtTile || !this.currentHeroId) return;
+    if (!this.onTransfer) return;
+    const result = this.onTransfer(this.currentHeroId, this.settlementAtTile.id, direction);
+    if (!result.ok) {
+      console.warn("[heroInfoMenu] transfer failed:", result.reason);
+    }
   }
 }

@@ -1,4 +1,4 @@
-import type { GameState, HeroId, SettlementId } from "./gameState";
+import type { GameState, HeroId, SettlementId, TransferDirection } from "./gameState";
 import {
   selectHero as selectHeroReducer,
   selectSettlement as selectSettlementReducer,
@@ -13,6 +13,7 @@ import {
   applyEndOfTurn as applyEndOfTurnReducer,
   advanceRound as advanceRoundReducer,
   detectAdjacentEnemy as detectAdjacentEnemyFn,
+  transferGold as transferGoldReducer,
 } from "./gameState";
 
 export interface TurnControllerHooks {
@@ -113,6 +114,25 @@ export class TurnController {
       type: "battle_started",
       payload: { attackerId, defenderId },
     });
+  }
+
+  transferGold(
+    heroId: HeroId,
+    settlementId: SettlementId,
+    direction: TransferDirection,
+  ): { ok: boolean; reason: string } {
+    const result = transferGoldReducer(this.state, heroId, settlementId, direction);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    const amount =
+      direction === "deposit"
+        ? this.state.heroes[heroId]?.gold ?? 0
+        : this.state.settlements[settlementId]?.gold ?? 0;
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "transfer_gold",
+      payload: { heroId, settlementId, direction, amount },
+    });
+    return { ok: true, reason: "" };
   }
 
   async resolveCurrentBattle(): Promise<void> {

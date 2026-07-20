@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { settlementIncome, playerIncome } from "../../src/economy/income";
+import { settlementIncome, playerIncome, playerWealth } from "../../src/economy/income";
 import { createInitialState, type GameState, type PlayerId, type SettlementState } from "../../src/state/gameState";
 
-function makeSettlement(id: string, ownerId: PlayerId | null, population: number, goldTax: number): SettlementState {
+function makeSettlement(id: string, ownerId: PlayerId | null, population: number, goldTax: number, gold = 0): SettlementState {
   return {
     id,
     ownerId,
@@ -14,6 +14,7 @@ function makeSettlement(id: string, ownerId: PlayerId | null, population: number
     goldTax,
     resourceRates: {},
     foundedOnResource: null,
+    gold,
   };
 }
 
@@ -69,4 +70,43 @@ test("playerIncome ignores neutral settlements and returns 0 for players who own
   assert.equal(playerIncome(state, 0), 500);
   assert.equal(playerIncome(state, 1), 0);
   assert.equal(playerIncome(state, 2), 0);
+});
+
+test("playerWealth sums owned hero gold + owned settlement gold", () => {
+  const state: GameState = createInitialState({
+    seedPlayers: [
+      { id: 0, faction: "player", name: "P0", color: "#fff", heroIds: ["h0a", "h0b"], settlementIds: ["s0", "s1"] },
+      { id: 1, faction: "ai", name: "AI", color: "#000", heroIds: ["h1"], settlementIds: ["s2"] },
+    ],
+    seedHeroes: [
+      { id: "h0a", ownerId: 0, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], gold: 120 },
+      { id: "h0b", ownerId: 0, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], gold: 30 },
+      { id: "h1", ownerId: 1, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], gold: 999 },
+    ],
+    seedSettlements: [
+      makeSettlement("s0", 0, 0, 0, 500),
+      makeSettlement("s1", 0, 0, 0, 50),
+      makeSettlement("s2", 1, 0, 0, 7),
+    ],
+  });
+  assert.equal(playerWealth(state, 0), 120 + 30 + 500 + 50);
+  assert.equal(playerWealth(state, 1), 999 + 7);
+});
+
+test("playerWealth ignores unowned (other-player or neutral) entities", () => {
+  const state: GameState = createInitialState({
+    seedPlayers: [
+      { id: 0, faction: "player", name: "P0", color: "#fff", heroIds: ["h0"], settlementIds: [] },
+      { id: 1, faction: "ai", name: "AI", color: "#000", heroIds: ["h1"], settlementIds: [] },
+    ],
+    seedHeroes: [
+      { id: "h0", ownerId: 0, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], gold: 100 },
+      { id: "h1", ownerId: 1, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], gold: 200 },
+    ],
+    seedSettlements: [
+      makeSettlement("s_neutral", null, 0, 0, 9999),
+    ],
+  });
+  assert.equal(playerWealth(state, 0), 100);
+  assert.equal(playerWealth(state, 1), 200);
 });

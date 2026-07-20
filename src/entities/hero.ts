@@ -18,6 +18,7 @@ export class Hero {
   ownerId: PlayerId;
   movementRemaining: number;
   trail: Axial[];
+  gold: number;
 
   constructor(
     id: string,
@@ -26,7 +27,8 @@ export class Hero {
     faction: Faction,
     ownerId: PlayerId,
     movementRemaining = 7,
-    trail?: Axial[]
+    trail?: Axial[],
+    gold = 0
   ) {
     this.id = id;
     this.tile = { q, r };
@@ -37,6 +39,7 @@ export class Hero {
     this.ownerId = ownerId;
     this.movementRemaining = movementRemaining;
     this.trail = trail ?? [{ q, r }];
+    this.gold = gold;
   }
 
   get moveDurationMs(): number {
@@ -101,6 +104,7 @@ export class Hero {
     this.ownerId = s.ownerId;
     this.movementRemaining = s.movementRemaining;
     this.trail = (s.trail ?? []).map((p) => ({ q: p.q, r: p.r }));
+    this.gold = s.gold ?? 0;
     if (this.moving) return;
     if (this.tile.q === s.q && this.tile.r === s.r) return;
     const start: Axial = { ...this.tile };
@@ -120,6 +124,7 @@ export class Hero {
       previousR: null,
       previousMovementRemaining: null,
       trail: this.trail.map((p) => ({ q: p.q, r: p.r })),
+      gold: this.gold,
     };
   }
 
@@ -132,7 +137,8 @@ export class Hero {
       faction,
       s.ownerId,
       s.movementRemaining,
-      (s.trail ?? []).map((p) => ({ q: p.q, r: p.r }))
+      (s.trail ?? []).map((p) => ({ q: p.q, r: p.r })),
+      s.gold ?? 0
     );
   }
 }

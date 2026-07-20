@@ -11,7 +11,6 @@ export interface Player {
   color: string;
   heroIds: HeroId[];
   settlementIds: SettlementId[];
-  gold: number;
 }
 
 export interface HeroState {
@@ -24,6 +23,7 @@ export interface HeroState {
   previousR: number | null;
   previousMovementRemaining: number | null;
   trail: { q: number; r: number }[];
+  gold: number;
 }
 
 export interface SettlementState {
@@ -37,6 +37,7 @@ export interface SettlementState {
   goldTax: number;
   resourceRates: Partial<Record<ResourceType, number>>;
   foundedOnResource: ResourceType | null;
+  gold: number;
 }
 
 export type GamePhase =
@@ -91,7 +92,6 @@ export function monthName(month: number): string {
 }
 
 export const MOVEMENT_PER_TURN = 7;
-export const BATTLE_GOLD_REWARD = 50;
 
 const NEIGHBOR_DIRS: { q: number; r: number }[] = [
   { q: 1, r: 0 },
@@ -114,15 +114,15 @@ export interface InitialStateOptions {
 
 function defaultPlayers(): Player[] {
   return [
-    { id: 0, faction: "player", name: "Human", color: "#d62828", heroIds: ["h0"], settlementIds: ["s0"], gold: 0 },
-    { id: 1, faction: "ai", name: "AI", color: "#1d7dd1", heroIds: ["h1"], settlementIds: ["s1"], gold: 0 },
+    { id: 0, faction: "player", name: "Human", color: "#d62828", heroIds: ["h0"], settlementIds: ["s0"] },
+    { id: 1, faction: "ai", name: "AI", color: "#1d7dd1", heroIds: ["h1"], settlementIds: ["s1"] },
   ];
 }
 
 function defaultHeroes(): Record<HeroId, HeroState> {
   return {
-    h0: { id: "h0", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }] },
-    h1: { id: "h1", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }] },
+    h0: { id: "h0", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 0 },
+    h1: { id: "h1", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 0 },
   };
 }
 
@@ -139,6 +139,7 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       goldTax: 1,
       resourceRates: {},
       foundedOnResource: null,
+      gold: 0,
     },
     s1: {
       id: "s1",
@@ -151,6 +152,7 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       goldTax: 1,
       resourceRates: {},
       foundedOnResource: null,
+      gold: 0,
     },
   };
 }
@@ -317,15 +319,19 @@ export function captureSettlement(
   const newPlayers = state.players.map((p) => {
     if (p.id === newOwnerId) {
       if (p.settlementIds.includes(settlementId)) return p;
-      return { ...p, settlementIds: [...p.settlementIds, settlementId], gold: p.gold + CAPTURE_GOLD_REWARD };
+      return { ...p, settlementIds: [...p.settlementIds, settlementId] };
     }
     if (p.id === previousOwnerId) {
       return { ...p, settlementIds: p.settlementIds.filter((id) => id !== settlementId) };
     }
     return p;
   });
+  const newHeroes: Record<HeroId, HeroState> = {
+    ...state.heroes,
+    [heroId]: { ...hero, gold: hero.gold + CAPTURE_GOLD_REWARD },
+  };
   return {
-    state: { ...state, settlements: newSettlements, players: newPlayers, dirty: true },
+    state: { ...state, settlements: newSettlements, players: newPlayers, heroes: newHeroes, dirty: true },
     captured: true,
     previousOwnerId,
   };
@@ -350,14 +356,12 @@ export function resolveBattle(state: GameState): GameState {
     return { ...state, phase: { kind: "PLAYER_TURN", playerId: state.activePlayerId }, dirty: true };
   }
   const newHeroes: Record<HeroId, HeroState> = { ...state.heroes };
+  const lootedGold = defender.gold;
+  newHeroes[attackerId] = { ...attacker, gold: attacker.gold + lootedGold };
   delete newHeroes[defenderId];
-  const newPlayers = state.players.map((p) =>
-    p.id === attacker.ownerId ? { ...p, gold: p.gold + BATTLE_GOLD_REWARD } : p,
-  );
   return {
     ...state,
     heroes: newHeroes,
-    players: newPlayers,
     phase: { kind: "PLAYER_TURN", playerId: state.activePlayerId },
     dirty: true,
   };
@@ -404,17 +408,16 @@ export function applyEndOfTurn(state: GameState): GameState {
       };
     }
   }
-  const player = state.players.find((p) => p.id === playerId);
-  if (!player) {
-    return { ...state, heroes: newHeroes, dirty: true };
+  const newSettlements: Record<SettlementId, SettlementState> = { ...state.settlements };
+  for (const s of Object.values(newSettlements)) {
+    if (s.ownerId === playerId) {
+      newSettlements[s.id] = {
+        ...s,
+        gold: s.gold + s.population * s.goldTax,
+      };
+    }
   }
-  const goldEarned = Object.values(state.settlements)
-    .filter((s) => s.ownerId === playerId)
-    .reduce((acc, s) => acc + s.population * s.goldTax, 0);
-  const newPlayers = state.players.map((p) =>
-    p.id === playerId ? { ...p, gold: p.gold + goldEarned } : p,
-  );
-  return { ...state, heroes: newHeroes, players: newPlayers, dirty: true };
+  return { ...state, heroes: newHeroes, settlements: newSettlements, dirty: true };
 }
 
 export function advanceRound(state: GameState): GameState {
@@ -444,4 +447,59 @@ export function advanceRound(state: GameState): GameState {
 export function markSaved(state: GameState): GameState {
   if (!state.dirty) return state;
   return { ...state, dirty: false };
+}
+
+export type TransferDirection = "deposit" | "withdraw";
+
+export interface TransferResult {
+  state: GameState;
+  ok: boolean;
+  reason: string;
+}
+
+export function transferGold(
+  state: GameState,
+  heroId: HeroId,
+  settlementId: SettlementId,
+  direction: TransferDirection,
+): TransferResult {
+  const hero = state.heroes[heroId];
+  const settlement = state.settlements[settlementId];
+  if (!hero) return { state, ok: false, reason: "no_hero" };
+  if (!settlement) return { state, ok: false, reason: "no_settlement" };
+  if (hero.q !== settlement.q || hero.r !== settlement.r) {
+    return { state, ok: false, reason: "hero_not_at_settlement" };
+  }
+  if (settlement.ownerId === null || settlement.ownerId !== hero.ownerId) {
+    return { state, ok: false, reason: "not_owned_settlement" };
+  }
+  if (direction === "deposit") {
+    if (hero.gold <= 0) return { state, ok: false, reason: "nothing_to_deposit" };
+    const amount = hero.gold;
+    return {
+      state: {
+        ...state,
+        heroes: { ...state.heroes, [heroId]: { ...hero, gold: 0 } },
+        settlements: { ...state.settlements, [settlementId]: { ...settlement, gold: settlement.gold + amount } },
+        dirty: true,
+      },
+      ok: true,
+      reason: "",
+    };
+  }
+  if (direction === "withdraw") {
+    if (settlement.gold <= 0) return { state, ok: false, reason: "nothing_to_withdraw" };
+    const amount = settlement.gold;
+    return {
+      state: {
+        ...state,
+        heroes: { ...state.heroes, [heroId]: { ...hero, gold: hero.gold + amount } },
+        settlements: { ...state.settlements, [settlementId]: { ...settlement, gold: 0 } },
+        dirty: true,
+      },
+      ok: true,
+      reason: "",
+    };
+  }
+  return { state, ok: false, reason: "invalid_direction" };
 }

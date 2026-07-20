@@ -59,7 +59,6 @@ function makePlayers(settlementIds: Record<string, string[]>, playerCount: numbe
       color: PLAYER_COLORS[i] ?? "#cccccc",
       heroIds: [heroIdFor(i)],
       settlementIds: settlementIds[`p${i}`] ?? [],
-      gold: 0,
     });
   }
   return out;
@@ -82,6 +81,8 @@ function makeHeroes(
       previousQ: null,
       previousR: null,
       previousMovementRemaining: null,
+      trail: [{ q: castle.tile.q, r: castle.tile.r }],
+      gold: 0,
     });
   }
   return heroes;
@@ -106,6 +107,7 @@ function makeSettlements(
       goldTax: SETTLEMENT_GOLD_TAX[c.level],
       resourceRates: computed.rates,
       foundedOnResource: computed.foundedOn,
+      gold: 0,
     };
   });
 }
@@ -187,6 +189,21 @@ export function makeInitialStatePayload(
   };
 }
 
+function backfillHero(h: Partial<HeroState> & { id: HeroId; ownerId: number; q: number; r: number }): HeroState {
+  return {
+    movementRemaining: h.movementRemaining ?? 7,
+    previousQ: h.previousQ ?? null,
+    previousR: h.previousR ?? null,
+    previousMovementRemaining: h.previousMovementRemaining ?? null,
+    trail: h.trail ?? [{ q: h.q, r: h.r }],
+    gold: h.gold ?? 0,
+    id: h.id,
+    ownerId: h.ownerId,
+    q: h.q,
+    r: h.r,
+  };
+}
+
 function backfillSettlement(s: Partial<SettlementState> & { id: string; q: number; r: number; level: 1 | 2 | 3 }): SettlementState {
   return {
     name: s.name ?? s.id,
@@ -195,6 +212,7 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     goldTax: s.goldTax ?? SETTLEMENT_GOLD_TAX[s.level],
     resourceRates: s.resourceRates ?? {},
     foundedOnResource: s.foundedOnResource ?? null,
+    gold: s.gold ?? 0,
     q: s.q,
     r: s.r,
     level: s.level,
@@ -210,12 +228,22 @@ export function hydrateGameState(
   for (const [id, raw] of Object.entries(row.settlements)) {
     settlementsRecord[id] = backfillSettlement({ ...raw, id });
   }
+  const heroesRecord: Record<HeroId, HeroState> = {};
+  for (const [id, raw] of Object.entries(row.heroes)) {
+    heroesRecord[id] = backfillHero({
+      ...raw,
+      id,
+      ownerId: raw.ownerId,
+      q: raw.q,
+      r: raw.r,
+    });
+  }
   return {
     round: row.round,
     day: row.day ?? row.round,
     activePlayerId: row.active_player_id,
     players: row.players,
-    heroes: row.heroes,
+    heroes: heroesRecord,
     settlements: settlementsRecord,
     phase:
       row.players.find((p) => p.id === row.active_player_id)?.faction === "ai"

@@ -4,6 +4,7 @@ import { GameMap } from "../map/gameMap";
 import type { GameState } from "../state/gameState";
 import type { Hero } from "../entities/hero";
 import type { Castle } from "../entities/settlement";
+import { playerWealth } from "../economy/income";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -44,9 +45,8 @@ export function updateHud(
     : "No hero";
   const enemyCount = Object.values(heroes).filter((h) => h.ownerId !== 0).length;
   const enemiesLine = `${enemyCount} enemy hero${enemyCount === 1 ? "" : "s"}`;
-  const player0 = state.players[0];
-  const goldLine = player0 ? `${player0.gold}g` : "0g";
-  const status = `${phase} · ${roundLine} · ${goldLine} · ${enemiesLine}${movementLine}`;
+  const wealthLine = `Wealth: ${playerWealth(state, 0)}g`;
+  const status = `${phase} · ${roundLine} · ${wealthLine} · ${enemiesLine}${movementLine}`;
   const dbInfo = backendOk ? `DB ${saveStatus}` : "DB offline";
   const savedInfo = lastSavedAt ? ` · Last saved ${formatTime(lastSavedAt)}` : "";
   const text = !hover

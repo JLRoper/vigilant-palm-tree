@@ -73,8 +73,20 @@ async function generateAndInsertTiles(
   );
 }
 
-function sumPlayerGold(players: Player[]): number {
-  return players.reduce((acc, p) => acc + (Number.isFinite(p.gold) ? p.gold : 0), 0);
+function sumPlayerGold(
+  players: Player[],
+  heroes: Record<string, HeroState>,
+  settlements: Record<string, SettlementState>,
+): number {
+  let total = 0;
+  const playerIds = new Set(players.map((p) => p.id));
+  for (const h of Object.values(heroes)) {
+    if (playerIds.has(h.ownerId) && Number.isFinite(h.gold)) total += h.gold;
+  }
+  for (const s of Object.values(settlements)) {
+    if (s.ownerId !== null && playerIds.has(s.ownerId) && Number.isFinite(s.gold)) total += s.gold;
+  }
+  return total;
 }
 
 router.get("/health", async (_req, res) => {
@@ -402,19 +414,17 @@ router.post("/games/:name/end-turn", async (req, res) => {
         name: p.name,
         heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
         settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
-        gold: Number.isFinite(p.gold) ? p.gold : 0,
       }));
 
-      // Award gold based on each owned settlement's population × goldTax.
-      // Use the DB row's gold as the authoritative base (incomingState.players may
-      // already include a client-side mirror of this same income).
-      const endingPlayer = players.find((p) => p.id === row.active_player_id);
-      const dbEndingPlayer = row.players.find((p) => p.id === row.active_player_id);
-      if (endingPlayer && dbEndingPlayer) {
-        const goldEarned = Object.values(incomingState.settlements)
-          .filter((s) => s.ownerId === endingPlayer.id)
-          .reduce((acc, s) => acc + s.population * s.goldTax, 0);
-        endingPlayer.gold = Number(dbEndingPlayer.gold) + goldEarned;
+      // Award gold into each owned settlement's treasury based on population × goldTax.
+      // Income stays at the settlement — never auto-routes to a hero.
+      const newSettlements: Record<string, SettlementState> = {};
+      for (const [id, s] of Object.entries(incomingState.settlements)) {
+        if (s.ownerId === row.active_player_id) {
+          newSettlements[id] = { ...s, gold: (Number(s.gold) || 0) + s.population * s.goldTax };
+        } else {
+          newSettlements[id] = s;
+        }
       }
 
       // Advance active_player_id; wrap when we go past the last player, incrementing round + day.
@@ -424,8 +434,8 @@ router.post("/games/:name/end-turn", async (req, res) => {
       const newRound = wrapped ? row.round + 1 : row.round;
       const newDay = wrapped ? (incomingState.day ?? row.day) + 1 : (incomingState.day ?? row.day);
 
-      // Legacy `gold` column is the sum of all players' gold (backward compat).
-      const legacyGold = sumPlayerGold(players);
+      // Legacy `gold` column is the sum of all players' purses (backward compat).
+      const legacyGold = sumPlayerGold(players, incomingState.heroes, newSettlements);
 
       await client.query(
         `UPDATE games SET
@@ -444,7 +454,7 @@ router.post("/games/:name/end-turn", async (req, res) => {
           nextActive,
           JSON.stringify(players),
           JSON.stringify(incomingState.heroes),
-          JSON.stringify(incomingState.settlements),
+          JSON.stringify(newSettlements),
           legacyGold,
           row.id,
         ]
@@ -544,33 +554,38 @@ router.post("/games/:name/resolve-battle", async (req, res) => {
         name: p.name,
         heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
         settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
-        gold: Number.isFinite(p.gold) ? p.gold : 0,
       }));
       const heroes: Record<string, HeroState> = { ...row.heroes };
+      const lootedGold = Number(defendersHero.gold) || 0;
+      if (heroes[attackerId]) {
+        heroes[attackerId] = {
+          ...heroes[attackerId],
+          gold: (Number(heroes[attackerId].gold) || 0) + lootedGold,
+        };
+      }
       delete heroes[defenderId];
 
-      // Remove defender from its owner's heroIds; award +50 gold to attacker's owner.
+      // Remove defender from its owner's heroIds. Gold transfer happens via heroes JSONB above.
       for (const p of players) {
         if (p.id === defendersHero.ownerId) {
           p.heroIds = p.heroIds.filter((id) => id !== defenderId);
         }
-        if (p.id === attackersHero.ownerId) {
-          p.gold += 50;
-        }
       }
 
-      const legacyGold = sumPlayerGold(players);
+      const legacyGold = sumPlayerGold(players, heroes, row.settlements);
 
       await client.query(
         `UPDATE games SET
            players = $1::jsonb,
            heroes = $2::jsonb,
-           gold = $3,
+           settlements = $3::jsonb,
+           gold = $4,
            updated_at = now()
-         WHERE id = $4`,
+         WHERE id = $5`,
         [
           JSON.stringify(players),
           JSON.stringify(heroes),
+          JSON.stringify(row.settlements),
           legacyGold,
           row.id,
         ]
@@ -585,7 +600,7 @@ router.post("/games/:name/resolve-battle", async (req, res) => {
             attackerId,
             defenderId,
             attackerOwnerId: attackersHero.ownerId,
-            rewardGold: 50,
+            rewardGold: lootedGold,
           }),
         ]
       );
@@ -607,6 +622,123 @@ router.post("/games/:name/resolve-battle", async (req, res) => {
     res.json(result.result);
   } catch (err) {
     console.error("[api] POST /games/:name/resolve-battle threw:", err);
+    res.status(500).json({
+      error: "internal",
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post("/games/:name/transfer", async (req, res) => {
+  const body = req.body ?? {};
+  const { heroId, settlementId, direction } = body;
+  if (
+    typeof heroId !== "string" ||
+    typeof settlementId !== "string" ||
+    (direction !== "deposit" && direction !== "withdraw")
+  ) {
+    res.status(400).json({ error: "invalid transfer payload" });
+    return;
+  }
+  try {
+    const result = await withTransaction(async (client) => {
+      const gr = await client.query<FullGameRow>(
+        `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
+        [req.params.name]
+      );
+      if (gr.rowCount === 0) return { status: 404 as const };
+      const row = gr.rows[0];
+      const hero = row.heroes[heroId];
+      const settlement = row.settlements[settlementId];
+      if (!hero) return { status: 404 as const, error: "hero not found" };
+      if (!settlement) return { status: 404 as const, error: "settlement not found" };
+      if (hero.q !== settlement.q || hero.r !== settlement.r) {
+        return { status: 409 as const, error: "hero_not_at_settlement" };
+      }
+      if (settlement.ownerId === null || settlement.ownerId !== hero.ownerId) {
+        return { status: 409 as const, error: "not_owned_settlement" };
+      }
+
+      const amount =
+        direction === "deposit"
+          ? Number(hero.gold) || 0
+          : Number(settlement.gold) || 0;
+      if (amount <= 0) {
+        return { status: 409 as const, error: "nothing_to_transfer" };
+      }
+
+      const newHeroes: Record<string, HeroState> = {
+        ...row.heroes,
+        [heroId]: direction === "deposit"
+          ? { ...hero, gold: 0 }
+          : { ...hero, gold: (Number(hero.gold) || 0) + amount },
+      };
+      const newSettlements: Record<string, SettlementState> = {
+        ...row.settlements,
+        [settlementId]: direction === "withdraw"
+          ? { ...settlement, gold: 0 }
+          : { ...settlement, gold: (Number(settlement.gold) || 0) + amount },
+      };
+
+      const players: Player[] = row.players.map((p) => ({
+        id: p.id,
+        faction: p.faction,
+        name: p.name,
+        heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
+        settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
+      }));
+      const legacyGold = sumPlayerGold(players, newHeroes, newSettlements);
+
+      await client.query(
+        `UPDATE games SET
+           players = $1::jsonb,
+           heroes = $2::jsonb,
+           settlements = $3::jsonb,
+           gold = $4,
+           updated_at = now()
+         WHERE id = $5`,
+        [
+          JSON.stringify(players),
+          JSON.stringify(newHeroes),
+          JSON.stringify(newSettlements),
+          legacyGold,
+          row.id,
+        ]
+      );
+
+      await client.query(
+        `INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3::jsonb)`,
+        [
+          row.id,
+          "transfer_gold",
+          JSON.stringify({ heroId, settlementId, direction, amount }),
+        ]
+      );
+
+      return {
+        status: 200 as const,
+        result: {
+          hero: newHeroes[heroId],
+          settlement: newSettlements[settlementId],
+        },
+      };
+    });
+
+    if (result.status === 404) {
+      if ("error" in result && result.error) {
+        res.status(404).json({ error: result.error });
+      } else {
+        res.status(404).json({ error: "not found" });
+      }
+      return;
+    }
+    if (result.status === 409) {
+      res.status(409).json({ error: result.error });
+      return;
+    }
+    res.json(result.result);
+  } catch (err) {
+    console.error("[api] POST /games/:name/transfer threw:", err);
     res.status(500).json({
       error: "internal",
       message: err instanceof Error ? err.message : String(err),

@@ -183,6 +183,11 @@ export class SettlementPanel {
     incomeRow.right.textContent = `${s.population * s.goldTax}g`;
     card.appendChild(incomeRow.row);
 
+    const treasuryRow = makeRow();
+    treasuryRow.left.textContent = "Treasury";
+    treasuryRow.right.textContent = `${s.gold}g`;
+    card.appendChild(treasuryRow.row);
+
     if (s.foundedOnResource) {
       const foundedRow = makeRow();
       foundedRow.left.textContent = "Founded on";

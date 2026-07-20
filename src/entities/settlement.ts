@@ -13,6 +13,7 @@ export class Castle {
   goldTax: number;
   resourceRates: Partial<Record<ResourceType, number>>;
   foundedOnResource: ResourceType | null;
+  gold: number;
 
   constructor(
     id: string,
@@ -24,6 +25,7 @@ export class Castle {
     goldTax: number,
     resourceRates: Partial<Record<ResourceType, number>>,
     foundedOnResource: ResourceType | null,
+    gold = 0,
   ) {
     this.id = id;
     this.tile = tile;
@@ -34,6 +36,7 @@ export class Castle {
     this.goldTax = goldTax;
     this.resourceRates = resourceRates;
     this.foundedOnResource = foundedOnResource;
+    this.gold = gold;
   }
 
   toGameState(): SettlementState {
@@ -48,6 +51,7 @@ export class Castle {
       goldTax: this.goldTax,
       resourceRates: { ...this.resourceRates },
       foundedOnResource: this.foundedOnResource,
+      gold: this.gold,
     };
   }
 
@@ -62,6 +66,7 @@ export class Castle {
       s.goldTax ?? 0,
       s.resourceRates ?? {},
       s.foundedOnResource ?? null,
+      s.gold ?? 0,
     );
   }
 }
