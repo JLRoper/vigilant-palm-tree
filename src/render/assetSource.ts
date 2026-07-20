@@ -15,11 +15,11 @@ export class ImageSpriteSource implements SpriteSource {
     for (const [key, url] of Object.entries(this.urlForKey)) {
       if (this.cache.has(key)) continue;
       const img = new Image();
-      img.src = url;
       this.cache.set(key, img);
       this.ready.set(key, false);
       img.onload = () => this.ready.set(key, true);
-    }
+      img.onerror = () => this.ready.set(key, false);
+      img.src = url;
   }
 
   resolve(key: string): { drawable: HTMLImageElement; ready: boolean } | undefined {
