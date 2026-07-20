@@ -68,9 +68,7 @@ export class Castle {
 
 export const CASTLE_LEVELS: readonly CastleLevel[] = [1, 2, 3] as const;
 
-export const CASTLES: readonly Castle[] = [];
-
-export function castleAt(q: number, r: number, castles: readonly Castle[] = CASTLES): Castle | undefined {
+export function castleAt(q: number, r: number, castles: readonly Castle[]): Castle | undefined {
   return castles.find((c) => c.tile.q === q && c.tile.r === r);
 }
 

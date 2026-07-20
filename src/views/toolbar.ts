@@ -17,7 +17,12 @@ export interface ToolbarState {
 }
 
 export interface ToolbarCallbacks {
-  onNew: (opts: { name: string; seed: number }) => void | Promise<void>;
+  onNew: (opts: {
+    name: string;
+    seed: number;
+    castleSeed?: number;
+    castleCount?: number;
+  }) => void | Promise<void>;
   onLoad: (game: Game, tiles: Awaited<ReturnType<typeof api.getTiles>>) => void | Promise<void>;
   onSave: () => void | Promise<void>;
   onEndTurn: () => void | Promise<void>;
@@ -170,6 +175,30 @@ export class Toolbar {
     styleInput(seedInput);
     content.appendChild(seedInput);
 
+    const castleSeedLabel = document.createElement("label");
+    castleSeedLabel.textContent = "Castle seed (random if blank)";
+    castleSeedLabel.style.opacity = "0.7";
+    content.appendChild(castleSeedLabel);
+
+    const castleSeedInput = document.createElement("input");
+    castleSeedInput.type = "number";
+    castleSeedInput.placeholder = "random";
+    styleInput(castleSeedInput);
+    content.appendChild(castleSeedInput);
+
+    const castleCountLabel = document.createElement("label");
+    castleCountLabel.textContent = "Castle count (2-5)";
+    castleCountLabel.style.opacity = "0.7";
+    content.appendChild(castleCountLabel);
+
+    const castleCountInput = document.createElement("input");
+    castleCountInput.type = "number";
+    castleCountInput.min = "2";
+    castleCountInput.max = "5";
+    castleCountInput.value = "3";
+    styleInput(castleCountInput);
+    content.appendChild(castleCountInput);
+
     const errorLine = document.createElement("div");
     Object.assign(errorLine.style, { ...menuTheme.error, minHeight: "14px", marginTop: "4px" });
     content.appendChild(errorLine);
@@ -180,7 +209,7 @@ export class Toolbar {
     row.style.gap = "8px";
     row.style.marginTop = "10px";
 
-    const modal = openCenteredModal(document.body, "New Game", 380);
+    const modal = openCenteredModal(document.body, "New Game", 400);
     const cancel = document.createElement("button");
     cancel.textContent = "Cancel";
     styleButton(cancel);
@@ -206,11 +235,26 @@ export class Toolbar {
           return;
         }
       }
+      let castleSeed: number | undefined;
+      if (castleSeedInput.value.trim() !== "") {
+        const v = Number(castleSeedInput.value);
+        if (!Number.isFinite(v)) {
+          errorLine.textContent = "Castle seed must be a number.";
+          return;
+        }
+        castleSeed = v;
+      }
+      const castleCountRaw = Number(castleCountInput.value);
+      if (!Number.isFinite(castleCountRaw)) {
+        errorLine.textContent = "Castle count must be a number.";
+        return;
+      }
+      const castleCount = Math.max(2, Math.min(5, Math.floor(castleCountRaw)));
       confirm.disabled = true;
       cancel.disabled = true;
       errorLine.textContent = "Creating…";
       try {
-        await this.opts.callbacks.onNew({ name, seed });
+        await this.opts.callbacks.onNew({ name, seed, castleSeed, castleCount });
         modal.close();
       } catch (e) {
         confirm.disabled = false;

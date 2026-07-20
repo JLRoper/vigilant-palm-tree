@@ -3,7 +3,8 @@ import { spawn, ChildProcess } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import { existsSync, readFileSync, statSync, openSync } from "node:fs";
 import assert from "node:assert/strict";
-import { GameMap, mulberry32 } from "../src/map/gameMap";
+import { GameMap } from "../src/map/gameMap";
+import { mulberry32 } from "../src/core/rng";
 import { placeResourceTiles, RESOURCES } from "../src/map/resourceTiles";
 import { axialToPixel } from "../src/core/hex";
 import { Pool } from "pg";
@@ -17,8 +18,8 @@ const WEB_URL = `http://localhost:${WEB_PORT}`;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const GAME_NAME = "default";
 const TEST_NEW_NAME = "smoke-new-game";
-const PLAYER_SPAWN = { q: 6, r: 5 };
-const AI_SPAWN = { q: 14, r: 8 };
+let PLAYER_SPAWN = { q: 6, r: 5 };
+let AI_SPAWN = { q: 14, r: 8 };
 
 function runDeterminismChecks() {
   const m1 = new GameMap(42);
@@ -608,6 +609,21 @@ async function run() {
       null,
       { timeout: 15_000 }
     );
+
+    const spawnInfo = await page.evaluate(() => {
+      const dbg = (window as any).__gameDebug;
+      const heroes = dbg?.getHeroes?.() ?? [];
+      const settlements = dbg?.getSettlements?.() ?? [];
+      const playerHero = heroes.find((h: any) => h.ownerId === 0);
+      const aiSettlement = settlements.find((s: any) => s.ownerId === 1);
+      return {
+        playerSpawn: playerHero ? { q: playerHero.q, r: playerHero.r } : null,
+        aiSpawn: aiSettlement ? { q: aiSettlement.q, r: aiSettlement.r } : null,
+      };
+    });
+    if (spawnInfo.playerSpawn) PLAYER_SPAWN = spawnInfo.playerSpawn;
+    if (spawnInfo.aiSpawn) AI_SPAWN = spawnInfo.aiSpawn;
+    console.log(`>> dynamic spawns: player=${JSON.stringify(PLAYER_SPAWN)} ai=${JSON.stringify(AI_SPAWN)}`);
 
     const before = await sampleNonBlackPixels(page);
     const heroStart = await heroTile(page);

@@ -17,3 +17,7 @@ export const TERRAIN_COST: Record<Terrain, number> = {
   desert: 1.4,
   mountain: Infinity,
 };
+
+export function isPassable(terrain: Terrain): boolean {
+  return TERRAIN_COST[terrain] !== Infinity;
+}

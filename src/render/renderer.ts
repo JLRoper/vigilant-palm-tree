@@ -2,7 +2,7 @@ import { Axial, axialToPixel, hexCorners, pixelToAxial, HEX_SIZE } from "../core
 import { Camera } from "./camera";
 import { Hero } from "../entities/hero";
 import { drawHeroSprite, drawCastleSprite } from "./sprites";
-import { Castle, CASTLES } from "../entities/settlement";
+import { Castle } from "../entities/settlement";
 import { GameMap } from "../map/gameMap";
 import { TERRAIN_COLORS, Terrain } from "../map/terrain";
 import { drawResourceIcons } from "./overlays/resourceIcon";
@@ -16,7 +16,7 @@ export class Renderer {
     private sprites: SpriteProvider
   ) {}
 
-  draw(hover: Axial | null, heroes: Hero[], path: Axial[], castles: readonly Castle[] = CASTLES) {
+  draw(hover: Axial | null, heroes: Hero[], path: Axial[], castles: readonly Castle[]) {
     const ctx = this.ctx;
     const w = window.innerWidth;
     const h = window.innerHeight;

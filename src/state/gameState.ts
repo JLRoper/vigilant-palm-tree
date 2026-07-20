@@ -52,6 +52,8 @@ export interface GameState {
   phase: GamePhase;
   selectedHeroId: HeroId | null;
   dirty: boolean;
+  castleSeed: number;
+  castleCount: number;
 }
 
 export const MOVEMENT_PER_TURN = 7;
@@ -72,6 +74,8 @@ export interface InitialStateOptions {
   seedSettlements?: SettlementState[];
   seedRound?: number;
   seedActivePlayerId?: PlayerId;
+  seedCastleSeed?: number;
+  seedCastleCount?: number;
 }
 
 function defaultPlayers(): Player[] {
@@ -141,6 +145,8 @@ export function createInitialState(opts?: InitialStateOptions): GameState {
     phase: { kind: "PLAYER_TURN", playerId: activePlayerId },
     selectedHeroId: null,
     dirty: false,
+    castleSeed: opts?.seedCastleSeed ?? 0,
+    castleCount: opts?.seedCastleCount ?? 3,
   };
 }
 
