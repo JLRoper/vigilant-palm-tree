@@ -28,11 +28,11 @@ export type Game = {
   enemy_positions: EnemyPos[];
   created_at: string;
   updated_at: string;
-  round?: number;
-  active_player_id?: number;
-  players?: Player[];
-  heroes?: Record<string, HeroState>;
-  settlements?: Record<string, SettlementState>;
+  round: number;
+  active_player_id: number;
+  players: Player[];
+  heroes: Record<string, HeroState>;
+  settlements: Record<string, SettlementState>;
 };
 
 export type TileRow = {

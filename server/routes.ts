@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { pool, withTransaction } from "./db";
 import { GameMap } from "../src/map/gameMap";
+import { mulberry32 } from "../src/core/rng";
+import { makeInitialStatePayload } from "../src/game/initState";
 import type { PoolClient } from "pg";
 import type {
   GameState,
@@ -12,7 +14,14 @@ import type {
 export const router = Router();
 
 type EnemyPos = { q: number; r: number };
-type GameRow = {
+type TileRow = {
+  q: number;
+  r: number;
+  terrain: string;
+  resource: string | null;
+};
+
+type FullGameRow = {
   id: number;
   name: string;
   seed: number;
@@ -21,29 +30,17 @@ type GameRow = {
   turn: number;
   gold: number;
   enemy_positions: EnemyPos[];
-  created_at: string;
-  updated_at: string;
-};
-type TileRow = {
-  q: number;
-  r: number;
-  terrain: string;
-  resource: string | null;
-};
-
-type FullGameRow = GameRow & {
   round: number;
   active_player_id: number;
   players: Player[];
   heroes: Record<string, HeroState>;
   settlements: Record<string, SettlementState>;
+  created_at: string;
+  updated_at: string;
 };
 
 const GAME_COLUMNS =
   "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, active_player_id, players, heroes, settlements, created_at, updated_at";
-
-const LEGACY_GAME_COLUMNS =
-  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, created_at, updated_at";
 
 async function generateAndInsertTiles(
   client: PoolClient,
@@ -85,15 +82,15 @@ router.get("/health", async (_req, res) => {
 });
 
 router.get("/games", async (_req, res) => {
-  const r = await pool.query<GameRow>(
-    `SELECT ${LEGACY_GAME_COLUMNS} FROM games ORDER BY id DESC`
+  const r = await pool.query<FullGameRow>(
+    `SELECT ${GAME_COLUMNS} FROM games ORDER BY id DESC`
   );
   res.json(r.rows);
 });
 
 router.get("/games/:name", async (req, res) => {
-  const r = await pool.query<GameRow>(
-    `SELECT ${LEGACY_GAME_COLUMNS} FROM games WHERE name = $1`,
+  const r = await pool.query<FullGameRow>(
+    `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
     [req.params.name]
   );
   if (r.rowCount === 0) {
@@ -117,18 +114,41 @@ router.post("/games", async (req, res) => {
       return;
     }
     console.log(`[api] POST /games name=${name} hero=(${hero_q},${hero_r})`);
+    const map = new GameMap(seed);
+    const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179));
     const game = await withTransaction(async (client) => {
-      const r = await client.query<GameRow>(
-        `INSERT INTO games (name, seed, hero_q, hero_r, enemy_positions)
-         VALUES ($1, $2, $3, $4, $5::jsonb)
-         ON CONFLICT (name) DO UPDATE
-           SET seed = EXCLUDED.seed,
-               hero_q = EXCLUDED.hero_q,
-               hero_r = EXCLUDED.hero_r,
-               enemy_positions = EXCLUDED.enemy_positions,
-               updated_at = now()
-         RETURNING ${LEGACY_GAME_COLUMNS}`,
-        [name, seed, hero_q, hero_r, JSON.stringify(enemy_positions)]
+      const r = await client.query<FullGameRow>(
+        `INSERT INTO games (
+            name, seed, hero_q, hero_r, enemy_positions,
+            round, active_player_id, players, heroes, settlements
+          ) VALUES (
+            $1, $2, $3, $4, $5::jsonb,
+            $6, $7, $8::jsonb, $9::jsonb, $10::jsonb
+          )
+          ON CONFLICT (name) DO UPDATE
+            SET seed = EXCLUDED.seed,
+                hero_q = EXCLUDED.hero_q,
+                hero_r = EXCLUDED.hero_r,
+                enemy_positions = EXCLUDED.enemy_positions,
+                round = EXCLUDED.round,
+                active_player_id = EXCLUDED.active_player_id,
+                players = EXCLUDED.players,
+                heroes = EXCLUDED.heroes,
+                settlements = EXCLUDED.settlements,
+                updated_at = now()
+          RETURNING ${GAME_COLUMNS}`,
+        [
+          name,
+          seed,
+          hero_q,
+          hero_r,
+          JSON.stringify(enemy_positions),
+          initial.round,
+          initial.active_player_id,
+          JSON.stringify(initial.players),
+          JSON.stringify(initial.heroes),
+          JSON.stringify(initial.settlements),
+        ]
       );
       const row = r.rows[0];
       await generateAndInsertTiles(client, row.id, row.seed, "upsert");
@@ -258,7 +278,7 @@ router.patch("/games/:name", async (req, res) => {
   vals.push(req.params.name);
   const r = await pool.query<GameRow>(
     `UPDATE games SET ${sets.join(", ")} WHERE name = $${i}
-     RETURNING ${LEGACY_GAME_COLUMNS}`,
+     RETURNING ${GAME_COLUMNS}`,
     vals
   );
   if (r.rowCount === 0) {

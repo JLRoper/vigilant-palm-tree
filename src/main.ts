@@ -21,7 +21,16 @@ import { SettlementPanel } from "./views/settlementPanel";
 import { listUserGames, rememberGame } from "./io/userGames";
 import { axialToPixel } from "./core/hex";
 import { Castle } from "./entities/settlement";
-import { buildInitialGameState, hydrateGameState, playerHeroId } from "./game/initState";
+import {
+  buildInitialGameState,
+  hydrateGameState,
+  playerHeroId,
+} from "./game/initState";
+import {
+  CASTLE_COUNT_DEFAULT,
+  defaultCastleSeedFromMapSeed,
+  generateCastles,
+} from "./map/castlePlacement";
 import { buildTurnHooks } from "./game/turnHooks";
 import { TurnController } from "./state/turnController";
 import type { GameState, HeroId } from "./state/gameState";
@@ -272,12 +281,16 @@ async function manualSave(): Promise<void> {
   refreshHud();
 }
 
-async function loadGameIntoState(loaded: Game, tiles: TileRow[]): Promise<void> {
+async function loadGameIntoState(
+  loaded: Game,
+  tiles: TileRow[],
+  castleOpts?: { castleSeed?: number; castleCount?: number },
+): Promise<void> {
   activeGameId = loaded.id;
   activeGameName = loaded.name;
   rememberGame(loaded.id, loaded.name);
   gameMap = GameMap.fromTiles(tiles);
-  const hydrated = hydrateGameState(loaded, gameMap, rng);
+  const hydrated = hydrateGameState(loaded, castleOpts);
   replaceTurnControllerState(hydrated);
   rebuildHeroesFromState();
   rebuildSettlementsFromState();
@@ -295,16 +308,30 @@ async function loadGameIntoState(loaded: Game, tiles: TileRow[]): Promise<void> 
 async function startFreshStarter(): Promise<void> {
   const name = `starter-${Date.now().toString(36)}`;
   try {
-    const created = await api.createGame(
-      name,
-      MAP_SEED,
-      6,
-      5,
-      [{ q: 14, r: 8 }, { q: 17, r: 9 }]
-    );
+    const castleSeed = defaultCastleSeedFromMapSeed(MAP_SEED);
+    const castles = generateCastles(gameMap, {
+      castleSeed,
+      castleCount: CASTLE_COUNT_DEFAULT,
+    });
+    const playerCastle = castles.find((c) => c.ownerId === 0);
+    const aiCastle = castles.find((c) => c.ownerId === 1);
+    const heroQ = playerCastle?.tile.q ?? 6;
+    const heroR = playerCastle?.tile.r ?? 5;
+    const enemyPositions = aiCastle
+      ? [
+          { q: aiCastle.tile.q, r: aiCastle.tile.r },
+          { q: aiCastle.tile.q + 3, r: aiCastle.tile.r + 1 },
+        ]
+      : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
+    const created = await api.createGame(name, MAP_SEED, heroQ, heroR, enemyPositions);
     const tiles = await api.getTiles(created.name);
-    await loadGameIntoState(created, tiles);
-    await api.logEvent(created.name, "session_start", { seed: created.seed, round: 1 });
+    await loadGameIntoState(created, tiles, { castleSeed, castleCount: CASTLE_COUNT_DEFAULT });
+    await api.logEvent(created.name, "session_start", {
+      seed: created.seed,
+      castleSeed,
+      castleCount: CASTLE_COUNT_DEFAULT,
+      round: 1,
+    });
   } catch (e) {
     console.warn("failed to start starter game:", e);
     saveStatus = "error";
@@ -374,17 +401,37 @@ function initialize(): void {
       canEndTurnNow: () => canEndTurn(gameState),
     },
     callbacks: {
-      onNew: async ({ name, seed }) => {
-        const created = await api.createGame(
-          name,
-          seed,
-          6,
-          5,
-          [{ q: 14, r: 8 }, { q: 17, r: 9 }]
-        );
+      onNew: async ({ name, seed, castleSeed, castleCount }) => {
+        const effectiveCastleSeed =
+          typeof castleSeed === "number" && Number.isFinite(castleSeed)
+            ? castleSeed
+            : defaultCastleSeedFromMapSeed(seed);
+        const effectiveCastleCount = castleCount ?? CASTLE_COUNT_DEFAULT;
+        const castles = generateCastles(gameMap, {
+          castleSeed: effectiveCastleSeed,
+          castleCount: effectiveCastleCount,
+        });
+        const playerCastle = castles.find((c) => c.ownerId === 0);
+        const aiCastle = castles.find((c) => c.ownerId === 1);
+        const heroQ = playerCastle?.tile.q ?? 6;
+        const heroR = playerCastle?.tile.r ?? 5;
+        const enemyPositions = aiCastle
+          ? [
+              { q: aiCastle.tile.q, r: aiCastle.tile.r },
+              { q: aiCastle.tile.q + 3, r: aiCastle.tile.r + 1 },
+            ]
+          : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
+        const created = await api.createGame(name, seed, heroQ, heroR, enemyPositions);
         const tiles = await api.getTiles(created.name);
-        await loadGameIntoState(created, tiles);
-        await api.logEvent(created.name, "new_game", { seed });
+        await loadGameIntoState(created, tiles, {
+          castleSeed: effectiveCastleSeed,
+          castleCount: effectiveCastleCount,
+        });
+        await api.logEvent(created.name, "new_game", {
+          seed,
+          castleSeed: effectiveCastleSeed,
+          castleCount: effectiveCastleCount,
+        });
       },
       onLoad: async (loaded, tiles) => {
         await loadGameIntoState(loaded, tiles);
