@@ -12,6 +12,7 @@ import {
   endTurn as endTurnReducer,
   applyEndOfTurn as applyEndOfTurnReducer,
   advanceRound as advanceRoundReducer,
+  reorderStack as reorderStackReducer,
   detectAdjacentEnemy as detectAdjacentEnemyFn,
   transferGold as transferGoldReducer,
   tradeResources as tradeResourcesReducer,
@@ -64,8 +65,9 @@ export class TurnController {
     heroId: HeroId,
     toTile: { q: number; r: number },
     cost: number,
+    trailExtension?: { q: number; r: number }[],
   ): boolean {
-    const result = startMoveReducer(this.state, heroId, toTile, cost);
+    const result = startMoveReducer(this.state, heroId, toTile, cost, trailExtension);
     this.state = result.state;
     if (!result.ok) return false;
     this.hooks.logEvent({
@@ -148,6 +150,21 @@ export class TurnController {
     this.hooks.logEvent({
       type: "resources_traded",
       payload: { fromId, toId, resource, amount },
+    });
+    return { ok: true, reason: "" };
+  }
+
+  reorderStack(
+    heroId: HeroId,
+    fromIdx: number,
+    toIdx: number,
+  ): { ok: boolean; reason: string } {
+    const result = reorderStackReducer(this.state, heroId, fromIdx, toIdx);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "stack_reordered",
+      payload: { heroId, fromIdx, toIdx },
     });
     return { ok: true, reason: "" };
   }

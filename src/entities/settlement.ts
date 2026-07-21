@@ -19,6 +19,8 @@ export class Castle {
   foundedOnResource: ResourceType | null;
   gold: number;
   warehouse: Warehouse;
+  citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
+  cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>;
 
   constructor(
     id: string,
@@ -32,6 +34,8 @@ export class Castle {
     foundedOnResource: ResourceType | null,
     gold = 0,
     warehouse?: Warehouse,
+    citySpots?: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>,
+    cityMines?: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>,
   ) {
     this.id = id;
     this.tile = tile;
@@ -44,6 +48,8 @@ export class Castle {
     this.foundedOnResource = foundedOnResource;
     this.gold = gold;
     this.warehouse = warehouse ?? emptyWarehouse();
+    this.citySpots = citySpots ?? [];
+    this.cityMines = cityMines ?? [];
   }
 
   toGameState(): SettlementState {
@@ -60,6 +66,8 @@ export class Castle {
       foundedOnResource: this.foundedOnResource,
       gold: this.gold,
       warehouse: { ...this.warehouse },
+      citySpots: this.citySpots,
+      cityMines: this.cityMines,
     };
   }
 
@@ -76,6 +84,8 @@ export class Castle {
       s.foundedOnResource ?? null,
       s.gold ?? 0,
       s.warehouse ?? emptyWarehouse(),
+      s.citySpots ?? [],
+      s.cityMines ?? [],
     );
   }
 }

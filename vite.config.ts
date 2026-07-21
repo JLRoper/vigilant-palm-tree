@@ -5,6 +5,7 @@ export default defineConfig({
     assetsInlineLimit: 0,
   },
   server: {
+    host: "0.0.0.0",
     port: 5173,
     proxy: {
       "/api": {
@@ -14,6 +15,7 @@ export default defineConfig({
     },
   },
   preview: {
+    host: "0.0.0.0",
     port: 4173,
     proxy: {
       "/api": {

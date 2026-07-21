@@ -6,6 +6,7 @@ import {
   clearSelection,
   startMove,
   cancelMove,
+  reorderStack,
   detectAdjacentEnemy,
   startBattle,
   resolveBattle,
@@ -190,6 +191,46 @@ test("startMove deducts cost correctly", () => {
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.state.heroes.h0.movementRemaining, 5);
+  }
+});
+
+test("startMove with trailExtension appends every tile in the path", () => {
+  const s = makeState({ selectedHeroId: "h0" });
+  const trail = [
+    { q: 3, r: 2 },
+    { q: 4, r: 2 },
+    { q: 5, r: 2 },
+  ];
+  const result = startMove(s, "h0", { q: 5, r: 2 }, 3, trail);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    const finalTrail = result.state.heroes.h0.trail;
+    assert.equal(finalTrail.length, 4); // initial {2,2} + 3 trail entries
+    assert.deepEqual(finalTrail[0], { q: 2, r: 2 });
+    assert.deepEqual(finalTrail[1], { q: 3, r: 2 });
+    assert.deepEqual(finalTrail[2], { q: 4, r: 2 });
+    assert.deepEqual(finalTrail[3], { q: 5, r: 2 });
+  }
+});
+
+test("startMove without trailExtension falls back to appending only the destination", () => {
+  const s = makeState({ selectedHeroId: "h0" });
+  const result = startMove(s, "h0", { q: 5, r: 2 }, 3);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    const finalTrail = result.state.heroes.h0.trail;
+    assert.equal(finalTrail.length, 2); // initial + destination
+    assert.deepEqual(finalTrail[1], { q: 5, r: 2 });
+  }
+});
+
+test("startMove with empty trailExtension falls back to appending only the destination", () => {
+  const s = makeState({ selectedHeroId: "h0" });
+  const result = startMove(s, "h0", { q: 5, r: 2 }, 3, []);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.state.heroes.h0.trail.length, 2);
+    assert.deepEqual(result.state.heroes.h0.trail[1], { q: 5, r: 2 });
   }
 });
 
@@ -700,4 +741,116 @@ test("tradeResources rejects non-positive or non-integer amount", () => {
   assert.equal(tradeResources(s, "s0", "s0b", "wood", 0).ok, false);
   assert.equal(tradeResources(s, "s0", "s0b", "wood", -3).ok, false);
   assert.equal(tradeResources(s, "s0", "s0b", "wood", 1.5).ok, false);
+});
+
+// --- reorderStack: army slots are FIXED battlefield positions, so this is a
+// swap of two slots, not a move-and-shift.
+
+test("reorderStack swaps the contents of two occupied slots", () => {
+  const s = makeState({
+    heroes: [
+      {
+        ...makeHero("h0", 0, 2, 2),
+        stacks: [
+          { unitTypeId: "swordsman", count: 12 },
+          { unitTypeId: "archer", count: 8 },
+          { unitTypeId: "cavalry", count: 4 },
+        ],
+      },
+      makeHero("h1", 1, 18, 4),
+    ],
+  });
+  const result = reorderStack(s, "h0", 0, 2);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const stacks = result.state.heroes.h0.stacks;
+  assert.equal(stacks[0].unitTypeId, "cavalry");
+  assert.equal(stacks[1].unitTypeId, "archer");
+  assert.equal(stacks[2].unitTypeId, "swordsman");
+  assert.equal(result.state.heroes.h0.stacks.length, 3);
+});
+
+test("reorderStack dragging onto an empty slot leaves source empty (swap with empty)", () => {
+  const s = makeState({
+    heroes: [
+      {
+        ...makeHero("h0", 0, 2, 2),
+        stacks: [
+          { unitTypeId: "archer", count: 8 },
+          { unitTypeId: null, count: 0 },
+          { unitTypeId: null, count: 0 },
+        ],
+      },
+      makeHero("h1", 1, 18, 4),
+    ],
+  });
+  const result = reorderStack(s, "h0", 0, 2);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const stacks = result.state.heroes.h0.stacks;
+  assert.equal(stacks[0].unitTypeId, null);
+  assert.equal(stacks[0].count, 0);
+  assert.equal(stacks[2].unitTypeId, "archer");
+  assert.equal(stacks[2].count, 8);
+});
+
+test("reorderStack with from === to is a successful no-op (state unchanged)", () => {
+  const s = makeState({
+    heroes: [
+      {
+        ...makeHero("h0", 0, 2, 2),
+        stacks: [
+          { unitTypeId: "swordsman", count: 12 },
+          { unitTypeId: "archer", count: 8 },
+        ],
+      },
+      makeHero("h1", 1, 18, 4),
+    ],
+  });
+  const result = reorderStack(s, "h0", 1, 1);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.state.heroes.h0.stacks[0].unitTypeId, "swordsman");
+  assert.equal(result.state.heroes.h0.stacks[1].unitTypeId, "archer");
+});
+
+test("reorderStack rejects out-of-range indices", () => {
+  const s = makeState({
+    heroes: [
+      {
+        ...makeHero("h0", 0, 2, 2),
+        stacks: [
+          { unitTypeId: "swordsman", count: 12 },
+          { unitTypeId: "archer", count: 8 },
+        ],
+      },
+      makeHero("h1", 1, 18, 4),
+    ],
+  });
+  assert.equal(reorderStack(s, "h0", -1, 0).ok, false);
+  assert.equal(reorderStack(s, "h0", 0, 5).ok, false);
+  assert.equal(reorderStack(s, "h0", 0, 1.5).ok, false);
+});
+
+test("reorderStack leaves other heroes untouched", () => {
+  const s = makeState({
+    heroes: [
+      {
+        ...makeHero("h0", 0, 2, 2),
+        stacks: [
+          { unitTypeId: "swordsman", count: 12 },
+          { unitTypeId: "archer", count: 8 },
+        ],
+      },
+      {
+        ...makeHero("h1", 1, 18, 4),
+        stacks: [{ unitTypeId: "griffin", count: 3 }],
+      },
+    ],
+  });
+  const result = reorderStack(s, "h0", 0, 1);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.state.heroes.h1.stacks[0].unitTypeId, "griffin");
+  assert.equal(result.state.heroes.h1.stacks[0].count, 3);
 });

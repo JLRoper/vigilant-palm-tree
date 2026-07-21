@@ -24,6 +24,8 @@ import {
   SETTLEMENT_GOLD_TAX,
 } from "../economy/settlementRates";
 import { PLAYER_COLORS, MAX_PLAYERS } from "../state/playerColors";
+import { generateCitySpots } from "../core/citySpots";
+import { cityViewSizeFor } from "../core/cityGrid";
 
 const DEFAULT_PLAYER_COUNT = 3;
 const MAX_PLAYER_COUNT = MAX_PLAYERS;
@@ -99,6 +101,8 @@ function makeSettlements(
 ): SettlementState[] {
   return castles.map((c) => {
     const computed = computeSettlementRates(map, c.tile.q, c.tile.r, c.level);
+    const size = cityViewSizeFor(c.level);
+    const { spots, mines } = generateCitySpots(size, rng);
     return {
       id: c.id,
       name: generateSettlementName(rng, c.ownerId),
@@ -112,6 +116,8 @@ function makeSettlements(
       foundedOnResource: computed.foundedOn,
       gold: 0,
       warehouse: emptyWarehouse(),
+      citySpots: spots,
+      cityMines: mines,
     };
   });
 }
@@ -224,6 +230,8 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     foundedOnResource: s.foundedOnResource ?? null,
     gold: s.gold ?? 0,
     warehouse: s.warehouse ?? emptyWarehouse(),
+    citySpots: s.citySpots ?? [],
+    cityMines: s.cityMines ?? [],
     q: s.q,
     r: s.r,
     level: s.level,

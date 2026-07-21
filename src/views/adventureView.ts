@@ -172,7 +172,11 @@ export class AdventureView {
       }
       const dest = newPath[reachableIdx - 1];
       const tc = this.opts.getTurnController();
-      const ok = tc.requestMove(selectedId, dest, actualCost);
+      // Record every reachable tile (incl. destination) so the trail line in
+      // the renderer follows the actual hex path instead of cutting diagonally
+      // through it as the crow flies.
+      const trailExtension = newPath.slice(0, reachableIdx);
+      const ok = tc.requestMove(selectedId, dest, actualCost, trailExtension);
       this.opts.onStateChanged?.();
       this.lastClickDebug.moved = ok;
       this.lastClickDebug.reason = ok
