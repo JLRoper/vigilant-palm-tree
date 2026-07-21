@@ -94,20 +94,33 @@ export class CityView {
     }
   }
 
+  private closing = false;
+  private lastClosedId: string | null = null;
+
   close(): string | null {
+    if (!this.isOpen()) return this.lastClosedId;
     return this.handleClose();
   }
 
   private handleClose(): string | null {
-    if (this.backBtn) {
-      this.backBtn.remove();
-      this.backBtn = null;
-    }
-    window.removeEventListener("keydown", this.onKeyDown);
+    if (this.closing) return this.lastClosedId;
+    if (!this.isOpen()) return this.lastClosedId;
+
+    this.closing = true;
     const id = this.openSettlementId;
-    this.openSettlementId = null;
-    this.hover = null;
-    this.onClose();
-    return id;
+    this.lastClosedId = id;
+    try {
+      if (this.backBtn) {
+        this.backBtn.remove();
+        this.backBtn = null;
+      }
+      window.removeEventListener("keydown", this.onKeyDown);
+      this.openSettlementId = null;
+      this.hover = null;
+      this.onClose();
+      return id;
+    } finally {
+      this.closing = false;
+    }
   }
 }
