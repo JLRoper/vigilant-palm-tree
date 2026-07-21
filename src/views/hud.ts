@@ -4,6 +4,7 @@ import { GameMap } from "../map/gameMap";
 import type { GameState } from "../state/gameState";
 import type { Hero } from "../entities/hero";
 import type { Castle } from "../entities/settlement";
+import { effectiveIncome } from "../economy/consumption";
 import { playerWealth } from "../economy/income";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -46,11 +47,14 @@ export function updateHud(
   const enemyCount = Object.values(heroes).filter((h) => h.ownerId !== 0).length;
   const enemiesLine = `${enemyCount} enemy hero${enemyCount === 1 ? "" : "s"}`;
   const wealthLine = `Wealth: ${playerWealth(state, 0)}g`;
+  const moraleLine = playerMorale(state);
+  const effectiveIncomeLine = playerEffectiveIncome(state);
   const status = `${phase} · ${roundLine} · ${wealthLine} · ${enemiesLine}${movementLine}`;
   const dbInfo = backendOk ? `DB ${saveStatus}` : "DB offline";
   const savedInfo = lastSavedAt ? ` · Last saved ${formatTime(lastSavedAt)}` : "";
+  const econLine = `${moraleLine} · ${effectiveIncomeLine}`;
   const text = !hover
-    ? `${heroInfo} · ${status} · ${dbInfo}${savedInfo} · ${base}`
+    ? `${heroInfo} · ${status} · ${econLine} · ${dbInfo}${savedInfo} · ${base}`
     : (() => {
         const t = map.get(hover.q, hover.r);
         const tile = `Tile (${hover.q}, ${hover.r}) · ${t ?? "void"}`;
@@ -60,9 +64,25 @@ export function updateHud(
           (s) => s.tile.q === hover.q && s.tile.r === hover.r
         );
         const settleLine = settle ? ` · Castle L${settle.level}` : "";
-        return `${tile}${resourceLine}${settleLine} · ${heroInfo} · ${status} · ${dbInfo}${savedInfo} · ${base}`;
+        return `${tile}${resourceLine}${settleLine} · ${heroInfo} · ${status} · ${econLine} · ${dbInfo}${savedInfo} · ${base}`;
       })();
   handles.textSpan.textContent = text;
+}
+
+function playerMorale(state: GameState): string {
+  const owned = Object.values(state.settlements).filter((s) => s.ownerId === 0);
+  if (owned.length === 0) return "Morale: n/a";
+  const sum = owned.reduce((acc, s) => acc + (s.morale ?? 100), 0);
+  const avg = Math.round(sum / owned.length);
+  return `Morale: ${avg}%`;
+}
+
+function playerEffectiveIncome(state: GameState): string {
+  const owned = Object.values(state.settlements).filter((s) => s.ownerId === 0);
+  if (owned.length === 0) return "Income: 0g";
+  const total = owned.reduce((acc, s) => acc + effectiveIncome(s), 0);
+  const base = owned.reduce((acc, s) => acc + (s.population ?? 0) * (s.goldTax ?? 0), 0);
+  return `Income: ${total}/${base}g`;
 }
 
 export function canEndTurn(state: GameState): boolean {

@@ -9,6 +9,7 @@ const RESOURCE_ICONS: Record<ResourceType, string> = {
   stone: "\u{1FAA8}",
   iron: "\u{1F528}",
   arcane: "\u{1F52E}",
+  food: "\u{1F33E}",
 };
 
 const WAREHOUSE_SHORT: WarehouseResource[] = ["wood", "stone", "iron", "arcane"];
@@ -33,7 +34,7 @@ function makeRow(): { row: HTMLDivElement; left: HTMLSpanElement; right: HTMLSpa
 export type TradeHandler = (
   fromId: SettlementId,
   toId: SettlementId,
-  resource: ResourceType,
+  resource: WarehouseResource,
   amount: number,
 ) => { ok: boolean; reason: string };
 
@@ -41,17 +42,20 @@ export interface SettlementPanelOptions {
   parent: HTMLElement;
   onSelect?: (settlementId: SettlementId) => void;
   onTrade?: TradeHandler;
+  onToggleAutoTrade?: (settlementId: SettlementId, autoTrade: boolean) => void;
 }
 
 export class SettlementPanel {
   private menu: PopupMenu;
   private body: HTMLElement;
   private onSelect?: (settlementId: SettlementId) => void;
+  private onToggleAutoTrade?: (settlementId: SettlementId, autoTrade: boolean) => void;
   private onTrade?: TradeHandler;
 
   constructor(opts: SettlementPanelOptions) {
     this.onSelect = opts.onSelect;
     this.onTrade = opts.onTrade;
+    this.onToggleAutoTrade = opts.onToggleAutoTrade;
     this.menu = new PopupMenu({
       parent: opts.parent,
       title: "Settlements",
@@ -197,6 +201,26 @@ export class SettlementPanel {
     incomeRow.left.textContent = "Income/turn";
     incomeRow.right.textContent = `${s.population * s.goldTax}g`;
     card.appendChild(incomeRow.row);
+
+    const moraleRow = makeRow();
+    moraleRow.left.textContent = "Morale (click to toggle)";
+    const moraleVal = Math.round(s.morale ?? 100);
+    moraleRow.right.textContent = `${moraleVal}% · ${(s.autoTrade ?? true) ? "on" : "off"}`;
+    moraleRow.row.style.cursor =
+      this.onToggleAutoTrade && s.ownerId === state.activePlayerId ? "pointer" : "default";
+    moraleRow.row.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (this.onToggleAutoTrade && s.ownerId === state.activePlayerId) {
+        this.onToggleAutoTrade(s.id, !(s.autoTrade ?? true));
+      }
+    });
+    card.appendChild(moraleRow.row);
+
+    const foodReq = Math.ceil((s.population ?? 0) / 100);
+    const foodRow = makeRow();
+    foodRow.left.textContent = "Food";
+    foodRow.right.textContent = `${s.warehouse.food ?? 0} / ${foodReq} req`;
+    card.appendChild(foodRow.row);
 
     const treasuryRow = makeRow();
     treasuryRow.left.textContent = "Treasury";

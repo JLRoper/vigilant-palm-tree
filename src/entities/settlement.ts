@@ -4,7 +4,7 @@ import type { PlayerId, ResourceType, SettlementState, Warehouse } from "../stat
 export type CastleLevel = 1 | 2 | 3;
 
 function emptyWarehouse(): Warehouse {
-  return { wood: 0, stone: 0, iron: 0, arcane: 0 };
+  return { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
 }
 
 export class Castle {
@@ -19,6 +19,8 @@ export class Castle {
   foundedOnResource: ResourceType | null;
   gold: number;
   warehouse: Warehouse;
+  morale: number;
+  autoTrade: boolean;
 
   constructor(
     id: string,
@@ -30,8 +32,10 @@ export class Castle {
     goldTax: number,
     resourceRates: Partial<Record<ResourceType, number>>,
     foundedOnResource: ResourceType | null,
-    gold = 0,
+    gold =0,
     warehouse?: Warehouse,
+    morale = 100,
+    autoTrade = true,
   ) {
     this.id = id;
     this.tile = tile;
@@ -44,6 +48,8 @@ export class Castle {
     this.foundedOnResource = foundedOnResource;
     this.gold = gold;
     this.warehouse = warehouse ?? emptyWarehouse();
+    this.morale = morale;
+    this.autoTrade = autoTrade;
   }
 
   toGameState(): SettlementState {
@@ -60,6 +66,8 @@ export class Castle {
       foundedOnResource: this.foundedOnResource,
       gold: this.gold,
       warehouse: { ...this.warehouse },
+      morale: this.morale,
+      autoTrade: this.autoTrade,
     };
   }
 
@@ -76,6 +84,8 @@ export class Castle {
       s.foundedOnResource ?? null,
       s.gold ?? 0,
       s.warehouse ?? emptyWarehouse(),
+      s.morale ?? 100,
+      s.autoTrade ?? true,
     );
   }
 }
