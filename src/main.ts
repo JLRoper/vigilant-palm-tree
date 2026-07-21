@@ -3,6 +3,7 @@ import { GameMap } from "./map/gameMap";
 import { Renderer } from "./render/renderer";
 import { Camera } from "./render/camera";
 import { api, type Game, type TileRow } from "./io/api";
+import { loadUnitCatalog } from "./data/unitCatalog";
 import { createDefaultProvider, SpriteProvider } from "./render/assets";
 import { HERO_PROCEDURAL_DRAWERS } from "./render/sprites";
 import { rng } from "./core/rng";
@@ -385,6 +386,7 @@ async function initBackend(): Promise<void> {
   try {
     await api.health();
     backendOk = true;
+    void loadUnitCatalog().catch((e) => console.warn("unit catalog load failed:", e));
   } catch (e) {
     backendOk = false;
     console.warn("backend offline:", e);

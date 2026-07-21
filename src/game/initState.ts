@@ -6,6 +6,7 @@ import {
   type Player,
   type SettlementState,
 } from "../state/gameState";
+import { demoStacksForPlayer, normalizeStacks } from "../state/units";
 import type { Game } from "../io/api";
 import type { GameMap } from "../map/gameMap";
 import {
@@ -84,6 +85,7 @@ function makeHeroes(
       trail: [{ q: castle.tile.q, r: castle.tile.r }],
       gold: 0,
       troops: 1,
+      stacks: demoStacksForPlayer(i),
     });
   }
   return heroes;
@@ -200,6 +202,7 @@ function backfillHero(h: Partial<HeroState> & { id: HeroId; ownerId: number; q: 
     trail: h.trail ?? [{ q: h.q, r: h.r }],
     gold: h.gold ?? 0,
     troops: h.troops ?? 1,
+    stacks: normalizeStacks(h.stacks),
     id: h.id,
     ownerId: h.ownerId,
     q: h.q,

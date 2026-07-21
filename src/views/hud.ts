@@ -37,7 +37,7 @@ export function updateHud(
   const roundLine = `Round ${state.round}`;
   const selected = state.selectedHeroId ? state.heroes[state.selectedHeroId] : null;
   const movementLine = selected
-    ? ` · Movement: ${selected.movementRemaining.toFixed(1)}/7`
+    ? ` · Movement: ${(selected.movementRemaining < 1 ? 0 : selected.movementRemaining).toFixed(1)}/7`
     : "";
   const playerHero = Object.values(heroes).find((h) => h.ownerId === 0);
   const heroInfo = playerHero
