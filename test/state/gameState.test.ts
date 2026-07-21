@@ -11,9 +11,11 @@ import {
   resolveBattle,
   endTurn,
   applyEndOfTurn,
+  applyWeeklyUpkeep,
   advanceRound,
   markSaved,
   transferGold,
+  tradeResources,
   MOVEMENT_PER_TURN,
   type GameState,
   type Player,
@@ -28,11 +30,21 @@ function makePlayer(id: PlayerId, faction: Player["faction"], name: string, hero
   return { id, faction, name, heroIds, settlementIds };
 }
 
-function makeHero(id: HeroId, ownerId: PlayerId, q: number, r: number, movementRemaining = MOVEMENT_PER_TURN, gold = 0): HeroState {
-  return { id, ownerId, q, r, movementRemaining, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q, r }], gold };
+function makeHero(id: HeroId, ownerId: PlayerId, q: number, r: number, movementRemaining = MOVEMENT_PER_TURN, gold = 0, troops = 1): HeroState {
+  return { id, ownerId, q, r, movementRemaining, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q, r }], gold, troops };
 }
 
-function makeSettlement(id: string, ownerId: PlayerId | null, q: number, r: number, opts: Partial<Pick<SettlementState, "population" | "goldTax" | "gold">> = {}): SettlementState {
+function emptyWarehouse() {
+  return { wood: 0, stone: 0, iron: 0, arcane: 0 };
+}
+
+function makeSettlement(
+  id: string,
+  ownerId: PlayerId | null,
+  q: number,
+  r: number,
+  opts: Partial<Pick<SettlementState, "population" | "goldTax" | "gold" | "resourceRates">> = {},
+): SettlementState {
   return {
     id,
     ownerId,
@@ -41,9 +53,10 @@ function makeSettlement(id: string, ownerId: PlayerId | null, q: number, r: numb
     level: 1,
     population: opts.population ?? 0,
     goldTax: opts.goldTax ?? 0,
-    resourceRates: {},
+    resourceRates: opts.resourceRates ?? {},
     foundedOnResource: null,
     gold: opts.gold ?? 0,
+    warehouse: emptyWarehouse(),
   };
 }
 
@@ -52,6 +65,7 @@ interface StateOverrides {
   heroes?: HeroState[];
   settlements?: SettlementState[];
   round?: number;
+  day?: number;
   activePlayerId?: PlayerId;
   phase?: GamePhase;
   selectedHeroId?: HeroId | null;
@@ -77,9 +91,11 @@ function makeState(overrides: StateOverrides = {}): GameState {
     seedRound: overrides.round ?? 1,
     seedActivePlayerId: overrides.activePlayerId ?? 0,
   });
-  if (overrides.phase) return { ...initial, phase: overrides.phase };
-  if (overrides.selectedHeroId !== undefined) return { ...initial, selectedHeroId: overrides.selectedHeroId };
-  return initial;
+  let state: GameState = initial;
+  if (overrides.day !== undefined) state = { ...state, day: overrides.day };
+  if (overrides.phase) state = { ...state, phase: overrides.phase };
+  if (overrides.selectedHeroId !== undefined) state = { ...state, selectedHeroId: overrides.selectedHeroId };
+  return state;
 }
 
 test("createInitialState defaults", () => {
@@ -520,4 +536,168 @@ test("transferGold rejects withdraw when settlement treasury is empty", () => {
   const next = transferGold(s, "h0", "s0", "withdraw");
   assert.equal(next.ok, false);
   if (!next.ok) assert.equal(next.reason, "nothing_to_withdraw");
+});
+
+test("applyEndOfTurn accumulates resourceRates into warehouse for all settlements", () => {
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2), resourceRates: { wood: 3, stone: 2 } },
+      { ...makeSettlement("s1", 1, 18, 4), resourceRates: { wood: 1, iron: 4 } },
+      makeSettlement("sN", null, 5, 5),
+    ],
+  });
+  const next = applyEndOfTurn(s);
+  assert.equal(next.settlements.s0.warehouse.wood, 3);
+  assert.equal(next.settlements.s0.warehouse.stone, 2);
+  assert.equal(next.settlements.s0.warehouse.iron, 0);
+  assert.equal(next.settlements.s1.warehouse.wood, 1);
+  assert.equal(next.settlements.s1.warehouse.iron, 4);
+  assert.equal(next.settlements.sN.warehouse.wood, 0);
+  assert.equal(next.dirty, true);
+});
+
+test("applyEndOfTurn does not award gold to non-active-player settlements", () => {
+  const s = makeState({
+    activePlayerId: 0,
+    settlements: [
+      makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 100 }),
+      makeSettlement("s1", 1, 18, 4, { population: 500, goldTax: 1, gold: 50 }),
+    ],
+  });
+  const next = applyEndOfTurn(s);
+  assert.equal(next.settlements.s0.gold, 600);
+  assert.equal(next.settlements.s1.gold, 50);
+});
+
+test("applyWeeklyUpkeep deducts cost when hero can pay", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 100, 10), makeHero("h1", 1, 18, 4, 7, 5, 3)],
+  });
+  const next = applyWeeklyUpkeep(s);
+  assert.equal(next.heroes.h0.gold, 90);
+  assert.equal(next.heroes.h0.troops, 10);
+  assert.equal(next.heroes.h1.gold, 2);
+  assert.equal(next.heroes.h1.troops, 3);
+});
+
+test("applyWeeklyUpkeep sets gold to 0 and troops to previous gold when hero cannot pay", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 3, 10)],
+  });
+  const next = applyWeeklyUpkeep(s);
+  assert.equal(next.heroes.h0.gold, 0);
+  assert.equal(next.heroes.h0.troops, 3);
+});
+
+test("applyWeeklyUpkeep is no-op when hero has 0 troops and 0 gold", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 0, 0)],
+  });
+  const next = applyWeeklyUpkeep(s);
+  assert.equal(next.heroes.h0.gold, 0);
+  assert.equal(next.heroes.h0.troops, 0);
+});
+
+test("advanceRound fires applyWeeklyUpkeep when day becomes divisible by 7", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 100, 10)],
+    round: 6,
+    day: 6,
+    phase: { kind: "ROUND_END", nextRound: 7 },
+  });
+  const next = advanceRound(s);
+  assert.equal(next.day, 7);
+  assert.equal(next.heroes.h0.gold, 90);
+  assert.equal(next.heroes.h0.troops, 10);
+});
+
+test("advanceRound does not fire applyWeeklyUpkeep on non-week days", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 100, 10)],
+    round: 2,
+    day: 2,
+    phase: { kind: "ROUND_END", nextRound: 3 },
+  });
+  const next = advanceRound(s);
+  assert.equal(next.day, 3);
+  assert.equal(next.heroes.h0.gold, 100);
+  assert.equal(next.heroes.h0.troops, 10);
+});
+
+test("tradeResources moves resources between same-owner settlements and charges gold", () => {
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
+      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const next = tradeResources(s, "s0", "s0b", "wood", 3);
+  assert.equal(next.ok, true);
+  if (next.ok) {
+    assert.equal(next.state.settlements.s0.warehouse.wood, 7);
+    assert.equal(next.state.settlements.s0.gold, 97);
+    assert.equal(next.state.settlements.s0b.warehouse.wood, 3);
+    assert.equal(next.state.dirty, true);
+  }
+});
+
+test("tradeResources rejects when settlements have different owners", () => {
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
+      { ...makeSettlement("s1", 1, 18, 4, { gold: 100 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
+    ],
+  });
+  const next = tradeResources(s, "s0", "s1", "wood", 2);
+  assert.equal(next.ok, false);
+  if (!next.ok) assert.equal(next.reason, "different_owners");
+});
+
+test("tradeResources rejects when from settlement has insufficient resource", () => {
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 1, stone: 0, iron: 0, arcane: 0 } },
+      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
+    ],
+  });
+  const next = tradeResources(s, "s0", "s0b", "wood", 5);
+  assert.equal(next.ok, false);
+  if (!next.ok) assert.equal(next.reason, "insufficient_resource");
+});
+
+test("tradeResources rejects when from settlement has insufficient gold", () => {
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { gold: 1 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
+      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
+    ],
+  });
+  const next = tradeResources(s, "s0", "s0b", "wood", 5);
+  assert.equal(next.ok, false);
+  if (!next.ok) assert.equal(next.reason, "insufficient_gold");
+});
+
+test("tradeResources rejects when either settlement is unowned (neutral)", () => {
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
+      { ...makeSettlement("sN", null, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
+    ],
+  });
+  const next = tradeResources(s, "s0", "sN", "wood", 1);
+  assert.equal(next.ok, false);
+  if (!next.ok) assert.equal(next.reason, "unowned_settlement");
+});
+
+test("tradeResources rejects non-positive or non-integer amount", () => {
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
+      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
+    ],
+  });
+  assert.equal(tradeResources(s, "s0", "s0b", "wood", 0).ok, false);
+  assert.equal(tradeResources(s, "s0", "s0b", "wood", -3).ok, false);
+  assert.equal(tradeResources(s, "s0", "s0b", "wood", 1.5).ok, false);
 });

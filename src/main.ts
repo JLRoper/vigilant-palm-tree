@@ -3,6 +3,7 @@ import { GameMap } from "./map/gameMap";
 import { Renderer } from "./render/renderer";
 import { Camera } from "./render/camera";
 import { api, type Game, type TileRow } from "./io/api";
+import { loadUnitCatalog } from "./data/unitCatalog";
 import { createDefaultProvider, SpriteProvider } from "./render/assets";
 import { HERO_PROCEDURAL_DRAWERS } from "./render/sprites";
 import { rng } from "./core/rng";
@@ -391,6 +392,7 @@ async function initBackend(): Promise<void> {
   try {
     await api.health();
     backendOk = true;
+    void loadUnitCatalog().catch((e) => console.warn("unit catalog load failed:", e));
   } catch (e) {
     backendOk = false;
     console.warn("backend offline:", e);
@@ -458,6 +460,17 @@ function initialize(): void {
       turnController.selectSettlement(id);
       gameState = turnController.getState();
       refreshAll();
+    },
+    onTrade: (fromId, toId, resource, amount) => {
+      if (resource === "gold") {
+        return { ok: false, reason: "gold_not_tradeable" };
+      }
+      const result = turnController.tradeResources(fromId, toId, resource, amount);
+      if (result.ok) {
+        gameState = turnController.getState();
+        refreshAll();
+      }
+      return result;
     },
   });
 
@@ -592,6 +605,17 @@ function initialize(): void {
       syncStateFromController();
       refreshAll();
       return ok;
+    },
+    tradeResources: (
+      fromId: string,
+      toId: string,
+      resource: "wood" | "stone" | "iron" | "arcane",
+      amount: number,
+    ) => {
+      const result = turnController.tradeResources(fromId, toId, resource, amount);
+      syncStateFromController();
+      refreshAll();
+      return result;
     },
     teleportHero: (id: HeroId, q: number, r: number) => {
       const state = turnController.getState();

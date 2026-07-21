@@ -1,5 +1,6 @@
 import { Axial, axialToPixel } from "../core/hex";
 import type { Faction as StateFaction, HeroId, HeroState, PlayerId } from "../state/gameState";
+import { normalizeStacks, type UnitStack } from "../state/units";
 import { settings } from "../state/settings";
 
 export type Faction = "player" | "enemy";
@@ -20,6 +21,7 @@ export class Hero {
   trail: Axial[];
   gold: number;
   troops: number;
+  stacks: UnitStack[];
 
   constructor(
     id: string,
@@ -30,7 +32,8 @@ export class Hero {
     movementRemaining = 7,
     trail?: Axial[],
     gold = 0,
-    troops = 1
+    troops = 1,
+    stacks?: UnitStack[]
   ) {
     this.id = id;
     this.tile = { q, r };
@@ -43,6 +46,7 @@ export class Hero {
     this.trail = trail ?? [{ q, r }];
     this.gold = gold;
     this.troops = troops;
+    this.stacks = normalizeStacks(stacks);
   }
 
   get moveDurationMs(): number {
@@ -109,6 +113,7 @@ export class Hero {
     this.trail = (s.trail ?? []).map((p) => ({ q: p.q, r: p.r }));
     this.gold = s.gold ?? 0;
     this.troops = s.troops ?? 1;
+    this.stacks = normalizeStacks(s.stacks);
     if (this.moving) return;
     if (this.tile.q === s.q && this.tile.r === s.r) return;
     const start: Axial = { ...this.tile };
@@ -130,6 +135,7 @@ export class Hero {
       trail: this.trail.map((p) => ({ q: p.q, r: p.r })),
       gold: this.gold,
       troops: this.troops,
+      stacks: normalizeStacks(this.stacks),
     };
   }
 
@@ -143,7 +149,9 @@ export class Hero {
       s.ownerId,
       s.movementRemaining,
       (s.trail ?? []).map((p) => ({ q: p.q, r: p.r })),
-      s.gold ?? 0
+      s.gold ?? 0,
+      s.troops ?? 1,
+      s.stacks
     );
   }
 }

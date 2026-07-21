@@ -1,8 +1,16 @@
 import type { GameState, Player, SettlementState } from "../state/gameState";
 import type { Hero } from "../entities/hero";
 import { PopupMenu, menuTheme } from "./menu";
+import { ARMY_STACK_SLOTS, type UnitStack } from "../state/units";
+import { catalogReady, catalogFailed, getCachedUnit, loadUnitCatalog } from "../data/unitCatalog";
+import { getUnitImageUrl } from "../data/unitImages";
 
 const MOVEMENT_PER_TURN = 7;
+const MIN_USABLE_MOVEMENT = 1.0;
+
+function displayableRemaining(remaining: number): number {
+  return remaining < MIN_USABLE_MOVEMENT ? 0 : remaining;
+}
 
 export type TransferHandler = (
   heroId: string,
@@ -51,6 +59,13 @@ export class HeroInfoMenu {
 
   private onTransfer?: TransferHandler;
   private settlementAtTile: SettlementState | null = null;
+  private troopsEl: HTMLElement;
+  private armyRows: HTMLDivElement[] = [];
+  private armyExpanded = false;
+  private armyChevron: HTMLSpanElement | null = null;
+  private armyCollapsedGrid: HTMLDivElement | null = null;
+  private armyExpandedList: HTMLDivElement | null = null;
+  private armyTiles: { tile: HTMLDivElement; img: HTMLImageElement; count: HTMLSpanElement }[] = [];
 
   constructor(opts: HeroInfoMenuOptions) {
     this.onTransfer = opts.onTransfer;
@@ -187,6 +202,23 @@ export class HeroInfoMenu {
 
     body.appendChild(movementSection);
 
+    const troopsRow = document.createElement("div");
+    Object.assign(troopsRow.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "baseline",
+      fontSize: "11px",
+      opacity: "0.85",
+      marginTop: "4px",
+    });
+    const troopsLabel = document.createElement("span");
+    troopsLabel.textContent = "Troops";
+    troopsRow.appendChild(troopsLabel);
+    this.troopsEl = document.createElement("span");
+    this.troopsEl.style.fontVariantNumeric = "tabular-nums";
+    troopsRow.appendChild(this.troopsEl);
+    body.appendChild(troopsRow);
+
     const statsBlock = document.createElement("div");
     Object.assign(statsBlock.style, {
       marginTop: "4px",
@@ -222,6 +254,162 @@ export class HeroInfoMenu {
 
     body.appendChild(statsBlock);
 
+    const armyBlock = document.createElement("div");
+    Object.assign(armyBlock.style, {
+      marginTop: "4px",
+      paddingTop: "8px",
+      borderTop: "1px solid rgba(255,255,255,0.08)",
+    });
+    const armyHeader = document.createElement("div");
+    Object.assign(armyHeader.style, {
+      display: "flex",
+      alignItems: "baseline",
+      gap: "6px",
+      marginBottom: "6px",
+      cursor: "pointer",
+      userSelect: "none",
+    });
+    const armyChevron = document.createElement("span");
+    armyChevron.textContent = "\u25B6";
+    Object.assign(armyChevron.style, {
+      fontSize: "9px",
+      opacity: "0.55",
+      transition: "transform 120ms ease-out",
+    });
+    this.armyChevron = armyChevron;
+    armyHeader.appendChild(armyChevron);
+    const armyTitle = document.createElement("span");
+    armyTitle.textContent = "Army";
+    Object.assign(armyTitle.style, {
+      fontSize: "11px",
+      letterSpacing: "0.06em",
+      textTransform: "uppercase",
+      opacity: "0.55",
+      flex: "1",
+    });
+    armyHeader.appendChild(armyTitle);
+    const armySlotCount = document.createElement("span");
+    armySlotCount.textContent = `${ARMY_STACK_SLOTS} slots`;
+    Object.assign(armySlotCount.style, {
+      fontSize: "10px",
+      opacity: "0.4",
+    });
+    armyHeader.appendChild(armySlotCount);
+    armyHeader.addEventListener("click", () => this.toggleArmy());
+    armyBlock.appendChild(armyHeader);
+
+    // Collapsed view: compact 2-row x 4-col grid of square tiles, each showing
+    // just the creature image with a count badge in the bottom-right.
+    const armyCollapsedGrid = document.createElement("div");
+    Object.assign(armyCollapsedGrid.style, {
+      display: "grid",
+      gridTemplateColumns: "repeat(4, 1fr)",
+      gap: "4px",
+    });
+    this.armyCollapsedGrid = armyCollapsedGrid;
+    for (let i = 0; i < ARMY_STACK_SLOTS; i++) {
+      const tile = document.createElement("div");
+      Object.assign(tile.style, {
+        position: "relative",
+        aspectRatio: "1",
+        borderRadius: "4px",
+        background: "rgba(0,0,0,0.35)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        overflow: "hidden",
+      });
+      const img = document.createElement("img");
+      Object.assign(img.style, {
+        width: "100%",
+        height: "100%",
+        objectFit: "contain",
+        display: "block",
+      });
+      img.alt = "";
+      img.draggable = false;
+      tile.appendChild(img);
+      const count = document.createElement("span");
+      Object.assign(count.style, {
+        position: "absolute",
+        right: "2px",
+        bottom: "1px",
+        fontSize: "10px",
+        fontWeight: "700",
+        lineHeight: "1",
+        padding: "1px 3px",
+        borderRadius: "3px",
+        background: "rgba(0,0,0,0.65)",
+        color: "#f4f4f8",
+        fontVariantNumeric: "tabular-nums",
+        pointerEvents: "none",
+        display: "none",
+      });
+      tile.appendChild(count);
+      tile.title = "";
+      armyCollapsedGrid.appendChild(tile);
+      this.armyTiles.push({ tile, img, count });
+    }
+    armyBlock.appendChild(armyCollapsedGrid);
+
+    // Expanded view: one row per stack with name, stats, count (hidden by default).
+    const armyList = document.createElement("div");
+    this.armyExpandedList = armyList;
+    Object.assign(armyList.style, {
+      display: "none",
+      flexDirection: "column",
+      gap: "3px",
+      marginTop: "6px",
+    });
+    for (let i = 0; i < ARMY_STACK_SLOTS; i++) {
+      const row = document.createElement("div");
+      Object.assign(row.style, {
+        display: "grid",
+        gridTemplateColumns: "16px 1fr auto",
+        alignItems: "center",
+        gap: "6px",
+        padding: "3px 4px",
+        borderRadius: "3px",
+        background: "rgba(255,255,255,0.03)",
+        fontSize: "11px",
+        opacity: "0.85",
+      });
+      const slotIdx = document.createElement("span");
+      slotIdx.textContent = String(i + 1);
+      Object.assign(slotIdx.style, {
+        fontVariantNumeric: "tabular-nums",
+        textAlign: "center",
+        opacity: "0.4",
+      });
+      const nameCol = document.createElement("div");
+      Object.assign(nameCol.style, { display: "flex", flexDirection: "column", minWidth: "0" });
+      const nameEl = document.createElement("span");
+      Object.assign(nameEl.style, { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+      const statsEl = document.createElement("span");
+      Object.assign(statsEl.style, {
+        fontSize: "10px",
+        opacity: "0.55",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+      });
+      nameCol.appendChild(nameEl);
+      nameCol.appendChild(statsEl);
+      const countEl = document.createElement("span");
+      Object.assign(countEl.style, {
+        fontVariantNumeric: "tabular-nums",
+        fontWeight: "600",
+        opacity: "0.9",
+      });
+      row.appendChild(slotIdx);
+      row.appendChild(nameCol);
+      row.appendChild(countEl);
+      row.dataset.slotIdx = String(i);
+      row.title = "";
+      armyList.appendChild(row);
+      this.armyRows.push(row);
+    }
+    armyBlock.appendChild(armyList);
+    body.appendChild(armyBlock);
+
     this.menu.root.style.display = "none";
   }
 
@@ -256,9 +444,11 @@ export class HeroInfoMenu {
     this.goldEl.textContent = `${hero.gold}g`;
     this.foodEl.textContent = "0 food";
     const remaining = Math.max(0, hero.movementRemaining);
-    const pct = Math.max(0, Math.min(1, remaining / MOVEMENT_PER_TURN)) * 100;
+    const shown = displayableRemaining(remaining);
+    const pct = Math.max(0, Math.min(1, shown / MOVEMENT_PER_TURN)) * 100;
     this.movementFill.style.width = `${pct}%`;
-    this.movementLabel.textContent = `${remaining.toFixed(1)} / ${MOVEMENT_PER_TURN}`;
+    this.movementLabel.textContent = `${shown.toFixed(1)} / ${MOVEMENT_PER_TURN}`;
+    this.troopsEl.textContent = `${hero.troops}  ·  Upkeep: ${hero.troops}g/week`;
 
     this.settlementAtTile = null;
     for (const s of Object.values(state.settlements)) {
@@ -277,6 +467,82 @@ export class HeroInfoMenu {
     this.depositBtn.style.opacity = this.depositBtn.disabled ? "0.4" : "1";
     this.withdrawBtn.style.cursor = this.withdrawBtn.disabled ? "default" : "pointer";
     this.depositBtn.style.cursor = this.depositBtn.disabled ? "default" : "pointer";
+    this.renderArmy(hero.stacks);
+  }
+
+  private toggleArmy(): void {
+    this.armyExpanded = !this.armyExpanded;
+    if (this.armyChevron) {
+      this.armyChevron.style.transform = this.armyExpanded ? "rotate(90deg)" : "";
+    }
+    if (this.armyCollapsedGrid) {
+      this.armyCollapsedGrid.style.display = this.armyExpanded ? "none" : "grid";
+    }
+    if (this.armyExpandedList) {
+      this.armyExpandedList.style.display = this.armyExpanded ? "flex" : "none";
+    }
+  }
+
+  private renderArmy(stacks: UnitStack[]): void {
+    if (!catalogReady() && !catalogFailed()) {
+      // Catalog still loading: kick off a fetch; when it resolves, the HUD
+      // refresh tick will call update() again and fill in the rows.
+      void loadUnitCatalog();
+    }
+    for (let i = 0; i < ARMY_STACK_SLOTS; i++) {
+      const stack = stacks[i];
+      const isEmpty = !stack || !stack.unitTypeId || stack.count <= 0;
+      const id = isEmpty ? null : stack!.unitTypeId;
+      const u = id ? getCachedUnit(id) : null;
+
+      // --- Collapsed tile: image + count badge ---
+      const { tile, img, count } = this.armyTiles[i];
+      if (isEmpty) {
+        img.src = "";
+        img.style.display = "none";
+        count.style.display = "none";
+        tile.style.opacity = "0.3";
+        tile.title = `Slot ${i + 1}: empty`;
+      } else {
+        img.src = getUnitImageUrl(id);
+        img.style.display = "block";
+        count.textContent = String(stack!.count);
+        count.style.display = "block";
+        tile.style.opacity = "1";
+        const name = u?.name ?? id!;
+        const stats = u ? ` · A ${u.attack} D ${u.defence} H ${u.health} S ${u.speed}` : "";
+        tile.title = `Slot ${i + 1}: ${name} x${stack!.count}${stats}`;
+      }
+
+      // --- Expanded row: name + stats + count ---
+      const row = this.armyRows[i];
+      const nameEl = row.children[1].firstChild as HTMLSpanElement;
+      const statsEl = row.children[1].lastChild as HTMLSpanElement;
+      const countEl = row.children[2] as HTMLSpanElement;
+      nameEl.textContent = isEmpty ? "—" : (id!);
+      countEl.textContent = isEmpty ? "" : String(stack!.count);
+      if (isEmpty) {
+        statsEl.textContent = "empty";
+        row.title = "Empty stack";
+        row.style.opacity = "0.35";
+      } else if (u) {
+        nameEl.textContent = u.name;
+        statsEl.textContent = `A ${u.attack} · D ${u.defence} · H ${u.health} · S ${u.speed}`;
+        row.title = `${u.name} — ${u.description}`;
+        row.style.opacity = "0.9";
+      } else if (catalogReady() || catalogFailed()) {
+        // Catalog resolved but this id isn't in it (unknown unit type).
+        nameEl.textContent = id!;
+        statsEl.textContent = "unknown unit";
+        row.title = `Unknown unit type: ${id}`;
+        row.style.opacity = "0.55";
+      } else {
+        nameEl.textContent = id!;
+        statsEl.textContent = "loading…";
+        row.title = "Loading unit catalog…";
+        row.style.opacity = "0.55";
+      }
+    }
   }
 
   private handleTransfer(direction: "deposit" | "withdraw"): void {
