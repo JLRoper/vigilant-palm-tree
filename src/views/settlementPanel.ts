@@ -1,6 +1,7 @@
-import type { GameState, ResourceType, SettlementId, SettlementState } from "../state/gameState";
+import type { GameState, ResourceType, SettlementId, SettlementState, WarehouseResource } from "../state/gameState";
 import { RESOURCES } from "../map/resourceTiles";
-import { PopupMenu, menuTheme } from "./menu";
+import { PopupMenu, menuTheme, styleButton } from "./menu";
+import { openTradeModal } from "./tradeModal";
 
 const RESOURCE_ICONS: Record<ResourceType, string> = {
   gold: "\u{1F4B0}",
@@ -9,6 +10,8 @@ const RESOURCE_ICONS: Record<ResourceType, string> = {
   iron: "\u{1F528}",
   arcane: "\u{1F52E}",
 };
+
+const WAREHOUSE_SHORT: WarehouseResource[] = ["wood", "stone", "iron", "arcane"];
 
 function makeRow(): { row: HTMLDivElement; left: HTMLSpanElement; right: HTMLSpanElement } {
   const row = document.createElement("div");
@@ -27,18 +30,28 @@ function makeRow(): { row: HTMLDivElement; left: HTMLSpanElement; right: HTMLSpa
   return { row, left, right };
 }
 
+export type TradeHandler = (
+  fromId: SettlementId,
+  toId: SettlementId,
+  resource: ResourceType,
+  amount: number,
+) => { ok: boolean; reason: string };
+
 export interface SettlementPanelOptions {
   parent: HTMLElement;
   onSelect?: (settlementId: SettlementId) => void;
+  onTrade?: TradeHandler;
 }
 
 export class SettlementPanel {
   private menu: PopupMenu;
   private body: HTMLElement;
   private onSelect?: (settlementId: SettlementId) => void;
+  private onTrade?: TradeHandler;
 
   constructor(opts: SettlementPanelOptions) {
     this.onSelect = opts.onSelect;
+    this.onTrade = opts.onTrade;
     this.menu = new PopupMenu({
       parent: opts.parent,
       title: "Settlements",
@@ -64,12 +77,12 @@ export class SettlementPanel {
     for (const player of state.players) {
       const bucket = grouped.get(player.id);
       if (bucket && Object.keys(bucket).length > 0) {
-        this.renderOwnerGroup(player.name, player.color, bucket, state.selectedSettlementId);
+        this.renderOwnerGroup(player.name, player.color, bucket, state.selectedSettlementId, state);
       }
     }
     const neutral = grouped.get(null);
     if (neutral && Object.keys(neutral).length > 0) {
-      this.renderOwnerGroup("Neutral", "#888888", neutral, state.selectedSettlementId);
+      this.renderOwnerGroup("Neutral", "#888888", neutral, state.selectedSettlementId, state);
     }
   }
 
@@ -78,6 +91,7 @@ export class SettlementPanel {
     color: string,
     settlements: Record<string, SettlementState>,
     selectedId: SettlementId | null,
+    state: GameState,
   ): void {
     const section = document.createElement("div");
     Object.assign(section.style, {
@@ -117,7 +131,7 @@ export class SettlementPanel {
     section.appendChild(header);
 
     for (const s of Object.values(settlements)) {
-      section.appendChild(this.renderSettlement(s, color, selectedId));
+      section.appendChild(this.renderSettlement(s, color, selectedId, state));
     }
     this.body.appendChild(section);
   }
@@ -126,6 +140,7 @@ export class SettlementPanel {
     s: SettlementState,
     ownerColor: string,
     selectedId: SettlementId | null,
+    state: GameState,
   ): HTMLDivElement {
     const isSelected = selectedId === s.id;
     const card = document.createElement("div");
@@ -214,6 +229,52 @@ export class SettlementPanel {
         rRow.right.textContent = `${s.resourceRates[r]}/turn`;
         card.appendChild(rRow.row);
       }
+    }
+
+    const warehouseParts = WAREHOUSE_SHORT.map((r) => {
+      const count = s.warehouse[r] ?? 0;
+      const letter = r[0];
+      return `${count}${letter}`;
+    });
+    const warehouseLine = document.createElement("div");
+    warehouseLine.textContent = `\u{1F3E0} ${warehouseParts.join(" ")}`;
+    Object.assign(warehouseLine.style, {
+      fontSize: "11px",
+      opacity: "0.75",
+      marginTop: "4px",
+      fontVariantNumeric: "tabular-nums",
+    });
+    card.appendChild(warehouseLine);
+
+    const canTrade =
+      this.onTrade !== undefined &&
+      s.ownerId !== null &&
+      s.ownerId === state.activePlayerId;
+    if (canTrade) {
+      const destinations = Object.values(state.settlements).filter(
+        (other) => other.id !== s.id && other.ownerId === s.ownerId,
+      );
+      const tradeBtn = document.createElement("button");
+      tradeBtn.textContent = "Trade\u2026";
+      styleButton(tradeBtn);
+      tradeBtn.style.width = "100%";
+      tradeBtn.style.marginTop = "6px";
+      tradeBtn.style.fontSize = "11px";
+      tradeBtn.style.padding = "4px 6px";
+      tradeBtn.disabled = destinations.length === 0;
+      tradeBtn.style.opacity = tradeBtn.disabled ? "0.4" : "1";
+      tradeBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        openTradeModal({
+          parent: document.body,
+          fromId: s.id,
+          fromSettlement: s,
+          destinations,
+          onConfirm: (toId, resource, amount) =>
+            this.onTrade!(s.id, toId, resource, amount),
+        });
+      });
+      card.appendChild(tradeBtn);
     }
 
     return card;

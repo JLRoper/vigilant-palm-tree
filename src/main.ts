@@ -3,6 +3,7 @@ import { GameMap } from "./map/gameMap";
 import { Renderer } from "./render/renderer";
 import { Camera } from "./render/camera";
 import { api, type Game, type TileRow } from "./io/api";
+import { loadUnitCatalog } from "./data/unitCatalog";
 import { createDefaultProvider, SpriteProvider } from "./render/assets";
 import { HERO_PROCEDURAL_DRAWERS } from "./render/sprites";
 import { rng } from "./core/rng";
@@ -44,6 +45,8 @@ import { playerIncome, playerWealth } from "./economy/income";
 import type { CalendarSnapshot } from "./views/toolbar";
 import { TurnController } from "./state/turnController";
 import { showBattleModal } from "./views/battleModal";
+import { CityView } from "./views/cityView";
+import { cityViewSizeFor } from "./core/cityGrid";
 
 const spriteProvider: SpriteProvider = createDefaultProvider(HERO_PROCEDURAL_DRAWERS);
 spriteProvider.preload();
@@ -66,6 +69,7 @@ let heroes: Record<string, Hero> = {};
 let settlements: Record<string, Castle> = {};
 let heroInfoMenu: HeroInfoMenu;
 let settlementPanel: SettlementPanel;
+let cityView: CityView;
 
 let saveStatus: "idle" | "saving" | "saved" | "error" = "idle";
 let backendOk = false;
@@ -230,6 +234,9 @@ function draw(): void {
     colorForOwner,
     viewPlayerId: 0,
   });
+  if (cityView && cityView.isOpen()) {
+    cityView.draw(ctx, window.innerWidth, window.innerHeight);
+  }
 }
 
 function drawGame(): void {
@@ -385,6 +392,7 @@ async function initBackend(): Promise<void> {
   try {
     await api.health();
     backendOk = true;
+    void loadUnitCatalog().catch((e) => console.warn("unit catalog load failed:", e));
   } catch (e) {
     backendOk = false;
     console.warn("backend offline:", e);
@@ -453,6 +461,48 @@ function initialize(): void {
       gameState = turnController.getState();
       refreshAll();
     },
+    onTrade: (fromId, toId, resource, amount) => {
+      if (resource === "gold") {
+        return { ok: false, reason: "gold_not_tradeable" };
+      }
+      const result = turnController.tradeResources(fromId, toId, resource, amount);
+      if (result.ok) {
+        gameState = turnController.getState();
+        refreshAll();
+      }
+      return result;
+    },
+  });
+
+  cityView = new CityView({
+    onClose: () => {
+      const closedId = cityView.close();
+      if (closedId) {
+        turnController.selectSettlement(closedId);
+        gameState = turnController.getState();
+        if (settlements[closedId]) {
+          const s = settlements[closedId];
+          view.centerOn(s.tile.q, s.tile.r);
+        }
+        refreshAll();
+      }
+    },
+  });
+
+  canvas.addEventListener("dblclick", (e) => {
+    if (cityView.isOpen()) return;
+    if (gameState.phase.kind !== "PLAYER_TURN" || gameState.activePlayerId !== 0) return;
+    const t = renderer.hoverFromScreen(e.clientX, e.clientY);
+    if (!t) return;
+    const castle = getCastlesArray().find((c) => c.tile.q === t.q && c.tile.r === t.r);
+    if (!castle || castle.ownerId !== 0) return;
+    cityView.open(castle.id, castle.name, cityViewSizeFor(castle.level), colorForOwner(castle.ownerId));
+  });
+
+  canvas.addEventListener("mousemove", (e) => {
+    if (cityView && cityView.isOpen()) {
+      cityView.updateMouse(e.clientX, e.clientY);
+    }
   });
 
   toolbar = new Toolbar({
@@ -555,6 +605,17 @@ function initialize(): void {
       syncStateFromController();
       refreshAll();
       return ok;
+    },
+    tradeResources: (
+      fromId: string,
+      toId: string,
+      resource: "wood" | "stone" | "iron" | "arcane",
+      amount: number,
+    ) => {
+      const result = turnController.tradeResources(fromId, toId, resource, amount);
+      syncStateFromController();
+      refreshAll();
+      return result;
     },
     teleportHero: (id: HeroId, q: number, r: number) => {
       const state = turnController.getState();

@@ -12,6 +12,7 @@ import type {
   SettlementState,
   WarehouseResource,
 } from "../src/state/gameState";
+import type { UnitType } from "../src/state/units";
 
 export const router = Router();
 
@@ -94,6 +95,21 @@ function sumPlayerGold(
 router.get("/health", async (_req, res) => {
   const r = await pool.query("SELECT 1 AS ok");
   res.json({ ok: r.rows[0].ok === 1 });
+});
+
+router.get("/units", async (_req, res) => {
+  try {
+    const r = await pool.query<UnitType>(
+      `SELECT id, name, attack, defence, health, speed, description FROM unit_types ORDER BY attack ASC, id ASC`
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error("[api] GET /units threw:", err);
+    res.status(500).json({
+      error: "internal",
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 router.get("/games", async (_req, res) => {

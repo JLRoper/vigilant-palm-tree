@@ -1,7 +1,7 @@
 import { Faction } from "../entities/hero";
 import { CastleLevel } from "../entities/settlement";
 import { ResourceType } from "../map/resourceTiles";
-import { ProceduralDrawer, SpriteProvider } from "./assets";
+import { SpriteProvider } from "./assets";
 import { castleKey, heroKey, resourceKey } from "./assetDescriptors";
 import { drawKnightSprite, drawDemonSprite } from "./heroSprites";
 

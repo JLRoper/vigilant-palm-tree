@@ -1,3 +1,5 @@
+import { normalizeStacks, type UnitStack } from "./units";
+
 export type PlayerId = number;
 export type Faction = "player" | "ai";
 export type HeroId = string;
@@ -41,6 +43,7 @@ export interface HeroState {
   trail: { q: number; r: number }[];
   gold: number;
   troops: number;
+  stacks: UnitStack[];
 }
 
 export interface SettlementState {
@@ -139,8 +142,8 @@ function defaultPlayers(): Player[] {
 
 function defaultHeroes(): Record<HeroId, HeroState> {
   return {
-    h0: { id: "h0", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 0, troops: 1 },
-    h1: { id: "h1", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 0, troops: 1 },
+    h0: { id: "h0", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 0, troops: 1, stacks: normalizeStacks([{ unitTypeId: "swordsman", count: 12 }, { unitTypeId: "archer", count: 8 }, { unitTypeId: "cavalry", count: 4 }]) },
+    h1: { id: "h1", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 0, troops: 1, stacks: normalizeStacks([{ unitTypeId: "crossbowman", count: 10 }, { unitTypeId: "griffin", count: 3 }]) },
   };
 }
 
