@@ -1,5 +1,11 @@
 import { TILE_W, TILE_D, cellOrigin, type CityViewSize } from "../core/cityGrid";
 import { computeCityScale, drawCityView } from "../render/cityRenderer";
+import type { ResourceType } from "../map/resourceTiles";
+import type { SpriteProvider } from "../render/assets";
+import type { BuildingDef, GenerationStyle } from "../render/cityBuildingDraw";
+import { coversCell, buildingFootprint } from "../render/cityBuildingDraw";
+import { generateBuildings, type GenerationPattern } from "../render/cityBuildingGen";
+import { BuildingMenu } from "./buildingMenu";
 
 export class CityView {
   private backBtn: HTMLButtonElement | null = null;
@@ -8,22 +14,74 @@ export class CityView {
   private size: CityViewSize = 5;
   private ownerColor = "#888888";
   private hover: { gx: number; gy: number } | null = null;
+  private citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }> = [];
+  private cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }> = [];
+  private buildings: BuildingDef[] = [];
+  private style: GenerationStyle = "classic";
+  private pattern: GenerationPattern = "denseUrban";
+  private seed = 42;
+  private provider: SpriteProvider;
+  private buildingMenu: BuildingMenu;
   private onClose: () => void;
   private onKeyDown: (e: KeyboardEvent) => void;
 
-  constructor(opts: { onClose: () => void }) {
+  constructor(opts: { onClose: () => void; provider: SpriteProvider }) {
+    this.provider = opts.provider;
+    this.buildingMenu = new BuildingMenu();
     this.onClose = opts.onClose;
     this.onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") this.handleClose();
+      if (e.key === "Escape") {
+        if (this.buildingMenu.isOpen()) {
+          this.buildingMenu.hide();
+          return;
+        }
+        this.handleClose();
+        return;
+      }
+      if (e.key >= "1" && e.key <= "5") {
+        const styles: GenerationStyle[] = ["classic", "blocky", "crystalline", "organic", "industrial"];
+        this.style = styles[parseInt(e.key) - 1];
+        this.regenerate();
+        return;
+      }
+      if (e.key === "!" || e.key === "@" || e.key === "#" || e.key === "$" || e.key === "%" || e.key === "^") {
+        const patterns: GenerationPattern[] = ["denseUrban", "sparseRural", "radial", "grid", "clustered", "sampler"];
+        const idx = "!@#$%^".indexOf(e.key);
+        if (idx >= 0 && idx < patterns.length) {
+          this.pattern = patterns[idx];
+          this.regenerate();
+        }
+        return;
+      }
+      if (e.key === "r" || e.key === "R") {
+        this.seed = Math.floor(Math.random() * 100000);
+        this.regenerate();
+        return;
+      }
     };
   }
 
-  open(settlementId: string, name: string, size: CityViewSize, ownerColor: string): void {
+  open(
+    settlementId: string, name: string, size: CityViewSize, ownerColor: string,
+    spots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>,
+    mines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>,
+  ): void {
     this.openSettlementId = settlementId;
     this.settlementName = name;
     this.size = size;
     this.ownerColor = ownerColor;
+    this.citySpots = spots;
+    this.cityMines = mines;
     this.hover = null;
+
+    const center = Math.floor(size / 2);
+    this.buildings = generateBuildings({
+      size,
+      pattern: this.pattern,
+      style: this.style,
+      seed: this.seed,
+      townHallAt: { gx: center, gy: center },
+    });
 
     this.backBtn = document.createElement("button");
     this.backBtn.textContent = "\u2190 Back";
@@ -64,6 +122,12 @@ export class CityView {
       size: this.size,
       hover: this.hover,
       ownerColor: this.ownerColor,
+      provider: this.provider,
+      citySpots: this.citySpots,
+      cityMines: this.cityMines,
+      buildings: this.buildings,
+      style: this.style,
+      pattern: this.pattern,
     });
   }
 
@@ -94,6 +158,55 @@ export class CityView {
     }
   }
 
+  handleBuildingClick(canvasX: number, canvasY: number): void {
+    if (!this.isOpen()) return;
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    const tileScale = computeCityScale(this.size, viewportW, viewportH);
+    const tw = TILE_W * tileScale;
+    const td = TILE_D * tileScale;
+    const origin = cellOrigin(this.size);
+
+    const wdx = canvasX - viewportW / 2 - origin.x * tileScale;
+    const wdy = canvasY - viewportH / 2 - origin.y * tileScale;
+
+    const gxf = wdx / tw + wdy / td;
+    const gyf = wdy / td - wdx / tw;
+    const gx = Math.floor(gxf);
+    const gy = Math.floor(gyf);
+
+    if (gx < 0 || gx >= this.size || gy < 0 || gy >= this.size) {
+      this.buildingMenu.hide();
+      return;
+    }
+
+    const building = this.buildings.find((b) => coversCell(b, gx, gy));
+    if (!building) {
+      this.buildingMenu.hide();
+      return;
+    }
+
+    const screenOrigin = { x: viewportW / 2, y: viewportH / 2 };
+    const gridOrigin = cellOrigin(this.size);
+    const w = building.w ?? 1;
+    const h = building.h ?? 1;
+    const fp = buildingFootprint(building.gx, building.gy, gridOrigin, screenOrigin, tileScale, w, h);
+
+    this.buildingMenu.show(building, fp.cx, fp.cy - fp.hh * 0.6);
+  }
+
+  private regenerate(): void {
+    if (!this.isOpen()) return;
+    const center = Math.floor(this.size / 2);
+    this.buildings = generateBuildings({
+      size: this.size,
+      pattern: this.pattern,
+      style: this.style,
+      seed: this.seed,
+      townHallAt: { gx: center, gy: center },
+    });
+  }
+
   private closing = false;
   private lastClosedId: string | null = null;
 
@@ -115,6 +228,7 @@ export class CityView {
         this.backBtn = null;
       }
       window.removeEventListener("keydown", this.onKeyDown);
+      this.buildingMenu.hide();
       this.openSettlementId = null;
       this.hover = null;
       this.onClose();

@@ -13,7 +13,8 @@ import { ResourceType, RESOURCES } from "../map/resourceTiles";
 export type SpriteKey =
   | `castle.${CastleLevel}`
   | `resource.${ResourceType}`
-  | `hero.${Faction}`;
+  | `hero.${Faction}`
+  | `building.${string}.${string}.${number}`;
 
 export type Anchor = "bottom" | "center";
 
@@ -111,4 +112,12 @@ export function resourceKey(type: ResourceType): `resource.${ResourceType}` {
 
 export function heroKey(faction: Faction): `hero.${Faction}` {
   return `hero.${faction}`;
+}
+
+export function buildingKey(
+  style: string,
+  kind: string,
+  level: number,
+): SpriteKey {
+  return `building.${style}.${kind}.${level}`;
 }

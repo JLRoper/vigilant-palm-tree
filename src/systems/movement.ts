@@ -18,7 +18,7 @@ export interface OnHeroArrivedOptions {
 export function onHeroArrived(opts: OnHeroArrivedOptions): GameState {
   const path = findPath(opts.gameMap, opts.fromTile, opts.toTile);
   const cost = computePathCost(opts.gameMap, path);
-  const ok = opts.turnController.requestMove(opts.hero.id, opts.toTile, cost);
+  const ok = opts.turnController.requestMove(opts.hero.id, opts.toTile, cost, path);
   if (!ok) {
     console.warn(`[movement] requestMove rejected for hero ${opts.hero.id} → (${opts.toTile.q},${opts.toTile.r}) cost=${cost}`);
     return opts.state;

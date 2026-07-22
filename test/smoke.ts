@@ -189,7 +189,7 @@ async function runNewLoadSaveFlow(
 
   const loadBtn = page.locator("#toolbar button", { hasText: "Load" });
   await loadBtn.click();
-  await wait(300);
+  await wait(500);
   const rows = page.locator("button", { hasText: "Open" });
   const rowCount = await rows.count();
   if (rowCount < 2) {
@@ -1308,10 +1308,19 @@ async function run() {
     await ctx.delete(`${API_URL}/api/games/${GAME_NAME}`);
     console.log(`>> reset game '${GAME_NAME}'`);
 
+    const allGamesRes = await ctx.get(`${API_URL}/api/games`);
+    const allGames = (await allGamesRes.json()) as Array<{ name: string }>;
+    const stale = allGames.filter((g) => g.name !== GAME_NAME && g.name !== TEST_NEW_NAME);
+    for (const g of stale) {
+      await ctx.delete(`${API_URL}/api/games/${g.name}`).catch(() => {});
+    }
+    if (stale.length > 0) console.log(`>> cleaned up ${stale.length} stale games`);
+
     browser = await chromium.launch();
     const page = await browser.newPage({ viewport: { width: 1024, height: 720 } });
     page.on("console", (msg) => {
-      if (msg.type() === "error") console.error("[browser error]", msg.text());
+      const text = msg.text();
+      if (msg.type() === "error") console.error("[browser error]", text);
     });
 
     await page.goto(WEB_URL, { waitUntil: "networkidle" });

@@ -18,9 +18,12 @@ export type TransferHandler = (
   direction: "deposit" | "withdraw",
 ) => { ok: boolean; reason: string };
 
+export type ReorderHandler = (fromIdx: number, toIdx: number) => void;
+
 export interface HeroInfoMenuOptions {
   parent: HTMLElement;
   onTransfer?: TransferHandler;
+  onReorder?: ReorderHandler;
 }
 
 function makeRow(label: string): { row: HTMLDivElement; value: HTMLSpanElement } {
@@ -58,6 +61,7 @@ export class HeroInfoMenu {
   private statValues: Record<string, HTMLSpanElement>;
 
   private onTransfer?: TransferHandler;
+  private onReorder?: ReorderHandler;
   private settlementAtTile: SettlementState | null = null;
   private troopsEl: HTMLElement;
   private armyRows: HTMLDivElement[] = [];
@@ -69,6 +73,7 @@ export class HeroInfoMenu {
 
   constructor(opts: HeroInfoMenuOptions) {
     this.onTransfer = opts.onTransfer;
+    this.onReorder = opts.onReorder;
     this.statValues = {};
 
     this.menu = new PopupMenu({
@@ -345,6 +350,7 @@ export class HeroInfoMenu {
       });
       tile.appendChild(count);
       tile.title = "";
+      this.attachArmyDragHandlers(tile, i);
       armyCollapsedGrid.appendChild(tile);
       this.armyTiles.push({ tile, img, count });
     }
@@ -404,6 +410,7 @@ export class HeroInfoMenu {
       row.appendChild(countEl);
       row.dataset.slotIdx = String(i);
       row.title = "";
+      this.attachArmyDragHandlers(row, i);
       armyList.appendChild(row);
       this.armyRows.push(row);
     }
@@ -481,6 +488,60 @@ export class HeroInfoMenu {
     if (this.armyExpandedList) {
       this.armyExpandedList.style.display = this.armyExpanded ? "flex" : "none";
     }
+  }
+
+  // Wires HTML5 drag-and-drop onto an army slot element (either a collapsed
+  // tile or an expanded row). The same handler works for both since the slot
+  // index is what matters, not the DOM container.
+  private attachArmyDragHandlers(el: HTMLElement, slotIdx: number): void {
+    el.draggable = true;
+    el.style.cursor = "grab";
+    el.addEventListener("dragstart", (e) => {
+      el.dataset.dragging = "true";
+      el.style.opacity = "0.35";
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", String(slotIdx));
+      }
+      console.debug("[army] dragstart from slot", slotIdx, "onReorder?", !!this.onReorder);
+    });
+    el.addEventListener("dragend", () => {
+      delete el.dataset.dragging;
+      el.style.opacity = "";
+      el.style.outline = "";
+      el.style.outlineOffset = "";
+      // Defensive cleanup in case dragleave didn't fire for any sibling target.
+      for (const t of this.armyTiles) {
+        t.tile.style.outline = "";
+        t.tile.style.outlineOffset = "";
+      }
+      for (const r of this.armyRows) {
+        r.style.outline = "";
+        r.style.outlineOffset = "";
+      }
+    });
+    el.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      el.style.outline = "2px solid #ffcc00";
+      el.style.outlineOffset = "1px";
+    });
+    el.addEventListener("dragleave", () => {
+      el.style.outline = "";
+      el.style.outlineOffset = "";
+    });
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      el.style.outline = "";
+      el.style.outlineOffset = "";
+      const raw = e.dataTransfer?.getData("text/plain");
+      const fromIdx = raw != null ? parseInt(raw, 10) : NaN;
+      console.debug("[army] drop on slot", slotIdx, "raw=", raw, "fromIdx=", fromIdx, "valid=", Number.isInteger(fromIdx) && fromIdx !== slotIdx);
+      if (Number.isInteger(fromIdx) && fromIdx !== slotIdx) {
+        console.debug("[army] calling onReorder(", fromIdx, "->", slotIdx, ")");
+        this.onReorder?.(fromIdx, slotIdx);
+      }
+    });
   }
 
   private renderArmy(stacks: UnitStack[]): void {

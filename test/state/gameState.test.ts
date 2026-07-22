@@ -19,6 +19,7 @@ import {
   tradeResources,
   setAutoTrade,
   runAutoTrade,
+  reorderStack,
   MOVEMENT_PER_TURN,
   type GameState,
   type Player,
@@ -792,4 +793,116 @@ test("setAutoTrade returns same state when settlement is unknown", () => {
   const s = makeState();
   const next = setAutoTrade(s, "ghost", false);
   assert.equal(next, s);
+});
+
+// --- reorderStack: army slots are FIXED battlefield positions, so this is a
+// swap of two slots, not a move-and-shift.
+
+test("reorderStack swaps the contents of two occupied slots", () => {
+  const s = makeState({
+    heroes: [
+      {
+        ...makeHero("h0", 0, 2, 2),
+        stacks: [
+          { unitTypeId: "swordsman", count: 12 },
+          { unitTypeId: "archer", count: 8 },
+          { unitTypeId: "cavalry", count: 4 },
+        ],
+      },
+      makeHero("h1", 1, 18, 4),
+    ],
+  });
+  const result = reorderStack(s, "h0", 0, 2);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const stacks = result.state.heroes.h0.stacks;
+  assert.equal(stacks[0].unitTypeId, "cavalry");
+  assert.equal(stacks[1].unitTypeId, "archer");
+  assert.equal(stacks[2].unitTypeId, "swordsman");
+  assert.equal(result.state.heroes.h0.stacks.length, 3);
+});
+
+test("reorderStack dragging onto an empty slot leaves source empty (swap with empty)", () => {
+  const s = makeState({
+    heroes: [
+      {
+        ...makeHero("h0", 0, 2, 2),
+        stacks: [
+          { unitTypeId: "archer", count: 8 },
+          { unitTypeId: null, count: 0 },
+          { unitTypeId: null, count: 0 },
+        ],
+      },
+      makeHero("h1", 1, 18, 4),
+    ],
+  });
+  const result = reorderStack(s, "h0", 0, 2);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const stacks = result.state.heroes.h0.stacks;
+  assert.equal(stacks[0].unitTypeId, null);
+  assert.equal(stacks[0].count, 0);
+  assert.equal(stacks[2].unitTypeId, "archer");
+  assert.equal(stacks[2].count, 8);
+});
+
+test("reorderStack with from === to is a successful no-op (state unchanged)", () => {
+  const s = makeState({
+    heroes: [
+      {
+        ...makeHero("h0", 0, 2, 2),
+        stacks: [
+          { unitTypeId: "swordsman", count: 12 },
+          { unitTypeId: "archer", count: 8 },
+        ],
+      },
+      makeHero("h1", 1, 18, 4),
+    ],
+  });
+  const result = reorderStack(s, "h0", 1, 1);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.state.heroes.h0.stacks[0].unitTypeId, "swordsman");
+  assert.equal(result.state.heroes.h0.stacks[1].unitTypeId, "archer");
+});
+
+test("reorderStack rejects out-of-range indices", () => {
+  const s = makeState({
+    heroes: [
+      {
+        ...makeHero("h0", 0, 2, 2),
+        stacks: [
+          { unitTypeId: "swordsman", count: 12 },
+          { unitTypeId: "archer", count: 8 },
+        ],
+      },
+      makeHero("h1", 1, 18, 4),
+    ],
+  });
+  assert.equal(reorderStack(s, "h0", -1, 0).ok, false);
+  assert.equal(reorderStack(s, "h0", 0, 5).ok, false);
+  assert.equal(reorderStack(s, "h0", 0, 1.5).ok, false);
+});
+
+test("reorderStack leaves other heroes untouched", () => {
+  const s = makeState({
+    heroes: [
+      {
+        ...makeHero("h0", 0, 2, 2),
+        stacks: [
+          { unitTypeId: "swordsman", count: 12 },
+          { unitTypeId: "archer", count: 8 },
+        ],
+      },
+      {
+        ...makeHero("h1", 1, 18, 4),
+        stacks: [{ unitTypeId: "griffin", count: 3 }],
+      },
+    ],
+  });
+  const result = reorderStack(s, "h0", 0, 1);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.state.heroes.h1.stacks[0].unitTypeId, "griffin");
+  assert.equal(result.state.heroes.h1.stacks[0].count, 3);
 });
