@@ -536,7 +536,20 @@ function initialize(): void {
     if (!t) return;
     const castle = getCastlesArray().find((c) => c.tile.q === t.q && c.tile.r === t.r);
     if (!castle || castle.ownerId !== 0) return;
-    cityView.open(castle.id, castle.name, cityViewSizeFor(castle.level), colorForOwner(castle.ownerId), castle.citySpots, castle.cityMines);
+    // cityView predates the "food" ResourceType added by feat/resource-driven-
+    // consumption, so filter it out at the boundary. The casts are required
+    // because state/gameState's ResourceType is wider than map/resourceTiles's.
+    const isMineable = (r: import("./state/gameState").ResourceType): r is Exclude<import("./state/gameState").ResourceType, "food"> => r !== "food";
+    const spots = castle.citySpots.filter((s) => isMineable(s.resource));
+    const mines = castle.cityMines.filter((m) => isMineable(m.resource));
+    cityView.open(
+      castle.id,
+      castle.name,
+      cityViewSizeFor(castle.level),
+      colorForOwner(castle.ownerId),
+      spots as unknown as Parameters<typeof cityView.open>[4],
+      mines as unknown as Parameters<typeof cityView.open>[5],
+    );
   });
 
   canvas.addEventListener("mousemove", (e) => {
