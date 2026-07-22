@@ -16,6 +16,7 @@ import {
   detectAdjacentEnemy as detectAdjacentEnemyFn,
   transferGold as transferGoldReducer,
   tradeResources as tradeResourcesReducer,
+  setAutoTrade as setAutoTradeReducer,
 } from "./gameState";
 
 export interface TurnControllerHooks {
@@ -167,6 +168,20 @@ export class TurnController {
       payload: { heroId, fromIdx, toIdx },
     });
     return { ok: true, reason: "" };
+  }
+
+  setAutoTrade(settlementId: SettlementId, autoTrade: boolean): boolean {
+    const before = this.state.settlements[settlementId];
+    if (!before) return false;
+    if (before.ownerId !== this.state.activePlayerId) return false;
+    const next = setAutoTradeReducer(this.state, settlementId, autoTrade);
+    if (next === this.state) return false;
+    this.state = next;
+    this.hooks.logEvent({
+      type: "auto_trade_toggled",
+      payload: { settlementId, autoTrade },
+    });
+    return true;
   }
 
   async resolveCurrentBattle(): Promise<void> {

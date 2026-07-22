@@ -495,7 +495,9 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
     const s = preTurnRow.settlements[sid];
     if (!s) return acc;
     if (s.ownerId !== 0) return acc;
-    return acc + (s.population ?? 0) * (s.goldTax ?? 0);
+    const morale = Math.max(0, Math.min(100, Number(s.morale ?? 100)));
+    const inc = Math.round(((s.population ?? 0) * (s.goldTax ?? 0) * morale) / 100);
+    return acc + inc;
   }, 0);
   const preSettlementGold: Record<string, number> = {};
   for (const sid of ownedSettlementIds) {
@@ -537,11 +539,25 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   const player0 = dbRow.players.find((p) => p.id === 0);
   if (!player0) throw new Error("players[0] missing in DB row");
 
+  // Income is awarded AFTER consumption+morale decay in the per-turn pipeline,
+  // so the effective income uses the post-decay morale stored in dbRow.
+  const actualExpectedIncome = ownedSettlementIds.reduce((acc, sid) => {
+    const s = dbRow.settlements[sid];
+    if (!s) return acc;
+    if (s.ownerId !== 0) return acc;
+    const morale = Math.max(0, Math.min(100, Number(s.morale ?? 100)));
+    const inc = Math.round(((s.population ?? 0) * (s.goldTax ?? 0) * morale) / 100);
+    return acc + inc;
+  }, 0);
+  console.log(
+    `>> pre-turn expected income was ${expectedIncome}; post-decay expected income is ${actualExpectedIncome}`
+  );
+
   let treasuryDelta = 0;
   for (const sid of ownedSettlementIds) {
     const before = preSettlementGold[sid] ?? 0;
     const after = Number(dbRow.settlements[sid]?.gold ?? 0);
-    const expected = before + expectedIncome / ownedSettlementIds.length;
+    const expected = before + actualExpectedIncome / ownedSettlementIds.length;
     if (Math.abs(after - expected) > 1) {
       throw new Error(
         `Treasury mismatch for ${sid}: expected ~${expected}, got ${after} (before=${before})`
@@ -552,9 +568,9 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   console.log(
     `>> DB treasury delta for owned settlements: ${treasuryDelta} (expected ${expectedIncome})`
   );
-  if (Math.abs(treasuryDelta - expectedIncome) > ownedSettlementIds.length) {
+  if (Math.abs(treasuryDelta - actualExpectedIncome) > ownedSettlementIds.length) {
     throw new Error(
-      `Expected treasury delta=${expectedIncome}, got ${treasuryDelta}`
+      `Expected treasury delta=${actualExpectedIncome}, got ${treasuryDelta}`
     );
   }
 
@@ -1010,6 +1026,97 @@ async function runTradeChecks(page: Page, ctx: any, activeName: string) {
   console.log(`>> Last event after trade test: ${lastEvent?.kind}`);
 }
 
+
+async function querySnapshots(name: string): Promise<Array<{ settlement_id: string; day: number; gold: number; morale: number; effective_income: number; warehouse: any }>> {
+  const pool = new Pool({
+    host: process.env.PGHOST ?? "localhost",
+    port: Number(process.env.PGPORT ?? 5432),
+    user: process.env.PGUSER ?? "gameuser",
+    password: process.env.PGPASSWORD ?? "gamepass",
+    database: process.env.PGDATABASE ?? "game_poc",
+  });
+  try {
+    const r = await pool.query(
+      `SELECT s.settlement_id, s.day, s.gold, s.morale, s.effective_income, s.warehouse
+         FROM settlement_snapshots s JOIN games g ON g.id = s.game_id
+        WHERE g.name = $1
+        ORDER BY s.day ASC, s.settlement_id ASC`,
+      [name]
+    );
+    return r.rows;
+  } finally {
+    await pool.end();
+  }
+}
+
+async function queryResourceTransactions(name: string): Promise<Array<{ from_settlement_id: string | null; to_settlement_id: string; resource: string; amount: number; gold_paid: number; reason: string }>> {
+  const pool = new Pool({
+    host: process.env.PGHOST ?? "localhost",
+    port: Number(process.env.PGPORT ?? 5432),
+    user: process.env.PGUSER ?? "gameuser",
+    password: process.env.PGASSWORD ?? "gamepass",
+    database: process.env.PGDATABASE ?? "game_poc",
+  });
+  try {
+    const r = await pool.query(
+      `SELECT t.from_settlement_id, t.to_settlement_id, t.resource, t.amount, t.gold_paid, t.reason
+         FROM resource_transactions t JOIN games g ON g.id = t.game_id
+        WHERE g.name = $1
+        ORDER BY t.id ASC`,
+      [name]
+    );
+    return r.rows;
+  } finally {
+    await pool.end();
+  }
+}
+
+async function runResourceConsumptionChecks(page: Page, _ctx: any, activeName: string) {
+  console.log(">> Resource consumption: verify morale persists + snapshots exist");
+
+  const dbRow = await queryDbRow(activeName);
+  const settlements = Object.values(dbRow.settlements) as any[];
+  const playerSettlements = settlements.filter((s) => s.ownerId === 0);
+  if (playerSettlements.length === 0) {
+    console.log(">> No player settlements to verify; skipping");
+    return;
+  }
+
+  // After at least 3 rounds of end-turn, each player settlement should have morale < 100
+  // because no food was ever produced.
+  for (const s of playerSettlements) {
+    const morale = Number(s.morale ?? 100);
+    console.log(`>> settlement ${s.id} morale=${morale}`);
+    if (morale >= 100) {
+      throw new Error(`Expected morale < 100 for ${s.id} after multiple foodless turns, got ${morale}`);
+    }
+    if (morale < 0) {
+      throw new Error(`Morale should be >= 0, got ${morale}`);
+    }
+  }
+
+  const snapshots = await querySnapshots(activeName);
+  console.log(`>> settlement_snapshots rows: ${snapshots.length}`);
+  if (snapshots.length === 0) {
+    throw new Error("Expected settlement_snapshots rows for at least one day");
+  }
+  for (const snap of snapshots) {
+    if (snap.morale < 0 || snap.morale > 100) {
+      throw new Error(`Snapshot morale out of range: ${snap.morale}`);
+    }
+    if (snap.effective_income < 0) {
+      throw new Error(`Snapshot effective_income out of range: ${snap.effective_income}`);
+    }
+  }
+
+  const txns = await queryResourceTransactions(activeName);
+  console.log(`>> resource_transactions rows: ${txns.length}`);
+  // No auto-trade should fire because no source has food to give, but verify the table is at least queryable.
+  // (Transfers may legitimately be empty in v1.)
+
+  const lastEvent = await queryLastEvent(activeName);
+  console.log(`>> Last event after resource check: ${lastEvent?.kind}`);
+}
 async function runWarehouseAndUpkeepChecks(page: Page, ctx: any, activeName: string) {
   console.log(">> Warehouse accumulation: end one round and verify warehouse + gold grew");
 
@@ -1069,7 +1176,8 @@ async function runWarehouseAndUpkeepChecks(page: Page, ctx: any, activeName: str
 async function ensureBuilt() {
   if (!existsSync("dist/index.html")) {
     console.log(">> building dist");
-    await runOnce("npm", ["run", "build"]);
+    await runOnce("npx", ["tsc"]);
+    await runOnce("npx", ["vite", "build"]);
   }
 }
 
@@ -1298,6 +1406,8 @@ async function run() {
     await runTradeChecks(page, ctx, activeName);
 
     await runWarehouseAndUpkeepChecks(page, ctx, activeName);
+
+    await runResourceConsumptionChecks(page, ctx, activeName);
 
     await page.screenshot({ path: "test/screenshot.png" });
     console.log(">> screenshot saved");

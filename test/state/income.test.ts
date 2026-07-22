@@ -1,4 +1,4 @@
-import { test } from "node:test";
+﻿import { test } from "node:test";
 import assert from "node:assert/strict";
 import { settlementIncome, playerIncome, playerWealth } from "../../src/economy/income";
 import { createInitialState, type GameState, type PlayerId, type SettlementState } from "../../src/state/gameState";
@@ -15,18 +15,21 @@ function makeSettlement(id: string, ownerId: PlayerId | null, population: number
     resourceRates: {},
     foundedOnResource: null,
     gold,
+    warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
+    morale: 100,
+    autoTrade: true,
   };
 }
 
-test("settlementIncome: level 1 (500 pop × 1 tax) = 500", () => {
+test("settlementIncome: level 1 (500 pop Ã— 1 tax) = 500", () => {
   assert.equal(settlementIncome(makeSettlement("s", 0, 500, 1)), 500);
 });
 
-test("settlementIncome: level 2 (1500 pop × 2 tax) = 3000", () => {
+test("settlementIncome: level 2 (1500 pop Ã— 2 tax) = 3000", () => {
   assert.equal(settlementIncome(makeSettlement("s", 0, 1500, 2)), 3000);
 });
 
-test("settlementIncome: level 3 (5000 pop × 3 tax) = 15000", () => {
+test("settlementIncome: level 3 (5000 pop Ã— 3 tax) = 15000", () => {
   assert.equal(settlementIncome(makeSettlement("s", 0, 5000, 3)), 15000);
 });
 

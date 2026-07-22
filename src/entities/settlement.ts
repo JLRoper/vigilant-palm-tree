@@ -4,7 +4,7 @@ import type { PlayerId, ResourceType, SettlementState, Warehouse } from "../stat
 export type CastleLevel = 1 | 2 | 3;
 
 function emptyWarehouse(): Warehouse {
-  return { wood: 0, stone: 0, iron: 0, arcane: 0 };
+  return { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
 }
 
 export class Castle {
@@ -21,6 +21,8 @@ export class Castle {
   warehouse: Warehouse;
   citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
   cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>;
+  morale: number;
+  autoTrade: boolean;
 
   constructor(
     id: string,
@@ -36,6 +38,8 @@ export class Castle {
     warehouse?: Warehouse,
     citySpots?: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>,
     cityMines?: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>,
+    morale = 100,
+    autoTrade = true,
   ) {
     this.id = id;
     this.tile = tile;
@@ -50,6 +54,8 @@ export class Castle {
     this.warehouse = warehouse ?? emptyWarehouse();
     this.citySpots = citySpots ?? [];
     this.cityMines = cityMines ?? [];
+    this.morale = morale;
+    this.autoTrade = autoTrade;
   }
 
   toGameState(): SettlementState {
@@ -68,6 +74,8 @@ export class Castle {
       warehouse: { ...this.warehouse },
       citySpots: this.citySpots,
       cityMines: this.cityMines,
+      morale: this.morale,
+      autoTrade: this.autoTrade,
     };
   }
 
@@ -86,6 +94,8 @@ export class Castle {
       s.warehouse ?? emptyWarehouse(),
       s.citySpots ?? [],
       s.cityMines ?? [],
+      s.morale ?? 100,
+      s.autoTrade ?? true,
     );
   }
 }

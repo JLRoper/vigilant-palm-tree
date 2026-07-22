@@ -1,16 +1,25 @@
 import { normalizeStacks, type UnitStack } from "./units";
+import {
+  buildingUpkeepRequired,
+  clampMorale,
+  clampWarehouseNonNegative,
+  effectiveIncome,
+  foodRequired,
+  moraleDecay,
+} from "../economy/consumption";
 
 export type PlayerId = number;
 export type Faction = "player" | "ai";
 export type HeroId = string;
 export type SettlementId = string;
-export type ResourceType = "gold" | "wood" | "stone" | "iron" | "arcane";
+export type ResourceType = "gold" | "wood" | "stone" | "iron" | "arcane" | "food";
 
 export const WAREHOUSE_RESOURCES = [
   "wood",
   "stone",
   "iron",
   "arcane",
+  "food",
 ] as const;
 
 export type WarehouseResource = (typeof WAREHOUSE_RESOURCES)[number];
@@ -20,6 +29,7 @@ export type Warehouse = {
   stone: number;
   iron: number;
   arcane: number;
+  food: number;
 };
 
 export interface Player {
@@ -61,6 +71,8 @@ export interface SettlementState {
   warehouse: Warehouse;
   citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
   cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>;
+  morale: number;
+  autoTrade: boolean;
 }
 
 export type GamePhase =
@@ -150,7 +162,7 @@ function defaultHeroes(): Record<HeroId, HeroState> {
 }
 
 function emptyWarehouse(): Warehouse {
-  return { wood: 0, stone: 0, iron: 0, arcane: 0 };
+  return { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
 }
 
 function defaultSettlements(): Record<SettlementId, SettlementState> {
@@ -170,6 +182,8 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       warehouse: emptyWarehouse(),
       citySpots: [],
       cityMines: [],
+      morale: 100,
+      autoTrade: true,
     },
     s1: {
       id: "s1",
@@ -186,6 +200,8 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       warehouse: emptyWarehouse(),
       citySpots: [],
       cityMines: [],
+      morale: 100,
+      autoTrade: true,
     },
   };
 }
@@ -481,7 +497,96 @@ export function endTurn(state: GameState): GameState {
   };
 }
 
+export interface AutoTradeTransfer {
+  fromSettlementId: SettlementId;
+  toSettlementId: SettlementId;
+  resource: WarehouseResource;
+  amount: number;
+  goldPaid: number;
+}
+
+export interface ApplyEndOfTurnResult {
+  state: GameState;
+  transfers: AutoTradeTransfer[];
+}
+
+export function applySettlementConsumption(s: SettlementState): SettlementState {
+  const warehouse: Warehouse = { ...s.warehouse };
+  const upkeep = buildingUpkeepRequired(s);
+  warehouse.food = clampWarehouseNonNegative(warehouse.food - foodRequired(s));
+  warehouse.wood = clampWarehouseNonNegative(warehouse.wood - upkeep.wood);
+  warehouse.stone = clampWarehouseNonNegative(warehouse.stone - upkeep.stone);
+  return { ...s, warehouse };
+}
+
+export function applyMoraleDecay(s: SettlementState): SettlementState {
+  return { ...s, morale: clampMorale((s.morale ?? 100) - moraleDecay(s)) };
+}
+
+export function applyEffectiveIncome(s: SettlementState): SettlementState {
+  const inc = effectiveIncome(s);
+  return { ...s, gold: s.gold + inc };
+}
+
+export function runAutoTrade(
+  settlements: Record<SettlementId, SettlementState>,
+  playerId: PlayerId,
+): { settlements: Record<SettlementId, SettlementState>; transfers: AutoTradeTransfer[] } {
+  const next: Record<SettlementId, SettlementState> = { ...settlements };
+  const transfers: AutoTradeTransfer[] = [];
+  const resources = WAREHOUSE_RESOURCES;
+  for (const s of Object.values(next)) {
+    if (s.ownerId !== playerId || !s.autoTrade) continue;
+    const updatedS: SettlementState = { ...next[s.id] };
+    for (const r of resources) {
+      const deficit = computeDeficit(updatedS, r);
+      if (deficit <= 0) continue;
+      const sources = Object.values(next).filter(
+        (other) => other.id !== s.id && other.ownerId === playerId && (other.warehouse[r] ?? 0) > 0 && (other.gold ?? 0) > 0,
+      );
+      let remaining = deficit;
+      for (const src of sources) {
+        if (remaining <= 0) break;
+        const sourceUpd: SettlementState = { ...next[src.id] };
+        const transferable = Math.max(0, Math.min(sourceUpd.warehouse[r] ?? 0, sourceUpd.gold ?? 0, remaining));
+        if (transferable <= 0) continue;
+        sourceUpd.warehouse = { ...sourceUpd.warehouse, [r]: clampWarehouseNonNegative((sourceUpd.warehouse[r] ?? 0) - transferable) };
+        sourceUpd.gold = sourceUpd.gold - transferable;
+        updatedS.warehouse = { ...updatedS.warehouse, [r]: (updatedS.warehouse[r] ?? 0) + transferable };
+        next[src.id] = sourceUpd;
+        remaining -= transferable;
+        transfers.push({
+          fromSettlementId: src.id,
+          toSettlementId: s.id,
+          resource: r as WarehouseResource,
+          amount: transferable,
+          goldPaid: transferable,
+        });
+      }
+    }
+    next[s.id] = updatedS;
+  }
+  return { settlements: next, transfers };
+}
+
+function computeDeficit(s: SettlementState, r: WarehouseResource): number {
+  if (r === "food") {
+    return Math.max(0, foodRequired(s) - (s.warehouse.food ?? 0));
+  }
+  if (r === "wood") {
+    return Math.max(0, buildingUpkeepRequired(s).wood - (s.warehouse.wood ?? 0));
+  }
+  if (r === "stone") {
+    return Math.max(0, buildingUpkeepRequired(s).stone - (s.warehouse.stone ?? 0));
+  }
+  return 0;
+}
+
 export function applyEndOfTurn(state: GameState): GameState {
+  return applyEndOfTurnDetailed(state).state;
+}
+
+export function applyEndOfTurnDetailed(state: GameState): ApplyEndOfTurnResult {
   const playerId = state.activePlayerId;
   const newHeroes: Record<HeroId, HeroState> = { ...state.heroes };
   for (const hero of Object.values(newHeroes)) {
@@ -496,22 +601,41 @@ export function applyEndOfTurn(state: GameState): GameState {
       };
     }
   }
-  const newSettlements: Record<SettlementId, SettlementState> = { ...state.settlements };
+  // 1. Produce resources for ALL settlements
+  let newSettlements: Record<SettlementId, SettlementState> = { ...state.settlements };
   for (const s of Object.values(newSettlements)) {
-    if (s.ownerId === playerId) {
-      newSettlements[s.id] = {
-        ...s,
-        gold: s.gold + s.population * s.goldTax,
-      };
-    }
     const newWarehouse: Warehouse = { ...s.warehouse };
     for (const r of WAREHOUSE_RESOURCES) {
       const rate = s.resourceRates[r] ?? 0;
-      if (rate > 0) newWarehouse[r] += rate;
+      if (rate > 0) newWarehouse[r] = (newWarehouse[r] ?? 0) + rate;
     }
     newSettlements[s.id] = { ...newSettlements[s.id], warehouse: newWarehouse };
   }
-  return { ...state, heroes: newHeroes, settlements: newSettlements, dirty: true };
+  // 2. Auto-trade for active player's settlements
+  const autoTrade = runAutoTrade(newSettlements, playerId);
+  newSettlements = autoTrade.settlements;
+  // 3. Consumption + morale decay + effective income for active player's settlements
+  for (const s of Object.values(newSettlements)) {
+    if (s.ownerId !== playerId) continue;
+    const consumed = applySettlementConsumption(s);
+    const moraleAfter = applyMoraleDecay(consumed);
+    newSettlements[s.id] = applyEffectiveIncome(moraleAfter);
+  }
+  return {
+    state: { ...state, heroes: newHeroes, settlements: newSettlements, dirty: true },
+    transfers: autoTrade.transfers,
+  };
+}
+
+export function setAutoTrade(state: GameState, settlementId: SettlementId, autoTrade: boolean): GameState {
+  const s = state.settlements[settlementId];
+  if (!s) return state;
+  if ((s.autoTrade ?? true) === autoTrade) return state;
+  return {
+    ...state,
+    settlements: { ...state.settlements, [settlementId]: { ...s, autoTrade } },
+    dirty: true,
+  };
 }
 
 export function applyWeeklyUpkeep(state: GameState): GameState {

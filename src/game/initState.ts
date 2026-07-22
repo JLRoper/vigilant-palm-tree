@@ -118,6 +118,8 @@ function makeSettlements(
       warehouse: emptyWarehouse(),
       citySpots: spots,
       cityMines: mines,
+      morale: 100,
+      autoTrade: true,
     };
   });
 }
@@ -217,10 +219,18 @@ function backfillHero(h: Partial<HeroState> & { id: HeroId; ownerId: number; q: 
 }
 
 function emptyWarehouse(): SettlementState["warehouse"] {
-  return { wood: 0, stone: 0, iron: 0, arcane: 0 };
+  return { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
 }
 
 function backfillSettlement(s: Partial<SettlementState> & { id: string; q: number; r: number; level: 1 | 2 | 3 }): SettlementState {
+  const warehouse = s.warehouse ?? emptyWarehouse();
+  const filledWarehouse: SettlementState["warehouse"] = {
+    wood: warehouse.wood ?? 0,
+    stone: warehouse.stone ?? 0,
+    iron: warehouse.iron ?? 0,
+    arcane: warehouse.arcane ?? 0,
+    food: warehouse.food ?? 0,
+  };
   return {
     name: s.name ?? s.id,
     ownerId: s.ownerId ?? null,
@@ -229,9 +239,11 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     resourceRates: s.resourceRates ?? {},
     foundedOnResource: s.foundedOnResource ?? null,
     gold: s.gold ?? 0,
-    warehouse: s.warehouse ?? emptyWarehouse(),
+    warehouse: filledWarehouse,
     citySpots: s.citySpots ?? [],
     cityMines: s.cityMines ?? [],
+    morale: s.morale ?? 100,
+    autoTrade: s.autoTrade ?? true,
     q: s.q,
     r: s.r,
     level: s.level,

@@ -1,9 +1,9 @@
-import { Router } from "express";
+﻿import { Router } from "express";
 import { pool, withTransaction } from "./db";
 import { GameMap } from "../src/map/gameMap";
 import { mulberry32 } from "../src/core/rng";
 import { makeInitialStatePayload } from "../src/game/initState";
-import { tradeResources as tradeResourcesReducer } from "../src/state/gameState";
+import {  tradeResources as tradeResourcesReducer,  applyEndOfTurnDetailed,  WAREHOUSE_RESOURCES,  type AutoTradeTransfer,} from "../src/state/gameState";
 import type { PoolClient } from "pg";
 import type {
   GameState,
@@ -434,22 +434,15 @@ router.post("/games/:name/end-turn", async (req, res) => {
         settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
       }));
 
-      // Award gold into each owned settlement's treasury based on population × goldTax.
-      // Income stays at the settlement — never auto-routes to a hero.
-      // Also accumulate resource production into each settlement's warehouse.
-      const newSettlements: Record<string, SettlementState> = {};
-      for (const [id, s] of Object.entries(incomingState.settlements)) {
-        const baseGold = s.ownerId === row.active_player_id
-          ? (Number(s.gold) || 0) + s.population * s.goldTax
-          : (Number(s.gold) || 0);
-        const newWarehouse = { ...(s.warehouse ?? { wood: 0, stone: 0, iron: 0, arcane: 0 }) };
-        for (const r of ["wood", "stone", "iron", "arcane"] as const) {
-          const rate = s.resourceRates?.[r] ?? 0;
-          if (rate > 0) newWarehouse[r] = (newWarehouse[r] ?? 0) + rate;
-        }
-        newSettlements[id] = { ...s, gold: baseGold, warehouse: newWarehouse };
-      }
 
+      // Run the full per-day pipeline (produce -> auto-trade -> consume -> morale -> effective income).
+      // The client computes this too; we re-run here so DB matches client state (drift-safe).
+      const pipeline = applyEndOfTurnDetailed({
+        ...incomingState,
+        activePlayerId: row.active_player_id,
+      } as GameState);
+      const newSettlements: Record<string, SettlementState> = { ...pipeline.state.settlements };
+      const transfers: AutoTradeTransfer[] = pipeline.transfers;
       // Advance active_player_id; wrap when we go past the last player, incrementing round + day.
       const playerCount = players.length;
       const wrapped = playerCount > 0 && row.active_player_id + 1 >= playerCount;
@@ -497,6 +490,48 @@ router.post("/games/:name/end-turn", async (req, res) => {
           row.id,
         ]
       );
+
+
+      // Insert settlement_snapshots rows (one per settlement, for the new day).
+      // Only snapshot settlements owned by the player whose turn just ended.
+      const snapshotDay = wrapped ? newDay : (incomingState.day ?? row.day);
+      for (const [sid, s] of Object.entries(newSettlements)) {
+        if (s.ownerId !== row.active_player_id) continue;
+        const inc = s.population * s.goldTax;
+        const morale = Math.max(0, Math.min(100, Math.round(Number(s.morale ?? 100))));
+        await client.query(
+          `INSERT INTO settlement_snapshots
+             (game_id, settlement_id, day, gold, warehouse, morale, effective_income)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+           ON CONFLICT (game_id, settlement_id, day) DO NOTHING`,
+          [
+            row.id,
+            sid,
+            snapshotDay,
+            Number(s.gold ?? 0),
+            JSON.stringify(s.warehouse ?? {}),
+            morale,
+            Math.round((inc * morale) / 100),
+          ]
+        );
+      }
+
+      // Log resource_transactions rows for any auto-trade transfers that fired.
+      for (const t of transfers) {
+        await client.query(
+          `INSERT INTO resource_transactions
+             (game_id, from_settlement_id, to_settlement_id, resource, amount, gold_paid, reason)
+           VALUES ($1, $2, $3, $4, $5, $6, 'auto_trade')`,
+          [
+            row.id,
+            t.fromSettlementId,
+            t.toSettlementId,
+            t.resource,
+            t.amount,
+            t.goldPaid,
+          ]
+        );
+      }
 
       const events: Array<{ kind: string; payload: Record<string, unknown> }> = [
         {
@@ -871,3 +906,4 @@ router.post("/games/:name/trade", async (req, res) => {
     });
   }
 });
+

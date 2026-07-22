@@ -95,6 +95,23 @@ function buildCalendarSnapshot(state: GameState): CalendarSnapshot | null {
   const cal = calendarFromDay(state.day);
   const activePlayer =
     state.players.find((p) => p.id === state.activePlayerId) ?? state.players[0];
+  const ownedSettlements = Object.values(state.settlements).filter(
+    (s) => s.ownerId === activePlayer.id,
+  );
+  const morale =
+    ownedSettlements.length > 0
+      ? Math.round(
+          ownedSettlements.reduce((acc, s) => acc + (s.morale ?? 100), 0) /
+            ownedSettlements.length,
+        )
+      : null;
+  const effectiveIncome =
+    ownedSettlements.length > 0
+      ? ownedSettlements.reduce((acc, s) => {
+          const morale = Math.max(0, Math.min(100, s.morale ?? 100));
+          return acc + Math.round(((s.population ?? 0) * (s.goldTax ?? 0) * morale) / 100);
+        }, 0)
+      : null;
   return {
     day: state.day,
     week: cal.week,
@@ -106,6 +123,8 @@ function buildCalendarSnapshot(state: GameState): CalendarSnapshot | null {
     activePlayerColor: activePlayer.color,
     nextTurnGold: playerIncome(state, activePlayer.id),
     wealth: playerWealth(state, activePlayer.id),
+    morale,
+    effectiveIncome,
   };
 }
 
@@ -477,15 +496,20 @@ function initialize(): void {
       refreshAll();
     },
     onTrade: (fromId, toId, resource, amount) => {
-      if (resource === "gold") {
-        return { ok: false, reason: "gold_not_tradeable" };
-      }
       const result = turnController.tradeResources(fromId, toId, resource, amount);
       if (result.ok) {
         gameState = turnController.getState();
         refreshAll();
       }
       return result;
+    },
+    onToggleAutoTrade: (settlementId, autoTrade) => {
+      const ok = turnController.setAutoTrade(settlementId, autoTrade);
+      if (ok) {
+        gameState = turnController.getState();
+        refreshAll();
+      }
+      return ok;
     },
   });
 

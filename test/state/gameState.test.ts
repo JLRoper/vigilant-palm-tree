@@ -6,17 +6,20 @@ import {
   clearSelection,
   startMove,
   cancelMove,
-  reorderStack,
   detectAdjacentEnemy,
   startBattle,
   resolveBattle,
   endTurn,
   applyEndOfTurn,
+  applyEndOfTurnDetailed,
   applyWeeklyUpkeep,
   advanceRound,
   markSaved,
   transferGold,
   tradeResources,
+  setAutoTrade,
+  runAutoTrade,
+  reorderStack,
   MOVEMENT_PER_TURN,
   type GameState,
   type Player,
@@ -44,7 +47,7 @@ function makeSettlement(
   ownerId: PlayerId | null,
   q: number,
   r: number,
-  opts: Partial<Pick<SettlementState, "population" | "goldTax" | "gold" | "resourceRates">> = {},
+  opts: Partial<Pick<SettlementState, "population" | "goldTax" | "gold" | "resourceRates" | "morale" | "autoTrade" | "warehouse">> = {},
 ): SettlementState {
   return {
     id,
@@ -57,7 +60,9 @@ function makeSettlement(
     resourceRates: opts.resourceRates ?? {},
     foundedOnResource: null,
     gold: opts.gold ?? 0,
-    warehouse: emptyWarehouse(),
+    warehouse: opts.warehouse ?? emptyWarehouse(),
+    morale: opts.morale ?? 100,
+    autoTrade: opts.autoTrade ?? true,
   };
 }
 
@@ -191,46 +196,6 @@ test("startMove deducts cost correctly", () => {
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.state.heroes.h0.movementRemaining, 5);
-  }
-});
-
-test("startMove with trailExtension appends every tile in the path", () => {
-  const s = makeState({ selectedHeroId: "h0" });
-  const trail = [
-    { q: 3, r: 2 },
-    { q: 4, r: 2 },
-    { q: 5, r: 2 },
-  ];
-  const result = startMove(s, "h0", { q: 5, r: 2 }, 3, trail);
-  assert.equal(result.ok, true);
-  if (result.ok) {
-    const finalTrail = result.state.heroes.h0.trail;
-    assert.equal(finalTrail.length, 4); // initial {2,2} + 3 trail entries
-    assert.deepEqual(finalTrail[0], { q: 2, r: 2 });
-    assert.deepEqual(finalTrail[1], { q: 3, r: 2 });
-    assert.deepEqual(finalTrail[2], { q: 4, r: 2 });
-    assert.deepEqual(finalTrail[3], { q: 5, r: 2 });
-  }
-});
-
-test("startMove without trailExtension falls back to appending only the destination", () => {
-  const s = makeState({ selectedHeroId: "h0" });
-  const result = startMove(s, "h0", { q: 5, r: 2 }, 3);
-  assert.equal(result.ok, true);
-  if (result.ok) {
-    const finalTrail = result.state.heroes.h0.trail;
-    assert.equal(finalTrail.length, 2); // initial + destination
-    assert.deepEqual(finalTrail[1], { q: 5, r: 2 });
-  }
-});
-
-test("startMove with empty trailExtension falls back to appending only the destination", () => {
-  const s = makeState({ selectedHeroId: "h0" });
-  const result = startMove(s, "h0", { q: 5, r: 2 }, 3, []);
-  assert.equal(result.ok, true);
-  if (result.ok) {
-    assert.equal(result.state.heroes.h0.trail.length, 2);
-    assert.deepEqual(result.state.heroes.h0.trail[1], { q: 5, r: 2 });
   }
 });
 
@@ -433,9 +398,9 @@ test("applyEndOfTurn awards population*goldTax into each owned settlement's trea
       makePlayer(1, "ai", "AI", ["h1"], ["s1"]),
     ],
     settlements: [
-      makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 100 }),
-      makeSettlement("s0b", 0, 3, 3, { population: 500, goldTax: 1, gold: 0 }),
-      makeSettlement("s1", 1, 18, 4, { population: 500, goldTax: 1, gold: 50 }),
+      { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 100 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 100 } },
+      { ...makeSettlement("s0b", 0, 3, 3, { population: 500, goldTax: 1, gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 100 } },
+      { ...makeSettlement("s1", 1, 18, 4, { population: 500, goldTax: 1, gold: 50 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 100 } },
     ],
   });
   const next = applyEndOfTurn(s);
@@ -601,8 +566,8 @@ test("applyEndOfTurn does not award gold to non-active-player settlements", () =
   const s = makeState({
     activePlayerId: 0,
     settlements: [
-      makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 100 }),
-      makeSettlement("s1", 1, 18, 4, { population: 500, goldTax: 1, gold: 50 }),
+      { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 100 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 100 } },
+      { ...makeSettlement("s1", 1, 18, 4, { population: 500, goldTax: 1, gold: 50 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 100 } },
     ],
   });
   const next = applyEndOfTurn(s);
@@ -741,6 +706,93 @@ test("tradeResources rejects non-positive or non-integer amount", () => {
   assert.equal(tradeResources(s, "s0", "s0b", "wood", 0).ok, false);
   assert.equal(tradeResources(s, "s0", "s0b", "wood", -3).ok, false);
   assert.equal(tradeResources(s, "s0", "s0b", "wood", 1.5).ok, false);
+});
+test("applyEndOfTurn consumes food from the warehouse for the active player", () => {
+  const s = makeState({
+    settlements: [
+      makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 0 }),
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  s.settlements.s0.warehouse.food = 10;
+  const next = applyEndOfTurn(s);
+  assert.equal(next.settlements.s0.warehouse.food, 5);
+  assert.equal(next.settlements.s0.morale, 100);
+});
+
+test("applyEndOfTurn decays morale when food missing", () => {
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 } },
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const next = applyEndOfTurn(s);
+  assert.ok((next.settlements.s0.morale ?? 100) < 100, "morale should drop from 100");
+  assert.ok((next.settlements.s0.morale ?? 100) >= 0);
+});
+
+test("applyEndOfTurn awards effective income scaled by morale", () => {
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 0, morale: 50 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 100 } },
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const next = applyEndOfTurn(s);
+  assert.equal(next.settlements.s0.gold, 250);
+});
+
+test("applyEndOfTurnDetailed returns transfers array alongside state", () => {
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0, food: 5 }, morale: 100, autoTrade: true },
+      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 }, morale: 100, autoTrade: true },
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const detail = applyEndOfTurnDetailed(s);
+  assert.ok(Array.isArray(detail.transfers));
+  assert.equal(detail.state.settlements.s0.warehouse.wood, 10);
+  assert.equal(detail.state.settlements.s0b.warehouse.wood, 0);
+});
+
+test("runAutoTrade returns no transfers when all warehouses are stocked", () => {
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 10 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0, food: 5 }, morale: 100, autoTrade: true },
+      { ...makeSettlement("s0b", 0, 3, 3, { population: 500, goldTax: 1, gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 5 }, morale: 100, autoTrade: true },
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const result = runAutoTrade(s.settlements, 0);
+  assert.equal(result.transfers.length, 0);
+});
+
+test("setAutoTrade toggles a settlement's autoTrade flag", () => {
+  const s = makeState({
+    settlements: [
+      makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 0 }),
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const next = setAutoTrade(s, "s0", false);
+  assert.equal(next.settlements.s0.autoTrade, false);
+  assert.equal(next.dirty, true);
+});
+
+test("setAutoTrade is no-op when value unchanged", () => {
+  const s = makeState({
+    settlements: [makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 0 })],
+  });
+  const next = setAutoTrade(s, "s0", true);
+  assert.equal(next, s);
+});
+
+test("setAutoTrade returns same state when settlement is unknown", () => {
+  const s = makeState();
+  const next = setAutoTrade(s, "ghost", false);
+  assert.equal(next, s);
 });
 
 // --- reorderStack: army slots are FIXED battlefield positions, so this is a

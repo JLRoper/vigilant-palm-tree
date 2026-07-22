@@ -22,6 +22,8 @@ export interface CalendarSnapshot {
   activePlayerColor: string;
   nextTurnGold: number;
   wealth: number;
+  morale: number | null;
+  effectiveIncome: number | null;
 }
 
 export interface ToolbarState {
@@ -212,6 +214,22 @@ export class Toolbar {
     wealthRow.appendChild(wealthValue);
     this.calendarEl.appendChild(wealthRow);
 
+    const moraleRow = document.createElement("div");
+    Object.assign(moraleRow.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      fontSize: "11px",
+      opacity: "0.85",
+      paddingTop: "2px",
+    });
+    const moraleLabel = document.createElement("span");
+    moraleLabel.textContent = "Morale";
+    moraleRow.appendChild(moraleLabel);
+    const moraleValue = document.createElement("span");
+    moraleValue.id = "toolbar-morale-value";
+    moraleRow.appendChild(moraleValue);
+    this.calendarEl.appendChild(moraleRow);
+
     this.menu.body.appendChild(this.calendarEl);
 
     this.newBtn = this.makeButton("New Game", false);
@@ -268,7 +286,8 @@ export class Toolbar {
     const activeEl = this.menu.root.querySelector<HTMLElement>("#toolbar-active-label");
     const incomeEl = this.menu.root.querySelector<HTMLElement>("#toolbar-income-value");
     const wealthEl = this.menu.root.querySelector<HTMLElement>("#toolbar-wealth-value");
-    if (!dayEl || !weekEl || !monthEl || !swatchEl || !activeEl || !incomeEl || !wealthEl) return;
+    const moraleEl = this.menu.root.querySelector<HTMLElement>("#toolbar-morale-value");
+    if (!dayEl || !weekEl || !monthEl || !swatchEl || !activeEl || !incomeEl || !wealthEl || !moraleEl) return;
     if (!cal) {
       dayEl.textContent = "—";
       weekEl.textContent = "—";
@@ -277,6 +296,7 @@ export class Toolbar {
       activeEl.textContent = "—";
       incomeEl.textContent = "—";
       wealthEl.textContent = "—";
+      moraleEl.textContent = "—";
       return;
     }
     dayEl.textContent = `${cal.day} (d${cal.dayOfWeek})`;
@@ -286,6 +306,11 @@ export class Toolbar {
     activeEl.textContent = `${cal.activePlayerName}'s turn`;
     incomeEl.textContent = `+${cal.nextTurnGold}g/turn`;
     wealthEl.textContent = `${cal.wealth}g`;
+    if (cal.morale === null || cal.effectiveIncome === null) {
+      moraleEl.textContent = "—";
+    } else {
+      moraleEl.textContent = `${cal.morale}% · ${cal.effectiveIncome}g`;
+    }
   }
 
   applyGameState(_state: GameState): void {
