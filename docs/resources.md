@@ -6,19 +6,29 @@
 
 Ordered from most common (most tiles) to rarest (fewest tiles). Rarer resources yield more per turn but are harder to find and more contested.
 
-| # | Resource      | Yield / turn | Icon idea     | Used for |
-|---|---------------|--------------|---------------|----------|
-| 1 | **Gold**      | +20          | Coin stack    | Recruitment, trading, building upkeep |
-| 2 | **Wood**      | +15          | Log pile      | Construction, basic units |
-| 3 | **Stone**     | +12          | Bricks        | Fortifications, walls |
-| 4 | **Iron Ore**  | +8           | Ore chunks    | Weapons, war machines, siege |
-| 5 | **Arcane Dust**| +5          | Glowing vial  | Magic, spells, mana, arcane units |
+| # | Resource       | Per-tile yield | Used for |
+|---|----------------|----------------|----------|
+| 1 | **Gold**       | +20            | Recruitment, trading, building upkeep |
+| 2 | **Wood**       | +15            | Construction, basic units |
+| 3 | **Stone**      | +12            | Fortifications, walls |
+| 4 | **Iron Ore**   | +8             | Weapons, war machines, siege |
+| 5 | **Arcane Dust**| +5             | Magic, spells, mana, arcane units |
 
-Yields are unchanged. The biome-correlation (where each resource spawns) is the new bit — see below.
+`RESOURCE_YIELD` is locked. Source of truth: [`src/map/resourceTiles.ts`](../src/map/resourceTiles.ts).
 
 ## Status
 
-🟡 **Updated.** Densities are now per-terrain (biome-aware), not a single flat rate per resource. The locked list of 5 resource types is unchanged.
+✅ **Locked.** All 5 resource types, their per-tile yields, and their per-terrain densities are final and implemented.
+
+## Per-settlement aggregation
+
+A settlement doesn't just collect from its own tile — it aggregates over a radius of 3 hexes, then multiplies by castle level:
+
+```
+settlement_rate[r] = RESOURCE_YIELD[r] × level × count(r-bearing tiles within radius 3)
+```
+
+So an L1 settlement on a forest with two wood-bearing forest tiles in radius produces `15 × 1 × 2 = 30 wood/turn`. Implementation: [`src/economy/settlementRates.ts`](../src/economy/settlementRates.ts).
 
 ## Food — deferred
 
@@ -37,7 +47,7 @@ Each resource has a density per terrain type. The placer picks the density for e
 | **Arcane Dust**        | 0%    | 2%   | 0%     | **8%** | 0%       |
 | **Total per terrain**  | ~10.5%| ~17% | ~20%   | ~10.5% | ~47%     |
 
-(Totals per terrain are the sum across resources; mountain's high total reflects that adjacent-to-mountain tiles (grass/dirt) get boosted stone density from spillover in the placement algorithm.)
+(Mountain's high total reflects that adjacent-to-mountain tiles (grass/dirt) get boosted stone density from spillover in the placement algorithm.)
 
 ### Rationale per resource
 

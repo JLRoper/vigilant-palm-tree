@@ -1,12 +1,10 @@
-﻿# Source Module Organization Plan
+﻿# Architecture & Module Layout
 
-**Timestamp:** 2026-07-19T02:21
-**Author:** Kilo (planning)
-**Status:** Implementation-ready
+**Status:** Executed. Describes the current `src/` shape — this was the implementation plan, now applied. Originally written 2026-07-19 under a timestamped filename; renamed to `architecture.md` as the canonical name.
 
 ## Context
 
-The previous agent created 7 empty subdirectories under `src/` (`core/`, `entities/`, `io/`, `map/`, `render/`, `systems/`, `views/`) but never recorded a plan for what belongs in each one. Meanwhile every real module still lives flat at `src/` root. The design docs in this folder (`resources.md`, `settlements.md`, `heroes.md`, `map.md`, `economy.md`, `city-view.md`, `army.md`) are authoritative for *game* design but say nothing about TypeScript module layout. This plan fills the gap and gives the implementation agent an unambiguous file map.
+The repo started with 7 empty subdirectories under `src/` (`core/`, `entities/`, `io/`, `map/`, `render/`, `systems/`, `views/`) but every real module still lived flat at `src/` root. The design docs in this folder (`resources.md`, `settlements.md`, `heroes.md`, `map.md`, `economy.md`, `army.md`) are authoritative for *game* design but say nothing about TypeScript module layout. This plan filled that gap and gave the implementation agent an unambiguous file map.
 
 ## Goal
 

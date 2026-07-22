@@ -4,8 +4,7 @@ The player's claim on the world. A settlement is built on a [resource tile](./re
 
 ## Model
 
-- **Level 1 Town** is the only buildable in v1.
-- Built directly on a resource tile. The settlement's yield is determined by the underlying tile's resource type.
+- Built directly on a resource tile. The settlement's yield is determined by the underlying tile's resource type and by other resource tiles within radius 3 (see [resources.md](./resources.md#per-settlement-aggregation)).
 - Each player can own **up to 3 settlements** at any time. Shared across all the player's heroes.
 - Settlements persist independently of which hero founded them — they belong to the **player**, not the hero. If the founding hero is lost, the settlement stays.
 - Settlements accumulate [resources](./resources.md) each turn (see [economy.md](./economy.md)).
@@ -21,9 +20,15 @@ Constructing a settlement costs:
 
 ## Levels
 
-- Schema anticipates up to **3 levels** per settlement.
-- Only Level 1 ships in v1 UI.
-- Future levels (not designed yet): Level 2 = 2× yield, Level 3 = 3× yield + special bonus.
+✅ **Locked.** Three levels ship in v1 UI. Level scales both resource yield and gold tax (population × tax = base gold income), and unlocks a larger city-view grid.
+
+| Level | Tier label | Population | Gold tax/turn | City grid |
+|-------|------------|------------|---------------|-----------|
+| 1     | Settlement | 500        | 1g/head       | 5×5       |
+| 2     | Town       | 1,500      | 2g/head       | 10×10     |
+| 3     | Castle     | 5,000      | 3g/head       | 15×15     |
+
+Resource yield scales linearly with level: `level × base_yield`. Source: [`src/economy/settlementRates.ts`](../src/economy/settlementRates.ts), [`src/entities/settlement.ts`](../src/entities/settlement.ts).
 
 ## Capture
 

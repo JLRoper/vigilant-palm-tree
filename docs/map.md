@@ -4,7 +4,7 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 
 ## Status
 
-🟡 **In progress.** Core terrain + rendering is implemented. Biome-aware resource placement, the new `mountain` and `desert` terrain types, and server-side tile persistence are planned and being documented before code lands.
+✅ **Implemented.** Procedural map generation, 6 terrain types, biome-aware resource placement, server-side tile persistence, isometric rendering, camera (pan/zoom, DPR-aware), and minimap all ship in v1.
 
 ## Grid
 
@@ -23,18 +23,13 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 | Mountain| grey rock   | impassable| Peaks and ridges. Stone + iron-bearing biome. Lakes / rivers. |
 | Water   | blue        | impassable| Lakes / rivers. Never carries resources. |
 
-Generated via a deterministic pseudo-noise function on the map seed. Same seed → same map.
+Generated via a deterministic pseudo-noise function on the map seed. Same seed → same map. Implementation: [`src/map/gameMap.ts`](../src/map/gameMap.ts), [`src/map/terrain.ts`](../src/map/terrain.ts). See [map-gen.md](./map-gen.md) for the algorithm.
 
-### New terrain (v1)
+## Resource tile placement
 
-- **`mountain`** — impassable like water, but stone/iron-bearing. Estimated ~3% of map. Renders as a peaked silhouette with a snow/light tip.
-- **`desert`** — passable at 1.4× movement cost. Estimated ~5% of map. Renders as sandy fill with light hatch lines. Carries arcane dust most often — thematically "the old things leak from ancient ruins buried in the sand."
+✅ **Implemented.** Resources are placed by per-terrain density — see [resources.md](./resources.md#biome-aware-density-matrix) for the full matrix. Water and impassable mountain are never assigned a resource; mountain-edge tiles get a spillover boost for stone/iron.
 
-## Resource tile placement (planned — biome-aware)
-
-Resources are **not independent of terrain**. Each resource has a per-terrain density table; the placer samples the appropriate row for each tile based on its terrain.
-
-See [resources.md](./resources.md) for the full density matrix and rationale.
+Implementation: [`src/map/resourceTiles.ts`](../src/map/resourceTiles.ts) (`placeResourceTiles`).
 
 ### Biome rules (summary)
 
@@ -46,21 +41,19 @@ See [resources.md](./resources.md) for the full density matrix and rationale.
 | Iron Ore   | **Mountain** (medium-high), dirt (low)    | Forest, water |
 | Arcane Dust| **Desert** (high), dirt (low)             | Forest, mountain, water |
 
-Tiles on water or impassable mountain are **never** assigned a resource (water has no deposits; mountain is a pathfinder block — its deposits are exposed at adjacent dirt/grass tiles).
-
-Per-terrain densities must sum to the same overall target (~14% of passable tiles carry a resource) to keep the global resource budget stable.
-
 ## Rendering
 
 - **Hex outline:** 1px darker stroke.
 - **Terrain fill:** flat colour from palette.
 - **Decoration overlay:** trees on forest, wave ripples on water, sand hatch on desert, peak silhouette on mountain (procedural).
-- **Resource overlay (planned):** small icon in the hex centre for unclaimed resource tiles.
-- **Settlement overlay (planned):** town sprite on top of resource icon when claimed.
+- **Resource overlay:** small icon in the hex centre for unclaimed resource tiles.
+- **Settlement overlay:** town sprite on top of resource icon when claimed (procedural, owner-coloured).
 
-## Data model (planned — Slice 2)
+Implementation: [`src/render/`](../src/render/).
 
-The map's authoritative state lives in a server-side table:
+## Data model
+
+✅ **Implemented.** The map's authoritative state lives in a server-side table:
 
 ```sql
 CREATE TABLE IF NOT EXISTS tiles (
@@ -68,21 +61,16 @@ CREATE TABLE IF NOT EXISTS tiles (
   game_id     INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
   q           INTEGER NOT NULL,
   r           INTEGER NOT NULL,
-  terrain     TEXT NOT NULL,                -- 'grass' | 'dirt' | 'forest' | 'desert' | 'mountain' | 'water'
-  resource    TEXT,                         -- 'gold' | 'wood' | 'stone' | 'iron' | 'arcane' | NULL
+  terrain     TEXT NOT NULL,
+  resource    TEXT,
   UNIQUE (game_id, q, r)
 );
 CREATE INDEX IF NOT EXISTS tiles_game_idx ON tiles (game_id);
 ```
 
 - `terrain` is non-null; `resource` is null for tiles without a deposit.
-- The seed moves from client-side map generation to server-side. `POST /api/games` generates the tile grid using the seed and inserts the rows. `GET /api/games/:name/tiles` returns them.
+- `POST /api/games` generates the tile grid using the seed and inserts the rows. `GET /api/games/:name/tiles` returns them.
 - Client-side `GameMap` hydrates from the tiles endpoint instead of re-deriving from seed.
-- Settlement binding (next milestone) keys on `(game_id, q, r)`.
-
-### Migration note
-
-When this slice lands, the existing seed-derived `resourceTiles` field on `GameMap` becomes obsolete and gets removed. Saved games from before Slice 2 won't have tile rows; on first read, the server backfills them by running the deterministic seed-based generator once.
 
 ## Future: randomized per-game tiles
 
@@ -119,5 +107,6 @@ Because the client only reads the table, all of these are server-only changes. N
 
 - What's placed on the map: [resources.md](./resources.md), [settlements.md](./settlements.md)
 - Who moves on it: [heroes.md](./heroes.md)
+- Map generation algorithm: [map-gen.md](./map-gen.md)
 
 [← Back to index](./README.md)

@@ -10,7 +10,11 @@ The player chose to skip the full army model for v1 to keep the resource/settlem
 
 A second screen/mode that opens when two heroes meet on the adventure map. Combat becomes **tactical** — units on a grid, turn-based actions, manual positioning.
 
-## Unit roster (proposed for v1 of the army system)
+## Unit roster — placeholder names only
+
+⚠️ **The roster table below is a placeholder sketch.** It is **not** the locked v1 unit list — the final roster, costs, and stats will be designed when this system lands. The code today contains a separate set of placeholder unit names (`swordsman`, `archer`, `cavalry`, `crossbowman`, `griffin` in [`src/data/unitCatalog.ts`](../src/data/unitCatalog.ts)) used only to make the UI and battle flow exercisable; **neither list is authoritative**.
+
+When this system is designed for real:
 
 5 unit types. Every **human** army type costs **1 food/day** for upkeep.
 

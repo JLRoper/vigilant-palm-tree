@@ -9,11 +9,11 @@ The actors on the map. Heroes move tile-to-tile, claim [settlements](./settlemen
 - A faction (`player` or `enemy`).
 - An ID and movement animation state.
 
-In v1 there is **no army** and **no death** — heroes are immortal. Army, death, and capture-for-ransom arrive with the deferred [army system](./army.md).
+Heroes lead **army stacks** of unit types (see [`src/data/unitCatalog.ts`](../src/data/unitCatalog.ts)). Battle resolves by auto-resolve formula — defender is removed from the map on loss and their gold transfers to the attacker. Hero death / capture-for-ransom is still deferred. See the [army system](./army.md) for what remains.
 
 ## Movement
 
-- Click a tile to plan a path. [A* pathfinding](../src/pathfinding.ts) computes the route.
+- Click a tile to plan a path. [A* pathfinding](../src/map/pathfinding.ts) computes the route.
 - Path renders as a yellow line with dots on each step.
 - Hero tweens between tiles at **220 ms per tile**.
 - During movement, new click commands are ignored.
