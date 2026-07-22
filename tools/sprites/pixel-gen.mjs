@@ -2,7 +2,12 @@
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { writeFileSync } from "node:fs";
-import { ASSETS_DIR, CASTLE_SPRITES, RESOURCE_SPRITES } from "./manifest.mjs";
+import {
+  ASSETS_DIR,
+  CASTLE_SPRITES,
+  RESOURCE_SPRITES,
+  RESOURCE_CART_SPRITES,
+} from "./manifest.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const htmlPath = path.resolve(__dirname, "pixel-art.html");
@@ -11,7 +16,7 @@ const outDir = path.resolve(__dirname, "..", "..", ASSETS_DIR);
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } });
 await page.goto("file://" + htmlPath.replace(/\\/g, "/"));
-await page.waitForFunction(() => document.querySelectorAll("canvas").length === 8);
+await page.waitForFunction(() => document.querySelectorAll("canvas").length === 13);
 
 const sprites = [
   { id: "l1", file: CASTLE_SPRITES[1] },
@@ -22,6 +27,11 @@ const sprites = [
   { id: "resource-stone",  file: RESOURCE_SPRITES.stone },
   { id: "resource-iron",   file: RESOURCE_SPRITES.iron },
   { id: "resource-arcane", file: RESOURCE_SPRITES.arcane },
+  { id: "resource-gold-cart",   file: RESOURCE_CART_SPRITES.gold },
+  { id: "resource-wood-cart",   file: RESOURCE_CART_SPRITES.wood },
+  { id: "resource-stone-cart",  file: RESOURCE_CART_SPRITES.stone },
+  { id: "resource-iron-cart",   file: RESOURCE_CART_SPRITES.iron },
+  { id: "resource-arcane-cart", file: RESOURCE_CART_SPRITES.arcane },
 ];
 
 for (const { id, file } of sprites) {

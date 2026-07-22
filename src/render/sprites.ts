@@ -1,8 +1,9 @@
 import { Faction } from "../entities/hero";
 import { CastleLevel } from "../entities/settlement";
 import { ResourceType } from "../map/resourceTiles";
+import { settings } from "../state/settings";
 import { SpriteProvider } from "./assets";
-import { castleKey, heroKey, resourceKey } from "./assetDescriptors";
+import { castleKey, heroKey, resourceStyleKey } from "./assetDescriptors";
 import { drawKnightSprite, drawDemonSprite } from "./heroSprites";
 
 export function drawCastleSprite(
@@ -26,7 +27,7 @@ export function drawResourceIcon(
   cy: number,
   hexSize: number
 ): void {
-  const r = provider.resolve(resourceKey(resource));
+  const r = provider.resolve(resourceStyleKey(resource, settings().resourceStyle));
   if (!r || !r.ready) return;
   drawWithDescriptor(ctx, r.drawable, r.descriptor, cx, cy, hexSize);
 }

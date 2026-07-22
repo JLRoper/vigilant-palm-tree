@@ -6,12 +6,14 @@
 <style>
   body { background:#0a0a0a; margin:0; padding:16px; font-family:monospace; color:#ccc; }
   h1 { font-size:14px; color:#ffcc00; margin:0 0 12px; }
-  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .grid { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+  .grid.row3 { grid-template-columns:repeat(3,1fr); margin-top:18px; padding-top:14px; border-top:1px solid #333; }
   .cell { display:flex; flex-direction:column; align-items:center; gap:6px; }
   canvas { image-rendering:pixelated; image-rendering:crisp-edges; background:
       repeating-conic-gradient(#202020 0% 25%, #2a2a2a 0% 50%) 50% / 8px 8px;
       width:auto; height:auto; }
   .lbl { font-size:12px; color:#bbb; }
+  .sect { font-size:11px; color:#ffcc00; margin: 14px 0 6px; }
 </style>
 </head>
 <body>
@@ -25,6 +27,15 @@
     <div class="cell"><canvas id="resource-stone"  width="32" height="32"></canvas><div class="lbl">resource-stone 32x32</div></div>
     <div class="cell"><canvas id="resource-iron"   width="32" height="32"></canvas><div class="lbl">resource-iron 32x32</div></div>
     <div class="cell"><canvas id="resource-arcane" width="32" height="32"></canvas><div class="lbl">resource-arcane 32x32</div></div>
+  </div>
+
+  <div class="sect">Cartography pin variant (parchment disc + woodcut symbol) — parked direction per docs/art-style.md</div>
+  <div class="grid">
+    <div class="cell"><canvas id="resource-gold-cart"   width="32" height="32"></canvas><div class="lbl">resource-gold-cart</div></div>
+    <div class="cell"><canvas id="resource-wood-cart"   width="32" height="32"></canvas><div class="lbl">resource-wood-cart</div></div>
+    <div class="cell"><canvas id="resource-stone-cart"  width="32" height="32"></canvas><div class="lbl">resource-stone-cart</div></div>
+    <div class="cell"><canvas id="resource-iron-cart"   width="32" height="32"></canvas><div class="lbl">resource-iron-cart</div></div>
+    <div class="cell"><canvas id="resource-arcane-cart" width="32" height="32"></canvas><div class="lbl">resource-arcane-cart</div></div>
   </div>
 <script>
 // ---------- helpers ----------
@@ -469,6 +480,200 @@ function drawResourceArcane(ctx) {
   R(ctx, 18, 18, 1, 1, p.glow);          // sparkle
 }
 
+// ---------- cartography pin variant (parked direction) ----------
+// Parchment-circle token with a woodcut hand-drawn symbol and a short
+// wooden pin stem at the bottom. Same silhouette across the set
+// (round parchment disc + stem); differentiated by symbol + accent.
+// See docs/art-style.md "Future directions (parked)" — kept as a
+// variant alongside the locked rune-stone direction.
+const CART_PAL = {
+  parchment:   "#e8d8a8",
+  parchmentDk: "#b8a878",
+  parchmentLt: "#f8ecc0",
+  outline:     "#2a1808",
+  ink:         "#2a1808",
+  wood:        "#6a4a20",
+  woodDk:      "#3a2010",
+};
+const CART_ACCENT = {
+  gold:   "#c89020", // tarnished gold
+  wood:   "#4a6a18", // forest green
+  stone:  "#3a3a32", // slate
+  iron:   "#e85820", // rust
+  arcane: "#6a30a0", // amethyst
+};
+
+// Filled disc helper (radius r inclusive). Solid pixels only.
+function discFill(ctx, cx, cy, r, color) {
+  ctx.fillStyle = color;
+  for (let y = -r; y <= r; y++) {
+    const dx = Math.round(Math.sqrt(r * r - y * y));
+    ctx.fillRect(cx - dx, cy + y, dx * 2 + 1, 1);
+  }
+}
+
+// Draw the shared parchment pin head + wooden stem. Symbol is drawn
+// afterwards at the centre of the disc, bounded by the inner frame.
+function drawCartPin(ctx) {
+  const cx = 16, cy = 15, r = 11;
+  // outer ring = ink outline (then parchment inside, 1px inset)
+  discFill(ctx, cx, cy, r, CART_PAL.outline);
+  discFill(ctx, cx, cy, r - 1, CART_PAL.parchment);
+  // inner shadow ring (parchment-darker) — 1 px ring inside the parchment
+  discFill(ctx, cx, cy, r - 2, CART_PAL.parchmentDk);
+  discFill(ctx, cx, cy, r - 3, CART_PAL.parchment);
+  // upper-left highlight crescent (3 px) — hand-lit parchment feel
+  R(ctx, cx - 6, cy - 7, 5, 1, CART_PAL.parchmentLt);
+  R(ctx, cx - 7, cy - 6, 1, 2, CART_PAL.parchmentLt);
+  R(ctx, cx - 6, cy - 5, 2, 1, CART_PAL.parchmentLt);
+  // lower-right hatched shading — woodcut "scratch" texture
+  R(ctx, cx + 4, cy + 6, 2, 1, CART_PAL.outline);
+  R(ctx, cx + 5, cy + 7, 2, 1, CART_PAL.outline);
+  R(ctx, cx + 6, cy + 8, 1, 1, CART_PAL.outline);
+  // small chip on the rim — hand-cut parchment feel
+  ctx.clearRect(cx + 10, cy - 2, 1, 1);
+  ctx.clearRect(cx - 11, cy + 4, 1, 1);
+
+  // wooden pin stem at bottom of disc
+  const stemY = cy + r - 1;
+  R(ctx, cx - 3, stemY, 7, 2, CART_PAL.wood);
+  R(ctx, cx - 2, stemY + 2, 5, 1, CART_PAL.wood);
+  R(ctx, cx - 1, stemY + 3, 3, 1, CART_PAL.wood);
+  R(ctx, cx,     stemY + 4, 1, 1, CART_PAL.wood);
+  // stem outline
+  R(ctx, cx - 3, stemY, 1, 2, CART_PAL.outline);
+  R(ctx, cx + 3, stemY, 1, 2, CART_PAL.outline);
+  R(ctx, cx - 2, stemY + 2, 1, 1, CART_PAL.outline);
+  R(ctx, cx + 2, stemY + 2, 1, 1, CART_PAL.outline);
+  R(ctx, cx - 1, stemY + 3, 1, 1, CART_PAL.outline);
+  R(ctx, cx + 1, stemY + 3, 1, 1, CART_PAL.outline);
+  R(ctx, cx,     stemY + 4, 1, 1, CART_PAL.outline);
+  R(ctx, cx - 3, stemY, 7, 1, CART_PAL.outline);
+  // stem shading on left
+  R(ctx, cx - 3, stemY + 1, 1, 1, CART_PAL.woodDk);
+  R(ctx, cx - 2, stemY + 2, 1, 1, CART_PAL.woodDk);
+}
+
+// Woodcut sun: filled disc with 4 cardinal rays + 4 diagonal dots.
+// Disc centre (16,15). Symbol bounded by x∈[10..22], y∈[9..21].
+function drawCartGold(ctx) {
+  drawCartPin(ctx);
+  // sun body (filled ink disc)
+  discFill(ctx, 16, 15, 3, CART_PAL.ink);
+  // hollow centre — small parchment circle 1px inside
+  discFill(ctx, 16, 15, 2, CART_PAL.parchment);
+  // 4 cardinal rays (1 px wide, 2 px long, just outside the body)
+  R(ctx, 16, 10, 1, 2, CART_PAL.ink);
+  R(ctx, 16, 18, 1, 2, CART_PAL.ink);
+  R(ctx, 11, 15, 2, 1, CART_PAL.ink);
+  R(ctx, 19, 15, 2, 1, CART_PAL.ink);
+  // 4 diagonal ray tips
+  R(ctx, 12, 11, 1, 1, CART_PAL.ink); R(ctx, 20, 11, 1, 1, CART_PAL.ink);
+  R(ctx, 12, 19, 1, 1, CART_PAL.ink); R(ctx, 20, 19, 1, 1, CART_PAL.ink);
+  R(ctx, 11, 12, 1, 1, CART_PAL.ink); R(ctx, 21, 12, 1, 1, CART_PAL.ink);
+  R(ctx, 11, 18, 1, 1, CART_PAL.ink); R(ctx, 21, 18, 1, 1, CART_PAL.ink);
+  // accent — gold dot at centre
+  R(ctx, 16, 15, 1, 1, CART_ACCENT.gold);
+}
+
+// Woodcut oak leaf: pointed leaf shape with central vein and 4 side veins.
+function drawCartWood(ctx) {
+  drawCartPin(ctx);
+  // leaf body (filled ink)
+  discFill(ctx, 16, 14, 4, CART_PAL.ink);
+  // taper to point at top
+  R(ctx, 16, 9, 1, 1, CART_PAL.ink);
+  R(ctx, 15, 10, 2, 1, CART_PAL.ink);
+  R(ctx, 14, 11, 4, 1, CART_PAL.ink);
+  R(ctx, 14, 12, 4, 1, CART_PAL.ink);
+  R(ctx, 14, 13, 4, 1, CART_PAL.ink);
+  R(ctx, 14, 16, 4, 1, CART_PAL.ink);
+  R(ctx, 14, 17, 4, 1, CART_PAL.ink);
+  R(ctx, 15, 18, 2, 1, CART_PAL.ink);
+  // central vein (parchment cut through the ink body)
+  R(ctx, 16, 10, 1, 9, CART_PAL.parchment);
+  // 4 side veins (parchment cuts)
+  R(ctx, 15, 12, 1, 1, CART_PAL.parchment);
+  R(ctx, 17, 12, 1, 1, CART_PAL.parchment);
+  R(ctx, 15, 16, 1, 1, CART_PAL.parchment);
+  R(ctx, 17, 16, 1, 1, CART_PAL.parchment);
+  // stem extending down from leaf
+  R(ctx, 16, 19, 1, 2, CART_PAL.ink);
+  // accent — green highlight on leaf tip
+  R(ctx, 16, 10, 1, 1, CART_ACCENT.wood);
+}
+
+// Woodcut mountain: 3 peaks with central peak tallest.
+function drawCartStone(ctx) {
+  drawCartPin(ctx);
+  // central peak (tallest)
+  R(ctx, 16, 10, 1, 1, CART_PAL.ink);
+  R(ctx, 15, 11, 3, 1, CART_PAL.ink);
+  R(ctx, 14, 12, 5, 1, CART_PAL.ink);
+  R(ctx, 13, 13, 7, 1, CART_PAL.ink);
+  R(ctx, 12, 14, 9, 1, CART_PAL.ink);
+  R(ctx, 11, 15, 11, 1, CART_PAL.ink);
+  R(ctx, 10, 16, 13, 1, CART_PAL.ink);
+  R(ctx, 10, 17, 13, 1, CART_PAL.ink);
+  R(ctx, 10, 18, 13, 1, CART_PAL.ink);
+  R(ctx, 10, 19, 13, 1, CART_PAL.ink);
+  // left peak (smaller)
+  R(ctx, 12, 14, 1, 1, CART_PAL.ink);
+  R(ctx, 11, 15, 1, 1, CART_PAL.ink);
+  // right peak (smaller)
+  R(ctx, 20, 14, 1, 1, CART_PAL.ink);
+  R(ctx, 21, 15, 1, 1, CART_PAL.ink);
+  // snow caps (parchment cuts on the peaks)
+  R(ctx, 15, 11, 3, 1, CART_PAL.parchment);
+  R(ctx, 14, 12, 1, 1, CART_PAL.parchment);
+  R(ctx, 18, 12, 1, 1, CART_PAL.parchment);
+  // accent — slate highlight
+  R(ctx, 16, 13, 1, 1, CART_ACCENT.stone);
+}
+
+// Woodcut hammer: rectangular head + handle, simple silhouette.
+function drawCartIron(ctx) {
+  drawCartPin(ctx);
+  // hammer head (horizontal block, 6x3) — drawn in rust first
+  R(ctx, 13, 12, 6, 3, CART_ACCENT.iron);
+  // ink outline + claw notch (ink frame around the rust head)
+  O(ctx, 13, 12, 6, 3, CART_PAL.ink);
+  // claw notch on right side (parchment cut through outline)
+  R(ctx, 19, 12, 1, 1, CART_PAL.parchment);
+  R(ctx, 19, 14, 1, 1, CART_PAL.parchment);
+  // dark ink stripe along the head top (gives it a forged-iron look on the rust body)
+  R(ctx, 13, 13, 6, 1, CART_PAL.ink);
+  // handle (vertical 1px wide, going down through head)
+  R(ctx, 14, 15, 1, 5, CART_PAL.ink);
+  // handle wrap at top (small ring)
+  R(ctx, 13, 15, 3, 1, CART_PAL.ink);
+  // handle end cap
+  R(ctx, 13, 19, 3, 1, CART_PAL.ink);
+  // handle inner shading (parchment cut)
+  R(ctx, 14, 16, 1, 3, CART_PAL.parchment);
+}
+
+// Woodcut 4-point star ✦: diamond core + 4 long cardinal rays + sparkle dots.
+function drawCartArcane(ctx) {
+  drawCartPin(ctx);
+  // diamond core (3x3)
+  R(ctx, 16, 14, 1, 1, CART_PAL.ink);
+  R(ctx, 15, 15, 3, 1, CART_PAL.ink);
+  R(ctx, 16, 16, 1, 1, CART_PAL.ink);
+  // 4 long cardinal rays (clear star points)
+  R(ctx, 16, 10, 1, 4, CART_PAL.ink);  // N
+  R(ctx, 16, 17, 1, 4, CART_PAL.ink);  // S
+  R(ctx, 10, 15, 4, 1, CART_PAL.ink);  // W
+  R(ctx, 19, 15, 4, 1, CART_PAL.ink);  // E
+  // 4 sparkle dots in diagonals
+  R(ctx, 12, 12, 1, 1, CART_PAL.ink);  // NW
+  R(ctx, 20, 12, 1, 1, CART_PAL.ink);  // NE
+  R(ctx, 12, 18, 1, 1, CART_PAL.ink);  // SW
+  R(ctx, 20, 18, 1, 1, CART_PAL.ink);  // SE
+  // accent — amethyst sparkle at the diamond centre
+  R(ctx, 16, 15, 1, 1, CART_ACCENT.arcane);
+}
+
 // ---------- run ----------
 drawL1(makeCtx(document.getElementById("l1")));
 drawL2(makeCtx(document.getElementById("l2")));
@@ -478,6 +683,13 @@ drawResourceWood(makeCtx(document.getElementById("resource-wood")));
 drawResourceStone(makeCtx(document.getElementById("resource-stone")));
 drawResourceIron(makeCtx(document.getElementById("resource-iron")));
 drawResourceArcane(makeCtx(document.getElementById("resource-arcane")));
+
+// cartography pin variant (parked direction)
+drawCartGold(makeCtx(document.getElementById("resource-gold-cart")));
+drawCartWood(makeCtx(document.getElementById("resource-wood-cart")));
+drawCartStone(makeCtx(document.getElementById("resource-stone-cart")));
+drawCartIron(makeCtx(document.getElementById("resource-iron-cart")));
+drawCartArcane(makeCtx(document.getElementById("resource-arcane-cart")));
 </script>
 </body>
 </html>
