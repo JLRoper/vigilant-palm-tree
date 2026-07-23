@@ -6,15 +6,7 @@ import resourceWood from "../resources/resource-wood.png?url";
 import resourceStone from "../resources/resource-stone.png?url";
 import resourceIron from "../resources/resource-iron.png?url";
 import resourceArcane from "../resources/resource-arcane.png?url";
-import heroPlayerN from "../resources/units/hero-player-n.png?url";
-import heroPlayerNE from "../resources/units/hero-player-ne.png?url";
-import heroPlayerE from "../resources/units/hero-player-e.png?url";
-import heroPlayerSE from "../resources/units/hero-player-se.png?url";
-import heroPlayerS from "../resources/units/hero-player-s.png?url";
-import heroPlayerSW from "../resources/units/hero-player-sw.png?url";
-import heroPlayerW from "../resources/units/hero-player-w.png?url";
-import heroPlayerNW from "../resources/units/hero-player-nw.png?url";
-import { Faction, HeroDirection } from "../entities/hero";
+import { Faction, Direction } from "../entities/hero";
 import { CastleLevel } from "../entities/settlement";
 import { ResourceType, RESOURCES } from "../map/resourceTiles";
 
@@ -22,7 +14,8 @@ export type SpriteKey =
   | `castle.${CastleLevel}`
   | `resource.${ResourceType}`
   | `hero.${Faction}`
-  | `hero.player.${HeroDirection}`
+  | `hero.player.${Direction}`
+  | `horse.${string}.${Direction}`
   | `building.${string}.${string}.${number}`;
 
 export type Anchor = "bottom" | "center";
@@ -88,75 +81,102 @@ export const RESOURCE_DESCRIPTORS: Record<`resource.${ResourceType}`, SpriteDesc
     ])
   ) as Record<`resource.${ResourceType}`, SpriteDescriptor>;
 
-const HERO_PLAYER_IMAGES: Record<HeroDirection, string> = {
-  n: heroPlayerN,
-  ne: heroPlayerNE,
-  e: heroPlayerE,
-  se: heroPlayerSE,
-  s: heroPlayerS,
-  sw: heroPlayerSW,
-  w: heroPlayerW,
-  nw: heroPlayerNW,
-};
+// Generic helper to load directional sprites from a glob
+// Returns a Record<Direction, string> mapping direction to URL
+function loadDirectionalSprites(
+  glob: Record<string, { default: string }>,
+  pattern: RegExp,
+  fallbacks: Partial<Record<Direction, Direction>> = {}
+): Record<Direction, string | null> {
+  const images: Record<Direction, string | null> = {
+    n: null, ne: null, e: null, se: null, s: null, sw: null, w: null, nw: null,
+  };
 
-export const HERO_DESCRIPTORS: Record<`hero.player.${HeroDirection}`, SpriteDescriptor> = {
-  "hero.player.n": {
-    key: "hero.player.n",
-    url: HERO_PLAYER_IMAGES["n"],
-    anchor: "bottom",
-    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
-    naturalSize: 512,
-  },
-  "hero.player.ne": {
-    key: "hero.player.ne",
-    url: HERO_PLAYER_IMAGES["ne"],
-    anchor: "bottom",
-    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
-    naturalSize: 512,
-  },
-  "hero.player.e": {
-    key: "hero.player.e",
-    url: HERO_PLAYER_IMAGES["e"],
-    anchor: "bottom",
-    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
-    naturalSize: 512,
-  },
-  "hero.player.se": {
-    key: "hero.player.se",
-    url: HERO_PLAYER_IMAGES["se"],
-    anchor: "bottom",
-    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
-    naturalSize: 512,
-  },
-  "hero.player.s": {
-    key: "hero.player.s",
-    url: HERO_PLAYER_IMAGES["s"],
-    anchor: "bottom",
-    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
-    naturalSize: 512,
-  },
-  "hero.player.sw": {
-    key: "hero.player.sw",
-    url: HERO_PLAYER_IMAGES["sw"],
-    anchor: "bottom",
-    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
-    naturalSize: 512,
-  },
-  "hero.player.w": {
-    key: "hero.player.w",
-    url: HERO_PLAYER_IMAGES["w"],
-    anchor: "bottom",
-    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
-    naturalSize: 512,
-  },
-  "hero.player.nw": {
-    key: "hero.player.nw",
-    url: HERO_PLAYER_IMAGES["nw"],
-    anchor: "bottom",
-    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
-    naturalSize: 512,
-  },
-};
+  for (const [key, mod] of Object.entries(glob)) {
+    const match = key.match(pattern);
+    if (match && mod.default) {
+      const dir = match[1] as Direction;
+      if (dir in images) {
+        images[dir] = mod.default;
+      }
+    }
+  }
+
+  // Apply fallbacks for missing directions
+  for (const [missing, fallback] of Object.entries(fallbacks)) {
+    if (!images[missing as Direction] && images[fallback]) {
+      images[missing as Direction] = images[fallback]!;
+    }
+  }
+
+  return images;
+}
+
+// Generic helper to create descriptors for directional sprites
+function createDirectionalDescriptors(
+  prefix: string,
+  images: Record<Direction, string | null>,
+  anchor: Anchor = "bottom",
+  sizing: Sizing = { kind: "fitHeight", hexSizeMul: 1.0 },
+  naturalSize?: number
+): Record<string, SpriteDescriptor> {
+  const descriptors: Record<string, SpriteDescriptor> = {};
+
+  for (const [dir, url] of Object.entries(images)) {
+    if (!url) continue;
+    const key = `${prefix}.${dir}` as SpriteKey;
+    descriptors[key] = {
+      key,
+      url,
+      anchor,
+      sizing,
+      naturalSize,
+    };
+  }
+
+  return descriptors;
+}
+
+// Load hero player sprites from horse/commander-1/ directory
+const HERO_PLAYER_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-1/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HERO_PLAYER_IMAGES = loadDirectionalSprites(
+  HERO_PLAYER_GLOB,
+  /hero-player-(n|ne|e|se|s|sw|w|nw)\.png$/
+);
+
+export const HERO_DESCRIPTORS: Record<`hero.player.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "hero.player",
+    HERO_PLAYER_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`hero.player.${Direction}`, SpriteDescriptor>;
+
+// Load bubbly horse sprites from horse/commander-2/ directory
+const HORSE_BUBBLY_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-2/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_BUBBLY_IMAGES = loadDirectionalSprites(
+  HORSE_BUBBLY_GLOB,
+  /bubbly-(n|ne|e|se|s|sw|w|nw)\.png$/,
+  { n: "nw", s: "se" }  // Fallbacks
+);
+
+export const HORSE_BUBBLY_DESCRIPTORS: Record<`horse.bubbly.${Direction}`, SpriteDescriptor> = 
+  createDirectionalDescriptors(
+    "horse.bubbly",
+    HORSE_BUBBLY_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    64
+  ) as Record<`horse.bubbly.${Direction}`, SpriteDescriptor>;
 
 export const HERO_FALLBACK_DESCRIPTORS: Record<`hero.enemy`, SpriteDescriptor> = {
   "hero.enemy": {
@@ -173,6 +193,7 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(RESOURCE_DESCRIPTORS),
   ...Object.values(HERO_DESCRIPTORS),
   ...Object.values(HERO_FALLBACK_DESCRIPTORS),
+  ...Object.values(HORSE_BUBBLY_DESCRIPTORS),
 ];
 
 export function castleKey(level: CastleLevel): `castle.${CastleLevel}` {
@@ -187,8 +208,12 @@ export function heroKey(_faction: Faction): `hero.${Faction}` {
   return `hero.${_faction}`;
 }
 
-export function heroDirectionKey(_faction: "player", direction: HeroDirection): `hero.player.${HeroDirection}` {
+export function heroDirectionKey(_faction: "player", direction: Direction): `hero.player.${Direction}` {
   return `hero.player.${direction}`;
+}
+
+export function horseBubblyKey(direction: Direction): `horse.bubbly.${Direction}` {
+  return `horse.bubbly.${direction}`;
 }
 
 export function buildingKey(

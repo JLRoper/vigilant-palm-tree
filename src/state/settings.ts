@@ -1,14 +1,19 @@
+export type HorseVariant = "hero" | "bubbly";
+
 export interface GameSettings {
   moveDurationMs: number;
+  horseVariant: HorseVariant;
 }
 
 const STORAGE_KEY = "heroesJs.settings";
 const MIN_MOVE_MS = 40;
 const MAX_MOVE_MS = 1000;
 const DEFAULT_MOVE_MS = 220;
+const DEFAULT_HORSE_VARIANT: HorseVariant = "bubbly";
 
 export const DEFAULT_SETTINGS: GameSettings = {
   moveDurationMs: DEFAULT_MOVE_MS,
+  horseVariant: DEFAULT_HORSE_VARIANT,
 };
 
 let current: GameSettings = loadFromStorage();
@@ -27,6 +32,7 @@ export function clampMoveDurationMs(ms: number): number {
 export function updateSettings(patch: Partial<GameSettings>): GameSettings {
   const next: GameSettings = {
     moveDurationMs: clampMoveDurationMs(patch.moveDurationMs ?? current.moveDurationMs),
+    horseVariant: patch.horseVariant ?? current.horseVariant,
   };
   current = next;
   try {
@@ -55,6 +61,9 @@ function loadFromStorage(): GameSettings {
     const parsed = JSON.parse(raw) as Partial<GameSettings>;
     return {
       moveDurationMs: clampMoveDurationMs(parsed.moveDurationMs ?? DEFAULT_MOVE_MS),
+      horseVariant: parsed.horseVariant === "hero" || parsed.horseVariant === "bubbly"
+        ? parsed.horseVariant
+        : DEFAULT_HORSE_VARIANT,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

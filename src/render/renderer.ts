@@ -1,13 +1,14 @@
 import { Axial, axialToPixel, hexCorners, pixelToAxial, HEX_SIZE } from "../core/hex";
 import { Camera } from "./camera";
 import { Hero } from "../entities/hero";
-import { drawHeroSprite, drawCastleSprite } from "./sprites";
+import { drawHeroSprite, drawHorseSprite, drawCastleSprite } from "./sprites";
 import { Castle } from "../entities/settlement";
 import { GameMap } from "../map/gameMap";
 import { TERRAIN_COLORS, TERRAIN_COST, Terrain } from "../map/terrain";
 import { drawResourceIcons } from "./overlays/resourceIcon";
 import { SpriteProvider } from "./assets";
 import { computeVision, isVisible } from "./fog";
+import { settings } from "../state/settings";
 
 export interface RenderOptions {
   selectedHeroId: string | null;
@@ -96,6 +97,8 @@ export class Renderer {
       ctx.stroke();
     }
 
+    const horseVariant = settings().horseVariant;
+
     for (const hero of heroes) {
       const canSee =
         hero.ownerId === opts.viewPlayerId || isVisible(visible, hero.tile.q, hero.tile.r);
@@ -105,16 +108,32 @@ export class Renderer {
       const phase = hero.moveProgress * Math.PI * 2;
       const bobY = hero.moving ? -Math.sin(phase) * bobAmplitude : 0;
       const scaleY = hero.moving ? 1.0 + 0.06 * Math.sin(phase) : 1.0;
-      drawHeroSprite(
-        ctx,
-        this.sprites,
-        hero.faction,
-        x + hero.pixelOffset.x,
-        y + hero.pixelOffset.y + bobY,
-        hero.facingDirection,
-        HEX_SIZE,
-        scaleY
-      );
+
+      if (horseVariant === "bubbly") {
+        // Draw bubbly horse sprite (no scale animation, just bob)
+        drawHorseSprite(
+          ctx,
+          this.sprites,
+          "bubbly",
+          x + hero.pixelOffset.x,
+          y + hero.pixelOffset.y + bobY,
+          hero.facingDirection,
+          HEX_SIZE
+        );
+      } else {
+        // Draw detailed knight-on-horse hero sprite with scale animation
+        drawHeroSprite(
+          ctx,
+          this.sprites,
+          hero.faction,
+          x + hero.pixelOffset.x,
+          y + hero.pixelOffset.y + bobY,
+          hero.facingDirection,
+          HEX_SIZE,
+          scaleY
+        );
+      }
+
       const color = opts.colorForOwner(hero.ownerId);
       ctx.fillStyle = color;
       ctx.beginPath();

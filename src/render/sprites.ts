@@ -1,9 +1,11 @@
-import { Faction, HeroDirection } from "../entities/hero";
+import { Faction, Direction } from "../entities/hero";
 import { CastleLevel } from "../entities/settlement";
 import { ResourceType } from "../map/resourceTiles";
 import { SpriteProvider } from "./assets";
-import { castleKey, heroDirectionKey, resourceKey } from "./assetDescriptors";
+import { castleKey, heroDirectionKey, resourceKey, horseBubblyKey } from "./assetDescriptors";
 import { drawKnightSprite, drawDemonSprite } from "./heroSprites";
+
+const warnedKeys = new Set<string>();
 
 export function drawCastleSprite(
   ctx: CanvasRenderingContext2D,
@@ -37,7 +39,7 @@ export function drawHeroSprite(
   faction: Faction,
   cx: number,
   cy: number,
-  direction: HeroDirection = "n",
+  direction: Direction = "n",
   hexSize: number = 32,
   scaleY: number = 1.0
 ): void {
@@ -62,6 +64,30 @@ export function drawHeroSprite(
   }
   if (needsScale) {
     ctx.restore();
+  }
+}
+
+export function drawHorseSprite(
+  ctx: CanvasRenderingContext2D,
+  provider: SpriteProvider,
+  variant: "bubbly",
+  cx: number,
+  cy: number,
+  direction: Direction = "n",
+  hexSize: number = 32
+): void {
+  if (variant === "bubbly") {
+    const key = horseBubblyKey(direction);
+    const r = provider.resolve(key);
+    if (!r) {
+      if (!warnedKeys.has(key)) {
+        console.warn(`drawHorseSprite: no descriptor for ${key}`);
+        warnedKeys.add(key);
+      }
+      return;
+    }
+    if (!r.ready) return;
+    drawWithDescriptor(ctx, r.drawable, r.descriptor, cx, cy, hexSize);
   }
 }
 

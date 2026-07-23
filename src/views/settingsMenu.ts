@@ -4,6 +4,7 @@ import {
   updateSettings,
   settingsBounds,
   type GameSettings,
+  type HorseVariant,
 } from "../state/settings";
 
 const SPEED_LABELS: Array<{ min: number; label: string }> = [
@@ -89,13 +90,59 @@ export function openSettingsMenu(parent: HTMLElement = document.body): void {
 
   content.appendChild(heroRow);
 
+  // Horse variant selector
+  const horseRow = document.createElement("div");
+  horseRow.style.display = "flex";
+  horseRow.style.flexDirection = "column";
+  horseRow.style.gap = "6px";
+
+  const horseLabel = document.createElement("span");
+  horseLabel.textContent = "Horse sprite style";
+  horseRow.appendChild(horseLabel);
+
+  const select = document.createElement("select");
+  select.style.width = "100%";
+  select.style.padding = "8px";
+  select.style.fontSize = "12px";
+  select.style.border = "1px solid #444";
+  select.style.borderRadius = "4px";
+  select.style.backgroundColor = "#1a1a1a";
+  select.style.color = "#eee";
+  select.style.accentColor = "#f77f00";
+
+  const bubblyOption = document.createElement("option");
+  bubblyOption.value = "bubbly";
+  bubblyOption.textContent = "Bubbly cartoon horse";
+  select.appendChild(bubblyOption);
+
+  const heroOption = document.createElement("option");
+  heroOption.value = "hero";
+  heroOption.textContent = "Detailed knight on horse";
+  select.appendChild(heroOption);
+
+  select.value = current.horseVariant;
+  horseRow.appendChild(select);
+
+  const horseHint = document.createElement("div");
+  horseHint.style.fontSize = "10px";
+  horseHint.style.opacity = "0.55";
+  horseHint.textContent = "Choose between cute bubbly pixel art or detailed isometric knight.";
+  horseRow.appendChild(horseHint);
+
+  select.addEventListener("change", () => {
+    updateSettings({ horseVariant: select.value as HorseVariant });
+  });
+
+  content.appendChild(horseRow);
+
   const resetBtn = document.createElement("button");
   resetBtn.textContent = "Reset to default";
   styleButton(resetBtn);
   resetBtn.style.alignSelf = "flex-end";
   resetBtn.addEventListener("click", () => {
-    const next = updateSettings({ moveDurationMs: bounds.default });
+    const next = updateSettings({ moveDurationMs: bounds.default, horseVariant: "bubbly" });
     refresh(next);
+    select.value = "bubbly";
   });
   content.appendChild(resetBtn);
 
