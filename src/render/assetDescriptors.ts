@@ -270,6 +270,90 @@ export const HORSE_BUBBLY_DESCRIPTORS: Record<`horse.bubbly.${Direction}`, Sprit
     64
   ) as Record<`horse.bubbly.${Direction}`, SpriteDescriptor>;
 
+// Load shadow knight sprites from horse/commander-3/ directory (cardinal directions + diagonal fallbacks)
+const HORSE_SHADOW_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-3/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_SHADOW_IMAGES = loadDirectionalSprites(
+  HORSE_SHADOW_GLOB,
+  /shadow-(n|e|s|w)\.png$/,
+  { ne: "n", nw: "n", se: "s", sw: "s" }
+);
+
+export const HORSE_SHADOW_DESCRIPTORS: Record<`horse.shadow.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "horse.shadow",
+    HORSE_SHADOW_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`horse.shadow.${Direction}`, SpriteDescriptor>;
+
+// Load paladin sprites from horse/commander-4/ directory (cardinal directions + diagonal fallbacks)
+const HORSE_PALADIN_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-4/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_PALADIN_IMAGES = loadDirectionalSprites(
+  HORSE_PALADIN_GLOB,
+  /paladin-(n|e|s|w)\.png$/,
+  { ne: "n", nw: "n", se: "s", sw: "s" }
+);
+
+export const HORSE_PALADIN_DESCRIPTORS: Record<`horse.paladin.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "horse.paladin",
+    HORSE_PALADIN_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`horse.paladin.${Direction}`, SpriteDescriptor>;
+
+// Load ranger sprites from horse/commander-5/ directory (cardinal directions + diagonal fallbacks)
+const HORSE_RANGER_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-5/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_RANGER_IMAGES = loadDirectionalSprites(
+  HORSE_RANGER_GLOB,
+  /ranger-(n|e|s|w)\.png$/,
+  { ne: "n", nw: "n", se: "s", sw: "s" }
+);
+
+export const HORSE_RANGER_DESCRIPTORS: Record<`horse.ranger.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "horse.ranger",
+    HORSE_RANGER_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`horse.ranger.${Direction}`, SpriteDescriptor>;
+
+// Load arcane spellrider sprites from horse/commander-6/ directory (cardinal directions + diagonal fallbacks)
+const HORSE_ARCANE_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-6/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_ARCANE_IMAGES = loadDirectionalSprites(
+  HORSE_ARCANE_GLOB,
+  /arcane-(n|e|s|w)\.png$/,
+  { ne: "n", nw: "n", se: "s", sw: "s" }
+);
+
+export const HORSE_ARCANE_DESCRIPTORS: Record<`horse.arcane.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "horse.arcane",
+    HORSE_ARCANE_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`horse.arcane.${Direction}`, SpriteDescriptor>;
+
 export const RESOURCE_CART_DESCRIPTORS: Record<`resource-cart.${ResourceType}`, SpriteDescriptor> =
   Object.fromEntries(
     RESOURCES.map((r) => [
@@ -356,6 +440,10 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(HERO_PLAYER_DESCRIPTORS),
   ...Object.values(HERO_DESCRIPTORS),
   ...Object.values(HORSE_BUBBLY_DESCRIPTORS),
+  ...Object.values(HORSE_SHADOW_DESCRIPTORS),
+  ...Object.values(HORSE_PALADIN_DESCRIPTORS),
+  ...Object.values(HORSE_RANGER_DESCRIPTORS),
+  ...Object.values(HORSE_ARCANE_DESCRIPTORS),
 ];
 
 export function castleKey(level: CastleLevel): `castle.${CastleLevel}` {
@@ -394,6 +482,22 @@ export function heroDirectionKey(_faction: "player", direction: Direction): `her
 
 export function horseBubblyKey(direction: Direction): `horse.bubbly.${Direction}` {
   return `horse.bubbly.${direction}`;
+}
+
+export function horseShadowKey(direction: Direction): `horse.shadow.${Direction}` {
+  return `horse.shadow.${direction}`;
+}
+
+export function horsePaladinKey(direction: Direction): `horse.paladin.${Direction}` {
+  return `horse.paladin.${direction}`;
+}
+
+export function horseRangerKey(direction: Direction): `horse.ranger.${Direction}` {
+  return `horse.ranger.${direction}`;
+}
+
+export function horseArcaneKey(direction: Direction): `horse.arcane.${Direction}` {
+  return `horse.arcane.${direction}`;
 }
 
 export function buildingKey(style: string, kind: string, level: number): SpriteKey {

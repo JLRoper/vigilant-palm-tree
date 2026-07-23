@@ -1,4 +1,4 @@
-export type HorseVariant = "hero" | "bubbly";
+export type HorseVariant = "hero" | "bubbly" | "shadow" | "paladin" | "ranger" | "arcane";
 
 export type ResourceStyle =
   | "rune-stone"
@@ -20,6 +20,9 @@ const STORAGE_KEY = "heroesJs.settings";
 const MIN_MOVE_MS = 40;
 const MAX_MOVE_MS = 1000;
 const DEFAULT_MOVE_MS = 220;
+const VALID_HORSE_VARIANTS: readonly HorseVariant[] = [
+  "hero", "bubbly", "shadow", "paladin", "ranger", "arcane",
+];
 const DEFAULT_HORSE_VARIANT: HorseVariant = "bubbly";
 
 const RESOURCE_STYLES: readonly ResourceStyle[] = [
@@ -56,7 +59,9 @@ export function clampResourceStyle(style: unknown): ResourceStyle {
 export function updateSettings(patch: Partial<GameSettings>): GameSettings {
   const next: GameSettings = {
     moveDurationMs: clampMoveDurationMs(patch.moveDurationMs ?? current.moveDurationMs),
-    horseVariant: patch.horseVariant ?? current.horseVariant,
+    horseVariant: (patch.horseVariant && (VALID_HORSE_VARIANTS as readonly string[]).includes(patch.horseVariant)
+    ? patch.horseVariant
+    : current.horseVariant) as HorseVariant,
     resourceStyle: clampResourceStyle(patch.resourceStyle ?? current.resourceStyle),
   };
   current = next;
@@ -88,8 +93,8 @@ function loadFromStorage(): GameSettings {
     const parsed = JSON.parse(raw) as Partial<GameSettings>;
     return {
       moveDurationMs: clampMoveDurationMs(parsed.moveDurationMs ?? DEFAULT_MOVE_MS),
-      horseVariant: parsed.horseVariant === "hero" || parsed.horseVariant === "bubbly"
-        ? parsed.horseVariant
+      horseVariant: (VALID_HORSE_VARIANTS as readonly string[]).includes(parsed.horseVariant as string)
+        ? (parsed.horseVariant as HorseVariant)
         : DEFAULT_HORSE_VARIANT,
       resourceStyle: clampResourceStyle(parsed.resourceStyle),
     };

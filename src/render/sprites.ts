@@ -3,10 +3,27 @@ import { CastleLevel } from "../entities/settlement";
 import { ResourceType } from "../map/resourceTiles";
 import { settings } from "../state/settings";
 import { SpriteProvider } from "./assets";
-import { castleKey, heroDirectionKey, resourceStyleKey, horseBubblyKey } from "./assetDescriptors";
+import {
+  castleKey,
+  heroDirectionKey,
+  resourceStyleKey,
+  horseBubblyKey,
+  horseShadowKey,
+  horsePaladinKey,
+  horseRangerKey,
+  horseArcaneKey,
+} from "./assetDescriptors";
 import { drawKnightSprite, drawDemonSprite } from "./heroSprites";
 
 const warnedKeys = new Set<string>();
+
+const HORSE_VARIANT_KEYS = {
+  bubbly: horseBubblyKey,
+  shadow: horseShadowKey,
+  paladin: horsePaladinKey,
+  ranger: horseRangerKey,
+  arcane: horseArcaneKey,
+} as const;
 
 export function drawCastleSprite(
   ctx: CanvasRenderingContext2D,
@@ -71,25 +88,23 @@ export function drawHeroSprite(
 export function drawHorseSprite(
   ctx: CanvasRenderingContext2D,
   provider: SpriteProvider,
-  variant: "bubbly",
+  variant: keyof typeof HORSE_VARIANT_KEYS,
   cx: number,
   cy: number,
   direction: Direction = "n",
   hexSize: number = 32
 ): void {
-  if (variant === "bubbly") {
-    const key = horseBubblyKey(direction);
-    const r = provider.resolve(key);
-    if (!r) {
-      if (!warnedKeys.has(key)) {
-        console.warn(`drawHorseSprite: no descriptor for ${key}`);
-        warnedKeys.add(key);
-      }
-      return;
+  const key = HORSE_VARIANT_KEYS[variant](direction);
+  const r = provider.resolve(key);
+  if (!r) {
+    if (!warnedKeys.has(key)) {
+      console.warn(`drawHorseSprite: no descriptor for ${key}`);
+      warnedKeys.add(key);
     }
-    if (!r.ready) return;
-    drawWithDescriptor(ctx, r.drawable, r.descriptor, cx, cy, hexSize);
+    return;
   }
+  if (!r.ready) return;
+  drawWithDescriptor(ctx, r.drawable, r.descriptor, cx, cy, hexSize);
 }
 
 function drawWithDescriptor(

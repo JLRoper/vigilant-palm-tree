@@ -112,18 +112,7 @@ export class Renderer {
       const bobY = hero.moving ? -Math.sin(phase) * bobAmplitude : 0;
       const scaleY = hero.moving ? 1.0 + 0.06 * Math.sin(phase) : 1.0;
 
-      if (horseVariant === "bubbly") {
-        // Draw bubbly horse sprite (no scale animation, just bob)
-        drawHorseSprite(
-          ctx,
-          this.sprites,
-          "bubbly",
-          x + hero.pixelOffset.x,
-          y + hero.pixelOffset.y + bobY,
-          hero.facingDirection,
-          HEX_SIZE
-        );
-      } else {
+      if (horseVariant === "hero") {
         // Draw detailed knight-on-horse hero sprite with scale animation
         drawHeroSprite(
           ctx,
@@ -134,6 +123,17 @@ export class Renderer {
           hero.facingDirection,
           HEX_SIZE,
           scaleY
+        );
+      } else {
+        // Draw image-based horse sprite (bubbly, shadow, paladin, ranger, arcane)
+        drawHorseSprite(
+          ctx,
+          this.sprites,
+          horseVariant,
+          x + hero.pixelOffset.x,
+          y + hero.pixelOffset.y + bobY,
+          hero.facingDirection,
+          HEX_SIZE
         );
       }
 

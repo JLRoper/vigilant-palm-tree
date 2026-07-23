@@ -223,13 +223,33 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   heroOption.textContent = "Detailed knight on horse";
   select.appendChild(heroOption);
 
+  const shadowOption = document.createElement("option");
+  shadowOption.value = "shadow";
+  shadowOption.textContent = "Shadow knight on horse";
+  select.appendChild(shadowOption);
+
+  const paladinOption = document.createElement("option");
+  paladinOption.value = "paladin";
+  paladinOption.textContent = "Golden paladin on horse";
+  select.appendChild(paladinOption);
+
+  const rangerOption = document.createElement("option");
+  rangerOption.value = "ranger";
+  rangerOption.textContent = "Forest ranger on horse";
+  select.appendChild(rangerOption);
+
+  const arcaneOption = document.createElement("option");
+  arcaneOption.value = "arcane";
+  arcaneOption.textContent = "Arcane spellrider";
+  select.appendChild(arcaneOption);
+
   select.value = current.horseVariant;
   horseRow.appendChild(select);
 
   const horseHint = document.createElement("div");
   horseHint.style.fontSize = "10px";
   horseHint.style.opacity = "0.55";
-  horseHint.textContent = "Choose between cute bubbly pixel art or detailed isometric knight.";
+  horseHint.textContent = "Choose between cute bubbly pixel art, detailed isometric knight, shadow knight, golden paladin, forest ranger, or arcane spellrider.";
   horseRow.appendChild(horseHint);
 
   select.addEventListener("change", () => {
