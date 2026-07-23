@@ -38,7 +38,7 @@ export function attachDebugApi(engine: {
     getState: () => engine.state.getTurnController()?.getState() ?? engine.state.getState(),
     getGameState: () => engine.state.getState(),
     getTurnController: () => engine.state.getTurnController(),
-    endTurn: () => void engine.handleEndTurn(),
+    endTurn: () => { void engine.handleEndTurn(); },
     setSelectedHero: (id: HeroId) => engine.state.getTurnController().selectHero(id),
 
     requestMove: (id: HeroId, q: number, r: number) => {

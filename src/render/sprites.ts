@@ -1,8 +1,9 @@
 import { Faction, Direction } from "../entities/hero";
 import { CastleLevel } from "../entities/settlement";
 import { ResourceType } from "../map/resourceTiles";
+import { settings } from "../state/settings";
 import { SpriteProvider } from "./assets";
-import { castleKey, heroDirectionKey, resourceKey, horseBubblyKey } from "./assetDescriptors";
+import { castleKey, heroDirectionKey, resourceStyleKey, horseBubblyKey } from "./assetDescriptors";
 import { drawKnightSprite, drawDemonSprite } from "./heroSprites";
 
 const warnedKeys = new Set<string>();
@@ -28,7 +29,7 @@ export function drawResourceIcon(
   cy: number,
   hexSize: number
 ): void {
-  const r = provider.resolve(resourceKey(resource));
+  const r = provider.resolve(resourceStyleKey(resource, settings().resourceStyle));
   if (!r || !r.ready) return;
   drawWithDescriptor(ctx, r.drawable, r.descriptor, cx, cy, hexSize);
 }
@@ -129,7 +130,7 @@ function drawWithDescriptor(
     y = cy - h / 2;
   } else {
     x = cx - w / 2;
-    y = cy + hexSize * 0.5 - h;
+    y = cy + hexSize * 0.5 - h + (desc.anchorOffsetY ?? 0);
   }
   ctx.drawImage(drawable, x, y, w, h);
 }

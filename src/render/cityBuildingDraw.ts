@@ -1,9 +1,10 @@
 ﻿import { cellToScreen, TILE_W, TILE_D } from "../core/cityGrid";
 import type { ResourceType } from "../map/resourceTiles";
+import { settings } from "../state/settings";
 import { RESOURCE_PAL, BUILDING_PALETTES, type BuildingPalette } from "./palettes";
 import type { GenerationStyle } from "./palettes";
 import type { SpriteProvider } from "./assets";
-import { resourceKey, buildingKey } from "./assetDescriptors";
+import { resourceStyleKey, buildingKey } from "./assetDescriptors";
 
 export type { GenerationStyle };
 export type { BuildingPalette } from "./palettes"; // re-exported so consumers get building types from one import (cityBuildingDraw), not two (cityBuildingDraw + palettes)
@@ -59,7 +60,7 @@ export function drawSpot(
   provider?: SpriteProvider,
 ): void {
   if (provider) {
-    const r = provider.resolve(resourceKey(resource));
+    const r = provider.resolve(resourceStyleKey(resource, settings().resourceStyle));
     if (r?.ready) {
       const w = Math.min(tw * 0.5, td * 2.0);
       const h = w / ((r.drawable as HTMLImageElement).naturalWidth ?? (r.drawable as HTMLCanvasElement).width) * ((r.drawable as HTMLImageElement).naturalHeight ?? (r.drawable as HTMLCanvasElement).height) || w;
