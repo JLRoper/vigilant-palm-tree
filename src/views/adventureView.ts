@@ -255,6 +255,20 @@ export class AdventureView {
       this.opts.onHudUpdate();
       return;
     }
+
+    const clickedSettlement = Object.values(this.state.settlements).find(
+      (s) => s.q === t.q && s.r === t.r
+    );
+    if (clickedSettlement) {
+      const tc = this.opts.getTurnController();
+      tc.selectSettlement(clickedSettlement.id);
+      this.opts.onStateChanged?.();
+      this.lastClickDebug.moved = false;
+      this.lastClickDebug.reason = "settlement_select";
+      this.opts.onHudUpdate();
+      return;
+    }
+
     const selectedId = this.state.selectedHeroId;
     if (!selectedId) {
       this.lastClickDebug.reason = "no selection";

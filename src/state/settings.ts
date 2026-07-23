@@ -1,4 +1,4 @@
-export type HorseVariant = "hero" | "bubbly" | "shadow" | "paladin" | "ranger" | "arcane";
+export type HorseVariant = "hero" | "bubbly" | "shadow" | "paladin" | "ranger" | "arcane" | "unicorn";
 
 export type ResourceStyle =
   | "rune-stone"
@@ -21,7 +21,7 @@ const MIN_MOVE_MS = 40;
 const MAX_MOVE_MS = 1000;
 const DEFAULT_MOVE_MS = 220;
 const VALID_HORSE_VARIANTS: readonly HorseVariant[] = [
-  "hero", "bubbly", "shadow", "paladin", "ranger", "arcane",
+  "hero", "bubbly", "shadow", "paladin", "ranger", "arcane", "unicorn",
 ];
 const DEFAULT_HORSE_VARIANT: HorseVariant = "bubbly";
 

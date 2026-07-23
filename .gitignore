@@ -7,4 +7,4 @@ dist/
 .vite/
 .kilo/
 .recycled/
-.tmp/
+tmp/

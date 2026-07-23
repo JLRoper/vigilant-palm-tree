@@ -144,7 +144,7 @@ export class GameEngine {
         this.fullFrame();
       },
     );
-    this.ui.initSettlementPanel(() => this.state);
+    this.ui.initSettlementInfo();
     this.ui.initCityView(() => this.state, this.view);
   }
 

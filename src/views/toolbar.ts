@@ -44,6 +44,8 @@ export interface ToolbarCallbacks {
   onLoad: (game: Game, tiles: Awaited<ReturnType<typeof api.getTiles>>) => void | Promise<void>;
   onSave: () => void | Promise<void>;
   onEndTurn: () => void | Promise<void>;
+  onHeroes?: () => void;
+  onSettlements?: () => void;
   onForget?: (id: number) => void;
   getMapInfo?: () => MapInfo | null;
 }
@@ -60,6 +62,8 @@ export class Toolbar {
   private loadBtn: HTMLButtonElement;
   private saveBtn: HTMLButtonElement;
   private endTurnBtn: HTMLButtonElement;
+  private heroesBtn: HTMLButtonElement;
+  private settlementsBtn: HTMLButtonElement;
   private calendarEl: HTMLElement;
   private calendarActiveEl: HTMLElement;
   private busy = false;
@@ -261,10 +265,24 @@ export class Toolbar {
       });
     });
 
+    this.heroesBtn = this.makeButton("Heroes", false);
+    this.heroesBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      this.opts.callbacks.onHeroes?.();
+    });
+
+    this.settlementsBtn = this.makeButton("Settlements", false);
+    this.settlementsBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      this.opts.callbacks.onSettlements?.();
+    });
+
     this.menu.appendContent(this.newBtn);
     this.menu.appendContent(this.loadBtn);
     this.menu.appendContent(this.saveBtn);
     this.menu.appendContent(this.endTurnBtn);
+    this.menu.appendContent(this.heroesBtn);
+    this.menu.appendContent(this.settlementsBtn);
     this.refresh();
   }
 
@@ -272,10 +290,13 @@ export class Toolbar {
     const ok = this.opts.state.backendOk();
     const active = this.opts.state.hasActiveGame();
     const endTurnOk = this.opts.state.canEndTurnNow();
+    const hasGameState = this.opts.state.getCalendar() !== null;
     this.setEnabled(this.newBtn, ok && !this.busy);
     this.setEnabled(this.loadBtn, ok && !this.busy);
     this.setEnabled(this.saveBtn, ok && active && !this.busy);
     this.setEnabled(this.endTurnBtn, endTurnOk && !this.busy);
+    this.setEnabled(this.heroesBtn, hasGameState && !this.busy);
+    this.setEnabled(this.settlementsBtn, hasGameState && !this.busy);
     this.refreshCalendar();
   }
 

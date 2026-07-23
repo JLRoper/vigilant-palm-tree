@@ -77,9 +77,15 @@ export class Renderer {
     if (path.length > 0 && heroes.length > 0) {
       const player = heroes.find((h) => h.ownerId === opts.viewPlayerId);
       if (player) {
-        const splitIdx = opts.pathReachableIdx ?? computeReachableSplit(path, this.map, player.movementRemaining);
         const pathPx = path.map((t) => axialToPixel(t.q, t.r));
-        const fullPx = opts.pathOrigin ? pathPx : [axialToPixel(player.tile.q, player.tile.r), ...pathPx];
+        const originPx = opts.pathOrigin
+          ? axialToPixel(opts.pathOrigin.q, opts.pathOrigin.r)
+          : axialToPixel(player.tile.q, player.tile.r);
+        const fullPx = [originPx, ...pathPx];
+        const splitIdx = Math.min(
+          opts.pathReachableIdx ?? computeReachableSplit(path, this.map, player.movementRemaining),
+          path.length
+        );
         drawPathSegment(ctx, fullPx, 0, splitIdx + 1, "rgba(255, 204, 0, 0.85)", 4, 6);
         if (splitIdx < path.length) {
           drawPathSegment(ctx, fullPx, splitIdx, pathPx.length, "rgba(255, 204, 0, 0.30)", 3, 4);

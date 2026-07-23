@@ -354,6 +354,27 @@ export const HORSE_ARCANE_DESCRIPTORS: Record<`horse.arcane.${Direction}`, Sprit
     512
   ) as Record<`horse.arcane.${Direction}`, SpriteDescriptor>;
 
+// Load dark unicorn sprites from horse/commander-7/ directory (cardinal directions + diagonal fallbacks)
+const HORSE_UNICORN_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-7/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_UNICORN_IMAGES = loadDirectionalSprites(
+  HORSE_UNICORN_GLOB,
+  /unicorn-(n|e|s|w)\.png$/,
+  { ne: "n", nw: "n", se: "s", sw: "s" }
+);
+
+export const HORSE_UNICORN_DESCRIPTORS: Record<`horse.unicorn.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "horse.unicorn",
+    HORSE_UNICORN_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`horse.unicorn.${Direction}`, SpriteDescriptor>;
+
 export const RESOURCE_CART_DESCRIPTORS: Record<`resource-cart.${ResourceType}`, SpriteDescriptor> =
   Object.fromEntries(
     RESOURCES.map((r) => [
@@ -444,6 +465,7 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(HORSE_PALADIN_DESCRIPTORS),
   ...Object.values(HORSE_RANGER_DESCRIPTORS),
   ...Object.values(HORSE_ARCANE_DESCRIPTORS),
+  ...Object.values(HORSE_UNICORN_DESCRIPTORS),
 ];
 
 export function castleKey(level: CastleLevel): `castle.${CastleLevel}` {
@@ -498,6 +520,10 @@ export function horseRangerKey(direction: Direction): `horse.ranger.${Direction}
 
 export function horseArcaneKey(direction: Direction): `horse.arcane.${Direction}` {
   return `horse.arcane.${direction}`;
+}
+
+export function horseUnicornKey(direction: Direction): `horse.unicorn.${Direction}` {
+  return `horse.unicorn.${direction}`;
 }
 
 export function buildingKey(style: string, kind: string, level: number): SpriteKey {

@@ -1,4 +1,4 @@
-import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource } from "./gameState";
+import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult } from "./gameState";
 import {
   selectHero as selectHeroReducer,
   selectSettlement as selectSettlementReducer,
@@ -17,6 +17,7 @@ import {
   transferGold as transferGoldReducer,
   tradeResources as tradeResourcesReducer,
   setAutoTrade as setAutoTradeReducer,
+  recruitHero as recruitHeroReducer,
 } from "./gameState";
 
 export interface TurnControllerHooks {
@@ -186,6 +187,18 @@ export class TurnController {
       payload: { settlementId, autoTrade },
     });
     return true;
+  }
+
+  recruitHero(heroName: string, settlementId: SettlementId): RecruitHeroResult {
+    const result = recruitHeroReducer(this.state, this.state.activePlayerId, heroName, settlementId);
+    if (result.hero) {
+      this.state = result.state;
+      this.hooks.logEvent({
+        type: "hero_recruited",
+        payload: { heroId: result.hero.id, name: heroName, playerId: this.state.activePlayerId },
+      });
+    }
+    return result;
   }
 
   async resolveCurrentBattle(): Promise<void> {

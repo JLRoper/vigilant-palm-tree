@@ -243,6 +243,11 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   arcaneOption.textContent = "Arcane spellrider";
   select.appendChild(arcaneOption);
 
+  const unicornOption = document.createElement("option");
+  unicornOption.value = "unicorn";
+  unicornOption.textContent = "Dark unicorn";
+  select.appendChild(unicornOption);
+
   select.value = current.horseVariant;
   horseRow.appendChild(select);
 

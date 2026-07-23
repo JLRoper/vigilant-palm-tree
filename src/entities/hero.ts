@@ -57,6 +57,7 @@ export class Hero {
   pixelOffset = { x: 0, y: 0 };
   faction: Faction;
   id: string;
+  name: string;
   ownerId: PlayerId;
   movementRemaining: number;
   trail: Axial[];
@@ -67,6 +68,7 @@ export class Hero {
 
   constructor(
     id: string,
+    name: string,
     q: number,
     r: number,
     faction: Faction,
@@ -78,6 +80,7 @@ export class Hero {
     stacks?: UnitStack[]
   ) {
     this.id = id;
+    this.name = name;
     this.tile = { q, r };
     this.fromTile = { q, r };
     this.toTile = { q, r };
@@ -175,6 +178,7 @@ export class Hero {
   toGameState(): HeroState {
     return {
       id: this.id as HeroId,
+      name: this.name,
       ownerId: this.ownerId,
       q: this.tile.q,
       r: this.tile.r,
@@ -193,6 +197,7 @@ export class Hero {
     const faction: Faction = mapFactionFromOwner(s.ownerId);
     return new Hero(
       s.id,
+      s.name,
       s.q,
       s.r,
       faction,
