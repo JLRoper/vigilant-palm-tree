@@ -12,8 +12,8 @@ async function main() {
   app.use(express.json());
   app.use("/api", router);
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`>> api listening on http://0.0.0.0:${PORT} (all interfaces)`);
+  app.listen(PORT, "127.0.0.1", () => {
+    console.log(`>> api listening on http://127.0.0.1:${PORT}`);
   });
 }
 
