@@ -101,7 +101,20 @@ export class Renderer {
         hero.ownerId === opts.viewPlayerId || isVisible(visible, hero.tile.q, hero.tile.r);
       if (!canSee) continue;
       const { x, y } = axialToPixel(hero.tile.q, hero.tile.r);
-      drawHeroSprite(ctx, this.sprites, hero.faction, x + hero.pixelOffset.x, y + hero.pixelOffset.y);
+      const bobAmplitude = 6;
+      const phase = hero.moveProgress * Math.PI * 2;
+      const bobY = hero.moving ? -Math.sin(phase) * bobAmplitude : 0;
+      const scaleY = hero.moving ? 1.0 + 0.06 * Math.sin(phase) : 1.0;
+      drawHeroSprite(
+        ctx,
+        this.sprites,
+        hero.faction,
+        x + hero.pixelOffset.x,
+        y + hero.pixelOffset.y + bobY,
+        hero.facingDirection,
+        HEX_SIZE,
+        scaleY
+      );
       const color = opts.colorForOwner(hero.ownerId);
       ctx.fillStyle = color;
       ctx.beginPath();

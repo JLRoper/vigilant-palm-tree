@@ -6,7 +6,15 @@ import resourceWood from "../resources/resource-wood.png?url";
 import resourceStone from "../resources/resource-stone.png?url";
 import resourceIron from "../resources/resource-iron.png?url";
 import resourceArcane from "../resources/resource-arcane.png?url";
-import { Faction } from "../entities/hero";
+import heroPlayerN from "../resources/units/hero-player-n.png?url";
+import heroPlayerNE from "../resources/units/hero-player-ne.png?url";
+import heroPlayerE from "../resources/units/hero-player-e.png?url";
+import heroPlayerSE from "../resources/units/hero-player-se.png?url";
+import heroPlayerS from "../resources/units/hero-player-s.png?url";
+import heroPlayerSW from "../resources/units/hero-player-sw.png?url";
+import heroPlayerW from "../resources/units/hero-player-w.png?url";
+import heroPlayerNW from "../resources/units/hero-player-nw.png?url";
+import { Faction, HeroDirection } from "../entities/hero";
 import { CastleLevel } from "../entities/settlement";
 import { ResourceType, RESOURCES } from "../map/resourceTiles";
 
@@ -14,6 +22,7 @@ export type SpriteKey =
   | `castle.${CastleLevel}`
   | `resource.${ResourceType}`
   | `hero.${Faction}`
+  | `hero.player.${HeroDirection}`
   | `building.${string}.${string}.${number}`;
 
 export type Anchor = "bottom" | "center";
@@ -79,14 +88,77 @@ export const RESOURCE_DESCRIPTORS: Record<`resource.${ResourceType}`, SpriteDesc
     ])
   ) as Record<`resource.${ResourceType}`, SpriteDescriptor>;
 
-export const HERO_DESCRIPTORS: Record<`hero.${Faction}`, SpriteDescriptor> = {
-  "hero.player": {
-    key: "hero.player",
-    url: null,
-    anchor: "center",
-    sizing: { kind: "abs", size: 18 },
-    naturalSize: 18,
+const HERO_PLAYER_IMAGES: Record<HeroDirection, string> = {
+  n: heroPlayerN,
+  ne: heroPlayerNE,
+  e: heroPlayerE,
+  se: heroPlayerSE,
+  s: heroPlayerS,
+  sw: heroPlayerSW,
+  w: heroPlayerW,
+  nw: heroPlayerNW,
+};
+
+export const HERO_DESCRIPTORS: Record<`hero.player.${HeroDirection}`, SpriteDescriptor> = {
+  "hero.player.n": {
+    key: "hero.player.n",
+    url: HERO_PLAYER_IMAGES["n"],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
+    naturalSize: 512,
   },
+  "hero.player.ne": {
+    key: "hero.player.ne",
+    url: HERO_PLAYER_IMAGES["ne"],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
+    naturalSize: 512,
+  },
+  "hero.player.e": {
+    key: "hero.player.e",
+    url: HERO_PLAYER_IMAGES["e"],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
+    naturalSize: 512,
+  },
+  "hero.player.se": {
+    key: "hero.player.se",
+    url: HERO_PLAYER_IMAGES["se"],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
+    naturalSize: 512,
+  },
+  "hero.player.s": {
+    key: "hero.player.s",
+    url: HERO_PLAYER_IMAGES["s"],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
+    naturalSize: 512,
+  },
+  "hero.player.sw": {
+    key: "hero.player.sw",
+    url: HERO_PLAYER_IMAGES["sw"],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
+    naturalSize: 512,
+  },
+  "hero.player.w": {
+    key: "hero.player.w",
+    url: HERO_PLAYER_IMAGES["w"],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
+    naturalSize: 512,
+  },
+  "hero.player.nw": {
+    key: "hero.player.nw",
+    url: HERO_PLAYER_IMAGES["nw"],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.8 },
+    naturalSize: 512,
+  },
+};
+
+export const HERO_FALLBACK_DESCRIPTORS: Record<`hero.enemy`, SpriteDescriptor> = {
   "hero.enemy": {
     key: "hero.enemy",
     url: null,
@@ -100,6 +172,7 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(CASTLE_DESCRIPTORS),
   ...Object.values(RESOURCE_DESCRIPTORS),
   ...Object.values(HERO_DESCRIPTORS),
+  ...Object.values(HERO_FALLBACK_DESCRIPTORS),
 ];
 
 export function castleKey(level: CastleLevel): `castle.${CastleLevel}` {
@@ -110,8 +183,12 @@ export function resourceKey(type: ResourceType): `resource.${ResourceType}` {
   return `resource.${type}`;
 }
 
-export function heroKey(faction: Faction): `hero.${Faction}` {
-  return `hero.${faction}`;
+export function heroKey(_faction: Faction): `hero.${Faction}` {
+  return `hero.${_faction}`;
+}
+
+export function heroDirectionKey(_faction: "player", direction: HeroDirection): `hero.player.${HeroDirection}` {
+  return `hero.player.${direction}`;
 }
 
 export function buildingKey(

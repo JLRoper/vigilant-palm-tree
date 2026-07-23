@@ -1,8 +1,8 @@
-import { Faction } from "../entities/hero";
+import { Faction, HeroDirection } from "../entities/hero";
 import { CastleLevel } from "../entities/settlement";
 import { ResourceType } from "../map/resourceTiles";
 import { SpriteProvider } from "./assets";
-import { castleKey, heroKey, resourceKey } from "./assetDescriptors";
+import { castleKey, heroDirectionKey, resourceKey } from "./assetDescriptors";
 import { drawKnightSprite, drawDemonSprite } from "./heroSprites";
 
 export function drawCastleSprite(
@@ -36,11 +36,33 @@ export function drawHeroSprite(
   provider: SpriteProvider,
   faction: Faction,
   cx: number,
-  cy: number
+  cy: number,
+  direction: HeroDirection = "n",
+  hexSize: number = 32,
+  scaleY: number = 1.0
 ): void {
-  const r = provider.resolve(heroKey(faction));
-  if (!r || !r.ready) return;
-  drawWithDescriptor(ctx, r.drawable, r.descriptor, cx, cy, 0);
+  const needsScale = Math.abs(scaleY - 1.0) > 1e-6;
+  if (needsScale) {
+    const anchorY = cy + hexSize * 0.5;
+    ctx.save();
+    ctx.translate(cx, anchorY);
+    ctx.scale(1, scaleY);
+    ctx.translate(-cx, -anchorY);
+  }
+  if (faction === "player") {
+    const r = provider.resolve(heroDirectionKey("player", direction));
+    if (r && r.ready) {
+      drawWithDescriptor(ctx, r.drawable, r.descriptor, cx, cy, hexSize);
+    }
+  } else {
+    const r = provider.resolve("hero.enemy" as const);
+    if (r && r.ready) {
+      drawWithDescriptor(ctx, r.drawable, r.descriptor, cx, cy, hexSize);
+    }
+  }
+  if (needsScale) {
+    ctx.restore();
+  }
 }
 
 function drawWithDescriptor(

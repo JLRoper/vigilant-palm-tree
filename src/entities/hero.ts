@@ -5,6 +5,21 @@ import { settings } from "../state/settings";
 
 export type Faction = "player" | "enemy";
 
+export type HeroDirection = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+
+export function directionFromAngle(angle: number): HeroDirection {
+  const dirs: HeroDirection[] = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
+  const idx = Math.round(((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / (Math.PI / 4)) % 8;
+  return dirs[idx];
+}
+
+export function directionFromDelta(dq: number, dr: number): HeroDirection {
+  const sq = dq * Math.sqrt(3);
+  const sr = dr * 1.5;
+  const angle = Math.atan2(sr, sq);
+  return directionFromAngle(angle);
+}
+
 export class Hero {
   tile: Axial;
   fromTile: Axial;
@@ -22,6 +37,7 @@ export class Hero {
   gold: number;
   troops: number;
   stacks: UnitStack[];
+  facingDirection: HeroDirection = "n";
 
   constructor(
     id: string,
@@ -73,6 +89,10 @@ export class Hero {
     this.moveProgress = 0;
     this.moving = true;
     this.pixelOffset = { x: 0, y: 0 };
+    this.facingDirection = directionFromDelta(
+      this.toTile.q - this.fromTile.q,
+      this.toTile.r - this.fromTile.r
+    );
   }
 
   update(dtMs: number) {
