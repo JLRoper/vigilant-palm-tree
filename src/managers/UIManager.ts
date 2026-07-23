@@ -14,13 +14,15 @@ import { SessionManager, type SaveStatus } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
 import type { WarehouseResource } from "../state/gameState";
+import type { MapInfo } from "../views/settingsMenu";
 
 type ToolbarCallbacks = {
-  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number }) => void;
+  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" }) => void;
   onLoad: (loaded: import("../io/api").Game, tiles: import("../io/api").TileRow[]) => void;
   onSave: () => void;
   onEndTurn: () => void;
   onForget: (id: number) => void;
+  getMapInfo?: () => MapInfo | null;
 };
 
 export class UIManager {
@@ -63,6 +65,7 @@ export class UIManager {
           session.forget(id);
           callbacks.onForget(id);
         },
+        getMapInfo: callbacks.getMapInfo,
       },
     });
   }

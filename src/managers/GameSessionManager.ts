@@ -2,7 +2,7 @@ import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { ViewManager } from "./ViewManager";
 import { UIManager } from "./UIManager";
-import { GameMap } from "../map/gameMap";
+import { GameMap, type MapSize, MAP_SIZES } from "../map/gameMap";
 import { playerWealth } from "../economy/income";
 import { markSaved } from "../state/gameState";
 import { hydrateGameState, playerHeroId } from "../game/initState";
@@ -25,9 +25,33 @@ export class GameSessionManager {
     private setGameMap: (m: GameMap) => void,
   ) {}
 
+  private currentGameName: string | null = null;
+  private currentGameSeed: number = MAP_SEED;
+  private currentMapSize: MapSize = "small";
+
+  getGameName(): string | null { return this.currentGameName; }
+  getGameSeed(): number { return this.currentGameSeed; }
+  getMapSize(): MapSize { return this.currentMapSize; }
+
+  private syncMetadata(name: string, seed: number, mapSize: MapSize): void {
+    this.currentGameName = name;
+    this.currentGameSeed = seed;
+    this.currentMapSize = mapSize;
+  }
+
+  private inferMapSize(map?: GameMap): MapSize {
+    const width = map?.width ?? this.getGameMap().width;
+    const height = map?.height ?? this.getGameMap().height;
+    if (width === MAP_SIZES.large.width && height === MAP_SIZES.large.height) return "large";
+    if (width === MAP_SIZES.medium.width && height === MAP_SIZES.medium.height) return "medium";
+    return "small";
+  }
+
   async loadGame(loaded: Game, tiles: TileRow[]): Promise<void> {
     this.session.adopt(loaded);
     const map = GameMap.fromTiles(tiles);
+    const inferredSize = this.inferMapSize(map);
+    this.syncMetadata(loaded.name, loaded.seed, inferredSize);
     this.setGameMap(map);
     this.state.setGameMap(map);
     const hydrated = hydrateGameState(loaded);
@@ -64,7 +88,7 @@ export class GameSessionManager {
     }
   }
 
-  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number }): Promise<void> {
+  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" }): Promise<void> {
     const effectiveCastleSeed =
       typeof opts.castleSeed === "number" && Number.isFinite(opts.castleSeed)
         ? opts.castleSeed
@@ -83,7 +107,7 @@ export class GameSessionManager {
     const enemyPositions = aiCastles.length
       ? aiCastles.map((c) => ({ q: c.tile.q, r: c.tile.r }))
       : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
-    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions);
+    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize);
     const gameTiles = await this.session.getTiles(created.name);
     await this.loadGame(created, gameTiles);
     void this.session.logEvent(created.name, "new_game", {
@@ -95,6 +119,7 @@ export class GameSessionManager {
 
   async createFreshStarter(): Promise<void> {
     try {
+      this.syncMetadata("starter", MAP_SEED, "small");
       const castleSeed = defaultCastleSeedFromMapSeed(MAP_SEED);
       const castles = generateCastles(this.getGameMap(), {
         castleSeed,
@@ -112,7 +137,7 @@ export class GameSessionManager {
           ]
         : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
       const name = `starter-${Date.now().toString(36)}`;
-      const created = await this.session.createGame(name, MAP_SEED, heroQ, heroR, enemyPositions);
+      const created = await this.session.createGame(name, MAP_SEED, heroQ, heroR, enemyPositions, "small");
       const tiles = await this.session.getTiles(created.name);
       await this.loadGame(created, tiles);
       void this.session.logEvent(created.name, "session_start", {

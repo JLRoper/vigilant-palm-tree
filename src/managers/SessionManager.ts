@@ -94,8 +94,8 @@ export class SessionManager {
     }
   }
 
-  async createGame(name: string, seed: number, heroQ: number, heroR: number, enemyPositions: { q: number; r: number }[]): Promise<Game> {
-    return await api.createGame(name, seed, heroQ, heroR, enemyPositions);
+  async createGame(name: string, seed: number, heroQ: number, heroR: number, enemyPositions: { q: number; r: number }[], mapSize?: "small" | "medium" | "large"): Promise<Game> {
+    return await api.createGame(name, seed, heroQ, heroR, enemyPositions, mapSize);
   }
 
   async getTiles(name: string): Promise<TileRow[]> {

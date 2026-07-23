@@ -119,6 +119,7 @@ export class GameEngine {
       onSave: () => void this.sessions.handleManualSave().then(() => this.fullFrame()),
       onEndTurn: () => void this.actions.handleEndTurn().then(() => this.fullFrame()),
       onForget: (_id) => this.ui.getToolbar()?.refresh(),
+      getMapInfo: () => this.getMapInfo(),
     });
     this.ui.initHeroMenu(
       (heroId, settlementId, direction) => {
@@ -165,6 +166,31 @@ export class GameEngine {
       view: { camera: this.view.camera, view: this.view.view },
       session: this.session,
     });
+  }
+
+  // =========================================================================
+  // STATE INFO
+  // =========================================================================
+
+  private getMapInfo(): import("../views/settingsMenu").MapInfo | null {
+    const gs = this.state.getState();
+    if (!gs) return null;
+    const hero = this.state.getHero("pa-hero");
+    const playerName = gs.players.find((p) => p.id === gs.activePlayerId)?.name ?? "—";
+    return {
+      name: this.sessions.getGameName() ?? this.session.getActiveGameName() ?? "—",
+      seed: this.sessions.getGameSeed(),
+      mapSize: this.sessions.getMapSize(),
+      width: this.gameMap.width,
+      height: this.gameMap.height,
+      castleSeed: gs.castleSeed,
+      castleCount: gs.castleCount,
+      heroQ: hero?.tile.q ?? gs.heroes["pa-hero"]?.q ?? 0,
+      heroR: hero?.tile.r ?? gs.heroes["pa-hero"]?.r ?? 0,
+      round: gs.round,
+      day: gs.day,
+      activePlayerName: playerName,
+    };
   }
 
   // =========================================================================

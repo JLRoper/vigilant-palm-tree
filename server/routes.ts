@@ -1,6 +1,6 @@
 ﻿import { Router } from "express";
 import { pool, withTransaction } from "./db";
-import { GameMap } from "../src/map/gameMap";
+import { GameMap, type MapSize } from "../src/map/gameMap";
 import { mulberry32 } from "../src/core/rng";
 import { makeInitialStatePayload } from "../src/game/initState";
 import {  tradeResources as tradeResourcesReducer,  applyEndOfTurnDetailed,  WAREHOUSE_RESOURCES,  type AutoTradeTransfer,} from "../src/state/gameState";
@@ -39,20 +39,22 @@ type FullGameRow = {
   players: Player[];
   heroes: Record<string, HeroState>;
   settlements: Record<string, SettlementState>;
+  map_size: string;
   created_at: string;
   updated_at: string;
 };
 
 const GAME_COLUMNS =
-  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, created_at, updated_at";
+  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, created_at, updated_at";
 
 async function generateAndInsertTiles(
   client: PoolClient,
   gameId: number,
   seed: number,
-  onConflict: "upsert" | "skip"
+  onConflict: "upsert" | "skip",
+  mapSize?: MapSize,
 ): Promise<void> {
-  const map = new GameMap(seed);
+  const map = new GameMap(seed, mapSize);
   const values: string[] = [];
   const params: unknown[] = [];
   let i = 0;
@@ -139,22 +141,26 @@ router.post("/games", async (req, res) => {
       hero_q = 2,
       hero_r = 2,
       enemy_positions = [],
+      mapSize,
     } = req.body ?? {};
     if (typeof name !== "string" || !name) {
       res.status(400).json({ error: "name required" });
       return;
     }
-    console.log(`[api] POST /games name=${name} hero=(${hero_q},${hero_r})`);
-    const map = new GameMap(seed);
+    const storedMapSize = ["small", "medium", "large"].includes(mapSize) ? mapSize : "small";
+    console.log(`[api] POST /games name=${name} hero=(${hero_q},${hero_r}) mapSize=${storedMapSize}`);
+    const map = new GameMap(seed, storedMapSize as MapSize);
     const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179));
     const game = await withTransaction(async (client) => {
       const r = await client.query<FullGameRow>(
         `INSERT INTO games (
             name, seed, hero_q, hero_r, enemy_positions,
-            round, day, active_player_id, players, heroes, settlements
+            round, day, active_player_id, players, heroes, settlements,
+            map_size
           ) VALUES (
             $1, $2, $3, $4, $5::jsonb,
-            $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb
+            $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb,
+            $12
           )
           ON CONFLICT (name) DO UPDATE
             SET seed = EXCLUDED.seed,
@@ -167,6 +173,7 @@ router.post("/games", async (req, res) => {
                 players = EXCLUDED.players,
                 heroes = EXCLUDED.heroes,
                 settlements = EXCLUDED.settlements,
+                map_size = EXCLUDED.map_size,
                 updated_at = now()
           RETURNING ${GAME_COLUMNS}`,
         [
@@ -181,10 +188,11 @@ router.post("/games", async (req, res) => {
           JSON.stringify(initial.players),
           JSON.stringify(initial.heroes),
           JSON.stringify(initial.settlements),
+          storedMapSize,
         ]
       );
       const row = r.rows[0];
-      await generateAndInsertTiles(client, row.id, row.seed, "upsert");
+      await generateAndInsertTiles(client, row.id, row.seed, "upsert", storedMapSize as MapSize);
       return row;
     });
     res.status(201).json(game);
@@ -370,8 +378,8 @@ router.get("/games/:name/events", async (req, res) => {
 });
 
 router.get("/games/:name/tiles", async (req, res) => {
-  const game = await pool.query<{ id: number; seed: number }>(
-    "SELECT id, seed FROM games WHERE name = $1",
+  const game = await pool.query<{ id: number; seed: number; map_size: string }>(
+    "SELECT id, seed, map_size FROM games WHERE name = $1",
     [req.params.name]
   );
   if (game.rowCount === 0) {
@@ -384,8 +392,11 @@ router.get("/games/:name/tiles", async (req, res) => {
     [gameRow.id]
   );
   if (Number(count.rows[0].count) === 0) {
+    const fallbackSize: MapSize = ["small", "medium", "large"].includes(gameRow.map_size)
+      ? (gameRow.map_size as MapSize)
+      : "small";
     await withTransaction((client) =>
-      generateAndInsertTiles(client, gameRow.id, gameRow.seed, "skip")
+      generateAndInsertTiles(client, gameRow.id, gameRow.seed, "skip", fallbackSize)
     );
   }
   const tiles = await pool.query<TileRow>(

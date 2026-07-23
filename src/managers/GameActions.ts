@@ -17,6 +17,7 @@ export class GameActions {
   /** Re-sync visuals from TurnController and trigger battle if needed. */
   syncFromController(onChanged: () => void): void {
     this.state.syncHeroVisualsToState();
+    this.state.rebuildSettlementsFromState();
     onChanged();
   }
 

@@ -25,6 +25,9 @@ export class ViewManager {
     hudEl: HTMLElement,
     opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw">,
   ): void {
+    if (this.view) {
+      this.view.detach();
+    }
     this.view = new AdventureView({
       canvas: this.canvas,
       hud: hudEl,
@@ -38,6 +41,7 @@ export class ViewManager {
 
   updateMap(map: GameMap): void {
     if (this.renderer) this.renderer.map = map;
+    if (this.view) this.view.setMap(map);
   }
 
   draw(
@@ -48,7 +52,11 @@ export class ViewManager {
     opts: RenderOptions,
   ): void {
     if (!this.renderer) return;
-    this.renderer.draw(hover, heroes, path, castles, opts);
+    this.renderer.draw(hover, heroes, path, castles, {
+      ...opts,
+      pathReachableIdx: this.view?.getReachableIdx() ?? undefined,
+      pathOrigin: this.view?.getWaypoint() ?? undefined,
+    });
   }
 
   drawCityOverlay(cityView: CityView | undefined): void {
@@ -72,7 +80,7 @@ export class ViewManager {
   }
 
   getPath(): Axial[] {
-    return this.view?.path ?? [];
+    return this.view?.getPath() ?? [];
   }
 
   getLastClickDebug(): unknown {

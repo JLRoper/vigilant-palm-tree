@@ -15,6 +15,10 @@ export interface RenderOptions {
   selectedSettlementId: string | null;
   colorForOwner: (ownerId: number | null) => string;
   viewPlayerId: number;
+  /** If provided, overrides the reachable split computed from movementRemaining. Use this to keep the proposed yellow route stable while a hero animates a committed move. */
+  pathReachableIdx?: number;
+  /** If provided, anchors the yellow proposed route to this tile instead of the hero's current (moving) tile. */
+  pathOrigin?: Axial;
 }
 
 const FOG_FILL = "rgba(8, 10, 16, 0.78)";
@@ -73,10 +77,9 @@ export class Renderer {
     if (path.length > 0 && heroes.length > 0) {
       const player = heroes.find((h) => h.ownerId === opts.viewPlayerId);
       if (player) {
-        const splitIdx = computeReachableSplit(path, this.map, player.movementRemaining);
-        const heroPx = axialToPixel(player.tile.q, player.tile.r);
+        const splitIdx = opts.pathReachableIdx ?? computeReachableSplit(path, this.map, player.movementRemaining);
         const pathPx = path.map((t) => axialToPixel(t.q, t.r));
-        const fullPx = [heroPx, ...pathPx];
+        const fullPx = opts.pathOrigin ? pathPx : [axialToPixel(player.tile.q, player.tile.r), ...pathPx];
         drawPathSegment(ctx, fullPx, 0, splitIdx + 1, "rgba(255, 204, 0, 0.85)", 4, 6);
         if (splitIdx < path.length) {
           drawPathSegment(ctx, fullPx, splitIdx, pathPx.length, "rgba(255, 204, 0, 0.30)", 3, 4);

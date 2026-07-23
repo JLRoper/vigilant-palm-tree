@@ -48,6 +48,10 @@ export class TurnController {
   selectHero(heroId: HeroId): void {
     if (this.state.phase.kind !== "PLAYER_TURN") return;
     this.state = selectHeroReducer(this.state, heroId);
+    const hero = this.state.heroes[heroId];
+    if (hero) {
+      this.tryCaptureAt(heroId, hero.q, hero.r);
+    }
   }
 
   selectSettlement(settlementId: SettlementId): void {

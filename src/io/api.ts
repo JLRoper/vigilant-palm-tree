@@ -32,6 +32,7 @@ export type Game = {
   round: number;
   day: number;
   active_player_id: number;
+  map_size?: "small" | "medium" | "large";
   players: Player[];
   heroes: Record<string, HeroState>;
   settlements: Record<string, SettlementState>;
@@ -139,13 +140,16 @@ export const api = {
     seed: number,
     hero_q: number,
     hero_r: number,
-    enemy_positions: EnemyPos[] = []
-  ) =>
-    fetchWithTimeout(`${BASE}/games`, {
+    enemy_positions: EnemyPos[] = [],
+    mapSize?: "small" | "medium" | "large",
+  ) => {
+    console.log("[api] createGame mapSize:", mapSize);
+    return fetchWithTimeout(`${BASE}/games`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions }),
-    }).then((r) => json<Game>(r)),
+      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize }),
+    }).then((r) => json<Game>(r));
+  },
   patchGame: ((name: string, patch: GamePatch) =>
     patchGameImpl(name, patch)) as {
     (name: string, patch: SpendMovementAction): Promise<HeroState>;
