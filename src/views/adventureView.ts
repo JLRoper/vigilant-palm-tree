@@ -3,10 +3,11 @@ import { Camera } from "../render/camera";
 import { GameMap } from "../map/gameMap";
 import { Renderer } from "../render/renderer";
 import { Hero } from "../entities/hero";
-import { findPath } from "../map/pathfinding";
+import { findPath, computePathCost, NEIGHBOR_DIRS } from "../map/pathfinding";
 import type { GameState, HeroId } from "../state/gameState";
 import type { TurnController } from "../state/turnController";
-import { TERRAIN_COST } from "../map/terrain";
+import { computeReachableSplit } from "../render/overlays/pathOverlay";
+import type { PathPreviewLock } from "../managers/GameStateManager";
 
 export const MAP_SEED = 42;
 
@@ -30,6 +31,8 @@ export interface AdventureViewOptions {
   onPathChanged: (path: Axial[]) => void;
   onHudUpdate: () => void;
   onRedraw: () => void;
+  getPathPreviewLock: () => PathPreviewLock | null;
+  setPathPreviewLock: (lock: PathPreviewLock | null) => void;
 }
 
 const DRAG_MOVE_THRESHOLD = 4;
@@ -63,9 +66,6 @@ export class AdventureView {
   private pendingPointer: { x: number; y: number } | null = null;
   private pointerFrameRequested = false;
 
-  /** When set, the committed destination tile pins the start of the proposed yellow route while the hero is still moving. The rest of the route follows hover as normal. */
-  private lockedMove: { heroId: HeroId; waypoint: Axial; reachableIdx: number } | null = null;
-
   private readonly boundMouseUp = () => this.onMouseUp();
   private readonly boundMouseMove = (e: MouseEvent) => this.onMouseMove(e);
   private readonly boundMouseDown = (e: MouseEvent) => this.onMouseDown(e);
@@ -89,34 +89,7 @@ export class AdventureView {
   }
 
   getPath(): Axial[] {
-    this.maybeClearLock();
     return this.path;
-  }
-
-  getReachableIdx(): number | null {
-    this.maybeClearLock();
-    return this.lockedMove?.reachableIdx ?? null;
-  }
-
-  getWaypoint(): Axial | null {
-    this.maybeClearLock();
-    return this.lockedMove?.waypoint ?? null;
-  }
-
-  private maybeClearLock(): void {
-    if (!this.lockedMove) return;
-    const hero = this.opts.heroes()[this.lockedMove.heroId];
-    if (
-      this.state.selectedHeroId !== this.lockedMove.heroId ||
-      !hero ||
-      !hero.moving
-    ) {
-      this.lockedMove = null;
-    }
-  }
-
-  private freezeMove(heroId: HeroId, waypoint: Axial, reachableIdx: number): void {
-    this.lockedMove = { heroId, waypoint, reachableIdx };
   }
 
   detach(): void {
@@ -199,12 +172,12 @@ export class AdventureView {
       return;
     }
 
-    this.maybeClearLock();
-
-    const start: Axial = this.lockedMove
-      ? this.lockedMove.waypoint
-      : this.state.selectedHeroId && this.state.heroes[this.state.selectedHeroId]
-      ? { q: this.state.heroes[this.state.selectedHeroId].q, r: this.state.heroes[this.state.selectedHeroId].r }
+    const lock = this.opts.getPathPreviewLock();
+    const previewHeroId = lock?.heroId ?? this.state.selectedHeroId;
+    const start: Axial = lock
+      ? lock.waypoint
+      : previewHeroId && this.state.heroes[previewHeroId]
+      ? { q: this.state.heroes[previewHeroId].q, r: this.state.heroes[previewHeroId].r }
       : { q: -1, r: -1 };
 
     if (start.q < 0) {
@@ -217,7 +190,14 @@ export class AdventureView {
       return;
     }
 
-    this.setPath(findPath(this.opts.map, start, this.hover));
+    const occupiedHexes = new Set<string>();
+    for (const [id, hero] of Object.entries(this.state.heroes)) {
+      if (id !== previewHeroId) {
+        occupiedHexes.add(`${hero.q},${hero.r}`);
+      }
+    }
+
+    this.setPath(findPath(this.opts.map, start, this.hover, occupiedHexes));
   }
 
   private setPath(path: Axial[]): void {
@@ -256,10 +236,76 @@ export class AdventureView {
       return;
     }
 
+    const selectedId = this.state.selectedHeroId;
+    const startTile = selectedId ? this.state.heroes[selectedId] : undefined;
+
+    const occupiedHexes = new Set<string>();
+    for (const [id, hero] of Object.entries(this.state.heroes)) {
+      if (id !== selectedId) {
+        occupiedHexes.add(`${hero.q},${hero.r}`);
+      }
+    }
+
+    const clickedEnemy = Object.values(heroes).find(
+      (h) => h.tile.q === t.q && h.tile.r === t.r && h.ownerId !== 0
+    );
+    if (clickedEnemy && selectedId && startTile) {
+      const adjacentTiles: Axial[] = [];
+      for (const dir of NEIGHBOR_DIRS) {
+        const nq = clickedEnemy.tile.q + dir.q;
+        const nr = clickedEnemy.tile.r + dir.r;
+        if (!this.opts.map.isPassable(nq, nr)) continue;
+        if (occupiedHexes.has(`${nq},${nr}`)) continue;
+        adjacentTiles.push({ q: nq, r: nr });
+      }
+
+      let bestPath: Axial[] | null = null;
+      let bestCost = Infinity;
+      for (const adj of adjacentTiles) {
+        const path = findPath(this.opts.map, { q: startTile.q, r: startTile.r }, adj, occupiedHexes);
+        if (path.length === 0) continue;
+        const cost = computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...path]);
+        if (cost < bestCost) {
+          bestCost = cost;
+          bestPath = path;
+        }
+      }
+
+      if (bestPath && bestPath.length > 0) {
+        const reachableIdx = computeReachableSplit(bestPath, this.opts.map, startTile.movementRemaining);
+        const clamped = reachableIdx < bestPath.length;
+        const actualCost = computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...bestPath.slice(0, reachableIdx)]);
+        if (reachableIdx > 0) {
+          const dest = bestPath[reachableIdx - 1];
+          const tc = this.opts.getTurnController();
+          const trailExtension = bestPath.slice(0, reachableIdx);
+          this.opts.setPathPreviewLock({ heroId: selectedId, waypoint: dest, reachableIdx });
+          const ok = tc.requestMove(selectedId, dest, actualCost, trailExtension);
+          if (!ok) {
+            this.opts.setPathPreviewLock(null);
+          }
+          this.opts.onStateChanged?.();
+          this.path = bestPath.slice(reachableIdx);
+          this.opts.onPathChanged(this.path);
+          this.lastClickDebug.moved = ok;
+          this.lastClickDebug.reason = ok
+            ? clamped
+              ? `attack clamped to ${dest.q},${dest.r}`
+              : "attack"
+            : "requestMove rejected";
+          this.opts.onHudUpdate();
+          this.opts.onRedraw();
+          return;
+        }
+      }
+      this.lastClickDebug.reason = "no attack path";
+      return;
+    }
+
     const clickedSettlement = Object.values(this.state.settlements).find(
       (s) => s.q === t.q && s.r === t.r
     );
-    if (clickedSettlement) {
+    if (clickedSettlement && !selectedId) {
       const tc = this.opts.getTurnController();
       tc.selectSettlement(clickedSettlement.id);
       this.opts.onStateChanged?.();
@@ -269,57 +315,38 @@ export class AdventureView {
       return;
     }
 
-    const selectedId = this.state.selectedHeroId;
     if (!selectedId) {
       this.lastClickDebug.reason = "no selection";
       return;
     }
-    const startTile = this.state.heroes[selectedId];
     if (!startTile) {
       this.lastClickDebug.reason = "no hero";
       return;
     }
-    const newPath = findPath(this.opts.map, { q: startTile.q, r: startTile.r }, t);
+    const newPath = findPath(this.opts.map, { q: startTile.q, r: startTile.r }, t, occupiedHexes);
     this.lastClickDebug.path = newPath;
     if (newPath.length === 0) {
       this.lastClickDebug.reason = "empty path";
       return;
     }
-    let cumulative = 0;
-    let reachableIdx = 0;
-    let actualCost = 0;
-    let clamped = false;
-    for (let i = 0; i < newPath.length; i++) {
-      const step = newPath[i];
-      const terrain = this.opts.map.get(step.q, step.r);
-      const stepCost = terrain ? TERRAIN_COST[terrain] : 1;
-      if (!Number.isFinite(stepCost) || stepCost <= 0) break;
-      if (cumulative + stepCost > startTile.movementRemaining) {
-        clamped = true;
-        break;
-      }
-      cumulative += stepCost;
-      reachableIdx = i + 1;
-      actualCost = cumulative;
-    }
-    this.path = newPath;
-    this.opts.onPathChanged(this.path);
+    const reachableIdx = computeReachableSplit(newPath, this.opts.map, startTile.movementRemaining);
+    const clamped = reachableIdx < newPath.length;
+    const actualCost = computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...newPath.slice(0, reachableIdx)]);
     if (reachableIdx === 0) {
       this.lastClickDebug.reason = "impassable first step";
       return;
     }
     const dest = newPath[reachableIdx - 1];
     const tc = this.opts.getTurnController();
-    // Record every reachable tile (incl. destination) so the trail line in
-    // the renderer follows the actual hex path instead of cutting diagonally
-    // through it as the crow flies.
     const trailExtension = newPath.slice(0, reachableIdx);
-    this.freezeMove(selectedId, dest, reachableIdx);
+    this.opts.setPathPreviewLock({ heroId: selectedId, waypoint: dest, reachableIdx });
     const ok = tc.requestMove(selectedId, dest, actualCost, trailExtension);
     if (!ok) {
-      this.lockedMove = null;
+      this.opts.setPathPreviewLock(null);
     }
     this.opts.onStateChanged?.();
+    this.path = newPath.slice(reachableIdx);
+    this.opts.onPathChanged(this.path);
     this.lastClickDebug.moved = ok;
     this.lastClickDebug.reason = ok
       ? clamped

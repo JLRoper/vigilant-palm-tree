@@ -205,12 +205,16 @@ export class SettlementInfoMenu {
     if (this.onRecruitHero && settlement.ownerId !== null) {
       const player = state.players.find((p) => p.id === settlement.ownerId);
       if (player) {
+        const hexOccupied = Object.values(state.heroes).some(
+          (h) => h.q === settlement.q && h.r === settlement.r
+        );
         showRecruit =
           player.heroIds.length < MAX_HEROES_PER_PLAYER &&
           settlement.gold >= HERO_RECRUIT_COST &&
           settlement.ownerId === state.activePlayerId &&
           state.phase.kind === "PLAYER_TURN" &&
-          player.faction === "player";
+          player.faction === "player" &&
+          !hexOccupied;
       }
     }
     this.recruitBtn.style.display = showRecruit ? "" : "none";

@@ -19,6 +19,8 @@ import {
   setAutoTrade as setAutoTradeReducer,
   recruitHero as recruitHeroReducer,
 } from "./gameState";
+import { findPath } from "../map/pathfinding";
+import type { GameMap } from "../map/gameMap";
 
 export interface TurnControllerHooks {
   onHumanTurnEnd(state: GameState): Promise<GameState>;
@@ -29,6 +31,7 @@ export interface TurnControllerHooks {
     heroId: HeroId,
   ): { toTile: { q: number; r: number }; cost: number } | null;
   logEvent(event: { type: string; payload: Record<string, unknown> }): void;
+  getMap(): GameMap;
 }
 
 export class TurnController {
@@ -265,7 +268,9 @@ export class TurnController {
       if (!hero || hero.movementRemaining <= 0) continue;
       const move = this.hooks.pickAiMove(this.state, heroId);
       if (!move) continue;
-      const result = startMoveReducer(this.state, heroId, move.toTile, move.cost);
+      const map = this.hooks.getMap();
+      const path = findPath(map, { q: hero.q, r: hero.r }, move.toTile);
+      const result = startMoveReducer(this.state, heroId, move.toTile, move.cost, path);
       if (!result.ok) continue;
       this.state = result.state;
       moved = true;

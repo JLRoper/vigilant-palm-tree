@@ -4,9 +4,10 @@ import { Hero } from "../entities/hero";
 import { drawHeroSprite, drawHorseSprite, drawCastleSprite } from "./sprites";
 import { Castle } from "../entities/settlement";
 import { GameMap } from "../map/gameMap";
-import { TERRAIN_COLORS, TERRAIN_COST, Terrain } from "../map/terrain";
+import { TERRAIN_COLORS, Terrain } from "../map/terrain";
 import { drawResourceIcons } from "./overlays/resourceIcon";
 import { drawTerritoryOutlines } from "./overlays/territoryOutline";
+import { drawPathOverlay, drawMinimapPath } from "./overlays/pathOverlay";
 import { SpriteProvider } from "./assets";
 import { computeVision, isVisible } from "./fog";
 import { settings } from "../state/settings";
@@ -20,6 +21,8 @@ export interface RenderOptions {
   pathReachableIdx?: number;
   /** If provided, anchors the yellow proposed route to this tile instead of the hero's current (moving) tile. */
   pathOrigin?: Axial;
+  /** Fallback origin when pathOrigin is not set. Use the selected hero's tile from game state. */
+  selectedHeroTile?: Axial;
 }
 
 const FOG_FILL = "rgba(8, 10, 16, 0.78)";
@@ -77,25 +80,7 @@ export class Renderer {
 
     drawTerritoryOutlines(ctx, castles, opts.colorForOwner, this.map.width, this.map.height, visible);
 
-    if (path.length > 0 && heroes.length > 0) {
-      const player = heroes.find((h) => h.ownerId === opts.viewPlayerId);
-      if (player) {
-        const pathPx = path.map((t) => axialToPixel(t.q, t.r));
-        const originPx = opts.pathOrigin
-          ? axialToPixel(opts.pathOrigin.q, opts.pathOrigin.r)
-          : axialToPixel(player.tile.q, player.tile.r);
-        const fullPx = [originPx, ...pathPx];
-        const splitIdx = Math.min(
-          opts.pathReachableIdx ?? computeReachableSplit(path, this.map, player.movementRemaining),
-          path.length
-        );
-        drawPathSegment(ctx, fullPx, 0, splitIdx + 1, "rgba(255, 204, 0, 0.85)", 4, 6);
-        if (splitIdx < path.length) {
-          drawPathSegment(ctx, fullPx, splitIdx, pathPx.length, "rgba(255, 204, 0, 0.30)", 3, 4);
-        }
-        drawTrail(ctx, player, opts);
-      }
-    }
+    drawPathOverlay(ctx, heroes, path, this.map, opts);
 
     if (hover && isVisible(visible, hover.q, hover.r)) {
       const { x, y } = axialToPixel(hover.q, hover.r);
@@ -329,12 +314,7 @@ export class Renderer {
       }
     }
 
-    if (path.length > 0) {
-      ctx.fillStyle = "rgba(255,204,0,0.5)";
-      for (const t of path) {
-        ctx.fillRect(x0 + t.q * cellW, y0 + t.r * cellH, cellW, cellH);
-      }
-    }
+    drawMinimapPath(ctx, path, x0, y0, cellW, cellH);
 
     for (const hero of heroes) {
       if (hero.ownerId !== opts.viewPlayerId && !isVisible(visible, hero.tile.q, hero.tile.r)) continue;
@@ -364,82 +344,4 @@ export class Renderer {
 
 function decorationSeed(q: number, r: number): number {
   return Math.sin(q * 91.71 + r * 43.17) * 43758.5453;
-}
-
-function computeReachableSplit(
-  path: readonly Axial[],
-  map: GameMap,
-  movementRemaining: number,
-): number {
-  let cumulative = 0;
-  for (let i = 0; i < path.length; i++) {
-    const t = map.get(path[i].q, path[i].r);
-    const stepCost = t ? TERRAIN_COST[t] : Infinity;
-    if (!Number.isFinite(stepCost) || stepCost <= 0) return i;
-    if (cumulative + stepCost > movementRemaining) return i;
-    cumulative += stepCost;
-  }
-  return path.length;
-}
-
-function drawPathSegment(
-  ctx: CanvasRenderingContext2D,
-  points: ReadonlyArray<{ x: number; y: number }>,
-  fromIdx: number,
-  toIdx: number,
-  strokeColor: string,
-  lineWidth: number,
-  dotRadius: number,
-): void {
-  if (toIdx <= fromIdx) return;
-  ctx.lineWidth = lineWidth;
-  ctx.strokeStyle = strokeColor;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  for (let i = fromIdx; i < toIdx; i++) {
-    const p = points[i];
-    if (i === fromIdx) ctx.moveTo(p.x, p.y);
-    else ctx.lineTo(p.x, p.y);
-  }
-  ctx.stroke();
-  for (let i = fromIdx + 1; i < toIdx; i++) {
-    const p = points[i];
-    ctx.fillStyle = strokeColor.replace(/[\d.]+\)$/, "0.5)");
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, dotRadius, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-function drawTrail(
-  ctx: CanvasRenderingContext2D,
-  hero: Hero,
-  opts: RenderOptions,
-): void {
-  if (!hero.trail || hero.trail.length < 2) return;
-  const color = opts.colorForOwner(hero.ownerId);
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.55;
-  for (let i = 1; i < hero.trail.length; i++) {
-    const p = axialToPixel(hero.trail[i].q, hero.trail[i].r);
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = color;
-  ctx.globalAlpha = 0.35;
-  ctx.lineWidth = 1.5;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  for (let i = 0; i < hero.trail.length; i++) {
-    const p = axialToPixel(hero.trail[i].q, hero.trail[i].r);
-    if (i === 0) ctx.moveTo(p.x, p.y);
-    else ctx.lineTo(p.x, p.y);
-  }
-  ctx.stroke();
-  ctx.restore();
 }

@@ -1,7 +1,6 @@
 import { Axial, hexDistance } from "../core/hex";
-import { findPath } from "../map/pathfinding";
+import { findPath, computePathCost } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
-import { TERRAIN_COST } from "../map/terrain";
 import type { GameState } from "../state/gameState";
 import type { TurnController } from "../state/turnController";
 import type { Hero } from "../entities/hero";
@@ -28,16 +27,6 @@ export function onHeroArrived(opts: OnHeroArrivedOptions): GameState {
   opts.hero.moveProgress = 0;
   opts.hero.moving = true;
   return opts.turnController.getState();
-}
-
-function computePathCost(map: GameMap, path: Axial[]): number {
-  let cost = 0;
-  for (let i = 1; i < path.length; i++) {
-    const t = map.get(path[i].q, path[i].r);
-    if (t) cost += TERRAIN_COST[t];
-    else cost += Infinity;
-  }
-  return Number.isFinite(cost) ? cost : 0;
 }
 
 export function pathCost(map: GameMap, from: Axial, to: Axial): number {

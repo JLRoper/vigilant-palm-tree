@@ -23,7 +23,7 @@ export class ViewManager {
 
   initializeAdventureView(
     hudEl: HTMLElement,
-    opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw">,
+    opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw" | "getPathPreviewLock" | "setPathPreviewLock">,
   ): void {
     if (this.view) {
       this.view.detach();
@@ -52,11 +52,7 @@ export class ViewManager {
     opts: RenderOptions,
   ): void {
     if (!this.renderer) return;
-    this.renderer.draw(hover, heroes, path, castles, {
-      ...opts,
-      pathReachableIdx: this.view?.getReachableIdx() ?? undefined,
-      pathOrigin: this.view?.getWaypoint() ?? undefined,
-    });
+    this.renderer.draw(hover, heroes, path, castles, opts);
   }
 
   drawCityOverlay(cityView: CityView | undefined): void {

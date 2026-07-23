@@ -9,7 +9,7 @@ import { buildTurnHooks } from "../game/turnHooks";
 import { cityViewSizeFor } from "../core/cityGrid";
 
 import { SessionManager } from "./SessionManager";
-import { GameStateManager } from "./GameStateManager";
+import { GameStateManager, type PathPreviewLock } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
 import { UIManager } from "./UIManager";
 import { GameActions } from "./GameActions";
@@ -105,6 +105,8 @@ export class GameEngine {
       onStateChanged: () => this.actions.syncFromController(() => this.actions.maybeAutoResolveBattle()),
       onHudUpdate: () => this.fullFrame(),
       onRedraw: () => this.draw(),
+      getPathPreviewLock: () => this.state.getPathPreviewLock(),
+      setPathPreviewLock: (lock: PathPreviewLock | null) => this.state.setPathPreviewLock(lock),
     });
   }
 
@@ -215,6 +217,7 @@ export class GameEngine {
   draw(): void {
     const gs = this.state.getState();
     if (!gs) return;
+    const selectedHero = gs.selectedHeroId ? gs.heroes[gs.selectedHeroId] : null;
     this.view.draw(
       this.view.getHover(),
       this.state.getHeroes(),
@@ -225,6 +228,9 @@ export class GameEngine {
         selectedSettlementId: gs.selectedSettlementId,
         colorForOwner,
         viewPlayerId: 0,
+        pathReachableIdx: this.state.getPathReachableIdx() ?? undefined,
+        pathOrigin: this.state.getPathOrigin() ?? undefined,
+        selectedHeroTile: selectedHero ? { q: selectedHero.q, r: selectedHero.r } : undefined,
       },
     );
     this.view.drawCityOverlay(this.ui.getCityView());

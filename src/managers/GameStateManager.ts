@@ -1,10 +1,17 @@
-import type { GameState } from "../state/gameState";
+import type { GameState, HeroId } from "../state/gameState";
 import { Hero } from "../entities/hero";
 import { Castle } from "../entities/settlement";
 import { findPath } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
 import { TurnController } from "../state/turnController";
 import type { TurnControllerHooks } from "../state/turnController";
+import type { Axial } from "../core/hex";
+
+export interface PathPreviewLock {
+  heroId: HeroId;
+  waypoint: Axial;
+  reachableIdx: number;
+}
 
 export class GameStateManager {
   private gameState!: GameState;
@@ -13,6 +20,7 @@ export class GameStateManager {
   private settlements: Record<string, Castle> = {};
   private gameMap!: GameMap;
   private hooks: TurnControllerHooks | null = null;
+  private pathPreviewLock: PathPreviewLock | null = null;
 
   setHooks(hooks: TurnControllerHooks): void {
     this.hooks = hooks;
@@ -24,6 +32,32 @@ export class GameStateManager {
 
   getGameMap(): GameMap {
     return this.gameMap;
+  }
+
+  setPathPreviewLock(lock: PathPreviewLock | null): void {
+    this.pathPreviewLock = lock;
+  }
+
+  getPathPreviewLock(): PathPreviewLock | null {
+    if (!this.pathPreviewLock) return null;
+    const hero = this.heroes[this.pathPreviewLock.heroId];
+    if (
+      this.gameState?.selectedHeroId !== this.pathPreviewLock.heroId ||
+      !hero ||
+      !hero.moving
+    ) {
+      this.pathPreviewLock = null;
+      return null;
+    }
+    return this.pathPreviewLock;
+  }
+
+  getPathReachableIdx(): number | null {
+    return this.getPathPreviewLock()?.reachableIdx ?? null;
+  }
+
+  getPathOrigin(): Axial | null {
+    return this.getPathPreviewLock()?.waypoint ?? null;
   }
 
   setState(state: GameState): void {

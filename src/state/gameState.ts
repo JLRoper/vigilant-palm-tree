@@ -295,6 +295,11 @@ export function startMove(
   if (!Number.isFinite(cost) || cost < 0) {
     return { state, ok: false, reason: "impassable" };
   }
+  for (const [id, other] of Object.entries(state.heroes)) {
+    if (id !== heroId && other.q === toTile.q && other.r === toTile.r) {
+      return { state, ok: false, reason: "occupied" };
+    }
+  }
   if (hero.movementRemaining < cost) {
     return { state, ok: false, reason: "insufficient_movement" };
   }
@@ -814,6 +819,12 @@ export function recruitHero(
   if (settlement.ownerId !== playerId) return { state, error: "Not your settlement" };
   if (settlement.gold < HERO_RECRUIT_COST) {
     return { state, error: "Not enough gold" };
+  }
+
+  for (const hero of Object.values(state.heroes)) {
+    if (hero.q === settlement.q && hero.r === settlement.r) {
+      return { state, error: "Hex is occupied" };
+    }
   }
 
   const indices = Array.from({ length: MAX_HEROES_PER_PLAYER }, (_, i) => i);
