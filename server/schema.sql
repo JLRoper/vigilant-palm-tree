@@ -13,9 +13,12 @@ CREATE TABLE IF NOT EXISTS games (
   players JSONB NOT NULL DEFAULT '[]'::jsonb,
   heroes JSONB NOT NULL DEFAULT '{}'::jsonb,
   settlements JSONB NOT NULL DEFAULT '{}'::jsonb,
+  map_size TEXT DEFAULT 'small',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE games ADD COLUMN IF NOT EXISTS map_size TEXT DEFAULT 'small';
 
 CREATE TABLE IF NOT EXISTS game_events (
   id BIGSERIAL PRIMARY KEY,

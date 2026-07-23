@@ -1,4 +1,4 @@
-import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource } from "./gameState";
+import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult } from "./gameState";
 import {
   selectHero as selectHeroReducer,
   selectSettlement as selectSettlementReducer,
@@ -17,7 +17,10 @@ import {
   transferGold as transferGoldReducer,
   tradeResources as tradeResourcesReducer,
   setAutoTrade as setAutoTradeReducer,
+  recruitHero as recruitHeroReducer,
 } from "./gameState";
+import { findPath } from "../map/pathfinding";
+import type { GameMap } from "../map/gameMap";
 
 export interface TurnControllerHooks {
   onHumanTurnEnd(state: GameState): Promise<GameState>;
@@ -28,6 +31,7 @@ export interface TurnControllerHooks {
     heroId: HeroId,
   ): { toTile: { q: number; r: number }; cost: number } | null;
   logEvent(event: { type: string; payload: Record<string, unknown> }): void;
+  getMap(): GameMap;
 }
 
 export class TurnController {
@@ -48,6 +52,10 @@ export class TurnController {
   selectHero(heroId: HeroId): void {
     if (this.state.phase.kind !== "PLAYER_TURN") return;
     this.state = selectHeroReducer(this.state, heroId);
+    const hero = this.state.heroes[heroId];
+    if (hero) {
+      this.tryCaptureAt(heroId, hero.q, hero.r);
+    }
   }
 
   selectSettlement(settlementId: SettlementId): void {
@@ -184,6 +192,18 @@ export class TurnController {
     return true;
   }
 
+  recruitHero(heroName: string, settlementId: SettlementId): RecruitHeroResult {
+    const result = recruitHeroReducer(this.state, this.state.activePlayerId, heroName, settlementId);
+    if (result.hero) {
+      this.state = result.state;
+      this.hooks.logEvent({
+        type: "hero_recruited",
+        payload: { heroId: result.hero.id, name: heroName, playerId: this.state.activePlayerId },
+      });
+    }
+    return result;
+  }
+
   async resolveCurrentBattle(): Promise<void> {
     if (this.state.phase.kind !== "BATTLE") return;
     this.state = resolveBattleReducer(this.state);
@@ -248,7 +268,9 @@ export class TurnController {
       if (!hero || hero.movementRemaining <= 0) continue;
       const move = this.hooks.pickAiMove(this.state, heroId);
       if (!move) continue;
-      const result = startMoveReducer(this.state, heroId, move.toTile, move.cost);
+      const map = this.hooks.getMap();
+      const path = findPath(map, { q: hero.q, r: hero.r }, move.toTile);
+      const result = startMoveReducer(this.state, heroId, move.toTile, move.cost, path);
       if (!result.ok) continue;
       this.state = result.state;
       moved = true;

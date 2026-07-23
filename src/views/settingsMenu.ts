@@ -5,6 +5,7 @@ import {
   settingsBounds,
   resourceStyleOptions,
   type GameSettings,
+  type HorseVariant,
   type ResourceStyle,
 } from "../state/settings";
 
@@ -34,11 +35,33 @@ function labelFor(ms: number): string {
   return SPEED_LABELS[SPEED_LABELS.length - 1].label;
 }
 
-export function openSettingsMenu(parent: HTMLElement = document.body): void {
+export interface MapInfo {
+  name: string;
+  seed: number;
+  mapSize: "small" | "medium" | "large";
+  width: number;
+  height: number;
+  castleSeed: number;
+  castleCount: number;
+  heroQ: number;
+  heroR: number;
+  round: number;
+  day: number;
+  activePlayerName: string;
+}
+
+export interface SettingsMenuOptions {
+  parent?: HTMLElement;
+  getMapInfo?: () => MapInfo | null;
+}
+
+export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
+  const parent = opts.parent ?? document.body;
   const bounds = settingsBounds();
   const current = settings();
+  const mapInfo = opts.getMapInfo?.() ?? null;
 
-  const modal = openCenteredModal(parent, "Settings", 380);
+  const modal = openCenteredModal(parent, "Settings", 420);
 
   const content = document.createElement("div");
   content.style.fontFamily = menuTheme.font;
@@ -54,6 +77,74 @@ export function openSettingsMenu(parent: HTMLElement = document.body): void {
   intro.style.fontSize = "11px";
   content.appendChild(intro);
 
+  if (mapInfo) {
+    const infoFrame = document.createElement("div");
+    Object.assign(infoFrame.style, {
+      display: "flex",
+      flexDirection: "column",
+      gap: "4px",
+      padding: "10px",
+      border: "1px solid #444",
+      borderRadius: "4px",
+      backgroundColor: "#1a1a1a",
+      fontSize: "11px",
+    });
+
+    let expanded = false;
+    const infoHeader = document.createElement("button");
+    infoHeader.type = "button";
+    infoHeader.textContent = `\u25b6 Map info`;
+    infoHeader.style.all = "unset";
+    infoHeader.style.fontWeight = "bold";
+    infoHeader.style.opacity = "0.8";
+    infoHeader.style.cursor = "pointer";
+    infoHeader.style.display = "flex";
+    infoHeader.style.alignItems = "center";
+    infoHeader.style.gap = "4px";
+    infoFrame.appendChild(infoHeader);
+
+    const fields: Array<[string, string]> = [
+      ["Name", mapInfo.name],
+      ["Size", `${mapInfo.mapSize} (${mapInfo.width}\u00d7${mapInfo.height})`],
+      ["Seed", String(mapInfo.seed)],
+      ["Castle seed", String(mapInfo.castleSeed)],
+      ["Castle count", String(mapInfo.castleCount)],
+      ["Hero start", `${mapInfo.heroQ}, ${mapInfo.heroR}`],
+      ["Round / Day", `${mapInfo.round} / ${mapInfo.day}`],
+      ["Active player", mapInfo.activePlayerName],
+    ];
+
+    const infoRows: HTMLDivElement[] = [];
+    for (const [label, value] of fields) {
+      const row = document.createElement("div");
+      row.style.display = "none";
+      row.style.justifyContent = "space-between";
+      row.style.gap = "12px";
+      const labelEl = document.createElement("span");
+      labelEl.textContent = label;
+      labelEl.style.opacity = "0.55";
+      const valEl = document.createElement("span");
+      valEl.textContent = value ?? "—";
+      valEl.style.fontVariantNumeric = "tabular-nums";
+      valEl.style.textAlign = "right";
+      row.appendChild(labelEl);
+      row.appendChild(valEl);
+      infoFrame.appendChild(row);
+      infoRows.push(row);
+    }
+
+    infoHeader.addEventListener("click", () => {
+      expanded = !expanded;
+      infoHeader.textContent = expanded ? "\u25bc Map info" : "\u25b6 Map info";
+      for (const row of infoRows) {
+        row.style.display = expanded ? "flex" : "none";
+      }
+    });
+
+    content.appendChild(infoFrame);
+  }
+
+  // Movement speed slider
   const heroRow = document.createElement("div");
   heroRow.style.display = "flex";
   heroRow.style.flexDirection = "column";
@@ -89,8 +180,8 @@ export function openSettingsMenu(parent: HTMLElement = document.body): void {
 
   function refresh(next: GameSettings): void {
     slider.value = String(next.moveDurationMs);
-    heroValue.textContent = `${next.moveDurationMs}ms · ${labelFor(next.moveDurationMs)}`;
-    hint.textContent = `Lower = snappier. Higher = easier to follow along. (Range ${bounds.min}–${bounds.max}ms)`;
+    heroValue.textContent = `${next.moveDurationMs}ms \u00b7 ${labelFor(next.moveDurationMs)}`;
+    hint.textContent = `Lower = snappier. Higher = easier to follow along. (Range ${bounds.min}\u2013${bounds.max}ms)`;
   }
   refresh(current);
 
@@ -102,67 +193,118 @@ export function openSettingsMenu(parent: HTMLElement = document.body): void {
 
   content.appendChild(heroRow);
 
+  // Horse variant selector
+  const horseRow = document.createElement("div");
+  horseRow.style.display = "flex";
+  horseRow.style.flexDirection = "column";
+  horseRow.style.gap = "6px";
+
+  const horseLabel = document.createElement("span");
+  horseLabel.textContent = "Horse sprite style";
+  horseRow.appendChild(horseLabel);
+
+  const select = document.createElement("select");
+  select.style.width = "100%";
+  select.style.padding = "8px";
+  select.style.fontSize = "12px";
+  select.style.border = "1px solid #444";
+  select.style.borderRadius = "4px";
+  select.style.backgroundColor = "#1a1a1a";
+  select.style.color = "#eee";
+  select.style.accentColor = "#f77f00";
+
+  const bubblyOption = document.createElement("option");
+  bubblyOption.value = "bubbly";
+  bubblyOption.textContent = "Bubbly cartoon horse";
+  select.appendChild(bubblyOption);
+
+  const heroOption = document.createElement("option");
+  heroOption.value = "hero";
+  heroOption.textContent = "Detailed knight on horse";
+  select.appendChild(heroOption);
+
+  const shadowOption = document.createElement("option");
+  shadowOption.value = "shadow";
+  shadowOption.textContent = "Shadow knight on horse";
+  select.appendChild(shadowOption);
+
+  const paladinOption = document.createElement("option");
+  paladinOption.value = "paladin";
+  paladinOption.textContent = "Golden paladin on horse";
+  select.appendChild(paladinOption);
+
+  const rangerOption = document.createElement("option");
+  rangerOption.value = "ranger";
+  rangerOption.textContent = "Forest ranger on horse";
+  select.appendChild(rangerOption);
+
+  const arcaneOption = document.createElement("option");
+  arcaneOption.value = "arcane";
+  arcaneOption.textContent = "Arcane spellrider";
+  select.appendChild(arcaneOption);
+
+  const unicornOption = document.createElement("option");
+  unicornOption.value = "unicorn";
+  unicornOption.textContent = "Dark unicorn";
+  select.appendChild(unicornOption);
+
+  select.value = current.horseVariant;
+  horseRow.appendChild(select);
+
+  const horseHint = document.createElement("div");
+  horseHint.style.fontSize = "10px";
+  horseHint.style.opacity = "0.55";
+  horseHint.textContent = "Choose between cute bubbly pixel art, detailed isometric knight, shadow knight, golden paladin, forest ranger, or arcane spellrider.";
+  horseRow.appendChild(horseHint);
+
+  select.addEventListener("change", () => {
+    updateSettings({ horseVariant: select.value as HorseVariant });
+  });
+
+  content.appendChild(horseRow);
+
+  // Resource icon style selector
   const styleRow = document.createElement("div");
   styleRow.style.display = "flex";
   styleRow.style.flexDirection = "column";
   styleRow.style.gap = "6px";
 
-  const styleLabelRow = document.createElement("div");
-  styleRow.appendChild(styleLabelRow);
-  styleLabelRow.style.display = "flex";
-  styleLabelRow.style.justifyContent = "space-between";
-  styleLabelRow.style.alignItems = "baseline";
-
   const styleLabel = document.createElement("span");
   styleLabel.textContent = "Resource icon style";
-  styleLabelRow.appendChild(styleLabel);
+  styleRow.appendChild(styleLabel);
 
-  const styleValue = document.createElement("span");
-  styleValue.style.fontVariantNumeric = "tabular-nums";
-  styleLabelRow.appendChild(styleValue);
-
-  const segWrap = document.createElement("div");
-  segWrap.style.display = "flex";
-  segWrap.style.flexWrap = "wrap";
-  segWrap.style.gap = "4px";
-  styleRow.appendChild(segWrap);
-
-  const segBtns = new Map<ResourceStyle, HTMLButtonElement>();
-  function refreshStyle(next: GameSettings): void {
-    styleValue.textContent = RESOURCE_STYLE_LABELS[next.resourceStyle];
-    for (const [style, btn] of segBtns) {
-      const active = style === next.resourceStyle;
-      btn.style.background = active ? "#f77f00" : "#3a2a1a";
-      btn.style.color = active ? "#1a1208" : "#e8d8a8";
-      btn.style.borderColor = active ? "#f77f00" : "#6a4a20";
-    }
-  }
-  refreshStyle(current);
+  const styleSelect = document.createElement("select");
+  styleSelect.style.width = "100%";
+  styleSelect.style.padding = "8px";
+  styleSelect.style.fontSize = "12px";
+  styleSelect.style.border = "1px solid #444";
+  styleSelect.style.borderRadius = "4px";
+  styleSelect.style.backgroundColor = "#1a1a1a";
+  styleSelect.style.color = "#eee";
+  styleSelect.style.accentColor = "#f77f00";
 
   for (const style of resourceStyleOptions()) {
-    const btn = document.createElement("button");
-    btn.textContent = RESOURCE_STYLE_LABELS[style];
-    btn.style.flex = "1 1 calc(50% - 4px)";
-    btn.style.minWidth = "120px";
-    btn.style.padding = "6px 8px";
-    btn.style.border = "1px solid";
-    btn.style.borderRadius = "3px";
-    btn.style.cursor = "pointer";
-    btn.style.fontFamily = menuTheme.font;
-    btn.style.fontSize = menuTheme.fontSize;
-    segBtns.set(style, btn);
-    btn.addEventListener("click", () => {
-      const next = updateSettings({ resourceStyle: style });
-      refreshStyle(next);
-    });
-    segWrap.appendChild(btn);
+    const opt = document.createElement("option");
+    opt.value = style;
+    opt.textContent = RESOURCE_STYLE_LABELS[style];
+    styleSelect.appendChild(opt);
   }
+  styleSelect.value = current.resourceStyle;
+  styleRow.appendChild(styleSelect);
 
   const styleHint = document.createElement("div");
   styleHint.textContent = "Map pin = parchment disc + woodcut symbol. Painted pin = FLUX-illustrated. Constellation + Heraldic crest = parked directions.";
   styleHint.style.fontSize = "10px";
   styleHint.style.opacity = "0.55";
   styleRow.appendChild(styleHint);
+
+  styleSelect.addEventListener("change", () => {
+    updateSettings({ resourceStyle: styleSelect.value as ResourceStyle });
+  });
+
+  function refreshStyle(next: GameSettings): void {
+    styleSelect.value = next.resourceStyle;
+  }
 
   content.appendChild(styleRow);
 
@@ -171,8 +313,10 @@ export function openSettingsMenu(parent: HTMLElement = document.body): void {
   styleButton(resetBtn);
   resetBtn.style.alignSelf = "flex-end";
   resetBtn.addEventListener("click", () => {
-    const next = updateSettings({ moveDurationMs: bounds.default });
+    const next = updateSettings({ moveDurationMs: bounds.default, horseVariant: "bubbly", resourceStyle: "rune-stone" });
     refresh(next);
+    refreshStyle(next);
+    select.value = "bubbly";
   });
   content.appendChild(resetBtn);
 

@@ -3,10 +3,11 @@ import { Camera } from "../render/camera";
 import { GameMap } from "../map/gameMap";
 import { Renderer } from "../render/renderer";
 import { Hero } from "../entities/hero";
-import { findPath } from "../map/pathfinding";
+import { findPath, computePathCost, NEIGHBOR_DIRS } from "../map/pathfinding";
 import type { GameState, HeroId } from "../state/gameState";
 import type { TurnController } from "../state/turnController";
-import { TERRAIN_COST } from "../map/terrain";
+import { computeReachableSplit } from "../render/overlays/pathOverlay";
+import type { PathPreviewLock } from "../managers/GameStateManager";
 
 export const MAP_SEED = 42;
 
@@ -30,6 +31,24 @@ export interface AdventureViewOptions {
   onPathChanged: (path: Axial[]) => void;
   onHudUpdate: () => void;
   onRedraw: () => void;
+  getPathPreviewLock: () => PathPreviewLock | null;
+  setPathPreviewLock: (lock: PathPreviewLock | null) => void;
+}
+
+const DRAG_MOVE_THRESHOLD = 4;
+
+function hoverChanged(a: Axial | null, b: Axial | null): boolean {
+  if (a === b) return false;
+  if (!a || !b) return true;
+  return a.q !== b.q || a.r !== b.r;
+}
+
+function pathsEqual(a: Axial[], b: Axial[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].q !== b[i].q || a[i].r !== b[i].r) return false;
+  }
+  return true;
 }
 
 export class AdventureView {
@@ -44,6 +63,15 @@ export class AdventureView {
   private lastX = 0;
   private lastY = 0;
 
+  private pendingPointer: { x: number; y: number } | null = null;
+  private pointerFrameRequested = false;
+
+  private readonly boundMouseUp = () => this.onMouseUp();
+  private readonly boundMouseMove = (e: MouseEvent) => this.onMouseMove(e);
+  private readonly boundMouseDown = (e: MouseEvent) => this.onMouseDown(e);
+  private readonly boundClick = (e: MouseEvent) => this.onClick(e);
+  private readonly boundWheel = (e: WheelEvent) => this.onWheel(e);
+
   constructor(private opts: AdventureViewOptions) {
     this.attach();
   }
@@ -56,148 +84,284 @@ export class AdventureView {
     return this.state.phase.kind === "PLAYER_TURN" && this.state.activePlayerId === 0;
   }
 
+  setMap(map: GameMap): void {
+    this.opts.map = map;
+  }
+
+  getPath(): Axial[] {
+    return this.path;
+  }
+
+  detach(): void {
+    window.removeEventListener("mouseup", this.boundMouseUp);
+    window.removeEventListener("mousemove", this.boundMouseMove);
+    this.opts.canvas.removeEventListener("mousedown", this.boundMouseDown);
+    this.opts.canvas.removeEventListener("click", this.boundClick);
+    this.opts.canvas.removeEventListener("wheel", this.boundWheel as EventListener);
+  }
+
   private attach(): void {
-    this.opts.canvas.addEventListener("mousedown", (e) => {
-      this.dragging = true;
-      this.movedDuringDrag = false;
-      this.dragStartX = e.clientX;
-      this.dragStartY = e.clientY;
-      this.lastX = e.clientX;
-      this.lastY = e.clientY;
-    });
-
-    window.addEventListener("mouseup", () => (this.dragging = false));
-
-    window.addEventListener("mousemove", (e) => {
-      if (this.dragging) {
-        this.opts.camera.pan(e.clientX - this.lastX, e.clientY - this.lastY);
-        this.lastX = e.clientX;
-        this.lastY = e.clientY;
-        if (
-          Math.abs(e.clientX - this.dragStartX) +
-            Math.abs(e.clientY - this.dragStartY) >
-          4
-        ) {
-          this.movedDuringDrag = true;
-        }
-      }
-      this.hover = this.opts.renderer.hoverFromScreen(e.clientX, e.clientY);
-      if (!this.dragging && this.hover && this.isPlayerTurn()) {
-        const selectedId = this.state.selectedHeroId;
-        const startTile = selectedId ? this.state.heroes[selectedId] : null;
-        const start: Axial = startTile
-          ? { q: startTile.q, r: startTile.r }
-          : { q: -1, r: -1 };
-        if (start.q >= 0 && this.opts.map.isPassable(this.hover.q, this.hover.r)) {
-          this.path = findPath(this.opts.map, start, this.hover);
-        } else {
-          this.path = [];
-        }
-        this.opts.onPathChanged(this.path);
-      } else {
-        this.path = [];
-        this.opts.onPathChanged(this.path);
-      }
-      this.opts.onHudUpdate();
-      this.opts.onRedraw();
-    });
-
-    this.opts.canvas.addEventListener("click", (e) => {
-      this.lastClickDebug.reason = "";
-      if (this.movedDuringDrag) {
-        this.lastClickDebug.reason = "movedDuringDrag";
-        return;
-      }
-      if (!this.isPlayerTurn()) {
-        this.lastClickDebug.reason = "not_player_turn";
-        return;
-      }
-      const t = this.opts.renderer.hoverFromScreen(e.clientX, e.clientY);
-      this.lastClickDebug.hover = t;
-      if (!t) {
-        this.lastClickDebug.reason = "no hover";
-        return;
-      }
-      const heroes = this.opts.heroes();
-      const clickedHero = Object.values(heroes).find(
-        (h) => h.tile.q === t.q && h.tile.r === t.r
-      );
-      if (clickedHero && clickedHero.ownerId === 0) {
-        const tc = this.opts.getTurnController();
-        tc.selectHero(clickedHero.id as HeroId);
-        this.opts.onStateChanged?.();
-        this.lastClickDebug.moved = false;
-        this.lastClickDebug.reason = "select";
-        this.opts.onHudUpdate();
-        return;
-      }
-      const selectedId = this.state.selectedHeroId;
-      if (!selectedId) {
-        this.lastClickDebug.reason = "no selection";
-        return;
-      }
-      const startTile = this.state.heroes[selectedId];
-      if (!startTile) {
-        this.lastClickDebug.reason = "no hero";
-        return;
-      }
-      const newPath = findPath(this.opts.map, { q: startTile.q, r: startTile.r }, t);
-      this.lastClickDebug.path = newPath;
-      if (newPath.length === 0) {
-        this.lastClickDebug.reason = "empty path";
-        return;
-      }
-      let cumulative = 0;
-      let reachableIdx = 0;
-      let actualCost = 0;
-      let clamped = false;
-      for (let i = 0; i < newPath.length; i++) {
-        const step = newPath[i];
-        const terrain = this.opts.map.get(step.q, step.r);
-        const stepCost = terrain ? TERRAIN_COST[terrain] : 1;
-        if (!Number.isFinite(stepCost) || stepCost <= 0) break;
-        if (cumulative + stepCost > startTile.movementRemaining) {
-          clamped = true;
-          break;
-        }
-        cumulative += stepCost;
-        reachableIdx = i + 1;
-        actualCost = cumulative;
-      }
-      this.path = newPath;
-      this.opts.onPathChanged(this.path);
-      if (reachableIdx === 0) {
-        this.lastClickDebug.reason = "impassable first step";
-        return;
-      }
-      const dest = newPath[reachableIdx - 1];
-      const tc = this.opts.getTurnController();
-      // Record every reachable tile (incl. destination) so the trail line in
-      // the renderer follows the actual hex path instead of cutting diagonally
-      // through it as the crow flies.
-      const trailExtension = newPath.slice(0, reachableIdx);
-      const ok = tc.requestMove(selectedId, dest, actualCost, trailExtension);
-      this.opts.onStateChanged?.();
-      this.lastClickDebug.moved = ok;
-      this.lastClickDebug.reason = ok
-        ? clamped
-          ? `clamped to ${dest.q},${dest.r}`
-          : ""
-        : "requestMove rejected";
-      this.opts.onHudUpdate();
-      this.opts.onRedraw();
-    });
-
+    this.opts.canvas.addEventListener("mousedown", this.boundMouseDown);
+    window.addEventListener("mouseup", this.boundMouseUp);
+    window.addEventListener("mousemove", this.boundMouseMove);
+    this.opts.canvas.addEventListener("click", this.boundClick);
     this.opts.canvas.addEventListener(
       "wheel",
-      (e) => {
-        e.preventDefault();
-        const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-        this.opts.camera.zoomAt(e.clientX, e.clientY, factor);
-        this.opts.onRedraw();
-      },
+      this.boundWheel as EventListener,
       { passive: false }
     );
+  }
+
+  private onMouseDown(e: MouseEvent): void {
+    this.dragging = true;
+    this.movedDuringDrag = false;
+    this.dragStartX = e.clientX;
+    this.dragStartY = e.clientY;
+    this.lastX = e.clientX;
+    this.lastY = e.clientY;
+  }
+
+  private onMouseUp(): void {
+    this.dragging = false;
+  }
+
+  private onMouseMove(e: MouseEvent): void {
+    if (this.dragging) {
+      this.opts.camera.pan(e.clientX - this.lastX, e.clientY - this.lastY);
+      this.lastX = e.clientX;
+      this.lastY = e.clientY;
+      if (
+        Math.abs(e.clientX - this.dragStartX) + Math.abs(e.clientY - this.dragStartY) >
+        DRAG_MOVE_THRESHOLD
+      ) {
+        this.movedDuringDrag = true;
+      }
+    }
+
+    // Ignore pointer updates when hovering over HTML UI overlays.
+    if (e.target !== this.opts.canvas) return;
+
+    this.pendingPointer = { x: e.clientX, y: e.clientY };
+    if (!this.pointerFrameRequested) {
+      this.pointerFrameRequested = true;
+      requestAnimationFrame(() => this.flushPointerState());
+    }
+  }
+
+  private flushPointerState(): void {
+    this.pointerFrameRequested = false;
+    if (!this.pendingPointer) return;
+
+    const { x, y } = this.pendingPointer;
+    this.pendingPointer = null;
+
+    const nextHover = this.opts.renderer.hoverFromScreen(x, y);
+    if (!hoverChanged(this.hover, nextHover)) {
+      return;
+    }
+
+    this.hover = nextHover;
+    this.updatePath();
+    this.opts.onHudUpdate();
+    this.opts.onRedraw();
+  }
+
+  private updatePath(): void {
+    if (this.dragging || !this.hover || !this.isPlayerTurn()) {
+      this.setPath([]);
+      return;
+    }
+
+    const lock = this.opts.getPathPreviewLock();
+    const previewHeroId = lock?.heroId ?? this.state.selectedHeroId;
+    const start: Axial = lock
+      ? lock.waypoint
+      : previewHeroId && this.state.heroes[previewHeroId]
+      ? { q: this.state.heroes[previewHeroId].q, r: this.state.heroes[previewHeroId].r }
+      : { q: -1, r: -1 };
+
+    if (start.q < 0) {
+      this.setPath([]);
+      return;
+    }
+
+    if (!this.opts.map.isPassable(this.hover.q, this.hover.r)) {
+      this.setPath([]);
+      return;
+    }
+
+    const occupiedHexes = new Set<string>();
+    for (const [id, hero] of Object.entries(this.state.heroes)) {
+      if (id !== previewHeroId) {
+        occupiedHexes.add(`${hero.q},${hero.r}`);
+      }
+    }
+
+    this.setPath(findPath(this.opts.map, start, this.hover, occupiedHexes));
+  }
+
+  private setPath(path: Axial[]): void {
+    if (pathsEqual(this.path, path)) return;
+    this.path = path;
+    this.opts.onPathChanged(this.path);
+  }
+
+  private onClick(e: MouseEvent): void {
+    this.lastClickDebug.reason = "";
+    if (this.movedDuringDrag) {
+      this.lastClickDebug.reason = "movedDuringDrag";
+      return;
+    }
+    if (!this.isPlayerTurn()) {
+      this.lastClickDebug.reason = "not_player_turn";
+      return;
+    }
+    const t = this.opts.renderer.hoverFromScreen(e.clientX, e.clientY);
+    this.lastClickDebug.hover = t;
+    if (!t) {
+      this.lastClickDebug.reason = "no hover";
+      return;
+    }
+    const heroes = this.opts.heroes();
+    const clickedHero = Object.values(heroes).find(
+      (h) => h.tile.q === t.q && h.tile.r === t.r
+    );
+    if (clickedHero && clickedHero.ownerId === 0) {
+      const tc = this.opts.getTurnController();
+      tc.selectHero(clickedHero.id as HeroId);
+      this.opts.onStateChanged?.();
+      this.lastClickDebug.moved = false;
+      this.lastClickDebug.reason = "select";
+      this.opts.onHudUpdate();
+      return;
+    }
+
+    const selectedId = this.state.selectedHeroId;
+    const startTile = selectedId ? this.state.heroes[selectedId] : undefined;
+
+    const occupiedHexes = new Set<string>();
+    for (const [id, hero] of Object.entries(this.state.heroes)) {
+      if (id !== selectedId) {
+        occupiedHexes.add(`${hero.q},${hero.r}`);
+      }
+    }
+
+    const clickedEnemy = Object.values(heroes).find(
+      (h) => h.tile.q === t.q && h.tile.r === t.r && h.ownerId !== 0
+    );
+    if (clickedEnemy && selectedId && startTile) {
+      const adjacentTiles: Axial[] = [];
+      for (const dir of NEIGHBOR_DIRS) {
+        const nq = clickedEnemy.tile.q + dir.q;
+        const nr = clickedEnemy.tile.r + dir.r;
+        if (!this.opts.map.isPassable(nq, nr)) continue;
+        if (occupiedHexes.has(`${nq},${nr}`)) continue;
+        adjacentTiles.push({ q: nq, r: nr });
+      }
+
+      let bestPath: Axial[] | null = null;
+      let bestCost = Infinity;
+      for (const adj of adjacentTiles) {
+        const path = findPath(this.opts.map, { q: startTile.q, r: startTile.r }, adj, occupiedHexes);
+        if (path.length === 0) continue;
+        const cost = computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...path]);
+        if (cost < bestCost) {
+          bestCost = cost;
+          bestPath = path;
+        }
+      }
+
+      if (bestPath && bestPath.length > 0) {
+        const reachableIdx = computeReachableSplit(bestPath, this.opts.map, startTile.movementRemaining);
+        const clamped = reachableIdx < bestPath.length;
+        const actualCost = computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...bestPath.slice(0, reachableIdx)]);
+        if (reachableIdx > 0) {
+          const dest = bestPath[reachableIdx - 1];
+          const tc = this.opts.getTurnController();
+          const trailExtension = bestPath.slice(0, reachableIdx);
+          this.opts.setPathPreviewLock({ heroId: selectedId, waypoint: dest, reachableIdx });
+          const ok = tc.requestMove(selectedId, dest, actualCost, trailExtension);
+          if (!ok) {
+            this.opts.setPathPreviewLock(null);
+          }
+          this.opts.onStateChanged?.();
+          this.path = bestPath.slice(reachableIdx);
+          this.opts.onPathChanged(this.path);
+          this.lastClickDebug.moved = ok;
+          this.lastClickDebug.reason = ok
+            ? clamped
+              ? `attack clamped to ${dest.q},${dest.r}`
+              : "attack"
+            : "requestMove rejected";
+          this.opts.onHudUpdate();
+          this.opts.onRedraw();
+          return;
+        }
+      }
+      this.lastClickDebug.reason = "no attack path";
+      return;
+    }
+
+    const clickedSettlement = Object.values(this.state.settlements).find(
+      (s) => s.q === t.q && s.r === t.r
+    );
+    if (clickedSettlement && !selectedId) {
+      const tc = this.opts.getTurnController();
+      tc.selectSettlement(clickedSettlement.id);
+      this.opts.onStateChanged?.();
+      this.lastClickDebug.moved = false;
+      this.lastClickDebug.reason = "settlement_select";
+      this.opts.onHudUpdate();
+      return;
+    }
+
+    if (!selectedId) {
+      this.lastClickDebug.reason = "no selection";
+      return;
+    }
+    if (!startTile) {
+      this.lastClickDebug.reason = "no hero";
+      return;
+    }
+    const newPath = findPath(this.opts.map, { q: startTile.q, r: startTile.r }, t, occupiedHexes);
+    this.lastClickDebug.path = newPath;
+    if (newPath.length === 0) {
+      this.lastClickDebug.reason = "empty path";
+      return;
+    }
+    const reachableIdx = computeReachableSplit(newPath, this.opts.map, startTile.movementRemaining);
+    const clamped = reachableIdx < newPath.length;
+    const actualCost = computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...newPath.slice(0, reachableIdx)]);
+    if (reachableIdx === 0) {
+      this.lastClickDebug.reason = "impassable first step";
+      return;
+    }
+    const dest = newPath[reachableIdx - 1];
+    const tc = this.opts.getTurnController();
+    const trailExtension = newPath.slice(0, reachableIdx);
+    this.opts.setPathPreviewLock({ heroId: selectedId, waypoint: dest, reachableIdx });
+    const ok = tc.requestMove(selectedId, dest, actualCost, trailExtension);
+    if (!ok) {
+      this.opts.setPathPreviewLock(null);
+    }
+    this.opts.onStateChanged?.();
+    this.path = newPath.slice(reachableIdx);
+    this.opts.onPathChanged(this.path);
+    this.lastClickDebug.moved = ok;
+    this.lastClickDebug.reason = ok
+      ? clamped
+        ? `clamped to ${dest.q},${dest.r}`
+        : ""
+      : "requestMove rejected";
+    this.opts.onHudUpdate();
+    this.opts.onRedraw();
+  }
+
+  private onWheel(e: WheelEvent): void {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    this.opts.camera.zoomAt(e.clientX, e.clientY, factor);
+    this.opts.onRedraw();
   }
 
   centerOn(q: number, r: number): void {

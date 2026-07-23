@@ -13,7 +13,7 @@ const API_URL = `http://127.0.0.1:${API_PORT}`;
 
 function startApi(): ChildProcess {
   const child = spawn("npx", ["tsx", "server/index.ts"], {
-    env: { ...process.env, PORT: String(API_PORT) },
+    env: { ...process.env, API_PORT: String(API_PORT) },
     stdio: ["ignore", "pipe", "pipe"],
     shell: true,
   });
@@ -24,7 +24,7 @@ function startApi(): ChildProcess {
 
 function startWeb(): ChildProcess {
   const child = spawn("npx", ["vite", "preview", "--port", String(WEB_PORT)], {
-    env: process.env,
+    env: { ...process.env, API_PORT: String(API_PORT) },
     stdio: ["ignore", "pipe", "pipe"],
     shell: true,
   });

@@ -5,6 +5,47 @@ import { settings } from "../state/settings";
 
 export type Faction = "player" | "enemy";
 
+/** 8-way direction for isometric/hex entities (heroes, horses, etc.) */
+export type Direction = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+
+/** Alias for backward compatibility */
+export type HeroDirection = Direction;
+
+// Hex neighbor directions and their corresponding HeroDirection names
+// Matches NEIGHBOR_DIRS in pathfinding.ts
+const DELTA_TO_DIRECTION: Array<{ dq: number; dr: number; dir: HeroDirection }> = [
+  { dq: 1, dr: 0, dir: "e" },      // +q = east
+  { dq: 1, dr: -1, dir: "ne" },    // +q-r = northeast
+  { dq: 0, dr: -1, dir: "nw" },    // -r = northwest
+  { dq: -1, dr: 0, dir: "w" },     // -q = west
+  { dq: -1, dr: 1, dir: "sw" },    // -q+r = southwest
+  { dq: 0, dr: 1, dir: "se" },     // +r = southeast
+];
+
+export function directionFromDelta(dq: number, dr: number): HeroDirection {
+  // Find matching hex direction by exact delta match
+  for (const entry of DELTA_TO_DIRECTION) {
+    if (entry.dq === dq && entry.dr === dr) {
+      return entry.dir;
+    }
+  }
+  // Fallback: use angle-based calculation for non-standard deltas
+  return directionFromAngleFallback(dq, dr);
+}
+
+export function directionFromAngle(angle: number): HeroDirection {
+  const dirs: HeroDirection[] = ["e", "se", "s", "sw", "w", "nw", "n", "ne"];
+  const idx = Math.round(((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / (Math.PI / 4)) % 8;
+  return dirs[idx];
+}
+
+function directionFromAngleFallback(dq: number, dr: number): HeroDirection {
+  const sq = dq * Math.sqrt(3);
+  const sr = dr * 1.5;
+  const angle = Math.atan2(sr, sq);
+  return directionFromAngle(angle);
+}
+
 export class Hero {
   tile: Axial;
   fromTile: Axial;
@@ -16,15 +57,18 @@ export class Hero {
   pixelOffset = { x: 0, y: 0 };
   faction: Faction;
   id: string;
+  name: string;
   ownerId: PlayerId;
   movementRemaining: number;
   trail: Axial[];
   gold: number;
   troops: number;
   stacks: UnitStack[];
+  facingDirection: HeroDirection = "n";
 
   constructor(
     id: string,
+    name: string,
     q: number,
     r: number,
     faction: Faction,
@@ -36,6 +80,7 @@ export class Hero {
     stacks?: UnitStack[]
   ) {
     this.id = id;
+    this.name = name;
     this.tile = { q, r };
     this.fromTile = { q, r };
     this.toTile = { q, r };
@@ -73,6 +118,10 @@ export class Hero {
     this.moveProgress = 0;
     this.moving = true;
     this.pixelOffset = { x: 0, y: 0 };
+    this.facingDirection = directionFromDelta(
+      this.toTile.q - this.fromTile.q,
+      this.toTile.r - this.fromTile.r
+    );
   }
 
   update(dtMs: number) {
@@ -103,6 +152,10 @@ export class Hero {
         this.fromTile = { ...this.animationPath[this.segIdx] };
         this.toTile = { ...this.animationPath[this.segIdx + 1] };
         this.moveProgress = 0;
+        this.facingDirection = directionFromDelta(
+          this.toTile.q - this.fromTile.q,
+          this.toTile.r - this.fromTile.r
+        );
       }
     }
   }
@@ -125,6 +178,7 @@ export class Hero {
   toGameState(): HeroState {
     return {
       id: this.id as HeroId,
+      name: this.name,
       ownerId: this.ownerId,
       q: this.tile.q,
       r: this.tile.r,
@@ -143,6 +197,7 @@ export class Hero {
     const faction: Faction = mapFactionFromOwner(s.ownerId);
     return new Hero(
       s.id,
+      s.name,
       s.q,
       s.r,
       faction,

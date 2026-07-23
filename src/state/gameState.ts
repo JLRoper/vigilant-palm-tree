@@ -43,6 +43,7 @@ export interface Player {
 
 export interface HeroState {
   id: HeroId;
+  name: string;
   ownerId: PlayerId;
   q: number;
   r: number;
@@ -156,8 +157,8 @@ function defaultPlayers(): Player[] {
 
 function defaultHeroes(): Record<HeroId, HeroState> {
   return {
-    h0: { id: "h0", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 0, troops: 1, stacks: normalizeStacks([{ unitTypeId: "swordsman", count: 12 }, { unitTypeId: "archer", count: 8 }, { unitTypeId: "cavalry", count: 4 }]) },
-    h1: { id: "h1", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 0, troops: 1, stacks: normalizeStacks([{ unitTypeId: "crossbowman", count: 10 }, { unitTypeId: "griffin", count: 3 }]) },
+    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 0, troops: 1, stacks: normalizeStacks([{ unitTypeId: "swordsman", count: 12 }, { unitTypeId: "archer", count: 8 }, { unitTypeId: "cavalry", count: 4 }]) },
+    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 0, troops: 1, stacks: normalizeStacks([{ unitTypeId: "crossbowman", count: 10 }, { unitTypeId: "griffin", count: 3 }]) },
   };
 }
 
@@ -293,6 +294,11 @@ export function startMove(
   }
   if (!Number.isFinite(cost) || cost < 0) {
     return { state, ok: false, reason: "impassable" };
+  }
+  for (const [id, other] of Object.entries(state.heroes)) {
+    if (id !== heroId && other.q === toTile.q && other.r === toTile.r) {
+      return { state, ok: false, reason: "occupied" };
+    }
   }
   if (hero.movementRemaining < cost) {
     return { state, ok: false, reason: "insufficient_movement" };
@@ -784,5 +790,82 @@ export function tradeResources(
     },
     ok: true,
     reason: "",
+  };
+}
+
+export const MAX_HEROES_PER_PLAYER = 5;
+export const HERO_RECRUIT_COST = 1;
+
+export interface RecruitHeroResult {
+  state: GameState;
+  hero?: HeroState;
+  error?: string;
+}
+
+export function recruitHero(
+  state: GameState,
+  playerId: PlayerId,
+  heroName: string,
+  settlementId: SettlementId,
+): RecruitHeroResult {
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player) return { state, error: "Player not found" };
+  if (player.heroIds.length >= MAX_HEROES_PER_PLAYER) {
+    return { state, error: "Already have 5 heroes" };
+  }
+
+  const settlement = state.settlements[settlementId];
+  if (!settlement) return { state, error: "Settlement not found" };
+  if (settlement.ownerId !== playerId) return { state, error: "Not your settlement" };
+  if (settlement.gold < HERO_RECRUIT_COST) {
+    return { state, error: "Not enough gold" };
+  }
+
+  for (const hero of Object.values(state.heroes)) {
+    if (hero.q === settlement.q && hero.r === settlement.r) {
+      return { state, error: "Hex is occupied" };
+    }
+  }
+
+  const indices = Array.from({ length: MAX_HEROES_PER_PLAYER }, (_, i) => i);
+  const usedIndices = new Set(
+    player.heroIds.map((id) => {
+      const num = parseInt(id.replace(/^h/, ""), 10);
+      return Number.isFinite(num) ? num : -1;
+    }),
+  );
+  const nextIdx = indices.find((i) => !usedIndices.has(i)) ?? player.heroIds.length;
+  const heroId = `h${nextIdx}`;
+
+  const hero: HeroState = {
+    id: heroId,
+    name: heroName,
+    ownerId: playerId,
+    q: settlement.q,
+    r: settlement.r,
+    movementRemaining: MOVEMENT_PER_TURN,
+    previousQ: null,
+    previousR: null,
+    previousMovementRemaining: null,
+    trail: [{ q: settlement.q, r: settlement.r }],
+    gold: 0,
+    troops: 1,
+    stacks: normalizeStacks([]),
+  };
+
+  return {
+    state: {
+      ...state,
+      heroes: { ...state.heroes, [heroId]: hero },
+      settlements: {
+        ...state.settlements,
+        [settlement.id]: { ...settlement, gold: settlement.gold - HERO_RECRUIT_COST },
+      },
+      players: state.players.map((p) =>
+        p.id === playerId ? { ...p, heroIds: [...p.heroIds, heroId] } : p,
+      ),
+      dirty: true,
+    },
+    hero,
   };
 }

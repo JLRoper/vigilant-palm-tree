@@ -1,7 +1,8 @@
 import { Axial, hexDistance } from "../core/hex";
 import { GameMap } from "./gameMap";
+import { TERRAIN_COST } from "./terrain";
 
-const NEIGHBOR_DIRS: Axial[] = [
+export const NEIGHBOR_DIRS: Axial[] = [
   { q: 1, r: 0 },
   { q: 1, r: -1 },
   { q: 0, r: -1 },
@@ -10,7 +11,7 @@ const NEIGHBOR_DIRS: Axial[] = [
   { q: 0, r: 1 },
 ];
 
-export function findPath(map: GameMap, start: Axial, goal: Axial): Axial[] {
+export function findPath(map: GameMap, start: Axial, goal: Axial, blockedHexes?: Set<string>): Axial[] {
   if (!map.isPassable(goal.q, goal.r)) return [];
   if (start.q === goal.q && start.r === goal.r) return [];
 
@@ -42,8 +43,9 @@ export function findPath(map: GameMap, start: Axial, goal: Axial): Axial[] {
       const nq = current.q + dir.q;
       const nr = current.r + dir.r;
       if (!map.isPassable(nq, nr)) continue;
-      const tentative = (gScore.get(key(current)) ?? Infinity) + map.cost(nq, nr);
       const nKey = `${nq},${nr}`;
+      if (blockedHexes?.has(nKey)) continue;
+      const tentative = (gScore.get(key(current)) ?? Infinity) + map.cost(nq, nr);
       if (tentative < (gScore.get(nKey) ?? Infinity)) {
         cameFrom.set(nKey, key(current));
         gScore.set(nKey, tentative);
@@ -56,6 +58,16 @@ export function findPath(map: GameMap, start: Axial, goal: Axial): Axial[] {
   }
 
   return [];
+}
+
+export function computePathCost(map: GameMap, path: readonly Axial[]): number {
+  let cost = 0;
+  for (let i = 1; i < path.length; i++) {
+    const t = map.get(path[i].q, path[i].r);
+    if (t) cost += TERRAIN_COST[t];
+    else cost += Infinity;
+  }
+  return Number.isFinite(cost) ? cost : 0;
 }
 
 function reconstruct(cameFrom: Map<string, string>, end: Axial): Axial[] {

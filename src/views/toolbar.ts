@@ -2,7 +2,7 @@ import type { Game } from "../io/api";
 import { api } from "../io/api";
 import { forgetGame, listUserGames, type UserGameEntry } from "../io/userGames";
 import type { GameState } from "../state/gameState";
-import { openSettingsMenu } from "./settingsMenu";
+import { openSettingsMenu, type MapInfo } from "./settingsMenu";
 import {
   PopupMenu,
   menuTheme,
@@ -39,11 +39,15 @@ export interface ToolbarCallbacks {
     seed: number;
     castleSeed?: number;
     castleCount?: number;
+    mapSize?: "small" | "medium" | "large";
   }) => void | Promise<void>;
   onLoad: (game: Game, tiles: Awaited<ReturnType<typeof api.getTiles>>) => void | Promise<void>;
   onSave: () => void | Promise<void>;
   onEndTurn: () => void | Promise<void>;
+  onHeroes?: () => void;
+  onSettlements?: () => void;
   onForget?: (id: number) => void;
+  getMapInfo?: () => MapInfo | null;
 }
 
 export interface ToolbarOptions {
@@ -58,6 +62,8 @@ export class Toolbar {
   private loadBtn: HTMLButtonElement;
   private saveBtn: HTMLButtonElement;
   private endTurnBtn: HTMLButtonElement;
+  private heroesBtn: HTMLButtonElement;
+  private settlementsBtn: HTMLButtonElement;
   private calendarEl: HTMLElement;
   private calendarActiveEl: HTMLElement;
   private busy = false;
@@ -94,7 +100,7 @@ export class Toolbar {
     });
     gear.addEventListener("click", (e) => {
       e.stopPropagation();
-      openSettingsMenu(document.body);
+      openSettingsMenu({ parent: document.body, getMapInfo: this.opts.callbacks.getMapInfo });
     });
     gear.addEventListener("mousedown", (e) => e.stopPropagation());
     this.menu.root.appendChild(gear);
@@ -259,10 +265,24 @@ export class Toolbar {
       });
     });
 
+    this.heroesBtn = this.makeButton("Heroes", false);
+    this.heroesBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      this.opts.callbacks.onHeroes?.();
+    });
+
+    this.settlementsBtn = this.makeButton("Settlements", false);
+    this.settlementsBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      this.opts.callbacks.onSettlements?.();
+    });
+
     this.menu.appendContent(this.newBtn);
     this.menu.appendContent(this.loadBtn);
     this.menu.appendContent(this.saveBtn);
     this.menu.appendContent(this.endTurnBtn);
+    this.menu.appendContent(this.heroesBtn);
+    this.menu.appendContent(this.settlementsBtn);
     this.refresh();
   }
 
@@ -270,10 +290,13 @@ export class Toolbar {
     const ok = this.opts.state.backendOk();
     const active = this.opts.state.hasActiveGame();
     const endTurnOk = this.opts.state.canEndTurnNow();
+    const hasGameState = this.opts.state.getCalendar() !== null;
     this.setEnabled(this.newBtn, ok && !this.busy);
     this.setEnabled(this.loadBtn, ok && !this.busy);
     this.setEnabled(this.saveBtn, ok && active && !this.busy);
     this.setEnabled(this.endTurnBtn, endTurnOk && !this.busy);
+    this.setEnabled(this.heroesBtn, hasGameState && !this.busy);
+    this.setEnabled(this.settlementsBtn, hasGameState && !this.busy);
     this.refreshCalendar();
   }
 
@@ -415,6 +438,33 @@ export class Toolbar {
     styleInput(castleCountInput);
     content.appendChild(castleCountInput);
 
+    const sizeLabel = document.createElement("label");
+    sizeLabel.textContent = "Map size";
+    sizeLabel.style.opacity = "0.7";
+    content.appendChild(sizeLabel);
+
+    const sizeSelect = document.createElement("select");
+    sizeSelect.style.width = "100%";
+    sizeSelect.style.padding = "8px";
+    sizeSelect.style.fontSize = "12px";
+    sizeSelect.style.border = "1px solid #444";
+    sizeSelect.style.borderRadius = "4px";
+    sizeSelect.style.backgroundColor = "#1a1a1a";
+    sizeSelect.style.color = "#eee";
+    const sizes: Array<{ value: string; label: string }> = [
+      { value: "small", label: "Small (24x18)" },
+      { value: "medium", label: "Medium (36x27)" },
+      { value: "large", label: "Large (48x36)" },
+    ];
+    for (const s of sizes) {
+      const opt = document.createElement("option");
+      opt.value = s.value;
+      opt.textContent = s.label;
+      sizeSelect.appendChild(opt);
+    }
+    sizeSelect.value = "small";
+    content.appendChild(sizeSelect);
+
     const errorLine = document.createElement("div");
     Object.assign(errorLine.style, { ...menuTheme.error, minHeight: "14px", marginTop: "4px" });
     content.appendChild(errorLine);
@@ -466,11 +516,12 @@ export class Toolbar {
         return;
       }
       const castleCount = Math.max(2, Math.min(5, Math.floor(castleCountRaw)));
+      const mapSize = (sizeSelect.value || "small") as "small" | "medium" | "large";
       confirm.disabled = true;
       cancel.disabled = true;
       errorLine.textContent = "Creating…";
       try {
-        await this.opts.callbacks.onNew({ name, seed, castleSeed, castleCount });
+        await this.opts.callbacks.onNew({ name, seed, castleSeed, castleCount, mapSize });
         modal.close();
       } catch (e) {
         confirm.disabled = false;

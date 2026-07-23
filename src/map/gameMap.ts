@@ -17,13 +17,25 @@ export type TileRow = {
   resource: ResourceType | null;
 };
 
+export type MapSize = "small" | "medium" | "large";
+
+export const MAP_SIZES: Record<MapSize, { width: number; height: number; label: string }> = {
+  small:  { width: 24, height: 18, label: "Small" },
+  medium: { width: 36, height: 27, label: "Medium" },
+  large:  { width: 48, height: 36, label: "Large" },
+};
+
 export class GameMap {
   width = 24;
   height = 18;
   tiles: Terrain[] = [];
   resourceTiles: (ResourceTile | undefined)[] = [];
 
-  constructor(seed = 1) {
+  constructor(seed = 1, mapSize?: MapSize) {
+    if (mapSize && MAP_SIZES[mapSize]) {
+      this.width = MAP_SIZES[mapSize].width;
+      this.height = MAP_SIZES[mapSize].height;
+    }
     this.tiles = generateTerrain(mulberry32(seed), this.width, this.height);
     if (!this.isPassable(HERO_SPAWN.q, HERO_SPAWN.r)) {
       this.tiles[this.index(HERO_SPAWN.q, HERO_SPAWN.r)] = "grass";

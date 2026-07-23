@@ -77,6 +77,7 @@ function makeHeroes(
     if (!castle) continue;
     heroes.push({
       id: heroIdFor(i),
+      name: i === 0 ? "Commander" : "Warlord",
       ownerId: i,
       q: castle.tile.q,
       r: castle.tile.r,
@@ -212,6 +213,7 @@ function backfillHero(h: Partial<HeroState> & { id: HeroId; ownerId: number; q: 
     troops: h.troops ?? 1,
     stacks: normalizeStacks(h.stacks),
     id: h.id,
+    name: h.name ?? h.id,
     ownerId: h.ownerId,
     q: h.q,
     r: h.r,

@@ -422,9 +422,12 @@ export class HeroInfoMenu {
 
   show(hero: Hero, player: Player, state: GameState): void {
     this.currentHeroId = hero.id;
-    this.menu.setTitle(`Hero — ${player.name}`);
+    this.menu.setTitle(`Hero \u2014 ${player.name}`);
     this.update(hero, state);
     if (!this.visible) {
+      if (!this.menu.root.parentNode) {
+        document.body.appendChild(this.menu.root);
+      }
       this.menu.root.style.display = "";
       this.visible = true;
     }
@@ -447,7 +450,7 @@ export class HeroInfoMenu {
   }
 
   update(hero: Hero, state: GameState): void {
-    this.nameEl.textContent = hero.id;
+    this.nameEl.textContent = hero.name;
     this.goldEl.textContent = `${hero.gold}g`;
     this.foodEl.textContent = "0 food";
     const remaining = Math.max(0, hero.movementRemaining);

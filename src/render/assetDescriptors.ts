@@ -41,7 +41,7 @@ import resourceWoodPileBubbly from "../resources/resource-wood-pile-bubbly.png?u
 import resourceStonePileBubbly from "../resources/resource-stone-pile-bubbly.png?url";
 import resourceIronPileBubbly from "../resources/resource-iron-pile-bubbly.png?url";
 import resourceArcanePileBubbly from "../resources/resource-arcane-pile-bubbly.png?url";
-import { Faction } from "../entities/hero";
+import { Faction, Direction } from "../entities/hero";
 import { CastleLevel } from "../entities/settlement";
 import { ResourceType, RESOURCES } from "../map/resourceTiles";
 import type { ResourceStyle } from "../state/settings";
@@ -57,6 +57,8 @@ export type SpriteKey =
   | `resource-pile-smol.${ResourceType}`
   | `resource-pile-bubbly.${ResourceType}`
   | `hero.${Faction}`
+  | `hero.player.${Direction}`
+  | `horse.${string}.${Direction}`
   | `building.${string}.${string}.${number}`;
 
 export type Anchor = "bottom" | "center";
@@ -89,10 +91,6 @@ export const RESOURCE_SPRITES: Record<ResourceType, string> = {
   arcane: resourceArcane,
 };
 
-// Cartography-pin variant (parked direction per docs/art-style.md
-// "Future directions"). Same silhouette across the set; differentiated
-// by woodcut symbol + accent. Wired in alongside the locked rune-stone
-// direction; no caller in the codebase uses `resource-cart.*` keys yet.
 export const RESOURCE_CART_SPRITES: Record<ResourceType, string> = {
   gold: resourceGoldCart,
   wood: resourceWoodCart,
@@ -101,8 +99,6 @@ export const RESOURCE_CART_SPRITES: Record<ResourceType, string> = {
   arcane: resourceArcaneCart,
 };
 
-// FLUX-illustrated variant of the cartography pin — generated via
-// tools/sprites/flux-gen.mjs. Higher fidelity than the procedural set.
 export const RESOURCE_ILLUST_SPRITES: Record<ResourceType, string> = {
   gold: resourceGoldIllust,
   wood: resourceWoodIllust,
@@ -111,7 +107,6 @@ export const RESOURCE_ILLUST_SPRITES: Record<ResourceType, string> = {
   arcane: resourceArcaneIllust,
 };
 
-// Constellation medallions (parked direction per docs/art-style.md).
 export const RESOURCE_CONSTELLATION_SPRITES: Record<ResourceType, string> = {
   gold: resourceGoldConstellation,
   wood: resourceWoodConstellation,
@@ -120,7 +115,6 @@ export const RESOURCE_CONSTELLATION_SPRITES: Record<ResourceType, string> = {
   arcane: resourceArcaneConstellation,
 };
 
-// Heraldic animal crests (parked direction per docs/art-style.md).
 export const RESOURCE_CREST_SPRITES: Record<ResourceType, string> = {
   gold: resourceGoldCrest,
   wood: resourceWoodCrest,
@@ -129,7 +123,6 @@ export const RESOURCE_CREST_SPRITES: Record<ResourceType, string> = {
   arcane: resourceArcaneCrest,
 };
 
-// Isometric realistic resource piles — FLUX-generated, viewed from 3/4 angle.
 export const RESOURCE_PILE_SPRITES: Record<ResourceType, string> = {
   gold: resourceGoldPile,
   wood: resourceWoodPile,
@@ -138,8 +131,6 @@ export const RESOURCE_PILE_SPRITES: Record<ResourceType, string> = {
   arcane: resourceArcanePile,
 };
 
-// Smaller, no-outline variant of the isometric pile — renders at half the
-// hex footprint so it reads as a tiny accent rather than the dominant mark.
 export const RESOURCE_PILE_SMOL_SPRITES: Record<ResourceType, string> = {
   gold: resourceGoldPileSmol,
   wood: resourceWoodPileSmol,
@@ -148,8 +139,6 @@ export const RESOURCE_PILE_SMOL_SPRITES: Record<ResourceType, string> = {
   arcane: resourceArcanePileSmol,
 };
 
-// Gameified bubbly pixel-art version of the iso piles — simplified rounded
-// cartoon shapes, still isometric 3/4 view, ~50% larger than smol (0.475 × 1.5 ≈ 0.71).
 export const RESOURCE_PILE_BUBBLY_SPRITES: Record<ResourceType, string> = {
   gold: resourceGoldPileBubbly,
   wood: resourceWoodPileBubbly,
@@ -194,16 +183,203 @@ export const RESOURCE_DESCRIPTORS: Record<`resource.${ResourceType}`, SpriteDesc
     ])
   ) as Record<`resource.${ResourceType}`, SpriteDescriptor>;
 
+// Generic helper to load directional sprites from a glob
+function loadDirectionalSprites(
+  glob: Record<string, { default: string }>,
+  pattern: RegExp,
+  fallbacks: Partial<Record<Direction, Direction>> = {}
+): Record<Direction, string | null> {
+  const images: Record<Direction, string | null> = {
+    n: null, ne: null, e: null, se: null, s: null, sw: null, w: null, nw: null,
+  };
+
+  for (const [key, mod] of Object.entries(glob)) {
+    const match = key.match(pattern);
+    if (match && mod.default) {
+      const dir = match[1] as Direction;
+      if (dir in images) {
+        images[dir] = mod.default;
+      }
+    }
+  }
+
+  for (const [missing, fallback] of Object.entries(fallbacks)) {
+    if (!images[missing as Direction] && images[fallback]) {
+      images[missing as Direction] = images[fallback]!;
+    }
+  }
+
+  return images;
+}
+
+function createDirectionalDescriptors(
+  prefix: string,
+  images: Record<Direction, string | null>,
+  anchor: Anchor = "bottom",
+  sizing: Sizing = { kind: "fitHeight", hexSizeMul: 1.0 },
+  naturalSize?: number
+): Record<string, SpriteDescriptor> {
+  const descriptors: Record<string, SpriteDescriptor> = {};
+
+  for (const [dir, url] of Object.entries(images)) {
+    if (!url) continue;
+    const key = `${prefix}.${dir}` as SpriteKey;
+    descriptors[key] = { key, url, anchor, sizing, naturalSize };
+  }
+  return descriptors;
+}
+
+// Load hero player sprites from horse/commander-1/ directory
+const HERO_PLAYER_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-1/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HERO_PLAYER_IMAGES = loadDirectionalSprites(
+  HERO_PLAYER_GLOB,
+  /hero-player-(n|ne|e|se|s|sw|w|nw)\.png$/
+);
+
+export const HERO_PLAYER_DESCRIPTORS: Record<`hero.player.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "hero.player",
+    HERO_PLAYER_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`hero.player.${Direction}`, SpriteDescriptor>;
+
+// Load bubbly horse sprites from horse/commander-2/ directory
+const HORSE_BUBBLY_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-2/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_BUBBLY_IMAGES = loadDirectionalSprites(
+  HORSE_BUBBLY_GLOB,
+  /bubbly-(n|ne|e|se|s|sw|w|nw)\.png$/,
+  { n: "nw", s: "se" }
+);
+
+export const HORSE_BUBBLY_DESCRIPTORS: Record<`horse.bubbly.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "horse.bubbly",
+    HORSE_BUBBLY_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    64
+  ) as Record<`horse.bubbly.${Direction}`, SpriteDescriptor>;
+
+// Load shadow knight sprites from horse/commander-3/ directory (cardinal directions + diagonal fallbacks)
+const HORSE_SHADOW_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-3/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_SHADOW_IMAGES = loadDirectionalSprites(
+  HORSE_SHADOW_GLOB,
+  /shadow-(n|e|s|w)\.png$/,
+  { ne: "n", nw: "n", se: "s", sw: "s" }
+);
+
+export const HORSE_SHADOW_DESCRIPTORS: Record<`horse.shadow.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "horse.shadow",
+    HORSE_SHADOW_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`horse.shadow.${Direction}`, SpriteDescriptor>;
+
+// Load paladin sprites from horse/commander-4/ directory (cardinal directions + diagonal fallbacks)
+const HORSE_PALADIN_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-4/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_PALADIN_IMAGES = loadDirectionalSprites(
+  HORSE_PALADIN_GLOB,
+  /paladin-(n|e|s|w)\.png$/,
+  { ne: "n", nw: "n", se: "s", sw: "s" }
+);
+
+export const HORSE_PALADIN_DESCRIPTORS: Record<`horse.paladin.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "horse.paladin",
+    HORSE_PALADIN_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`horse.paladin.${Direction}`, SpriteDescriptor>;
+
+// Load ranger sprites from horse/commander-5/ directory (cardinal directions + diagonal fallbacks)
+const HORSE_RANGER_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-5/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_RANGER_IMAGES = loadDirectionalSprites(
+  HORSE_RANGER_GLOB,
+  /ranger-(n|e|s|w)\.png$/,
+  { ne: "n", nw: "n", se: "s", sw: "s" }
+);
+
+export const HORSE_RANGER_DESCRIPTORS: Record<`horse.ranger.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "horse.ranger",
+    HORSE_RANGER_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`horse.ranger.${Direction}`, SpriteDescriptor>;
+
+// Load arcane spellrider sprites from horse/commander-6/ directory (cardinal directions + diagonal fallbacks)
+const HORSE_ARCANE_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-6/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_ARCANE_IMAGES = loadDirectionalSprites(
+  HORSE_ARCANE_GLOB,
+  /arcane-(n|e|s|w)\.png$/,
+  { ne: "n", nw: "n", se: "s", sw: "s" }
+);
+
+export const HORSE_ARCANE_DESCRIPTORS: Record<`horse.arcane.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "horse.arcane",
+    HORSE_ARCANE_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`horse.arcane.${Direction}`, SpriteDescriptor>;
+
+// Load dark unicorn sprites from horse/commander-7/ directory (cardinal directions + diagonal fallbacks)
+const HORSE_UNICORN_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-7/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_UNICORN_IMAGES = loadDirectionalSprites(
+  HORSE_UNICORN_GLOB,
+  /unicorn-(n|e|s|w)\.png$/,
+  { ne: "n", nw: "n", se: "s", sw: "s" }
+);
+
+export const HORSE_UNICORN_DESCRIPTORS: Record<`horse.unicorn.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "horse.unicorn",
+    HORSE_UNICORN_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`horse.unicorn.${Direction}`, SpriteDescriptor>;
+
 export const RESOURCE_CART_DESCRIPTORS: Record<`resource-cart.${ResourceType}`, SpriteDescriptor> =
   Object.fromEntries(
     RESOURCES.map((r) => [
       `resource-cart.${r}`,
-      {
-        key: `resource-cart.${r}`,
-        url: RESOURCE_CART_SPRITES[r],
-        anchor: "center",
-        sizing: { kind: "fitWidth", hexSizeMul: 0.9 },
-      } as SpriteDescriptor,
+      { key: `resource-cart.${r}`, url: RESOURCE_CART_SPRITES[r], anchor: "center", sizing: { kind: "fitWidth", hexSizeMul: 0.9 } } as SpriteDescriptor,
     ])
   ) as Record<`resource-cart.${ResourceType}`, SpriteDescriptor>;
 
@@ -211,12 +387,7 @@ export const RESOURCE_ILLUST_DESCRIPTORS: Record<`resource-illust.${ResourceType
   Object.fromEntries(
     RESOURCES.map((r) => [
       `resource-illust.${r}`,
-      {
-        key: `resource-illust.${r}`,
-        url: RESOURCE_ILLUST_SPRITES[r],
-        anchor: "center",
-        sizing: { kind: "fitWidth", hexSizeMul: 0.9 },
-      } as SpriteDescriptor,
+      { key: `resource-illust.${r}`, url: RESOURCE_ILLUST_SPRITES[r], anchor: "center", sizing: { kind: "fitWidth", hexSizeMul: 0.9 } } as SpriteDescriptor,
     ])
   ) as Record<`resource-illust.${ResourceType}`, SpriteDescriptor>;
 
@@ -224,12 +395,7 @@ export const RESOURCE_CONSTELLATION_DESCRIPTORS: Record<`resource-constellation.
   Object.fromEntries(
     RESOURCES.map((r) => [
       `resource-constellation.${r}`,
-      {
-        key: `resource-constellation.${r}`,
-        url: RESOURCE_CONSTELLATION_SPRITES[r],
-        anchor: "center",
-        sizing: { kind: "fitWidth", hexSizeMul: 0.9 },
-      } as SpriteDescriptor,
+      { key: `resource-constellation.${r}`, url: RESOURCE_CONSTELLATION_SPRITES[r], anchor: "center", sizing: { kind: "fitWidth", hexSizeMul: 0.9 } } as SpriteDescriptor,
     ])
   ) as Record<`resource-constellation.${ResourceType}`, SpriteDescriptor>;
 
@@ -237,12 +403,7 @@ export const RESOURCE_CREST_DESCRIPTORS: Record<`resource-crest.${ResourceType}`
   Object.fromEntries(
     RESOURCES.map((r) => [
       `resource-crest.${r}`,
-      {
-        key: `resource-crest.${r}`,
-        url: RESOURCE_CREST_SPRITES[r],
-        anchor: "center",
-        sizing: { kind: "fitWidth", hexSizeMul: 0.9 },
-      } as SpriteDescriptor,
+      { key: `resource-crest.${r}`, url: RESOURCE_CREST_SPRITES[r], anchor: "center", sizing: { kind: "fitWidth", hexSizeMul: 0.9 } } as SpriteDescriptor,
     ])
   ) as Record<`resource-crest.${ResourceType}`, SpriteDescriptor>;
 
@@ -250,12 +411,7 @@ export const RESOURCE_PILE_DESCRIPTORS: Record<`resource-pile.${ResourceType}`, 
   Object.fromEntries(
     RESOURCES.map((r) => [
       `resource-pile.${r}`,
-      {
-        key: `resource-pile.${r}`,
-        url: RESOURCE_PILE_SPRITES[r],
-        anchor: "center",
-        sizing: { kind: "fitWidth", hexSizeMul: 0.95 },
-      } as SpriteDescriptor,
+      { key: `resource-pile.${r}`, url: RESOURCE_PILE_SPRITES[r], anchor: "center", sizing: { kind: "fitWidth", hexSizeMul: 0.95 } } as SpriteDescriptor,
     ])
   ) as Record<`resource-pile.${ResourceType}`, SpriteDescriptor>;
 
@@ -263,12 +419,7 @@ export const RESOURCE_PILE_SMOL_DESCRIPTORS: Record<`resource-pile-smol.${Resour
   Object.fromEntries(
     RESOURCES.map((r) => [
       `resource-pile-smol.${r}`,
-      {
-        key: `resource-pile-smol.${r}`,
-        url: RESOURCE_PILE_SMOL_SPRITES[r],
-        anchor: "center",
-        sizing: { kind: "fitWidth", hexSizeMul: 0.475 }, // half of the 0.95 outline variant
-      } as SpriteDescriptor,
+      { key: `resource-pile-smol.${r}`, url: RESOURCE_PILE_SMOL_SPRITES[r], anchor: "center", sizing: { kind: "fitWidth", hexSizeMul: 0.475 } } as SpriteDescriptor,
     ])
   ) as Record<`resource-pile-smol.${ResourceType}`, SpriteDescriptor>;
 
@@ -276,12 +427,7 @@ export const RESOURCE_PILE_BUBBLY_DESCRIPTORS: Record<`resource-pile-bubbly.${Re
   Object.fromEntries(
     RESOURCES.map((r) => [
       `resource-pile-bubbly.${r}`,
-      {
-        key: `resource-pile-bubbly.${r}`,
-        url: RESOURCE_PILE_BUBBLY_SPRITES[r],
-        anchor: "center",
-        sizing: { kind: "fitWidth", hexSizeMul: 0.71 }, // 50% bigger than smol (0.475 × 1.5)
-      } as SpriteDescriptor,
+      { key: `resource-pile-bubbly.${r}`, url: RESOURCE_PILE_BUBBLY_SPRITES[r], anchor: "center", sizing: { kind: "fitWidth", hexSizeMul: 0.71 } } as SpriteDescriptor,
     ])
   ) as Record<`resource-pile-bubbly.${ResourceType}`, SpriteDescriptor>;
 
@@ -312,7 +458,14 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(RESOURCE_PILE_DESCRIPTORS),
   ...Object.values(RESOURCE_PILE_SMOL_DESCRIPTORS),
   ...Object.values(RESOURCE_PILE_BUBBLY_DESCRIPTORS),
+  ...Object.values(HERO_PLAYER_DESCRIPTORS),
   ...Object.values(HERO_DESCRIPTORS),
+  ...Object.values(HORSE_BUBBLY_DESCRIPTORS),
+  ...Object.values(HORSE_SHADOW_DESCRIPTORS),
+  ...Object.values(HORSE_PALADIN_DESCRIPTORS),
+  ...Object.values(HORSE_RANGER_DESCRIPTORS),
+  ...Object.values(HORSE_ARCANE_DESCRIPTORS),
+  ...Object.values(HORSE_UNICORN_DESCRIPTORS),
 ];
 
 export function castleKey(level: CastleLevel): `castle.${CastleLevel}` {
@@ -327,10 +480,7 @@ export function resourceCartKey(type: ResourceType): `resource-cart.${ResourceTy
   return `resource-cart.${type}`;
 }
 
-export function resourceStyleKey(
-  type: ResourceType,
-  style: ResourceStyle,
-): SpriteKey {
+export function resourceStyleKey(type: ResourceType, style: ResourceStyle): SpriteKey {
   switch (style) {
     case "cartography-pin":  return `resource-cart.${type}`;
     case "illustrated-pin":  return `resource-illust.${type}`;
@@ -348,10 +498,34 @@ export function heroKey(faction: Faction): `hero.${Faction}` {
   return `hero.${faction}`;
 }
 
-export function buildingKey(
-  style: string,
-  kind: string,
-  level: number,
-): SpriteKey {
+export function heroDirectionKey(_faction: "player", direction: Direction): `hero.player.${Direction}` {
+  return `hero.player.${direction}`;
+}
+
+export function horseBubblyKey(direction: Direction): `horse.bubbly.${Direction}` {
+  return `horse.bubbly.${direction}`;
+}
+
+export function horseShadowKey(direction: Direction): `horse.shadow.${Direction}` {
+  return `horse.shadow.${direction}`;
+}
+
+export function horsePaladinKey(direction: Direction): `horse.paladin.${Direction}` {
+  return `horse.paladin.${direction}`;
+}
+
+export function horseRangerKey(direction: Direction): `horse.ranger.${Direction}` {
+  return `horse.ranger.${direction}`;
+}
+
+export function horseArcaneKey(direction: Direction): `horse.arcane.${Direction}` {
+  return `horse.arcane.${direction}`;
+}
+
+export function horseUnicornKey(direction: Direction): `horse.unicorn.${Direction}` {
+  return `horse.unicorn.${direction}`;
+}
+
+export function buildingKey(style: string, kind: string, level: number): SpriteKey {
   return `building.${style}.${kind}.${level}`;
 }

@@ -1,6 +1,7 @@
 import type { Hero } from "../entities/hero";
 import type { Castle } from "../entities/settlement";
 import { hexDistance, type Axial } from "../core/hex";
+import { controlRange } from "../core/control";
 
 export const VISION_RANGE = 4;
 
@@ -17,7 +18,7 @@ export function computeVision(
   }
   for (const c of castles) {
     if (c.ownerId !== viewPlayerId) continue;
-    addRing(visible, c.tile, range);
+    addRing(visible, c.tile, controlRange(c.level));
   }
   return visible;
 }

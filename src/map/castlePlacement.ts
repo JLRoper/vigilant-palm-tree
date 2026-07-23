@@ -3,9 +3,9 @@ import { Castle, CastleLevel } from "../entities/settlement";
 import { GameMap } from "./gameMap";
 import { isPassable } from "./terrain";
 
-export const CASTLE_COUNT_MIN = 2;
-export const CASTLE_COUNT_MAX = 5;
-export const CASTLE_COUNT_DEFAULT = 3;
+export const CASTLE_COUNT_MIN = 4;
+export const CASTLE_COUNT_MAX = 7;
+export const CASTLE_COUNT_DEFAULT = 4;
 
 export const EDGE_BUFFER = 2;
 export const MIN_CASTLE_SPACING = 4;
@@ -74,8 +74,12 @@ function levelForIndex(idx: number): CastleLevel {
   return 3;
 }
 
+const HUMAN_CASTLE_COUNT = 2;
+
 function ownerForIndex(idx: number, playerCount: number): number | null {
-  if (idx < playerCount) return idx;
+  if (idx < HUMAN_CASTLE_COUNT) return 0;
+  const remainingIdx = idx - HUMAN_CASTLE_COUNT;
+  if (remainingIdx < playerCount - 1) return remainingIdx + 1;
   return null;
 }
 

@@ -85,6 +85,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       if (!name) return;
       void api.logEvent(name, event.type, event.payload).catch(() => {});
     },
+    getMap: () => opts.gameMap(),
   };
 }
 
