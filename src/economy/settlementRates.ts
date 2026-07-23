@@ -1,8 +1,7 @@
 import type { GameMap } from "../map/gameMap";
 import { RESOURCE_YIELD, type ResourceType } from "../map/resourceTiles";
 import type { CastleLevel } from "../entities/settlement";
-
-const SETTLEMENT_RATE_RADIUS = 3;
+import { settlementRateRadius } from "../core/control";
 
 const POP_BY_LEVEL: Record<CastleLevel, number> = {
   1: 500,
@@ -62,11 +61,12 @@ export function computeSettlementRates(
   r: number,
   level: CastleLevel
 ): ComputedRates {
+  const radius = settlementRateRadius(level);
   const rates: Partial<Record<ResourceType, number>> = {};
   let foundedOn: ResourceType | null = null;
-  for (let dq = -SETTLEMENT_RATE_RADIUS; dq <= SETTLEMENT_RATE_RADIUS; dq++) {
-    for (let dr = -SETTLEMENT_RATE_RADIUS; dr <= SETTLEMENT_RATE_RADIUS; dr++) {
-      if (Math.abs(dq + dr) > SETTLEMENT_RATE_RADIUS) continue;
+  for (let dq = -radius; dq <= radius; dq++) {
+    for (let dr = -radius; dr <= radius; dr++) {
+      if (Math.abs(dq + dr) > radius) continue;
       const rt = map.resourceTileAt(q + dq, r + dr);
       if (!rt) continue;
       rates[rt.resource] = (rates[rt.resource] ?? 0) + RESOURCE_YIELD[rt.resource];

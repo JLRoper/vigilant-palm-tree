@@ -6,6 +6,7 @@ import { Castle } from "../entities/settlement";
 import { GameMap } from "../map/gameMap";
 import { TERRAIN_COLORS, TERRAIN_COST, Terrain } from "../map/terrain";
 import { drawResourceIcons } from "./overlays/resourceIcon";
+import { drawTerritoryOutlines } from "./overlays/territoryOutline";
 import { SpriteProvider } from "./assets";
 import { computeVision, isVisible } from "./fog";
 import { settings } from "../state/settings";
@@ -73,6 +74,8 @@ export class Renderer {
       drawCastleSprite(ctx, this.sprites, c.level, x, y, HEX_SIZE);
       this.drawCastleBorder(x, y, c, opts);
     }
+
+    drawTerritoryOutlines(ctx, castles, opts.colorForOwner, this.map.width, this.map.height, visible);
 
     if (path.length > 0 && heroes.length > 0) {
       const player = heroes.find((h) => h.ownerId === opts.viewPlayerId);
