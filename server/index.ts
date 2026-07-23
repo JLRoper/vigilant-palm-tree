@@ -3,7 +3,7 @@ import cors from "cors";
 import { initSchema, pool } from "./db";
 import { router } from "./routes";
 
-const PORT = Number(process.env.PORT ?? 3001);
+const PORT = Number(process.env.API_PORT ?? 3001);
 
 async function main() {
   await initSchema();
@@ -12,8 +12,8 @@ async function main() {
   app.use(express.json());
   app.use("/api", router);
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`>> api listening on http://0.0.0.0:${PORT} (all interfaces)`);
+  app.listen(PORT, "127.0.0.1", () => {
+    console.log(`>> api listening on http://127.0.0.1:${PORT}`);
   });
 }
 

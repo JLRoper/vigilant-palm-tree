@@ -72,6 +72,7 @@ export interface SpriteDescriptor {
   anchor: Anchor;
   sizing: Sizing;
   naturalSize?: number;
+  anchorOffsetY?: number;
 }
 
 export const CASTLE_SPRITES: Record<CastleLevel, string> = {
@@ -169,12 +170,14 @@ export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescripto
     url: CASTLE_SPRITES[2],
     anchor: "bottom",
     sizing: { kind: "fitHeight", hexSizeMul: 2.2 },
+    anchorOffsetY: 8,
   },
   "castle.3": {
     key: "castle.3",
     url: CASTLE_SPRITES[3],
     anchor: "bottom",
     sizing: { kind: "fitHeight", hexSizeMul: 3.0 },
+    anchorOffsetY: 16,
   },
 };
 

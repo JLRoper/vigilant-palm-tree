@@ -82,7 +82,7 @@ function drawWithDescriptor(
     y = cy - h / 2;
   } else {
     x = cx - w / 2;
-    y = cy + hexSize * 0.5 - h;
+    y = cy + hexSize * 0.5 - h + (desc.anchorOffsetY ?? 0);
   }
   ctx.drawImage(drawable, x, y, w, h);
 }
