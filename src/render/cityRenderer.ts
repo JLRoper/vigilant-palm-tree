@@ -68,13 +68,14 @@ export interface DrawCityViewOptions {
   buildings: BuildingDef[];
   style: GenerationStyle;
   pattern: string;
+  ghost?: { gx: number; gy: number; kind: string; w: number; h: number; valid: boolean } | null;
 }
 
 export function drawCityView(
   ctx: CanvasRenderingContext2D,
   opts: DrawCityViewOptions,
 ): void {
-  const { viewportW, viewportH, settlementName, size, hover, citySpots, cityMines, provider, buildings, style, pattern } = opts;
+  const { viewportW, viewportH, settlementName, size, hover, citySpots, cityMines, provider, buildings, style, pattern, ghost } = opts;
   const ownerColor = opts.ownerColor ?? "#888888";
   const tileScale = computeCityScale(size, viewportW, viewportH);
   const tw = TILE_W * tileScale;
@@ -125,6 +126,17 @@ export function drawCityView(
     const h = b.h ?? 1;
     const fp = buildingFootprint(b.gx, b.gy, gridOrigin, screenOrigin, tileScale, w, h);
     drawBuilding(ctx, fp.cx, fp.cy, fp.hw * 2, fp.hh * 2, b.kind, b.level, ownerColor, b.style, provider);
+  }
+
+  if (ghost) {
+    const fp = buildingFootprint(ghost.gx, ghost.gy, gridOrigin, screenOrigin, tileScale, ghost.w, ghost.h);
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    ctx.strokeStyle = ghost.valid ? "#44ff44" : "#ff4444";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(fp.cx - fp.hw, fp.cy - fp.hh, fp.hw * 2, fp.hh * 2);
+    drawBuilding(ctx, fp.cx, fp.cy, fp.hw * 2, fp.hh * 2, ghost.kind as BuildingDef["kind"], 1, ownerColor, style as GenerationStyle, provider);
+    ctx.restore();
   }
 
   ctx.fillStyle = COLOR_TEXT;
