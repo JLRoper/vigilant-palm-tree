@@ -40,6 +40,12 @@ export function updateHud(
   const movementLine = selected
     ? ` · Movement: ${(selected.movementRemaining < 1 ? 0 : selected.movementRemaining).toFixed(1)}/7`
     : "";
+  const charterLine = selected?.isChartering ? (() => {
+    const ch = state.activeCharters.find((c) => c.id === selected.charterId);
+    if (!ch) return "";
+    if (ch.phase === "traveling") return ` · Chartering: traveling to ${ch.settlementName}`;
+    return ` · Chartering: ${ch.daysRemaining} days remaining`;
+  })() : "";
   const playerHero = Object.values(heroes).find((h) => h.ownerId === 0);
   const heroInfo = playerHero
     ? `Hero (${playerHero.tile.q}, ${playerHero.tile.r})${playerHero.moving ? " moving" : ""}`
@@ -49,7 +55,7 @@ export function updateHud(
   const wealthLine = `Wealth: ${playerWealth(state, 0)}g`;
   const moraleLine = playerMorale(state);
   const effectiveIncomeLine = playerEffectiveIncome(state);
-  const status = `${phase} · ${roundLine} · ${wealthLine} · ${enemiesLine}${movementLine}`;
+  const status = `${phase} · ${roundLine} · ${wealthLine} · ${enemiesLine}${movementLine}${charterLine}`;
   const dbInfo = backendOk ? `DB ${saveStatus}` : "DB offline";
   const savedInfo = lastSavedAt ? ` · Last saved ${formatTime(lastSavedAt)}` : "";
   const econLine = `${moraleLine} · ${effectiveIncomeLine}`;
@@ -64,7 +70,13 @@ export function updateHud(
           (s) => s.tile.q === hover.q && s.tile.r === hover.r
         );
         const settleLine = settle ? ` · Castle L${settle.level}` : "";
-        return `${tile}${resourceLine}${settleLine} · ${heroInfo} · ${status} · ${econLine} · ${dbInfo}${savedInfo} · ${base}`;
+        const charterTarget = state.activeCharters.find(
+          (c) => c.targetQ === hover.q && c.targetR === hover.r
+        );
+        const charterHoverLine = charterTarget
+          ? ` · Charter site: ${charterTarget.settlementName} (${charterTarget.phase})`
+          : "";
+        return `${tile}${resourceLine}${settleLine}${charterHoverLine} · ${heroInfo} · ${status} · ${econLine} · ${dbInfo}${savedInfo} · ${base}`;
       })();
   handles.textSpan.textContent = text;
 }

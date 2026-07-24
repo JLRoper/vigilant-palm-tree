@@ -26,6 +26,8 @@ type ToolbarCallbacks = {
   onEndTurn: () => void;
   onForget: (id: number) => void;
   getMapInfo?: () => MapInfo | null;
+  onStartCharter?: () => void;
+  canStartCharter?: () => boolean;
 };
 
 export class UIManager {
@@ -80,6 +82,8 @@ export class UIManager {
           callbacks.onForget(id);
         },
         getMapInfo: callbacks.getMapInfo,
+        onStartCharter: callbacks.onStartCharter,
+        canStartCharter: callbacks.canStartCharter,
       },
     });
 

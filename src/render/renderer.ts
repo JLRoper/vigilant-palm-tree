@@ -11,6 +11,7 @@ import { drawPathOverlay, drawMinimapPath } from "./overlays/pathOverlay";
 import { SpriteProvider } from "./assets";
 import { computeVision, isVisible } from "./fog";
 import { settings } from "../state/settings";
+import type { CharterState } from "../state/gameState";
 
 export interface RenderOptions {
   selectedHeroId: string | null;
@@ -23,6 +24,10 @@ export interface RenderOptions {
   pathOrigin?: Axial;
   /** Fallback origin when pathOrigin is not set. Use the selected hero's tile from game state. */
   selectedHeroTile?: Axial;
+  /** Charter targets for overlay rendering. */
+  activeCharters?: readonly CharterState[];
+  /** Valid hexes for charter placement mode. */
+  validCharterHexes?: Set<string> | null;
 }
 
 const FOG_FILL = "rgba(8, 10, 16, 0.78)";
@@ -68,6 +73,14 @@ export class Renderer {
     }
 
     drawResourceIcons(ctx, this.sprites, this.map, visible);
+
+    if (opts.activeCharters && opts.activeCharters.length > 0) {
+      this.drawCharterOverlays(ctx, opts.activeCharters, visible);
+    }
+
+    if (opts.validCharterHexes && opts.validCharterHexes.size > 0) {
+      this.drawValidCharterHexes(ctx, opts.validCharterHexes, visible);
+    }
 
     for (const c of castles) {
       const canSee =
@@ -259,6 +272,87 @@ export class Renderer {
       ctx.lineTo(cx + ox - 4, cy + oy - 6);
       ctx.lineTo(cx + ox + 4, cy + oy - 6);
       ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  private drawCharterOverlays(
+    ctx: CanvasRenderingContext2D,
+    charters: readonly CharterState[],
+    visible: Set<string>,
+  ): void {
+    for (const charter of charters) {
+      if (!isVisible(visible, charter.targetQ, charter.targetR)) continue;
+      const { x, y } = axialToPixel(charter.targetQ, charter.targetR);
+      const corners = hexCorners(x, y);
+
+      if (charter.phase === "traveling") {
+        ctx.strokeStyle = "rgba(200, 180, 140, 0.5)";
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 2;
+      } else {
+        ctx.strokeStyle = "rgba(200, 160, 80, 0.7)";
+        ctx.setLineDash([]);
+        ctx.lineWidth = 3;
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(corners[0].x, corners[0].y);
+      for (let i = 1; i < 6; i++) ctx.lineTo(corners[i].x, corners[i].y);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (charter.phase === "traveling") {
+        ctx.fillStyle = "rgba(200, 180, 140, 0.15)";
+      } else {
+        ctx.fillStyle = "rgba(200, 160, 80, 0.2)";
+      }
+      ctx.fill();
+
+      if (charter.phase === "constructing") {
+        const innerSize = HEX_SIZE * 0.5;
+        ctx.strokeStyle = "rgba(160, 120, 60, 0.6)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x - innerSize * 0.5, y - innerSize * 0.3);
+        ctx.lineTo(x + innerSize * 0.5, y - innerSize * 0.3);
+        ctx.lineTo(x, y - innerSize);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x - innerSize * 0.5, y - innerSize * 0.3);
+        ctx.lineTo(x + innerSize * 0.5, y - innerSize * 0.3);
+        ctx.lineTo(x, y + innerSize * 0.2);
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+  }
+
+  private drawValidCharterHexes(
+    ctx: CanvasRenderingContext2D,
+    hexes: Set<string>,
+    visible: Set<string>,
+  ): void {
+    for (const key of hexes) {
+      const [qs, rs] = key.split(",");
+      const q = Number(qs);
+      const r = Number(rs);
+      if (isNaN(q) || isNaN(r)) continue;
+      if (!isVisible(visible, q, r)) continue;
+      const { x, y } = axialToPixel(q, r);
+      const corners = hexCorners(x, y);
+      ctx.strokeStyle = "rgba(100, 220, 100, 0.6)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(corners[0].x, corners[0].y);
+      for (let i = 1; i < 6; i++) ctx.lineTo(corners[i].x, corners[i].y);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(100, 220, 100, 0.08)";
       ctx.fill();
     }
   }

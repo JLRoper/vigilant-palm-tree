@@ -104,6 +104,8 @@ export class GameStateManager {
       v.movementRemaining = h.movementRemaining;
       v.trail = (h.trail ?? []).map((p) => ({ q: p.q, r: p.r }));
       v.gold = h.gold ?? 0;
+      v.isChartering = h.isChartering ?? false;
+      v.charterId = h.charterId ?? null;
       if (v.moving) continue;
       if (v.tile.q === h.q && v.tile.r === h.r) continue;
       const start = { ...v.tile };

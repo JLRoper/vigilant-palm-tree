@@ -89,6 +89,8 @@ function makeHeroes(
       gold: 0,
       troops: 1,
       stacks: demoStacksForPlayer(i),
+      isChartering: false,
+      charterId: null,
     });
   }
   return heroes;
@@ -202,7 +204,7 @@ export function makeInitialStatePayload(
   };
 }
 
-function backfillHero(h: Partial<HeroState> & { id: HeroId; ownerId: number; q: number; r: number }): HeroState {
+function backfillHero(h: Partial<import("../state/gameState").HeroState> & { id: import("../state/gameState").HeroId; ownerId: number; q: number; r: number }): import("../state/gameState").HeroState {
   return {
     movementRemaining: h.movementRemaining ?? 7,
     previousQ: h.previousQ ?? null,
@@ -212,6 +214,8 @@ function backfillHero(h: Partial<HeroState> & { id: HeroId; ownerId: number; q: 
     gold: h.gold ?? 0,
     troops: h.troops ?? 1,
     stacks: normalizeStacks(h.stacks),
+    isChartering: h.isChartering ?? false,
+    charterId: h.charterId ?? null,
     id: h.id,
     name: h.name ?? h.id,
     ownerId: h.ownerId,
@@ -271,6 +275,7 @@ export function hydrateGameState(
       r: raw.r,
     });
   }
+  const settlementCount = Object.keys(settlementsRecord).length;
   return {
     round: row.round,
     day: row.day ?? row.round,
@@ -287,6 +292,9 @@ export function hydrateGameState(
     dirty: false,
     castleSeed: opts?.castleSeed ?? defaultCastleSeedFromMapSeed(row.seed),
     castleCount: opts?.castleCount ?? CASTLE_COUNT_DEFAULT,
+    activeCharters: (row as unknown as { activeCharters?: GameState["activeCharters"] }).activeCharters ?? [],
+    nextCharterId: (row as unknown as { nextCharterId?: number }).nextCharterId ?? 0,
+    nextSettlementId: (row as unknown as { nextSettlementId?: number }).nextSettlementId ?? settlementCount,
   };
 }
 

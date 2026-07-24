@@ -35,7 +35,7 @@ function makePlayer(id: PlayerId, faction: Player["faction"], name: string, hero
 }
 
 function makeHero(id: HeroId, ownerId: PlayerId, q: number, r: number, movementRemaining = MOVEMENT_PER_TURN, gold = 0, troops = 1): HeroState {
-  return { id, ownerId, q, r, movementRemaining, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q, r }], gold, troops };
+  return { id, name: id, ownerId, q, r, movementRemaining, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q, r }], gold, troops, stacks: [], isChartering: false, charterId: null };
 }
 
 function emptyWarehouse() {

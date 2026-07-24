@@ -12,6 +12,7 @@ export type PlayerId = number;
 export type Faction = "player" | "ai";
 export type HeroId = string;
 export type SettlementId = string;
+export type CharterId = string;
 export type ResourceType = "gold" | "wood" | "stone" | "iron" | "arcane" | "food";
 
 export const WAREHOUSE_RESOURCES = [
@@ -55,6 +56,25 @@ export interface HeroState {
   gold: number;
   troops: number;
   stacks: UnitStack[];
+  isChartering: boolean;
+  charterId: CharterId | null;
+}
+
+export type CharterPhase = "traveling" | "constructing";
+
+export interface CharterState {
+  id: CharterId;
+  heroId: HeroId;
+  ownerId: PlayerId;
+  targetQ: number;
+  targetR: number;
+  settlementName: string;
+  phase: CharterPhase;
+  daysRemaining: number;
+  settlementId: SettlementId;
+  resourceRates: Partial<Record<ResourceType, number>>;
+  foundedOnResource: ResourceType | null;
+  citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
 }
 
 export interface SettlementState {
@@ -95,6 +115,9 @@ export interface GameState {
   dirty: boolean;
   castleSeed: number;
   castleCount: number;
+  activeCharters: CharterState[];
+  nextCharterId: number;
+  nextSettlementId: number;
 }
 
 export const DAYS_PER_WEEK = 7;
@@ -157,8 +180,8 @@ function defaultPlayers(): Player[] {
 
 function defaultHeroes(): Record<HeroId, HeroState> {
   return {
-    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 0, troops: 1, stacks: normalizeStacks([{ unitTypeId: "swordsman", count: 12 }, { unitTypeId: "archer", count: 8 }, { unitTypeId: "cavalry", count: 4 }]) },
-    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 0, troops: 1, stacks: normalizeStacks([{ unitTypeId: "crossbowman", count: 10 }, { unitTypeId: "griffin", count: 3 }]) },
+    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 0, troops: 1, stacks: normalizeStacks([{ unitTypeId: "swordsman", count: 12 }, { unitTypeId: "archer", count: 8 }, { unitTypeId: "cavalry", count: 4 }]), isChartering: false, charterId: null },
+    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 0, troops: 1, stacks: normalizeStacks([{ unitTypeId: "crossbowman", count: 10 }, { unitTypeId: "griffin", count: 3 }]), isChartering: false, charterId: null },
   };
 }
 
@@ -222,6 +245,7 @@ export function createInitialState(opts?: InitialStateOptions): GameState {
     Object.assign(settlementsRecord, defaultSettlements());
   }
   const activePlayerId = opts?.seedActivePlayerId ?? 0;
+  const settlementCount = Object.keys(settlementsRecord).length;
   return {
     round: opts?.seedRound ?? 1,
     activePlayerId,
@@ -235,6 +259,9 @@ export function createInitialState(opts?: InitialStateOptions): GameState {
     castleSeed: opts?.seedCastleSeed ?? 0,
     castleCount: opts?.seedCastleCount ?? 3,
     day: 1,
+    activeCharters: [],
+    nextCharterId: 0,
+    nextSettlementId: settlementCount,
   };
 }
 
@@ -246,6 +273,7 @@ export function selectHero(state: GameState, heroId: HeroId): GameState {
   const hero = state.heroes[heroId];
   if (!hero) return state;
   if (hero.ownerId !== state.activePlayerId) return state;
+  if (hero.isChartering) return state;
   return { ...state, selectedHeroId: heroId };
 }
 
@@ -286,6 +314,9 @@ export function startMove(
   }
   const hero = state.heroes[heroId];
   if (!hero) return { state, ok: false, reason: "no_hero" };
+  if (hero.isChartering) {
+    return { state, ok: false, reason: "is_chartering" };
+  }
   if (hero.ownerId !== state.activePlayerId) {
     return { state, ok: false, reason: "not_owner" };
   }
@@ -469,12 +500,14 @@ export function resolveBattle(state: GameState): GameState {
   const lootedGold = defender.gold;
   newHeroes[attackerId] = { ...attacker, gold: attacker.gold + lootedGold };
   delete newHeroes[defenderId];
-  return {
+  let result: GameState = {
     ...state,
     heroes: newHeroes,
     phase: { kind: "PLAYER_TURN", playerId: state.activePlayerId },
     dirty: true,
   };
+  result = cleanupDefeatedHeroCharters(result, defenderId);
+  return result;
 }
 
 export function endTurn(state: GameState): GameState {
@@ -670,7 +703,7 @@ export function advanceRound(state: GameState): GameState {
     };
   }
   const nextDay = state.day + 1;
-  const withDay: GameState = {
+  let withDay: GameState = {
     ...state,
     round: state.round + 1,
     day: nextDay,
@@ -680,6 +713,7 @@ export function advanceRound(state: GameState): GameState {
     selectedHeroId: null,
     selectedSettlementId: null,
   };
+  withDay = advanceCharters(withDay);
   if (nextDay % 7 === 0) return applyWeeklyUpkeep(withDay);
   return withDay;
 }
@@ -851,6 +885,8 @@ export function recruitHero(
     gold: 0,
     troops: 1,
     stacks: normalizeStacks([]),
+    isChartering: false,
+    charterId: null,
   };
 
   return {
@@ -867,5 +903,288 @@ export function recruitHero(
       dirty: true,
     },
     hero,
+  };
+}
+
+// =========================================================================
+// CHARTER SETTLEMENTS
+// =========================================================================
+
+export const CHARTER_GOLD_COST = 2500;
+export const CHARTER_WAREHOUSE_COST = { wood: 20, stone: 15 };
+export const CHARTER_CONSTRUCTION_DAYS = 10;
+export const CHARTER_MIN_DISTANCE = 4;
+export const CHARTER_SETTLEMENT_POPULATION = 50;
+
+export interface StartCharterPayload {
+  heroId: HeroId;
+  targetQ: number;
+  targetR: number;
+  settlementName: string;
+  settlementId: SettlementId;
+  charterId: CharterId;
+  resourceRates: Partial<Record<ResourceType, number>>;
+  foundedOnResource: ResourceType | null;
+  citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
+}
+
+export type StartCharterResult =
+  | { state: GameState; ok: true }
+  | { state: GameState; ok: false; reason: string };
+
+export function startCharter(state: GameState, payload: StartCharterPayload): StartCharterResult {
+  if (state.phase.kind !== "PLAYER_TURN") {
+    return { state, ok: false, reason: "not_player_turn" };
+  }
+
+  const hero = state.heroes[payload.heroId];
+  if (!hero) return { state, ok: false, reason: "no_hero" };
+  if (hero.ownerId !== state.activePlayerId) {
+    return { state, ok: false, reason: "not_owner" };
+  }
+  if (hero.isChartering) {
+    return { state, ok: false, reason: "already_chartering" };
+  }
+  if (hero.gold < CHARTER_GOLD_COST) {
+    return { state, ok: false, reason: "insufficient_gold" };
+  }
+
+  const provisioningSettlement = Object.values(state.settlements).find(
+    (s) => s.q === hero.q && s.r === hero.r && s.ownerId === hero.ownerId,
+  );
+  if (!provisioningSettlement) {
+    return { state, ok: false, reason: "hero_not_at_friendly_settlement" };
+  }
+  if ((provisioningSettlement.warehouse.wood ?? 0) < CHARTER_WAREHOUSE_COST.wood) {
+    return { state, ok: false, reason: "insufficient_wood" };
+  }
+  if ((provisioningSettlement.warehouse.stone ?? 0) < CHARTER_WAREHOUSE_COST.stone) {
+    return { state, ok: false, reason: "insufficient_stone" };
+  }
+
+  for (const [id, other] of Object.entries(state.heroes)) {
+    if (id !== payload.heroId && other.q === payload.targetQ && other.r === payload.targetR) {
+      return { state, ok: false, reason: "occupied" };
+    }
+  }
+
+  for (const ch of state.activeCharters) {
+    if (ch.targetQ === payload.targetQ && ch.targetR === payload.targetR) {
+      return { state, ok: false, reason: "hex_already_chartered" };
+    }
+  }
+
+  for (const s of Object.values(state.settlements)) {
+    if (s.q === payload.targetQ && s.r === payload.targetR) {
+      return { state, ok: false, reason: "hex_has_settlement" };
+    }
+  }
+
+  const updatedHero: HeroState = {
+    ...hero,
+    gold: hero.gold - CHARTER_GOLD_COST,
+    isChartering: true,
+    charterId: payload.charterId,
+  };
+
+  const updatedSettlement: SettlementState = {
+    ...provisioningSettlement,
+    warehouse: {
+      ...provisioningSettlement.warehouse,
+      wood: (provisioningSettlement.warehouse.wood ?? 0) - CHARTER_WAREHOUSE_COST.wood,
+      stone: (provisioningSettlement.warehouse.stone ?? 0) - CHARTER_WAREHOUSE_COST.stone,
+    },
+  };
+
+  const charter: CharterState = {
+    id: payload.charterId,
+    heroId: payload.heroId,
+    ownerId: hero.ownerId,
+    targetQ: payload.targetQ,
+    targetR: payload.targetR,
+    settlementName: payload.settlementName,
+    phase: "traveling",
+    daysRemaining: CHARTER_CONSTRUCTION_DAYS,
+    settlementId: payload.settlementId,
+    resourceRates: payload.resourceRates,
+    foundedOnResource: payload.foundedOnResource,
+    citySpots: payload.citySpots,
+  };
+
+  return {
+    state: {
+      ...state,
+      heroes: { ...state.heroes, [payload.heroId]: updatedHero },
+      settlements: { ...state.settlements, [provisioningSettlement.id]: updatedSettlement },
+      activeCharters: [...state.activeCharters, charter],
+      nextCharterId: state.nextCharterId + 1,
+      nextSettlementId: state.nextSettlementId + 1,
+      dirty: true,
+    },
+    ok: true,
+  };
+}
+
+export type StepTravelResult =
+  | { state: GameState; ok: true }
+  | { state: GameState; ok: false; reason: string };
+
+export function stepTravelCharter(
+  state: GameState,
+  heroId: HeroId,
+  toQ: number,
+  toR: number,
+  cost: number,
+): StepTravelResult {
+  const hero = state.heroes[heroId];
+  if (!hero) return { state, ok: false, reason: "no_hero" };
+  if (!hero.isChartering || hero.charterId === null) {
+    return { state, ok: false, reason: "not_chartering" };
+  }
+
+  const charter = state.activeCharters.find((c) => c.id === hero.charterId);
+  if (!charter) return { state, ok: false, reason: "no_charter" };
+  if (charter.phase !== "traveling") {
+    return { state, ok: false, reason: "not_traveling" };
+  }
+
+  for (const [id, other] of Object.entries(state.heroes)) {
+    if (id !== heroId && other.q === toQ && other.r === toR) {
+      return { state, ok: false, reason: "occupied" };
+    }
+  }
+
+  if (!Number.isFinite(cost) || cost < 0) {
+    return { state, ok: false, reason: "impassable" };
+  }
+
+  if (hero.movementRemaining < cost) {
+    return { state, ok: false, reason: "insufficient_movement" };
+  }
+
+  const updatedHero: HeroState = {
+    ...hero,
+    q: toQ,
+    r: toR,
+    movementRemaining: hero.movementRemaining - cost,
+    previousQ: hero.q,
+    previousR: hero.r,
+    previousMovementRemaining: hero.movementRemaining,
+    trail: [...(hero.trail ?? []), { q: toQ, r: toR }],
+  };
+
+  const arrived = toQ === charter.targetQ && toR === charter.targetR;
+  const newCharters = state.activeCharters.map((c) => {
+    if (c.id === charter.id) {
+      const next: CharterState = { ...c, phase: arrived ? "constructing" : c.phase };
+      if (arrived) {
+        next.phase = "constructing";
+      }
+      return next;
+    }
+    return c;
+  });
+
+  const resultHero = arrived
+    ? { ...updatedHero, movementRemaining: 0 }
+    : updatedHero;
+
+  return {
+    state: {
+      ...state,
+      heroes: { ...state.heroes, [heroId]: resultHero },
+      activeCharters: newCharters,
+      dirty: true,
+    },
+    ok: true,
+  };
+}
+
+export function advanceCharters(state: GameState): GameState {
+  let result = state;
+  let completed: CharterState[] = [];
+
+  for (const charter of state.activeCharters) {
+    if (charter.phase === "constructing") {
+      const newDays = charter.daysRemaining - 1;
+      if (newDays <= 0) {
+        completed.push(charter);
+      } else {
+        result = {
+          ...result,
+          activeCharters: result.activeCharters.map((c) =>
+            c.id === charter.id ? { ...c, daysRemaining: newDays } : c,
+          ),
+        };
+      }
+    }
+  }
+
+  for (const charter of completed) {
+    result = completeCharter(result, charter);
+  }
+
+  return result;
+}
+
+function completeCharter(state: GameState, charter: CharterState): GameState {
+  const hero = state.heroes[charter.heroId];
+  const updatedHero: HeroState = hero
+    ? {
+        ...hero,
+        isChartering: false,
+        charterId: null,
+        movementRemaining: MOVEMENT_PER_TURN,
+        previousQ: null,
+        previousR: null,
+        previousMovementRemaining: null,
+      }
+    : null as unknown as HeroState;
+
+  const newSettlement: SettlementState = {
+    id: charter.settlementId,
+    name: charter.settlementName,
+    ownerId: charter.ownerId,
+    q: charter.targetQ,
+    r: charter.targetR,
+    level: 1,
+    population: CHARTER_SETTLEMENT_POPULATION,
+    goldTax: 1,
+    resourceRates: { ...charter.resourceRates },
+    foundedOnResource: charter.foundedOnResource,
+    gold: 0,
+    warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
+    citySpots: charter.citySpots.slice(),
+    cityMines: [],
+    morale: 50,
+    autoTrade: false,
+  };
+
+  const newHeroes = hero
+    ? { ...state.heroes, [charter.heroId]: updatedHero }
+    : state.heroes;
+
+  return {
+    ...state,
+    heroes: newHeroes,
+    settlements: { ...state.settlements, [charter.settlementId]: newSettlement },
+    activeCharters: state.activeCharters.filter((c) => c.id !== charter.id),
+    players: state.players.map((p) =>
+      p.id === charter.ownerId
+        ? { ...p, settlementIds: [...p.settlementIds, charter.settlementId] }
+        : p,
+    ),
+    dirty: true,
+  };
+}
+
+export function cleanupDefeatedHeroCharters(state: GameState, defeatedHeroId: HeroId): GameState {
+  const hero = state.heroes[defeatedHeroId];
+  if (!hero || !hero.isChartering || hero.charterId === null) return state;
+
+  return {
+    ...state,
+    activeCharters: state.activeCharters.filter((c) => c.id !== hero.charterId),
+    dirty: true,
   };
 }

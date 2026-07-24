@@ -1,4 +1,4 @@
-import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult } from "./gameState";
+import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload } from "./gameState";
 import {
   selectHero as selectHeroReducer,
   selectSettlement as selectSettlementReducer,
@@ -18,9 +18,16 @@ import {
   tradeResources as tradeResourcesReducer,
   setAutoTrade as setAutoTradeReducer,
   recruitHero as recruitHeroReducer,
+  startCharter as startCharterReducer,
+  stepTravelCharter as stepTravelCharterReducer,
+  cleanupDefeatedHeroCharters as cleanupDefeatedHeroChartersReducer,
 } from "./gameState";
 import { findPath } from "../map/pathfinding";
+import { hexDistance } from "../core/hex";
 import type { GameMap } from "../map/gameMap";
+import { computeSettlementRates } from "../economy/settlementRates";
+import { generateCitySpots } from "../core/citySpots";
+import { cityViewSizeFor } from "../core/cityGrid";
 
 export interface TurnControllerHooks {
   onHumanTurnEnd(state: GameState): Promise<GameState>;
@@ -32,6 +39,7 @@ export interface TurnControllerHooks {
   ): { toTile: { q: number; r: number }; cost: number } | null;
   logEvent(event: { type: string; payload: Record<string, unknown> }): void;
   getMap(): GameMap;
+  rng(): number;
 }
 
 export class TurnController {
@@ -51,10 +59,12 @@ export class TurnController {
 
   selectHero(heroId: HeroId): void {
     if (this.state.phase.kind !== "PLAYER_TURN") return;
-    this.state = selectHeroReducer(this.state, heroId);
     const hero = this.state.heroes[heroId];
-    if (hero) {
-      this.tryCaptureAt(heroId, hero.q, hero.r);
+    if (hero?.isChartering) return;
+    this.state = selectHeroReducer(this.state, heroId);
+    const updatedHero = this.state.heroes[heroId];
+    if (updatedHero) {
+      this.tryCaptureAt(heroId, updatedHero.q, updatedHero.r);
     }
   }
 
@@ -204,14 +214,143 @@ export class TurnController {
     return result;
   }
 
+  // =========================================================================
+  // CHARTER SETTLEMENTS
+  // =========================================================================
+
+  startCharter(targetQ: number, targetR: number, settlementName: string): { ok: boolean; reason?: string } {
+    const map = this.hooks.getMap();
+    const rng = this.hooks.rng();
+    const heroId = this.state.selectedHeroId;
+    if (!heroId) return { ok: false, reason: "no_hero_selected" };
+    const hero = this.state.heroes[heroId];
+    if (!hero) return { ok: false, reason: "no_hero" };
+
+    if (!map.isPassable(targetQ, targetR)) {
+      return { ok: false, reason: "impassable_terrain" };
+    }
+
+    for (const s of Object.values(this.state.settlements)) {
+      const dist = hexDistance({ q: targetQ, r: targetR }, { q: s.q, r: s.r });
+      if (dist < 4) {
+        return { ok: false, reason: "too_close_to_settlement" };
+      }
+    }
+
+    const computed = computeSettlementRates(map, targetQ, targetR, 1);
+    const size = cityViewSizeFor(1);
+    const { spots } = generateCitySpots(size, () => rng);
+
+    const payload: StartCharterPayload = {
+      heroId,
+      targetQ,
+      targetR,
+      settlementName,
+      settlementId: `s${this.state.nextSettlementId}`,
+      charterId: `ch${this.state.nextCharterId}`,
+      resourceRates: computed.rates,
+      foundedOnResource: computed.foundedOn,
+      citySpots: spots,
+    };
+
+    const result = startCharterReducer(this.state, payload);
+    this.state = result.state;
+    if (!result.ok) return { ok: false, reason: result.reason };
+
+    this.hooks.logEvent({
+      type: "charter_started",
+      payload: { heroId, targetQ, targetR, settlementName, charterId: payload.charterId },
+    });
+
+    this.advanceAutoTravel();
+    return { ok: true };
+  }
+
+  advanceAutoTravel(): void {
+    if (this.state.phase.kind !== "PLAYER_TURN") return;
+    const playerId = this.state.activePlayerId;
+    const map = this.hooks.getMap();
+    let changed = true;
+
+    while (changed) {
+      changed = false;
+      const charters = this.state.activeCharters.filter(
+        (c) => c.ownerId === playerId && c.phase === "traveling",
+      );
+      for (const charter of charters) {
+        const hero = this.state.heroes[charter.heroId];
+        if (!hero || hero.movementRemaining <= 0) continue;
+
+        if (hero.q === charter.targetQ && hero.r === charter.targetR) {
+          const arrivedCharters = this.state.activeCharters.map((c) =>
+            c.id === charter.id ? { ...c, phase: "constructing" as const } : c,
+          );
+          const arrivedHero = { ...hero, movementRemaining: 0 };
+          this.state = {
+            ...this.state,
+            heroes: { ...this.state.heroes, [hero.id]: arrivedHero },
+            activeCharters: arrivedCharters,
+            dirty: true,
+          };
+          this.hooks.logEvent({
+            type: "charter_arrived",
+            payload: { heroId: hero.id, charterId: charter.id, targetQ: charter.targetQ, targetR: charter.targetR },
+          });
+          changed = true;
+          continue;
+        }
+
+        const occupiedHexes = new Set<string>();
+        for (const [id, other] of Object.entries(this.state.heroes)) {
+          if (id !== hero.id) {
+            occupiedHexes.add(`${other.q},${other.r}`);
+          }
+        }
+
+        const path = findPath(map, { q: hero.q, r: hero.r }, { q: charter.targetQ, r: charter.targetR }, occupiedHexes);
+        if (path.length === 0) continue;
+
+        const nextStep = path[0];
+        const cost = map.cost(nextStep.q, nextStep.r);
+        if (!Number.isFinite(cost) || cost < 0) continue;
+
+        const result = stepTravelCharterReducer(this.state, hero.id, nextStep.q, nextStep.r, cost);
+        if (!result.ok) {
+          this.hooks.logEvent({
+            type: "charter_travel_blocked",
+            payload: { heroId: hero.id, reason: result.reason },
+          });
+          continue;
+        }
+        this.state = result.state;
+
+        const updatedHero = this.state.heroes[hero.id];
+        if (updatedHero) {
+          const defenderId = detectAdjacentEnemyFn(this.state, hero.id);
+          if (defenderId) {
+            this.enterBattle(hero.id, defenderId);
+            break;
+          }
+        }
+
+        changed = true;
+      }
+    }
+  }
+
   async resolveCurrentBattle(): Promise<void> {
     if (this.state.phase.kind !== "BATTLE") return;
+    const { defenderId } = this.state.phase;
+    const defender = this.state.heroes[defenderId];
     this.state = resolveBattleReducer(this.state);
+    if (defender?.isChartering) {
+      this.state = cleanupDefeatedHeroChartersReducer(this.state, defenderId);
+    }
     const resolved = await this.hooks.onBattleResolved(this.state);
     this.state = resolved;
     this.hooks.logEvent({
       type: "battle_resolved",
-      payload: { attackerId: this.state.phase.kind === "BATTLE" ? null : null },
+      payload: {},
     });
   }
 
@@ -232,7 +371,9 @@ export class TurnController {
       this.state = endTurnReducer(this.state);
       this.state = await this.hooks.onHumanTurnEnd(this.state);
 
-      if (this.state.phase.kind === "AI_TURN") {
+      if (this.state.phase.kind === "PLAYER_TURN") {
+        this.advanceAutoTravel();
+      } else if (this.state.phase.kind === "AI_TURN") {
         this.hooks.logEvent({
           type: "ai_turn_started",
           payload: { playerId: this.state.activePlayerId, round: this.state.round },
@@ -248,6 +389,7 @@ export class TurnController {
           type: "round_started",
           payload: { round: this.state.round },
         });
+        this.advanceAutoTravel();
       }
     } finally {
       this.aiEnding = false;
@@ -266,6 +408,7 @@ export class TurnController {
     for (const heroId of aiPlayer.heroIds) {
       const hero = this.state.heroes[heroId];
       if (!hero || hero.movementRemaining <= 0) continue;
+      if (hero.isChartering) continue;
       const move = this.hooks.pickAiMove(this.state, heroId);
       if (!move) continue;
       const map = this.hooks.getMap();

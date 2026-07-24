@@ -51,6 +51,8 @@ export interface ToolbarCallbacks {
   onSettlements?: () => void;
   onForget?: (id: number) => void;
   getMapInfo?: () => MapInfo | null;
+  onStartCharter?: () => void;
+  canStartCharter?: () => boolean;
 }
 
 export interface ToolbarOptions {
@@ -67,6 +69,7 @@ export class Toolbar {
   private endTurnBtn: HTMLButtonElement;
   private heroesBtn: HTMLButtonElement;
   private settlementsBtn: HTMLButtonElement;
+  private charterBtn: HTMLButtonElement;
   private calendarEl: HTMLElement;
   private calendarActiveEl: HTMLElement;
   private busy = false;
@@ -257,10 +260,39 @@ export class Toolbar {
 
     this.menu.body.appendChild(this.calendarEl);
 
-    this.newBtn = this.makeButton("+  New Game", false);
-    this.loadBtn = this.makeButton("↕  Load Game", false);
-    this.saveBtn = this.makeButton("↓  Save Game", false);
-    this.endTurnBtn = this.makeButton("▶  End Turn", true);
+    const topRow = document.createElement("div");
+    Object.assign(topRow.style, {
+      display: "flex",
+      gap: "6px",
+    });
+
+    this.newBtn = this.makeButton("New Game", false);
+    this.newBtn.style.whiteSpace = "nowrap";
+    this.newBtn.style.width = "50%";
+
+    this.saveBtn = document.createElement("button");
+    this.saveBtn.textContent = "\uD83D\uDCBE";
+    this.saveBtn.title = "Save game";
+    styleButton(this.saveBtn);
+    this.saveBtn.style.width = "25%";
+    this.saveBtn.style.textAlign = "center";
+    this.saveBtn.style.padding = "7px 4px";
+    this.saveBtn.style.fontSize = "16px";
+    this.saveBtn.style.lineHeight = "1";
+
+    this.loadBtn = document.createElement("button");
+    this.loadBtn.textContent = "\uD83D\uDCC2";
+    this.loadBtn.title = "Load game";
+    styleButton(this.loadBtn);
+    this.loadBtn.style.width = "25%";
+    this.loadBtn.style.textAlign = "center";
+    this.loadBtn.style.padding = "7px 4px";
+    this.loadBtn.style.fontSize = "16px";
+    this.loadBtn.style.lineHeight = "1";
+
+    topRow.appendChild(this.newBtn);
+    topRow.appendChild(this.saveBtn);
+    topRow.appendChild(this.loadBtn);
 
     this.newBtn.addEventListener("click", () => {
       if (this.busy) return;
@@ -269,16 +301,18 @@ export class Toolbar {
       }
       this.openNewModal();
     });
-    this.loadBtn.addEventListener("click", () => {
-      if (this.busy) return;
-      void this.openLoadModal();
-    });
     this.saveBtn.addEventListener("click", () => {
       if (this.busy) return;
       void this.runAsync(async () => {
         await this.opts.callbacks.onSave();
       });
     });
+    this.loadBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      void this.openLoadModal();
+    });
+
+    this.endTurnBtn = this.makeButton("\u25B6  End Turn", true);
     this.endTurnBtn.addEventListener("click", () => {
       if (this.busy) return;
       if (!this.opts.state.canEndTurnNow()) return;
@@ -299,12 +333,17 @@ export class Toolbar {
       this.opts.callbacks.onSettlements?.();
     });
 
-    this.menu.appendContent(this.newBtn);
-    this.menu.appendContent(this.loadBtn);
-    this.menu.appendContent(this.saveBtn);
+    this.charterBtn = this.makeButton("\u2692  Charter Settlement", true);
+    this.charterBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      this.opts.callbacks.onStartCharter?.();
+    });
+
+    this.menu.body.appendChild(topRow);
     this.menu.appendContent(this.endTurnBtn);
     this.menu.appendContent(this.heroesBtn);
     this.menu.appendContent(this.settlementsBtn);
+    this.menu.appendContent(this.charterBtn);
     this.refresh();
   }
 
@@ -319,6 +358,14 @@ export class Toolbar {
     this.setEnabled(this.endTurnBtn, endTurnOk && !this.busy);
     this.setEnabled(this.heroesBtn, hasGameState && !this.busy);
     this.setEnabled(this.settlementsBtn, hasGameState && !this.busy);
+
+    if (this.charterBtn) {
+      const canCharter = hasGameState && !this.busy && (this.opts.callbacks.canStartCharter?.() ?? false);
+      this.setEnabled(this.charterBtn, canCharter);
+      this.charterBtn.title = canCharter
+        ? "Found a new settlement (2500g + 20 wood + 15 stone)"
+        : "Hero must be on a friendly settlement with enough resources";
+    }
 
     this.newBtn.title = !ok ? "Backend unavailable" : active ? "New game (current game will be lost)" : "Start a new game";
     this.loadBtn.title = !ok ? "Backend unavailable" : "Open a saved game";

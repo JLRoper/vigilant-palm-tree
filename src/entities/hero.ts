@@ -65,6 +65,8 @@ export class Hero {
   troops: number;
   stacks: UnitStack[];
   facingDirection: HeroDirection = "n";
+  isChartering = false;
+  charterId: string | null = null;
 
   constructor(
     id: string,
@@ -167,6 +169,8 @@ export class Hero {
     this.gold = s.gold ?? 0;
     this.troops = s.troops ?? 1;
     this.stacks = normalizeStacks(s.stacks);
+    this.isChartering = s.isChartering ?? false;
+    this.charterId = s.charterId ?? null;
     if (this.moving) return;
     if (this.tile.q === s.q && this.tile.r === s.r) return;
     const start: Axial = { ...this.tile };
@@ -190,12 +194,14 @@ export class Hero {
       gold: this.gold,
       troops: this.troops,
       stacks: normalizeStacks(this.stacks),
+      isChartering: this.isChartering,
+      charterId: this.charterId,
     };
   }
 
   static fromGameState(s: HeroState): Hero {
     const faction: Faction = mapFactionFromOwner(s.ownerId);
-    return new Hero(
+    const hero = new Hero(
       s.id,
       s.name,
       s.q,
@@ -208,6 +214,9 @@ export class Hero {
       s.troops ?? 1,
       s.stacks
     );
+    hero.isChartering = s.isChartering ?? false;
+    hero.charterId = s.charterId ?? null;
+    return hero;
   }
 }
 

@@ -33,6 +33,10 @@ export interface AdventureViewOptions {
   onRedraw: () => void;
   getPathPreviewLock: () => PathPreviewLock | null;
   setPathPreviewLock: (lock: PathPreviewLock | null) => void;
+  onStartCharter?: (targetQ: number, targetR: number, name: string) => boolean;
+  getCharterMode?: () => boolean;
+  setCharterMode?: (v: boolean) => void;
+  getValidCharterHexes?: () => Set<string> | null;
 }
 
 const DRAG_MOVE_THRESHOLD = 4;
@@ -208,6 +212,59 @@ export class AdventureView {
 
   private onClick(e: MouseEvent): void {
     this.lastClickDebug.reason = "";
+
+    if (this.opts.getCharterMode?.() && this.opts.getValidCharterHexes?.()) {
+      const t = this.opts.renderer.hoverFromScreen(e.clientX, e.clientY);
+      this.lastClickDebug.hover = t;
+      if (t) {
+        const key = `${t.q},${t.r}`;
+        const validHexes = this.opts.getValidCharterHexes();
+        if (validHexes && validHexes.has(key)) {
+          const gs = this.opts.getGameState();
+          const selectedId = gs.selectedHeroId;
+          if (selectedId) {
+            const hero = gs.heroes[selectedId];
+            if (hero) {
+              const name = generateCharterName();
+              const proceed = confirm(`Found charter at (${t.q},${t.r})?\n\nSuggested name: ${name}\n\nCost: 2500g + 20 wood + 15 stone`);
+              if (proceed) {
+                let finalName = name;
+                let asking = true;
+                while (asking) {
+                  const input = prompt("Settlement name:", finalName);
+                  if (input === null) { asking = false; break; }
+                  if (input.trim()) {
+                    finalName = input.trim();
+                    asking = false;
+                  }
+                }
+                if (finalName && finalName !== name) {
+                } else {
+                  finalName = name;
+                }
+                if (this.opts.onStartCharter) {
+                  const ok = this.opts.onStartCharter(t.q, t.r, finalName);
+                  if (ok) {
+                    this.lastClickDebug.reason = "charter_started";
+                    this.opts.setCharterMode?.(false);
+                    this.opts.onStateChanged?.();
+                    this.opts.onHudUpdate();
+                    this.opts.onRedraw();
+                    return;
+                  }
+                }
+              } else {
+                this.lastClickDebug.reason = "charter_cancelled";
+              }
+              return;
+            }
+          }
+        }
+      }
+      this.lastClickDebug.reason = "charter_invalid";
+      return;
+    }
+
     if (this.movedDuringDrag) {
       this.lastClickDebug.reason = "movedDuringDrag";
       return;
@@ -397,3 +454,21 @@ export class AdventureView {
 }
 
 export { axialToPixel };
+
+const CHARTER_NAME_PREFIXES = [
+  "Black", "Iron", "Silver", "Storm", "Frost",
+  "Dragon", "Wolf", "Raven", "Stone", "Dawn",
+  "Gold", "Ember", "Thorn", "Grim", "High",
+];
+
+const CHARTER_NAME_SUFFIXES = [
+  "hold", "keep", "watch", "spire", "fall",
+  "reach", "gate", "crest", "hollow", "rest",
+  "guard", "pass", "mark",
+];
+
+function generateCharterName(): string {
+  const p = CHARTER_NAME_PREFIXES[Math.floor(Math.random() * CHARTER_NAME_PREFIXES.length)];
+  const s = CHARTER_NAME_SUFFIXES[Math.floor(Math.random() * CHARTER_NAME_SUFFIXES.length)];
+  return `${p} ${s}`;
+}

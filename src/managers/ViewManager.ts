@@ -7,6 +7,7 @@ import { AdventureView, type AdventureViewOptions } from "../views/adventureView
 import { SpriteProvider } from "../render/assets";
 import type { Axial } from "../core/hex";
 import type { CityView } from "../views/cityView";
+import type { CharterState } from "../state/gameState";
 
 export class ViewManager {
   public camera = new Camera();
@@ -23,7 +24,7 @@ export class ViewManager {
 
   initializeAdventureView(
     hudEl: HTMLElement,
-    opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw" | "getPathPreviewLock" | "setPathPreviewLock">,
+    opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw" | "getPathPreviewLock" | "setPathPreviewLock" | "onStartCharter" | "getCharterMode" | "setCharterMode" | "getValidCharterHexes">,
   ): void {
     if (this.view) {
       this.view.detach();
@@ -50,9 +51,12 @@ export class ViewManager {
     path: Axial[],
     castles: Castle[],
     opts: RenderOptions,
+    activeCharters?: readonly CharterState[],
+    validCharterHexes?: Set<string> | null,
   ): void {
     if (!this.renderer) return;
-    this.renderer.draw(hover, heroes, path, castles, opts);
+    const fullOpts: RenderOptions = { ...opts, activeCharters, validCharterHexes };
+    this.renderer.draw(hover, heroes, path, castles, fullOpts);
   }
 
   drawCityOverlay(cityView: CityView | undefined): void {

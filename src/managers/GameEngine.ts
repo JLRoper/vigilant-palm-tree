@@ -7,6 +7,8 @@ import { colorForOwner } from "../state/playerColors";
 import { buildInitialGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";
 import { cityViewSizeFor } from "../core/cityGrid";
+import { hexDistance } from "../core/hex";
+import { CHARTER_GOLD_COST, CHARTER_WAREHOUSE_COST } from "../state/gameState";
 
 import { SessionManager } from "./SessionManager";
 import { GameStateManager, type PathPreviewLock } from "./GameStateManager";
@@ -34,6 +36,8 @@ export class GameEngine {
   // Owned state
   private gameMap = new GameMap(MAP_SEED);
   private lastTime = performance.now();
+  private charterPlacementMode = false;
+  private validCharterHexes: Set<string> | null = null;
 
   constructor() {
     this.canvas = document.getElementById("game") as HTMLCanvasElement;
@@ -107,6 +111,10 @@ export class GameEngine {
       onRedraw: () => this.draw(),
       getPathPreviewLock: () => this.state.getPathPreviewLock(),
       setPathPreviewLock: (lock: PathPreviewLock | null) => this.state.setPathPreviewLock(lock),
+      onStartCharter: (targetQ: number, targetR: number, name: string) => this.handleStartCharter(targetQ, targetR, name),
+      getCharterMode: () => this.charterPlacementMode,
+      setCharterMode: (v: boolean) => { this.charterPlacementMode = v; if (!v) this.validCharterHexes = null; },
+      getValidCharterHexes: () => this.validCharterHexes,
     });
   }
 
@@ -122,6 +130,8 @@ export class GameEngine {
       onEndTurn: () => void this.actions.handleEndTurn().then(() => this.fullFrame()),
       onForget: (_id) => this.ui.getToolbar()?.refresh(),
       getMapInfo: () => this.getMapInfo(),
+      onStartCharter: () => this.enterCharterMode(),
+      canStartCharter: () => this.canStartCharter(),
     }, () => this.view.camera.zoom);
     this.ui.initHeroMenu(
       (heroId, settlementId, direction) => {
@@ -196,6 +206,91 @@ export class GameEngine {
   }
 
   // =========================================================================
+  // CHARTER
+  // =========================================================================
+
+  private canStartCharter(): boolean {
+    const gs = this.state.getState();
+    if (!gs || gs.phase.kind !== "PLAYER_TURN" || gs.activePlayerId !== 0) return false;
+    const selectedId = gs.selectedHeroId;
+    if (!selectedId) return false;
+    const hero = gs.heroes[selectedId];
+    if (!hero || hero.isChartering || hero.gold < CHARTER_GOLD_COST) return false;
+    const settlement = Object.values(gs.settlements).find(
+      (s) => s.q === hero.q && s.r === hero.r && s.ownerId === hero.ownerId,
+    );
+    if (!settlement) return false;
+    if ((settlement.warehouse.wood ?? 0) < CHARTER_WAREHOUSE_COST.wood) return false;
+    if ((settlement.warehouse.stone ?? 0) < CHARTER_WAREHOUSE_COST.stone) return false;
+    return true;
+  }
+
+  private enterCharterMode(): void {
+    const gs = this.state.getState();
+    if (!gs) return;
+    const selectedId = gs.selectedHeroId;
+    if (!selectedId) return;
+    this.charterPlacementMode = true;
+    this.validCharterHexes = this.computeValidCharterHexes(gs);
+    this.fullFrame();
+  }
+
+  private computeValidCharterHexes(gs: import("../state/gameState").GameState): Set<string> {
+    const hexes = new Set<string>();
+    const settlementSet = new Set<string>();
+    for (const s of Object.values(gs.settlements)) {
+      settlementSet.add(`${s.q},${s.r}`);
+    }
+    const charterSet = new Set<string>();
+    for (const c of gs.activeCharters) {
+      charterSet.add(`${c.targetQ},${c.targetR}`);
+    }
+    const heroSet = new Set<string>();
+    for (const h of Object.values(gs.heroes)) {
+      heroSet.add(`${h.q},${h.r}`);
+    }
+
+    for (let r = 0; r < this.gameMap.height; r++) {
+      for (let q = 0; q < this.gameMap.width; q++) {
+        if (!this.gameMap.isPassable(q, r)) continue;
+        const key = `${q},${r}`;
+        if (settlementSet.has(key)) continue;
+        if (charterSet.has(key)) continue;
+        if (heroSet.has(key)) continue;
+        let tooClose = false;
+        for (const s of Object.values(gs.settlements)) {
+          if (hexDistance({ q, r }, { q: s.q, r: s.r }) < 4) {
+            tooClose = true;
+            break;
+          }
+        }
+        if (tooClose) continue;
+        hexes.add(key);
+      }
+    }
+    return hexes;
+  }
+
+  private handleStartCharter(targetQ: number, targetR: number, name: string): boolean {
+    const tc = this.state.getTurnController();
+    const gs = this.state.getState();
+    if (!gs || !gs.selectedHeroId) return false;
+
+    const result = tc.startCharter(targetQ, targetR, name);
+    if (!result.ok) {
+      console.warn("[charter] start failed:", result.reason);
+      return false;
+    }
+
+    this.state.replaceState(tc.getState());
+    this.state.rebuildHeroesFromState();
+    this.state.syncHeroVisualsToState();
+    this.charterPlacementMode = false;
+    this.validCharterHexes = null;
+    return true;
+  }
+
+  // =========================================================================
   // FRAME LOOP
   // =========================================================================
 
@@ -232,6 +327,8 @@ export class GameEngine {
         pathOrigin: this.state.getPathOrigin() ?? undefined,
         selectedHeroTile: selectedHero ? { q: selectedHero.q, r: selectedHero.r } : undefined,
       },
+      gs.activeCharters,
+      this.validCharterHexes,
     );
     this.view.drawCityOverlay(this.ui.getCityView());
   }
