@@ -1,5 +1,7 @@
 # Event-Driven Architecture for heroes-js
 
+> Status: 📋 Planned (not started). Not yet implemented — current architecture uses callback hooks (`TurnControllerHooks`) and direct function calls. This plan describes a future EventBus refactor.
+
 ## Overview
 
 Replace imperative, cross-cutting function chains with a central `EventBus`. State changes emit typed events. UI, AI, economy, and modifier systems subscribe independently. No system imports another system's internals.

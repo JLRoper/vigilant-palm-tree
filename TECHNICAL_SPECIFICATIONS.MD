@@ -19,7 +19,7 @@ Top-level directories:
 
 - `src/` — game client (TypeScript, run in the browser via Vite)
 - `server/` — backend API (TypeScript, run via `tsx`)
-- `test/` — smoke test harness (`tsx test/smoke.ts`)
+- `test/` — smoke test harness + unit tests (`tsx test/smoke.ts`)
 - `tools/` — build/sprite scripts (Node + Playwright)
 - `docs/` — game design documents (Markdown)
 - `dist/` — Vite build output
@@ -131,18 +131,19 @@ Entry point: [`src/main.ts`](./src/main.ts:1) wires modules together. There is n
 | Subfolder | Responsibility |
 |---|---|
 | `src/main.ts` | App bootstrap: instantiate map, camera, renderer, sprite provider, controllers, HUD, toolbar, panels |
-| `src/core/` | Pure utilities: `hex.ts` (axial hex math), `rng.ts` (Mulberry32 seeded RNG) |
+| `src/core/` | Pure utilities: `hex.ts` (axial hex math), `rng.ts` (Mulberry32 seeded RNG), `cityGrid.ts` (city view layout), `citySpots.ts` (mine generation) |
 | `src/entities/` | Domain objects: `hero.ts`, `settlement.ts` (Castle) |
 | `src/map/` | Map generation and traversal: `gameMap.ts`, `terrain.ts`, `pathfinding.ts` (A\* over axial hex grid), `castlePlacement.ts`, `resourceTiles.ts` |
 | `src/resources/` | Static asset images (`castle-l1/l2/l3.png` + `.svg`, resource icons) |
 | `src/render/` | Canvas rendering: `renderer.ts`, `camera.ts` (pan/zoom), `fog.ts`, `sprites.ts` (procedural hero drawers), `heroSprites.ts`, `assets.ts` (sprite provider), `assetSource.ts`, `assetDescriptors.ts`, `overlays/` |
-| `src/state/` | Game state: `gameState.ts` (typed store + persistence helpers), `turnController.ts`, `units.ts`, `playerColors.ts`, `settings.ts` |
+| `src/managers/` | Orchestration between state, views, and I/O: `GameEngine.ts` (composer), `GameStateManager.ts` (state ↔ entities sync), `ViewManager.ts` (renderer + camera + adventure view), `UIManager.ts` (HUD, toolbar, menus, city view), `GameActions.ts` (end turn, save, battle flow), `SessionManager.ts` (game session lifecycle), `GameSessionManager.ts` (save/load orchestration) |
+| `src/state/` | Game state: `gameState.ts` (typed store + all pure reducers including charter settlement logic), `turnController.ts` (turn lifecycle, auto-travel, AI tick), `units.ts`, `playerColors.ts`, `settings.ts` |
 | `src/game/` | Game lifecycle: `initState.ts` (build/hydrate initial state), `turnHooks.ts` |
-| `src/economy/` | Per-turn economy: `income.ts`, `settlementRates.ts` |
-| `src/systems/` | Behavioral systems: `movement.ts`, `enemyWander.ts` |
+| `src/economy/` | Per-turn economy: `income.ts`, `settlementRates.ts`, `consumption.ts` |
+| `src/systems/` | Behavioral systems: `enemyWander.ts` |
 | `src/ai/` | AI: `aiBrain.ts` |
-| `src/io/` | External I/O: `api.ts` (typed REST client), `userGames.ts` (local saved-games bookkeeping) |
-| `src/views/` | DOM UI: `hud.ts`, `toolbar.ts`, `menu.ts`, `heroInfoMenu.ts`, `settlementPanel.ts`, `battleModal.ts`, `tradeModal.ts`, `settingsMenu.ts`, `adventureView.ts` |
+| `src/io/` | External I/O: `api.ts` (typed REST client), `userGames.ts` (local saved-games bookkeeping), `debugCommands.ts` |
+| `src/views/` | DOM UI: `hud.ts`, `toolbar.ts`, `menu.ts`, `heroInfoMenu.ts`, `heroRosterMenu.ts`, `settlementInfoMenu.ts`, `settlementRosterMenu.ts`, `battleModal.ts`, `tradeModal.ts`, `settingsMenu.ts`, `adventureView.ts`, `cityView.ts` |
 | `src/vite-env.d.ts` | Vite type shims |
 
 ### Rendering model
@@ -178,8 +179,9 @@ API conventions:
 
 ## 8. Testing & QA
 
-- **Framework**: none — the project uses Node's built-in `assert/strict` plus Playwright for browser driving.
-- **Smoke test**: [`test/smoke.ts`](./test/smoke.ts:1) (run via `tsx`).
+- **Framework**: none — the project uses Node's built-in `assert/strict` (via `tsx --test`) for unit tests, plus Playwright for browser driving.
+- **Unit tests**: under `test/state/` and `test/map/` (e.g. `gameState.test.ts`, `income.test.ts`, `castlePlacement.test.ts`) — run via `npx tsx --test <file>`.
+- **Smoke test**: [`test/smoke.ts`](./test/smoke.ts:1) (run via `npm test`).
   - Spawns the API and `vite preview` as child processes.
   - Uses Playwright (`chromium`) to load the built app on `http://localhost:4173`.
   - Talks to the API directly on `http://127.0.0.1:3001` via Playwright's `request` API and via `pg.Pool`.

@@ -1,6 +1,6 @@
 # Procedural Map Generation
 
-> Status: 📋 Planned for review. Current implementation: **blob growth** (see `src/map/gameMap.ts` → `generateTerrain`). This doc covers alternatives and when to swap.
+> Status: ✅ Implemented. Current implementation: **blob growth** (see `src/map/gameMap.ts` → `generateTerrain`). This doc covers alternatives and when to swap.
 
 ## Current implementation: blob growth
 

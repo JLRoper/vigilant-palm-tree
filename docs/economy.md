@@ -4,68 +4,85 @@ The per-turn loop that ties [resources](./resources.md), [settlements](./settlem
 
 ## Status
 
-✅ **Implemented.** Per-turn loop, resource accumulation, decay, and trade all ship and are covered by the smoke test.
+✅ **Implemented.** Per-round loop, resource accumulation, decay, auto-trade, and charter costs all ship and are covered by tests.
 
 ## The loop
 
-End of every player turn:
+Per **round** (all players act, then `advanceRound`):
 
-1. **Collect resources** from every settlement the player owns. Each settlement produces its underlying tile's resource yield plus any other resource-bearing tiles within radius 3, scaled by castle level (see [resources.md](./resources.md#per-settlement-aggregation)).
-2. **Award move gold** based on path length of the player's last move: `gold += max(1, path_length)`.
-3. **Increment turn counter.**
-4. **Check combat** — if any enemy hero is within hex distance 1, trigger battle (auto-resolve).
-5. **Persist** updated game state to the DB.
-6. **Emit event** to the game_events log.
+1. **Hero movement** — each player's turn: heroes move (manual for human, AI for enemies). Chartering heroes auto-travel at turn start.
+2. **Resource production** — all settlements produce resources based on `resourceRates` (computed from nearby resource tiles × level).
+3. **Auto-trade** — active player's settlements auto-transfer resources to cover deficits.
+4. **Consumption** — active player's settlements consume food and building upkeep from warehouses.
+5. **Morale decay** — active player's settlements lose morale based on deficits.
+6. **Effective income** — `population × goldTax × (morale / 100)` is added to each settlement's treasury.
+7. **Advance round** — day increments, all heroes get movement reset, hero weekly upkeep (1g/troop every 7 days).
+8. **Charter advancement** — constructing charters decrement `daysRemaining`; completed charters spawn new settlements.
 
-Implementation: [`src/economy/`](../../src/economy/), [`src/state/turnController.ts`](../../src/state/turnController.ts).
+Implementation: [`src/state/gameState.ts`](../src/state/gameState.ts) (reducers), [`src/state/turnController.ts`](../src/state/turnController.ts) (orchestration), [`src/economy/`](../src/economy/).
 
-## Player inventory
+## Resource pools
 
-Tracked fields (gold held in two pools: hero purse and per-settlement treasuries):
+Gold is held in two separate pools:
+- **Hero purse** (`hero.gold`) — moves with the hero; spent on chartering (2500g); captured on defeat
+- **Settlement treasury** (`settlement.gold`) — funds recruitment, building, trade; grows from `population × gold_tax × morale` per round
 
-- `gold` (hero purse) — moves with the hero, captured on hero loss
-- Per-settlement `gold` (treasury) — funds recruitment, building, trade; grows from `population × gold_tax` per round
-- `wood`, `stone`, `iron`, `arcane` in each settlement's warehouse — produced per turn, spent on building or traded between owned settlements
+Warehouse resources held per-settlement:
+- `wood`, `stone`, `iron`, `arcane` — produced per turn from nearby tiles
+- Spent on charter provisioning (20 wood + 15 stone from settlement warehouse)
+- Traded between owned settlements (manual or auto-trade)
+- Consumed by building upkeep
 - (future) `food` — for army upkeep, deferred
 
-See [`src/state/gameState.ts`](../../src/state/gameState.ts) for the canonical shape.
+## Charter expedition costs
 
-## Settlement build cost
+✅ **Locked.** Founding a new settlement via charter costs:
+- **2500 Gold** — deducted from hero purse
+- **20 Wood** — deducted from provisioning settlement warehouse
+- **15 Stone** — deducted from provisioning settlement warehouse
 
-✅ **Locked:** flat **100g / 30w / 20s** regardless of resource rarity. See [settlements.md](./settlements.md).
+Hero must stand on a friendly settlement to initiate. All costs are non-refundable if the hero is defeated during travel or construction.
 
-For deeper resource production (mines inside a settlement), see [city-view.md](./city-view.md).
+## Settlement income
 
-## Example turn (v1)
+Each settlement produces:
+- **Gold:** `population × goldTax × (morale / 100)` per round (effective income)
+- **Resources:** `resourceRates[r]` per round per resource type, where `resourceRates` is computed at settlement creation time from nearby resource tiles × level
 
-Player owns one L1 settlement founded on wood, with two forest tiles in radius (so 3 wood tiles total → `3 × 15 × 1 = 45 wood/turn`), population 500, gold tax 1 → `500g/turn`.
+Initial castles start with population 500, gold tax 1, morale 100. Charter-founded settlements start with population 50, gold tax 1, morale 50, `autoTrade: false`.
 
-| Step | Result |
-|------|--------|
-| Move from (2,7) to (3,7), 1 step | `hero_purse += 1g` (move gold) |
-| Settlement produces | `warehouse.wood += 45`, `treasury += 500g` |
-| End of turn totals | `+45 wood, +501g (1 move + 500 tax)` |
-| Persisted state | `{ hero: (3,7), turn: N+1, purse: P+1, settlement: { gold: T+500, wood: W+45 } }` |
+## Morale
 
-Morale decays when food/warehouse can't keep up with upkeep (when food ships); for v1 without food, morale is held at 100.
+Morale ranges 0–100. It decays when food or building upkeep can't be met from warehouse stocks. Charter settlements start at 50 (lower initial morale). Morale affects effective gold income linearly.
 
 ## Combat's economic impact
 
-When combat resolves (future, see [army.md](./army.md)):
-- Winner: +50 gold bonus.
-- Loser: hero captured for ransom (see [heroes.md](./heroes.md)).
-- Settlement capture: ownership flips, settlement continues producing for new owner.
+When combat resolves:
+- **Winner gains defender's hero gold** (from loser's purse).
+- **Loser's hero is deleted** — if chartering, charter is cancelled and costs forfeited.
+- **Settlement capture:** ownership flips; settlement continues producing for new owner.
 
-## DB schema (current)
+## Example turn (v1)
 
-```sql
-gold INTEGER NOT NULL DEFAULT 0
--- wood, stone, iron_ore, arcane_dust can be added when settlements land:
-wood         INTEGER NOT NULL DEFAULT 0
-stone        INTEGER NOT NULL DEFAULT 0
-iron_ore     INTEGER NOT NULL DEFAULT 0
-arcane_dust  INTEGER NOT NULL DEFAULT 0
-```
+Player owns one L1 settlement on wood, with two forest tiles in radius (3 wood tiles → `3 × 15 × 1 = 45 wood/round`), population 500, gold tax 1, morale 100 → `500g/round`.
+
+| Step | Result |
+|------|--------|
+| Advance round | Day increments, all heroes get 7 MP |
+| Settlement produces | `warehouse.wood += 45`, `treasury += 500g` |
+| Auto-trade (if active) | Transfers resources to cover deficits |
+| Consumption | Food + building upkeep deducted |
+| Morale decay | Decays if upkeep unmet |
+| Charter construction | `daysRemaining--` for constructing charters |
+| End of round totals | `+45 wood, +500g` (for player 0) |
+
+## DB persistence
+
+All economy state is stored in the `games` table JSONB columns:
+- `heroes` — per-hero `gold`
+- `settlements` — per-settlement `gold`, `warehouse`, `morale`, `resourceRates`, `autoTrade`
+
+`activeCharters` round-trips through JSONB alongside the rest of `GameState`.
 
 ## Cross-references
 

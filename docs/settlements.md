@@ -1,22 +1,50 @@
 # Settlements
 
-The player's claim on the world. A settlement is built on a [resource tile](./resources.md) and passively produces that tile's resource each turn.
+The player's claim on the world. Settlements come in two forms: **initial castles** (pre-placed at game start via `castlePlacement`) and **charter-founded settlements** (created by heroes via expedition).
 
-## Model
+## Initial castles
 
-- Built directly on a resource tile. The settlement's yield is determined by the underlying tile's resource type and by other resource tiles within radius 3 (see [resources.md](./resources.md#per-settlement-aggregation)).
-- Each player can own **up to 3 settlements** at any time. Shared across all the player's heroes.
-- Settlements persist independently of which hero founded them — they belong to the **player**, not the hero. If the founding hero is lost, the settlement stays.
-- Settlements accumulate [resources](./resources.md) each turn (see [economy.md](./economy.md)).
+At game start, 2–5 castles are placed on the map (configurable via `castleSeed`/`castleCount`). Each faction gets one. These are Level 1–3 settlements with pre-computed resource rates, city spots, and mines.
 
-## Building cost (locked)
+## Charter settlements (✅ implemented)
 
-Constructing a settlement costs:
-- **100 Gold**
-- **30 Wood**
-- **20 Stone**
+A hero standing on a friendly settlement can initiate a **charter expedition** to found a new settlement at a distant hex.
 
-✅ **Locked:** flat cost regardless of underlying resource type. Rarity of the tile is the constraint, not the cost. A settlement on an arcane dust tile costs the same as one on a gold tile.
+### Cost
+
+Paid at initiation time, deducted immediately:
+- **2500 Gold** (from hero's purse)
+- **20 Wood** (from provisioning settlement's warehouse)
+- **15 Stone** (from provisioning settlement's warehouse)
+
+If the hero is defeated during travel or construction, all costs are forfeited.
+
+### Process
+
+1. **Provision** (instant): costs deducted. Hero enters `"traveling"` phase.
+2. **Travel** (1+ turns): hero auto-paths one hex-step per owner-turn toward target. Vulnerable to attack.
+3. **Construction** (10 days): hero is stationary at target. `daysRemaining` decrements each `advanceRound`. Vulnerable to attack.
+4. **Complete**: settlement appears as Level 1 with population 50, empty warehouse, 0 gold, morale 50, `autoTrade: false`, generated city spots.
+
+### Placement rules
+
+- Target hex must be passable terrain
+- Minimum 4 hexes from any existing settlement
+- Not occupied by another hero or active charter target
+- No movement-range limit — hero walks there over multiple turns
+
+### Limits
+
+- **No cap** on number of settlements per player
+- Voluntary cancellation not allowed
+- AI does not charter in this phase
+
+### Hero state during charter
+
+- `isChartering: true` / `charterId` set — hero cannot be manually controlled
+- Traveling: auto-paths each turn via `advanceAutoTravel()` in `TurnController`
+- Constructing: stationary, `daysRemaining` decrements per round
+- Defeat in any phase → charter lost, costs forfeited
 
 ## Levels
 
@@ -27,6 +55,8 @@ Constructing a settlement costs:
 | 1     | Settlement | 500        | 1g/head       | 5×5       |
 | 2     | Town       | 1,500      | 2g/head       | 10×10     |
 | 3     | Castle     | 5,000      | 3g/head       | 15×15     |
+
+Charter-founded settlements always start at Level 1 with population 50 (not 500).
 
 Resource yield scales linearly with level: `level × base_yield`. Source: [`src/economy/settlementRates.ts`](../src/economy/settlementRates.ts), [`src/entities/settlement.ts`](../src/entities/settlement.ts).
 
@@ -44,20 +74,24 @@ If an enemy hero walks onto a settlement tile, ownership **flips** to that hero'
 
 - **Unclaimed resource tile:** small icon overlay (coin, log, brick, ore, vial) on top of the terrain.
 - **Claimed settlement:** small town sprite (procedural: walls + flag in the owner's colour) drawn **on top of** the resource icon.
+- **Charter target:** hex with scaffolding overlay — dashed outline in `"traveling"` phase, solid outline with construction icon in `"constructing"` phase.
+- **Charter placement mode:** valid hexes highlighted with green dashed outline.
 - **Minimap:** resource tiles shown as an amber dot in the corner of the tile cell.
 
-## Persistence (DB schema preview)
+## Persistence
 
-Extend the `games` table:
-```sql
-settlements JSONB NOT NULL DEFAULT '[]'::jsonb
--- each entry: { id, q, r, resource, level, owner_faction, founded_turn }
-```
+`activeCharters`, `nextCharterId`, and `nextSettlementId` are stored as part of the `games` JSONB row. No schema change needed — they round-trip through `heroes`/`settlements`/`players` JSONB columns on `POST /api/games/:name/end-turn`.
+
+State types defined in [`src/state/gameState.ts`](../src/state/gameState.ts):
+- `CharterState` — `{ id, heroId, ownerId, targetQ, targetR, settlementName, phase, daysRemaining, settlementId, resourceRates, foundedOnResource, citySpots }`
+- `HeroState.isChartering` / `HeroState.charterId`
+- `GameState.activeCharters`, `nextCharterId`, `nextSettlementId`
 
 New event kinds:
-- `settlement_built`
-- `settlement_captured`
-- `settlement_upgraded` (future)
+- `charter_started`
+- `charter_arrived`
+- `charter_travel_blocked`
+- (battle resolution handles `charter_lost` implicitly via `cleanupDefeatedHeroCharters`)
 
 ## Cross-references
 

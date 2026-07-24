@@ -1,5 +1,7 @@
 # Art Style
 
+> Status: ✅ Implemented. Canonical reference for sprite art direction. Rune stone resource icons, procedural castle sprites, and hero/knight sprites have been generated.
+
 Canonical reference for sprite art direction in heroes-js. Update this file when the direction changes; the next art agent will read it first.
 
 ## Current direction: Alchemical Rune Stones
