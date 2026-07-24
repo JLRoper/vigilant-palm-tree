@@ -1,5 +1,5 @@
 import { Faction, Direction } from "../entities/hero";
-import { CastleLevel } from "../entities/settlement";
+import { CastleLevel, CastleVariant } from "../entities/settlement";
 import { ResourceType } from "../map/resourceTiles";
 import { settings } from "../state/settings";
 import { SpriteProvider } from "./assets";
@@ -35,9 +35,10 @@ export function drawCastleSprite(
   level: CastleLevel,
   cx: number,
   cy: number,
-  hexSize: number
+  hexSize: number,
+  variant?: CastleVariant,
 ): void {
-  const r = provider.resolve(castleKey(level));
+  const r = provider.resolve(castleKey(level, variant));
   if (!r || !r.ready) return;
   drawWithDescriptor(ctx, r.drawable, r.descriptor, cx, cy, hexSize);
 }

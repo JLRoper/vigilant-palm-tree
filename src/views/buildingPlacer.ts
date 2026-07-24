@@ -34,7 +34,7 @@ function defaultFootprint(kind: BuildingKind): { w: number; h: number } {
 }
 
 const BUILDABLE_KINDS: BuildingKind[] = [
-  "house", "tower", "archeryRange", "barracks", "smithy",
+  "townHall", "house", "tower", "archeryRange", "barracks", "smithy",
   "market", "mine", "mageGuild", "apartment", "farmField", "farmhouse",
 ];
 
@@ -168,6 +168,7 @@ export class BuildingPlacer {
 
   canPlaceAt(gx: number, gy: number): boolean {
     if (gx < 0 || gy < 0 || gx + this.w > this.size || gy + this.h > this.size) return false;
+    if (this.active === "townHall" && this.buildings.some((b) => b.kind === "townHall")) return false;
     for (let dx = 0; dx < this.w; dx++) {
       for (let dy = 0; dy < this.h; dy++) {
         const cx = gx + dx;

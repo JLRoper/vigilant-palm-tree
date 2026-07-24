@@ -1,6 +1,9 @@
 import castleL1 from "../resources/castle-l1.png?url";
 import castleL2 from "../resources/castle-l2.png?url";
 import castleL3 from "../resources/castle-l3.png?url";
+import castleAltL1 from "../resources/castle-l1-alt.png?url";
+import castleAltL2 from "../resources/castle-l2-alt.png?url";
+import castleAltL3 from "../resources/castle-l3-alt.png?url";
 import settlementBanner from "../resources/settlement-banner.png?url";
 import cityBanner from "../resources/city-banner.png?url";
 import castleBanner from "../resources/castle-banner.png?url";
@@ -60,12 +63,13 @@ import buildingClassicTownHall1 from "../resources/building-classic-townHall-1.p
 import buildingBlockyArcheryRange1 from "../resources/building-blocky-archeryRange-1.png?url";
 import buildingBlockyHouse2 from "../resources/building-blocky-house-2.png?url";
 import { Faction, Direction } from "../entities/hero";
-import { CastleLevel } from "../entities/settlement";
+import { CastleLevel, CastleVariant } from "../entities/settlement";
 import { ResourceType, RESOURCES } from "../map/resourceTiles";
 import type { ResourceStyle, HorseVariant } from "../state/settings";
 
 export type SpriteKey =
   | `castle.${CastleLevel}`
+  | `castle-alt.${CastleLevel}`
   | `resource.${ResourceType}`
   | `resource-cart.${ResourceType}`
   | `resource-illust.${ResourceType}`
@@ -99,6 +103,12 @@ export const CASTLE_SPRITES: Record<CastleLevel, string> = {
   1: castleL1,
   2: castleL2,
   3: castleL3,
+};
+
+export const CASTLE_ALT_SPRITES: Record<CastleLevel, string> = {
+  1: castleAltL1,
+  2: castleAltL2,
+  3: castleAltL3,
 };
 
 export const SETTLEMENT_BANNERS: Record<CastleLevel, string> = {
@@ -216,6 +226,29 @@ export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescripto
   "castle.3": {
     key: "castle.3",
     url: CASTLE_SPRITES[3],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 3.0 },
+    anchorOffsetY: 16,
+  },
+};
+
+export const CASTLE_ALT_DESCRIPTORS: Record<`castle-alt.${CastleLevel}`, SpriteDescriptor> = {
+  "castle-alt.1": {
+    key: "castle-alt.1",
+    url: CASTLE_ALT_SPRITES[1],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.5 },
+  },
+  "castle-alt.2": {
+    key: "castle-alt.2",
+    url: CASTLE_ALT_SPRITES[2],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 2.2 },
+    anchorOffsetY: 8,
+  },
+  "castle-alt.3": {
+    key: "castle-alt.3",
+    url: CASTLE_ALT_SPRITES[3],
     anchor: "bottom",
     sizing: { kind: "fitHeight", hexSizeMul: 3.0 },
     anchorOffsetY: 16,
@@ -531,6 +564,7 @@ export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> =
 
 export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(CASTLE_DESCRIPTORS),
+  ...Object.values(CASTLE_ALT_DESCRIPTORS),
   ...Object.values(RESOURCE_DESCRIPTORS),
   ...Object.values(RESOURCE_CART_DESCRIPTORS),
   ...Object.values(RESOURCE_ILLUST_DESCRIPTORS),
@@ -551,8 +585,8 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(BUILDING_DESCRIPTORS),
 ];
 
-export function castleKey(level: CastleLevel): `castle.${CastleLevel}` {
-  return `castle.${level}`;
+export function castleKey(level: CastleLevel, variant?: CastleVariant): `castle.${CastleLevel}` | `castle-alt.${CastleLevel}` {
+  return variant ? `castle-alt.${level}` : `castle.${level}`;
 }
 
 export function resourceKey(type: ResourceType): `resource.${ResourceType}` {

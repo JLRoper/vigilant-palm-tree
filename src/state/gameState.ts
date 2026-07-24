@@ -7,6 +7,7 @@ import {
   foodRequired,
   moraleDecay,
 } from "../economy/consumption";
+import type { CastleVariant } from "../entities/settlement";
 
 export type PlayerId = number;
 export type Faction = "player" | "ai";
@@ -94,6 +95,7 @@ export interface SettlementState {
   cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>;
   morale: number;
   autoTrade: boolean;
+  castleVariant: CastleVariant;
 }
 
 export type GamePhase =
@@ -208,6 +210,7 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       cityMines: [],
       morale: 100,
       autoTrade: true,
+      castleVariant: 0,
     },
     s1: {
       id: "s1",
@@ -226,6 +229,7 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       cityMines: [],
       morale: 100,
       autoTrade: true,
+      castleVariant: 0,
     },
   };
 }
@@ -1158,6 +1162,7 @@ function completeCharter(state: GameState, charter: CharterState): GameState {
     cityMines: [],
     morale: 50,
     autoTrade: false,
+    castleVariant: Math.random() < 0.5 ? 1 : 0,
   };
 
   const newHeroes = hero

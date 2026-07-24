@@ -8,6 +8,7 @@ import type { GameState, HeroId } from "../state/gameState";
 import type { TurnController } from "../state/turnController";
 import { computeReachableSplit } from "../render/overlays/pathOverlay";
 import type { PathPreviewLock } from "../managers/GameStateManager";
+import { openCenteredModal, styleButton, styleInput } from "./menu";
 
 export const MAP_SEED = 42;
 
@@ -225,38 +226,8 @@ export class AdventureView {
           if (selectedId) {
             const hero = gs.heroes[selectedId];
             if (hero) {
-              const name = generateCharterName();
-              const proceed = confirm(`Found charter at (${t.q},${t.r})?\n\nSuggested name: ${name}\n\nCost: 2500g + 20 wood + 15 stone`);
-              if (proceed) {
-                let finalName = name;
-                let asking = true;
-                while (asking) {
-                  const input = prompt("Settlement name:", finalName);
-                  if (input === null) { asking = false; break; }
-                  if (input.trim()) {
-                    finalName = input.trim();
-                    asking = false;
-                  }
-                }
-                if (finalName && finalName !== name) {
-                } else {
-                  finalName = name;
-                }
-                if (this.opts.onStartCharter) {
-                  const ok = this.opts.onStartCharter(t.q, t.r, finalName);
-                  if (ok) {
-                    this.lastClickDebug.reason = "charter_started";
-                    this.opts.setCharterMode?.(false);
-                    this.opts.onStateChanged?.();
-                    this.opts.onHudUpdate();
-                    this.opts.onRedraw();
-                    return;
-                  }
-                }
-              } else {
-                this.lastClickDebug.reason = "charter_cancelled";
-              }
-              return;
+              void this.startCharterModal(t.q, t.r);
+              this.lastClickDebug.reason = "charter_modal_opened";
             }
           }
         }
@@ -412,6 +383,101 @@ export class AdventureView {
       : "requestMove rejected";
     this.opts.onHudUpdate();
     this.opts.onRedraw();
+  }
+
+  private async startCharterModal(targetQ: number, targetR: number): Promise<void> {
+    return new Promise<void>((_) => {
+      let currentName = generateCharterName();
+      const modal = openCenteredModal(document.body, "Charter Settlement", 320);
+
+      const info = document.createElement("div");
+      info.style.fontSize = "14px";
+      info.style.opacity = "0.9";
+      info.style.textAlign = "center";
+      info.style.margin = "4px 0 12px";
+      info.textContent = `Found settlement at (${targetQ}, ${targetR})`;
+      modal.appendContent(info);
+
+      const cost = document.createElement("div");
+      cost.style.fontSize = "11px";
+      cost.style.opacity = "0.7";
+      cost.style.textAlign = "center";
+      cost.style.marginBottom = "10px";
+      cost.textContent = "Cost: 2500g + 20 wood + 15 stone";
+      modal.appendContent(cost);
+
+      const nameLabel = document.createElement("label");
+      nameLabel.textContent = "Settlement name";
+      nameLabel.style.fontSize = "11px";
+      nameLabel.style.opacity = "0.7";
+      modal.appendContent(nameLabel);
+
+      const nameRow = document.createElement("div");
+      nameRow.style.display = "flex";
+      nameRow.style.gap = "6px";
+      nameRow.style.alignItems = "center";
+
+      const nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.value = currentName;
+      styleInput(nameInput);
+      nameInput.style.flex = "1";
+      nameRow.appendChild(nameInput);
+
+      const rerollBtn = document.createElement("button");
+      rerollBtn.textContent = "↻";
+      rerollBtn.title = "Re-roll name";
+      styleButton(rerollBtn);
+      rerollBtn.style.width = "32px";
+      rerollBtn.style.height = "100%";
+      rerollBtn.style.textAlign = "center";
+      rerollBtn.style.padding = "6px 0";
+      rerollBtn.addEventListener("click", () => {
+        currentName = generateCharterName();
+        nameInput.value = currentName;
+      });
+      nameRow.appendChild(rerollBtn);
+
+      modal.appendContent(nameRow);
+
+      const row = document.createElement("div");
+      row.style.display = "flex";
+      row.style.justifyContent = "flex-end";
+      row.style.gap = "8px";
+      row.style.marginTop = "12px";
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.textContent = "Cancel";
+      styleButton(cancelBtn);
+      cancelBtn.addEventListener("click", () => {
+        modal.close();
+        this.lastClickDebug.reason = "charter_cancelled";
+      });
+      row.appendChild(cancelBtn);
+
+      const confirmBtn = document.createElement("button");
+      confirmBtn.textContent = "Confirm";
+      styleButton(confirmBtn, true);
+      confirmBtn.addEventListener("click", () => {
+        const finalName = nameInput.value.trim() || currentName;
+        modal.close();
+        if (this.opts.onStartCharter) {
+          const ok = this.opts.onStartCharter(targetQ, targetR, finalName);
+          if (ok) {
+            this.lastClickDebug.reason = "charter_started";
+            this.opts.setCharterMode?.(false);
+            this.opts.onStateChanged?.();
+            this.opts.onHudUpdate();
+            this.opts.onRedraw();
+          }
+        }
+      });
+      row.appendChild(confirmBtn);
+
+      modal.appendContent(row);
+      nameInput.focus();
+      nameInput.select();
+    });
   }
 
   private onWheel(e: WheelEvent): void {

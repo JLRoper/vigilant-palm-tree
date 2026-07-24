@@ -87,7 +87,7 @@ export class Renderer {
         c.ownerId === opts.viewPlayerId || isVisible(visible, c.tile.q, c.tile.r);
       if (!canSee) continue;
       const { x, y } = axialToPixel(c.tile.q, c.tile.r);
-      drawCastleSprite(ctx, this.sprites, c.level, x, y, HEX_SIZE);
+      drawCastleSprite(ctx, this.sprites, c.level, x, y, HEX_SIZE, c.castleVariant);
       this.drawCastleBorder(x, y, c, opts);
     }
 

@@ -62,7 +62,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   const current = settings();
   const mapInfo = opts.getMapInfo?.() ?? null;
 
-  const modal = openCenteredModal(parent, "Settings", 420);
+  const modal = openCenteredModal(parent, "Settings", 420, true);
 
   const content = document.createElement("div");
   content.style.fontFamily = menuTheme.font;

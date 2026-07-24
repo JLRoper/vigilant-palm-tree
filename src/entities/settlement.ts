@@ -2,6 +2,7 @@ import { Axial } from "../core/hex";
 import type { PlayerId, ResourceType, SettlementState, Warehouse } from "../state/gameState";
 
 export type CastleLevel = 1 | 2 | 3;
+export type CastleVariant = 0 | 1;
 
 function emptyWarehouse(): Warehouse {
   return { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
@@ -23,6 +24,7 @@ export class Castle {
   cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>;
   morale: number;
   autoTrade: boolean;
+  castleVariant: CastleVariant;
 
   constructor(
     id: string,
@@ -40,6 +42,7 @@ export class Castle {
     cityMines?: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>,
     morale = 100,
     autoTrade = true,
+    castleVariant: CastleVariant = 0,
   ) {
     this.id = id;
     this.tile = tile;
@@ -56,6 +59,7 @@ export class Castle {
     this.cityMines = cityMines ?? [];
     this.morale = morale;
     this.autoTrade = autoTrade;
+    this.castleVariant = castleVariant;
   }
 
   toGameState(): SettlementState {
@@ -76,6 +80,7 @@ export class Castle {
       cityMines: this.cityMines,
       morale: this.morale,
       autoTrade: this.autoTrade,
+      castleVariant: this.castleVariant,
     };
   }
 
@@ -96,6 +101,7 @@ export class Castle {
       s.cityMines ?? [],
       s.morale ?? 100,
       s.autoTrade ?? true,
+      s.castleVariant ?? 0,
     );
   }
 }

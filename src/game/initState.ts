@@ -123,6 +123,7 @@ function makeSettlements(
       cityMines: mines,
       morale: 100,
       autoTrade: true,
+      castleVariant: Math.random() < 0.5 ? 1 : 0,
     };
   });
 }
@@ -254,6 +255,7 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     r: s.r,
     level: s.level,
     id: s.id,
+    castleVariant: s.castleVariant ?? (Math.random() < 0.5 ? 1 : 0),
   };
 }
 

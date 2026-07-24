@@ -241,7 +241,8 @@ export class PopupMenu {
 export function openCenteredModal(
   parent: HTMLElement,
   title: string,
-  width = 360
+  width = 360,
+  draggable = false,
 ): PopupMenu {
   const wrapper = document.createElement("div");
   Object.assign(wrapper.style, {
@@ -258,7 +259,7 @@ export function openCenteredModal(
     parent: wrapper,
     title,
     width,
-    draggable: false,
+    draggable,
     onClose: () => wrapper.remove(),
   });
   const initialLeft = (window.innerWidth - width) / 2;

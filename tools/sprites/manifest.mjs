@@ -6,6 +6,12 @@ export const CASTLE_SPRITES = {
   3: "castle-l3.png",
 };
 
+export const CASTLE_ALT_SPRITES = {
+  1: "castle-l1-alt.png",
+  2: "castle-l2-alt.png",
+  3: "castle-l3-alt.png",
+};
+
 export const RESOURCE_SPRITES = {
   gold: "resource-gold.png",
   wood: "resource-wood.png",
@@ -53,6 +59,7 @@ export const RESOURCE_CREST_SPRITES = {
 
 export const SPRITE_FILES = [
   ...Object.values(CASTLE_SPRITES),
+  ...Object.values(CASTLE_ALT_SPRITES),
   ...Object.values(RESOURCE_SPRITES),
   ...Object.values(RESOURCE_CART_SPRITES),
   ...Object.values(RESOURCE_ILLUST_SPRITES),
