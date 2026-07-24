@@ -13,6 +13,7 @@ import {
   horseRangerKey,
   horseArcaneKey,
   horseUnicornKey,
+  horseSamuraiKey,
 } from "./assetDescriptors";
 import { drawKnightSprite, drawDemonSprite } from "./heroSprites";
 
@@ -25,6 +26,7 @@ const HORSE_VARIANT_KEYS = {
   ranger: horseRangerKey,
   arcane: horseArcaneKey,
   unicorn: horseUnicornKey,
+  samurai: horseSamuraiKey,
 } as const;
 
 export function drawCastleSprite(

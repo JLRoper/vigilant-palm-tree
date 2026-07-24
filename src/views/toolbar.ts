@@ -31,6 +31,9 @@ export interface ToolbarState {
   hasActiveGame: () => boolean;
   canEndTurnNow: () => boolean;
   getCalendar: () => CalendarSnapshot | null;
+  getSaveStatus: () => import("../managers/SessionManager").SaveStatus;
+  getLastSavedAt: () => string | null;
+  getZoom: () => number;
 }
 
 export interface ToolbarCallbacks {
@@ -82,9 +85,6 @@ export class Toolbar {
     gear.textContent = "\u2699";
     gear.title = "Settings";
     Object.assign(gear.style, {
-      position: "absolute",
-      top: "6px",
-      right: "8px",
       width: "22px",
       height: "22px",
       padding: "0",
@@ -96,23 +96,24 @@ export class Toolbar {
       borderRadius: "3px",
       color: menuTheme.panel.color,
       fontFamily: menuTheme.font,
-      zIndex: "1",
+      flexShrink: "0",
     });
     gear.addEventListener("click", (e) => {
       e.stopPropagation();
       openSettingsMenu({ parent: document.body, getMapInfo: this.opts.callbacks.getMapInfo });
     });
     gear.addEventListener("mousedown", (e) => e.stopPropagation());
-    this.menu.root.appendChild(gear);
+    this.menu.header.appendChild(gear);
+    this.menu.header.style.overflow = "hidden";
 
     this.calendarEl = document.createElement("div");
     Object.assign(this.calendarEl.style, {
       display: "flex",
       flexDirection: "column",
-      gap: "2px",
-      paddingBottom: "8px",
-      borderBottom: "1px solid rgba(255,255,255,0.08)",
-      marginBottom: "4px",
+      gap: "6px",
+      paddingBottom: "10px",
+      borderBottom: "1px solid rgba(255,255,255,0.14)",
+      marginBottom: "6px",
       fontFamily: menuTheme.font,
       color: menuTheme.panel.color,
     });
@@ -169,7 +170,6 @@ export class Toolbar {
       gap: "6px",
       fontSize: "11px",
       opacity: "0.85",
-      paddingTop: "4px",
     });
     const swatch = document.createElement("span");
     swatch.id = "toolbar-active-swatch";
@@ -194,7 +194,6 @@ export class Toolbar {
       justifyContent: "space-between",
       fontSize: "11px",
       opacity: "0.85",
-      paddingTop: "2px",
     });
     const incomeLabel = document.createElement("span");
     incomeLabel.textContent = "Income";
@@ -210,7 +209,6 @@ export class Toolbar {
       justifyContent: "space-between",
       fontSize: "11px",
       opacity: "0.85",
-      paddingTop: "2px",
     });
     const wealthLabel = document.createElement("span");
     wealthLabel.textContent = "Wealth";
@@ -226,7 +224,6 @@ export class Toolbar {
       justifyContent: "space-between",
       fontSize: "11px",
       opacity: "0.85",
-      paddingTop: "2px",
     });
     const moraleLabel = document.createElement("span");
     moraleLabel.textContent = "Morale";
@@ -236,15 +233,40 @@ export class Toolbar {
     moraleRow.appendChild(moraleValue);
     this.calendarEl.appendChild(moraleRow);
 
+    const statusRow = document.createElement("div");
+    Object.assign(statusRow.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      fontSize: "10px",
+      opacity: "0.7",
+      paddingTop: "6px",
+      borderTop: "1px solid rgba(255,255,255,0.08)",
+    });
+    const saveLabel = document.createElement("span");
+    saveLabel.id = "toolbar-save-label";
+    saveLabel.textContent = "Save";
+    statusRow.appendChild(saveLabel);
+    const saveValue = document.createElement("span");
+    saveValue.id = "toolbar-save-value";
+    statusRow.appendChild(saveValue);
+    const zoomValue = document.createElement("span");
+    zoomValue.id = "toolbar-zoom-value";
+    Object.assign(zoomValue.style, { marginLeft: "8px" });
+    statusRow.appendChild(zoomValue);
+    this.calendarEl.appendChild(statusRow);
+
     this.menu.body.appendChild(this.calendarEl);
 
-    this.newBtn = this.makeButton("New Game", false);
-    this.loadBtn = this.makeButton("Load Game", false);
-    this.saveBtn = this.makeButton("Save Game", false);
-    this.endTurnBtn = this.makeButton("End Turn", true);
+    this.newBtn = this.makeButton("+  New Game", false);
+    this.loadBtn = this.makeButton("↕  Load Game", false);
+    this.saveBtn = this.makeButton("↓  Save Game", false);
+    this.endTurnBtn = this.makeButton("▶  End Turn", true);
 
     this.newBtn.addEventListener("click", () => {
       if (this.busy) return;
+      if (this.opts.state.hasActiveGame()) {
+        if (!confirm("Start a new game? Current game will be lost.")) return;
+      }
       this.openNewModal();
     });
     this.loadBtn.addEventListener("click", () => {
@@ -265,13 +287,13 @@ export class Toolbar {
       });
     });
 
-    this.heroesBtn = this.makeButton("Heroes", false);
+    this.heroesBtn = this.makeButton("\u2694  Heroes", false);
     this.heroesBtn.addEventListener("click", () => {
       if (this.busy) return;
       this.opts.callbacks.onHeroes?.();
     });
 
-    this.settlementsBtn = this.makeButton("Settlements", false);
+    this.settlementsBtn = this.makeButton("\u2302  Settlements", false);
     this.settlementsBtn.addEventListener("click", () => {
       if (this.busy) return;
       this.opts.callbacks.onSettlements?.();
@@ -297,6 +319,14 @@ export class Toolbar {
     this.setEnabled(this.endTurnBtn, endTurnOk && !this.busy);
     this.setEnabled(this.heroesBtn, hasGameState && !this.busy);
     this.setEnabled(this.settlementsBtn, hasGameState && !this.busy);
+
+    this.newBtn.title = !ok ? "Backend unavailable" : active ? "New game (current game will be lost)" : "Start a new game";
+    this.loadBtn.title = !ok ? "Backend unavailable" : "Open a saved game";
+    this.saveBtn.title = !ok ? "Backend unavailable" : active ? "Save current game" : "No active game to save";
+    this.endTurnBtn.title = endTurnOk ? "End the current turn" : "Not your turn or action in progress";
+    this.heroesBtn.title = hasGameState ? "View and manage heroes" : "No active game";
+    this.settlementsBtn.title = hasGameState ? "View and manage settlements" : "No active game";
+
     this.refreshCalendar();
   }
 
@@ -310,6 +340,9 @@ export class Toolbar {
     const incomeEl = this.menu.root.querySelector<HTMLElement>("#toolbar-income-value");
     const wealthEl = this.menu.root.querySelector<HTMLElement>("#toolbar-wealth-value");
     const moraleEl = this.menu.root.querySelector<HTMLElement>("#toolbar-morale-value");
+    const saveLabelEl = this.menu.root.querySelector<HTMLElement>("#toolbar-save-label");
+    const saveValueEl = this.menu.root.querySelector<HTMLElement>("#toolbar-save-value");
+    const zoomValueEl = this.menu.root.querySelector<HTMLElement>("#toolbar-zoom-value");
     if (!dayEl || !weekEl || !monthEl || !swatchEl || !activeEl || !incomeEl || !wealthEl || !moraleEl) return;
     if (!cal) {
       dayEl.textContent = "—";
@@ -320,19 +353,39 @@ export class Toolbar {
       incomeEl.textContent = "—";
       wealthEl.textContent = "—";
       moraleEl.textContent = "—";
+      if (saveLabelEl) saveLabelEl.textContent = "Save";
+      if (saveValueEl) saveValueEl.textContent = "—";
+      if (zoomValueEl) zoomValueEl.textContent = "";
       return;
     }
-    dayEl.textContent = `${cal.day} (d${cal.dayOfWeek})`;
-    weekEl.textContent = `${cal.week}`;
-    monthEl.textContent = `${cal.monthName} ${cal.month} (d${cal.dayOfMonth})`;
+    dayEl.textContent = `Day ${cal.dayOfWeek} of 7`;
+    weekEl.textContent = `Week ${cal.week}`;
+    monthEl.textContent = `${cal.monthName} · day ${cal.dayOfMonth}`;
     swatchEl.style.background = cal.activePlayerColor;
     activeEl.textContent = `${cal.activePlayerName}'s turn`;
     incomeEl.textContent = `+${cal.nextTurnGold}g/turn`;
-    wealthEl.textContent = `${cal.wealth}g`;
-    if (cal.morale === null || cal.effectiveIncome === null) {
-      moraleEl.textContent = "—";
-    } else {
-      moraleEl.textContent = `${cal.morale}% · ${cal.effectiveIncome}g`;
+    wealthEl.textContent = `${Number(cal.wealth).toLocaleString()}g`;
+    moraleEl.textContent = cal.morale !== null ? `${cal.morale}%` : "—";
+
+    if (saveLabelEl && saveValueEl) {
+      const sv = this.opts.state.getSaveStatus();
+      const savedAt = this.opts.state.getLastSavedAt();
+      if (sv === "saving") {
+        saveLabelEl.textContent = "Saving";
+        saveValueEl.textContent = "…";
+      } else if (sv === "error") {
+        saveLabelEl.textContent = "Save";
+        saveValueEl.textContent = "failed";
+      } else if (sv === "saved" && savedAt) {
+        saveLabelEl.textContent = "Saved";
+        saveValueEl.textContent = formatTime(savedAt);
+      } else {
+        saveLabelEl.textContent = "Save";
+        saveValueEl.textContent = "—";
+      }
+    }
+    if (zoomValueEl) {
+      zoomValueEl.textContent = `Zoom ${this.opts.state.getZoom().toFixed(2)}x`;
     }
   }
 

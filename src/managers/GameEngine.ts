@@ -122,7 +122,7 @@ export class GameEngine {
       onEndTurn: () => void this.actions.handleEndTurn().then(() => this.fullFrame()),
       onForget: (_id) => this.ui.getToolbar()?.refresh(),
       getMapInfo: () => this.getMapInfo(),
-    });
+    }, () => this.view.camera.zoom);
     this.ui.initHeroMenu(
       (heroId, settlementId, direction) => {
         const result = this.state.getTurnController().transferGold(heroId, settlementId, direction);

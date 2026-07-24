@@ -54,6 +54,7 @@ export class UIManager {
     state: GameStateManager,
     getCalendar: () => CalendarSnapshot | null,
     callbacks: ToolbarCallbacks,
+    getZoom?: () => number,
   ): void {
     this.gameStateManager = state;
     this.toolbar = new Toolbar({
@@ -63,6 +64,9 @@ export class UIManager {
         hasActiveGame: () => session.getActiveGameId() !== null,
         canEndTurnNow: () => canEndTurn(state.getState()),
         getCalendar,
+        getSaveStatus: () => session.getSaveStatus(),
+        getLastSavedAt: () => session.getLastSavedAt(),
+        getZoom: getZoom ?? (() => 1),
       },
       callbacks: {
         onNew: callbacks.onNew,
@@ -98,6 +102,13 @@ export class UIManager {
       parent: document.body,
       onTransfer,
       onReorder,
+      onClose: () => {
+        if (this.gameStateManager) {
+          const tc = this.gameStateManager.getTurnController();
+          tc.clearSelection();
+          this.gameStateManager.replaceState(tc.getState());
+        }
+      },
     });
   }
 
@@ -214,9 +225,11 @@ export class UIManager {
     }
   }
 
-  private refreshRosterMenus(gameState: GameState): void {
-    this.heroRosterMenu?.update(gameState);
-    this.settlementRosterMenu?.update(gameState);
+  private refreshRosterMenus(_gameState: GameState): void {
+    // Rosters are populated by show() and persist until hide().
+    // Per-frame update() would destroy/recreate buttons every 16ms,
+    // causing click events to be lost when the target element is
+    // detached from the DOM between mousedown and mouseup.
   }
 
   private openHeroRoster(): void {

@@ -4,6 +4,8 @@ import { PopupMenu, menuTheme } from "./menu";
 import { ARMY_STACK_SLOTS, type UnitStack } from "../state/units";
 import { catalogReady, catalogFailed, getCachedUnit, loadUnitCatalog } from "../data/unitCatalog";
 import { getUnitImageUrl } from "../data/unitImages";
+import { HERO_BANNERS } from "../render/assetDescriptors";
+import { settings } from "../state/settings";
 
 const MOVEMENT_PER_TURN = 7;
 const MIN_USABLE_MOVEMENT = 1.0;
@@ -24,6 +26,7 @@ export interface HeroInfoMenuOptions {
   parent: HTMLElement;
   onTransfer?: TransferHandler;
   onReorder?: ReorderHandler;
+  onClose?: () => void;
 }
 
 function makeRow(label: string): { row: HTMLDivElement; value: HTMLSpanElement } {
@@ -50,6 +53,7 @@ export class HeroInfoMenu {
   private visible = false;
   private currentHeroId: string | null = null;
 
+  private bannerEl: HTMLImageElement;
   private nameEl: HTMLElement;
   private goldEl: HTMLElement;
   private foodEl: HTMLElement;
@@ -87,10 +91,23 @@ export class HeroInfoMenu {
       onClose: () => {
         this.visible = false;
         this.currentHeroId = null;
+        opts.onClose?.();
       },
     });
 
     const body = this.menu.body;
+
+    this.bannerEl = document.createElement("img");
+    Object.assign(this.bannerEl.style, {
+      width: "100%",
+      height: "60px",
+      objectFit: "cover",
+      objectPosition: "center",
+      borderRadius: "3px 3px 0 0",
+      marginBottom: "6px",
+      display: "block",
+    });
+    body.appendChild(this.bannerEl);
 
     this.nameEl = document.createElement("div");
     Object.assign(this.nameEl.style, {
@@ -451,6 +468,7 @@ export class HeroInfoMenu {
 
   update(hero: Hero, state: GameState): void {
     this.nameEl.textContent = hero.name;
+    this.bannerEl.src = HERO_BANNERS[settings().horseVariant];
     this.goldEl.textContent = `${hero.gold}g`;
     this.foodEl.textContent = "0 food";
     const remaining = Math.max(0, hero.movementRemaining);
@@ -458,7 +476,7 @@ export class HeroInfoMenu {
     const pct = Math.max(0, Math.min(1, shown / MOVEMENT_PER_TURN)) * 100;
     this.movementFill.style.width = `${pct}%`;
     this.movementLabel.textContent = `${shown.toFixed(1)} / ${MOVEMENT_PER_TURN}`;
-    this.troopsEl.textContent = `${hero.troops}  ·  Upkeep: ${hero.troops}g/week`;
+    this.troopsEl.textContent = `${hero.troops}  Â·  Upkeep: ${hero.troops}g/week`;
 
     this.settlementAtTile = null;
     for (const s of Object.values(state.settlements)) {
@@ -574,7 +592,7 @@ export class HeroInfoMenu {
         count.style.display = "block";
         tile.style.opacity = "1";
         const name = u?.name ?? id!;
-        const stats = u ? ` · A ${u.attack} D ${u.defence} H ${u.health} S ${u.speed}` : "";
+        const stats = u ? ` Â· A ${u.attack} D ${u.defence} H ${u.health} S ${u.speed}` : "";
         tile.title = `Slot ${i + 1}: ${name} x${stack!.count}${stats}`;
       }
 
@@ -583,7 +601,7 @@ export class HeroInfoMenu {
       const nameEl = row.children[1].firstChild as HTMLSpanElement;
       const statsEl = row.children[1].lastChild as HTMLSpanElement;
       const countEl = row.children[2] as HTMLSpanElement;
-      nameEl.textContent = isEmpty ? "—" : (id!);
+      nameEl.textContent = isEmpty ? "â€”" : (id!);
       countEl.textContent = isEmpty ? "" : String(stack!.count);
       if (isEmpty) {
         statsEl.textContent = "empty";
@@ -591,8 +609,8 @@ export class HeroInfoMenu {
         row.style.opacity = "0.35";
       } else if (u) {
         nameEl.textContent = u.name;
-        statsEl.textContent = `A ${u.attack} · D ${u.defence} · H ${u.health} · S ${u.speed}`;
-        row.title = `${u.name} — ${u.description}`;
+        statsEl.textContent = `A ${u.attack} Â· D ${u.defence} Â· H ${u.health} Â· S ${u.speed}`;
+        row.title = `${u.name} â€” ${u.description}`;
         row.style.opacity = "0.9";
       } else if (catalogReady() || catalogFailed()) {
         // Catalog resolved but this id isn't in it (unknown unit type).
@@ -602,8 +620,8 @@ export class HeroInfoMenu {
         row.style.opacity = "0.55";
       } else {
         nameEl.textContent = id!;
-        statsEl.textContent = "loading…";
-        row.title = "Loading unit catalog…";
+        statsEl.textContent = "loadingâ€¦";
+        row.title = "Loading unit catalogâ€¦";
         row.style.opacity = "0.55";
       }
     }
@@ -618,3 +636,5 @@ export class HeroInfoMenu {
     }
   }
 }
+
+

@@ -104,6 +104,8 @@ export class PopupMenu {
       fontSize: menuTheme.fontSize,
       zIndex: String(opts.zIndex ?? 50),
       userSelect: "none",
+      pointerEvents: "auto",
+      isolation: "isolate",
     });
     if (opts.width !== undefined) {
       this.root.style.width = typeof opts.width === "number" ? `${opts.width}px` : opts.width;

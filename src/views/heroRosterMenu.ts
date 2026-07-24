@@ -46,7 +46,6 @@ export class HeroRosterMenu {
   }
 
   show(state: GameState): void {
-    this.update(state);
     if (!this.visible) {
       if (!this.menu.root.parentNode) {
         document.body.appendChild(this.menu.root);
@@ -54,6 +53,7 @@ export class HeroRosterMenu {
       this.menu.root.style.display = "";
       this.visible = true;
     }
+    this.update(state);
   }
 
   hide(): void {
@@ -68,6 +68,7 @@ export class HeroRosterMenu {
   }
 
   update(state: GameState): void {
+    if (!this.visible) return;
     const activePlayer = state.players.find((p) => p.id === state.activePlayerId);
     this.menu.setTitle(activePlayer ? `${activePlayer.name}'s Heroes` : "Heroes");
 
@@ -153,7 +154,10 @@ export class HeroRosterMenu {
         borderRadius: menuTheme.button.borderRadius,
         fontFamily: menuTheme.font,
       });
-      selectBtn.addEventListener("click", () => this.opts.onSelectHero?.(hero.id));
+      selectBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.opts.onSelectHero?.(hero.id);
+      });
       buttons.appendChild(selectBtn);
     }
 
@@ -170,7 +174,10 @@ export class HeroRosterMenu {
         borderRadius: menuTheme.button.borderRadius,
         fontFamily: menuTheme.font,
       });
-      locateBtn.addEventListener("click", () => this.opts.onCenterHero?.(hero.id));
+      locateBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.opts.onCenterHero?.(hero.id);
+      });
       buttons.appendChild(locateBtn);
     }
 

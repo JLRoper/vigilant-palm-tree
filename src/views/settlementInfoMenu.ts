@@ -1,6 +1,8 @@
 import type { GameState, SettlementState } from "../state/gameState";
 import { PopupMenu, menuTheme } from "./menu";
 import { MAX_HEROES_PER_PLAYER, HERO_RECRUIT_COST } from "../state/gameState";
+import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../render/assetDescriptors";
+import type { CastleLevel } from "../entities/settlement";
 
 export interface SettlementInfoMenuOptions {
   parent: HTMLElement;
@@ -27,6 +29,8 @@ function makeRow(label: string): { row: HTMLDivElement; value: HTMLSpanElement }
   return { row, value };
 }
 
+const WAREHOUSE_RESOURCE_ORDER = ["wood", "stone", "iron", "arcane", "food"] as const;
+
 export class SettlementInfoMenu {
   private menu: PopupMenu;
   private visible = false;
@@ -38,7 +42,8 @@ export class SettlementInfoMenu {
   private treasuryEl: HTMLSpanElement;
   private moraleEl: HTMLSpanElement;
   private foodEl: HTMLSpanElement;
-    private warehouseEls: Record<string, HTMLSpanElement>;
+  private bannerEl: HTMLImageElement;
+  private warehouseEls: Record<string, HTMLSpanElement>;
   private onCloseCallback?: () => void;
   private onRecruitHero?: () => void;
   private recruitContainer: HTMLDivElement;
@@ -63,6 +68,18 @@ export class SettlementInfoMenu {
     });
 
     const body = this.menu.body;
+
+    this.bannerEl = document.createElement("img");
+    Object.assign(this.bannerEl.style, {
+      width: "100%",
+      height: "60px",
+      objectFit: "cover",
+      objectPosition: "center",
+      borderRadius: "3px 3px 0 0",
+      marginBottom: "6px",
+      display: "block",
+    });
+    body.appendChild(this.bannerEl);
 
     this.nameEl = document.createElement("div");
     Object.assign(this.nameEl.style, {
@@ -118,15 +135,54 @@ export class SettlementInfoMenu {
       letterSpacing: "0.06em",
       textTransform: "uppercase",
       opacity: "0.55",
-      marginBottom: "4px",
+      marginBottom: "6px",
     });
     body.appendChild(warehouseLabel);
 
+    const grid = document.createElement("div");
+    Object.assign(grid.style, {
+      display: "grid",
+      gridAutoFlow: "row",
+      gridTemplateColumns: "repeat(4, 1fr)",
+      columnGap: "2px",
+      rowGap: "4px",
+      marginBottom: "4px",
+      justifyItems: "center",
+    });
+    body.appendChild(grid);
+
     this.warehouseEls = {};
-    for (const r of ["wood", "stone", "iron", "arcane", "food"] as const) {
-      const { row: wRow, value: wVal } = makeRow(r);
-      this.warehouseEls[r] = wVal;
-      body.appendChild(wRow);
+    for (const r of WAREHOUSE_RESOURCE_ORDER) {
+      const cell = document.createElement("div");
+      Object.assign(cell.style, {
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "2px",
+      });
+
+      const img = document.createElement("img");
+      img.src = RESOURCE_PILE_BUBBLY_SPRITES[r as keyof typeof RESOURCE_PILE_BUBBLY_SPRITES];
+      Object.assign(img.style, {
+        width: "28px",
+        height: "28px",
+        imageRendering: "pixelated",
+        objectFit: "contain",
+      });
+      cell.appendChild(img);
+
+      const value = document.createElement("span");
+      value.textContent = "0";
+      Object.assign(value.style, {
+        fontSize: "11px",
+        fontVariantNumeric: "tabular-nums",
+        opacity: "0.85",
+        lineHeight: "1",
+      });
+      cell.appendChild(value);
+
+      this.warehouseEls[r] = value;
+      grid.appendChild(cell);
     }
 
     this.recruitContainer = document.createElement("div");
@@ -185,6 +241,7 @@ export class SettlementInfoMenu {
   update(settlement: SettlementState, state: GameState): void {
     const ownerText = settlement.ownerId !== null ? ` — Player ${settlement.ownerId + 1}` : " — Neutral";
     this.menu.setTitle(`Settlement${ownerText}`);
+    this.bannerEl.src = SETTLEMENT_BANNERS[settlement.level as CastleLevel] ?? SETTLEMENT_BANNERS[1];
     this.nameEl.childNodes[0].textContent = settlement.name;
     this.levelBadge.textContent = `L${settlement.level}`;
     this.populationEl.textContent = settlement.population.toLocaleString();

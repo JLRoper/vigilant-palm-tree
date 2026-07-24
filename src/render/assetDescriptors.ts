@@ -1,6 +1,17 @@
 import castleL1 from "../resources/castle-l1.png?url";
 import castleL2 from "../resources/castle-l2.png?url";
 import castleL3 from "../resources/castle-l3.png?url";
+import settlementBanner from "../resources/settlement-banner.png?url";
+import cityBanner from "../resources/city-banner.png?url";
+import castleBanner from "../resources/castle-banner.png?url";
+import heroBannerHero from "../resources/hero-banner-hero.png?url";
+import heroBannerBubbly from "../resources/hero-banner-bubbly.png?url";
+import heroBannerShadow from "../resources/hero-banner-shadow.png?url";
+import heroBannerPaladin from "../resources/hero-banner-paladin.png?url";
+import heroBannerRanger from "../resources/hero-banner-ranger.png?url";
+import heroBannerArcane from "../resources/hero-banner-arcane.png?url";
+import heroBannerUnicorn from "../resources/hero-banner-unicorn.png?url";
+import heroBannerSamurai from "../resources/hero-banner-samurai.png?url";
 import resourceGold from "../resources/resource-gold.png?url";
 import resourceWood from "../resources/resource-wood.png?url";
 import resourceStone from "../resources/resource-stone.png?url";
@@ -41,10 +52,17 @@ import resourceWoodPileBubbly from "../resources/resource-wood-pile-bubbly.png?u
 import resourceStonePileBubbly from "../resources/resource-stone-pile-bubbly.png?url";
 import resourceIronPileBubbly from "../resources/resource-iron-pile-bubbly.png?url";
 import resourceArcanePileBubbly from "../resources/resource-arcane-pile-bubbly.png?url";
+import resourceFoodPileBubbly from "../resources/resource-food-pile-bubbly.png?url";
+import buildingClassicArcheryRange1 from "../resources/building-classic-archeryRange-1.png?url";
+import buildingClassicHouse2 from "../resources/building-classic-house-2.png?url";
+import buildingClassicTower1 from "../resources/building-classic-tower-1.png?url";
+import buildingClassicTownHall1 from "../resources/building-classic-townHall-1.png?url";
+import buildingBlockyArcheryRange1 from "../resources/building-blocky-archeryRange-1.png?url";
+import buildingBlockyHouse2 from "../resources/building-blocky-house-2.png?url";
 import { Faction, Direction } from "../entities/hero";
 import { CastleLevel } from "../entities/settlement";
 import { ResourceType, RESOURCES } from "../map/resourceTiles";
-import type { ResourceStyle } from "../state/settings";
+import type { ResourceStyle, HorseVariant } from "../state/settings";
 
 export type SpriteKey =
   | `castle.${CastleLevel}`
@@ -83,12 +101,30 @@ export const CASTLE_SPRITES: Record<CastleLevel, string> = {
   3: castleL3,
 };
 
+export const SETTLEMENT_BANNERS: Record<CastleLevel, string> = {
+  1: settlementBanner,
+  2: cityBanner,
+  3: castleBanner,
+};
+
+export const HERO_BANNERS: Record<HorseVariant, string> = {
+  hero: heroBannerHero,
+  bubbly: heroBannerBubbly,
+  shadow: heroBannerShadow,
+  paladin: heroBannerPaladin,
+  ranger: heroBannerRanger,
+  arcane: heroBannerArcane,
+  unicorn: heroBannerUnicorn,
+  samurai: heroBannerSamurai,
+};
+
 export const RESOURCE_SPRITES: Record<ResourceType, string> = {
   gold: resourceGold,
   wood: resourceWood,
   stone: resourceStone,
   iron: resourceIron,
   arcane: resourceArcane,
+  food: resourceFoodPileBubbly,
 };
 
 export const RESOURCE_CART_SPRITES: Record<ResourceType, string> = {
@@ -97,6 +133,7 @@ export const RESOURCE_CART_SPRITES: Record<ResourceType, string> = {
   stone: resourceStoneCart,
   iron: resourceIronCart,
   arcane: resourceArcaneCart,
+  food: resourceFoodPileBubbly,
 };
 
 export const RESOURCE_ILLUST_SPRITES: Record<ResourceType, string> = {
@@ -105,6 +142,7 @@ export const RESOURCE_ILLUST_SPRITES: Record<ResourceType, string> = {
   stone: resourceStoneIllust,
   iron: resourceIronIllust,
   arcane: resourceArcaneIllust,
+  food: resourceFoodPileBubbly,
 };
 
 export const RESOURCE_CONSTELLATION_SPRITES: Record<ResourceType, string> = {
@@ -113,6 +151,7 @@ export const RESOURCE_CONSTELLATION_SPRITES: Record<ResourceType, string> = {
   stone: resourceStoneConstellation,
   iron: resourceIronConstellation,
   arcane: resourceArcaneConstellation,
+  food: resourceFoodPileBubbly,
 };
 
 export const RESOURCE_CREST_SPRITES: Record<ResourceType, string> = {
@@ -121,6 +160,7 @@ export const RESOURCE_CREST_SPRITES: Record<ResourceType, string> = {
   stone: resourceStoneCrest,
   iron: resourceIronCrest,
   arcane: resourceArcaneCrest,
+  food: resourceFoodPileBubbly,
 };
 
 export const RESOURCE_PILE_SPRITES: Record<ResourceType, string> = {
@@ -129,6 +169,7 @@ export const RESOURCE_PILE_SPRITES: Record<ResourceType, string> = {
   stone: resourceStonePile,
   iron: resourceIronPile,
   arcane: resourceArcanePile,
+  food: resourceFoodPileBubbly,
 };
 
 export const RESOURCE_PILE_SMOL_SPRITES: Record<ResourceType, string> = {
@@ -137,6 +178,7 @@ export const RESOURCE_PILE_SMOL_SPRITES: Record<ResourceType, string> = {
   stone: resourceStonePileSmol,
   iron: resourceIronPileSmol,
   arcane: resourceArcanePileSmol,
+  food: resourceFoodPileBubbly,
 };
 
 export const RESOURCE_PILE_BUBBLY_SPRITES: Record<ResourceType, string> = {
@@ -145,6 +187,16 @@ export const RESOURCE_PILE_BUBBLY_SPRITES: Record<ResourceType, string> = {
   stone: resourceStonePileBubbly,
   iron: resourceIronPileBubbly,
   arcane: resourceArcanePileBubbly,
+  food: resourceFoodPileBubbly,
+};
+
+export const BUILDING_SPRITES: Record<string, string> = {
+  "classic.archeryRange.1": buildingClassicArcheryRange1,
+  "classic.house.2": buildingClassicHouse2,
+  "classic.tower.1": buildingClassicTower1,
+  "classic.townHall.1": buildingClassicTownHall1,
+  "blocky.archeryRange.1": buildingBlockyArcheryRange1,
+  "blocky.house.2": buildingBlockyHouse2,
 };
 
 export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescriptor> = {
@@ -375,6 +427,27 @@ export const HORSE_UNICORN_DESCRIPTORS: Record<`horse.unicorn.${Direction}`, Spr
     512
   ) as Record<`horse.unicorn.${Direction}`, SpriteDescriptor>;
 
+// Load samurai warrior sprites from horse/commander-8/ directory (cardinal directions + diagonal fallbacks)
+const HORSE_SAMURAI_GLOB = import.meta.glob(
+  "../resources/units/horse/commander-8/*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const HORSE_SAMURAI_IMAGES = loadDirectionalSprites(
+  HORSE_SAMURAI_GLOB,
+  /samurai-(n|e|s|w)\.png$/,
+  { ne: "n", nw: "n", se: "s", sw: "s" }
+);
+
+export const HORSE_SAMURAI_DESCRIPTORS: Record<`horse.samurai.${Direction}`, SpriteDescriptor> =
+  createDirectionalDescriptors(
+    "horse.samurai",
+    HORSE_SAMURAI_IMAGES,
+    "bottom",
+    { kind: "fitHeight", hexSizeMul: 1.8 },
+    512
+  ) as Record<`horse.samurai.${Direction}`, SpriteDescriptor>;
+
 export const RESOURCE_CART_DESCRIPTORS: Record<`resource-cart.${ResourceType}`, SpriteDescriptor> =
   Object.fromEntries(
     RESOURCES.map((r) => [
@@ -448,6 +521,14 @@ export const HERO_DESCRIPTORS: Record<`hero.${Faction}`, SpriteDescriptor> = {
   },
 };
 
+export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> = 
+  Object.fromEntries(
+    Object.keys(BUILDING_SPRITES).map((k) => [
+      `building.${k}`,
+      { key: `building.${k}`, url: BUILDING_SPRITES[k], anchor: "center", sizing: { kind: "fitWidth", hexSizeMul: 0.9 } } as SpriteDescriptor,
+    ])
+  );
+
 export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(CASTLE_DESCRIPTORS),
   ...Object.values(RESOURCE_DESCRIPTORS),
@@ -466,6 +547,8 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(HORSE_RANGER_DESCRIPTORS),
   ...Object.values(HORSE_ARCANE_DESCRIPTORS),
   ...Object.values(HORSE_UNICORN_DESCRIPTORS),
+  ...Object.values(HORSE_SAMURAI_DESCRIPTORS),
+  ...Object.values(BUILDING_DESCRIPTORS),
 ];
 
 export function castleKey(level: CastleLevel): `castle.${CastleLevel}` {
@@ -524,6 +607,10 @@ export function horseArcaneKey(direction: Direction): `horse.arcane.${Direction}
 
 export function horseUnicornKey(direction: Direction): `horse.unicorn.${Direction}` {
   return `horse.unicorn.${direction}`;
+}
+
+export function horseSamuraiKey(direction: Direction): `horse.samurai.${Direction}` {
+  return `horse.samurai.${direction}`;
 }
 
 export function buildingKey(style: string, kind: string, level: number): SpriteKey {

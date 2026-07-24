@@ -3,6 +3,7 @@ import {
   settings,
   updateSettings,
   settingsBounds,
+  borderWidthBounds,
   resourceStyleOptions,
   type GameSettings,
   type HorseVariant,
@@ -193,6 +194,56 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
   content.appendChild(heroRow);
 
+  const borderBounds = borderWidthBounds();
+
+  const borderRow = document.createElement("div");
+  borderRow.style.display = "flex";
+  borderRow.style.flexDirection = "column";
+  borderRow.style.gap = "6px";
+
+  const borderLabelRow = document.createElement("div");
+  borderRow.appendChild(borderLabelRow);
+  borderLabelRow.style.display = "flex";
+  borderLabelRow.style.justifyContent = "space-between";
+  borderLabelRow.style.alignItems = "baseline";
+
+  const borderLabel = document.createElement("span");
+  borderLabel.textContent = "Territory border thickness";
+  borderLabelRow.appendChild(borderLabel);
+
+  const borderValue = document.createElement("span");
+  borderValue.style.fontVariantNumeric = "tabular-nums";
+  borderLabelRow.appendChild(borderValue);
+
+  const borderSlider = document.createElement("input");
+  borderSlider.type = "range";
+  borderSlider.min = String(borderBounds.min);
+  borderSlider.max = String(borderBounds.max);
+  borderSlider.step = "0.1";
+  borderSlider.style.width = "100%";
+  borderSlider.style.accentColor = "#f77f00";
+  borderRow.appendChild(borderSlider);
+
+  const borderHint = document.createElement("div");
+  borderHint.style.fontSize = "10px";
+  borderHint.style.opacity = "0.55";
+  borderRow.appendChild(borderHint);
+
+  function refreshBorder(next: GameSettings): void {
+    borderSlider.value = String(next.territoryBorderWidth);
+    borderValue.textContent = `${next.territoryBorderWidth}px`;
+    borderHint.textContent = `Controls the thickness of colored territory outlines on the map. (Range ${borderBounds.min}\u2013${borderBounds.max}px)`;
+  }
+  refreshBorder(current);
+
+  borderSlider.addEventListener("input", () => {
+    const w = Number(borderSlider.value);
+    const next = updateSettings({ territoryBorderWidth: w });
+    refreshBorder(next);
+  });
+
+  content.appendChild(borderRow);
+
   // Horse variant selector
   const horseRow = document.createElement("div");
   horseRow.style.display = "flex";
@@ -248,13 +299,18 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   unicornOption.textContent = "Dark unicorn";
   select.appendChild(unicornOption);
 
+  const samuraiOption = document.createElement("option");
+  samuraiOption.value = "samurai";
+  samuraiOption.textContent = "Samurai warrior";
+  select.appendChild(samuraiOption);
+
   select.value = current.horseVariant;
   horseRow.appendChild(select);
 
   const horseHint = document.createElement("div");
   horseHint.style.fontSize = "10px";
   horseHint.style.opacity = "0.55";
-  horseHint.textContent = "Choose between cute bubbly pixel art, detailed isometric knight, shadow knight, golden paladin, forest ranger, or arcane spellrider.";
+  horseHint.textContent = "Choose between cute bubbly pixel art, detailed knight, shadow knight, golden paladin, forest ranger, arcane spellrider, dark unicorn, or samurai warrior.";
   horseRow.appendChild(horseHint);
 
   select.addEventListener("change", () => {
@@ -313,8 +369,9 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   styleButton(resetBtn);
   resetBtn.style.alignSelf = "flex-end";
   resetBtn.addEventListener("click", () => {
-    const next = updateSettings({ moveDurationMs: bounds.default, horseVariant: "bubbly", resourceStyle: "rune-stone" });
+    const next = updateSettings({ moveDurationMs: bounds.default, horseVariant: "bubbly", resourceStyle: "rune-stone", territoryBorderWidth: borderBounds.default });
     refresh(next);
+    refreshBorder(next);
     refreshStyle(next);
     select.value = "bubbly";
   });

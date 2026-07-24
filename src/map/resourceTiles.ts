@@ -1,17 +1,17 @@
 import { GameMap } from "./gameMap";
 import { Terrain } from "./terrain";
 
-export type ResourceType = "gold" | "wood" | "stone" | "iron" | "arcane";
+export type ResourceType = "gold" | "wood" | "stone" | "iron" | "arcane" | "food";
 
-export const RESOURCES: readonly ResourceType[] = ["gold", "wood", "stone", "iron", "arcane"] as const;
+export const RESOURCES: readonly ResourceType[] = ["gold", "wood", "stone", "iron", "arcane", "food"] as const;
 
 export const RESOURCE_DENSITY: Record<Terrain, Record<ResourceType, number>> = {
-  grass: { gold: 0.06, wood: 0.02, stone: 0.02, iron: 0.005, arcane: 0 },
-  dirt: { gold: 0.05, wood: 0.01, stone: 0.06, iron: 0.03, arcane: 0.02 },
-  forest: { gold: 0.01, wood: 0.18, stone: 0.01, iron: 0, arcane: 0 },
-  desert: { gold: 0.01, wood: 0.005, stone: 0.01, iron: 0, arcane: 0.08 },
-  mountain: { gold: 0, wood: 0, stone: 0, iron: 0, arcane: 0 },
-  water: { gold: 0, wood: 0, stone: 0, iron: 0, arcane: 0 },
+  grass: { gold: 0.06, wood: 0.02, stone: 0.02, iron: 0.005, arcane: 0, food: 0 },
+  dirt: { gold: 0.05, wood: 0.01, stone: 0.06, iron: 0.03, arcane: 0.02, food: 0 },
+  forest: { gold: 0.01, wood: 0.18, stone: 0.01, iron: 0, arcane: 0, food: 0 },
+  desert: { gold: 0.01, wood: 0.005, stone: 0.01, iron: 0, arcane: 0.08, food: 0 },
+  mountain: { gold: 0, wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
+  water: { gold: 0, wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
 };
 
 const MOUNTAIN_BORDER_BOOST = 0.5;
@@ -24,6 +24,7 @@ export const RESOURCE_YIELD: Record<ResourceType, number> = {
   stone: 12,
   iron: 8,
   arcane: 5,
+  food: 10,
 };
 
 export type ResourceTile = { q: number; r: number; resource: ResourceType };

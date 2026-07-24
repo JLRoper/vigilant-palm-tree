@@ -1,6 +1,7 @@
 import { Castle } from "../../entities/settlement";
 import { controlledPositions, territoryBoundaryEdges } from "../../core/control";
 import { axialToPixel, hexCorners, hexDistance, HEX_SIZE } from "../../core/hex";
+import { settings } from "../../state/settings";
 
 export function drawTerritoryOutlines(
   ctx: CanvasRenderingContext2D,
@@ -82,7 +83,7 @@ export function drawTerritoryOutlines(
     const color = colorForOwner(ownerId);
     ctx.save();
     ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = settings().territoryBorderWidth;
     ctx.globalAlpha = 0.45;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";

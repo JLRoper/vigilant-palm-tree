@@ -1,4 +1,4 @@
-export type HorseVariant = "hero" | "bubbly" | "shadow" | "paladin" | "ranger" | "arcane" | "unicorn";
+export type HorseVariant = "hero" | "bubbly" | "shadow" | "paladin" | "ranger" | "arcane" | "unicorn" | "samurai";
 
 export type ResourceStyle =
   | "rune-stone"
@@ -14,14 +14,18 @@ export interface GameSettings {
   moveDurationMs: number;
   horseVariant: HorseVariant;
   resourceStyle: ResourceStyle;
+  territoryBorderWidth: number;
 }
 
 const STORAGE_KEY = "heroesJs.settings";
 const MIN_MOVE_MS = 40;
 const MAX_MOVE_MS = 1000;
 const DEFAULT_MOVE_MS = 220;
+const MIN_BORDER_WIDTH = 1.5;
+const MAX_BORDER_WIDTH = 6;
+const DEFAULT_BORDER_WIDTH = 1.5;
 const VALID_HORSE_VARIANTS: readonly HorseVariant[] = [
-  "hero", "bubbly", "shadow", "paladin", "ranger", "arcane", "unicorn",
+  "hero", "bubbly", "shadow", "paladin", "ranger", "arcane", "unicorn", "samurai",
 ];
 const DEFAULT_HORSE_VARIANT: HorseVariant = "bubbly";
 
@@ -35,6 +39,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   moveDurationMs: DEFAULT_MOVE_MS,
   horseVariant: DEFAULT_HORSE_VARIANT,
   resourceStyle: DEFAULT_RESOURCE_STYLE,
+  territoryBorderWidth: DEFAULT_BORDER_WIDTH,
 };
 
 let current: GameSettings = loadFromStorage();
@@ -50,6 +55,11 @@ export function clampMoveDurationMs(ms: number): number {
   return Math.max(MIN_MOVE_MS, Math.min(MAX_MOVE_MS, Math.round(ms)));
 }
 
+export function clampBorderWidth(w: number): number {
+  if (!Number.isFinite(w)) return DEFAULT_BORDER_WIDTH;
+  return Math.max(MIN_BORDER_WIDTH, Math.min(MAX_BORDER_WIDTH, Math.round(w * 10) / 10));
+}
+
 export function clampResourceStyle(style: unknown): ResourceStyle {
   return RESOURCE_STYLES.includes(style as ResourceStyle)
     ? (style as ResourceStyle)
@@ -63,6 +73,7 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
     ? patch.horseVariant
     : current.horseVariant) as HorseVariant,
     resourceStyle: clampResourceStyle(patch.resourceStyle ?? current.resourceStyle),
+    territoryBorderWidth: clampBorderWidth(patch.territoryBorderWidth ?? current.territoryBorderWidth),
   };
   current = next;
   try {
@@ -81,6 +92,10 @@ export function settingsBounds(): { min: number; max: number; default: number } 
   return { min: MIN_MOVE_MS, max: MAX_MOVE_MS, default: DEFAULT_MOVE_MS };
 }
 
+export function borderWidthBounds(): { min: number; max: number; default: number } {
+  return { min: MIN_BORDER_WIDTH, max: MAX_BORDER_WIDTH, default: DEFAULT_BORDER_WIDTH };
+}
+
 export function resourceStyleOptions(): readonly ResourceStyle[] {
   return RESOURCE_STYLES;
 }
@@ -97,6 +112,7 @@ function loadFromStorage(): GameSettings {
         ? (parsed.horseVariant as HorseVariant)
         : DEFAULT_HORSE_VARIANT,
       resourceStyle: clampResourceStyle(parsed.resourceStyle),
+      territoryBorderWidth: clampBorderWidth(parsed.territoryBorderWidth ?? DEFAULT_BORDER_WIDTH),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

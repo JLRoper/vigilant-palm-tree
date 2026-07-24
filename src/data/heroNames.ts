@@ -49,6 +49,16 @@ const HERO_NAMES: readonly string[] = [
   "Tessa Brightwater",
   "Ulric Stonebreaker",
   "Kira Nightfall",
+  "Kenji Stormblade",
+  "Akane Crimsonleaf",
+  "Takeshi Ironwind",
+  "Yukiko Shadowdance",
+  "Ryuunosuke Thunderhoof",
+  "Hanako Silvermist",
+  "Daichi Firemane",
+  "Sakura Dawnstrider",
+  "Katsuro Steelheart",
+  "Miyuki Wintersong",
 ];
 
 let usedNames: Set<string> | null = null;

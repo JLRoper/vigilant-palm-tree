@@ -187,16 +187,10 @@ export function drawBuilding(
       ctx.imageSmoothingEnabled = false;
       const dw = (r.drawable as HTMLImageElement).naturalWidth ?? (r.drawable as HTMLCanvasElement).width;
       const dh = (r.drawable as HTMLImageElement).naturalHeight ?? (r.drawable as HTMLCanvasElement).height;
-      const scale = Math.min(tw * 0.9 / dw, td * 0.9 / dh);
+      const scale = tw * 0.85 / dw;
       const w = dw * scale;
       const h = dh * scale;
-      ctx.globalAlpha = 0.5;
       ctx.drawImage(r.drawable, x - w / 2, y - h / 2, w, h);
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = "source-atop";
-      ctx.fillStyle = ownerColor;
-      ctx.fillRect(x - w / 2, y - h / 2, w, h);
-      ctx.globalCompositeOperation = "source-over";
       ctx.restore();
       return;
     }

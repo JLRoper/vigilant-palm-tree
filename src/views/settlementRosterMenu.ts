@@ -44,7 +44,6 @@ export class SettlementRosterMenu {
   }
 
   show(state: GameState): void {
-    this.update(state);
     if (!this.visible) {
       if (!this.menu.root.parentNode) {
         document.body.appendChild(this.menu.root);
@@ -52,6 +51,7 @@ export class SettlementRosterMenu {
       this.menu.root.style.display = "";
       this.visible = true;
     }
+    this.update(state);
   }
 
   hide(): void {

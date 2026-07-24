@@ -143,8 +143,11 @@ export class CityView {
     const td = TILE_D * tileScale;
     const origin = cellOrigin(this.size);
 
+    const gridVCenter = (this.size - 1) * TILE_D / 2;
+    const buildingPad = this.size * TILE_D * 0.18;
+    const screenOriginY = viewportH / 2 - (gridVCenter + buildingPad) * tileScale;
     const wdx = canvasX - viewportW / 2 - origin.x * tileScale;
-    const wdy = canvasY - viewportH / 2 - origin.y * tileScale;
+    const wdy = canvasY - screenOriginY - origin.y * tileScale;
 
     const gxf = wdx / tw + wdy / td;
     const gyf = wdy / td - wdx / tw;
@@ -167,8 +170,9 @@ export class CityView {
     const td = TILE_D * tileScale;
     const origin = cellOrigin(this.size);
 
+    const screenOriginY = viewportH / 2 - ((this.size - 1) * TILE_D / 2 + this.size * TILE_D * 0.18) * tileScale;
     const wdx = canvasX - viewportW / 2 - origin.x * tileScale;
-    const wdy = canvasY - viewportH / 2 - origin.y * tileScale;
+    const wdy = canvasY - screenOriginY - origin.y * tileScale;
 
     const gxf = wdx / tw + wdy / td;
     const gyf = wdy / td - wdx / tw;
@@ -186,7 +190,7 @@ export class CityView {
       return;
     }
 
-    const screenOrigin = { x: viewportW / 2, y: viewportH / 2 };
+    const screenOrigin = { x: viewportW / 2, y: viewportH / 2 - ((this.size - 1) * TILE_D / 2 + this.size * TILE_D * 0.18) * tileScale };
     const gridOrigin = cellOrigin(this.size);
     const w = building.w ?? 1;
     const h = building.h ?? 1;

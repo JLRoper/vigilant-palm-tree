@@ -80,7 +80,9 @@ export function drawCityView(
   const tw = TILE_W * tileScale;
   const td = TILE_D * tileScale;
 
-  const screenOrigin = { x: viewportW / 2, y: viewportH / 2 };
+  const gridVCenter = (size - 1) * TILE_D / 2;
+  const buildingPad = size * TILE_D * 0.18;
+  const screenOrigin = { x: viewportW / 2, y: viewportH / 2 - (gridVCenter + buildingPad) * tileScale };
   const gridOrigin = cellOrigin(size);
 
   ctx.save();
