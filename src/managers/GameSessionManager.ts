@@ -56,10 +56,7 @@ export class GameSessionManager {
     this.state.setGameMap(map);
     const hydrated = hydrateGameState(loaded);
     this.state.replaceState(hydrated);
-    this.state.rebuildHeroesFromState();
-    this.state.rebuildSettlementsFromState();
     this.view.updateMap(map);
-    this.state.syncHeroVisualsToState();
     const center = this.state.getHero(playerHeroId())?.tile ?? { q: 6, r: 5 };
     this.view.centerOn(center.q, center.r);
     this.ui.getToolbar()?.refresh();

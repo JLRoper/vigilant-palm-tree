@@ -6,6 +6,7 @@ import { GameMap } from "../map/gameMap";
 import { TurnController } from "../state/turnController";
 import type { TurnControllerHooks } from "../state/turnController";
 import type { Axial } from "../core/hex";
+import { bus } from "../core/eventBus";
 
 export interface PathPreviewLock {
   heroId: HeroId;
@@ -68,6 +69,7 @@ export class GameStateManager {
   replaceState(state: GameState): void {
     this.gameState = state;
     this.turnController = new TurnController(state, this.hooks ?? ({} as TurnControllerHooks));
+    bus.emit({ type: "state:committed" });
   }
 
   rebuildHeroesFromState(): void {

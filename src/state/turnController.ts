@@ -1,4 +1,5 @@
 import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload } from "./gameState";
+import { bus } from "../core/eventBus";
 import {
   selectHero as selectHeroReducer,
   selectSettlement as selectSettlementReducer,
@@ -89,6 +90,8 @@ export class TurnController {
     const result = startMoveReducer(this.state, heroId, toTile, cost, trailExtension);
     this.state = result.state;
     if (!result.ok) return false;
+    const hero = this.state.heroes[heroId];
+    bus.emit({ type: "hero:moved", heroId, from: { q: hero?.previousQ ?? hero?.q ?? 0, r: hero?.previousR ?? hero?.r ?? 0 }, to: toTile, playerId: hero?.ownerId ?? 0 });
     this.hooks.logEvent({
       type: "move_completed",
       payload: { heroId, to: toTile, cost },
@@ -118,6 +121,7 @@ export class TurnController {
     const result = captureSettlementReducer(this.state, heroId, settlementId);
     if (!result.captured) return false;
     this.state = result.state;
+    bus.emit({ type: "settlement:captured", heroId, settlementId });
     this.hooks.logEvent({
       type: "settlement_captured",
       payload: {
@@ -150,6 +154,8 @@ export class TurnController {
         ? this.state.heroes[heroId]?.gold ?? 0
         : this.state.settlements[settlementId]?.gold ?? 0;
     this.state = result.state;
+    bus.emit({ type: "economy:goldChanged", entityId: heroId, entityType: "hero", amount: this.state.heroes[heroId]?.gold ?? 0 });
+    bus.emit({ type: "economy:goldChanged", entityId: settlementId, entityType: "settlement", amount: this.state.settlements[settlementId]?.gold ?? 0 });
     this.hooks.logEvent({
       type: "transfer_gold",
       payload: { heroId, settlementId, direction, amount },
@@ -166,6 +172,8 @@ export class TurnController {
     const result = tradeResourcesReducer(this.state, fromId, toId, resource, amount);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.state = result.state;
+    bus.emit({ type: "economy:warehouseChanged", settlementId: fromId, resource, amount: this.state.settlements[fromId]?.warehouse?.[resource] ?? 0 });
+    bus.emit({ type: "economy:warehouseChanged", settlementId: toId, resource, amount: this.state.settlements[toId]?.warehouse?.[resource] ?? 0 });
     this.hooks.logEvent({
       type: "resources_traded",
       payload: { fromId, toId, resource, amount },
@@ -205,8 +213,8 @@ export class TurnController {
   recruitHero(heroName: string, settlementId: SettlementId): RecruitHeroResult {
     const result = recruitHeroReducer(this.state, this.state.activePlayerId, heroName, settlementId);
     if (result.hero) {
-      this.state = result.state;
-      this.hooks.logEvent({
+    this.state = result.state;
+    this.hooks.logEvent({
         type: "hero_recruited",
         payload: { heroId: result.hero.id, name: heroName, playerId: this.state.activePlayerId },
       });
@@ -323,6 +331,7 @@ export class TurnController {
           continue;
         }
         this.state = result.state;
+        bus.emit({ type: "hero:moved", heroId: hero.id, from: { q: hero.q, r: hero.r }, to: { q: nextStep.q, r: nextStep.r }, playerId: hero.ownerId });
 
         const updatedHero = this.state.heroes[hero.id];
         if (updatedHero) {
@@ -343,6 +352,7 @@ export class TurnController {
     const { defenderId } = this.state.phase;
     const defender = this.state.heroes[defenderId];
     this.state = resolveBattleReducer(this.state);
+    bus.emit({ type: "battle:resolved", attackerId: this.state.phase.kind === "BATTLE" ? this.state.phase.attackerId : "", defenderId, attackerSurvived: true });
     if (defender?.isChartering) {
       this.state = cleanupDefeatedHeroChartersReducer(this.state, defenderId);
     }
@@ -367,13 +377,20 @@ export class TurnController {
         type: "turn_ended",
         payload: { playerId: endedPlayerId, round: this.state.round },
       });
+      bus.emit({ type: "turn:ended", playerId: endedPlayerId });
+      const oldPhase = this.state.phase.kind;
       this.state = applyEndOfTurnReducer(this.state);
       this.state = endTurnReducer(this.state);
+      const newPhase = this.state.phase.kind;
+      if (oldPhase !== newPhase) {
+        bus.emit({ type: "phase:changed", oldPhase, newPhase });
+      }
       this.state = await this.hooks.onHumanTurnEnd(this.state);
 
       if (this.state.phase.kind === "PLAYER_TURN") {
         this.advanceAutoTravel();
       } else if (this.state.phase.kind === "AI_TURN") {
+        bus.emit({ type: "phase:changed", oldPhase: "PLAYER_TURN", newPhase: "AI_TURN" });
         this.hooks.logEvent({
           type: "ai_turn_started",
           payload: { playerId: this.state.activePlayerId, round: this.state.round },
@@ -385,6 +402,8 @@ export class TurnController {
           payload: { round: endedRound },
         });
         this.state = advanceRoundReducer(this.state);
+        bus.emit({ type: "round:changed", round: this.state.round });
+        bus.emit({ type: "day:changed", day: this.state.day });
         this.hooks.logEvent({
           type: "round_started",
           payload: { round: this.state.round },

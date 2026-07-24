@@ -261,8 +261,6 @@ export class UIManager {
     const tc = this.gameStateManager.getTurnController();
     tc.selectHero(heroId);
     this.gameStateManager.replaceState(tc.getState());
-    this.gameStateManager.rebuildHeroesFromState();
-    this.gameStateManager.syncHeroVisualsToState();
     this.handleRosterHeroCenter(heroId);
   }
 
@@ -287,8 +285,6 @@ export class UIManager {
     console.log("[recruit] result ok=", !!result.hero, "error=", result.error, "heroId=", result.hero?.id);
     if (result.hero) {
       this.gameStateManager.replaceState(result.state);
-      this.gameStateManager.rebuildHeroesFromState();
-      this.gameStateManager.syncHeroVisualsToState();
       console.log("[recruit] hero rebuild done, heroes count:", Object.keys(this.gameStateManager.getHeroesMap()).length);
       if (this.viewManager) {
         this.viewManager.centerOn(result.hero.q, result.hero.r);

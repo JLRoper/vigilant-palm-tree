@@ -101,16 +101,6 @@ export function attachDebugApi(engine: {
         heroes: { ...gs.heroes, [id]: { ...existing, q, r, previousQ: null, previousR: null, previousMovementRemaining: null } },
         dirty: true,
       });
-      const hero = engine.state.getHero(id);
-      if (hero) {
-        hero.tile = { q, r };
-        hero.fromTile = { q, r };
-        hero.toTile = { q, r };
-        hero.moving = false;
-        hero.pixelOffset = { x: 0, y: 0 };
-      }
-      engine.state.rebuildHeroesFromState();
-      engine.refresh();
       return true;
     },
 

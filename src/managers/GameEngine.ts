@@ -17,6 +17,8 @@ import { UIManager } from "./UIManager";
 import { GameActions } from "./GameActions";
 import { GameSessionManager } from "./GameSessionManager";
 import { attachDebugApi } from "../io/debugCommands";
+import { bus } from "../core/eventBus";
+import { registerAllListeners } from "../core/eventRegistry";
 
 export class GameEngine {
   // Infrastructure
@@ -64,6 +66,8 @@ export class GameEngine {
     this.initUI();
     this.initInput();
     this.initDebug();
+    this.initEventListeners();
+    registerAllListeners();
 
     const center = this.state.getHero("pa-hero")?.tile ?? { q: 6, r: 5 };
     this.view.centerOn(center.q, center.r);
@@ -138,9 +142,6 @@ export class GameEngine {
         const result = this.state.getTurnController().transferGold(heroId, settlementId, direction);
         if (result.ok) {
           this.state.replaceState(this.state.getTurnController().getState());
-          this.state.rebuildHeroesFromState();
-          this.state.syncHeroVisualsToState();
-          this.fullFrame();
         }
         return result;
       },
@@ -151,9 +152,6 @@ export class GameEngine {
         const result = this.state.getTurnController().reorderStack(selectedId, fromIdx, toIdx);
         if (!result.ok) return;
         this.state.replaceState(this.state.getTurnController().getState());
-        this.state.rebuildHeroesFromState();
-        this.state.syncHeroVisualsToState();
-        this.fullFrame();
       },
     );
     this.ui.initSettlementInfo();
@@ -177,6 +175,15 @@ export class GameEngine {
       state: this.state,
       view: { camera: this.view.camera, view: this.view.view },
       session: this.session,
+    });
+  }
+
+  private initEventListeners(): void {
+    bus.on("state:committed", () => {
+      this.state.rebuildHeroesFromState();
+      this.state.rebuildSettlementsFromState();
+      this.state.syncHeroVisualsToState();
+      this.fullFrame();
     });
   }
 
@@ -283,8 +290,6 @@ export class GameEngine {
     }
 
     this.state.replaceState(tc.getState());
-    this.state.rebuildHeroesFromState();
-    this.state.syncHeroVisualsToState();
     this.charterPlacementMode = false;
     this.validCharterHexes = null;
     return true;

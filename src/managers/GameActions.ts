@@ -52,8 +52,6 @@ export class GameActions {
       this.state.replaceState(tc.getState());
     } finally {
       this.battleInFlight = false;
-      this.state.rebuildHeroesFromState();
-      this.state.syncHeroVisualsToState();
     }
   }
 
@@ -66,8 +64,6 @@ export class GameActions {
     await tc.endHumanTurn();
     this.state.replaceState(tc.getState());
     this.session.setSaveStatus("saved");
-    this.state.rebuildHeroesFromState();
-    this.state.syncHeroVisualsToState();
     this.maybeAutoResolveBattle();
   }
 }
