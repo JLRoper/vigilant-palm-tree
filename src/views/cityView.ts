@@ -5,12 +5,14 @@ import type { SpriteProvider } from "../render/assets";
 import type { BuildingDef, GenerationStyle } from "../render/cityBuildingDraw";
 import { coversCell, buildingFootprint } from "../render/cityBuildingDraw";
 import { generateBuildings, type GenerationPattern } from "../render/cityBuildingGen";
-import { BuildingMenu } from "./buildingMenu";
+import { BuildingMenu, type BuildingMenuOptions } from "./buildingMenu";
 import { BuildingPlacer } from "./buildingPlacer";
+import type { SettlementState } from "../state/gameState";
 
 export class CityView {
   private backBtn: HTMLButtonElement | null = null;
   private buildBtn: HTMLButtonElement | null = null;
+  private generateBtn: HTMLButtonElement | null = null;
   private openSettlementId: string | null = null;
   private settlementName = "";
   private size: CityViewSize = 5;
@@ -24,14 +26,16 @@ export class CityView {
   private provider: SpriteProvider;
   private buildingMenu: BuildingMenu;
   private placer: BuildingPlacer;
-  private onClose: () => void;
+  private onClose: (settlementId: string, buildings: BuildingDef[]) => void;
+  private getSettlement: () => SettlementState | undefined;
   private onKeyDown: (e: KeyboardEvent) => void;
 
-  constructor(opts: { onClose: () => void; provider: SpriteProvider }) {
+  constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[]) => void; provider: SpriteProvider; getSettlement: () => SettlementState | undefined }) {
     this.provider = opts.provider;
-    this.buildingMenu = new BuildingMenu();
+    this.buildingMenu = new BuildingMenu({ onRecruitArcher: opts.onRecruitArcher, onUpgradeTownHall: opts.onUpgradeTownHall });
     this.placer = new BuildingPlacer();
     this.onClose = opts.onClose;
+    this.getSettlement = opts.getSettlement;
     this.onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (this.buildingMenu.isOpen()) {
@@ -40,22 +44,19 @@ export class CityView {
         }
         if (this.placer.isActive()) {
           this.placer.cancelPlacement();
-          this.placer.hidePalette();
           this.updateBuildButton();
           return;
         }
         if (this.placer.isPaletteOpen()) {
           this.placer.hidePalette();
+          this.updateBuildButton();
           return;
         }
         this.handleClose();
         return;
       }
       if (e.key === "b" || e.key === "B") {
-        if (this.placer.isActive()) {
-          this.placer.cancelPlacement();
-          this.placer.hidePalette();
-        } else if (this.placer.isPaletteOpen()) {
+        if (this.placer.isPaletteOpen()) {
           this.placer.hidePalette();
         } else {
           this.openBuildPalette();
@@ -97,6 +98,7 @@ export class CityView {
     settlementId: string, name: string, size: CityViewSize, ownerColor: string,
     spots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>,
     mines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>,
+    buildings?: BuildingDef[],
   ): void {
     this.openSettlementId = settlementId;
     this.settlementName = name;
@@ -106,8 +108,11 @@ export class CityView {
     this.cityMines = mines;
     this.hover = null;
 
-    const buildings = this.generateBuildingsArray();
-    this.placer.init(size, { gx: Math.floor(size / 2), gy: Math.floor(size / 2) }, buildings, this.style);
+    const initialBuildings = buildings && buildings.length > 0
+      ? buildings
+      : this.generateBuildingsArray();
+    this.placer.init(size, { gx: Math.floor(size / 2), gy: Math.floor(size / 2) }, initialBuildings, this.style);
+    this.placer.setOnConfirm(() => this.persistBuildings());
 
     this.backBtn = document.createElement("button");
     this.backBtn.textContent = "\u2190 Back";
@@ -129,12 +134,17 @@ export class CityView {
     document.body.appendChild(this.backBtn);
 
     this.createBuildButton();
+    this.createGenerateButton();
 
     window.addEventListener("keydown", this.onKeyDown);
   }
 
   isOpen(): boolean {
     return this.openSettlementId !== null;
+  }
+
+  getOpenSettlementId(): string | null {
+    return this.openSettlementId;
   }
 
   draw(ctx: CanvasRenderingContext2D, viewportW: number, viewportH: number): void {
@@ -219,12 +229,17 @@ export class CityView {
       return;
     }
 
+    // destroy mode: remove building under cursor
+    if (this.placer.isDestroyMode()) {
+      this.placer.removeAt(gx, gy);
+      this.updateBuildButton();
+      return;
+    }
+
     // placement mode: place building
     if (this.placer.isActive()) {
-      const placed = this.placer.place();
-      if (placed) {
-        this.updateBuildButton();
-      }
+      this.placer.place();
+      this.updateBuildButton();
       return;
     }
 
@@ -241,7 +256,7 @@ export class CityView {
     const h = building.h ?? 1;
     const fp = buildingFootprint(building.gx, building.gy, gridOrigin, screenOrigin, tileScale, w, h);
 
-    this.buildingMenu.show(building, fp.cx, fp.cy - fp.hh * 0.6);
+    this.buildingMenu.show(building, fp.cx, fp.cy - fp.hh * 0.6, this.getSettlement());
   }
 
   private generateBuildingsArray(): BuildingDef[] {
@@ -265,16 +280,22 @@ export class CityView {
   }
 
   private openBuildPalette(): void {
-    const x = window.innerWidth - 220;
+    const x = window.innerWidth - 260;
     const y = 60;
     this.placer.showPalette(document.body, x, y);
+    this.updateBuildButton();
+  }
+
+  private persistBuildings(): void {
+    if (!this.openSettlementId) return;
+    this.onClose(this.openSettlementId, [...this.placer.buildings]);
     this.updateBuildButton();
   }
 
   private createBuildButton(): void {
     if (this.buildBtn) this.buildBtn.remove();
     this.buildBtn = document.createElement("button");
-    this.buildBtn.textContent = this.placer.isActive() ? "\u2716 Cancel Build" : "\u2692 Build";
+    this.buildBtn.textContent = this.placer.isPaletteOpen() ? "\u2716 Close" : "\u2692 Build";
     Object.assign(this.buildBtn.style, {
       position: "fixed",
       top: "44px",
@@ -282,7 +303,7 @@ export class CityView {
       zIndex: "100",
       padding: "4px 12px",
       border: "1px solid rgba(255,255,255,0.2)",
-      background: this.placer.isActive() ? "rgba(120,40,40,0.7)" : "rgba(0,0,0,0.7)",
+      background: this.placer.isPaletteOpen() ? "rgba(120,40,40,0.7)" : "rgba(0,0,0,0.7)",
       color: "#fff",
       fontSize: "12px",
       cursor: "pointer",
@@ -290,10 +311,7 @@ export class CityView {
       fontFamily: "system-ui, sans-serif",
     });
     this.buildBtn.addEventListener("click", () => {
-      if (this.placer.isActive()) {
-        this.placer.cancelPlacement();
-        this.placer.hidePalette();
-      } else if (this.placer.isPaletteOpen()) {
+      if (this.placer.isPaletteOpen()) {
         this.placer.hidePalette();
       } else {
         this.openBuildPalette();
@@ -303,10 +321,35 @@ export class CityView {
     document.body.appendChild(this.buildBtn);
   }
 
+  private createGenerateButton(): void {
+    if (this.generateBtn) this.generateBtn.remove();
+    this.generateBtn = document.createElement("button");
+    this.generateBtn.textContent = "Generate";
+    Object.assign(this.generateBtn.style, {
+      position: "fixed",
+      top: "76px",
+      right: "12px",
+      zIndex: "100",
+      padding: "2px 10px",
+      border: "1px solid rgba(255,255,255,0.1)",
+      background: "rgba(0,0,0,0.4)",
+      color: "#999",
+      fontSize: "10px",
+      cursor: "pointer",
+      borderRadius: "3px",
+      fontFamily: "system-ui, sans-serif",
+      opacity: "0.6",
+    });
+    this.generateBtn.addEventListener("click", () => {
+      this.regenerate();
+    });
+    document.body.appendChild(this.generateBtn);
+  }
+
   private updateBuildButton(): void {
     if (!this.buildBtn) return;
-    this.buildBtn.textContent = this.placer.isActive() ? "\u2716 Cancel Build" : "\u2692 Build";
-    this.buildBtn.style.background = this.placer.isActive()
+    this.buildBtn.textContent = this.placer.isPaletteOpen() ? "\u2716 Close" : "\u2692 Build";
+    this.buildBtn.style.background = this.placer.isPaletteOpen()
       ? "rgba(120,40,40,0.7)"
       : "rgba(0,0,0,0.7)";
   }
@@ -324,8 +367,9 @@ export class CityView {
     if (!this.isOpen()) return this.lastClosedId;
 
     this.closing = true;
-    const id = this.openSettlementId;
+    const id = this.openSettlementId!;
     this.lastClosedId = id;
+    const finalBuildings = [...this.placer.buildings];
     try {
       this.placer.cancelPlacement();
       this.placer.hidePalette();
@@ -337,11 +381,15 @@ export class CityView {
         this.buildBtn.remove();
         this.buildBtn = null;
       }
+      if (this.generateBtn) {
+        this.generateBtn.remove();
+        this.generateBtn = null;
+      }
       window.removeEventListener("keydown", this.onKeyDown);
       this.buildingMenu.hide();
       this.openSettlementId = null;
       this.hover = null;
-      this.onClose();
+      this.onClose(id, finalBuildings);
       return id;
     } finally {
       this.closing = false;

@@ -22,11 +22,14 @@ import {
   startCharter as startCharterReducer,
   stepTravelCharter as stepTravelCharterReducer,
   cleanupDefeatedHeroCharters as cleanupDefeatedHeroChartersReducer,
+  startTownHallUpgrade as startTownHallUpgradeReducer,
+  startSettlementUpgrade as startSettlementUpgradeReducer,
 } from "./gameState";
 import { findPath } from "../map/pathfinding";
 import { hexDistance } from "../core/hex";
 import type { GameMap } from "../map/gameMap";
 import { computeSettlementRates } from "../economy/settlementRates";
+import type { HorseVariant } from "./settings";
 import { generateCitySpots } from "../core/citySpots";
 import { cityViewSizeFor } from "../core/cityGrid";
 
@@ -210,8 +213,8 @@ export class TurnController {
     return true;
   }
 
-  recruitHero(heroName: string, settlementId: SettlementId): RecruitHeroResult {
-    const result = recruitHeroReducer(this.state, this.state.activePlayerId, heroName, settlementId);
+  recruitHero(heroName: string, settlementId: SettlementId, horseVariant: HorseVariant): RecruitHeroResult {
+    const result = recruitHeroReducer(this.state, this.state.activePlayerId, heroName, settlementId, horseVariant);
     if (result.hero) {
     this.state = result.state;
     this.hooks.logEvent({
@@ -413,6 +416,42 @@ export class TurnController {
     } finally {
       this.aiEnding = false;
     }
+  }
+
+  startTownHallUpgrade(settlementId: string, targetLevel: 2 | 3): { ok: boolean; reason: string } {
+    const result = startTownHallUpgradeReducer(this.state, settlementId, targetLevel);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "town_hall_upgrade_started",
+      payload: { settlementId, targetLevel },
+    });
+    return { ok: true, reason: "" };
+  }
+
+  startSettlementUpgrade(settlementId: string): { ok: boolean; reason: string } {
+    const s = this.state.settlements[settlementId];
+    if (!s) return { ok: false, reason: "no_settlement" };
+    const targetLevel = (s.level + 1) as 2 | 3;
+    if (targetLevel > 3) return { ok: false, reason: "max_level" };
+
+    const map = this.hooks.getMap();
+    const computed = computeSettlementRates(map, s.q, s.r, targetLevel);
+    const size = 5 * targetLevel as 5 | 10 | 15;
+    const rng = () => this.hooks.rng();
+    const { spots } = generateCitySpots(size, rng);
+    const newCitySpots = spots.filter(
+      (spot) => !s.citySpots.some((cs) => cs.cell.x === spot.cell.x && cs.cell.y === spot.cell.y),
+    );
+
+    const result = startSettlementUpgradeReducer(this.state, settlementId, targetLevel, computed.rates, newCitySpots);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "settlement_upgrade_started",
+      payload: { settlementId, targetLevel },
+    });
+    return { ok: true, reason: "" };
   }
 
   tick(_dtMs: number): void {

@@ -25,6 +25,14 @@ class EventBus {
   clear(): void {
     this.listeners.clear();
   }
+
+  getListenerCounts(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const [type, handlers] of this.listeners) {
+      counts.set(type, handlers.length);
+    }
+    return counts;
+  }
 }
 
 export const bus = new EventBus();

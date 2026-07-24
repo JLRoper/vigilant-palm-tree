@@ -16,8 +16,9 @@ Per **round** (all players act, then `advanceRound`):
 4. **Consumption** — active player's settlements consume food and building upkeep from warehouses.
 5. **Morale decay** — active player's settlements lose morale based on deficits.
 6. **Effective income** — `population × goldTax × (morale / 100)` is added to each settlement's treasury.
-7. **Advance round** — day increments, all heroes get movement reset, hero weekly upkeep (1g/troop every 7 days).
+7. **Advance round** — day increments, all heroes get movement reset, hero weekly upkeep (1g/troop every 7 days), settlement population growth (weekly), upgrade timer advancement.
 8. **Charter advancement** — constructing charters decrement `daysRemaining`; completed charters spawn new settlements.
+9. **Upgrade advancement** — active settlement and town hall upgrades decrement `daysRemaining`; completed upgrades apply level-up (rates, spots, TH level).
 
 Implementation: [`src/state/gameState.ts`](../src/state/gameState.ts) (reducers), [`src/state/turnController.ts`](../src/state/turnController.ts) (orchestration), [`src/economy/`](../src/economy/).
 
@@ -43,6 +44,30 @@ Warehouse resources held per-settlement:
 
 Hero must stand on a friendly settlement to initiate. All costs are non-refundable if the hero is defeated during travel or construction.
 
+## Settlement upgrade costs (✅ implemented)
+
+Upgrading a settlement to the next tier costs resources from the settlement's treasury and warehouse:
+
+| | L1→L2 (Town) | L2→L3 (Castle) |
+|---|---|---|
+| Gold | 5,000g | 15,000g |
+| Wood | 40 | 80 |
+| Stone | 30 | 60 |
+| Iron | 20 | 50 |
+| Arcane | — | 20 |
+| Days | 15 | 25 |
+
+## Town Hall upgrade costs (✅ implemented)
+
+| | L1→L2 | L2→L3 |
+|---|---|---|
+| Gold | 1,500g | 5,000g |
+| Wood | 15 | 40 |
+| Stone | 10 | 25 |
+| Days | 7 | 12 |
+
+All costs are deducted immediately at initiation. If the settlement is captured during construction, the upgrade continues under the new owner with no additional cost.
+
 ## Settlement income
 
 Each settlement produces:
@@ -50,6 +75,17 @@ Each settlement produces:
 - **Resources:** `resourceRates[r]` per round per resource type, where `resourceRates` is computed at settlement creation time from nearby resource tiles × level
 
 Initial castles start with population 500, gold tax 1, morale 100. Charter-founded settlements start with population 50, gold tax 1, morale 50, `autoTrade: false`.
+
+## Population growth (✅ implemented)
+
+Settlements gain population weekly during `applyWeeklyUpkeep` (day % 7 === 0), provided they have enough food.
+
+- **Food check:** `warehouse.food >= foodRequired(s)` — growth stalls if food is insufficient
+- **Growth:** `max(1, ceil(population × growthRate))` using `settings().populationGrowthRate` (default 10%)
+- **Cap:** Population cannot exceed the level's maximum (see [settlements.md](./settlements.md) level table)
+- **No food penalty:** Population simply doesn't grow; existing morale decay still applies
+
+Growth rate and the upgrade population gate percentage are player-configurable in Settings.
 
 ## Morale
 
@@ -73,16 +109,18 @@ Player owns one L1 settlement on wood, with two forest tiles in radius (3 wood t
 | Auto-trade (if active) | Transfers resources to cover deficits |
 | Consumption | Food + building upkeep deducted |
 | Morale decay | Decays if upkeep unmet |
+| Population growth | Weekly: if food met, `pop += max(1, ceil(500 × 0.10)) = +50` |
 | Charter construction | `daysRemaining--` for constructing charters |
+| Upgrade advancement | `daysRemaining--` for active settlement/TH upgrades |
 | End of round totals | `+45 wood, +500g` (for player 0) |
 
 ## DB persistence
 
 All economy state is stored in the `games` table JSONB columns:
 - `heroes` — per-hero `gold`
-- `settlements` — per-settlement `gold`, `warehouse`, `morale`, `resourceRates`, `autoTrade`
+- `settlements` — per-settlement `gold`, `warehouse`, `morale`, `resourceRates`, `autoTrade`, `population`, `buildings`, `upgrade`
 
-`activeCharters` round-trips through JSONB alongside the rest of `GameState`.
+`activeCharters` round-trips through JSONB alongside the rest of `GameState`. Settlement upgrades persist via `UpgradeState` in the settlement JSONB.
 
 ## Cross-references
 

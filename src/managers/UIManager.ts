@@ -11,7 +11,6 @@ import { Hero } from "../entities/hero";
 import { Castle } from "../entities/settlement";
 import { SpriteProvider } from "../render/assets";
 import { playerIncome, playerWealth } from "../economy/income";
-import { pickHeroName } from "../data/heroNames";
 import { Camera } from "../render/camera";
 import { GameMap } from "../map/gameMap";
 import { SessionManager, type SaveStatus } from "./SessionManager";
@@ -126,7 +125,8 @@ export class UIManager {
           this.gameStateManager.replaceState(tc.getState());
         }
       },
-      onRecruitHero: () => this.handleRecruitHero(),
+      onRecruitHero: (name, variant) => this.handleRecruitHero(name, variant),
+      onUpgradeSettlement: () => this.handleUpgradeSettlement(),
     });
   }
 
@@ -135,18 +135,48 @@ export class UIManager {
     viewManager: ViewManager,
   ): void {
     this.viewManager = viewManager;
-    const getTc = () => state().getTurnController();
+    const getStateMgr = () => state();
     this.cityView = new CityView({
       provider: this.spriteProvider,
-      onClose: () => {
-        const closedId = this.cityView!.close();
-        if (closedId) {
-          getTc().selectSettlement(closedId);
-          state().replaceState(getTc().getState());
-          const s = state().getSettlement(closedId);
-          if (s) {
-            viewManager.centerOn(s.tile.q, s.tile.r);
-          }
+      onUpgradeTownHall: () => {
+        const openId = this.cityView?.getOpenSettlementId();
+        if (!openId) return;
+        const gs = state().getState();
+        const s = gs.settlements[openId];
+        if (!s) return;
+        const townHall = s.buildings.find((b) => b.kind === "townHall");
+        if (!townHall || townHall.level >= 3) return;
+        const tc = state().getTurnController();
+        const result = tc.startTownHallUpgrade(openId, (townHall.level + 1) as 2 | 3);
+        if (result.ok) {
+          state().replaceState(tc.getState());
+        }
+      },
+      getSettlement: () => {
+        const gs = getStateMgr().getState();
+        const openId = this.cityView?.getOpenSettlementId();
+        return openId ? gs.settlements[openId] : undefined;
+      },
+      onClose: (closedId, buildings) => {
+        const gs = state().getState();
+        const s = gs.settlements[closedId];
+        if (s) {
+          const updated = {
+            ...gs,
+            settlements: {
+              ...gs.settlements,
+              [closedId]: { ...s, buildings },
+            },
+            dirty: true,
+          };
+          state().replaceState(updated);
+        }
+        const tc = state().getTurnController();
+        tc.selectSettlement(closedId);
+        state().replaceState(tc.getState());
+        const castle = state().getSettlement(closedId);
+        if (castle) {
+          viewManager.centerOn(castle.tile.q, castle.tile.r);
         }
       },
     });
@@ -229,11 +259,13 @@ export class UIManager {
     }
   }
 
-  private refreshRosterMenus(_gameState: GameState): void {
-    // Rosters are populated by show() and persist until hide().
-    // Per-frame update() would destroy/recreate buttons every 16ms,
-    // causing click events to be lost when the target element is
-    // detached from the DOM between mousedown and mouseup.
+  private refreshRosterMenus(gameState: GameState): void {
+    if (this.heroRosterMenu?.isVisible()) {
+      this.heroRosterMenu.update(gameState);
+    }
+    if (this.settlementRosterMenu?.isVisible()) {
+      this.settlementRosterMenu.update(gameState);
+    }
   }
 
   private openHeroRoster(): void {
@@ -272,23 +304,35 @@ export class UIManager {
     }
   }
 
-  private handleRecruitHero(): void {
+  private handleRecruitHero(name: string, horseVariant: import("../state/settings").HorseVariant): void {
     if (!this.gameStateManager) { console.warn("[recruit] no gameStateManager"); return; }
     const gs = this.gameStateManager.getState();
     const settlementId = gs.selectedSettlementId;
     if (!settlementId) { console.warn("[recruit] no selected settlement"); return; }
-    const name = pickHeroName();
-    if (!name) { console.warn("[recruit] no name available"); return; }
     console.log("[recruit] attempting: name=", name, "settlement=", settlementId, "gold=", gs.settlements[settlementId]?.gold);
     const tc = this.gameStateManager.getTurnController();
-    const result = tc.recruitHero(name, settlementId);
+    const result = tc.recruitHero(name, settlementId, horseVariant);
     console.log("[recruit] result ok=", !!result.hero, "error=", result.error, "heroId=", result.hero?.id);
     if (result.hero) {
       this.gameStateManager.replaceState(result.state);
+      this.gameStateManager.rebuildHeroesFromState();
+      this.gameStateManager.syncHeroVisualsToState();
       console.log("[recruit] hero rebuild done, heroes count:", Object.keys(this.gameStateManager.getHeroesMap()).length);
       if (this.viewManager) {
         this.viewManager.centerOn(result.hero.q, result.hero.r);
       }
+    }
+  }
+
+  private handleUpgradeSettlement(): void {
+    if (!this.gameStateManager) return;
+    const gs = this.gameStateManager.getState();
+    const settlementId = gs.selectedSettlementId;
+    if (!settlementId) return;
+    const tc = this.gameStateManager.getTurnController();
+    const result = tc.startSettlementUpgrade(settlementId);
+    if (result.ok) {
+      this.gameStateManager.replaceState(tc.getState());
     }
   }
 

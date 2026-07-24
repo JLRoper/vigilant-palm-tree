@@ -15,6 +15,8 @@ export interface GameSettings {
   horseVariant: HorseVariant;
   resourceStyle: ResourceStyle;
   territoryBorderWidth: number;
+  populationGrowthRate: number;
+  upgradePopulationGate: number;
 }
 
 const STORAGE_KEY = "heroesJs.settings";
@@ -35,11 +37,20 @@ const RESOURCE_STYLES: readonly ResourceStyle[] = [
 ];
 const DEFAULT_RESOURCE_STYLE: ResourceStyle = "rune-stone";
 
+const MIN_GROWTH_RATE = 0.01;
+const MAX_GROWTH_RATE = 0.50;
+const DEFAULT_GROWTH_RATE = 0.10;
+const MIN_UPGRADE_GATE = 0.25;
+const MAX_UPGRADE_GATE = 1.00;
+const DEFAULT_UPGRADE_GATE = 0.85;
+
 export const DEFAULT_SETTINGS: GameSettings = {
   moveDurationMs: DEFAULT_MOVE_MS,
   horseVariant: DEFAULT_HORSE_VARIANT,
   resourceStyle: DEFAULT_RESOURCE_STYLE,
   territoryBorderWidth: DEFAULT_BORDER_WIDTH,
+  populationGrowthRate: DEFAULT_GROWTH_RATE,
+  upgradePopulationGate: DEFAULT_UPGRADE_GATE,
 };
 
 let current: GameSettings = loadFromStorage();
@@ -66,6 +77,18 @@ export function clampResourceStyle(style: unknown): ResourceStyle {
     : DEFAULT_RESOURCE_STYLE;
 }
 
+export function clampGrowthRate(r: number): number {
+  if (!Number.isFinite(r)) return DEFAULT_GROWTH_RATE;
+  const clamped = Math.max(MIN_GROWTH_RATE, Math.min(MAX_GROWTH_RATE, r));
+  return Math.round(clamped * 100) / 100;
+}
+
+export function clampUpgradeGate(g: number): number {
+  if (!Number.isFinite(g)) return DEFAULT_UPGRADE_GATE;
+  const clamped = Math.max(MIN_UPGRADE_GATE, Math.min(MAX_UPGRADE_GATE, g));
+  return Math.round(clamped * 100) / 100;
+}
+
 export function updateSettings(patch: Partial<GameSettings>): GameSettings {
   const next: GameSettings = {
     moveDurationMs: clampMoveDurationMs(patch.moveDurationMs ?? current.moveDurationMs),
@@ -74,6 +97,8 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
     : current.horseVariant) as HorseVariant,
     resourceStyle: clampResourceStyle(patch.resourceStyle ?? current.resourceStyle),
     territoryBorderWidth: clampBorderWidth(patch.territoryBorderWidth ?? current.territoryBorderWidth),
+    populationGrowthRate: clampGrowthRate(patch.populationGrowthRate ?? current.populationGrowthRate),
+    upgradePopulationGate: clampUpgradeGate(patch.upgradePopulationGate ?? current.upgradePopulationGate),
   };
   current = next;
   try {
@@ -100,6 +125,14 @@ export function resourceStyleOptions(): readonly ResourceStyle[] {
   return RESOURCE_STYLES;
 }
 
+export function growthRateBounds(): { min: number; max: number; default: number } {
+  return { min: MIN_GROWTH_RATE, max: MAX_GROWTH_RATE, default: DEFAULT_GROWTH_RATE };
+}
+
+export function upgradeGateBounds(): { min: number; max: number; default: number } {
+  return { min: MIN_UPGRADE_GATE, max: MAX_UPGRADE_GATE, default: DEFAULT_UPGRADE_GATE };
+}
+
 function loadFromStorage(): GameSettings {
   if (typeof localStorage === "undefined") return { ...DEFAULT_SETTINGS };
   try {
@@ -113,6 +146,8 @@ function loadFromStorage(): GameSettings {
         : DEFAULT_HORSE_VARIANT,
       resourceStyle: clampResourceStyle(parsed.resourceStyle),
       territoryBorderWidth: clampBorderWidth(parsed.territoryBorderWidth ?? DEFAULT_BORDER_WIDTH),
+      populationGrowthRate: clampGrowthRate(parsed.populationGrowthRate ?? DEFAULT_GROWTH_RATE),
+      upgradePopulationGate: clampUpgradeGate(parsed.upgradePopulationGate ?? DEFAULT_UPGRADE_GATE),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

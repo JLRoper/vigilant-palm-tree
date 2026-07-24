@@ -383,6 +383,7 @@ export class GameEngine {
       colorForOwner(castle.ownerId),
       spots as unknown as Parameters<typeof cityView.open>[4],
       mines as unknown as Parameters<typeof cityView.open>[5],
+      castle.buildings,
     );
   }
 

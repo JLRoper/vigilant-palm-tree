@@ -3,7 +3,7 @@ import { RESOURCE_YIELD, type ResourceType } from "../map/resourceTiles";
 import type { CastleLevel } from "../entities/settlement";
 import { settlementRateRadius } from "../core/control";
 
-const POP_BY_LEVEL: Record<CastleLevel, number> = {
+export const POP_BY_LEVEL: Record<CastleLevel, number> = {
   1: 500,
   2: 1500,
   3: 5000,

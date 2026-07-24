@@ -1,5 +1,6 @@
 import { Axial } from "../core/hex";
-import type { PlayerId, ResourceType, SettlementState, Warehouse } from "../state/gameState";
+import type { PlayerId, ResourceType, SettlementState, UpgradeState, Warehouse } from "../state/gameState";
+import type { BuildingDef } from "../render/cityBuildingDraw";
 
 export type CastleLevel = 1 | 2 | 3;
 export type CastleVariant = 0 | 1;
@@ -25,6 +26,8 @@ export class Castle {
   morale: number;
   autoTrade: boolean;
   castleVariant: CastleVariant;
+  buildings: BuildingDef[];
+  upgrade?: UpgradeState;
 
   constructor(
     id: string,
@@ -43,6 +46,8 @@ export class Castle {
     morale = 100,
     autoTrade = true,
     castleVariant: CastleVariant = 0,
+    buildings: BuildingDef[] = [],
+    upgrade?: UpgradeState,
   ) {
     this.id = id;
     this.tile = tile;
@@ -60,6 +65,8 @@ export class Castle {
     this.morale = morale;
     this.autoTrade = autoTrade;
     this.castleVariant = castleVariant;
+    this.buildings = buildings;
+    this.upgrade = upgrade;
   }
 
   toGameState(): SettlementState {
@@ -81,6 +88,8 @@ export class Castle {
       morale: this.morale,
       autoTrade: this.autoTrade,
       castleVariant: this.castleVariant,
+      buildings: this.buildings,
+      upgrade: this.upgrade,
     };
   }
 
@@ -102,6 +111,8 @@ export class Castle {
       s.morale ?? 100,
       s.autoTrade ?? true,
       s.castleVariant ?? 0,
+      s.buildings ?? [],
+      s.upgrade ?? undefined,
     );
   }
 }

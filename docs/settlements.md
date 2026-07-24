@@ -50,15 +50,86 @@ If the hero is defeated during travel or construction, all costs are forfeited.
 
 ✅ **Locked.** Three levels ship in v1 UI. Level scales both resource yield and gold tax (population × tax = base gold income), and unlocks a larger city-view grid.
 
-| Level | Tier label | Population | Gold tax/turn | City grid |
-|-------|------------|------------|---------------|-----------|
-| 1     | Settlement | 500        | 1g/head       | 5×5       |
-| 2     | Town       | 1,500      | 2g/head       | 10×10     |
-| 3     | Castle     | 5,000      | 3g/head       | 15×15     |
+| Level | Tier label | Population cap | Gold tax/turn | City grid |
+|-------|------------|----------------|---------------|-----------|
+| 1     | Settlement | 500            | 1g/head       | 5×5       |
+| 2     | Town       | 1,500          | 2g/head       | 10×10     |
+| 3     | Castle     | 5,000          | 3g/head       | 15×15     |
 
 Charter-founded settlements always start at Level 1 with population 50 (not 500).
 
 Resource yield scales linearly with level: `level × base_yield`. Source: [`src/economy/settlementRates.ts`](../src/economy/settlementRates.ts), [`src/entities/settlement.ts`](../src/entities/settlement.ts).
+
+## Population growth (✅ implemented)
+
+Settlements grow naturally each week, provided they have enough food to sustain their current population.
+
+- **Schedule:** Weekly during `applyWeeklyUpkeep` (day % 7 === 0)
+- **Condition:** `warehouse.food >= foodRequired(s)` — growth only occurs when food is met
+- **Formula:** `growth = max(1, ceil(population × growthRate))`
+- **Cap:** Level's maximum population (500 / 1,500 / 5,000)
+- **No growth penalty:** When food is short, population simply doesn't grow (morale decay handles the penalty separately)
+
+The growth rate and upgrade population gate are configurable in Settings:
+
+| Setting | Default | Range | Step |
+|---------|---------|-------|------|
+| Population Growth Rate | 10% | 1%–50% | 1% |
+| Upgrade Population Gate | 85% | 25%–100% | 5% |
+
+Source: [`src/state/settings.ts`](../src/state/settings.ts), growth logic in [`src/state/gameState.ts`](../src/state/gameState.ts) `applyWeeklyUpkeep`.
+
+## Settlement upgrades (✅ implemented)
+
+Settlements can be upgraded to the next tier through an active construction process. Upgrades are player-initiated and require both population and Town Hall prerequisites.
+
+### Settlement upgrade costs
+
+| | L1→L2 (Town) | L2→L3 (Castle) |
+|---|---|---|
+| Gold (treasury) | 5,000g | 15,000g |
+| Wood | 40 | 80 |
+| Stone | 30 | 60 |
+| Iron | 20 | 50 |
+| Arcane | — | 20 |
+| Construction | 15 days | 25 days |
+| Req: population | ≥ 85% of level cap | ≥ 85% of level cap |
+| Req: Town Hall level | ≥ 2 | ≥ 3 |
+
+### Town Hall upgrade costs
+
+| | L1→L2 | L2→L3 |
+|---|---|---|
+| Gold (treasury) | 1,500g | 5,000g |
+| Wood | 15 | 40 |
+| Stone | 10 | 25 |
+| Construction | 7 days | 12 days |
+
+### Process
+
+1. **Pre-requisite check:** Population must meet the gate threshold (default 85% of level cap), and Town Hall must be at or above the target level.
+2. **Initiation:** Player clicks the upgrade button in the settlement info panel. Costs are deducted immediately from the settlement treasury and warehouse.
+3. **Construction:** `daysRemaining` counts down each `advanceRound`. Settlement operates normally during construction (production, income, growth continue).
+4. **Completion:** When `daysRemaining` reaches 0:
+   - Level increments to target
+   - Gold tax updates (2 for L2, 3 for L3)
+   - Resource rates recalculated (pre-computed at initiation)
+   - New city spots merged in (pre-computed at initiation)
+   - Population and buildings preserved as-is
+5. **Town Hall completion:** The Town Hall building level increments in the `buildings` array.
+
+### Constraints
+
+- **No concurrent upgrades:** Only one upgrade (town hall or settlement) at a time per settlement.
+- **Upgrade persists through capture:** If a settlement is captured mid-upgrade, construction continues under new ownership.
+- **Only player-owned settlements can upgrade:** The upgrade button only appears for the active player's settlements.
+
+### UI
+
+- **Settlement info panel:** Upgrade button below the warehouse grid. Shows pre-req status when requirements aren't met, clickable button when ready, progress bar during construction.
+- **Building menu (Town Hall):** Upgrade button appears when clicking the Town Hall building (L1 or L2 only). Shows cost and disables when resources are insufficient.
+
+Source: [`src/state/gameState.ts`](../src/state/gameState.ts) (`startTownHallUpgrade`, `startSettlementUpgrade`, `advanceSettlementUpgrades`), [`src/views/settlementInfoMenu.ts`](../src/views/settlementInfoMenu.ts), [`src/views/buildingMenu.ts`](../src/views/buildingMenu.ts).
 
 ## Capture
 
@@ -67,8 +138,20 @@ If an enemy hero walks onto a settlement tile, ownership **flips** to that hero'
 - Captured settlements produce for the new owner starting the next turn.
 - Capturing is the only way settlements change hands in v1.
 - A player can recapture their own settlements by walking their hero back onto them.
+- **Active upgrades survive capture.** If a settlement is mid-upgrade, construction continues under the new owner.
 
 ✅ **Locked:** no other form of destruction. Settlements are permanent until captured — no spells, no demolition, no decay.
+
+## Building persistence (✅ implemented)
+
+Buildings placed in the city view are persisted to `SettlementState.buildings` (a `BuildingDef[]` array). Previously ephemeral (only existed while city view was open), buildings now survive close/reopen cycles.
+
+- **First open:** If `buildings` is empty (migration of old saves), buildings are auto-generated and persisted.
+- **Close:** The full buildings array is written back to settlement state.
+- **Generate button:** A small "Generate" button in the top-right of the city view replaces the entire buildings array with fresh generation. Useful for testing.
+- **Town Hall at center:** The center cell is always reserved for a Town Hall building.
+
+Source: [`src/views/cityView.ts`](../src/views/cityView.ts), [`src/views/buildingPlacer.ts`](../src/views/buildingPlacer.ts).
 
 ## Map visualisation
 
@@ -86,11 +169,16 @@ State types defined in [`src/state/gameState.ts`](../src/state/gameState.ts):
 - `CharterState` — `{ id, heroId, ownerId, targetQ, targetR, settlementName, phase, daysRemaining, settlementId, resourceRates, foundedOnResource, citySpots }`
 - `HeroState.isChartering` / `HeroState.charterId`
 - `GameState.activeCharters`, `nextCharterId`, `nextSettlementId`
+- `UpgradeState` — `{ kind: "townHall"|"settlement", targetLevel: 2|3, daysRemaining, newResourceRates?, newCitySpots? }`
+- `SettlementState.buildings` — `BuildingDef[]` (persisted building array)
+- `SettlementState.upgrade` — `UpgradeState?` (active upgrade, if any)
 
 New event kinds:
 - `charter_started`
 - `charter_arrived`
 - `charter_travel_blocked`
+- `town_hall_upgrade_started`
+- `settlement_upgrade_started`
 - (battle resolution handles `charter_lost` implicitly via `cleanupDefeatedHeroCharters`)
 
 ## Cross-references
