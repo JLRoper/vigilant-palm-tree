@@ -14,6 +14,7 @@ import {
   drawMine,
   drawBuilding,
   buildingFootprint,
+  BUILDING_STYLE_REGISTRY,
   type BuildingDef,
   type GenerationStyle,
 } from "./cityBuildingDraw";
@@ -34,13 +35,9 @@ const TIER_LABELS: Record<CityViewSize, string> = {
   15: "15\u00d715 Castle",
 };
 
-const STYLE_LABELS: Record<GenerationStyle, string> = {
-  classic: "Classic Fantasy",
-  blocky: "Blocky Pixel",
-  crystalline: "Crystalline Elven",
-  organic: "Organic Wooden",
-  industrial: "Industrial Dwarven",
-};
+const STYLE_LABELS: Record<string, string> = Object.fromEntries(
+  BUILDING_STYLE_REGISTRY.map((s) => [s.id, s.label])
+);
 
 export function computeCityScale(
   size: CityViewSize,

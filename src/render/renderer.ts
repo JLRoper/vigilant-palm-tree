@@ -10,7 +10,7 @@ import { drawTerritoryOutlines } from "./overlays/territoryOutline";
 import { drawPathOverlay, drawMinimapPath } from "./overlays/pathOverlay";
 import { SpriteProvider } from "./assets";
 import { computeVision, isVisible } from "./fog";
-import { settings } from "../state/settings";
+
 import type { CharterState } from "../state/gameState";
 
 export interface RenderOptions {
@@ -107,8 +107,6 @@ export class Renderer {
       ctx.stroke();
     }
 
-    const horseVariant = settings().horseVariant;
-
     for (const hero of heroes) {
       const canSee =
         hero.ownerId === opts.viewPlayerId || isVisible(visible, hero.tile.q, hero.tile.r);
@@ -118,8 +116,9 @@ export class Renderer {
       const phase = hero.moveProgress * Math.PI * 2;
       const bobY = hero.moving ? -Math.sin(phase) * bobAmplitude : 0;
       const scaleY = hero.moving ? 1.0 + 0.06 * Math.sin(phase) : 1.0;
+      const variant = hero.horseVariant;
 
-      if (horseVariant === "hero") {
+      if (variant === "hero") {
         // Draw detailed knight-on-horse hero sprite with scale animation
         drawHeroSprite(
           ctx,
@@ -136,7 +135,7 @@ export class Renderer {
         drawHorseSprite(
           ctx,
           this.sprites,
-          horseVariant,
+          variant,
           x + hero.pixelOffset.x,
           y + hero.pixelOffset.y + bobY,
           hero.facingDirection,

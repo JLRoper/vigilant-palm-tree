@@ -1,4 +1,6 @@
-export type HorseVariant = "hero" | "bubbly" | "shadow" | "paladin" | "ranger" | "arcane" | "unicorn" | "samurai";
+import { HORSE_VARIANT_REGISTRY, type HorseVariantId, VALID_HORSE_VARIANTS } from "../render/horseVariants";
+
+export type HorseVariant = HorseVariantId;
 
 export type ResourceStyle =
   | "rune-stone"
@@ -26,9 +28,6 @@ const DEFAULT_MOVE_MS = 220;
 const MIN_BORDER_WIDTH = 1.5;
 const MAX_BORDER_WIDTH = 6;
 const DEFAULT_BORDER_WIDTH = 1.5;
-const VALID_HORSE_VARIANTS: readonly HorseVariant[] = [
-  "hero", "bubbly", "shadow", "paladin", "ranger", "arcane", "unicorn", "samurai",
-];
 const DEFAULT_HORSE_VARIANT: HorseVariant = "bubbly";
 
 const RESOURCE_STYLES: readonly ResourceStyle[] = [
@@ -43,6 +42,8 @@ const DEFAULT_GROWTH_RATE = 0.10;
 const MIN_UPGRADE_GATE = 0.25;
 const MAX_UPGRADE_GATE = 1.00;
 const DEFAULT_UPGRADE_GATE = 0.85;
+
+export { VALID_HORSE_VARIANTS, HORSE_VARIANT_REGISTRY };
 
 export const DEFAULT_SETTINGS: GameSettings = {
   moveDurationMs: DEFAULT_MOVE_MS,

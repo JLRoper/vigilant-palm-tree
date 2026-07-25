@@ -65,7 +65,8 @@ import buildingBlockyHouse2 from "../resources/building-blocky-house-2.png?url";
 import { Faction, Direction } from "../entities/hero";
 import { CastleLevel, CastleVariant } from "../entities/settlement";
 import { ResourceType, RESOURCES } from "../map/resourceTiles";
-import type { ResourceStyle, HorseVariant } from "../state/settings";
+import type { ResourceStyle } from "../state/settings";
+import { HORSE_VARIANT_REGISTRY, type HorseVariantId } from "./horseVariants";
 
 export type SpriteKey =
   | `castle.${CastleLevel}`
@@ -117,7 +118,7 @@ export const SETTLEMENT_BANNERS: Record<CastleLevel, string> = {
   3: castleBanner,
 };
 
-export const HERO_BANNERS: Record<HorseVariant, string> = {
+export const HERO_BANNERS: Record<HorseVariantId, string> = {
   hero: heroBannerHero,
   bubbly: heroBannerBubbly,
   shadow: heroBannerShadow,
@@ -268,7 +269,6 @@ export const RESOURCE_DESCRIPTORS: Record<`resource.${ResourceType}`, SpriteDesc
     ])
   ) as Record<`resource.${ResourceType}`, SpriteDescriptor>;
 
-// Generic helper to load directional sprites from a glob
 function loadDirectionalSprites(
   glob: Record<string, { default: string }>,
   pattern: RegExp,
@@ -334,152 +334,85 @@ export const HERO_PLAYER_DESCRIPTORS: Record<`hero.player.${Direction}`, SpriteD
     512
   ) as Record<`hero.player.${Direction}`, SpriteDescriptor>;
 
-// Load bubbly horse sprites from horse/commander-2/ directory
-const HORSE_BUBBLY_GLOB = import.meta.glob(
-  "../resources/units/horse/commander-2/*.png",
+// Load all horse sprites from a single glob, then filter per variant from the registry
+const ALL_HORSE_FILES = import.meta.glob(
+  "../resources/units/horse/commander-*/*.png",
   { eager: true }
 ) as Record<string, { default: string }>;
 
-const HORSE_BUBBLY_IMAGES = loadDirectionalSprites(
-  HORSE_BUBBLY_GLOB,
-  /bubbly-(n|ne|e|se|s|sw|w|nw)\.png$/,
-  { n: "nw", s: "se" }
-);
+const HORSE_VARIANT_IMAGES: Record<string, Record<Direction, string | null>> = {};
 
-export const HORSE_BUBBLY_DESCRIPTORS: Record<`horse.bubbly.${Direction}`, SpriteDescriptor> =
-  createDirectionalDescriptors(
-    "horse.bubbly",
-    HORSE_BUBBLY_IMAGES,
+for (const entry of HORSE_VARIANT_REGISTRY) {
+  const dirPrefix = `commander-${entry.commanderDir}/`;
+  const variantFiles: Record<string, { default: string }> = {};
+  for (const [path, mod] of Object.entries(ALL_HORSE_FILES)) {
+    if (path.includes(dirPrefix)) {
+      variantFiles[path] = mod;
+    }
+  }
+
+  const filePattern = entry.id === "hero"
+    ? /hero-player-(n|ne|e|se|s|sw|w|nw)\.png$/
+    : new RegExp(`${entry.id}-(n|ne|e|se|s|sw|w|nw)\\.png$`);
+
+  const fallbacks: Partial<Record<Direction, Direction>> = {};
+  if (entry.id === "bubbly") {
+    fallbacks.n = "nw";
+    fallbacks.s = "se";
+  } else if (entry.id !== "hero") {
+    fallbacks.ne = "n";
+    fallbacks.nw = "n";
+    fallbacks.se = "s";
+    fallbacks.sw = "s";
+  }
+
+  HORSE_VARIANT_IMAGES[entry.id] = loadDirectionalSprites(variantFiles, filePattern, fallbacks);
+}
+
+export const HORSE_VARIANT_DESCRIPTORS: Record<string, Record<string, SpriteDescriptor>> = {};
+
+for (const entry of HORSE_VARIANT_REGISTRY) {
+  HORSE_VARIANT_DESCRIPTORS[entry.id] = createDirectionalDescriptors(
+    `horse.${entry.id}`,
+    HORSE_VARIANT_IMAGES[entry.id],
     "bottom",
     { kind: "fitHeight", hexSizeMul: 1.8 },
-    64
-  ) as Record<`horse.bubbly.${Direction}`, SpriteDescriptor>;
+    entry.id === "bubbly" ? 64 : 512
+  );
+}
 
-// Load shadow knight sprites from horse/commander-3/ directory (cardinal directions + diagonal fallbacks)
-const HORSE_SHADOW_GLOB = import.meta.glob(
-  "../resources/units/horse/commander-3/*.png",
-  { eager: true }
-) as Record<string, { default: string }>;
+// Horse variant key functions auto-generated from registry
+export function horseVariantKey(variant: HorseVariantId, direction: Direction): `horse.${string}.${Direction}` {
+  return `horse.${variant}.${direction}` as `horse.${string}.${Direction}`;
+}
 
-const HORSE_SHADOW_IMAGES = loadDirectionalSprites(
-  HORSE_SHADOW_GLOB,
-  /shadow-(n|e|s|w)\.png$/,
-  { ne: "n", nw: "n", se: "s", sw: "s" }
-);
+export function horseBubblyKey(direction: Direction): `horse.bubbly.${Direction}` {
+  return horseVariantKey("bubbly", direction) as `horse.bubbly.${Direction}`;
+}
 
-export const HORSE_SHADOW_DESCRIPTORS: Record<`horse.shadow.${Direction}`, SpriteDescriptor> =
-  createDirectionalDescriptors(
-    "horse.shadow",
-    HORSE_SHADOW_IMAGES,
-    "bottom",
-    { kind: "fitHeight", hexSizeMul: 1.8 },
-    512
-  ) as Record<`horse.shadow.${Direction}`, SpriteDescriptor>;
+export function horseShadowKey(direction: Direction): `horse.shadow.${Direction}` {
+  return horseVariantKey("shadow", direction) as `horse.shadow.${Direction}`;
+}
 
-// Load paladin sprites from horse/commander-4/ directory (cardinal directions + diagonal fallbacks)
-const HORSE_PALADIN_GLOB = import.meta.glob(
-  "../resources/units/horse/commander-4/*.png",
-  { eager: true }
-) as Record<string, { default: string }>;
+export function horsePaladinKey(direction: Direction): `horse.paladin.${Direction}` {
+  return horseVariantKey("paladin", direction) as `horse.paladin.${Direction}`;
+}
 
-const HORSE_PALADIN_IMAGES = loadDirectionalSprites(
-  HORSE_PALADIN_GLOB,
-  /paladin-(n|e|s|w)\.png$/,
-  { ne: "n", nw: "n", se: "s", sw: "s" }
-);
+export function horseRangerKey(direction: Direction): `horse.ranger.${Direction}` {
+  return horseVariantKey("ranger", direction) as `horse.ranger.${Direction}`;
+}
 
-export const HORSE_PALADIN_DESCRIPTORS: Record<`horse.paladin.${Direction}`, SpriteDescriptor> =
-  createDirectionalDescriptors(
-    "horse.paladin",
-    HORSE_PALADIN_IMAGES,
-    "bottom",
-    { kind: "fitHeight", hexSizeMul: 1.8 },
-    512
-  ) as Record<`horse.paladin.${Direction}`, SpriteDescriptor>;
+export function horseArcaneKey(direction: Direction): `horse.arcane.${Direction}` {
+  return horseVariantKey("arcane", direction) as `horse.arcane.${Direction}`;
+}
 
-// Load ranger sprites from horse/commander-5/ directory (cardinal directions + diagonal fallbacks)
-const HORSE_RANGER_GLOB = import.meta.glob(
-  "../resources/units/horse/commander-5/*.png",
-  { eager: true }
-) as Record<string, { default: string }>;
+export function horseUnicornKey(direction: Direction): `horse.unicorn.${Direction}` {
+  return horseVariantKey("unicorn", direction) as `horse.unicorn.${Direction}`;
+}
 
-const HORSE_RANGER_IMAGES = loadDirectionalSprites(
-  HORSE_RANGER_GLOB,
-  /ranger-(n|e|s|w)\.png$/,
-  { ne: "n", nw: "n", se: "s", sw: "s" }
-);
-
-export const HORSE_RANGER_DESCRIPTORS: Record<`horse.ranger.${Direction}`, SpriteDescriptor> =
-  createDirectionalDescriptors(
-    "horse.ranger",
-    HORSE_RANGER_IMAGES,
-    "bottom",
-    { kind: "fitHeight", hexSizeMul: 1.8 },
-    512
-  ) as Record<`horse.ranger.${Direction}`, SpriteDescriptor>;
-
-// Load arcane spellrider sprites from horse/commander-6/ directory (cardinal directions + diagonal fallbacks)
-const HORSE_ARCANE_GLOB = import.meta.glob(
-  "../resources/units/horse/commander-6/*.png",
-  { eager: true }
-) as Record<string, { default: string }>;
-
-const HORSE_ARCANE_IMAGES = loadDirectionalSprites(
-  HORSE_ARCANE_GLOB,
-  /arcane-(n|e|s|w)\.png$/,
-  { ne: "n", nw: "n", se: "s", sw: "s" }
-);
-
-export const HORSE_ARCANE_DESCRIPTORS: Record<`horse.arcane.${Direction}`, SpriteDescriptor> =
-  createDirectionalDescriptors(
-    "horse.arcane",
-    HORSE_ARCANE_IMAGES,
-    "bottom",
-    { kind: "fitHeight", hexSizeMul: 1.8 },
-    512
-  ) as Record<`horse.arcane.${Direction}`, SpriteDescriptor>;
-
-// Load dark unicorn sprites from horse/commander-7/ directory (cardinal directions + diagonal fallbacks)
-const HORSE_UNICORN_GLOB = import.meta.glob(
-  "../resources/units/horse/commander-7/*.png",
-  { eager: true }
-) as Record<string, { default: string }>;
-
-const HORSE_UNICORN_IMAGES = loadDirectionalSprites(
-  HORSE_UNICORN_GLOB,
-  /unicorn-(n|e|s|w)\.png$/,
-  { ne: "n", nw: "n", se: "s", sw: "s" }
-);
-
-export const HORSE_UNICORN_DESCRIPTORS: Record<`horse.unicorn.${Direction}`, SpriteDescriptor> =
-  createDirectionalDescriptors(
-    "horse.unicorn",
-    HORSE_UNICORN_IMAGES,
-    "bottom",
-    { kind: "fitHeight", hexSizeMul: 1.8 },
-    512
-  ) as Record<`horse.unicorn.${Direction}`, SpriteDescriptor>;
-
-// Load samurai warrior sprites from horse/commander-8/ directory (cardinal directions + diagonal fallbacks)
-const HORSE_SAMURAI_GLOB = import.meta.glob(
-  "../resources/units/horse/commander-8/*.png",
-  { eager: true }
-) as Record<string, { default: string }>;
-
-const HORSE_SAMURAI_IMAGES = loadDirectionalSprites(
-  HORSE_SAMURAI_GLOB,
-  /samurai-(n|e|s|w)\.png$/,
-  { ne: "n", nw: "n", se: "s", sw: "s" }
-);
-
-export const HORSE_SAMURAI_DESCRIPTORS: Record<`horse.samurai.${Direction}`, SpriteDescriptor> =
-  createDirectionalDescriptors(
-    "horse.samurai",
-    HORSE_SAMURAI_IMAGES,
-    "bottom",
-    { kind: "fitHeight", hexSizeMul: 1.8 },
-    512
-  ) as Record<`horse.samurai.${Direction}`, SpriteDescriptor>;
+export function horseSamuraiKey(direction: Direction): `horse.samurai.${Direction}` {
+  return horseVariantKey("samurai", direction) as `horse.samurai.${Direction}`;
+}
 
 export const RESOURCE_CART_DESCRIPTORS: Record<`resource-cart.${ResourceType}`, SpriteDescriptor> =
   Object.fromEntries(
@@ -562,6 +495,11 @@ export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> =
     ])
   );
 
+const ALL_HORSE_DESCRIPTORS: SpriteDescriptor[] = [];
+for (const entry of HORSE_VARIANT_REGISTRY) {
+  ALL_HORSE_DESCRIPTORS.push(...Object.values(HORSE_VARIANT_DESCRIPTORS[entry.id]));
+}
+
 export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(CASTLE_DESCRIPTORS),
   ...Object.values(CASTLE_ALT_DESCRIPTORS),
@@ -575,13 +513,7 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(RESOURCE_PILE_BUBBLY_DESCRIPTORS),
   ...Object.values(HERO_PLAYER_DESCRIPTORS),
   ...Object.values(HERO_DESCRIPTORS),
-  ...Object.values(HORSE_BUBBLY_DESCRIPTORS),
-  ...Object.values(HORSE_SHADOW_DESCRIPTORS),
-  ...Object.values(HORSE_PALADIN_DESCRIPTORS),
-  ...Object.values(HORSE_RANGER_DESCRIPTORS),
-  ...Object.values(HORSE_ARCANE_DESCRIPTORS),
-  ...Object.values(HORSE_UNICORN_DESCRIPTORS),
-  ...Object.values(HORSE_SAMURAI_DESCRIPTORS),
+  ...ALL_HORSE_DESCRIPTORS,
   ...Object.values(BUILDING_DESCRIPTORS),
 ];
 
@@ -617,34 +549,6 @@ export function heroKey(faction: Faction): `hero.${Faction}` {
 
 export function heroDirectionKey(_faction: "player", direction: Direction): `hero.player.${Direction}` {
   return `hero.player.${direction}`;
-}
-
-export function horseBubblyKey(direction: Direction): `horse.bubbly.${Direction}` {
-  return `horse.bubbly.${direction}`;
-}
-
-export function horseShadowKey(direction: Direction): `horse.shadow.${Direction}` {
-  return `horse.shadow.${direction}`;
-}
-
-export function horsePaladinKey(direction: Direction): `horse.paladin.${Direction}` {
-  return `horse.paladin.${direction}`;
-}
-
-export function horseRangerKey(direction: Direction): `horse.ranger.${Direction}` {
-  return `horse.ranger.${direction}`;
-}
-
-export function horseArcaneKey(direction: Direction): `horse.arcane.${Direction}` {
-  return `horse.arcane.${direction}`;
-}
-
-export function horseUnicornKey(direction: Direction): `horse.unicorn.${Direction}` {
-  return `horse.unicorn.${direction}`;
-}
-
-export function horseSamuraiKey(direction: Direction): `horse.samurai.${Direction}` {
-  return `horse.samurai.${direction}`;
 }
 
 export function buildingKey(style: string, kind: string, level: number): SpriteKey {

@@ -26,6 +26,7 @@ import {
 import { PLAYER_COLORS, MAX_PLAYERS } from "../state/playerColors";
 import { generateCitySpots } from "../core/citySpots";
 import { cityViewSizeFor } from "../core/cityGrid";
+import { VALID_HORSE_VARIANTS } from "../state/settings";
 
 const DEFAULT_PLAYER_COUNT = 3;
 const MAX_PLAYER_COUNT = MAX_PLAYERS;
@@ -75,7 +76,7 @@ function makeHeroes(
   for (let i = 0; i < playerCount; i++) {
     const castle = castles.find((c) => c.ownerId === i);
     if (!castle) continue;
-    const VARIANTS = ["hero", "bubbly", "shadow", "paladin", "ranger", "arcane", "unicorn", "samurai"] as const;
+    const variantIds = VALID_HORSE_VARIANTS;
     heroes.push({
       id: heroIdFor(i),
       name: i === 0 ? "Commander" : "Warlord",
@@ -92,7 +93,7 @@ function makeHeroes(
       stacks: demoStacksForPlayer(i),
       isChartering: false,
       charterId: null,
-      horseVariant: VARIANTS[Math.floor(Math.random() * VARIANTS.length)],
+      horseVariant: variantIds[Math.floor(Math.random() * variantIds.length)],
     });
   }
   return heroes;
@@ -209,7 +210,7 @@ export function makeInitialStatePayload(
 }
 
 function backfillHero(h: Partial<import("../state/gameState").HeroState> & { id: import("../state/gameState").HeroId; ownerId: number; q: number; r: number }): import("../state/gameState").HeroState {
-  const VARIANTS = ["hero", "bubbly", "shadow", "paladin", "ranger", "arcane", "unicorn", "samurai"] as const;
+  const variantIds = VALID_HORSE_VARIANTS;
   return {
     movementRemaining: h.movementRemaining ?? 7,
     previousQ: h.previousQ ?? null,
@@ -226,7 +227,7 @@ function backfillHero(h: Partial<import("../state/gameState").HeroState> & { id:
     ownerId: h.ownerId,
     q: h.q,
     r: h.r,
-    horseVariant: h.horseVariant ?? VARIANTS[Math.floor(Math.random() * VARIANTS.length)],
+    horseVariant: h.horseVariant ?? variantIds[Math.floor(Math.random() * variantIds.length)],
   };
 }
 

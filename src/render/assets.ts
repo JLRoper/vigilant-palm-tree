@@ -6,10 +6,12 @@ import {
 import {
   CompositeSpriteSource,
   ImageSpriteSource,
+  OnDemandSpriteSource,
   ProceduralDrawer,
   ProceduralSpriteSource,
   SpriteSource,
 } from "./assetSource";
+import { settings } from "../state/settings";
 
 export type { Drawable, ProceduralDrawer, SpriteSource } from "./assetSource";
 
@@ -46,22 +48,36 @@ export class SpriteProvider {
 export function createDefaultProvider(
   proceduralDrawers: Record<string, ProceduralDrawer> = {}
 ): SpriteProvider {
-  const imageUrls: Record<string, string> = {};
+  const activeHorse = settings().horseVariant;
+
+  const eagerUrls: Record<string, string> = {};
+  const onDemandUrls: Record<string, string> = {};
   const proceduralNaturalSizes: Record<string, number> = {};
   const proceduralKeys = new Set(Object.keys(proceduralDrawers));
+
   for (const d of ALL_DESCRIPTORS) {
     if (d.url === null) {
       proceduralNaturalSizes[d.key] = d.naturalSize ?? 32;
-    } else if (!proceduralKeys.has(d.key)) {
-      imageUrls[d.key] = d.url;
+      continue;
+    }
+    if (proceduralKeys.has(d.key)) continue;
+
+    const isCastle = d.key.startsWith("castle.");
+    const isActiveHorse = d.key.startsWith(`horse.${activeHorse}.`);
+
+    if (isCastle || isActiveHorse) {
+      eagerUrls[d.key] = d.url;
+    } else {
+      onDemandUrls[d.key] = d.url;
     }
   }
 
-  const imageSource = new ImageSpriteSource(imageUrls);
+  const eagerImageSource = new ImageSpriteSource(eagerUrls);
+  const onDemandSource = new OnDemandSpriteSource(onDemandUrls);
   const proceduralSource = new ProceduralSpriteSource(
     proceduralDrawers,
     proceduralNaturalSizes
   );
-  const composite = new CompositeSpriteSource([imageSource, proceduralSource]);
+  const composite = new CompositeSpriteSource([eagerImageSource, onDemandSource, proceduralSource]);
   return new SpriteProvider(composite);
 }

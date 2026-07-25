@@ -30,6 +30,30 @@ export class ImageSpriteSource implements SpriteSource {
   }
 }
 
+export class OnDemandSpriteSource implements SpriteSource {
+  private cache = new Map<string, HTMLImageElement>();
+  private loading = new Set<string>();
+
+  constructor(private urlMap: Record<string, string>) {}
+
+  preload(): void {}
+
+  resolve(key: string): { drawable: HTMLImageElement; ready: boolean } | undefined {
+    if (this.cache.has(key)) return { drawable: this.cache.get(key)!, ready: true };
+    const url = this.urlMap[key];
+    if (!url) return undefined;
+    if (this.loading.has(key)) return undefined;
+    const img = new Image();
+    img.src = url;
+    this.cache.set(key, img);
+    this.loading.add(key);
+    img.onload = () => {
+      this.loading.delete(key);
+    };
+    return { drawable: img, ready: false };
+  }
+}
+
 export type ProceduralDrawer = (ctx: CanvasRenderingContext2D, size: number) => void;
 
 export class ProceduralSpriteSource implements SpriteSource {

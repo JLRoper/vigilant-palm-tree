@@ -64,15 +64,44 @@ if (Test-Path -LiteralPath $envFile) {
 }
 
 # --- 2. Helpers ---------------------------------------------------------
+
+# Shared lock directory so concurrent test runs across worktrees don't collide.
+# Lock files are small, zero-byte markers; cleaned up when the owning process
+# exits.  The directory lives under the system temp path so it's safe for
+# parallel CI / agent processes.
+$lockDir = Join-Path ([System.IO.Path]::GetTempPath()) 'heroes-js-ports'
+if (-not (Test-Path -LiteralPath $lockDir)) {
+    New-Item -ItemType Directory -Path $lockDir -Force | Out-Null
+}
+
+# Remove any stale locks (older than 5 minutes — the test timeout is ~90s).
+$staleThreshold = (Get-Date).AddMinutes(-5)
+Get-ChildItem -LiteralPath $lockDir -Filter 'port-*.lock' -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTime -lt $staleThreshold } |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+
 function Test-PortFree {
     param([int]$Port)
-    return -not [bool](Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+    # Check both TCP and lock-file occupancy
+    if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) { return $false }
+    if (Test-Path -LiteralPath (Join-Path $lockDir "port-$Port.lock")) { return $false }
+    return $true
 }
 function Find-FreePort {
     param([int]$Base, [int]$Max = 200)
     for ($i = 0; $i -lt $Max; $i++) {
         $p = $Base + $i
-        if (Test-PortFree $p) { return $p }
+        if (Test-PortFree $p) {
+            $lockPath = Join-Path $lockDir "port-$p.lock"
+            try {
+                # Create WITHOUT -Force so it fails if another process already locked it
+                $null = New-Item -ItemType File -Path $lockPath -ErrorAction Stop
+                return $p
+            } catch {
+                # Another process grabbed this port between our check and lock attempt
+                continue
+            }
+        }
     }
     throw "No free port found starting at $Base within $Max attempts."
 }

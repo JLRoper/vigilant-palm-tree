@@ -7,6 +7,7 @@ import { settings } from "../state/settings";
 import type { HorseVariant } from "../state/settings";
 import { POP_BY_LEVEL } from "../economy/settlementRates";
 import { pickHeroName } from "../data/heroNames";
+import { HORSE_VARIANT_REGISTRY } from "../render/horseVariants";
 
 export interface SettlementInfoMenuOptions {
   parent: HTMLElement;
@@ -369,17 +370,6 @@ export class SettlementInfoMenu {
   }
 }
 
-const VARIANTS: { variant: HorseVariant; label: string }[] = [
-  { variant: "bubbly", label: "Bubbly" },
-  { variant: "shadow", label: "Shadow" },
-  { variant: "paladin", label: "Paladin" },
-  { variant: "ranger", label: "Ranger" },
-  { variant: "arcane", label: "Arcane" },
-  { variant: "unicorn", label: "Unicorn" },
-  { variant: "samurai", label: "Samurai" },
-  { variant: "hero", label: "Knight" },
-];
-
 function openRecruitHeroModal(onRecruit: (name: string, variant: HorseVariant) => void): void {
   const content = document.createElement("div");
   content.style.fontFamily = menuTheme.font;
@@ -424,10 +414,10 @@ function openRecruitHeroModal(onRecruit: (name: string, variant: HorseVariant) =
   });
   content.appendChild(variantGrid);
 
-  let selectedVariant: HorseVariant = VARIANTS[0].variant;
+  let selectedVariant: HorseVariant = HORSE_VARIANT_REGISTRY[0].id;
   const buttons: HTMLButtonElement[] = [];
 
-  for (const v of VARIANTS) {
+  for (const v of HORSE_VARIANT_REGISTRY) {
     const btn = document.createElement("button");
     btn.textContent = v.label;
     styleButton(btn);
@@ -437,7 +427,7 @@ function openRecruitHeroModal(onRecruit: (name: string, variant: HorseVariant) =
     btn.style.fontSize = "12px";
     btn.style.cursor = "pointer";
     btn.addEventListener("click", () => {
-      selectedVariant = v.variant;
+      selectedVariant = v.id;
       for (const b of buttons) {
         b.style.border = menuTheme.button.border;
         b.style.background = menuTheme.button.background;
@@ -445,7 +435,7 @@ function openRecruitHeroModal(onRecruit: (name: string, variant: HorseVariant) =
       btn.style.border = "1px solid rgba(100,200,100,0.6)";
       btn.style.background = "rgba(40,90,40,0.5)";
     });
-    if (v.variant === selectedVariant) {
+    if (v.id === selectedVariant) {
       btn.style.border = "1px solid rgba(100,200,100,0.6)";
       btn.style.background = "rgba(40,90,40,0.5)";
     }

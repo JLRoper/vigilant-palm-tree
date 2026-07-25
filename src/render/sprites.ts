@@ -7,27 +7,17 @@ import {
   castleKey,
   heroDirectionKey,
   resourceStyleKey,
-  horseBubblyKey,
-  horseShadowKey,
-  horsePaladinKey,
-  horseRangerKey,
-  horseArcaneKey,
-  horseUnicornKey,
-  horseSamuraiKey,
+  horseVariantKey,
 } from "./assetDescriptors";
+import { HORSE_VARIANT_REGISTRY } from "./horseVariants";
 import { drawKnightSprite, drawDemonSprite } from "./heroSprites";
 
 const warnedKeys = new Set<string>();
 
-const HORSE_VARIANT_KEYS = {
-  bubbly: horseBubblyKey,
-  shadow: horseShadowKey,
-  paladin: horsePaladinKey,
-  ranger: horseRangerKey,
-  arcane: horseArcaneKey,
-  unicorn: horseUnicornKey,
-  samurai: horseSamuraiKey,
-} as const;
+const HORSE_VARIANT_KEYS: Record<string, (direction: Direction) => ReturnType<typeof horseVariantKey>> = {};
+for (const entry of HORSE_VARIANT_REGISTRY) {
+  HORSE_VARIANT_KEYS[entry.id] = (direction: Direction) => horseVariantKey(entry.id, direction);
+}
 
 export function drawCastleSprite(
   ctx: CanvasRenderingContext2D,
@@ -93,13 +83,21 @@ export function drawHeroSprite(
 export function drawHorseSprite(
   ctx: CanvasRenderingContext2D,
   provider: SpriteProvider,
-  variant: keyof typeof HORSE_VARIANT_KEYS,
+  variant: string,
   cx: number,
   cy: number,
   direction: Direction = "n",
   hexSize: number = 32
 ): void {
-  const key = HORSE_VARIANT_KEYS[variant](direction);
+  const keyFn = HORSE_VARIANT_KEYS[variant];
+  if (!keyFn) {
+    if (!warnedKeys.has(variant)) {
+      console.warn(`drawHorseSprite: unknown variant ${variant}`);
+      warnedKeys.add(variant);
+    }
+    return;
+  }
+  const key = keyFn(direction);
   const r = provider.resolve(key);
   if (!r) {
     if (!warnedKeys.has(key)) {

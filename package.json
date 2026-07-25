@@ -16,7 +16,10 @@
     "db:down": "docker compose down",
     "pretest": "pwsh scripts/ports.ps1",
     "test": "tsx --env-file=.env test/smoke.ts",
+    "test:cityview": "pwsh scripts/ports.ps1 && tsx --env-file=.env test/cityView.test.ts",
+    "test:all": "pwsh scripts/ports.ps1 && tsx --env-file=.env test/smoke.ts && tsx --env-file=.env test/cityView.test.ts",
     "test:static": "pwsh scripts/ports.ps1 --static && tsx --env-file=.env test/smoke.ts",
+    "validate-assets": "node tools/sprites/validate-assets.mjs",
     "sprites:generate": "node tools/sprites/pixel-gen.mjs",
     "sprites:preview": "node tools/sprites/generate-preview.mjs"
   },

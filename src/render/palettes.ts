@@ -1,11 +1,7 @@
 import type { ResourceType } from "../map/resourceTiles";
+import type { BuildingStyleId } from "./buildingStyles";
 
-export type GenerationStyle =
-  | "classic"
-  | "blocky"
-  | "crystalline"
-  | "organic"
-  | "industrial";
+export type GenerationStyle = BuildingStyleId;
 
 export type ResourcePalette = {
   stone: string;

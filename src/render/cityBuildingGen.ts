@@ -1,5 +1,6 @@
 ﻿import type { BuildingDef, BuildingKind, GenerationStyle } from "./cityBuildingDraw";
 import type { CityViewSize } from "../core/cityGrid";
+import { STYLE_IDS, type BuildingStyleId } from "./buildingStyles";
 
 export type GenerationPattern =
   | "denseUrban"
@@ -8,8 +9,6 @@ export type GenerationPattern =
   | "grid"
   | "clustered"
   | "sampler";
-
-const ALL_STYLES: GenerationStyle[] = ["classic", "blocky", "crystalline", "organic", "industrial"];
 
 const ALL_KINDS: BuildingKind[] = [
   "townHall", "house", "tower", "mageGuild", "mine", "market", "barracks", "smithy",
@@ -30,6 +29,19 @@ export interface GenerationConfig {
   seed: number;
   townHallAt: { gx: number; gy: number };
 }
+
+type EnrichFn = (
+  buildings: BuildingDef[],
+  size: CityViewSize,
+  center: { gx: number; gy: number },
+  rng: () => number,
+  style: GenerationStyle,
+) => void;
+
+const STYLE_ENRICHERS: Partial<Record<BuildingStyleId, EnrichFn>> = {
+  organic: enrichOrganic,
+  blocky: enrichBlocky,
+};
 
 export function generateBuildings(config: GenerationConfig): BuildingDef[] {
   const rng = seededRandom(config.seed);
@@ -56,12 +68,9 @@ export function generateBuildings(config: GenerationConfig): BuildingDef[] {
       break;
   }
 
-  // The organic faction gets its signature agrarian + living structures.
-  if (config.style === "organic") {
-    enrichOrganic(buildings, config.size, config.townHallAt, rng, config.style);
-  }
-  if (config.style === "blocky") {
-    enrichBlocky(buildings, config.size, config.townHallAt, rng, config.style);
+  const enrich = STYLE_ENRICHERS[config.style];
+  if (enrich) {
+    enrich(buildings, config.size, config.townHallAt, rng, config.style);
   }
 
   return buildings;
@@ -106,8 +115,6 @@ function firstFreeCell(
   return null;
 }
 
-// Adds an apartment (1x1), a 2x2 farm field, and an adjacent farmhouse to an
-// organic-style settlement so the faction's agrarian art can be previewed.
 function enrichOrganic(
   buildings: BuildingDef[],
   size: CityViewSize,
@@ -115,7 +122,6 @@ function enrichOrganic(
   rng: () => number,
   style: GenerationStyle,
 ): void {
-  // 1) Apartment: a multi-level living unit near the town hall.
   for (let r = 1; r <= 2; r++) {
     const ring = shuffle(ringCells(center, r, size), rng);
     const spot = firstFreeCell(buildings, center, size, ring);
@@ -125,7 +131,6 @@ function enrichOrganic(
     }
   }
 
-  // 1b) Archery range: another building near the town hall on a free cell.
   for (let r = 1; r <= 2; r++) {
     const ring = shuffle(ringCells(center, r, size), rng);
     const spot = firstFreeCell(buildings, center, size, ring);
@@ -135,14 +140,11 @@ function enrichOrganic(
     }
   }
 
-  // 2) 2x2 farm field: prefer a corner-ish block away from center.
   const fieldCandidates: Array<{ gx: number; gy: number }> = [];
-  // corners
   fieldCandidates.push({ gx: 0, gy: 0 });
   fieldCandidates.push({ gx: size - 2, gy: size - 2 });
   fieldCandidates.push({ gx: size - 2, gy: 0 });
   fieldCandidates.push({ gx: 0, gy: size - 2 });
-  // a few random interior roots
   for (let i = 0; i < 6; i++) {
     fieldCandidates.push({
       gx: Math.floor(rng() * (size - 1)),
@@ -159,8 +161,6 @@ function enrichOrganic(
   if (fieldRoot) {
     buildings.push({ gx: fieldRoot.gx, gy: fieldRoot.gy, kind: "farmField", level: 1, style, w: 2, h: 2 });
 
-    // 3) Farmhouse in front of (south of) the field. Try cells just beyond the
-    //    field's lower-right / lower-left edges, then anywhere adjacent.
     const front: Array<{ gx: number; gy: number }> = [
       { gx: fieldRoot.gx, gy: fieldRoot.gy + 2 },
       { gx: fieldRoot.gx + 2, gy: fieldRoot.gy },
@@ -176,8 +176,6 @@ function enrichOrganic(
   }
 }
 
-// Adds a blocky archery range, farmhouse, and high‑rise complex to a
-// blocky‑style settlement for visual testing.
 function enrichBlocky(
   buildings: BuildingDef[],
   size: CityViewSize,
@@ -185,7 +183,6 @@ function enrichBlocky(
   rng: () => number,
   style: GenerationStyle,
 ): void {
-  // 1) Archery range near center
   for (let r = 1; r <= 2; r++) {
     const ring = shuffle(ringCells(center, r, size), rng);
     const spot = firstFreeCell(buildings, center, size, ring);
@@ -195,7 +192,6 @@ function enrichBlocky(
     }
   }
 
-  // 2) Farmhouse on an edge cell
   for (let r = 1; r <= 2; r++) {
     const ring = shuffle(ringCells(center, r, size), rng);
     const spot = firstFreeCell(buildings, center, size, ring);
@@ -205,7 +201,6 @@ function enrichBlocky(
     }
   }
 
-  // 3) High‑rise complex (apartment) near center
   for (let r = 1; r <= 2; r++) {
     const ring = shuffle(ringCells(center, r, size), rng);
     const spot = firstFreeCell(buildings, center, size, ring);
@@ -264,8 +259,6 @@ function shuffle<T>(arr: T[], rng: () => number): T[] {
   return a;
 }
 
-// ─── Pattern: Dense Urban ───────────────────────────────────────────────────
-
 function generateDenseUrban(config: GenerationConfig, rng: () => number): BuildingDef[] {
   const { size, style, townHallAt } = config;
   const buildings: BuildingDef[] = [];
@@ -292,8 +285,6 @@ function generateDenseUrban(config: GenerationConfig, rng: () => number): Buildi
   return buildings;
 }
 
-// ─── Pattern: Sparse Rural ──────────────────────────────────────────────────
-
 function generateSparseRural(config: GenerationConfig, rng: () => number): BuildingDef[] {
   const { size, style, townHallAt } = config;
   const buildings: BuildingDef[] = [];
@@ -317,8 +308,6 @@ function generateSparseRural(config: GenerationConfig, rng: () => number): Build
 
   return buildings;
 }
-
-// ─── Pattern: Radial ────────────────────────────────────────────────────────
 
 function generateRadial(config: GenerationConfig, rng: () => number): BuildingDef[] {
   const { size, style, townHallAt } = config;
@@ -345,8 +334,6 @@ function generateRadial(config: GenerationConfig, rng: () => number): BuildingDe
   return buildings;
 }
 
-// ─── Pattern: Grid ──────────────────────────────────────────────────────────
-
 function generateGrid(config: GenerationConfig, rng: () => number): BuildingDef[] {
   const { size, style, townHallAt } = config;
   const buildings: BuildingDef[] = [];
@@ -367,8 +354,6 @@ function generateGrid(config: GenerationConfig, rng: () => number): BuildingDef[
 
   return buildings;
 }
-
-// ─── Pattern: Clustered ─────────────────────────────────────────────────────
 
 function generateClustered(config: GenerationConfig, rng: () => number): BuildingDef[] {
   const { size, style, townHallAt } = config;
@@ -399,16 +384,14 @@ function generateClustered(config: GenerationConfig, rng: () => number): Buildin
   return buildings;
 }
 
-// ─── Pattern: Sampler ───────────────────────────────────────────────────────
-
 function generateSampler(config: GenerationConfig, _rng: () => number): BuildingDef[] {
   const { size, style, townHallAt } = config;
   const buildings: BuildingDef[] = [];
   const center = townHallAt;
 
-  for (let s = 0; s < ALL_STYLES.length; s++) {
-    const buildStyle = ALL_STYLES[s];
-    const gx = 1 + s * Math.floor(size / ALL_STYLES.length);
+  for (let s = 0; s < STYLE_IDS.length; s++) {
+    const buildStyle = STYLE_IDS[s];
+    const gx = 1 + s * Math.floor(size / STYLE_IDS.length);
     const gy = 1 + s;
     if (gx < size && gy < size && !isOccupied(gx, gy, buildings, center, size)) {
       const kind = ALL_KINDS[s % ALL_KINDS.length];
