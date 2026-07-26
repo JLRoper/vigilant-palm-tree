@@ -14,7 +14,6 @@ export type ResourceStyle =
 
 export interface GameSettings {
   moveDurationMs: number;
-  horseVariant: HorseVariant;
   resourceStyle: ResourceStyle;
   territoryBorderWidth: number;
   populationGrowthRate: number;
@@ -28,7 +27,6 @@ const DEFAULT_MOVE_MS = 220;
 const MIN_BORDER_WIDTH = 1.5;
 const MAX_BORDER_WIDTH = 6;
 const DEFAULT_BORDER_WIDTH = 1.5;
-const DEFAULT_HORSE_VARIANT: HorseVariant = "bubbly";
 
 const RESOURCE_STYLES: readonly ResourceStyle[] = [
   "rune-stone", "cartography-pin", "illustrated-pin", "constellation",
@@ -47,7 +45,6 @@ export { VALID_HORSE_VARIANTS, HORSE_VARIANT_REGISTRY };
 
 export const DEFAULT_SETTINGS: GameSettings = {
   moveDurationMs: DEFAULT_MOVE_MS,
-  horseVariant: DEFAULT_HORSE_VARIANT,
   resourceStyle: DEFAULT_RESOURCE_STYLE,
   territoryBorderWidth: DEFAULT_BORDER_WIDTH,
   populationGrowthRate: DEFAULT_GROWTH_RATE,
@@ -93,9 +90,6 @@ export function clampUpgradeGate(g: number): number {
 export function updateSettings(patch: Partial<GameSettings>): GameSettings {
   const next: GameSettings = {
     moveDurationMs: clampMoveDurationMs(patch.moveDurationMs ?? current.moveDurationMs),
-    horseVariant: (patch.horseVariant && (VALID_HORSE_VARIANTS as readonly string[]).includes(patch.horseVariant)
-    ? patch.horseVariant
-    : current.horseVariant) as HorseVariant,
     resourceStyle: clampResourceStyle(patch.resourceStyle ?? current.resourceStyle),
     territoryBorderWidth: clampBorderWidth(patch.territoryBorderWidth ?? current.territoryBorderWidth),
     populationGrowthRate: clampGrowthRate(patch.populationGrowthRate ?? current.populationGrowthRate),
@@ -142,9 +136,6 @@ function loadFromStorage(): GameSettings {
     const parsed = JSON.parse(raw) as Partial<GameSettings>;
     return {
       moveDurationMs: clampMoveDurationMs(parsed.moveDurationMs ?? DEFAULT_MOVE_MS),
-      horseVariant: (VALID_HORSE_VARIANTS as readonly string[]).includes(parsed.horseVariant as string)
-        ? (parsed.horseVariant as HorseVariant)
-        : DEFAULT_HORSE_VARIANT,
       resourceStyle: clampResourceStyle(parsed.resourceStyle),
       territoryBorderWidth: clampBorderWidth(parsed.territoryBorderWidth ?? DEFAULT_BORDER_WIDTH),
       populationGrowthRate: clampGrowthRate(parsed.populationGrowthRate ?? DEFAULT_GROWTH_RATE),

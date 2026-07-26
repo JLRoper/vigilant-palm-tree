@@ -56,8 +56,16 @@ import resourceStonePileBubbly from "../resources/resource-stone-pile-bubbly.png
 import resourceIronPileBubbly from "../resources/resource-iron-pile-bubbly.png?url";
 import resourceArcanePileBubbly from "../resources/resource-arcane-pile-bubbly.png?url";
 import resourceFoodPileBubbly from "../resources/resource-food-pile-bubbly.png?url";
+import buildingClassicApartment1 from "../resources/building-classic-apartment-1.png?url";
 import buildingClassicArcheryRange1 from "../resources/building-classic-archeryRange-1.png?url";
+import buildingClassicBarracks1 from "../resources/building-classic-barracks-1.png?url";
+import buildingClassicFarmField1 from "../resources/building-classic-farmField-1.png?url";
+import buildingClassicFarmhouse1 from "../resources/building-classic-farmhouse-1.png?url";
 import buildingClassicHouse2 from "../resources/building-classic-house-2.png?url";
+import buildingClassicMageGuild1 from "../resources/building-classic-mageGuild-1.png?url";
+import buildingClassicMarket1 from "../resources/building-classic-market-1.png?url";
+import buildingClassicMine1 from "../resources/building-classic-mine-1.png?url";
+import buildingClassicSmithy1 from "../resources/building-classic-smithy-1.png?url";
 import buildingClassicTower1 from "../resources/building-classic-tower-1.png?url";
 import buildingClassicTownHall1 from "../resources/building-classic-townHall-1.png?url";
 import buildingBlockyArcheryRange1 from "../resources/building-blocky-archeryRange-1.png?url";
@@ -202,8 +210,16 @@ export const RESOURCE_PILE_BUBBLY_SPRITES: Record<ResourceType, string> = {
 };
 
 export const BUILDING_SPRITES: Record<string, string> = {
+  "classic.apartment.1": buildingClassicApartment1,
   "classic.archeryRange.1": buildingClassicArcheryRange1,
+  "classic.barracks.1": buildingClassicBarracks1,
+  "classic.farmField.1": buildingClassicFarmField1,
+  "classic.farmhouse.1": buildingClassicFarmhouse1,
   "classic.house.2": buildingClassicHouse2,
+  "classic.mageGuild.1": buildingClassicMageGuild1,
+  "classic.market.1": buildingClassicMarket1,
+  "classic.mine.1": buildingClassicMine1,
+  "classic.smithy.1": buildingClassicSmithy1,
   "classic.tower.1": buildingClassicTower1,
   "classic.townHall.1": buildingClassicTownHall1,
   "blocky.archeryRange.1": buildingBlockyArcheryRange1,

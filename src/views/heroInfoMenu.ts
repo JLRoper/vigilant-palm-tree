@@ -5,7 +5,6 @@ import { ARMY_STACK_SLOTS, type UnitStack } from "../state/units";
 import { catalogReady, catalogFailed, getCachedUnit, loadUnitCatalog } from "../data/unitCatalog";
 import { getUnitImageUrl } from "../data/unitImages";
 import { HERO_BANNERS } from "../render/assetDescriptors";
-import { settings } from "../state/settings";
 
 const MOVEMENT_PER_TURN = 7;
 const MIN_USABLE_MOVEMENT = 1.0;
@@ -468,7 +467,7 @@ export class HeroInfoMenu {
 
   update(hero: Hero, state: GameState): void {
     this.nameEl.textContent = hero.name;
-    this.bannerEl.src = HERO_BANNERS[settings().horseVariant];
+    this.bannerEl.src = HERO_BANNERS[hero.horseVariant] ?? HERO_BANNERS["bubbly"];
     this.goldEl.textContent = `${hero.gold}g`;
     this.foodEl.textContent = "0 food";
     const remaining = Math.max(0, hero.movementRemaining);

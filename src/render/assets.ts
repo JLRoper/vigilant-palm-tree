@@ -11,7 +11,6 @@ import {
   ProceduralSpriteSource,
   SpriteSource,
 } from "./assetSource";
-import { settings } from "../state/settings";
 
 export type { Drawable, ProceduralDrawer, SpriteSource } from "./assetSource";
 
@@ -48,8 +47,6 @@ export class SpriteProvider {
 export function createDefaultProvider(
   proceduralDrawers: Record<string, ProceduralDrawer> = {}
 ): SpriteProvider {
-  const activeHorse = settings().horseVariant;
-
   const eagerUrls: Record<string, string> = {};
   const onDemandUrls: Record<string, string> = {};
   const proceduralNaturalSizes: Record<string, number> = {};
@@ -62,10 +59,7 @@ export function createDefaultProvider(
     }
     if (proceduralKeys.has(d.key)) continue;
 
-    const isCastle = d.key.startsWith("castle.");
-    const isActiveHorse = d.key.startsWith(`horse.${activeHorse}.`);
-
-    if (isCastle || isActiveHorse) {
+    if (d.key.startsWith("castle.")) {
       eagerUrls[d.key] = d.url;
     } else {
       onDemandUrls[d.key] = d.url;

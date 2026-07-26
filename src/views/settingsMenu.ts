@@ -8,7 +8,6 @@ import {
   growthRateBounds,
   upgradeGateBounds,
   type GameSettings,
-  type HorseVariant,
   type ResourceStyle,
 } from "../state/settings";
 import { openDeveloperSettingsMenu } from "./developerSettingsMenu";
@@ -381,60 +380,6 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   {
     const children: HTMLElement[] = [];
 
-    // Horse variant
-    const horseRow = document.createElement("div");
-    horseRow.style.display = "flex";
-    horseRow.style.flexDirection = "column";
-    horseRow.style.gap = "6px";
-
-    const horseLabel = document.createElement("span");
-    horseLabel.textContent = "Horse sprite style";
-    horseRow.appendChild(horseLabel);
-
-    const select = document.createElement("select");
-    select.style.width = "100%";
-    select.style.padding = "8px";
-    select.style.fontSize = "12px";
-    select.style.border = "1px solid #444";
-    select.style.borderRadius = "4px";
-    select.style.backgroundColor = "#1a1a1a";
-    select.style.color = "#eee";
-    select.style.accentColor = "#f77f00";
-
-    const horseOptions: Array<[HorseVariant, string]> = [
-      ["bubbly", "Bubbly cartoon horse"],
-      ["hero", "Detailed knight on horse"],
-      ["shadow", "Shadow knight on horse"],
-      ["paladin", "Golden paladin on horse"],
-      ["ranger", "Forest ranger on horse"],
-      ["arcane", "Arcane spellrider"],
-      ["unicorn", "Dark unicorn"],
-      ["samurai", "Samurai warrior"],
-    ];
-    for (const [val, label] of horseOptions) {
-      const opt = document.createElement("option");
-      opt.value = val;
-      opt.textContent = label;
-      select.appendChild(opt);
-    }
-    select.value = current.horseVariant;
-    horseRow.appendChild(select);
-
-    const horseHint = document.createElement("div");
-    horseHint.style.fontSize = "10px";
-    horseHint.style.opacity = "0.55";
-    horseHint.textContent = "Choose between cute bubbly pixel art, detailed knight, shadow knight, golden paladin, forest ranger, arcane spellrider, dark unicorn, or samurai warrior.";
-    horseRow.appendChild(horseHint);
-
-    select.addEventListener("change", () => {
-      updateSettings({ horseVariant: select.value as HorseVariant });
-    });
-    refreshList.push(() => {
-      select.value = settings().horseVariant;
-    });
-
-    children.push(horseRow);
-
     // Resource icon style
     const styleRow = document.createElement("div");
     styleRow.style.display = "flex";
@@ -491,7 +436,6 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   resetBtn.addEventListener("click", () => {
     updateSettings({
       moveDurationMs: bounds.default,
-      horseVariant: "bubbly",
       resourceStyle: "rune-stone",
       territoryBorderWidth: borderBounds.default,
       populationGrowthRate: growthBounds.default,
