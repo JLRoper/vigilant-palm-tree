@@ -244,13 +244,16 @@ export class AdventureView {
       if (!t) return;
       e.preventDefault();
 
+      const dist = Math.hypot(t.clientX - mt.startX, t.clientY - mt.startY);
+      if (!mt.moved) {
+        if (dist <= DRAG_MOVE_THRESHOLD) return;
+        mt.moved = true;
+      }
+
       const geo = getMinimapGeometry(this.opts.map);
       this.opts.minimapCamera.panBy(mt.lastX, mt.lastY, t.clientX, t.clientY, geo, this.opts.map);
       mt.lastX = t.clientX;
       mt.lastY = t.clientY;
-      if (Math.hypot(t.clientX - mt.startX, t.clientY - mt.startY) > DRAG_MOVE_THRESHOLD) {
-        mt.moved = true;
-      }
       this.opts.onRedraw();
       return;
     }
