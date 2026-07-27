@@ -425,15 +425,23 @@ export class AdventureView {
     this.lastClickDebug.reason = "";
 
     const minimapGeo = getMinimapGeometry(this.opts.map);
-    if (isPointInMinimap(e.clientX, e.clientY, minimapGeo)) {
+    const inMinimap = isPointInMinimap(e.clientX, e.clientY, minimapGeo);
+    if (inMinimap) {
       if (this.minimapDragMoved || this.movedDuringDrag) {
         this.lastClickDebug.reason = "minimap_drag";
+        this.minimapDragMoved = false;
         return;
       }
       const world = this.opts.minimapCamera.screenToWorld(e.clientX, e.clientY, minimapGeo);
       this.centerOn(world.q, world.r);
       this.lastClickDebug.reason = "minimap_navigate";
       this.opts.onRedraw();
+      return;
+    }
+
+    if (this.minimapDragMoved) {
+      this.lastClickDebug.reason = "minimap_drag";
+      this.minimapDragMoved = false;
       return;
     }
 
