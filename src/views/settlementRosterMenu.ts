@@ -1,7 +1,9 @@
 import { PopupMenu, menuTheme } from "./menu";
 import type { GameState, SettlementId, SettlementState } from "../state/gameState";
+import { SETTLEMENT_BANNERS } from "../render/assetDescriptors";
 
 export interface SettlementRosterMenuOptions {
+  onSelectSettlement?: (settlementId: SettlementId) => void;
   onCenterSettlement?: (settlementId: SettlementId) => void;
 }
 
@@ -10,6 +12,7 @@ export class SettlementRosterMenu {
   private visible = false;
   private opts: SettlementRosterMenuOptions;
   private content: HTMLDivElement;
+  private lastRosterKey = "";
 
   constructor(opts: SettlementRosterMenuOptions) {
     this.opts = opts;
@@ -58,6 +61,7 @@ export class SettlementRosterMenu {
     if (this.visible) {
       this.menu.root.style.display = "none";
       this.visible = false;
+      this.lastRosterKey = "";
     }
   }
 
@@ -69,12 +73,24 @@ export class SettlementRosterMenu {
     const activePlayer = state.players.find((p) => p.id === state.activePlayerId);
     this.menu.setTitle(activePlayer ? `${activePlayer.name}'s Settlements` : "Settlements");
 
-    this.content.replaceChildren();
-
     const activePlayerId = activePlayer?.id ?? null;
     const settlements = Object.values(state.settlements).filter(
       (s) => activePlayerId === null || s.ownerId === activePlayerId,
     );
+
+    const rosterKey = JSON.stringify({
+      activePlayerId: state.activePlayerId,
+      settlements: settlements.map((s) => ({
+        id: s.id, q: s.q, r: s.r, gold: s.gold,
+        level: s.level, population: s.population,
+        morale: s.morale, name: s.name,
+      })),
+    });
+
+    if (rosterKey === this.lastRosterKey) return;
+    this.lastRosterKey = rosterKey;
+
+    this.content.replaceChildren();
 
     if (settlements.length === 0) {
       const empty = document.createElement("div");
@@ -95,23 +111,29 @@ export class SettlementRosterMenu {
   }
 
   private buildSettlementRow(settlement: SettlementState): HTMLDivElement {
+    const bannerUrl = SETTLEMENT_BANNERS[settlement.level as 1 | 2 | 3];
+
     const row = document.createElement("div");
     Object.assign(row.style, {
       display: "flex",
       flexDirection: "column",
       gap: "4px",
       padding: "8px 10px",
-      background: "rgba(255,255,255,0.05)",
       borderRadius: "4px",
+      background: `linear-gradient(rgba(26, 26, 26, 0.3), rgba(26, 26, 26, 0.3)), url(${bannerUrl}) center / cover no-repeat`,
     });
 
-    const topRow = document.createElement("div");
-    Object.assign(topRow.style, {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: "8px",
-    });
+    if (this.opts.onSelectSettlement || this.opts.onCenterSettlement) {
+      row.style.cursor = "pointer";
+      row.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.opts.onSelectSettlement?.(settlement.id);
+      });
+      row.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        this.opts.onCenterSettlement?.(settlement.id);
+      });
+    }
 
     const nameEl = document.createElement("div");
     nameEl.textContent = settlement.name;
@@ -120,44 +142,19 @@ export class SettlementRosterMenu {
       overflow: "hidden",
       textOverflow: "ellipsis",
       whiteSpace: "nowrap",
+      textShadow: "0 1px 3px rgba(0,0,0,0.8)",
     });
-    topRow.appendChild(nameEl);
-
-    const buttons = document.createElement("div");
-    Object.assign(buttons.style, {
-      display: "flex",
-      gap: "4px",
-      flexShrink: "0",
-    });
-
-    if (this.opts.onCenterSettlement) {
-      const locateBtn = document.createElement("button");
-      locateBtn.textContent = "Locate";
-      Object.assign(locateBtn.style, {
-        padding: "3px 6px",
-        fontSize: "11px",
-        cursor: "pointer",
-        background: menuTheme.button.background,
-        color: menuTheme.button.color,
-        border: menuTheme.button.border,
-        borderRadius: menuTheme.button.borderRadius,
-        fontFamily: menuTheme.font,
-      });
-      locateBtn.addEventListener("click", () => this.opts.onCenterSettlement?.(settlement.id));
-      buttons.appendChild(locateBtn);
-    }
-
-    topRow.appendChild(buttons);
-    row.appendChild(topRow);
+    row.appendChild(nameEl);
 
     const metaEl = document.createElement("div");
     metaEl.textContent = `(${settlement.q}, ${settlement.r}) · L${settlement.level} · ${settlement.population} pop · ${settlement.gold}g · Morale ${settlement.morale ?? 100}%`;
     Object.assign(metaEl.style, {
       fontSize: "11px",
-      opacity: "0.75",
+      opacity: "0.85",
       overflow: "hidden",
       textOverflow: "ellipsis",
       whiteSpace: "nowrap",
+      textShadow: "0 1px 3px rgba(0,0,0,0.8)",
     });
     row.appendChild(metaEl);
 

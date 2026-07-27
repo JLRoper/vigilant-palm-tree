@@ -10,7 +10,9 @@ import {
   ProceduralDrawer,
   ProceduralSpriteSource,
   SpriteSource,
+  VariantAwareSource,
 } from "./assetSource";
+import { settings } from "../state/settings";
 
 export type { Drawable, ProceduralDrawer, SpriteSource } from "./assetSource";
 
@@ -73,5 +75,6 @@ export function createDefaultProvider(
     proceduralNaturalSizes
   );
   const composite = new CompositeSpriteSource([eagerImageSource, onDemandSource, proceduralSource]);
-  return new SpriteProvider(composite);
+  const variantAware = new VariantAwareSource(composite, () => settings().spriteVariant);
+  return new SpriteProvider(variantAware);
 }

@@ -4,8 +4,8 @@ import { GameMap } from "./gameMap";
 import { isPassable } from "./terrain";
 
 export const CASTLE_COUNT_MIN = 4;
-export const CASTLE_COUNT_MAX = 7;
-export const CASTLE_COUNT_DEFAULT = 4;
+export const CASTLE_COUNT_MAX = 15;
+export const CASTLE_COUNT_DEFAULT = 6;
 
 export const EDGE_BUFFER = 2;
 export const MIN_CASTLE_SPACING = 4;

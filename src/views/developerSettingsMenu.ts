@@ -1,5 +1,6 @@
 import { openCenteredModal, menuTheme, styleButton } from "./menu";
 import { bus } from "../core/eventBus";
+import { openAssetManager } from "./assetManager";
 
 export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
   const root = parent ?? document.body;
@@ -138,6 +139,17 @@ export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
   buildEventList();
 
   content.appendChild(refreshBtn);
+
+  const assetBtn = document.createElement("button");
+  assetBtn.textContent = "Asset Manager";
+  styleButton(assetBtn);
+  assetBtn.style.alignSelf = "flex-start";
+  assetBtn.style.marginTop = "4px";
+  assetBtn.addEventListener("click", () => {
+    modal.close();
+    setTimeout(() => openAssetManager(), 100);
+  });
+  content.appendChild(assetBtn);
 
   const closeRow = document.createElement("div");
   closeRow.style.display = "flex";

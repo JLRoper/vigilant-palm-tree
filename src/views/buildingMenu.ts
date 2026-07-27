@@ -1,42 +1,68 @@
 import { PopupMenu, styleButton } from "./menu";
 import type { BuildingDef, BuildingKind } from "../render/cityBuildingDraw";
 import type { SettlementState } from "../state/gameState";
+import {
+  buildingLabel,
+  buildingDescription,
+  buildingPlacementCost,
+  buildingSettlementEffects,
+  buildingPlayerEffects,
+  buildingUpkeep,
+  getBuildingEffect,
+} from "../core/buildingRegistry";
 
-function buildingLabel(kind: BuildingKind, level: number): string {
-  const names: Record<BuildingKind, string> = {
-    townHall:    "Town Hall",
-    house:       "House",
-    tower:       "Tower",
-    mageGuild:   "Mage Guild",
-    mine:        "Mine",
-    market:      "Market",
-    barracks:    "Barracks",
-    smithy:      "Smithy",
-    apartment:   "Apartment",
-    farmField:   "Farm Field",
-    farmhouse:   "Farmhouse",
-    archeryRange: "Archery Range",
-  };
-  const name = names[kind] ?? kind;
-  return level > 1 ? `${name} (Lv ${level})` : name;
+function formatEffectLine(kind: BuildingKind, level: number): string[] {
+  const lines: string[] = [];
+  const se = buildingSettlementEffects(kind, level);
+  const pe = buildingPlayerEffects(kind, level);
+  const upkeep = buildingUpkeep(kind, level);
+
+  if (se.goldPerTurn) lines.push(`+${se.goldPerTurn} gold/turn`);
+  if (se.foodPerTurn) lines.push(`+${se.foodPerTurn} food/turn`);
+  if (se.populationBonus) lines.push(`+${se.populationBonus} population`);
+  if (se.defenseBonus) lines.push(`+${se.defenseBonus} defense`);
+  if (se.unitCostReductionPct) lines.push(`-${se.unitCostReductionPct}% unit cost`);
+  if (se.resourceYieldBonus) {
+    for (const [r, v] of Object.entries(se.resourceYieldBonus)) {
+      if (v > 0) lines.push(`+${v} ${r}/turn`);
+    }
+  }
+  if (pe.visionRangeBonus) lines.push(`+${pe.visionRangeBonus} vision range`);
+  if (pe.controlRangeBonus) lines.push(`+${pe.controlRangeBonus} control range`);
+  if (pe.heroSpeedBonus) lines.push(`+${pe.heroSpeedBonus} hero speed`);
+  if (pe.heroAttackBonus) lines.push(`+${pe.heroAttackBonus} hero attack`);
+
+  if (upkeep.wood > 0 || upkeep.stone > 0) {
+    const parts: string[] = [];
+    if (upkeep.wood > 0) parts.push(`${upkeep.wood}w`);
+    if (upkeep.stone > 0) parts.push(`${upkeep.stone}s`);
+    lines.push(`Upkeep: ${parts.join(" ")}/turn`);
+  }
+
+  const effect = getBuildingEffect(kind);
+  for (const r of effect.recruits) {
+    const costParts = [`${r.goldCost}g`];
+    if (r.resourceCost) {
+      for (const [res, v] of Object.entries(r.resourceCost)) {
+        if (v > 0) costParts.push(`${v}${res[0]}`);
+      }
+    }
+    lines.push(`Recruit: ${r.unitTypeId} (${costParts.join(" ")})`);
+  }
+
+  return lines;
 }
 
-function buildingDescription(kind: BuildingKind): string {
-  const descs: Record<BuildingKind, string> = {
-    townHall:    "Center of settlement governance.",
-    house:       "A humble dwelling.",
-    tower:       "A tall defensive spire.",
-    mageGuild:   "Arcane research and spellcraft.",
-    mine:        "Extracts raw resources.",
-    market:      "Trade goods and gold.",
-    barracks:    "Trains melee infantry.",
-    smithy:      "Forge weaponry and armor.",
-    apartment:   "Multi-level living quarters.",
-    farmField:   "Cultivated crop rows.",
-    farmhouse:   "A small rural home.",
-    archeryRange: "Train and recruit ranged units.",
-  };
-  return descs[kind] ?? "";
+function formatPlacementCost(kind: BuildingKind): string {
+  const cost = buildingPlacementCost(kind);
+  const parts: string[] = [];
+  for (const [r, v] of Object.entries(cost)) {
+    if (v > 0) {
+      const suffix = r === "gold" ? "g" : r[0];
+      parts.push(`${v}${suffix}`);
+    }
+  }
+  return parts.length > 0 ? `Cost: ${parts.join(" ")}` : "";
 }
 
 export interface BuildingMenuOptions {
@@ -67,9 +93,9 @@ export class BuildingMenu {
 
     this.menu = new PopupMenu({
       parent: document.body,
-      title: buildingLabel(building.kind, building.level),
+      title: buildingLabel(building.kind) + (building.level > 1 ? ` (Lv ${building.level})` : ""),
       initialPosition: { x, y },
-      width: 220,
+      width: 240,
       zIndex: 75,
       onClose: () => { this.menu = null; },
     });
@@ -80,9 +106,38 @@ export class BuildingMenu {
       fontSize: "12px",
       opacity: "0.8",
       lineHeight: "1.4",
-      marginBottom: "4px",
+      marginBottom: "2px",
     });
     this.menu.appendContent(desc);
+
+    const effects = formatEffectLine(building.kind, building.level);
+    if (effects.length > 0) {
+      const effDiv = document.createElement("div");
+      effDiv.style.marginBottom = "4px";
+      for (const line of effects) {
+        const el = document.createElement("div");
+        el.textContent = line;
+        Object.assign(el.style, {
+          fontSize: "11px",
+          color: "#8f8",
+          lineHeight: "1.5",
+        });
+        effDiv.appendChild(el);
+      }
+      this.menu.appendContent(effDiv);
+    }
+
+    const costStr = formatPlacementCost(building.kind);
+    if (costStr) {
+      const costDiv = document.createElement("div");
+      costDiv.textContent = costStr;
+      Object.assign(costDiv.style, {
+        fontSize: "10px",
+        opacity: "0.6",
+        marginBottom: "4px",
+      });
+      this.menu.appendContent(costDiv);
+    }
 
     if (building.kind === "townHall" && building.level < 3 && this.onUpgradeTownHall) {
       const cost = TOWN_HALL_UPGRADE_COSTS[building.level];

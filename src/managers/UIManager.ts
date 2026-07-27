@@ -6,7 +6,7 @@ import { SettlementRosterMenu } from "../views/settlementRosterMenu";
 import { SettlementInfoMenu } from "../views/settlementInfoMenu";
 import { CityView } from "../views/cityView";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
-import type { HeroId } from "../state/gameState";
+import type { HeroId, SettlementState } from "../state/gameState";
 import { Hero } from "../entities/hero";
 import { Castle } from "../entities/settlement";
 import { SpriteProvider } from "../render/assets";
@@ -91,6 +91,7 @@ export class UIManager {
       onCenterHero: (heroId) => this.handleRosterHeroCenter(heroId),
     });
     this.settlementRosterMenu = new SettlementRosterMenu({
+      onSelectSettlement: (settlementId) => this.handleRosterSettlementSelect(settlementId),
       onCenterSettlement: (settlementId) => this.handleRosterSettlementCenter(settlementId),
     });
 
@@ -152,20 +153,41 @@ export class UIManager {
           state().replaceState(tc.getState());
         }
       },
+      onUpgradeBuildings: (settlementId, requests) => {
+        const tc = state().getTurnController();
+        const result = tc.startBuildingUpgrade(settlementId, requests);
+        if (result.ok) {
+          state().replaceState(tc.getState());
+        }
+        return result;
+      },
       getSettlement: () => {
         const gs = getStateMgr().getState();
         const openId = this.cityView?.getOpenSettlementId();
         return openId ? gs.settlements[openId] : undefined;
       },
-      onClose: (closedId, buildings) => {
+      onClose: (closedId, buildings, netCost) => {
         const gs = state().getState();
         const s = gs.settlements[closedId];
         if (s) {
+          const updatedSettlement: SettlementState = {
+            ...s,
+            buildings,
+            gold: s.gold - (netCost.gold ?? 0),
+            warehouse: {
+              ...s.warehouse,
+              wood: Math.max(0, (s.warehouse.wood ?? 0) - (netCost.wood ?? 0)),
+              stone: Math.max(0, (s.warehouse.stone ?? 0) - (netCost.stone ?? 0)),
+              iron: Math.max(0, (s.warehouse.iron ?? 0) - (netCost.iron ?? 0)),
+              arcane: Math.max(0, (s.warehouse.arcane ?? 0) - (netCost.arcane ?? 0)),
+              food: s.warehouse.food ?? 0,
+            },
+          };
           const updated = {
             ...gs,
             settlements: {
               ...gs.settlements,
-              [closedId]: { ...s, buildings },
+              [closedId]: updatedSettlement,
             },
             dirty: true,
           };
@@ -353,6 +375,13 @@ export class UIManager {
         this.gameStateManager.replaceState(tc.getState());
       }
     }
+  }
+
+  private handleRosterSettlementSelect(settlementId: string): void {
+    if (!this.gameStateManager) return;
+    const tc = this.gameStateManager.getTurnController();
+    tc.selectSettlement(settlementId);
+    this.gameStateManager.replaceState(tc.getState());
   }
 
   private handleRosterSettlementCenter(settlementId: string): void {

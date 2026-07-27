@@ -1,11 +1,13 @@
 import { cellToScreen, TILE_W, TILE_D } from "../../core/cityGrid";
+import { buildingFootprintFromRegistry } from "../../core/buildingRegistry";
 import type { BuildingDef, BuildingKind, DrawBuildingContext } from "./types";
 
 export { type BuildingDef, type BuildingKind, type DrawBuildingContext };
 
 export function coversCell(b: BuildingDef, gx: number, gy: number): boolean {
-  const w = b.w ?? 1;
-  const h = b.h ?? 1;
+  const fp = buildingFootprintFromRegistry(b.kind, b.level);
+  const w = b.w ?? fp.w;
+  const h = b.h ?? fp.h;
   return gx >= b.gx && gx < b.gx + w && gy >= b.gy && gy < b.gy + h;
 }
 
@@ -59,6 +61,7 @@ export function buildingHeight(kind: BuildingKind, level: number): number {
     farmField: 6,
     farmhouse: 22,
     archeryRange: 28,
+    granary: 26,
   };
   return (base[kind] ?? 24) + (level - 1) * 12;
 }

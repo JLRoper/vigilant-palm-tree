@@ -12,7 +12,8 @@ export type BuildingKind =
   | "apartment"
   | "farmField"
   | "farmhouse"
-  | "archeryRange";
+  | "archeryRange"
+  | "granary";
 
 export interface BuildingDef {
   gx: number;

@@ -56,25 +56,39 @@ import resourceStonePileBubbly from "../resources/resource-stone-pile-bubbly.png
 import resourceIronPileBubbly from "../resources/resource-iron-pile-bubbly.png?url";
 import resourceArcanePileBubbly from "../resources/resource-arcane-pile-bubbly.png?url";
 import resourceFoodPileBubbly from "../resources/resource-food-pile-bubbly.png?url";
-import buildingClassicApartment1 from "../resources/building-classic-apartment-1.png?url";
-import buildingClassicArcheryRange1 from "../resources/building-classic-archeryRange-1.png?url";
-import buildingClassicBarracks1 from "../resources/building-classic-barracks-1.png?url";
-import buildingClassicFarmField1 from "../resources/building-classic-farmField-1.png?url";
-import buildingClassicFarmhouse1 from "../resources/building-classic-farmhouse-1.png?url";
-import buildingClassicHouse2 from "../resources/building-classic-house-2.png?url";
-import buildingClassicMageGuild1 from "../resources/building-classic-mageGuild-1.png?url";
-import buildingClassicMarket1 from "../resources/building-classic-market-1.png?url";
-import buildingClassicMine1 from "../resources/building-classic-mine-1.png?url";
-import buildingClassicSmithy1 from "../resources/building-classic-smithy-1.png?url";
-import buildingClassicTower1 from "../resources/building-classic-tower-1.png?url";
-import buildingClassicTownHall1 from "../resources/building-classic-townHall-1.png?url";
-import buildingBlockyArcheryRange1 from "../resources/building-blocky-archeryRange-1.png?url";
-import buildingBlockyHouse2 from "../resources/building-blocky-house-2.png?url";
+import buildingClassicApartment1 from "../resources/buildings/building-classic-apartment-1.png?url";
+import buildingClassicArcheryRange1 from "../resources/buildings/building-classic-archeryRange-1.png?url";
+import buildingClassicBarracks1 from "../resources/buildings/building-classic-barracks-1.png?url";
+import buildingClassicFarmField1 from "../resources/buildings/building-classic-farmField-1.png?url";
+import buildingClassicFarmField1Variant2 from "../resources/buildings/building-classic-farmField-1-variant2.png?url";
+import buildingClassicFarmhouse1 from "../resources/buildings/building-classic-farmhouse-1.png?url";
+import buildingClassicHouse1 from "../resources/buildings/building-classic-house-1.png?url";
+import buildingClassicHouse2 from "../resources/buildings/building-classic-house-2.png?url";
+import buildingClassicMageGuild1 from "../resources/buildings/building-classic-mageGuild-1.png?url";
+import buildingClassicMarket1 from "../resources/buildings/building-classic-market-1.png?url";
+import buildingClassicMarket1Variant2 from "../resources/buildings/building-classic-market-1-variant2.png?url";
+import buildingClassicMarket1Variant3 from "../resources/buildings/building-classic-market-1-variant3.png?url";
+import buildingClassicMarket1Variant4 from "../resources/buildings/building-classic-market-1-variant4.png?url";
+import buildingClassicMarket1Variant5 from "../resources/buildings/building-classic-market-1-variant5.png?url";
+import buildingClassicMarket2 from "../resources/buildings/building-classic-market-2.png?url";
+import buildingClassicMine1 from "../resources/buildings/building-classic-mine-1.png?url";
+import buildingClassicSmithy1 from "../resources/buildings/building-classic-smithy-1.png?url";
+import buildingClassicTower1 from "../resources/buildings/building-classic-tower-1.png?url";
+import buildingClassicTower2 from "../resources/buildings/building-classic-tower-2.png?url";
+import buildingClassicTownHall1 from "../resources/buildings/building-classic-townHall-1.png?url";
+import buildingClassicTownHall2 from "../resources/buildings/building-classic-townHall-2.png?url";
+import buildingBlockyArcheryRange1 from "../resources/buildings/building-blocky-archeryRange-1.png?url";
+import buildingBlockyHouse2 from "../resources/buildings/building-blocky-house-2.png?url";
+import buildingPixelGranary1 from "../resources/buildings/building-pixel-granary-1.png?url";
+import buildingPixelGranary2 from "../resources/buildings/building-pixel-granary-2.png?url";
+import buildingPixelGranary3 from "../resources/buildings/building-pixel-granary-3.png?url";
+import buildingPixelSmithy2 from "../resources/buildings/building-pixel-smithy-2.png?url";
 import { Faction, Direction } from "../entities/hero";
 import { CastleLevel, CastleVariant } from "../entities/settlement";
 import { ResourceType, RESOURCES } from "../map/resourceTiles";
 import type { ResourceStyle } from "../state/settings";
 import { HORSE_VARIANT_REGISTRY, type HorseVariantId } from "./horseVariants";
+import { pickStyleForBuilding } from "./buildingStyleResolver";
 
 export type SpriteKey =
   | `castle.${CastleLevel}`
@@ -214,16 +228,29 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "classic.archeryRange.1": buildingClassicArcheryRange1,
   "classic.barracks.1": buildingClassicBarracks1,
   "classic.farmField.1": buildingClassicFarmField1,
+  "classic.farmField.1_variant2": buildingClassicFarmField1Variant2,
   "classic.farmhouse.1": buildingClassicFarmhouse1,
+  "classic.house.1": buildingClassicHouse1,
   "classic.house.2": buildingClassicHouse2,
   "classic.mageGuild.1": buildingClassicMageGuild1,
   "classic.market.1": buildingClassicMarket1,
+  "classic.market.1_variant2": buildingClassicMarket1Variant2,
+  "classic.market.1_variant3": buildingClassicMarket1Variant3,
+  "classic.market.1_variant4": buildingClassicMarket1Variant4,
+  "classic.market.1_variant5": buildingClassicMarket1Variant5,
+  "classic.market.2": buildingClassicMarket2,
   "classic.mine.1": buildingClassicMine1,
   "classic.smithy.1": buildingClassicSmithy1,
   "classic.tower.1": buildingClassicTower1,
+  "classic.tower.2": buildingClassicTower2,
   "classic.townHall.1": buildingClassicTownHall1,
+  "classic.townHall.2": buildingClassicTownHall2,
   "blocky.archeryRange.1": buildingBlockyArcheryRange1,
   "blocky.house.2": buildingBlockyHouse2,
+  "pixel.granary.1": buildingPixelGranary1,
+  "pixel.granary.2": buildingPixelGranary2,
+  "pixel.granary.3": buildingPixelGranary3,
+  "pixel.smithy.2": buildingPixelSmithy2,
 };
 
 export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescriptor> = {
@@ -503,13 +530,58 @@ export const HERO_DESCRIPTORS: Record<`hero.${Faction}`, SpriteDescriptor> = {
   },
 };
 
-export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> = 
+export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> =
   Object.fromEntries(
     Object.keys(BUILDING_SPRITES).map((k) => [
       `building.${k}`,
-      { key: `building.${k}`, url: BUILDING_SPRITES[k], anchor: "center", sizing: { kind: "fitWidth", hexSizeMul: 0.9 } } as SpriteDescriptor,
+      { key: `building.${k}`, url: BUILDING_SPRITES[k], anchor: "bottom", anchorOffsetY: -12, sizing: { kind: "fitWidth", hexSizeMul: 0.9 } } as SpriteDescriptor,
     ])
   );
+
+// Tower sprites have minimal transparent padding at the bottom (8px / 3px
+// out of 128), so the universal -12 default overshoots and the visible base
+// ends up below the cell's south vertex. Override with -2 so the rendered
+// base lands slightly above the south vertex (visible ~4-7px above).
+// Per-sprite overrides so each building's visible base sits at the cell's
+// south vertex. The universal -12 default below pulls every sprite up by
+// (12 + bottomPad*sh/128)px above the vertex. The overrides below cancel that
+// overshoot using each PNG's measured transparent bottom padding.
+//   formula: visibleBase = y + td*0.5 + anchorOffsetY - bottomPad*(sh/128)
+//   target:  visibleBase = y + td*0.5
+//   => anchorOffsetY = bottomPad * (sh/128), with sh = tw * 0.9 = 86.4
+const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
+  "building.classic.apartment.1": 3,
+  "building.classic.archeryRange.1": 8,
+  "building.classic.barracks.1": 11,
+  "building.classic.farmField.1": 14,
+  "building.classic.farmField.1_variant2": 5,
+  "building.classic.farmhouse.1": 11,
+  "building.classic.house.1": 4,
+  "building.classic.house.2": 6,
+  "building.classic.mageGuild.1": 5,
+  "building.classic.market.1": 6,
+  "building.classic.market.1_variant2": 3,
+  "building.classic.market.1_variant3": 12,
+  "building.classic.market.1_variant4": 2,
+  "building.classic.market.1_variant5": 0,
+  "building.classic.market.2": 0,
+  "building.classic.mine.1": 0,
+  "building.classic.smithy.1": 4,
+  "building.classic.tower.1": 5,
+  "building.classic.tower.2": 2,
+  "building.classic.townHall.1": 4,
+  "building.classic.townHall.2": 2,
+  "building.blocky.archeryRange.1": 7,
+  "building.blocky.house.2": 7,
+  "building.pixel.granary.1": 11,
+  "building.pixel.granary.2": 25,
+  "building.pixel.granary.3": 19,
+  "building.pixel.smithy.2": 20,
+};
+for (const [key, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {
+  const desc = BUILDING_DESCRIPTORS[key];
+  if (desc) BUILDING_DESCRIPTORS[key] = { ...desc, anchorOffsetY: offsetY };
+}
 
 const ALL_HORSE_DESCRIPTORS: SpriteDescriptor[] = [];
 for (const entry of HORSE_VARIANT_REGISTRY) {
@@ -570,3 +642,5 @@ export function heroDirectionKey(_faction: "player", direction: Direction): `her
 export function buildingKey(style: string, kind: string, level: number): SpriteKey {
   return `building.${style}.${kind}.${level}`;
 }
+
+export { pickStyleForBuilding };

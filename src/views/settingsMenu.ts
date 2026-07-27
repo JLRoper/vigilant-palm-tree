@@ -7,6 +7,8 @@ import {
   resourceStyleOptions,
   growthRateBounds,
   upgradeGateBounds,
+  spriteVariantOptions,
+  bgOffsetBounds,
   type GameSettings,
   type ResourceStyle,
 } from "../state/settings";
@@ -375,6 +377,54 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     makeFoldableSection(content, "Population", children, true);
   }
 
+  // ─── Confirmations Section ──────────────────────────────────────────────
+
+  {
+    const children: HTMLElement[] = [];
+
+    const confirmRow = document.createElement("div");
+    confirmRow.style.display = "flex";
+    confirmRow.style.alignItems = "center";
+    confirmRow.style.justifyContent = "space-between";
+    confirmRow.style.gap = "8px";
+
+    const confirmLabelWrap = document.createElement("div");
+    confirmLabelWrap.style.display = "flex";
+    confirmLabelWrap.style.flexDirection = "column";
+    confirmLabelWrap.style.gap = "2px";
+
+    const confirmLabel = document.createElement("span");
+    confirmLabel.textContent = "Confirm building upgrades";
+    confirmLabelWrap.appendChild(confirmLabel);
+
+    const confirmHint = document.createElement("div");
+    confirmHint.textContent = "Show a confirmation dialog before paying for selected building upgrades. Toggle off to skip the prompt.";
+    confirmHint.style.fontSize = "10px";
+    confirmHint.style.opacity = "0.55";
+    confirmLabelWrap.appendChild(confirmHint);
+
+    confirmRow.appendChild(confirmLabelWrap);
+
+    const confirmToggle = document.createElement("input");
+    confirmToggle.type = "checkbox";
+    confirmToggle.checked = current.buildingUpgradeConfirm;
+    confirmToggle.style.accentColor = "#f77f00";
+    confirmToggle.style.transform = "scale(1.2)";
+    confirmToggle.style.cursor = "pointer";
+    confirmRow.appendChild(confirmToggle);
+
+    confirmToggle.addEventListener("change", () => {
+      updateSettings({ buildingUpgradeConfirm: confirmToggle.checked });
+    });
+    refreshList.push(() => {
+      confirmToggle.checked = settings().buildingUpgradeConfirm;
+    });
+
+    children.push(confirmRow);
+
+    makeFoldableSection(content, "Confirmations", children, true);
+  }
+
   // ─── Visual Section ────────────────────────────────────────────────────
 
   {
@@ -424,6 +474,144 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     children.push(styleRow);
 
+    // Sprite variant
+    const variantRow = document.createElement("div");
+    variantRow.style.display = "flex";
+    variantRow.style.flexDirection = "column";
+    variantRow.style.gap = "6px";
+
+    const variantLabel = document.createElement("span");
+    variantLabel.textContent = "Sprite variant";
+    variantRow.appendChild(variantLabel);
+
+    const variantSelect = document.createElement("select");
+    variantSelect.style.width = "100%";
+    variantSelect.style.padding = "8px";
+    variantSelect.style.fontSize = "12px";
+    variantSelect.style.border = "1px solid #444";
+    variantSelect.style.borderRadius = "4px";
+    variantSelect.style.backgroundColor = "#1a1a1a";
+    variantSelect.style.color = "#eee";
+    variantSelect.style.accentColor = "#f77f00";
+
+    for (const v of spriteVariantOptions()) {
+      const opt = document.createElement("option");
+      opt.value = String(v);
+      opt.textContent = `Variant ${v}`;
+      variantSelect.appendChild(opt);
+    }
+    variantSelect.value = String(current.spriteVariant);
+    variantRow.appendChild(variantSelect);
+
+    const variantHint = document.createElement("div");
+    variantHint.style.fontSize = "10px";
+    variantHint.style.opacity = "0.55";
+    variantHint.textContent = "Switches sprite variants globally. Falls back to base image if the selected variant does not exist for a sprite.";
+    variantRow.appendChild(variantHint);
+
+    variantSelect.addEventListener("change", () => {
+      updateSettings({ spriteVariant: Number(variantSelect.value) });
+    });
+    refreshList.push(() => {
+      variantSelect.value = String(settings().spriteVariant);
+    });
+
+    children.push(variantRow);
+
+    const bgBounds = bgOffsetBounds();
+
+    // City background X offset
+    const bgXRow = document.createElement("div");
+    bgXRow.style.display = "flex";
+    bgXRow.style.flexDirection = "column";
+    bgXRow.style.gap = "6px";
+
+    const bgXLabelRow = document.createElement("div");
+    bgXLabelRow.style.display = "flex";
+    bgXLabelRow.style.justifyContent = "space-between";
+    bgXLabelRow.style.alignItems = "baseline";
+
+    const bgXLabel = document.createElement("span");
+    bgXLabel.textContent = "City background X offset";
+    bgXLabelRow.appendChild(bgXLabel);
+
+    const bgXValue = document.createElement("span");
+    bgXValue.style.fontVariantNumeric = "tabular-nums";
+    bgXLabelRow.appendChild(bgXValue);
+
+    const bgXSlider = document.createElement("input");
+    bgXSlider.type = "range";
+    bgXSlider.min = String(bgBounds.min);
+    bgXSlider.max = String(bgBounds.max);
+    bgXSlider.step = "1";
+    bgXSlider.style.width = "100%";
+    bgXSlider.style.accentColor = "#f77f00";
+    bgXRow.appendChild(bgXSlider);
+
+    const bgXHint = document.createElement("div");
+    bgXHint.style.fontSize = "10px";
+    bgXHint.style.opacity = "0.55";
+    bgXRow.appendChild(bgXHint);
+
+    function refreshBgX(next: GameSettings): void {
+      bgXSlider.value = String(next.cityBgOffsetX);
+      bgXValue.textContent = `${next.cityBgOffsetX}px`;
+      bgXHint.textContent = `Shift the city view background horizontally. (Range ${bgBounds.min}\u2013${bgBounds.max}px)`;
+    }
+    refreshBgX(current);
+    bgXSlider.addEventListener("input", () => {
+      updateSettings({ cityBgOffsetX: Number(bgXSlider.value) });
+    });
+    refreshList.push(() => refreshBgX(settings()));
+
+    children.push(bgXRow);
+
+    // City background Y offset
+    const bgYRow = document.createElement("div");
+    bgYRow.style.display = "flex";
+    bgYRow.style.flexDirection = "column";
+    bgYRow.style.gap = "6px";
+
+    const bgYLabelRow = document.createElement("div");
+    bgYLabelRow.style.display = "flex";
+    bgYLabelRow.style.justifyContent = "space-between";
+    bgYLabelRow.style.alignItems = "baseline";
+
+    const bgYLabel = document.createElement("span");
+    bgYLabel.textContent = "City background Y offset";
+    bgYLabelRow.appendChild(bgYLabel);
+
+    const bgYValue = document.createElement("span");
+    bgYValue.style.fontVariantNumeric = "tabular-nums";
+    bgYLabelRow.appendChild(bgYValue);
+
+    const bgYSlider = document.createElement("input");
+    bgYSlider.type = "range";
+    bgYSlider.min = String(bgBounds.min);
+    bgYSlider.max = String(bgBounds.max);
+    bgYSlider.step = "1";
+    bgYSlider.style.width = "100%";
+    bgYSlider.style.accentColor = "#f77f00";
+    bgYRow.appendChild(bgYSlider);
+
+    const bgYHint = document.createElement("div");
+    bgYHint.style.fontSize = "10px";
+    bgYHint.style.opacity = "0.55";
+    bgYRow.appendChild(bgYHint);
+
+    function refreshBgY(next: GameSettings): void {
+      bgYSlider.value = String(next.cityBgOffsetY);
+      bgYValue.textContent = `${next.cityBgOffsetY}px`;
+      bgYHint.textContent = `Shift the city view background vertically. (Range ${bgBounds.min}\u2013${bgBounds.max}px)`;
+    }
+    refreshBgY(current);
+    bgYSlider.addEventListener("input", () => {
+      updateSettings({ cityBgOffsetY: Number(bgYSlider.value) });
+    });
+    refreshList.push(() => refreshBgY(settings()));
+
+    children.push(bgYRow);
+
     makeFoldableSection(content, "Visual", children, true);
   }
 
@@ -434,12 +622,16 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   styleButton(resetBtn);
   resetBtn.style.alignSelf = "flex-end";
   resetBtn.addEventListener("click", () => {
+    const bgBounds = bgOffsetBounds();
     updateSettings({
       moveDurationMs: bounds.default,
       resourceStyle: "rune-stone",
       territoryBorderWidth: borderBounds.default,
       populationGrowthRate: growthBounds.default,
       upgradePopulationGate: gateBounds.default,
+      spriteVariant: 1,
+      cityBgOffsetX: bgBounds.default,
+      cityBgOffsetY: bgBounds.default,
     });
     for (const fn of refreshList) fn();
   });

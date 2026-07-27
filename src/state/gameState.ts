@@ -11,7 +11,9 @@ import type { CastleVariant } from "../entities/settlement";
 import type { HorseVariant } from "./settings";
 import { settings } from "./settings";
 import { POP_BY_LEVEL } from "../economy/settlementRates";
-import type { BuildingDef } from "../render/cityBuildingDraw";
+import type { BuildingDef, BuildingKind } from "../render/cityBuildingDraw";
+import { pickStyleForBuilding } from "../render/buildingStyleResolver";
+import { buildingUpgradeCost } from "../core/buildingRegistry";
 
 export type PlayerId = number;
 export type Faction = "player" | "ai";
@@ -68,10 +70,18 @@ export interface HeroState {
 
 export type CharterPhase = "traveling" | "constructing";
 
+export interface BuildingRef {
+  gx: number;
+  gy: number;
+  kind: BuildingKind;
+}
+
 export interface UpgradeState {
-  kind: "townHall" | "settlement";
+  kind: "townHall" | "settlement" | "building" | "buildings";
   targetLevel: 2 | 3;
   daysRemaining: number;
+  buildingRef?: BuildingRef;
+  buildingRefs?: BuildingRef[];
   newResourceRates?: Partial<Record<ResourceType, number>>;
   newCitySpots?: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
 }
@@ -197,13 +207,9 @@ function defaultPlayers(): Player[] {
 
 function defaultHeroes(): Record<HeroId, HeroState> {
   return {
-    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 0, troops: 1, stacks: normalizeStacks([{ unitTypeId: "swordsman", count: 12 }, { unitTypeId: "archer", count: 8 }, { unitTypeId: "cavalry", count: 4 }]), isChartering: false, charterId: null, horseVariant: "bubbly" },
-    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 0, troops: 1, stacks: normalizeStacks([{ unitTypeId: "crossbowman", count: 10 }, { unitTypeId: "griffin", count: 3 }]), isChartering: false, charterId: null, horseVariant: "shadow" },
+    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 300, troops: 1, stacks: normalizeStacks([{ unitTypeId: "swordsman", count: 12 }, { unitTypeId: "archer", count: 8 }, { unitTypeId: "cavalry", count: 4 }]), isChartering: false, charterId: null, horseVariant: "bubbly" },
+    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 300, troops: 1, stacks: normalizeStacks([{ unitTypeId: "crossbowman", count: 10 }, { unitTypeId: "griffin", count: 3 }]), isChartering: false, charterId: null, horseVariant: "shadow" },
   };
-}
-
-function emptyWarehouse(): Warehouse {
-  return { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
 }
 
 function defaultSettlements(): Record<SettlementId, SettlementState> {
@@ -219,8 +225,8 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       goldTax: 1,
       resourceRates: {},
       foundedOnResource: null,
-      gold: 0,
-      warehouse: emptyWarehouse(),
+      gold: 300,
+      warehouse: { wood: 300, stone: 300, iron: 300, arcane: 300, food: 0 },
       citySpots: [],
       cityMines: [],
       morale: 100,
@@ -239,8 +245,8 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       goldTax: 1,
       resourceRates: {},
       foundedOnResource: null,
-      gold: 0,
-      warehouse: emptyWarehouse(),
+      gold: 300,
+      warehouse: { wood: 300, stone: 300, iron: 300, arcane: 300, food: 0 },
       citySpots: [],
       cityMines: [],
       morale: 100,
@@ -1241,6 +1247,88 @@ export type StartUpgradeResult =
   | { state: GameState; ok: true }
   | { state: GameState; ok: false; reason: string };
 
+export interface BuildingUpgradeRequest {
+  gx: number;
+  gy: number;
+  kind: BuildingKind;
+}
+
+export function startBuildingUpgrade(
+  state: GameState,
+  settlementId: SettlementId,
+  requests: BuildingUpgradeRequest[],
+): StartUpgradeResult {
+  const s = state.settlements[settlementId];
+  if (!s) return { state, ok: false, reason: "no_settlement" };
+  if (s.upgrade) return { state, ok: false, reason: "upgrade_in_progress" };
+  if (requests.length === 0) return { state, ok: false, reason: "no_buildings" };
+
+  let totalGold = 0;
+  let totalWood = 0;
+  let totalStone = 0;
+  let maxDays = 0;
+
+  for (const req of requests) {
+    const b = s.buildings.find((x) => x.gx === req.gx && x.gy === req.gy && x.kind === req.kind);
+    if (!b) return { state, ok: false, reason: "building_not_found" };
+    if (b.level >= 3) return { state, ok: false, reason: "max_level" };
+    const cost = buildingUpgradeCost(req.kind, b.level);
+    if (!cost) return { state, ok: false, reason: "no_cost_for_level" };
+    totalGold += cost.gold;
+    totalWood += cost.wood;
+    totalStone += cost.stone;
+    maxDays = Math.max(maxDays, cost.days);
+  }
+
+  if (s.gold < totalGold) return { state, ok: false, reason: "insufficient_gold" };
+  if ((s.warehouse.wood ?? 0) < totalWood) return { state, ok: false, reason: "insufficient_wood" };
+  if ((s.warehouse.stone ?? 0) < totalStone) return { state, ok: false, reason: "insufficient_stone" };
+
+  const upgrade: UpgradeState = {
+    kind: "buildings",
+    targetLevel: 3,
+    daysRemaining: maxDays,
+    buildingRefs: requests.map((r) => ({ gx: r.gx, gy: r.gy, kind: r.kind })),
+  };
+
+  const updated: SettlementState = {
+    ...s,
+    gold: s.gold - totalGold,
+    warehouse: {
+      ...s.warehouse,
+      wood: (s.warehouse.wood ?? 0) - totalWood,
+      stone: (s.warehouse.stone ?? 0) - totalStone,
+    },
+    upgrade,
+  };
+
+  return {
+    state: { ...state, settlements: { ...state.settlements, [settlementId]: updated }, dirty: true },
+    ok: true,
+  };
+}
+
+export function applyBuildingUpgrade(
+  state: GameState,
+  settlementId: SettlementId,
+  refs: BuildingRef[],
+): GameState {
+  const s = state.settlements[settlementId];
+  if (!s) return state;
+  const buildings = s.buildings.map((b) => {
+    const ref = refs.find((r) => r.gx === b.gx && r.gy === b.gy && r.kind === b.kind);
+    if (!ref || b.level >= 3) return b;
+    const newLevel = (b.level + 1) as 2 | 3;
+    const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style) as BuildingDef["style"];
+    return { ...b, level: newLevel, style: newStyle };
+  });
+  return {
+    ...state,
+    settlements: { ...state.settlements, [settlementId]: { ...s, buildings } },
+    dirty: true,
+  };
+}
+
 export function startTownHallUpgrade(state: GameState, settlementId: SettlementId, targetLevel: 2 | 3): StartUpgradeResult {
   const s = state.settlements[settlementId];
   if (!s) return { state, ok: false, reason: "no_settlement" };
@@ -1336,8 +1424,20 @@ export function advanceSettlementUpgrades(state: GameState): GameState {
     const upgrade = s.upgrade;
     if (upgrade.kind === "townHall") {
       const buildings = s.buildings.map((b) => {
-        if (b.kind === "townHall") return { ...b, level: Math.max(b.level, upgrade.targetLevel) };
-        return b;
+        const newLevel = Math.max(b.level, upgrade.targetLevel) as 1 | 2 | 3;
+        const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style);
+        return { ...b, level: newLevel, style: newStyle as BuildingDef["style"] };
+      });
+      newSettlements[id] = { ...s, buildings, upgrade: undefined };
+      changed = true;
+    } else if (upgrade.kind === "buildings" && upgrade.buildingRefs) {
+      const refs = upgrade.buildingRefs;
+      const buildings = s.buildings.map((b) => {
+        const ref = refs.find((r) => r.gx === b.gx && r.gy === b.gy && r.kind === b.kind);
+        if (!ref || b.level >= 3) return b;
+        const newLevel = (b.level + 1) as 2 | 3;
+        const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style) as BuildingDef["style"];
+        return { ...b, level: newLevel, style: newStyle };
       });
       newSettlements[id] = { ...s, buildings, upgrade: undefined };
       changed = true;

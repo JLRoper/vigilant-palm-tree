@@ -24,6 +24,8 @@ import {
   cleanupDefeatedHeroCharters as cleanupDefeatedHeroChartersReducer,
   startTownHallUpgrade as startTownHallUpgradeReducer,
   startSettlementUpgrade as startSettlementUpgradeReducer,
+  startBuildingUpgrade as startBuildingUpgradeReducer,
+  type BuildingUpgradeRequest,
 } from "./gameState";
 import { findPath } from "../map/pathfinding";
 import { hexDistance } from "../core/hex";
@@ -425,6 +427,17 @@ export class TurnController {
     this.hooks.logEvent({
       type: "town_hall_upgrade_started",
       payload: { settlementId, targetLevel },
+    });
+    return { ok: true, reason: "" };
+  }
+
+  startBuildingUpgrade(settlementId: string, requests: BuildingUpgradeRequest[]): { ok: boolean; reason: string } {
+    const result = startBuildingUpgradeReducer(this.state, settlementId, requests);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "building_upgrade_started",
+      payload: { settlementId, requests },
     });
     return { ok: true, reason: "" };
   }

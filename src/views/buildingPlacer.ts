@@ -3,42 +3,60 @@ import { computeCityScale } from "../render/cityRenderer";
 import type { BuildingDef, BuildingKind } from "../render/cityBuildingDraw";
 import { coversCell as reCoversCell } from "../render/cityBuildingDraw";
 import { PopupMenu, styleButton, menuTheme } from "./menu";
-
-function buildingLabel(kind: BuildingKind): string {
-  const names: Record<BuildingKind, string> = {
-    townHall: "Town Hall",
-    house: "House",
-    tower: "Tower",
-    mageGuild: "Mage Guild",
-    mine: "Mine",
-    market: "Market",
-    barracks: "Barracks",
-    smithy: "Smithy",
-    apartment: "Apartment",
-    farmField: "Farm Field",
-    farmhouse: "Farmhouse",
-    archeryRange: "Archery Range",
-  };
-  return names[kind] ?? kind;
-}
-
-function defaultFootprint(kind: BuildingKind): { w: number; h: number } {
-  switch (kind) {
-    case "townHall":    return { w: 2, h: 2 };
-    case "farmField":   return { w: 2, h: 2 };
-    case "apartment":   return { w: 2, h: 2 };
-    case "tower":       return { w: 1, h: 1 };
-    case "archeryRange": return { w: 1, h: 2 };
-    default:            return { w: 1, h: 1 };
-  }
-}
+import {
+  buildingPlacementCost,
+  buildingLabel,
+  buildingBuildDays,
+  buildingFootprintFromRegistry,
+} from "../core/buildingRegistry";
+import { pickStyleForBuilding } from "../render/assetDescriptors";
+import type { ResourceType } from "../state/gameState";
+import resourceGoldPileSmol from "../resources/resource-gold-pile-smol.png?url";
+import resourceWoodPileSmol from "../resources/resource-wood-pile-smol.png?url";
+import resourceStonePileSmol from "../resources/resource-stone-pile-smol.png?url";
+import resourceIronPileSmol from "../resources/resource-iron-pile-smol.png?url";
+import resourceArcanePileSmol from "../resources/resource-arcane-pile-smol.png?url";
 
 const BUILDABLE_KINDS: BuildingKind[] = [
   "townHall", "house", "tower", "archeryRange", "barracks", "smithy",
   "market", "mine", "mageGuild", "apartment", "farmField", "farmhouse",
+  "granary",
 ];
 
 type PaletteMode = "build" | "destroy";
+
+const DESTROY_REFUND_PCT = 0.5;
+
+const RESOURCE_ICON_URLS: Partial<Record<ResourceType, string>> = {
+  gold: resourceGoldPileSmol,
+  wood: resourceWoodPileSmol,
+  stone: resourceStonePileSmol,
+  iron: resourceIronPileSmol,
+  arcane: resourceArcanePileSmol,
+};
+
+const RESOURCE_ORDER: ResourceType[] = ["gold", "wood", "stone", "iron", "arcane"];
+
+const HOURGLASS_SVG = `data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+    <path d="M8 4h16v4l-8 8-8-8V4z" fill="#c8a050" stroke="#8a6a30" stroke-width="1"/>
+    <path d="M8 28h16v-4l-8-8-8 8v4z" fill="#e0c060" stroke="#8a6a30" stroke-width="1"/>
+    <line x1="10" y1="16" x2="22" y2="16" stroke="#8a6a30" stroke-width="1.5"/>
+  </svg>`
+)}`;
+
+const ICON_SIZE = 14;
+
+export interface Affordability {
+  gold: number;
+  warehouse: {
+    wood: number;
+    stone: number;
+    iron: number;
+    arcane: number;
+    food: number;
+  };
+}
 
 export class BuildingPlacer {
   active: BuildingKind | null = null;
@@ -56,16 +74,23 @@ export class BuildingPlacer {
   private onPlaced: (() => void) | null = null;
   private selectedKind: BuildingKind | null = null;
   private onConfirm: (() => void) | null = null;
+  private originalBuildings: BuildingDef[] = [];
+  private affordability: Affordability | null = null;
 
   init(size: CityViewSize, center: { gx: number; gy: number }, initialBuildings: BuildingDef[], style: string): void {
     this.size = size;
     this.center = center;
     this.buildings = [...initialBuildings];
+    this.originalBuildings = [...initialBuildings];
     this.style = style;
     this.active = null;
     this.hoverCell = null;
     this.valid = false;
     this.selectedKind = null;
+  }
+
+  setAffordability(aff: Affordability): void {
+    this.affordability = aff;
   }
 
   isActive(): boolean {
@@ -75,7 +100,7 @@ export class BuildingPlacer {
   selectBuilding(kind: BuildingKind): void {
     this.selectedKind = kind;
     this.active = kind;
-    const fp = defaultFootprint(kind);
+    const fp = buildingFootprintFromRegistry(kind);
     this.w = fp.w;
     this.h = fp.h;
     this.hoverCell = null;
@@ -85,12 +110,13 @@ export class BuildingPlacer {
 
   confirmPlacement(): boolean {
     if (!this.active || !this.hoverCell || !this.valid) return false;
+    const style = pickStyleForBuilding(this.active, 1, this.style);
     const b: BuildingDef = {
       gx: this.hoverCell.gx,
       gy: this.hoverCell.gy,
       kind: this.active,
       level: 1,
-      style: this.style as BuildingDef["style"],
+      style: style as BuildingDef["style"],
       w: this.w,
       h: this.h,
     };
@@ -106,6 +132,84 @@ export class BuildingPlacer {
     this.valid = false;
   }
 
+  // ─── net cost calculation for shopping cart model ────────────────────
+
+  private computeNetCost(): Partial<Record<ResourceType, number>> {
+    const net: Partial<Record<ResourceType, number>> = {};
+    const origMap = new Map<string, BuildingDef>();
+    for (const b of this.originalBuildings) {
+      origMap.set(`${b.gx},${b.gy}`, b);
+    }
+    const currMap = new Map<string, BuildingDef>();
+    for (const b of this.buildings) {
+      currMap.set(`${b.gx},${b.gy}`, b);
+    }
+
+    for (const b of this.buildings) {
+      if (!origMap.has(`${b.gx},${b.gy}`)) {
+        const cost = buildingPlacementCost(b.kind);
+        for (const [r, v] of Object.entries(cost)) {
+          net[r as ResourceType] = (net[r as ResourceType] ?? 0) + v;
+        }
+      }
+    }
+
+    for (const b of this.originalBuildings) {
+      if (!currMap.has(`${b.gx},${b.gy}`)) {
+        const cost = buildingPlacementCost(b.kind);
+        for (const [r, v] of Object.entries(cost)) {
+          net[r as ResourceType] = (net[r as ResourceType] ?? 0) - Math.ceil(v * DESTROY_REFUND_PCT);
+        }
+      }
+    }
+
+    return net;
+  }
+
+  getNetCost(): Partial<Record<ResourceType, number>> {
+    return this.computeNetCost();
+  }
+
+  canAfford(): boolean {
+    if (!this.affordability) return true;
+    const net = this.computeNetCost();
+    const goldCost = net.gold ?? 0;
+    if (goldCost > this.affordability.gold) return false;
+    const woodCost = net.wood ?? 0;
+    if (woodCost > this.affordability.warehouse.wood) return false;
+    const stoneCost = net.stone ?? 0;
+    if (stoneCost > this.affordability.warehouse.stone) return false;
+    const ironCost = net.iron ?? 0;
+    if (ironCost > this.affordability.warehouse.iron) return false;
+    const arcaneCost = net.arcane ?? 0;
+    if (arcaneCost > this.affordability.warehouse.arcane) return false;
+    return true;
+  }
+
+  canAffordSingle(kind: BuildingKind): boolean {
+    if (!this.affordability) return true;
+    const cost = buildingPlacementCost(kind);
+    if ((cost.gold ?? 0) > this.affordability.gold) return false;
+    if ((cost.wood ?? 0) > this.affordability.warehouse.wood) return false;
+    if ((cost.stone ?? 0) > this.affordability.warehouse.stone) return false;
+    if ((cost.iron ?? 0) > this.affordability.warehouse.iron) return false;
+    if ((cost.arcane ?? 0) > this.affordability.warehouse.arcane) return false;
+    return true;
+  }
+
+  getNetCostSummary(): string {
+    const net = this.computeNetCost();
+    const parts: string[] = [];
+    for (const [r, v] of Object.entries(net)) {
+      if (v !== 0) {
+        const prefix = r === "gold" ? "g" : r[0];
+        const sign = v > 0 ? `+${v}${prefix}` : `${v}${prefix}`;
+        parts.push(sign);
+      }
+    }
+    return parts.join(" ") || "No changes";
+  }
+
   // ─── palette popup ──────────────────────────────────────────────────
 
   showPalette(parent: HTMLElement, anchorX: number, anchorY: number): void {
@@ -116,7 +220,7 @@ export class BuildingPlacer {
     this.palette = new PopupMenu({
       parent,
       title: "Building Palette",
-      width: 220,
+      width: 240,
       initialPosition: { x: anchorX, y: anchorY },
       onClose: () => this.handlePaletteClose(),
     });
@@ -139,7 +243,6 @@ export class BuildingPlacer {
     if (!this.palette) return;
     this.palette.clearContent();
 
-    // ── mode toggle row ──
     const modeRow = document.createElement("div");
     Object.assign(modeRow.style, {
       display: "flex",
@@ -150,16 +253,28 @@ export class BuildingPlacer {
     modeRow.appendChild(this.makeModeButton("Build", "build"));
     modeRow.appendChild(this.makeModeButton("Destroy", "destroy"));
     this.palette.appendContent(modeRow);
-    this.palette.appendContent(modeRow);
 
-    // ── content area ──
     if (this.paletteMode === "build") {
       this.renderBuildList();
     } else {
       this.renderDestroyInstructions();
     }
 
-    // ── action bar ──
+    const costSummary = this.getNetCostSummary();
+    if (costSummary !== "No changes") {
+      const summaryDiv = document.createElement("div");
+      summaryDiv.textContent = `Cart: ${costSummary}`;
+      Object.assign(summaryDiv.style, {
+        fontSize: "10px",
+        color: this.canAfford() ? "#8f8" : "#f88",
+        marginTop: "6px",
+        padding: "3px 6px",
+        background: "rgba(0,0,0,0.3)",
+        borderRadius: "3px",
+      });
+      this.palette.appendContent(summaryDiv);
+    }
+
     const actionRow = document.createElement("div");
     Object.assign(actionRow.style, {
       display: "flex",
@@ -170,8 +285,14 @@ export class BuildingPlacer {
 
     const confirmBtn = document.createElement("button");
     confirmBtn.textContent = "\u2713 Confirm";
-    styleButton(confirmBtn, true);
+    styleButton(confirmBtn, this.canAfford());
+    if (!this.canAfford()) {
+      confirmBtn.style.opacity = "0.4";
+      confirmBtn.style.cursor = "not-allowed";
+      confirmBtn.title = "Cannot afford the net cost of these changes";
+    }
     confirmBtn.addEventListener("click", () => {
+      if (!this.canAfford()) return;
       this.cancelPlacement();
       this.hidePalette();
       this.onConfirm?.();
@@ -233,22 +354,86 @@ export class BuildingPlacer {
 
     for (const kind of BUILDABLE_KINDS) {
       const row = document.createElement("button");
-      row.textContent = buildingLabel(kind);
+      const label = buildingLabel(kind);
+      const cost = buildingPlacementCost(kind);
+      const days = buildingBuildDays(kind);
+      const canAfford = this.canAffordSingle(kind);
+      const hasTownHall = kind === "townHall" && this.buildings.some((b) => b.kind === "townHall");
       const isSelected = this.selectedKind === kind;
+      const disabled = !canAfford || hasTownHall;
+
       Object.assign(row.style, {
         width: "100%",
         textAlign: "left",
-        padding: "4px 8px",
+        padding: "3px 6px",
         marginBottom: "1px",
         background: isSelected ? "rgba(60,120,60,0.6)" : "rgba(255,255,255,0.04)",
-        color: "#eee",
+        color: disabled ? "#666" : "#eee",
         border: isSelected ? "1px solid rgba(100,200,100,0.4)" : "1px solid transparent",
         borderRadius: "2px",
         fontSize: "11px",
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
         fontFamily: menuTheme.button.fontFamily,
+        opacity: disabled ? "0.5" : "1",
+        display: "flex",
+        alignItems: "center",
+        gap: "4px",
       });
-      row.addEventListener("click", () => this.selectBuilding(kind));
+
+      const costWrap = document.createElement("span");
+      Object.assign(costWrap.style, {
+        display: "flex",
+        alignItems: "center",
+        gap: "1px",
+        flexShrink: "0",
+      });
+
+      if (days > 0) {
+        const hgIcon = document.createElement("img");
+        hgIcon.src = HOURGLASS_SVG;
+        Object.assign(hgIcon.style, {
+          width: `${ICON_SIZE}px`,
+          height: `${ICON_SIZE}px`,
+          imageRendering: "pixelated",
+        });
+        costWrap.appendChild(hgIcon);
+        const hgNum = document.createElement("span");
+        hgNum.textContent = `${days}`;
+        Object.assign(hgNum.style, { fontSize: "10px", marginRight: "3px" });
+        costWrap.appendChild(hgNum);
+      }
+
+      for (const r of RESOURCE_ORDER) {
+        const v = cost[r];
+        if (!v) continue;
+        const url = RESOURCE_ICON_URLS[r];
+        if (url) {
+          const icon = document.createElement("img");
+          icon.src = url;
+          Object.assign(icon.style, {
+            width: `${ICON_SIZE}px`,
+            height: `${ICON_SIZE}px`,
+            imageRendering: "pixelated",
+          });
+          costWrap.appendChild(icon);
+        }
+        const num = document.createElement("span");
+        num.textContent = `${v}`;
+        Object.assign(num.style, { fontSize: "10px", marginRight: "3px" });
+        costWrap.appendChild(num);
+      }
+
+      const labelSpan = document.createElement("span");
+      labelSpan.textContent = hasTownHall ? `${label} (built)` : label;
+      Object.assign(labelSpan.style, { flex: "1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+
+      row.appendChild(costWrap);
+      row.appendChild(labelSpan);
+
+      row.addEventListener("click", () => {
+        if (disabled) return;
+        this.selectBuilding(kind);
+      });
       scrollWrap.appendChild(row);
     }
 
@@ -268,9 +453,10 @@ export class BuildingPlacer {
   private renderDestroyInstructions(): void {
     if (!this.palette) return;
 
+    const refundPct = Math.round(DESTROY_REFUND_PCT * 100);
     const msg = document.createElement("div");
     msg.innerHTML = `
-      <div style="font-size:12px;margin-bottom:6px;">Click any building on the grid to remove it.</div>
+      <div style="font-size:12px;margin-bottom:6px;">Click any building on the grid to remove it. (${refundPct}% refund)</div>
       <div style="font-size:10px;opacity:0.5;">The town hall on the center cell cannot be removed.</div>
     `;
     this.palette.appendContent(msg);

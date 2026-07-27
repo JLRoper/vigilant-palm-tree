@@ -1,5 +1,6 @@
 ﻿import type { BuildingDef, BuildingKind, GenerationStyle } from "./cityBuildingDraw";
 import type { CityViewSize } from "../core/cityGrid";
+import { buildingFootprintFromRegistry } from "../core/buildingRegistry";
 import { STYLE_IDS, type BuildingStyleId } from "./buildingStyles";
 
 export type GenerationPattern =
@@ -12,6 +13,7 @@ export type GenerationPattern =
 
 const ALL_KINDS: BuildingKind[] = [
   "townHall", "house", "tower", "mageGuild", "mine", "market", "barracks", "smithy",
+  "apartment", "farmField", "farmhouse", "archeryRange", "granary",
 ];
 
 function seededRandom(seed: number): () => number {
@@ -77,8 +79,9 @@ export function generateBuildings(config: GenerationConfig): BuildingDef[] {
 }
 
 function coversCell(b: BuildingDef, gx: number, gy: number): boolean {
-  const w = b.w ?? 1;
-  const h = b.h ?? 1;
+  const fp = buildingFootprintFromRegistry(b.kind, b.level);
+  const w = b.w ?? fp.w;
+  const h = b.h ?? fp.h;
   return gx >= b.gx && gx < b.gx + w && gy >= b.gy && gy < b.gy + h;
 }
 

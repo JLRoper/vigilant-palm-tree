@@ -115,10 +115,28 @@ export function drawBuilding(
       ctx.imageSmoothingEnabled = false;
       const dw = (r.drawable as HTMLImageElement).naturalWidth ?? (r.drawable as HTMLCanvasElement).width;
       const dh = (r.drawable as HTMLImageElement).naturalHeight ?? (r.drawable as HTMLCanvasElement).height;
-      const scale = tw * 0.85 / dw;
-      const w = dw * scale;
-      const h = dh * scale;
-      ctx.drawImage(r.drawable, x - w / 2, y - h / 2, w, h);
+      const desc = r.descriptor;
+      const aspect = dw / dh;
+      let sw: number, sh: number;
+      if (desc.sizing.kind === "fitWidth") {
+        sw = tw * desc.sizing.hexSizeMul;
+        sh = sw / aspect;
+      } else if (desc.sizing.kind === "fitHeight") {
+        sh = tw * desc.sizing.hexSizeMul;
+        sw = sh * aspect;
+      } else {
+        sw = tw * 0.85;
+        sh = (tw * 0.85) / aspect;
+      }
+      let dx: number, dy: number;
+      if (desc.anchor === "center") {
+        dx = x - sw / 2;
+        dy = y - sh / 2 + (desc.anchorOffsetY ?? 0);
+      } else {
+        dx = x - sw / 2;
+        dy = y + td * 0.5 - sh + (desc.anchorOffsetY ?? 0);
+      }
+      ctx.drawImage(r.drawable, dx, dy, sw, sh);
       ctx.restore();
       return;
     }

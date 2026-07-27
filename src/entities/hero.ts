@@ -158,6 +158,7 @@ export class Hero {
         this.fromTile = { ...this.animationPath[this.segIdx] };
         this.toTile = { ...this.animationPath[this.segIdx + 1] };
         this.moveProgress = 0;
+        this.pixelOffset = { x: 0, y: 0 };
         this.facingDirection = directionFromDelta(
           this.toTile.q - this.fromTile.q,
           this.toTile.r - this.fromTile.r

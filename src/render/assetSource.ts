@@ -102,3 +102,62 @@ export class CompositeSpriteSource implements SpriteSource {
     return undefined;
   }
 }
+
+export class VariantAwareSource implements SpriteSource {
+  constructor(
+    private inner: SpriteSource,
+    private getVariant: () => number,
+  ) {}
+
+  preload(): void {
+    this.inner.preload();
+  }
+
+  resolve(key: string): { drawable: Drawable; ready: boolean } | undefined {
+    const variant = this.getVariant();
+    if (variant > 1) {
+      const variantKey = `${key}_variant${variant}`;
+      const r = this.inner.resolve(variantKey);
+      if (r) return r;
+    }
+    return this.inner.resolve(key);
+  }
+}
+
+export class ApiSpriteSource implements SpriteSource {
+  private cache = new Map<string, HTMLImageElement>();
+  private loading = new Set<string>();
+  private baseUrl: string;
+
+  constructor(baseUrl = "/api/assets") {
+    this.baseUrl = baseUrl;
+  }
+
+  preload(): void {}
+
+  resolve(key: string): { drawable: HTMLImageElement; ready: boolean } | undefined {
+    if (this.cache.has(key)) return { drawable: this.cache.get(key)!, ready: true };
+    if (this.loading.has(key)) return undefined;
+    const url = `${this.baseUrl}/${encodeURIComponent(key)}`;
+    const img = new Image();
+    this.cache.set(key, img);
+    this.loading.add(key);
+    img.onload = () => {
+      this.loading.delete(key);
+    };
+    img.onerror = () => {
+      this.loading.delete(key);
+      this.cache.delete(key);
+    };
+    img.src = url;
+    return { drawable: img, ready: false };
+  }
+
+  clear(): void {
+    for (const img of this.cache.values()) {
+      img.src = "";
+    }
+    this.cache.clear();
+    this.loading.clear();
+  }
+}

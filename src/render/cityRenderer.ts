@@ -18,6 +18,9 @@ import {
   type BuildingDef,
   type GenerationStyle,
 } from "./cityBuildingDraw";
+import { buildingFootprintFromRegistry } from "../core/buildingRegistry";
+import { pickStyleForBuilding } from "./assetDescriptors";
+import { settings } from "../state/settings";
 
 export { type BuildingDef, type GenerationStyle };
 
@@ -28,6 +31,46 @@ const COLOR_FILL = "#2a2438";
 const COLOR_STROKE = "#3a3450";
 const COLOR_HOVER_STROKE = "#ffcc00";
 const COLOR_TEXT = "#ffffff";
+
+const SKYBOX_BASE = "/src/resources/skybox/cityView-background";
+
+let skyboxCache = new Map<number, HTMLImageElement>();
+let skyboxLoaded = new Set<number>();
+let skyboxPending = new Set<number>();
+let lastVariant = 0;
+let activeSkybox: HTMLImageElement | null = null;
+
+function skyboxPath(variant: number): string {
+  return variant <= 1 ? `${SKYBOX_BASE}.png` : `${SKYBOX_BASE}-variant${variant}.png`;
+}
+
+function ensureSkybox(variant: number): void {
+  if (skyboxCache.has(variant)) {
+    if (variant !== lastVariant) {
+      activeSkybox = skyboxCache.get(variant) ?? null;
+      lastVariant = variant;
+    }
+    return;
+  }
+  if (skyboxPending.has(variant)) return;
+  skyboxPending.add(variant);
+  const img = new Image();
+  img.onload = () => {
+    skyboxCache.set(variant, img);
+    skyboxLoaded.add(variant);
+    skyboxPending.delete(variant);
+    if (variant === lastVariant || lastVariant === 0) {
+      activeSkybox = img;
+    }
+  };
+  img.onerror = () => {
+    skyboxPending.delete(variant);
+    if (variant > 1) {
+      ensureSkybox(1);
+    }
+  };
+  img.src = skyboxPath(variant);
+}
 
 const TIER_LABELS: Record<CityViewSize, string> = {
   5: "5\u00d75 Settlement",
@@ -66,6 +109,7 @@ export interface DrawCityViewOptions {
   style: GenerationStyle;
   pattern: string;
   ghost?: { gx: number; gy: number; kind: string; w: number; h: number; valid: boolean } | null;
+  selectedKeys?: ReadonlySet<string>;
 }
 
 export function drawCityView(
@@ -73,6 +117,7 @@ export function drawCityView(
   opts: DrawCityViewOptions,
 ): void {
   const { viewportW, viewportH, settlementName, size, hover, citySpots, cityMines, provider, buildings, style, pattern, ghost } = opts;
+  const selectedKeys = opts.selectedKeys;
   const ownerColor = opts.ownerColor ?? "#888888";
   const tileScale = computeCityScale(size, viewportW, viewportH);
   const tw = TILE_W * tileScale;
@@ -84,8 +129,32 @@ export function drawCityView(
   const gridOrigin = cellOrigin(size);
 
   ctx.save();
-  ctx.fillStyle = COLOR_BG;
-  ctx.fillRect(0, 0, viewportW, viewportH);
+
+  const s = settings();
+  ensureSkybox(s.spriteVariant);
+  if (activeSkybox && skyboxLoaded.has(s.spriteVariant)) {
+    const imgW = activeSkybox.naturalWidth;
+    const imgH = activeSkybox.naturalHeight;
+    const imgRatio = imgW / imgH;
+    const viewRatio = viewportW / viewportH;
+
+    let drawW: number;
+    let drawH: number;
+    if (viewRatio > imgRatio) {
+      drawW = viewportW;
+      drawH = viewportW / imgRatio;
+    } else {
+      drawH = viewportH;
+      drawW = viewportH * imgRatio;
+    }
+
+    const offsetX = (drawW - viewportW) / 2 + s.cityBgOffsetX;
+    const offsetY = (drawH - viewportH) / 2 + s.cityBgOffsetY;
+    ctx.drawImage(activeSkybox, -offsetX, -offsetY, drawW, drawH);
+  } else {
+    ctx.fillStyle = COLOR_BG;
+    ctx.fillRect(0, 0, viewportW, viewportH);
+  }
 
   ctx.lineJoin = "miter";
   for (const cell of cellsInDrawOrder(size)) {
@@ -119,10 +188,28 @@ export function drawCityView(
 
   const orderedBuildings = [...buildings].sort((a, b) => (a.gx + a.gy) - (b.gx + b.gy));
   for (const b of orderedBuildings) {
-    const w = b.w ?? 1;
-    const h = b.h ?? 1;
+    const fpSize = buildingFootprintFromRegistry(b.kind, b.level);
+    const w = fpSize.w;
+    const h = fpSize.h;
     const fp = buildingFootprint(b.gx, b.gy, gridOrigin, screenOrigin, tileScale, w, h);
     drawBuilding(ctx, fp.cx, fp.cy, fp.hw * 2, fp.hh * 2, b.kind, b.level, ownerColor, b.style, provider);
+  }
+
+  if (selectedKeys && selectedKeys.size > 0) {
+    ctx.save();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#66ccff";
+    ctx.setLineDash([6, 4]);
+    for (const b of orderedBuildings) {
+      const key = `${b.gx},${b.gy},${b.kind}`;
+      if (!selectedKeys.has(key)) continue;
+      const fpSize = buildingFootprintFromRegistry(b.kind, b.level);
+      const w = fpSize.w;
+      const h = fpSize.h;
+      const fp = buildingFootprint(b.gx, b.gy, gridOrigin, screenOrigin, tileScale, w, h);
+      ctx.strokeRect(fp.cx - fp.hw, fp.cy - fp.hh, fp.hw * 2, fp.hh * 2);
+    }
+    ctx.restore();
   }
 
   if (ghost) {
@@ -132,7 +219,8 @@ export function drawCityView(
     ctx.strokeStyle = ghost.valid ? "#44ff44" : "#ff4444";
     ctx.lineWidth = 3;
     ctx.strokeRect(fp.cx - fp.hw, fp.cy - fp.hh, fp.hw * 2, fp.hh * 2);
-    drawBuilding(ctx, fp.cx, fp.cy, fp.hw * 2, fp.hh * 2, ghost.kind as BuildingDef["kind"], 1, ownerColor, style as GenerationStyle, provider);
+    const ghostStyle = pickStyleForBuilding(ghost.kind, 1, style);
+    drawBuilding(ctx, fp.cx, fp.cy, fp.hw * 2, fp.hh * 2, ghost.kind as BuildingDef["kind"], 1, ownerColor, ghostStyle as GenerationStyle, provider);
     ctx.restore();
   }
 

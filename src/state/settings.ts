@@ -18,6 +18,10 @@ export interface GameSettings {
   territoryBorderWidth: number;
   populationGrowthRate: number;
   upgradePopulationGate: number;
+  spriteVariant: number;
+  cityBgOffsetX: number;
+  cityBgOffsetY: number;
+  buildingUpgradeConfirm: boolean;
 }
 
 const STORAGE_KEY = "heroesJs.settings";
@@ -34,12 +38,19 @@ const RESOURCE_STYLES: readonly ResourceStyle[] = [
 ];
 const DEFAULT_RESOURCE_STYLE: ResourceStyle = "rune-stone";
 
+const MIN_SPRITE_VARIANT = 1;
+const MAX_SPRITE_VARIANT = 5;
+const DEFAULT_SPRITE_VARIANT = 1;
+
 const MIN_GROWTH_RATE = 0.01;
 const MAX_GROWTH_RATE = 0.50;
 const DEFAULT_GROWTH_RATE = 0.10;
 const MIN_UPGRADE_GATE = 0.25;
 const MAX_UPGRADE_GATE = 1.00;
 const DEFAULT_UPGRADE_GATE = 0.85;
+const MIN_BG_OFFSET = -500;
+const MAX_BG_OFFSET = 500;
+const DEFAULT_BG_OFFSET = 0;
 
 export { VALID_HORSE_VARIANTS, HORSE_VARIANT_REGISTRY };
 
@@ -49,6 +60,10 @@ export const DEFAULT_SETTINGS: GameSettings = {
   territoryBorderWidth: DEFAULT_BORDER_WIDTH,
   populationGrowthRate: DEFAULT_GROWTH_RATE,
   upgradePopulationGate: DEFAULT_UPGRADE_GATE,
+  spriteVariant: DEFAULT_SPRITE_VARIANT,
+  cityBgOffsetX: DEFAULT_BG_OFFSET,
+  cityBgOffsetY: DEFAULT_BG_OFFSET,
+  buildingUpgradeConfirm: true,
 };
 
 let current: GameSettings = loadFromStorage();
@@ -87,6 +102,26 @@ export function clampUpgradeGate(g: number): number {
   return Math.round(clamped * 100) / 100;
 }
 
+export function clampSpriteVariant(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return Math.max(MIN_SPRITE_VARIANT, Math.min(MAX_SPRITE_VARIANT, Math.round(v)));
+  }
+  return DEFAULT_SPRITE_VARIANT;
+}
+
+export function clampBgOffset(v: number): number {
+  if (!Number.isFinite(v)) return DEFAULT_BG_OFFSET;
+  return Math.max(MIN_BG_OFFSET, Math.min(MAX_BG_OFFSET, Math.round(v)));
+}
+
+export function bgOffsetBounds(): { min: number; max: number; default: number } {
+  return { min: MIN_BG_OFFSET, max: MAX_BG_OFFSET, default: DEFAULT_BG_OFFSET };
+}
+
+export function spriteVariantOptions(): readonly number[] {
+  return [1, 2, 3, 4, 5];
+}
+
 export function updateSettings(patch: Partial<GameSettings>): GameSettings {
   const next: GameSettings = {
     moveDurationMs: clampMoveDurationMs(patch.moveDurationMs ?? current.moveDurationMs),
@@ -94,6 +129,12 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
     territoryBorderWidth: clampBorderWidth(patch.territoryBorderWidth ?? current.territoryBorderWidth),
     populationGrowthRate: clampGrowthRate(patch.populationGrowthRate ?? current.populationGrowthRate),
     upgradePopulationGate: clampUpgradeGate(patch.upgradePopulationGate ?? current.upgradePopulationGate),
+    spriteVariant: clampSpriteVariant(patch.spriteVariant ?? current.spriteVariant),
+    cityBgOffsetX: clampBgOffset(patch.cityBgOffsetX ?? current.cityBgOffsetX),
+    cityBgOffsetY: clampBgOffset(patch.cityBgOffsetY ?? current.cityBgOffsetY),
+    buildingUpgradeConfirm: typeof patch.buildingUpgradeConfirm === "boolean"
+      ? patch.buildingUpgradeConfirm
+      : current.buildingUpgradeConfirm,
   };
   current = next;
   try {
@@ -140,6 +181,12 @@ function loadFromStorage(): GameSettings {
       territoryBorderWidth: clampBorderWidth(parsed.territoryBorderWidth ?? DEFAULT_BORDER_WIDTH),
       populationGrowthRate: clampGrowthRate(parsed.populationGrowthRate ?? DEFAULT_GROWTH_RATE),
       upgradePopulationGate: clampUpgradeGate(parsed.upgradePopulationGate ?? DEFAULT_UPGRADE_GATE),
+      spriteVariant: clampSpriteVariant(parsed.spriteVariant),
+      cityBgOffsetX: clampBgOffset(parsed.cityBgOffsetX ?? DEFAULT_BG_OFFSET),
+      cityBgOffsetY: clampBgOffset(parsed.cityBgOffsetY ?? DEFAULT_BG_OFFSET),
+      buildingUpgradeConfirm: typeof parsed.buildingUpgradeConfirm === "boolean"
+        ? parsed.buildingUpgradeConfirm
+        : true,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

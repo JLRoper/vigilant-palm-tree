@@ -90,8 +90,8 @@ export class GameSessionManager {
       typeof opts.castleSeed === "number" && Number.isFinite(opts.castleSeed)
         ? opts.castleSeed
         : defaultCastleSeedFromMapSeed(opts.seed);
-    const effectiveCastleCount = opts.castleCount ?? CASTLE_COUNT_DEFAULT;
     const playerCount = 3;
+    const effectiveCastleCount = opts.castleCount ?? (2 * playerCount);
     const castles = generateCastles(this.getGameMap(), {
       castleSeed: effectiveCastleSeed,
       playerCount,

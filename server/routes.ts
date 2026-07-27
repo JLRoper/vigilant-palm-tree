@@ -13,8 +13,11 @@ import type {
   WarehouseResource,
 } from "../src/state/gameState";
 import type { UnitType } from "../src/state/units";
+import { assetRouter } from "./assetRoutes";
 
 export const router = Router();
+
+router.use("/assets", assetRouter);
 
 type EnemyPos = { q: number; r: number };
 type TileRow = {

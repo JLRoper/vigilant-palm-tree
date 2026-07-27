@@ -1,8 +1,7 @@
 import type { SettlementState } from "../state/gameState";
+import { buildingUpkeep } from "../core/buildingRegistry";
 
 export const FOOD_PER_POPULATION = 100;
-export const BUILDING_UPKEEP_WOOD = 0;
-export const BUILDING_UPKEEP_STONE = 0;
 export const MORALE_DECAY_PER_DEFICIT_RATIO = 10;
 export const LOW_MORALE_EXTRA_DECAY = 1;
 export const MORALE_TAX_INCOME_DIVISOR = 100;
@@ -13,11 +12,14 @@ export function foodRequired(s: SettlementState): number {
 }
 
 export function buildingUpkeepRequired(s: SettlementState): { wood: number; stone: number } {
-  const levelBoost = s.level ?? 1;
-  return {
-    wood: BUILDING_UPKEEP_WOOD * levelBoost,
-    stone: BUILDING_UPKEEP_STONE * levelBoost,
-  };
+  let wood = 0;
+  let stone = 0;
+  for (const b of s.buildings) {
+    const u = buildingUpkeep(b.kind, b.level);
+    wood += u.wood;
+    stone += u.stone;
+  }
+  return { wood, stone };
 }
 
 export function foodDeficitRatio(s: SettlementState): number {

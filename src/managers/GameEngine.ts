@@ -392,7 +392,11 @@ export class GameEngine {
   }
 
   private handleClick(e: MouseEvent): void {
-    this.ui.getCityView()?.handleBuildingClick(e.clientX, e.clientY);
+    this.ui.getCityView()?.handleBuildingClick(e.clientX, e.clientY, {
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+      shiftKey: e.shiftKey,
+    });
   }
 
   private handleResize(): void {

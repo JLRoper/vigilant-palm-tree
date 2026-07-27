@@ -21,7 +21,8 @@
     "test:static": "pwsh scripts/ports.ps1 --static && tsx --env-file=.env test/smoke.ts",
     "validate-assets": "node tools/sprites/validate-assets.mjs",
     "sprites:generate": "node tools/sprites/pixel-gen.mjs",
-    "sprites:preview": "node tools/sprites/generate-preview.mjs"
+    "sprites:preview": "node tools/sprites/generate-preview.mjs",
+    "assets:seed": "tsx --env-file=.env scripts/seed-assets.ts"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

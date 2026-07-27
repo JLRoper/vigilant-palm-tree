@@ -30,6 +30,8 @@ import { VALID_HORSE_VARIANTS } from "../state/settings";
 
 const DEFAULT_PLAYER_COUNT = 3;
 const MAX_PLAYER_COUNT = MAX_PLAYERS;
+const STARTING_GOLD = 300;
+const STARTING_WAREHOUSE: SettlementState["warehouse"] = { wood: 300, stone: 300, iron: 300, arcane: 300, food: 0 };
 
 function heroIdFor(playerIdx: number): HeroId {
   return `p${playerIdx}-hero`;
@@ -88,7 +90,7 @@ function makeHeroes(
       previousR: null,
       previousMovementRemaining: null,
       trail: [{ q: castle.tile.q, r: castle.tile.r }],
-      gold: 0,
+      gold: STARTING_GOLD,
       troops: 1,
       stacks: demoStacksForPlayer(i),
       isChartering: false,
@@ -120,8 +122,8 @@ function makeSettlements(
       goldTax: SETTLEMENT_GOLD_TAX[c.level],
       resourceRates: computed.rates,
       foundedOnResource: computed.foundedOn,
-      gold: 0,
-      warehouse: emptyWarehouse(),
+      gold: STARTING_GOLD,
+      warehouse: { ...STARTING_WAREHOUSE },
       citySpots: spots,
       cityMines: mines,
       morale: 100,
@@ -149,8 +151,8 @@ export function buildInitialGameState(
 ): GameState {
   const mapSeed = opts?.castleSeed ?? 1;
   const castleSeed = opts?.castleSeed ?? defaultCastleSeedFromMapSeed(mapSeed);
-  const castleCount = opts?.castleCount ?? CASTLE_COUNT_DEFAULT;
   const playerCount = clampPlayerCount(opts?.playerCount);
+  const castleCount = opts?.castleCount ?? (2 * playerCount);
 
   const castles = generateCastles(map, {
     castleSeed,
@@ -187,8 +189,8 @@ export function makeInitialStatePayload(
 ): InitialStatePayload {
   const mapSeed = opts?.castleSeed ?? 1;
   const castleSeed = opts?.castleSeed ?? defaultCastleSeedFromMapSeed(mapSeed);
-  const castleCount = opts?.castleCount ?? CASTLE_COUNT_DEFAULT;
   const playerCount = opts?.playerCount ?? 3;
+  const castleCount = opts?.castleCount ?? (2 * playerCount);
 
   const castles = generateCastles(map, {
     castleSeed,
@@ -332,7 +334,7 @@ export function generatedCastles(
   return generateCastles(map, {
     castleSeed: opts.castleSeed,
     playerCount,
-    castleCount: Math.max(opts.castleCount ?? CASTLE_COUNT_DEFAULT, playerCount),
+    castleCount: Math.max(opts.castleCount ?? (2 * playerCount), playerCount),
   });
 }
 

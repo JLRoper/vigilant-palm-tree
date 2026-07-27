@@ -1,6 +1,7 @@
 import { PopupMenu, menuTheme } from "./menu";
 import type { GameState, HeroId } from "../state/gameState";
 import { MOVEMENT_PER_TURN } from "../state/gameState";
+import { HERO_BANNERS } from "../render/assetDescriptors";
 
 export interface HeroRosterMenuOptions {
   onSelectHero?: (heroId: HeroId) => void;
@@ -12,6 +13,7 @@ export class HeroRosterMenu {
   private visible = false;
   private opts: HeroRosterMenuOptions;
   private content: HTMLDivElement;
+  private lastRosterKey = "";
 
   constructor(opts: HeroRosterMenuOptions) {
     this.opts = opts;
@@ -60,6 +62,7 @@ export class HeroRosterMenu {
     if (this.visible) {
       this.menu.root.style.display = "none";
       this.visible = false;
+      this.lastRosterKey = "";
     }
   }
 
@@ -72,8 +75,6 @@ export class HeroRosterMenu {
     const activePlayer = state.players.find((p) => p.id === state.activePlayerId);
     this.menu.setTitle(activePlayer ? `${activePlayer.name}'s Heroes` : "Heroes");
 
-    this.content.replaceChildren();
-
     const heroIds = activePlayer?.heroIds ?? [];
     const heroes = heroIds
       .map((id) => state.heroes[id])
@@ -83,6 +84,26 @@ export class HeroRosterMenu {
       this.opts.onSelectHero != null &&
       state.phase.kind === "PLAYER_TURN" &&
       activePlayer?.faction === "player";
+
+    const hasLocate = this.opts.onCenterHero != null;
+
+    const rosterKey = JSON.stringify({
+      activePlayerId: state.activePlayerId,
+      phaseKind: state.phase.kind,
+      heroes: heroes.map((h) => ({
+        id: h.id, q: h.q, r: h.r, gold: h.gold,
+        troops: h.troops, movementRemaining: h.movementRemaining,
+        isChartering: h.isChartering, name: h.name,
+        horseVariant: h.horseVariant,
+      })),
+      canSelectHero,
+      hasLocate,
+    });
+
+    if (rosterKey === this.lastRosterKey) return;
+    this.lastRosterKey = rosterKey;
+
+    this.content.replaceChildren();
 
     if (heroes.length === 0) {
       const empty = document.createElement("div");
@@ -98,31 +119,44 @@ export class HeroRosterMenu {
     }
 
     for (const hero of heroes) {
-      this.content.appendChild(this.buildHeroRow(hero, canSelectHero));
+      this.content.appendChild(this.buildHeroRow(hero, canSelectHero, hasLocate));
     }
   }
 
   private buildHeroRow(
     hero: NonNullable<GameState["heroes"][HeroId]>,
     canSelectHero: boolean,
+    hasLocate: boolean,
   ): HTMLDivElement {
+    const bannerUrl = HERO_BANNERS[hero.horseVariant];
+
     const row = document.createElement("div");
     Object.assign(row.style, {
       display: "flex",
       flexDirection: "column",
       gap: "4px",
       padding: "8px 10px",
-      background: "rgba(255,255,255,0.05)",
       borderRadius: "4px",
+      background: `linear-gradient(rgba(26, 26, 26, 0.3), rgba(26, 26, 26, 0.3)), url(${bannerUrl}) center / cover no-repeat`,
     });
 
-    const topRow = document.createElement("div");
-    Object.assign(topRow.style, {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: "8px",
-    });
+    if (canSelectHero) {
+      row.style.cursor = "pointer";
+      row.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.opts.onSelectHero?.(hero.id);
+      });
+      row.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        this.opts.onCenterHero?.(hero.id);
+      });
+    } else if (hasLocate) {
+      row.style.cursor = "pointer";
+      row.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.opts.onCenterHero?.(hero.id);
+      });
+    }
 
     const nameEl = document.createElement("div");
     nameEl.textContent = hero.name;
@@ -131,68 +165,20 @@ export class HeroRosterMenu {
       overflow: "hidden",
       textOverflow: "ellipsis",
       whiteSpace: "nowrap",
+      textShadow: "0 1px 3px rgba(0,0,0,0.8)",
     });
-    topRow.appendChild(nameEl);
-
-    const buttons = document.createElement("div");
-    Object.assign(buttons.style, {
-      display: "flex",
-      gap: "4px",
-      flexShrink: "0",
-    });
-
-    if (canSelectHero) {
-      const selectBtn = document.createElement("button");
-      selectBtn.textContent = "Select";
-      Object.assign(selectBtn.style, {
-        padding: "3px 6px",
-        fontSize: "11px",
-        cursor: "pointer",
-        background: menuTheme.button.background,
-        color: menuTheme.button.color,
-        border: menuTheme.button.border,
-        borderRadius: menuTheme.button.borderRadius,
-        fontFamily: menuTheme.font,
-      });
-      selectBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.opts.onSelectHero?.(hero.id);
-      });
-      buttons.appendChild(selectBtn);
-    }
-
-    if (this.opts.onCenterHero) {
-      const locateBtn = document.createElement("button");
-      locateBtn.textContent = "Locate";
-      Object.assign(locateBtn.style, {
-        padding: "3px 6px",
-        fontSize: "11px",
-        cursor: "pointer",
-        background: menuTheme.button.background,
-        color: menuTheme.button.color,
-        border: menuTheme.button.border,
-        borderRadius: menuTheme.button.borderRadius,
-        fontFamily: menuTheme.font,
-      });
-      locateBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.opts.onCenterHero?.(hero.id);
-      });
-      buttons.appendChild(locateBtn);
-    }
-
-    topRow.appendChild(buttons);
-    row.appendChild(topRow);
+    row.appendChild(nameEl);
 
     const metaEl = document.createElement("div");
     const remaining = hero.movementRemaining < 1 ? 0 : hero.movementRemaining;
     metaEl.textContent = `(${hero.q}, ${hero.r}) · Move ${remaining.toFixed(1)}/${MOVEMENT_PER_TURN} · ${hero.gold}g · ${hero.troops} troops`;
     Object.assign(metaEl.style, {
       fontSize: "11px",
-      opacity: "0.75",
+      opacity: "0.85",
       overflow: "hidden",
       textOverflow: "ellipsis",
       whiteSpace: "nowrap",
+      textShadow: "0 1px 3px rgba(0,0,0,0.8)",
     });
     row.appendChild(metaEl);
 

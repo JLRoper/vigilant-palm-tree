@@ -2,6 +2,7 @@ import type { Game } from "../io/api";
 import { api } from "../io/api";
 import { forgetGame, listUserGames, type UserGameEntry } from "../io/userGames";
 import type { GameState } from "../state/gameState";
+import { CASTLE_COUNT_MAX } from "../map/castlePlacement";
 import { openSettingsMenu, type MapInfo } from "./settingsMenu";
 import {
   PopupMenu,
@@ -526,14 +527,14 @@ export class Toolbar {
     content.appendChild(castleSeedInput);
 
     const castleCountLabel = document.createElement("label");
-    castleCountLabel.textContent = "Castle count (2-5)";
+    castleCountLabel.textContent = `Castle count (2-${CASTLE_COUNT_MAX})`;
     castleCountLabel.style.opacity = "0.7";
     content.appendChild(castleCountLabel);
 
     const castleCountInput = document.createElement("input");
     castleCountInput.type = "number";
     castleCountInput.min = "2";
-    castleCountInput.max = "5";
+    castleCountInput.max = String(CASTLE_COUNT_MAX);
     castleCountInput.value = "3";
     styleInput(castleCountInput);
     content.appendChild(castleCountInput);
@@ -615,7 +616,7 @@ export class Toolbar {
         errorLine.textContent = "Castle count must be a number.";
         return;
       }
-      const castleCount = Math.max(2, Math.min(5, Math.floor(castleCountRaw)));
+      const castleCount = Math.max(2, Math.min(CASTLE_COUNT_MAX, Math.floor(castleCountRaw)));
       const mapSize = (sizeSelect.value || "small") as "small" | "medium" | "large";
       confirm.disabled = true;
       cancel.disabled = true;

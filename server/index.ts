@@ -9,6 +9,7 @@ async function main() {
   await initSchema();
   const app = express();
   app.use(cors());
+  app.use(express.raw({ type: ["image/*", "application/octet-stream"], limit: "10mb" }));
   app.use(express.json());
   app.use("/api", router);
 

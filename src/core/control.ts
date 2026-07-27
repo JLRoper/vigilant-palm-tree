@@ -1,8 +1,14 @@
 import type { Axial } from "./hex";
 import type { CastleLevel } from "../entities/settlement";
+import type { BuildingDef } from "../render/cityBuildingDraw";
+import { computeSettlementBonuses } from "./buildingModifiers";
 
-export function controlRange(level: CastleLevel): number {
-  return level;
+export function controlRange(level: CastleLevel, buildings?: BuildingDef[]): number {
+  let range = level;
+  if (buildings) {
+    range += computeSettlementBonuses(buildings).controlRangeBonus;
+  }
+  return range;
 }
 
 export function settlementRateRadius(level: CastleLevel): number {

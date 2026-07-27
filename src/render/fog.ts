@@ -18,7 +18,7 @@ export function computeVision(
   }
   for (const c of castles) {
     if (c.ownerId !== viewPlayerId) continue;
-    addRing(visible, c.tile, controlRange(c.level));
+    addRing(visible, c.tile, controlRange(c.level, c.buildings));
   }
   return visible;
 }

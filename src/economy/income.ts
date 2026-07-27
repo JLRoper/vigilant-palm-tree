@@ -1,7 +1,12 @@
 import type { GameState, PlayerId, SettlementState } from "../state/gameState";
+import { buildingSettlementEffects } from "../core/buildingRegistry";
 
 export function settlementIncome(s: SettlementState): number {
-  return s.population * s.goldTax;
+  let total = s.population * s.goldTax;
+  for (const b of s.buildings) {
+    total += buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+  }
+  return total;
 }
 
 export function playerIncome(state: GameState, playerId: PlayerId): number {

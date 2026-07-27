@@ -7,7 +7,12 @@ import { coversCell, buildingFootprint } from "../render/cityBuildingDraw";
 import { generateBuildings, type GenerationPattern } from "../render/cityBuildingGen";
 import { BuildingMenu, type BuildingMenuOptions } from "./buildingMenu";
 import { BuildingPlacer } from "./buildingPlacer";
+import { BuildingSelectionMenu, type SelectedBuildingEntry } from "./buildingSelectionMenu";
+import { openConfirmDialog } from "./confirmDialog";
+import { settings } from "../state/settings";
 import type { SettlementState } from "../state/gameState";
+import type { BuildingUpgradeRequest } from "../state/gameState";
+import type { BuildingUpgradeCost } from "../core/buildingRegistry";
 
 export class CityView {
   private backBtn: HTMLButtonElement | null = null;
@@ -26,18 +31,30 @@ export class CityView {
   private provider: SpriteProvider;
   private buildingMenu: BuildingMenu;
   private placer: BuildingPlacer;
-  private onClose: (settlementId: string, buildings: BuildingDef[]) => void;
+  private selectionMenu: BuildingSelectionMenu;
+  private selectedKeys: Set<string> = new Set();
+  private selectionAnchor: { x: number; y: number } | null = null;
+  private onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>) => void;
   private getSettlement: () => SettlementState | undefined;
+  private onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string };
   private onKeyDown: (e: KeyboardEvent) => void;
 
-  constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[]) => void; provider: SpriteProvider; getSettlement: () => SettlementState | undefined }) {
+  constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>) => void; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string } }) {
     this.provider = opts.provider;
     this.buildingMenu = new BuildingMenu({ onRecruitArcher: opts.onRecruitArcher, onUpgradeTownHall: opts.onUpgradeTownHall });
     this.placer = new BuildingPlacer();
+    this.selectionMenu = new BuildingSelectionMenu({
+      onUpgrade: (combined) => this.commitUpgrade(combined),
+    });
     this.onClose = opts.onClose;
     this.getSettlement = opts.getSettlement;
+    this.onUpgradeBuildings = opts.onUpgradeBuildings;
     this.onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (this.selectionMenu.isOpen()) {
+          this.selectionMenu.hide();
+          return;
+        }
         if (this.buildingMenu.isOpen()) {
           this.buildingMenu.hide();
           return;
@@ -50,6 +67,10 @@ export class CityView {
         if (this.placer.isPaletteOpen()) {
           this.placer.hidePalette();
           this.updateBuildButton();
+          return;
+        }
+        if (this.selectedKeys.size > 0) {
+          this.clearSelection();
           return;
         }
         this.handleClose();
@@ -107,11 +128,14 @@ export class CityView {
     this.citySpots = spots;
     this.cityMines = mines;
     this.hover = null;
+    this.selectedKeys.clear();
+    this.selectionAnchor = null;
 
     const initialBuildings = buildings && buildings.length > 0
       ? buildings
       : this.generateBuildingsArray();
     this.placer.init(size, { gx: Math.floor(size / 2), gy: Math.floor(size / 2) }, initialBuildings, this.style);
+    this.refreshAffordability();
     this.placer.setOnConfirm(() => this.persistBuildings());
 
     this.backBtn = document.createElement("button");
@@ -169,6 +193,7 @@ export class CityView {
       style: this.style,
       pattern: this.pattern,
       ghost,
+      selectedKeys: this.selectedKeys,
     });
   }
 
@@ -207,7 +232,7 @@ export class CityView {
     }
   }
 
-  handleBuildingClick(canvasX: number, canvasY: number): void {
+  handleBuildingClick(canvasX: number, canvasY: number, modifier?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): void {
     if (!this.isOpen()) return;
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
@@ -226,8 +251,11 @@ export class CityView {
 
     if (gx < 0 || gx >= this.size || gy < 0 || gy >= this.size) {
       this.buildingMenu.hide();
+      if (!modifier?.ctrlKey && !modifier?.metaKey) this.clearSelection();
       return;
     }
+
+    const ctrlLike = !!(modifier?.ctrlKey || modifier?.metaKey);
 
     // destroy mode: remove building under cursor
     if (this.placer.isDestroyMode()) {
@@ -243,13 +271,31 @@ export class CityView {
       return;
     }
 
-    // inspection mode: show building menu
+    // inspection / selection mode
     const building = this.placer.buildings.find((b) => coversCell(b, gx, gy));
     if (!building) {
       this.buildingMenu.hide();
+      if (!ctrlLike) this.clearSelection();
       return;
     }
 
+    const key = `${building.gx},${building.gy},${building.kind}`;
+
+    if (ctrlLike) {
+      if (this.selectedKeys.has(key)) {
+        this.selectedKeys.delete(key);
+      } else {
+        this.selectedKeys.add(key);
+      }
+      this.buildingMenu.hide();
+      this.refreshSelectionMenu(canvasX, canvasY);
+      return;
+    }
+
+    // single click: show the building's own menu
+    if (this.selectedKeys.size > 0) {
+      this.clearSelection();
+    }
     const screenOrigin = { x: viewportW / 2, y: viewportH / 2 - ((this.size - 1) * TILE_D / 2 + this.size * TILE_D * 0.18) * tileScale };
     const gridOrigin = cellOrigin(this.size);
     const w = building.w ?? 1;
@@ -257,6 +303,70 @@ export class CityView {
     const fp = buildingFootprint(building.gx, building.gy, gridOrigin, screenOrigin, tileScale, w, h);
 
     this.buildingMenu.show(building, fp.cx, fp.cy - fp.hh * 0.6, this.getSettlement());
+  }
+
+  private clearSelection(): void {
+    this.selectedKeys.clear();
+    this.selectionAnchor = null;
+    this.selectionMenu.hide();
+  }
+
+  private refreshSelectionMenu(screenX?: number, screenY?: number): void {
+    if (this.selectedKeys.size === 0) {
+      this.selectionMenu.hide();
+      return;
+    }
+    const entries: SelectedBuildingEntry[] = [];
+    for (const key of this.selectedKeys) {
+      const [gxs, gys, kind] = key.split(",");
+      const gx = parseInt(gxs);
+      const gy = parseInt(gys);
+      const b = this.placer.buildings.find((x) => x.gx === gx && x.gy === gy && x.kind === kind);
+      if (b) entries.push({ key, building: b });
+    }
+    const settlement = this.getSettlement() ?? null;
+    const x = screenX ?? this.selectionAnchor?.x ?? window.innerWidth - 300;
+    const y = screenY ?? this.selectionAnchor?.y ?? 80;
+    this.selectionMenu.show(entries, settlement, x, y);
+  }
+
+  private commitUpgrade(combined: BuildingUpgradeCost): void {
+    const settlement = this.getSettlement();
+    if (!settlement) return;
+    const requests: BuildingUpgradeRequest[] = [];
+    for (const key of this.selectedKeys) {
+      const [gxs, gys, kind] = key.split(",");
+      requests.push({ gx: parseInt(gxs), gy: parseInt(gys), kind: kind as BuildingDef["kind"] });
+    }
+    if (requests.length === 0) return;
+
+    const costText = `${combined.gold}g ${combined.wood}w ${combined.stone}s / ${combined.days}d`;
+    const summary = `Upgrade ${requests.length} building${requests.length === 1 ? "" : "s"} for ${costText}?`;
+
+    const perform = () => {
+      const result = this.onUpgradeBuildings(settlement.id, requests);
+      if (!result.ok) {
+        openConfirmDialog({
+          title: "Upgrade failed",
+          message: `Could not start upgrade: ${result.reason}`,
+          confirmLabel: "OK",
+          onConfirm: () => {},
+        });
+        return;
+      }
+      this.clearSelection();
+    };
+
+    if (settings().buildingUpgradeConfirm) {
+      openConfirmDialog({
+        title: "Confirm upgrade",
+        message: summary,
+        confirmLabel: "Upgrade",
+        onConfirm: perform,
+      });
+    } else {
+      perform();
+    }
   }
 
   private generateBuildingsArray(): BuildingDef[] {
@@ -288,8 +398,26 @@ export class CityView {
 
   private persistBuildings(): void {
     if (!this.openSettlementId) return;
-    this.onClose(this.openSettlementId, [...this.placer.buildings]);
+    const netCost = this.placer.getNetCost();
+    this.onClose(this.openSettlementId, [...this.placer.buildings], netCost);
+    this.refreshAffordability();
     this.updateBuildButton();
+  }
+
+  private refreshAffordability(): void {
+    const s = this.getSettlement();
+    if (s) {
+      this.placer.setAffordability({
+        gold: s.gold,
+        warehouse: {
+          wood: s.warehouse.wood ?? 0,
+          stone: s.warehouse.stone ?? 0,
+          iron: s.warehouse.iron ?? 0,
+          arcane: s.warehouse.arcane ?? 0,
+          food: s.warehouse.food ?? 0,
+        },
+      });
+    }
   }
 
   private createBuildButton(): void {
@@ -387,9 +515,12 @@ export class CityView {
       }
       window.removeEventListener("keydown", this.onKeyDown);
       this.buildingMenu.hide();
+      this.selectionMenu.hide();
+      this.selectedKeys.clear();
+      this.selectionAnchor = null;
       this.openSettlementId = null;
       this.hover = null;
-      this.onClose(id, finalBuildings);
+      this.onClose(id, finalBuildings, this.placer.getNetCost());
       return id;
     } finally {
       this.closing = false;
