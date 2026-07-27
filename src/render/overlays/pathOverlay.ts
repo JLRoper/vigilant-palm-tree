@@ -3,6 +3,7 @@ import { Hero } from "../../entities/hero";
 import { GameMap } from "../../map/gameMap";
 import { TERRAIN_COST } from "../../map/terrain";
 import type { RenderOptions } from "../renderer";
+import type { MinimapCamera, MinimapGeometry } from "../minimap";
 
 const REACHABLE_COLOR = "rgba(255, 204, 0, 0.85)";
 const UNREACHABLE_COLOR = "rgba(255, 204, 0, 0.30)";
@@ -118,14 +119,15 @@ export function drawPathOverlay(
 export function drawMinimapPath(
   ctx: CanvasRenderingContext2D,
   path: Axial[],
-  x0: number,
-  y0: number,
-  cellW: number,
-  cellH: number,
+  minimapCamera: MinimapCamera,
+  geo: MinimapGeometry,
 ): void {
   if (path.length === 0) return;
   ctx.fillStyle = MINIMAP_PATH_COLOR;
+  const cellSize = geo.baseScale * minimapCamera.zoom;
+  const half = cellSize / 2;
   for (const t of path) {
-    ctx.fillRect(x0 + t.q * cellW, y0 + t.r * cellH, cellW, cellH);
+    const { x, y } = minimapCamera.worldToScreen(t.q, t.r, geo);
+    ctx.fillRect(x - half, y - half, cellSize, cellSize);
   }
 }

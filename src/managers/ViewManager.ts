@@ -1,5 +1,6 @@
 import { Camera } from "../render/camera";
 import { Renderer, type RenderOptions } from "../render/renderer";
+import { MinimapCamera } from "../render/minimap";
 import { GameMap } from "../map/gameMap";
 import { Hero } from "../entities/hero";
 import { Castle } from "../entities/settlement";
@@ -11,6 +12,7 @@ import type { CharterState } from "../state/gameState";
 
 export class ViewManager {
   public camera = new Camera();
+  public minimapCamera!: MinimapCamera;
   public renderer!: Renderer;
   public view!: AdventureView;
   private ctx!: CanvasRenderingContext2D;
@@ -19,7 +21,12 @@ export class ViewManager {
 
   initializeRenderer(map: GameMap): void {
     this.ctx = this.canvas.getContext("2d")!;
-    this.renderer = new Renderer(this.ctx, map, this.camera, this.spriteProvider);
+    if (this.minimapCamera) {
+      this.minimapCamera.reset(map);
+    } else {
+      this.minimapCamera = new MinimapCamera(map);
+    }
+    this.renderer = new Renderer(this.ctx, map, this.camera, this.spriteProvider, this.minimapCamera);
   }
 
   initializeAdventureView(
@@ -35,6 +42,7 @@ export class ViewManager {
       renderer: this.renderer,
       map: this.renderer.map,
       camera: this.camera,
+      minimapCamera: this.minimapCamera,
       onPathChanged: () => {},
       ...opts,
     });
@@ -43,6 +51,7 @@ export class ViewManager {
   updateMap(map: GameMap): void {
     if (this.renderer) this.renderer.map = map;
     if (this.view) this.view.setMap(map);
+    if (this.minimapCamera) this.minimapCamera.reset(map);
   }
 
   draw(
