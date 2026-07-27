@@ -8,6 +8,7 @@ import {
   buildingSettlementEffects,
   buildingPlayerEffects,
   buildingUpkeep,
+  buildingUpgradeCost,
   getBuildingEffect,
 } from "../core/buildingRegistry";
 
@@ -68,6 +69,7 @@ function formatPlacementCost(kind: BuildingKind): string {
 export interface BuildingMenuOptions {
   onRecruitArcher?: () => void;
   onUpgradeTownHall?: () => void;
+  onUpgradeBuilding?: (building: BuildingDef) => void;
 }
 
 const TOWN_HALL_UPGRADE_COSTS: Record<number, { gold: number; wood: number; stone: number; days: number }> = {
@@ -79,10 +81,12 @@ export class BuildingMenu {
   private menu: PopupMenu | null = null;
   private onRecruitArcher: (() => void) | undefined;
   private onUpgradeTownHall: (() => void) | undefined;
+  private onUpgradeBuilding: ((building: BuildingDef) => void) | undefined;
 
   constructor(opts: BuildingMenuOptions = {}) {
     this.onRecruitArcher = opts.onRecruitArcher;
     this.onUpgradeTownHall = opts.onUpgradeTownHall;
+    this.onUpgradeBuilding = opts.onUpgradeBuilding;
   }
 
   show(building: BuildingDef, screenX: number, screenY: number, settlement?: SettlementState): void {
@@ -173,6 +177,49 @@ export class BuildingMenu {
         upgradeBtn.addEventListener("click", () => {
           if (canAfford) {
             this.onUpgradeTownHall?.();
+            this.hide();
+          }
+        });
+        row.appendChild(upgradeBtn);
+
+        this.menu.appendContent(row);
+      }
+    }
+
+    if (building.kind !== "townHall" && building.level < 3 && this.onUpgradeBuilding) {
+      const cost = buildingUpgradeCost(building.kind, building.level);
+      if (cost) {
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.justifyContent = "space-between";
+        row.style.alignItems = "center";
+        row.style.marginTop = "4px";
+        row.style.marginBottom = "4px";
+
+        const info = document.createElement("span");
+        info.textContent = `L${building.level + 1}: ${cost.gold}g ${cost.wood}w ${cost.stone}s / ${cost.days}d`;
+        info.style.fontSize = "10px";
+        info.style.opacity = "0.75";
+        row.appendChild(info);
+
+        const canAfford = settlement && settlement.gold >= cost.gold
+          && (settlement.warehouse.wood ?? 0) >= cost.wood
+          && (settlement.warehouse.stone ?? 0) >= cost.stone
+          && !settlement.upgrade;
+
+        const upgradeBtn = document.createElement("button");
+        upgradeBtn.textContent = "Upgrade";
+        styleButton(upgradeBtn, true);
+        upgradeBtn.style.padding = "2px 8px";
+        upgradeBtn.style.fontSize = "11px";
+        if (!canAfford) {
+          upgradeBtn.style.opacity = "0.4";
+          upgradeBtn.style.cursor = "not-allowed";
+        }
+        upgradeBtn.disabled = !canAfford;
+        upgradeBtn.addEventListener("click", () => {
+          if (canAfford) {
+            this.onUpgradeBuilding?.(building);
             this.hide();
           }
         });

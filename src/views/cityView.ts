@@ -41,7 +41,17 @@ export class CityView {
 
   constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>) => void; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string } }) {
     this.provider = opts.provider;
-    this.buildingMenu = new BuildingMenu({ onRecruitArcher: opts.onRecruitArcher, onUpgradeTownHall: opts.onUpgradeTownHall });
+    this.buildingMenu = new BuildingMenu({
+      onRecruitArcher: opts.onRecruitArcher,
+      onUpgradeTownHall: opts.onUpgradeTownHall,
+      onUpgradeBuilding: (building) => {
+        const settlement = this.getSettlement();
+        if (!settlement) return;
+        this.onUpgradeBuildings(settlement.id, [
+          { gx: building.gx, gy: building.gy, kind: building.kind },
+        ]);
+      },
+    });
     this.placer = new BuildingPlacer();
     this.selectionMenu = new BuildingSelectionMenu({
       onUpgrade: (combined) => this.commitUpgrade(combined),
