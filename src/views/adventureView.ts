@@ -266,7 +266,8 @@ export class AdventureView {
     const geo = getMinimapGeometry(this.opts.map);
     const midX = (t1.clientX + t2.clientX) / 2;
     const midY = (t1.clientY + t2.clientY) / 2;
-    const factor = touchDist(t1, t2) / mt.startDist;
+    const dist = touchDist(t1, t2);
+    const factor = mt.startDist > 0 ? dist / mt.startDist : 1;
     const newZoom = mt.startZoom * factor;
     const newRotation = mt.startRotation + (touchAngle(t1, t2) - mt.startAngle);
 
