@@ -8,11 +8,8 @@ import { CityView } from "../views/cityView";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
 import type { HeroId, SettlementState } from "../state/gameState";
 import { Hero } from "../entities/hero";
-import { Castle } from "../entities/settlement";
 import { SpriteProvider } from "../render/assets";
 import { playerIncome, playerWealth } from "../economy/income";
-import { Camera } from "../render/camera";
-import { GameMap } from "../map/gameMap";
 import { SessionManager, type SaveStatus } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
@@ -41,13 +38,12 @@ export class UIManager {
   private viewManager?: ViewManager;
 
   constructor(
-    private hudEl: HTMLElement,
     private toolbarEl: HTMLElement,
     private spriteProvider: SpriteProvider,
   ) {}
 
-  initHud(): void {
-    this.hudHandles = buildHud(this.hudEl);
+  private initHud(): void {
+    this.hudHandles = buildHud(this.toolbar?.statusSlot ?? this.toolbarEl);
   }
 
   initToolbar(
@@ -85,6 +81,8 @@ export class UIManager {
         canStartCharter: callbacks.canStartCharter,
       },
     });
+
+    this.initHud();
 
     this.heroRosterMenu = new HeroRosterMenu({
       onSelectHero: (heroId) => this.handleRosterHeroSelect(heroId),
@@ -210,23 +208,15 @@ export class UIManager {
   refreshHud(
     gameState: GameState,
     heroes: Record<string, Hero>,
-    settlements: Record<string, Castle>,
-    viewHover: { q: number; r: number } | null,
-    gameMap: GameMap,
-    camera: Camera,
     backendOk: boolean,
     saveStatus: SaveStatus,
     lastSavedAt: string | null,
   ): void {
     if (!this.hudHandles) return;
     updateHud(
-      this.hudEl,
+      this.toolbarEl,
       gameState,
       heroes,
-      settlements,
-      viewHover,
-      gameMap,
-      camera,
       backendOk,
       saveStatus,
       lastSavedAt,

@@ -143,7 +143,9 @@ async function runNewLoadSaveFlow(
 
   await ctx.delete(`${API_URL}/api/games/${TEST_NEW_NAME}`).catch(() => {});
 
+  const menuBtn = page.locator("#toolbar button[title='Menu']");
   const newBtn = page.locator("#toolbar button", { hasText: "New" });
+  await menuBtn.click();
   await newBtn.click();
   await wait(100);
   const nameInput = page.locator("input[type=text]").first();
@@ -172,6 +174,7 @@ async function runNewLoadSaveFlow(
 
   const saveBtn = page.locator("#toolbar button", { hasText: "Save" });
   await wait(200);
+  await menuBtn.click();
   await saveBtn.click();
   await wait(500);
   const hudText = await page.locator("#hud").textContent();
@@ -188,6 +191,7 @@ async function runNewLoadSaveFlow(
   console.log(`>> Save advanced updated_at`);
 
   const loadBtn = page.locator("#toolbar button", { hasText: "Load" });
+  await menuBtn.click();
   await loadBtn.click();
   await wait(500);
   const rows = page.locator("button", { hasText: "Open" });
@@ -597,12 +601,17 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   console.log(`>> Toolbar shows Income +Xg/turn and Wealth: Xg`);
 
   const settingsOpen = await page.evaluate(() => {
-    const gear = document.querySelector("#toolbar button[title='Settings']");
-    if (!gear) return false;
-    (gear as HTMLButtonElement).click();
+    const menu = document.querySelector("#toolbar button[title='Menu']");
+    if (!menu) return false;
+    (menu as HTMLButtonElement).click();
+    const settingsItem = Array.from(document.querySelectorAll("#toolbar button")).find(
+      (b) => b.textContent?.includes("Settings")
+    );
+    if (!settingsItem) return false;
+    (settingsItem as HTMLButtonElement).click();
     return true;
   });
-  if (!settingsOpen) throw new Error("Settings gear button not found in toolbar");
+  if (!settingsOpen) throw new Error("Settings menu item not found in toolbar");
   await wait(300);
 
   const settingsModal = await page.evaluate(() => {

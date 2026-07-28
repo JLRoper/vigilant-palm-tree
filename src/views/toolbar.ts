@@ -5,12 +5,57 @@ import type { GameState } from "../state/gameState";
 import { CASTLE_COUNT_MAX } from "../map/castlePlacement";
 import { openSettingsMenu, type MapInfo } from "./settingsMenu";
 import {
-  PopupMenu,
   menuTheme,
   openCenteredModal,
   styleButton,
   styleInput,
 } from "./menu";
+
+const headerTheme = {
+  bg: "var(--header-blue, #1c2f57)",
+  bgDark: "var(--header-blue-dark, #142145)",
+  gold: "var(--header-gold, #c9a227)",
+  goldLight: "var(--header-gold-light, #e9cf7d)",
+  cream: "var(--header-cream, #f1e4c3)",
+  font: "var(--header-font, Georgia, 'Times New Roman', serif)",
+};
+
+function styleHeaderButton(btn: HTMLButtonElement, primary = false): void {
+  Object.assign(btn.style, {
+    padding: "6px 12px",
+    background: primary ? headerTheme.gold : headerTheme.bgDark,
+    color: primary ? "#241a05" : headerTheme.cream,
+    border: `1px solid ${primary ? headerTheme.goldLight : headerTheme.gold}`,
+    borderRadius: "3px",
+    fontSize: "12px",
+    fontWeight: primary ? "700" : "400",
+    fontFamily: headerTheme.font,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  });
+}
+
+function makeStatChip(labelText: string): { chip: HTMLDivElement; value: HTMLSpanElement } {
+  const chip = document.createElement("div");
+  Object.assign(chip.style, {
+    display: "inline-flex",
+    alignItems: "baseline",
+    gap: "4px",
+  });
+  const label = document.createElement("span");
+  label.textContent = labelText;
+  Object.assign(label.style, {
+    opacity: "0.65",
+    fontSize: "10px",
+    textTransform: "uppercase",
+    letterSpacing: "0.4px",
+  });
+  const value = document.createElement("span");
+  Object.assign(value.style, { fontSize: "12px", fontWeight: "600" });
+  chip.appendChild(label);
+  chip.appendChild(value);
+  return { chip, value };
+}
 
 export interface CalendarSnapshot {
   day: number;
@@ -63,7 +108,8 @@ export interface ToolbarOptions {
 }
 
 export class Toolbar {
-  private menu: PopupMenu;
+  readonly root: HTMLDivElement;
+  readonly statusSlot: HTMLDivElement;
   private newBtn: HTMLButtonElement;
   private loadBtn: HTMLButtonElement;
   private saveBtn: HTMLButtonElement;
@@ -76,104 +122,194 @@ export class Toolbar {
   private busy = false;
 
   constructor(private opts: ToolbarOptions) {
-    this.menu = new PopupMenu({
-      parent: opts.parent,
-      title: "Heroes of JS",
-      initialPosition: { x: 16, y: 16 },
-      width: 220,
-      closeable: false,
-      draggable: true,
+    this.root = document.createElement("div");
+    Object.assign(this.root.style, {
+      width: "100%",
+      boxSizing: "border-box",
+      background: headerTheme.bg,
+      borderBottom: `4px double ${headerTheme.gold}`,
+      boxShadow: "0 2px 10px rgba(0,0,0,0.5)",
+      fontFamily: headerTheme.font,
+      color: headerTheme.cream,
+      userSelect: "none",
     });
 
+    const brandRow = document.createElement("div");
+    Object.assign(brandRow.style, {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "8px 16px 2px",
+    });
+
+    const title = document.createElement("div");
+    title.textContent = "⚔ Heroes of JS ⚔";
+    Object.assign(title.style, {
+      fontSize: "19px",
+      fontWeight: "700",
+      letterSpacing: "1px",
+      color: headerTheme.goldLight,
+      textShadow: "1px 1px 0 rgba(0,0,0,0.6), 0 0 10px rgba(233,207,126,0.25)",
+    });
+    brandRow.appendChild(title);
+
+    const menuWrap = document.createElement("div");
+    Object.assign(menuWrap.style, { position: "relative", flexShrink: "0" });
+
     const gear = document.createElement("button");
-    gear.textContent = "\u2699";
-    gear.title = "Settings";
+    gear.textContent = "⚙";
+    gear.title = "Menu";
     Object.assign(gear.style, {
-      width: "22px",
-      height: "22px",
+      width: "24px",
+      height: "24px",
       padding: "0",
       fontSize: "14px",
       lineHeight: "1",
       cursor: "pointer",
-      background: "transparent",
-      border: "1px solid rgba(255,255,255,0.20)",
+      background: headerTheme.bgDark,
+      border: `1px solid ${headerTheme.gold}`,
       borderRadius: "3px",
-      color: menuTheme.panel.color,
-      fontFamily: menuTheme.font,
+      color: headerTheme.cream,
+      fontFamily: headerTheme.font,
       flexShrink: "0",
     });
+    menuWrap.appendChild(gear);
+
+    const dropdown = document.createElement("div");
+    Object.assign(dropdown.style, {
+      position: "absolute",
+      top: "calc(100% + 6px)",
+      right: "0",
+      minWidth: "170px",
+      background: headerTheme.bgDark,
+      border: `1px solid ${headerTheme.gold}`,
+      borderRadius: "4px",
+      boxShadow: "0 4px 14px rgba(0,0,0,0.6)",
+      padding: "6px",
+      display: "none",
+      flexDirection: "column",
+      gap: "2px",
+      zIndex: "50",
+    });
+    menuWrap.appendChild(dropdown);
+
+    const closeDropdown = () => {
+      dropdown.style.display = "none";
+    };
+    const toggleDropdown = () => {
+      dropdown.style.display = dropdown.style.display === "none" ? "flex" : "none";
+    };
     gear.addEventListener("click", (e) => {
       e.stopPropagation();
+      toggleDropdown();
+    });
+    document.addEventListener("click", (e) => {
+      if (!menuWrap.contains(e.target as Node)) closeDropdown();
+    });
+
+    const makeMenuItem = (label: string): HTMLButtonElement => {
+      const item = document.createElement("button");
+      item.textContent = label;
+      Object.assign(item.style, {
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        padding: "6px 10px",
+        background: "transparent",
+        color: headerTheme.cream,
+        border: "none",
+        borderRadius: "3px",
+        fontSize: "12px",
+        fontFamily: headerTheme.font,
+        cursor: "pointer",
+      });
+      item.addEventListener("mouseenter", () => { item.style.background = "rgba(201,162,39,0.18)"; });
+      item.addEventListener("mouseleave", () => { item.style.background = "transparent"; });
+      dropdown.appendChild(item);
+      return item;
+    };
+
+    this.newBtn = makeMenuItem("New Game");
+    this.saveBtn = makeMenuItem("💾 Save");
+    this.saveBtn.title = "Save game";
+    this.loadBtn = makeMenuItem("📂 Load");
+    this.loadBtn.title = "Load game";
+
+    const divider = document.createElement("div");
+    Object.assign(divider.style, {
+      height: "1px",
+      background: "rgba(201,162,39,0.3)",
+      margin: "4px 2px",
+    });
+    dropdown.appendChild(divider);
+
+    const settingsItem = makeMenuItem("⚙ Settings");
+    settingsItem.addEventListener("click", () => {
+      closeDropdown();
       openSettingsMenu({ parent: document.body, getMapInfo: this.opts.callbacks.getMapInfo });
     });
-    gear.addEventListener("mousedown", (e) => e.stopPropagation());
-    this.menu.header.appendChild(gear);
-    this.menu.header.style.overflow = "hidden";
+
+    this.newBtn.addEventListener("click", () => {
+      closeDropdown();
+      if (this.busy) return;
+      if (this.opts.state.hasActiveGame()) {
+        if (!confirm("Start a new game? Current game will be lost.")) return;
+      }
+      this.openNewModal();
+    });
+    this.saveBtn.addEventListener("click", () => {
+      closeDropdown();
+      if (this.busy) return;
+      void this.runAsync(async () => {
+        await this.opts.callbacks.onSave();
+      });
+    });
+    this.loadBtn.addEventListener("click", () => {
+      closeDropdown();
+      if (this.busy) return;
+      void this.openLoadModal();
+    });
+
+    brandRow.appendChild(menuWrap);
+
+    this.root.appendChild(brandRow);
+
+    this.statusSlot = document.createElement("div");
+    this.root.appendChild(this.statusSlot);
+
+    const contentWrap = document.createElement("div");
+    Object.assign(contentWrap.style, { padding: "4px 16px 10px" });
 
     this.calendarEl = document.createElement("div");
     Object.assign(this.calendarEl.style, {
       display: "flex",
-      flexDirection: "column",
-      gap: "6px",
-      paddingBottom: "10px",
-      borderBottom: "1px solid rgba(255,255,255,0.14)",
-      marginBottom: "6px",
-      fontFamily: menuTheme.font,
-      color: menuTheme.panel.color,
+      flexWrap: "wrap",
+      alignItems: "center",
+      gap: "6px 20px",
+      paddingBottom: "8px",
+      marginBottom: "8px",
+      borderBottom: "1px solid rgba(201,162,39,0.3)",
+      fontSize: "12px",
     });
-    const calendarTopRow = document.createElement("div");
-    Object.assign(calendarTopRow.style, {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "baseline",
-      fontSize: "14px",
-      fontWeight: "600",
-    });
-    const dayLabel = document.createElement("span");
-    dayLabel.textContent = "Day";
-    calendarTopRow.appendChild(dayLabel);
-    const dayValue = document.createElement("span");
-    dayValue.id = "toolbar-day-value";
-    calendarTopRow.appendChild(dayValue);
-    this.calendarEl.appendChild(calendarTopRow);
 
-    const subRow = document.createElement("div");
-    Object.assign(subRow.style, {
-      display: "flex",
-      justifyContent: "space-between",
-      fontSize: "11px",
-      opacity: "0.7",
-    });
-    const weekLabel = document.createElement("span");
-    weekLabel.textContent = "Week";
-    subRow.appendChild(weekLabel);
-    const weekValue = document.createElement("span");
-    weekValue.id = "toolbar-week-value";
-    subRow.appendChild(weekValue);
-    this.calendarEl.appendChild(subRow);
+    const dayChip = makeStatChip("Day");
+    dayChip.value.id = "toolbar-day-value";
+    this.calendarEl.appendChild(dayChip.chip);
 
-    const monthRow = document.createElement("div");
-    Object.assign(monthRow.style, {
-      display: "flex",
-      justifyContent: "space-between",
-      fontSize: "11px",
-      opacity: "0.7",
-    });
-    const monthLabel = document.createElement("span");
-    monthLabel.textContent = "Month";
-    monthRow.appendChild(monthLabel);
-    const monthValue = document.createElement("span");
-    monthValue.id = "toolbar-month-value";
-    monthRow.appendChild(monthValue);
-    this.calendarEl.appendChild(monthRow);
+    const weekChip = makeStatChip("Week");
+    weekChip.value.id = "toolbar-week-value";
+    this.calendarEl.appendChild(weekChip.chip);
+
+    const monthChip = makeStatChip("Month");
+    monthChip.value.id = "toolbar-month-value";
+    this.calendarEl.appendChild(monthChip.chip);
 
     this.calendarActiveEl = document.createElement("div");
     Object.assign(this.calendarActiveEl.style, {
-      display: "flex",
+      display: "inline-flex",
       alignItems: "center",
       gap: "6px",
-      fontSize: "11px",
-      opacity: "0.85",
+      fontSize: "12px",
     });
     const swatch = document.createElement("span");
     swatch.id = "toolbar-active-swatch";
@@ -189,131 +325,51 @@ export class Toolbar {
     const activeLabel = document.createElement("span");
     activeLabel.id = "toolbar-active-label";
     activeLabel.textContent = "—";
+    Object.assign(activeLabel.style, { fontWeight: "600" });
     this.calendarActiveEl.appendChild(activeLabel);
     this.calendarEl.appendChild(this.calendarActiveEl);
 
-    const incomeRow = document.createElement("div");
-    Object.assign(incomeRow.style, {
-      display: "flex",
-      justifyContent: "space-between",
-      fontSize: "11px",
-      opacity: "0.85",
-    });
-    const incomeLabel = document.createElement("span");
-    incomeLabel.textContent = "Income";
-    incomeRow.appendChild(incomeLabel);
-    const incomeValue = document.createElement("span");
-    incomeValue.id = "toolbar-income-value";
-    incomeRow.appendChild(incomeValue);
-    this.calendarEl.appendChild(incomeRow);
+    const incomeChip = makeStatChip("Income");
+    incomeChip.value.id = "toolbar-income-value";
+    this.calendarEl.appendChild(incomeChip.chip);
 
-    const wealthRow = document.createElement("div");
-    Object.assign(wealthRow.style, {
-      display: "flex",
-      justifyContent: "space-between",
-      fontSize: "11px",
-      opacity: "0.85",
-    });
-    const wealthLabel = document.createElement("span");
-    wealthLabel.textContent = "Wealth";
-    wealthRow.appendChild(wealthLabel);
-    const wealthValue = document.createElement("span");
-    wealthValue.id = "toolbar-wealth-value";
-    wealthRow.appendChild(wealthValue);
-    this.calendarEl.appendChild(wealthRow);
+    const wealthChip = makeStatChip("Wealth");
+    wealthChip.value.id = "toolbar-wealth-value";
+    this.calendarEl.appendChild(wealthChip.chip);
 
-    const moraleRow = document.createElement("div");
-    Object.assign(moraleRow.style, {
-      display: "flex",
-      justifyContent: "space-between",
-      fontSize: "11px",
-      opacity: "0.85",
-    });
-    const moraleLabel = document.createElement("span");
-    moraleLabel.textContent = "Morale";
-    moraleRow.appendChild(moraleLabel);
-    const moraleValue = document.createElement("span");
-    moraleValue.id = "toolbar-morale-value";
-    moraleRow.appendChild(moraleValue);
-    this.calendarEl.appendChild(moraleRow);
+    const moraleChip = makeStatChip("Morale");
+    moraleChip.value.id = "toolbar-morale-value";
+    this.calendarEl.appendChild(moraleChip.chip);
 
-    const statusRow = document.createElement("div");
-    Object.assign(statusRow.style, {
-      display: "flex",
-      justifyContent: "space-between",
-      fontSize: "10px",
-      opacity: "0.7",
-      paddingTop: "6px",
-      borderTop: "1px solid rgba(255,255,255,0.08)",
-    });
+    const saveChip = document.createElement("div");
+    Object.assign(saveChip.style, { display: "inline-flex", alignItems: "baseline", gap: "4px", opacity: "0.85" });
     const saveLabel = document.createElement("span");
     saveLabel.id = "toolbar-save-label";
     saveLabel.textContent = "Save";
-    statusRow.appendChild(saveLabel);
+    Object.assign(saveLabel.style, { opacity: "0.65", fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.4px" });
+    saveChip.appendChild(saveLabel);
     const saveValue = document.createElement("span");
     saveValue.id = "toolbar-save-value";
-    statusRow.appendChild(saveValue);
+    Object.assign(saveValue.style, { fontSize: "12px", fontWeight: "600" });
+    saveChip.appendChild(saveValue);
+    this.calendarEl.appendChild(saveChip);
+
     const zoomValue = document.createElement("span");
     zoomValue.id = "toolbar-zoom-value";
-    Object.assign(zoomValue.style, { marginLeft: "8px" });
-    statusRow.appendChild(zoomValue);
-    this.calendarEl.appendChild(statusRow);
+    Object.assign(zoomValue.style, { fontSize: "11px", opacity: "0.75" });
+    this.calendarEl.appendChild(zoomValue);
 
-    this.menu.body.appendChild(this.calendarEl);
+    contentWrap.appendChild(this.calendarEl);
 
-    const topRow = document.createElement("div");
-    Object.assign(topRow.style, {
+    const buttonsRow = document.createElement("div");
+    Object.assign(buttonsRow.style, {
       display: "flex",
-      gap: "6px",
+      flexWrap: "wrap",
+      gap: "8px",
+      alignItems: "center",
     });
 
-    this.newBtn = this.makeButton("New Game", false);
-    this.newBtn.style.whiteSpace = "nowrap";
-    this.newBtn.style.width = "50%";
-
-    this.saveBtn = document.createElement("button");
-    this.saveBtn.textContent = "\uD83D\uDCBE";
-    this.saveBtn.title = "Save game";
-    styleButton(this.saveBtn);
-    this.saveBtn.style.width = "25%";
-    this.saveBtn.style.textAlign = "center";
-    this.saveBtn.style.padding = "7px 4px";
-    this.saveBtn.style.fontSize = "16px";
-    this.saveBtn.style.lineHeight = "1";
-
-    this.loadBtn = document.createElement("button");
-    this.loadBtn.textContent = "\uD83D\uDCC2";
-    this.loadBtn.title = "Load game";
-    styleButton(this.loadBtn);
-    this.loadBtn.style.width = "25%";
-    this.loadBtn.style.textAlign = "center";
-    this.loadBtn.style.padding = "7px 4px";
-    this.loadBtn.style.fontSize = "16px";
-    this.loadBtn.style.lineHeight = "1";
-
-    topRow.appendChild(this.newBtn);
-    topRow.appendChild(this.saveBtn);
-    topRow.appendChild(this.loadBtn);
-
-    this.newBtn.addEventListener("click", () => {
-      if (this.busy) return;
-      if (this.opts.state.hasActiveGame()) {
-        if (!confirm("Start a new game? Current game will be lost.")) return;
-      }
-      this.openNewModal();
-    });
-    this.saveBtn.addEventListener("click", () => {
-      if (this.busy) return;
-      void this.runAsync(async () => {
-        await this.opts.callbacks.onSave();
-      });
-    });
-    this.loadBtn.addEventListener("click", () => {
-      if (this.busy) return;
-      void this.openLoadModal();
-    });
-
-    this.endTurnBtn = this.makeButton("\u25B6  End Turn", true);
+    this.endTurnBtn = this.makeButton("▶  End Turn", true);
     this.endTurnBtn.addEventListener("click", () => {
       if (this.busy) return;
       if (!this.opts.state.canEndTurnNow()) return;
@@ -322,29 +378,33 @@ export class Toolbar {
       });
     });
 
-    this.heroesBtn = this.makeButton("\u2694  Heroes", false);
+    this.heroesBtn = this.makeButton("⚔  Heroes", false);
     this.heroesBtn.addEventListener("click", () => {
       if (this.busy) return;
       this.opts.callbacks.onHeroes?.();
     });
 
-    this.settlementsBtn = this.makeButton("\u2302  Settlements", false);
+    this.settlementsBtn = this.makeButton("⌂  Settlements", false);
     this.settlementsBtn.addEventListener("click", () => {
       if (this.busy) return;
       this.opts.callbacks.onSettlements?.();
     });
 
-    this.charterBtn = this.makeButton("\u2692  Charter Settlement", true);
+    this.charterBtn = this.makeButton("⚒  Charter Settlement", true);
     this.charterBtn.addEventListener("click", () => {
       if (this.busy) return;
       this.opts.callbacks.onStartCharter?.();
     });
 
-    this.menu.body.appendChild(topRow);
-    this.menu.appendContent(this.endTurnBtn);
-    this.menu.appendContent(this.heroesBtn);
-    this.menu.appendContent(this.settlementsBtn);
-    this.menu.appendContent(this.charterBtn);
+    buttonsRow.appendChild(this.endTurnBtn);
+    buttonsRow.appendChild(this.heroesBtn);
+    buttonsRow.appendChild(this.settlementsBtn);
+    buttonsRow.appendChild(this.charterBtn);
+    contentWrap.appendChild(buttonsRow);
+
+    this.root.appendChild(contentWrap);
+    opts.parent.appendChild(this.root);
+
     this.refresh();
   }
 
@@ -380,17 +440,17 @@ export class Toolbar {
 
   private refreshCalendar(): void {
     const cal = this.opts.state.getCalendar();
-    const dayEl = this.menu.root.querySelector<HTMLElement>("#toolbar-day-value");
-    const weekEl = this.menu.root.querySelector<HTMLElement>("#toolbar-week-value");
-    const monthEl = this.menu.root.querySelector<HTMLElement>("#toolbar-month-value");
-    const swatchEl = this.menu.root.querySelector<HTMLElement>("#toolbar-active-swatch");
-    const activeEl = this.menu.root.querySelector<HTMLElement>("#toolbar-active-label");
-    const incomeEl = this.menu.root.querySelector<HTMLElement>("#toolbar-income-value");
-    const wealthEl = this.menu.root.querySelector<HTMLElement>("#toolbar-wealth-value");
-    const moraleEl = this.menu.root.querySelector<HTMLElement>("#toolbar-morale-value");
-    const saveLabelEl = this.menu.root.querySelector<HTMLElement>("#toolbar-save-label");
-    const saveValueEl = this.menu.root.querySelector<HTMLElement>("#toolbar-save-value");
-    const zoomValueEl = this.menu.root.querySelector<HTMLElement>("#toolbar-zoom-value");
+    const dayEl = this.root.querySelector<HTMLElement>("#toolbar-day-value");
+    const weekEl = this.root.querySelector<HTMLElement>("#toolbar-week-value");
+    const monthEl = this.root.querySelector<HTMLElement>("#toolbar-month-value");
+    const swatchEl = this.root.querySelector<HTMLElement>("#toolbar-active-swatch");
+    const activeEl = this.root.querySelector<HTMLElement>("#toolbar-active-label");
+    const incomeEl = this.root.querySelector<HTMLElement>("#toolbar-income-value");
+    const wealthEl = this.root.querySelector<HTMLElement>("#toolbar-wealth-value");
+    const moraleEl = this.root.querySelector<HTMLElement>("#toolbar-morale-value");
+    const saveLabelEl = this.root.querySelector<HTMLElement>("#toolbar-save-label");
+    const saveValueEl = this.root.querySelector<HTMLElement>("#toolbar-save-value");
+    const zoomValueEl = this.root.querySelector<HTMLElement>("#toolbar-zoom-value");
     if (!dayEl || !weekEl || !monthEl || !swatchEl || !activeEl || !incomeEl || !wealthEl || !moraleEl) return;
     if (!cal) {
       dayEl.textContent = "—";
@@ -449,11 +509,7 @@ export class Toolbar {
   private makeButton(label: string, primary: boolean): HTMLButtonElement {
     const b = document.createElement("button");
     b.textContent = label;
-    styleButton(b, primary);
-    b.style.width = "100%";
-    b.style.textAlign = "left";
-    b.style.fontSize = "13px";
-    b.style.padding = "7px 10px";
+    styleHeaderButton(b, primary);
     return b;
   }
 

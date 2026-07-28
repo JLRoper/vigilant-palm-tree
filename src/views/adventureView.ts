@@ -22,7 +22,6 @@ export interface LastClickDebug {
 
 export interface AdventureViewOptions {
   canvas: HTMLCanvasElement;
-  hud: HTMLElement;
   renderer: Renderer;
   map: GameMap;
   camera: Camera;

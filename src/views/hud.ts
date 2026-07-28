@@ -1,9 +1,5 @@
-import { Axial } from "../core/hex";
-import { Camera } from "../render/camera";
-import { GameMap } from "../map/gameMap";
 import type { GameState } from "../state/gameState";
 import type { Hero } from "../entities/hero";
-import type { Castle } from "../entities/settlement";
 import { effectiveIncome } from "../economy/consumption";
 import { playerWealth } from "../economy/income";
 
@@ -13,10 +9,13 @@ export interface HudHandles {
   textSpan: HTMLSpanElement;
 }
 
-export function buildHud(buttonContainer: HTMLElement): HudHandles {
+export function buildHud(container: HTMLElement): HudHandles {
+  const hudEl = document.createElement("div");
+  hudEl.id = "hud";
   const textSpan = document.createElement("span");
   textSpan.id = "hud-text";
-  buttonContainer.appendChild(textSpan);
+  hudEl.appendChild(textSpan);
+  container.appendChild(hudEl);
   return { textSpan };
 }
 
@@ -24,16 +23,11 @@ export function updateHud(
   _hud: HTMLElement,
   state: GameState,
   heroes: Record<string, Hero>,
-  settlements: Record<string, Castle>,
-  hover: Axial | null,
-  map: GameMap,
-  camera: Camera,
   backendOk: boolean,
   saveStatus: SaveStatus,
   lastSavedAt: string | null,
   handles: HudHandles
 ): void {
-  const base = `Drag to pan · Wheel to zoom · Zoom ${camera.zoom.toFixed(2)}x`;
   const phase = phaseLabel(state);
   const roundLine = `Round ${state.round}`;
   const selected = state.selectedHeroId ? state.heroes[state.selectedHeroId] : null;
@@ -59,25 +53,7 @@ export function updateHud(
   const dbInfo = backendOk ? `DB ${saveStatus}` : "DB offline";
   const savedInfo = lastSavedAt ? ` · Last saved ${formatTime(lastSavedAt)}` : "";
   const econLine = `${moraleLine} · ${effectiveIncomeLine}`;
-  const text = !hover
-    ? `${heroInfo} · ${status} · ${econLine} · ${dbInfo}${savedInfo} · ${base}`
-    : (() => {
-        const t = map.get(hover.q, hover.r);
-        const tile = `Tile (${hover.q}, ${hover.r}) · ${t ?? "void"}`;
-        const resourceInfo = map.resourceTileAt(hover.q, hover.r);
-        const resourceLine = resourceInfo ? ` · Resource: ${resourceInfo.resource}` : "";
-        const settle = Object.values(settlements).find(
-          (s) => s.tile.q === hover.q && s.tile.r === hover.r
-        );
-        const settleLine = settle ? ` · Castle L${settle.level}` : "";
-        const charterTarget = state.activeCharters.find(
-          (c) => c.targetQ === hover.q && c.targetR === hover.r
-        );
-        const charterHoverLine = charterTarget
-          ? ` · Charter site: ${charterTarget.settlementName} (${charterTarget.phase})`
-          : "";
-        return `${tile}${resourceLine}${settleLine}${charterHoverLine} · ${heroInfo} · ${status} · ${econLine} · ${dbInfo}${savedInfo} · ${base}`;
-      })();
+  const text = `${heroInfo} · ${status} · ${econLine} · ${dbInfo}${savedInfo}`;
   handles.textSpan.textContent = text;
 }
 

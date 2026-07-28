@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>heroes-js</title>
     <style>
+      :root {
+        --header-blue: #1c2f57;
+        --header-blue-dark: #142145;
+        --header-gold: #c9a227;
+        --header-gold-light: #e9cf7d;
+        --header-cream: #f1e4c3;
+        --header-font: Georgia, "Cambria", "Times New Roman", serif;
+      }
       html,
       body {
         margin: 0;
@@ -29,33 +37,33 @@
       canvas:active {
         cursor: grabbing;
       }
-      #hud {
-        position: fixed;
-        top: 8px;
-        left: 8px;
-        padding: 6px 10px;
-        background: rgba(0, 0, 0, 0.5);
-        border-radius: 4px;
-        font-size: 12px;
-        pointer-events: none;
-        max-width: calc(100vw - 240px);
-      }
       #toolbar {
         position: fixed;
         top: 0;
         left: 0;
-        pointer-events: none;
-        font-family: system-ui, sans-serif;
+        right: 0;
+        width: 100%;
+        z-index: 10;
+        box-sizing: border-box;
       }
       #toolbar > * {
         pointer-events: auto;
+      }
+      #hud {
+        background: var(--header-blue);
+        color: var(--header-cream);
+        font-family: var(--header-font);
+        font-size: 11px;
+        padding: 3px 16px;
+        text-align: center;
+        border-bottom: 1px solid rgba(201, 162, 39, 0.35);
+        letter-spacing: 0.2px;
       }
     </style>
   </head>
   <body>
     <div id="app">
       <canvas id="game"></canvas>
-      <div id="hud"><span>Drag to pan · Wheel to zoom · Hover a tile</span></div>
       <div id="toolbar"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
