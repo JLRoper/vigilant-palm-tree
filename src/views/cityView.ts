@@ -13,11 +13,10 @@ import { settings } from "../state/settings";
 import type { SettlementState } from "../state/gameState";
 import type { BuildingUpgradeRequest } from "../state/gameState";
 import type { BuildingUpgradeCost } from "../core/buildingRegistry";
+import { CityDesignBoxManager } from "../managers/CityDesignBoxManager";
 
 export class CityView {
-  private backBtn: HTMLButtonElement | null = null;
-  private buildBtn: HTMLButtonElement | null = null;
-  private generateBtn: HTMLButtonElement | null = null;
+  private designBox = new CityDesignBoxManager();
   private openSettlementId: string | null = null;
   private settlementName = "";
   private size: CityViewSize = 5;
@@ -148,27 +147,18 @@ export class CityView {
     this.refreshAffordability();
     this.placer.setOnConfirm(() => this.persistBuildings());
 
-    this.backBtn = document.createElement("button");
-    this.backBtn.textContent = "\u2190 Back";
-    Object.assign(this.backBtn.style, {
-      position: "fixed",
-      top: "12px",
-      right: "12px",
-      zIndex: "100",
-      padding: "4px 12px",
-      border: "1px solid rgba(255,255,255,0.2)",
-      background: "rgba(0,0,0,0.7)",
-      color: "#fff",
-      fontSize: "12px",
-      cursor: "pointer",
-      borderRadius: "3px",
-      fontFamily: "system-ui, sans-serif",
+    this.designBox.show({
+      onBuild: () => {
+        if (this.placer.isPaletteOpen()) {
+          this.placer.hidePalette();
+        } else {
+          this.openBuildPalette();
+        }
+        this.updateBuildButton();
+      },
+      onGenerate: () => this.regenerate(),
+      onBack: () => this.handleClose(),
     });
-    this.backBtn.addEventListener("click", () => this.handleClose());
-    document.body.appendChild(this.backBtn);
-
-    this.createBuildButton();
-    this.createGenerateButton();
 
     window.addEventListener("keydown", this.onKeyDown);
   }
@@ -400,8 +390,8 @@ export class CityView {
   }
 
   private openBuildPalette(): void {
-    const x = window.innerWidth - 260;
-    const y = 60;
+    const x = 12;
+    const y = Math.max(20, window.innerHeight - 480);
     this.placer.showPalette(document.body, x, y);
     this.updateBuildButton();
   }
@@ -430,66 +420,8 @@ export class CityView {
     }
   }
 
-  private createBuildButton(): void {
-    if (this.buildBtn) this.buildBtn.remove();
-    this.buildBtn = document.createElement("button");
-    this.buildBtn.textContent = this.placer.isPaletteOpen() ? "\u2716 Close" : "\u2692 Build";
-    Object.assign(this.buildBtn.style, {
-      position: "fixed",
-      top: "44px",
-      right: "12px",
-      zIndex: "100",
-      padding: "4px 12px",
-      border: "1px solid rgba(255,255,255,0.2)",
-      background: this.placer.isPaletteOpen() ? "rgba(120,40,40,0.7)" : "rgba(0,0,0,0.7)",
-      color: "#fff",
-      fontSize: "12px",
-      cursor: "pointer",
-      borderRadius: "3px",
-      fontFamily: "system-ui, sans-serif",
-    });
-    this.buildBtn.addEventListener("click", () => {
-      if (this.placer.isPaletteOpen()) {
-        this.placer.hidePalette();
-      } else {
-        this.openBuildPalette();
-      }
-      this.updateBuildButton();
-    });
-    document.body.appendChild(this.buildBtn);
-  }
-
-  private createGenerateButton(): void {
-    if (this.generateBtn) this.generateBtn.remove();
-    this.generateBtn = document.createElement("button");
-    this.generateBtn.textContent = "Generate";
-    Object.assign(this.generateBtn.style, {
-      position: "fixed",
-      top: "76px",
-      right: "12px",
-      zIndex: "100",
-      padding: "2px 10px",
-      border: "1px solid rgba(255,255,255,0.1)",
-      background: "rgba(0,0,0,0.4)",
-      color: "#999",
-      fontSize: "10px",
-      cursor: "pointer",
-      borderRadius: "3px",
-      fontFamily: "system-ui, sans-serif",
-      opacity: "0.6",
-    });
-    this.generateBtn.addEventListener("click", () => {
-      this.regenerate();
-    });
-    document.body.appendChild(this.generateBtn);
-  }
-
   private updateBuildButton(): void {
-    if (!this.buildBtn) return;
-    this.buildBtn.textContent = this.placer.isPaletteOpen() ? "\u2716 Close" : "\u2692 Build";
-    this.buildBtn.style.background = this.placer.isPaletteOpen()
-      ? "rgba(120,40,40,0.7)"
-      : "rgba(0,0,0,0.7)";
+    this.designBox.setBuildPaletteOpen(this.placer.isPaletteOpen());
   }
 
   private closing = false;
@@ -511,18 +443,7 @@ export class CityView {
     try {
       this.placer.cancelPlacement();
       this.placer.hidePalette();
-      if (this.backBtn) {
-        this.backBtn.remove();
-        this.backBtn = null;
-      }
-      if (this.buildBtn) {
-        this.buildBtn.remove();
-        this.buildBtn = null;
-      }
-      if (this.generateBtn) {
-        this.generateBtn.remove();
-        this.generateBtn = null;
-      }
+      this.designBox.hide();
       window.removeEventListener("keydown", this.onKeyDown);
       this.buildingMenu.hide();
       this.selectionMenu.hide();
