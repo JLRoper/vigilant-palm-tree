@@ -8,6 +8,14 @@ import type { Axial } from "../core/hex";
 const MINIMAP_WIDTH = 180;
 const MINIMAP_PAD = 10;
 const HIT_PAD = 4;
+const VISION_EDGE_DIRS = [
+  { q: 1, r: 0 },
+  { q: 1, r: -1 },
+  { q: 0, r: -1 },
+  { q: -1, r: 0 },
+  { q: -1, r: 1 },
+  { q: 0, r: 1 },
+];
 
 export interface MinimapGeometry {
   x0: number;
@@ -178,6 +186,59 @@ function drawNorthIndicator(ctx: CanvasRenderingContext2D, geo: MinimapGeometry,
   ctx.restore();
 }
 
+function isVisionEdge(visible: Set<string>, q: number, r: number): boolean {
+  for (const dir of VISION_EDGE_DIRS) {
+    if (!isVisible(visible, q + dir.q, r + dir.r)) return true;
+  }
+  return false;
+}
+
+function drawMistCell(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  time: number,
+  q: number,
+  r: number,
+  opacity: number,
+): void {
+  const driftA = time * 24;
+  const driftB = time * 16;
+  const oxA = Math.sin((r * 1.35 + time * 1.4) * 1.3) * size * 0.26;
+  const oyA = Math.cos((q * 1.1 + time * 1.1) * 1.2) * size * 0.26;
+  const oxB = Math.sin((q * 1.7 - time * 1.2) * 1.1) * size * 0.34;
+  const oyB = Math.cos((r * 1.55 - time * 1.5) * 1.05) * size * 0.34;
+  const pulse = (Math.sin(time * 2.2 + q * 0.9 + r * 1.3) + 1) * 0.5;
+
+  const g1 = ctx.createLinearGradient(
+    x - size * 0.5 + oxA + driftA,
+    y + oyA,
+    x + size * 1.5 + oxA + driftA,
+    y + size + oyA,
+  );
+  g1.addColorStop(0, `rgba(210, 218, 226, ${opacity * 0.32})`);
+  g1.addColorStop(0.5, `rgba(120, 138, 154, ${opacity * 0.46})`);
+  g1.addColorStop(1, `rgba(58, 72, 86, ${opacity * 0.32})`);
+
+  const g2 = ctx.createLinearGradient(
+    x - size * 0.7 + oxB - driftB,
+    y + size * 0.2 + oyB,
+    x + size * 1.2 + oxB - driftB,
+    y + size * 0.9 + oyB,
+  );
+  g2.addColorStop(0, `rgba(222, 230, 236, ${opacity * 0.2})`);
+  g2.addColorStop(0.6, `rgba(128, 146, 162, ${opacity * 0.3})`);
+  g2.addColorStop(1, `rgba(58, 70, 82, ${opacity * 0.2})`);
+
+  ctx.fillStyle = g1;
+  ctx.fillRect(x, y, size, size);
+  ctx.fillStyle = g2;
+  ctx.fillRect(x, y, size, size);
+  ctx.fillStyle = `rgba(188, 200, 212, ${opacity * (0.08 + pulse * 0.18)})`;
+  ctx.fillRect(x, y, size, size);
+}
+
 export function drawMinimap(
   ctx: CanvasRenderingContext2D,
   map: GameMap,
@@ -209,6 +270,7 @@ export function drawMinimap(
   const cellSize = geo.baseScale * minimapCamera.zoom;
   const half = cellSize / 2;
   const cullMargin = cellSize + 24;
+  const mistTime = performance.now() * 0.001;
 
   for (let r = 0; r < map.height; r++) {
     for (let q = 0; q < map.width; q++) {
@@ -223,8 +285,19 @@ export function drawMinimap(
       ) {
         continue;
       }
-      ctx.fillStyle = isVisible(visible, q, r) ? TERRAIN_COLORS[t].fill : "rgba(0,0,0,0.85)";
-      ctx.fillRect(x - half, y - half, cellSize + 0.5, cellSize + 0.5);
+      const cellX = x - half;
+      const cellY = y - half;
+      const canSee = isVisible(visible, q, r);
+      const edgeOfVision = canSee && isVisionEdge(visible, q, r);
+
+      ctx.fillStyle = canSee ? TERRAIN_COLORS[t].fill : "rgba(12,18,24,0.92)";
+      ctx.fillRect(cellX, cellY, cellSize + 0.5, cellSize + 0.5);
+
+      if (!canSee) {
+        drawMistCell(ctx, cellX, cellY, cellSize + 0.5, mistTime, q, r, 1.22);
+      } else if (edgeOfVision) {
+        drawMistCell(ctx, cellX, cellY, cellSize + 0.5, mistTime, q, r, 0.14);
+      }
     }
   }
 
