@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "node ./scripts/hooks/log-session-change.mjs",
+        "timeout": 10
+      }
+    ]
+  }
+}
