@@ -254,6 +254,10 @@ export class UIManager {
 
   private refreshSettlementInfoMenu(gameState: GameState): void {
     if (!this.settlementInfoMenu) return;
+    if (this.cityView?.isOpen()) {
+      this.settlementInfoMenu.hide();
+      return;
+    }
     const selectedId = gameState.selectedSettlementId;
     if (!selectedId) {
       this.settlementInfoMenu.hide();
