@@ -1192,7 +1192,7 @@ function startApi(): ChildProcess {
   const out = openSync("test/api.log", "w");
   const err = openSync("test/api.err.log", "w");
   const child = spawn("npx", ["tsx", "server/index.ts"], {
-    env: { ...process.env, PORT: String(API_PORT) },
+    env: { ...process.env, API_PORT: String(API_PORT) },
     stdio: ["ignore", out, err],
     detached: true,
     shell: true,
