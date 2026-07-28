@@ -7,9 +7,10 @@ import { GameMap } from "../map/gameMap";
 import { TERRAIN_COLORS, Terrain } from "../map/terrain";
 import { drawResourceIcons } from "./overlays/resourceIcon";
 import { drawTerritoryOutlines } from "./overlays/territoryOutline";
-import { drawPathOverlay, drawMinimapPath } from "./overlays/pathOverlay";
+import { drawPathOverlay } from "./overlays/pathOverlay";
 import { SpriteProvider } from "./assets";
 import { computeVision, isVisible } from "./fog";
+import { drawMinimap, MinimapCamera } from "./minimap";
 
 import type { CharterState } from "../state/gameState";
 
@@ -38,7 +39,8 @@ export class Renderer {
     private ctx: CanvasRenderingContext2D,
     public map: GameMap,
     private camera: Camera,
-    private sprites: SpriteProvider
+    private sprites: SpriteProvider,
+    private minimapCamera: MinimapCamera
   ) {}
 
   draw(
@@ -162,7 +164,7 @@ export class Renderer {
 
     ctx.restore();
 
-    this.drawMinimap(heroes, path, opts, visible);
+    drawMinimap(ctx, this.map, this.minimapCamera, heroes, path, opts, visible);
   }
 
   private drawFogHex(cx: number, cy: number): void {
@@ -354,76 +356,6 @@ export class Renderer {
       ctx.fillStyle = "rgba(100, 220, 100, 0.08)";
       ctx.fill();
     }
-  }
-
-  private drawMinimap(
-    heroes: Hero[],
-    path: Axial[],
-    opts: RenderOptions,
-    visible: Set<string>,
-  ) {
-    const ctx = this.ctx;
-    const mmW = 180;
-    const mmH = (this.map.height / this.map.width) * mmW;
-    const pad = 10;
-    const x0 = window.innerWidth - mmW - pad;
-    const y0 = window.innerHeight - mmH - pad;
-
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    ctx.fillRect(x0 - 4, y0 - 4, mmW + 8, mmH + 8);
-
-    const cellW = mmW / this.map.width;
-    const cellH = mmH / this.map.height;
-
-    for (let r = 0; r < this.map.height; r++) {
-      for (let q = 0; q < this.map.width; q++) {
-        const t = this.map.get(q, r);
-        if (!t) continue;
-        if (isVisible(visible, q, r)) {
-          ctx.fillStyle = TERRAIN_COLORS[t].fill;
-        } else {
-          ctx.fillStyle = "rgba(0,0,0,0.85)";
-        }
-        ctx.fillRect(x0 + q * cellW, y0 + r * cellH, cellW + 0.5, cellH + 0.5);
-      }
-    }
-
-    ctx.fillStyle = "#ffa500";
-    for (let r = 0; r < this.map.height; r++) {
-      for (let q = 0; q < this.map.width; q++) {
-        const t = this.map.resourceTileAt(q, r);
-        if (!t) continue;
-        if (!isVisible(visible, q, r)) continue;
-        ctx.beginPath();
-        ctx.arc(
-          x0 + (q + 0.78) * cellW,
-          y0 + (r + 0.22) * cellH,
-          Math.min(cellW, cellH) * 0.22,
-          0,
-          Math.PI * 2
-        );
-        ctx.fill();
-      }
-    }
-
-    drawMinimapPath(ctx, path, x0, y0, cellW, cellH);
-
-    for (const hero of heroes) {
-      if (hero.ownerId !== opts.viewPlayerId && !isVisible(visible, hero.tile.q, hero.tile.r)) continue;
-      ctx.fillStyle = opts.colorForOwner(hero.ownerId);
-      ctx.fillRect(
-        x0 + hero.tile.q * cellW - 1,
-        y0 + hero.tile.r * cellH - 1,
-        cellW + 2,
-        cellH + 2
-      );
-    }
-
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x0 - 4, y0 - 4, mmW + 8, mmH + 8);
-    ctx.restore();
   }
 
   hoverFromScreen(sx: number, sy: number): Axial | null {

@@ -9,6 +9,7 @@ import type { TurnController } from "../state/turnController";
 import { computeReachableSplit } from "../render/overlays/pathOverlay";
 import type { PathPreviewLock } from "../managers/GameStateManager";
 import { openCenteredModal, styleButton, styleInput } from "./menu";
+import { MinimapCamera, getMinimapGeometry, isPointInMinimap } from "../render/minimap";
 
 export const MAP_SEED = 42;
 
@@ -25,6 +26,7 @@ export interface AdventureViewOptions {
   renderer: Renderer;
   map: GameMap;
   camera: Camera;
+  minimapCamera: MinimapCamera;
   heroes: () => Record<string, Hero>;
   getGameState: () => GameState;
   getTurnController: () => TurnController;
@@ -56,6 +58,35 @@ function pathsEqual(a: Axial[], b: Axial[]): boolean {
   return true;
 }
 
+function touchDist(a: Touch, b: Touch): number {
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+function touchAngle(a: Touch, b: Touch): number {
+  return Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
+}
+
+type MinimapTouchState =
+  | {
+      mode: "tap";
+      id: number;
+      startX: number;
+      startY: number;
+      lastX: number;
+      lastY: number;
+      moved: boolean;
+    }
+  | {
+      mode: "gesture";
+      id1: number;
+      id2: number;
+      startDist: number;
+      startAngle: number;
+      startZoom: number;
+      startRotation: number;
+      anchor: { q: number; r: number };
+    };
+
 export class AdventureView {
   hover: Axial | null = null;
   path: Axial[] = [];
@@ -71,11 +102,23 @@ export class AdventureView {
   private pendingPointer: { x: number; y: number } | null = null;
   private pointerFrameRequested = false;
 
+  private minimapTouch: MinimapTouchState | null = null;
+
+  private minimapDragging = false;
+  private minimapDragMoved = false;
+  private minimapDragStartX = 0;
+  private minimapDragStartY = 0;
+  private minimapLastX = 0;
+  private minimapLastY = 0;
+
   private readonly boundMouseUp = () => this.onMouseUp();
   private readonly boundMouseMove = (e: MouseEvent) => this.onMouseMove(e);
   private readonly boundMouseDown = (e: MouseEvent) => this.onMouseDown(e);
   private readonly boundClick = (e: MouseEvent) => this.onClick(e);
   private readonly boundWheel = (e: WheelEvent) => this.onWheel(e);
+  private readonly boundTouchStart = (e: TouchEvent) => this.onTouchStart(e);
+  private readonly boundTouchMove = (e: TouchEvent) => this.onTouchMove(e);
+  private readonly boundTouchEnd = (e: TouchEvent) => this.onTouchEnd(e);
 
   constructor(private opts: AdventureViewOptions) {
     this.attach();
@@ -103,6 +146,10 @@ export class AdventureView {
     this.opts.canvas.removeEventListener("mousedown", this.boundMouseDown);
     this.opts.canvas.removeEventListener("click", this.boundClick);
     this.opts.canvas.removeEventListener("wheel", this.boundWheel as EventListener);
+    this.opts.canvas.removeEventListener("touchstart", this.boundTouchStart as EventListener);
+    this.opts.canvas.removeEventListener("touchmove", this.boundTouchMove as EventListener);
+    this.opts.canvas.removeEventListener("touchend", this.boundTouchEnd as EventListener);
+    this.opts.canvas.removeEventListener("touchcancel", this.boundTouchEnd as EventListener);
   }
 
   private attach(): void {
@@ -115,11 +162,147 @@ export class AdventureView {
       this.boundWheel as EventListener,
       { passive: false }
     );
+    this.opts.canvas.addEventListener(
+      "touchstart",
+      this.boundTouchStart as EventListener,
+      { passive: false }
+    );
+    this.opts.canvas.addEventListener(
+      "touchmove",
+      this.boundTouchMove as EventListener,
+      { passive: false }
+    );
+    this.opts.canvas.addEventListener("touchend", this.boundTouchEnd as EventListener);
+    this.opts.canvas.addEventListener("touchcancel", this.boundTouchEnd as EventListener);
+  }
+
+  // --- Minimap gestures -----------------------------------------------
+  // The minimap has its own local pan/zoom/rotation (opts.minimapCamera),
+  // independent of the main game camera. A single tap/click jumps the main
+  // camera to that spot; a two-finger pinch zooms the minimap's own view;
+  // a two-finger twist rotates the minimap drawing around its center.
+
+  private onTouchStart(e: TouchEvent): void {
+    const geo = getMinimapGeometry(this.opts.map);
+
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      if (!isPointInMinimap(t.clientX, t.clientY, geo)) {
+        this.minimapTouch = null;
+        return;
+      }
+      this.minimapTouch = {
+        mode: "tap",
+        id: t.identifier,
+        startX: t.clientX,
+        startY: t.clientY,
+        lastX: t.clientX,
+        lastY: t.clientY,
+        moved: false,
+      };
+      e.preventDefault();
+      return;
+    }
+
+    if (e.touches.length === 2) {
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const startedInMinimap =
+        this.minimapTouch !== null ||
+        isPointInMinimap(t1.clientX, t1.clientY, geo) ||
+        isPointInMinimap(t2.clientX, t2.clientY, geo);
+      if (!startedInMinimap) {
+        this.minimapTouch = null;
+        return;
+      }
+      const midX = (t1.clientX + t2.clientX) / 2;
+      const midY = (t1.clientY + t2.clientY) / 2;
+      const camera = this.opts.minimapCamera;
+      this.minimapTouch = {
+        mode: "gesture",
+        id1: t1.identifier,
+        id2: t2.identifier,
+        startDist: touchDist(t1, t2),
+        startAngle: touchAngle(t1, t2),
+        startZoom: camera.zoom,
+        startRotation: camera.rotation,
+        anchor: camera.screenToWorld(midX, midY, geo),
+      };
+      e.preventDefault();
+      return;
+    }
+
+    this.minimapTouch = null;
+  }
+
+  private onTouchMove(e: TouchEvent): void {
+    const mt = this.minimapTouch;
+    if (!mt) return;
+
+    if (mt.mode === "tap") {
+      const t = Array.from(e.touches).find((touch) => touch.identifier === mt.id);
+      if (!t) return;
+      e.preventDefault();
+
+      const dist = Math.hypot(t.clientX - mt.startX, t.clientY - mt.startY);
+      if (!mt.moved) {
+        if (dist <= DRAG_MOVE_THRESHOLD) return;
+        mt.moved = true;
+      }
+
+      const geo = getMinimapGeometry(this.opts.map);
+      this.opts.minimapCamera.panBy(mt.lastX, mt.lastY, t.clientX, t.clientY, geo, this.opts.map);
+      mt.lastX = t.clientX;
+      mt.lastY = t.clientY;
+      this.opts.onRedraw();
+      return;
+    }
+
+    const t1 = Array.from(e.touches).find((touch) => touch.identifier === mt.id1);
+    const t2 = Array.from(e.touches).find((touch) => touch.identifier === mt.id2);
+    if (!t1 || !t2) return;
+    e.preventDefault();
+
+    const geo = getMinimapGeometry(this.opts.map);
+    const midX = (t1.clientX + t2.clientX) / 2;
+    const midY = (t1.clientY + t2.clientY) / 2;
+    const dist = touchDist(t1, t2);
+    const factor = mt.startDist > 0 ? dist / mt.startDist : 1;
+    const newZoom = mt.startZoom * factor;
+    const newRotation = mt.startRotation + (touchAngle(t1, t2) - mt.startAngle);
+
+    this.opts.minimapCamera.applyPinchRotate(midX, midY, newZoom, newRotation, mt.anchor, geo, this.opts.map);
+    this.opts.onRedraw();
+  }
+
+  private onTouchEnd(e: TouchEvent): void {
+    const mt = this.minimapTouch;
+    if (!mt) return;
+
+    if (mt.mode === "tap" && !mt.moved) {
+      const geo = getMinimapGeometry(this.opts.map);
+      const world = this.opts.minimapCamera.screenToWorld(mt.startX, mt.startY, geo);
+      this.centerOn(world.q, world.r);
+      this.opts.onRedraw();
+    }
+
+    if (e.touches.length === 0 || (mt.mode === "gesture" && e.touches.length < 2)) {
+      this.minimapTouch = null;
+    }
   }
 
   private onMouseDown(e: MouseEvent): void {
-    this.dragging = true;
     this.movedDuringDrag = false;
+    if (isPointInMinimap(e.clientX, e.clientY, getMinimapGeometry(this.opts.map))) {
+      this.minimapDragging = true;
+      this.minimapDragMoved = false;
+      this.minimapDragStartX = e.clientX;
+      this.minimapDragStartY = e.clientY;
+      this.minimapLastX = e.clientX;
+      this.minimapLastY = e.clientY;
+      return;
+    }
+    this.dragging = true;
     this.dragStartX = e.clientX;
     this.dragStartY = e.clientY;
     this.lastX = e.clientX;
@@ -128,9 +311,25 @@ export class AdventureView {
 
   private onMouseUp(): void {
     this.dragging = false;
+    this.minimapDragging = false;
   }
 
   private onMouseMove(e: MouseEvent): void {
+    if (this.minimapDragging) {
+      const geo = getMinimapGeometry(this.opts.map);
+      this.opts.minimapCamera.panBy(this.minimapLastX, this.minimapLastY, e.clientX, e.clientY, geo, this.opts.map);
+      this.minimapLastX = e.clientX;
+      this.minimapLastY = e.clientY;
+      if (
+        Math.abs(e.clientX - this.minimapDragStartX) + Math.abs(e.clientY - this.minimapDragStartY) >
+        DRAG_MOVE_THRESHOLD
+      ) {
+        this.minimapDragMoved = true;
+      }
+      this.opts.onRedraw();
+      return;
+    }
+
     if (this.dragging) {
       this.opts.camera.pan(e.clientX - this.lastX, e.clientY - this.lastY);
       this.lastX = e.clientX;
@@ -145,6 +344,17 @@ export class AdventureView {
 
     // Ignore pointer updates when hovering over HTML UI overlays.
     if (e.target !== this.opts.canvas) return;
+
+    if (isPointInMinimap(e.clientX, e.clientY, getMinimapGeometry(this.opts.map))) {
+      this.pendingPointer = null;
+      if (this.hover) {
+        this.hover = null;
+        this.updatePath();
+        this.opts.onHudUpdate();
+        this.opts.onRedraw();
+      }
+      return;
+    }
 
     this.pendingPointer = { x: e.clientX, y: e.clientY };
     if (!this.pointerFrameRequested) {
@@ -213,6 +423,27 @@ export class AdventureView {
 
   private onClick(e: MouseEvent): void {
     this.lastClickDebug.reason = "";
+
+    const minimapGeo = getMinimapGeometry(this.opts.map);
+    const inMinimap = isPointInMinimap(e.clientX, e.clientY, minimapGeo);
+    if (inMinimap) {
+      if (this.minimapDragMoved || this.movedDuringDrag) {
+        this.lastClickDebug.reason = "minimap_drag";
+        this.minimapDragMoved = false;
+        return;
+      }
+      const world = this.opts.minimapCamera.screenToWorld(e.clientX, e.clientY, minimapGeo);
+      this.centerOn(world.q, world.r);
+      this.lastClickDebug.reason = "minimap_navigate";
+      this.opts.onRedraw();
+      return;
+    }
+
+    if (this.minimapDragMoved) {
+      this.lastClickDebug.reason = "minimap_drag";
+      this.minimapDragMoved = false;
+      return;
+    }
 
     if (this.opts.getCharterMode?.() && this.opts.getValidCharterHexes?.()) {
       const t = this.opts.renderer.hoverFromScreen(e.clientX, e.clientY);
@@ -483,6 +714,12 @@ export class AdventureView {
   private onWheel(e: WheelEvent): void {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    const minimapGeo = getMinimapGeometry(this.opts.map);
+    if (isPointInMinimap(e.clientX, e.clientY, minimapGeo)) {
+      this.opts.minimapCamera.zoomAt(e.clientX, e.clientY, factor, minimapGeo, this.opts.map);
+      this.opts.onRedraw();
+      return;
+    }
     this.opts.camera.zoomAt(e.clientX, e.clientY, factor);
     this.opts.onRedraw();
   }
