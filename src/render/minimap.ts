@@ -74,9 +74,24 @@ export class MinimapCamera {
     this.panR = (map.height - 1) / 2;
   }
 
-  private clampPan(map: GameMap): void {
-    this.panQ = Math.max(0, Math.min(map.width - 1, this.panQ));
-    this.panR = Math.max(0, Math.min(map.height - 1, this.panR));
+  private clampPan(map: GameMap, geo: MinimapGeometry): void {
+    const qHalfSpan = geo.w / (2 * (geo.baseScale * this.zoom));
+    if (qHalfSpan * 2 >= map.width - 1) {
+      this.panQ = (map.width - 1) / 2;
+    } else {
+      const qMin = qHalfSpan;
+      const qMax = map.width - 1 - qHalfSpan;
+      this.panQ = Math.max(qMin, Math.min(qMax, this.panQ));
+    }
+
+    const rHalfSpan = geo.h / (2 * (geo.baseScale * this.zoom));
+    if (rHalfSpan * 2 >= map.height - 1) {
+      this.panR = (map.height - 1) / 2;
+    } else {
+      const rMin = rHalfSpan;
+      const rMax = map.height - 1 - rHalfSpan;
+      this.panR = Math.max(rMin, Math.min(rMax, this.panR));
+    }
   }
 
   /** World (q, r) -> pre-rotation screen point (the canvas rotation transform handles the twist at draw time). */
@@ -107,7 +122,7 @@ export class MinimapCamera {
     const after = this.screenToWorld(x, y, geo);
     this.panQ += before.q - after.q;
     this.panR += before.r - after.r;
-    this.clampPan(map);
+    this.clampPan(map, geo);
   }
 
   /** Drags the minimap's own view so the world point under (fromX, fromY) ends up under (toX, toY). */
@@ -116,7 +131,7 @@ export class MinimapCamera {
     const after = this.screenToWorld(toX, toY, geo);
     this.panQ += before.q - after.q;
     this.panR += before.r - after.r;
-    this.clampPan(map);
+    this.clampPan(map, geo);
   }
 
   /**
@@ -138,7 +153,7 @@ export class MinimapCamera {
     const after = this.screenToWorld(midX, midY, geo);
     this.panQ += anchor.q - after.q;
     this.panR += anchor.r - after.r;
-    this.clampPan(map);
+    this.clampPan(map, geo);
   }
 }
 
