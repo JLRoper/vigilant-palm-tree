@@ -30,7 +30,6 @@ export class ViewManager {
   }
 
   initializeAdventureView(
-    hudEl: HTMLElement,
     opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw" | "getPathPreviewLock" | "setPathPreviewLock" | "onStartCharter" | "getCharterMode" | "setCharterMode" | "getValidCharterHexes">,
   ): void {
     if (this.view) {
@@ -38,7 +37,6 @@ export class ViewManager {
     }
     this.view = new AdventureView({
       canvas: this.canvas,
-      hud: hudEl,
       renderer: this.renderer,
       map: this.renderer.map,
       camera: this.camera,

@@ -24,7 +24,6 @@ export class GameEngine {
   // Infrastructure
   private spriteProvider: SpriteProvider = createDefaultProvider(HERO_PROCEDURAL_DRAWERS);
   private canvas: HTMLCanvasElement;
-  private hudEl: HTMLElement;
   private toolbarEl: HTMLElement;
 
   // Managers
@@ -43,10 +42,9 @@ export class GameEngine {
 
   constructor() {
     this.canvas = document.getElementById("game") as HTMLCanvasElement;
-    this.hudEl = document.getElementById("hud")!;
     this.toolbarEl = document.getElementById("toolbar")!;
     this.view = new ViewManager(this.canvas, this.spriteProvider);
-    this.ui = new UIManager(this.hudEl, this.toolbarEl, this.spriteProvider);
+    this.ui = new UIManager(this.toolbarEl, this.spriteProvider);
     this.actions = new GameActions(this.state, this.session);
     this.sessions = new GameSessionManager(
       this.session, this.state, this.view, this.ui,
@@ -106,7 +104,7 @@ export class GameEngine {
 
   private initRendering(): void {
     this.view.initializeRenderer(this.gameMap);
-    this.view.initializeAdventureView(this.hudEl, {
+    this.view.initializeAdventureView({
       heroes: () => this.state.getHeroesMap(),
       getGameState: () => this.state.getState(),
       getTurnController: () => this.state.getTurnController(),
@@ -123,7 +121,6 @@ export class GameEngine {
   }
 
   private initUI(): void {
-    this.ui.initHud();
     this.ui.initToolbar(this.session, this.state, () => this.getCalendar(), {
       onNew: (opts) => void this.sessions.handleNewGame(opts).then(() => this.fullFrame()),
       onLoad: (loaded, tiles) => void this.sessions.loadGame(loaded, tiles).then(() => {
@@ -347,10 +344,6 @@ export class GameEngine {
     this.ui.refreshHud(
       this.state.getState(),
       this.state.getHeroesMap(),
-      this.state.getSettlementsMap(),
-      this.view.getHover(),
-      this.gameMap,
-      this.view.camera,
       this.session.isBackendOk(),
       this.session.getSaveStatus(),
       this.session.getLastSavedAt(),
