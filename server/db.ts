@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const pool = new Pool({
   host: process.env.PGHOST ?? "localhost",
-  port: Number(process.env.PGPORT ?? 5432),
+  port: Number(process.env.DB_PORT ?? process.env.PGPORT ?? 5432),
   user: process.env.PGUSER ?? "gameuser",
   password: process.env.PGPASSWORD ?? "gamepass",
   database: process.env.PGDATABASE ?? "game_poc",
