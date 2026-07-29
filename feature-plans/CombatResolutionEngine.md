@@ -150,6 +150,14 @@ during implementation:
 
 ## Open decisions to resolve during this phase
 
+- Special abilities vs. plain stat-comparison: several seeded units in
+  `unit_types` imply mechanics beyond attack/defense/health/speed —
+  `monk` heals, `hydra` "grows back twofold" when hit, `black_dragon` has
+  a breath attack (likely AoE). GDD §9's locked resolution model is plain
+  "stat-comparison with unit-type counters," with no ability system
+  described. Decide whether these are just flavor text to trim/ignore for
+  v1, or whether an ability hook needs to be part of the resolver's
+  design from the start (harder to retrofit than to include up front).
 - Retreat granularity for platoons: does "any individual unit can
   self-retreat at 15% loss" (GDD §9/MANUAL.md) apply to a whole platoon,
   or to one unit-type entry's count within a platoon? Blocks the
