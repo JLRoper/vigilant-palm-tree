@@ -1,0 +1,126 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  attackWithPlatoon,
+  finalizeManualBattle,
+  getCombatant,
+  getMovementRange,
+  getValidAttackTargets,
+  hasLineOfSight,
+  isBattleOver,
+  movePlatoon,
+  startManualBattle,
+} from "../../shared/combat/manualBattle";
+import { ARMY_STACK_SLOTS, type Platoon, type UnitType } from "../../src/state/units";
+
+const unitTypes: Record<string, UnitType> = {
+  footman: { id: "footman", name: "Footman", attack: 5, defence: 5, health: 20, speed: 3, description: "", advantageType: "infantry" },
+  bowman: { id: "bowman", name: "Bowman", attack: 5, defence: 2, health: 10, speed: 3, description: "", advantageType: "ranged" },
+  weak: { id: "weak", name: "Weak", attack: 1, defence: 1, health: 5, speed: 1, description: "", advantageType: "cavalry" },
+  hero: { id: "hero", name: "Hero", attack: 200, defence: 0, health: 100, speed: 5, description: "", advantageType: "infantry" },
+};
+
+function makePlatoons(entries: { unitTypeId: string; count: number }[]): Platoon[] {
+  const out: Platoon[] = [{ entries }];
+  while (out.length < ARMY_STACK_SLOTS) out.push({ entries: [] });
+  return out;
+}
+
+test("getMovementRange: bounded by speed and blocked by obstacles", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+
+  const open = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: { cols: 7, rows: 1 },
+    fixedObstacles: [],
+  });
+  const openActor = getCombatant(open, "attacker", 0)!;
+  const openRange = getMovementRange(open, openActor);
+  assert.equal(openRange.length, 3, "footman has speed 3, should reach exactly 3 hexes along the open row");
+  assert.ok(openRange.some((h) => h.q === 3 && h.r === 0));
+  assert.ok(!openRange.some((h) => h.q === 4 && h.r === 0), "beyond speed range");
+
+  const blocked = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: { cols: 7, rows: 1 },
+    fixedObstacles: [{ q: 2, r: 0, impassable: true }],
+  });
+  const blockedActor = getCombatant(blocked, "attacker", 0)!;
+  const blockedRange = getMovementRange(blocked, blockedActor);
+  assert.ok(!blockedRange.some((h) => h.q === 3 && h.r === 0), "obstacle at q=2 should block the path to q=3");
+});
+
+test("hasLineOfSight: blocked by an obstacle directly between shooter and target", () => {
+  const attacker = makePlatoons([{ unitTypeId: "bowman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+
+  const clear = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 7, rows: 1 }, fixedObstacles: [] });
+  assert.equal(hasLineOfSight(clear.grid, { q: 0, r: 0 }, { q: 6, r: 0 }), true);
+
+  const blocked = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: { cols: 7, rows: 1 },
+    fixedObstacles: [{ q: 3, r: 0, impassable: true }],
+  });
+  assert.equal(hasLineOfSight(blocked.grid, { q: 0, r: 0 }, { q: 6, r: 0 }), false);
+});
+
+test("attackWithPlatoon: melee rejected when not adjacent, ranged rejected beyond RANGED_ATTACK_RANGE", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  // Default 15x11 grid deploys the two sides on opposite outer columns —
+  // far apart, well outside both melee adjacency and ranged range.
+  const state = startManualBattle(attacker, defender, { unitTypes, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  assert.equal(getValidAttackTargets(state, actor).length, 0);
+  assert.equal(attackWithPlatoon(state, "attacker", 0, 0), false);
+
+  const rangedAttacker = makePlatoons([{ unitTypeId: "bowman", count: 5 }]);
+  const rangedState = startManualBattle(rangedAttacker, defender, {
+    unitTypes,
+    grid: { cols: 7, rows: 1 },
+    fixedObstacles: [],
+  });
+  // Distance here is exactly 6 (== RANGED_ATTACK_RANGE), so this should succeed.
+  const rangedActor = getCombatant(rangedState, "attacker", 0)!;
+  assert.equal(getValidAttackTargets(rangedState, rangedActor).length, 1);
+  assert.equal(attackWithPlatoon(rangedState, "attacker", 0, 0), true);
+});
+
+test("isBattleOver / finalizeManualBattle: detects a wipeout and reports the winner", () => {
+  const attacker = makePlatoons([{ unitTypeId: "hero", count: 1 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 2, rows: 1 }, fixedObstacles: [] });
+
+  assert.equal(isBattleOver(state), false);
+  const success = attackWithPlatoon(state, "attacker", 0, 0);
+  assert.equal(success, true);
+  assert.equal(isBattleOver(state), true);
+
+  const result = finalizeManualBattle(state);
+  assert.equal(result.winner, "attacker");
+  assert.equal(result.defenderOutcome, "lost_all_troops");
+});
+
+test("movePlatoon: a platoon gets exactly one move per turn, not a fresh range each step", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]); // speed 3
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 12, rows: 1 }, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+
+  const firstRange = getMovementRange(state, actor);
+  assert.equal(firstRange.length, 3, "footman (speed 3) should reach exactly 3 hexes on the open row");
+
+  assert.equal(movePlatoon(state, "attacker", 0, { q: 3, r: 0 }), true);
+  assert.equal(actor.position.q, 3);
+
+  // Having already moved this turn, it must not be able to move again, even
+  // to a hex that would have been in range from its original position, and
+  // getMovementRange must report no further options (this is the bug the
+  // user reported: re-selecting after a move re-calculated a fresh range
+  // from the new position, letting a platoon "walk" indefinitely per turn).
+  assert.deepEqual(getMovementRange(state, actor), []);
+  assert.equal(movePlatoon(state, "attacker", 0, { q: 4, r: 0 }), false);
+  assert.equal(actor.position.q, 3, "position must be unchanged after the rejected second move");
+});

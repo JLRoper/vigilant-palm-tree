@@ -14,6 +14,7 @@
     "preview": "vite preview",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
+    "dev:status": "pwsh scripts/dev-status.ps1",
     "pretest": "pwsh scripts/ports.ps1",
     "test": "tsx --env-file=.env test/smoke.ts",
     "test:cityview": "pwsh scripts/ports.ps1 && tsx --env-file=.env test/cityView.test.ts",

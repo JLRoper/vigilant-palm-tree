@@ -336,8 +336,9 @@ this doc is implementation-ready.
   first real use of a `shared/`-style boundary in this repo.
 - `shared/combatConfig.ts` — the tunable-numbers module from "Tunability"
   above (advantage multiplier, triangle, retreat/counterattack percentages).
-- `server/migrations/003_unit_counters.sql` (or extend `002`) for the
-  `advantage_type` column.
+- `server/migrations/005_unit_counters.sql` for the `advantage_type` column
+  (003 and 004 are already taken by `003_resource_tables.sql` and
+  `004_game_assets.sql`).
 - `server/routes.ts` — replace the `resolve-battle` handler's body with a
   call into the resolver.
 - `src/state/units.ts` — replace `UnitStack` with the `Platoon`/

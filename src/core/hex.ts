@@ -16,7 +16,7 @@ export function pixelToAxial(x: number, y: number, size = HEX_SIZE): Axial {
   return axialRound(q, r);
 }
 
-function axialRound(qf: number, rf: number): Axial {
+export function axialRound(qf: number, rf: number): Axial {
   const sf = -qf - rf;
   let q = Math.round(qf);
   let r = Math.round(rf);

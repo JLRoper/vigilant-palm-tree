@@ -118,7 +118,6 @@ $serviceBases = [ordered]@{
     API_PORT    = 4000
     WS_PORT     = 4100
     CLIENT_PORT = 5173
-    DB_PORT     = 5432
     REDIS_PORT  = 6379
 }
 

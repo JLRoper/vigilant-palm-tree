@@ -7,7 +7,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const pool = new Pool({
   host: process.env.PGHOST ?? "localhost",
-  port: Number(process.env.DB_PORT ?? process.env.PGPORT ?? 5432),
+  // The db runs in a single shared docker-compose container on a fixed
+  // host port (see docker-compose.yml), not the per-worktree dynamic
+  // DB_PORT that scripts/ports.ps1 writes to .env - so it's intentionally
+  // not read here. PGPORT remains available as an explicit override.
+  port: Number(process.env.PGPORT ?? 5432),
   user: process.env.PGUSER ?? "gameuser",
   password: process.env.PGPASSWORD ?? "gamepass",
   database: process.env.PGDATABASE ?? "game_poc",
@@ -36,6 +40,11 @@ export async function initSchema(): Promise<void> {
     "utf8"
   );
   await pool.query(assetsMigration);
+  const unitCountersMigration = readFileSync(
+    join(__dirname, "migrations", "005_unit_counters.sql"),
+    "utf8"
+  );
+  await pool.query(unitCountersMigration);
 }
 
 export async function withTransaction<T>(

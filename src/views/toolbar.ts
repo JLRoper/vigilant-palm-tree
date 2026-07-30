@@ -4,6 +4,7 @@ import { forgetGame, listUserGames, type UserGameEntry } from "../io/userGames";
 import type { GameState } from "../state/gameState";
 import { CASTLE_COUNT_MAX } from "../map/castlePlacement";
 import { openSettingsMenu, type MapInfo } from "./settingsMenu";
+import { openTestBattleSetup } from "./testBattleSetup";
 import {
   menuTheme,
   openCenteredModal,
@@ -117,6 +118,7 @@ export class Toolbar {
   private heroesBtn: HTMLButtonElement;
   private settlementsBtn: HTMLButtonElement;
   private charterBtn: HTMLButtonElement;
+  private testBattleBtn: HTMLButtonElement;
   private calendarEl: HTMLElement;
   private calendarActiveEl: HTMLElement;
   private busy = false;
@@ -396,10 +398,18 @@ export class Toolbar {
       this.opts.callbacks.onStartCharter?.();
     });
 
+    this.testBattleBtn = this.makeButton("Test Battle", false);
+    this.testBattleBtn.title = "Sandbox: player vs AI manual-fight arena (no effect on your real game)";
+    this.testBattleBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      openTestBattleSetup();
+    });
+
     buttonsRow.appendChild(this.endTurnBtn);
     buttonsRow.appendChild(this.heroesBtn);
     buttonsRow.appendChild(this.settlementsBtn);
     buttonsRow.appendChild(this.charterBtn);
+    buttonsRow.appendChild(this.testBattleBtn);
     contentWrap.appendChild(buttonsRow);
 
     this.root.appendChild(contentWrap);
@@ -419,6 +429,7 @@ export class Toolbar {
     this.setEnabled(this.endTurnBtn, endTurnOk && !this.busy);
     this.setEnabled(this.heroesBtn, hasGameState && !this.busy);
     this.setEnabled(this.settlementsBtn, hasGameState && !this.busy);
+    this.setEnabled(this.testBattleBtn, !this.busy);
 
     if (this.charterBtn) {
       const canCharter = hasGameState && !this.busy && (this.opts.callbacks.canStartCharter?.() ?? false);

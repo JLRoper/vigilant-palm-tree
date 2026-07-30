@@ -8,7 +8,7 @@ import {
   cancelMove,
   detectAdjacentEnemy,
   startBattle,
-  resolveBattle,
+  endBattlePhase,
   endTurn,
   applyEndOfTurn,
   applyEndOfTurnDetailed,
@@ -300,22 +300,24 @@ test("startBattle transitions to BATTLE phase", () => {
   assert.equal(next.selectedHeroId, null);
 });
 
-test("resolveBattle transfers defender.gold to attacker.gold (winner takes all)", () => {
+test("endBattlePhase transitions BATTLE back to PLAYER_TURN without touching heroes", () => {
   const s = makeState({
     players: [makePlayer(0, "player", "Human", ["h0"], ["s0"]), makePlayer(1, "ai", "AI", ["h1"], ["s1"])],
     heroes: [makeHero("h0", 0, 2, 2, 7, 10), makeHero("h1", 1, 3, 2, 7, 75)],
     phase: { kind: "BATTLE", attackerId: "h0", defenderId: "h1" },
   });
-  const next = resolveBattle(s);
-  assert.equal(next.heroes.h1, undefined);
-  assert.equal(next.heroes.h0.gold, 85);
+  const next = endBattlePhase(s);
+  // Actual combat resolution (gold transfer, casualties) is server-side —
+  // see server/routes.ts resolve-battle and shared/combat/resolveBattle.ts.
+  assert.equal(next.heroes.h0.gold, 10);
+  assert.equal(next.heroes.h1.gold, 75);
   assert.equal(next.phase.kind, "PLAYER_TURN");
   assert.equal(next.dirty, true);
 });
 
-test("resolveBattle is no-op outside BATTLE phase", () => {
+test("endBattlePhase is no-op outside BATTLE phase", () => {
   const s = makeState();
-  const next = resolveBattle(s);
+  const next = endBattlePhase(s);
   assert.equal(next, s);
 });
 
@@ -804,9 +806,9 @@ test("reorderStack swaps the contents of two occupied slots", () => {
       {
         ...makeHero("h0", 0, 2, 2),
         stacks: [
-          { unitTypeId: "swordsman", count: 12 },
-          { unitTypeId: "archer", count: 8 },
-          { unitTypeId: "cavalry", count: 4 },
+          { entries: [{ unitTypeId: "swordsman", count: 12 }] },
+          { entries: [{ unitTypeId: "archer", count: 8 }] },
+          { entries: [{ unitTypeId: "cavalry", count: 4 }] },
         ],
       },
       makeHero("h1", 1, 18, 4),
@@ -816,9 +818,9 @@ test("reorderStack swaps the contents of two occupied slots", () => {
   assert.equal(result.ok, true);
   if (!result.ok) return;
   const stacks = result.state.heroes.h0.stacks;
-  assert.equal(stacks[0].unitTypeId, "cavalry");
-  assert.equal(stacks[1].unitTypeId, "archer");
-  assert.equal(stacks[2].unitTypeId, "swordsman");
+  assert.equal(stacks[0].entries[0].unitTypeId, "cavalry");
+  assert.equal(stacks[1].entries[0].unitTypeId, "archer");
+  assert.equal(stacks[2].entries[0].unitTypeId, "swordsman");
   assert.equal(result.state.heroes.h0.stacks.length, 3);
 });
 
@@ -828,9 +830,9 @@ test("reorderStack dragging onto an empty slot leaves source empty (swap with em
       {
         ...makeHero("h0", 0, 2, 2),
         stacks: [
-          { unitTypeId: "archer", count: 8 },
-          { unitTypeId: null, count: 0 },
-          { unitTypeId: null, count: 0 },
+          { entries: [{ unitTypeId: "archer", count: 8 }] },
+          { entries: [] },
+          { entries: [] },
         ],
       },
       makeHero("h1", 1, 18, 4),
@@ -840,10 +842,9 @@ test("reorderStack dragging onto an empty slot leaves source empty (swap with em
   assert.equal(result.ok, true);
   if (!result.ok) return;
   const stacks = result.state.heroes.h0.stacks;
-  assert.equal(stacks[0].unitTypeId, null);
-  assert.equal(stacks[0].count, 0);
-  assert.equal(stacks[2].unitTypeId, "archer");
-  assert.equal(stacks[2].count, 8);
+  assert.equal(stacks[0].entries.length, 0);
+  assert.equal(stacks[2].entries[0].unitTypeId, "archer");
+  assert.equal(stacks[2].entries[0].count, 8);
 });
 
 test("reorderStack with from === to is a successful no-op (state unchanged)", () => {
@@ -852,8 +853,8 @@ test("reorderStack with from === to is a successful no-op (state unchanged)", ()
       {
         ...makeHero("h0", 0, 2, 2),
         stacks: [
-          { unitTypeId: "swordsman", count: 12 },
-          { unitTypeId: "archer", count: 8 },
+          { entries: [{ unitTypeId: "swordsman", count: 12 }] },
+          { entries: [{ unitTypeId: "archer", count: 8 }] },
         ],
       },
       makeHero("h1", 1, 18, 4),
@@ -862,8 +863,8 @@ test("reorderStack with from === to is a successful no-op (state unchanged)", ()
   const result = reorderStack(s, "h0", 1, 1);
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  assert.equal(result.state.heroes.h0.stacks[0].unitTypeId, "swordsman");
-  assert.equal(result.state.heroes.h0.stacks[1].unitTypeId, "archer");
+  assert.equal(result.state.heroes.h0.stacks[0].entries[0].unitTypeId, "swordsman");
+  assert.equal(result.state.heroes.h0.stacks[1].entries[0].unitTypeId, "archer");
 });
 
 test("reorderStack rejects out-of-range indices", () => {
@@ -872,8 +873,8 @@ test("reorderStack rejects out-of-range indices", () => {
       {
         ...makeHero("h0", 0, 2, 2),
         stacks: [
-          { unitTypeId: "swordsman", count: 12 },
-          { unitTypeId: "archer", count: 8 },
+          { entries: [{ unitTypeId: "swordsman", count: 12 }] },
+          { entries: [{ unitTypeId: "archer", count: 8 }] },
         ],
       },
       makeHero("h1", 1, 18, 4),
@@ -890,19 +891,19 @@ test("reorderStack leaves other heroes untouched", () => {
       {
         ...makeHero("h0", 0, 2, 2),
         stacks: [
-          { unitTypeId: "swordsman", count: 12 },
-          { unitTypeId: "archer", count: 8 },
+          { entries: [{ unitTypeId: "swordsman", count: 12 }] },
+          { entries: [{ unitTypeId: "archer", count: 8 }] },
         ],
       },
       {
         ...makeHero("h1", 1, 18, 4),
-        stacks: [{ unitTypeId: "griffin", count: 3 }],
+        stacks: [{ entries: [{ unitTypeId: "griffin", count: 3 }] }],
       },
     ],
   });
   const result = reorderStack(s, "h0", 0, 1);
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  assert.equal(result.state.heroes.h1.stacks[0].unitTypeId, "griffin");
-  assert.equal(result.state.heroes.h1.stacks[0].count, 3);
+  assert.equal(result.state.heroes.h1.stacks[0].entries[0].unitTypeId, "griffin");
+  assert.equal(result.state.heroes.h1.stacks[0].entries[0].count, 3);
 });
