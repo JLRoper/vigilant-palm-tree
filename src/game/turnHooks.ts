@@ -58,6 +58,9 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
           defenderId: cached.defenderId,
           state,
         });
+        console.log(
+          `[combat] battle resolved: winner=${result.battle.winner} attacker=${result.battle.attackerOutcome} defender=${result.battle.defenderOutcome} rounds=${result.battle.rounds}`,
+        );
         return {
           ...state,
           players: result.players,

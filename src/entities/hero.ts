@@ -1,6 +1,6 @@
 import { Axial, axialToPixel } from "../core/hex";
 import type { Faction as StateFaction, HeroId, HeroState, PlayerId } from "../state/gameState";
-import { normalizeStacks, type UnitStack } from "../state/units";
+import { normalizePlatoons, type Platoon } from "../state/units";
 import { settings } from "../state/settings";
 import type { HorseVariant } from "../state/settings";
 
@@ -64,7 +64,7 @@ export class Hero {
   trail: Axial[];
   gold: number;
   troops: number;
-  stacks: UnitStack[];
+  stacks: Platoon[];
   facingDirection: HeroDirection = "n";
   isChartering = false;
   charterId: string | null = null;
@@ -81,7 +81,7 @@ export class Hero {
     trail?: Axial[],
     gold = 0,
     troops = 1,
-    stacks?: UnitStack[],
+    stacks?: Platoon[],
     horseVariant: HorseVariant = "bubbly",
   ) {
     this.id = id;
@@ -96,7 +96,7 @@ export class Hero {
     this.trail = trail ?? [{ q, r }];
     this.gold = gold;
     this.troops = troops;
-    this.stacks = normalizeStacks(stacks);
+    this.stacks = normalizePlatoons(stacks);
     this.horseVariant = horseVariant;
   }
 
@@ -173,7 +173,7 @@ export class Hero {
     this.trail = (s.trail ?? []).map((p) => ({ q: p.q, r: p.r }));
     this.gold = s.gold ?? 0;
     this.troops = s.troops ?? 1;
-    this.stacks = normalizeStacks(s.stacks);
+    this.stacks = normalizePlatoons(s.stacks);
     this.isChartering = s.isChartering ?? false;
     this.charterId = s.charterId ?? null;
     this.horseVariant = s.horseVariant;
@@ -199,7 +199,7 @@ export class Hero {
       trail: this.trail.map((p) => ({ q: p.q, r: p.r })),
       gold: this.gold,
       troops: this.troops,
-      stacks: normalizeStacks(this.stacks),
+      stacks: normalizePlatoons(this.stacks),
       isChartering: this.isChartering,
       charterId: this.charterId,
       horseVariant: this.horseVariant,

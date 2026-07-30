@@ -6,7 +6,7 @@ import {
   type Player,
   type SettlementState,
 } from "../state/gameState";
-import { demoStacksForPlayer, normalizeStacks } from "../state/units";
+import { demoPlatoonsForPlayer, normalizePlatoons } from "../state/units";
 import type { Game } from "../io/api";
 import type { GameMap } from "../map/gameMap";
 import {
@@ -92,7 +92,7 @@ function makeHeroes(
       trail: [{ q: castle.tile.q, r: castle.tile.r }],
       gold: STARTING_GOLD,
       troops: 1,
-      stacks: demoStacksForPlayer(i),
+      stacks: demoPlatoonsForPlayer(i),
       isChartering: false,
       charterId: null,
       horseVariant: variantIds[Math.floor(Math.random() * variantIds.length)],
@@ -221,7 +221,7 @@ function backfillHero(h: Partial<import("../state/gameState").HeroState> & { id:
     trail: h.trail ?? [{ q: h.q, r: h.r }],
     gold: h.gold ?? 0,
     troops: h.troops ?? 1,
-    stacks: normalizeStacks(h.stacks),
+    stacks: normalizePlatoons(h.stacks),
     isChartering: h.isChartering ?? false,
     charterId: h.charterId ?? null,
     id: h.id,

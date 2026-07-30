@@ -9,7 +9,7 @@ import {
   cancelMove as cancelMoveReducer,
   captureSettlement as captureSettlementReducer,
   startBattle as startBattleReducer,
-  resolveBattle as resolveBattleReducer,
+  endBattlePhase as endBattlePhaseReducer,
   endTurn as endTurnReducer,
   applyEndOfTurn as applyEndOfTurnReducer,
   advanceRound as advanceRoundReducer,
@@ -29,6 +29,7 @@ import {
 } from "./gameState";
 import { findPath } from "../map/pathfinding";
 import { hexDistance } from "../core/hex";
+import { platoonsHaveTroops } from "./units";
 import type { GameMap } from "../map/gameMap";
 import { computeSettlementRates } from "../economy/settlementRates";
 import type { HorseVariant } from "./settings";
@@ -354,15 +355,20 @@ export class TurnController {
 
   async resolveCurrentBattle(): Promise<void> {
     if (this.state.phase.kind !== "BATTLE") return;
-    const { defenderId } = this.state.phase;
-    const defender = this.state.heroes[defenderId];
-    this.state = resolveBattleReducer(this.state);
-    bus.emit({ type: "battle:resolved", attackerId: this.state.phase.kind === "BATTLE" ? this.state.phase.attackerId : "", defenderId, attackerSurvived: true });
-    if (defender?.isChartering) {
+    const { attackerId, defenderId } = this.state.phase;
+    // The server is authoritative for combat resolution (it owns the
+    // unit-type/counter catalog), so fetch its result before closing out the
+    // BATTLE phase locally.
+    const resolved = await this.hooks.onBattleResolved(this.state);
+    this.state = endBattlePhaseReducer(resolved);
+    const attackerAfter = this.state.heroes[attackerId];
+    const defenderAfter = this.state.heroes[defenderId];
+    const attackerSurvived = attackerAfter ? platoonsHaveTroops(attackerAfter.stacks) : false;
+    bus.emit({ type: "battle:resolved", attackerId, defenderId, attackerSurvived });
+    const defenderDefeated = defenderAfter ? !platoonsHaveTroops(defenderAfter.stacks) : true;
+    if (defenderDefeated && defenderAfter?.isChartering) {
       this.state = cleanupDefeatedHeroChartersReducer(this.state, defenderId);
     }
-    const resolved = await this.hooks.onBattleResolved(this.state);
-    this.state = resolved;
     this.hooks.logEvent({
       type: "battle_resolved",
       payload: {},

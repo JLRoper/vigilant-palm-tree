@@ -36,6 +36,11 @@ export async function initSchema(): Promise<void> {
     "utf8"
   );
   await pool.query(assetsMigration);
+  const unitCountersMigration = readFileSync(
+    join(__dirname, "migrations", "005_unit_counters.sql"),
+    "utf8"
+  );
+  await pool.query(unitCountersMigration);
 }
 
 export async function withTransaction<T>(

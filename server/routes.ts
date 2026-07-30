@@ -12,7 +12,10 @@ import type {
   SettlementState,
   WarehouseResource,
 } from "../src/state/gameState";
-import type { UnitType } from "../src/state/units";
+import type { Platoon, UnitType } from "../src/state/units";
+import { normalizePlatoons } from "../src/state/units";
+import { resolveBattle as resolveBattleEngine } from "../shared/combat/resolveBattle";
+import type { BattleResult } from "../shared/combat/types";
 import { assetRouter } from "./assetRoutes";
 
 export const router = Router();
@@ -102,12 +105,33 @@ router.get("/health", async (_req, res) => {
   res.json({ ok: r.rows[0].ok === 1 });
 });
 
+type UnitTypeRow = {
+  id: string;
+  name: string;
+  attack: number;
+  defence: number;
+  health: number;
+  speed: number;
+  description: string;
+  advantage_type: UnitType["advantageType"];
+};
+
 router.get("/units", async (_req, res) => {
   try {
-    const r = await pool.query<UnitType>(
-      `SELECT id, name, attack, defence, health, speed, description FROM unit_types ORDER BY attack ASC, id ASC`
+    const r = await pool.query<UnitTypeRow>(
+      `SELECT id, name, attack, defence, health, speed, description, advantage_type FROM unit_types ORDER BY attack ASC, id ASC`
     );
-    res.json(r.rows);
+    const units: UnitType[] = r.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      attack: row.attack,
+      defence: row.defence,
+      health: row.health,
+      speed: row.speed,
+      description: row.description,
+      advantageType: row.advantage_type,
+    }));
+    res.json(units);
   } catch (err) {
     console.error("[api] GET /units threw:", err);
     res.status(500).json({
@@ -635,6 +659,23 @@ router.post("/games/:name/resolve-battle", async (req, res) => {
         return { status: 404 as const, error: "hero not found" };
       }
 
+      const unitTypesResult = await client.query<UnitTypeRow>(
+        `SELECT id, name, attack, defence, health, speed, description, advantage_type FROM unit_types`
+      );
+      const unitTypes: Record<string, UnitType> = {};
+      for (const r of unitTypesResult.rows) {
+        unitTypes[r.id] = {
+          id: r.id,
+          name: r.name,
+          attack: r.attack,
+          defence: r.defence,
+          health: r.health,
+          speed: r.speed,
+          description: r.description,
+          advantageType: r.advantage_type,
+        };
+      }
+
       const players: Player[] = (state.players as Player[]).map((p) => ({
         id: p.id,
         faction: p.faction,
@@ -642,22 +683,33 @@ router.post("/games/:name/resolve-battle", async (req, res) => {
         heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
         settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
       }));
-      const heroes: Record<string, HeroState> = { ...row.heroes };
-      const lootedGold = Number(defendersHero.gold) || 0;
-      if (heroes[attackerId]) {
-        heroes[attackerId] = {
-          ...heroes[attackerId],
-          gold: (Number(heroes[attackerId].gold) || 0) + lootedGold,
-        };
-      }
-      delete heroes[defenderId];
 
-      // Remove defender from its owner's heroIds. Gold transfer happens via heroes JSONB above.
-      for (const p of players) {
-        if (p.id === defendersHero.ownerId) {
-          p.heroIds = p.heroIds.filter((id) => id !== defenderId);
-        }
-      }
+      const attackerPlatoons: Platoon[] = normalizePlatoons(attackersHero.stacks);
+      const defenderPlatoons: Platoon[] = normalizePlatoons(defendersHero.stacks);
+
+      const battle: BattleResult = resolveBattleEngine(attackerPlatoons, defenderPlatoons, {
+        obstacleSeed: (row.id * 2654435761 + Date.now()) >>> 0,
+        unitTypes,
+      });
+
+      // Hero entities are never deleted here — a no-retreat loss just empties
+      // their platoons. What happens to a fully-defeated hero (capture,
+      // ransom, etc.) is left to a later phase per
+      // feature-plans/CombatResolutionEngine.md "Out of scope".
+      const lootedGold = battle.defenderOutcome === "lost_all_troops" ? Number(defendersHero.gold) || 0 : 0;
+      const heroes: Record<string, HeroState> = {
+        ...row.heroes,
+        [attackerId]: {
+          ...attackersHero,
+          gold: (Number(attackersHero.gold) || 0) + lootedGold,
+          stacks: battle.attackerPlatoons,
+        },
+        [defenderId]: {
+          ...defendersHero,
+          gold: lootedGold > 0 ? 0 : defendersHero.gold,
+          stacks: battle.defenderPlatoons,
+        },
+      };
 
       const legacyGold = sumPlayerGold(players, heroes, row.settlements);
 
@@ -682,19 +734,23 @@ router.post("/games/:name/resolve-battle", async (req, res) => {
         `INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3::jsonb)`,
         [
           row.id,
-          "combat_won",
+          "combat_resolved",
           JSON.stringify({
             attackerId,
             defenderId,
             attackerOwnerId: attackersHero.ownerId,
+            winner: battle.winner,
+            attackerOutcome: battle.attackerOutcome,
+            defenderOutcome: battle.defenderOutcome,
             rewardGold: lootedGold,
+            rounds: battle.rounds,
           }),
         ]
       );
 
       return {
         status: 200 as const,
-        result: { players, heroes },
+        result: { players, heroes, battle },
       };
     });
 

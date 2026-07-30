@@ -1,7 +1,7 @@
 import type { GameState, Player, SettlementState } from "../state/gameState";
 import type { Hero } from "../entities/hero";
 import { PopupMenu, menuTheme } from "./menu";
-import { ARMY_STACK_SLOTS, type UnitStack } from "../state/units";
+import { ARMY_STACK_SLOTS, type Platoon } from "../state/units";
 import { catalogReady, catalogFailed, getCachedUnit, loadUnitCatalog } from "../data/unitCatalog";
 import { getUnitImageUrl } from "../data/unitImages";
 import { HERO_BANNERS } from "../render/assetDescriptors";
@@ -72,7 +72,7 @@ export class HeroInfoMenu {
   private armyChevron: HTMLSpanElement | null = null;
   private armyCollapsedGrid: HTMLDivElement | null = null;
   private armyExpandedList: HTMLDivElement | null = null;
-  private armyTiles: { tile: HTMLDivElement; img: HTMLImageElement; count: HTMLSpanElement }[] = [];
+  private armyTiles: { tile: HTMLDivElement; img: HTMLImageElement; count: HTMLSpanElement; extra: HTMLSpanElement }[] = [];
 
   constructor(opts: HeroInfoMenuOptions) {
     this.onTransfer = opts.onTransfer;
@@ -365,10 +365,26 @@ export class HeroInfoMenu {
         display: "none",
       });
       tile.appendChild(count);
+      const extra = document.createElement("span");
+      Object.assign(extra.style, {
+        position: "absolute",
+        left: "2px",
+        top: "1px",
+        fontSize: "9px",
+        fontWeight: "700",
+        lineHeight: "1",
+        padding: "1px 3px",
+        borderRadius: "3px",
+        background: "rgba(0,0,0,0.65)",
+        color: "#ffcc00",
+        pointerEvents: "none",
+        display: "none",
+      });
+      tile.appendChild(extra);
       tile.title = "";
       this.attachArmyDragHandlers(tile, i);
       armyCollapsedGrid.appendChild(tile);
-      this.armyTiles.push({ tile, img, count });
+      this.armyTiles.push({ tile, img, count, extra });
     }
     armyBlock.appendChild(armyCollapsedGrid);
 
@@ -564,52 +580,70 @@ export class HeroInfoMenu {
     });
   }
 
-  private renderArmy(stacks: UnitStack[]): void {
+  private renderArmy(stacks: Platoon[]): void {
     if (!catalogReady() && !catalogFailed()) {
       // Catalog still loading: kick off a fetch; when it resolves, the HUD
       // refresh tick will call update() again and fill in the rows.
       void loadUnitCatalog();
     }
     for (let i = 0; i < ARMY_STACK_SLOTS; i++) {
-      const stack = stacks[i];
-      const isEmpty = !stack || !stack.unitTypeId || stack.count <= 0;
-      const id = isEmpty ? null : stack!.unitTypeId;
+      const platoon = stacks[i];
+      const entries = (platoon?.entries ?? []).filter((e) => e.count > 0);
+      const isEmpty = entries.length === 0;
+      const primary = isEmpty ? null : entries[0];
+      const id = primary?.unitTypeId ?? null;
       const u = id ? getCachedUnit(id) : null;
+      const totalCount = entries.reduce((sum, e) => sum + e.count, 0);
+      const extraTypes = entries.length - 1;
 
-      // --- Collapsed tile: image + count badge ---
-      const { tile, img, count } = this.armyTiles[i];
+      // --- Collapsed tile: primary unit's image + total count badge, plus a
+      // "+N" badge when the platoon carries more than one unit type. ---
+      const { tile, img, count, extra } = this.armyTiles[i];
       if (isEmpty) {
         img.src = "";
         img.style.display = "none";
         count.style.display = "none";
+        extra.style.display = "none";
         tile.style.opacity = "0.3";
         tile.title = `Slot ${i + 1}: empty`;
       } else {
         img.src = getUnitImageUrl(id);
         img.style.display = "block";
-        count.textContent = String(stack!.count);
+        count.textContent = String(totalCount);
         count.style.display = "block";
         tile.style.opacity = "1";
-        const name = u?.name ?? id!;
-        const stats = u ? ` Â· A ${u.attack} D ${u.defence} H ${u.health} S ${u.speed}` : "";
-        tile.title = `Slot ${i + 1}: ${name} x${stack!.count}${stats}`;
+        if (extraTypes > 0) {
+          extra.textContent = `+${extraTypes}`;
+          extra.style.display = "block";
+        } else {
+          extra.style.display = "none";
+        }
+        const composition = entries
+          .map((e) => `${getCachedUnit(e.unitTypeId)?.name ?? e.unitTypeId} x${e.count}`)
+          .join(", ");
+        tile.title = `Slot ${i + 1}: ${composition}`;
       }
 
-      // --- Expanded row: name + stats + count ---
+      // --- Expanded row: composition + count ---
       const row = this.armyRows[i];
       const nameEl = row.children[1].firstChild as HTMLSpanElement;
       const statsEl = row.children[1].lastChild as HTMLSpanElement;
       const countEl = row.children[2] as HTMLSpanElement;
-      nameEl.textContent = isEmpty ? "â€”" : (id!);
-      countEl.textContent = isEmpty ? "" : String(stack!.count);
+      countEl.textContent = isEmpty ? "" : String(totalCount);
       if (isEmpty) {
+        nameEl.textContent = "—";
         statsEl.textContent = "empty";
-        row.title = "Empty stack";
+        row.title = "Empty platoon";
         row.style.opacity = "0.35";
+      } else if (entries.length > 1) {
+        nameEl.textContent = entries.map((e) => getCachedUnit(e.unitTypeId)?.name ?? e.unitTypeId).join(" + ");
+        statsEl.textContent = entries.map((e) => `${e.count}x`).join(" / ");
+        row.title = `Mixed platoon: ${entries.map((e) => `${getCachedUnit(e.unitTypeId)?.name ?? e.unitTypeId} x${e.count}`).join(", ")}`;
+        row.style.opacity = "0.9";
       } else if (u) {
         nameEl.textContent = u.name;
-        statsEl.textContent = `A ${u.attack} Â· D ${u.defence} Â· H ${u.health} Â· S ${u.speed}`;
-        row.title = `${u.name} â€” ${u.description}`;
+        statsEl.textContent = `A ${u.attack} · D ${u.defence} · H ${u.health} · S ${u.speed}`;
+        row.title = `${u.name} — ${u.description}`;
         row.style.opacity = "0.9";
       } else if (catalogReady() || catalogFailed()) {
         // Catalog resolved but this id isn't in it (unknown unit type).
@@ -619,8 +653,8 @@ export class HeroInfoMenu {
         row.style.opacity = "0.55";
       } else {
         nameEl.textContent = id!;
-        statsEl.textContent = "loadingâ€¦";
-        row.title = "Loading unit catalogâ€¦";
+        statsEl.textContent = "loading…";
+        row.title = "Loading unit catalog…";
         row.style.opacity = "0.55";
       }
     }

@@ -1,4 +1,4 @@
-import { normalizeStacks, type UnitStack } from "./units";
+import { normalizePlatoons, type Platoon } from "./units";
 import {
   buildingUpkeepRequired,
   clampMorale,
@@ -62,7 +62,7 @@ export interface HeroState {
   trail: { q: number; r: number }[];
   gold: number;
   troops: number;
-  stacks: UnitStack[];
+  stacks: Platoon[];
   isChartering: boolean;
   charterId: CharterId | null;
   horseVariant: HorseVariant;
@@ -207,8 +207,8 @@ function defaultPlayers(): Player[] {
 
 function defaultHeroes(): Record<HeroId, HeroState> {
   return {
-    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 300, troops: 1, stacks: normalizeStacks([{ unitTypeId: "swordsman", count: 12 }, { unitTypeId: "archer", count: 8 }, { unitTypeId: "cavalry", count: 4 }]), isChartering: false, charterId: null, horseVariant: "bubbly" },
-    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 300, troops: 1, stacks: normalizeStacks([{ unitTypeId: "crossbowman", count: 10 }, { unitTypeId: "griffin", count: 3 }]), isChartering: false, charterId: null, horseVariant: "shadow" },
+    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 300, troops: 1, stacks: normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 12 }] }, { entries: [{ unitTypeId: "archer", count: 8 }] }, { entries: [{ unitTypeId: "cavalry", count: 4 }] }]), isChartering: false, charterId: null, horseVariant: "bubbly" },
+    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 300, troops: 1, stacks: normalizePlatoons([{ entries: [{ unitTypeId: "crossbowman", count: 10 }] }, { entries: [{ unitTypeId: "griffin", count: 3 }] }]), isChartering: false, charterId: null, horseVariant: "shadow" },
   };
 }
 
@@ -432,7 +432,7 @@ export function reorderStack(
   const tmp = stacks[fromIdx];
   stacks[fromIdx] = stacks[toIdx];
   stacks[toIdx] = tmp;
-  console.debug("[reorderStack] swap", fromIdx, "->", toIdx, "hero=", heroId, "new order=", stacks.map(s => s.unitTypeId ?? "_"));
+  console.debug("[reorderStack] swap", fromIdx, "->", toIdx, "hero=", heroId, "new order=", stacks.map(s => s.entries[0]?.unitTypeId ?? "_"));
   return {
     state: {
       ...state,
@@ -515,26 +515,18 @@ export function startBattle(state: GameState, attackerId: HeroId, defenderId: He
   };
 }
 
-export function resolveBattle(state: GameState): GameState {
+// The actual combat resolution (stat comparison, counters, retreat) is
+// server-authoritative — see POST /games/:name/resolve-battle and
+// shared/combat/resolveBattle.ts — because it needs the DB-backed unit-type
+// catalog. This just closes out the local BATTLE phase once the caller has
+// the server's result in hand; heroes/players are merged in separately.
+export function endBattlePhase(state: GameState): GameState {
   if (state.phase.kind !== "BATTLE") return state;
-  const { attackerId, defenderId } = state.phase;
-  const attacker = state.heroes[attackerId];
-  const defender = state.heroes[defenderId];
-  if (!attacker || !defender) {
-    return { ...state, phase: { kind: "PLAYER_TURN", playerId: state.activePlayerId }, dirty: true };
-  }
-  const newHeroes: Record<HeroId, HeroState> = { ...state.heroes };
-  const lootedGold = defender.gold;
-  newHeroes[attackerId] = { ...attacker, gold: attacker.gold + lootedGold };
-  delete newHeroes[defenderId];
-  let result: GameState = {
+  return {
     ...state,
-    heroes: newHeroes,
     phase: { kind: "PLAYER_TURN", playerId: state.activePlayerId },
     dirty: true,
   };
-  result = cleanupDefeatedHeroCharters(result, defenderId);
-  return result;
 }
 
 export function endTurn(state: GameState): GameState {
@@ -925,7 +917,7 @@ export function recruitHero(
     trail: [{ q: settlement.q, r: settlement.r }],
     gold: 0,
     troops: 1,
-    stacks: normalizeStacks([]),
+    stacks: normalizePlatoons([]),
     isChartering: false,
     charterId: null,
     horseVariant,
