@@ -12,8 +12,8 @@ export const pool = new Pool({
   // DB_PORT that scripts/ports.ps1 writes to .env - so it's intentionally
   // not read here. PGPORT remains available as an explicit override.
   port: Number(process.env.PGPORT ?? 5432),
-  user: process.env.PGUSER ?? "gameuser",
-  password: process.env.PGPASSWORD ?? "gamepass",
+  user: process.env.PGUSER || "gameuser",
+  password: process.env.PGPASSWORD || "gamepass",
   database: process.env.PGDATABASE ?? "game_poc",
 });
 
