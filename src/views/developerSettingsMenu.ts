@@ -1,6 +1,7 @@
 import { openCenteredModal, menuTheme, styleButton } from "./menu";
 import { bus } from "../core/eventBus";
 import { openAssetManager } from "./assetManager";
+import { openTestBattleSetup } from "./testBattleSetup";
 
 export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
   const root = parent ?? document.body;
@@ -150,6 +151,17 @@ export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
     setTimeout(() => openAssetManager(), 100);
   });
   content.appendChild(assetBtn);
+
+  const testBattleBtn = document.createElement("button");
+  testBattleBtn.textContent = "Test Battle";
+  styleButton(testBattleBtn);
+  testBattleBtn.style.alignSelf = "flex-start";
+  testBattleBtn.style.marginTop = "4px";
+  testBattleBtn.addEventListener("click", () => {
+    modal.close();
+    setTimeout(() => openTestBattleSetup(), 100);
+  });
+  content.appendChild(testBattleBtn);
 
   const closeRow = document.createElement("div");
   closeRow.style.display = "flex";

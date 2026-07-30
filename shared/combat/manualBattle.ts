@@ -1,0 +1,416 @@
+// Interactive (HoMM3-style) battle engine for the manual-fight arena. Built
+// on the same primitives as resolveBattle.ts (damage/casualty math, grid,
+// combatant/result building) but replaces the auto-resolved turn loop with
+// player/AI-driven per-platoon actions: melee platoons must move to an
+// adjacent hex before attacking, ranged platoons need RANGED_ATTACK_RANGE and
+// an unobstructed line of sight. The player chooses which of their own live
+// platoons acts next each round; the AI does the same for its side via a
+// simple heuristic (see runAiTurn). See feature-plans/CombatResolutionEngine.md
+// for the underlying damage/type-advantage rules this reuses unchanged.
+
+import { type Axial, axialRound, hexDistance } from "../../src/core/hex";
+import type { Platoon, UnitType } from "../../src/state/units";
+import { RANGED_ATTACK_RANGE } from "../combatConfig";
+import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT, makeBattleGrid } from "./grid";
+import {
+  buildCombatants,
+  buildResults,
+  DEFAULT_MAX_ROUNDS,
+  livingCombatants,
+  pickTarget,
+  resolveAttack,
+} from "./resolveBattle";
+import type { BattleGrid, BattleLogEntry, BattleResult, BattleSide, Combatant } from "./types";
+
+const NEIGHBOR_DIRS: Axial[] = [
+  { q: 1, r: 0 },
+  { q: 1, r: -1 },
+  { q: 0, r: -1 },
+  { q: -1, r: 0 },
+  { q: -1, r: 1 },
+  { q: 0, r: 1 },
+];
+
+export interface ManualBattleOptions {
+  unitTypes: Record<string, UnitType>;
+  obstacleSeed?: number;
+  fixedObstacles?: BattleGrid["hexes"];
+  grid?: { cols: number; rows: number; obstacleCount?: number };
+  sideChoice?: BattleSide;
+  maxRounds?: number;
+}
+
+export interface ManualBattleState {
+  grid: BattleGrid;
+  attacker: Combatant[];
+  defender: Combatant[];
+  attackerOriginalPlatoons: Platoon[];
+  defenderOriginalPlatoons: Platoon[];
+  unitTypes: Record<string, UnitType>;
+  round: number;
+  unactedAttacker: Set<number>;
+  unactedDefender: Set<number>;
+  // Slots that have already spent their one move this round — a platoon's
+  // movement range is calculated once at the start of its turn and it may
+  // use up to that many hexes exactly once, not repeatedly re-plan a fresh
+  // move from wherever it ends up.
+  movedAttacker: Set<number>;
+  movedDefender: Set<number>;
+  log: BattleLogEntry[];
+  maxRounds: number;
+  obstacleSeed: number;
+  over: boolean;
+}
+
+function hexKey(a: Axial): string {
+  return `${a.q},${a.r}`;
+}
+
+function combatantsFor(state: ManualBattleState, side: BattleSide): Combatant[] {
+  return side === "attacker" ? state.attacker : state.defender;
+}
+
+function unactedSetFor(state: ManualBattleState, side: BattleSide): Set<number> {
+  return side === "attacker" ? state.unactedAttacker : state.unactedDefender;
+}
+
+function movedSetFor(state: ManualBattleState, side: BattleSide): Set<number> {
+  return side === "attacker" ? state.movedAttacker : state.movedDefender;
+}
+
+function enemySideOf(side: BattleSide): BattleSide {
+  return side === "attacker" ? "defender" : "attacker";
+}
+
+export function startManualBattle(
+  attackerPlatoons: Platoon[],
+  defenderPlatoons: Platoon[],
+  options: ManualBattleOptions,
+): ManualBattleState {
+  const unitTypes = options.unitTypes;
+  const obstacleSeed = options.obstacleSeed ?? 1;
+  const grid = makeBattleGrid(
+    options.grid?.cols ?? DEFAULT_GRID_COLS,
+    options.grid?.rows ?? DEFAULT_GRID_ROWS,
+    options.grid?.obstacleCount ?? DEFAULT_OBSTACLE_COUNT,
+    obstacleSeed,
+    options.fixedObstacles,
+  );
+  const sideChoice = options.sideChoice ?? "attacker";
+  const attacker = buildCombatants("attacker", attackerPlatoons, grid, unitTypes, sideChoice);
+  const defender = buildCombatants("defender", defenderPlatoons, grid, unitTypes, sideChoice);
+
+  return {
+    grid,
+    attacker,
+    defender,
+    attackerOriginalPlatoons: attackerPlatoons,
+    defenderOriginalPlatoons: defenderPlatoons,
+    unitTypes,
+    round: 1,
+    unactedAttacker: new Set(livingCombatants(attacker).map((c) => c.slotIndex)),
+    unactedDefender: new Set(livingCombatants(defender).map((c) => c.slotIndex)),
+    movedAttacker: new Set(),
+    movedDefender: new Set(),
+    log: [],
+    maxRounds: options.maxRounds ?? DEFAULT_MAX_ROUNDS,
+    obstacleSeed,
+    over: false,
+  };
+}
+
+export function getCombatant(state: ManualBattleState, side: BattleSide, slotIndex: number): Combatant | undefined {
+  return combatantsFor(state, side).find((c) => c.slotIndex === slotIndex);
+}
+
+// Slots on `side` that are still alive and haven't acted this round — the
+// pool the player (or AI) picks their next platoon from.
+export function unactedLivingSlots(state: ManualBattleState, side: BattleSide): number[] {
+  const living = new Set(livingCombatants(combatantsFor(state, side)).map((c) => c.slotIndex));
+  return Array.from(unactedSetFor(state, side)).filter((slot) => living.has(slot));
+}
+
+function platoonSpeed(combatant: Combatant, unitTypes: Record<string, UnitType>): number {
+  let min = Infinity;
+  for (const e of combatant.entries) {
+    const speed = unitTypes[e.unitTypeId]?.speed ?? 0;
+    if (speed < min) min = speed;
+  }
+  return Number.isFinite(min) ? min : 0;
+}
+
+function occupiedHexes(state: ManualBattleState, excludeSide: BattleSide, excludeSlotIndex: number): Set<string> {
+  const set = new Set<string>();
+  for (const side of ["attacker", "defender"] as const) {
+    for (const c of combatantsFor(state, side)) {
+      if (side === excludeSide && c.slotIndex === excludeSlotIndex) continue;
+      if (c.retreated || !c.entries.some((e) => e.count > 0)) continue;
+      set.add(hexKey(c.position));
+    }
+  }
+  return set;
+}
+
+// BFS over the grid bounded by the platoon's speed (min speed among its
+// entries), blocked by impassable hexes and any other live combatant's hex.
+// Returns empty once the platoon has already spent its move this round.
+export function getMovementRange(state: ManualBattleState, combatant: Combatant): Axial[] {
+  if (movedSetFor(state, combatant.side).has(combatant.slotIndex)) return [];
+  const speed = platoonSpeed(combatant, state.unitTypes);
+  const blocked = occupiedHexes(state, combatant.side, combatant.slotIndex);
+  const hexByKey = new Map(state.grid.hexes.map((h) => [hexKey(h), h]));
+  const visited = new Map<string, number>([[hexKey(combatant.position), 0]]);
+  const queue: Axial[] = [combatant.position];
+  const result: Axial[] = [];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const dist = visited.get(hexKey(current))!;
+    if (dist >= speed) continue;
+    for (const dir of NEIGHBOR_DIRS) {
+      const next = { q: current.q + dir.q, r: current.r + dir.r };
+      const key = hexKey(next);
+      if (visited.has(key)) continue;
+      const hex = hexByKey.get(key);
+      if (!hex || hex.impassable || blocked.has(key)) continue;
+      visited.set(key, dist + 1);
+      result.push(next);
+      queue.push(next);
+    }
+  }
+  return result;
+}
+
+export function canMeleeAttack(a: Combatant, b: Combatant): boolean {
+  return hexDistance(a.position, b.position) === 1;
+}
+
+// Hex-line interpolation between two axial coords; blocked if any
+// intermediate hex (excluding the endpoints) is impassable.
+export function hasLineOfSight(grid: BattleGrid, from: Axial, to: Axial): boolean {
+  const dist = hexDistance(from, to);
+  if (dist <= 1) return true;
+  const hexByKey = new Map(grid.hexes.map((h) => [hexKey(h), h]));
+  for (let i = 1; i < dist; i++) {
+    const t = i / dist;
+    const lerpQ = from.q + (to.q - from.q) * t;
+    const lerpR = from.r + (to.r - from.r) * t;
+    const rounded = axialRound(lerpQ, lerpR);
+    const hex = hexByKey.get(hexKey(rounded));
+    if (hex?.impassable) return false;
+  }
+  return true;
+}
+
+export function isRangedPlatoon(combatant: Combatant, unitTypes: Record<string, UnitType>): boolean {
+  return combatant.entries.length > 0 && combatant.entries.every((e) => unitTypes[e.unitTypeId]?.advantageType === "ranged");
+}
+
+export function getValidMeleeTargets(state: ManualBattleState, combatant: Combatant): Combatant[] {
+  const enemies = livingCombatants(combatantsFor(state, enemySideOf(combatant.side)));
+  return enemies.filter((e) => canMeleeAttack(combatant, e));
+}
+
+export function getValidRangedTargets(state: ManualBattleState, combatant: Combatant): Combatant[] {
+  const enemies = livingCombatants(combatantsFor(state, enemySideOf(combatant.side)));
+  return enemies.filter(
+    (e) => hexDistance(combatant.position, e.position) <= RANGED_ATTACK_RANGE && hasLineOfSight(state.grid, combatant.position, e.position),
+  );
+}
+
+export function getValidAttackTargets(state: ManualBattleState, combatant: Combatant): Combatant[] {
+  return isRangedPlatoon(combatant, state.unitTypes)
+    ? getValidRangedTargets(state, combatant)
+    : getValidMeleeTargets(state, combatant);
+}
+
+function pruneDead(state: ManualBattleState): void {
+  const aliveAttacker = new Set(livingCombatants(state.attacker).map((c) => c.slotIndex));
+  const aliveDefender = new Set(livingCombatants(state.defender).map((c) => c.slotIndex));
+  for (const slot of Array.from(state.unactedAttacker)) if (!aliveAttacker.has(slot)) state.unactedAttacker.delete(slot);
+  for (const slot of Array.from(state.unactedDefender)) if (!aliveDefender.has(slot)) state.unactedDefender.delete(slot);
+  for (const slot of Array.from(state.movedAttacker)) if (!aliveAttacker.has(slot)) state.movedAttacker.delete(slot);
+  for (const slot of Array.from(state.movedDefender)) if (!aliveDefender.has(slot)) state.movedDefender.delete(slot);
+}
+
+export function isBattleOver(state: ManualBattleState): boolean {
+  return livingCombatants(state.attacker).length === 0 || livingCombatants(state.defender).length === 0;
+}
+
+function checkRoundAdvance(state: ManualBattleState): void {
+  pruneDead(state);
+  if (isBattleOver(state)) {
+    state.over = true;
+    return;
+  }
+  if (state.unactedAttacker.size === 0 && state.unactedDefender.size === 0) {
+    state.round++;
+    if (state.round > state.maxRounds) {
+      state.over = true;
+      state.log.push({ round: state.round, kind: "stalemate", detail: `battle exceeded ${state.maxRounds} rounds` });
+      return;
+    }
+    state.unactedAttacker = new Set(livingCombatants(state.attacker).map((c) => c.slotIndex));
+    state.unactedDefender = new Set(livingCombatants(state.defender).map((c) => c.slotIndex));
+    state.movedAttacker = new Set();
+    state.movedDefender = new Set();
+  }
+}
+
+// Moves a not-yet-acted platoon within its movement range, calculated once
+// at the start of its turn from its current position — a platoon gets a
+// single move per turn, not a fresh recalculated range after each step.
+// Moving does not by itself consume the platoon's turn — it may still
+// attack afterward (or call endPlatoonTurn to skip attacking this round).
+export function movePlatoon(state: ManualBattleState, side: BattleSide, slotIndex: number, destination: Axial): boolean {
+  if (!unactedSetFor(state, side).has(slotIndex)) return false;
+  if (movedSetFor(state, side).has(slotIndex)) return false;
+  const combatant = getCombatant(state, side, slotIndex);
+  if (!combatant) return false;
+  const range = getMovementRange(state, combatant);
+  if (!range.some((h) => h.q === destination.q && h.r === destination.r)) return false;
+  combatant.position = destination;
+  movedSetFor(state, side).add(slotIndex);
+  return true;
+}
+
+// Attacks with a not-yet-acted platoon; validates the target is currently a
+// legal target (adjacency for melee, range+LOS for ranged) from wherever the
+// platoon currently stands. Consumes the platoon's turn for this round.
+export function attackWithPlatoon(state: ManualBattleState, side: BattleSide, slotIndex: number, targetSlotIndex: number): boolean {
+  const unacted = unactedSetFor(state, side);
+  if (!unacted.has(slotIndex)) return false;
+  const actor = getCombatant(state, side, slotIndex);
+  if (!actor) return false;
+  const target = getValidAttackTargets(state, actor).find((t) => t.slotIndex === targetSlotIndex);
+  if (!target) return false;
+  resolveAttack(actor, target, state.unitTypes, 1, false, state.round, state.log);
+  unacted.delete(slotIndex);
+  checkRoundAdvance(state);
+  return true;
+}
+
+// Consumes a not-yet-acted platoon's turn without attacking (e.g. it moved
+// but has no legal target, or the player chooses not to attack).
+export function endPlatoonTurn(state: ManualBattleState, side: BattleSide, slotIndex: number): boolean {
+  const unacted = unactedSetFor(state, side);
+  if (!unacted.has(slotIndex)) return false;
+  unacted.delete(slotIndex);
+  checkRoundAdvance(state);
+  return true;
+}
+
+function closestHexTo(candidates: Axial[], target: Axial, current: Axial): Axial | null {
+  let best: Axial | null = null;
+  let bestDist = hexDistance(current, target);
+  for (const h of candidates) {
+    const d = hexDistance(h, target);
+    if (d < bestDist) {
+      bestDist = d;
+      best = h;
+    }
+  }
+  return best;
+}
+
+// Simple AI heuristic for one of the AI's platoons: target the weakest
+// living enemy (reusing the same pickTarget used by the auto-resolver),
+// then move into position and attack if possible. Ranged platoons that
+// can't reach range+LOS this turn just close distance; melee platoons that
+// can't reach adjacency just move as close as their speed allows. Neither
+// case attempts multi-turn kiting/pathing around obstacles beyond a single
+// greedy step — an intentional simplification for this arena.
+export function runAiTurn(state: ManualBattleState, side: BattleSide): void {
+  const slots = unactedLivingSlots(state, side);
+  if (slots.length === 0) return;
+  const slotIndex = slots[0];
+  const actor = getCombatant(state, side, slotIndex);
+  if (!actor) return;
+
+  const enemies = livingCombatants(combatantsFor(state, enemySideOf(side)));
+  const target = pickTarget(enemies, state.unitTypes);
+  if (!target) {
+    endPlatoonTurn(state, side, slotIndex);
+    return;
+  }
+
+  const range = getMovementRange(state, actor);
+
+  if (isRangedPlatoon(actor, state.unitTypes)) {
+    if (hexDistance(actor.position, target.position) <= RANGED_ATTACK_RANGE && hasLineOfSight(state.grid, actor.position, target.position)) {
+      attackWithPlatoon(state, side, slotIndex, target.slotIndex);
+      return;
+    }
+    const reposition = range.find(
+      (h) => hexDistance(h, target.position) <= RANGED_ATTACK_RANGE && hasLineOfSight(state.grid, h, target.position),
+    );
+    if (reposition) {
+      movePlatoon(state, side, slotIndex, reposition);
+      attackWithPlatoon(state, side, slotIndex, target.slotIndex);
+      return;
+    }
+    const closer = closestHexTo(range, target.position, actor.position);
+    if (closer) movePlatoon(state, side, slotIndex, closer);
+    endPlatoonTurn(state, side, slotIndex);
+    return;
+  }
+
+  if (canMeleeAttack(actor, target)) {
+    attackWithPlatoon(state, side, slotIndex, target.slotIndex);
+    return;
+  }
+  const adjacentHex = range.find((h) => hexDistance(h, target.position) === 1);
+  if (adjacentHex) {
+    movePlatoon(state, side, slotIndex, adjacentHex);
+    attackWithPlatoon(state, side, slotIndex, target.slotIndex);
+    return;
+  }
+  const closer = closestHexTo(range, target.position, actor.position);
+  if (closer) movePlatoon(state, side, slotIndex, closer);
+  endPlatoonTurn(state, side, slotIndex);
+}
+
+export function finalizeManualBattle(state: ManualBattleState): BattleResult {
+  const attackerAlive = livingCombatants(state.attacker).length > 0;
+  const defenderAlive = livingCombatants(state.defender).length > 0;
+
+  let winner: BattleSide | "draw";
+  let attackerOutcome: Parameters<typeof buildResults>[2];
+  let defenderOutcome: Parameters<typeof buildResults>[2];
+
+  if (attackerAlive && !defenderAlive) {
+    winner = "attacker";
+    attackerOutcome = "won";
+    defenderOutcome = "lost_all_troops";
+  } else if (defenderAlive && !attackerAlive) {
+    winner = "defender";
+    defenderOutcome = "won";
+    attackerOutcome = "lost_all_troops";
+  } else if (!attackerAlive && !defenderAlive) {
+    winner = "draw";
+    attackerOutcome = "lost_all_troops";
+    defenderOutcome = "lost_all_troops";
+  } else {
+    winner = "draw";
+    attackerOutcome = "survived";
+    defenderOutcome = "survived";
+  }
+
+  const attackerResults = buildResults(state.attackerOriginalPlatoons, state.attacker, attackerOutcome);
+  const defenderResults = buildResults(state.defenderOriginalPlatoons, state.defender, defenderOutcome);
+
+  return {
+    winner,
+    attackerOutcome,
+    defenderOutcome,
+    attackerPlatoons: attackerResults.map((r) => r.platoon),
+    defenderPlatoons: defenderResults.map((r) => r.platoon),
+    attackerResults,
+    defenderResults,
+    attackerRenownDelta: 0,
+    defenderRenownDelta: 0,
+    rounds: state.round,
+    log: state.log,
+    grid: state.grid,
+    obstacleSeed: state.obstacleSeed,
+  };
+}

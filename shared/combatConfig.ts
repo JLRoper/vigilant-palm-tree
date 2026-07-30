@@ -30,3 +30,9 @@ export const DEFAULT_GRID_COLS = 15;
 export const DEFAULT_GRID_ROWS = 11;
 export const DEFAULT_OBSTACLE_COUNT = 8;
 export const DEFAULT_MAX_ROUNDS = 30;
+
+// UnitType has no numeric range stat yet, so the manual battle arena
+// (shared/combat/manualBattle.ts) applies this one flat range to any platoon
+// whose entries are all advantageType "ranged" — melee/cavalry/monster
+// platoons always need hex-adjacency instead.
+export const RANGED_ATTACK_RANGE = 6;

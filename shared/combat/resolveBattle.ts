@@ -19,7 +19,7 @@ import type {
 
 export { DEFAULT_MAX_ROUNDS };
 
-function buildCombatants(
+export function buildCombatants(
   side: BattleSide,
   platoons: Platoon[],
   grid: BattleGrid,
@@ -43,11 +43,11 @@ function buildCombatants(
   return out;
 }
 
-function livingCombatants(list: Combatant[]): Combatant[] {
+export function livingCombatants(list: Combatant[]): Combatant[] {
   return list.filter((c) => !c.retreated && c.entries.some((e) => e.count > 0));
 }
 
-function pickTarget(enemies: Combatant[], unitTypes: Record<string, UnitType>): Combatant | null {
+export function pickTarget(enemies: Combatant[], unitTypes: Record<string, UnitType>): Combatant | null {
   const living = livingCombatants(enemies);
   if (living.length === 0) return null;
   living.sort((a, b) => {
@@ -58,13 +58,13 @@ function pickTarget(enemies: Combatant[], unitTypes: Record<string, UnitType>): 
   return living[0];
 }
 
-function cloneCombatant(c: Combatant): Combatant {
+export function cloneCombatant(c: Combatant): Combatant {
   return { ...c, entries: c.entries.map((e) => ({ ...e })) };
 }
 
 // resolveAttack(): the seam a future ability layer (heal/regen/AoE) can
 // extend with new CombatEffect kinds without restructuring the turn loop.
-function resolveAttack(
+export function resolveAttack(
   actor: Combatant,
   target: Combatant,
   unitTypes: Record<string, UnitType>,
@@ -140,7 +140,7 @@ function applyRetreatPolicy(
   return heroRetreat;
 }
 
-function buildResults(
+export function buildResults(
   originalPlatoons: Platoon[],
   combatants: Combatant[],
   sideOutcome: CombatantOutcome,
