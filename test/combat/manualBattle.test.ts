@@ -6,9 +6,11 @@ import {
   getCombatant,
   getMovementRange,
   getValidAttackTargets,
+  getValidMeleeTargets,
   hasLineOfSight,
   isBattleOver,
   movePlatoon,
+  pickTarget,
   startManualBattle,
 } from "../../shared/combat/manualBattle";
 import { ARMY_STACK_SLOTS, type Platoon, type UnitType } from "../../src/state/units";
@@ -123,4 +125,29 @@ test("movePlatoon: a platoon gets exactly one move per turn, not a fresh range e
   assert.deepEqual(getMovementRange(state, actor), []);
   assert.equal(movePlatoon(state, "attacker", 0, { q: 4, r: 0 }), false);
   assert.equal(actor.position.q, 3, "position must be unchanged after the rejected second move");
+});
+
+test("moving into an adjacent hex puts the enemy in getValidMeleeTargets, and attacking causes casualties", () => {
+  // Mirrors the manual-fight arena's "bump into contact" behavior: the
+  // player moves a platoon, the engine reports it's now touching an enemy
+  // hex, and resolving that attack costs the defender units based on stats.
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]); // speed 3
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 50 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 4, rows: 1 }, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const enemy = getCombatant(state, "defender", 0)!;
+
+  // Attacker deploys at q=0, defender at q=3 (cols-1) — not adjacent yet.
+  assert.equal(getValidMeleeTargets(state, actor).length, 0);
+
+  assert.equal(movePlatoon(state, "attacker", 0, { q: 2, r: 0 }), true);
+  const adjacent = getValidMeleeTargets(state, actor);
+  assert.equal(adjacent.length, 1, "after moving next to it, the enemy platoon is now a valid melee target");
+  assert.equal(adjacent[0].slotIndex, enemy.slotIndex);
+
+  const target = pickTarget(adjacent, unitTypes)!;
+  const beforeCount = enemy.entries[0].count;
+  assert.equal(attackWithPlatoon(state, "attacker", 0, target.slotIndex), true);
+  const afterCount = enemy.entries[0]?.count ?? 0;
+  assert.ok(afterCount < beforeCount, "the defending platoon should have taken casualties from the bump attack");
 });

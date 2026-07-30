@@ -280,6 +280,15 @@ async function queryLastEvent(name: string): Promise<{ kind: string; payload: an
   }
 }
 
+async function isHumanTurn(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const state = (window as any).__gameDebug?.getGameState?.();
+    if (!state || state.phase?.kind !== "PLAYER_TURN") return false;
+    const p = state.players?.find((pl: any) => pl.id === state.phase.playerId);
+    return p?.faction === "player";
+  });
+}
+
 async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   console.log(">> Turn flow: select hero, move, end turn, AI runs, round advances");
 
@@ -287,8 +296,8 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
   if (!hudBefore || !hudBefore.includes("Round 1")) {
     throw new Error(`HUD missing "Round 1": ${hudBefore}`);
   }
-  if (!hudBefore.includes("Turn: Human")) {
-    throw new Error(`HUD missing "Turn: Human": ${hudBefore}`);
+  if (!(await isHumanTurn(page))) {
+    throw new Error(`Expected player turn before move; HUD: ${hudBefore}`);
   }
   console.log(`>> HUD before move: ${hudBefore}`);
 
@@ -519,17 +528,19 @@ async function runTurnFlowChecks(page: Page, ctx: any, activeName: string) {
 
   const deadline = Date.now() + 15000;
   let hudFinal = "";
+  let humanTurnFinal = false;
   while (Date.now() < deadline) {
     hudFinal = (await page.locator("#hud").textContent()) ?? "";
-    if (hudFinal.includes("Round 2") && hudFinal.includes("Turn: Human")) break;
+    humanTurnFinal = await isHumanTurn(page);
+    if (hudFinal.includes("Round 2") && humanTurnFinal) break;
     await wait(250);
   }
   console.log(`>> HUD after AI: ${hudFinal}`);
   if (!hudFinal.includes("Round 2")) {
     throw new Error(`HUD did not reach Round 2: ${hudFinal}`);
   }
-  if (!hudFinal.includes("Turn: Human")) {
-    throw new Error(`HUD did not return to "Turn: Human" after AI: ${hudFinal}`);
+  if (!humanTurnFinal) {
+    throw new Error(`Did not return to human turn after AI: ${hudFinal}`);
   }
 
   const dbRow = await queryDbRow(activeName);

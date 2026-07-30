@@ -344,8 +344,6 @@ export class GameEngine {
     this.ui.refreshHud(
       this.state.getState(),
       this.state.getHeroesMap(),
-      this.session.isBackendOk(),
-      this.session.getSaveStatus(),
       this.session.getLastSavedAt(),
     );
   }
