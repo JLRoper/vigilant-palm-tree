@@ -22,6 +22,8 @@ import {
 } from "./resolveBattle";
 import type { BattleGrid, BattleLogEntry, BattleResult, BattleSide, Combatant } from "./types";
 
+export { pickTarget } from "./resolveBattle";
+
 const NEIGHBOR_DIRS: Axial[] = [
   { q: 1, r: 0 },
   { q: 1, r: -1 },

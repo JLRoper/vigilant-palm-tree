@@ -10,7 +10,7 @@ import type { HeroId, SettlementState } from "../state/gameState";
 import { Hero } from "../entities/hero";
 import { SpriteProvider } from "../render/assets";
 import { playerIncome, playerWealth } from "../economy/income";
-import { SessionManager, type SaveStatus } from "./SessionManager";
+import { SessionManager } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
 import type { MapInfo } from "../views/settingsMenu";
@@ -208,17 +208,12 @@ export class UIManager {
   refreshHud(
     gameState: GameState,
     heroes: Record<string, Hero>,
-    backendOk: boolean,
-    saveStatus: SaveStatus,
     lastSavedAt: string | null,
   ): void {
     if (!this.hudHandles) return;
     updateHud(
       this.toolbarEl,
       gameState,
-      heroes,
-      backendOk,
-      saveStatus,
       lastSavedAt,
       this.hudHandles,
     );

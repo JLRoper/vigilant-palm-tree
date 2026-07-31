@@ -14,8 +14,10 @@ import {
   getCombatant,
   getMovementRange,
   getValidAttackTargets,
+  getValidMeleeTargets,
   isBattleOver,
   movePlatoon,
+  pickTarget,
   runAiTurn,
   startManualBattle,
   unactedLivingSlots,
@@ -24,7 +26,7 @@ import {
 import type { Combatant } from "../../shared/combat/types";
 import type { Platoon, UnitType } from "../state/units";
 import { showBattleResultCard } from "./battleResultCard";
-import { menuTheme, openCenteredModal, styleButton } from "./menu";
+import { menuTheme, styleButton } from "./menu";
 
 const HEX_SIZE = 26;
 
@@ -43,9 +45,73 @@ function computeLayout(state: ManualBattleState) {
   return { minX, minY, maxX, maxY };
 }
 
-function describeCombatant(state: ManualBattleState, c: Combatant): string {
-  const parts = c.entries.map((e) => `${state.unitTypes[e.unitTypeId]?.name ?? e.unitTypeId} x${e.count}`);
-  return parts.length > 0 ? parts.join(", ") : "(empty)";
+// One tile per platoon in a side's status bar: its unit composition (the
+// "resources" making it up) and an overall HP bar, so both players can read
+// the whole army's condition at a glance without clicking each stack. Tinted
+// with the side's accent color (matching its hero portrait and grid token)
+// so attacker vs. defender is unmistakable at a glance.
+function buildStatusTile(state: ManualBattleState, c: Combatant, accent: string, highlighted: boolean): HTMLElement {
+  const tile = document.createElement("div");
+  Object.assign(tile.style, {
+    background: `${accent}22`,
+    border: highlighted ? `2px solid ${accent}` : `1px solid ${accent}88`,
+    borderRadius: "4px",
+    padding: "6px 8px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "3px",
+  });
+
+  const title = document.createElement("div");
+  title.style.fontWeight = "600";
+  title.style.fontSize = "11px";
+  title.textContent = `Platoon ${c.slotIndex + 1}`;
+  tile.appendChild(title);
+
+  const alive = !c.retreated && c.entries.some((e) => e.count > 0);
+  if (!alive) {
+    tile.style.opacity = "0.45";
+    const status = document.createElement("div");
+    status.style.fontSize = "10px";
+    status.textContent = c.retreated ? "Retreated" : "Defeated";
+    tile.appendChild(status);
+    return tile;
+  }
+
+  for (const e of c.entries) {
+    if (e.count <= 0) continue;
+    const line = document.createElement("div");
+    line.style.fontSize = "10px";
+    line.style.opacity = "0.85";
+    line.textContent = `${state.unitTypes[e.unitTypeId]?.name ?? e.unitTypeId} x${e.count}`;
+    tile.appendChild(line);
+  }
+
+  const hpPct = c.maxHealth > 0 ? totalHealth(c.entries, state.unitTypes) / c.maxHealth : 0;
+  const barTrack = document.createElement("div");
+  Object.assign(barTrack.style, {
+    background: "#000",
+    borderRadius: "2px",
+    height: "5px",
+    overflow: "hidden",
+    marginTop: "2px",
+  });
+  const barFill = document.createElement("div");
+  Object.assign(barFill.style, {
+    height: "100%",
+    width: `${Math.max(0, Math.min(1, hpPct)) * 100}%`,
+    background: hpPct > 0.5 ? "#4caf50" : hpPct > 0.25 ? "#ffb300" : "#e53935",
+  });
+  barTrack.appendChild(barFill);
+  tile.appendChild(barTrack);
+
+  const hpLabel = document.createElement("div");
+  hpLabel.style.opacity = "0.7";
+  hpLabel.style.fontSize = "10px";
+  hpLabel.textContent = `${Math.round(hpPct * 100)}% HP`;
+  tile.appendChild(hpLabel);
+
+  return tile;
 }
 
 export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Platoon[], unitTypes: Record<string, UnitType>): void {
@@ -54,17 +120,60 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
     obstacleSeed: Math.floor(Math.random() * 1_000_000),
   });
 
-  const modal = openCenteredModal(document.body, "Test Battle — Manual Fight", 1380, true);
+  // The fight takes over the whole viewport rather than sitting in a small
+  // centered popup — there's a lot to look at (grid + both hero panels +
+  // side panel) and a modal box was cramping it.
+  const overlay = document.createElement("div");
+  Object.assign(overlay.style, {
+    position: "fixed",
+    inset: "0",
+    background: menuTheme.panel.background,
+    color: menuTheme.panel.color,
+    display: "flex",
+    flexDirection: "column",
+    zIndex: "100",
+    fontFamily: menuTheme.font,
+    fontSize: menuTheme.fontSize,
+  });
+  document.body.appendChild(overlay);
+
+  const header = document.createElement("div");
+  Object.assign(header.style, {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "10px 16px",
+    background: menuTheme.panel.headerBackground,
+    color: menuTheme.panel.headerColor,
+    borderBottom: "1px solid rgba(255,255,255,0.08)",
+    fontSize: "14px",
+    fontWeight: "600",
+    flexShrink: "0",
+  });
+  const titleEl = document.createElement("div");
+  titleEl.textContent = "Test Battle — Manual Fight";
+  header.appendChild(titleEl);
+  overlay.appendChild(header);
+
+  function closeArena(): void {
+    overlay.remove();
+  }
 
   let selectedSlot: number | null = null;
   let moveRange: Axial[] = [];
   let attackTargets: Combatant[] = [];
 
   const container = document.createElement("div");
-  container.style.display = "flex";
-  container.style.gap = "10px";
-  container.style.overflowX = "auto";
-  modal.setContent(container);
+  Object.assign(container.style, {
+    flex: "1",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "10px",
+    overflow: "auto",
+    padding: "16px",
+  });
+  overlay.appendChild(container);
 
   // Hero portraits flank the battlefield, HoMM3-style — they stand outside
   // the grid rather than occupying a hex. Cast Spell is a stub for now: no
@@ -117,7 +226,54 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
     return panel;
   }
 
-  container.appendChild(buildHeroPanel("You", "#3070c0"));
+  // Status bars flank the battlefield, one per side, each showing every
+  // platoon on that side as a tile (composition + HP). Each bar is grouped
+  // under its own hero portrait in one column, so the two armies read as
+  // two distinct, color-coded blocks instead of a scattered row of panels.
+  function buildStatusBar(label: string): HTMLElement {
+    const bar = document.createElement("div");
+    Object.assign(bar.style, {
+      width: "150px",
+      flexShrink: "0",
+      display: "flex",
+      flexDirection: "column",
+      gap: "6px",
+      maxHeight: "calc(100vh - 260px)",
+      overflowY: "auto",
+      fontFamily: menuTheme.font,
+    });
+    const heading = document.createElement("div");
+    heading.textContent = label;
+    Object.assign(heading.style, {
+      fontWeight: "600",
+      fontSize: "12px",
+      opacity: "0.85",
+      textAlign: "center",
+    });
+    bar.appendChild(heading);
+    return bar;
+  }
+
+  function buildSideColumn(heroLabel: string, barLabel: string, accent: string): { column: HTMLElement; bar: HTMLElement } {
+    const column = document.createElement("div");
+    Object.assign(column.style, {
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: "10px",
+      flexShrink: "0",
+    });
+    column.appendChild(buildHeroPanel(heroLabel, accent));
+    const bar = buildStatusBar(barLabel);
+    column.appendChild(bar);
+    return { column, bar };
+  }
+
+  const ATTACKER_ACCENT = "#3070c0";
+  const DEFENDER_ACCENT = "#c04040";
+
+  const { column: attackerColumn, bar: attackerBar } = buildSideColumn("You", "Your Platoons", ATTACKER_ACCENT);
+  container.appendChild(attackerColumn);
 
   const canvas = document.createElement("canvas");
   canvas.style.background = "#14161a";
@@ -126,7 +282,8 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
   container.appendChild(canvas);
   const ctx = canvas.getContext("2d")!;
 
-  container.appendChild(buildHeroPanel("AI Opponent", "#c04040"));
+  const { column: defenderColumn, bar: defenderBar } = buildSideColumn("AI Opponent", "Enemy Platoons", DEFENDER_ACCENT);
+  container.appendChild(defenderColumn);
 
   const sidePanel = document.createElement("div");
   Object.assign(sidePanel.style, {
@@ -137,7 +294,7 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
     gap: "6px",
     fontFamily: menuTheme.font,
     fontSize: "12px",
-    maxHeight: "560px",
+    maxHeight: "calc(100vh - 100px)",
     overflowY: "auto",
   });
   container.appendChild(sidePanel);
@@ -234,8 +391,12 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
   }
 
   // Called after a successful move: the platoon has spent its one move for
-  // this turn, so no further movement is offered — only an immediate attack
-  // from the new position (if now in range) or ending the turn.
+  // this turn, so no further movement is offered. If the move landed it on
+  // a hex directly connected (adjacent) to an enemy platoon, that's a bump
+  // into melee contact and the fight resolves immediately — no separate
+  // "attack" click required. Otherwise, fall back to showing any in-range
+  // ranged targets (still requires an explicit click — that's a deliberate
+  // shot, not a bump) or just ending the turn.
   function refreshAfterMove(): void {
     if (selectedSlot === null) return;
     const combatant = getCombatant(state, "attacker", selectedSlot);
@@ -247,6 +408,13 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
       return;
     }
     moveRange = [];
+    const adjacentEnemies = getValidMeleeTargets(state, combatant);
+    if (adjacentEnemies.length > 0) {
+      const target = pickTarget(adjacentEnemies, state.unitTypes) ?? adjacentEnemies[0];
+      attackWithPlatoon(state, "attacker", selectedSlot, target.slotIndex);
+      afterPlayerAction();
+      return;
+    }
     attackTargets = getValidAttackTargets(state, combatant);
     refresh();
   }
@@ -282,7 +450,7 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
 
   function finishBattle(): void {
     const result = finalizeManualBattle(state);
-    modal.close();
+    closeArena();
     showBattleResultCard({
       result,
       attackerLabel: "You",
@@ -347,28 +515,11 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
     instructions.style.fontSize = "10px";
     instructions.textContent =
       selectedSlot === null
-        ? "Click one of your platoons below (or on the grid) to act."
+        ? "Click one of your platoons in the status bar (or on the grid) to act."
         : moveRange.length > 0
-          ? "Click a highlighted hex to move, or a ringed enemy to attack."
-          : "Already moved this turn — click a ringed enemy to attack, or End Turn.";
+          ? "Click a highlighted hex to move (moving next to an enemy fights immediately), or a ringed enemy to attack."
+          : "Already acted this turn — click a ringed enemy to attack, or End Turn.";
     sidePanel.appendChild(instructions);
-
-    const listLabel = document.createElement("div");
-    listLabel.textContent = "Your platoons:";
-    listLabel.style.marginTop = "4px";
-    sidePanel.appendChild(listLabel);
-
-    for (const slot of unactedLivingSlots(state, "attacker")) {
-      const c = getCombatant(state, "attacker", slot);
-      if (!c) continue;
-      const btn = document.createElement("button");
-      btn.textContent = describeCombatant(state, c);
-      styleButton(btn, slot === selectedSlot);
-      btn.style.textAlign = "left";
-      btn.style.whiteSpace = "normal";
-      btn.addEventListener("click", () => selectPlatoon(slot));
-      sidePanel.appendChild(btn);
-    }
 
     if (unactedLivingSlots(state, "attacker").length === 0) {
       const waiting = document.createElement("div");
@@ -391,9 +542,26 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
     }
   }
 
+  function renderStatusBars(): void {
+    const actableSlots = unactedLivingSlots(state, "attacker");
+    const attackerTiles = state.attacker.map((c) => {
+      const tile = buildStatusTile(state, c, ATTACKER_ACCENT, c.slotIndex === selectedSlot);
+      if (actableSlots.includes(c.slotIndex)) {
+        tile.style.cursor = "pointer";
+        tile.addEventListener("click", () => selectPlatoon(c.slotIndex));
+      }
+      return tile;
+    });
+    attackerBar.replaceChildren(attackerBar.firstElementChild!, ...attackerTiles);
+
+    const defenderTiles = state.defender.map((c) => buildStatusTile(state, c, DEFENDER_ACCENT, false));
+    defenderBar.replaceChildren(defenderBar.firstElementChild!, ...defenderTiles);
+  }
+
   function refresh(): void {
     draw();
     renderSidePanel();
+    renderStatusBars();
   }
 
   refresh();
