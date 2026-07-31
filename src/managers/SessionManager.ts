@@ -102,6 +102,10 @@ export class SessionManager {
     return await api.getTiles(name);
   }
 
+  async getTilesForGame(loaded: Game): Promise<TileRow[]> {
+    return await api.getTiles(loaded.name);
+  }
+
   async logEvent(name: string, kind: string, payload: Record<string, unknown>): Promise<void> {
     try {
       await api.logEvent(name, kind, payload);

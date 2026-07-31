@@ -41,3 +41,23 @@ CREATE TABLE IF NOT EXISTS tiles (
 );
 
 CREATE INDEX IF NOT EXISTS tiles_game_idx ON tiles (game_id);
+
+CREATE TABLE IF NOT EXISTS auth_codes (
+  id BIGSERIAL PRIMARY KEY,
+  email TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS auth_codes_email_idx ON auth_codes (email);
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+  token TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS user_sessions_email_idx ON user_sessions (email);
