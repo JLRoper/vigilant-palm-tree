@@ -64,6 +64,7 @@ export class SettlementPanel {
       closeable: false,
       draggable: true,
       zIndex: 55,
+      saveKey: "settlement_panel",
     });
     this.body = this.menu.body;
   }

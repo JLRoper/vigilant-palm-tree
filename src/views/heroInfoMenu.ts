@@ -87,6 +87,7 @@ export class HeroInfoMenu {
       closeable: true,
       draggable: true,
       zIndex: 60,
+      saveKey: "hero_info_menu",
       onClose: () => {
         this.visible = false;
         this.currentHeroId = null;
