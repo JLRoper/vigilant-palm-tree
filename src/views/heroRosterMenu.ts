@@ -26,6 +26,7 @@ export class HeroRosterMenu {
       closeable: true,
       draggable: true,
       zIndex: 60,
+      saveKey: "hero_roster_menu",
       onClose: () => {
         this.visible = false;
       },

@@ -70,6 +70,30 @@ export interface PopupMenuOptions {
   zIndex?: number;
   onClose?: () => void;
   onMove?: (pos: { x: number; y: number }) => void;
+  saveKey?: string;
+}
+
+const STORAGE_PREFIX = "popup_menu_";
+
+function loadSavedPosition(key: string): { x: number; y: number } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_PREFIX + key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed?.x === "number" &&
+      typeof parsed?.y === "number"
+    ) {
+      return parsed;
+    }
+  } catch { /* ignore corrupt data */ }
+  return null;
+}
+
+function savePosition(key: string, pos: { x: number; y: number }): void {
+  try {
+    localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(pos));
+  } catch { /* storage full or unavailable */ }
 }
 
 export class PopupMenu {
@@ -83,11 +107,16 @@ export class PopupMenu {
   private dragOffset: { dx: number; dy: number } | null = null;
   private pos: { x: number; y: number };
   private onClose?: () => void;
+  private saveKey?: string;
 
   constructor(private opts: PopupMenuOptions) {
     this.draggable = opts.draggable ?? true;
     this.onClose = opts.onClose;
-    this.pos = opts.initialPosition ?? { x: 0, y: 0 };
+    this.saveKey = opts.saveKey;
+
+    const saved = this.saveKey ? loadSavedPosition(this.saveKey) : null;
+    const initial = saved ?? opts.initialPosition ?? { x: 0, y: 0 };
+    this.pos = initial;
 
     this.root = document.createElement("div");
     Object.assign(this.root.style, {
@@ -195,6 +224,22 @@ export class PopupMenu {
     this.root.style.top = `${y}px`;
   }
 
+  clampToViewport(margin = 24): void {
+    const rect = this.root.getBoundingClientRect();
+    const panelW = rect.width;
+    const panelH = rect.height;
+    const maxX = Math.max(margin, window.innerWidth - panelW - margin);
+    const maxY = Math.max(margin, window.innerHeight - panelH - margin);
+    const x = Math.max(margin, Math.min(this.pos.x, maxX));
+    const y = Math.max(margin, Math.min(this.pos.y, maxY));
+    this.setPosition(x, y);
+  }
+
+  getSize(): { width: number; height: number } {
+    const rect = this.root.getBoundingClientRect();
+    return { width: rect.width, height: rect.height };
+  }
+
   getPosition(): { x: number; y: number } {
     return { ...this.pos };
   }
@@ -205,6 +250,7 @@ export class PopupMenu {
   }
 
   close(): void {
+    if (this.saveKey) savePosition(this.saveKey, this.pos);
     this.root.remove();
     this.onClose?.();
   }
@@ -221,10 +267,18 @@ export class PopupMenu {
       };
       const onMove = (ev: MouseEvent) => {
         if (!this.dragOffset) return;
-        const x = Math.max(0, ev.clientX - this.dragOffset.dx);
-        const y = Math.max(0, ev.clientY - this.dragOffset.dy);
+        const panelRect = this.root.getBoundingClientRect();
+        const panelW = panelRect.width;
+        const panelH = panelRect.height;
+        const minX = 0;
+        const minY = 0;
+        const maxX = Math.max(minX, window.innerWidth - panelW);
+        const maxY = Math.max(minY, window.innerHeight - panelH);
+        const x = Math.max(minX, Math.min(ev.clientX - this.dragOffset.dx, maxX));
+        const y = Math.max(minY, Math.min(ev.clientY - this.dragOffset.dy, maxY));
         this.setPosition(x, y);
         this.opts.onMove?.({ x, y });
+        if (this.saveKey) savePosition(this.saveKey, { x, y });
       };
       const onUp = () => {
         this.dragOffset = null;

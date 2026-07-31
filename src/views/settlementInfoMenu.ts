@@ -71,6 +71,7 @@ export class SettlementInfoMenu {
       closeable: true,
       draggable: true,
       zIndex: 60,
+      saveKey: "settlement_info_menu",
       onClose: () => {
         this.visible = false;
         this.currentSettlementId = null;

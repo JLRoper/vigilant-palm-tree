@@ -25,6 +25,7 @@ export class SettlementRosterMenu {
       closeable: true,
       draggable: true,
       zIndex: 60,
+      saveKey: "settlement_roster_menu",
       onClose: () => {
         this.visible = false;
       },

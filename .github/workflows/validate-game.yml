@@ -1,0 +1,139 @@
+name: Validate Game
+
+# Gate PRs on the same commands a developer runs locally:
+#   npm install
+#   npm run dev   (client + API boot check)
+#   npm test      (smoke test)
+#
+# This project's predev/pretest npm scripts shell out to PowerShell scripts
+# (scripts/cleanup.ps1, scripts/ports.ps1) that use Windows-only cmdlets
+# (Get-NetTCPConnection, Get-WmiObject), so this workflow must run on
+# windows-latest rather than ubuntu-latest.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: validate-game-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Install, boot dev servers, run smoke test
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+
+      # GitHub-hosted Windows runners don't support the `services:` key
+      # (Linux-only), so Postgres is installed directly on the runner
+      # instead of via a container. Credentials/port match docker-compose.yml
+      # and server/db.ts's defaults, so no PG* env vars need overriding.
+      - name: Set up PostgreSQL
+        uses: ikalnytskyi/action-setup-postgres@v8
+        with:
+          username: gameuser
+          password: gamepass
+          database: game_poc
+          port: 5432
+          postgres-version: "16"
+
+      - name: npm install
+        run: npm install
+
+      - name: Install Playwright browser (chromium)
+        run: npx playwright install chromium
+
+      # `npm run dev` runs concurrently forever, so it can't just be "run".
+      # Boot it in the background, wait for the client + API to come up
+      # (ports are chosen dynamically by scripts/ports.ps1 into .env), then
+      # tear the whole process tree down. This is the "game will run" check.
+      - name: Validate "npm run dev" boots client + API
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dev = Start-Process -FilePath "cmd.exe" `
+            -ArgumentList "/c", "npm run dev > dev-run.log 2>&1" `
+            -PassThru -WindowStyle Hidden
+
+          try {
+            $portDeadline = (Get-Date).AddSeconds(60)
+            $clientPort = $null
+            $apiPort = $null
+            while ((Get-Date) -lt $portDeadline -and (-not $clientPort -or -not $apiPort)) {
+              if (Test-Path .env) {
+                $content = Get-Content .env -Raw
+                if ($content -match "CLIENT_PORT=(\d+)") { $clientPort = $Matches[1] }
+                if ($content -match "API_PORT=(\d+)") { $apiPort = $Matches[1] }
+              }
+              if (-not $clientPort -or -not $apiPort) { Start-Sleep -Seconds 1 }
+            }
+            if (-not $clientPort -or -not $apiPort) {
+              throw "scripts/ports.ps1 (predev) never wrote CLIENT_PORT/API_PORT to .env within 60s"
+            }
+            Write-Host "Waiting for client on :$clientPort and API on :$apiPort ..."
+
+            $upDeadline = (Get-Date).AddSeconds(60)
+            $apiUp = $false
+            $clientUp = $false
+            while ((Get-Date) -lt $upDeadline -and -not ($apiUp -and $clientUp)) {
+              if (-not $apiUp) {
+                try {
+                  $r = Invoke-WebRequest -Uri "http://127.0.0.1:$apiPort/api/health" -UseBasicParsing -TimeoutSec 3
+                  if ($r.StatusCode -eq 200) { $apiUp = $true }
+                } catch {}
+              }
+              if (-not $clientUp) {
+                try {
+                  $r = Invoke-WebRequest -Uri "http://127.0.0.1:$clientPort" -UseBasicParsing -TimeoutSec 3
+                  if ($r.StatusCode -eq 200) { $clientUp = $true }
+                } catch {}
+              }
+              if (-not ($apiUp -and $clientUp)) { Start-Sleep -Seconds 1 }
+            }
+            if (-not $apiUp) { throw "API server never responded healthy on port $apiPort" }
+            if (-not $clientUp) { throw "Vite dev server never responded on port $clientPort" }
+            Write-Host "npm run dev booted successfully (client=$clientPort api=$apiPort)"
+          } finally {
+            # Kill the whole tree: cmd.exe -> npm -> concurrently -> vite + tsx watch.
+            if ($dev -and -not $dev.HasExited) {
+              taskkill /PID $dev.Id /T /F | Out-Null
+            }
+          }
+
+      - name: Dump "npm run dev" boot log
+        if: always()
+        run: |
+          if (Test-Path dev-run.log) { Get-Content dev-run.log }
+
+      - name: Reset local dev state before smoke test
+        run: |
+          Remove-Item .env -Force -ErrorAction SilentlyContinue
+          Remove-Item dev-run.log -Force -ErrorAction SilentlyContinue
+
+      # test/smoke.ts builds dist/ itself if missing, and starts its own
+      # API (port 3001) + vite preview (port 4173) instances independent
+      # of the .env-based ports used above.
+      - name: npm test (smoke test)
+        run: npm test
+
+      - name: Upload smoke test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-output
+          path: |
+            test/*.log
+            test/*.png
+          if-no-files-found: ignore

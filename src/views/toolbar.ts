@@ -767,7 +767,9 @@ export class Toolbar {
   }
 
   private closeAllModals(): void {
-    const overlays = document.body.querySelectorAll("div[style*='z-index: 100']");
+    const overlays = document.body.querySelectorAll(
+      "div[style*='z-index: 100'], div[style*='z-index: 120'], div[style*='z-index: 121']",
+    );
     overlays.forEach((el) => el.remove());
   }
 }
