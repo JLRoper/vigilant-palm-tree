@@ -1,6 +1,6 @@
-# Heroes JS — Design Docs
+# Heroes JS — Docs
 
-Game design documentation for the Heroes of Might & Magic-inspired hex adventure game. This is the index. Every design doc lives in this folder and links back here.
+Game design and architecture documentation for the Heroes of Might & Magic-inspired hex adventure game. This is the index. Every doc lives in this folder and links back here.
 
 ## Status legend
 
@@ -24,6 +24,14 @@ A turn-based hex adventure map where the player moves a hero, claims resource ti
 | [army.md](./army.md) | Unit roster, recruitment, food/upkeep, tactical combat | ⏸️ Deferred |
 | [economy.md](./economy.md) | Per-turn economy flow tying resources + settlements | ✅ Locked |
 | [map.md](./map.md) | Map generation, terrain, camera, fog of war (future) | ✅ Locked |
+
+## Code & architecture
+
+| Doc | Covers | Status |
+|-----|--------|--------|
+| [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) | Module-by-module dependency map for `src/`, `server/`, `shared/`, `test/`, `tools/`, `scripts/` | 📋 Planned |
+| [architecture.md](./architecture.md) | Executed layout plan that established the current `src/` structure | ✅ Locked |
+| [battle-view-architecture.md](./battle-view-architecture.md) | Battle view surface: trigger → state → UI → server resolver; auto-resolve vs. dev Test-Battle paths | 📋 Planned |
 
 ## How to read these
 

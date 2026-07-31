@@ -33,6 +33,10 @@ export class GameSessionManager {
   getGameSeed(): number { return this.currentGameSeed; }
   getMapSize(): MapSize { return this.currentMapSize; }
 
+  async getTilesForGame(loaded: Game): Promise<TileRow[]> {
+    return await this.session.getTiles(loaded.name);
+  }
+
   private syncMetadata(name: string, seed: number, mapSize: MapSize): void {
     this.currentGameName = name;
     this.currentGameSeed = seed;
