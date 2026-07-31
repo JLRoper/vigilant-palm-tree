@@ -20,6 +20,10 @@ npm test         # run the smoke test
 | Game design — resources, settlements, heroes, economy, map, art | [docs/README.md](./docs/README.md) |
 | The TypeScript module layout under `src/` | [docs/architecture.md](./docs/architecture.md) |
 | Front-end rendering performance TODOs | [docs/TODO-front-end-efficiency.md](./docs/TODO-front-end-efficiency.md) |
+| Coding constraints + Kilo agent behavior in this repo | [AGENTS.md](./AGENTS.md) |
+| Kilo subagents (session-tracker, doc-updater, precommit-checker) | [.kilo/agent/](./.kilo/agent/) |
+| Per-session change logs (one file per day, YYYY-MM-DD.md) | [sessionTracking/](./sessionTracking/) |
+| Kilo slash commands (`/dev`, `/precommit`, `/pre-pr`) | [.kilo/command/](./.kilo/command/) |
 
 ## Status
 
