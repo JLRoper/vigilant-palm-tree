@@ -1,0 +1,10 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "agent": {
+    "test-min": {
+      "description": "Simple test",
+      "mode": "subagent",
+      "prompt": "You are a test agent."
+    }
+  }
+}
