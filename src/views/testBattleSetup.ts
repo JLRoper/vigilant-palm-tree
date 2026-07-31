@@ -6,9 +6,13 @@
 
 import { fixedTestPlayerPlatoons, randomAiPlatoons } from "../combat/testArmies";
 import { catalogFailed, loadUnitCatalog } from "../data/unitCatalog";
+import type { BattleSide } from "../../shared/combat/types";
 import type { Platoon, UnitType } from "../state/units";
 import { menuTheme, openCenteredModal, styleButton } from "./menu";
 import { openManualBattleArena } from "./manualBattleArena";
+
+const BLUE_ACCENT = "#3070c0";
+const RED_ACCENT = "#c04040";
 
 function rosterList(title: string, platoons: Platoon[], unitTypes: Record<string, UnitType>): HTMLElement {
   const col = document.createElement("div");
@@ -61,6 +65,11 @@ function buildSetup(modal: ReturnType<typeof openCenteredModal>, units: UnitType
   const unitTypes: Record<string, UnitType> = Object.fromEntries(units.map((u) => [u.id, u]));
   const playerPlatoons = fixedTestPlayerPlatoons();
   let aiPlatoons = randomAiPlatoons(unitTypes);
+  // Which engine role (and thus grid color — attacker is always blue,
+  // defender always red) the human controls. The AI always takes whichever
+  // role the human didn't pick, so red isn't hardcoded to "the opponent"
+  // anymore — it's whatever role you didn't choose to play.
+  let humanSide: BattleSide = "attacker";
 
   const intro = document.createElement("div");
   intro.textContent = "Player uses a fixed roster. Reroll the AI's roster until you're happy, then start.";
@@ -68,6 +77,43 @@ function buildSetup(modal: ReturnType<typeof openCenteredModal>, units: UnitType
   intro.style.opacity = "0.65";
   intro.style.marginBottom = "6px";
   modal.appendContent(intro);
+
+  const sideRow = document.createElement("div");
+  Object.assign(sideRow.style, {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "10px",
+    fontSize: "11px",
+  });
+  const sideLabel = document.createElement("span");
+  sideLabel.textContent = "Play as:";
+  sideLabel.style.opacity = "0.7";
+  sideRow.appendChild(sideLabel);
+
+  const blueBtn = document.createElement("button");
+  blueBtn.textContent = "Blue";
+  const redBtn = document.createElement("button");
+  redBtn.textContent = "Red";
+
+  function updateSideButtons(): void {
+    styleButton(blueBtn, humanSide === "attacker");
+    styleButton(redBtn, humanSide === "defender");
+    blueBtn.style.borderColor = humanSide === "attacker" ? BLUE_ACCENT : blueBtn.style.borderColor;
+    redBtn.style.borderColor = humanSide === "defender" ? RED_ACCENT : redBtn.style.borderColor;
+  }
+  blueBtn.addEventListener("click", () => {
+    humanSide = "attacker";
+    updateSideButtons();
+  });
+  redBtn.addEventListener("click", () => {
+    humanSide = "defender";
+    updateSideButtons();
+  });
+  updateSideButtons();
+  sideRow.appendChild(blueBtn);
+  sideRow.appendChild(redBtn);
+  modal.appendContent(sideRow);
 
   const columns = document.createElement("div");
   columns.style.display = "flex";
@@ -106,7 +152,7 @@ function buildSetup(modal: ReturnType<typeof openCenteredModal>, units: UnitType
   styleButton(startBtn, true);
   startBtn.addEventListener("click", () => {
     modal.close();
-    openManualBattleArena(playerPlatoons, aiPlatoons, unitTypes);
+    openManualBattleArena(playerPlatoons, aiPlatoons, unitTypes, humanSide);
   });
   buttonRow.appendChild(startBtn);
 

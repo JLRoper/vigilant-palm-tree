@@ -24,6 +24,19 @@ import type { BattleGrid, BattleLogEntry, BattleResult, BattleSide, Combatant } 
 
 export { pickTarget } from "./resolveBattle";
 
+// Purely cosmetic for now (drives the arena's banner only) but exported and
+// keyed off round number rather than buried in UI code, so a future
+// day/night combat bonus (e.g. a UnitType.nightBonus trait) can key off the
+// same phase without re-deriving it.
+export const TIME_OF_DAY_PHASES = ["Dawn", "Day", "Dusk", "Night"] as const;
+export type TimeOfDay = (typeof TIME_OF_DAY_PHASES)[number];
+const ROUNDS_PER_TIME_PHASE = 3;
+
+export function timeOfDayForRound(round: number): TimeOfDay {
+  const idx = Math.floor((Math.max(1, round) - 1) / ROUNDS_PER_TIME_PHASE) % TIME_OF_DAY_PHASES.length;
+  return TIME_OF_DAY_PHASES[idx];
+}
+
 const NEIGHBOR_DIRS: Axial[] = [
   { q: 1, r: 0 },
   { q: 1, r: -1 },
@@ -52,12 +65,14 @@ export interface ManualBattleState {
   round: number;
   unactedAttacker: Set<number>;
   unactedDefender: Set<number>;
-  // Slots that have already spent their one move this round — a platoon's
-  // movement range is calculated once at the start of its turn and it may
-  // use up to that many hexes exactly once, not repeatedly re-plan a fresh
-  // move from wherever it ends up.
-  movedAttacker: Set<number>;
-  movedDefender: Set<number>;
+  // Remaining movement points this round, keyed by slot index. A slot with
+  // no entry here still has its full platoon speed available (hasn't moved
+  // yet this round). A platoon may move multiple times in a turn — e.g. 3
+  // hexes now, 2 more later — but the *total* distance it covers this round
+  // is capped at its speed; it never gets a fresh full-speed range just by
+  // moving again.
+  moveBudgetAttacker: Map<number, number>;
+  moveBudgetDefender: Map<number, number>;
   log: BattleLogEntry[];
   maxRounds: number;
   obstacleSeed: number;
@@ -76,8 +91,16 @@ function unactedSetFor(state: ManualBattleState, side: BattleSide): Set<number> 
   return side === "attacker" ? state.unactedAttacker : state.unactedDefender;
 }
 
-function movedSetFor(state: ManualBattleState, side: BattleSide): Set<number> {
-  return side === "attacker" ? state.movedAttacker : state.movedDefender;
+function moveBudgetSetFor(state: ManualBattleState, side: BattleSide): Map<number, number> {
+  return side === "attacker" ? state.moveBudgetAttacker : state.moveBudgetDefender;
+}
+
+// A slot absent from the budget map hasn't moved yet this round, so its full
+// platoon speed is available.
+function remainingMovement(state: ManualBattleState, combatant: Combatant): number {
+  const budget = moveBudgetSetFor(state, combatant.side);
+  const stored = budget.get(combatant.slotIndex);
+  return stored !== undefined ? stored : platoonSpeed(combatant, state.unitTypes);
 }
 
 function enemySideOf(side: BattleSide): BattleSide {
@@ -112,8 +135,8 @@ export function startManualBattle(
     round: 1,
     unactedAttacker: new Set(livingCombatants(attacker).map((c) => c.slotIndex)),
     unactedDefender: new Set(livingCombatants(defender).map((c) => c.slotIndex)),
-    movedAttacker: new Set(),
-    movedDefender: new Set(),
+    moveBudgetAttacker: new Map(),
+    moveBudgetDefender: new Map(),
     log: [],
     maxRounds: options.maxRounds ?? DEFAULT_MAX_ROUNDS,
     obstacleSeed,
@@ -132,7 +155,7 @@ export function unactedLivingSlots(state: ManualBattleState, side: BattleSide): 
   return Array.from(unactedSetFor(state, side)).filter((slot) => living.has(slot));
 }
 
-function platoonSpeed(combatant: Combatant, unitTypes: Record<string, UnitType>): number {
+export function platoonSpeed(combatant: Combatant, unitTypes: Record<string, UnitType>): number {
   let min = Infinity;
   for (const e of combatant.entries) {
     const speed = unitTypes[e.unitTypeId]?.speed ?? 0;
@@ -153,21 +176,20 @@ function occupiedHexes(state: ManualBattleState, excludeSide: BattleSide, exclud
   return set;
 }
 
-// BFS over the grid bounded by the platoon's speed (min speed among its
-// entries), blocked by impassable hexes and any other live combatant's hex.
-// Returns empty once the platoon has already spent its move this round.
-export function getMovementRange(state: ManualBattleState, combatant: Combatant): Axial[] {
-  if (movedSetFor(state, combatant.side).has(combatant.slotIndex)) return [];
-  const speed = platoonSpeed(combatant, state.unitTypes);
+// BFS over the grid bounded by a movement budget, blocked by impassable
+// hexes and any other live combatant's hex. Returns every reachable hex
+// (including the start hex, at cost 0) mapped to its hex-step distance, so
+// callers can both enumerate reachable destinations and look up the cost of
+// a specific one.
+function movementCosts(state: ManualBattleState, combatant: Combatant, budget: number): Map<string, number> {
   const blocked = occupiedHexes(state, combatant.side, combatant.slotIndex);
   const hexByKey = new Map(state.grid.hexes.map((h) => [hexKey(h), h]));
   const visited = new Map<string, number>([[hexKey(combatant.position), 0]]);
   const queue: Axial[] = [combatant.position];
-  const result: Axial[] = [];
   while (queue.length > 0) {
     const current = queue.shift()!;
     const dist = visited.get(hexKey(current))!;
-    if (dist >= speed) continue;
+    if (dist >= budget) continue;
     for (const dir of NEIGHBOR_DIRS) {
       const next = { q: current.q + dir.q, r: current.r + dir.r };
       const key = hexKey(next);
@@ -175,9 +197,24 @@ export function getMovementRange(state: ManualBattleState, combatant: Combatant)
       const hex = hexByKey.get(key);
       if (!hex || hex.impassable || blocked.has(key)) continue;
       visited.set(key, dist + 1);
-      result.push(next);
       queue.push(next);
     }
+  }
+  return visited;
+}
+
+// Hexes reachable with whatever movement budget the platoon has left this
+// round (its full speed, minus any hexes it's already covered via earlier
+// moves this same round). Returns empty once that budget is exhausted.
+export function getMovementRange(state: ManualBattleState, combatant: Combatant): Axial[] {
+  const budget = remainingMovement(state, combatant);
+  if (budget <= 0) return [];
+  const visited = movementCosts(state, combatant, budget);
+  const result: Axial[] = [];
+  for (const [key, dist] of visited) {
+    if (dist === 0) continue;
+    const [q, r] = key.split(",").map(Number);
+    result.push({ q, r });
   }
   return result;
 }
@@ -230,8 +267,8 @@ function pruneDead(state: ManualBattleState): void {
   const aliveDefender = new Set(livingCombatants(state.defender).map((c) => c.slotIndex));
   for (const slot of Array.from(state.unactedAttacker)) if (!aliveAttacker.has(slot)) state.unactedAttacker.delete(slot);
   for (const slot of Array.from(state.unactedDefender)) if (!aliveDefender.has(slot)) state.unactedDefender.delete(slot);
-  for (const slot of Array.from(state.movedAttacker)) if (!aliveAttacker.has(slot)) state.movedAttacker.delete(slot);
-  for (const slot of Array.from(state.movedDefender)) if (!aliveDefender.has(slot)) state.movedDefender.delete(slot);
+  for (const slot of Array.from(state.moveBudgetAttacker.keys())) if (!aliveAttacker.has(slot)) state.moveBudgetAttacker.delete(slot);
+  for (const slot of Array.from(state.moveBudgetDefender.keys())) if (!aliveDefender.has(slot)) state.moveBudgetDefender.delete(slot);
 }
 
 export function isBattleOver(state: ManualBattleState): boolean {
@@ -253,25 +290,28 @@ function checkRoundAdvance(state: ManualBattleState): void {
     }
     state.unactedAttacker = new Set(livingCombatants(state.attacker).map((c) => c.slotIndex));
     state.unactedDefender = new Set(livingCombatants(state.defender).map((c) => c.slotIndex));
-    state.movedAttacker = new Set();
-    state.movedDefender = new Set();
+    state.moveBudgetAttacker = new Map();
+    state.moveBudgetDefender = new Map();
   }
 }
 
-// Moves a not-yet-acted platoon within its movement range, calculated once
-// at the start of its turn from its current position — a platoon gets a
-// single move per turn, not a fresh recalculated range after each step.
-// Moving does not by itself consume the platoon's turn — it may still
-// attack afterward (or call endPlatoonTurn to skip attacking this round).
+// Moves a not-yet-acted platoon toward a hex within its remaining movement
+// budget for this round. A platoon may call this more than once per turn —
+// e.g. 3 hexes now, 2 more later — but the total distance covered across
+// all its moves this round is capped at its speed. Moving does not by
+// itself consume the platoon's turn — it may still attack afterward (or
+// call endPlatoonTurn to skip attacking, or stop moving, this round).
 export function movePlatoon(state: ManualBattleState, side: BattleSide, slotIndex: number, destination: Axial): boolean {
   if (!unactedSetFor(state, side).has(slotIndex)) return false;
-  if (movedSetFor(state, side).has(slotIndex)) return false;
   const combatant = getCombatant(state, side, slotIndex);
   if (!combatant) return false;
-  const range = getMovementRange(state, combatant);
-  if (!range.some((h) => h.q === destination.q && h.r === destination.r)) return false;
+  const budget = remainingMovement(state, combatant);
+  if (budget <= 0) return false;
+  const costs = movementCosts(state, combatant, budget);
+  const cost = costs.get(hexKey(destination));
+  if (cost === undefined || cost === 0) return false;
   combatant.position = destination;
-  movedSetFor(state, side).add(slotIndex);
+  moveBudgetSetFor(state, side).set(slotIndex, budget - cost);
   return true;
 }
 

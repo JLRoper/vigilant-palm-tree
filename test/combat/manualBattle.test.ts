@@ -105,7 +105,7 @@ test("isBattleOver / finalizeManualBattle: detects a wipeout and reports the win
   assert.equal(result.defenderOutcome, "lost_all_troops");
 });
 
-test("movePlatoon: a platoon gets exactly one move per turn, not a fresh range each step", () => {
+test("movePlatoon: total distance per turn is capped at speed, even spread across multiple moves", () => {
   const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]); // speed 3
   const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
   const state = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 12, rows: 1 }, fixedObstacles: [] });
@@ -114,17 +114,39 @@ test("movePlatoon: a platoon gets exactly one move per turn, not a fresh range e
   const firstRange = getMovementRange(state, actor);
   assert.equal(firstRange.length, 3, "footman (speed 3) should reach exactly 3 hexes on the open row");
 
+  // Using the platoon's full speed in one move still leaves it capped —
+  // this is the bug the user originally reported: re-selecting after a move
+  // re-calculated a fresh full-speed range from the new position, letting a
+  // platoon "walk" indefinitely per turn.
   assert.equal(movePlatoon(state, "attacker", 0, { q: 3, r: 0 }), true);
   assert.equal(actor.position.q, 3);
-
-  // Having already moved this turn, it must not be able to move again, even
-  // to a hex that would have been in range from its original position, and
-  // getMovementRange must report no further options (this is the bug the
-  // user reported: re-selecting after a move re-calculated a fresh range
-  // from the new position, letting a platoon "walk" indefinitely per turn).
   assert.deepEqual(getMovementRange(state, actor), []);
   assert.equal(movePlatoon(state, "attacker", 0, { q: 4, r: 0 }), false);
-  assert.equal(actor.position.q, 3, "position must be unchanged after the rejected second move");
+  assert.equal(actor.position.q, 3, "position must be unchanged after the rejected move");
+});
+
+test("movePlatoon: unspent movement carries over across multiple moves within the same turn", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]); // speed 3
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 12, rows: 1 }, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+
+  // Take just 1 of the 3 available steps.
+  assert.equal(movePlatoon(state, "attacker", 0, { q: 1, r: 0 }), true);
+
+  // The platoon should still be offered its remaining 2 steps of movement
+  // (reachable in either direction along the row: q=0 behind, q=2/q=3
+  // ahead), not treated as having already used its one move for the turn.
+  const rangeAfterFirstStep = getMovementRange(state, actor);
+  assert.equal(rangeAfterFirstStep.length, 3, "2 remaining steps reach q=0, q=2, and q=3 from q=1");
+  assert.ok(rangeAfterFirstStep.some((h) => h.q === 3 && h.r === 0), "2 more steps should reach q=3");
+  assert.ok(!rangeAfterFirstStep.some((h) => h.q === 4 && h.r === 0), "beyond the remaining budget");
+
+  // Use up the remaining budget exactly.
+  assert.equal(movePlatoon(state, "attacker", 0, { q: 3, r: 0 }), true);
+  assert.equal(actor.position.q, 3);
+  assert.deepEqual(getMovementRange(state, actor), [], "budget fully spent — no further movement this turn");
+  assert.equal(movePlatoon(state, "attacker", 0, { q: 4, r: 0 }), false);
 });
 
 test("moving into an adjacent hex puts the enemy in getValidMeleeTargets, and attacking causes casualties", () => {

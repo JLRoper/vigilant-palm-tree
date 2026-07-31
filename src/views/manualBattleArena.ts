@@ -5,7 +5,7 @@
 // the "Test Battle" sandbox (src/views/testBattleSetup.ts) — see that file's
 // header for the scope boundary against the real game's battle flow.
 
-import { axialToPixel, hexCorners, pixelToAxial, type Axial } from "../core/hex";
+import { axialToPixel, hexCorners, hexDistance, pixelToAxial, type Axial } from "../core/hex";
 import { totalHealth } from "../../shared/combat/damage";
 import {
   attackWithPlatoon,
@@ -18,17 +18,42 @@ import {
   isBattleOver,
   movePlatoon,
   pickTarget,
+  platoonSpeed,
   runAiTurn,
   startManualBattle,
+  timeOfDayForRound,
   unactedLivingSlots,
   type ManualBattleState,
+  type TimeOfDay,
 } from "../../shared/combat/manualBattle";
-import type { Combatant } from "../../shared/combat/types";
+import type { BattleLogEntry, BattleSide, Combatant } from "../../shared/combat/types";
 import type { Platoon, UnitType } from "../state/units";
 import { showBattleResultCard } from "./battleResultCard";
 import { menuTheme, styleButton } from "./menu";
 
-const HEX_SIZE = 26;
+const HEX_SIZE = 34;
+
+// Dev-only console logging for the arena — this view is only reachable from
+// the Test Battle sandbox (see file header), so it's safe to leave this on
+// by default rather than gating it behind a toggle. Traces every click's
+// resulting action (select/move/attack/deselect/no-op), every combat event
+// the engine's own battle log records (attacks, casualties, retreats), and
+// keeps a running per-platoon move tally for diagnosing movement bugs.
+const DEBUG_LOG = true;
+const LOG_PREFIX = "[manualBattle]";
+
+function debugLog(...args: unknown[]): void {
+  if (!DEBUG_LOG) return;
+  console.log(LOG_PREFIX, ...args);
+}
+
+function fmtHex(h: Axial): string {
+  return `(${h.q},${h.r})`;
+}
+
+function platoonLabel(side: BattleSide, slotIndex: number): string {
+  return `${side}#${slotIndex}`;
+}
 
 function computeLayout(state: ManualBattleState) {
   let minX = Infinity;
@@ -114,11 +139,101 @@ function buildStatusTile(state: ManualBattleState, c: Combatant, accent: string,
   return tile;
 }
 
-export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Platoon[], unitTypes: Record<string, UnitType>): void {
-  const state = startManualBattle(playerPlatoons, aiPlatoons, {
+export function openManualBattleArena(
+  playerPlatoons: Platoon[],
+  aiPlatoons: Platoon[],
+  unitTypes: Record<string, UnitType>,
+  humanSide: BattleSide = "attacker",
+): void {
+  // The engine's attacker/defender roles are fixed to their grid colors
+  // (attacker always blue, defender always red) — humanSide picks which of
+  // those two roles the player controls; the AI always takes the other one.
+  const aiSide: BattleSide = humanSide === "attacker" ? "defender" : "attacker";
+  const attackerPlatoons = humanSide === "attacker" ? playerPlatoons : aiPlatoons;
+  const defenderPlatoons = humanSide === "attacker" ? aiPlatoons : playerPlatoons;
+  const state = startManualBattle(attackerPlatoons, defenderPlatoons, {
     unitTypes,
     obstacleSeed: Math.floor(Math.random() * 1_000_000),
   });
+
+  // Running per-platoon move tally for the whole battle (both sides), keyed
+  // by "side#slotIndex" — printed on demand via logMoveStats and dumped
+  // again when the battle ends, so it's easy to see e.g. a platoon that
+  // never got to use its full speed.
+  const moveStats = new Map<string, { moves: number; hexesTraveled: number }>();
+
+  function recordMove(side: BattleSide, slotIndex: number, hexes: number): void {
+    const key = platoonLabel(side, slotIndex);
+    const prev = moveStats.get(key) ?? { moves: 0, hexesTraveled: 0 };
+    moveStats.set(key, { moves: prev.moves + 1, hexesTraveled: prev.hexesTraveled + hexes });
+  }
+
+  function logMoveStats(label: string): void {
+    if (!DEBUG_LOG) return;
+    const rows = Array.from(moveStats.entries()).map(([platoon, stat]) => ({ platoon, ...stat }));
+    console.groupCollapsed(`${LOG_PREFIX} moves per platoon — ${label}`);
+    console.table(rows.length > 0 ? rows : [{ platoon: "(none yet)", moves: 0, hexesTraveled: 0 }]);
+    console.groupEnd();
+  }
+
+  // The engine's own battle log (state.log) already records every attack,
+  // casualty, and retreat with full detail — rather than re-deriving that
+  // from before/after health snapshots, just print whatever entries were
+  // appended since the last check. Covers both the player's clicks and the
+  // AI's turns.
+  function logNewBattleEvents(sinceLength: number): void {
+    if (!DEBUG_LOG) return;
+    for (let i = sinceLength; i < state.log.length; i++) {
+      const entry: BattleLogEntry = state.log[i];
+      if (entry.kind === "damage") {
+        const targetSide = entry.side === "attacker" ? "defender" : "attacker";
+        const flags = [
+          entry.isCounterattack ? "counterattack" : null,
+          entry.advantageBonus ? "advantage" : null,
+          entry.disadvantagePenalty ? "disadvantage" : null,
+        ].filter(Boolean);
+        const casualties = entry.casualties.length
+          ? entry.casualties.map((c) => `${c.unitTypeId} x${c.count}`).join(", ")
+          : "none";
+        debugLog(
+          `combat: ${platoonLabel(entry.side, entry.attackerSlot)} -> ${platoonLabel(targetSide, entry.targetSlot)}`,
+          `dmg=${entry.damage}`,
+          flags.length ? `[${flags.join(", ")}]` : "",
+          `casualties=${casualties}`,
+        );
+      } else if (entry.kind === "self_retreat") {
+        debugLog(`retreat: ${platoonLabel(entry.side, entry.slotIndex)} self-retreated`);
+      } else if (entry.kind === "hero_retreat") {
+        debugLog(`retreat: ${entry.side} hero retreated`);
+      } else if (entry.kind === "stalemate") {
+        debugLog(`stalemate: ${entry.detail}`);
+      }
+    }
+  }
+
+  function logBattleStart(): void {
+    if (!DEBUG_LOG) return;
+    console.groupCollapsed(
+      `${LOG_PREFIX} battle start — you are ${humanSide}, grid ${state.grid.cols}x${state.grid.rows}, ` +
+        `obstacleSeed=${state.obstacleSeed}, maxRounds=${state.maxRounds}`,
+    );
+    const rows: Record<string, unknown>[] = [];
+    for (const side of ["attacker", "defender"] as const) {
+      for (const c of side === "attacker" ? state.attacker : state.defender) {
+        rows.push({
+          platoon: platoonLabel(side, c.slotIndex),
+          controlledBy: side === humanSide ? "you" : "ai",
+          units: c.entries.map((e) => `${state.unitTypes[e.unitTypeId]?.name ?? e.unitTypeId} x${e.count}`).join(", ") || "(empty)",
+          speed: platoonSpeed(c, state.unitTypes),
+          maxHealth: c.maxHealth,
+          position: fmtHex(c.position),
+        });
+      }
+    }
+    console.table(rows);
+    console.groupEnd();
+  }
+  logBattleStart();
 
   // The fight takes over the whole viewport rather than sitting in a small
   // centered popup — there's a lot to look at (grid + both hero panels +
@@ -151,7 +266,7 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
     flexShrink: "0",
   });
   const titleEl = document.createElement("div");
-  titleEl.textContent = "Test Battle — Manual Fight";
+  titleEl.textContent = `Test Battle — Manual Fight (You: ${humanSide === "attacker" ? "Blue" : "Red"})`;
   header.appendChild(titleEl);
   overlay.appendChild(header);
 
@@ -174,6 +289,103 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
     padding: "16px",
   });
   overlay.appendChild(container);
+
+  // Status banner along the bottom of the arena, under the map: an info row
+  // (round counter, whose turn it currently is, and the flavor time-of-day —
+  // see timeOfDayForRound, purely cosmetic today but a future day/night
+  // combat bonus can key off the same round-derived phase) and, below that,
+  // an action row with the contextual help text and the End Turn button —
+  // both act on "whatever's currently selected on the map", so they live
+  // with the rest of the map-status banner rather than off to the side.
+  const footer = document.createElement("div");
+  Object.assign(footer.style, {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "10px",
+    padding: "16px",
+    background: menuTheme.panel.headerBackground,
+    color: menuTheme.panel.headerColor,
+    borderTop: "1px solid rgba(255,255,255,0.08)",
+    flexShrink: "0",
+  });
+  overlay.appendChild(footer);
+
+  const infoRow = document.createElement("div");
+  Object.assign(infoRow.style, {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "20px",
+    fontSize: "18px",
+    fontWeight: "600",
+  });
+  footer.appendChild(infoRow);
+
+  function buildFooterBox(): HTMLElement {
+    const box = document.createElement("div");
+    Object.assign(box.style, {
+      border: "1px solid rgba(255,255,255,0.25)",
+      borderRadius: "6px",
+      padding: "8px 20px",
+    });
+    return box;
+  }
+
+  const roundEl = buildFooterBox();
+  const turnEl = buildFooterBox();
+  const timeEl = buildFooterBox();
+  infoRow.append(roundEl, turnEl, timeEl);
+
+  const TIME_OF_DAY_ICON: Record<TimeOfDay, string> = {
+    Dawn: "🌅",
+    Day: "☀️",
+    Dusk: "🌇",
+    Night: "🌙",
+  };
+
+  function renderFooter(): void {
+    roundEl.textContent = `Round ${state.round}`;
+    const humanActing = unactedLivingSlots(state, humanSide).length > 0;
+    turnEl.textContent = isBattleOver(state) ? "Battle Over" : humanActing ? "Your Turn" : "AI's Turn";
+    const phase = timeOfDayForRound(state.round);
+    timeEl.textContent = `${TIME_OF_DAY_ICON[phase]} ${phase}`;
+  }
+
+  const actionRow = document.createElement("div");
+  Object.assign(actionRow.style, {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "16px",
+    fontSize: "13px",
+  });
+  footer.appendChild(actionRow);
+
+  const helpTextEl = document.createElement("div");
+  helpTextEl.style.opacity = "0.75";
+  actionRow.appendChild(helpTextEl);
+
+  const endTurnBtn = document.createElement("button");
+  endTurnBtn.textContent = "End Turn (Don't Attack)";
+  styleButton(endTurnBtn);
+  endTurnBtn.addEventListener("click", () => {
+    if (selectedSlot === null) return;
+    debugLog(`click End Turn -> ${platoonLabel(humanSide, selectedSlot)} ends its turn without attacking`);
+    endPlatoonTurn(state, humanSide, selectedSlot);
+    afterPlayerAction();
+  });
+  actionRow.appendChild(endTurnBtn);
+
+  function renderFooterActions(): void {
+    helpTextEl.textContent =
+      selectedSlot === null
+        ? "Click one of your platoons in the status bar (or on the grid) to act."
+        : moveRange.length > 0
+          ? "Click a highlighted hex to move (moving next to an enemy fights immediately). Steps left over can still be used — move again, attack a ringed enemy, or End Turn when done."
+          : "Out of movement — click a ringed enemy to attack, or End Turn.";
+    endTurnBtn.style.display = selectedSlot !== null ? "" : "none";
+  }
 
   // Hero portraits flank the battlefield, HoMM3-style — they stand outside
   // the grid rather than occupying a hex. Cast Spell is a stub for now: no
@@ -272,7 +484,11 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
   const ATTACKER_ACCENT = "#3070c0";
   const DEFENDER_ACCENT = "#c04040";
 
-  const { column: attackerColumn, bar: attackerBar } = buildSideColumn("You", "Your Platoons", ATTACKER_ACCENT);
+  const { column: attackerColumn, bar: attackerBar } = buildSideColumn(
+    humanSide === "attacker" ? "You" : "AI Opponent",
+    humanSide === "attacker" ? "Your Platoons" : "Enemy Platoons",
+    ATTACKER_ACCENT,
+  );
   container.appendChild(attackerColumn);
 
   const canvas = document.createElement("canvas");
@@ -282,7 +498,11 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
   container.appendChild(canvas);
   const ctx = canvas.getContext("2d")!;
 
-  const { column: defenderColumn, bar: defenderBar } = buildSideColumn("AI Opponent", "Enemy Platoons", DEFENDER_ACCENT);
+  const { column: defenderColumn, bar: defenderBar } = buildSideColumn(
+    humanSide === "defender" ? "You" : "AI Opponent",
+    humanSide === "defender" ? "Your Platoons" : "Enemy Platoons",
+    DEFENDER_ACCENT,
+  );
   container.appendChild(defenderColumn);
 
   const sidePanel = document.createElement("div");
@@ -343,7 +563,7 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
       for (const c of side === "attacker" ? state.attacker : state.defender) {
         if (c.retreated || !c.entries.some((e) => e.count > 0)) continue;
         const { x, y } = toCanvas(c.position.q, c.position.r);
-        const isSelected = side === "attacker" && c.slotIndex === selectedSlot;
+        const isSelected = side === humanSide && c.slotIndex === selectedSlot;
         ctx.beginPath();
         ctx.arc(x, y, HEX_SIZE * 0.55, 0, Math.PI * 2);
         ctx.fillStyle = side === "attacker" ? (isSelected ? "#5fb0ff" : "#3070c0") : "#c04040";
@@ -354,7 +574,7 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
 
         const count = c.entries.reduce((sum, e) => sum + e.count, 0);
         ctx.fillStyle = "#fff";
-        ctx.font = `10px ${menuTheme.font}`;
+        ctx.font = `${Math.round(HEX_SIZE * 0.4)}px ${menuTheme.font}`;
         ctx.textAlign = "center";
         ctx.fillText(String(count), x, y + 3);
 
@@ -372,34 +592,31 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
 
   function selectPlatoon(slotIndex: number): void {
     selectedSlot = slotIndex;
-    const combatant = getCombatant(state, "attacker", slotIndex);
+    const combatant = getCombatant(state, humanSide, slotIndex);
     if (!combatant) {
       selectedSlot = null;
       moveRange = [];
       attackTargets = [];
     } else {
-      // Movement range is calculated once, here, at the start of the
-      // platoon's turn. After it moves (see handleClick's move branch) we
-      // must NOT recompute it again from the new position — the engine
-      // already refuses a second move via movePlatoon's moved-set check,
-      // but getMovementRange would also just return [] for an
-      // already-moved platoon, so this stays accurate either way.
       moveRange = getMovementRange(state, combatant);
       attackTargets = getValidAttackTargets(state, combatant);
     }
     refresh();
   }
 
-  // Called after a successful move: the platoon has spent its one move for
-  // this turn, so no further movement is offered. If the move landed it on
-  // a hex directly connected (adjacent) to an enemy platoon, that's a bump
-  // into melee contact and the fight resolves immediately — no separate
-  // "attack" click required. Otherwise, fall back to showing any in-range
-  // ranged targets (still requires an explicit click — that's a deliberate
-  // shot, not a bump) or just ending the turn.
+  // Called after a successful move. If the move landed it on a hex directly
+  // connected (adjacent) to an enemy platoon, that's a bump into melee
+  // contact and the fight resolves immediately — no separate "attack" click
+  // required. Otherwise, re-show any in-range ranged targets (still
+  // requires an explicit click — that's a deliberate shot, not a bump) and
+  // whatever movement budget the platoon has left: a platoon that hasn't
+  // used its full speed yet can keep walking, hex by hex or in bigger
+  // hops, rather than being forced to attack or end its turn immediately.
+  // The player can stop early via the "End Turn" button once they're happy
+  // with its position.
   function refreshAfterMove(): void {
     if (selectedSlot === null) return;
-    const combatant = getCombatant(state, "attacker", selectedSlot);
+    const combatant = getCombatant(state, humanSide, selectedSlot);
     if (!combatant) {
       selectedSlot = null;
       moveRange = [];
@@ -407,14 +624,18 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
       refresh();
       return;
     }
-    moveRange = [];
     const adjacentEnemies = getValidMeleeTargets(state, combatant);
     if (adjacentEnemies.length > 0) {
+      moveRange = [];
       const target = pickTarget(adjacentEnemies, state.unitTypes) ?? adjacentEnemies[0];
-      attackWithPlatoon(state, "attacker", selectedSlot, target.slotIndex);
+      debugLog(`bump attack: ${platoonLabel(humanSide, selectedSlot)} -> ${platoonLabel(target.side, target.slotIndex)}`);
+      const beforeLog = state.log.length;
+      attackWithPlatoon(state, humanSide, selectedSlot, target.slotIndex);
+      logNewBattleEvents(beforeLog);
       afterPlayerAction();
       return;
     }
+    moveRange = getMovementRange(state, combatant);
     attackTargets = getValidAttackTargets(state, combatant);
     refresh();
   }
@@ -426,20 +647,47 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
     advanceAi();
   }
 
+  // runAiTurn is a single opaque engine call — it may move and/or attack
+  // with one AI platoon internally. Snapshot positions before and diff
+  // after so AI moves show up in the same per-platoon move log as the
+  // player's, and diff state.log the same way attacks do for clicks.
+  function snapshotAiPosition(): Axial | undefined {
+    const slots = unactedLivingSlots(state, aiSide);
+    if (slots.length === 0) return undefined;
+    const actor = getCombatant(state, aiSide, slots[0]);
+    return actor ? { ...actor.position } : undefined;
+  }
+
+  function runAiTurnLogged(): void {
+    const slots = unactedLivingSlots(state, aiSide);
+    if (slots.length === 0) return;
+    const slotIndex = slots[0];
+    const before = snapshotAiPosition();
+    const beforeLog = state.log.length;
+    runAiTurn(state, aiSide);
+    const actor = getCombatant(state, aiSide, slotIndex);
+    if (actor && before && (before.q !== actor.position.q || before.r !== actor.position.r)) {
+      const distance = hexDistance(before, actor.position);
+      recordMove(aiSide, slotIndex, distance);
+      debugLog(`ai move: ${platoonLabel(aiSide, slotIndex)}: ${fmtHex(before)} -> ${fmtHex(actor.position)} (${distance} hex${distance === 1 ? "" : "es"})`);
+    }
+    logNewBattleEvents(beforeLog);
+  }
+
   function advanceAi(): void {
     if (isBattleOver(state)) {
       finishBattle();
       return;
     }
-    if (unactedLivingSlots(state, "defender").length > 0) {
-      runAiTurn(state, "defender");
+    if (unactedLivingSlots(state, aiSide).length > 0) {
+      runAiTurnLogged();
     }
     if (isBattleOver(state)) {
       finishBattle();
       return;
     }
-    while (unactedLivingSlots(state, "attacker").length === 0 && unactedLivingSlots(state, "defender").length > 0) {
-      runAiTurn(state, "defender");
+    while (unactedLivingSlots(state, humanSide).length === 0 && unactedLivingSlots(state, aiSide).length > 0) {
+      runAiTurnLogged();
       if (isBattleOver(state)) {
         finishBattle();
         return;
@@ -449,48 +697,80 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
   }
 
   function finishBattle(): void {
+    logMoveStats("battle end");
     const result = finalizeManualBattle(state);
     closeArena();
     showBattleResultCard({
       result,
-      attackerLabel: "You",
-      defenderLabel: "AI Opponent",
+      attackerLabel: humanSide === "attacker" ? "You" : "AI Opponent",
+      defenderLabel: humanSide === "defender" ? "You" : "AI Opponent",
       onCarryOn: () => {},
     });
   }
 
   function handleClick(hex: Axial): void {
-    if (isBattleOver(state)) return;
+    if (isBattleOver(state)) {
+      debugLog(`click ${fmtHex(hex)} -> ignored (battle over)`);
+      return;
+    }
 
     if (selectedSlot === null) {
-      const candidates = unactedLivingSlots(state, "attacker");
-      const combatant = state.attacker.find(
+      const candidates = unactedLivingSlots(state, humanSide);
+      const humanCombatants = humanSide === "attacker" ? state.attacker : state.defender;
+      const combatant = humanCombatants.find(
         (c) => candidates.includes(c.slotIndex) && c.position.q === hex.q && c.position.r === hex.r,
       );
-      if (combatant) selectPlatoon(combatant.slotIndex);
+      if (combatant) {
+        debugLog(`click ${fmtHex(hex)} -> select ${platoonLabel(humanSide, combatant.slotIndex)}`);
+        selectPlatoon(combatant.slotIndex);
+      } else {
+        debugLog(`click ${fmtHex(hex)} -> no-op (no actable platoon there)`);
+      }
       return;
     }
 
     const target = attackTargets.find((t) => t.position.q === hex.q && t.position.r === hex.r);
     if (target) {
-      attackWithPlatoon(state, "attacker", selectedSlot, target.slotIndex);
+      debugLog(`click ${fmtHex(hex)} -> attack: ${platoonLabel(humanSide, selectedSlot)} -> ${platoonLabel(target.side, target.slotIndex)}`);
+      const beforeLog = state.log.length;
+      attackWithPlatoon(state, humanSide, selectedSlot, target.slotIndex);
+      logNewBattleEvents(beforeLog);
       afterPlayerAction();
       return;
     }
 
     if (moveRange.some((h) => h.q === hex.q && h.r === hex.r)) {
-      movePlatoon(state, "attacker", selectedSlot, hex);
+      const actorBefore = getCombatant(state, humanSide, selectedSlot);
+      const from = actorBefore ? { ...actorBefore.position } : hex;
+      const distance = hexDistance(from, hex);
+      const moved = movePlatoon(state, humanSide, selectedSlot, hex);
+      if (moved) {
+        recordMove(humanSide, selectedSlot, distance);
+        const stillActor = getCombatant(state, humanSide, selectedSlot);
+        const remainingSteps = stillActor ? getMovementRange(state, stillActor).length : 0;
+        debugLog(
+          `click ${fmtHex(hex)} -> move ${platoonLabel(humanSide, selectedSlot)}: ${fmtHex(from)} -> ${fmtHex(hex)}`,
+          `(${distance} hex${distance === 1 ? "" : "es"}), movement left: ${remainingSteps > 0 ? `${remainingSteps} hexes reachable` : "none"}`,
+        );
+        logMoveStats(`after ${platoonLabel(humanSide, selectedSlot)} move`);
+      } else {
+        debugLog(`click ${fmtHex(hex)} -> move REJECTED by engine for ${platoonLabel(humanSide, selectedSlot)} (was shown in range)`);
+      }
       refreshAfterMove();
       return;
     }
 
-    const actor = getCombatant(state, "attacker", selectedSlot);
+    const actor = getCombatant(state, humanSide, selectedSlot);
     if (actor && actor.position.q === hex.q && actor.position.r === hex.r) {
+      debugLog(`click ${fmtHex(hex)} -> deselect ${platoonLabel(humanSide, selectedSlot)}`);
       selectedSlot = null;
       moveRange = [];
       attackTargets = [];
       refresh();
+      return;
     }
+
+    debugLog(`click ${fmtHex(hex)} -> no-op (not a legal move/attack/deselect target for ${platoonLabel(humanSide, selectedSlot)})`);
   }
 
   canvas.addEventListener("click", (e) => {
@@ -505,48 +785,20 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
   function renderSidePanel(): void {
     sidePanel.replaceChildren();
 
-    const roundLine = document.createElement("div");
-    roundLine.textContent = `Round ${state.round}`;
-    roundLine.style.fontWeight = "600";
-    sidePanel.appendChild(roundLine);
-
-    const instructions = document.createElement("div");
-    instructions.style.opacity = "0.65";
-    instructions.style.fontSize = "10px";
-    instructions.textContent =
-      selectedSlot === null
-        ? "Click one of your platoons in the status bar (or on the grid) to act."
-        : moveRange.length > 0
-          ? "Click a highlighted hex to move (moving next to an enemy fights immediately), or a ringed enemy to attack."
-          : "Already acted this turn — click a ringed enemy to attack, or End Turn.";
-    sidePanel.appendChild(instructions);
-
-    if (unactedLivingSlots(state, "attacker").length === 0) {
+    if (unactedLivingSlots(state, humanSide).length === 0) {
       const waiting = document.createElement("div");
       waiting.textContent = "Waiting on the AI to finish its round...";
       waiting.style.opacity = "0.6";
       waiting.style.fontSize = "10px";
       sidePanel.appendChild(waiting);
     }
-
-    if (selectedSlot !== null) {
-      const endTurnBtn = document.createElement("button");
-      endTurnBtn.textContent = "End Turn (Don't Attack)";
-      styleButton(endTurnBtn);
-      endTurnBtn.style.marginTop = "6px";
-      endTurnBtn.addEventListener("click", () => {
-        endPlatoonTurn(state, "attacker", selectedSlot!);
-        afterPlayerAction();
-      });
-      sidePanel.appendChild(endTurnBtn);
-    }
   }
 
   function renderStatusBars(): void {
-    const actableSlots = unactedLivingSlots(state, "attacker");
+    const actableSlots = unactedLivingSlots(state, humanSide);
     const attackerTiles = state.attacker.map((c) => {
-      const tile = buildStatusTile(state, c, ATTACKER_ACCENT, c.slotIndex === selectedSlot);
-      if (actableSlots.includes(c.slotIndex)) {
+      const tile = buildStatusTile(state, c, ATTACKER_ACCENT, humanSide === "attacker" && c.slotIndex === selectedSlot);
+      if (humanSide === "attacker" && actableSlots.includes(c.slotIndex)) {
         tile.style.cursor = "pointer";
         tile.addEventListener("click", () => selectPlatoon(c.slotIndex));
       }
@@ -554,7 +806,14 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
     });
     attackerBar.replaceChildren(attackerBar.firstElementChild!, ...attackerTiles);
 
-    const defenderTiles = state.defender.map((c) => buildStatusTile(state, c, DEFENDER_ACCENT, false));
+    const defenderTiles = state.defender.map((c) => {
+      const tile = buildStatusTile(state, c, DEFENDER_ACCENT, humanSide === "defender" && c.slotIndex === selectedSlot);
+      if (humanSide === "defender" && actableSlots.includes(c.slotIndex)) {
+        tile.style.cursor = "pointer";
+        tile.addEventListener("click", () => selectPlatoon(c.slotIndex));
+      }
+      return tile;
+    });
     defenderBar.replaceChildren(defenderBar.firstElementChild!, ...defenderTiles);
   }
 
@@ -562,6 +821,8 @@ export function openManualBattleArena(playerPlatoons: Platoon[], aiPlatoons: Pla
     draw();
     renderSidePanel();
     renderStatusBars();
+    renderFooter();
+    renderFooterActions();
   }
 
   refresh();
