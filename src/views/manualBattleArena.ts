@@ -20,6 +20,7 @@ import {
   movePlatoon,
   pickTarget,
   platoonSpeed,
+  retreatHero,
   runAiTurn,
   startManualBattle,
   timeOfDayForRound,
@@ -31,6 +32,7 @@ import {
 import type { BattleLogEntry, BattleSide, Combatant } from "../../shared/combat/types";
 import type { Platoon, UnitType } from "../state/units";
 import { showBattleResultCard } from "./battleResultCard";
+import { openConfirmDialog } from "./confirmDialog";
 import { menuTheme, styleButton } from "./menu";
 
 const HEX_SIZE = 34;
@@ -498,6 +500,51 @@ export function openManualBattleArena(
   });
   actionRow.appendChild(endTurnBtn);
 
+  // Voluntary concession — Retreat applies the standard 15% self-retreat
+  // loss to every still-living platoon and pulls the whole side off the
+  // field; Surrender skips the loss and yields immediately. Both finalize
+  // the battle as `retreated_hero` for the conceding side (see retreatHero
+  // + finalizeManualBattle in shared/combat/manualBattle.ts).
+  const retreatBtn = document.createElement("button");
+  retreatBtn.textContent = "Retreat";
+  styleButton(retreatBtn);
+  retreatBtn.title = "Withdraw your hero from the fight (each surviving platoon takes a 15% loss before leaving)";
+  retreatBtn.addEventListener("click", () => {
+    if (isBattleOver(state)) return;
+    openConfirmDialog({
+      title: "Retreat?",
+      message: "Withdraw your hero from this battle?\n\nEvery surviving platoon takes a 15% loss before leaving the field, and you lose the engagement.",
+      confirmLabel: "Retreat",
+      destructive: true,
+      onConfirm: () => {
+        debugLog(`player retreats as ${humanSide}`);
+        retreatHero(state, humanSide, { applyLoss: true });
+        finishBattle();
+      },
+    });
+  });
+  actionRow.appendChild(retreatBtn);
+
+  const surrenderBtn = document.createElement("button");
+  surrenderBtn.textContent = "Surrender";
+  styleButton(surrenderBtn);
+  surrenderBtn.title = "Yield immediately with no further losses — you lose the engagement";
+  surrenderBtn.addEventListener("click", () => {
+    if (isBattleOver(state)) return;
+    openConfirmDialog({
+      title: "Surrender?",
+      message: "Yield to the enemy?\n\nYou concede the battle immediately with no additional troop losses.",
+      confirmLabel: "Surrender",
+      destructive: true,
+      onConfirm: () => {
+        debugLog(`player surrenders as ${humanSide}`);
+        retreatHero(state, humanSide, { applyLoss: false });
+        finishBattle();
+      },
+    });
+  });
+  actionRow.appendChild(surrenderBtn);
+
   function renderFooterActions(): void {
     helpTextEl.textContent =
       selectedSlot === null
@@ -505,7 +552,10 @@ export function openManualBattleArena(
         : moveRange.length > 0
           ? "Click a highlighted hex to move (moving next to an enemy fights immediately). Steps left over can still be used — move again, attack a ringed enemy, or End Turn when done."
           : "Out of movement — click a ringed enemy to attack, or End Turn.";
-    endTurnBtn.style.display = selectedSlot !== null ? "" : "none";
+    const over = isBattleOver(state);
+    endTurnBtn.style.display = selectedSlot !== null && !over ? "" : "none";
+    retreatBtn.style.display = over ? "none" : "";
+    surrenderBtn.style.display = over ? "none" : "";
   }
 
   // Hero portraits flank the battlefield, HoMM3-style — they stand outside
