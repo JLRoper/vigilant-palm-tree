@@ -296,6 +296,17 @@ export class GameEngine {
   // FRAME LOOP
   // =========================================================================
 
+  fullFrame(): void {
+    this.draw();
+    this.refreshHud();
+  }
+
+  refreshToolbarAndFrame(): void {
+    this.ui.getToolbar()?.refresh();
+    void this.actions.maybeAutoResolveBattle();
+    this.fullFrame();
+  }
+
   loop(now: number): void {
     const dt = now - this.lastTime;
     this.lastTime = now;
@@ -333,11 +344,6 @@ export class GameEngine {
       this.validCharterHexes,
     );
     this.view.drawCityOverlay(this.ui.getCityView());
-  }
-
-  private fullFrame(): void {
-    this.draw();
-    this.refreshHud();
   }
 
   private refreshHud(): void {

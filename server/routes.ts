@@ -17,10 +17,12 @@ import { normalizePlatoons } from "../src/state/units";
 import { resolveBattle as resolveBattleEngine } from "../shared/combat/resolveBattle";
 import type { BattleResult } from "../shared/combat/types";
 import { assetRouter } from "./assetRoutes";
+import { authRouter } from "./auth";
 
 export const router = Router();
 
 router.use("/assets", assetRouter);
+router.use("/auth", authRouter);
 
 type EnemyPos = { q: number; r: number };
 type TileRow = {

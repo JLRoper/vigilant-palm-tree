@@ -82,7 +82,7 @@ class TimeoutError extends Error {
   }
 }
 
-async function fetchWithTimeout(
+export async function apiFetch(
   url: string,
   init: RequestInit = {},
   timeoutMs: number = DEFAULT_TIMEOUT_MS
@@ -99,6 +99,14 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
+): Promise<Response> {
+  return apiFetch(url, init, timeoutMs);
 }
 
 async function json<T>(res: Response): Promise<T> {

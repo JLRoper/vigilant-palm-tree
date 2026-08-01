@@ -29,4 +29,6 @@ npm test         # run the smoke test
 
 v1 is feature-complete enough for end-to-end playtesting: procedural map generation (incl. biome-aware resource placement), hero movement with A* pathfinding, settlements (L1–L3) with capture, per-turn economy (resource accumulation, decay, trade), battle resolution, gold transfer between hero purse and settlement treasury, and new/load/save flows are all implemented and covered by the smoke test.
 
-Deferred to later milestones: tactical combat (auto-resolve only today), army upkeep + food, fog of war, in-settlement mines (city view exists but mines aren't yet placed).
+The app now opens to a **home / landing page** (New Game / Load Game / Settings / Sign In) before the canvas is shown; Sign In is an email magic-link flow (short-term: the 6-digit code is also surfaced in dev for testing — real email delivery comes later).
+
+Deferred to later milestones: tactical combat (auto-resolve only today), army upkeep + food, fog of war, in-settlement mines (city view exists but mines aren't yet placed), real email delivery for sign-in codes.

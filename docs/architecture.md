@@ -133,3 +133,30 @@ After all 13 steps, the project must:
 - Renaming public types or changing `Game` / `Hero` / `GameMap` / `Renderer` / `Camera` APIs.
 - Server, schema, test, or tool changes.
 - Adding a `src/index.ts` barrel.
+
+## Subsequent additions
+
+The following modules landed after this plan was executed and are documented here so the file map stays current. They follow the same conventions (strict TS, no barrels, `core/` leaf-only, no `render/` → `systems/`/`views/` imports).
+
+### Home page + email magic-link sign-in (issue #29)
+
+A full-screen home view is shown over the canvas on startup; the existing rAF loop keeps running underneath so revealing the game is a no-op.
+
+| Module | Purpose |
+|---|---|
+| `src/views/homeView.ts` | Landing screen (New Game / Load Game / Settings / Sign In). Owns its own New Game + Load Game modals; reuses `openSettingsMenu` from `views/settingsMenu.ts` for Settings and `openCenteredModal` / `styleButton` / `styleInput` from `views/menu.ts` for the auth modal. |
+| `src/io/auth.ts` | Client-side email magic-link flow: `requestLoginCode`, `verifyLoginCode`, `checkSession`, `logout`, `getCachedAuth`. Token + email are cached in `localStorage`; `Authorization: Bearer <token>` is the wire format. |
+| `src/io/api.ts` | `apiFetch` was promoted from internal helper to a named export so `auth.ts` can share the timeout/abort logic. |
+
+Server-side additions:
+
+| Module | Purpose |
+|---|---|
+| `server/auth.ts` | `POST /api/auth/request-code`, `POST /api/auth/verify-code`, `GET /api/auth/session`, `POST /api/auth/logout`. 6-digit codes are SHA-256 hashed (salted by email) and stored in `auth_codes` with a 10-minute TTL; `user_sessions` holds bearer tokens with a 30-day rolling expiry. Also exports a `requireAuth` Express middleware (unused for now — game endpoints are still anonymous). In dev (`NODE_ENV !== "production"`) the code is also returned in the response so the magic-link flow can be exercised without a real SMTP integration. |
+| `server/schema.sql` | New tables: `auth_codes`, `user_sessions` (plus indexes). |
+
+Entry-point change in `src/main.ts`: after `engine.initBackend()`, a `HomeView` is constructed and shown. Its `onNewGame` / `onLoadGame` callbacks delegate to `engine.sessions.handleNewGame` / `engine.sessions.loadGame`; `onEnterGame` just hides the overlay (no loop teardown). `GameEngine.fullFrame()` was promoted from `private` to `public`, and a thin `refreshToolbarAndFrame()` helper was added so home-view callbacks can resync the toolbar after a load.
+
+## See also
+
+- [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) — current module-by-module dependency map for `src/`, `server/`, `shared/`, `test/`, `tools/`, `scripts/`. This doc (`architecture.md`) is the executed **plan** that established the layout; the dependency map is the maintained **current state** and reflects any drift since the move.
