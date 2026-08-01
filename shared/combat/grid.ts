@@ -45,15 +45,25 @@ export function makeBattleGrid(
 }
 
 // Deployment position for the platoon in ARMY_STACK_SLOTS slot `slotIndex`.
-// Each side occupies one outer column, one platoon per row; `sideChoice`
-// lets a scouting party pick which outer column (left/right) they start on.
+// Each side occupies one outer column (attacker on the left, defender on
+// the right — see sideChoice); one platoon per row, but rows are spaced
+// by 2 (rows 0, 2, 4, ...) so there's always one empty hex between
+// adjacent deployed platoons. Without the gap the back column was a
+// solid wall of overlapping tokens; with it each platoon has a clear
+// "personal space" hex and movement from the back row isn't blocked by
+// the slot next to it.
+//
+// Attacker is always on the left column (q=0) and defender always on
+// the right column (q=cols-1) for this arena — sideChoice just picks
+// which outer column the *attacker* starts on so the convention stays
+// attacker-left / defender-right regardless.
 export function deploymentPosition(
   side: BattleSide,
   slotIndex: number,
   grid: BattleGrid,
   sideChoice: BattleSide = "attacker",
 ): Axial {
-  const r = Math.min(slotIndex, grid.rows - 1);
+  const r = Math.min(slotIndex * 2, grid.rows - 1);
   const onLeft = side === sideChoice;
   return { q: onLeft ? 0 : grid.cols - 1, r };
 }

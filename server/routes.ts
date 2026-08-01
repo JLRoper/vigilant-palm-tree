@@ -48,12 +48,20 @@ type FullGameRow = {
   heroes: Record<string, HeroState>;
   settlements: Record<string, SettlementState>;
   map_size: string;
+  lobby: LobbyState;
   created_at: string;
   updated_at: string;
 };
 
+export interface LobbyState {
+  seats?: number;
+  humanSlots?: number;
+  claimed?: Record<string, { handle: string; claimedAt: string }>;
+  startedAt?: string;
+}
+
 const GAME_COLUMNS =
-  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, created_at, updated_at";
+  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, created_at, updated_at";
 
 async function generateAndInsertTiles(
   client: PoolClient,
@@ -116,12 +124,15 @@ type UnitTypeRow = {
   speed: number;
   description: string;
   advantage_type: UnitType["advantageType"];
+  specialty: string;
+  specialty_priority: number;
 };
 
 router.get("/units", async (_req, res) => {
   try {
     const r = await pool.query<UnitTypeRow>(
-      `SELECT id, name, attack, defence, health, speed, description, advantage_type FROM unit_types ORDER BY attack ASC, id ASC`
+      `SELECT id, name, attack, defence, health, speed, description, advantage_type, specialty, specialty_priority
+         FROM unit_types ORDER BY attack ASC, id ASC`
     );
     const units: UnitType[] = r.rows.map((row) => ({
       id: row.id,
@@ -132,6 +143,8 @@ router.get("/units", async (_req, res) => {
       speed: row.speed,
       description: row.description,
       advantageType: row.advantage_type,
+      specialty: row.specialty,
+      specialtyPriority: row.specialty_priority,
     }));
     res.json(units);
   } catch (err) {
@@ -159,7 +172,112 @@ router.get("/games/:name", async (req, res) => {
     res.status(404).json({ error: "not found" });
     return;
   }
-  res.json(r.rows[0]);
+  const row = r.rows[0];
+  const claimed = row.lobby?.claimed ?? {};
+  const availableSeats = Object.keys(claimed)
+    .map((k) => Number(k))
+    .filter((n) => Number.isInteger(n))
+    .filter((n) => !claimed[String(n)])
+    .sort((a, b) => a - b);
+  const seatTotal = row.lobby?.seats ?? row.players.length;
+  res.json({ ...row, availableSeats, seatTotal });
+});
+
+router.post("/games/:name/lobby/claim", async (req, res) => {
+  const { seat, handle } = req.body ?? {};
+  if (!Number.isInteger(seat) || typeof handle !== "string" || !handle.trim()) {
+    res.status(400).json({ error: "seat (int) and handle (string) required" });
+    return;
+  }
+  const cleanHandle = handle.trim().slice(0, 32);
+  try {
+    const result = await withTransaction(async (client) => {
+      const gr = await client.query<FullGameRow>(
+        `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
+        [req.params.name]
+      );
+      if (gr.rowCount === 0) return { status: 404 as const };
+      const row = gr.rows[0];
+      if (row.lobby?.startedAt) {
+        return { status: 409 as const, error: "lobby_already_started" };
+      }
+      const seats = row.lobby?.seats ?? row.players.length;
+      if (seat < 0 || seat >= seats) {
+        return { status: 400 as const, error: "seat_out_of_range" };
+      }
+      const claimed = { ...(row.lobby?.claimed ?? {}) };
+      if (claimed[String(seat)]) {
+        return { status: 409 as const, error: "seat_already_claimed" };
+      }
+      claimed[String(seat)] = { handle: cleanHandle, claimedAt: new Date().toISOString() };
+      const newPlayers = row.players.map((p) =>
+        p.id === seat ? { ...p, faction: "player" as const, name: cleanHandle } : p,
+      );
+      const newLobby: LobbyState = { ...(row.lobby ?? {}), claimed, seats };
+      const ur = await client.query<FullGameRow>(
+        `UPDATE games SET lobby = $1::jsonb, players = $2::jsonb, updated_at = now()
+         WHERE id = $3 RETURNING ${GAME_COLUMNS}`,
+        [JSON.stringify(newLobby), JSON.stringify(newPlayers), row.id]
+      );
+      return { status: 200 as const, game: ur.rows[0] };
+    });
+    if (result.status === 404) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+    if (result.status === 400 || result.status === 409) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.json(result.game);
+  } catch (err) {
+    console.error("[api] POST /games/:name/lobby/claim threw:", err);
+    res.status(500).json({ error: "internal", message: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.post("/games/:name/lobby/start", async (req, res) => {
+  try {
+    const result = await withTransaction(async (client) => {
+      const gr = await client.query<FullGameRow>(
+        `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
+        [req.params.name]
+      );
+      if (gr.rowCount === 0) return { status: 404 as const };
+      const row = gr.rows[0];
+      const seats = row.lobby?.seats ?? row.players.length;
+      const claimed = row.lobby?.claimed ?? {};
+      const missing: number[] = [];
+      for (let i = 0; i < seats; i++) {
+        if (!claimed[String(i)]) missing.push(i);
+      }
+      if (missing.length > 0) {
+        return { status: 409 as const, error: "seats_unclaimed", missing };
+      }
+      if (row.lobby?.startedAt) {
+        return { status: 409 as const, error: "lobby_already_started" };
+      }
+      const newLobby: LobbyState = { ...(row.lobby ?? {}), startedAt: new Date().toISOString() };
+      const ur = await client.query<FullGameRow>(
+        `UPDATE games SET lobby = $1::jsonb, updated_at = now()
+         WHERE id = $2 RETURNING ${GAME_COLUMNS}`,
+        [JSON.stringify(newLobby), row.id]
+      );
+      return { status: 200 as const, game: ur.rows[0] };
+    });
+    if (result.status === 404) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+    if (result.status === 409) {
+      res.status(409).json({ error: result.error, missing: "missing" in result ? result.missing : undefined });
+      return;
+    }
+    res.json(result.game);
+  } catch (err) {
+    console.error("[api] POST /games/:name/lobby/start threw:", err);
+    res.status(500).json({ error: "internal", message: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 router.post("/games", async (req, res) => {
@@ -171,6 +289,8 @@ router.post("/games", async (req, res) => {
       hero_r = 2,
       enemy_positions = [],
       mapSize,
+      lobby,
+      humanSlots,
     } = req.body ?? {};
     if (typeof name !== "string" || !name) {
       res.status(400).json({ error: "name required" });
@@ -180,16 +300,34 @@ router.post("/games", async (req, res) => {
     console.log(`[api] POST /games name=${name} hero=(${hero_q},${hero_r}) mapSize=${storedMapSize}`);
     const map = new GameMap(seed, storedMapSize as MapSize);
     const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179));
+
+    let lobbyState: LobbyState = {};
+    if (lobby && typeof lobby === "object") {
+      const seats = Number.isInteger(lobby.seats) ? (lobby.seats as number) : null;
+      const humanCount = Number.isInteger(humanSlots)
+        ? (humanSlots as number)
+        : Number.isInteger(lobby.humanSlots)
+          ? (lobby.humanSlots as number)
+          : null;
+      if (seats !== null && seats >= 1 && humanCount !== null && humanCount >= 1 && humanCount <= seats) {
+        lobbyState = { seats, humanSlots: humanCount, claimed: {} };
+      }
+    }
+    if (lobbyState.humanSlots !== undefined && lobbyState.humanSlots < 1) {
+      res.status(400).json({ error: "humanSlots must be >= 1" });
+      return;
+    }
+
     const game = await withTransaction(async (client) => {
       const r = await client.query<FullGameRow>(
         `INSERT INTO games (
             name, seed, hero_q, hero_r, enemy_positions,
             round, day, active_player_id, players, heroes, settlements,
-            map_size
+            map_size, lobby
           ) VALUES (
             $1, $2, $3, $4, $5::jsonb,
             $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb,
-            $12
+            $12, $13::jsonb
           )
           ON CONFLICT (name) DO UPDATE
             SET seed = EXCLUDED.seed,
@@ -203,6 +341,7 @@ router.post("/games", async (req, res) => {
                 heroes = EXCLUDED.heroes,
                 settlements = EXCLUDED.settlements,
                 map_size = EXCLUDED.map_size,
+                lobby = EXCLUDED.lobby,
                 updated_at = now()
           RETURNING ${GAME_COLUMNS}`,
         [
@@ -218,6 +357,7 @@ router.post("/games", async (req, res) => {
           JSON.stringify(initial.heroes),
           JSON.stringify(initial.settlements),
           storedMapSize,
+          JSON.stringify(lobbyState),
         ]
       );
       const row = r.rows[0];
@@ -266,10 +406,8 @@ router.patch("/games/:name", async (req, res) => {
         if (hero.q !== fromTile.q || hero.r !== fromTile.r) {
           return { status: 409 as const, error: "hero not at fromTile" };
         }
-        // V1: human movement allowed any time; AI movement only during AI turn.
-        const activePlayer = row.players.find((p) => p.id === row.active_player_id);
-        if (hero.ownerId !== row.active_player_id && activePlayer?.faction === "ai") {
-          return { status: 409 as const, error: "not AI turn" };
+        if (hero.ownerId !== row.active_player_id) {
+          return { status: 403 as const, error: "forbidden_not_your_turn" };
         }
         const updatedHero: HeroState = {
           ...hero,
@@ -660,9 +798,12 @@ router.post("/games/:name/resolve-battle", async (req, res) => {
       if (!attackersHero || !defendersHero) {
         return { status: 404 as const, error: "hero not found" };
       }
+      if (attackersHero.ownerId !== row.active_player_id) {
+        return { status: 403 as const, error: "forbidden_not_your_turn" };
+      }
 
       const unitTypesResult = await client.query<UnitTypeRow>(
-        `SELECT id, name, attack, defence, health, speed, description, advantage_type FROM unit_types`
+        `SELECT id, name, attack, defence, health, speed, description, advantage_type, specialty, specialty_priority FROM unit_types`
       );
       const unitTypes: Record<string, UnitType> = {};
       for (const r of unitTypesResult.rows) {
@@ -675,6 +816,8 @@ router.post("/games/:name/resolve-battle", async (req, res) => {
           speed: r.speed,
           description: r.description,
           advantageType: r.advantage_type,
+          specialty: r.specialty,
+          specialtyPriority: r.specialty_priority,
         };
       }
 
@@ -797,6 +940,9 @@ router.post("/games/:name/transfer", async (req, res) => {
       const settlement = row.settlements[settlementId];
       if (!hero) return { status: 404 as const, error: "hero not found" };
       if (!settlement) return { status: 404 as const, error: "settlement not found" };
+      if (hero.ownerId !== row.active_player_id) {
+        return { status: 403 as const, error: "forbidden_not_your_turn" };
+      }
       if (hero.q !== settlement.q || hero.r !== settlement.r) {
         return { status: 409 as const, error: "hero_not_at_settlement" };
       }
@@ -915,6 +1061,18 @@ router.post("/games/:name/trade", async (req, res) => {
       );
       if (gr.rowCount === 0) return { status: 404 as const, error: "game not found" };
       const row = gr.rows[0];
+
+      const fromSettlement = row.settlements[fromSettlementId];
+      const toSettlement = row.settlements[toSettlementId];
+      if (!fromSettlement || !toSettlement) {
+        return { status: 404 as const, error: "settlement not found" };
+      }
+      if (
+        fromSettlement.ownerId !== row.active_player_id ||
+        toSettlement.ownerId !== row.active_player_id
+      ) {
+        return { status: 403 as const, error: "forbidden_not_your_turn" };
+      }
 
       const tradeResult = tradeResourcesReducer(
         { ...row, dirty: false } as GameState,

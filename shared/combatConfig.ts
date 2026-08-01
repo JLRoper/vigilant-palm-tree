@@ -27,7 +27,11 @@ export const PLATOON_RETREAT_LOSS = 0.15;
 export const HERO_RETREAT_PENALTY = 0.5;
 
 export const DEFAULT_GRID_COLS = 15;
-export const DEFAULT_GRID_ROWS = 11;
+// Rows were bumped from 11 to 15 to fit 8 ARMY_STACK_SLOTS platoons per
+// side on the back column with one hex of space between each — see
+// deploymentPosition() in shared/combat/grid.ts, which now spaces rows
+// by 2 (rows 0, 2, 4, ..., 14) rather than packing them consecutively.
+export const DEFAULT_GRID_ROWS = 15;
 export const DEFAULT_OBSTACLE_COUNT = 8;
 export const DEFAULT_MAX_ROUNDS = 30;
 
