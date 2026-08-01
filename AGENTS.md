@@ -6,7 +6,8 @@ This file is loaded into every agent's context. Treat the rules below as non-neg
 - Node/TypeScript/Vite single-page game (heroes-js).
 - Dev environment: `npm run dev` (vite client + tsx api, via concurrently). Ports are per-worktree and re-allocated by `predev` unless you use `npm run dev:static`.
 - Postgres dev DB: shared `game_db` container, fixed host port 5432. `npm run db:up` to start. Do NOT run `db:down` unless explicitly asked — other worktrees share it.
-- Build: `npm run build` (tsc + vite build). Tests: `npm run test:all` (smoke + cityView). Status: `npm run dev:status`.
+- Build: `npm run build` (tsc + vite build). Tests: `npm run test:all` (smoke + multiplayer.smoke + cityView). Status: `npm run dev:status`.
+- LAN multiplayer: set `LAN_HOST=1` in `.env` (or process env) before `npm run dev` to bind the API to `0.0.0.0`. `npm run dev:status` will print LAN URLs when `LAN_HOST=1`. `scripts/ports.ps1` already reserves `WS_PORT=4100` for a future realtime layer; leave it dormant.
 
 ## Coding constraints
 - Never commit secrets, `.env` contents, or anything under `local/`.

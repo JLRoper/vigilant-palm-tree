@@ -42,6 +42,8 @@ if ($ports.ContainsKey('CLIENT_PORT')) {
     if (-not $listening) { $allOk = $false }
 }
 
+$lanHost = $false
+if (Test-Path -Path 'Env:LAN_HOST') { $lanHost = ($env:LAN_HOST -eq '1') }
 if ($ports.ContainsKey('API_PORT')) {
     $p = $ports['API_PORT']
     $listening = Test-Listening $p
@@ -49,6 +51,14 @@ if ($ports.ContainsKey('API_PORT')) {
         try {
             $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$p/api/health" -TimeoutSec 3 -UseBasicParsing
             Write-Host "  api  (tsx)   port $p : LISTENING  health=$($resp.StatusCode)  http://localhost:$p/api/health"
+            if ($lanHost) {
+                $ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                    Where-Object { $_.IPAddress -notmatch '^127\.' -and $_.IPAddress -notmatch '^169\.254\.' } |
+                    Select-Object -ExpandProperty IPAddress
+                foreach ($ip in $ips) {
+                    Write-Host "             LAN URL: http://${ip}:$p/api"
+                }
+            }
         } catch {
             Write-Host "  api  (tsx)   port $p : LISTENING  health=UNREACHABLE ($($_.Exception.Message))"
             $allOk = $false

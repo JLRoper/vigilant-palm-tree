@@ -195,6 +195,10 @@ export class PopupMenu {
     this.root.style.top = `${y}px`;
   }
 
+  setOnClose(fn: () => void): void {
+    this.onClose = fn;
+  }
+
   getPosition(): { x: number; y: number } {
     return { ...this.pos };
   }

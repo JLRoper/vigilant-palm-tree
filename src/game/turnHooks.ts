@@ -4,6 +4,7 @@ import type { TurnControllerHooks } from "../state/turnController";
 import { pickAiMove as pickAiMoveBrain } from "../ai/aiBrain";
 import type { GameMap } from "../map/gameMap";
 import type { Axial } from "../core/hex";
+import { getMultiplayerSync } from "../io/multiplayerSync";
 
 export interface BuildTurnHooksOptions {
   gameName: () => string | null;
@@ -19,13 +20,18 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     onHumanTurnEnd: async (state: GameState): Promise<GameState> => {
       const name = opts.gameName();
       if (!name) return state;
+      const sync = getMultiplayerSync();
+      sync.stop();
       try {
         const endingPlayerId = computeEndingPlayerId(state);
         const payload: GameState = { ...state, activePlayerId: endingPlayerId };
         const result = await endTurn(name, payload);
-        return mergeFromEndTurn(state, result);
+        const merged = mergeFromEndTurn(state, result);
+        sync.start(name);
+        return merged;
       } catch (e) {
         console.warn("[turnHooks] endTurn failed:", e);
+        sync.start(name);
         return state;
       }
     },

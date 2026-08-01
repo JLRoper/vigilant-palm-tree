@@ -299,19 +299,23 @@ router.post("/games", async (req, res) => {
     const storedMapSize = ["small", "medium", "large"].includes(mapSize) ? mapSize : "small";
     console.log(`[api] POST /games name=${name} hero=(${hero_q},${hero_r}) mapSize=${storedMapSize}`);
     const map = new GameMap(seed, storedMapSize as MapSize);
-    const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179));
+    const topHumanSlots = Number.isInteger(humanSlots) ? (humanSlots as number) : null;
+    const lobbyObj = lobby && typeof lobby === "object" ? lobby : null;
+    const lobbyHumanSlots =
+      lobbyObj && Number.isInteger(lobbyObj.humanSlots) ? (lobbyObj.humanSlots as number) : null;
+    const humanCount = topHumanSlots ?? lobbyHumanSlots;
+    const initOpts =
+      humanCount !== null
+        ? { playerCount: humanCount, humanSeatCount: humanCount }
+        : undefined;
+    const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179), initOpts);
 
     let lobbyState: LobbyState = {};
-    if (lobby && typeof lobby === "object") {
-      const seats = Number.isInteger(lobby.seats) ? (lobby.seats as number) : null;
-      const humanCount = Number.isInteger(humanSlots)
-        ? (humanSlots as number)
-        : Number.isInteger(lobby.humanSlots)
-          ? (lobby.humanSlots as number)
-          : null;
-      if (seats !== null && seats >= 1 && humanCount !== null && humanCount >= 1 && humanCount <= seats) {
-        lobbyState = { seats, humanSlots: humanCount, claimed: {} };
-      }
+    const explicitSeats =
+      lobbyObj && Number.isInteger(lobbyObj.seats) ? (lobbyObj.seats as number) : null;
+    const seats = explicitSeats ?? (humanCount !== null ? initial.players.length : null);
+    if (seats !== null && seats >= 1 && humanCount !== null && humanCount >= 1 && humanCount <= seats) {
+      lobbyState = { seats, humanSlots: humanCount, claimed: {} };
     }
     if (lobbyState.humanSlots !== undefined && lobbyState.humanSlots < 1) {
       res.status(400).json({ error: "humanSlots must be >= 1" });
