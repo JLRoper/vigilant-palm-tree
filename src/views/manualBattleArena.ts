@@ -614,6 +614,13 @@ export function openManualBattleArena(
   // hops, rather than being forced to attack or end its turn immediately.
   // The player can stop early via the "End Turn" button once they're happy
   // with its position.
+  //
+  // When the move exhausts the platoon's movement AND there are no attack
+  // targets left in range (ranged-only path: a ranged unit walked into max
+  // range with no enemy to shoot at), the turn is auto-ended and focus
+  // jumps to the next unacted platoon on the human side so the player can
+  // immediately see its available movement — no need to click "End Turn"
+  // just to move on to the next unit.
   function refreshAfterMove(): void {
     if (selectedSlot === null) return;
     const combatant = getCombatant(state, humanSide, selectedSlot);
@@ -637,7 +644,32 @@ export function openManualBattleArena(
     }
     moveRange = getMovementRange(state, combatant);
     attackTargets = getValidAttackTargets(state, combatant);
+    if (moveRange.length === 0 && attackTargets.length === 0) {
+      debugLog(`auto-end turn: ${platoonLabel(humanSide, selectedSlot)} exhausted movement with no attack targets`);
+      endPlatoonTurn(state, humanSide, selectedSlot);
+      selectedSlot = null;
+      moveRange = [];
+      attackTargets = [];
+      const slots = unactedLivingSlots(state, humanSide);
+      if (slots.length > 0) {
+        focusNextUnactedPlatoon();
+      } else {
+        advanceAi();
+      }
+      return;
+    }
     refresh();
+  }
+
+  // Select the next not-yet-acted platoon on the human side (slot order
+  // matches the roster bar) so the player sees its available movement
+  // immediately. No-op if every human platoon has already acted.
+  function focusNextUnactedPlatoon(): void {
+    const slots = unactedLivingSlots(state, humanSide);
+    if (slots.length === 0) return;
+    const nextSlot = slots[0];
+    debugLog(`focus next unacted: ${platoonLabel(humanSide, nextSlot)}`);
+    selectPlatoon(nextSlot);
   }
 
   function afterPlayerAction(): void {

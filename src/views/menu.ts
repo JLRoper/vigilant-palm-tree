@@ -252,7 +252,8 @@ export function openCenteredModal(
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    zIndex: "100",
+    // Must sit above the home overlay (z-index 200 in homeView.ts).
+    zIndex: "300",
   });
   parent.appendChild(wrapper);
   const menu = new PopupMenu({
