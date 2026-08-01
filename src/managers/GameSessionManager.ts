@@ -89,12 +89,12 @@ export class GameSessionManager {
     }
   }
 
-  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" }): Promise<void> {
+  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; playerCount?: 2 | 3 | 4 }): Promise<void> {
     const effectiveCastleSeed =
       typeof opts.castleSeed === "number" && Number.isFinite(opts.castleSeed)
         ? opts.castleSeed
         : defaultCastleSeedFromMapSeed(opts.seed);
-    const playerCount = 3;
+    const playerCount = opts.playerCount ?? 3;
     const effectiveCastleCount = opts.castleCount ?? (2 * playerCount);
     const castles = generateCastles(this.getGameMap(), {
       castleSeed: effectiveCastleSeed,
