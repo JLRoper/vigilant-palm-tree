@@ -7,6 +7,7 @@
 
 import { axialToPixel, hexCorners, hexDistance, pixelToAxial, type Axial } from "../core/hex";
 import { totalHealth } from "../../shared/combat/damage";
+import { SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "../../shared/combatConfig";
 import {
   attackWithPlatoon,
   computeSpecialty,
@@ -33,7 +34,7 @@ import type { BattleLogEntry, BattleSide, Combatant } from "../../shared/combat/
 import type { Platoon, UnitType } from "../state/units";
 import { showBattleResultCard } from "./battleResultCard";
 import { openConfirmDialog } from "./confirmDialog";
-import { menuTheme, styleButton } from "./menu";
+import { PopupMenu, menuTheme, styleButton } from "./menu";
 
 const HEX_SIZE = 34;
 
@@ -90,6 +91,227 @@ const SPECIALTY_ICONS: Record<string, string> = {
 
 function specialtyIcon(specialty: string): string {
   return SPECIALTY_ICONS[specialty] ?? "⚔";
+}
+
+// Key for indexing a specific unit entry inside the arena's combatant list.
+// `slotIndex` is the army-stack slot, `unitTypeId` is which entry within
+// that slot (a platoon can hold up to MAX_PLATOON_ENTRIES distinct types).
+type LeaveBehindKey = string;
+
+function leaveBehindKey(slotIndex: number, unitTypeId: string): LeaveBehindKey {
+  return `${slotIndex}:${unitTypeId}`;
+}
+
+// Strips the selected unit counts off the human side's surviving
+// combatants so they show up as casualties on the final result card (see
+// buildResults in shared/combat/resolveBattle.ts — it diffs original vs
+// surviving counts and reports the gap). Called from the Leave Behind
+// picker once the player has agreed to the sacrifice.
+function applyLeaveBehind(
+  state: ManualBattleState,
+  side: BattleSide,
+  leftBehind: Map<LeaveBehindKey, number>,
+): void {
+  const combatants = side === "attacker" ? state.attacker : state.defender;
+  for (const c of combatants) {
+    if (c.retreated) continue;
+    let mutated = false;
+    for (const e of c.entries) {
+      const key = leaveBehindKey(c.slotIndex, e.unitTypeId);
+      const remove = leftBehind.get(key);
+      if (!remove) continue;
+      e.count = Math.max(0, e.count - remove);
+      mutated = true;
+    }
+    if (mutated) c.entries = c.entries.filter((e) => e.count > 0);
+  }
+}
+
+// Modal shown when the player tries to surrender without enough gold to
+// cover the surrender cost. Lets them mark individual units to "leave
+// behind" (sacrifice) until the gold shortfall is met — each unit is
+// worth `unitValue` gold. Confirm stays disabled until enough units are
+// selected; cancelling keeps the battle going.
+function openLeaveBehindDialog(opts: {
+  state: ManualBattleState;
+  side: BattleSide;
+  unitTypes: Record<string, UnitType>;
+  shortfall: number;
+  unitValue: number;
+  onConfirm: (leftBehind: Map<LeaveBehindKey, number>) => void;
+}): void {
+  const { state, side, unitTypes, shortfall, unitValue, onConfirm } = opts;
+  const combatants = side === "attacker" ? state.attacker : state.defender;
+  const requiredUnits = Math.ceil(shortfall / unitValue);
+
+  const wrapper = document.createElement("div");
+  Object.assign(wrapper.style, {
+    position: "fixed",
+    inset: "0",
+    background: "rgba(0,0,0,0.6)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: "120",
+  });
+  document.body.appendChild(wrapper);
+
+  const menu = new PopupMenu({
+    parent: wrapper,
+    title: "Leave Behind",
+    width: 420,
+    draggable: false,
+    closeable: true,
+    zIndex: 121,
+    onClose: () => wrapper.remove(),
+  });
+  menu.setPosition(Math.max(24, (window.innerWidth - 420) / 2), Math.max(24, (window.innerHeight - 360) / 2));
+
+  // Per-entry counts the player has earmarked. Keyed by
+  // "<slotIndex>:<unitTypeId>" so we can match them back to specific
+  // combatants in applyLeaveBehind().
+  const selected = new Map<LeaveBehindKey, number>();
+
+  const intro = document.createElement("div");
+  Object.assign(intro.style, {
+    fontSize: "13px",
+    lineHeight: "1.5",
+    opacity: "0.9",
+    marginBottom: "8px",
+  });
+  intro.textContent =
+    `You can't cover the surrender cost. Pick units to leave behind — each ` +
+    `unit is worth ${unitValue}G. You need at least ${requiredUnits} more ` +
+    `unit${requiredUnits === 1 ? "" : "s"} (${shortfall}G).`;
+  menu.appendContent(intro);
+
+  const summary = document.createElement("div");
+  Object.assign(summary.style, {
+    fontSize: "12px",
+    padding: "6px 8px",
+    marginBottom: "8px",
+    border: "1px solid rgba(255,255,255,0.2)",
+    borderRadius: "4px",
+  });
+  menu.appendContent(summary);
+
+  const list = document.createElement("div");
+  Object.assign(list.style, {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    maxHeight: "240px",
+    overflowY: "auto",
+    marginBottom: "10px",
+  });
+  menu.appendContent(list);
+
+  for (const c of combatants) {
+    if (c.retreated) continue;
+    if (c.entries.every((e) => e.count <= 0)) continue;
+    for (const e of c.entries) {
+      if (e.count <= 0) continue;
+      const name = unitTypes[e.unitTypeId]?.name ?? e.unitTypeId;
+      const row = document.createElement("div");
+      Object.assign(row.style, {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "8px",
+        padding: "4px 8px",
+        border: "1px solid rgba(255,255,255,0.12)",
+        borderRadius: "4px",
+        fontSize: "12px",
+      });
+      const label = document.createElement("div");
+      label.textContent = `Platoon ${c.slotIndex + 1} — ${name} ×${e.count}`;
+      row.appendChild(label);
+
+      const controls = document.createElement("div");
+      Object.assign(controls.style, { display: "flex", gap: "4px", alignItems: "center" });
+
+      const minus = document.createElement("button");
+      minus.textContent = "−";
+      styleButton(minus);
+      minus.style.minWidth = "24px";
+      const plus = document.createElement("button");
+      plus.textContent = "+";
+      styleButton(plus);
+      plus.style.minWidth = "24px";
+
+      const pickLabel = document.createElement("span");
+      pickLabel.style.minWidth = "40px";
+      pickLabel.style.textAlign = "center";
+
+      const key = leaveBehindKey(c.slotIndex, e.unitTypeId);
+
+      const update = (): void => {
+        const picked = selected.get(key) ?? 0;
+        pickLabel.textContent = `${picked}/${e.count}`;
+        refresh();
+      };
+
+      minus.addEventListener("click", () => {
+        const cur = selected.get(key) ?? 0;
+        if (cur <= 0) return;
+        const next = cur - 1;
+        if (next === 0) selected.delete(key);
+        else selected.set(key, next);
+        update();
+      });
+      plus.addEventListener("click", () => {
+        const cur = selected.get(key) ?? 0;
+        if (cur >= e.count) return;
+        selected.set(key, cur + 1);
+        update();
+      });
+
+      controls.append(minus, pickLabel, plus);
+      row.appendChild(controls);
+      list.appendChild(row);
+      update();
+    }
+  }
+
+  const confirmBtn = document.createElement("button");
+  confirmBtn.textContent = "Confirm Surrender";
+  styleButton(confirmBtn, false);
+  confirmBtn.style.background = "rgba(120,40,40,0.7)";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.textContent = "Cancel";
+  styleButton(cancelBtn);
+
+  const row = document.createElement("div");
+  Object.assign(row.style, {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: "8px",
+  });
+  row.append(cancelBtn, confirmBtn);
+  menu.appendContent(row);
+
+  function refresh(): void {
+    let units = 0;
+    for (const v of selected.values()) units += v;
+    const goldCovered = units * unitValue;
+    const enough = units >= requiredUnits;
+    summary.textContent =
+      `Leaving behind: ${units} unit${units === 1 ? "" : "s"} ` +
+      `(${goldCovered}G / need ${shortfall}G)` +
+      (enough ? " ✓" : "");
+    confirmBtn.disabled = !enough;
+    confirmBtn.style.opacity = enough ? "1" : "0.4";
+    confirmBtn.style.cursor = enough ? "pointer" : "not-allowed";
+  }
+
+  cancelBtn.addEventListener("click", () => menu.close());
+  confirmBtn.addEventListener("click", () => {
+    if (confirmBtn.disabled) return;
+    menu.close();
+    onConfirm(selected);
+  });
+
+  refresh();
 }
 
 // Specialty only counts as visible if it makes up at least 40% of the
@@ -267,6 +489,7 @@ export function openManualBattleArena(
   aiPlatoons: Platoon[],
   unitTypes: Record<string, UnitType>,
   humanSide: BattleSide = "attacker",
+  options: { heroGold?: number; surrenderCost?: number } = {},
 ): void {
   // The engine's attacker/defender roles are fixed to their grid colors
   // (attacker always blue, defender always red) — humanSide picks which of
@@ -278,6 +501,14 @@ export function openManualBattleArena(
     unitTypes,
     obstacleSeed: Math.floor(Math.random() * 1_000_000),
   });
+
+  // Gold the human hero brings into this battle. Defaults to a low value
+  // (300, matching gameState.ts's initial hero gold) so the Test Battle
+  // sandbox always exercises the "Leave Behind" path; real callers can
+  // pass the hero's actual purse via `options.heroGold`. `surrenderCost`
+  // defaults to SURRENDER_COST_GOLD.
+  let currentHeroGold = options.heroGold ?? 300;
+  const surrenderCost = options.surrenderCost ?? SURRENDER_COST_GOLD;
 
   // Running per-platoon move tally for the whole battle (both sides), keyed
   // by "side#slotIndex" — printed on demand via logMoveStats and dumped
@@ -528,20 +759,41 @@ export function openManualBattleArena(
   const surrenderBtn = document.createElement("button");
   surrenderBtn.textContent = "Surrender";
   styleButton(surrenderBtn);
-  surrenderBtn.title = "Yield immediately with no further losses — you lose the engagement";
+  surrenderBtn.title = `Yield immediately with no further losses — costs ${surrenderCost}G (you have ${currentHeroGold}G)`;
   surrenderBtn.addEventListener("click", () => {
     if (isBattleOver(state)) return;
-    openConfirmDialog({
-      title: "Surrender?",
-      message: "Yield to the enemy?\n\nYou concede the battle immediately with no additional troop losses.",
-      confirmLabel: "Surrender",
-      destructive: true,
-      onConfirm: () => {
-        debugLog(`player surrenders as ${humanSide}`);
-        retreatHero(state, humanSide, { applyLoss: false });
-        finishBattle();
-      },
-    });
+    if (currentHeroGold >= surrenderCost) {
+      openConfirmDialog({
+        title: "Surrender?",
+        message:
+          `Yield to the enemy?\n\nYou concede the battle immediately with no additional troop losses.\n` +
+          `Cost: ${surrenderCost}G (you have ${currentHeroGold}G).`,
+        confirmLabel: "Surrender",
+        destructive: true,
+        onConfirm: () => {
+          debugLog(`player surrenders as ${humanSide} (paid ${surrenderCost}G)`);
+          currentHeroGold -= surrenderCost;
+          retreatHero(state, humanSide, { applyLoss: false });
+          finishBattle();
+        },
+      });
+    } else {
+      const shortfall = surrenderCost - currentHeroGold;
+      debugLog(`player surrender short by ${shortfall}G -> leave-behind picker`);
+      openLeaveBehindDialog({
+        state,
+        side: humanSide,
+        unitTypes,
+        shortfall,
+        unitValue: SURRENDER_UNIT_VALUE_GOLD,
+        onConfirm: (leftBehind) => {
+          debugLog(`player surrenders as ${humanSide} after leaving behind ${leftBehind} units`);
+          applyLeaveBehind(state, humanSide, leftBehind);
+          retreatHero(state, humanSide, { applyLoss: false });
+          finishBattle();
+        },
+      });
+    }
   });
   actionRow.appendChild(surrenderBtn);
 
