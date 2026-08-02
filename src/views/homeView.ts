@@ -12,6 +12,7 @@ import {
 import { openCenteredModal, styleButton, styleInput, menuTheme } from "./menu";
 import { openSettingsMenu } from "./settingsMenu";
 import { createNewGameScreen } from "./newGameScreen";
+import { createMultiplayerLobby } from "./multiplayerLobby";
 
 export interface HomeViewOptions {
   onEnterGame: () => void;
@@ -21,10 +22,12 @@ export interface HomeViewOptions {
     castleSeed?: number;
     castleCount?: number;
     mapSize?: "small" | "medium" | "large";
-    playerCount?: 2 | 3 | 4;
+    playerCount?: 1 | 2 | 3 | 4;
+    humanSeatCount?: number;
   }) => Promise<void>;
   onLoadGame: (game: Game) => Promise<void>;
   isBackendOk: () => boolean;
+  onJoinMultiplayerGame?: (game: Game) => Promise<void>;
 }
 
 export interface HomeView {
@@ -97,10 +100,12 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
 
   const newBtn = makeBigButton("New Game", true);
   const loadBtn = makeBigButton("Load Game", false);
+  const mpBtn = makeBigButton("Multiplayer", false);
   const settingsBtn = makeBigButton("Settings", false);
   const authBtn = makeBigButton("Sign In", false);
   buttonStack.appendChild(newBtn);
   buttonStack.appendChild(loadBtn);
+  buttonStack.appendChild(mpBtn);
   buttonStack.appendChild(settingsBtn);
   buttonStack.appendChild(authBtn);
 
@@ -132,9 +137,10 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
     busy = value;
     newBtn.disabled = value;
     loadBtn.disabled = value;
+    mpBtn.disabled = value;
     settingsBtn.disabled = value;
     authBtn.disabled = value;
-    for (const b of [newBtn, loadBtn, settingsBtn, authBtn]) {
+    for (const b of [newBtn, loadBtn, mpBtn, settingsBtn, authBtn]) {
       b.style.opacity = value ? "0.6" : "1";
       b.style.cursor = value ? "default" : "pointer";
     }
@@ -148,6 +154,29 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
   loadBtn.addEventListener("click", () => {
     if (busy) return;
     void openLoadModal();
+  });
+
+  mpBtn.addEventListener("click", () => {
+    if (busy) return;
+    if (!opts.isBackendOk()) {
+      alert("Backend offline. Multiplayer requires the API.");
+      return;
+    }
+    createMultiplayerLobby({
+      isBackendOk: opts.isBackendOk,
+      onEnterGame: () => {
+        hide();
+        opts.onEnterGame();
+      },
+      onJoinGame: async (game) => {
+        hide();
+        if (opts.onJoinMultiplayerGame) {
+          await opts.onJoinMultiplayerGame(game);
+        } else {
+          await opts.onLoadGame(game);
+        }
+      },
+    });
   });
 
   settingsBtn.addEventListener("click", () => {
@@ -202,6 +231,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
             seed: values.seed,
             mapSize: values.mapSize,
             playerCount: values.playerCount,
+            humanSeatCount: values.playerCount,
           });
           rememberGameEntry(values.name);
           screen.destroy();

@@ -1,10 +1,10 @@
 // Full-screen "Create Game" panel. Hosted by homeView (replaces the landing
 // button stack while the user is filling out the form). Owns Name + Map Size
-// + Number of Players + Map Seed fields and a Create / Cancel action row.
+// + Number of Human Players + Map Seed fields and a Create / Cancel action row.
 //
 // Map seed defaults to a fresh random 31-bit int; the user can edit it.
-// "Number of players" is exposed as a small chip selector (2/3/4). Map size
-// stays a dropdown because we ship three named presets.
+// "Number of human players" is exposed as a small chip selector (1/2/3/4).
+// Map size stays a dropdown because we ship three named presets.
 
 import { styleButton } from "./menu";
 
@@ -12,7 +12,7 @@ export type NewGameFormValues = {
   name: string;
   seed: number;
   mapSize: "small" | "medium" | "large";
-  playerCount: 2 | 3 | 4;
+  playerCount: 1 | 2 | 3 | 4;
 };
 
 export interface NewGameScreenOptions {
@@ -32,7 +32,7 @@ export interface NewGameScreen {
   destroy: () => void;
 }
 
-const PLAYER_CHOICES: Array<2 | 3 | 4> = [2, 3, 4];
+const PLAYER_CHOICES: Array<1 | 2 | 3 | 4> = [1, 2, 3, 4];
 
 export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
   const root = document.createElement("div");
@@ -141,15 +141,15 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
   sizeSelect.value = "small";
   sizeField.control.appendChild(sizeSelect);
 
-  const playersField = makeFieldRow("Number of players");
+  const playersField = makeFieldRow("Number of human players");
   const playersWrap = document.createElement("div");
   Object.assign(playersWrap.style, {
     display: "flex",
     gap: "6px",
   });
-  let selectedPlayers: 2 | 3 | 4 = 3;
-  const playerButtons: Record<2 | 3 | 4, HTMLButtonElement> = {} as Record<
-    2 | 3 | 4,
+  let selectedPlayers: 1 | 2 | 3 | 4 = 1;
+  const playerButtons: Record<1 | 2 | 3 | 4, HTMLButtonElement> = {} as Record<
+    1 | 2 | 3 | 4,
     HTMLButtonElement
   >;
   function refreshPlayers(): void {

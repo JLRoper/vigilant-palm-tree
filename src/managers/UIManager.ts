@@ -1,4 +1,5 @@
 import { buildHud, updateHud, canEndTurn, type HudHandles } from "../views/hud";
+import type { PlayerId } from "../state/gameState";
 import { Toolbar, type CalendarSnapshot } from "../views/toolbar";
 import { HeroInfoMenu } from "../views/heroInfoMenu";
 import { HeroRosterMenu } from "../views/heroRosterMenu";
@@ -209,6 +210,7 @@ export class UIManager {
     gameState: GameState,
     heroes: Record<string, Hero>,
     lastSavedAt: string | null,
+    localPlayerId: PlayerId | null,
   ): void {
     if (!this.hudHandles) return;
     updateHud(
@@ -216,6 +218,7 @@ export class UIManager {
       gameState,
       lastSavedAt,
       this.hudHandles,
+      localPlayerId,
     );
     this.refreshHeroInfoMenu(gameState, heroes);
     this.refreshSettlementInfoMenu(gameState);

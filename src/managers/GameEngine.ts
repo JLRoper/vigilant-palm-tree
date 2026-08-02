@@ -19,6 +19,7 @@ import { GameSessionManager } from "./GameSessionManager";
 import { attachDebugApi } from "../io/debugCommands";
 import { bus } from "../core/eventBus";
 import { registerAllListeners } from "../core/eventRegistry";
+import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 
 export class GameEngine {
   // Infrastructure
@@ -215,7 +216,8 @@ export class GameEngine {
 
   private canStartCharter(): boolean {
     const gs = this.state.getState();
-    if (!gs || gs.phase.kind !== "PLAYER_TURN" || gs.activePlayerId !== 0) return false;
+    const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
+    if (!gs || gs.phase.kind !== "PLAYER_TURN" || gs.activePlayerId !== localId) return false;
     const selectedId = gs.selectedHeroId;
     if (!selectedId) return false;
     const hero = gs.heroes[selectedId];
@@ -326,6 +328,7 @@ export class GameEngine {
     const gs = this.state.getState();
     if (!gs) return;
     const selectedHero = gs.selectedHeroId ? gs.heroes[gs.selectedHeroId] : null;
+    const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
     this.view.draw(
       this.view.getHover(),
       this.state.getHeroes(),
@@ -335,7 +338,7 @@ export class GameEngine {
         selectedHeroId: gs.selectedHeroId,
         selectedSettlementId: gs.selectedSettlementId,
         colorForOwner,
-        viewPlayerId: 0,
+        viewPlayerId: localId,
         pathReachableIdx: this.state.getPathReachableIdx() ?? undefined,
         pathOrigin: this.state.getPathOrigin() ?? undefined,
         selectedHeroTile: selectedHero ? { q: selectedHero.q, r: selectedHero.r } : undefined,
@@ -347,10 +350,12 @@ export class GameEngine {
   }
 
   private refreshHud(): void {
+    const gameName = this.session.getActiveGameName() ?? "";
     this.ui.refreshHud(
       this.state.getState(),
       this.state.getHeroesMap(),
       this.session.getLastSavedAt(),
+      getInMemoryLocalPlayerId(gameName),
     );
   }
 
@@ -365,11 +370,12 @@ export class GameEngine {
   private handleDblClick(e: MouseEvent): void {
     if (this.ui.getCityView()?.isOpen()) return;
     const gs = this.state.getState();
-    if (!gs || gs.phase.kind !== "PLAYER_TURN" || gs.activePlayerId !== 0) return;
+    const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
+    if (!gs || gs.phase.kind !== "PLAYER_TURN" || gs.activePlayerId !== localId) return;
     const t = this.view.hoverFromScreen(e.clientX, e.clientY);
     if (!t) return;
     const castle = this.state.getSettlements().find((c) => c.tile.q === t.q && c.tile.r === t.r);
-    if (!castle || castle.ownerId !== 0) return;
+    if (!castle || castle.ownerId !== localId) return;
     const isMineable = (r: import("../state/gameState").ResourceType): r is Exclude<import("../state/gameState").ResourceType, "food"> => r !== "food";
     const spots = castle.citySpots.filter((s) => isMineable(s.resource));
     const mines = castle.cityMines.filter((m) => isMineable(m.resource));

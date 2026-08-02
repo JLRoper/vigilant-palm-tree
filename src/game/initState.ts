@@ -41,6 +41,7 @@ interface BuildInitialOptions {
   castleSeed?: number;
   castleCount?: number;
   playerCount?: number;
+  humanSeatCount?: number;
 }
 
 interface HydrateOptions {
@@ -53,11 +54,21 @@ function clampPlayerCount(n: number | undefined): number {
   return Math.max(2, Math.min(MAX_PLAYER_COUNT, Math.floor(n)));
 }
 
-function makePlayers(settlementIds: Record<string, string[]>, playerCount: number): Player[] {
+function clampHumanSeatCount(n: number | undefined, playerCount: number): number {
+  if (!Number.isFinite(n)) return 1;
+  return Math.max(1, Math.min(playerCount, Math.floor(n as number)));
+}
+
+function makePlayers(
+  settlementIds: Record<string, string[]>,
+  playerCount: number,
+  humanSeatCount: number,
+): Player[] {
   const out: Player[] = [];
   for (let i = 0; i < playerCount; i++) {
-    const faction = i === 0 ? "player" : "ai";
-    const name = i === 0 ? "Human" : `AI ${i}`;
+    const isHuman = i < humanSeatCount;
+    const faction: Player["faction"] = isHuman ? "player" : "ai";
+    const name = isHuman ? (i === 0 ? "Human" : `Human ${i + 1}`) : `AI ${i + 1 - humanSeatCount}`;
     out.push({
       id: i,
       faction,
@@ -73,15 +84,18 @@ function makePlayers(settlementIds: Record<string, string[]>, playerCount: numbe
 function makeHeroes(
   castles: Castle[],
   playerCount: number,
+  rng: () => number,
+  humanSeatCount: number,
 ): HeroState[] {
   const heroes: HeroState[] = [];
   for (let i = 0; i < playerCount; i++) {
     const castle = castles.find((c) => c.ownerId === i);
     if (!castle) continue;
     const variantIds = VALID_HORSE_VARIANTS;
+    const isHuman = i < humanSeatCount;
     heroes.push({
       id: heroIdFor(i),
-      name: i === 0 ? "Commander" : "Warlord",
+      name: isHuman ? "Commander" : "Warlord",
       ownerId: i,
       q: castle.tile.q,
       r: castle.tile.r,
@@ -95,7 +109,7 @@ function makeHeroes(
       stacks: demoPlatoonsForPlayer(i),
       isChartering: false,
       charterId: null,
-      horseVariant: variantIds[Math.floor(Math.random() * variantIds.length)],
+      horseVariant: variantIds[Math.floor(rng() * variantIds.length)],
     });
   }
   return heroes;
@@ -128,7 +142,7 @@ function makeSettlements(
       cityMines: mines,
       morale: 100,
       autoTrade: true,
-      castleVariant: Math.random() < 0.5 ? 1 : 0,
+      castleVariant: rng() < 0.5 ? 1 : 0,
       buildings: [],
     };
   });
@@ -152,6 +166,7 @@ export function buildInitialGameState(
   const mapSeed = opts?.castleSeed ?? 1;
   const castleSeed = opts?.castleSeed ?? defaultCastleSeedFromMapSeed(mapSeed);
   const playerCount = clampPlayerCount(opts?.playerCount);
+  const humanSeatCount = clampHumanSeatCount(opts?.humanSeatCount, playerCount);
   const castleCount = opts?.castleCount ?? (2 * playerCount);
 
   const castles = generateCastles(map, {
@@ -163,8 +178,8 @@ export function buildInitialGameState(
   const settlements = makeSettlements(map, rng, castles, playerCount);
   const settlementIds = splitByOwner(settlements);
   return createInitialState({
-    seedPlayers: makePlayers(settlementIds, playerCount),
-    seedHeroes: makeHeroes(castles, playerCount),
+    seedPlayers: makePlayers(settlementIds, playerCount, humanSeatCount),
+    seedHeroes: makeHeroes(castles, playerCount, rng, humanSeatCount),
     seedSettlements: settlements,
     seedRound: 1,
     seedActivePlayerId: 0,
@@ -190,6 +205,7 @@ export function makeInitialStatePayload(
   const mapSeed = opts?.castleSeed ?? 1;
   const castleSeed = opts?.castleSeed ?? defaultCastleSeedFromMapSeed(mapSeed);
   const playerCount = opts?.playerCount ?? 3;
+  const humanSeatCount = clampHumanSeatCount(opts?.humanSeatCount, playerCount);
   const castleCount = opts?.castleCount ?? (2 * playerCount);
 
   const castles = generateCastles(map, {
@@ -199,8 +215,8 @@ export function makeInitialStatePayload(
   });
   const settlements = makeSettlements(map, rng, castles, playerCount);
   const settlementIds = splitByOwner(settlements);
-  const players = makePlayers(settlementIds, playerCount);
-  const heroes = makeHeroes(castles, playerCount);
+  const players = makePlayers(settlementIds, playerCount, humanSeatCount);
+  const heroes = makeHeroes(castles, playerCount, rng, humanSeatCount);
   return {
     round: 1,
     day: 1,
@@ -229,7 +245,7 @@ function backfillHero(h: Partial<import("../state/gameState").HeroState> & { id:
     ownerId: h.ownerId,
     q: h.q,
     r: h.r,
-    horseVariant: h.horseVariant ?? variantIds[Math.floor(Math.random() * variantIds.length)],
+    horseVariant: h.horseVariant ?? variantIds[0],
   };
 }
 
@@ -263,7 +279,7 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     r: s.r,
     level: s.level,
     id: s.id,
-    castleVariant: s.castleVariant ?? (Math.random() < 0.5 ? 1 : 0),
+    castleVariant: s.castleVariant ?? 0,
     buildings: (s as any).buildings ?? [],
     upgrade: (s as any).upgrade ?? undefined,
   };

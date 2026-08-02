@@ -26,8 +26,21 @@ export const TYPE_DISADVANTAGE_MULTIPLIER = 2 - TYPE_ADVANTAGE_MULTIPLIER;
 export const PLATOON_RETREAT_LOSS = 0.15;
 export const HERO_RETREAT_PENALTY = 0.5;
 
+// Flat gold price the hero pays to surrender a battle. If they can't cover
+// it, the surrender modal (see manualBattleArena.ts) opens a "Leave Behind"
+// picker that lets them sacrifice units at SURRENDER_UNIT_VALUE_GOLD each
+// until the shortfall is made up — those units are stripped from the
+// surviving platoons before the battle finalizes, so they show up as
+// casualties on the result card.
+export const SURRENDER_COST_GOLD = 5000;
+export const SURRENDER_UNIT_VALUE_GOLD = 100;
+
 export const DEFAULT_GRID_COLS = 15;
-export const DEFAULT_GRID_ROWS = 11;
+// Rows were bumped from 11 to 15 to fit 8 ARMY_STACK_SLOTS platoons per
+// side on the back column with one hex of space between each — see
+// deploymentPosition() in shared/combat/grid.ts, which now spaces rows
+// by 2 (rows 0, 2, 4, ..., 14) rather than packing them consecutively.
+export const DEFAULT_GRID_ROWS = 15;
 export const DEFAULT_OBSTACLE_COUNT = 8;
 export const DEFAULT_MAX_ROUNDS = 30;
 

@@ -7,8 +7,10 @@
 
 import { axialToPixel, hexCorners, hexDistance, pixelToAxial, type Axial } from "../core/hex";
 import { totalHealth } from "../../shared/combat/damage";
+import { SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "../../shared/combatConfig";
 import {
   attackWithPlatoon,
+  computeSpecialty,
   endPlatoonTurn,
   finalizeManualBattle,
   getCombatant,
@@ -19,9 +21,11 @@ import {
   movePlatoon,
   pickTarget,
   platoonSpeed,
+  retreatHero,
   runAiTurn,
   startManualBattle,
   timeOfDayForRound,
+  totalUnits,
   unactedLivingSlots,
   type ManualBattleState,
   type TimeOfDay,
@@ -29,7 +33,8 @@ import {
 import type { BattleLogEntry, BattleSide, Combatant } from "../../shared/combat/types";
 import type { Platoon, UnitType } from "../state/units";
 import { showBattleResultCard } from "./battleResultCard";
-import { menuTheme, styleButton } from "./menu";
+import { openConfirmDialog } from "./confirmDialog";
+import { PopupMenu, menuTheme, styleButton } from "./menu";
 
 const HEX_SIZE = 34;
 
@@ -70,14 +75,272 @@ function computeLayout(state: ManualBattleState) {
   return { minX, minY, maxX, maxY };
 }
 
+// Specialty → icon. Emoji stand-ins until a real icon set ships; the
+// arena is only reachable from the Test Battle sandbox today, so we don't
+// need pixel-perfect assets yet. `null` falls back to the plain tile.
+const SPECIALTY_ICONS: Record<string, string> = {
+  archery: "🏹",
+  shield: "🛡",
+  pike: "🔱",
+  sword: "⚔",
+  cavalry: "🐎",
+  monster: "🐲",
+  prayer: "✨",
+  militia: "👥",
+};
+
+function specialtyIcon(specialty: string): string {
+  return SPECIALTY_ICONS[specialty] ?? "⚔";
+}
+
+// Key for indexing a specific unit entry inside the arena's combatant list.
+// `slotIndex` is the army-stack slot, `unitTypeId` is which entry within
+// that slot (a platoon can hold up to MAX_PLATOON_ENTRIES distinct types).
+type LeaveBehindKey = string;
+
+function leaveBehindKey(slotIndex: number, unitTypeId: string): LeaveBehindKey {
+  return `${slotIndex}:${unitTypeId}`;
+}
+
+// Strips the selected unit counts off the human side's surviving
+// combatants so they show up as casualties on the final result card (see
+// buildResults in shared/combat/resolveBattle.ts — it diffs original vs
+// surviving counts and reports the gap). Called from the Leave Behind
+// picker once the player has agreed to the sacrifice.
+function applyLeaveBehind(
+  state: ManualBattleState,
+  side: BattleSide,
+  leftBehind: Map<LeaveBehindKey, number>,
+): void {
+  const combatants = side === "attacker" ? state.attacker : state.defender;
+  for (const c of combatants) {
+    if (c.retreated) continue;
+    let mutated = false;
+    for (const e of c.entries) {
+      const key = leaveBehindKey(c.slotIndex, e.unitTypeId);
+      const remove = leftBehind.get(key);
+      if (!remove) continue;
+      e.count = Math.max(0, e.count - remove);
+      mutated = true;
+    }
+    if (mutated) c.entries = c.entries.filter((e) => e.count > 0);
+  }
+}
+
+// Modal shown when the player tries to surrender without enough gold to
+// cover the surrender cost. Lets them mark individual units to "leave
+// behind" (sacrifice) until the gold shortfall is met — each unit is
+// worth `unitValue` gold. Confirm stays disabled until enough units are
+// selected; cancelling keeps the battle going.
+function openLeaveBehindDialog(opts: {
+  state: ManualBattleState;
+  side: BattleSide;
+  unitTypes: Record<string, UnitType>;
+  shortfall: number;
+  unitValue: number;
+  onConfirm: (leftBehind: Map<LeaveBehindKey, number>) => void;
+}): void {
+  const { state, side, unitTypes, shortfall, unitValue, onConfirm } = opts;
+  const combatants = side === "attacker" ? state.attacker : state.defender;
+  const requiredUnits = Math.ceil(shortfall / unitValue);
+
+  const wrapper = document.createElement("div");
+  Object.assign(wrapper.style, {
+    position: "fixed",
+    inset: "0",
+    background: "rgba(0,0,0,0.6)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: "120",
+  });
+  document.body.appendChild(wrapper);
+
+  const menu = new PopupMenu({
+    parent: wrapper,
+    title: "Leave Behind",
+    width: 420,
+    draggable: false,
+    closeable: true,
+    zIndex: 121,
+    onClose: () => wrapper.remove(),
+  });
+  menu.setPosition(Math.max(24, (window.innerWidth - 420) / 2), Math.max(24, (window.innerHeight - 360) / 2));
+
+  // Per-entry counts the player has earmarked. Keyed by
+  // "<slotIndex>:<unitTypeId>" so we can match them back to specific
+  // combatants in applyLeaveBehind().
+  const selected = new Map<LeaveBehindKey, number>();
+
+  const intro = document.createElement("div");
+  Object.assign(intro.style, {
+    fontSize: "13px",
+    lineHeight: "1.5",
+    opacity: "0.9",
+    marginBottom: "8px",
+  });
+  intro.textContent =
+    `You can't cover the surrender cost. Pick units to leave behind — each ` +
+    `unit is worth ${unitValue}G. You need at least ${requiredUnits} more ` +
+    `unit${requiredUnits === 1 ? "" : "s"} (${shortfall}G).`;
+  menu.appendContent(intro);
+
+  const summary = document.createElement("div");
+  Object.assign(summary.style, {
+    fontSize: "12px",
+    padding: "6px 8px",
+    marginBottom: "8px",
+    border: "1px solid rgba(255,255,255,0.2)",
+    borderRadius: "4px",
+  });
+  menu.appendContent(summary);
+
+  const list = document.createElement("div");
+  Object.assign(list.style, {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    maxHeight: "240px",
+    overflowY: "auto",
+    marginBottom: "10px",
+  });
+  menu.appendContent(list);
+
+  for (const c of combatants) {
+    if (c.retreated) continue;
+    if (c.entries.every((e) => e.count <= 0)) continue;
+    for (const e of c.entries) {
+      if (e.count <= 0) continue;
+      const name = unitTypes[e.unitTypeId]?.name ?? e.unitTypeId;
+      const row = document.createElement("div");
+      Object.assign(row.style, {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "8px",
+        padding: "4px 8px",
+        border: "1px solid rgba(255,255,255,0.12)",
+        borderRadius: "4px",
+        fontSize: "12px",
+      });
+      const label = document.createElement("div");
+      label.textContent = `Platoon ${c.slotIndex + 1} — ${name} ×${e.count}`;
+      row.appendChild(label);
+
+      const controls = document.createElement("div");
+      Object.assign(controls.style, { display: "flex", gap: "4px", alignItems: "center" });
+
+      const minus = document.createElement("button");
+      minus.textContent = "−";
+      styleButton(minus);
+      minus.style.minWidth = "24px";
+      const plus = document.createElement("button");
+      plus.textContent = "+";
+      styleButton(plus);
+      plus.style.minWidth = "24px";
+
+      const pickLabel = document.createElement("span");
+      pickLabel.style.minWidth = "40px";
+      pickLabel.style.textAlign = "center";
+
+      const key = leaveBehindKey(c.slotIndex, e.unitTypeId);
+
+      const update = (): void => {
+        const picked = selected.get(key) ?? 0;
+        pickLabel.textContent = `${picked}/${e.count}`;
+        refresh();
+      };
+
+      minus.addEventListener("click", () => {
+        const cur = selected.get(key) ?? 0;
+        if (cur <= 0) return;
+        const next = cur - 1;
+        if (next === 0) selected.delete(key);
+        else selected.set(key, next);
+        update();
+      });
+      plus.addEventListener("click", () => {
+        const cur = selected.get(key) ?? 0;
+        if (cur >= e.count) return;
+        selected.set(key, cur + 1);
+        update();
+      });
+
+      controls.append(minus, pickLabel, plus);
+      row.appendChild(controls);
+      list.appendChild(row);
+      update();
+    }
+  }
+
+  const confirmBtn = document.createElement("button");
+  confirmBtn.textContent = "Confirm Surrender";
+  styleButton(confirmBtn, false);
+  confirmBtn.style.background = "rgba(120,40,40,0.7)";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.textContent = "Cancel";
+  styleButton(cancelBtn);
+
+  const row = document.createElement("div");
+  Object.assign(row.style, {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: "8px",
+  });
+  row.append(cancelBtn, confirmBtn);
+  menu.appendContent(row);
+
+  function refresh(): void {
+    let units = 0;
+    for (const v of selected.values()) units += v;
+    const goldCovered = units * unitValue;
+    const enough = units >= requiredUnits;
+    summary.textContent =
+      `Leaving behind: ${units} unit${units === 1 ? "" : "s"} ` +
+      `(${goldCovered}G / need ${shortfall}G)` +
+      (enough ? " ✓" : "");
+    confirmBtn.disabled = !enough;
+    confirmBtn.style.opacity = enough ? "1" : "0.4";
+    confirmBtn.style.cursor = enough ? "pointer" : "not-allowed";
+  }
+
+  cancelBtn.addEventListener("click", () => menu.close());
+  confirmBtn.addEventListener("click", () => {
+    if (confirmBtn.disabled) return;
+    menu.close();
+    onConfirm(selected);
+  });
+
+  refresh();
+}
+
+// Specialty only counts as visible if it makes up at least 40% of the
+// platoon's surviving units — matches the "at least 40% archers → archery"
+// threshold the design doc calls out, and prevents a single surviving
+// unit of a different type from flipping the icon after one stray
+// casualty.
+const SPECIALTY_VISIBILITY_THRESHOLD = 0.4;
+
 // One tile per platoon in a side's status bar: its unit composition (the
 // "resources" making it up) and an overall HP bar, so both players can read
 // the whole army's condition at a glance without clicking each stack. Tinted
 // with the side's accent color (matching its hero portrait and grid token)
 // so attacker vs. defender is unmistakable at a glance.
-function buildStatusTile(state: ManualBattleState, c: Combatant, accent: string, highlighted: boolean): HTMLElement {
+//
+// A specialty icon (top-left) shows only for the owner of the platoon, or
+// for the opponent once they've made contact (any successful attack
+// involving this platoon in either direction adds the opponent side to
+// Combatant.scoutedBy — see markContacted() in shared/combat/manualBattle.ts).
+function buildStatusTile(
+  state: ManualBattleState,
+  c: Combatant,
+  accent: string,
+  highlighted: boolean,
+  viewerSide: BattleSide,
+): HTMLElement {
   const tile = document.createElement("div");
   Object.assign(tile.style, {
+    position: "relative",
     background: `${accent}22`,
     border: highlighted ? `2px solid ${accent}` : `1px solid ${accent}88`,
     borderRadius: "4px",
@@ -87,20 +350,61 @@ function buildStatusTile(state: ManualBattleState, c: Combatant, accent: string,
     gap: "3px",
   });
 
-  const title = document.createElement("div");
-  title.style.fontWeight = "600";
-  title.style.fontSize = "11px";
-  title.textContent = `Platoon ${c.slotIndex + 1}`;
-  tile.appendChild(title);
-
   const alive = !c.retreated && c.entries.some((e) => e.count > 0);
   if (!alive) {
     tile.style.opacity = "0.45";
+    const title = document.createElement("div");
+    title.style.fontWeight = "600";
+    title.style.fontSize = "11px";
+    title.textContent = `Platoon ${c.slotIndex + 1}`;
+    tile.appendChild(title);
     const status = document.createElement("div");
     status.style.fontSize = "10px";
     status.textContent = c.retreated ? "Retreated" : "Defeated";
     tile.appendChild(status);
     return tile;
+  }
+
+  // Specialty icon (top-left) — only visible to the owner, or to the
+  // opponent after they've made contact. Recomputed from current entries
+  // so the icon naturally shifts when casualties flip the dominant unit
+  // type (e.g. the last archer dies and the platoon drops below the 40%
+  // archery threshold — icon disappears).
+  const specialty = computeSpecialty(c.entries, state.unitTypes);
+  const total = totalUnits(c.entries);
+  let dominantCount = 0;
+  if (specialty) {
+    for (const e of c.entries) {
+      if (e.count <= 0) continue;
+      if (state.unitTypes[e.unitTypeId]?.specialty === specialty) dominantCount += e.count;
+    }
+  }
+  const meetsThreshold = specialty !== null && total > 0 && dominantCount / total >= SPECIALTY_VISIBILITY_THRESHOLD;
+  const revealSpecialty =
+    meetsThreshold && (c.side === viewerSide || c.scoutedBy.has(viewerSide));
+
+  const title = document.createElement("div");
+  title.style.fontWeight = "600";
+  title.style.fontSize = "11px";
+  // Reserve room for the top-left specialty icon (when shown) so the title
+  // doesn't overlap it.
+  title.style.paddingLeft = revealSpecialty ? "20px" : "0";
+  title.textContent = `Platoon ${c.slotIndex + 1}`;
+  tile.appendChild(title);
+
+  if (revealSpecialty && specialty) {
+    const icon = document.createElement("div");
+    Object.assign(icon.style, {
+      position: "absolute",
+      top: "3px",
+      left: "5px",
+      fontSize: "14px",
+      lineHeight: "1",
+      opacity: "0.9",
+    });
+    icon.textContent = specialtyIcon(specialty);
+    icon.title = `Specialty: ${specialty} (${dominantCount}/${total})`;
+    tile.appendChild(icon);
   }
 
   for (const e of c.entries) {
@@ -136,7 +440,48 @@ function buildStatusTile(state: ManualBattleState, c: Combatant, accent: string,
   hpLabel.textContent = `${Math.round(hpPct * 100)}% HP`;
   tile.appendChild(hpLabel);
 
+  // Morale + Fatigue placeholder bars. No actual mechanic behind these yet —
+  // the values are hard-coded (morale always 100, fatigue always 0) so the
+  // slot exists in the UI for when the combat system gets around to
+  // tracking them. Wired into the same color palette as HP so the bar
+  // conveys severity at a glance.
+  tile.appendChild(makeMetricBar("Morale", 100, (v) => (v > 0.5 ? "#4caf50" : v > 0.25 ? "#ffb300" : "#e53935")));
+  tile.appendChild(makeMetricBar("Fatigue", 0, (v) => (v < 0.25 ? "#4caf50" : v < 0.5 ? "#ffb300" : "#e53935")));
+
   return tile;
+}
+
+// Thin label + horizontal bar, one per metric. Reused for the HP, Morale,
+// and Fatigue rows on each status tile. `value` is a 0..1 ratio (NOT a
+// percentage); `colorFor` maps that ratio to a fill color.
+function makeMetricBar(label: string, value: number, colorFor: (v: number) => string): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.style.marginTop = "3px";
+
+  const labelRow = document.createElement("div");
+  labelRow.style.fontSize = "10px";
+  labelRow.style.opacity = "0.7";
+  labelRow.textContent = `${label} ${Math.round(value * 100)}`;
+  wrap.appendChild(labelRow);
+
+  const track = document.createElement("div");
+  Object.assign(track.style, {
+    background: "#000",
+    borderRadius: "2px",
+    height: "4px",
+    overflow: "hidden",
+    marginTop: "1px",
+  });
+  const fill = document.createElement("div");
+  Object.assign(fill.style, {
+    height: "100%",
+    width: `${Math.max(0, Math.min(1, value)) * 100}%`,
+    background: colorFor(value),
+  });
+  track.appendChild(fill);
+  wrap.appendChild(track);
+
+  return wrap;
 }
 
 export function openManualBattleArena(
@@ -144,6 +489,7 @@ export function openManualBattleArena(
   aiPlatoons: Platoon[],
   unitTypes: Record<string, UnitType>,
   humanSide: BattleSide = "attacker",
+  options: { heroGold?: number; surrenderCost?: number } = {},
 ): void {
   // The engine's attacker/defender roles are fixed to their grid colors
   // (attacker always blue, defender always red) — humanSide picks which of
@@ -155,6 +501,14 @@ export function openManualBattleArena(
     unitTypes,
     obstacleSeed: Math.floor(Math.random() * 1_000_000),
   });
+
+  // Gold the human hero brings into this battle. Defaults to a low value
+  // (300, matching gameState.ts's initial hero gold) so the Test Battle
+  // sandbox always exercises the "Leave Behind" path; real callers can
+  // pass the hero's actual purse via `options.heroGold`. `surrenderCost`
+  // defaults to SURRENDER_COST_GOLD.
+  let currentHeroGold = options.heroGold ?? 300;
+  const surrenderCost = options.surrenderCost ?? SURRENDER_COST_GOLD;
 
   // Running per-platoon move tally for the whole battle (both sides), keyed
   // by "side#slotIndex" — printed on demand via logMoveStats and dumped
@@ -377,6 +731,72 @@ export function openManualBattleArena(
   });
   actionRow.appendChild(endTurnBtn);
 
+  // Voluntary concession — Retreat applies the standard 15% self-retreat
+  // loss to every still-living platoon and pulls the whole side off the
+  // field; Surrender skips the loss and yields immediately. Both finalize
+  // the battle as `retreated_hero` for the conceding side (see retreatHero
+  // + finalizeManualBattle in shared/combat/manualBattle.ts).
+  const retreatBtn = document.createElement("button");
+  retreatBtn.textContent = "Retreat";
+  styleButton(retreatBtn);
+  retreatBtn.title = "Withdraw your hero from the fight (each surviving platoon takes a 15% loss before leaving)";
+  retreatBtn.addEventListener("click", () => {
+    if (isBattleOver(state)) return;
+    openConfirmDialog({
+      title: "Retreat?",
+      message: "Withdraw your hero from this battle?\n\nEvery surviving platoon takes a 15% loss before leaving the field, and you lose the engagement.",
+      confirmLabel: "Retreat",
+      destructive: true,
+      onConfirm: () => {
+        debugLog(`player retreats as ${humanSide}`);
+        retreatHero(state, humanSide, { applyLoss: true });
+        finishBattle();
+      },
+    });
+  });
+  actionRow.appendChild(retreatBtn);
+
+  const surrenderBtn = document.createElement("button");
+  surrenderBtn.textContent = "Surrender";
+  styleButton(surrenderBtn);
+  surrenderBtn.title = `Yield immediately with no further losses — costs ${surrenderCost}G (you have ${currentHeroGold}G)`;
+  surrenderBtn.addEventListener("click", () => {
+    if (isBattleOver(state)) return;
+    if (currentHeroGold >= surrenderCost) {
+      openConfirmDialog({
+        title: "Surrender?",
+        message:
+          `Yield to the enemy?\n\nYou concede the battle immediately with no additional troop losses.\n` +
+          `Cost: ${surrenderCost}G (you have ${currentHeroGold}G).`,
+        confirmLabel: "Surrender",
+        destructive: true,
+        onConfirm: () => {
+          debugLog(`player surrenders as ${humanSide} (paid ${surrenderCost}G)`);
+          currentHeroGold -= surrenderCost;
+          retreatHero(state, humanSide, { applyLoss: false });
+          finishBattle();
+        },
+      });
+    } else {
+      const shortfall = surrenderCost - currentHeroGold;
+      debugLog(`player surrender short by ${shortfall}G -> leave-behind picker`);
+      openLeaveBehindDialog({
+        state,
+        side: humanSide,
+        unitTypes,
+        shortfall,
+        unitValue: SURRENDER_UNIT_VALUE_GOLD,
+        onConfirm: (leftBehind) => {
+          debugLog(`player surrenders as ${humanSide} after leaving behind ${leftBehind} units`);
+          applyLeaveBehind(state, humanSide, leftBehind);
+          retreatHero(state, humanSide, { applyLoss: false });
+          finishBattle();
+        },
+      });
+    }
+  });
+  actionRow.appendChild(surrenderBtn);
+
   function renderFooterActions(): void {
     helpTextEl.textContent =
       selectedSlot === null
@@ -384,7 +804,10 @@ export function openManualBattleArena(
         : moveRange.length > 0
           ? "Click a highlighted hex to move (moving next to an enemy fights immediately). Steps left over can still be used — move again, attack a ringed enemy, or End Turn when done."
           : "Out of movement — click a ringed enemy to attack, or End Turn.";
-    endTurnBtn.style.display = selectedSlot !== null ? "" : "none";
+    const over = isBattleOver(state);
+    endTurnBtn.style.display = selectedSlot !== null && !over ? "" : "none";
+    retreatBtn.style.display = over ? "none" : "";
+    surrenderBtn.style.display = over ? "none" : "";
   }
 
   // Hero portraits flank the battlefield, HoMM3-style — they stand outside
@@ -829,7 +1252,7 @@ export function openManualBattleArena(
   function renderStatusBars(): void {
     const actableSlots = unactedLivingSlots(state, humanSide);
     const attackerTiles = state.attacker.map((c) => {
-      const tile = buildStatusTile(state, c, ATTACKER_ACCENT, humanSide === "attacker" && c.slotIndex === selectedSlot);
+      const tile = buildStatusTile(state, c, ATTACKER_ACCENT, humanSide === "attacker" && c.slotIndex === selectedSlot, humanSide);
       if (humanSide === "attacker" && actableSlots.includes(c.slotIndex)) {
         tile.style.cursor = "pointer";
         tile.addEventListener("click", () => selectPlatoon(c.slotIndex));
@@ -839,7 +1262,7 @@ export function openManualBattleArena(
     attackerBar.replaceChildren(attackerBar.firstElementChild!, ...attackerTiles);
 
     const defenderTiles = state.defender.map((c) => {
-      const tile = buildStatusTile(state, c, DEFENDER_ACCENT, humanSide === "defender" && c.slotIndex === selectedSlot);
+      const tile = buildStatusTile(state, c, DEFENDER_ACCENT, humanSide === "defender" && c.slotIndex === selectedSlot, humanSide);
       if (humanSide === "defender" && actableSlots.includes(c.slotIndex)) {
         tile.style.cursor = "pointer";
         tile.addEventListener("click", () => selectPlatoon(c.slotIndex));
