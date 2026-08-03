@@ -22,6 +22,10 @@ export type SettlementId = string;
 export type CharterId = string;
 export type ResourceType = "gold" | "wood" | "stone" | "iron" | "arcane" | "food";
 
+export function isHuman(p: Player): boolean {
+  return p.faction === "player";
+}
+
 export const WAREHOUSE_RESOURCES = [
   "wood",
   "stone",
@@ -1197,7 +1201,7 @@ function completeCharter(state: GameState, charter: CharterState): GameState {
     cityMines: [],
     morale: 50,
     autoTrade: false,
-    castleVariant: Math.random() < 0.5 ? 1 : 0,
+    castleVariant: 0,
     buildings: [],
   };
 

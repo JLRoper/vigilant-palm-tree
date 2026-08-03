@@ -4,6 +4,7 @@ import { initSchema, pool } from "./db";
 import { router } from "./routes";
 
 const PORT = Number(process.env.API_PORT ?? 3001);
+const BIND_HOST = process.env.LAN_HOST === "1" ? "0.0.0.0" : "127.0.0.1";
 
 async function main() {
   await initSchema();
@@ -13,8 +14,8 @@ async function main() {
   app.use(express.json());
   app.use("/api", router);
 
-  app.listen(PORT, "127.0.0.1", () => {
-    console.log(`>> api listening on http://127.0.0.1:${PORT}`);
+  app.listen(PORT, BIND_HOST, () => {
+    console.log(`>> api listening on http://${BIND_HOST}:${PORT}`);
   });
 }
 
