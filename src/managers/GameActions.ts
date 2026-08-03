@@ -1,6 +1,8 @@
 import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { showBattleModal } from "../views/battleModal";
+import { showBattleResultCard } from "../views/battleResultCard";
+import type { BattleResult } from "../../shared/combat/types";
 
 /**
  * Handles game-flow actions: end turn, manual save, battle resolution.
@@ -44,12 +46,21 @@ export class GameActions {
         defenderName: `Hero ${defenderName}`,
       });
       const tc = this.state.getTurnController();
+      let battle: BattleResult | null = null;
       if (result === "resolve") {
-        await tc.resolveCurrentBattle();
+        battle = await tc.resolveCurrentBattle();
       } else {
         tc.cancelMove(attackerId);
       }
       this.state.replaceState(tc.getState());
+      if (battle) {
+        showBattleResultCard({
+          result: battle,
+          attackerLabel: `Hero ${attackerName}`,
+          defenderLabel: `Hero ${defenderName}`,
+          onCarryOn: () => {},
+        });
+      }
     } finally {
       this.battleInFlight = false;
     }

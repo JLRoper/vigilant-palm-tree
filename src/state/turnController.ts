@@ -35,11 +35,12 @@ import { computeSettlementRates } from "../economy/settlementRates";
 import type { HorseVariant } from "./settings";
 import { generateCitySpots } from "../core/citySpots";
 import { cityViewSizeFor } from "../core/cityGrid";
+import type { BattleResult } from "../../shared/combat/types";
 
 export interface TurnControllerHooks {
   onHumanTurnEnd(state: GameState): Promise<GameState>;
   onAiMove(state: GameState, heroId: HeroId, toTile: { q: number; r: number }): Promise<void>;
-  onBattleResolved(state: GameState): Promise<GameState>;
+  onBattleResolved(state: GameState): Promise<{ state: GameState; battle: BattleResult | null }>;
   pickAiMove(
     state: GameState,
     heroId: HeroId,
@@ -353,13 +354,13 @@ export class TurnController {
     }
   }
 
-  async resolveCurrentBattle(): Promise<void> {
-    if (this.state.phase.kind !== "BATTLE") return;
+  async resolveCurrentBattle(): Promise<BattleResult | null> {
+    if (this.state.phase.kind !== "BATTLE") return null;
     const { attackerId, defenderId } = this.state.phase;
     // The server is authoritative for combat resolution (it owns the
     // unit-type/counter catalog), so fetch its result before closing out the
     // BATTLE phase locally.
-    const resolved = await this.hooks.onBattleResolved(this.state);
+    const { state: resolved, battle } = await this.hooks.onBattleResolved(this.state);
     this.state = endBattlePhaseReducer(resolved);
     const attackerAfter = this.state.heroes[attackerId];
     const defenderAfter = this.state.heroes[defenderId];
@@ -373,6 +374,7 @@ export class TurnController {
       type: "battle_resolved",
       payload: {},
     });
+    return battle;
   }
 
   async endHumanTurn(): Promise<void> {
