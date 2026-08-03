@@ -18,6 +18,7 @@ import { resolveBattle as resolveBattleEngine } from "../shared/combat/resolveBa
 import type { BattleResult } from "../shared/combat/types";
 import { assetRouter } from "./assetRoutes";
 import { authRouter } from "./auth";
+import { validateGameRow, isHealthy } from "../shared/validation/gameIntegrity";
 
 export const router = Router();
 
@@ -181,6 +182,24 @@ router.get("/games/:name", async (req, res) => {
     .sort((a, b) => a - b);
   const seatTotal = row.lobby?.seats ?? row.players.length;
   res.json({ ...row, availableSeats, seatTotal });
+});
+
+router.get("/games/:name/validate", async (req, res) => {
+  const r = await pool.query<FullGameRow>(
+    `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
+    [req.params.name]
+  );
+  if (r.rowCount === 0) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+  const issues = validateGameRow(r.rows[0]);
+  res.json({
+    healthy: isHealthy(issues),
+    errorCount: issues.filter((i) => i.severity === "error").length,
+    warningCount: issues.filter((i) => i.severity === "warning").length,
+    issues,
+  });
 });
 
 router.post("/games/:name/lobby/claim", async (req, res) => {
