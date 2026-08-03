@@ -1,5 +1,6 @@
 import {
   createInitialState,
+  WAREHOUSE_RESOURCES,
   type GameState,
   type HeroId,
   type HeroState,
@@ -227,8 +228,18 @@ export function makeInitialStatePayload(
   };
 }
 
+function warnMissing(path: string, field: string): void {
+  console.warn(`[hydrateGameState] ${path} missing "${field}"; using default`);
+}
+
 function backfillHero(h: Partial<import("../state/gameState").HeroState> & { id: import("../state/gameState").HeroId; ownerId: number; q: number; r: number }): import("../state/gameState").HeroState {
   const variantIds = VALID_HORSE_VARIANTS;
+  const path = `heroes.${h.id}`;
+  if (h.movementRemaining === undefined) warnMissing(path, "movementRemaining");
+  if (h.gold === undefined) warnMissing(path, "gold");
+  if (h.troops === undefined) warnMissing(path, "troops");
+  if (h.stacks === undefined) warnMissing(path, "stacks");
+  if (h.horseVariant === undefined) warnMissing(path, "horseVariant");
   return {
     movementRemaining: h.movementRemaining ?? 7,
     previousQ: h.previousQ ?? null,
@@ -254,6 +265,20 @@ function emptyWarehouse(): SettlementState["warehouse"] {
 }
 
 function backfillSettlement(s: Partial<SettlementState> & { id: string; q: number; r: number; level: 1 | 2 | 3 }): SettlementState {
+  const path = `settlements.${s.id}`;
+  if (s.warehouse === undefined) {
+    warnMissing(path, "warehouse");
+  } else {
+    for (const res of WAREHOUSE_RESOURCES) {
+      if (s.warehouse[res] === undefined) warnMissing(`${path}.warehouse`, res);
+    }
+  }
+  if (s.population === undefined) warnMissing(path, "population");
+  if (s.goldTax === undefined) warnMissing(path, "goldTax");
+  if (s.morale === undefined) warnMissing(path, "morale");
+  if (s.autoTrade === undefined) warnMissing(path, "autoTrade");
+  if (s.castleVariant === undefined) warnMissing(path, "castleVariant");
+  if ((s as any).buildings === undefined) warnMissing(path, "buildings");
   const warehouse = s.warehouse ?? emptyWarehouse();
   const filledWarehouse: SettlementState["warehouse"] = {
     wood: warehouse.wood ?? 0,
@@ -289,6 +314,7 @@ export function hydrateGameState(
   row: Game,
   opts?: HydrateOptions,
 ): GameState {
+  if (row.day === undefined) warnMissing(row.name ? `games.${row.name}` : "game", "day");
   const settlementsRecord: Record<string, SettlementState> = {};
   for (const [id, raw] of Object.entries(row.settlements)) {
     settlementsRecord[id] = backfillSettlement({ ...raw, id });
