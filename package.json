@@ -23,7 +23,8 @@
     "validate-assets": "node tools/sprites/validate-assets.mjs",
     "sprites:generate": "node tools/sprites/pixel-gen.mjs",
     "sprites:preview": "node tools/sprites/generate-preview.mjs",
-    "assets:seed": "tsx --env-file=.env scripts/seed-assets.ts"
+    "assets:seed": "tsx --env-file=.env scripts/seed-assets.ts",
+    "skybox:split": "tsx scripts/split-skybox-layers.ts"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

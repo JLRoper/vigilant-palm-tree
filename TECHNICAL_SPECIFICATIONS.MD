@@ -121,6 +121,7 @@ No CSS framework, no UI framework, no state library, no ORM, no testing framewor
 | `test` | `tsx test/smoke.ts` | End-to-end smoke test (spawns API + preview, drives with Playwright) |
 | `sprites:generate` | `node tools/sprites/pixel-gen.mjs` | Render pixel-art castle sprites into `src/resources/` |
 | `sprites:preview` | `node tools/sprites/generate-preview.mjs` | Build a sprite contact-sheet preview |
+| `skybox:split` | `tsx scripts/split-skybox-layers.ts` | Split the city-view skybox into separate layer PNGs |
 
 ---
 
