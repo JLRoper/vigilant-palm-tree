@@ -9,7 +9,7 @@ A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. Thi
 | Aspect | Value |
 |---|---|
 | Project name | `heroes-js` (also referenced as `vigilant-palm-tree` in `README.md`) |
-| Version | `0.0.1` |
+| Version | `0.2.0` |
 | Package type | ESM (`"type": "module"`) |
 | Repo layout | Monorepo-style single repo, **no framework workspace tooling** |
 | Languages | TypeScript (primary), plain JavaScript `.mjs` (sprite tooling), SQL (migrations), HTML/CSS (UI shell) |
