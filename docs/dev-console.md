@@ -136,15 +136,35 @@ the bottom.
 
 When **Pin** is toggled on:
 
-- Clicking the modal's × button **hides** the console instead of destroying it
-  (filters, paused state, and modal contents are preserved).
-- The console can be re-shown via `handle.show()`, or from the browser console
-  via `__gameDebug.console.show()`.
-- Pin state plus the current filters (type prefix, source, paused) are saved to
-  `localStorage` under `persistKey`.
-- On next page load, if pin was on, the console auto-reopens with the same
-  filters and paused state — call `mountPersistentDevConsole(log)` once during
-  boot to opt into this. The engine does this in `GameEngine.initDebug()`.
+- The console **detaches from modal layout** and becomes a floating panel:
+  - The full-screen modal backdrop/scrim is removed (`wrapper` becomes
+    transparent with `pointer-events: none`), so the rest of the page stays
+    fully interactive — clicks outside the panel hit the underlying game UI
+    as normal.
+  - The panel renders on top of other modals (`wrapper` z-index bumped to
+    `900`, panel z-index `1000`), so the console stays visible even while
+    other modals (settings, asset manager, etc.) are open.
+  - The panel becomes slightly translucent (`opacity: 0.9`) with a stronger
+    drop shadow, so it reads as a floating overlay rather than a blocking
+    dialog.
+- Clicking the panel's × button **hides** the console instead of destroying
+  it (filters, paused state, and contents are preserved). The console can
+  be re-shown via `handle.show()` or `__gameDebug.console.show()`.
+- **Click-and-hold anywhere on the panel** (not just the header) starts a
+  drag — mousedown on the panel body initiates a move, mousemove repositions,
+  mouseup releases. The drag is suppressed when the gesture starts on a
+  `button`, `input`, `select`, `textarea`, `label`, or the header (so
+  normal clicks on controls and the existing header-drag still work).
+- Pin state plus the current filters (type prefix, source, paused) are saved
+  to `localStorage` under `persistKey`.
+- On next page load, if pin was on, the console auto-reopens as a floating
+  panel with the same filters and paused state — call
+  `mountPersistentDevConsole(log)` once during boot to opt into this. The
+  engine does this in `GameEngine.initDebug()`.
+
+Toggling Pin off restores the standard centered-modal behaviour (backdrop
+reappears, pointer-events return, panel becomes fully opaque, body-drag is
+disabled, z-index returns to the modal layer).
 
 To force-destroy a pinned console from code:
 
