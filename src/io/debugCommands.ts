@@ -2,12 +2,10 @@ import type { HeroId } from "../state/gameState";
 import { findPath } from "../map/pathfinding";
 import { TERRAIN_COST } from "../map/terrain";
 import { axialToPixel } from "../core/hex";
+import type { EventLog, LogEntry, LogQuery, LogStats } from "../debug/eventLog";
+import type { DevConsoleHandle } from "../debug/devConsole";
 
-/**
- * Attaches the __gameDebug API to window.
- * All heavy logic delegates back to the engine via the provided callbacks.
- */
-export function attachDebugApi(engine: {
+export interface AttachDebugApiEngine {
   getState: () => any;
   getTurnController: () => any;
   handleEndTurn: () => Promise<void>;
@@ -25,15 +23,24 @@ export function attachDebugApi(engine: {
     replaceState: (s: any) => void;
     syncHeroVisualsToState: () => void;
   };
-    view: {
-        camera: { zoom: number; x: number; y: number };
-        view: { hover: any; lastClickDebug: any };
-      };
+  view: {
+    camera: { zoom: number; x: number; y: number };
+    view: { hover: any; lastClickDebug: any };
+  };
   session: {
     getActiveGameId: () => number | null;
     getActiveGameName: () => string | null;
   };
-}): void {
+  eventLog?: EventLog | null;
+  consoleHandle?: DevConsoleHandle | null;
+  setConsoleHandle?: (handle: DevConsoleHandle | null) => void;
+}
+
+/**
+ * Attaches the __gameDebug API to window.
+ * All heavy logic delegates back to the engine via the provided callbacks.
+ */
+export function attachDebugApi(engine: AttachDebugApiEngine): void {
   (window as any).__gameDebug = {
     getState: () => engine.state.getTurnController()?.getState() ?? engine.state.getState(),
     getGameState: () => engine.state.getState(),
@@ -130,5 +137,50 @@ export function attachDebugApi(engine: {
 
     isPassable: (q: number, r: number) => engine.state.getGameMap().isPassable(q, r),
     getMoveDurationMs: () => engine.state.getHeroes()[0]?.moveDurationMs ?? 0,
+
+    eventLog: engine.eventLog ?? null,
+
+    events: (() => {
+      const log: EventLog | null | undefined = engine.eventLog;
+      return {
+        available: () => log !== null && log !== undefined,
+        subscribe: (handler: (entry: LogEntry) => void): (() => void) => {
+          if (!log) throw new Error("eventLog not attached");
+          return log.subscribe(handler);
+        },
+        getEntries: (query?: LogQuery): LogEntry[] => {
+          if (!log) return [];
+          return log.getEntries(query);
+        },
+        clear: (): void => {
+          if (log) log.clear();
+        },
+        stats: (): LogStats | null => (log ? log.stats() : null),
+        setCapacity: (n: number): void => {
+          if (log) log.setCapacity(n);
+        },
+      };
+    })(),
+
+    console: {
+      get isOpen(): boolean {
+        return !!engine.consoleHandle;
+      },
+      get isPinned(): boolean {
+        return !!engine.consoleHandle?.isPinned();
+      },
+      show: (): void => {
+        engine.consoleHandle?.show();
+      },
+      hide: (): void => {
+        engine.consoleHandle?.hide();
+      },
+      togglePin: (): boolean => {
+        return engine.consoleHandle?.togglePin() ?? false;
+      },
+      setPinned: (value: boolean): void => {
+        engine.consoleHandle?.setPinned(value);
+      },
+    },
   };
 }

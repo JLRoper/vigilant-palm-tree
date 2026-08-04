@@ -342,12 +342,15 @@ async function run() {
     // Handle load/splash screen if present
     const body = (await page.textContent("body")) ?? "";
     if (body.includes("New Game") || body.includes("Load Game")) {
-      const loadBtn = page.locator("button").filter({ hasText: "Load" });
+      const loadBtn = page.locator("button").filter({ hasText: /^Load Game$/ });
       if (await loadBtn.count() > 0) {
-        await loadBtn.first().click();
+        await loadBtn.first().click({ trial: false, force: false });
         await wait(300);
-        await page.locator("button").filter({ hasText: "Open" }).first().click();
-        await wait(1000);
+        const openBtn = page.locator("button:visible").filter({ hasText: "Open" });
+        if (await openBtn.count() > 0) {
+          await openBtn.first().click();
+          await wait(1000);
+        }
       }
     }
 

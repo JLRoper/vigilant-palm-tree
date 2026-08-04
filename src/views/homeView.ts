@@ -1,5 +1,5 @@
 import { api, type Game } from "../io/api";
-import { listUserGames, rememberGame, type UserGameEntry } from "../io/userGames";
+import { forgetGame, listUserGames, rememberGame, type UserGameEntry } from "../io/userGames";
 import {
   checkSession,
   clearAuth,
@@ -275,12 +275,10 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
 
   async function openLoadModal(): Promise<void> {
     let serverGames: Game[] = [];
-    if (opts.isBackendOk()) {
-      try {
-        serverGames = await api.listGames();
-      } catch (e) {
-        console.error("[home] listGames failed:", e);
-      }
+    try {
+      serverGames = await api.listGames();
+    } catch (e) {
+      console.error("[home] listGames failed:", e);
     }
     const userGames = readLoadEntries(serverGames);
     const modal = openCenteredModal(document.body, "Load Game", 420);
@@ -293,12 +291,16 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
     content.style.flexDirection = "column";
     content.style.gap = "10px";
 
-    if (userGames.length === 0) {
+    function showEmptyState(): void {
       const empty = document.createElement("div");
       empty.textContent = "No saved games yet — start a new game to begin.";
       empty.style.opacity = "0.7";
       empty.style.padding = "6px 0";
       content.appendChild(empty);
+    }
+
+    if (userGames.length === 0) {
+      showEmptyState();
     } else {
       const list = document.createElement("div");
       list.style.maxHeight = "320px";
@@ -306,7 +308,14 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
       list.style.border = "1px solid rgba(255,255,255,0.1)";
       list.style.borderRadius = "3px";
       for (const entry of userGames) {
-        list.appendChild(makeLoadRow(entry, () => modal.close()));
+        list.appendChild(
+          makeLoadRow(entry, () => modal.close(), () => {
+            if (list.children.length === 0) {
+              list.remove();
+              showEmptyState();
+            }
+          }),
+        );
       }
       content.appendChild(list);
     }
@@ -346,6 +355,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
   function makeLoadRow(
     entry: UserGameEntry & { server?: Game },
     onLoaded: () => void,
+    onRowRemoved: () => void,
   ): HTMLDivElement {
     const row = document.createElement("div");
     Object.assign(row.style, {
@@ -399,6 +409,27 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
       });
       right.appendChild(open);
     }
+    const del = document.createElement("button");
+    del.textContent = "Delete";
+    styleButton(del);
+    del.addEventListener("click", async () => {
+      if (!confirm(`Delete saved game "${entry.name}"? This cannot be undone.`)) return;
+      del.disabled = true;
+      del.textContent = "Deleting…";
+      try {
+        if (entry.server) {
+          await api.deleteGame(entry.name);
+        }
+        forgetGame(entry.id);
+        row.remove();
+        onRowRemoved();
+      } catch (e) {
+        del.disabled = false;
+        del.textContent = "Delete";
+        console.error("[home] delete failed:", e);
+      }
+    });
+    right.appendChild(del);
     row.appendChild(right);
     return row;
   }

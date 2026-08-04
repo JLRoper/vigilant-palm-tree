@@ -19,6 +19,8 @@ import { GameSessionManager } from "./GameSessionManager";
 import { attachDebugApi } from "../io/debugCommands";
 import { bus } from "../core/eventBus";
 import { registerAllListeners } from "../core/eventRegistry";
+import { attachEventLog, type EventLog } from "../debug/eventLog";
+import { mountPersistentDevConsole, type DevConsoleHandle } from "../debug/devConsole";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 
 export class GameEngine {
@@ -40,6 +42,8 @@ export class GameEngine {
   private lastTime = performance.now();
   private charterPlacementMode = false;
   private validCharterHexes: Set<string> | null = null;
+  public eventLog: EventLog | null = null;
+  public consoleHandle: DevConsoleHandle | null = null;
 
   constructor() {
     this.canvas = document.getElementById("game") as HTMLCanvasElement;
@@ -91,12 +95,14 @@ export class GameEngine {
 
   private initGameState(): void {
     this.state.setGameMap(this.gameMap);
+    const attached = attachEventLog();
+    this.eventLog = attached.log;
     const hooks = buildTurnHooks({
       gameName: () => this.session.getActiveGameName(),
       gameMap: () => this.gameMap,
       rng,
     });
-    this.state.setHooks(hooks);
+    this.state.setHooks(attached.wrapHooks(hooks));
     const initialState = buildInitialGameState(this.gameMap, rng);
     this.state.setState(initialState);
     this.state.rebuildHeroesFromState();
@@ -163,6 +169,9 @@ export class GameEngine {
   }
 
   private initDebug(): void {
+    if (this.eventLog) {
+      this.consoleHandle = mountPersistentDevConsole(this.eventLog);
+    }
     attachDebugApi({
       getState: () => this.state.getTurnController()?.getState() ?? this.state.getState(),
       getTurnController: () => this.state.getTurnController(),
@@ -173,6 +182,9 @@ export class GameEngine {
       state: this.state,
       view: { camera: this.view.camera, view: this.view.view },
       session: this.session,
+      eventLog: this.eventLog,
+      consoleHandle: this.consoleHandle,
+      setConsoleHandle: (handle: DevConsoleHandle | null) => { this.consoleHandle = handle; },
     });
   }
 

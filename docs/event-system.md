@@ -117,6 +117,9 @@ bus.on("state:committed", () => {
 - `src/managers/UIManager.ts`: closeHeroInfoMenu (L110), closeSettlementInfoMenu (L124), `handleRosterHeroSelect()` (L263), `handleRecruitHero()` (L289)
 - `src/views/adventureView.ts`: onClick charter/select/attack/settlement (L250,292,353,371,344,404)
 - `src/io/debugCommands.ts`: `requestMove()` (L67), `captureSettlement()` (L81), `tradeResources()` (L89), `teleportHero()` (L99)
+- **Note:** `debugCommands.ts` is also extended to forward `eventLog` into the
+  `__gameDebug.events` surface (see [`dev-console.md`](./dev-console.md)). That
+  wiring is purely additive and does not change the cleanup target above.
 
 ---
 
