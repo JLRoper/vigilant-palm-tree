@@ -20,7 +20,7 @@ import {
 } from "./cityBuildingDraw";
 import { buildingFootprintFromRegistry } from "../core/buildingRegistry";
 import { pickStyleForBuilding } from "./assetDescriptors";
-import { settings } from "../state/settings";
+import { settings, PARALLAX_SPEEDS } from "../state/settings";
 
 export { type BuildingDef, type GenerationStyle };
 
@@ -34,11 +34,33 @@ const COLOR_TEXT = "#ffffff";
 
 const SKYBOX_BASE = "/src/resources/skybox/cityView-background";
 
+const LAYER_BANDS: Record<number, Array<{ yStart: number; yEnd: number }>> = {
+  2: [
+    { yStart: 0.00, yEnd: 0.55 },
+    { yStart: 0.45, yEnd: 1.00 },
+  ],
+  3: [
+    { yStart: 0.00, yEnd: 0.40 },
+    { yStart: 0.30, yEnd: 0.70 },
+    { yStart: 0.60, yEnd: 1.00 },
+  ],
+  4: [
+    { yStart: 0.00, yEnd: 0.35 },
+    { yStart: 0.25, yEnd: 0.60 },
+    { yStart: 0.50, yEnd: 0.80 },
+    { yStart: 0.70, yEnd: 1.00 },
+  ],
+};
+
 let skyboxCache = new Map<number, HTMLImageElement>();
 let skyboxLoaded = new Set<number>();
 let skyboxPending = new Set<number>();
 let lastVariant = 0;
 let activeSkybox: HTMLImageElement | null = null;
+
+type LayerId = string;
+let layerCanvasCache = new Map<LayerId, HTMLCanvasElement[]>();
+let layerSplitPending = new Set<LayerId>();
 
 function skyboxPath(variant: number): string {
   return variant <= 1 ? `${SKYBOX_BASE}.png` : `${SKYBOX_BASE}-variant${variant}.png`;
@@ -70,6 +92,143 @@ function ensureSkybox(variant: number): void {
     }
   };
   img.src = skyboxPath(variant);
+}
+
+function splitIntoLayers(img: HTMLImageElement, layerCount: number): HTMLCanvasElement[] {
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  const bands = LAYER_BANDS[layerCount] ?? LAYER_BANDS[4];
+  const layers: HTMLCanvasElement[] = [];
+  const fadePct = 0.18;
+
+  for (let i = 0; i < layerCount; i++) {
+    const band = bands[i];
+    const y0 = Math.floor(band.yStart * h);
+    const y1 = Math.floor(band.yEnd * h);
+    const bandH = y1 - y0;
+    const fadePx = Math.max(1, Math.floor(bandH * fadePct));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d")!;
+
+    const sliceCanvas = document.createElement("canvas");
+    sliceCanvas.width = w;
+    sliceCanvas.height = bandH;
+    const sctx = sliceCanvas.getContext("2d")!;
+    sctx.drawImage(img, 0, y0, w, bandH, 0, 0, w, bandH);
+
+    const imageData = sctx.getImageData(0, 0, w, bandH);
+    const data = imageData.data;
+    for (let py = 0; py < bandH; py++) {
+      let alphaMul = 1;
+      if (py < fadePx) {
+        alphaMul = py / fadePx;
+      } else if (py > bandH - fadePx) {
+        alphaMul = (bandH - py) / fadePx;
+      }
+      if (alphaMul >= 1) continue;
+      const rowStart = py * w * 4;
+      for (let px = 0; px < w; px++) {
+        const idx = rowStart + px * 4;
+        data[idx + 3] = Math.round(data[idx + 3] * alphaMul);
+      }
+    }
+    sctx.putImageData(imageData, 0, 0);
+
+    ctx.drawImage(sliceCanvas, 0, y0);
+    layers.push(canvas);
+  }
+
+  return layers;
+}
+
+function ensureSkyboxLayers(variant: number, layerCount: number): HTMLCanvasElement[] | null {
+  const img = skyboxCache.get(variant);
+  if (!img || !skyboxLoaded.has(variant)) return null;
+
+  const key = `${variant}:${layerCount}`;
+  if (layerCanvasCache.has(key)) return layerCanvasCache.get(key)!;
+  if (layerSplitPending.has(key)) return null;
+
+  layerSplitPending.add(key);
+  try {
+    const layers = splitIntoLayers(img, layerCount);
+    layerCanvasCache.set(key, layers);
+    layerSplitPending.delete(key);
+    return layers;
+  } catch {
+    layerSplitPending.delete(key);
+    return null;
+  }
+}
+
+function drawSkybox(
+  ctx: CanvasRenderingContext2D,
+  s: ReturnType<typeof settings>,
+  viewportW: number,
+  viewportH: number,
+): void {
+  ensureSkybox(s.spriteVariant);
+
+  if (s.parallaxEnabled) {
+    const layerCount = s.parallaxLayerCount;
+    const layers = ensureSkyboxLayers(s.spriteVariant, layerCount);
+
+    if (layers) {
+      const img = activeSkybox!;
+      const imgW = img.naturalWidth;
+      const imgH = img.naturalHeight;
+      const imgRatio = imgW / imgH;
+      const viewRatio = viewportW / viewportH;
+
+      let drawW: number;
+      let drawH: number;
+      if (viewRatio > imgRatio) {
+        drawW = viewportW;
+        drawH = viewportW / imgRatio;
+      } else {
+        drawH = viewportH;
+        drawW = viewportH * imgRatio;
+      }
+
+      const offsetX = (drawW - viewportW) / 2 + s.cityBgOffsetX;
+      const offsetY = (drawH - viewportH) / 2 + s.cityBgOffsetY;
+      const speeds = PARALLAX_SPEEDS[layerCount] ?? PARALLAX_SPEEDS[4];
+
+      for (let i = 0; i < layers.length; i++) {
+        const speed = speeds[i];
+        ctx.drawImage(layers[i], -offsetX * speed, -offsetY * speed, drawW, drawH);
+      }
+      return;
+    }
+  }
+
+  if (activeSkybox && skyboxLoaded.has(s.spriteVariant)) {
+    const imgW = activeSkybox.naturalWidth;
+    const imgH = activeSkybox.naturalHeight;
+    const imgRatio = imgW / imgH;
+    const viewRatio = viewportW / viewportH;
+
+    let drawW: number;
+    let drawH: number;
+    if (viewRatio > imgRatio) {
+      drawW = viewportW;
+      drawH = viewportW / imgRatio;
+    } else {
+      drawH = viewportH;
+      drawW = viewportH * imgRatio;
+    }
+
+    const offsetX = (drawW - viewportW) / 2 + s.cityBgOffsetX;
+    const offsetY = (drawH - viewportH) / 2 + s.cityBgOffsetY;
+    ctx.drawImage(activeSkybox, -offsetX, -offsetY, drawW, drawH);
+    return;
+  }
+
+  ctx.fillStyle = COLOR_BG;
+  ctx.fillRect(0, 0, viewportW, viewportH);
 }
 
 const TIER_LABELS: Record<CityViewSize, string> = {
@@ -131,30 +290,7 @@ export function drawCityView(
   ctx.save();
 
   const s = settings();
-  ensureSkybox(s.spriteVariant);
-  if (activeSkybox && skyboxLoaded.has(s.spriteVariant)) {
-    const imgW = activeSkybox.naturalWidth;
-    const imgH = activeSkybox.naturalHeight;
-    const imgRatio = imgW / imgH;
-    const viewRatio = viewportW / viewportH;
-
-    let drawW: number;
-    let drawH: number;
-    if (viewRatio > imgRatio) {
-      drawW = viewportW;
-      drawH = viewportW / imgRatio;
-    } else {
-      drawH = viewportH;
-      drawW = viewportH * imgRatio;
-    }
-
-    const offsetX = (drawW - viewportW) / 2 + s.cityBgOffsetX;
-    const offsetY = (drawH - viewportH) / 2 + s.cityBgOffsetY;
-    ctx.drawImage(activeSkybox, -offsetX, -offsetY, drawW, drawH);
-  } else {
-    ctx.fillStyle = COLOR_BG;
-    ctx.fillRect(0, 0, viewportW, viewportH);
-  }
+  drawSkybox(ctx, s, viewportW, viewportH);
 
   ctx.lineJoin = "miter";
   for (const cell of cellsInDrawOrder(size)) {

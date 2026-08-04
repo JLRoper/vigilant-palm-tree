@@ -9,6 +9,8 @@ import {
   upgradeGateBounds,
   spriteVariantOptions,
   bgOffsetBounds,
+  parallaxLayerCountBounds,
+  PARALLAX_SPEEDS,
   type GameSettings,
   type ResourceStyle,
 } from "../state/settings";
@@ -612,6 +614,80 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     children.push(bgYRow);
 
+    const pBounds = parallaxLayerCountBounds();
+
+    const parallaxToggleRow = document.createElement("div");
+    parallaxToggleRow.style.display = "flex";
+    parallaxToggleRow.style.flexDirection = "column";
+    parallaxToggleRow.style.gap = "6px";
+
+    const parallaxToggleLabel = document.createElement("span");
+    parallaxToggleLabel.textContent = "Parallax background";
+    parallaxToggleRow.appendChild(parallaxToggleLabel);
+
+    const parallaxToggleRow2 = document.createElement("div");
+    parallaxToggleRow2.style.display = "flex";
+    parallaxToggleRow2.style.alignItems = "center";
+    parallaxToggleRow2.style.gap = "8px";
+
+    const parallaxCheck = document.createElement("input");
+    parallaxCheck.type = "checkbox";
+    parallaxCheck.style.accentColor = "#f77f00";
+    parallaxCheck.checked = current.parallaxEnabled;
+    parallaxToggleRow2.appendChild(parallaxCheck);
+
+    const parallaxCheckLabel = document.createElement("span");
+    parallaxCheckLabel.textContent = "Enable parallax scrolling (splits background into depth layers)";
+    parallaxCheckLabel.style.fontSize = "12px";
+    parallaxToggleRow2.appendChild(parallaxCheckLabel);
+
+    parallaxToggleRow.appendChild(parallaxToggleRow2);
+
+    const parallaxLayerCountLabel = document.createElement("span");
+    parallaxLayerCountLabel.style.fontSize = "11px";
+    parallaxLayerCountLabel.style.opacity = "0.7";
+    parallaxLayerCountLabel.style.marginTop = "4px";
+    parallaxToggleRow.appendChild(parallaxLayerCountLabel);
+
+    function refreshParallaxLayerLabel(next: GameSettings): void {
+      const speeds = PARALLAX_SPEEDS[next.parallaxLayerCount] ?? PARALLAX_SPEEDS[4];
+      parallaxLayerCountLabel.textContent = `${next.parallaxLayerCount} layers \u2014 speeds: ${speeds.map(s => s.toFixed(2)).join(", ")}`;
+    }
+    refreshParallaxLayerLabel(current);
+
+    const parallaxLayerSlider = document.createElement("input");
+    parallaxLayerSlider.type = "range";
+    parallaxLayerSlider.min = String(pBounds.min);
+    parallaxLayerSlider.max = String(pBounds.max);
+    parallaxLayerSlider.step = "1";
+    parallaxLayerSlider.value = String(current.parallaxLayerCount);
+    parallaxLayerSlider.style.width = "100%";
+    parallaxLayerSlider.style.accentColor = "#f77f00";
+    parallaxLayerSlider.style.display = parallaxCheck.checked ? "" : "none";
+    parallaxLayerCountLabel.style.display = parallaxCheck.checked ? "" : "none";
+    parallaxToggleRow.appendChild(parallaxLayerSlider);
+
+    parallaxCheck.addEventListener("change", () => {
+      updateSettings({ parallaxEnabled: parallaxCheck.checked });
+      parallaxLayerSlider.style.display = parallaxCheck.checked ? "" : "none";
+      parallaxLayerCountLabel.style.display = parallaxCheck.checked ? "" : "none";
+    });
+
+    parallaxLayerSlider.addEventListener("input", () => {
+      updateSettings({ parallaxLayerCount: Number(parallaxLayerSlider.value) });
+    });
+
+    refreshList.push(() => {
+      const s = settings();
+      parallaxCheck.checked = s.parallaxEnabled;
+      parallaxLayerSlider.value = String(s.parallaxLayerCount);
+      parallaxLayerSlider.style.display = s.parallaxEnabled ? "" : "none";
+      parallaxLayerCountLabel.style.display = s.parallaxEnabled ? "" : "none";
+      refreshParallaxLayerLabel(s);
+    });
+
+    children.push(parallaxToggleRow);
+
     makeFoldableSection(content, "Visual", children, true);
   }
 
@@ -623,6 +699,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   resetBtn.style.alignSelf = "flex-end";
   resetBtn.addEventListener("click", () => {
     const bgBounds = bgOffsetBounds();
+    const pBounds = parallaxLayerCountBounds();
     updateSettings({
       moveDurationMs: bounds.default,
       resourceStyle: "rune-stone",
@@ -632,6 +709,8 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
       spriteVariant: 1,
       cityBgOffsetX: bgBounds.default,
       cityBgOffsetY: bgBounds.default,
+      parallaxEnabled: false,
+      parallaxLayerCount: pBounds.default,
     });
     for (const fn of refreshList) fn();
   });

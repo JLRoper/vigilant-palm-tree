@@ -8,8 +8,8 @@
 import { spawn, ChildProcess } from "node:child_process";
 import { chromium } from "playwright";
 
-const WEB_PORT = 4173;
-const API_PORT = 3001;
+const WEB_PORT = Number(process.env.CLIENT_PORT) || 4173;
+const API_PORT = Number(process.env.API_PORT) || 3001;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const GAME_NAME = "dragdrop-test";
@@ -18,7 +18,7 @@ const browserLogs: string[] = [];
 
 function startApi(): ChildProcess {
   const child = spawn("npx", ["tsx", "server/index.ts"], {
-    env: { ...process.env, PORT: String(API_PORT) },
+    env: { ...process.env, API_PORT: String(API_PORT) },
     stdio: ["ignore", "pipe", "pipe"],
     shell: true,
   });

@@ -9,7 +9,7 @@ A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. Thi
 | Aspect | Value |
 |---|---|
 | Project name | `heroes-js` (also referenced as `vigilant-palm-tree` in `README.md`) |
-| Version | `0.0.1` |
+| Version | `0.2.0` |
 | Package type | ESM (`"type": "module"`) |
 | Repo layout | Monorepo-style single repo, **no framework workspace tooling** |
 | Languages | TypeScript (primary), plain JavaScript `.mjs` (sprite tooling), SQL (migrations), HTML/CSS (UI shell) |
@@ -121,6 +121,7 @@ No CSS framework, no UI framework, no state library, no ORM, no testing framewor
 | `test` | `tsx test/smoke.ts` | End-to-end smoke test (spawns API + preview, drives with Playwright) |
 | `sprites:generate` | `node tools/sprites/pixel-gen.mjs` | Render pixel-art castle sprites into `src/resources/` |
 | `sprites:preview` | `node tools/sprites/generate-preview.mjs` | Build a sprite contact-sheet preview |
+| `skybox:split` | `tsx scripts/split-skybox-layers.ts` | Split the city-view skybox into separate layer PNGs |
 
 ---
 

@@ -22,6 +22,8 @@ export interface GameSettings {
   cityBgOffsetX: number;
   cityBgOffsetY: number;
   buildingUpgradeConfirm: boolean;
+  parallaxEnabled: boolean;
+  parallaxLayerCount: number;
 }
 
 const STORAGE_KEY = "heroesJs.settings";
@@ -52,6 +54,16 @@ const MIN_BG_OFFSET = -500;
 const MAX_BG_OFFSET = 500;
 const DEFAULT_BG_OFFSET = 0;
 
+const MIN_PARALLAX_LAYERS = 2;
+const MAX_PARALLAX_LAYERS = 4;
+const DEFAULT_PARALLAX_LAYERS = 4;
+
+export const PARALLAX_SPEEDS: Record<number, number[]> = {
+  2: [0.10, 1.00],
+  3: [0.10, 0.40, 1.00],
+  4: [0.10, 0.30, 0.60, 1.00],
+};
+
 export { VALID_HORSE_VARIANTS, HORSE_VARIANT_REGISTRY };
 
 export const DEFAULT_SETTINGS: GameSettings = {
@@ -64,6 +76,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   cityBgOffsetX: DEFAULT_BG_OFFSET,
   cityBgOffsetY: DEFAULT_BG_OFFSET,
   buildingUpgradeConfirm: true,
+  parallaxEnabled: false,
+  parallaxLayerCount: DEFAULT_PARALLAX_LAYERS,
 };
 
 let current: GameSettings = loadFromStorage();
@@ -114,6 +128,17 @@ export function clampBgOffset(v: number): number {
   return Math.max(MIN_BG_OFFSET, Math.min(MAX_BG_OFFSET, Math.round(v)));
 }
 
+export function clampParallaxLayerCount(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return Math.max(MIN_PARALLAX_LAYERS, Math.min(MAX_PARALLAX_LAYERS, Math.round(v)));
+  }
+  return DEFAULT_PARALLAX_LAYERS;
+}
+
+export function parallaxLayerCountBounds(): { min: number; max: number; default: number } {
+  return { min: MIN_PARALLAX_LAYERS, max: MAX_PARALLAX_LAYERS, default: DEFAULT_PARALLAX_LAYERS };
+}
+
 export function bgOffsetBounds(): { min: number; max: number; default: number } {
   return { min: MIN_BG_OFFSET, max: MAX_BG_OFFSET, default: DEFAULT_BG_OFFSET };
 }
@@ -135,6 +160,10 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
     buildingUpgradeConfirm: typeof patch.buildingUpgradeConfirm === "boolean"
       ? patch.buildingUpgradeConfirm
       : current.buildingUpgradeConfirm,
+    parallaxEnabled: typeof patch.parallaxEnabled === "boolean"
+      ? patch.parallaxEnabled
+      : current.parallaxEnabled,
+    parallaxLayerCount: clampParallaxLayerCount(patch.parallaxLayerCount ?? current.parallaxLayerCount),
   };
   current = next;
   try {
@@ -187,6 +216,10 @@ function loadFromStorage(): GameSettings {
       buildingUpgradeConfirm: typeof parsed.buildingUpgradeConfirm === "boolean"
         ? parsed.buildingUpgradeConfirm
         : true,
+      parallaxEnabled: typeof parsed.parallaxEnabled === "boolean"
+        ? parsed.parallaxEnabled
+        : false,
+      parallaxLayerCount: clampParallaxLayerCount(parsed.parallaxLayerCount),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

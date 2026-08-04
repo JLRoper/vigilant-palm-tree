@@ -12,8 +12,8 @@ import { Pool } from "pg";
 const TERRAINS = new Set(["grass", "dirt", "forest", "desert", "mountain", "water"]);
 const RESOURCE_SET = new Set(["gold", "wood", "stone", "iron", "arcane"]);
 
-const WEB_PORT = 4173;
-const API_PORT = 3001;
+const WEB_PORT = Number(process.env.CLIENT_PORT) || 4173;
+const API_PORT = Number(process.env.API_PORT) || 3001;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const GAME_NAME = "default";
@@ -295,6 +295,14 @@ async function isHumanTurn(page: Page): Promise<boolean> {
 
 // ... many unchanged helper functions omitted in this patch view for brevity ...
 // (We will keep the rest of the file unchanged except the functions noted below.)
+
+function ensureBuilt(): void {
+  if (!existsSync("dist/index.html")) {
+    throw new Error(
+      "dist/index.html not found — run `npm run build` before the smoke test"
+    );
+  }
+}
 
 function runOnce(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {

@@ -1,7 +1,7 @@
 {
   "name": "heroes-js",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "cleanup": "pwsh scripts/cleanup.ps1",
@@ -24,7 +24,8 @@
     "validate-assets": "node tools/sprites/validate-assets.mjs",
     "sprites:generate": "node tools/sprites/pixel-gen.mjs",
     "sprites:preview": "node tools/sprites/generate-preview.mjs",
-    "assets:seed": "tsx --env-file=.env scripts/seed-assets.ts"
+    "assets:seed": "tsx --env-file=.env scripts/seed-assets.ts",
+    "skybox:split": "tsx scripts/split-skybox-layers.ts"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
