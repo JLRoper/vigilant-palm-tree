@@ -195,6 +195,10 @@ export class PopupMenu {
     this.root.style.top = `${y}px`;
   }
 
+  setOnClose(fn: () => void): void {
+    this.onClose = fn;
+  }
+
   getPosition(): { x: number; y: number } {
     return { ...this.pos };
   }
@@ -252,7 +256,8 @@ export function openCenteredModal(
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    zIndex: "100",
+    // Must sit above the home overlay (z-index 200 in homeView.ts).
+    zIndex: "300",
   });
   parent.appendChild(wrapper);
   const menu = new PopupMenu({

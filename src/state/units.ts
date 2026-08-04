@@ -23,6 +23,16 @@ export interface UnitType {
   // Type-advantage tag used by the combat resolver's damage formula — see
   // shared/combatConfig.ts TYPE_TRIANGLE and shared/combat/damage.ts.
   advantageType: AdvantageType;
+  // Categorical "specialty" tag used by the manual battle arena to derive a
+  // per-platoon specialty icon (top-left of the status tile). Platoons
+  // pick their dominant specialty from their entries — see
+  // shared/combat/manualBattle.ts computeSpecialty().
+  specialty: string;
+  // Tiebreaker weight when a platoon mixes units of more than one
+  // specialty. Specialty weighted-total = sum(count * specialtyPriority).
+  // Bumps above 1.0 let a smaller-but-heavier specialty take precedence
+  // (e.g. shields out-vote pikes at smaller counts).
+  specialtyPriority: number;
 }
 
 export interface PlatoonEntry {
