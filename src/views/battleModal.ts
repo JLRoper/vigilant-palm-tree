@@ -20,7 +20,7 @@ export function showBattleModal(opts: BattleModalOptions): Promise<BattleModalRe
     modal.appendContent(intro);
 
     const note = document.createElement("div");
-    note.textContent = "Resolve to award +50 gold to the attacker and remove the defender.";
+    note.textContent = "Resolve to fight the battle immediately. Casualties apply to both sides based on unit strength and type matchups.";
     note.style.fontSize = "11px";
     note.style.opacity = "0.7";
     note.style.textAlign = "center";

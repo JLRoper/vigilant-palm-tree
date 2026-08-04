@@ -9,8 +9,9 @@
 // for the underlying damage/type-advantage rules this reuses unchanged.
 
 import { type Axial, axialRound, hexDistance } from "../../src/core/hex";
-import type { Platoon, UnitType } from "../../src/state/units";
-import { RANGED_ATTACK_RANGE } from "../combatConfig";
+import type { Platoon, PlatoonEntry, UnitType } from "../../src/state/units";
+import { PLATOON_RETREAT_LOSS, RANGED_ATTACK_RANGE } from "../combatConfig";
+import { applyRetreatLoss } from "./damage";
 import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT, makeBattleGrid } from "./grid";
 import {
   buildCombatants,
@@ -77,6 +78,10 @@ export interface ManualBattleState {
   maxRounds: number;
   obstacleSeed: number;
   over: boolean;
+  // Sides whose hero manually retreated or surrendered (via retreatHero) —
+  // finalizeManualBattle reads this to assign the `retreated_hero` outcome
+  // instead of `lost_all_troops` when one side has voluntarily conceded.
+  sidesRetreated: Set<BattleSide>;
 }
 
 function hexKey(a: Axial): string {
@@ -141,6 +146,7 @@ export function startManualBattle(
     maxRounds: options.maxRounds ?? DEFAULT_MAX_ROUNDS,
     obstacleSeed,
     over: false,
+    sidesRetreated: new Set(),
   };
 }
 
@@ -326,9 +332,75 @@ export function attackWithPlatoon(state: ManualBattleState, side: BattleSide, sl
   const target = getValidAttackTargets(state, actor).find((t) => t.slotIndex === targetSlotIndex);
   if (!target) return false;
   resolveAttack(actor, target, state.unitTypes, 1, false, state.round, state.log);
+  markContacted(actor, target);
   unacted.delete(slotIndex);
   checkRoundAdvance(state);
   return true;
+}
+
+// Records that two opposing platoons have made contact: both sides gain the
+// other's side in their scoutedBy set, so each will reveal its specialty
+// icon to the other from this round onward. Idempotent — re-running for
+// the same pair is a no-op. Called automatically by attackWithPlatoon;
+// exported for tests and any future "force scout" interaction.
+export function markContacted(actor: Combatant, target: Combatant): void {
+  if (actor.side !== target.side) {
+    actor.scoutedBy.add(target.side);
+    target.scoutedBy.add(actor.side);
+  }
+}
+
+// Pure derivation — given a platoon's current entries, returns the dominant
+// specialty tag. Recomputed live from entries (no cached state) so the
+// specialty naturally shifts when casualties flip the dominant unit type:
+// e.g. a mixed archer/swordsman platoon whose archers all die will switch
+// from "archery" to "sword" without any explicit notification.
+//
+// Returns null when the platoon has no entries.
+//
+// Rule: group entries by UnitType.specialty, sum
+// (count * specialtyPriority) per group, then pick the group with the
+// highest weighted total. Ties broken by absolute unit count, then by the
+// unit type that appears first in entries order. Thresholds ("at least
+// 40% of the platoon must be that specialty") live in the UI layer — the
+// engine just answers "which specialty, if any, is dominant right now".
+export function computeSpecialty(entries: PlatoonEntry[], unitTypes: Record<string, UnitType>): string | null {
+  if (entries.length === 0) return null;
+  type Bucket = { weight: number; count: number; firstIndex: number };
+  const buckets = new Map<string, Bucket>();
+  entries.forEach((e, idx) => {
+    if (e.count <= 0) return;
+    const unitType = unitTypes[e.unitTypeId];
+    if (!unitType || !unitType.specialty) return;
+    const tag = unitType.specialty;
+    const priority = Number.isFinite(unitType.specialtyPriority) ? unitType.specialtyPriority : 1.0;
+    const weight = e.count * priority;
+    const prev = buckets.get(tag);
+    if (prev) {
+      prev.weight += weight;
+      prev.count += e.count;
+    } else {
+      buckets.set(tag, { weight, count: e.count, firstIndex: idx });
+    }
+  });
+  if (buckets.size === 0) return null;
+  let best: { tag: string; bucket: Bucket } | null = null;
+  for (const [tag, bucket] of buckets) {
+    if (!best || bucket.weight > best.bucket.weight ||
+        (bucket.weight === best.bucket.weight && bucket.count > best.bucket.count) ||
+        (bucket.weight === best.bucket.weight && bucket.count === best.bucket.count && bucket.firstIndex < best.bucket.firstIndex)) {
+      best = { tag, bucket };
+    }
+  }
+  return best ? best.tag : null;
+}
+
+// Convenience: total unit count across entries that have count > 0.
+// Used by the UI to apply the 40% threshold on top of computeSpecialty().
+export function totalUnits(entries: PlatoonEntry[]): number {
+  let total = 0;
+  for (const e of entries) if (e.count > 0) total += e.count;
+  return total;
 }
 
 // Consumes a not-yet-acted platoon's turn without attacking (e.g. it moved
@@ -411,15 +483,56 @@ export function runAiTurn(state: ManualBattleState, side: BattleSide): void {
   endPlatoonTurn(state, side, slotIndex);
 }
 
+// Voluntary side concession triggered by the player (Retreat / Surrender
+// footer buttons in the manual-fight arena). Retreat applies the standard
+// PLATOON_RETREAT_LOSS to every still-living platoon on the side before
+// pulling them off the field; surrender skips the loss and just yields
+// immediately. Either way the side ends up in `sidesRetreated` so
+// finalizeManualBattle can tag the outcome as `retreated_hero` rather than
+// the misleading `lost_all_troops`.
+export interface RetreatHeroOptions {
+  applyLoss?: boolean;
+}
+
+export function retreatHero(state: ManualBattleState, side: BattleSide, options: RetreatHeroOptions = {}): void {
+  const applyLoss = options.applyLoss ?? true;
+  const round = state.round;
+  const combatants = side === "attacker" ? state.attacker : state.defender;
+  for (const c of combatants) {
+    if (c.retreated || c.entries.every((e) => e.count <= 0)) continue;
+    if (applyLoss) {
+      const { entries, casualties } = applyRetreatLoss(c.entries, PLATOON_RETREAT_LOSS);
+      c.entries = entries;
+      state.log.push({ round, kind: "self_retreat", side, slotIndex: c.slotIndex, casualties });
+    }
+    c.retreated = true;
+  }
+  state.log.push({ round, kind: "hero_retreat", side });
+  state.sidesRetreated.add(side);
+  if (side === "attacker") state.unactedAttacker.clear();
+  else state.unactedDefender.clear();
+  state.over = true;
+}
+
 export function finalizeManualBattle(state: ManualBattleState): BattleResult {
   const attackerAlive = livingCombatants(state.attacker).length > 0;
   const defenderAlive = livingCombatants(state.defender).length > 0;
+  const attackerRetreated = state.sidesRetreated.has("attacker");
+  const defenderRetreated = state.sidesRetreated.has("defender");
 
   let winner: BattleSide | "draw";
   let attackerOutcome: Parameters<typeof buildResults>[2];
   let defenderOutcome: Parameters<typeof buildResults>[2];
 
-  if (attackerAlive && !defenderAlive) {
+  if (attackerRetreated && !defenderRetreated) {
+    winner = "defender";
+    attackerOutcome = "retreated_hero";
+    defenderOutcome = defenderAlive ? "won" : "lost_all_troops";
+  } else if (defenderRetreated && !attackerRetreated) {
+    winner = "attacker";
+    defenderOutcome = "retreated_hero";
+    attackerOutcome = attackerAlive ? "won" : "lost_all_troops";
+  } else if (attackerAlive && !defenderAlive) {
     winner = "attacker";
     attackerOutcome = "won";
     defenderOutcome = "lost_all_troops";
