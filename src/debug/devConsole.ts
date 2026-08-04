@@ -68,7 +68,6 @@ export function openDevConsole(log: EventLog, options: DevConsoleOptions = {}): 
   const initial = loadPersisted(persistKey);
 
   const modal = openCenteredModal(options.parent ?? document.body, title, width, true);
-  const wrapper = modal.root.parentElement as HTMLElement;
 
   let paused = initial.paused ?? false;
   let typeFilter = initial.typeFilter ?? "";
@@ -76,54 +75,6 @@ export function openDevConsole(log: EventLog, options: DevConsoleOptions = {}): 
   let pinned = initial.pinned ?? false;
   let renderToken = 0;
   let hidden = false;
-
-  const applyPinnedStyle = (): void => {
-    if (pinned) {
-      wrapper.style.background = "transparent";
-      wrapper.style.pointerEvents = "none";
-      wrapper.style.zIndex = "900";
-      modal.root.style.pointerEvents = "auto";
-      modal.root.style.zIndex = "1000";
-      modal.root.style.opacity = "0.9";
-      modal.root.style.boxShadow = "0 6px 28px rgba(0,0,0,0.55)";
-      modal.root.style.cursor = "grab";
-    } else {
-      wrapper.style.background = "";
-      wrapper.style.pointerEvents = "";
-      wrapper.style.zIndex = "";
-      modal.root.style.pointerEvents = "";
-      modal.root.style.zIndex = "";
-      modal.root.style.opacity = "";
-      modal.root.style.boxShadow = "";
-      modal.root.style.cursor = "";
-    }
-  };
-
-  const onRootMouseDown = (e: MouseEvent): void => {
-    if (!pinned) return;
-    if (e.button !== 0) return;
-    const target = e.target as HTMLElement;
-    if (target.closest("button, input, select, textarea, label")) return;
-    if (modal.header.contains(target)) return;
-    e.preventDefault();
-    modal.root.style.cursor = "grabbing";
-    const rect = modal.root.getBoundingClientRect();
-    const dx = e.clientX - rect.left;
-    const dy = e.clientY - rect.top;
-    const onMove = (ev: MouseEvent): void => {
-      const x = Math.max(0, ev.clientX - dx);
-      const y = Math.max(0, ev.clientY - dy);
-      modal.setPosition(x, y);
-    };
-    const onUp = (): void => {
-      modal.root.style.cursor = "grab";
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
-  modal.root.addEventListener("mousedown", onRootMouseDown);
 
   const state = { current: log.getEntries({ limit: pageSize }) };
 
@@ -349,15 +300,12 @@ export function openDevConsole(log: EventLog, options: DevConsoleOptions = {}): 
     if (pinned === next) return;
     pinned = next;
     refreshPinBtn();
-    applyPinnedStyle();
     if (pinned) {
       persistFilters();
     } else {
       clearPersisted(persistKey);
     }
   };
-
-  applyPinnedStyle();
 
   const show = (): void => {
     if (!hidden) return;
