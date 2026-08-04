@@ -11,7 +11,7 @@ export interface IntegrityIssue {
 
 export interface GameRowLike {
   round: number;
-  day: number;
+  day?: number;
   active_player_id: number;
   players: Player[];
   heroes: Record<string, HeroState>;
@@ -39,7 +39,7 @@ export function validateGameRow(row: GameRowLike): IntegrityIssue[] {
   if (!isFiniteNumber(row.round) || row.round < 1) {
     push("error", "round", `round must be a positive integer, got ${JSON.stringify(row.round)}`);
   }
-  if (row.day !== undefined && (!isFiniteNumber(row.day) || row.day < 1)) {
+  if (row.day === undefined || !isFiniteNumber(row.day) || row.day < 1) {
     push("warning", "day", `day is missing or invalid (defaults to round on load), got ${JSON.stringify(row.day)}`);
   }
   if (!Array.isArray(row.players) || row.players.length === 0) {

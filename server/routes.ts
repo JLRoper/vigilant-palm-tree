@@ -175,12 +175,11 @@ router.get("/games/:name", async (req, res) => {
   }
   const row = r.rows[0];
   const claimed = row.lobby?.claimed ?? {};
-  const availableSeats = Object.keys(claimed)
-    .map((k) => Number(k))
-    .filter((n) => Number.isInteger(n))
-    .filter((n) => !claimed[String(n)])
-    .sort((a, b) => a - b);
   const seatTotal = row.lobby?.seats ?? row.players.length;
+  const availableSeats: number[] = [];
+  for (let seat = 0; seat < seatTotal; seat++) {
+    if (!claimed[String(seat)]) availableSeats.push(seat);
+  }
   res.json({ ...row, availableSeats, seatTotal });
 });
 
@@ -310,6 +309,7 @@ router.post("/games", async (req, res) => {
       mapSize,
       lobby,
       humanSlots,
+      seats: topSeats,
     } = req.body ?? {};
     if (typeof name !== "string" || !name) {
       res.status(400).json({ error: "name required" });
@@ -323,16 +323,18 @@ router.post("/games", async (req, res) => {
     const lobbyHumanSlots =
       lobbyObj && Number.isInteger(lobbyObj.humanSlots) ? (lobbyObj.humanSlots as number) : null;
     const humanCount = topHumanSlots ?? lobbyHumanSlots;
+
+    const explicitSeatsTop = Number.isInteger(topSeats) ? (topSeats as number) : null;
+    const explicitSeatsLobby =
+      lobbyObj && Number.isInteger(lobbyObj.seats) ? (lobbyObj.seats as number) : null;
+    const explicitSeats = explicitSeatsTop ?? explicitSeatsLobby;
+    const seats = explicitSeats ?? humanCount;
+
     const initOpts =
-      humanCount !== null
-        ? { playerCount: humanCount, humanSeatCount: humanCount }
-        : undefined;
+      humanCount !== null ? { playerCount: seats ?? humanCount, humanSeatCount: humanCount } : undefined;
     const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179), initOpts);
 
     let lobbyState: LobbyState = {};
-    const explicitSeats =
-      lobbyObj && Number.isInteger(lobbyObj.seats) ? (lobbyObj.seats as number) : null;
-    const seats = explicitSeats ?? (humanCount !== null ? initial.players.length : null);
     if (seats !== null && seats >= 1 && humanCount !== null && humanCount >= 1 && humanCount <= seats) {
       lobbyState = { seats, humanSlots: humanCount, claimed: {} };
     }

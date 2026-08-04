@@ -152,12 +152,13 @@ export const api = {
     enemy_positions: EnemyPos[] = [],
     mapSize?: "small" | "medium" | "large",
     humanSlots?: number,
+    seats?: number,
   ) => {
     console.log("[api] createGame mapSize:", mapSize);
     return fetchWithTimeout(`${BASE}/games`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize, humanSlots }),
+      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize, humanSlots, seats }),
     }).then((r) => json<Game>(r));
   },
   claimLobbySeat: (name: string, seat: number, handle: string) =>
