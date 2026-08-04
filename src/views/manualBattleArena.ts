@@ -35,6 +35,7 @@ import type { Platoon, UnitType } from "../state/units";
 import { showBattleResultCard } from "./battleResultCard";
 import { openConfirmDialog } from "./confirmDialog";
 import { PopupMenu, menuTheme, styleButton } from "./menu";
+import { openSettingsMenu } from "./settingsMenu";
 
 const HEX_SIZE = 34;
 
@@ -796,6 +797,15 @@ export function openManualBattleArena(
     }
   });
   actionRow.appendChild(surrenderBtn);
+
+  const settingsBtn = document.createElement("button");
+  settingsBtn.textContent = "⚙ Settings";
+  styleButton(settingsBtn);
+  settingsBtn.title = "Open game settings";
+  settingsBtn.addEventListener("click", () => {
+    openSettingsMenu({ parent: overlay });
+  });
+  actionRow.appendChild(settingsBtn);
 
   function renderFooterActions(): void {
     helpTextEl.textContent =

@@ -2,6 +2,7 @@ import { openCenteredModal, menuTheme, styleButton } from "./menu";
 import { bus } from "../core/eventBus";
 import { openAssetManager } from "./assetManager";
 import { openTestBattleSetup } from "./testBattleSetup";
+import { openDevConsole } from "../debug/devConsole";
 
 export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
   const root = parent ?? document.body;
@@ -162,6 +163,23 @@ export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
     setTimeout(() => openTestBattleSetup(), 100);
   });
   content.appendChild(testBattleBtn);
+
+  const devConsoleBtn = document.createElement("button");
+  devConsoleBtn.textContent = "Dev Console";
+  styleButton(devConsoleBtn);
+  devConsoleBtn.style.alignSelf = "flex-start";
+  devConsoleBtn.style.marginTop = "4px";
+  devConsoleBtn.title = "Open the real-time event log console";
+  devConsoleBtn.addEventListener("click", () => {
+    const log = (window as any).__gameDebug?.eventLog;
+    if (!log) {
+      console.warn("[developerSettingsMenu] no __gameDebug.eventLog available; dev console disabled");
+      return;
+    }
+    modal.close();
+    setTimeout(() => openDevConsole(log), 100);
+  });
+  content.appendChild(devConsoleBtn);
 
   const closeRow = document.createElement("div");
   closeRow.style.display = "flex";
