@@ -278,7 +278,7 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
   if (s.morale === undefined) warnMissing(path, "morale");
   if (s.autoTrade === undefined) warnMissing(path, "autoTrade");
   if (s.castleVariant === undefined) warnMissing(path, "castleVariant");
-  if ((s as any).buildings === undefined) warnMissing(path, "buildings");
+  if (s.buildings === undefined) warnMissing(path, "buildings");
   const warehouse = s.warehouse ?? emptyWarehouse();
   const filledWarehouse: SettlementState["warehouse"] = {
     wood: warehouse.wood ?? 0,

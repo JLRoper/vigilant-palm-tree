@@ -144,6 +144,15 @@ export const api = {
     fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}`).then((r) =>
       json<Game>(r)
     ),
+  deleteGame: async (name: string): Promise<void> => {
+    const res = await fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText} ${text}`);
+    }
+  },
   createGame: (
     name: string,
     seed: number,
