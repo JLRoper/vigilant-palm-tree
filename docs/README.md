@@ -32,6 +32,8 @@ A turn-based hex adventure map where the player moves a hero, claims resource ti
 | [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) | Module-by-module dependency map for `src/`, `server/`, `shared/`, `test/`, `tools/`, `scripts/` | 📋 Planned |
 | [architecture.md](./architecture.md) | Executed layout plan that established the current `src/` structure | ✅ Locked |
 | [battle-view-architecture.md](./battle-view-architecture.md) | Battle view surface: trigger → state → UI → server resolver; auto-resolve vs. dev Test-Battle paths | 📋 Planned |
+| [dev-console.md](./dev-console.md) | `src/debug/` event log + modal/footer console for inspecting bus + hook events in real time | 🟡 Open question |
+| [event-system.md](./event-system.md) | Planned `core/eventBus` refactor and event catalog (Phases 1–6) | 📋 Planned |
 
 ## How to read these
 

@@ -122,6 +122,19 @@ not for resolving fights).
 (`BATTLE` → `PLAYER_TURN`) — it no longer touches gold or deletes heroes.
 That responsibility moved entirely server-side.
 
+**Scope boundary — manual-arena surrender.** The Test Battle UI
+(`src/views/manualBattleArena.ts`) adds a separate gold-gated
+side-concession that is *not* part of this resolver's `RetreatPolicy`
+system: the player's Surrender button costs `SURRENDER_COST_GOLD` (5000G,
+from `shared/combatConfig.ts`); if the hero can't cover it, a Leave
+Behind picker opens at `SURRENDER_UNIT_VALUE_GOLD` (100G) per unit,
+strips the chosen counts off the surviving platoons (so they surface as
+casualties on the result card via the same `buildResults` diff), and
+then calls `retreatHero(... applyLoss: false)`. The auto-resolve
+`RetreatPolicy` (auto/custom/fight) still governs in-flight
+retreats during the turn loop; the manual surrender is purely a player
+action that sits on top.
+
 ## 4. Objects / types (`shared/combat/types.ts` unless noted)
 
 | Type | Shape | Purpose |

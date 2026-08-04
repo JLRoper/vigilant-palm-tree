@@ -10,6 +10,11 @@ import { CASTLE_COUNT_DEFAULT, defaultCastleSeedFromMapSeed, generateCastles } f
 import { loadUnitCatalog } from "../data/unitCatalog";
 import { MAP_SEED } from "../views/adventureView";
 import type { Game, TileRow } from "../io/api";
+import {
+  getInMemoryLocalPlayerId,
+  setInMemoryLocalPlayerId,
+} from "../players/localPlayer";
+import { getMultiplayerSync } from "../io/multiplayerSync";
 
 /**
  * Handles game session lifecycle: loading, creating, and saving games.
@@ -65,15 +70,24 @@ export class GameSessionManager {
     this.view.centerOn(center.q, center.r);
     this.ui.getToolbar()?.refresh();
     void this.session.logEvent(loaded.name, "load_game", {});
+
+    const claimed = (loaded as unknown as { lobby?: { claimed?: Record<string, { handle: string }> } }).lobby?.claimed ?? {};
+    const claimedSeat = Number(Object.keys(claimed).find((k) => claimed[k]) ?? "");
+    if (Number.isInteger(claimedSeat) && claimedSeat >= 0) {
+      setInMemoryLocalPlayerId(loaded.name, claimedSeat);
+    }
+    getMultiplayerSync().start(loaded.name);
   }
 
   async handleManualSave(): Promise<void> {
     const gs = this.state.getState();
+    const gameName = this.getGameName() ?? "";
+    const ownerId = getInMemoryLocalPlayerId(gameName) ?? 0;
     const playerId = playerHeroId();
     const playerHero = this.state.getHero(playerId);
-    const wealth = playerWealth(gs, 0);
+    const wealth = playerWealth(gs, ownerId);
     const enemies = this.state.getHeroes()
-      .filter((h) => h.ownerId !== 0)
+      .filter((h) => h.ownerId !== ownerId)
       .map((h) => ({ q: h.tile.q, r: h.tile.r }));
     const updated = await this.session.manualSave({
       playerHeroTile: playerHero?.tile ?? { q: 0, r: 0 },
@@ -89,32 +103,34 @@ export class GameSessionManager {
     }
   }
 
-  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" }): Promise<void> {
+  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number }): Promise<void> {
     const effectiveCastleSeed =
       typeof opts.castleSeed === "number" && Number.isFinite(opts.castleSeed)
         ? opts.castleSeed
         : defaultCastleSeedFromMapSeed(opts.seed);
-    const playerCount = 3;
+    const playerCount = opts.playerCount ?? 3;
+    const humanSeatCount = Math.max(1, Math.min(playerCount, opts.humanSeatCount ?? 1));
     const effectiveCastleCount = opts.castleCount ?? (2 * playerCount);
     const castles = generateCastles(this.getGameMap(), {
       castleSeed: effectiveCastleSeed,
       playerCount,
       castleCount: Math.max(effectiveCastleCount, playerCount),
     });
-    const playerCastle = castles.find((c) => c.ownerId === 0);
+    const localCastle = castles.find((c) => c.ownerId === 0);
     const aiCastles = castles.filter((c) => c.ownerId !== null && c.ownerId !== 0);
-    const heroQ = playerCastle?.tile.q ?? 6;
-    const heroR = playerCastle?.tile.r ?? 5;
+    const heroQ = localCastle?.tile.q ?? 6;
+    const heroR = localCastle?.tile.r ?? 5;
     const enemyPositions = aiCastles.length
       ? aiCastles.map((c) => ({ q: c.tile.q, r: c.tile.r }))
       : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
-    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize);
+    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount);
     const gameTiles = await this.session.getTiles(created.name);
     await this.loadGame(created, gameTiles);
     void this.session.logEvent(created.name, "new_game", {
       seed: opts.seed,
       castleSeed: effectiveCastleSeed,
       castleCount: effectiveCastleCount,
+      humanSeatCount,
     });
   }
 

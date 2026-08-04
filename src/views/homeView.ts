@@ -1,5 +1,5 @@
 import { api, type Game } from "../io/api";
-import { listUserGames, rememberGame, type UserGameEntry } from "../io/userGames";
+import { forgetGame, listUserGames, rememberGame, type UserGameEntry } from "../io/userGames";
 import {
   checkSession,
   clearAuth,
@@ -11,6 +11,8 @@ import {
 } from "../io/auth";
 import { openCenteredModal, styleButton, styleInput, menuTheme } from "./menu";
 import { openSettingsMenu } from "./settingsMenu";
+import { createNewGameScreen } from "./newGameScreen";
+import { createMultiplayerLobby } from "./multiplayerLobby";
 
 export interface HomeViewOptions {
   onEnterGame: () => void;
@@ -20,9 +22,12 @@ export interface HomeViewOptions {
     castleSeed?: number;
     castleCount?: number;
     mapSize?: "small" | "medium" | "large";
+    playerCount?: 1 | 2 | 3 | 4;
+    humanSeatCount?: number;
   }) => Promise<void>;
   onLoadGame: (game: Game) => Promise<void>;
   isBackendOk: () => boolean;
+  onJoinMultiplayerGame?: (game: Game) => Promise<void>;
 }
 
 export interface HomeView {
@@ -95,10 +100,12 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
 
   const newBtn = makeBigButton("New Game", true);
   const loadBtn = makeBigButton("Load Game", false);
+  const mpBtn = makeBigButton("Multiplayer", false);
   const settingsBtn = makeBigButton("Settings", false);
   const authBtn = makeBigButton("Sign In", false);
   buttonStack.appendChild(newBtn);
   buttonStack.appendChild(loadBtn);
+  buttonStack.appendChild(mpBtn);
   buttonStack.appendChild(settingsBtn);
   buttonStack.appendChild(authBtn);
 
@@ -108,8 +115,13 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
   footer.style.opacity = "0.7";
   card.appendChild(footer);
 
+  const newGameSlot = document.createElement("div");
+  newGameSlot.style.display = "none";
+  card.appendChild(newGameSlot);
+
   let authState: AuthState | null = getCachedAuth();
   let busy = false;
+  let newGameScreenHandle: ReturnType<typeof createNewGameScreen> | null = null;
 
   function refreshAuthUi(): void {
     if (authState) {
@@ -125,9 +137,10 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
     busy = value;
     newBtn.disabled = value;
     loadBtn.disabled = value;
+    mpBtn.disabled = value;
     settingsBtn.disabled = value;
     authBtn.disabled = value;
-    for (const b of [newBtn, loadBtn, settingsBtn, authBtn]) {
+    for (const b of [newBtn, loadBtn, mpBtn, settingsBtn, authBtn]) {
       b.style.opacity = value ? "0.6" : "1";
       b.style.cursor = value ? "default" : "pointer";
     }
@@ -141,6 +154,29 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
   loadBtn.addEventListener("click", () => {
     if (busy) return;
     void openLoadModal();
+  });
+
+  mpBtn.addEventListener("click", () => {
+    if (busy) return;
+    if (!opts.isBackendOk()) {
+      alert("Backend offline. Multiplayer requires the API.");
+      return;
+    }
+    createMultiplayerLobby({
+      isBackendOk: opts.isBackendOk,
+      onEnterGame: () => {
+        hide();
+        opts.onEnterGame();
+      },
+      onJoinGame: async (game) => {
+        hide();
+        if (opts.onJoinMultiplayerGame) {
+          await opts.onJoinMultiplayerGame(game);
+        } else {
+          await opts.onLoadGame(game);
+        }
+      },
+    });
   });
 
   settingsBtn.addEventListener("click", () => {
@@ -174,133 +210,75 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
   }
 
   function openNewGameModal(): void {
-    const modal = openCenteredModal(document.body, "New Game", 400);
-    const content = document.createElement("div");
-    content.style.fontFamily = menuTheme.font;
-    content.style.fontSize = menuTheme.fontSize;
-    content.style.color = menuTheme.panel.color;
-    content.style.display = "flex";
-    content.style.flexDirection = "column";
-    content.style.gap = "6px";
-
-    const nameLabel = document.createElement("label");
-    nameLabel.textContent = "Name";
-    nameLabel.style.opacity = "0.7";
-    content.appendChild(nameLabel);
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.value = defaultName();
-    styleInput(nameInput);
-    content.appendChild(nameInput);
-
-    const seedLabel = document.createElement("label");
-    seedLabel.textContent = "Seed (random if blank)";
-    seedLabel.style.opacity = "0.7";
-    content.appendChild(seedLabel);
-    const seedInput = document.createElement("input");
-    seedInput.type = "number";
-    seedInput.placeholder = "random";
-    styleInput(seedInput);
-    content.appendChild(seedInput);
-
-    const sizeLabel = document.createElement("label");
-    sizeLabel.textContent = "Map size";
-    sizeLabel.style.opacity = "0.7";
-    content.appendChild(sizeLabel);
-    const sizeSelect = document.createElement("select");
-    Object.assign(sizeSelect.style, {
-      width: "100%",
-      padding: "8px",
-      fontSize: "12px",
-      border: "1px solid #444",
-      borderRadius: "4px",
-      backgroundColor: "#1a1a1a",
-      color: "#eee",
-    });
-    for (const s of [
-      { value: "small", label: "Small" },
-      { value: "medium", label: "Medium" },
-      { value: "large", label: "Large" },
-    ]) {
-      const opt = document.createElement("option");
-      opt.value = s.value;
-      opt.textContent = s.label;
-      sizeSelect.appendChild(opt);
+    if (busy) return;
+    if (newGameScreenHandle) {
+      newGameScreenHandle.destroy();
+      newGameScreenHandle = null;
     }
-    sizeSelect.value = "small";
-    content.appendChild(sizeSelect);
-
-    const errorLine = document.createElement("div");
-    Object.assign(errorLine.style, { ...menuTheme.error, minHeight: "14px", marginTop: "4px" });
-    content.appendChild(errorLine);
-
-    const row = document.createElement("div");
-    Object.assign(row.style, {
-      display: "flex",
-      justifyContent: "flex-end",
-      gap: "8px",
-      marginTop: "10px",
-    });
-    const cancel = document.createElement("button");
-    cancel.textContent = "Cancel";
-    styleButton(cancel);
-    cancel.addEventListener("click", () => modal.close());
-    row.appendChild(cancel);
-    const create = document.createElement("button");
-    create.textContent = "Create";
-    styleButton(create, true);
-    create.addEventListener("click", async () => {
-      const name = nameInput.value.trim();
-      if (!name) {
-        errorLine.textContent = "Name required.";
-        return;
-      }
-      let seed: number;
-      if (seedInput.value.trim() === "") {
-        seed = Math.floor(Math.random() * 0x7fffffff);
-      } else {
-        seed = Number(seedInput.value);
-        if (!Number.isFinite(seed)) {
-          errorLine.textContent = "Seed must be a number.";
-          return;
+    const screen = createNewGameScreen({
+      defaultName: defaultName(),
+      defaultSeed: Math.floor(Math.random() * 0x7fffffff),
+      isBackendOk: opts.isBackendOk,
+      busy,
+      onCancel: () => showLanding(),
+      onCreate: async (values) => {
+        setBusy(true);
+        screen.setBusy(true);
+        screen.clearError();
+        try {
+          await opts.onNewGame({
+            name: values.name,
+            seed: values.seed,
+            mapSize: values.mapSize,
+            playerCount: values.playerCount,
+            humanSeatCount: values.playerCount,
+          });
+          rememberGameEntry(values.name);
+          screen.destroy();
+          newGameScreenHandle = null;
+          hide();
+          opts.onEnterGame();
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          screen.showError(`Failed: ${msg}`);
+          screen.setBusy(false);
+          console.error("[home] new game failed:", e);
+        } finally {
+          setBusy(false);
         }
-      }
-      const mapSize = (sizeSelect.value || "small") as "small" | "medium" | "large";
-      create.disabled = true;
-      cancel.disabled = true;
-      setBusy(true);
-      errorLine.textContent = "Creating…";
-      try {
-        await opts.onNewGame({ name, seed, mapSize });
-        rememberGameEntry(name);
-        modal.close();
-        hide();
-        opts.onEnterGame();
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        errorLine.textContent = `Failed: ${msg}`;
-        console.error("[home] new game failed:", e);
-      } finally {
-        setBusy(false);
-        create.disabled = false;
-        cancel.disabled = false;
-      }
+      },
     });
-    row.appendChild(create);
-    content.appendChild(row);
-    modal.setContent(content);
-    nameInput.focus();
-    nameInput.select();
+    newGameScreenHandle = screen;
+    newGameSlot.replaceChildren(screen.root);
+    showCreateGame();
+  }
+
+  function showLanding(): void {
+    buttonStack.style.display = "flex";
+    footer.style.display = "block";
+    title.style.display = "block";
+    tagline.style.display = "block";
+    newGameSlot.style.display = "none";
+    if (newGameScreenHandle) {
+      newGameScreenHandle.destroy();
+      newGameScreenHandle = null;
+    }
+  }
+
+  function showCreateGame(): void {
+    buttonStack.style.display = "none";
+    footer.style.display = "none";
+    title.style.display = "none";
+    tagline.style.display = "none";
+    newGameSlot.style.display = "block";
   }
 
   async function openLoadModal(): Promise<void> {
     let serverGames: Game[] = [];
-    if (opts.isBackendOk()) {
-      try {
-        serverGames = await api.listGames();
-      } catch (e) {
-        console.error("[home] listGames failed:", e);
-      }
+    try {
+      serverGames = await api.listGames();
+    } catch (e) {
+      console.error("[home] listGames failed:", e);
     }
     const userGames = readLoadEntries(serverGames);
     const modal = openCenteredModal(document.body, "Load Game", 420);
@@ -313,12 +291,16 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
     content.style.flexDirection = "column";
     content.style.gap = "10px";
 
-    if (userGames.length === 0) {
+    function showEmptyState(): void {
       const empty = document.createElement("div");
       empty.textContent = "No saved games yet — start a new game to begin.";
       empty.style.opacity = "0.7";
       empty.style.padding = "6px 0";
       content.appendChild(empty);
+    }
+
+    if (userGames.length === 0) {
+      showEmptyState();
     } else {
       const list = document.createElement("div");
       list.style.maxHeight = "320px";
@@ -326,7 +308,14 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
       list.style.border = "1px solid rgba(255,255,255,0.1)";
       list.style.borderRadius = "3px";
       for (const entry of userGames) {
-        list.appendChild(makeLoadRow(entry, () => modal.close()));
+        list.appendChild(
+          makeLoadRow(entry, () => modal.close(), () => {
+            if (list.children.length === 0) {
+              list.remove();
+              showEmptyState();
+            }
+          }),
+        );
       }
       content.appendChild(list);
     }
@@ -366,6 +355,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
   function makeLoadRow(
     entry: UserGameEntry & { server?: Game },
     onLoaded: () => void,
+    onRowRemoved: () => void,
   ): HTMLDivElement {
     const row = document.createElement("div");
     Object.assign(row.style, {
@@ -419,6 +409,27 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
       });
       right.appendChild(open);
     }
+    const del = document.createElement("button");
+    del.textContent = "Delete";
+    styleButton(del);
+    del.addEventListener("click", async () => {
+      if (!confirm(`Delete saved game "${entry.name}"? This cannot be undone.`)) return;
+      del.disabled = true;
+      del.textContent = "Deleting…";
+      try {
+        if (entry.server) {
+          await api.deleteGame(entry.name);
+        }
+        forgetGame(entry.id);
+        row.remove();
+        onRowRemoved();
+      } catch (e) {
+        del.disabled = false;
+        del.textContent = "Delete";
+        console.error("[home] delete failed:", e);
+      }
+    });
+    right.appendChild(del);
     row.appendChild(right);
     return row;
   }

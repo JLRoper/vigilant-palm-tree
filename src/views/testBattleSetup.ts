@@ -92,15 +92,23 @@ function buildSetup(modal: ReturnType<typeof openCenteredModal>, units: UnitType
   sideRow.appendChild(sideLabel);
 
   const blueBtn = document.createElement("button");
-  blueBtn.textContent = "Blue";
+  blueBtn.textContent = "Blue (attacker — moves first)";
   const redBtn = document.createElement("button");
-  redBtn.textContent = "Red";
+  redBtn.textContent = "Red (defender)";
 
   function updateSideButtons(): void {
     styleButton(blueBtn, humanSide === "attacker");
     styleButton(redBtn, humanSide === "defender");
-    blueBtn.style.borderColor = humanSide === "attacker" ? BLUE_ACCENT : blueBtn.style.borderColor;
-    redBtn.style.borderColor = humanSide === "defender" ? RED_ACCENT : redBtn.style.borderColor;
+    blueBtn.style.borderColor = humanSide === "attacker" ? BLUE_ACCENT : "rgba(255,255,255,0.2)";
+    blueBtn.style.background = humanSide === "attacker"
+      ? "rgba(48, 112, 192, 0.35)"
+      : menuTheme.button.background;
+    redBtn.style.borderColor = humanSide === "defender" ? RED_ACCENT : "rgba(255,255,255,0.2)";
+    redBtn.style.background = humanSide === "defender"
+      ? "rgba(192, 64, 64, 0.35)"
+      : menuTheme.button.background;
+    blueBtn.style.color = "#fff";
+    redBtn.style.color = "#fff";
   }
   blueBtn.addEventListener("click", () => {
     humanSide = "attacker";

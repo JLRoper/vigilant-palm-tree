@@ -1,9 +1,11 @@
 import { api, endTurn, spendMovement, resolveBattle } from "../io/api";
 import type { GameState, HeroId } from "../state/gameState";
 import type { TurnControllerHooks } from "../state/turnController";
+import type { BattleResult } from "../../shared/combat/types";
 import { pickAiMove as pickAiMoveBrain } from "../ai/aiBrain";
 import type { GameMap } from "../map/gameMap";
 import type { Axial } from "../core/hex";
+import { getMultiplayerSync } from "../io/multiplayerSync";
 
 export interface BuildTurnHooksOptions {
   gameName: () => string | null;
@@ -19,13 +21,18 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     onHumanTurnEnd: async (state: GameState): Promise<GameState> => {
       const name = opts.gameName();
       if (!name) return state;
+      const sync = getMultiplayerSync();
+      sync.stop();
       try {
         const endingPlayerId = computeEndingPlayerId(state);
         const payload: GameState = { ...state, activePlayerId: endingPlayerId };
         const result = await endTurn(name, payload);
-        return mergeFromEndTurn(state, result);
+        const merged = mergeFromEndTurn(state, result);
+        sync.start(name);
+        return merged;
       } catch (e) {
         console.warn("[turnHooks] endTurn failed:", e);
+        sync.start(name);
         return state;
       }
     },
@@ -47,28 +54,30 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         console.warn("[turnHooks] spendMovement failed:", e);
       }
     },
-    onBattleResolved: async (state: GameState): Promise<GameState> => {
+    onBattleResolved: async (
+      state: GameState,
+    ): Promise<{ state: GameState; battle: BattleResult | null }> => {
       const cached = lastBattle;
       lastBattle = null;
       const name = opts.gameName();
-      if (!name || !cached) return state;
+      if (!name || !cached) return { state, battle: null };
       try {
         const result = await resolveBattle(name, {
           attackerId: cached.attackerId,
           defenderId: cached.defenderId,
           state,
         });
-        console.log(
-          `[combat] battle resolved: winner=${result.battle.winner} attacker=${result.battle.attackerOutcome} defender=${result.battle.defenderOutcome} rounds=${result.battle.rounds}`,
-        );
         return {
-          ...state,
-          players: result.players,
-          heroes: result.heroes,
+          state: {
+            ...state,
+            players: result.players,
+            heroes: result.heroes,
+          },
+          battle: result.battle,
         };
       } catch (e) {
         console.warn("[turnHooks] resolveBattle failed:", e);
-        return state;
+        return { state, battle: null };
       }
     },
     pickAiMove: (state: GameState, heroId: HeroId) => {
