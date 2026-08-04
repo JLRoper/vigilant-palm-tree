@@ -12,6 +12,7 @@ import { MAP_SEED } from "../views/adventureView";
 import type { Game, TileRow } from "../io/api";
 import {
   getInMemoryLocalPlayerId,
+  getLocalPlayerId,
   setInMemoryLocalPlayerId,
 } from "../players/localPlayer";
 import { getMultiplayerSync } from "../io/multiplayerSync";
@@ -71,10 +72,9 @@ export class GameSessionManager {
     this.ui.getToolbar()?.refresh();
     void this.session.logEvent(loaded.name, "load_game", {});
 
-    const claimed = (loaded as unknown as { lobby?: { claimed?: Record<string, { handle: string }> } }).lobby?.claimed ?? {};
-    const claimedSeat = Number(Object.keys(claimed).find((k) => claimed[k]) ?? "");
-    if (Number.isInteger(claimedSeat) && claimedSeat >= 0) {
-      setInMemoryLocalPlayerId(loaded.name, claimedSeat);
+    const savedSeat = getLocalPlayerId(loaded.name);
+    if (savedSeat !== null) {
+      setInMemoryLocalPlayerId(loaded.name, savedSeat);
     }
     getMultiplayerSync().start(loaded.name);
   }
