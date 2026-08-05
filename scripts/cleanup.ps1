@@ -26,30 +26,66 @@ if ($ports.Count -eq 0) {
 
 Write-Host "Checking worktree ports: $($ports -join ', ')"
 
+function Test-TcpListening {
+    param([int]$Port)
+    try {
+        $client = New-Object System.Net.Sockets.TcpClient
+        $client.Connect([System.Net.IPAddress]::Loopback, $Port)
+        $client.Close()
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Get-ProcessOnPort {
+    param([int]$Port)
+    if ($IsWindows) {
+        $conn = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
+        if ($conn) {
+            $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+            if ($proc) { return @{ Id = $proc.Id; Name = $proc.ProcessName } }
+        }
+        return $null
+    }
+    $line = (& ss -tlnp 2>$null) -split "`n" | Where-Object { $_ -match ":$Port\s" } | Select-Object -First 1
+    if ($line -and $line -match 'pid=(\d+)') {
+        $pid = [int]$Matches[1]
+        $name = (Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName
+        return @{ Id = $pid; Name = $name }
+    }
+    return $null
+}
+
+function Get-ProcessCommandLine {
+    param([int]$Pid)
+    if ($IsWindows) {
+        try {
+            $wmi = Get-WmiObject -Class Win32_Process -Filter "ProcessId = $Pid" -ErrorAction SilentlyContinue
+            return $wmi.CommandLine
+        } catch { return $null }
+    }
+    try {
+        return Get-Content -LiteralPath "/proc/$Pid/cmdline" -Raw -ErrorAction SilentlyContinue | ForEach-Object { $_ -replace "\0", ' ' }
+    } catch { return $null }
+}
+
 $killed = @()
 foreach ($port in $ports) {
-    $conn = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue
-    if ($conn) {
-        $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
-        if ($proc) {
-            # Check if this process is from THIS worktree by examining command line
-            # Node/tsx processes started from this worktree will reference files here
-            try {
-                $wmi = Get-WmiObject -Class Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue
-                $cmdline = $wmi.CommandLine
-                
-                # Check if command line contains this worktree path
-                if ($cmdline -and $cmdline -like "*$worktree*") {
-                    Write-Host "Killing PID $($proc.Id) ($($proc.ProcessName)) on port $port (worktree match)"
-                    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-                    $killed += $proc.Id
-                } else {
-                    Write-Host "Skipping PID $($proc.Id) on port $port (no worktree match in cmdline)"
-                }
-            } catch {
-                Write-Host "Could not examine PID $($proc.Id), skipping."
-            }
+    if (-not (Test-TcpListening $port)) { continue }
+    $info = Get-ProcessOnPort $port
+    if (-not $info) { continue }
+    try {
+        $cmdline = Get-ProcessCommandLine $info.Id
+        if ($cmdline -and $cmdline -like "*$worktree*") {
+            Write-Host "Killing PID $($info.Id) ($($info.Name)) on port $port (worktree match)"
+            Stop-Process -Id $info.Id -Force -ErrorAction SilentlyContinue
+            $killed += $info.Id
+        } else {
+            Write-Host "Skipping PID $($info.Id) on port $port (no worktree match in cmdline)"
         }
+    } catch {
+        Write-Host "Could not examine PID $($info.Id), skipping."
     }
 }
 

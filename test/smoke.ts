@@ -39,10 +39,6 @@ function runDeterminismChecks() {
 
 runDeterminismChecks();
 
-async function ensureBuilt(): Promise<void> {
-  return;
-}
-
 async function pickClickTarget(
   api: {
     get(url: string): Promise<{
