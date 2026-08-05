@@ -7,6 +7,28 @@ export function totalHealth(entries: readonly PlatoonEntry[], unitTypes: Record<
   return hp;
 }
 
+// Not a simulated win-rate — computeDamage is deterministic ("no random
+// swing", see below), so fighting the same two platoons twice always gives
+// the same outcome. Instead this compares how many rounds each side would
+// take to grind the other down at their current damage/HP and turns that
+// into a 0-100 estimate. Symmetric: estimateWinChance(a, b, ...) is always
+// 100 - estimateWinChance(b, a, ...).
+export function estimateWinChance(
+  aEntries: readonly PlatoonEntry[],
+  bEntries: readonly PlatoonEntry[],
+  unitTypes: Record<string, UnitType>,
+): number {
+  const aHp = totalHealth(aEntries, unitTypes);
+  const bHp = totalHealth(bEntries, unitTypes);
+  if (aHp <= 0) return 0;
+  if (bHp <= 0) return 100;
+  const aDmg = computeDamage(aEntries, bEntries, unitTypes, 1).damage;
+  const bDmg = computeDamage(bEntries, aEntries, unitTypes, 1).damage;
+  const roundsToKillB = bHp / aDmg;
+  const roundsToKillA = aHp / bDmg;
+  return Math.round((roundsToKillA / (roundsToKillA + roundsToKillB)) * 100);
+}
+
 function uniqueAdvantageTypes(entries: readonly PlatoonEntry[], unitTypes: Record<string, UnitType>): string[] {
   const set = new Set<string>();
   for (const e of entries) {
