@@ -23,7 +23,7 @@ Top-level directories:
 - `tools/` — build/sprite scripts (Node + Playwright)
 - `docs/` — game design documents (Markdown)
 - `dist/` — Vite build output
-- `src/resources/` — baked-in sprite PNGs/SVGs (castles, resource icons)
+- `src/resources/` — baked-in sprite PNGs/SVGs (castles, resource icons, skybox parallax layers)
 - `docker-compose.yml` — local Postgres + Adminer
 
 ---
@@ -131,7 +131,7 @@ Three helper scripts manage ports and processes via PowerShell (cross-platform �
 | `test:static` | `pwsh scripts/ports.ps1 --static && tsx --env-file=.env test/smoke.ts` | Smoke test with stable deterministic ports |
 | `sprites:generate` | `node tools/sprites/pixel-gen.mjs` | Render pixel-art castle sprites into `src/resources/` |
 | `sprites:preview` | `node tools/sprites/generate-preview.mjs` | Build a sprite contact-sheet preview |
-| `skybox:split` | `tsx scripts/split-skybox-layers.ts` | Split the city-view skybox into separate layer PNGs |
+| `skybox:split` | `tsx scripts/split-skybox-layers.ts` | Split all skybox variants into parallax layer PNGs (2/3/4-layer breakdowns, 18% feathered blends) |
 
 All server-side scripts (`dev:api`, `dev`, `test`, `test:*`)** pass `--env-file=.env`** to `tsx` so the dynamically allocated ports are available to the runtime. `vite` auto-loads `.env` without extra flags.
 
@@ -218,6 +218,13 @@ API conventions:
 - `tools/sprites/generate-preview.mjs` builds a contact sheet at `sprite-preview.png`.
 - `tools/sprites/screenshot-preview.mjs` supports screenshot-based previews.
 - `sprite-preview.html` is the HTML harness for the contact sheet.
+
+### Skybox pipeline
+- City view parallax skyboxes are digital watercolor landscapes generated via DeepInfra FLUX API.
+- [`tools/sprites/flux-skybox.mjs`](./tools/sprites/flux-skybox.mjs:1) sends prompts to `black-forest-labs/FLUX-2-klein-4b`, producing 1024×576 PNGs for variants 2–4 (mountains, plains, riverlands). Requires `DEEPINFRA_API_KEY` env var.
+- [`scripts/split-skybox-layers.ts`](./scripts/split-skybox-layers.ts:1) slices each variant PNG into 2-layer, 3-layer, and 4-layer depth breakdowns with 18% feathered alpha transitions, producing `src/resources/skybox/cityView-background-variant<n>-layer<m>.png`. Layer bands overlap by 10% with fade blending so composited parallax layers don't show seams.
+- The `skybox:split` npm script (`tsx scripts/split-skybox-layers.ts`) operates on all non-layer PNGs in `src/resources/skybox/`, supporting all current and future variants automatically.
+- Output assets ship under `src/resources/skybox/` — Vite bundles them as separate files (per `assetsInlineLimit: 0`).
 
 ### Editor
 - No linter, formatter, or pre-commit hook is configured in the repo (no `.eslintrc*`, no `.prettierrc*`, no Husky config).

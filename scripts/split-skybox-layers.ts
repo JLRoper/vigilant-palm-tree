@@ -1,7 +1,8 @@
 import sharp from "sharp";
 import { resolve, basename } from "path";
+import { readdirSync } from "fs";
 
-const SKYBOX_PATH = resolve("src/resources/skybox/cityView-background.png");
+const SKYBOX_DIR = resolve("src/resources/skybox");
 
 const LAYER_BANDS: Record<number, Array<{ yStart: number; yEnd: number }>> = {
   2: [
@@ -23,15 +24,14 @@ const LAYER_BANDS: Record<number, Array<{ yStart: number; yEnd: number }>> = {
 
 const FADE_PCT = 0.18;
 
-async function main() {
-  const meta = await sharp(SKYBOX_PATH).metadata();
+async function splitSkybox(skyboxPath: string) {
+  const meta = await sharp(skyboxPath).metadata();
   const w = meta.width!;
   const h = meta.height!;
-  const buffer = await sharp(SKYBOX_PATH).raw().ensureAlpha().toBuffer({ resolveWithObject: true });
+  const buffer = await sharp(skyboxPath).raw().ensureAlpha().toBuffer({ resolveWithObject: true });
   const pixels = buffer.data;
 
-  const dir = resolve("src/resources/skybox");
-  const base = basename(SKYBOX_PATH, ".png");
+  const base = basename(skyboxPath, ".png");
 
   for (const layerCount of [2, 3, 4]) {
     const bands = LAYER_BANDS[layerCount];
@@ -64,7 +64,7 @@ async function main() {
         }
       }
 
-      const outPath = resolve(dir, `${base}-layer${i + 1}.png`);
+      const outPath = resolve(SKYBOX_DIR, `${base}-layer${i + 1}.png`);
       await sharp(out, { raw: { width: w, height: h, channels: 4 } })
         .png()
         .toFile(outPath);
@@ -72,7 +72,18 @@ async function main() {
     }
   }
 
-  console.log("Done.");
+  console.log(`Done: ${base}`);
+}
+
+async function main() {
+  const files = readdirSync(SKYBOX_DIR)
+    .filter(f => f.endsWith(".png") && !f.includes("-layer"))
+    .map(f => resolve(SKYBOX_DIR, f));
+
+  for (const file of files) {
+    console.log(`Splitting ${basename(file)}...`);
+    await splitSkybox(file);
+  }
 }
 
 main().catch((e) => {

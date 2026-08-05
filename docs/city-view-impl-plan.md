@@ -80,6 +80,8 @@ src/
     cityBuilding.ts      # building definitions + state
   state/
     gameState.ts         # extend SettlementState (see below)
+  resources/
+    skybox/              # parallax background layer PNGs (variants 2-4: watercolor landscapes)
 server/
   migrations/
     <timestamp>_city_state.sql   # city_spots, city_mines, buildings JSONB
@@ -167,5 +169,6 @@ DB: add three JSONB columns to the settlements JSONB blob, defaulting to `[]`. M
 - High-level design (now superseded for tier sizing): `docs/city-view.md`
 - Settlement data model: `src/entities/settlement.ts`, `docs/settlements.md`
 - Economy / per-turn yield: `src/economy/income.ts`, `docs/economy.md`
-- Art direction for resource icons: `docs/art-style.md`
+- Art direction for resource icons & skybox: `docs/art-style.md`
+- Skybox variant system & parallax layers: `scripts/split-skybox-layers.ts`, `tools/sprites/flux-skybox.mjs`
 - Overlay pattern (battle modal is the reference): `src/views/battleModal.ts`

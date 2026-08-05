@@ -65,6 +65,41 @@ All resource icons are small carved stone tablets, each bearing a glowing alchem
 - Don't break the shared silhouette too much — the visual cohesion comes from the shared stone shape.
 - Don't draw runes that look the same at 11 px — silhouette + color is what reads, not fine detail.
 
+## Skybox backgrounds (City View)
+
+The city-view overlay renders a multi-layer parallax skybox behind the isometric grid. The backgrounds are digital watercolor paintings, generated via DeepInfra FLUX API and split into depth layers for parallax scrolling.
+
+### Aesthetic direction
+
+- **Digital watercolor** — painterly wet-on-wet technique, visible brushstrokes, soft atmospheric haze, paper-texture feel. No hard edges or cel-shading.
+- **Landscapes only** — no buildings, figures, or man-made structures. The skybox is pure environment so the isometric city reads on top without competing.
+- **White/light gradient at top** — sky fades to near-white, blending naturally into the adventure-map overlay dim.
+
+### Variant catalog
+
+| Variant | Theme       | Palette / mood                                |
+|---------|-------------|-----------------------------------------------|
+| 1       | Base        | Original skybox (non-FLUX, hand-authored)     |
+| 2       | Mountains   | Misty blue peaks, indigo/slate washes, sunrise |
+| 3       | Plains      | Rolling green hills, golden fields, afternoon  |
+| 4       | Riverlands  | Winding rivers, teal/sage wetlands, lush       |
+
+Variants 2–4 are generated via `tools/sprites/flux-skybox.mjs` and split into parallax layers (2/3/4-layer breakdowns) by `scripts/split-skybox-layers.ts`. The city view renderer selects a variant per settlement, keyed by settlement ID.
+
+### Pipeline
+
+1. Generate the base 1024×576 PNGs: `$env:DEEPINFRA_API_KEY="..." ; node tools/sprites/flux-skybox.mjs`
+2. Split into alpha-blended parallax layers: `npm run skybox:split`
+3. Output lands in `src/resources/skybox/` as `cityView-background-variant<n>-layer<m>.png`
+
+Each variant produces 2-layer, 3-layer, and 4-layer breakdowns, all with 18% feathered band transitions so layers composite seamlessly when parallax-shifted.
+
+### How to extend (adding a new variant)
+
+1. Add a new entry to the `VARIANTS` map in `tools/sprites/flux-skybox.mjs` with a `variant` number, `prompt`, and `seed`.
+2. Run generation and layer splitting as above.
+3. Register the new variant in the city view renderer's variant selection logic.
+
 ## Future directions (parked)
 
 If the alchemical-stone direction needs to evolve, here are alternative directions that were considered but not chosen:

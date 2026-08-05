@@ -84,12 +84,12 @@ function Test-PortFree {
     param([int]$Port)
     if (Test-Path -LiteralPath (Join-Path $lockDir "port-$Port.lock")) { return $false }
     try {
-        $client = New-Object System.Net.Sockets.TcpClient
-        $client.Connect([System.Net.IPAddress]::Loopback, $Port)
-        $client.Close()
-        return $false
-    } catch {
+        $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, $Port)
+        $listener.Start()
+        $listener.Stop()
         return $true
+    } catch {
+        return $false
     }
 }
 function Find-FreePort {
