@@ -268,6 +268,56 @@ export function getValidAttackTargets(state: ManualBattleState, combatant: Comba
     : getValidMeleeTargets(state, combatant);
 }
 
+// One-directional, unlike markContacted: the spying side learns the target,
+// not vice versa.
+export function markScouted(target: Combatant, bySide: BattleSide): void {
+  if (target.side !== bySide) target.scoutedBy.add(bySide);
+}
+
+// Same shape as getValidRangedTargets/getValidMeleeTargets, but the target
+// set is enemies reachable from the platoon's current position OR anywhere
+// in its movement range this turn (using the same adjacency/ranged+LOS rule
+// attacks use), since Spy is meant to answer "could this platoon actually
+// get eyes on them right now" rather than reveal the whole map. Already-
+// scouted enemies are excluded — no reason to spend a troop re-learning them.
+export function getValidSpyTargets(state: ManualBattleState, combatant: Combatant): Combatant[] {
+  const enemies = livingCombatants(combatantsFor(state, enemySideOf(combatant.side))).filter(
+    (e) => !e.scoutedBy.has(combatant.side),
+  );
+  const reach = [combatant.position, ...getMovementRange(state, combatant)];
+  const ranged = isRangedPlatoon(combatant, state.unitTypes);
+  return enemies.filter((e) =>
+    reach.some((h) =>
+      ranged
+        ? hexDistance(h, e.position) <= RANGED_ATTACK_RANGE && hasLineOfSight(state.grid, h, e.position)
+        : hexDistance(h, e.position) === 1,
+    ),
+  );
+}
+
+// Validates the target, spends 1 troop from costUnitTypeId, and reveals the
+// target via markScouted. Deliberately never touches the unacted set (contrast
+// attackWithPlatoon/movePlatoon) — that's what keeps Spy from counting as the
+// platoon's official action for the turn.
+export function spyOnPlatoon(
+  state: ManualBattleState,
+  side: BattleSide,
+  slotIndex: number,
+  targetSlotIndex: number,
+  costUnitTypeId: string,
+): boolean {
+  const actor = getCombatant(state, side, slotIndex);
+  if (!actor) return false;
+  const target = getValidSpyTargets(state, actor).find((t) => t.slotIndex === targetSlotIndex);
+  if (!target) return false;
+  const entry = actor.entries.find((e) => e.unitTypeId === costUnitTypeId && e.count > 0);
+  if (!entry) return false;
+  entry.count -= 1;
+  actor.entries = actor.entries.filter((e) => e.count > 0);
+  markScouted(target, side);
+  return true;
+}
+
 function pruneDead(state: ManualBattleState): void {
   const aliveAttacker = new Set(livingCombatants(state.attacker).map((c) => c.slotIndex));
   const aliveDefender = new Set(livingCombatants(state.defender).map((c) => c.slotIndex));

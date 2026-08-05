@@ -17,12 +17,14 @@ import {
   getMovementRange,
   getValidAttackTargets,
   getValidMeleeTargets,
+  getValidSpyTargets,
   isBattleOver,
   movePlatoon,
   pickTarget,
   platoonSpeed,
   retreatHero,
   runAiTurn,
+  spyOnPlatoon,
   startManualBattle,
   timeOfDayForRound,
   totalUnits,
@@ -35,6 +37,7 @@ import type { Platoon, UnitType } from "../state/units";
 import { showBattleResultCard } from "./battleResultCard";
 import { openConfirmDialog } from "./confirmDialog";
 import { PopupMenu, menuTheme, styleButton } from "./menu";
+import { createPlatoonInfoPopup } from "./platoonInfoPopup";
 import { openSettingsMenu } from "./settingsMenu";
 
 const HEX_SIZE = 34;
@@ -313,6 +316,80 @@ function openLeaveBehindDialog(opts: {
   });
 
   refresh();
+}
+
+// Shown after the player clicks a valid Spy target — asks which unit type
+// in the spying platoon pays the 1-troop cost. Modeled on
+// openLeaveBehindDialog above, but simplified to a single click-to-pick row
+// (always exactly 1 troop, never a range) rather than +/- counters.
+// Cancelling has no side effects — the cost is only ever paid by the caller
+// inside onConfirm, via spyOnPlatoon.
+function openSpyCostDialog(opts: {
+  combatant: Combatant;
+  unitTypes: Record<string, UnitType>;
+  onConfirm: (unitTypeId: string) => void;
+}): void {
+  const { combatant, unitTypes, onConfirm } = opts;
+
+  const wrapper = document.createElement("div");
+  Object.assign(wrapper.style, {
+    position: "fixed",
+    inset: "0",
+    background: "rgba(0,0,0,0.6)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: "120",
+  });
+  document.body.appendChild(wrapper);
+
+  const menu = new PopupMenu({
+    parent: wrapper,
+    title: "Send a Spy",
+    width: 360,
+    draggable: false,
+    closeable: true,
+    zIndex: 121,
+    onClose: () => wrapper.remove(),
+  });
+  menu.setPosition(Math.max(24, (window.innerWidth - 360) / 2), Math.max(24, (window.innerHeight - 280) / 2));
+
+  const intro = document.createElement("div");
+  Object.assign(intro.style, { fontSize: "13px", lineHeight: "1.5", opacity: "0.9", marginBottom: "8px" });
+  intro.textContent = `Pick which unit to send — it costs 1 troop and won't return, but doesn't use this platoon's turn.`;
+  menu.appendContent(intro);
+
+  const list = document.createElement("div");
+  Object.assign(list.style, { display: "flex", flexDirection: "column", gap: "4px", marginBottom: "10px" });
+  menu.appendContent(list);
+
+  for (const e of combatant.entries) {
+    if (e.count <= 0) continue;
+    const name = unitTypes[e.unitTypeId]?.name ?? e.unitTypeId;
+    const row = document.createElement("button");
+    styleButton(row);
+    Object.assign(row.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      width: "100%",
+      textAlign: "left",
+    });
+    row.innerHTML = `<span>${name}</span><span>×${e.count}</span>`;
+    row.addEventListener("click", () => {
+      menu.close();
+      onConfirm(e.unitTypeId);
+    });
+    list.appendChild(row);
+  }
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.textContent = "Cancel";
+  styleButton(cancelBtn);
+  const row = document.createElement("div");
+  Object.assign(row.style, { display: "flex", justifyContent: "flex-end" });
+  row.appendChild(cancelBtn);
+  menu.appendContent(row);
+  cancelBtn.addEventListener("click", () => menu.close());
 }
 
 // Specialty only counts as visible if it makes up at least 40% of the
@@ -632,6 +709,12 @@ export function openManualBattleArena(
   let selectedSlot: number | null = null;
   let moveRange: Axial[] = [];
   let attackTargets: Combatant[] = [];
+  // Spy targeting: entered via the Spy button, independent of moveRange/
+  // attackTargets so it never disturbs the selected platoon's normal
+  // move-or-attack state (see spyOnPlatoon in shared/combat/manualBattle.ts —
+  // it deliberately never touches the unacted set).
+  let spyMode = false;
+  let spyTargets: Combatant[] = [];
 
   const container = document.createElement("div");
   Object.assign(container.style, {
@@ -732,6 +815,26 @@ export function openManualBattleArena(
   });
   actionRow.appendChild(endTurnBtn);
 
+  // Spends 1 troop from the selected platoon to permanently reveal an
+  // enemy platoon within this turn's move+attack reach (see
+  // getValidSpyTargets). Deliberately does NOT call afterPlayerAction —
+  // spyOnPlatoon never touches the unacted set, so the platoon can still
+  // move/attack normally afterward.
+  const spyBtn = document.createElement("button");
+  spyBtn.textContent = "Spy";
+  styleButton(spyBtn);
+  spyBtn.title = "Send a spy to permanently reveal an enemy platoon within reach — costs 1 troop, doesn't end this platoon's turn.";
+  spyBtn.addEventListener("click", () => {
+    if (selectedSlot === null || isBattleOver(state)) return;
+    const actor = getCombatant(state, humanSide, selectedSlot);
+    if (!actor) return;
+    debugLog(`click Spy -> ${platoonLabel(humanSide, selectedSlot)} enters spy targeting`);
+    spyMode = true;
+    spyTargets = getValidSpyTargets(state, actor);
+    refresh();
+  });
+  actionRow.appendChild(spyBtn);
+
   // Voluntary concession — Retreat applies the standard 15% self-retreat
   // loss to every still-living platoon and pulls the whole side off the
   // field; Surrender skips the loss and yields immediately. Both finalize
@@ -808,16 +911,22 @@ export function openManualBattleArena(
   actionRow.appendChild(settingsBtn);
 
   function renderFooterActions(): void {
-    helpTextEl.textContent =
-      selectedSlot === null
+    const over = isBattleOver(state);
+    const actor = selectedSlot === null ? undefined : getCombatant(state, humanSide, selectedSlot);
+    helpTextEl.textContent = spyMode
+      ? "Click a highlighted enemy to send a spy (costs 1 troop), or click elsewhere to cancel."
+      : selectedSlot === null
         ? "Click one of your platoons in the status bar (or on the grid) to act."
         : moveRange.length > 0
           ? "Click a highlighted hex to move (moving next to an enemy fights immediately). Steps left over can still be used — move again, attack a ringed enemy, or End Turn when done."
           : "Out of movement — click a ringed enemy to attack, or End Turn.";
-    const over = isBattleOver(state);
     endTurnBtn.style.display = selectedSlot !== null && !over ? "" : "none";
     retreatBtn.style.display = over ? "none" : "";
     surrenderBtn.style.display = over ? "none" : "";
+    spyBtn.style.display = actor && !over && totalUnits(actor.entries) > 1 ? "" : "none";
+    spyBtn.disabled = spyMode;
+    spyBtn.style.opacity = spyMode ? "0.5" : "1";
+    spyBtn.style.cursor = spyMode ? "not-allowed" : "pointer";
   }
 
   // Hero portraits flank the battlefield, HoMM3-style — they stand outside
@@ -924,12 +1033,23 @@ export function openManualBattleArena(
   );
   container.appendChild(attackerColumn);
 
+  // Wrapped in its own positioned div (rather than appended straight into
+  // `container`, which is a scrollable flex row of several columns) so the
+  // info popup below can be positioned in simple canvas-local coordinates
+  // instead of accounting for container scroll/layout.
+  const canvasWrap = document.createElement("div");
+  canvasWrap.style.position = "relative";
+  canvasWrap.style.flexShrink = "0";
+  container.appendChild(canvasWrap);
+
   const canvas = document.createElement("canvas");
   canvas.style.background = "#14161a";
   canvas.style.borderRadius = "4px";
   canvas.style.flexShrink = "0";
-  container.appendChild(canvas);
+  canvasWrap.appendChild(canvas);
   const ctx = canvas.getContext("2d")!;
+
+  const infoPopup = createPlatoonInfoPopup(canvasWrap);
 
   const { column: defenderColumn, bar: defenderBar } = buildSideColumn(
     humanSide === "defender" ? "You" : "AI Opponent",
@@ -966,6 +1086,56 @@ export function openManualBattleArena(
     return { x: x + offsetX, y: y + offsetY };
   }
 
+  // Which horizontal side of `subject` counts as "behind the line" — away
+  // from the opposing army's average position, so an info popup anchored
+  // there never covers the ground between the two armies. Computed live off
+  // positions rather than hardcoded to a side, since attacker/defender can
+  // deploy from either edge (see BattleGrid.sideChoice).
+  function behindSide(subject: Combatant, opponents: Combatant[]): "left" | "right" {
+    const living = opponents.filter((c) => !c.retreated && c.entries.some((e) => e.count > 0));
+    if (living.length === 0) return "left";
+    const subjectX = toCanvas(subject.position.q, subject.position.r).x;
+    const avgOpponentX = living.reduce((sum, c) => sum + toCanvas(c.position.q, c.position.r).x, 0) / living.length;
+    return subjectX >= avgOpponentX ? "right" : "left";
+  }
+
+  // Shared by: selecting one of your own platoons, completing a Spy, and
+  // clicking a previously-spied enemy. `winVsSlot` (a human slotIndex) adds
+  // the win-odds row — only meaningful when showing an enemy's card while
+  // one of your own platoons is selected.
+  function showInfoPopupFor(combatant: Combatant, winVsSlot: number | null): void {
+    const accent = combatant.side === "attacker" ? ATTACKER_ACCENT : DEFENDER_ACCENT;
+    const ownerLabel = combatant.side === humanSide ? "Your platoon" : "Enemy platoon";
+    const opponents = combatant.side === "attacker" ? state.defender : state.attacker;
+    const canAct = combatant.side === humanSide && unactedLivingSlots(state, humanSide).includes(combatant.slotIndex);
+    const movementRemaining = getMovementRange(state, combatant).length;
+    const anchor = toCanvas(combatant.position.q, combatant.position.r);
+    const winner = winVsSlot === null ? undefined : getCombatant(state, humanSide, winVsSlot);
+    // The canvas is snug around the hex grid (barely 50px of padding) — far
+    // too tight to fit a popup beside an edge-column unit without covering
+    // it. canvasWrap has no overflow:hidden, so give the popup the real
+    // on-screen room (the whole viewport, minus a margin) rather than
+    // clamping it to the canvas's own tiny bounds.
+    const wrapRect = canvasWrap.getBoundingClientRect();
+    const margin = 12;
+    infoPopup.show({
+      combatant,
+      unitTypes: state.unitTypes,
+      accent,
+      ownerLabel,
+      canAct,
+      movementRemaining,
+      winChanceVs: winner ? { entries: winner.entries, label: `Platoon ${winner.slotIndex + 1}` } : undefined,
+      anchorX: anchor.x,
+      anchorY: anchor.y,
+      anchorSide: behindSide(combatant, opponents),
+      minX: margin - wrapRect.left,
+      maxX: window.innerWidth - wrapRect.left - margin,
+      minY: margin - wrapRect.top,
+      maxY: window.innerHeight - wrapRect.top - margin,
+    });
+  }
+
   function draw(): void {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -990,6 +1160,19 @@ export function openManualBattleArena(
       ctx.strokeStyle = "#e05050";
       ctx.lineWidth = 2;
       ctx.stroke();
+    }
+
+    // Gold dashed ring — deliberately distinct from the red attack-target
+    // ring above, so a Spy-armed click never reads as an attack indicator.
+    for (const t of spyTargets) {
+      const { x, y } = toCanvas(t.position.q, t.position.r);
+      ctx.beginPath();
+      ctx.setLineDash([4, 3]);
+      ctx.arc(x, y, HEX_SIZE * 0.85, 0, Math.PI * 2);
+      ctx.strokeStyle = "#e8c04a";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     for (const side of ["attacker", "defender"] as const) {
@@ -1030,9 +1213,11 @@ export function openManualBattleArena(
       selectedSlot = null;
       moveRange = [];
       attackTargets = [];
+      infoPopup.hide();
     } else {
       moveRange = getMovementRange(state, combatant);
       attackTargets = getValidAttackTargets(state, combatant);
+      showInfoPopupFor(combatant, null);
     }
     refresh();
   }
@@ -1109,6 +1294,7 @@ export function openManualBattleArena(
     selectedSlot = null;
     moveRange = [];
     attackTargets = [];
+    infoPopup.hide();
     advanceAi();
   }
 
@@ -1179,18 +1365,58 @@ export function openManualBattleArena(
       return;
     }
 
-    if (selectedSlot === null) {
-      const candidates = unactedLivingSlots(state, humanSide);
-      const humanCombatants = humanSide === "attacker" ? state.attacker : state.defender;
-      const combatant = humanCombatants.find(
-        (c) => candidates.includes(c.slotIndex) && c.position.q === hex.q && c.position.r === hex.r,
-      );
-      if (combatant) {
-        debugLog(`click ${fmtHex(hex)} -> select ${platoonLabel(humanSide, combatant.slotIndex)}`);
-        selectPlatoon(combatant.slotIndex);
+    // Intercepts before the normal select/attack/move chain entirely, so a
+    // Spy-armed click can never be misread as an attack — and so cancelling
+    // (clicking a non-target hex) never disturbs the selected platoon's
+    // actual moveRange/attackTargets underneath.
+    if (spyMode) {
+      const target = spyTargets.find((t) => t.position.q === hex.q && t.position.r === hex.r);
+      if (target && selectedSlot !== null) {
+        const spySlot = selectedSlot;
+        const actor = getCombatant(state, humanSide, spySlot);
+        if (actor) {
+          debugLog(`click ${fmtHex(hex)} -> spy target ${platoonLabel(target.side, target.slotIndex)}`);
+          openSpyCostDialog({
+            combatant: actor,
+            unitTypes: state.unitTypes,
+            onConfirm: (unitTypeId) => {
+              const ok = spyOnPlatoon(state, humanSide, spySlot, target.slotIndex, unitTypeId);
+              debugLog(`spy ${ok ? "succeeded" : "FAILED"}: ${platoonLabel(humanSide, spySlot)} -> ${platoonLabel(target.side, target.slotIndex)} (spent 1x ${unitTypeId})`);
+              spyMode = false;
+              spyTargets = [];
+              refresh();
+              if (ok) showInfoPopupFor(target, spySlot);
+            },
+          });
+        }
       } else {
-        debugLog(`click ${fmtHex(hex)} -> no-op (no actable platoon there)`);
+        debugLog(`click ${fmtHex(hex)} -> cancel spy mode`);
+        spyMode = false;
+        spyTargets = [];
+        refresh();
       }
+      return;
+    }
+
+    // Clicking any of your own not-yet-acted platoons — on the grid or in
+    // the status bar — selects it immediately and shows its info popup,
+    // even while a different platoon is already selected. No need to
+    // explicitly deselect first. Excludes the currently-selected platoon's
+    // own hex so that click still falls through to the deselect branch
+    // below rather than re-selecting itself.
+    const candidates = unactedLivingSlots(state, humanSide);
+    const humanCombatants = humanSide === "attacker" ? state.attacker : state.defender;
+    const ownCombatant = humanCombatants.find(
+      (c) => candidates.includes(c.slotIndex) && c.position.q === hex.q && c.position.r === hex.r,
+    );
+    if (ownCombatant && ownCombatant.slotIndex !== selectedSlot) {
+      debugLog(`click ${fmtHex(hex)} -> select ${platoonLabel(humanSide, ownCombatant.slotIndex)}`);
+      selectPlatoon(ownCombatant.slotIndex);
+      return;
+    }
+
+    if (selectedSlot === null) {
+      debugLog(`click ${fmtHex(hex)} -> no-op (no actable platoon there)`);
       return;
     }
 
@@ -1231,7 +1457,27 @@ export function openManualBattleArena(
       selectedSlot = null;
       moveRange = [];
       attackTargets = [];
+      infoPopup.hide();
       refresh();
+      return;
+    }
+
+    // Not an attack/move/deselect — last chance is inspecting an enemy
+    // you've already spied on (out of attack range, or you're simply
+    // choosing to look rather than fight). Attack/move above always win
+    // when both are possible, so this never steals a click from combat.
+    const enemyCombatants = aiSide === "attacker" ? state.attacker : state.defender;
+    const inspectable = enemyCombatants.find(
+      (e) =>
+        !e.retreated &&
+        e.entries.some((entry) => entry.count > 0) &&
+        e.position.q === hex.q &&
+        e.position.r === hex.r &&
+        e.scoutedBy.has(humanSide),
+    );
+    if (inspectable) {
+      debugLog(`click ${fmtHex(hex)} -> inspect scouted ${platoonLabel(inspectable.side, inspectable.slotIndex)}`);
+      showInfoPopupFor(inspectable, selectedSlot);
       return;
     }
 
