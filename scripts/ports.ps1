@@ -82,10 +82,15 @@ Get-ChildItem -LiteralPath $lockDir -Filter 'port-*.lock' -ErrorAction SilentlyC
 
 function Test-PortFree {
     param([int]$Port)
-    # Check both TCP and lock-file occupancy
-    if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) { return $false }
     if (Test-Path -LiteralPath (Join-Path $lockDir "port-$Port.lock")) { return $false }
-    return $true
+    try {
+        $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, $Port)
+        $listener.Start()
+        $listener.Stop()
+        return $true
+    } catch {
+        return $false
+    }
 }
 function Find-FreePort {
     param([int]$Base, [int]$Max = 200)

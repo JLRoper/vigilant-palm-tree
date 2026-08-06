@@ -9,7 +9,7 @@ A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. Thi
 | Aspect | Value |
 |---|---|
 | Project name | `heroes-js` (also referenced as `vigilant-palm-tree` in `README.md`) |
-| Version | `0.0.1` |
+| Version | `0.2.0` |
 | Package type | ESM (`"type": "module"`) |
 | Repo layout | Monorepo-style single repo, **no framework workspace tooling** |
 | Languages | TypeScript (primary), plain JavaScript `.mjs` (sprite tooling), SQL (migrations), HTML/CSS (UI shell) |
@@ -23,7 +23,7 @@ Top-level directories:
 - `tools/` — build/sprite scripts (Node + Playwright)
 - `docs/` — game design documents (Markdown)
 - `dist/` — Vite build output
-- `src/resources/` — baked-in sprite PNGs/SVGs (castles, resource icons)
+- `src/resources/` — baked-in sprite PNGs/SVGs (castles, resource icons, skybox parallax layers)
 - `docker-compose.yml` — local Postgres + Adminer
 
 ---
@@ -65,8 +65,8 @@ Top-level directories:
 - UI overlays (HUD, toolbar, menus, modals) are plain DOM elements styled via inline CSS in `index.html` plus per-view TS in `src/views/`.
 
 ### Server (Node.js)
-- [`server/index.ts`](./server/index.ts:1) boots Express 5 on `PORT` (default `3001`).
-- `cors()` middleware enabled globally; `express.json()` for JSON bodies.
+- [`server/index.ts`](./server/index.ts:1) boots Express 5 on `API_PORT` (loaded from `.env` by `scripts/ports.ps1`, default `3001`).
+- `cors()` middleware enabled globally; `express.raw()` for image/octet-stream bodies, `express.json()` for JSON bodies.
 - All routes mounted under `/api` via `router` from [`server/routes.ts`](./server/routes.ts:1).
 - Graceful shutdown closes the Postgres pool on `SIGINT`.
 
@@ -109,18 +109,31 @@ No CSS framework, no UI framework, no state library, no ORM, no testing framewor
 
 ## 5. npm scripts
 
+Three helper scripts manage ports and processes via PowerShell (cross-platform — they use .NET `TcpClient` and Linux `ss` fallbacks, not Windows-only cmdlets):
+
 | Script | Command | Purpose |
 |---|---|---|
-| `dev` | `concurrently -n web,api -c green,cyan "vite" "tsx watch server/index.ts"` | Run client (Vite) and API (tsx watch) together |
+| `cleanup` | `pwsh scripts/cleanup.ps1` | Kill dev/test processes on this worktree's ports |
+| `dev:status` | `pwsh scripts/dev-status.ps1` | Check which services are listening |
+| `predev` | `pwsh scripts/cleanup.ps1 && pwsh scripts/ports.ps1` | (lifecycle hook) Free old ports + allocate new ones for `dev` |
+| `dev` | `concurrently -n web,api -c green,cyan "vite" "tsx watch --env-file=.env server/index.ts"` | Run client (Vite) and API (tsx watch) together, ports from `.env` |
 | `dev:web` | `vite` | Client only |
-| `dev:api` | `tsx watch server/index.ts` | API only with watch reload |
+| `dev:api` | `tsx watch --env-file=.env server/index.ts` | API only with watch reload |
+| `dev:static` | `pwsh scripts/cleanup.ps1 && pwsh scripts/ports.ps1 --static && concurrently …` | Same as `dev` but uses deterministic hash-derived ports (stable across runs) |
 | `build` | `tsc && vite build` | Type-check, then produce a production client bundle in `dist/` |
-| `preview` | `vite preview` | Serve the built bundle (port 4173) |
+| `preview` | `vite preview` | Serve the built bundle (port from `CLIENT_PORT` in `.env`, default 5173) |
 | `db:up` | `docker compose up -d` | Start Postgres + Adminer |
 | `db:down` | `docker compose down` | Stop them |
-| `test` | `tsx test/smoke.ts` | End-to-end smoke test (spawns API + preview, drives with Playwright) |
+| `pretest` | `pwsh scripts/ports.ps1` | (lifecycle hook) Allocate ports for `test` |
+| `test` | `tsx --env-file=.env test/smoke.ts` | End-to-end smoke test (spawns API + preview, drives with Playwright) |
+| `test:cityview` | `pwsh scripts/ports.ps1 && tsx --env-file=.env test/cityView.test.ts` | City view integration test |
+| `test:all` | `pwsh scripts/ports.ps1 && tsx --env-file=.env test/smoke.ts && tsx --env-file=.env test/cityView.test.ts` | Full test suite (smoke + cityView) |
+| `test:static` | `pwsh scripts/ports.ps1 --static && tsx --env-file=.env test/smoke.ts` | Smoke test with stable deterministic ports |
 | `sprites:generate` | `node tools/sprites/pixel-gen.mjs` | Render pixel-art castle sprites into `src/resources/` |
 | `sprites:preview` | `node tools/sprites/generate-preview.mjs` | Build a sprite contact-sheet preview |
+| `skybox:split` | `tsx scripts/split-skybox-layers.ts` | Split all skybox variants into parallax layer PNGs (2/3/4-layer breakdowns, 18% feathered blends) |
+
+All server-side scripts (`dev:api`, `dev`, `test`, `test:*`)** pass `--env-file=.env`** to `tsx` so the dynamically allocated ports are available to the runtime. `vite` auto-loads `.env` without extra flags.
 
 ---
 
@@ -173,7 +186,7 @@ API conventions:
 - JSON in/out.
 - CORS open (default `cors()` middleware, no origin allowlist configured).
 - No auth layer present in the codebase.
-- Default port `3001`, overridable via `PORT` env var.
+- Port read from `API_PORT` env var (written by `scripts/ports.ps1` into `.env`), default `3001`.
 
 ---
 
@@ -183,12 +196,16 @@ API conventions:
 - **Unit tests**: under `test/state/` and `test/map/` (e.g. `gameState.test.ts`, `income.test.ts`, `castlePlacement.test.ts`) — run via `npx tsx --test <file>`.
 - **Smoke test**: [`test/smoke.ts`](./test/smoke.ts:1) (run via `npm test`).
   - Spawns the API and `vite preview` as child processes.
-  - Uses Playwright (`chromium`) to load the built app on `http://localhost:4173`.
-  - Talks to the API directly on `http://127.0.0.1:3001` via Playwright's `request` API and via `pg.Pool`.
+  - Uses Playwright (`chromium`) to load the built app, reading the client URL from `CLIENT_PORT` in `.env` (default 4173).
+  - Talks to the API using `API_PORT` from `.env` (default 3001) via Playwright's `request` API and via `pg.Pool`.
   - Asserts map determinism (same seed → same resource tile placement and counts), then exercises the live UI.
 - **Unit-ish tests** under `test/state/` and `test/map/` (e.g. `gameState.test.ts`, `income.test.ts`, `castlePlacement.test.ts`) are imported by the smoke harness — they run as part of `npm test`.
 - Logs from previous runs are kept at `test/web.log`, `test/api.log`, `test/*.err.log`; screenshots at `test/screenshot.png` / `test/screenshot-dpr2.png`.
 - Helper script: `tools/run-smoke.ps1` (PowerShell wrapper).
+
+### CI (GitHub Actions)
+
+[`.github/workflows/validate-game.yml`](./.github/workflows/validate-game.yml:1) gates PRs on every push: `npm install` → `npm run dev` (boot check) → `npm test` (smoke test). Runs on `ubuntu-latest` with a Postgres 16 service container — the entire pipeline is Linux-native. The helper scripts (`ports.ps1`, `cleanup.ps1`, `dev-status.ps1`) are cross-platform PowerShell that work on both Windows and Linux via .NET `TcpClient` with `ss` fallbacks.
 
 ---
 
@@ -202,6 +219,13 @@ API conventions:
 - `tools/sprites/screenshot-preview.mjs` supports screenshot-based previews.
 - `sprite-preview.html` is the HTML harness for the contact sheet.
 
+### Skybox pipeline
+- City view parallax skyboxes are digital watercolor landscapes generated via DeepInfra FLUX API.
+- [`tools/sprites/flux-skybox.mjs`](./tools/sprites/flux-skybox.mjs:1) sends prompts to `black-forest-labs/FLUX-2-klein-4b`, producing 1024×576 PNGs for variants 2–4 (mountains, plains, riverlands). Requires `DEEPINFRA_API_KEY` env var.
+- [`scripts/split-skybox-layers.ts`](./scripts/split-skybox-layers.ts:1) slices each variant PNG into 2-layer, 3-layer, and 4-layer depth breakdowns with 18% feathered alpha transitions, producing `src/resources/skybox/cityView-background-variant<n>-layer<m>.png`. Layer bands overlap by 10% with fade blending so composited parallax layers don't show seams.
+- The `skybox:split` npm script (`tsx scripts/split-skybox-layers.ts`) operates on all non-layer PNGs in `src/resources/skybox/`, supporting all current and future variants automatically.
+- Output assets ship under `src/resources/skybox/` — Vite bundles them as separate files (per `assetsInlineLimit: 0`).
+
 ### Editor
 - No linter, formatter, or pre-commit hook is configured in the repo (no `.eslintrc*`, no `.prettierrc*`, no Husky config).
 - The build command (`tsc && vite build`) is the only enforced static check.
@@ -212,13 +236,19 @@ API conventions:
 
 | Port | Service | How |
 |---|---|---|
-| `5173` | Vite dev server (client + HMR) | `npm run dev` |
-| `4173` | Vite preview server (built bundle) | `npm run preview` / `npm test` |
-| `3001` | API (Express) | `npm run dev:api` |
-| `5432` | Postgres | `npm run db:up` (docker compose) |
+| Dynamic | Vite dev server (client + HMR) | `CLIENT_PORT` in `.env`, allocated by `scripts/ports.ps1` (default base `5173`) |
+| Dynamic | API (Express) | `API_PORT` in `.env`, allocated by `scripts/ports.ps1` (default base `4000`) |
+| Dynamic | WebSocket | `WS_PORT` in `.env`, allocated by `scripts/ports.ps1` (default base `4100`) |
+| `5432` | Postgres | `npm run db:up` (docker compose, fixed shared port) |
 | `8080` | Adminer (DB UI) | `npm run db:up` |
 
-Vite proxies `/api/*` to `http://localhost:3001` in both dev and preview, so the client always calls relative `/api/...` URLs.
+`scripts/ports.ps1` allocates free ports at dev/test startup (via npm `predev`/`pretest` hooks) and writes them to `.env`. It uses cross-platform .NET `TcpClient` for port availability checks with Linux `ss` fallbacks — no Windows-only cmdlets. Two modes:
+- **Dynamic** (default): picks any free port scanning upward from base.
+- **Static** (`--static`): derives deterministic ports from the worktree path hash — same worktree always gets the same ports. Use `npm run dev:static` or `npm run test:static`.
+
+Vite auto-loads `.env`; `tsx` processes use `--env-file=.env`. The Postgres port (`5432`) and Adminer port (`8080`) are fixed because the database container is shared across worktrees.
+
+Vite proxies `/api/*` to `http://127.0.0.1:<API_PORT>` in both dev and preview, so the client always calls relative `/api/...` URLs.
 
 ---
 

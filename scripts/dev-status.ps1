@@ -27,7 +27,14 @@ if ($ports.Count -eq 0) {
 
 function Test-Listening {
     param([int]$Port)
-    return [bool](Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+    try {
+        $client = New-Object System.Net.Sockets.TcpClient
+        $client.Connect([System.Net.IPAddress]::Loopback, $Port)
+        $client.Close()
+        return $true
+    } catch {
+        return $false
+    }
 }
 
 $allOk = $true

@@ -1,7 +1,7 @@
 import { request as pwRequest } from "playwright";
 import assert from "node:assert/strict";
 
-const API_URL = "http://127.0.0.1:3001";
+const API_URL = `http://127.0.0.1:${process.env.API_PORT || "3001"}`;
 
 async function run() {
   const ctx = await pwRequest.newContext();
