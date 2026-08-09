@@ -319,6 +319,116 @@ async function testPersistence(page: Page, settlementId: string): Promise<void> 
   await page.keyboard.press("Escape"); await wait(400);
 }
 
+async function sampleSkyRegion(page: Page): Promise<{ r: number; g: number; b: number }> {
+  return page.evaluate(() => {
+    const c = document.getElementById("game") as HTMLCanvasElement;
+    const ctx = c.getContext("2d")!;
+    const data = ctx.getImageData(0, 0, c.width, Math.min(200, c.height)).data;
+    let rSum = 0, gSum = 0, bSum = 0, count = 0;
+    for (let y = 0; y < Math.min(200, c.height); y += 8) {
+      for (let x = 0; x < c.width; x += 8) {
+        const i = (y * c.width + x) * 4;
+        if (data[i + 3] > 0) {
+          rSum += data[i];
+          gSum += data[i + 1];
+          bSum += data[i + 2];
+          count++;
+        }
+      }
+    }
+    if (count === 0) return { r: 0, g: 0, b: 0 };
+    return {
+      r: Math.round(rSum / count),
+      g: Math.round(gSum / count),
+      b: Math.round(bSum / count),
+    };
+  });
+}
+
+async function testSkyboxVariantSwitch(page: Page): Promise<void> {
+  console.log(">> Test: skybox variant switching");
+
+  const baseline = await sampleSkyRegion(page);
+  assert(baseline.r > 0 || baseline.g > 0 || baseline.b > 0, "Sky region should not be pure black on variant 1");
+  console.log(`>> Variant 1 sky avg: rgb(${baseline.r},${baseline.g},${baseline.b}) ✓`);
+
+  for (const v of [2, 3, 4]) {
+    await page.evaluate((variant) => {
+      (window as any).__gameDebug.settings.update({ spriteVariant: variant });
+    }, v);
+    await wait(1200);
+
+    const sk = await sampleSkyRegion(page);
+    assert(sk.r > 0 || sk.g > 0 || sk.b > 0, `Sky region should not be black on variant ${v}`);
+    const changed = Math.abs(sk.r - baseline.r) > 5 || Math.abs(sk.g - baseline.g) > 5 || Math.abs(sk.b - baseline.b) > 5;
+    assert(changed, `Sky color on variant ${v} should differ from variant 1 baseline (got rgb(${sk.r},${sk.g},${sk.b}) vs baseline rgb(${baseline.r},${baseline.g},${baseline.b}))`);
+    console.log(`>> Variant ${v} sky avg: rgb(${sk.r},${sk.g},${sk.b}) ✓`);
+  }
+
+  // Reset to variant 1
+  await page.evaluate(() => {
+    (window as any).__gameDebug.settings.update({ spriteVariant: 1 });
+  });
+  await wait(1200);
+}
+
+async function testParallaxMode(page: Page): Promise<void> {
+  console.log(">> Test: parallax mode");
+
+  const baseline = await sampleSkyRegion(page);
+
+  // Enable parallax with 4 layers
+  await page.evaluate(() => {
+    (window as any).__gameDebug.settings.update({ parallaxEnabled: true, parallaxLayerCount: 4 });
+  });
+  await wait(800);
+
+  const para4 = await sampleSkyRegion(page);
+  assert(para4.r > 0 || para4.g > 0 || para4.b > 0, "Sky should not be black with parallax 4");
+  console.log(`>> Parallax 4-layer sky avg: rgb(${para4.r},${para4.g},${para4.b}) ✓`);
+
+  // 2 layers
+  await page.evaluate(() => {
+    (window as any).__gameDebug.settings.update({ parallaxLayerCount: 2 });
+  });
+  await wait(500);
+  const para2 = await sampleSkyRegion(page);
+  assert(para2.r > 0 || para2.g > 0 || para2.b > 0, "Sky should not be black with parallax 2");
+  console.log(`>> Parallax 2-layer sky avg: rgb(${para2.r},${para2.g},${para2.b}) ✓`);
+
+  // Disable parallax
+  await page.evaluate(() => {
+    (window as any).__gameDebug.settings.update({ parallaxEnabled: false });
+  });
+  await wait(500);
+
+  const afterDisable = await sampleSkyRegion(page);
+  assert(afterDisable.r > 0 || afterDisable.g > 0 || afterDisable.b > 0, "Sky should not be black after disabling parallax");
+  console.log(`>> Parallax disabled sky avg: rgb(${afterDisable.r},${afterDisable.g},${afterDisable.b}) ✓`);
+}
+
+async function testBgOffset(page: Page): Promise<void> {
+  console.log(">> Test: background offset panning");
+
+  const baseline = await sampleSkyRegion(page);
+
+  // Pan right/down
+  await page.evaluate(() => {
+    (window as any).__gameDebug.settings.update({ cityBgOffsetX: 200, cityBgOffsetY: -100 });
+  });
+  await wait(500);
+
+  const panned = await sampleSkyRegion(page);
+  assert(panned.r > 0 || panned.g > 0 || panned.b > 0, "Sky should not be black after panning");
+  console.log(`>> Panned sky avg: rgb(${panned.r},${panned.g},${panned.b}) ✓`);
+
+  // Reset
+  await page.evaluate(() => {
+    (window as any).__gameDebug.settings.update({ cityBgOffsetX: 0, cityBgOffsetY: 0 });
+  });
+  await wait(500);
+}
+
 // ── Main ──────────────────────────────────────────────────────────────
 
 async function run() {
@@ -366,6 +476,11 @@ async function run() {
     await testDestroyMode(page);
     await testEscapeHandling(page);
     await testPersistence(page, settlementId);
+
+    await openCityView(page, settlementId);
+    await testSkyboxVariantSwitch(page);
+    await testParallaxMode(page);
+    await testBgOffset(page);
 
     console.log("\n>> All city view tests passed ✓");
   } catch (err) {
