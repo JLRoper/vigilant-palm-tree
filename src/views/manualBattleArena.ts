@@ -7,7 +7,7 @@
 
 import { axialToPixel, hexCorners, hexDistance, pixelToAxial, type Axial } from "../core/hex";
 import { totalHealth } from "../../shared/combat/damage";
-import { SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "../../shared/combatConfig";
+import { RANGED_ATTACK_RANGE, SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "../../shared/combatConfig";
 import {
   attackWithPlatoon,
   computeSpecialty,
@@ -19,6 +19,7 @@ import {
   getValidMeleeTargets,
   getValidSpyTargets,
   isBattleOver,
+  isRangedPlatoon,
   movePlatoon,
   pickTarget,
   platoonSpeed,
@@ -443,6 +444,14 @@ function buildStatusTile(
     return tile;
   }
 
+  // Fog of war: everything below the title (composition, HP, morale,
+  // fatigue) is only known for your own platoons, or an enemy platoon once
+  // it's been scouted — either by contact (markContacted, any attack) or by
+  // the dedicated Spy action (markScouted). Same Combatant.scoutedBy set
+  // that already gated the specialty icon below; now gates the rest of the
+  // tile too.
+  const isKnown = c.side === viewerSide || c.scoutedBy.has(viewerSide);
+
   // Specialty icon (top-left) — only visible to the owner, or to the
   // opponent after they've made contact. Recomputed from current entries
   // so the icon naturally shifts when casualties flip the dominant unit
@@ -458,8 +467,7 @@ function buildStatusTile(
     }
   }
   const meetsThreshold = specialty !== null && total > 0 && dominantCount / total >= SPECIALTY_VISIBILITY_THRESHOLD;
-  const revealSpecialty =
-    meetsThreshold && (c.side === viewerSide || c.scoutedBy.has(viewerSide));
+  const revealSpecialty = meetsThreshold && isKnown;
 
   const title = document.createElement("div");
   title.style.fontWeight = "600";
@@ -485,6 +493,15 @@ function buildStatusTile(
     tile.appendChild(icon);
   }
 
+  if (!isKnown) {
+    const unscouted = document.createElement("div");
+    unscouted.style.fontSize = "10px";
+    unscouted.style.opacity = "0.6";
+    unscouted.textContent = "Unscouted";
+    tile.appendChild(unscouted);
+    return tile;
+  }
+
   for (const e of c.entries) {
     if (e.count <= 0) continue;
     const line = document.createElement("div");
@@ -492,6 +509,45 @@ function buildStatusTile(
     line.style.opacity = "0.85";
     line.textContent = `${state.unitTypes[e.unitTypeId]?.name ?? e.unitTypeId} x${e.count}`;
     tile.appendChild(line);
+  }
+
+  // Atk/Def/Speed/Range at a glance. A platoon can mix up to
+  // MAX_PLATOON_ENTRIES unit types with different stats, so Atk/Def use the
+  // numerically dominant entry (most units) rather than an average — same
+  // "pick the entry that actually represents the platoon" idea as
+  // computeSpecialty, just simpler since it's a single number, not a
+  // weighted tag. Speed instead reuses platoonSpeed() directly: it's
+  // already the real mechanical value (min speed across entries) that
+  // movement range is computed from, not just a display stat.
+  const livingEntries = c.entries.filter((e) => e.count > 0);
+  if (livingEntries.length > 0) {
+    const dominantEntry = livingEntries.reduce((a, b) => (b.count > a.count ? b : a));
+    const dominantUnit = state.unitTypes[dominantEntry.unitTypeId];
+    const speed = platoonSpeed(c, state.unitTypes);
+    const ranged = isRangedPlatoon(c, state.unitTypes);
+    const statRow = document.createElement("div");
+    Object.assign(statRow.style, { display: "flex", flexWrap: "wrap", gap: "2px 8px", fontSize: "10px", opacity: "0.9" });
+    const stat = (label: string, value: string): void => {
+      const chip = document.createElement("span");
+      chip.textContent = `${label} ${value}`;
+      statRow.appendChild(chip);
+    };
+    if (dominantUnit) {
+      stat("Atk", String(dominantUnit.attack));
+      stat("Def", String(dominantUnit.defence));
+    }
+    stat("Spd", String(speed));
+    stat("Rng", ranged ? String(RANGED_ATTACK_RANGE) : "Melee");
+    tile.appendChild(statRow);
+
+    // Terrain placeholder — the game has no terrain-bonus mechanic yet (see
+    // docs/terrain-plan.md), so this stays a "—" slot, same pattern as the
+    // Morale/Fatigue placeholders below: the UI slot exists ahead of the
+    // mechanic so wiring in real values later is a one-line change here.
+    const terrainRow = document.createElement("div");
+    Object.assign(terrainRow.style, { fontSize: "10px", opacity: "0.6", fontStyle: "italic" });
+    terrainRow.textContent = "Terrain —";
+    tile.appendChild(terrainRow);
   }
 
   const hpPct = c.maxHealth > 0 ? totalHealth(c.entries, state.unitTypes) / c.maxHealth : 0;
@@ -578,6 +634,10 @@ export function openManualBattleArena(
   const state = startManualBattle(attackerPlatoons, defenderPlatoons, {
     unitTypes,
     obstacleSeed: Math.floor(Math.random() * 1_000_000),
+    // Deploy the human's side on the grid's left edge and the AI's on the
+    // right, regardless of which role (attacker/defender) the human picked —
+    // otherwise the AI ends up on the left whenever the human plays defender.
+    sideChoice: humanSide,
   });
 
   // Gold the human hero brings into this battle. Defaults to a low value
@@ -684,18 +744,28 @@ export function openManualBattleArena(
   });
   document.body.appendChild(overlay);
 
+  // Floats over the arena (position: absolute, out of the overlay's normal
+  // flex-column flow) instead of sitting in flow above `container` — that
+  // way `container` gets the overlay's full height rather than losing
+  // header-height off the top, so it's easier to see how the layout behaves
+  // at the full viewport size. Translucent red so it still reads as an
+  // overlay banner rather than opaque chrome.
   const header = document.createElement("div");
   Object.assign(header.style, {
+    position: "absolute",
+    top: "0",
+    left: "0",
+    right: "0",
+    zIndex: "5",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     padding: "10px 16px",
-    background: menuTheme.panel.headerBackground,
+    background: "rgba(192, 64, 64, 0.55)",
     color: menuTheme.panel.headerColor,
-    borderBottom: "1px solid rgba(255,255,255,0.08)",
+    borderBottom: "1px solid rgba(255,255,255,0.15)",
     fontSize: "14px",
     fontWeight: "600",
-    flexShrink: "0",
   });
   const titleEl = document.createElement("div");
   titleEl.textContent = `Test Battle — Manual Fight (You: ${humanSide === "attacker" ? "Blue" : "Red"})`;
@@ -703,6 +773,7 @@ export function openManualBattleArena(
   overlay.appendChild(header);
 
   function closeArena(): void {
+    window.removeEventListener("resize", fitCanvasToContainer);
     overlay.remove();
   }
 
@@ -742,6 +813,11 @@ export function openManualBattleArena(
     alignItems: "center",
     gap: "10px",
     padding: "16px",
+    // border-box so the maxWidth set in fitCanvasToContainer (matched to the
+    // battle row's content span) is the footer's true outer width, padding
+    // included — otherwise the padding would push it wider than the row above.
+    boxSizing: "border-box",
+    margin: "0 auto",
     background: menuTheme.panel.headerBackground,
     color: menuTheme.panel.headerColor,
     borderTop: "1px solid rgba(255,255,255,0.08)",
@@ -858,7 +934,9 @@ export function openManualBattleArena(
       },
     });
   });
-  actionRow.appendChild(retreatBtn);
+  // Not appended to actionRow — moved into the human's hero panel, directly
+  // under Cast Spell (see humanCastBtn below), so it reads as "your hero's
+  // options" rather than a generic footer action.
 
   const surrenderBtn = document.createElement("button");
   surrenderBtn.textContent = "Surrender";
@@ -899,7 +977,7 @@ export function openManualBattleArena(
       });
     }
   });
-  actionRow.appendChild(surrenderBtn);
+  // Also moved into the human's hero panel — see the retreatBtn comment above.
 
   const settingsBtn = document.createElement("button");
   settingsBtn.textContent = "⚙ Settings";
@@ -921,18 +999,24 @@ export function openManualBattleArena(
           ? "Click a highlighted hex to move (moving next to an enemy fights immediately). Steps left over can still be used — move again, attack a ringed enemy, or End Turn when done."
           : "Out of movement — click a ringed enemy to attack, or End Turn.";
     endTurnBtn.style.display = selectedSlot !== null && !over ? "" : "none";
-    retreatBtn.style.display = over ? "none" : "";
-    surrenderBtn.style.display = over ? "none" : "";
     spyBtn.style.display = actor && !over && totalUnits(actor.entries) > 1 ? "" : "none";
     spyBtn.disabled = spyMode;
     spyBtn.style.opacity = spyMode ? "0.5" : "1";
     spyBtn.style.cursor = spyMode ? "not-allowed" : "pointer";
+
+    // Cast Spell, Retreat, and Surrender live under the human's hero portrait
+    // and only make sense while it's actually the human's turn to act.
+    const humanActing = unactedLivingSlots(state, humanSide).length > 0;
+    const showHumanActions = !over && humanActing;
+    humanCastBtn.style.display = showHumanActions ? "" : "none";
+    retreatBtn.style.display = showHumanActions ? "" : "none";
+    surrenderBtn.style.display = showHumanActions ? "" : "none";
   }
 
   // Hero portraits flank the battlefield, HoMM3-style — they stand outside
   // the grid rather than occupying a hex. Cast Spell is a stub for now: no
   // spell system exists yet, so the button just explains that.
-  function buildHeroPanel(label: string, accent: string): HTMLElement {
+  function buildHeroPanel(label: string, accent: string): { panel: HTMLElement; castBtn: HTMLButtonElement } {
     const panel = document.createElement("div");
     Object.assign(panel.style, {
       display: "flex",
@@ -977,7 +1061,7 @@ export function openManualBattleArena(
     castBtn.title = "Spellcasting isn't implemented yet";
     panel.appendChild(castBtn);
 
-    return panel;
+    return { panel, castBtn };
   }
 
   // Status bars flank the battlefield, one per side, each showing every
@@ -987,10 +1071,13 @@ export function openManualBattleArena(
   function buildStatusBar(label: string): HTMLElement {
     const bar = document.createElement("div");
     Object.assign(bar.style, {
-      width: "150px",
+      // Two tiles per row instead of one long column — halves the scroll
+      // length for a full roster and leaves each tile enough width for the
+      // Atk/Def/Speed/Range/Terrain rows added in buildStatusTile.
+      width: "320px",
       flexShrink: "0",
-      display: "flex",
-      flexDirection: "column",
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
       gap: "6px",
       maxHeight: "calc(100vh - 260px)",
       overflowY: "auto",
@@ -999,6 +1086,7 @@ export function openManualBattleArena(
     const heading = document.createElement("div");
     heading.textContent = label;
     Object.assign(heading.style, {
+      gridColumn: "1 / -1",
       fontWeight: "600",
       fontSize: "12px",
       opacity: "0.85",
@@ -1008,7 +1096,11 @@ export function openManualBattleArena(
     return bar;
   }
 
-  function buildSideColumn(heroLabel: string, barLabel: string, accent: string): { column: HTMLElement; bar: HTMLElement } {
+  function buildSideColumn(
+    heroLabel: string,
+    barLabel: string,
+    accent: string,
+  ): { column: HTMLElement; bar: HTMLElement; castBtn: HTMLButtonElement } {
     const column = document.createElement("div");
     Object.assign(column.style, {
       display: "flex",
@@ -1016,22 +1108,31 @@ export function openManualBattleArena(
       alignItems: "center",
       gap: "10px",
       flexShrink: "0",
+      // `container` centers each of its 4 children independently along the
+      // cross axis (align-items: center) based on that child's own height.
+      // The two hero columns are NOT the same height — the human's carries
+      // Retreat/Surrender under Cast Spell, the AI's doesn't — so centering
+      // them independently pushed the shorter/human portrait up out of
+      // alignment with the AI's (and, at some viewport heights, off the top
+      // of the viewport entirely). Anchoring both to the top keeps the two
+      // portraits level regardless of how tall either column's content is.
+      alignSelf: "flex-start",
     });
-    column.appendChild(buildHeroPanel(heroLabel, accent));
+    const hero = buildHeroPanel(heroLabel, accent);
+    column.appendChild(hero.panel);
     const bar = buildStatusBar(barLabel);
     column.appendChild(bar);
-    return { column, bar };
+    return { column, bar, castBtn: hero.castBtn };
   }
 
   const ATTACKER_ACCENT = "#3070c0";
   const DEFENDER_ACCENT = "#c04040";
 
-  const { column: attackerColumn, bar: attackerBar } = buildSideColumn(
+  const { column: attackerColumn, bar: attackerBar, castBtn: attackerCastBtn } = buildSideColumn(
     humanSide === "attacker" ? "You" : "AI Opponent",
     humanSide === "attacker" ? "Your Platoons" : "Enemy Platoons",
     ATTACKER_ACCENT,
   );
-  container.appendChild(attackerColumn);
 
   // Wrapped in its own positioned div (rather than appended straight into
   // `container`, which is a scrollable flex row of several columns) so the
@@ -1040,7 +1141,6 @@ export function openManualBattleArena(
   const canvasWrap = document.createElement("div");
   canvasWrap.style.position = "relative";
   canvasWrap.style.flexShrink = "0";
-  container.appendChild(canvasWrap);
 
   const canvas = document.createElement("canvas");
   canvas.style.background = "#14161a";
@@ -1051,12 +1151,11 @@ export function openManualBattleArena(
 
   const infoPopup = createPlatoonInfoPopup(canvasWrap);
 
-  const { column: defenderColumn, bar: defenderBar } = buildSideColumn(
+  const { column: defenderColumn, bar: defenderBar, castBtn: defenderCastBtn } = buildSideColumn(
     humanSide === "defender" ? "You" : "AI Opponent",
     humanSide === "defender" ? "Your Platoons" : "Enemy Platoons",
     DEFENDER_ACCENT,
   );
-  container.appendChild(defenderColumn);
 
   const sidePanel = document.createElement("div");
   Object.assign(sidePanel.style, {
@@ -1070,7 +1169,26 @@ export function openManualBattleArena(
     maxHeight: "calc(100vh - 100px)",
     overflowY: "auto",
   });
+
+  // Attacker/defender roles are fixed to their grid colors (see the
+  // sideChoice comment above), but the human should always see themself on
+  // the left and the AI on the right, whichever role they're playing —
+  // so the DOM order (which drives the on-screen left-to-right order) is
+  // picked by humanSide rather than hardcoded attacker-then-defender.
+  const humanColumn = humanSide === "attacker" ? attackerColumn : defenderColumn;
+  const aiColumn = humanSide === "attacker" ? defenderColumn : attackerColumn;
+  container.appendChild(humanColumn);
+  container.appendChild(canvasWrap);
+  container.appendChild(aiColumn);
   container.appendChild(sidePanel);
+
+  // Retreat/Surrender are human-only actions, so they live under the
+  // human's own Cast Spell button rather than the AI's — see the comments
+  // where retreatBtn/surrenderBtn are built, and renderFooterActions for
+  // the turn-gated visibility.
+  const humanCastBtn = humanSide === "attacker" ? attackerCastBtn : defenderCastBtn;
+  humanCastBtn.insertAdjacentElement("afterend", surrenderBtn);
+  humanCastBtn.insertAdjacentElement("afterend", retreatBtn);
 
   const layout = computeLayout(state);
   const pad = HEX_SIZE + 20;
@@ -1080,6 +1198,43 @@ export function openManualBattleArena(
   canvas.style.height = `${canvas.height}px`;
   const offsetX = -layout.minX + pad;
   const offsetY = -layout.minY + pad;
+
+  // The canvas's pixel buffer (canvas.width/height, set above) stays fixed to
+  // the hex grid's natural size — hex hit-testing math and drawing all assume
+  // that coordinate space. What changes on resize is only the canvas's
+  // on-screen CSS size: scaled down (via width/height, never up) to whatever
+  // room is left after the side panels take theirs, so the arena never forces
+  // a horizontal scrollbar on narrower viewports. The click handler already
+  // divides by canvas.width/rect.width to map screen coords back into grid
+  // space, so shrinking the CSS size needs no other changes to stay clickable.
+  //
+  // The floor is a last-resort sanity clamp (degenerate near-zero canvas at
+  // pathologically narrow windows), not a usability target — it must stay
+  // below whatever scale the widest real sidebar configuration needs at the
+  // narrowest supported viewport (1280px), or it becomes the thing that
+  // forces the scrollbar it exists to prevent. The 2-up status-bar grid
+  // (buildStatusBar) needs ~0.28 at 1280px, hence 0.2 here with headroom.
+  const CANVAS_MIN_SCALE = 0.2;
+  function fitCanvasToContainer(): void {
+    const containerStyle = getComputedStyle(container);
+    const paddingX = parseFloat(containerStyle.paddingLeft) + parseFloat(containerStyle.paddingRight);
+    const gapX = parseFloat(containerStyle.columnGap || containerStyle.gap || "0") * 3; // 4 siblings, 3 gaps
+    const siblingsWidth =
+      attackerColumn.getBoundingClientRect().width +
+      defenderColumn.getBoundingClientRect().width +
+      sidePanel.getBoundingClientRect().width;
+    const available = container.clientWidth - paddingX - gapX - siblingsWidth;
+    const scale = Math.min(1, Math.max(CANVAS_MIN_SCALE, available / canvas.width));
+    canvas.style.width = `${canvas.width * scale}px`;
+    canvas.style.height = `${canvas.height * scale}px`;
+
+    // Bound the footer to the same horizontal span as the battle row above
+    // it (side panels + canvas + gaps) instead of the full viewport width,
+    // so it visually lines up with the panels rather than floating full-bleed.
+    const contentWidth = siblingsWidth + canvas.width * scale + gapX;
+    footer.style.maxWidth = `${contentWidth}px`;
+  }
+  window.addEventListener("resize", fitCanvasToContainer);
 
   function toCanvas(q: number, r: number): { x: number; y: number } {
     const { x, y } = axialToPixel(q, r, HEX_SIZE);
@@ -1537,4 +1692,5 @@ export function openManualBattleArena(
   }
 
   refresh();
+  fitCanvasToContainer();
 }
