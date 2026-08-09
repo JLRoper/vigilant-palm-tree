@@ -34,6 +34,7 @@ A turn-based hex adventure map where the player moves a hero, claims resource ti
 | [battle-view-architecture.md](./battle-view-architecture.md) | Battle view surface: trigger → state → UI → server resolver; auto-resolve vs. dev Test-Battle paths | 📋 Planned |
 | [dev-console.md](./dev-console.md) | `src/debug/` event log + modal/footer console for inspecting bus + hook events in real time | 🟡 Open question |
 | [event-system.md](./event-system.md) | Planned `core/eventBus` refactor and event catalog (Phases 1–6) | 📋 Planned |
+| [plan/](./plan/) | Architecture plans: walkthrough + Tailscale, bloat/scalability review, module expansion plan | 📋 Planned |
 
 ## How to read these
 
@@ -74,7 +75,7 @@ Full details in the individual docs, but the big ones:
 - **Yield timing:** resources tick per round (all players act, then advanceRound)
 - **Schema anticipates 3 levels** but only Level 1 ships in v1 for player-founded settlements
 - **City view:** double-click settlement → city grid → build mines on resource spots
-- **Combat (future):** auto-resolve formula
+- **Combat (current / in progress):** the server runs the **temporary default auto-resolver** at [`shared/combat/resolveBattle.ts`](../shared/combat/resolveBattle.ts) on `POST /api/games/:name/resolve-battle` when heroes collide on the adventure map. The **tactical (manual) resolver** at [`shared/combat/manualBattle.ts`](../shared/combat/manualBattle.ts) + [`src/views/manualBattleArena.ts`](../src/views/manualBattleArena.ts) is the target and is **in progress** — engine + dev Test Battle arena shipped, adventure-map trigger wiring pending. See [`docs/army.md`](./army.md).
 - **Recruitment (future):** instant at friendly settlement
 - **Hero death (future):** captured for ransom
 - **Unit cap (future):** base 10 + 1 per owned settlement

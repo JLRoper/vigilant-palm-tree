@@ -127,6 +127,11 @@ After all 13 steps, the project must:
 - **Unused `planEnemyMove`.** Confirmed unused in `main.ts`; safe to delete during the `enemyWander.ts` move.
 - **`window.__gameDebug`** in `main.ts` references many internals; after refactor it must keep working because the smoke test may read it.
 
+### Linked mitigation plans
+
+- `../plan/2026-08-09-risk-circular-imports.md` — still applicable (core/ no longer leaf-only by convention only)
+- `../plan/2026-08-09-risk-gameDebug-contract.md` — still applicable (surface has grown past what the architecture doc described)
+
 ## Out of scope
 
 - Creating placeholder files for not-yet-built modules (per "Implementation order" step 13 note). The empty directories are the deliverable; the modules land with their milestones.
