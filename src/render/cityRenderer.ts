@@ -21,6 +21,10 @@ import {
 import { buildingFootprintFromRegistry } from "../core/buildingRegistry";
 import { pickStyleForBuilding } from "./assetDescriptors";
 import { settings, PARALLAX_SPEEDS } from "../state/settings";
+import skyboxBaseUrl from "../resources/skybox/cityView-background.png?url";
+import skyboxVariant2Url from "../resources/skybox/cityView-background-variant2.png?url";
+import skyboxVariant3Url from "../resources/skybox/cityView-background-variant3.png?url";
+import skyboxVariant4Url from "../resources/skybox/cityView-background-variant4.png?url";
 
 export { type BuildingDef, type GenerationStyle };
 
@@ -31,8 +35,6 @@ const COLOR_FILL = "#2a2438";
 const COLOR_STROKE = "#3a3450";
 const COLOR_HOVER_STROKE = "#ffcc00";
 const COLOR_TEXT = "#ffffff";
-
-const SKYBOX_BASE = "/src/resources/skybox/cityView-background";
 
 const LAYER_BANDS: Record<number, Array<{ yStart: number; yEnd: number }>> = {
   2: [
@@ -62,8 +64,15 @@ type LayerId = string;
 let layerCanvasCache = new Map<LayerId, HTMLCanvasElement[]>();
 let layerSplitPending = new Set<LayerId>();
 
+const SKYBOX_URLS: Record<number, string> = {
+  1: skyboxBaseUrl,
+  2: skyboxVariant2Url,
+  3: skyboxVariant3Url,
+  4: skyboxVariant4Url,
+};
+
 function skyboxPath(variant: number): string {
-  return variant <= 1 ? `${SKYBOX_BASE}.png` : `${SKYBOX_BASE}-variant${variant}.png`;
+  return SKYBOX_URLS[variant] ?? skyboxBaseUrl;
 }
 
 function ensureSkybox(variant: number): void {
