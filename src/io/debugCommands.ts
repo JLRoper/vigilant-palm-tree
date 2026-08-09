@@ -4,6 +4,7 @@ import { TERRAIN_COST } from "../map/terrain";
 import { axialToPixel } from "../core/hex";
 import type { EventLog, LogEntry, LogQuery, LogStats } from "../debug/eventLog";
 import type { DevConsoleHandle } from "../debug/devConsole";
+import { settings, updateSettings, DEFAULT_SETTINGS, type GameSettings } from "../state/settings";
 
 export interface AttachDebugApiEngine {
   getState: () => any;
@@ -181,6 +182,12 @@ export function attachDebugApi(engine: AttachDebugApiEngine): void {
       setPinned: (value: boolean): void => {
         engine.consoleHandle?.setPinned(value);
       },
+    },
+
+    settings: {
+      get: () => settings(),
+      update: (patch: Partial<GameSettings>) => updateSettings(patch),
+      reset: () => updateSettings({ ...DEFAULT_SETTINGS }),
     },
   };
 }
