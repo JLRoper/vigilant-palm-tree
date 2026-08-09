@@ -1,6 +1,6 @@
-# Army & Tactical Battlefield (Fallback)
+# Army & Tactical Battlefield
 
-🔁 **Fallback.** Per [`feature-plans/CombatResolutionEngine.md`](../feature-plans/CombatResolutionEngine.md), the hex tactical grid is now the v1 combat target, not a later milestone, and it has shipped: `POST /games/:name/resolve-battle` calls the real resolver at [`shared/combat/resolveBattle.ts`](../shared/combat/resolveBattle.ts) instead of deleting the defender outright. This doc's own auto-resolve plan (±20% swing, instant outcome, described below) was never implemented and is kept only as a fallback/preview design in case a quicker, non-tactical resolution mode is wanted later. Documented here so that design intent isn't lost and the schema anticipates it.
+**Combat status (today):** the server runs the **temporary default auto-resolver** at [`shared/combat/resolveBattle.ts`](../shared/combat/resolveBattle.ts) on `POST /api/games/:name/resolve-battle` whenever two heroes collide on the adventure map — it replaces the old "delete the defender outright" behavior with a turn-loop, type-advantage math, counterattacks, and retreat policies, but **no player input** is involved. The eventual target is the **tactical (manual) resolver** ([`shared/combat/manualBattle.ts`](../shared/combat/manualBattle.ts) + the dev Test Battle arena at [`src/views/manualBattleArena.ts`](../src/views/manualBattleArena.ts)) and it is **in progress** — the engine and dev arena have shipped, but wiring the adventure-map hero-collision trigger into the manual arena UI is still pending. The simple ±20% swing auto-resolve formula described below was the original v1 plan, was never implemented, and is kept only as a fallback / preview design in case a quicker non-tactical mode is wanted later. Documented here so that design intent isn't lost and the schema anticipates it.
 
 ## Why this was originally deferred
 
@@ -40,12 +40,15 @@ When this system is designed for real:
 
 ## Combat resolution
 
-✅ **Locked (from earlier decision), fallback only:** this **auto-resolve formula** was the original v1 plan, superseded by the tactical resolver in [`shared/combat/`](../shared/combat/) (damage formula, type-advantage chart, counterattacks, and self/hero retreat documented in `feature-plans/CombatResolutionEngine.md`). Kept here in case a quicker non-tactical mode is wanted later.
+**Current default (temporary):** `shared/combat/resolveBattle.ts` runs server-side as an auto-resolver with no player input — damage formula, type-advantage chart, counterattack chains, and self/hero retreat policies (full design in [`feature-plans/CombatResolutionEngine.md`](../feature-plans/CombatResolutionEngine.md) and the in-progress technical write-up in [`docs/CombatResolutionEngine-TechnicalDesign.md`](./CombatResolutionEngine-TechnicalDesign.md)).
+
+**Target (in progress):** the tactical (manual) resolver at `shared/combat/manualBattle.ts` + `src/views/manualBattleArena.ts`. The dev Test Battle arena exercises it today; the adventure-map hero-collision trigger wiring is the remaining piece.
+
+**Fallback / historical (never implemented):** the simple **auto-resolve formula** below was the original v1 plan. Kept here only so design intent isn't lost and the schema continues to anticipate a non-tactical mode if one is wanted later.
 
 - `attack` and `defense` derived from unit types + counts.
 - Random ±20% swing per engagement.
 - Instant outcome, no per-unit positioning in v1.
-- Tactical grid screen can come **after** auto-resolve ships, if desired.
 
 ## Hero death
 

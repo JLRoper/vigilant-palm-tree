@@ -2,14 +2,16 @@
 
 **Status:** In progress, uncommitted on `feature/combat-resolution-engine`. Describes
 the code that exists in the working tree today, not the target/finished
-design — see [`CombatResolutionEngine.md`](CombatResolutionEngine.md) for the
+design — see [`../feature-plans/CombatResolutionEngine.md`](../feature-plans/CombatResolutionEngine.md) for the
 locked design decisions this implements. Update this doc as the
 implementation changes; it should always describe what's actually there.
 
+**Framing:** the resolver at [`shared/combat/resolveBattle.ts`](../shared/combat/resolveBattle.ts) documented here is the **temporary default auto-resolver** that runs server-side on `POST /api/games/:name/resolve-battle` whenever heroes collide on the adventure map. It is auto in the sense that no player drives it; the eventual target is the **tactical (manual) resolver** at [`shared/combat/manualBattle.ts`](../shared/combat/manualBattle.ts) + the dev Test Battle arena at [`src/views/manualBattleArena.ts`](../src/views/manualBattleArena.ts), which is the work this engine feeds into. See [`./army.md`](./army.md) for the full status.
+
 ## 1. Summary
 
-A pure, deterministic hex-battle resolver (`shared/combat/`) replaces the old
-"defender just vanishes" auto-resolve behind
+A pure, deterministic hex-battle resolver (`shared/combat/resolveBattle.ts`) — currently the **temporary default auto-resolver** for adventure-map combat — replaces the old
+"defender just vanishes" stub behind
 `POST /games/:name/resolve-battle`. Given two 8-slot platoon rosters, it plays
 out stat-comparison combat with type advantages, counterattacks, and
 per-side retreat policies, and returns a full result + replayable log. The
