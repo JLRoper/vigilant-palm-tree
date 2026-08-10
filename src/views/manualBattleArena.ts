@@ -575,11 +575,14 @@ function buildStatusTile(
   tile.appendChild(hpLabel);
 
   // Morale + Fatigue placeholder bars. No actual mechanic behind these yet —
-  // the values are hard-coded (morale always 100, fatigue always 0) so the
+  // the values are hard-coded (morale always full, fatigue always none) so the
   // slot exists in the UI for when the combat system gets around to
   // tracking them. Wired into the same color palette as HP so the bar
   // conveys severity at a glance.
-  tile.appendChild(makeMetricBar("Morale", 100, (v) => (v > 0.5 ? "#4caf50" : v > 0.25 ? "#ffb300" : "#e53935")));
+  //
+  // NB: makeMetricBar takes a 0..1 ratio, not a percentage — passing 100 here
+  // rendered the label as "Morale 10000".
+  tile.appendChild(makeMetricBar("Morale", 1, (v) => (v > 0.5 ? "#4caf50" : v > 0.25 ? "#ffb300" : "#e53935")));
   tile.appendChild(makeMetricBar("Fatigue", 0, (v) => (v < 0.25 ? "#4caf50" : v < 0.5 ? "#ffb300" : "#e53935")));
 
   return tile;
@@ -825,31 +828,38 @@ export function openManualBattleArena(
   });
   overlay.appendChild(footer);
 
+  // Round / turn / time-of-day are ambient state that never changes mid-turn.
+  // They used to be three 18px bordered boxes — the largest type on the whole
+  // screen — while the actual controls sat in a corner as small buttons, which
+  // put the visual hierarchy exactly backwards. Now a quiet single status
+  // line; End Turn below carries the emphasis instead.
   const infoRow = document.createElement("div");
   Object.assign(infoRow.style, {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: "20px",
-    fontSize: "18px",
-    fontWeight: "600",
+    gap: "8px",
+    fontSize: "12.5px",
+    opacity: "0.7",
+    letterSpacing: "0.2px",
   });
   footer.appendChild(infoRow);
 
-  function buildFooterBox(): HTMLElement {
-    const box = document.createElement("div");
-    Object.assign(box.style, {
-      border: "1px solid rgba(255,255,255,0.25)",
-      borderRadius: "6px",
-      padding: "8px 20px",
-    });
-    return box;
+  function buildFooterSeparator(): HTMLElement {
+    const sep = document.createElement("span");
+    sep.textContent = "·";
+    sep.style.opacity = "0.5";
+    return sep;
   }
 
-  const roundEl = buildFooterBox();
-  const turnEl = buildFooterBox();
-  const timeEl = buildFooterBox();
-  infoRow.append(roundEl, turnEl, timeEl);
+  const roundEl = document.createElement("span");
+  const turnEl = document.createElement("span");
+  const timeEl = document.createElement("span");
+  // Whose turn it is is the one part of this row that actually changes during
+  // play, so it keeps a little weight while the rest stays flat.
+  turnEl.style.fontWeight = "600";
+  turnEl.style.opacity = "1";
+  infoRow.append(roundEl, buildFooterSeparator(), turnEl, buildFooterSeparator(), timeEl);
 
   const TIME_OF_DAY_ICON: Record<TimeOfDay, string> = {
     Dawn: "🌅",
@@ -882,7 +892,11 @@ export function openManualBattleArena(
 
   const endTurnBtn = document.createElement("button");
   endTurnBtn.textContent = "End Turn (Don't Attack)";
-  styleButton(endTurnBtn);
+  // The primary action on the screen — promoted out of the row of identical
+  // grey buttons it used to sit in.
+  styleButton(endTurnBtn, true);
+  endTurnBtn.style.padding = "8px 16px";
+  endTurnBtn.style.fontSize = "13px";
   endTurnBtn.addEventListener("click", () => {
     if (selectedSlot === null) return;
     debugLog(`click End Turn -> ${platoonLabel(humanSide, selectedSlot)} ends its turn without attacking`);
@@ -991,13 +1005,21 @@ export function openManualBattleArena(
   function renderFooterActions(): void {
     const over = isBattleOver(state);
     const actor = selectedSlot === null ? undefined : getCombatant(state, humanSide, selectedSlot);
-    helpTextEl.textContent = spyMode
-      ? "Click a highlighted enemy to send a spy (costs 1 troop), or click elsewhere to cancel."
-      : selectedSlot === null
-        ? "Click one of your platoons in the status bar (or on the grid) to act."
-        : moveRange.length > 0
-          ? "Click a highlighted hex to move (moving next to an enemy fights immediately). Steps left over can still be used — move again, attack a ringed enemy, or End Turn when done."
-          : "Out of movement — click a ringed enemy to attack, or End Turn.";
+    // "Waiting on the AI" used to live in a dedicated 200px side panel that
+    // was otherwise empty (and was costing the battlefield that width). It
+    // belongs here with the rest of the turn state — and without it this row
+    // told the player to "click one of your platoons" during the AI's turn,
+    // when nothing is selectable.
+    const waitingOnAi = !over && unactedLivingSlots(state, humanSide).length === 0;
+    helpTextEl.textContent = waitingOnAi
+      ? "Waiting on the AI to finish its round…"
+      : spyMode
+        ? "Click a highlighted enemy to send a spy (costs 1 troop), or click elsewhere to cancel."
+        : selectedSlot === null
+          ? "Click one of your platoons in the status bar (or on the grid) to act."
+          : moveRange.length > 0
+            ? "Click a highlighted hex to move (moving next to an enemy fights immediately). Steps left over can still be used — move again, attack a ringed enemy, or End Turn when done."
+            : "Out of movement — click a ringed enemy to attack, or End Turn.";
     endTurnBtn.style.display = selectedSlot !== null && !over ? "" : "none";
     spyBtn.style.display = actor && !over && totalUnits(actor.entries) > 1 ? "" : "none";
     spyBtn.disabled = spyMode;
@@ -1079,7 +1101,14 @@ export function openManualBattleArena(
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
       gap: "6px",
-      maxHeight: "calc(100vh - 260px)",
+      // Take whatever height is left in the column under the hero panel,
+      // rather than a hardcoded `calc(100vh - 260px)` guess that clipped the
+      // last row of tiles while leaving dead space below the map. minHeight:0
+      // is what actually lets a flex child shrink below its content size and
+      // scroll internally.
+      flex: "1",
+      minHeight: "0",
+      alignContent: "start",
       overflowY: "auto",
       fontFamily: menuTheme.font,
     });
@@ -1108,15 +1137,20 @@ export function openManualBattleArena(
       alignItems: "center",
       gap: "10px",
       flexShrink: "0",
-      // `container` centers each of its 4 children independently along the
+      // `container` centers each of its children independently along the
       // cross axis (align-items: center) based on that child's own height.
       // The two hero columns are NOT the same height — the human's carries
       // Retreat/Surrender under Cast Spell, the AI's doesn't — so centering
       // them independently pushed the shorter/human portrait up out of
       // alignment with the AI's (and, at some viewport heights, off the top
-      // of the viewport entirely). Anchoring both to the top keeps the two
-      // portraits level regardless of how tall either column's content is.
-      alignSelf: "flex-start",
+      // of the viewport entirely).
+      //
+      // `stretch` rather than the `flex-start` that originally fixed that:
+      // both still start at the container's top edge, so the portraits stay
+      // level, but the column now also runs the container's full height,
+      // which is what lets the platoon grid below flex into the leftover
+      // space instead of being capped and clipped.
+      alignSelf: "stretch",
     });
     const hero = buildHeroPanel(heroLabel, accent);
     column.appendChild(hero.panel);
@@ -1157,19 +1191,6 @@ export function openManualBattleArena(
     DEFENDER_ACCENT,
   );
 
-  const sidePanel = document.createElement("div");
-  Object.assign(sidePanel.style, {
-    width: "200px",
-    flexShrink: "0",
-    display: "flex",
-    flexDirection: "column",
-    gap: "6px",
-    fontFamily: menuTheme.font,
-    fontSize: "12px",
-    maxHeight: "calc(100vh - 100px)",
-    overflowY: "auto",
-  });
-
   // Attacker/defender roles are fixed to their grid colors (see the
   // sideChoice comment above), but the human should always see themself on
   // the left and the AI on the right, whichever role they're playing —
@@ -1180,7 +1201,6 @@ export function openManualBattleArena(
   container.appendChild(humanColumn);
   container.appendChild(canvasWrap);
   container.appendChild(aiColumn);
-  container.appendChild(sidePanel);
 
   // Retreat/Surrender are human-only actions, so they live under the
   // human's own Cast Spell button rather than the AI's — see the comments
@@ -1192,21 +1212,30 @@ export function openManualBattleArena(
 
   const layout = computeLayout(state);
   const pad = HEX_SIZE + 20;
-  canvas.width = layout.maxX - layout.minX + pad * 2;
-  canvas.height = layout.maxY - layout.minY + pad * 2;
-  canvas.style.width = `${canvas.width}px`;
-  canvas.style.height = `${canvas.height}px`;
+  // The hex grid's natural size at HEX_SIZE. This is the *logical* drawing
+  // space: every draw call and all hit-testing works in these coordinates,
+  // whatever the canvas is actually sized to on screen.
+  const GRID_W = layout.maxX - layout.minX + pad * 2;
+  const GRID_H = layout.maxY - layout.minY + pad * 2;
   const offsetX = -layout.minX + pad;
   const offsetY = -layout.minY + pad;
 
-  // The canvas's pixel buffer (canvas.width/height, set above) stays fixed to
-  // the hex grid's natural size — hex hit-testing math and drawing all assume
-  // that coordinate space. What changes on resize is only the canvas's
-  // on-screen CSS size: scaled down (via width/height, never up) to whatever
-  // room is left after the side panels take theirs, so the arena never forces
-  // a horizontal scrollbar on narrower viewports. The click handler already
-  // divides by canvas.width/rect.width to map screen coords back into grid
-  // space, so shrinking the CSS size needs no other changes to stay clickable.
+  // Display sizing. Three separate numbers are in play and it's worth being
+  // explicit about which is which:
+  //
+  //   GRID_W/GRID_H  logical drawing space — fixed, what draw() speaks
+  //   scale          logical → CSS px, i.e. how big the map looks
+  //   dpr            CSS px → device px, for HiDPI sharpness
+  //
+  // canvas.style.* is the CSS size; canvas.width/height is the backing pixel
+  // buffer, sized at scale * dpr so the map re-renders crisp at whatever size
+  // it lands on rather than being a fixed bitmap stretched to fit. `draw()`
+  // keeps working in logical coordinates because applyCanvasTransform bakes
+  // scale * dpr into the context transform.
+  //
+  // The previous version capped scale at 1 and only ever shrank a fixed-size
+  // buffer, which left the battlefield small on anything wider than ~1280 and
+  // soft on every HiDPI display.
   //
   // The floor is a last-resort sanity clamp (degenerate near-zero canvas at
   // pathologically narrow windows), not a usability target — it must stay
@@ -1215,23 +1244,42 @@ export function openManualBattleArena(
   // forces the scrollbar it exists to prevent. The 2-up status-bar grid
   // (buildStatusBar) needs ~0.28 at 1280px, hence 0.2 here with headroom.
   const CANVAS_MIN_SCALE = 0.2;
+  let canvasScale = 1;
+
+  function applyCanvasTransform(): void {
+    const dpr = window.devicePixelRatio || 1;
+    const factor = canvasScale * dpr;
+    canvas.width = Math.round(GRID_W * factor);
+    canvas.height = Math.round(GRID_H * factor);
+    canvas.style.width = `${GRID_W * canvasScale}px`;
+    canvas.style.height = `${GRID_H * canvasScale}px`;
+    // Setting canvas.width/height resets the context, so the transform has to
+    // be (re)applied here rather than once at startup.
+    ctx.setTransform(factor, 0, 0, factor, 0, 0);
+  }
+
   function fitCanvasToContainer(): void {
     const containerStyle = getComputedStyle(container);
     const paddingX = parseFloat(containerStyle.paddingLeft) + parseFloat(containerStyle.paddingRight);
-    const gapX = parseFloat(containerStyle.columnGap || containerStyle.gap || "0") * 3; // 4 siblings, 3 gaps
+    const paddingY = parseFloat(containerStyle.paddingTop) + parseFloat(containerStyle.paddingBottom);
+    const gapX = parseFloat(containerStyle.columnGap || containerStyle.gap || "0") * 2; // 3 siblings, 2 gaps
     const siblingsWidth =
-      attackerColumn.getBoundingClientRect().width +
-      defenderColumn.getBoundingClientRect().width +
-      sidePanel.getBoundingClientRect().width;
-    const available = container.clientWidth - paddingX - gapX - siblingsWidth;
-    const scale = Math.min(1, Math.max(CANVAS_MIN_SCALE, available / canvas.width));
-    canvas.style.width = `${canvas.width * scale}px`;
-    canvas.style.height = `${canvas.height * scale}px`;
+      attackerColumn.getBoundingClientRect().width + defenderColumn.getBoundingClientRect().width;
+    const availableW = container.clientWidth - paddingX - gapX - siblingsWidth;
+    const availableH = container.clientHeight - paddingY;
+
+    // Fit to *both* axes. Width alone was enough while the map could only
+    // shrink; now that it can grow, a wide-but-short viewport (ultrawide, or
+    // any window with the browser chrome eating the height) would otherwise
+    // scale the grid past the bottom of the container.
+    canvasScale = Math.max(CANVAS_MIN_SCALE, Math.min(availableW / GRID_W, availableH / GRID_H));
+    applyCanvasTransform();
+    draw();
 
     // Bound the footer to the same horizontal span as the battle row above
     // it (side panels + canvas + gaps) instead of the full viewport width,
     // so it visually lines up with the panels rather than floating full-bleed.
-    const contentWidth = siblingsWidth + canvas.width * scale + gapX;
+    const contentWidth = siblingsWidth + GRID_W * canvasScale + gapX;
     footer.style.maxWidth = `${contentWidth}px`;
   }
   window.addEventListener("resize", fitCanvasToContainer);
@@ -1268,10 +1316,20 @@ export function openManualBattleArena(
     const winner = winVsSlot === null ? undefined : getCombatant(state, humanSide, winVsSlot);
     // The canvas is snug around the hex grid (barely 50px of padding) — far
     // too tight to fit a popup beside an edge-column unit without covering
-    // it. canvasWrap has no overflow:hidden, so give the popup the real
-    // on-screen room (the whole viewport, minus a margin) rather than
-    // clamping it to the canvas's own tiny bounds.
+    // it. canvasWrap has no overflow:hidden, so the popup is allowed to
+    // spill outside the canvas into the arena's own padding and gaps.
+    //
+    // What it must NOT spill over is either platoon rail. behindSide() puts
+    // the card on the far side of its subject, away from the enemy — which
+    // for the left-hand army points straight at that army's own rail, so an
+    // un-clamped card lands on top of the very tile it's describing. Bounding
+    // it to the gap *between* the rails (rather than the whole viewport)
+    // keeps the extra elbow room without ever covering them; same idea
+    // vertically for the header and footer.
     const wrapRect = canvasWrap.getBoundingClientRect();
+    const humanRect = humanColumn.getBoundingClientRect();
+    const aiRect = aiColumn.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
     const margin = 12;
     infoPopup.show({
       combatant,
@@ -1284,15 +1342,17 @@ export function openManualBattleArena(
       anchorX: anchor.x,
       anchorY: anchor.y,
       anchorSide: behindSide(combatant, opponents),
-      minX: margin - wrapRect.left,
-      maxX: window.innerWidth - wrapRect.left - margin,
-      minY: margin - wrapRect.top,
-      maxY: window.innerHeight - wrapRect.top - margin,
+      minX: humanRect.right + margin - wrapRect.left,
+      maxX: aiRect.left - margin - wrapRect.left,
+      minY: containerRect.top + margin - wrapRect.top,
+      maxY: containerRect.bottom - margin - wrapRect.top,
     });
   }
 
   function draw(): void {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Logical extent, not canvas.width/height — the context transform set in
+    // applyCanvasTransform already maps logical space onto the backing buffer.
+    ctx.clearRect(0, 0, GRID_W, GRID_H);
 
     for (const hex of state.grid.hexes) {
       const { x, y } = toCanvas(hex.q, hex.r);
@@ -1343,11 +1403,55 @@ export function openManualBattleArena(
         ctx.lineWidth = isSelected ? 2 : 1;
         ctx.stroke();
 
-        const count = c.entries.reduce((sum, e) => sum + e.count, 0);
+        // Primary label is the platoon number, not the unit count: every
+        // panel on screen is organised by "Platoon N", so the token has to
+        // carry the same identity or there's no way to connect a marker on
+        // the map to its tile in the side rail (or the other way round).
         ctx.fillStyle = "#fff";
-        ctx.font = `${Math.round(HEX_SIZE * 0.4)}px ${menuTheme.font}`;
+        ctx.font = `600 ${Math.round(HEX_SIZE * 0.45)}px ${menuTheme.font}`;
         ctx.textAlign = "center";
-        ctx.fillText(String(count), x, y + 3);
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(c.slotIndex + 1), x, y);
+
+        // Same fog-of-war gate the status tiles use (see buildStatusTile):
+        // your own platoons are always known, an enemy's only once it's been
+        // scouted — by contact or by the Spy action. Strength and health are
+        // exactly what scouting is *for*, so the token has to respect it too;
+        // drawing them unconditionally here handed the player the enemy's
+        // full roster on the grid while the rail still read "Unscouted",
+        // which made both Spy and the scoutedBy gating pointless.
+        //
+        // Platoon number stays visible either way — the rail already titles
+        // unscouted enemies "Platoon N", and the number is what ties a token
+        // to its tile.
+        const isKnown = c.side === humanSide || c.scoutedBy.has(humanSide);
+
+        // Unit count demoted to a badge on the token's upper-right shoulder.
+        // Kept inside the token's own footprint (rather than stacked under
+        // the HP bar, which would collide with the token of the hex below).
+        // Unscouted enemies get "?" rather than no badge at all, so the fog
+        // reads as missing information instead of a half-drawn token.
+        const count = c.entries.reduce((sum, e) => sum + e.count, 0);
+        const badgeOffset = HEX_SIZE * 0.55 * 0.72;
+        const badgeX = x + badgeOffset;
+        const badgeY = y - badgeOffset;
+        const badgeR = HEX_SIZE * 0.55 * 0.45;
+        ctx.beginPath();
+        ctx.arc(badgeX, badgeY, badgeR, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0,0,0,0.8)";
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = isKnown ? "#fff" : "rgba(255,255,255,0.65)";
+        ctx.font = `${Math.round(HEX_SIZE * 0.26)}px ${menuTheme.font}`;
+        ctx.fillText(isKnown ? String(count) : "?", badgeX, badgeY);
+        ctx.textBaseline = "alphabetic";
+
+        // No health bar at all for an unscouted enemy. An empty or greyed
+        // track would read as "this platoon is at 0 HP" rather than "you
+        // don't know" — absence plus the "?" badge is unambiguous.
+        if (!isKnown) continue;
 
         const hpPct = c.maxHealth > 0 ? totalHealth(c.entries, state.unitTypes) / c.maxHealth : 0;
         const barW = HEX_SIZE * 1.1;
@@ -1431,6 +1535,10 @@ export function openManualBattleArena(
       }
       return;
     }
+    // Re-anchor the card to where the platoon actually is now. selectPlatoon
+    // does this on selection but this path didn't, so after a move the popup
+    // stayed at the old hex still advertising the pre-move movement budget.
+    showInfoPopupFor(combatant, null);
     refresh();
   }
 
@@ -1641,24 +1749,13 @@ export function openManualBattleArena(
 
   canvas.addEventListener("click", (e) => {
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX - offsetX;
-    const y = (e.clientY - rect.top) * scaleY - offsetY;
+    // Map CSS pixels back into logical grid space. Deliberately GRID_W/H and
+    // not canvas.width/height: the backing buffer now carries the devicePixel
+    // ratio too, which must not enter the hit-test.
+    const x = ((e.clientX - rect.left) * GRID_W) / rect.width - offsetX;
+    const y = ((e.clientY - rect.top) * GRID_H) / rect.height - offsetY;
     handleClick(pixelToAxial(x, y, HEX_SIZE));
   });
-
-  function renderSidePanel(): void {
-    sidePanel.replaceChildren();
-
-    if (unactedLivingSlots(state, humanSide).length === 0) {
-      const waiting = document.createElement("div");
-      waiting.textContent = "Waiting on the AI to finish its round...";
-      waiting.style.opacity = "0.6";
-      waiting.style.fontSize = "10px";
-      sidePanel.appendChild(waiting);
-    }
-  }
 
   function renderStatusBars(): void {
     const actableSlots = unactedLivingSlots(state, humanSide);
@@ -1685,12 +1782,15 @@ export function openManualBattleArena(
 
   function refresh(): void {
     draw();
-    renderSidePanel();
     renderStatusBars();
     renderFooter();
     renderFooterActions();
   }
 
-  refresh();
+  // Status bars first (they set the side columns' width, which is what's left
+  // over for the canvas), then fit — which sizes the canvas and draws it.
+  renderStatusBars();
+  renderFooter();
+  renderFooterActions();
   fitCanvasToContainer();
 }

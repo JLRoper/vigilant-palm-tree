@@ -179,7 +179,28 @@ export function createPlatoonInfoPopup(container: HTMLElement): PlatoonInfoPopup
     const popupH = el.offsetHeight;
     const gap = 16;
 
-    let left = opts.anchorSide === "left" ? opts.anchorX - gap - popupW : opts.anchorX + gap;
+    // Preferred side first, then flip, then clamp — in that order. Clamping
+    // alone was enough while the battlefield was small and there was a wide
+    // gutter to absorb the card; now that the map fills the space between the
+    // rails, a card whose preferred side doesn't fit gets pushed back across
+    // its own anchor and ends up covering the very platoon it describes.
+    // Trying the opposite side before falling back to a clamp keeps it beside
+    // the token instead of on top of it.
+    let side = opts.anchorSide;
+    let left = side === "left" ? opts.anchorX - gap - popupW : opts.anchorX + gap;
+    if (side === "left" && left < opts.minX) {
+      const flipped = opts.anchorX + gap;
+      if (flipped + popupW <= opts.maxX) {
+        left = flipped;
+        side = "right";
+      }
+    } else if (side === "right" && left + popupW > opts.maxX) {
+      const flipped = opts.anchorX - gap - popupW;
+      if (flipped >= opts.minX) {
+        left = flipped;
+        side = "left";
+      }
+    }
     left = Math.max(opts.minX, Math.min(left, opts.maxX - popupW));
     let top = opts.anchorY - popupH / 2;
     top = Math.max(opts.minY, Math.min(top, opts.maxY - popupH));
@@ -190,7 +211,8 @@ export function createPlatoonInfoPopup(container: HTMLElement): PlatoonInfoPopup
 
     const tailTop = Math.max(10, Math.min(opts.anchorY - top - 5, popupH - 20));
     tail.style.top = `${tailTop}px`;
-    if (opts.anchorSide === "left") {
+    // `side`, not `opts.anchorSide` — the flip above may have moved the card.
+    if (side === "left") {
       tail.style.left = "-6px";
       tail.style.right = "";
       tail.style.borderRight = "none";
