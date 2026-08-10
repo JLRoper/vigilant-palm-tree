@@ -1,7 +1,14 @@
 # Plan: Bound modal height to the viewport, then page the Settings menu
 
 **Source issue:** Settings modal content runs off the bottom of the screen with no way to reach it.
-**Status:** Root cause confirmed against a running build. Not started.
+**Status:** Stage A implemented and verified in the running app. Stage B not started.
+
+> **Correction to A3 below: the `ResizeObserver` approach does not work and was not shipped.**
+> Once the panel reaches its `max-height`, further content growth is absorbed by the
+> scrolling body and `root`'s box stops changing size, so an observer on it never fires
+> (measured: **0 callbacks** across a full collapse/expand cycle). Positioning is instead
+> left to the wrapper's existing flexbox, which re-centres on content growth and window
+> resize with no JS at all. See **"Stage A as built"** at the end of this document.
 
 ## Current state (verified live at `http://localhost:5190/`)
 
@@ -158,3 +165,65 @@ Should `‹ Back` always return to the section list, or should reopening Setting
 | **Single-open accordion** (collapse others on expand) | Insufficient alone — the Visual section *by itself* already overflowed at a 691px viewport. Would mask the bug at common window sizes without fixing it. |
 | **Two-pane settings** (section list left, content right, widen 420 → ~640) | Best end state for a settings screen, but materially more work than B for the same immediate benefit. Reconsider after B if Settings keeps growing. |
 | **Stage B alone, skipping A** | Fixes only what is currently visible. The other 14 modals keep the latent overflow, and the next one to grow re-opens the same bug. |
+
+---
+
+## Stage A as built
+
+Implemented in `src/views/menu.ts` (+60 / −6). Differs from the plan above in one
+important way: **no `ResizeObserver` is used for centring.**
+
+### Why A3 was abandoned
+
+A3 assumed a `ResizeObserver` on `menu.root` would catch post-open content growth.
+It does not. Once `root` hits its `max-height`, the extra content is taken up by the
+scrolling body and `root`'s own box stops changing — so the observer goes silent
+exactly when it is needed. An independent probe observer on the same element
+recorded **0 callbacks** across a full collapse/expand cycle.
+
+The wrapper created by `openCenteredModal` was *already* `display:flex` +
+`align-items:center`. The only reason it never centred anything is that
+`setPosition` writes `position:absolute`, which removes the panel from flex flow.
+Leaving the panel in flow lets CSS handle centring, growth, and window resize with
+no JavaScript and no observer.
+
+### What changed
+
+| # | Change | Location |
+|---|---|---|
+| A1 | `root` → flex column with `max-height: calc(100vh - 48px)`; `header` → `flex-shrink: 0`; `body` → `overflow-y: auto`, `min-height: 0`, `overscroll-behavior: contain` | `PopupMenu` constructor |
+| A2 | Hardcoded `240` removed; no position computed at all | `openCenteredModal` |
+| A3′ | **Replaced:** panel stays `position: relative` in the wrapper's flex flow; wrapper gains `padding: 24px` + `box-sizing: border-box` | `openCenteredModal` |
+| A4 | Drag clamped on all four edges via a shared `clamp` helper | `attachDrag` |
+| A5 | **New:** first drag promotes the panel from flex flow to `position: absolute`, pinned where it currently sits | `attachDrag` |
+
+### Two traps worth remembering
+
+- **`min-height: 0` on the body is load-bearing.** Flex children default to
+  `min-height: auto` and refuse to shrink below their content, which silently
+  defeats the `max-height` on `root`. Without it the change appears to do nothing.
+- **Do not use `max-height: 100%` here.** A percentage resolves against the
+  wrapper's *content* box in flex flow but its *padding* box once a drag promotes
+  the panel to absolute — quietly loosening the cap by the padding and letting the
+  panel hang ~2px off screen. The viewport-based `calc(100vh - 48px)` is identical
+  in both modes.
+
+### Verified in the running app
+
+In-game Settings, all 5 sections expanded, 691px viewport:
+
+| Check | Result |
+|---|---|
+| Panel fits viewport | ✅ top 23, bottom 668 (was bottom 1044) |
+| Previously unreachable content | ✅ 572px now scrollable |
+| Reaches last control | ✅ `Close` reachable |
+| Header pinned while scrolled | ✅ |
+| Page itself does not scroll | ✅ |
+| Drag to all 4 corners stays on screen | ✅ 4/4 |
+| Auto re-centres on growth | ✅ top 162 → 23, no JS |
+
+Regression spot-checks, all on screen and correctly centred: New Game (400),
+Test Battle Setup (480), Developer Settings (480), Asset Manager (720), plus the
+non-modal `PopupMenu` popups (Heroes, Settlements) which share the constructor change.
+
+`npx tsc --noEmit` clean; `npm run build` passes.
