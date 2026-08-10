@@ -1,5 +1,6 @@
 import { Camera } from "../render/camera";
-import { Renderer, type RenderOptions } from "../render/renderer";
+import { Renderer } from "../render/renderer";
+import type { RenderOptions } from "../render/renderTypes";
 import { MinimapCamera } from "../render/minimap";
 import { GameMap } from "../map/gameMap";
 import { Hero } from "../entities/hero";

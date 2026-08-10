@@ -1,4 +1,4 @@
-import type { PlatoonEntry, UnitType } from "../../src/state/units";
+import type { PlatoonEntry, UnitType } from "../units";
 import { TYPE_ADVANTAGE_MULTIPLIER, TYPE_DISADVANTAGE_MULTIPLIER, TYPE_TRIANGLE } from "../combatConfig";
 
 export function totalHealth(entries: readonly PlatoonEntry[], unitTypes: Record<string, UnitType>): number {

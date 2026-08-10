@@ -98,6 +98,7 @@ From [`package.json`](./package.json:1).
 | `vite` | ^5.4.10 | Client bundler / dev server |
 | `tsx` | ^4.23.1 | Run `.ts` files directly (server + tests) with watch mode |
 | `concurrently` | ^9.1.2 | Run web + API together (`npm run dev`) |
+| `dependency-cruiser` | ^18.1.1 | Lint cross-boundary import rules for `src/`, `shared/`, `server/` (config: `dependency-cruiser.cjs`); invoked by `npm run lint:deps` |
 | `playwright` | ^1.61.1 | Browser automation: smoke tests + sprite generation pipeline |
 | `@types/express` | ^5.0.6 | Express 5 typings |
 | `@types/cors` | ^2.8.19 | CORS typings |
@@ -129,6 +130,7 @@ Three helper scripts manage ports and processes via PowerShell (cross-platform â
 | `test:cityview` | `pwsh scripts/ports.ps1 && tsx --env-file=.env test/cityView.test.ts` | City view integration test |
 | `test:all` | `pwsh scripts/ports.ps1 && tsx --env-file=.env test/smoke.ts && tsx --env-file=.env test/cityView.test.ts` | Full test suite (smoke + cityView) |
 | `test:static` | `pwsh scripts/ports.ps1 --static && tsx --env-file=.env test/smoke.ts` | Smoke test with stable deterministic ports |
+| `lint:deps` | `depcruise src shared server --config dependency-cruiser.cjs` | Static check of cross-boundary imports (catches cycles and out-of-bounds deps between `src/`, `shared/`, and `server/`) |
 | `sprites:generate` | `node tools/sprites/pixel-gen.mjs` | Render pixel-art castle sprites into `src/resources/` |
 | `sprites:preview` | `node tools/sprites/generate-preview.mjs` | Build a sprite contact-sheet preview |
 | `skybox:split` | `tsx scripts/split-skybox-layers.ts` | Split all skybox variants into parallax layer PNGs (2/3/4-layer breakdowns, 18% feathered blends) |
@@ -256,7 +258,9 @@ Vite proxies `/api/*` to `http://127.0.0.1:<API_PORT>` in both dev and preview, 
 
 - ESM everywhere; no `require()` in source.
 - Strict TypeScript; unused locals/parameters are build errors.
-- Domain types live next to the code that owns them (`Hero`, `Castle`, `GameState`, etc.) rather than in a central `types/` folder.
+- Domain types live next to the code that owns them (`Hero`, `Castle`, `GameState`, etc.) rather than in a central `types/` folder. Engine-neutral types that must be visible to both `src/` and `server/` are an explicit exception and live in `shared/types.ts` (`Axial`, identity types, `ResourceType`, `BuildingKind`, `GenerationStyle`, `BuildingDef`, `CastleLevel`/`CastleVariant`); engine-neutral constants and helpers live alongside them (`shared/constants.ts`, `shared/rng.ts`, `shared/units.ts`, `shared/map/*`, `shared/horseVariants.ts`, `shared/styleResolver.ts`). `shared/gameState.ts` is a stepping-stone barrel that re-exports server-safe reducers from `src/state/gameState.ts`. Domain state shapes (`SettlementState`, `CharterState`, `UpgradeState`, `Warehouse`, `BuildingRef`, etc.) live in `shared/settlementTypes.ts` so entities and economy modules can import them without pulling `src/state/gameState` transitively.
+- View navigation goes through the `src/views/viewLauncher.ts` registry, not direct cross-imports between view files; `ViewManager` / `UIManager` resolve views via the registry.
+- Cross-cutting render types (`RenderOptions`, `MinimapGeometry`) live in `src/render/renderTypes.ts`; the `MinimapCamera` class lives in `src/render/minimapCamera.ts`. These extractions break the prior render-file cycles and keep `renderer.ts` / `minimap.ts` / `overlays/pathOverlay.ts` free of mutual type imports.
 - Axial hex coordinates (`Axial`) are the universal map primitive; `axialToPixel` bridges to screen space.
 - All randomness goes through `Mulberry32` with an explicit seed for determinism â€” the smoke test relies on this.
 - No secrets in source; DB credentials live only in `docker-compose.yml` for local development.

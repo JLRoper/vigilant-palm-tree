@@ -1,4 +1,4 @@
-import type { Platoon, PlatoonEntry, UnitType } from "../../src/state/units";
+import type { Platoon, PlatoonEntry, UnitType } from "../units";
 import { DEFAULT_MAX_ROUNDS, HERO_RETREAT_PENALTY, PLATOON_RETREAT_LOSS } from "../combatConfig";
 import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT, deploymentPosition, makeBattleGrid } from "./grid";
 import { applyCasualties, applyRetreatLoss, computeDamage, totalHealth } from "./damage";

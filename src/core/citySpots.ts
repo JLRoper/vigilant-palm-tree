@@ -1,4 +1,4 @@
-import type { ResourceType } from "../map/resourceTiles";
+import type { ResourceType } from "../../shared/types";
 import type { CityViewSize } from "./cityGrid";
 
 export interface CitySpot {

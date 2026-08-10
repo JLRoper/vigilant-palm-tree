@@ -2,8 +2,8 @@ import { Axial, axialToPixel } from "../../core/hex";
 import { Hero } from "../../entities/hero";
 import { GameMap } from "../../map/gameMap";
 import { TERRAIN_COST } from "../../map/terrain";
-import type { RenderOptions } from "../renderer";
-import type { MinimapCamera, MinimapGeometry } from "../minimap";
+import type { RenderOptions, MinimapGeometry } from "../renderTypes";
+import type { MinimapCamera } from "../minimapCamera";
 
 const REACHABLE_COLOR = "rgba(255, 204, 0, 0.85)";
 const UNREACHABLE_COLOR = "rgba(255, 204, 0, 0.30)";
