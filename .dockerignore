@@ -1,0 +1,29 @@
+# Dependencies and build artifacts
+node_modules/
+npm-debug.log
+dist/
+.git/
+.gitignore
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.env.local
+.DS_Store
+
+# Test and dev files
+test/
+test-results/
+.kilo/
+.claude/
+scripts/
+tools/
+docs/
+plan/
+feature-plans/
+.recycled/
+
+# Dev-only html files (but keep index.html)
+pixel-art.html
+sprite-preview.html
