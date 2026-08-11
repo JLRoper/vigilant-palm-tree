@@ -252,7 +252,7 @@ PNG and SVG art used by the game — castle levels, hero banners, resource piles
 | File | What it does |
 |---|---|
 | `scripts/cleanup.ps1` | Kills lingering dev processes from the current worktree before starting again. |
-| `scripts/ports.ps1` | Allocates unique dev ports for this worktree so multiple worktrees can coexist. |
+| `scripts/allocate-ports.ts` | Allocates OS-assigned ports for this worktree (cross-platform, via Node `net.Server.listen(0)`). |
 | `scripts/dev-status.ps1` | Reports whether the dev client, API, and DB are currently running for this worktree. |
 | `scripts/seed-assets.ts` | Bulk-uploads the bundled sprites from `src/resources/` into the asset table. |
 | `scripts/remove_background.py` | Python helper that strips the white background from AI-generated PNG assets. |

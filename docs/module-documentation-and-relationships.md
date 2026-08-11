@@ -242,8 +242,8 @@ Browser (Vite SPA)                                  Express API server
 FLUX-driven sprite generation pipeline (`tools/sprites/flux-*.mjs` for castles, buildings, heroes, resources, horse variants, farms, market variants, town-hall, tower, piles, regeneration helpers), plus `pixel-gen.mjs`/`pixel-gen-pure.mjs` for pixel-art, `outline-apply.mjs`, `manifest.mjs`, `generate-preview.mjs`, `screenshot-preview.mjs`, and **`validate-assets.mjs`** (asserts every sprite key referenced by `assetDescriptors.ts` has a PNG).
 
 ## 8. `scripts/` (helpers, run by `npm` scripts or manually)
-- PowerShell: `cleanup.ps1`, `ports.ps1`, `dev-status.ps1`, `batch_remove_background.ps1`.
-- TS/Node: `seed-assets.ts` (bulk-insert `src/resources/*` PNGs into `game_assets`), `capture-path.ts` (Playwright path debug screenshots).
+- PowerShell: `cleanup.ps1`, `dev-status.ps1`, `batch_remove_background.ps1`.
+- TS/Node: `allocate-ports.ts` (OS-assigned port allocator via `net.Server.listen(0)`; replaces the old `ports.ps1`), `seed-assets.ts` (bulk-insert `src/resources/*` PNGs into `game_assets`), `capture-path.ts` (Playwright path debug screenshots).
 - Python: `remove_background.py` (PIL flood-fill background removal).
 - Hooks: `scripts/hooks/log-session-change.mjs`.
 

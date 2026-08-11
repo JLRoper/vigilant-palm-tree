@@ -65,7 +65,7 @@ Top-level directories:
 - UI overlays (HUD, toolbar, menus, modals) are plain DOM elements styled via inline CSS in `index.html` plus per-view TS in `src/views/`.
 
 ### Server (Node.js)
-- [`server/index.ts`](./server/index.ts:1) boots Express 5 on `API_PORT` (loaded from `.env` by `scripts/ports.ps1`, default `3001`).
+- [`server/index.ts`](./server/index.ts:1) boots Express 5 on `API_PORT` (loaded from `.env` by `scripts/allocate-ports.ts`, default `3001`).
 - `cors()` middleware enabled globally; `express.raw()` for image/octet-stream bodies, `express.json()` for JSON bodies.
 - All routes mounted under `/api` via `router` from [`server/routes.ts`](./server/routes.ts:1).
 - Graceful shutdown closes the Postgres pool on `SIGINT`.
@@ -110,26 +110,24 @@ No CSS framework, no UI framework, no state library, no ORM, no testing framewor
 
 ## 5. npm scripts
 
-Three helper scripts manage ports and processes via PowerShell (cross-platform — they use .NET `TcpClient` and Linux `ss` fallbacks, not Windows-only cmdlets):
+Port allocation is OS-native and cross-platform (`scripts/allocate-ports.ts` uses Node's `net.Server.listen(0)`, so the kernel guarantees a free port on Windows, Linux, and macOS identically — no PowerShell needed). One helper script remains for process management.
 
 | Script | Command | Purpose |
 |---|---|---|
 | `cleanup` | `pwsh scripts/cleanup.ps1` | Kill dev/test processes on this worktree's ports |
 | `dev:status` | `pwsh scripts/dev-status.ps1` | Check which services are listening |
-| `predev` | `pwsh scripts/cleanup.ps1 && pwsh scripts/ports.ps1` | (lifecycle hook) Free old ports + allocate new ones for `dev` |
+| `predev` | `tsx scripts/allocate-ports.ts` | (lifecycle hook) Allocate fresh OS-assigned ports for `dev` |
 | `dev` | `concurrently -n web,api -c green,cyan "vite" "tsx watch --env-file=.env server/index.ts"` | Run client (Vite) and API (tsx watch) together, ports from `.env` |
 | `dev:web` | `vite` | Client only |
 | `dev:api` | `tsx watch --env-file=.env server/index.ts` | API only with watch reload |
-| `dev:static` | `pwsh scripts/cleanup.ps1 && pwsh scripts/ports.ps1 --static && concurrently …` | Same as `dev` but uses deterministic hash-derived ports (stable across runs) |
 | `build` | `tsc && vite build` | Type-check, then produce a production client bundle in `dist/` |
 | `preview` | `vite preview` | Serve the built bundle (port from `CLIENT_PORT` in `.env`, default 5173) |
 | `db:up` | `docker compose up -d` | Start Postgres + Adminer |
 | `db:down` | `docker compose down` | Stop them |
-| `pretest` | `pwsh scripts/ports.ps1` | (lifecycle hook) Allocate ports for `test` |
+| `pretest` | `tsx scripts/allocate-ports.ts` | (lifecycle hook) Allocate ports for `test` |
 | `test` | `tsx --env-file=.env test/smoke.ts` | End-to-end smoke test (spawns API + preview, drives with Playwright) |
-| `test:cityview` | `pwsh scripts/ports.ps1 && tsx --env-file=.env test/cityView.test.ts` | City view integration test |
-| `test:all` | `pwsh scripts/ports.ps1 && tsx --env-file=.env test/smoke.ts && tsx --env-file=.env test/cityView.test.ts` | Full test suite (smoke + cityView) |
-| `test:static` | `pwsh scripts/ports.ps1 --static && tsx --env-file=.env test/smoke.ts` | Smoke test with stable deterministic ports |
+| `test:cityview` | `tsx scripts/allocate-ports.ts && tsx --env-file=.env test/cityView.test.ts` | City view integration test |
+| `test:all` | `tsx scripts/allocate-ports.ts && tsx --env-file=.env test/smoke.ts && tsx --env-file=.env test/multiplayer.smoke.ts && tsx --env-file=.env test/cityView.test.ts` | Full test suite (smoke + multiplayer + cityView) |
 | `lint:deps` | `depcruise src shared server --config dependency-cruiser.cjs` | Static check of cross-boundary imports (catches cycles and out-of-bounds deps between `src/`, `shared/`, and `server/`) |
 | `sprites:generate` | `node tools/sprites/pixel-gen.mjs` | Render pixel-art castle sprites into `src/resources/` |
 | `sprites:preview` | `node tools/sprites/generate-preview.mjs` | Build a sprite contact-sheet preview |
@@ -188,7 +186,7 @@ API conventions:
 - JSON in/out.
 - CORS open (default `cors()` middleware, no origin allowlist configured).
 - No auth layer present in the codebase.
-- Port read from `API_PORT` env var (written by `scripts/ports.ps1` into `.env`), default `3001`.
+- Port read from `API_PORT` env var (written by `scripts/allocate-ports.ts` into `.env`), default `3001`.
 
 ---
 
@@ -207,7 +205,7 @@ API conventions:
 
 ### CI (GitHub Actions)
 
-[`.github/workflows/validate-game.yml`](./.github/workflows/validate-game.yml:1) gates PRs on every push: `npm install` → `npm run dev` (boot check) → `npm test` (smoke test). Runs on `ubuntu-latest` with a Postgres 16 service container — the entire pipeline is Linux-native. The helper scripts (`ports.ps1`, `cleanup.ps1`, `dev-status.ps1`) are cross-platform PowerShell that work on both Windows and Linux via .NET `TcpClient` with `ss` fallbacks.
+[`.github/workflows/validate-game.yml`](./.github/workflows/validate-game.yml:1) gates PRs on every push: `npm install` → `npm run dev` (boot check) → `npm test` (smoke test). Runs on `ubuntu-latest` with a Postgres 16 service container — the entire pipeline is Linux-native. Port allocation is now OS-native via `scripts/allocate-ports.ts` (Node `net.Server.listen(0)`); the remaining PowerShell helpers (`cleanup.ps1`, `dev-status.ps1`) are cross-platform and work on both Windows and Linux.
 
 ---
 
@@ -238,15 +236,13 @@ API conventions:
 
 | Port | Service | How |
 |---|---|---|
-| Dynamic | Vite dev server (client + HMR) | `CLIENT_PORT` in `.env`, allocated by `scripts/ports.ps1` (default base `5173`) |
-| Dynamic | API (Express) | `API_PORT` in `.env`, allocated by `scripts/ports.ps1` (default base `4000`) |
-| Dynamic | WebSocket | `WS_PORT` in `.env`, allocated by `scripts/ports.ps1` (default base `4100`) |
+| Dynamic | Vite dev server (client + HMR) | `CLIENT_PORT` in `.env`, allocated by `scripts/allocate-ports.ts` |
+| Dynamic | API (Express) | `API_PORT` in `.env`, allocated by `scripts/allocate-ports.ts` |
+| Dynamic | WebSocket | `WS_PORT` in `.env`, allocated by `scripts/allocate-ports.ts` (reserved for a future realtime layer) |
 | `5432` | Postgres | `npm run db:up` (docker compose, fixed shared port) |
 | `8080` | Adminer (DB UI) | `npm run db:up` |
 
-`scripts/ports.ps1` allocates free ports at dev/test startup (via npm `predev`/`pretest` hooks) and writes them to `.env`. It uses cross-platform .NET `TcpClient` for port availability checks with Linux `ss` fallbacks — no Windows-only cmdlets. Two modes:
-- **Dynamic** (default): picks any free port scanning upward from base.
-- **Static** (`--static`): derives deterministic ports from the worktree path hash — same worktree always gets the same ports. Use `npm run dev:static` or `npm run test:static`.
+`scripts/allocate-ports.ts` allocates free ports at dev/test startup (via npm `predev`/`pretest` hooks) and writes them to `.env`. It uses Node's `net.Server.listen(0)` to ask the kernel for a free port — the same mechanism on Windows, Linux, and macOS — so allocations are collision-free across concurrent runs and no PowerShell is required.
 
 Vite auto-loads `.env`; `tsx` processes use `--env-file=.env`. The Postgres port (`5432`) and Adminer port (`8080`) are fixed because the database container is shared across worktrees.
 

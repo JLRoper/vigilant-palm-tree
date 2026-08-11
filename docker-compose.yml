@@ -63,8 +63,10 @@ services:
     networks:
       - heroes-network
     environment:
-      # Proxy requests to /api to the api container
-      VITE_API_URL: http://api:3001
+      # `vite preview` reads this and proxies /api/* to the api service
+      API_HOST: api
+      API_PORT: "3001"
+      CLIENT_PORT: "5173"
     healthcheck:
       test: ["CMD-SHELL", "wget -O /dev/null http://localhost:5173 || exit 1"]
       interval: 30s

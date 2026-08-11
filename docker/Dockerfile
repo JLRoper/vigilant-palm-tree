@@ -49,19 +49,23 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Start the server (uses tsx import for runtime compilation)
 CMD ["node", "--import", "tsx/esm", "server/index.ts"]
 
-# Web runtime stage (uses built Vite assets)
+# Web runtime stage (uses built Vite assets + vite preview for /api proxy)
 FROM node:22-alpine AS web-runtime
 
 WORKDIR /app
 
-# Install simple http server for serving static files
-RUN npm install -g serve
+# vite preview reads vite.config.ts and honors the preview.proxy block,
+# which routes /api/* to the api container (host via API_HOST env).
+COPY --from=builder /app/package.json /app/package-lock.json ./
+RUN npm ci --omit=dev --save=false && npm install --save-exact "vite@$(node -p "require('./package.json').devDependencies.vite")"
 
-# Copy built Vite assets
+# Copy built Vite assets + the files `vite preview` needs at runtime
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/vite.config.ts ./vite.config.ts
+COPY --from=builder /app/index.html ./index.html
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
 # Expose web port
 EXPOSE 5173
 
-# Start serving static assets
-CMD ["serve", "-s", "dist", "-l", "5173"]
+CMD ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "5173"]

@@ -9,7 +9,7 @@ You run the project's build + test + dependency-layer gate and report pass/fail.
 ## Procedure
 1. `npm run build` — capture full output. If it fails, return immediately with the failing file/line and the last ~30 lines of output.
 2. If build passes, `npm run lint:deps` — same. Documented exceptions in `dependency-cruiser.cjs` are warnings; new violations are the gate.
-3. If lint:deps passes, `npm run test:all` — same. (`pretest` runs `scripts/ports.ps1` automatically, so don't worry about port setup.)
+3. If lint:deps passes, `npm run test:all` — same. (`pretest` runs `scripts/allocate-ports.ts` automatically, so don't worry about port setup.)
 4. All three passed → return "PASS" plus the test summary.
 
 ## Rules

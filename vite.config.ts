@@ -2,7 +2,9 @@ import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  
+  const apiHost = process.env.API_HOST ?? "127.0.0.1";
+  const apiPort = env.API_PORT ?? process.env.API_PORT ?? "3001";
+
   return {
     build: {
       assetsInlineLimit: 0,
@@ -12,7 +14,7 @@ export default defineConfig(({ mode }) => {
       port: Number(env.CLIENT_PORT ?? 5173),
       proxy: {
         "/api": {
-          target: `http://127.0.0.1:${env.API_PORT ?? 3001}`,
+          target: `http://${apiHost}:${apiPort}`,
           changeOrigin: true,
         },
       },
@@ -22,7 +24,7 @@ export default defineConfig(({ mode }) => {
       port: Number(env.CLIENT_PORT ?? 5173),
       proxy: {
         "/api": {
-          target: `http://127.0.0.1:${env.API_PORT ?? 3001}`,
+          target: `http://${apiHost}:${apiPort}`,
           changeOrigin: true,
         },
       },

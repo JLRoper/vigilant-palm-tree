@@ -1,18 +1,16 @@
 import { chromium, Browser, Page } from "playwright";
 import { spawn, ChildProcess } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
-import { existsSync, readFileSync, unlinkSync, openSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import { existsSync, readFileSync, openSync } from "node:fs";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
 
 // ── Port allocation ───────────────────────────────────────────────────
-// Picks free ports via scripts/ports.ps1, reads .env, then starts own
-// infrastructure. All subprocesses are killed on exit, including agent-
-// initiated SIGTERM. The default env ports serve as fallback when .env
-// is missing (e.g. already running dev server).
-const PORTS_SCRIPT = "pwsh scripts/ports.ps1";
+// Allocates OS-assigned ports via scripts/allocate-ports.ts, reads .env,
+// then starts own infrastructure. All subprocesses are killed on exit,
+// including agent-initiated SIGTERM. The default env ports serve as
+// fallback when .env is missing (e.g. already running dev server).
+const PORTS_SCRIPT = "tsx scripts/allocate-ports.ts";
 try { execSync(PORTS_SCRIPT, { stdio: "pipe" }); } catch { /* already ran */ }
 
 function readEnvPort(name: string, fallback: number): number {
@@ -59,14 +57,6 @@ function cleanup(): void {
       try { c.kill("SIGKILL"); } catch {}
     }
   }, 2000).unref();
-
-  // Release port lock files
-  const lockDir = path.join(os.tmpdir(), "heroes-js-ports");
-  const ports = [API_PORT, WEB_PORT, Number(process.env.WS_PORT ?? 4100)];
-  for (const p of ports) {
-    const lock = path.join(lockDir, `port-${p}.lock`);
-    try { if (existsSync(lock)) unlinkSync(lock); } catch {}
-  }
 }
 
 process.on("exit", cleanup);

@@ -352,6 +352,26 @@ async function waitForUrl(url: string, timeoutMs = 15000) {
   throw new Error(`server at ${url} did not respond`);
 }
 
+async function canReachDb(timeoutMs = 2000): Promise<boolean> {
+  const net = await import("node:net");
+  return new Promise<boolean>((resolve) => {
+    const sock = new net.Socket();
+    const done = (ok: boolean) => {
+      sock.removeAllListeners();
+      sock.destroy();
+      resolve(ok);
+    };
+    sock.setTimeout(timeoutMs);
+    sock.once("connect", () => done(true));
+    sock.once("timeout", () => done(false));
+    sock.once("error", () => done(false));
+    sock.connect(
+      Number(process.env.PGPORT ?? 5432),
+      process.env.PGHOST ?? "localhost"
+    );
+  });
+}
+
 let logTailTimer: NodeJS.Timeout | null = null;
 let apiLogPos = 0;
 let webLogPos = 0;
@@ -393,7 +413,19 @@ async function run() {
   let browser: Browser | undefined;
   let failed = false;
   try {
-    await waitForUrl(`${API_URL}/api/health`);
+    try {
+      await waitForUrl(`${API_URL}/api/health`);
+    } catch (err) {
+      const dbReachable = await canReachDb().catch(() => false);
+      if (!dbReachable) {
+        console.error(
+          ">> API never came up and Postgres on localhost:5432 is unreachable.\n" +
+            ">> Hint: start the shared dev DB with `npm run db:up` (or `docker start game_db`),\n" +
+            ">> then re-run `npm run test`."
+        );
+      }
+      throw err;
+    }
     await waitForUrl(WEB_URL);
     console.log(">> api + web up");
 
