@@ -9,6 +9,7 @@ import { catalogFailed, loadUnitCatalog } from "../data/unitCatalog";
 import type { BattleSide } from "../../shared/combat/types";
 import type { Platoon, UnitType } from "../../shared/units";
 import { menuTheme, openCenteredModal, styleButton } from "./menu";
+import "./manualBattleArena";
 import { launchView, registerView } from "./viewLauncher";
 
 registerView("testBattleSetup", () => openTestBattleSetup());
