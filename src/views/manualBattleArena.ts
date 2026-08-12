@@ -4,6 +4,12 @@
 // the engine in shared/combat/manualBattle.ts. Currently only reachable from
 // the "Test Battle" sandbox (src/views/testBattleSetup.ts) — see that file's
 // header for the scope boundary against the real game's battle flow.
+//
+// Layout is battlefield-first: the grid takes whatever room is left after two
+// narrow roster rails, and it *reflows* (the hex size is solved for the
+// available box) rather than being drawn at a fixed size and scaled down.
+// Per-platoon detail lives in the hover/click info card rather than in
+// always-on tiles — see buildPlatoonStrip and showInfoPopupFor.
 
 import { axialToPixel, hexCorners, hexDistance, pixelToAxial, type Axial } from "../core/hex";
 import { totalHealth } from "../../shared/combat/damage";
@@ -41,7 +47,22 @@ import { PopupMenu, menuTheme, styleButton } from "./menu";
 import { createPlatoonInfoPopup } from "./platoonInfoPopup";
 import { openSettingsMenu } from "./settingsMenu";
 
-const HEX_SIZE = 34;
+// Bounds for the solved-for hex size. The grid is fitted to the available
+// battlefield box between these two — MAX so a large viewport gets genuinely
+// large hexes rather than a small grid marooned in whitespace, MIN as a
+// readability floor we'd rather overflow slightly than go below.
+const HEX_SIZE_MAX = 44;
+const HEX_SIZE_MIN = 14;
+
+// Blank space kept between the outermost hexes and the canvas edge, on top of
+// the one-hex radius already needed to fit those hexes' corners.
+const CANVAS_MARGIN = 20;
+
+// Width of each side's roster rail. Narrow by design: the rail carries
+// identification and at-a-glance health only, and everything else moves into
+// the info card, so the battlefield's share of the viewport doesn't depend on
+// how many platoons are in play.
+const RAIL_WIDTH = 190;
 
 // Dev-only console logging for the arena — this view is only reachable from
 // the Test Battle sandbox (see file header), so it's safe to leave this on
@@ -65,19 +86,38 @@ function platoonLabel(side: BattleSide, slotIndex: number): string {
   return `${side}#${slotIndex}`;
 }
 
-function computeLayout(state: ManualBattleState) {
+interface GridExtent {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+function gridExtent(state: ManualBattleState, size: number): GridExtent {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const hex of state.grid.hexes) {
-    const { x, y } = axialToPixel(hex.q, hex.r, HEX_SIZE);
+    const { x, y } = axialToPixel(hex.q, hex.r, size);
     minX = Math.min(minX, x);
     maxX = Math.max(maxX, x);
     minY = Math.min(minY, y);
     maxY = Math.max(maxY, y);
   }
   return { minX, minY, maxX, maxY };
+}
+
+// Hex centers scale linearly with hex size, so one measurement of the grid at
+// size 1 is enough to solve for any box. Total canvas span at size s is
+// span1 * s + 2 * (s + CANVAS_MARGIN) — i.e. s * (span1 + 2) + 2 * MARGIN —
+// so invert that per axis, take the tighter of the two, and clamp.
+function fitHexSize(unitExtent: GridExtent, availW: number, availH: number): number {
+  const spanX = unitExtent.maxX - unitExtent.minX;
+  const spanY = unitExtent.maxY - unitExtent.minY;
+  const byWidth = (availW - CANVAS_MARGIN * 2) / (spanX + 2);
+  const byHeight = (availH - CANVAS_MARGIN * 2) / (spanY + 2);
+  return Math.max(HEX_SIZE_MIN, Math.min(HEX_SIZE_MAX, Math.floor(Math.min(byWidth, byHeight))));
 }
 
 // Specialty → icon. Emoji stand-ins until a real icon set ships; the
@@ -400,222 +440,129 @@ function openSpyCostDialog(opts: {
 // casualty.
 const SPECIALTY_VISIBILITY_THRESHOLD = 0.4;
 
-// One tile per platoon in a side's status bar: its unit composition (the
-// "resources" making it up) and an overall HP bar, so both players can read
-// the whole army's condition at a glance without clicking each stack. Tinted
-// with the side's accent color (matching its hero portrait and grid token)
-// so attacker vs. defender is unmistakable at a glance.
-//
-// A specialty icon (top-left) shows only for the owner of the platoon, or
-// for the opponent once they've made contact (any successful attack
-// involving this platoon in either direction adds the opponent side to
-// Combatant.scoutedBy — see markContacted() in shared/combat/manualBattle.ts).
-function buildStatusTile(
+// Fog of war: a platoon's details are known to `viewerSide` if it owns the
+// platoon, or once the platoon has been scouted — either by contact
+// (markContacted, any attack) or by the dedicated Spy action (markScouted).
+function isKnownTo(c: Combatant, viewerSide: BattleSide): boolean {
+  return c.side === viewerSide || c.scoutedBy.has(viewerSide);
+}
+
+function isAlive(c: Combatant): boolean {
+  return !c.retreated && c.entries.some((e) => e.count > 0);
+}
+
+// Dominant specialty, recomputed live from entries (no cached state) so it
+// naturally shifts when casualties flip the dominant unit type — e.g. the
+// last archer dies and the platoon drops below the archery threshold.
+// Returns null when nothing clears the threshold.
+function visibleSpecialty(
   state: ManualBattleState,
   c: Combatant,
-  accent: string,
-  highlighted: boolean,
-  viewerSide: BattleSide,
-): HTMLElement {
-  const tile = document.createElement("div");
-  Object.assign(tile.style, {
-    position: "relative",
-    background: `${accent}22`,
-    border: highlighted ? `2px solid ${accent}` : `1px solid ${accent}88`,
-    borderRadius: "4px",
-    padding: "6px 8px",
+): { tag: string; dominant: number; total: number } | null {
+  const specialty = computeSpecialty(c.entries, state.unitTypes);
+  if (!specialty) return null;
+  const total = totalUnits(c.entries);
+  if (total === 0) return null;
+  let dominant = 0;
+  for (const e of c.entries) {
+    if (e.count <= 0) continue;
+    if (state.unitTypes[e.unitTypeId]?.specialty === specialty) dominant += e.count;
+  }
+  return dominant / total >= SPECIALTY_VISIBILITY_THRESHOLD ? { tag: specialty, dominant, total } : null;
+}
+
+function hpRatio(state: ManualBattleState, c: Combatant): number {
+  return c.maxHealth > 0 ? totalHealth(c.entries, state.unitTypes) / c.maxHealth : 0;
+}
+
+function hpColor(pct: number): string {
+  return pct > 0.5 ? "#4caf50" : pct > 0.25 ? "#ffb300" : "#e53935";
+}
+
+// One compact row per platoon in a side's rail: enough to identify it and
+// read its health at a glance, and nothing more. The full readout
+// (composition, Atk/Def/Spd/Rng, terrain, morale, fatigue, win odds) lives in
+// the info card, shown on hover or selection — see showInfoPopupFor. This is
+// the density change the rest of the layout depends on: sixteen always-on
+// stat tiles previously consumed 640px of width that the battlefield now gets.
+function buildPlatoonStrip(opts: {
+  state: ManualBattleState;
+  combatant: Combatant;
+  accent: string;
+  viewerSide: BattleSide;
+  selected: boolean;
+  canAct: boolean;
+}): HTMLElement {
+  const { state, combatant: c, accent, viewerSide, selected, canAct } = opts;
+  const alive = isAlive(c);
+  const known = isKnownTo(c, viewerSide);
+
+  const strip = document.createElement("div");
+  Object.assign(strip.style, {
     display: "flex",
     flexDirection: "column",
     gap: "3px",
+    padding: "5px 7px",
+    borderRadius: "4px",
+    background: selected ? `${accent}33` : "rgba(255,255,255,0.03)",
+    border: selected ? `1px solid ${accent}` : "1px solid rgba(255,255,255,0.07)",
+    // Spent platoons stay legible but visibly dimmed, so "who still has a
+    // turn left" reads without counting.
+    opacity: !alive ? "0.35" : canAct ? "1" : "0.55",
   });
 
-  const alive = !c.retreated && c.entries.some((e) => e.count > 0);
-  if (!alive) {
-    tile.style.opacity = "0.45";
-    const title = document.createElement("div");
-    title.style.fontWeight = "600";
-    title.style.fontSize = "11px";
-    title.textContent = `Platoon ${c.slotIndex + 1}`;
-    tile.appendChild(title);
-    const status = document.createElement("div");
-    status.style.fontSize = "10px";
-    status.textContent = c.retreated ? "Retreated" : "Defeated";
-    tile.appendChild(status);
-    return tile;
-  }
+  const top = document.createElement("div");
+  Object.assign(top.style, { display: "flex", alignItems: "center", gap: "6px", fontSize: "11px" });
 
-  // Fog of war: everything below the title (composition, HP, morale,
-  // fatigue) is only known for your own platoons, or an enemy platoon once
-  // it's been scouted — either by contact (markContacted, any attack) or by
-  // the dedicated Spy action (markScouted). Same Combatant.scoutedBy set
-  // that already gated the specialty icon below; now gates the rest of the
-  // tile too.
-  const isKnown = c.side === viewerSide || c.scoutedBy.has(viewerSide);
+  const specialty = known ? visibleSpecialty(state, c) : null;
+  const icon = document.createElement("span");
+  Object.assign(icon.style, { width: "14px", textAlign: "center", flexShrink: "0", lineHeight: "1" });
+  icon.textContent = !alive ? "✕" : specialty ? specialtyIcon(specialty.tag) : known ? "·" : "?";
+  top.appendChild(icon);
 
-  // Specialty icon (top-left) — only visible to the owner, or to the
-  // opponent after they've made contact. Recomputed from current entries
-  // so the icon naturally shifts when casualties flip the dominant unit
-  // type (e.g. the last archer dies and the platoon drops below the 40%
-  // archery threshold — icon disappears).
-  const specialty = computeSpecialty(c.entries, state.unitTypes);
-  const total = totalUnits(c.entries);
-  let dominantCount = 0;
-  if (specialty) {
-    for (const e of c.entries) {
-      if (e.count <= 0) continue;
-      if (state.unitTypes[e.unitTypeId]?.specialty === specialty) dominantCount += e.count;
-    }
-  }
-  const meetsThreshold = specialty !== null && total > 0 && dominantCount / total >= SPECIALTY_VISIBILITY_THRESHOLD;
-  const revealSpecialty = meetsThreshold && isKnown;
+  const name = document.createElement("span");
+  name.style.fontWeight = "600";
+  name.textContent = `P${c.slotIndex + 1}`;
+  top.appendChild(name);
 
-  const title = document.createElement("div");
-  title.style.fontWeight = "600";
-  title.style.fontSize = "11px";
-  // Reserve room for the top-left specialty icon (when shown) so the title
-  // doesn't overlap it.
-  title.style.paddingLeft = revealSpecialty ? "20px" : "0";
-  title.textContent = `Platoon ${c.slotIndex + 1}`;
-  tile.appendChild(title);
+  const spacer = document.createElement("span");
+  spacer.style.flex = "1";
+  top.appendChild(spacer);
 
-  if (revealSpecialty && specialty) {
-    const icon = document.createElement("div");
-    Object.assign(icon.style, {
-      position: "absolute",
-      top: "3px",
-      left: "5px",
-      fontSize: "14px",
-      lineHeight: "1",
-      opacity: "0.9",
+  const count = document.createElement("span");
+  Object.assign(count.style, { opacity: "0.85", fontVariantNumeric: "tabular-nums" });
+  if (!alive) count.textContent = c.retreated ? "Retreated" : "Defeated";
+  else count.textContent = known ? `×${totalUnits(c.entries)}` : "×?";
+  top.appendChild(count);
+
+  strip.appendChild(top);
+
+  if (alive) {
+    const track = document.createElement("div");
+    Object.assign(track.style, {
+      height: "4px",
+      borderRadius: "2px",
+      background: "rgba(0,0,0,0.55)",
+      overflow: "hidden",
     });
-    icon.textContent = specialtyIcon(specialty);
-    icon.title = `Specialty: ${specialty} (${dominantCount}/${total})`;
-    tile.appendChild(icon);
-  }
-
-  if (!isKnown) {
-    const unscouted = document.createElement("div");
-    unscouted.style.fontSize = "10px";
-    unscouted.style.opacity = "0.6";
-    unscouted.textContent = "Unscouted";
-    tile.appendChild(unscouted);
-    return tile;
-  }
-
-  for (const e of c.entries) {
-    if (e.count <= 0) continue;
-    const line = document.createElement("div");
-    line.style.fontSize = "10px";
-    line.style.opacity = "0.85";
-    line.textContent = `${state.unitTypes[e.unitTypeId]?.name ?? e.unitTypeId} x${e.count}`;
-    tile.appendChild(line);
-  }
-
-  // Atk/Def/Speed/Range at a glance. A platoon can mix up to
-  // MAX_PLATOON_ENTRIES unit types with different stats, so Atk/Def use the
-  // numerically dominant entry (most units) rather than an average — same
-  // "pick the entry that actually represents the platoon" idea as
-  // computeSpecialty, just simpler since it's a single number, not a
-  // weighted tag. Speed instead reuses platoonSpeed() directly: it's
-  // already the real mechanical value (min speed across entries) that
-  // movement range is computed from, not just a display stat.
-  const livingEntries = c.entries.filter((e) => e.count > 0);
-  if (livingEntries.length > 0) {
-    const dominantEntry = livingEntries.reduce((a, b) => (b.count > a.count ? b : a));
-    const dominantUnit = state.unitTypes[dominantEntry.unitTypeId];
-    const speed = platoonSpeed(c, state.unitTypes);
-    const ranged = isRangedPlatoon(c, state.unitTypes);
-    const statRow = document.createElement("div");
-    Object.assign(statRow.style, { display: "flex", flexWrap: "wrap", gap: "2px 8px", fontSize: "10px", opacity: "0.9" });
-    const stat = (label: string, value: string): void => {
-      const chip = document.createElement("span");
-      chip.textContent = `${label} ${value}`;
-      statRow.appendChild(chip);
-    };
-    if (dominantUnit) {
-      stat("Atk", String(dominantUnit.attack));
-      stat("Def", String(dominantUnit.defence));
+    if (known) {
+      const pct = hpRatio(state, c);
+      const fill = document.createElement("div");
+      Object.assign(fill.style, {
+        height: "100%",
+        width: `${Math.max(0, Math.min(1, pct)) * 100}%`,
+        background: hpColor(pct),
+      });
+      track.appendChild(fill);
+    } else {
+      // Unscouted: keep the row's height but hatch the track, so the missing
+      // information reads as unknown rather than as an empty health bar.
+      track.style.background = "repeating-linear-gradient(90deg, rgba(255,255,255,0.13) 0 3px, transparent 3px 6px)";
     }
-    stat("Spd", String(speed));
-    stat("Rng", ranged ? String(RANGED_ATTACK_RANGE) : "Melee");
-    tile.appendChild(statRow);
-
-    // Terrain placeholder — the game has no terrain-bonus mechanic yet (see
-    // docs/terrain-plan.md), so this stays a "—" slot, same pattern as the
-    // Morale/Fatigue placeholders below: the UI slot exists ahead of the
-    // mechanic so wiring in real values later is a one-line change here.
-    const terrainRow = document.createElement("div");
-    Object.assign(terrainRow.style, { fontSize: "10px", opacity: "0.6", fontStyle: "italic" });
-    terrainRow.textContent = "Terrain —";
-    tile.appendChild(terrainRow);
+    strip.appendChild(track);
   }
 
-  const hpPct = c.maxHealth > 0 ? totalHealth(c.entries, state.unitTypes) / c.maxHealth : 0;
-  const barTrack = document.createElement("div");
-  Object.assign(barTrack.style, {
-    background: "#000",
-    borderRadius: "2px",
-    height: "5px",
-    overflow: "hidden",
-    marginTop: "2px",
-  });
-  const barFill = document.createElement("div");
-  Object.assign(barFill.style, {
-    height: "100%",
-    width: `${Math.max(0, Math.min(1, hpPct)) * 100}%`,
-    background: hpPct > 0.5 ? "#4caf50" : hpPct > 0.25 ? "#ffb300" : "#e53935",
-  });
-  barTrack.appendChild(barFill);
-  tile.appendChild(barTrack);
-
-  const hpLabel = document.createElement("div");
-  hpLabel.style.opacity = "0.7";
-  hpLabel.style.fontSize = "10px";
-  hpLabel.textContent = `${Math.round(hpPct * 100)}% HP`;
-  tile.appendChild(hpLabel);
-
-  // Morale + Fatigue placeholder bars. No actual mechanic behind these yet —
-  // the values are hard-coded (morale always 100, fatigue always 0) so the
-  // slot exists in the UI for when the combat system gets around to
-  // tracking them. Wired into the same color palette as HP so the bar
-  // conveys severity at a glance.
-  tile.appendChild(makeMetricBar("Morale", 100, (v) => (v > 0.5 ? "#4caf50" : v > 0.25 ? "#ffb300" : "#e53935")));
-  tile.appendChild(makeMetricBar("Fatigue", 0, (v) => (v < 0.25 ? "#4caf50" : v < 0.5 ? "#ffb300" : "#e53935")));
-
-  return tile;
-}
-
-// Thin label + horizontal bar, one per metric. Reused for the HP, Morale,
-// and Fatigue rows on each status tile. `value` is a 0..1 ratio (NOT a
-// percentage); `colorFor` maps that ratio to a fill color.
-function makeMetricBar(label: string, value: number, colorFor: (v: number) => string): HTMLElement {
-  const wrap = document.createElement("div");
-  wrap.style.marginTop = "3px";
-
-  const labelRow = document.createElement("div");
-  labelRow.style.fontSize = "10px";
-  labelRow.style.opacity = "0.7";
-  labelRow.textContent = `${label} ${Math.round(value * 100)}`;
-  wrap.appendChild(labelRow);
-
-  const track = document.createElement("div");
-  Object.assign(track.style, {
-    background: "#000",
-    borderRadius: "2px",
-    height: "4px",
-    overflow: "hidden",
-    marginTop: "1px",
-  });
-  const fill = document.createElement("div");
-  Object.assign(fill.style, {
-    height: "100%",
-    width: `${Math.max(0, Math.min(1, value)) * 100}%`,
-    background: colorFor(value),
-  });
-  track.appendChild(fill);
-  wrap.appendChild(track);
-
-  return wrap;
+  return strip;
 }
 
 export function openManualBattleArena(
@@ -727,9 +674,13 @@ export function openManualBattleArena(
   }
   logBattleStart();
 
-  // The fight takes over the whole viewport rather than sitting in a small
-  // centered popup — there's a lot to look at (grid + both hero panels +
-  // side panel) and a modal box was cramping it.
+  const ATTACKER_ACCENT = "#3070c0";
+  const DEFENDER_ACCENT = "#c04040";
+  const humanAccent = humanSide === "attacker" ? ATTACKER_ACCENT : DEFENDER_ACCENT;
+  const aiAccent = humanSide === "attacker" ? DEFENDER_ACCENT : ATTACKER_ACCENT;
+
+  // The fight takes over the whole viewport. Three stacked bands: a status
+  // bar, the battle row (rail | battlefield | rail), and an action + log bar.
   const overlay = document.createElement("div");
   Object.assign(overlay.style, {
     position: "fixed",
@@ -744,36 +695,79 @@ export function openManualBattleArena(
   });
   document.body.appendChild(overlay);
 
-  // Floats over the arena (position: absolute, out of the overlay's normal
-  // flex-column flow) instead of sitting in flow above `container` — that
-  // way `container` gets the overlay's full height rather than losing
-  // header-height off the top, so it's easier to see how the layout behaves
-  // at the full viewport size. Translucent red so it still reads as an
-  // overlay banner rather than opaque chrome.
-  const header = document.createElement("div");
-  Object.assign(header.style, {
-    position: "absolute",
-    top: "0",
-    left: "0",
-    right: "0",
-    zIndex: "5",
+  // Round / time-of-day / turn state, previously split between a floating
+  // translucent banner and the footer. Consolidated into one in-flow band so
+  // the bottom of the screen is purely "things you can do" and the
+  // battlefield owns everything between the two.
+  const topBar = document.createElement("div");
+  Object.assign(topBar.style, {
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
-    padding: "10px 16px",
-    background: "rgba(192, 64, 64, 0.55)",
+    gap: "12px",
+    padding: "0 14px",
+    height: "40px",
+    flexShrink: "0",
+    background: menuTheme.panel.headerBackground,
     color: menuTheme.panel.headerColor,
-    borderBottom: "1px solid rgba(255,255,255,0.15)",
-    fontSize: "14px",
-    fontWeight: "600",
+    borderBottom: "1px solid rgba(255,255,255,0.1)",
+    fontSize: "12px",
   });
+  overlay.appendChild(topBar);
+
   const titleEl = document.createElement("div");
-  titleEl.textContent = `Test Battle — Manual Fight (You: ${humanSide === "attacker" ? "Blue" : "Red"})`;
-  header.appendChild(titleEl);
-  overlay.appendChild(header);
+  Object.assign(titleEl.style, { fontWeight: "600", fontSize: "13px" });
+  titleEl.textContent = "Test Battle — Manual Fight";
+  topBar.appendChild(titleEl);
+
+  const sideTag = document.createElement("span");
+  Object.assign(sideTag.style, {
+    fontSize: "10.5px",
+    padding: "2px 7px",
+    borderRadius: "3px",
+    background: `${humanAccent}33`,
+    border: `1px solid ${humanAccent}`,
+  });
+  sideTag.textContent = `You: ${humanSide === "attacker" ? "Blue" : "Red"}`;
+  topBar.appendChild(sideTag);
+
+  const topSpacer = document.createElement("div");
+  topSpacer.style.flex = "1";
+  topBar.appendChild(topSpacer);
+
+  function buildStatusChip(): HTMLElement {
+    const chip = document.createElement("div");
+    Object.assign(chip.style, {
+      padding: "3px 10px",
+      borderRadius: "4px",
+      background: "rgba(255,255,255,0.05)",
+      fontVariantNumeric: "tabular-nums",
+    });
+    return chip;
+  }
+
+  const roundEl = buildStatusChip();
+  const timeEl = buildStatusChip();
+  const turnEl = buildStatusChip();
+  topBar.append(roundEl, timeEl, turnEl);
+
+  const settingsBtn = document.createElement("button");
+  settingsBtn.textContent = "⚙";
+  styleButton(settingsBtn);
+  settingsBtn.title = "Open game settings";
+  settingsBtn.addEventListener("click", () => {
+    openSettingsMenu({ parent: overlay });
+  });
+  topBar.appendChild(settingsBtn);
+
+  const TIME_OF_DAY_ICON: Record<TimeOfDay, string> = {
+    Dawn: "🌅",
+    Day: "☀️",
+    Dusk: "🌇",
+    Night: "🌙",
+  };
 
   function closeArena(): void {
-    window.removeEventListener("resize", fitCanvasToContainer);
+    resizeObserver.disconnect();
     overlay.remove();
   }
 
@@ -787,109 +781,55 @@ export function openManualBattleArena(
   let spyMode = false;
   let spyTargets: Combatant[] = [];
 
-  const container = document.createElement("div");
-  Object.assign(container.style, {
-    flex: "1",
+  const battleRow = document.createElement("div");
+  Object.assign(battleRow.style, {
+    flex: "1 1 0",
+    minHeight: "0",
     display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "10px",
-    overflow: "auto",
-    padding: "16px",
+    alignItems: "stretch",
+    gap: "12px",
+    padding: "12px",
   });
-  overlay.appendChild(container);
+  overlay.appendChild(battleRow);
 
-  // Status banner along the bottom of the arena, under the map: an info row
-  // (round counter, whose turn it currently is, and the flavor time-of-day —
-  // see timeOfDayForRound, purely cosmetic today but a future day/night
-  // combat bonus can key off the same round-derived phase) and, below that,
-  // an action row with the contextual help text and the End Turn button —
-  // both act on "whatever's currently selected on the map", so they live
-  // with the rest of the map-status banner rather than off to the side.
-  const footer = document.createElement("div");
-  Object.assign(footer.style, {
+  // Bottom band: the contextual help text plus whatever actions apply to the
+  // current selection, and under it the battle log. Full-bleed rather than
+  // width-matched to the row above, since the battlefield's width is now
+  // fluid and there's no fixed content span to line up with.
+  const bottomBar = document.createElement("div");
+  Object.assign(bottomBar.style, {
+    flexShrink: "0",
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
-    gap: "10px",
-    padding: "16px",
-    // border-box so the maxWidth set in fitCanvasToContainer (matched to the
-    // battle row's content span) is the footer's true outer width, padding
-    // included — otherwise the padding would push it wider than the row above.
-    boxSizing: "border-box",
-    margin: "0 auto",
     background: menuTheme.panel.headerBackground,
     color: menuTheme.panel.headerColor,
-    borderTop: "1px solid rgba(255,255,255,0.08)",
-    flexShrink: "0",
+    borderTop: "1px solid rgba(255,255,255,0.1)",
   });
-  overlay.appendChild(footer);
-
-  const infoRow = document.createElement("div");
-  Object.assign(infoRow.style, {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "20px",
-    fontSize: "18px",
-    fontWeight: "600",
-  });
-  footer.appendChild(infoRow);
-
-  function buildFooterBox(): HTMLElement {
-    const box = document.createElement("div");
-    Object.assign(box.style, {
-      border: "1px solid rgba(255,255,255,0.25)",
-      borderRadius: "6px",
-      padding: "8px 20px",
-    });
-    return box;
-  }
-
-  const roundEl = buildFooterBox();
-  const turnEl = buildFooterBox();
-  const timeEl = buildFooterBox();
-  infoRow.append(roundEl, turnEl, timeEl);
-
-  const TIME_OF_DAY_ICON: Record<TimeOfDay, string> = {
-    Dawn: "🌅",
-    Day: "☀️",
-    Dusk: "🌇",
-    Night: "🌙",
-  };
-
-  function renderFooter(): void {
-    roundEl.textContent = `Round ${state.round}`;
-    const humanActing = unactedLivingSlots(state, humanSide).length > 0;
-    turnEl.textContent = isBattleOver(state) ? "Battle Over" : humanActing ? "Your Turn" : "AI's Turn";
-    const phase = timeOfDayForRound(state.round);
-    timeEl.textContent = `${TIME_OF_DAY_ICON[phase]} ${phase}`;
-  }
+  overlay.appendChild(bottomBar);
 
   const actionRow = document.createElement("div");
   Object.assign(actionRow.style, {
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
-    gap: "16px",
-    fontSize: "13px",
+    gap: "12px",
+    padding: "8px 14px",
+    fontSize: "12px",
   });
-  footer.appendChild(actionRow);
+  bottomBar.appendChild(actionRow);
 
   const helpTextEl = document.createElement("div");
-  helpTextEl.style.opacity = "0.75";
+  Object.assign(helpTextEl.style, { opacity: "0.75", flex: "1", minWidth: "0" });
   actionRow.appendChild(helpTextEl);
 
   const endTurnBtn = document.createElement("button");
   endTurnBtn.textContent = "End Turn (Don't Attack)";
-  styleButton(endTurnBtn);
+  styleButton(endTurnBtn, true);
   endTurnBtn.addEventListener("click", () => {
     if (selectedSlot === null) return;
     debugLog(`click End Turn -> ${platoonLabel(humanSide, selectedSlot)} ends its turn without attacking`);
     endPlatoonTurn(state, humanSide, selectedSlot);
     afterPlayerAction();
   });
-  actionRow.appendChild(endTurnBtn);
 
   // Spends 1 troop from the selected platoon to permanently reveal an
   // enemy platoon within this turn's move+attack reach (see
@@ -909,7 +849,118 @@ export function openManualBattleArena(
     spyTargets = getValidSpyTargets(state, actor);
     refresh();
   });
-  actionRow.appendChild(spyBtn);
+  actionRow.append(spyBtn, endTurnBtn);
+
+  // The engine has always produced a full replayable log (state.log); until
+  // now the arena only forwarded it to console.log and the player saw none of
+  // it. Collapsed to a single line by default so it costs almost no vertical
+  // space, expandable when the round-by-round detail is wanted.
+  const LOG_COLLAPSED_HEIGHT = "20px";
+  const LOG_EXPANDED_HEIGHT = "128px";
+  let logExpanded = false;
+
+  const logBar = document.createElement("div");
+  Object.assign(logBar.style, {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "8px",
+    padding: "0 14px 8px",
+    fontSize: "11px",
+  });
+  bottomBar.appendChild(logBar);
+
+  const logToggle = document.createElement("button");
+  styleButton(logToggle);
+  Object.assign(logToggle.style, { fontSize: "10.5px", padding: "2px 7px", flexShrink: "0" });
+  logBar.appendChild(logToggle);
+
+  const logFeed = document.createElement("div");
+  Object.assign(logFeed.style, {
+    flex: "1",
+    minWidth: "0",
+    height: LOG_COLLAPSED_HEIGHT,
+    overflowY: "hidden",
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    lineHeight: "1.45",
+  });
+  logBar.appendChild(logFeed);
+
+  function applyLogHeight(): void {
+    logToggle.textContent = logExpanded ? "▾ Log" : "▸ Log";
+    logFeed.style.height = logExpanded ? LOG_EXPANDED_HEIGHT : LOG_COLLAPSED_HEIGHT;
+    logFeed.style.overflowY = logExpanded ? "auto" : "hidden";
+    // Collapsed shows only the newest line, so anchor to the bottom either way.
+    logFeed.scrollTop = logFeed.scrollHeight;
+  }
+  logToggle.addEventListener("click", () => {
+    logExpanded = !logExpanded;
+    applyLogHeight();
+  });
+
+  function sideName(side: BattleSide): string {
+    return side === humanSide ? "You" : "Enemy";
+  }
+
+  function describeLogEntry(entry: BattleLogEntry): string {
+    if (entry.kind === "damage") {
+      const targetSide: BattleSide = entry.side === "attacker" ? "defender" : "attacker";
+      const lost = entry.casualties.reduce((sum, c) => sum + c.count, 0);
+      const tags: string[] = [];
+      if (entry.isCounterattack) tags.push("counter");
+      if (entry.advantageBonus) tags.push("advantage");
+      if (entry.disadvantagePenalty) tags.push("disadvantage");
+      return (
+        `R${entry.round} · ${sideName(entry.side)} P${entry.attackerSlot + 1} → ` +
+        `${sideName(targetSide)} P${entry.targetSlot + 1} · ${entry.damage} dmg` +
+        (lost > 0 ? ` · ${lost} lost` : "") +
+        (tags.length > 0 ? ` (${tags.join(", ")})` : "")
+      );
+    }
+    if (entry.kind === "self_retreat") {
+      const lost = entry.casualties.reduce((sum, c) => sum + c.count, 0);
+      return `R${entry.round} · ${sideName(entry.side)} P${entry.slotIndex + 1} withdrew${lost > 0 ? ` · ${lost} lost` : ""}`;
+    }
+    if (entry.kind === "hero_retreat") {
+      return `R${entry.round} · ${sideName(entry.side)} hero left the field`;
+    }
+    return `R${entry.round} · Stalemate — ${entry.detail}`;
+  }
+
+  // Appended incrementally rather than re-rendered, so the feed keeps its
+  // scroll position instead of rebuilding the whole history every refresh.
+  let renderedLogCount = 0;
+
+  const logEmpty = document.createElement("div");
+  logEmpty.textContent = "No engagements yet.";
+  logEmpty.style.opacity = "0.4";
+  logFeed.appendChild(logEmpty);
+
+  function renderLog(): void {
+    if (state.log.length === renderedLogCount) return;
+    logEmpty.remove();
+    for (let i = renderedLogCount; i < state.log.length; i++) {
+      const entry = state.log[i];
+      const line = document.createElement("div");
+      line.textContent = describeLogEntry(entry);
+      Object.assign(line.style, {
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        fontVariantNumeric: "tabular-nums",
+        opacity: "0.85",
+      });
+      if (entry.kind !== "stalemate") {
+        line.style.color = entry.side === humanSide ? "#9ecbff" : "#ff9e9e";
+      }
+      logFeed.appendChild(line);
+    }
+    renderedLogCount = state.log.length;
+    logFeed.scrollTop = logFeed.scrollHeight;
+  }
+
+  applyLogHeight();
 
   // Voluntary concession — Retreat applies the standard 15% self-retreat
   // loss to every still-living platoon and pulls the whole side off the
@@ -979,25 +1030,21 @@ export function openManualBattleArena(
   });
   // Also moved into the human's hero panel — see the retreatBtn comment above.
 
-  const settingsBtn = document.createElement("button");
-  settingsBtn.textContent = "⚙ Settings";
-  styleButton(settingsBtn);
-  settingsBtn.title = "Open game settings";
-  settingsBtn.addEventListener("click", () => {
-    openSettingsMenu({ parent: overlay });
-  });
-  actionRow.appendChild(settingsBtn);
-
-  function renderFooterActions(): void {
+  function renderActions(): void {
     const over = isBattleOver(state);
     const actor = selectedSlot === null ? undefined : getCombatant(state, humanSide, selectedSlot);
-    helpTextEl.textContent = spyMode
-      ? "Click a highlighted enemy to send a spy (costs 1 troop), or click elsewhere to cancel."
-      : selectedSlot === null
-        ? "Click one of your platoons in the status bar (or on the grid) to act."
-        : moveRange.length > 0
-          ? "Click a highlighted hex to move (moving next to an enemy fights immediately). Steps left over can still be used — move again, attack a ringed enemy, or End Turn when done."
-          : "Out of movement — click a ringed enemy to attack, or End Turn.";
+    const waitingOnAi = !over && unactedLivingSlots(state, humanSide).length === 0;
+    helpTextEl.textContent = over
+      ? "Battle over."
+      : waitingOnAi
+        ? "Waiting on the AI to finish its round..."
+        : spyMode
+          ? "Click a highlighted enemy to send a spy (costs 1 troop), or click elsewhere to cancel."
+          : selectedSlot === null
+            ? "Click one of your outlined platoons — on the grid or in the left rail — to act. Hover any platoon for its full details."
+            : moveRange.length > 0
+              ? "Click a highlighted hex to move (moving next to an enemy fights immediately). Steps left over can still be used — move again, attack a ringed enemy, or End Turn when done."
+              : "Out of movement — click a ringed enemy to attack, or End Turn.";
     endTurnBtn.style.display = selectedSlot !== null && !over ? "" : "none";
     spyBtn.style.display = actor && !over && totalUnits(actor.entries) > 1 ? "" : "none";
     spyBtn.disabled = spyMode;
@@ -1014,43 +1061,47 @@ export function openManualBattleArena(
   }
 
   // Hero portraits flank the battlefield, HoMM3-style — they stand outside
-  // the grid rather than occupying a hex. Cast Spell is a stub for now: no
-  // spell system exists yet, so the button just explains that.
+  // the grid rather than occupying a hex. Laid out horizontally (portrait
+  // beside name + Cast Spell) rather than as a tall centered stack, so the
+  // rail spends its height on platoons instead of chrome. Cast Spell is a
+  // stub for now: no spell system exists yet, so the button just says so.
   function buildHeroPanel(label: string, accent: string): { panel: HTMLElement; castBtn: HTMLButtonElement } {
     const panel = document.createElement("div");
     Object.assign(panel.style, {
       display: "flex",
-      flexDirection: "column",
       alignItems: "center",
-      gap: "6px",
-      width: "84px",
+      gap: "8px",
       flexShrink: "0",
       fontFamily: menuTheme.font,
       fontSize: "11px",
-      textAlign: "center",
     });
 
     const portrait = document.createElement("div");
     Object.assign(portrait.style, {
-      width: "56px",
-      height: "56px",
+      width: "38px",
+      height: "38px",
       borderRadius: "50%",
       background: accent,
       border: "2px solid rgba(255,255,255,0.4)",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      fontSize: "20px",
+      fontSize: "16px",
       fontWeight: "700",
       color: "#fff",
+      flexShrink: "0",
     });
     portrait.textContent = label.charAt(0);
     panel.appendChild(portrait);
 
+    const meta = document.createElement("div");
+    Object.assign(meta.style, { display: "flex", flexDirection: "column", gap: "4px", flex: "1", minWidth: "0" });
+
     const nameEl = document.createElement("div");
     nameEl.textContent = label;
     nameEl.style.opacity = "0.85";
-    panel.appendChild(nameEl);
+    nameEl.style.fontWeight = "600";
+    meta.appendChild(nameEl);
 
     const castBtn = document.createElement("button");
     castBtn.textContent = "Cast Spell";
@@ -1058,186 +1109,157 @@ export function openManualBattleArena(
     castBtn.disabled = true;
     castBtn.style.opacity = "0.4";
     castBtn.style.cursor = "not-allowed";
+    castBtn.style.fontSize = "10.5px";
+    castBtn.style.padding = "3px 7px";
     castBtn.title = "Spellcasting isn't implemented yet";
-    panel.appendChild(castBtn);
+    meta.appendChild(castBtn);
 
+    panel.appendChild(meta);
     return { panel, castBtn };
   }
 
-  // Status bars flank the battlefield, one per side, each showing every
-  // platoon on that side as a tile (composition + HP). Each bar is grouped
-  // under its own hero portrait in one column, so the two armies read as
-  // two distinct, color-coded blocks instead of a scattered row of panels.
-  function buildStatusBar(label: string): HTMLElement {
-    const bar = document.createElement("div");
-    Object.assign(bar.style, {
-      // Two tiles per row instead of one long column — halves the scroll
-      // length for a full roster and leaves each tile enough width for the
-      // Atk/Def/Speed/Range/Terrain rows added in buildStatusTile.
-      width: "320px",
-      flexShrink: "0",
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: "6px",
-      maxHeight: "calc(100vh - 260px)",
-      overflowY: "auto",
-      fontFamily: menuTheme.font,
-    });
-    const heading = document.createElement("div");
-    heading.textContent = label;
-    Object.assign(heading.style, {
-      gridColumn: "1 / -1",
-      fontWeight: "600",
-      fontSize: "12px",
-      opacity: "0.85",
-      textAlign: "center",
-    });
-    bar.appendChild(heading);
-    return bar;
-  }
-
-  function buildSideColumn(
+  // One rail per side: hero panel, then a scrolling column of platoon strips,
+  // then any hero-level actions pinned to the bottom. Fixed narrow width, so
+  // the battlefield's share of the viewport never depends on how many
+  // platoons are in play — the old status bars were 320px each and grew a
+  // second column of tiles, which is what squeezed the grid.
+  function buildRail(
     heroLabel: string,
-    barLabel: string,
+    railLabel: string,
     accent: string,
-  ): { column: HTMLElement; bar: HTMLElement; castBtn: HTMLButtonElement } {
-    const column = document.createElement("div");
-    Object.assign(column.style, {
+  ): { rail: HTMLElement; list: HTMLElement; castBtn: HTMLButtonElement; actions: HTMLElement } {
+    const rail = document.createElement("div");
+    Object.assign(rail.style, {
+      width: `${RAIL_WIDTH}px`,
+      flexShrink: "0",
       display: "flex",
       flexDirection: "column",
-      alignItems: "center",
-      gap: "10px",
-      flexShrink: "0",
-      // `container` centers each of its 4 children independently along the
-      // cross axis (align-items: center) based on that child's own height.
-      // The two hero columns are NOT the same height — the human's carries
-      // Retreat/Surrender under Cast Spell, the AI's doesn't — so centering
-      // them independently pushed the shorter/human portrait up out of
-      // alignment with the AI's (and, at some viewport heights, off the top
-      // of the viewport entirely). Anchoring both to the top keeps the two
-      // portraits level regardless of how tall either column's content is.
-      alignSelf: "flex-start",
+      gap: "8px",
+      minHeight: "0",
+      fontFamily: menuTheme.font,
     });
+
     const hero = buildHeroPanel(heroLabel, accent);
-    column.appendChild(hero.panel);
-    const bar = buildStatusBar(barLabel);
-    column.appendChild(bar);
-    return { column, bar, castBtn: hero.castBtn };
+    rail.appendChild(hero.panel);
+
+    const heading = document.createElement("div");
+    Object.assign(heading.style, {
+      fontSize: "10px",
+      letterSpacing: "0.06em",
+      textTransform: "uppercase",
+      opacity: "0.55",
+      borderBottom: "1px solid rgba(255,255,255,0.08)",
+      paddingBottom: "4px",
+      flexShrink: "0",
+    });
+    heading.textContent = railLabel;
+    rail.appendChild(heading);
+
+    const list = document.createElement("div");
+    Object.assign(list.style, {
+      flex: "1 1 0",
+      minHeight: "0",
+      overflowY: "auto",
+      display: "flex",
+      flexDirection: "column",
+      gap: "4px",
+    });
+    rail.appendChild(list);
+
+    const actions = document.createElement("div");
+    Object.assign(actions.style, { display: "flex", flexDirection: "column", gap: "4px", flexShrink: "0" });
+    rail.appendChild(actions);
+
+    return { rail, list, castBtn: hero.castBtn, actions };
   }
 
-  const ATTACKER_ACCENT = "#3070c0";
-  const DEFENDER_ACCENT = "#c04040";
+  const humanRail = buildRail("You", "Your Army", humanAccent);
+  const aiRail = buildRail("AI Opponent", "Enemy Army", aiAccent);
 
-  const { column: attackerColumn, bar: attackerBar, castBtn: attackerCastBtn } = buildSideColumn(
-    humanSide === "attacker" ? "You" : "AI Opponent",
-    humanSide === "attacker" ? "Your Platoons" : "Enemy Platoons",
-    ATTACKER_ACCENT,
-  );
+  // Takes all the width the two rails don't. flex-basis 0 plus min-width/
+  // min-height 0 makes this box's size depend purely on the row, never on the
+  // canvas inside it — which is what keeps the ResizeObserver below from
+  // feeding its own canvas resize back in as a layout change.
+  const battlefield = document.createElement("div");
+  Object.assign(battlefield.style, {
+    flex: "1 1 0",
+    minWidth: "0",
+    minHeight: "0",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  });
 
-  // Wrapped in its own positioned div (rather than appended straight into
-  // `container`, which is a scrollable flex row of several columns) so the
-  // info popup below can be positioned in simple canvas-local coordinates
-  // instead of accounting for container scroll/layout.
+  // Wrapped in its own positioned div so the info popup can be positioned in
+  // simple canvas-local coordinates. Deliberately not overflow:hidden — the
+  // card is allowed to escape the canvas bounds (see showInfoPopupFor).
   const canvasWrap = document.createElement("div");
   canvasWrap.style.position = "relative";
   canvasWrap.style.flexShrink = "0";
+  battlefield.appendChild(canvasWrap);
 
   const canvas = document.createElement("canvas");
   canvas.style.background = "#14161a";
   canvas.style.borderRadius = "4px";
-  canvas.style.flexShrink = "0";
+  canvas.style.display = "block";
   canvasWrap.appendChild(canvas);
   const ctx = canvas.getContext("2d")!;
 
   const infoPopup = createPlatoonInfoPopup(canvasWrap);
 
-  const { column: defenderColumn, bar: defenderBar, castBtn: defenderCastBtn } = buildSideColumn(
-    humanSide === "defender" ? "You" : "AI Opponent",
-    humanSide === "defender" ? "Your Platoons" : "Enemy Platoons",
-    DEFENDER_ACCENT,
-  );
-
-  const sidePanel = document.createElement("div");
-  Object.assign(sidePanel.style, {
-    width: "200px",
-    flexShrink: "0",
-    display: "flex",
-    flexDirection: "column",
-    gap: "6px",
-    fontFamily: menuTheme.font,
-    fontSize: "12px",
-    maxHeight: "calc(100vh - 100px)",
-    overflowY: "auto",
-  });
-
   // Attacker/defender roles are fixed to their grid colors (see the
   // sideChoice comment above), but the human should always see themself on
-  // the left and the AI on the right, whichever role they're playing —
-  // so the DOM order (which drives the on-screen left-to-right order) is
-  // picked by humanSide rather than hardcoded attacker-then-defender.
-  const humanColumn = humanSide === "attacker" ? attackerColumn : defenderColumn;
-  const aiColumn = humanSide === "attacker" ? defenderColumn : attackerColumn;
-  container.appendChild(humanColumn);
-  container.appendChild(canvasWrap);
-  container.appendChild(aiColumn);
-  container.appendChild(sidePanel);
+  // the left and the AI on the right, whichever role they're playing — so the
+  // DOM order is picked by humanSide rather than hardcoded.
+  battleRow.append(humanRail.rail, battlefield, aiRail.rail);
 
-  // Retreat/Surrender are human-only actions, so they live under the
-  // human's own Cast Spell button rather than the AI's — see the comments
-  // where retreatBtn/surrenderBtn are built, and renderFooterActions for
+  // Retreat/Surrender are human-only actions, so they sit at the bottom of
+  // the human's own rail rather than in the shared action bar — see the
+  // comments where retreatBtn/surrenderBtn are built, and renderActions for
   // the turn-gated visibility.
-  const humanCastBtn = humanSide === "attacker" ? attackerCastBtn : defenderCastBtn;
-  humanCastBtn.insertAdjacentElement("afterend", surrenderBtn);
-  humanCastBtn.insertAdjacentElement("afterend", retreatBtn);
+  humanRail.actions.append(retreatBtn, surrenderBtn);
+  const humanCastBtn = humanRail.castBtn;
 
-  const layout = computeLayout(state);
-  const pad = HEX_SIZE + 20;
-  canvas.width = layout.maxX - layout.minX + pad * 2;
-  canvas.height = layout.maxY - layout.minY + pad * 2;
-  canvas.style.width = `${canvas.width}px`;
-  canvas.style.height = `${canvas.height}px`;
-  const offsetX = -layout.minX + pad;
-  const offsetY = -layout.minY + pad;
+  // The hex size is solved for the available battlefield box on every layout
+  // change, rather than drawing at a fixed size and scaling the bitmap down.
+  // The old approach kept a fixed 34px-hex buffer and shrank its CSS size to
+  // fit, which at 1280x720 left the grid rendering at ~27% — roughly 12px
+  // hexes. Reflowing instead keeps hexes legible at any viewport.
+  let hexSize = HEX_SIZE_MAX;
+  let offsetX = 0;
+  let offsetY = 0;
+  let canvasCssW = 0;
+  let canvasCssH = 0;
 
-  // The canvas's pixel buffer (canvas.width/height, set above) stays fixed to
-  // the hex grid's natural size — hex hit-testing math and drawing all assume
-  // that coordinate space. What changes on resize is only the canvas's
-  // on-screen CSS size: scaled down (via width/height, never up) to whatever
-  // room is left after the side panels take theirs, so the arena never forces
-  // a horizontal scrollbar on narrower viewports. The click handler already
-  // divides by canvas.width/rect.width to map screen coords back into grid
-  // space, so shrinking the CSS size needs no other changes to stay clickable.
-  //
-  // The floor is a last-resort sanity clamp (degenerate near-zero canvas at
-  // pathologically narrow windows), not a usability target — it must stay
-  // below whatever scale the widest real sidebar configuration needs at the
-  // narrowest supported viewport (1280px), or it becomes the thing that
-  // forces the scrollbar it exists to prevent. The 2-up status-bar grid
-  // (buildStatusBar) needs ~0.28 at 1280px, hence 0.2 here with headroom.
-  const CANVAS_MIN_SCALE = 0.2;
-  function fitCanvasToContainer(): void {
-    const containerStyle = getComputedStyle(container);
-    const paddingX = parseFloat(containerStyle.paddingLeft) + parseFloat(containerStyle.paddingRight);
-    const gapX = parseFloat(containerStyle.columnGap || containerStyle.gap || "0") * 3; // 4 siblings, 3 gaps
-    const siblingsWidth =
-      attackerColumn.getBoundingClientRect().width +
-      defenderColumn.getBoundingClientRect().width +
-      sidePanel.getBoundingClientRect().width;
-    const available = container.clientWidth - paddingX - gapX - siblingsWidth;
-    const scale = Math.min(1, Math.max(CANVAS_MIN_SCALE, available / canvas.width));
-    canvas.style.width = `${canvas.width * scale}px`;
-    canvas.style.height = `${canvas.height * scale}px`;
+  const unitExtent = gridExtent(state, 1);
 
-    // Bound the footer to the same horizontal span as the battle row above
-    // it (side panels + canvas + gaps) instead of the full viewport width,
-    // so it visually lines up with the panels rather than floating full-bleed.
-    const contentWidth = siblingsWidth + canvas.width * scale + gapX;
-    footer.style.maxWidth = `${contentWidth}px`;
+  function relayoutCanvas(): void {
+    const rect = battlefield.getBoundingClientRect();
+    hexSize = fitHexSize(unitExtent, Math.max(160, rect.width), Math.max(160, rect.height));
+    const extent = gridExtent(state, hexSize);
+    const pad = hexSize + CANVAS_MARGIN;
+    canvasCssW = Math.ceil(extent.maxX - extent.minX + pad * 2);
+    canvasCssH = Math.ceil(extent.maxY - extent.minY + pad * 2);
+    offsetX = -extent.minX + pad;
+    offsetY = -extent.minY + pad;
+
+    // Back the canvas at device resolution so hex outlines and unit counts
+    // stay crisp on HiDPI displays. All drawing math stays in CSS pixels via
+    // the setTransform in draw(), so the canvas stays 1:1 with its layout box
+    // and hit-testing needs no rescaling.
+    const dpr = window.devicePixelRatio || 1;
+    canvas.style.width = `${canvasCssW}px`;
+    canvas.style.height = `${canvasCssH}px`;
+    canvas.width = Math.round(canvasCssW * dpr);
+    canvas.height = Math.round(canvasCssH * dpr);
+    draw();
   }
-  window.addEventListener("resize", fitCanvasToContainer);
+
+  const resizeObserver = new ResizeObserver(() => relayoutCanvas());
+  resizeObserver.observe(battlefield);
 
   function toCanvas(q: number, r: number): { x: number; y: number } {
-    const { x, y } = axialToPixel(q, r, HEX_SIZE);
+    const { x, y } = axialToPixel(q, r, hexSize);
     return { x: x + offsetX, y: y + offsetY };
   }
 
@@ -1247,17 +1269,59 @@ export function openManualBattleArena(
   // positions rather than hardcoded to a side, since attacker/defender can
   // deploy from either edge (see BattleGrid.sideChoice).
   function behindSide(subject: Combatant, opponents: Combatant[]): "left" | "right" {
-    const living = opponents.filter((c) => !c.retreated && c.entries.some((e) => e.count > 0));
+    const living = opponents.filter(isAlive);
     if (living.length === 0) return "left";
     const subjectX = toCanvas(subject.position.q, subject.position.r).x;
     const avgOpponentX = living.reduce((sum, c) => sum + toCanvas(c.position.q, c.position.r).x, 0) / living.length;
     return subjectX >= avgOpponentX ? "right" : "left";
   }
 
-  // Shared by: selecting one of your own platoons, completing a Spy, and
-  // clicking a previously-spied enemy. `winVsSlot` (a human slotIndex) adds
-  // the win-odds row — only meaningful when showing an enemy's card while
-  // one of your own platoons is selected.
+  // The stat rows that used to sit on every always-on roster tile. They now
+  // render inside the info card, so they're one hover away rather than
+  // permanently occupying 640px of screen width.
+  //
+  // Atk/Def use the numerically dominant entry (most units) rather than an
+  // average, since a platoon can mix up to MAX_PLATOON_ENTRIES unit types —
+  // same "pick the entry that actually represents the platoon" idea as
+  // computeSpecialty, just simpler since it's a single number. Speed instead
+  // reuses platoonSpeed() directly: it's already the real mechanical value
+  // (min speed across entries) movement range is computed from.
+  function statsFor(c: Combatant): { label: string; value: string }[] {
+    const living = c.entries.filter((e) => e.count > 0);
+    if (living.length === 0) return [];
+    const dominant = living.reduce((a, b) => (b.count > a.count ? b : a));
+    const unit = state.unitTypes[dominant.unitTypeId];
+    const stats: { label: string; value: string }[] = [];
+    if (unit) {
+      stats.push({ label: "Atk", value: String(unit.attack) });
+      stats.push({ label: "Def", value: String(unit.defence) });
+    }
+    stats.push({ label: "Spd", value: String(platoonSpeed(c, state.unitTypes)) });
+    stats.push({ label: "Rng", value: isRangedPlatoon(c, state.unitTypes) ? String(RANGED_ATTACK_RANGE) : "Melee" });
+    // Terrain placeholder — the game has no terrain-bonus mechanic yet (see
+    // docs/terrain-plan.md). Same pattern as the Morale/Fatigue placeholders
+    // below: the slot exists ahead of the mechanic, so wiring in a real value
+    // later is a one-line change here.
+    stats.push({ label: "Terrain", value: "—" });
+    return stats;
+  }
+
+  // Morale + Fatigue placeholders. No mechanic behind these yet — the values
+  // are hard-coded (morale 100, fatigue 0) so the slot exists for when the
+  // combat system tracks them; see docs/morale-fatigue-plan.md.
+  function metricsFor(): { label: string; value: number; color: string }[] {
+    const morale = 1;
+    const fatigue = 0;
+    return [
+      { label: "Morale", value: morale, color: morale > 0.5 ? "#4caf50" : morale > 0.25 ? "#ffb300" : "#e53935" },
+      { label: "Fatigue", value: fatigue, color: fatigue < 0.25 ? "#4caf50" : fatigue < 0.5 ? "#ffb300" : "#e53935" },
+    ];
+  }
+
+  // Shared by: selecting one of your own platoons, hovering a rail strip,
+  // completing a Spy, and clicking a previously-spied enemy. `winVsSlot` (a
+  // human slotIndex) adds the win-odds row — only meaningful when showing an
+  // enemy's card while one of your own platoons is selected.
   function showInfoPopupFor(combatant: Combatant, winVsSlot: number | null): void {
     const accent = combatant.side === "attacker" ? ATTACKER_ACCENT : DEFENDER_ACCENT;
     const ownerLabel = combatant.side === humanSide ? "Your platoon" : "Enemy platoon";
@@ -1266,11 +1330,11 @@ export function openManualBattleArena(
     const movementRemaining = getMovementRange(state, combatant).length;
     const anchor = toCanvas(combatant.position.q, combatant.position.r);
     const winner = winVsSlot === null ? undefined : getCombatant(state, humanSide, winVsSlot);
-    // The canvas is snug around the hex grid (barely 50px of padding) — far
-    // too tight to fit a popup beside an edge-column unit without covering
-    // it. canvasWrap has no overflow:hidden, so give the popup the real
-    // on-screen room (the whole viewport, minus a margin) rather than
-    // clamping it to the canvas's own tiny bounds.
+    const specialty = visibleSpecialty(state, combatant);
+    // The canvas is snug around the hex grid — far too tight to fit a popup
+    // beside an edge-column unit without covering it. canvasWrap has no
+    // overflow:hidden, so give the popup the real on-screen room (the whole
+    // viewport, minus a margin) rather than clamping it to the canvas bounds.
     const wrapRect = canvasWrap.getBoundingClientRect();
     const margin = 12;
     infoPopup.show({
@@ -1280,6 +1344,9 @@ export function openManualBattleArena(
       ownerLabel,
       canAct,
       movementRemaining,
+      specialty: specialty ? { icon: specialtyIcon(specialty.tag), label: specialty.tag } : undefined,
+      stats: statsFor(combatant),
+      metrics: metricsFor(),
       winChanceVs: winner ? { entries: winner.entries, label: `Platoon ${winner.slotIndex + 1}` } : undefined,
       anchorX: anchor.x,
       anchorY: anchor.y,
@@ -1291,27 +1358,55 @@ export function openManualBattleArena(
     });
   }
 
+  // Called when a transient hover ends: fall back to the selected platoon's
+  // card (the persistent state) rather than leaving the last hovered one up.
+  function restoreInfoPopup(): void {
+    if (selectedSlot !== null) {
+      const selected = getCombatant(state, humanSide, selectedSlot);
+      if (selected) {
+        showInfoPopupFor(selected, null);
+        return;
+      }
+    }
+    infoPopup.hide();
+  }
+
   function draw(): void {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // All drawing below is in CSS pixels; the device-pixel backing store is
+    // applied here rather than by inflating the layout coordinates, so
+    // hit-testing in the click handler needs no rescaling.
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, canvasCssW, canvasCssH);
+
+    // Hexes holding one of your platoons that hasn't acted yet. Every platoon
+    // has to move each round, so rather than a separate turn-order readout,
+    // the grid itself shows what's still waiting on you.
+    const availableHexes = unactedLivingSlots(state, humanSide)
+      .map((slot) => getCombatant(state, humanSide, slot))
+      .filter((c): c is Combatant => c !== undefined)
+      .map((c) => c.position);
 
     for (const hex of state.grid.hexes) {
       const { x, y } = toCanvas(hex.q, hex.r);
-      const corners = hexCorners(x, y, HEX_SIZE - 1);
+      const corners = hexCorners(x, y, hexSize - 1);
       ctx.beginPath();
       corners.forEach((c, i) => (i === 0 ? ctx.moveTo(c.x, c.y) : ctx.lineTo(c.x, c.y)));
       ctx.closePath();
       const inRange = moveRange.some((h) => h.q === hex.q && h.r === hex.r);
       ctx.fillStyle = hex.impassable ? "#3a2a2a" : inRange ? "rgba(210,210,215,0.35)" : "#20242c";
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.08)";
-      ctx.lineWidth = 1;
+
+      const isAvailable = availableHexes.some((h) => h.q === hex.q && h.r === hex.r);
+      ctx.strokeStyle = isAvailable ? "rgba(255,214,102,0.9)" : "rgba(255,255,255,0.08)";
+      ctx.lineWidth = isAvailable ? 2 : 1;
       ctx.stroke();
     }
 
     for (const t of attackTargets) {
       const { x, y } = toCanvas(t.position.q, t.position.r);
       ctx.beginPath();
-      ctx.arc(x, y, HEX_SIZE * 0.8, 0, Math.PI * 2);
+      ctx.arc(x, y, hexSize * 0.8, 0, Math.PI * 2);
       ctx.strokeStyle = "#e05050";
       ctx.lineWidth = 2;
       ctx.stroke();
@@ -1323,7 +1418,7 @@ export function openManualBattleArena(
       const { x, y } = toCanvas(t.position.q, t.position.r);
       ctx.beginPath();
       ctx.setLineDash([4, 3]);
-      ctx.arc(x, y, HEX_SIZE * 0.85, 0, Math.PI * 2);
+      ctx.arc(x, y, hexSize * 0.85, 0, Math.PI * 2);
       ctx.strokeStyle = "#e8c04a";
       ctx.lineWidth = 2;
       ctx.stroke();
@@ -1332,12 +1427,12 @@ export function openManualBattleArena(
 
     for (const side of ["attacker", "defender"] as const) {
       for (const c of side === "attacker" ? state.attacker : state.defender) {
-        if (c.retreated || !c.entries.some((e) => e.count > 0)) continue;
+        if (!isAlive(c)) continue;
         const { x, y } = toCanvas(c.position.q, c.position.r);
         const isSelected = side === humanSide && c.slotIndex === selectedSlot;
         ctx.beginPath();
-        ctx.arc(x, y, HEX_SIZE * 0.55, 0, Math.PI * 2);
-        ctx.fillStyle = side === "attacker" ? (isSelected ? "#5fb0ff" : "#3070c0") : "#c04040";
+        ctx.arc(x, y, hexSize * 0.55, 0, Math.PI * 2);
+        ctx.fillStyle = side === "attacker" ? (isSelected ? "#5fb0ff" : "#3070c0") : isSelected ? "#ff7a7a" : "#c04040";
         ctx.fill();
         ctx.strokeStyle = "#fff";
         ctx.lineWidth = isSelected ? 2 : 1;
@@ -1345,18 +1440,18 @@ export function openManualBattleArena(
 
         const count = c.entries.reduce((sum, e) => sum + e.count, 0);
         ctx.fillStyle = "#fff";
-        ctx.font = `${Math.round(HEX_SIZE * 0.4)}px ${menuTheme.font}`;
+        ctx.font = `${Math.round(hexSize * 0.4)}px ${menuTheme.font}`;
         ctx.textAlign = "center";
-        ctx.fillText(String(count), x, y + 3);
+        ctx.fillText(String(count), x, y + hexSize * 0.14);
 
-        const hpPct = c.maxHealth > 0 ? totalHealth(c.entries, state.unitTypes) / c.maxHealth : 0;
-        const barW = HEX_SIZE * 1.1;
+        const pct = hpRatio(state, c);
+        const barW = hexSize * 1.1;
         const barX = x - barW / 2;
-        const barY = y + HEX_SIZE * 0.55 + 3;
+        const barY = y + hexSize * 0.55 + 3;
         ctx.fillStyle = "#000";
         ctx.fillRect(barX, barY, barW, 4);
-        ctx.fillStyle = hpPct > 0.5 ? "#4caf50" : hpPct > 0.25 ? "#ffb300" : "#e53935";
-        ctx.fillRect(barX, barY, barW * hpPct, 4);
+        ctx.fillStyle = hpColor(pct);
+        ctx.fillRect(barX, barY, barW * pct, 4);
       }
     }
   }
@@ -1639,58 +1734,71 @@ export function openManualBattleArena(
     debugLog(`click ${fmtHex(hex)} -> no-op (not a legal move/attack/deselect target for ${platoonLabel(humanSide, selectedSlot)})`);
   }
 
+  // The canvas is sized 1:1 with its layout box (the device-pixel backing is
+  // applied via ctx.setTransform in draw, not by inflating the layout size),
+  // so a click's canvas-local position needs no rescaling.
   canvas.addEventListener("click", (e) => {
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX - offsetX;
-    const y = (e.clientY - rect.top) * scaleY - offsetY;
-    handleClick(pixelToAxial(x, y, HEX_SIZE));
+    const x = e.clientX - rect.left - offsetX;
+    const y = e.clientY - rect.top - offsetY;
+    handleClick(pixelToAxial(x, y, hexSize));
   });
 
-  function renderSidePanel(): void {
-    sidePanel.replaceChildren();
+  function renderTopBar(): void {
+    roundEl.textContent = `Round ${state.round} / ${state.maxRounds}`;
+    const phase = timeOfDayForRound(state.round);
+    timeEl.textContent = `${TIME_OF_DAY_ICON[phase]} ${phase}`;
 
-    if (unactedLivingSlots(state, humanSide).length === 0) {
-      const waiting = document.createElement("div");
-      waiting.textContent = "Waiting on the AI to finish its round...";
-      waiting.style.opacity = "0.6";
-      waiting.style.fontSize = "10px";
-      sidePanel.appendChild(waiting);
-    }
+    const over = isBattleOver(state);
+    const humanActing = unactedLivingSlots(state, humanSide).length > 0;
+    turnEl.textContent = over ? "Battle Over" : humanActing ? "Your Turn" : "AI's Turn";
+    turnEl.style.color = over ? "" : humanActing ? "#9ecbff" : "#ff9e9e";
   }
 
-  function renderStatusBars(): void {
+  function renderRails(): void {
     const actableSlots = unactedLivingSlots(state, humanSide);
-    const attackerTiles = state.attacker.map((c) => {
-      const tile = buildStatusTile(state, c, ATTACKER_ACCENT, humanSide === "attacker" && c.slotIndex === selectedSlot, humanSide);
-      if (humanSide === "attacker" && actableSlots.includes(c.slotIndex)) {
-        tile.style.cursor = "pointer";
-        tile.addEventListener("click", () => selectPlatoon(c.slotIndex));
-      }
-      return tile;
-    });
-    attackerBar.replaceChildren(attackerBar.firstElementChild!, ...attackerTiles);
+    const humanCombatants = humanSide === "attacker" ? state.attacker : state.defender;
+    const aiCombatants = aiSide === "attacker" ? state.attacker : state.defender;
 
-    const defenderTiles = state.defender.map((c) => {
-      const tile = buildStatusTile(state, c, DEFENDER_ACCENT, humanSide === "defender" && c.slotIndex === selectedSlot, humanSide);
-      if (humanSide === "defender" && actableSlots.includes(c.slotIndex)) {
-        tile.style.cursor = "pointer";
-        tile.addEventListener("click", () => selectPlatoon(c.slotIndex));
-      }
-      return tile;
-    });
-    defenderBar.replaceChildren(defenderBar.firstElementChild!, ...defenderTiles);
+    function fillRail(list: HTMLElement, combatants: Combatant[], accent: string, own: boolean): void {
+      const strips = combatants.map((c) => {
+        const canAct = own ? actableSlots.includes(c.slotIndex) : isAlive(c);
+        const strip = buildPlatoonStrip({
+          state,
+          combatant: c,
+          accent,
+          viewerSide: humanSide,
+          selected: own && c.slotIndex === selectedSlot,
+          canAct,
+        });
+        if (own && actableSlots.includes(c.slotIndex)) {
+          strip.style.cursor = "pointer";
+          strip.addEventListener("click", () => selectPlatoon(c.slotIndex));
+        }
+        // Hover is what replaces the old always-on stat tiles: the full card
+        // appears for whatever platoon you point at, and falls back to the
+        // selected one when the pointer leaves.
+        if (isAlive(c) && isKnownTo(c, humanSide)) {
+          strip.addEventListener("mouseenter", () => showInfoPopupFor(c, own ? null : selectedSlot));
+          strip.addEventListener("mouseleave", restoreInfoPopup);
+        }
+        return strip;
+      });
+      list.replaceChildren(...strips);
+    }
+
+    fillRail(humanRail.list, humanCombatants, humanAccent, true);
+    fillRail(aiRail.list, aiCombatants, aiAccent, false);
   }
 
   function refresh(): void {
     draw();
-    renderSidePanel();
-    renderStatusBars();
-    renderFooter();
-    renderFooterActions();
+    renderRails();
+    renderTopBar();
+    renderActions();
+    renderLog();
   }
 
+  relayoutCanvas();
   refresh();
-  fitCanvasToContainer();
 }
