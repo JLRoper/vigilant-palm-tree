@@ -5,10 +5,12 @@ gameplay to feel. Agreed direction: **tactical centerpiece** (the grid is the pa
 positioning matters), **battlefield-first** (rosters collapse to strips, detail on
 demand), scoped to **layout/UX only** — no combat-engine changes.
 
-**Status:** Stage 1 implemented and verified in the running app. Stages 2–4 not started.
-Stage 2 is the open design question (grid geometry) and needs a decision before work.
+**Status:** Stage 1 shipped. Stage 2 (straighten the grid) and G1 (visible AI) approved
+and implemented, along with defects D1–D3. Stage 3 (small viewports) and Stage 4 (docs)
+still open, as are gaps G2–G8.
 
-**Branch:** `claude/fight-screen-design-532553` — nothing committed yet.
+**Branch:** `claude/fight-screen-design-532553` — committed as `667f463`, open as
+[PR #19](https://github.com/Millerfly91/vigilant-palm-tree/pull/19).
 
 ---
 
@@ -104,10 +106,100 @@ displayed). Verifiable by sampling the canvas for that colour.
 
 ---
 
-## Stage 2 — Straighten the battlefield ⬜ decision needed
+## Review findings (2026-08-12) — D1–D3 and G1 ✅ done, G2–G8 ⬜ open
 
-**This is the open question.** The field is a skewed parallelogram, and it wastes a lot
-of space.
+Code-level audit of what Stage 1 shipped. The browser tooling was unavailable for this
+pass, so these are read from source, not observed live — the three defects are reasoned
+from the code and should be reproduced before fixing.
+
+### Defects introduced by Stage 1
+
+**D1 — The info card goes stale on reflow.** `relayoutCanvas()` recomputes `hexSize`,
+`offsetX`, `offsetY` and calls `draw()`, but never repositions an open info card. The
+card's `anchorX`/`anchorY` were computed from the *previous* geometry, so after any
+reflow it points at the wrong hex. Easy to hit: open a card, then expand the battle log —
+that reflows the canvas (confirmed in Stage 1 testing: 846×523 → 770×477). Fix: call
+`restoreInfoPopup()` at the end of `relayoutCanvas()`.
+
+**D2 — Hover can strand the card.** `renderRails()` calls `list.replaceChildren(...)` on
+every `refresh()`, destroying the strip the pointer is over. A destroyed element never
+fires `mouseleave`, so the card can keep showing a platoon you are no longer pointing at
+— for example when a refresh lands mid-hover as the AI resolves. Fix: track the hovered
+slot and reconcile after the rebuild, or attach the listeners once to the list and use
+event delegation.
+
+**D3 — `canAct` means two different things.** `renderRails()` passes
+`actableSlots.includes(...)` for your rail but `isAlive(c)` for the enemy's, so the same
+`buildPlatoonStrip` parameter means "has an action left" on one side and "is alive" on the
+other. The visible consequence is that enemy strips never dim. Harmless today, misleading
+to the next reader. Fix: split into `dimmed` and let each caller decide.
+
+**All three fixed.** D1 by calling `restoreInfoPopup()` at the end of `relayoutCanvas()`;
+D2 by moving hover onto delegated `mouseover`/`mouseout` listeners bound once to the
+persistent list containers instead of per-strip `mouseenter`/`mouseleave`; D3 by renaming
+the parameter to `dimmed` and letting each rail decide what it means.
+
+### Gaps not covered anywhere in this plan
+
+Ordered by how much they cost the "tactical centerpiece" goal.
+
+**G1 — The AI is invisible.** ✅ **Fixed.** `advanceAi()` used to resolve AI turns
+*synchronously*: one AI platoon after each of your actions, then a `while` loop that burned
+the rest of its round once you had no platoons left — no timers, no animation, one repaint
+at the end. You never saw the AI move; the board teleported between your clicks.
+
+Now stepped on a timer in two beats per platoon: mark the platoon that is about to act and
+repaint (`AI_TELEGRAPH_MS`, 320ms, drawn as a white ring around the token), then resolve
+and repaint (`AI_STEP_MS`, 260ms, before the next platoon). An `aiActing` flag locks player
+input for the duration — `handleClick` ignores clicks, rail strips stop being selectable,
+and End Turn / Spy / Retreat / Surrender hide. The gold "still to act" outline is
+suppressed while the AI moves so the only thing lit is the platoon actually moving, and the
+turn chip reads "AI's Turn" even when you still hold unacted platoons. `closeArena()`
+cancels any pending beat so a timer can't fire against a detached overlay.
+
+**G2 — No hover feedback on the grid.** The canvas has exactly one listener, `click`
+(`manualBattleArena.ts:1740`). Moving the pointer over the field produces nothing: no hex
+under-cursor highlight, no path preview, no "this is who you'd hit". All affordance comes
+from the static move-range fill and target rings.
+
+**G3 — No enemy threat range.** Knowing where the enemy can reach next round is core to
+tactical positioning. `getMovementRange(state, combatant)` is already engine-side and
+works for any combatant regardless of side; nothing in the UI surfaces it for enemies.
+
+**G4 — No outcome preview before committing.** `estimateWinChance` exists but only
+appears on an enemy's card, and only while one of your platoons is selected. There is no
+"this attack costs you ~N" before you click. Worse, a move that lands adjacent to an enemy
+triggers `refreshAfterMove()`'s bump-attack, which resolves the fight **immediately with
+no confirmation** — a misclick on a move hex can spend a platoon's turn on an attack you
+didn't intend.
+
+**G5 — No deployment phase.** `deploymentPosition()` is fixed: outer column, rows 0,2,4…
+In HoMM3 much of the tactical decision lives in arranging the army before the first round.
+This is a gameplay change, not layout.
+
+**G6 — No keyboard support.** No Escape, no cycling platoons, no key to end a turn. The
+arena is mouse-only.
+
+**G7 — The result card destroys the battlefield first.** `finishBattle()` calls
+`closeArena()` *before* `showBattleResultCard()`, so the final board position and the whole
+battle log are gone before you can review them. The card shows winner, round count,
+survivors and casualties — but not the field you just fought over.
+
+**G8 — Obstacles and terrain are undrawn.** Obstacles are flat `#3a2a2a` hexes; Terrain is
+a `—` placeholder in the info card. This is the visual difference between "a battlefield"
+and "a diagram", and was explicitly out of scope for Stage 1.
+
+### Which of these are still "layout/UX only"
+
+G1, G2, G4 (the preview half), G6, G7 and the three defects sit inside the original scope.
+G3, G4 (the bump-attack confirm), G5 and G8 change gameplay or engine behaviour and need
+the same sign-off as Stage 2.
+
+---
+
+## Stage 2 — Straighten the battlefield ✅ approved & implemented
+
+The field was a skewed parallelogram wasting a large slice of the canvas.
 
 ### Root cause
 
@@ -184,11 +276,33 @@ If a wide field is wanted, the deployment rule has to change first, e.g. two sta
 back columns of 4 platoons each, which would free rows to drop back to 11. **That is a
 gameplay change, not a layout change** — flagged here as a decision, not proposed work.
 
-### Scope note
+### As built — verified
 
-Stage 2 edits `shared/combat/grid.ts`, which is **outside the "layout/UX only" scope**
-originally agreed. It needs explicit sign-off before implementation. It is, however,
-contained: two functions, plus test updates.
+`rowShift(r) = ⌊r/2⌋` and an exported `columnOf(hex)` were added to `grid.ts`;
+`makeBattleGrid` now iterates rows-then-columns emitting `q = col − rowShift(r)`, the
+obstacle filter keys on `columnOf`, and `deploymentPosition` converts its column to axial
+the same way. No other file changed — the arena picks the new geometry up automatically,
+because `fitHexSize` solves against the real grid extent.
+
+Measured against a freshly built 15×15 grid:
+
+| Check | Result |
+|---|---|
+| Cell count | 225 (unchanged) |
+| `spanX` | **25.115** units (was 36.373; predicted 25.115) |
+| `spanY` | 21.000 units (unchanged) |
+| Distinct row widths | **one** — 24.249 (i.e. a true rectangle) |
+| Row left edges | alternating `0, 0.866, 0, 0.866…` (brick offset) |
+| Hex size @1280×720 | **24** (was 21) |
+| Hex size @1920×1080 | **39** (was 37) |
+| Deployment cells landing off-grid | none, across all 8 slots × 2 sides |
+| Obstacle columns | 2–10, inside the required 1–13 |
+
+`test/combat/manualBattle.test.ts` (10/10) and `test/combat/resolveBattle.test.ts` (10/10)
+pass unchanged — their position assertions all sit on row 0, where the offset conversion
+is the identity. `npm run build` and `npm run test:all` clean.
+
+**Still open from this stage:** the square-vs-wide question below.
 
 ---
 
@@ -223,7 +337,10 @@ width, so the floor engages at a much narrower viewport.
 
 ---
 
-## Stage 4 — Docs & commit ⬜ not started
+## Stage 4 — Docs ⬜ not started
+
+Stage 1 is committed (`667f463`) and open as PR #19; the doc updates below were **not**
+included and are still outstanding.
 
 Stale references created by Stage 1:
 
@@ -243,10 +360,31 @@ and `tsc --noEmit` were run directly instead. Worth resolving before relying on 
 
 ## Decisions needed
 
+Resolved: **#1 straighten the grid — yes** (done); **#6 make the AI visible — yes** (done);
+**#5 D1–D3 — fixed alongside**, since stepping the AI on a timer makes D1 and D2 far easier
+to trigger.
+
+Still open:
+
 | # | Question | Options |
 |---|---|---|
-| 1 | Straighten the grid (Stage 2)? | Yes — accept the `shared/combat/grid.ts` change / No — keep the rhombus |
-| 2 | If yes: square or wide field? | Keep 15×15 square / Go wide (needs a deployment-rule change first) |
+| 2 | Square or wide field? | Keep 15×15 square / go wide (needs a deployment-rule change first) |
 | 3 | Small-viewport behaviour (Stage 3)? | Pan below the floor / 1280 is the hard floor / lower the floor |
-| 4 | Verify the gold unacted-platoon highlight now? | Yes (pixel-sample) / wait for a session with screenshots |
-| 5 | Commit Stage 1 on its own, or bundle with Stage 2? | Separate commits / one change |
+| 4 | Verify the gold outline + AI telegraph visually? | Needs a session with working browser tooling |
+| 7 | Grid hover feedback + outcome preview (G2, G4)? | Both / hover only / neither |
+| 8 | Confirm before an unintended bump-attack (G4)? | Yes / no — keep the fast path |
+| 9 | Keep the battlefield alive behind the result card (G7)? | Yes / no |
+| 10 | Deployment phase (G5) and enemy threat range (G3)? | Later stage / not wanted |
+
+Also worth revisiting now that the grid is straightened: **AI pacing**. `AI_TELEGRAPH_MS`
+(320ms) and `AI_STEP_MS` (260ms) are first guesses. With 8 platoons a full AI round is
+roughly 4-5 seconds, which may be too slow once the novelty wears off — a speed control, or
+skipping the telegraph for platoons that only move, are both cheap adjustments.
+
+### Suggested order for what remains
+
+1. **Visual confirmation** of the AI telegraph and gold outline (blocked on tooling).
+2. **G2/G4** (hover + outcome preview) — makes positioning legible.
+3. **Stage 3** (small viewports) — much less pressing now that the grid needs ~31% less width.
+4. **Stage 4** (docs).
+5. **G5/G3/G8** — larger gameplay/art work, separate planning.

@@ -491,9 +491,11 @@ function buildPlatoonStrip(opts: {
   accent: string;
   viewerSide: BattleSide;
   selected: boolean;
-  canAct: boolean;
+  // Rendered spent. The caller decides what that means for its side — "has
+  // already acted this round" on your rail, never on the enemy's.
+  dimmed: boolean;
 }): HTMLElement {
-  const { state, combatant: c, accent, viewerSide, selected, canAct } = opts;
+  const { state, combatant: c, accent, viewerSide, selected, dimmed } = opts;
   const alive = isAlive(c);
   const known = isKnownTo(c, viewerSide);
 
@@ -508,7 +510,7 @@ function buildPlatoonStrip(opts: {
     border: selected ? `1px solid ${accent}` : "1px solid rgba(255,255,255,0.07)",
     // Spent platoons stay legible but visibly dimmed, so "who still has a
     // turn left" reads without counting.
-    opacity: !alive ? "0.35" : canAct ? "1" : "0.55",
+    opacity: !alive ? "0.35" : dimmed ? "0.55" : "1",
   });
 
   const top = document.createElement("div");
@@ -767,6 +769,8 @@ export function openManualBattleArena(
   };
 
   function closeArena(): void {
+    // Must cancel any pending AI beat, or it fires against a detached overlay.
+    clearAiTimer();
     resizeObserver.disconnect();
     overlay.remove();
   }
@@ -780,6 +784,24 @@ export function openManualBattleArena(
   // it deliberately never touches the unacted set).
   let spyMode = false;
   let spyTargets: Combatant[] = [];
+
+  // The AI used to resolve its whole turn synchronously inside advanceAi(),
+  // with a single repaint at the end — the board simply teleported between the
+  // player's clicks and you never saw the opponent move. Stepping it on a
+  // timer instead: telegraph which platoon is about to act, pause, resolve,
+  // pause, repeat. `aiActing` blocks player input for the duration.
+  const AI_TELEGRAPH_MS = 320;
+  const AI_STEP_MS = 260;
+  let aiActing = false;
+  let aiActingSlot: number | null = null;
+  let aiTimer: number | null = null;
+
+  function clearAiTimer(): void {
+    if (aiTimer !== null) {
+      window.clearTimeout(aiTimer);
+      aiTimer = null;
+    }
+  }
 
   const battleRow = document.createElement("div");
   Object.assign(battleRow.style, {
@@ -1033,11 +1055,11 @@ export function openManualBattleArena(
   function renderActions(): void {
     const over = isBattleOver(state);
     const actor = selectedSlot === null ? undefined : getCombatant(state, humanSide, selectedSlot);
-    const waitingOnAi = !over && unactedLivingSlots(state, humanSide).length === 0;
+    const waitingOnAi = !over && (aiActing || unactedLivingSlots(state, humanSide).length === 0);
     helpTextEl.textContent = over
       ? "Battle over."
       : waitingOnAi
-        ? "Waiting on the AI to finish its round..."
+        ? "The AI is making its move..."
         : spyMode
           ? "Click a highlighted enemy to send a spy (costs 1 troop), or click elsewhere to cancel."
           : selectedSlot === null
@@ -1045,16 +1067,17 @@ export function openManualBattleArena(
             : moveRange.length > 0
               ? "Click a highlighted hex to move (moving next to an enemy fights immediately). Steps left over can still be used — move again, attack a ringed enemy, or End Turn when done."
               : "Out of movement — click a ringed enemy to attack, or End Turn.";
-    endTurnBtn.style.display = selectedSlot !== null && !over ? "" : "none";
-    spyBtn.style.display = actor && !over && totalUnits(actor.entries) > 1 ? "" : "none";
+    endTurnBtn.style.display = selectedSlot !== null && !over && !aiActing ? "" : "none";
+    spyBtn.style.display = actor && !over && !aiActing && totalUnits(actor.entries) > 1 ? "" : "none";
     spyBtn.disabled = spyMode;
     spyBtn.style.opacity = spyMode ? "0.5" : "1";
     spyBtn.style.cursor = spyMode ? "not-allowed" : "pointer";
 
     // Cast Spell, Retreat, and Surrender live under the human's hero portrait
-    // and only make sense while it's actually the human's turn to act.
+    // and only make sense while it's actually the human's turn to act — which
+    // now excludes the beats where the AI is mid-move.
     const humanActing = unactedLivingSlots(state, humanSide).length > 0;
-    const showHumanActions = !over && humanActing;
+    const showHumanActions = !over && !aiActing && humanActing;
     humanCastBtn.style.display = showHumanActions ? "" : "none";
     retreatBtn.style.display = showHumanActions ? "" : "none";
     surrenderBtn.style.display = showHumanActions ? "" : "none";
@@ -1253,6 +1276,11 @@ export function openManualBattleArena(
     canvas.width = Math.round(canvasCssW * dpr);
     canvas.height = Math.round(canvasCssH * dpr);
     draw();
+    // An open info card was anchored against the previous hex size and
+    // offsets, so it would now point at the wrong hex. Re-anchor it against
+    // the geometry we just computed. Easy to hit by expanding the battle log,
+    // which reflows the canvas underneath a card that is already showing.
+    restoreInfoPopup();
   }
 
   const resizeObserver = new ResizeObserver(() => relayoutCanvas());
@@ -1381,11 +1409,14 @@ export function openManualBattleArena(
 
     // Hexes holding one of your platoons that hasn't acted yet. Every platoon
     // has to move each round, so rather than a separate turn-order readout,
-    // the grid itself shows what's still waiting on you.
-    const availableHexes = unactedLivingSlots(state, humanSide)
-      .map((slot) => getCombatant(state, humanSide, slot))
-      .filter((c): c is Combatant => c !== undefined)
-      .map((c) => c.position);
+    // the grid itself shows what's still waiting on you. Suppressed while the
+    // AI is acting so the only thing lit up is the platoon actually moving.
+    const availableHexes = aiActing
+      ? []
+      : unactedLivingSlots(state, humanSide)
+          .map((slot) => getCombatant(state, humanSide, slot))
+          .filter((c): c is Combatant => c !== undefined)
+          .map((c) => c.position);
 
     for (const hex of state.grid.hexes) {
       const { x, y } = toCanvas(hex.q, hex.r);
@@ -1423,6 +1454,20 @@ export function openManualBattleArena(
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.setLineDash([]);
+    }
+
+    // The AI platoon that is about to act, telegraphed for one beat before its
+    // move resolves so the player can follow what the opponent is doing.
+    if (aiActingSlot !== null) {
+      const acting = getCombatant(state, aiSide, aiActingSlot);
+      if (acting && isAlive(acting)) {
+        const { x, y } = toCanvas(acting.position.q, acting.position.r);
+        ctx.beginPath();
+        ctx.arc(x, y, hexSize * 0.78, 0, Math.PI * 2);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
     }
 
     for (const side of ["attacker", "defender"] as const) {
@@ -1575,26 +1620,63 @@ export function openManualBattleArena(
     logNewBattleEvents(beforeLog);
   }
 
+  // Hands control back to the player once the AI has nothing more to do this
+  // round (or the player has platoons waiting again).
+  function endAiPhase(): void {
+    aiActing = false;
+    aiActingSlot = null;
+    refresh();
+  }
+
+  // One AI platoon per invocation, in two beats: mark it as about to act and
+  // repaint (so the player can see *which* platoon is moving), then resolve
+  // and repaint again. Keeps going only while the player has nothing to do,
+  // which preserves the alternating turn order the engine expects.
+  function stepAi(): void {
+    aiTimer = null;
+    if (isBattleOver(state)) {
+      finishBattle();
+      return;
+    }
+    const slots = unactedLivingSlots(state, aiSide);
+    if (slots.length === 0) {
+      endAiPhase();
+      return;
+    }
+
+    aiActingSlot = slots[0];
+    refresh();
+
+    aiTimer = window.setTimeout(() => {
+      aiTimer = null;
+      runAiTurnLogged();
+      aiActingSlot = null;
+      refresh();
+      if (isBattleOver(state)) {
+        finishBattle();
+        return;
+      }
+      if (unactedLivingSlots(state, humanSide).length === 0 && unactedLivingSlots(state, aiSide).length > 0) {
+        aiTimer = window.setTimeout(stepAi, AI_STEP_MS);
+      } else {
+        endAiPhase();
+      }
+    }, AI_TELEGRAPH_MS);
+  }
+
   function advanceAi(): void {
     if (isBattleOver(state)) {
       finishBattle();
       return;
     }
-    if (unactedLivingSlots(state, aiSide).length > 0) {
-      runAiTurnLogged();
-    }
-    if (isBattleOver(state)) {
-      finishBattle();
+    if (unactedLivingSlots(state, aiSide).length === 0) {
+      refresh();
       return;
     }
-    while (unactedLivingSlots(state, humanSide).length === 0 && unactedLivingSlots(state, aiSide).length > 0) {
-      runAiTurnLogged();
-      if (isBattleOver(state)) {
-        finishBattle();
-        return;
-      }
-    }
+    aiActing = true;
+    // Paint "AI's Turn" and lock the controls before the first beat lands.
     refresh();
+    aiTimer = window.setTimeout(stepAi, AI_STEP_MS);
   }
 
   function finishBattle(): void {
@@ -1612,6 +1694,12 @@ export function openManualBattleArena(
   function handleClick(hex: Axial): void {
     if (isBattleOver(state)) {
       debugLog(`click ${fmtHex(hex)} -> ignored (battle over)`);
+      return;
+    }
+    // The AI's turn now takes real time, so the board can be mid-change when a
+    // click lands. Ignore input until it hands control back.
+    if (aiActing) {
+      debugLog(`click ${fmtHex(hex)} -> ignored (AI is acting)`);
       return;
     }
 
@@ -1750,45 +1838,75 @@ export function openManualBattleArena(
     timeEl.textContent = `${TIME_OF_DAY_ICON[phase]} ${phase}`;
 
     const over = isBattleOver(state);
-    const humanActing = unactedLivingSlots(state, humanSide).length > 0;
-    turnEl.textContent = over ? "Battle Over" : humanActing ? "Your Turn" : "AI's Turn";
-    turnEl.style.color = over ? "" : humanActing ? "#9ecbff" : "#ff9e9e";
+    // aiActing wins over the unacted-slot count: with the AI stepped on a
+    // timer the player can still have platoons in hand while it's mid-turn.
+    const yours = !over && !aiActing && unactedLivingSlots(state, humanSide).length > 0;
+    turnEl.textContent = over ? "Battle Over" : yours ? "Your Turn" : "AI's Turn";
+    turnEl.style.color = over ? "" : yours ? "#9ecbff" : "#ff9e9e";
   }
+
+  function railCombatants(own: boolean): Combatant[] {
+    const side = own ? humanSide : aiSide;
+    return side === "attacker" ? state.attacker : state.defender;
+  }
+
+  // Hover is what replaces the old always-on stat tiles: the full card appears
+  // for whatever platoon you point at, and falls back to the selected one when
+  // the pointer leaves.
+  //
+  // Delegated onto the list container, which survives every refresh, rather
+  // than bound per strip. renderRails() replaces its children on each refresh,
+  // and a removed element never fires mouseleave — so per-strip listeners
+  // could strand the card showing a platoon the pointer had already left.
+  // mouseover/mouseout bubble, so the persistent container sees both.
+  function attachRailHover(list: HTMLElement, own: boolean): void {
+    list.addEventListener("mouseover", (e) => {
+      const strip = (e.target as HTMLElement | null)?.closest<HTMLElement>("[data-slot]");
+      if (!strip || !list.contains(strip)) return;
+      const combatant = railCombatants(own).find((c) => c.slotIndex === Number(strip.dataset.slot));
+      if (!combatant || !isAlive(combatant) || !isKnownTo(combatant, humanSide)) return;
+      showInfoPopupFor(combatant, own ? null : selectedSlot);
+    });
+    list.addEventListener("mouseout", (e) => {
+      // Ignore crossings between two strips inside the same list; only restore
+      // when the pointer actually leaves the rail.
+      const to = e.relatedTarget as Node | null;
+      if (to && list.contains(to)) return;
+      restoreInfoPopup();
+    });
+  }
+
+  attachRailHover(humanRail.list, true);
+  attachRailHover(aiRail.list, false);
 
   function renderRails(): void {
     const actableSlots = unactedLivingSlots(state, humanSide);
-    const humanCombatants = humanSide === "attacker" ? state.attacker : state.defender;
-    const aiCombatants = aiSide === "attacker" ? state.attacker : state.defender;
 
-    function fillRail(list: HTMLElement, combatants: Combatant[], accent: string, own: boolean): void {
-      const strips = combatants.map((c) => {
-        const canAct = own ? actableSlots.includes(c.slotIndex) : isAlive(c);
+    function fillRail(list: HTMLElement, accent: string, own: boolean): void {
+      const strips = railCombatants(own).map((c) => {
+        const selectable = own && !aiActing && actableSlots.includes(c.slotIndex);
         const strip = buildPlatoonStrip({
           state,
           combatant: c,
           accent,
           viewerSide: humanSide,
           selected: own && c.slotIndex === selectedSlot,
-          canAct,
+          // Only your own rail tracks "still has an action"; enemy strips just
+          // dim when the platoon is out of the fight.
+          dimmed: own ? !actableSlots.includes(c.slotIndex) : false,
         });
-        if (own && actableSlots.includes(c.slotIndex)) {
+        strip.dataset.slot = String(c.slotIndex);
+        if (selectable) {
           strip.style.cursor = "pointer";
           strip.addEventListener("click", () => selectPlatoon(c.slotIndex));
-        }
-        // Hover is what replaces the old always-on stat tiles: the full card
-        // appears for whatever platoon you point at, and falls back to the
-        // selected one when the pointer leaves.
-        if (isAlive(c) && isKnownTo(c, humanSide)) {
-          strip.addEventListener("mouseenter", () => showInfoPopupFor(c, own ? null : selectedSlot));
-          strip.addEventListener("mouseleave", restoreInfoPopup);
         }
         return strip;
       });
       list.replaceChildren(...strips);
     }
 
-    fillRail(humanRail.list, humanCombatants, humanAccent, true);
-    fillRail(aiRail.list, aiCombatants, aiAccent, false);
+    fillRail(humanRail.list, humanAccent, true);
+    fillRail(aiRail.list, aiAccent, false);
   }
 
   function refresh(): void {
