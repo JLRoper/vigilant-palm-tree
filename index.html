@@ -23,6 +23,38 @@
         font-family: system-ui, sans-serif;
         color: #eee;
       }
+      /* The UI is dark throughout; without this the browser paints native
+         scrollbars, form controls and focus rings in their light-mode colors. */
+      :root {
+        color-scheme: dark;
+      }
+      /* Firefox */
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+      }
+      /* Chrome/Edge/Safari — match the menu panel rather than the OS default. */
+      ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      ::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.35);
+        border-radius: 5px;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.18);
+        border-radius: 5px;
+        border: 2px solid transparent;
+        background-clip: content-box;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.3);
+        background-clip: content-box;
+      }
+      ::-webkit-scrollbar-corner {
+        background: transparent;
+      }
       #app {
         position: fixed;
         inset: 0;

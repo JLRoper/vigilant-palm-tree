@@ -60,6 +60,13 @@ export function styleInput(input: HTMLInputElement): void {
   input.style.fontFamily = menuTheme.input.fontFamily;
 }
 
+/** Gap kept between a panel edge and the viewport edge, in px. */
+const VIEWPORT_MARGIN = 24;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 export interface PopupMenuOptions {
   parent?: HTMLElement;
   title: string;
@@ -95,6 +102,10 @@ export class PopupMenu {
       left: `${this.pos.x}px`,
       top: `${this.pos.y}px`,
       minWidth: "180px",
+      // Column layout so the header stays pinned and only the body scrolls.
+      display: "flex",
+      flexDirection: "column",
+      maxHeight: `calc(100vh - ${VIEWPORT_MARGIN * 2}px)`,
       background: menuTheme.panel.background,
       color: menuTheme.panel.color,
       border: menuTheme.panel.border,
@@ -125,6 +136,7 @@ export class PopupMenu {
       cursor: this.draggable ? "move" : "default",
       fontSize: "13px",
       fontWeight: "600",
+      flexShrink: "0",
     });
 
     this.titleEl = document.createElement("div");
@@ -157,6 +169,12 @@ export class PopupMenu {
       display: "flex",
       flexDirection: "column",
       gap: "8px",
+      overflowY: "auto",
+      // Flex children default to min-height:auto and refuse to shrink below
+      // their content, which would defeat the max-height on root.
+      minHeight: "0",
+      // Keep wheel events from chaining to the map once the list bottoms out.
+      overscrollBehavior: "contain",
     });
 
     this.root.appendChild(this.header);
@@ -219,14 +237,23 @@ export class PopupMenu {
       if (this.closeBtn && e.target === this.closeBtn) return;
       e.preventDefault();
       const rect = this.root.getBoundingClientRect();
+      // Centred modals sit in normal flex flow so CSS can keep them centred.
+      // Dragging one means taking it out of flow, pinned where it currently is.
+      if (this.root.style.position !== "absolute") {
+        const origin = (this.root.offsetParent as HTMLElement | null)?.getBoundingClientRect();
+        this.root.style.position = "absolute";
+        this.setPosition(rect.left - (origin?.left ?? 0), rect.top - (origin?.top ?? 0));
+      }
       this.dragOffset = {
         dx: e.clientX - rect.left,
         dy: e.clientY - rect.top,
       };
       const onMove = (ev: MouseEvent) => {
         if (!this.dragOffset) return;
-        const x = Math.max(0, ev.clientX - this.dragOffset.dx);
-        const y = Math.max(0, ev.clientY - this.dragOffset.dy);
+        // Clamp both edges so a panel can never be dragged out of reach.
+        const { width, height } = this.root.getBoundingClientRect();
+        const x = clamp(ev.clientX - this.dragOffset.dx, 0, Math.max(0, window.innerWidth - width));
+        const y = clamp(ev.clientY - this.dragOffset.dy, 0, Math.max(0, window.innerHeight - height));
         this.setPosition(x, y);
         this.opts.onMove?.({ x, y });
       };
@@ -256,19 +283,46 @@ export function openCenteredModal(
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    padding: `${VIEWPORT_MARGIN}px`,
+    boxSizing: "border-box",
     // Must sit above the home overlay (z-index 200 in homeView.ts).
     zIndex: "300",
   });
   parent.appendChild(wrapper);
+
   const menu = new PopupMenu({
     parent: wrapper,
     title,
     width,
     draggable,
-    onClose: () => wrapper.remove(),
+    onClose: () => {
+      window.removeEventListener("resize", clampIntoView);
+      wrapper.remove();
+    },
   });
-  const initialLeft = (window.innerWidth - width) / 2;
-  const initialTop = Math.max(24, (window.innerHeight - 240) / 2);
-  menu.setPosition(initialLeft, initialTop);
+
+  // Centring is left to the wrapper's flexbox rather than computed here. A
+  // measured position would go stale the moment content grew, and once the
+  // panel reaches its max-height a ResizeObserver stops firing entirely --
+  // further growth is absorbed by the scrolling body, not the panel's box.
+  // Flex re-centres on content growth and window resize for free.
+  // Note: the constructor's viewport-based max-height is deliberately kept
+  // rather than switching to 100%. A percentage resolves against the wrapper's
+  // content box in flex flow but its padding box once a drag promotes the
+  // panel to absolute, which would quietly loosen the cap by the padding.
+  menu.root.style.position = "relative";
+
+  // Only relevant once a drag has switched the panel to absolute positioning:
+  // a later window resize could otherwise strand it off screen.
+  function clampIntoView(): void {
+    if (menu.root.style.position !== "absolute") return;
+    const rect = menu.root.getBoundingClientRect();
+    const pos = menu.getPosition();
+    const x = clamp(pos.x, 0, Math.max(0, window.innerWidth - rect.width));
+    const y = clamp(pos.y, 0, Math.max(0, window.innerHeight - rect.height));
+    if (x !== pos.x || y !== pos.y) menu.setPosition(x, y);
+  }
+
+  window.addEventListener("resize", clampIntoView);
   return menu;
 }
