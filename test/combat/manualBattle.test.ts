@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  attackFromHex,
   attackWithPlatoon,
   executeAiPlan,
   finalizeManualBattle,
+  getApproachHexes,
   getCombatant,
   getMovementPath,
   getMovementRange,
@@ -271,6 +273,205 @@ test("moving into an adjacent hex puts the enemy in getValidMeleeTargets, and at
   assert.equal(attackWithPlatoon(state, "attacker", 0, target.slotIndex), true);
   const afterCount = enemy.entries[0]?.count ?? 0;
   assert.ok(afterCount < beforeCount, "the defending platoon should have taken casualties from the bump attack");
+});
+
+// Directional melee targeting: the player picks which of the hexes around an
+// enemy their platoon closes in from. These tests place combatants directly
+// rather than walking them out of their deployment columns — the geometry
+// under test is "the six hexes around a target", which is fiddly to reach
+// from the board edge and unrelated to how a platoon got there.
+const APPROACH_GRID = { cols: 7, rows: 5 };
+
+function sortHexes(hexes: { hex: { q: number; r: number } }[]): string[] {
+  return hexes.map((a) => `${a.hex.q},${a.hex.r}`).sort();
+}
+
+test("getApproachHexes: every free neighbour of the target that's within reach", () => {
+  // hero has speed 5 — enough to walk around the target to any of its six
+  // sides, including the far one that needs a detour past the enemy itself.
+  const attacker = makePlatoons([{ unitTypeId: "hero", count: 1 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const enemy = getCombatant(state, "defender", 0)!;
+  actor.position = { q: 0, r: 2 };
+  enemy.position = { q: 3, r: 2 };
+
+  assert.deepEqual(
+    sortHexes(getApproachHexes(state, actor, enemy)),
+    ["2,2", "2,3", "3,1", "3,3", "4,1", "4,2"].sort(),
+    "all six sides of a mid-board target are reachable at speed 5",
+  );
+});
+
+test("getApproachHexes: excludes impassable, occupied, and out-of-budget sides", () => {
+  const attacker = makePlatoons([{ unitTypeId: "hero", count: 1 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+
+  const blocked = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: APPROACH_GRID,
+    fixedObstacles: [{ q: 3, r: 3, impassable: true }],
+  });
+  const blockedActor = getCombatant(blocked, "attacker", 0)!;
+  const blockedEnemy = getCombatant(blocked, "defender", 0)!;
+  blockedActor.position = { q: 0, r: 2 };
+  blockedEnemy.position = { q: 3, r: 2 };
+  const blockedHexes = sortHexes(getApproachHexes(blocked, blockedActor, blockedEnemy));
+  assert.ok(!blockedHexes.includes("3,3"), "an impassable side is not an approach hex");
+  assert.equal(blockedHexes.length, 5);
+
+  // A second enemy platoon standing on one of the sides takes that side away.
+  const crowdedDefenders = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  crowdedDefenders[1] = { entries: [{ unitTypeId: "weak", count: 1 }] };
+  const crowded = startManualBattle(attacker, crowdedDefenders, {
+    unitTypes,
+    grid: APPROACH_GRID,
+    fixedObstacles: [],
+  });
+  const crowdedActor = getCombatant(crowded, "attacker", 0)!;
+  const crowdedEnemy = getCombatant(crowded, "defender", 0)!;
+  crowdedActor.position = { q: 0, r: 2 };
+  crowdedEnemy.position = { q: 3, r: 2 };
+  getCombatant(crowded, "defender", 1)!.position = { q: 2, r: 2 };
+  const crowdedHexes = sortHexes(getApproachHexes(crowded, crowdedActor, crowdedEnemy));
+  assert.ok(!crowdedHexes.includes("2,2"), "a side occupied by another platoon is not an approach hex");
+
+  // footman has speed 3, so only the near sides are in budget this round.
+  const slowAttacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const slow = startManualBattle(slowAttacker, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const slowActor = getCombatant(slow, "attacker", 0)!;
+  const slowEnemy = getCombatant(slow, "defender", 0)!;
+  slowActor.position = { q: 0, r: 2 };
+  slowEnemy.position = { q: 3, r: 2 };
+  assert.deepEqual(
+    sortHexes(getApproachHexes(slow, slowActor, slowEnemy)),
+    ["2,2", "2,3", "3,1"].sort(),
+    "the three far sides cost 4-5 hexes, beyond a speed-3 platoon's budget",
+  );
+});
+
+test("getApproachHexes: a platoon already adjacent gets its current hex back at cost 0", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const enemy = getCombatant(state, "defender", 0)!;
+  actor.position = { q: 2, r: 2 };
+  enemy.position = { q: 3, r: 2 };
+
+  const here = getApproachHexes(state, actor, enemy).find((a) => a.hex.q === 2 && a.hex.r === 2);
+  assert.ok(here, "standing beside the target, your own hex is an approach hex");
+  assert.equal(here.cost, 0, "attacking from where you already stand costs no movement");
+});
+
+test("getApproachHexes: empty for a ranged platoon and for an unreachable target", () => {
+  const ranged = makePlatoons([{ unitTypeId: "bowman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const rangedState = startManualBattle(ranged, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const rangedActor = getCombatant(rangedState, "attacker", 0)!;
+  const rangedEnemy = getCombatant(rangedState, "defender", 0)!;
+  rangedActor.position = { q: 2, r: 2 };
+  rangedEnemy.position = { q: 3, r: 2 };
+  assert.deepEqual(getApproachHexes(rangedState, rangedActor, rangedEnemy), [], "ranged platoons pick range, not a side");
+
+  // A speed-3 melee platoon parked at the far end of the board can't reach
+  // any side of the target this round.
+  const melee = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const far = startManualBattle(melee, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const farActor = getCombatant(far, "attacker", 0)!;
+  const farEnemy = getCombatant(far, "defender", 0)!;
+  farActor.position = { q: 0, r: 2 };
+  farEnemy.position = { q: 6, r: 2 };
+  assert.deepEqual(getApproachHexes(far, farActor, farEnemy), []);
+});
+
+test("attackFromHex: moves to the chosen side, attacks, and spends the turn", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 50 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const enemy = getCombatant(state, "defender", 0)!;
+  actor.position = { q: 1, r: 2 };
+  enemy.position = { q: 3, r: 2 };
+
+  const beforeCount = enemy.entries[0].count;
+  // Approach from *below* the target rather than the head-on hex a plain
+  // move would have picked.
+  assert.equal(attackFromHex(state, "attacker", 0, 0, { q: 2, r: 3 }), true);
+  assert.deepEqual(actor.position, { q: 2, r: 3 }, "the platoon ends the action on the side it chose");
+  assert.ok(enemy.entries[0].count < beforeCount, "the target took casualties");
+  assert.ok(!unactedLivingSlots(state, "attacker").includes(0), "attacking consumes the platoon's turn");
+});
+
+test("attackFromHex: attacks in place when the chosen hex is where the platoon already stands", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 50 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const enemy = getCombatant(state, "defender", 0)!;
+  actor.position = { q: 2, r: 2 };
+  enemy.position = { q: 3, r: 2 };
+
+  const beforeCount = enemy.entries[0].count;
+  assert.equal(attackFromHex(state, "attacker", 0, 0, { q: 2, r: 2 }), true);
+  assert.deepEqual(actor.position, { q: 2, r: 2 }, "no movement — it was already on the side it wanted");
+  assert.ok(enemy.entries[0].count < beforeCount);
+});
+
+test("attackFromHex: every rejection leaves the battle exactly as it was", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]); // speed 3
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 50 }]);
+
+  function fresh() {
+    const state = startManualBattle(attacker, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+    const actor = getCombatant(state, "attacker", 0)!;
+    const enemy = getCombatant(state, "defender", 0)!;
+    actor.position = { q: 1, r: 2 };
+    enemy.position = { q: 3, r: 2 };
+    return { state, actor, enemy };
+  }
+
+  function assertUntouched(label: string, ctx: ReturnType<typeof fresh>, expectedRange: number): void {
+    assert.deepEqual(ctx.actor.position, { q: 1, r: 2 }, `${label}: platoon must not have moved`);
+    assert.equal(ctx.state.log.length, 0, `${label}: nothing may be written to the combat log`);
+    assert.equal(ctx.enemy.entries[0].count, 50, `${label}: the target must be unharmed`);
+    assert.equal(getMovementRange(ctx.state, ctx.actor).length, expectedRange, `${label}: movement budget must be intact`);
+  }
+
+  const untouchedRange = getMovementRange(fresh().state, fresh().actor).length;
+
+  // Not a side of the target at all — two hexes away from it.
+  const notAdjacent = fresh();
+  assert.equal(attackFromHex(notAdjacent.state, "attacker", 0, 0, { q: 1, r: 2 }), false);
+  assertUntouched("non-adjacent fromHex", notAdjacent, untouchedRange);
+
+  // A genuine side of the target, but 4 hexes away — beyond speed 3.
+  const outOfBudget = fresh();
+  assert.equal(attackFromHex(outOfBudget.state, "attacker", 0, 0, { q: 4, r: 2 }), false);
+  assertUntouched("out-of-budget fromHex", outOfBudget, untouchedRange);
+
+  // A legal side, but the platoon has already acted this round.
+  const spent = fresh();
+  endPlatoonTurn(spent.state, "attacker", 0);
+  assert.equal(attackFromHex(spent.state, "attacker", 0, 0, { q: 2, r: 2 }), false);
+  assert.deepEqual(spent.actor.position, { q: 1, r: 2 }, "already-acted platoon must not have moved");
+  assert.equal(spent.enemy.entries[0].count, 50, "already-acted platoon must not have attacked");
+});
+
+test("attackFromHex: rejected for a ranged platoon", () => {
+  const ranged = makePlatoons([{ unitTypeId: "bowman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 50 }]);
+  const state = startManualBattle(ranged, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const enemy = getCombatant(state, "defender", 0)!;
+  actor.position = { q: 1, r: 2 };
+  enemy.position = { q: 3, r: 2 };
+
+  assert.equal(attackFromHex(state, "attacker", 0, 0, { q: 2, r: 2 }), false);
+  assert.deepEqual(actor.position, { q: 1, r: 2 });
+  // The existing shoot-from-where-you-stand path is unaffected.
+  assert.equal(attackWithPlatoon(state, "attacker", 0, 0), true);
 });
 
 test("estimateWinChance: symmetric for identical platoons, skewed toward the stronger one", () => {

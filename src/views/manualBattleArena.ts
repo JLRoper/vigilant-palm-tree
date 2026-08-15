@@ -11,14 +11,16 @@
 // Per-platoon detail lives in the hover/click info card rather than in
 // always-on tiles — see buildPlatoonStrip and showInfoPopupFor.
 
-import { axialToPixel, hexCorners, hexDistance, pixelToAxial, type Axial } from "../core/hex";
+import { axialToPixel, hexCorners, HEX_DIRECTIONS, hexDistance, nearestHexEdge, pixelToAxial, type Axial } from "../core/hex";
 import { totalHealth } from "../../shared/combat/damage";
 import { RANGED_ATTACK_RANGE, SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "../../shared/combatConfig";
 import {
+  attackFromHex,
   attackWithPlatoon,
   computeSpecialty,
   endPlatoonTurn,
   finalizeManualBattle,
+  getApproachHexes,
   getCombatant,
   getMovementPath,
   getMovementRange,
@@ -692,6 +694,28 @@ export function openManualBattleArena(
   let moveRange: Axial[] = [];
   let attackTargets: Combatant[] = [];
 
+  // Directional melee targeting. Hovering a reachable enemy *latches* it as
+  // pendingTarget and works out which of the hexes around it you'd close in
+  // from, based on which sixth of the enemy's hex the cursor sits in. The
+  // latch deliberately survives the cursor leaving the enemy and moving onto
+  // one of those approach hexes — that's what lets you click the hex itself
+  // instead of trusting the sector (see updateHover).
+  //
+  // While a latch is live, a click on an approach hex is an *attack*; with no
+  // latch the same click is an ordinary move. That ordering, enforced in
+  // handleClick, is the whole disambiguation between the two meanings.
+  let pendingTarget: Combatant | null = null;
+  let approachHexes: { hex: Axial; cost: number }[] = [];
+  let approachChoice: Axial | null = null;
+
+  function clearPendingAttack(): boolean {
+    if (pendingTarget === null && approachChoice === null) return false;
+    pendingTarget = null;
+    approachHexes = [];
+    approachChoice = null;
+    return true;
+  }
+
   // The AI used to resolve its whole turn synchronously inside advanceAi(),
   // with a single repaint at the end — the board simply teleported between the
   // player's clicks and you never saw the opponent move. It is now narrated in
@@ -1028,15 +1052,25 @@ export function openManualBattleArena(
   function renderActions(): void {
     const over = isBattleOver(state);
     const waitingOnAi = !over && (aiActing || unactedLivingSlots(state, humanSide).length === 0);
+    // Ranged platoons have no approach side to pick — they shoot from where
+    // they stand — so they must never be told to hover for a direction.
+    const selected = selectedSlot === null ? undefined : getCombatant(state, humanSide, selectedSlot);
+    const ranged = selected ? isRangedPlatoon(selected, state.unitTypes) : false;
     helpTextEl.textContent = over
       ? "Battle over."
       : waitingOnAi
         ? "The AI is making its move..."
         : selectedSlot === null
           ? "Click one of your outlined platoons — on the grid or in the left rail — to act. Hover any platoon for its full details."
-          : moveRange.length > 0
-            ? "Click a highlighted hex to move (moving next to an enemy fights immediately). Steps left over can still be used — move again, attack a ringed enemy, or End Turn when done."
-            : "Out of movement — click a ringed enemy to attack, or End Turn.";
+          : pendingTarget !== null
+            ? "The arrow shows which side you'll attack from — move the cursor around the enemy to swing it, then click to close in and fight. Click the marked hex itself if you'd rather pick it directly."
+            : ranged
+              ? moveRange.length > 0
+                ? "Click a ringed enemy to shoot it from where you stand, or a highlighted hex to reposition. Move again, shoot, or End Turn when done."
+                : "Out of movement — click a ringed enemy to shoot, or End Turn."
+              : moveRange.length > 0
+                ? "Hover an enemy in reach to choose the side you attack from, or click a highlighted hex to just move (landing beside a lone enemy fights immediately). Move again, attack, or End Turn when done."
+                : "Out of movement — hover an adjacent enemy to attack from where you stand, or End Turn.";
     endTurnBtn.style.display = selectedSlot !== null && !over && !aiActing ? "" : "none";
 
     // Cast Spell, Retreat, and Surrender live under the human's hero portrait
@@ -1538,8 +1572,101 @@ export function openManualBattleArena(
     return { x: a.x + (b.x - a.x) * localT, y: a.y + (b.y - a.y) * localT };
   }
 
+  function livingEnemyAt(hex: Axial): Combatant | undefined {
+    const enemies = aiSide === "attacker" ? state.attacker : state.defender;
+    return enemies.find((e) => isAlive(e) && e.position.q === hex.q && e.position.r === hex.r);
+  }
+
+  // The cursor's sector can point at a hex that's impassable, already taken,
+  // or simply out of reach this round. Rather than offering nothing, snap to
+  // the legal approach hex closest in angle — so hovering an enemy you *can*
+  // reach always yields a usable attack, whichever way you point.
+  function pickApproachForEdge(target: Combatant, approaches: { hex: Axial; cost: number }[], edge: number): Axial {
+    const wanted = {
+      q: target.position.q + HEX_DIRECTIONS[edge].q,
+      r: target.position.r + HEX_DIRECTIONS[edge].r,
+    };
+    const exact = approaches.find((a) => a.hex.q === wanted.q && a.hex.r === wanted.r);
+    if (exact) return exact.hex;
+
+    let best = approaches[0];
+    let bestGap = Infinity;
+    for (const a of approaches) {
+      const dir = HEX_DIRECTIONS.findIndex(
+        (d) => target.position.q + d.q === a.hex.q && target.position.r + d.r === a.hex.r,
+      );
+      const raw = Math.abs(dir - edge);
+      const gap = Math.min(raw, 6 - raw);
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = a;
+      }
+    }
+    return best.hex;
+  }
+
+  function resolveHover(
+    hex: Axial,
+    localX: number,
+    localY: number,
+  ): { target: Combatant; approaches: { hex: Axial; cost: number }[]; choice: Axial } | null {
+    if (aiActing || isBattleOver(state) || selectedSlot === null) return null;
+    const actor = getCombatant(state, humanSide, selectedSlot);
+    if (!actor || isRangedPlatoon(actor, state.unitTypes)) return null;
+
+    // Over the enemy itself: latch it, and read the approach hex off whichever
+    // sixth of its hex the cursor occupies.
+    const enemy = livingEnemyAt(hex);
+    if (enemy) {
+      const approaches = getApproachHexes(state, actor, enemy);
+      if (approaches.length === 0) return null;
+      const center = axialToPixel(enemy.position.q, enemy.position.r, hexSize);
+      const edge = nearestHexEdge(center.x, center.y, localX, localY);
+      return { target: enemy, approaches, choice: pickApproachForEdge(enemy, approaches, edge) };
+    }
+
+    // Cursor has left the enemy and is sitting on one of its approach hexes.
+    // Hold the latch and take that hex verbatim — this is the click fallback
+    // for when you'd rather name the hex than aim at a sector.
+    if (pendingTarget) {
+      const onApproach = approachHexes.find((a) => a.hex.q === hex.q && a.hex.r === hex.r);
+      if (onApproach) return { target: pendingTarget, approaches: approachHexes, choice: onApproach.hex };
+    }
+    return null;
+  }
+
+  // mousemove fires far too often to repaint on every event, so this diffs the
+  // latch and the chosen hex and only redraws when one of them actually moved.
+  function updateHover(localX: number, localY: number): void {
+    const prevTarget = pendingTarget;
+    const prevChoice = approachChoice;
+
+    const resolved = resolveHover(pixelToAxial(localX, localY, hexSize), localX, localY);
+    if (resolved) {
+      pendingTarget = resolved.target;
+      approachHexes = resolved.approaches;
+      approachChoice = resolved.choice;
+    } else {
+      clearPendingAttack();
+    }
+
+    canvas.style.cursor = pendingTarget ? "crosshair" : "";
+    // Latching or dropping a target changes the action-bar help text too, so
+    // that case needs a full refresh; swinging the arrow around a target
+    // already latched only moves pixels on the canvas.
+    if (prevTarget !== pendingTarget) {
+      refresh();
+      return;
+    }
+    const sameChoice =
+      prevChoice === approachChoice ||
+      (prevChoice !== null && approachChoice !== null && prevChoice.q === approachChoice.q && prevChoice.r === approachChoice.r);
+    if (!sameChoice) draw();
+  }
+
   function selectPlatoon(slotIndex: number): void {
     selectedSlot = slotIndex;
+    clearPendingAttack();
     const combatant = getCombatant(state, humanSide, slotIndex);
     if (!combatant) {
       selectedSlot = null;
@@ -1554,10 +1681,21 @@ export function openManualBattleArena(
     refresh();
   }
 
-  // Called after a successful move. If the move landed it on a hex directly
-  // connected (adjacent) to an enemy platoon, that's a bump into melee
+  // Called after a successful move. If the move landed it adjacent to
+  // exactly *one* enemy platoon, that's an unambiguous bump into melee
   // contact and the fight resolves immediately — no separate "attack" click
-  // required. Otherwise, re-show any in-range ranged targets (still
+  // required.
+  //
+  // The "exactly one" is the point. This used to fire whenever *any* enemy
+  // was adjacent, with pickTarget choosing which one to hit — so walking
+  // between two enemies handed the target choice to the engine, which is
+  // precisely what directional targeting exists to give back to the player.
+  // With two or more in contact we fall through below: both light up as
+  // attack targets and the click decides. Aiming a specific enemy from a
+  // specific side never comes through here at all — that's attackFromHex,
+  // driven by the hover latch in handleClick.
+  //
+  // Otherwise, re-show any in-range ranged targets (still
   // requires an explicit click — that's a deliberate shot, not a bump) and
   // whatever movement budget the platoon has left: a platoon that hasn't
   // used its full speed yet can keep walking, hex by hex or in bigger
@@ -1573,6 +1711,7 @@ export function openManualBattleArena(
   // just to move on to the next unit.
   function refreshAfterMove(): void {
     if (selectedSlot === null) return;
+    clearPendingAttack();
     const combatant = getCombatant(state, humanSide, selectedSlot);
     if (!combatant) {
       selectedSlot = null;
@@ -1582,7 +1721,7 @@ export function openManualBattleArena(
       return;
     }
     const adjacentEnemies = getValidMeleeTargets(state, combatant);
-    if (adjacentEnemies.length > 0) {
+    if (adjacentEnemies.length === 1) {
       moveRange = [];
       const target = pickTarget(adjacentEnemies, state.unitTypes) ?? adjacentEnemies[0];
       debugLog(`bump attack: ${platoonLabel(humanSide, selectedSlot)} -> ${platoonLabel(target.side, target.slotIndex)}`);
@@ -1624,6 +1763,7 @@ export function openManualBattleArena(
     selectedSlot = null;
     moveRange = [];
     attackTargets = [];
+    clearPendingAttack();
     infoPopup.hide();
     advanceAi();
   }
@@ -1814,6 +1954,38 @@ export function openManualBattleArena(
       return;
     }
 
+    // Directional melee, and it has to be tested before both the plain-attack
+    // and the move branches below. A hex that is an approach hex for the
+    // latched enemy is *also* an ordinary move-range hex, so whichever branch
+    // runs first defines what the click means: with an enemy latched by hover
+    // it means "close in from here and attack", and with nothing latched the
+    // move branch below gives it its usual meaning.
+    if (pendingTarget && approachChoice) {
+      const clickedApproach = approachHexes.find((a) => a.hex.q === hex.q && a.hex.r === hex.r);
+      const clickedTarget = hex.q === pendingTarget.position.q && hex.r === pendingTarget.position.r;
+      if (clickedApproach || clickedTarget) {
+        const from = clickedApproach ? clickedApproach.hex : approachChoice;
+        const actorBefore = getCombatant(state, humanSide, selectedSlot);
+        const origin = actorBefore ? { ...actorBefore.position } : from;
+        const distance = hexDistance(origin, from);
+        debugLog(
+          `click ${fmtHex(hex)} -> directional attack: ${platoonLabel(humanSide, selectedSlot)}`,
+          `from ${fmtHex(from)} -> ${platoonLabel(pendingTarget.side, pendingTarget.slotIndex)}`,
+        );
+        const beforeLog = state.log.length;
+        if (attackFromHex(state, humanSide, selectedSlot, pendingTarget.slotIndex, from)) {
+          if (distance > 0) recordMove(humanSide, selectedSlot, distance);
+          logNewBattleEvents(beforeLog);
+          afterPlayerAction();
+        } else {
+          debugLog(`click ${fmtHex(hex)} -> directional attack REJECTED by engine (was previewed as legal)`);
+          clearPendingAttack();
+          refresh();
+        }
+        return;
+      }
+    }
+
     const target = attackTargets.find((t) => t.position.q === hex.q && t.position.r === hex.r);
     if (target) {
       debugLog(`click ${fmtHex(hex)} -> attack: ${platoonLabel(humanSide, selectedSlot)} -> ${platoonLabel(target.side, target.slotIndex)}`);
@@ -1851,6 +2023,7 @@ export function openManualBattleArena(
       selectedSlot = null;
       moveRange = [];
       attackTargets = [];
+      clearPendingAttack();
       infoPopup.hide();
       refresh();
       return;
@@ -1885,6 +2058,22 @@ export function openManualBattleArena(
     const x = e.clientX - rect.left - offsetX;
     const y = e.clientY - rect.top - offsetY;
     handleClick(pixelToAxial(x, y, hexSize));
+  });
+
+  // Drives the directional-melee preview. Same coordinate conversion as the
+  // click handler above, and the grid-local result feeds both the hex lookup
+  // and the sector angle, which is measured against the target's grid-local
+  // centre from axialToPixel.
+  canvas.addEventListener("mousemove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    updateHover(e.clientX - rect.left - offsetX, e.clientY - rect.top - offsetY);
+  });
+
+  canvas.addEventListener("mouseleave", () => {
+    if (clearPendingAttack()) {
+      canvas.style.cursor = "";
+      draw();
+    }
   });
 
   function renderTopBar(): void {
