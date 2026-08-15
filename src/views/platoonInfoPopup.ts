@@ -1,8 +1,8 @@
 // Click-anchored info card for a single platoon: composition, HP, movement
-// left, and (for a scouted enemy) a win-odds estimate against whichever of
-// your platoons is currently selected. Used by manualBattleArena.ts for two
+// left, and (for an enemy) a win-odds estimate against whichever of your
+// platoons is currently selected. Used by manualBattleArena.ts for two
 // cases — the platoon you've just selected to act with, and any enemy
-// platoon you've spied on (see spyOnPlatoon in shared/combat/manualBattle.ts).
+// platoon you click on or hover.
 //
 // Deliberately a dumb rendering+placement component: the caller decides
 // *which side* of the anchor point counts as "behind the line" (away from
@@ -43,8 +43,8 @@ export interface PlatoonInfoPopupShowOptions {
   ownerLabel: string;
   canAct: boolean;
   movementRemaining: number;
-  // Dominant specialty, already threshold-checked and fog-gated by the
-  // caller. Omitted when there's nothing to reveal.
+  // Dominant specialty, already threshold-checked by the caller. Omitted
+  // when nothing clears the threshold.
   specialty?: { icon: string; label: string };
   stats?: PlatoonInfoPopupStat[];
   metrics?: PlatoonInfoPopupMetric[];

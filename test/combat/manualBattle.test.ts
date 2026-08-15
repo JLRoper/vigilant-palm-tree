@@ -7,13 +7,10 @@ import {
   getMovementRange,
   getValidAttackTargets,
   getValidMeleeTargets,
-  getValidSpyTargets,
   hasLineOfSight,
   isBattleOver,
-  markScouted,
   movePlatoon,
   pickTarget,
-  spyOnPlatoon,
   startManualBattle,
   unactedLivingSlots,
 } from "../../shared/combat/manualBattle";
@@ -177,68 +174,6 @@ test("moving into an adjacent hex puts the enemy in getValidMeleeTargets, and at
   assert.equal(attackWithPlatoon(state, "attacker", 0, target.slotIndex), true);
   const afterCount = enemy.entries[0]?.count ?? 0;
   assert.ok(afterCount < beforeCount, "the defending platoon should have taken casualties from the bump attack");
-});
-
-test("getValidSpyTargets: reachable-this-turn, out-of-reach, and already-scouted enemies", () => {
-  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]); // speed 3
-  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
-
-  // Attacker at q=0, defender at q=4 (cols-1): footman's move range reaches
-  // q=0..3, and q=3 is adjacent (distance 1) to the defender at q=4.
-  const inReach = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 5, rows: 1 }, fixedObstacles: [] });
-  const inReachActor = getCombatant(inReach, "attacker", 0)!;
-  const inReachEnemy = getCombatant(inReach, "defender", 0)!;
-  const inReachTargets = getValidSpyTargets(inReach, inReachActor);
-  assert.equal(inReachTargets.length, 1);
-  assert.equal(inReachTargets[0].slotIndex, inReachEnemy.slotIndex);
-
-  // Same shape but far enough (cols=9) that q=3 is nowhere near the
-  // defender at q=8 — out of both move range and attack adjacency.
-  const outOfReach = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 9, rows: 1 }, fixedObstacles: [] });
-  const outOfReachActor = getCombatant(outOfReach, "attacker", 0)!;
-  assert.equal(getValidSpyTargets(outOfReach, outOfReachActor).length, 0);
-
-  // Already-scouted enemies are excluded even when in range.
-  markScouted(inReachEnemy, "attacker");
-  assert.equal(getValidSpyTargets(inReach, inReachActor).length, 0, "no reason to spend a troop re-scouting a known platoon");
-});
-
-test("spyOnPlatoon: spends 1 troop, reveals one-directionally, and never touches the unacted set", () => {
-  const attacker = makePlatoons([
-    { unitTypeId: "footman", count: 5 },
-    { unitTypeId: "bowman", count: 2 },
-  ]);
-  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
-  const state = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 5, rows: 1 }, fixedObstacles: [] });
-  const actor = getCombatant(state, "attacker", 0)!;
-  const enemy = getCombatant(state, "defender", 0)!;
-
-  const ok = spyOnPlatoon(state, "attacker", 0, enemy.slotIndex, "bowman");
-  assert.equal(ok, true);
-
-  // Cost came only from the chosen entry.
-  assert.equal(actor.entries.find((e) => e.unitTypeId === "bowman")?.count, 1);
-  assert.equal(actor.entries.find((e) => e.unitTypeId === "footman")?.count, 5);
-
-  // Revealed to the spying side only — markContacted's mutual behavior does
-  // not apply here.
-  assert.equal(enemy.scoutedBy.has("attacker"), true);
-  assert.equal(enemy.scoutedBy.has("defender"), false);
-
-  // Not the platoon's official action — it should still show as unacted and
-  // able to move/attack normally afterward.
-  assert.ok(unactedLivingSlots(state, "attacker").includes(0));
-
-  // Rejected: target no longer valid (already scouted).
-  assert.equal(spyOnPlatoon(state, "attacker", 0, enemy.slotIndex, "footman"), false);
-  assert.equal(actor.entries.find((e) => e.unitTypeId === "footman")?.count, 5, "rejected spy must not spend a troop");
-
-  // Rejected: unit type not present in the acting platoon.
-  const far = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 9, rows: 1 }, fixedObstacles: [] });
-  const farActor = getCombatant(far, "attacker", 0)!;
-  const farEnemy = getCombatant(far, "defender", 0)!;
-  assert.equal(spyOnPlatoon(far, "attacker", 0, farEnemy.slotIndex, "footman"), false, "target out of spy range must be rejected");
-  assert.equal(farActor.entries.find((e) => e.unitTypeId === "footman")?.count, 5);
 });
 
 test("estimateWinChance: symmetric for identical platoons, skewed toward the stronger one", () => {
