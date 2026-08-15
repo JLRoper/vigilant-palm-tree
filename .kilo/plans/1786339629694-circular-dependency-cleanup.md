@@ -1,6 +1,6 @@
 # Plan: Circular Dependency Full Cleanup (Option C)
 
-**Status:** Planned. Targets all five boundary violations identified in the audit.
+**Status:** ✅ Implemented — commit `526398e` on branch `architecture/circular-dep-cleanup` (2026-08-10). All five boundary violations fixed; `dependency-cruiser.cjs` + `npm run lint:deps` enforce the layer rules and are wired into the precommit gate. Not yet merged to `main`.
 **Build baseline:** `npm run build` passes clean (235 modules).
 
 ---

@@ -278,7 +278,7 @@ Do **not** big-bang this. Order chosen so every step ships alone:
 
 | Phase | What | Why first |
 |---|---|---|
-| 0 | Execute the existing cleanup plan (`.kilo/plans/1786339629694-...`) incl. dependency-cruiser | Makes shared/ a true leaf — it becomes `engine/` + `contracts/` seed material |
+| 0 | ✅ **DONE** (commit `526398e` on `architecture/circular-dep-cleanup`) — executed the cleanup plan (`.kilo/plans/1786339629694-...`) incl. dependency-cruiser (`dependency-cruiser.cjs`, `npm run lint:deps`, wired into precommit gate). Remaining: merge the branch to `main` | Makes shared/ a true leaf — it becomes `engine/` + `contracts/` seed material |
 | 1 | Root npm workspaces; move `shared/` → `packages/engine`, extract `packages/contracts` from its types | Physical boundary before anything else grows |
 | 2 | Carve `gameState.ts` into engine domains **one domain at a time** (economy → charter → settlement → hero → turn), each reducer to its own command file; `gameState.ts` shrinks to re-exports until empty | Highest-traffic file; every future feature benefits immediately |
 | 3 | Server: introduce `commandHandler.ts` + repos; port endpoints one at a time onto commands (start with `spend_movement` — it's already action-shaped); `routes.ts` shrinks per endpoint | De-risks the DB migration by putting repos in place first |
@@ -413,7 +413,7 @@ Each decision below lists options A/B/C with pros, cons, and the situations wher
 
 ### Decision 4 — Auth/user scoping for months-long games
 
-**A. Defer entirely** — keep seats claimable by session token as today; `game_players.user_id` stays NULL-able and unused.
+**A. Defer entirely** — keep seats as they are today: claimed by bare `{ seat, handle }` with no binding to any session or user (`routes.ts` lobby/claim records only a handle string; the localStorage bearer token from the auth flow is not consulted). `game_players.user_id` stays NULL-able and unused.
 
 - Pros:
   - Zero work now; migration plan untouched; single-machine/LAN play unaffected.
@@ -444,3 +444,5 @@ Each decision below lists options A/B/C with pros, cons, and the situations wher
 - Best when: the game has players who aren't you. Not before.
 
 **Verdict to pick from: A, B, or C.** Plan's recommendation: **A now, with B pre-planned as its own small plan doc, triggered by the first real long-running multiplayer game. C only when external users exist.**
+
+**Owner direction (2026-08-12):** Early development keeps all games visible to everyone (no per-user game lists yet). Identity model confirmed as localStorage bearer token with email-based recovery — which `server/auth.ts` already implements (email → 6-digit single-use code, 10-min TTL → mints 32-byte token in `user_sessions`, 30-day sliding TTL). Recovery is "request a new code" (mints a fresh token), never resending an existing token by email. Remaining gaps when B triggers: (1) real email delivery — codes are currently `console.log`-only; (2) `lobby/claim` must consult the bearer token and record `user_id`. Dev note: localStorage is scoped to scheme+host+port, and this repo's per-worktree OS-assigned ports mean dev tokens "vanish" when the port changes between runs — expected behavior, not a bug.

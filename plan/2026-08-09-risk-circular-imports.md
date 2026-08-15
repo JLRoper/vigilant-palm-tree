@@ -1,7 +1,7 @@
 # Plan: Enforce `core/` leaf-only and prevent runtime circular imports
 
 **Source risk:** `docs/architecture.md` line 124 — *Circular imports.*
-**Status:** Partially violated. Still a risk.
+**Status:** ✅ Resolved (2026-08-10) — implemented via `.kilo/plans/1786339629694-circular-dependency-cleanup.md`, commit `526398e` on `architecture/circular-dep-cleanup`. `dependency-cruiser.cjs` exists with layer rules, `npm run lint:deps` runs in the precommit gate. The "Current state" section below describes the **pre-cleanup** situation and is preserved as historical context.
 
 ## Current state (verified against latest build)
 
