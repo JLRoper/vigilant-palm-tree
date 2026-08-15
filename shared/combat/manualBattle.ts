@@ -194,7 +194,7 @@ function movementBfs(state: ManualBattleState, combatant: Combatant, budget: num
     const current = queue.shift()!;
     const d = dist.get(hexKey(current))!;
     if (d >= budget) continue;
-    for (const dir of NEIGHBOR_DIRS) {
+    for (const dir of HEX_DIRECTIONS) {
       const next = { q: current.q + dir.q, r: current.r + dir.r };
       const key = hexKey(next);
       if (dist.has(key)) continue;

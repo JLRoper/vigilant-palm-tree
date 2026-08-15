@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   attackFromHex,
   attackWithPlatoon,
+  endPlatoonTurn,
   executeAiPlan,
   finalizeManualBattle,
   getApproachHexes,
