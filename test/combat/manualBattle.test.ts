@@ -4,9 +4,11 @@ import {
   attackFromHex,
   attackWithPlatoon,
   endPlatoonTurn,
+  executeAiPlan,
   finalizeManualBattle,
   getApproachHexes,
   getCombatant,
+  getMovementPath,
   getMovementRange,
   getValidAttackTargets,
   getValidMeleeTargets,
@@ -14,6 +16,7 @@ import {
   isBattleOver,
   movePlatoon,
   pickTarget,
+  planAiTurn,
   startManualBattle,
   unactedLivingSlots,
 } from "../../shared/combat/manualBattle";
@@ -56,6 +59,100 @@ test("getMovementRange: bounded by speed and blocked by obstacles", () => {
   const blockedActor = getCombatant(blocked, "attacker", 0)!;
   const blockedRange = getMovementRange(blocked, blockedActor);
   assert.ok(!blockedRange.some((h) => h.q === 3 && h.r === 0), "obstacle at q=2 should block the path to q=3");
+});
+
+test("getMovementPath: walks the hexes between start and destination, start excluded", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const state = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: { cols: 7, rows: 1 },
+    fixedObstacles: [],
+  });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const start = { ...actor.position };
+
+  const path = getMovementPath(state, actor, { q: start.q + 3, r: start.r });
+  assert.deepEqual(
+    path,
+    [
+      { q: start.q + 1, r: start.r },
+      { q: start.q + 2, r: start.r },
+      { q: start.q + 3, r: start.r },
+    ],
+    "each step is one hex, ending on the destination",
+  );
+
+  assert.deepEqual(getMovementPath(state, actor, start), [], "no path to the hex it already occupies");
+  assert.deepEqual(
+    getMovementPath(state, actor, { q: start.q + 4, r: start.r }),
+    [],
+    "destination beyond the movement budget is unreachable",
+  );
+});
+
+test("getMovementPath: every step is adjacent and avoids obstacles", () => {
+  const attacker = makePlatoons([{ unitTypeId: "hero", count: 1 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const state = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: { cols: 7, rows: 3 },
+    fixedObstacles: [{ q: 1, r: 1, impassable: true }],
+  });
+  const actor = getCombatant(state, "attacker", 0)!;
+  actor.position = { q: 0, r: 1 };
+
+  const path = getMovementPath(state, actor, { q: 2, r: 1 });
+  assert.ok(path.length > 0, "a route around the obstacle exists within speed 5");
+  assert.deepEqual(path[path.length - 1], { q: 2, r: 1 });
+  assert.ok(!path.some((h) => h.q === 1 && h.r === 1), "never routes through the impassable hex");
+
+  const steps = [{ q: 0, r: 1 }, ...path];
+  for (let i = 1; i < steps.length; i++) {
+    const a = steps[i - 1];
+    const b = steps[i];
+    const dist = (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
+    assert.equal(dist, 1, `step ${i} must be to an adjacent hex`);
+  }
+});
+
+test("planAiTurn: decides without mutating, and executeAiPlan applies the same result", () => {
+  const attacker = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const defender = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const state = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: { cols: 7, rows: 1 },
+    fixedObstacles: [],
+  });
+
+  const actor = getCombatant(state, "defender", 0)!;
+  const before = { ...actor.position };
+  const targetHealthBefore = getCombatant(state, "attacker", 0)!.entries[0].count;
+
+  const plan = planAiTurn(state, "defender");
+  assert.ok(plan, "the AI has a platoon to act with");
+  assert.equal(plan!.slotIndex, 0);
+  assert.deepEqual(actor.position, before, "planning alone must not move anything");
+  assert.equal(getCombatant(state, "attacker", 0)!.entries[0].count, targetHealthBefore, "planning alone must not deal damage");
+  assert.ok(unactedLivingSlots(state, "defender").includes(0), "planning alone must not consume the turn");
+
+  executeAiPlan(state, "defender", plan!);
+  assert.ok(!unactedLivingSlots(state, "defender").includes(0), "executing always consumes the platoon's turn");
+});
+
+test("executeAiPlan: consumes the turn even when the attack is not legal", () => {
+  const attacker = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const defender = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const state = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: { cols: 7, rows: 1 },
+    fixedObstacles: [],
+  });
+
+  // A melee attack against an enemy that is nowhere near adjacent — the
+  // engine refuses it, and the platoon must still not be left owed a turn.
+  executeAiPlan(state, "defender", { slotIndex: 0, moveTo: null, attackTargetSlot: 0 });
+  assert.deepEqual(unactedLivingSlots(state, "defender"), [], "slot cleared despite the refused attack");
 });
 
 test("hasLineOfSight: blocked by an obstacle directly between shooter and target", () => {

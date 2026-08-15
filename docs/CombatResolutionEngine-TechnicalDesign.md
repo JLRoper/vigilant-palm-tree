@@ -161,7 +161,9 @@ Tunable constants live in `shared/combatConfig.ts`
 grid defaults, `DEFAULT_MAX_ROUNDS = 30`) — a single edit point for balance
 passes, per the feature plan's "Tunability" section.
 
-## 5. Core algorithm (`shared/combat/resolveBattle.ts`)
+## 5. Core algorithms
+
+### 5.1 Auto-resolver (`shared/combat/resolveBattle.ts`)
 
 1. **Setup:** build a `BattleGrid` (seeded or fixed obstacles), convert both
    platoon rosters into `Combatant[]` (empty platoons filtered out,
@@ -198,6 +200,41 @@ passes, per the feature plan's "Tunability" section.
    entries per slot to produce casualties, and reconstitutes each side's
    platoon array (re-indexed by `slotIndex`) for the caller to write back
    to `HeroState.stacks`.
+
+### 5.2 Manual arena (`shared/combat/manualBattle.ts`)
+
+Shares the grid, damage and result-building primitives with the auto-resolver
+but replaces its turn loop with player/AI-driven per-platoon actions. Reachable
+today only from the Test Battle sandbox (`src/views/testBattleSetup.ts`).
+
+- **Round model:** each side holds a set of platoons that have not yet acted
+  this round (`unactedAttacker` / `unactedDefender`). Every living platoon gets
+  one action per round; the player chooses the order theirs act in. The round
+  advances — and both unacted sets and movement budgets refill — only once both
+  sides' sets are empty (`checkRoundAdvance`).
+- **Movement vs. action:** a platoon's movement budget for the round is its
+  slowest unit's speed and may be spent across several separate moves. Moving
+  does *not* consume its action; attacking (or `endPlatoonTurn`) does.
+  `getMovementPath()` returns the hex-by-hex route to a destination —
+  informational only, for animating the walk; `movePlatoon()` still takes a
+  destination and re-derives the cost itself.
+- **Turn order is strict alternation**, enforced by the arena rather than the
+  engine: one player platoon acts, then one AI platoon, back and forth. Every
+  path by which a player platoon can finish — attacking, bumping into melee,
+  the End Turn button, or exhausting its movement with nothing in range — must
+  route through `afterPlayerAction()`. When one side's pool empties first, the
+  other runs out its remaining platoons consecutively to close the round.
+- **AI decision/execution split:** `planAiTurn()` is pure and returns an
+  `AiTurnPlan` (`slotIndex`, optional `moveTo`, optional `attackTargetSlot`)
+  for the lowest unacted slot; `executeAiPlan()` applies it. `runAiTurn()`
+  wraps both for callers that want the whole turn in one step. The split exists
+  so the arena can render the decision (telegraph, walk animation) *before* its
+  effect lands, instead of the board teleporting. The heuristic itself is
+  unchanged and deliberately simple: target the weakest living enemy via the
+  shared `pickTarget()`, close to range/adjacency, attack if able.
+- **Turn consumption is unconditional.** `executeAiPlan()` falls back to
+  `endPlatoonTurn()` whenever the attack is refused — a slot left in the
+  unacted pool would stall `checkRoundAdvance` for the rest of the battle.
 
 ## 6. Type-advantage & damage formula (`shared/combat/damage.ts`)
 
@@ -298,6 +335,12 @@ distinct from the feature plan's deliberate "out of scope" list:
   custom retreat policy callback, the counterattack-chain sequencing (4
   hits/round breakdown for symmetric platoons), and both type-advantage
   and monster-exception damage multiplier checks.
+- `test/combat/manualBattle.test.ts`: movement budget carry-over and per-round
+  speed cap, line-of-sight blocking, melee/ranged target validation, wipeout
+  detection; plus `getMovementPath()` (route contents, one-hex steps, routes
+  around obstacles, unreachable/self destinations), `planAiTurn()` purity
+  (planning moves nothing, deals no damage, consumes no turn), and
+  `executeAiPlan()` consuming the turn even when the attack is refused.
 - `test/state/gameState.test.ts` (updated): `resolveBattle` reducer tests
   replaced with `endBattlePhase` tests (phase transition only, no
   gold/hero mutation); `reorderStack` tests updated for the
