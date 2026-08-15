@@ -1,5 +1,32 @@
 # Plan: directional melee attack targeting (part 1 of the attacking overhaul)
 
+> **Superseded — shipped with an inverted interaction model.** Kept for the design
+> reasoning; the line numbers below predate the Spy removal (`96a9a13`) and no longer match.
+>
+> This doc aimed the *actor's* hex edge at whatever enemy sat on that side: you clicked your
+> own hex or a move-range hex, and the nearest edge chose the target. What shipped inverts
+> it — you aim the *enemy*, and the sixth of its hex under your cursor chooses the hex you
+> close in **from**. That reads more directly as "pick the direction I'm attacking from",
+> and it subsumes this doc's model as the click fallback: with a target latched by hover,
+> clicking one of its highlighted approach hexes attacks from there.
+>
+> As shipped:
+> - `getApproachHexes` and `attackFromHex` in `shared/combat/manualBattle.ts` — the engine
+>   half. Approach hexes come from a single `movementCosts` lookup, and `attackFromHex`
+>   validates everything before the platoon moves, so a rejection can never half-commit.
+> - `HEX_DIRECTIONS` and `nearestHexEdge` in `src/core/hex.ts` — as this doc proposed, the
+>   six neighbour offsets are now one shared edge-ordered constant. It replaced both the
+>   private `EDGE_NEIGHBORS` in `src/core/control.ts` and `NEIGHBOR_DIRS` in the battle engine.
+> - Hover latch, sector preview with a direction arrow, and the click branch in
+>   `src/views/manualBattleArena.ts`.
+> - A sector pointing at a blocked or unreachable hex **snaps to the nearest legal approach**
+>   rather than doing nothing — this doc's "empty side does nothing" rule turned out to be
+>   too punishing once the cursor, not a click, was driving the choice.
+> - The bump attack narrowed to fire only when exactly one enemy is adjacent; see
+>   [move-into-contact-rules.md](move-into-contact-rules.md).
+>
+> Deferred: flank/rear damage bonuses — see [flanking-and-facing.md](flanking-and-facing.md).
+
 ## Context
 
 This is the first part of a broader plan to rework how attacking works. It covers only the

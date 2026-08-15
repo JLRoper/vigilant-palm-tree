@@ -8,7 +8,7 @@
 // simple heuristic (see runAiTurn). See feature-plans/CombatResolutionEngine.md
 // for the underlying damage/type-advantage rules this reuses unchanged.
 
-import { type Axial, axialRound, hexDistance } from "../../src/core/hex";
+import { type Axial, axialRound, HEX_DIRECTIONS, hexDistance } from "../../src/core/hex";
 import type { Platoon, PlatoonEntry, UnitType } from "../../src/state/units";
 import { PLATOON_RETREAT_LOSS, RANGED_ATTACK_RANGE } from "../combatConfig";
 import { applyRetreatLoss } from "./damage";
@@ -37,15 +37,6 @@ export function timeOfDayForRound(round: number): TimeOfDay {
   const idx = Math.floor((Math.max(1, round) - 1) / ROUNDS_PER_TIME_PHASE) % TIME_OF_DAY_PHASES.length;
   return TIME_OF_DAY_PHASES[idx];
 }
-
-const NEIGHBOR_DIRS: Axial[] = [
-  { q: 1, r: 0 },
-  { q: 1, r: -1 },
-  { q: 0, r: -1 },
-  { q: -1, r: 0 },
-  { q: -1, r: 1 },
-  { q: 0, r: 1 },
-];
 
 export interface ManualBattleOptions {
   unitTypes: Record<string, UnitType>;
@@ -196,7 +187,7 @@ function movementCosts(state: ManualBattleState, combatant: Combatant, budget: n
     const current = queue.shift()!;
     const dist = visited.get(hexKey(current))!;
     if (dist >= budget) continue;
-    for (const dir of NEIGHBOR_DIRS) {
+    for (const dir of HEX_DIRECTIONS) {
       const next = { q: current.q + dir.q, r: current.r + dir.r };
       const key = hexKey(next);
       if (visited.has(key)) continue;
@@ -266,6 +257,68 @@ export function getValidAttackTargets(state: ManualBattleState, combatant: Comba
   return isRangedPlatoon(combatant, state.unitTypes)
     ? getValidRangedTargets(state, combatant)
     : getValidMeleeTargets(state, combatant);
+}
+
+// The hexes `actor` could strike `target` from this round: the six neighbours
+// of the target that the actor can legally stand on and reach with the
+// movement it has left, each with the number of hexes it costs to get there.
+//
+// A single movementCosts lookup answers all four constraints at once — that
+// map only ever contains hexes that exist on the grid, are passable, aren't
+// occupied by another live combatant, and are within budget. The actor's own
+// hex is seeded there at cost 0, so a platoon already adjacent gets its
+// current position back as a free approach and attacks without moving.
+//
+// Melee only: ranged platoons pick targets by range and line of sight
+// (getValidRangedTargets), so there is no approach hex to choose.
+export function getApproachHexes(
+  state: ManualBattleState,
+  actor: Combatant,
+  target: Combatant,
+): { hex: Axial; cost: number }[] {
+  if (isRangedPlatoon(actor, state.unitTypes)) return [];
+  const costs = movementCosts(state, actor, remainingMovement(state, actor));
+  const out: { hex: Axial; cost: number }[] = [];
+  for (const dir of HEX_DIRECTIONS) {
+    const hex = { q: target.position.q + dir.q, r: target.position.r + dir.r };
+    const cost = costs.get(hexKey(hex));
+    if (cost === undefined) continue;
+    out.push({ hex, cost });
+  }
+  return out;
+}
+
+// Move to a chosen approach hex and attack in one action — the player-facing
+// "attack from this direction" move. Everything is validated *before* the
+// platoon budges: because fromHex is checked against getApproachHexes (which
+// already guarantees adjacency to the target), the attack can never fail
+// after the move has been applied, so there's no half-committed state to
+// unwind. Returns false and leaves the battle untouched if anything is off.
+//
+// Delegates to movePlatoon and attackWithPlatoon rather than reimplementing
+// them, so movement-budget bookkeeping, the combat log, and round advancement
+// all stay in one place.
+export function attackFromHex(
+  state: ManualBattleState,
+  side: BattleSide,
+  slotIndex: number,
+  targetSlotIndex: number,
+  fromHex: Axial,
+): boolean {
+  if (!unactedSetFor(state, side).has(slotIndex)) return false;
+  const actor = getCombatant(state, side, slotIndex);
+  if (!actor || actor.retreated || !actor.entries.some((e) => e.count > 0)) return false;
+  if (isRangedPlatoon(actor, state.unitTypes)) return false;
+
+  const enemies = livingCombatants(combatantsFor(state, enemySideOf(side)));
+  const target = enemies.find((e) => e.slotIndex === targetSlotIndex);
+  if (!target) return false;
+
+  const approach = getApproachHexes(state, actor, target).find((a) => a.hex.q === fromHex.q && a.hex.r === fromHex.r);
+  if (!approach) return false;
+
+  if (approach.cost > 0 && !movePlatoon(state, side, slotIndex, approach.hex)) return false;
+  return attackWithPlatoon(state, side, slotIndex, targetSlotIndex);
 }
 
 function pruneDead(state: ManualBattleState): void {
