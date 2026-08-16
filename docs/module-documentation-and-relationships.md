@@ -264,7 +264,7 @@ Design-time per-faction unit roster data, distinct from the server-driven `UnitT
 
 ## 6. `test/`
 - **Unit (Node `node:test`):** `cityGrid`, `citySpots`, `minimap`, `state/economy`, `state/gameState`, `state/income`, `combat/resolveBattle`, `combat/manualBattle` (includes approach-hex/`attackFromHex` coverage), `map/castlePlacement`.
-- **Playwright integration:** `smoke.ts` (full E2E spawns API+Vite, verifies New/Load/Save/HUD/DB), `multiplayer.smoke.ts` (lobby lifecycle over the API: create → claim seat → duplicate claim rejected 409 → start blocked while a seat is unclaimed → host claims → start sets `startedAt`), `cityView.test.ts`, `dragDrop.test.ts`, `proposedPath.test.ts`.
+- **Playwright integration:** `smoke.ts` (full E2E spawns API+Vite, verifies New/Load/Save/HUD/DB), `multiplayer.smoke.ts` (lobby lifecycle over the API: create → claim seat → duplicate claim rejected 409 → start blocked while a seat is unclaimed → host claims → start sets `startedAt`), `cityView.test.ts`, `dragDrop.test.ts`, `proposedPath.test.ts`. `smoke`, `multiplayer.smoke`, and `cityView.test.ts` boot their server through the shared `test/_request.ts` helper, which reads `local/.test-request.json` written by `tools/run-test.mjs`.
 
 ## 7. `tools/`
 FLUX-driven sprite generation pipeline (`tools/sprites/flux-*.mjs` for castles, buildings, heroes, resources, horse variants, farms, market variants, town-hall, tower, piles, regeneration helpers), plus `pixel-gen.mjs`/`pixel-gen-pure.mjs` for pixel-art, `outline-apply.mjs`, `manifest.mjs`, `generate-preview.mjs`, `screenshot-preview.mjs`, and **`validate-assets.mjs`** (asserts every sprite key referenced by `assetDescriptors.ts` has a PNG).

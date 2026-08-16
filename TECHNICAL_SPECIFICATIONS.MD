@@ -125,9 +125,9 @@ Port allocation is OS-native and cross-platform (`scripts/allocate-ports.ts` use
 | `db:up` | `docker compose up -d` | Start Postgres + Adminer |
 | `db:down` | `docker compose down` | Stop them |
 | `pretest` | `tsx scripts/allocate-ports.ts` | (lifecycle hook) Allocate ports for `test` |
-| `test` | `tsx --env-file=.env test/smoke.ts` | End-to-end smoke test (spawns API + preview, drives with Playwright) |
-| `test:cityview` | `tsx scripts/allocate-ports.ts && tsx --env-file=.env test/cityView.test.ts` | City view integration test |
-| `test:all` | `tsx scripts/allocate-ports.ts && tsx --env-file=.env test/smoke.ts && tsx --env-file=.env test/multiplayer.smoke.ts && tsx --env-file=.env test/cityView.test.ts` | Full test suite (smoke + multiplayer + cityView) |
+| `test` | `node tools/run-test.mjs smoke` | End-to-end smoke test (spawns API + preview, drives with Playwright) |
+| `test:cityview` | `node tools/run-test.mjs cityview` | City view integration test |
+| `test:all` | `node tools/run-test.mjs all` | Full test suite (smoke + multiplayer + cityView) |
 | `lint:deps` | `depcruise src shared server --config dependency-cruiser.cjs` | Static check of cross-boundary imports (catches cycles and out-of-bounds deps between `src/`, `shared/`, and `server/`) |
 | `sprites:generate` | `node tools/sprites/pixel-gen.mjs` | Render pixel-art castle sprites into `src/resources/` |
 | `sprites:preview` | `node tools/sprites/generate-preview.mjs` | Build a sprite contact-sheet preview |
@@ -199,11 +199,13 @@ API conventions:
   - Uses Playwright (`chromium`) to load the built app, reading the client URL from `CLIENT_PORT` in `.env` (default 4173).
   - Talks to the API using `API_PORT` from `.env` (default 3001) via Playwright's `request` API and via `pg.Pool`.
   - Asserts map determinism (same seed → same resource tile placement and counts), then exercises the live UI.
-  - Records the spawned API / preview / browser PIDs in `test/.last-test-pids.json` on each spawn so the next run (or `npm run cleanup`) can reap stragglers via `taskkill /F /T` on Windows / `SIGKILL` on POSIX.
+  - Records the spawned API / preview / browser PIDs in `local/.test-request.json` (the per-run shared request file written by `tools/run-test.mjs`) so the next run (or `npm run cleanup`) can reap stragglers via `taskkill /F /T` on Windows / `SIGKILL` on POSIX.
   - Accepts an optional `--shutdownAfterSeconds=<n>` flag that forces a hard tree-kill of all spawned children after `n` seconds (useful for CI runs that hit the 120 s safety ceiling).
+  - Accepts an optional `--auto-close` flag. Default behavior preserves the spawned API/`vite preview` for manual inspection (only the npx wrappers are torn down; the detached server trees survive). With `--auto-close` the smoke harness tree-kills the API and preview on exit so the ports release immediately — used by `npm run test:all` so multiplayer/cityView start with fresh ports.
+- **Shared request file** — `tools/run-test.mjs` is the cross-platform wrapper invoked by `npm test` / `npm run test:all`. It writes a per-run request to `local/.test-request.json` (gitignored; lives under `local/`, never committed) carrying the per-worktree port layout, then hands control to the test entry. [`test/_request.ts`](./test/_request.ts:1) reads that file to spawn / reap the API + `vite preview`, so `smoke`, `multiplayer.smoke`, and `cityView` share a single boot contract instead of each re-implementing `child_process.spawn` and PID tracking. `test/_request.ts` exposes the same boot helpers (request URL, health-check wait, tree-kill on exit) the individual tests used to inline.
 - **Unit-ish tests** under `test/state/` and `test/map/` (e.g. `gameState.test.ts`, `income.test.ts`, `castlePlacement.test.ts`) are imported by the smoke harness — they run as part of `npm test`.
-- Logs from previous runs are kept at `test/web.log`, `test/api.log`, `test/*.err.log`; screenshots at `test/screenshot.png` / `test/screenshot-dpr2.png`; PID ledger at `test/.last-test-pids.json` (consumed by the straggler-kill path on next run / shutdown).
-- Helper script: `tools/run-smoke.ps1` (PowerShell wrapper).
+- Logs from previous runs are kept at `test/web.log`, `test/api.log`, `test/*.err.log`; screenshots at `test/screenshot.png` / `test/screenshot-dpr2.png`; PID ledger at `local/.test-request.json` (consumed by the straggler-kill path on next run / shutdown).
+- Helper scripts: `tools/run-smoke.ps1` (PowerShell convenience wrapper) and `tools/run-test.mjs` (Node wrapper used by the npm scripts — cross-platform; writes `local/.test-request.json` and launches the requested test entry).
 
 ### CI (GitHub Actions)
 
