@@ -73,6 +73,7 @@ import buildingClassicMarket1Variant5 from "../resources/buildings/building-clas
 import buildingClassicMarket2 from "../resources/buildings/building-classic-market-2.png?url";
 import buildingClassicMine1 from "../resources/buildings/building-classic-mine-1.png?url";
 import buildingClassicSmithy1 from "../resources/buildings/building-classic-smithy-1.png?url";
+import buildingClassicSmithy2 from "../resources/buildings/building-classic-smithy-2.png?url";
 import buildingClassicTower1 from "../resources/buildings/building-classic-tower-1.png?url";
 import buildingClassicTower2 from "../resources/buildings/building-classic-tower-2.png?url";
 import buildingClassicTownHall1 from "../resources/buildings/building-classic-townHall-1.png?url";
@@ -241,6 +242,7 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "classic.market.2": buildingClassicMarket2,
   "classic.mine.1": buildingClassicMine1,
   "classic.smithy.1": buildingClassicSmithy1,
+  "classic.smithy.2": buildingClassicSmithy2,
   "classic.tower.1": buildingClassicTower1,
   "classic.tower.2": buildingClassicTower2,
   "classic.townHall.1": buildingClassicTownHall1,
@@ -567,6 +569,7 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.classic.market.2": 0,
   "building.classic.mine.1": 0,
   "building.classic.smithy.1": 4,
+  "building.classic.smithy.2": 4,
   "building.classic.tower.1": 5,
   "building.classic.tower.2": 2,
   "building.classic.townHall.1": 4,
