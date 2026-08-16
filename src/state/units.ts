@@ -8,10 +8,6 @@
 // CombatResolutionEngine.md "Army model: platoons"). This replaces the older
 // single-type-per-slot UnitStack shape.
 
-// UnitType/AdvantageType/Platoon/PlatoonEntry and the ARMY_STACK_SLOTS/
-// MAX_PLATOON_ENTRIES helpers now live in @heroes/engine (and
-// @heroes/contracts for the plain data shapes) — re-exported here so
-// existing consumers of state/units don't need to change their import path.
 export type { AdvantageType, Platoon, PlatoonEntry, UnitType } from "@heroes/engine";
 export { ARMY_STACK_SLOTS, emptyPlatoon, MAX_PLATOON_ENTRIES, normalizePlatoons, platoonsHaveTroops } from "@heroes/engine";
 
