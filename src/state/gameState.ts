@@ -65,11 +65,6 @@ export {
   monthName,
 } from "@heroes/engine";
 
-// gameState.ts shrinks to a re-export barrel for its types (Track A / Phase
-// 1, stage 2 of plan/2026-08-15-parallel-dev-split.md) — the type
-// definitions now live in @heroes/contracts; this file keeps re-exporting
-// them so none of its ~35 existing consumers need to change on this PR.
-// Runtime behavior (the functions below) is unchanged.
 export { MOVEMENT_PER_TURN, WAREHOUSE_RESOURCES } from "@heroes/contracts";
 export type {
   Player,
