@@ -3,8 +3,8 @@ import { pool, withTransaction } from "./db";
 import { GameMap, type MapSize } from "@heroes/engine";
 import { mulberry32 } from "@heroes/engine";
 import { makeInitialStatePayload } from "../src/game/initState";
-import {  tradeResources as tradeResourcesReducer,  applyEndOfTurnDetailed,  type AutoTradeTransfer,} from "../shared/gameState";
-import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+import { tradeResources as tradeResourcesReducer, applyEndOfTurnDetailed } from "@heroes/engine";
+import { WAREHOUSE_RESOURCES, type AutoTradeTransfer } from "@heroes/contracts";
 import type { PoolClient } from "pg";
 import type {
   GameState,

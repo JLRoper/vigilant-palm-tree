@@ -2,7 +2,7 @@ import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { showBattleModal } from "@screens/combat/battleModal";
 import { showBattleResultCard } from "@screens/combat/battleResultCard";
-import type { BattleResult } from "@heroes/engine";
+import { canEndTurn, type BattleResult } from "@heroes/engine";
 
 /**
  * Handles game-flow actions: end turn, manual save, battle resolution.
@@ -68,9 +68,7 @@ export class GameActions {
 
   async handleEndTurn(): Promise<void> {
     const gs = this.state.getState();
-    const phase = gs.phase;
-    if (phase.kind !== "PLAYER_TURN") return;
-    if (gs.players.find((p) => p.id === phase.playerId)?.faction !== "player") return;
+    if (!canEndTurn(gs)) return;
     const tc = this.state.getTurnController();
     await tc.endHumanTurn();
     this.state.replaceState(tc.getState());

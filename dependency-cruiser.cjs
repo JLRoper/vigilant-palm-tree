@@ -2,9 +2,6 @@
 // Documented exceptions (scoped out of the error rules via pathNot on the
 // `from` side; tracked as follow-up plans in
 // plan/2026-08-09-bloat-scalability-review.md):
-//   - shared/gameState.ts → src/state/gameState.ts (tradeResources,
-//     applyEndOfTurnDetailed, AutoTradeTransfer re-exported as a stepping stone
-//     until full extraction to shared/turns/ lands — R9).
 //   - server/routes.ts → src/game/initState.ts (makeInitialStatePayload is the
 //     map-gen + castle-placement + economy-init orchestrator; full extraction
 //     to shared/map/initState is R11).
@@ -53,15 +50,6 @@ module.exports = {
       },
     },
     {
-      name: "no-shared-from-src-or-server",
-      severity: "error",
-      from: { path: "^shared", pathNot: "^shared/gameState\\.ts$" },
-      to: {
-        path: "^(src/|server/)",
-        dependencyTypesNot: ["type-only"],
-      },
-    },
-    {
       name: "no-server-from-src",
       severity: "error",
       from: { path: "^server", pathNot: "^server/routes\\.ts$" },
@@ -83,9 +71,9 @@ module.exports = {
       name: "contracts-is-a-leaf",
       severity: "error",
       comment:
-        "@heroes/contracts is the wire: zero dependencies on engine, client, server, or shared code.",
+        "@heroes/contracts is the wire: zero dependencies on engine, client, or server code.",
       from: { path: "^packages/contracts" },
-      to: { path: "^(packages/engine|src/|server/|shared/)" },
+      to: { path: "^(packages/engine|src/|server/)" },
     },
     {
       name: "engine-depends-on-contracts-only",
