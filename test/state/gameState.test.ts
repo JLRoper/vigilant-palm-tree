@@ -308,7 +308,8 @@ test("endBattlePhase transitions BATTLE back to PLAYER_TURN without touching her
   });
   const next = endBattlePhase(s);
   // Actual combat resolution (gold transfer, casualties) is server-side —
-  // see server/routes.ts resolve-battle and shared/combat/resolveBattle.ts.
+  // see server/routes.ts resolve-battle and
+  // packages/engine/src/combat/resolveBattle.ts.
   assert.equal(next.heroes.h0.gold, 10);
   assert.equal(next.heroes.h1.gold, 75);
   assert.equal(next.phase.kind, "PLAYER_TURN");

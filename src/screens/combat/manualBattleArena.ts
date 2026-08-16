@@ -161,9 +161,9 @@ function leaveBehindKey(slotIndex: number, unitTypeId: string): LeaveBehindKey {
 
 // Strips the selected unit counts off the human side's surviving
 // combatants so they show up as casualties on the final result card (see
-// buildResults in shared/combat/resolveBattle.ts — it diffs original vs
-// surviving counts and reports the gap). Called from the Leave Behind
-// picker once the player has agreed to the sacrifice.
+// buildResults in packages/engine/src/combat/resolveBattle.ts — it diffs
+// original vs surviving counts and reports the gap). Called from the Leave
+// Behind picker once the player has agreed to the sacrifice.
 function applyLeaveBehind(
   state: ManualBattleState,
   side: BattleSide,
