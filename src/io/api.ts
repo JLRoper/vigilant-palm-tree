@@ -7,14 +7,14 @@ import type {
   Player,
   SettlementState,
   WarehouseResource,
-} from "../state/gameState";
+} from "@heroes/contracts";
 
 export type {
   GameState,
   HeroState,
   Player,
   SettlementState,
-} from "../state/gameState";
+} from "@heroes/contracts";
 
 export type EnemyPos = { q: number; r: number };
 
@@ -69,7 +69,7 @@ export type EndTurnResult = {
 export type ResolveBattleResult = {
   players: Player[];
   heroes: Record<string, HeroState>;
-  battle: import("../../shared/combat/types").BattleResult;
+  battle: import("@heroes/engine").BattleResult;
 };
 
 const BASE = "/api";

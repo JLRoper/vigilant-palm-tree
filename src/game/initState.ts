@@ -1,12 +1,12 @@
+import { createInitialState } from "../state/gameState";
 import {
-  createInitialState,
   WAREHOUSE_RESOURCES,
   type GameState,
   type HeroId,
   type HeroState,
   type Player,
   type SettlementState,
-} from "../state/gameState";
+} from "@heroes/contracts";
 import { demoPlatoonsForPlayer, normalizePlatoons } from "../state/units";
 import type { Game } from "../io/api";
 import type { GameMap } from "../map/gameMap";
@@ -23,11 +23,11 @@ import {
   defaultPopulation,
   generateSettlementName,
   SETTLEMENT_GOLD_TAX,
-} from "../economy/settlementRates";
+} from "@heroes/engine";
 import { PLAYER_COLORS, MAX_PLAYERS } from "../state/playerColors";
 import { generateCitySpots } from "../core/citySpots";
 import { cityViewSizeFor } from "../core/cityGrid";
-import { VALID_HORSE_VARIANTS } from "../../shared/horseVariants";
+import { VALID_HORSE_VARIANTS } from "@heroes/engine";
 
 const DEFAULT_PLAYER_COUNT = 3;
 const MAX_PLAYER_COUNT = MAX_PLAYERS;

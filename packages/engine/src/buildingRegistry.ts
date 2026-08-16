@@ -1,4 +1,4 @@
-import type { BuildingKind, ResourceType } from "../../shared/types";
+import type { BuildingKind, ResourceType } from "@heroes/contracts";
 
 export interface RecruitEntry {
   unitTypeId: string;

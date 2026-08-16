@@ -1,3 +1,4 @@
-export { tradeResources, applyEndOfTurnDetailed } from "../src/state/gameState";
-export { WAREHOUSE_RESOURCES } from "./constants";
-export type { AutoTradeTransfer } from "../src/state/gameState";
+export { applyEndOfTurnDetailed } from "../src/state/gameState";
+export { tradeResources } from "@heroes/engine";
+export { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+export type { AutoTradeTransfer } from "@heroes/contracts";

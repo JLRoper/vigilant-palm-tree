@@ -8,9 +8,14 @@
 // CombatResolutionEngine.md "Army model: platoons"). This replaces the older
 // single-type-per-slot UnitStack shape.
 
-import type { AdvantageType } from "../../shared/combatConfig";
+import type { AdvantageType } from "@heroes/engine";
+import type { Platoon, PlatoonEntry } from "@heroes/contracts";
 
 export type { AdvantageType };
+// Platoon/PlatoonEntry now live in @heroes/contracts (Track A / Phase 1,
+// stage 2) — re-exported here so existing consumers of state/units don't
+// need to change their import path.
+export type { Platoon, PlatoonEntry };
 
 export interface UnitType {
   id: string;
@@ -33,15 +38,6 @@ export interface UnitType {
   // Bumps above 1.0 let a smaller-but-heavier specialty take precedence
   // (e.g. shields out-vote pikes at smaller counts).
   specialtyPriority: number;
-}
-
-export interface PlatoonEntry {
-  unitTypeId: string;
-  count: number;
-}
-
-export interface Platoon {
-  entries: PlatoonEntry[];
 }
 
 export const ARMY_STACK_SLOTS = 8;

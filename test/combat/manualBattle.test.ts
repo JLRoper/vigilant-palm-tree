@@ -19,8 +19,8 @@ import {
   planAiTurn,
   startManualBattle,
   unactedLivingSlots,
-} from "../../shared/combat/manualBattle";
-import { estimateWinChance } from "../../shared/combat/damage";
+} from "@heroes/engine";
+import { estimateWinChance } from "@heroes/engine";
 import { ARMY_STACK_SLOTS, type Platoon, type UnitType } from "../../src/state/units";
 
 const unitTypes: Record<string, UnitType> = {

@@ -1,6 +1,5 @@
 import type { GameState, PlayerId } from "../../state/gameState";
-import { effectiveIncome } from "../../economy/consumption";
-import { playerWealth } from "../../economy/income";
+import { effectiveIncome, playerWealth } from "@heroes/engine";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 

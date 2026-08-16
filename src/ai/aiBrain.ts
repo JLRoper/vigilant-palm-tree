@@ -1,7 +1,7 @@
 import { Axial, hexDistance } from "../core/hex";
 import { findPath } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
-import type { GameState, HeroState } from "../state/gameState";
+import type { GameState, HeroState } from "@heroes/contracts";
 import { TERRAIN_COST } from "../map/terrain";
 
 export interface AiMove {

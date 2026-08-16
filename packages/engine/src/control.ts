@@ -1,5 +1,5 @@
-import { HEX_DIRECTIONS } from "./hex";
-import type { Axial, CastleLevel, BuildingDef } from "../../shared/types";
+import { HEX_DIRECTIONS } from "@heroes/contracts";
+import type { Axial, CastleLevel, BuildingDef } from "@heroes/contracts";
 import { computeSettlementBonuses } from "./buildingModifiers";
 
 export function controlRange(level: CastleLevel, buildings?: BuildingDef[]): number {

@@ -10,7 +10,7 @@ import { GameState, calendarFromDay, monthName } from "../state/gameState";
 import type { HeroId, SettlementState } from "../state/gameState";
 import { Hero } from "../entities/hero";
 import { SpriteProvider } from "../render/assets";
-import { playerIncome, playerWealth } from "../economy/income";
+import { playerIncome, playerWealth } from "@heroes/engine";
 import { SessionManager } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";

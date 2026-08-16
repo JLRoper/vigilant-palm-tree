@@ -8,7 +8,7 @@
 // simple heuristic (see runAiTurn). See feature-plans/CombatResolutionEngine.md
 // for the underlying damage/type-advantage rules this reuses unchanged.
 
-import { type Axial, axialRound, HEX_DIRECTIONS, hexDistance } from "../types";
+import { type Axial, axialRound, HEX_DIRECTIONS, hexDistance } from "@heroes/contracts";
 import type { Platoon, PlatoonEntry, UnitType } from "../units";
 import { PLATOON_RETREAT_LOSS, RANGED_ATTACK_RANGE } from "../combatConfig";
 import { applyRetreatLoss } from "./damage";

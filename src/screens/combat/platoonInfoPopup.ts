@@ -9,8 +9,8 @@
 // the opposing army) — this file just draws the card there and keeps it
 // on-screen.
 
-import { estimateWinChance, totalHealth } from "../../../shared/combat/damage";
-import type { Combatant } from "../../../shared/combat/types";
+import { estimateWinChance, totalHealth } from "@heroes/engine";
+import type { Combatant } from "@heroes/engine";
 import type { UnitType } from "../../state/units";
 import { menuTheme } from "@screens/shared/menu";
 

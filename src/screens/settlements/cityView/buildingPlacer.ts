@@ -8,7 +8,7 @@ import {
   buildingLabel,
   buildingBuildDays,
   buildingFootprintFromRegistry,
-} from "../../../core/buildingRegistry";
+} from "@heroes/engine";
 import { pickStyleForBuilding } from "../../../render/assetDescriptors";
 import type { ResourceType } from "../../../state/gameState";
 import resourceGoldPileSmol from "../../../resources/resource-gold-pile-smol.png?url";

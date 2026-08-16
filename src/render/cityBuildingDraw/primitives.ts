@@ -1,5 +1,5 @@
 import { cellToScreen, TILE_W, TILE_D } from "../../core/cityGrid";
-import { buildingFootprintFromRegistry } from "../../core/buildingRegistry";
+import { buildingFootprintFromRegistry } from "@heroes/engine";
 import type { BuildingDef, BuildingKind, DrawBuildingContext } from "./types";
 
 export { type BuildingDef, type BuildingKind, type DrawBuildingContext };

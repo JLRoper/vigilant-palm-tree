@@ -1,6 +1,6 @@
 import { Terrain, TERRAIN_COST } from "./terrain";
 import { placeResourceTiles, ResourceTile } from "./resourceTiles";
-import type { Axial } from "../types";
+import type { Axial } from "@heroes/contracts";
 import { mulberry32 } from "../rng";
 
 const HERO_SPAWN: Axial = { q: 2, r: 2 };

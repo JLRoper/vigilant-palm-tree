@@ -1,4 +1,4 @@
-import type { Axial } from "../types";
+import type { Axial } from "@heroes/contracts";
 import { mulberry32 } from "../rng";
 import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT } from "../combatConfig";
 import { ARMY_STACK_SLOTS } from "../units";
