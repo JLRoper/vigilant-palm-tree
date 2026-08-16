@@ -4,7 +4,7 @@ import { GameMap, type MapSize } from "@heroes/engine";
 import { mulberry32 } from "@heroes/engine";
 import { makeInitialStatePayload } from "../src/game/initState";
 import { tradeResources as tradeResourcesReducer, applyEndOfTurnDetailed } from "@heroes/engine";
-import { WAREHOUSE_RESOURCES, type AutoTradeTransfer } from "@heroes/contracts";
+import type { AutoTradeTransfer } from "@heroes/contracts";
 import type { PoolClient } from "pg";
 import type {
   GameState,
@@ -510,7 +510,7 @@ router.patch("/games/:name", async (req, res) => {
   }
   sets.push("updated_at = now()");
   vals.push(req.params.name);
-  const r = await pool.query<GameRow>(
+  const r = await pool.query<FullGameRow>(
     `UPDATE games SET ${sets.join(", ")} WHERE name = $${i}
      RETURNING ${GAME_COLUMNS}`,
     vals
@@ -632,6 +632,7 @@ router.post("/games/:name/end-turn", async (req, res) => {
         id: p.id,
         faction: p.faction,
         name: p.name,
+        color: p.color,
         heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
         settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
       }));
@@ -849,6 +850,7 @@ router.post("/games/:name/resolve-battle", async (req, res) => {
         id: p.id,
         faction: p.faction,
         name: p.name,
+        color: p.color,
         heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
         settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
       }));
@@ -999,6 +1001,7 @@ router.post("/games/:name/transfer", async (req, res) => {
         id: p.id,
         faction: p.faction,
         name: p.name,
+        color: p.color,
         heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
         settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
       }));
@@ -1099,7 +1102,23 @@ router.post("/games/:name/trade", async (req, res) => {
       }
 
       const tradeResult = tradeResourcesReducer(
-        { ...row, dirty: false } as GameState,
+        {
+          round: row.round,
+          day: row.day,
+          activePlayerId: row.active_player_id,
+          players: row.players,
+          heroes: row.heroes,
+          settlements: row.settlements,
+          phase: { kind: "PLAYER_TURN", playerId: row.active_player_id },
+          selectedHeroId: null,
+          selectedSettlementId: null,
+          dirty: false,
+          castleSeed: row.seed,
+          castleCount: 0,
+          activeCharters: [],
+          nextCharterId: 0,
+          nextSettlementId: Object.keys(row.settlements).length,
+        },
         fromSettlementId,
         toSettlementId,
         resource as WarehouseResource,
