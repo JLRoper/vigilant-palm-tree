@@ -5,11 +5,15 @@
 // the "Test Battle" sandbox (src/views/testBattleSetup.ts) — see that file's
 // header for the scope boundary against the real game's battle flow.
 //
-// Layout is battlefield-first: the grid takes whatever room is left after two
-// narrow roster rails, and it *reflows* (the hex size is solved for the
-// available box) rather than being drawn at a fixed size and scaled down.
-// Per-platoon detail lives in the hover/click info card rather than in
-// always-on tiles — see buildPlatoonStrip and showInfoPopupFor.
+// Layout is battlefield-first: the grid takes whatever room is left after one
+// narrow roster rail — the player's own — and it *reflows* (the hex size is
+// solved for the available box) rather than being drawn at a fixed size and
+// scaled down. There's no rail for the opponent; only your own units belong
+// on your screen. A platoon strip's full detail (composition, stats, morale/
+// fatigue, movement) stays collapsed until that platoon is hovered or
+// selected, when the strip itself expands in place — see buildPlatoonStrip.
+// Enemy platoons have no rail to expand into, so clicking one on the
+// battlefield still opens the floating info card — see showInfoPopupFor.
 
 import { axialToPixel, hexCorners, HEX_DIRECTIONS, hexDistance, nearestHexEdge, pixelToAxial, type Axial } from "../core/hex";
 import { totalHealth } from "../../shared/combat/damage";
@@ -65,11 +69,12 @@ const HEX_SIZE_MIN = 14;
 // the one-hex radius already needed to fit those hexes' corners.
 const CANVAS_MARGIN = 20;
 
-// Width of each side's roster rail. Narrow by design: the rail carries
-// identification and at-a-glance health only, and everything else moves into
-// the info card, so the battlefield's share of the viewport doesn't depend on
-// how many platoons are in play.
-const RAIL_WIDTH = 190;
+// Width of the player's roster rail. A collapsed strip only needs enough
+// room for identification and at-a-glance health, but an expanded one (the
+// hovered/selected platoon) carries the full readout — composition, Atk/Def/
+// Spd/Rng, morale/fatigue bars — so the rail is sized for that case rather
+// than the collapsed one.
+const RAIL_WIDTH = 230;
 
 // Dev-only console logging for the arena — this view is only reachable from
 // the Test Battle sandbox (see file header), so it's safe to leave this on
@@ -405,21 +410,51 @@ function hpColor(pct: number): string {
   return pct > 0.5 ? "#4caf50" : pct > 0.25 ? "#ffb300" : "#e53935";
 }
 
-// One compact row per platoon in a side's rail: enough to identify it and
-// read its health at a glance, and nothing more. The full readout
-// (composition, Atk/Def/Spd/Rng, terrain, morale, fatigue, win odds) lives in
-// the info card, shown on hover or selection — see showInfoPopupFor. This is
-// the density change the rest of the layout depends on: sixteen always-on
-// stat tiles previously consumed 640px of width that the battlefield now gets.
+// Detail shown only in a strip's expanded state — the same shape of data
+// showInfoPopupFor computes for the enemy popup, just rendered inline
+// instead of floating. Left optional/undefined when the strip is collapsed
+// so buildPlatoonStrip's caller (fillRail) only has to compute it for
+// whichever one platoon is actually expanded.
+interface PlatoonStripDetail {
+  unitTypes: Record<string, UnitType>;
+  stats: { label: string; value: string }[];
+  metrics: { label: string; value: number; color: string }[];
+  movementRemaining: number;
+  canAct: boolean;
+}
+
+function detailRow(label: string, value: string): HTMLElement {
+  const row = document.createElement("div");
+  Object.assign(row.style, { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px" });
+  const l = document.createElement("span");
+  l.textContent = label;
+  Object.assign(l.style, { opacity: "0.7", fontSize: "10.5px" });
+  const v = document.createElement("span");
+  v.textContent = value;
+  Object.assign(v.style, { fontVariantNumeric: "tabular-nums", textAlign: "right", fontSize: "10.5px" });
+  row.append(l, v);
+  return row;
+}
+
+// One row per platoon in a side's rail. Collapsed, it's enough to identify
+// the platoon and read its health at a glance. Expanded (the currently
+// hovered or selected platoon), it grows in place to show the full readout —
+// composition, Atk/Def/Spd/Rng, morale, fatigue, movement left — that used
+// to live only in a floating info card. This is the density change the rest
+// of the layout depends on: sixteen always-on stat tiles previously consumed
+// 640px of width that the battlefield now gets, with the detail spent only
+// on the one platoon actually being looked at.
 function buildPlatoonStrip(opts: {
   state: ManualBattleState;
   combatant: Combatant;
   accent: string;
   selected: boolean;
-  // Rendered spent — "has already acted this round", on either side's rail.
+  // Rendered spent — "has already acted this round".
   dimmed: boolean;
+  expanded: boolean;
+  detail?: PlatoonStripDetail;
 }): HTMLElement {
-  const { state, combatant: c, accent, selected, dimmed } = opts;
+  const { state, combatant: c, accent, selected, dimmed, expanded, detail } = opts;
   const alive = isAlive(c);
 
   const strip = document.createElement("div");
@@ -479,6 +514,65 @@ function buildPlatoonStrip(opts: {
     });
     track.appendChild(fill);
     strip.appendChild(track);
+
+    if (expanded && detail) {
+      const hp = totalHealth(c.entries, detail.unitTypes);
+      strip.appendChild(detailRow("HP", `${hp} / ${c.maxHealth}`));
+
+      const compList = document.createElement("div");
+      Object.assign(compList.style, { display: "flex", flexDirection: "column", gap: "1px" });
+      for (const e of c.entries) {
+        if (e.count <= 0) continue;
+        compList.appendChild(detailRow(detail.unitTypes[e.unitTypeId]?.name ?? e.unitTypeId, `x${e.count}`));
+      }
+      strip.appendChild(compList);
+
+      strip.appendChild(detailRow("Movement", `${detail.movementRemaining} left`));
+
+      if (detail.stats.length > 0) {
+        const statRow = document.createElement("div");
+        Object.assign(statRow.style, { display: "flex", flexWrap: "wrap", gap: "3px 4px", marginTop: "1px" });
+        for (const s of detail.stats) {
+          const chip = document.createElement("span");
+          Object.assign(chip.style, {
+            fontSize: "9.5px",
+            padding: "2px 5px",
+            borderRadius: "3px",
+            background: "rgba(255,255,255,0.06)",
+            fontVariantNumeric: "tabular-nums",
+          });
+          chip.innerHTML = `<span style="opacity:0.6">${s.label}</span> ${s.value}`;
+          statRow.appendChild(chip);
+        }
+        strip.appendChild(statRow);
+      }
+
+      for (const m of detail.metrics) {
+        const clamped = Math.max(0, Math.min(1, m.value));
+        const line = document.createElement("div");
+        line.appendChild(detailRow(m.label, String(Math.round(clamped * 100))));
+        const mTrack = document.createElement("div");
+        Object.assign(mTrack.style, { height: "4px", borderRadius: "2px", background: "rgba(0,0,0,0.5)", overflow: "hidden", marginTop: "2px" });
+        const mFill = document.createElement("div");
+        Object.assign(mFill.style, { height: "100%", width: `${clamped * 100}%`, background: m.color });
+        mTrack.appendChild(mFill);
+        line.appendChild(mTrack);
+        strip.appendChild(line);
+      }
+
+      const canActChip = document.createElement("span");
+      Object.assign(canActChip.style, {
+        alignSelf: "flex-start",
+        fontSize: "9.5px",
+        padding: "2px 6px",
+        borderRadius: "3px",
+        border: "1px solid rgba(255,255,255,0.15)",
+        opacity: "0.85",
+        marginTop: "1px",
+      });
+      canActChip.textContent = detail.canAct ? "Can act" : "Acted";
+      strip.appendChild(canActChip);
+    }
   }
 
   return strip;
@@ -596,7 +690,6 @@ export function openManualBattleArena(
   const ATTACKER_ACCENT = "#3070c0";
   const DEFENDER_ACCENT = "#c04040";
   const humanAccent = humanSide === "attacker" ? ATTACKER_ACCENT : DEFENDER_ACCENT;
-  const aiAccent = humanSide === "attacker" ? DEFENDER_ACCENT : ATTACKER_ACCENT;
 
   // The fight takes over the whole viewport. Three stacked bands: a status
   // bar, the battle row (rail | battlefield | rail), and an action + log bar.
@@ -696,6 +789,11 @@ export function openManualBattleArena(
   }
 
   let selectedSlot: number | null = null;
+  // The rail strip currently expanded by mouse hover, independent of
+  // selectedSlot — hovering a different platoon than the selected one should
+  // expand *that* one without disturbing the selection. Falls back to
+  // selectedSlot when nothing's hovered — see fillRail.
+  let hoveredSlot: number | null = null;
   let moveRange: Axial[] = [];
   let attackTargets: Combatant[] = [];
 
@@ -1146,11 +1244,14 @@ export function openManualBattleArena(
     return { panel, castBtn };
   }
 
-  // One rail per side: hero panel, then a scrolling column of platoon strips,
-  // then any hero-level actions pinned to the bottom. Fixed narrow width, so
-  // the battlefield's share of the viewport never depends on how many
-  // platoons are in play — the old status bars were 320px each and grew a
-  // second column of tiles, which is what squeezed the grid.
+  // The player's own roster rail: hero panel, then a scrolling column of
+  // platoon strips, then any hero-level actions pinned to the bottom. Fixed
+  // narrow width, so the battlefield's share of the viewport never depends on
+  // how many platoons are in play — the old status bars were 320px each and
+  // grew a second column of tiles, which is what squeezed the grid. There's
+  // no equivalent rail for the opponent — only the player's own units belong
+  // on the player's screen; enemy detail is inspected on the battlefield
+  // itself (see showInfoPopupFor).
   function buildRail(
     heroLabel: string,
     railLabel: string,
@@ -1202,9 +1303,8 @@ export function openManualBattleArena(
   }
 
   const humanRail = buildRail("You", "Your Army", humanAccent);
-  const aiRail = buildRail("AI Opponent", "Enemy Army", aiAccent);
 
-  // Takes all the width the two rails don't. flex-basis 0 plus min-width/
+  // Takes all the width the rail doesn't. flex-basis 0 plus min-width/
   // min-height 0 makes this box's size depend purely on the row, never on the
   // canvas inside it — which is what keeps the ResizeObserver below from
   // feeding its own canvas resize back in as a layout change.
@@ -1235,11 +1335,7 @@ export function openManualBattleArena(
 
   const infoPopup = createPlatoonInfoPopup(canvasWrap);
 
-  // Attacker/defender roles are fixed to their grid colors (see the
-  // sideChoice comment above), but the human should always see themself on
-  // the left and the AI on the right, whichever role they're playing — so the
-  // DOM order is picked by humanSide rather than hardcoded.
-  battleRow.append(humanRail.rail, battlefield, aiRail.rail);
+  battleRow.append(humanRail.rail, battlefield);
 
   // Retreat/Surrender are human-only actions, so they sit at the bottom of
   // the human's own rail rather than in the shared action bar — see the
@@ -1281,11 +1377,12 @@ export function openManualBattleArena(
     canvas.width = Math.round(canvasCssW * dpr);
     canvas.height = Math.round(canvasCssH * dpr);
     draw();
-    // An open info card was anchored against the previous hex size and
-    // offsets, so it would now point at the wrong hex. Re-anchor it against
-    // the geometry we just computed. Easy to hit by expanding the battle log,
-    // which reflows the canvas underneath a card that is already showing.
-    restoreInfoPopup();
+    // An open enemy info card was anchored against the previous hex size and
+    // offsets, so it would now point at the wrong hex — simplest is to just
+    // dismiss it rather than re-anchor. Easy to hit by expanding the battle
+    // log, which reflows the canvas underneath a card that is already
+    // showing.
+    infoPopup.hide();
   }
 
   const resizeObserver = new ResizeObserver(() => relayoutCanvas());
@@ -1351,10 +1448,11 @@ export function openManualBattleArena(
     ];
   }
 
-  // Shared by: selecting one of your own platoons, hovering a rail strip,
-  // and clicking a previously-scouted enemy. `winVsSlot` (a human slotIndex)
-  // adds the win-odds row — only meaningful when showing an enemy's card
-  // while one of your own platoons is selected.
+  // Only ever called for an enemy platoon clicked on the battlefield — your
+  // own platoons have no equivalent popup anymore, since their detail
+  // expands inline in the roster rail instead (see buildPlatoonStrip and
+  // renderRails). `winVsSlot` (a human slotIndex) adds the win-odds row when
+  // one of your own platoons is selected while you inspect the enemy.
   function showInfoPopupFor(combatant: Combatant, winVsSlot: number | null): void {
     const accent = combatant.side === "attacker" ? ATTACKER_ACCENT : DEFENDER_ACCENT;
     const ownerLabel = combatant.side === humanSide ? "Your platoon" : "Enemy platoon";
@@ -1389,19 +1487,6 @@ export function openManualBattleArena(
       minY: margin - wrapRect.top,
       maxY: window.innerHeight - wrapRect.top - margin,
     });
-  }
-
-  // Called when a transient hover ends: fall back to the selected platoon's
-  // card (the persistent state) rather than leaving the last hovered one up.
-  function restoreInfoPopup(): void {
-    if (selectedSlot !== null) {
-      const selected = getCombatant(state, humanSide, selectedSlot);
-      if (selected) {
-        showInfoPopupFor(selected, null);
-        return;
-      }
-    }
-    infoPopup.hide();
   }
 
   function draw(): void {
@@ -1677,11 +1762,9 @@ export function openManualBattleArena(
       selectedSlot = null;
       moveRange = [];
       attackTargets = [];
-      infoPopup.hide();
     } else {
       moveRange = getMovementRange(state, combatant);
       attackTargets = getValidAttackTargets(state, combatant);
-      showInfoPopupFor(combatant, null);
     }
     refresh();
   }
@@ -2094,73 +2177,75 @@ export function openManualBattleArena(
     turnEl.style.color = over ? "" : yours ? "#9ecbff" : "#ff9e9e";
   }
 
-  function railCombatants(own: boolean): Combatant[] {
-    const side = own ? humanSide : aiSide;
-    return side === "attacker" ? state.attacker : state.defender;
+  function humanCombatants(): Combatant[] {
+    return humanSide === "attacker" ? state.attacker : state.defender;
   }
 
-  // Hover is what replaces the old always-on stat tiles: the full card appears
-  // for whatever platoon you point at, and falls back to the selected one when
-  // the pointer leaves.
+  // Hovering a strip expands it in place (see buildPlatoonStrip) — the inline
+  // equivalent of the old floating info card. Falls back to the selected
+  // platoon, if any, when the pointer leaves the rail entirely.
   //
   // Delegated onto the list container, which survives every refresh, rather
-  // than bound per strip. renderRails() replaces its children on each refresh,
-  // and a removed element never fires mouseleave — so per-strip listeners
-  // could strand the card showing a platoon the pointer had already left.
-  // mouseover/mouseout bubble, so the persistent container sees both.
-  function attachRailHover(list: HTMLElement, own: boolean): void {
+  // than bound per strip. renderRails() replaces its children on each
+  // refresh, and a removed element never fires mouseleave — so per-strip
+  // listeners could strand a strip expanded after the pointer had already
+  // left it. mouseover/mouseout bubble, so the persistent container sees both.
+  function attachRailHover(list: HTMLElement): void {
     list.addEventListener("mouseover", (e) => {
       const strip = (e.target as HTMLElement | null)?.closest<HTMLElement>("[data-slot]");
       if (!strip || !list.contains(strip)) return;
-      const combatant = railCombatants(own).find((c) => c.slotIndex === Number(strip.dataset.slot));
+      const slot = Number(strip.dataset.slot);
+      if (slot === hoveredSlot) return;
+      const combatant = humanCombatants().find((c) => c.slotIndex === slot);
       if (!combatant || !isAlive(combatant)) return;
-      showInfoPopupFor(combatant, own ? null : selectedSlot);
+      hoveredSlot = slot;
+      renderRails();
     });
     list.addEventListener("mouseout", (e) => {
-      // Ignore crossings between two strips inside the same list; only restore
+      // Ignore crossings between two strips inside the same list; only clear
       // when the pointer actually leaves the rail.
       const to = e.relatedTarget as Node | null;
       if (to && list.contains(to)) return;
-      restoreInfoPopup();
+      if (hoveredSlot === null) return;
+      hoveredSlot = null;
+      renderRails();
     });
   }
 
-  attachRailHover(humanRail.list, true);
-  attachRailHover(aiRail.list, false);
+  attachRailHover(humanRail.list);
 
   function renderRails(): void {
     const actableSlots = unactedLivingSlots(state, humanSide);
-    const aiActableSlots = unactedLivingSlots(state, aiSide);
+    const expandedSlot = hoveredSlot ?? selectedSlot;
 
-    function fillRail(list: HTMLElement, accent: string, own: boolean): void {
-      const unacted = own ? actableSlots : aiActableSlots;
-      const strips = railCombatants(own).map((c) => {
-        const selectable = own && !aiActing && actableSlots.includes(c.slotIndex);
-        const strip = buildPlatoonStrip({
-          state,
-          combatant: c,
-          accent,
-          selected: own && c.slotIndex === selectedSlot,
-          // Both rails now track "still has an action this round". The enemy
-          // rail used to stay lit regardless, which made the AI's choice of
-          // platoon look arbitrary — you had no way to see which of its
-          // platoons were still owed a turn, or that it picks them in slot
-          // order. Dimming them as they spend their turn makes the sequence
-          // legible and shows how much of the AI's round is left.
-          dimmed: !unacted.includes(c.slotIndex),
-        });
-        strip.dataset.slot = String(c.slotIndex);
-        if (selectable) {
-          strip.style.cursor = "pointer";
-          strip.addEventListener("click", () => selectPlatoon(c.slotIndex));
-        }
-        return strip;
+    const strips = humanCombatants().map((c) => {
+      const selectable = !aiActing && actableSlots.includes(c.slotIndex);
+      const expanded = c.slotIndex === expandedSlot && isAlive(c);
+      const strip = buildPlatoonStrip({
+        state,
+        combatant: c,
+        accent: humanAccent,
+        selected: c.slotIndex === selectedSlot,
+        dimmed: !actableSlots.includes(c.slotIndex),
+        expanded,
+        detail: expanded
+          ? {
+              unitTypes: state.unitTypes,
+              stats: statsFor(c),
+              metrics: metricsFor(),
+              movementRemaining: getMovementRange(state, c).length,
+              canAct: actableSlots.includes(c.slotIndex),
+            }
+          : undefined,
       });
-      list.replaceChildren(...strips);
-    }
-
-    fillRail(humanRail.list, humanAccent, true);
-    fillRail(aiRail.list, aiAccent, false);
+      strip.dataset.slot = String(c.slotIndex);
+      if (selectable) {
+        strip.style.cursor = "pointer";
+        strip.addEventListener("click", () => selectPlatoon(c.slotIndex));
+      }
+      return strip;
+    });
+    humanRail.list.replaceChildren(...strips);
   }
 
   function refresh(): void {

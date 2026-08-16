@@ -1,6 +1,7 @@
 import type { Axial } from "../types";
 import { mulberry32 } from "../rng";
 import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT } from "../combatConfig";
+import { ARMY_STACK_SLOTS } from "../units";
 import type { BattleGrid, BattleHex, BattleSide } from "./types";
 
 export { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT };
@@ -74,12 +75,16 @@ export function makeBattleGrid(
 
 // Deployment position for the platoon in ARMY_STACK_SLOTS slot `slotIndex`.
 // Each side occupies one outer column (attacker on the left, defender on
-// the right — see sideChoice); one platoon per row, but rows are spaced
-// by 2 (rows 0, 2, 4, ...) so there's always one empty hex between
-// adjacent deployed platoons. Without the gap the back column was a
-// solid wall of overlapping tokens; with it each platoon has a clear
-// "personal space" hex and movement from the back row isn't blocked by
-// the slot next to it.
+// the right — see sideChoice); one platoon per row, spread evenly across
+// however many rows the grid has via `slotIndex * (rows-1)/(SLOTS-1)`,
+// rounded to the nearest row. At the original 15-row grid this lands
+// exactly on rows 0, 2, 4, ..., 14 (spacing 2) — the gap so there's always
+// an empty hex between adjacent platoons, which stops the back column
+// being a solid wall of overlapping tokens and keeps movement from the
+// back row from being blocked by the slot next to it. On a shorter grid
+// the same formula keeps every slot on a distinct row (no two platoons
+// ever collide) but the spacing drops toward 1, so some adjacent platoons
+// lose that gap.
 //
 // Attacker is always on the left column (q=0) and defender always on
 // the right column (q=cols-1) for this arena — sideChoice just picks
@@ -91,7 +96,7 @@ export function deploymentPosition(
   grid: BattleGrid,
   sideChoice: BattleSide = "attacker",
 ): Axial {
-  const r = Math.min(slotIndex * 2, grid.rows - 1);
+  const r = Math.round((slotIndex * (grid.rows - 1)) / (ARMY_STACK_SLOTS - 1));
   const onLeft = side === sideChoice;
   const col = onLeft ? 0 : grid.cols - 1;
   // Column → axial, matching the offset rows makeBattleGrid generates.
