@@ -83,6 +83,17 @@ module.exports = {
       from: { path: "^packages/engine" },
       to: { path: "^(src/|server/)" },
     },
+    {
+      name: "no-http-or-app-into-persistence-except-commandhandler",
+      severity: "error",
+      comment:
+        "server/http/ and server/app/ (other than commandHandler.ts itself) must never import server/persistence/repositories/* directly -- everything goes through commandHandler.ts's own repo calls. Mirrors no-core-value-import-from-siblings' shape. Plan: plan/2026-08-16-phase-3-parallel-dev-plan.md (Track 3.A/3.B boundary).",
+      from: {
+        path: "^server/(http|app)/",
+        pathNot: "^server/app/commandHandler\\.ts$",
+      },
+      to: { path: "^server/persistence/repositories/" },
+    },
   ],
   options: {
     doNotFollow: { path: "node_modules" },

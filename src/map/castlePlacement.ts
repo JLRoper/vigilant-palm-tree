@@ -1,12 +1,11 @@
 import { mulberry32 } from "../core/rng";
 import { Castle } from "../entities/settlement";
 import type { CastleLevel } from "@heroes/contracts";
+import { CASTLE_COUNT_DEFAULT, CASTLE_COUNT_MAX, CASTLE_COUNT_MIN, defaultCastleSeedFromMapSeed } from "@heroes/engine";
 import { GameMap } from "./gameMap";
 import { isPassable } from "./terrain";
 
-export const CASTLE_COUNT_MIN = 4;
-export const CASTLE_COUNT_MAX = 15;
-export const CASTLE_COUNT_DEFAULT = 6;
+export { CASTLE_COUNT_MIN, CASTLE_COUNT_MAX, CASTLE_COUNT_DEFAULT, defaultCastleSeedFromMapSeed };
 
 export const EDGE_BUFFER = 2;
 export const MIN_CASTLE_SPACING = 4;
@@ -90,10 +89,6 @@ export function clampCastleCount(n: number): number {
   if (i < CASTLE_COUNT_MIN) return CASTLE_COUNT_MIN;
   if (i > CASTLE_COUNT_MAX) return CASTLE_COUNT_MAX;
   return i;
-}
-
-export function defaultCastleSeedFromMapSeed(mapSeed: number): number {
-  return ((mapSeed ^ 0x63617374) >>> 0) || 1;
 }
 
 export function generateCastles(

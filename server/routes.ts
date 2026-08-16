@@ -20,11 +20,13 @@ import type { BattleResult } from "@heroes/engine";
 import { assetRouter } from "./assetRoutes";
 import { authRouter } from "./auth";
 import { validateGameRow, isHealthy } from "@heroes/engine";
+import { commandsRouter } from "./http/routes/commands";
 
 export const router = Router();
 
 router.use("/assets", assetRouter);
 router.use("/auth", authRouter);
+router.use("/games/:name/commands", commandsRouter);
 
 type EnemyPos = { q: number; r: number };
 type TileRow = {
