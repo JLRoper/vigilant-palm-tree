@@ -1,48 +1,31 @@
 import { chromium, Browser, Page } from "playwright";
-import { spawn, ChildProcess } from "node:child_process";
+import { ChildProcess } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
-import { existsSync, readFileSync, openSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
+import { getApiPort, getClientPort, spawnLogged, waitForUrl, treeKill } from "./_request";
 
-// ── Port allocation ───────────────────────────────────────────────────
-// Allocates OS-assigned ports via scripts/allocate-ports.ts, reads .env,
-// then starts own infrastructure. All subprocesses are killed on exit,
-// including agent-initiated SIGTERM. The default env ports serve as
-// fallback when .env is missing (e.g. already running dev server).
-const PORTS_SCRIPT = "tsx scripts/allocate-ports.ts";
-try { execSync(PORTS_SCRIPT, { stdio: "pipe" }); } catch { /* already ran */ }
-
-function readEnvPort(name: string, fallback: number): number {
-  try {
-    const env = readFileSync(".env", "utf8");
-    const m = env.match(new RegExp(`^${name}=(.+)`, "m"));
-    if (m) return Number(m[1]);
-  } catch {}
-  return Number(process.env[name] ?? fallback);
-}
-
-const API_PORT = readEnvPort("API_PORT", 4000);
-const WEB_PORT = readEnvPort("CLIENT_PORT", 5173);
+const API_PORT = getApiPort(4000);
+const WEB_PORT = getClientPort(5173);
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 
-// ── Process management ────────────────────────────────────────────────
 const children: ChildProcess[] = [];
 let cleaned = false;
 
-function spawnLogged(label: string, cmd: string, args: string[], extraEnv: Record<string, string> = {}): ChildProcess {
-  const out = openSync(`test/${label}.log`, "w");
-  const err = openSync(`test/${label}.err.log`, "w");
-  const child = spawn(cmd, args, {
-    env: { ...process.env, ...extraEnv },
-    stdio: ["ignore", out, err],
-    shell: true,
+function startApi(): ChildProcess {
+  const c = spawnLogged("api", "npx", ["tsx", "server/index.ts"], {
+    API_PORT: String(API_PORT),
+    CLIENT_PORT: String(WEB_PORT),
   });
-  children.push(child);
-  child.on("exit", (code) => console.log(`[${label}] exited ${code}`));
-  child.on("error", (e) => console.error(`[${label}] error: ${e.message}`));
-  return child;
+  children.push(c);
+  return c;
+}
+
+function startWeb(): ChildProcess {
+  const c = spawnLogged("web", "npx", ["vite", "--port", String(WEB_PORT), "--strictPort"], {});
+  children.push(c);
+  return c;
 }
 
 function cleanup(): void {
@@ -50,44 +33,14 @@ function cleanup(): void {
   cleaned = true;
   console.log(">> Cleaning up subprocesses...");
   for (const c of children) {
-    try { c.kill("SIGTERM"); } catch {}
+    if (c.pid != null) treeKill(c.pid);
   }
-  setTimeout(() => {
-    for (const c of children) {
-      try { c.kill("SIGKILL"); } catch {}
-    }
-  }, 2000).unref();
 }
 
 process.on("exit", cleanup);
 process.on("SIGINT", () => { cleanup(); process.exit(1); });
 process.on("SIGTERM", () => { cleanup(); process.exit(1); });
 process.on("uncaughtException", (err) => { console.error(err); cleanup(); process.exit(1); });
-
-// ── Infrastructure ────────────────────────────────────────────────────
-
-function startApi(): ChildProcess {
-  return spawnLogged("api", "npx", ["tsx", "server/index.ts"], {
-    PORT: String(API_PORT),
-    CLIENT_PORT: String(WEB_PORT),
-  });
-}
-
-function startWeb(): ChildProcess {
-  return spawnLogged("web", "npx", ["vite", "--port", String(WEB_PORT), "--strictPort"], {});
-}
-
-async function waitForUrl(url: string, timeoutMs = 20000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url);
-      if (res.ok || res.status < 500) return;
-    } catch {}
-    await wait(300);
-  }
-  throw new Error(`server at ${url} did not respond within ${timeoutMs}ms`);
-}
 
 async function tailLog(label: string): Promise<string> {
   try { return readFileSync(`test/${label}.log`, "utf8").slice(-500); }

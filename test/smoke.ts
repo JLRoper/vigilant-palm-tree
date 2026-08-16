@@ -1,25 +1,35 @@
 import { chromium, Browser, Page, request as pwRequest } from "playwright";
-import { spawn, ChildProcess, execSync } from "node:child_process";
+import { ChildProcess } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
-import { existsSync, readFileSync, statSync, openSync, writeFileSync, promises as fsPromises } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync, promises as fsPromises } from "node:fs";
 import assert from "node:assert/strict";
 import { GameMap } from "../src/map/gameMap";
 import { mulberry32 } from "../src/core/rng";
 import { placeResourceTiles, RESOURCES } from "../src/map/resourceTiles";
 import { axialToPixel } from "../src/core/hex";
 import { Pool } from "pg";
+import {
+  getApiPort,
+  getClientPort,
+  shouldAutoClose,
+  getShutdownAfterMs,
+  reapPreviousRunPids,
+  spawnLogged,
+  waitForUrl,
+  registerPid,
+  treeKill,
+  clearRegisteredPids,
+} from "./_request";
 
 const TERRAINS = new Set(["grass", "dirt", "forest", "desert", "mountain", "water"]);
 const RESOURCE_SET = new Set(["gold", "wood", "stone", "iron", "arcane"]);
 
-const WEB_PORT = Number(process.env.CLIENT_PORT) || 4173;
-const API_PORT = Number(process.env.API_PORT) || 3001;
+const WEB_PORT = getClientPort(4173);
+const API_PORT = getApiPort(3001);
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const GAME_NAME = "default";
 const TEST_NEW_NAME = "smoke-new-game";
-const PID_REGISTRY_PATH = "test/.last-test-pids.json";
-const IS_WINDOWS = process.platform === "win32";
 
 interface PidEntry {
   role: string;
@@ -33,88 +43,15 @@ interface PidRegistry {
   pids: PidEntry[];
 }
 
-function parseShutdownAfterSeconds(): number | null {
-  const arg = process.argv.find((a) => a.startsWith("--shutdownAfterSeconds="));
-  if (!arg) return null;
-  const n = Number(arg.split("=")[1]);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
+const AUTO_CLOSE_SERVERS = shouldAutoClose();
+const SHUTDOWN_AFTER_MS = getShutdownAfterMs();
 
-const SHUTDOWN_AFTER_MS = parseShutdownAfterSeconds();
-
-function readRegistry(): PidRegistry {
-  if (!existsSync(PID_REGISTRY_PATH)) {
-    return { runId: "?", startedAt: new Date().toISOString(), pids: [] };
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(PID_REGISTRY_PATH, "utf8")) as PidRegistry;
-    if (!parsed || !Array.isArray(parsed.pids)) {
-      return { runId: "?", startedAt: new Date().toISOString(), pids: [] };
-    }
-    return parsed;
-  } catch {
-    return { runId: "?", startedAt: new Date().toISOString(), pids: [] };
-  }
-}
-
-function writeRegistry(registry: PidRegistry): void {
-  try {
-    writeFileSync(PID_REGISTRY_PATH, JSON.stringify(registry, null, 2));
-  } catch (e) {
-    console.error(`>> failed to write pid registry: ${e}`);
-  }
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function treeKill(pid: number): void {
-  if (IS_WINDOWS) {
-    try {
-      execSync(`taskkill /F /T /PID ${pid}`, { stdio: "ignore" });
-      return;
-    } catch {
-      // fall through to plain kill
-    }
-  }
-  try {
-    process.kill(pid, "SIGKILL");
-  } catch {
-    // best-effort
-  }
-}
-
-function reapPreviousRunPids(): void {
-  const prev = readRegistry();
-  if (prev.pids.length === 0) return;
-  let reaped = 0;
-  for (const entry of prev.pids) {
-    if (!isAlive(entry.pid)) continue;
-    try {
-      treeKill(entry.pid);
-      reaped++;
-      console.log(`>> reaped leftover ${entry.role} pid=${entry.pid} from previous run`);
-    } catch {
-      // best-effort
-    }
-  }
-  if (reaped > 0) {
-    console.log(`>> reaped ${reaped} leftover pid(s) from previous run`);
-  }
-}
-
-function killSpawnedChild(extra: ChildProcess | undefined): void {
+function killSpawnedServer(extra: ChildProcess | undefined): void {
   if (!extra || extra.killed || extra.pid == null) return;
-  try {
-    extra.kill("SIGKILL");
-  } catch {
-    // best-effort
+  if (AUTO_CLOSE_SERVERS) {
+    treeKill(extra.pid);
+  } else {
+    try { extra.kill("SIGKILL"); } catch {}
   }
 }
 
@@ -122,21 +59,6 @@ function killBrowserTree(): void {
   try {
     const proc = browser?.process?.();
     if (proc && proc.pid != null) treeKill(proc.pid);
-  } catch {
-    // best-effort
-  }
-}
-
-function registerPid(role: string, pid: number): void {
-  const registry = readRegistry();
-  registry.pids = registry.pids.filter((entry) => entry.pid !== pid);
-  registry.pids.push({ role, pid, spawnedAt: new Date().toISOString() });
-  writeRegistry(registry);
-}
-
-function clearRegisteredPids(): void {
-  try {
-    if (existsSync(PID_REGISTRY_PATH)) writeFileSync(PID_REGISTRY_PATH, "");
   } catch {
     // best-effort
   }
@@ -436,50 +358,16 @@ function runOnce(cmd: string, args: string[]): Promise<void> {
 }
 
 function startApi(): ChildProcess {
-  // Pipe stdout/stderr so logs appear in Actions in real-time with a prefix
-  const child = spawn("npx", ["tsx", "server/index.ts"], {
-    env: { ...process.env, API_PORT: String(API_PORT) },
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: true,
-    shell: true,
-  });
-  child.stdout?.on("data", (d) => process.stdout.write(`[api] ${d.toString()}`));
-  child.stderr?.on("data", (d) => process.stderr.write(`[api-err] ${d.toString()}`));
-  child.unref();
-  if (child.pid != null) registerPid("api", child.pid);
-  return child;
+  return spawnLogged("api", "npx", ["tsx", "server/index.ts"], { API_PORT: String(API_PORT) });
 }
 
 function startWeb(): ChildProcess {
-  const child = spawn(
+  return spawnLogged(
+    "web",
     "npx",
     ["vite", "preview", "--port", String(WEB_PORT), "--strictPort"],
-    {
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
-      shell: true,
-    }
+    {}
   );
-  child.stdout?.on("data", (d) => process.stdout.write(`[web] ${d.toString()}`));
-  child.stderr?.on("data", (d) => process.stderr.write(`[web-err] ${d.toString()}`));
-  child.unref();
-  if (child.pid != null) registerPid("web", child.pid);
-  return child;
-}
-
-async function waitForUrl(url: string, timeoutMs = 15000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url);
-      if (res.ok || res.status < 500) return;
-      // For 5xx responses, log a snippet of the body to help diagnostics
-      const body = await res.text().catch(() => "<unable to read body>");
-      console.error(`waitForUrl: ${url} returned ${res.status}. body: ${body.slice(0, 2000)}`);
-    } catch {}
-    await wait(500);
-  }
-  throw new Error(`server at ${url} did not respond`);
 }
 
 async function canReachDb(timeoutMs = 2000): Promise<boolean> {
@@ -647,8 +535,8 @@ async function run() {
   } finally {
     stopLogTail();
     killBrowserTree();
-    killSpawnedChild(api);
-    killSpawnedChild(web);
+    killSpawnedServer(api);
+    killSpawnedServer(web);
     clearRegisteredPids();
     process.exit(failed ? 1 : 0);
   }
@@ -659,10 +547,9 @@ run();
 if (SHUTDOWN_AFTER_MS != null) {
   setTimeout(() => {
     console.error(`>> shutdown ceiling (${SHUTDOWN_AFTER_MS}ms) reached, killing child trees`);
-    killSpawnedChild(api);
-    killSpawnedChild(web);
+    killSpawnedServer(api);
+    killSpawnedServer(web);
     killBrowserTree();
-    clearRegisteredPids();
     process.exit(3);
   }, SHUTDOWN_AFTER_MS).unref();
 }

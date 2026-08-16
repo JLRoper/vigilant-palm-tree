@@ -302,7 +302,9 @@ distinct from the feature plan's deliberate "out of scope" list:
   replaced with `endBattlePhase` tests (phase transition only, no
   gold/hero mutation); `reorderStack` tests updated for the
   `Platoon`/`entries` shape.
-- Run via `npm test` (`tsx --env-file=.env test/smoke.ts`) — note
+- Run via `npm test` (`node tools/run-test.mjs smoke`, which writes `local/.test-request.json` and hands off to `test/smoke.ts`) — note
   `test/combat/` isn't wired into `test/smoke.ts` or `package.json` scripts
   yet; currently must be run directly, e.g.
-  `tsx --env-file=.env test/combat/resolveBattle.test.ts`.
+  `tsx --env-file=.env test/combat/resolveBattle.test.ts`. The
+  `npm run test:all` chain also routes through `tools/run-test.mjs`, so
+  every entry in the suite shares one boot contract.
