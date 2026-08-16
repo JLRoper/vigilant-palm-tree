@@ -8,7 +8,7 @@
 // CombatResolutionEngine.md "Army model: platoons"). This replaces the older
 // single-type-per-slot UnitStack shape.
 
-import type { AdvantageType } from "../../shared/combatConfig";
+import type { AdvantageType } from "@heroes/engine";
 import type { Platoon, PlatoonEntry } from "@heroes/contracts";
 
 export type { AdvantageType };

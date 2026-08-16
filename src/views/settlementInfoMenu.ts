@@ -6,7 +6,7 @@ import { settings } from "../state/settings";
 import type { HorseVariant } from "../state/settings";
 import { POP_BY_LEVEL } from "../economy/settlementRates";
 import { pickHeroName } from "../data/heroNames";
-import { HORSE_VARIANT_REGISTRY } from "../../shared/horseVariants";
+import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 
 export interface SettlementInfoMenuOptions {
   parent: HTMLElement;

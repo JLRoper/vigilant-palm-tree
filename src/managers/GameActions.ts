@@ -2,7 +2,7 @@ import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { showBattleModal } from "../views/battleModal";
 import { showBattleResultCard } from "../views/battleResultCard";
-import type { BattleResult } from "../../shared/combat/types";
+import type { BattleResult } from "@heroes/engine";
 
 /**
  * Handles game-flow actions: end turn, manual save, battle resolution.

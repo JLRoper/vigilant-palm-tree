@@ -1,2 +1,2 @@
-export type { Terrain } from "../../shared/map/terrain";
-export { TERRAIN_COLORS, TERRAIN_COST, isPassable } from "../../shared/map/terrain";
+export type { Terrain } from "@heroes/engine";
+export { TERRAIN_COLORS, TERRAIN_COST, isPassable } from "@heroes/engine";

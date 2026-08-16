@@ -35,7 +35,7 @@ import { computeSettlementRates } from "../economy/settlementRates";
 import type { HorseVariant } from "./settings";
 import { generateCitySpots } from "../core/citySpots";
 import { cityViewSizeFor } from "../core/cityGrid";
-import type { BattleResult } from "../../shared/combat/types";
+import type { BattleResult } from "@heroes/engine";
 
 export interface TurnControllerHooks {
   onHumanTurnEnd(state: GameState): Promise<GameState>;

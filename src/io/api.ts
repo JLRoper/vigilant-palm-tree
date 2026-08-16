@@ -69,7 +69,7 @@ export type EndTurnResult = {
 export type ResolveBattleResult = {
   players: Player[];
   heroes: Record<string, HeroState>;
-  battle: import("../../shared/combat/types").BattleResult;
+  battle: import("@heroes/engine").BattleResult;
 };
 
 const BASE = "/api";

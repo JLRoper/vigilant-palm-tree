@@ -10,7 +10,7 @@ import {
 import type { HorseVariant } from "./settings";
 import { settings } from "./settings";
 import { POP_BY_LEVEL } from "../economy/settlementRates";
-import { pickStyleForBuilding } from "../../shared/styleResolver";
+import { pickStyleForBuilding } from "@heroes/engine";
 import { buildingUpgradeCost } from "../core/buildingRegistry";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import type {

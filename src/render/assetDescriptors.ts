@@ -87,8 +87,8 @@ import { Faction, Direction } from "../entities/hero";
 import type { CastleLevel, CastleVariant, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
 import type { ResourceStyle } from "../state/settings";
-import { HORSE_VARIANT_REGISTRY, type HorseVariantId } from "../../shared/horseVariants";
-import { pickStyleForBuilding } from "../../shared/styleResolver";
+import { HORSE_VARIANT_REGISTRY, type HorseVariantId } from "@heroes/engine";
+import { pickStyleForBuilding } from "@heroes/engine";
 
 export type SpriteKey =
   | `castle.${CastleLevel}`

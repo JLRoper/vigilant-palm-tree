@@ -16,8 +16,8 @@
 // battlefield still opens the floating info card — see showInfoPopupFor.
 
 import { axialToPixel, hexCorners, HEX_DIRECTIONS, hexDistance, nearestHexEdge, pixelToAxial, type Axial } from "../core/hex";
-import { totalHealth } from "../../shared/combat/damage";
-import { RANGED_ATTACK_RANGE, SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "../../shared/combatConfig";
+import { totalHealth } from "@heroes/engine";
+import { RANGED_ATTACK_RANGE, SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "@heroes/engine";
 import {
   attackFromHex,
   attackWithPlatoon,
@@ -44,8 +44,8 @@ import {
   type AiTurnPlan,
   type ManualBattleState,
   type TimeOfDay,
-} from "../../shared/combat/manualBattle";
-import type { BattleLogEntry, BattleSide, Combatant } from "../../shared/combat/types";
+} from "@heroes/engine";
+import type { BattleLogEntry, BattleSide, Combatant } from "@heroes/engine";
 import type { Platoon, UnitType } from "../state/units";
 import { showBattleResultCard } from "./battleResultCard";
 import { openConfirmDialog } from "./confirmDialog";

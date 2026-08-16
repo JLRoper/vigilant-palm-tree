@@ -4,7 +4,7 @@
 // future production flow can reuse it with an additional "Manual Fight" retry
 // button without reshaping this component.
 
-import type { BattleResult, CombatantResult } from "../../shared/combat/types";
+import type { BattleResult, CombatantResult } from "@heroes/engine";
 import { getCachedUnit } from "../data/unitCatalog";
 import { menuTheme, openCenteredModal, styleButton } from "./menu";
 

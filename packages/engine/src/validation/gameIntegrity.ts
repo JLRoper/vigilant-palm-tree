@@ -1,4 +1,4 @@
-import type { HeroState, Player, SettlementState } from "../../src/state/gameState";
+import type { HeroState, Player, SettlementState } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 
 export type IntegritySeverity = "error" | "warning";
