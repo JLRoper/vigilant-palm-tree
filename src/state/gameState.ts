@@ -1,14 +1,15 @@
 import { normalizePlatoons } from "./units";
-import type { HorseVariant } from "./settings";
 import { settings } from "./settings";
 import {
   advanceCharters,
   advanceSettlementUpgrades,
   applyEffectiveIncome,
+  applyHeroUpkeep,
   applyMoraleDecay,
   applyPopulationGrowth,
   applySettlementConsumption,
   produceSettlementResources,
+  resetHeroMovement,
   runAutoTrade,
   tradeResources,
   transferGold,
@@ -21,11 +22,7 @@ import type {
   GameState,
   CalendarParts,
   InitialStateOptions,
-  StartMoveResult,
-  ReorderResult,
   ApplyEndOfTurnResult,
-  RecruitHeroResult,
-  PlayerId,
   HeroId,
   SettlementId,
   SettlementState,
@@ -52,6 +49,16 @@ export {
   TOWN_HALL_COSTS,
   startSettlementUpgrade,
   SETTLEMENT_UPGRADE_COSTS,
+} from "@heroes/engine";
+
+export {
+  startMove,
+  cancelMove,
+  reorderStack,
+  detectAdjacentEnemy,
+  MAX_HEROES_PER_PLAYER,
+  HERO_RECRUIT_COST,
+  recruitHero,
 } from "@heroes/engine";
 
 // gameState.ts shrinks to a re-export barrel for its types (Track A / Phase
@@ -123,15 +130,6 @@ export function monthName(month: number): string {
   if (month < 1) return MONTH_NAMES[0];
   return MONTH_NAMES[(month - 1) % MONTH_NAMES.length];
 }
-
-const NEIGHBOR_DIRS: { q: number; r: number }[] = [
-  { q: 1, r: 0 },
-  { q: 1, r: -1 },
-  { q: 0, r: -1 },
-  { q: -1, r: 0 },
-  { q: -1, r: 1 },
-  { q: 0, r: 1 },
-];
 
 function defaultPlayers(): Player[] {
   return [
@@ -255,135 +253,6 @@ export function clearSettlementSelection(state: GameState): GameState {
   return { ...state, selectedSettlementId: null };
 }
 
-export function startMove(
-  state: GameState,
-  heroId: HeroId,
-  toTile: { q: number; r: number },
-  cost: number,
-  // Ordered list of every tile the hero will pass through during this move
-  // (including the destination). When omitted, only the destination is
-  // appended to the trail — which produces a "as the crow flies" line for
-  // multi-hex moves. Callers should pass the full clamped path so the trail
-  // reflects the actual route.
-  trailExtension?: { q: number; r: number }[],
-): StartMoveResult {
-  if (state.phase.kind !== "PLAYER_TURN") {
-    return { state, ok: false, reason: "not_player_turn" };
-  }
-  const hero = state.heroes[heroId];
-  if (!hero) return { state, ok: false, reason: "no_hero" };
-  if (hero.isChartering) {
-    return { state, ok: false, reason: "is_chartering" };
-  }
-  if (hero.ownerId !== state.activePlayerId) {
-    return { state, ok: false, reason: "not_owner" };
-  }
-  if (state.selectedHeroId !== heroId) {
-    return { state, ok: false, reason: "not_selected" };
-  }
-  if (!Number.isFinite(cost) || cost < 0) {
-    return { state, ok: false, reason: "impassable" };
-  }
-  for (const [id, other] of Object.entries(state.heroes)) {
-    if (id !== heroId && other.q === toTile.q && other.r === toTile.r) {
-      return { state, ok: false, reason: "occupied" };
-    }
-  }
-  if (hero.movementRemaining < cost) {
-    return { state, ok: false, reason: "insufficient_movement" };
-  }
-  const trailExtensionFinal = trailExtension && trailExtension.length > 0
-    ? trailExtension
-    : [toTile];
-  const updatedHero: HeroState = {
-    ...hero,
-    q: toTile.q,
-    r: toTile.r,
-    movementRemaining: hero.movementRemaining - cost,
-    previousQ: hero.q,
-    previousR: hero.r,
-    previousMovementRemaining: hero.movementRemaining,
-    trail: [...(hero.trail ?? []), ...trailExtensionFinal],
-  };
-  return {
-    state: { ...state, heroes: { ...state.heroes, [heroId]: updatedHero }, dirty: true },
-    ok: true,
-  };
-}
-
-export function cancelMove(state: GameState, heroId: HeroId): GameState {
-  const hero = state.heroes[heroId];
-  if (!hero) return state;
-  if (hero.previousQ === null || hero.previousR === null || hero.previousMovementRemaining === null) {
-    return state;
-  }
-  const restored: HeroState = {
-    ...hero,
-    q: hero.previousQ,
-    r: hero.previousR,
-    movementRemaining: hero.previousMovementRemaining,
-    previousQ: null,
-    previousR: null,
-    previousMovementRemaining: null,
-  };
-  return { ...state, heroes: { ...state.heroes, [heroId]: restored }, dirty: true };
-}
-
-// The 8 army slots are FIXED positions on the battlefield (front line, back
-// line, etc.), so the user can only SWAP the contents of two slots. Same
-// from/to is a no-op success. Dragging onto an empty slot effectively moves
-// the stack there while leaving the source empty (swap with empty). Marks the
-// state dirty so the next save/turn boundary persists it.
-export function reorderStack(
-  state: GameState,
-  heroId: HeroId,
-  fromIdx: number,
-  toIdx: number,
-): ReorderResult {
-  const hero = state.heroes[heroId];
-  if (!hero) return { state, ok: false, reason: "no_hero" };
-  const stacks = [...(hero.stacks ?? [])];
-  if (
-    !Number.isInteger(fromIdx) ||
-    !Number.isInteger(toIdx) ||
-    fromIdx < 0 ||
-    fromIdx >= stacks.length ||
-    toIdx < 0 ||
-    toIdx >= stacks.length
-  ) {
-    return { state, ok: false, reason: "invalid_index" };
-  }
-  if (fromIdx === toIdx) return { state, ok: true, reason: "" };
-  const tmp = stacks[fromIdx];
-  stacks[fromIdx] = stacks[toIdx];
-  stacks[toIdx] = tmp;
-  console.debug("[reorderStack] swap", fromIdx, "->", toIdx, "hero=", heroId, "new order=", stacks.map(s => s.entries[0]?.unitTypeId ?? "_"));
-  return {
-    state: {
-      ...state,
-      heroes: { ...state.heroes, [heroId]: { ...hero, stacks } },
-      dirty: true,
-    },
-    ok: true,
-    reason: "",
-  };
-}
-
-export function detectAdjacentEnemy(state: GameState, moverId: HeroId): HeroId | null {
-  const mover = state.heroes[moverId];
-  if (!mover) return null;
-  for (const dir of NEIGHBOR_DIRS) {
-    const nq = mover.q + dir.q;
-    const nr = mover.r + dir.r;
-    for (const [id, h] of Object.entries(state.heroes)) {
-      if (id === moverId) continue;
-      if (h.ownerId === mover.ownerId) continue;
-      if (h.q === nq && h.r === nr) return id;
-    }
-  }
-  return null;
-}
-
 export function startBattle(state: GameState, attackerId: HeroId, defenderId: HeroId): GameState {
   if (state.phase.kind === "BATTLE") return state;
   return {
@@ -440,19 +309,7 @@ export function applyEndOfTurn(state: GameState): GameState {
 
 export function applyEndOfTurnDetailed(state: GameState): ApplyEndOfTurnResult {
   const playerId = state.activePlayerId;
-  const newHeroes: Record<HeroId, HeroState> = { ...state.heroes };
-  for (const hero of Object.values(newHeroes)) {
-    if (hero.ownerId === playerId) {
-      newHeroes[hero.id] = {
-        ...hero,
-        movementRemaining: MOVEMENT_PER_TURN,
-        previousQ: null,
-        previousR: null,
-        previousMovementRemaining: null,
-        trail: [{ q: hero.q, r: hero.r }],
-      };
-    }
-  }
+  const newHeroes: Record<HeroId, HeroState> = resetHeroMovement(state.heroes, playerId);
   // 1. Produce resources for ALL settlements
   let newSettlements: Record<SettlementId, SettlementState> = produceSettlementResources(state.settlements);
   // 2. Auto-trade for active player's settlements
@@ -472,31 +329,13 @@ export function applyEndOfTurnDetailed(state: GameState): ApplyEndOfTurnResult {
 }
 
 export function applyWeeklyUpkeep(state: GameState): GameState {
-  const newHeroes: Record<HeroId, HeroState> = { ...state.heroes };
-  for (const hero of Object.values(newHeroes)) {
-    const cost = hero.troops * 1;
-    if (hero.gold >= cost) {
-      newHeroes[hero.id] = { ...hero, gold: hero.gold - cost };
-    } else {
-      newHeroes[hero.id] = { ...hero, gold: 0, troops: hero.gold };
-    }
-  }
+  const newHeroes = applyHeroUpkeep(state.heroes);
   const newSettlements = applyPopulationGrowth(state.settlements, settings().populationGrowthRate);
   return { ...state, heroes: newHeroes, settlements: newSettlements, dirty: true };
 }
 
 export function advanceRound(state: GameState): GameState {
-  const newHeroes: Record<HeroId, HeroState> = { ...state.heroes };
-  for (const hero of Object.values(newHeroes)) {
-    newHeroes[hero.id] = {
-      ...hero,
-      movementRemaining: MOVEMENT_PER_TURN,
-      previousQ: null,
-      previousR: null,
-      previousMovementRemaining: null,
-      trail: [{ q: hero.q, r: hero.r }],
-    };
-  }
+  const newHeroes: Record<HeroId, HeroState> = resetHeroMovement(state.heroes);
   const nextDay = state.day + 1;
   let withDay: GameState = {
     ...state,
@@ -519,78 +358,4 @@ export function markSaved(state: GameState): GameState {
   return { ...state, dirty: false };
 }
 
-export const MAX_HEROES_PER_PLAYER = 5;
-export const HERO_RECRUIT_COST = 1;
-
-export function recruitHero(
-  state: GameState,
-  playerId: PlayerId,
-  heroName: string,
-  settlementId: SettlementId,
-  horseVariant: HorseVariant,
-): RecruitHeroResult {
-  const player = state.players.find((p) => p.id === playerId);
-  if (!player) return { state, error: "Player not found" };
-  if (player.heroIds.length >= MAX_HEROES_PER_PLAYER) {
-    return { state, error: "Already have 5 heroes" };
-  }
-
-  const settlement = state.settlements[settlementId];
-  if (!settlement) return { state, error: "Settlement not found" };
-  if (settlement.ownerId !== playerId) return { state, error: "Not your settlement" };
-  if (settlement.gold < HERO_RECRUIT_COST) {
-    return { state, error: "Not enough gold" };
-  }
-
-  for (const hero of Object.values(state.heroes)) {
-    if (hero.q === settlement.q && hero.r === settlement.r) {
-      return { state, error: "Hex is occupied" };
-    }
-  }
-
-  const indices = Array.from({ length: MAX_HEROES_PER_PLAYER }, (_, i) => i);
-  const usedIndices = new Set(
-    player.heroIds.map((id) => {
-      const num = parseInt(id.replace(/^h/, ""), 10);
-      return Number.isFinite(num) ? num : -1;
-    }),
-  );
-  const nextIdx = indices.find((i) => !usedIndices.has(i)) ?? player.heroIds.length;
-  const heroId = `h${nextIdx}`;
-
-  const hero: HeroState = {
-    id: heroId,
-    name: heroName,
-    ownerId: playerId,
-    q: settlement.q,
-    r: settlement.r,
-    movementRemaining: MOVEMENT_PER_TURN,
-    previousQ: null,
-    previousR: null,
-    previousMovementRemaining: null,
-    trail: [{ q: settlement.q, r: settlement.r }],
-    gold: 0,
-    troops: 1,
-    stacks: normalizePlatoons([]),
-    isChartering: false,
-    charterId: null,
-    horseVariant,
-  };
-
-  return {
-    state: {
-      ...state,
-      heroes: { ...state.heroes, [heroId]: hero },
-      settlements: {
-        ...state.settlements,
-        [settlement.id]: { ...settlement, gold: settlement.gold - HERO_RECRUIT_COST },
-      },
-      players: state.players.map((p) =>
-        p.id === playerId ? { ...p, heroIds: [...p.heroIds, heroId] } : p,
-      ),
-      dirty: true,
-    },
-    hero,
-  };
-}
 
