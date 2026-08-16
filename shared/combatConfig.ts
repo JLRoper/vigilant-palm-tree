@@ -36,11 +36,12 @@ export const SURRENDER_COST_GOLD = 5000;
 export const SURRENDER_UNIT_VALUE_GOLD = 100;
 
 export const DEFAULT_GRID_COLS = 15;
-// Rows were bumped from 11 to 15 to fit 8 ARMY_STACK_SLOTS platoons per
-// side on the back column with one hex of space between each — see
-// deploymentPosition() in shared/combat/grid.ts, which now spaces rows
-// by 2 (rows 0, 2, 4, ..., 14) rather than packing them consecutively.
-export const DEFAULT_GRID_ROWS = 15;
+// Trimmed from 15 to 13 rows to reclaim vertical space for the arena view —
+// deploymentPosition() in shared/combat/grid.ts spreads the 8
+// ARMY_STACK_SLOTS platoons evenly across however many rows exist, so
+// shrinking this no longer requires a matching change there; it just means
+// some platoons lose the 1-hex gap that used to separate every slot.
+export const DEFAULT_GRID_ROWS = 13;
 export const DEFAULT_OBSTACLE_COUNT = 8;
 export const DEFAULT_MAX_ROUNDS = 30;
 
