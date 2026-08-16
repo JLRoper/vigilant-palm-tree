@@ -1,3 +1,4 @@
+import { HEX_DIRECTIONS } from "./hex";
 import type { Axial, CastleLevel, BuildingDef } from "../../shared/types";
 import { computeSettlementBonuses } from "./buildingModifiers";
 
@@ -12,15 +13,6 @@ export function controlRange(level: CastleLevel, buildings?: BuildingDef[]): num
 export function settlementRateRadius(level: CastleLevel): number {
   return level - 1;
 }
-
-const EDGE_NEIGHBORS: readonly [number, number][] = [
-  [1, 0],
-  [0, 1],
-  [-1, 1],
-  [-1, 0],
-  [0, -1],
-  [1, -1],
-];
 
 export function controlledPositions(
   center: Axial,
@@ -56,7 +48,7 @@ export function territoryBoundaryEdges(
     const { x: cx, y: cy } = toPixel(q, r, hexSize);
     const corners = cornersFn(cx, cy, hexSize);
     for (let edge = 0; edge < 6; edge++) {
-      const [dq, dr] = EDGE_NEIGHBORS[edge];
+      const { q: dq, r: dr } = HEX_DIRECTIONS[edge];
       const nKey = `${q + dq},${r + dr}`;
       if (controlled.has(nKey)) continue;
       const c1 = corners[edge];

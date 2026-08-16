@@ -1,19 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  attackFromHex,
   attackWithPlatoon,
+  endPlatoonTurn,
+  executeAiPlan,
   finalizeManualBattle,
+  getApproachHexes,
   getCombatant,
+  getMovementPath,
   getMovementRange,
   getValidAttackTargets,
   getValidMeleeTargets,
-  getValidSpyTargets,
   hasLineOfSight,
   isBattleOver,
-  markScouted,
   movePlatoon,
   pickTarget,
-  spyOnPlatoon,
+  planAiTurn,
   startManualBattle,
   unactedLivingSlots,
 } from "../../shared/combat/manualBattle";
@@ -56,6 +59,100 @@ test("getMovementRange: bounded by speed and blocked by obstacles", () => {
   const blockedActor = getCombatant(blocked, "attacker", 0)!;
   const blockedRange = getMovementRange(blocked, blockedActor);
   assert.ok(!blockedRange.some((h) => h.q === 3 && h.r === 0), "obstacle at q=2 should block the path to q=3");
+});
+
+test("getMovementPath: walks the hexes between start and destination, start excluded", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const state = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: { cols: 7, rows: 1 },
+    fixedObstacles: [],
+  });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const start = { ...actor.position };
+
+  const path = getMovementPath(state, actor, { q: start.q + 3, r: start.r });
+  assert.deepEqual(
+    path,
+    [
+      { q: start.q + 1, r: start.r },
+      { q: start.q + 2, r: start.r },
+      { q: start.q + 3, r: start.r },
+    ],
+    "each step is one hex, ending on the destination",
+  );
+
+  assert.deepEqual(getMovementPath(state, actor, start), [], "no path to the hex it already occupies");
+  assert.deepEqual(
+    getMovementPath(state, actor, { q: start.q + 4, r: start.r }),
+    [],
+    "destination beyond the movement budget is unreachable",
+  );
+});
+
+test("getMovementPath: every step is adjacent and avoids obstacles", () => {
+  const attacker = makePlatoons([{ unitTypeId: "hero", count: 1 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const state = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: { cols: 7, rows: 3 },
+    fixedObstacles: [{ q: 1, r: 1, impassable: true }],
+  });
+  const actor = getCombatant(state, "attacker", 0)!;
+  actor.position = { q: 0, r: 1 };
+
+  const path = getMovementPath(state, actor, { q: 2, r: 1 });
+  assert.ok(path.length > 0, "a route around the obstacle exists within speed 5");
+  assert.deepEqual(path[path.length - 1], { q: 2, r: 1 });
+  assert.ok(!path.some((h) => h.q === 1 && h.r === 1), "never routes through the impassable hex");
+
+  const steps = [{ q: 0, r: 1 }, ...path];
+  for (let i = 1; i < steps.length; i++) {
+    const a = steps[i - 1];
+    const b = steps[i];
+    const dist = (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
+    assert.equal(dist, 1, `step ${i} must be to an adjacent hex`);
+  }
+});
+
+test("planAiTurn: decides without mutating, and executeAiPlan applies the same result", () => {
+  const attacker = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const defender = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const state = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: { cols: 7, rows: 1 },
+    fixedObstacles: [],
+  });
+
+  const actor = getCombatant(state, "defender", 0)!;
+  const before = { ...actor.position };
+  const targetHealthBefore = getCombatant(state, "attacker", 0)!.entries[0].count;
+
+  const plan = planAiTurn(state, "defender");
+  assert.ok(plan, "the AI has a platoon to act with");
+  assert.equal(plan!.slotIndex, 0);
+  assert.deepEqual(actor.position, before, "planning alone must not move anything");
+  assert.equal(getCombatant(state, "attacker", 0)!.entries[0].count, targetHealthBefore, "planning alone must not deal damage");
+  assert.ok(unactedLivingSlots(state, "defender").includes(0), "planning alone must not consume the turn");
+
+  executeAiPlan(state, "defender", plan!);
+  assert.ok(!unactedLivingSlots(state, "defender").includes(0), "executing always consumes the platoon's turn");
+});
+
+test("executeAiPlan: consumes the turn even when the attack is not legal", () => {
+  const attacker = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const defender = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const state = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: { cols: 7, rows: 1 },
+    fixedObstacles: [],
+  });
+
+  // A melee attack against an enemy that is nowhere near adjacent — the
+  // engine refuses it, and the platoon must still not be left owed a turn.
+  executeAiPlan(state, "defender", { slotIndex: 0, moveTo: null, attackTargetSlot: 0 });
+  assert.deepEqual(unactedLivingSlots(state, "defender"), [], "slot cleared despite the refused attack");
 });
 
 test("hasLineOfSight: blocked by an obstacle directly between shooter and target", () => {
@@ -179,66 +276,203 @@ test("moving into an adjacent hex puts the enemy in getValidMeleeTargets, and at
   assert.ok(afterCount < beforeCount, "the defending platoon should have taken casualties from the bump attack");
 });
 
-test("getValidSpyTargets: reachable-this-turn, out-of-reach, and already-scouted enemies", () => {
-  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]); // speed 3
+// Directional melee targeting: the player picks which of the hexes around an
+// enemy their platoon closes in from. These tests place combatants directly
+// rather than walking them out of their deployment columns — the geometry
+// under test is "the six hexes around a target", which is fiddly to reach
+// from the board edge and unrelated to how a platoon got there.
+const APPROACH_GRID = { cols: 7, rows: 5 };
+
+function sortHexes(hexes: { hex: { q: number; r: number } }[]): string[] {
+  return hexes.map((a) => `${a.hex.q},${a.hex.r}`).sort();
+}
+
+test("getApproachHexes: every free neighbour of the target that's within reach", () => {
+  // hero has speed 5 — enough to walk around the target to any of its six
+  // sides, including the far one that needs a detour past the enemy itself.
+  const attacker = makePlatoons([{ unitTypeId: "hero", count: 1 }]);
   const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
-
-  // Attacker at q=0, defender at q=4 (cols-1): footman's move range reaches
-  // q=0..3, and q=3 is adjacent (distance 1) to the defender at q=4.
-  const inReach = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 5, rows: 1 }, fixedObstacles: [] });
-  const inReachActor = getCombatant(inReach, "attacker", 0)!;
-  const inReachEnemy = getCombatant(inReach, "defender", 0)!;
-  const inReachTargets = getValidSpyTargets(inReach, inReachActor);
-  assert.equal(inReachTargets.length, 1);
-  assert.equal(inReachTargets[0].slotIndex, inReachEnemy.slotIndex);
-
-  // Same shape but far enough (cols=9) that q=3 is nowhere near the
-  // defender at q=8 — out of both move range and attack adjacency.
-  const outOfReach = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 9, rows: 1 }, fixedObstacles: [] });
-  const outOfReachActor = getCombatant(outOfReach, "attacker", 0)!;
-  assert.equal(getValidSpyTargets(outOfReach, outOfReachActor).length, 0);
-
-  // Already-scouted enemies are excluded even when in range.
-  markScouted(inReachEnemy, "attacker");
-  assert.equal(getValidSpyTargets(inReach, inReachActor).length, 0, "no reason to spend a troop re-scouting a known platoon");
-});
-
-test("spyOnPlatoon: spends 1 troop, reveals one-directionally, and never touches the unacted set", () => {
-  const attacker = makePlatoons([
-    { unitTypeId: "footman", count: 5 },
-    { unitTypeId: "bowman", count: 2 },
-  ]);
-  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
-  const state = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 5, rows: 1 }, fixedObstacles: [] });
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
   const actor = getCombatant(state, "attacker", 0)!;
   const enemy = getCombatant(state, "defender", 0)!;
+  actor.position = { q: 0, r: 2 };
+  enemy.position = { q: 3, r: 2 };
 
-  const ok = spyOnPlatoon(state, "attacker", 0, enemy.slotIndex, "bowman");
-  assert.equal(ok, true);
+  assert.deepEqual(
+    sortHexes(getApproachHexes(state, actor, enemy)),
+    ["2,2", "2,3", "3,1", "3,3", "4,1", "4,2"].sort(),
+    "all six sides of a mid-board target are reachable at speed 5",
+  );
+});
 
-  // Cost came only from the chosen entry.
-  assert.equal(actor.entries.find((e) => e.unitTypeId === "bowman")?.count, 1);
-  assert.equal(actor.entries.find((e) => e.unitTypeId === "footman")?.count, 5);
+test("getApproachHexes: excludes impassable, occupied, and out-of-budget sides", () => {
+  const attacker = makePlatoons([{ unitTypeId: "hero", count: 1 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
 
-  // Revealed to the spying side only — markContacted's mutual behavior does
-  // not apply here.
-  assert.equal(enemy.scoutedBy.has("attacker"), true);
-  assert.equal(enemy.scoutedBy.has("defender"), false);
+  const blocked = startManualBattle(attacker, defender, {
+    unitTypes,
+    grid: APPROACH_GRID,
+    fixedObstacles: [{ q: 3, r: 3, impassable: true }],
+  });
+  const blockedActor = getCombatant(blocked, "attacker", 0)!;
+  const blockedEnemy = getCombatant(blocked, "defender", 0)!;
+  blockedActor.position = { q: 0, r: 2 };
+  blockedEnemy.position = { q: 3, r: 2 };
+  const blockedHexes = sortHexes(getApproachHexes(blocked, blockedActor, blockedEnemy));
+  assert.ok(!blockedHexes.includes("3,3"), "an impassable side is not an approach hex");
+  assert.equal(blockedHexes.length, 5);
 
-  // Not the platoon's official action — it should still show as unacted and
-  // able to move/attack normally afterward.
-  assert.ok(unactedLivingSlots(state, "attacker").includes(0));
+  // A second enemy platoon standing on one of the sides takes that side away.
+  const crowdedDefenders = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  crowdedDefenders[1] = { entries: [{ unitTypeId: "weak", count: 1 }] };
+  const crowded = startManualBattle(attacker, crowdedDefenders, {
+    unitTypes,
+    grid: APPROACH_GRID,
+    fixedObstacles: [],
+  });
+  const crowdedActor = getCombatant(crowded, "attacker", 0)!;
+  const crowdedEnemy = getCombatant(crowded, "defender", 0)!;
+  crowdedActor.position = { q: 0, r: 2 };
+  crowdedEnemy.position = { q: 3, r: 2 };
+  getCombatant(crowded, "defender", 1)!.position = { q: 2, r: 2 };
+  const crowdedHexes = sortHexes(getApproachHexes(crowded, crowdedActor, crowdedEnemy));
+  assert.ok(!crowdedHexes.includes("2,2"), "a side occupied by another platoon is not an approach hex");
 
-  // Rejected: target no longer valid (already scouted).
-  assert.equal(spyOnPlatoon(state, "attacker", 0, enemy.slotIndex, "footman"), false);
-  assert.equal(actor.entries.find((e) => e.unitTypeId === "footman")?.count, 5, "rejected spy must not spend a troop");
+  // footman has speed 3, so only the near sides are in budget this round.
+  const slowAttacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const slow = startManualBattle(slowAttacker, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const slowActor = getCombatant(slow, "attacker", 0)!;
+  const slowEnemy = getCombatant(slow, "defender", 0)!;
+  slowActor.position = { q: 0, r: 2 };
+  slowEnemy.position = { q: 3, r: 2 };
+  assert.deepEqual(
+    sortHexes(getApproachHexes(slow, slowActor, slowEnemy)),
+    ["2,2", "2,3", "3,1"].sort(),
+    "the three far sides cost 4-5 hexes, beyond a speed-3 platoon's budget",
+  );
+});
 
-  // Rejected: unit type not present in the acting platoon.
-  const far = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 9, rows: 1 }, fixedObstacles: [] });
+test("getApproachHexes: a platoon already adjacent gets its current hex back at cost 0", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const enemy = getCombatant(state, "defender", 0)!;
+  actor.position = { q: 2, r: 2 };
+  enemy.position = { q: 3, r: 2 };
+
+  const here = getApproachHexes(state, actor, enemy).find((a) => a.hex.q === 2 && a.hex.r === 2);
+  assert.ok(here, "standing beside the target, your own hex is an approach hex");
+  assert.equal(here.cost, 0, "attacking from where you already stand costs no movement");
+});
+
+test("getApproachHexes: empty for a ranged platoon and for an unreachable target", () => {
+  const ranged = makePlatoons([{ unitTypeId: "bowman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
+  const rangedState = startManualBattle(ranged, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const rangedActor = getCombatant(rangedState, "attacker", 0)!;
+  const rangedEnemy = getCombatant(rangedState, "defender", 0)!;
+  rangedActor.position = { q: 2, r: 2 };
+  rangedEnemy.position = { q: 3, r: 2 };
+  assert.deepEqual(getApproachHexes(rangedState, rangedActor, rangedEnemy), [], "ranged platoons pick range, not a side");
+
+  // A speed-3 melee platoon parked at the far end of the board can't reach
+  // any side of the target this round.
+  const melee = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const far = startManualBattle(melee, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
   const farActor = getCombatant(far, "attacker", 0)!;
   const farEnemy = getCombatant(far, "defender", 0)!;
-  assert.equal(spyOnPlatoon(far, "attacker", 0, farEnemy.slotIndex, "footman"), false, "target out of spy range must be rejected");
-  assert.equal(farActor.entries.find((e) => e.unitTypeId === "footman")?.count, 5);
+  farActor.position = { q: 0, r: 2 };
+  farEnemy.position = { q: 6, r: 2 };
+  assert.deepEqual(getApproachHexes(far, farActor, farEnemy), []);
+});
+
+test("attackFromHex: moves to the chosen side, attacks, and spends the turn", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 50 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const enemy = getCombatant(state, "defender", 0)!;
+  actor.position = { q: 1, r: 2 };
+  enemy.position = { q: 3, r: 2 };
+
+  const beforeCount = enemy.entries[0].count;
+  // Approach from *below* the target rather than the head-on hex a plain
+  // move would have picked.
+  assert.equal(attackFromHex(state, "attacker", 0, 0, { q: 2, r: 3 }), true);
+  assert.deepEqual(actor.position, { q: 2, r: 3 }, "the platoon ends the action on the side it chose");
+  assert.ok(enemy.entries[0].count < beforeCount, "the target took casualties");
+  assert.ok(!unactedLivingSlots(state, "attacker").includes(0), "attacking consumes the platoon's turn");
+});
+
+test("attackFromHex: attacks in place when the chosen hex is where the platoon already stands", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 50 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const enemy = getCombatant(state, "defender", 0)!;
+  actor.position = { q: 2, r: 2 };
+  enemy.position = { q: 3, r: 2 };
+
+  const beforeCount = enemy.entries[0].count;
+  assert.equal(attackFromHex(state, "attacker", 0, 0, { q: 2, r: 2 }), true);
+  assert.deepEqual(actor.position, { q: 2, r: 2 }, "no movement — it was already on the side it wanted");
+  assert.ok(enemy.entries[0].count < beforeCount);
+});
+
+test("attackFromHex: every rejection leaves the battle exactly as it was", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]); // speed 3
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 50 }]);
+
+  function fresh() {
+    const state = startManualBattle(attacker, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+    const actor = getCombatant(state, "attacker", 0)!;
+    const enemy = getCombatant(state, "defender", 0)!;
+    actor.position = { q: 1, r: 2 };
+    enemy.position = { q: 3, r: 2 };
+    return { state, actor, enemy };
+  }
+
+  function assertUntouched(label: string, ctx: ReturnType<typeof fresh>, expectedRange: number): void {
+    assert.deepEqual(ctx.actor.position, { q: 1, r: 2 }, `${label}: platoon must not have moved`);
+    assert.equal(ctx.state.log.length, 0, `${label}: nothing may be written to the combat log`);
+    assert.equal(ctx.enemy.entries[0].count, 50, `${label}: the target must be unharmed`);
+    assert.equal(getMovementRange(ctx.state, ctx.actor).length, expectedRange, `${label}: movement budget must be intact`);
+  }
+
+  const untouchedRange = getMovementRange(fresh().state, fresh().actor).length;
+
+  // Not a side of the target at all — two hexes away from it.
+  const notAdjacent = fresh();
+  assert.equal(attackFromHex(notAdjacent.state, "attacker", 0, 0, { q: 1, r: 2 }), false);
+  assertUntouched("non-adjacent fromHex", notAdjacent, untouchedRange);
+
+  // A genuine side of the target, but 4 hexes away — beyond speed 3.
+  const outOfBudget = fresh();
+  assert.equal(attackFromHex(outOfBudget.state, "attacker", 0, 0, { q: 4, r: 2 }), false);
+  assertUntouched("out-of-budget fromHex", outOfBudget, untouchedRange);
+
+  // A legal side, but the platoon has already acted this round.
+  const spent = fresh();
+  endPlatoonTurn(spent.state, "attacker", 0);
+  assert.equal(attackFromHex(spent.state, "attacker", 0, 0, { q: 2, r: 2 }), false);
+  assert.deepEqual(spent.actor.position, { q: 1, r: 2 }, "already-acted platoon must not have moved");
+  assert.equal(spent.enemy.entries[0].count, 50, "already-acted platoon must not have attacked");
+});
+
+test("attackFromHex: rejected for a ranged platoon", () => {
+  const ranged = makePlatoons([{ unitTypeId: "bowman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 50 }]);
+  const state = startManualBattle(ranged, defender, { unitTypes, grid: APPROACH_GRID, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const enemy = getCombatant(state, "defender", 0)!;
+  actor.position = { q: 1, r: 2 };
+  enemy.position = { q: 3, r: 2 };
+
+  assert.equal(attackFromHex(state, "attacker", 0, 0, { q: 2, r: 2 }), false);
+  assert.deepEqual(actor.position, { q: 1, r: 2 });
+  // The existing shoot-from-where-you-stand path is unaffected.
+  assert.equal(attackWithPlatoon(state, "attacker", 0, 0), true);
 });
 
 test("estimateWinChance: symmetric for identical platoons, skewed toward the stronger one", () => {

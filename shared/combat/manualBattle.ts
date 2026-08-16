@@ -8,7 +8,7 @@
 // simple heuristic (see runAiTurn). See feature-plans/CombatResolutionEngine.md
 // for the underlying damage/type-advantage rules this reuses unchanged.
 
-import { type Axial, axialRound, hexDistance } from "../types";
+import { type Axial, axialRound, HEX_DIRECTIONS, hexDistance } from "../types";
 import type { Platoon, PlatoonEntry, UnitType } from "../units";
 import { PLATOON_RETREAT_LOSS, RANGED_ATTACK_RANGE } from "../combatConfig";
 import { applyRetreatLoss } from "./damage";
@@ -37,15 +37,6 @@ export function timeOfDayForRound(round: number): TimeOfDay {
   const idx = Math.floor((Math.max(1, round) - 1) / ROUNDS_PER_TIME_PHASE) % TIME_OF_DAY_PHASES.length;
   return TIME_OF_DAY_PHASES[idx];
 }
-
-const NEIGHBOR_DIRS: Axial[] = [
-  { q: 1, r: 0 },
-  { q: 1, r: -1 },
-  { q: 0, r: -1 },
-  { q: -1, r: 0 },
-  { q: -1, r: 1 },
-  { q: 0, r: 1 },
-];
 
 export interface ManualBattleOptions {
   unitTypes: Record<string, UnitType>;
@@ -183,30 +174,66 @@ function occupiedHexes(state: ManualBattleState, excludeSide: BattleSide, exclud
 }
 
 // BFS over the grid bounded by a movement budget, blocked by impassable
-// hexes and any other live combatant's hex. Returns every reachable hex
-// (including the start hex, at cost 0) mapped to its hex-step distance, so
-// callers can both enumerate reachable destinations and look up the cost of
-// a specific one.
-function movementCosts(state: ManualBattleState, combatant: Combatant, budget: number): Map<string, number> {
+// hexes and any other live combatant's hex. `dist` holds every reachable hex
+// (including the start hex, at cost 0) mapped to its hex-step distance;
+// `prev` holds each hex's predecessor on the discovered route, so callers
+// that need the actual walked path (rather than just "can I get there and
+// for how much") can reconstruct it backwards from the destination.
+interface MovementBfs {
+  dist: Map<string, number>;
+  prev: Map<string, Axial>;
+}
+
+function movementBfs(state: ManualBattleState, combatant: Combatant, budget: number): MovementBfs {
   const blocked = occupiedHexes(state, combatant.side, combatant.slotIndex);
   const hexByKey = new Map(state.grid.hexes.map((h) => [hexKey(h), h]));
-  const visited = new Map<string, number>([[hexKey(combatant.position), 0]]);
+  const dist = new Map<string, number>([[hexKey(combatant.position), 0]]);
+  const prev = new Map<string, Axial>();
   const queue: Axial[] = [combatant.position];
   while (queue.length > 0) {
     const current = queue.shift()!;
-    const dist = visited.get(hexKey(current))!;
-    if (dist >= budget) continue;
-    for (const dir of NEIGHBOR_DIRS) {
+    const d = dist.get(hexKey(current))!;
+    if (d >= budget) continue;
+    for (const dir of HEX_DIRECTIONS) {
       const next = { q: current.q + dir.q, r: current.r + dir.r };
       const key = hexKey(next);
-      if (visited.has(key)) continue;
+      if (dist.has(key)) continue;
       const hex = hexByKey.get(key);
       if (!hex || hex.impassable || blocked.has(key)) continue;
-      visited.set(key, dist + 1);
+      dist.set(key, d + 1);
+      prev.set(key, current);
       queue.push(next);
     }
   }
-  return visited;
+  return { dist, prev };
+}
+
+function movementCosts(state: ManualBattleState, combatant: Combatant, budget: number): Map<string, number> {
+  return movementBfs(state, combatant, budget).dist;
+}
+
+// The hex-by-hex route the platoon would actually walk to reach
+// `destination`, excluding its current hex and ending on the destination.
+// Returns [] when the destination is the current hex or is out of reach with
+// the movement left this round. Purely informational — movePlatoon still
+// only takes a destination and re-derives the cost itself; this exists so
+// the UI can animate the platoon along its real path instead of teleporting
+// it (BFS explores in ring order, so this is a shortest route).
+export function getMovementPath(state: ManualBattleState, combatant: Combatant, destination: Axial): Axial[] {
+  const budget = remainingMovement(state, combatant);
+  if (budget <= 0) return [];
+  const { dist, prev } = movementBfs(state, combatant, budget);
+  const destKey = hexKey(destination);
+  const cost = dist.get(destKey);
+  if (cost === undefined || cost === 0) return [];
+  const startKey = hexKey(combatant.position);
+  const path: Axial[] = [];
+  let cursor: Axial | undefined = destination;
+  while (cursor && hexKey(cursor) !== startKey) {
+    path.unshift(cursor);
+    cursor = prev.get(hexKey(cursor));
+  }
+  return path;
 }
 
 // Hexes reachable with whatever movement budget the platoon has left this
@@ -268,54 +295,66 @@ export function getValidAttackTargets(state: ManualBattleState, combatant: Comba
     : getValidMeleeTargets(state, combatant);
 }
 
-// One-directional, unlike markContacted: the spying side learns the target,
-// not vice versa.
-export function markScouted(target: Combatant, bySide: BattleSide): void {
-  if (target.side !== bySide) target.scoutedBy.add(bySide);
+// The hexes `actor` could strike `target` from this round: the six neighbours
+// of the target that the actor can legally stand on and reach with the
+// movement it has left, each with the number of hexes it costs to get there.
+//
+// A single movementCosts lookup answers all four constraints at once — that
+// map only ever contains hexes that exist on the grid, are passable, aren't
+// occupied by another live combatant, and are within budget. The actor's own
+// hex is seeded there at cost 0, so a platoon already adjacent gets its
+// current position back as a free approach and attacks without moving.
+//
+// Melee only: ranged platoons pick targets by range and line of sight
+// (getValidRangedTargets), so there is no approach hex to choose.
+export function getApproachHexes(
+  state: ManualBattleState,
+  actor: Combatant,
+  target: Combatant,
+): { hex: Axial; cost: number }[] {
+  if (isRangedPlatoon(actor, state.unitTypes)) return [];
+  const costs = movementCosts(state, actor, remainingMovement(state, actor));
+  const out: { hex: Axial; cost: number }[] = [];
+  for (const dir of HEX_DIRECTIONS) {
+    const hex = { q: target.position.q + dir.q, r: target.position.r + dir.r };
+    const cost = costs.get(hexKey(hex));
+    if (cost === undefined) continue;
+    out.push({ hex, cost });
+  }
+  return out;
 }
 
-// Same shape as getValidRangedTargets/getValidMeleeTargets, but the target
-// set is enemies reachable from the platoon's current position OR anywhere
-// in its movement range this turn (using the same adjacency/ranged+LOS rule
-// attacks use), since Spy is meant to answer "could this platoon actually
-// get eyes on them right now" rather than reveal the whole map. Already-
-// scouted enemies are excluded — no reason to spend a troop re-learning them.
-export function getValidSpyTargets(state: ManualBattleState, combatant: Combatant): Combatant[] {
-  const enemies = livingCombatants(combatantsFor(state, enemySideOf(combatant.side))).filter(
-    (e) => !e.scoutedBy.has(combatant.side),
-  );
-  const reach = [combatant.position, ...getMovementRange(state, combatant)];
-  const ranged = isRangedPlatoon(combatant, state.unitTypes);
-  return enemies.filter((e) =>
-    reach.some((h) =>
-      ranged
-        ? hexDistance(h, e.position) <= RANGED_ATTACK_RANGE && hasLineOfSight(state.grid, h, e.position)
-        : hexDistance(h, e.position) === 1,
-    ),
-  );
-}
-
-// Validates the target, spends 1 troop from costUnitTypeId, and reveals the
-// target via markScouted. Deliberately never touches the unacted set (contrast
-// attackWithPlatoon/movePlatoon) — that's what keeps Spy from counting as the
-// platoon's official action for the turn.
-export function spyOnPlatoon(
+// Move to a chosen approach hex and attack in one action — the player-facing
+// "attack from this direction" move. Everything is validated *before* the
+// platoon budges: because fromHex is checked against getApproachHexes (which
+// already guarantees adjacency to the target), the attack can never fail
+// after the move has been applied, so there's no half-committed state to
+// unwind. Returns false and leaves the battle untouched if anything is off.
+//
+// Delegates to movePlatoon and attackWithPlatoon rather than reimplementing
+// them, so movement-budget bookkeeping, the combat log, and round advancement
+// all stay in one place.
+export function attackFromHex(
   state: ManualBattleState,
   side: BattleSide,
   slotIndex: number,
   targetSlotIndex: number,
-  costUnitTypeId: string,
+  fromHex: Axial,
 ): boolean {
+  if (!unactedSetFor(state, side).has(slotIndex)) return false;
   const actor = getCombatant(state, side, slotIndex);
-  if (!actor) return false;
-  const target = getValidSpyTargets(state, actor).find((t) => t.slotIndex === targetSlotIndex);
+  if (!actor || actor.retreated || !actor.entries.some((e) => e.count > 0)) return false;
+  if (isRangedPlatoon(actor, state.unitTypes)) return false;
+
+  const enemies = livingCombatants(combatantsFor(state, enemySideOf(side)));
+  const target = enemies.find((e) => e.slotIndex === targetSlotIndex);
   if (!target) return false;
-  const entry = actor.entries.find((e) => e.unitTypeId === costUnitTypeId && e.count > 0);
-  if (!entry) return false;
-  entry.count -= 1;
-  actor.entries = actor.entries.filter((e) => e.count > 0);
-  markScouted(target, side);
-  return true;
+
+  const approach = getApproachHexes(state, actor, target).find((a) => a.hex.q === fromHex.q && a.hex.r === fromHex.r);
+  if (!approach) return false;
+
+  if (approach.cost > 0 && !movePlatoon(state, side, slotIndex, approach.hex)) return false;
+  return attackWithPlatoon(state, side, slotIndex, targetSlotIndex);
 }
 
 function pruneDead(state: ManualBattleState): void {
@@ -382,22 +421,9 @@ export function attackWithPlatoon(state: ManualBattleState, side: BattleSide, sl
   const target = getValidAttackTargets(state, actor).find((t) => t.slotIndex === targetSlotIndex);
   if (!target) return false;
   resolveAttack(actor, target, state.unitTypes, 1, false, state.round, state.log);
-  markContacted(actor, target);
   unacted.delete(slotIndex);
   checkRoundAdvance(state);
   return true;
-}
-
-// Records that two opposing platoons have made contact: both sides gain the
-// other's side in their scoutedBy set, so each will reveal its specialty
-// icon to the other from this round onward. Idempotent — re-running for
-// the same pair is a no-op. Called automatically by attackWithPlatoon;
-// exported for tests and any future "force scout" interaction.
-export function markContacted(actor: Combatant, target: Combatant): void {
-  if (actor.side !== target.side) {
-    actor.scoutedBy.add(target.side);
-    target.scoutedBy.add(actor.side);
-  }
 }
 
 // Pure derivation — given a platoon's current entries, returns the dominant
@@ -476,6 +502,17 @@ function closestHexTo(candidates: Axial[], target: Axial, current: Axial): Axial
   return best;
 }
 
+// What the AI intends to do with one platoon this turn. Split out from the
+// execution so a UI can narrate the turn beat by beat — telegraph the actor,
+// animate it walking `moveTo`, then land the attack — rather than having the
+// whole thing resolve inside one opaque call and the board teleport. A plan
+// with both fields null is "this platoon has nothing useful to do".
+export interface AiTurnPlan {
+  slotIndex: number;
+  moveTo: Axial | null;
+  attackTargetSlot: number | null;
+}
+
 // Simple AI heuristic for one of the AI's platoons: target the weakest
 // living enemy (reusing the same pickTarget used by the auto-resolver),
 // then move into position and attack if possible. Ranged platoons that
@@ -483,54 +520,57 @@ function closestHexTo(candidates: Axial[], target: Axial, current: Axial): Axial
 // can't reach adjacency just move as close as their speed allows. Neither
 // case attempts multi-turn kiting/pathing around obstacles beyond a single
 // greedy step — an intentional simplification for this arena.
-export function runAiTurn(state: ManualBattleState, side: BattleSide): void {
+//
+// Pure: decides, mutates nothing. The returned plan is only valid against
+// the state it was computed from, so execute it before mutating anything
+// else.
+export function planAiTurn(state: ManualBattleState, side: BattleSide): AiTurnPlan | null {
   const slots = unactedLivingSlots(state, side);
-  if (slots.length === 0) return;
+  if (slots.length === 0) return null;
   const slotIndex = slots[0];
   const actor = getCombatant(state, side, slotIndex);
-  if (!actor) return;
+  if (!actor) return null;
 
   const enemies = livingCombatants(combatantsFor(state, enemySideOf(side)));
   const target = pickTarget(enemies, state.unitTypes);
-  if (!target) {
-    endPlatoonTurn(state, side, slotIndex);
-    return;
-  }
+  if (!target) return { slotIndex, moveTo: null, attackTargetSlot: null };
 
   const range = getMovementRange(state, actor);
 
   if (isRangedPlatoon(actor, state.unitTypes)) {
     if (hexDistance(actor.position, target.position) <= RANGED_ATTACK_RANGE && hasLineOfSight(state.grid, actor.position, target.position)) {
-      attackWithPlatoon(state, side, slotIndex, target.slotIndex);
-      return;
+      return { slotIndex, moveTo: null, attackTargetSlot: target.slotIndex };
     }
     const reposition = range.find(
       (h) => hexDistance(h, target.position) <= RANGED_ATTACK_RANGE && hasLineOfSight(state.grid, h, target.position),
     );
-    if (reposition) {
-      movePlatoon(state, side, slotIndex, reposition);
-      attackWithPlatoon(state, side, slotIndex, target.slotIndex);
-      return;
-    }
-    const closer = closestHexTo(range, target.position, actor.position);
-    if (closer) movePlatoon(state, side, slotIndex, closer);
-    endPlatoonTurn(state, side, slotIndex);
-    return;
+    if (reposition) return { slotIndex, moveTo: reposition, attackTargetSlot: target.slotIndex };
+    return { slotIndex, moveTo: closestHexTo(range, target.position, actor.position), attackTargetSlot: null };
   }
 
   if (canMeleeAttack(actor, target)) {
-    attackWithPlatoon(state, side, slotIndex, target.slotIndex);
-    return;
+    return { slotIndex, moveTo: null, attackTargetSlot: target.slotIndex };
   }
   const adjacentHex = range.find((h) => hexDistance(h, target.position) === 1);
-  if (adjacentHex) {
-    movePlatoon(state, side, slotIndex, adjacentHex);
-    attackWithPlatoon(state, side, slotIndex, target.slotIndex);
-    return;
-  }
-  const closer = closestHexTo(range, target.position, actor.position);
-  if (closer) movePlatoon(state, side, slotIndex, closer);
-  endPlatoonTurn(state, side, slotIndex);
+  if (adjacentHex) return { slotIndex, moveTo: adjacentHex, attackTargetSlot: target.slotIndex };
+  return { slotIndex, moveTo: closestHexTo(range, target.position, actor.position), attackTargetSlot: null };
+}
+
+// Applies a plan from planAiTurn. Always consumes the platoon's turn: if the
+// attack is refused (the target moved out of reach between planning and
+// execution, or died to a counterattack), the platoon still ends its turn
+// rather than staying in the unacted pool — a slot that never clears would
+// hang the round-advance check forever.
+export function executeAiPlan(state: ManualBattleState, side: BattleSide, plan: AiTurnPlan): void {
+  if (plan.moveTo) movePlatoon(state, side, plan.slotIndex, plan.moveTo);
+  if (plan.attackTargetSlot !== null && attackWithPlatoon(state, side, plan.slotIndex, plan.attackTargetSlot)) return;
+  endPlatoonTurn(state, side, plan.slotIndex);
+}
+
+export function runAiTurn(state: ManualBattleState, side: BattleSide): void {
+  const plan = planAiTurn(state, side);
+  if (!plan) return;
+  executeAiPlan(state, side, plan);
 }
 
 // Voluntary side concession triggered by the player (Retreat / Surrender

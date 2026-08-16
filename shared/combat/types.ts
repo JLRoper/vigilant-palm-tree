@@ -28,14 +28,6 @@ export interface Combatant {
   // the moment it spends a counterattack. See "Counterattacks (resolved)".
   hasCounterCharge: boolean;
   retreated: boolean;
-  // Sides that have engaged this platoon in combat (either as attacker or
-  // target). The owning side can see its own specialty icon at all times;
-  // opposing sides only see it once they're in this set — i.e. once they've
-  // "made contact and been able to assess". Mutated by markContacted() in
-  // shared/combat/manualBattle.ts whenever an attack involves this
-  // platoon. Cloned by cloneCombatant() so the set is not shared by
-  // reference across snapshots.
-  scoutedBy: Set<BattleSide>;
 }
 
 export type CombatantOutcome =

@@ -38,7 +38,6 @@ export function buildCombatants(
       maxHealth: totalHealth(entries, unitTypes),
       hasCounterCharge: true,
       retreated: false,
-      scoutedBy: new Set<BattleSide>(),
     });
   });
   return out;
@@ -60,7 +59,7 @@ export function pickTarget(enemies: Combatant[], unitTypes: Record<string, UnitT
 }
 
 export function cloneCombatant(c: Combatant): Combatant {
-  return { ...c, entries: c.entries.map((e) => ({ ...e })), scoutedBy: new Set(c.scoutedBy) };
+  return { ...c, entries: c.entries.map((e) => ({ ...e })) };
 }
 
 // resolveAttack(): the seam a future ability layer (heal/regen/AoE) can

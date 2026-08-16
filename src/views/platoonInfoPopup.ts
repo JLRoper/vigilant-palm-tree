@@ -1,8 +1,8 @@
 // Click-anchored info card for a single platoon: composition, HP, movement
-// left, and (for a scouted enemy) a win-odds estimate against whichever of
-// your platoons is currently selected. Used by manualBattleArena.ts for two
+// left, and (for an enemy) a win-odds estimate against whichever of your
+// platoons is currently selected. Used by manualBattleArena.ts for two
 // cases — the platoon you've just selected to act with, and any enemy
-// platoon you've spied on (see spyOnPlatoon in shared/combat/manualBattle.ts).
+// platoon you click on or hover.
 //
 // Deliberately a dumb rendering+placement component: the caller decides
 // *which side* of the anchor point counts as "behind the line" (away from
@@ -19,6 +19,23 @@ export interface PlatoonInfoPopupWinChance {
   label: string;
 }
 
+// A labelled scalar shown as a small chip (Atk/Def/Spd/Rng/Terrain). The
+// caller formats the value — this component never reads UnitType stats
+// itself, keeping the "dumb rendering" contract in the file header.
+export interface PlatoonInfoPopupStat {
+  label: string;
+  value: string;
+}
+
+// A 0..1 ratio drawn as a labelled bar (Morale/Fatigue). `color` is resolved
+// by the caller so the popup doesn't need to know which direction is "good"
+// for a given metric.
+export interface PlatoonInfoPopupMetric {
+  label: string;
+  value: number;
+  color: string;
+}
+
 export interface PlatoonInfoPopupShowOptions {
   combatant: Combatant;
   unitTypes: Record<string, UnitType>;
@@ -26,6 +43,11 @@ export interface PlatoonInfoPopupShowOptions {
   ownerLabel: string;
   canAct: boolean;
   movementRemaining: number;
+  // Dominant specialty, already threshold-checked by the caller. Omitted
+  // when nothing clears the threshold.
+  specialty?: { icon: string; label: string };
+  stats?: PlatoonInfoPopupStat[];
+  metrics?: PlatoonInfoPopupMetric[];
   winChanceVs?: PlatoonInfoPopupWinChance;
   anchorX: number;
   anchorY: number;
@@ -130,7 +152,7 @@ export function createPlatoonInfoPopup(container: HTMLElement): PlatoonInfoPopup
     title.textContent = `Platoon ${combatant.slotIndex + 1}`;
     const sub = document.createElement("small");
     Object.assign(sub.style, { display: "block", fontWeight: "400", opacity: "0.65", fontSize: "10.5px", marginTop: "1px" });
-    sub.textContent = opts.ownerLabel;
+    sub.textContent = opts.specialty ? `${opts.specialty.icon} ${opts.specialty.label} · ${opts.ownerLabel}` : opts.ownerLabel;
     title.appendChild(sub);
 
     body.innerHTML = "";
@@ -156,6 +178,42 @@ export function createPlatoonInfoPopup(container: HTMLElement): PlatoonInfoPopup
     body.appendChild(hpWrap);
 
     body.appendChild(row("Movement", `${opts.movementRemaining} left`));
+
+    if (opts.stats && opts.stats.length > 0) {
+      const statRow = document.createElement("div");
+      Object.assign(statRow.style, { display: "flex", flexWrap: "wrap", gap: "3px 5px" });
+      for (const s of opts.stats) {
+        const c = document.createElement("span");
+        Object.assign(c.style, {
+          fontSize: "10px",
+          padding: "2px 5px",
+          borderRadius: "3px",
+          background: "rgba(255,255,255,0.06)",
+          fontVariantNumeric: "tabular-nums",
+        });
+        c.innerHTML = `<span style="opacity:0.6">${s.label}</span> ${s.value}`;
+        statRow.appendChild(c);
+      }
+      body.appendChild(statRow);
+    }
+
+    if (opts.metrics && opts.metrics.length > 0) {
+      const metricWrap = document.createElement("div");
+      Object.assign(metricWrap.style, { display: "flex", flexDirection: "column", gap: "4px" });
+      for (const m of opts.metrics) {
+        const clamped = Math.max(0, Math.min(1, m.value));
+        const line = document.createElement("div");
+        line.appendChild(row(m.label, String(Math.round(clamped * 100))));
+        const t = document.createElement("div");
+        Object.assign(t.style, { height: "4px", borderRadius: "2px", background: "rgba(0,0,0,0.5)", overflow: "hidden", marginTop: "2px" });
+        const f = document.createElement("div");
+        Object.assign(f.style, { height: "100%", width: `${clamped * 100}%`, background: m.color });
+        t.appendChild(f);
+        line.appendChild(t);
+        metricWrap.appendChild(line);
+      }
+      body.appendChild(metricWrap);
+    }
 
     const chips = document.createElement("div");
     Object.assign(chips.style, { display: "flex", gap: "5px", flexWrap: "wrap" });

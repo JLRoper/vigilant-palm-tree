@@ -1,5 +1,15 @@
 # Spellcasting plan: from a disabled button to a real hero ability
 
+> **Note:** This doc originally used the manual battle arena's "Spy" action
+> (`spyOnPlatoon`/`spyBtn`/`spyMode` in `shared/combat/manualBattle.ts` and
+> `src/views/manualBattleArena.ts`) as an implementation precedent for how to
+> wire a new player-triggered platoon action into the arena's turn loop and
+> UI. Spy has since been removed as half-baked/under-designed, so those
+> references below are to code that no longer exists — treat them as a
+> description of the *pattern* (a targeting mode + UI trigger + engine
+> function that doesn't consume the platoon's turn), not as a pointer to
+> reusable code.
+
 ## Goal
 
 Give the manual battle arena's permanently-disabled "Cast Spell" button a
@@ -107,10 +117,10 @@ wired to real data**:
   [src/views/manualBattleArena.ts:608](../src/views/manualBattleArena.ts),
   defaulting to 300). There is no `Combatant.hero` field, no hero HP/mana,
   nothing.
-- `shared/combat/types.ts`'s `Combatant` (lines 21-39) — the thing that
+- `shared/combat/types.ts`'s `Combatant` — the thing that
   actually fights — is a **platoon**, not a hero: `side`, `slotIndex`,
-  `position`, `entries`, `maxHealth`, `hasCounterCharge`, `retreated`,
-  `scoutedBy`. Same conclusion `docs/morale-fatigue-plan.md` reached for
+  `position`, `entries`, `maxHealth`, `hasCounterCharge`, `retreated`.
+  Same conclusion `docs/morale-fatigue-plan.md` reached for
   morale/fatigue fields: nothing hero-shaped exists to extend.
 
 **Conclusion:** before any spell can be cast, something has to decide
