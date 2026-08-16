@@ -55,7 +55,6 @@ export type SpendMovementAction = {
   fromTile: Axial;
   toTile: Axial;
   cost: number;
-  settlements?: Record<string, SettlementState>;
 };
 
 export type GamePatch = LegacyGamePatch | SpendMovementAction;
@@ -225,7 +224,6 @@ export async function spendMovement(
     fromTile: Axial;
     toTile: Axial;
     cost: number;
-    settlements?: Record<string, SettlementState>;
   }
 ): Promise<HeroState> {
   const res = await fetchWithTimeout(
