@@ -60,9 +60,9 @@ Adopts `2026-08-16-parallel-dev-phases-3-5.md` §4's Track 3.A / Track 3.B assig
 
 **Exit criteria:**
 - `EngineCtx` is a real exported type: `{ rng: Rng; catalog: Catalog }` (no `actor`, no clock — see contradiction resolution above)
-- `packages/contracts/src/commands/moveHero.ts` and `transferGold.ts` exist as discriminated-union command shapes, each carrying its own `actor: PlayerSeat`
+- `packages/contracts/src/commands/moveHero.ts` and `packages/contracts/src/commands/transferGold.ts` exist as discriminated-union command shapes, each carrying its own `actor: PlayerSeat`
 - `commandHandler.ts` implements the full loop against the **Track 3.A/3.B pre-agreed repo interface** (below), not against raw `pool.query` — even before Track 3.B's real repo implementations land, `commandHandler.ts` codes against the interface and Track 3.A can use a temporary in-memory or thin-wrapper implementation to keep moving
-- `POST /games/:id/commands` accepts `{kind: "MoveHero", ...}` and `{kind: "TransferGold", ...}`, both round-tripping through `engine.validate` → `engine.apply` → repo persistence → event append
+- `POST /games/:name/commands` accepts `{kind: "MoveHero", ...}` and `{kind: "TransferGold", ...}`, both round-tripping through `engine.validate` → `engine.apply` → repo persistence → event append
 - `spend_movement`'s known gaps (missing `isChartering` and tile-occupancy checks) are closed as an observable side effect of calling the real `startMove`, not by hand-patching the old branch
 - Old `PATCH /games/:name` action branches for `spend_movement` and `transfer` are deleted once the new command path is confirmed equivalent (not left running in parallel indefinitely)
 - `npm run build` passes with `server/` now included in `tsconfig.json` (see Shared config touchpoints)
@@ -175,7 +175,7 @@ Week 3+:
 - `npm run build` exits 0 (now meaningfully checks `server/` too)
 - `npm run lint:deps` exits 0
 - `npm run test:all` exits 0
-- Manual: `POST /games/:id/commands` with a `MoveHero` command rejects a move onto an occupied tile and a move by a chartering hero (the two gaps `spend_movement` had) — write this as an explicit regression test, not just a manual check
+- Manual: `POST /games/:name/commands` with a `MoveHero` command rejects a move onto an occupied tile and a move by a chartering hero (the two gaps `spend_movement` had) — write this as an explicit regression test, not just a manual check
 - Manual: `grep -rn "action === \"spend_movement\"\|action === \"transfer\"" server/routes.ts` returns 0 matches once both are ported
 
 **Track 3.B — at each PR:**
