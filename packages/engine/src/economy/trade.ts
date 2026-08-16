@@ -8,8 +8,13 @@ import type {
   Warehouse,
   WarehouseResource,
 } from "@heroes/contracts";
-import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import { buildingUpkeepRequired, clampWarehouseNonNegative, foodRequired } from "./consumption";
+
+// computeDeficit below only ever returns non-zero for these three -- iron/
+// arcane have no consumption/upkeep concept, so they can never be in
+// deficit. Looping WAREHOUSE_RESOURCES' full 5-element list would be a
+// guaranteed no-op for the other two on every settlement, every turn.
+const AUTO_TRADE_RESOURCES: readonly WarehouseResource[] = ["food", "wood", "stone"];
 
 export function tradeResources(
   state: GameState,
@@ -60,7 +65,7 @@ export function runAutoTrade(
 ): { settlements: Record<SettlementId, SettlementState>; transfers: AutoTradeTransfer[] } {
   const next: Record<SettlementId, SettlementState> = { ...settlements };
   const transfers: AutoTradeTransfer[] = [];
-  const resources = WAREHOUSE_RESOURCES;
+  const resources = AUTO_TRADE_RESOURCES;
   for (const s of Object.values(next)) {
     if (s.ownerId !== playerId || !s.autoTrade) continue;
     const updatedS: SettlementState = { ...next[s.id] };
@@ -84,7 +89,7 @@ export function runAutoTrade(
         transfers.push({
           fromSettlementId: src.id,
           toSettlementId: s.id,
-          resource: r as WarehouseResource,
+          resource: r,
           amount: transferable,
           goldPaid: transferable,
         });
