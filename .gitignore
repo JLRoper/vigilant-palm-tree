@@ -8,3 +8,4 @@ dist/
 .recycled/
 tmp/
 sessionTracking/
+.kilo/
