@@ -1,4 +1,4 @@
-import type { GameState, PlayerId } from "../state/gameState";
+import type { GameState, PlayerId } from "../../state/gameState";
 import { effectiveIncome, playerWealth } from "@heroes/engine";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";

@@ -1,5 +1,5 @@
-import type { SettlementState, WarehouseResource } from "../state/gameState";
-import { openCenteredModal, styleButton, styleInput, menuTheme } from "./menu";
+import type { SettlementState, WarehouseResource } from "../../state/gameState";
+import { openCenteredModal, styleButton, styleInput, menuTheme } from "@screens/shared/menu";
 
 export type TradeConfirmHandler = (
   toId: string,

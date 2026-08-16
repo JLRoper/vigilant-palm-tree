@@ -4,12 +4,12 @@
 // this sandbox intentionally skips the auto-resolve step of the real battle
 // flow so the arena itself can be exercised directly.
 
-import { fixedTestPlayerPlatoons, randomAiPlatoons } from "../combat/testArmies";
-import { catalogFailed, loadUnitCatalog } from "../data/unitCatalog";
+import { fixedTestPlayerPlatoons, randomAiPlatoons } from "../../combat/testArmies";
+import { catalogFailed, loadUnitCatalog } from "../../data/unitCatalog";
 import type { BattleSide } from "@heroes/engine";
 import type { Platoon, UnitType } from "@heroes/engine";
-import { menuTheme, openCenteredModal, styleButton } from "./menu";
-import { launchView, registerView } from "./viewLauncher";
+import { menuTheme, openCenteredModal, styleButton } from "@screens/shared/menu";
+import { launchView, registerView } from "@screens/shared/viewLauncher";
 
 registerView("testBattleSetup", () => openTestBattleSetup());
 

@@ -6,7 +6,7 @@
 // "Number of human players" is exposed as a small chip selector (1/2/3/4).
 // Map size stays a dropdown because we ship three named presets.
 
-import { styleButton } from "./menu";
+import { styleButton } from "@screens/shared/menu";
 
 export type NewGameFormValues = {
   name: string;

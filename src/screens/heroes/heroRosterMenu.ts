@@ -1,26 +1,27 @@
-import { PopupMenu, menuTheme } from "./menu";
-import type { GameState, SettlementId, SettlementState } from "../state/gameState";
-import { SETTLEMENT_BANNERS } from "../render/assetDescriptors";
+import { PopupMenu, menuTheme } from "@screens/shared/menu";
+import type { GameState, HeroId } from "../../state/gameState";
+import { MOVEMENT_PER_TURN } from "../../state/gameState";
+import { HERO_BANNERS } from "../../render/assetDescriptors";
 
-export interface SettlementRosterMenuOptions {
-  onSelectSettlement?: (settlementId: SettlementId) => void;
-  onCenterSettlement?: (settlementId: SettlementId) => void;
+export interface HeroRosterMenuOptions {
+  onSelectHero?: (heroId: HeroId) => void;
+  onCenterHero?: (heroId: HeroId) => void;
 }
 
-export class SettlementRosterMenu {
+export class HeroRosterMenu {
   private menu: PopupMenu;
   private visible = false;
-  private opts: SettlementRosterMenuOptions;
+  private opts: HeroRosterMenuOptions;
   private content: HTMLDivElement;
   private lastRosterKey = "";
 
-  constructor(opts: SettlementRosterMenuOptions) {
+  constructor(opts: HeroRosterMenuOptions) {
     this.opts = opts;
 
     this.menu = new PopupMenu({
       parent: document.body,
-      title: "Settlements",
-      initialPosition: { x: 260, y: 220 },
+      title: "Heroes",
+      initialPosition: { x: 260, y: 16 },
       width: 280,
       closeable: true,
       draggable: true,
@@ -70,21 +71,33 @@ export class SettlementRosterMenu {
   }
 
   update(state: GameState): void {
+    if (!this.visible) return;
     const activePlayer = state.players.find((p) => p.id === state.activePlayerId);
-    this.menu.setTitle(activePlayer ? `${activePlayer.name}'s Settlements` : "Settlements");
+    this.menu.setTitle(activePlayer ? `${activePlayer.name}'s Heroes` : "Heroes");
 
-    const activePlayerId = activePlayer?.id ?? null;
-    const settlements = Object.values(state.settlements).filter(
-      (s) => activePlayerId === null || s.ownerId === activePlayerId,
-    );
+    const heroIds = activePlayer?.heroIds ?? [];
+    const heroes = heroIds
+      .map((id) => state.heroes[id])
+      .filter((h): h is NonNullable<typeof h> => h != null);
+
+    const canSelectHero =
+      this.opts.onSelectHero != null &&
+      state.phase.kind === "PLAYER_TURN" &&
+      activePlayer?.faction === "player";
+
+    const hasLocate = this.opts.onCenterHero != null;
 
     const rosterKey = JSON.stringify({
       activePlayerId: state.activePlayerId,
-      settlements: settlements.map((s) => ({
-        id: s.id, q: s.q, r: s.r, gold: s.gold,
-        level: s.level, population: s.population,
-        morale: s.morale, name: s.name,
+      phaseKind: state.phase.kind,
+      heroes: heroes.map((h) => ({
+        id: h.id, q: h.q, r: h.r, gold: h.gold,
+        troops: h.troops, movementRemaining: h.movementRemaining,
+        isChartering: h.isChartering, name: h.name,
+        horseVariant: h.horseVariant,
       })),
+      canSelectHero,
+      hasLocate,
     });
 
     if (rosterKey === this.lastRosterKey) return;
@@ -92,10 +105,10 @@ export class SettlementRosterMenu {
 
     this.content.replaceChildren();
 
-    if (settlements.length === 0) {
+    if (heroes.length === 0) {
       const empty = document.createElement("div");
       empty.textContent = activePlayer
-        ? `${activePlayer.name} has no settlements.`
+        ? `${activePlayer.name} has no heroes.`
         : "No active player.";
       Object.assign(empty.style, {
         opacity: "0.7",
@@ -105,13 +118,17 @@ export class SettlementRosterMenu {
       return;
     }
 
-    for (const settlement of settlements) {
-      this.content.appendChild(this.buildSettlementRow(settlement));
+    for (const hero of heroes) {
+      this.content.appendChild(this.buildHeroRow(hero, canSelectHero, hasLocate));
     }
   }
 
-  private buildSettlementRow(settlement: SettlementState): HTMLDivElement {
-    const bannerUrl = SETTLEMENT_BANNERS[settlement.level as 1 | 2 | 3];
+  private buildHeroRow(
+    hero: NonNullable<GameState["heroes"][HeroId]>,
+    canSelectHero: boolean,
+    hasLocate: boolean,
+  ): HTMLDivElement {
+    const bannerUrl = HERO_BANNERS[hero.horseVariant];
 
     const row = document.createElement("div");
     Object.assign(row.style, {
@@ -123,20 +140,26 @@ export class SettlementRosterMenu {
       background: `linear-gradient(rgba(26, 26, 26, 0.3), rgba(26, 26, 26, 0.3)), url(${bannerUrl}) center / cover no-repeat`,
     });
 
-    if (this.opts.onSelectSettlement || this.opts.onCenterSettlement) {
+    if (canSelectHero) {
       row.style.cursor = "pointer";
       row.addEventListener("click", (e) => {
         e.stopPropagation();
-        this.opts.onSelectSettlement?.(settlement.id);
+        this.opts.onSelectHero?.(hero.id);
       });
       row.addEventListener("dblclick", (e) => {
         e.stopPropagation();
-        this.opts.onCenterSettlement?.(settlement.id);
+        this.opts.onCenterHero?.(hero.id);
+      });
+    } else if (hasLocate) {
+      row.style.cursor = "pointer";
+      row.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.opts.onCenterHero?.(hero.id);
       });
     }
 
     const nameEl = document.createElement("div");
-    nameEl.textContent = settlement.name;
+    nameEl.textContent = hero.name;
     Object.assign(nameEl.style, {
       fontWeight: "600",
       overflow: "hidden",
@@ -147,7 +170,8 @@ export class SettlementRosterMenu {
     row.appendChild(nameEl);
 
     const metaEl = document.createElement("div");
-    metaEl.textContent = `(${settlement.q}, ${settlement.r}) · L${settlement.level} · ${settlement.population} pop · ${settlement.gold}g · Morale ${settlement.morale ?? 100}%`;
+    const remaining = hero.movementRemaining < 1 ? 0 : hero.movementRemaining;
+    metaEl.textContent = `(${hero.q}, ${hero.r}) · Move ${remaining.toFixed(1)}/${MOVEMENT_PER_TURN} · ${hero.gold}g · ${hero.troops} troops`;
     Object.assign(metaEl.style, {
       fontSize: "11px",
       opacity: "0.85",

@@ -11,8 +11,8 @@
 
 import { estimateWinChance, totalHealth } from "@heroes/engine";
 import type { Combatant } from "@heroes/engine";
-import type { UnitType } from "../state/units";
-import { menuTheme } from "./menu";
+import type { UnitType } from "../../state/units";
+import { menuTheme } from "@screens/shared/menu";
 
 export interface PlatoonInfoPopupWinChance {
   entries: Combatant["entries"];

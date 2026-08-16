@@ -5,8 +5,8 @@
 // button without reshaping this component.
 
 import type { BattleResult, CombatantResult } from "@heroes/engine";
-import { getCachedUnit } from "../data/unitCatalog";
-import { menuTheme, openCenteredModal, styleButton } from "./menu";
+import { getCachedUnit } from "../../data/unitCatalog";
+import { menuTheme, openCenteredModal, styleButton } from "@screens/shared/menu";
 
 export interface BattleResultCardOptions {
   result: BattleResult;
