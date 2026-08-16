@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.2.1",
   "type": "module",
+  "workspaces": ["packages/*"],
   "scripts": {
     "cleanup": "pwsh scripts/cleanup.ps1",
     "predev": "tsx scripts/allocate-ports.ts",
@@ -19,7 +20,7 @@
     "test:cityview": "tsx scripts/allocate-ports.ts && tsx --env-file=.env test/cityView.test.ts",
     "test:all": "tsx scripts/allocate-ports.ts && tsx --env-file=.env test/smoke.ts && tsx --env-file=.env test/multiplayer.smoke.ts && tsx --env-file=.env test/cityView.test.ts",
     "test:multiplayer": "tsx scripts/allocate-ports.ts && tsx --env-file=.env test/multiplayer.smoke.ts",
-    "lint:deps": "depcruise src shared server --config dependency-cruiser.cjs",
+    "lint:deps": "depcruise src shared server packages --config dependency-cruiser.cjs",
     "validate-assets": "node tools/sprites/validate-assets.mjs",
     "sprites:generate": "node tools/sprites/pixel-gen.mjs",
     "sprites:preview": "node tools/sprites/generate-preview.mjs",
