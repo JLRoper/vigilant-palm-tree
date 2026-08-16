@@ -6,18 +6,18 @@
 
 import "./settingsMenu";
 import "./developerSettingsMenu";
-import "./testBattleSetup";
-import "./manualBattleArena";
+import "@screens/combat/testBattleSetup";
+import "@screens/combat/manualBattleArena";
 import "./homeView";
 import "./assetManager";
-import "./cityView";
+import "@screens/settlements/cityView/cityView";
 import "./developerSettingsMenu";
 import "./heroInfoMenu";
 import "./heroRosterMenu";
-import "./hud";
-import "./menu";
+import "@screens/shared/hud";
+import "@screens/shared/menu";
 import "./newGameScreen";
 import "./multiplayerLobby";
-import "./settlementInfoMenu";
-import "./settlementRosterMenu";
-import "./toolbar";
+import "@screens/settlements/settlementInfoMenu";
+import "@screens/settlements/settlementRosterMenu";
+import "@screens/shared/toolbar";

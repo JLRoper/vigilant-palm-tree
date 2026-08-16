@@ -1,11 +1,11 @@
-import { buildHud, updateHud, canEndTurn, type HudHandles } from "../views/hud";
+import { buildHud, updateHud, canEndTurn, type HudHandles } from "@screens/shared/hud";
 import type { PlayerId } from "../state/gameState";
-import { Toolbar, type CalendarSnapshot } from "../views/toolbar";
+import { Toolbar, type CalendarSnapshot } from "@screens/shared/toolbar";
 import { HeroInfoMenu } from "../views/heroInfoMenu";
 import { HeroRosterMenu } from "../views/heroRosterMenu";
-import { SettlementRosterMenu } from "../views/settlementRosterMenu";
-import { SettlementInfoMenu } from "../views/settlementInfoMenu";
-import { CityView } from "../views/cityView";
+import { SettlementRosterMenu } from "@screens/settlements/settlementRosterMenu";
+import { SettlementInfoMenu } from "@screens/settlements/settlementInfoMenu";
+import { CityView } from "@screens/settlements/cityView/cityView";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
 import type { HeroId, SettlementState } from "../state/gameState";
 import { Hero } from "../entities/hero";

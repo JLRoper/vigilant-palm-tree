@@ -2,7 +2,7 @@ import { GameMap } from "../map/gameMap";
 import { createDefaultProvider, SpriteProvider } from "../render/assets";
 import { HERO_PROCEDURAL_DRAWERS } from "../render/sprites";
 import { rng } from "../core/rng";
-import { MAP_SEED } from "../views/adventureView";
+import { MAP_SEED } from "@screens/adventure/adventureView";
 import { colorForOwner } from "../state/playerColors";
 import { buildInitialGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";

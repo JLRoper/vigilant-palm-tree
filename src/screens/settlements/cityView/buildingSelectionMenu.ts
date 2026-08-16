@@ -1,6 +1,6 @@
-import { PopupMenu, styleButton } from "./menu";
-import type { BuildingDef, BuildingKind } from "../render/cityBuildingDraw";
-import type { SettlementState } from "../state/gameState";
+import { PopupMenu, styleButton } from "@screens/shared/menu";
+import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
+import type { SettlementState } from "../../../state/gameState";
 import {
   buildingLabel,
   buildingSettlementEffects,
@@ -9,8 +9,8 @@ import {
   buildingUpgradeCost,
   combineUpgradeCosts,
   type BuildingUpgradeCost,
-} from "../core/buildingRegistry";
-import { menuTheme } from "./menu";
+} from "../../../core/buildingRegistry";
+import { menuTheme } from "@screens/shared/menu";
 
 export interface BuildingSelectionMenuOptions {
   onUpgrade: (combined: BuildingUpgradeCost) => void;

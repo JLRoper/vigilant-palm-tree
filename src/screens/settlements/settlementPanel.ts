@@ -1,6 +1,6 @@
-import type { GameState, ResourceType, SettlementId, SettlementState, WarehouseResource } from "../state/gameState";
-import { RESOURCES } from "../map/resourceTiles";
-import { PopupMenu, menuTheme, styleButton } from "./menu";
+import type { GameState, ResourceType, SettlementId, SettlementState, WarehouseResource } from "../../state/gameState";
+import { RESOURCES } from "../../map/resourceTiles";
+import { PopupMenu, menuTheme, styleButton } from "@screens/shared/menu";
 import { openTradeModal } from "./tradeModal";
 
 const RESOURCE_ICONS: Record<ResourceType, string> = {

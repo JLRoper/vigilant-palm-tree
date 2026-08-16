@@ -1,4 +1,4 @@
-import { openCenteredModal, styleButton } from "./menu";
+import { openCenteredModal, styleButton } from "@screens/shared/menu";
 
 export interface BattleModalOptions {
   attackerName: string;

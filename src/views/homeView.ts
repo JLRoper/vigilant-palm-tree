@@ -9,7 +9,7 @@ import {
   verifyLoginCode,
   type AuthState,
 } from "../io/auth";
-import { openCenteredModal, styleButton, styleInput, menuTheme } from "./menu";
+import { openCenteredModal, styleButton, styleInput, menuTheme } from "@screens/shared/menu";
 import { openSettingsMenu } from "./settingsMenu";
 import { createNewGameScreen } from "./newGameScreen";
 import { createMultiplayerLobby } from "./multiplayerLobby";

@@ -1,4 +1,4 @@
-import { openCenteredModal, menuTheme, styleButton } from "./menu";
+import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
 import {
   fetchAssetList,
   uploadAsset,

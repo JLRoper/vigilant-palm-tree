@@ -1,4 +1,4 @@
-import { openCenteredModal, menuTheme, styleButton } from "./menu";
+import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
 import {
   settings,
   updateSettings,
@@ -14,7 +14,7 @@ import {
   type GameSettings,
   type ResourceStyle,
 } from "../state/settings";
-import { launchView, registerView } from "./viewLauncher";
+import { launchView, registerView } from "@screens/shared/viewLauncher";
 
 registerView("settingsMenu", (opts) => openSettingsMenu(opts as Parameters<typeof openSettingsMenu>[0]));
 

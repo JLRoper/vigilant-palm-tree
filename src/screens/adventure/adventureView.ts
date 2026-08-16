@@ -1,15 +1,15 @@
-import { Axial, axialToPixel } from "../core/hex";
-import { Camera } from "../render/camera";
-import { GameMap } from "../map/gameMap";
-import { Renderer } from "../render/renderer";
-import { Hero } from "../entities/hero";
-import { findPath, computePathCost, NEIGHBOR_DIRS } from "../map/pathfinding";
-import type { GameState, HeroId } from "../state/gameState";
-import type { TurnController } from "../state/turnController";
-import { computeReachableSplit } from "../render/overlays/pathOverlay";
-import type { PathPreviewLock } from "../managers/GameStateManager";
-import { openCenteredModal, styleButton, styleInput } from "./menu";
-import { MinimapCamera, getMinimapGeometry, isPointInMinimap } from "../render/minimap";
+import { Axial, axialToPixel } from "../../core/hex";
+import { Camera } from "../../render/camera";
+import { GameMap } from "../../map/gameMap";
+import { Renderer } from "../../render/renderer";
+import { Hero } from "../../entities/hero";
+import { findPath, computePathCost, NEIGHBOR_DIRS } from "../../map/pathfinding";
+import type { GameState, HeroId } from "../../state/gameState";
+import type { TurnController } from "../../state/turnController";
+import { computeReachableSplit } from "../../render/overlays/pathOverlay";
+import type { PathPreviewLock } from "../../managers/GameStateManager";
+import { openCenteredModal, styleButton, styleInput } from "@screens/shared/menu";
+import { MinimapCamera, getMinimapGeometry, isPointInMinimap } from "../../render/minimap";
 
 export const MAP_SEED = 42;
 

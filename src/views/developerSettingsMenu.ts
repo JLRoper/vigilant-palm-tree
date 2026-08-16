@@ -1,7 +1,7 @@
-import { openCenteredModal, menuTheme, styleButton } from "./menu";
+import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
 import { bus } from "../core/eventBus";
 import { openAssetManager } from "./assetManager";
-import { launchView, registerView } from "./viewLauncher";
+import { launchView, registerView } from "@screens/shared/viewLauncher";
 import { openDevConsole } from "../debug/devConsole";
 
 registerView("developerSettingsMenu", openDeveloperSettingsMenu);

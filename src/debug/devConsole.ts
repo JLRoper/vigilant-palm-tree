@@ -1,4 +1,4 @@
-import { openCenteredModal, menuTheme, styleButton, styleInput } from "../views/menu";
+import { openCenteredModal, menuTheme, styleButton, styleInput } from "@screens/shared/menu";
 import { EventLog, type LogEntry, type LogSource } from "./eventLog";
 
 export interface DevConsoleOptions {

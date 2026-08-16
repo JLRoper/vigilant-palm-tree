@@ -1,4 +1,4 @@
-import { PopupMenu, menuTheme } from "./menu";
+import { PopupMenu, menuTheme } from "@screens/shared/menu";
 import type { GameState, HeroId } from "../state/gameState";
 import { MOVEMENT_PER_TURN } from "../state/gameState";
 import { HERO_BANNERS } from "../render/assetDescriptors";

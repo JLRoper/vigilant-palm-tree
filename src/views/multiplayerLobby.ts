@@ -1,5 +1,5 @@
 import { api, type Game } from "../io/api";
-import { openCenteredModal, styleButton, styleInput, menuTheme } from "./menu";
+import { openCenteredModal, styleButton, styleInput, menuTheme } from "@screens/shared/menu";
 import { PLAYER_COLORS } from "../state/playerColors";
 import {
   setInMemoryLocalPlayerId,

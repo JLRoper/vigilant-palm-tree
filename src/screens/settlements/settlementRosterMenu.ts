@@ -1,6 +1,6 @@
-import { PopupMenu, menuTheme } from "./menu";
-import type { GameState, SettlementId, SettlementState } from "../state/gameState";
-import { SETTLEMENT_BANNERS } from "../render/assetDescriptors";
+import { PopupMenu, menuTheme } from "@screens/shared/menu";
+import type { GameState, SettlementId, SettlementState } from "../../state/gameState";
+import { SETTLEMENT_BANNERS } from "../../render/assetDescriptors";
 
 export interface SettlementRosterMenuOptions {
   onSelectSettlement?: (settlementId: SettlementId) => void;
