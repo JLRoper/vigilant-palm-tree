@@ -874,6 +874,126 @@ router.post("/games/:name/resolve-battle", async (req, res) => {
 // transfer used to be POST /games/:name/transfer -- ported to the
 // TransferGold command, see POST /games/:name/commands
 // (server/http/routes/commands.ts) and server/app/commandHandler.ts.
+router.post("/games/:name/transfer", async (req, res) => {
+  const body = req.body ?? {};
+  const { heroId, settlementId, direction } = body;
+  if (
+    typeof heroId !== "string" ||
+    typeof settlementId !== "string" ||
+    (direction !== "deposit" && direction !== "withdraw")
+  ) {
+    res.status(400).json({ error: "invalid transfer payload" });
+    return;
+  }
+  try {
+    const result = await withTransaction(async (client) => {
+      const gr = await client.query<FullGameRow>(
+        `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
+        [req.params.name]
+      );
+      if (gr.rowCount === 0) return { status: 404 as const };
+      const row = gr.rows[0];
+      const hero = row.heroes[heroId];
+      const settlement = row.settlements[settlementId];
+      if (!hero) return { status: 404 as const, error: "hero not found" };
+      if (!settlement) return { status: 404 as const, error: "settlement not found" };
+      if (hero.ownerId !== row.active_player_id) {
+        return { status: 403 as const, error: "forbidden_not_your_turn" };
+      }
+      if (hero.q !== settlement.q || hero.r !== settlement.r) {
+        return { status: 409 as const, error: "hero_not_at_settlement" };
+      }
+      if (settlement.ownerId === null || settlement.ownerId !== hero.ownerId) {
+        return { status: 409 as const, error: "not_owned_settlement" };
+      }
+
+      const amount =
+        direction === "deposit"
+          ? Number(hero.gold) || 0
+          : Number(settlement.gold) || 0;
+      if (amount <= 0) {
+        return { status: 409 as const, error: "nothing_to_transfer" };
+      }
+
+      const newHeroes: Record<string, HeroState> = {
+        ...row.heroes,
+        [heroId]: direction === "deposit"
+          ? { ...hero, gold: 0 }
+          : { ...hero, gold: (Number(hero.gold) || 0) + amount },
+      };
+      const newSettlements: Record<string, SettlementState> = {
+        ...row.settlements,
+        [settlementId]: direction === "withdraw"
+          ? { ...settlement, gold: 0 }
+          : { ...settlement, gold: (Number(settlement.gold) || 0) + amount },
+      };
+
+      const players: Player[] = row.players.map((p) => ({
+        id: p.id,
+        faction: p.faction,
+        name: p.name,
+        color: p.color,
+        heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
+        settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
+      }));
+      const legacyGold = sumPlayerGold(players, newHeroes, newSettlements);
+
+      await client.query(
+        `UPDATE games SET
+           players = $1::jsonb,
+           heroes = $2::jsonb,
+           settlements = $3::jsonb,
+           gold = $4,
+           updated_at = now()
+         WHERE id = $5`,
+        [
+          JSON.stringify(players),
+          JSON.stringify(newHeroes),
+          JSON.stringify(newSettlements),
+          legacyGold,
+          row.id,
+        ]
+      );
+
+      await client.query(
+        `INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3::jsonb)`,
+        [
+          row.id,
+          "transfer_gold",
+          JSON.stringify({ heroId, settlementId, direction, amount }),
+        ]
+      );
+
+      return {
+        status: 200 as const,
+        result: {
+          hero: newHeroes[heroId],
+          settlement: newSettlements[settlementId],
+        },
+      };
+    });
+
+    if (result.status === 404) {
+      if ("error" in result && result.error) {
+        res.status(404).json({ error: result.error });
+      } else {
+        res.status(404).json({ error: "not found" });
+      }
+      return;
+    }
+    if (result.status === 409) {
+      res.status(409).json({ error: result.error });
+      return;
+    }
+    res.json(result.result);
+  } catch (err) {
+    console.error("[api] POST /games/:name/transfer threw:", err);
+    res.status(500).json({
+      error: "internal",
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
 
 router.post("/games/:name/trade", async (req, res) => {
   const body = req.body ?? {};
@@ -914,6 +1034,23 @@ router.post("/games/:name/trade", async (req, res) => {
 
       const tradeResult = tradeResourcesReducer(
         { ...row, dirty: false } as unknown as GameState,
+        {
+          round: row.round,
+          day: row.day,
+          activePlayerId: row.active_player_id,
+          players: row.players,
+          heroes: row.heroes,
+          settlements: row.settlements,
+          phase: { kind: "PLAYER_TURN", playerId: row.active_player_id },
+          selectedHeroId: null,
+          selectedSettlementId: null,
+          dirty: false,
+          castleSeed: row.seed,
+          castleCount: 0,
+          activeCharters: [],
+          nextCharterId: 0,
+          nextSettlementId: Object.keys(row.settlements).length,
+        },
         fromSettlementId,
         toSettlementId,
         resource as WarehouseResource,
