@@ -2,7 +2,7 @@ import type { GameState, SettlementState } from "../state/gameState";
 import { MAX_HEROES_PER_PLAYER, HERO_RECRUIT_COST, SETTLEMENT_UPGRADE_COSTS } from "../state/gameState";
 import { PopupMenu, menuTheme, openCenteredModal, styleButton } from "./menu";
 import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../render/assetDescriptors";
-import type { CastleLevel } from "../../shared/types";
+import type { CastleLevel } from "@heroes/contracts";
 import { settings } from "../state/settings";
 import type { HorseVariant } from "../state/settings";
 import { POP_BY_LEVEL } from "../economy/settlementRates";

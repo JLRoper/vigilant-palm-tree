@@ -1,4 +1,4 @@
-import { normalizePlatoons, type Platoon } from "./units";
+import { normalizePlatoons } from "./units";
 import {
   buildingUpkeepRequired,
   clampMorale,
@@ -10,96 +10,92 @@ import {
 import type { HorseVariant } from "./settings";
 import { settings } from "./settings";
 import { POP_BY_LEVEL } from "../economy/settlementRates";
-import type { BuildingDef, BuildingKind, PlayerId, Faction, HeroId, SettlementId, CharterId, ResourceType } from "../../shared/types";
-import type {
-  BuildingRef,
-  CharterState,
-  SettlementState,
-  UpgradeState,
-  Warehouse,
-  WarehouseResource,
-} from "../../shared/settlementTypes";
 import { pickStyleForBuilding } from "../../shared/styleResolver";
-import { WAREHOUSE_RESOURCES } from "../../shared/constants";
-export { WAREHOUSE_RESOURCES } from "../../shared/constants";
 import { buildingUpgradeCost } from "../core/buildingRegistry";
-
-export type { PlayerId, Faction, HeroId, SettlementId, CharterId, ResourceType } from "../../shared/types";
-export type { BuildingDef, BuildingKind } from "../../shared/types";
-export type {
-  WarehouseResource,
-  Warehouse,
+import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+import type {
+  Player,
+  HeroState,
+  GamePhase,
+  GameState,
+  CalendarParts,
+  InitialStateOptions,
+  StartMoveResult,
+  ReorderResult,
+  CaptureResult,
+  AutoTradeTransfer,
+  ApplyEndOfTurnResult,
+  TransferDirection,
+  TransferResult,
+  TradeResult,
+  RecruitHeroResult,
+  StartCharterPayload,
+  StartCharterResult,
+  StepTravelResult,
+  StartUpgradeResult,
+  BuildingUpgradeRequest,
+  PlayerId,
+  HeroId,
+  SettlementId,
+  ResourceType,
+  BuildingDef,
   BuildingRef,
-  UpgradeState,
   CharterState,
   SettlementState,
-} from "../../shared/settlementTypes";
+  UpgradeState,
+  Warehouse,
+  WarehouseResource,
+} from "@heroes/contracts";
+
+// gameState.ts shrinks to a re-export barrel for its types (Track A / Phase
+// 1, stage 2 of plan/2026-08-15-parallel-dev-split.md) — the type
+// definitions now live in @heroes/contracts; this file keeps re-exporting
+// them so none of its ~35 existing consumers need to change on this PR.
+// Runtime behavior (the functions below) is unchanged.
+export { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+export type {
+  Player,
+  HeroState,
+  GamePhase,
+  GameState,
+  CalendarParts,
+  InitialStateOptions,
+  StartMoveResult,
+  ReorderResult,
+  CaptureResult,
+  AutoTradeTransfer,
+  ApplyEndOfTurnResult,
+  TransferDirection,
+  TransferResult,
+  TradeResult,
+  RecruitHeroResult,
+  StartCharterPayload,
+  StartCharterResult,
+  StepTravelResult,
+  StartUpgradeResult,
+  BuildingUpgradeRequest,
+  PlayerId,
+  Faction,
+  HeroId,
+  SettlementId,
+  CharterId,
+  ResourceType,
+  BuildingDef,
+  BuildingKind,
+  BuildingRef,
+  CharterState,
+  SettlementState,
+  UpgradeState,
+  Warehouse,
+  WarehouseResource,
+} from "@heroes/contracts";
 
 export function isHuman(p: Player): boolean {
   return p.faction === "player";
 }
 
-export interface Player {
-  id: PlayerId;
-  faction: Faction;
-  name: string;
-  color: string;
-  heroIds: HeroId[];
-  settlementIds: SettlementId[];
-}
-
-export interface HeroState {
-  id: HeroId;
-  name: string;
-  ownerId: PlayerId;
-  q: number;
-  r: number;
-  movementRemaining: number;
-  previousQ: number | null;
-  previousR: number | null;
-  previousMovementRemaining: number | null;
-  trail: { q: number; r: number }[];
-  gold: number;
-  troops: number;
-  stacks: Platoon[];
-  isChartering: boolean;
-  charterId: CharterId | null;
-  horseVariant: HorseVariant;
-}
-
-export type GamePhase =
-  | { kind: "PLAYER_TURN"; playerId: PlayerId }
-  | { kind: "AI_TURN"; playerId: PlayerId }
-  | { kind: "BATTLE"; attackerId: HeroId; defenderId: HeroId }
-  | { kind: "ROUND_END"; nextRound: number };
-
-export interface GameState {
-  round: number;
-  day: number;
-  activePlayerId: PlayerId;
-  players: Player[];
-  heroes: Record<HeroId, HeroState>;
-  settlements: Record<SettlementId, SettlementState>;
-  phase: GamePhase;
-  selectedHeroId: HeroId | null;
-  selectedSettlementId: SettlementId | null;
-  dirty: boolean;
-  castleSeed: number;
-  castleCount: number;
-  activeCharters: CharterState[];
-  nextCharterId: number;
-  nextSettlementId: number;
-}
-
 export const DAYS_PER_WEEK = 7;
 export const DAYS_PER_MONTH = 30;
-
-export interface CalendarParts {
-  week: number;
-  dayOfWeek: number;
-  month: number;
-  dayOfMonth: number;
-}
 
 export function calendarFromDay(day: number): CalendarParts {
   const d = Math.max(1, Math.floor(day));
@@ -131,16 +127,6 @@ const NEIGHBOR_DIRS: { q: number; r: number }[] = [
   { q: -1, r: 1 },
   { q: 0, r: 1 },
 ];
-
-export interface InitialStateOptions {
-  seedPlayers?: Player[];
-  seedHeroes?: HeroState[];
-  seedSettlements?: SettlementState[];
-  seedRound?: number;
-  seedActivePlayerId?: PlayerId;
-  seedCastleSeed?: number;
-  seedCastleCount?: number;
-}
 
 function defaultPlayers(): Player[] {
   return [
@@ -264,10 +250,6 @@ export function clearSettlementSelection(state: GameState): GameState {
   return { ...state, selectedSettlementId: null };
 }
 
-export type StartMoveResult =
-  | { state: GameState; ok: true }
-  | { state: GameState; ok: false; reason: string };
-
 export function startMove(
   state: GameState,
   heroId: HeroId,
@@ -342,12 +324,6 @@ export function cancelMove(state: GameState, heroId: HeroId): GameState {
   return { ...state, heroes: { ...state.heroes, [heroId]: restored }, dirty: true };
 }
 
-export interface ReorderResult {
-  state: GameState;
-  ok: boolean;
-  reason: string;
-}
-
 // The 8 army slots are FIXED positions on the battlefield (front line, back
 // line, etc.), so the user can only SWAP the contents of two slots. Same
 // from/to is a no-op success. Dragging onto an empty slot effectively moves
@@ -404,12 +380,6 @@ export function detectAdjacentEnemy(state: GameState, moverId: HeroId): HeroId |
 }
 
 export const CAPTURE_GOLD_REWARD = 100;
-
-export interface CaptureResult {
-  state: GameState;
-  captured: boolean;
-  previousOwnerId: PlayerId | null;
-}
 
 export function captureSettlement(
   state: GameState,
@@ -497,19 +467,6 @@ export function endTurn(state: GameState): GameState {
     selectedHeroId: null,
     selectedSettlementId: null,
   };
-}
-
-export interface AutoTradeTransfer {
-  fromSettlementId: SettlementId;
-  toSettlementId: SettlementId;
-  resource: WarehouseResource;
-  amount: number;
-  goldPaid: number;
-}
-
-export interface ApplyEndOfTurnResult {
-  state: GameState;
-  transfers: AutoTradeTransfer[];
 }
 
 export function applySettlementConsumption(s: SettlementState): SettlementState {
@@ -699,14 +656,6 @@ export function markSaved(state: GameState): GameState {
   return { ...state, dirty: false };
 }
 
-export type TransferDirection = "deposit" | "withdraw";
-
-export interface TransferResult {
-  state: GameState;
-  ok: boolean;
-  reason: string;
-}
-
 export function transferGold(
   state: GameState,
   heroId: HeroId,
@@ -754,12 +703,6 @@ export function transferGold(
   return { state, ok: false, reason: "invalid_direction" };
 }
 
-export interface TradeResult {
-  state: GameState;
-  ok: boolean;
-  reason: string;
-}
-
 export function tradeResources(
   state: GameState,
   fromSettlementId: SettlementId,
@@ -805,12 +748,6 @@ export function tradeResources(
 
 export const MAX_HEROES_PER_PLAYER = 5;
 export const HERO_RECRUIT_COST = 1;
-
-export interface RecruitHeroResult {
-  state: GameState;
-  hero?: HeroState;
-  error?: string;
-}
 
 export function recruitHero(
   state: GameState,
@@ -898,22 +835,6 @@ export const SETTLEMENT_UPGRADE_COSTS: Record<number, { gold: number; wood: numb
   1: { gold: 5000, wood: 40, stone: 30, iron: 20, arcane: 0, days: 15 },
   2: { gold: 15000, wood: 80, stone: 60, iron: 50, arcane: 20, days: 25 },
 };
-
-export interface StartCharterPayload {
-  heroId: HeroId;
-  targetQ: number;
-  targetR: number;
-  settlementName: string;
-  settlementId: SettlementId;
-  charterId: CharterId;
-  resourceRates: Partial<Record<ResourceType, number>>;
-  foundedOnResource: ResourceType | null;
-  citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
-}
-
-export type StartCharterResult =
-  | { state: GameState; ok: true }
-  | { state: GameState; ok: false; reason: string };
 
 export function startCharter(state: GameState, payload: StartCharterPayload): StartCharterResult {
   if (state.phase.kind !== "PLAYER_TURN") {
@@ -1007,10 +928,6 @@ export function startCharter(state: GameState, payload: StartCharterPayload): St
     ok: true,
   };
 }
-
-export type StepTravelResult =
-  | { state: GameState; ok: true }
-  | { state: GameState; ok: false; reason: string };
 
 export function stepTravelCharter(
   state: GameState,
@@ -1178,16 +1095,6 @@ export const TOWN_HALL_COSTS: Record<number, { gold: number; wood: number; stone
   1: { gold: 1500, wood: 15, stone: 10, days: 7 },
   2: { gold: 5000, wood: 40, stone: 25, days: 12 },
 };
-
-export type StartUpgradeResult =
-  | { state: GameState; ok: true }
-  | { state: GameState; ok: false; reason: string };
-
-export interface BuildingUpgradeRequest {
-  gx: number;
-  gy: number;
-  kind: BuildingKind;
-}
 
 export function startBuildingUpgrade(
   state: GameState,

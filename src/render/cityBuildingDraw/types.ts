@@ -1,6 +1,6 @@
-import type { BuildingKind, GenerationStyle } from "../../../shared/types";
+import type { BuildingKind, GenerationStyle } from "@heroes/contracts";
 
-export type { BuildingKind, BuildingDef, GenerationStyle } from "../../../shared/types";
+export type { BuildingKind, BuildingDef, GenerationStyle } from "@heroes/contracts";
 
 export interface DrawBuildingContext {
   ctx: CanvasRenderingContext2D;

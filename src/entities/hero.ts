@@ -1,5 +1,5 @@
 import { Axial, axialToPixel } from "../core/hex";
-import type { Faction as StateFaction, HeroId, HeroState, PlayerId } from "../state/gameState";
+import type { Faction as StateFaction, HeroId, HeroState, PlayerId } from "@heroes/contracts";
 import { normalizePlatoons, type Platoon } from "../state/units";
 import { settings } from "../state/settings";
 import type { HorseVariant } from "../state/settings";

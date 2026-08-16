@@ -1,4 +1,4 @@
-import type { PlayerId } from "../state/gameState";
+import type { PlayerId } from "@heroes/contracts";
 
 const STORAGE_PREFIX = "heroes.mp.localPlayerId.";
 

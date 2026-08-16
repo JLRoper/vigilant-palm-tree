@@ -1,5 +1,5 @@
 import { Faction, Direction } from "../entities/hero";
-import type { CastleLevel, CastleVariant, ResourceType } from "../../shared/types";
+import type { CastleLevel, CastleVariant, ResourceType } from "@heroes/contracts";
 import { settings } from "../state/settings";
 import { SpriteProvider } from "./assets";
 import {

@@ -84,7 +84,7 @@ import buildingPixelGranary2 from "../resources/buildings/building-pixel-granary
 import buildingPixelGranary3 from "../resources/buildings/building-pixel-granary-3.png?url";
 import buildingPixelSmithy2 from "../resources/buildings/building-pixel-smithy-2.png?url";
 import { Faction, Direction } from "../entities/hero";
-import type { CastleLevel, CastleVariant, ResourceType } from "../../shared/types";
+import type { CastleLevel, CastleVariant, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
 import type { ResourceStyle } from "../state/settings";
 import { HORSE_VARIANT_REGISTRY, type HorseVariantId } from "../../shared/horseVariants";

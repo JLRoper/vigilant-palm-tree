@@ -1,4 +1,4 @@
-import type { SettlementState } from "../../shared/settlementTypes";
+import type { SettlementState } from "@heroes/contracts";
 import { buildingUpkeep } from "../core/buildingRegistry";
 
 export const FOOD_PER_POPULATION = 100;

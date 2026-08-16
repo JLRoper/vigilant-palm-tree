@@ -1,4 +1,4 @@
-import type { ResourceType } from "../../shared/types";
+import type { ResourceType } from "@heroes/contracts";
 import type { CityViewSize } from "./cityGrid";
 
 export interface CitySpot {

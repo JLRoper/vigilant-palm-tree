@@ -1,6 +1,6 @@
 import { mulberry32 } from "../core/rng";
 import { Castle } from "../entities/settlement";
-import type { CastleLevel } from "../../shared/types";
+import type { CastleLevel } from "@heroes/contracts";
 import { GameMap } from "./gameMap";
 import { isPassable } from "./terrain";
 
