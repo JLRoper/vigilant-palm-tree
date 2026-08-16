@@ -1,4 +1,5 @@
-import { TILE_W, TILE_D, cellOrigin, type CityViewSize } from "../../../core/cityGrid";
+import { TILE_W, TILE_D, cellOrigin } from "../../../core/cityGrid";
+import type { CityViewSize } from "@heroes/engine";
 import { computeCityScale } from "../../../render/cityRenderer";
 import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
 import { coversCell as reCoversCell } from "../../../render/cityBuildingDraw";

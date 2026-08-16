@@ -6,7 +6,7 @@ import { MAP_SEED } from "@screens/adventure/adventureView";
 import { colorForOwner } from "../state/playerColors";
 import { buildInitialGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";
-import { cityViewSizeFor } from "../core/cityGrid";
+import { cityViewSizeFor } from "@heroes/engine";
 import { hexDistance } from "../core/hex";
 import { CHARTER_GOLD_COST, CHARTER_WAREHOUSE_COST } from "../state/gameState";
 
