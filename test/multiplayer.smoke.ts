@@ -1,9 +1,34 @@
 import { request as pwRequest } from "playwright";
+import { ChildProcess } from "node:child_process";
 import assert from "node:assert/strict";
+import { getApiPort, spawnLogged, waitForUrl, treeKill } from "./_request";
 
-const API_URL = `http://127.0.0.1:${process.env.API_PORT || "3001"}`;
+const API_PORT = getApiPort(3001);
+const API_URL = `http://127.0.0.1:${API_PORT}`;
+
+const api: { child?: ChildProcess } = {};
+let cleaned = false;
+
+function startApi(): ChildProcess {
+  api.child = spawnLogged("api", "npx", ["tsx", "server/index.ts"], { API_PORT: String(API_PORT) });
+  return api.child;
+}
+
+function cleanup(): void {
+  if (cleaned) return;
+  cleaned = true;
+  if (api.child && api.child.pid != null) treeKill(api.child.pid);
+}
+
+process.on("exit", cleanup);
+process.on("SIGINT", () => { cleanup(); process.exit(1); });
+process.on("SIGTERM", () => { cleanup(); process.exit(1); });
+process.on("uncaughtException", (err) => { console.error(err); cleanup(); process.exit(1); });
 
 async function run() {
+  startApi();
+  await waitForUrl(`${API_URL}/api/health`);
+
   const ctx = await pwRequest.newContext();
   const lobbyGameName = `mp-smoke-${Date.now().toString(36)}`;
 

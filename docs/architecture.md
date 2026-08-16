@@ -114,7 +114,7 @@ Do **not** create in this plan: `entities/settlement.ts` content, `map/resourceT
 After all 13 steps, the project must:
 
 - `npm run build` succeeds (tsc + vite build, both clean).
-- `npm test` succeeds (smoke test in `test/smoke.ts`; `pretest` allocates ports via `scripts/allocate-ports.ts`).
+- `npm test` succeeds (smoke test in `test/smoke.ts`; `pretest` allocates ports via `scripts/allocate-ports.ts`, and the smoke entry reads its boot contract from `local/.test-request.json` written by `tools/run-test.mjs`).
 - Dev server (`npm run dev`) loads `index.html`, renders the same hex map, pans/zooms, moves the player hero along an A* path, wanders enemies, and persists via the API exactly as today.
 - `git grep -nE "^import.*from \"\\./hex\"" src/` and similar greps confirm no flat-root `hex.ts` / `pathfinding.ts` / `camera.ts` / `sprites.ts` / `api.ts` / `hero.ts` / `castles.ts` / `ai.ts` remain at `src/` root.
 - `src/main.ts` is shorter and reads as an orchestrator: init, rAF loop, delegate to views + systems.
