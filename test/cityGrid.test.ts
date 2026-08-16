@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import {
   TILE_W,
   TILE_D,
-  cityViewSizeFor,
   cellOrigin,
   cellToScreen,
   screenToCell,
@@ -11,6 +10,7 @@ import {
   cellsInDrawOrder,
   type CityCell,
 } from "../src/core/cityGrid.js";
+import { cityViewSizeFor } from "@heroes/engine";
 
 let n = 0;
 function check(cond: unknown, msg: string) {

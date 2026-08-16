@@ -1,5 +1,12 @@
 import type { ResourceType } from "@heroes/contracts";
-import type { CityViewSize } from "./cityGrid";
+
+export type CityViewSize = 5 | 10 | 15;
+
+export function cityViewSizeFor(level: 1 | 2 | 3): CityViewSize {
+  if (level === 1) return 5;
+  if (level === 2) return 10;
+  return 15;
+}
 
 export interface CitySpot {
   cell: { x: number; y: number };

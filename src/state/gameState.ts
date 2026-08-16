@@ -3,18 +3,17 @@ import type { HorseVariant } from "./settings";
 import { settings } from "./settings";
 import {
   advanceCharters,
+  advanceSettlementUpgrades,
   applyEffectiveIncome,
   applyMoraleDecay,
+  applyPopulationGrowth,
   applySettlementConsumption,
-  buildingUpgradeCost,
-  foodRequired,
-  pickStyleForBuilding,
-  POP_BY_LEVEL,
+  produceSettlementResources,
   runAutoTrade,
   tradeResources,
   transferGold,
 } from "@heroes/engine";
-import { MOVEMENT_PER_TURN, WAREHOUSE_RESOURCES } from "@heroes/contracts";
+import { MOVEMENT_PER_TURN } from "@heroes/contracts";
 import type {
   Player,
   HeroState,
@@ -24,26 +23,14 @@ import type {
   InitialStateOptions,
   StartMoveResult,
   ReorderResult,
-  CaptureResult,
   ApplyEndOfTurnResult,
   RecruitHeroResult,
-  StartUpgradeResult,
-  BuildingUpgradeRequest,
   PlayerId,
   HeroId,
   SettlementId,
-  ResourceType,
-  BuildingDef,
-  BuildingRef,
   SettlementState,
-  UpgradeState,
-  Warehouse,
 } from "@heroes/contracts";
 
-// applySettlementConsumption/applyMoraleDecay/applyEffectiveIncome/
-// runAutoTrade/transferGold/tradeResources now live in @heroes/engine
-// (Track A / Phase 1, stage 4) — re-exported here so existing consumers of
-// state/gameState don't need to change their import path.
 export { applySettlementConsumption, applyMoraleDecay, applyEffectiveIncome, runAutoTrade, transferGold, tradeResources };
 
 export { advanceCharters };
@@ -53,6 +40,18 @@ export {
   cleanupDefeatedHeroCharters,
   startCharter,
   stepTravelCharter,
+} from "@heroes/engine";
+
+export {
+  CAPTURE_GOLD_REWARD,
+  captureSettlement,
+  setAutoTrade,
+  startBuildingUpgrade,
+  applyBuildingUpgrade,
+  startTownHallUpgrade,
+  TOWN_HALL_COSTS,
+  startSettlementUpgrade,
+  SETTLEMENT_UPGRADE_COSTS,
 } from "@heroes/engine";
 
 // gameState.ts shrinks to a re-export barrel for its types (Track A / Phase
@@ -385,46 +384,6 @@ export function detectAdjacentEnemy(state: GameState, moverId: HeroId): HeroId |
   return null;
 }
 
-export const CAPTURE_GOLD_REWARD = 100;
-
-export function captureSettlement(
-  state: GameState,
-  heroId: HeroId,
-  settlementId: SettlementId,
-): CaptureResult {
-  const hero = state.heroes[heroId];
-  const settlement = state.settlements[settlementId];
-  if (!hero || !settlement) return { state, captured: false, previousOwnerId: null };
-  if (hero.ownerId === settlement.ownerId) {
-    return { state, captured: false, previousOwnerId: settlement.ownerId };
-  }
-  const newOwnerId = hero.ownerId;
-  const previousOwnerId = settlement.ownerId;
-  const newSettlements: Record<SettlementId, SettlementState> = {
-    ...state.settlements,
-    [settlementId]: { ...settlement, ownerId: newOwnerId },
-  };
-  const newPlayers = state.players.map((p) => {
-    if (p.id === newOwnerId) {
-      if (p.settlementIds.includes(settlementId)) return p;
-      return { ...p, settlementIds: [...p.settlementIds, settlementId] };
-    }
-    if (p.id === previousOwnerId) {
-      return { ...p, settlementIds: p.settlementIds.filter((id) => id !== settlementId) };
-    }
-    return p;
-  });
-  const newHeroes: Record<HeroId, HeroState> = {
-    ...state.heroes,
-    [heroId]: { ...hero, gold: hero.gold + CAPTURE_GOLD_REWARD },
-  };
-  return {
-    state: { ...state, settlements: newSettlements, players: newPlayers, heroes: newHeroes, dirty: true },
-    captured: true,
-    previousOwnerId,
-  };
-}
-
 export function startBattle(state: GameState, attackerId: HeroId, defenderId: HeroId): GameState {
   if (state.phase.kind === "BATTLE") return state;
   return {
@@ -495,15 +454,7 @@ export function applyEndOfTurnDetailed(state: GameState): ApplyEndOfTurnResult {
     }
   }
   // 1. Produce resources for ALL settlements
-  let newSettlements: Record<SettlementId, SettlementState> = { ...state.settlements };
-  for (const s of Object.values(newSettlements)) {
-    const newWarehouse: Warehouse = { ...s.warehouse };
-    for (const r of WAREHOUSE_RESOURCES) {
-      const rate = s.resourceRates[r] ?? 0;
-      if (rate > 0) newWarehouse[r] = (newWarehouse[r] ?? 0) + rate;
-    }
-    newSettlements[s.id] = { ...newSettlements[s.id], warehouse: newWarehouse };
-  }
+  let newSettlements: Record<SettlementId, SettlementState> = produceSettlementResources(state.settlements);
   // 2. Auto-trade for active player's settlements
   const autoTrade = runAutoTrade(newSettlements, playerId);
   newSettlements = autoTrade.settlements;
@@ -520,17 +471,6 @@ export function applyEndOfTurnDetailed(state: GameState): ApplyEndOfTurnResult {
   };
 }
 
-export function setAutoTrade(state: GameState, settlementId: SettlementId, autoTrade: boolean): GameState {
-  const s = state.settlements[settlementId];
-  if (!s) return state;
-  if ((s.autoTrade ?? true) === autoTrade) return state;
-  return {
-    ...state,
-    settlements: { ...state.settlements, [settlementId]: { ...s, autoTrade } },
-    dirty: true,
-  };
-}
-
 export function applyWeeklyUpkeep(state: GameState): GameState {
   const newHeroes: Record<HeroId, HeroState> = { ...state.heroes };
   for (const hero of Object.values(newHeroes)) {
@@ -541,18 +481,7 @@ export function applyWeeklyUpkeep(state: GameState): GameState {
       newHeroes[hero.id] = { ...hero, gold: 0, troops: hero.gold };
     }
   }
-  const growthRate = settings().populationGrowthRate;
-  const newSettlements: Record<SettlementId, SettlementState> = { ...state.settlements };
-  for (const [id, s] of Object.entries(newSettlements)) {
-    if (s.population <= 0) continue;
-    const levelMax = POP_BY_LEVEL[s.level] ?? POP_BY_LEVEL[1];
-    if (s.population >= levelMax) continue;
-    const needed = foodRequired(s);
-    if ((s.warehouse.food ?? 0) < needed) continue;
-    const growth = Math.max(1, Math.ceil(s.population * growthRate));
-    const newPop = Math.min(levelMax, s.population + growth);
-    newSettlements[id] = { ...s, population: newPop };
-  }
+  const newSettlements = applyPopulationGrowth(state.settlements, settings().populationGrowthRate);
   return { ...state, heroes: newHeroes, settlements: newSettlements, dirty: true };
 }
 
@@ -665,230 +594,3 @@ export function recruitHero(
   };
 }
 
-// =========================================================================
-// CHARTER SETTLEMENTS
-// =========================================================================
-
-export const SETTLEMENT_UPGRADE_COSTS: Record<number, { gold: number; wood: number; stone: number; iron: number; arcane: number; days: number }> = {
-  1: { gold: 5000, wood: 40, stone: 30, iron: 20, arcane: 0, days: 15 },
-  2: { gold: 15000, wood: 80, stone: 60, iron: 50, arcane: 20, days: 25 },
-};
-
-export const TOWN_HALL_COSTS: Record<number, { gold: number; wood: number; stone: number; days: number }> = {
-  1: { gold: 1500, wood: 15, stone: 10, days: 7 },
-  2: { gold: 5000, wood: 40, stone: 25, days: 12 },
-};
-
-export function startBuildingUpgrade(
-  state: GameState,
-  settlementId: SettlementId,
-  requests: BuildingUpgradeRequest[],
-): StartUpgradeResult {
-  const s = state.settlements[settlementId];
-  if (!s) return { state, ok: false, reason: "no_settlement" };
-  if (s.upgrade) return { state, ok: false, reason: "upgrade_in_progress" };
-  if (requests.length === 0) return { state, ok: false, reason: "no_buildings" };
-
-  let totalGold = 0;
-  let totalWood = 0;
-  let totalStone = 0;
-  let maxDays = 0;
-
-  for (const req of requests) {
-    const b = s.buildings.find((x) => x.gx === req.gx && x.gy === req.gy && x.kind === req.kind);
-    if (!b) return { state, ok: false, reason: "building_not_found" };
-    if (b.level >= 3) return { state, ok: false, reason: "max_level" };
-    const cost = buildingUpgradeCost(req.kind, b.level);
-    if (!cost) return { state, ok: false, reason: "no_cost_for_level" };
-    totalGold += cost.gold;
-    totalWood += cost.wood;
-    totalStone += cost.stone;
-    maxDays = Math.max(maxDays, cost.days);
-  }
-
-  if (s.gold < totalGold) return { state, ok: false, reason: "insufficient_gold" };
-  if ((s.warehouse.wood ?? 0) < totalWood) return { state, ok: false, reason: "insufficient_wood" };
-  if ((s.warehouse.stone ?? 0) < totalStone) return { state, ok: false, reason: "insufficient_stone" };
-
-  const upgrade: UpgradeState = {
-    kind: "buildings",
-    targetLevel: 3,
-    daysRemaining: maxDays,
-    buildingRefs: requests.map((r) => ({ gx: r.gx, gy: r.gy, kind: r.kind })),
-  };
-
-  const updated: SettlementState = {
-    ...s,
-    gold: s.gold - totalGold,
-    warehouse: {
-      ...s.warehouse,
-      wood: (s.warehouse.wood ?? 0) - totalWood,
-      stone: (s.warehouse.stone ?? 0) - totalStone,
-    },
-    upgrade,
-  };
-
-  return {
-    state: { ...state, settlements: { ...state.settlements, [settlementId]: updated }, dirty: true },
-    ok: true,
-  };
-}
-
-export function applyBuildingUpgrade(
-  state: GameState,
-  settlementId: SettlementId,
-  refs: BuildingRef[],
-): GameState {
-  const s = state.settlements[settlementId];
-  if (!s) return state;
-  const buildings = s.buildings.map((b) => {
-    const ref = refs.find((r) => r.gx === b.gx && r.gy === b.gy && r.kind === b.kind);
-    if (!ref || b.level >= 3) return b;
-    const newLevel = (b.level + 1) as 2 | 3;
-    const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style) as BuildingDef["style"];
-    return { ...b, level: newLevel, style: newStyle };
-  });
-  return {
-    ...state,
-    settlements: { ...state.settlements, [settlementId]: { ...s, buildings } },
-    dirty: true,
-  };
-}
-
-export function startTownHallUpgrade(state: GameState, settlementId: SettlementId, targetLevel: 2 | 3): StartUpgradeResult {
-  const s = state.settlements[settlementId];
-  if (!s) return { state, ok: false, reason: "no_settlement" };
-  if (s.upgrade) return { state, ok: false, reason: "upgrade_in_progress" };
-  const cost = TOWN_HALL_COSTS[targetLevel - 1];
-  if (!cost) return { state, ok: false, reason: "invalid_level" };
-  if (s.gold < cost.gold) return { state, ok: false, reason: "insufficient_gold" };
-  if ((s.warehouse.wood ?? 0) < cost.wood) return { state, ok: false, reason: "insufficient_wood" };
-  if ((s.warehouse.stone ?? 0) < cost.stone) return { state, ok: false, reason: "insufficient_stone" };
-
-  const townHall = s.buildings.find((b) => b.kind === "townHall");
-  if (!townHall || townHall.level !== targetLevel - 1) return { state, ok: false, reason: "town_hall_level_mismatch" };
-
-  const upgrade: UpgradeState = { kind: "townHall", targetLevel, daysRemaining: cost.days };
-  const updated: SettlementState = {
-    ...s,
-    gold: s.gold - cost.gold,
-    warehouse: {
-      ...s.warehouse,
-      wood: (s.warehouse.wood ?? 0) - cost.wood,
-      stone: (s.warehouse.stone ?? 0) - cost.stone,
-    },
-    upgrade,
-  };
-  return {
-    state: { ...state, settlements: { ...state.settlements, [settlementId]: updated }, dirty: true },
-    ok: true,
-  };
-}
-
-export function startSettlementUpgrade(
-  state: GameState,
-  settlementId: SettlementId,
-  targetLevel: 2 | 3,
-  newResourceRates: Partial<Record<ResourceType, number>>,
-  newCitySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>,
-): StartUpgradeResult {
-  const s = state.settlements[settlementId];
-  if (!s) return { state, ok: false, reason: "no_settlement" };
-  if (s.upgrade) return { state, ok: false, reason: "upgrade_in_progress" };
-  if (s.level !== targetLevel - 1) return { state, ok: false, reason: "invalid_level" };
-  const cost = SETTLEMENT_UPGRADE_COSTS[s.level];
-  if (!cost) return { state, ok: false, reason: "invalid_level" };
-  if (s.gold < cost.gold) return { state, ok: false, reason: "insufficient_gold" };
-  if ((s.warehouse.wood ?? 0) < cost.wood) return { state, ok: false, reason: "insufficient_wood" };
-  if ((s.warehouse.stone ?? 0) < cost.stone) return { state, ok: false, reason: "insufficient_stone" };
-  if ((s.warehouse.iron ?? 0) < cost.iron) return { state, ok: false, reason: "insufficient_iron" };
-  if ((s.warehouse.arcane ?? 0) < cost.arcane) return { state, ok: false, reason: "insufficient_arcane" };
-
-  const gatePct = settings().upgradePopulationGate;
-  const levelMax = POP_BY_LEVEL[s.level] ?? 500;
-  if (s.population < gatePct * levelMax) return { state, ok: false, reason: "population_too_low" };
-
-  const townHall = s.buildings.find((b) => b.kind === "townHall");
-  if (!townHall || townHall.level < targetLevel) return { state, ok: false, reason: "town_hall_level_too_low" };
-
-  const upgrade: UpgradeState = {
-    kind: "settlement",
-    targetLevel,
-    daysRemaining: cost.days,
-    newResourceRates,
-    newCitySpots,
-  };
-  const updated: SettlementState = {
-    ...s,
-    gold: s.gold - cost.gold,
-    warehouse: {
-      ...s.warehouse,
-      wood: (s.warehouse.wood ?? 0) - cost.wood,
-      stone: (s.warehouse.stone ?? 0) - cost.stone,
-      iron: (s.warehouse.iron ?? 0) - cost.iron,
-      arcane: (s.warehouse.arcane ?? 0) - cost.arcane,
-    },
-    upgrade,
-  };
-  return {
-    state: { ...state, settlements: { ...state.settlements, [settlementId]: updated }, dirty: true },
-    ok: true,
-  };
-}
-
-export function advanceSettlementUpgrades(state: GameState): GameState {
-  let changed = false;
-  const newSettlements: Record<SettlementId, SettlementState> = { ...state.settlements };
-  for (const [id, s] of Object.entries(newSettlements)) {
-    if (!s.upgrade) continue;
-    const daysRemaining = s.upgrade.daysRemaining - 1;
-    if (daysRemaining > 0) {
-      newSettlements[id] = { ...s, upgrade: { ...s.upgrade, daysRemaining } };
-      changed = true;
-      continue;
-    }
-    const upgrade = s.upgrade;
-    if (upgrade.kind === "townHall") {
-      const buildings = s.buildings.map((b) => {
-        const newLevel = Math.max(b.level, upgrade.targetLevel) as 1 | 2 | 3;
-        const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style);
-        return { ...b, level: newLevel, style: newStyle as BuildingDef["style"] };
-      });
-      newSettlements[id] = { ...s, buildings, upgrade: undefined };
-      changed = true;
-    } else if (upgrade.kind === "buildings" && upgrade.buildingRefs) {
-      const refs = upgrade.buildingRefs;
-      const buildings = s.buildings.map((b) => {
-        const ref = refs.find((r) => r.gx === b.gx && r.gy === b.gy && r.kind === b.kind);
-        if (!ref || b.level >= 3) return b;
-        const newLevel = (b.level + 1) as 2 | 3;
-        const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style) as BuildingDef["style"];
-        return { ...b, level: newLevel, style: newStyle };
-      });
-      newSettlements[id] = { ...s, buildings, upgrade: undefined };
-      changed = true;
-    } else if (upgrade.kind === "settlement") {
-      const targetLevel = upgrade.targetLevel;
-      const goldTax = targetLevel === 2 ? 2 : 3;
-      const mergedSpots = [...s.citySpots];
-      if (upgrade.newCitySpots) {
-        for (const spot of upgrade.newCitySpots) {
-          if (!mergedSpots.some((ms) => ms.cell.x === spot.cell.x && ms.cell.y === spot.cell.y)) {
-            mergedSpots.push(spot);
-          }
-        }
-      }
-      newSettlements[id] = {
-        ...s,
-        level: targetLevel as 1 | 2 | 3,
-        goldTax,
-        resourceRates: upgrade.newResourceRates ?? s.resourceRates,
-        citySpots: mergedSpots,
-        upgrade: undefined,
-      };
-      changed = true;
-    }
-  }
-  if (!changed) return state;
-  return { ...state, settlements: newSettlements, dirty: true };
-}

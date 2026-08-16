@@ -1,4 +1,5 @@
-import { TILE_W, TILE_D, cellOrigin, type CityViewSize } from "../../../core/cityGrid";
+import { TILE_W, TILE_D, cellOrigin } from "../../../core/cityGrid";
+import type { CityViewSize } from "@heroes/engine";
 import { computeCityScale, drawCityView } from "../../../render/cityRenderer";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { SpriteProvider } from "../../../render/assets";

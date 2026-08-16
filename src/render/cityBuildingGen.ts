@@ -1,5 +1,5 @@
 ﻿import type { BuildingDef, BuildingKind, GenerationStyle } from "./cityBuildingDraw";
-import type { CityViewSize } from "../core/cityGrid";
+import type { CityViewSize } from "@heroes/engine";
 import { buildingFootprintFromRegistry } from "@heroes/engine";
 import { STYLE_IDS, type BuildingStyleId } from "./buildingStyles";
 

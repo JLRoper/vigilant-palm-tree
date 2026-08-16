@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { generateCitySpots, type CitySpot, type CityMine } from "../src/core/citySpots.js";
-import type { CityViewSize } from "../src/core/cityGrid.js";
+import { generateCitySpots, type CitySpot, type CityMine, type CityViewSize } from "@heroes/engine";
 
 let n = 0;
 function check(cond: unknown, msg: string) {

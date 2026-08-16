@@ -31,10 +31,8 @@ import { findPath } from "../map/pathfinding";
 import { hexDistance } from "../core/hex";
 import { platoonsHaveTroops } from "./units";
 import type { GameMap } from "../map/gameMap";
-import { computeSettlementRates } from "@heroes/engine";
-import type { HorseVariant } from "./settings";
-import { generateCitySpots } from "../core/citySpots";
-import { cityViewSizeFor } from "../core/cityGrid";
+import { computeSettlementRates, generateCitySpots, cityViewSizeFor } from "@heroes/engine";
+import { settings, type HorseVariant } from "./settings";
 import type { BattleResult } from "@heroes/engine";
 
 export interface TurnControllerHooks {
@@ -458,14 +456,21 @@ export class TurnController {
 
     const map = this.hooks.getMap();
     const computed = computeSettlementRates(map, s.q, s.r, targetLevel);
-    const size = 5 * targetLevel as 5 | 10 | 15;
+    const size = cityViewSizeFor(targetLevel);
     const rng = () => this.hooks.rng();
     const { spots } = generateCitySpots(size, rng);
     const newCitySpots = spots.filter(
       (spot) => !s.citySpots.some((cs) => cs.cell.x === spot.cell.x && cs.cell.y === spot.cell.y),
     );
 
-    const result = startSettlementUpgradeReducer(this.state, settlementId, targetLevel, computed.rates, newCitySpots);
+    const result = startSettlementUpgradeReducer(
+      this.state,
+      settlementId,
+      targetLevel,
+      computed.rates,
+      newCitySpots,
+      settings().upgradePopulationGate,
+    );
     if (!result.ok) return { ok: false, reason: result.reason };
     this.state = result.state;
     this.hooks.logEvent({
