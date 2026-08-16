@@ -1,6 +1,6 @@
-import { PopupMenu, styleButton } from "./menu";
-import type { BuildingDef, BuildingKind } from "../render/cityBuildingDraw";
-import type { SettlementState } from "../state/gameState";
+import { PopupMenu, styleButton } from "@screens/shared/menu";
+import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
+import type { SettlementState } from "../../../state/gameState";
 import {
   buildingLabel,
   buildingSettlementEffects,
@@ -10,7 +10,7 @@ import {
   combineUpgradeCosts,
   type BuildingUpgradeCost,
 } from "@heroes/engine";
-import { menuTheme } from "./menu";
+import { menuTheme } from "@screens/shared/menu";
 
 export interface BuildingSelectionMenuOptions {
   onUpgrade: (combined: BuildingUpgradeCost) => void;

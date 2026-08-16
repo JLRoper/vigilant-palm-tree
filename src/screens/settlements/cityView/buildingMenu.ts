@@ -1,6 +1,6 @@
-import { PopupMenu, styleButton } from "./menu";
-import type { BuildingDef, BuildingKind } from "../render/cityBuildingDraw";
-import type { SettlementState } from "../state/gameState";
+import { PopupMenu, styleButton } from "@screens/shared/menu";
+import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
+import type { SettlementState } from "../../../state/gameState";
 import {
   buildingLabel,
   buildingDescription,

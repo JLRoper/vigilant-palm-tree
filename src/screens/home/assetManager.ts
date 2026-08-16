@@ -1,11 +1,11 @@
-import { openCenteredModal, menuTheme, styleButton } from "./menu";
+import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
 import {
   fetchAssetList,
   uploadAsset,
   deleteAsset,
   assetUrl,
   type AssetSummary,
-} from "../io/assetApi";
+} from "../../io/assetApi";
 
 export function openAssetManager(): void {
   const modal = openCenteredModal(document.body, "Asset Manager", 720, false);

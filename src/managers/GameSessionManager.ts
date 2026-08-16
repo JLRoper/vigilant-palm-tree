@@ -8,7 +8,7 @@ import { markSaved } from "../state/gameState";
 import { hydrateGameState, playerHeroId } from "../game/initState";
 import { CASTLE_COUNT_DEFAULT, defaultCastleSeedFromMapSeed, generateCastles } from "../map/castlePlacement";
 import { loadUnitCatalog } from "../data/unitCatalog";
-import { MAP_SEED } from "../views/adventureView";
+import { MAP_SEED } from "@screens/adventure/adventureView";
 import type { Game, TileRow } from "../io/api";
 import {
   getInMemoryLocalPlayerId,

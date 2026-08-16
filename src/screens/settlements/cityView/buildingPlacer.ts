@@ -1,21 +1,21 @@
-import { TILE_W, TILE_D, cellOrigin, type CityViewSize } from "../core/cityGrid";
-import { computeCityScale } from "../render/cityRenderer";
-import type { BuildingDef, BuildingKind } from "../render/cityBuildingDraw";
-import { coversCell as reCoversCell } from "../render/cityBuildingDraw";
-import { PopupMenu, styleButton, menuTheme } from "./menu";
+import { TILE_W, TILE_D, cellOrigin, type CityViewSize } from "../../../core/cityGrid";
+import { computeCityScale } from "../../../render/cityRenderer";
+import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
+import { coversCell as reCoversCell } from "../../../render/cityBuildingDraw";
+import { PopupMenu, styleButton, menuTheme } from "@screens/shared/menu";
 import {
   buildingPlacementCost,
   buildingLabel,
   buildingBuildDays,
   buildingFootprintFromRegistry,
 } from "@heroes/engine";
-import { pickStyleForBuilding } from "../render/assetDescriptors";
-import type { ResourceType } from "../state/gameState";
-import resourceGoldPileSmol from "../resources/resource-gold-pile-smol.png?url";
-import resourceWoodPileSmol from "../resources/resource-wood-pile-smol.png?url";
-import resourceStonePileSmol from "../resources/resource-stone-pile-smol.png?url";
-import resourceIronPileSmol from "../resources/resource-iron-pile-smol.png?url";
-import resourceArcanePileSmol from "../resources/resource-arcane-pile-smol.png?url";
+import { pickStyleForBuilding } from "../../../render/assetDescriptors";
+import type { ResourceType } from "../../../state/gameState";
+import resourceGoldPileSmol from "../../../resources/resource-gold-pile-smol.png?url";
+import resourceWoodPileSmol from "../../../resources/resource-wood-pile-smol.png?url";
+import resourceStonePileSmol from "../../../resources/resource-stone-pile-smol.png?url";
+import resourceIronPileSmol from "../../../resources/resource-iron-pile-smol.png?url";
+import resourceArcanePileSmol from "../../../resources/resource-arcane-pile-smol.png?url";
 
 const BUILDABLE_KINDS: BuildingKind[] = [
   "townHall", "house", "tower", "archeryRange", "barracks", "smithy",

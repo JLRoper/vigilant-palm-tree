@@ -1,10 +1,10 @@
-import type { GameState, Player, SettlementState } from "../state/gameState";
-import type { Hero } from "../entities/hero";
-import { PopupMenu, menuTheme } from "./menu";
-import { ARMY_STACK_SLOTS, type Platoon } from "../state/units";
-import { catalogReady, catalogFailed, getCachedUnit, loadUnitCatalog } from "../data/unitCatalog";
-import { getUnitImageUrl } from "../data/unitImages";
-import { HERO_BANNERS } from "../render/assetDescriptors";
+import type { GameState, Player, SettlementState } from "../../state/gameState";
+import type { Hero } from "../../entities/hero";
+import { PopupMenu, menuTheme } from "@screens/shared/menu";
+import { ARMY_STACK_SLOTS, type Platoon } from "../../state/units";
+import { catalogReady, catalogFailed, getCachedUnit, loadUnitCatalog } from "../../data/unitCatalog";
+import { getUnitImageUrl } from "../../data/unitImages";
+import { HERO_BANNERS } from "../../render/assetDescriptors";
 
 const MOVEMENT_PER_TURN = 7;
 const MIN_USABLE_MOVEMENT = 1.0;
