@@ -79,6 +79,22 @@ module.exports = {
         dependencyTypesNot: ["type-only"],
       },
     },
+    {
+      name: "contracts-is-a-leaf",
+      severity: "error",
+      comment:
+        "@heroes/contracts is the wire: zero dependencies on engine, client, server, or shared code.",
+      from: { path: "^packages/contracts" },
+      to: { path: "^(packages/engine|src/|server/|shared/)" },
+    },
+    {
+      name: "engine-depends-on-contracts-only",
+      severity: "error",
+      comment:
+        "@heroes/engine is pure rules: may depend on @heroes/contracts only, never on client (src/) or server code.",
+      from: { path: "^packages/engine" },
+      to: { path: "^(src/|server/)" },
+    },
   ],
   options: {
     doNotFollow: { path: "node_modules" },
