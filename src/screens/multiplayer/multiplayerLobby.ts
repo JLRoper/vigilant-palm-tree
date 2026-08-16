@@ -1,10 +1,10 @@
-import { api, type Game } from "../io/api";
-import { openCenteredModal, styleButton, styleInput, menuTheme } from "./menu";
-import { PLAYER_COLORS } from "../state/playerColors";
+import { api, type Game } from "../../io/api";
+import { openCenteredModal, styleButton, styleInput, menuTheme } from "@screens/shared/menu";
+import { PLAYER_COLORS } from "../../state/playerColors";
 import {
   setInMemoryLocalPlayerId,
   setLocalPlayerId,
-} from "../players/localPlayer";
+} from "../../players/localPlayer";
 
 interface LobbySeat {
   id: number;
@@ -245,7 +245,7 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
       const handle = handleInput.value.trim() || "Host";
       create.disabled = true;
       try {
-        const map = new (await import("../map/gameMap")).GameMap(Math.floor(Math.random() * 0x7fffffff));
+        const map = new (await import("../../map/gameMap")).GameMap(Math.floor(Math.random() * 0x7fffffff));
         const heroQ = map.width >> 1;
         const heroR = map.height >> 1;
         const created = await api.createGame(gameName, Math.floor(Math.random() * 0x7fffffff), heroQ, heroR, [], "small", humanSlots);

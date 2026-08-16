@@ -2,7 +2,7 @@
 // canvas and lets the player click their own platoons (in whatever order
 // they choose) to move + attack, alternating with a simple AI opponent, via
 // the engine in shared/combat/manualBattle.ts. Currently only reachable from
-// the "Test Battle" sandbox (src/views/testBattleSetup.ts) — see that file's
+// the "Test Battle" sandbox (src/screens/combat/testBattleSetup.ts) — see that file's
 // header for the scope boundary against the real game's battle flow.
 //
 // Layout is battlefield-first: the grid takes whatever room is left after one
@@ -15,9 +15,9 @@
 // Enemy platoons have no rail to expand into, so clicking one on the
 // battlefield still opens the floating info card — see showInfoPopupFor.
 
-import { axialToPixel, hexCorners, HEX_DIRECTIONS, hexDistance, nearestHexEdge, pixelToAxial, type Axial } from "../core/hex";
-import { totalHealth } from "../../shared/combat/damage";
-import { RANGED_ATTACK_RANGE, SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "../../shared/combatConfig";
+import { axialToPixel, hexCorners, HEX_DIRECTIONS, hexDistance, nearestHexEdge, pixelToAxial, type Axial } from "../../core/hex";
+import { totalHealth } from "../../../shared/combat/damage";
+import { RANGED_ATTACK_RANGE, SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "../../../shared/combatConfig";
 import {
   attackFromHex,
   attackWithPlatoon,
@@ -44,14 +44,14 @@ import {
   type AiTurnPlan,
   type ManualBattleState,
   type TimeOfDay,
-} from "../../shared/combat/manualBattle";
-import type { BattleLogEntry, BattleSide, Combatant } from "../../shared/combat/types";
-import type { Platoon, UnitType } from "../state/units";
+} from "../../../shared/combat/manualBattle";
+import type { BattleLogEntry, BattleSide, Combatant } from "../../../shared/combat/types";
+import type { Platoon, UnitType } from "../../state/units";
 import { showBattleResultCard } from "./battleResultCard";
-import { openConfirmDialog } from "./confirmDialog";
-import { PopupMenu, menuTheme, styleButton } from "./menu";
+import { openConfirmDialog } from "@screens/shared/confirmDialog";
+import { PopupMenu, menuTheme, styleButton } from "@screens/shared/menu";
 import { createPlatoonInfoPopup } from "./platoonInfoPopup";
-import { launchView, registerView } from "./viewLauncher";
+import { launchView, registerView } from "@screens/shared/viewLauncher";
 
 registerView("manualBattleArena", (opts) => {
   const o = opts as { playerPlatoons: Platoon[]; aiPlatoons: Platoon[]; unitTypes: Record<string, UnitType>; humanSide: BattleSide };

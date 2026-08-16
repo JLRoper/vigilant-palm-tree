@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
       alias: {
         "@heroes/contracts": path.resolve(__dirname, "packages/contracts/src/index.ts"),
         "@heroes/engine": path.resolve(__dirname, "packages/engine/src/index.ts"),
+        "@screens": path.resolve(__dirname, "src/screens"),
       },
     },
     build: {

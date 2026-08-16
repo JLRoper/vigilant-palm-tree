@@ -18,7 +18,8 @@
       "@heroes/contracts": ["./packages/contracts/src/index.ts"],
       "@heroes/contracts/*": ["./packages/contracts/src/*"],
       "@heroes/engine": ["./packages/engine/src/index.ts"],
-      "@heroes/engine/*": ["./packages/engine/src/*"]
+      "@heroes/engine/*": ["./packages/engine/src/*"],
+      "@screens/*": ["./src/screens/*"]
     }
   },
   "include": ["src", "shared", "packages/contracts/src", "packages/engine/src"]

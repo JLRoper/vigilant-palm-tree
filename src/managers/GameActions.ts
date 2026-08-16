@@ -1,7 +1,7 @@
 import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
-import { showBattleModal } from "../views/battleModal";
-import { showBattleResultCard } from "../views/battleResultCard";
+import { showBattleModal } from "@screens/combat/battleModal";
+import { showBattleResultCard } from "@screens/combat/battleResultCard";
 import type { BattleResult } from "../../shared/combat/types";
 
 /**

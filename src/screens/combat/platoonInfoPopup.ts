@@ -9,10 +9,10 @@
 // the opposing army) — this file just draws the card there and keeps it
 // on-screen.
 
-import { estimateWinChance, totalHealth } from "../../shared/combat/damage";
-import type { Combatant } from "../../shared/combat/types";
-import type { UnitType } from "../state/units";
-import { menuTheme } from "./menu";
+import { estimateWinChance, totalHealth } from "../../../shared/combat/damage";
+import type { Combatant } from "../../../shared/combat/types";
+import type { UnitType } from "../../state/units";
+import { menuTheme } from "@screens/shared/menu";
 
 export interface PlatoonInfoPopupWinChance {
   entries: Combatant["entries"];

@@ -1,5 +1,5 @@
-import { api, type Game } from "../io/api";
-import { forgetGame, listUserGames, rememberGame, type UserGameEntry } from "../io/userGames";
+import { api, type Game } from "../../io/api";
+import { forgetGame, listUserGames, rememberGame, type UserGameEntry } from "../../io/userGames";
 import {
   checkSession,
   clearAuth,
@@ -8,11 +8,11 @@ import {
   requestLoginCode,
   verifyLoginCode,
   type AuthState,
-} from "../io/auth";
-import { openCenteredModal, styleButton, styleInput, menuTheme } from "./menu";
+} from "../../io/auth";
+import { openCenteredModal, styleButton, styleInput, menuTheme } from "@screens/shared/menu";
 import { openSettingsMenu } from "./settingsMenu";
 import { createNewGameScreen } from "./newGameScreen";
-import { createMultiplayerLobby } from "./multiplayerLobby";
+import { createMultiplayerLobby } from "@screens/multiplayer/multiplayerLobby";
 
 export interface HomeViewOptions {
   onEnterGame: () => void;

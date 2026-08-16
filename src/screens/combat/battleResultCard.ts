@@ -4,9 +4,9 @@
 // future production flow can reuse it with an additional "Manual Fight" retry
 // button without reshaping this component.
 
-import type { BattleResult, CombatantResult } from "../../shared/combat/types";
-import { getCachedUnit } from "../data/unitCatalog";
-import { menuTheme, openCenteredModal, styleButton } from "./menu";
+import type { BattleResult, CombatantResult } from "../../../shared/combat/types";
+import { getCachedUnit } from "../../data/unitCatalog";
+import { menuTheme, openCenteredModal, styleButton } from "@screens/shared/menu";
 
 export interface BattleResultCardOptions {
   result: BattleResult;

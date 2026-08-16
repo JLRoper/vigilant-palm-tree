@@ -1,18 +1,18 @@
-import { TILE_W, TILE_D, cellOrigin, type CityViewSize } from "../core/cityGrid";
-import { computeCityScale, drawCityView } from "../render/cityRenderer";
-import type { ResourceType } from "../map/resourceTiles";
-import type { SpriteProvider } from "../render/assets";
-import type { BuildingDef, GenerationStyle } from "../render/cityBuildingDraw";
-import { coversCell, buildingFootprint } from "../render/cityBuildingDraw";
-import { generateBuildings, type GenerationPattern } from "../render/cityBuildingGen";
+import { TILE_W, TILE_D, cellOrigin, type CityViewSize } from "../../../core/cityGrid";
+import { computeCityScale, drawCityView } from "../../../render/cityRenderer";
+import type { ResourceType } from "../../../map/resourceTiles";
+import type { SpriteProvider } from "../../../render/assets";
+import type { BuildingDef, GenerationStyle } from "../../../render/cityBuildingDraw";
+import { coversCell, buildingFootprint } from "../../../render/cityBuildingDraw";
+import { generateBuildings, type GenerationPattern } from "../../../render/cityBuildingGen";
 import { BuildingMenu, type BuildingMenuOptions } from "./buildingMenu";
 import { BuildingPlacer } from "./buildingPlacer";
 import { BuildingSelectionMenu, type SelectedBuildingEntry } from "./buildingSelectionMenu";
-import { openConfirmDialog } from "./confirmDialog";
-import { settings } from "../state/settings";
-import type { SettlementState } from "../state/gameState";
-import type { BuildingUpgradeRequest } from "../state/gameState";
-import type { BuildingUpgradeCost } from "../core/buildingRegistry";
+import { openConfirmDialog } from "@screens/shared/confirmDialog";
+import { settings } from "../../../state/settings";
+import type { SettlementState } from "../../../state/gameState";
+import type { BuildingUpgradeRequest } from "../../../state/gameState";
+import type { BuildingUpgradeCost } from "../../../core/buildingRegistry";
 import { CityDesignBoxManager } from "./CityDesignBoxManager";
 
 export class CityView {
