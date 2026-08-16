@@ -1,12 +1,12 @@
+import { createInitialState } from "../state/gameState";
 import {
-  createInitialState,
   WAREHOUSE_RESOURCES,
   type GameState,
   type HeroId,
   type HeroState,
   type Player,
   type SettlementState,
-} from "../state/gameState";
+} from "@heroes/contracts";
 import { demoPlatoonsForPlayer, normalizePlatoons } from "../state/units";
 import type { Game } from "../io/api";
 import type { GameMap } from "../map/gameMap";

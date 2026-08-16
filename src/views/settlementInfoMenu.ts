@@ -2,7 +2,6 @@ import type { GameState, SettlementState } from "../state/gameState";
 import { MAX_HEROES_PER_PLAYER, HERO_RECRUIT_COST, SETTLEMENT_UPGRADE_COSTS } from "../state/gameState";
 import { PopupMenu, menuTheme, openCenteredModal, styleButton } from "./menu";
 import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../render/assetDescriptors";
-import type { CastleLevel } from "../../shared/types";
 import { settings } from "../state/settings";
 import type { HorseVariant } from "../state/settings";
 import { POP_BY_LEVEL } from "../economy/settlementRates";
@@ -285,7 +284,7 @@ export class SettlementInfoMenu {
   update(settlement: SettlementState, state: GameState): void {
     const ownerText = settlement.ownerId !== null ? ` — Player ${settlement.ownerId + 1}` : " — Neutral";
     this.menu.setTitle(`Settlement${ownerText}`);
-    this.bannerEl.src = SETTLEMENT_BANNERS[settlement.level as CastleLevel] ?? SETTLEMENT_BANNERS[1];
+    this.bannerEl.src = SETTLEMENT_BANNERS[settlement.level] ?? SETTLEMENT_BANNERS[1];
     this.nameEl.childNodes[0].textContent = settlement.name;
     this.levelBadge.textContent = `L${settlement.level}`;
     this.populationEl.textContent = settlement.population.toLocaleString();

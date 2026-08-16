@@ -1,4 +1,4 @@
-import type { ResourceType } from "../types";
+import type { ResourceType } from "@heroes/contracts";
 
 export const RESOURCES: readonly ResourceType[] = ["gold", "wood", "stone", "iron", "arcane", "food"] as const;
 

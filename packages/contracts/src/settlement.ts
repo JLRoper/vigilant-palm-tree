@@ -1,32 +1,9 @@
-import type {
-  BuildingDef,
-  BuildingKind,
-  CastleVariant,
-  CharterId,
-  HeroId,
-  PlayerId,
-  ResourceType,
-  SettlementId,
-} from "./types";
-import { WAREHOUSE_RESOURCES } from "./constants";
-
-export type WarehouseResource = (typeof WAREHOUSE_RESOURCES)[number];
-
-export type Warehouse = {
-  wood: number;
-  stone: number;
-  iron: number;
-  arcane: number;
-  food: number;
-};
+import type { BuildingDef, BuildingRef } from "./buildings";
+import type { CastleVariant } from "./castle";
+import type { CharterId, HeroId, PlayerId, SettlementId } from "./ids";
+import type { ResourceType, Warehouse } from "./resources";
 
 export type CharterPhase = "traveling" | "constructing";
-
-export interface BuildingRef {
-  gx: number;
-  gy: number;
-  kind: BuildingKind;
-}
 
 export interface UpgradeState {
   kind: "townHall" | "settlement" | "building" | "buildings";

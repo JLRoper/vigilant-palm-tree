@@ -4,7 +4,7 @@ import { GameMap, type MapSize } from "../shared/map/gameMap";
 import { mulberry32 } from "../shared/rng";
 import { makeInitialStatePayload } from "../src/game/initState";
 import {  tradeResources as tradeResourcesReducer,  applyEndOfTurnDetailed,  type AutoTradeTransfer,} from "../shared/gameState";
-import { WAREHOUSE_RESOURCES } from "../shared/constants";
+import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import type { PoolClient } from "pg";
 import type {
   GameState,

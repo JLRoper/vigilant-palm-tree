@@ -1,5 +1,4 @@
-import type { Axial } from "../../shared/types";
-import type { HeroId, SettlementId } from "../../shared/types";
+import type { Axial, HeroId, SettlementId } from "@heroes/contracts";
 
 export type GameEvent =
   | { type: "state:committed" }

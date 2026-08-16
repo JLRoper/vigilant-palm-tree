@@ -1,5 +1,14 @@
-import type { Axial, BuildingDef, CastleLevel, CastleVariant, PlayerId, ResourceType } from "../../shared/types";
-import type { SettlementState, UpgradeState, Warehouse } from "../../shared/settlementTypes";
+import type {
+  Axial,
+  BuildingDef,
+  CastleLevel,
+  CastleVariant,
+  PlayerId,
+  ResourceType,
+  SettlementState,
+  UpgradeState,
+  Warehouse,
+} from "@heroes/contracts";
 
 function emptyWarehouse(): Warehouse {
   return { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };

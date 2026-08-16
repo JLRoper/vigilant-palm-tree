@@ -1,4 +1,4 @@
-import type { BuildingKind, GenerationStyle } from "./types";
+import type { BuildingKind, GenerationStyle } from "@heroes/contracts";
 
 export const BUILDING_SPRITE_KEYS: readonly string[] = [
   "classic.apartment.1",

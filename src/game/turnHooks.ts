@@ -1,5 +1,5 @@
 import { api, endTurn, spendMovement, resolveBattle } from "../io/api";
-import type { GameState, HeroId } from "../state/gameState";
+import type { GameState, HeroId } from "@heroes/contracts";
 import type { TurnControllerHooks } from "../state/turnController";
 import type { BattleResult } from "../../shared/combat/types";
 import { pickAiMove as pickAiMoveBrain } from "../ai/aiBrain";

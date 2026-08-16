@@ -7,14 +7,14 @@ import type {
   Player,
   SettlementState,
   WarehouseResource,
-} from "../state/gameState";
+} from "@heroes/contracts";
 
 export type {
   GameState,
   HeroState,
   Player,
   SettlementState,
-} from "../state/gameState";
+} from "@heroes/contracts";
 
 export type EnemyPos = { q: number; r: number };
 

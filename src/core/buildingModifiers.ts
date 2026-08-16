@@ -1,4 +1,4 @@
-import type { BuildingDef } from "../../shared/types";
+import type { BuildingDef } from "@heroes/contracts";
 import { buildingPlayerEffects } from "./buildingRegistry";
 
 export interface PlayerBonuses {

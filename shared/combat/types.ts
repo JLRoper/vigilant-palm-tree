@@ -1,4 +1,4 @@
-import type { Axial } from "../types";
+import type { Axial } from "@heroes/contracts";
 import type { Platoon, PlatoonEntry, UnitType } from "../units";
 
 export type BattleSide = "attacker" | "defender";

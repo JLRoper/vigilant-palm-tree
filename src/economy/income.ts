@@ -1,4 +1,4 @@
-import type { GameState, PlayerId, SettlementState } from "../state/gameState";
+import type { GameState, PlayerId, SettlementState } from "@heroes/contracts";
 import { buildingSettlementEffects } from "../core/buildingRegistry";
 
 export function settlementIncome(s: SettlementState): number {

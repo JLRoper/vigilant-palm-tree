@@ -1,6 +1,6 @@
 import type { GameMap } from "../map/gameMap";
 import { RESOURCE_YIELD, type ResourceType } from "../map/resourceTiles";
-import type { CastleLevel } from "../../shared/types";
+import type { CastleLevel } from "@heroes/contracts";
 import { settlementRateRadius } from "../core/control";
 
 export const POP_BY_LEVEL: Record<CastleLevel, number> = {
