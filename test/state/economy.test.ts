@@ -15,7 +15,7 @@ import {
   MORALE_DECAY_PER_DEFICIT_RATIO,
   LOW_MORALE_EXTRA_DECAY,
   MORALE_TAX_INCOME_DIVISOR,
-} from "../../src/economy/consumption";
+} from "@heroes/engine";
 import type { SettlementState } from "../../src/state/gameState";
 
 function makeSettlement(overrides: Partial<SettlementState> = {}): SettlementState {

@@ -1,5 +1,5 @@
 import type { GameState, PlayerId, SettlementState } from "@heroes/contracts";
-import { buildingSettlementEffects } from "../core/buildingRegistry";
+import { buildingSettlementEffects } from "../buildingRegistry";
 
 export function settlementIncome(s: SettlementState): number {
   let total = s.population * s.goldTax;

@@ -1,4 +1,4 @@
-import { HEX_DIRECTIONS } from "./hex";
+import { HEX_DIRECTIONS } from "@heroes/contracts";
 import type { Axial, CastleLevel, BuildingDef } from "@heroes/contracts";
 import { computeSettlementBonuses } from "./buildingModifiers";
 
