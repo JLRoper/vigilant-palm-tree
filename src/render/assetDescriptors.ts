@@ -579,7 +579,7 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.granary.1": 11,
   "building.pixel.granary.2": 25,
   "building.pixel.granary.3": 19,
-  "building.pixel.smithy.2": 20,
+  "building.pixel.smithy.2": 4,
 };
 for (const [key, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {
   const desc = BUILDING_DESCRIPTORS[key];

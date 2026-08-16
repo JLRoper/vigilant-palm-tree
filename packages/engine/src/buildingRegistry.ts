@@ -244,9 +244,6 @@ export function buildingFootprintFromRegistry(kind: BuildingKind, level?: number
   if (kind === "granary" && (level === 2 || level === 3)) {
     return { w: 1.5, h: 1.5 };
   }
-  if (kind === "smithy" && level === 2) {
-    return { w: 1.5, h: 1.5 };
-  }
   return { ...REGISTRY[kind].footprint };
 }
 
