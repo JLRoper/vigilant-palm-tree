@@ -94,7 +94,7 @@ Browser (Vite SPA)                                  Express API server
 | Module | Role | Imports |
 |---|---|---|
 | `hex.ts` | Axial-hex primitives: `HEX_SIZE=32`, `axialToPixel`/`pixelToAxial`, `axialRound`, `hexCorners`, `hexDistance`. Also the **canonical** `HEX_DIRECTIONS` (six axial vectors, edge-ordered so index `i` is the neighbour across edge `i`, whose midpoint sits at 60·`i`°) and `nearestHexEdge(cx, cy, px, py)` → edge index. These replaced two separate copies of the same vectors (`EDGE_NEIGHBORS` in `core/control.ts`, `NEIGHBOR_DIRS` in the battle engine) — add new direction math here, not in a consumer | — |
-| `rng.ts` | Global LCG `rng()` + `mulberry32(seed)` factory | — |
+| `rng.ts` | Global LCG `rng()` — local, deliberately non-deterministic client-only randomness (AI wander, decorative city-grid placement). Re-export shim for `mulberry32(seed)` (definition now lives in `@heroes/engine`) | `@heroes/engine` |
 | `eventBus.ts` | Typed pub/sub singleton (`bus.on`/`emit`/`clear`) | — |
 | `eventRegistry.ts` | `registerAllListeners()` hook (placeholder) | `./eventBus` |
 | `events.ts` | `GameEvent` discriminated union (`state:committed`, `turn:ended`, `phase:changed`, `hero:moved`, `settlement:captured`, `battle:resolved`, economy/morale, calc:vision/control/heroSpeed) | `../../shared/types`, `../state/gameState` |
@@ -109,7 +109,7 @@ Browser (Vite SPA)                                  Express API server
 |---|---|---|
 | `gameState.ts` | **Core reducers.** Types (`Player`, `HeroState`, `GameState`) and **all pure reducers** (`selectHero`, `startMove`, `captureSettlement`, `startBattle`, `endBattlePhase`, `endTurn`, `transferGold`, `tradeResources`, `applySettlementConsumption`, `applyEndOfTurnDetailed`, `advanceRound`, charter flow, upgrade flow, `recruitHero`); re-exports `WAREHOUSE_RESOURCES` and identity/building types from `shared/types`. `SettlementState`/`CharterState`/etc. were moved to `shared/settlementTypes.ts` so domain shapes are not transitively pulled through this file. | `./units`, `../economy/consumption`, `../entities/settlement`, `./settings`, `../economy/settlementRates`, `../../shared/types`, `../../shared/styleResolver`, `../../shared/constants`, `../../shared/settlementTypes`, `../core/buildingRegistry` |
 | `turnController.ts` | **Stateful wrapper.** Wraps every reducer; broadcasts `bus` events; `tick(dtMs)` runs AI turn (`pickAiMove`→`startMove`→`onAiMove`); `endHumanTurn` runs full pipeline; persists across moves | `./gameState`, `../core/eventBus`, `../map/pathfinding`, `../core/hex`, `./units`, `../map/gameMap`, `../economy/settlementRates`, `./settings`, `../core/citySpots`, `../core/cityGrid` |
-| `units.ts` | Unit/platoon types (`UnitType`, `Platoon`, `PlatoonEntry`), `normalizePlatoons`, `demoPlatoonsForPlayer`; re-exports `AdvantageType` | `../../shared/combatConfig` |
+| `units.ts` | Re-export shim: `UnitType`, `AdvantageType`, `Platoon`, `PlatoonEntry`, `ARMY_STACK_SLOTS`, `MAX_PLATOON_ENTRIES`, `emptyPlatoon`, `normalizePlatoons`, `platoonsHaveTroops` (definitions live in `@heroes/engine`); local `demoPlatoonsForPlayer()` (client-only fixture data) | `@heroes/engine`, `@heroes/contracts` |
 | `settings.ts` | `HorseVariant` (8), `ResourceStyle` (8), `GameSettings` (move duration, sprite variant, building upgrade confirm, etc.); localStorage-persisted singleton `settings()` | `../../shared/horseVariants` |
 | `playerColors.ts` | `PLAYER_COLORS` (10), `MAX_PLAYERS`, `colorForOwner` | — |
 
@@ -263,7 +263,7 @@ Design-time per-faction unit roster data, distinct from the server-driven `UnitT
 ---
 
 ## 6. `test/`
-- **Unit (Node `node:test`):** `cityGrid`, `citySpots`, `minimap`, `state/economy`, `state/gameState`, `state/income`, `combat/resolveBattle`, `combat/manualBattle` (includes approach-hex/`attackFromHex` coverage), `map/castlePlacement`.
+- **Unit (Node `node:test`):** `cityGrid`, `citySpots`, `minimap`, `state/economy`, `state/gameState`, `state/income`, `combat/resolveBattle`, `combat/manualBattle` (includes approach-hex/`attackFromHex` coverage), `charter/start`, `charter/travel`, `charter/advance`, `charter/cleanup`, `map/castlePlacement`.
 - **Playwright integration:** `smoke.ts` (full E2E spawns API+Vite, verifies New/Load/Save/HUD/DB), `multiplayer.smoke.ts` (lobby lifecycle over the API: create → claim seat → duplicate claim rejected 409 → start blocked while a seat is unclaimed → host claims → start sets `startedAt`), `cityView.test.ts`, `dragDrop.test.ts`, `proposedPath.test.ts`. `smoke`, `multiplayer.smoke`, and `cityView.test.ts` boot their server through the shared `test/_request.ts` helper, which reads `local/.test-request.json` written by `tools/run-test.mjs`.
 
 ## 7. `tools/`

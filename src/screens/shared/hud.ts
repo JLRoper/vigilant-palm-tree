@@ -1,6 +1,8 @@
 import type { GameState, PlayerId } from "../../state/gameState";
 import { effectiveIncome, playerWealth } from "@heroes/engine";
 
+export { canEndTurn } from "@heroes/engine";
+
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 export interface HudHandles {
@@ -67,13 +69,6 @@ function playerUpkeep(state: GameState, ownerId: PlayerId): string {
   const owned = Object.values(state.heroes).filter((h) => h.ownerId === ownerId);
   const cost = owned.reduce((acc, h) => acc + h.troops, 0);
   return `Empire Upkeep: ${cost}g/week`;
-}
-
-export function canEndTurn(state: GameState): boolean {
-  if (state.phase.kind !== "PLAYER_TURN") return false;
-  const phase = state.phase;
-  const p = state.players.find((pl) => pl.id === phase.playerId);
-  return p?.faction === "player";
 }
 
 function formatTime(iso: string): string {

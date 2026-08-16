@@ -5,8 +5,8 @@ import {
   TILE_W,
   TILE_D,
   type CityCell,
-  type CityViewSize,
 } from "../core/cityGrid";
+import type { CityViewSize } from "@heroes/engine";
 import type { ResourceType } from "../map/resourceTiles";
 import type { SpriteProvider } from "./assets";
 import {

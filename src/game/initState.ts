@@ -25,8 +25,7 @@ import {
   SETTLEMENT_GOLD_TAX,
 } from "@heroes/engine";
 import { PLAYER_COLORS, MAX_PLAYERS } from "../state/playerColors";
-import { generateCitySpots } from "../core/citySpots";
-import { cityViewSizeFor } from "../core/cityGrid";
+import { generateCitySpots, cityViewSizeFor } from "@heroes/engine";
 import { VALID_HORSE_VARIANTS } from "@heroes/engine";
 
 const DEFAULT_PLAYER_COUNT = 3;

@@ -22,7 +22,7 @@
     "test:multiplayer": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs multiplayer",
     "test:smoke": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs smoke --auto-close",
     "test:wrapper": "node --no-deprecation tools/run-test.mjs",
-    "lint:deps": "depcruise src shared server packages --config dependency-cruiser.cjs",
+    "lint:deps": "depcruise src server packages --config dependency-cruiser.cjs",
     "validate-assets": "node tools/sprites/validate-assets.mjs",
     "sprites:generate": "node tools/sprites/pixel-gen.mjs",
     "sprites:preview": "node tools/sprites/generate-preview.mjs",

@@ -279,12 +279,12 @@ Do **not** big-bang this. Order chosen so every step ships alone:
 | Phase | What | Why first |
 |---|---|---|
 | 0 | ✅ **DONE** (commit `526398e` on `architecture/circular-dep-cleanup`) — executed the cleanup plan (`.kilo/plans/1786339629694-...`) incl. dependency-cruiser (`dependency-cruiser.cjs`, `npm run lint:deps`, wired into precommit gate). Remaining: merge the branch to `main` | Makes shared/ a true leaf — it becomes `engine/` + `contracts/` seed material |
-| 1 | Root npm workspaces; move `shared/` → `packages/engine`, extract `packages/contracts` from its types | Physical boundary before anything else grows |
-| 2 | Carve `gameState.ts` into engine domains **one domain at a time** (economy → charter → settlement → hero → turn), each reducer to its own command file; `gameState.ts` shrinks to re-exports until empty | Highest-traffic file; every future feature benefits immediately |
-| 3 | Server: introduce `commandHandler.ts` + repos; port endpoints one at a time onto commands (start with `spend_movement` — it's already action-shaped); `routes.ts` shrinks per endpoint | De-risks the DB migration by putting repos in place first |
-| 4 | DB: migrations to small tables, dual-write JSONB + tables for one release, then flip reads, then drop blobs | Months-long live games must survive the migration |
-| 5 | Event `seq` + cursor polling; scene builder/painter split in client; screens split as touched (§4.4 rule: a view moves when it next gets a non-trivial edit) | Sync + render seams, independently shippable |
-| 6 | Catalog tables (`building_defs`, `castle_levels`, `sprite_sets`) + facing column consumed by city view | Unlocks castle sizes + rotation as content work |
+| 1 | ✅ **DONE** — root npm workspaces (`packages/*`); `shared/` moved to `packages/engine` (only the `shared/gameState.ts` re-export shim remains as a stepping-stone); `packages/contracts` extracted (`ids.ts`, `geometry.ts`, `resources.ts`, `units.ts`, `buildings.ts`, `castle.ts`, `settlement.ts`, `gameState.ts`) | Physical boundary before anything else grows |
+| 2 | 🔶 **IN PROGRESS** — carving `gameState.ts` into engine domains **one domain at a time** (economy → charter → settlement → hero → turn); `gameState.ts` shrinks to re-exports until empty. Done: `economy/*`, `charter/*` (PR #72, commit `f6ce118`), `settlement/*` (PR #74, commit `a0a638a`), `hero/*` (PR #75, commit `cd494b3`). Next: `turn/endTurn.ts` (starting now) — the last Phase 2 domain | Highest-traffic file; every future feature benefits immediately |
+| 3 | ⬜ Server: introduce `commandHandler.ts` + repos; port endpoints one at a time onto commands (start with `spend_movement` — it's already action-shaped); `routes.ts` shrinks per endpoint | De-risks the DB migration by putting repos in place first |
+| 4 | ⬜ DB: migrations to small tables, dual-write JSONB + tables for one release, then flip reads, then drop blobs | Months-long live games must survive the migration |
+| 5 | ⬜ Event `seq` + cursor polling; scene builder/painter split in client; screens split as touched (§4.4 rule: a view moves when it next gets a non-trivial edit) — note: the mechanical `views/` → `screens/` folder move already landed (Decision 3.C, run in parallel with Phase 1 per `plan/2026-08-15-parallel-dev-split.md`); the scene builder/painter split and event-cursor polling have not | Sync + render seams, independently shippable |
+| 6 | ⬜ Catalog tables (`building_defs`, `castle_levels`, `sprite_sets`) + facing column consumed by city view | Unlocks castle sizes + rotation as content work |
 
 Rules that keep it honest (add to AGENTS.md when adopted):
 - New code lands in its target package/domain from day one. No new function enters a >300-line file.

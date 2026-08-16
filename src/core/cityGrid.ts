@@ -1,15 +1,9 @@
-export type CityCell = { gx: number; gy: number };
+import type { CityViewSize } from "@heroes/engine";
 
-export type CityViewSize = 5 | 10 | 15;
+export type CityCell = { gx: number; gy: number };
 
 export const TILE_W = 96;
 export const TILE_D = TILE_W * 0.5;
-
-export function cityViewSizeFor(level: 1 | 2 | 3): CityViewSize {
-  if (level === 1) return 5;
-  if (level === 2) return 10;
-  return 15;
-}
 
 export function cellOrigin(size: CityViewSize): { x: number; y: number } {
   const c = (size - 1) / 2;

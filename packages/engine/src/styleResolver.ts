@@ -18,6 +18,7 @@ export const BUILDING_SPRITE_KEYS: readonly string[] = [
   "classic.market.2",
   "classic.mine.1",
   "classic.smithy.1",
+  "classic.smithy.2",
   "classic.tower.1",
   "classic.tower.2",
   "classic.townHall.1",

@@ -4,6 +4,8 @@ import type { ResourceType, WarehouseResource } from "./resources";
 import type { CharterState, SettlementState } from "./settlement";
 import type { Platoon } from "./units";
 
+export const MOVEMENT_PER_TURN = 7;
+
 export interface Player {
   id: PlayerId;
   faction: Faction;
