@@ -199,8 +199,10 @@ API conventions:
   - Uses Playwright (`chromium`) to load the built app, reading the client URL from `CLIENT_PORT` in `.env` (default 4173).
   - Talks to the API using `API_PORT` from `.env` (default 3001) via Playwright's `request` API and via `pg.Pool`.
   - Asserts map determinism (same seed → same resource tile placement and counts), then exercises the live UI.
+  - Records the spawned API / preview / browser PIDs in `test/.last-test-pids.json` on each spawn so the next run (or `npm run cleanup`) can reap stragglers via `taskkill /F /T` on Windows / `SIGKILL` on POSIX.
+  - Accepts an optional `--shutdownAfterSeconds=<n>` flag that forces a hard tree-kill of all spawned children after `n` seconds (useful for CI runs that hit the 120 s safety ceiling).
 - **Unit-ish tests** under `test/state/` and `test/map/` (e.g. `gameState.test.ts`, `income.test.ts`, `castlePlacement.test.ts`) are imported by the smoke harness — they run as part of `npm test`.
-- Logs from previous runs are kept at `test/web.log`, `test/api.log`, `test/*.err.log`; screenshots at `test/screenshot.png` / `test/screenshot-dpr2.png`.
+- Logs from previous runs are kept at `test/web.log`, `test/api.log`, `test/*.err.log`; screenshots at `test/screenshot.png` / `test/screenshot-dpr2.png`; PID ledger at `test/.last-test-pids.json` (consumed by the straggler-kill path on next run / shutdown).
 - Helper script: `tools/run-smoke.ps1` (PowerShell wrapper).
 
 ### CI (GitHub Actions)

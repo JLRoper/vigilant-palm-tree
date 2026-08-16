@@ -8,6 +8,33 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 $worktree = (Get-Location).Path
 $envFile = Join-Path $worktree '.env'
+$pidRegistry = Join-Path $worktree 'test/.last-test-pids.json'
+
+# Reap any PIDs the previous smoke test recorded but failed to clean up.
+if (Test-Path -LiteralPath $pidRegistry) {
+    $raw = Get-Content -LiteralPath $pidRegistry -Raw -ErrorAction SilentlyContinue
+    if ($raw -and $raw.Trim()) {
+        try {
+            $registry = $raw | ConvertFrom-Json -ErrorAction Stop
+            if ($registry.pids) {
+                foreach ($entry in $registry.pids) {
+                    $pid = [int]$entry.pid
+                    if ($pid -le 0) { continue }
+                    $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+                    if (-not $proc) { continue }
+                    Write-Host "Killing leftover $($entry.role) pid=$pid (from .last-test-pids.json)"
+                    if ($IsWindows) {
+                        & taskkill.exe /F /T /PID $pid 2>$null | Out-Null
+                    } else {
+                        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+                    }
+                }
+            }
+        } catch {
+            Write-Host "Could not parse $pidRegistry, skipping registry sweep."
+        }
+    }
+}
 
 # Read ports from .env (this worktree's assigned ports)
 $ports = @()
