@@ -2,6 +2,7 @@ import type { Game } from "../io/api";
 import { api } from "../io/api";
 import { forgetGame, listUserGames, type UserGameEntry } from "../io/userGames";
 import type { GameState } from "../state/gameState";
+import type { SaveStatus } from "../managers/SessionManager";
 import { CASTLE_COUNT_MAX } from "../map/castlePlacement";
 import { openSettingsMenu, type MapInfo } from "./settingsMenu";
 import { openTestBattleSetup } from "./testBattleSetup";
@@ -78,7 +79,7 @@ export interface ToolbarState {
   hasActiveGame: () => boolean;
   canEndTurnNow: () => boolean;
   getCalendar: () => CalendarSnapshot | null;
-  getSaveStatus: () => import("../managers/SessionManager").SaveStatus;
+  getSaveStatus: () => SaveStatus;
   getLastSavedAt: () => string | null;
   getZoom: () => number;
 }

@@ -1,5 +1,5 @@
-import type { Axial } from "./hex";
-import type { HeroId, SettlementId } from "../state/gameState";
+import type { Axial } from "../../shared/types";
+import type { HeroId, SettlementId } from "../../shared/types";
 
 export type GameEvent =
   | { type: "state:committed" }

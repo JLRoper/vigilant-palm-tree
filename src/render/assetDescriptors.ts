@@ -84,11 +84,11 @@ import buildingPixelGranary2 from "../resources/buildings/building-pixel-granary
 import buildingPixelGranary3 from "../resources/buildings/building-pixel-granary-3.png?url";
 import buildingPixelSmithy2 from "../resources/buildings/building-pixel-smithy-2.png?url";
 import { Faction, Direction } from "../entities/hero";
-import { CastleLevel, CastleVariant } from "../entities/settlement";
-import { ResourceType, RESOURCES } from "../map/resourceTiles";
+import type { CastleLevel, CastleVariant, ResourceType } from "../../shared/types";
+import { RESOURCES } from "../map/resourceTiles";
 import type { ResourceStyle } from "../state/settings";
-import { HORSE_VARIANT_REGISTRY, type HorseVariantId } from "./horseVariants";
-import { pickStyleForBuilding } from "./buildingStyleResolver";
+import { HORSE_VARIANT_REGISTRY, type HorseVariantId } from "../../shared/horseVariants";
+import { pickStyleForBuilding } from "../../shared/styleResolver";
 
 export type SpriteKey =
   | `castle.${CastleLevel}`

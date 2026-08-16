@@ -5,22 +5,21 @@
   "type": "module",
   "scripts": {
     "cleanup": "pwsh scripts/cleanup.ps1",
-    "predev": "pwsh scripts/cleanup.ps1 && pwsh scripts/ports.ps1",
+    "predev": "tsx scripts/allocate-ports.ts",
     "dev": "concurrently -n web,api -c green,cyan \"vite\" \"tsx watch --env-file=.env server/index.ts\"",
     "dev:web": "vite",
     "dev:api": "tsx watch --env-file=.env server/index.ts",
-    "dev:static": "pwsh scripts/cleanup.ps1 && pwsh scripts/ports.ps1 --static && concurrently -n web,api -c green,cyan \"vite\" \"tsx watch --env-file=.env server/index.ts\"",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "dev:status": "pwsh scripts/dev-status.ps1",
-    "pretest": "pwsh scripts/ports.ps1",
+    "pretest": "tsx scripts/allocate-ports.ts",
     "test": "tsx --env-file=.env test/smoke.ts",
-    "test:cityview": "pwsh scripts/ports.ps1 && tsx --env-file=.env test/cityView.test.ts",
-    "test:all": "pwsh scripts/ports.ps1 && tsx --env-file=.env test/smoke.ts && tsx --env-file=.env test/multiplayer.smoke.ts && tsx --env-file=.env test/cityView.test.ts",
-    "test:multiplayer": "pwsh scripts/ports.ps1 && tsx --env-file=.env test/multiplayer.smoke.ts",
-    "test:static": "pwsh scripts/ports.ps1 --static && tsx --env-file=.env test/smoke.ts",
+    "test:cityview": "tsx scripts/allocate-ports.ts && tsx --env-file=.env test/cityView.test.ts",
+    "test:all": "tsx scripts/allocate-ports.ts && tsx --env-file=.env test/smoke.ts && tsx --env-file=.env test/multiplayer.smoke.ts && tsx --env-file=.env test/cityView.test.ts",
+    "test:multiplayer": "tsx scripts/allocate-ports.ts && tsx --env-file=.env test/multiplayer.smoke.ts",
+    "lint:deps": "depcruise src shared server --config dependency-cruiser.cjs",
     "validate-assets": "node tools/sprites/validate-assets.mjs",
     "sprites:generate": "node tools/sprites/pixel-gen.mjs",
     "sprites:preview": "node tools/sprites/generate-preview.mjs",
@@ -32,17 +31,18 @@
     "@types/express": "^5.0.6",
     "@types/pg": "^8.20.0",
     "concurrently": "^9.1.2",
+    "dependency-cruiser": "^18.1.1",
     "playwright": "^1.61.1",
     "pngjs": "^7.0.0",
     "puppeteer": "^25.3.0",
     "sharp": "^0.35.3",
-    "tsx": "^4.23.1",
-    "typescript": "^5.6.3",
-    "vite": "^5.4.10"
+    "typescript": "^5.6.3"
   },
   "dependencies": {
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "pg": "^8.22.0"
+    "pg": "^8.22.0",
+    "tsx": "^4.23.1",
+    "vite": "^5.4.10"
   }
 }

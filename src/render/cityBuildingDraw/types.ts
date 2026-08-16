@@ -1,29 +1,6 @@
-import type { GenerationStyle } from "../palettes";
+import type { BuildingKind, GenerationStyle } from "../../../shared/types";
 
-export type BuildingKind =
-  | "townHall"
-  | "house"
-  | "tower"
-  | "mageGuild"
-  | "mine"
-  | "market"
-  | "barracks"
-  | "smithy"
-  | "apartment"
-  | "farmField"
-  | "farmhouse"
-  | "archeryRange"
-  | "granary";
-
-export interface BuildingDef {
-  gx: number;
-  gy: number;
-  kind: BuildingKind;
-  level: number;
-  style: GenerationStyle;
-  w?: number;
-  h?: number;
-}
+export type { BuildingKind, BuildingDef, GenerationStyle } from "../../../shared/types";
 
 export interface DrawBuildingContext {
   ctx: CanvasRenderingContext2D;

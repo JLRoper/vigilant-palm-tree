@@ -10,26 +10,10 @@ import { drawTerritoryOutlines } from "./overlays/territoryOutline";
 import { drawPathOverlay } from "./overlays/pathOverlay";
 import { SpriteProvider } from "./assets";
 import { computeVision, isVisible } from "./fog";
-import { drawMinimap, MinimapCamera } from "./minimap";
-
+import { MinimapCamera } from "./minimapCamera";
+import { drawMinimap } from "./minimap";
+import type { RenderOptions } from "./renderTypes";
 import type { CharterState } from "../state/gameState";
-
-export interface RenderOptions {
-  selectedHeroId: string | null;
-  selectedSettlementId: string | null;
-  colorForOwner: (ownerId: number | null) => string;
-  viewPlayerId: number;
-  /** If provided, overrides the reachable split computed from movementRemaining. Use this to keep the proposed yellow route stable while a hero animates a committed move. */
-  pathReachableIdx?: number;
-  /** If provided, anchors the yellow proposed route to this tile instead of the hero's current (moving) tile. */
-  pathOrigin?: Axial;
-  /** Fallback origin when pathOrigin is not set. Use the selected hero's tile from game state. */
-  selectedHeroTile?: Axial;
-  /** Charter targets for overlay rendering. */
-  activeCharters?: readonly CharterState[];
-  /** Valid hexes for charter placement mode. */
-  validCharterHexes?: Set<string> | null;
-}
 
 const FOG_FILL = "rgba(8, 10, 16, 0.78)";
 const FOG_EDGE = "rgba(8, 10, 16, 0.55)";

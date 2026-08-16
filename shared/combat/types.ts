@@ -1,5 +1,5 @@
-import type { Axial } from "../../src/core/hex";
-import type { Platoon, PlatoonEntry, UnitType } from "../../src/state/units";
+import type { Axial } from "../types";
+import type { Platoon, PlatoonEntry, UnitType } from "../units";
 
 export type BattleSide = "attacker" | "defender";
 

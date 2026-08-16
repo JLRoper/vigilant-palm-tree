@@ -1,5 +1,4 @@
-import type { BuildingKind } from "../render/cityBuildingDraw";
-import type { ResourceType } from "../state/gameState";
+import type { BuildingKind, ResourceType } from "../../shared/types";
 
 export interface RecruitEntry {
   unitTypeId: string;

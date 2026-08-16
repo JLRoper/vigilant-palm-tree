@@ -1,6 +1,5 @@
 import { Faction, Direction } from "../entities/hero";
-import { CastleLevel, CastleVariant } from "../entities/settlement";
-import { ResourceType } from "../map/resourceTiles";
+import type { CastleLevel, CastleVariant, ResourceType } from "../../shared/types";
 import { settings } from "../state/settings";
 import { SpriteProvider } from "./assets";
 import {
@@ -9,7 +8,7 @@ import {
   resourceStyleKey,
   horseVariantKey,
 } from "./assetDescriptors";
-import { HORSE_VARIANT_REGISTRY } from "./horseVariants";
+import { HORSE_VARIANT_REGISTRY } from "../../shared/horseVariants";
 import { drawKnightSprite, drawDemonSprite } from "./heroSprites";
 
 const warnedKeys = new Set<string>();

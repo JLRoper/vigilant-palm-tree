@@ -4,10 +4,10 @@ This file is loaded into every agent's context. Treat the rules below as non-neg
 
 ## Project quick facts
 - Node/TypeScript/Vite single-page game (heroes-js).
-- Dev environment: `npm run dev` (vite client + tsx api, via concurrently). Ports are per-worktree and re-allocated by `predev` unless you use `npm run dev:static`.
+- Dev environment: `npm run dev` (vite client + tsx api, via concurrently). Ports are per-worktree and OS-assigned (random kernel-picked free ports) by `predev` via `scripts/allocate-ports.ts` — collision-free across concurrent runs.
 - Postgres dev DB: shared `game_db` container, fixed host port 5432. `npm run db:up` to start. Do NOT run `db:down` unless explicitly asked — other worktrees share it.
 - Build: `npm run build` (tsc + vite build). Tests: `npm run test:all` (smoke + multiplayer.smoke + cityView). Status: `npm run dev:status`.
-- LAN multiplayer: set `LAN_HOST=1` in `.env` (or process env) before `npm run dev` to bind the API to `0.0.0.0`. `npm run dev:status` will print LAN URLs when `LAN_HOST=1`. `scripts/ports.ps1` already reserves `WS_PORT=4100` for a future realtime layer; leave it dormant.
+- LAN multiplayer: set `LAN_HOST=1` in `.env` (or process env) before `npm run dev` to bind the API to `0.0.0.0`. `npm run dev:status` will print LAN URLs when `LAN_HOST=1`. `scripts/allocate-ports.ts` reserves `WS_PORT` for a future realtime layer; leave it dormant.
 
 ## Coding constraints
 - Never commit secrets, `.env` contents, or anything under `local/`.
@@ -15,7 +15,7 @@ This file is loaded into every agent's context. Treat the rules below as non-neg
 - Do not add code comments unless the user asked. (Doc files like this one are fine.)
 - Use `npm run cleanup` (not `taskkill`/broad kills) to free ports — it's scoped to this worktree by design.
 - Don't touch files outside the worktree root, the shared `game_db` container, or another worktree's processes.
-- Prefer the project's existing helpers (`scripts/cleanup.ps1`, `scripts/ports.ps1`, `scripts/dev-status.ps1`) over ad-hoc equivalents.
+- Prefer the project's existing helpers (`scripts/cleanup.ps1`, `scripts/allocate-ports.ts`, `scripts/dev-status.ps1`) over ad-hoc equivalents.
 
 ## MANDATORY auto-running subagents (do NOT skip)
 

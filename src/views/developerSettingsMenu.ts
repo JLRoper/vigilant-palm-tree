@@ -1,8 +1,10 @@
 import { openCenteredModal, menuTheme, styleButton } from "./menu";
 import { bus } from "../core/eventBus";
 import { openAssetManager } from "./assetManager";
-import { openTestBattleSetup } from "./testBattleSetup";
+import { launchView, registerView } from "./viewLauncher";
 import { openDevConsole } from "../debug/devConsole";
+
+registerView("developerSettingsMenu", openDeveloperSettingsMenu);
 
 export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
   const root = parent ?? document.body;
@@ -160,7 +162,7 @@ export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
   testBattleBtn.style.marginTop = "4px";
   testBattleBtn.addEventListener("click", () => {
     modal.close();
-    setTimeout(() => openTestBattleSetup(), 100);
+    setTimeout(() => launchView("testBattleSetup"), 100);
   });
   content.appendChild(testBattleBtn);
 
