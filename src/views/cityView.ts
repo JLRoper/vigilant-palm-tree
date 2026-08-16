@@ -13,7 +13,7 @@ import { settings } from "../state/settings";
 import type { SettlementState } from "../state/gameState";
 import type { BuildingUpgradeRequest } from "../state/gameState";
 import type { BuildingUpgradeCost } from "../core/buildingRegistry";
-import { CityDesignBoxManager } from "../managers/CityDesignBoxManager";
+import { CityDesignBoxManager } from "./CityDesignBoxManager";
 
 export class CityView {
   private designBox = new CityDesignBoxManager();

@@ -18,7 +18,6 @@ Bring up the game through the repo’s existing npm scripts and confirm that the
 2. If the preview is already running, stop the old process first so you get a clean restart.
 3. Choose the right command:
    - Use `npm run dev` for the normal live development preview with the client and API server.
-   - Use `npm run dev:static` if you want the same setup but with the cleanup/static-port flow.
    - Use `npm run preview` only when you specifically want a build-style preview rather than the live dev server.
 4. Run the command from the project root.
 5. Wait for the terminal to report the local URL and confirm the server is ready.

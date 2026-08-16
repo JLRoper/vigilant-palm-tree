@@ -1,5 +1,5 @@
 import type { HeroState, Player, SettlementState } from "../../src/state/gameState";
-import { WAREHOUSE_RESOURCES } from "../../src/state/gameState";
+import { WAREHOUSE_RESOURCES } from "../../shared/constants";
 
 export type IntegritySeverity = "error" | "warning";
 

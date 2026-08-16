@@ -13,11 +13,11 @@ You manage the local dev environment for this repo (heroes-js). You are invoked 
 - `npm run dev` — starts vite (client) + tsx watch (api) via `concurrently`. This is long-running: launch it with the background option on your Bash/PowerShell tool call, don't block on it.
 - `npm run cleanup` — kills only node/vite processes whose command line matches *this worktree's own path*. Safe to run before starting, to guarantee a clean slate.
 - `npm run db:up` — `docker compose up -d`. Idempotent; safe to run every time even if the db is already up.
-- Reading `.env` in the repo root to see which ports (`CLIENT_PORT`, `API_PORT`, `DB_PORT`, `WS_PORT`) this worktree was assigned by `scripts/ports.ps1`.
+- Reading `.env` in the repo root to see which ports (`CLIENT_PORT`, `API_PORT`, `WS_PORT`) this worktree was assigned by `scripts/allocate-ports.ts`. (`DB_PORT` is irrelevant — the Postgres container is shared at fixed host port 5432.)
 
 ## Key facts about this project's setup
 
-- Ports are per-worktree and dynamic: `predev` (runs automatically before `npm run dev`) re-picks free ports and rewrites `.env` each time, unless you use `npm run dev:static` for stable ports. Default to `npm run dev` unless the user asked for static ports.
+- Ports are per-worktree and OS-assigned: `predev` (runs automatically before `npm run dev`) picks a free port per service via `net.Server.listen(0)` and rewrites `.env` each time. No static variant — random kernel-assigned ports are collision-free across concurrent runs.
 - `npm run cleanup` (scripts/cleanup.ps1) only touches processes whose command line contains this worktree's absolute path — it will report "Skipping PID ... (no worktree match)" for processes on the target port that belong to a *different* worktree/session. That is not a bug to work around; it's a safety boundary. Do not fall back to a broader kill (e.g. `Stop-Process` by port/PID directly, or `taskkill`) to force it through.
 - The postgres db (`game_db` via `docker-compose.yml`) is **shared across every worktree** — fixed container name, fixed host port 5432 regardless of the per-worktree `DB_PORT` in `.env`. It is normal for it to already be running (possibly for hours) before you touch anything.
 

@@ -14,7 +14,9 @@ import {
   type GameSettings,
   type ResourceStyle,
 } from "../state/settings";
-import { openDeveloperSettingsMenu } from "./developerSettingsMenu";
+import { launchView, registerView } from "./viewLauncher";
+
+registerView("settingsMenu", (opts) => openSettingsMenu(opts as Parameters<typeof openSettingsMenu>[0]));
 
 const SPEED_LABELS: Array<{ min: number; label: string }> = [
   { min: 800, label: "Very slow (1s/hex)" },
@@ -722,7 +724,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   devBtn.style.alignSelf = "flex-end";
   devBtn.style.opacity = "0.6";
   devBtn.style.fontSize = "10px";
-  devBtn.addEventListener("click", () => openDeveloperSettingsMenu());
+  devBtn.addEventListener("click", () => launchView("developerSettingsMenu"));
   content.appendChild(devBtn);
 
   const closeRow = document.createElement("div");

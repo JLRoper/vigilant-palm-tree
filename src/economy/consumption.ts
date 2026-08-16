@@ -1,4 +1,4 @@
-import type { SettlementState } from "../state/gameState";
+import type { SettlementState } from "../../shared/settlementTypes";
 import { buildingUpkeep } from "../core/buildingRegistry";
 
 export const FOOD_PER_POPULATION = 100;

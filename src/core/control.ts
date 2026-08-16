@@ -1,6 +1,5 @@
-import { HEX_DIRECTIONS, type Axial } from "./hex";
-import type { CastleLevel } from "../entities/settlement";
-import type { BuildingDef } from "../render/cityBuildingDraw";
+import { HEX_DIRECTIONS } from "./hex";
+import type { Axial, CastleLevel, BuildingDef } from "../../shared/types";
 import { computeSettlementBonuses } from "./buildingModifiers";
 
 export function controlRange(level: CastleLevel, buildings?: BuildingDef[]): number {

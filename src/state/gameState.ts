@@ -7,42 +7,37 @@ import {
   foodRequired,
   moraleDecay,
 } from "../economy/consumption";
-import type { CastleVariant } from "../entities/settlement";
 import type { HorseVariant } from "./settings";
 import { settings } from "./settings";
 import { POP_BY_LEVEL } from "../economy/settlementRates";
-import type { BuildingDef, BuildingKind } from "../render/cityBuildingDraw";
-import { pickStyleForBuilding } from "../render/buildingStyleResolver";
+import type { BuildingDef, BuildingKind, PlayerId, Faction, HeroId, SettlementId, CharterId, ResourceType } from "../../shared/types";
+import type {
+  BuildingRef,
+  CharterState,
+  SettlementState,
+  UpgradeState,
+  Warehouse,
+  WarehouseResource,
+} from "../../shared/settlementTypes";
+import { pickStyleForBuilding } from "../../shared/styleResolver";
+import { WAREHOUSE_RESOURCES } from "../../shared/constants";
+export { WAREHOUSE_RESOURCES } from "../../shared/constants";
 import { buildingUpgradeCost } from "../core/buildingRegistry";
 
-export type PlayerId = number;
-export type Faction = "player" | "ai";
-export type HeroId = string;
-export type SettlementId = string;
-export type CharterId = string;
-export type ResourceType = "gold" | "wood" | "stone" | "iron" | "arcane" | "food";
+export type { PlayerId, Faction, HeroId, SettlementId, CharterId, ResourceType } from "../../shared/types";
+export type { BuildingDef, BuildingKind } from "../../shared/types";
+export type {
+  WarehouseResource,
+  Warehouse,
+  BuildingRef,
+  UpgradeState,
+  CharterState,
+  SettlementState,
+} from "../../shared/settlementTypes";
 
 export function isHuman(p: Player): boolean {
   return p.faction === "player";
 }
-
-export const WAREHOUSE_RESOURCES = [
-  "wood",
-  "stone",
-  "iron",
-  "arcane",
-  "food",
-] as const;
-
-export type WarehouseResource = (typeof WAREHOUSE_RESOURCES)[number];
-
-export type Warehouse = {
-  wood: number;
-  stone: number;
-  iron: number;
-  arcane: number;
-  food: number;
-};
 
 export interface Player {
   id: PlayerId;
@@ -70,61 +65,6 @@ export interface HeroState {
   isChartering: boolean;
   charterId: CharterId | null;
   horseVariant: HorseVariant;
-}
-
-export type CharterPhase = "traveling" | "constructing";
-
-export interface BuildingRef {
-  gx: number;
-  gy: number;
-  kind: BuildingKind;
-}
-
-export interface UpgradeState {
-  kind: "townHall" | "settlement" | "building" | "buildings";
-  targetLevel: 2 | 3;
-  daysRemaining: number;
-  buildingRef?: BuildingRef;
-  buildingRefs?: BuildingRef[];
-  newResourceRates?: Partial<Record<ResourceType, number>>;
-  newCitySpots?: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
-}
-
-export interface CharterState {
-  id: CharterId;
-  heroId: HeroId;
-  ownerId: PlayerId;
-  targetQ: number;
-  targetR: number;
-  settlementName: string;
-  phase: CharterPhase;
-  daysRemaining: number;
-  settlementId: SettlementId;
-  resourceRates: Partial<Record<ResourceType, number>>;
-  foundedOnResource: ResourceType | null;
-  citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
-}
-
-export interface SettlementState {
-  id: SettlementId;
-  name: string;
-  ownerId: PlayerId | null;
-  q: number;
-  r: number;
-  level: 1 | 2 | 3;
-  population: number;
-  goldTax: number;
-  resourceRates: Partial<Record<ResourceType, number>>;
-  foundedOnResource: ResourceType | null;
-  gold: number;
-  warehouse: Warehouse;
-  citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
-  cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>;
-  morale: number;
-  autoTrade: boolean;
-  castleVariant: CastleVariant;
-  buildings: BuildingDef[];
-  upgrade?: UpgradeState;
 }
 
 export type GamePhase =
