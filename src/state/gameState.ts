@@ -1,37 +1,26 @@
 import { normalizePlatoons } from "./units";
-import { settings } from "./settings";
-import {
-  advanceCharters,
-  advanceSettlementUpgrades,
-  applyEffectiveIncome,
-  applyHeroUpkeep,
-  applyMoraleDecay,
-  applyPopulationGrowth,
-  applySettlementConsumption,
-  produceSettlementResources,
-  resetHeroMovement,
-  runAutoTrade,
-  tradeResources,
-  transferGold,
-} from "@heroes/engine";
 import { MOVEMENT_PER_TURN } from "@heroes/contracts";
 import type {
   Player,
   HeroState,
-  GamePhase,
   GameState,
-  CalendarParts,
   InitialStateOptions,
-  ApplyEndOfTurnResult,
   HeroId,
   SettlementId,
   SettlementState,
 } from "@heroes/contracts";
 
-export { applySettlementConsumption, applyMoraleDecay, applyEffectiveIncome, runAutoTrade, transferGold, tradeResources };
-
-export { advanceCharters };
 export {
+  applySettlementConsumption,
+  applyMoraleDecay,
+  applyEffectiveIncome,
+  runAutoTrade,
+  transferGold,
+  tradeResources,
+} from "@heroes/engine";
+
+export {
+  advanceCharters,
   CHARTER_GOLD_COST,
   CHARTER_WAREHOUSE_COST,
   cleanupDefeatedHeroCharters,
@@ -59,6 +48,21 @@ export {
   MAX_HEROES_PER_PLAYER,
   HERO_RECRUIT_COST,
   recruitHero,
+} from "@heroes/engine";
+
+export {
+  startBattle,
+  endBattlePhase,
+  endTurn,
+  canEndTurn,
+  applyEndOfTurn,
+  applyEndOfTurnDetailed,
+  applyWeeklyUpkeep,
+  advanceRound,
+  DAYS_PER_WEEK,
+  DAYS_PER_MONTH,
+  calendarFromDay,
+  monthName,
 } from "@heroes/engine";
 
 // gameState.ts shrinks to a re-export barrel for its types (Track A / Phase
@@ -106,29 +110,6 @@ export type {
 
 export function isHuman(p: Player): boolean {
   return p.faction === "player";
-}
-
-export const DAYS_PER_WEEK = 7;
-export const DAYS_PER_MONTH = 30;
-
-export function calendarFromDay(day: number): CalendarParts {
-  const d = Math.max(1, Math.floor(day));
-  return {
-    week: Math.floor((d - 1) / DAYS_PER_WEEK) + 1,
-    dayOfWeek: ((d - 1) % DAYS_PER_WEEK) + 1,
-    month: Math.floor((d - 1) / DAYS_PER_MONTH) + 1,
-    dayOfMonth: ((d - 1) % DAYS_PER_MONTH) + 1,
-  };
-}
-
-const MONTH_NAMES: readonly string[] = [
-  "Frostmoon", "Thawmist", "Greenrise", "Bloomtide", "Sunpeak", "Goldfall",
-  "Harvest", "Emberveil", "Hollowmoon", "Stillrime", "Longnight", "Stormwane",
-];
-
-export function monthName(month: number): string {
-  if (month < 1) return MONTH_NAMES[0];
-  return MONTH_NAMES[(month - 1) % MONTH_NAMES.length];
 }
 
 function defaultPlayers(): Player[] {
@@ -251,106 +232,6 @@ export function selectSettlement(state: GameState, settlementId: SettlementId): 
 export function clearSettlementSelection(state: GameState): GameState {
   if (state.selectedSettlementId === null) return state;
   return { ...state, selectedSettlementId: null };
-}
-
-export function startBattle(state: GameState, attackerId: HeroId, defenderId: HeroId): GameState {
-  if (state.phase.kind === "BATTLE") return state;
-  return {
-    ...state,
-    phase: { kind: "BATTLE", attackerId, defenderId },
-    selectedHeroId: null,
-    selectedSettlementId: null,
-  };
-}
-
-// The actual combat resolution (stat comparison, counters, retreat) is
-// server-authoritative — see POST /games/:name/resolve-battle and
-// shared/combat/resolveBattle.ts — because it needs the DB-backed unit-type
-// catalog. This just closes out the local BATTLE phase once the caller has
-// the server's result in hand; heroes/players are merged in separately.
-export function endBattlePhase(state: GameState): GameState {
-  if (state.phase.kind !== "BATTLE") return state;
-  return {
-    ...state,
-    phase: { kind: "PLAYER_TURN", playerId: state.activePlayerId },
-    dirty: true,
-  };
-}
-
-export function endTurn(state: GameState): GameState {
-  const currentIdx = state.players.findIndex((p) => p.id === state.activePlayerId);
-  if (currentIdx < 0) return state;
-  const isLast = currentIdx === state.players.length - 1;
-  if (isLast) {
-    return {
-      ...state,
-      phase: { kind: "ROUND_END", nextRound: state.round + 1 },
-      selectedHeroId: null,
-      selectedSettlementId: null,
-    };
-  }
-  const nextPlayer = state.players[currentIdx + 1];
-  const newPhase: GamePhase =
-    nextPlayer.faction === "ai"
-      ? { kind: "AI_TURN", playerId: nextPlayer.id }
-      : { kind: "PLAYER_TURN", playerId: nextPlayer.id };
-  return {
-    ...state,
-    activePlayerId: nextPlayer.id,
-    phase: newPhase,
-    selectedHeroId: null,
-    selectedSettlementId: null,
-  };
-}
-
-export function applyEndOfTurn(state: GameState): GameState {
-  return applyEndOfTurnDetailed(state).state;
-}
-
-export function applyEndOfTurnDetailed(state: GameState): ApplyEndOfTurnResult {
-  const playerId = state.activePlayerId;
-  const newHeroes: Record<HeroId, HeroState> = resetHeroMovement(state.heroes, playerId);
-  // 1. Produce resources for ALL settlements
-  let newSettlements: Record<SettlementId, SettlementState> = produceSettlementResources(state.settlements);
-  // 2. Auto-trade for active player's settlements
-  const autoTrade = runAutoTrade(newSettlements, playerId);
-  newSettlements = autoTrade.settlements;
-  // 3. Consumption + morale decay + effective income for active player's settlements
-  for (const s of Object.values(newSettlements)) {
-    if (s.ownerId !== playerId) continue;
-    const consumed = applySettlementConsumption(s);
-    const moraleAfter = applyMoraleDecay(consumed);
-    newSettlements[s.id] = applyEffectiveIncome(moraleAfter);
-  }
-  return {
-    state: { ...state, heroes: newHeroes, settlements: newSettlements, dirty: true },
-    transfers: autoTrade.transfers,
-  };
-}
-
-export function applyWeeklyUpkeep(state: GameState): GameState {
-  const newHeroes = applyHeroUpkeep(state.heroes);
-  const newSettlements = applyPopulationGrowth(state.settlements, settings().populationGrowthRate);
-  return { ...state, heroes: newHeroes, settlements: newSettlements, dirty: true };
-}
-
-export function advanceRound(state: GameState): GameState {
-  const newHeroes: Record<HeroId, HeroState> = resetHeroMovement(state.heroes);
-  const nextDay = state.day + 1;
-  let withDay: GameState = {
-    ...state,
-    round: state.round + 1,
-    day: nextDay,
-    activePlayerId: 0,
-    phase: { kind: "PLAYER_TURN", playerId: 0 },
-    heroes: newHeroes,
-    selectedHeroId: null,
-    selectedSettlementId: null,
-  };
-  withDay = advanceCharters(withDay);
-  withDay = advanceSettlementUpgrades(withDay);
-  if (nextDay % 7 === 0) return applyWeeklyUpkeep(withDay);
-  return withDay;
 }
 
 export function markSaved(state: GameState): GameState {

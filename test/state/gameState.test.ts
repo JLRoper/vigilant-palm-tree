@@ -433,7 +433,7 @@ test("advanceRound increments round, resets all heroes' movement, sets activePla
     phase: { kind: "ROUND_END", nextRound: 2 },
     round: 1,
   });
-  const next = advanceRound(s);
+  const next = advanceRound(s, 0.1);
   assert.equal(next.round, 2);
   assert.equal(next.activePlayerId, 0);
   assert.equal(next.phase.kind, "PLAYER_TURN");
@@ -581,7 +581,7 @@ test("applyWeeklyUpkeep deducts cost when hero can pay", () => {
   const s = makeState({
     heroes: [makeHero("h0", 0, 2, 2, 7, 100, 10), makeHero("h1", 1, 18, 4, 7, 5, 3)],
   });
-  const next = applyWeeklyUpkeep(s);
+  const next = applyWeeklyUpkeep(s, 0.1);
   assert.equal(next.heroes.h0.gold, 90);
   assert.equal(next.heroes.h0.troops, 10);
   assert.equal(next.heroes.h1.gold, 2);
@@ -592,7 +592,7 @@ test("applyWeeklyUpkeep sets gold to 0 and troops to previous gold when hero can
   const s = makeState({
     heroes: [makeHero("h0", 0, 2, 2, 7, 3, 10)],
   });
-  const next = applyWeeklyUpkeep(s);
+  const next = applyWeeklyUpkeep(s, 0.1);
   assert.equal(next.heroes.h0.gold, 0);
   assert.equal(next.heroes.h0.troops, 3);
 });
@@ -601,7 +601,7 @@ test("applyWeeklyUpkeep is no-op when hero has 0 troops and 0 gold", () => {
   const s = makeState({
     heroes: [makeHero("h0", 0, 2, 2, 7, 0, 0)],
   });
-  const next = applyWeeklyUpkeep(s);
+  const next = applyWeeklyUpkeep(s, 0.1);
   assert.equal(next.heroes.h0.gold, 0);
   assert.equal(next.heroes.h0.troops, 0);
 });
@@ -613,7 +613,7 @@ test("advanceRound fires applyWeeklyUpkeep when day becomes divisible by 7", () 
     day: 6,
     phase: { kind: "ROUND_END", nextRound: 7 },
   });
-  const next = advanceRound(s);
+  const next = advanceRound(s, 0.1);
   assert.equal(next.day, 7);
   assert.equal(next.heroes.h0.gold, 90);
   assert.equal(next.heroes.h0.troops, 10);
@@ -626,7 +626,7 @@ test("advanceRound does not fire applyWeeklyUpkeep on non-week days", () => {
     day: 2,
     phase: { kind: "ROUND_END", nextRound: 3 },
   });
-  const next = advanceRound(s);
+  const next = advanceRound(s, 0.1);
   assert.equal(next.day, 3);
   assert.equal(next.heroes.h0.gold, 100);
   assert.equal(next.heroes.h0.troops, 10);

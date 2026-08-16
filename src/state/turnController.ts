@@ -412,7 +412,7 @@ export class TurnController {
           type: "round_ended",
           payload: { round: endedRound },
         });
-        this.state = advanceRoundReducer(this.state);
+        this.state = advanceRoundReducer(this.state, settings().populationGrowthRate);
         bus.emit({ type: "round:changed", round: this.state.round });
         bus.emit({ type: "day:changed", day: this.state.day });
         this.hooks.logEvent({
