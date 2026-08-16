@@ -8,7 +8,7 @@ import {
   resourceStyleKey,
   horseVariantKey,
 } from "./assetDescriptors";
-import { HORSE_VARIANT_REGISTRY } from "../../shared/horseVariants";
+import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 import { drawKnightSprite, drawDemonSprite } from "./heroSprites";
 
 const warnedKeys = new Set<string>();

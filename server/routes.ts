@@ -1,7 +1,7 @@
 ﻿import { Router } from "express";
 import { pool, withTransaction } from "./db";
-import { GameMap, type MapSize } from "../shared/map/gameMap";
-import { mulberry32 } from "../shared/rng";
+import { GameMap, type MapSize } from "@heroes/engine";
+import { mulberry32 } from "@heroes/engine";
 import { makeInitialStatePayload } from "../src/game/initState";
 import {  tradeResources as tradeResourcesReducer,  applyEndOfTurnDetailed,  type AutoTradeTransfer,} from "../shared/gameState";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
@@ -13,13 +13,13 @@ import type {
   SettlementState,
   WarehouseResource,
 } from "../src/state/gameState";
-import type { Platoon, UnitType } from "../shared/units";
-import { normalizePlatoons } from "../shared/units";
-import { resolveBattle as resolveBattleEngine } from "../shared/combat/resolveBattle";
-import type { BattleResult } from "../shared/combat/types";
+import type { Platoon, UnitType } from "@heroes/engine";
+import { normalizePlatoons } from "@heroes/engine";
+import { resolveBattle as resolveBattleEngine } from "@heroes/engine";
+import type { BattleResult } from "@heroes/engine";
 import { assetRouter } from "./assetRoutes";
 import { authRouter } from "./auth";
-import { validateGameRow, isHealthy } from "../shared/validation/gameIntegrity";
+import { validateGameRow, isHealthy } from "@heroes/engine";
 
 export const router = Router();
 

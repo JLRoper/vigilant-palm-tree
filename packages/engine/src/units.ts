@@ -1,6 +1,11 @@
 import type { AdvantageType } from "./combatConfig";
+import type { Platoon, PlatoonEntry } from "@heroes/contracts";
 
 export type { AdvantageType };
+// Platoon/PlatoonEntry now live in @heroes/contracts (Track A / Phase 1,
+// stage 2) — re-exported here so existing consumers of state/units don't
+// need to change their import path.
+export type { Platoon, PlatoonEntry };
 
 export interface UnitType {
   id: string;
@@ -13,15 +18,6 @@ export interface UnitType {
   advantageType: AdvantageType;
   specialty: string;
   specialtyPriority: number;
-}
-
-export interface PlatoonEntry {
-  unitTypeId: string;
-  count: number;
-}
-
-export interface Platoon {
-  entries: PlatoonEntry[];
 }
 
 export const ARMY_STACK_SLOTS = 8;

@@ -1,1 +1,1 @@
-export { BUILDING_SPRITE_KEYS, hasBuildingSpriteKey, pickStyleForBuilding } from "../../shared/styleResolver";
+export { BUILDING_SPRITE_KEYS, hasBuildingSpriteKey, pickStyleForBuilding } from "@heroes/engine";
