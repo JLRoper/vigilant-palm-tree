@@ -100,7 +100,6 @@ test("advanceCharters completes even when the founding hero no longer exists", (
       makeCharter({ id: "c0", heroId: "ghost-hero", ownerId: 0, phase: "constructing", daysRemaining: 1, settlementId: "s-new" }),
     ],
   });
-  assert.doesNotThrow(() => advanceCharters(s));
   const next = advanceCharters(s);
   assert.ok(next.settlements["s-new"], "settlement is still created without the hero");
   assert.equal(next.activeCharters.length, 0);

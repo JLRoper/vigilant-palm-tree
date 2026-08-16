@@ -1,8 +1,3 @@
-// Shared state/entity factories for test/charter/*.test.ts, mirroring the
-// per-file factory style in test/state/gameState.test.ts (positional
-// id/ownerId/q/r + an options object for the rest) so charter tests stay
-// consistent with the rest of the suite. Not itself a test file — see
-// test/_request.ts for the precedent of an underscore-prefixed shared helper.
 import type {
   CharterState,
   GamePhase,
