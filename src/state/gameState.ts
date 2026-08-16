@@ -40,10 +40,6 @@ import type {
   Warehouse,
 } from "@heroes/contracts";
 
-// applySettlementConsumption/applyMoraleDecay/applyEffectiveIncome/
-// runAutoTrade/transferGold/tradeResources now live in @heroes/engine
-// (Track A / Phase 1, stage 4) — re-exported here so existing consumers of
-// state/gameState don't need to change their import path.
 export { applySettlementConsumption, applyMoraleDecay, applyEffectiveIncome, runAutoTrade, transferGold, tradeResources };
 
 export { advanceCharters };
