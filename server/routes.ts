@@ -20,11 +20,13 @@ import type { BattleResult } from "@heroes/engine";
 import { assetRouter } from "./assetRoutes";
 import { authRouter } from "./auth";
 import { validateGameRow, isHealthy } from "@heroes/engine";
+import { commandsRouter } from "./http/routes/commands";
 
 export const router = Router();
 
 router.use("/assets", assetRouter);
 router.use("/auth", authRouter);
+router.use("/games/:name/commands", commandsRouter);
 
 type EnemyPos = { q: number; r: number };
 type TileRow = {
@@ -440,11 +442,9 @@ router.patch("/games/:name", async (req, res) => {
           movementRemaining: hero.movementRemaining - cost,
         };
         const newHeroes = { ...row.heroes, [heroId]: updatedHero };
-        const incomingSettlements = (body && typeof body === "object" && body.settlements) || null;
-        const newSettlements = incomingSettlements ?? row.settlements;
         await client.query(
-          `UPDATE games SET heroes = $1::jsonb, settlements = $2::jsonb, updated_at = now() WHERE id = $3`,
-          [JSON.stringify(newHeroes), JSON.stringify(newSettlements), row.id]
+          `UPDATE games SET heroes = $1::jsonb, updated_at = now() WHERE id = $2`,
+          [JSON.stringify(newHeroes), row.id]
         );
         await client.query(
           `INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3::jsonb)`,

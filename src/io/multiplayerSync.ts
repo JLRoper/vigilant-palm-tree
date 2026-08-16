@@ -1,5 +1,5 @@
 import { api, type Game } from "./api";
-import { hydrateGameState } from "../game/initState";
+import { hydrateGameState } from "@heroes/engine";
 import type { GameState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
 import {
