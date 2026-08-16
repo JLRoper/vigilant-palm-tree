@@ -1,10 +1,10 @@
 ﻿import { Router } from "express";
-import { pool, withTransaction } from "./db";
+import { pool, withTransaction } from "./persistence/db";
 import { GameMap, type MapSize } from "@heroes/engine";
 import { mulberry32 } from "@heroes/engine";
 import { makeInitialStatePayload } from "../src/game/initState";
 import { tradeResources as tradeResourcesReducer, applyEndOfTurnDetailed } from "@heroes/engine";
-import { WAREHOUSE_RESOURCES, type AutoTradeTransfer } from "@heroes/contracts";
+import type { AutoTradeTransfer } from "@heroes/contracts";
 import type { PoolClient } from "pg";
 import type {
   GameState,
@@ -19,12 +19,14 @@ import { resolveBattle as resolveBattleEngine } from "@heroes/engine";
 import type { BattleResult } from "@heroes/engine";
 import { assetRouter } from "./assetRoutes";
 import { authRouter } from "./auth";
+import { commandsRouter } from "./http/routes/commands";
 import { validateGameRow, isHealthy } from "@heroes/engine";
 
 export const router = Router();
 
 router.use("/assets", assetRouter);
 router.use("/auth", authRouter);
+router.use("/games/:name/commands", commandsRouter);
 
 type EnemyPos = { q: number; r: number };
 type TileRow = {
@@ -401,83 +403,9 @@ router.post("/games", async (req, res) => {
 router.patch("/games/:name", async (req, res) => {
   const body = req.body ?? {};
 
-  // New action: spend_movement
-  if (body && body.action === "spend_movement") {
-    const { heroId, fromTile, toTile, cost } = body;
-    if (
-      typeof heroId !== "string" ||
-      !fromTile ||
-      typeof fromTile.q !== "number" ||
-      typeof fromTile.r !== "number" ||
-      !toTile ||
-      typeof toTile.q !== "number" ||
-      typeof toTile.r !== "number" ||
-      typeof cost !== "number"
-    ) {
-      res.status(400).json({ error: "invalid spend_movement payload" });
-      return;
-    }
-    try {
-      const result = await withTransaction(async (client) => {
-        const gr = await client.query<FullGameRow>(
-          `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
-          [req.params.name]
-        );
-        if (gr.rowCount === 0) return { status: 404 as const };
-        const row = gr.rows[0];
-        const hero = row.heroes[heroId];
-        if (!hero) return { status: 404 as const, error: "hero not found" };
-        if (hero.q !== fromTile.q || hero.r !== fromTile.r) {
-          return { status: 409 as const, error: "hero not at fromTile" };
-        }
-        if (hero.ownerId !== row.active_player_id) {
-          return { status: 403 as const, error: "forbidden_not_your_turn" };
-        }
-        const updatedHero: HeroState = {
-          ...hero,
-          q: toTile.q,
-          r: toTile.r,
-          movementRemaining: hero.movementRemaining - cost,
-        };
-        const newHeroes = { ...row.heroes, [heroId]: updatedHero };
-        const incomingSettlements = (body && typeof body === "object" && body.settlements) || null;
-        const newSettlements = incomingSettlements ?? row.settlements;
-        await client.query(
-          `UPDATE games SET heroes = $1::jsonb, settlements = $2::jsonb, updated_at = now() WHERE id = $3`,
-          [JSON.stringify(newHeroes), JSON.stringify(newSettlements), row.id]
-        );
-        await client.query(
-          `INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3::jsonb)`,
-          [
-            row.id,
-            "move_completed",
-            JSON.stringify({ heroId, fromTile, toTile, cost }),
-          ]
-        );
-        return { status: 200 as const, hero: updatedHero };
-      });
-      if (result.status === 404) {
-        if ("error" in result && result.error) {
-          res.status(404).json({ error: result.error });
-        } else {
-          res.status(404).json({ error: "not found" });
-        }
-        return;
-      }
-      if (result.status === 409) {
-        res.status(409).json({ error: result.error });
-        return;
-      }
-      res.json(result.hero);
-    } catch (err) {
-      console.error("[api] PATCH /games/:name spend_movement threw:", err);
-      res.status(500).json({
-        error: "internal",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-    return;
-  }
+  // spend_movement used to be handled here (legacy PATCH action) -- ported
+  // to the MoveHero command, see POST /games/:name/commands
+  // (server/http/routes/commands.ts) and server/app/commandHandler.ts.
 
   // Legacy patch behavior
   const { hero_q, hero_r, turn, gold, enemy_positions } = body;
@@ -510,7 +438,7 @@ router.patch("/games/:name", async (req, res) => {
   }
   sets.push("updated_at = now()");
   vals.push(req.params.name);
-  const r = await pool.query<GameRow>(
+  const r = await pool.query<FullGameRow>(
     `UPDATE games SET ${sets.join(", ")} WHERE name = $${i}
      RETURNING ${GAME_COLUMNS}`,
     vals
@@ -632,6 +560,7 @@ router.post("/games/:name/end-turn", async (req, res) => {
         id: p.id,
         faction: p.faction,
         name: p.name,
+        color: p.color,
         heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
         settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
       }));
@@ -849,6 +778,7 @@ router.post("/games/:name/resolve-battle", async (req, res) => {
         id: p.id,
         faction: p.faction,
         name: p.name,
+        color: p.color,
         heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
         settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
       }));
@@ -941,125 +871,9 @@ router.post("/games/:name/resolve-battle", async (req, res) => {
   }
 });
 
-router.post("/games/:name/transfer", async (req, res) => {
-  const body = req.body ?? {};
-  const { heroId, settlementId, direction } = body;
-  if (
-    typeof heroId !== "string" ||
-    typeof settlementId !== "string" ||
-    (direction !== "deposit" && direction !== "withdraw")
-  ) {
-    res.status(400).json({ error: "invalid transfer payload" });
-    return;
-  }
-  try {
-    const result = await withTransaction(async (client) => {
-      const gr = await client.query<FullGameRow>(
-        `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
-        [req.params.name]
-      );
-      if (gr.rowCount === 0) return { status: 404 as const };
-      const row = gr.rows[0];
-      const hero = row.heroes[heroId];
-      const settlement = row.settlements[settlementId];
-      if (!hero) return { status: 404 as const, error: "hero not found" };
-      if (!settlement) return { status: 404 as const, error: "settlement not found" };
-      if (hero.ownerId !== row.active_player_id) {
-        return { status: 403 as const, error: "forbidden_not_your_turn" };
-      }
-      if (hero.q !== settlement.q || hero.r !== settlement.r) {
-        return { status: 409 as const, error: "hero_not_at_settlement" };
-      }
-      if (settlement.ownerId === null || settlement.ownerId !== hero.ownerId) {
-        return { status: 409 as const, error: "not_owned_settlement" };
-      }
-
-      const amount =
-        direction === "deposit"
-          ? Number(hero.gold) || 0
-          : Number(settlement.gold) || 0;
-      if (amount <= 0) {
-        return { status: 409 as const, error: "nothing_to_transfer" };
-      }
-
-      const newHeroes: Record<string, HeroState> = {
-        ...row.heroes,
-        [heroId]: direction === "deposit"
-          ? { ...hero, gold: 0 }
-          : { ...hero, gold: (Number(hero.gold) || 0) + amount },
-      };
-      const newSettlements: Record<string, SettlementState> = {
-        ...row.settlements,
-        [settlementId]: direction === "withdraw"
-          ? { ...settlement, gold: 0 }
-          : { ...settlement, gold: (Number(settlement.gold) || 0) + amount },
-      };
-
-      const players: Player[] = row.players.map((p) => ({
-        id: p.id,
-        faction: p.faction,
-        name: p.name,
-        heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
-        settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
-      }));
-      const legacyGold = sumPlayerGold(players, newHeroes, newSettlements);
-
-      await client.query(
-        `UPDATE games SET
-           players = $1::jsonb,
-           heroes = $2::jsonb,
-           settlements = $3::jsonb,
-           gold = $4,
-           updated_at = now()
-         WHERE id = $5`,
-        [
-          JSON.stringify(players),
-          JSON.stringify(newHeroes),
-          JSON.stringify(newSettlements),
-          legacyGold,
-          row.id,
-        ]
-      );
-
-      await client.query(
-        `INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3::jsonb)`,
-        [
-          row.id,
-          "transfer_gold",
-          JSON.stringify({ heroId, settlementId, direction, amount }),
-        ]
-      );
-
-      return {
-        status: 200 as const,
-        result: {
-          hero: newHeroes[heroId],
-          settlement: newSettlements[settlementId],
-        },
-      };
-    });
-
-    if (result.status === 404) {
-      if ("error" in result && result.error) {
-        res.status(404).json({ error: result.error });
-      } else {
-        res.status(404).json({ error: "not found" });
-      }
-      return;
-    }
-    if (result.status === 409) {
-      res.status(409).json({ error: result.error });
-      return;
-    }
-    res.json(result.result);
-  } catch (err) {
-    console.error("[api] POST /games/:name/transfer threw:", err);
-    res.status(500).json({
-      error: "internal",
-      message: err instanceof Error ? err.message : String(err),
-    });
-  }
-});
+// transfer used to be POST /games/:name/transfer -- ported to the
+// TransferGold command, see POST /games/:name/commands
+// (server/http/routes/commands.ts) and server/app/commandHandler.ts.
 
 router.post("/games/:name/trade", async (req, res) => {
   const body = req.body ?? {};
@@ -1099,7 +913,7 @@ router.post("/games/:name/trade", async (req, res) => {
       }
 
       const tradeResult = tradeResourcesReducer(
-        { ...row, dirty: false } as GameState,
+        { ...row, dirty: false } as unknown as GameState,
         fromSettlementId,
         toSettlementId,
         resource as WarehouseResource,

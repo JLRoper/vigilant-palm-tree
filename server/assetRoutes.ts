@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { pool } from "./db";
+import { pool } from "./persistence/db";
 
 export const assetRouter = Router();
 

@@ -83,6 +83,17 @@ module.exports = {
       from: { path: "^packages/engine" },
       to: { path: "^(src/|server/)" },
     },
+    {
+      name: "no-repo-import-outside-commandHandler",
+      severity: "error",
+      comment:
+        "server/http/ and server/app/ (other than commandHandler.ts itself) must not import repositories directly — everything goes through commandHandler's own repo calls, not ad-hoc repo imports scattered through route/app files.",
+      from: {
+        path: "^server/(http|app)/",
+        pathNot: "^server/app/commandHandler\\.ts$",
+      },
+      to: { path: "^server/persistence/repositories/" },
+    },
   ],
   options: {
     doNotFollow: { path: "node_modules" },

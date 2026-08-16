@@ -1,4 +1,9 @@
 export type PlayerId = number;
+// The seat issuing a command (packages/contracts/src/commands/). Same
+// underlying value as PlayerId today -- kept as a distinct name because a
+// command's actor and an entity's owner are conceptually different things
+// that only happen to share a representation right now.
+export type PlayerSeat = PlayerId;
 export type Faction = "player" | "ai";
 export type HeroId = string;
 export type SettlementId = string;

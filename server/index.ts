@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
-import { initSchema, pool } from "./db";
+import { initSchema } from "./db";
+import { pool } from "./persistence/db";
 import { router } from "./routes";
 
 const PORT = Number(process.env.API_PORT ?? 3001);

@@ -44,11 +44,11 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         const previousCost = (hero.previousMovementRemaining ?? hero.movementRemaining) - hero.movementRemaining;
         await spendMovement(name, {
+          actor: hero.ownerId,
           heroId,
           fromTile: { q: hero.q, r: hero.r },
           toTile,
           cost: previousCost > 0 ? previousCost : 1,
-          settlements: state.settlements,
         });
       } catch (e) {
         console.warn("[turnHooks] spendMovement failed:", e);

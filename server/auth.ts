@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { createHash, randomBytes, randomInt } from "node:crypto";
-import { pool } from "./db";
+import { pool } from "./persistence/db";
 
 export const authRouter = Router();
 

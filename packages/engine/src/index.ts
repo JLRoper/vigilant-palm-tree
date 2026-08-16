@@ -1,6 +1,7 @@
 // @heroes/engine — deterministic game rules. Depends on @heroes/contracts
 // only: no DOM, no Canvas, no Date.now, no Math.random, no fetch. All
-// non-determinism is injected via EngineCtx = { rng, catalog }.
+// non-determinism is injected via EngineCtx (./ctx.ts) = { rng, catalog }.
+export * from "./ctx";
 export * from "./combat";
 export * from "./combatConfig";
 export * from "./horseVariants";
