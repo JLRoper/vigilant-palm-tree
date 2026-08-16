@@ -29,24 +29,24 @@ module.exports = {
       },
     },
     {
-      name: "no-render-into-systems-or-views",
+      name: "no-render-into-systems-or-screens",
       severity: "error",
       from: { path: "^src/render" },
-      to: { path: "^src/(systems|views|screens)/" },
+      to: { path: "^src/(systems|screens)/" },
     },
     {
-      name: "no-state-value-import-from-render-or-views",
+      name: "no-state-value-import-from-render-or-screens",
       severity: "error",
       from: { path: "^src/state" },
       to: {
-        path: "^src/(render|views|screens)/",
+        path: "^src/(render|screens)/",
         dependencyTypesNot: ["type-only"],
       },
     },
     {
-      name: "no-views-into-managers",
+      name: "no-screens-into-managers",
       severity: "error",
-      from: { path: "^src/(views|screens)" },
+      from: { path: "^src/screens" },
       to: {
         path: "^src/managers/",
         dependencyTypesNot: ["type-only"],
@@ -71,11 +71,11 @@ module.exports = {
       },
     },
     {
-      name: "no-entities-value-from-render-or-views",
+      name: "no-entities-value-from-render-or-screens",
       severity: "error",
       from: { path: "^src/entities" },
       to: {
-        path: "^src/(render|views|screens)/",
+        path: "^src/(render|screens)/",
         dependencyTypesNot: ["type-only"],
       },
     },

@@ -2,7 +2,7 @@
 // canvas and lets the player click their own platoons (in whatever order
 // they choose) to move + attack, alternating with a simple AI opponent, via
 // the engine in shared/combat/manualBattle.ts. Currently only reachable from
-// the "Test Battle" sandbox (src/views/testBattleSetup.ts) — see that file's
+// the "Test Battle" sandbox (src/screens/combat/testBattleSetup.ts) — see that file's
 // header for the scope boundary against the real game's battle flow.
 //
 // Layout is battlefield-first: the grid takes whatever room is left after one

@@ -1,6 +1,6 @@
 import { GameEngine } from "./managers/GameEngine";
-import "./views";
-import { createHomeView } from "./views/homeView";
+import "./screens";
+import { createHomeView } from "@screens/home/homeView";
 import type { Game } from "./io/api";
 
 const engine = new GameEngine();

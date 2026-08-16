@@ -13,7 +13,7 @@ import {
   PARALLAX_SPEEDS,
   type GameSettings,
   type ResourceStyle,
-} from "../state/settings";
+} from "../../state/settings";
 import { launchView, registerView } from "@screens/shared/viewLauncher";
 
 registerView("settingsMenu", (opts) => openSettingsMenu(opts as Parameters<typeof openSettingsMenu>[0]));
