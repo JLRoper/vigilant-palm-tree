@@ -13,7 +13,13 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "@heroes/contracts": ["./packages/contracts/src/index.ts"],
+      "@heroes/contracts/*": ["./packages/contracts/src/*"],
+      "@heroes/engine": ["./packages/engine/src/index.ts"],
+      "@heroes/engine/*": ["./packages/engine/src/*"]
+    }
   },
-  "include": ["src", "shared"]
+  "include": ["src", "shared", "packages/contracts/src", "packages/engine/src"]
 }

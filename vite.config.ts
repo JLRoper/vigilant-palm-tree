@@ -1,4 +1,5 @@
 import { defineConfig, loadEnv } from "vite";
+import path from "node:path";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
@@ -6,6 +7,12 @@ export default defineConfig(({ mode }) => {
   const apiPort = env.API_PORT ?? process.env.API_PORT ?? "3001";
 
   return {
+    resolve: {
+      alias: {
+        "@heroes/contracts": path.resolve(__dirname, "packages/contracts/src/index.ts"),
+        "@heroes/engine": path.resolve(__dirname, "packages/engine/src/index.ts"),
+      },
+    },
     build: {
       assetsInlineLimit: 0,
     },
