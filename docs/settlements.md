@@ -186,6 +186,6 @@ New event kinds:
 - What a settlement produces: [resources.md](./resources.md)
 - How it produces per turn: [economy.md](./economy.md)
 - Who builds and captures them: [heroes.md](./heroes.md)
-- Inside a settlement: [city-view.md](./city-view.md)
+- Inside a settlement: [city-view-impl-plan.md](./city-view-impl-plan.md)
 
 [← Back to index](./README.md)

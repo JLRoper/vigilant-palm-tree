@@ -48,7 +48,7 @@ Browser (Vite SPA)                                  Express API server
 | `server/db.ts` | `pg.Pool` factory; `initSchema()` applies `schema.sql` + migrations 001–005; `withTransaction()` helper | `pg`, `node:fs`, `node:path` |
 | `server/auth.ts` | Email + 6-digit-code auth (SHA-256 hashed codes), bearer-token sessions w/ 30-day TTL, `requireAuth` middleware | `express`, `node:crypto`, `./db` |
 | `server/assetRoutes.ts` | REST for `game_assets`: list, get binary (cache headers), put, delete, batch upload | `express`, `./db` |
-| `server/routes.ts` | Core game API; orchestrates state mutations + combat | `../src/map/gameMap`, `../src/core/rng`, `../src/game/initState`, `../src/state/gameState`, `../src/state/units`, `../../shared/combat/resolveBattle`, `./assetRoutes`, `./auth` |
+| `server/routes.ts` | Core game API; orchestrates state mutations + combat. Also owns the **lobby** endpoints — `POST /games/:name/lobby/claim` (claim a seat by index + handle; 409 on `lobby_already_started` or `seat_already_claimed`) and `POST /games/:name/lobby/start` — backed by a `lobby` jsonb column (`LobbyState`: `seats`, `humanSlots`, `claimed: Record<seatIndex, { handle, claimedAt }>`, `startedAt`). Runs `validateGameRow` on load paths | `../src/map/gameMap`, `../src/core/rng`, `../src/game/initState`, `../src/state/gameState`, `../src/state/units`, `../../shared/combat/resolveBattle`, `../../shared/validation/gameIntegrity`, `./assetRoutes`, `./auth` |
 | `server/schema.sql` + `migrations/001..005` | DDL for `games`, `tiles`, `game_events`, `settlement_snapshots`, `resource_transactions`, `game_assets`, `unit_types` + counter columns | — |
 
 ---
@@ -59,11 +59,17 @@ Browser (Vite SPA)                                  Express API server
 |---|---|---|
 | `shared/combatConfig.ts` | Tunables: `TYPE_TRIANGLE`, advantage multipliers, retreat loss, grid/row defaults, `RANGED_ATTACK_RANGE` | — |
 | `shared/combat/types.ts` | `BattleSide`, `BattleHex`, `BattleGrid`, `Combatant`, `CombatantOutcome`, `BattleResult`, `BattleSnapshot`, `ResolveBattleOptions` | `../../src/core/hex`, `../../src/state/units` |
-| `shared/combat/damage.ts` | Pure math: `typeMultiplier`, `computeDamage` (effAttack²/(effAttack+effDefense) × adv × mod), `applyCasualties`, `applyRetreatLoss` | `../../src/state/units`, `../combatConfig` |
-| `shared/combat/grid.ts` | `makeBattleGrid` (random obstacles via `mulberry32`), `deploymentPosition` | `../../src/core/hex`, `../../src/core/rng`, `../combatConfig` |
+| `shared/combat/damage.ts` | Pure math: `typeMultiplier`, `computeDamage` (effAttack²/(effAttack+effDefense) × adv × mod), `applyCasualties`, `applyRetreatLoss`; plus the UI-facing estimators `totalHealth` and `estimateWinChance` (used by `views/platoonInfoPopup.ts`) | `../../src/state/units`, `../combatConfig` |
+| `shared/combat/grid.ts` | `makeBattleGrid` (random obstacles via `mulberry32`), `deploymentPosition`, `columnOf`. Cells are generated in **odd-r offset** coordinates (`q = col - floor(r/2)`) so the pointy-top mapping produces a true rectangle instead of a rhombus — this changes only *which* axial cells exist, not the coordinate system, so `hexDistance`, the six neighbours, movement BFS and line-of-sight are unaffected. `deploymentPosition` and the obstacle filter convert via `columnOf` rather than reading raw `q` | `../../src/core/hex`, `../../src/core/rng`, `../combatConfig` |
 | `shared/combat/resolveBattle.ts` | Auto-resolver: turn loop, counterattack chains, retreat policies; exports `buildCombatants`, `resolveAttack`, `buildResults` | `../../src/state/units`, `../combatConfig`, `./grid`, `./damage`, `./types` |
-| `shared/combat/manualBattle.ts` | HoMM3-style interactive engine: `startManualBattle`, `movePlatoon`/`attackWithPlatoon`, BFS movement range, line-of-sight, `runAiTurn`, `finalizeManualBattle` | `../../src/core/hex`, `../../src/state/units`, `../combatConfig`, `./grid`, `./resolveBattle`, `./types` |
+| `shared/combat/manualBattle.ts` | HoMM3-style interactive engine: `startManualBattle`, `movePlatoon`/`attackWithPlatoon`, BFS movement range, line-of-sight, `runAiTurn`, `retreatHero`, `finalizeManualBattle`, `timeOfDayForRound`. **Approach-hex targeting:** `getApproachHexes(state, actor, target)` returns the hexes an actor can strike a target from (one `movementCosts` lookup covers bounds, passability, occupancy and remaining budget; the actor's own hex comes back at cost 0 when already adjacent), and `attackFromHex` moves + attacks as one validated action, delegating to `movePlatoon`/`attackWithPlatoon`. Both are **melee-only** — ranged platoons shoot from where they stand | `../../src/core/hex`, `../../src/state/units`, `../combatConfig`, `./grid`, `./resolveBattle`, `./types` |
 | `shared/combat/index.ts` | Barrel re-export | (all above) |
+
+### 4.1 `shared/validation/`
+
+| Module | Role | Depends on |
+|---|---|---|
+| `shared/validation/gameIntegrity.ts` | Structural check for a persisted game row. `validateGameRow(row)` returns `IntegrityIssue[]` — **`error`** = malformed in a way `hydrateGameState` can't safely paper over (bad cross-references, wrong shapes: duplicate/unknown player ids, hero/settlement key ≠ `.id`, `ownerId` matching no player, non-finite `q`/`r`, settlement `level` outside 1–3); **`warning`** = a field `hydrateGameState` silently defaults on load (missing `day`, `movementRemaining`, `troops`, `stacks`, `warehouse` entries, roster arrays referencing absent ids). `isHealthy(issues)` = no errors. Consumed by `server/routes.ts` | `../../src/state/gameState` |
 
 ---
 
@@ -75,14 +81,14 @@ Browser (Vite SPA)                                  Express API server
 ### 5.2 `src/core/` — pure utilities (no I/O)
 | Module | Role | Imports |
 |---|---|---|
-| `hex.ts` | Axial-hex primitives: `HEX_SIZE=32`, `axialToPixel`/`pixelToAxial`, `axialRound`, `hexDistance` | — |
+| `hex.ts` | Axial-hex primitives: `HEX_SIZE=32`, `axialToPixel`/`pixelToAxial`, `axialRound`, `hexCorners`, `hexDistance`. Also the **canonical** `HEX_DIRECTIONS` (six axial vectors, edge-ordered so index `i` is the neighbour across edge `i`, whose midpoint sits at 60·`i`°) and `nearestHexEdge(cx, cy, px, py)` → edge index. These replaced two separate copies of the same vectors (`EDGE_NEIGHBORS` in `core/control.ts`, `NEIGHBOR_DIRS` in the battle engine) — add new direction math here, not in a consumer | — |
 | `rng.ts` | Global LCG `rng()` + `mulberry32(seed)` factory | — |
 | `eventBus.ts` | Typed pub/sub singleton (`bus.on`/`emit`/`clear`) | — |
 | `eventRegistry.ts` | `registerAllListeners()` hook (placeholder) | `./eventBus` |
 | `events.ts` | `GameEvent` discriminated union (`state:committed`, `turn:ended`, `phase:changed`, `hero:moved`, `settlement:captured`, `battle:resolved`, economy/morale, calc:vision/control/heroSpeed) | `./hex`, `../state/gameState` |
 | `cityGrid.ts` | Diamond-grid math for city view (`TILE_W=96`, `TILE_D=48`); `cellToScreen`/`screenToCell`, `cellsInDrawOrder` | — |
 | `citySpots.ts` | `generateCitySpots` places 3/6/9 resource veins + mines for 5/10/15 city sizes | `../map/resourceTiles`, `./cityGrid` |
-| `control.ts` | `controlRange`, `settlementRateRadius`, `controlledPositions`, `territoryBoundaryEdges` | `./hex`, `../entities/settlement`, `../render/cityBuildingDraw` |
+| `control.ts` | `controlRange`, `settlementRateRadius`, `controlledPositions`, `territoryBoundaryEdges` (edge walk now reads `HEX_DIRECTIONS` from `./hex` instead of a local `EDGE_NEIGHBORS` copy) | `./hex`, `../entities/settlement`, `../render/cityBuildingDraw` |
 | `buildingRegistry.ts` | Master `REGISTRY` of 13 building kinds (townHall, house, tower, mageGuild, mine, market, barracks, smithy, apartment, farmField, farmhouse, archeryRange, granary) — placement/upkeep/effects | `../render/cityBuildingDraw`, `../state/gameState` |
 | `buildingModifiers.ts` | `computeSettlementBonuses`/`computePlayerBonuses` aggregators | `../render/cityBuildingDraw`, `./buildingRegistry` |
 
@@ -139,6 +145,7 @@ Browser (Vite SPA)                                  Express API server
 | `auth.ts` | localStorage-backed auth state (`heroesJs.authToken`/`authEmail`); `requestLoginCode`, `verifyLoginCode`, `checkSession`, `logout`, `authHeader` | `./api` |
 | `assetApi.ts` | `fetchAssetList`, `fetchAssetBlob`, `assetUrl(key)`, `uploadAsset`, `deleteAsset`, `batchUpload` against `/api/assets*` | — |
 | `userGames.ts` | localStorage cache `heroesJs.userGames` (recent games w/ `lastSeenAt`) for home screen | — |
+| `multiplayerSync.ts` | **Polling** multiplayer client (no sockets). `MultiplayerSync.start(gameName, intervalMs = 2000)` polls `api.getGame` on a `setInterval`, hydrates each row and emits `mp:stateChanged` on the bus every tick (carrying `prev`/`next`/`serverActivePlayerId`), plus `mp:turnStarted` when `activePlayerId` changes between polls. Claims seat 0 in memory if the lobby shows it claimed and no local id is set. Singleton via `getMultiplayerSync()`; a failed poll warns and returns rather than stopping the timer | `./api`, `../game/initState`, `../core/eventBus`, `../players/localPlayer` |
 | `debugCommands.ts` | Attaches `window.__gameDebug` for manual poking (`endTurn`, `requestMove`, `enterBattle`, etc.) and exposes `__gameDebug.events` (`subscribe`/`getEntries`/`stats`/`clear`/`setCapacity`) backed by the `EventLog` | `../state/gameState`, `../map/pathfinding`, `../map/terrain`, `../core/hex`, `../debug/eventLog` |
 
 ### 5.10 `src/render/` — drawing pipeline
@@ -184,7 +191,9 @@ Browser (Vite SPA)                                  Express API server
 | Module | Role | Imports |
 |---|---|---|
 | `menu.ts` | Generic popup primitives: `menuTheme`, `styleButton`/`styleInput`, `PopupMenu` class (draggable, closeable, setContent/appendContent/clearContent/setPosition), `openCenteredModal` | — |
-| `homeView.ts` | Home overlay: New/Load/Settings/Sign-In modals, `userGames` remember | `../io/api`, `../io/userGames`, `../io/auth`, `./menu`, `./settingsMenu` |
+| `homeView.ts` | Home overlay: New/Load/Settings/Sign-In modals, `userGames` remember; hosts `newGameScreen` and launches `multiplayerLobby` | `../io/api`, `../io/userGames`, `../io/auth`, `./menu`, `./settingsMenu`, `./newGameScreen`, `./multiplayerLobby` |
+| `newGameScreen.ts` | Full-screen **Create Game** panel hosted by `homeView` (replaces the landing button stack while the form is open). Fields: Name, Map Size (3 named presets, dropdown), Number of Human Players (1–4 chip selector), Map Seed (defaults to a fresh random 31-bit int, user-editable). `createNewGameScreen(opts)` → `{ root, setBusy, showError, clearError, destroy }`; the caller supplies `onCreate(values)`/`onCancel` and an `isBackendOk` gate | `./menu` |
+| `multiplayerLobby.ts` | LAN lobby modal. Create-or-join flow over `POST /games/:name/lobby/claim` + `/lobby/start`: seat grid (2/3/4 seats) built by `snapshotFromGame` from the row's `lobby.claimed` map, colored via `PLAYER_COLORS`, default game name `lan-<YYYY-MM-DD>-<hex>`. Persists the claimed seat through `players/localPlayer` (both localStorage and in-memory) so `multiplayerSync` knows which seat is ours | `../io/api`, `./menu`, `../state/playerColors`, `../players/localPlayer` |
 | `adventureView.ts` | **Main map view:** mouse drag/wheel/touch-pinch, hover tracking, path preview, click-to-move/adjacent-enemy/settlement, charter modal; `MAP_SEED=42` | `../core/hex`, `../render/camera`, `../map/gameMap`, `../render/renderer`, `../entities/hero`, `../map/pathfinding`, `../state/gameState`, `../state/turnController`, `../render/overlays/pathOverlay`, `../managers/GameStateManager`, `./menu`, `../render/minimap` |
 | `cityView.ts` | Full-screen city build view: keyboard (B/Esc/Delete/1–5 styles/!@#$%^ patterns/R reroll); mouse→grid picking; place/destroy/select modes; `TurnController.startBuildingUpgrade`; persists on close; wires `BuildingPlacer`, `BuildingMenu`, `BuildingSelectionMenu`, `CityDesignBoxManager` | `../core/cityGrid`, `../render/cityRenderer`, `../map/resourceTiles`, `../render/assets`, `../render/cityBuildingDraw`, `../render/cityBuildingGen`, `./buildingMenu`, `./buildingPlacer`, `./buildingSelectionMenu`, `./confirmDialog`, `../state/settings`, `../state/gameState`, `../core/buildingRegistry`, `../managers/CityDesignBoxManager` |
 | `hud.ts` | Status line: round, wealth, morale, effective income, upkeep, save time | `../state/gameState`, `../economy/consumption`, `../economy/income` |
@@ -199,7 +208,8 @@ Browser (Vite SPA)                                  Express API server
 | `buildingSelectionMenu.ts` | Multi-select upgrade preview (aggregate effects, combined cost, single confirm) | `./menu`, `../render/cityBuildingDraw`, `../state/gameState`, `../core/buildingRegistry` |
 | `battleModal.ts` | Tiny modal: Resolve or Flee before applying battle result | `./menu` |
 | `battleResultCard.ts` | End-of-battle summary (per-side survivors/losses) | `../../shared/combat/types`, `../data/unitCatalog`, `./menu` |
-| `manualBattleArena.ts` | **Fullscreen HoMM3-style arena** for Test Battle: grid + side panels + footer (round/turn/time-of-day info row + action row with End Turn, **Retreat**, **Surrender**, **⚙ Settings** buttons); click-to-move/attack; alternates with `runAiTurn`; Retreat/Surrender call `retreatHero` (applyLoss true/false) → `finalizeManualBattle` → `showBattleResultCard`; Surrender costs SURRENDER_COST_GOLD (5000G) — if heroGold is insufficient, opens a Leave Behind picker (SURRENDER_UNIT_VALUE_GOLD=100 per unit) that strips the chosen counts from surviving platoons before finalize; Settings opens `openSettingsMenu({ parent: overlay })` | `../core/hex`, `../../shared/combat/damage`, `../../shared/combat/manualBattle`, `../../shared/combat/types`, `../../shared/combatConfig`, `../state/units`, `./battleResultCard`, `./confirmDialog`, `./menu`, `./settingsMenu` |
+| `manualBattleArena.ts` | **Fullscreen HoMM3-style arena** for Test Battle — **battlefield-first three-band layout**: status bar / battle row / action + log bar. Roster rails are 190px columns of ~33px platoon strips (specialty icon, count, HP bar; spent platoons dim); per-platoon stats live in the hover/selection info card (`platoonInfoPopup`), not on the tiles. Hex size is **solved for the available box** rather than drawn fixed and scaled down, and the canvas is 1:1 with its layout box over a DPR backing store. The engine's battle log is surfaced (collapsed to one line, expandable); unacted platoons get a gold hex outline. **Approach-hex targeting:** hovering a reachable enemy latches it and reads the approach hex off whichever sixth of its hex the cursor occupies (`nearestHexEdge`), drawn with a direction arrow; a sector pointing at a blocked or unreachable hex snaps to the nearest legal side; the latch survives the cursor moving onto one of the approach hexes, so clicking that hex directly also works. The approach branch is tested **before** the plain-attack and move branches — an approach hex is also an ordinary move-range hex, so branch order disambiguates the two meanings of the same click. Ranged platoons get their own help text (no side to choose). The **bump attack** now fires only when exactly one enemy is adjacent; with two or more the move stands and the click picks the target. The AI turn is **stepped on a timer** (telegraph the acting platoon with a white ring ~320ms, then resolve and repaint ~260ms) rather than resolved synchronously. Footer actions: End Turn, **Retreat**, **Surrender**, **⚙ Settings**. Retreat/Surrender call `retreatHero` (applyLoss true/false) → `finalizeManualBattle` → `showBattleResultCard`; Surrender costs SURRENDER_COST_GOLD (5000G) — if heroGold is insufficient, opens a Leave Behind picker (SURRENDER_UNIT_VALUE_GOLD=100 per unit) that strips the chosen counts from surviving platoons before finalize; Settings opens `openSettingsMenu({ parent: overlay })` | `../core/hex`, `../../shared/combat/damage`, `../../shared/combat/manualBattle`, `../../shared/combat/types`, `../../shared/combatConfig`, `../state/units`, `./battleResultCard`, `./confirmDialog`, `./menu`, `./platoonInfoPopup`, `./settingsMenu` |
+| `platoonInfoPopup.ts` | Click/hover-anchored info card for a single platoon: composition, HP, movement left, optional specialty/stats/metrics rows, and — for an enemy — a win-odds estimate against your currently selected platoon (`estimateWinChance`). `createPlatoonInfoPopup(container)` → `{ show, hide }`. Deliberately a dumb render+placement component: the **caller** decides which side of the anchor counts as "behind the line" (away from the opposing army); this file just draws the card there and clamps it on-screen | `../../shared/combat/damage`, `../../shared/combat/types`, `../state/units`, `./menu` |
 | `testBattleSetup.ts` | Test Battle entry modal: Blue/Red side pick, player preset + AI roster (Reroll), Start → `openManualBattleArena` | `../combat/testArmies`, `../data/unitCatalog`, `../../shared/combat/types`, `../state/units`, `./menu`, `./manualBattleArena` |
 | `assetManager.ts` | Dev modal: list/upload/download/delete assets via `assetApi` | `./menu`, `../io/assetApi` |
 | `developerSettingsMenu.ts` | Dev menu: event-bus inspector, Asset Manager launch, Test Battle launch, Dev Console launch (reads `__gameDebug.eventLog`) | `./menu`, `../core/eventBus`, `./assetManager`, `./testBattleSetup`, `../debug/devConsole` |
@@ -219,11 +229,29 @@ Browser (Vite SPA)                                  Express API server
 | `eventLog.ts` | `EventLog` ring buffer (`record`/`subscribe`/`getEntries`/`stats`/`clear`/`setCapacity`), `attachEventLog()` subscribes the bus + returns a `wrapHooks(hooks)` interceptor for `TurnControllerHooks.logEvent` | `../core/eventBus`, `../state/turnController` |
 | `devConsole.ts` | `openDevConsole(log, opts?)` modal (filter/pause/clear/copy) and `mountDevConsoleFooter(log, opts?)` sticky bar; backed by `EventLog` subscribe | `../views/menu`, `./eventLog` |
 
+### 5.15 `src/factions/` — static roster data ⚠️ **not yet wired**
+
+Design-time per-faction unit roster data, distinct from the server-driven `UnitType` in `state/units.ts`: `FactionUnit` adds `hp`/`walkDistance` and a bundled unit image (imported via Vite `?url`) so each unit is fully self-described.
+
+| Module | Role | Imports |
+|---|---|---|
+| `factions/types.ts` | `FactionUnit` interface: `id`, `name`, `description`, `hp`, `attack`, `defence`, `speed`, `walkDistance`, `image` | — |
+| `factions/humans/{swordsman,archer,cavalry,pikeman,crossbowman,griffin}.ts` | One `FactionUnit` const per unit | `../types`, `../../resources/units/*.png?url` |
+| `factions/humans/index.ts` | Re-exports each unit plus the `humanUnits: FactionUnit[]` roster | `../types`, `./*` |
+
+> ⚠️ **Nothing imports `src/factions/` yet.** It mirrors the unit set used by the Test Battle player preset (`combat/testArmies.ts` `PLAYER_PRESET`) and is intended as the template for other factions, but the runtime still reads units from `data/unitCatalog.ts` (server `/api/units`) and `state/units.ts`. Treat it as staged data awaiting a consumer — if you're looking for the units the game actually fights with, they are **not** here.
+
+### 5.16 `src/players/` — local seat identity
+
+| Module | Role | Imports |
+|---|---|---|
+| `localPlayer.ts` | Which seat *this browser* owns in a multiplayer game. localStorage-backed under `heroes.mp.localPlayerId.<gameName>` (`get`/`set`/`clearLocalPlayerId`, each guarded against localStorage being disabled) plus a parallel in-memory `Map` (`get`/`setInMemoryLocalPlayerId`) that survives a disabled/blocked store within the session | `../state/gameState` (type-only) |
+
 ---
 
 ## 6. `test/`
-- **Unit (Node `node:test`):** `cityGrid`, `citySpots`, `minimap`, `state/economy`, `state/gameState`, `state/income`, `combat/resolveBattle`, `combat/manualBattle`, `map/castlePlacement`.
-- **Playwright integration:** `smoke.ts` (full E2E spawns API+Vite, verifies New/Load/Save/HUD/DB), `cityView.test.ts`, `dragDrop.test.ts`, `proposedPath.test.ts`.
+- **Unit (Node `node:test`):** `cityGrid`, `citySpots`, `minimap`, `state/economy`, `state/gameState`, `state/income`, `combat/resolveBattle`, `combat/manualBattle` (includes approach-hex/`attackFromHex` coverage), `map/castlePlacement`.
+- **Playwright integration:** `smoke.ts` (full E2E spawns API+Vite, verifies New/Load/Save/HUD/DB), `multiplayer.smoke.ts` (lobby lifecycle over the API: create → claim seat → duplicate claim rejected 409 → start blocked while a seat is unclaimed → host claims → start sets `startedAt`), `cityView.test.ts`, `dragDrop.test.ts`, `proposedPath.test.ts`.
 
 ## 7. `tools/`
 FLUX-driven sprite generation pipeline (`tools/sprites/flux-*.mjs` for castles, buildings, heroes, resources, horse variants, farms, market variants, town-hall, tower, piles, regeneration helpers), plus `pixel-gen.mjs`/`pixel-gen-pure.mjs` for pixel-art, `outline-apply.mjs`, `manifest.mjs`, `generate-preview.mjs`, `screenshot-preview.mjs`, and **`validate-assets.mjs`** (asserts every sprite key referenced by `assetDescriptors.ts` has a PNG).
@@ -246,3 +274,6 @@ FLUX-driven sprite generation pipeline (`tools/sprites/flux-*.mjs` for castles, 
 - **`render/assetDescriptors.ts`** is the bridge from Vite-bundled PNGs (`src/resources/*`) to runtime sprite keys; `tools/sprites/validate-assets.mjs` enforces its consistency.
 - **`core/buildingRegistry.ts`** is referenced from both logic (`state/gameState`, `economy/*`) and rendering (`render/cityBuildingDraw`, `views/buildingMenu`) — it's the canonical building definition.
 - **`io/api.ts`** is the **only file that knows the HTTP shape**; every manager calls into it via `SessionManager`/`GameSessionManager`/`turnHooks`.
+- **Multiplayer is poll-based, not push.** `io/multiplayerSync.ts` re-fetches the whole game row on a 2s interval and republishes it as `mp:stateChanged`/`mp:turnStarted` bus events — there is no socket and no delta protocol. Seat identity lives in `players/localPlayer.ts`; the server side of it is the `lobby` jsonb column driven by `views/multiplayerLobby.ts`. Started from `GameSessionManager`, consumed via `turnHooks` and `GameEngine`.
+- **`shared/validation/gameIntegrity.ts`** encodes the contract between the DB row and `hydrateGameState`: its `error`/`warning` split is exactly "hydration cannot recover" vs. "hydration silently defaults". When you add a defaulted field to `hydrateGameState`, add the matching `warning` here.
+- **Direction math has one home:** `HEX_DIRECTIONS`/`nearestHexEdge` in `core/hex.ts`. `core/control.ts` and `shared/combat/manualBattle.ts` each previously kept their own copy of the six axial vectors.

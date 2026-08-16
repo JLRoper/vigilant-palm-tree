@@ -98,7 +98,7 @@ Heroes are stored in the `heroes JSONB` column of the `games` table. Each hero i
 
 - Where heroes move: [map.md](./map.md)
 - What they claim: [settlements.md](./settlements.md)
-- What they see inside a settlement: [city-view.md](./city-view.md)
+- What they see inside a settlement: [city-view-impl-plan.md](./city-view-impl-plan.md)
 - What they fight with (future): [army.md](./army.md)
 
 [← Back to index](./README.md)
