@@ -2,6 +2,7 @@ import { normalizePlatoons } from "./units";
 import type { HorseVariant } from "./settings";
 import { settings } from "./settings";
 import {
+  advanceCharters,
   applyEffectiveIncome,
   applyMoraleDecay,
   applySettlementConsumption,
@@ -13,7 +14,7 @@ import {
   tradeResources,
   transferGold,
 } from "@heroes/engine";
-import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+import { MOVEMENT_PER_TURN, WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import type {
   Player,
   HeroState,
@@ -26,9 +27,6 @@ import type {
   CaptureResult,
   ApplyEndOfTurnResult,
   RecruitHeroResult,
-  StartCharterPayload,
-  StartCharterResult,
-  StepTravelResult,
   StartUpgradeResult,
   BuildingUpgradeRequest,
   PlayerId,
@@ -37,7 +35,6 @@ import type {
   ResourceType,
   BuildingDef,
   BuildingRef,
-  CharterState,
   SettlementState,
   UpgradeState,
   Warehouse,
@@ -49,12 +46,27 @@ import type {
 // state/gameState don't need to change their import path.
 export { applySettlementConsumption, applyMoraleDecay, applyEffectiveIncome, runAutoTrade, transferGold, tradeResources };
 
+// startCharter/stepTravelCharter/advanceCharters/cleanupDefeatedHeroCharters
+// (plus CHARTER_GOLD_COST/CHARTER_WAREHOUSE_COST) now live in @heroes/engine
+// (Track A / Phase 1, stage 5) -- advanceCharters is also called locally
+// below (advanceRound); the rest are re-exported purely for existing
+// consumers (turnController.ts's aliased imports, GameEngine.ts's direct
+// constant imports) so neither needs to change on this PR.
+export { advanceCharters };
+export {
+  CHARTER_GOLD_COST,
+  CHARTER_WAREHOUSE_COST,
+  cleanupDefeatedHeroCharters,
+  startCharter,
+  stepTravelCharter,
+} from "@heroes/engine";
+
 // gameState.ts shrinks to a re-export barrel for its types (Track A / Phase
 // 1, stage 2 of plan/2026-08-15-parallel-dev-split.md) — the type
 // definitions now live in @heroes/contracts; this file keeps re-exporting
 // them so none of its ~35 existing consumers need to change on this PR.
 // Runtime behavior (the functions below) is unchanged.
-export { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+export { MOVEMENT_PER_TURN, WAREHOUSE_RESOURCES } from "@heroes/contracts";
 export type {
   Player,
   HeroState,
@@ -118,8 +130,6 @@ export function monthName(month: number): string {
   if (month < 1) return MONTH_NAMES[0];
   return MONTH_NAMES[(month - 1) % MONTH_NAMES.length];
 }
-
-export const MOVEMENT_PER_TURN = 7;
 
 const NEIGHBOR_DIRS: { q: number; r: number }[] = [
   { q: 1, r: 0 },
@@ -665,271 +675,10 @@ export function recruitHero(
 // CHARTER SETTLEMENTS
 // =========================================================================
 
-export const CHARTER_GOLD_COST = 2500;
-export const CHARTER_WAREHOUSE_COST = { wood: 20, stone: 15 };
-export const CHARTER_CONSTRUCTION_DAYS = 10;
-export const CHARTER_MIN_DISTANCE = 4;
-export const CHARTER_SETTLEMENT_POPULATION = 50;
-
 export const SETTLEMENT_UPGRADE_COSTS: Record<number, { gold: number; wood: number; stone: number; iron: number; arcane: number; days: number }> = {
   1: { gold: 5000, wood: 40, stone: 30, iron: 20, arcane: 0, days: 15 },
   2: { gold: 15000, wood: 80, stone: 60, iron: 50, arcane: 20, days: 25 },
 };
-
-export function startCharter(state: GameState, payload: StartCharterPayload): StartCharterResult {
-  if (state.phase.kind !== "PLAYER_TURN") {
-    return { state, ok: false, reason: "not_player_turn" };
-  }
-
-  const hero = state.heroes[payload.heroId];
-  if (!hero) return { state, ok: false, reason: "no_hero" };
-  if (hero.ownerId !== state.activePlayerId) {
-    return { state, ok: false, reason: "not_owner" };
-  }
-  if (hero.isChartering) {
-    return { state, ok: false, reason: "already_chartering" };
-  }
-  if (hero.gold < CHARTER_GOLD_COST) {
-    return { state, ok: false, reason: "insufficient_gold" };
-  }
-
-  const provisioningSettlement = Object.values(state.settlements).find(
-    (s) => s.q === hero.q && s.r === hero.r && s.ownerId === hero.ownerId,
-  );
-  if (!provisioningSettlement) {
-    return { state, ok: false, reason: "hero_not_at_friendly_settlement" };
-  }
-  if ((provisioningSettlement.warehouse.wood ?? 0) < CHARTER_WAREHOUSE_COST.wood) {
-    return { state, ok: false, reason: "insufficient_wood" };
-  }
-  if ((provisioningSettlement.warehouse.stone ?? 0) < CHARTER_WAREHOUSE_COST.stone) {
-    return { state, ok: false, reason: "insufficient_stone" };
-  }
-
-  for (const [id, other] of Object.entries(state.heroes)) {
-    if (id !== payload.heroId && other.q === payload.targetQ && other.r === payload.targetR) {
-      return { state, ok: false, reason: "occupied" };
-    }
-  }
-
-  for (const ch of state.activeCharters) {
-    if (ch.targetQ === payload.targetQ && ch.targetR === payload.targetR) {
-      return { state, ok: false, reason: "hex_already_chartered" };
-    }
-  }
-
-  for (const s of Object.values(state.settlements)) {
-    if (s.q === payload.targetQ && s.r === payload.targetR) {
-      return { state, ok: false, reason: "hex_has_settlement" };
-    }
-  }
-
-  const updatedHero: HeroState = {
-    ...hero,
-    gold: hero.gold - CHARTER_GOLD_COST,
-    isChartering: true,
-    charterId: payload.charterId,
-  };
-
-  const updatedSettlement: SettlementState = {
-    ...provisioningSettlement,
-    warehouse: {
-      ...provisioningSettlement.warehouse,
-      wood: (provisioningSettlement.warehouse.wood ?? 0) - CHARTER_WAREHOUSE_COST.wood,
-      stone: (provisioningSettlement.warehouse.stone ?? 0) - CHARTER_WAREHOUSE_COST.stone,
-    },
-  };
-
-  const charter: CharterState = {
-    id: payload.charterId,
-    heroId: payload.heroId,
-    ownerId: hero.ownerId,
-    targetQ: payload.targetQ,
-    targetR: payload.targetR,
-    settlementName: payload.settlementName,
-    phase: "traveling",
-    daysRemaining: CHARTER_CONSTRUCTION_DAYS,
-    settlementId: payload.settlementId,
-    resourceRates: payload.resourceRates,
-    foundedOnResource: payload.foundedOnResource,
-    citySpots: payload.citySpots,
-  };
-
-  return {
-    state: {
-      ...state,
-      heroes: { ...state.heroes, [payload.heroId]: updatedHero },
-      settlements: { ...state.settlements, [provisioningSettlement.id]: updatedSettlement },
-      activeCharters: [...state.activeCharters, charter],
-      nextCharterId: state.nextCharterId + 1,
-      nextSettlementId: state.nextSettlementId + 1,
-      dirty: true,
-    },
-    ok: true,
-  };
-}
-
-export function stepTravelCharter(
-  state: GameState,
-  heroId: HeroId,
-  toQ: number,
-  toR: number,
-  cost: number,
-): StepTravelResult {
-  const hero = state.heroes[heroId];
-  if (!hero) return { state, ok: false, reason: "no_hero" };
-  if (!hero.isChartering || hero.charterId === null) {
-    return { state, ok: false, reason: "not_chartering" };
-  }
-
-  const charter = state.activeCharters.find((c) => c.id === hero.charterId);
-  if (!charter) return { state, ok: false, reason: "no_charter" };
-  if (charter.phase !== "traveling") {
-    return { state, ok: false, reason: "not_traveling" };
-  }
-
-  for (const [id, other] of Object.entries(state.heroes)) {
-    if (id !== heroId && other.q === toQ && other.r === toR) {
-      return { state, ok: false, reason: "occupied" };
-    }
-  }
-
-  if (!Number.isFinite(cost) || cost < 0) {
-    return { state, ok: false, reason: "impassable" };
-  }
-
-  if (hero.movementRemaining < cost) {
-    return { state, ok: false, reason: "insufficient_movement" };
-  }
-
-  const updatedHero: HeroState = {
-    ...hero,
-    q: toQ,
-    r: toR,
-    movementRemaining: hero.movementRemaining - cost,
-    previousQ: hero.q,
-    previousR: hero.r,
-    previousMovementRemaining: hero.movementRemaining,
-    trail: [...(hero.trail ?? []), { q: toQ, r: toR }],
-  };
-
-  const arrived = toQ === charter.targetQ && toR === charter.targetR;
-  const newCharters = state.activeCharters.map((c) => {
-    if (c.id === charter.id) {
-      const next: CharterState = { ...c, phase: arrived ? "constructing" : c.phase };
-      if (arrived) {
-        next.phase = "constructing";
-      }
-      return next;
-    }
-    return c;
-  });
-
-  const resultHero = arrived
-    ? { ...updatedHero, movementRemaining: 0 }
-    : updatedHero;
-
-  return {
-    state: {
-      ...state,
-      heroes: { ...state.heroes, [heroId]: resultHero },
-      activeCharters: newCharters,
-      dirty: true,
-    },
-    ok: true,
-  };
-}
-
-export function advanceCharters(state: GameState): GameState {
-  let result = state;
-  let completed: CharterState[] = [];
-
-  for (const charter of state.activeCharters) {
-    if (charter.phase === "constructing") {
-      const newDays = charter.daysRemaining - 1;
-      if (newDays <= 0) {
-        completed.push(charter);
-      } else {
-        result = {
-          ...result,
-          activeCharters: result.activeCharters.map((c) =>
-            c.id === charter.id ? { ...c, daysRemaining: newDays } : c,
-          ),
-        };
-      }
-    }
-  }
-
-  for (const charter of completed) {
-    result = completeCharter(result, charter);
-  }
-
-  return result;
-}
-
-function completeCharter(state: GameState, charter: CharterState): GameState {
-  const hero = state.heroes[charter.heroId];
-  const updatedHero: HeroState = hero
-    ? {
-        ...hero,
-        isChartering: false,
-        charterId: null,
-        movementRemaining: MOVEMENT_PER_TURN,
-        previousQ: null,
-        previousR: null,
-        previousMovementRemaining: null,
-      }
-    : null as unknown as HeroState;
-
-  const newSettlement: SettlementState = {
-    id: charter.settlementId,
-    name: charter.settlementName,
-    ownerId: charter.ownerId,
-    q: charter.targetQ,
-    r: charter.targetR,
-    level: 1,
-    population: CHARTER_SETTLEMENT_POPULATION,
-    goldTax: 1,
-    resourceRates: { ...charter.resourceRates },
-    foundedOnResource: charter.foundedOnResource,
-    gold: 0,
-    warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
-    citySpots: charter.citySpots.slice(),
-    cityMines: [],
-    morale: 50,
-    autoTrade: false,
-    castleVariant: 0,
-    buildings: [],
-  };
-
-  const newHeroes = hero
-    ? { ...state.heroes, [charter.heroId]: updatedHero }
-    : state.heroes;
-
-  return {
-    ...state,
-    heroes: newHeroes,
-    settlements: { ...state.settlements, [charter.settlementId]: newSettlement },
-    activeCharters: state.activeCharters.filter((c) => c.id !== charter.id),
-    players: state.players.map((p) =>
-      p.id === charter.ownerId
-        ? { ...p, settlementIds: [...p.settlementIds, charter.settlementId] }
-        : p,
-    ),
-    dirty: true,
-  };
-}
-
-export function cleanupDefeatedHeroCharters(state: GameState, defeatedHeroId: HeroId): GameState {
-  const hero = state.heroes[defeatedHeroId];
-  if (!hero || !hero.isChartering || hero.charterId === null) return state;
-
-  return {
-    ...state,
-    activeCharters: state.activeCharters.filter((c) => c.id !== hero.charterId),
-    dirty: true,
-  };
-}
 
 export const TOWN_HALL_COSTS: Record<number, { gold: number; wood: number; stone: number; days: number }> = {
   1: { gold: 1500, wood: 15, stone: 10, days: 7 },
