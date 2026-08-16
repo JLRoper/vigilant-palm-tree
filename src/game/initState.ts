@@ -23,7 +23,7 @@ import {
   defaultPopulation,
   generateSettlementName,
   SETTLEMENT_GOLD_TAX,
-} from "../economy/settlementRates";
+} from "@heroes/engine";
 import { PLAYER_COLORS, MAX_PLAYERS } from "../state/playerColors";
 import { generateCitySpots } from "../core/citySpots";
 import { cityViewSizeFor } from "../core/cityGrid";

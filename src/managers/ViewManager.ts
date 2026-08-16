@@ -5,10 +5,10 @@ import { MinimapCamera } from "../render/minimap";
 import { GameMap } from "../map/gameMap";
 import { Hero } from "../entities/hero";
 import { Castle } from "../entities/settlement";
-import { AdventureView, type AdventureViewOptions } from "../views/adventureView";
+import { AdventureView, type AdventureViewOptions } from "@screens/adventure/adventureView";
 import { SpriteProvider } from "../render/assets";
 import type { Axial } from "../core/hex";
-import type { CityView } from "../views/cityView";
+import type { CityView } from "@screens/settlements/cityView/cityView";
 import type { CharterState } from "../state/gameState";
 
 export class ViewManager {

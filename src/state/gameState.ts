@@ -1,17 +1,18 @@
 import { normalizePlatoons } from "./units";
-import {
-  buildingUpkeepRequired,
-  clampMorale,
-  clampWarehouseNonNegative,
-  effectiveIncome,
-  foodRequired,
-  moraleDecay,
-} from "../economy/consumption";
 import type { HorseVariant } from "./settings";
 import { settings } from "./settings";
-import { POP_BY_LEVEL } from "../economy/settlementRates";
-import { pickStyleForBuilding } from "@heroes/engine";
-import { buildingUpgradeCost } from "../core/buildingRegistry";
+import {
+  applyEffectiveIncome,
+  applyMoraleDecay,
+  applySettlementConsumption,
+  buildingUpgradeCost,
+  foodRequired,
+  pickStyleForBuilding,
+  POP_BY_LEVEL,
+  runAutoTrade,
+  tradeResources,
+  transferGold,
+} from "@heroes/engine";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import type {
   Player,
@@ -23,11 +24,7 @@ import type {
   StartMoveResult,
   ReorderResult,
   CaptureResult,
-  AutoTradeTransfer,
   ApplyEndOfTurnResult,
-  TransferDirection,
-  TransferResult,
-  TradeResult,
   RecruitHeroResult,
   StartCharterPayload,
   StartCharterResult,
@@ -44,8 +41,13 @@ import type {
   SettlementState,
   UpgradeState,
   Warehouse,
-  WarehouseResource,
 } from "@heroes/contracts";
+
+// applySettlementConsumption/applyMoraleDecay/applyEffectiveIncome/
+// runAutoTrade/transferGold/tradeResources now live in @heroes/engine
+// (Track A / Phase 1, stage 4) — re-exported here so existing consumers of
+// state/gameState don't need to change their import path.
+export { applySettlementConsumption, applyMoraleDecay, applyEffectiveIncome, runAutoTrade, transferGold, tradeResources };
 
 // gameState.ts shrinks to a re-export barrel for its types (Track A / Phase
 // 1, stage 2 of plan/2026-08-15-parallel-dev-split.md) — the type
@@ -469,78 +471,6 @@ export function endTurn(state: GameState): GameState {
   };
 }
 
-export function applySettlementConsumption(s: SettlementState): SettlementState {
-  const warehouse: Warehouse = { ...s.warehouse };
-  const upkeep = buildingUpkeepRequired(s);
-  warehouse.food = clampWarehouseNonNegative(warehouse.food - foodRequired(s));
-  warehouse.wood = clampWarehouseNonNegative(warehouse.wood - upkeep.wood);
-  warehouse.stone = clampWarehouseNonNegative(warehouse.stone - upkeep.stone);
-  return { ...s, warehouse };
-}
-
-export function applyMoraleDecay(s: SettlementState): SettlementState {
-  return { ...s, morale: clampMorale((s.morale ?? 100) - moraleDecay(s)) };
-}
-
-export function applyEffectiveIncome(s: SettlementState): SettlementState {
-  const inc = effectiveIncome(s);
-  return { ...s, gold: s.gold + inc };
-}
-
-export function runAutoTrade(
-  settlements: Record<SettlementId, SettlementState>,
-  playerId: PlayerId,
-): { settlements: Record<SettlementId, SettlementState>; transfers: AutoTradeTransfer[] } {
-  const next: Record<SettlementId, SettlementState> = { ...settlements };
-  const transfers: AutoTradeTransfer[] = [];
-  const resources = WAREHOUSE_RESOURCES;
-  for (const s of Object.values(next)) {
-    if (s.ownerId !== playerId || !s.autoTrade) continue;
-    const updatedS: SettlementState = { ...next[s.id] };
-    for (const r of resources) {
-      const deficit = computeDeficit(updatedS, r);
-      if (deficit <= 0) continue;
-      const sources = Object.values(next).filter(
-        (other) => other.id !== s.id && other.ownerId === playerId && (other.warehouse[r] ?? 0) > 0 && (other.gold ?? 0) > 0,
-      );
-      let remaining = deficit;
-      for (const src of sources) {
-        if (remaining <= 0) break;
-        const sourceUpd: SettlementState = { ...next[src.id] };
-        const transferable = Math.max(0, Math.min(sourceUpd.warehouse[r] ?? 0, sourceUpd.gold ?? 0, remaining));
-        if (transferable <= 0) continue;
-        sourceUpd.warehouse = { ...sourceUpd.warehouse, [r]: clampWarehouseNonNegative((sourceUpd.warehouse[r] ?? 0) - transferable) };
-        sourceUpd.gold = sourceUpd.gold - transferable;
-        updatedS.warehouse = { ...updatedS.warehouse, [r]: (updatedS.warehouse[r] ?? 0) + transferable };
-        next[src.id] = sourceUpd;
-        remaining -= transferable;
-        transfers.push({
-          fromSettlementId: src.id,
-          toSettlementId: s.id,
-          resource: r as WarehouseResource,
-          amount: transferable,
-          goldPaid: transferable,
-        });
-      }
-    }
-    next[s.id] = updatedS;
-  }
-  return { settlements: next, transfers };
-}
-
-function computeDeficit(s: SettlementState, r: WarehouseResource): number {
-  if (r === "food") {
-    return Math.max(0, foodRequired(s) - (s.warehouse.food ?? 0));
-  }
-  if (r === "wood") {
-    return Math.max(0, buildingUpkeepRequired(s).wood - (s.warehouse.wood ?? 0));
-  }
-  if (r === "stone") {
-    return Math.max(0, buildingUpkeepRequired(s).stone - (s.warehouse.stone ?? 0));
-  }
-  return 0;
-}
-
 export function applyEndOfTurn(state: GameState): GameState {
   return applyEndOfTurnDetailed(state).state;
 }
@@ -654,96 +584,6 @@ export function advanceRound(state: GameState): GameState {
 export function markSaved(state: GameState): GameState {
   if (!state.dirty) return state;
   return { ...state, dirty: false };
-}
-
-export function transferGold(
-  state: GameState,
-  heroId: HeroId,
-  settlementId: SettlementId,
-  direction: TransferDirection,
-): TransferResult {
-  const hero = state.heroes[heroId];
-  const settlement = state.settlements[settlementId];
-  if (!hero) return { state, ok: false, reason: "no_hero" };
-  if (!settlement) return { state, ok: false, reason: "no_settlement" };
-  if (hero.q !== settlement.q || hero.r !== settlement.r) {
-    return { state, ok: false, reason: "hero_not_at_settlement" };
-  }
-  if (settlement.ownerId === null || settlement.ownerId !== hero.ownerId) {
-    return { state, ok: false, reason: "not_owned_settlement" };
-  }
-  if (direction === "deposit") {
-    if (hero.gold <= 0) return { state, ok: false, reason: "nothing_to_deposit" };
-    const amount = hero.gold;
-    return {
-      state: {
-        ...state,
-        heroes: { ...state.heroes, [heroId]: { ...hero, gold: 0 } },
-        settlements: { ...state.settlements, [settlementId]: { ...settlement, gold: settlement.gold + amount } },
-        dirty: true,
-      },
-      ok: true,
-      reason: "",
-    };
-  }
-  if (direction === "withdraw") {
-    if (settlement.gold <= 0) return { state, ok: false, reason: "nothing_to_withdraw" };
-    const amount = settlement.gold;
-    return {
-      state: {
-        ...state,
-        heroes: { ...state.heroes, [heroId]: { ...hero, gold: hero.gold + amount } },
-        settlements: { ...state.settlements, [settlementId]: { ...settlement, gold: 0 } },
-        dirty: true,
-      },
-      ok: true,
-      reason: "",
-    };
-  }
-  return { state, ok: false, reason: "invalid_direction" };
-}
-
-export function tradeResources(
-  state: GameState,
-  fromSettlementId: SettlementId,
-  toSettlementId: SettlementId,
-  resource: WarehouseResource,
-  amount: number,
-): TradeResult {
-  if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
-    return { state, ok: false, reason: "invalid_amount" };
-  }
-  const from = state.settlements[fromSettlementId];
-  const to = state.settlements[toSettlementId];
-  if (!from) return { state, ok: false, reason: "no_from_settlement" };
-  if (!to) return { state, ok: false, reason: "no_to_settlement" };
-  if (from.ownerId === null || to.ownerId === null) {
-    return { state, ok: false, reason: "unowned_settlement" };
-  }
-  if (from.ownerId !== to.ownerId) {
-    return { state, ok: false, reason: "different_owners" };
-  }
-  if (from.warehouse[resource] < amount) {
-    return { state, ok: false, reason: "insufficient_resource" };
-  }
-  if (from.gold < amount) {
-    return { state, ok: false, reason: "insufficient_gold" };
-  }
-  const newFromWarehouse: Warehouse = { ...from.warehouse, [resource]: from.warehouse[resource] - amount };
-  const newToWarehouse: Warehouse = { ...to.warehouse, [resource]: to.warehouse[resource] + amount };
-  return {
-    state: {
-      ...state,
-      settlements: {
-        ...state.settlements,
-        [fromSettlementId]: { ...from, gold: from.gold - amount, warehouse: newFromWarehouse },
-        [toSettlementId]: { ...to, warehouse: newToWarehouse },
-      },
-      dirty: true,
-    },
-    ok: true,
-    reason: "",
-  };
 }
 
 export const MAX_HEROES_PER_PLAYER = 5;
