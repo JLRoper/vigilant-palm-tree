@@ -1,5 +1,5 @@
-import type { Axial } from "../../src/core/hex";
-import { mulberry32 } from "../../src/core/rng";
+import type { Axial } from "../types";
+import { mulberry32 } from "../rng";
 import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT } from "../combatConfig";
 import type { BattleGrid, BattleHex, BattleSide } from "./types";
 

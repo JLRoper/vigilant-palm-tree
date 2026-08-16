@@ -47,7 +47,12 @@ import { showBattleResultCard } from "./battleResultCard";
 import { openConfirmDialog } from "./confirmDialog";
 import { PopupMenu, menuTheme, styleButton } from "./menu";
 import { createPlatoonInfoPopup } from "./platoonInfoPopup";
-import { openSettingsMenu } from "./settingsMenu";
+import { launchView, registerView } from "./viewLauncher";
+
+registerView("manualBattleArena", (opts) => {
+  const o = opts as { playerPlatoons: Platoon[]; aiPlatoons: Platoon[]; unitTypes: Record<string, UnitType>; humanSide: BattleSide };
+  openManualBattleArena(o.playerPlatoons, o.aiPlatoons, o.unitTypes, o.humanSide);
+});
 
 // Bounds for the solved-for hex size. The grid is fitted to the available
 // battlefield box between these two — MAX so a large viewport gets genuinely
@@ -669,7 +674,7 @@ export function openManualBattleArena(
   styleButton(settingsBtn);
   settingsBtn.title = "Open game settings";
   settingsBtn.addEventListener("click", () => {
-    openSettingsMenu({ parent: overlay });
+    launchView("settingsMenu", { parent: overlay });
   });
   topBar.appendChild(settingsBtn);
 

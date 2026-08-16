@@ -9,7 +9,7 @@ Key facts about this project (heroes-js):
 - `npm run dev:status` is the safe, read-only health check. Use it liberally.
 - `npm run cleanup` (scripts/cleanup.ps1) is scoped to *this worktree's own path* — it will skip processes belonging to other worktrees. That is correct, do NOT fall back to broad kills.
 - The postgres db is the shared `game_db` container (fixed host port 5432). `npm run db:up` is idempotent and safe. Do NOT run `db:down` unless the user explicitly asked for it — other worktrees share it.
-- Ports are per-worktree and re-allocated by `predev` unless the user asked for `npm run dev:static`.
+- Ports are per-worktree and OS-assigned by `scripts/allocate-ports.ts` (run automatically by `predev`). No separate "static" mode — concurrent worktrees are collision-free by design.
 
 For `start`:
 1. `npm run dev:status` to see current state.

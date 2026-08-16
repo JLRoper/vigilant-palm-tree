@@ -1,9 +1,10 @@
 ﻿import { Router } from "express";
 import { pool, withTransaction } from "./db";
-import { GameMap, type MapSize } from "../src/map/gameMap";
-import { mulberry32 } from "../src/core/rng";
+import { GameMap, type MapSize } from "../shared/map/gameMap";
+import { mulberry32 } from "../shared/rng";
 import { makeInitialStatePayload } from "../src/game/initState";
-import {  tradeResources as tradeResourcesReducer,  applyEndOfTurnDetailed,  WAREHOUSE_RESOURCES,  type AutoTradeTransfer,} from "../src/state/gameState";
+import {  tradeResources as tradeResourcesReducer,  applyEndOfTurnDetailed,  type AutoTradeTransfer,} from "../shared/gameState";
+import { WAREHOUSE_RESOURCES } from "../shared/constants";
 import type { PoolClient } from "pg";
 import type {
   GameState,
@@ -12,8 +13,8 @@ import type {
   SettlementState,
   WarehouseResource,
 } from "../src/state/gameState";
-import type { Platoon, UnitType } from "../src/state/units";
-import { normalizePlatoons } from "../src/state/units";
+import type { Platoon, UnitType } from "../shared/units";
+import { normalizePlatoons } from "../shared/units";
 import { resolveBattle as resolveBattleEngine } from "../shared/combat/resolveBattle";
 import type { BattleResult } from "../shared/combat/types";
 import { assetRouter } from "./assetRoutes";

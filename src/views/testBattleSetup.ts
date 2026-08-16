@@ -7,9 +7,12 @@
 import { fixedTestPlayerPlatoons, randomAiPlatoons } from "../combat/testArmies";
 import { catalogFailed, loadUnitCatalog } from "../data/unitCatalog";
 import type { BattleSide } from "../../shared/combat/types";
-import type { Platoon, UnitType } from "../state/units";
+import type { Platoon, UnitType } from "../../shared/units";
 import { menuTheme, openCenteredModal, styleButton } from "./menu";
-import { openManualBattleArena } from "./manualBattleArena";
+import "./manualBattleArena";
+import { launchView, registerView } from "./viewLauncher";
+
+registerView("testBattleSetup", () => openTestBattleSetup());
 
 const BLUE_ACCENT = "#3070c0";
 const RED_ACCENT = "#c04040";
@@ -160,7 +163,7 @@ function buildSetup(modal: ReturnType<typeof openCenteredModal>, units: UnitType
   styleButton(startBtn, true);
   startBtn.addEventListener("click", () => {
     modal.close();
-    openManualBattleArena(playerPlatoons, aiPlatoons, unitTypes, humanSide);
+    launchView("manualBattleArena", { playerPlatoons, aiPlatoons, unitTypes, humanSide });
   });
   buttonRow.appendChild(startBtn);
 

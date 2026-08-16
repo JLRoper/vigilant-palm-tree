@@ -1,9 +1,5 @@
-import { Axial } from "../core/hex";
-import type { PlayerId, ResourceType, SettlementState, UpgradeState, Warehouse } from "../state/gameState";
-import type { BuildingDef } from "../render/cityBuildingDraw";
-
-export type CastleLevel = 1 | 2 | 3;
-export type CastleVariant = 0 | 1;
+import type { Axial, BuildingDef, CastleLevel, CastleVariant, PlayerId, ResourceType } from "../../shared/types";
+import type { SettlementState, UpgradeState, Warehouse } from "../../shared/settlementTypes";
 
 function emptyWarehouse(): Warehouse {
   return { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };

@@ -4,6 +4,11 @@ import { TERRAIN_COLORS } from "../map/terrain";
 import { drawMinimapPath } from "./overlays/pathOverlay";
 import { isVisible } from "./fog";
 import type { Axial } from "../core/hex";
+import { MinimapCamera } from "./minimapCamera";
+import type { MinimapGeometry } from "./renderTypes";
+
+export { MinimapCamera } from "./minimapCamera";
+export type { MinimapGeometry } from "./renderTypes";
 
 const MINIMAP_WIDTH = 180;
 const MINIMAP_PAD = 10;
@@ -16,16 +21,6 @@ const VISION_EDGE_DIRS = [
   { q: -1, r: 1 },
   { q: 0, r: 1 },
 ];
-
-export interface MinimapGeometry {
-  x0: number;
-  y0: number;
-  w: number;
-  h: number;
-  centerX: number;
-  centerY: number;
-  baseScale: number;
-}
 
 interface MinimapRenderOptions {
   viewPlayerId: number;
@@ -55,114 +50,6 @@ export function isPointInMinimap(x: number, y: number, geo: MinimapGeometry): bo
     y >= geo.y0 - HIT_PAD &&
     y <= geo.y0 + geo.h + HIT_PAD
   );
-}
-
-/**
- * Owns the minimap's own local pan/zoom/rotation, independent of the main
- * game camera. Rotation is purely cosmetic (rotates the minimap drawing
- * around its center) — it never touches the main camera or hex math.
- */
-export class MinimapCamera {
-  static readonly MIN_ZOOM = 1;
-  static readonly MAX_ZOOM = 5;
-
-  zoom = 1;
-  rotation = 0;
-  panQ = 0;
-  panR = 0;
-
-  constructor(map: GameMap) {
-    this.reset(map);
-  }
-
-  reset(map: GameMap): void {
-    this.zoom = 1;
-    this.rotation = 0;
-    this.panQ = (map.width - 1) / 2;
-    this.panR = (map.height - 1) / 2;
-  }
-
-  private clampPan(map: GameMap, geo: MinimapGeometry): void {
-    const qHalfSpan = geo.w / (2 * (geo.baseScale * this.zoom));
-    if (qHalfSpan * 2 >= map.width - 1) {
-      this.panQ = (map.width - 1) / 2;
-    } else {
-      const qMin = qHalfSpan;
-      const qMax = map.width - 1 - qHalfSpan;
-      this.panQ = Math.max(qMin, Math.min(qMax, this.panQ));
-    }
-
-    const rHalfSpan = geo.h / (2 * (geo.baseScale * this.zoom));
-    if (rHalfSpan * 2 >= map.height - 1) {
-      this.panR = (map.height - 1) / 2;
-    } else {
-      const rMin = rHalfSpan;
-      const rMax = map.height - 1 - rHalfSpan;
-      this.panR = Math.max(rMin, Math.min(rMax, this.panR));
-    }
-  }
-
-  /** World (q, r) -> pre-rotation screen point (the canvas rotation transform handles the twist at draw time). */
-  worldToScreen(q: number, r: number, geo: MinimapGeometry): { x: number; y: number } {
-    const scale = geo.baseScale * this.zoom;
-    return {
-      x: geo.centerX + (q - this.panQ) * scale,
-      y: geo.centerY + (r - this.panR) * scale,
-    };
-  }
-
-  /** Actual (post-rotation) screen point -> world (q, r). Inverse of worldToScreen + the canvas rotation. */
-  screenToWorld(x: number, y: number, geo: MinimapGeometry): { q: number; r: number } {
-    const dx0 = x - geo.centerX;
-    const dy0 = y - geo.centerY;
-    const cos = Math.cos(-this.rotation);
-    const sin = Math.sin(-this.rotation);
-    const dx = dx0 * cos - dy0 * sin;
-    const dy = dx0 * sin + dy0 * cos;
-    const scale = geo.baseScale * this.zoom;
-    return { q: this.panQ + dx / scale, r: this.panR + dy / scale };
-  }
-
-  /** Zoom while keeping the world point under (x, y) fixed on screen — used for wheel/trackpad pinch. */
-  zoomAt(x: number, y: number, factor: number, geo: MinimapGeometry, map: GameMap): void {
-    const before = this.screenToWorld(x, y, geo);
-    this.zoom = Math.max(MinimapCamera.MIN_ZOOM, Math.min(MinimapCamera.MAX_ZOOM, this.zoom * factor));
-    const after = this.screenToWorld(x, y, geo);
-    this.panQ += before.q - after.q;
-    this.panR += before.r - after.r;
-    this.clampPan(map, geo);
-  }
-
-  /** Drags the minimap's own view so the world point under (fromX, fromY) ends up under (toX, toY). */
-  panBy(fromX: number, fromY: number, toX: number, toY: number, geo: MinimapGeometry, map: GameMap): void {
-    const before = this.screenToWorld(fromX, fromY, geo);
-    const after = this.screenToWorld(toX, toY, geo);
-    this.panQ += before.q - after.q;
-    this.panR += before.r - after.r;
-    this.clampPan(map, geo);
-  }
-
-  /**
-   * Applies a combined two-finger pinch (zoom) + twist (rotate), anchored so the
-   * world point captured at gesture start (`anchor`) stays glued under the
-   * current finger midpoint (midX, midY).
-   */
-  applyPinchRotate(
-    midX: number,
-    midY: number,
-    zoom: number,
-    rotation: number,
-    anchor: { q: number; r: number },
-    geo: MinimapGeometry,
-    map: GameMap,
-  ): void {
-    this.zoom = Math.max(MinimapCamera.MIN_ZOOM, Math.min(MinimapCamera.MAX_ZOOM, zoom));
-    this.rotation = rotation;
-    const after = this.screenToWorld(midX, midY, geo);
-    this.panQ += anchor.q - after.q;
-    this.panR += anchor.r - after.r;
-    this.clampPan(map, geo);
-  }
 }
 
 function drawNorthIndicator(ctx: CanvasRenderingContext2D, geo: MinimapGeometry, rotation: number): void {

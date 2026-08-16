@@ -1,4 +1,4 @@
-import type { BuildingDef } from "../render/cityBuildingDraw";
+import type { BuildingDef } from "../../shared/types";
 import { buildingPlayerEffects } from "./buildingRegistry";
 
 export interface PlayerBonuses {
