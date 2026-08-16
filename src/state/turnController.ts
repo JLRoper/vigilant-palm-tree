@@ -31,7 +31,7 @@ import { findPath } from "../map/pathfinding";
 import { hexDistance } from "../core/hex";
 import { platoonsHaveTroops } from "./units";
 import type { GameMap } from "../map/gameMap";
-import { computeSettlementRates } from "../economy/settlementRates";
+import { computeSettlementRates } from "@heroes/engine";
 import type { HorseVariant } from "./settings";
 import { generateCitySpots } from "../core/citySpots";
 import { cityViewSizeFor } from "../core/cityGrid";

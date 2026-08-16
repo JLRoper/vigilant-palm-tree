@@ -1,5 +1,5 @@
 import { Castle } from "../../entities/settlement";
-import { controlledPositions, territoryBoundaryEdges } from "../../core/control";
+import { controlledPositions, territoryBoundaryEdges } from "@heroes/engine";
 import { axialToPixel, hexCorners, hexDistance, HEX_SIZE } from "../../core/hex";
 import { settings } from "../../state/settings";
 

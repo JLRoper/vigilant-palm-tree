@@ -12,7 +12,7 @@ import { openConfirmDialog } from "./confirmDialog";
 import { settings } from "../state/settings";
 import type { SettlementState } from "../state/gameState";
 import type { BuildingUpgradeRequest } from "../state/gameState";
-import type { BuildingUpgradeCost } from "../core/buildingRegistry";
+import type { BuildingUpgradeCost } from "@heroes/engine";
 import { CityDesignBoxManager } from "./CityDesignBoxManager";
 
 export class CityView {

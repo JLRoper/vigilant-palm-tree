@@ -10,7 +10,7 @@ import {
   buildingUpkeep,
   buildingUpgradeCost,
   getBuildingEffect,
-} from "../core/buildingRegistry";
+} from "@heroes/engine";
 
 function formatEffectLine(kind: BuildingKind, level: number): string[] {
   const lines: string[] = [];

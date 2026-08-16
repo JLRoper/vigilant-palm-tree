@@ -1,5 +1,5 @@
-import type { SettlementState } from "@heroes/contracts";
-import { buildingUpkeep } from "../core/buildingRegistry";
+import type { SettlementState, Warehouse } from "@heroes/contracts";
+import { buildingUpkeep } from "../buildingRegistry";
 
 export const FOOD_PER_POPULATION = 100;
 export const MORALE_DECAY_PER_DEFICIT_RATIO = 10;
@@ -63,4 +63,22 @@ export function clampWarehouseNonNegative(value: number): number {
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, value));
+}
+
+export function applySettlementConsumption(s: SettlementState): SettlementState {
+  const warehouse: Warehouse = { ...s.warehouse };
+  const upkeep = buildingUpkeepRequired(s);
+  warehouse.food = clampWarehouseNonNegative(warehouse.food - foodRequired(s));
+  warehouse.wood = clampWarehouseNonNegative(warehouse.wood - upkeep.wood);
+  warehouse.stone = clampWarehouseNonNegative(warehouse.stone - upkeep.stone);
+  return { ...s, warehouse };
+}
+
+export function applyMoraleDecay(s: SettlementState): SettlementState {
+  return { ...s, morale: clampMorale((s.morale ?? 100) - moraleDecay(s)) };
+}
+
+export function applyEffectiveIncome(s: SettlementState): SettlementState {
+  const inc = effectiveIncome(s);
+  return { ...s, gold: s.gold + inc };
 }

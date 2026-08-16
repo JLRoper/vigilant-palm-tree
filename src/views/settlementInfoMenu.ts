@@ -4,7 +4,7 @@ import { PopupMenu, menuTheme, openCenteredModal, styleButton } from "./menu";
 import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../render/assetDescriptors";
 import { settings } from "../state/settings";
 import type { HorseVariant } from "../state/settings";
-import { POP_BY_LEVEL } from "../economy/settlementRates";
+import { POP_BY_LEVEL } from "@heroes/engine";
 import { pickHeroName } from "../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 

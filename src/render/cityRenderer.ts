@@ -18,7 +18,7 @@ import {
   type BuildingDef,
   type GenerationStyle,
 } from "./cityBuildingDraw";
-import { buildingFootprintFromRegistry } from "../core/buildingRegistry";
+import { buildingFootprintFromRegistry } from "@heroes/engine";
 import { pickStyleForBuilding } from "./assetDescriptors";
 import { settings, PARALLAX_SPEEDS } from "../state/settings";
 import skyboxBaseUrl from "../resources/skybox/cityView-background.png?url";
