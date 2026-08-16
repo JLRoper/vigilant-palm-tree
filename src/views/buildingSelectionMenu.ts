@@ -9,7 +9,7 @@ import {
   buildingUpgradeCost,
   combineUpgradeCosts,
   type BuildingUpgradeCost,
-} from "../core/buildingRegistry";
+} from "@heroes/engine";
 import { menuTheme } from "./menu";
 
 export interface BuildingSelectionMenuOptions {

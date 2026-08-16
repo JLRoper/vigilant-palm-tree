@@ -4,6 +4,33 @@ export const HEX_SIZE = 32;
 
 const SQRT3 = Math.sqrt(3);
 
+// The six axial neighbour offsets, in edge order: index `i` is the neighbour
+// across edge `i`, and edge `i` spans corners `i` and `i+1` from hexCorners
+// below. Because those corners sit at 60i-30 degrees, edge i's midpoint sits
+// at exactly 60i degrees — which is what lets nearestHexEdge convert a
+// pointer angle straight into an index here.
+//
+// Canonical copy for src/ — territoryBoundaryEdges (core/control.ts) walks it
+// for outline drawing. shared/types.ts carries its own duplicate (the battle
+// engine in shared/combat/manualBattle.ts walks that one instead, since
+// shared/ may not import from src/ — see dependency-cruiser.cjs). Keep both
+// arrays edge-aligned if the ordering ever changes.
+export const HEX_DIRECTIONS: readonly Axial[] = [
+  { q: 1, r: 0 },
+  { q: 0, r: 1 },
+  { q: -1, r: 1 },
+  { q: -1, r: 0 },
+  { q: 0, r: -1 },
+  { q: 1, r: -1 },
+];
+
+// Which of a hex's six edges a point lies toward, given the hex's centre.
+// Returns 0-5, indexing directly into HEX_DIRECTIONS.
+export function nearestHexEdge(cx: number, cy: number, px: number, py: number): number {
+  const deg = (Math.atan2(py - cy, px - cx) * 180) / Math.PI;
+  return ((Math.round(deg / 60) % 6) + 6) % 6;
+}
+
 export function axialToPixel(q: number, r: number, size = HEX_SIZE): { x: number; y: number } {
   const x = size * (SQRT3 * q + (SQRT3 / 2) * r);
   const y = size * (1.5 * r);

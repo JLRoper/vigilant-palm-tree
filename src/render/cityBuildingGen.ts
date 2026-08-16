@@ -1,6 +1,6 @@
 ﻿import type { BuildingDef, BuildingKind, GenerationStyle } from "./cityBuildingDraw";
 import type { CityViewSize } from "../core/cityGrid";
-import { buildingFootprintFromRegistry } from "../core/buildingRegistry";
+import { buildingFootprintFromRegistry } from "@heroes/engine";
 import { STYLE_IDS, type BuildingStyleId } from "./buildingStyles";
 
 export type GenerationPattern =

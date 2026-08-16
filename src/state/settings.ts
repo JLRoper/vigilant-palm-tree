@@ -1,4 +1,4 @@
-import { HORSE_VARIANT_REGISTRY, type HorseVariantId, VALID_HORSE_VARIANTS } from "../../shared/horseVariants";
+import { HORSE_VARIANT_REGISTRY, type HorseVariantId, VALID_HORSE_VARIANTS } from "@heroes/engine";
 
 export type HorseVariant = HorseVariantId;
 

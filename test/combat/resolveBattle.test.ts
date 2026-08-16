@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveBattle } from "../../shared/combat/resolveBattle";
-import { computeDamage } from "../../shared/combat/damage";
+import { resolveBattle } from "@heroes/engine";
+import { computeDamage } from "@heroes/engine";
 import { ARMY_STACK_SLOTS, type Platoon, type PlatoonEntry, type UnitType } from "../../src/state/units";
 
 const unitTypes: Record<string, UnitType> = {

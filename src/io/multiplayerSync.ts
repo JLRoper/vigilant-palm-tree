@@ -1,6 +1,6 @@
 import { api, type Game } from "./api";
 import { hydrateGameState } from "../game/initState";
-import type { GameState } from "../state/gameState";
+import type { GameState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
 import {
   getInMemoryLocalPlayerId,

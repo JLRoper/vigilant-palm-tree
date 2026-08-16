@@ -6,8 +6,8 @@
 
 import { fixedTestPlayerPlatoons, randomAiPlatoons } from "../combat/testArmies";
 import { catalogFailed, loadUnitCatalog } from "../data/unitCatalog";
-import type { BattleSide } from "../../shared/combat/types";
-import type { Platoon, UnitType } from "../../shared/units";
+import type { BattleSide } from "@heroes/engine";
+import type { Platoon, UnitType } from "@heroes/engine";
 import { menuTheme, openCenteredModal, styleButton } from "./menu";
 import { launchView, registerView } from "./viewLauncher";
 

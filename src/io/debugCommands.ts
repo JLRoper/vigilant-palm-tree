@@ -1,4 +1,4 @@
-import type { HeroId } from "../state/gameState";
+import type { HeroId } from "@heroes/contracts";
 import { findPath } from "../map/pathfinding";
 import { TERRAIN_COST } from "../map/terrain";
 import { axialToPixel } from "../core/hex";

@@ -1,6 +1,6 @@
 ﻿import { test } from "node:test";
 import assert from "node:assert/strict";
-import { settlementIncome, playerIncome, playerWealth } from "../../src/economy/income";
+import { settlementIncome, playerIncome, playerWealth } from "@heroes/engine";
 import { createInitialState, type GameState, type PlayerId, type SettlementState, type HeroState } from "../../src/state/gameState";
 
 function makeSettlement(id: string, ownerId: PlayerId | null, population: number, goldTax: number, gold = 0): SettlementState {

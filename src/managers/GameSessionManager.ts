@@ -3,7 +3,7 @@ import { SessionManager } from "./SessionManager";
 import { ViewManager } from "./ViewManager";
 import { UIManager } from "./UIManager";
 import { GameMap, type MapSize, MAP_SIZES } from "../map/gameMap";
-import { playerWealth } from "../economy/income";
+import { playerWealth } from "@heroes/engine";
 import { markSaved } from "../state/gameState";
 import { hydrateGameState, playerHeroId } from "../game/initState";
 import { CASTLE_COUNT_DEFAULT, defaultCastleSeedFromMapSeed, generateCastles } from "../map/castlePlacement";

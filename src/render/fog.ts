@@ -1,7 +1,7 @@
 import type { Hero } from "../entities/hero";
 import type { Castle } from "../entities/settlement";
 import { hexDistance, type Axial } from "../core/hex";
-import { controlRange } from "../core/control";
+import { controlRange } from "@heroes/engine";
 
 export const VISION_RANGE = 4;
 

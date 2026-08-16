@@ -10,9 +10,8 @@ need restructuring.
 ## Current fit in the codebase
 
 - [shared/combat/types.ts](../shared/combat/types.ts)'s `Combatant`
-  (lines 21-39) has no `morale`/`fatigue` fields — only `side`, `slotIndex`,
-  `position`, `entries`, `maxHealth`, `hasCounterCharge`, `retreated`,
-  `scoutedBy`.
+  has no `morale`/`fatigue` fields — only `side`, `slotIndex`,
+  `position`, `entries`, `maxHealth`, `hasCounterCharge`, `retreated`.
 - [src/views/manualBattleArena.ts:221-227](../src/views/manualBattleArena.ts)
   renders Morale and Fatigue bars via `makeMetricBar()`, but the values are
   hard-coded (`100` and `0`) — "the slot exists in the UI for when the combat
