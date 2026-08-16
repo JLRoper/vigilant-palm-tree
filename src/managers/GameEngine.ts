@@ -201,7 +201,7 @@ export class GameEngine {
   // STATE INFO
   // =========================================================================
 
-  private getMapInfo(): import("../views/settingsMenu").MapInfo | null {
+  private getMapInfo(): import("@screens/home/settingsMenu").MapInfo | null {
     const gs = this.state.getState();
     if (!gs) return null;
     const hero = this.state.getHero("pa-hero");

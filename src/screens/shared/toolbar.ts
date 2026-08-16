@@ -4,7 +4,7 @@ import { forgetGame, listUserGames, type UserGameEntry } from "../../io/userGame
 import type { GameState } from "../../state/gameState";
 import type { SaveStatus } from "../../managers/SessionManager";
 import { CASTLE_COUNT_MAX } from "../../map/castlePlacement";
-import { openSettingsMenu, type MapInfo } from "../../views/settingsMenu";
+import { openSettingsMenu, type MapInfo } from "@screens/home/settingsMenu";
 import { openTestBattleSetup } from "@screens/combat/testBattleSetup";
 import {
   menuTheme,

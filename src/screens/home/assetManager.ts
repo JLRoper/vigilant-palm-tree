@@ -5,7 +5,7 @@ import {
   deleteAsset,
   assetUrl,
   type AssetSummary,
-} from "../io/assetApi";
+} from "../../io/assetApi";
 
 export function openAssetManager(): void {
   const modal = openCenteredModal(document.body, "Asset Manager", 720, false);

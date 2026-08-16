@@ -1,5 +1,5 @@
 // Sandbox army generators for the "Test Battle" dev feature (see
-// src/views/testBattleSetup.ts). Not used by the real game — the player side
+// src/screens/combat/testBattleSetup.ts). Not used by the real game — the player side
 // is a fixed preset and the AI side is randomized/rerollable, purely to
 // exercise the manual battle arena end to end.
 
