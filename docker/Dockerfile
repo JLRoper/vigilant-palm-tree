@@ -29,8 +29,8 @@ RUN apk add --no-cache wget
 # Copy package files
 COPY package.json package-lock.json ./
 
-# Install production dependencies (including tsx for runtime)
-RUN npm ci --omit=dev --save=false && npm install --save-exact tsx
+# Install production dependencies (tsx is in `dependencies` for runtime use)
+RUN npm ci --omit=dev --save=false
 
 # Copy source files (app runs with tsx loader at runtime)
 COPY --from=builder /app/src ./src
@@ -57,7 +57,8 @@ WORKDIR /app
 # vite preview reads vite.config.ts and honors the preview.proxy block,
 # which routes /api/* to the api container (host via API_HOST env).
 COPY --from=builder /app/package.json /app/package-lock.json ./
-RUN npm ci --omit=dev --save=false && npm install --save-exact "vite@$(node -p "require('./package.json').devDependencies.vite")"
+# vite is in `dependencies`; installed from the lockfile
+RUN npm ci --omit=dev --save=false
 
 # Copy built Vite assets + the files `vite preview` needs at runtime
 COPY --from=builder /app/dist ./dist

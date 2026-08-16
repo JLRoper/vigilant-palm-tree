@@ -1,4 +1,4 @@
-import type { GenerationStyle } from "../../../shared/types";
+import type { BuildingKind, GenerationStyle } from "../../../shared/types";
 
 export type { BuildingKind, BuildingDef, GenerationStyle } from "../../../shared/types";
 
@@ -12,7 +12,7 @@ export interface DrawBuildingContext {
   screenOrigin: { x: number; y: number };
   tileScale: number;
   style: GenerationStyle;
-  kind: import("../../../shared/types").BuildingKind;
+  kind: BuildingKind;
   level: number;
   ownerColor: string;
   cellScreen: { x: number; y: number };
