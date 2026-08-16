@@ -8,3 +8,6 @@ dist/
 .recycled/
 tmp/
 sessionTracking/
+test/.last-test-pids.json
+test/.baseline-snapshot.txt
+test/.test-timing.txt

@@ -1,7 +1,7 @@
 import { chromium, Browser, Page, request as pwRequest } from "playwright";
-import { spawn, ChildProcess } from "node:child_process";
+import { spawn, ChildProcess, execSync } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
-import { existsSync, readFileSync, statSync, openSync, promises as fsPromises } from "node:fs";
+import { existsSync, readFileSync, statSync, openSync, writeFileSync, promises as fsPromises } from "node:fs";
 import assert from "node:assert/strict";
 import { GameMap } from "../src/map/gameMap";
 import { mulberry32 } from "../src/core/rng";
@@ -18,8 +18,136 @@ const WEB_URL = `http://localhost:${WEB_PORT}`;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const GAME_NAME = "default";
 const TEST_NEW_NAME = "smoke-new-game";
+const PID_REGISTRY_PATH = "test/.last-test-pids.json";
+const IS_WINDOWS = process.platform === "win32";
+
+interface PidEntry {
+  role: string;
+  pid: number;
+  spawnedAt: string;
+}
+
+interface PidRegistry {
+  runId: string;
+  startedAt: string;
+  pids: PidEntry[];
+}
+
+function parseShutdownAfterSeconds(): number | null {
+  const arg = process.argv.find((a) => a.startsWith("--shutdownAfterSeconds="));
+  if (!arg) return null;
+  const n = Number(arg.split("=")[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+const SHUTDOWN_AFTER_MS = parseShutdownAfterSeconds();
+
+function readRegistry(): PidRegistry {
+  if (!existsSync(PID_REGISTRY_PATH)) {
+    return { runId: "?", startedAt: new Date().toISOString(), pids: [] };
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(PID_REGISTRY_PATH, "utf8")) as PidRegistry;
+    if (!parsed || !Array.isArray(parsed.pids)) {
+      return { runId: "?", startedAt: new Date().toISOString(), pids: [] };
+    }
+    return parsed;
+  } catch {
+    return { runId: "?", startedAt: new Date().toISOString(), pids: [] };
+  }
+}
+
+function writeRegistry(registry: PidRegistry): void {
+  try {
+    writeFileSync(PID_REGISTRY_PATH, JSON.stringify(registry, null, 2));
+  } catch (e) {
+    console.error(`>> failed to write pid registry: ${e}`);
+  }
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function treeKill(pid: number): void {
+  if (IS_WINDOWS) {
+    try {
+      execSync(`taskkill /F /T /PID ${pid}`, { stdio: "ignore" });
+      return;
+    } catch {
+      // fall through to plain kill
+    }
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // best-effort
+  }
+}
+
+function reapPreviousRunPids(): void {
+  const prev = readRegistry();
+  if (prev.pids.length === 0) return;
+  let reaped = 0;
+  for (const entry of prev.pids) {
+    if (!isAlive(entry.pid)) continue;
+    try {
+      treeKill(entry.pid);
+      reaped++;
+      console.log(`>> reaped leftover ${entry.role} pid=${entry.pid} from previous run`);
+    } catch {
+      // best-effort
+    }
+  }
+  if (reaped > 0) {
+    console.log(`>> reaped ${reaped} leftover pid(s) from previous run`);
+  }
+}
+
+function killSpawnedChild(extra: ChildProcess | undefined): void {
+  if (!extra || extra.killed || extra.pid == null) return;
+  try {
+    extra.kill("SIGKILL");
+  } catch {
+    // best-effort
+  }
+}
+
+function killBrowserTree(): void {
+  try {
+    const proc = browser?.process?.();
+    if (proc && proc.pid != null) treeKill(proc.pid);
+  } catch {
+    // best-effort
+  }
+}
+
+function registerPid(role: string, pid: number): void {
+  const registry = readRegistry();
+  registry.pids = registry.pids.filter((entry) => entry.pid !== pid);
+  registry.pids.push({ role, pid, spawnedAt: new Date().toISOString() });
+  writeRegistry(registry);
+}
+
+function clearRegisteredPids(): void {
+  try {
+    if (existsSync(PID_REGISTRY_PATH)) writeFileSync(PID_REGISTRY_PATH, "");
+  } catch {
+    // best-effort
+  }
+}
+
+reapPreviousRunPids();
 let PLAYER_SPAWN = { q: 6, r: 5 };
 let AI_SPAWN = { q: 14, r: 8 };
+let api: ChildProcess | undefined;
+let web: ChildProcess | undefined;
+let browser: Browser | undefined;
 
 function runDeterminismChecks() {
   const m1 = new GameMap(42);
@@ -318,6 +446,7 @@ function startApi(): ChildProcess {
   child.stdout?.on("data", (d) => process.stdout.write(`[api] ${d.toString()}`));
   child.stderr?.on("data", (d) => process.stderr.write(`[api-err] ${d.toString()}`));
   child.unref();
+  if (child.pid != null) registerPid("api", child.pid);
   return child;
 }
 
@@ -334,6 +463,7 @@ function startWeb(): ChildProcess {
   child.stdout?.on("data", (d) => process.stdout.write(`[web] ${d.toString()}`));
   child.stderr?.on("data", (d) => process.stderr.write(`[web-err] ${d.toString()}`));
   child.unref();
+  if (child.pid != null) registerPid("web", child.pid);
   return child;
 }
 
@@ -407,10 +537,9 @@ function stopLogTail(): void {
 
 async function run() {
   await ensureBuilt();
-  const api = startApi();
-  const web = startWeb();
+  api = startApi();
+  web = startWeb();
   startLogTail();
-  let browser: Browser | undefined;
   let failed = false;
   try {
     try {
@@ -447,6 +576,12 @@ async function run() {
     if (stale.length > 0) console.log(`>> cleaned up ${stale.length} stale games`);
 
     browser = await chromium.launch();
+    try {
+      const browserProc = browser.process?.();
+      if (browserProc && browserProc.pid != null) registerPid("browser", browserProc.pid);
+    } catch {
+      // best-effort: some Browser implementations don't expose process()
+    }
     const page = await browser.newPage({ viewport: { width: 1024, height: 720 } });
     page.on("console", (msg) => {
       const text = msg.text();
@@ -511,25 +646,26 @@ async function run() {
     console.error("TEST FAILED:", err);
   } finally {
     stopLogTail();
-    try {
-      if (browser) {
-        const proc = browser.process();
-        if (proc) proc.kill("SIGKILL");
-      }
-    } catch {
-      // best-effort
-    }
-    if (api && !api.killed) {
-      try { api.kill("SIGKILL"); } catch {}
-    }
-    if (web && !web.killed) {
-      try { web.kill("SIGKILL"); } catch {}
-    }
+    killBrowserTree();
+    killSpawnedChild(api);
+    killSpawnedChild(web);
+    clearRegisteredPids();
     process.exit(failed ? 1 : 0);
   }
 }
 
 run();
+
+if (SHUTDOWN_AFTER_MS != null) {
+  setTimeout(() => {
+    console.error(`>> shutdown ceiling (${SHUTDOWN_AFTER_MS}ms) reached, killing child trees`);
+    killSpawnedChild(api);
+    killSpawnedChild(web);
+    killBrowserTree();
+    clearRegisteredPids();
+    process.exit(3);
+  }, SHUTDOWN_AFTER_MS).unref();
+}
 
 setTimeout(() => {
   console.error(">> smoke test exceeded 120s, forcing exit");
