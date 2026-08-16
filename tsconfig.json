@@ -22,5 +22,5 @@
       "@screens/*": ["./src/screens/*"]
     }
   },
-  "include": ["src", "packages/contracts/src", "packages/engine/src"]
+  "include": ["src", "packages/contracts/src", "packages/engine/src", "server"]
 }
