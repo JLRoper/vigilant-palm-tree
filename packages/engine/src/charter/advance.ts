@@ -1,4 +1,4 @@
-import type { CharterState, GameState, HeroState, SettlementState } from "@heroes/contracts";
+import type { CharterState, GameState, SettlementState } from "@heroes/contracts";
 import { MOVEMENT_PER_TURN } from "@heroes/contracts";
 
 export const CHARTER_SETTLEMENT_POPULATION = 50;
@@ -32,17 +32,6 @@ export function advanceCharters(state: GameState): GameState {
 
 function completeCharter(state: GameState, charter: CharterState): GameState {
   const hero = state.heroes[charter.heroId];
-  const updatedHero: HeroState = hero
-    ? {
-        ...hero,
-        isChartering: false,
-        charterId: null,
-        movementRemaining: MOVEMENT_PER_TURN,
-        previousQ: null,
-        previousR: null,
-        previousMovementRemaining: null,
-      }
-    : null as unknown as HeroState;
 
   const newSettlement: SettlementState = {
     id: charter.settlementId,
@@ -66,7 +55,18 @@ function completeCharter(state: GameState, charter: CharterState): GameState {
   };
 
   const newHeroes = hero
-    ? { ...state.heroes, [charter.heroId]: updatedHero }
+    ? {
+        ...state.heroes,
+        [charter.heroId]: {
+          ...hero,
+          isChartering: false,
+          charterId: null,
+          movementRemaining: MOVEMENT_PER_TURN,
+          previousQ: null,
+          previousR: null,
+          previousMovementRemaining: null,
+        },
+      }
     : state.heroes;
 
   return {

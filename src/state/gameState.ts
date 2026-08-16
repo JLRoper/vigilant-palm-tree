@@ -46,12 +46,6 @@ import type {
 // state/gameState don't need to change their import path.
 export { applySettlementConsumption, applyMoraleDecay, applyEffectiveIncome, runAutoTrade, transferGold, tradeResources };
 
-// startCharter/stepTravelCharter/advanceCharters/cleanupDefeatedHeroCharters
-// (plus CHARTER_GOLD_COST/CHARTER_WAREHOUSE_COST) now live in @heroes/engine
-// (Track A / Phase 1, stage 5) -- advanceCharters is also called locally
-// below (advanceRound); the rest are re-exported purely for existing
-// consumers (turnController.ts's aliased imports, GameEngine.ts's direct
-// constant imports) so neither needs to change on this PR.
 export { advanceCharters };
 export {
   CHARTER_GOLD_COST,

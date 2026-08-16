@@ -1,4 +1,4 @@
-import type { CharterState, GameState, HeroId, HeroState, StepTravelResult } from "@heroes/contracts";
+import type { GameState, HeroId, HeroState, StepTravelResult } from "@heroes/contracts";
 
 export function stepTravelCharter(
   state: GameState,
@@ -45,16 +45,9 @@ export function stepTravelCharter(
   };
 
   const arrived = toQ === charter.targetQ && toR === charter.targetR;
-  const newCharters = state.activeCharters.map((c) => {
-    if (c.id === charter.id) {
-      const next: CharterState = { ...c, phase: arrived ? "constructing" : c.phase };
-      if (arrived) {
-        next.phase = "constructing";
-      }
-      return next;
-    }
-    return c;
-  });
+  const newCharters = state.activeCharters.map((c) =>
+    c.id === charter.id ? { ...c, phase: arrived ? ("constructing" as const) : c.phase } : c,
+  );
 
   const resultHero = arrived
     ? { ...updatedHero, movementRemaining: 0 }
