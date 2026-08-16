@@ -19,7 +19,7 @@ A turn-based hex adventure map where the player moves a hero, claims resource ti
 |-----|--------|--------|
 | [resources.md](./resources.md) | 5 resource types, tile distribution, yields | ✅ Locked |
 | [settlements.md](./settlements.md) | Build cost, charter expeditions, settlement limits, capture, levels | ✅ Locked |
-| [city-view.md](./city-view.md) | 10×10 settlement interior, mines, per-resource yield | 📋 Planned |
+| [city-view-impl-plan.md](./city-view-impl-plan.md) | 10×10 settlement interior, mines, per-resource yield | 📋 Planned |
 | [heroes.md](./heroes.md) | Hero movement, chartering, capture-for-ransom | ✅ Locked (movement) / 🟡 Charter implemented / ⏸️ Ransom deferred |
 | [army.md](./army.md) | Unit roster, recruitment, food/upkeep, tactical combat | ⏸️ Deferred |
 | [economy.md](./economy.md) | Per-turn economy flow tying resources + settlements | ✅ Locked |
@@ -31,10 +31,13 @@ A turn-based hex adventure map where the player moves a hero, claims resource ti
 |-----|--------|--------|
 | [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) | Module-by-module dependency map for `src/`, `server/`, `shared/`, `test/`, `tools/`, `scripts/` | 📋 Planned |
 | [architecture.md](./architecture.md) | Executed layout plan that established the current `src/` structure | ✅ Locked |
-| [battle-view-architecture.md](./battle-view-architecture.md) | Battle view surface: trigger → state → UI → server resolver; auto-resolve vs. dev Test-Battle paths | 📋 Planned |
+| [module-documentation-and-relationships.md §4 / §5.12](./module-documentation-and-relationships.md#4-shared--engine-neutral-code-both-sides-import-this) | Battle view surface: trigger → state → UI → server resolver; auto-resolve vs. dev Test-Battle paths | 🟡 See note below |
 | [dev-console.md](./dev-console.md) | `src/debug/` event log + modal/footer console for inspecting bus + hook events in real time | 🟡 Open question |
 | [event-system.md](./event-system.md) | Planned `core/eventBus` refactor and event catalog (Phases 1–6) | 📋 Planned |
-| [plan/](./plan/) | Architecture plans: walkthrough + Tailscale, bloat/scalability review, module expansion plan | 📋 Planned |
+| [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) | **Multiplayer (LAN):** lobby seat claim + `lobby` jsonb column (§3), 2s polling sync (§5.9), lobby UI (§5.12), local seat identity (§5.16) | 🟡 Built, no design doc |
+| [../plan/](../plan/) | Architecture plans: walkthrough + Tailscale, bloat/scalability review, module expansion plan, modal viewport overflow, fight-screen redesign, combat reveal / fog of war | 📋 Planned |
+
+> **`battle-view-architecture.md` is not in this repo.** A 229-line draft exists on the unmerged branch `origin/docs/updated-battle-view` (commit `053d4f6`, 2026-07-31). It predates the battlefield-first arena rework, approach-hex targeting, and the Spy/fog-of-war removal, so merging it as-is would land stale docs. Until someone refreshes and merges it, the battle surface is documented in [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) (`shared/combat/*` in §4, `manualBattleArena.ts` + `platoonInfoPopup.ts` in §5.12).
 
 ## How to read these
 
@@ -58,6 +61,9 @@ All major questions resolved. Remaining minor ones:
 2. **City view mine upgrades** — schema supports Level 1–3, UI ships Level 1 only.
 3. **Map fog of war** — deferred entirely; resource tiles stay always-visible for now.
 4. **AI chartering** — deferred; only human player can charter settlements currently.
+5. **Multiplayer has no design doc** — the LAN lobby + polling sync are built and are described mechanically in the module map, but the *design* (how many players, turn-timeout policy, what happens when a seat drops mid-game, whether AI fills empty seats) was never written down.
+6. **`src/factions/` is staged but unwired** — `FactionUnit` roster data for the humans exists at `src/factions/humans/` and nothing imports it. The live unit data still comes from the server catalog (`data/unitCatalog.ts`) and `state/units.ts`. Decide whether factions becomes the source of truth or the directory gets dropped.
+7. **Combat reveal / fog of war in battle** — the Spy action and its `scoutedBy`/`markContacted` fog were removed as half-baked; the parked idea is written up in [../plan/2026-08-15-combat-reveal-fog-of-war.md](../plan/2026-08-15-combat-reveal-fog-of-war.md).
 
 ## Locked decisions (quick reference)
 
