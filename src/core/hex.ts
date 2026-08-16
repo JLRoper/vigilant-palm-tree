@@ -10,11 +10,12 @@ const SQRT3 = Math.sqrt(3);
 // at exactly 60i degrees — which is what lets nearestHexEdge convert a
 // pointer angle straight into an index here.
 //
-// Canonical copy for src/ — territoryBoundaryEdges (core/control.ts) walks it
-// for outline drawing. shared/types.ts carries its own duplicate (the battle
-// engine in shared/combat/manualBattle.ts walks that one instead, since
-// shared/ may not import from src/ — see dependency-cruiser.cjs). Keep both
-// arrays edge-aligned if the ordering ever changes.
+// Canonical copy for src/ — territoryBoundaryEdges (packages/engine/src/
+// control.ts) walks it for outline drawing. packages/contracts/src/
+// geometry.ts carries its own duplicate (packages/engine/src/combat/
+// manualBattle.ts walks that one instead, since @heroes/contracts may not
+// import from src/ — see dependency-cruiser.cjs's contracts-is-a-leaf rule).
+// Keep both arrays edge-aligned if the ordering ever changes.
 export const HEX_DIRECTIONS: readonly Axial[] = [
   { q: 1, r: 0 },
   { q: 0, r: 1 },
