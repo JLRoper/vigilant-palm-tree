@@ -1,4 +1,5 @@
 import { GameEngine } from "./managers/GameEngine";
+import "./views";
 import { createHomeView } from "./views/homeView";
 import type { Game } from "./io/api";
 

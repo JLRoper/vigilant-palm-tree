@@ -2,8 +2,9 @@
 //
 // OS-assigned port allocator. Cross-platform (Windows / Linux / macOS).
 // Picks free TCP ports via net.Server({ port: 0 }) and writes them to .env
-// in the current working directory. Idempotent and cheap; safe to run
-// multiple times. Replaces scripts/ports.ps1 with no PowerShell dependency.
+// in the current working directory. Idempotent: re-running preserves
+// existing .env values unless process.env overrides are set. Replaces
+// scripts/ports.ps1 with no PowerShell dependency.
 //
 // Keys written:
 //   API_PORT     - Express API (server/index.ts)
@@ -62,6 +63,13 @@ async function main(): Promise<void> {
     const override = process.env[key];
     if (override) {
       merged[key] = override;
+      continue;
+    }
+    if (existing[key]) {
+      // Preserve existing .env value. predev/pretest invoke this on every
+      // run; re-allocating would silently rotate ports and strand orphan
+      // processes on the previous values. Run `npm run cleanup` to free
+      // stale ports before requesting a fresh allocation.
       continue;
     }
     const port = await pickPort();
