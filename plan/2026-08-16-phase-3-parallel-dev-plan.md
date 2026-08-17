@@ -198,6 +198,15 @@ Week 3+:
 
 **Rollback:** each port is its own PR (one command at a time, per the base plan's own file rule). A bad port rolls back independently; it doesn't take `commandHandler.ts` or any other already-shipped command with it.
 
+## Week 2 follow-ups (#88, #89) — added 2026-08-17
+
+The Week 2 `EndTurn` port (PR #87) was scoped to round-wrap logic and the charter/population-growth gap. Two regressions slipped past because neither was in scope at the time:
+
+- **#88** — recruit/build/upgrade/charter/reorder/auto-trade/capture mutations are discarded on end turn (the legacy `PATCH /games/:name` fallback still ran these; the `EndTurn` command's persistence step never calls `saveHeroesAndSettlements` with the mutation deltas). Higher severity than #89 because the client still holds the values in memory and re-sends.
+- **#89** — `settlement_snapshots` / `resource_transactions` audit rows stopped being written entirely the moment the `EndTurn` command replaced the old `/end-turn` route. The plan's port description never mentioned either table, so the regression went unnoticed for the lifetime of PR #87. Fixed by PR #92 (Track 3.B repo methods on `e955e83`, Track 3.A wiring on `470697f`).
+
+Both must be closed before any Phase 4 rework of `EndTurn`'s persistence step, or that rework will inherit the same audit gap. The Phase 4 `commandHandler.ts` dual-write step (`2026-08-17-consolidated-phase-1-5-track-map.md` §6.1) should treat these as already-closed prior work, not reopen them.
+
 ## What this plan does NOT cover
 
 - Phase 4 (database de-blobbing, dual-write, migrations) and Phase 5 (client command dispatcher, event-cursor sync, scene renderer seam) — see `2026-08-16-parallel-dev-phases-3-5.md` §4 for those, unchanged by this doc.
