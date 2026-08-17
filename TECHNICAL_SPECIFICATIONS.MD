@@ -148,7 +148,7 @@ Entry point: [`src/main.ts`](./src/main.ts:1) wires modules together. There is n
 | `src/entities/` | Domain objects: `hero.ts`, `settlement.ts` (Castle) |
 | `src/map/` | Map generation and traversal: `gameMap.ts`, `terrain.ts`, `pathfinding.ts` (A\* over axial hex grid), `castlePlacement.ts`, `resourceTiles.ts` |
 | `src/resources/` | Static asset images (`castle-l1/l2/l3.png` + `.svg`, resource icons) |
-| `src/render/` | Canvas rendering: `renderer.ts`, `camera.ts` (pan/zoom), `fog.ts`, `sprites.ts` (procedural hero drawers), `heroSprites.ts`, `assets.ts` (sprite provider), `assetSource.ts`, `assetDescriptors.ts`, `overlays/` |
+| `src/render/` | Canvas rendering: `renderer.ts`, `camera.ts` (pan/zoom), `fog.ts`, `sprites.ts` (procedural hero drawers), `heroSprites.ts`, `assets.ts` (sprite provider), `assetSource.ts`, `assetDescriptors.ts`, `overlays/`, `scene/` (Phase 5 Track B, in progress: pure `GameState -> SceneNode[]` scene builders + a future Canvas2D painter — not wired into live rendering yet, see `src/render/docs/technical-spec.md` §7) |
 | `src/managers/` | Orchestration between state, views, and I/O: `GameEngine.ts` (composer), `GameStateManager.ts` (state ↔ entities sync), `ViewManager.ts` (renderer + camera + adventure view), `UIManager.ts` (HUD, toolbar, menus, city view), `GameActions.ts` (end turn, save, battle flow), `SessionManager.ts` (game session lifecycle), `GameSessionManager.ts` (save/load orchestration) |
 | `src/state/` | Game state: `gameState.ts` (typed store + all pure reducers including charter settlement logic), `turnController.ts` (turn lifecycle, auto-travel, AI tick), `units.ts`, `playerColors.ts`, `settings.ts` |
 | `src/game/` | Game lifecycle: `initState.ts` (build/hydrate initial state), `turnHooks.ts` |
@@ -161,7 +161,7 @@ Entry point: [`src/main.ts`](./src/main.ts:1) wires modules together. There is n
 
 ### Rendering model
 - Single full-viewport `<canvas>` (`#game`) in `index.html`.
-- `Renderer` paints each frame based on `GameState` and `Camera`.
+- `Renderer` paints each frame based on `GameState` and `Camera`. (In progress, not live yet: `src/render/scene/` is building a pure `SceneNode[]` seam meant to replace this direct coupling — see Phase 5 Track B in the plan docs.)
 - `Camera` supports drag-pan and wheel-zoom (per the `#hud` hint text).
 - Hero/castle sprites are loaded via a `SpriteProvider` (defaults to procedural drawers in `HERO_PROCEDURAL_DRAWERS`); PNGs in `src/resources/` are the static fallback / baked output.
 
