@@ -1,6 +1,6 @@
-import type { HeroId, HeroState, Player, SettlementId, SettlementState } from "@heroes/contracts";
+import type { CharterState, HeroId, HeroState, Player, SettlementId, SettlementState } from "@heroes/contracts";
 import type { HydratableGameRow } from "@heroes/engine";
-import type { EventRepo, GameRepo } from "../../server/app/commandHandler";
+import type { CharterRepo, EventRepo, GameRepo, HeroRepo, SettlementRepo } from "../../server/app/commandHandler";
 import type { SettlementSnapshotInput, ResourceTransactionInput } from "../../server/persistence/repositories/gameRepo";
 
 // In-memory doubles implementing commandHandler.ts's pre-agreed repo
@@ -77,6 +77,79 @@ export function createMockEventRepo(): EventRepo & { events: RecordedEvent[] } {
     events,
     async append(gameName: string, kind: string, payload: unknown): Promise<void> {
       events.push({ gameName, kind, payload });
+    },
+  };
+}
+
+// Phase 4 Track A (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md).
+// In-memory doubles for commandHandler.ts's HeroRepo/SettlementRepo/
+// CharterRepo, same rationale as createMockGameRepo/createMockEventRepo
+// above. Unseeded (the default in every existing commandHandler.test.ts
+// call site) means loadAllForGame returns [] for every game -- that's
+// exactly the "granular tables empty" signal server/persistence/hydrate.ts's
+// hydrateFromRepos() treats as "fall back to the legacy JSONB row," so
+// every pre-Phase-4 test keeps exercising the JSONB path unchanged without
+// needing to know these repos exist. Tests that DO want to exercise the
+// granular-read path seed `rows` up front; tests that want to assert on the
+// dual-write step inspect `calls`.
+export interface RecordedUpsert<T> {
+  gameName: string;
+  value: T;
+}
+
+export function createMockHeroRepo(
+  seed: Record<string, Record<HeroId, HeroState>> = {},
+): HeroRepo & { rows: Record<string, Record<HeroId, HeroState>>; calls: RecordedUpsert<Record<HeroId, HeroState>>[] } {
+  const rows: Record<string, Record<HeroId, HeroState>> = { ...seed };
+  const calls: RecordedUpsert<Record<HeroId, HeroState>>[] = [];
+  return {
+    rows,
+    calls,
+    async loadAllForGame(gameName: string): Promise<HeroState[]> {
+      return Object.values(rows[gameName] ?? {});
+    },
+    async upsertMany(gameName: string, heroes: Record<HeroId, HeroState>): Promise<void> {
+      calls.push({ gameName, value: heroes });
+      rows[gameName] = heroes;
+    },
+  };
+}
+
+export function createMockSettlementRepo(
+  seed: Record<string, Record<SettlementId, SettlementState>> = {},
+): SettlementRepo & {
+  rows: Record<string, Record<SettlementId, SettlementState>>;
+  calls: RecordedUpsert<Record<SettlementId, SettlementState>>[];
+} {
+  const rows: Record<string, Record<SettlementId, SettlementState>> = { ...seed };
+  const calls: RecordedUpsert<Record<SettlementId, SettlementState>>[] = [];
+  return {
+    rows,
+    calls,
+    async loadAllForGame(gameName: string): Promise<SettlementState[]> {
+      return Object.values(rows[gameName] ?? {});
+    },
+    async upsertMany(gameName: string, settlements: Record<SettlementId, SettlementState>): Promise<void> {
+      calls.push({ gameName, value: settlements });
+      rows[gameName] = settlements;
+    },
+  };
+}
+
+export function createMockCharterRepo(
+  seed: Record<string, CharterState[]> = {},
+): CharterRepo & { rows: Record<string, CharterState[]>; calls: RecordedUpsert<CharterState[]>[] } {
+  const rows: Record<string, CharterState[]> = { ...seed };
+  const calls: RecordedUpsert<CharterState[]>[] = [];
+  return {
+    rows,
+    calls,
+    async loadAllForGame(gameName: string): Promise<CharterState[]> {
+      return rows[gameName] ?? [];
+    },
+    async upsertMany(gameName: string, charters: CharterState[]): Promise<void> {
+      calls.push({ gameName, value: charters });
+      rows[gameName] = charters;
     },
   };
 }
