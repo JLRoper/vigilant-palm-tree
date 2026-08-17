@@ -35,6 +35,12 @@ import type { BattleResult } from "@heroes/engine";
 export interface TurnControllerHooks {
   onHumanTurnEnd(state: GameState): Promise<GameState>;
   onAiMove(state: GameState, heroId: HeroId, toTile: { q: number; r: number }): Promise<void>;
+  onHumanMove(
+    state: GameState,
+    heroId: HeroId,
+    toTile: { q: number; r: number },
+    cost: number,
+  ): Promise<void>;
   onBattleResolved(state: GameState): Promise<{ state: GameState; battle: BattleResult | null }>;
   pickAiMove(
     state: GameState,
@@ -72,6 +78,12 @@ export interface TurnControllerHooks {
   onSetAutoTrade(actor: number, settlementId: SettlementId, autoTrade: boolean): Promise<void>;
   onReorderStack(actor: number, heroId: HeroId, fromIdx: number, toIdx: number): Promise<void>;
   onCaptureSettlement(actor: number, heroId: HeroId, settlementId: SettlementId): Promise<void>;
+  onTransferGold(
+    actor: number,
+    heroId: HeroId,
+    settlementId: SettlementId,
+    direction: TransferDirection,
+  ): Promise<void>;
 }
 
 export class TurnController {
@@ -132,6 +144,9 @@ export class TurnController {
     if (defenderId) {
       this.enterBattle(heroId, defenderId);
     }
+    void this.hooks.onHumanMove(this.state, heroId, toTile, cost).catch((e) => {
+      console.warn("[turnController] onHumanMove failed:", e);
+    });
     return true;
   }
 
@@ -194,6 +209,10 @@ export class TurnController {
     this.hooks.logEvent({
       type: "transfer_gold",
       payload: { heroId, settlementId, direction, amount },
+    });
+    const actor = this.state.heroes[heroId]?.ownerId ?? this.state.activePlayerId;
+    void this.hooks.onTransferGold(actor, heroId, settlementId, direction).catch((e) => {
+      console.warn("[turnController] onTransferGold failed:", e);
     });
     return { ok: true, reason: "" };
   }

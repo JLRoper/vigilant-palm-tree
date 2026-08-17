@@ -1,6 +1,18 @@
-import { api, endTurn, spendMovement, resolveBattle, tradeResources, recruitHero, upgradeTownHall, setAutoTrade, reorderStack, captureSettlement } from "../io/api";
-import type { EndTurnResult } from "../io/api";
-import type { GameState, HeroId, SettlementId, WarehouseResource } from "@heroes/contracts";
+import { api } from "../io/api";
+import {
+  endTurn,
+  spendMovement,
+  resolveBattle,
+  transferGold,
+  tradeResources,
+  recruitHero,
+  upgradeTownHall,
+  setAutoTrade,
+  reorderStack,
+  captureSettlement,
+} from "../io/commands";
+import type { EndTurnResult } from "../io/commands";
+import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource } from "@heroes/contracts";
 import type { TurnControllerHooks } from "../state/turnController";
 import type { BattleResult } from "@heroes/engine";
 import { pickAiMove as pickAiMoveBrain } from "../ai/aiBrain";
@@ -51,12 +63,34 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await spendMovement(name, {
           actor: hero.ownerId,
           heroId,
-          fromTile: { q: hero.q, r: hero.r },
+          fromTile: { q: hero.previousQ ?? hero.q, r: hero.previousR ?? hero.r },
           toTile,
           cost: previousCost > 0 ? previousCost : 1,
         });
       } catch (e) {
         console.warn("[turnHooks] spendMovement failed:", e);
+      }
+    },
+    onHumanMove: async (
+      state: GameState,
+      heroId: HeroId,
+      toTile: Axial,
+      cost: number,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      const hero = state.heroes[heroId];
+      if (!hero) return;
+      try {
+        await spendMovement(name, {
+          actor: hero.ownerId,
+          heroId,
+          fromTile: { q: hero.previousQ ?? hero.q, r: hero.previousR ?? hero.r },
+          toTile,
+          cost,
+        });
+      } catch (e) {
+        console.warn("[turnHooks] onHumanMove/spendMovement failed:", e);
       }
     },
     onBattleResolved: async (
@@ -175,6 +209,20 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await captureSettlement(name, { actor, heroId, settlementId });
       } catch (e) {
         console.warn("[turnHooks] captureSettlement failed:", e);
+      }
+    },
+    onTransferGold: async (
+      actor: number,
+      heroId: HeroId,
+      settlementId: SettlementId,
+      direction: TransferDirection,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await transferGold(name, { actor, heroId, settlementId, direction });
+      } catch (e) {
+        console.warn("[turnHooks] transferGold failed:", e);
       }
     },
     pickAiMove: (state: GameState, heroId: HeroId) => {
