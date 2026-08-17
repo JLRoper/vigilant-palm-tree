@@ -94,6 +94,28 @@ module.exports = {
       },
       to: { path: "^server/persistence/repositories/" },
     },
+    {
+      name: "paint2d-cannot-import-asset-descriptors",
+      severity: "error",
+      comment:
+        "paint2d/ must stay pure-importable from node:test (no Vite ?url asset-loader coupling). The forbidden set is the same one revision note 4 nailed: every file known to transitively pull in src/render/assetDescriptors.ts's ~100 ?url PNG imports, or src/render/sprites.ts (which imports the *Key helpers from assetDescriptors), or the cityBuildingDraw.ts barrel (which imports buildingKey). Settings state is a value-import singleton with a cleanup lifecycle, so its value form is also forbidden. The default-deps builder at src/render/paint2dDefaults.ts and the skybox module at src/render/skybox.ts are the *only* files in the painter project allowed to touch these -- they live outside paint2d/.",
+      from: { path: "^src/render/scene/paint2d/" },
+      to: {
+        path: "^src/render/(assetDescriptors|assets|sprites|cityRenderer|cityBuildingDraw|cityBuildingDraw/spots)\\.(ts|$)",
+        dependencyTypesNot: ["type-only"],
+      },
+    },
+    {
+      name: "paint2d-cannot-value-import-state",
+      severity: "error",
+      comment:
+        "paint2d/ must not read the state/settings singleton directly -- settings() has a subscribe cleanup lifecycle, and paint2d/ should depend on injected getters instead. Type-only imports of types from src/state/settings.ts are fine (HorseVariant, ResourceStyle, etc.).",
+      from: { path: "^src/render/scene/paint2d/" },
+      to: {
+        path: "^src/state/settings\\.(ts|$)",
+        dependencyTypesNot: ["type-only"],
+      },
+    },
   ],
   options: {
     doNotFollow: { path: "node_modules" },
@@ -101,7 +123,6 @@ module.exports = {
     enhancedResolveOptions: {
       exportsFields: ["exports"],
       conditionNames: ["import", "require", "node", "default", "types"],
-      extensions: [".ts", ".d.ts"],
       mainFields: ["module", "main", "types", "typings"],
     },
     skipAnalysisNotInRules: true,
