@@ -106,6 +106,7 @@ test("MoveHero succeeds, persists the new position, and emits HeroMoved", async 
     gameName: "test-game",
     actor: 0,
     heroId: "h0",
+    fromTile: { q: 2, r: 2 },
     toTile: { q: 3, r: 2 },
     cost: 1,
   };
@@ -128,6 +129,7 @@ test("MoveHero rejects a move onto a tile already occupied by another hero", asy
     gameName: "test-game",
     actor: 0,
     heroId: "h0",
+    fromTile: { q: 2, r: 2 },
     toTile: { q: 3, r: 2 },
     cost: 1,
   };
@@ -145,12 +147,49 @@ test("MoveHero rejects a move by a hero that is currently chartering", async () 
     gameName: "test-game",
     actor: 0,
     heroId: "h0",
+    fromTile: { q: 2, r: 2 },
     toTile: { q: 3, r: 2 },
     cost: 1,
   };
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "is_chartering");
+  assert.equal(result.events.length, 0);
+});
+
+test("MoveHero rejects a stale fromTile that doesn't match the hero's server-side position", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [makeSettlement("s0", 0, 2, 2)]);
+  const { deps } = makeDeps(row);
+  const command: Command = {
+    kind: "MoveHero",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 5, r: 5 },
+    toTile: { q: 3, r: 2 },
+    cost: 1,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "hero_not_at_fromTile");
+  assert.equal(result.events.length, 0);
+});
+
+test("MoveHero rejects a command whose actor is not the active player", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [makeSettlement("s0", 0, 2, 2)], { active_player_id: 1 });
+  const { deps } = makeDeps(row);
+  const command: Command = {
+    kind: "MoveHero",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 2, r: 2 },
+    toTile: { q: 3, r: 2 },
+    cost: 1,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "forbidden_not_your_turn");
   assert.equal(result.events.length, 0);
 });
 

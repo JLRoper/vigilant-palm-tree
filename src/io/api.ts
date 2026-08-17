@@ -220,6 +220,7 @@ export async function endTurn(
 export async function spendMovement(
   name: string,
   payload: {
+    actor: number;
     heroId: string;
     fromTile: Axial;
     toTile: Axial;
@@ -227,14 +228,15 @@ export async function spendMovement(
   }
 ): Promise<HeroState> {
   const res = await fetchWithTimeout(
-    `${BASE}/games/${encodeURIComponent(name)}`,
+    `${BASE}/games/${encodeURIComponent(name)}/commands`,
     {
-      method: "PATCH",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "spend_movement", ...payload }),
+      body: JSON.stringify({ kind: "MoveHero", ...payload }),
     }
   );
-  return json<HeroState>(res);
+  const result = await json<{ hero: HeroState }>(res);
+  return result.hero;
 }
 
 export async function resolveBattle(
@@ -260,17 +262,18 @@ export type TransferGoldResult = {
 export async function transferGold(
   name: string,
   payload: {
+    actor: number;
     heroId: string;
     settlementId: string;
     direction: "deposit" | "withdraw";
   }
 ): Promise<TransferGoldResult> {
   const res = await fetchWithTimeout(
-    `${BASE}/games/${encodeURIComponent(name)}/transfer`,
+    `${BASE}/games/${encodeURIComponent(name)}/commands`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ kind: "TransferGold", ...payload }),
     }
   );
   return json<TransferGoldResult>(res);

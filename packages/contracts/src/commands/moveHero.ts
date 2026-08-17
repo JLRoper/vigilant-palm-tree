@@ -11,6 +11,13 @@ export interface MoveHeroCommand {
   gameName: string;
   actor: PlayerSeat;
   heroId: HeroId;
+  // Staleness guard: the client's believed current position. startMove
+  // itself doesn't check this (it just moves the hero from wherever the
+  // server thinks it is) -- the old spend_movement route rejected a move
+  // whose fromTile didn't match server state, protecting against a client
+  // computing cost/path from a position that's since changed underneath
+  // it (e.g. a concurrent move from another request).
+  fromTile: Axial;
   toTile: Axial;
   cost: number;
   // Ordered list of every tile the hero passes through, matching
