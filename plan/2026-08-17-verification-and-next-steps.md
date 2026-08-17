@@ -14,6 +14,7 @@ The dev environment did not previously exist on this machine. Getting it running
 | `npm run build` | ✅ clean |
 | `npm run lint:deps` | ✅ 311 modules / 888 deps, 0 violations |
 | `npm run test:all` | ✅ 148/148 unit tests; smoke suite "ALL TESTS PASSED"; multiplayer smoke OK; cityView suite all green |
+| `npm run validate-assets` | ✅ `tools/sprites/validate-assets.mjs`: all 31 registered sprites present; asset validation passed |
 | Live browser render check | ✅ created a game, sampled canvas pixel data directly (screenshots unavailable in this session — used `getImageData`): adventure map renders with 526 distinct sampled colors in a coherent hex-terrain palette; Test Battle arena renders with 531 distinct colors. Zero console errors, zero failed network/asset requests (all 200 OK) across both screens. |
 
 **Why this matters:** the consolidated track map claims the Phase 5.B scene-builder work (`battleScene.ts`, `cityScene.ts`, `entityMirror.ts`, `paint2d/`'s dispatcher shell) is purely additive/unwired and carries "zero regression risk." That was previously only supported by the doc's own narrative and a `grep` spot-check of stub counts. It's now directly confirmed: the live render path renders correctly with no errors, exactly as expected if that new code genuinely isn't wired into anything yet.
