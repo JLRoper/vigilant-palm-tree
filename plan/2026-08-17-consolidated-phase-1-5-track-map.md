@@ -1,10 +1,11 @@
 # Consolidated Phase Map (1–5) — Two-Track Parallel Development
 
 *Authored: 2026-08-17*
-*Consolidates: `plan/2026-08-15-parallel-dev-split.md`, `plan/2026-08-16-parallel-dev-phases-3-5.md`, `plan/2026-08-16-phase-3-parallel-dev-plan.md`, `plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md`, `sessionTracking/2026-08-16.md`, PRs #81/#83/#84/#86/#87/#91/#92/#93.*
+*Consolidates: `plan/2026-08-15-parallel-dev-split.md`, `plan/2026-08-16-parallel-dev-phases-3-5.md`, `plan/2026-08-16-phase-3-parallel-dev-plan.md`, `plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md`, `sessionTracking/2026-08-16.md`, PRs #81/#83/#84/#86/#87/#91/#92/#93/#95.*
 *Status legend: ✅ done & merged · 🟡 in progress / open PR · ⬜ not started · 🚫 blocked / deferred*
 *Revision note (2026-08-17, post-#94): syncs in PR #93 (Phase 4 Track B — granular entity tables, repos, JSONB backfill). PR #94's own doc-sync branch was cut before #93 merged, so that revision of this file missed it. This revision also corrects two rows in §5.2 that had misattributed `heroRepo.ts`/`settlementRepo.ts` to PR #84 — that PR's own commit message says it explicitly did not add them.*
 *Revision note 2 (2026-08-17, same day): reflects Track 4.A's `hydrate.ts` + `commandHandler.ts` dual-write work, committed as `20704d4`/`3aad7d3` on branch `phase4/track-a-hydrate-dualwrite`, pushed, open as **PR #95**. Marked 🟡, not ✅, until it's merged (per this doc's own legend, "✅ done & merged"); see §6.1.*
+*Revision note 3 (2026-08-17, from worktree `20260817_0211_phase5trackA`): **PR #95 merged** (commit `2554711`, this worktree's `HEAD`/`main`/`github main`) — flips every 🟡-pending-#95 row below to ✅; Phase 4 is now fully done and Sync Point 2 (§6.3) is fully met. PR #95 merged with 5 Copilot review comments that were never addressed (posted ~2 min after merge, no follow-up commit) — all 5 fixed in this worktree: `hydrate.ts`'s fallback logging is now rate-limited to once per game per process, `hydrateFromRepos()` no longer queries `charterRepo` on a path that's about to discard it and fall back to JSONB, `hydrate.ts`/`commandHandler.ts` comment blocks trimmed per this repo's own AGENTS.md rule against unrequested comments, and `test/persistence/hydrate.test.ts` now uses `node:test`'s `t.mock.method` instead of a global `console.info` monkey-patch. Phase 5 Track A also partially started in this worktree (§7.1): `src/io/commands.ts` created (consolidates the client's command-POST functions out of `src/io/api.ts`) and the human-initiated `MoveHero`/`TransferGold` round-trip gap (R4, §10) fully closed via two new `TurnControllerHooks` (`onHumanMove`, `onTransferGold`). `multiplayerSync.ts`'s event-cursor rewrite, `GameSessionManager.ts` cursor init, and deleting `SessionManager.ts`'s full-state save push are deliberately still deferred (see §7.1). Verified: `npm run build`, `npm run lint:deps`, `npm run test:all` (76/76 unit + smoke + multiplayer + cityView) all green.*
 
 ---
 
@@ -16,17 +17,17 @@ Phase 2  Pure deterministic engine extraction           [✅ DONE]
 Phase 3  Server Command Loop & Repositories             [✅ DONE]
    ├── 3.A  Command bus, EngineCtx, command handlers    [✅ Dev A — PRs #86, #87, #91, #92 merged]
    └── 3.B  Typed repositories & persistence layer      [🟡 Dev B — PR #84 + PR #90 (gameRepo write methods) merged; tile/charter repos deferred to Phase 4]
-Phase 4  Database De-blobbing & Dual-Write              [🟡 IN PROGRESS]
-   ├── 4.A  Dual-write integration & state hydration     [🟡 Dev A — implemented + committed, **open as PR #95**]
+Phase 4  Database De-blobbing & Dual-Write              [✅ DONE]
+   ├── 4.A  Dual-write integration & state hydration     [✅ Dev A — PR #95 merged]
    └── 4.B  SQL migrations & historical-game backfill    [✅ Dev B — PR #93 merged]
-Phase 5  Client Event Sync & Scene Renderer Seam        [⬜ NOT STARTED]
-   ├── 5.A  Client command dispatcher & event-cursor sync
-   └── 5.B  Scene graph builder & entity-mirror animation
+Phase 5  Client Event Sync & Scene Renderer Seam        [🟡 IN PROGRESS]
+   ├── 5.A  Client command dispatcher & event-cursor sync [🟡 Dev A — commands.ts created + R4 closed; cursor sync/manualSave deletion still pending]
+   └── 5.B  Scene graph builder & entity-mirror animation [⬜]
 ```
 
 Sync points between phases:
 - **Sync 1 (Phase 3 → 4):** Track 3.A's `commandHandler.ts` and Track 3.B's repos both stable; `EngineEvent` discriminated union in `@heroes/contracts/events/`.
-- **Sync 2 (Phase 4 → 5):** Normalized tables populated; `hydrateGameState` round-trip-equivalent to legacy JSONB; `event_seq` monotonic cursor available client-side.
+- **Sync 2 (Phase 4 → 5):** Normalized tables populated; `hydrateGameState` round-trip-equivalent to legacy JSONB; `event_seq` monotonic cursor available client-side. ✅ **fully met** (PR #95 merged — see §6.3).
 
 ---
 
@@ -125,7 +126,7 @@ Conflict surface is near zero by design: Track A never imports from `server/pers
 - `StartCharter` / `AdvanceCharter` — was blocked on the `activeCharters` schema gap (no DB column existed). **Schema gap closed 2026-08-17 by Phase 4 Track B, PR #93** (`charters` table + `next_charter_id`/`next_settlement_id` counters); **read-side wired the same day by Track 4.A's `hydrate.ts` work** (committed `20704d4`, §6.1 — `GameState.activeCharters` now reads from the real table on the granular path). Still blocked: nothing in the command-bus path *writes* a charter yet (no command allocates a `CharterId` / calls `charterRepo.upsertMany`) — that's the one remaining port, not a schema or read-plumbing gap anymore. 🚫
 - `BuildStructure` — blocked on missing `@heroes/engine` validate+apply function (Stage 6 deferred item). 🚫
 - Lobby claim / start — session/social layer, lowest priority; not game-rules. 🚫
-- Human-initiated `MoveHero`/`TransferGold` server round-trip — pre-existing gap (only AI moves + EndTurn are wired client-side today; surfaced in PR #91 description). 🟡 follow-up needed.
+- Human-initiated `MoveHero`/`TransferGold` server round-trip — pre-existing gap (only AI moves + EndTurn were wired client-side; surfaced in PR #91 description). ✅ **closed** (worktree `20260817_0211_phase5trackA`, Phase 5.A — see §10 R4).
 
 ### 5.2 Track 3.B — Persistence Repositories & Test Harness (Dev B) `[🟡 PARTIAL]`
 
@@ -159,20 +160,20 @@ Conflict surface is near zero by design: Track A never imports from `server/pers
 
 *Deep dive: `plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md` (current-state audit, DDL, pre-agreed repo interface, week-by-week order, risks — same structure as the Phase 3 deep dive).*
 
-### 6.1 Track 4.A — Dual-Write Integration & State Hydration (Dev A) `[🟡 IMPLEMENTED — open as PR #95]`
+### 6.1 Track 4.A — Dual-Write Integration & State Hydration (Dev A) `[✅ DONE — PR #95 merged]`
 
-**2026-08-17 update:** every item below is implemented, committed (`20704d4`, `3aad7d3`), pushed, and open as **PR #95** (`phase4/track-a-hydrate-dualwrite` → `main`). Marked 🟡 rather than ✅ per this doc's own status legend ("✅ done & merged") until the PR merges. Design matches the deep-dive doc (granular-first read with per-game JSONB fallback in `hydrate.ts`; dual-write scoped to only the entities a command touched, same transaction as the existing JSONB write).
+**2026-08-17 update:** every item below shipped in **PR #95** (`phase4/track-a-hydrate-dualwrite` → `main`, commits `20704d4`/`3aad7d3`/`4b4789e`), now merged (`2554711`). Design matches the deep-dive doc (granular-first read with per-game JSONB fallback in `hydrate.ts`; dual-write scoped to only the entities a command touched, same transaction as the existing JSONB write). PR #95 merged with 5 unaddressed Copilot review comments (posted after the merge went through); all 5 are fixed in worktree `20260817_0211_phase5trackA`: fallback logging rate-limited to once per game per process, the doomed-to-fall-back path no longer queries `charterRepo`, several comment blocks trimmed per AGENTS.md, and `hydrate.test.ts`'s global `console.info` patch replaced with `t.mock.method`.
 
 | Item | Status |
 | :--- | :--- |
-| `server/persistence/hydrate.ts` (reconstructs `GameState` from `gameRepo` + `heroRepo` + `settlementRepo` + `charterRepo` + `tileRepo`) | 🟡 implemented, committed (`20704d4`) — `hydrateFromRepos()` + a `hydrateGame()` convenience wrapper. Deliberately does **not** read `tileRepo`: tiles are map-generation-time data, never part of `GameState`, so hydration has nothing to consume there. |
-| `commandHandler.ts` dual-write step (write to `games.state` JSONB AND normalized tables) | 🟡 implemented, committed (`20704d4`) — new `dualWriteEntities()` helper wired into all 10 currently-ported commands (MoveHero, TransferGold, EndTurn, TradeResources, ResolveBattle, RecruitHero, UpgradeTownHall, SetAutoTrade, ReorderStack, CaptureSettlement). Scoped per the plan via a reference-equality check against pre-command state (decides whether `heroRepo`/`settlementRepo` need calling at all) rather than a per-field diff — necessary because `upsertMany` is a full sync, so calling it with a filtered subset would wrongly delete untouched rows. |
-| Read-path cutover with fallback: if granular rows missing, fall back to legacy JSONB; log a telemetry marker | 🟡 implemented, committed (`20704d4`) — per-game fallback keyed on "**either** `heroes` or `settlements` granular table empty for this game" (OR, not AND — deliberately defensive against a hypothetically-partial dual-write leaving only one side populated, even though that shouldn't be reachable given both are upserted in the same DB transaction as the JSONB write; see `hydrate.ts`'s own comment). `console.info`-based `[hydrate]`-tagged telemetry marker fires on fallback. |
-| Close `activeCharters` schema gap (introduce `charters` table; backfill from JSONB) | ✅ **schema done in Track 4.B, PR #93.** Read-side now also wired 🟡 (committed `20704d4`, this branch) — `hydrate.ts`'s granular path reads real rows via `charterRepo`. Write-side (`charterRepo.upsertMany`) still deliberately unwired anywhere: nothing produces a non-empty `activeCharters` yet since `StartCharter`/`AdvanceCharter` remain unported (see §5.1). |
-| Close the pre-existing human-initiated `MoveHero`/`TransferGold` round-trip gap surfaced in PR #91 | ⬜ untouched by this branch — client-side gap, still a Phase 5.A item (R4). Independently reproduced live during this branch's manual testing; see §10 R4. |
-| Round-trip equivalence tests: hydrate identical `GameState` from both paths | 🟡 implemented, committed (`20704d4`), at two layers — `test/server/commandHandler.test.ts` (mocked repos: asserts which repo(s) fire per command and with what data, plus that granular rows override/fall back to JSONB correctly) and new `test/persistence/hydrate.test.ts` (real Postgres via `pgTestTx.withRollback`: JSONB-fallback + telemetry-log assertion, granular-read equivalence, `activeCharters` by-design divergence between the two paths, and a "granular table partially populated" case that intentionally stays on the JSONB path per the OR-based fallback above). |
+| `server/persistence/hydrate.ts` (reconstructs `GameState` from `gameRepo` + `heroRepo` + `settlementRepo` + `charterRepo` + `tileRepo`) | ✅ merged (PR #95) — `hydrateFromRepos()` + a `hydrateGame()` convenience wrapper. Deliberately does **not** read `tileRepo`: tiles are map-generation-time data, never part of `GameState`. Post-merge fix (this worktree): only queries `charterRepo` on the granular path, not before the fallback check. |
+| `commandHandler.ts` dual-write step (write to `games.state` JSONB AND normalized tables) | ✅ merged (PR #95) — `dualWriteEntities()` helper wired into all 10 currently-ported commands (MoveHero, TransferGold, EndTurn, TradeResources, ResolveBattle, RecruitHero, UpgradeTownHall, SetAutoTrade, ReorderStack, CaptureSettlement). Scoped via a reference-equality check against pre-command state (decides whether `heroRepo`/`settlementRepo` need calling at all) rather than a per-field diff — necessary because `upsertMany` is a full sync, so calling it with a filtered subset would wrongly delete untouched rows. |
+| Read-path cutover with fallback: if granular rows missing, fall back to legacy JSONB; log a telemetry marker | ✅ merged (PR #95) — per-game fallback keyed on "**either** `heroes` or `settlements` granular table empty for this game" (OR, not AND — defensive against a hypothetically-partial dual-write, even though that shouldn't be reachable given both are upserted in the same DB transaction as the JSONB write). `console.info`-based `[hydrate]`-tagged telemetry marker fires on fallback, rate-limited to once per game per process (post-merge fix, this worktree). |
+| Close `activeCharters` schema gap (introduce `charters` table; backfill from JSONB) | ✅ schema done in Track 4.B (PR #93); read-side wired in PR #95 — `hydrate.ts`'s granular path reads real rows via `charterRepo`. Write-side (`charterRepo.upsertMany`) still deliberately unwired: nothing produces a non-empty `activeCharters` yet since `StartCharter`/`AdvanceCharter` remain unported (see §5.1). |
+| Close the pre-existing human-initiated `MoveHero`/`TransferGold` round-trip gap surfaced in PR #91 | ⬜ untouched by PR #95 itself (confirmed unrelated to and unaffected by the dual-write/read-cutover work) — ✅ **closed separately**, in Phase 5.A (worktree `20260817_0211_phase5trackA`); see §10 R4. |
+| Round-trip equivalence tests: hydrate identical `GameState` from both paths | ✅ merged (PR #95), at two layers — `test/server/commandHandler.test.ts` (mocked repos) and `test/persistence/hydrate.test.ts` (real Postgres via `pgTestTx.withRollback`). Post-merge fix (this worktree): the fallback test's `console.info` capture now uses `t.mock.method` instead of a manual global monkey-patch. |
 
-**Exit criteria:** commands persist to normalized tables; server hydrates byte-identical `GameState` from normalized tables as it did from JSONB. — **met and verified**: `npm run build`, `npm run lint:deps`, and `npm run test:all` (smoke + multiplayer + cityView + `test:unit` — 76/76, up from Phase 3's 23) all pass against this branch's diff; additionally live-verified against the real dev server + Postgres (`POST /commands` end-to-end, granular tables confirmed populated). Commit/push/PR is the remaining step (see §11, §12).
+**Exit criteria:** commands persist to normalized tables; server hydrates byte-identical `GameState` from normalized tables as it did from JSONB. — **met, verified, and merged**: `npm run build`, `npm run lint:deps`, and `npm run test:all` (smoke + multiplayer + cityView + `test:unit` 76/76) all pass, including after this worktree's post-merge Copilot-comment fixes.
 
 ### 6.2 Track 4.B — SQL Migrations & Historical Backfill (Dev B) `[✅ Week 1–2 DONE]`
 
@@ -188,11 +189,11 @@ Conflict surface is near zero by design: Track A never imports from `server/pers
 | Idempotency: rerunning migration is a no-op | ✅ (dedicated test: "backfillGame is idempotent: running it twice converges to the same rows") | #93 |
 | Backfill 100% of sample games without data loss | ✅ verified against representative fixtures (varied stacks, in-flight upgrades, a partial `resourceRates` incl. a `gold` rate) via round-trip deep-equality. No real production historical dataset has been run through it yet — that's an ops step whenever real data needs it, not a code gap. | #93 |
 
-**Exit criteria:** migration runs idempotently; 100% of sampled historical games round-trip without loss — **met for Track B's scope.** The other half of Phase 4's overall exit criteria (this section's intro: "commands persist to normalized tables; server hydrates byte-identical `GameState`...") is Track 4.A's, still ⬜.
+**Exit criteria:** migration runs idempotently; 100% of sampled historical games round-trip without loss — **met for Track B's scope.** The other half of Phase 4's overall exit criteria (this section's intro: "commands persist to normalized tables; server hydrates byte-identical `GameState`...") is Track 4.A's — ✅ also met (PR #95 merged, see §6.1). **Phase 4 is fully done.**
 
 ### 6.3 Sync Point 2 (Phase 4 → 5)
 
-`hydrateGameState` round-trip-equivalent to legacy JSONB (🟡 implemented, committed, open as **PR #95** — see §6.1); monotonic event cursor available client-side (✅ resolved — `game_events.id`, already `BIGSERIAL`, is the cursor per PR #93's `010_event_seq.sql`; no separate `event_seq` column was added); `charters` table exists (✅ PR #93).
+✅ **Fully met** (PR #95 merged): `hydrateGameState` round-trip-equivalent to legacy JSONB (✅ — see §6.1); monotonic event cursor available client-side (✅ — `game_events.id`, already `BIGSERIAL`, is the cursor per PR #93's `010_event_seq.sql`; no separate `event_seq` column was added); `charters` table exists (✅ PR #93).
 
 ---
 
@@ -200,17 +201,19 @@ Conflict surface is near zero by design: Track A never imports from `server/pers
 
 **Goal:** Replace full-state client pushing (`POST /api/games/:id/save`) with command emission + event-cursor sync. Decouple canvas rendering from game state via pure scene builders.
 
-### 7.1 Track 5.A — Client Command Dispatcher & Event-Cursor Sync (Dev A)
+### 7.1 Track 5.A — Client Command Dispatcher & Event-Cursor Sync (Dev A) `[🟡 IN PROGRESS]`
+
+**2026-08-17 update (worktree `20260817_0211_phase5trackA`):** started after merging `main` (PR #95) in. Scoped deliberately: the client-command-relocation and R4-closing items below are done; the event-cursor sync rewrite is not, because it has two unresolved dependencies (see the ⬜ rows) that need their own decision before that work starts.
 
 | Item | Status |
 | :--- | :--- |
-| `src/io/commands.ts` (client command dispatcher — replaces `src/managers/GameActions.ts`) | ⬜ |
-| `src/io/multiplayerSync.ts` polls `GET /api/games/:id/events?after=<seq>` OR receives SSE; applies events through `@heroes/engine` | ⬜ |
-| `src/managers/GameSessionManager.ts` new/load lifecycle initializes event cursor | ⬜ |
-| Delete full-state save push from `SessionManager.ts` | ⬜ |
-| All client actions emit commands against `POST /commands` (close the pre-existing human-initiated MoveHero/TransferGold gap + ensure all 9 ports have client wiring) | ⬜ |
+| `src/io/commands.ts` (client command dispatcher) | 🟡 **partial.** Created — consolidates the command-POST functions (`endTurn`, `spendMovement`, `resolveBattle`, `transferGold`, `tradeResources`, `recruitHero`, `upgradeTownHall`, `setAutoTrade`, `reorderStack`, `captureSettlement`) that used to live inline in `src/io/api.ts`, which now holds only plain REST calls. Does **not** replace `src/managers/GameActions.ts` — that file still does battle-flow/end-turn UI orchestration (`syncFromController`, `maybeAutoResolveBattle`, `startBattleFlow`, `handleEndTurn`), which is a separate concern from the raw command-POST relocation and was left untouched. |
+| `src/io/multiplayerSync.ts` polls `GET /api/games/:id/events?after=<seq>` OR receives SSE; applies events through `@heroes/engine` | ⬜ **not started.** The file already exists today, but as a full-state poller (`api.getGame()` → `hydrateGameState()`) predating this design — this item is a rewrite, not a from-scratch build. Deferred: `server/routes.ts`'s `GET /games/:name/events` has no `?after=<seq>` cursor filtering yet (returns every event), and the ownership matrix (§8) doesn't assign that server-side slice to a track. |
+| `src/managers/GameSessionManager.ts` new/load lifecycle initializes event cursor | ⬜ **not started**, blocked on the multiplayerSync.ts rewrite above — `loadGame()` currently wires up the old full-state poller (`getMultiplayerSync().start()`) instead. |
+| Delete full-state save push from `SessionManager.ts` | ⬜ **not started, deliberately deferred.** `SessionManager.manualSave()` still `PATCH`es full state (`hero_q/hero_r/turn/gold/enemy_positions`). Deferred alongside the two rows above (same "how does the client know state is persisted" concern), and because `test/smoke.ts` currently exercises the Save button + asserts the HUD "Last saved" text and the server row's `updated_at` advancing — removing this needs either a replacement persistence-confirmation mechanism or a deliberate test update, not just a deletion. |
+| All client actions emit commands against `POST /commands` (close the pre-existing human-initiated MoveHero/TransferGold gap + ensure all 10 ports have client wiring) | ✅ **done.** Closed the R4 gap: added `onHumanMove` (fired from `TurnController.requestMove()`) and `onTransferGold` (fired from `TurnController.transferGold()`) to `TurnControllerHooks`, implemented in `src/game/turnHooks.ts` using the relocated `spendMovement`/`transferGold` command functions — mirrors the existing fire-and-forget pattern the other 6 Week-3+ actions already used. All 10 ported commands (EndTurn, MoveHero, ResolveBattle, TransferGold, TradeResources, RecruitHero, UpgradeTownHall, SetAutoTrade, ReorderStack, CaptureSettlement) now have client wiring for both AI- and human-initiated paths. Verified: `npm run build`, `npm run lint:deps`, `npm run test:all` all green. |
 
-**Exit criteria:** client actions execute exclusively as commands; multiplayer state syncs exclusively via delta events.
+**Exit criteria:** client actions execute exclusively as commands (✅ met); multiplayer state syncs exclusively via delta events (⬜ not met — still full-state polling via `multiplayerSync.ts`).
 
 ### 7.2 Track 5.B — Scene Graph Builder & Entity Mirror (Dev B)
 
@@ -275,7 +278,7 @@ Additional Phase 5 gate: Canvas-render screenshot diffs vs. previous render path
 | R1 | Legacy-patch fallback becoming the "everything not yet ported" catch-all | P3 | Port order in `2026-08-16-phase-3-parallel-dev-plan.md` § "Port order Week 3+" — track all 12 candidates, not just the easy wins. Already 7/12 done in PR #91. |
 | R2 | `EndTurn` port silently changes multiplayer behavior | P3 | Side-by-side path comparison against recorded game histories before deleting old code (drift-safe). Done in PR #87. |
 | R3 | `EngineCtx` shape churn | P3 | `EngineCtx = { rng, catalog }` only (no actor, no clock); `actor` on each command. Fixed per `2026-08-15_OVERVIEW.md`. |
-| R4 | Human-initiated `MoveHero`/`TransferGold` have no server round-trip | P3/4/5 | Pre-existing gap, surfaced in PR #91. **Needs to be closed in Phase 5.A** when `src/io/commands.ts` replaces `GameActions.ts`. Independently reproduced live 2026-08-17 during Track 4.A manual testing (user-observed symptom: hero snaps back to its last-persisted position on every `EndTurn`, since `turnHooks.ts`'s `mergeFromEndTurn()` unconditionally overwrites local `heroes` state with the server's response — traced to `src/state/turnController.ts:115`'s `requestMove()` never calling the server for human moves). Confirmed unrelated to and unaffected by Track 4.A's dual-write/read-cutover work (both JSONB and the granular tables reflect the same server-side position either way); left for Phase 5.A per this doc's existing plan. |
+| R4 | Human-initiated `MoveHero`/`TransferGold` have no server round-trip | P3/4/5 | ✅ **Closed** (worktree `20260817_0211_phase5trackA`, Phase 5.A). Pre-existing gap, surfaced in PR #91, independently reproduced live 2026-08-17 during Track 4.A manual testing (symptom: hero snaps back to its last-persisted position on every `EndTurn`, traced to `src/state/turnController.ts`'s `requestMove()` never calling the server for human moves). Confirmed unrelated to and unaffected by Track 4.A's dual-write/read-cutover work. Fixed by adding `onHumanMove`/`onTransferGold` hooks to `TurnControllerHooks` (`src/state/turnController.ts`, `src/game/turnHooks.ts`) — not via a `GameActions.ts` replacement as originally sketched in §7.1/§8; that file's battle-flow/end-turn orchestration role turned out to be a separate concern from the raw command-POST relocation. |
 | R5 | `activeCharters` schema gap | P4 | ✅ **Schema closed 2026-08-17 (PR #93):** `charters` table + `next_charter_id`/`next_settlement_id` counters exist and are migration-backfill-covered. Read-side also wired 🟡 (2026-08-17, committed as `20704d4` on `phase4/track-a-hydrate-dualwrite`) — `hydrate.ts` now populates `activeCharters` from the real table. `StartCharter`/`AdvanceCharter` command ports themselves remain deferred — the only thing left blocking them is the port itself (no command writes a charter yet), not schema or read plumbing. |
 | R6 | `BuildStructure` blocked on missing engine validate+apply | ∞ | Stage 6 prerequisite. Track whenever next engine module is added. |
 | R7 | Multi-DB portability (Oracle/MySQL) parked | ∞ | Per multi-DB `.fable.md` appendix decision; revisit when a second DB vendor container actually exists. |
@@ -285,16 +288,15 @@ Additional Phase 5 gate: Canvas-render screenshot diffs vs. previous render path
 
 ## 11. Open PRs Awaiting Merge (as of 2026-08-17)
 
-- *None open.* Merge order on 2026-08-17 (all EDT): **#92** (01:21, Phase 3 Track A — `#89` closure) → **#91** (01:30, Phase 3 Track A Week 3 ports) → **#93** (01:53, Phase 4 Track B — granular entity tables/repos/backfill) → **#94** (01:58, docs-only sync of this file; its branch was cut before #93 merged, so it missed #93 — corrected in this revision).
-- **PR #95** (open): `phase4/track-a-hydrate-dualwrite` → `main`. Implements Track 4.A's `hydrate.ts` + `commandHandler.ts` dual-write step (commits `20704d4`, `3aad7d3`). See §6.1.
+- *None open.* Merge order on 2026-08-17 (all EDT): **#92** (01:21, Phase 3 Track A — `#89` closure) → **#91** (01:30, Phase 3 Track A Week 3 ports) → **#93** (01:53, Phase 4 Track B — granular entity tables/repos/backfill) → **#94** (01:58, docs-only sync of this file; its branch was cut before #93 merged, so it missed #93 — corrected in a later revision) → **#95** (02:53, Phase 4 Track A — `hydrate.ts` + `commandHandler.ts` dual-write step; see §6.1). **Phase 4 is now fully done.**
 
 ---
 
 ## 12. What's Next (Immediate)
 
-1. **Phase 4.A review & merge** — `hydrate.ts` + `commandHandler.ts` dual-write step are implemented, committed, pushed, and open as **PR #95** (see §6.1). Full verification gate (§9) already green on these commits. Next: review + merge. The still-open #89 follow-up (unit-level regression assertions in `commandHandler.test.ts`) has **not** been absorbed by this branch — still a separate follow-up.
-2. **`StartCharter`/`AdvanceCharter` command ports** — schema (Track 4.B, PR #93) and the hydration read-side (Track 4.A, this branch) are both in place; only the write-side command port itself is left (see §5.1, §10 R5).
-3. **Phase 5.A kickoff** — `src/io/commands.ts` dispatcher. Should absorb the human-initiated MoveHero/TransferGold round-trip gap (R4) as its first deliverable.
+1. ~~**Phase 4.A review & merge**~~ — done; PR #95 merged (§6.1, §11). The still-open #89 follow-up (unit-level regression assertions in `commandHandler.test.ts`) has **not** been absorbed by this branch — still a separate follow-up.
+2. **`StartCharter`/`AdvanceCharter` command ports** — schema (Track 4.B, PR #93) and the hydration read-side (Track 4.A, PR #95) are both in place; only the write-side command port itself is left (see §5.1, §10 R5).
+3. **Phase 5.A continuation** — `src/io/commands.ts` exists and R4 is closed (§7.1). Remaining: decide who owns adding `?after=<seq>` cursor support to the events endpoint (or an SSE alternative) — not currently assigned in the ownership matrix (§8) — then rewrite `multiplayerSync.ts` against it, wire `GameSessionManager.ts`'s cursor init, and either replace or deliberately retire `SessionManager.manualSave()`'s full-state push (currently still exercised by `test/smoke.ts`'s Save-button assertion).
 
 ---
 
