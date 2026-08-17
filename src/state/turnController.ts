@@ -35,6 +35,19 @@ import type { BattleResult } from "@heroes/engine";
 export interface TurnControllerHooks {
   onHumanTurnEnd(state: GameState): Promise<GameState>;
   onAiMove(state: GameState, heroId: HeroId, toTile: { q: number; r: number }): Promise<void>;
+  // Phase 5 Track A (plan/2026-08-17-consolidated-phase-1-5-track-map.md
+  // §7.1, R4): the human-move counterpart to onAiMove above -- until this
+  // was added, a human's own requestMove() never round-tripped to the
+  // server at all (only AI moves, via onAiMove, did). Fired-and-forgotten
+  // the same way the six Week-3+ hooks below already are: the local
+  // @heroes/engine reducer already ran and this.state is already
+  // updated by the time this is called.
+  onHumanMove(
+    state: GameState,
+    heroId: HeroId,
+    toTile: { q: number; r: number },
+    cost: number,
+  ): Promise<void>;
   onBattleResolved(state: GameState): Promise<{ state: GameState; battle: BattleResult | null }>;
   pickAiMove(
     state: GameState,
@@ -72,6 +85,15 @@ export interface TurnControllerHooks {
   onSetAutoTrade(actor: number, settlementId: SettlementId, autoTrade: boolean): Promise<void>;
   onReorderStack(actor: number, heroId: HeroId, fromIdx: number, toIdx: number): Promise<void>;
   onCaptureSettlement(actor: number, heroId: HeroId, settlementId: SettlementId): Promise<void>;
+  // Phase 5 Track A (R4): transferGold() below had no hook at all before
+  // this -- not even a fire-and-forget stub like its five siblings above
+  // -- so human-initiated gold transfers never persisted server-side.
+  onTransferGold(
+    actor: number,
+    heroId: HeroId,
+    settlementId: SettlementId,
+    direction: TransferDirection,
+  ): Promise<void>;
 }
 
 export class TurnController {
@@ -132,6 +154,9 @@ export class TurnController {
     if (defenderId) {
       this.enterBattle(heroId, defenderId);
     }
+    void this.hooks.onHumanMove(this.state, heroId, toTile, cost).catch((e) => {
+      console.warn("[turnController] onHumanMove failed:", e);
+    });
     return true;
   }
 
@@ -194,6 +219,10 @@ export class TurnController {
     this.hooks.logEvent({
       type: "transfer_gold",
       payload: { heroId, settlementId, direction, amount },
+    });
+    const actor = this.state.heroes[heroId]?.ownerId ?? this.state.activePlayerId;
+    void this.hooks.onTransferGold(actor, heroId, settlementId, direction).catch((e) => {
+      console.warn("[turnController] onTransferGold failed:", e);
     });
     return { ok: true, reason: "" };
   }

@@ -1,6 +1,18 @@
-import { api, endTurn, spendMovement, resolveBattle, tradeResources, recruitHero, upgradeTownHall, setAutoTrade, reorderStack, captureSettlement } from "../io/api";
-import type { EndTurnResult } from "../io/api";
-import type { GameState, HeroId, SettlementId, WarehouseResource } from "@heroes/contracts";
+import { api } from "../io/api";
+import {
+  endTurn,
+  spendMovement,
+  resolveBattle,
+  transferGold,
+  tradeResources,
+  recruitHero,
+  upgradeTownHall,
+  setAutoTrade,
+  reorderStack,
+  captureSettlement,
+} from "../io/commands";
+import type { EndTurnResult } from "../io/commands";
+import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource } from "@heroes/contracts";
 import type { TurnControllerHooks } from "../state/turnController";
 import type { BattleResult } from "@heroes/engine";
 import { pickAiMove as pickAiMoveBrain } from "../ai/aiBrain";
@@ -57,6 +69,33 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         });
       } catch (e) {
         console.warn("[turnHooks] spendMovement failed:", e);
+      }
+    },
+    // Phase 5 Track A (R4): closes the human-move round-trip gap. Mirrors
+    // onAiMove above -- state is already post-move by the time this
+    // fires -- but unlike onAiMove, turnController.ts's requestMove()
+    // already has `cost` in hand and passes it straight through instead
+    // of reconstructing it from a previousMovementRemaining diff.
+    onHumanMove: async (
+      state: GameState,
+      heroId: HeroId,
+      toTile: Axial,
+      cost: number,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      const hero = state.heroes[heroId];
+      if (!hero) return;
+      try {
+        await spendMovement(name, {
+          actor: hero.ownerId,
+          heroId,
+          fromTile: { q: hero.previousQ ?? hero.q, r: hero.previousR ?? hero.r },
+          toTile,
+          cost,
+        });
+      } catch (e) {
+        console.warn("[turnHooks] onHumanMove/spendMovement failed:", e);
       }
     },
     onBattleResolved: async (
@@ -175,6 +214,24 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await captureSettlement(name, { actor, heroId, settlementId });
       } catch (e) {
         console.warn("[turnHooks] captureSettlement failed:", e);
+      }
+    },
+    // Phase 5 Track A (R4): transferGold() (src/state/turnController.ts)
+    // had no hook at all before this -- not even a fire-and-forget stub
+    // like its siblings above -- so human-initiated gold transfers never
+    // persisted server-side.
+    onTransferGold: async (
+      actor: number,
+      heroId: HeroId,
+      settlementId: SettlementId,
+      direction: TransferDirection,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await transferGold(name, { actor, heroId, settlementId, direction });
+      } catch (e) {
+        console.warn("[turnHooks] transferGold failed:", e);
       }
     },
     pickAiMove: (state: GameState, heroId: HeroId) => {
