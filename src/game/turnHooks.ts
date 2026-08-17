@@ -10,6 +10,7 @@ import {
   setAutoTrade,
   reorderStack,
   captureSettlement,
+  CommandError,
   startCharter,
 } from "../io/commands";
 import type { EndTurnResult } from "../io/commands";
@@ -21,6 +22,23 @@ import type { GameMap } from "../map/gameMap";
 import type { Axial } from "../core/hex";
 import { getMultiplayerSync } from "../io/multiplayerSync";
 import { settings, type HorseVariant } from "../state/settings";
+import { bus } from "../core/eventBus";
+
+// #100: src/state/turnController.ts calls each of the eight
+// TurnControllerHooks methods below fire-and-forget (`void this.hooks.onXxx(
+// ...).catch(...)`) -- the local @heroes/engine reducer call has already run
+// and the player already sees the result rendered by the time any of these
+// resolve or reject. Previously a rejection only reached a console.warn here
+// (see this function's own header comment on turnController.ts:52-63), so a
+// server-side rollback "un-happened" on screen several seconds later, on the
+// next multiplayerSync poll, with no explanation. reportCommandFailure keeps
+// the console.warn (still useful in devtools) and additionally emits a
+// bus event so src/screens/shared/toast.ts can show the player something.
+function reportCommandFailure(action: string, e: unknown): void {
+  console.warn(`[turnHooks] ${action} failed:`, e);
+  const reason = e instanceof CommandError ? e.reason : e instanceof Error ? e.message : String(e);
+  bus.emit({ type: "command:rejected", action, reason });
+}
 
 export interface BuildTurnHooksOptions {
   gameName: () => string | null;
@@ -91,7 +109,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
           cost,
         });
       } catch (e) {
-        console.warn("[turnHooks] onHumanMove/spendMovement failed:", e);
+        reportCommandFailure("Move", e);
       }
     },
     onBattleResolved: async (
@@ -142,7 +160,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         await tradeResources(name, { actor, fromSettlementId, toSettlementId, resource, amount });
       } catch (e) {
-        console.warn("[turnHooks] tradeResources failed:", e);
+        reportCommandFailure("Trade resources", e);
       }
     },
     onRecruitHero: async (
@@ -156,7 +174,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         await recruitHero(name, { actor, heroName, settlementId, horseVariant });
       } catch (e) {
-        console.warn("[turnHooks] recruitHero failed:", e);
+        reportCommandFailure("Recruit hero", e);
       }
     },
     onUpgradeTownHall: async (
@@ -169,7 +187,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         await upgradeTownHall(name, { actor, settlementId, targetLevel });
       } catch (e) {
-        console.warn("[turnHooks] upgradeTownHall failed:", e);
+        reportCommandFailure("Upgrade Town Hall", e);
       }
     },
     onSetAutoTrade: async (
@@ -182,7 +200,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         await setAutoTrade(name, { actor, settlementId, autoTrade });
       } catch (e) {
-        console.warn("[turnHooks] setAutoTrade failed:", e);
+        reportCommandFailure("Set auto-trade", e);
       }
     },
     onReorderStack: async (
@@ -196,7 +214,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         await reorderStack(name, { actor, heroId, fromIdx, toIdx });
       } catch (e) {
-        console.warn("[turnHooks] reorderStack failed:", e);
+        reportCommandFailure("Reorder stack", e);
       }
     },
     onCaptureSettlement: async (
@@ -209,7 +227,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         await captureSettlement(name, { actor, heroId, settlementId });
       } catch (e) {
-        console.warn("[turnHooks] captureSettlement failed:", e);
+        reportCommandFailure("Capture settlement", e);
       }
     },
     onTransferGold: async (
@@ -223,7 +241,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         await transferGold(name, { actor, heroId, settlementId, direction });
       } catch (e) {
-        console.warn("[turnHooks] transferGold failed:", e);
+        reportCommandFailure("Transfer gold", e);
       }
     },
     onStartCharter: async (
@@ -238,7 +256,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         await startCharter(name, { actor, heroId, targetQ, targetR, settlementName });
       } catch (e) {
-        console.warn("[turnHooks] startCharter failed:", e);
+        reportCommandFailure("Start charter", e);
       }
     },
     pickAiMove: (state: GameState, heroId: HeroId) => {

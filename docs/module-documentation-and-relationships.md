@@ -99,7 +99,7 @@ Browser (Vite SPA)                                  Express API server
 | `rng.ts` | Global LCG `rng()` — local, deliberately non-deterministic client-only randomness (AI wander, decorative city-grid placement). Re-export shim for `mulberry32(seed)` (definition now lives in `@heroes/engine`) | `@heroes/engine` |
 | `eventBus.ts` | Typed pub/sub singleton (`bus.on`/`emit`/`clear`) | — |
 | `eventRegistry.ts` | `registerAllListeners()` hook (placeholder) | `./eventBus` |
-| `events.ts` | `GameEvent` discriminated union (`state:committed`, `turn:ended`, `phase:changed`, `hero:moved`, `settlement:captured`, `battle:resolved`, economy/morale, calc:vision/control/heroSpeed) | `../../shared/types`, `../state/gameState` |
+| `events.ts` | `GameEvent` discriminated union (`state:committed`, `turn:ended`, `phase:changed`, `hero:moved`, `settlement:captured`, `battle:resolved`, economy/morale, calc:vision/control/heroSpeed, `command:rejected`) | `../../shared/types`, `../state/gameState` |
 | `cityGrid.ts` | Diamond-grid math for city view (`TILE_W=96`, `TILE_D=48`); `cellToScreen`/`screenToCell`, `cellsInDrawOrder` | — |
 | `citySpots.ts` | `generateCitySpots` places 3/6/9 resource veins + mines for 5/10/15 city sizes | `../../shared/types`, `./cityGrid` |
 | `control.ts` | `controlRange`, `settlementRateRadius`, `controlledPositions`, `territoryBoundaryEdges` (edge walk reads `HEX_DIRECTIONS` from `./hex`) | `./hex`, `../../shared/types` |
@@ -236,12 +236,13 @@ Browser (Vite SPA)                                  Express API server
 | `settingsMenu.ts` | Settings UI: Map Info + Game + Population + Confirmations + Visual sections (sliders → `updateSettings`), Reset, Developer Settings link | `./menu`, `../state/settings`, `./developerSettingsMenu` |
 | `tradeModal.ts` | Move resources between settlements (gold cost, amount cap) | `../state/gameState`, `./menu` |
 | `confirmDialog.ts` | Generic confirm/cancel dialog | `./menu` |
+| `src/screens/shared/toast.ts` | Bottom-right dismissible/auto-expiring toast notifications (`showToast(message, kind, durationMs)`, z-index above every modal). `attachCommandFailureToasts()` — explicit-attach, called once from `GameEngine.initEventListeners()`, mirroring `debug/eventLog.ts`'s `attachEventLog()` convention — subscribes to the bus's `command:rejected` event and shows "`{action}` failed: `{reason}`", so a rejected fire-and-forget turn-hook command (#100) surfaces to the player instead of only a `console.warn` | `../../core/eventBus` |
 
 ### 5.13 `src/game/` — bootstrap + turn wiring
 | Module | Role | Imports |
 |---|---|---|
 | `initState.ts` | `buildInitialGameState` (client-side factory using `generateCastles` + `computeSettlementRates` + city spots), `makeInitialStatePayload` (server DTO), `hydrateGameState(row)` (server→client); re-exports `CASTLE_COUNT_*` | `../state/gameState`, `../state/units`, `../io/api`, `../map/gameMap`, `../map/castlePlacement`, `../entities/settlement`, `../economy/settlementRates`, `../state/playerColors`, `../core/citySpots`, `../core/cityGrid`, `../state/settings` |
-| `turnHooks.ts` | `buildTurnHooks` wires client reducers to API: `onHumanTurnEnd`→`/commands` (`EndTurn`), `onAiMove`→`/commands` (`MoveHero`), `onBattleResolved`→`/commands` (`ResolveBattle`), `onTradeResources`/`onRecruitHero`/`onUpgradeTownHall`/`onSetAutoTrade`/`onReorderStack`/`onCaptureSettlement`→`/commands` (fire-and-forget, same pattern as `onAiMove`), `pickAiMove`→`aiBrain`, `logEvent`→`/events` (intercepted by `EventLog.wrapHooks` when a dev console is attached) | `../io/api`, `../state/gameState`, `../state/turnController`, `../ai/aiBrain`, `../map/gameMap`, `../core/hex` |
+| `turnHooks.ts` | `buildTurnHooks` wires client reducers to API: `onHumanTurnEnd`→`/commands` (`EndTurn`), `onAiMove`→`/commands` (`MoveHero`), `onBattleResolved`→`/commands` (`ResolveBattle`), `onTradeResources`/`onRecruitHero`/`onUpgradeTownHall`/`onSetAutoTrade`/`onReorderStack`/`onCaptureSettlement`→`/commands` (fire-and-forget, same pattern as `onAiMove` — but a rejection is no longer silent: `reportCommandFailure` emits `command:rejected` on the bus alongside the existing `console.warn`, surfaced to the player as a toast by `src/screens/shared/toast.ts` (#100)), `pickAiMove`→`aiBrain`, `logEvent`→`/events` (intercepted by `EventLog.wrapHooks` when a dev console is attached) | `../io/api`, `../state/gameState`, `../state/turnController`, `../ai/aiBrain`, `../map/gameMap`, `../core/hex`, `../core/eventBus` |
 
 ### 5.14 `src/debug/` — real-time event log + dev console
 | Module | Role | Imports |

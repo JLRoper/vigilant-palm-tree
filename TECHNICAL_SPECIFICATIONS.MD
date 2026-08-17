@@ -157,6 +157,7 @@ Entry point: [`src/main.ts`](./src/main.ts:1) wires modules together. There is n
 | `src/ai/` | AI: `aiBrain.ts` |
 | `src/io/` | External I/O: `api.ts` (typed REST client), `userGames.ts` (local saved-games bookkeeping), `debugCommands.ts` |
 | `src/views/` | DOM UI: `hud.ts`, `toolbar.ts`, `menu.ts`, `heroInfoMenu.ts`, `heroRosterMenu.ts`, `settlementInfoMenu.ts`, `settlementRosterMenu.ts`, `battleModal.ts`, `tradeModal.ts`, `settingsMenu.ts`, `adventureView.ts`, `cityView.ts` |
+| `src/screens/shared/toast.ts` | Bottom-right toast notifications; `attachCommandFailureToasts()` (called once from `GameEngine`) subscribes to the `command:rejected` bus event so a rejected fire-and-forget turn-hook command (`src/game/turnHooks.ts`) surfaces to the player instead of only `console.warn` (#100) |
 | `src/vite-env.d.ts` | Vite type shims |
 
 ### Rendering model
@@ -177,6 +178,7 @@ Entry point: [`src/main.ts`](./src/main.ts:1) wires modules together. There is n
 | File | Role |
 |---|---|
 | `server/index.ts` | Express bootstrap, mounts `cors`, `express.json`, `/api` router; calls `initSchema()` before listening |
+| `server/errorHandler.ts` | Global Express error-handling middleware (`ErrorRequestHandler`), registered last in `server/index.ts`'s chain (after the `/api` router). Normalizes any error that reaches it — an unguarded route's thrown/rejected error, an async handler's rejected promise — to the same `{ error: "internal", message }` JSON shape every route with a manual try/catch already returns, instead of Express's default HTML stack-trace page (#98) |
 | `server/db.ts` | `pg.Pool` + `initSchema()` (runs `schema.sql` and any new migrations from `server/migrations/`) |
 | `server/routes.ts` | Remaining `/api` routes: games CRUD, tiles, events log, lobby claim/start; mounts `commandsRouter` (below) at `/games/:name/commands` for `MoveHero`/`TransferGold`/`EndTurn`/`TradeResources`/`ResolveBattle`/`RecruitHero`/`UpgradeTownHall`/`SetAutoTrade`/`ReorderStack`/`CaptureSettlement` — the old dedicated `resolve-battle`/`trade` routes are deleted |
 | `server/http/routes/commands.ts` | `POST /games/:name/commands` — `parseCommand()` validates the request body for all 10 command kinds, then dispatches to `handleCommand()`. Lazily awaits + memoizes `createLiveCommandDeps()` on first request rather than at module load, since it's now async |
@@ -192,6 +194,7 @@ API conventions:
 - CORS open (default `cors()` middleware, no origin allowlist configured).
 - No auth layer present in the codebase.
 - Port read from `API_PORT` env var (written by `scripts/allocate-ports.ts` into `.env`), default `3001`.
+- Errors: any error not already caught by a route's own try/catch is normalized to `{ error: "internal", message }` JSON by the global `server/errorHandler.ts` middleware, instead of leaking Express's default HTML/stack-trace error page (#98).
 
 ---
 
