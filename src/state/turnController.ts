@@ -35,13 +35,6 @@ import type { BattleResult } from "@heroes/engine";
 export interface TurnControllerHooks {
   onHumanTurnEnd(state: GameState): Promise<GameState>;
   onAiMove(state: GameState, heroId: HeroId, toTile: { q: number; r: number }): Promise<void>;
-  // Phase 5 Track A (plan/2026-08-17-consolidated-phase-1-5-track-map.md
-  // §7.1, R4): the human-move counterpart to onAiMove above -- until this
-  // was added, a human's own requestMove() never round-tripped to the
-  // server at all (only AI moves, via onAiMove, did). Fired-and-forgotten
-  // the same way the six Week-3+ hooks below already are: the local
-  // @heroes/engine reducer already ran and this.state is already
-  // updated by the time this is called.
   onHumanMove(
     state: GameState,
     heroId: HeroId,
@@ -85,9 +78,6 @@ export interface TurnControllerHooks {
   onSetAutoTrade(actor: number, settlementId: SettlementId, autoTrade: boolean): Promise<void>;
   onReorderStack(actor: number, heroId: HeroId, fromIdx: number, toIdx: number): Promise<void>;
   onCaptureSettlement(actor: number, heroId: HeroId, settlementId: SettlementId): Promise<void>;
-  // Phase 5 Track A (R4): transferGold() below had no hook at all before
-  // this -- not even a fire-and-forget stub like its five siblings above
-  // -- so human-initiated gold transfers never persisted server-side.
   onTransferGold(
     actor: number,
     heroId: HeroId,

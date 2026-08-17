@@ -63,7 +63,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await spendMovement(name, {
           actor: hero.ownerId,
           heroId,
-          fromTile: { q: hero.q, r: hero.r },
+          fromTile: { q: hero.previousQ ?? hero.q, r: hero.previousR ?? hero.r },
           toTile,
           cost: previousCost > 0 ? previousCost : 1,
         });
@@ -71,11 +71,6 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         console.warn("[turnHooks] spendMovement failed:", e);
       }
     },
-    // Phase 5 Track A (R4): closes the human-move round-trip gap. Mirrors
-    // onAiMove above -- state is already post-move by the time this
-    // fires -- but unlike onAiMove, turnController.ts's requestMove()
-    // already has `cost` in hand and passes it straight through instead
-    // of reconstructing it from a previousMovementRemaining diff.
     onHumanMove: async (
       state: GameState,
       heroId: HeroId,
@@ -216,10 +211,6 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         console.warn("[turnHooks] captureSettlement failed:", e);
       }
     },
-    // Phase 5 Track A (R4): transferGold() (src/state/turnController.ts)
-    // had no hook at all before this -- not even a fire-and-forget stub
-    // like its siblings above -- so human-initiated gold transfers never
-    // persisted server-side.
     onTransferGold: async (
       actor: number,
       heroId: HeroId,

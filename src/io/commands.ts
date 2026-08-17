@@ -8,12 +8,7 @@ import type {
 } from "@heroes/contracts";
 import { apiFetch } from "./api";
 
-// Client command dispatcher (Phase 5 Track A, plan/2026-08-17-consolidated-
-// phase-1-5-track-map.md §7.1): the one place in the client that POSTs
-// `kind`-discriminated commands to `/api/games/:name/commands`. These
-// functions used to live inline in `src/io/api.ts` alongside the plain
-// REST calls (getGame, patchGame, ...); consolidated here so the
-// command-bus surface has its own home as more callers migrate onto it.
+// See plan/2026-08-17-consolidated-phase-1-5-track-map.md §7.1 for context.
 
 const BASE = "/api";
 
