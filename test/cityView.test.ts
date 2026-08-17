@@ -3,7 +3,15 @@ import { ChildProcess } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import { existsSync, readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { getApiPort, getClientPort, spawnLogged, waitForUrl, treeKill } from "./_request";
+import {
+  getApiPort,
+  getClientPort,
+  spawnLogged,
+  waitForUrl,
+  treeKill,
+  reapPreviousRunPids,
+  clearRegisteredPids,
+} from "./_request";
 
 const API_PORT = getApiPort(4000);
 const WEB_PORT = getClientPort(5173);
@@ -35,12 +43,15 @@ function cleanup(): void {
   for (const c of children) {
     if (c.pid != null) treeKill(c.pid);
   }
+  clearRegisteredPids();
 }
 
 process.on("exit", cleanup);
 process.on("SIGINT", () => { cleanup(); process.exit(1); });
 process.on("SIGTERM", () => { cleanup(); process.exit(1); });
 process.on("uncaughtException", (err) => { console.error(err); cleanup(); process.exit(1); });
+
+reapPreviousRunPids();
 
 async function tailLog(label: string): Promise<string> {
   try { return readFileSync(`test/${label}.log`, "utf8").slice(-500); }
