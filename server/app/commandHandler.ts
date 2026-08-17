@@ -247,7 +247,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
   // hydrate.ts's own comment on why). Left as `row` rather than switched to
   // `state` to keep this cutover's diff to hydration + dual-write only,
   // not a rewrite of Phase 3's pre-existing per-command validation.
-  const { state } = await hydrateFromRepos(row, deps, command.gameName);
+  const { state, source } = await hydrateFromRepos(row, deps, command.gameName);
 
   switch (command.kind) {
     case "MoveHero": {
@@ -338,10 +338,14 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // countdown + settlement founding) whenever this EndTurn wraps the
       // round -- persist whatever it did to finalState.activeCharters the
       // same way dualWriteEntities just did for heroes/settlements.
-      // Unconditional, not reference-equality-gated like dualWriteEntities:
-      // charterRepo.upsertMany's own full-sync DELETE is correct (and
-      // cheap) even when activeCharters is unchanged or empty.
-      await deps.charterRepo.upsertMany(command.gameName, finalState.activeCharters);
+      // Gated on the granular hydration source: if hydrate fell back to
+      // JSONB (heroes/settlements granular tables empty, partial/inconsistent
+      // state), state.activeCharters is [] regardless of what's in the
+      // charters table, and a full-sync upsertMany([]) would silently
+      // delete those real rows. Falls back to JSONB? Don't touch charters.
+      if (source === "granular") {
+        await deps.charterRepo.upsertMany(command.gameName, finalState.activeCharters);
+      }
       await dualWriteEntities(deps, command.gameName, state, finalState);
       // #89: the old /end-turn route wrote one settlement_snapshots row
       // per settlement owned by the ending player (day/gold/warehouse/
@@ -558,7 +562,13 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // reference) -- ResolveBattle never touches settlement state, only
       // the two combatants' hero rows, so this only ever calls heroRepo.
       await dualWriteEntities(deps, command.gameName, state, { heroes: newHeroes, settlements: state.settlements });
-      if (finalActiveCharters !== state.activeCharters) {
+      if (finalActiveCharters !== state.activeCharters && source === "granular") {
+        // Source gate matches the EndTurn case above: on JSONB fallback,
+        // state.activeCharters is always [] regardless of the charters
+        // table's real contents, so an upsertMany([]) here would silently
+        // delete them. (finalActiveCharters !== state.activeCharters gates
+        // out the common case where the defender either survived or wasn't
+        // chartering; the source gate is what catches the fallback path.)
         await deps.charterRepo.upsertMany(command.gameName, finalActiveCharters);
       }
       const event: EngineEvent = {
@@ -744,6 +754,19 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       };
     }
     case "StartCharter": {
+      // Source gate FIRST: on JSONB fallback hydrateFromRepos() can't see
+      // real charters in the charters table, so persisting one would race
+      // against rows hydrate can't know about. Reject before any side
+      // effects (hero gold/warehouse deduction, settlement warehouse
+      // update, counter increments) so a rejected StartCharter leaves the
+      // DB exactly as it was -- EndTurn/ResolveBattle's same gate runs
+      // AFTER their engine pipeline because those pipelines only touch
+      // heroes/settlements (which have the JSONB column as
+      // source-of-truth), but StartCharter's writes touch a table
+      // (charters) that hydrate-on-fallback literally cannot see.
+      if (source !== "granular") {
+        return { ok: false, reason: "charters_persist_unavailable", events: [] };
+      }
       // No command reconstructs a GameMap server-side before this one --
       // row.seed/row.map_size (both already selected by GAME_COLUMNS) are
       // exactly what server/routes.ts's generateAndInsertTiles() used to

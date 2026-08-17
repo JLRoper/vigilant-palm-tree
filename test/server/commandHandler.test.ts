@@ -101,8 +101,8 @@ function makeRow(
 function makeDeps(row: HydratableGameRow, unitTypes: UnitType[] = []) {
   const gameRepo = createMockGameRepo({ [row.name as string]: row });
   const eventRepo = createMockEventRepo();
-  const heroRepo = createMockHeroRepo();
-  const settlementRepo = createMockSettlementRepo();
+  const heroRepo = createMockHeroRepo({ [row.name as string]: row.heroes });
+  const settlementRepo = createMockSettlementRepo({ [row.name as string]: row.settlements });
   const charterRepo = createMockCharterRepo();
   return {
     gameRepo,
@@ -1161,10 +1161,96 @@ test("EndTurn dual-writes heroRepo/settlementRepo and syncs charterRepo (a no-op
   assert.equal(settlementRepo.calls.length, 1);
   // advanceRound()'s advanceCharters() call needs its result synced every
   // EndTurn now that StartCharter is ported -- charterRepo.upsertMany is
-  // safe (and cheap) to call unconditionally even when there's nothing to
-  // sync yet.
+  // safe to call unconditionally on the granular path (its full-sync
+  // DELETE is correct on a no-op empty array). The source gate that
+  // prevents this same call from wiping real rows on JSONB fallback is
+  // covered by the dedicated test below.
   assert.equal(charterRepo.calls.length, 1, "charterRepo.upsertMany now runs every EndTurn");
   assert.deepEqual(charterRepo.calls[0].value, []);
+});
+
+test("EndTurn does NOT call charterRepo when hydration fell back to JSONB -- guards against wiping real charter rows in a partially-backfilled game", async () => {
+  // Counterpart to the test above: when hydrateFromRepos() falls back to
+  // the legacy JSONB row (heroes or settlements granular table empty,
+  // partial/inconsistent state), state.activeCharters is [] regardless of
+  // what the charters table really contains -- so an unconditional
+  // upsertMany([]) would silently DELETE real charter rows. Source gate
+  // introduced after PR #105's Copilot review caught this.
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { movementRemaining: 2, gold: 15 })],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { deps, heroRepo, settlementRepo, charterRepo } = makeDeps(row);
+  // Force the JSONB fallback: clear the granular seeds so hydrateFromRepos
+  // sees heroes.length === 0 and returns source="jsonb".
+  delete heroRepo.rows["test-game"];
+  delete settlementRepo.rows["test-game"];
+  charterRepo.rows["test-game"] = [
+    {
+      id: "ch0",
+      heroId: "h99",
+      ownerId: 0,
+      targetQ: 5,
+      targetR: 5,
+      settlementName: "Real Charter",
+      phase: "traveling",
+      daysRemaining: 10,
+      settlementId: "s5",
+      resourceRates: {},
+      foundedOnResource: null,
+      citySpots: [],
+    },
+  ];
+  const command: Command = { kind: "EndTurn", gameName: "test-game", actor: 0 };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(charterRepo.calls.length, 0, "must not write to charterRepo on JSONB fallback (would wipe real rows)");
+  assert.equal(charterRepo.rows["test-game"].length, 1, "real charter row preserved");
+});
+
+test("StartCharter rejects outright when hydration fell back to JSONB -- no source for charterRepo.upsertMany to be safe against", async () => {
+  // Symmetric to the EndTurn case above: StartCharter's success path
+  // requires writing to charterRepo, but on JSONB fallback the hydrate
+  // result can't see real charters that might exist, so racing them is
+  // unsafe. Reject the command outright rather than risk overwriting.
+  // Source gate runs BEFORE startCharter() and any persistence calls, so a
+  // rejected StartCharter leaves gameRepo/heroRepo/settlementRepo/
+  // charterRepo/eventRepo all untouched (unlike EndTurn/ResolveBattle's
+  // gate, which runs after their engine pipeline because those pipelines
+  // only touch heroes/settlements -- StartCharter is the only case that
+  // touches the charters table hydrate-on-fallback can't see).
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { gold: 5000 })],
+    [makeSettlement("s0", 0, 2, 2, { warehouse: CHARTER_WAREHOUSE })],
+  );
+  const { deps, gameRepo, heroRepo, settlementRepo, charterRepo, eventRepo } = makeDeps(row);
+  delete heroRepo.rows["test-game"];
+  delete settlementRepo.rows["test-game"];
+  const command: Command = {
+    kind: "StartCharter",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    targetQ: 6,
+    targetR: 6,
+    settlementName: "Won't Happen",
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "charters_persist_unavailable");
+  // No side effects: the rejection must be a true no-op.
+  assert.equal(charterRepo.calls.length, 0);
+  assert.equal(heroRepo.calls.length, 0);
+  assert.equal(settlementRepo.calls.length, 0);
+  assert.equal(eventRepo.events.length, 0);
+  // Counters must NOT have been incremented -- a rejected StartCharter must
+  // leave next_charter_id/next_settlement_id exactly as they were. gameRepo
+  // doesn't expose a `calls` array the way the other mock repos do, but
+  // saveHeroesAndSettlements is the only path that mutates those fields;
+  // asserting the row reference is unchanged (same object as input) is the
+  // strongest "saveHeroesAndSettlements never ran" proof -- if it had run,
+  // mockGameRepo would have replaced `rows[name]` with a new spread object.
+  assert.equal(gameRepo.rows["test-game"], row);
 });
 
 test("read-path cutover: a game with granular hero/settlement rows hydrates from those instead of the (differing) legacy JSONB row", async () => {
