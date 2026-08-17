@@ -1,6 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import type { PoolClient } from "pg";
+import type { HeroState } from "@heroes/contracts";
 import { withRollback } from "../helpers/pgTestTx";
 import { pool } from "../../server/persistence/db";
 import { createHeroRepo } from "../../server/persistence/repositories/heroRepo";
@@ -97,6 +98,25 @@ test("heroRepo.upsertMany replaces stacks on update rather than merging them", a
     const [loaded] = await repo.loadAllForGame(name);
 
     assert.deepEqual(loaded.stacks, reorderedHero.stacks);
+  });
+});
+
+test("heroRepo.upsertMany round-trips a fractional movementRemaining (forest/desert terrain costs are non-integer)", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createHeroRepo(client);
+    const hero: HeroState = {
+      ...makeHero("h0", 0, 3, 4, { movementRemaining: 1.1999999999999993 }),
+      previousQ: 2,
+      previousR: 4,
+      previousMovementRemaining: 3.4,
+    };
+
+    await repo.upsertMany(name, { h0: hero });
+    const [loaded] = await repo.loadAllForGame(name);
+
+    assert.deepEqual(loaded, hero);
   });
 });
 
