@@ -22,6 +22,7 @@ import { registerAllListeners } from "../core/eventRegistry";
 import { attachEventLog, type EventLog } from "../debug/eventLog";
 import { mountPersistentDevConsole, type DevConsoleHandle } from "../debug/devConsole";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
+import { attachCommandFailureToasts } from "@screens/shared/toast";
 
 export class GameEngine {
   // Infrastructure
@@ -195,6 +196,10 @@ export class GameEngine {
       this.state.syncHeroVisualsToState();
       this.fullFrame();
     });
+    // #100: surfaces a toast whenever a fire-and-forget command hook
+    // (src/game/turnHooks.ts) rejects, instead of the previous
+    // console.warn-only silence.
+    attachCommandFailureToasts();
   }
 
   // =========================================================================

@@ -39,6 +39,13 @@ COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/tsconfig.json ./
 COPY --from=builder /app/package.json ./
 
+# #98: explicit for the deployed image -- without this, app.get('env')
+# defaults to "development", which (a) makes Express's own default error
+# handler include stack traces on any error server/errorHandler.ts doesn't
+# otherwise catch, and (b) leaves server/auth.ts's devCode convenience field
+# turned on for real users, not just local dev.
+ENV NODE_ENV=production
+
 # Expose API port
 EXPOSE 3001
 

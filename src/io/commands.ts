@@ -12,10 +12,50 @@ import { apiFetch } from "./api";
 
 const BASE = "/api";
 
+// Thrown by json() below on a non-2xx commands response (#100). `.reason` is
+// the server's own `error` field (e.g. "hero_not_at_fromTile",
+// "forbidden_not_your_turn" -- see server/app/commandHandler.ts's various
+// `{ ok: false, reason }` returns, surfaced as JSON by
+// server/http/routes/commands.ts) when the body matches that shape, instead
+// of the raw "<status> <statusText> <body>" blob a plain Error(...) here
+// used to carry. Callers (src/game/turnHooks.ts) show `.reason` to the
+// player via a toast instead of staying silent on rejection.
+export class CommandError extends Error {
+  readonly status: number;
+  readonly reason: string;
+
+  constructor(status: number, reason: string) {
+    super(reason);
+    this.name = "CommandError";
+    this.status = status;
+    this.reason = reason;
+  }
+
+  static fromResponse(status: number, statusText: string, bodyText: string): CommandError {
+    const trimmed = bodyText.trim();
+    if (trimmed) {
+      try {
+        const parsed = JSON.parse(trimmed) as { error?: unknown; message?: unknown };
+        if (typeof parsed.error === "string" && parsed.error) {
+          const reason =
+            typeof parsed.message === "string" && parsed.message
+              ? `${parsed.error}: ${parsed.message}`
+              : parsed.error;
+          return new CommandError(status, reason);
+        }
+      } catch {
+        // Not JSON (or didn't match the { error, message? } shape) -- fall
+        // through to the raw text below rather than swallowing it.
+      }
+    }
+    return new CommandError(status, trimmed || `${status} ${statusText}`);
+  }
+}
+
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`${res.status} ${res.statusText} ${text}`);
+    throw CommandError.fromResponse(res.status, res.statusText, text);
   }
   return res.json() as Promise<T>;
 }
