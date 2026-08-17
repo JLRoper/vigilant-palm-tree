@@ -39,6 +39,12 @@ export interface CommandResult {
   ok: boolean;
   reason?: string;
   events: EngineEvent[];
+  // The old spend_movement/transfer endpoints returned the updated
+  // hero/settlement directly; preserved here so their client call sites
+  // (src/io/api.ts) keep that even though the command's own authoritative
+  // record of "what changed" is the events array.
+  hero?: HeroState;
+  settlement?: SettlementState;
 }
 
 // The central transaction loop: load state via repos -> call the matching
@@ -50,10 +56,35 @@ export interface CommandResult {
 // already-tested reducers to change shape for Phase 3's convenience.
 export async function handleCommand(command: Command, deps: CommandDeps): Promise<CommandResult> {
   const row = await deps.gameRepo.load(command.gameName);
+
+  // Generic turn-ownership guard, enforced once here for every command
+  // rather than duplicated per engine function. This matters for
+  // TransferGold specifically: transferGold() has no actor/turn check of
+  // its own (only startMove does, internally, via
+  // hero.ownerId !== state.activePlayerId) -- the old /transfer route got
+  // its forbidden_not_your_turn 403 from a hand-written check in
+  // routes.ts, not from the engine. This guard preserves that behavior for
+  // every command uniformly instead of re-deriving it per engine function.
+  if (command.actor !== row.active_player_id) {
+    return { ok: false, reason: "forbidden_not_your_turn", events: [] };
+  }
+
   const state = hydrateGameState(row);
 
   switch (command.kind) {
     case "MoveHero": {
+      // Staleness guard: startMove doesn't check this itself (it just
+      // moves the hero from wherever the server thinks it is). The old
+      // spend_movement route rejected a move whose fromTile didn't match
+      // server state, protecting against a client computing cost/path from
+      // a position that's since changed underneath it.
+      const currentHero = row.heroes[command.heroId];
+      if (
+        currentHero &&
+        (currentHero.q !== command.fromTile.q || currentHero.r !== command.fromTile.r)
+      ) {
+        return { ok: false, reason: "hero_not_at_fromTile", events: [] };
+      }
       // startMove's `state.selectedHeroId !== heroId` check ("not_selected")
       // guards a client-side UI concept: "is this the hero the player has
       // clicked on." A command already names its target hero explicitly --
@@ -78,7 +109,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         to: command.toTile,
       };
       await deps.eventRepo.append(command.gameName, event.type, event);
-      return { ok: true, events: [event] };
+      return { ok: true, events: [event], hero: result.state.heroes[command.heroId] };
     }
     case "TransferGold": {
       const result = transferGold(state, command.heroId, command.settlementId, command.direction);
@@ -98,7 +129,12 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         direction: command.direction,
       };
       await deps.eventRepo.append(command.gameName, event.type, event);
-      return { ok: true, events: [event] };
+      return {
+        ok: true,
+        events: [event],
+        hero: result.state.heroes[command.heroId],
+        settlement: result.state.settlements[command.settlementId],
+      };
     }
   }
 
