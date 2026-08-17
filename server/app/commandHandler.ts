@@ -1,4 +1,11 @@
-import { hydrateGameState, startMove, transferGold, mulberry32 } from "@heroes/engine";
+import {
+  hydrateGameState,
+  startMove,
+  transferGold,
+  mulberry32,
+  effectiveIncome,
+  clampMorale,
+} from "@heroes/engine";
 import type { EngineCtx, HydratableGameRow } from "@heroes/engine";
 import type {
   Command,
@@ -12,6 +19,7 @@ import type {
 import { runEndTurn, clampGrowthRate } from "./turnService";
 import { pool } from "../persistence/db";
 import { createGameRepo } from "../persistence/repositories/gameRepo";
+import type { SettlementSnapshotInput, ResourceTransactionInput } from "../persistence/repositories/gameRepo";
 import { createEventRepo } from "../persistence/repositories/eventRepo";
 
 // Pre-agreed shape from plan/2026-08-16-phase-3-parallel-dev-plan.md's
@@ -21,6 +29,16 @@ import { createEventRepo } from "../persistence/repositories/eventRepo";
 // declaring the interface here keeps commandHandler.ts's own logic
 // decoupled from that implementation and lets it be tested against
 // test/helpers/mockRepos.ts.
+//
+// insertSettlementSnapshots/insertResourceTransactions close #89 (this
+// EndTurn case is the only call site for either): the old /end-turn
+// route wrote a settlement_snapshots row per settlement and a
+// resource_transactions row per auto-trade transfer on every turn end;
+// the EndTurn command that replaced it never picked that logic up, so
+// both tables silently stopped being written from PR #87 onward. Track
+// 3.B's real implementations (server/persistence/repositories/gameRepo.ts)
+// land the persistence-layer half; this file's EndTurn case (below) is
+// the wiring half.
 export interface GameRepo {
   load(name: string): Promise<HydratableGameRow>;
   saveHeroesAndSettlements(
@@ -35,6 +53,8 @@ export interface GameRepo {
       active_player_id?: number;
     },
   ): Promise<void>;
+  insertSettlementSnapshots(gameName: string, snapshots: SettlementSnapshotInput[]): Promise<void>;
+  insertResourceTransactions(gameName: string, transactions: ResourceTransactionInput[]): Promise<void>;
 }
 
 export interface EventRepo {
@@ -186,7 +206,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // See server/app/turnService.ts for the pipeline itself and its
       // documented charter-advancement limitation (no DB column for
       // activeCharters yet).
-      const { state: finalState, wrapped } = runEndTurn(state, clampGrowthRate(command.growthRate));
+      const { state: finalState, wrapped, transfers } = runEndTurn(state, clampGrowthRate(command.growthRate));
       const legacyGold = sumPlayerGold(finalState.players, finalState.heroes, finalState.settlements);
       await deps.gameRepo.saveHeroesAndSettlements(
         command.gameName,
@@ -200,6 +220,41 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
           gold: legacyGold,
         },
       );
+      // #89: the old /end-turn route wrote one settlement_snapshots row
+      // per settlement owned by the ending player (day/gold/warehouse/
+      // morale/effective_income), and one resource_transactions row per
+      // auto-trade transfer -- on every single turn end, not just on a
+      // round wrap. That stopped happening the moment this command
+      // replaced the old route (PR #86/#87); this restores it, computed
+      // from the same finalState/transfers this case already has instead
+      // of re-deriving anything. day is finalState.day on a round wrap
+      // (the new day just started) or row.day otherwise (day doesn't
+      // change on a simple next-player advance) -- there's no
+      // client-submitted incomingState.day to fall back to anymore the
+      // way the old route had.
+      const snapshotDay = wrapped ? finalState.day : (row.day ?? finalState.day);
+      const snapshots: SettlementSnapshotInput[] = Object.entries(finalState.settlements)
+        .filter(([, s]) => s.ownerId === command.actor)
+        .map(([settlementId, s]) => ({
+          settlementId,
+          day: snapshotDay,
+          gold: Number(s.gold) || 0,
+          warehouse: s.warehouse,
+          // effectiveIncome() is the same @heroes/engine function
+          // applyEndOfTurnDetailed() itself already used to update
+          // s.gold this turn (economy/consumption.ts) -- reusing it here
+          // instead of re-deriving the population*goldTax*morale formula
+          // inline the way the old route did.
+          morale: Math.round(clampMorale(s.morale ?? 100)),
+          effectiveIncome: effectiveIncome(s),
+        }));
+      await deps.gameRepo.insertSettlementSnapshots(command.gameName, snapshots);
+      // AutoTradeTransfer (packages/contracts/src/gameState.ts) is a
+      // structural match for ResourceTransactionInput (fromSettlementId/
+      // toSettlementId/resource/amount/goldPaid) -- transfers passes
+      // straight through, `reason` defaults to "auto_trade" in the repo
+      // method itself, same as the old route's hardcoded literal.
+      await deps.gameRepo.insertResourceTransactions(command.gameName, transfers);
       const event: EngineEvent = {
         type: "TurnEnded",
         actor: command.actor,
