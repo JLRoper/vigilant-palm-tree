@@ -12,7 +12,13 @@ import type {
 } from "@heroes/contracts";
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
 import { handleCommand, handleCommandTransactional } from "../../server/app/commandHandler";
-import { createMockEventRepo, createMockGameRepo } from "../helpers/mockRepos";
+import {
+  createMockCharterRepo,
+  createMockEventRepo,
+  createMockGameRepo,
+  createMockHeroRepo,
+  createMockSettlementRepo,
+} from "../helpers/mockRepos";
 
 function makeHero(id: HeroId, ownerId: PlayerId, q: number, r: number, overrides: Partial<HeroState> = {}): HeroState {
   return {
@@ -92,10 +98,16 @@ function makeRow(
 function makeDeps(row: HydratableGameRow, unitTypes: UnitType[] = []) {
   const gameRepo = createMockGameRepo({ [row.name as string]: row });
   const eventRepo = createMockEventRepo();
+  const heroRepo = createMockHeroRepo();
+  const settlementRepo = createMockSettlementRepo();
+  const charterRepo = createMockCharterRepo();
   return {
     gameRepo,
     eventRepo,
-    deps: { gameRepo, eventRepo, ctx: { rng: () => 0.5, catalog: { unitTypes } } },
+    heroRepo,
+    settlementRepo,
+    charterRepo,
+    deps: { gameRepo, eventRepo, heroRepo, settlementRepo, charterRepo, ctx: { rng: () => 0.5, catalog: { unitTypes } } },
   };
 }
 
@@ -491,6 +503,27 @@ function makeFakePoolClient(
       if (/^INSERT\s+INTO\s+resource_transactions\b/i.test(sql.trim())) {
         return { rows: [], rowCount: 1 };
       }
+      // Phase 4 Track A: heroRepo/settlementRepo/charterRepo are
+      // constructed against this same fake client inside
+      // handleCommandTransactional's requestDeps (real repo factories, not
+      // mocks -- see server/persistence/repositories/*.ts). These tests
+      // only care about the lock/commit ordering (asserted via `queries`
+      // above), not granular data, so every granular SELECT reads back
+      // empty (hydrateFromRepos falls back to the JSONB `row` already
+      // handled above) and every DELETE/INSERT the repos' upsertMany
+      // issues is accepted as a generic write.
+      if (
+        /^SELECT\b/i.test(sql.trim()) &&
+        /\bFROM\s+(heroes|hero_platoons|settlements|settlement_resources|settlement_buildings|charters)\b/i.test(sql)
+      ) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (/^DELETE\s+FROM\s+(heroes|hero_platoons|settlements|settlement_resources|settlement_buildings|charters)\b/i.test(sql.trim())) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (/^INSERT\s+INTO\s+(heroes|hero_platoons|settlements|settlement_resources|settlement_buildings|charters)\b/i.test(sql.trim())) {
+        return { rows: [], rowCount: 1 };
+      }
       throw new Error(`fakePoolClient: unhandled query: ${head}`);
     },
     release() {},
@@ -500,6 +533,13 @@ function makeFakePoolClient(
 function makeTransactionalDeps(row: HydratableGameRow) {
   const gameRepo = createMockGameRepo({ [row.name as string]: row });
   const eventRepo = createMockEventRepo();
+  // handleCommandTransactional never reads these three off `deps` itself --
+  // it rebuilds its own requestDeps from the (fake) client, same as it
+  // already does for gameRepo/eventRepo above -- but LiveCommandDeps
+  // extends CommandDeps, so they're still required to satisfy the type.
+  const heroRepo = createMockHeroRepo();
+  const settlementRepo = createMockSettlementRepo();
+  const charterRepo = createMockCharterRepo();
   const ctx = { rng: () => 0.5, catalog: { unitTypes: [] as UnitType[] } };
   let activeClient: FakePoolClient | null = null;
   const pool = {
@@ -515,6 +555,9 @@ function makeTransactionalDeps(row: HydratableGameRow) {
     deps: {
       gameRepo,
       eventRepo,
+      heroRepo,
+      settlementRepo,
+      charterRepo,
       ctx,
       pool: pool as unknown as import("pg").Pool,
     },
@@ -758,4 +801,195 @@ test("CaptureSettlement rejects a hero that isn't actually standing on the settl
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "hero_not_at_settlement");
+});
+
+// ---------------------------------------------------------------------------
+// Phase 4 Track A (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md):
+// dual-write into heroRepo/settlementRepo alongside the existing
+// gameRepo.saveHeroesAndSettlements JSONB write, and the granular-first
+// read-path cutover (server/persistence/hydrate.ts). Every test above this
+// banner never seeds heroRepo/settlementRepo/charterRepo (makeDeps's
+// mocks default to empty), so they've all been implicitly exercising --
+// and continue to exercise, unchanged -- the JSONB-fallback branch of
+// hydrateFromRepos(). These tests specifically exercise the granular side.
+// ---------------------------------------------------------------------------
+
+test("MoveHero dual-writes the touched hero into heroRepo but never calls settlementRepo (settlements unchanged)", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [makeSettlement("s0", 0, 2, 2)]);
+  const { deps, heroRepo, settlementRepo } = makeDeps(row);
+  const command: Command = {
+    kind: "MoveHero",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 2, r: 2 },
+    toTile: { q: 3, r: 2 },
+    cost: 1,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(heroRepo.calls.length, 1, "heroRepo.upsertMany should fire once");
+  assert.equal(heroRepo.calls[0].value.h0.q, 3);
+  assert.equal(settlementRepo.calls.length, 0, "settlementRepo.upsertMany should never fire for MoveHero");
+});
+
+test("TransferGold dual-writes both heroRepo and settlementRepo (both sides change)", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2, { gold: 50 })], [makeSettlement("s0", 0, 2, 2, { gold: 10 })]);
+  const { deps, heroRepo, settlementRepo } = makeDeps(row);
+  const command: Command = {
+    kind: "TransferGold",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    settlementId: "s0",
+    direction: "deposit",
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(heroRepo.calls.length, 1);
+  assert.equal(heroRepo.calls[0].value.h0.gold, 0);
+  assert.equal(settlementRepo.calls.length, 1);
+  assert.equal(settlementRepo.calls[0].value.s0.gold, 60);
+});
+
+test("TradeResources dual-writes settlementRepo but never calls heroRepo (heroes unchanged)", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, { warehouse: { wood: 50, stone: 0, iron: 0, arcane: 0, food: 0 }, gold: 100 }),
+      makeSettlement("s1", 0, 5, 5),
+    ],
+  );
+  const { deps, heroRepo, settlementRepo } = makeDeps(row);
+  const command: Command = {
+    kind: "TradeResources",
+    gameName: "test-game",
+    actor: 0,
+    fromSettlementId: "s0",
+    toSettlementId: "s1",
+    resource: "wood",
+    amount: 10,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(heroRepo.calls.length, 0, "heroRepo.upsertMany should never fire for TradeResources");
+  assert.equal(settlementRepo.calls.length, 1);
+  assert.equal(settlementRepo.calls[0].value.s0.warehouse.wood, 40);
+  assert.equal(settlementRepo.calls[0].value.s1.warehouse.wood, 10);
+});
+
+test("ResolveBattle dual-writes heroRepo but never calls settlementRepo (settlements unchanged)", async () => {
+  const row = makeRow(
+    [
+      makeHero("h0", 0, 2, 2, { stacks: [makeSingleEntryPlatoon("hero_unit", 10)] }),
+      makeHero("h1", 1, 3, 2, { gold: 40, stacks: [makeSingleEntryPlatoon("weak_unit", 1)] }),
+    ],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { deps, heroRepo, settlementRepo } = makeDeps(row, RESOLVE_BATTLE_UNIT_TYPES);
+  const command: Command = { kind: "ResolveBattle", gameName: "test-game", actor: 0, attackerId: "h0", defenderId: "h1" };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(heroRepo.calls.length, 1);
+  assert.equal(heroRepo.calls[0].value.h0.gold, 40, "looted gold present in the dual-written hero record");
+  assert.equal(settlementRepo.calls.length, 0);
+});
+
+test("SetAutoTrade dual-writes settlementRepo but never calls heroRepo", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [makeSettlement("s0", 0, 2, 2, { autoTrade: true })]);
+  const { deps, heroRepo, settlementRepo } = makeDeps(row);
+  const command: Command = { kind: "SetAutoTrade", gameName: "test-game", actor: 0, settlementId: "s0", autoTrade: false };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(heroRepo.calls.length, 0);
+  assert.equal(settlementRepo.calls.length, 1);
+  assert.equal(settlementRepo.calls[0].value.s0.autoTrade, false);
+});
+
+test("SetAutoTrade rejecting as a no-op change never reaches the dual-write step", async () => {
+  // nextState === state (setAutoTrade()'s own no-op short-circuit) returns
+  // before saveHeroesAndSettlements/dualWriteEntities are ever called --
+  // this guards against a future refactor accidentally moving the
+  // dual-write step above that early return.
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [makeSettlement("s0", 0, 2, 2, { autoTrade: true })]);
+  const { deps, heroRepo, settlementRepo } = makeDeps(row);
+  const command: Command = { kind: "SetAutoTrade", gameName: "test-game", actor: 0, settlementId: "s0", autoTrade: true };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "no_change");
+  assert.equal(heroRepo.calls.length, 0);
+  assert.equal(settlementRepo.calls.length, 0);
+});
+
+test("EndTurn dual-writes both heroRepo and settlementRepo but never calls charterRepo (StartCharter isn't ported yet)", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { movementRemaining: 2, gold: 15 })],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { deps, heroRepo, settlementRepo, charterRepo } = makeDeps(row);
+  const command: Command = { kind: "EndTurn", gameName: "test-game", actor: 0 };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(heroRepo.calls.length, 1);
+  assert.equal(heroRepo.calls[0].value.h0.movementRemaining, 7);
+  assert.equal(settlementRepo.calls.length, 1);
+  assert.equal(charterRepo.calls.length, 0, "charterRepo.upsertMany is not wired until a charter-creating command is ported");
+});
+
+test("read-path cutover: a game with granular hero/settlement rows hydrates from those instead of the (differing) legacy JSONB row", async () => {
+  // TransferGold is deliberately the command exercised here, not MoveHero:
+  // MoveHero's staleness guard (commandHandler.ts's MoveHero case) checks
+  // command.fromTile against `row.heroes[heroId]` -- the raw JSONB row --
+  // by design (it's meant to catch a client computing a path against a
+  // position that's since changed underneath it), not against the
+  // granular-or-JSONB-sourced `state`. In real operation that's harmless
+  // (dual-write keeps row and the granular tables value-identical for any
+  // game either has ever touched), but it means MoveHero can't distinguish
+  // "hydrated from JSONB" from "hydrated from granular" in a test either --
+  // both always see the same row-sourced position for that specific check.
+  // TransferGold has no such row-based pre-check; transferGold() itself
+  // does every check (hero exists, settlement exists, position, ownership)
+  // against `state` alone, so it's a clean signal for which source actually
+  // fed the hydration.
+  //
+  // The JSONB row's own h0/s0 sit apart (9,9) -- if handleCommand hydrated
+  // from it, transferGold() would reject with hero_not_at_settlement.
+  // Seeding heroRepo/settlementRepo with both co-located at (2,2) and
+  // asserting success is what proves hydrateFromRepos() actually took the
+  // granular branch rather than silently falling back.
+  const row = makeRow(
+    [makeHero("h0", 0, 9, 9, { gold: 50 })],
+    [makeSettlement("s0", 0, 2, 2, { gold: 10 })],
+  );
+  const { deps, heroRepo, settlementRepo } = makeDeps(row);
+  heroRepo.rows["test-game"] = { h0: makeHero("h0", 0, 2, 2, { gold: 50 }) };
+  settlementRepo.rows["test-game"] = { s0: makeSettlement("s0", 0, 2, 2, { gold: 10 }) };
+  const command: Command = {
+    kind: "TransferGold",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    settlementId: "s0",
+    direction: "deposit",
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true, `expected granular-path hydration to co-locate h0/s0 at (2,2); got reason=${result.reason}`);
+  assert.equal(result.settlement?.gold, 60);
+});
+
+test("read-path cutover: a game with only empty granular rows falls back to the legacy JSONB row unchanged", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [makeSettlement("s0", 0, 2, 2)]);
+  const { deps } = makeDeps(row);
+  const command: Command = {
+    kind: "MoveHero",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 2, r: 2 },
+    toTile: { q: 3, r: 2 },
+    cost: 1,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.hero?.q, 3);
 });

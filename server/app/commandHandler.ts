@@ -1,5 +1,4 @@
 import {
-  hydrateGameState,
   startMove,
   transferGold,
   mulberry32,
@@ -17,6 +16,7 @@ import {
 } from "@heroes/engine";
 import type { EngineCtx, HydratableGameRow, UnitType, BattleResult } from "@heroes/engine";
 import type {
+  CharterState,
   Command,
   EngineEvent,
   HeroId,
@@ -29,6 +29,10 @@ import { runEndTurn, clampGrowthRate } from "./turnService";
 import { pool } from "../persistence/db";
 import { createGameRepo, GameNotFoundError, type SettlementSnapshotInput, type ResourceTransactionInput } from "../persistence/repositories/gameRepo";
 import { createEventRepo } from "../persistence/repositories/eventRepo";
+import { createHeroRepo } from "../persistence/repositories/heroRepo";
+import { createSettlementRepo } from "../persistence/repositories/settlementRepo";
+import { createCharterRepo } from "../persistence/repositories/charterRepo";
+import { hydrateFromRepos } from "../persistence/hydrate";
 
 // Pre-agreed shape from plan/2026-08-16-phase-3-parallel-dev-plan.md's
 // "Pre-agreed repo interface" section. server/persistence/repositories/
@@ -69,9 +73,33 @@ export interface EventRepo {
   append(gameName: string, kind: string, payload: unknown): Promise<void>;
 }
 
+// Phase 4 Track A (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md,
+// "Dual-write & read-path design"). Same decoupling rationale as GameRepo/
+// EventRepo above: structural copies of server/persistence/repositories/
+// {hero,settlement,charter}Repo.ts's real interfaces, kept separate so this
+// file (and test/helpers/mockRepos.ts's in-memory doubles) don't depend on
+// those modules' types directly. server/persistence/hydrate.ts's own
+// HydrateRepos is narrower still (read-only) -- these three add the write
+// side hydrate.ts never needs but the dual-write step below does.
+export interface HeroRepo {
+  loadAllForGame(gameName: string): Promise<HeroState[]>;
+  upsertMany(gameName: string, heroes: Record<HeroId, HeroState>): Promise<void>;
+}
+export interface SettlementRepo {
+  loadAllForGame(gameName: string): Promise<SettlementState[]>;
+  upsertMany(gameName: string, settlements: Record<SettlementId, SettlementState>): Promise<void>;
+}
+export interface CharterRepo {
+  loadAllForGame(gameName: string): Promise<CharterState[]>;
+  upsertMany(gameName: string, charters: CharterState[]): Promise<void>;
+}
+
 export interface CommandDeps {
   gameRepo: GameRepo;
   eventRepo: EventRepo;
+  heroRepo: HeroRepo;
+  settlementRepo: SettlementRepo;
+  charterRepo: CharterRepo;
   ctx: EngineCtx;
 }
 
@@ -141,6 +169,41 @@ function sumPlayerGold(
   return total;
 }
 
+// Phase 4 Track A dual-write step (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md,
+// "Dual-write & read-path design"): every case below that calls
+// gameRepo.saveHeroesAndSettlements (the legacy JSONB write) also calls
+// this right afterward, passing the exact same before/after heroes+
+// settlements it already has in scope. "Only the entities that command
+// actually touched" (the plan's own phrasing) is implemented as a
+// reference-equality check against the pre-command state, not a per-row
+// filter: every @heroes/engine reducer either returns the SAME object
+// reference for a slice it didn't touch (e.g. startMove only ever
+// overrides `heroes`, leaving `settlements` referentially identical to the
+// input state) or a brand-new one for a slice it did -- so comparing
+// references tells us which of heroRepo/settlementRepo to call without
+// hand-annotating each command's domain, and without ever calling
+// upsertMany with anything less than the FULL heroes/settlements record
+// for the game. That matters because both repos' upsertMany is a full sync
+// (deletes any row for the game not present in the given record) -- see
+// heroRepo.ts/settlementRepo.ts's own header comments -- so passing a
+// filtered subset would silently delete every untouched entity instead of
+// skipping the call.
+async function dualWriteEntities(
+  deps: CommandDeps,
+  gameName: string,
+  before: { heroes: Record<HeroId, HeroState>; settlements: Record<SettlementId, SettlementState> },
+  after: { heroes: Record<HeroId, HeroState>; settlements: Record<SettlementId, SettlementState> },
+): Promise<void> {
+  const writes: Promise<void>[] = [];
+  if (after.heroes !== before.heroes) {
+    writes.push(deps.heroRepo.upsertMany(gameName, after.heroes));
+  }
+  if (after.settlements !== before.settlements) {
+    writes.push(deps.settlementRepo.upsertMany(gameName, after.settlements));
+  }
+  await Promise.all(writes);
+}
+
 // The central transaction loop: load state via repos -> call the matching
 // @heroes/engine reducer -> persist the delta -> append the resulting
 // event(s). @heroes/engine's reducers (startMove, transferGold, ...) are
@@ -165,7 +228,30 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
     return { ok: false, reason: "forbidden_not_your_turn", events: [] };
   }
 
-  const state = hydrateGameState(row);
+  // Phase 4 Track A read-path cutover (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md):
+  // granular-first, with a per-game fallback to the legacy JSONB row
+  // (hydrateGameState(row), unchanged) when a game's heroes/settlements
+  // granular tables are both still empty. See server/persistence/hydrate.ts
+  // for the full rationale; `source` isn't consumed here today (nothing
+  // branches on it) but is available for callers that want it later
+  // (e.g. an eventual metrics counter) without changing this call site again.
+  //
+  // Note for whoever touches this next: several cases below still read
+  // command.actor's target hero/settlement off `row` directly (the raw
+  // JSONB row) for their own existence/ownership/position pre-checks --
+  // MoveHero's staleness guard, TradeResources/ResolveBattle/UpgradeTownHall/
+  // SetAutoTrade/ReorderStack/CaptureSettlement's "does this exist"/
+  // ownership checks -- rather than reading the same thing off `state`
+  // (which may now be granular-sourced). That's intentional, not an
+  // oversight introduced by this cutover: `row` and the granular tables are
+  // value-identical for any game dualWriteEntities has ever touched (both
+  // are written together, same transaction), so those checks see the same
+  // answer either way in real operation. It only matters for a
+  // hypothetically inconsistent game, which shouldn't be reachable (see
+  // hydrate.ts's own comment on why). Left as `row` rather than switched to
+  // `state` to keep this cutover's diff to hydration + dual-write only,
+  // not a rewrite of Phase 3's pre-existing per-command validation.
+  const { state } = await hydrateFromRepos(row, deps, command.gameName);
 
   switch (command.kind) {
     case "MoveHero": {
@@ -198,6 +284,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         result.state.heroes,
         result.state.settlements,
       );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
       const event: EngineEvent = {
         type: "HeroMoved",
         actor: command.actor,
@@ -217,6 +304,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         result.state.heroes,
         result.state.settlements,
       );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
       const event: EngineEvent = {
         type: "GoldTransferred",
         actor: command.actor,
@@ -250,6 +338,15 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
           gold: legacyGold,
         },
       );
+      // charterRepo.upsertMany is deliberately NOT called here even though
+      // EndTurn's advanceRound() internally runs advanceCharters() --
+      // finalState.activeCharters is always [] today (StartCharter isn't
+      // ported, see turnService.ts's own "Known limitation" comment above),
+      // so there is nothing to sync yet. hydrate.ts already reads charterRepo
+      // on every load, so the day a charter-creating command IS ported, its
+      // own case just needs to add this call -- EndTurn doesn't need to
+      // pre-emptively call upsertMany([]) against a table nothing writes to.
+      await dualWriteEntities(deps, command.gameName, state, finalState);
       // #89: the old /end-turn route wrote one settlement_snapshots row
       // per settlement owned by the ending player (day/gold/warehouse/
       // morale/effective_income), and one resource_transactions row per
@@ -367,6 +464,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         result.state.settlements,
         { gold: legacyGold },
       );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
       const event: EngineEvent = {
         type: "ResourcesTraded",
         actor: command.actor,
@@ -446,6 +544,10 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         state.settlements,
         { gold: legacyGold },
       );
+      // settlements is passed through unchanged (state.settlements, same
+      // reference) -- ResolveBattle never touches settlement state, only
+      // the two combatants' hero rows, so this only ever calls heroRepo.
+      await dualWriteEntities(deps, command.gameName, state, { heroes: newHeroes, settlements: state.settlements });
       const event: EngineEvent = {
         type: "BattleResolved",
         actor: command.actor,
@@ -482,6 +584,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         result.state.settlements,
         { players: result.state.players },
       );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
       const event: EngineEvent = {
         type: "HeroRecruited",
         actor: command.actor,
@@ -511,6 +614,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         result.state.heroes,
         result.state.settlements,
       );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
       const event: EngineEvent = {
         type: "TownHallUpgradeStarted",
         actor: command.actor,
@@ -544,6 +648,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         nextState.heroes,
         nextState.settlements,
       );
+      await dualWriteEntities(deps, command.gameName, state, nextState);
       const event: EngineEvent = {
         type: "AutoTradeToggled",
         actor: command.actor,
@@ -572,6 +677,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         result.state.heroes,
         result.state.settlements,
       );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
       const event: EngineEvent = {
         type: "StackReordered",
         actor: command.actor,
@@ -607,6 +713,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         result.state.settlements,
         { players: result.state.players },
       );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
       const event: EngineEvent = {
         type: "SettlementCaptured",
         actor: command.actor,
@@ -666,6 +773,9 @@ export async function createLiveCommandDeps(): Promise<LiveCommandDeps> {
   return {
     gameRepo: createGameRepo(pool),
     eventRepo: createEventRepo(pool),
+    heroRepo: createHeroRepo(pool),
+    settlementRepo: createSettlementRepo(pool),
+    charterRepo: createCharterRepo(pool),
     pool,
     ctx: { rng: mulberry32(Date.now() >>> 0), catalog: { unitTypes } },
   };
@@ -723,6 +833,9 @@ export async function handleCommandTransactional(
     const requestDeps: CommandDeps = {
       gameRepo: createGameRepo(client),
       eventRepo: createEventRepo(client),
+      heroRepo: createHeroRepo(client),
+      settlementRepo: createSettlementRepo(client),
+      charterRepo: createCharterRepo(client),
       ctx: deps.ctx,
     };
     const result = await handleCommand(command, requestDeps);
