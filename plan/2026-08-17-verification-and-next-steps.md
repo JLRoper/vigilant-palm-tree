@@ -7,7 +7,7 @@
 
 ## 1. What was verified live (new — not just doc review)
 
-The dev environment did not previously exist on this machine. Getting it running required installing Node.js LTS, PowerShell Core, and Playwright's Chromium binaries (see §3). With it running, all four of the track map's own verification gates were re-run directly, plus a live in-browser check that wasn't previously possible:
+The dev environment did not previously exist on this machine. Getting it running required installing Node.js LTS, PowerShell Core, and Playwright's Chromium binaries (see §2.2). With it running, all four of the track map's own verification gates were re-run directly, plus a live in-browser check that wasn't previously possible:
 
 | Check | Result |
 | :--- | :--- |
