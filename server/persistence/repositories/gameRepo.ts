@@ -1,5 +1,13 @@
 import type { Pool, PoolClient } from "pg";
-import type { HeroId, HeroState, Player, SettlementId, SettlementState } from "@heroes/contracts";
+import type {
+  HeroId,
+  HeroState,
+  Player,
+  SettlementId,
+  SettlementState,
+  Warehouse,
+  WarehouseResource,
+} from "@heroes/contracts";
 
 // Accepts either the shared pool (reads, or writes outside a transaction) or
 // a PoolClient already inside a caller-owned transaction (writes that must
@@ -62,6 +70,36 @@ export interface SaveHeroesAndSettlementsExtra {
   active_player_id?: number;
 }
 
+// One row per settlement snapshot, matching the columns the now-dead
+// server/routes.ts POST /games/:name/end-turn route used to write on every
+// turn end (see #89) -- restoring this table's writes as a Track 3.B repo
+// method so Track 3.A's EndTurn case has something to call once it's wired
+// in. Batched (array, not one method per row) because EndTurn always writes
+// one of these per settlement owned by the player whose turn just ended,
+// same as the old route did in a loop.
+export interface SettlementSnapshotInput {
+  settlementId: SettlementId;
+  day: number;
+  gold: number;
+  warehouse: Warehouse;
+  morale: number;
+  effectiveIncome: number;
+}
+
+// Mirrors resource_transactions' columns; one row per auto-trade transfer
+// applyEndOfTurnDetailed() produces during EndTurn. fromSettlementId is
+// nullable in the schema (server/schema.sql doesn't constrain it NOT NULL)
+// even though auto_trade transfers always have one today -- kept optional
+// here to match the column, not the one reason currently in use.
+export interface ResourceTransactionInput {
+  fromSettlementId: SettlementId | null;
+  toSettlementId: SettlementId;
+  resource: WarehouseResource;
+  amount: number;
+  goldPaid: number;
+  reason?: string;
+}
+
 export interface GameRepo {
   load(name: string): Promise<GameRow>;
   saveHeroesAndSettlements(
@@ -70,6 +108,14 @@ export interface GameRepo {
     settlements: Record<SettlementId, SettlementState>,
     extra?: SaveHeroesAndSettlementsExtra,
   ): Promise<void>;
+  insertSettlementSnapshots(gameName: string, snapshots: SettlementSnapshotInput[]): Promise<void>;
+  insertResourceTransactions(gameName: string, transactions: ResourceTransactionInput[]): Promise<void>;
+}
+
+async function resolveGameId(db: Queryable, name: string): Promise<number> {
+  const r = await db.query<{ id: number }>("SELECT id FROM games WHERE name = $1", [name]);
+  if (r.rowCount === 0) throw new GameNotFoundError(name);
+  return r.rows[0].id;
 }
 
 export function createGameRepo(db: Queryable): GameRepo {
@@ -114,6 +160,33 @@ export function createGameRepo(db: Queryable): GameRepo {
         vals,
       );
       if (r.rowCount === 0) throw new GameNotFoundError(name);
+    },
+
+    async insertSettlementSnapshots(gameName, snapshots) {
+      if (snapshots.length === 0) return;
+      const gameId = await resolveGameId(db, gameName);
+      for (const s of snapshots) {
+        await db.query(
+          `INSERT INTO settlement_snapshots
+             (game_id, settlement_id, day, gold, warehouse, morale, effective_income)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+           ON CONFLICT (game_id, settlement_id, day) DO NOTHING`,
+          [gameId, s.settlementId, s.day, s.gold, JSON.stringify(s.warehouse), s.morale, s.effectiveIncome],
+        );
+      }
+    },
+
+    async insertResourceTransactions(gameName, transactions) {
+      if (transactions.length === 0) return;
+      const gameId = await resolveGameId(db, gameName);
+      for (const t of transactions) {
+        await db.query(
+          `INSERT INTO resource_transactions
+             (game_id, from_settlement_id, to_settlement_id, resource, amount, gold_paid, reason)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [gameId, t.fromSettlementId, t.toSettlementId, t.resource, t.amount, t.goldPaid, t.reason ?? "auto_trade"],
+        );
+      }
     },
   };
 }
