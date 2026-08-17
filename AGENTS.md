@@ -17,16 +17,12 @@ This file is loaded into every agent's context. Treat the rules below as non-neg
 - Don't touch files outside the worktree root, the shared `game_db` container, or another worktree's processes.
 - Prefer the project's existing helpers (`scripts/cleanup.ps1`, `scripts/allocate-ports.ts`, `scripts/dev-status.ps1`) over ad-hoc equivalents.
 
-## MANDATORY auto-running subagents (do NOT skip)
+## Auto-running subagents
 
-On every user request, in your FIRST response, you MUST launch subagents via the `task` tool in parallel — both calls in the SAME message:
+- **`session-tracker` auto-invocation is DISABLED (user rule, added 2026-08-17).** Do not launch it at the start or end of a task, and do not treat it as mandatory. It still exists as a tool and may be used, but only when the user explicitly asks for session tracking/logging in their message. Do not pair it with `doc-updater` anymore.
+- **`doc-updater`** — in your FIRST response, launch this via the `task` tool when the task may touch code (any implementation, refactor, config, dependency, or script change). Skippable for pure Q&A and conversation. Fast-return pattern: scan current docs, plan updates, return without blocking the user's actual work.
 
-- **`session-tracker`** — ALWAYS. No exceptions. Even for pure Q&A. It opens/creates `sessionTracking/YYYY-MM-DD.md`, writes a start-of-task marker, and returns immediately so it does not block your work. You will invoke it ONE more time at the end to finalize the entry.
-- **`doc-updater`** — when the task may touch code (any implementation, refactor, config, dependency, or script change). Skippable for pure Q&A and conversation. Same fast-return pattern: scan current docs, plan updates, return.
-
-Both `task` calls in one message = parallel (tandem) execution. Do not sequence them, do not wait for one to finish before starting the other, do not wait for either before starting the user's actual work. They are background-fast, not blocking.
-
-When you finish the task, invoke `session-tracker` a second time with the final details (files changed, verification, revert notes). Invoke `doc-updater` a second time if any doc actually needs updating.
+When you finish the task, invoke `doc-updater` a second time if any doc actually needs updating.
 
 ## Pre-commit / pre-PR gate (automatic)
 Before ANY `git commit`, `git switch -c`, `gh pr create`, or `gh repo create`:

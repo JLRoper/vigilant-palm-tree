@@ -11,8 +11,8 @@ export function startBattle(state: GameState, attackerId: HeroId, defenderId: He
 }
 
 // The actual combat resolution (stat comparison, counters, retreat) is
-// server-authoritative — see POST /games/:name/resolve-battle and
-// packages/engine/src/combat/resolveBattle.ts — because it needs the
+// server-authoritative — see POST /games/:name/commands (kind: "ResolveBattle")
+// and packages/engine/src/combat/resolveBattle.ts — because it needs the
 // DB-backed unit-type catalog. This just closes out the local BATTLE phase
 // once the caller has the server's result in hand; heroes/players are
 // merged in separately.

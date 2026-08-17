@@ -1,13 +1,13 @@
-import { api, endTurn, spendMovement, resolveBattle } from "../io/api";
+import { api, endTurn, spendMovement, resolveBattle, tradeResources, recruitHero, upgradeTownHall, setAutoTrade, reorderStack, captureSettlement } from "../io/api";
 import type { EndTurnResult } from "../io/api";
-import type { GameState, HeroId } from "@heroes/contracts";
+import type { GameState, HeroId, SettlementId, WarehouseResource } from "@heroes/contracts";
 import type { TurnControllerHooks } from "../state/turnController";
 import type { BattleResult } from "@heroes/engine";
 import { pickAiMove as pickAiMoveBrain } from "../ai/aiBrain";
 import type { GameMap } from "../map/gameMap";
 import type { Axial } from "../core/hex";
 import { getMultiplayerSync } from "../io/multiplayerSync";
-import { settings } from "../state/settings";
+import { settings, type HorseVariant } from "../state/settings";
 
 export interface BuildTurnHooksOptions {
   gameName: () => string | null;
@@ -66,23 +66,115 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       lastBattle = null;
       const name = opts.gameName();
       if (!name || !cached) return { state, battle: null };
+      const attackerHeroBefore = state.heroes[cached.attackerId];
+      if (!attackerHeroBefore) return { state, battle: null };
       try {
+        // No longer sends the client's GameState at all (Phase 3 Track A
+        // Week 3+) -- the server loads its own row and its own unit_types
+        // catalog (see server/app/commandHandler.ts's ResolveBattle case),
+        // so this only needs to carry who's attacking whom and on whose
+        // behalf.
         const result = await resolveBattle(name, {
+          actor: attackerHeroBefore.ownerId,
           attackerId: cached.attackerId,
           defenderId: cached.defenderId,
-          state,
         });
         return {
           state: {
             ...state,
-            players: result.players,
-            heroes: result.heroes,
+            heroes: {
+              ...state.heroes,
+              [cached.attackerId]: result.attackerHero,
+              [cached.defenderId]: result.defenderHero,
+            },
           },
           battle: result.battle,
         };
       } catch (e) {
         console.warn("[turnHooks] resolveBattle failed:", e);
         return { state, battle: null };
+      }
+    },
+    onTradeResources: async (
+      actor: number,
+      fromSettlementId: SettlementId,
+      toSettlementId: SettlementId,
+      resource: WarehouseResource,
+      amount: number,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name || resource === "food") return;
+      try {
+        await tradeResources(name, { actor, fromSettlementId, toSettlementId, resource, amount });
+      } catch (e) {
+        console.warn("[turnHooks] tradeResources failed:", e);
+      }
+    },
+    onRecruitHero: async (
+      actor: number,
+      heroName: string,
+      settlementId: SettlementId,
+      horseVariant: HorseVariant,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await recruitHero(name, { actor, heroName, settlementId, horseVariant });
+      } catch (e) {
+        console.warn("[turnHooks] recruitHero failed:", e);
+      }
+    },
+    onUpgradeTownHall: async (
+      actor: number,
+      settlementId: SettlementId,
+      targetLevel: 2 | 3,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await upgradeTownHall(name, { actor, settlementId, targetLevel });
+      } catch (e) {
+        console.warn("[turnHooks] upgradeTownHall failed:", e);
+      }
+    },
+    onSetAutoTrade: async (
+      actor: number,
+      settlementId: SettlementId,
+      autoTrade: boolean,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await setAutoTrade(name, { actor, settlementId, autoTrade });
+      } catch (e) {
+        console.warn("[turnHooks] setAutoTrade failed:", e);
+      }
+    },
+    onReorderStack: async (
+      actor: number,
+      heroId: HeroId,
+      fromIdx: number,
+      toIdx: number,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await reorderStack(name, { actor, heroId, fromIdx, toIdx });
+      } catch (e) {
+        console.warn("[turnHooks] reorderStack failed:", e);
+      }
+    },
+    onCaptureSettlement: async (
+      actor: number,
+      heroId: HeroId,
+      settlementId: SettlementId,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await captureSettlement(name, { actor, heroId, settlementId });
+      } catch (e) {
+        console.warn("[turnHooks] captureSettlement failed:", e);
       }
     },
     pickAiMove: (state: GameState, heroId: HeroId) => {

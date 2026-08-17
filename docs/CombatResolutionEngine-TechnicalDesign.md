@@ -6,13 +6,13 @@ design — see [`../feature-plans/CombatResolutionEngine.md`](../feature-plans/C
 locked design decisions this implements. Update this doc as the
 implementation changes; it should always describe what's actually there.
 
-**Framing:** the resolver at [`shared/combat/resolveBattle.ts`](../shared/combat/resolveBattle.ts) documented here is the **temporary default auto-resolver** that runs server-side on `POST /api/games/:name/resolve-battle` whenever heroes collide on the adventure map. It is auto in the sense that no player drives it; the eventual target is the **tactical (manual) resolver** at [`shared/combat/manualBattle.ts`](../shared/combat/manualBattle.ts) + the dev Test Battle arena at [`src/views/manualBattleArena.ts`](../src/views/manualBattleArena.ts), which is the work this engine feeds into. See [`./army.md`](./army.md) for the full status.
+**Framing:** the resolver at [`shared/combat/resolveBattle.ts`](../shared/combat/resolveBattle.ts) documented here is the **temporary default auto-resolver** that runs server-side via the `ResolveBattle` command on `POST /api/games/:name/commands` whenever heroes collide on the adventure map. It is auto in the sense that no player drives it; the eventual target is the **tactical (manual) resolver** at [`shared/combat/manualBattle.ts`](../shared/combat/manualBattle.ts) + the dev Test Battle arena at [`src/views/manualBattleArena.ts`](../src/views/manualBattleArena.ts), which is the work this engine feeds into. See [`./army.md`](./army.md) for the full status.
 
 ## 1. Summary
 
 A pure, deterministic hex-battle resolver (`shared/combat/resolveBattle.ts`) — currently the **temporary default auto-resolver** for adventure-map combat — replaces the old
-"defender just vanishes" stub behind
-`POST /games/:name/resolve-battle`. Given two 8-slot platoon rosters, it plays
+"defender just vanishes" stub behind what is now the `ResolveBattle` command on
+`POST /games/:name/commands`. Given two 8-slot platoon rosters, it plays
 out stat-comparison combat with type advantages, counterattacks, and
 per-side retreat policies, and returns a full result + replayable log. The
 route now applies that result to `heroes` JSONB instead of deleting the
@@ -38,9 +38,9 @@ defender.
   resolver operates on (see §4).
 
 **Downstream (things that now depend on this engine):**
-- `server/routes.ts` `POST /games/:name/resolve-battle` — calls
-  `resolveBattle()` directly (server-authoritative; needs the DB-backed
-  unit-type catalog).
+- `server/app/commandHandler.ts` (`ResolveBattle` command, via
+  `POST /games/:name/commands`) — calls `resolveBattle()` directly
+  (server-authoritative; needs the DB-backed unit-type catalog).
 - `src/state/turnController.ts` `resolveCurrentBattle()` — awaits the
   server's result via `hooks.onBattleResolved` *before* closing out the
   local `BATTLE` phase (previously resolved combat locally, then
@@ -80,8 +80,8 @@ in-repo primitives (`mulberry32`, `Axial`, `node:test`).
                     ┌────────────────┼─────────────────────┐
                     │                                       │
         ┌───────────▼───────────┐                ┌──────────▼─────────┐
-        │ server/routes.ts       │                │ src/state/units.ts  │
-        │ POST .../resolve-battle│                │ Platoon/PlatoonEntry│
+        │ commandHandler.ts      │                │ src/state/units.ts  │
+        │ ResolveBattle command  │                │ Platoon/PlatoonEntry│
         │ - loads unit_types     │                │ /UnitType shapes    │
         │ - normalizePlatoons()  │                │ shared by client &  │
         │ - resolveBattle(...)   │                │ server              │
@@ -266,10 +266,10 @@ ALTER TABLE unit_types DROP COLUMN IF EXISTS strong_against;    -- abandoned ear
 Wired into `server/db.ts:initSchema()` right after the existing
 `004_game_assets.sql` migration; runs on every boot (idempotent).
 
-`GET /api/units` and the resolve-battle handler both now select
+`GET /api/units` and the `ResolveBattle` command handler both now select
 `advantage_type` and map it to `UnitType.advantageType` in application code
-(`server/routes.ts` `UnitTypeRow` → `UnitType` mapping, duplicated in two
-places — see §9 gaps).
+(`UnitTypeRow` → `UnitType` mapping duplicated across `server/routes.ts` and
+`server/app/commandHandler.ts` — see §9 gaps).
 
 `HeroState.stacks` (`src/state/gameState.ts`) is now typed `Platoon[]`
 instead of `UnitStack[]`; `src/entities/hero.ts`'s `Hero` class mirrors the
@@ -277,7 +277,7 @@ same change. `normalizeStacks` → `normalizePlatoons` throughout.
 
 ## 8. API contract change
 
-`POST /games/:name/resolve-battle`:
+The `ResolveBattle` command (`POST /games/:name/commands`):
 - **Request:** unchanged shape (attacker/defender hero IDs; no battle
   location/tile is passed yet — flagged as a known gap, see §9 and the
   feature plan's "Battle grid" section).
@@ -317,9 +317,10 @@ distinct from the feature plan's deliberate "out of scope" list:
   outcome; there's no battle-screen rendering of the log, grid, or
   round-by-round combat (tracked separately as implementation-order.md #7,
   explicitly deferred by the feature plan).
-- **`UnitTypeRow` → `UnitType` mapping is duplicated** in `server/routes.ts`
-  (once for `GET /units`, once inside the resolve-battle handler) — worth
-  collapsing into one helper if a third call site appears.
+- **`UnitTypeRow` → `UnitType` mapping is duplicated** across
+  `server/routes.ts` (`GET /units`) and `server/app/commandHandler.ts`
+  (the `ResolveBattle` command handler) — worth collapsing into one
+  helper if a third call site appears.
 - **No overworld trigger, capture/pillage, or reputation mutation** yet —
   all explicitly out of scope per the feature plan (items #3/#2/#4 in
   `implementation-order.md`).
