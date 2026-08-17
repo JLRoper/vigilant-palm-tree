@@ -13,8 +13,15 @@ import {
   captureSettlement,
   effectiveIncome,
   clampMorale,
+  GameMap,
+  computeSettlementRates,
+  cityViewSizeFor,
+  generateCitySpots,
+  startCharter,
+  cleanupDefeatedHeroCharters,
 } from "@heroes/engine";
-import type { EngineCtx, HydratableGameRow, UnitType, BattleResult } from "@heroes/engine";
+import type { EngineCtx, HydratableGameRow, UnitType, BattleResult, MapSize } from "@heroes/engine";
+import { hexDistance } from "@heroes/contracts";
 import type {
   CharterState,
   Command,
@@ -24,6 +31,7 @@ import type {
   Player,
   SettlementId,
   SettlementState,
+  StartCharterPayload,
 } from "@heroes/contracts";
 import { runEndTurn, clampGrowthRate } from "./turnService";
 import { pool } from "../persistence/db";
@@ -63,6 +71,8 @@ export interface GameRepo {
       round?: number;
       day?: number;
       active_player_id?: number;
+      next_charter_id?: number;
+      next_settlement_id?: number;
     },
   ): Promise<void>;
   insertSettlementSnapshots(gameName: string, snapshots: SettlementSnapshotInput[]): Promise<void>;
@@ -324,14 +334,14 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
           gold: legacyGold,
         },
       );
-      // charterRepo.upsertMany is deliberately NOT called here even though
-      // EndTurn's advanceRound() internally runs advanceCharters() --
-      // finalState.activeCharters is always [] today (StartCharter isn't
-      // ported, see turnService.ts's own "Known limitation" comment above),
-      // so there is nothing to sync yet. hydrate.ts already reads charterRepo
-      // on every load, so the day a charter-creating command IS ported, its
-      // own case just needs to add this call -- EndTurn doesn't need to
-      // pre-emptively call upsertMany([]) against a table nothing writes to.
+      // advanceRound() internally runs advanceCharters() (days-remaining
+      // countdown + settlement founding) whenever this EndTurn wraps the
+      // round -- persist whatever it did to finalState.activeCharters the
+      // same way dualWriteEntities just did for heroes/settlements.
+      // Unconditional, not reference-equality-gated like dualWriteEntities:
+      // charterRepo.upsertMany's own full-sync DELETE is correct (and
+      // cheap) even when activeCharters is unchanged or empty.
+      await deps.charterRepo.upsertMany(command.gameName, finalState.activeCharters);
       await dualWriteEntities(deps, command.gameName, state, finalState);
       // #89: the old /end-turn route wrote one settlement_snapshots row
       // per settlement owned by the ending player (day/gold/warehouse/
@@ -524,6 +534,20 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         },
       };
       const legacyGold = sumPlayerGold(state.players, newHeroes, state.settlements);
+      // A chartering hero can end up as either combatant (traveling heroes
+      // can walk adjacent to an enemy mid-route; constructing heroes can be
+      // attacked at their target) -- mirrors src/state/turnController.ts's
+      // own resolveCurrentBattle(), which likewise only checks the
+      // DEFENDER's defeat this way (an attacker losing while chartering
+      // isn't handled there either; matched as-is rather than expanding
+      // scope beyond that existing client behavior).
+      let finalActiveCharters = state.activeCharters;
+      if (battle.defenderOutcome === "lost_all_troops") {
+        finalActiveCharters = cleanupDefeatedHeroCharters(
+          { ...state, heroes: newHeroes },
+          command.defenderId,
+        ).activeCharters;
+      }
       await deps.gameRepo.saveHeroesAndSettlements(
         command.gameName,
         newHeroes,
@@ -534,6 +558,9 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // reference) -- ResolveBattle never touches settlement state, only
       // the two combatants' hero rows, so this only ever calls heroRepo.
       await dualWriteEntities(deps, command.gameName, state, { heroes: newHeroes, settlements: state.settlements });
+      if (finalActiveCharters !== state.activeCharters) {
+        await deps.charterRepo.upsertMany(command.gameName, finalActiveCharters);
+      }
       const event: EngineEvent = {
         type: "BattleResolved",
         actor: command.actor,
@@ -715,6 +742,76 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlement: result.state.settlements[command.settlementId],
         players: result.state.players,
       };
+    }
+    case "StartCharter": {
+      // No command reconstructs a GameMap server-side before this one --
+      // row.seed/row.map_size (both already selected by GAME_COLUMNS) are
+      // exactly what server/routes.ts's generateAndInsertTiles() used to
+      // produce this same game's persisted `tiles` rows at creation time
+      // (new GameMap(seed, mapSize) there too), so this reconstructs a
+      // byte-identical map deterministically -- pinned down by
+      // test/server/gameMapReconstruction.test.ts.
+      const map = new GameMap(row.seed, row.map_size as MapSize | undefined);
+      if (!map.isPassable(command.targetQ, command.targetR)) {
+        return { ok: false, reason: "impassable_terrain", events: [] };
+      }
+      // Mirrors src/state/turnController.ts's own startCharter() pre-checks:
+      // @heroes/engine's startCharter() (packages/engine/src/charter/
+      // start.ts) has no notion of terrain or map distance at all -- only
+      // the client's caller ever enforced either of these two.
+      for (const s of Object.values(state.settlements)) {
+        if (hexDistance({ q: command.targetQ, r: command.targetR }, { q: s.q, r: s.r }) < 4) {
+          return { ok: false, reason: "too_close_to_settlement", events: [] };
+        }
+      }
+      const computed = computeSettlementRates(map, command.targetQ, command.targetR, 1);
+      const { spots } = generateCitySpots(cityViewSizeFor(1), deps.ctx.rng);
+      // Unlike recruitHero() (self-allocating), startCharter() does not
+      // allocate settlementId/charterId itself -- see
+      // packages/contracts/src/commands/startCharter.ts's header comment.
+      // This is the caller, building both from server-authoritative
+      // counters (state.nextCharterId/nextSettlementId) instead of
+      // trusting anything the client computed for its own local preview.
+      const payload: StartCharterPayload = {
+        heroId: command.heroId,
+        targetQ: command.targetQ,
+        targetR: command.targetR,
+        settlementName: command.settlementName,
+        settlementId: `s${state.nextSettlementId}`,
+        charterId: `ch${state.nextCharterId}`,
+        resourceRates: computed.rates,
+        foundedOnResource: computed.foundedOn,
+        citySpots: spots,
+      };
+      const result = startCharter(state, payload);
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+        {
+          next_charter_id: result.state.nextCharterId,
+          next_settlement_id: result.state.nextSettlementId,
+        },
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      // The one call this whole port exists to add: activeCharters gained
+      // a new entry, and (unlike heroes/settlements) it has no legacy
+      // JSONB column to fall back on -- charterRepo is its only home.
+      await deps.charterRepo.upsertMany(command.gameName, result.state.activeCharters);
+      const event: EngineEvent = {
+        type: "CharterStarted",
+        actor: command.actor,
+        heroId: command.heroId,
+        charterId: payload.charterId,
+        settlementId: payload.settlementId,
+        targetQ: command.targetQ,
+        targetR: command.targetR,
+      };
+      await deps.eventRepo.append(command.gameName, event.type, event);
+      return { ok: true, events: [event], hero: result.state.heroes[command.heroId] };
     }
   }
 

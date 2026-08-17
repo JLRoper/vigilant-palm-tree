@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type {
+  CharterState,
   Command,
   HeroId,
   HeroState,
@@ -11,6 +12,8 @@ import type {
   SettlementState,
 } from "@heroes/contracts";
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
+import { GameMap } from "@heroes/engine";
+import { hexDistance } from "@heroes/contracts";
 import { handleCommand, handleCommandTransactional } from "../../server/app/commandHandler";
 import {
   createMockCharterRepo,
@@ -109,6 +112,39 @@ function makeDeps(row: HydratableGameRow, unitTypes: UnitType[] = []) {
     charterRepo,
     deps: { gameRepo, eventRepo, heroRepo, settlementRepo, charterRepo, ctx: { rng: () => 0.5, catalog: { unitTypes } } },
   };
+}
+
+// StartCharter test support: rather than hand-pick (q,r) coordinates that
+// happen to work for a specific seed (fragile against any future change to
+// packages/engine/src/map/gameMap.ts's terrain generation), search the same
+// GameMap server/app/commandHandler.ts's StartCharter case itself
+// reconstructs for a hex that actually satisfies its checks.
+function findChartersTarget(
+  map: GameMap,
+  avoid: Array<{ q: number; r: number }>,
+  minDist = 4,
+): { q: number; r: number } {
+  for (let r = 0; r < map.height; r++) {
+    for (let q = 0; q < map.width; q++) {
+      if (!map.isPassable(q, r)) continue;
+      if (avoid.some((a) => hexDistance({ q, r }, a) < minDist)) continue;
+      return { q, r };
+    }
+  }
+  throw new Error("findChartersTarget: no valid target hex found for this seed/mapSize");
+}
+
+function findTooCloseButPassableTarget(map: GameMap, settlement: { q: number; r: number }): { q: number; r: number } {
+  for (let dr = -3; dr <= 3; dr++) {
+    for (let dq = -3; dq <= 3; dq++) {
+      if (dq === 0 && dr === 0) continue;
+      const q = settlement.q + dq;
+      const r = settlement.r + dr;
+      if (!map.isPassable(q, r)) continue;
+      if (hexDistance({ q, r }, settlement) < 4) return { q, r };
+    }
+  }
+  throw new Error("findTooCloseButPassableTarget: no valid target hex found for this seed/mapSize");
 }
 
 test("MoveHero succeeds, persists the new position, and emits HeroMoved", async () => {
@@ -438,6 +474,71 @@ test("ResolveBattle rejects a defenderId that isn't actually adjacent to the att
 const result = await handleCommand(command, deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "not_adjacent");
+});
+
+test("ResolveBattle cleans up the defender's charter when it loses all troops mid-charter, and persists the removal via charterRepo", async () => {
+  // Closes the gap flagged for the StartCharter port
+  // (plan/2026-08-17-consolidated-phase-1-5-track-map.md §5.1 R5): once
+  // charters are server-persisted, a chartering hero killed in a
+  // server-resolved battle must not leave an orphaned charter row behind.
+  // Mirrors src/state/turnController.ts's own resolveCurrentBattle(),
+  // which runs the identical cleanupDefeatedHeroCharters() call
+  // client-side today.
+  const h0 = makeHero("h0", 0, 2, 2, { stacks: [makeSingleEntryPlatoon("hero_unit", 10)] });
+  const h1 = makeHero("h1", 1, 3, 2, {
+    gold: 40,
+    stacks: [makeSingleEntryPlatoon("weak_unit", 1)],
+    isChartering: true,
+    charterId: "ch0",
+  });
+  const s0 = makeSettlement("s0", 0, 2, 2);
+  const row = makeRow([h0, h1], [s0]);
+  const { deps, charterRepo, heroRepo, settlementRepo } = makeDeps(row, RESOLVE_BATTLE_UNIT_TYPES);
+  // activeCharters only ever comes from the granular path
+  // (server/persistence/hydrate.ts) -- seed hero/settlementRepo too so
+  // hydrateFromRepos() doesn't fall back to the JSONB row (which always
+  // hydrates activeCharters as []).
+  heroRepo.rows["test-game"] = { h0, h1 };
+  settlementRepo.rows["test-game"] = { s0 };
+  const charter: CharterState = {
+    id: "ch0",
+    heroId: "h1",
+    ownerId: 1,
+    targetQ: 3,
+    targetR: 2,
+    settlementName: "Doomed Town",
+    phase: "traveling",
+    daysRemaining: 10,
+    settlementId: "s5",
+    resourceRates: {},
+    foundedOnResource: null,
+    citySpots: [],
+  };
+  charterRepo.rows["test-game"] = [charter];
+
+  const command: Command = { kind: "ResolveBattle", gameName: "test-game", actor: 0, attackerId: "h0", defenderId: "h1" };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.battle?.defenderOutcome, "lost_all_troops");
+  assert.equal(charterRepo.calls.length, 1, "cleanupDefeatedHeroCharters removing ch0 should trigger a charterRepo sync");
+  assert.deepEqual(charterRepo.calls[0].value, []);
+  assert.equal(charterRepo.rows["test-game"].length, 0);
+});
+
+test("ResolveBattle never touches charterRepo when the defender isn't chartering", async () => {
+  const row = makeRow(
+    [
+      makeHero("h0", 0, 2, 2, { stacks: [makeSingleEntryPlatoon("hero_unit", 10)] }),
+      makeHero("h1", 1, 3, 2, { gold: 40, stacks: [makeSingleEntryPlatoon("weak_unit", 1)] }),
+    ],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { deps, charterRepo } = makeDeps(row, RESOLVE_BATTLE_UNIT_TYPES);
+  const command: Command = { kind: "ResolveBattle", gameName: "test-game", actor: 0, attackerId: "h0", defenderId: "h1" };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.battle?.defenderOutcome, "lost_all_troops");
+  assert.equal(charterRepo.calls.length, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -804,6 +905,131 @@ test("CaptureSettlement rejects a hero that isn't actually standing on the settl
 });
 
 // ---------------------------------------------------------------------------
+// StartCharter (plan/2026-08-17-consolidated-phase-1-5-track-map.md §5.1
+// R5): the last Track 3.A-era command port, closing a real client/server
+// desync bug (charter state applied locally was previously silently
+// reverted by the next EndTurn round-trip). Follows RecruitHero's own
+// two-test template (happy path + a validation-gap rejection), plus a
+// dedicated regression test for the counter-persistence gap this port's
+// own audit found (server/persistence/repositories/gameRepo.ts's
+// next_charter_id/next_settlement_id columns).
+// ---------------------------------------------------------------------------
+
+const CHARTER_WAREHOUSE: SettlementState["warehouse"] = { wood: 100, stone: 100, iron: 0, arcane: 0, food: 0 };
+
+test("StartCharter founds a new charter, deducts hero gold and settlement warehouse, and persists it via charterRepo", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { gold: 5000 })],
+    [makeSettlement("s0", 0, 2, 2, { warehouse: CHARTER_WAREHOUSE })],
+  );
+  const { gameRepo, eventRepo, heroRepo, settlementRepo, charterRepo, deps } = makeDeps(row);
+  const map = new GameMap(row.seed, undefined);
+  const target = findChartersTarget(map, [{ q: 2, r: 2 }]);
+  const command: Command = {
+    kind: "StartCharter",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    targetQ: target.q,
+    targetR: target.r,
+    settlementName: "New Town",
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true, `expected StartCharter to succeed, got reason=${result.reason}`);
+  assert.equal(result.hero?.isChartering, true);
+  assert.equal(result.hero?.charterId, "ch0");
+  // CHARTER_GOLD_COST is 2500, CHARTER_WAREHOUSE_COST is {wood:20, stone:15}
+  // (packages/engine/src/charter/start.ts).
+  assert.equal(gameRepo.rows["test-game"].heroes.h0.gold, 2500);
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.warehouse.wood, 80);
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.warehouse.stone, 85);
+  assert.equal(gameRepo.rows["test-game"].next_charter_id, 1);
+  assert.equal(gameRepo.rows["test-game"].next_settlement_id, 2);
+  assert.equal(heroRepo.calls.length, 1);
+  assert.equal(settlementRepo.calls.length, 1);
+  assert.equal(charterRepo.calls.length, 1);
+  assert.equal(charterRepo.calls[0].value.length, 1);
+  assert.equal(charterRepo.calls[0].value[0].id, "ch0");
+  assert.equal(charterRepo.calls[0].value[0].settlementId, "s1");
+  assert.equal(charterRepo.calls[0].value[0].phase, "traveling");
+  assert.equal(eventRepo.events.map((e) => e.kind).join(","), "CharterStarted");
+});
+
+test("StartCharter rejects a target hex too close to an existing settlement -- a check the engine function itself doesn't make", async () => {
+  // @heroes/engine's startCharter() (packages/engine/src/charter/start.ts)
+  // has no distance-from-settlement check at all -- that guarantee existed
+  // purely because src/state/turnController.ts's own startCharter() method
+  // pre-checked it client-side before ever calling the engine reducer.
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { gold: 5000 })],
+    [makeSettlement("s0", 0, 2, 2, { warehouse: CHARTER_WAREHOUSE })],
+  );
+  const { deps } = makeDeps(row);
+  const map = new GameMap(row.seed, undefined);
+  const target = findTooCloseButPassableTarget(map, { q: 2, r: 2 });
+  const command: Command = {
+    kind: "StartCharter",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    targetQ: target.q,
+    targetR: target.r,
+    settlementName: "Too Close",
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "too_close_to_settlement");
+});
+
+test("StartCharter allocates a distinct charterId/settlementId for a second charter in the same game -- next_charter_id/next_settlement_id counter-persistence regression", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { gold: 5000 }), makeHero("h1", 0, 2, 2, { gold: 5000 })],
+    [makeSettlement("s0", 0, 2, 2, { warehouse: CHARTER_WAREHOUSE })],
+  );
+  const { gameRepo, charterRepo, deps } = makeDeps(row);
+  const map = new GameMap(row.seed, undefined);
+  const target1 = findChartersTarget(map, [{ q: 2, r: 2 }]);
+  const target2 = findChartersTarget(map, [{ q: 2, r: 2 }, target1]);
+
+  const command1: Command = {
+    kind: "StartCharter",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    targetQ: target1.q,
+    targetR: target1.r,
+    settlementName: "First Town",
+  };
+  const result1 = await handleCommand(command1, deps);
+  assert.equal(result1.ok, true, `expected first StartCharter to succeed, got reason=${result1.reason}`);
+
+  // Loads a fresh row via deps.gameRepo.load() again, exactly like a
+  // second, independent HTTP request would -- if next_charter_id/
+  // next_settlement_id weren't actually persisted and re-read (the bug
+  // this test guards against), this would collide with command1's ids.
+  const command2: Command = {
+    kind: "StartCharter",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h1",
+    targetQ: target2.q,
+    targetR: target2.r,
+    settlementName: "Second Town",
+  };
+  const result2 = await handleCommand(command2, deps);
+  assert.equal(result2.ok, true, `expected second StartCharter to succeed, got reason=${result2.reason}`);
+
+  const charters = charterRepo.rows["test-game"];
+  assert.equal(charters.length, 2);
+  assert.equal(charters[0].id, "ch0");
+  assert.equal(charters[1].id, "ch1");
+  assert.equal(charters[0].settlementId, "s1");
+  assert.equal(charters[1].settlementId, "s2");
+  assert.equal(gameRepo.rows["test-game"].next_charter_id, 2);
+  assert.equal(gameRepo.rows["test-game"].next_settlement_id, 3);
+});
+
+// ---------------------------------------------------------------------------
 // Phase 4 Track A (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md):
 // dual-write into heroRepo/settlementRepo alongside the existing
 // gameRepo.saveHeroesAndSettlements JSONB write, and the granular-first
@@ -921,7 +1147,7 @@ test("SetAutoTrade rejecting as a no-op change never reaches the dual-write step
   assert.equal(settlementRepo.calls.length, 0);
 });
 
-test("EndTurn dual-writes both heroRepo and settlementRepo but never calls charterRepo (StartCharter isn't ported yet)", async () => {
+test("EndTurn dual-writes heroRepo/settlementRepo and syncs charterRepo (a no-op full-sync with no active charters)", async () => {
   const row = makeRow(
     [makeHero("h0", 0, 2, 2, { movementRemaining: 2, gold: 15 })],
     [makeSettlement("s0", 0, 2, 2)],
@@ -933,7 +1159,12 @@ test("EndTurn dual-writes both heroRepo and settlementRepo but never calls chart
   assert.equal(heroRepo.calls.length, 1);
   assert.equal(heroRepo.calls[0].value.h0.movementRemaining, 7);
   assert.equal(settlementRepo.calls.length, 1);
-  assert.equal(charterRepo.calls.length, 0, "charterRepo.upsertMany is not wired until a charter-creating command is ported");
+  // advanceRound()'s advanceCharters() call needs its result synced every
+  // EndTurn now that StartCharter is ported -- charterRepo.upsertMany is
+  // safe (and cheap) to call unconditionally even when there's nothing to
+  // sync yet.
+  assert.equal(charterRepo.calls.length, 1, "charterRepo.upsertMany now runs every EndTurn");
+  assert.deepEqual(charterRepo.calls[0].value, []);
 });
 
 test("read-path cutover: a game with granular hero/settlement rows hydrates from those instead of the (differing) legacy JSONB row", async () => {

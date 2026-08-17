@@ -1,5 +1,5 @@
 import type { Axial } from "../geometry";
-import type { HeroId, HorseVariantId, PlayerSeat, SettlementId } from "../ids";
+import type { CharterId, HeroId, HorseVariantId, PlayerSeat, SettlementId } from "../ids";
 import type { TransferDirection } from "../gameState";
 import type { WarehouseResource } from "../resources";
 
@@ -85,4 +85,13 @@ export type EngineEvent =
       heroId: HeroId;
       settlementId: SettlementId;
       previousOwnerId: number | null;
+    }
+  | {
+      type: "CharterStarted";
+      actor: PlayerSeat;
+      heroId: HeroId;
+      charterId: CharterId;
+      settlementId: SettlementId;
+      targetQ: number;
+      targetR: number;
     };

@@ -44,6 +44,8 @@ export interface GameRow {
   settlements: Record<SettlementId, SettlementState>;
   map_size: string;
   lobby: LobbyState;
+  next_charter_id: number;
+  next_settlement_id: number;
   // TIMESTAMPTZ columns - node-postgres returns these as Date, not string.
   created_at: Date;
   updated_at: Date;
@@ -57,7 +59,7 @@ export class GameNotFoundError extends Error {
 }
 
 const GAME_COLUMNS =
-  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, created_at, updated_at";
+  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, next_charter_id, next_settlement_id, created_at, updated_at";
 
 export interface SaveHeroesAndSettlementsExtra {
   players?: Player[];
@@ -68,6 +70,12 @@ export interface SaveHeroesAndSettlementsExtra {
   round?: number;
   day?: number;
   active_player_id?: number;
+  // StartCharter's counter-persistence gap (plan/2026-08-17-consolidated-
+  // phase-1-5-track-map.md §5.1 R5): these two must move atomically with
+  // heroes/settlements too, or a second StartCharter in the same game
+  // before a reload can collide charterId/settlementId with the first.
+  next_charter_id?: number;
+  next_settlement_id?: number;
 }
 
 // One row per settlement snapshot, matching the columns the now-dead
@@ -157,6 +165,14 @@ export function createGameRepo(db: Queryable): GameRepo {
       if (extra?.active_player_id !== undefined) {
         sets.push(`active_player_id = $${i++}`);
         vals.push(extra.active_player_id);
+      }
+      if (extra?.next_charter_id !== undefined) {
+        sets.push(`next_charter_id = $${i++}`);
+        vals.push(extra.next_charter_id);
+      }
+      if (extra?.next_settlement_id !== undefined) {
+        sets.push(`next_settlement_id = $${i++}`);
+        vals.push(extra.next_settlement_id);
       }
       sets.push("updated_at = now()");
       vals.push(name);
