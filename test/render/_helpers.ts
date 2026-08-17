@@ -139,7 +139,7 @@ export function makeNoopPaint2DDep(): Paint2DDep {
       resolveSprite: () => undefined,
     },
     skybox: null,
-    getResourceStyle: () => "rect",
+    getResourceStyle: () => "rune-stone",
     getSpriteVariant: () => 1,
     getParallaxEnabled: () => false,
     getParallaxLayerCount: () => 4,

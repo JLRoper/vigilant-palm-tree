@@ -75,6 +75,13 @@ export function paintScene(
   deps: Paint2DDep,
   frame?: Paint2DFrame,
 ): void {
+  // Fail-fast: a citySkybox node carries its own viewport dimensions, but the
+  // real skybox painter (Commit 7 of the design doc) needs the surrounding
+  // frame for the parallax draw position math. Catch missing frames now so
+  // the wiring stays tidy once the stub turns into a real Canvas call.
+  if (frame === undefined && nodes.some((n) => n.kind === "citySkybox")) {
+    throw new Error("paintScene: citySkybox node requires a Paint2DFrame (viewport dimensions) but none was provided");
+  }
   for (const node of nodes) {
     switch (node.kind) {
       case "terrainHex":
@@ -158,6 +165,15 @@ export function paintScene(
       case "battleFloatingText":
         paintBattleFloatingText(ctx, node, deps);
         break;
+      default: {
+        // Exhaustiveness check: adding a new SceneNode.kind that isn't handled
+        // above becomes a compile error here (since the `never` assignability
+        // fails). If a runtime-SceneNode slips through somehow (downcasted or
+        // from a future plugin), throw instead of silently no-op.
+        const _exhaustive: never = node;
+        void _exhaustive;
+        throw new Error(`paintScene: unknown SceneNode.kind: ${(node as { kind: string }).kind}`);
+      }
     }
   }
 }

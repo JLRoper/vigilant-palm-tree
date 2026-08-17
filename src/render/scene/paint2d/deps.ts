@@ -18,7 +18,7 @@ import type { ResourceType } from "../../../map/resourceTiles";
 import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase, GenerationStyle } from "@heroes/contracts";
 import type { BattleSide } from "@heroes/engine";
 import type { Faction, HeroDirection } from "../../../entities/hero";
-import type { HorseVariant } from "../../../state/settings";
+import type { HorseVariant, ResourceStyle } from "../../../state/settings";
 
 // String-branded alias for the upstream SpriteKey template-literal type
 // (declared in src/render/assetDescriptors.ts). We can't import the upstream
@@ -72,7 +72,7 @@ export interface Paint2DDep {
   // Decision-time getters. The painter never reads settings() directly, because
   // settings is a singleton with a subscribe cleanup lifecycle and paint2d/
   // shouldn't hold a reference to it.
-  readonly getResourceStyle: () => string;
+  readonly getResourceStyle: () => ResourceStyle;
   readonly getSpriteVariant: () => number;
   readonly getParallaxEnabled: () => boolean;
   readonly getParallaxLayerCount: () => number;

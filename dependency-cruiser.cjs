@@ -101,7 +101,7 @@ module.exports = {
         "paint2d/ must stay pure-importable from node:test (no Vite ?url asset-loader coupling). The forbidden set is the same one revision note 4 nailed: every file known to transitively pull in src/render/assetDescriptors.ts's ~100 ?url PNG imports, or src/render/sprites.ts (which imports the *Key helpers from assetDescriptors), or the cityBuildingDraw.ts barrel (which imports buildingKey). Settings state is a value-import singleton with a cleanup lifecycle, so its value form is also forbidden. The default-deps builder at src/render/paint2dDefaults.ts and the skybox module at src/render/skybox.ts are the *only* files in the painter project allowed to touch these -- they live outside paint2d/.",
       from: { path: "^src/render/scene/paint2d/" },
       to: {
-        path: "^src/render/(assetDescriptors|assets|sprites|cityRenderer|cityBuildingDraw\\.ts|cityBuildingDraw/spots)\\.(ts|$)",
+        path: "^src/render/(assetDescriptors|assets|sprites|cityRenderer|cityBuildingDraw|cityBuildingDraw/spots)\\.(ts|$)",
         dependencyTypesNot: ["type-only"],
       },
     },
