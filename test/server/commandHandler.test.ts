@@ -234,7 +234,11 @@ const SOLO_PLAYER: Player[] = [
 
 test("EndTurn advances to the next player without wrapping the round", async () => {
   const row = makeRow(
-    [makeHero("h0", 0, 2, 2, { movementRemaining: 2 })],
+    // gold: 15 so the legacy-gold assertion below is actually
+    // exercising something -- neither applyEndOfTurnDetailed (no round
+    // wrap, so no hero upkeep) nor this settlement's income (goldTax: 0
+    // by default) touch it, so it should pass through unchanged.
+    [makeHero("h0", 0, 2, 2, { movementRemaining: 2, gold: 15 })],
     [makeSettlement("s0", 0, 2, 2)],
   );
   const { gameRepo, eventRepo, deps } = makeDeps(row);
@@ -248,11 +252,18 @@ test("EndTurn advances to the next player without wrapping the round", async () 
   // h0 belongs to player 0, who just ended their turn.
   assert.equal(gameRepo.rows["test-game"].heroes.h0.movementRemaining, 7);
   assert.equal(gameRepo.rows["test-game"].active_player_id, 1);
-  // turn_ended always fires; ai_turn_started also fires here because
+  // Legacy `gold` column recomputation (server/app/commandHandler.ts's
+  // sumPlayerGold) actually gets persisted -- h0's 15 is the only gold
+  // anywhere in this row's heroes/settlements.
+  assert.equal(gameRepo.rows["test-game"].gold, 15);
+  // The canonical TurnEnded EngineEvent (matching MoveHero/TransferGold's
+  // own append-what-you-return convention) always fires first; turn_ended
+  // is the old /end-turn route's separate legacy-shaped audit-trail entry,
+  // which always fires too; ai_turn_started also fires here because
   // PLAYERS[1] (the next player) is faction "ai" -- matching the old
   // /end-turn route's same check.
-  assert.equal(eventRepo.events.map((e) => e.kind).join(","), "turn_ended,ai_turn_started");
-  assert.equal((eventRepo.events[0].payload as { playerId: number }).playerId, 0);
+  assert.equal(eventRepo.events.map((e) => e.kind).join(","), "TurnEnded,turn_ended,ai_turn_started");
+  assert.equal((eventRepo.events[1].payload as { playerId: number }).playerId, 0);
 });
 
 test("EndTurn wraps the round, advances settlement upgrades, and applies weekly upkeep on day%7 -- closing the gaps the old /end-turn route left client-trusted", async () => {
@@ -293,5 +304,5 @@ test("EndTurn wraps the round, advances settlement upgrades, and applies weekly 
   assert.equal(h0.gold, 0);
   assert.equal(h0.troops, 0);
 
-  assert.equal(eventRepo.events.map((e) => e.kind).join(","), "turn_ended,round_ended,round_started");
+  assert.equal(eventRepo.events.map((e) => e.kind).join(","), "TurnEnded,turn_ended,round_ended,round_started");
 });

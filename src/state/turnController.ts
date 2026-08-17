@@ -383,11 +383,7 @@ export class TurnController {
       const endedPlayerId = this.state.activePlayerId;
       const endedRound = this.state.round;
       const oldPhase = this.state.phase.kind;
-      this.hooks.logEvent({
-        type: "turn_ended",
-        payload: { playerId: endedPlayerId, round: endedRound },
-      });
-      bus.emit({ type: "turn:ended", playerId: endedPlayerId });
+      const stateBeforeEnd = this.state;
 
       // Server is now fully authoritative for the whole end-turn pipeline
       // (production/auto-trade/consumption, the next-player-or-round-wrap
@@ -398,6 +394,23 @@ export class TurnController {
       // activePlayerId, via the hook), and what comes back is the full
       // merged result -- see src/game/turnHooks.ts's onHumanTurnEnd.
       this.state = await this.hooks.onHumanTurnEnd(this.state);
+
+      // turnHooks.ts's onHumanTurnEnd returns the exact same state
+      // reference, untouched, when it has nothing to do (no game name) or
+      // when the server request itself fails (it catches and
+      // console.warns internally, then returns the state it was given).
+      // Bail out before logging/emitting anything below in that case --
+      // otherwise a failed end-turn request would still tell the event
+      // log and event bus a turn transition happened (and could
+      // re-trigger advanceAutoTravel()) when nothing actually changed
+      // server-side.
+      if (this.state === stateBeforeEnd) return;
+
+      this.hooks.logEvent({
+        type: "turn_ended",
+        payload: { playerId: endedPlayerId, round: endedRound },
+      });
+      bus.emit({ type: "turn:ended", playerId: endedPlayerId });
 
       const newPhase = this.state.phase.kind;
       if (oldPhase !== newPhase) {

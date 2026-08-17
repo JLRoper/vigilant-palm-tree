@@ -8,10 +8,19 @@ import type { EventRepo, GameRepo } from "../../server/app/commandHandler";
 // real Postgres-backed implementation; this file lets Track 3.A's own
 // tests run without needing a live DB connection.
 
+// HydratableGameRow (packages/engine/src/hydrate.ts) has no `gold` field --
+// it's a structural subset for hydrateGameState(), and legacy `gold` isn't
+// something hydration reads. The real GameRow (server/persistence/
+// repositories/gameRepo.ts) does carry it, though, and saveHeroesAndSettlements's
+// `extra.gold` needs somewhere to land here too, or the mock silently drops
+// it while the real repo persists it -- widen the stored row type by one
+// optional field rather than diverge from GameRepo's actual contract.
+type MockGameRow = HydratableGameRow & { gold?: number };
+
 export function createMockGameRepo(
   seed: Record<string, HydratableGameRow>,
-): GameRepo & { rows: Record<string, HydratableGameRow> } {
-  const rows: Record<string, HydratableGameRow> = { ...seed };
+): GameRepo & { rows: Record<string, MockGameRow> } {
+  const rows: Record<string, MockGameRow> = { ...seed };
   return {
     rows,
     async load(name: string): Promise<HydratableGameRow> {
@@ -41,6 +50,7 @@ export function createMockGameRepo(
         ...(extra?.round !== undefined ? { round: extra.round } : {}),
         ...(extra?.day !== undefined ? { day: extra.day } : {}),
         ...(extra?.active_player_id !== undefined ? { active_player_id: extra.active_player_id } : {}),
+        ...(extra?.gold !== undefined ? { gold: extra.gold } : {}),
       };
     },
   };

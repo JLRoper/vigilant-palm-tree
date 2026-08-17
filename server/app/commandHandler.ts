@@ -208,12 +208,23 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         activePlayerId: finalState.activePlayerId,
         wrapped,
       };
-      // Preserves the old /end-turn route's exact game_events `kind`
-      // strings (turn_ended/round_ended/round_started/ai_turn_started) --
-      // nothing in this codebase currently reads game_events by kind
-      // (confirmed: GET /games/:name/events has no client caller yet), but
-      // keeping the same audit-trail shape is free and avoids silently
-      // changing it for whatever eventually does.
+      // MoveHero/TransferGold above both persist their own returned
+      // EngineEvent verbatim (kind === event.type, payload === the whole
+      // event) -- do the same here so game_events.kind always has a
+      // "TurnEnded" row matching what this command actually returns to
+      // its caller. Without this, EndTurn was the only command whose
+      // result.events entry never made it into the DB event stream at
+      // all under its own name, which is exactly the kind of
+      // per-command inconsistency a future kind-based consumer of
+      // game_events would trip over.
+      await deps.eventRepo.append(command.gameName, event.type, event);
+      // In addition to that, preserve the old /end-turn route's exact
+      // game_events `kind` strings (turn_ended/round_ended/round_started/
+      // ai_turn_started) as their own rows -- nothing in this codebase
+      // currently reads game_events by kind (confirmed: GET
+      // /games/:name/events has no client caller yet), but keeping the
+      // same audit-trail shape is free and avoids silently changing it
+      // for whatever eventually does.
       await deps.eventRepo.append(command.gameName, "turn_ended", {
         playerId: command.actor,
         round: row.round,

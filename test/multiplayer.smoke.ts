@@ -89,35 +89,33 @@ async function run() {
   const started = (await start.json()) as { lobby: { startedAt?: string } };
   assert.ok(started.lobby.startedAt, "startedAt should be set");
 
-  // 7. Permission gate: attempt to move seat 0's hero via the command
-  //    endpoint, claiming to act as seat 0 -- should only succeed (200)
-  //    when seat 0 is actually the active player; otherwise the
-  //    turn-ownership guard in server/app/commandHandler.ts rejects with
-  //    403. (Movement moved from PATCH /games/:name {action:
+  // 7. Permission gate: POST /commands MoveHero, claiming to act as
+  //    whichever seat is NOT the currently active player -- the
+  //    turn-ownership guard in server/app/commandHandler.ts must reject
+  //    with 403 regardless of which seat that happens to be, so this
+  //    doesn't need to guess (or depend on) which seat the lobby started
+  //    active. (Movement moved from PATCH /games/:name {action:
   //    "spend_movement"} to POST /games/:name/commands {kind: "MoveHero"}
   //    in Phase 3 Track A Week 2 -- see plan/2026-08-16-phase-3-parallel-dev-plan.md.)
   const gameRes = await ctx.get(`${API_URL}/api/games/${lobbyGameName}`);
-  const game = (await gameRes.json()) as { heroes: Record<string, { id: string; ownerId: number; q: number; r: number }> };
+  const game = (await gameRes.json()) as {
+    active_player_id: number;
+    heroes: Record<string, { id: string; ownerId: number; q: number; r: number }>;
+  };
   const seat0Hero = Object.values(game.heroes).find((h) => h.ownerId === 0);
   assert.ok(seat0Hero, "seat 0 hero should exist");
+  const nonActiveActor = game.active_player_id === 0 ? 1 : 0;
   const badMove = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/commands`, {
     data: {
       kind: "MoveHero",
-      actor: 0,
+      actor: nonActiveActor,
       heroId: seat0Hero!.id,
       fromTile: { q: seat0Hero!.q, r: seat0Hero!.r },
       toTile: { q: seat0Hero!.q + 1, r: seat0Hero!.r },
       cost: 1,
     },
   });
-  // Whoever is currently active may or may not be seat 0; the test's strict
-  // assertion below only fires when the active player is not seat 0.
-  if (game.active_player_id === 0 || (game as unknown as { active_player_id?: number }).active_player_id === 0) {
-    // Active player IS seat 0, so the gate permits the move (200).
-    assert.ok([200].includes(badMove.status()), `expected 200 when active is owner, got ${badMove.status()}`);
-  } else {
-    assert.equal(badMove.status(), 403, "non-owner move should be 403");
-  }
+  assert.equal(badMove.status(), 403, "non-active-player move should be 403");
 
   await ctx.delete(`${API_URL}/api/games/${lobbyGameName}`).catch(() => {});
   await ctx.dispose();
