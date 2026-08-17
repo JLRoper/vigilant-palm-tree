@@ -2,8 +2,8 @@ import type { Axial } from "../core/hex";
 import type { Terrain } from "../map/terrain";
 import type { ResourceType } from "../map/resourceTiles";
 import type {
-  GameState,
   HeroState,
+  HorseVariantId,
   Player,
   SettlementState,
   WarehouseResource,
@@ -61,8 +61,8 @@ export type EndTurnResult = {
 };
 
 export type ResolveBattleResult = {
-  players: Player[];
-  heroes: Record<string, HeroState>;
+  attackerHero: HeroState;
+  defenderHero: HeroState;
   battle: import("@heroes/engine").BattleResult;
 };
 
@@ -234,16 +234,21 @@ export async function spendMovement(
   return result.hero;
 }
 
+// Phase 3 Track A Week 3+: ported from the old dedicated /resolve-battle
+// route to the /commands bus. No longer carries the client's GameState at
+// all -- the server loads its own row, its own unit_types catalog, and
+// re-derives adjacency itself (see server/app/commandHandler.ts's
+// ResolveBattle case) instead of trusting attackerId/defenderId wholesale.
 export async function resolveBattle(
   name: string,
-  payload: { attackerId: string; defenderId: string; state: GameState }
+  payload: { actor: number; attackerId: string; defenderId: string }
 ): Promise<ResolveBattleResult> {
   const res = await fetchWithTimeout(
-    `${BASE}/games/${encodeURIComponent(name)}/resolve-battle`,
+    `${BASE}/games/${encodeURIComponent(name)}/commands`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ kind: "ResolveBattle", ...payload }),
     }
   );
   return json<ResolveBattleResult>(res);
@@ -275,26 +280,99 @@ export async function transferGold(
 }
 
 export type TradeResourcesResult = {
-  from: SettlementState;
-  to: SettlementState;
+  fromSettlement: SettlementState;
+  toSettlement: SettlementState;
 };
 
+// Phase 3 Track A Week 3+: ported from the old dedicated /trade route to
+// the /commands bus.
 export async function tradeResources(
   name: string,
   payload: {
+    actor: number;
     fromSettlementId: string;
     toSettlementId: string;
-    resource: WarehouseResource;
+    resource: Exclude<WarehouseResource, "food">;
     amount: number;
   }
 ): Promise<TradeResourcesResult> {
   const res = await fetchWithTimeout(
-    `${BASE}/games/${encodeURIComponent(name)}/trade`,
+    `${BASE}/games/${encodeURIComponent(name)}/commands`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ kind: "TradeResources", ...payload }),
     }
   );
   return json<TradeResourcesResult>(res);
 }
+
+// The five functions below are new in Phase 3 Track A Week 3+ -- none of
+// RecruitHero/UpgradeTownHall/SetAutoTrade/ReorderStack/CaptureSettlement
+// had any server round-trip at all before this (see this port's PR
+// description's cross-cutting finding). Each is called fire-and-forget
+// from src/game/turnHooks.ts, mirroring onAiMove's existing pattern for
+// MoveHero -- the response bodies are intentionally unused by the callers
+// (client trusts its own already-applied local reducer result; these
+// calls exist purely so the mutation also persists server-side).
+
+export async function recruitHero(
+  name: string,
+  payload: { actor: number; heroName: string; settlementId: string; horseVariant: HorseVariantId }
+): Promise<void> {
+  const res = await fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "RecruitHero", ...payload }),
+  });
+  await json(res);
+}
+
+export async function upgradeTownHall(
+  name: string,
+  payload: { actor: number; settlementId: string; targetLevel: 2 | 3 }
+): Promise<void> {
+  const res = await fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "UpgradeTownHall", ...payload }),
+  });
+  await json(res);
+}
+
+export async function setAutoTrade(
+  name: string,
+  payload: { actor: number; settlementId: string; autoTrade: boolean }
+): Promise<void> {
+  const res = await fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "SetAutoTrade", ...payload }),
+  });
+  await json(res);
+}
+
+export async function reorderStack(
+  name: string,
+  payload: { actor: number; heroId: string; fromIdx: number; toIdx: number }
+): Promise<void> {
+  const res = await fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "ReorderStack", ...payload }),
+  });
+  await json(res);
+}
+
+export async function captureSettlement(
+  name: string,
+  payload: { actor: number; heroId: string; settlementId: string }
+): Promise<void> {
+  const res = await fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "CaptureSettlement", ...payload }),
+  });
+  await json(res);
+}
+

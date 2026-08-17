@@ -55,7 +55,7 @@ flowchart TB
     end
 
     subgraph SERVER["Express API (server/)"]
-        I["routes.ts POST /games/:name/resolve-battle"]
+        I["commandHandler.ts<br/>ResolveBattle case<br/>(via POST /games/:name/commands)"]
         J["PG transaction<br/>read unit_types + game row"]
     end
 
@@ -98,7 +98,7 @@ flowchart TB
     F -->|"'resolve'"| X["TurnController.resolveCurrentBattle()"]
     F -->|"'flee'"| Y["TurnController.cancelMove(attackerId)"]
     X --> H
-    H -->|"fetch /resolve-battle"| I
+    H -->|"fetch /commands (ResolveBattle)"| I
     I --> J
     J --> O
     I --> M
@@ -159,7 +159,7 @@ flowchart TB
    resolved battles proceed.
 4. **Server call.** `TurnController.resolveCurrentBattle()` calls the
    injected hook `hooks.onBattleResolved(state)` (`src/game/turnHooks.ts`
-   → `io/api.resolveBattle()` → `POST /api/games/:name/resolve-battle`).
+   → `io/api.resolveBattle()` → `POST /api/games/:name/commands` (`ResolveBattle` command)).
 5. **Server resolve.** Inside a PG transaction the route loads the game
    row + `unit_types` catalog, normalizes both sides' `stacks` into
    `Platoon[]`, calls `resolveBattleEngine(...)` from
@@ -263,7 +263,7 @@ status bar / battle row / action + log bar:
 | `shared/combat/resolveBattle.ts` | Engine | Auto-resolver turn loop |
 | `shared/combat/manualBattle.ts` | Engine | Interactive engine; `getApproachHexes`, `attackFromHex`, `retreatHero`, `timeOfDayForRound` |
 | `shared/combat/types.ts` | Engine | `BattleResult`, `Combatant`, `BattleSnapshot`, etc. |
-| `server/routes.ts` (`POST /resolve-battle`) | Server | Loads DB row + `unit_types`, runs `resolveBattleEngine`, persists result |
+| `server/app/commandHandler.ts` (`ResolveBattle` via `POST /games/:name/commands`) | Server | Loads DB row + `unit_types`, runs `resolveBattleEngine`, persists result |
 
 ---
 
