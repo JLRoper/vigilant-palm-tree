@@ -169,25 +169,11 @@ function sumPlayerGold(
   return total;
 }
 
-// Phase 4 Track A dual-write step (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md,
-// "Dual-write & read-path design"): every case below that calls
-// gameRepo.saveHeroesAndSettlements (the legacy JSONB write) also calls
-// this right afterward, passing the exact same before/after heroes+
-// settlements it already has in scope. "Only the entities that command
-// actually touched" (the plan's own phrasing) is implemented as a
-// reference-equality check against the pre-command state, not a per-row
-// filter: every @heroes/engine reducer either returns the SAME object
-// reference for a slice it didn't touch (e.g. startMove only ever
-// overrides `heroes`, leaving `settlements` referentially identical to the
-// input state) or a brand-new one for a slice it did -- so comparing
-// references tells us which of heroRepo/settlementRepo to call without
-// hand-annotating each command's domain, and without ever calling
-// upsertMany with anything less than the FULL heroes/settlements record
-// for the game. That matters because both repos' upsertMany is a full sync
-// (deletes any row for the game not present in the given record) -- see
-// heroRepo.ts/settlementRepo.ts's own header comments -- so passing a
-// filtered subset would silently delete every untouched entity instead of
-// skipping the call.
+// Phase 4 Track A dual-write (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md):
+// upsertMany is a full sync (deletes rows missing from the given record),
+// so we use reference-equality against pre-command state to decide which
+// repo(s) actually need syncing, rather than risk a filtered subset that
+// would silently delete untouched rows.
 async function dualWriteEntities(
   deps: CommandDeps,
   gameName: string,

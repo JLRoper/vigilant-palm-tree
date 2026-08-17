@@ -46,27 +46,18 @@ async function seedLegacyGame(
   );
 }
 
-test("hydrateGame falls back to the legacy JSONB row when the granular tables are empty, and logs a telemetry marker", async () => {
+test("hydrateGame falls back to the legacy JSONB row when the granular tables are empty, and logs a telemetry marker", async (t) => {
   await withRollback(async (client) => {
     const name = uniqueName();
     const heroes: Record<HeroId, HeroState> = { h0: makeHero("h0", 0, 2, 2, { gold: 15 }) };
     const settlements: Record<SettlementId, SettlementState> = { s0: makeSettlement("s0", 0, 2, 2) };
     await seedLegacyGame(client, name, heroes, settlements);
 
-    // Plain manual monkey-patch (not node:test's mock API) -- consistent
-    // with how the rest of the test suite has no prior mock.method usage,
-    // and this only needs to capture what console.info was called with.
-    const originalInfo = console.info;
-    const infoCalls: unknown[][] = [];
-    console.info = (...args: unknown[]) => {
-      infoCalls.push(args);
-    };
-    let result;
-    try {
-      result = await hydrateGame(client, name);
-    } finally {
-      console.info = originalInfo;
-    }
+    // node:test's per-test mock API: scoped to this test and
+    // auto-restored afterward, unlike a manual global console.info
+    // reassignment (which can leak across concurrently-running tests).
+    const info = t.mock.method(console, "info", () => {});
+    const result = await hydrateGame(client, name);
 
     assert.equal(result.source, "jsonb");
     // Not compared against the raw `heroes`/`settlements` objects directly:
@@ -83,8 +74,8 @@ test("hydrateGame falls back to the legacy JSONB row when the granular tables ar
     const row = await createGameRepo(client).load(name);
     assert.deepEqual(result.state, hydrateGameState(row));
 
-    assert.equal(infoCalls.length, 1, "expected exactly one telemetry log call");
-    const [message] = infoCalls[0];
+    assert.equal(info.mock.callCount(), 1, "expected exactly one telemetry log call");
+    const [message] = info.mock.calls[0].arguments;
     assert.match(String(message), /\[hydrate\]/);
     assert.match(String(message), new RegExp(name));
   });
