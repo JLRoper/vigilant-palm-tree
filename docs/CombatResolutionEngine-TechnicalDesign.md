@@ -263,8 +263,9 @@ ALTER TABLE unit_types DROP COLUMN IF EXISTS strong_against;    -- abandoned ear
 -- + UPDATE statements tagging all 12 existing units per the table in
 --   CombatResolutionEngine.md
 ```
-Wired into `server/db.ts:initSchema()` right after the existing
-`004_game_assets.sql` migration; runs on every boot (idempotent).
+Auto-discovered by `server/db.ts:initSchema()` (every `*.sql` file in
+`server/migrations/`, sorted by filename — so this one applies right after
+`004_game_assets.sql`); runs on every boot (idempotent).
 
 `GET /api/units` and the `ResolveBattle` command handler both now select
 `advantage_type` and map it to `UnitType.advantageType` in application code

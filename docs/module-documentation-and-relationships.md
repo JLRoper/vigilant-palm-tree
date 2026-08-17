@@ -47,11 +47,11 @@ Browser (Vite SPA)                                  Express API server
 
 | Module | Role | Depends on |
 |---|---|---|
-| `server/db.ts` | `pg.Pool` factory; `initSchema()` applies `schema.sql` + migrations 001–005; `withTransaction()` helper | `pg`, `node:fs`, `node:path` |
+| `server/db.ts` | `pg.Pool` factory; `initSchema()` applies `schema.sql`, then auto-discovers and applies every `*.sql` file in `server/migrations/` (sorted by filename); `withTransaction()` helper | `pg`, `node:fs`, `node:path` |
 | `server/auth.ts` | Email + 6-digit-code auth (SHA-256 hashed codes), bearer-token sessions w/ 30-day TTL, `requireAuth` middleware | `express`, `node:crypto`, `./db` |
 | `server/assetRoutes.ts` | REST for `game_assets`: list, get binary (cache headers), put, delete, batch upload | `express`, `./db` |
 | `server/routes.ts` | Core game API; orchestrates state mutations + combat. Also owns the **lobby** endpoints — `POST /games/:name/lobby/claim` (claim a seat by index + handle; 409 on `lobby_already_started` or `seat_already_claimed`) and `POST /games/:name/lobby/start` — backed by a `lobby` jsonb column (`LobbyState`: `seats`, `humanSlots`, `claimed: Record<seatIndex, { handle, claimedAt }>`, `startedAt`). Runs `validateGameRow` on load paths | `../shared/map/gameMap`, `../shared/rng`, `../src/game/initState`, `../shared/gameState`, `../shared/units`, `../shared/constants`, `../shared/combat/resolveBattle`, `../shared/combat/types`, `../shared/validation/gameIntegrity`, `./assetRoutes`, `./auth` |
-| `server/schema.sql` + `migrations/001..005` | DDL for `games`, `tiles`, `game_events`, `settlement_snapshots`, `resource_transactions`, `game_assets`, `unit_types` + counter columns | — |
+| `server/schema.sql` + `migrations/*.sql` | DDL for `games`, `tiles`, `game_events`, `settlement_snapshots`, `resource_transactions`, `game_assets`, `unit_types` + counter columns | — |
 
 ---
 
