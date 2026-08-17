@@ -11,9 +11,9 @@
 ```
 Phase 1  Workspaces & Contracts foundation              [✅ DONE]
 Phase 2  Pure deterministic engine extraction           [✅ DONE]
-Phase 3  Server Command Loop & Repositories             [🟡 TRACK A DONE / TRACK B PARTIAL]
-   ├── 3.A  Command bus, EngineCtx, command handlers    [✅ Dev A — PRs #86, #87, #91 merged]
-   └── 3.B  Typed repositories & persistence layer      [🟡 Dev B — PR #84 partial; tile/charter repos deferred to Phase 4]
+Phase 3  Server Command Loop & Repositories             [✅ DONE]
+   ├── 3.A  Command bus, EngineCtx, command handlers    [✅ Dev A — PRs #86, #87, #91, #92 merged]
+   └── 3.B  Typed repositories & persistence layer      [🟡 Dev B — PR #84 + PR #90 (gameRepo write methods) merged; tile/charter repos deferred to Phase 4]
 Phase 4  Database De-blobbing & Dual-Write              [⬜ NOT STARTED]
    ├── 4.A  Dual-write integration & state hydration
    └── 4.B  SQL migrations & historical-game backfill
@@ -111,6 +111,12 @@ Conflict surface is near zero by design: Track A never imports from `server/pers
 | — `CaptureSettlement` (closes pre-existing gap: never checked hero.position vs settlement.position) | ✅ | #91 |
 | Delete legacy `POST /games/:name/resolve-battle` and `POST /games/:name/trade` routes | ✅ | #91 |
 | `unit_types` live catalog query for ResolveBattle (12 seeded types) | ✅ | #91 |
+| **#89 closure** (`settlement_snapshots` / `resource_transactions` audit writes restored on `EndTurn`): | | #92 |
+| — `mockRepos.ts`: no-op `insertSettlementSnapshots` / `insertResourceTransactions` (no recorded-call arrays) | ✅ | #92 |
+| — `commandHandler.ts` EndTurn case builds snapshot rows per settlement owned by `command.actor` + passes `transfers` straight through; `snapshotDay = wrapped ? finalState.day : row.day ?? finalState.day`; `effectiveIncome()` reused from `@heroes/engine` (D1, D3, D4) | ✅ | #92 |
+| — Legacy `game_events` `kind` strings preserved (`turn_ended` / `round_ended` / `round_started` / `ai_turn_started`) | ✅ | #92 |
+| — `commandHandler.test.ts` regression assertions that the writes fired | ⬜ | (follow-up; flagged in `2026-08-17-issue-89-track-and-phase-assignment.md` audit — Phase 4.A natural owner) |
+| — D2 settlements slice: used `finalState.settlements` (post-`advanceRound`), **not** the post-`applyEndOfTurnDetailed` slice the scoping plan recommended | ⚠️ | (acceptable today: nothing reads `settlement_snapshots`; flagged so Phase 4 hydration does not assume slice parity on `day % 7 === 0` rows) |
 
 **Track 3.A deferred (out of Phase 3 scope):**
 - `UpgradeSettlement` — needs `GameMap`+RNG wired into `CommandDeps`, larger lift than pre-agreed repo interface covers. 🚫
@@ -125,6 +131,9 @@ Conflict surface is near zero by design: Track A never imports from `server/pers
 | :--- | :--- | :--- |
 | `server/persistence/db.ts` (move `pool`/`withTransaction` out of flat `server/db.ts`; `server/db.ts` keeps only `initSchema`) | ✅ | #84 |
 | `server/persistence/repositories/gameRepo.ts` (`load`, `saveHeroesAndSettlements` + round/day/active_player_id extra param) | ✅ | #84 |
+| `server/persistence/repositories/gameRepo.ts` additions: `insertSettlementSnapshots` (batched, `ON CONFLICT (game_id, settlement_id, day) DO NOTHING`), `insertResourceTransactions` (batched, `reason` defaults to `'auto_trade'`, nullable `fromSettlementId`); `resolveGameId` + `GameNotFoundError`; empty-array short-circuit | ✅ | #90 |
+| `test/persistence/gameRepo.test.ts` — 7 new tests (row-per-settlement, idempotency, empty no-op, missing game, per-transfer rows) | ✅ | #90 |
+| `package.json` `test:unit` widened to `test/server/*.test.ts test/persistence/*.test.ts` (consequence: `npm run test:all` now requires `npm run db:up`) | ✅ | #90 |
 | `server/persistence/repositories/eventRepo.ts` (`append(gameId, kind, payload)`) | ✅ | #84 |
 | `server/persistence/repositories/heroRepo.ts` | ✅ | #84 |
 | `server/persistence/repositories/settlementRepo.ts` | ✅ | #84 |
@@ -137,8 +146,9 @@ Conflict surface is near zero by design: Track A never imports from `server/pers
 
 - `npm run build` (now checks `server/` too): ✅
 - `npm run lint:deps` (286 modules / 783 deps, 0 violations): ✅
-- `npm run test:all` (test:unit 23/23; smoke + multiplayer + cityview green): ✅
+- `npm run test:all` (test:unit 23/23; smoke + multiplayer + cityView green): ✅
 - Live round-trip against dev Postgres for TradeResources, SetAutoTrade, RecruitHero, UpgradeTownHall, ReorderStack, CaptureSettlement (followed up via GETs to confirm persistence): ✅
+- #89 regression guard: live `SELECT count(*) FROM settlement_snapshots WHERE game_id = …` returns one row per settlement owned by the ending player after one `POST /games/:name/commands` EndTurn; `resource_transactions` gains a row per auto-trade transfer that fired: ✅ (PR #92; the corresponding `commandHandler.test.ts` unit-level guard is the still-open follow-up noted in §5.1).
 
 ---
 
@@ -267,15 +277,14 @@ Additional Phase 5 gate: Canvas-render screenshot diffs vs. previous render path
 
 ## 11. Open PRs Awaiting Merge (as of 2026-08-17)
 
-- **#91** — Phase 3 Track A Week 3 ports (7 commands) — Dev A, status: addressing Copilot review (per `sessionTracking/2026-08-17.md`).
+- *None open.* Last PR merged: **#92** — Phase 3 Track A `#89` closure (EndTurn persists `settlement_snapshots` + `resource_transactions`), merged 2026-08-17 01:21 EDT. PR #91 (Phase 3 Track A Week 3 ports) merged earlier the same day at `43accdf`.
 
 ---
 
 ## 12. What's Next (Immediate)
 
-1. **Land PR #91** with Copilot-review fixes (Dev A, in flight).
-2. **Plan Phase 4.A kickoff** — `hydrate.ts` + dual-write step. Prereq: confirm the schema for `charters` table (Track B owns the migration in 4.B; coordinate before either track starts to avoid schema drift).
-3. **Plan Phase 5.A kickoff** — `src/io/commands.ts` dispatcher. Should absorb the human-initiated MoveHero/TransferGold round-trip gap (R4) as its first deliverable.
+1. **Phase 4.A kickoff** — `hydrate.ts` + `commandHandler.ts` dual-write step. Prereq: confirm the schema for `charters` table (Track B owns the migration in 4.B; coordinate before either track starts to avoid schema drift). Also absorb the still-open #89 follow-up (the unit-level regression assertions in `commandHandler.test.ts`) — natural to land alongside the first commandHandler write-side refactor in 4.A.
+2. **Phase 5.A kickoff** — `src/io/commands.ts` dispatcher. Should absorb the human-initiated MoveHero/TransferGold round-trip gap (R4) as its first deliverable.
 
 ---
 
