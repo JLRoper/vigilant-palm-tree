@@ -1,5 +1,5 @@
 ---
-description: MANDATORY auto-invoke subagent. Updates project documentation (README.md, TECHNICAL_SPECIFICATIONS.MD, docs/*) to reflect recent code changes. Primary agents must launch this in parallel with session-tracker on EVERY user request that may touch code (implementation, refactor, config, dependency, or script change). Designed to fast-return: scans current docs, plans updates, exits immediately so it does not block the parent agent. Invoked a second time at task end if docs actually need updating.
+description: MANDATORY auto-invoke subagent. Updates project documentation (README.md, TECHNICAL_SPECIFICATIONS.MD, docs/*) to reflect recent code changes. Primary agents must launch this on EVERY user request that may touch code (implementation, refactor, config, dependency, or script change). Designed to fast-return: scans current docs, plans updates, exits immediately so it does not block the parent agent. Invoked a second time at task end if docs actually need updating.
 mode: subagent
 hidden: true
 ---

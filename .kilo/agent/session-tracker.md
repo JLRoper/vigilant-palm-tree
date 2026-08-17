@@ -1,5 +1,5 @@
 ---
-description: "MANDATORY auto-invoke subagent. Appends a structured entry to sessionTracking/YYYY-MM-DD.md. Primary agents must launch this in parallel with doc-updater on EVERY user request via the task tool. Designed to fast-return: opens the daily log, writes a start-of-task marker, exits immediately so it does not block the parent agent. Invoked a second time at task end to finalize the entry."
+description: "On-demand session logging subagent — NOT auto-invoked. Appends a structured entry to sessionTracking/YYYY-MM-DD.md. Primary agents must only launch this via the task tool when the user explicitly asks for session tracking/logging; never launch it automatically at the start of a request. Fast-return when used: opens the daily log, writes a start-of-task marker, exits immediately so it does not block the parent agent. If used, invoke a second time at task end to finalize the entry."
 mode: subagent
 hidden: true
 ---
