@@ -1,14 +1,14 @@
 # Plan: Parallel Development Execution (Phases 3 – 5)
 
 *Authored: 2026-08-16*
-*Status: Phase 2 Complete → Advancing to Phases 3, 4, 5*
+*Status: Phases 0–4 Complete → Phase 5 in progress (Track 5.A partial, Track 5.B scene graph builders + entityMirror landed; paint2d/, manualBattleArena decomposition, renderer.ts/cityRenderer.ts rewrite still ⬜). See `plan/2026-08-17-consolidated-phase-1-5-track-map.md` for the live status.*
 *Supplements: `plan/2026-08-15-parallel-dev-split.md`, `plan/2026-08-15_OVERVIEW.md`, `plan/2026-08-15-architecture-map_OVERVIEW.md`*
 
 ---
 
 ## 1. Executive Summary & Status Check
 
-The monorepo reorganization has successfully completed **Phase 0, Phase 1, and Phase 2**:
+The monorepo reorganization has successfully completed **Phase 0 through Phase 4** (Phases 3 and 4 both landed — Phase 3 via Track 3.A command bus + Track 3.B repos merged across PRs #86/#87/#91/#92 + #84/#90; Phase 4 via Track 4.A dual-write/hydrate (PR #95) + Track 4.B granular tables + backfill (PR #93)). Phase 5 is in progress on both tracks (see consolidated plan for live status).
 
 - ✅ **Phase 0**: Dependency cruiser rules established (`dependency-cruiser.cjs`), zero circular violations.
 - ✅ **Phase 1**: Root npm workspaces (`packages/contracts`, `packages/engine`), baseline contracts extracted, views moved to `src/screens/`.
@@ -22,7 +22,7 @@ The monorepo reorganization has successfully completed **Phase 0, Phase 1, and P
   - Registries (`buildingRegistry.ts`, `buildingModifiers.ts`, `styleResolver.ts`, `control.ts`)
   - Unit test suites in `test/charter/`, `test/combat/`, `test/state/`, `test/map/`.
 
-This document establishes the updated roadmap for **Phase 3 (Server Command Loop & Repositories)**, **Phase 4 (Database Schema De-blobbing)**, and **Phase 5 (Event-Cursor Sync & Scene Renderer Seam)**, split across two parallel development tracks (**Track A: Dev A** and **Track B: Dev B**) with zero toe-stepping.
+This document also covers the now-completed **Phase 3 (Server Command Loop & Repositories)** and **Phase 4 (Database De-blobbing & Dual-Write)**, and the in-progress **Phase 5 (Event-Cursor Sync & Scene Renderer Seam)**, split across two parallel development tracks (**Track A: Dev A** and **Track B: Dev B**) with zero toe-stepping. Phases 3 and 4 are both ✅ complete per the consolidated phase-1-5 track map; Phase 5 is 🟡 in progress.
 
 ---
 
