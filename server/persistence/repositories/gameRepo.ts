@@ -112,7 +112,12 @@ export interface GameRepo {
   insertResourceTransactions(gameName: string, transactions: ResourceTransactionInput[]): Promise<void>;
 }
 
-async function resolveGameId(db: Queryable, name: string): Promise<number> {
+// Exported for the other repos in this directory (heroRepo, settlementRepo,
+// charterRepo, tileRepo) -- every repo call site works off gameName, not the
+// numeric id (see plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md's
+// "Pre-agreed repo interface" section), so this same resolution step would
+// otherwise be duplicated in all five files instead of just called from four.
+export async function resolveGameId(db: Queryable, name: string): Promise<number> {
   const r = await db.query<{ id: number }>("SELECT id FROM games WHERE name = $1", [name]);
   if (r.rowCount === 0) throw new GameNotFoundError(name);
   return r.rows[0].id;

@@ -45,4 +45,14 @@ export async function initSchema(): Promise<void> {
     "utf8"
   );
   await pool.query(lobbyMigration);
+  const granularEntitiesMigration = readFileSync(
+    join(__dirname, "migrations", "009_granular_entities.sql"),
+    "utf8"
+  );
+  await pool.query(granularEntitiesMigration);
+  const eventSeqMigration = readFileSync(
+    join(__dirname, "migrations", "010_event_seq.sql"),
+    "utf8"
+  );
+  await pool.query(eventSeqMigration);
 }
