@@ -101,14 +101,6 @@ function makeRow(
 function makeDeps(row: HydratableGameRow, unitTypes: UnitType[] = []) {
   const gameRepo = createMockGameRepo({ [row.name as string]: row });
   const eventRepo = createMockEventRepo();
-  // Seed hero/settlement granular repos from row.heroes/settlements so
-  // hydrateFromRepos() takes the granular path (source="granular"). This
-  // mirrors real production -- a game that's ever executed any dual-written
-  // command has these populated -- and is what every existing command
-  // except the dedicated JSONB-fallback test now needs (EndTurn/ResolveBattle
-  // gates charterRepo on this source, StartCharter rejects outright when it
-  // isn't "granular"). The dedicated JSONB-fallback test clears these seeds
-  // explicitly.
   const heroRepo = createMockHeroRepo({ [row.name as string]: row.heroes });
   const settlementRepo = createMockSettlementRepo({ [row.name as string]: row.settlements });
   const charterRepo = createMockCharterRepo();
@@ -1221,11 +1213,17 @@ test("StartCharter rejects outright when hydration fell back to JSONB -- no sour
   // requires writing to charterRepo, but on JSONB fallback the hydrate
   // result can't see real charters that might exist, so racing them is
   // unsafe. Reject the command outright rather than risk overwriting.
+  // Source gate runs BEFORE startCharter() and any persistence calls, so a
+  // rejected StartCharter leaves gameRepo/heroRepo/settlementRepo/
+  // charterRepo/eventRepo all untouched (unlike EndTurn/ResolveBattle's
+  // gate, which runs after their engine pipeline because those pipelines
+  // only touch heroes/settlements -- StartCharter is the only case that
+  // touches the charters table hydrate-on-fallback can't see).
   const row = makeRow(
     [makeHero("h0", 0, 2, 2, { gold: 5000 })],
     [makeSettlement("s0", 0, 2, 2, { warehouse: CHARTER_WAREHOUSE })],
   );
-  const { deps, heroRepo, settlementRepo, charterRepo } = makeDeps(row);
+  const { deps, gameRepo, heroRepo, settlementRepo, charterRepo, eventRepo } = makeDeps(row);
   delete heroRepo.rows["test-game"];
   delete settlementRepo.rows["test-game"];
   const command: Command = {
@@ -1240,7 +1238,19 @@ test("StartCharter rejects outright when hydration fell back to JSONB -- no sour
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "charters_persist_unavailable");
+  // No side effects: the rejection must be a true no-op.
   assert.equal(charterRepo.calls.length, 0);
+  assert.equal(heroRepo.calls.length, 0);
+  assert.equal(settlementRepo.calls.length, 0);
+  assert.equal(eventRepo.events.length, 0);
+  // Counters must NOT have been incremented -- a rejected StartCharter must
+  // leave next_charter_id/next_settlement_id exactly as they were. gameRepo
+  // doesn't expose a `calls` array the way the other mock repos do, but
+  // saveHeroesAndSettlements is the only path that mutates those fields;
+  // asserting the row reference is unchanged (same object as input) is the
+  // strongest "saveHeroesAndSettlements never ran" proof -- if it had run,
+  // mockGameRepo would have replaced `rows[name]` with a new spread object.
+  assert.equal(gameRepo.rows["test-game"], row);
 });
 
 test("read-path cutover: a game with granular hero/settlement rows hydrates from those instead of the (differing) legacy JSONB row", async () => {

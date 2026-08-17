@@ -754,6 +754,19 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       };
     }
     case "StartCharter": {
+      // Source gate FIRST: on JSONB fallback hydrateFromRepos() can't see
+      // real charters in the charters table, so persisting one would race
+      // against rows hydrate can't know about. Reject before any side
+      // effects (hero gold/warehouse deduction, settlement warehouse
+      // update, counter increments) so a rejected StartCharter leaves the
+      // DB exactly as it was -- EndTurn/ResolveBattle's same gate runs
+      // AFTER their engine pipeline because those pipelines only touch
+      // heroes/settlements (which have the JSONB column as
+      // source-of-truth), but StartCharter's writes touch a table
+      // (charters) that hydrate-on-fallback literally cannot see.
+      if (source !== "granular") {
+        return { ok: false, reason: "charters_persist_unavailable", events: [] };
+      }
       // No command reconstructs a GameMap server-side before this one --
       // row.seed/row.map_size (both already selected by GAME_COLUMNS) are
       // exactly what server/routes.ts's generateAndInsertTiles() used to
@@ -810,18 +823,6 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // The one call this whole port exists to add: activeCharters gained
       // a new entry, and (unlike heroes/settlements) it has no legacy
       // JSONB column to fall back on -- charterRepo is its only home.
-      // Source gate matches the EndTurn/ResolveBattle cases: on JSONB
-      // fallback (heroes/settlements granular tables empty, partial/
-      // inconsistent state) the hydrate path can't see real charters,
-      // so even though StartCharter succeeded against the JSONB state,
-      // writing its result would race with a real charter that hydrate
-      // can't see. Reject the charter outright in that fallback case
-      // rather than risk overwriting -- it's already reachable in the
-      // deduped-upgrade path, no game can be in that state without
-      // backfill re-running first.
-      if (source !== "granular") {
-        return { ok: false, reason: "charters_persist_unavailable", events: [] };
-      }
       await deps.charterRepo.upsertMany(command.gameName, result.state.activeCharters);
       const event: EngineEvent = {
         type: "CharterStarted",
