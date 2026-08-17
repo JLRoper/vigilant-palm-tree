@@ -43,6 +43,35 @@ export interface TurnControllerHooks {
   logEvent(event: { type: string; payload: Record<string, unknown> }): void;
   getMap(): GameMap;
   rng(): number;
+  // Week 3+ ports (plan/2026-08-16-phase-3-parallel-dev-plan.md): unlike
+  // onHumanTurnEnd/onBattleResolved (awaited -- the server's response IS
+  // the new state), these six are fired-and-forgotten the same way
+  // onAiMove already is. The local @heroes/engine reducer call already
+  // ran and this.state is already updated by the time these are called;
+  // they exist purely so the mutation also persists server-side (closing
+  // exactly the gap this port's PR description documents: any of these
+  // actions performed between commands were previously invisible to
+  // EndTurn's authoritative pipeline and got silently reverted by the
+  // next mergeFromEndTurn). Callers don't await the returned promise or
+  // use its resolved value -- same "client trusts its own local
+  // computation, eventual consistency via sync" philosophy as onAiMove.
+  onTradeResources(
+    actor: number,
+    fromSettlementId: SettlementId,
+    toSettlementId: SettlementId,
+    resource: WarehouseResource,
+    amount: number,
+  ): Promise<void>;
+  onRecruitHero(
+    actor: number,
+    heroName: string,
+    settlementId: SettlementId,
+    horseVariant: HorseVariant,
+  ): Promise<void>;
+  onUpgradeTownHall(actor: number, settlementId: SettlementId, targetLevel: 2 | 3): Promise<void>;
+  onSetAutoTrade(actor: number, settlementId: SettlementId, autoTrade: boolean): Promise<void>;
+  onReorderStack(actor: number, heroId: HeroId, fromIdx: number, toIdx: number): Promise<void>;
+  onCaptureSettlement(actor: number, heroId: HeroId, settlementId: SettlementId): Promise<void>;
 }
 
 export class TurnController {
@@ -133,6 +162,10 @@ export class TurnController {
         previousOwnerId: result.previousOwnerId,
       },
     });
+    const actor = this.state.heroes[heroId]?.ownerId ?? this.state.activePlayerId;
+    void this.hooks.onCaptureSettlement(actor, heroId, settlementId).catch((e) => {
+      console.warn("[turnController] onCaptureSettlement failed:", e);
+    });
     return true;
   }
 
@@ -180,6 +213,9 @@ export class TurnController {
       type: "resources_traded",
       payload: { fromId, toId, resource, amount },
     });
+    void this.hooks.onTradeResources(this.state.activePlayerId, fromId, toId, resource, amount).catch((e) => {
+      console.warn("[turnController] onTradeResources failed:", e);
+    });
     return { ok: true, reason: "" };
   }
 
@@ -195,6 +231,10 @@ export class TurnController {
       type: "stack_reordered",
       payload: { heroId, fromIdx, toIdx },
     });
+    const actor = this.state.heroes[heroId]?.ownerId ?? this.state.activePlayerId;
+    void this.hooks.onReorderStack(actor, heroId, fromIdx, toIdx).catch((e) => {
+      console.warn("[turnController] onReorderStack failed:", e);
+    });
     return { ok: true, reason: "" };
   }
 
@@ -209,6 +249,9 @@ export class TurnController {
       type: "auto_trade_toggled",
       payload: { settlementId, autoTrade },
     });
+    void this.hooks.onSetAutoTrade(this.state.activePlayerId, settlementId, autoTrade).catch((e) => {
+      console.warn("[turnController] onSetAutoTrade failed:", e);
+    });
     return true;
   }
 
@@ -219,6 +262,9 @@ export class TurnController {
     this.hooks.logEvent({
         type: "hero_recruited",
         payload: { heroId: result.hero.id, name: heroName, playerId: this.state.activePlayerId },
+      });
+      void this.hooks.onRecruitHero(this.state.activePlayerId, heroName, settlementId, horseVariant).catch((e) => {
+        console.warn("[turnController] onRecruitHero failed:", e);
       });
     }
     return result;
@@ -445,6 +491,9 @@ export class TurnController {
     this.hooks.logEvent({
       type: "town_hall_upgrade_started",
       payload: { settlementId, targetLevel },
+    });
+    void this.hooks.onUpgradeTownHall(this.state.activePlayerId, settlementId, targetLevel).catch((e) => {
+      console.warn("[turnController] onUpgradeTownHall failed:", e);
     });
     return { ok: true, reason: "" };
   }

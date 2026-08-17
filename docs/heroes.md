@@ -63,7 +63,7 @@ When a hero moves adjacent to an enemy hero, battle triggers:
 - Loser is removed from the map.
 - Winner gains loser's hero gold.
 - If loser was chartering, the charter is cancelled (costs forfeited).
-- Battle resolution persists via `/api/games/:name/resolve-battle`.
+- Battle resolution persists via the `ResolveBattle` command on `/api/games/:name/commands`.
 
 ## Enemy heroes
 

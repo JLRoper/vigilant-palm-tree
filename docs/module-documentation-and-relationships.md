@@ -29,7 +29,7 @@ Browser (Vite SPA)                                  Express API server
    src/render/* draws every frame from hex map + Hero entities
 ```
 
-`shared/combat/*` is engine-neutral and used by **both** sides — client drives the "Test Battle" dev arena; server calls `resolveBattle()` inside route handlers against the DB-backed `unit_types` catalog.
+`shared/combat/*` is engine-neutral and used by **both** sides — client drives the "Test Battle" dev arena; server resolves battles via the `ResolveBattle` command (`server/app/commandHandler.ts`), not a dedicated route, against its own DB-backed `unit_types` catalog.
 
 ---
 
@@ -39,7 +39,7 @@ Browser (Vite SPA)                                  Express API server
 |---|---|---|
 | Client | `src/main.ts` | Creates `GameEngine`, runs `init`+`initBackend`, shows home view, kicks off `requestAnimationFrame` loop |
 | API | `server/index.ts` | Express bootstrap, CORS, raw image + JSON parsers, mounts `/api` router on `API_PORT` |
-| API routes | `server/routes.ts` | Games CRUD, tiles, events log, resolve-battle, resource trade; delegates MoveHero/TransferGold/EndTurn to `server/http/routes/commands.ts` (`server/app/commandHandler.ts`) instead of hand-rolled PATCH/POST branches |
+| API routes | `server/routes.ts` | Games CRUD, tiles, events log, lobby claim/start; delegates MoveHero/TransferGold/EndTurn/TradeResources/ResolveBattle/RecruitHero/UpgradeTownHall/SetAutoTrade/ReorderStack/CaptureSettlement to `server/http/routes/commands.ts` (`server/app/commandHandler.ts`) instead of hand-rolled PATCH/POST branches — the old dedicated `resolve-battle`/`trade` routes are deleted |
 
 ---
 
@@ -236,7 +236,7 @@ Browser (Vite SPA)                                  Express API server
 | Module | Role | Imports |
 |---|---|---|
 | `initState.ts` | `buildInitialGameState` (client-side factory using `generateCastles` + `computeSettlementRates` + city spots), `makeInitialStatePayload` (server DTO), `hydrateGameState(row)` (server→client); re-exports `CASTLE_COUNT_*` | `../state/gameState`, `../state/units`, `../io/api`, `../map/gameMap`, `../map/castlePlacement`, `../entities/settlement`, `../economy/settlementRates`, `../state/playerColors`, `../core/citySpots`, `../core/cityGrid`, `../state/settings` |
-| `turnHooks.ts` | `buildTurnHooks` wires client reducers to API: `onHumanTurnEnd`→`/commands` (`EndTurn`), `onAiMove`→`/commands` (`MoveHero`), `onBattleResolved`→`/resolve-battle`, `pickAiMove`→`aiBrain`, `logEvent`→`/events` (intercepted by `EventLog.wrapHooks` when a dev console is attached) | `../io/api`, `../state/gameState`, `../state/turnController`, `../ai/aiBrain`, `../map/gameMap`, `../core/hex` |
+| `turnHooks.ts` | `buildTurnHooks` wires client reducers to API: `onHumanTurnEnd`→`/commands` (`EndTurn`), `onAiMove`→`/commands` (`MoveHero`), `onBattleResolved`→`/commands` (`ResolveBattle`), `onTradeResources`/`onRecruitHero`/`onUpgradeTownHall`/`onSetAutoTrade`/`onReorderStack`/`onCaptureSettlement`→`/commands` (fire-and-forget, same pattern as `onAiMove`), `pickAiMove`→`aiBrain`, `logEvent`→`/events` (intercepted by `EventLog.wrapHooks` when a dev console is attached) | `../io/api`, `../state/gameState`, `../state/turnController`, `../ai/aiBrain`, `../map/gameMap`, `../core/hex` |
 
 ### 5.14 `src/debug/` — real-time event log + dev console
 | Module | Role | Imports |

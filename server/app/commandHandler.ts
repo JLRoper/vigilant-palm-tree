@@ -3,10 +3,19 @@ import {
   startMove,
   transferGold,
   mulberry32,
+  tradeResources,
+  resolveBattle as resolveBattleEngine,
+  normalizePlatoons,
+  detectAdjacentEnemy,
+  recruitHero,
+  startTownHallUpgrade,
+  setAutoTrade,
+  reorderStack,
+  captureSettlement,
   effectiveIncome,
   clampMorale,
 } from "@heroes/engine";
-import type { EngineCtx, HydratableGameRow } from "@heroes/engine";
+import type { EngineCtx, HydratableGameRow, UnitType, BattleResult } from "@heroes/engine";
 import type {
   Command,
   EngineEvent,
@@ -18,8 +27,7 @@ import type {
 } from "@heroes/contracts";
 import { runEndTurn, clampGrowthRate } from "./turnService";
 import { pool } from "../persistence/db";
-import { createGameRepo } from "../persistence/repositories/gameRepo";
-import type { SettlementSnapshotInput, ResourceTransactionInput } from "../persistence/repositories/gameRepo";
+import { createGameRepo, GameNotFoundError, type SettlementSnapshotInput, type ResourceTransactionInput } from "../persistence/repositories/gameRepo";
 import { createEventRepo } from "../persistence/repositories/eventRepo";
 
 // Pre-agreed shape from plan/2026-08-16-phase-3-parallel-dev-plan.md's
@@ -67,6 +75,16 @@ export interface CommandDeps {
   ctx: EngineCtx;
 }
 
+// Live (Postgres) deps additionally carry the pool that the repos above
+// were built from. handleCommandTransactional needs it to acquire a
+// PoolClient per request for the SELECT ... FOR UPDATE + atomic
+// save+event-append flow; the in-memory mockRepos tests don't (and
+// can't) exercise the transactional wrapper, so this field is optional
+// in the broader CommandDeps type.
+export interface LiveCommandDeps extends CommandDeps {
+  pool: import("pg").Pool;
+}
+
 export interface CommandResult {
   ok: boolean;
   reason?: string;
@@ -86,6 +104,18 @@ export interface CommandResult {
   day?: number;
   activePlayerId?: number;
   players?: Player[];
+  // TradeResources: the two settlements it actually touches (mirrors
+  // TransferGold's hero/settlement pair above -- named fields for the
+  // specific affected entities, not the full map EndTurn returns).
+  fromSettlement?: SettlementState;
+  toSettlement?: SettlementState;
+  // ResolveBattle: both combatants plus the full engine BattleResult the
+  // client's battle UI needs (log, grid, per-round detail) -- none of
+  // that is reconstructable from the summary fields on the persisted
+  // BattleResolved event alone.
+  attackerHero?: HeroState;
+  defenderHero?: HeroState;
+  battle?: BattleResult;
 }
 
 // Legacy `gold` column is the sum of all players' purses (backward compat
@@ -306,6 +336,293 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         players: finalState.players,
       };
     }
+    case "TradeResources": {
+      const from = row.settlements[command.fromSettlementId];
+      const to = row.settlements[command.toSettlementId];
+      if (!from || !to) {
+        return { ok: false, reason: "settlement_not_found", events: [] };
+      }
+      // tradeResources() itself only requires from.ownerId === to.ownerId
+      // -- it never compares either to command.actor. Without this
+      // explicit check, command.actor (already confirmed above to be the
+      // active player) could trade between two OTHER players'
+      // settlements as long as those two happen to share an owner.
+      if (from.ownerId !== command.actor || to.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
+      }
+      const result = tradeResources(
+        state,
+        command.fromSettlementId,
+        command.toSettlementId,
+        command.resource,
+        command.amount,
+      );
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      const legacyGold = sumPlayerGold(state.players, state.heroes, result.state.settlements);
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+        { gold: legacyGold },
+      );
+      const event: EngineEvent = {
+        type: "ResourcesTraded",
+        actor: command.actor,
+        fromSettlementId: command.fromSettlementId,
+        toSettlementId: command.toSettlementId,
+        resource: command.resource,
+        amount: command.amount,
+      };
+      await deps.eventRepo.append(command.gameName, event.type, event);
+      return {
+        ok: true,
+        events: [event],
+        fromSettlement: result.state.settlements[command.fromSettlementId],
+        toSettlement: result.state.settlements[command.toSettlementId],
+      };
+    }
+    case "ResolveBattle": {
+      const attackerHero = row.heroes[command.attackerId];
+      const defenderHero = row.heroes[command.defenderId];
+      if (!attackerHero || !defenderHero) {
+        return { ok: false, reason: "hero_not_found", events: [] };
+      }
+      // command.actor === row.active_player_id is already enforced above;
+      // this additionally confirms the ATTACKER's hero belongs to that
+      // same actor (the old /resolve-battle route's exact check), since
+      // the two aren't otherwise tied together anywhere.
+      if (attackerHero.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_hero", events: [] };
+      }
+      // Neither the old route nor @heroes/engine's resolveBattle() itself
+      // ever checked that defenderId is actually adjacent to attackerId --
+      // that guarantee existed purely because the client's own
+      // detectAdjacentEnemy() call chose the pairing before ever asking
+      // the server to resolve it. Re-derive and verify it server-side
+      // instead of trusting the pairing the command names.
+      if (detectAdjacentEnemy(state, command.attackerId) !== command.defenderId) {
+        return { ok: false, reason: "not_adjacent", events: [] };
+      }
+      const unitTypes: Record<string, UnitType> = Object.fromEntries(
+        deps.ctx.catalog.unitTypes.map((u) => [u.id, u]),
+      );
+      const attackerPlatoons = normalizePlatoons(attackerHero.stacks);
+      const defenderPlatoons = normalizePlatoons(defenderHero.stacks);
+      // ctx.rng is the properly-injected randomness source for exactly
+      // this -- Date.now() (the old route's obstacleSeed source) is a
+      // wall-clock read commandHandler.ts shouldn't be making directly.
+      // See packages/contracts/src/events/engineEvent.ts's BattleResolved
+      // variant for why this now gets persisted instead of only existing
+      // transiently on the HTTP response.
+      const obstacleSeed = Math.floor(deps.ctx.rng() * 0x1_0000_0000) >>> 0;
+      const battle: BattleResult = resolveBattleEngine(attackerPlatoons, defenderPlatoons, {
+        obstacleSeed,
+        unitTypes,
+      });
+      // Hero entities are never deleted here -- a no-retreat loss just
+      // empties their platoons, matching the old route's own comment
+      // (what happens to a fully-defeated hero is a later phase's
+      // concern, per feature-plans/CombatResolutionEngine.md).
+      const lootedGold = battle.defenderOutcome === "lost_all_troops" ? Number(defenderHero.gold) || 0 : 0;
+      const newHeroes: Record<HeroId, HeroState> = {
+        ...state.heroes,
+        [command.attackerId]: {
+          ...attackerHero,
+          gold: (Number(attackerHero.gold) || 0) + lootedGold,
+          stacks: battle.attackerPlatoons,
+        },
+        [command.defenderId]: {
+          ...defenderHero,
+          gold: lootedGold > 0 ? 0 : defenderHero.gold,
+          stacks: battle.defenderPlatoons,
+        },
+      };
+      const legacyGold = sumPlayerGold(state.players, newHeroes, state.settlements);
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        newHeroes,
+        state.settlements,
+        { gold: legacyGold },
+      );
+      const event: EngineEvent = {
+        type: "BattleResolved",
+        actor: command.actor,
+        attackerId: command.attackerId,
+        defenderId: command.defenderId,
+        winner: battle.winner,
+        attackerOutcome: battle.attackerOutcome,
+        defenderOutcome: battle.defenderOutcome,
+        rewardGold: lootedGold,
+        rounds: battle.rounds,
+        obstacleSeed,
+      };
+      await deps.eventRepo.append(command.gameName, event.type, event);
+      return {
+        ok: true,
+        events: [event],
+        attackerHero: newHeroes[command.attackerId],
+        defenderHero: newHeroes[command.defenderId],
+        battle,
+      };
+    }
+    case "RecruitHero": {
+      // recruitHero() itself checks settlement.ownerId !== playerId, and
+      // command.actor === row.active_player_id is already enforced above
+      // -- between the two, there's no separate ownership hole to close
+      // here the way TradeResources/UpgradeTownHall/etc. need.
+      const result = recruitHero(state, command.actor, command.heroName, command.settlementId, command.horseVariant);
+      if (!result.hero) {
+        return { ok: false, reason: result.error ?? "recruit_failed", events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+        { players: result.state.players },
+      );
+      const event: EngineEvent = {
+        type: "HeroRecruited",
+        actor: command.actor,
+        heroId: result.hero.id,
+        name: result.hero.name,
+        settlementId: command.settlementId,
+        horseVariant: command.horseVariant,
+      };
+      await deps.eventRepo.append(command.gameName, event.type, event);
+      return { ok: true, events: [event], hero: result.hero, players: result.state.players };
+    }
+    case "UpgradeTownHall": {
+      const settlement = row.settlements[command.settlementId];
+      if (!settlement) {
+        return { ok: false, reason: "no_settlement", events: [] };
+      }
+      // startTownHallUpgrade() never checks ownership itself.
+      if (settlement.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
+      }
+      const result = startTownHallUpgrade(state, command.settlementId, command.targetLevel);
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      const event: EngineEvent = {
+        type: "TownHallUpgradeStarted",
+        actor: command.actor,
+        settlementId: command.settlementId,
+        targetLevel: command.targetLevel,
+      };
+      await deps.eventRepo.append(command.gameName, event.type, event);
+      return { ok: true, events: [event], settlement: result.state.settlements[command.settlementId] };
+    }
+    case "SetAutoTrade": {
+      const settlement = row.settlements[command.settlementId];
+      if (!settlement) {
+        return { ok: false, reason: "no_settlement", events: [] };
+      }
+      // setAutoTrade() never checks ownership itself -- today that only
+      // lives in src/state/turnController.ts's client-side caller.
+      if (settlement.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
+      }
+      const nextState = setAutoTrade(state, command.settlementId, command.autoTrade);
+      // setAutoTrade() returns the *same* state reference, unchanged,
+      // when the flag already matches -- src/state/turnController.ts's
+      // own setAutoTrade() wrapper treats that identically as a failure
+      // (`if (next === this.state) return false;`), so mirror that here
+      // instead of treating a no-op as success.
+      if (nextState === state) {
+        return { ok: false, reason: "no_change", events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        nextState.heroes,
+        nextState.settlements,
+      );
+      const event: EngineEvent = {
+        type: "AutoTradeToggled",
+        actor: command.actor,
+        settlementId: command.settlementId,
+        autoTrade: command.autoTrade,
+      };
+      await deps.eventRepo.append(command.gameName, event.type, event);
+      return { ok: true, events: [event], settlement: nextState.settlements[command.settlementId] };
+    }
+    case "ReorderStack": {
+      const hero = row.heroes[command.heroId];
+      if (!hero) {
+        return { ok: false, reason: "no_hero", events: [] };
+      }
+      // reorderStack() has no ownership check at all -- nor does its only
+      // existing client-side caller. Added here from scratch.
+      if (hero.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_hero", events: [] };
+      }
+      const result = reorderStack(state, command.heroId, command.fromIdx, command.toIdx);
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      const event: EngineEvent = {
+        type: "StackReordered",
+        actor: command.actor,
+        heroId: command.heroId,
+        fromIdx: command.fromIdx,
+        toIdx: command.toIdx,
+      };
+      await deps.eventRepo.append(command.gameName, event.type, event);
+      return { ok: true, events: [event], hero: result.state.heroes[command.heroId] };
+    }
+    case "CaptureSettlement": {
+      const hero = row.heroes[command.heroId];
+      const settlement = row.settlements[command.settlementId];
+      if (!hero || !settlement) {
+        return { ok: false, reason: "not_found", events: [] };
+      }
+      if (hero.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_hero", events: [] };
+      }
+      // captureSettlement() itself never checks hero position at all --
+      // see packages/contracts/src/commands/captureSettlement.ts's own
+      // header comment for why this can't be left to the engine function.
+      if (hero.q !== settlement.q || hero.r !== settlement.r) {
+        return { ok: false, reason: "hero_not_at_settlement", events: [] };
+      }
+      const result = captureSettlement(state, command.heroId, command.settlementId);
+      if (!result.captured) {
+        return { ok: false, reason: "already_owned", events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+        { players: result.state.players },
+      );
+      const event: EngineEvent = {
+        type: "SettlementCaptured",
+        actor: command.actor,
+        heroId: command.heroId,
+        settlementId: command.settlementId,
+        previousOwnerId: result.previousOwnerId,
+      };
+      await deps.eventRepo.append(command.gameName, event.type, event);
+      return {
+        ok: true,
+        events: [event],
+        hero: result.state.heroes[command.heroId],
+        settlement: result.state.settlements[command.settlementId],
+        players: result.state.players,
+      };
+    }
   }
 
   // Exhaustiveness check: every Command variant returns inside its own case
@@ -321,15 +638,123 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
 // importing server/persistence/repositories/* directly -- server/http/ and
 // the rest of server/app/ cannot. Replaces server/app/liveRepos.ts, which
 // was an explicitly temporary stand-in for exactly these real repos.
-export function createLiveCommandDeps(): CommandDeps {
+//
+// Async now (Week 1/2 shipped this synchronous): ResolveBattle is this
+// phase's first real consumer of ctx.catalog.unitTypes, which -- unlike
+// ctx.rng -- can't be seeded from a pure function call, only from a DB
+// read (the same `unit_types` table/columns server/routes.ts's own
+// GET /units already queries). server/http/routes/commands.ts calls and
+// memoizes this once, lazily, on first request rather than at module load
+// time, so route registration itself still doesn't block on a DB round-trip.
+export async function createLiveCommandDeps(): Promise<LiveCommandDeps> {
+  const unitTypesResult = await pool.query<UnitTypeRow>(
+    `SELECT id, name, attack, defence, health, speed, description, advantage_type, specialty, specialty_priority
+       FROM unit_types`,
+  );
+  const unitTypes: UnitType[] = unitTypesResult.rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    attack: r.attack,
+    defence: r.defence,
+    health: r.health,
+    speed: r.speed,
+    description: r.description,
+    advantageType: r.advantage_type,
+    specialty: r.specialty,
+    specialtyPriority: r.specialty_priority,
+  }));
   return {
     gameRepo: createGameRepo(pool),
     eventRepo: createEventRepo(pool),
-    // Week 1/2's commands (MoveHero, TransferGold, EndTurn) don't read
-    // ctx.rng or ctx.catalog -- none of startMove/transferGold/runEndTurn
-    // take an EngineCtx parameter. Inert placeholder until a real consumer
-    // (e.g. Week 3+'s ResolveBattle) needs one; seeding it from Date.now()
-    // here is fine precisely because nothing reads it yet.
-    ctx: { rng: mulberry32(Date.now() >>> 0), catalog: { unitTypes: [] } },
+    pool,
+    ctx: { rng: mulberry32(Date.now() >>> 0), catalog: { unitTypes } },
   };
 }
+
+// Transactional wrapper around handleCommand for the live (Postgres)
+// path. Closes the gap the retired /trade and /resolve-battle routes used
+// to close with their own withTransaction block: state mutation, event
+// append, and any concurrent-command serialization now happen as one
+// atomic unit instead of as three independent pool queries (where a
+// failure between them could persist state without its event, and where
+// two concurrent commands against the same game could each load the
+// pre-state, mutate, and last-write-win over each other).
+//
+// Phase 3 scope (plan/2026-08-16-phase-3-parallel-dev-plan.md § "What's
+// actually broken today" /trade row: "just needs the transaction/
+// persistence step generalized"; parallel-dev-phases-3-5.md §4 Phase 3
+// names commandHandler.ts "the central transaction loop"). A version
+// column for optimistic concurrency on the games row is intentionally
+// NOT added here -- that's a schema change and belongs to Phase 4
+// (parallel-dev-phases-3-5.md §4 Phase 4: Database De-blobbing). The
+// pessimistic SELECT ... FOR UPDATE below is the right primitive for
+// Phase 3's needs and matches what server/routes.ts's now-retired
+// /trade and /resolve-battle already did.
+export async function handleCommandTransactional(
+  command: Command,
+  deps: LiveCommandDeps,
+): Promise<CommandResult> {
+  // Implemented inline (rather than via ../persistence/db's withTransaction
+  // helper) because that helper closes over the *global* pool imported at
+  // module load, while this wrapper is intentionally pool-agnostic --
+  // LiveCommandDeps carries the pool so tests can drive it against a
+  // fake PoolClient without spinning up Postgres. Same BEGIN/COMMIT/
+  // ROLLBACK semantics as withTransaction, same console.error on rollback.
+  const client = await deps.pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Pessimistic row lock on games.name = command.gameName. SELECT FOR
+    // UPDATE locks the matching row (if any) for the duration of this
+    // transaction; a second concurrent command against the same game
+    // blocks here until COMMIT/ROLLBACK, so it then sees the post-state
+    // and re-runs validation against it. Without this, two
+    // MoveHero/TradeResources/whatever commands issued in the same
+    // millisecond each load the pre-state, each compute their own delta,
+    // and each issue saveHeroesAndSettlements; the second write silently
+    // clobbers the first.
+    //
+    // rowCount === 0 is NOT an error here: FOR UPDATE on a non-existent
+    // row is a no-op (nothing to lock). handleCommand -> gameRepo.load
+    // throws GameNotFoundError below if the row truly doesn't exist,
+    // which rolls the transaction back naturally.
+    await client.query("SELECT id FROM games WHERE name = $1 FOR UPDATE", [
+      command.gameName,
+    ]);
+    const requestDeps: CommandDeps = {
+      gameRepo: createGameRepo(client),
+      eventRepo: createEventRepo(client),
+      ctx: deps.ctx,
+    };
+    const result = await handleCommand(command, requestDeps);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    console.error("[api] handleCommandTransactional rolling back:", err);
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Re-export so callers (server/http/routes/commands.ts) can match the
+// retired /trade + /resolve-battle routes' own "game not found" 404
+// detection without needing to import the persistence layer directly.
+export { GameNotFoundError };
+
+// Mirrors server/routes.ts's own identically-shaped, identically-named
+// local type for the same `unit_types` SELECT -- not imported from there
+// (routes.ts doesn't export it, and commandHandler.ts shouldn't depend on
+// routes.ts either way).
+type UnitTypeRow = {
+  id: string;
+  name: string;
+  attack: number;
+  defence: number;
+  health: number;
+  speed: number;
+  description: string;
+  advantage_type: UnitType["advantageType"];
+  specialty: string;
+  specialty_priority: number;
+};
