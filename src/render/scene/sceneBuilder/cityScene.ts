@@ -1,6 +1,6 @@
 import type { CityViewSize } from "@heroes/engine";
 import { buildingFootprintFromRegistry, pickStyleForBuilding } from "@heroes/engine";
-import type { BuildingDef, GenerationStyle } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, GenerationStyle } from "@heroes/contracts";
 import { cellOrigin, cellsInDrawOrder, cellToScreen, computeCityScale, TILE_D, TILE_W } from "../../../core/cityGrid";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { GameSettings } from "../../../state/settings";
@@ -36,7 +36,7 @@ export interface CitySceneInput {
   buildings: BuildingDef[];
   style: GenerationStyle;
   pattern: string;
-  ghost?: { gx: number; gy: number; kind: string; w: number; h: number; valid: boolean } | null;
+  ghost?: { gx: number; gy: number; kind: BuildingKind; w: number; h: number; valid: boolean } | null;
   selectedKeys?: ReadonlySet<string>;
   citySettings: Pick<
     GameSettings,

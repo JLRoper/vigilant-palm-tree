@@ -195,7 +195,7 @@ export interface CityBuildingNode {
 
 export interface CityGhostBuildingNode {
   kind: "cityGhostBuilding";
-  buildingKind: string;
+  buildingKind: BuildingKind;
   center: WorldPoint;
   halfWidth: number;
   halfHeight: number;
