@@ -120,7 +120,7 @@ All economy state is stored in the `games` table JSONB columns:
 - `heroes` — per-hero `gold`
 - `settlements` — per-settlement `gold`, `warehouse`, `morale`, `resourceRates`, `autoTrade`, `population`, `buildings`, `upgrade`
 
-`activeCharters` round-trips through JSONB alongside the rest of `GameState`. Settlement upgrades persist via `UpgradeState` in the settlement JSONB.
+`activeCharters` does **not** round-trip anywhere server-side — no DB column exists for it (see [settlements.md](./settlements.md#persistence)); it's client-state-only today. Settlement upgrades persist via `UpgradeState` in the settlement JSONB, and (as of Phase 3 Track A Week 2) actually advance/complete server-side via `server/app/turnService.ts`'s `advanceSettlementUpgrades()` call on round wrap, not just client-side.
 
 ## Cross-references
 

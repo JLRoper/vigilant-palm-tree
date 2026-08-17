@@ -51,13 +51,24 @@ export class GameNotFoundError extends Error {
 const GAME_COLUMNS =
   "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, created_at, updated_at";
 
+export interface SaveHeroesAndSettlementsExtra {
+  players?: Player[];
+  gold?: number;
+  // EndTurn's round-advance needs to move all three of these atomically
+  // alongside heroes/settlements/players -- see
+  // server/app/commandHandler.ts's EndTurn case.
+  round?: number;
+  day?: number;
+  active_player_id?: number;
+}
+
 export interface GameRepo {
   load(name: string): Promise<GameRow>;
   saveHeroesAndSettlements(
     name: string,
     heroes: Record<HeroId, HeroState>,
     settlements: Record<SettlementId, SettlementState>,
-    extra?: { players?: Player[]; gold?: number },
+    extra?: SaveHeroesAndSettlementsExtra,
   ): Promise<void>;
 }
 
@@ -83,6 +94,18 @@ export function createGameRepo(db: Queryable): GameRepo {
       if (extra?.gold !== undefined) {
         sets.push(`gold = $${i++}`);
         vals.push(extra.gold);
+      }
+      if (extra?.round !== undefined) {
+        sets.push(`round = $${i++}`);
+        vals.push(extra.round);
+      }
+      if (extra?.day !== undefined) {
+        sets.push(`day = $${i++}`);
+        vals.push(extra.day);
+      }
+      if (extra?.active_player_id !== undefined) {
+        sets.push(`active_player_id = $${i++}`);
+        vals.push(extra.active_player_id);
       }
       sets.push("updated_at = now()");
       vals.push(name);

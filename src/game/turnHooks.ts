@@ -1,4 +1,5 @@
 import { api, endTurn, spendMovement, resolveBattle } from "../io/api";
+import type { EndTurnResult } from "../io/api";
 import type { GameState, HeroId } from "@heroes/contracts";
 import type { TurnControllerHooks } from "../state/turnController";
 import type { BattleResult } from "@heroes/engine";
@@ -6,6 +7,7 @@ import { pickAiMove as pickAiMoveBrain } from "../ai/aiBrain";
 import type { GameMap } from "../map/gameMap";
 import type { Axial } from "../core/hex";
 import { getMultiplayerSync } from "../io/multiplayerSync";
+import { settings } from "../state/settings";
 
 export interface BuildTurnHooksOptions {
   gameName: () => string | null;
@@ -18,15 +20,18 @@ let lastBattle: { attackerId: HeroId; defenderId: HeroId } | null = null;
 
 export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks {
   return {
+    // Called with state.activePlayerId still the player who is ending
+    // their turn (src/state/turnController.ts's endCurrentTurn() no longer
+    // runs applyEndOfTurnReducer/endTurnReducer locally before this --
+    // the server is now fully authoritative for the whole end-turn
+    // pipeline, see server/app/turnService.ts).
     onHumanTurnEnd: async (state: GameState): Promise<GameState> => {
       const name = opts.gameName();
       if (!name) return state;
       const sync = getMultiplayerSync();
       sync.stop();
       try {
-        const endingPlayerId = computeEndingPlayerId(state);
-        const payload: GameState = { ...state, activePlayerId: endingPlayerId };
-        const result = await endTurn(name, payload);
+        const result = await endTurn(name, state.activePlayerId, settings().populationGrowthRate);
         const merged = mergeFromEndTurn(state, result);
         sync.start(name);
         return merged;
@@ -102,30 +107,30 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
   };
 }
 
-function mergeFromEndTurn(
-  state: GameState,
-  result: { round: number; activePlayerId: number; players: GameState["players"] }
-): GameState {
-  const advanced = result.round > state.round;
-  const nextPhase: GameState["phase"] = advanced
-    ? { kind: "PLAYER_TURN", playerId: result.activePlayerId }
-    : state.phase;
+function mergeFromEndTurn(state: GameState, result: EndTurnResult): GameState {
+  // The server now runs the whole end-turn pipeline authoritatively
+  // (simple next-player advance, or a full round wrap -- see
+  // server/app/turnService.ts), so result.activePlayerId/players are
+  // always "whoever's turn it is now," not just a round-wrap correction
+  // like the old client-authoritative flow needed. Phase kind follows
+  // directly from that player's faction, the same rule
+  // @heroes/engine's endTurn() (packages/engine/src/turn/phases.ts) uses.
+  const nextPlayer = result.players.find((p) => p.id === result.activePlayerId);
+  const phase: GameState["phase"] =
+    nextPlayer?.faction === "ai"
+      ? { kind: "AI_TURN", playerId: result.activePlayerId }
+      : { kind: "PLAYER_TURN", playerId: result.activePlayerId };
   return {
     ...state,
     round: result.round,
+    day: result.day,
     activePlayerId: result.activePlayerId,
     players: result.players,
-    phase: nextPhase,
+    heroes: result.heroes,
+    settlements: result.settlements,
+    phase,
+    selectedHeroId: null,
+    selectedSettlementId: null,
+    dirty: true,
   };
-}
-
-function computeEndingPlayerId(state: GameState): number {
-  if (state.phase.kind === "ROUND_END") {
-    return state.activePlayerId;
-  }
-  const ids = state.players.map((p) => p.id);
-  const idx = ids.indexOf(state.activePlayerId);
-  if (idx < 0) return state.activePlayerId;
-  const prevIdx = (idx - 1 + ids.length) % ids.length;
-  return ids[prevIdx];
 }

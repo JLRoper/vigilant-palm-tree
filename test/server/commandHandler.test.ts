@@ -227,3 +227,82 @@ test("TransferGold rejects when the hero is not at the settlement", async () => 
   assert.equal(result.ok, false);
   assert.equal(result.reason, "hero_not_at_settlement");
 });
+
+const SOLO_PLAYER: Player[] = [
+  { id: 0, faction: "player", name: "Human", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
+];
+
+test("EndTurn advances to the next player without wrapping the round", async () => {
+  const row = makeRow(
+    // gold: 15 so the legacy-gold assertion below is actually
+    // exercising something -- neither applyEndOfTurnDetailed (no round
+    // wrap, so no hero upkeep) nor this settlement's income (goldTax: 0
+    // by default) touch it, so it should pass through unchanged.
+    [makeHero("h0", 0, 2, 2, { movementRemaining: 2, gold: 15 })],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { gameRepo, eventRepo, deps } = makeDeps(row);
+  const command: Command = { kind: "EndTurn", gameName: "test-game", actor: 0 };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.activePlayerId, 1);
+  assert.equal(result.round, 1);
+  // Movement reset only applies to the ending player's own heroes
+  // (applyEndOfTurnDetailed's resetHeroMovement(state.heroes, playerId)) --
+  // h0 belongs to player 0, who just ended their turn.
+  assert.equal(gameRepo.rows["test-game"].heroes.h0.movementRemaining, 7);
+  assert.equal(gameRepo.rows["test-game"].active_player_id, 1);
+  // Legacy `gold` column recomputation (server/app/commandHandler.ts's
+  // sumPlayerGold) actually gets persisted -- h0's 15 is the only gold
+  // anywhere in this row's heroes/settlements.
+  assert.equal(gameRepo.rows["test-game"].gold, 15);
+  // The canonical TurnEnded EngineEvent (matching MoveHero/TransferGold's
+  // own append-what-you-return convention) always fires first; turn_ended
+  // is the old /end-turn route's separate legacy-shaped audit-trail entry,
+  // which always fires too; ai_turn_started also fires here because
+  // PLAYERS[1] (the next player) is faction "ai" -- matching the old
+  // /end-turn route's same check.
+  assert.equal(eventRepo.events.map((e) => e.kind).join(","), "TurnEnded,turn_ended,ai_turn_started");
+  assert.equal((eventRepo.events[1].payload as { playerId: number }).playerId, 0);
+});
+
+test("EndTurn wraps the round, advances settlement upgrades, and applies weekly upkeep on day%7 -- closing the gaps the old /end-turn route left client-trusted", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { gold: 0, troops: 3 })],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        population: 100,
+        level: 1,
+        // Large buffer so applyEndOfTurnDetailed's consumption step can't
+        // exhaust it before applyPopulationGrowth's food check runs --
+        // this test only needs to prove growth fires, not predict the
+        // exact post-consumption remainder.
+        warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 10_000 },
+        upgrade: { kind: "townHall", targetLevel: 2, daysRemaining: 1 },
+      }),
+    ],
+    { players: SOLO_PLAYER, day: 6 },
+  );
+  const { gameRepo, eventRepo, deps } = makeDeps(row);
+  const command: Command = { kind: "EndTurn", gameName: "test-game", actor: 0, growthRate: 0.1 };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.round, 2);
+  assert.equal(result.day, 7);
+  assert.equal(result.activePlayerId, 0);
+
+  const s0 = gameRepo.rows["test-game"].settlements.s0;
+  // advanceSettlementUpgrades: gap #1. Old route never called this --
+  // upgrade.daysRemaining (1) hits 0 and clears.
+  assert.equal(s0.upgrade, undefined);
+  // applyPopulationGrowth: gap #2. Old route never called this at all.
+  assert.ok(s0.population > 100, `expected population growth, got ${s0.population}`);
+
+  // applyHeroUpkeep (part of the same weekly-upkeep gap): troops=3, cost=3,
+  // hero had 0 gold, so the shortfall branch sets gold:0, troops:<old gold>.
+  const h0 = gameRepo.rows["test-game"].heroes.h0;
+  assert.equal(h0.gold, 0);
+  assert.equal(h0.troops, 0);
+
+  assert.equal(eventRepo.events.map((e) => e.kind).join(","), "TurnEnded,turn_ended,round_ended,round_started");
+});

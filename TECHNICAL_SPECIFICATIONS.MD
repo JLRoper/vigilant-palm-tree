@@ -178,7 +178,12 @@ Entry point: [`src/main.ts`](./src/main.ts:1) wires modules together. There is n
 |---|---|
 | `server/index.ts` | Express bootstrap, mounts `cors`, `express.json`, `/api` router; calls `initSchema()` before listening |
 | `server/db.ts` | `pg.Pool` + `initSchema()` (runs `schema.sql` and any new migrations from `server/migrations/`) |
-| `server/routes.ts` | All HTTP routes under `/api` (game state CRUD, list/create user games, etc.) |
+| `server/routes.ts` | Remaining `/api` routes: games CRUD, tiles, events log, lobby claim/start, resolve-battle, resource trade; mounts `commandsRouter` (below) at `/games/:name/commands` for `MoveHero`/`TransferGold`/`EndTurn` |
+| `server/http/routes/commands.ts` | `POST /games/:name/commands` — `parseCommand()` validates the request body, then dispatches to `handleCommand()` |
+| `server/app/commandHandler.ts` | Command-bus core: `handleCommand()` loads the game row, enforces the turn-ownership guard, runs the matching `@heroes/engine` reducer (or `turnService.ts` for `EndTurn`), and persists via `GameRepo`/`EventRepo`. `createLiveCommandDeps()` wires the real Postgres-backed repos below — replaces the now-deleted `server/app/liveRepos.ts` shim |
+| `server/app/turnService.ts` | `runEndTurn()` — server-side EndTurn pipeline (`applyEndOfTurnDetailed` → `endTurn` → `advanceRound`), the same composition `src/state/turnController.ts` used to run client-side |
+| `server/persistence/repositories/gameRepo.ts` | `createGameRepo()` — Postgres-backed `GameRepo` (`load`/`saveHeroesAndSettlements`) used by `commandHandler.ts` |
+| `server/persistence/repositories/eventRepo.ts` | `createEventRepo()` — Postgres-backed `EventRepo.append()`, writes to `game_events` |
 | `server/schema.sql` | Base schema |
 | `server/migrations/001_turn_state.sql` | First migration (turn-state columns/tables) |
 
