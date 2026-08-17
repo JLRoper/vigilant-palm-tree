@@ -4,7 +4,7 @@
 *Consolidates: `plan/2026-08-15-parallel-dev-split.md`, `plan/2026-08-16-parallel-dev-phases-3-5.md`, `plan/2026-08-16-phase-3-parallel-dev-plan.md`, `plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md`, `sessionTracking/2026-08-16.md`, PRs #81/#83/#84/#86/#87/#91/#92/#93.*
 *Status legend: ✅ done & merged · 🟡 in progress / open PR · ⬜ not started · 🚫 blocked / deferred*
 *Revision note (2026-08-17, post-#94): syncs in PR #93 (Phase 4 Track B — granular entity tables, repos, JSONB backfill). PR #94's own doc-sync branch was cut before #93 merged, so that revision of this file missed it. This revision also corrects two rows in §5.2 that had misattributed `heroRepo.ts`/`settlementRepo.ts` to PR #84 — that PR's own commit message says it explicitly did not add them.*
-*Revision note 2 (2026-08-17, same day): reflects Track 4.A's `hydrate.ts` + `commandHandler.ts` dual-write work, committed as `20704d4` on local branch `phase4/track-a-hydrate-dualwrite` (1 commit ahead of `main`'s `208f8c0`) — not pushed, no PR yet. Marked 🟡, not ✅, until it's merged (per this doc's own legend, "✅ done & merged"); see §6.1.*
+*Revision note 2 (2026-08-17, same day): reflects Track 4.A's `hydrate.ts` + `commandHandler.ts` dual-write work, committed as `20704d4`/`3aad7d3` on branch `phase4/track-a-hydrate-dualwrite`, pushed, open as **PR #95**. Marked 🟡, not ✅, until it's merged (per this doc's own legend, "✅ done & merged"); see §6.1.*
 
 ---
 
@@ -17,7 +17,7 @@ Phase 3  Server Command Loop & Repositories             [✅ DONE]
    ├── 3.A  Command bus, EngineCtx, command handlers    [✅ Dev A — PRs #86, #87, #91, #92 merged]
    └── 3.B  Typed repositories & persistence layer      [🟡 Dev B — PR #84 + PR #90 (gameRepo write methods) merged; tile/charter repos deferred to Phase 4]
 Phase 4  Database De-blobbing & Dual-Write              [🟡 IN PROGRESS]
-   ├── 4.A  Dual-write integration & state hydration     [🟡 Dev A — implemented + committed (`20704d4`) on local branch `phase4/track-a-hydrate-dualwrite`, no PR yet]
+   ├── 4.A  Dual-write integration & state hydration     [🟡 Dev A — implemented + committed, **open as PR #95**]
    └── 4.B  SQL migrations & historical-game backfill    [✅ Dev B — PR #93 merged]
 Phase 5  Client Event Sync & Scene Renderer Seam        [⬜ NOT STARTED]
    ├── 5.A  Client command dispatcher & event-cursor sync
@@ -159,9 +159,9 @@ Conflict surface is near zero by design: Track A never imports from `server/pers
 
 *Deep dive: `plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md` (current-state audit, DDL, pre-agreed repo interface, week-by-week order, risks — same structure as the Phase 3 deep dive).*
 
-### 6.1 Track 4.A — Dual-Write Integration & State Hydration (Dev A) `[🟡 IMPLEMENTED & COMMITTED — no PR yet]`
+### 6.1 Track 4.A — Dual-Write Integration & State Hydration (Dev A) `[🟡 IMPLEMENTED — open as PR #95]`
 
-**2026-08-17 update:** every item below is implemented and committed as `20704d4` on local branch `phase4/track-a-hydrate-dualwrite` (1 commit ahead of `main`'s `208f8c0`) — not pushed, no PR opened. Marked 🟡 rather than ✅ per this doc's own status legend ("✅ done & merged") until that happens. Design matches the deep-dive doc (granular-first read with per-game JSONB fallback in `hydrate.ts`; dual-write scoped to only the entities a command touched, same transaction as the existing JSONB write).
+**2026-08-17 update:** every item below is implemented, committed (`20704d4`, `3aad7d3`), pushed, and open as **PR #95** (`phase4/track-a-hydrate-dualwrite` → `main`). Marked 🟡 rather than ✅ per this doc's own status legend ("✅ done & merged") until the PR merges. Design matches the deep-dive doc (granular-first read with per-game JSONB fallback in `hydrate.ts`; dual-write scoped to only the entities a command touched, same transaction as the existing JSONB write).
 
 | Item | Status |
 | :--- | :--- |
@@ -192,7 +192,7 @@ Conflict surface is near zero by design: Track A never imports from `server/pers
 
 ### 6.3 Sync Point 2 (Phase 4 → 5)
 
-`hydrateGameState` round-trip-equivalent to legacy JSONB (🟡 implemented and committed (`20704d4`) on local branch `phase4/track-a-hydrate-dualwrite`, no PR yet — see §6.1); monotonic event cursor available client-side (✅ resolved — `game_events.id`, already `BIGSERIAL`, is the cursor per PR #93's `010_event_seq.sql`; no separate `event_seq` column was added); `charters` table exists (✅ PR #93).
+`hydrateGameState` round-trip-equivalent to legacy JSONB (🟡 implemented, committed, open as **PR #95** — see §6.1); monotonic event cursor available client-side (✅ resolved — `game_events.id`, already `BIGSERIAL`, is the cursor per PR #93's `010_event_seq.sql`; no separate `event_seq` column was added); `charters` table exists (✅ PR #93).
 
 ---
 
@@ -286,13 +286,13 @@ Additional Phase 5 gate: Canvas-render screenshot diffs vs. previous render path
 ## 11. Open PRs Awaiting Merge (as of 2026-08-17)
 
 - *None open.* Merge order on 2026-08-17 (all EDT): **#92** (01:21, Phase 3 Track A — `#89` closure) → **#91** (01:30, Phase 3 Track A Week 3 ports) → **#93** (01:53, Phase 4 Track B — granular entity tables/repos/backfill) → **#94** (01:58, docs-only sync of this file; its branch was cut before #93 merged, so it missed #93 — corrected in this revision).
-- **Not yet a PR:** local branch `phase4/track-a-hydrate-dualwrite` (1 commit ahead of `main`'s `208f8c0`, at `20704d4`; not pushed) implements Track 4.A's `hydrate.ts` + `commandHandler.ts` dual-write step. See §6.1.
+- **PR #95** (open): `phase4/track-a-hydrate-dualwrite` → `main`. Implements Track 4.A's `hydrate.ts` + `commandHandler.ts` dual-write step (commits `20704d4`, `3aad7d3`). See §6.1.
 
 ---
 
 ## 12. What's Next (Immediate)
 
-1. **Phase 4.A review & land** — `hydrate.ts` + `commandHandler.ts` dual-write step are implemented and committed (`20704d4`) on local branch `phase4/track-a-hydrate-dualwrite` (see §6.1). Full verification gate (§9) already run and green on this commit. Next: push, open a PR. The still-open #89 follow-up (unit-level regression assertions in `commandHandler.test.ts`) has **not** been absorbed by this branch — still a separate follow-up.
+1. **Phase 4.A review & merge** — `hydrate.ts` + `commandHandler.ts` dual-write step are implemented, committed, pushed, and open as **PR #95** (see §6.1). Full verification gate (§9) already green on these commits. Next: review + merge. The still-open #89 follow-up (unit-level regression assertions in `commandHandler.test.ts`) has **not** been absorbed by this branch — still a separate follow-up.
 2. **`StartCharter`/`AdvanceCharter` command ports** — schema (Track 4.B, PR #93) and the hydration read-side (Track 4.A, this branch) are both in place; only the write-side command port itself is left (see §5.1, §10 R5).
 3. **Phase 5.A kickoff** — `src/io/commands.ts` dispatcher. Should absorb the human-initiated MoveHero/TransferGold round-trip gap (R4) as its first deliverable.
 
