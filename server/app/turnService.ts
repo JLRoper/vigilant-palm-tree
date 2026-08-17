@@ -16,22 +16,19 @@ import type { AutoTradeTransfer, GameState } from "@heroes/contracts";
 // logic, just moves the composition server-side so it runs against the
 // server's authoritative row instead of a client-submitted GameState.
 //
-// Known limitation, not an oversight: advanceRound() internally calls
-// advanceCharters(), which operates on state.activeCharters. There is no
-// `charters`/`active_charters` column anywhere in server/schema.sql or
-// server/migrations/, and packages/engine/src/hydrate.ts's
-// hydrateGameState() always defaults activeCharters to [] because of that
-// (see its own `?? []` fallback). So this call is safe (it no-ops on an
-// empty array) but it does NOT actually close the charter-advancement gap
-// -- charters a player has in flight still only advance/complete via the
-// client's own local simulation, same as before this port. Closing that
-// for real needs a schema addition, which
-// plan/2026-08-16-phase-3-parallel-dev-plan.md explicitly rules out for
-// Phase 3 ("no schema changes... that's Phase 4"). Flagging here rather
-// than silently skipping the call, since calling the real advanceRound()
-// (instead of a hand-picked subset of it) is the architecturally correct
-// choice regardless -- it's what will pick up charter advancement for free
-// the day a charters column exists, with zero changes needed here.
+// AdvanceCharter status (plan/2026-08-17-consolidated-phase-1-5-track-map.md
+// §5.1 R5): advanceRound() internally calls advanceCharters(), which
+// decrements state.activeCharters' daysRemaining and founds the real
+// settlement when a charter's "constructing" phase completes. That is now
+// real server-side behavior for any game with charters (the schema gap is
+// closed -- server/migrations/009_granular_entities.sql's `charters` table
+// -- and commandHandler.ts's EndTurn case dual-writes finalState.
+// activeCharters into charterRepo right after this call returns). The one
+// piece still NOT server-authoritative is the hex-by-hex *travel* a
+// "traveling"-phase charter's hero takes toward its target
+// (stepTravelCharter(), driven purely client-side today by
+// src/state/turnController.ts's advanceAutoTravel() loop) -- deliberately
+// out of scope for this port; see that plan doc section for why.
 export interface EndTurnOutcome {
   state: GameState;
   wrapped: boolean;

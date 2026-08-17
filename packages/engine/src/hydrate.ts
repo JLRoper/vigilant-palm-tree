@@ -36,6 +36,15 @@ export interface HydratableGameRow {
   players: Player[];
   heroes: Record<string, HeroState>;
   settlements: Record<string, SettlementState>;
+  // Additive, same as day above -- needed for server/app/commandHandler.ts's
+  // StartCharter case to reconstruct an identical GameMap (map_size) and to
+  // allocate collision-free charterId/settlementId values
+  // (next_charter_id/next_settlement_id; see
+  // server/migrations/009_granular_entities.sql). Optional so callers that
+  // predate this (mocks, older rows) still satisfy the type.
+  map_size?: string;
+  next_charter_id?: number;
+  next_settlement_id?: number;
 }
 
 function warnMissing(path: string, field: string): void {
@@ -157,7 +166,16 @@ export function hydrateGameState(
     castleSeed: opts?.castleSeed ?? defaultCastleSeedFromMapSeed(row.seed),
     castleCount: opts?.castleCount ?? CASTLE_COUNT_DEFAULT,
     activeCharters: (row as unknown as { activeCharters?: GameState["activeCharters"] }).activeCharters ?? [],
-    nextCharterId: (row as unknown as { nextCharterId?: number }).nextCharterId ?? 0,
-    nextSettlementId: (row as unknown as { nextSettlementId?: number }).nextSettlementId ?? settlementCount,
+    nextCharterId: row.next_charter_id ?? 0,
+    // Math.max, not a plain `??`: a row created before this counter was
+    // wired (every row's next_settlement_id defaults to 0 via that
+    // migration's ADD COLUMN) must not re-collide with settlements that
+    // already existed at game creation -- settlementCount is the same
+    // safe floor this field relied on entirely before this counter was
+    // persisted anywhere. Once next_settlement_id is genuinely being
+    // incremented by StartCharter, it's always >= settlementCount anyway
+    // (a completed charter's settlement is already counted in both), so
+    // this never diverges from a plain read in the steady state.
+    nextSettlementId: Math.max(row.next_settlement_id ?? 0, settlementCount),
   };
 }

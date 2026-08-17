@@ -39,6 +39,8 @@ export function createMockGameRepo(
         round?: number;
         day?: number;
         active_player_id?: number;
+        next_charter_id?: number;
+        next_settlement_id?: number;
       },
     ): Promise<void> {
       const row = rows[name];
@@ -52,6 +54,8 @@ export function createMockGameRepo(
         ...(extra?.day !== undefined ? { day: extra.day } : {}),
         ...(extra?.active_player_id !== undefined ? { active_player_id: extra.active_player_id } : {}),
         ...(extra?.gold !== undefined ? { gold: extra.gold } : {}),
+        ...(extra?.next_charter_id !== undefined ? { next_charter_id: extra.next_charter_id } : {}),
+        ...(extra?.next_settlement_id !== undefined ? { next_settlement_id: extra.next_settlement_id } : {}),
       };
     },
     async insertSettlementSnapshots(
