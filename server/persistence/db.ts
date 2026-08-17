@@ -3,9 +3,10 @@ import { Pool, type PoolClient } from "pg";
 export const pool = new Pool({
   host: process.env.PGHOST ?? "localhost",
   // The db runs in a single shared docker-compose container on a fixed
-  // host port (see docker-compose.yml), not the per-worktree dynamic
-  // DB_PORT that scripts/ports.ps1 writes to .env - so it's intentionally
-  // not read here. PGPORT remains available as an explicit override.
+  // host port (see docker-compose.yml). scripts/allocate-ports.ts only
+  // allocates API_PORT/CLIENT_PORT/WS_PORT per worktree - it never writes
+  // a DB port, so there's nothing per-worktree to read here. PGPORT
+  // remains available as an explicit override.
   port: Number(process.env.PGPORT ?? 5432),
   user: process.env.PGUSER || "gameuser",
   password: process.env.PGPASSWORD || "gamepass",

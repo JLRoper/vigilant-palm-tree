@@ -1,9 +1,15 @@
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import type { PoolClient } from "pg";
 import { withRollback } from "../helpers/pgTestTx";
+import { pool } from "../../server/persistence/db";
 import { createGameRepo, GameNotFoundError } from "../../server/persistence/repositories/gameRepo";
 import { makeHero, makePlayer, makeSettlement } from "../charter/_helpers";
+
+// withRollback pulls in the shared pg pool; close it once this file's tests
+// are done so node:test's process can exit promptly instead of waiting out
+// the pool's idle timeout.
+after(() => pool.end());
 
 async function seedGame(client: PoolClient, name: string): Promise<number> {
   const r = await client.query(

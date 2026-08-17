@@ -36,8 +36,9 @@ export interface GameRow {
   settlements: Record<SettlementId, SettlementState>;
   map_size: string;
   lobby: LobbyState;
-  created_at: string;
-  updated_at: string;
+  // TIMESTAMPTZ columns - node-postgres returns these as Date, not string.
+  created_at: Date;
+  updated_at: Date;
 }
 
 export class GameNotFoundError extends Error {
