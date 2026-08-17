@@ -72,7 +72,8 @@ Week 1, Day 3 - Week 2, Day 2:
 > commits — `add78d5` (gameplay screens: adventure, settlements, combat) and
 > `ba9f359` (chrome screens: heroes, multiplayer, home; `src/views/` deleted) —
 > both on the same day, sequenced as the plan described. This split stayed
-> useful: Phase 5 work has since layered `src/render/scene/{sceneBuilder,entityMirror}.ts`
+> useful: Phase 5 work has since layered `src/render/scene/` (the `entityMirror.ts`
+> + `types.ts` + `sceneBuilder/{adventureScene,cityScene,battleScene}.ts` tree)
 > on top without conflicts.
 
 Week 2, Day 3 onwards:
