@@ -1,6 +1,6 @@
 # Plan: Database-agnostic repository abstraction (Postgres / Oracle / MySQL, any version)
 
-**Status:** DRAFT — *will be revised when the in-flight circular-import cleanup lands. Treat §2 ("Current shape") and §5 ("Sequencing") as best-effort until that work is merged.*
+**Status:** DRAFT — *the circular-import cleanup this was waiting on has landed (commit `526398e` on `architecture/circular-dep-cleanup`, 2026-08-10 — see `plan/2026-08-09-risk-circular-imports.md`). §2 ("Current shape") and §5 ("Sequencing") still need re-derivation against the post-cleanup `server/` shape (the cleanup moved `server/db.ts` and reorganized `server/*` import boundaries as predicted in §8 question 4).*
 **Author date:** 2026-08-10
 **Source request:** "Abstract repositories enough to switch between postgres, oracle, mysql, or any variations/versions of those we may want to test our code against. Assuming data structures exist the same between them."
 **Concrete trigger:** the new permanent `docker-postgress-v-1` database on the tailscale mesh is the first second-backend. The dropdown on the New Game popup must select *which backend* a new game is created against.
