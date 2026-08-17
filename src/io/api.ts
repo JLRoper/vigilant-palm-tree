@@ -49,20 +49,15 @@ export type LegacyGamePatch = Partial<
   Pick<Game, "hero_q" | "hero_r" | "turn" | "gold" | "enemy_positions">
 >;
 
-export type SpendMovementAction = {
-  action: "spend_movement";
-  heroId: string;
-  fromTile: Axial;
-  toTile: Axial;
-  cost: number;
-};
-
-export type GamePatch = LegacyGamePatch | SpendMovementAction;
+export type GamePatch = LegacyGamePatch;
 
 export type EndTurnResult = {
   round: number;
+  day: number;
   activePlayerId: number;
   players: Player[];
+  heroes: Record<string, HeroState>;
+  settlements: Record<string, SettlementState>;
 };
 
 export type ResolveBattleResult = {
@@ -119,7 +114,7 @@ async function json<T>(res: Response): Promise<T> {
 async function patchGameImpl(
   name: string,
   patch: GamePatch
-): Promise<Game | HeroState> {
+): Promise<Game> {
   const res = await fetchWithTimeout(
     `${BASE}/games/${encodeURIComponent(name)}`,
     {
@@ -128,9 +123,6 @@ async function patchGameImpl(
       body: JSON.stringify(patch),
     }
   );
-  if ("action" in patch && patch.action === "spend_movement") {
-    return json<HeroState>(res);
-  }
   return json<Game>(res);
 }
 
@@ -180,12 +172,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: "{}",
     }).then((r) => json<Game>(r)),
-  patchGame: ((name: string, patch: GamePatch) =>
-    patchGameImpl(name, patch)) as {
-    (name: string, patch: SpendMovementAction): Promise<HeroState>;
-    (name: string, patch: LegacyGamePatch): Promise<Game>;
-    (name: string, patch: GamePatch): Promise<Game | HeroState>;
-  },
+  patchGame: (name: string, patch: GamePatch): Promise<Game> => patchGameImpl(name, patch),
   logEvent: (name: string, kind: string, payload: Record<string, unknown> = {}) =>
     fetchWithTimeout(
       `${BASE}/games/${encodeURIComponent(name)}/events`,
@@ -202,16 +189,24 @@ export const api = {
     ),
 };
 
+// Server is now fully authoritative for end-turn (Phase 3 Track A Week 2):
+// this no longer sends the client's GameState at all. The old route
+// trusted incomingState.heroes/players wholesale and only re-ran the
+// per-day production/auto-trade/consumption pipeline against them; the
+// server now loads its own row and runs the full pipeline itself
+// (see server/app/turnService.ts), so all this needs to carry is who's
+// ending their turn and the client's population-growth preference.
 export async function endTurn(
   name: string,
-  state: GameState
+  actor: number,
+  growthRate?: number
 ): Promise<EndTurnResult> {
   const res = await fetchWithTimeout(
-    `${BASE}/games/${encodeURIComponent(name)}/end-turn`,
+    `${BASE}/games/${encodeURIComponent(name)}/commands`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ state }),
+      body: JSON.stringify({ kind: "EndTurn", actor, growthRate }),
     }
   );
   return json<EndTurnResult>(res);

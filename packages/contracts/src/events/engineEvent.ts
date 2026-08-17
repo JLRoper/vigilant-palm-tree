@@ -13,4 +13,12 @@ export type EngineEvent =
       heroId: HeroId;
       settlementId: SettlementId;
       direction: TransferDirection;
+    }
+  | {
+      type: "TurnEnded";
+      actor: PlayerSeat;
+      round: number;
+      day: number;
+      activePlayerId: number;
+      wrapped: boolean;
     };

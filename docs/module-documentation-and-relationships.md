@@ -17,8 +17,10 @@ Browser (Vite SPA)                                  Express API server
       ├─ src/io/assetApi.ts fetch /api/assets/* ─────►  │       ▼
       │                                                │   postgres (shared
       │   src/state/gameState.ts                      │    "game_db" container,
-      │       │  applyEndOfTurnDetailed()             │    fixed port 5432)
-      │       │  reconcile against server result ◄───┼── server re-applies same
+      │       │  builds/spends locally, then          │    fixed port 5432)
+      │       │  POST /commands (EndTurn) ────────────┼─► server runs the whole
+      │       │  ◄──── authoritative heroes/           │    pipeline itself now
+      │       │        settlements/round/day back      │    (server/app/turnService.ts)
       ▼                                                ▼
    TurnController (client-authoritative reducer)
       │  builds/spends Heroes, Settlements, Charters
@@ -37,7 +39,7 @@ Browser (Vite SPA)                                  Express API server
 |---|---|---|
 | Client | `src/main.ts` | Creates `GameEngine`, runs `init`+`initBackend`, shows home view, kicks off `requestAnimationFrame` loop |
 | API | `server/index.ts` | Express bootstrap, CORS, raw image + JSON parsers, mounts `/api` router on `API_PORT` |
-| API routes | `server/routes.ts` | Games CRUD, tiles, events log, end-turn pipeline, resolve-battle, gold transfer, resource trade; re-runs `applyEndOfTurnDetailed` server-side for drift safety |
+| API routes | `server/routes.ts` | Games CRUD, tiles, events log, resolve-battle, resource trade; delegates MoveHero/TransferGold/EndTurn to `server/http/routes/commands.ts` (`server/app/commandHandler.ts`) instead of hand-rolled PATCH/POST branches |
 
 ---
 
@@ -281,7 +283,7 @@ FLUX-driven sprite generation pipeline (`tools/sprites/flux-*.mjs` for castles, 
 
 - **`core/`** has zero `state/`/`render/`/`views/` deps — pure math + pub/sub. Everything else depends on it.
 - **`shared/`** is the engine-neutral layer both `src/` and `server/` import from. Identity/geometry/building/media types (`Axial`, `CastleLevel`, `BuildingKind`, `GenerationStyle`, `PlayerId`, etc.) live in `shared/types.ts`; `mulberry32` is in `shared/rng.ts`; `WAREHOUSE_RESOURCES` in `shared/constants.ts`; map primitives (`Terrain`, `GameMap`, `placeResourceTiles`) in `shared/map/*`. `shared/combat/*` and `shared/units.ts` are imported by both sides.
-- **`state/gameState.ts`** is the **single source of truth** for game logic; both `turnController.ts` and `server/routes.ts` consume its reducers (drift safety: server re-runs `applyEndOfTurnDetailed`). The server reaches those reducers via the `shared/gameState.ts` stepping-stone barrel rather than reaching into `src/` directly.
+- **`state/gameState.ts`** is the **single source of truth** for game logic client-side; `turnController.ts` consumes its reducers for everything except end-turn, which is now server-authoritative end-to-end (`server/app/turnService.ts` composes `@heroes/engine`'s own `applyEndOfTurnDetailed`/`endTurn`/`advanceRound` against the DB row, not a client-submitted state — closes the settlement-upgrade and population-growth/weekly-upkeep gaps the old client-trusting `/end-turn` route left open; charter advancement is still a no-op server-side pending a schema column for `activeCharters`).
 - **`core/eventBus.ts`** is the spine connecting `TurnController` → `GameStateManager` → `ViewManager` → `UIManager`/`Renderer`.
 - **`render/renderer.ts`** is the **only consumer** of `entities/Hero` + `entities/Settlement` for drawing; everything else uses `state/gameState` directly.
 - **`shared/combat/*`** is the **only directory imported by both** `server/routes.ts` and `src/views/manualBattleArena.ts`.

@@ -163,7 +163,7 @@ Source: [`src/views/cityView.ts`](../src/views/cityView.ts), [`src/views/buildin
 
 ## Persistence
 
-`activeCharters`, `nextCharterId`, and `nextSettlementId` are stored as part of the `games` JSONB row. No schema change needed — they round-trip through `heroes`/`settlements`/`players` JSONB columns on `POST /api/games/:name/end-turn`.
+`nextSettlementId` is stored as part of the `games` JSONB row. **`activeCharters`/`nextCharterId` are not persisted server-side at all** — there is no `charters`/`active_charters` column in `server/schema.sql` or `server/migrations/`, so `hydrateGameState()` (`packages/engine/src/hydrate.ts`) always hydrates `activeCharters` as `[]` regardless of what a client last saved. In-flight charters only exist in client-side state; server-side charter advancement (`advanceCharters()`, called as part of `server/app/turnService.ts`'s round-wrap pipeline) is consequently a no-op today. Closing this needs a schema addition, which is explicitly out of scope for Phase 3 (`plan/2026-08-16-phase-3-parallel-dev-plan.md`: "no schema changes... that's Phase 4").
 
 State types defined in [`src/state/gameState.ts`](../src/state/gameState.ts):
 - `CharterState` — `{ id, heroId, ownerId, targetQ, targetR, settlementName, phase, daysRemaining, settlementId, resourceRates, foundedOnResource, citySpots }`

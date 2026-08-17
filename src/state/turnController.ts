@@ -10,9 +10,6 @@ import {
   captureSettlement as captureSettlementReducer,
   startBattle as startBattleReducer,
   endBattlePhase as endBattlePhaseReducer,
-  endTurn as endTurnReducer,
-  applyEndOfTurn as applyEndOfTurnReducer,
-  advanceRound as advanceRoundReducer,
   reorderStack as reorderStackReducer,
   detectAdjacentEnemy as detectAdjacentEnemyFn,
   transferGold as transferGoldReducer,
@@ -384,42 +381,44 @@ export class TurnController {
     this.aiEnding = true;
     try {
       const endedPlayerId = this.state.activePlayerId;
+      const endedRound = this.state.round;
+      const oldPhase = this.state.phase.kind;
       this.hooks.logEvent({
         type: "turn_ended",
-        payload: { playerId: endedPlayerId, round: this.state.round },
+        payload: { playerId: endedPlayerId, round: endedRound },
       });
       bus.emit({ type: "turn:ended", playerId: endedPlayerId });
-      const oldPhase = this.state.phase.kind;
-      this.state = applyEndOfTurnReducer(this.state);
-      this.state = endTurnReducer(this.state);
+
+      // Server is now fully authoritative for the whole end-turn pipeline
+      // (production/auto-trade/consumption, the next-player-or-round-wrap
+      // phase transition, and -- when wrapping -- settlement upgrades and
+      // weekly upkeep/population growth). No local
+      // applyEndOfTurnReducer/endTurnReducer/advanceRoundReducer pass
+      // beforehand: this.state going in is exactly what gets sent (just
+      // activePlayerId, via the hook), and what comes back is the full
+      // merged result -- see src/game/turnHooks.ts's onHumanTurnEnd.
+      this.state = await this.hooks.onHumanTurnEnd(this.state);
+
       const newPhase = this.state.phase.kind;
       if (oldPhase !== newPhase) {
         bus.emit({ type: "phase:changed", oldPhase, newPhase });
       }
-      this.state = await this.hooks.onHumanTurnEnd(this.state);
+
+      const wrapped = this.state.round > endedRound;
+      if (wrapped) {
+        this.hooks.logEvent({ type: "round_ended", payload: { round: endedRound } });
+        bus.emit({ type: "round:changed", round: this.state.round });
+        bus.emit({ type: "day:changed", day: this.state.day });
+        this.hooks.logEvent({ type: "round_started", payload: { round: this.state.round } });
+      }
 
       if (this.state.phase.kind === "PLAYER_TURN") {
         this.advanceAutoTravel();
       } else if (this.state.phase.kind === "AI_TURN") {
-        bus.emit({ type: "phase:changed", oldPhase: "PLAYER_TURN", newPhase: "AI_TURN" });
         this.hooks.logEvent({
           type: "ai_turn_started",
           payload: { playerId: this.state.activePlayerId, round: this.state.round },
         });
-      } else if (this.state.phase.kind === "ROUND_END") {
-        const endedRound = this.state.round;
-        this.hooks.logEvent({
-          type: "round_ended",
-          payload: { round: endedRound },
-        });
-        this.state = advanceRoundReducer(this.state, settings().populationGrowthRate);
-        bus.emit({ type: "round:changed", round: this.state.round });
-        bus.emit({ type: "day:changed", day: this.state.day });
-        this.hooks.logEvent({
-          type: "round_started",
-          payload: { round: this.state.round },
-        });
-        this.advanceAutoTravel();
       }
     } finally {
       this.aiEnding = false;

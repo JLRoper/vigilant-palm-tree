@@ -89,15 +89,21 @@ async function run() {
   const started = (await start.json()) as { lobby: { startedAt?: string } };
   assert.ok(started.lobby.startedAt, "startedAt should be set");
 
-  // 7. Permission gate: seat 1 player tries to spend movement for seat 0's hero
-  //    while seat 0 is the active player — should be 403.
+  // 7. Permission gate: attempt to move seat 0's hero via the command
+  //    endpoint, claiming to act as seat 0 -- should only succeed (200)
+  //    when seat 0 is actually the active player; otherwise the
+  //    turn-ownership guard in server/app/commandHandler.ts rejects with
+  //    403. (Movement moved from PATCH /games/:name {action:
+  //    "spend_movement"} to POST /games/:name/commands {kind: "MoveHero"}
+  //    in Phase 3 Track A Week 2 -- see plan/2026-08-16-phase-3-parallel-dev-plan.md.)
   const gameRes = await ctx.get(`${API_URL}/api/games/${lobbyGameName}`);
   const game = (await gameRes.json()) as { heroes: Record<string, { id: string; ownerId: number; q: number; r: number }> };
   const seat0Hero = Object.values(game.heroes).find((h) => h.ownerId === 0);
   assert.ok(seat0Hero, "seat 0 hero should exist");
-  const badMove = await ctx.patch(`${API_URL}/api/games/${lobbyGameName}`, {
+  const badMove = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/commands`, {
     data: {
-      action: "spend_movement",
+      kind: "MoveHero",
+      actor: 0,
       heroId: seat0Hero!.id,
       fromTile: { q: seat0Hero!.q, r: seat0Hero!.r },
       toTile: { q: seat0Hero!.q + 1, r: seat0Hero!.r },

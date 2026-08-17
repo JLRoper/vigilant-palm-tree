@@ -1,15 +1,12 @@
-import type { HeroId, HeroState, SettlementId, SettlementState } from "@heroes/contracts";
+import type { HeroId, HeroState, Player, SettlementId, SettlementState } from "@heroes/contracts";
 import type { HydratableGameRow } from "@heroes/engine";
 import type { EventRepo, GameRepo } from "../../server/app/commandHandler";
 
 // In-memory doubles implementing commandHandler.ts's pre-agreed repo
 // interface (plan/2026-08-16-phase-3-parallel-dev-plan.md, "Pre-agreed
-// repo interface" section). Track 3.B owns the real Postgres-backed
-// implementation in server/persistence/repositories/; this file lets
-// Track 3.A's own tests run without blocking on that landing, per the
-// plan's own stated fallback ("Track 3.A still has mockRepos.ts to develop
-// and test against"). Track 3.B should take over/expand this file once its
-// real repos exist.
+// repo interface" section). server/persistence/repositories/ owns the
+// real Postgres-backed implementation; this file lets Track 3.A's own
+// tests run without needing a live DB connection.
 
 export function createMockGameRepo(
   seed: Record<string, HydratableGameRow>,
@@ -26,10 +23,25 @@ export function createMockGameRepo(
       name: string,
       heroes: Record<HeroId, HeroState>,
       settlements: Record<SettlementId, SettlementState>,
+      extra?: {
+        players?: Player[];
+        gold?: number;
+        round?: number;
+        day?: number;
+        active_player_id?: number;
+      },
     ): Promise<void> {
       const row = rows[name];
       if (!row) throw new Error(`mock game not found: ${name}`);
-      rows[name] = { ...row, heroes, settlements };
+      rows[name] = {
+        ...row,
+        heroes,
+        settlements,
+        ...(extra?.players !== undefined ? { players: extra.players } : {}),
+        ...(extra?.round !== undefined ? { round: extra.round } : {}),
+        ...(extra?.day !== undefined ? { day: extra.day } : {}),
+        ...(extra?.active_player_id !== undefined ? { active_player_id: extra.active_player_id } : {}),
+      };
     },
   };
 }
