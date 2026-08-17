@@ -1,6 +1,7 @@
 import type { HeroId, HeroState, Player, SettlementId, SettlementState } from "@heroes/contracts";
 import type { HydratableGameRow } from "@heroes/engine";
 import type { EventRepo, GameRepo } from "../../server/app/commandHandler";
+import type { SettlementSnapshotInput, ResourceTransactionInput } from "../../server/persistence/repositories/gameRepo";
 
 // In-memory doubles implementing commandHandler.ts's pre-agreed repo
 // interface (plan/2026-08-16-phase-3-parallel-dev-plan.md, "Pre-agreed
@@ -53,6 +54,14 @@ export function createMockGameRepo(
         ...(extra?.gold !== undefined ? { gold: extra.gold } : {}),
       };
     },
+    async insertSettlementSnapshots(
+      _gameName: string,
+      _snapshots: SettlementSnapshotInput[],
+    ): Promise<void> {},
+    async insertResourceTransactions(
+      _gameName: string,
+      _transactions: ResourceTransactionInput[],
+    ): Promise<void> {},
   };
 }
 
