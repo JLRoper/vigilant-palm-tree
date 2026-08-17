@@ -6,6 +6,7 @@
 *Revision note (2026-08-17, post-#94): syncs in PR #93 (Phase 4 Track B — granular entity tables, repos, JSONB backfill). PR #94's own doc-sync branch was cut before #93 merged, so that revision of this file missed it. This revision also corrects two rows in §5.2 that had misattributed `heroRepo.ts`/`settlementRepo.ts` to PR #84 — that PR's own commit message says it explicitly did not add them.*
 *Revision note 2 (2026-08-17, same day): reflects Track 4.A's `hydrate.ts` + `commandHandler.ts` dual-write work, committed as `20704d4`/`3aad7d3` on branch `phase4/track-a-hydrate-dualwrite`, pushed, open as **PR #95**. Marked 🟡, not ✅, until it's merged (per this doc's own legend, "✅ done & merged"); see §6.1.*
 *Revision note 3 (2026-08-17, from worktree `20260817_0211_phase5trackA`): **PR #95 merged** (commit `2554711`, this worktree's `HEAD`/`main`/`github main`) — flips every 🟡-pending-#95 row below to ✅; Phase 4 is now fully done and Sync Point 2 (§6.3) is fully met. PR #95 merged with 5 Copilot review comments that were never addressed (posted ~2 min after merge, no follow-up commit) — all 5 fixed in this worktree: `hydrate.ts`'s fallback logging is now rate-limited to once per game per process, `hydrateFromRepos()` no longer queries `charterRepo` on a path that's about to discard it and fall back to JSONB, `hydrate.ts`/`commandHandler.ts` comment blocks trimmed per this repo's own AGENTS.md rule against unrequested comments, and `test/persistence/hydrate.test.ts` now uses `node:test`'s `t.mock.method` instead of a global `console.info` monkey-patch. Phase 5 Track A also partially started in this worktree (§7.1): `src/io/commands.ts` created (consolidates the client's command-POST functions out of `src/io/api.ts`) and the human-initiated `MoveHero`/`TransferGold` round-trip gap (R4, §10) fully closed via two new `TurnControllerHooks` (`onHumanMove`, `onTransferGold`). `multiplayerSync.ts`'s event-cursor rewrite, `GameSessionManager.ts` cursor init, and deleting `SessionManager.ts`'s full-state save push are deliberately still deferred (see §7.1). Verified: `npm run build`, `npm run lint:deps`, `npm run test:all` (76/76 unit + smoke + multiplayer + cityView) all green.*
+*Revision note 4 (2026-08-17, from worktree `20260817_0335_phase5TrackB`): merged `main` (PR #96 — the Track 5.A partial work from revision note 3) into this branch, fast-forward, no conflicts. Made real progress on Track 5.B (§7.2, table updated below): fixed a real bug in `adventureScene.ts` (its relative imports were one directory level too shallow, so it never actually compiled — this had shipped uncaught in the prior session since it was never run through `npm run build`), then added `entityMirror.ts` and `sceneBuilder/cityScene.ts`, both pure and fully unit-tested (24 new tests in `test/render/`, now wired into `test:unit`). Also relocated `computeCityScale` out of `cityRenderer.ts` into `src/core/cityGrid.ts` (re-exported from its old location for the two existing call sites) — `cityRenderer.ts` has module-scope Vite-only `?url` PNG imports, so nothing importable from it (or from the `cityBuildingDraw.ts` barrel, which pulls in `assetDescriptors.ts`'s PNG imports the same way) can be safely imported from a plain `node:test` context. This is a real, general pitfall for whoever builds `battleScene.ts` or `paint2d/` next: import pure helpers from their actual leaf module (e.g. `cityBuildingDraw/primitives.ts`) rather than through an asset-loading barrel. `battleScene.ts`, `paint2d/`, the `manualBattleArena.ts` decomposition, and the `renderer.ts`/`cityRenderer.ts` rewrite itself all remain ⬜ — none of Track 5.B's output is wired into the live render path yet, so regression risk so far is still zero. Verified: `npm run build`, `npm run lint:deps`, `npm run test:all` (100/100 unit + smoke + multiplayer + cityview) all green.*
 
 ---
 
@@ -22,7 +23,7 @@ Phase 4  Database De-blobbing & Dual-Write              [✅ DONE]
    └── 4.B  SQL migrations & historical-game backfill    [✅ Dev B — PR #93 merged]
 Phase 5  Client Event Sync & Scene Renderer Seam        [🟡 IN PROGRESS]
    ├── 5.A  Client command dispatcher & event-cursor sync [🟡 Dev A — commands.ts created + R4 closed; cursor sync/manualSave deletion still pending]
-   └── 5.B  Scene graph builder & entity-mirror animation [⬜]
+   └── 5.B  Scene graph builder & entity-mirror animation [🟡 Dev B — adventureScene/cityScene/entityMirror done+tested; battleScene/paint2d/manualBattleArena decomp/renderer rewrite still ⬜]
 ```
 
 Sync points between phases:
@@ -215,17 +216,23 @@ Conflict surface is near zero by design: Track A never imports from `server/pers
 
 **Exit criteria:** client actions execute exclusively as commands (✅ met); multiplayer state syncs exclusively via delta events (⬜ not met — still full-state polling via `multiplayerSync.ts`).
 
-### 7.2 Track 5.B — Scene Graph Builder & Entity Mirror (Dev B)
+### 7.2 Track 5.B — Scene Graph Builder & Entity Mirror (Dev B) `[🟡 IN PROGRESS]`
+
+**2026-08-17 update (worktree `20260817_0335_phase5TrackB`):** the pure, inert half of this track is done and unit-tested; nothing below is wired into the live render path yet, so regression risk so far is zero. `SceneNode`'s actual shape (`src/render/scene/types.ts`) diverged from the Fable-era `{ spriteKey, facing, gridPos, ... }` sketch — it's a ~20-variant discriminated union keyed by `kind`, one variant per drawable thing, not one flat shape.
 
 | Item | Status |
 | :--- | :--- |
-| `src/render/scene/sceneBuilder/{adventureScene,cityScene,battleScene}.ts` (pure: `GameState + Camera -> SceneNode[]`) | ⬜ |
-| `src/render/scene/paint2d/` (Canvas2D painter reading `SceneNode[]`) | ⬜ |
-| `src/render/scene/entityMirror.ts` (subscribes to `HeroMoved`, `StructureBuilt` events; smooth tweening without rAF full-state re-polling) | ⬜ |
-| Decompose `src/screens/combat/manualBattleArena.ts` into modular components | ⬜ |
-| `src/render/renderer.ts` and `src/render/cityRenderer.ts` rewritten to consume `SceneNode[]` instead of state directly | ⬜ |
+| `src/render/scene/sceneBuilder/adventureScene.ts` (pure decomposition of `Renderer.draw()`) | ✅ done + unit-tested (`test/render/adventureScene.test.ts`, 11 tests). Takes today's `Hero[]`/`Castle[]`/`GameMap` wrapper inputs (`Renderer.draw()`'s real signature), not raw `GameState` — replacing that mirror is `entityMirror.ts`'s job. |
+| `src/render/scene/sceneBuilder/cityScene.ts` (pure decomposition of `cityRenderer.ts`'s `drawCityView()`) | ✅ done + unit-tested (`test/render/cityScene.test.ts`, 6 tests). The skybox's image loading/caching/parallax-layer-splitting stays a `paint2d` concern (stateful asset loading, not scene data) — the `citySkybox` node only carries the resolved variant/parallax decision. |
+| `src/render/scene/sceneBuilder/battleScene.ts` | ⬜ not started. |
+| `src/render/scene/paint2d/` (Canvas2D painter reading `SceneNode[]`) | ⬜ not started. |
+| `src/render/scene/entityMirror.ts` (subscribes to `HeroMoved`, `StructureBuilt` events; smooth tweening without rAF full-state re-polling) | 🟡 **partial, by necessity.** `HeroMoved` is implemented (tweens via the existing `Hero.startMoveToPath()`/`Hero.update()`) and `SettlementCaptured` (updates `ownerId`). `StructureBuilt` doesn't exist as an `EngineEvent` variant yet (confirmed via repo-wide grep — it's plan-doc prose only, blocked on `BuildStructure`, R6 §10) so it can't be implemented; every other real `EngineEvent` variant is a documented no-op for now (either the event doesn't carry enough data to reconstruct the entity, e.g. `HeroRecruited`, or wasn't needed yet — callers should `bootstrap()` from a fresh `GameState` to cover those). Unit-tested (`test/render/entityMirror.test.ts`, 7 tests). Still unwired anywhere live — depends on Track 5.A's event-cursor delivery, which doesn't exist client-side yet either (§7.1). |
+| Decompose `src/screens/combat/manualBattleArena.ts` into modular components | ⬜ not started. |
+| `src/render/renderer.ts` and `src/render/cityRenderer.ts` rewritten to consume `SceneNode[]` instead of state directly | ⬜ not started — deliberately last; the highest-risk step since it's the only one that touches the live render path. |
 
-**Exit criteria:** canvas rendering runs from immutable `SceneNode[]` lists; hero movement animations interpolate smoothly driven by event subscriptions.
+**Notable side-fix:** `computeCityScale` used to live in `cityRenderer.ts`, which has module-scope Vite-only `?url` PNG imports — so nothing could import it (or anything from the `cityBuildingDraw.ts` barrel, which pulls in `assetDescriptors.ts`'s PNG imports the same way) from a plain `node:test` context. Relocated its implementation to `src/core/cityGrid.ts` (zero asset deps); `cityRenderer.ts` now imports + re-exports it, so its two existing call sites (`buildingPlacer.ts`, `cityView.ts`) are unaffected (confirmed via the `cityview` browser suite in `test:all`). Same pitfall will hit `battleScene.ts`/`paint2d/` — import pure helpers from their leaf module (e.g. `cityBuildingDraw/primitives.ts`), not through an asset-loading barrel.
+
+**Exit criteria:** canvas rendering runs from immutable `SceneNode[]` lists; hero movement animations interpolate smoothly driven by event subscriptions. — not yet met; no `SceneNode[]` output is consumed by the live renderer yet.
 
 ---
 
@@ -297,6 +304,7 @@ Additional Phase 5 gate: Canvas-render screenshot diffs vs. previous render path
 1. ~~**Phase 4.A review & merge**~~ — done; PR #95 merged (§6.1, §11). The still-open #89 follow-up (unit-level regression assertions in `commandHandler.test.ts`) has **not** been absorbed by this branch — still a separate follow-up.
 2. **`StartCharter`/`AdvanceCharter` command ports** — schema (Track 4.B, PR #93) and the hydration read-side (Track 4.A, PR #95) are both in place; only the write-side command port itself is left (see §5.1, §10 R5).
 3. **Phase 5.A continuation** — `src/io/commands.ts` exists and R4 is closed (§7.1). Remaining: decide who owns adding `?after=<seq>` cursor support to the events endpoint (or an SSE alternative) — not currently assigned in the ownership matrix (§8) — then rewrite `multiplayerSync.ts` against it, wire `GameSessionManager.ts`'s cursor init, and either replace or deliberately retire `SessionManager.manualSave()`'s full-state push (currently still exercised by `test/smoke.ts`'s Save-button assertion).
+4. **Phase 5.B continuation** — `adventureScene.ts`, `cityScene.ts`, and `entityMirror.ts` are done and unit-tested (§7.2). Remaining, roughly in ascending risk order: `battleScene.ts` (needs a full read of `manualBattleArena.ts` first — untouched so far), `paint2d/` (the actual Canvas2D painter reading `SceneNode[]` — a large "transcribe existing drawing code into pure functions" effort), decomposing `manualBattleArena.ts` into modular components (vague scope, high risk without a pre-agreed target structure, and it's a live interactive screen), and finally rewriring `renderer.ts`/`cityRenderer.ts` to actually consume `SceneNode[]` (deliberately last — the only step touching the live render path).
 
 ---
 

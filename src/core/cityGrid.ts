@@ -63,6 +63,22 @@ export function cellCorners(
   ];
 }
 
+// Pure -- lives here (not cityRenderer.ts) so it stays importable from
+// contexts without a bundler asset pipeline (e.g. plain node:test), since
+// cityRenderer.ts also pulls in Vite `?url` PNG imports at module scope.
+export function computeCityScale(
+  size: CityViewSize,
+  viewportW: number,
+  viewportH: number,
+): number {
+  if (size <= 10) return 1.0;
+  const limitW = viewportW * 0.85;
+  const limitH = viewportH * 0.85;
+  const maxW = limitW / (size * TILE_W);
+  const maxH = limitH / (size * TILE_D);
+  return Math.min(1, maxW, maxH);
+}
+
 export function cellsInDrawOrder(size: CityViewSize): CityCell[] {
   const out: CityCell[] = [];
   for (let s = 0; s <= 2 * (size - 1); s++) {

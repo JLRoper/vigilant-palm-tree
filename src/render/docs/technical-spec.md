@@ -921,7 +921,7 @@ classDiagram
 ### External Dependencies
 
 - `src/core/hex.ts` — Hex coordinate math (`axialToPixel`, `pixelToAxial`, `hexCorners`, `hexDistance`, `HEX_SIZE`)
-- `src/core/cityGrid.ts` — City grid coordinate math (`cellOrigin`, `cellToScreen`, `cellsInDrawOrder`, `TILE_W`, `TILE_D`, `CityViewSize`)
+- `src/core/cityGrid.ts` — City grid coordinate math (`cellOrigin`, `cellToScreen`, `cellsInDrawOrder`, `computeCityScale`, `TILE_W`, `TILE_D`, `CityViewSize`). `computeCityScale` moved here from `cityRenderer.ts` (which re-exports it for its existing callers) so it's importable without pulling in `cityRenderer.ts`'s module-scope Vite `?url` PNG imports — see §7.
 - `src/core/control.ts` — Territory control logic (`controlledPositions`, `territoryBoundaryEdges`, `controlRange`)
 - `src/map/terrain.ts` — `TERRAIN_COLORS`, `Terrain` type, `TERRAIN_COST`
 - `src/map/resourceTiles.ts` — `ResourceType`, `RESOURCES`
@@ -943,3 +943,17 @@ classDiagram
 5. **Painter's algorithm**: Both the world map and city view render entities in z-order (sorted by `q + r` for hex map, `gx + gy` for city grid) so closer entities correctly occlude farther ones.
 
 6. **Deterministic terrain decoration**: Terrain decorations (trees, snow caps, sand ripples) use a seeded pseudo-random function `decorationSeed(q, r) = sin(q * 91.71 + r * 43.17) * 43758.5453` so the same map tile always gets the same decoration regardless of rendering order.
+
+---
+
+## 7. Scene Graph Seam (In Progress, Phase 5 Track B)
+
+**Not wired into the live render path yet.** Everything above this section (`Renderer.draw()`, `cityRenderer.ts`'s `drawCityView()`) is still exactly how frames actually get drawn today. In parallel, `src/render/scene/` is building a pure `GameState/Hero[]/Castle[] + Camera -> SceneNode[]` seam so a future Canvas2D (or later WebGL) painter can draw from immutable data instead of reaching back into game state directly. See `plan/2026-08-17-consolidated-phase-1-5-track-map.md` §7.2 for status.
+
+- **`scene/types.ts`** — `SceneNode`, a discriminated union keyed by `kind` (one variant per drawable thing: `terrainHex`, `fogHex`, `resourceIcon`, `castle`, `hero`, `cityCell`, `cityBuilding`, `citySkybox`, …), plus `WorldPoint`.
+- **`scene/sceneBuilder/adventureScene.ts`** — `buildAdventureScene()`, a faithful pure decomposition of `Renderer.draw()`'s per-frame draw decisions. Takes today's `Hero[]`/`Castle[]`/`GameMap` inputs (not raw `GameState`) — replacing that mirror is `entityMirror.ts`'s job.
+- **`scene/sceneBuilder/cityScene.ts`** — `buildCityScene()`, the same treatment for `cityRenderer.ts`'s `drawCityView()`. The skybox's actual image loading/caching/parallax-layer-splitting stays a future `paint2d` concern (stateful asset loading, not scene data); the `citySkybox` node only carries the resolved variant/parallax decision.
+- **`scene/entityMirror.ts`** — `EntityMirror`, the visual `Hero[]`/`Castle[]` tween cache described in the plan docs. `bootstrap(state)` hard-resyncs from a `GameState` snapshot; `applyEvent(event)` is the soft, targeted path meant to run off Track 5.A's event-cursor stream once that exists client-side — it currently handles `HeroMoved` (tweens via `Hero.startMoveToPath()`) and `SettlementCaptured` (owner color), with every other `EngineEvent` variant a documented no-op until either the event carries enough data to apply or it's actually needed. Not wired into `GameEngine.ts`/`GameStateManager.ts` yet — those still use the wholesale rebuild-on-`state:committed` pattern this is meant to replace.
+- **Still to build**: `scene/sceneBuilder/battleScene.ts`, `scene/paint2d/` (the actual painter reading `SceneNode[]`), and the `renderer.ts`/`cityRenderer.ts` rewrite to actually consume `SceneNode[]` (deliberately last — the only step touching the live render path).
+- **Testing**: `test/render/*.test.ts` (`node:test`, wired into `npm run test:unit`) unit-tests every scene builder and `entityMirror.ts` against hand-built `GameMap`/`Hero`/`Castle`/`GameState` fixtures — no DOM/canvas required, since everything here is pure data.
+- **Known pitfall for `battleScene.ts`/`paint2d/`**: importing from `cityRenderer.ts`, or from the `cityBuildingDraw.ts` barrel (which pulls in `assetDescriptors.ts`'s dozens of Vite `?url` PNG imports), crashes under plain `node:test`/tsx — Node has no loader for `.png`/`?url` specifiers outside Vite's bundler. Import pure helpers from their actual leaf module instead (e.g. `cityBuildingDraw/primitives.ts` for `buildingFootprint`, `core/cityGrid.ts` for `computeCityScale`), not through an asset-loading barrel.

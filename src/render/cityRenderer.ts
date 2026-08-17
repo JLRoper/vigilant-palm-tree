@@ -2,6 +2,7 @@ import {
   cellOrigin,
   cellToScreen,
   cellsInDrawOrder,
+  computeCityScale,
   TILE_W,
   TILE_D,
   type CityCell,
@@ -250,18 +251,7 @@ const STYLE_LABELS: Record<string, string> = Object.fromEntries(
   BUILDING_STYLE_REGISTRY.map((s) => [s.id, s.label])
 );
 
-export function computeCityScale(
-  size: CityViewSize,
-  viewportW: number,
-  viewportH: number,
-): number {
-  if (size <= 10) return 1.0;
-  const limitW = viewportW * 0.85;
-  const limitH = viewportH * 0.85;
-  const maxW = limitW / (size * TILE_W);
-  const maxH = limitH / (size * TILE_D);
-  return Math.min(1, maxW, maxH);
-}
+export { computeCityScale };
 
 export interface DrawCityViewOptions {
   viewportW: number;
