@@ -1,18 +1,35 @@
 import { Router, type Request } from "express";
 import type { Command } from "@heroes/contracts";
 import { VALID_HORSE_VARIANTS } from "@heroes/engine";
-import { handleCommand, createLiveCommandDeps, type CommandDeps } from "../../app/commandHandler";
+import { handleCommandTransactional, createLiveCommandDeps, type LiveCommandDeps } from "../../app/commandHandler";
 
 // createLiveCommandDeps() is async as of Week 3 (it now queries the
 // unit_types table for ResolveBattle's catalog -- see that function's own
 // comment), so it can no longer just be called once at module load time
 // the way Week 1/2 had it. Memoized lazily on first request instead:
 // route registration doesn't block on a DB round-trip, and every request
-// after the first reuses the same resolved CommandDeps (still built once
-// per process, not once per request -- same intent as before).
-let liveDepsPromise: Promise<CommandDeps> | null = null;
-function getLiveDeps(): Promise<CommandDeps> {
-  if (!liveDepsPromise) liveDepsPromise = createLiveCommandDeps();
+// after the first reuses the same resolved LiveCommandDeps (still built
+// once per process, not once per request -- same intent as before).
+//
+// LiveCommandDeps is the superset of CommandDeps that
+// handleCommandTransactional needs (it carries the pool the transactional
+// wrapper acquires per-request PoolClients from). The transactional
+// wrapper internally threads a request-scoped gameRepo/eventRepo from a
+// PoolClient, so the memoized repos themselves are only used for the
+// unit_types pre-read inside createLiveCommandDeps.
+let liveDepsPromise: Promise<LiveCommandDeps> | null = null;
+function getLiveDeps(): Promise<LiveCommandDeps> {
+  if (!liveDepsPromise) {
+    liveDepsPromise = createLiveCommandDeps().catch((err) => {
+      // Clear the memoized promise on rejection so a transient DB failure
+      // (e.g. unit_types query timing out while the DB is recovering)
+      // doesn't permanently cache a rejected promise and 500 every command
+      // until the process restarts. Without this, the first failure to
+      // build liveDepsPromise locks every subsequent request out.
+      liveDepsPromise = null;
+      throw err;
+    });
+  }
   return liveDepsPromise;
 }
 
@@ -240,7 +257,7 @@ commandsRouter.post("/", async (req: Request<{ name: string }>, res) => {
   }
   try {
     const deps = await getLiveDeps();
-    const result = await handleCommand(command, deps);
+    const result = await handleCommandTransactional(command, deps);
     if (!result.ok) {
       const status = result.reason === "forbidden_not_your_turn" ? 403 : 409;
       res.status(status).json({ error: result.reason });

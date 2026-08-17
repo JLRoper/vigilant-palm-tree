@@ -11,7 +11,7 @@ import type {
   SettlementState,
 } from "@heroes/contracts";
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
-import { handleCommand } from "../../server/app/commandHandler";
+import { handleCommand, handleCommandTransactional } from "../../server/app/commandHandler";
 import { createMockEventRepo, createMockGameRepo } from "../helpers/mockRepos";
 
 function makeHero(id: HeroId, ownerId: PlayerId, q: number, r: number, overrides: Partial<HeroState> = {}): HeroState {
@@ -423,9 +423,160 @@ test("ResolveBattle rejects a defenderId that isn't actually adjacent to the att
   );
   const { deps } = makeDeps(row, RESOLVE_BATTLE_UNIT_TYPES);
   const command: Command = { kind: "ResolveBattle", gameName: "test-game", actor: 0, attackerId: "h0", defenderId: "h1" };
-  const result = await handleCommand(command, deps);
+const result = await handleCommand(command, deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "not_adjacent");
+});
+
+// ---------------------------------------------------------------------------
+// handleCommandTransactional: wraps the live Postgres path so that load /
+// validate / saveHeroesAndSettlements / eventRepo.append all share a single
+// PoolClient AND the games row is SELECT ... FOR UPDATE-locked for the
+// duration of the command (closing the concurrent-overwrite gap Copilot
+// flagged in PR #91 review: without the lock, two MoveHero/TradeResources
+// commands issued in the same millisecond each load the pre-state, each
+// mutate, and each save -- last write clobbers the first).
+//
+// mockRepos is in-memory and atomic-per-call, so testing the wrapper end
+// to end requires a fake "PoolClient" that records the queries
+// handleCommandTransactional issues (notably the FOR UPDATE) and exposes
+// just enough query surface for createGameRepo/createEventRepo to load
+// and persist against. The point of these tests is the lock + commit
+// ordering, not the in-memory repo behavior (which the handleCommand tests
+// above already exhaustively cover).
+// ---------------------------------------------------------------------------
+
+interface FakePoolClient {
+  query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[]; rowCount: number }>;
+  release: () => void;
+}
+
+function makeFakePoolClient(
+  row: HydratableGameRow,
+): FakePoolClient & { queries: string[] } {
+  const queries: string[] = [];
+  return {
+    queries,
+    async query(sql: string, _params?: unknown[]) {
+      queries.push(sql);
+      // Dispatch on leading keyword, not on substring matches --
+      // /UPDATE/i matches "updated_at" inside a SELECT, and BEGIN/COMMIT/
+      // ROLLBACK don't match any of the table-shaped patterns.
+      const head = sql.trim().split(/\s+/, 2).join(" ").toUpperCase();
+      if (head === "BEGIN" || head === "COMMIT" || head === "ROLLBACK") {
+        return { rows: [], rowCount: 0 };
+      }
+      if (head.startsWith("SELECT") && /FOR UPDATE/i.test(sql)) {
+        return { rows: [{ id: 1 }], rowCount: 1 };
+      }
+      if (
+        head.startsWith("SELECT") &&
+        /FROM\s+games\s+WHERE\s+name\s*=\s*\$1/i.test(sql)
+      ) {
+        return { rows: [row], rowCount: 1 };
+      }
+      // UPDATE games SET ... WHERE name = $N -- head parsing only takes
+      // two words so we have to substring-match the SET marker.
+      if (/^UPDATE\s+games\s+SET\b/i.test(sql.trim())) {
+        return { rows: [], rowCount: 1 };
+      }
+      // INSERT INTO game_events / settlement_snapshots / resource_transactions
+      // -- same problem (head is just "INSERT INTO"), so substring-match.
+      if (/^INSERT\s+INTO\s+game_events\b/i.test(sql.trim())) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (/^INSERT\s+INTO\s+settlement_snapshots\b/i.test(sql.trim())) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (/^INSERT\s+INTO\s+resource_transactions\b/i.test(sql.trim())) {
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error(`fakePoolClient: unhandled query: ${head}`);
+    },
+    release() {},
+  };
+}
+
+function makeTransactionalDeps(row: HydratableGameRow) {
+  const gameRepo = createMockGameRepo({ [row.name as string]: row });
+  const eventRepo = createMockEventRepo();
+  const ctx = { rng: () => 0.5, catalog: { unitTypes: [] as UnitType[] } };
+  let activeClient: FakePoolClient | null = null;
+  const pool = {
+    async connect() {
+      activeClient = makeFakePoolClient(row);
+      return activeClient;
+    },
+  };
+  return {
+    gameRepo,
+    eventRepo,
+    queries: () => activeClient?.queries ?? [],
+    deps: {
+      gameRepo,
+      eventRepo,
+      ctx,
+      pool: pool as unknown as import("pg").Pool,
+    },
+  };
+}
+
+test("handleCommandTransactional acquires a SELECT FOR UPDATE on the games row before delegating to handleCommand", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [makeSettlement("s0", 0, 2, 2)]);
+  const { deps, queries } = makeTransactionalDeps(row);
+  const command: Command = {
+    kind: "MoveHero",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 2, r: 2 },
+    toTile: { q: 3, r: 2 },
+    cost: 1,
+  };
+  const result = await handleCommandTransactional(command, deps);
+  assert.equal(result.ok, true);
+  // Lock issued first; load, save, and event-append follow it in the
+  // same connection. The exact ordering of load/save/event is whatever
+  // handleCommand does, but FOR UPDATE must precede any of them.
+  const lockIdx = queries().findIndex((q) => /FOR UPDATE/i.test(q));
+  const loadIdx = queries().findIndex(
+    (q) => /^SELECT\b/i.test(q.trim()) && /FROM\s+games\s+WHERE\s+name\s*=\s*\$1/i.test(q) && !/FOR UPDATE/i.test(q),
+  );
+  const saveIdx = queries().findIndex((q) => /^UPDATE\s+games\s+set/i.test(q.trim()));
+  const eventIdx = queries().findIndex((q) => /^INSERT\s+INTO\s+game_events/i.test(q.trim()));
+  assert.ok(lockIdx >= 0, "FOR UPDATE must be issued");
+  assert.ok(loadIdx > lockIdx, "load must follow FOR UPDATE on the same client");
+  assert.ok(saveIdx > lockIdx, "save must follow FOR UPDATE on the same client");
+  assert.ok(eventIdx > lockIdx, "event-append must follow FOR UPDATE on the same client");
+});
+
+test("handleCommandTransactional rolls back the transaction when handleCommand returns a non-ok result", async () => {
+  // MoveHero onto a tile already occupied by h1 must fail with "occupied"
+  // (engine rejects it). The transactional wrapper must NOT issue the
+  // save or event-append in that case -- otherwise a client sending a
+  // command that fails validation could partially-mutate state.
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2), makeHero("h1", 1, 3, 2)],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { deps, queries } = makeTransactionalDeps(row);
+  const command: Command = {
+    kind: "MoveHero",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 2, r: 2 },
+    toTile: { q: 3, r: 2 },
+    cost: 1,
+  };
+  const result = await handleCommandTransactional(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "occupied");
+  // FOR UPDATE was acquired; no UPDATE games SET / INSERT INTO game_events
+  // issued (engine rejected before either).
+  assert.ok(queries().some((q) => /FOR UPDATE/i.test(q)));
+  assert.ok(!queries().some((q) => /^UPDATE\s+games\s+set/i.test(q.trim())), "no save issued on engine failure");
+  assert.ok(!queries().some((q) => /^INSERT\s+INTO\s+game_events/i.test(q.trim())), "no event issued on engine failure");
 });
 
 test("RecruitHero adds a new hero, deducts the recruit cost, and updates the player's heroIds", async () => {
@@ -471,7 +622,7 @@ test("RecruitHero rejects recruiting at a settlement the actor doesn't own", asy
     settlementId: "s0",
     horseVariant: "bubbly",
   };
-  const result = await handleCommand(command, deps);
+const result = await handleCommand(command, deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "Not your settlement");
 });

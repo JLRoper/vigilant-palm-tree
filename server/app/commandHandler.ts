@@ -25,7 +25,7 @@ import type {
 } from "@heroes/contracts";
 import { runEndTurn, clampGrowthRate } from "./turnService";
 import { pool } from "../persistence/db";
-import { createGameRepo } from "../persistence/repositories/gameRepo";
+import { createGameRepo, GameNotFoundError } from "../persistence/repositories/gameRepo";
 import { createEventRepo } from "../persistence/repositories/eventRepo";
 
 // Pre-agreed shape from plan/2026-08-16-phase-3-parallel-dev-plan.md's
@@ -59,6 +59,16 @@ export interface CommandDeps {
   gameRepo: GameRepo;
   eventRepo: EventRepo;
   ctx: EngineCtx;
+}
+
+// Live (Postgres) deps additionally carry the pool that the repos above
+// were built from. handleCommandTransactional needs it to acquire a
+// PoolClient per request for the SELECT ... FOR UPDATE + atomic
+// save+event-append flow; the in-memory mockRepos tests don't (and
+// can't) exercise the transactional wrapper, so this field is optional
+// in the broader CommandDeps type.
+export interface LiveCommandDeps extends CommandDeps {
+  pool: import("pg").Pool;
 }
 
 export interface CommandResult {
@@ -587,7 +597,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
 // GET /units already queries). server/http/routes/commands.ts calls and
 // memoizes this once, lazily, on first request rather than at module load
 // time, so route registration itself still doesn't block on a DB round-trip.
-export async function createLiveCommandDeps(): Promise<CommandDeps> {
+export async function createLiveCommandDeps(): Promise<LiveCommandDeps> {
   const unitTypesResult = await pool.query<UnitTypeRow>(
     `SELECT id, name, attack, defence, health, speed, description, advantage_type, specialty, specialty_priority
        FROM unit_types`,
@@ -607,9 +617,81 @@ export async function createLiveCommandDeps(): Promise<CommandDeps> {
   return {
     gameRepo: createGameRepo(pool),
     eventRepo: createEventRepo(pool),
+    pool,
     ctx: { rng: mulberry32(Date.now() >>> 0), catalog: { unitTypes } },
   };
 }
+
+// Transactional wrapper around handleCommand for the live (Postgres)
+// path. Closes the gap the retired /trade and /resolve-battle routes used
+// to close with their own withTransaction block: state mutation, event
+// append, and any concurrent-command serialization now happen as one
+// atomic unit instead of as three independent pool queries (where a
+// failure between them could persist state without its event, and where
+// two concurrent commands against the same game could each load the
+// pre-state, mutate, and last-write-win over each other).
+//
+// Phase 3 scope (plan/2026-08-16-phase-3-parallel-dev-plan.md § "What's
+// actually broken today" /trade row: "just needs the transaction/
+// persistence step generalized"; parallel-dev-phases-3-5.md §4 Phase 3
+// names commandHandler.ts "the central transaction loop"). A version
+// column for optimistic concurrency on the games row is intentionally
+// NOT added here -- that's a schema change and belongs to Phase 4
+// (parallel-dev-phases-3-5.md §4 Phase 4: Database De-blobbing). The
+// pessimistic SELECT ... FOR UPDATE below is the right primitive for
+// Phase 3's needs and matches what server/routes.ts's now-retired
+// /trade and /resolve-battle already did.
+export async function handleCommandTransactional(
+  command: Command,
+  deps: LiveCommandDeps,
+): Promise<CommandResult> {
+  // Implemented inline (rather than via ../persistence/db's withTransaction
+  // helper) because that helper closes over the *global* pool imported at
+  // module load, while this wrapper is intentionally pool-agnostic --
+  // LiveCommandDeps carries the pool so tests can drive it against a
+  // fake PoolClient without spinning up Postgres. Same BEGIN/COMMIT/
+  // ROLLBACK semantics as withTransaction, same console.error on rollback.
+  const client = await deps.pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Pessimistic row lock on games.name = command.gameName. SELECT FOR
+    // UPDATE locks the matching row (if any) for the duration of this
+    // transaction; a second concurrent command against the same game
+    // blocks here until COMMIT/ROLLBACK, so it then sees the post-state
+    // and re-runs validation against it. Without this, two
+    // MoveHero/TradeResources/whatever commands issued in the same
+    // millisecond each load the pre-state, each compute their own delta,
+    // and each issue saveHeroesAndSettlements; the second write silently
+    // clobbers the first.
+    //
+    // rowCount === 0 is NOT an error here: FOR UPDATE on a non-existent
+    // row is a no-op (nothing to lock). handleCommand -> gameRepo.load
+    // throws GameNotFoundError below if the row truly doesn't exist,
+    // which rolls the transaction back naturally.
+    await client.query("SELECT id FROM games WHERE name = $1 FOR UPDATE", [
+      command.gameName,
+    ]);
+    const requestDeps: CommandDeps = {
+      gameRepo: createGameRepo(client),
+      eventRepo: createEventRepo(client),
+      ctx: deps.ctx,
+    };
+    const result = await handleCommand(command, requestDeps);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    console.error("[api] handleCommandTransactional rolling back:", err);
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Re-export so callers (server/http/routes/commands.ts) can match the
+// retired /trade + /resolve-battle routes' own "game not found" 404
+// detection without needing to import the persistence layer directly.
+export { GameNotFoundError };
 
 // Mirrors server/routes.ts's own identically-shaped, identically-named
 // local type for the same `unit_types` SELECT -- not imported from there
