@@ -84,6 +84,13 @@ export interface TurnControllerHooks {
     settlementId: SettlementId,
     direction: TransferDirection,
   ): Promise<void>;
+  onStartCharter(
+    actor: number,
+    heroId: HeroId,
+    targetQ: number,
+    targetR: number,
+    settlementName: string,
+  ): Promise<void>;
 }
 
 export class TurnController {
@@ -335,6 +342,10 @@ export class TurnController {
     this.hooks.logEvent({
       type: "charter_started",
       payload: { heroId, targetQ, targetR, settlementName, charterId: payload.charterId },
+    });
+
+    void this.hooks.onStartCharter(this.state.activePlayerId, heroId, targetQ, targetR, settlementName).catch((e) => {
+      console.warn("[turnController] onStartCharter failed:", e);
     });
 
     this.advanceAutoTravel();

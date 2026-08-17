@@ -241,6 +241,27 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     };
   }
 
+  if (b.kind === "StartCharter") {
+    if (
+      typeof b.heroId !== "string" ||
+      typeof b.targetQ !== "number" ||
+      typeof b.targetR !== "number" ||
+      typeof b.settlementName !== "string" ||
+      b.settlementName.length === 0
+    ) {
+      return null;
+    }
+    return {
+      kind: "StartCharter",
+      gameName,
+      actor: b.actor,
+      heroId: b.heroId,
+      targetQ: b.targetQ,
+      targetR: b.targetR,
+      settlementName: b.settlementName,
+    };
+  }
+
   return null;
 }
 

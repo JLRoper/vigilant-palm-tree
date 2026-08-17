@@ -3,6 +3,7 @@ import type { ResourceType } from "../../map/resourceTiles";
 import type { Faction, HeroDirection } from "../../entities/hero";
 import type { HorseVariant } from "../../state/settings";
 import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase, GenerationStyle } from "@heroes/contracts";
+import type { BattleSide } from "@heroes/engine";
 
 /** World-space pixel coordinates (pre-Camera-transform), same space axialToPixel() returns. */
 export interface WorldPoint {
@@ -29,7 +30,15 @@ export type SceneNode =
   | CityMineNode
   | CityBuildingNode
   | CityGhostBuildingNode
-  | CityLabelNode;
+  | CityLabelNode
+  | BattleHexNode
+  | BattleAttackTargetRingNode
+  | BattleAiTelegraphHexNode
+  | BattleMovePathNode
+  | BattleImpactRingNode
+  | BattleAiActingRingNode
+  | BattleCombatantNode
+  | BattleFloatingTextNode;
 
 export interface TerrainHexNode {
   kind: "terrainHex";
@@ -210,5 +219,79 @@ export interface CityLabelNode {
   x: number;
   y: number;
   fontPx: number;
+  alpha: number;
+}
+
+// Battle-view node kinds, decomposed from src/screens/combat/
+// manualBattleArena.ts's draw()/renderPixelFor(). `hexRadius`/`radius` below
+// are fully resolved pixel values (hexSize already multiplied in), matching
+// how CityCellNode/CityBuildingNode resolve halfWidth/halfHeight rather than
+// leaving a scale factor for the painter -- this scene has no shared Camera
+// to apply a zoom later, so hexSize has to be baked in per node instead.
+
+export interface BattleHexNode {
+  kind: "battleHex";
+  q: number;
+  r: number;
+  world: WorldPoint;
+  hexRadius: number;
+  impassable: boolean;
+  inMoveRange: boolean;
+  available: boolean;
+}
+
+export interface BattleAttackTargetRingNode {
+  kind: "battleAttackTargetRing";
+  side: BattleSide;
+  slotIndex: number;
+  world: WorldPoint;
+  radius: number;
+}
+
+export interface BattleAiTelegraphHexNode {
+  kind: "battleAiTelegraphHex";
+  q: number;
+  r: number;
+  world: WorldPoint;
+  hexRadius: number;
+}
+
+export interface BattleMovePathNode {
+  kind: "battleMovePath";
+  side: BattleSide;
+  slotIndex: number;
+  points: WorldPoint[];
+}
+
+export interface BattleImpactRingNode {
+  kind: "battleImpactRing";
+  world: WorldPoint;
+  radius: number;
+  alpha: number;
+}
+
+export interface BattleAiActingRingNode {
+  kind: "battleAiActingRing";
+  side: BattleSide;
+  slotIndex: number;
+  world: WorldPoint;
+  radius: number;
+}
+
+export interface BattleCombatantNode {
+  kind: "battleCombatant";
+  side: BattleSide;
+  slotIndex: number;
+  world: WorldPoint;
+  radius: number;
+  selected: boolean;
+  unitCount: number;
+  hpRatio: number;
+}
+
+export interface BattleFloatingTextNode {
+  kind: "battleFloatingText";
+  text: string;
+  world: WorldPoint;
   alpha: number;
 }

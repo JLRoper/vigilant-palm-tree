@@ -11,6 +11,7 @@ import {
   reorderStack,
   captureSettlement,
   CommandError,
+  startCharter,
 } from "../io/commands";
 import type { EndTurnResult } from "../io/commands";
 import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource } from "@heroes/contracts";
@@ -241,6 +242,21 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await transferGold(name, { actor, heroId, settlementId, direction });
       } catch (e) {
         reportCommandFailure("Transfer gold", e);
+      }
+    },
+    onStartCharter: async (
+      actor: number,
+      heroId: HeroId,
+      targetQ: number,
+      targetR: number,
+      settlementName: string,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await startCharter(name, { actor, heroId, targetQ, targetR, settlementName });
+      } catch (e) {
+        reportCommandFailure("Start charter", e);
       }
     },
     pickAiMove: (state: GameState, heroId: HeroId) => {

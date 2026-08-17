@@ -261,3 +261,20 @@ export async function captureSettlement(
   });
   await json(res);
 }
+
+// StartCharter (plan/2026-08-17-consolidated-phase-1-5-track-map.md §7.1):
+// same fire-and-forget shape as the five functions above -- called from
+// src/game/turnHooks.ts's onStartCharter right after the local
+// startCharterReducer() call already applied and returned ok, so this
+// response body is unused here too.
+export async function startCharter(
+  name: string,
+  payload: { actor: number; heroId: string; targetQ: number; targetR: number; settlementName: string }
+): Promise<void> {
+  const res = await apiFetch(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "StartCharter", ...payload }),
+  });
+  await json(res);
+}

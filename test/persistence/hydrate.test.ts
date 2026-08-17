@@ -142,6 +142,64 @@ test("hydrateGame's granular path surfaces real charters, which the legacy JSONB
   });
 });
 
+test("hydrateGame round-trips next_charter_id/next_settlement_id once they're persisted, alongside the charter they gate", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    const heroes: Record<HeroId, HeroState> = {
+      h0: makeHero("h0", 0, 2, 2, { isChartering: true, charterId: "ch3" }),
+    };
+    const settlements: Record<SettlementId, SettlementState> = { s0: makeSettlement("s0", 0, 2, 2) };
+    await seedLegacyGame(client, name, heroes, settlements);
+    // Phase 1-5 track map §5.1 R5's counter-persistence fix: before
+    // GAME_COLUMNS/saveHeroesAndSettlements carried these two, this call
+    // would silently no-op them and the assertions below would see 0/1
+    // (the settlementCount-derived floor) instead of the real values.
+    await createGameRepo(client).saveHeroesAndSettlements(name, heroes, settlements, {
+      next_charter_id: 4,
+      next_settlement_id: 7,
+    });
+    await createHeroRepo(client).upsertMany(name, heroes);
+    await createSettlementRepo(client).upsertMany(name, settlements);
+    const charter = makeCharter({ id: "ch3", heroId: "h0", ownerId: 0, settlementId: "s7" });
+    await createCharterRepo(client).upsertMany(name, [charter]);
+
+    const result = await hydrateGame(client, name);
+
+    assert.equal(result.source, "granular");
+    assert.equal(result.state.nextCharterId, 4);
+    assert.equal(result.state.nextSettlementId, 7);
+    assert.deepEqual(result.state.activeCharters, [charter]);
+
+    // Round-trip equivalence still holds directly against the row too.
+    const row = await createGameRepo(client).load(name);
+    assert.equal(hydrateGameState(row).nextCharterId, 4);
+    assert.equal(hydrateGameState(row).nextSettlementId, 7);
+  });
+});
+
+test("hydrateGame floors next_settlement_id at the real settlement count for a game that predates the counter", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    const heroes: Record<HeroId, HeroState> = { h0: makeHero("h0", 0, 2, 2) };
+    const settlements: Record<SettlementId, SettlementState> = {
+      s0: makeSettlement("s0", 0, 2, 2),
+      s1: makeSettlement("s1", 1, 10, 10),
+    };
+    await seedLegacyGame(client, name, heroes, settlements);
+    // Deliberately never persists next_charter_id/next_settlement_id --
+    // simulates a row created before this counter was wired anywhere
+    // (server/migrations/009_granular_entities.sql's ADD COLUMN ...
+    // DEFAULT 0 leaves next_settlement_id at a real 0 in the DB despite 2
+    // settlements already existing). A plain `row.next_settlement_id ?? x`
+    // read would allocate the next charter's settlementId as "s0",
+    // colliding with the settlement that already exists.
+
+    const result = await hydrateGame(client, name);
+    assert.equal(result.state.nextSettlementId, 2, "must floor at the real settlement count, not the raw column default of 0");
+    assert.equal(result.state.nextCharterId, 0);
+  });
+});
+
 test("hydrateGame falls back to the JSONB path when only one granular table has been populated (partial/inconsistent state)", async () => {
   // Shouldn't be reachable via any real code path today -- dual-write
   // (server/app/commandHandler.ts's dualWriteEntities) and the backfill
