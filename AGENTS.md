@@ -32,5 +32,6 @@ The `/precommit` and `/pre-pr` slash commands are manual equivalents you can off
 
 ## Skills available
 - `/dev start|stop|restart` — manage the local dev environment (db + api + client).
+- `/review-issue [branch|PR#] [issue#]` — review a branch against the issue it claims to close, plus a general pass against the project docs. Read-only.
 - `/precommit` — run the build + test gate on demand.
 - `/pre-pr` — same as `/precommit`, plus a quick doc sanity sweep.
