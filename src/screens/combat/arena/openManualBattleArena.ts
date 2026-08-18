@@ -45,6 +45,7 @@ import { attachRailHover, buildPlatoonStrip } from "./view";
 import { createArenaInput, type ArenaInput } from "./input";
 import { createArenaAi, type ArenaAi } from "./ai";
 import { attackFromSelectedHex, attackFromTarget, endPlatoonTurnAction, moveSelectedTo, retreatAction, surrenderAction } from "./state";
+import { buildArenaPaint2dDeps, paintSceneForArena, readUseSceneBuilder } from "./paint";
 
 // Key for indexing a specific unit entry inside the arena's combatant list.
 // `slotIndex` is the army-stack slot, `unitTypeId` is which entry within
@@ -162,6 +163,18 @@ export function openManualBattleArena(
   const ATTACKER_ACCENT = "#3070c0";
   const DEFENDER_ACCENT = "#c04040";
   const humanAccent = humanSide === "attacker" ? ATTACKER_ACCENT : DEFENDER_ACCENT;
+
+  // Dev-only paint2d/ SceneNode[] rendering path. Off by default; opt in via
+  // ?paint=scenebuilder in the URL. Per
+  // plan/2026-08-17-combat-decomposition-finishing-breakout.md §9.4. The
+  // fallback (drawLegacy) keeps the visual byte-identical to pre-CB-4 until
+  // each battle-kind painter in paint2d/ is transcribed (5.B P1 #5).
+  const useSceneBuilder = readUseSceneBuilder(window.location.search);
+  const arenaPaint2dDeps = buildArenaPaint2dDeps({
+    fontFamily: menuTheme.font,
+    attackerAccent: ATTACKER_ACCENT,
+    defenderAccent: DEFENDER_ACCENT,
+  });
 
   // The fight takes over the whole viewport. Three stacked bands: a status
   // bar, the battle row (rail | battlefield | rail), and an action + log bar.
@@ -912,6 +925,35 @@ const FLOAT_MS = 800;
   }
 
   function draw(): void {
+    if (useSceneBuilder) {
+      paintSceneForArena({
+        ctx,
+        state,
+        humanSide,
+        aiSide,
+        selectedSlot,
+        moveRange,
+        attackTargets,
+        aiActing: ai.isActing(),
+        aiActingSlot: ai.getActingSlot(),
+        aiTargetHex: ai.getTargetHex(),
+        moveAnim,
+        impact,
+        floats,
+        hexSize,
+        offsetX,
+        offsetY,
+        canvasCssW,
+        canvasCssH,
+        paint2d: arenaPaint2dDeps,
+        drawFallback: drawLegacy,
+      });
+    } else {
+      drawLegacy();
+    }
+  }
+
+  function drawLegacy(): void {
     // All drawing below is in CSS pixels; the device-pixel backing store is
     // applied here rather than by inflating the layout coordinates, so
     // hit-testing in the click handler needs no rescaling.
