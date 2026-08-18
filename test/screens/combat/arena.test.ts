@@ -425,13 +425,9 @@ test("paintSceneForArena: calls drawFallback exactly once after building the sce
   // for the city/adventure kinds, but the battle-kind painters today are all
   // no-op stubs so the actual ctx calls are minimal. We just need every
   // property access to return a callable stub so nothing throws.
-  const ctxCalls: string[] = [];
   const ctx = new Proxy({} as Record<string, unknown>, {
     get(_t, prop) {
-      if (typeof prop === "string") {
-        ctxCalls.push(prop);
-        return () => undefined;
-      }
+      if (typeof prop === "string") return () => undefined;
       return undefined;
     },
   }) as unknown as CanvasRenderingContext2D;
@@ -467,7 +463,6 @@ test("paintSceneForArena: calls drawFallback exactly once after building the sce
     },
   });
   assert.equal(fallbackCalls, 1, "drawFallback should run exactly once after paintScene()");
-  assert.ok(ctxCalls.length >= 0, "paintScene() should not throw on the mock ctx");
 });
 
 test("paintSceneForArena: handles an active moveAnim without throwing", () => {
@@ -475,6 +470,11 @@ test("paintSceneForArena: handles an active moveAnim without throwing", () => {
     get: () => () => undefined,
   }) as unknown as CanvasRenderingContext2D;
   const state = makeState();
+  // Use performance.now() so the moveAnim is actually active per
+  // buildBattleScene's check (nowMs - startedAt < durationMs). The
+  // previous test used hard-coded `startedAt: 1000` which is long
+  // since expired by the time the assertion runs, so the active-
+  // moveAnim code path was never actually exercised.
   paintSceneForArena({
     ctx,
     state,
@@ -490,8 +490,8 @@ test("paintSceneForArena: handles an active moveAnim without throwing", () => {
       side: "attacker",
       slotIndex: 0,
       path: [{ q: 0, r: 0 }, { q: 1, r: 0 }, { q: 2, r: 0 }],
-      startedAt: 1000,
-      durationMs: 400,
+      startedAt: performance.now() - 100,
+      durationMs: 5000,
     },
     impact: null,
     floats: [],

@@ -28,20 +28,20 @@ export interface PaintSceneForArenaArgs {
   readonly humanSide: BattleSide;
   readonly aiSide: BattleSide;
   readonly selectedSlot: number | null;
-  readonly moveRange: readonly Axial[];
-  readonly attackTargets: readonly Combatant[];
+  readonly moveRange: Axial[];
+  readonly attackTargets: Combatant[];
   readonly aiActing: boolean;
   readonly aiActingSlot: number | null;
   readonly aiTargetHex: Axial | null;
   readonly moveAnim: {
     readonly side: BattleSide;
     readonly slotIndex: number;
-    readonly path: readonly Axial[];
+    readonly path: Axial[];
     readonly startedAt: number;
     readonly durationMs: number;
   } | null;
   readonly impact: { readonly hex: Axial; readonly startedAt: number } | null;
-  readonly floats: readonly { readonly hex: Axial; readonly text: string; readonly startedAt: number }[];
+  readonly floats: { readonly hex: Axial; readonly text: string; readonly startedAt: number }[];
   readonly hexSize: number;
   readonly offsetX: number;
   readonly offsetY: number;
@@ -67,22 +67,17 @@ export function paintSceneForArena(args: PaintSceneForArenaArgs): void {
     humanSide: args.humanSide,
     aiSide: args.aiSide,
     selectedSlot: args.selectedSlot,
-    moveRange: [...args.moveRange],
-    attackTargets: [...args.attackTargets],
+    // buildBattleScene() treats moveRange/attackTargets/path/floats as
+    // read-only (it only filters/maps them, never mutates), so we can
+    // pass the caller's arrays through without per-frame copies.
+    moveRange: args.moveRange,
+    attackTargets: args.attackTargets,
     aiActing: args.aiActing,
     aiActingSlot: args.aiActingSlot,
     aiTargetHex: args.aiTargetHex,
-    moveAnim: args.moveAnim
-      ? {
-          side: args.moveAnim.side,
-          slotIndex: args.moveAnim.slotIndex,
-          path: [...args.moveAnim.path],
-          startedAt: args.moveAnim.startedAt,
-          durationMs: args.moveAnim.durationMs,
-        }
-      : null,
-    impact: args.impact ? { hex: args.impact.hex, startedAt: args.impact.startedAt } : null,
-    floats: args.floats.map((f) => ({ hex: f.hex, text: f.text, startedAt: f.startedAt })),
+    moveAnim: args.moveAnim,
+    impact: args.impact,
+    floats: args.floats,
     hexSize: args.hexSize,
     offsetX: args.offsetX,
     offsetY: args.offsetY,
