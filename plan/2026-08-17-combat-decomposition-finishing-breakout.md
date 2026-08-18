@@ -287,12 +287,12 @@ This plan **does not** address:
 | Gap | Where tracked | Why out |
 |---|---|---|
 | Hero-collision → manual arena entry point (README's "in progress") | New plan TBD | Different files (`src/state/turnController.ts` + `src/managers/GameActions.ts`); different risk surface (UI trigger vs. UI structure). |
-| G2 hover feedback on grid | `plan/2026-08-11-fight-screen-redesign.md` §"Gaps" G2 | UX feature, not a decomp item. Can land after CB-1 since `input.ts` will exist as a clean home. |
+| G2 hover feedback on grid | `plan/2026-08-11-fight-screen-redesign.md` §"Gaps" G2 | UX feature, not a decomp item. **✅ Closed 2026-08-18** — hex under-cursor highlight added in `arena/openManualBattleArena.ts` (`hoveredHex: Axial \| null`, updated via `pixelToAxial` on `mousemove`, cleared on `mouseleave`, drawn in `draw()` as a 12% cyan fill + outline). Outcome preview half still open per fight-screen-redesign.md Decision #7. |
 | G3 enemy threat range | fight-screen-redesign.md G3 | Engine-side already works (`getMovementRange`); UI surfacing is a feature, not a decomp. |
 | G4 outcome preview + bump-attack confirm | fight-screen-redesign.md G4 | Decision (#8 in that doc) still open. UI feature. |
 | G5 deployment phase | fight-screen-redesign.md G5 | Gameplay change, not decomp. |
 | G6 keyboard support | fight-screen-redesign.md G6 | UX feature. |
-| G7 keep battlefield behind result card | fight-screen-redesign.md G7 | UX fix. Trivial once the orchestrator is decomposed. |
+| G7 keep battlefield behind result card | fight-screen-redesign.md G7 | UX fix. Trivial once the orchestrator is decomposed. **✅ Closed 2026-08-18** — `finishBattle()` reordered in `arena/openManualBattleArena.ts`; it now cancels AI timers/animations, clears input state, refreshes, and only then opens the result card with `onCarryOn: () => { closeArena(); }`. The modal's 60% backdrop dims the arena instead of hiding it. |
 | G8 obstacles/terrain rendering | fight-screen-redesign.md G8 | Render work — would slot into `arena/paint.ts` once CB-3 lands. |
 | Stage 3 small-viewport pan | fight-screen-redesign.md Stage 3 | Layout feature; `arena/layout.ts` is the home. |
 | Stage 4 stale doc references | fight-screen-redesign.md Stage 4 | Doc fixes only. |
