@@ -952,11 +952,6 @@ const FLOAT_MS = 800;
       ctx.lineWidth = isAvailable ? 2 : 1;
       ctx.stroke();
 
-      // Subtle highlight on the hex under the cursor (G2). Suppressed while
-      // the AI is acting or the battle is over so the player doesn't get
-      // input feedback during animations they can't act on. Impassable hexes
-      // are kept visually distinct from the highlight; a unit on the hex
-      // still shows its own disk, since that sits inside the hex edges.
       const isHovered =
         !hex.impassable &&
         !ai.isActing() &&
@@ -1276,11 +1271,6 @@ const ai: ArenaAi = createArenaAi({
 function finishBattle(): void {
     logMoveStats("battle end");
     const result = finalizeManualBattle(state);
-    // Show the result card against the still-visible battlefield (G7): the
-    // modal's 60% backdrop dims the arena without hiding it, so the player
-    // can review the final board position and the battle log underneath the
-    // card. closeArena() now runs from the card's Carry On button, after the
-    // player has had a chance to look.
     ai.bumpRunToken();
     ai.clearTimer();
     clearAnimations();
@@ -1455,8 +1445,21 @@ function finishBattle(): void {
     const rect = canvas.getBoundingClientRect();
     const localX = e.clientX - rect.left - offsetX;
     const localY = e.clientY - rect.top - offsetY;
-    input.updateHover(localX, localY);
+    const prevHovered = hoveredHex;
     hoveredHex = pixelToAxial(localX, localY, hexSize);
+    input.updateHover(localX, localY);
+    const hoverChanged =
+      (prevHovered === null) !== (hoveredHex === null) ||
+      (prevHovered !== null &&
+        hoveredHex !== null &&
+        (prevHovered.q !== hoveredHex.q || prevHovered.r !== hoveredHex.r));
+    if (
+      hoverChanged &&
+      input.getPendingTarget() === null &&
+      input.getApproachChoice() === null
+    ) {
+      draw();
+    }
   });
 
   canvas.addEventListener("mouseleave", () => {
