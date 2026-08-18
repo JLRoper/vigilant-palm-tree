@@ -219,6 +219,22 @@ Conflict surface is near zero by design: Track A never imports from `server/pers
 
 **Exit criteria:** client actions execute exclusively as commands (✅ met); multiplayer state syncs exclusively via delta events (⬜ not met — still full-state polling via `multiplayerSync.ts`).
 
+#### Constraints before starting the cursor-sync rewrite (added 2026-08-17)
+
+Decisions and gotchas that resolve the ⬜ rows' blockers. All file:line refs below verified against the tree at the time of writing.
+
+1. **Cursor is `game_events.id` (BIGSERIAL). Do not add a new column.** §6.3 and PR #93's `010_event_seq.sql` explicitly chose this — `game_events.id` is already monotonic per game, and `game_events_game_id_idx` (`server/schema.sql:31`) plus the `id` primary key already back the query. Settled; not open for re-litigation.
+
+2. **Polling, not SSE.** Neither was assigned, so this defaults to polling: the existing `GET /games/:name/events` route (`server/routes.ts:475`) only needs `?after=<id>` folded into its `WHERE` clause — no new infrastructure. SSE brings reconnect, replay, and buffering complexity the plan has not justified. If SSE is wanted, it gets its own design doc; it is not a Track 5.A implementation detail.
+
+3. **The server-side `?after=<id>` slice is the actual blocker, and §8 assigns it to nobody.** `server/routes.ts:485` currently reads `... WHERE game_id = $1 ORDER BY id ASC` and needs `AND id > $2` filtering. Decide ownership before the `multiplayerSync.ts` rewrite starts — most likely Track 5.A absorbs it, since it is a one-line `WHERE` change, but confirm rather than assume.
+
+4. **`eventRepo.append()` returns `void` today — this is the gotcha.** `server/persistence/repositories/eventRepo.ts:14` discards the inserted row. For the cursor to flow back to the client, the insert needs `RETURNING id` and `commandHandler.ts` must surface that id in the `POST /commands` response, so the client can advance its cursor after its own writes. Without it the client has no way to account for events it caused. This is the **first concrete sub-step** of the `multiplayerSync.ts` rewrite. Note the change spans three places, not one: the `EventRepo` interface (`eventRepo.ts:9`, declared `Promise<void>`), the implementation, and the `server/app/liveRepos.ts` placeholder its header comment points at.
+
+5. **`SessionManager.manualSave()` is a separate decision — do not bundle it.** `test/smoke.ts` exercises the Save button (`:225`), asserts the HUD "Last saved" text (`:231`), and asserts `games.updated_at` advancing (`:238`). Removing the full-state push needs a replacement persistence-confirmation mechanism — probably deriving "saved" from a `POST /commands` 200, since the dual-write already shares the DB transaction (PR #95). Land the cursor sync first; take `manualSave()` in a follow-up PR.
+
+**Bonus constraint:** §7.2's `entityMirror.ts` row notes that `StructureBuilt` is not an `EngineEvent` variant (plan-doc prose only, blocked on R6's `BuildStructure`) — confirmed by grep: zero occurrences across `packages/`, `src/`, `server/`. The new event-sync path must not assume it exists. Subscribe only to variants actually declared in `packages/contracts/src/events/engineEvent.ts`: `HeroMoved`, `GoldTransferred`, `TurnEnded`, `ResourcesTraded`, `BattleResolved`, `HeroRecruited`, `TownHallUpgradeStarted`, `AutoTradeToggled`, `StackReordered`, `SettlementCaptured`, `CharterStarted`.
+
 ### 7.2 Track 5.B — Scene Graph Builder & Entity Mirror (Dev B) `[🟡 IN PROGRESS]`
 
 **2026-08-17 update (worktree `20260817_0335_phase5TrackB`):** the pure, inert half of this track is done and unit-tested; nothing below is wired into the live render path yet, so regression risk so far is zero. `SceneNode`'s actual shape (`src/render/scene/types.ts`) diverged from the Fable-era `{ spriteKey, facing, gridPos, ... }` sketch — it's a ~20-variant discriminated union keyed by `kind`, one variant per drawable thing, not one flat shape.
