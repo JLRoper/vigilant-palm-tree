@@ -94,4 +94,15 @@ export type EngineEvent =
       settlementId: SettlementId;
       targetQ: number;
       targetR: number;
+    }
+  | {
+      type: "BuildingUpgradeStarted";
+      actor: PlayerSeat;
+      settlementId: SettlementId;
+    }
+  | {
+      type: "SettlementUpgradeStarted";
+      actor: PlayerSeat;
+      settlementId: SettlementId;
+      targetLevel: 2 | 3;
     };
