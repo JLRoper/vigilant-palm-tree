@@ -1310,3 +1310,429 @@ test("read-path cutover: a game with only empty granular rows falls back to the 
   assert.equal(result.ok, true);
   assert.equal(result.hero?.q, 3);
 });
+
+// ---------------------------------------------------------------------------
+// UpgradeBuilding / UpgradeSettlement
+// (plan/2026-08-17-issue-88-remaining-command-ports.md): the last two
+// mutations issue #88's re-scoped review found still silently discarded by
+// the EndTurn cutover. Both follow UpgradeTownHall's own template (happy
+// path + ownership-gap rejection + one reducer rejection).
+
+test("UpgradeBuilding starts an upgrade on a level-1 building with enough resources", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 999999,
+        warehouse: { wood: 999999, stone: 999999, iron: 0, arcane: 0, food: 0 },
+        buildings: [{ gx: 1, gy: 1, kind: "market", level: 1, style: "classic" }],
+      }),
+    ],
+  );
+  const { gameRepo, eventRepo, deps } = makeDeps(row);
+  const command: Command = {
+    kind: "UpgradeBuilding",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    requests: [{ gx: 1, gy: 1, kind: "market" }],
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.settlement?.upgrade?.kind, "buildings");
+  assert.deepEqual(gameRepo.rows["test-game"].settlements.s0.upgrade?.buildingRefs, [
+    { gx: 1, gy: 1, kind: "market" },
+  ]);
+  assert.equal(eventRepo.events.map((e) => e.kind).join(","), "BuildingUpgradeStarted");
+});
+
+test("UpgradeBuilding rejects a missing settlement", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [makeSettlement("s0", 0, 2, 2)]);
+  const { deps } = makeDeps(row);
+  const command: Command = {
+    kind: "UpgradeBuilding",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "does-not-exist",
+    requests: [{ gx: 1, gy: 1, kind: "market" }],
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "no_settlement");
+});
+
+test("UpgradeBuilding rejects a settlement the actor doesn't own -- startBuildingUpgrade() never checked this itself", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 1, 2, 2, {
+        gold: 999999,
+        warehouse: { wood: 999999, stone: 999999, iron: 0, arcane: 0, food: 0 },
+        buildings: [{ gx: 1, gy: 1, kind: "market", level: 1, style: "classic" }],
+      }),
+    ],
+  );
+  const { deps } = makeDeps(row);
+  const command: Command = {
+    kind: "UpgradeBuilding",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    requests: [{ gx: 1, gy: 1, kind: "market" }],
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "forbidden_not_your_settlement");
+});
+
+test("UpgradeBuilding rejects a building already at max level", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 999999,
+        warehouse: { wood: 999999, stone: 999999, iron: 0, arcane: 0, food: 0 },
+        buildings: [{ gx: 1, gy: 1, kind: "market", level: 3, style: "classic" }],
+      }),
+    ],
+  );
+  const { deps } = makeDeps(row);
+  const command: Command = {
+    kind: "UpgradeBuilding",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    requests: [{ gx: 1, gy: 1, kind: "market" }],
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "max_level");
+});
+
+test("UpgradeSettlement starts an upgrade on a level-1 settlement with enough resources, population, and town hall level", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        level: 1,
+        population: 100000,
+        gold: 999999,
+        warehouse: { wood: 999999, stone: 999999, iron: 999999, arcane: 999999, food: 0 },
+        buildings: [{ gx: 0, gy: 0, kind: "townHall", level: 2, style: "classic" }],
+      }),
+    ],
+  );
+  const { gameRepo, eventRepo, deps } = makeDeps(row);
+  const command: Command = {
+    kind: "UpgradeSettlement",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    upgradePopulationGate: 0,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.settlement?.upgrade?.kind, "settlement");
+  assert.equal(result.settlement?.upgrade?.targetLevel, 2);
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.upgrade?.targetLevel, 2);
+  assert.equal(eventRepo.events.map((e) => e.kind).join(","), "SettlementUpgradeStarted");
+});
+
+test("UpgradeSettlement rejects a missing settlement", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [makeSettlement("s0", 0, 2, 2)]);
+  const { deps } = makeDeps(row);
+  const command: Command = {
+    kind: "UpgradeSettlement",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "does-not-exist",
+    upgradePopulationGate: 0,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "no_settlement");
+});
+
+test("UpgradeSettlement rejects a settlement the actor doesn't own -- startSettlementUpgrade() never checked this itself", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 1, 2, 2, {
+        level: 1,
+        population: 100000,
+        gold: 999999,
+        warehouse: { wood: 999999, stone: 999999, iron: 999999, arcane: 999999, food: 0 },
+        buildings: [{ gx: 0, gy: 0, kind: "townHall", level: 2, style: "classic" }],
+      }),
+    ],
+  );
+  const { deps } = makeDeps(row);
+  const command: Command = {
+    kind: "UpgradeSettlement",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    upgradePopulationGate: 0,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "forbidden_not_your_settlement");
+});
+
+test("UpgradeSettlement rejects when population is below the client-supplied gate", async () => {
+  // upgradePopulationGate is trusted from the client (see
+  // packages/contracts/src/commands/upgradeSettlement.ts's header comment)
+  // -- this pins down that the server still enforces whatever gate value it
+  // was sent, not that it ignores the gate entirely.
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        level: 1,
+        population: 0,
+        gold: 999999,
+        warehouse: { wood: 999999, stone: 999999, iron: 999999, arcane: 999999, food: 0 },
+        buildings: [{ gx: 0, gy: 0, kind: "townHall", level: 2, style: "classic" }],
+      }),
+    ],
+  );
+  const { deps } = makeDeps(row);
+  const command: Command = {
+    kind: "UpgradeSettlement",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    upgradePopulationGate: 1,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "population_too_low");
+});
+
+// ---------------------------------------------------------------------------
+// Cross-cutting EndTurn-survival regression class
+// (plan/2026-08-17-issue-88-remaining-command-ports.md's "Background"
+// section): nothing in this file previously chained "issue command -> run
+// EndTurn -> re-hydrate -> assert the mutation survived" for ANY mutation
+// type, not even the five #88 originally reported that are otherwise fully
+// covered above by their own isolated happy-path tests. This is the
+// regression #88 actually needed -- its absence is why #88 shipped in the
+// first place, and it's why re-persisting the mutation (via
+// saveHeroesAndSettlements + dualWriteEntities inside each case above)
+// isn't enough on its own to prove the fix: only a second handleCommand
+// call, against the same in-memory repos, reusing the row EndTurn's own
+// hydrateFromRepos() will read, proves the mutation is still there once
+// EndTurn's read-then-overwrite cycle has run.
+//
+// Each test below deliberately ends the SAME player's turn who made the
+// mutation, without wrapping the round (two players, so one EndTurn call
+// only advances active_player_id -- see "EndTurn advances to the next
+// player without wrapping the round" above). advanceRound()'s settlement
+// upgrade/charter advancement only runs on a round wrap
+// (server/app/turnService.ts), so a non-wrapping EndTurn here is the
+// simplest case that isolates "did the mutation survive hydration" from
+// "did advancing the round also change it," while still exercising the
+// exact hydrate-then-persist cycle the original bug was about.
+
+test("RecruitHero survives an EndTurn round-trip", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 9, 9)],
+    [makeSettlement("s0", 0, 2, 2, { gold: 50 })],
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const recruit: Command = {
+    kind: "RecruitHero",
+    gameName: "test-game",
+    actor: 0,
+    heroName: "Sir Newman",
+    settlementId: "s0",
+    horseVariant: "bubbly",
+  };
+  const recruitResult = await handleCommand(recruit, deps);
+  assert.equal(recruitResult.ok, true);
+  const newHeroId = recruitResult.hero!.id;
+
+  const endTurnResult = await handleCommand(
+    { kind: "EndTurn", gameName: "test-game", actor: 0 },
+    deps,
+  );
+  assert.equal(endTurnResult.ok, true);
+  assert.ok(
+    gameRepo.rows["test-game"].heroes[newHeroId],
+    "recruited hero must survive EndTurn's hydrate-then-persist cycle",
+  );
+});
+
+test("UpgradeTownHall survives an EndTurn round-trip", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 2000,
+        warehouse: { wood: 20, stone: 15, iron: 0, arcane: 0, food: 0 },
+        buildings: [{ gx: 0, gy: 0, kind: "townHall", level: 1, style: "classic" }],
+      }),
+    ],
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const upgrade: Command = {
+    kind: "UpgradeTownHall",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    targetLevel: 2,
+  };
+  assert.equal((await handleCommand(upgrade, deps)).ok, true);
+
+  const endTurnResult = await handleCommand(
+    { kind: "EndTurn", gameName: "test-game", actor: 0 },
+    deps,
+  );
+  assert.equal(endTurnResult.ok, true);
+  assert.equal(
+    gameRepo.rows["test-game"].settlements.s0.upgrade?.kind,
+    "townHall",
+    "town hall upgrade must survive EndTurn's hydrate-then-persist cycle",
+  );
+});
+
+test("SetAutoTrade survives an EndTurn round-trip", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [makeSettlement("s0", 0, 2, 2, { autoTrade: true })],
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const toggle: Command = {
+    kind: "SetAutoTrade",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    autoTrade: false,
+  };
+  assert.equal((await handleCommand(toggle, deps)).ok, true);
+
+  const endTurnResult = await handleCommand(
+    { kind: "EndTurn", gameName: "test-game", actor: 0 },
+    deps,
+  );
+  assert.equal(endTurnResult.ok, true);
+  assert.equal(
+    gameRepo.rows["test-game"].settlements.s0.autoTrade,
+    false,
+    "auto-trade toggle must survive EndTurn's hydrate-then-persist cycle",
+  );
+});
+
+test("ReorderStack survives an EndTurn round-trip", async () => {
+  const row = makeRow(
+    [
+      makeHero("h0", 0, 2, 2, {
+        stacks: [makeSingleEntryPlatoon("a", 1), makeSingleEntryPlatoon("b", 2)],
+      }),
+    ],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const reorder: Command = { kind: "ReorderStack", gameName: "test-game", actor: 0, heroId: "h0", fromIdx: 0, toIdx: 1 };
+  assert.equal((await handleCommand(reorder, deps)).ok, true);
+
+  const endTurnResult = await handleCommand(
+    { kind: "EndTurn", gameName: "test-game", actor: 0 },
+    deps,
+  );
+  assert.equal(endTurnResult.ok, true);
+  assert.equal(
+    gameRepo.rows["test-game"].heroes.h0.stacks[0].entries[0].unitTypeId,
+    "b",
+    "reordered stack must survive EndTurn's hydrate-then-persist cycle",
+  );
+});
+
+test("CaptureSettlement survives an EndTurn round-trip", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 5, 5, { gold: 10 })],
+    [makeSettlement("s0", 1, 5, 5)],
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const capture: Command = { kind: "CaptureSettlement", gameName: "test-game", actor: 0, heroId: "h0", settlementId: "s0" };
+  assert.equal((await handleCommand(capture, deps)).ok, true);
+
+  const endTurnResult = await handleCommand(
+    { kind: "EndTurn", gameName: "test-game", actor: 0 },
+    deps,
+  );
+  assert.equal(endTurnResult.ok, true);
+  assert.equal(
+    gameRepo.rows["test-game"].settlements.s0.ownerId,
+    0,
+    "captured settlement must survive EndTurn's hydrate-then-persist cycle",
+  );
+});
+
+test("UpgradeBuilding survives an EndTurn round-trip -- the gap this port closes", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 999999,
+        warehouse: { wood: 999999, stone: 999999, iron: 0, arcane: 0, food: 0 },
+        buildings: [{ gx: 1, gy: 1, kind: "market", level: 1, style: "classic" }],
+      }),
+    ],
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const upgrade: Command = {
+    kind: "UpgradeBuilding",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    requests: [{ gx: 1, gy: 1, kind: "market" }],
+  };
+  assert.equal((await handleCommand(upgrade, deps)).ok, true);
+
+  const endTurnResult = await handleCommand(
+    { kind: "EndTurn", gameName: "test-game", actor: 0 },
+    deps,
+  );
+  assert.equal(endTurnResult.ok, true);
+  assert.equal(
+    gameRepo.rows["test-game"].settlements.s0.upgrade?.kind,
+    "buildings",
+    "building upgrade must survive EndTurn's hydrate-then-persist cycle",
+  );
+});
+
+test("UpgradeSettlement survives an EndTurn round-trip -- the gap this port closes", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        level: 1,
+        population: 100000,
+        gold: 999999,
+        warehouse: { wood: 999999, stone: 999999, iron: 999999, arcane: 999999, food: 0 },
+        buildings: [{ gx: 0, gy: 0, kind: "townHall", level: 2, style: "classic" }],
+      }),
+    ],
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const upgrade: Command = {
+    kind: "UpgradeSettlement",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    upgradePopulationGate: 0,
+  };
+  assert.equal((await handleCommand(upgrade, deps)).ok, true);
+
+  const endTurnResult = await handleCommand(
+    { kind: "EndTurn", gameName: "test-game", actor: 0 },
+    deps,
+  );
+  assert.equal(endTurnResult.ok, true);
+  assert.equal(
+    gameRepo.rows["test-game"].settlements.s0.upgrade?.kind,
+    "settlement",
+    "settlement upgrade must survive EndTurn's hydrate-then-persist cycle",
+  );
+});
