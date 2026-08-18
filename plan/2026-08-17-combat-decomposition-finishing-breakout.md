@@ -2,7 +2,7 @@
 
 *Authored 2026-08-17. Sibling to `plan/2026-08-17-consolidated-phase-1-5-track-map.md` (this is the missing concrete plan for §7.2's `Decompose src/screens/combat/manualBattleArena.ts into modular components` row, currently ⬜ not started with the caveat "vague scope, high risk without a pre-agreed target structure"). Also touches the last open item from `plan/2026-08-11-srp-module-reorganization.fable.md` §1's diagnosis table — the SRP fable's table-of-shame listed `src/views/manualBattleArena.ts` (then 1562 lines; now 2064) as the prime example of "1000+ line files are the disease." The fable's Target Architecture for the client package got mostly delivered (the `combat/` subdirectory, the scene-builder seam, the entityMirror); this plan delivers the one big file it left undone.*
 
-**Status (2026-08-17, session start): CB-1 starting now** — worktree `phase5/track-b-combat-decomposition` cut from `main` (`889e1ac`). Status transitions tracked below; mark each PR 🟡 when its branch is created and ✅ when its PR merges (revisit the status table after every PR lands). **CB-4 (paint.ts) remains 🚫 deferred**, blocked on paint2d/ per-kind transcription (5.B P1 #5).
+**Status (2026-08-17, session start): CB-4 starting now** — worktree `phase5/track-b-combat-decomposition-cb4` cut from `main` (`8f8a32d`, has CB-1 + CB-2 + CB-3 merged). CB-1/2/3 are already ✅ merged via PRs #112, #113, #115 — see §5 status table. **CB-4 still blocked on paint2d/ per-kind transcription (5.B P1 #5) for full byte-equivalence, but can land now behind the `useSceneBuilder` flag with a `draw()` fallback (§9.3).**
 
 ---
 
@@ -121,7 +121,7 @@ The arena's `draw()` is currently raw Canvas2D. `battleScene.ts` already produce
 | **CB-1** | Extract `arena/` subdirectory: `constants`, `layout`, `view`, `input`, `leaveBehind` | ✅ merged (PR #112, 2026-08-17) | — |
 | **CB-2** | Extract `arena/state.ts` (game-state mirror + mutators) + `arena/ai.ts` (timer-driven pacing) | ✅ merged (PR #113, 2026-08-17) | CB-1 |
 | **CB-3** | `manualBattleArena.ts` shrinks to ≤150-line orchestrator that delegates to `arena/openManualBattleArena.ts`; delete the old inline code | ✅ merged (PR #115, 2026-08-17) | CB-2 |
-| **CB-4** | Add `arena/paint.ts` — `SceneNode[]` consumer wired via `paint2d/paintScene()` + `Paint2DDep` (behind a `useSceneBuilder` flag, default false) | 🚫 deferred, blocked on paint2d/ per-kind transcription (5.B P1 #5) | paint2d |
+| **CB-4** | Add `arena/paint.ts` — `SceneNode[]` consumer wired via `paint2d/paintScene()` + `Paint2DDep` (behind a `useSceneBuilder` flag, default false) | 🟡 in progress — worktree `phase5/track-b-combat-decomposition-cb4` (CB-4 lands with `draw()` fallback since all battle-kind painters are still no-op stubs; flag flips in a follow-up commit when paint2d/ per-kind transcription, 5.B P1 #5, completes) | paint2d |
 | **CB-5** | New `test/screens/combat/arena.test.ts` — module-level tests for the seams that aren't exercised by the existing smoke suite | ✅ merged with CB-1 (12 tests, lands in PR #112) | CB-1 (lands first as scaffolding) |
 
 **Status legend:** ⬜ not started · 🟡 in progress · ✅ merged · 🚫 blocked / deferred
@@ -178,21 +178,21 @@ CB-1 + CB-5 together (decomp scaffolding + its own tests) → CB-2 + CB-4 togeth
 
 **No test changes in CB-2 itself** — the smoke test (`test/smoke.ts`) exercises the full flow, and CB-1's `arena.test.ts` already covers the seams. CB-2 is pure mechanical extraction.
 
-### 6.3 CB-3 — Add `arena/paint.ts` (SceneNode wiring behind a flag)
+### 6.3 CB-4 — Add `arena/paint.ts` (SceneNode wiring behind a flag)
 
 **New files:**
 
-- `src/screens/combat/arena/paint.ts` — `paintSceneForArena(ctx, state, deps, frame?)`. Calls `battleScene(state)` from `src/render/scene/sceneBuilder/battleScene.ts` to get `SceneNode[]`, then `paintScene(ctx, nodes, deps)` from `src/render/scene/paint2d/index.ts`. Constructs the `Paint2DDep` from `state` (per the dep interface in `src/render/scene/paint2d/deps.ts`) — for the bits that aren't yet supported by `paint2d/` per-kind transcription (5.B P1 #5), `paint.ts` either renders the fallback inline (matching `draw.ts`'s output byte-for-byte) or errors loudly with a clear message.
+- `src/screens/combat/arena/paint.ts` — `paintSceneForArena(args)` + `buildArenaPaint2dDeps(opts)` + `readUseSceneBuilder(search)`. Calls `buildBattleScene(input)` from `src/render/scene/sceneBuilder/battleScene.ts` to get `SceneNode[]`, then `paintScene(ctx, nodes, deps, frame)` from `src/render/scene/paint2d/index.ts`. Constructs a minimal `Paint2DDep` for battle (no resource/parallax/charter bits, plus `battleAccent` from the arena's ATTACKER_ACCENT/DEFENDER_ACCENT). For the bits that aren't yet supported by `paint2d/` per-kind transcription (5.B P1 #5), the orchestrator passes `drawFallback: drawLegacy` and `paintSceneForArena` calls it after `paintScene()` so the visual stays byte-identical to pre-CB-4 today.
 
 **Modified files:**
 
-- `src/screens/combat/manualBattleArena.ts` — at the top of the orchestrator, add a `useSceneBuilder` boolean (read from a query param or a dev-only flag). When true, `draw()` calls `paintSceneForArena(ctx, state, deps)`; when false, calls the existing inline path. Default false in production — flipping the default waits on `paint2d/` per-kind transcription.
+- `src/screens/combat/arena/openManualBattleArena.ts` — at the top of the orchestrator, read `useSceneBuilder = readUseSceneBuilder(window.location.search)` (default false, opt-in via `?paint=scenebuilder` per §9.4). Rename the existing inline `draw()` body to `drawLegacy()`; add a new `draw()` that branches: `useSceneBuilder ? paintSceneForArena({..., drawFallback: drawLegacy}) : drawLegacy()`. Default false in production — flipping the default waits on `paint2d/` per-kind transcription.
 
 **Test changes:**
 
-- `test/render/battleScene.arenaPaint.test.ts` (NEW) — runs `paintSceneForArena` against a hand-crafted `ManualBattleState`, snapshots the canvas pixel data (same approach the verification doc used: `getImageData` count of distinct colors, console-error count, network-error count). Compare against the existing `draw()` output to verify byte-equivalence where `paint2d/` already supports the kind, and explicit "not yet supported" markers for the rest.
+- `test/screens/combat/arena.test.ts` — append a `paint tests` describe block. Covers: `readUseSceneBuilder` for missing/empty/wrong-value/scenebuilder search strings; `buildArenaPaint2dDeps` returns a well-formed `Paint2DDep` with correct `battleAccent` and inert defaults; `paintSceneForArena` invokes `drawFallback` exactly once after `paintScene()`, and handles an active `moveAnim` without throwing. Uses hand-rolled `Proxy`-based mocks for `CanvasRenderingContext2D` (no jsdom; matches the CB-1/CB-5 pattern).
 
-### 6.4 CB-4 — `manualBattleArena.ts` shrinks to orchestrator
+### 6.4 CB-3 — `manualBattleArena.ts` shrinks to orchestrator
 
 **Modified files:**
 
@@ -266,13 +266,13 @@ Each PR is mechanical extraction with "no behavior change in this PR" as the rul
 
 The orchestrator owns both. `view.ts` reads state via a `getState()` callback; `state.ts` mutates and returns new state. The orchestrator wires them together. The dependency direction in §4.2 makes this impossible at import time, but the runtime data flow (view → state via click handler → view re-renders) is owned by the orchestrator.
 
-### 9.3 Risk: `paint2d/` per-kind transcription blocks CB-3
+### 9.3 Risk: `paint2d/` per-kind transcription blocks CB-4
 
-CB-3 cannot land with full byte-equivalence until 5.B P1 #5 (paint2d per-kind Canvas transcription) is done. **Decision:** land CB-3 with `paint2d/`'s current dispatcher-shell stub (28 no-op painters) wrapped in a fallback that calls `draw()` for any unsupported kind. This gives us a working `paintSceneForArena` that exercises the `SceneNode[]` pipeline end-to-end, while keeping the visual identical. The flag stays off in production until paint2d/ transcription is complete.
+CB-4 cannot land with full byte-equivalence until 5.B P1 #5 (paint2d per-kind Canvas transcription) is done. **Decision:** land CB-4 with `paint2d/`'s current dispatcher-shell stub (28 no-op painters, of which the 8 battle-kind ones are the relevant subset) wrapped in a fallback that calls `drawLegacy()` after `paintScene()` runs. This gives us a working `paintSceneForArena` that exercises the `SceneNode[]` pipeline end-to-end, while keeping the visual identical. The flag stays off in production until paint2d/ transcription is complete — at which point `drawFallback` is dropped per-kind as each per-kind painter lands.
 
 ### 9.4 Decision: which `useSceneBuilder` flag mechanism
 
-Three options: (a) URL query param `?paint=scenebuilder`, (b) localStorage flag, (c) Kilo dev-console toggle. Default for CB-3: query param (easiest to test, easy to script, easy to disable). Promote to dev-console toggle in a follow-up if it stays useful past CB-3.
+Three options: (a) URL query param `?paint=scenebuilder`, (b) localStorage flag, (c) Kilo dev-console toggle. Default for CB-4: query param (easiest to test, easy to script, easy to disable). Promote to dev-console toggle in a follow-up if it stays useful past CB-4.
 
 ### 9.5 Risk: smoke test depends on details of the orchestrator
 
@@ -318,5 +318,5 @@ This plan **does not** address:
 1. **§9.5 decision: lock `ManualBattleController` with a structural test?** Default: yes, included in `arena.test.ts`. Confirm.
 2. **§9.4 decision: `useSceneBuilder` flag mechanism.** Default: URL query param. Confirm.
 3. **§6.1 test framework: `jsdom` for DOM-mock tests?** Check if `jsdom` is already a transitive dep (it's used by Playwright's tooling); if not, add it as a dev dep. Confirm.
-4. **Does CB-3 ship before paint2d/ per-kind transcription is done?** Default: yes, behind a flag, with `draw()` fallback for unsupported kinds. The flag flips later as a separate commit when paint2d/ catches up. Confirm.
+4. **Does CB-4 ship before paint2d/ per-kind transcription is done?** Default: yes, behind a flag, with `drawLegacy()` fallback for unsupported kinds. The flag flips later as a separate commit when paint2d/ catches up. Confirm.
 5. **Should CB-4 happen at all, or should `manualBattleArena.ts` be deleted?** Default: keep the 5-line shim so the old import path keeps working — fewer call-site changes. Confirm.

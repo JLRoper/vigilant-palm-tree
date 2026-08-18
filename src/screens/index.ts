@@ -21,3 +21,4 @@ import "@screens/multiplayer/multiplayerLobby";
 import "@screens/settlements/settlementInfoMenu";
 import "@screens/settlements/settlementRosterMenu";
 import "@screens/shared/toolbar";
+import "@screens/debug/networkMap";
