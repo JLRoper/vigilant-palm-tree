@@ -281,6 +281,12 @@ export function openManualBattleArena(
   let hoveredSlot: number | null = null;
   let moveRange: Axial[] = [];
   let attackTargets: Combatant[] = [];
+  // Hex under the cursor on the battlefield canvas — drives the hex
+  // highlight in draw() and gives the player feedback that the field is
+  // interactive even when nothing is selected (G2). Distinct from
+  // input.ts's pendingTarget/approachChoice, which only track directional
+  // melee targeting and were never meant to be a general pointer indicator.
+  let hoveredHex: Axial | null = null;
 
   // Directional melee targeting is owned by the arena/input module — see
   // createArenaInput below. The latch survives the cursor leaving the enemy
@@ -987,6 +993,26 @@ const FLOAT_MS = 800;
       ctx.strokeStyle = isAvailable ? "rgba(255,214,102,0.9)" : "rgba(255,255,255,0.08)";
       ctx.lineWidth = isAvailable ? 2 : 1;
       ctx.stroke();
+
+      // Subtle highlight on the hex under the cursor (G2). Suppressed while
+      // the AI is acting or the battle is over so the player doesn't get
+      // input feedback during animations they can't act on. Impassable hexes
+      // are kept visually distinct from the highlight; a unit on the hex
+      // still shows its own disk, since that sits inside the hex edges.
+      const isHovered =
+        !hex.impassable &&
+        !ai.isActing() &&
+        !isBattleOver(state) &&
+        hoveredHex !== null &&
+        hoveredHex.q === hex.q &&
+        hoveredHex.r === hex.r;
+      if (isHovered) {
+        ctx.fillStyle = "rgba(180,220,255,0.12)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(180,220,255,0.85)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     }
 
     for (const t of attackTargets) {
@@ -1292,12 +1318,25 @@ const ai: ArenaAi = createArenaAi({
 function finishBattle(): void {
     logMoveStats("battle end");
     const result = finalizeManualBattle(state);
-    closeArena();
+    // Show the result card against the still-visible battlefield (G7): the
+    // modal's 60% backdrop dims the arena without hiding it, so the player
+    // can review the final board position and the battle log underneath the
+    // card. closeArena() now runs from the card's Carry On button, after the
+    // player has had a chance to look.
+    ai.bumpRunToken();
+    ai.clearTimer();
+    clearAnimations();
+    selectedSlot = null;
+    moveRange = [];
+    attackTargets = [];
+    input.clearPendingAttack();
+    infoPopup.hide();
+    refresh();
     showBattleResultCard({
       result,
       attackerLabel: humanSide === "attacker" ? "You" : "AI Opponent",
       defenderLabel: humanSide === "defender" ? "You" : "AI Opponent",
-      onCarryOn: () => {},
+      onCarryOn: () => { closeArena(); },
     });
   }
 
@@ -1456,14 +1495,18 @@ function finishBattle(): void {
 
   canvas.addEventListener("mousemove", (e) => {
     const rect = canvas.getBoundingClientRect();
-    input.updateHover(e.clientX - rect.left - offsetX, e.clientY - rect.top - offsetY);
+    const localX = e.clientX - rect.left - offsetX;
+    const localY = e.clientY - rect.top - offsetY;
+    input.updateHover(localX, localY);
+    hoveredHex = pixelToAxial(localX, localY, hexSize);
   });
 
   canvas.addEventListener("mouseleave", () => {
-    if (input.clearPendingAttack()) {
-      canvas.style.cursor = "";
-      draw();
-    }
+    const hadPending = input.clearPendingAttack();
+    const hadHovered = hoveredHex !== null;
+    if (hadPending) canvas.style.cursor = "";
+    hoveredHex = null;
+    if (hadPending || hadHovered) draw();
   });
 
   function renderTopBar(): void {
