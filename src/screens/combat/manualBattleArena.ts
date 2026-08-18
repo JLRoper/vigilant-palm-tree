@@ -15,16 +15,12 @@
 // Enemy platoons have no rail to expand into, so clicking one on the
 // battlefield still opens the floating info card — see showInfoPopupFor.
 
-import { axialToPixel, hexCorners, HEX_DIRECTIONS, hexDistance, nearestHexEdge, pixelToAxial, type Axial } from "../../core/hex";
-import { totalHealth } from "@heroes/engine";
 import { RANGED_ATTACK_RANGE, SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "@heroes/engine";
 import {
   attackFromHex,
   attackWithPlatoon,
-  computeSpecialty,
   endPlatoonTurn,
   finalizeManualBattle,
-  getApproachHexes,
   getCombatant,
   getMovementPath,
   getMovementRange,
@@ -39,544 +35,31 @@ import {
   retreatHero,
   startManualBattle,
   timeOfDayForRound,
-  totalUnits,
   unactedLivingSlots,
   type AiTurnPlan,
-  type ManualBattleState,
   type TimeOfDay,
 } from "@heroes/engine";
 import type { BattleLogEntry, BattleSide, Combatant } from "@heroes/engine";
 import type { Platoon, UnitType } from "../../state/units";
 import { showBattleResultCard } from "./battleResultCard";
 import { openConfirmDialog } from "@screens/shared/confirmDialog";
-import { PopupMenu, menuTheme, styleButton } from "@screens/shared/menu";
+import { menuTheme, styleButton } from "@screens/shared/menu";
 import { createPlatoonInfoPopup } from "./platoonInfoPopup";
 import { launchView, registerView } from "@screens/shared/viewLauncher";
+import { CANVAS_MARGIN, DEBUG_LOG, HEX_SIZE_MAX, LOG_PREFIX, RAIL_WIDTH, debugLog } from "./arena/constants";
+import { axialToPixel, fmtHex, gridExtent, fitHexSize, hexCorners, hexDistance, hpColor, hpRatio, isAlive, pixelToAxial, platoonLabel, specialtyIcon, visibleSpecialty, type Axial } from "./arena/layout";
+import { applyLeaveBehind, openLeaveBehindDialog } from "./arena/leaveBehind";
+import { attachRailHover, buildPlatoonStrip } from "./arena/view";
+import { createArenaInput, type ArenaInput } from "./arena/input";
 
 registerView("manualBattleArena", (opts) => {
   const o = opts as { playerPlatoons: Platoon[]; aiPlatoons: Platoon[]; unitTypes: Record<string, UnitType>; humanSide: BattleSide };
   openManualBattleArena(o.playerPlatoons, o.aiPlatoons, o.unitTypes, o.humanSide);
 });
 
-// Bounds for the solved-for hex size. The grid is fitted to the available
-// battlefield box between these two — MAX so a large viewport gets genuinely
-// large hexes rather than a small grid marooned in whitespace, MIN as a
-// readability floor we'd rather overflow slightly than go below.
-const HEX_SIZE_MAX = 44;
-const HEX_SIZE_MIN = 14;
-
-// Blank space kept between the outermost hexes and the canvas edge, on top of
-// the one-hex radius already needed to fit those hexes' corners.
-const CANVAS_MARGIN = 20;
-
-// Width of the player's roster rail. A collapsed strip only needs enough
-// room for identification and at-a-glance health, but an expanded one (the
-// hovered/selected platoon) carries the full readout — composition, Atk/Def/
-// Spd/Rng, morale/fatigue bars — so the rail is sized for that case rather
-// than the collapsed one.
-const RAIL_WIDTH = 230;
-
-// Dev-only console logging for the arena — this view is only reachable from
-// the Test Battle sandbox (see file header), so it's safe to leave this on
-// by default rather than gating it behind a toggle. Traces every click's
-// resulting action (select/move/attack/deselect/no-op), every combat event
-// the engine's own battle log records (attacks, casualties, retreats), and
-// keeps a running per-platoon move tally for diagnosing movement bugs.
-const DEBUG_LOG = true;
-const LOG_PREFIX = "[manualBattle]";
-
-function debugLog(...args: unknown[]): void {
-  if (!DEBUG_LOG) return;
-  console.log(LOG_PREFIX, ...args);
-}
-
-function fmtHex(h: Axial): string {
-  return `(${h.q},${h.r})`;
-}
-
-function platoonLabel(side: BattleSide, slotIndex: number): string {
-  return `${side}#${slotIndex}`;
-}
-
-interface GridExtent {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-}
-
-function gridExtent(state: ManualBattleState, size: number): GridExtent {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const hex of state.grid.hexes) {
-    const { x, y } = axialToPixel(hex.q, hex.r, size);
-    minX = Math.min(minX, x);
-    maxX = Math.max(maxX, x);
-    minY = Math.min(minY, y);
-    maxY = Math.max(maxY, y);
-  }
-  return { minX, minY, maxX, maxY };
-}
-
-// Hex centers scale linearly with hex size, so one measurement of the grid at
-// size 1 is enough to solve for any box. Total canvas span at size s is
-// span1 * s + 2 * (s + CANVAS_MARGIN) — i.e. s * (span1 + 2) + 2 * MARGIN —
-// so invert that per axis, take the tighter of the two, and clamp.
-function fitHexSize(unitExtent: GridExtent, availW: number, availH: number): number {
-  const spanX = unitExtent.maxX - unitExtent.minX;
-  const spanY = unitExtent.maxY - unitExtent.minY;
-  const byWidth = (availW - CANVAS_MARGIN * 2) / (spanX + 2);
-  const byHeight = (availH - CANVAS_MARGIN * 2) / (spanY + 2);
-  return Math.max(HEX_SIZE_MIN, Math.min(HEX_SIZE_MAX, Math.floor(Math.min(byWidth, byHeight))));
-}
-
-// Specialty → icon. Emoji stand-ins until a real icon set ships; the
-// arena is only reachable from the Test Battle sandbox today, so we don't
-// need pixel-perfect assets yet. `null` falls back to the plain tile.
-const SPECIALTY_ICONS: Record<string, string> = {
-  archery: "🏹",
-  shield: "🛡",
-  pike: "🔱",
-  sword: "⚔",
-  cavalry: "🐎",
-  monster: "🐲",
-  prayer: "✨",
-  militia: "👥",
-};
-
-function specialtyIcon(specialty: string): string {
-  return SPECIALTY_ICONS[specialty] ?? "⚔";
-}
-
 // Key for indexing a specific unit entry inside the arena's combatant list.
 // `slotIndex` is the army-stack slot, `unitTypeId` is which entry within
 // that slot (a platoon can hold up to MAX_PLATOON_ENTRIES distinct types).
-type LeaveBehindKey = string;
-
-function leaveBehindKey(slotIndex: number, unitTypeId: string): LeaveBehindKey {
-  return `${slotIndex}:${unitTypeId}`;
-}
-
-// Strips the selected unit counts off the human side's surviving
-// combatants so they show up as casualties on the final result card (see
-// buildResults in packages/engine/src/combat/resolveBattle.ts — it diffs
-// original vs surviving counts and reports the gap). Called from the Leave
-// Behind picker once the player has agreed to the sacrifice.
-function applyLeaveBehind(
-  state: ManualBattleState,
-  side: BattleSide,
-  leftBehind: Map<LeaveBehindKey, number>,
-): void {
-  const combatants = side === "attacker" ? state.attacker : state.defender;
-  for (const c of combatants) {
-    if (c.retreated) continue;
-    let mutated = false;
-    for (const e of c.entries) {
-      const key = leaveBehindKey(c.slotIndex, e.unitTypeId);
-      const remove = leftBehind.get(key);
-      if (!remove) continue;
-      e.count = Math.max(0, e.count - remove);
-      mutated = true;
-    }
-    if (mutated) c.entries = c.entries.filter((e) => e.count > 0);
-  }
-}
-
-// Modal shown when the player tries to surrender without enough gold to
-// cover the surrender cost. Lets them mark individual units to "leave
-// behind" (sacrifice) until the gold shortfall is met — each unit is
-// worth `unitValue` gold. Confirm stays disabled until enough units are
-// selected; cancelling keeps the battle going.
-function openLeaveBehindDialog(opts: {
-  state: ManualBattleState;
-  side: BattleSide;
-  unitTypes: Record<string, UnitType>;
-  shortfall: number;
-  unitValue: number;
-  onConfirm: (leftBehind: Map<LeaveBehindKey, number>) => void;
-}): void {
-  const { state, side, unitTypes, shortfall, unitValue, onConfirm } = opts;
-  const combatants = side === "attacker" ? state.attacker : state.defender;
-  const requiredUnits = Math.ceil(shortfall / unitValue);
-
-  const wrapper = document.createElement("div");
-  Object.assign(wrapper.style, {
-    position: "fixed",
-    inset: "0",
-    background: "rgba(0,0,0,0.6)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: "120",
-  });
-  document.body.appendChild(wrapper);
-
-  const menu = new PopupMenu({
-    parent: wrapper,
-    title: "Leave Behind",
-    width: 420,
-    draggable: false,
-    closeable: true,
-    zIndex: 121,
-    onClose: () => wrapper.remove(),
-  });
-  menu.setPosition(Math.max(24, (window.innerWidth - 420) / 2), Math.max(24, (window.innerHeight - 360) / 2));
-
-  // Per-entry counts the player has earmarked. Keyed by
-  // "<slotIndex>:<unitTypeId>" so we can match them back to specific
-  // combatants in applyLeaveBehind().
-  const selected = new Map<LeaveBehindKey, number>();
-
-  const intro = document.createElement("div");
-  Object.assign(intro.style, {
-    fontSize: "13px",
-    lineHeight: "1.5",
-    opacity: "0.9",
-    marginBottom: "8px",
-  });
-  intro.textContent =
-    `You can't cover the surrender cost. Pick units to leave behind — each ` +
-    `unit is worth ${unitValue}G. You need at least ${requiredUnits} more ` +
-    `unit${requiredUnits === 1 ? "" : "s"} (${shortfall}G).`;
-  menu.appendContent(intro);
-
-  const summary = document.createElement("div");
-  Object.assign(summary.style, {
-    fontSize: "12px",
-    padding: "6px 8px",
-    marginBottom: "8px",
-    border: "1px solid rgba(255,255,255,0.2)",
-    borderRadius: "4px",
-  });
-  menu.appendContent(summary);
-
-  const list = document.createElement("div");
-  Object.assign(list.style, {
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
-    maxHeight: "240px",
-    overflowY: "auto",
-    marginBottom: "10px",
-  });
-  menu.appendContent(list);
-
-  for (const c of combatants) {
-    if (c.retreated) continue;
-    if (c.entries.every((e) => e.count <= 0)) continue;
-    for (const e of c.entries) {
-      if (e.count <= 0) continue;
-      const name = unitTypes[e.unitTypeId]?.name ?? e.unitTypeId;
-      const row = document.createElement("div");
-      Object.assign(row.style, {
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "8px",
-        padding: "4px 8px",
-        border: "1px solid rgba(255,255,255,0.12)",
-        borderRadius: "4px",
-        fontSize: "12px",
-      });
-      const label = document.createElement("div");
-      label.textContent = `Platoon ${c.slotIndex + 1} — ${name} ×${e.count}`;
-      row.appendChild(label);
-
-      const controls = document.createElement("div");
-      Object.assign(controls.style, { display: "flex", gap: "4px", alignItems: "center" });
-
-      const minus = document.createElement("button");
-      minus.textContent = "−";
-      styleButton(minus);
-      minus.style.minWidth = "24px";
-      const plus = document.createElement("button");
-      plus.textContent = "+";
-      styleButton(plus);
-      plus.style.minWidth = "24px";
-
-      const pickLabel = document.createElement("span");
-      pickLabel.style.minWidth = "40px";
-      pickLabel.style.textAlign = "center";
-
-      const key = leaveBehindKey(c.slotIndex, e.unitTypeId);
-
-      const update = (): void => {
-        const picked = selected.get(key) ?? 0;
-        pickLabel.textContent = `${picked}/${e.count}`;
-        refresh();
-      };
-
-      minus.addEventListener("click", () => {
-        const cur = selected.get(key) ?? 0;
-        if (cur <= 0) return;
-        const next = cur - 1;
-        if (next === 0) selected.delete(key);
-        else selected.set(key, next);
-        update();
-      });
-      plus.addEventListener("click", () => {
-        const cur = selected.get(key) ?? 0;
-        if (cur >= e.count) return;
-        selected.set(key, cur + 1);
-        update();
-      });
-
-      controls.append(minus, pickLabel, plus);
-      row.appendChild(controls);
-      list.appendChild(row);
-      update();
-    }
-  }
-
-  const confirmBtn = document.createElement("button");
-  confirmBtn.textContent = "Confirm Surrender";
-  styleButton(confirmBtn, false);
-  confirmBtn.style.background = "rgba(120,40,40,0.7)";
-  const cancelBtn = document.createElement("button");
-  cancelBtn.textContent = "Cancel";
-  styleButton(cancelBtn);
-
-  const row = document.createElement("div");
-  Object.assign(row.style, {
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: "8px",
-  });
-  row.append(cancelBtn, confirmBtn);
-  menu.appendContent(row);
-
-  function refresh(): void {
-    let units = 0;
-    for (const v of selected.values()) units += v;
-    const goldCovered = units * unitValue;
-    const enough = units >= requiredUnits;
-    summary.textContent =
-      `Leaving behind: ${units} unit${units === 1 ? "" : "s"} ` +
-      `(${goldCovered}G / need ${shortfall}G)` +
-      (enough ? " ✓" : "");
-    confirmBtn.disabled = !enough;
-    confirmBtn.style.opacity = enough ? "1" : "0.4";
-    confirmBtn.style.cursor = enough ? "pointer" : "not-allowed";
-  }
-
-  cancelBtn.addEventListener("click", () => menu.close());
-  confirmBtn.addEventListener("click", () => {
-    if (confirmBtn.disabled) return;
-    menu.close();
-    onConfirm(selected);
-  });
-
-  refresh();
-}
-
-// Specialty only counts as visible if it makes up at least 40% of the
-// platoon's surviving units — matches the "at least 40% archers → archery"
-// threshold the design doc calls out, and prevents a single surviving
-// unit of a different type from flipping the icon after one stray
-// casualty.
-const SPECIALTY_VISIBILITY_THRESHOLD = 0.4;
-
-function isAlive(c: Combatant): boolean {
-  return !c.retreated && c.entries.some((e) => e.count > 0);
-}
-
-// Dominant specialty, recomputed live from entries (no cached state) so it
-// naturally shifts when casualties flip the dominant unit type — e.g. the
-// last archer dies and the platoon drops below the archery threshold.
-// Returns null when nothing clears the threshold.
-function visibleSpecialty(
-  state: ManualBattleState,
-  c: Combatant,
-): { tag: string; dominant: number; total: number } | null {
-  const specialty = computeSpecialty(c.entries, state.unitTypes);
-  if (!specialty) return null;
-  const total = totalUnits(c.entries);
-  if (total === 0) return null;
-  let dominant = 0;
-  for (const e of c.entries) {
-    if (e.count <= 0) continue;
-    if (state.unitTypes[e.unitTypeId]?.specialty === specialty) dominant += e.count;
-  }
-  return dominant / total >= SPECIALTY_VISIBILITY_THRESHOLD ? { tag: specialty, dominant, total } : null;
-}
-
-function hpRatio(state: ManualBattleState, c: Combatant): number {
-  return c.maxHealth > 0 ? totalHealth(c.entries, state.unitTypes) / c.maxHealth : 0;
-}
-
-function hpColor(pct: number): string {
-  return pct > 0.5 ? "#4caf50" : pct > 0.25 ? "#ffb300" : "#e53935";
-}
-
-// Detail shown only in a strip's expanded state — the same shape of data
-// showInfoPopupFor computes for the enemy popup, just rendered inline
-// instead of floating. Left optional/undefined when the strip is collapsed
-// so buildPlatoonStrip's caller (fillRail) only has to compute it for
-// whichever one platoon is actually expanded.
-interface PlatoonStripDetail {
-  unitTypes: Record<string, UnitType>;
-  stats: { label: string; value: string }[];
-  metrics: { label: string; value: number; color: string }[];
-  movementRemaining: number;
-  canAct: boolean;
-}
-
-function detailRow(label: string, value: string): HTMLElement {
-  const row = document.createElement("div");
-  Object.assign(row.style, { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px" });
-  const l = document.createElement("span");
-  l.textContent = label;
-  Object.assign(l.style, { opacity: "0.7", fontSize: "10.5px" });
-  const v = document.createElement("span");
-  v.textContent = value;
-  Object.assign(v.style, { fontVariantNumeric: "tabular-nums", textAlign: "right", fontSize: "10.5px" });
-  row.append(l, v);
-  return row;
-}
-
-// One row per platoon in a side's rail. Collapsed, it's enough to identify
-// the platoon and read its health at a glance. Expanded (the currently
-// hovered or selected platoon), it grows in place to show the full readout —
-// composition, Atk/Def/Spd/Rng, morale, fatigue, movement left — that used
-// to live only in a floating info card. This is the density change the rest
-// of the layout depends on: sixteen always-on stat tiles previously consumed
-// 640px of width that the battlefield now gets, with the detail spent only
-// on the one platoon actually being looked at.
-function buildPlatoonStrip(opts: {
-  state: ManualBattleState;
-  combatant: Combatant;
-  accent: string;
-  selected: boolean;
-  // Rendered spent — "has already acted this round".
-  dimmed: boolean;
-  expanded: boolean;
-  detail?: PlatoonStripDetail;
-}): HTMLElement {
-  const { state, combatant: c, accent, selected, dimmed, expanded, detail } = opts;
-  const alive = isAlive(c);
-
-  const strip = document.createElement("div");
-  Object.assign(strip.style, {
-    display: "flex",
-    flexDirection: "column",
-    gap: "3px",
-    padding: "5px 7px",
-    borderRadius: "4px",
-    background: selected ? `${accent}33` : "rgba(255,255,255,0.03)",
-    border: selected ? `1px solid ${accent}` : "1px solid rgba(255,255,255,0.07)",
-    // Spent platoons stay legible but visibly dimmed, so "who still has a
-    // turn left" reads without counting.
-    opacity: !alive ? "0.35" : dimmed ? "0.55" : "1",
-  });
-
-  const top = document.createElement("div");
-  Object.assign(top.style, { display: "flex", alignItems: "center", gap: "6px", fontSize: "11px" });
-
-  const specialty = visibleSpecialty(state, c);
-  const icon = document.createElement("span");
-  Object.assign(icon.style, { width: "14px", textAlign: "center", flexShrink: "0", lineHeight: "1" });
-  icon.textContent = !alive ? "✕" : specialty ? specialtyIcon(specialty.tag) : "·";
-  top.appendChild(icon);
-
-  const name = document.createElement("span");
-  name.style.fontWeight = "600";
-  name.textContent = `P${c.slotIndex + 1}`;
-  top.appendChild(name);
-
-  const spacer = document.createElement("span");
-  spacer.style.flex = "1";
-  top.appendChild(spacer);
-
-  const count = document.createElement("span");
-  Object.assign(count.style, { opacity: "0.85", fontVariantNumeric: "tabular-nums" });
-  if (!alive) count.textContent = c.retreated ? "Retreated" : "Defeated";
-  else count.textContent = `×${totalUnits(c.entries)}`;
-  top.appendChild(count);
-
-  strip.appendChild(top);
-
-  if (alive) {
-    const track = document.createElement("div");
-    Object.assign(track.style, {
-      height: "4px",
-      borderRadius: "2px",
-      background: "rgba(0,0,0,0.55)",
-      overflow: "hidden",
-    });
-    const pct = hpRatio(state, c);
-    const fill = document.createElement("div");
-    Object.assign(fill.style, {
-      height: "100%",
-      width: `${Math.max(0, Math.min(1, pct)) * 100}%`,
-      background: hpColor(pct),
-    });
-    track.appendChild(fill);
-    strip.appendChild(track);
-
-    if (expanded && detail) {
-      const hp = totalHealth(c.entries, detail.unitTypes);
-      strip.appendChild(detailRow("HP", `${hp} / ${c.maxHealth}`));
-
-      const compList = document.createElement("div");
-      Object.assign(compList.style, { display: "flex", flexDirection: "column", gap: "1px" });
-      for (const e of c.entries) {
-        if (e.count <= 0) continue;
-        compList.appendChild(detailRow(detail.unitTypes[e.unitTypeId]?.name ?? e.unitTypeId, `x${e.count}`));
-      }
-      strip.appendChild(compList);
-
-      strip.appendChild(detailRow("Movement", `${detail.movementRemaining} left`));
-
-      if (detail.stats.length > 0) {
-        const statRow = document.createElement("div");
-        Object.assign(statRow.style, { display: "flex", flexWrap: "wrap", gap: "3px 4px", marginTop: "1px" });
-        for (const s of detail.stats) {
-          const chip = document.createElement("span");
-          Object.assign(chip.style, {
-            fontSize: "9.5px",
-            padding: "2px 5px",
-            borderRadius: "3px",
-            background: "rgba(255,255,255,0.06)",
-            fontVariantNumeric: "tabular-nums",
-          });
-          chip.innerHTML = `<span style="opacity:0.6">${s.label}</span> ${s.value}`;
-          statRow.appendChild(chip);
-        }
-        strip.appendChild(statRow);
-      }
-
-      for (const m of detail.metrics) {
-        const clamped = Math.max(0, Math.min(1, m.value));
-        const line = document.createElement("div");
-        line.appendChild(detailRow(m.label, String(Math.round(clamped * 100))));
-        const mTrack = document.createElement("div");
-        Object.assign(mTrack.style, { height: "4px", borderRadius: "2px", background: "rgba(0,0,0,0.5)", overflow: "hidden", marginTop: "2px" });
-        const mFill = document.createElement("div");
-        Object.assign(mFill.style, { height: "100%", width: `${clamped * 100}%`, background: m.color });
-        mTrack.appendChild(mFill);
-        line.appendChild(mTrack);
-        strip.appendChild(line);
-      }
-
-      const canActChip = document.createElement("span");
-      Object.assign(canActChip.style, {
-        alignSelf: "flex-start",
-        fontSize: "9.5px",
-        padding: "2px 6px",
-        borderRadius: "3px",
-        border: "1px solid rgba(255,255,255,0.15)",
-        opacity: "0.85",
-        marginTop: "1px",
-      });
-      canActChip.textContent = detail.canAct ? "Can act" : "Acted";
-      strip.appendChild(canActChip);
-    }
-  }
-
-  return strip;
-}
 
 export function openManualBattleArena(
   playerPlatoons: Platoon[],
@@ -797,27 +280,13 @@ export function openManualBattleArena(
   let moveRange: Axial[] = [];
   let attackTargets: Combatant[] = [];
 
-  // Directional melee targeting. Hovering a reachable enemy *latches* it as
-  // pendingTarget and works out which of the hexes around it you'd close in
-  // from, based on which sixth of the enemy's hex the cursor sits in. The
-  // latch deliberately survives the cursor leaving the enemy and moving onto
-  // one of those approach hexes — that's what lets you click the hex itself
-  // instead of trusting the sector (see updateHover).
-  //
-  // While a latch is live, a click on an approach hex is an *attack*; with no
-  // latch the same click is an ordinary move. That ordering, enforced in
-  // handleClick, is the whole disambiguation between the two meanings.
-  let pendingTarget: Combatant | null = null;
-  let approachHexes: { hex: Axial; cost: number }[] = [];
-  let approachChoice: Axial | null = null;
-
-  function clearPendingAttack(): boolean {
-    if (pendingTarget === null && approachChoice === null) return false;
-    pendingTarget = null;
-    approachHexes = [];
-    approachChoice = null;
-    return true;
-  }
+  // Directional melee targeting is owned by the arena/input module — see
+  // createArenaInput below. The latch survives the cursor leaving the enemy
+  // and moving onto one of its approach hexes, so the click can name the hex
+  // directly rather than aiming at a sector. While a latch is live, a click
+  // on an approach hex is an *attack*; with no latch the same click is an
+  // ordinary move — see handleClick for the branch ordering that
+  // disambiguates the two meanings.
 
   // The AI used to resolve its whole turn synchronously inside advanceAi(),
   // with a single repaint at the end — the board simply teleported between the
@@ -1165,7 +634,7 @@ export function openManualBattleArena(
         ? "The AI is making its move..."
         : selectedSlot === null
           ? "Click one of your outlined platoons — on the grid or in the left rail — to act. Hover any platoon for its full details."
-          : pendingTarget !== null
+          : input.getPendingTarget() !== null
             ? "The arrow shows which side you'll attack from — move the cursor around the enemy to swing it, then click to close in and fight. Click the marked hex itself if you'd rather pick it directly."
             : ranged
               ? moveRange.length > 0
@@ -1662,101 +1131,9 @@ export function openManualBattleArena(
     return { x: a.x + (b.x - a.x) * localT, y: a.y + (b.y - a.y) * localT };
   }
 
-  function livingEnemyAt(hex: Axial): Combatant | undefined {
-    const enemies = aiSide === "attacker" ? state.attacker : state.defender;
-    return enemies.find((e) => isAlive(e) && e.position.q === hex.q && e.position.r === hex.r);
-  }
-
-  // The cursor's sector can point at a hex that's impassable, already taken,
-  // or simply out of reach this round. Rather than offering nothing, snap to
-  // the legal approach hex closest in angle — so hovering an enemy you *can*
-  // reach always yields a usable attack, whichever way you point.
-  function pickApproachForEdge(target: Combatant, approaches: { hex: Axial; cost: number }[], edge: number): Axial {
-    const wanted = {
-      q: target.position.q + HEX_DIRECTIONS[edge].q,
-      r: target.position.r + HEX_DIRECTIONS[edge].r,
-    };
-    const exact = approaches.find((a) => a.hex.q === wanted.q && a.hex.r === wanted.r);
-    if (exact) return exact.hex;
-
-    let best = approaches[0];
-    let bestGap = Infinity;
-    for (const a of approaches) {
-      const dir = HEX_DIRECTIONS.findIndex(
-        (d) => target.position.q + d.q === a.hex.q && target.position.r + d.r === a.hex.r,
-      );
-      const raw = Math.abs(dir - edge);
-      const gap = Math.min(raw, 6 - raw);
-      if (gap < bestGap) {
-        bestGap = gap;
-        best = a;
-      }
-    }
-    return best.hex;
-  }
-
-  function resolveHover(
-    hex: Axial,
-    localX: number,
-    localY: number,
-  ): { target: Combatant; approaches: { hex: Axial; cost: number }[]; choice: Axial } | null {
-    if (aiActing || isBattleOver(state) || selectedSlot === null) return null;
-    const actor = getCombatant(state, humanSide, selectedSlot);
-    if (!actor || isRangedPlatoon(actor, state.unitTypes)) return null;
-
-    // Over the enemy itself: latch it, and read the approach hex off whichever
-    // sixth of its hex the cursor occupies.
-    const enemy = livingEnemyAt(hex);
-    if (enemy) {
-      const approaches = getApproachHexes(state, actor, enemy);
-      if (approaches.length === 0) return null;
-      const center = axialToPixel(enemy.position.q, enemy.position.r, hexSize);
-      const edge = nearestHexEdge(center.x, center.y, localX, localY);
-      return { target: enemy, approaches, choice: pickApproachForEdge(enemy, approaches, edge) };
-    }
-
-    // Cursor has left the enemy and is sitting on one of its approach hexes.
-    // Hold the latch and take that hex verbatim — this is the click fallback
-    // for when you'd rather name the hex than aim at a sector.
-    if (pendingTarget) {
-      const onApproach = approachHexes.find((a) => a.hex.q === hex.q && a.hex.r === hex.r);
-      if (onApproach) return { target: pendingTarget, approaches: approachHexes, choice: onApproach.hex };
-    }
-    return null;
-  }
-
-  // mousemove fires far too often to repaint on every event, so this diffs the
-  // latch and the chosen hex and only redraws when one of them actually moved.
-  function updateHover(localX: number, localY: number): void {
-    const prevTarget = pendingTarget;
-    const prevChoice = approachChoice;
-
-    const resolved = resolveHover(pixelToAxial(localX, localY, hexSize), localX, localY);
-    if (resolved) {
-      pendingTarget = resolved.target;
-      approachHexes = resolved.approaches;
-      approachChoice = resolved.choice;
-    } else {
-      clearPendingAttack();
-    }
-
-    canvas.style.cursor = pendingTarget ? "crosshair" : "";
-    // Latching or dropping a target changes the action-bar help text too, so
-    // that case needs a full refresh; swinging the arrow around a target
-    // already latched only moves pixels on the canvas.
-    if (prevTarget !== pendingTarget) {
-      refresh();
-      return;
-    }
-    const sameChoice =
-      prevChoice === approachChoice ||
-      (prevChoice !== null && approachChoice !== null && prevChoice.q === approachChoice.q && prevChoice.r === approachChoice.r);
-    if (!sameChoice) draw();
-  }
-
   function selectPlatoon(slotIndex: number): void {
     selectedSlot = slotIndex;
-    clearPendingAttack();
+    input.clearPendingAttack();
     const combatant = getCombatant(state, humanSide, slotIndex);
     if (!combatant) {
       selectedSlot = null;
@@ -1799,7 +1176,7 @@ export function openManualBattleArena(
   // just to move on to the next unit.
   function refreshAfterMove(): void {
     if (selectedSlot === null) return;
-    clearPendingAttack();
+    input.clearPendingAttack();
     const combatant = getCombatant(state, humanSide, selectedSlot);
     if (!combatant) {
       selectedSlot = null;
@@ -1851,7 +1228,7 @@ export function openManualBattleArena(
     selectedSlot = null;
     moveRange = [];
     attackTargets = [];
-    clearPendingAttack();
+    input.clearPendingAttack();
     infoPopup.hide();
     advanceAi();
   }
@@ -2048,26 +1425,26 @@ export function openManualBattleArena(
     // runs first defines what the click means: with an enemy latched by hover
     // it means "close in from here and attack", and with nothing latched the
     // move branch below gives it its usual meaning.
-    if (pendingTarget && approachChoice) {
-      const clickedApproach = approachHexes.find((a) => a.hex.q === hex.q && a.hex.r === hex.r);
-      const clickedTarget = hex.q === pendingTarget.position.q && hex.r === pendingTarget.position.r;
+    if (input.getPendingTarget() && input.getApproachChoice()) {
+      const clickedApproach = input.getApproachHexes().find((a) => a.hex.q === hex.q && a.hex.r === hex.r);
+      const clickedTarget = hex.q === input.getPendingTarget()!.position.q && hex.r === input.getPendingTarget()!.position.r;
       if (clickedApproach || clickedTarget) {
-        const from = clickedApproach ? clickedApproach.hex : approachChoice;
+        const from = clickedApproach ? clickedApproach.hex : input.getApproachChoice()!;
         const actorBefore = getCombatant(state, humanSide, selectedSlot);
         const origin = actorBefore ? { ...actorBefore.position } : from;
         const distance = hexDistance(origin, from);
         debugLog(
           `click ${fmtHex(hex)} -> directional attack: ${platoonLabel(humanSide, selectedSlot)}`,
-          `from ${fmtHex(from)} -> ${platoonLabel(pendingTarget.side, pendingTarget.slotIndex)}`,
+          `from ${fmtHex(from)} -> ${platoonLabel(input.getPendingTarget()!.side, input.getPendingTarget()!.slotIndex)}`,
         );
         const beforeLog = state.log.length;
-        if (attackFromHex(state, humanSide, selectedSlot, pendingTarget.slotIndex, from)) {
+        if (attackFromHex(state, humanSide, selectedSlot, input.getPendingTarget()!.slotIndex, from)) {
           if (distance > 0) recordMove(humanSide, selectedSlot, distance);
           logNewBattleEvents(beforeLog);
           afterPlayerAction();
         } else {
           debugLog(`click ${fmtHex(hex)} -> directional attack REJECTED by engine (was previewed as legal)`);
-          clearPendingAttack();
+          input.clearPendingAttack();
           refresh();
         }
         return;
@@ -2111,7 +1488,7 @@ export function openManualBattleArena(
       selectedSlot = null;
       moveRange = [];
       attackTargets = [];
-      clearPendingAttack();
+      input.clearPendingAttack();
       infoPopup.hide();
       refresh();
       return;
@@ -2152,13 +1529,26 @@ export function openManualBattleArena(
   // click handler above, and the grid-local result feeds both the hex lookup
   // and the sector angle, which is measured against the target's grid-local
   // centre from axialToPixel.
+  const input: ArenaInput = createArenaInput({
+    getState: () => state,
+    getHumanSide: () => humanSide,
+    getAiSide: () => aiSide,
+    getHexSize: () => hexSize,
+    getSelectedSlot: () => selectedSlot,
+    isAiActing: () => aiActing,
+    isBattleOver: () => isBattleOver(state),
+    getCursorTarget: () => canvas,
+    draw: () => draw(),
+    refresh: () => refresh(),
+  });
+
   canvas.addEventListener("mousemove", (e) => {
     const rect = canvas.getBoundingClientRect();
-    updateHover(e.clientX - rect.left - offsetX, e.clientY - rect.top - offsetY);
+    input.updateHover(e.clientX - rect.left - offsetX, e.clientY - rect.top - offsetY);
   });
 
   canvas.addEventListener("mouseleave", () => {
-    if (clearPendingAttack()) {
+    if (input.clearPendingAttack()) {
       canvas.style.cursor = "";
       draw();
     }
@@ -2190,29 +1580,17 @@ export function openManualBattleArena(
   // refresh, and a removed element never fires mouseleave — so per-strip
   // listeners could strand a strip expanded after the pointer had already
   // left it. mouseover/mouseout bubble, so the persistent container sees both.
-  function attachRailHover(list: HTMLElement): void {
-    list.addEventListener("mouseover", (e) => {
-      const strip = (e.target as HTMLElement | null)?.closest<HTMLElement>("[data-slot]");
-      if (!strip || !list.contains(strip)) return;
-      const slot = Number(strip.dataset.slot);
-      if (slot === hoveredSlot) return;
-      const combatant = humanCombatants().find((c) => c.slotIndex === slot);
-      if (!combatant || !isAlive(combatant)) return;
+  // The listener wiring itself lives in arena/view.ts (attachRailHover); this
+  // file passes the closure it needs to update hoveredSlot and re-render.
+  attachRailHover({
+    list: humanRail.list,
+    getHumanCombatants: () => humanCombatants(),
+    getHoveredSlot: () => hoveredSlot,
+    onHoverChange: (slot) => {
       hoveredSlot = slot;
       renderRails();
-    });
-    list.addEventListener("mouseout", (e) => {
-      // Ignore crossings between two strips inside the same list; only clear
-      // when the pointer actually leaves the rail.
-      const to = e.relatedTarget as Node | null;
-      if (to && list.contains(to)) return;
-      if (hoveredSlot === null) return;
-      hoveredSlot = null;
-      renderRails();
-    });
-  }
-
-  attachRailHover(humanRail.list);
+    },
+  });
 
   function renderRails(): void {
     const actableSlots = unactedLivingSlots(state, humanSide);
