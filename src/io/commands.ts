@@ -1,5 +1,6 @@
 import type { Axial } from "../core/hex";
 import type {
+  BuildingUpgradeRequest,
   HeroState,
   HorseVariantId,
   Player,
@@ -275,6 +276,35 @@ export async function startCharter(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kind: "StartCharter", ...payload }),
+  });
+  await json(res);
+}
+
+// UpgradeBuilding / UpgradeSettlement
+// (plan/2026-08-17-issue-88-remaining-command-ports.md): same fire-and-forget
+// shape as the functions above, closing the last two gaps issue #88's
+// re-scoped review found -- these two mutations previously had no server
+// round-trip at all.
+export async function upgradeBuilding(
+  name: string,
+  payload: { actor: number; settlementId: string; requests: BuildingUpgradeRequest[] }
+): Promise<void> {
+  const res = await apiFetch(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "UpgradeBuilding", ...payload }),
+  });
+  await json(res);
+}
+
+export async function upgradeSettlement(
+  name: string,
+  payload: { actor: number; settlementId: string; upgradePopulationGate: number }
+): Promise<void> {
+  const res = await apiFetch(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "UpgradeSettlement", ...payload }),
   });
   await json(res);
 }
