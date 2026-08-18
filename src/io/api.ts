@@ -1,7 +1,9 @@
 import type { Terrain } from "../map/terrain";
 import type { ResourceType } from "../map/resourceTiles";
 import type {
+  ClientTelemetryReport,
   HeroState,
+  NetworkTopologySnapshot,
   Player,
   SettlementState,
 } from "@heroes/contracts";
@@ -168,6 +170,23 @@ export const api = {
   getTiles: (name: string) =>
     fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}/tiles`).then((r) =>
       json<TileRow[]>(r)
+    ),
+  // Dev Network Map telemetry (issue #51). Best-effort debug data on a short
+  // timeout: it must never be the reason a poll cycle stalls.
+  reportTelemetry: async (name: string, report: ClientTelemetryReport): Promise<void> => {
+    await fetchWithTimeout(
+      `${BASE}/games/${encodeURIComponent(name)}/telemetry`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(report),
+      },
+      3_000
+    );
+  },
+  getTopology: (name: string) =>
+    fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}/telemetry`, {}, 3_000).then((r) =>
+      json<NetworkTopologySnapshot>(r)
     ),
 };
 

@@ -33,12 +33,23 @@ New file `packages/contracts/src/telemetry.ts` (mirrors the existing per-domain 
 ```ts
 export type NetworkEntityType = "dedicated-server" | "client" | "host" | "peer" | "relay";
 // host/peer/relay are part of the issue's requested vocabulary; this codebase has no
-// host-migration or P2P transport, so no code path ever constructs those two types today.
+// host-migration or P2P transport, so no code path ever constructs those three types today.
 
 export type NetworkLinkStatus = "healthy" | "degraded" | "failing";
 
+// Node ids are strings so the single dedicated-server node can share the `id` field
+// with player-backed client nodes. PlayerId itself is a number (contracts/src/ids.ts)
+// and stays a number wherever it is carried as a player id -- see ClientTelemetryReport
+// in §2. The string form exists only at the graph layer, and is produced only by
+// clientEntityId(), so client / server registry / snapshot builder cannot drift into
+// disagreeing key formats (which would yield a silently empty graph, not an error).
+export const SERVER_ENTITY_ID = "server";
+export const CLIENT_ENTITY_ID_PREFIX = "client:";
+export function clientEntityId(playerId: PlayerId): string;   // 0 -> "client:0"
+export function playerIdFromEntityId(id: string): PlayerId | null;  // inverse; null for "server"
+
 export interface NetworkEntity {
-  id: string;               // "server" for the single dedicated-server node; playerId string for clients
+  id: string;               // SERVER_ENTITY_ID, or clientEntityId(playerId) e.g. "client:0"
   type: NetworkEntityType;
   label: string;             // player handle, or "Dedicated Server"
   lastSeenAt: number;        // epoch ms
@@ -65,11 +76,11 @@ Export from `packages/contracts/src/index.ts` alongside the other domain exports
 
 ## §2 — Server: in-memory presence/telemetry registry
 
-New file `server/telemetry/presenceRegistry.ts`. Plain in-memory `Map<gameName, Map<playerId, ClientTelemetrySample>>`, no DB. A sample expires (is dropped from the map) if not refreshed within a staleness window (e.g. 3x the poll interval, 6s) — checked lazily on read, no background sweep needed at this scale.
+New file `server/telemetry/presenceRegistry.ts`. Plain in-memory `Map<gameName, Map<PlayerId, ClientTelemetrySample>>` (keyed by the numeric seat, not the `client:N` graph id), no DB. A sample expires (is dropped from the map) if not refreshed within a staleness window (e.g. 3x the poll interval, 6s) — checked lazily on read, no background sweep needed at this scale.
 
 ```ts
 interface ClientTelemetrySample {
-  playerId: string;
+  playerId: PlayerId;   // number, raw and unconverted -- NOT the "client:N" graph id
   label: string;
   rttMs: number;
   responseBytes: number;
@@ -90,17 +101,17 @@ POST /api/games/:name/telemetry   { playerId, label, rttMs, responseBytes, ok } 
 GET  /api/games/:name/telemetry   -> NetworkTopologySnapshot
 ```
 
-Keep this as its own small router file (`server/http/routes/telemetry.ts`) mounted via `router.use("/games/:name/telemetry", telemetryRouter)`, matching the existing `commandsRouter` mounting pattern — not inlined into the already-large `routes.ts`.
+Keep this as its own small router file (`server/http/routes/telemetry.ts`) mounted via `router.use("/games/:name/telemetry", telemetryRouter)` (unprefixed here on purpose — `server/index.ts` mounts the whole router at `/api`, so the live paths are `/api/games/:name/telemetry`), matching the existing `commandsRouter` mounting pattern — not inlined into the already-large `routes.ts`.
 
 ## §3 — Client: instrument the existing poll loop
 
 Extend `MultiplayerSync.pollOnce` (`src/io/multiplayerSync.ts`) — do not add a second timer:
 
 1. Wrap the existing `api.getGame(gameName)` call with `performance.now()` before/after to get real RTT.
-2. On success, compute the response's approximate byte size (`JSON.stringify(game).length` is an acceptable approximation — exact `Content-Length` isn't available through the existing `api.getGame` wrapper without changing its return type, and this is a debug-only proxy metric per §Scope-decisions item 5).
-3. Fire-and-forget `POST /games/:name/telemetry` with the sample (own player id from `getInMemoryLocalPlayerId`, RTT, byte size, `ok`). On fetch failure, still report `ok: false` with `rttMs: null`-equivalent (use the elapsed time up to the failure).
+2. On success, compute the response's approximate byte size (`new TextEncoder().encode(JSON.stringify(game)).length` — UTF-8 bytes, since `String.length` counts UTF-16 code units and under-reports any non-ASCII payload; exact `Content-Length` still isn't available through the existing `api.getGame` wrapper without changing its return type, and this is a debug-only proxy metric per §Scope-decisions item 5).
+3. Fire-and-forget `POST /api/games/:name/telemetry` with the sample (own player id from `getInMemoryLocalPlayerId`, RTT, byte size, `ok`). On fetch failure, still report `ok: false` with `rttMs: null`-equivalent (use the elapsed time up to the failure).
 4. This report must not block or affect the existing `mp:stateChanged` / `mp:turnStarted` emission — telemetry reporting is best-effort and swallows its own errors (`.catch(() => {})`), same posture as the existing `console.warn` on poll failure.
-5. Also fetch the aggregated `GET /games/:name/telemetry` snapshot once per poll cycle (can piggyback on the same `pollOnce` tick) and emit a new bus event:
+5. Also fetch the aggregated `GET /api/games/:name/telemetry` snapshot once per poll cycle (can piggyback on the same `pollOnce` tick) and emit a new bus event:
 
 ```ts
 export interface MpTopologyUpdatedEvent {
@@ -149,7 +160,7 @@ A "Copy JSON" button on the network map screen, mirroring `openDevConsole`'s exi
 ## Suggested order
 
 1. §1 shared types (`packages/contracts/src/telemetry.ts`) — no runtime behavior, unblocks everything else.
-2. §2 server presence registry + `POST`/`GET /games/:name/telemetry` routes, with unit tests on `presenceRegistry.ts` directly (ring buffer eviction, staleness expiry) — no HTTP needed for these tests.
+2. §2 server presence registry + `POST`/`GET /api/games/:name/telemetry` routes, with unit tests on `presenceRegistry.ts` directly (ring buffer eviction, staleness expiry) — no HTTP needed for these tests.
 3. §3 client instrumentation of `MultiplayerSync.pollOnce` + new `mp:topologyUpdated` bus event.
 4. §4 `deriveLinkStatus` as a small pure/unit-tested function, landed alongside §2 or §3 (no ordering dependency).
 5. §5 the `networkMap` screen, consuming the bus event.
@@ -160,5 +171,5 @@ A "Copy JSON" button on the network map screen, mirroring `openDevConsole`'s exi
 
 - `test/server/presenceRegistry.test.ts` (or under wherever `server/telemetry/` tests land): sample recording, ring-buffer rolling failure rate, staleness expiry, snapshot shape.
 - `test/net/linkStatus.test.ts`: threshold boundaries for `deriveLinkStatus`.
-- Extend `test/multiplayer.smoke.ts` (already exercises the poll loop end-to-end) with an assertion that a telemetry sample round-trips: after one `pollOnce()`, `GET /games/:name/telemetry` includes the calling client with a non-null `rttMs`.
+- Extend `test/multiplayer.smoke.ts` (already exercises the poll loop end-to-end) with an assertion that a telemetry sample round-trips: after one `pollOnce()`, `GET /api/games/:name/telemetry` includes the calling client with a non-null `rttMs`.
 - No canvas/DOM rendering tests — out of line with this repo's existing test surface (`docs/dev-console.md` §5 only unit-tests the pure log class, not the modal rendering).
