@@ -1485,7 +1485,16 @@ function finishBattle(): void {
     const prevHex = hoveredHex;
     hoveredHex = pixelToAxial(localX, localY, hexSize);
     input.updateHover(localX, localY);
-    if (hoveredHex !== prevHex && !ai.isActing() && !isBattleOver(state)) {
+    const hoverChanged =
+      (prevHex === null) !== (hoveredHex === null) ||
+      (prevHex !== null &&
+        hoveredHex !== null &&
+        (prevHex.q !== hoveredHex.q || prevHex.r !== hoveredHex.r));
+    if (
+      hoverChanged &&
+      input.getPendingTarget() === null &&
+      input.getApproachChoice() === null
+    ) {
       draw();
     }
   });
