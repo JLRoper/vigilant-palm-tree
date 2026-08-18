@@ -71,7 +71,7 @@ function renderSideResults(title: string, results: CombatantResult[]): HTMLEleme
 }
 
 export function showBattleResultCard(opts: BattleResultCardOptions): void {
-  const modal = openCenteredModal(document.body, "Battle Results", 480);
+  const modal = openCenteredModal(document.body, "Battle Results", 480, false, false);
 
   modal.setOnClose(() => {
     modal.root.parentElement?.remove();
