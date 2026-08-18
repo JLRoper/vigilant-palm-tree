@@ -17,26 +17,18 @@
 
 import { RANGED_ATTACK_RANGE, SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "@heroes/engine";
 import {
-  attackFromHex,
-  attackWithPlatoon,
-  endPlatoonTurn,
   finalizeManualBattle,
   getCombatant,
-  getMovementPath,
   getMovementRange,
   getValidAttackTargets,
   getValidMeleeTargets,
   isBattleOver,
   isRangedPlatoon,
-  movePlatoon,
   pickTarget,
-  planAiTurn,
   platoonSpeed,
-  retreatHero,
   startManualBattle,
   timeOfDayForRound,
   unactedLivingSlots,
-  type AiTurnPlan,
   type TimeOfDay,
 } from "@heroes/engine";
 import type { BattleLogEntry, BattleSide, Combatant } from "@heroes/engine";
@@ -51,6 +43,8 @@ import { axialToPixel, fmtHex, gridExtent, fitHexSize, hexCorners, hexDistance, 
 import { applyLeaveBehind, openLeaveBehindDialog } from "./arena/leaveBehind";
 import { attachRailHover, buildPlatoonStrip } from "./arena/view";
 import { createArenaInput, type ArenaInput } from "./arena/input";
+import { createArenaAi, type ArenaAi } from "./arena/ai";
+import { attackFromSelectedHex, attackFromTarget, endPlatoonTurnAction, moveSelectedTo, retreatAction, surrenderAction } from "./arena/state";
 
 registerView("manualBattleArena", (opts) => {
   const o = opts as { playerPlatoons: Platoon[]; aiPlatoons: Platoon[]; unitTypes: Record<string, UnitType>; humanSide: BattleSide };
@@ -263,9 +257,9 @@ export function openManualBattleArena(
 
   function closeArena(): void {
     // Must cancel any pending AI beat, or it fires against a detached overlay.
-    // Bumping the token also aborts an AI sequence already parked on an await.
-    aiRunToken++;
-    clearAiTimer();
+    // Bumping the run token also aborts an AI sequence already parked on an await.
+    ai.bumpRunToken();
+    ai.clearTimer();
     clearAnimations();
     resizeObserver.disconnect();
     overlay.remove();
@@ -288,55 +282,19 @@ export function openManualBattleArena(
   // ordinary move — see handleClick for the branch ordering that
   // disambiguates the two meanings.
 
-  // The AI used to resolve its whole turn synchronously inside advanceAi(),
-  // with a single repaint at the end — the board simply teleported between the
-  // player's clicks and you never saw the opponent move. It is now narrated in
-  // discrete beats, one platoon per pass (see stepAi): telegraph the actor and
-  // its intended target, walk it hex by hex along its real path, pause on
-  // arrival, then land the attack with an impact flash and a floating casualty
-  // count. `aiActing` blocks player input for the duration.
-  const AI_TELEGRAPH_MS = 320;
-  const AI_STEP_MS = 260;
-  // Per hex of the walk, capped so a full-speed dash across the field still
-  // resolves promptly rather than making the player wait out every step.
-  const AI_MOVE_MS_PER_HEX = 90;
-  const AI_MOVE_MS_MAX = 620;
-  const AI_ARRIVE_PAUSE_MS = 140;
-  const AI_IMPACT_HOLD_MS = 420;
-  // Lifetimes of the two purely cosmetic overlays. Both outlive the beat that
-  // spawns them so the float is still drifting as control returns.
-  const IMPACT_MS = 300;
-  const FLOAT_MS = 800;
-  let aiActing = false;
-  let aiActingSlot: number | null = null;
-  // Hex the telegraphed platoon intends to hit, flashed during the first beat
-  // so the player reads "who is about to act, and on whom" before anything
-  // moves.
-  let aiTargetHex: Axial | null = null;
-  let aiTimer: number | null = null;
-  // Bumped whenever the arena closes or the battle ends. The AI sequence
-  // awaits between beats, so every step re-checks this before touching state
-  // that may have been torn down mid-flight.
-  let aiRunToken = 0;
-
-  function clearAiTimer(): void {
-    if (aiTimer !== null) {
-      window.clearTimeout(aiTimer);
-      aiTimer = null;
-    }
-  }
-
-  // Sleeps between AI beats. Resolves false if the run was cancelled while
-  // waiting, so the caller can bail instead of animating into a dead overlay.
-  function aiWait(ms: number): Promise<boolean> {
-    const token = aiRunToken;
-    return new Promise((resolve) => {
-      aiTimer = window.setTimeout(() => {
-        aiTimer = null;
-        resolve(token === aiRunToken);
-      }, ms);
-    });
-  }
+// The AI used to resolve its whole turn synchronously inside advanceAi(),
+// with a single repaint at the end — the board simply teleported between the
+// player's clicks and you never saw the opponent move. It is now narrated in
+// discrete beats, one platoon per pass (see createArenaAi in arena/ai.ts):
+// telegraph the actor and its intended target, walk it hex by hex along its
+// real path, pause on arrival, then land the attack with an impact flash and
+// a floating casualty count. `ai.isActing()` blocks player input for the
+// duration. Timing constants and the run-token bookkeeping live in
+// arena/ai.ts so closeArena() can cancel timers without juggling them here.
+// Lifetimes of the two purely cosmetic overlays. Both outlive the beat that
+// spawns them so the float is still drifting as control returns.
+const IMPACT_MS = 300;
+const FLOAT_MS = 800;
 
   // ---- cosmetic overlays -------------------------------------------------
   // None of this touches engine state: the platoon's authoritative position
@@ -436,7 +394,7 @@ export function openManualBattleArena(
   endTurnBtn.addEventListener("click", () => {
     if (selectedSlot === null) return;
     debugLog(`click End Turn -> ${platoonLabel(humanSide, selectedSlot)} ends its turn without attacking`);
-    endPlatoonTurn(state, humanSide, selectedSlot);
+    endPlatoonTurnAction(state, humanSide, selectedSlot);
     afterPlayerAction();
   });
 
@@ -571,7 +529,7 @@ export function openManualBattleArena(
       destructive: true,
       onConfirm: () => {
         debugLog(`player retreats as ${humanSide}`);
-        retreatHero(state, humanSide, { applyLoss: true });
+        retreatAction(state, humanSide);
         finishBattle();
       },
     });
@@ -597,7 +555,7 @@ export function openManualBattleArena(
         onConfirm: () => {
           debugLog(`player surrenders as ${humanSide} (paid ${surrenderCost}G)`);
           currentHeroGold -= surrenderCost;
-          retreatHero(state, humanSide, { applyLoss: false });
+          surrenderAction(state, humanSide);
           finishBattle();
         },
       });
@@ -613,7 +571,7 @@ export function openManualBattleArena(
         onConfirm: (leftBehind) => {
           debugLog(`player surrenders as ${humanSide} after leaving behind ${leftBehind} units`);
           applyLeaveBehind(state, humanSide, leftBehind);
-          retreatHero(state, humanSide, { applyLoss: false });
+          surrenderAction(state, humanSide);
           finishBattle();
         },
       });
@@ -623,7 +581,7 @@ export function openManualBattleArena(
 
   function renderActions(): void {
     const over = isBattleOver(state);
-    const waitingOnAi = !over && (aiActing || unactedLivingSlots(state, humanSide).length === 0);
+    const waitingOnAi = !over && (ai.isActing() || unactedLivingSlots(state, humanSide).length === 0);
     // Ranged platoons have no approach side to pick — they shoot from where
     // they stand — so they must never be told to hover for a direction.
     const selected = selectedSlot === null ? undefined : getCombatant(state, humanSide, selectedSlot);
@@ -643,13 +601,13 @@ export function openManualBattleArena(
               : moveRange.length > 0
                 ? "Hover an enemy in reach to choose the side you attack from, or click a highlighted hex to just move (landing beside a lone enemy fights immediately). Move again, attack, or End Turn when done."
                 : "Out of movement — hover an adjacent enemy to attack from where you stand, or End Turn.";
-    endTurnBtn.style.display = selectedSlot !== null && !over && !aiActing ? "" : "none";
+    endTurnBtn.style.display = selectedSlot !== null && !over && !ai.isActing() ? "" : "none";
 
     // Cast Spell, Retreat, and Surrender live under the human's hero portrait
     // and only make sense while it's actually the human's turn to act — which
     // now excludes the beats where the AI is mid-move.
     const humanActing = unactedLivingSlots(state, humanSide).length > 0;
-    const showHumanActions = !over && !aiActing && humanActing;
+    const showHumanActions = !over && !ai.isActing() && humanActing;
     humanCastBtn.style.display = showHumanActions ? "" : "none";
     retreatBtn.style.display = showHumanActions ? "" : "none";
     surrenderBtn.style.display = showHumanActions ? "" : "none";
@@ -971,7 +929,7 @@ export function openManualBattleArena(
     // has to move each round, so rather than a separate turn-order readout,
     // the grid itself shows what's still waiting on you. Suppressed while the
     // AI is acting so the only thing lit up is the platoon actually moving.
-    const availableHexes = aiActing
+    const availableHexes = ai.isActing()
       ? []
       : unactedLivingSlots(state, humanSide)
           .map((slot) => getCombatant(state, humanSide, slot))
@@ -1007,6 +965,7 @@ export function openManualBattleArena(
     // first beat only (cleared once the attack resolves), so the player knows
     // where the blow is coming before it lands rather than reconstructing it
     // from the health bars afterwards.
+    const aiTargetHex = ai.getTargetHex();
     if (aiTargetHex) {
       const { x, y } = toCanvas(aiTargetHex.q, aiTargetHex.r);
       const corners = hexCorners(x, y, hexSize - 1);
@@ -1048,6 +1007,7 @@ export function openManualBattleArena(
     // The AI platoon that is about to act, telegraphed for one beat before its
     // move resolves so the player can follow what the opponent is doing. Uses
     // the animated position so the ring travels with it during the walk.
+    const aiActingSlot = ai.getActingSlot();
     if (aiActingSlot !== null) {
       const acting = getCombatant(state, aiSide, aiActingSlot);
       if (acting && isAlive(acting)) {
@@ -1191,7 +1151,7 @@ export function openManualBattleArena(
       const target = pickTarget(adjacentEnemies, state.unitTypes) ?? adjacentEnemies[0];
       debugLog(`bump attack: ${platoonLabel(humanSide, selectedSlot)} -> ${platoonLabel(target.side, target.slotIndex)}`);
       const beforeLog = state.log.length;
-      attackWithPlatoon(state, humanSide, selectedSlot, target.slotIndex);
+      attackFromTarget(state, humanSide, selectedSlot, target.slotIndex);
       logNewBattleEvents(beforeLog);
       afterPlayerAction();
       return;
@@ -1200,7 +1160,7 @@ export function openManualBattleArena(
     attackTargets = getValidAttackTargets(state, combatant);
     if (moveRange.length === 0 && attackTargets.length === 0) {
       debugLog(`auto-end turn: ${platoonLabel(humanSide, selectedSlot)} exhausted movement with no attack targets`);
-      endPlatoonTurn(state, humanSide, selectedSlot);
+      endPlatoonTurnAction(state, humanSide, selectedSlot);
       // Hands over to the AI exactly like the attack and End Turn paths do.
       // It used to jump straight to your next platoon instead, which is why
       // the opening round played as "you move all eight, then the AI moves
@@ -1230,7 +1190,7 @@ export function openManualBattleArena(
     attackTargets = [];
     input.clearPendingAttack();
     infoPopup.hide();
-    advanceAi();
+    ai.advance();
   }
 
   // Every damage entry appended by the beat we just resolved becomes a
@@ -1253,127 +1213,46 @@ export function openManualBattleArena(
     }
   }
 
-  // Hands control back to the player once the AI has nothing more to do this
-  // round. Focuses their next waiting platoon so its movement range is
-  // already showing — the convenience the old auto-end path provided before
-  // it was folded into the normal alternation.
-  function endAiPhase(): void {
-    aiActing = false;
-    aiActingSlot = null;
-    aiTargetHex = null;
-    if (selectedSlot === null && !isBattleOver(state) && unactedLivingSlots(state, humanSide).length > 0) {
-      focusNextUnactedPlatoon();
-      return;
-    }
-    refresh();
+// Hands control back to the player once the AI has nothing more to do this
+// round. Focuses their next waiting platoon so its movement range is
+// already showing — the convenience the old auto-end path provided before
+// it was folded into the normal alternation. This is the callback the
+// ArenaAi module invokes via deps.endAiPhase() once its stepAi resolves.
+function endAiPhase(): void {
+  if (selectedSlot === null && !isBattleOver(state) && unactedLivingSlots(state, humanSide).length > 0) {
+    focusNextUnactedPlatoon();
+    return;
   }
+  refresh();
+}
 
-  // Plays one AI platoon's turn as a sequence of readable beats rather than
-  // resolving it in a single frame:
-  //
-  //   1. ring the actor and flash the hex it intends to hit
-  //   2. walk it hex by hex along the path it actually takes
-  //   3. brief pause on arrival
-  //   4. resolve the attack — impact ring plus floating casualty counts
-  //   5. hand back, or take another platoon if the player has nothing waiting
-  //
-  // Steps 2 and 4 are skipped when the plan has no move / no attack. The
-  // engine work is unchanged; planAiTurn just lets us decide first and apply
-  // in pieces, so the visuals can sit between the decision and its effect.
-  async function stepAi(): Promise<void> {
-    const token = aiRunToken;
-    if (isBattleOver(state)) {
-      finishBattle();
-      return;
-    }
-    const plan: AiTurnPlan | null = planAiTurn(state, aiSide);
-    if (!plan) {
-      endAiPhase();
-      return;
-    }
+// AI pacing itself (advance/step/endAiPhase setup) lives in arena/ai.ts via
+// createArenaAi — the orchestrator just calls `ai.advance()` after each
+// player action and lets the module own the run-token, timers, and the
+// per-beat telegraph/walk/attack sequence. See plan/2026-08-17-combat-
+// decomposition-finishing-breakout.md §6.2.
+const ai: ArenaAi = createArenaAi({
+  getState: () => state,
+  getAiSide: () => aiSide,
+  getHumanSide: () => humanSide,
+  debugLog,
+  recordMove,
+  logNewBattleEvents,
+  spawnDamageFloats,
+  refresh: () => refresh(),
+  pumpAnimation: () => pumpAnimation(),
+  finishBattle: () => finishBattle(),
+  endAiPhase: () => endAiPhase(),
+  setMoveAnim: (anim) => {
+    moveAnim = anim;
+  },
+  setImpact: (fx) => {
+    impact = fx;
+  },
+});
+// decomposition-finishing-breakout.md §6.2.
 
-    const actor = getCombatant(state, aiSide, plan.slotIndex);
-    aiActingSlot = plan.slotIndex;
-    const plannedTarget =
-      plan.attackTargetSlot !== null
-        ? getCombatant(state, aiSide === "attacker" ? "defender" : "attacker", plan.attackTargetSlot)
-        : undefined;
-    aiTargetHex = plannedTarget ? { ...plannedTarget.position } : null;
-    refresh();
-    if (!(await aiWait(AI_TELEGRAPH_MS)) || token !== aiRunToken) return;
-
-    if (plan.moveTo && actor) {
-      const from = { ...actor.position };
-      const path = getMovementPath(state, actor, plan.moveTo);
-      const distance = hexDistance(from, plan.moveTo);
-      movePlatoon(state, aiSide, plan.slotIndex, plan.moveTo);
-      if (path.length > 0) {
-        recordMove(aiSide, plan.slotIndex, distance);
-        debugLog(`ai move: ${platoonLabel(aiSide, plan.slotIndex)}: ${fmtHex(from)} -> ${fmtHex(plan.moveTo)} (${distance} hex${distance === 1 ? "" : "es"})`);
-        const durationMs = Math.min(path.length * AI_MOVE_MS_PER_HEX, AI_MOVE_MS_MAX);
-        moveAnim = { side: aiSide, slotIndex: plan.slotIndex, path: [from, ...path], startedAt: performance.now(), durationMs };
-        pumpAnimation();
-        if (!(await aiWait(durationMs + AI_ARRIVE_PAUSE_MS)) || token !== aiRunToken) return;
-      }
-      moveAnim = null;
-    }
-
-    // The move is done and the walk has played out; drop the intent flash so
-    // the impact reads as the consequence rather than more telegraphing.
-    aiTargetHex = null;
-    const beforeLog = state.log.length;
-    const struck = plan.attackTargetSlot !== null ? getCombatant(state, aiSide === "attacker" ? "defender" : "attacker", plan.attackTargetSlot) : undefined;
-    // Second half of executeAiPlan — the move above already ran, ahead of the
-    // walk animation. Same fallback: if the attack is refused the platoon
-    // still ends its turn, or its slot would never leave the unacted pool.
-    if (plan.attackTargetSlot === null || !attackWithPlatoon(state, aiSide, plan.slotIndex, plan.attackTargetSlot)) {
-      endPlatoonTurn(state, aiSide, plan.slotIndex);
-    }
-    logNewBattleEvents(beforeLog);
-    const landedHits = state.log.length > beforeLog;
-    if (landedHits) {
-      if (struck) impact = { hex: { ...struck.position }, startedAt: performance.now() };
-      spawnDamageFloats(beforeLog);
-      pumpAnimation();
-    }
-    aiActingSlot = null;
-    refresh();
-    if (landedHits && (!(await aiWait(AI_IMPACT_HOLD_MS)) || token !== aiRunToken)) return;
-
-    if (isBattleOver(state)) {
-      finishBattle();
-      return;
-    }
-    // Keep going only while the player has nothing in hand — that tail is how
-    // the AI finishes a round in which it out-numbers the player's remaining
-    // platoons. Otherwise control alternates back after this single beat.
-    if (unactedLivingSlots(state, humanSide).length === 0 && unactedLivingSlots(state, aiSide).length > 0) {
-      if (!(await aiWait(AI_STEP_MS)) || token !== aiRunToken) return;
-      void stepAi();
-      return;
-    }
-    endAiPhase();
-  }
-
-  function advanceAi(): void {
-    if (isBattleOver(state)) {
-      finishBattle();
-      return;
-    }
-    if (unactedLivingSlots(state, aiSide).length === 0) {
-      refresh();
-      return;
-    }
-    aiActing = true;
-    // Paint "AI's Turn" and lock the controls before the first beat lands.
-    refresh();
-    aiTimer = window.setTimeout(() => {
-      aiTimer = null;
-      void stepAi();
-    }, AI_STEP_MS);
-  }
-
-  function finishBattle(): void {
+function finishBattle(): void {
     logMoveStats("battle end");
     const result = finalizeManualBattle(state);
     closeArena();
@@ -1392,7 +1271,7 @@ export function openManualBattleArena(
     }
     // The AI's turn now takes real time, so the board can be mid-change when a
     // click lands. Ignore input until it hands control back.
-    if (aiActing) {
+    if (ai.isActing()) {
       debugLog(`click ${fmtHex(hex)} -> ignored (AI is acting)`);
       return;
     }
@@ -1438,7 +1317,7 @@ export function openManualBattleArena(
           `from ${fmtHex(from)} -> ${platoonLabel(input.getPendingTarget()!.side, input.getPendingTarget()!.slotIndex)}`,
         );
         const beforeLog = state.log.length;
-        if (attackFromHex(state, humanSide, selectedSlot, input.getPendingTarget()!.slotIndex, from)) {
+        if (attackFromSelectedHex(state, humanSide, selectedSlot, input.getPendingTarget()!.slotIndex, from)) {
           if (distance > 0) recordMove(humanSide, selectedSlot, distance);
           logNewBattleEvents(beforeLog);
           afterPlayerAction();
@@ -1455,24 +1334,20 @@ export function openManualBattleArena(
     if (target) {
       debugLog(`click ${fmtHex(hex)} -> attack: ${platoonLabel(humanSide, selectedSlot)} -> ${platoonLabel(target.side, target.slotIndex)}`);
       const beforeLog = state.log.length;
-      attackWithPlatoon(state, humanSide, selectedSlot, target.slotIndex);
+      attackFromTarget(state, humanSide, selectedSlot, target.slotIndex);
       logNewBattleEvents(beforeLog);
       afterPlayerAction();
       return;
     }
 
     if (moveRange.some((h) => h.q === hex.q && h.r === hex.r)) {
-      const actorBefore = getCombatant(state, humanSide, selectedSlot);
-      const from = actorBefore ? { ...actorBefore.position } : hex;
-      const distance = hexDistance(from, hex);
-      const moved = movePlatoon(state, humanSide, selectedSlot, hex);
-      if (moved) {
-        recordMove(humanSide, selectedSlot, distance);
-        const stillActor = getCombatant(state, humanSide, selectedSlot);
-        const remainingSteps = stillActor ? getMovementRange(state, stillActor).length : 0;
+      const result = moveSelectedTo(state, humanSide, selectedSlot, hex);
+      const from = result.from ?? hex;
+      if (result.moved) {
+        recordMove(humanSide, selectedSlot, result.distance);
         debugLog(
           `click ${fmtHex(hex)} -> move ${platoonLabel(humanSide, selectedSlot)}: ${fmtHex(from)} -> ${fmtHex(hex)}`,
-          `(${distance} hex${distance === 1 ? "" : "es"}), movement left: ${remainingSteps > 0 ? `${remainingSteps} hexes reachable` : "none"}`,
+          `(${result.distance} hex${result.distance === 1 ? "" : "es"}), movement left: ${result.remainingSteps > 0 ? `${result.remainingSteps} hexes reachable` : "none"}`,
         );
         logMoveStats(`after ${platoonLabel(humanSide, selectedSlot)} move`);
       } else {
@@ -1535,7 +1410,7 @@ export function openManualBattleArena(
     getAiSide: () => aiSide,
     getHexSize: () => hexSize,
     getSelectedSlot: () => selectedSlot,
-    isAiActing: () => aiActing,
+    isAiActing: () => ai.isActing(),
     isBattleOver: () => isBattleOver(state),
     getCursorTarget: () => canvas,
     draw: () => draw(),
@@ -1562,7 +1437,7 @@ export function openManualBattleArena(
     const over = isBattleOver(state);
     // aiActing wins over the unacted-slot count: with the AI stepped on a
     // timer the player can still have platoons in hand while it's mid-turn.
-    const yours = !over && !aiActing && unactedLivingSlots(state, humanSide).length > 0;
+    const yours = !over && !ai.isActing() && unactedLivingSlots(state, humanSide).length > 0;
     turnEl.textContent = over ? "Battle Over" : yours ? "Your Turn" : "AI's Turn";
     turnEl.style.color = over ? "" : yours ? "#9ecbff" : "#ff9e9e";
   }
@@ -1597,7 +1472,7 @@ export function openManualBattleArena(
     const expandedSlot = hoveredSlot ?? selectedSlot;
 
     const strips = humanCombatants().map((c) => {
-      const selectable = !aiActing && actableSlots.includes(c.slotIndex);
+      const selectable = !ai.isActing() && actableSlots.includes(c.slotIndex);
       const expanded = c.slotIndex === expandedSlot && isAlive(c);
       const strip = buildPlatoonStrip({
         state,
