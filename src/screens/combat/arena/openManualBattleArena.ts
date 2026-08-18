@@ -281,11 +281,6 @@ export function openManualBattleArena(
   let hoveredSlot: number | null = null;
   let moveRange: Axial[] = [];
   let attackTargets: Combatant[] = [];
-  // Hex under the cursor on the battlefield canvas — drives the hex
-  // highlight in draw() and gives the player feedback that the field is
-  // interactive even when nothing is selected (G2). Distinct from
-  // input.ts's pendingTarget/approachChoice, which only track directional
-  // melee targeting and were never meant to be a general pointer indicator.
   let hoveredHex: Axial | null = null;
 
   // Directional melee targeting is owned by the arena/input module — see
@@ -994,11 +989,6 @@ const FLOAT_MS = 800;
       ctx.lineWidth = isAvailable ? 2 : 1;
       ctx.stroke();
 
-      // Subtle highlight on the hex under the cursor (G2). Suppressed while
-      // the AI is acting or the battle is over so the player doesn't get
-      // input feedback during animations they can't act on. Impassable hexes
-      // are kept visually distinct from the highlight; a unit on the hex
-      // still shows its own disk, since that sits inside the hex edges.
       const isHovered =
         !hex.impassable &&
         !ai.isActing() &&
@@ -1318,11 +1308,6 @@ const ai: ArenaAi = createArenaAi({
 function finishBattle(): void {
     logMoveStats("battle end");
     const result = finalizeManualBattle(state);
-    // Show the result card against the still-visible battlefield (G7): the
-    // modal's 60% backdrop dims the arena without hiding it, so the player
-    // can review the final board position and the battle log underneath the
-    // card. closeArena() now runs from the card's Carry On button, after the
-    // player has had a chance to look.
     ai.bumpRunToken();
     ai.clearTimer();
     clearAnimations();
@@ -1497,8 +1482,12 @@ function finishBattle(): void {
     const rect = canvas.getBoundingClientRect();
     const localX = e.clientX - rect.left - offsetX;
     const localY = e.clientY - rect.top - offsetY;
-    input.updateHover(localX, localY);
+    const prevHex = hoveredHex;
     hoveredHex = pixelToAxial(localX, localY, hexSize);
+    input.updateHover(localX, localY);
+    if (hoveredHex !== prevHex && !ai.isActing() && !isBattleOver(state)) {
+      draw();
+    }
   });
 
   canvas.addEventListener("mouseleave", () => {

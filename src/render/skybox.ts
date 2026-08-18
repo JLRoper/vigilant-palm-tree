@@ -1,21 +1,5 @@
-// Skybox asset module. The ONLY file in the painter project allowed to take
-// on the live `cityRenderer.ts`'s module-scope `?url` skybox PNG imports and
-// the `skyboxCache` / `layerCanvasCache` Maps. Lives at `src/render/` (NOT
-// inside `src/render/scene/paint2d/`) so the painter itself stays
-// pure-importable from node:test (Node has no loader for `.png` / `?url`
-// specifiers outside Vite's bundler).
-//
-// See plan/2026-08-17-consolidated-phase-1-5-track-map.md §7.2 and
-// src/render/scene/paint2d/README.md for the boundary contract. The
-// dependency-cruiser rule `paint2d-cannot-import-asset-descriptors` +
-// seam test `test/render/paint2d.seam.test.ts` enforce that.
-//
-// This module is a near-verbatim port of cityRenderer.ts's
-// `ensureSkybox`/`ensureSkyboxLayers`/`splitIntoLayers` logic, lifted into
-// a `createSkyboxProvider()` factory so the live caches become per-instance
-// state (the live module-scope `let`s become a closure). Once the seam is
-// wired into `drawCityView`, the cityRenderer.ts module-scope state can be
-// deleted; the painter consumes just the provider.
+// Skybox asset module. Boundary contract lives in src/render/docs/technical-spec.md
+// and src/render/scene/paint2d/README.md.
 
 import skyboxBaseUrl from "./resources/skybox/cityView-background.png?url";
 import skyboxVariant2Url from "./resources/skybox/cityView-background-variant2.png?url";

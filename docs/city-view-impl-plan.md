@@ -116,7 +116,7 @@ DB: add three JSONB columns to the settlements JSONB blob, defaulting to `[]`. M
 ### Phase 2 — Pick & hover
 
 - [ ] `screenToCell` wired to `mousemove` on the canvas while city view is open.
-- [ ] Hovered cell drawn with a diamond outline (matches existing hover style in `painters/HexHoverPainter.ts`).
+- [ ] Hovered cell drawn with a diamond outline (matches existing hover style in `src/render/painter/HexHoverPainter.ts`).
 - [ ] Out-of-bounds hover clears highlight.
 
 **Done when:** mouse hover highlights exactly the cell under the cursor.

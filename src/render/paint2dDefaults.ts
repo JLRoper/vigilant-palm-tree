@@ -48,9 +48,7 @@ import { SpriteProvider } from "./assets";
 // `createSkyboxProvider` is dynamically imported only when the caller does not
 // supply a `skybox` option. This keeps `paint2dDefaults.ts` importable under
 // node:test without dragging the four `?url` PNG imports (Node has no loader
-// for `.png` / `?url` specifiers outside Vite). The seam test on paint2d/
-// stays clean; the builder's own test supplies a fake `skybox` so the dynamic
-// import never fires.
+// for `.png` / `?url` specifiers outside Vite).
 async function loadCreateSkyboxProvider(): Promise<() => SkyboxProvider> {
   const mod = await import("./skybox");
   return mod.createSkyboxProvider;
