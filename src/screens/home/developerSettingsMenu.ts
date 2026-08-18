@@ -183,6 +183,18 @@ export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
   });
   content.appendChild(devConsoleBtn);
 
+  const networkMapBtn = document.createElement("button");
+  networkMapBtn.textContent = "Network Map";
+  styleButton(networkMapBtn);
+  networkMapBtn.style.alignSelf = "flex-start";
+  networkMapBtn.style.marginTop = "4px";
+  networkMapBtn.title = "Open the live network topology overlay";
+  networkMapBtn.addEventListener("click", () => {
+    modal.close();
+    setTimeout(() => launchView("networkMap"), 100);
+  });
+  content.appendChild(networkMapBtn);
+
   const closeRow = document.createElement("div");
   closeRow.style.display = "flex";
   closeRow.style.justifyContent = "flex-end";
