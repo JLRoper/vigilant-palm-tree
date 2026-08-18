@@ -119,8 +119,8 @@ The arena's `draw()` is currently raw Canvas2D. `battleScene.ts` already produce
 | PR | Title | Status | Depends on |
 |---|---|---|---|
 | **CB-1** | Extract `arena/` subdirectory: `constants`, `layout`, `view`, `input`, `leaveBehind` | ✅ merged (PR #112, 2026-08-17) | — |
-| **CB-2** | Extract `arena/state.ts` (game-state mirror + mutators) + `arena/ai.ts` (timer-driven pacing) | ⬜ ready (unblocked by CB-1 merge) | CB-1 |
-| **CB-3** | `manualBattleArena.ts` shrinks to ≤150-line orchestrator that delegates to `arena/openManualBattleArena.ts`; delete the old inline code | ⬜ blocked on CB-2 | CB-2 |
+| **CB-2** | Extract `arena/state.ts` (game-state mirror + mutators) + `arena/ai.ts` (timer-driven pacing) | ✅ merged (PR #113, 2026-08-17) | CB-1 |
+| **CB-3** | `manualBattleArena.ts` shrinks to ≤150-line orchestrator that delegates to `arena/openManualBattleArena.ts`; delete the old inline code | ⬜ ready (unblocked by CB-2 merge) | CB-2 |
 | **CB-4** | Add `arena/paint.ts` — `SceneNode[]` consumer wired via `paint2d/paintScene()` + `Paint2DDep` (behind a `useSceneBuilder` flag, default false) | 🚫 deferred, blocked on paint2d/ per-kind transcription (5.B P1 #5) | paint2d |
 | **CB-5** | New `test/screens/combat/arena.test.ts` — module-level tests for the seams that aren't exercised by the existing smoke suite | ✅ merged with CB-1 (12 tests, lands in PR #112) | CB-1 (lands first as scaffolding) |
 
