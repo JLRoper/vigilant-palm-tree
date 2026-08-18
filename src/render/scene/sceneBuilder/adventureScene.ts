@@ -13,11 +13,11 @@ import type {
   WorldPoint,
 } from "../types";
 
-// Faithful decomposition of Renderer.draw()'s per-frame "what to draw"
+// Faithful decomposition of MapRenderer.draw()'s per-frame "what to draw"
 // decisions into pure data. Not yet covered: the minimap (its own
 // self-contained secondary view, drawn outside the main camera transform).
 //
-// Takes the same Hero[]/Castle[] wrapper inputs Renderer.draw() takes today
+// Takes the same Hero[]/Castle[] wrapper inputs MapRenderer.draw() takes today
 // rather than raw GameState — see entityMirror.ts for why that mirror isn't
 // replaced yet.
 

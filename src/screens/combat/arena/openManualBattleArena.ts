@@ -281,6 +281,7 @@ export function openManualBattleArena(
   let hoveredSlot: number | null = null;
   let moveRange: Axial[] = [];
   let attackTargets: Combatant[] = [];
+  let hoveredHex: Axial | null = null;
 
   // Directional melee targeting is owned by the arena/input module — see
   // createArenaInput below. The latch survives the cursor leaving the enemy
@@ -987,6 +988,21 @@ const FLOAT_MS = 800;
       ctx.strokeStyle = isAvailable ? "rgba(255,214,102,0.9)" : "rgba(255,255,255,0.08)";
       ctx.lineWidth = isAvailable ? 2 : 1;
       ctx.stroke();
+
+      const isHovered =
+        !hex.impassable &&
+        !ai.isActing() &&
+        !isBattleOver(state) &&
+        hoveredHex !== null &&
+        hoveredHex.q === hex.q &&
+        hoveredHex.r === hex.r;
+      if (isHovered) {
+        ctx.fillStyle = "rgba(180,220,255,0.12)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(180,220,255,0.85)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     }
 
     for (const t of attackTargets) {
@@ -1292,12 +1308,20 @@ const ai: ArenaAi = createArenaAi({
 function finishBattle(): void {
     logMoveStats("battle end");
     const result = finalizeManualBattle(state);
-    closeArena();
+    ai.bumpRunToken();
+    ai.clearTimer();
+    clearAnimations();
+    selectedSlot = null;
+    moveRange = [];
+    attackTargets = [];
+    input.clearPendingAttack();
+    infoPopup.hide();
+    refresh();
     showBattleResultCard({
       result,
       attackerLabel: humanSide === "attacker" ? "You" : "AI Opponent",
       defenderLabel: humanSide === "defender" ? "You" : "AI Opponent",
-      onCarryOn: () => {},
+      onCarryOn: () => { closeArena(); },
     });
   }
 
@@ -1456,14 +1480,22 @@ function finishBattle(): void {
 
   canvas.addEventListener("mousemove", (e) => {
     const rect = canvas.getBoundingClientRect();
-    input.updateHover(e.clientX - rect.left - offsetX, e.clientY - rect.top - offsetY);
+    const localX = e.clientX - rect.left - offsetX;
+    const localY = e.clientY - rect.top - offsetY;
+    const prevHex = hoveredHex;
+    hoveredHex = pixelToAxial(localX, localY, hexSize);
+    input.updateHover(localX, localY);
+    if (hoveredHex !== prevHex && !ai.isActing() && !isBattleOver(state)) {
+      draw();
+    }
   });
 
   canvas.addEventListener("mouseleave", () => {
-    if (input.clearPendingAttack()) {
-      canvas.style.cursor = "";
-      draw();
-    }
+    const hadPending = input.clearPendingAttack();
+    const hadHovered = hoveredHex !== null;
+    if (hadPending) canvas.style.cursor = "";
+    hoveredHex = null;
+    if (hadPending || hadHovered) draw();
   });
 
   function renderTopBar(): void {
