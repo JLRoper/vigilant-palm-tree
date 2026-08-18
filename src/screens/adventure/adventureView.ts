@@ -1,7 +1,7 @@
 import { Axial, axialToPixel } from "../../core/hex";
 import { Camera } from "../../render/camera";
 import { GameMap } from "../../map/gameMap";
-import { Renderer } from "../../render/renderer";
+import { MapRenderer } from "../../render/renderer";
 import { Hero } from "../../entities/hero";
 import { findPath, computePathCost, NEIGHBOR_DIRS } from "../../map/pathfinding";
 import type { GameState, HeroId } from "../../state/gameState";
@@ -22,7 +22,7 @@ export interface LastClickDebug {
 
 export interface AdventureViewOptions {
   canvas: HTMLCanvasElement;
-  renderer: Renderer;
+  renderer: MapRenderer;
   map: GameMap;
   camera: Camera;
   minimapCamera: MinimapCamera;

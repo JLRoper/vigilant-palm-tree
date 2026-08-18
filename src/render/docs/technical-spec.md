@@ -258,7 +258,7 @@ Each variant loads from `resources/units/horse/commander-{N}/`:
 
 ### 2.1 Renderer Class
 
-`renderer.ts` exports `Renderer`, the main game-world draw controller.
+`renderer.ts` exports `MapRenderer`, the main game-world draw controller. Internally, `MapRenderer.draw()` is a thin orchestrator that owns only the camera transform (`ctx.save` → `camera.apply` → painter calls → `ctx.restore`) and delegates every paint call to a per-kind class under `painter/` (`BackgroundPainter`, `HexTerrainPainter`, `CharterPainter`, `CastlePainter`, `HexHoverPainter`, `HeroPainter`). The public constructor signature, `draw(...)`, `hoverFromScreen(...)`, and the `map` field are unchanged from the pre-decomposition `Renderer`; callers (`ViewManager.ts`, `adventureView.ts`) were updated in place.
 
 **Constructor** receives the canvas 2D context, the `GameMap`, the `Camera`, and a `SpriteProvider`.
 
