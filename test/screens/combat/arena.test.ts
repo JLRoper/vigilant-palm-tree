@@ -10,6 +10,7 @@ import type { UnitType } from "../../../src/state/units";
 import { fitHexSize, gridExtent, type GridExtent } from "../../../src/screens/combat/arena/layout";
 import { buildPlatoonStrip } from "../../../src/screens/combat/arena/view";
 import { applyLeaveBehind } from "../../../src/screens/combat/arena/leaveBehind";
+import { buildArenaPaint2dDeps, paintSceneForArena, readUseSceneBuilder, PAINT_MODE_QUERY_KEY, PAINT_MODE_SCENEBUILDER } from "../../../src/screens/combat/arena/paint";
 
 // ---- Hand-rolled minimal DOM mock -----------------------------------------
 // The arena modules touch document.createElement / Node.style / addEventListener
@@ -376,4 +377,134 @@ test("applyLeaveBehind: ignores entries for retreated combatants", () => {
   state.attacker[0].retreated = true;
   applyLeaveBehind(state, "attacker", new Map([["0:footman", 2]]));
   assert.equal(state.attacker[0].entries.find((e) => e.unitTypeId === "footman")!.count, 5);
+});
+
+// ---- paint tests ----------------------------------------------------------
+
+test("readUseSceneBuilder: returns false for missing/empty/wrong-value query strings", () => {
+  assert.equal(readUseSceneBuilder(""), false);
+  assert.equal(readUseSceneBuilder("?foo=bar"), false);
+  assert.equal(readUseSceneBuilder(`?${PAINT_MODE_QUERY_KEY}=off`), false);
+  assert.equal(readUseSceneBuilder(`?${PAINT_MODE_QUERY_KEY}=`), false);
+});
+
+test("readUseSceneBuilder: returns true only for ?paint=scenebuilder", () => {
+  assert.equal(readUseSceneBuilder(`?${PAINT_MODE_QUERY_KEY}=${PAINT_MODE_SCENEBUILDER}`), true);
+  assert.equal(readUseSceneBuilder(`?other=1&${PAINT_MODE_QUERY_KEY}=${PAINT_MODE_SCENEBUILDER}`), true);
+});
+
+test("buildArenaPaint2dDeps: returns a well-formed Paint2DDep", () => {
+  const deps = buildArenaPaint2dDeps({
+    fontFamily: "system-ui",
+    attackerAccent: "#3070c0",
+    defenderAccent: "#c04040",
+  });
+  assert.equal(deps.fontFamily, "system-ui");
+  assert.equal(deps.battleAccent("attacker", "ring"), "#3070c0");
+  assert.equal(deps.battleAccent("defender", "select"), "#c04040");
+  assert.equal(deps.battleAccent("attacker", "select"), "#3070c0");
+  assert.equal(deps.colorForOwner(0), "#ffffff");
+  assert.equal(deps.getResourceStyle(), "rune-stone");
+  assert.equal(deps.getSpriteVariant(), 0);
+  assert.equal(deps.getParallaxEnabled(), false);
+  assert.equal(deps.getParallaxLayerCount(), 0);
+  assert.equal(deps.getBgOffsetX(), 0);
+  assert.equal(deps.getBgOffsetY(), 0);
+  assert.equal(deps.getTerritoryBorderWidth(), 1);
+  assert.equal(deps.skybox, null);
+  assert.equal(deps.sprite.resolveSpriteForResource("gold" as never), undefined);
+  assert.equal(deps.sprite.resolveSprite("anything"), undefined);
+  const charter = deps.charterStyle("traveling");
+  assert.equal(charter.stroke, "transparent");
+  assert.equal(charter.lineDash.length, 0);
+  assert.equal(deps.validCharterStyle.fill, "transparent");
+});
+
+test("paintSceneForArena: calls drawFallback exactly once when invoked", () => {
+  // Hand-rolled Canvas2D context mock -- paint2d/ calls many ctx.* methods
+  // for the city/adventure kinds, but the battle-kind painters today are all
+  // no-op stubs so the actual ctx calls are minimal. We just need every
+  // property access to return a callable stub so nothing throws.
+  const ctx = new Proxy({} as Record<string, unknown>, {
+    get(_t, prop) {
+      if (typeof prop === "string") return () => undefined;
+      return undefined;
+    },
+  }) as unknown as CanvasRenderingContext2D;
+
+  const state = makeState();
+  let fallbackCalls = 0;
+  paintSceneForArena({
+    ctx,
+    state,
+    humanSide: "attacker",
+    aiSide: "defender",
+    selectedSlot: null,
+    moveRange: [],
+    attackTargets: [],
+    aiActing: false,
+    aiActingSlot: null,
+    aiTargetHex: null,
+    moveAnim: null,
+    impact: null,
+    floats: [],
+    hexSize: 28,
+    offsetX: 100,
+    offsetY: 100,
+    canvasCssW: 1280,
+    canvasCssH: 720,
+    paint2d: buildArenaPaint2dDeps({
+      fontFamily: "system-ui",
+      attackerAccent: "#3070c0",
+      defenderAccent: "#c04040",
+    }),
+    drawFallback: () => {
+      fallbackCalls += 1;
+    },
+  });
+  assert.equal(fallbackCalls, 1, "drawFallback should run exactly once per invocation");
+});
+
+test("paintSceneForArena: handles an active moveAnim without throwing", () => {
+  const ctx = new Proxy({} as Record<string, unknown>, {
+    get: () => () => undefined,
+  }) as unknown as CanvasRenderingContext2D;
+  const state = makeState();
+  // Use performance.now() so the moveAnim is actually active per
+  // buildBattleScene's check (nowMs - startedAt < durationMs). The
+  // previous test used hard-coded `startedAt: 1000` which is long
+  // since expired by the time the assertion runs, so the active-
+  // moveAnim code path was never actually exercised.
+  paintSceneForArena({
+    ctx,
+    state,
+    humanSide: "attacker",
+    aiSide: "defender",
+    selectedSlot: 0,
+    moveRange: [{ q: 1, r: 0 }, { q: 2, r: 0 }],
+    attackTargets: [],
+    aiActing: false,
+    aiActingSlot: null,
+    aiTargetHex: null,
+    moveAnim: {
+      side: "attacker",
+      slotIndex: 0,
+      path: [{ q: 0, r: 0 }, { q: 1, r: 0 }, { q: 2, r: 0 }],
+      startedAt: performance.now() - 100,
+      durationMs: 5000,
+    },
+    impact: null,
+    floats: [],
+    hexSize: 28,
+    offsetX: 50,
+    offsetY: 50,
+    canvasCssW: 800,
+    canvasCssH: 600,
+    paint2d: buildArenaPaint2dDeps({
+      fontFamily: "system-ui",
+      attackerAccent: "#3070c0",
+      defenderAccent: "#c04040",
+    }),
+    drawFallback: () => undefined,
+  });
 });

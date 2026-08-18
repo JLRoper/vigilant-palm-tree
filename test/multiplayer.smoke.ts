@@ -130,6 +130,60 @@ async function run() {
     });
     assert.equal(badMove.status(), 403, "non-active-player move should be 403");
 
+    // 8. Network Map telemetry round-trip (issue #51). The registry is
+    //    in-memory and per-process, so this exercises the real server the
+    //    test just spawned: an empty game reports only the dedicated-server
+    //    node, a reported sample shows up as a client node with a link
+    //    carrying the RTT the client measured, and a malformed report 400s.
+    const emptyTopo = await ctx.get(`${API_URL}/api/games/${lobbyGameName}/telemetry`);
+    assert.equal(emptyTopo.status(), 200, "GET telemetry should return 200");
+    const empty = (await emptyTopo.json()) as {
+      gameName: string;
+      entities: Array<{ id: string; type: string }>;
+      links: unknown[];
+    };
+    assert.equal(empty.gameName, lobbyGameName, "snapshot should name the game");
+    assert.deepEqual(
+      empty.entities.map((e) => e.type),
+      ["dedicated-server"],
+      "no clients have polled yet, so only the server node should be present",
+    );
+    assert.equal(empty.links.length, 0, "no links before any client reports");
+
+    const report = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/telemetry`, {
+      data: { playerId: 0, label: "Host", rttMs: 37, responseBytes: 4096, ok: true },
+    });
+    assert.equal(report.status(), 204, "telemetry report should return 204");
+
+    const badReport = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/telemetry`, {
+      data: { playerId: 0, label: "Host", rttMs: "fast", responseBytes: 4096, ok: true },
+    });
+    assert.equal(badReport.status(), 400, "malformed telemetry report should be 400");
+
+    // playerId is a numeric seat (PlayerId), not a string -- a stringly
+    // "0" is a different representation and must be rejected rather than
+    // quietly creating a second node for the same player.
+    const stringSeat = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/telemetry`, {
+      data: { playerId: "0", label: "Host", rttMs: 37, responseBytes: 4096, ok: true },
+    });
+    assert.equal(stringSeat.status(), 400, "string playerId should be 400");
+
+    const topoRes = await ctx.get(`${API_URL}/api/games/${lobbyGameName}/telemetry`);
+    const topo = (await topoRes.json()) as {
+      entities: Array<{ id: string; type: string; label: string }>;
+      links: Array<{ fromId: string; toId: string; rttMs: number | null; packetLossPct: number; status: string }>;
+    };
+    const hostNode = topo.entities.find((e) => e.id === "client:0");
+    assert.ok(hostNode, "reporting client should appear as a node");
+    assert.equal(hostNode!.type, "client");
+    assert.equal(hostNode!.label, "Host");
+    assert.equal(topo.links.length, 1, "one client means one link to the server");
+    assert.equal(topo.links[0].fromId, "client:0");
+    assert.equal(topo.links[0].toId, "server");
+    assert.equal(topo.links[0].rttMs, 37, "round-tripped rtt should be the reported measurement");
+    assert.equal(topo.links[0].packetLossPct, 0, "a single ok sample means no poll failures");
+    assert.equal(topo.links[0].status, "healthy");
+
     await ctx.delete(`${API_URL}/api/games/${lobbyGameName}`).catch(() => {});
     console.log(">> multiplayer lobby smoke OK");
   } catch (err) {

@@ -68,7 +68,7 @@ services:
       API_PORT: "3001"
       CLIENT_PORT: "5173"
     healthcheck:
-      test: ["CMD-SHELL", "wget -O /dev/null http://localhost:5173 || exit 1"]
+      test: ["CMD-SHELL", "wget -O /dev/null http://127.0.0.1:5173 || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 5s
