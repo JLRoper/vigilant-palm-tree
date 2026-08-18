@@ -2,6 +2,11 @@
 
 A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. Move a hero across a procedurally generated hex map, claim resource tiles by building settlements on them, accumulate resources per turn, and defend them against enemy heroes.
 
+## Prerequisites
+
+- Node.js 22.x (see `engines` in `package.json`)
+- On Windows: [PowerShell Core](https://github.com/PowerShell/PowerShell) (`pwsh`, not the built-in Windows PowerShell 5.1) — `npm run cleanup` and `npm run dev:status` shell out to it
+
 ## Quick start
 
 ```
@@ -9,6 +14,8 @@ npm install
 npm run dev      # start the client + API server (concurrently)
 npm test         # run the smoke test
 ```
+
+`npm install`'s `postinstall` step also installs Playwright's Chromium binary, which `npm test` needs.
 
 `npm test` boots the API and a headless browser, plays through movement / capture / battle / transfer / trade / economy flows, and asserts on the resulting state and HUD.
 

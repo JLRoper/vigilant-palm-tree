@@ -3,8 +3,12 @@
   "private": true,
   "version": "0.3.0",
   "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "workspaces": ["packages/*"],
   "scripts": {
+    "postinstall": "node -e \"require.resolve('playwright')\" && playwright install chromium || true",
     "cleanup": "pwsh scripts/cleanup.ps1",
     "predev": "tsx scripts/allocate-ports.ts",
     "dev": "concurrently -n web,api -c green,cyan \"vite\" \"tsx watch --env-file=.env server/index.ts\"",
