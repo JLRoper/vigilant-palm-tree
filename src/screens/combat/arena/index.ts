@@ -1,1 +1,1 @@
-export {};
+export { openManualBattleArena } from "./openManualBattleArena";
