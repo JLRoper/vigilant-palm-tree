@@ -420,7 +420,7 @@ test("buildArenaPaint2dDeps: returns a well-formed Paint2DDep", () => {
   assert.equal(deps.validCharterStyle.fill, "transparent");
 });
 
-test("paintSceneForArena: calls drawFallback exactly once after building the scene", () => {
+test("paintSceneForArena: calls drawFallback exactly once when invoked", () => {
   // Hand-rolled Canvas2D context mock -- paint2d/ calls many ctx.* methods
   // for the city/adventure kinds, but the battle-kind painters today are all
   // no-op stubs so the actual ctx calls are minimal. We just need every
@@ -462,7 +462,7 @@ test("paintSceneForArena: calls drawFallback exactly once after building the sce
       fallbackCalls += 1;
     },
   });
-  assert.equal(fallbackCalls, 1, "drawFallback should run exactly once after paintScene()");
+  assert.equal(fallbackCalls, 1, "drawFallback should run exactly once per invocation");
 });
 
 test("paintSceneForArena: handles an active moveAnim without throwing", () => {
