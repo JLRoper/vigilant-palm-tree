@@ -532,7 +532,10 @@ export class AdventureView {
       if (bestPath && bestPath.length > 0) {
         const reachableIdx = computeReachableSplit(bestPath, this.opts.map, startTile.movementRemaining);
         const clamped = reachableIdx < bestPath.length;
-        const actualCost = computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...bestPath.slice(0, reachableIdx)]);
+        const actualCost = Math.min(
+          computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...bestPath.slice(0, reachableIdx)]),
+          startTile.movementRemaining,
+        );
         if (reachableIdx > 0) {
           const dest = bestPath[reachableIdx - 1];
           const tc = this.opts.getTurnController();
@@ -589,7 +592,10 @@ export class AdventureView {
     }
     const reachableIdx = computeReachableSplit(newPath, this.opts.map, startTile.movementRemaining);
     const clamped = reachableIdx < newPath.length;
-    const actualCost = computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...newPath.slice(0, reachableIdx)]);
+    const actualCost = Math.min(
+      computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...newPath.slice(0, reachableIdx)]),
+      startTile.movementRemaining,
+    );
     if (reachableIdx === 0) {
       this.lastClickDebug.reason = "impassable first step";
       return;
