@@ -12,9 +12,18 @@ import {
   captureSettlement,
   CommandError,
   startCharter,
+  upgradeBuilding,
+  upgradeSettlement,
 } from "../io/commands";
 import type { EndTurnResult } from "../io/commands";
-import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource } from "@heroes/contracts";
+import type {
+  BuildingUpgradeRequest,
+  GameState,
+  HeroId,
+  SettlementId,
+  TransferDirection,
+  WarehouseResource,
+} from "@heroes/contracts";
 import type { TurnControllerHooks } from "../state/turnController";
 import type { BattleResult } from "@heroes/engine";
 import { pickAiMove as pickAiMoveBrain } from "../ai/aiBrain";
@@ -257,6 +266,32 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await startCharter(name, { actor, heroId, targetQ, targetR, settlementName });
       } catch (e) {
         reportCommandFailure("Start charter", e);
+      }
+    },
+    onUpgradeBuilding: async (
+      actor: number,
+      settlementId: SettlementId,
+      requests: BuildingUpgradeRequest[],
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await upgradeBuilding(name, { actor, settlementId, requests });
+      } catch (e) {
+        reportCommandFailure("Upgrade building", e);
+      }
+    },
+    onUpgradeSettlement: async (
+      actor: number,
+      settlementId: SettlementId,
+      upgradePopulationGate: number,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await upgradeSettlement(name, { actor, settlementId, upgradePopulationGate });
+      } catch (e) {
+        reportCommandFailure("Upgrade settlement", e);
       }
     },
     pickAiMove: (state: GameState, heroId: HeroId) => {

@@ -71,7 +71,12 @@ function renderSideResults(title: string, results: CombatantResult[]): HTMLEleme
 }
 
 export function showBattleResultCard(opts: BattleResultCardOptions): void {
-  const modal = openCenteredModal(document.body, "Battle Results", 480);
+  const modal = openCenteredModal(document.body, "Battle Results", 480, false, false);
+
+  modal.setOnClose(() => {
+    modal.root.parentElement?.remove();
+    opts.onCarryOn();
+  });
 
   const banner = document.createElement("div");
   const winnerText =
@@ -113,7 +118,6 @@ export function showBattleResultCard(opts: BattleResultCardOptions): void {
   styleButton(carryOnBtn, true);
   carryOnBtn.addEventListener("click", () => {
     modal.close();
-    opts.onCarryOn();
   });
   row.appendChild(carryOnBtn);
   modal.appendContent(row);

@@ -1,4 +1,11 @@
 import { PopupMenu, menuTheme } from "@screens/shared/menu";
+import {
+  attachDockControl,
+  getPanelRail,
+  mountPanel,
+  savePanelPosition,
+  toolbarHeight,
+} from "@screens/shared/panelRail";
 import type { GameState, SettlementId, SettlementState } from "../../state/gameState";
 import { SETTLEMENT_BANNERS } from "../../render/assetDescriptors";
 
@@ -18,13 +25,14 @@ export class SettlementRosterMenu {
     this.opts = opts;
 
     this.menu = new PopupMenu({
-      parent: document.body,
+      parent: getPanelRail(),
       title: "Settlements",
-      initialPosition: { x: 260, y: 220 },
       width: 280,
       closeable: true,
       draggable: true,
       zIndex: 60,
+      minTop: toolbarHeight,
+      onMove: (pos) => savePanelPosition("settlements", pos),
       onClose: () => {
         this.visible = false;
       },
@@ -38,20 +46,20 @@ export class SettlementRosterMenu {
       display: "flex",
       flexDirection: "column",
       gap: "6px",
-      maxHeight: "360px",
+      flex: "1 1 auto",
+      minHeight: "0",
       overflowY: "auto",
     });
 
     this.menu.setContent(this.content);
     this.menu.root.style.display = "none";
+    attachDockControl(this.menu, "settlements");
   }
 
   show(state: GameState): void {
     if (!this.visible) {
-      if (!this.menu.root.parentNode) {
-        document.body.appendChild(this.menu.root);
-      }
-      this.menu.root.style.display = "";
+      mountPanel(this.menu, "settlements");
+      this.menu.root.style.display = "flex";
       this.visible = true;
     }
     this.update(state);

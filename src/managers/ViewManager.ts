@@ -1,5 +1,5 @@
 import { Camera } from "../render/camera";
-import { Renderer } from "../render/renderer";
+import { MapRenderer } from "../render/renderer";
 import type { RenderOptions } from "../render/renderTypes";
 import { MinimapCamera } from "../render/minimap";
 import { GameMap } from "../map/gameMap";
@@ -14,7 +14,7 @@ import type { CharterState } from "../state/gameState";
 export class ViewManager {
   public camera = new Camera();
   public minimapCamera!: MinimapCamera;
-  public renderer!: Renderer;
+  public mapRenderer!: MapRenderer;
   public view!: AdventureView;
   private ctx!: CanvasRenderingContext2D;
 
@@ -27,7 +27,7 @@ export class ViewManager {
     } else {
       this.minimapCamera = new MinimapCamera(map);
     }
-    this.renderer = new Renderer(this.ctx, map, this.camera, this.spriteProvider, this.minimapCamera);
+    this.mapRenderer = new MapRenderer(this.ctx, map, this.camera, this.spriteProvider, this.minimapCamera);
   }
 
   initializeAdventureView(
@@ -38,8 +38,8 @@ export class ViewManager {
     }
     this.view = new AdventureView({
       canvas: this.canvas,
-      renderer: this.renderer,
-      map: this.renderer.map,
+      renderer: this.mapRenderer,
+      map: this.mapRenderer.map,
       camera: this.camera,
       minimapCamera: this.minimapCamera,
       onPathChanged: () => {},
@@ -48,7 +48,7 @@ export class ViewManager {
   }
 
   updateMap(map: GameMap): void {
-    if (this.renderer) this.renderer.map = map;
+    if (this.mapRenderer) this.mapRenderer.map = map;
     if (this.view) this.view.setMap(map);
     if (this.minimapCamera) this.minimapCamera.reset(map);
   }
@@ -62,9 +62,9 @@ export class ViewManager {
     activeCharters?: readonly CharterState[],
     validCharterHexes?: Set<string> | null,
   ): void {
-    if (!this.renderer) return;
+    if (!this.mapRenderer) return;
     const fullOpts: RenderOptions = { ...opts, activeCharters, validCharterHexes };
-    this.renderer.draw(hover, heroes, path, castles, fullOpts);
+    this.mapRenderer.draw(hover, heroes, path, castles, fullOpts);
   }
 
   drawCityOverlay(cityView: CityView | undefined): void {
@@ -96,6 +96,6 @@ export class ViewManager {
   }
 
   hoverFromScreen(x: number, y: number): Axial | null {
-    return this.renderer?.hoverFromScreen(x, y) ?? null;
+    return this.mapRenderer?.hoverFromScreen(x, y) ?? null;
   }
 }

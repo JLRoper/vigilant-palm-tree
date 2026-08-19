@@ -4,6 +4,7 @@ import { TERRAIN_COLORS } from "../map/terrain";
 import { drawMinimapPath } from "./overlays/pathOverlay";
 import { isVisible } from "./fog";
 import type { Axial } from "../core/hex";
+import { Camera, getViewportAxialCorners } from "./camera";
 import { MinimapCamera } from "./minimapCamera";
 import type { MinimapGeometry } from "./renderTypes";
 
@@ -27,9 +28,13 @@ interface MinimapRenderOptions {
   colorForOwner: (ownerId: number | null) => string;
 }
 
+function minimapPixelHeight(mapWidth: number, mapHeight: number): number {
+  return (mapHeight / mapWidth) * MINIMAP_WIDTH;
+}
+
 export function getMinimapGeometry(map: GameMap): MinimapGeometry {
   const w = MINIMAP_WIDTH;
-  const h = (map.height / map.width) * w;
+  const h = minimapPixelHeight(map.width, map.height);
   const x0 = window.innerWidth - w - MINIMAP_PAD;
   const y0 = window.innerHeight - h - MINIMAP_PAD;
   return {
@@ -43,6 +48,15 @@ export function getMinimapGeometry(map: GameMap): MinimapGeometry {
   };
 }
 
+// Total vertical footprint of the minimap block measured from the window's
+// bottom edge -- MINIMAP_PAD's own gap, plus the minimap height, plus the 4px
+// the drawn box extends past it (see boxY/boxH in drawMinimap below). UI
+// overlays (the panel rail) reserve exactly this much space so they never
+// draw over the minimap.
+export function getMinimapReserveHeight(mapWidth: number, mapHeight: number): number {
+  return MINIMAP_PAD + minimapPixelHeight(mapWidth, mapHeight) + 4;
+}
+
 export function isPointInMinimap(x: number, y: number, geo: MinimapGeometry): boolean {
   return (
     x >= geo.x0 - HIT_PAD &&
@@ -50,6 +64,57 @@ export function isPointInMinimap(x: number, y: number, geo: MinimapGeometry): bo
     y >= geo.y0 - HIT_PAD &&
     y <= geo.y0 + geo.h + HIT_PAD
   );
+}
+
+// Screen-space corners (in the minimap's *unrotated* local coordinate system
+// used by MinimapCamera.worldToScreen) of the main camera's visible viewport.
+// Suitable for drawing directly inside drawMinimap's rotated ctx block, which
+// applies the minimap's own rotation for free.
+export function getFovFrameLocalPoints(
+  camera: Camera,
+  minimapCamera: MinimapCamera,
+  geo: MinimapGeometry,
+  screenWidth: number,
+  screenHeight: number,
+): { x: number; y: number }[] {
+  const corners = getViewportAxialCorners(camera, screenWidth, screenHeight);
+  return corners.map(({ q, r }) => minimapCamera.worldToScreen(q, r, geo));
+}
+
+function rotateAroundPoint(x: number, y: number, cx: number, cy: number, angle: number): { x: number; y: number } {
+  const dx = x - cx;
+  const dy = y - cy;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+}
+
+// Same frame, but rotated into real (unrotated) mouse-event screen space —
+// i.e. what MinimapCamera.screenToWorld expects as input. Use this for drag
+// hit-testing so it agrees with what getFovFrameLocalPoints draws.
+export function getFovFrameScreenPolygon(
+  camera: Camera,
+  minimapCamera: MinimapCamera,
+  geo: MinimapGeometry,
+  screenWidth: number,
+  screenHeight: number,
+): { x: number; y: number }[] {
+  const local = getFovFrameLocalPoints(camera, minimapCamera, geo, screenWidth, screenHeight);
+  return local.map((p) => rotateAroundPoint(p.x, p.y, geo.centerX, geo.centerY, minimapCamera.rotation));
+}
+
+// Standard even-odd point-in-polygon test (ray casting).
+export function isPointInPolygon(x: number, y: number, poly: { x: number; y: number }[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x;
+    const yi = poly[i].y;
+    const xj = poly[j].x;
+    const yj = poly[j].y;
+    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
 function drawNorthIndicator(ctx: CanvasRenderingContext2D, geo: MinimapGeometry, rotation: number): void {
@@ -129,6 +194,7 @@ function drawMistCell(
 export function drawMinimap(
   ctx: CanvasRenderingContext2D,
   map: GameMap,
+  camera: Camera,
   minimapCamera: MinimapCamera,
   heroes: Hero[],
   path: Axial[],
@@ -209,6 +275,17 @@ export function drawMinimap(
     ctx.fillStyle = opts.colorForOwner(hero.ownerId);
     ctx.fillRect(x - half - 1, y - half - 1, cellSize + 2, cellSize + 2);
   }
+
+  const fovPoints = getFovFrameLocalPoints(camera, minimapCamera, geo, window.innerWidth, window.innerHeight);
+  ctx.beginPath();
+  ctx.moveTo(fovPoints[0].x, fovPoints[0].y);
+  for (let i = 1; i < fovPoints.length; i++) ctx.lineTo(fovPoints[i].x, fovPoints[i].y);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(255, 204, 0, 0.1)";
+  ctx.fill();
+  ctx.strokeStyle = "#ffcc00";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
 
   ctx.restore();
 

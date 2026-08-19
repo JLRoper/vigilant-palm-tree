@@ -63,6 +63,10 @@ export function styleInput(input: HTMLInputElement): void {
 /** Gap kept between a panel edge and the viewport edge, in px. */
 const VIEWPORT_MARGIN = 24;
 
+const FLOATING_MAX_HEIGHT = `calc(100vh - ${VIEWPORT_MARGIN * 2}px)`;
+
+export type MenuLayout = "docked" | "floating";
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -77,6 +81,7 @@ export interface PopupMenuOptions {
   zIndex?: number;
   onClose?: () => void;
   onMove?: (pos: { x: number; y: number }) => void;
+  minTop?: () => number;
 }
 
 export class PopupMenu {
@@ -84,7 +89,9 @@ export class PopupMenu {
   readonly header: HTMLDivElement;
   readonly titleEl: HTMLDivElement;
   readonly body: HTMLDivElement;
+  readonly actions: HTMLDivElement;
 
+  private layout: MenuLayout = "floating";
   private closeBtn: HTMLButtonElement | null = null;
   private draggable: boolean;
   private dragOffset: { dx: number; dy: number } | null = null;
@@ -105,7 +112,7 @@ export class PopupMenu {
       // Column layout so the header stays pinned and only the body scrolls.
       display: "flex",
       flexDirection: "column",
-      maxHeight: `calc(100vh - ${VIEWPORT_MARGIN * 2}px)`,
+      maxHeight: FLOATING_MAX_HEIGHT,
       background: menuTheme.panel.background,
       color: menuTheme.panel.color,
       border: menuTheme.panel.border,
@@ -143,6 +150,15 @@ export class PopupMenu {
     this.titleEl.textContent = opts.title;
     this.header.appendChild(this.titleEl);
 
+    this.actions = document.createElement("div");
+    Object.assign(this.actions.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "2px",
+      flexShrink: "0",
+    });
+    this.header.appendChild(this.actions);
+
     if (opts.closeable ?? true) {
       this.closeBtn = document.createElement("button");
       this.closeBtn.textContent = "×";
@@ -160,7 +176,7 @@ export class PopupMenu {
         e.stopPropagation();
         this.close();
       });
-      this.header.appendChild(this.closeBtn);
+      this.actions.appendChild(this.closeBtn);
     }
 
     this.body = document.createElement("div");
@@ -207,6 +223,68 @@ export class PopupMenu {
     this.body.replaceChildren();
   }
 
+  addHeaderAction(label: string, title: string, onClick: () => void): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    btn.title = title;
+    Object.assign(btn.style, {
+      background: "transparent",
+      color: "rgba(255,255,255,0.7)",
+      border: "none",
+      fontSize: "13px",
+      lineHeight: "1",
+      padding: "0 4px",
+      cursor: "pointer",
+      fontFamily: menuTheme.font,
+    });
+    btn.addEventListener("mousedown", (e) => e.stopPropagation());
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onClick();
+    });
+    this.actions.insertBefore(btn, this.closeBtn);
+    return btn;
+  }
+
+  setLayout(mode: MenuLayout): void {
+    this.layout = mode;
+    if (mode === "docked") {
+      Object.assign(this.root.style, {
+        position: "static",
+        left: "",
+        top: "",
+        width: "100%",
+        // Capped, not stretched: a lone open panel should size to its
+        // content rather than fill the whole rail, and two open panels
+        // should split it evenly. -4px is half of panelRail.ts's RAIL_GAP
+        // (8px) so two capped panels plus the gap between them sum to
+        // exactly 100% instead of overflowing the rail by the gap amount.
+        maxHeight: "calc(50% - 4px)",
+        flex: "0 1 auto",
+        minHeight: "0",
+      });
+      this.setDraggable(false);
+      return;
+    }
+    Object.assign(this.root.style, {
+      position: "absolute",
+      maxHeight: FLOATING_MAX_HEIGHT,
+      flex: "",
+      minHeight: "",
+      width: this.opts.width === undefined
+        ? ""
+        : typeof this.opts.width === "number"
+          ? `${this.opts.width}px`
+          : this.opts.width,
+    });
+    this.setPosition(this.pos.x, this.pos.y);
+    this.setDraggable(this.opts.draggable ?? true);
+  }
+
+  getLayout(): MenuLayout {
+    return this.layout;
+  }
+
   setPosition(x: number, y: number): void {
     this.pos = { x, y };
     this.root.style.left = `${x}px`;
@@ -233,6 +311,7 @@ export class PopupMenu {
 
   private attachDrag(): void {
     const onDown = (e: MouseEvent) => {
+      if (!this.draggable) return;
       if (e.button !== 0) return;
       if (this.closeBtn && e.target === this.closeBtn) return;
       e.preventDefault();
@@ -252,8 +331,9 @@ export class PopupMenu {
         if (!this.dragOffset) return;
         // Clamp both edges so a panel can never be dragged out of reach.
         const { width, height } = this.root.getBoundingClientRect();
+        const minY = this.opts.minTop?.() ?? 0;
         const x = clamp(ev.clientX - this.dragOffset.dx, 0, Math.max(0, window.innerWidth - width));
-        const y = clamp(ev.clientY - this.dragOffset.dy, 0, Math.max(0, window.innerHeight - height));
+        const y = clamp(ev.clientY - this.dragOffset.dy, minY, Math.max(minY, window.innerHeight - height));
         this.setPosition(x, y);
         this.opts.onMove?.({ x, y });
       };
@@ -269,11 +349,21 @@ export class PopupMenu {
   }
 }
 
+export function clampMenuIntoView(menu: PopupMenu, minTop = 0): void {
+  if (menu.root.style.position !== "absolute") return;
+  const rect = menu.root.getBoundingClientRect();
+  const pos = menu.getPosition();
+  const x = clamp(pos.x, 0, Math.max(0, window.innerWidth - rect.width));
+  const y = clamp(pos.y, minTop, Math.max(minTop, window.innerHeight - rect.height));
+  if (x !== pos.x || y !== pos.y) menu.setPosition(x, y);
+}
+
 export function openCenteredModal(
   parent: HTMLElement,
   title: string,
   width = 360,
   draggable = false,
+  closeable = true,
 ): PopupMenu {
   const wrapper = document.createElement("div");
   Object.assign(wrapper.style, {
@@ -295,6 +385,7 @@ export function openCenteredModal(
     title,
     width,
     draggable,
+    closeable,
     onClose: () => {
       window.removeEventListener("resize", clampIntoView);
       wrapper.remove();
@@ -315,12 +406,7 @@ export function openCenteredModal(
   // Only relevant once a drag has switched the panel to absolute positioning:
   // a later window resize could otherwise strand it off screen.
   function clampIntoView(): void {
-    if (menu.root.style.position !== "absolute") return;
-    const rect = menu.root.getBoundingClientRect();
-    const pos = menu.getPosition();
-    const x = clamp(pos.x, 0, Math.max(0, window.innerWidth - rect.width));
-    const y = clamp(pos.y, 0, Math.max(0, window.innerHeight - rect.height));
-    if (x !== pos.x || y !== pos.y) menu.setPosition(x, y);
+    clampMenuIntoView(menu);
   }
 
   window.addEventListener("resize", clampIntoView);

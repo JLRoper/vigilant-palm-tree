@@ -91,6 +91,10 @@ export interface TurnControllerHooks {
     targetR: number,
     settlementName: string,
   ): Promise<void>;
+  // plan/2026-08-17-issue-88-remaining-command-ports.md Tracks 1/2: same
+  // fire-and-forget shape as the rest of this block.
+  onUpgradeBuilding(actor: number, settlementId: SettlementId, requests: BuildingUpgradeRequest[]): Promise<void>;
+  onUpgradeSettlement(actor: number, settlementId: SettlementId, upgradePopulationGate: number): Promise<void>;
 }
 
 export class TurnController {
@@ -98,6 +102,16 @@ export class TurnController {
   private readonly hooks: TurnControllerHooks;
   private aiAwaitingPersist = false;
   private aiEnding = false;
+  // #114 / plan/2026-08-17-issue-88-remaining-command-ports.md §"Race-avoidance
+  // requirement": the fire-and-forget hook calls below (onRecruitHero,
+  // onUpgradeTownHall, etc.) have no barrier against End Turn racing ahead of
+  // them -- act, then immediately end turn, and the server can hydrate
+  // EndTurn's response from a row that doesn't yet reflect the still-in-flight
+  // mutation, silently discarding it. trackCommand registers each hook
+  // promise here; endCurrentTurn() drains this set before calling
+  // onHumanTurnEnd so a command already in flight is guaranteed to land
+  // server-side first.
+  private readonly pendingCommands = new Set<Promise<void>>();
 
   constructor(initial: GameState, hooks: TurnControllerHooks) {
     this.state = initial;
@@ -106,6 +120,18 @@ export class TurnController {
 
   getState(): GameState {
     return this.state;
+  }
+
+  private trackCommand(promise: Promise<void>, label: string): void {
+    const tracked = promise.catch((e) => {
+      console.warn(`[turnController] ${label} failed:`, e);
+    });
+    this.pendingCommands.add(tracked);
+    void tracked.finally(() => this.pendingCommands.delete(tracked));
+  }
+
+  private async drainPendingCommands(): Promise<void> {
+    await Promise.all(this.pendingCommands);
   }
 
   selectHero(heroId: HeroId): void {
@@ -151,9 +177,7 @@ export class TurnController {
     if (defenderId) {
       this.enterBattle(heroId, defenderId);
     }
-    void this.hooks.onHumanMove(this.state, heroId, toTile, cost).catch((e) => {
-      console.warn("[turnController] onHumanMove failed:", e);
-    });
+    this.trackCommand(this.hooks.onHumanMove(this.state, heroId, toTile, cost), "onHumanMove");
     return true;
   }
 
@@ -185,9 +209,7 @@ export class TurnController {
       },
     });
     const actor = this.state.heroes[heroId]?.ownerId ?? this.state.activePlayerId;
-    void this.hooks.onCaptureSettlement(actor, heroId, settlementId).catch((e) => {
-      console.warn("[turnController] onCaptureSettlement failed:", e);
-    });
+    this.trackCommand(this.hooks.onCaptureSettlement(actor, heroId, settlementId), "onCaptureSettlement");
     return true;
   }
 
@@ -218,9 +240,7 @@ export class TurnController {
       payload: { heroId, settlementId, direction, amount },
     });
     const actor = this.state.heroes[heroId]?.ownerId ?? this.state.activePlayerId;
-    void this.hooks.onTransferGold(actor, heroId, settlementId, direction).catch((e) => {
-      console.warn("[turnController] onTransferGold failed:", e);
-    });
+    this.trackCommand(this.hooks.onTransferGold(actor, heroId, settlementId, direction), "onTransferGold");
     return { ok: true, reason: "" };
   }
 
@@ -239,9 +259,10 @@ export class TurnController {
       type: "resources_traded",
       payload: { fromId, toId, resource, amount },
     });
-    void this.hooks.onTradeResources(this.state.activePlayerId, fromId, toId, resource, amount).catch((e) => {
-      console.warn("[turnController] onTradeResources failed:", e);
-    });
+    this.trackCommand(
+      this.hooks.onTradeResources(this.state.activePlayerId, fromId, toId, resource, amount),
+      "onTradeResources",
+    );
     return { ok: true, reason: "" };
   }
 
@@ -258,9 +279,7 @@ export class TurnController {
       payload: { heroId, fromIdx, toIdx },
     });
     const actor = this.state.heroes[heroId]?.ownerId ?? this.state.activePlayerId;
-    void this.hooks.onReorderStack(actor, heroId, fromIdx, toIdx).catch((e) => {
-      console.warn("[turnController] onReorderStack failed:", e);
-    });
+    this.trackCommand(this.hooks.onReorderStack(actor, heroId, fromIdx, toIdx), "onReorderStack");
     return { ok: true, reason: "" };
   }
 
@@ -275,9 +294,10 @@ export class TurnController {
       type: "auto_trade_toggled",
       payload: { settlementId, autoTrade },
     });
-    void this.hooks.onSetAutoTrade(this.state.activePlayerId, settlementId, autoTrade).catch((e) => {
-      console.warn("[turnController] onSetAutoTrade failed:", e);
-    });
+    this.trackCommand(
+      this.hooks.onSetAutoTrade(this.state.activePlayerId, settlementId, autoTrade),
+      "onSetAutoTrade",
+    );
     return true;
   }
 
@@ -289,9 +309,10 @@ export class TurnController {
         type: "hero_recruited",
         payload: { heroId: result.hero.id, name: heroName, playerId: this.state.activePlayerId },
       });
-      void this.hooks.onRecruitHero(this.state.activePlayerId, heroName, settlementId, horseVariant).catch((e) => {
-        console.warn("[turnController] onRecruitHero failed:", e);
-      });
+      this.trackCommand(
+        this.hooks.onRecruitHero(this.state.activePlayerId, heroName, settlementId, horseVariant),
+        "onRecruitHero",
+      );
     }
     return result;
   }
@@ -344,9 +365,10 @@ export class TurnController {
       payload: { heroId, targetQ, targetR, settlementName, charterId: payload.charterId },
     });
 
-    void this.hooks.onStartCharter(this.state.activePlayerId, heroId, targetQ, targetR, settlementName).catch((e) => {
-      console.warn("[turnController] onStartCharter failed:", e);
-    });
+    this.trackCommand(
+      this.hooks.onStartCharter(this.state.activePlayerId, heroId, targetQ, targetR, settlementName),
+      "onStartCharter",
+    );
 
     this.advanceAutoTravel();
     return { ok: true };
@@ -461,6 +483,14 @@ export class TurnController {
       const oldPhase = this.state.phase.kind;
       const stateBeforeEnd = this.state;
 
+      // Drain any still-in-flight command promises (recruit, upgrades,
+      // captures, etc.) before asking the server to end the turn -- closes
+      // the race described on this.pendingCommands's own declaration
+      // comment above. Commands rejected here already warned via
+      // trackCommand's own .catch; this only waits for them to settle, it
+      // doesn't re-surface their errors.
+      await this.drainPendingCommands();
+
       // Server is now fully authoritative for the whole end-turn pipeline
       // (production/auto-trade/consumption, the next-player-or-round-wrap
       // phase transition, and -- when wrapping -- settlement upgrades and
@@ -522,9 +552,10 @@ export class TurnController {
       type: "town_hall_upgrade_started",
       payload: { settlementId, targetLevel },
     });
-    void this.hooks.onUpgradeTownHall(this.state.activePlayerId, settlementId, targetLevel).catch((e) => {
-      console.warn("[turnController] onUpgradeTownHall failed:", e);
-    });
+    this.trackCommand(
+      this.hooks.onUpgradeTownHall(this.state.activePlayerId, settlementId, targetLevel),
+      "onUpgradeTownHall",
+    );
     return { ok: true, reason: "" };
   }
 
@@ -536,6 +567,10 @@ export class TurnController {
       type: "building_upgrade_started",
       payload: { settlementId, requests },
     });
+    this.trackCommand(
+      this.hooks.onUpgradeBuilding(this.state.activePlayerId, settlementId, requests),
+      "onUpgradeBuilding",
+    );
     return { ok: true, reason: "" };
   }
 
@@ -568,6 +603,10 @@ export class TurnController {
       type: "settlement_upgrade_started",
       payload: { settlementId, targetLevel },
     });
+    this.trackCommand(
+      this.hooks.onUpgradeSettlement(this.state.activePlayerId, settlementId, settings().upgradePopulationGate),
+      "onUpgradeSettlement",
+    );
     return { ok: true, reason: "" };
   }
 

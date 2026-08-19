@@ -6,8 +6,10 @@ positioning matters), **battlefield-first** (rosters collapse to strips, detail 
 demand), scoped to **layout/UX only** — no combat-engine changes.
 
 **Status:** Stage 1 shipped. Stage 2 (straighten the grid) and G1 (visible AI) approved
-and implemented, along with defects D1–D3. Stage 3 (small viewports) and Stage 4 (docs)
-still open, as are gaps G2–G8.
+and implemented, along with defects D1–D3. G2 (hex under-cursor highlight) and G7
+(keep the battlefield alive behind the result card) implemented post-decomp in
+`src/screens/combat/arena/openManualBattleArena.ts` — see the gap notes below. Stage
+3 (small viewports) and Stage 4 (docs) still open, as are gaps G3, G4, G5, G6, G8.
 
 **Branch:** `claude/fight-screen-design-532553` — committed as `667f463`, open as
 [PR #19](https://github.com/Millerfly91/vigilant-palm-tree/pull/19).
@@ -106,7 +108,7 @@ displayed). Verifiable by sampling the canvas for that colour.
 
 ---
 
-## Review findings (2026-08-12) — D1–D3 and G1 ✅ done, G2–G8 ⬜ open
+## Review findings (2026-08-12) — D1–D3 ✅ done; G1 ✅ done; G2, G7 ✅ done; G3–G6, G8 ⬜ open
 
 Code-level audit of what Stage 1 shipped. The browser tooling was unavailable for this
 pass, so these are read from source, not observed live — the three defects are reasoned
@@ -157,10 +159,17 @@ suppressed while the AI moves so the only thing lit is the platoon actually movi
 turn chip reads "AI's Turn" even when you still hold unacted platoons. `closeArena()`
 cancels any pending beat so a timer can't fire against a detached overlay.
 
-**G2 — No hover feedback on the grid.** The canvas has exactly one listener, `click`
-(`manualBattleArena.ts:1740`). Moving the pointer over the field produces nothing: no hex
-under-cursor highlight, no path preview, no "this is who you'd hit". All affordance comes
-from the static move-range fill and target rings.
+**G2 — No hover feedback on the grid.** ✅ **Fixed (post-decomp).** The canvas now
+tracks a `hoveredHex: Axial | null` alongside the existing `selectedSlot`/`hoveredSlot`
+selection state. `mousemove` updates it via `pixelToAxial`, `mouseleave` clears it,
+and `draw()` paints a subtle cyan outline (`rgba(180,220,255,0.85)`) + 12% fill
+(`rgba(180,220,255,0.12)`) on the hex under the cursor. The highlight is suppressed
+while `ai.isActing()`, when `isBattleOver(state)`, and on impassable hexes — so it
+never gives input feedback during animations the player can't act on, or on terrain
+they can't enter. Distinct from `input.ts`'s `pendingTarget`/`approachChoice`, which
+only track directional melee targeting and were never meant to be a general pointer
+indicator. Outcome preview (the "this is who you'd hit" half of G2) deliberately not
+bundled with the highlight — see Decision #7 below and G4 for that scope.
 
 **G3 — No enemy threat range.** Knowing where the enemy can reach next round is core to
 tactical positioning. `getMovementRange(state, combatant)` is already engine-side and
@@ -180,10 +189,15 @@ This is a gameplay change, not layout.
 **G6 — No keyboard support.** No Escape, no cycling platoons, no key to end a turn. The
 arena is mouse-only.
 
-**G7 — The result card destroys the battlefield first.** `finishBattle()` calls
-`closeArena()` *before* `showBattleResultCard()`, so the final board position and the whole
-battle log are gone before you can review them. The card shows winner, round count,
-survivors and casualties — but not the field you just fought over.
+**G7 — The result card destroys the battlefield first.** ✅ **Fixed (post-decomp).**
+`finishBattle()` no longer calls `closeArena()` before `showBattleResultCard()`. The
+new order is: bump the AI run token and clear its timer, cancel clearable animations
+(`clearAnimations()`), clear input state (`selectedSlot = null`, empty `moveRange`/
+`attackTargets`, `input.clearPendingAttack()`, hide the info popup), call `refresh()`
+to repaint the final board, then open the result card with
+`onCarryOn: () => { closeArena(); }`. The modal's 60% black backdrop dims the arena
+without hiding it, so the player can review the final board position and the battle
+log underneath the card before pressing Carry On.
 
 **G8 — Obstacles and terrain are undrawn.** Obstacles are flat `#3a2a2a` hexes; Terrain is
 a `—` placeholder in the info card. This is the visual difference between "a battlefield"
@@ -362,7 +376,12 @@ and `tsc --noEmit` were run directly instead. Worth resolving before relying on 
 
 Resolved: **#1 straighten the grid — yes** (done); **#6 make the AI visible — yes** (done);
 **#5 D1–D3 — fixed alongside**, since stepping the AI on a timer makes D1 and D2 far easier
-to trigger.
+to trigger; **#7 hover feedback — hover only** — G2 landed as a hex-under-cursor
+highlight on the canvas (post-decomp, in `openManualBattleArena.ts`); the outcome
+preview half (G4) deliberately stays out of this scope; **#9 keep the battlefield
+alive behind the result card — yes** — G7 landed as a `finishBattle()` reorder so the
+result modal dims the arena via its 60% backdrop instead of destroying it first
+(`closeArena()` now runs from the card's Carry On button).
 
 Still open:
 
@@ -371,9 +390,7 @@ Still open:
 | 2 | Square or wide field? | Keep 15×15 square / go wide (needs a deployment-rule change first) |
 | 3 | Small-viewport behaviour (Stage 3)? | Pan below the floor / 1280 is the hard floor / lower the floor |
 | 4 | Verify the gold outline + AI telegraph visually? | Needs a session with working browser tooling |
-| 7 | Grid hover feedback + outcome preview (G2, G4)? | Both / hover only / neither |
 | 8 | Confirm before an unintended bump-attack (G4)? | Yes / no — keep the fast path |
-| 9 | Keep the battlefield alive behind the result card (G7)? | Yes / no |
 | 10 | Deployment phase (G5) and enemy threat range (G3)? | Later stage / not wanted |
 
 Also worth revisiting now that the grid is straightened: **AI pacing**. `AI_TELEGRAPH_MS`

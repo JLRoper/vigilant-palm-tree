@@ -19,6 +19,8 @@ import {
   generateCitySpots,
   startCharter,
   cleanupDefeatedHeroCharters,
+  startBuildingUpgrade,
+  startSettlementUpgrade,
 } from "@heroes/engine";
 import type { EngineCtx, HydratableGameRow, UnitType, BattleResult, MapSize } from "@heroes/engine";
 import { hexDistance } from "@heroes/contracts";
@@ -835,6 +837,86 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       };
       await deps.eventRepo.append(command.gameName, event.type, event);
       return { ok: true, events: [event], hero: result.state.heroes[command.heroId] };
+    }
+    case "UpgradeBuilding": {
+      const settlement = row.settlements[command.settlementId];
+      if (!settlement) {
+        return { ok: false, reason: "no_settlement", events: [] };
+      }
+      // startBuildingUpgrade() never checks ownership itself, same gap as
+      // UpgradeTownHall.
+      if (settlement.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
+      }
+      const result = startBuildingUpgrade(state, command.settlementId, command.requests);
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "BuildingUpgradeStarted",
+        actor: command.actor,
+        settlementId: command.settlementId,
+      };
+      await deps.eventRepo.append(command.gameName, event.type, event);
+      return { ok: true, events: [event], settlement: result.state.settlements[command.settlementId] };
+    }
+    case "UpgradeSettlement": {
+      const settlement = row.settlements[command.settlementId];
+      if (!settlement) {
+        return { ok: false, reason: "no_settlement", events: [] };
+      }
+      // startSettlementUpgrade() never checks ownership itself, same gap as
+      // UpgradeTownHall/UpgradeBuilding.
+      if (settlement.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
+      }
+      // targetLevel is derived server-side, not client-supplied -- same
+      // reasoning StartCharter uses for settlementId/charterId above.
+      const targetLevel = ((state.settlements[command.settlementId]?.level ?? settlement.level) + 1) as 2 | 3;
+      // Same GameMap reconstruction StartCharter uses above (row.seed/
+      // row.map_size reproduce the persisted map byte-identically; pinned
+      // by test/server/gameMapReconstruction.test.ts).
+      const map = new GameMap(row.seed, row.map_size as MapSize | undefined);
+      const computed = computeSettlementRates(map, settlement.q, settlement.r, targetLevel);
+      const { spots } = generateCitySpots(cityViewSizeFor(targetLevel), deps.ctx.rng);
+      const newCitySpots = spots.filter(
+        (spot) =>
+          !settlement.citySpots.some((cs) => cs.cell.x === spot.cell.x && cs.cell.y === spot.cell.y),
+      );
+      const result = startSettlementUpgrade(
+        state,
+        command.settlementId,
+        targetLevel,
+        computed.rates,
+        newCitySpots,
+        // upgradePopulationGate is trusted from the client -- see
+        // packages/contracts/src/commands/upgradeSettlement.ts's header
+        // comment for why this is a deliberate, temporary exception.
+        command.upgradePopulationGate,
+      );
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "SettlementUpgradeStarted",
+        actor: command.actor,
+        settlementId: command.settlementId,
+        targetLevel,
+      };
+      await deps.eventRepo.append(command.gameName, event.type, event);
+      return { ok: true, events: [event], settlement: result.state.settlements[command.settlementId] };
     }
   }
 

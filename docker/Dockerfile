@@ -3,8 +3,10 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files -- npm workspaces (packages/*) need their package.json
+# present on disk before `npm ci` runs, so they're linked correctly.
 COPY package.json package-lock.json ./
+COPY packages ./packages
 
 # Install dependencies (including devDependencies for build)
 RUN npm ci
@@ -13,7 +15,6 @@ RUN npm ci
 COPY index.html tsconfig.json vite.config.ts ./
 COPY src ./src
 COPY server ./server
-COPY shared ./shared
 
 # Build both TypeScript and Vite (creates dist/)
 RUN npm run build
@@ -26,8 +27,10 @@ WORKDIR /app
 # Install wget for health checks
 RUN apk add --no-cache wget
 
-# Copy package files
+# Copy package files -- npm workspaces (packages/*) need their package.json
+# present on disk before `npm ci` runs, so they're linked correctly.
 COPY package.json package-lock.json ./
+COPY --from=builder /app/packages ./packages
 
 # Install production dependencies (tsx is in `dependencies` for runtime use)
 RUN npm ci --omit=dev --save=false
@@ -35,7 +38,6 @@ RUN npm ci --omit=dev --save=false
 # Copy source files (app runs with tsx loader at runtime)
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/server ./server
-COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/tsconfig.json ./
 COPY --from=builder /app/package.json ./
 
@@ -64,6 +66,7 @@ WORKDIR /app
 # vite preview reads vite.config.ts and honors the preview.proxy block,
 # which routes /api/* to the api container (host via API_HOST env).
 COPY --from=builder /app/package.json /app/package-lock.json ./
+COPY --from=builder /app/packages ./packages
 # vite is in `dependencies`; installed from the lockfile
 RUN npm ci --omit=dev --save=false
 

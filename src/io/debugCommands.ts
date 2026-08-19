@@ -63,10 +63,10 @@ export function attachDebugApi(engine: AttachDebugApiEngine): void {
         const t = gm.get(newPath[i].q, newPath[i].r);
         const stepCost = t ? (TERRAIN_COST as Record<string, number>)[t] : 1;
         if (!Number.isFinite(stepCost) || stepCost <= 0) break;
-        if (cumulative + stepCost > hero.movementRemaining) break;
+        if (cumulative >= hero.movementRemaining) break;
         cumulative += stepCost;
         reachableIdx = i + 1;
-        actualCost = cumulative;
+        actualCost = Math.min(cumulative, hero.movementRemaining);
       }
       if (reachableIdx === 0) return false;
       const dest = newPath[reachableIdx - 1];

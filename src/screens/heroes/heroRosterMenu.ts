@@ -1,4 +1,11 @@
 import { PopupMenu, menuTheme } from "@screens/shared/menu";
+import {
+  attachDockControl,
+  getPanelRail,
+  mountPanel,
+  savePanelPosition,
+  toolbarHeight,
+} from "@screens/shared/panelRail";
 import type { GameState, HeroId } from "../../state/gameState";
 import { MOVEMENT_PER_TURN } from "../../state/gameState";
 import { HERO_BANNERS } from "../../render/assetDescriptors";
@@ -19,13 +26,14 @@ export class HeroRosterMenu {
     this.opts = opts;
 
     this.menu = new PopupMenu({
-      parent: document.body,
+      parent: getPanelRail(),
       title: "Heroes",
-      initialPosition: { x: 260, y: 16 },
       width: 280,
       closeable: true,
       draggable: true,
       zIndex: 60,
+      minTop: toolbarHeight,
+      onMove: (pos) => savePanelPosition("heroes", pos),
       onClose: () => {
         this.visible = false;
       },
@@ -39,20 +47,20 @@ export class HeroRosterMenu {
       display: "flex",
       flexDirection: "column",
       gap: "6px",
-      maxHeight: "360px",
+      flex: "1 1 auto",
+      minHeight: "0",
       overflowY: "auto",
     });
 
     this.menu.setContent(this.content);
     this.menu.root.style.display = "none";
+    attachDockControl(this.menu, "heroes");
   }
 
   show(state: GameState): void {
     if (!this.visible) {
-      if (!this.menu.root.parentNode) {
-        document.body.appendChild(this.menu.root);
-      }
-      this.menu.root.style.display = "";
+      mountPanel(this.menu, "heroes");
+      this.menu.root.style.display = "flex";
       this.visible = true;
     }
     this.update(state);
@@ -170,8 +178,8 @@ export class HeroRosterMenu {
     row.appendChild(nameEl);
 
     const metaEl = document.createElement("div");
-    const remaining = hero.movementRemaining < 1 ? 0 : hero.movementRemaining;
-    metaEl.textContent = `(${hero.q}, ${hero.r}) · Move ${remaining.toFixed(1)}/${MOVEMENT_PER_TURN} · ${hero.gold}g · ${hero.troops} troops`;
+    const remaining = Math.round(Math.max(0, hero.movementRemaining));
+    metaEl.textContent = `(${hero.q}, ${hero.r}) · Move ${remaining}/${MOVEMENT_PER_TURN} · ${hero.gold}g · ${hero.troops} troops`;
     Object.assign(metaEl.style, {
       fontSize: "11px",
       opacity: "0.85",

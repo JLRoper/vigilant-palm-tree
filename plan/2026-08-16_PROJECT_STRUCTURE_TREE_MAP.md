@@ -148,6 +148,13 @@ heroes-js/
 │   │   ├── palettes.ts                          # Hex color palettes
 │   │   ├── renderTypes.ts                       # RenderOptions & MinimapGeometry
 │   │   ├── renderer.ts                          # Adventure map 2D canvas renderer
+│   │   ├── scene/                               # Phase 5 Track B renderer seam (PR #101, #104)
+│   │   │   ├── entityMirror.ts                  # Hero/Castle tween mirror (applyEvent-shaped; not yet wired to a live event stream)
+│   │   │   ├── types.ts                         # SceneNode union + per-builder input types
+│   │   │   └── sceneBuilder/                    # Pure: GameState + Camera → SceneNode[]
+│   │   │       ├── adventureScene.ts
+│   │   │       ├── cityScene.ts
+│   │   │       └── battleScene.ts
 │   │   └── sprites.ts                           # Sprite drawing functions
 │   ├── screens/                                 # UI Screens & Dialogs
 │   │   ├── adventure/adventureView.ts           # AdventureView class

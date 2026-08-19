@@ -40,9 +40,17 @@ export function axialToPixel(q: number, r: number, size = HEX_SIZE): { x: number
 }
 
 export function pixelToAxial(x: number, y: number, size = HEX_SIZE): Axial {
+  const { q, r } = pixelToAxialExact(x, y, size);
+  return axialRound(q, r);
+}
+
+// Same projection as pixelToAxial but without snapping to the nearest hex.
+// Used where the fractional position matters (e.g. camera-viewport corners
+// for the minimap FOV frame) — rounding here would make those jitter.
+export function pixelToAxialExact(x: number, y: number, size = HEX_SIZE): { q: number; r: number } {
   const q = ((SQRT3 / 3) * x - (1 / 3) * y) / size;
   const r = ((2 / 3) * y) / size;
-  return axialRound(q, r);
+  return { q, r };
 }
 
 export function axialRound(qf: number, rf: number): Axial {
