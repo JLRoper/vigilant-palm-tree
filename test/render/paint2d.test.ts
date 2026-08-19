@@ -8,7 +8,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { paintScene } from "../../src/render/scene/paint2d";
+import { paintScene, paintTerrainHex, paintTerrainDecoration, paintFogHex, paintHoverHighlight } from "../../src/render/scene/paint2d";
 import type { SceneNode } from "../../src/render/scene/types";
 import { makeNoopPaint2DDep, makeRecordingCtx } from "./_helpers";
 
@@ -18,12 +18,13 @@ test("paintScene: empty input is a no-op (no calls emitted, no throw)", () => {
   assert.equal(calls.length, 0);
 });
 
-test("paintScene: one of every node kind dispatches without throwing under stub painters", () => {
+test("paintScene: every still-stub kind emits zero canvas calls (per-kind transcription lands in follow-up commits)", () => {
+  // As Commit 3 lands the terrain-hex / decoration / fog / hover pair, the
+  // corresponding node kinds are removed from this fixture and re-asserted
+  // in the per-kind tests below. Anything left in this list is still a
+  // no-op stub.
   const { ctx, calls } = makeRecordingCtx();
   const nodes: SceneNode[] = [
-    { kind: "terrainHex", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "grass" },
-    { kind: "terrainDecoration", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "grass" },
-    { kind: "fogHex", q: 0, r: 0, world: { x: 0, y: 0 } },
     { kind: "resourceIcon", q: 0, r: 0, world: { x: 0, y: 0 }, resource: "gold" },
     { kind: "charterOverlay", q: 0, r: 0, world: { x: 0, y: 0 }, phase: "traveling" },
     { kind: "validCharterHex", q: 0, r: 0, world: { x: 0, y: 0 } },
@@ -41,7 +42,6 @@ test("paintScene: one of every node kind dispatches without throwing under stub 
     { kind: "territoryOutlineEdge", ownerId: 0, color: "#000", x1: 0, y1: 0, x2: 1, y2: 1 },
     { kind: "pathSegment", reachable: true, points: [{ x: 0, y: 0 }] },
     { kind: "heroTrail", heroId: "h", color: "#fff", points: [{ x: 0, y: 0 }] },
-    { kind: "hoverHighlight", q: 0, r: 0, world: { x: 0, y: 0 } },
     {
       kind: "hero",
       heroId: "h",
@@ -124,8 +124,6 @@ test("paintScene: one of every node kind dispatches without throwing under stub 
     { kind: "battleFloatingText", text: "-1", world: { x: 0, y: 0 }, alpha: 1 },
   ];
   paintScene(ctx, nodes, makeNoopPaint2DDep(), { viewportW: 800, viewportH: 600 });
-  // Stub painters emit no canvas calls. Replace with call-log assertions as
-  // each kind's real transcription lands (Commits 3-10 in the design doc).
   assert.equal(calls.length, 0);
 });
 
@@ -215,4 +213,64 @@ test("paintScene: dispatcher emits nodes in array order (paint-order contract) w
   // produce the same call log (no per-node calls yet, but the symmetry is
   // the contract).
   assert.equal(callsA.length, callsB.length, "forward and reverse-call orderings must produce identical recorded calls");
+});
+
+test("paintTerrainHex: emits fill + stroke with TERRAIN_COLORS keyed by node.terrain", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintTerrainHex(ctx, { kind: "terrainHex", q: 0, r: 0, world: { x: 10, y: 20 }, terrain: "grass" }, makeNoopPaint2DDep());
+  const styleSet = calls.filter((c) => c.name.startsWith("set:"));
+  const fill = styleSet.find((c) => c.name === "set:fillStyle");
+  const stroke = styleSet.find((c) => c.name === "set:strokeStyle");
+  assert.ok(fill, "should set fillStyle");
+  assert.ok(stroke, "should set strokeStyle");
+  assert.ok(calls.some((c) => c.name === "beginPath"), "should begin a path");
+  assert.ok(calls.some((c) => c.name === "fill"), "should fill");
+  assert.ok(calls.some((c) => c.name === "stroke"), "should stroke");
+  const lineWidth = styleSet.find((c) => c.name === "set:lineWidth");
+  assert.deepEqual(lineWidth?.args, [1], "live renderer uses 1px stroke for terrain hex");
+});
+
+test("paintTerrainDecoration: forest emits a tree triangle + trunk rect", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintTerrainDecoration(ctx, { kind: "terrainDecoration", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "forest" }, makeNoopPaint2DDep());
+  assert.ok(calls.some((c) => c.name === "beginPath"), "forest should draw a tree path");
+  assert.ok(calls.some((c) => c.name === "fill"), "forest should fill the tree");
+  assert.ok(calls.some((c) => c.name === "fillRect"), "forest should paint a trunk rect");
+});
+
+test("paintTerrainDecoration: mountain emits a grey triangle + a snow-cap triangle", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintTerrainDecoration(ctx, { kind: "terrainDecoration", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "mountain" }, makeNoopPaint2DDep());
+  const triangleFills = calls.filter((c) => c.name === "fill").length;
+  assert.ok(triangleFills >= 2, "mountain should paint at least two filled triangles (base + snow cap)");
+});
+
+test("paintTerrainDecoration: water emits a single arc stroke", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintTerrainDecoration(ctx, { kind: "terrainDecoration", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "water" }, makeNoopPaint2DDep());
+  assert.ok(calls.some((c) => c.name === "arc"), "water should draw an arc");
+  assert.ok(calls.some((c) => c.name === "stroke"), "water should stroke the arc");
+});
+
+test("paintFogHex: emits the live fog rgba fill + a stroke", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintFogHex(ctx, { kind: "fogHex", q: 0, r: 0, world: { x: 0, y: 0 } }, makeNoopPaint2DDep());
+  const fill = calls.find((c) => c.name === "set:fillStyle");
+  assert.equal(fill?.args[0], "rgba(8, 10, 16, 0.78)", "fog fill must match the live rgba(8,10,16,0.78)");
+  const stroke = calls.find((c) => c.name === "set:strokeStyle");
+  assert.equal(stroke?.args[0], "rgba(8, 10, 16, 0.55)", "fog edge must match the live rgba(8,10,16,0.55)");
+  assert.ok(calls.some((c) => c.name === "fill"), "fog should fill");
+  assert.ok(calls.some((c) => c.name === "stroke"), "fog should stroke");
+});
+
+test("paintHoverHighlight: emits hexPath + 3px stroke in the live #ffcc00", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintHoverHighlight(ctx, { kind: "hoverHighlight", q: 0, r: 0, world: { x: 0, y: 0 } }, makeNoopPaint2DDep());
+  const stroke = calls.find((c) => c.name === "set:strokeStyle");
+  assert.equal(stroke?.args[0], "#ffcc00", "hover stroke must match the live #ffcc00");
+  const lineWidth = calls.find((c) => c.name === "set:lineWidth");
+  assert.deepEqual(lineWidth?.args, [3], "hover stroke must be 3px to match the live renderer");
+  assert.ok(calls.some((c) => c.name === "beginPath"), "hover should begin a hex path");
+  assert.ok(calls.some((c) => c.name === "stroke"), "hover should stroke");
+  assert.ok(!calls.some((c) => c.name === "fill"), "hover should not fill");
 });
