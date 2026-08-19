@@ -178,8 +178,8 @@ export class HeroRosterMenu {
     row.appendChild(nameEl);
 
     const metaEl = document.createElement("div");
-    const remaining = hero.movementRemaining < 1 ? 0 : hero.movementRemaining;
-    metaEl.textContent = `(${hero.q}, ${hero.r}) · Move ${remaining.toFixed(1)}/${MOVEMENT_PER_TURN} · ${hero.gold}g · ${hero.troops} troops`;
+    const remaining = Math.round(Math.max(0, hero.movementRemaining));
+    metaEl.textContent = `(${hero.q}, ${hero.r}) · Move ${remaining}/${MOVEMENT_PER_TURN} · ${hero.gold}g · ${hero.troops} troops`;
     Object.assign(metaEl.style, {
       fontSize: "11px",
       opacity: "0.85",

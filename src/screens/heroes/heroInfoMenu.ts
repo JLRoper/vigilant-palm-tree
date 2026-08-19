@@ -7,11 +7,6 @@ import { getUnitImageUrl } from "../../data/unitImages";
 import { HERO_BANNERS } from "../../render/assetDescriptors";
 
 const MOVEMENT_PER_TURN = 7;
-const MIN_USABLE_MOVEMENT = 1.0;
-
-function displayableRemaining(remaining: number): number {
-  return remaining < MIN_USABLE_MOVEMENT ? 0 : remaining;
-}
 
 export type TransferHandler = (
   heroId: string,
@@ -198,7 +193,7 @@ export class HeroInfoMenu {
     movementCaption.textContent = "Movement";
     movementLabelRow.appendChild(movementCaption);
     this.movementLabel = document.createElement("span");
-    this.movementLabel.textContent = `${MOVEMENT_PER_TURN.toFixed(1)} / ${MOVEMENT_PER_TURN}`;
+    this.movementLabel.textContent = `${MOVEMENT_PER_TURN} / ${MOVEMENT_PER_TURN}`;
     movementLabelRow.appendChild(this.movementLabel);
     movementSection.appendChild(movementLabelRow);
 
@@ -487,10 +482,10 @@ export class HeroInfoMenu {
     this.goldEl.textContent = `${hero.gold}g`;
     this.foodEl.textContent = "0 food";
     const remaining = Math.max(0, hero.movementRemaining);
-    const shown = displayableRemaining(remaining);
-    const pct = Math.max(0, Math.min(1, shown / MOVEMENT_PER_TURN)) * 100;
+    const shown = Math.round(remaining);
+    const pct = Math.max(0, Math.min(1, remaining / MOVEMENT_PER_TURN)) * 100;
     this.movementFill.style.width = `${pct}%`;
-    this.movementLabel.textContent = `${shown.toFixed(1)} / ${MOVEMENT_PER_TURN}`;
+    this.movementLabel.textContent = `${shown} / ${MOVEMENT_PER_TURN}`;
     this.troopsEl.textContent = `${hero.troops}  Â·  Upkeep: ${hero.troops}g/week`;
 
     this.settlementAtTile = null;

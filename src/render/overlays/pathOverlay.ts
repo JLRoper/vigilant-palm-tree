@@ -19,7 +19,7 @@ export function computeReachableSplit(
     const t = map.get(path[i].q, path[i].r);
     const stepCost = t ? TERRAIN_COST[t] : Infinity;
     if (!Number.isFinite(stepCost) || stepCost <= 0) return i;
-    if (cumulative + stepCost > movementRemaining) return i;
+    if (cumulative >= movementRemaining) return i;
     cumulative += stepCost;
   }
   return path.length;
