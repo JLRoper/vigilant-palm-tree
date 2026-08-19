@@ -1,3 +1,5 @@
+import { pixelToAxialExact, type Axial } from "../core/hex";
+
 export class Camera {
   x = 0;
   y = 0;
@@ -32,4 +34,21 @@ export class Camera {
       dpr * this.y
     );
   }
+}
+
+// The four screen corners of the camera's visible viewport, inverse-projected
+// into unrounded axial (hex) space — used to draw the minimap's field-of-view
+// frame. Order: top-left, top-right, bottom-right, bottom-left.
+export function getViewportAxialCorners(camera: Camera, screenWidth: number, screenHeight: number): Axial[] {
+  const screenCorners = [
+    { x: 0, y: 0 },
+    { x: screenWidth, y: 0 },
+    { x: screenWidth, y: screenHeight },
+    { x: 0, y: screenHeight },
+  ];
+  return screenCorners.map(({ x, y }) => {
+    const wx = (x - camera.x) / camera.zoom;
+    const wy = (y - camera.y) / camera.zoom;
+    return pixelToAxialExact(wx, wy);
+  });
 }
