@@ -27,9 +27,13 @@ interface MinimapRenderOptions {
   colorForOwner: (ownerId: number | null) => string;
 }
 
+function minimapPixelHeight(mapWidth: number, mapHeight: number): number {
+  return (mapHeight / mapWidth) * MINIMAP_WIDTH;
+}
+
 export function getMinimapGeometry(map: GameMap): MinimapGeometry {
   const w = MINIMAP_WIDTH;
-  const h = (map.height / map.width) * w;
+  const h = minimapPixelHeight(map.width, map.height);
   const x0 = window.innerWidth - w - MINIMAP_PAD;
   const y0 = window.innerHeight - h - MINIMAP_PAD;
   return {
@@ -41,6 +45,15 @@ export function getMinimapGeometry(map: GameMap): MinimapGeometry {
     centerY: y0 + h / 2,
     baseScale: w / map.width,
   };
+}
+
+// Total vertical footprint of the minimap block measured from the window's
+// bottom edge -- MINIMAP_PAD's own gap, plus the minimap height, plus the 4px
+// the drawn box extends past it (see boxY/boxH in drawMinimap below). UI
+// overlays (the panel rail) reserve exactly this much space so they never
+// draw over the minimap.
+export function getMinimapReserveHeight(mapWidth: number, mapHeight: number): number {
+  return MINIMAP_PAD + minimapPixelHeight(mapWidth, mapHeight) + 4;
 }
 
 export function isPointInMinimap(x: number, y: number, geo: MinimapGeometry): boolean {

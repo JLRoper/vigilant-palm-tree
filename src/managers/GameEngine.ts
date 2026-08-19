@@ -318,6 +318,7 @@ export class GameEngine {
   fullFrame(): void {
     this.draw();
     this.refreshHud();
+    this.ui.setMapDimensions(this.gameMap.width, this.gameMap.height);
   }
 
   refreshToolbarAndFrame(): void {
