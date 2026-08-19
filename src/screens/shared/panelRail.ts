@@ -35,6 +35,10 @@ let toolbarResizeObserver: ResizeObserver | null = null;
 let store: StoredLayout | null = null;
 let resizeBound = false;
 const attached = new Map<PanelKey, PopupMenu>();
+let lastMinimapReserve = -1;
+let persistFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let persistFlushBound = false;
+const PERSIST_DEBOUNCE_MS = 200;
 
 // Synchronous measurement, safe to call as often as needed (a read plus a
 // conditional single style write -- no forced layout thrash beyond what the
@@ -72,9 +76,17 @@ export function toolbarHeight(): number {
 
 // Called by UIManager (which knows the current map's dimensions) whenever
 // they're available, so the rail's bottom edge tracks the minimap's actual
-// on-screen footprint instead of a guessed constant.
+// on-screen footprint instead of a guessed constant. UIManager calls this
+// unconditionally from the engine's per-frame rAF loop (the value has no
+// dedicated change hook), so this guards the DOM write itself: the map's
+// dimensions are effectively constant between new-game/load-game, and a
+// style write on <html> invalidates computed style for every descendant
+// that resolves through --minimap-reserve, which is wasted work 60x/sec.
 export function setMinimapReserve(px: number): void {
-  document.documentElement.style.setProperty(MINIMAP_RESERVE_VAR, `${Math.max(0, Math.round(px))}px`);
+  const next = Math.max(0, Math.round(px));
+  if (next === lastMinimapReserve) return;
+  lastMinimapReserve = next;
+  document.documentElement.style.setProperty(MINIMAP_RESERVE_VAR, `${next}px`);
 }
 
 export function getPanelRail(): HTMLDivElement {
@@ -142,13 +154,40 @@ function layoutFor(key: PanelKey): PanelLayout {
   return store[key] ?? { mode: "docked" };
 }
 
+function flushPersist(): void {
+  if (persistFlushTimer !== null) {
+    clearTimeout(persistFlushTimer);
+    persistFlushTimer = null;
+  }
+  if (!store) return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  } catch { /* ignore */ }
+}
+
+// A window-level 'mouseup' (capture phase, so it fires before the drag's own
+// mouseup handler removes its listeners) guarantees a pending debounced write
+// lands the moment a drag ends, rather than waiting out the trailing delay.
+function bindPersistFlush(): void {
+  if (persistFlushBound) return;
+  persistFlushBound = true;
+  window.addEventListener("mouseup", flushPersist, { capture: true });
+}
+
+// The in-memory store updates synchronously (so layout reads are always
+// current), but the localStorage write is debounced: savePanelPosition's
+// onMove wiring calls this on every mousemove while dragging a floating
+// panel, and a synchronous localStorage.setItem on every mousemove is
+// needless main-thread work during a drag. bindPersistFlush's mouseup
+// listener ensures the final position is still flushed immediately once
+// the drag ends.
 function saveLayout(key: PanelKey, patch: Partial<PanelLayout>): void {
   store ??= loadStore();
   store[key] = { ...layoutFor(key), ...patch };
   if (!persistenceAllowed()) return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-  } catch { /* ignore */ }
+  bindPersistFlush();
+  if (persistFlushTimer !== null) clearTimeout(persistFlushTimer);
+  persistFlushTimer = setTimeout(flushPersist, PERSIST_DEBOUNCE_MS);
 }
 
 export function savePanelPosition(key: PanelKey, pos: { x: number; y: number }): void {
