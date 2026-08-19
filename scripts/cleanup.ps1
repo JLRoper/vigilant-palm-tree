@@ -1,13 +1,21 @@
 # scripts/cleanup.ps1
-# Kill lingering node processes from THIS worktree only.
-# Reads .env to know which ports this worktree uses, then checks if those
-# processes are actually running from this worktree directory by examining
-# the command line (which includes the script path).
+# Kill lingering dev processes from THIS worktree only.
+#
+# Previously this only checked processes bound to the ports currently listed
+# in .env. That misses orphans: `predev` (scripts/allocate-ports.ts)
+# preserves existing .env port values and only allocates fresh ones for keys
+# that are missing, so if .env ever gets reset/rewritten between runs, the
+# previous generation's processes keep running on ports no longer recorded
+# anywhere - invisible to a port-based cleanup.
+#
+# So this scans the system process list directly for anything (node.exe /
+# esbuild.exe) whose command line is rooted in this worktree path and looks
+# like part of our dev stack (vite / tsx watch / server/index.ts /
+# concurrently / esbuild service), regardless of what port it's bound to.
 
 $ErrorActionPreference = 'SilentlyContinue'
 
 $worktree = (Get-Location).Path
-$envFile = Join-Path $worktree '.env'
 $pidRegistry = Join-Path $worktree 'test/.last-test-pids.json'
 
 # Reap any PIDs the previous smoke test recorded but failed to clean up.
@@ -36,88 +44,55 @@ if (Test-Path -LiteralPath $pidRegistry) {
     }
 }
 
-# Read ports from .env (this worktree's assigned ports)
-$ports = @()
-if (Test-Path -LiteralPath $envFile) {
-    Get-Content -LiteralPath $envFile | ForEach-Object {
-        if ($_ -match '^(API_PORT|WS_PORT|CLIENT_PORT|DB_PORT|REDIS_PORT)\s*=\s*(\d+)') {
-            $ports += [int]$Matches[2]
+# Markers that identify a process as part of this project's dev stack, so a
+# worktree-path match alone (which any node process launched from this
+# directory would satisfy, including an editor's language server) isn't
+# enough on its own to justify killing it.
+$devMarkers = @('vite', 'tsx watch', 'server[\\/]index\.ts', 'concurrently', 'esbuild')
+
+function Test-DevProcessCommandLine {
+    param([string]$CommandLine)
+    if (-not $CommandLine) { return $false }
+    if ($CommandLine -notlike "*$worktree*") { return $false }
+    foreach ($marker in $devMarkers) {
+        if ($CommandLine -match $marker) { return $true }
+    }
+    return $false
+}
+
+function Get-WorktreeDevProcesses {
+    if ($IsWindows) {
+        $procs = @()
+        foreach ($name in @('node.exe', 'esbuild.exe')) {
+            $procs += Get-WmiObject -Class Win32_Process -Filter "Name='$name'" -ErrorAction SilentlyContinue
+        }
+        return $procs | Where-Object { Test-DevProcessCommandLine $_.CommandLine } | ForEach-Object {
+            @{ Id = [int]$_.ProcessId; Name = $_.Name }
         }
     }
-}
-
-if ($ports.Count -eq 0) {
-    Write-Host "No ports found in .env, nothing to clean up."
-    exit 0
-}
-
-Write-Host "Checking worktree ports: $($ports -join ', ')"
-
-function Test-TcpListening {
-    param([int]$Port)
-    try {
-        $client = New-Object System.Net.Sockets.TcpClient
-        $client.Connect([System.Net.IPAddress]::Loopback, $Port)
-        $client.Close()
-        return $true
-    } catch {
-        return $false
-    }
-}
-
-function Get-ProcessOnPort {
-    param([int]$Port)
-    if ($IsWindows) {
-        $conn = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
-        if ($conn) {
-            $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
-            if ($proc) { return @{ Id = $proc.Id; Name = $proc.ProcessName } }
+    $matches = @()
+    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -in @('node', 'esbuild') } | ForEach-Object {
+        $cmdline = (Get-Content -LiteralPath "/proc/$($_.Id)/cmdline" -Raw -ErrorAction SilentlyContinue) -replace "\0", ' '
+        if (Test-DevProcessCommandLine $cmdline) {
+            $matches += @{ Id = $_.Id; Name = $_.ProcessName }
         }
-        return $null
     }
-    $line = (& ss -tlnp 2>$null) -split "`n" | Where-Object { $_ -match ":$Port\s" } | Select-Object -First 1
-    if ($line -and $line -match 'pid=(\d+)') {
-        $pid = [int]$Matches[1]
-        $name = (Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName
-        return @{ Id = $pid; Name = $name }
-    }
-    return $null
-}
-
-function Get-ProcessCommandLine {
-    param([int]$Pid)
-    if ($IsWindows) {
-        try {
-            $wmi = Get-WmiObject -Class Win32_Process -Filter "ProcessId = $Pid" -ErrorAction SilentlyContinue
-            return $wmi.CommandLine
-        } catch { return $null }
-    }
-    try {
-        return Get-Content -LiteralPath "/proc/$Pid/cmdline" -Raw -ErrorAction SilentlyContinue | ForEach-Object { $_ -replace "\0", ' ' }
-    } catch { return $null }
+    return $matches
 }
 
 $killed = @()
-foreach ($port in $ports) {
-    if (-not (Test-TcpListening $port)) { continue }
-    $info = Get-ProcessOnPort $port
-    if (-not $info) { continue }
-    try {
-        $cmdline = Get-ProcessCommandLine $info.Id
-        if ($cmdline -and $cmdline -like "*$worktree*") {
-            Write-Host "Killing PID $($info.Id) ($($info.Name)) on port $port (worktree match)"
-            Stop-Process -Id $info.Id -Force -ErrorAction SilentlyContinue
-            $killed += $info.Id
-        } else {
-            Write-Host "Skipping PID $($info.Id) on port $port (no worktree match in cmdline)"
-        }
-    } catch {
-        Write-Host "Could not examine PID $($info.Id), skipping."
+foreach ($proc in (Get-WorktreeDevProcesses)) {
+    Write-Host "Killing PID $($proc.Id) ($($proc.Name)) - worktree dev process match"
+    if ($IsWindows) {
+        & taskkill.exe /F /T /PID $proc.Id 2>$null | Out-Null
+    } else {
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
     }
+    $killed += $proc.Id
 }
 
 if ($killed.Count -eq 0) {
-    Write-Host "No lingering processes from this worktree found."
+    Write-Host "No lingering dev processes from this worktree found."
 } else {
     Write-Host "Killed $($killed.Count) process(es) from this worktree."
 }
