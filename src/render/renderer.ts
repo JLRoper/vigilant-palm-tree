@@ -74,7 +74,7 @@ export class MapRenderer {
 
     ctx.restore();
 
-    drawMinimap(ctx, this.map, this.minimapCamera, heroes, path, opts, visible);
+    drawMinimap(ctx, this.map, this.camera, this.minimapCamera, heroes, path, opts, visible);
   }
 
   hoverFromScreen(sx: number, sy: number): Axial | null {

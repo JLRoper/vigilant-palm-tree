@@ -29,7 +29,7 @@ export function updateHud(
   const roundLine = `Round ${state.round}`;
   const selected = state.selectedHeroId ? state.heroes[state.selectedHeroId] : null;
   const movementLine = selected
-    ? ` · Movement: ${(selected.movementRemaining < 1 ? 0 : selected.movementRemaining).toFixed(1)}/7`
+    ? ` · Movement: ${Math.round(Math.max(0, selected.movementRemaining))}/7`
     : "";
   const charterLine = selected?.isChartering ? (() => {
     const ch = state.activeCharters.find((c) => c.id === selected.charterId);

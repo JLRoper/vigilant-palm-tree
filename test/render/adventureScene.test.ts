@@ -251,6 +251,13 @@ test("path nodes: partially reachable path splits into reachable/unreachable seg
   assert.deepEqual(unreachable?.points, [axialToPixel(1, 0), axialToPixel(2, 0), axialToPixel(3, 0)]);
 });
 
+test("computeReachableSplit: a fractional movementRemaining below a hex's full cost is still reachable (regression for issue #129)", () => {
+  const map = makeGrassMap(2, 1);
+  const path = [{ q: 1, r: 0 }];
+  const splitIdx = computeReachableSplit(path, map, 0.5);
+  assert.equal(splitIdx, 1, "0.5 remaining should still afford one more grass hex (cost 1)");
+});
+
 test("pathReachableIdx and pathOrigin overrides are honored", () => {
   const map = makeGrassMap(4, 1);
   const hero = new Hero("h0", "Hero", 0, 0, "player", 0, 10);
