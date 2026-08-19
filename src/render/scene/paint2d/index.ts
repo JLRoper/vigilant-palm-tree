@@ -18,6 +18,11 @@
 // See src/render/scene/paint2d/README.md for the full boundary rationale.
 
 import type { Paint2DDep } from "./deps";
+import {
+  hexPath,
+} from "./geometry";
+import { decorationSeed } from "../../decorationSeed";
+import { TERRAIN_COLORS } from "../../../map/terrain";
 import type {
   BattleAiActingRingNode,
   BattleAiTelegraphHexNode,
@@ -48,6 +53,14 @@ import type {
   TerritoryOutlineEdgeNode,
   ValidCharterHexNode,
 } from "../types";
+
+// Live-copied colour constants. The painter classes under `src/render/painter/`
+// (PR #122) already use these -- the paint2d transcription emit must match
+// their output byte-for-byte. The painter project lives here, not in the
+// forbidden Vite-?url-coupled set, so these literals are the source of truth.
+const FOG_FILL = "rgba(8, 10, 16, 0.78)";
+const FOG_EDGE = "rgba(8, 10, 16, 0.55)";
+const HOVER_STROKE = "#ffcc00";
 
 export interface Paint2DFrame {
   /** CSS pixels the painter should treat as the viewport. City view paints into this rect as a single origin-space; adventure/battle use it for the background fill. */
@@ -184,29 +197,82 @@ export function paintScene(
 // and the per-kind function signatures that the painters will satisfy.
 
 export function paintTerrainHex(ctx: CanvasRenderingContext2D, node: TerrainHexNode, deps: Paint2DDep): void {
-  // TODO: Transcribe src/render/renderer.ts:192-205 (drawHex). Fill from
-  // TERRAIN_COLORS[node.terrain] (sourced from @heroes/engine), stroke with
-  // a faint edge.
-  void ctx;
-  void node;
+  const colors = TERRAIN_COLORS[node.terrain];
+  ctx.fillStyle = colors.fill;
+  ctx.strokeStyle = colors.stroke;
+  ctx.lineWidth = 1;
+  hexPath(ctx, node.world.x, node.world.y);
+  ctx.fill();
+  ctx.stroke();
   void deps;
 }
 
 export function paintTerrainDecoration(ctx: CanvasRenderingContext2D, node: TerrainDecorationNode, deps: Paint2DDep): void {
-  // TODO: Transcribe src/render/renderer.ts:207-262 (drawDecoration). The
-  // decoration seed formula at renderer.ts:354 (decorationSeed) classifies
-  // each hex by a deterministic Math.sin() hash and draws 0..3 procedural
-  // decorations (small triangles/arcs for trees/rocks/etc.).
-  void ctx;
-  void node;
+  const { x: cx, y: cy } = node.world;
+  const seed = decorationSeed(node.q, node.r) - Math.floor(decorationSeed(node.q, node.r));
+  const ox = (seed - 0.5) * 14;
+  const oy = (((decorationSeed(node.q + 7, node.r - 3)) % 1) - 0.5) * 10;
+
+  const t = node.terrain;
+  if (t === "forest") {
+    ctx.fillStyle = "#0d2a14";
+    ctx.beginPath();
+    ctx.moveTo(cx + ox, cy + oy - 10);
+    ctx.lineTo(cx + ox - 8, cy + oy + 6);
+    ctx.lineTo(cx + ox + 8, cy + oy + 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#5a3a1a";
+    ctx.fillRect(cx + ox - 1.5, cy + oy + 5, 3, 4);
+  } else if (t === "water") {
+    ctx.strokeStyle = "rgba(255,255,255,0.25)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx + ox, cy + oy, 4, 0.2 * Math.PI, 0.9 * Math.PI);
+    ctx.stroke();
+  } else if (t === "desert") {
+    ctx.strokeStyle = "rgba(80,60,30,0.55)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx + ox - 7, cy + oy - 2);
+    ctx.lineTo(cx + ox - 3, cy + oy - 5);
+    ctx.moveTo(cx + ox + 2, cy + oy + 3);
+    ctx.lineTo(cx + ox + 6, cy + oy + 1);
+    ctx.moveTo(cx + ox - 5, cy + oy + 5);
+    ctx.lineTo(cx + ox - 1, cy + oy + 3);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(120,90,50,0.6)";
+    ctx.beginPath();
+    ctx.arc(cx + ox + 9, cy + oy + 4, 1, 0, Math.PI * 2);
+    ctx.arc(cx + ox - 10, cy + oy - 6, 1, 0, Math.PI * 2);
+    ctx.arc(cx + ox + 3, cy + oy - 9, 1, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (t === "mountain") {
+    ctx.fillStyle = "#5a5a64";
+    ctx.beginPath();
+    ctx.moveTo(cx + ox, cy + oy - 14);
+    ctx.lineTo(cx + ox - 14, cy + oy + 8);
+    ctx.lineTo(cx + ox + 14, cy + oy + 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#f4f4f8";
+    ctx.beginPath();
+    ctx.moveTo(cx + ox, cy + oy - 14);
+    ctx.lineTo(cx + ox - 4, cy + oy - 6);
+    ctx.lineTo(cx + ox + 4, cy + oy - 6);
+    ctx.closePath();
+    ctx.fill();
+  }
   void deps;
 }
 
 export function paintFogHex(ctx: CanvasRenderingContext2D, node: FogHexNode, deps: Paint2DDep): void {
-  // TODO: Transcribe src/render/renderer.ts:154-166 (drawFogHex). Fills with
-  // FOG_FILL, no edge stroke.
-  void ctx;
-  void node;
+  hexPath(ctx, node.world.x, node.world.y);
+  ctx.fillStyle = FOG_FILL;
+  ctx.fill();
+  ctx.strokeStyle = FOG_EDGE;
+  ctx.lineWidth = 1;
+  ctx.stroke();
   void deps;
 }
 
@@ -272,9 +338,10 @@ export function paintHeroTrail(ctx: CanvasRenderingContext2D, node: HeroTrailNod
 }
 
 export function paintHoverHighlight(ctx: CanvasRenderingContext2D, node: HoverHighlightNode, deps: Paint2DDep): void {
-  // TODO: Transcribe src/render/renderer.ts:84-94.
-  void ctx;
-  void node;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = HOVER_STROKE;
+  hexPath(ctx, node.world.x, node.world.y);
+  ctx.stroke();
   void deps;
 }
 
