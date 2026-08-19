@@ -5,6 +5,8 @@ import { HeroInfoMenu } from "@screens/heroes/heroInfoMenu";
 import { HeroRosterMenu } from "@screens/heroes/heroRosterMenu";
 import { SettlementRosterMenu } from "@screens/settlements/settlementRosterMenu";
 import { SettlementInfoMenu } from "@screens/settlements/settlementInfoMenu";
+import { setMinimapReserve } from "@screens/shared/panelRail";
+import { getMinimapReserveHeight } from "../render/minimap";
 import { CityView } from "@screens/settlements/cityView/cityView";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
 import type { HeroId, SettlementState } from "../state/gameState";
@@ -205,6 +207,14 @@ export class UIManager {
 
   getToolbar(): Toolbar | undefined { return this.toolbar; }
   getCityView(): CityView | undefined { return this.cityView; }
+
+  // Breathing room between the panel rail's hard stop and the minimap's own
+  // drawn box, so the rail doesn't sit flush against it.
+  private static readonly MINIMAP_RAIL_GAP = 16;
+
+  setMapDimensions(width: number, height: number): void {
+    setMinimapReserve(getMinimapReserveHeight(width, height) + UIManager.MINIMAP_RAIL_GAP);
+  }
 
   refreshHud(
     gameState: GameState,
