@@ -107,6 +107,15 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
     nodes.push({ kind: "hoverHighlight", q: hover.q, r: hover.r, world: axialToPixel(hover.q, hover.r) });
   }
 
+  if (opts.inspectedTile) {
+    nodes.push({
+      kind: "selectedTileHighlight",
+      q: opts.inspectedTile.q,
+      r: opts.inspectedTile.r,
+      world: axialToPixel(opts.inspectedTile.q, opts.inspectedTile.r),
+    });
+  }
+
   for (const hero of heroes) {
     const canSee = hero.ownerId === opts.viewPlayerId || isVisible(visible, hero.tile.q, hero.tile.r);
     if (!canSee) continue;

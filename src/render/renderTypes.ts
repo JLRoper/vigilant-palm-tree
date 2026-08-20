@@ -30,4 +30,6 @@ export interface RenderOptions {
   activeCharters?: readonly CharterState[];
   /** Valid hexes for charter placement mode. */
   validCharterHexes?: Set<string> | null;
+  /** The clicked/inspected tile driving the tile info panel, if any. Drawn as a persistent selection ring, even through fog. */
+  inspectedTile?: Axial;
 }

@@ -125,6 +125,11 @@ export class GameEngine {
       getCharterMode: () => this.charterPlacementMode,
       setCharterMode: (v: boolean) => { this.charterPlacementMode = v; if (!v) this.validCharterHexes = null; },
       getValidCharterHexes: () => this.validCharterHexes,
+      onTileInspect: (tile) => {
+        if (this.ui.getCityView()?.isOpen()) return;
+        this.ui.setInspectedTile(tile);
+        this.fullFrame();
+      },
     });
   }
 
@@ -160,6 +165,7 @@ export class GameEngine {
       },
     );
     this.ui.initSettlementInfo();
+    this.ui.initTileInfo();
     this.ui.initCityView(() => this.state, this.view);
   }
 
@@ -360,6 +366,7 @@ export class GameEngine {
         pathReachableIdx: this.state.getPathReachableIdx() ?? undefined,
         pathOrigin: this.state.getPathOrigin() ?? undefined,
         selectedHeroTile: selectedHero ? { q: selectedHero.q, r: selectedHero.r } : undefined,
+        inspectedTile: this.view.getInspectedTile() ?? undefined,
       },
       gs.activeCharters,
       this.validCharterHexes,

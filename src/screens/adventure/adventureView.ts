@@ -45,6 +45,7 @@ export interface AdventureViewOptions {
   getCharterMode?: () => boolean;
   setCharterMode?: (v: boolean) => void;
   getValidCharterHexes?: () => Set<string> | null;
+  onTileInspect?: (tile: Axial | null) => void;
 }
 
 const DRAG_MOVE_THRESHOLD = 4;
@@ -99,6 +100,8 @@ export class AdventureView {
   path: Axial[] = [];
   lastClickDebug: LastClickDebug = { hover: null, path: [], reason: "", moved: false };
 
+  private inspectedTile: Axial | null = null;
+
   private dragging = false;
   private movedDuringDrag = false;
   private dragStartX = 0;
@@ -148,10 +151,26 @@ export class AdventureView {
 
   setMap(map: GameMap): void {
     this.opts.map = map;
+    this.setInspectedTile(null);
   }
 
   getPath(): Axial[] {
     return this.path;
+  }
+
+  getInspectedTile(): Axial | null {
+    return this.inspectedTile;
+  }
+
+  clearInspectedTile(): void {
+    this.setInspectedTile(null);
+  }
+
+  private setInspectedTile(tile: Axial | null): void {
+    if (hoverChanged(this.inspectedTile, tile)) {
+      this.inspectedTile = tile;
+      this.opts.onTileInspect?.(tile);
+    }
   }
 
   detach(): void {
@@ -514,9 +533,16 @@ export class AdventureView {
       return;
     }
 
+    // Resolved once here (rather than separately per branch below) so tile
+    // inspection -- a read-only side effect of the click -- always runs,
+    // including during the AI's turn and inside the charter-placement branch.
+    // A click outside the map (t === null) intentionally leaves the current
+    // inspection alone rather than clearing it.
+    const t = this.opts.renderer.hoverFromScreen(e.clientX, e.clientY);
+    this.lastClickDebug.hover = t;
+    if (t) this.setInspectedTile(t);
+
     if (this.opts.getCharterMode?.() && this.opts.getValidCharterHexes?.()) {
-      const t = this.opts.renderer.hoverFromScreen(e.clientX, e.clientY);
-      this.lastClickDebug.hover = t;
       if (t) {
         const key = `${t.q},${t.r}`;
         const validHexes = this.opts.getValidCharterHexes();
@@ -544,8 +570,6 @@ export class AdventureView {
       this.lastClickDebug.reason = "not_player_turn";
       return;
     }
-    const t = this.opts.renderer.hoverFromScreen(e.clientX, e.clientY);
-    this.lastClickDebug.hover = t;
     if (!t) {
       this.lastClickDebug.reason = "no hover";
       return;

@@ -31,7 +31,7 @@ export class ViewManager {
   }
 
   initializeAdventureView(
-    opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw" | "getPathPreviewLock" | "setPathPreviewLock" | "onStartCharter" | "getCharterMode" | "setCharterMode" | "getValidCharterHexes">,
+    opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw" | "getPathPreviewLock" | "setPathPreviewLock" | "onStartCharter" | "getCharterMode" | "setCharterMode" | "getValidCharterHexes" | "onTileInspect">,
   ): void {
     if (this.view) {
       this.view.detach();
@@ -97,5 +97,13 @@ export class ViewManager {
 
   hoverFromScreen(x: number, y: number): Axial | null {
     return this.mapRenderer?.hoverFromScreen(x, y) ?? null;
+  }
+
+  getInspectedTile(): Axial | null {
+    return this.view?.getInspectedTile() ?? null;
+  }
+
+  clearInspectedTile(): void {
+    this.view?.clearInspectedTile();
   }
 }

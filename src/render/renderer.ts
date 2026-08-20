@@ -18,12 +18,14 @@ import {
   HexHoverPainter,
   HexTerrainPainter,
   HeroPainter,
+  SelectedTilePainter,
 } from "./painter";
 
 export class MapRenderer {
   public map: GameMap;
   private readonly backgroundPainter = new BackgroundPainter();
   private readonly terrainPainter = new HexTerrainPainter();
+  private readonly selectedTilePainter = new SelectedTilePainter();
   private readonly hoverPainter = new HexHoverPainter();
   private readonly heroPainter = new HeroPainter();
   private readonly castlePainter = new CastlePainter();
@@ -67,6 +69,8 @@ export class MapRenderer {
     drawTerritoryOutlines(ctx, castles, opts.colorForOwner, this.map.width, this.map.height, visible);
 
     drawPathOverlay(ctx, heroes, path, this.map, opts);
+
+    this.selectedTilePainter.paint(ctx, opts.inspectedTile);
 
     this.hoverPainter.paint(ctx, hover, visible);
 
