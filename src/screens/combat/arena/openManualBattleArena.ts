@@ -166,9 +166,9 @@ export function openManualBattleArena(
 
   // Dev-only paint2d/ SceneNode[] rendering path. Off by default; opt in via
   // ?paint=scenebuilder in the URL. Per
-  // plan/2026-08-17-combat-decomposition-finishing-breakout.md §9.4. The
-  // fallback (drawLegacy) keeps the visual byte-identical to pre-CB-4 until
-  // each battle-kind painter in paint2d/ is transcribed (5.B P1 #5).
+  // plan/2026-08-17-combat-decomposition-finishing-breakout.md §9.4. All eight
+  // battle-kind painters are real transcriptions now (5.B P1 #5, PR #136), so
+  // this path renders standalone -- draw() no longer falls back to drawLegacy().
   const useSceneBuilder = readUseSceneBuilder(window.location.search);
   const arenaPaint2dDeps = buildArenaPaint2dDeps({
     fontFamily: menuTheme.font,
@@ -927,6 +927,7 @@ const FLOAT_MS = 800;
 
   function draw(): void {
     if (useSceneBuilder) {
+      resetCanvasForFrame();
       paintSceneForArena({
         ctx,
         state,
@@ -947,21 +948,26 @@ const FLOAT_MS = 800;
         canvasCssW,
         canvasCssH,
         paint2d: arenaPaint2dDeps,
-        drawFallback: drawLegacy,
       });
     } else {
       drawLegacy();
     }
   }
 
-  function drawLegacy(): void {
-    // All drawing below is in CSS pixels; the device-pixel backing store is
-    // applied here rather than by inflating the layout coordinates, so
-    // hit-testing in the click handler needs no rescaling.
+  // All drawing is in CSS pixels; the device-pixel backing store is applied
+  // here rather than by inflating the layout coordinates, so hit-testing in
+  // the click handler needs no rescaling. Shared by both draw paths -- when
+  // drawFallback still existed, drawLegacy() ran unconditionally every frame
+  // and did this setup for both; now each path must do it for itself.
+  function resetCanvasForFrame(): void {
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, canvasCssW, canvasCssH);
     pruneExpiredEffects(performance.now());
+  }
+
+  function drawLegacy(): void {
+    resetCanvasForFrame();
 
     // Hexes holding one of your platoons that hasn't acted yet. Every platoon
     // has to move each round, so rather than a separate turn-order readout,

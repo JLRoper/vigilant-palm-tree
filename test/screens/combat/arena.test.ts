@@ -420,27 +420,35 @@ test("buildArenaPaint2dDeps: returns a well-formed Paint2DDep", () => {
   assert.equal(deps.validCharterStyle.fill, "transparent");
 });
 
-test("paintSceneForArena: calls drawFallback exactly once when invoked", () => {
-  // Hand-rolled Canvas2D context mock -- paint2d/ calls many ctx.* methods
-  // for the city/adventure kinds, but the battle-kind painters today are all
-  // no-op stubs so the actual ctx calls are minimal. We just need every
-  // property access to return a callable stub so nothing throws.
+test("paintSceneForArena: paints the battle scene itself, with no legacy fallback to double-paint over it", () => {
+  // Recording Canvas2D context mock -- logs every method call so we can
+  // assert paintScene actually emitted battle-kind draw calls (PR #136
+  // transcribed all eight battle painters from no-op stubs to real ctx
+  // calls) rather than relying on a legacy drawFallback to render anything.
+  // PaintSceneForArenaArgs no longer has a drawFallback field at all (see
+  // #143) -- passing one here would now be a TS excess-property error at
+  // the call site below, which is the compile-time half of this guarantee.
+  const calls: string[] = [];
   const ctx = new Proxy({} as Record<string, unknown>, {
     get(_t, prop) {
-      if (typeof prop === "string") return () => undefined;
+      if (typeof prop === "string") {
+        return (..._args: unknown[]) => {
+          calls.push(prop);
+          return undefined;
+        };
+      }
       return undefined;
     },
   }) as unknown as CanvasRenderingContext2D;
 
   const state = makeState();
-  let fallbackCalls = 0;
   paintSceneForArena({
     ctx,
     state,
     humanSide: "attacker",
     aiSide: "defender",
-    selectedSlot: null,
-    moveRange: [],
+    selectedSlot: 0,
+    moveRange: [{ q: 1, r: 0 }],
     attackTargets: [],
     aiActing: false,
     aiActingSlot: null,
@@ -458,11 +466,12 @@ test("paintSceneForArena: calls drawFallback exactly once when invoked", () => {
       attackerAccent: "#3070c0",
       defenderAccent: "#c04040",
     }),
-    drawFallback: () => {
-      fallbackCalls += 1;
-    },
   });
-  assert.equal(fallbackCalls, 1, "drawFallback should run exactly once per invocation");
+
+  // Every hex on the grid produces a battleHex node, so a real per-kind
+  // transcription must fill and stroke at least one hex.
+  assert.ok(calls.includes("fill"), "expected paintScene to actually call ctx.fill() for battle hexes");
+  assert.ok(calls.includes("stroke"), "expected paintScene to actually call ctx.stroke() for battle hexes");
 });
 
 test("paintSceneForArena: handles an active moveAnim without throwing", () => {
@@ -505,6 +514,5 @@ test("paintSceneForArena: handles an active moveAnim without throwing", () => {
       attackerAccent: "#3070c0",
       defenderAccent: "#c04040",
     }),
-    drawFallback: () => undefined,
   });
 });
