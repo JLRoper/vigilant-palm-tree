@@ -23,6 +23,7 @@ export type SceneNode =
   | PathSegmentNode
   | HeroTrailNode
   | HoverHighlightNode
+  | SelectedTileHighlightNode
   | HeroNode
   | CitySkyboxNode
   | CityCellNode
@@ -123,6 +124,13 @@ export interface HeroTrailNode {
 
 export interface HoverHighlightNode {
   kind: "hoverHighlight";
+  q: number;
+  r: number;
+  world: WorldPoint;
+}
+
+export interface SelectedTileHighlightNode {
+  kind: "selectedTileHighlight";
   q: number;
   r: number;
   world: WorldPoint;

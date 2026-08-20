@@ -5,11 +5,14 @@ import { HeroInfoMenu } from "@screens/heroes/heroInfoMenu";
 import { HeroRosterMenu } from "@screens/heroes/heroRosterMenu";
 import { SettlementRosterMenu } from "@screens/settlements/settlementRosterMenu";
 import { SettlementInfoMenu } from "@screens/settlements/settlementInfoMenu";
+import { TileInfoPanel } from "@screens/adventure/tileInfoPanel";
+import { describeTile } from "@screens/adventure/tileInfo";
 import { setMinimapReserve } from "@screens/shared/panelRail";
 import { getMinimapReserveHeight } from "../render/minimap";
 import { CityView } from "@screens/settlements/cityView/cityView";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
 import type { HeroId, SettlementState } from "../state/gameState";
+import type { Axial } from "../core/hex";
 import { Hero } from "../entities/hero";
 import { SpriteProvider } from "../render/assets";
 import { playerIncome, playerWealth } from "@heroes/engine";
@@ -36,6 +39,8 @@ export class UIManager {
   private heroRosterMenu?: HeroRosterMenu;
   private settlementRosterMenu?: SettlementRosterMenu;
   private settlementInfoMenu?: SettlementInfoMenu;
+  private tileInfoPanel?: TileInfoPanel;
+  private inspectedTile: Axial | null = null;
   private cityView?: CityView;
   private gameStateManager?: GameStateManager;
   private viewManager?: ViewManager;
@@ -130,6 +135,20 @@ export class UIManager {
       onRecruitHero: (name, variant) => this.handleRecruitHero(name, variant),
       onUpgradeSettlement: () => this.handleUpgradeSettlement(),
     });
+  }
+
+  initTileInfo(): void {
+    this.tileInfoPanel = new TileInfoPanel({
+      parent: document.body,
+      onClose: () => {
+        this.inspectedTile = null;
+        this.viewManager?.clearInspectedTile();
+      },
+    });
+  }
+
+  setInspectedTile(tile: Axial | null): void {
+    this.inspectedTile = tile;
   }
 
   initCityView(
@@ -232,6 +251,7 @@ export class UIManager {
     );
     this.refreshHeroInfoMenu(gameState, heroes);
     this.refreshSettlementInfoMenu(gameState);
+    this.refreshTileInfoPanel(gameState, heroes, localPlayerId);
     this.refreshRosterMenus(gameState);
     this.toolbar?.refresh();
   }
@@ -281,6 +301,31 @@ export class UIManager {
     } else {
       this.settlementInfoMenu.update(settlement, gameState);
     }
+  }
+
+  private refreshTileInfoPanel(gameState: GameState, heroes: Record<string, Hero>, localPlayerId: PlayerId | null): void {
+    if (!this.tileInfoPanel || !this.gameStateManager) return;
+    if (this.cityView?.isOpen()) {
+      this.tileInfoPanel.hide();
+      return;
+    }
+    if (!this.inspectedTile) {
+      this.tileInfoPanel.hide();
+      return;
+    }
+    const info = describeTile({
+      map: this.gameStateManager.getGameMap(),
+      state: gameState,
+      heroes: Object.values(heroes),
+      castles: this.gameStateManager.getSettlements(),
+      viewPlayerId: localPlayerId ?? 0,
+      tile: this.inspectedTile,
+    });
+    if (!info) {
+      this.tileInfoPanel.hide();
+      return;
+    }
+    this.tileInfoPanel.update(info);
   }
 
   private refreshRosterMenus(gameState: GameState): void {

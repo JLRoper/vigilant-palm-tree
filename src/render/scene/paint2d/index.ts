@@ -50,6 +50,7 @@ import type {
   PathSegmentNode,
   ResourceIconNode,
   SceneNode,
+  SelectedTileHighlightNode,
   TerrainDecorationNode,
   TerrainHexNode,
   TerritoryOutlineEdgeNode,
@@ -63,6 +64,7 @@ import type {
 const FOG_FILL = "rgba(8, 10, 16, 0.78)";
 const FOG_EDGE = "rgba(8, 10, 16, 0.55)";
 const HOVER_STROKE = "#ffcc00";
+const SELECTED_TILE_STROKE = "#ffffff";
 
 const PARALLAX_SPEEDS: Record<number, number[]> = {
   2: [0.1, 1.0],
@@ -218,6 +220,9 @@ export function paintScene(
         break;
       case "hoverHighlight":
         paintHoverHighlight(ctx, node, deps);
+        break;
+      case "selectedTileHighlight":
+        paintSelectedTileHighlight(ctx, node, deps);
         break;
       case "hero":
         paintHero(ctx, node, deps);
@@ -508,6 +513,16 @@ export function paintHoverHighlight(ctx: CanvasRenderingContext2D, node: HoverHi
   ctx.strokeStyle = HOVER_STROKE;
   hexPath(ctx, node.world.x, node.world.y);
   ctx.stroke();
+  void deps;
+}
+
+export function paintSelectedTileHighlight(ctx: CanvasRenderingContext2D, node: SelectedTileHighlightNode, deps: Paint2DDep): void {
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = SELECTED_TILE_STROKE;
+  ctx.setLineDash([4, 3]);
+  hexPath(ctx, node.world.x, node.world.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
   void deps;
 }
 

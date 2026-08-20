@@ -15,6 +15,7 @@ import type {
   HoverHighlightNode,
   PathSegmentNode,
   ResourceIconNode,
+  SelectedTileHighlightNode,
   TerrainHexNode,
   TerritoryOutlineEdgeNode,
   ValidCharterHexNode,
@@ -192,6 +193,25 @@ test("hover highlight only appears when the hovered tile is visible", () => {
 
   const farHover = buildAdventureScene({ map, heroes: [hero], castles: [], path: [], hover: { q: 5, r: 0 }, opts });
   assert.equal(nodesOfKind<HoverHighlightNode>(farHover, "hoverHighlight").length, 0, "q=5 is hex-distance 5 from the hero, outside VISION_RANGE=4");
+});
+
+test("selected-tile highlight is emitted from opts.inspectedTile, even on a fogged hex (unlike hover)", () => {
+  const map = makeGrassMap(6, 1);
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0);
+
+  const noSelection = buildAdventureScene({
+    map, heroes: [hero], castles: [], path: [], hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  assert.equal(nodesOfKind<SelectedTileHighlightNode>(noSelection, "selectedTileHighlight").length, 0);
+
+  const fogged = buildAdventureScene({
+    map, heroes: [hero], castles: [], path: [], hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, inspectedTile: { q: 5, r: 0 } }),
+  });
+  const nodes = nodesOfKind<SelectedTileHighlightNode>(fogged, "selectedTileHighlight");
+  assert.equal(nodes.length, 1, "q=5 is fogged (outside VISION_RANGE=4) but the ring should still draw");
+  assert.deepEqual(nodes[0].world, axialToPixel(5, 0));
 });
 
 test("path nodes: fully reachable path produces one segment plus the hero's trail", () => {
