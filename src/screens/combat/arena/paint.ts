@@ -48,17 +48,7 @@ export interface PaintSceneForArenaArgs {
   readonly canvasCssW: number;
   readonly canvasCssH: number;
   readonly paint2d: Paint2DDep;
-  // Legacy draw() implementation. Called AFTER paintScene() so any battle-kind
-  // node whose paint2d/ painter is still a no-op stub (per 5.B P1 #5 paint2d/
-  // per-kind transcription) renders through the pre-CB-4 code path. Today all
-  // eight battle-kind painters are stubs, so the fallback renders everything
-  // and the visual is byte-identical to pre-CB-4. As painters land, callers
-  // can drop the drawFallback and the pipeline becomes pure-SceneNode. See
-  // §9.3 of the breakout plan.
-  readonly drawFallback: (ctx: CanvasRenderingContext2D) => void;
 }
-
-export type DrawFallback = (ctx: CanvasRenderingContext2D) => void;
 
 export function paintSceneForArena(args: PaintSceneForArenaArgs): void {
   const nowMs = performance.now();
@@ -88,11 +78,6 @@ export function paintSceneForArena(args: PaintSceneForArenaArgs): void {
   const frame: Paint2DFrame = { viewportW: args.canvasCssW, viewportH: args.canvasCssH };
 
   paintScene(args.ctx, nodes, args.paint2d, frame);
-
-  // Fallback: render via the legacy draw() so the visual stays byte-identical
-  // to pre-CB-4 behavior while every battle-kind painter is still a stub.
-  // Removed per-kind as paint2d/ per-kind transcription (5.B P1 #5) lands.
-  args.drawFallback(args.ctx);
 }
 
 export interface ArenaPaint2dDepsOptions {

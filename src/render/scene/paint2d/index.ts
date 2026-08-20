@@ -2,10 +2,10 @@
 // src/render/scene/sceneBuilder/{adventureScene,cityScene,battleScene}.ts.
 //
 // This is the dispatcher shell: it switches on node.kind and dispatches to a
-// per-kind painter function. Each per-kind painter is currently a stub
-// (no-op). The actual per-kind Canvas transcription is a follow-up -- this
-// commit only establishes the module tree, the Paint2DDep seam, and the
-// dispatcher.
+// per-kind painter function. Every per-kind painter below is a real Canvas2D
+// transcription of its legacy draw()/cityRenderer.ts/renderer.ts equivalent
+// (adventure/city kinds landed in PR #135, the eight battle kinds in #136) --
+// none of them are stubs any more.
 //
 // The seam is the whole point. paint2d/ never imports assetDescriptors.ts,
 // assets.ts, sprites.ts, cityRenderer.ts, cityBuildingDraw.ts (barrel), or
@@ -280,10 +280,10 @@ export function paintScene(
   }
 }
 
-// ---- Per-kind stubs ------------------------------------------------------------
-// Each function is a no-op. The actual 1:1 Canvas transcription lives in
-// follow-up commits; this module only establishes the seam, the dispatcher,
-// and the per-kind function signatures that the painters will satisfy.
+// ---- Per-kind painters -----------------------------------------------------
+// 1:1 Canvas transcriptions of the legacy draw paths, matching their output
+// byte-for-byte per the per-kind function signatures the dispatcher above
+// satisfies.
 
 export function paintTerrainHex(ctx: CanvasRenderingContext2D, node: TerrainHexNode, deps: Paint2DDep): void {
   const colors = TERRAIN_COLORS[node.terrain];
