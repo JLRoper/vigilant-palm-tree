@@ -82,7 +82,7 @@ export interface GameRepo {
 }
 
 export interface EventRepo {
-  append(gameName: string, kind: string, payload: unknown): Promise<void>;
+  append(gameName: string, kind: string, payload: unknown, actorSeat: number | null): Promise<void>;
 }
 
 // Phase 4 Track A (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md,
@@ -289,7 +289,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         heroId: command.heroId,
         to: command.toTile,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], hero: result.state.heroes[command.heroId] };
     }
     case "TransferGold": {
@@ -310,7 +310,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         direction: command.direction,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return {
         ok: true,
         events: [event],
@@ -401,7 +401,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // all under its own name, which is exactly the kind of
       // per-command inconsistency a future kind-based consumer of
       // game_events would trip over.
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       // In addition to that, preserve the old /end-turn route's exact
       // game_events `kind` strings (turn_ended/round_ended/round_started/
       // ai_turn_started) as their own rows -- nothing in this codebase
@@ -412,17 +412,19 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       await deps.eventRepo.append(command.gameName, "turn_ended", {
         playerId: command.actor,
         round: row.round,
-      });
+      }, command.actor);
       if (wrapped) {
-        await deps.eventRepo.append(command.gameName, "round_ended", { round: row.round });
-        await deps.eventRepo.append(command.gameName, "round_started", { round: finalState.round });
+        await deps.eventRepo.append(command.gameName, "round_ended", { round: row.round }, command.actor);
+        // Not attributable to a single seat -- see
+        // server/migrations/010_event_seq.sql's header comment.
+        await deps.eventRepo.append(command.gameName, "round_started", { round: finalState.round }, null);
       }
       const nextPlayer = finalState.players.find((p) => p.id === finalState.activePlayerId);
       if (nextPlayer?.faction === "ai") {
         await deps.eventRepo.append(command.gameName, "ai_turn_started", {
           playerId: finalState.activePlayerId,
           round: finalState.round,
-        });
+        }, null);
       }
       return {
         ok: true,
@@ -475,7 +477,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         resource: command.resource,
         amount: command.amount,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return {
         ok: true,
         events: [event],
@@ -585,7 +587,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         rounds: battle.rounds,
         obstacleSeed,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return {
         ok: true,
         events: [event],
@@ -618,7 +620,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         horseVariant: command.horseVariant,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], hero: result.hero, players: result.state.players };
     }
     case "UpgradeTownHall": {
@@ -646,7 +648,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         targetLevel: command.targetLevel,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], settlement: result.state.settlements[command.settlementId] };
     }
     case "SetAutoTrade": {
@@ -680,7 +682,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         autoTrade: command.autoTrade,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], settlement: nextState.settlements[command.settlementId] };
     }
     case "ReorderStack": {
@@ -710,7 +712,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         fromIdx: command.fromIdx,
         toIdx: command.toIdx,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], hero: result.state.heroes[command.heroId] };
     }
     case "CaptureSettlement": {
@@ -746,7 +748,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         previousOwnerId: result.previousOwnerId,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return {
         ok: true,
         events: [event],
@@ -835,7 +837,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         targetQ: command.targetQ,
         targetR: command.targetR,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], hero: result.state.heroes[command.heroId] };
     }
     case "UpgradeBuilding": {
@@ -863,7 +865,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         actor: command.actor,
         settlementId: command.settlementId,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], settlement: result.state.settlements[command.settlementId] };
     }
     case "UpgradeSettlement": {
@@ -915,7 +917,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         targetLevel,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event);
+      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], settlement: result.state.settlements[command.settlementId] };
     }
   }

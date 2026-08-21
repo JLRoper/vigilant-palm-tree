@@ -6,16 +6,19 @@ import type { Queryable } from "./gameRepo";
 // happens here, in the same statement, via the same approach
 // server/app/liveRepos.ts's placeholder already uses.
 export interface EventRepo {
-  append(gameName: string, kind: string, payload: unknown): Promise<void>;
+  // actorSeat is null for events not attributable to a single seat (see
+  // server/migrations/010_event_seq.sql's header) -- round_started/
+  // ai_turn_started today.
+  append(gameName: string, kind: string, payload: unknown, actorSeat: number | null): Promise<void>;
 }
 
 export function createEventRepo(db: Queryable): EventRepo {
   return {
-    async append(gameName, kind, payload) {
+    async append(gameName, kind, payload, actorSeat) {
       await db.query(
-        `INSERT INTO game_events (game_id, kind, payload)
-         SELECT id, $2, $3::jsonb FROM games WHERE name = $1`,
-        [gameName, kind, JSON.stringify(payload)],
+        `INSERT INTO game_events (game_id, kind, payload, actor_seat)
+         SELECT id, $2, $3::jsonb, $4 FROM games WHERE name = $1`,
+        [gameName, kind, JSON.stringify(payload), actorSeat],
       );
     },
   };

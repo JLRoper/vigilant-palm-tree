@@ -165,6 +165,7 @@ test("MoveHero succeeds, persists the new position, and emits HeroMoved", async 
   assert.equal(gameRepo.rows["test-game"].heroes.h0.movementRemaining, 6);
   assert.equal(eventRepo.events.length, 1);
   assert.equal(eventRepo.events[0].kind, "HeroMoved");
+  assert.equal(eventRepo.events[0].actorSeat, command.actor);
 });
 
 test("MoveHero rejects a move onto a tile already occupied by another hero", async () => {
@@ -313,6 +314,13 @@ test("EndTurn advances to the next player without wrapping the round", async () 
   // /end-turn route's same check.
   assert.equal(eventRepo.events.map((e) => e.kind).join(","), "TurnEnded,turn_ended,ai_turn_started");
   assert.equal((eventRepo.events[1].payload as { playerId: number }).playerId, 0);
+  // TurnEnded/turn_ended are attributable to the player who ended their
+  // turn; ai_turn_started is not attributable to a single seat (see
+  // server/migrations/010_event_seq.sql's header) and gets null.
+  assert.deepEqual(
+    eventRepo.events.map((e) => e.actorSeat),
+    [0, 0, null],
+  );
 });
 
 test("EndTurn wraps the round, advances settlement upgrades, and applies weekly upkeep on day%7 -- closing the gaps the old /end-turn route left client-trusted", async () => {
@@ -354,6 +362,12 @@ test("EndTurn wraps the round, advances settlement upgrades, and applies weekly 
   assert.equal(h0.troops, 0);
 
   assert.equal(eventRepo.events.map((e) => e.kind).join(","), "TurnEnded,turn_ended,round_ended,round_started");
+  // round_started is not attributable to a single seat; the other three
+  // are attributable to the player who ended the turn/round.
+  assert.deepEqual(
+    eventRepo.events.map((e) => e.actorSeat),
+    [0, 0, 0, null],
+  );
 });
 
 // ---------------------------------------------------------------------------
