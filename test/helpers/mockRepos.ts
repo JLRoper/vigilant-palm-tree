@@ -73,14 +73,16 @@ export interface RecordedEvent {
   gameName: string;
   kind: string;
   payload: unknown;
+  actorSeat: number | null;
 }
 
 export function createMockEventRepo(): EventRepo & { events: RecordedEvent[] } {
   const events: RecordedEvent[] = [];
   return {
     events,
-    async append(gameName: string, kind: string, payload: unknown): Promise<void> {
-      events.push({ gameName, kind, payload });
+    async append(gameName: string, kind: string, payload: unknown, actorSeat: number | null): Promise<number> {
+      events.push({ gameName, kind, payload, actorSeat });
+      return events.length;
     },
   };
 }
