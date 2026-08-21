@@ -193,7 +193,7 @@ async function runGameScenes(context: BrowserContext): Promise<void> {
   // FIRST" comment) -- a fresh game here is JSONB-backed, so a real
   // StartCharter round-trip always fails with charters_persist_unavailable.
   // The charter overlay only ever reads targetQ/targetR/phase to render
-  // (CharterPainter.ts / adventureScene.ts), so the injected object is
+  // (adventureScene.ts / paint2d's paintCharterOverlay), so the injected object is
   // exactly as good a fixture as a persisted one for this screenshot.
   const settlements = await page.evaluate(() => (window as unknown as { __gameDebug: Dbg }).__gameDebug.getSettlements());
   const homeSettlement = settlements.find((s: any) => s.ownerId === 0);

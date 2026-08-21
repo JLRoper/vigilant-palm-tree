@@ -63,17 +63,39 @@ painter project that are allowed to touch the forbidden set. They live outside
 
 `src/render/scene/paint2d/index.ts` exports `paintScene(ctx, nodes, deps,
 frame?)`. It switches on `node.kind` and dispatches to a per-kind painter
-function. The per-kind functions are currently stubs (no-ops); the
-1:1 Canvas transcription per kind is a follow-up commit sequence (Commits 3-10
-in the design doc). This commit only establishes the module skeleton, the
-dispatcher, the dep interface, the file tree, and the boundary enforcement.
+function -- all 27 kinds are real Canvas transcriptions (PRs #135, #136), none
+are stubs.
 
-## Why this commit exists
+Two kinds are **run-batched** rather than painted one node at a time, because
+their pre-cutover originals drew in passes rather than per item:
 
-The headline pitfall of *this* module is the Vite `?url` seam. If we tried to
-ship the actual Canvas transcription in one massive commit, the pitfall would
-likely slip in undiscovered (a `node:test` import path that crashes only
-locally, masked by Vite's loader elsewhere). The shell + seam approach
-isolates the risk: the seam test (`test/render/paint2d.seam.test.ts`) **fails
-loudly** if the boundary ever leaks, before any Canvas work touches the
-forbidden imports.
+- consecutive same-owner `territoryOutlineEdge` nodes stroke as one path.
+  `drawTerritoryOutlines()` batched per owner and the stroke runs at
+  `globalAlpha: 0.45` with round caps -- per-edge strokes double-blend every
+  shared endpoint into a visible bead.
+- a run of `cityBuilding` nodes paints every building body first, and only
+  then the dashed selection rings, matching `drawCityView()`'s two passes.
+  Otherwise a later building can paint over an earlier one's ring.
+
+Draw order is the scene builder's business, not the painter's: `paintScene`
+walks the list it is given.
+
+## Consumers
+
+- `src/render/renderer.ts` -- `MapRenderer.draw()` (adventure map)
+- `src/render/cityRenderer.ts` -- `drawCityView()` (city interior)
+- `src/screens/combat/arena/paint.ts` -- `paintSceneForArena()` (battle,
+  behind `?paint=scenebuilder`; see #143 for that flag's double-paint)
+
+## Why this module exists
+
+The headline pitfall is the Vite `?url` seam. A `node:test` import path that
+crashes only outside Vite is exactly the kind of thing that slips in
+undiscovered, so the seam test (`test/render/paint2d.seam.test.ts`) **fails
+loudly** the moment the boundary leaks -- before any Canvas work depends on it.
+
+The second reason is the one issue #148 paid for: while `paint2d/` sat unwired
+next to a live `src/render/painter/` set drawing the same things, the two
+drifted apart in six separate ways and nothing caught it, because only one of
+them ran. There is now one painter set, and `npm run test:visual` diffs its
+output against committed screenshots.

@@ -29,9 +29,30 @@ import type { HorseVariant, ResourceStyle } from "../../../state/settings";
 // names a key string in source.
 export type SpriteKey = string;
 
+// Structural mirror of assetDescriptors.ts's SpriteDescriptor. Mirrored
+// rather than imported for the same ?url reason as SpriteKey above; the
+// default-deps builder passes the live descriptor's fields straight through,
+// so anchor/sizing must be part of the shape -- drawWithDescriptor() in
+// index.ts reads them on every sprite draw.
+export type ResolvedSpriteAnchor = "bottom" | "center";
+
+export type ResolvedSpriteSizing =
+  | { kind: "abs"; size: number }
+  | { kind: "fitHeight"; hexSizeMul: number }
+  | { kind: "fitWidth"; hexSizeMul: number };
+
+export interface ResolvedSpriteDescriptor {
+  key: string;
+  url: string | null;
+  anchor: ResolvedSpriteAnchor;
+  sizing: ResolvedSpriteSizing;
+  naturalSize?: number;
+  anchorOffsetY?: number;
+}
+
 export interface ResolvedSprite {
   drawable: HTMLImageElement | HTMLCanvasElement;
-  descriptor: { key: string; url: string | null; naturalSize?: number };
+  descriptor: ResolvedSpriteDescriptor;
   ready: boolean;
 }
 

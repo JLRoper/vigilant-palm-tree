@@ -114,7 +114,7 @@ export function attachDebugApi(engine: AttachDebugApiEngine): void {
 
     // Injects a charter directly into local state for rendering purposes --
     // the adventure scene's charter overlay only ever reads targetQ/targetR/
-    // phase (see CharterPainter.ts / adventureScene.ts), so this skips the
+    // phase (see adventureScene.ts / paint2d's paintCharterOverlay), so this skips the
     // real startCharter command/reducer/server round-trip entirely rather
     // than fighting commandHandler.ts's granular-vs-JSONB-storage gate on
     // StartCharter persistence (server/app/commandHandler.ts's "Source gate

@@ -38,12 +38,14 @@ import { settings } from "../state/settings";
 import {
   buildingKey,
   castleKey,
+  heroDirectionKey,
   heroKey,
   horseVariantKey,
   resourceStyleKey,
   type SpriteKey,
 } from "./assetDescriptors";
 import { SpriteProvider } from "./assets";
+import type { ResolvedSprite as LiveResolvedSprite } from "./assets";
 
 // `createSkyboxProvider` is dynamically imported only when the caller does not
 // supply a `skybox` option. This keeps `paint2dDefaults.ts` importable under
@@ -85,20 +87,16 @@ function defaultCharterStyle(phase: CharterPhase): CharterStyle {
   }
 }
 
-function narrowResolvedSprite(resolved: {
-  drawable: HTMLImageElement | HTMLCanvasElement;
-  descriptor: unknown;
-  ready: boolean;
-} | undefined): ResolvedSprite | undefined {
+// SpriteDescriptor is structurally assignable to ResolvedSpriteDescriptor
+// (same anchor/sizing/naturalSize/anchorOffsetY fields, SpriteKey widening to
+// string), so the descriptor passes through untouched. It must: the painter's
+// drawWithDescriptor() reads anchor and sizing on every sprite draw, and an
+// earlier version of this function dropped both.
+function narrowResolvedSprite(resolved: LiveResolvedSprite | undefined): ResolvedSprite | undefined {
   if (!resolved) return undefined;
-  const desc = resolved.descriptor as { key?: unknown; url?: unknown; naturalSize?: unknown };
   return {
     drawable: resolved.drawable,
-    descriptor: {
-      key: typeof desc.key === "string" ? desc.key : "",
-      url: typeof desc.url === "string" ? desc.url : null,
-      ...(typeof desc.naturalSize === "number" ? { naturalSize: desc.naturalSize } : {}),
-    },
+    descriptor: resolved.descriptor,
     ready: resolved.ready,
   };
 }
@@ -114,10 +112,14 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
       direction: HeroDirection,
       variant: HorseVariant,
     ): ResolvedSprite | undefined {
+      // Mirrors drawHeroSprite()/drawHorseSprite() in sprites.ts exactly: the
+      // player hero has per-direction sprites, the enemy hero does not.
       const key =
-        variant === "hero"
-          ? (heroKey(faction) as SpriteKey)
-          : (horseVariantKey(variant, direction) as SpriteKey);
+        variant !== "hero"
+          ? (horseVariantKey(variant, direction) as SpriteKey)
+          : faction === "player"
+            ? (heroDirectionKey("player", direction) as SpriteKey)
+            : (heroKey(faction) as SpriteKey);
       return narrowResolvedSprite(provider.resolve(key));
     },
     resolveSpriteForBuilding(
@@ -159,15 +161,32 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
 export async function createDefaultPaint2DDep(
   options: DefaultPaint2DDepOptions,
 ): Promise<Paint2DDep> {
-  const sprite = buildSpriteResolver(options.spriteProvider);
   const skybox =
     options.skybox === undefined
       ? (await loadCreateSkyboxProvider())()
       : options.skybox;
+  return createPaint2DDep({ ...options, skybox });
+}
+
+/**
+ * Synchronous sibling of `createDefaultPaint2DDep` for callers that already
+ * hold a `SkyboxProvider` (or don't need one, e.g. the adventure map). The
+ * async variant exists only to lazily resolve the default skybox provider,
+ * which drags in the four Vite `?url` PNG imports; supply `skybox` yourself
+ * and there is nothing to await.
+ *
+ * Per-frame draw paths must build the dep once and reuse it -- the skybox
+ * provider owns the image + layer-canvas caches, so a fresh dep per frame
+ * would re-decode the skybox on every draw.
+ */
+export function createPaint2DDep(
+  options: DefaultPaint2DDepOptions & { readonly skybox: SkyboxProvider | null },
+): Paint2DDep {
+  const sprite = buildSpriteResolver(options.spriteProvider);
 
   return {
     sprite,
-    skybox,
+    skybox: options.skybox,
     getResourceStyle: () => settings().resourceStyle,
     getSpriteVariant: () => settings().spriteVariant,
     getParallaxEnabled: () => settings().parallaxEnabled,
