@@ -92,3 +92,17 @@ test("eventRepo.append round-trips actor_seat, including null for unattributed e
     );
   });
 });
+
+test("eventRepo.append returns the inserted row's id, increasing per call", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createEventRepo(client);
+
+    const firstId = await repo.append(name, "move_completed", { step: 1 }, 0);
+    const secondId = await repo.append(name, "transfer_gold", { step: 2 }, 0);
+
+    assert.equal(typeof firstId, "number");
+    assert.ok(secondId > firstId);
+  });
+});

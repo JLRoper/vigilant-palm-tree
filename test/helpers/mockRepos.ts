@@ -80,8 +80,9 @@ export function createMockEventRepo(): EventRepo & { events: RecordedEvent[] } {
   const events: RecordedEvent[] = [];
   return {
     events,
-    async append(gameName: string, kind: string, payload: unknown, actorSeat: number | null): Promise<void> {
+    async append(gameName: string, kind: string, payload: unknown, actorSeat: number | null): Promise<number> {
       events.push({ gameName, kind, payload, actorSeat });
+      return events.length;
     },
   };
 }

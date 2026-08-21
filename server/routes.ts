@@ -475,6 +475,23 @@ router.post("/games/:name/events", async (req, res) => {
 });
 
 router.get("/games/:name/events", async (req, res) => {
+  // ?after=<id> is the poll cursor (game_events.id, BIGSERIAL -- strictly
+  // monotonic per row, so it doubles as a cursor with no separate seq
+  // column needed; see server/migrations/010_event_seq.sql's header).
+  // Defaults to 0 (the whole log) so existing callers with no cursor yet
+  // keep working unchanged. Rejected outright rather than silently ignored
+  // when present but not a valid non-negative integer, so a client bug
+  // (e.g. passing NaN or a stringified object) surfaces immediately
+  // instead of quietly refetching the entire log forever.
+  const afterRaw = req.query.after;
+  let after = 0;
+  if (afterRaw !== undefined) {
+    if (typeof afterRaw !== "string" || !/^\d+$/.test(afterRaw)) {
+      res.status(400).json({ error: "invalid after cursor" });
+      return;
+    }
+    after = Number(afterRaw);
+  }
   const game = await pool.query<{ id: number }>(
     "SELECT id FROM games WHERE name = $1",
     [req.params.name]
@@ -483,9 +500,11 @@ router.get("/games/:name/events", async (req, res) => {
     res.status(404).json({ error: "game not found" });
     return;
   }
+  // A cursor past the end of the log is a normal "nothing new yet" poll
+  // result, not an error -- returns an empty array, not a 404.
   const r = await pool.query(
-    "SELECT id, kind, payload, created_at FROM game_events WHERE game_id = $1 ORDER BY id ASC",
-    [game.rows[0].id]
+    "SELECT id, kind, payload, created_at FROM game_events WHERE game_id = $1 AND id > $2 ORDER BY id ASC",
+    [game.rows[0].id, after]
   );
   res.json(r.rows);
 });

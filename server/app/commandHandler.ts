@@ -82,7 +82,7 @@ export interface GameRepo {
 }
 
 export interface EventRepo {
-  append(gameName: string, kind: string, payload: unknown, actorSeat: number | null): Promise<void>;
+  append(gameName: string, kind: string, payload: unknown, actorSeat: number | null): Promise<number>;
 }
 
 // Phase 4 Track A (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md,
@@ -129,6 +129,11 @@ export interface CommandResult {
   ok: boolean;
   reason?: string;
   events: EngineEvent[];
+  // game_events.id of the last event this command's own writes caused
+  // (undefined on a failed command, which appends nothing). Lets the caller
+  // advance its poll cursor past its own writes instead of re-fetching and
+  // re-applying them on the next GET .../events?after= poll.
+  lastEventId?: number;
   // The old spend_movement/transfer endpoints returned the updated
   // hero/settlement directly; preserved here so their client call sites
   // (src/io/api.ts) keep that even though the command's own authoritative
@@ -289,8 +294,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         heroId: command.heroId,
         to: command.toTile,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], hero: result.state.heroes[command.heroId] };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, hero: result.state.heroes[command.heroId] };
     }
     case "TransferGold": {
       const result = transferGold(state, command.heroId, command.settlementId, command.direction);
@@ -310,10 +315,11 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         direction: command.direction,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return {
         ok: true,
         events: [event],
+        lastEventId,
         hero: result.state.heroes[command.heroId],
         settlement: result.state.settlements[command.settlementId],
       };
@@ -401,27 +407,29 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // all under its own name, which is exactly the kind of
       // per-command inconsistency a future kind-based consumer of
       // game_events would trip over.
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      let lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       // In addition to that, preserve the old /end-turn route's exact
       // game_events `kind` strings (turn_ended/round_ended/round_started/
       // ai_turn_started) as their own rows -- nothing in this codebase
       // currently reads game_events by kind (confirmed: GET
       // /games/:name/events has no client caller yet), but keeping the
       // same audit-trail shape is free and avoids silently changing it
-      // for whatever eventually does.
-      await deps.eventRepo.append(command.gameName, "turn_ended", {
+      // for whatever eventually does. lastEventId is reassigned through
+      // each of these so it ends up holding the highest id this command
+      // caused, whichever of these ends up being the last one appended.
+      lastEventId = await deps.eventRepo.append(command.gameName, "turn_ended", {
         playerId: command.actor,
         round: row.round,
       }, command.actor);
       if (wrapped) {
-        await deps.eventRepo.append(command.gameName, "round_ended", { round: row.round }, command.actor);
+        lastEventId = await deps.eventRepo.append(command.gameName, "round_ended", { round: row.round }, command.actor);
         // Not attributable to a single seat -- see
         // server/migrations/010_event_seq.sql's header comment.
-        await deps.eventRepo.append(command.gameName, "round_started", { round: finalState.round }, null);
+        lastEventId = await deps.eventRepo.append(command.gameName, "round_started", { round: finalState.round }, null);
       }
       const nextPlayer = finalState.players.find((p) => p.id === finalState.activePlayerId);
       if (nextPlayer?.faction === "ai") {
-        await deps.eventRepo.append(command.gameName, "ai_turn_started", {
+        lastEventId = await deps.eventRepo.append(command.gameName, "ai_turn_started", {
           playerId: finalState.activePlayerId,
           round: finalState.round,
         }, null);
@@ -429,6 +437,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       return {
         ok: true,
         events: [event],
+        lastEventId,
         heroes: finalState.heroes,
         settlements: finalState.settlements,
         round: finalState.round,
@@ -477,10 +486,11 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         resource: command.resource,
         amount: command.amount,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return {
         ok: true,
         events: [event],
+        lastEventId,
         fromSettlement: result.state.settlements[command.fromSettlementId],
         toSettlement: result.state.settlements[command.toSettlementId],
       };
@@ -587,10 +597,11 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         rounds: battle.rounds,
         obstacleSeed,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return {
         ok: true,
         events: [event],
+        lastEventId,
         attackerHero: newHeroes[command.attackerId],
         defenderHero: newHeroes[command.defenderId],
         battle,
@@ -620,8 +631,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         horseVariant: command.horseVariant,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], hero: result.hero, players: result.state.players };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, hero: result.hero, players: result.state.players };
     }
     case "UpgradeTownHall": {
       const settlement = row.settlements[command.settlementId];
@@ -648,8 +659,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         targetLevel: command.targetLevel,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], settlement: result.state.settlements[command.settlementId] };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
     }
     case "SetAutoTrade": {
       const settlement = row.settlements[command.settlementId];
@@ -682,8 +693,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         autoTrade: command.autoTrade,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], settlement: nextState.settlements[command.settlementId] };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, settlement: nextState.settlements[command.settlementId] };
     }
     case "ReorderStack": {
       const hero = row.heroes[command.heroId];
@@ -712,8 +723,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         fromIdx: command.fromIdx,
         toIdx: command.toIdx,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], hero: result.state.heroes[command.heroId] };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, hero: result.state.heroes[command.heroId] };
     }
     case "CaptureSettlement": {
       const hero = row.heroes[command.heroId];
@@ -748,10 +759,11 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         previousOwnerId: result.previousOwnerId,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return {
         ok: true,
         events: [event],
+        lastEventId,
         hero: result.state.heroes[command.heroId],
         settlement: result.state.settlements[command.settlementId],
         players: result.state.players,
@@ -837,8 +849,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         targetQ: command.targetQ,
         targetR: command.targetR,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], hero: result.state.heroes[command.heroId] };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, hero: result.state.heroes[command.heroId] };
     }
     case "UpgradeBuilding": {
       const settlement = row.settlements[command.settlementId];
@@ -865,8 +877,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         actor: command.actor,
         settlementId: command.settlementId,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], settlement: result.state.settlements[command.settlementId] };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
     }
     case "UpgradeSettlement": {
       const settlement = row.settlements[command.settlementId];
@@ -917,8 +929,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         targetLevel,
       };
-      await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], settlement: result.state.settlements[command.settlementId] };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
     }
   }
 
