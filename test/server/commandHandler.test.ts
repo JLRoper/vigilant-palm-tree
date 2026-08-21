@@ -166,6 +166,7 @@ test("MoveHero succeeds, persists the new position, and emits HeroMoved", async 
   assert.equal(eventRepo.events.length, 1);
   assert.equal(eventRepo.events[0].kind, "HeroMoved");
   assert.equal(eventRepo.events[0].actorSeat, command.actor);
+  assert.equal(result.lastEventId, 1);
 });
 
 test("MoveHero rejects a move onto a tile already occupied by another hero", async () => {
@@ -321,6 +322,7 @@ test("EndTurn advances to the next player without wrapping the round", async () 
     eventRepo.events.map((e) => e.actorSeat),
     [0, 0, null],
   );
+  assert.equal(result.lastEventId, 3);
 });
 
 test("EndTurn wraps the round, advances settlement upgrades, and applies weekly upkeep on day%7 -- closing the gaps the old /end-turn route left client-trusted", async () => {
@@ -368,6 +370,7 @@ test("EndTurn wraps the round, advances settlement upgrades, and applies weekly 
     eventRepo.events.map((e) => e.actorSeat),
     [0, 0, 0, null],
   );
+  assert.equal(result.lastEventId, 4);
 });
 
 // ---------------------------------------------------------------------------
@@ -582,6 +585,7 @@ function makeFakePoolClient(
   row: HydratableGameRow,
 ): FakePoolClient & { queries: string[] } {
   const queries: string[] = [];
+  let nextEventId = 1;
   return {
     queries,
     async query(sql: string, _params?: unknown[]) {
@@ -610,7 +614,7 @@ function makeFakePoolClient(
       // INSERT INTO game_events / settlement_snapshots / resource_transactions
       // -- same problem (head is just "INSERT INTO"), so substring-match.
       if (/^INSERT\s+INTO\s+game_events\b/i.test(sql.trim())) {
-        return { rows: [], rowCount: 1 };
+        return { rows: [{ id: nextEventId++ }], rowCount: 1 };
       }
       if (/^INSERT\s+INTO\s+settlement_snapshots\b/i.test(sql.trim())) {
         return { rows: [], rowCount: 1 };

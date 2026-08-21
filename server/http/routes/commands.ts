@@ -287,8 +287,15 @@ commandsRouter.post("/", async (req: Request<{ name: string }>, res) => {
     // Not returning a `version` field yet (ROADMAP's exit criteria mentions
     // one) -- no version/optimistic-concurrency column exists on `games`
     // today, and inventing one is its own decision, not a Week-1 given.
+    //
+    // lastEventId is the game_events.id of the last event this command's
+    // own writes caused (server/app/commandHandler.ts's CommandResult) --
+    // the client advances its GET .../events?after= poll cursor to this
+    // value so it doesn't re-fetch and re-apply the events its own command
+    // just produced on the next poll.
     res.json({
       events: result.events,
+      lastEventId: result.lastEventId,
       hero: result.hero,
       settlement: result.settlement,
       heroes: result.heroes,
