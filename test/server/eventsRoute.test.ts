@@ -135,3 +135,49 @@ test("GET /games/:name/events?after=-1 is rejected with 400 (not a non-negative 
     await cleanupGame(name);
   }
 });
+
+test("GET /games/:name/events returns actor_seat, the column #144 wrote and nothing read", async () => {
+  const name = uniqueName();
+  await seedGame(name);
+  try {
+    await pool.query(
+      `INSERT INTO game_events (game_id, kind, payload, actor_seat)
+       SELECT id, 'HeroMoved', '{"type":"HeroMoved"}'::jsonb, 2 FROM games WHERE name = $1`,
+      [name],
+    );
+    await pool.query(
+      `INSERT INTO game_events (game_id, kind, payload, actor_seat)
+       SELECT id, 'round_started', '{"round":2}'::jsonb, NULL FROM games WHERE name = $1`,
+      [name],
+    );
+    const res = await fetch(`${baseUrl}/games/${name}/events`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { kind: string; actor_seat: number | null }[];
+    assert.deepEqual(
+      body.map((e) => [e.kind, e.actor_seat]),
+      [["HeroMoved", 2], ["round_started", null]],
+    );
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("GET /games/:name returns last_event_id, the cursor a fresh client load seeds from", async () => {
+  const name = uniqueName();
+  await seedGame(name);
+  try {
+    const empty = await fetch(`${baseUrl}/games/${name}`);
+    assert.equal(empty.status, 200);
+    assert.equal(((await empty.json()) as { last_event_id: string }).last_event_id, "0");
+
+    const ids = await seedEvents(name, 3);
+    const res = await fetch(`${baseUrl}/games/${name}`);
+    const body = (await res.json()) as { last_event_id: string };
+    assert.equal(Number(body.last_event_id), Number(ids[ids.length - 1]));
+
+    const after = await fetch(`${baseUrl}/games/${name}/events?after=${body.last_event_id}`);
+    assert.deepEqual(await after.json(), [], "seeding from it means the first poll replays nothing");
+  } finally {
+    await cleanupGame(name);
+  }
+});

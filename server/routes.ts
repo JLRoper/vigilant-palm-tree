@@ -166,8 +166,16 @@ router.get("/games", async (_req, res) => {
 });
 
 router.get("/games/:name", async (req, res) => {
-  const r = await pool.query<FullGameRow>(
-    `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
+  // last_event_id is the poll cursor a fresh client load seeds from (#146):
+  // taken in the same statement as the state it labels, so no event can slip
+  // between the snapshot and the cursor. ::text because game_events.id is a
+  // BIGSERIAL -- node-postgres hands int8 back as a string either way, and
+  // the client Number()s it (same reasoning as eventRepo.append's own).
+  const r = await pool.query<FullGameRow & { last_event_id: string }>(
+    `SELECT ${GAME_COLUMNS},
+            COALESCE((SELECT MAX(e.id) FROM game_events e WHERE e.game_id = games.id), 0)::text
+              AS last_event_id
+       FROM games WHERE name = $1`,
     [req.params.name]
   );
   if (r.rowCount === 0) {
@@ -502,8 +510,11 @@ router.get("/games/:name/events", async (req, res) => {
   }
   // A cursor past the end of the log is a normal "nothing new yet" poll
   // result, not an error -- returns an empty array, not a 404.
+  // actor_seat is returned so the client can skip events its own commands
+  // caused (it already applied them locally) -- the read half of #144's
+  // column, which had a writer but no reader until this cursor sync.
   const r = await pool.query(
-    "SELECT id, kind, payload, created_at FROM game_events WHERE game_id = $1 AND id > $2 ORDER BY id ASC",
+    "SELECT id, kind, payload, actor_seat, created_at FROM game_events WHERE game_id = $1 AND id > $2 ORDER BY id ASC",
     [game.rows[0].id, after]
   );
   res.json(r.rows);
