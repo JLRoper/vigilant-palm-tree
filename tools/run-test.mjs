@@ -13,9 +13,12 @@ const ENTRIES = {
   smoke: "test/smoke.ts",
   multiplayer: "test/multiplayer.smoke.ts",
   cityview: "test/cityView.test.ts",
+  visual: "test/visualRegression.test.ts",
 };
 
-const ALL_ORDER = ["smoke", "multiplayer", "cityview"];
+// "visual" runs last -- it's the slowest suite (several game setups, each
+// spinning up its own scene) and gains nothing from running earlier.
+const ALL_ORDER = ["smoke", "multiplayer", "cityview", "visual"];
 
 function readEnvPort(name, fallback) {
   try {
@@ -97,7 +100,7 @@ function runOne(entry, opts) {
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
-    console.error("usage: node tools/run-test.mjs <smoke|multiplayer|cityview|all> [--auto-close] [--shutdown-after-ms=N]");
+    console.error("usage: node tools/run-test.mjs <smoke|multiplayer|cityview|visual|all> [--auto-close] [--shutdown-after-ms=N] [--update-baselines]");
     process.exit(2);
   }
 
@@ -108,6 +111,9 @@ async function main() {
       const a = args.find((x) => x.startsWith("--shutdown-after-ms="));
       return a ? Number(a.split("=")[1]) || null : null;
     })(),
+    extra: {
+      updateBaselines: args.includes("--update-baselines"),
+    },
   };
 
   // Best-effort: allocate ports via the existing script so .env is fresh.

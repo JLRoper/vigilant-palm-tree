@@ -22,6 +22,8 @@
     "pretest": "tsx scripts/allocate-ports.ts",
     "test": "tsx --env-file=.env --env-file=.env.test test/smoke.ts",
     "test:cityview": "tsx scripts/allocate-ports.ts && tsx --env-file=.env --env-file=.env.test test/cityView.test.ts",
+    "test:visual": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs visual --auto-close",
+    "test:visual:update-baselines": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs visual --auto-close --update-baselines",
     "test:all": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs all --auto-close && npm run test:unit",
     "test:multiplayer": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs multiplayer",
     "test:smoke": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs smoke --auto-close",
