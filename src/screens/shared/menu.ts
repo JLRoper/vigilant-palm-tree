@@ -358,6 +358,26 @@ export function clampMenuIntoView(menu: PopupMenu, minTop = 0): void {
   if (x !== pos.x || y !== pos.y) menu.setPosition(x, y);
 }
 
+// Anchors a floating menu against the bottom-left of the viewport from its
+// *measured* height, instead of guessing that height and subtracting the guess
+// from window.innerHeight. Panels whose content varies (a hero's army, a
+// settlement's available actions) have no single correct constant, so the only
+// reliable anchor is the box the browser actually laid out.
+//
+// The caller must have the menu displayed before calling: a `display: none`
+// element measures 0x0, and an anchor derived from that silently does nothing.
+export function anchorMenuToBottom(menu: PopupMenu, x: number, minTop = 0): void {
+  // The shared FLOATING_MAX_HEIGHT cap is measured against the whole viewport
+  // and knows nothing about the space reserved at the top for the toolbar.
+  // Without narrowing it here, a panel that grows to the full cap still hangs
+  // past the bottom edge by roughly the toolbar's height once anchored, and
+  // clamping alone cannot recover that -- there is nowhere left to move it to.
+  menu.root.style.maxHeight = `${Math.max(0, window.innerHeight - minTop - VIEWPORT_MARGIN)}px`;
+  const { height } = menu.root.getBoundingClientRect();
+  menu.setPosition(x, Math.max(minTop, window.innerHeight - height - VIEWPORT_MARGIN));
+  clampMenuIntoView(menu, minTop);
+}
+
 export function openCenteredModal(
   parent: HTMLElement,
   title: string,
