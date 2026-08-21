@@ -10,7 +10,7 @@ const IS_WINDOWS = process.platform === "win32";
 
 export interface TestRequest {
   runId: string;
-  entry: "smoke" | "multiplayer" | "cityview";
+  entry: "smoke" | "multiplayer" | "cityview" | "visual";
   apiPort: number;
   clientPort: number;
   autoClose: boolean;
@@ -43,6 +43,12 @@ export function shouldAutoClose(): boolean {
 
 export function getShutdownAfterMs(): number | null {
   return loadRequest()?.shutdownAfterMs ?? null;
+}
+
+export function shouldUpdateBaselines(): boolean {
+  const req = loadRequest();
+  if (req) return req.extra?.updateBaselines === true;
+  return process.argv.includes("--update-baselines");
 }
 
 interface PidEntry { role: string; pid: number; spawnedAt: string; }
