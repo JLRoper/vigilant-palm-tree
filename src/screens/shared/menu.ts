@@ -97,6 +97,7 @@ export class PopupMenu {
   private dragOffset: { dx: number; dy: number } | null = null;
   private pos: { x: number; y: number };
   private onClose?: () => void;
+  private readonly closeHandlers: Array<() => void> = [];
 
   constructor(private opts: PopupMenuOptions) {
     this.draggable = opts.draggable ?? true;
@@ -295,6 +296,13 @@ export class PopupMenu {
     this.onClose = fn;
   }
 
+  // Teardown that always runs on close, unlike the single `onClose` slot that
+  // setOnClose overwrites. Owned DOM and listeners belong here so a caller
+  // cannot detach them by accident.
+  addCloseHandler(fn: () => void): void {
+    this.closeHandlers.push(fn);
+  }
+
   getPosition(): { x: number; y: number } {
     return { ...this.pos };
   }
@@ -306,6 +314,7 @@ export class PopupMenu {
 
   close(): void {
     this.root.remove();
+    for (const fn of this.closeHandlers.splice(0)) fn();
     this.onClose?.();
   }
 
@@ -386,10 +395,11 @@ export function openCenteredModal(
     width,
     draggable,
     closeable,
-    onClose: () => {
-      window.removeEventListener("resize", clampIntoView);
-      wrapper.remove();
-    },
+  });
+
+  menu.addCloseHandler(() => {
+    window.removeEventListener("resize", clampIntoView);
+    wrapper.remove();
   });
 
   // Centring is left to the wrapper's flexbox rather than computed here. A

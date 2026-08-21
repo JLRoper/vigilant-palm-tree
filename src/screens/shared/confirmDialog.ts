@@ -30,8 +30,9 @@ export function openConfirmDialog(opts: ConfirmDialogOptions): PopupMenu {
     draggable: false,
     closeable: true,
     zIndex: 121,
-    onClose: () => wrapper.remove(),
   });
+
+  menu.addCloseHandler(() => wrapper.remove());
 
   const initialLeft = (window.innerWidth - 360) / 2;
   const initialTop = Math.max(24, (window.innerHeight - 240) / 2);

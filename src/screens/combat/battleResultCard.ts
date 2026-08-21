@@ -1,8 +1,8 @@
 // Reusable end-of-battle summary card: winner banner + per-platoon casualties
-// for both sides. Used today only by the Test Battle sandbox (manualBattleArena.ts),
-// but shaped generically (BattleResult + a single onCarryOn callback) so a
-// future production flow can reuse it with an additional "Manual Fight" retry
-// button without reshaping this component.
+// for both sides. Used by the Test Battle sandbox (openManualBattleArena.ts) and
+// by the production battle flow (GameActions.ts), so it stays generic
+// (BattleResult + a single onCarryOn callback) and a future caller can add an
+// extra "Manual Fight" retry button without reshaping this component.
 
 import type { BattleResult, CombatantResult } from "@heroes/engine";
 import { getCachedUnit } from "../../data/unitCatalog";
@@ -73,10 +73,7 @@ function renderSideResults(title: string, results: CombatantResult[]): HTMLEleme
 export function showBattleResultCard(opts: BattleResultCardOptions): void {
   const modal = openCenteredModal(document.body, "Battle Results", 480, false, false);
 
-  modal.setOnClose(() => {
-    modal.root.parentElement?.remove();
-    opts.onCarryOn();
-  });
+  modal.setOnClose(() => opts.onCarryOn());
 
   const banner = document.createElement("div");
   const winnerText =
