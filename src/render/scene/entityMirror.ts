@@ -52,8 +52,36 @@ export class EntityMirror {
         return this.applyHeroMoved(event.heroId, event.to);
       case "SettlementCaptured":
         return this.applySettlementCaptured(event.settlementId, event.actor);
-      default:
+      // Reviewed as part of #146. Everything below changes state this mirror
+      // does not hold: gold/warehouse/stacks/upgrade are read by the DOM
+      // panels (settlementInfoMenu, buildingMenu), never by the Hero/Castle
+      // sprites drawn on the adventure map. BuildingUpgradeStarted and
+      // SettlementUpgradeStarted in particular set `settlement.upgrade`,
+      // which has no canvas-visible effect at all today -- so they are
+      // genuinely inert here, not merely unimplemented. TurnEnded,
+      // BattleResolved, HeroRecruited and CharterStarted DO change what is
+      // drawn (a recruited hero is a new sprite, a lost battle removes one),
+      // but none of them is reconstructable from its own payload; the poller
+      // classifies those as resync events and re-bootstraps this mirror from
+      // the fresh GameState instead. Listed per variant rather than left to
+      // `default:` so a new EngineEvent variant trips the check below.
+      case "GoldTransferred":
+      case "TurnEnded":
+      case "ResourcesTraded":
+      case "BattleResolved":
+      case "HeroRecruited":
+      case "TownHallUpgradeStarted":
+      case "AutoTradeToggled":
+      case "StackReordered":
+      case "CharterStarted":
+      case "BuildingUpgradeStarted":
+      case "SettlementUpgradeStarted":
         return false;
+      default: {
+        const exhaustive: never = event;
+        void exhaustive;
+        return false;
+      }
     }
   }
 
