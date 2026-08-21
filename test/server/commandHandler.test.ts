@@ -288,7 +288,13 @@ test("EndTurn advances to the next player without wrapping the round", async () 
     // wrap, so no hero upkeep) nor this settlement's income (goldTax: 0
     // by default) touch it, so it should pass through unchanged.
     [makeHero("h0", 0, 2, 2, { movementRemaining: 2, gold: 15 })],
-    [makeSettlement("s0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2),
+      // Owned by player 1 (the OTHER player), not the actor ending their
+      // turn -- present specifically so the snapshot-filter assertion
+      // below can prove insertSettlementSnapshots only got s0, not both.
+      makeSettlement("s1", 1, 10, 10),
+    ],
   );
   const { gameRepo, eventRepo, deps } = makeDeps(row);
   const command: Command = { kind: "EndTurn", gameName: "test-game", actor: 0 };
@@ -305,6 +311,22 @@ test("EndTurn advances to the next player without wrapping the round", async () 
   // sumPlayerGold) actually gets persisted -- h0's 15 is the only gold
   // anywhere in this row's heroes/settlements.
   assert.equal(gameRepo.rows["test-game"].gold, 15);
+  // #150 (follow-up to #89): the write guard commandHandler.test.ts never
+  // had -- insertSettlementSnapshots must fire exactly once per EndTurn,
+  // with exactly one row (s0, owned by actor 0), never s1 (owned by the
+  // OTHER player, even though it's in the same finalState.settlements map
+  // EndTurn iterates). day comes from the pre-turn row.day (1) since this
+  // EndTurn doesn't wrap the round.
+  assert.equal(gameRepo.snapshotCalls.length, 1);
+  assert.equal(gameRepo.snapshotCalls[0].gameName, "test-game");
+  assert.deepEqual(gameRepo.snapshotCalls[0].value, [
+    { settlementId: "s0", day: 1, gold: 0, warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 }, morale: 100, effectiveIncome: 0 },
+  ]);
+  // No auto-trade deficit anywhere in this row (population: 0 everywhere),
+  // so insertResourceTransactions must still fire -- with zero rows, not
+  // skip the call entirely.
+  assert.equal(gameRepo.transactionCalls.length, 1);
+  assert.deepEqual(gameRepo.transactionCalls[0].value, []);
   // The canonical TurnEnded EngineEvent (matching MoveHero/TransferGold's
   // own append-what-you-return convention) always fires first; turn_ended
   // is the old /end-turn route's separate legacy-shaped audit-trail entry,
@@ -353,7 +375,55 @@ test("EndTurn wraps the round, advances settlement upgrades, and applies weekly 
   assert.equal(h0.gold, 0);
   assert.equal(h0.troops, 0);
 
+  // #150: on a wrapping EndTurn, snapshotDay must be finalState.day (7, the
+  // day that just started via advanceRound), NOT the pre-turn row.day (6)
+  // the non-wrapping test above uses -- this is the exact wrapped/unwrapped
+  // distinction commandHandler.ts's snapshotDay ternary exists to get
+  // right, and it's easy to break silently by hardcoding either side.
+  assert.equal(gameRepo.snapshotCalls.length, 1);
+  assert.equal(gameRepo.snapshotCalls[0].value.length, 1);
+  assert.equal(gameRepo.snapshotCalls[0].value[0].settlementId, "s0");
+  assert.equal(gameRepo.snapshotCalls[0].value[0].day, 7);
+  // 10,000 food buffer is nowhere near a deficit, so no auto-trade transfer
+  // fires even though this EndTurn wraps the round.
+  assert.equal(gameRepo.transactionCalls.length, 1);
+  assert.deepEqual(gameRepo.transactionCalls[0].value, []);
+
   assert.equal(eventRepo.events.map((e) => e.kind).join(","), "TurnEnded,turn_ended,round_ended,round_started");
+});
+
+test("EndTurn writes one resource_transactions row per auto-trade transfer that actually fired", async () => {
+  // s0 has population but zero food in its warehouse (a real deficit);
+  // s1, owned by the same player, has food to spare plus gold to pay for
+  // it. runAutoTrade (packages/engine/src/economy/trade.ts) should move
+  // exactly ceil(100/100) = 1 food from s1 -> s0, gold-for-gold.
+  const players: Player[] = [
+    { id: 0, faction: "player", name: "Human", color: "#000000", heroIds: ["h0"], settlementIds: ["s0", "s1"] },
+    { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: ["s2"] },
+  ];
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, { population: 100 }),
+      makeSettlement("s1", 0, 5, 5, { warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 50 }, gold: 50 }),
+      makeSettlement("s2", 1, 10, 10),
+    ],
+    { players },
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const command: Command = { kind: "EndTurn", gameName: "test-game", actor: 0 };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(gameRepo.transactionCalls.length, 1);
+  assert.deepEqual(gameRepo.transactionCalls[0].value, [
+    { fromSettlementId: "s1", toSettlementId: "s0", resource: "food", amount: 1, goldPaid: 1 },
+  ]);
+  // The transfer already landed in newSettlements before the owner-only
+  // consumption/morale/income step runs (applyEndOfTurnDetailed's step
+  // order), so it shows up in this same EndTurn's settlement_snapshots
+  // write too -- both repo calls are derived from the same finalState.
+  const s0Snapshot = gameRepo.snapshotCalls[0].value.find((s) => s.settlementId === "s0");
+  assert.equal(s0Snapshot?.warehouse.food, 0, "the 1 food that arrived was immediately consumed by this turn's upkeep");
 });
 
 // ---------------------------------------------------------------------------

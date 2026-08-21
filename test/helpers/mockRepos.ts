@@ -20,10 +20,18 @@ type MockGameRow = HydratableGameRow & { gold?: number };
 
 export function createMockGameRepo(
   seed: Record<string, HydratableGameRow>,
-): GameRepo & { rows: Record<string, MockGameRow> } {
+): GameRepo & {
+  rows: Record<string, MockGameRow>;
+  snapshotCalls: RecordedUpsert<SettlementSnapshotInput[]>[];
+  transactionCalls: RecordedUpsert<ResourceTransactionInput[]>[];
+} {
   const rows: Record<string, MockGameRow> = { ...seed };
+  const snapshotCalls: RecordedUpsert<SettlementSnapshotInput[]>[] = [];
+  const transactionCalls: RecordedUpsert<ResourceTransactionInput[]>[] = [];
   return {
     rows,
+    snapshotCalls,
+    transactionCalls,
     async load(name: string): Promise<HydratableGameRow> {
       const row = rows[name];
       if (!row) throw new Error(`mock game not found: ${name}`);
@@ -59,13 +67,17 @@ export function createMockGameRepo(
       };
     },
     async insertSettlementSnapshots(
-      _gameName: string,
-      _snapshots: SettlementSnapshotInput[],
-    ): Promise<void> {},
+      gameName: string,
+      snapshots: SettlementSnapshotInput[],
+    ): Promise<void> {
+      snapshotCalls.push({ gameName, value: snapshots });
+    },
     async insertResourceTransactions(
-      _gameName: string,
-      _transactions: ResourceTransactionInput[],
-    ): Promise<void> {},
+      gameName: string,
+      transactions: ResourceTransactionInput[],
+    ): Promise<void> {
+      transactionCalls.push({ gameName, value: transactions });
+    },
   };
 }
 
