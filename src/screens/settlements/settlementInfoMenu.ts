@@ -1,6 +1,7 @@
 import type { GameState, SettlementState } from "../../state/gameState";
 import { MAX_HEROES_PER_PLAYER, HERO_RECRUIT_COST, SETTLEMENT_UPGRADE_COSTS } from "../../state/gameState";
-import { PopupMenu, menuTheme, openCenteredModal, styleButton } from "@screens/shared/menu";
+import { PopupMenu, menuTheme, openCenteredModal, styleButton, anchorMenuToBottom, clampMenuIntoView } from "@screens/shared/menu";
+import { toolbarHeight } from "@screens/shared/panelRail";
 import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../../render/assetDescriptors";
 import { settings } from "../../state/settings";
 import type { HorseVariant } from "../../state/settings";
@@ -36,10 +37,15 @@ function makeRow(label: string): { row: HTMLDivElement; value: HTMLSpanElement }
 
 const WAREHOUSE_RESOURCE_ORDER = ["wood", "stone", "iron", "arcane", "food"] as const;
 
+const PANEL_X = 16;
+
 export class SettlementInfoMenu {
   private menu: PopupMenu;
   private visible = false;
   private currentSettlementId: string | null = null;
+  // Once the player drags the panel, their position wins: reposition() then
+  // only clamps it back into view rather than re-anchoring it.
+  private userMoved = false;
   private nameEl: HTMLElement;
   private levelBadge: HTMLElement;
   private populationEl: HTMLSpanElement;
@@ -65,11 +71,17 @@ export class SettlementInfoMenu {
     this.menu = new PopupMenu({
       parent: opts.parent,
       title: "Settlement",
-      initialPosition: { x: 16, y: Math.max(24, window.innerHeight - 420) },
+      // Placeholder only. The real position is derived from the panel's
+      // measured height by reposition(), once it is on screen and displayed.
+      initialPosition: { x: PANEL_X, y: toolbarHeight() },
       width: 240,
       closeable: true,
       draggable: true,
       zIndex: 60,
+      minTop: toolbarHeight,
+      onMove: () => {
+        this.userMoved = true;
+      },
       onClose: () => {
         this.visible = false;
         this.currentSettlementId = null;
@@ -251,6 +263,21 @@ export class SettlementInfoMenu {
     this.upgradeContainer.appendChild(this.upgradeInfo);
 
     this.menu.root.style.display = "none";
+
+    // The panel is appended straight to document.body rather than through
+    // panelRail, so it does not inherit the rail's resize re-clamp.
+    window.addEventListener("resize", () => this.reposition());
+  }
+
+  // The panel's height varies with the settlement (recruit and upgrade rows
+  // appear conditionally), so the anchor has to come from a measured box
+  // rather than a constant. Must run *after* `display` is restored: a
+  // `display: none` element measures 0x0 and would anchor a zero-height box.
+  private reposition(): void {
+    if (!this.visible) return;
+    const minTop = toolbarHeight();
+    if (this.userMoved) clampMenuIntoView(this.menu, minTop);
+    else anchorMenuToBottom(this.menu, PANEL_X, minTop);
   }
 
   show(settlement: SettlementState, state: GameState): void {
@@ -260,9 +287,17 @@ export class SettlementInfoMenu {
       if (!this.menu.root.parentNode) {
         document.body.appendChild(this.menu.root);
       }
-      this.menu.root.style.display = "";
+      // "flex", never "": the root's inline `display: flex` is what makes the
+      // header stay pinned while the body scrolls. Clearing it drops the root
+      // to `block`, and the body then overflows the root's max-height instead
+      // of shrinking inside it -- which is why this panel's body never
+      // scrolled (issue #140). Matches heroRosterMenu / tileInfoPanel.
+      this.menu.root.style.display = "flex";
       this.visible = true;
     }
+    // Runs on every show(), not just the hidden -> visible transition: the
+    // panel is reused across settlements and its height varies with them.
+    this.reposition();
   }
 
   hide(): void {
