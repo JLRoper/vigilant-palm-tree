@@ -1,5 +1,5 @@
 import { Router, type Request } from "express";
-import type { Command } from "@heroes/contracts";
+import type { BuildingUpgradeRequest, Command } from "@heroes/contracts";
 import { VALID_HORSE_VARIANTS } from "@heroes/engine";
 import { handleCommandTransactional, createLiveCommandDeps, type LiveCommandDeps } from "../../app/commandHandler";
 
@@ -59,6 +59,24 @@ function isAxial(v: unknown): v is { q: number; r: number } {
     typeof v === "object" &&
     typeof (v as { q: unknown }).q === "number" &&
     typeof (v as { r: unknown }).r === "number"
+  );
+}
+
+// UpgradeBuilding's per-entry shape check. `kind` is only checked for
+// being a non-empty string, not against a list of BuildingKind values:
+// BuildingKind is a type-only union in @heroes/contracts (no runtime
+// array exists to check against, unlike VALID_HORSE_VARIANTS above), and
+// @heroes/engine's startBuildingUpgrade() already resolves each request
+// against the settlement's own buildings -- an unknown kind falls out
+// there as a "building_not_found" 409, not a crash.
+function isBuildingUpgradeRequest(v: unknown): boolean {
+  if (!v || typeof v !== "object") return false;
+  const r = v as { gx: unknown; gy: unknown; kind: unknown };
+  return (
+    Number.isInteger(r.gx) &&
+    Number.isInteger(r.gy) &&
+    typeof r.kind === "string" &&
+    r.kind.length > 0
   );
 }
 
@@ -238,6 +256,58 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       actor: b.actor,
       heroId: b.heroId,
       settlementId: b.settlementId,
+    };
+  }
+
+  if (b.kind === "UpgradeBuilding") {
+    // An empty requests array is deliberately NOT rejected here: it's a
+    // well-formed command that @heroes/engine's startBuildingUpgrade()
+    // already turns down with "no_buildings", which this route surfaces
+    // as a 409. Only malformed entries are a 400.
+    if (
+      typeof b.settlementId !== "string" ||
+      !Array.isArray(b.requests) ||
+      !b.requests.every(isBuildingUpgradeRequest)
+    ) {
+      return null;
+    }
+    return {
+      kind: "UpgradeBuilding",
+      gameName,
+      actor: b.actor,
+      settlementId: b.settlementId,
+      requests: b.requests as BuildingUpgradeRequest[],
+    };
+  }
+
+  if (b.kind === "UpgradeSettlement") {
+    // targetLevel is deliberately not read off the body -- the handler
+    // derives it as settlement.level + 1 (server/app/commandHandler.ts's
+    // UpgradeSettlement case). A client that sends one is ignored, not
+    // rejected, same as any other extra field on a command body.
+    //
+    // upgradePopulationGate IS trusted from the client (see
+    // packages/contracts/src/commands/upgradeSettlement.ts's header for
+    // why that's a deliberate, temporary exception), but only within its
+    // actual domain: it's a fraction of the level's population cap
+    // (packages/engine/src/settlement/upgradeSettlement.ts multiplies it
+    // by POP_BY_LEVEL), so anything outside 0..1 is malformed, not just
+    // unfavorable. 0 is allowed -- it means "no population requirement".
+    if (
+      typeof b.settlementId !== "string" ||
+      typeof b.upgradePopulationGate !== "number" ||
+      !Number.isFinite(b.upgradePopulationGate) ||
+      b.upgradePopulationGate < 0 ||
+      b.upgradePopulationGate > 1
+    ) {
+      return null;
+    }
+    return {
+      kind: "UpgradeSettlement",
+      gameName,
+      actor: b.actor,
+      settlementId: b.settlementId,
+      upgradePopulationGate: b.upgradePopulationGate,
     };
   }
 
