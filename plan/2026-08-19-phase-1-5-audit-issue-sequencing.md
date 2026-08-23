@@ -4,6 +4,29 @@
 *Audits: `plan/2026-08-17-consolidated-phase-1-5-track-map.md` against the tree at `f395e95` (main, post-#138).*
 *Produces: issues #143–#155, and the wave ordering below.*
 *Repo: `JLRoper/vigilant-palm-tree`*
+*Status reviewed: 2026-08-22, against `origin/main@4c89d9a`.*
+
+---
+
+## 0. Status Update (2026-08-22)
+
+Checked against live GitHub issue state and spot-verified in the tree (`origin/main@4c89d9a`).
+
+**Closed (9 of 13):** #143, #144, #145, #146, #148, #149, #151, #155 — plus #140/#142 from the same period (not part of this audit's issue set, but merged in the same window). Verified in-tree, not just by issue status:
+- #143 — arena double-paint fixed.
+- #144 + #145 — landed together as required; `eventRepo.append()` and `actor_seat` plumbing done.
+- #146 — `src/io/multiplayerSync.ts` (moved from `src/net/`) is now cursor-based (`this.cursor`, `ResyncReason`), wired to `EntityMirror`. No longer a full-state poller.
+- #148 — `cityRenderer.ts` and `sceneBuilder/` now consume/produce `SceneNode[]`; single painter path confirmed.
+- #149, #151, #155 — closed per GitHub; not re-verified line-by-line this pass.
+
+**Still open (5 of 13):**
+- **#147** — `SessionManager.manualSave()` (now `src/managers/SessionManager.ts`) still PATCHes `hero_q`/`hero_r`/`turn`/`gold`/`enemy_positions` directly. Unblocked now that #146 is done — this is the next Track A item.
+- **#150** — `test/server/commandHandler.test.ts`'s fake pool client accepts `INSERT INTO settlement_snapshots`/`resource_transactions` but nothing asserts EndTurn actually issues them. Still just a permissive stub, not a guard.
+- **#152** — `stepTravelCharter()` is still client-local only (`src/state/turnController.ts:425`); no `AdvanceCharterTravel` server command exists. Now unblocked (#144/#145 landed, `commandHandler.ts` is quiet).
+- **#153** — trigger-gated per §5, not expected to move until the settings slider is hidden. No action needed yet.
+- **#154** — `gameRepo.ts` still writes `heroes`/`settlements` as JSONB. Unowned, as flagged; tail work.
+
+**Net effect on the wave plan:** Wave 1 is fully done. Wave 2 is done except the trigger-gated #153. Wave 3 (#147, #152) is now the active frontier — both are unblocked and independent of each other (different files: `SessionManager.ts` vs `turnController.ts`/`commandHandler.ts`). Wave 4 (#154) remains tail work; its step 2 (real-data migration dry run) can still be done early per §5 if not already done.
 
 ---
 
@@ -43,21 +66,21 @@ Track 5.B is **further along** than `plan/2026-08-17-consolidated-phase-1-5-trac
 
 ## 2. The Thirteen Issues
 
-| # | Title | Kind | Wave |
-| :--- | :--- | :--- | :--- |
-| [#143](https://github.com/JLRoper/vigilant-palm-tree/issues/143) | Arena double-paints under `?paint=scenebuilder` | bug | 1 |
-| [#144](https://github.com/JLRoper/vigilant-palm-tree/issues/144) | `game_events.actor_seat` is dead schema | bug | 1 |
-| [#145](https://github.com/JLRoper/vigilant-palm-tree/issues/145) | No `?after=` cursor; `eventRepo.append()` discards the id | refactor | 1 |
-| [#146](https://github.com/JLRoper/vigilant-palm-tree/issues/146) | `multiplayerSync.ts` still a full-state poller | refactor | 2 |
-| [#147](https://github.com/JLRoper/vigilant-palm-tree/issues/147) | `SessionManager.manualSave()` still PATCHes full state | refactor | 3 |
-| [#148](https://github.com/JLRoper/vigilant-palm-tree/issues/148) | Two parallel painter sets; no renderer consumes `SceneNode[]` | refactor | 2 |
-| [#149](https://github.com/JLRoper/vigilant-palm-tree/issues/149) | Phase 5's visual-regression gate does not exist | enhancement | 1 |
-| [#150](https://github.com/JLRoper/vigilant-palm-tree/issues/150) | #89 follow-up: no unit guard on audit-row writes | bug | 1 |
-| [#151](https://github.com/JLRoper/vigilant-palm-tree/issues/151) | No client test for the `drainPendingCommands()` barrier | bug | 1 |
-| [#152](https://github.com/JLRoper/vigilant-palm-tree/issues/152) | Charter travel-stepping still client-authoritative | refactor | 3 |
-| [#153](https://github.com/JLRoper/vigilant-palm-tree/issues/153) | `upgradePopulationGate` is client-trusted | bug | 2 (trigger-gated) |
-| [#154](https://github.com/JLRoper/vigilant-palm-tree/issues/154) | JSONB blob retirement is unowned | refactor | 4 |
-| [#155](https://github.com/JLRoper/vigilant-palm-tree/issues/155) | Track map stale; in-code comments contradict the code | documentation | 4 |
+| # | Title | Kind | Wave | Status (2026-08-22) |
+| :--- | :--- | :--- | :--- | :--- |
+| [#143](https://github.com/JLRoper/vigilant-palm-tree/issues/143) | Arena double-paints under `?paint=scenebuilder` | bug | 1 | ✅ Closed |
+| [#144](https://github.com/JLRoper/vigilant-palm-tree/issues/144) | `game_events.actor_seat` is dead schema | bug | 1 | ✅ Closed |
+| [#145](https://github.com/JLRoper/vigilant-palm-tree/issues/145) | No `?after=` cursor; `eventRepo.append()` discards the id | refactor | 1 | ✅ Closed |
+| [#146](https://github.com/JLRoper/vigilant-palm-tree/issues/146) | `multiplayerSync.ts` still a full-state poller | refactor | 2 | ✅ Closed |
+| [#147](https://github.com/JLRoper/vigilant-palm-tree/issues/147) | `SessionManager.manualSave()` still PATCHes full state | refactor | 3 | 🟡 Open — unblocked, next up |
+| [#148](https://github.com/JLRoper/vigilant-palm-tree/issues/148) | Two parallel painter sets; no renderer consumes `SceneNode[]` | refactor | 2 | ✅ Closed |
+| [#149](https://github.com/JLRoper/vigilant-palm-tree/issues/149) | Phase 5's visual-regression gate does not exist | enhancement | 1 | ✅ Closed |
+| [#150](https://github.com/JLRoper/vigilant-palm-tree/issues/150) | #89 follow-up: no unit guard on audit-row writes | bug | 1 | 🟡 Open |
+| [#151](https://github.com/JLRoper/vigilant-palm-tree/issues/151) | No client test for the `drainPendingCommands()` barrier | bug | 1 | ✅ Closed |
+| [#152](https://github.com/JLRoper/vigilant-palm-tree/issues/152) | Charter travel-stepping still client-authoritative | refactor | 3 | 🟡 Open — unblocked, next up |
+| [#153](https://github.com/JLRoper/vigilant-palm-tree/issues/153) | `upgradePopulationGate` is client-trusted | bug | 2 (trigger-gated) | 🟡 Open — not yet triggered |
+| [#154](https://github.com/JLRoper/vigilant-palm-tree/issues/154) | JSONB blob retirement is unowned | refactor | 4 | 🟡 Open — tail work |
+| [#155](https://github.com/JLRoper/vigilant-palm-tree/issues/155) | Track map stale; in-code comments contradict the code | documentation | 4 | ✅ Closed |
 
 ### The two real defects
 
@@ -119,7 +142,7 @@ Four lanes is the realistic ceiling for this backlog.
 | Lane | Work | Unblocked by |
 | :--- | :--- | :--- |
 | **A** | #146 — rewrite `multiplayerSync.ts` against the cursor; wire `entityMirror.ts` in | #145 |
-| **B** | ~~#148~~ ✅ **closed 2026-08-21** — reconciled `src/render/painter/` vs `paint2d/` (`paint2d/` survives, `painter/` deleted), cut `MapRenderer` *and* `drawCityView` over | #149 |
+| **B** | #148 — reconcile `src/render/painter/` vs `paint2d/`, cut `MapRenderer` over | #149 |
 | **Opportunistic** | #153 | Nothing — but see §5 |
 
 ### Wave 3 — 2 concurrent lanes
