@@ -1,10 +1,10 @@
 // Skybox asset module. Boundary contract lives in src/render/docs/technical-spec.md
 // and src/render/scene/paint2d/README.md.
 
-import skyboxBaseUrl from "./resources/skybox/cityView-background.png?url";
-import skyboxVariant2Url from "./resources/skybox/cityView-background-variant2.png?url";
-import skyboxVariant3Url from "./resources/skybox/cityView-background-variant3.png?url";
-import skyboxVariant4Url from "./resources/skybox/cityView-background-variant4.png?url";
+import skyboxBaseUrl from "../resources/skybox/cityView-background.png?url";
+import skyboxVariant2Url from "../resources/skybox/cityView-background-variant2.png?url";
+import skyboxVariant3Url from "../resources/skybox/cityView-background-variant3.png?url";
+import skyboxVariant4Url from "../resources/skybox/cityView-background-variant4.png?url";
 
 import type { SkyboxProvider } from "./scene/paint2d/deps";
 

@@ -28,12 +28,16 @@ export interface AdventureSceneInput {
   path: Axial[];
   hover: Axial | null;
   opts: RenderOptions;
+  /** Precomputed fog-of-war set. Callers that also need it (MapRenderer draws
+   * the minimap from the same set) pass it in so it isn't derived twice per
+   * frame; omitted, it is computed here. */
+  visible?: Set<string>;
 }
 
 export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
   const { map, heroes, castles, path, hover, opts } = input;
   const nodes: SceneNode[] = [];
-  const visible = computeVision(heroes, castles, opts.viewPlayerId);
+  const visible = input.visible ?? computeVision(heroes, castles, opts.viewPlayerId);
 
   for (let r = 0; r < map.height; r++) {
     for (let q = 0; q < map.width; q++) {
@@ -103,10 +107,6 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
     nodes.push(node);
   }
 
-  if (hover && isVisible(visible, hover.q, hover.r)) {
-    nodes.push({ kind: "hoverHighlight", q: hover.q, r: hover.r, world: axialToPixel(hover.q, hover.r) });
-  }
-
   if (opts.inspectedTile) {
     nodes.push({
       kind: "selectedTileHighlight",
@@ -114,6 +114,10 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       r: opts.inspectedTile.r,
       world: axialToPixel(opts.inspectedTile.q, opts.inspectedTile.r),
     });
+  }
+
+  if (hover && isVisible(visible, hover.q, hover.r)) {
+    nodes.push({ kind: "hoverHighlight", q: hover.q, r: hover.r, world: axialToPixel(hover.q, hover.r) });
   }
 
   for (const hero of heroes) {
@@ -129,6 +133,7 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       heroId: hero.id,
       ownerId: hero.ownerId,
       world: { x: base.x + hero.pixelOffset.x, y: base.y + hero.pixelOffset.y + bobY },
+      markerWorld: { x: base.x + hero.pixelOffset.x, y: base.y + hero.pixelOffset.y },
       facingDirection: hero.facingDirection,
       horseVariant: hero.horseVariant,
       faction: hero.faction,

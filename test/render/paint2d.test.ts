@@ -21,6 +21,8 @@ import {
   paintPathSegment,
   paintHeroTrail,
   paintTerritoryOutlineEdge,
+  paintTerritoryOutlineEdges,
+  paintCityBuildingSelections,
   paintHero,
   paintCitySkybox,
   paintCityCell,
@@ -65,7 +67,7 @@ test("paintScene: every node kind emits canvas calls (stubs are gone)", () => {
     { kind: "territoryOutlineEdge", ownerId: 0, color: "#000", x1: 0, y1: 0, x2: 1, y2: 1 },
     { kind: "pathSegment", reachable: true, points: [{ x: 0, y: 0 }, { x: 10, y: 10 }] },
     { kind: "heroTrail", heroId: "h", color: "#fff", points: [{ x: 0, y: 0 }, { x: 10, y: 10 }] },
-    { kind: "hero", heroId: "h", ownerId: 0, world: { x: 0, y: 0 }, facingDirection: "N", horseVariant: "hero", faction: "player", scaleY: 1, color: "#fff", selected: false },
+    { kind: "hero", heroId: "h", ownerId: 0, world: { x: 0, y: 0 }, markerWorld: { x: 0, y: 0 }, facingDirection: "n", horseVariant: "hero", faction: "player", scaleY: 1, color: "#fff", selected: false },
     { kind: "battleHex", q: 0, r: 0, world: { x: 0, y: 0 }, hexRadius: 30, impassable: false, inMoveRange: false, available: false },
     { kind: "battleCombatant", side: "attacker", slotIndex: 0, world: { x: 0, y: 0 }, radius: 16, selected: false, unitCount: 5, hpRatio: 1 },
   ];
@@ -283,11 +285,72 @@ test("paintTerritoryOutlineEdge: emits a 0.45-alpha line + uses deps.getTerritor
   (deps as { getTerritoryBorderWidth: () => number }).getTerritoryBorderWidth = realGetter;
 });
 
-test("paintHero: with hero horseVariant and no sprite, falls back to drawKnightSprite (calls ctx.fillRect)", () => {
+test("paintTerritoryOutlineEdges: a same-owner run is one path + one stroke, not one stroke per edge", () => {
+  // Load-bearing: at globalAlpha 0.45 with round caps, stroking edge-by-edge
+  // double-blends every shared endpoint into a visible bead.
   const { ctx, calls } = makeRecordingCtx();
-  paintHero(ctx, { kind: "hero", heroId: "h", ownerId: 0, world: { x: 0, y: 0 }, facingDirection: "N", horseVariant: "hero", faction: "player", scaleY: 1, color: "#fff", selected: false }, makeNoopPaint2DDep());
-  assert.ok(calls.some((c) => c.name === "fillRect"), "procedural knight should call fillRect for each pixel");
-  assert.ok(calls.some((c) => c.name === "arc"), "should also draw the owner dot");
+  paintTerritoryOutlineEdges(
+    ctx,
+    [
+      { kind: "territoryOutlineEdge", ownerId: 0, color: "#abc", x1: 0, y1: 0, x2: 10, y2: 0 },
+      { kind: "territoryOutlineEdge", ownerId: 0, color: "#abc", x1: 10, y1: 0, x2: 10, y2: 10 },
+      { kind: "territoryOutlineEdge", ownerId: 0, color: "#abc", x1: 10, y1: 10, x2: 0, y2: 10 },
+    ],
+    makeNoopPaint2DDep(),
+  );
+  assert.equal(calls.filter((c) => c.name === "beginPath").length, 1);
+  assert.equal(calls.filter((c) => c.name === "stroke").length, 1);
+  assert.equal(calls.filter((c) => c.name === "moveTo").length, 3);
+});
+
+test("paintScene: batches consecutive same-owner territory edges, and splits on owner change", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintScene(
+    ctx,
+    [
+      { kind: "territoryOutlineEdge", ownerId: 0, color: "#abc", x1: 0, y1: 0, x2: 10, y2: 0 },
+      { kind: "territoryOutlineEdge", ownerId: 0, color: "#abc", x1: 10, y1: 0, x2: 10, y2: 10 },
+      { kind: "territoryOutlineEdge", ownerId: 1, color: "#def", x1: 50, y1: 0, x2: 60, y2: 0 },
+    ],
+    makeNoopPaint2DDep(),
+    { viewportW: 800, viewportH: 600 },
+  );
+  assert.equal(calls.filter((c) => c.name === "stroke").length, 2, "one stroke per owner, not per edge");
+  const strokeStyles = calls.filter((c) => c.name === "set:strokeStyle").map((c) => c.args[0]);
+  assert.deepEqual(strokeStyles, ["#abc", "#def"]);
+});
+
+test("paintHero: with no sprite ready, draws only the owner dot -- no procedural fallback", () => {
+  // drawHeroSprite()/drawHorseSprite() never drew a procedural hero at the
+  // draw site: hero.player / hero.enemy resolve to procedural canvases through
+  // the SpriteProvider itself, so an unresolved sprite means "draw nothing".
+  const { ctx, calls } = makeRecordingCtx();
+  paintHero(ctx, { kind: "hero", heroId: "h", ownerId: 0, world: { x: 0, y: 0 }, markerWorld: { x: 0, y: 0 }, facingDirection: "n", horseVariant: "hero", faction: "player", scaleY: 1, color: "#fff", selected: false }, makeNoopPaint2DDep());
+  assert.ok(!calls.some((c) => c.name === "fillRect"), "no procedural sprite is drawn at the paint site");
+  assert.ok(calls.some((c) => c.name === "arc"), "should still draw the owner dot");
+});
+
+test("paintHero: owner dot and selection ring anchor to markerWorld, not the bobbing sprite position", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintHero(
+    ctx,
+    { kind: "hero", heroId: "h", ownerId: 0, world: { x: 10, y: 94 }, markerWorld: { x: 10, y: 100 }, facingDirection: "n", horseVariant: "hero", faction: "player", scaleY: 1, color: "#fff", selected: true },
+    makeNoopPaint2DDep(),
+  );
+  const arcs = calls.filter((c) => c.name === "arc");
+  assert.equal(arcs.length, 2, "owner dot + selection ring");
+  assert.deepEqual(arcs[0].args?.slice(0, 2), [10, 122], "owner dot sits 22px below markerWorld, ignoring the bob");
+  assert.deepEqual(arcs[1].args?.slice(0, 2), [10, 100], "selection ring is centred on markerWorld");
+});
+
+test("paintHero: the walk-cycle squash applies to the on-foot hero only, never a mounted one", () => {
+  const { ctx: onFoot, calls: onFootCalls } = makeRecordingCtx();
+  paintHero(onFoot, { kind: "hero", heroId: "h", ownerId: 0, world: { x: 0, y: 0 }, markerWorld: { x: 0, y: 0 }, facingDirection: "n", horseVariant: "hero", faction: "player", scaleY: 1.06, color: "#fff", selected: false }, makeNoopPaint2DDep());
+  assert.ok(onFootCalls.some((c) => c.name === "scale"), "on-foot hero squashes with the walk cycle");
+
+  const { ctx: mounted, calls: mountedCalls } = makeRecordingCtx();
+  paintHero(mounted, { kind: "hero", heroId: "h", ownerId: 0, world: { x: 0, y: 0 }, markerWorld: { x: 0, y: 0 }, facingDirection: "n", horseVariant: "bubbly", faction: "player", scaleY: 1.06, color: "#fff", selected: false }, makeNoopPaint2DDep());
+  assert.ok(!mountedCalls.some((c) => c.name === "scale"), "drawHorseSprite never took a scaleY");
 });
 
 test("paintCitySkybox: without skybox provider, falls back to the CITY_BG fillRect", () => {
@@ -329,11 +392,51 @@ test("paintCityMine: emits the diamond + the four inked wall polygons + the leve
   assert.equal(text?.args?.[0], "3", "mine should print the level");
 });
 
-test("paintCityBuilding: with selected=true, draws a dashed cyan strokeRect around the footprint", () => {
+test("paintCityBuilding: with no sprite ready, falls back to the procedural style leaf", () => {
   const { ctx, calls } = makeRecordingCtx();
-  paintCityBuilding(ctx, { kind: "cityBuilding", gx: 0, gy: 0, buildingKind: "townHall", level: 1, center: { x: 0, y: 0 }, halfWidth: 20, halfHeight: 20, ownerColor: "#888", style: "classic", selected: true }, makeNoopPaint2DDep());
-  assert.ok(calls.some((c) => c.name === "strokeRect"), "selected building should strokeRect");
-  assert.ok(calls.some((c) => c.name === "setLineDash"), "selected building should be dashed");
+  paintCityBuilding(ctx, { kind: "cityBuilding", gx: 0, gy: 0, buildingKind: "townHall", level: 1, center: { x: 0, y: 0 }, halfWidth: 20, halfHeight: 20, ownerColor: "#888888", style: "classic", selected: true }, makeNoopPaint2DDep());
+  assert.ok(calls.some((c) => c.name === "fill"), "drawClassic should fill the iso box");
+  assert.ok(
+    !calls.some((c) => c.name === "set:strokeStyle" && c.args[0] === "#66ccff"),
+    "the selection ring is a separate second pass",
+  );
+});
+
+test("paintCityBuildingSelections: strokes a dashed cyan rect per selected building, in one save/restore", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  const base = { kind: "cityBuilding", gx: 0, gy: 0, buildingKind: "townHall", level: 1, halfWidth: 20, halfHeight: 20, ownerColor: "#888888", style: "classic" } as const;
+  paintCityBuildingSelections(
+    ctx,
+    [
+      { ...base, center: { x: 0, y: 0 }, selected: true },
+      { ...base, center: { x: 80, y: 0 }, selected: false },
+      { ...base, center: { x: 160, y: 0 }, selected: true },
+    ],
+    makeNoopPaint2DDep(),
+  );
+  assert.equal(calls.filter((c) => c.name === "strokeRect").length, 2, "only the selected buildings get a ring");
+  assert.equal(calls.filter((c) => c.name === "save").length, 1, "one save/restore for the whole pass");
+  const stroke = calls.find((c) => c.name === "set:strokeStyle");
+  assert.equal(stroke?.args[0], "#66ccff");
+  assert.ok(calls.some((c) => c.name === "setLineDash"), "selection ring is dashed");
+});
+
+test("paintScene: buildings all paint before any selection ring", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  const base = { kind: "cityBuilding", gx: 0, gy: 0, buildingKind: "townHall", level: 1, halfWidth: 20, halfHeight: 20, ownerColor: "#888888", style: "classic" } as const;
+  paintScene(
+    ctx,
+    [
+      { ...base, center: { x: 0, y: 0 }, selected: true },
+      { ...base, center: { x: 80, y: 0 }, selected: false },
+    ],
+    makeNoopPaint2DDep(),
+    { viewportW: 800, viewportH: 600 },
+  );
+  const ringAt = calls.findIndex((c) => c.name === "set:strokeStyle" && c.args[0] === "#66ccff");
+  const lastFill = calls.map((c) => c.name).lastIndexOf("fill");
+  assert.ok(ringAt > 0, "a selection ring should be painted");
+  assert.ok(ringAt > lastFill, "the selection ring must land after every building body");
 });
 
 test("paintCityGhostBuilding: emits a 0.45-alpha strokeRect green/red depending on node.valid", () => {

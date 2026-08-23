@@ -119,7 +119,7 @@ Four lanes is the realistic ceiling for this backlog.
 | Lane | Work | Unblocked by |
 | :--- | :--- | :--- |
 | **A** | #146 — rewrite `multiplayerSync.ts` against the cursor; wire `entityMirror.ts` in | #145 |
-| **B** | #148 — reconcile `src/render/painter/` vs `paint2d/`, cut `MapRenderer` over | #149 |
+| **B** | ~~#148~~ ✅ **closed 2026-08-21** — reconciled `src/render/painter/` vs `paint2d/` (`paint2d/` survives, `painter/` deleted), cut `MapRenderer` *and* `drawCityView` over | #149 |
 | **Opportunistic** | #153 | Nothing — but see §5 |
 
 ### Wave 3 — 2 concurrent lanes

@@ -3,33 +3,22 @@ import { Camera } from "./camera";
 import { Hero } from "../entities/hero";
 import { Castle } from "../entities/settlement";
 import { GameMap } from "../map/gameMap";
-import { drawResourceIcons } from "./overlays/resourceIcon";
-import { drawTerritoryOutlines } from "./overlays/territoryOutline";
-import { drawPathOverlay } from "./overlays/pathOverlay";
 import { SpriteProvider } from "./assets";
 import { computeVision } from "./fog";
 import { MinimapCamera } from "./minimapCamera";
 import { drawMinimap } from "./minimap";
 import type { RenderOptions } from "./renderTypes";
-import {
-  BackgroundPainter,
-  CastlePainter,
-  CharterPainter,
-  HexHoverPainter,
-  HexTerrainPainter,
-  HeroPainter,
-  SelectedTilePainter,
-} from "./painter";
+import { buildAdventureScene } from "./scene/sceneBuilder/adventureScene";
+import { paintScene } from "./scene/paint2d";
+import { createPaint2DDep } from "./paint2dDefaults";
+import type { Paint2DDep } from "./scene/paint2d/deps";
+
+const BACKGROUND = "#0a0a0a";
 
 export class MapRenderer {
   public map: GameMap;
-  private readonly backgroundPainter = new BackgroundPainter();
-  private readonly terrainPainter = new HexTerrainPainter();
-  private readonly selectedTilePainter = new SelectedTilePainter();
-  private readonly hoverPainter = new HexHoverPainter();
-  private readonly heroPainter = new HeroPainter();
-  private readonly castlePainter = new CastlePainter();
-  private readonly charterPainter = new CharterPainter();
+  private readonly paint2d: Paint2DDep;
+  private colorForOwner: (ownerId: number | null) => string = () => "#ffffff";
 
   constructor(
     private ctx: CanvasRenderingContext2D,
@@ -39,6 +28,15 @@ export class MapRenderer {
     private minimapCamera: MinimapCamera,
   ) {
     this.map = map;
+    // Built once, not per frame: the sprite resolver is stateless but the dep
+    // is the painter's whole external surface, and rebuilding it each draw
+    // would allocate a closure set per frame for no gain. The adventure map
+    // has no skybox nodes, so no SkyboxProvider is needed.
+    this.paint2d = createPaint2DDep({
+      spriteProvider: this.sprites,
+      skybox: null,
+      colorForOwner: (ownerId) => this.colorForOwner(ownerId),
+    });
   }
 
   draw(
@@ -49,35 +47,22 @@ export class MapRenderer {
     opts: RenderOptions,
   ): void {
     const ctx = this.ctx;
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    this.colorForOwner = opts.colorForOwner;
 
-    this.backgroundPainter.paint(ctx, w, h);
+    ctx.fillStyle = BACKGROUND;
+    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 
     const visible = computeVision(heroes, castles, opts.viewPlayerId);
+    const nodes = buildAdventureScene({ map: this.map, heroes, castles, path, hover, opts, visible });
 
     ctx.save();
     this.camera.apply(ctx);
-
-    this.terrainPainter.paint(ctx, this.map, visible);
-    drawResourceIcons(ctx, this.sprites, this.map, visible);
-
-    this.charterPainter.paint(ctx, opts.activeCharters, opts.validCharterHexes, visible);
-
-    this.castlePainter.paint(ctx, castles, this.sprites, visible, opts);
-
-    drawTerritoryOutlines(ctx, castles, opts.colorForOwner, this.map.width, this.map.height, visible);
-
-    drawPathOverlay(ctx, heroes, path, this.map, opts);
-
-    this.selectedTilePainter.paint(ctx, opts.inspectedTile);
-
-    this.hoverPainter.paint(ctx, hover, visible);
-
-    this.heroPainter.paint(ctx, heroes, this.sprites, visible, opts);
-
+    paintScene(ctx, nodes, this.paint2d);
     ctx.restore();
 
+    // The minimap is a self-contained secondary view drawn outside the camera
+    // transform; the scene graph models no minimap node kinds, so it stays a
+    // direct call. See plan/2026-08-19-phase5-final-renderer-rewrite.md §7.
     drawMinimap(ctx, this.map, this.camera, this.minimapCamera, heroes, path, opts, visible);
   }
 

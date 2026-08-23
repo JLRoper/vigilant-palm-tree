@@ -140,7 +140,12 @@ export interface HeroNode {
   kind: "hero";
   heroId: string;
   ownerId: number;
+  /** Sprite anchor: tile centre + pixelOffset + the walk-cycle bob. */
   world: WorldPoint;
+  /** Owner-dot / selection-ring anchor: tile centre + pixelOffset, no bob. The
+   * pre-cutover HeroPainter deliberately left both markers still while the
+   * sprite bobbed, so they need their own anchor rather than reusing `world`. */
+  markerWorld: WorldPoint;
   facingDirection: HeroDirection;
   horseVariant: HorseVariant;
   faction: Faction;

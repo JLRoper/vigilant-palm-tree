@@ -17,13 +17,14 @@
 //
 // See src/render/scene/paint2d/README.md for the full boundary rationale.
 
-import type { Paint2DDep } from "./deps";
+import type { Paint2DDep, ResolvedSpriteDescriptor } from "./deps";
 import {
   hexPath,
 } from "./geometry";
+import { HEX_SIZE } from "../../../core/hex";
 import { decorationSeed } from "../../decorationSeed";
 import { TERRAIN_COLORS } from "../../../map/terrain";
-import { drawKnightSprite, drawDemonSprite } from "../../heroSprites";
+import { drawBuildingInto } from "./buildings";
 import { RESOURCE_PAL } from "../../palettes";
 import type {
   BattleAiActingRingNode,
@@ -57,10 +58,10 @@ import type {
   ValidCharterHexNode,
 } from "../types";
 
-// Live-copied colour constants. The painter classes under `src/render/painter/`
-// (PR #122) already use these -- the paint2d transcription emit must match
-// their output byte-for-byte. The painter project lives here, not in the
-// forbidden Vite-?url-coupled set, so these literals are the source of truth.
+// Live colour constants, transcribed byte-for-byte from the per-kind painter
+// classes that used to live under `src/render/painter/` (PR #122). Those
+// classes were deleted in issue #148 once MapRenderer switched to paintScene,
+// so these literals are now the only copy.
 const FOG_FILL = "rgba(8, 10, 16, 0.78)";
 const FOG_EDGE = "rgba(8, 10, 16, 0.55)";
 const HOVER_STROKE = "#ffcc00";
@@ -81,6 +82,9 @@ const CITY_CELL_FILL = "#2a2438";
 const CITY_CELL_STROKE = "#3a3450";
 const CITY_HOVER_STROKE = "#ffcc00";
 const CITY_TEXT = "#ffffff";
+const CITY_SELECTION_STROKE = "#66ccff";
+const CITY_GHOST_VALID_STROKE = "#44ff44";
+const CITY_GHOST_INVALID_STROKE = "#ff4444";
 
 const BATTLE_HEX_FILL = "#20242c";
 const BATTLE_HEX_IMPASSABLE = "#3a2a2a";
@@ -100,19 +104,10 @@ const BATTLE_COMBATANT_STROKE = "#fff";
 
 type Drawable = HTMLImageElement | HTMLCanvasElement;
 
-interface SpriteDescriptor {
-  anchor: "bottom" | "center";
-  anchorOffsetY?: number;
-  sizing:
-    | { kind: "abs"; size: number }
-    | { kind: "fitHeight"; hexSizeMul: number }
-    | { kind: "fitWidth"; hexSizeMul: number };
-}
-
 function drawWithDescriptor(
   ctx: CanvasRenderingContext2D,
   drawable: Drawable,
-  desc: SpriteDescriptor,
+  desc: ResolvedSpriteDescriptor,
   cx: number,
   cy: number,
   hexSize: number,
@@ -186,7 +181,8 @@ export function paintScene(
   if (frame === undefined && nodes.some((n) => n.kind === "citySkybox")) {
     throw new Error("paintScene: citySkybox node requires a Paint2DFrame (viewport dimensions) but none was provided");
   }
-  for (const node of nodes) {
+  for (let idx = 0; idx < nodes.length; idx++) {
+    const node = nodes[idx];
     switch (node.kind) {
       case "terrainHex":
         paintTerrainHex(ctx, node, deps);
@@ -209,9 +205,22 @@ export function paintScene(
       case "castle":
         paintCastle(ctx, node, deps);
         break;
-      case "territoryOutlineEdge":
-        paintTerritoryOutlineEdge(ctx, node, deps);
+      case "territoryOutlineEdge": {
+        // drawTerritoryOutlines() stroked one owner's whole boundary as a
+        // single sub-path under globalAlpha 0.45. Stroking edge-by-edge would
+        // double-blend every shared endpoint into a visible bead, so gather
+        // the consecutive same-owner run the scene builder emits and stroke
+        // it once.
+        let end = idx + 1;
+        while (end < nodes.length) {
+          const next = nodes[end];
+          if (next.kind !== "territoryOutlineEdge" || next.ownerId !== node.ownerId) break;
+          end++;
+        }
+        paintTerritoryOutlineEdges(ctx, nodes.slice(idx, end) as TerritoryOutlineEdgeNode[], deps);
+        idx = end - 1;
         break;
+      }
       case "pathSegment":
         paintPathSegment(ctx, node, deps);
         break;
@@ -239,9 +248,19 @@ export function paintScene(
       case "cityMine":
         paintCityMine(ctx, node, deps);
         break;
-      case "cityBuilding":
-        paintCityBuilding(ctx, node, deps);
+      case "cityBuilding": {
+        // Same run-batching shape as territoryOutlineEdge above, for the same
+        // reason: drawCityView() drew every building first and only then made
+        // a second pass over the selected ones, so the dashed selection rings
+        // sit above neighbouring buildings that overlap them.
+        let end = idx + 1;
+        while (end < nodes.length && nodes[end].kind === "cityBuilding") end++;
+        const run = nodes.slice(idx, end) as CityBuildingNode[];
+        for (const building of run) paintCityBuilding(ctx, building, deps);
+        paintCityBuildingSelections(ctx, run, deps);
+        idx = end - 1;
         break;
+      }
       case "cityGhostBuilding":
         paintCityGhostBuilding(ctx, node, deps);
         break;
@@ -374,18 +393,18 @@ export function paintResourceIcon(ctx: CanvasRenderingContext2D, node: ResourceI
   const r = deps.sprite.resolveSpriteForResource(node.resource);
   if (!r || !r.ready) return;
   ctx.imageSmoothingEnabled = false;
-  drawWithDescriptor(ctx, r.drawable as Drawable, r.descriptor as unknown as SpriteDescriptor, node.world.x, node.world.y, 32);
+  drawWithDescriptor(ctx, r.drawable, r.descriptor, node.world.x, node.world.y, HEX_SIZE);
 }
 
 export function paintCastle(ctx: CanvasRenderingContext2D, node: CastleNode, deps: Paint2DDep): void {
   const r = deps.sprite.resolveSpriteForCastle(node.level, node.variant);
   if (r && r.ready) {
-    drawWithDescriptor(ctx, r.drawable as Drawable, r.descriptor as unknown as SpriteDescriptor, node.world.x, node.world.y, 32);
+    drawWithDescriptor(ctx, r.drawable, r.descriptor, node.world.x, node.world.y, HEX_SIZE);
   }
   const { x: cx, y: cy } = node.world;
-  const radius = node.selected ? 32 * 1.05 : 32 * 0.95;
+  const radius = node.selected ? HEX_SIZE * 1.05 : HEX_SIZE * 0.95;
   ctx.beginPath();
-  ctx.arc(cx, cy + 32 * 0.55, radius, 0, Math.PI * 2);
+  ctx.arc(cx, cy + HEX_SIZE * 0.55, radius, 0, Math.PI * 2);
   if (node.dashedBorder) {
     ctx.strokeStyle = "rgba(255,255,255,0.18)";
     ctx.setLineDash([4, 4]);
@@ -410,7 +429,7 @@ export function paintCharterOverlay(ctx: CanvasRenderingContext2D, node: Charter
   ctx.fill();
 
   if (node.phase === "constructing") {
-    const innerSize = 32 * 0.5;
+    const innerSize = HEX_SIZE * 0.5;
     ctx.strokeStyle = "rgba(160, 120, 60, 0.6)";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -441,15 +460,32 @@ export function paintValidCharterHex(ctx: CanvasRenderingContext2D, node: ValidC
 }
 
 export function paintTerritoryOutlineEdge(ctx: CanvasRenderingContext2D, node: TerritoryOutlineEdgeNode, deps: Paint2DDep): void {
+  paintTerritoryOutlineEdges(ctx, [node], deps);
+}
+
+/**
+ * Stroke a run of same-owner boundary edges as one path, matching
+ * `drawTerritoryOutlines()`'s per-owner batch. Batching is load-bearing, not
+ * an optimisation: at `globalAlpha = 0.45` with round caps, per-edge strokes
+ * blend twice at every shared endpoint.
+ */
+export function paintTerritoryOutlineEdges(
+  ctx: CanvasRenderingContext2D,
+  edges: readonly TerritoryOutlineEdgeNode[],
+  deps: Paint2DDep,
+): void {
+  if (edges.length === 0) return;
   ctx.save();
-  ctx.strokeStyle = node.color;
+  ctx.strokeStyle = edges[0].color;
   ctx.lineWidth = deps.getTerritoryBorderWidth();
   ctx.globalAlpha = 0.45;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.beginPath();
-  ctx.moveTo(node.x1, node.y1);
-  ctx.lineTo(node.x2, node.y2);
+  for (const e of edges) {
+    ctx.moveTo(e.x1, e.y1);
+    ctx.lineTo(e.x2, e.y2);
+  }
   ctx.stroke();
   ctx.restore();
 }
@@ -471,7 +507,10 @@ export function paintPathSegment(ctx: CanvasRenderingContext2D, node: PathSegmen
   const dotRadius = node.reachable ? 6 : 4;
   const alpha = color.replace(/[\d.]+\)$/, "0.5)");
   ctx.fillStyle = alpha;
-  for (let i = 1; i < node.points.length - 1; i++) {
+  // Every point except the segment's first one gets a dot -- including the
+  // last. drawPathSegment()'s loop ran `fromIdx + 1 ..< toIdx`, i.e. inclusive
+  // of the final point it had just stroked to.
+  for (let i = 1; i < node.points.length; i++) {
     const p = node.points[i];
     ctx.beginPath();
     ctx.arc(p.x, p.y, dotRadius, 0, Math.PI * 2);
@@ -528,33 +567,26 @@ export function paintSelectedTileHighlight(ctx: CanvasRenderingContext2D, node: 
 
 export function paintHero(ctx: CanvasRenderingContext2D, node: HeroNode, deps: Paint2DDep): void {
   const variant = node.horseVariant;
-  const needsScale = Math.abs(node.scaleY - 1.0) > 1e-6;
+  // The walk-cycle vertical squash applies to the on-foot hero sprite only --
+  // drawHorseSprite() never took a scaleY. Mounted heroes bob but don't squash.
+  const needsScale = variant === "hero" && Math.abs(node.scaleY - 1.0) > 1e-6;
   if (needsScale) {
-    const anchorY = node.world.y + 32 * 0.5;
+    const anchorY = node.world.y + HEX_SIZE * 0.5;
     ctx.save();
     ctx.translate(node.world.x, anchorY);
     ctx.scale(1, node.scaleY);
     ctx.translate(-node.world.x, -anchorY);
   }
-  if (variant === "hero") {
-    const r = deps.sprite.resolveSpriteForHero(node.faction, node.facingDirection, variant);
-    if (r && r.ready) {
-      drawWithDescriptor(ctx, r.drawable as Drawable, r.descriptor as unknown as SpriteDescriptor, node.world.x, node.world.y, 32);
-    } else {
-      const drawer = node.faction === "player" ? drawKnightSprite : drawDemonSprite;
-      drawer(ctx, 32);
-    }
-  } else {
-    const r = deps.sprite.resolveSpriteForHero(node.faction, node.facingDirection, variant);
-    if (r && r.ready) {
-      drawWithDescriptor(ctx, r.drawable as Drawable, r.descriptor as unknown as SpriteDescriptor, node.world.x, node.world.y, 32);
-    }
+  const r = deps.sprite.resolveSpriteForHero(node.faction, node.facingDirection, variant);
+  if (r && r.ready) {
+    drawWithDescriptor(ctx, r.drawable, r.descriptor, node.world.x, node.world.y, HEX_SIZE);
   }
   if (needsScale) ctx.restore();
 
+  // Markers anchor to markerWorld, not world: they stay put while the sprite bobs.
   ctx.fillStyle = node.color;
   ctx.beginPath();
-  ctx.arc(node.world.x, node.world.y + OWNER_DOT_OFFSET_Y, OWNER_DOT_RADIUS, 0, Math.PI * 2);
+  ctx.arc(node.markerWorld.x, node.markerWorld.y + OWNER_DOT_OFFSET_Y, OWNER_DOT_RADIUS, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = "rgba(0,0,0,0.55)";
   ctx.lineWidth = 1;
@@ -563,7 +595,7 @@ export function paintHero(ctx: CanvasRenderingContext2D, node: HeroNode, deps: P
     ctx.strokeStyle = node.color;
     ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.arc(node.world.x, node.world.y, SELECTED_HERO_RING_RADIUS, 0, Math.PI * 2);
+    ctx.arc(node.markerWorld.x, node.markerWorld.y, SELECTED_HERO_RING_RADIUS, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
@@ -742,28 +774,63 @@ export function paintCityMine(ctx: CanvasRenderingContext2D, node: CityMineNode,
 }
 
 export function paintCityBuilding(ctx: CanvasRenderingContext2D, node: CityBuildingNode, deps: Paint2DDep): void {
-  const r = deps.sprite.resolveSpriteForBuilding(node.style, node.buildingKind, node.level);
-  if (r && r.ready) {
-    drawWithDescriptor(ctx, r.drawable as Drawable, r.descriptor as unknown as SpriteDescriptor, node.center.x, node.center.y, 32);
-  }
-  if (node.selected) {
-    ctx.save();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "#66ccff";
-    ctx.setLineDash([6, 4]);
+  drawBuildingInto(
+    ctx,
+    deps.sprite.resolveSpriteForBuilding(node.style, node.buildingKind, node.level),
+    node.center.x,
+    node.center.y,
+    node.halfWidth * 2,
+    node.halfHeight * 2,
+    node.buildingKind,
+    node.level,
+    node.ownerColor,
+    node.style,
+  );
+}
+
+/**
+ * Second pass over a run of building nodes, stroking the dashed ring around
+ * the selected ones. Separate from `paintCityBuilding` because drawCityView()
+ * drew all buildings before any selection ring -- inlining the ring would let
+ * a later building paint over an earlier building's ring.
+ */
+export function paintCityBuildingSelections(
+  ctx: CanvasRenderingContext2D,
+  nodes: readonly CityBuildingNode[],
+  deps: Paint2DDep,
+): void {
+  const selected = nodes.filter((n) => n.selected);
+  if (selected.length === 0) return;
+  ctx.save();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = CITY_SELECTION_STROKE;
+  ctx.setLineDash([6, 4]);
+  for (const node of selected) {
     ctx.strokeRect(node.center.x - node.halfWidth, node.center.y - node.halfHeight, node.halfWidth * 2, node.halfHeight * 2);
-    ctx.restore();
   }
+  ctx.restore();
+  void deps;
 }
 
 export function paintCityGhostBuilding(ctx: CanvasRenderingContext2D, node: CityGhostBuildingNode, deps: Paint2DDep): void {
   ctx.save();
   ctx.globalAlpha = 0.45;
-  ctx.strokeStyle = node.valid ? "#44ff44" : "#ff4444";
+  ctx.strokeStyle = node.valid ? CITY_GHOST_VALID_STROKE : CITY_GHOST_INVALID_STROKE;
   ctx.lineWidth = 3;
   ctx.strokeRect(node.center.x - node.halfWidth, node.center.y - node.halfHeight, node.halfWidth * 2, node.halfHeight * 2);
+  drawBuildingInto(
+    ctx,
+    deps.sprite.resolveSpriteForBuilding(node.style, node.buildingKind, 1),
+    node.center.x,
+    node.center.y,
+    node.halfWidth * 2,
+    node.halfHeight * 2,
+    node.buildingKind,
+    1,
+    node.ownerColor,
+    node.style,
+  );
   ctx.restore();
-  void deps;
 }
 
 export function paintCityLabel(ctx: CanvasRenderingContext2D, node: CityLabelNode, deps: Paint2DDep): void {

@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-19
 **Owner:** Dev B (renderer surface; this doc), Dev A can pick up the §3 Track 5.A tail in parallel.
-**Status:** Draft. Plan for the next work session.
+**Status:** ✅ **Executed 2026-08-21** on branch `claude/issue-148-9dcdc3`, as issue **#148**. Read §9 first — it records where the execution deviated from this draft and why.
 **Closes:** `issue #97` ("Complete Phase 5 part B"), §7.2 exit criteria, opens §3 to Track 5.A's tail.
 
 ---
@@ -176,3 +176,40 @@ Pre-push gate (per AGENTS.md): `npm run precommit-checker` runs `npm run build` 
 - Issue #97 "Complete Phase 5 part B" — closes when this commit lands + §3 is in flight.
 - PRs: open is #136 (Commits 4–10); merged are #122 (Commit 2 — skybox + paint2dDefaults), #135 (Commit 3 — terrain hex / decoration / fog / hover), #117 (CB-4), #115 (CB-3), #113 (CB-2), #112 (CB-1).
 - Track 5.A tail: §7.1 of the consolidated plan + the §3 of this doc.
+
+---
+
+## 9. Execution notes (2026-08-21, issue #148)
+
+This plan was followed, with four deliberate deviations and one thing it did not anticipate.
+
+### 9.1 Deviations from §2
+
+**`MapRenderer.draw()` kept its signature.** §2.1 proposed `draw(hover, nodes, frame?)`, moving `buildAdventureScene()` to the call site. It builds the scene internally instead. The reason is `drawMinimap()`: it needs `heroes`, `path`, `opts`, and the fog `visible` set, so pushing scene construction out to `ViewManager`/`adventureView` would have made both call sites re-derive inputs the renderer already has, and `computeVision()` would run twice per frame. `buildAdventureScene` gained an optional `visible` input so the renderer computes fog once and shares it with the minimap. No caller changed at all — the §4.1 exit criterion (`draw()` body ≤ 30 lines) is met either way.
+
+**`decorationSeed.ts` was not deleted.** §2.1's file list says to delete it as a duplicate; it isn't one — `paint2d/index.ts` imports it. It stays.
+
+**`overlays/pathOverlay.ts` kept `drawMinimapPath` as well as `computeReachableSplit`.** §2.1 mentioned only the latter. The minimap isn't in the scene graph, so its path draw has nowhere else to go.
+
+**`cityRenderer.ts` was not reduced to a re-export.** It keeps a four-line `drawCityView` that wraps `paintScene` in `ctx.save()` / `ctx.lineJoin = "miter"` / `ctx.restore()`. That `lineJoin` is load-bearing — the adventure painters leave it on `"round"`, and the city's diamond cells want mitred corners.
+
+### 9.2 What §5's risk register missed
+
+The register's highest-impact entry was that `adventureScene.ts`'s territory partitioning might differ from `drawTerritoryOutlines()`'s. It doesn't. What did differ was everything else: **six** behavioural divergences between `painter/` and `paint2d/`, plus three more in the city painters. The full table is in `src/render/docs/technical-spec.md` §7.3. Two are worth repeating here because they invalidate an assumption this doc states twice:
+
+- `paint2dDefaults.ts`'s `narrowResolvedSprite()` stripped `anchor` and `sizing` off the sprite descriptor, so `drawWithDescriptor()` would have thrown on `desc.sizing.kind` for **every** sprite draw. `paint2d/`'s sprite path had never run.
+- `paint2d/colors.ts`'s charter and valid-charter palettes were invented values, under a header comment asserting they were byte-exact with the live renderers.
+
+So §6's "the visual output must be byte-identical assuming the migration matrix is followed" was wrong as written: following the matrix was necessary but nowhere near sufficient. The transcriptions were not byte-for-byte, and only the #149 gate could tell.
+
+### 9.3 The gate did the work
+
+All eight `npm run test:visual` scenes matched their committed baselines pixel-for-pixel, **with no baseline regenerated** — that, rather than the migration matrix, is the byte-equivalence claim. `npm run build`, `npm run lint:deps` (0 violations), and `npm run test:all` (smoke + multiplayer + cityView + visual + 253 unit tests) are green.
+
+### 9.4 Unrelated bug found
+
+`src/render/skybox.ts` imported its four skybox PNGs from `./resources/skybox/` instead of `../resources/skybox/`. It had shipped in PR #122 and never been imported by anything, so the build had never tried to resolve the paths. Wiring `CityView` to it broke the build immediately; fixed in the same commit.
+
+### 9.5 Still open
+
+§2.5 of issue #148 — retiring the `?paint=scenebuilder` flag — is **not** done here. It is blocked on #143 (the arena still calls `drawLegacy()` unconditionally after `paintScene()`, so the flag double-paints). The visual suite's `battle-arena-legacy-vs-scenebuilder` cross-diff is the check that will confirm #143's fix.

@@ -2,57 +2,40 @@
 // Paint2DDep). Centralized so the painter files don't sprinkle magic strings --
 // and so a future theme can override Paint2DDep without rewriting constants.
 //
-// All values are byte-exact with the live renderers today: terrain hex
-// backgrounds, fog, path reachable/unreachable, hover gold, charter building-icon
-// dims, and battle hex tints. If a future theme wants to change any of these,
-// route through Paint2DDep instead -- colors.ts is a record of the default
-// palette, not a retheme seam.
+// All values here are byte-exact with the live renderers. Verified against the
+// pre-cutover draw paths during issue #148's painter reconciliation: the
+// charter / valid-charter entries below had drifted to invented palettes and
+// were the only consumed constants in this file, so a cutover would have
+// silently recoloured every charter overlay. A batch of never-consumed
+// adventure constants (fog, hover, path, hero trail) had drifted the same way
+// and were deleted rather than corrected -- the painters in index.ts carry
+// those literals directly, and a second unused copy is exactly how the drift
+// happened. If a future theme wants to change any of these, route through
+// Paint2DDep.
 
-// Hex stroke "available" overlay tint (adventure: hover highlight outline).
-export const HOVER_STROKE = "rgba(255,214,102,0.9)";
-
-// Fog of war (adventure: view-player can't see this hex).
-export const FOG_FILL = "rgba(0,0,0,0.55)";
-export const FOG_EDGE = "rgba(0,0,0,0.0)";
-
-// Path preview (Overlay/pathOverlay.ts):
-// - reachable = a hex the hero can still walk to this turn
-// - unreachable = proposed-but-blocked-by-an-obstacle segment
-export const REACHABLE_PATH = "rgba(120,255,120,0.85)";
-export const UNREACHABLE_PATH = "rgba(255,90,90,0.85)";
-
-// Hero trail (the faint dashed line drawn behind the hero when it's animating).
-export const HERO_TRAIL_DOT = "rgba(255,255,255,0.55)";
-export const HERO_TRAIL_LINE = "rgba(255,255,255,0.35)";
-
-// Charter defaults (live values today -- injected via Paint2DDep.charterStyle
-// for future themes). The literals here are referenced by the default-deps
-// builder at src/render/paint2dDefaults.ts, not by the painters themselves.
+// Charter defaults, byte-exact with the pre-cutover CharterPainter.ts.
+// Injected via Paint2DDep.charterStyle; the literals here are referenced by
+// the default-deps builder at src/render/paint2dDefaults.ts, not by the
+// painters themselves.
 export const DEFAULT_CHARTER_TRAVELING = {
-  stroke: "rgba(0,200,255,0.9)",
-  fill: "rgba(0,200,255,0.18)",
-  lineDash: [6, 4],
-  lineWidth: 2,
-};
-export const DEFAULT_CHARTER_PLAN = {
-  stroke: "rgba(255,165,0,0.9)",
-  fill: "rgba(255,165,0,0.18)",
-  lineDash: [3, 3],
+  stroke: "rgba(200, 180, 140, 0.5)",
+  fill: "rgba(200, 180, 140, 0.15)",
+  lineDash: [4, 4],
   lineWidth: 2,
 };
 export const DEFAULT_CHARTER_CONSTRUCTING = {
-  stroke: "rgba(170,255,90,0.9)",
-  fill: "rgba(170,255,90,0.18)",
+  stroke: "rgba(200, 160, 80, 0.7)",
+  fill: "rgba(200, 160, 80, 0.2)",
   lineDash: [],
-  lineWidth: 2,
+  lineWidth: 3,
 };
 
-// Default-deps builder uses these for the validCharterHex palette -- the live
-// renderer.ts hardcodes #44ff44 with rgba 0.18 alpha.
+// Valid charter-placement hexes, byte-exact with CharterPainter.ts's
+// paintValidCharterHexes().
 export const VALID_CHARTER_HEX = {
-  stroke: "rgba(68,255,68,0.9)",
-  fill: "rgba(68,255,68,0.18)",
-  lineDash: [6, 4],
+  stroke: "rgba(100, 220, 100, 0.6)",
+  fill: "rgba(100, 220, 100, 0.08)",
+  lineDash: [3, 3],
   lineWidth: 2,
 };
 

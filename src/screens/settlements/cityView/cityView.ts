@@ -1,6 +1,10 @@
 import { TILE_W, TILE_D, cellOrigin } from "../../../core/cityGrid";
 import type { CityViewSize } from "@heroes/engine";
 import { computeCityScale, drawCityView } from "../../../render/cityRenderer";
+import { buildCityScene } from "../../../render/scene/sceneBuilder/cityScene";
+import { createPaint2DDep } from "../../../render/paint2dDefaults";
+import { createSkyboxProvider } from "../../../render/skybox";
+import type { Paint2DDep } from "../../../render/scene/paint2d/deps";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { SpriteProvider } from "../../../render/assets";
 import type { BuildingDef, GenerationStyle } from "../../../render/cityBuildingDraw";
@@ -28,7 +32,10 @@ export class CityView {
   private style: GenerationStyle = "classic";
   private pattern: GenerationPattern = "denseUrban";
   private seed = 42;
-  private provider: SpriteProvider;
+  // One dep for the lifetime of the view: the skybox provider owns the decoded
+  // image + parallax layer-canvas caches, so rebuilding it per frame would
+  // re-split the skybox on every draw.
+  private paint2d: Paint2DDep;
   private buildingMenu: BuildingMenu;
   private placer: BuildingPlacer;
   private selectionMenu: BuildingSelectionMenu;
@@ -40,7 +47,11 @@ export class CityView {
   private onKeyDown: (e: KeyboardEvent) => void;
 
   constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>) => void; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string } }) {
-    this.provider = opts.provider;
+    this.paint2d = createPaint2DDep({
+      spriteProvider: opts.provider,
+      skybox: createSkyboxProvider(),
+      colorForOwner: () => this.ownerColor,
+    });
     this.buildingMenu = new BuildingMenu({
       onRecruitArcher: opts.onRecruitArcher,
       onUpgradeTownHall: opts.onUpgradeTownHall,
@@ -180,14 +191,14 @@ export class CityView {
     ctx.restore();
 
     const ghost = this.placer.ghostSnapshot();
-    drawCityView(ctx, {
+    const s = settings();
+    const nodes = buildCityScene({
       viewportW,
       viewportH,
       settlementName: this.settlementName,
       size: this.size,
       hover: this.hover,
       ownerColor: this.ownerColor,
-      provider: this.provider,
       citySpots: this.citySpots,
       cityMines: this.cityMines,
       buildings: this.placer.buildings,
@@ -195,7 +206,15 @@ export class CityView {
       pattern: this.pattern,
       ghost,
       selectedKeys: this.selectedKeys,
+      citySettings: {
+        spriteVariant: s.spriteVariant,
+        parallaxEnabled: s.parallaxEnabled,
+        parallaxLayerCount: s.parallaxLayerCount,
+        cityBgOffsetX: s.cityBgOffsetX,
+        cityBgOffsetY: s.cityBgOffsetY,
+      },
     });
+    drawCityView(ctx, nodes, this.paint2d, { viewportW, viewportH });
   }
 
   updateMouse(canvasX: number, canvasY: number): void {
