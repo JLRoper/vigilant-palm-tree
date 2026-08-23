@@ -4,13 +4,30 @@
 *Audits: `plan/2026-08-17-consolidated-phase-1-5-track-map.md` against the tree at `f395e95` (main, post-#138).*
 *Produces: issues #143–#155, and the wave ordering below.*
 *Repo: `JLRoper/vigilant-palm-tree`*
-*Status reviewed: 2026-08-22, against `origin/main@4c89d9a`.*
+*Status reviewed: 2026-08-23, against `origin/main@fc7d8c6`.*
 
 ---
 
-## 0. Status Update (2026-08-22)
+## 0. Status Update (2026-08-23)
 
-Checked against live GitHub issue state and spot-verified in the tree (`origin/main@4c89d9a`).
+Checked against live GitHub issue state.
+
+**Closed since the 2026-08-22 update:** #147, #150, #152 — the entire wave 3 frontier plus the #150 test-guard item (closed by PR #160 on 2026-08-23).
+- **#147** — `SessionManager.manualSave()` now goes through the command pipeline instead of PATCHing full state (landed 2026-08-23).
+- **#150** — `mockRepos.ts` now has `snapshotCalls`/`transactionCalls` recorded-call arrays, and `commandHandler.test.ts` asserts `EndTurn` writes `settlement_snapshots` only for the actor's own settlements and `resource_transactions` only for transfers that actually fired.
+- **#152** — `AdvanceCharterTravel` server command landed; charter travel-stepping is no longer client-authoritative.
+
+**Only 2 of 13 issues remain open, both by design, not by neglect:**
+- **#153** — trigger-gated per §5; waits on the settings slider being hidden or the game accepting untrusted players. No action expected yet.
+- **#154** — Phase-6-shaped JSONB blob retirement; tail work, unowned as flagged.
+
+**Net effect on the wave plan:** Waves 1–3 are fully done — all 11 non-tail, non-trigger-gated issues in this audit's set are closed. Wave 4 (#154) is the only unscheduled work item left; #155's doc refresh already landed. This sequencing plan's active job is finished — what's left is #153's trigger and #154's six-step retirement, both already fully specified in §5 and their own issue bodies.
+
+---
+
+## 0.1 Status Update (2026-08-22) — historical
+
+Checked against live GitHub issue state and spot-verified in the tree (`origin/main@4c89d9a`), before #147/#150/#152 closed.
 
 **Closed (9 of 13):** #143, #144, #145, #146, #148, #149, #151, #155 — plus #140/#142 from the same period (not part of this audit's issue set, but merged in the same window). Verified in-tree, not just by issue status:
 - #143 — arena double-paint fixed.
@@ -66,18 +83,18 @@ Track 5.B is **further along** than `plan/2026-08-17-consolidated-phase-1-5-trac
 
 ## 2. The Thirteen Issues
 
-| # | Title | Kind | Wave | Status (2026-08-22) |
+| # | Title | Kind | Wave | Status (2026-08-23) |
 | :--- | :--- | :--- | :--- | :--- |
 | [#143](https://github.com/JLRoper/vigilant-palm-tree/issues/143) | Arena double-paints under `?paint=scenebuilder` | bug | 1 | ✅ Closed |
 | [#144](https://github.com/JLRoper/vigilant-palm-tree/issues/144) | `game_events.actor_seat` is dead schema | bug | 1 | ✅ Closed |
 | [#145](https://github.com/JLRoper/vigilant-palm-tree/issues/145) | No `?after=` cursor; `eventRepo.append()` discards the id | refactor | 1 | ✅ Closed |
 | [#146](https://github.com/JLRoper/vigilant-palm-tree/issues/146) | `multiplayerSync.ts` still a full-state poller | refactor | 2 | ✅ Closed |
-| [#147](https://github.com/JLRoper/vigilant-palm-tree/issues/147) | `SessionManager.manualSave()` still PATCHes full state | refactor | 3 | 🟡 Open — unblocked, next up |
+| [#147](https://github.com/JLRoper/vigilant-palm-tree/issues/147) | `SessionManager.manualSave()` still PATCHes full state | refactor | 3 | ✅ Closed |
 | [#148](https://github.com/JLRoper/vigilant-palm-tree/issues/148) | Two parallel painter sets; no renderer consumes `SceneNode[]` | refactor | 2 | ✅ Closed |
 | [#149](https://github.com/JLRoper/vigilant-palm-tree/issues/149) | Phase 5's visual-regression gate does not exist | enhancement | 1 | ✅ Closed |
 | [#150](https://github.com/JLRoper/vigilant-palm-tree/issues/150) | #89 follow-up: no unit guard on audit-row writes | bug | 1 | ✅ Closed |
 | [#151](https://github.com/JLRoper/vigilant-palm-tree/issues/151) | No client test for the `drainPendingCommands()` barrier | bug | 1 | ✅ Closed |
-| [#152](https://github.com/JLRoper/vigilant-palm-tree/issues/152) | Charter travel-stepping still client-authoritative | refactor | 3 | 🟡 Open — unblocked, next up |
+| [#152](https://github.com/JLRoper/vigilant-palm-tree/issues/152) | Charter travel-stepping still client-authoritative | refactor | 3 | ✅ Closed |
 | [#153](https://github.com/JLRoper/vigilant-palm-tree/issues/153) | `upgradePopulationGate` is client-trusted | bug | 2 (trigger-gated) | 🟡 Open — not yet triggered |
 | [#154](https://github.com/JLRoper/vigilant-palm-tree/issues/154) | JSONB blob retirement is unowned | refactor | 4 | 🟡 Open — tail work |
 | [#155](https://github.com/JLRoper/vigilant-palm-tree/issues/155) | Track map stale; in-code comments contradict the code | documentation | 4 | ✅ Closed |
@@ -126,31 +143,31 @@ Order matters for a substantive reason, not convenience: #149's baselines must b
 
 Lanes map onto the track map's existing §2 split (Track A = server & client logic, Track B = persistence & rendering), so each lane can be handed to a separate worktree with near-zero conflict surface — the same property that split was designed for.
 
-### Wave 1 — 4 concurrent lanes
+### Wave 1 — 4 concurrent lanes — ✅ done 2026-08-23
 
 | Lane | Work | Notes |
 | :--- | :--- | :--- |
-| **A-server** | #144 **+** #145 as one PR | The signature change happens once. See §3. |
-| **B-render** | #149 | Capture baselines from `main` first, before #143 or #148 touch anything. |
-| **Test** | #150, #151 | Both test-only. #150 touches `mockRepos.ts`; see §6. |
-| **Bug** | #143 | Smallest, most self-contained. Good first win. |
+| **A-server** | ~~#144~~ **+** ~~#145~~ ✅ as one PR | The signature change happens once. See §3. |
+| **B-render** | ~~#149~~ ✅ | Capture baselines from `main` first, before #143 or #148 touch anything. |
+| **Test** | ~~#150~~, ~~#151~~ ✅ | Both test-only. #150 touches `mockRepos.ts`; see §6. |
+| **Bug** | ~~#143~~ ✅ | Smallest, most self-contained. Good first win. |
 
 Four lanes is the realistic ceiling for this backlog.
 
-### Wave 2 — 2–3 concurrent lanes
+### Wave 2 — 2–3 concurrent lanes — done except #153 (trigger-gated, see below)
 
 | Lane | Work | Unblocked by |
 | :--- | :--- | :--- |
-| **A** | #146 — rewrite `multiplayerSync.ts` against the cursor; wire `entityMirror.ts` in | #145 |
-| **B** | #148 — reconcile `src/render/painter/` vs `paint2d/`, cut `MapRenderer` over | #149 |
-| **Opportunistic** | #153 | Nothing — but see §5 |
+| **A** | ~~#146~~ ✅ — rewrite `multiplayerSync.ts` against the cursor; wire `entityMirror.ts` in | #145 |
+| **B** | ~~#148~~ ✅ — reconcile `src/render/painter/` vs `paint2d/`, cut `MapRenderer` over | #149 |
+| **Opportunistic** | #153 — still 🟡 open, waiting on its trigger | Nothing — but see §5 |
 
-### Wave 3 — 2 concurrent lanes
+### Wave 3 — 2 concurrent lanes — ✅ done 2026-08-23
 
 | Lane | Work | Unblocked by |
 | :--- | :--- | :--- |
-| **A** | #147 — retire the full-state PATCH | #146 |
-| **A2** | #152 — `AdvanceCharterTravel` command | #144/#145 landing; `commandHandler.ts` quiet |
+| **A** | ~~#147~~ ✅ — retire the full-state PATCH | #146 |
+| **A2** | ~~#152~~ ✅ — `AdvanceCharterTravel` command | #144/#145 landing; `commandHandler.ts` quiet |
 
 ### Wave 4 — tail
 
