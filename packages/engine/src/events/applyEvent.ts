@@ -49,10 +49,49 @@ function applyHeroMoved(
   };
 }
 
+// Same "carries only the fact of the move, not the cost" shape as
+// applyHeroMoved above (see that function's own header comment) -- plus
+// flipping the charter to "constructing" on arrival, since that's a fact
+// this event's own payload (`to`) is enough to re-derive deterministically
+// against the charter's already-known targetQ/targetR.
+function applyCharterTravelAdvanced(
+  state: GameState,
+  heroId: string,
+  charterId: string,
+  to: { q: number; r: number },
+): ApplyEngineEventResult {
+  const hero = state.heroes[heroId];
+  if (!hero) return resync(state);
+  const charter = state.activeCharters.find((c) => c.id === charterId);
+  if (!charter) return resync(state);
+  if (hero.q === to.q && hero.r === to.r) return { state, outcome: "noop" };
+  const arrived = to.q === charter.targetQ && to.r === charter.targetR;
+  const moved: HeroState = {
+    ...hero,
+    q: to.q,
+    r: to.r,
+    previousQ: hero.q,
+    previousR: hero.r,
+    previousMovementRemaining: hero.movementRemaining,
+    trail: [...(hero.trail ?? []), { q: to.q, r: to.r }],
+    movementRemaining: arrived ? 0 : hero.movementRemaining,
+  };
+  const newCharters = arrived
+    ? state.activeCharters.map((c) => (c.id === charterId ? { ...c, phase: "constructing" as const } : c))
+    : state.activeCharters;
+  return {
+    state: { ...state, heroes: { ...state.heroes, [heroId]: moved }, activeCharters: newCharters },
+    outcome: "applied",
+  };
+}
+
 export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEngineEventResult {
   switch (event.type) {
     case "HeroMoved":
       return applyHeroMoved(state, event.heroId, event.to);
+
+    case "CharterTravelAdvanced":
+      return applyCharterTravelAdvanced(state, event.heroId, event.charterId, event.to);
 
     case "GoldTransferred": {
       const result = transferGold(state, event.heroId, event.settlementId, event.direction);

@@ -18,6 +18,7 @@ import {
   cityViewSizeFor,
   generateCitySpots,
   startCharter,
+  stepTravelCharter,
   cleanupDefeatedHeroCharters,
   startBuildingUpgrade,
   startSettlementUpgrade,
@@ -848,6 +849,77 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: payload.settlementId,
         targetQ: command.targetQ,
         targetR: command.targetR,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, hero: result.state.heroes[command.heroId] };
+    }
+    case "AdvanceCharterTravel": {
+      // Issue #152: the last piece of R5's charter lifecycle to go
+      // server-authoritative. Same source gate StartCharter uses and for
+      // the same reason -- charter phase has no JSONB fallback column, so
+      // on a fallback hydration state.activeCharters is [] regardless of
+      // what the charters table really holds, and stepTravelCharter()'s own
+      // not_traveling/no_charter checks would misfire against that empty
+      // view instead of the real one.
+      if (source !== "granular") {
+        return { ok: false, reason: "charters_persist_unavailable", events: [] };
+      }
+      const currentHero = row.heroes[command.heroId];
+      if (!currentHero) {
+        return { ok: false, reason: "no_hero", events: [] };
+      }
+      if (currentHero.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_hero", events: [] };
+      }
+      // Staleness guard, identical in shape and purpose to MoveHero's own
+      // (server/app/commandHandler.ts's MoveHero case, above): protects
+      // against a step computed from a hero position that's since changed
+      // underneath it (e.g. a concurrent ResolveBattle-triggered
+      // cleanupDefeatedHeroCharters, or a second in-flight step from a
+      // duplicate advanceAutoTravel() tick).
+      if (
+        currentHero.q !== command.fromTile.q ||
+        currentHero.r !== command.fromTile.r
+      ) {
+        return { ok: false, reason: "hero_not_at_fromTile", events: [] };
+      }
+      if (hexDistance(command.fromTile, command.toTile) !== 1) {
+        return { ok: false, reason: "not_adjacent", events: [] };
+      }
+      // Cost/passability are server-recomputed from the reconstructed map,
+      // not client-supplied -- same trust boundary StartCharter's
+      // target-hex check uses above (and the same GameMap reconstruction,
+      // pinned equivalent to the client's own by
+      // test/server/gameMapReconstruction.test.ts).
+      const map = new GameMap(row.seed, row.map_size as MapSize | undefined);
+      if (!map.isPassable(command.toTile.q, command.toTile.r)) {
+        return { ok: false, reason: "impassable", events: [] };
+      }
+      const cost = map.cost(command.toTile.q, command.toTile.r);
+      const result = stepTravelCharter(state, command.heroId, command.toTile.q, command.toTile.r, cost);
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      // Only reached on the granular path (gated above), same as
+      // StartCharter's own unconditional call -- safe here too since
+      // result.state.activeCharters is always this game's real, complete
+      // set (never a partial/JSONB-fallback view).
+      await deps.charterRepo.upsertMany(command.gameName, result.state.activeCharters);
+      const hero = state.heroes[command.heroId];
+      const event: EngineEvent = {
+        type: "CharterTravelAdvanced",
+        actor: command.actor,
+        heroId: command.heroId,
+        // hero.charterId is guaranteed non-null here -- stepTravelCharter()
+        // already rejected with not_chartering/no_charter otherwise.
+        charterId: hero!.charterId as string,
+        to: command.toTile,
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, hero: result.state.heroes[command.heroId] };

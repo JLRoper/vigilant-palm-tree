@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { EngineEvent } from "@heroes/contracts";
 import { applyEngineEvent } from "@heroes/engine";
-import { emptyWarehouse, makeHero, makeSettlement, makeState } from "../charter/_helpers";
+import { emptyWarehouse, makeCharter, makeHero, makeSettlement, makeState } from "../charter/_helpers";
 
 test("HeroMoved moves the hero, records the previous tile, and extends the trail", () => {
   const state = makeState({ heroes: [makeHero("h1", 1, 5, 5)], settlements: [] });
@@ -44,6 +44,71 @@ test("HeroMoved to the tile the hero already occupies is a noop; an unknown hero
   );
   assert.equal(
     applyEngineEvent(state, { type: "HeroMoved", actor: 1, heroId: "ghost", to: { q: 5, r: 5 } }).outcome,
+    "resync",
+  );
+});
+
+test("CharterTravelAdvanced moves the hero and extends the trail, mid-route", () => {
+  const state = makeState({
+    heroes: [makeHero("h1", 1, 5, 5, { isChartering: true, charterId: "c0", movementRemaining: 4 })],
+    activeCharters: [makeCharter({ id: "c0", heroId: "h1", ownerId: 1, targetQ: 10, targetR: 5 })],
+  });
+  const result = applyEngineEvent(state, {
+    type: "CharterTravelAdvanced",
+    actor: 1,
+    heroId: "h1",
+    charterId: "c0",
+    to: { q: 6, r: 5 },
+  });
+
+  assert.equal(result.outcome, "applied");
+  const hero = result.state.heroes.h1;
+  assert.deepEqual([hero.q, hero.r], [6, 5]);
+  assert.deepEqual([hero.previousQ, hero.previousR], [5, 5]);
+  assert.deepEqual(hero.trail.at(-1), { q: 6, r: 5 });
+  // Mid-route: the event carries no cost, same as HeroMoved -- movement is
+  // left untouched (TurnEnded's resync bounds the drift).
+  assert.equal(hero.movementRemaining, 4);
+  assert.equal(result.state.activeCharters.find((c) => c.id === "c0")?.phase, "traveling");
+});
+
+test("CharterTravelAdvanced flips the charter to constructing and zeroes movement on arrival", () => {
+  const state = makeState({
+    heroes: [makeHero("h1", 1, 9, 5, { isChartering: true, charterId: "c0", movementRemaining: 3 })],
+    activeCharters: [makeCharter({ id: "c0", heroId: "h1", ownerId: 1, targetQ: 10, targetR: 5 })],
+  });
+  const result = applyEngineEvent(state, {
+    type: "CharterTravelAdvanced",
+    actor: 1,
+    heroId: "h1",
+    charterId: "c0",
+    to: { q: 10, r: 5 },
+  });
+
+  assert.equal(result.outcome, "applied");
+  assert.equal(result.state.heroes.h1.movementRemaining, 0);
+  assert.equal(result.state.activeCharters.find((c) => c.id === "c0")?.phase, "constructing");
+});
+
+test("CharterTravelAdvanced to the hero's current tile is a noop; an unknown hero or charter resyncs", () => {
+  const state = makeState({
+    heroes: [makeHero("h1", 1, 5, 5, { isChartering: true, charterId: "c0" })],
+    activeCharters: [makeCharter({ id: "c0", heroId: "h1", ownerId: 1, targetQ: 10, targetR: 5 })],
+  });
+
+  assert.equal(
+    applyEngineEvent(state, { type: "CharterTravelAdvanced", actor: 1, heroId: "h1", charterId: "c0", to: { q: 5, r: 5 } })
+      .outcome,
+    "noop",
+  );
+  assert.equal(
+    applyEngineEvent(state, { type: "CharterTravelAdvanced", actor: 1, heroId: "ghost", charterId: "c0", to: { q: 6, r: 5 } })
+      .outcome,
+    "resync",
+  );
+  assert.equal(
+    applyEngineEvent(state, { type: "CharterTravelAdvanced", actor: 1, heroId: "h1", charterId: "ghost", to: { q: 6, r: 5 } })
+      .outcome,
     "resync",
   );
 });

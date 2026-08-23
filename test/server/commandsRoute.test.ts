@@ -171,6 +171,36 @@ test("UpgradeSettlement ignores a client-supplied targetLevel and derives it ser
   }
 });
 
+test("POST /games/:name/commands accepts AdvanceCharterTravel over HTTP (was a 400 -- parseCommand had no branch for it)", async () => {
+  // seedGame() only seeds the legacy JSONB columns (granular heroes/
+  // settlements/charters tables stay empty), so hydrateFromRepos() falls
+  // back to source="jsonb" here -- server/app/commandHandler.ts's
+  // AdvanceCharterTravel case rejects that with "charters_persist_
+  // unavailable" (409), same gate StartCharter uses. That 409 is exactly
+  // the regression pin this file's other two tests use a 200 for: it proves
+  // parseCommand recognized the kind and the request reached handleCommand,
+  // rather than falling through to parseCommand's `return null` and a 400
+  // "invalid command" that has nothing to do with charter persistence.
+  const name = uniqueName();
+  const { heroId } = ids(name);
+  await seedGame(name, buildingUpgradeSettlement(name));
+  try {
+    const res = await postCommand(name, {
+      kind: "AdvanceCharterTravel",
+      actor: 0,
+      heroId,
+      fromTile: { q: 2, r: 2 },
+      toTile: { q: 3, r: 2 },
+      cost: 1,
+    });
+    assert.equal(res.status, 409, await res.clone().text());
+    const body = (await res.json()) as { error?: string };
+    assert.equal(body.error, "charters_persist_unavailable");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
 test("UpgradeBuilding with a malformed requests payload is a 400, not a handler-level crash", async () => {
   const name = uniqueName();
   const { settlementId } = ids(name);

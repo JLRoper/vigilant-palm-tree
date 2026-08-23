@@ -54,7 +54,7 @@ function readClaims(game: Game): LobbyClaims {
   return (game as unknown as { lobby?: { claimed?: LobbyClaims } }).lobby?.claimed ?? {};
 }
 
-// The 13 variants packages/contracts/src/events/engineEvent.ts actually
+// The 14 variants packages/contracts/src/events/engineEvent.ts actually
 // declares. game_events also carries four legacy audit kinds
 // (turn_ended/round_ended/round_started/ai_turn_started, appended alongside
 // TurnEnded by server/app/commandHandler.ts) whose payloads are not
@@ -74,6 +74,7 @@ const ENGINE_EVENT_KINDS = new Set<EngineEvent["type"]>([
   "CharterStarted",
   "BuildingUpgradeStarted",
   "SettlementUpgradeStarted",
+  "CharterTravelAdvanced",
 ]);
 
 export function isEngineEventRow(row: GameEventRow): boolean {

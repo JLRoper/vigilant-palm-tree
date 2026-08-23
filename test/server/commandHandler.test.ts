@@ -1118,6 +1118,262 @@ test("StartCharter allocates a distinct charterId/settlementId for a second char
 });
 
 // ---------------------------------------------------------------------------
+// AdvanceCharterTravel (issue #152, R5 remainder): the last piece of the
+// charter lifecycle to go server-authoritative. stepTravelCharter() itself
+// (packages/engine/src/charter/travel.ts) already has its own coverage in
+// test/charter/travel.test.ts -- these focus on what this port adds: the
+// server-recomputed cost/passability/adjacency trust boundary, the
+// charterRepo persistence gate (same one StartCharter uses), and ownership
+// (stepTravelCharter() has no owner check of its own, same gap
+// ResolveBattle's forbidden_not_your_hero check closed).
+// ---------------------------------------------------------------------------
+
+function makeCharterRow(
+  overrides: Partial<CharterState> & Pick<CharterState, "id" | "heroId" | "ownerId" | "targetQ" | "targetR">,
+): CharterState {
+  return {
+    settlementName: "New Town",
+    phase: "traveling",
+    daysRemaining: 10,
+    settlementId: `${overrides.id}-settlement`,
+    resourceRates: {},
+    foundedOnResource: null,
+    citySpots: [],
+    ...overrides,
+  };
+}
+
+// Same rationale as findChartersTarget above: search for a real neighbor of
+// `from` rather than hand-picking an offset that happens to work for one
+// seed's terrain layout.
+function findAdjacentPassableHex(map: GameMap, from: { q: number; r: number }): { q: number; r: number } {
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dq = -1; dq <= 1; dq++) {
+      if (dq === 0 && dr === 0) continue;
+      const q = from.q + dq;
+      const r = from.r + dr;
+      if (hexDistance({ q, r }, from) !== 1) continue;
+      if (map.isPassable(q, r)) return { q, r };
+    }
+  }
+  throw new Error("findAdjacentPassableHex: no adjacent passable hex found for this seed");
+}
+
+test("AdvanceCharterTravel steps a chartering hero one hex, persists the new position, and emits CharterTravelAdvanced", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { isChartering: true, charterId: "c0", movementRemaining: 5 })],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { gameRepo, eventRepo, charterRepo, deps } = makeDeps(row);
+  const map = new GameMap(row.seed, undefined);
+  const target = findChartersTarget(map, [{ q: 2, r: 2 }]);
+  const step = findAdjacentPassableHex(map, { q: 2, r: 2 });
+  charterRepo.rows["test-game"] = [
+    makeCharterRow({ id: "c0", heroId: "h0", ownerId: 0, targetQ: target.q, targetR: target.r }),
+  ];
+  const cost = map.cost(step.q, step.r);
+  const command: Command = {
+    kind: "AdvanceCharterTravel",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 2, r: 2 },
+    toTile: step,
+    cost,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true, `expected AdvanceCharterTravel to succeed, got reason=${result.reason}`);
+  assert.equal(gameRepo.rows["test-game"].heroes.h0.q, step.q);
+  assert.equal(gameRepo.rows["test-game"].heroes.h0.r, step.r);
+  assert.equal(gameRepo.rows["test-game"].heroes.h0.movementRemaining, 5 - cost);
+  assert.equal(eventRepo.events.map((e) => e.kind).join(","), "CharterTravelAdvanced");
+  assert.equal(charterRepo.calls.length, 1);
+  assert.equal(charterRepo.calls[0].value.find((c) => c.id === "c0")?.phase, "traveling");
+});
+
+test("AdvanceCharterTravel flips the charter to constructing when the hero reaches the target, persisting the change via charterRepo", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { isChartering: true, charterId: "c0", movementRemaining: 5 })],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { gameRepo, charterRepo, deps } = makeDeps(row);
+  const map = new GameMap(row.seed, undefined);
+  const step = findAdjacentPassableHex(map, { q: 2, r: 2 });
+  charterRepo.rows["test-game"] = [
+    makeCharterRow({ id: "c0", heroId: "h0", ownerId: 0, targetQ: step.q, targetR: step.r }),
+  ];
+  const command: Command = {
+    kind: "AdvanceCharterTravel",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 2, r: 2 },
+    toTile: step,
+    cost: map.cost(step.q, step.r),
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true, `expected AdvanceCharterTravel to succeed, got reason=${result.reason}`);
+  assert.equal(gameRepo.rows["test-game"].heroes.h0.movementRemaining, 0);
+  assert.equal(charterRepo.calls[0].value.find((c) => c.id === "c0")?.phase, "constructing");
+});
+
+test("AdvanceCharterTravel ignores the client-supplied cost and recomputes it from the reconstructed map", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { isChartering: true, charterId: "c0", movementRemaining: 5 })],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { gameRepo, charterRepo, deps } = makeDeps(row);
+  const map = new GameMap(row.seed, undefined);
+  const target = findChartersTarget(map, [{ q: 2, r: 2 }]);
+  const step = findAdjacentPassableHex(map, { q: 2, r: 2 });
+  charterRepo.rows["test-game"] = [
+    makeCharterRow({ id: "c0", heroId: "h0", ownerId: 0, targetQ: target.q, targetR: target.r }),
+  ];
+  const realCost = map.cost(step.q, step.r);
+  const command: Command = {
+    kind: "AdvanceCharterTravel",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 2, r: 2 },
+    toTile: step,
+    // The client lies about the cost -- the server must ignore it.
+    cost: realCost + 999,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true, `expected AdvanceCharterTravel to succeed, got reason=${result.reason}`);
+  assert.equal(
+    gameRepo.rows["test-game"].heroes.h0.movementRemaining,
+    5 - realCost,
+    "server must use its own recomputed cost, not the client's",
+  );
+});
+
+test("AdvanceCharterTravel rejects a toTile that isn't adjacent to fromTile -- the client can't skip hexes", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { isChartering: true, charterId: "c0" })],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { deps, charterRepo } = makeDeps(row);
+  charterRepo.rows["test-game"] = [
+    makeCharterRow({ id: "c0", heroId: "h0", ownerId: 0, targetQ: 10, targetR: 10 }),
+  ];
+  const command: Command = {
+    kind: "AdvanceCharterTravel",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 2, r: 2 },
+    toTile: { q: 8, r: 8 },
+    cost: 1,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "not_adjacent");
+});
+
+test("AdvanceCharterTravel rejects a stale fromTile that doesn't match the hero's server-side position", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { isChartering: true, charterId: "c0" })],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { deps, charterRepo } = makeDeps(row);
+  const map = new GameMap(row.seed, undefined);
+  const step = findAdjacentPassableHex(map, { q: 5, r: 5 });
+  charterRepo.rows["test-game"] = [
+    makeCharterRow({ id: "c0", heroId: "h0", ownerId: 0, targetQ: 10, targetR: 10 }),
+  ];
+  const command: Command = {
+    kind: "AdvanceCharterTravel",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 5, r: 5 },
+    toTile: step,
+    cost: 1,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "hero_not_at_fromTile");
+});
+
+test("AdvanceCharterTravel rejects a hero the actor doesn't own -- stepTravelCharter() never checked this itself", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { isChartering: true, charterId: "c0" }), makeHero("h1", 1, 6, 6)],
+    [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, 18, 4)],
+  );
+  const { deps, charterRepo } = makeDeps(row);
+  charterRepo.rows["test-game"] = [
+    makeCharterRow({ id: "c0", heroId: "h0", ownerId: 0, targetQ: 10, targetR: 10 }),
+  ];
+  const command: Command = {
+    kind: "AdvanceCharterTravel",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h1",
+    fromTile: { q: 6, r: 6 },
+    toTile: { q: 7, r: 6 },
+    cost: 1,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "forbidden_not_your_hero");
+});
+
+test("AdvanceCharterTravel rejects outright when hydration fell back to JSONB -- no source for charterRepo.upsertMany to be safe against", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { isChartering: true, charterId: "c0" })],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { deps, heroRepo, settlementRepo, charterRepo, eventRepo } = makeDeps(row);
+  delete heroRepo.rows["test-game"];
+  delete settlementRepo.rows["test-game"];
+  const map = new GameMap(row.seed, undefined);
+  const step = findAdjacentPassableHex(map, { q: 2, r: 2 });
+  const command: Command = {
+    kind: "AdvanceCharterTravel",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 2, r: 2 },
+    toTile: step,
+    cost: 1,
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "charters_persist_unavailable");
+  assert.equal(charterRepo.calls.length, 0);
+  assert.equal(eventRepo.events.length, 0);
+});
+
+test("AdvanceCharterTravel dual-writes the touched hero into heroRepo but never calls settlementRepo (settlements unchanged)", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { isChartering: true, charterId: "c0", movementRemaining: 5 })],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { heroRepo, settlementRepo, charterRepo, deps } = makeDeps(row);
+  const map = new GameMap(row.seed, undefined);
+  const target = findChartersTarget(map, [{ q: 2, r: 2 }]);
+  const step = findAdjacentPassableHex(map, { q: 2, r: 2 });
+  charterRepo.rows["test-game"] = [
+    makeCharterRow({ id: "c0", heroId: "h0", ownerId: 0, targetQ: target.q, targetR: target.r }),
+  ];
+  const command: Command = {
+    kind: "AdvanceCharterTravel",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    fromTile: { q: 2, r: 2 },
+    toTile: step,
+    cost: map.cost(step.q, step.r),
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true, `expected AdvanceCharterTravel to succeed, got reason=${result.reason}`);
+  assert.equal(heroRepo.calls.length, 1);
+  assert.equal(settlementRepo.calls.length, 0);
+});
+
+// ---------------------------------------------------------------------------
 // Phase 4 Track A (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md):
 // dual-write into heroRepo/settlementRepo alongside the existing
 // gameRepo.saveHeroesAndSettlements JSONB write, and the granular-first

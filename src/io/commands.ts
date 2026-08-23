@@ -247,3 +247,21 @@ export async function upgradeSettlement(
 ): Promise<void> {
   await postCommand(name, { kind: "UpgradeSettlement", ...payload });
 }
+
+// AdvanceCharterTravel (#152, R5 remainder): one hex-step of a chartering
+// hero's auto-travel. Fire-and-forget, same shape as spendMovement's
+// MoveHero call -- src/state/turnController.ts's advanceAutoTravel() calls
+// this right after its own local stepTravelCharterReducer() call already
+// applied and returned ok, so this response body is unused here too.
+export async function advanceCharterTravel(
+  name: string,
+  payload: {
+    actor: number;
+    heroId: string;
+    fromTile: Axial;
+    toTile: Axial;
+    cost: number;
+  }
+): Promise<void> {
+  await postCommand(name, { kind: "AdvanceCharterTravel", ...payload });
+}

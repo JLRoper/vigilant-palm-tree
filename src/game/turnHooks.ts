@@ -14,6 +14,7 @@ import {
   startCharter,
   upgradeBuilding,
   upgradeSettlement,
+  advanceCharterTravel,
 } from "../io/commands";
 import type { EndTurnResult } from "../io/commands";
 import type {
@@ -266,6 +267,21 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await startCharter(name, { actor, heroId, targetQ, targetR, settlementName });
       } catch (e) {
         reportCommandFailure("Start charter", e);
+      }
+    },
+    onAdvanceCharterTravel: async (
+      actor: number,
+      heroId: HeroId,
+      fromTile: Axial,
+      toTile: Axial,
+      cost: number,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await advanceCharterTravel(name, { actor, heroId, fromTile, toTile, cost });
+      } catch (e) {
+        reportCommandFailure("Advance charter travel", e);
       }
     },
     onUpgradeBuilding: async (
