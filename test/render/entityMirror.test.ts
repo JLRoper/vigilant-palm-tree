@@ -61,6 +61,25 @@ test("HeroMoved is a no-op for an unknown hero or a move to the hero's current t
   assert.equal(mirror.getHero("h0")!.moving, false);
 });
 
+test("CharterTravelAdvanced tweens the hero exactly like HeroMoved (issue #152)", () => {
+  const mirror = new EntityMirror();
+  mirror.bootstrap(makeState({ heroes: [makeHero("h0", 0, 2, 2)], settlements: [] }));
+
+  const changed = mirror.applyEvent({
+    type: "CharterTravelAdvanced",
+    actor: 0,
+    heroId: "h0",
+    charterId: "c0",
+    to: { q: 3, r: 2 },
+  });
+  assert.equal(changed, true);
+
+  const hero = mirror.getHero("h0")!;
+  assert.equal(hero.moving, true);
+  assert.deepEqual(hero.fromTile, { q: 2, r: 2 });
+  assert.deepEqual(hero.toTile, { q: 3, r: 2 });
+});
+
 test("SettlementCaptured updates ownerId to the capturing actor, and is a no-op for an unknown settlement or an unchanged owner", () => {
   const mirror = new EntityMirror();
   mirror.bootstrap(makeState({ heroes: [], settlements: [makeSettlement("s0", 1, 2, 2)] }));

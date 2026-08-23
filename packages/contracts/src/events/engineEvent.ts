@@ -105,4 +105,15 @@ export type EngineEvent =
       actor: PlayerSeat;
       settlementId: SettlementId;
       targetLevel: 2 | 3;
+    }
+  | {
+      // #152: one hex-step of a charter's auto-travel, mirroring HeroMoved's
+      // shape exactly (same `to`-only payload, same reasoning: movement
+      // cost/whether-arrived isn't carried here, TurnEnded remains the
+      // resync boundary that re-syncs anything this event's replay drifts).
+      type: "CharterTravelAdvanced";
+      actor: PlayerSeat;
+      heroId: HeroId;
+      charterId: CharterId;
+      to: Axial;
     };

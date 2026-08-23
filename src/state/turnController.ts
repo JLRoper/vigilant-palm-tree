@@ -91,6 +91,17 @@ export interface TurnControllerHooks {
     targetR: number,
     settlementName: string,
   ): Promise<void>;
+  // #152 (R5 remainder): fired once per hex-step from advanceAutoTravel()'s
+  // loop, same fire-and-forget shape as onHumanMove -- the local
+  // stepTravelCharterReducer() call already ran and this.state already
+  // reflects it by the time this resolves or rejects.
+  onAdvanceCharterTravel(
+    actor: number,
+    heroId: HeroId,
+    fromTile: { q: number; r: number },
+    toTile: { q: number; r: number },
+    cost: number,
+  ): Promise<void>;
   // plan/2026-08-17-issue-88-remaining-command-ports.md Tracks 1/2: same
   // fire-and-forget shape as the rest of this block.
   onUpgradeBuilding(actor: number, settlementId: SettlementId, requests: BuildingUpgradeRequest[]): Promise<void>;
@@ -430,8 +441,18 @@ export class TurnController {
           });
           continue;
         }
+        const fromTile = { q: hero.q, r: hero.r };
         this.state = result.state;
-        bus.emit({ type: "hero:moved", heroId: hero.id, from: { q: hero.q, r: hero.r }, to: { q: nextStep.q, r: nextStep.r }, playerId: hero.ownerId });
+        bus.emit({ type: "hero:moved", heroId: hero.id, from: fromTile, to: { q: nextStep.q, r: nextStep.r }, playerId: hero.ownerId });
+        // #152: wrapped in trackCommand for the same reason every other
+        // fire-and-forget hook is (this class's own pendingCommands
+        // comment, above) -- without it, ending the turn right after the
+        // last step of a charter's route could race ahead of this POST and
+        // have EndTurn's response silently revert it.
+        this.trackCommand(
+          this.hooks.onAdvanceCharterTravel(hero.ownerId, hero.id, fromTile, { q: nextStep.q, r: nextStep.r }, cost),
+          "onAdvanceCharterTravel",
+        );
 
         const updatedHero = this.state.heroes[hero.id];
         if (updatedHero) {

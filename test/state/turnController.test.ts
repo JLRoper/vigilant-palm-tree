@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TurnController, type TurnControllerHooks } from "../../src/state/turnController";
-import { makeState } from "../charter/_helpers";
+import { makeCharter, makeHero, makeState } from "../charter/_helpers";
 import type { GameState } from "@heroes/contracts";
 
 interface Deferred<T> {
@@ -71,6 +71,7 @@ function buildHooks(initial: GameState): TurnControllerHooks {
     onStartCharter: noop,
     onUpgradeBuilding: noop,
     onUpgradeSettlement: noop,
+    onAdvanceCharterTravel: noop,
   };
   (hooks as unknown as TestHooks).onHumanTurnEndSpy = onHumanTurnEndSpy;
   return hooks;
@@ -252,6 +253,55 @@ test("drainPendingCommands still releases onHumanTurnEnd when the in-flight comm
   }
 });
 
+test("advanceAutoTravel fires onAdvanceCharterTravel once per hex-step, and endCurrentTurn blocks on them (issue #152 -- closing the #114 race on the charter-travel path)", async () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 0, 0, { isChartering: true, charterId: "c0", movementRemaining: 2 })],
+    activeCharters: [makeCharter({ id: "c0", heroId: "h0", ownerId: 0, targetQ: 5, targetR: 0 })],
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  // A fully open, uniform-cost map -- this test is about how many times
+  // (and with what args) advanceAutoTravel() calls the hook per step, not
+  // about pathfinding/terrain itself (already covered by
+  // src/map/pathfinding.ts's own tests).
+  hooks.getMap = (() => ({
+    isPassable: () => true,
+    cost: () => 1,
+  })) as unknown as TurnControllerHooks["getMap"];
+
+  const steps: unknown[][] = [];
+  const commands: Deferred<void>[] = [];
+  hooks.onAdvanceCharterTravel = ((...args: unknown[]) => {
+    steps.push(args);
+    const d = deferred<void>();
+    commands.push(d);
+    return d.promise;
+  }) as TurnControllerHooks["onAdvanceCharterTravel"];
+
+  const controller = new TurnController(initial, hooks);
+  controller.advanceAutoTravel();
+
+  assert.equal(steps.length, 2, "movementRemaining=2 at cost 1/hex should take exactly two steps in one call");
+  assert.deepEqual(steps[0], [0, "h0", { q: 0, r: 0 }, { q: 1, r: 0 }, 1]);
+  assert.deepEqual(steps[1], [0, "h0", { q: 1, r: 0 }, { q: 2, r: 0 }, 1]);
+
+  // Same #114 shape as the MoveHero/SetAutoTrade regression pins above:
+  // ending the turn immediately after these steps must not race past the
+  // still-in-flight commands they registered via trackCommand.
+  const endTurnPromise = controller.endHumanTurn();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(
+    endTurnSpy.mock.callCount(),
+    0,
+    "End Turn must not race ahead of the two still-in-flight charter-travel steps",
+  );
+
+  for (const d of commands) d.resolve();
+  await endTurnPromise;
+  assert.equal(endTurnSpy.mock.callCount(), 1);
+});
+
 test("pendingCommands empties after a tracked command settles, so the Set can't grow unbounded across a session (issue #151 §4)", async () => {
   const initial = makeState();
   const hooks = buildHooks(initial);
@@ -305,6 +355,7 @@ test("coverage guard: every this.hooks.on*( call inside a TurnController mutatio
     "startTownHallUpgrade",
     "startBuildingUpgrade",
     "startSettlementUpgrade",
+    "advanceAutoTravel",
   ]);
 
   const lines = source.split("\n");

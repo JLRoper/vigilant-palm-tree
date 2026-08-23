@@ -11,6 +11,7 @@ import type { CaptureSettlementCommand } from "./captureSettlement";
 import type { StartCharterCommand } from "./startCharter";
 import type { UpgradeBuildingCommand } from "./upgradeBuilding";
 import type { UpgradeSettlementCommand } from "./upgradeSettlement";
+import type { AdvanceCharterTravelCommand } from "./advanceCharterTravel";
 
 export * from "./moveHero";
 export * from "./transferGold";
@@ -25,6 +26,7 @@ export * from "./captureSettlement";
 export * from "./startCharter";
 export * from "./upgradeBuilding";
 export * from "./upgradeSettlement";
+export * from "./advanceCharterTravel";
 
 // Grows with each command port. Week 1 of Phase 3 Track 3.A shipped
 // MoveHero/TransferGold; EndTurn followed in Week 2
@@ -37,7 +39,9 @@ export * from "./upgradeSettlement";
 // by issue #88's re-scoped review
 // (plan/2026-08-17-issue-88-remaining-command-ports.md) -- the lobby
 // actions and real new-construction (BuildStructure) remain deferred as
-// low priority / no engine reducer, respectively.
+// low priority / no engine reducer, respectively. AdvanceCharterTravel
+// (#152) closed the last piece of R5: charter travel-stepping, previously
+// purely client-local.
 export type Command =
   | MoveHeroCommand
   | TransferGoldCommand
@@ -51,4 +55,5 @@ export type Command =
   | CaptureSettlementCommand
   | StartCharterCommand
   | UpgradeBuildingCommand
-  | UpgradeSettlementCommand;
+  | UpgradeSettlementCommand
+  | AdvanceCharterTravelCommand;

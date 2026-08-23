@@ -332,6 +332,26 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     };
   }
 
+  if (b.kind === "AdvanceCharterTravel") {
+    if (
+      typeof b.heroId !== "string" ||
+      !isAxial(b.fromTile) ||
+      !isAxial(b.toTile) ||
+      typeof b.cost !== "number"
+    ) {
+      return null;
+    }
+    return {
+      kind: "AdvanceCharterTravel",
+      gameName,
+      actor: b.actor,
+      heroId: b.heroId,
+      fromTile: b.fromTile,
+      toTile: b.toTile,
+      cost: b.cost,
+    };
+  }
+
   return null;
 }
 

@@ -50,6 +50,8 @@ export class EntityMirror {
     switch (event.type) {
       case "HeroMoved":
         return this.applyHeroMoved(event.heroId, event.to);
+      case "CharterTravelAdvanced":
+        return this.applyHeroMoved(event.heroId, event.to);
       case "SettlementCaptured":
         return this.applySettlementCaptured(event.settlementId, event.actor);
       // Reviewed as part of #146. Everything below changes state this mirror
