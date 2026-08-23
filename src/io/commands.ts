@@ -8,6 +8,7 @@ import type {
   WarehouseResource,
 } from "@heroes/contracts";
 import { apiFetch } from "./api";
+import { getMultiplayerSync } from "./multiplayerSync";
 
 // See plan/2026-08-17-consolidated-phase-1-5-track-map.md §7.1 for context.
 
@@ -61,6 +62,24 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Every command POST goes through here so the `lastEventId` the server
+// returns (server/http/routes/commands.ts) reaches the event-cursor poller
+// (#146). Those events are this client's own writes, already applied by the
+// local reducer that ran before the POST, so the poller skips them instead
+// of double-applying them on the next tick.
+async function postCommand<T>(name: string, body: Record<string, unknown>): Promise<T> {
+  const res = await apiFetch(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const result = await json<T & { lastEventId?: unknown }>(res);
+  if (typeof result.lastEventId === "number") {
+    getMultiplayerSync().noteSelfEventId(result.lastEventId);
+  }
+  return result;
+}
+
 export type EndTurnResult = {
   round: number;
   day: number;
@@ -98,15 +117,7 @@ export async function endTurn(
   actor: number,
   growthRate?: number
 ): Promise<EndTurnResult> {
-  const res = await apiFetch(
-    `${BASE}/games/${encodeURIComponent(name)}/commands`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "EndTurn", actor, growthRate }),
-    }
-  );
-  return json<EndTurnResult>(res);
+  return postCommand<EndTurnResult>(name, { kind: "EndTurn", actor, growthRate });
 }
 
 export async function spendMovement(
@@ -119,15 +130,7 @@ export async function spendMovement(
     cost: number;
   }
 ): Promise<HeroState> {
-  const res = await apiFetch(
-    `${BASE}/games/${encodeURIComponent(name)}/commands`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "MoveHero", ...payload }),
-    }
-  );
-  const result = await json<{ hero: HeroState }>(res);
+  const result = await postCommand<{ hero: HeroState }>(name, { kind: "MoveHero", ...payload });
   return result.hero;
 }
 
@@ -140,15 +143,7 @@ export async function resolveBattle(
   name: string,
   payload: { actor: number; attackerId: string; defenderId: string }
 ): Promise<ResolveBattleResult> {
-  const res = await apiFetch(
-    `${BASE}/games/${encodeURIComponent(name)}/commands`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "ResolveBattle", ...payload }),
-    }
-  );
-  return json<ResolveBattleResult>(res);
+  return postCommand<ResolveBattleResult>(name, { kind: "ResolveBattle", ...payload });
 }
 
 export async function transferGold(
@@ -160,15 +155,7 @@ export async function transferGold(
     direction: "deposit" | "withdraw";
   }
 ): Promise<TransferGoldResult> {
-  const res = await apiFetch(
-    `${BASE}/games/${encodeURIComponent(name)}/commands`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "TransferGold", ...payload }),
-    }
-  );
-  return json<TransferGoldResult>(res);
+  return postCommand<TransferGoldResult>(name, { kind: "TransferGold", ...payload });
 }
 
 // Phase 3 Track A Week 3+: ported from the old dedicated /trade route to
@@ -183,15 +170,7 @@ export async function tradeResources(
     amount: number;
   }
 ): Promise<TradeResourcesResult> {
-  const res = await apiFetch(
-    `${BASE}/games/${encodeURIComponent(name)}/commands`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "TradeResources", ...payload }),
-    }
-  );
-  return json<TradeResourcesResult>(res);
+  return postCommand<TradeResourcesResult>(name, { kind: "TradeResources", ...payload });
 }
 
 // The five functions below are new in Phase 3 Track A Week 3+ -- none of
@@ -207,60 +186,35 @@ export async function recruitHero(
   name: string,
   payload: { actor: number; heroName: string; settlementId: string; horseVariant: HorseVariantId }
 ): Promise<void> {
-  const res = await apiFetch(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "RecruitHero", ...payload }),
-  });
-  await json(res);
+  await postCommand(name, { kind: "RecruitHero", ...payload });
 }
 
 export async function upgradeTownHall(
   name: string,
   payload: { actor: number; settlementId: string; targetLevel: 2 | 3 }
 ): Promise<void> {
-  const res = await apiFetch(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "UpgradeTownHall", ...payload }),
-  });
-  await json(res);
+  await postCommand(name, { kind: "UpgradeTownHall", ...payload });
 }
 
 export async function setAutoTrade(
   name: string,
   payload: { actor: number; settlementId: string; autoTrade: boolean }
 ): Promise<void> {
-  const res = await apiFetch(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "SetAutoTrade", ...payload }),
-  });
-  await json(res);
+  await postCommand(name, { kind: "SetAutoTrade", ...payload });
 }
 
 export async function reorderStack(
   name: string,
   payload: { actor: number; heroId: string; fromIdx: number; toIdx: number }
 ): Promise<void> {
-  const res = await apiFetch(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "ReorderStack", ...payload }),
-  });
-  await json(res);
+  await postCommand(name, { kind: "ReorderStack", ...payload });
 }
 
 export async function captureSettlement(
   name: string,
   payload: { actor: number; heroId: string; settlementId: string }
 ): Promise<void> {
-  const res = await apiFetch(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "CaptureSettlement", ...payload }),
-  });
-  await json(res);
+  await postCommand(name, { kind: "CaptureSettlement", ...payload });
 }
 
 // StartCharter (plan/2026-08-17-consolidated-phase-1-5-track-map.md §7.1):
@@ -272,12 +226,7 @@ export async function startCharter(
   name: string,
   payload: { actor: number; heroId: string; targetQ: number; targetR: number; settlementName: string }
 ): Promise<void> {
-  const res = await apiFetch(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "StartCharter", ...payload }),
-  });
-  await json(res);
+  await postCommand(name, { kind: "StartCharter", ...payload });
 }
 
 // UpgradeBuilding / UpgradeSettlement
@@ -289,22 +238,12 @@ export async function upgradeBuilding(
   name: string,
   payload: { actor: number; settlementId: string; requests: BuildingUpgradeRequest[] }
 ): Promise<void> {
-  const res = await apiFetch(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "UpgradeBuilding", ...payload }),
-  });
-  await json(res);
+  await postCommand(name, { kind: "UpgradeBuilding", ...payload });
 }
 
 export async function upgradeSettlement(
   name: string,
   payload: { actor: number; settlementId: string; upgradePopulationGate: number }
 ): Promise<void> {
-  const res = await apiFetch(`${BASE}/games/${encodeURIComponent(name)}/commands`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "UpgradeSettlement", ...payload }),
-  });
-  await json(res);
+  await postCommand(name, { kind: "UpgradeSettlement", ...payload });
 }

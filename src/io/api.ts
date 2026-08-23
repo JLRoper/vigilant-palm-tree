@@ -35,6 +35,23 @@ export type Game = {
   players: Player[];
   heroes: Record<string, HeroState>;
   settlements: Record<string, SettlementState>;
+  // Newest game_events.id at the moment this snapshot was read (#146). Only
+  // GET /games/:name returns it; the list route and the command responses
+  // don't, hence optional. String because it's a BIGSERIAL over the wire.
+  last_event_id?: string;
+};
+
+// One row of GET /games/:name/events. Raw DB shape (snake_case, id and
+// actor_seat straight off the row) -- `payload` is the persisted EngineEvent
+// for the 13 EngineEvent kinds and a bespoke audit blob for the legacy
+// turn_ended/round_ended/round_started/ai_turn_started kinds, so it stays
+// unknown here and is narrowed at the point of use.
+export type GameEventRow = {
+  id: string;
+  kind: string;
+  payload: unknown;
+  actor_seat: number | null;
+  created_at: string;
 };
 
 export type TileRow = {
@@ -167,6 +184,13 @@ export const api = {
       },
       5_000
     ).then((r) => json<{ id: number; kind: string }>(r)),
+  // ?after=<cursor> is the event-cursor poll (#146/#145). 0 means "the whole
+  // log"; the server rejects a non-integer cursor with a 400 rather than
+  // silently refetching everything.
+  getEvents: (name: string, after: number) =>
+    fetchWithTimeout(
+      `${BASE}/games/${encodeURIComponent(name)}/events?after=${encodeURIComponent(String(after))}`
+    ).then((r) => json<GameEventRow[]>(r)),
   getTiles: (name: string) =>
     fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}/tiles`).then((r) =>
       json<TileRow[]>(r)

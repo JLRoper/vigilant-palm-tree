@@ -1,12 +1,15 @@
 import type { GameState, Player, SettlementState } from "../../state/gameState";
 import type { Hero } from "../../entities/hero";
-import { PopupMenu, menuTheme } from "@screens/shared/menu";
+import { PopupMenu, menuTheme, anchorMenuToBottom, clampMenuIntoView } from "@screens/shared/menu";
+import { toolbarHeight } from "@screens/shared/panelRail";
 import { ARMY_STACK_SLOTS, type Platoon } from "../../state/units";
 import { catalogReady, catalogFailed, getCachedUnit, loadUnitCatalog } from "../../data/unitCatalog";
 import { getUnitImageUrl } from "../../data/unitImages";
 import { HERO_BANNERS } from "../../render/assetDescriptors";
 
 const MOVEMENT_PER_TURN = 7;
+
+const PANEL_X = 16;
 
 export type TransferHandler = (
   heroId: string,
@@ -46,6 +49,9 @@ export class HeroInfoMenu {
   private menu: PopupMenu;
   private visible = false;
   private currentHeroId: string | null = null;
+  // Once the player drags the panel, their position wins: reposition() then
+  // only clamps it back into view rather than re-anchoring it.
+  private userMoved = false;
 
   private bannerEl: HTMLImageElement;
   private nameEl: HTMLElement;
@@ -77,11 +83,17 @@ export class HeroInfoMenu {
     this.menu = new PopupMenu({
       parent: opts.parent,
       title: "Hero",
-      initialPosition: { x: 16, y: Math.max(24, window.innerHeight - 280) },
+      // Placeholder only. The real position is derived from the panel's
+      // measured height by reposition(), once it is on screen and displayed.
+      initialPosition: { x: PANEL_X, y: toolbarHeight() },
       width: 240,
       closeable: true,
       draggable: true,
       zIndex: 60,
+      minTop: toolbarHeight,
+      onMove: () => {
+        this.userMoved = true;
+      },
       onClose: () => {
         this.visible = false;
         this.currentHeroId = null;
@@ -445,6 +457,21 @@ export class HeroInfoMenu {
     body.appendChild(armyBlock);
 
     this.menu.root.style.display = "none";
+
+    // The panel is appended straight to document.body rather than through
+    // panelRail, so it does not inherit the rail's resize re-clamp.
+    window.addEventListener("resize", () => this.reposition());
+  }
+
+  // The panel's height depends on the hero (army composition) and on whether
+  // the Army section is expanded, so no constant can predict it -- the anchor
+  // has to come from a measured box. Must run *after* `display` is restored:
+  // a `display: none` element measures 0x0 and would anchor a zero-height box.
+  private reposition(): void {
+    if (!this.visible) return;
+    const minTop = toolbarHeight();
+    if (this.userMoved) clampMenuIntoView(this.menu, minTop);
+    else anchorMenuToBottom(this.menu, PANEL_X, minTop);
   }
 
   show(hero: Hero, player: Player, state: GameState): void {
@@ -455,9 +482,17 @@ export class HeroInfoMenu {
       if (!this.menu.root.parentNode) {
         document.body.appendChild(this.menu.root);
       }
-      this.menu.root.style.display = "";
+      // "flex", never "": the root's inline `display: flex` is what makes the
+      // header stay pinned while the body scrolls. Clearing it drops the root
+      // to `block`, and the body then overflows the root's max-height instead
+      // of shrinking inside it -- which is why this panel's body never
+      // scrolled (issue #140). Matches heroRosterMenu / tileInfoPanel.
+      this.menu.root.style.display = "flex";
       this.visible = true;
     }
+    // Runs on every show(), not just the hidden -> visible transition: the
+    // panel is reused across heroes and its height changes with the army.
+    this.reposition();
   }
 
   hide(): void {
@@ -519,6 +554,11 @@ export class HeroInfoMenu {
     if (this.armyExpandedList) {
       this.armyExpandedList.style.display = this.armyExpanded ? "flex" : "none";
     }
+    // Expanding grows the panel downwards; re-anchor so the extra rows do not
+    // push the bottom of the panel off screen. Deliberately not a
+    // ResizeObserver -- see plan/2026-08-09-modal-viewport-overflow.md, an
+    // observer on the root stops firing once max-height is reached.
+    this.reposition();
   }
 
   // Wires HTML5 drag-and-drop onto an army slot element (either a collapsed

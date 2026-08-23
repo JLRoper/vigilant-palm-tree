@@ -42,3 +42,4 @@ export * from "./calendar";
 export * from "./turn/phases";
 export * from "./turn/endTurn";
 export * from "./turn/round";
+export * from "./events/applyEvent";

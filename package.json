@@ -27,7 +27,7 @@
     "test:all": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs all --auto-close && npm run test:unit",
     "test:multiplayer": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs multiplayer",
     "test:smoke": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs smoke --auto-close",
-    "test:unit": "tsx --test test/server/*.test.ts test/persistence/*.test.ts test/migrations/*.test.ts test/render/*.test.ts test/io/*.test.ts test/net/*.test.ts test/screens/**/*.test.ts",
+    "test:unit": "tsx --test test/server/*.test.ts test/persistence/*.test.ts test/migrations/*.test.ts test/render/*.test.ts test/engine/*.test.ts test/io/*.test.ts test/net/*.test.ts test/screens/**/*.test.ts",
     "test:wrapper": "node --no-deprecation tools/run-test.mjs",
     "lint:deps": "depcruise src server packages --config dependency-cruiser.cjs",
     "validate-assets": "node tools/sprites/validate-assets.mjs",

@@ -1,6 +1,7 @@
 import type { GameState, ResourceType, SettlementId, SettlementState, WarehouseResource } from "../../state/gameState";
 import { RESOURCES } from "../../map/resourceTiles";
-import { PopupMenu, menuTheme, styleButton } from "@screens/shared/menu";
+import { PopupMenu, menuTheme, styleButton, clampMenuIntoView } from "@screens/shared/menu";
+import { toolbarHeight } from "@screens/shared/panelRail";
 import { openTradeModal } from "./tradeModal";
 
 const RESOURCE_ICONS: Record<ResourceType, string> = {
@@ -13,6 +14,9 @@ const RESOURCE_ICONS: Record<ResourceType, string> = {
 };
 
 const WAREHOUSE_SHORT: WarehouseResource[] = ["wood", "stone", "iron", "arcane"];
+
+const PANEL_WIDTH = 260;
+const PANEL_MARGIN = 16;
 
 function makeRow(): { row: HTMLDivElement; left: HTMLSpanElement; right: HTMLSpanElement } {
   const row = document.createElement("div");
@@ -59,13 +63,22 @@ export class SettlementPanel {
     this.menu = new PopupMenu({
       parent: opts.parent,
       title: "Settlements",
-      initialPosition: { x: window.innerWidth - 280, y: 16 },
-      width: 260,
+      // Math.max keeps the panel on screen on a viewport narrower than the
+      // panel itself; the clamp below corrects the position from the panel's
+      // real measured box, and re-runs whenever the viewport changes.
+      initialPosition: {
+        x: Math.max(0, window.innerWidth - PANEL_WIDTH - PANEL_MARGIN),
+        y: toolbarHeight() + PANEL_MARGIN,
+      },
+      width: PANEL_WIDTH,
       closeable: false,
       draggable: true,
       zIndex: 55,
+      minTop: toolbarHeight,
     });
     this.body = this.menu.body;
+    clampMenuIntoView(this.menu, toolbarHeight());
+    window.addEventListener("resize", () => clampMenuIntoView(this.menu, toolbarHeight()));
   }
 
   update(state: GameState): void {
