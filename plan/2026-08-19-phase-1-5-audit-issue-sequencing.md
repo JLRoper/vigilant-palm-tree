@@ -75,7 +75,7 @@ Track 5.B is **further along** than `plan/2026-08-17-consolidated-phase-1-5-trac
 | [#147](https://github.com/JLRoper/vigilant-palm-tree/issues/147) | `SessionManager.manualSave()` still PATCHes full state | refactor | 3 | 🟡 Open — unblocked, next up |
 | [#148](https://github.com/JLRoper/vigilant-palm-tree/issues/148) | Two parallel painter sets; no renderer consumes `SceneNode[]` | refactor | 2 | ✅ Closed |
 | [#149](https://github.com/JLRoper/vigilant-palm-tree/issues/149) | Phase 5's visual-regression gate does not exist | enhancement | 1 | ✅ Closed |
-| [#150](https://github.com/JLRoper/vigilant-palm-tree/issues/150) | #89 follow-up: no unit guard on audit-row writes | bug | 1 | 🟡 Open |
+| [#150](https://github.com/JLRoper/vigilant-palm-tree/issues/150) | #89 follow-up: no unit guard on audit-row writes | bug | 1 | ✅ Closed |
 | [#151](https://github.com/JLRoper/vigilant-palm-tree/issues/151) | No client test for the `drainPendingCommands()` barrier | bug | 1 | ✅ Closed |
 | [#152](https://github.com/JLRoper/vigilant-palm-tree/issues/152) | Charter travel-stepping still client-authoritative | refactor | 3 | 🟡 Open — unblocked, next up |
 | [#153](https://github.com/JLRoper/vigilant-palm-tree/issues/153) | `upgradePopulationGate` is client-trusted | bug | 2 (trigger-gated) | 🟡 Open — not yet triggered |
