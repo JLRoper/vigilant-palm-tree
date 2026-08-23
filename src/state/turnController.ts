@@ -145,6 +145,13 @@ export class TurnController {
     await Promise.all(this.pendingCommands);
   }
 
+  /** Public entry point for callers outside the class (manual save) to wait
+   * for in-flight command mutations to settle, without duplicating
+   * pendingCommands internals. */
+  async flushPendingCommands(): Promise<void> {
+    await this.drainPendingCommands();
+  }
+
   selectHero(heroId: HeroId): void {
     if (this.state.phase.kind !== "PLAYER_TURN") return;
     const hero = this.state.heroes[heroId];

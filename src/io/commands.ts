@@ -62,6 +62,19 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+let lastPersistedAt: string | null = null;
+
+/** Timestamp of the most recent server-confirmed write: a command ack, or a
+ * freshly loaded/created game's own `updated_at`. The durability signal
+ * SessionManager.manualSave reports as "Last saved" (#147). */
+export function getLastPersistedAt(): string | null {
+  return lastPersistedAt;
+}
+
+export function notePersisted(timestamp: string): void {
+  lastPersistedAt = timestamp;
+}
+
 // Every command POST goes through here so the `lastEventId` the server
 // returns (server/http/routes/commands.ts) reaches the event-cursor poller
 // (#146). Those events are this client's own writes, already applied by the
@@ -77,6 +90,7 @@ async function postCommand<T>(name: string, body: Record<string, unknown>): Prom
   if (typeof result.lastEventId === "number") {
     getMultiplayerSync().noteSelfEventId(result.lastEventId);
   }
+  notePersisted(new Date().toISOString());
   return result;
 }
 

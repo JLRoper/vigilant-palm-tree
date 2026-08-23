@@ -174,6 +174,10 @@ async function runTilesEndpointChecks(
   console.log(`>> tiles endpoint: ${tiles.length} rows, all enum values valid, full coverage`);
 }
 
+// NOTE: as of 2026-08-23 this function is defined but never called from
+// run() below -- see #175 for why the New/Load/Save/tiles/movement/battle
+// flows here don't currently execute. Kept correct (not deleted) for
+// whenever run() is reconnected to it.
 async function runNewLoadSaveFlow(
   page: Page,
   ctx: {
@@ -213,12 +217,15 @@ async function runNewLoadSaveFlow(
   console.log(`>> New Game active: ${activeAfterNew}`);
 
   const newGameRes = await ctx.get(`${API_URL}/api/games/${TEST_NEW_NAME}`);
-  const newGameBody = (await newGameRes.json()) as { seed: number; turn: number; gold: number };
+  const newGameBody = (await newGameRes.json()) as { seed: number; turn: number; gold: number; updated_at: string };
   if (newGameBody.seed !== 1234) {
     throw new Error(`Seed not honored: got ${newGameBody.seed}`);
   }
   if (newGameBody.turn !== 1 || newGameBody.gold !== 0) {
     throw new Error(`New game not reset: turn=${newGameBody.turn} gold=${newGameBody.gold}`);
+  }
+  if (newGameBody.updated_at <= starterUpdatedAt) {
+    throw new Error(`New game's updated_at not fresh: ${newGameBody.updated_at} <= ${starterUpdatedAt}`);
   }
   console.log(`>> New Game DB row: seed=${newGameBody.seed} turn=${newGameBody.turn} gold=${newGameBody.gold}`);
 
@@ -233,12 +240,17 @@ async function runNewLoadSaveFlow(
   }
   console.log(">> HUD shows Last saved");
 
+  // Save no longer PATCHes full state (#147) -- it flushes any in-flight
+  // command promises and reports the last command ack (or, with nothing
+  // pending, the game's own creation timestamp) as "Last saved". Nothing
+  // fired a command between creation and this Save, so there's nothing new
+  // for the server to persist; just confirm updated_at didn't regress.
   const afterSaveRes = await ctx.get(`${API_URL}/api/games/${TEST_NEW_NAME}`);
   const afterSaveBody = (await afterSaveRes.json()) as { updated_at: string };
-  if (afterSaveBody.updated_at <= starterUpdatedAt) {
-    throw new Error(`Save did not advance updated_at: ${afterSaveBody.updated_at} <= ${starterUpdatedAt}`);
+  if (afterSaveBody.updated_at < newGameBody.updated_at) {
+    throw new Error(`updated_at regressed after Save: ${afterSaveBody.updated_at} < ${newGameBody.updated_at}`);
   }
-  console.log(`>> Save advanced updated_at`);
+  console.log(`>> updated_at intact after Save`);
 
   const loadBtn = page.locator("#toolbar button", { hasText: "Load" });
   await menuBtn.click();

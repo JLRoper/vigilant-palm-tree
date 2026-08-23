@@ -1,5 +1,7 @@
 import { api, type Game, type TileRow } from "../io/api";
 import { rememberGame, listUserGames } from "../io/userGames";
+import { getLastPersistedAt } from "../io/commands";
+import type { TurnController } from "../state/turnController";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -68,30 +70,14 @@ export class SessionManager {
     rememberGame(loaded.id, loaded.name);
   }
 
-  async manualSave(args: {
-    playerHeroTile: { q: number; r: number };
-    round: number;
-    wealth: number;
-    enemyPositions: { q: number; r: number }[];
-  }): Promise<{ updated_at: string } | null> {
+  async manualSave(turnController: TurnController): Promise<{ savedAt: string } | null> {
     if (!this.backendOk || !this.activeGameName) return null;
     this.saveStatus = "saving";
-    try {
-      const updated = await api.patchGame(this.activeGameName, {
-        hero_q: args.playerHeroTile.q,
-        hero_r: args.playerHeroTile.r,
-        turn: args.round,
-        gold: args.wealth,
-        enemy_positions: args.enemyPositions,
-      });
-      this.lastSavedAt = updated.updated_at;
-      this.saveStatus = "saved";
-      return updated;
-    } catch (e) {
-      console.warn("manual save failed:", e);
-      this.saveStatus = "error";
-      return null;
-    }
+    await turnController.flushPendingCommands();
+    const savedAt = getLastPersistedAt() ?? new Date().toISOString();
+    this.lastSavedAt = savedAt;
+    this.saveStatus = "saved";
+    return { savedAt };
   }
 
   async createGame(name: string, seed: number, heroQ: number, heroR: number, enemyPositions: { q: number; r: number }[], mapSize?: "small" | "medium" | "large", humanSeatCount?: number): Promise<Game> {

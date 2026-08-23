@@ -406,52 +406,6 @@ router.post("/games", async (req, res) => {
   }
 });
 
-router.patch("/games/:name", async (req, res) => {
-  const body = req.body ?? {};
-
-  // Legacy patch behavior
-  const { hero_q, hero_r, turn, gold, enemy_positions } = body;
-  const sets: string[] = [];
-  const vals: unknown[] = [];
-  let i = 1;
-  if (typeof hero_q === "number") {
-    sets.push(`hero_q = $${i++}`);
-    vals.push(hero_q);
-  }
-  if (typeof hero_r === "number") {
-    sets.push(`hero_r = $${i++}`);
-    vals.push(hero_r);
-  }
-  if (typeof turn === "number") {
-    sets.push(`turn = $${i++}`);
-    vals.push(turn);
-  }
-  if (typeof gold === "number") {
-    sets.push(`gold = $${i++}`);
-    vals.push(gold);
-  }
-  if (Array.isArray(enemy_positions)) {
-    sets.push(`enemy_positions = $${i++}::jsonb`);
-    vals.push(JSON.stringify(enemy_positions));
-  }
-  if (sets.length === 0) {
-    res.status(400).json({ error: "nothing to update" });
-    return;
-  }
-  sets.push("updated_at = now()");
-  vals.push(req.params.name);
-  const r = await pool.query<FullGameRow>(
-    `UPDATE games SET ${sets.join(", ")} WHERE name = $${i}
-     RETURNING ${GAME_COLUMNS}`,
-    vals
-  );
-  if (r.rowCount === 0) {
-    res.status(404).json({ error: "not found" });
-    return;
-  }
-  res.json(r.rows[0]);
-});
-
 router.delete("/games/:name", async (req, res) => {
   const r = await pool.query("DELETE FROM games WHERE name = $1", [req.params.name]);
   if (r.rowCount === 0) {

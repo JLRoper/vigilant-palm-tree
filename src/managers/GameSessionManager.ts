@@ -3,17 +3,15 @@ import { SessionManager } from "./SessionManager";
 import { ViewManager } from "./ViewManager";
 import { UIManager } from "./UIManager";
 import { GameMap, type MapSize, MAP_SIZES } from "../map/gameMap";
-import { playerWealth, hydrateGameState } from "@heroes/engine";
+import { hydrateGameState } from "@heroes/engine";
 import { markSaved } from "../state/gameState";
 import { playerHeroId } from "../game/initState";
 import { CASTLE_COUNT_DEFAULT, defaultCastleSeedFromMapSeed, generateCastles } from "../map/castlePlacement";
 import { loadUnitCatalog } from "../data/unitCatalog";
 import { MAP_SEED } from "@screens/adventure/adventureView";
 import type { Game, TileRow } from "../io/api";
-import {
-  getInMemoryLocalPlayerId,
-  setInMemoryLocalPlayerId,
-} from "../players/localPlayer";
+import { notePersisted } from "../io/commands";
+import { setInMemoryLocalPlayerId } from "../players/localPlayer";
 import { getMultiplayerSync } from "../io/multiplayerSync";
 
 /**
@@ -58,6 +56,7 @@ export class GameSessionManager {
 
   async loadGame(loaded: Game, tiles: TileRow[]): Promise<void> {
     this.session.adopt(loaded);
+    notePersisted(loaded.updated_at);
     const map = GameMap.fromTiles(tiles);
     const inferredSize = this.inferMapSize(map);
     this.syncMetadata(loaded.name, loaded.seed, inferredSize);
@@ -87,21 +86,7 @@ export class GameSessionManager {
   }
 
   async handleManualSave(): Promise<void> {
-    const gs = this.state.getState();
-    const gameName = this.getGameName() ?? "";
-    const ownerId = getInMemoryLocalPlayerId(gameName) ?? 0;
-    const playerId = playerHeroId();
-    const playerHero = this.state.getHero(playerId);
-    const wealth = playerWealth(gs, ownerId);
-    const enemies = this.state.getHeroes()
-      .filter((h) => h.ownerId !== ownerId)
-      .map((h) => ({ q: h.tile.q, r: h.tile.r }));
-    const updated = await this.session.manualSave({
-      playerHeroTile: playerHero?.tile ?? { q: 0, r: 0 },
-      round: gs.round,
-      wealth,
-      enemyPositions: enemies,
-    });
+    const updated = await this.session.manualSave(this.state.getTurnController());
     if (updated) {
       this.state.replaceState(markSaved(this.state.getState()));
       setTimeout(() => {

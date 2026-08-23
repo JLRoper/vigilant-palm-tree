@@ -61,12 +61,6 @@ export type TileRow = {
   resource: ResourceType | null;
 };
 
-export type LegacyGamePatch = Partial<
-  Pick<Game, "hero_q" | "hero_r" | "turn" | "gold" | "enemy_positions">
->;
-
-export type GamePatch = LegacyGamePatch;
-
 const BASE = "/api";
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -110,21 +104,6 @@ async function json<T>(res: Response): Promise<T> {
     throw new Error(`${res.status} ${res.statusText} ${text}`);
   }
   return res.json() as Promise<T>;
-}
-
-async function patchGameImpl(
-  name: string,
-  patch: GamePatch
-): Promise<Game> {
-  const res = await fetchWithTimeout(
-    `${BASE}/games/${encodeURIComponent(name)}`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    }
-  );
-  return json<Game>(res);
 }
 
 export const api = {
@@ -173,7 +152,6 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: "{}",
     }).then((r) => json<Game>(r)),
-  patchGame: (name: string, patch: GamePatch): Promise<Game> => patchGameImpl(name, patch),
   logEvent: (name: string, kind: string, payload: Record<string, unknown> = {}) =>
     fetchWithTimeout(
       `${BASE}/games/${encodeURIComponent(name)}/events`,
