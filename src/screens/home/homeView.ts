@@ -126,10 +126,11 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
   function refreshAuthUi(): void {
     if (authState) {
       authBtn.textContent = `Sign out (${authState.email})`;
-      footer.textContent = "Signed in. Games are linked to your email.";
+      footer.textContent = "Signed in. Your seat in multiplayer games is secured to your email.";
     } else {
       authBtn.textContent = "Sign In";
-      footer.textContent = "Not signed in. You can still play — sign-in saves progress to your email.";
+      footer.textContent =
+        "Sign-in is optional — you can play right now. Signing in secures your seat in multiplayer games and lets you pick up games from any device.";
     }
   }
 

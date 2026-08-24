@@ -60,10 +60,12 @@ function ids(gameName: string): { heroId: HeroId; settlementId: SettlementId } {
 // empty, server/persistence/hydrate.ts falls back to hydrating from the row
 // itself (its "jsonb" source), which is all these tests need -- they're
 // about the request-parsing layer, not the read path.
-// Returns a bearer token for seat 0, already claimed -- issue #179 gates
-// this router on requireAuth+requireGamePlayer, and its own actor-vs-seat
-// check means every command below (all actor: 0) needs a token bound to
-// that exact seat, not just any authenticated caller.
+// Returns a bearer token for seat 0, already claimed. Sign-in is optional
+// (issue #179 follow-up) -- commands would work fine anonymously too (see
+// the dedicated test below) -- but driving the tests through a real claimed
+// session also exercises the actor-vs-seat check's signed-in path: every
+// command below (all actor: 0) needs a token bound to that exact seat, or
+// it 403s, so this is the stricter path to keep covered by default.
 async function seedGame(name: string, settlement: SettlementState): Promise<string> {
   const { heroId } = ids(name);
   const heroes: Record<HeroId, HeroState> = { [heroId]: makeHero(heroId, 0, 2, 2) };
@@ -271,6 +273,30 @@ test("UpgradeSettlement with an out-of-domain upgradePopulationGate is a 400", a
         `gate ${JSON.stringify(upgradePopulationGate)} should be rejected`,
       );
     }
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games/:name/commands succeeds with no Authorization header at all -- sign-in is optional", async () => {
+  const name = uniqueName();
+  const { settlementId } = ids(name);
+  // seedGame() logs in and claims seat 0 for setup convenience, but this
+  // test's whole point is that an anonymous caller doesn't need any of
+  // that: it never sends the resulting token.
+  await seedGame(name, buildingUpgradeSettlement(name));
+  try {
+    const res = await fetch(`${baseUrl}/games/${name}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "UpgradeBuilding",
+        actor: 0,
+        settlementId,
+        requests: [{ gx: 1, gy: 1, kind: "market" }],
+      }),
+    });
+    assert.equal(res.status, 200, await res.clone().text());
   } finally {
     await cleanupGame(name);
   }

@@ -1,80 +1,86 @@
 # Auth model
 
-Issue #179. Magic-link auth (`server/auth.ts`) plus per-game membership
-(`server/middleware/requireGamePlayer.ts`), wired into every route that reads
-or mutates a specific game.
+Issue #179 (plus its optional-sign-in follow-up). Magic-link auth
+(`server/auth.ts`) plus per-game membership (`server/middleware/
+attachPlayerSeat.ts`), wired into the routes that benefit from knowing who's
+calling. **Sign-in is optional everywhere** -- see `src/screens/home/
+homeView.ts`'s footer message. Nothing rejects an anonymous caller; being
+signed in only ever adds protection on top of what an anonymous caller
+already gets.
 
-## Middleware order: `requireAuth` -> `requireGamePlayer`
+## Middleware: `attachAuth` -> `attachPlayerSeat`
 
-`requireGamePlayer` asserts `req.authEmail` is already set and throws if it
-isn't -- that only happens if the two are wired in the wrong order (or
-`requireGamePlayer` is used alone), and it should fail loud in that case
-rather than surface as a confusing 403 with no clear cause. Express 5
-auto-forwards a rejected async middleware's promise to `errorHandler`
-(`server/errorHandler.ts`), which turns it into a `500`.
+Both are non-blocking. `attachAuth` sets `req.authEmail` if the caller sent a
+valid bearer token; if not (no token, expired session, whatever), it just
+calls `next()` with `req.authEmail` left unset -- never a 401. `attachPlayerSeat`
+only does anything if `req.authEmail` is already set: it looks up whether
+that email has claimed a seat in the target game and sets `req.playerSeat` if
+so. An anonymous caller, or a signed-in caller who hasn't claimed a seat in
+this particular game, ends up with `req.playerSeat` unset and proceeds
+exactly like they would have before #179 -- trusted on the `actor` field they
+send.
 
-## 401 vs 403
+Order still matters (`attachPlayerSeat` needs `req.authEmail` to already be
+set to do anything), but there's no fail-loud assertion anymore since running
+`attachPlayerSeat` alone just means it never resolves a seat, not a bug.
 
-- **401** (`requireAuth`): no valid bearer token. The caller isn't logged in,
-  or their session expired/was revoked.
-- **403** (`requireGamePlayer`, `not_a_player`): the caller is logged in, but
-  their email has no claimed seat in this game.
-- **403** (commands route, `actor_mismatch`): the caller is logged in and is
-  a member of this game, but the `actor` seat on the command they sent isn't
-  the seat they claimed.
-- **404** (`requireGamePlayer`, `game_not_found`): the named game doesn't
-  exist.
+## Where this is wired, and why
 
-## Email-to-seat mapping
+- **`commandsRouter`** (`server/http/routes/commands.ts`) -- both, because the
+  actor-vs-seat check below depends on `req.playerSeat`.
+- **`POST /games/:name/lobby/claim`** (`server/routes.ts`) -- `attachAuth`
+  only. Claiming is how a signed-in caller's identity gets bound to a seat in
+  the first place; an anonymous caller can still claim, they just don't get
+  that binding.
+- **Everything else** (`GET .../events`, `GET .../tiles`, `POST .../lobby/
+  start`, game list/metadata) -- no auth middleware at all. Nothing in those
+  handlers reads `req.authEmail`/`req.playerSeat`, so attaching it would be
+  pure overhead with no behavior to justify it.
 
-`games.lobby.claimed[seat]` (JSONB, from `008_lobby.sql`) gained an `email`
-field alongside the existing cosmetic `handle`:
-
-```
-claimed[seat] = { handle: string, email: string, claimedAt: string }
-```
-
-`email` is always server-derived from `req.authEmail` at claim time -- never
-client-supplied -- so it's the identity-binding field `requireGamePlayer`
-matches against. `handle` stays a free-text display name; it carries no
-security weight. No new table: `requireGamePlayer` does a per-request
-`SELECT lobby->'claimed' FROM games WHERE name = $1` and matches by email,
-cached in-process per game name for 5 seconds. `POST .../lobby/claim` calls
-`invalidateMembershipCache(name)` after a successful claim so a player who
-just joined can act immediately rather than waiting out the TTL.
-
-## Actor-vs-seat defense in depth
+## Actor-vs-seat: the one real protection layer
 
 `commandHandler.ts`'s existing per-command checks (`forbidden_not_your_turn`,
 `forbidden_not_your_hero`, `forbidden_not_your_settlement`) are seat-based --
 they verify the seat named in the command has the authority it claims, not
 that the caller sending the command actually owns that seat. The commands
-route adds one more check in front of that: `command.actor !== req.playerSeat`
--> `403 actor_mismatch`. The seat-level checks stay as-is; they catch logic
-bugs (an existing seat that lacks authority for this specific action), the
-route-level check catches identity spoofing (a seat the caller was never
-bound to).
+route adds one more check in front of that, but only when it can:
 
-## Public routes (no auth)
+```ts
+if (req.playerSeat !== undefined && command.actor !== req.playerSeat) {
+  res.status(403).json({ error: "actor_mismatch" });
+}
+```
 
-- `GET /health`
-- `GET /units`
-- `GET /games`, `GET /games/:name`, `GET /games/:name/validate` -- game
-  list/metadata; not sensitive enough to gate, and gating them would block
-  the pre-login lobby browse.
-- `PATCH /games/:name` -- deprecated full-state push, superseded by the
-  commands bus; not worth adding auth to a path already on its way out.
+If the caller is signed in and has claimed the seat they're acting as, a
+spoofed `actor` gets caught here. If not, the request falls through to
+`commandHandler.ts`'s seat-based checks -- the same trust model the app had
+before #179. Signing in is what upgrades "trusted seat" to "trusted seat you
+proved you own."
 
-## Backward-compat: pre-auth lobby claims
+## Email-to-seat mapping
 
-Claims made before this landed have `{ handle, claimedAt }` with no `email`.
-Migration `012_clear_unbound_lobby_claims.sql` clears any such entry
-(idempotent -- a no-op once every remaining entry has an `email`), so those
-seats go back to unclaimed and get re-claimed under the new flow. No
-`legacy:`-prefixed placeholder backdoor.
+`games.lobby.claimed[seat]` (JSONB, from `008_lobby.sql`) has an optional
+`email` field alongside the existing cosmetic `handle`:
+
+```
+claimed[seat] = { handle: string, email?: string, claimedAt: string }
+```
+
+`email` is server-derived from `req.authEmail` at claim time -- never
+client-supplied -- and is only present if the claimer was signed in. `handle`
+stays a free-text display name either way; it carries no security weight. No
+new table: `attachPlayerSeat` does a per-request `SELECT lobby->'claimed'
+FROM games WHERE name = $1` and matches by email, cached in-process per game
+name for 5 seconds. `POST .../lobby/claim` calls `invalidateMembershipCache(name)`
+after a successful claim so a player who just signed in and claimed can act
+on that identity immediately rather than waiting out the TTL.
 
 ## Testing
 
 `server/auth.ts`'s `POST /auth/request-code` returns `devCode` whenever
-`NODE_ENV !== "production"`, so tests drive the real login flow end-to-end
-(`test/helpers/authFlow.ts`) instead of mocking auth.
+`NODE_ENV !== "production"`, so tests that care about the signed-in path
+drive the real login flow end-to-end (`test/helpers/authFlow.ts`,
+`test/server/attachPlayerSeat.test.ts`, `test/server/commandsRoute.test.ts`)
+instead of mocking auth. Most of the suite (`test/smoke.ts`, `test/
+multiplayer.smoke.ts`, `test/cityView.test.ts`, `test/visualRegression.test.ts`)
+deliberately runs anonymously, since that's the default experience now.

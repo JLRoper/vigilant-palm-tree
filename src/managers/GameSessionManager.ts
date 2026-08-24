@@ -117,10 +117,13 @@ export class GameSessionManager {
       ? aiCastles.map((c) => ({ q: c.tile.q, r: c.tile.r }))
       : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
     const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount);
-    // Issue #179: same requireGamePlayer gap as createFreshStarter() below --
-    // the "New Game" toolbar flow loads straight into the game rather than
-    // routing through the multiplayer lobby UI, so the creator (seat 0)
-    // needs to self-claim here too.
+    // Issue #179: same self-claim as createFreshStarter() below -- the "New
+    // Game" toolbar flow loads straight into the game rather than routing
+    // through the multiplayer lobby UI. Claiming is optional (sign-in is
+    // optional), but doing it here means a signed-in creator's commands get
+    // the extra actor-vs-seat protection commandsRouter offers claimed
+    // seats; an anonymous creator still claims fine, just without a bound
+    // email, same as multiplayer's own anonymous-claim path.
     const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? "Player";
     await this.session.claimLobbySeat(created.name, 0, handle);
     const gameTiles = await this.session.getTiles(created.name);
@@ -154,13 +157,12 @@ export class GameSessionManager {
         : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
       const name = `starter-${Date.now().toString(36)}`;
       const created = await this.session.createGame(name, MAP_SEED, heroQ, heroR, enemyPositions, "small");
-      // Issue #179: GET .../tiles/.../events require the caller to be a
-      // claimed member of the game (requireGamePlayer), and single-player
-      // starter games skip the multiplayer lobby UI entirely -- so this is
-      // the only place that ever claims seat 0 for them. Left to throw into
-      // this method's own catch below on failure (e.g. not logged in): the
-      // starter game exists but is unplayable regardless of whether this
-      // call or the getTiles() right after it is what surfaces that.
+      // Issue #179: single-player starter games skip the multiplayer lobby
+      // UI entirely, so this is the only place that ever claims seat 0 for
+      // them. Sign-in is optional -- claiming never rejects an anonymous
+      // caller -- but doing it here binds a signed-in player's identity to
+      // the seat, which is what lets commandsRouter's actor-vs-seat check
+      // offer them extra protection later.
       const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? "Player";
       await this.session.claimLobbySeat(created.name, 0, handle);
       const tiles = await this.session.getTiles(created.name);

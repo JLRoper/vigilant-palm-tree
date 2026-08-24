@@ -12,7 +12,6 @@ import {
   reapPreviousRunPids,
   clearRegisteredPids,
 } from "./_request";
-import { loginViaMagicLink, uniqueTestEmail } from "./helpers/authFlow";
 
 const API_PORT = getApiPort(4000);
 const WEB_PORT = getClientPort(5173);
@@ -399,27 +398,8 @@ async function run() {
     await waitForUrl(WEB_URL);
     console.log(">> API + Web ready");
 
-    // Issue #179: GET .../tiles, GET .../events, and POST .../commands now
-    // require an authenticated, game-member caller -- including the
-    // claimLobbySeat() call GameSessionManager.createFreshStarter()/
-    // handleNewGame() make right after creating a game. Without a session
-    // primed before the app boots, that claim 401s, the starter-game load
-    // aborts, and the app is left running on nothing but its pre-network
-    // default state -- which happens to still render a canvas, so failures
-    // only surface downstream (e.g. the palette toggle test, which checks
-    // state that's only set once a game actually finishes loading).
-    const email = uniqueTestEmail("cityview");
-    const token = await loginViaMagicLink(`${API_URL}/api`, email);
-
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
-    await page.addInitScript(
-      ({ token, email }) => {
-        localStorage.setItem("heroesJs.authToken", token);
-        localStorage.setItem("heroesJs.authEmail", email);
-      },
-      { token, email }
-    );
     await page.goto(WEB_URL);
     await wait(1500);
 

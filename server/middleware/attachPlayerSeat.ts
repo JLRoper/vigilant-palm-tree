@@ -41,31 +41,27 @@ export function invalidateMembershipCache(gameName: string): void {
   membershipCache.delete(gameName);
 }
 
-// Resolves req.playerSeat from the caller's authenticated email against the
-// target game's lobby.claimed[seat].email -- must run after requireAuth,
-// which sets req.authEmail. Throws (rather than 500ing gracefully) if
-// req.authEmail is unset, since that only happens if middleware order is
-// silently broken -- the kind of bug that should fail loud in dev, not
-// surface as a confusing 403 in prod.
-export async function requireGamePlayer(
+// Sign-in is optional -- this never rejects the request, and a missing or
+// nonexistent game is left for the route handler's own lookup to 404 on (it
+// needs to re-load the row anyway). If the caller is authenticated
+// (attachAuth already ran and set req.authEmail) and has claimed a seat in
+// this game, sets req.playerSeat so the commands route's actor-vs-seat check
+// can bind to a real identity; anonymous or unclaimed callers just proceed
+// with req.playerSeat left unset, falling back to the client-trusted
+// `actor` field the same way the app worked before #179.
+export async function attachPlayerSeat(
   req: Request,
-  res: Response,
+  _res: Response,
   next: NextFunction,
 ): Promise<void> {
   if (!req.authEmail) {
-    throw new Error("requireGamePlayer: req.authEmail is unset -- requireAuth must run first");
-  }
-  const gameName = String(req.params.name);
-  const claimed = await loadClaimed(gameName);
-  if (claimed === null) {
-    res.status(404).json({ error: "game_not_found" });
+    next();
     return;
   }
-  const entry = Object.entries(claimed).find(([, seat]) => seat.email === req.authEmail);
-  if (!entry) {
-    res.status(403).json({ error: "not_a_player" });
-    return;
+  const claimed = await loadClaimed(String(req.params.name));
+  if (claimed) {
+    const entry = Object.entries(claimed).find(([, seat]) => seat.email === req.authEmail);
+    if (entry) req.playerSeat = Number(entry[0]);
   }
-  req.playerSeat = Number(entry[0]);
   next();
 }
