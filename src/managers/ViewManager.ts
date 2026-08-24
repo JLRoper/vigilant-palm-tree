@@ -10,6 +10,7 @@ import { SpriteProvider } from "../render/assets";
 import type { Axial } from "../core/hex";
 import type { CityView } from "@screens/settlements/cityView/cityView";
 import type { CharterState } from "../state/gameState";
+import type { EntityMirror } from "../render/scene/entityMirror";
 
 export class ViewManager {
   public camera = new Camera();
@@ -17,17 +18,23 @@ export class ViewManager {
   public mapRenderer!: MapRenderer;
   public view!: AdventureView;
   private ctx!: CanvasRenderingContext2D;
+  private mirror: EntityMirror | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private spriteProvider: SpriteProvider) {}
 
-  initializeRenderer(map: GameMap): void {
+  initializeRenderer(map: GameMap, mirror: EntityMirror): void {
     this.ctx = this.canvas.getContext("2d")!;
+    this.mirror = mirror;
     if (this.minimapCamera) {
       this.minimapCamera.reset(map);
     } else {
       this.minimapCamera = new MinimapCamera(map);
     }
-    this.mapRenderer = new MapRenderer(this.ctx, map, this.camera, this.spriteProvider, this.minimapCamera);
+    this.mapRenderer = new MapRenderer(this.ctx, map, this.camera, this.spriteProvider, this.minimapCamera, mirror);
+  }
+
+  getMirror(): EntityMirror | null {
+    return this.mirror;
   }
 
   initializeAdventureView(

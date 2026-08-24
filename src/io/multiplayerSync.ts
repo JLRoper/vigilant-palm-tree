@@ -334,3 +334,7 @@ export function getMultiplayerSync(): MultiplayerSync {
   if (!instance) instance = new MultiplayerSync();
   return instance;
 }
+
+export function getEntityMirror(): EntityMirror {
+  return getMultiplayerSync().getMirror();
+}
