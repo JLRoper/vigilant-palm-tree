@@ -8,6 +8,7 @@ import { pool } from "../../server/persistence/db";
 import { router } from "../../server/routes";
 import { errorHandler } from "../../server/errorHandler";
 import { emptyWarehouse, makeHero, makePlayer, makeSettlement } from "../charter/_helpers";
+import { loginAndClaim, authHeader } from "../helpers/authFlow";
 
 // Route-level coverage for POST /games/:name/commands, over real Express +
 // real Postgres (same harness pattern as eventsRoute.test.ts).
@@ -59,7 +60,13 @@ function ids(gameName: string): { heroId: HeroId; settlementId: SettlementId } {
 // empty, server/persistence/hydrate.ts falls back to hydrating from the row
 // itself (its "jsonb" source), which is all these tests need -- they're
 // about the request-parsing layer, not the read path.
-async function seedGame(name: string, settlement: SettlementState): Promise<void> {
+// Returns a bearer token for seat 0, already claimed. Sign-in is optional
+// (issue #179 follow-up) -- commands would work fine anonymously too (see
+// the dedicated test below) -- but driving the tests through a real claimed
+// session also exercises the actor-vs-seat check's signed-in path: every
+// command below (all actor: 0) needs a token bound to that exact seat, or
+// it 403s, so this is the stricter path to keep covered by default.
+async function seedGame(name: string, settlement: SettlementState): Promise<string> {
   const { heroId } = ids(name);
   const heroes: Record<HeroId, HeroState> = { [heroId]: makeHero(heroId, 0, 2, 2) };
   const settlements: Record<SettlementId, SettlementState> = { [settlement.id]: settlement };
@@ -69,6 +76,7 @@ async function seedGame(name: string, settlement: SettlementState): Promise<void
      VALUES ($1, 1, 2, 2, 0, $2::jsonb, $3::jsonb, $4::jsonb, 'small')`,
     [name, JSON.stringify(players), JSON.stringify(heroes), JSON.stringify(settlements)],
   );
+  return loginAndClaim(baseUrl, name, 0);
 }
 
 // Cascades to game_events / heroes / settlements (all ON DELETE CASCADE off
@@ -77,10 +85,10 @@ async function cleanupGame(name: string): Promise<void> {
   await pool.query(`DELETE FROM games WHERE name = $1`, [name]);
 }
 
-async function postCommand(name: string, body: unknown): Promise<Response> {
+async function postCommand(name: string, body: unknown, token: string): Promise<Response> {
   return fetch(`${baseUrl}/games/${name}/commands`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...authHeader(token) },
     body: JSON.stringify(body),
   });
 }
@@ -111,14 +119,14 @@ function settlementUpgradeSettlement(name: string): SettlementState {
 test("POST /games/:name/commands accepts UpgradeBuilding over HTTP (was a 400 -- parseCommand had no branch for it)", async () => {
   const name = uniqueName();
   const { settlementId } = ids(name);
-  await seedGame(name, buildingUpgradeSettlement(name));
+  const token = await seedGame(name, buildingUpgradeSettlement(name));
   try {
     const res = await postCommand(name, {
       kind: "UpgradeBuilding",
       actor: 0,
       settlementId,
       requests: [{ gx: 1, gy: 1, kind: "market" }],
-    });
+    }, token);
     assert.equal(res.status, 200, await res.clone().text());
     const body = (await res.json()) as { settlement?: SettlementState };
     assert.equal(body.settlement?.upgrade?.kind, "buildings");
@@ -131,14 +139,14 @@ test("POST /games/:name/commands accepts UpgradeBuilding over HTTP (was a 400 --
 test("POST /games/:name/commands accepts UpgradeSettlement over HTTP (was a 400 -- parseCommand had no branch for it)", async () => {
   const name = uniqueName();
   const { settlementId } = ids(name);
-  await seedGame(name, settlementUpgradeSettlement(name));
+  const token = await seedGame(name, settlementUpgradeSettlement(name));
   try {
     const res = await postCommand(name, {
       kind: "UpgradeSettlement",
       actor: 0,
       settlementId,
       upgradePopulationGate: 0.85,
-    });
+    }, token);
     assert.equal(res.status, 200, await res.clone().text());
     const body = (await res.json()) as { settlement?: SettlementState };
     assert.equal(body.settlement?.upgrade?.kind, "settlement");
@@ -151,7 +159,7 @@ test("POST /games/:name/commands accepts UpgradeSettlement over HTTP (was a 400 
 test("UpgradeSettlement ignores a client-supplied targetLevel and derives it server-side", async () => {
   const name = uniqueName();
   const { settlementId } = ids(name);
-  await seedGame(name, settlementUpgradeSettlement(name));
+  const token = await seedGame(name, settlementUpgradeSettlement(name));
   try {
     // If targetLevel were read off the body, startSettlementUpgrade() would
     // reject this level-1 settlement with "invalid_level" (a 409); the
@@ -162,7 +170,7 @@ test("UpgradeSettlement ignores a client-supplied targetLevel and derives it ser
       settlementId,
       upgradePopulationGate: 0.85,
       targetLevel: 3,
-    });
+    }, token);
     assert.equal(res.status, 200, await res.clone().text());
     const body = (await res.json()) as { settlement?: SettlementState };
     assert.equal(body.settlement?.upgrade?.targetLevel, 2);
@@ -183,7 +191,7 @@ test("POST /games/:name/commands accepts AdvanceCharterTravel over HTTP (was a 4
   // "invalid command" that has nothing to do with charter persistence.
   const name = uniqueName();
   const { heroId } = ids(name);
-  await seedGame(name, buildingUpgradeSettlement(name));
+  const token = await seedGame(name, buildingUpgradeSettlement(name));
   try {
     const res = await postCommand(name, {
       kind: "AdvanceCharterTravel",
@@ -192,7 +200,7 @@ test("POST /games/:name/commands accepts AdvanceCharterTravel over HTTP (was a 4
       fromTile: { q: 2, r: 2 },
       toTile: { q: 3, r: 2 },
       cost: 1,
-    });
+    }, token);
     assert.equal(res.status, 409, await res.clone().text());
     const body = (await res.json()) as { error?: string };
     assert.equal(body.error, "charters_persist_unavailable");
@@ -204,14 +212,14 @@ test("POST /games/:name/commands accepts AdvanceCharterTravel over HTTP (was a 4
 test("UpgradeBuilding with a malformed requests payload is a 400, not a handler-level crash", async () => {
   const name = uniqueName();
   const { settlementId } = ids(name);
-  await seedGame(name, buildingUpgradeSettlement(name));
+  const token = await seedGame(name, buildingUpgradeSettlement(name));
   try {
     const missingKind = await postCommand(name, {
       kind: "UpgradeBuilding",
       actor: 0,
       settlementId,
       requests: [{ gx: 1, gy: 1 }],
-    });
+    }, token);
     assert.equal(missingKind.status, 400);
 
     const notAnArray = await postCommand(name, {
@@ -219,7 +227,7 @@ test("UpgradeBuilding with a malformed requests payload is a 400, not a handler-
       actor: 0,
       settlementId,
       requests: { gx: 1, gy: 1, kind: "market" },
-    });
+    }, token);
     assert.equal(notAnArray.status, 400);
   } finally {
     await cleanupGame(name);
@@ -229,14 +237,14 @@ test("UpgradeBuilding with a malformed requests payload is a 400, not a handler-
 test("UpgradeBuilding with an empty requests array reaches the reducer as a 409, not a 400", async () => {
   const name = uniqueName();
   const { settlementId } = ids(name);
-  await seedGame(name, buildingUpgradeSettlement(name));
+  const token = await seedGame(name, buildingUpgradeSettlement(name));
   try {
     const res = await postCommand(name, {
       kind: "UpgradeBuilding",
       actor: 0,
       settlementId,
       requests: [],
-    });
+    }, token);
     assert.equal(res.status, 409);
     assert.equal(((await res.json()) as { error: string }).error, "no_buildings");
   } finally {
@@ -247,7 +255,7 @@ test("UpgradeBuilding with an empty requests array reaches the reducer as a 409,
 test("UpgradeSettlement with an out-of-domain upgradePopulationGate is a 400", async () => {
   const name = uniqueName();
   const { settlementId } = ids(name);
-  await seedGame(name, settlementUpgradeSettlement(name));
+  const token = await seedGame(name, settlementUpgradeSettlement(name));
   try {
     // The gate is a fraction of the level's population cap, so anything
     // outside 0..1 (or not a number at all) is malformed rather than merely
@@ -258,13 +266,37 @@ test("UpgradeSettlement with an out-of-domain upgradePopulationGate is a 400", a
         actor: 0,
         settlementId,
         upgradePopulationGate,
-      });
+      }, token);
       assert.equal(
         res.status,
         400,
         `gate ${JSON.stringify(upgradePopulationGate)} should be rejected`,
       );
     }
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games/:name/commands succeeds with no Authorization header at all -- sign-in is optional", async () => {
+  const name = uniqueName();
+  const { settlementId } = ids(name);
+  // seedGame() logs in and claims seat 0 for setup convenience, but this
+  // test's whole point is that an anonymous caller doesn't need any of
+  // that: it never sends the resulting token.
+  await seedGame(name, buildingUpgradeSettlement(name));
+  try {
+    const res = await fetch(`${baseUrl}/games/${name}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "UpgradeBuilding",
+        actor: 0,
+        settlementId,
+        requests: [{ gx: 1, gy: 1, kind: "market" }],
+      }),
+    });
+    assert.equal(res.status, 200, await res.clone().text());
   } finally {
     await cleanupGame(name);
   }

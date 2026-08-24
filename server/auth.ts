@@ -66,18 +66,21 @@ function readBearerToken(req: Request): string | undefined {
   return undefined;
 }
 
-export async function requireAuth(
+// Sign-in is optional (see src/screens/home/homeView.ts's footer message) --
+// this never rejects the request. If a valid bearer token is present it sets
+// req.authEmail so downstream middleware/handlers can offer signed-in-only
+// benefits (see attachPlayerSeat.ts); an anonymous or invalid-token caller
+// just proceeds with req.authEmail unset.
+export async function attachAuth(
   req: Request,
-  res: Response,
+  _res: Response,
   next: NextFunction,
 ): Promise<void> {
   const token = readBearerToken(req);
   const session = await loadSession(token);
-  if (!session) {
-    res.status(401).json({ error: "unauthorized" });
-    return;
+  if (session) {
+    req.authEmail = session.email;
   }
-  req.authEmail = session.email;
   next();
 }
 

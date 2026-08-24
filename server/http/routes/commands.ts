@@ -2,6 +2,8 @@ import { Router, type Request } from "express";
 import type { BuildingUpgradeRequest, Command } from "@heroes/contracts";
 import { VALID_HORSE_VARIANTS } from "@heroes/engine";
 import { handleCommandTransactional, createLiveCommandDeps, type LiveCommandDeps } from "../../app/commandHandler";
+import { attachAuth } from "../../auth";
+import { attachPlayerSeat } from "../../middleware/attachPlayerSeat";
 
 // createLiveCommandDeps() is async as of Week 3 (it now queries the
 // unit_types table for ResolveBattle's catalog -- see that function's own
@@ -52,6 +54,11 @@ function getLiveDeps(): Promise<LiveCommandDeps> {
 // update (Week 1's own tests called handleCommand() directly against
 // mockRepos, never through Express).
 export const commandsRouter = Router({ mergeParams: true });
+// Sign-in is optional (issue #179 follow-up) -- attachAuth/attachPlayerSeat
+// never reject the request. They just make req.playerSeat available below
+// when the caller happens to be signed in and has claimed a seat, so the
+// actor-vs-seat check can offer that caller extra protection.
+commandsRouter.use(attachAuth, attachPlayerSeat);
 
 function isAxial(v: unknown): v is { q: number; r: number } {
   return (
@@ -364,6 +371,17 @@ commandsRouter.post("/", async (req: Request<{ name: string }>, res) => {
   const command = parseCommand(req.body, gameName);
   if (!command) {
     res.status(400).json({ error: "invalid command" });
+    return;
+  }
+  // Defense-in-depth alongside commandHandler.ts's own seat-based checks
+  // (forbidden_not_your_turn, forbidden_not_your_hero, etc.): those verify
+  // the asserted seat has authority, not that the caller IS that seat.
+  // req.playerSeat (from attachPlayerSeat) can't be spoofed the way
+  // command.actor can -- but sign-in is optional, so this only applies when
+  // we actually know who the caller is; an anonymous/unclaimed caller falls
+  // back to trusting command.actor, same as the app worked before #179.
+  if (req.playerSeat !== undefined && command.actor !== req.playerSeat) {
+    res.status(403).json({ error: "actor_mismatch" });
     return;
   }
   try {

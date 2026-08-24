@@ -7,6 +7,7 @@ import type {
   Player,
   SettlementState,
 } from "@heroes/contracts";
+import { getCachedAuth } from "./authStorage";
 
 export type {
   GameState,
@@ -71,6 +72,20 @@ class TimeoutError extends Error {
   }
 }
 
+// Attaches the cached session token to every request that doesn't already
+// carry an explicit Authorization header -- src/io/auth.ts's own
+// checkSession()/logout() pass a specific token as an explicit header (e.g.
+// while verifying a not-yet-cached token), and that must win over whatever
+// happens to be cached.
+function withCachedAuth(init: RequestInit): RequestInit {
+  const auth = getCachedAuth();
+  if (!auth) return init;
+  const headers = new Headers(init.headers);
+  if (headers.has("Authorization")) return init;
+  headers.set("Authorization", `Bearer ${auth.token}`);
+  return { ...init, headers };
+}
+
 export async function apiFetch(
   url: string,
   init: RequestInit = {},
@@ -79,7 +94,7 @@ export async function apiFetch(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await fetch(url, { ...withCachedAuth(init), signal: controller.signal });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new TimeoutError(timeoutMs);

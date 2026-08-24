@@ -14,7 +14,8 @@ import type {
 } from "../src/state/gameState";
 import type { UnitType } from "@heroes/engine";
 import { assetRouter } from "./assetRoutes";
-import { authRouter } from "./auth";
+import { authRouter, attachAuth } from "./auth";
+import { invalidateMembershipCache } from "./middleware/attachPlayerSeat";
 import { validateGameRow, isHealthy } from "@heroes/engine";
 import { commandsRouter } from "./http/routes/commands";
 import { telemetryRouter } from "./http/routes/telemetry";
@@ -58,7 +59,11 @@ type FullGameRow = {
 export interface LobbyState {
   seats?: number;
   humanSlots?: number;
-  claimed?: Record<string, { handle: string; claimedAt: string }>;
+  // email (server-derived from req.authEmail, never client-supplied) binds
+  // this seat to the caller's identity when they were signed in at claim
+  // time; sign-in is optional (issue #179 follow-up), so an anonymous claim
+  // leaves it unset. handle stays purely cosmetic either way.
+  claimed?: Record<string, { handle: string; email?: string; claimedAt: string }>;
   startedAt?: string;
 }
 
@@ -211,13 +216,19 @@ router.get("/games/:name/validate", async (req, res) => {
   });
 });
 
-router.post("/games/:name/lobby/claim", async (req, res) => {
+// attachAuth only, not attachPlayerSeat -- claiming is how you become a
+// member in the first place. Sign-in is optional (issue #179 follow-up):
+// a signed-in caller's claim gets bound to their email for the commands
+// route's optional actor-vs-seat check; an anonymous claim still works,
+// same as before #179, just without that extra binding.
+router.post("/games/:name/lobby/claim", attachAuth, async (req, res) => {
   const { seat, handle } = req.body ?? {};
   if (!Number.isInteger(seat) || typeof handle !== "string" || !handle.trim()) {
     res.status(400).json({ error: "seat (int) and handle (string) required" });
     return;
   }
   const cleanHandle = handle.trim().slice(0, 32);
+  const email = req.authEmail;
   try {
     const result = await withTransaction(async (client) => {
       const gr = await client.query<FullGameRow>(
@@ -237,7 +248,7 @@ router.post("/games/:name/lobby/claim", async (req, res) => {
       if (claimed[String(seat)]) {
         return { status: 409 as const, error: "seat_already_claimed" };
       }
-      claimed[String(seat)] = { handle: cleanHandle, claimedAt: new Date().toISOString() };
+      claimed[String(seat)] = { handle: cleanHandle, email, claimedAt: new Date().toISOString() };
       const newPlayers = row.players.map((p) =>
         p.id === seat ? { ...p, faction: "player" as const, name: cleanHandle } : p,
       );
@@ -257,6 +268,7 @@ router.post("/games/:name/lobby/claim", async (req, res) => {
       res.status(result.status).json({ error: result.error });
       return;
     }
+    invalidateMembershipCache(String(req.params.name));
     res.json(result.game);
   } catch (err) {
     console.error("[api] POST /games/:name/lobby/claim threw:", err);
