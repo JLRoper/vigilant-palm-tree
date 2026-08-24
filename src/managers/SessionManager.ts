@@ -84,6 +84,10 @@ export class SessionManager {
     return await api.createGame(name, seed, heroQ, heroR, enemyPositions, mapSize, humanSeatCount);
   }
 
+  async claimLobbySeat(name: string, seat: number, handle: string): Promise<Game> {
+    return await api.claimLobbySeat(name, seat, handle);
+  }
+
   async getTiles(name: string): Promise<TileRow[]> {
     return await api.getTiles(name);
   }

@@ -14,7 +14,8 @@ import type {
 } from "../src/state/gameState";
 import type { UnitType } from "@heroes/engine";
 import { assetRouter } from "./assetRoutes";
-import { authRouter } from "./auth";
+import { authRouter, requireAuth } from "./auth";
+import { requireGamePlayer, invalidateMembershipCache } from "./middleware/requireGamePlayer";
 import { validateGameRow, isHealthy } from "@heroes/engine";
 import { commandsRouter } from "./http/routes/commands";
 import { telemetryRouter } from "./http/routes/telemetry";
@@ -58,7 +59,11 @@ type FullGameRow = {
 export interface LobbyState {
   seats?: number;
   humanSlots?: number;
-  claimed?: Record<string, { handle: string; claimedAt: string }>;
+  // email binds this seat to the caller's authenticated identity
+  // (server-derived from req.authEmail, never client-supplied); handle
+  // stays purely cosmetic (issue #179). Optional so pre-auth claims (cleared
+  // by migration 012) and any not-yet-migrated in-flight row still type-check.
+  claimed?: Record<string, { handle: string; email?: string; claimedAt: string }>;
   startedAt?: string;
 }
 
@@ -211,13 +216,17 @@ router.get("/games/:name/validate", async (req, res) => {
   });
 });
 
-router.post("/games/:name/lobby/claim", async (req, res) => {
+// requireAuth only, not requireGamePlayer -- claiming is how you BECOME a
+// member, so requireGamePlayer would reject a first-time claimer before
+// they ever get the chance (issue #179).
+router.post("/games/:name/lobby/claim", requireAuth, async (req, res) => {
   const { seat, handle } = req.body ?? {};
   if (!Number.isInteger(seat) || typeof handle !== "string" || !handle.trim()) {
     res.status(400).json({ error: "seat (int) and handle (string) required" });
     return;
   }
   const cleanHandle = handle.trim().slice(0, 32);
+  const email = req.authEmail!;
   try {
     const result = await withTransaction(async (client) => {
       const gr = await client.query<FullGameRow>(
@@ -237,7 +246,7 @@ router.post("/games/:name/lobby/claim", async (req, res) => {
       if (claimed[String(seat)]) {
         return { status: 409 as const, error: "seat_already_claimed" };
       }
-      claimed[String(seat)] = { handle: cleanHandle, claimedAt: new Date().toISOString() };
+      claimed[String(seat)] = { handle: cleanHandle, email, claimedAt: new Date().toISOString() };
       const newPlayers = row.players.map((p) =>
         p.id === seat ? { ...p, faction: "player" as const, name: cleanHandle } : p,
       );
@@ -257,6 +266,7 @@ router.post("/games/:name/lobby/claim", async (req, res) => {
       res.status(result.status).json({ error: result.error });
       return;
     }
+    invalidateMembershipCache(String(req.params.name));
     res.json(result.game);
   } catch (err) {
     console.error("[api] POST /games/:name/lobby/claim threw:", err);
@@ -264,7 +274,7 @@ router.post("/games/:name/lobby/claim", async (req, res) => {
   }
 });
 
-router.post("/games/:name/lobby/start", async (req, res) => {
+router.post("/games/:name/lobby/start", requireAuth, requireGamePlayer, async (req, res) => {
   try {
     const result = await withTransaction(async (client) => {
       const gr = await client.query<FullGameRow>(
@@ -436,7 +446,7 @@ router.post("/games/:name/events", async (req, res) => {
   res.status(201).json(r.rows[0]);
 });
 
-router.get("/games/:name/events", async (req, res) => {
+router.get("/games/:name/events", requireAuth, requireGamePlayer, async (req, res) => {
   // ?after=<id> is the poll cursor (game_events.id, BIGSERIAL -- strictly
   // monotonic per row, so it doubles as a cursor with no separate seq
   // column needed; see server/migrations/010_event_seq.sql's header).
@@ -474,7 +484,7 @@ router.get("/games/:name/events", async (req, res) => {
   res.json(r.rows);
 });
 
-router.get("/games/:name/tiles", async (req, res) => {
+router.get("/games/:name/tiles", requireAuth, requireGamePlayer, async (req, res) => {
   const game = await pool.query<{ id: number; seed: number; map_size: string }>(
     "SELECT id, seed, map_size FROM games WHERE name = $1",
     [req.params.name]

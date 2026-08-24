@@ -6,6 +6,7 @@ import express from "express";
 import { pool } from "../../server/persistence/db";
 import { router } from "../../server/routes";
 import { errorHandler } from "../../server/errorHandler";
+import { loginAndClaim, loginViaMagicLink, uniqueTestEmail, authHeader } from "../helpers/authFlow";
 
 // Real Express app + real Postgres (same pattern server/index.ts wires up),
 // not a mocked route -- the thing under test is the SQL WHERE clause and
@@ -15,6 +16,7 @@ let baseUrl: string;
 
 before(async () => {
   const app = express();
+  app.use(express.json());
   app.use("/api", router);
   app.use(errorHandler);
   server = app.listen(0);
@@ -32,11 +34,15 @@ function uniqueName(): string {
   return `test-events-route-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-async function seedGame(name: string): Promise<void> {
+// lobby: { seats: 1 } lets the returned token claim seat 0 (issue #179 --
+// GET /events is now requireAuth+requireGamePlayer-gated) without needing to
+// also seed a `players` row just to satisfy lobby/claim's seat-range check.
+async function seedGame(name: string): Promise<string> {
   await pool.query(
-    `INSERT INTO games (name, seed, hero_q, hero_r) VALUES ($1, $2, $3, $4)`,
-    [name, 1, 0, 0],
+    `INSERT INTO games (name, seed, hero_q, hero_r, lobby) VALUES ($1, $2, $3, $4, $5::jsonb)`,
+    [name, 1, 0, 0, JSON.stringify({ seats: 1 })],
   );
+  return loginAndClaim(baseUrl, name, 0);
 }
 
 async function seedEvents(name: string, count: number): Promise<number[]> {
@@ -60,10 +66,10 @@ async function cleanupGame(name: string): Promise<void> {
 
 test("GET /games/:name/events with no ?after returns the whole log, oldest first", async () => {
   const name = uniqueName();
-  await seedGame(name);
+  const token = await seedGame(name);
   const ids = await seedEvents(name, 3);
   try {
-    const res = await fetch(`${baseUrl}/games/${name}/events`);
+    const res = await fetch(`${baseUrl}/games/${name}/events`, { headers: authHeader(token) });
     assert.equal(res.status, 200);
     const body = (await res.json()) as { id: number }[];
     assert.deepEqual(body.map((e) => e.id), ids);
@@ -74,10 +80,10 @@ test("GET /games/:name/events with no ?after returns the whole log, oldest first
 
 test("GET /games/:name/events?after=0 behaves the same as no cursor", async () => {
   const name = uniqueName();
-  await seedGame(name);
+  const token = await seedGame(name);
   const ids = await seedEvents(name, 2);
   try {
-    const res = await fetch(`${baseUrl}/games/${name}/events?after=0`);
+    const res = await fetch(`${baseUrl}/games/${name}/events?after=0`, { headers: authHeader(token) });
     assert.equal(res.status, 200);
     const body = (await res.json()) as { id: number }[];
     assert.deepEqual(body.map((e) => e.id), ids);
@@ -88,10 +94,10 @@ test("GET /games/:name/events?after=0 behaves the same as no cursor", async () =
 
 test("GET /games/:name/events?after=<mid-log id> returns only events after the cursor", async () => {
   const name = uniqueName();
-  await seedGame(name);
+  const token = await seedGame(name);
   const ids = await seedEvents(name, 3);
   try {
-    const res = await fetch(`${baseUrl}/games/${name}/events?after=${ids[0]}`);
+    const res = await fetch(`${baseUrl}/games/${name}/events?after=${ids[0]}`, { headers: authHeader(token) });
     assert.equal(res.status, 200);
     const body = (await res.json()) as { id: number }[];
     assert.deepEqual(body.map((e) => e.id), ids.slice(1));
@@ -102,10 +108,12 @@ test("GET /games/:name/events?after=<mid-log id> returns only events after the c
 
 test("GET /games/:name/events?after=<id past the end> returns an empty array, not 404", async () => {
   const name = uniqueName();
-  await seedGame(name);
+  const token = await seedGame(name);
   const ids = await seedEvents(name, 2);
   try {
-    const res = await fetch(`${baseUrl}/games/${name}/events?after=${ids[ids.length - 1]}`);
+    const res = await fetch(`${baseUrl}/games/${name}/events?after=${ids[ids.length - 1]}`, {
+      headers: authHeader(token),
+    });
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.deepEqual(body, []);
@@ -116,9 +124,11 @@ test("GET /games/:name/events?after=<id past the end> returns an empty array, no
 
 test("GET /games/:name/events?after=<non-numeric> is rejected with 400, not silently ignored", async () => {
   const name = uniqueName();
-  await seedGame(name);
+  const token = await seedGame(name);
   try {
-    const res = await fetch(`${baseUrl}/games/${name}/events?after=not-a-number`);
+    const res = await fetch(`${baseUrl}/games/${name}/events?after=not-a-number`, {
+      headers: authHeader(token),
+    });
     assert.equal(res.status, 400);
   } finally {
     await cleanupGame(name);
@@ -127,9 +137,9 @@ test("GET /games/:name/events?after=<non-numeric> is rejected with 400, not sile
 
 test("GET /games/:name/events?after=-1 is rejected with 400 (not a non-negative integer)", async () => {
   const name = uniqueName();
-  await seedGame(name);
+  const token = await seedGame(name);
   try {
-    const res = await fetch(`${baseUrl}/games/${name}/events?after=-1`);
+    const res = await fetch(`${baseUrl}/games/${name}/events?after=-1`, { headers: authHeader(token) });
     assert.equal(res.status, 400);
   } finally {
     await cleanupGame(name);
@@ -138,7 +148,7 @@ test("GET /games/:name/events?after=-1 is rejected with 400 (not a non-negative 
 
 test("GET /games/:name/events returns actor_seat, the column #144 wrote and nothing read", async () => {
   const name = uniqueName();
-  await seedGame(name);
+  const token = await seedGame(name);
   try {
     await pool.query(
       `INSERT INTO game_events (game_id, kind, payload, actor_seat)
@@ -150,7 +160,7 @@ test("GET /games/:name/events returns actor_seat, the column #144 wrote and noth
        SELECT id, 'round_started', '{"round":2}'::jsonb, NULL FROM games WHERE name = $1`,
       [name],
     );
-    const res = await fetch(`${baseUrl}/games/${name}/events`);
+    const res = await fetch(`${baseUrl}/games/${name}/events`, { headers: authHeader(token) });
     assert.equal(res.status, 200);
     const body = (await res.json()) as { kind: string; actor_seat: number | null }[];
     assert.deepEqual(
@@ -162,9 +172,32 @@ test("GET /games/:name/events returns actor_seat, the column #144 wrote and noth
   }
 });
 
-test("GET /games/:name returns last_event_id, the cursor a fresh client load seeds from", async () => {
+test("GET /games/:name/events with no auth header is rejected with 401", async () => {
   const name = uniqueName();
   await seedGame(name);
+  try {
+    const res = await fetch(`${baseUrl}/games/${name}/events`);
+    assert.equal(res.status, 401);
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("GET /games/:name/events for an authenticated caller who hasn't claimed a seat is rejected with 403", async () => {
+  const name = uniqueName();
+  await seedGame(name);
+  try {
+    const strangerToken = await loginViaMagicLink(baseUrl, uniqueTestEmail("stranger"));
+    const res = await fetch(`${baseUrl}/games/${name}/events`, { headers: authHeader(strangerToken) });
+    assert.equal(res.status, 403);
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("GET /games/:name returns last_event_id, the cursor a fresh client load seeds from", async () => {
+  const name = uniqueName();
+  const token = await seedGame(name);
   try {
     const empty = await fetch(`${baseUrl}/games/${name}`);
     assert.equal(empty.status, 200);
@@ -175,7 +208,9 @@ test("GET /games/:name returns last_event_id, the cursor a fresh client load see
     const body = (await res.json()) as { last_event_id: string };
     assert.equal(Number(body.last_event_id), Number(ids[ids.length - 1]));
 
-    const after = await fetch(`${baseUrl}/games/${name}/events?after=${body.last_event_id}`);
+    const after = await fetch(`${baseUrl}/games/${name}/events?after=${body.last_event_id}`, {
+      headers: authHeader(token),
+    });
     assert.deepEqual(await after.json(), [], "seeding from it means the first poll replays nothing");
   } finally {
     await cleanupGame(name);

@@ -1,45 +1,7 @@
 import { apiFetch } from "./api";
+import { getCachedAuth, setCachedAuth, clearAuth, type AuthState } from "./authStorage";
 
-const TOKEN_KEY = "heroesJs.authToken";
-const EMAIL_KEY = "heroesJs.authEmail";
-
-export type AuthState = {
-  token: string;
-  email: string;
-};
-
-function readCache(): AuthState | null {
-  try {
-    const token = localStorage.getItem(TOKEN_KEY);
-    const email = localStorage.getItem(EMAIL_KEY);
-    if (!token || !email) return null;
-    return { token, email };
-  } catch {
-    return null;
-  }
-}
-
-function writeCache(state: AuthState | null): void {
-  try {
-    if (state) {
-      localStorage.setItem(TOKEN_KEY, state.token);
-      localStorage.setItem(EMAIL_KEY, state.email);
-    } else {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(EMAIL_KEY);
-    }
-  } catch {
-    // ignore (private mode / quota)
-  }
-}
-
-export function getCachedAuth(): AuthState | null {
-  return readCache();
-}
-
-export function clearAuth(): void {
-  writeCache(null);
-}
+export { getCachedAuth, clearAuth, type AuthState };
 
 function withAuthHeaders(extra: Record<string, string> = {}, token?: string): Record<string, string> {
   const headers: Record<string, string> = { ...extra };
@@ -73,7 +35,7 @@ export async function verifyLoginCode(email: string, code: string): Promise<Auth
   }
   const data = (await res.json()) as { email: string; token: string };
   const state: AuthState = { email: data.email, token: data.token };
-  writeCache(state);
+  setCachedAuth(state);
   return state;
 }
 

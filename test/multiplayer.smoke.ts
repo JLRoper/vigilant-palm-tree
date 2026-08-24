@@ -9,6 +9,7 @@ import {
   reapPreviousRunPids,
   clearRegisteredPids,
 } from "./_request";
+import { loginViaMagicLink, uniqueTestEmail, authHeader } from "./helpers/authFlow";
 
 const API_PORT = getApiPort(3001);
 const API_URL = `http://127.0.0.1:${API_PORT}`;
@@ -48,6 +49,13 @@ async function run() {
     // Clean up if it already exists from a previous failed run.
     await ctx.delete(`${API_URL}/api/games/${lobbyGameName}`).catch(() => {});
 
+    // Issue #179: lobby/claim, lobby/start, and commands all now require an
+    // authenticated, game-member caller. Two distinct logins so seat 0
+    // (Host) and seat 1 (Joiner) are bound to different identities, the way
+    // a real 2-player lobby would be.
+    const hostToken = await loginViaMagicLink(`${API_URL}/api`, uniqueTestEmail("host"));
+    const joinerToken = await loginViaMagicLink(`${API_URL}/api`, uniqueTestEmail("joiner"));
+
     // 1. Host creates a 2-player lobby with 2 human slots.
     const createRes = await ctx.post(`${API_URL}/api/games`, {
       data: {
@@ -68,6 +76,7 @@ async function run() {
 
     // 2. Joiner claims seat 1.
     const claim1 = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/lobby/claim`, {
+      headers: authHeader(joinerToken),
       data: { seat: 1, handle: "Joiner" },
     });
     assert.equal(claim1.status(), 200, "first claim should return 200");
@@ -76,26 +85,35 @@ async function run() {
     assert.equal(afterClaim1.players.find((p) => p.id === 1)?.faction, "player");
     assert.equal(afterClaim1.lobby.claimed["1"]?.handle, "Joiner");
 
-    // 3. Trying to claim seat 1 again is rejected.
+    // 3. Trying to claim seat 1 again is rejected. A fresh identity here --
+    // the point is "seat already claimed," not "you can't re-claim your own
+    // seat," and a fresh caller who isn't a member yet keeps that distinct
+    // from a 403.
+    const imposterToken = await loginViaMagicLink(`${API_URL}/api`, uniqueTestEmail("imposter"));
     const dupClaim = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/lobby/claim`, {
+      headers: authHeader(imposterToken),
       data: { seat: 1, handle: "Imposter" },
     });
     assert.equal(dupClaim.status(), 409, "duplicate claim should be 409");
 
-    // 4. Trying to start with seat 0 unclaimed fails.
+    // 4. Trying to start with seat 0 unclaimed fails. Joiner is the only
+    // member so far.
     const earlyStart = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/lobby/start`, {
+      headers: authHeader(joinerToken),
       data: {},
     });
     assert.equal(earlyStart.status(), 409, "start should fail with unclaimed seats");
 
     // 5. Host claims seat 0.
     const claim0 = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/lobby/claim`, {
+      headers: authHeader(hostToken),
       data: { seat: 0, handle: "Host" },
     });
     assert.equal(claim0.status(), 200, "host claim should return 200");
 
     // 6. Start succeeds.
     const start = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/lobby/start`, {
+      headers: authHeader(hostToken),
       data: {},
     });
     assert.equal(start.status(), 200, "start should return 200");
@@ -118,7 +136,9 @@ async function run() {
     const seat0Hero = Object.values(game.heroes).find((h) => h.ownerId === 0);
     assert.ok(seat0Hero, "seat 0 hero should exist");
     const nonActiveActor = game.active_player_id === 0 ? 1 : 0;
+    const nonActiveToken = nonActiveActor === 0 ? hostToken : joinerToken;
     const badMove = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/commands`, {
+      headers: authHeader(nonActiveToken),
       data: {
         kind: "MoveHero",
         actor: nonActiveActor,

@@ -21,6 +21,7 @@ import {
   clearRegisteredPids,
 } from "./_request";
 import { comparePng, diffPngBuffers } from "./render/pixelDiff";
+import { loginViaMagicLink, uniqueTestEmail } from "./helpers/authFlow";
 
 const API_PORT = getApiPort(4000);
 const WEB_PORT = getClientPort(5173);
@@ -87,13 +88,38 @@ function seededRandomInitScript(seed: number): (s: number) => void {
   };
 }
 
+// Issue #179: GET .../tiles/.../events and the claimLobbySeat() call
+// GameSessionManager's New Game / starter-game flows now make both require
+// an authenticated caller. One real session (server/auth.ts's devCode
+// bypass, same as test/helpers/authFlow.ts uses elsewhere) is logged in
+// once and reused for every page this suite creates -- newPage()'s own
+// localStorage.clear()+reload would otherwise wipe out a per-page login on
+// every call.
+let cachedAuth: { token: string; email: string } | null = null;
+async function ensureLoggedIn(): Promise<{ token: string; email: string }> {
+  if (!cachedAuth) {
+    const email = uniqueTestEmail("visual");
+    const token = await loginViaMagicLink(`${API_URL}/api`, email);
+    cachedAuth = { token, email };
+  }
+  return cachedAuth;
+}
+
 async function newPage(context: BrowserContext, urlSuffix = ""): Promise<Page> {
+  const auth = await ensureLoggedIn();
   const page = await context.newPage();
   page.on("console", (msg) => {
     if (msg.type() === "error" || msg.type() === "warning") console.log(`[browser ${msg.type()}] ${msg.text()}`);
   });
   page.on("pageerror", (e) => console.log(`[browser pageerror] ${e.message}`));
   await page.addInitScript(seededRandomInitScript(RNG_SEED), RNG_SEED);
+  await page.addInitScript(
+    ({ token, email }) => {
+      localStorage.setItem("heroesJs.authToken", token);
+      localStorage.setItem("heroesJs.authEmail", email);
+    },
+    auth
+  );
   await page.goto(`${WEB_URL}${urlSuffix}`, { waitUntil: "networkidle" });
   await page.evaluate(() => localStorage.clear());
   await page.reload({ waitUntil: "networkidle" });

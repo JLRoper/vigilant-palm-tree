@@ -20,6 +20,7 @@ import {
   treeKill,
   clearRegisteredPids,
 } from "./_request";
+import { authHeader } from "./helpers/authFlow";
 
 const TERRAINS = new Set(["grass", "dirt", "forest", "desert", "mountain", "water"]);
 const RESOURCE_SET = new Set(["gold", "wood", "stone", "iron", "arcane"]);
@@ -467,6 +468,43 @@ async function run() {
     await ctx.delete(`${API_URL}/api/games/${GAME_NAME}`);
     console.log(`>> reset game '${GAME_NAME}'`);
 
+    // Issue #179: GET .../events, GET .../tiles, and POST .../commands now
+    // require an authenticated, game-member caller. server/auth.ts's
+    // request-code route returns `devCode` whenever NODE_ENV !== "production",
+    // so this drives the real magic-link flow rather than mocking it.
+    const smokeEmail = `smoke-${Date.now()}@example.com`;
+    const requestCodeRes = await ctx.post(`${API_URL}/api/auth/request-code`, {
+      data: { email: smokeEmail },
+    });
+    const { devCode } = (await requestCodeRes.json()) as { devCode?: string };
+    if (!devCode) {
+      throw new Error("request-code did not return devCode -- is NODE_ENV=production for this run?");
+    }
+    const verifyCodeRes = await ctx.post(`${API_URL}/api/auth/verify-code`, {
+      data: { email: smokeEmail, code: devCode },
+    });
+    const { token: smokeToken } = (await verifyCodeRes.json()) as { token: string };
+    console.log(`>> logged in as ${smokeEmail}`);
+
+    // Pre-create '${GAME_NAME}' and claim seat 0 for this identity BEFORE
+    // the browser ever loads the app. The client's own init fetches
+    // GET .../tiles and GET .../events for its active game as part of
+    // getting to a rendered state -- both are requireGamePlayer-gated now,
+    // so without a claimed seat already in place, client init would hang
+    // waiting on 401/403s it has no way to resolve itself (a chicken-and-egg
+    // that isn't solvable by claiming *after* waiting for activeGameName,
+    // since activeGameName itself never resolves without those calls
+    // succeeding first).
+    await ctx.post(`${API_URL}/api/games`, { data: { name: GAME_NAME } });
+    const preClaim = await ctx.post(`${API_URL}/api/games/${GAME_NAME}/lobby/claim`, {
+      headers: authHeader(smokeToken),
+      data: { seat: 0, handle: "smoke-test" },
+    });
+    if (!preClaim.ok() && preClaim.status() !== 409) {
+      throw new Error(`pre-claim on '${GAME_NAME}' failed: ${preClaim.status()} ${await preClaim.text()}`);
+    }
+    console.log(`>> claimed seat 0 on '${GAME_NAME}'`);
+
     const allGamesRes = await ctx.get(`${API_URL}/api/games`);
     const allGames = (await allGamesRes.json()) as Array<{ name: string }>;
     const stale = allGames.filter((g) => g.name !== GAME_NAME && g.name !== TEST_NEW_NAME);
@@ -488,9 +526,19 @@ async function run() {
       if (msg.type() === "error") console.error("[browser error]", text);
     });
 
+    // Prime the client's auth cache (src/io/authStorage.ts's storage keys)
+    // with the real session from above BEFORE the app's own init script ever
+    // runs -- addInitScript (unlike page.evaluate after goto) fires on every
+    // navigation, including this very first one, so there's no unauthenticated
+    // first attempt for the app to fail on the way to a working session.
+    await page.addInitScript(
+      ({ token, email }) => {
+        localStorage.setItem("heroesJs.authToken", token);
+        localStorage.setItem("heroesJs.authEmail", email);
+      },
+      { token: smokeToken, email: smokeEmail }
+    );
     await page.goto(WEB_URL, { waitUntil: "networkidle" });
-    await page.evaluate(() => localStorage.clear());
-    await page.reload({ waitUntil: "networkidle" });
 
     // Wait for client initialization, with stronger diagnostics on timeout
     try {
@@ -521,6 +569,22 @@ async function run() {
       } catch (e) { console.error("failed to dump logs:", e); }
 
       throw err;
+    }
+
+    // Safety net: the pre-claim above assumed the client's active game would
+    // be GAME_NAME. Confirm, and claim seat 0 here too if it turned out to
+    // be something else -- a 409 (already claimed, the common case) is fine.
+    const activeGameName = await page.evaluate(() => (window as any).__gameDebug?.activeGameName);
+    if (activeGameName && activeGameName !== GAME_NAME) {
+      const claimRes = await ctx.post(`${API_URL}/api/games/${activeGameName}/lobby/claim`, {
+        headers: authHeader(smokeToken),
+        data: { seat: 0, handle: "smoke-test" },
+      });
+      if (claimRes.ok()) {
+        console.log(`>> claimed seat 0 on '${activeGameName}'`);
+      } else if (claimRes.status() !== 409) {
+        console.error(`>> lobby/claim on '${activeGameName}' failed: ${claimRes.status()} ${await claimRes.text()}`);
+      }
     }
 
     const spawnInfo = await page.evaluate(() => {

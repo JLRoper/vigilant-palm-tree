@@ -13,6 +13,7 @@ import type { Game, TileRow } from "../io/api";
 import { notePersisted } from "../io/commands";
 import { setInMemoryLocalPlayerId } from "../players/localPlayer";
 import { getMultiplayerSync } from "../io/multiplayerSync";
+import { getCachedAuth } from "../io/authStorage";
 
 /**
  * Handles game session lifecycle: loading, creating, and saving games.
@@ -116,6 +117,12 @@ export class GameSessionManager {
       ? aiCastles.map((c) => ({ q: c.tile.q, r: c.tile.r }))
       : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
     const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount);
+    // Issue #179: same requireGamePlayer gap as createFreshStarter() below --
+    // the "New Game" toolbar flow loads straight into the game rather than
+    // routing through the multiplayer lobby UI, so the creator (seat 0)
+    // needs to self-claim here too.
+    const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? "Player";
+    await this.session.claimLobbySeat(created.name, 0, handle);
     const gameTiles = await this.session.getTiles(created.name);
     await this.loadGame(created, gameTiles);
     void this.session.logEvent(created.name, "new_game", {
@@ -147,6 +154,15 @@ export class GameSessionManager {
         : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
       const name = `starter-${Date.now().toString(36)}`;
       const created = await this.session.createGame(name, MAP_SEED, heroQ, heroR, enemyPositions, "small");
+      // Issue #179: GET .../tiles/.../events require the caller to be a
+      // claimed member of the game (requireGamePlayer), and single-player
+      // starter games skip the multiplayer lobby UI entirely -- so this is
+      // the only place that ever claims seat 0 for them. Left to throw into
+      // this method's own catch below on failure (e.g. not logged in): the
+      // starter game exists but is unplayable regardless of whether this
+      // call or the getTiles() right after it is what surfaces that.
+      const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? "Player";
+      await this.session.claimLobbySeat(created.name, 0, handle);
       const tiles = await this.session.getTiles(created.name);
       await this.loadGame(created, tiles);
       void this.session.logEvent(created.name, "session_start", {
