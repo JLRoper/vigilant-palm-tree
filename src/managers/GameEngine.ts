@@ -23,6 +23,7 @@ import { attachEventLog, type EventLog } from "../debug/eventLog";
 import { mountPersistentDevConsole, type DevConsoleHandle } from "../debug/devConsole";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { attachCommandFailureToasts } from "@screens/shared/toast";
+import { getEntityMirror } from "../io/multiplayerSync";
 
 export class GameEngine {
   // Infrastructure
@@ -111,7 +112,7 @@ export class GameEngine {
   }
 
   private initRendering(): void {
-    this.view.initializeRenderer(this.gameMap);
+    this.view.initializeRenderer(this.gameMap, getEntityMirror());
     this.view.initializeAdventureView({
       heroes: () => this.state.getHeroesMap(),
       getGameState: () => this.state.getState(),

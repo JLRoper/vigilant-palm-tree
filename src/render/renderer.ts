@@ -12,6 +12,7 @@ import { buildAdventureScene } from "./scene/sceneBuilder/adventureScene";
 import { paintScene } from "./scene/paint2d";
 import { createPaint2DDep } from "./paint2dDefaults";
 import type { Paint2DDep } from "./scene/paint2d/deps";
+import type { EntityMirror } from "./scene/entityMirror";
 
 const BACKGROUND = "#0a0a0a";
 
@@ -19,6 +20,7 @@ export class MapRenderer {
   public map: GameMap;
   private readonly paint2d: Paint2DDep;
   private colorForOwner: (ownerId: number | null) => string = () => "#ffffff";
+  private readonly mirror: EntityMirror;
 
   constructor(
     private ctx: CanvasRenderingContext2D,
@@ -26,8 +28,10 @@ export class MapRenderer {
     private camera: Camera,
     private sprites: SpriteProvider,
     private minimapCamera: MinimapCamera,
+    mirror: EntityMirror,
   ) {
     this.map = map;
+    this.mirror = mirror;
     // Built once, not per frame: the sprite resolver is stateless but the dep
     // is the painter's whole external surface, and rebuilding it each draw
     // would allocate a closure set per frame for no gain. The adventure map
@@ -72,5 +76,9 @@ export class MapRenderer {
     const { q, r } = pixelToAxial(wx, wy);
     if (q < 0 || q >= this.map.width || r < 0 || r >= this.map.height) return null;
     return { q, r };
+  }
+
+  getMirror(): EntityMirror {
+    return this.mirror;
   }
 }
