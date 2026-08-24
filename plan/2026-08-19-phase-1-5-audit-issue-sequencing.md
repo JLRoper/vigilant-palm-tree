@@ -4,11 +4,25 @@
 *Audits: `plan/2026-08-17-consolidated-phase-1-5-track-map.md` against the tree at `f395e95` (main, post-#138).*
 *Produces: issues #143–#155, and the wave ordering below.*
 *Repo: `JLRoper/vigilant-palm-tree`*
-*Status reviewed: 2026-08-23, against `origin/main@fc7d8c6`.*
+*Status reviewed: 2026-08-24, against `origin/main@e69a7d3`.*
 
 ---
 
-## 0. Status Update (2026-08-23)
+## 0. Status Update (2026-08-24)
+
+Checked against live GitHub issue/PR state.
+
+**#153's blocker is now concretely in flight, not just theoretical.** Investigating #153 for implementation found that its second trigger condition — *"the game first accepts untrusted players"* — depended on a completely separate, orphaned plan (`plan/2026-08-17-auth-wiring-and-per-game-membership.md`) that had no tracking issue and had already silently missed its own stated deadline (it says it must land before #146's `multiplayerSync.ts` rewrite merges; that rewrite merged 2026-08-21 with no auth in front of it). Filed **#179** to track it, then implemented and opened **[PR #181](https://github.com/JLRoper/vigilant-palm-tree/pull/181)** (open, not yet merged): wires `requireAuth` + a new `requireGamePlayer` membership middleware into every route that reads or mutates a game — including `POST .../commands`, previously the one unauthenticated mutation path in the entire app.
+
+**Net effect once PR #181 merges:** #153's second trigger condition has fired — every route requires an authenticated, seat-claimed caller. PR #181 does **not** itself touch `upgradePopulationGate` or #153's own plan; #153 stays open and becomes the natural next pick once #181 lands (§5 below still describes its correct scope: move the gate to game-creation state, drop it from the client-sent command).
+
+**#154 is unchanged:** still open, unowned, tail work.
+
+**#179/PR #181 are outside this doc's original 13-issue set** (§2's table is left as-is, describing only what the 2026-08-19 audit found) — noted here because it's what actually moves #153 forward, and because the orphaned-plan pattern that produced it (a real, time-pinned plan with no tracking issue, silently missing its own deadline) is worth watching for elsewhere in this backlog too.
+
+---
+
+## 0.1 Status Update (2026-08-23) — historical
 
 Checked against live GitHub issue state.
 
@@ -25,7 +39,7 @@ Checked against live GitHub issue state.
 
 ---
 
-## 0.1 Status Update (2026-08-22) — historical
+## 0.2 Status Update (2026-08-22) — historical
 
 Checked against live GitHub issue state and spot-verified in the tree (`origin/main@4c89d9a`), before #147/#150/#152 closed.
 
@@ -95,7 +109,7 @@ Track 5.B is **further along** than `plan/2026-08-17-consolidated-phase-1-5-trac
 | [#150](https://github.com/JLRoper/vigilant-palm-tree/issues/150) | #89 follow-up: no unit guard on audit-row writes | bug | 1 | ✅ Closed |
 | [#151](https://github.com/JLRoper/vigilant-palm-tree/issues/151) | No client test for the `drainPendingCommands()` barrier | bug | 1 | ✅ Closed |
 | [#152](https://github.com/JLRoper/vigilant-palm-tree/issues/152) | Charter travel-stepping still client-authoritative | refactor | 3 | ✅ Closed |
-| [#153](https://github.com/JLRoper/vigilant-palm-tree/issues/153) | `upgradePopulationGate` is client-trusted | bug | 2 (trigger-gated) | 🟡 Open — not yet triggered |
+| [#153](https://github.com/JLRoper/vigilant-palm-tree/issues/153) | `upgradePopulationGate` is client-trusted | bug | 2 (trigger-gated) | 🟡 Open — trigger in flight, see §0 (#179/PR #181) |
 | [#154](https://github.com/JLRoper/vigilant-palm-tree/issues/154) | JSONB blob retirement is unowned | refactor | 4 | 🟡 Open — tail work |
 | [#155](https://github.com/JLRoper/vigilant-palm-tree/issues/155) | Track map stale; in-code comments contradict the code | documentation | 4 | ✅ Closed |
 
@@ -160,7 +174,7 @@ Four lanes is the realistic ceiling for this backlog.
 | :--- | :--- | :--- |
 | **A** | ~~#146~~ ✅ — rewrite `multiplayerSync.ts` against the cursor; wire `entityMirror.ts` in | #145 |
 | **B** | ~~#148~~ ✅ — reconcile `src/render/painter/` vs `paint2d/`, cut `MapRenderer` over | #149 |
-| **Opportunistic** | #153 — still 🟡 open, waiting on its trigger | Nothing — but see §5 |
+| **Opportunistic** | #153 — still 🟡 open; trigger now in flight as PR #181 (see §0/§5) | Nothing — but see §5 |
 
 ### Wave 3 — 2 concurrent lanes — ✅ done 2026-08-23
 
@@ -180,7 +194,7 @@ Four lanes is the realistic ceiling for this backlog.
 
 ## 5. Scheduling Caveats
 
-**#153 is trigger-gated, not wave-gated.** Its own plan says the obligation fires "once the settings slider is hidden behind a wall later in development." It has no code dependency on anything here, so schedule it by that event — or by the first time the game accepts untrusted players, whichever comes first. Link it from whatever change hides the slider. Wave 2 is a suggestion, not a deadline.
+**#153 is trigger-gated, not wave-gated.** Its own plan says the obligation fires "once the settings slider is hidden behind a wall later in development." It has no code dependency on anything here, so schedule it by that event — or by the first time the game accepts untrusted players, whichever comes first. Link it from whatever change hides the slider. Wave 2 is a suggestion, not a deadline. **Update 2026-08-24:** the second half of that trigger is now a concrete, in-flight PR — see §0. Once [PR #181](https://github.com/JLRoper/vigilant-palm-tree/pull/181) merges, #153 should be picked up rather than continuing to wait.
 
 **#154 step 2 should happen early, out of band.** Running `scripts/migrate-jsonb-to-tables.ts` against real data is an ops step with no code dependency, and §6.2 of the track map is explicit that it has only ever run against representative fixtures — *"No real production historical dataset has been run through it yet."* The script is idempotent and has a dedicated convergence test. Do this whenever convenient rather than waiting for wave 4; you want to know now if real data surprises it, not at the end of a six-step retirement.
 
@@ -241,3 +255,4 @@ Claims spot-checked against the tree rather than taken from the track map's narr
 - `plan/2026-08-17-combat-decomposition-finishing-breakout.md` — §9.3/§9.4 define the flag #143 fixes
 - `plan/2026-08-17-issue-88-remaining-command-ports.md` — "Resolved decisions" section, context for #153
 - `plan/2026-08-17-issue-89-track-and-phase-assignment.md` — the audit that flagged #150's item originally
+- `plan/2026-08-17-auth-wiring-and-per-game-membership.md` — the orphaned plan behind #153's second trigger; tracked as #179, implemented by PR #181
