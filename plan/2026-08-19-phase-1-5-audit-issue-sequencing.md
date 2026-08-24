@@ -8,13 +8,17 @@
 
 ---
 
+**2026-08-24: this doc's job is done — folded back into the track map.** Per the decision recorded in `plan/2026-08-17-consolidated-phase-1-5-track-map.md`'s revision note 13 (issue #183): this doc's original 13-issue audit set is 11/13 closed, and the 2026-08-24 update below (§0) is itself the example of why splitting status across two docs is risky — it made a claim about PR #181 that turned out to be a pre-merge prediction, got corrected in a GitHub comment on #153, and that correction sat uncommitted here for the rest of the day because nothing forced this doc back into sync with the track map. §0 below is corrected in place rather than left wrong, but **this document is now historical — future status updates land directly in the track map, not here.**
+
+---
+
 ## 0. Status Update (2026-08-24)
 
 Checked against live GitHub issue/PR state.
 
-**#153's blocker is now concretely in flight, not just theoretical.** Investigating #153 for implementation found that its second trigger condition — *"the game first accepts untrusted players"* — depended on a completely separate, orphaned plan (`plan/2026-08-17-auth-wiring-and-per-game-membership.md`) that had no tracking issue and had already silently missed its own stated deadline (it says it must land before #146's `multiplayerSync.ts` rewrite merges; that rewrite merged 2026-08-21 with no auth in front of it). Filed **#179** to track it, then implemented and opened **[PR #181](https://github.com/JLRoper/vigilant-palm-tree/pull/181)** (open, not yet merged): wires `requireAuth` + a new `requireGamePlayer` membership middleware into every route that reads or mutates a game — including `POST .../commands`, previously the one unauthenticated mutation path in the entire app.
+**#153's blocker is now concretely in flight, not just theoretical.** Investigating #153 for implementation found that its second trigger condition — *"the game first accepts untrusted players"* — depended on a completely separate, orphaned plan (`plan/2026-08-17-auth-wiring-and-per-game-membership.md`) that had no tracking issue and had already silently missed its own stated deadline (it says it must land before #146's `multiplayerSync.ts` rewrite merges; that rewrite merged 2026-08-21 with no auth in front of it). Filed **#179** to track it, then implemented and opened **[PR #181](https://github.com/JLRoper/vigilant-palm-tree/pull/181)**: wires `requireAuth` + a new `requireGamePlayer` membership middleware into every route that reads or mutates a game — including `POST .../commands`, previously the one unauthenticated mutation path in the entire app.
 
-**Net effect once PR #181 merges:** #153's second trigger condition has fired — every route requires an authenticated, seat-claimed caller. PR #181 does **not** itself touch `upgradePopulationGate` or #153's own plan; #153 stays open and becomes the natural next pick once #181 lands (§5 below still describes its correct scope: move the gate to game-creation state, drop it from the client-sent command).
+**CORRECTED 2026-08-24 (was wrong the same day it was written — see track map revision note 13):** the line originally here claimed "every route requires an authenticated, seat-claimed caller" once PR #181 merges. That was a prediction against #181's in-review design, written before the PR changed direction. **PR #181 merged with sign-in optional everywhere, not required** — see `docs/auth-model.md`: *"Nothing rejects an anonymous caller; being signed in only ever adds protection on top of what an anonymous caller already gets."* Anonymous callers stay fully trusted on the client-supplied `actor` field, identical to pre-#179 behavior. A comment on #153 itself (posted after #181 merged) caught this and laid out two ways to re-scope the trigger: **(a)** redefine it as "once real accounts/sessions are load-bearing for something," which #181 alone doesn't establish, or **(b)** leave `upgradePopulationGate` client-trusted until there's an actual hard auth wall, consistent with every other client-trusted field in the app. #153 stays open under option (b) — PR #181 does not itself touch `upgradePopulationGate` or #153's own plan, and there is still no hard auth wall for the second trigger to have fired against.
 
 **#154 is unchanged:** still open, unowned, tail work.
 
@@ -109,7 +113,7 @@ Track 5.B is **further along** than `plan/2026-08-17-consolidated-phase-1-5-trac
 | [#150](https://github.com/JLRoper/vigilant-palm-tree/issues/150) | #89 follow-up: no unit guard on audit-row writes | bug | 1 | ✅ Closed |
 | [#151](https://github.com/JLRoper/vigilant-palm-tree/issues/151) | No client test for the `drainPendingCommands()` barrier | bug | 1 | ✅ Closed |
 | [#152](https://github.com/JLRoper/vigilant-palm-tree/issues/152) | Charter travel-stepping still client-authoritative | refactor | 3 | ✅ Closed |
-| [#153](https://github.com/JLRoper/vigilant-palm-tree/issues/153) | `upgradePopulationGate` is client-trusted | bug | 2 (trigger-gated) | 🟡 Open — trigger in flight, see §0 (#179/PR #181) |
+| [#153](https://github.com/JLRoper/vigilant-palm-tree/issues/153) | `upgradePopulationGate` is client-trusted | bug | 2 (trigger-gated) | 🟡 Open — trigger not yet fired; PR #181 shipped optional auth, not a hard wall, see §0 |
 | [#154](https://github.com/JLRoper/vigilant-palm-tree/issues/154) | JSONB blob retirement is unowned | refactor | 4 | 🟡 Open — tail work |
 | [#155](https://github.com/JLRoper/vigilant-palm-tree/issues/155) | Track map stale; in-code comments contradict the code | documentation | 4 | ✅ Closed |
 
@@ -174,7 +178,7 @@ Four lanes is the realistic ceiling for this backlog.
 | :--- | :--- | :--- |
 | **A** | ~~#146~~ ✅ — rewrite `multiplayerSync.ts` against the cursor; wire `entityMirror.ts` in | #145 |
 | **B** | ~~#148~~ ✅ — reconcile `src/render/painter/` vs `paint2d/`, cut `MapRenderer` over | #149 |
-| **Opportunistic** | #153 — still 🟡 open; trigger now in flight as PR #181 (see §0/§5) | Nothing — but see §5 |
+| **Opportunistic** | #153 — still 🟡 open; PR #181 merged but shipped optional auth, so the trigger has not fired (see §0/§5) | Nothing — but see §5 |
 
 ### Wave 3 — 2 concurrent lanes — ✅ done 2026-08-23
 
@@ -194,7 +198,7 @@ Four lanes is the realistic ceiling for this backlog.
 
 ## 5. Scheduling Caveats
 
-**#153 is trigger-gated, not wave-gated.** Its own plan says the obligation fires "once the settings slider is hidden behind a wall later in development." It has no code dependency on anything here, so schedule it by that event — or by the first time the game accepts untrusted players, whichever comes first. Link it from whatever change hides the slider. Wave 2 is a suggestion, not a deadline. **Update 2026-08-24:** the second half of that trigger is now a concrete, in-flight PR — see §0. Once [PR #181](https://github.com/JLRoper/vigilant-palm-tree/pull/181) merges, #153 should be picked up rather than continuing to wait.
+**#153 is trigger-gated, not wave-gated.** Its own plan says the obligation fires "once the settings slider is hidden behind a wall later in development." It has no code dependency on anything here, so schedule it by that event — or by the first time the game accepts untrusted players, whichever comes first. Link it from whatever change hides the slider. Wave 2 is a suggestion, not a deadline. **Update 2026-08-24 (corrected):** [PR #181](https://github.com/JLRoper/vigilant-palm-tree/pull/181) merged, but shipped optional sign-in rather than a hard auth wall — see the correction in §0. The game still doesn't accept untrusted players in the sense this trigger means; #153 is not yet ready to pick up on that basis and stays scheduled by trigger, not by this PR landing.
 
 **#154 step 2 should happen early, out of band.** Running `scripts/migrate-jsonb-to-tables.ts` against real data is an ops step with no code dependency, and §6.2 of the track map is explicit that it has only ever run against representative fixtures — *"No real production historical dataset has been run through it yet."* The script is idempotent and has a dedicated convergence test. Do this whenever convenient rather than waiting for wave 4; you want to know now if real data surprises it, not at the end of a six-step retirement.
 
