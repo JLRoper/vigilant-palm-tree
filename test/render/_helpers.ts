@@ -136,6 +136,7 @@ export function makeNoopPaint2DDep(): Paint2DDep {
       resolveSpriteForHero: () => undefined,
       resolveSpriteForBuilding: () => undefined,
       resolveSpriteForCastle: () => undefined,
+      resolveSpriteForUnit: () => undefined,
       resolveSprite: () => undefined,
     },
     skybox: null,

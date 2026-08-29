@@ -33,6 +33,9 @@
     "validate-assets": "node tools/sprites/validate-assets.mjs",
     "sprites:generate": "node tools/sprites/pixel-gen.mjs",
     "sprites:preview": "node tools/sprites/generate-preview.mjs",
+    "models:build": "tsx tools/models/build.ts",
+    "models:preview": "tsx tools/models/preview.ts",
+    "models:check": "tsc -p tsconfig.tools.json",
     "assets:seed": "tsx --env-file=.env scripts/seed-assets.ts",
     "skybox:split": "tsx scripts/split-skybox-layers.ts",
     "migrate:jsonb-to-tables": "tsx --env-file=.env scripts/migrate-jsonb-to-tables.ts"

@@ -29,6 +29,7 @@ import type {
   Paint2DSpriteResolver,
   ResolvedSprite,
   SkyboxProvider,
+  UnitFacing,
 } from "./scene/paint2d/deps";
 import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase } from "@heroes/contracts";
 import type { ResourceType } from "../map/resourceTiles";
@@ -42,6 +43,7 @@ import {
   heroKey,
   horseVariantKey,
   resourceStyleKey,
+  unitKey,
   type SpriteKey,
 } from "./assetDescriptors";
 import { SpriteProvider } from "./assets";
@@ -135,6 +137,10 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
       variant: CastleVariant,
     ): ResolvedSprite | undefined {
       const key = castleKey(level, variant) as SpriteKey;
+      return narrowResolvedSprite(provider.resolve(key));
+    },
+    resolveSpriteForUnit(unitTypeId: string, dir: UnitFacing): ResolvedSprite | undefined {
+      const key = unitKey(unitTypeId, dir) as SpriteKey;
       return narrowResolvedSprite(provider.resolve(key));
     },
     resolveSprite(key: SpriteKey): ResolvedSprite | undefined {

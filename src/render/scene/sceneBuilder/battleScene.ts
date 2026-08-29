@@ -8,6 +8,7 @@ import {
   type ManualBattleState,
 } from "@heroes/engine";
 import type { SceneNode, WorldPoint } from "../types";
+import type { UnitFacing } from "../paint2d/deps";
 
 // Faithful decomposition of manualBattleArena.ts's draw()/renderPixelFor()
 // into pure data. Unlike the adventure/city scenes, there's no wrapper
@@ -70,6 +71,36 @@ function hexKey(a: Axial): string {
 
 function isAlive(c: Combatant): boolean {
   return !c.retreated && c.entries.some((e) => e.count > 0);
+}
+
+// The platoon's majority unit type, which is what its sprite depicts. Entries
+// are homogeneous in practice (one unit type per platoon), so this is just
+// "the one entry" for every army the game builds today -- max-by-count only
+// decides the picture if a mixed platoon ever appears.
+export function dominantUnitTypeId(c: Combatant): string | null {
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const e of c.entries) {
+    if (e.count > bestCount) {
+      bestCount = e.count;
+      best = e.unitTypeId;
+    }
+  }
+  return best;
+}
+
+// Each side faces the other side's centre of mass. Derived from live positions
+// rather than from `side`, because which column a side deploys on depends on
+// sideChoice (see deploymentPosition() in packages/engine/src/combat/grid.ts),
+// and this builder is never told what sideChoice was.
+export function facingFor(c: Combatant, enemyMeanQ: number): UnitFacing {
+  return c.position.q <= enemyMeanQ ? "e" : "w";
+}
+
+export function meanQ(list: Combatant[]): number {
+  const living = list.filter(isAlive);
+  if (living.length === 0) return 0;
+  return living.reduce((sum, c) => sum + c.position.q, 0) / living.length;
 }
 
 function hpRatioFor(state: ManualBattleState, c: Combatant): number {
@@ -199,7 +230,11 @@ export function buildBattleScene(input: BattleSceneInput): SceneNode[] {
     }
   }
 
+  const attackerMeanQ = meanQ(input.state.attacker);
+  const defenderMeanQ = meanQ(input.state.defender);
+
   for (const side of ["attacker", "defender"] as const) {
+    const enemyMeanQ = side === "attacker" ? defenderMeanQ : attackerMeanQ;
     for (const c of side === "attacker" ? input.state.attacker : input.state.defender) {
       if (!isAlive(c)) continue;
       nodes.push({
@@ -211,6 +246,8 @@ export function buildBattleScene(input: BattleSceneInput): SceneNode[] {
         selected: side === input.humanSide && c.slotIndex === input.selectedSlot,
         unitCount: c.entries.reduce((sum, e) => sum + e.count, 0),
         hpRatio: hpRatioFor(input.state, c),
+        unitTypeId: dominantUnitTypeId(c),
+        facing: facingFor(c, enemyMeanQ),
       });
     }
   }

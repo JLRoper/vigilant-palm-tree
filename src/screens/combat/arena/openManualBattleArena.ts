@@ -46,6 +46,9 @@ import { createArenaInput, type ArenaInput } from "./input";
 import { createArenaAi, type ArenaAi } from "./ai";
 import { attackFromSelectedHex, attackFromTarget, endPlatoonTurnAction, moveSelectedTo, retreatAction, surrenderAction } from "./state";
 import { buildArenaPaint2dDeps, paintSceneForArena, readUseSceneBuilder } from "./paint";
+import { createArenaSpriteResolver, resolveUnitSprite } from "../../../render/unitSprites";
+import { drawWithDescriptor } from "../../../render/scene/paint2d";
+import { dominantUnitTypeId, facingFor, meanQ } from "../../../render/scene/sceneBuilder/battleScene";
 
 // Key for indexing a specific unit entry inside the arena's combatant list.
 // `slotIndex` is the army-stack slot, `unitTypeId` is which entry within
@@ -170,10 +173,12 @@ export function openManualBattleArena(
   // battle-kind painters are real transcriptions now (5.B P1 #5, PR #136), so
   // this path renders standalone -- draw() no longer falls back to drawLegacy().
   const useSceneBuilder = readUseSceneBuilder(window.location.search);
+  const arenaSpriteResolver = createArenaSpriteResolver();
   const arenaPaint2dDeps = buildArenaPaint2dDeps({
     fontFamily: menuTheme.font,
     attackerAccent: ATTACKER_ACCENT,
     defenderAccent: DEFENDER_ACCENT,
+    sprite: arenaSpriteResolver,
   });
 
   // The fight takes over the whole viewport. Three stacked bands: a status
@@ -1079,24 +1084,61 @@ const FLOAT_MS = 800;
       }
     }
 
+    const attackerMeanQ = meanQ(state.attacker);
+    const defenderMeanQ = meanQ(state.defender);
+
     for (const side of ["attacker", "defender"] as const) {
+      const enemyMeanQ = side === "attacker" ? defenderMeanQ : attackerMeanQ;
       for (const c of side === "attacker" ? state.attacker : state.defender) {
         if (!isAlive(c)) continue;
         const { x, y } = renderPixelFor(c);
         const isSelected = side === humanSide && c.slotIndex === selectedSlot;
-        ctx.beginPath();
-        ctx.arc(x, y, hexSize * 0.55, 0, Math.PI * 2);
-        ctx.fillStyle = side === "attacker" ? (isSelected ? "#5fb0ff" : "#3070c0") : isSelected ? "#ff7a7a" : "#c04040";
-        ctx.fill();
-        ctx.strokeStyle = "#fff";
-        ctx.lineWidth = isSelected ? 2 : 1;
-        ctx.stroke();
+        const accent =
+          side === "attacker" ? (isSelected ? "#5fb0ff" : "#3070c0") : isSelected ? "#ff7a7a" : "#c04040";
+
+        // Mirrors paintBattleCombatant() in paint2d/index.ts -- both paths must
+        // agree, since ?paint=scenebuilder swaps between them.
+        const unitTypeId = dominantUnitTypeId(c);
+        const sprite = unitTypeId ? resolveUnitSprite(unitTypeId, facingFor(c, enemyMeanQ)) : undefined;
+        let drewSprite = false;
+
+        if (sprite && sprite.ready) {
+          drewSprite = true;
+          ctx.beginPath();
+          ctx.ellipse(x, y + hexSize * 0.495, hexSize * 0.44, hexSize * 0.165, 0, 0, Math.PI * 2);
+          ctx.fillStyle = accent;
+          ctx.globalAlpha = isSelected ? 0.95 : 0.6;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          if (isSelected) {
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+          drawWithDescriptor(ctx, sprite.drawable, sprite.descriptor, x, y, hexSize);
+        }
+
+        if (!drewSprite) {
+          ctx.beginPath();
+          ctx.arc(x, y, hexSize * 0.55, 0, Math.PI * 2);
+          ctx.fillStyle = accent;
+          ctx.fill();
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = isSelected ? 2 : 1;
+          ctx.stroke();
+        }
 
         const count = c.entries.reduce((sum, e) => sum + e.count, 0);
-        ctx.fillStyle = "#fff";
+        const countY = drewSprite ? y + hexSize * 0.561 : y + hexSize * 0.14;
         ctx.font = `${Math.round(hexSize * 0.4)}px ${menuTheme.font}`;
         ctx.textAlign = "center";
-        ctx.fillText(String(count), x, y + hexSize * 0.14);
+        if (drewSprite) {
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "rgba(0,0,0,0.8)";
+          ctx.strokeText(String(count), x, countY);
+        }
+        ctx.fillStyle = "#fff";
+        ctx.fillText(String(count), x, countY);
 
         const pct = hpRatio(state, c);
         const barW = hexSize * 1.1;
