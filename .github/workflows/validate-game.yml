@@ -98,6 +98,15 @@ jobs:
       - name: npm run build
         run: npm run build
 
+      - name: Dependency boundaries (lint:deps)
+        run: npm run lint:deps
+
+      - name: Initialize database schema
+        run: npm run db:schema
+
+      - name: Unit tests
+        run: npm run test:unit
+
       - name: npm test (smoke test)
         run: npm test
 

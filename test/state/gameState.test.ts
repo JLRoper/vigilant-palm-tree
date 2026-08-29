@@ -61,8 +61,12 @@ function makeSettlement(
     foundedOnResource: null,
     gold: opts.gold ?? 0,
     warehouse: opts.warehouse ?? emptyWarehouse(),
+    citySpots: [],
+    cityMines: [],
     morale: opts.morale ?? 100,
     autoTrade: opts.autoTrade ?? true,
+    castleVariant: 0,
+    buildings: [],
   };
 }
 
