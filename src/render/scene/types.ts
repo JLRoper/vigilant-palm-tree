@@ -4,6 +4,7 @@ import type { Faction, HeroDirection } from "../../entities/hero";
 import type { HorseVariant } from "../../state/settings";
 import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase, GenerationStyle } from "@heroes/contracts";
 import type { BattleSide } from "@heroes/engine";
+import type { UnitFacing } from "./paint2d/deps";
 
 /** World-space pixel coordinates (pre-Camera-transform), same space axialToPixel() returns. */
 export interface WorldPoint {
@@ -300,6 +301,12 @@ export interface BattleCombatantNode {
   selected: boolean;
   unitCount: number;
   hpRatio: number;
+  // Drives the per-unit battlefield sprite. `unitTypeId` is the platoon's
+  // majority entry; null when the platoon is empty. `facing` points at the
+  // opposing side, so the two armies look at each other -- the painter falls
+  // back to the flat disc when no sprite exists for the pair.
+  unitTypeId: string | null;
+  facing: UnitFacing;
 }
 
 export interface BattleFloatingTextNode {

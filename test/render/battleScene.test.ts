@@ -385,3 +385,74 @@ test("nodes are emitted in draw()'s exact paint order when every overlay is pres
   assert.ok(firstIndexOf("battleAiActingRing") < firstIndexOf("battleCombatant"));
   assert.ok(lastIndexOf("battleCombatant") < firstIndexOf("battleFloatingText"));
 });
+
+test("battleCombatant: unitTypeId is the platoon's majority entry and facing points at the opposing side", () => {
+  const attacker = makeCombatant({
+    side: "attacker",
+    slotIndex: 0,
+    position: { q: 0, r: 0 },
+    entries: [{ unitTypeId: "archer", count: 9 }],
+  });
+  const defender = makeCombatant({
+    side: "defender",
+    slotIndex: 0,
+    position: { q: 3, r: 0 },
+    entries: [{ unitTypeId: "sword", count: 4 }],
+  });
+  const state = makeState({ attacker: [attacker], defender: [defender] });
+  const nodes = buildBattleScene(baseInput({ state }));
+  const combatants = nodesOfKind<BattleCombatantNode>(nodes, "battleCombatant");
+
+  const left = combatants.find((c) => c.side === "attacker");
+  const right = combatants.find((c) => c.side === "defender");
+
+  assert.equal(left?.unitTypeId, "archer");
+  assert.equal(right?.unitTypeId, "sword");
+  assert.equal(left?.facing, "e", "the side on the low-q column looks right, toward the enemy");
+  assert.equal(right?.facing, "w", "the side on the high-q column looks left, toward the enemy");
+});
+
+test("battleCombatant: facing follows live positions, so it survives the sides deploying on swapped columns", () => {
+  // sideChoice flips which column each side deploys on; the builder is never
+  // told what it was, so facing must come from where the armies actually are.
+  const attacker = makeCombatant({
+    side: "attacker",
+    slotIndex: 0,
+    position: { q: 3, r: 0 },
+    entries: [{ unitTypeId: "archer", count: 9 }],
+  });
+  const defender = makeCombatant({
+    side: "defender",
+    slotIndex: 0,
+    position: { q: 0, r: 0 },
+    entries: [{ unitTypeId: "sword", count: 4 }],
+  });
+  const state = makeState({ attacker: [attacker], defender: [defender] });
+  const nodes = buildBattleScene(baseInput({ state }));
+  const combatants = nodesOfKind<BattleCombatantNode>(nodes, "battleCombatant");
+
+  assert.equal(combatants.find((c) => c.side === "attacker")?.facing, "w");
+  assert.equal(combatants.find((c) => c.side === "defender")?.facing, "e");
+});
+
+test("battleCombatant: a mixed platoon reports its highest-count entry, and an empty one reports null", () => {
+  const mixed = makeCombatant({
+    side: "attacker",
+    slotIndex: 0,
+    position: { q: 0, r: 0 },
+    entries: [
+      { unitTypeId: "sword", count: 3 },
+      { unitTypeId: "archer", count: 11 },
+    ],
+  });
+  const defender = makeCombatant({
+    side: "defender",
+    slotIndex: 0,
+    position: { q: 3, r: 0 },
+    entries: [{ unitTypeId: "sword", count: 2 }],
+  });
+  const nodes = buildBattleScene(baseInput({ state: makeState({ attacker: [mixed], defender: [defender] }) }));
+  const combatants = nodesOfKind<BattleCombatantNode>(nodes, "battleCombatant");
+
+  assert.equal(combatants.find((c) => c.side === "attacker")?.unitTypeId, "archer");
+});

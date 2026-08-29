@@ -29,6 +29,12 @@ import type { HorseVariant, ResourceStyle } from "../../../state/settings";
 // names a key string in source.
 export type SpriteKey = string;
 
+// Structural mirror of assetDescriptors.ts's Direction, for the same ?url
+// reason as SpriteKey above. Battlefield unit sprites are rendered for all
+// eight compass facings; the arena only ever asks for "e"/"w" today, since
+// deploymentPosition() puts the two sides on opposite grid columns.
+export type UnitFacing = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+
 // Structural mirror of assetDescriptors.ts's SpriteDescriptor. Mirrored
 // rather than imported for the same ?url reason as SpriteKey above; the
 // default-deps builder passes the live descriptor's fields straight through,
@@ -65,6 +71,10 @@ export interface Paint2DSpriteResolver {
   resolveSpriteForHero(faction: Faction, dir: HeroDirection, variant: HorseVariant): ResolvedSprite | undefined;
   resolveSpriteForBuilding(style: GenerationStyle, kind: BuildingKind, level: number): ResolvedSprite | undefined;
   resolveSpriteForCastle(level: CastleLevel, variant: CastleVariant): ResolvedSprite | undefined;
+  // Per-unit-type battlefield sprites (src/resources/units/<id>/still/).
+  // Returns undefined for any unit type that has no generated model yet, which
+  // is how paintBattleCombatant() decides to fall back to the flat disc.
+  resolveSpriteForUnit(unitTypeId: string, dir: UnitFacing): ResolvedSprite | undefined;
   // Escape hatch for tests/fixtures that already have a key in hand. Production
   // painters should prefer the four per-kind helpers above.
   resolveSprite(key: SpriteKey): ResolvedSprite | undefined;

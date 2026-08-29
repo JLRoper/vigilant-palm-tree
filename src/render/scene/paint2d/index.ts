@@ -104,7 +104,7 @@ const BATTLE_COMBATANT_STROKE = "#fff";
 
 type Drawable = HTMLImageElement | HTMLCanvasElement;
 
-function drawWithDescriptor(
+export function drawWithDescriptor(
   ctx: CanvasRenderingContext2D,
   drawable: Drawable,
   desc: ResolvedSpriteDescriptor,
@@ -909,20 +909,56 @@ export function paintBattleAiActingRing(ctx: CanvasRenderingContext2D, node: Bat
 }
 
 export function paintBattleCombatant(ctx: CanvasRenderingContext2D, node: BattleCombatantNode, deps: Paint2DDep): void {
-  ctx.beginPath();
-  ctx.arc(node.world.x, node.world.y, node.radius, 0, Math.PI * 2);
-  ctx.fillStyle = node.side === "attacker"
+  const accent = node.side === "attacker"
     ? (node.selected ? BATTLE_COMBATANT_ATTACKER_SELECTED : BATTLE_COMBATANT_ATTACKER)
     : (node.selected ? BATTLE_COMBATANT_DEFENDER_SELECTED : BATTLE_COMBATANT_DEFENDER);
-  ctx.fill();
-  ctx.strokeStyle = BATTLE_COMBATANT_STROKE;
-  ctx.lineWidth = node.selected ? 2 : 1;
-  ctx.stroke();
 
-  ctx.fillStyle = "#fff";
+  const sprite = node.unitTypeId
+    ? deps.sprite.resolveSpriteForUnit(node.unitTypeId, node.facing)
+    : undefined;
+
+  let drewSprite = false;
+
+  if (sprite && sprite.ready) {
+    drewSprite = true;
+    // A side pip under the sprite's feet keeps attacker/defender readable,
+    // which the flat disc used to carry on its own.
+    ctx.beginPath();
+    ctx.ellipse(node.world.x, node.world.y + node.radius * 0.9, node.radius * 0.8, node.radius * 0.3, 0, 0, Math.PI * 2);
+    ctx.fillStyle = accent;
+    ctx.globalAlpha = node.selected ? 0.95 : 0.6;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    if (node.selected) {
+      ctx.strokeStyle = BATTLE_COMBATANT_STROKE;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    drawWithDescriptor(ctx, sprite.drawable, sprite.descriptor, node.world.x, node.world.y, node.radius / 0.55);
+  }
+
+  if (!drewSprite) {
+    ctx.beginPath();
+    ctx.arc(node.world.x, node.world.y, node.radius, 0, Math.PI * 2);
+    ctx.fillStyle = accent;
+    ctx.fill();
+    ctx.strokeStyle = BATTLE_COMBATANT_STROKE;
+    ctx.lineWidth = node.selected ? 2 : 1;
+    ctx.stroke();
+  }
+
+  // With a sprite drawn, the count rides the pip at the unit's feet instead of
+  // sitting in the middle of its chest.
+  const countY = drewSprite ? node.world.y + node.radius * 1.02 : node.world.y + node.radius * 0.14;
   ctx.font = `${Math.round(node.radius * 0.7)}px ${deps.fontFamily}`;
   ctx.textAlign = "center";
-  ctx.fillText(String(node.unitCount), node.world.x, node.world.y + node.radius * 0.14);
+  if (drewSprite) {
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0,0,0,0.8)";
+    ctx.strokeText(String(node.unitCount), node.world.x, countY);
+  }
+  ctx.fillStyle = "#fff";
+  ctx.fillText(String(node.unitCount), node.world.x, countY);
 
   const barW = node.radius * 2;
   const barX = node.world.x - barW / 2;

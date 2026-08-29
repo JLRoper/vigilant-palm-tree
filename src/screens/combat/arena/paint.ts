@@ -84,6 +84,11 @@ export interface ArenaPaint2dDepsOptions {
   readonly fontFamily: string;
   readonly attackerAccent: string;
   readonly defenderAccent: string;
+  // Injected by the browser-side caller (openManualBattleArena.ts), which can
+  // reach assetDescriptors.ts/assets.ts. Left undefined by node:test callers,
+  // who get the inert resolver below -- this module must stay importable
+  // outside Vite, so it can never import the ?url-coupled asset modules itself.
+  readonly sprite?: Paint2DSpriteResolver;
 }
 
 // Battle-specific Paint2DDep. Most Paint2DDep fields are unused for the
@@ -93,11 +98,12 @@ export interface ArenaPaint2dDepsOptions {
 // so any future per-kind painter that asks for the side accent gets the same
 // color draw() uses today.
 export function buildArenaPaint2dDeps(opts: ArenaPaint2dDepsOptions): Paint2DDep {
-  const sprite: Paint2DSpriteResolver = {
+  const sprite: Paint2DSpriteResolver = opts.sprite ?? {
     resolveSpriteForResource: () => undefined,
     resolveSpriteForHero: () => undefined,
     resolveSpriteForBuilding: () => undefined,
     resolveSpriteForCastle: () => undefined,
+    resolveSpriteForUnit: () => undefined,
     resolveSprite: (_key: SpriteKey): ResolvedSprite | undefined => undefined,
   };
 
