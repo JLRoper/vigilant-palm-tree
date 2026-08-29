@@ -10,12 +10,11 @@ import {
   clampMorale,
   clampWarehouseNonNegative,
   FOOD_PER_POPULATION,
-  BUILDING_UPKEEP_WOOD,
-  BUILDING_UPKEEP_STONE,
   MORALE_DECAY_PER_DEFICIT_RATIO,
   LOW_MORALE_EXTRA_DECAY,
   MORALE_TAX_INCOME_DIVISOR,
 } from "@heroes/engine";
+import type { BuildingDef } from "@heroes/contracts";
 import type { SettlementState } from "../../src/state/gameState";
 
 function makeSettlement(overrides: Partial<SettlementState> = {}): SettlementState {
@@ -32,10 +31,18 @@ function makeSettlement(overrides: Partial<SettlementState> = {}): SettlementSta
     foundedOnResource: null,
     gold: 0,
     warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
+    citySpots: [],
+    cityMines: [],
     morale: 100,
     autoTrade: true,
+    castleVariant: 0,
+    buildings: [],
     ...overrides,
   };
+}
+
+function building(kind: BuildingDef["kind"], level: number): BuildingDef {
+  return { gx: 0, gy: 0, kind, level, style: "classic" };
 }
 
 test("foodRequired returns ceil(population / FOOD_PER_POPULATION)", () => {
@@ -50,12 +57,22 @@ test("FOOD_PER_POPULATION defaults to 100", () => {
   assert.equal(FOOD_PER_POPULATION, 100);
 });
 
-test("buildingUpkeepRequired returns BUILDING_UPKEEP_* scaled by level (0 for now)", () => {
+test("buildingUpkeepRequired is 0 for a settlement with no buildings, at any level", () => {
   assert.deepEqual(buildingUpkeepRequired(makeSettlement({ level: 1 })), { wood: 0, stone: 0 });
   assert.deepEqual(buildingUpkeepRequired(makeSettlement({ level: 2 })), { wood: 0, stone: 0 });
   assert.deepEqual(buildingUpkeepRequired(makeSettlement({ level: 3 })), { wood: 0, stone: 0 });
-  assert.equal(BUILDING_UPKEEP_WOOD, 0);
-  assert.equal(BUILDING_UPKEEP_STONE, 0);
+});
+
+test("buildingUpkeepRequired sums each building's registry upkeep scaled by that building's level", () => {
+  const s = makeSettlement({ buildings: [building("townHall", 1), building("house", 2)] });
+  assert.deepEqual(buildingUpkeepRequired(s), { wood: 3 * 1 + 1 * 2, stone: 2 * 1 + 0 * 2 });
+});
+
+test("buildingUpkeepRequired tracks settlement building count, not settlement level", () => {
+  const one = makeSettlement({ level: 3, buildings: [building("house", 1)] });
+  const two = makeSettlement({ level: 1, buildings: [building("house", 1), building("house", 1)] });
+  assert.deepEqual(buildingUpkeepRequired(one), { wood: 1, stone: 0 });
+  assert.deepEqual(buildingUpkeepRequired(two), { wood: 2, stone: 0 });
 });
 
 test("foodDeficitRatio: 0 when warehouse has enough food", () => {
@@ -79,9 +96,26 @@ test("foodDeficitRatio: partial ratio when partial food", () => {
   assert.equal(foodDeficitRatio(s), 0.5);
 });
 
-test("suppliesDeficitRatio: 0 because BUILDING_UPKEEP is 0", () => {
+test("suppliesDeficitRatio: 0 when there are no buildings to upkeep", () => {
   const s = makeSettlement({ warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 } });
   assert.equal(suppliesDeficitRatio(s), 0);
+});
+
+test("suppliesDeficitRatio: 1 when buildings need upkeep and the warehouse is empty", () => {
+  const s = makeSettlement({
+    buildings: [building("townHall", 1)],
+    warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
+  });
+  assert.equal(suppliesDeficitRatio(s), 1);
+});
+
+test("suppliesDeficitRatio: partial ratio when the warehouse partly covers upkeep", () => {
+  // townHall L1 needs wood 3 + stone 2 = 5; warehouse supplies 2 of it.
+  const s = makeSettlement({
+    buildings: [building("townHall", 1)],
+    warehouse: { wood: 1, stone: 1, iron: 0, arcane: 0, food: 0 },
+  });
+  assert.equal(suppliesDeficitRatio(s), 0.6);
 });
 
 test("moraleDecay: 0 when fully supplied", () => {

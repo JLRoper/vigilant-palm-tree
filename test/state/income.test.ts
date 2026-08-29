@@ -20,6 +20,8 @@ function makeSettlement(id: string, ownerId: PlayerId | null, population: number
     cityMines: [],
     morale: 100,
     autoTrade: true,
+    castleVariant: 0,
+    buildings: [],
   };
 }
 
