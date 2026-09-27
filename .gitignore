@@ -9,8 +9,10 @@ dist/
 tmp/
 local/
 sessionTracking/
-.kilo/
+.kilo/worktrees/
+.kilo/plans/
 test/.last-test-pids.json
 test/.baseline-snapshot.txt
 test/.test-timing.txt
 test/visual-baselines/*.diff.png
+jlr/

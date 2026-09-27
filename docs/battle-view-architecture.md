@@ -292,4 +292,4 @@ status bar / battle row / action + log bar:
 - **No fog of war in battle.** The Spy action and its
   `scoutedBy`/`markContacted` fog were removed as half-baked — every
   platoon is visible to both sides. The parked idea is written up in
-  [`../plan/2026-08-15-combat-reveal-fog-of-war.md`](../plan/2026-08-15-combat-reveal-fog-of-war.md).
+   [`../.kilo/plan/2026-08-15-combat-reveal-fog-of-war.md`](../.kilo/plan/2026-08-15-combat-reveal-fog-of-war.md).

@@ -1,5 +1,25 @@
 # Combat Resolution Engine — Feature Plan
 
+> **Status banner (2026-09-27).** This is the *Kingdom Rule* roadmap — the
+> design authority lives in the external Kingdom Rule repo (path below is
+> machine-specific). The "Current state" section is **historical**, stale in
+> two ways as of 2026-09-26:
+>
+> 1. The route it describes — `POST /games/:name/resolve-battle`
+>    (`server/routes.ts:609-717`) — was **deleted**. Battles now resolve
+>    through the command bus: `POST /api/games/:name/commands` with
+>    `{ kind: "ResolveBattle", ... }` (`server/http/routes/commands.ts` →
+>    `server/app/commandHandler.ts`).
+> 2. The described behaviour ("deletes the defender outright, transfers gold,
+>    no stats compared, no grid") was **replaced** by a real grid-based
+>    resolver: `packages/engine/src/combat/resolveBattle.ts` now deploys
+>    platoons onto a battle grid with rounds, damage, retreats, and obstacles
+>    (see `combat/grid.ts`, `combat/damage.ts`, `combatConfig.ts`).
+>
+> Read every `resolve-battle` mention below as "the ResolveBattle command
+> path". The design target (hex tactical grid as primary, `docs/army.md`
+> auto-resolve as fallback) is unchanged.
+
 Source: [`implementation-order.md`](../implementation-order.md) item **#1**.
 Design intent for the target system lives in the sibling Kingdom Rule
 project: `docs/GDD.md` §9/§9a/§9b and `docs/MANUAL.md` "How battles resolve"
