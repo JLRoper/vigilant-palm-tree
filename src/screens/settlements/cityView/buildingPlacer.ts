@@ -21,7 +21,7 @@ import resourceArcanePileSmol from "../../../resources/resource-arcane-pile-smol
 const BUILDABLE_KINDS: BuildingKind[] = [
   "townHall", "house", "tower", "archeryRange", "barracks", "smithy",
   "market", "mine", "mageGuild", "apartment", "farmField", "farmhouse",
-  "granary",
+  "granary", "bank", "goldMine", "woodcutterHut",
 ];
 
 type PaletteMode = "build" | "destroy";

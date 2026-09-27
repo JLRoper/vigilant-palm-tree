@@ -188,6 +188,42 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     settlementEffects: { foodPerTurn: 3 },
     playerEffects: {},
   },
+  bank: {
+    kind: "bank",
+    label: "Bank",
+    description: "Secure vaults and ledger houses that store and compound the settlement's gold each turn.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 5,
+    placementCost: { gold: 400, wood: 6, stone: 8 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [],
+    settlementEffects: { goldPerTurn: 60 },
+    playerEffects: {},
+  },
+  goldMine: {
+    kind: "goldMine",
+    label: "Gold Mine",
+    description: "Extracts gold ore from deep seams, turning each turn into fresh coin for the treasury.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 4,
+    placementCost: { gold: 300, wood: 6, stone: 4 },
+    upkeepPerLevel: { wood: 2, stone: 0 },
+    recruits: [],
+    settlementEffects: { goldPerTurn: 40 },
+    playerEffects: {},
+  },
+  woodcutterHut: {
+    kind: "woodcutterHut",
+    label: "Woodcutter's Hut",
+    description: "Fells and seasons timber from the surrounding woods, improving the settlement's wood yield.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 3,
+    placementCost: { gold: 150, wood: 5 },
+    upkeepPerLevel: { wood: 1, stone: 0 },
+    recruits: [],
+    settlementEffects: { resourceYieldBonus: { wood: 3 } },
+    playerEffects: {},
+  },
 };
 
 export function getBuildingEffect(kind: BuildingKind): BuildingEffect {
@@ -241,7 +277,10 @@ export function buildingFootprintFromRegistry(kind: BuildingKind, level?: number
   if (kind === "townHall" && level === 2) {
     return { w: 1.5, h: 1.5 };
   }
-  if (kind === "granary" && (level === 2 || level === 3)) {
+  if (
+    (kind === "granary" || kind === "bank" || kind === "goldMine" || kind === "woodcutterHut") &&
+    (level === 2 || level === 3)
+  ) {
     return { w: 1.5, h: 1.5 };
   }
   return { ...REGISTRY[kind].footprint };

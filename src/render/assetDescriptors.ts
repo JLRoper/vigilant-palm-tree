@@ -83,6 +83,12 @@ import buildingBlockyHouse2 from "../resources/buildings/building-blocky-house-2
 import buildingPixelGranary1 from "../resources/buildings/building-pixel-granary-1.png?url";
 import buildingPixelGranary2 from "../resources/buildings/building-pixel-granary-2.png?url";
 import buildingPixelGranary3 from "../resources/buildings/building-pixel-granary-3.png?url";
+import buildingPixelBank1 from "../resources/buildings/building-pixel-bank-1.png?url";
+import buildingPixelGoldMine1 from "../resources/buildings/building-pixel-goldMine-1.png?url";
+import buildingPixelGoldMine2 from "../resources/buildings/building-pixel-goldMine-2.png?url";
+import buildingPixelGoldMine3 from "../resources/buildings/building-pixel-goldMine-3.png?url";
+import buildingPixelWoodcutterHut1 from "../resources/buildings/building-pixel-woodcutterHut-1.png?url";
+import buildingPixelWoodcutterHut2 from "../resources/buildings/building-pixel-woodcutterHut-2.png?url";
 import buildingPixelSmithy2 from "../resources/buildings/building-pixel-smithy-2.png?url";
 import { Faction, Direction } from "../entities/hero";
 import type { CastleLevel, CastleVariant, ResourceType } from "@heroes/contracts";
@@ -252,6 +258,15 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel.granary.1": buildingPixelGranary1,
   "pixel.granary.2": buildingPixelGranary2,
   "pixel.granary.3": buildingPixelGranary3,
+  "pixel.bank.1": buildingPixelBank1,
+  "pixel.bank.2": buildingPixelBank1,
+  "pixel.bank.3": buildingPixelBank1,
+  "pixel.goldMine.1": buildingPixelGoldMine1,
+  "pixel.goldMine.2": buildingPixelGoldMine2,
+  "pixel.goldMine.3": buildingPixelGoldMine3,
+  "pixel.woodcutterHut.1": buildingPixelWoodcutterHut1,
+  "pixel.woodcutterHut.2": buildingPixelWoodcutterHut2,
+  "pixel.woodcutterHut.3": buildingPixelWoodcutterHut2,
   "pixel.smithy.2": buildingPixelSmithy2,
 };
 
@@ -579,6 +594,15 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.granary.1": 11,
   "building.pixel.granary.2": 25,
   "building.pixel.granary.3": 19,
+  "building.pixel.bank.1": 7,
+  "building.pixel.bank.2": 7,
+  "building.pixel.bank.3": 7,
+  "building.pixel.goldMine.1": 13,
+  "building.pixel.goldMine.2": 9,
+  "building.pixel.goldMine.3": 1,
+  "building.pixel.woodcutterHut.1": 4,
+  "building.pixel.woodcutterHut.2": 8,
+  "building.pixel.woodcutterHut.3": 8,
   "building.pixel.smithy.2": 4,
 };
 for (const [key, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {

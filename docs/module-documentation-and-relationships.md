@@ -106,7 +106,7 @@ Browser (Vite SPA)                                  Express API server
 | `cityGrid.ts` | Diamond-grid math for city view (`TILE_W=96`, `TILE_D=48`); `cellToScreen`/`screenToCell`, `cellsInDrawOrder` | — |
 | `citySpots.ts` | `generateCitySpots` places 3/6/9 resource veins + mines for 5/10/15 city sizes | `../../shared/types`, `./cityGrid` |
 | `control.ts` | `controlRange`, `settlementRateRadius`, `controlledPositions`, `territoryBoundaryEdges` (edge walk reads `HEX_DIRECTIONS` from `./hex`) | `./hex`, `../../shared/types` |
-| `buildingRegistry.ts` | Master `REGISTRY` of 13 building kinds (townHall, house, tower, mageGuild, mine, market, barracks, smithy, apartment, farmField, farmhouse, archeryRange, granary) — placement/upkeep/effects | `../../shared/types` |
+| `buildingRegistry.ts` | Master `REGISTRY` of 16 building kinds (townHall, house, tower, mageGuild, mine, market, barracks, smithy, apartment, farmField, farmhouse, archeryRange, granary, bank, goldMine, woodcutterHut) — placement/upkeep/effects | `@heroes/contracts` |
 | `buildingModifiers.ts` | `computeSettlementBonuses`/`computePlayerBonuses` aggregators | `../../shared/types`, `./buildingRegistry` |
 
 ### 5.3 `src/state/` — authoritative game state (pure reducers)

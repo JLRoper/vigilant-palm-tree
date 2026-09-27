@@ -28,6 +28,15 @@ export const BUILDING_SPRITE_KEYS: readonly string[] = [
   "pixel.granary.1",
   "pixel.granary.2",
   "pixel.granary.3",
+  "pixel.bank.1",
+  "pixel.bank.2",
+  "pixel.bank.3",
+  "pixel.goldMine.1",
+  "pixel.goldMine.2",
+  "pixel.goldMine.3",
+  "pixel.woodcutterHut.1",
+  "pixel.woodcutterHut.2",
+  "pixel.woodcutterHut.3",
   "pixel.smithy.2",
 ] as const;
 
