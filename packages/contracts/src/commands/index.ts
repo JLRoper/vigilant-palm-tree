@@ -12,6 +12,7 @@ import type { StartCharterCommand } from "./startCharter";
 import type { UpgradeBuildingCommand } from "./upgradeBuilding";
 import type { UpgradeSettlementCommand } from "./upgradeSettlement";
 import type { AdvanceCharterTravelCommand } from "./advanceCharterTravel";
+import type { SubmitBattleResultCommand } from "./submitBattleResult";
 
 export * from "./moveHero";
 export * from "./transferGold";
@@ -27,6 +28,7 @@ export * from "./startCharter";
 export * from "./upgradeBuilding";
 export * from "./upgradeSettlement";
 export * from "./advanceCharterTravel";
+export * from "./submitBattleResult";
 
 // Grows with each command port. Week 1 of Phase 3 Track 3.A shipped
 // MoveHero/TransferGold; EndTurn followed in Week 2
@@ -41,7 +43,10 @@ export * from "./advanceCharterTravel";
 // actions and real new-construction (BuildStructure) remain deferred as
 // low priority / no engine reducer, respectively. AdvanceCharterTravel
 // (#152) closed the last piece of R5: charter travel-stepping, previously
-// purely client-local.
+// purely client-local. SubmitBattleResult
+// (plan/2026-09-27-manual-battle-wiring.md, work item 4) is the 15th kind:
+// the manual arena's played-out outcome, applied server-side with the same
+// post-battle rules the auto-resolver uses.
 export type Command =
   | MoveHeroCommand
   | TransferGoldCommand
@@ -56,4 +61,5 @@ export type Command =
   | StartCharterCommand
   | UpgradeBuildingCommand
   | UpgradeSettlementCommand
-  | AdvanceCharterTravelCommand;
+  | AdvanceCharterTravelCommand
+  | SubmitBattleResultCommand;

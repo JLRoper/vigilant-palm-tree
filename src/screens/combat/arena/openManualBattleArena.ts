@@ -1,9 +1,15 @@
 // Playable HoMM3-style manual fight arena: renders the battle grid on a
 // canvas and lets the player click their own platoons (in whatever order
 // they choose) to move + attack, alternating with a simple AI opponent, via
-// the engine in shared/combat/manualBattle.ts. Currently only reachable from
-// the "Test Battle" sandbox (src/screens/combat/testBattleSetup.ts) — see that file's
-// header for the scope boundary against the real game's battle flow.
+// the engine in shared/combat/manualBattle.ts. Reachable from the "Test
+// Battle" sandbox (src/screens/combat/testBattleSetup.ts) AND from the real
+// game's battle flow since plan/2026-09-27-manual-battle-wiring.md — when a
+// hero collision is fought rather than quick-resolved, GameActions opens
+// this arena with the two heroes' actual armies and receives the played-out
+// outcome through the onComplete callback (see ManualBattleOutcome). The
+// sandbox boundary that used to live here is documented from the other side
+// in GameActions.startBattleFlow: the sandbox passes no onComplete and no
+// telemetry, so it neither touches real game state nor streams actions.
 //
 // Layout is battlefield-first: the grid takes whatever room is left after one
 // narrow roster rail — the player's own — and it *reflows* (the hex size is
@@ -29,6 +35,7 @@ import {
   startManualBattle,
   timeOfDayForRound,
   unactedLivingSlots,
+  type BattleResult,
   type TimeOfDay,
 } from "@heroes/engine";
 import type { BattleLogEntry, BattleSide, Combatant } from "@heroes/engine";
@@ -44,20 +51,65 @@ import { applyLeaveBehind, openLeaveBehindDialog } from "./leaveBehind";
 import { attachRailHover, buildPlatoonStrip } from "./view";
 import { createArenaInput, type ArenaInput } from "./input";
 import { createArenaAi, type ArenaAi } from "./ai";
-import { attackFromSelectedHex, attackFromTarget, endPlatoonTurnAction, moveSelectedTo, retreatAction, surrenderAction } from "./state";
+import { attackFromSelectedHex, attackFromTarget, endPlatoonTurnAction, moveSelectedTo, retreatAction, surrenderAction, type BattleActionEmit, type BattleActionPhase } from "./state";
 import { buildArenaPaint2dDeps, paintSceneForArena, readUseSceneBuilder } from "./paint";
 
 // Key for indexing a specific unit entry inside the arena's combatant list.
 // `slotIndex` is the army-stack slot, `unitTypeId` is which entry within
 // that slot (a platoon can hold up to MAX_PLATOON_ENTRIES distinct types).
 
+// Arena-level result handed to the production caller through `onComplete`
+// (plan/2026-09-27-manual-battle-wiring.md, work item 3). `outcome` is the
+// arena-level verdict — retreat/surrender are the human's concession
+// buttons, wins/draw come from finalizeManualBattle's winner. The survivor
+// platoons are the engine-role survivors exactly as finalizeManualBattle
+// built them (retreat's 15% loss and the surrender Leave-Behind strip are
+// already applied), and `surrenderedGold` is the gold actually paid to
+// surrender — 0 when the Leave-Behind path covered the shortfall with units
+// instead, and 0 on every non-surrender outcome. `result` is the full
+// engine BattleResult so the caller can show the shared result card without
+// re-deriving anything.
+export type ManualBattleOutcomeKind = "attackerWon" | "defenderWon" | "retreat" | "surrender" | "draw";
+
+export interface ManualBattleOutcome {
+  outcome: ManualBattleOutcomeKind;
+  attackerSurvivors: Platoon[];
+  defenderSurvivors: Platoon[];
+  surrenderedGold: number;
+  result: BattleResult;
+}
+
+export interface ManualBattleArenaOptions {
+  // Gold the human hero brings into this battle (drives the Surrender
+  // pricing and the Leave-Behind shortfall path). Defaults to a low value
+  // (300, matching gameState.ts's initial hero gold) so the Test Battle
+  // sandbox always exercises the "Leave Behind" path; the production flow
+  // passes the human hero's actual purse.
+  heroGold?: number;
+  surrenderCost?: number;
+  // Production flow only (work item 3): resolves the caller's wait once the
+  // battle has finalized. When provided, the arena does NOT show its own
+  // result card and does NOT close itself — the caller submits the outcome
+  // server-side, applies the result, and shows the shared result card with
+  // real hero labels, closing the arena via the returned handle's `close`
+  // on Carry On. The Test Battle sandbox passes none and keeps the
+  // show-card-then-close behavior it has always had.
+  onComplete?: (outcome: ManualBattleOutcome) => void;
+  // Production flow only (work item 4b): the live action stream. Called once
+  // per applied action (plus the mandatory seq-0 "start" seed row and the
+  // terminal "end" row) with the arena-level phase and the full action +
+  // state context; the caller owns seq numbering and the actual POST, so a
+  // network failure can never block or fail the arena from inside it.
+  telemetry?: (phase: BattleActionPhase, payload: Record<string, unknown>) => void;
+}
+
 export function openManualBattleArena(
   playerPlatoons: Platoon[],
   aiPlatoons: Platoon[],
   unitTypes: Record<string, UnitType>,
   humanSide: BattleSide = "attacker",
-  options: { heroGold?: number; surrenderCost?: number } = {},
-): void {
+  options: ManualBattleArenaOptions = {},
+): { close: () => void } {
   // The engine's attacker/defender roles are fixed to their grid colors
   // (attacker always blue, defender always red) — humanSide picks which of
   // those two roles the player controls; the AI always takes the other one.
@@ -80,6 +132,45 @@ export function openManualBattleArena(
   // defaults to SURRENDER_COST_GOLD.
   let currentHeroGold = options.heroGold ?? 300;
   const surrenderCost = options.surrenderCost ?? SURRENDER_COST_GOLD;
+
+  // Live action stream (work item 4b). The arena only builds context +
+  // payload; seq numbering and the actual POST belong to the caller's
+  // telemetry callback (GameActions wires it to api.postBattleAction with a
+  // per-battle counter), so a slow or failing endpoint can never block or
+  // fail the arena from inside it.
+  const telemetry = options.telemetry;
+  const emit: BattleActionEmit | undefined = telemetry
+    ? (action) => telemetry(action.phase, action.payload)
+    : undefined;
+
+  // Mandatory seed row (seq 0 on the caller's counter): the obstacle seed
+  // plus the initial stacks/sides/grid — the minimal input the future
+  // legality-check consumer needs to re-simulate the battle. The engine's
+  // AI (planAiTurn) is fully deterministic — verified while wiring this up:
+  // createArenaAi/planAiTurn/pickTarget use no Math.random() anywhere, only
+  // the obstacle layout above is seed-driven — so the AI's moves need no
+  // rows of their own; they're re-derivable from this seed row alone.
+  emit?.({
+    phase: "start",
+    payload: {
+      obstacleSeed: state.obstacleSeed,
+      humanSide,
+      attackerStacks: state.attackerOriginalPlatoons,
+      defenderStacks: state.defenderOriginalPlatoons,
+      grid: { cols: state.grid.cols, rows: state.grid.rows },
+      maxRounds: state.maxRounds,
+    },
+  });
+
+  // The human's concession, if any — set by the Retreat/Surrender buttons
+  // before finishBattle runs, and what the submitted outcome is derived
+  // from (a win/loss/draw can't be a concession by definition).
+  let concession: "retreat" | "surrender" | null = null;
+  // Gold actually paid to surrender: the direct path deducts the full
+  // price from currentHeroGold; the Leave-Behind path covers the shortfall
+  // with units instead (already stripped from the survivor platoons), so it
+  // pays 0 gold. Report exactly what was paid, not the list price.
+  let surrenderedGoldPaid = 0;
 
   // Running per-platoon move tally for the whole battle (both sides), keyed
   // by "side#slotIndex" — printed on demand via logMoveStats and dumped
@@ -538,7 +629,8 @@ const FLOAT_MS = 800;
       destructive: true,
       onConfirm: () => {
         debugLog(`player retreats as ${humanSide}`);
-        retreatAction(state, humanSide);
+        concession = "retreat";
+        retreatAction(state, humanSide, emit);
         finishBattle();
       },
     });
@@ -564,7 +656,9 @@ const FLOAT_MS = 800;
         onConfirm: () => {
           debugLog(`player surrenders as ${humanSide} (paid ${surrenderCost}G)`);
           currentHeroGold -= surrenderCost;
-          surrenderAction(state, humanSide);
+          concession = "surrender";
+          surrenderedGoldPaid = surrenderCost;
+          surrenderAction(state, humanSide, emit);
           finishBattle();
         },
       });
@@ -580,7 +674,11 @@ const FLOAT_MS = 800;
         onConfirm: (leftBehind) => {
           debugLog(`player surrenders as ${humanSide} after leaving behind ${leftBehind} units`);
           applyLeaveBehind(state, humanSide, leftBehind);
-          surrenderAction(state, humanSide);
+          concession = "surrender";
+          // Leave-Behind covers the shortfall with units (already stripped
+          // from the survivors by applyLeaveBehind) — no gold changes hands.
+          surrenderedGoldPaid = 0;
+          surrenderAction(state, humanSide, emit);
           finishBattle();
         },
       });
@@ -1210,7 +1308,7 @@ const FLOAT_MS = 800;
       const target = pickTarget(adjacentEnemies, state.unitTypes) ?? adjacentEnemies[0];
       debugLog(`bump attack: ${platoonLabel(humanSide, selectedSlot)} -> ${platoonLabel(target.side, target.slotIndex)}`);
       const beforeLog = state.log.length;
-      attackFromTarget(state, humanSide, selectedSlot, target.slotIndex);
+      attackFromTarget(state, humanSide, selectedSlot, target.slotIndex, emit);
       logNewBattleEvents(beforeLog);
       afterPlayerAction();
       return;
@@ -1323,6 +1421,40 @@ function finishBattle(): void {
     input.clearPendingAttack();
     infoPopup.hide();
     refresh();
+    // Arena-level verdict (work item 3): a human concession wins, otherwise
+    // the engine's winner decides; "draw" is the max-rounds stalemate.
+    const outcome: ManualBattleOutcomeKind =
+      concession === "retreat" || concession === "surrender"
+        ? concession
+        : result.winner === "attacker"
+          ? "attackerWon"
+          : result.winner === "defender"
+            ? "defenderWon"
+            : "draw";
+    // Terminal row of the action stream (work item 4b): outcome + survivor
+    // stacks — everything the future legality-check consumer needs to close
+    // out the battle it re-simulated.
+    emit?.({
+      phase: "end",
+      payload: {
+        outcome,
+        rounds: result.rounds,
+        attackerSurvivors: result.attackerPlatoons,
+        defenderSurvivors: result.defenderPlatoons,
+        surrenderedGold: surrenderedGoldPaid,
+      },
+    });
+    if (options.onComplete) {
+      // Production flow (plan/2026-09-27-manual-battle-wiring.md, work item
+      // 3): hand the outcome to the caller instead of showing the card here —
+      // it submits the result server-side (SubmitBattleResult), applies the
+      // returned heroes, and shows the shared result card with real hero
+      // labels, closing this arena via the returned handle's `close` when
+      // the card is carried on. The arena overlay stays up under that card
+      // so the world behind it only appears once the state is consistent.
+      options.onComplete({ outcome, attackerSurvivors: result.attackerPlatoons, defenderSurvivors: result.defenderPlatoons, surrenderedGold: surrenderedGoldPaid, result });
+      return;
+    }
     showBattleResultCard({
       result,
       attackerLabel: humanSide === "attacker" ? "You" : "AI Opponent",
@@ -1384,7 +1516,7 @@ function finishBattle(): void {
           `from ${fmtHex(from)} -> ${platoonLabel(input.getPendingTarget()!.side, input.getPendingTarget()!.slotIndex)}`,
         );
         const beforeLog = state.log.length;
-        if (attackFromSelectedHex(state, humanSide, selectedSlot, input.getPendingTarget()!.slotIndex, from)) {
+        if (attackFromSelectedHex(state, humanSide, selectedSlot, input.getPendingTarget()!.slotIndex, from, emit)) {
           if (distance > 0) recordMove(humanSide, selectedSlot, distance);
           logNewBattleEvents(beforeLog);
           afterPlayerAction();
@@ -1401,14 +1533,14 @@ function finishBattle(): void {
     if (target) {
       debugLog(`click ${fmtHex(hex)} -> attack: ${platoonLabel(humanSide, selectedSlot)} -> ${platoonLabel(target.side, target.slotIndex)}`);
       const beforeLog = state.log.length;
-      attackFromTarget(state, humanSide, selectedSlot, target.slotIndex);
+      attackFromTarget(state, humanSide, selectedSlot, target.slotIndex, emit);
       logNewBattleEvents(beforeLog);
       afterPlayerAction();
       return;
     }
 
     if (moveRange.some((h) => h.q === hex.q && h.r === hex.r)) {
-      const result = moveSelectedTo(state, humanSide, selectedSlot, hex);
+      const result = moveSelectedTo(state, humanSide, selectedSlot, hex, emit);
       const from = result.from ?? hex;
       if (result.moved) {
         recordMove(humanSide, selectedSlot, result.distance);
@@ -1595,4 +1727,11 @@ function finishBattle(): void {
 
   relayoutCanvas();
   refresh();
+
+  // Production callers (GameActions) need to close the arena themselves —
+  // after submitting the played-out result and showing the shared result
+  // card, the card's Carry On dismisses this overlay. Same teardown as the
+  // sandbox's internal closeArena(), exposed rather than self-invoked so
+  // the overlay outlives finishBattle() until the caller is done with it.
+  return { close: closeArena };
 }

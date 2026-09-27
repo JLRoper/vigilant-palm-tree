@@ -240,5 +240,37 @@ export const api = {
     fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}/telemetry`, {}, 3_000).then((r) =>
       json<NetworkTopologySnapshot>(r)
     ),
+  // Manual-arena action stream (plan/2026-09-27-manual-battle-wiring.md,
+  // work item 4b): one row per arena action, written to the server's
+  // battle_actions table as it happens. Same fire-and-forget posture as
+  // reportTelemetry above -- short timeout, every failure swallowed into a
+  // `false` return (the caller logs it at most), because a dropped telemetry
+  // row must never block or fail the arena. v1 validates nothing here and
+  // reads nothing back; the future legality-check consumer owns that half.
+  postBattleAction: async (
+    name: string,
+    row: {
+      attackerId: string;
+      defenderId: string;
+      seq: number;
+      phase: "start" | "move" | "attack" | "retreat" | "surrender" | "end";
+      payload: Record<string, unknown>;
+    },
+  ): Promise<boolean> => {
+    try {
+      const res = await fetchWithTimeout(
+        `${BASE}/games/${encodeURIComponent(name)}/battle-actions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(row),
+        },
+        3_000
+      );
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
 };
 

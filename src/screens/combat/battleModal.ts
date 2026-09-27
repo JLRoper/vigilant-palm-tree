@@ -5,7 +5,12 @@ export interface BattleModalOptions {
   defenderName: string;
 }
 
-export type BattleModalResult = "resolve" | "cancel";
+// Three paths since the manual arena was wired in as the default collision
+// outcome (plan/2026-09-27-manual-battle-wiring.md, decisions locked
+// 2026-09-27 + work item 1): "fight" opens the tactical arena with the real
+// armies, "quickResolve" runs the server auto-resolver (the old "Resolve"),
+// "cancel" flees the pre-battle position (unchanged semantics).
+export type BattleModalResult = "fight" | "quickResolve" | "cancel";
 
 export function showBattleModal(opts: BattleModalOptions): Promise<BattleModalResult> {
   return new Promise<BattleModalResult>((resolve) => {
@@ -20,7 +25,8 @@ export function showBattleModal(opts: BattleModalOptions): Promise<BattleModalRe
     modal.appendContent(intro);
 
     const note = document.createElement("div");
-    note.textContent = "Resolve to fight the battle immediately. Casualties apply to both sides based on unit strength and type matchups.";
+    note.textContent =
+      "Fight to command your armies on the tactical battlegrid yourself, or Quick Resolve to settle it immediately by unit strength and type matchups. Fleeing cancels your move.";
     note.style.fontSize = "11px";
     note.style.opacity = "0.7";
     note.style.textAlign = "center";
@@ -41,14 +47,27 @@ export function showBattleModal(opts: BattleModalOptions): Promise<BattleModalRe
     });
     row.appendChild(flee);
 
-    const resolveBtn = document.createElement("button");
-    resolveBtn.textContent = "Resolve";
-    styleButton(resolveBtn, true);
-    resolveBtn.addEventListener("click", () => {
+    // The old "Resolve" button, relabeled to make room for Fight as the
+    // primary — same server auto-resolver behind it as before.
+    const quickResolve = document.createElement("button");
+    quickResolve.textContent = "Quick Resolve";
+    styleButton(quickResolve);
+    quickResolve.addEventListener("click", () => {
       modal.close();
-      resolve("resolve");
+      resolve("quickResolve");
     });
-    row.appendChild(resolveBtn);
+    row.appendChild(quickResolve);
+
+    // Fight is the default collision outcome (decision 1): the manual arena
+    // opens with the two heroes' real armies.
+    const fight = document.createElement("button");
+    fight.textContent = "Fight";
+    styleButton(fight, true);
+    fight.addEventListener("click", () => {
+      modal.close();
+      resolve("fight");
+    });
+    row.appendChild(fight);
 
     modal.appendContent(row);
   });

@@ -19,6 +19,7 @@ import { invalidateMembershipCache } from "./middleware/attachPlayerSeat";
 import { validateGameRow, isHealthy } from "@heroes/engine";
 import { commandsRouter } from "./http/routes/commands";
 import { telemetryRouter } from "./http/routes/telemetry";
+import { battleActionsRouter } from "./http/routes/battleActions";
 
 export const router = Router();
 
@@ -26,6 +27,7 @@ router.use("/assets", assetRouter);
 router.use("/auth", authRouter);
 router.use("/games/:name/commands", commandsRouter);
 router.use("/games/:name/telemetry", telemetryRouter);
+router.use("/games/:name/battle-actions", battleActionsRouter);
 
 type EnemyPos = { q: number; r: number };
 type TileRow = {

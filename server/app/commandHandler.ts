@@ -6,6 +6,7 @@ import {
   resolveBattle as resolveBattleEngine,
   normalizePlatoons,
   detectAdjacentEnemy,
+  cancelMove,
   recruitHero,
   startTownHallUpgrade,
   setAutoTrade,
@@ -29,9 +30,11 @@ import type {
   CharterState,
   Command,
   EngineEvent,
+  GameState,
   HeroId,
   HeroState,
   Player,
+  Platoon,
   SettlementId,
   SettlementState,
   StartCharterPayload,
@@ -206,6 +209,95 @@ async function dualWriteEntities(
     writes.push(deps.settlementRepo.upsertMany(gameName, after.settlements));
   }
   await Promise.all(writes);
+}
+
+// ---------------------------------------------------------------------------
+// Shared post-battle application (plan/2026-09-27-manual-battle-wiring.md,
+// work item 4): the two battle-outcome commands -- ResolveBattle (server-run
+// auto-resolver) and SubmitBattleResult (client-played manual arena) -- must
+// apply IDENTICAL world rules once a result exists. Both used to inline this
+// logic in the ResolveBattle case only; it's factored out here so the manual
+// path can't drift from the auto path the way the two painter sets did
+// (see src/render/docs/technical-spec.md §7.3 for that lesson).
+//
+// buildPostBattleHeroes is the pure half: survivor stacks onto the hero pair
+// plus the one asymmetric gold rule (a defender who lost every troop is
+// looted down to 0 and the attacker pockets the purse). persistBattleOutcome
+// is the I/O half: charter cleanup when the defender was wiped, legacy-gold
+// accounting, the row save, and the granular dual-write -- including the
+// same JSONB-fallback charter gate EndTurn/ResolveBattle/StartCharter use.
+// ---------------------------------------------------------------------------
+
+function buildPostBattleHeroes(
+  allHeroes: Record<HeroId, HeroState>,
+  attackerHero: HeroState,
+  defenderHero: HeroState,
+  attackerStacks: Platoon[],
+  defenderStacks: Platoon[],
+  defenderLostAllTroops: boolean,
+): { heroes: Record<HeroId, HeroState>; lootedGold: number } {
+  // Hero entities are never deleted here -- a no-retreat loss just
+  // empties their platoons, matching the old route's own comment
+  // (what happens to a fully-defeated hero is a later phase's
+  // concern, per feature-plans/CombatResolutionEngine.md).
+  const lootedGold = defenderLostAllTroops ? Number(defenderHero.gold) || 0 : 0;
+  const heroes: Record<HeroId, HeroState> = { ...allHeroes };
+  heroes[attackerHero.id] = {
+    ...attackerHero,
+    gold: (Number(attackerHero.gold) || 0) + lootedGold,
+    stacks: attackerStacks,
+  };
+  heroes[defenderHero.id] = {
+    ...defenderHero,
+    gold: lootedGold > 0 ? 0 : defenderHero.gold,
+    stacks: defenderStacks,
+  };
+  return { heroes, lootedGold };
+}
+
+async function persistBattleOutcome(
+  deps: CommandDeps,
+  gameName: string,
+  state: GameState,
+  source: "granular" | "jsonb",
+  newHeroes: Record<HeroId, HeroState>,
+  defenderId: HeroId,
+  defenderLostAllTroops: boolean,
+): Promise<void> {
+  const legacyGold = sumPlayerGold(state.players, newHeroes, state.settlements);
+  // A chartering hero can end up as either combatant (traveling heroes
+  // can walk adjacent to an enemy mid-route; constructing heroes can be
+  // attacked at their target) -- mirrors src/state/turnController.ts's
+  // own resolveCurrentBattle(), which likewise only checks the
+  // DEFENDER's defeat this way (an attacker losing while chartering
+  // isn't handled there either; matched as-is rather than expanding
+  // scope beyond that existing client behavior).
+  let finalActiveCharters = state.activeCharters;
+  if (defenderLostAllTroops) {
+    finalActiveCharters = cleanupDefeatedHeroCharters(
+      { ...state, heroes: newHeroes },
+      defenderId,
+    ).activeCharters;
+  }
+  await deps.gameRepo.saveHeroesAndSettlements(
+    gameName,
+    newHeroes,
+    state.settlements,
+    { gold: legacyGold },
+  );
+  // settlements is passed through unchanged (state.settlements, same
+  // reference) -- neither battle command ever touches settlement state,
+  // only the two combatants' hero rows, so this only ever calls heroRepo.
+  await dualWriteEntities(deps, gameName, state, { heroes: newHeroes, settlements: state.settlements });
+  if (finalActiveCharters !== state.activeCharters && source === "granular") {
+    // Source gate matches the EndTurn case above: on JSONB fallback,
+    // state.activeCharters is always [] regardless of the charters
+    // table's real contents, so an upsertMany([]) here would silently
+    // delete them. (finalActiveCharters !== state.activeCharters gates
+    // out the common case where the defender either survived or wasn't
+    // chartering; the source gate is what catches the fallback path.)
+    await deps.charterRepo.upsertMany(gameName, finalActiveCharters);
+  }
 }
 
 // The central transaction loop: load state via repos -> call the matching
@@ -534,58 +626,27 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         obstacleSeed,
         unitTypes,
       });
-      // Hero entities are never deleted here -- a no-retreat loss just
-      // empties their platoons, matching the old route's own comment
-      // (what happens to a fully-defeated hero is a later phase's
-      // concern, per feature-plans/CombatResolutionEngine.md).
-      const lootedGold = battle.defenderOutcome === "lost_all_troops" ? Number(defenderHero.gold) || 0 : 0;
-      const newHeroes: Record<HeroId, HeroState> = {
-        ...state.heroes,
-        [command.attackerId]: {
-          ...attackerHero,
-          gold: (Number(attackerHero.gold) || 0) + lootedGold,
-          stacks: battle.attackerPlatoons,
-        },
-        [command.defenderId]: {
-          ...defenderHero,
-          gold: lootedGold > 0 ? 0 : defenderHero.gold,
-          stacks: battle.defenderPlatoons,
-        },
-      };
-      const legacyGold = sumPlayerGold(state.players, newHeroes, state.settlements);
-      // A chartering hero can end up as either combatant (traveling heroes
-      // can walk adjacent to an enemy mid-route; constructing heroes can be
-      // attacked at their target) -- mirrors src/state/turnController.ts's
-      // own resolveCurrentBattle(), which likewise only checks the
-      // DEFENDER's defeat this way (an attacker losing while chartering
-      // isn't handled there either; matched as-is rather than expanding
-      // scope beyond that existing client behavior).
-      let finalActiveCharters = state.activeCharters;
-      if (battle.defenderOutcome === "lost_all_troops") {
-        finalActiveCharters = cleanupDefeatedHeroCharters(
-          { ...state, heroes: newHeroes },
-          command.defenderId,
-        ).activeCharters;
-      }
-      await deps.gameRepo.saveHeroesAndSettlements(
-        command.gameName,
-        newHeroes,
-        state.settlements,
-        { gold: legacyGold },
+      // Post-battle application is the shared helper both battle commands
+      // run (see its header above) -- the auto path and the manual arena's
+      // SubmitBattleResult path must stay rule-identical.
+      const defenderLostAllTroops = battle.defenderOutcome === "lost_all_troops";
+      const { heroes: newHeroes, lootedGold } = buildPostBattleHeroes(
+        state.heroes,
+        attackerHero,
+        defenderHero,
+        battle.attackerPlatoons,
+        battle.defenderPlatoons,
+        defenderLostAllTroops,
       );
-      // settlements is passed through unchanged (state.settlements, same
-      // reference) -- ResolveBattle never touches settlement state, only
-      // the two combatants' hero rows, so this only ever calls heroRepo.
-      await dualWriteEntities(deps, command.gameName, state, { heroes: newHeroes, settlements: state.settlements });
-      if (finalActiveCharters !== state.activeCharters && source === "granular") {
-        // Source gate matches the EndTurn case above: on JSONB fallback,
-        // state.activeCharters is always [] regardless of the charters
-        // table's real contents, so an upsertMany([]) here would silently
-        // delete them. (finalActiveCharters !== state.activeCharters gates
-        // out the common case where the defender either survived or wasn't
-        // chartering; the source gate is what catches the fallback path.)
-        await deps.charterRepo.upsertMany(command.gameName, finalActiveCharters);
-      }
+      await persistBattleOutcome(
+        deps,
+        command.gameName,
+        state,
+        source,
+        newHeroes,
+        command.defenderId,
+        defenderLostAllTroops,
+      );
       const event: EngineEvent = {
         type: "BattleResolved",
         actor: command.actor,
@@ -923,6 +984,168 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, hero: result.state.heroes[command.heroId] };
+    }
+    case "SubmitBattleResult": {
+      // Manual-arena result submission (plan/2026-09-27-manual-battle-wiring.md,
+      // work item 4). v1 trusts the client's played-out outcome (decision 4,
+      // locked 2026-09-27 -- LAN trust, cheat-able by a modified client and
+      // accepted); everything this case validates is cheap and structural,
+      // and the full per-action stream lives in battle_actions (work item
+      // 4b) for the future legality-check consumer.
+      const attackerHero = row.heroes[command.attackerId];
+      const defenderHero = row.heroes[command.defenderId];
+      if (!attackerHero || !defenderHero) {
+        return { ok: false, reason: "hero_not_found", events: [] };
+      }
+      // The submitting seat must own one of the two combatants -- its
+      // client is the one that opened the arena for this pair. (It can't
+      // own both: detectAdjacentEnemy below skips same-owner heroes, so a
+      // same-owner pair could never have collided in the first place.)
+      if (attackerHero.ownerId !== command.actor && defenderHero.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_hero", events: [] };
+      }
+      // "Phase is BATTLE for this hero pair" (plan's server-validation list),
+      // expressed server-side: the server never persists a BATTLE phase --
+      // hydrateGameState always derives PLAYER_TURN/AI_TURN from
+      // active_player_id -- so the honest equivalent of that check is the
+      // same adjacency re-derivation the ResolveBattle case runs. Adjacent
+      // + one of them owned by the still-active submitting seat is exactly
+      // the live-collision precondition the client's BATTLE phase encodes.
+      if (detectAdjacentEnemy(state, command.attackerId) !== command.defenderId) {
+        return { ok: false, reason: "not_adjacent", events: [] };
+      }
+      // Survivors shape was wire-validated in parseCommand; this is the
+      // semantic half -- every unitTypeId must exist in the server's own
+      // DB-backed catalog (the same catalog the auto-resolver resolves
+      // against), so a modified client can't invent units.
+      const catalogIds = new Set(deps.ctx.catalog.unitTypes.map((u) => u.id));
+      const unknownUnit = [...command.attackerStacks, ...command.defenderStacks].some((p) =>
+        p.entries.some((e) => !catalogIds.has(e.unitTypeId)),
+      );
+      if (unknownUnit) {
+        return { ok: false, reason: "unknown_unit_type", events: [] };
+      }
+      // Who conceded on retreat/surrender is derivable, not carried: only
+      // the arena's human side can retreat/surrender, and the human is the
+      // combatant owned by the submitting seat (see the ownership check
+      // above). Exactly one hero matches by construction.
+      const concedingIsAttacker = attackerHero.ownerId === command.actor;
+      const concedingHero = concedingIsAttacker ? attackerHero : defenderHero;
+      // Surrender's priced gold: capped by the conceding hero's actual
+      // purse (a Leave-Behind surrender submits 0 -- units were stripped
+      // from the survivor stacks instead).
+      let surrenderedGold = command.surrenderedGold ?? 0;
+      if (command.outcome === "surrender" && surrenderedGold > (Number(concedingHero.gold) || 0)) {
+        return { ok: false, reason: "surrender_gold_exceeds_purse", events: [] };
+      }
+      if (command.outcome !== "surrender") {
+        surrenderedGold = 0;
+      }
+      // Retreat/surrender cancel the attacker's move (decision 3): the
+      // server-side equivalent of the client's tc.cancelMove(attackerId) --
+      // the engine's cancelMove() restores previousQ/R/movementRemaining,
+      // all of which MoveHero persists, so this works against the row.
+      // Wins/losses/draws leave the attacker standing where the collision
+      // happened, exactly like the auto-resolver.
+      const baseState =
+        command.outcome === "retreat" || command.outcome === "surrender"
+          ? cancelMove(state, command.attackerId)
+          : state;
+      const cancelledAttacker = baseState.heroes[command.attackerId];
+      const cancelledDefender = baseState.heroes[command.defenderId];
+      if (!cancelledAttacker || !cancelledDefender) {
+        return { ok: false, reason: "hero_not_found", events: [] };
+      }
+      const attackerStacks = normalizePlatoons(command.attackerStacks);
+      const defenderStacks = normalizePlatoons(command.defenderStacks);
+      const defenderLostAllTroops =
+        command.outcome === "attackerWon" ||
+        (command.outcome === "draw" && defenderStacks.every((p) => p.entries.length === 0));
+      const { heroes: newHeroes, lootedGold } = buildPostBattleHeroes(
+        baseState.heroes,
+        cancelledAttacker,
+        cancelledDefender,
+        attackerStacks,
+        defenderStacks,
+        defenderLostAllTroops,
+      );
+      // Surrender deducts the paid gold from the conceding hero on top of
+      // the shared survivor/loot application (a surrender never loots: the
+      // defender did not lose all troops, so lootedGold is 0 here).
+      if (surrenderedGold > 0) {
+        newHeroes[concedingHero.id] = {
+          ...newHeroes[concedingHero.id],
+          gold: (Number(newHeroes[concedingHero.id].gold) || 0) - surrenderedGold,
+        };
+      }
+      await persistBattleOutcome(
+        deps,
+        command.gameName,
+        state,
+        source,
+        newHeroes,
+        command.defenderId,
+        defenderLostAllTroops,
+      );
+      // The existing BattleResolved event, derived from the submitted
+      // outcome so battle:resolved UI/bus consumers keep working on every
+      // path. The engine's outcome union already carries retreated_hero/
+      // survived (verified: no event-shape extension needed -- see
+      // packages/contracts/src/events/engineEvent.ts), so retreat and
+      // surrender both map onto retreated_hero; the persisted survivor
+      // stacks and surrenderedGold deduction carry the difference.
+      type ResolvedWinner = Extract<EngineEvent, { type: "BattleResolved" }>["winner"];
+      type ResolvedOutcome = Extract<EngineEvent, { type: "BattleResolved" }>["attackerOutcome"];
+      const winner: ResolvedWinner =
+        command.outcome === "attackerWon"
+          ? "attacker"
+          : command.outcome === "defenderWon"
+            ? "defender"
+            : command.outcome === "draw"
+              ? "draw"
+              : concedingIsAttacker
+                ? "defender"
+                : "attacker";
+      const attackerOutcome: ResolvedOutcome =
+        command.outcome === "attackerWon"
+          ? "won"
+          : command.outcome === "defenderWon"
+            ? "lost_all_troops"
+            : command.outcome === "draw"
+              ? "survived"
+              : concedingIsAttacker
+                ? "retreated_hero"
+                : "won";
+      const defenderOutcome: ResolvedOutcome =
+        command.outcome === "defenderWon"
+          ? "won"
+          : command.outcome === "attackerWon"
+            ? "lost_all_troops"
+            : command.outcome === "draw"
+              ? "survived"
+              : concedingIsAttacker
+                ? "won"
+                : "retreated_hero";
+      const event: EngineEvent = {
+        type: "BattleResolved",
+        actor: command.actor,
+        attackerId: command.attackerId,
+        defenderId: command.defenderId,
+        winner,
+        attackerOutcome,
+        defenderOutcome,
+        rewardGold: lootedGold,
+        rounds: command.rounds,
+        obstacleSeed: command.obstacleSeed,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return {
+        ok: true,
+        events: [event],
+        lastEventId,
+        attackerHero: newHeroes[command.attackerId],
+        defenderHero: newHeroes[command.defenderId],
+      };
     }
     case "UpgradeBuilding": {
       const settlement = row.settlements[command.settlementId];

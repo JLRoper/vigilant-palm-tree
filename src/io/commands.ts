@@ -3,6 +3,7 @@ import type {
   BuildingUpgradeRequest,
   HeroState,
   HorseVariantId,
+  Platoon,
   Player,
   SettlementState,
   WarehouseResource,
@@ -109,6 +110,23 @@ export type ResolveBattleResult = {
   battle: import("@heroes/engine").BattleResult;
 };
 
+export type SubmitBattleResultPayload = {
+  actor: number;
+  attackerId: string;
+  defenderId: string;
+  outcome: "attackerWon" | "defenderWon" | "retreat" | "surrender" | "draw";
+  attackerStacks: Platoon[];
+  defenderStacks: Platoon[];
+  surrenderedGold?: number;
+  rounds: number;
+  obstacleSeed: number;
+};
+
+export type SubmitBattleResultResult = {
+  attackerHero: HeroState;
+  defenderHero: HeroState;
+};
+
 export type TransferGoldResult = {
   hero: HeroState;
   settlement: SettlementState;
@@ -158,6 +176,20 @@ export async function resolveBattle(
   payload: { actor: number; attackerId: string; defenderId: string }
 ): Promise<ResolveBattleResult> {
   return postCommand<ResolveBattleResult>(name, { kind: "ResolveBattle", ...payload });
+}
+
+// Manual-arena result submission (plan/2026-09-27-manual-battle-wiring.md,
+// work item 4): the 15th command kind. Unlike ResolveBattle -- where the
+// server runs the resolver -- this carries the arena's played-out outcome
+// and the server applies it through the same shared post-battle rules
+// (server/app/commandHandler.ts's buildPostBattleHeroes/persistBattleOutcome).
+// Awaited by GameActions.startBattleFlow's Fight path: the returned hero pair
+// is what the client merges before ending the BATTLE phase.
+export async function submitBattleResult(
+  name: string,
+  payload: SubmitBattleResultPayload,
+): Promise<SubmitBattleResultResult> {
+  return postCommand<SubmitBattleResultResult>(name, { kind: "SubmitBattleResult", ...payload });
 }
 
 export async function transferGold(

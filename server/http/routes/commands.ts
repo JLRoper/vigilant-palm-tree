@@ -1,5 +1,5 @@
 import { Router, type Request } from "express";
-import type { BuildingUpgradeRequest, Command } from "@heroes/contracts";
+import type { BuildingUpgradeRequest, Command, Platoon } from "@heroes/contracts";
 import { VALID_HORSE_VARIANTS } from "@heroes/engine";
 import { handleCommandTransactional, createLiveCommandDeps, type LiveCommandDeps } from "../../app/commandHandler";
 import { touchSeat } from "../../app/dropPolicy";
@@ -92,6 +92,50 @@ function isBuildingUpgradeRequest(v: unknown): boolean {
 // -- "food" is deliberately excluded, see
 // packages/contracts/src/commands/tradeResources.ts's header comment.
 const VALID_TRADE_RESOURCES = ["wood", "stone", "iron", "arcane"] as const;
+
+// SubmitBattleResult's outcome enum — mirrors
+// packages/contracts/src/commands/submitBattleResult.ts's
+// SubmittedBattleOutcome (type-only there, so a runtime list lives here;
+// same pattern as VALID_TRADE_RESOURCES above).
+const VALID_SUBMITTED_OUTCOMES = [
+  "attackerWon",
+  "defenderWon",
+  "retreat",
+  "surrender",
+  "draw",
+] as const;
+
+// Survivor-platoon shape check for SubmitBattleResult: an array of at most
+// ARMY_STACK_SLOTS platoons, each entry a known-string unitTypeId with a
+// positive integer count (survivors never carry zero/negative counts —
+// normalizePlatoons strips those client-side). Whether each unitTypeId
+// actually exists in the game's catalog is the handler's job (it owns the
+// DB-backed unit_types read); this is purely the wire-shape gate that keeps
+// a malformed body out of handleCommand as a clean 400 rather than a
+// deep-in-the-handler failure.
+function isSurvivorStacks(v: unknown): v is Platoon[] {
+  if (!Array.isArray(v) || v.length > 8) return false;
+  return v.every((platoon) => {
+    if (!platoon || typeof platoon !== "object") return false;
+    const entries = (platoon as { entries?: unknown }).entries;
+    if (!Array.isArray(entries) || entries.length > 3) return false;
+    return entries.every((e) => {
+      if (!e || typeof e !== "object") return false;
+      const entry = e as { unitTypeId?: unknown; count?: unknown };
+      return (
+        typeof entry.unitTypeId === "string" &&
+        entry.unitTypeId.length > 0 &&
+        typeof entry.count === "number" &&
+        Number.isInteger(entry.count) &&
+        entry.count > 0
+      );
+    });
+  });
+}
+
+function isNonNegativeInt(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0;
+}
 
 // Real per-field validation, not just a `kind` check -- a malformed
 // MoveHero/TransferGold body (missing/mistyped field) is rejected as a
@@ -357,6 +401,39 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       fromTile: b.fromTile,
       toTile: b.toTile,
       cost: b.cost,
+    };
+  }
+
+  if (b.kind === "SubmitBattleResult") {
+    if (
+      typeof b.attackerId !== "string" ||
+      typeof b.defenderId !== "string" ||
+      typeof b.outcome !== "string" ||
+      !VALID_SUBMITTED_OUTCOMES.includes(b.outcome as (typeof VALID_SUBMITTED_OUTCOMES)[number]) ||
+      !isSurvivorStacks(b.attackerStacks) ||
+      !isSurvivorStacks(b.defenderStacks) ||
+      // rounds/obstacleSeed are this port's payload addition beyond the
+      // plan's field list (see submitBattleResult.ts's header) — the
+      // BattleResolved event requires both, and the seed must be the arena's
+      // real one for the future re-simulation consumer.
+      !isNonNegativeInt(b.rounds) ||
+      !isNonNegativeInt(b.obstacleSeed) ||
+      (b.surrenderedGold !== undefined && !isNonNegativeInt(b.surrenderedGold))
+    ) {
+      return null;
+    }
+    return {
+      kind: "SubmitBattleResult",
+      gameName,
+      actor: b.actor,
+      attackerId: b.attackerId,
+      defenderId: b.defenderId,
+      outcome: b.outcome as (typeof VALID_SUBMITTED_OUTCOMES)[number],
+      attackerStacks: b.attackerStacks,
+      defenderStacks: b.defenderStacks,
+      ...(b.surrenderedGold !== undefined ? { surrenderedGold: b.surrenderedGold } : {}),
+      rounds: b.rounds,
+      obstacleSeed: b.obstacleSeed,
     };
   }
 
