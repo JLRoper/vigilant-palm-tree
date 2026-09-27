@@ -1,5 +1,12 @@
 # Morale & fatigue plan: from placeholder bars to real combat stats
 
+> **Status (2026-09-27):** approved for implementation, sequenced after the
+> manual-battle wiring lands — see
+> [the battle updates roadmap](../.kilo/plan/2026-09-27-battle-updates-roadmap.md).
+> No open design questions. Note the file paths below predate the
+> `shared/` → `packages/engine` and `src/views/` → `src/screens/` moves;
+> the roadmap lists the canonical locations.
+
 ## Goal
 
 Give morale and fatigue actual mechanical weight in the manual battle engine

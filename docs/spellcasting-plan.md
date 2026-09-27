@@ -1,5 +1,14 @@
 # Spellcasting plan: from a disabled button to a real hero ability
 
+> **Status (2026-09-27):** all five open design questions ANSWERED — see
+> [the battle updates roadmap](../.kilo/plan/2026-09-27-battle-updates-roadmap.md)
+> §"Spellcasting v1" for the locked decisions (persistent HeroState mana,
+> Int=pool/Arcane=power, AI casting deferred to v1.1, mana-only limiter,
+> `activeEffects` per-Combatant field). Sequenced after morale/fatigue so
+> `Combatant` evolves once. Implementation-ready; file paths below predate
+> the `shared/` → `packages/engine` and `src/views/` → `src/screens/` moves
+> (roadmap lists canonical locations).
+
 > **Note:** This doc originally used the manual battle arena's "Spy" action
 > (`spyOnPlatoon`/`spyBtn`/`spyMode` in `shared/combat/manualBattle.ts` and
 > `src/views/manualBattleArena.ts`) as an implementation precedent for how to
