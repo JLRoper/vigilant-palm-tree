@@ -1,52 +1,13 @@
 import { api, type Game, type GameEventRow } from "./api";
 import { applyEngineEvent, hydrateGameState } from "@heroes/engine";
-import type { EngineEvent, GameState, NetworkTopologySnapshot } from "@heroes/contracts";
+import type { EngineEvent, GameState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
+import type { ResyncReason } from "../core/events";
 import { EntityMirror } from "../render/scene/entityMirror";
 import {
   getInMemoryLocalPlayerId,
   setInMemoryLocalPlayerId,
 } from "../players/localPlayer";
-
-export interface MpStateChangedEvent {
-  type: "mp:stateChanged";
-  gameName: string;
-  prev: GameState | null;
-  next: GameState;
-  serverActivePlayerId: number;
-}
-
-export interface MpTurnStartedEvent {
-  type: "mp:turnStarted";
-  gameName: string;
-  activePlayerId: number;
-}
-
-/** Emitted once per poll cycle with the server's current view of the network topology (issue #51). */
-export interface MpTopologyUpdatedEvent {
-  type: "mp:topologyUpdated";
-  gameName: string;
-  snapshot: NetworkTopologySnapshot;
-}
-
-/** The delta events a poll actually applied, in log order (#146). */
-export interface MpEventsAppliedEvent {
-  type: "mp:eventsApplied";
-  gameName: string;
-  events: EngineEvent[];
-  cursor: number;
-}
-
-/** Emitted whenever the poller fell back to a full-state refetch (#146). */
-export interface MpResyncedEvent {
-  type: "mp:resynced";
-  gameName: string;
-  state: GameState;
-  cursor: number;
-  reason: ResyncReason;
-}
-
-export type ResyncReason = "initial" | "event_not_derivable" | "cursor_gap";
 
 type LobbyClaims = Record<string, { handle: string }>;
 

@@ -99,9 +99,9 @@ Browser (Vite SPA)                                  Express API server
 |---|---|---|
 | `hex.ts` | Axial-hex primitives: `HEX_SIZE=32`, `axialToPixel`/`pixelToAxial`, `axialRound`, `hexCorners`, `hexDistance`. Also the **canonical** `HEX_DIRECTIONS` (six axial vectors, edge-ordered so index `i` is the neighbour across edge `i`, whose midpoint sits at 60·`i`°) and `nearestHexEdge(cx, cy, px, py)` → edge index. These replaced two separate copies of the same vectors (`EDGE_NEIGHBORS` in `core/control.ts`, `NEIGHBOR_DIRS` in the battle engine) — add new direction math here, not in a consumer | — |
 | `rng.ts` | Global LCG `rng()` — local, deliberately non-deterministic client-only randomness (AI wander, decorative city-grid placement). Re-export shim for `mulberry32(seed)` (definition now lives in `@heroes/engine`) | `@heroes/engine` |
-| `eventBus.ts` | Typed pub/sub singleton (`bus.on`/`emit`/`clear`) | — |
+| `eventBus.ts` | Typed pub/sub singleton (`bus.on`/`once`/`off`/`onAny`/`emit`/`emitRaw`/`clear`); per-event payload types resolved via `Extract<GameEvent, { type: K }>`; `emitRaw` is a debug-tooling-only escape hatch | `./events` |
 | `eventRegistry.ts` | `registerAllListeners()` hook (placeholder) | `./eventBus` |
-| `events.ts` | `GameEvent` discriminated union (`state:committed`, `turn:ended`, `phase:changed`, `hero:moved`, `settlement:captured`, `battle:resolved`, economy/morale, calc:vision/control/heroSpeed, `command:rejected`) | `../../shared/types`, `../state/gameState` |
+| `events.ts` | `GameEvent` discriminated union (`state:committed`, `turn:ended`, `phase:changed`, `hero:moved`, `settlement:captured`, `battle:resolved`, economy/morale, calc:vision/control/heroSpeed, `command:rejected`, plus the five `mp:*` multiplayer sync events and `ResyncReason`) | `@heroes/contracts` |
 | `cityGrid.ts` | Diamond-grid math for city view (`TILE_W=96`, `TILE_D=48`); `cellToScreen`/`screenToCell`, `cellsInDrawOrder` | — |
 | `citySpots.ts` | `generateCitySpots` places 3/6/9 resource veins + mines for 5/10/15 city sizes | `../../shared/types`, `./cityGrid` |
 | `control.ts` | `controlRange`, `settlementRateRadius`, `controlledPositions`, `territoryBoundaryEdges` (edge walk reads `HEX_DIRECTIONS` from `./hex`) | `./hex`, `../../shared/types` |

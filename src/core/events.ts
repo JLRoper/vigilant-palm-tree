@@ -1,4 +1,11 @@
-import type { Axial, HeroId, SettlementId } from "@heroes/contracts";
+import type {
+  Axial,
+  EngineEvent,
+  GameState,
+  HeroId,
+  NetworkTopologySnapshot,
+  SettlementId,
+} from "@heroes/contracts";
 
 export type GameEvent =
   | { type: "state:committed" }
@@ -23,4 +30,49 @@ export type GameEvent =
   // CommandError), otherwise the raw failure text. Consumed by
   // src/screens/shared/toast.ts to give the player a visible notification
   // instead of the previous console.warn-only silence.
-  | { type: "command:rejected"; action: string; reason: string };
+  | { type: "command:rejected"; action: string; reason: string }
+  | MpStateChangedEvent
+  | MpTurnStartedEvent
+  | MpTopologyUpdatedEvent
+  | MpEventsAppliedEvent
+  | MpResyncedEvent;
+
+export type ResyncReason = "initial" | "event_not_derivable" | "cursor_gap";
+
+/** Emitted once per poll cycle with the server's current view of the network topology (issue #51). */
+export type MpTopologyUpdatedEvent = {
+  type: "mp:topologyUpdated";
+  gameName: string;
+  snapshot: NetworkTopologySnapshot;
+};
+
+/** The delta events a poll actually applied, in log order (#146). */
+export type MpEventsAppliedEvent = {
+  type: "mp:eventsApplied";
+  gameName: string;
+  events: EngineEvent[];
+  cursor: number;
+};
+
+/** Emitted whenever the poller fell back to a full-state refetch (#146). */
+export type MpResyncedEvent = {
+  type: "mp:resynced";
+  gameName: string;
+  state: GameState;
+  cursor: number;
+  reason: ResyncReason;
+};
+
+export type MpStateChangedEvent = {
+  type: "mp:stateChanged";
+  gameName: string;
+  prev: GameState | null;
+  next: GameState;
+  serverActivePlayerId: number;
+};
+
+export type MpTurnStartedEvent = {
+  type: "mp:turnStarted";
+  gameName: string;
+  activePlayerId: number;
+};

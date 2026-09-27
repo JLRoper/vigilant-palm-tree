@@ -1,6 +1,13 @@
 # Event-Driven Architecture for heroes-js
 
-> Status: 📋 Planned (not started). Not yet implemented — current architecture uses callback hooks (`TurnControllerHooks`) and direct function calls. This plan describes a future EventBus refactor.
+> Status: 🟡 Partially shipped (2026-09-27). The bus, typed catalog, and registry
+> files exist: `src/core/eventBus.ts` is a fully typed pub/sub (no `any` —
+> handler payloads resolve via `Extract` on the `GameEvent` union), and
+> `src/core/events.ts` holds the complete catalog incl. the `mp:*` multiplayer
+> sync events. The bus is live across 10+ modules (state/turn/movement/economy
+> emit; UI, toast, dev console, and network map listen). What remains of this
+> plan is the Phase-2+ listener migration (single `registerAllListeners()`
+> flow replacing callback chains).
 
 ## Overview
 
@@ -50,30 +57,26 @@ Each domain file registers its own handlers. Domain files never import each othe
 | `src/core/events.ts` | All `GameEvent` types |
 | `src/core/eventRegistry.ts` | `registerAllListeners()` |
 
-**`eventBus.ts` implementation:**
+**`eventBus.ts` implementation (shipped 2026-09-27):**
 ```typescript
-type Handler = (ev: any) => void | Promise<void>;
+import type { GameEvent } from "./events";
 
 class EventBus {
-  private listeners = new Map<string, Handler[]>();
-  private onceListeners = new Map<string, Handler[]>();
-
-  on(type: string, handler: Handler): void { ... }
-  once(type: string, handler: Handler): void { ... }
-  off(type: string, handler: Handler): void { ... }
-
-  async emit(ev: { type: string; [key: string]: any }): Promise<void> {
-    const handlers = [...(this.listeners.get(ev.type) ?? []), ...(this.onceListeners.get(ev.type) ?? [])];
-    this.onceListeners.delete(ev.type);
-    // Run synchronously since all handlers are sync for now
-    for (const h of handlers) h(ev);
-  }
+  on<K extends GameEvent["type"]>(type: K, handler: (ev: Extract<GameEvent, { type: K }>) => void): void;
+  once<K extends GameEvent["type"]>(type: K, handler: (ev: Extract<GameEvent, { type: K }>) => void): void;
+  off<K extends GameEvent["type"]>(type: K, handler: (ev: Extract<GameEvent, { type: K }>) => void): void;
+  onAny(handler: (ev: GameEvent) => void): () => void;          // debug/log tooling
+  emit(ev: GameEvent): void;
+  emitRaw(ev: { type: string; [key: string]: unknown }): void;  // debug tooling only
+  clear(): void;
+  getListenerCounts(): Map<string, number>;
 }
 
 export const bus = new EventBus();
 ```
 
-No async overhead yet — all handlers are synchronous. Add `Promise.all` later if needed.
+Fully typed — no `any`. `once`, `onAny`, and `emitRaw` extend the original
+sketch below; the historical sketch is kept for the phase narrative.
 
 ---
 

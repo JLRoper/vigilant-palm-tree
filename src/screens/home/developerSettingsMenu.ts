@@ -99,7 +99,7 @@ export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
       fireBtn.style.fontSize = "10px";
       fireBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        bus.emit({ type, _fired: Date.now() });
+        bus.emitRaw({ type, _fired: Date.now() });
       });
       right.appendChild(fireBtn);
 

@@ -51,14 +51,21 @@ This is the design doc the multiplayer system never had (former open question #5
 
 **What already exists:** heartbeat reports per poll (`multiplayerSync.reportTelemetry`), presence staleness tracking (`presenceRegistry`, tuned for 6s debug freshness), rejoin healing via full resync, email-bound seat claims, and a server-side EndTurn pipeline to reuse (`server/app/turnService.ts` `runEndTurn`).
 
-**What must be built:**
+**What must be built (decisions locked 2026-09-27):**
 
-| Piece | Notes |
+| Piece | Decision |
 |---|---|
-| Enforcement-grade presence | `presenceRegistry` is in-memory, per-process, debug-tuned (6s prune). Drop detection needs a ~60s window and a decision on API-restart semantics (an API restart forgets presence; that is acceptable — worst case the grace timer restarts). |
-| Server-side skip timer | On transition to "disconnected active seat", schedule `runEndTurn` for that game after ~2 min; cancel on any heartbeat or command from the seat. Must interlock with `phase.kind === "BATTLE"` (see open question 1). |
-| Disconnected-seat signal to clients | Extend the topology snapshot (or a lobby field) so clients can render "waiting for seat N (disconnected)". |
+| Enforcement-grade presence | Per-seat last-seen is written into the **games row** (the `lobby` jsonb), not the debug telemetry path. `presenceRegistry` stays dev-Network-Map-only. Detection window: **~60s** without a heartbeat → seat marked disconnected. API restart forgetting in-memory timers is accepted (grace clock restarts; worst case is a longer wait, never a wrong action). |
+| Server-side skip timer | On "disconnected seat holds the active turn", schedule `runEndTurn` (`server/app/turnService.ts`) after a **~2-minute grace**; cancel on any heartbeat or valid command from the seat. **BATTLE interlock: hold** — while `phase.kind === "BATTLE"` the timer pauses and the grace clock resumes after the phase resolves; the skip never cancels a move or resolves a battle the player didn't see. |
+| Disconnected-seat signal to clients | The games-row presence field IS the signal: clients read it off the existing game poll (2s event-cursor cycle already refetches the row on resync; a lightweight per-poll presence read rides the same transport) and render "waiting for seat N (disconnected)". |
 | Rejoin reclaim | Lobby claim route: if a seat's `claimed.email` matches the requester's auth email, allow reclaiming a started game's seat (groundwork exists; the "started game" path needs wiring). |
+
+## Implementation decisions (2026-09-27)
+
+1. **Auto-EndTurn vs. BATTLE phase** — resolved: **hold during battle**. The skip timer pauses while `phase.kind === "BATTLE"` and the grace clock resumes once the phase resolves. The skip never escalates to cancel-move or battle resolution.
+2. **Skip persistence** — accepted: an API restart mid-grace restarts the grace clock. Acceptable for LAN v1.
+3. **Timings** — 60s disconnect detection / 2-minute active-turn grace, server-enforced constants (not per-lobby configurable in v1).
+4. **Presence transport** — games row (`lobby` jsonb), not the topology snapshot; `presenceRegistry` remains dev-overlay-only.
 
 ### 3. AI fill — no AI seats in v1
 
@@ -68,8 +75,8 @@ This is the design doc the multiplayer system never had (former open question #5
 
 ## Open questions
 
-1. **Auto-EndTurn vs. BATTLE phase** — if the skip timer fires while the disconnected seat's game state is in a BATTLE phase, an EndTurn command is invalid. Recommendation: hold the skip while `phase.kind === "BATTLE"` and resume the grace clock once the phase resolves; alternatively the skip escalates to cancel-move + resolve. Pick at implementation time.
-2. **Skip persistence** — if the API restarts mid-grace, the in-memory timer dies and the grace clock restarts. Acceptable for LAN v1; note it in the implementation.
+1. **Auto-EndTurn vs. BATTLE phase** — ~~resolved 2026-09-27: hold during battle~~ (see Implementation decisions).
+2. **Skip persistence** — accepted: an API restart mid-grace restarts the grace clock. Acceptable for LAN v1.
 
 ## Out of scope
 
