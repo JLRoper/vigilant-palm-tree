@@ -18,6 +18,26 @@ export type {
 
 export type EnemyPos = { q: number; r: number };
 
+// One seat's server-side presence snapshot (drop policy, shipped
+// 2026-09-27) -- mirrors the `presence` entry shape in server/routes.ts's
+// LobbyState and src/core/events.ts's MpSeatPresence.
+export type SeatPresence = { lastSeenAt: string; connected: boolean };
+
+// The games row's lobby jsonb, as clients see it off GET /games/:name.
+// Structurally mirrors server/routes.ts's LobbyState (kept as a separate
+// client-side type: io/ cannot import server code, and the engine package
+// doesn't carry lobby shapes).
+export type GameLobbyState = {
+  seats?: number;
+  humanSlots?: number;
+  claimed?: Record<string, { handle: string; email?: string; claimedAt: string }>;
+  startedAt?: string;
+  // Disconnected-seat signal, keyed by seat index; written by the server on
+  // connected<->disconnected transitions. Seats with no entry have not
+  // transitioned -- absence reads as "nothing to flag".
+  presence?: Record<string, SeatPresence>;
+};
+
 export type Game = {
   id: number;
   name: string;
@@ -40,6 +60,9 @@ export type Game = {
   // GET /games/:name returns it; the list route and the command responses
   // don't, hence optional. String because it's a BIGSERIAL over the wire.
   last_event_id?: string;
+  // Only GET /games/:name returns it (same as last_event_id): the lobby
+  // column carries seat claims, startedAt, and drop-policy presence.
+  lobby?: GameLobbyState;
 };
 
 // One row of GET /games/:name/events. Raw DB shape (snake_case, id and
@@ -188,10 +211,15 @@ export const api = {
     fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}/tiles`).then((r) =>
       json<TileRow[]>(r)
     ),
-  // Dev Network Map telemetry (issue #51). Best-effort debug data on a short
-  // timeout: it must never be the reason a poll cycle stalls.
-  reportTelemetry: async (name: string, report: ClientTelemetryReport): Promise<void> => {
-    await fetchWithTimeout(
+  // Dev Network Map telemetry (issue #51) + drop-policy heartbeat read
+  // (2026-09-27): the POST body is the per-poll report; the response body
+  // carries the server's current seat-presence view, so the call the client
+  // already makes every poll doubles as the presence read (the server used
+  // to answer 204 with no body -- an old API process still parses as null
+  // below). Best-effort debug/presence data on a short timeout: it must
+  // never be the reason a poll cycle stalls.
+  reportTelemetry: async (name: string, report: ClientTelemetryReport): Promise<Record<string, SeatPresence> | null> => {
+    const res = await fetchWithTimeout(
       `${BASE}/games/${encodeURIComponent(name)}/telemetry`,
       {
         method: "POST",
@@ -200,6 +228,13 @@ export const api = {
       },
       3_000
     );
+    if (!res.ok) return null;
+    try {
+      const body = (await res.json()) as { presence?: Record<string, SeatPresence> };
+      return body.presence ?? null;
+    } catch {
+      return null;
+    }
   },
   getTopology: (name: string) =>
     fetchWithTimeout(`${BASE}/games/${encodeURIComponent(name)}/telemetry`, {}, 3_000).then((r) =>

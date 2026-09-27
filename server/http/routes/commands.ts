@@ -2,6 +2,7 @@ import { Router, type Request } from "express";
 import type { BuildingUpgradeRequest, Command } from "@heroes/contracts";
 import { VALID_HORSE_VARIANTS } from "@heroes/engine";
 import { handleCommandTransactional, createLiveCommandDeps, type LiveCommandDeps } from "../../app/commandHandler";
+import { touchSeat } from "../../app/dropPolicy";
 import { attachAuth } from "../../auth";
 import { attachPlayerSeat } from "../../middleware/attachPlayerSeat";
 
@@ -384,6 +385,14 @@ commandsRouter.post("/", async (req: Request<{ name: string }>, res) => {
     res.status(403).json({ error: "actor_mismatch" });
     return;
   }
+  // Drop-policy heartbeat (docs/multiplayer.md, shipped 2026-09-27): a
+  // valid command from a seat proves it is alive, so it counts alongside
+  // the per-poll telemetry report and cancels any pending turn-skip for
+  // that seat. Placed after the actor-vs-seat guard so a signed-in caller
+  // asserting someone else's seat is rejected before it can keep THAT
+  // seat's presence alive; anonymous callers fall back to trusting
+  // command.actor the same way the rest of this route does.
+  touchSeat(gameName, command.actor);
   try {
     const deps = await getLiveDeps();
     const result = await handleCommandTransactional(command, deps);

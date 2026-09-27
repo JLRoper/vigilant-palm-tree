@@ -20,6 +20,11 @@ export interface LobbyState {
   humanSlots?: number;
   claimed?: Record<string, { handle: string; claimedAt: string }>;
   startedAt?: string;
+  // Drop-policy presence (server/app/dropPolicy.ts) -- listed so this row
+  // shape reflects what the column actually holds; the repo itself never
+  // reads or writes it (flushes are direct jsonb_set updates from the
+  // drop-policy module, and hydrate ignores lobby entirely).
+  presence?: Record<string, { lastSeenAt: string; connected: boolean }>;
 }
 
 export interface EnemyPos {

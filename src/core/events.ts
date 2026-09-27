@@ -35,9 +35,29 @@ export type GameEvent =
   | MpTurnStartedEvent
   | MpTopologyUpdatedEvent
   | MpEventsAppliedEvent
-  | MpResyncedEvent;
+  | MpResyncedEvent
+  | MpPresenceUpdatedEvent;
 
 export type ResyncReason = "initial" | "event_not_derivable" | "cursor_gap";
+
+/** One seat's server-side presence, from the games row's lobby.presence (drop policy, shipped 2026-09-27). */
+export type MpSeatPresence = {
+  /** Server-side last-heartbeat time, ISO-8601. */
+  lastSeenAt: string;
+  connected: boolean;
+};
+
+/**
+ * Emitted whenever the poller learns a fresh seat-presence view: the
+ * per-poll telemetry POST response carries it, and a full resync carries it
+ * on the row's lobby.presence. Consumers render "(disconnected)" seat state
+ * (multiplayerLobby seat list, the in-game "waiting for seat N" hint).
+ */
+export type MpPresenceUpdatedEvent = {
+  type: "mp:presenceUpdated";
+  gameName: string;
+  presence: Record<string, MpSeatPresence>;
+};
 
 /** Emitted once per poll cycle with the server's current view of the network topology (issue #51). */
 export type MpTopologyUpdatedEvent = {

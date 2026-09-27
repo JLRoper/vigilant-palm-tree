@@ -65,6 +65,13 @@ export interface LobbyState {
   // leaves it unset. handle stays purely cosmetic either way.
   claimed?: Record<string, { handle: string; email?: string; claimedAt: string }>;
   startedAt?: string;
+  // Drop-policy presence (docs/multiplayer.md, shipped 2026-09-27), keyed by
+  // seat index. Written by server/app/dropPolicy.ts on connected->disconnected
+  // and disconnect-cleared transitions only (never per 2s heartbeat); this is
+  // the disconnected-seat signal every client reads off the existing game
+  // poll. Seats with no entry have not transitioned since this API process
+  // started tracking the game -- absence reads as "nothing to flag".
+  presence?: Record<string, { lastSeenAt: string; connected: boolean }>;
 }
 
 const GAME_COLUMNS =
@@ -237,7 +244,16 @@ router.post("/games/:name/lobby/claim", attachAuth, async (req, res) => {
       );
       if (gr.rowCount === 0) return { status: 404 as const };
       const row = gr.rows[0];
-      if (row.lobby?.startedAt) {
+      const started = Boolean(row.lobby?.startedAt);
+      const existingClaim = row.lobby?.claimed?.[String(seat)];
+      // Drop-policy rejoin reclaim (docs/multiplayer.md, shipped 2026-09-27):
+      // a STARTED game's seat whose claim is bound to the caller's
+      // server-derived auth email can be reclaimed by that same identity
+      // (a closed laptop rejoins without a new seat). Handle-only (anonymous)
+      // claims cannot rebind, and brand-new seats still cannot be claimed
+      // once the lobby has started -- only the email match unlocks this path.
+      const reclaimable = started && !!email && existingClaim?.email === email;
+      if (started && !reclaimable) {
         return { status: 409 as const, error: "lobby_already_started" };
       }
       const seats = row.lobby?.seats ?? row.players.length;
@@ -245,9 +261,12 @@ router.post("/games/:name/lobby/claim", attachAuth, async (req, res) => {
         return { status: 400 as const, error: "seat_out_of_range" };
       }
       const claimed = { ...(row.lobby?.claimed ?? {}) };
-      if (claimed[String(seat)]) {
+      if (claimed[String(seat)] && !reclaimable) {
         return { status: 409 as const, error: "seat_already_claimed" };
       }
+      // On reclaim the handle/claimedAt refresh to the rejoining client's
+      // current values (both are cosmetic bookkeeping); the email binding
+      // is re-asserted, unchanged by definition since it authorized this.
       claimed[String(seat)] = { handle: cleanHandle, email, claimedAt: new Date().toISOString() };
       const newPlayers = row.players.map((p) =>
         p.id === seat ? { ...p, faction: "player" as const, name: cleanHandle } : p,

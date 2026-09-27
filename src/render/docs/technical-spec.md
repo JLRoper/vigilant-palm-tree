@@ -81,6 +81,7 @@ graph TD
   - [5.1 Procedural (pixel-art.html + pixel-gen.mjs)](#51-procedural-pixel-arthtml--pixel-genmjs)
   - [5.2 FLUX AI Generators](#52-flux-ai-generators)
   - [5.3 Manifest (`manifest.mjs`)](#53-manifest-manifestmjs)
+  - [5.4 Gemini/OpenRouter Generators](#54-geminiopenrouter-generators)
 - [6. File Reference](#6-file-reference)
 
 ---
@@ -805,6 +806,38 @@ Central registry of all sprite filenames. Used by `pixel-gen.mjs` for the proced
 - `RESOURCE_CONSTELLATION_SPRITES` — FLUX constellation variant filenames
 - `RESOURCE_CREST_SPRITES` — FLUX crest variant filenames
 - `SPRITE_FILES` — flat array of all filenames
+
+### 5.4 Gemini/OpenRouter Generators
+
+Three scripts cover the `pixel` building sprites — `building-pixel-<camelCaseName>-<level>.png` in `src/resources/buildings/` (e.g. `building-pixel-granary-1.png`, `building-pixel-woodcutterHut-2.png`), a naming scheme separate from the FLUX `building-{style}-{kind}-{level}.png` files. They live in `.kilo/skills/building-sprite-gen/scripts/` (see that folder's `SKILL.md` for the full workflow).
+
+```mermaid
+sequenceDiagram
+    participant S as gemini-buildings.mjs
+    participant API as OpenRouter API
+    participant FS as filesystem
+    participant PW as strip-checkerboard.mjs
+
+    S->>API: POST /chat/completions<br/>{prompt + style reference (base64 data URL)}
+    API-->>S: base64 PNG
+    S->>FS: write as-is to src/resources/buildings/
+    FS->>PW: run on the generated file
+    PW->>PW: flood-fill checker from borders<br/>→ real alpha, written in place
+```
+
+**`gemini-buildings.mjs`** — image-in → image-out generation via the **OpenRouter API** (`google/gemini-2.5-flash-image`). Every invocation passes the job as CLI flags — `--name <file>` plus `--prompt <text>` or `--prompt-file <path>` (mutually exclusive, exactly one required), optional `--ref <path>` to override the style reference, `--no-strip`, and `--dry-run` to preview without an API call. The script deliberately stores no prompts, so multiple agents can generate concurrently without editing a shared file. Each prompt is sent alongside a style-reference image (`building-pixel-granary-1.png` by default, attached as a base64 data URL) so output matches the established pixel-art style (chunky pixel size, 2:1 dimetric isometric projection, thick dark-brown outlines, warm palette, transparent background). Requires `OPENROUTER_API_KEY` in the environment; **each generated image is one billed generation call**, so `--dry-run` first. After writing each PNG the script spawns `strip-checkerboard.mjs` on it automatically (skip with `--no-strip`).
+
+**`strip-checkerboard.mjs`** — post-pass for that output: image models bake in a checkerboard *suggesting* transparency instead of real alpha. Playwright + canvas: samples the two checker colors from the top border, flood-fills from the image borders (so enclosed gray tones like a stone chimney survive), then erodes grayish pixels adjacent to the background over up to 16 passes and overwrites the input file with true alpha (reports the cleared-pixel percentage).
+
+**`remove-specks.mjs`** — follow-up post-pass that removes isolated background specks (surviving checkerboard islands) via connected-component analysis: an opaque component is deleted only if it is not the main sprite, small (≤600 px), and low-saturation, so colored details like gold flecks and anything touching the main art survive.
+
+| Script | Output | Pipeline |
+|--------|--------|----------|
+| `gemini-buildings.mjs` | `building-pixel-<camelCaseName>-<level>.png` | reference-image style match → PNG as-is |
+| `strip-checkerboard.mjs` | in-place alpha fix on any PNG | border flood-fill + gray erosion → real alpha |
+| `remove-specks.mjs` | in-place speck cleanup on any PNG | connected-component analysis: drops non-main, small, low-saturation opaque islands |
+
+Wiring note: these files are not auto-registered — `pixel.granary.1/2/3` and `pixel.smithy.2` are the wired precedents in `assetDescriptors.ts`; the woodcutter hut pair and the gold mine tier 1–3 trio exist on disk only until descriptors land for them.
 
 ---
 

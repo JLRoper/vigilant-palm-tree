@@ -44,7 +44,7 @@ A turn-based hex adventure map where the player moves a hero, claims resource ti
 | [pr-13-dev-console.md](./pr-13-dev-console.md) | PR record (merged) for the dev console: ring-buffer event log + pin/persist; float follow-up reverted pre-merge | ✅ Current |
 | [network-map.md](./network-map.md) | Dev overlay showing live client↔API routing topology (RTT, poll-failure rate, throughput); what each metric really measures and why three of four are proxies | ✅ Current |
 | [event-system.md](./event-system.md) | Planned `core/eventBus` refactor and event catalog (Phases 1–6) | 🟡 Partially shipped — typed bus + full `GameEvent` catalog live (2026-09-27); Phase-2+ listener migration still planned |
-| [multiplayer.md](./multiplayer.md) | LAN multiplayer design: lobby/seat identity, event-cursor sync, and session policy — no turn timer in v1, dropped-seat grace-then-skip, no AI seats | ✅ Current |
+| [multiplayer.md](./multiplayer.md) | LAN multiplayer design: lobby/seat identity, event-cursor sync, and session policy — no turn timer in v1, shipped drop policy (60s disconnect detection, grace-then-skip with server auto-EndTurn), email rejoin reclaim, no AI seats | ✅ Current |
 | [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) | **Multiplayer (LAN):** lobby seat claim + `lobby` jsonb column (§3), 2s polling sync (§5.9), lobby UI (§5.12), local seat identity (§5.16) | 🟡 Built, no design doc |
 | [../.kilo/plan/](../.kilo/plan/) | Architecture plans: walkthrough + Tailscale, bloat/scalability review, module expansion plan, modal viewport overflow, fight-screen redesign, combat reveal / fog of war | 📋 Planned |
 
@@ -71,8 +71,8 @@ All major questions resolved. Remaining minor ones:
 2. **City view mine upgrades** — schema supports Level 1–3, UI ships Level 1 only.
 3. **Map fog of war** — resolved, shipped: heroes reveal a 4-hex vision ring and castles reveal by control range (`src/render/fog.ts`); unexplored tiles render under fog, and resource tiles appear only inside a vision ring.
 4. **AI chartering** — deferred; only human player can charter settlements currently.
-5. **Multiplayer design doc** — ~~never written down~~ now exists: [multiplayer.md](./multiplayer.md) records the mechanics plus the 2026-09-27 policy decisions (no turn timer in v1; dropped seats get grace-then-skip with server auto-EndTurn — implementation pending; no AI seats).
-6. **`src/factions/` is staged but unwired** — `FactionUnit` roster data for the humans exists at `src/factions/humans/` and nothing imports it. The live unit data still comes from the server catalog (`data/unitCatalog.ts`) and `state/units.ts`. Decide whether factions becomes the source of truth or the directory gets dropped.
+5. **Multiplayer design doc** — ~~never written down~~ now exists and matches the build: [multiplayer.md](./multiplayer.md) records the mechanics plus the 2026-09-27 policy decisions (no turn timer in v1; dropped seats get ~60s disconnect detection + ~2min active-turn grace, then the server auto-EndTurns — shipped 2026-09-27; no AI seats).
+6. **~~`src/factions/` is staged but unwired~~** — resolved 2026-09-27: the directory was **deleted** (zero imports, overlapped the DB `unit_types` seed — the repo's "unwired parallel implementation" lesson). The live unit data remains the server catalog (`data/unitCatalog.ts`) and `state/units.ts`. If multi-faction rosters ship later, the concept should be resurrected in `packages/engine` + DB seed, not as client-side staged data.
 7. **Combat reveal / fog of war in battle** — the Spy action and its `scoutedBy`/`markContacted` fog were removed as half-baked; the parked idea is written up in [../.kilo/plan/2026-08-15-combat-reveal-fog-of-war.md](../.kilo/plan/2026-08-15-combat-reveal-fog-of-war.md).
 
 ## Locked decisions (quick reference)
@@ -96,4 +96,4 @@ Full details in the individual docs, but the big ones:
 - **Hero death (future):** captured for ransom
 - **Unit cap (future):** base 10 + 1 per owned settlement
 - **No food in v1** — returns with army system, where every human unit costs 1 food/day
-- **Multiplayer (LAN) policy:** no turn timer in v1; a dropped seat gets ~60s disconnect detection + ~2min active-turn grace, then the server auto-EndTurns (implementation pending); no AI seats — unclaimed seats stay empty. See [multiplayer.md](./multiplayer.md).
+- **Multiplayer (LAN) policy:** no turn timer in v1; a dropped seat gets ~60s disconnect detection + ~2min active-turn grace, then the server auto-EndTurns (shipped 2026-09-27, `server/app/dropPolicy.ts`); no AI seats — unclaimed seats stay empty. See [multiplayer.md](./multiplayer.md).

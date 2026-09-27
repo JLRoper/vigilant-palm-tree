@@ -1124,6 +1124,61 @@ export async function handleCommandTransactional(
   }
 }
 
+// Server-internal EndTurn for the drop policy (docs/multiplayer.md,
+// "Drop policy", shipped 2026-09-27): when a disconnected seat's grace
+// expires while it holds the active turn, server/app/dropPolicy.ts ends
+// that seat's turn for it. This is the small service-level entry point
+// for that -- deliberately NOT reached through the HTTP command router,
+// because the router's own guard (actor_mismatch, commands.ts) exists to
+// authenticate an HTTP caller against the seat it claims, and there is no
+// HTTP caller here: the server is acting on the seat's behalf.
+//
+// handleCommand()'s internal turn-ownership guard
+// (command.actor !== row.active_player_id -> forbidden_not_your_turn)
+// still runs and passes by construction: dropPolicy.ts only ever invokes
+// this after re-reading the row and confirming the seat IS the active
+// player, so the guard doubles as a last-voice stale-timer check (if the
+// turn moved on between scheduling and firing, the command is rejected
+// here exactly as it would be from HTTP).
+//
+// The full EndTurn pipeline is reused unchanged (runEndTurn ->
+// saveHeroesAndSettlements + charter dual-write + settlement snapshots +
+// resource transactions + TurnEnded/turn_ended/round_ended events), so a
+// server-side skip is byte-for-byte the same mutation the seat's own
+// client would have produced.
+//
+// On success this also appends one extra legacy-style audit event row,
+// kind "turn_skipped" (snake_case like the other non-EngineEvent audit
+// kinds turn_ended/round_ended/round_started/ai_turn_started), recording
+// that this EndTurn was server-initiated rather than player-initiated.
+// actor_seat is null -- like round_started/ai_turn_started, the action is
+// not attributable to the seat's own hand (see 010_event_seq.sql's header).
+// Best-effort and outside the command transaction: a failed audit append
+// must not roll back an already-committed turn, it only degrades the trail.
+export const TURN_SKIPPED_AUDIT_KIND = "turn_skipped";
+
+export async function runServerEndTurnForSeat(
+  gameName: string,
+  seat: number,
+  deps: LiveCommandDeps,
+): Promise<CommandResult> {
+  const command: Command = { kind: "EndTurn", gameName, actor: seat };
+  const result = await handleCommandTransactional(command, deps);
+  if (!result.ok) return result;
+  try {
+    await createEventRepo(deps.pool).append(gameName, TURN_SKIPPED_AUDIT_KIND, {
+      playerId: seat,
+      reason: "disconnected_grace_expired",
+      round: result.round,
+      day: result.day,
+      activePlayerId: result.activePlayerId,
+    }, null);
+  } catch (err) {
+    console.error("[api] turn_skipped audit append failed:", err);
+  }
+  return result;
+}
+
 // Re-export so callers (server/http/routes/commands.ts) can match the
 // retired /trade + /resolve-battle routes' own "game not found" 404
 // detection without needing to import the persistence layer directly.
