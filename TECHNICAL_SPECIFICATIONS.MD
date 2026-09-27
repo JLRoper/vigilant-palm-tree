@@ -344,7 +344,7 @@ Vite auto-loads `.env`; `tsx` processes use `--env-file=.env`. Both Vite servers
 
 ### Known gaps / staged work (as of this writing)
 
-- Spellcraft has no code (only flavor text on the mageGuild building); combat-level renown/morale deltas are stubbed as future fields in `@heroes/engine` combat types. (Settlement *morale* — decay, income tax modifier, clamping — **is** implemented in `@heroes/engine`'s economy and persisted per settlement.)
+- Spellcraft has no code (only flavor text on the mageGuild building); combat-level renown deltas are stubbed as future fields in `@heroes/engine` combat types. (Battle-level *morale/fatigue* — per-platoon stats with damage multipliers, `morale_change` log entries, and the low-morale auto-retreat interaction — **is** implemented; see `docs/morale-fatigue-plan.md`. Settlement *morale* — decay, income tax modifier, clamping — **is** also implemented in `@heroes/engine`'s economy and persisted per settlement.)
 - Battle resolution: the server-side auto-resolver (`@heroes/engine` `resolveBattle`) is the live default; the manual tactical resolver (`manualBattle`) + dev **Test Battle** arena are shipped and reachable via the developer settings menu → test battle setup; wiring the manual arena to real adventure-map encounters is still in progress.
 - `WS_PORT` is allocated but no realtime layer listens on it.
 - The legacy `POST /games/:name/end-turn` route still exists beside the `EndTurn` command for backward compatibility.

@@ -221,6 +221,10 @@ export function openManualBattleArena(
         debugLog(`retreat: ${platoonLabel(entry.side, entry.slotIndex)} self-retreated`);
       } else if (entry.kind === "hero_retreat") {
         debugLog(`retreat: ${entry.side} hero retreated`);
+      } else if (entry.kind === "morale_change") {
+        debugLog(
+          `stats: ${platoonLabel(entry.side, entry.slotIndex)} morale=${entry.morale} fatigue=${entry.fatigue} (${entry.reason})`,
+        );
       } else if (entry.kind === "stalemate") {
         debugLog(`stalemate: ${entry.detail}`);
       }
@@ -242,6 +246,8 @@ export function openManualBattleArena(
           units: c.entries.map((e) => `${state.unitTypes[e.unitTypeId]?.name ?? e.unitTypeId} x${e.count}`).join(", ") || "(empty)",
           speed: platoonSpeed(c, state.unitTypes),
           maxHealth: c.maxHealth,
+          morale: c.morale,
+          fatigue: c.fatigue,
           position: fmtHex(c.position),
         });
       }
@@ -573,6 +579,12 @@ const FLOAT_MS = 800;
     }
     if (entry.kind === "hero_retreat") {
       return `R${entry.round} · ${sideName(entry.side)} hero left the field`;
+    }
+    if (entry.kind === "morale_change") {
+      const parts: string[] = [];
+      if (entry.moraleDelta !== 0) parts.push(`morale ${entry.moraleDelta > 0 ? "+" : "−"}${Math.abs(entry.moraleDelta)} → ${entry.morale}`);
+      if (entry.fatigueDelta !== 0) parts.push(`fatigue ${entry.fatigueDelta > 0 ? "+" : "−"}${Math.abs(entry.fatigueDelta)} → ${entry.fatigue}`);
+      return `R${entry.round} · ${sideName(entry.side)} P${entry.slotIndex + 1} ${parts.join(", ")} (${entry.reason})`;
     }
     return `R${entry.round} · Stalemate — ${entry.detail}`;
   }
@@ -963,19 +975,19 @@ const FLOAT_MS = 800;
     stats.push({ label: "Spd", value: String(platoonSpeed(c, state.unitTypes)) });
     stats.push({ label: "Rng", value: isRangedPlatoon(c, state.unitTypes) ? String(RANGED_ATTACK_RANGE) : "Melee" });
     // Terrain placeholder — the game has no terrain-bonus mechanic yet (see
-    // docs/terrain-plan.md). Same pattern as the Morale/Fatigue placeholders
-    // below: the slot exists ahead of the mechanic, so wiring in a real value
-    // later is a one-line change here.
+    // docs/terrain-plan.md). Same "the slot exists ahead of the mechanic"
+    // pattern the Morale/Fatigue bars used before the engine tracked them.
     stats.push({ label: "Terrain", value: "—" });
     return stats;
   }
 
-  // Morale + Fatigue placeholders. No mechanic behind these yet — the values
-  // are hard-coded (morale 100, fatigue 0) so the slot exists for when the
-  // combat system tracks them; see docs/morale-fatigue-plan.md.
-  function metricsFor(): { label: string; value: number; color: string }[] {
-    const morale = 1;
-    const fatigue = 0;
+  // Live per-platoon battle stats: the bars this arena reserved as
+  // hard-coded placeholders (morale 100, fatigue 0) now read the real
+  // Combatant.morale/fatigue the engine maintains; see
+  // docs/morale-fatigue-plan.md.
+  function metricsFor(c: Combatant): { label: string; value: number; color: string }[] {
+    const morale = c.morale / 100;
+    const fatigue = c.fatigue / 100;
     return [
       { label: "Morale", value: morale, color: morale > 0.5 ? "#4caf50" : morale > 0.25 ? "#ffb300" : "#e53935" },
       { label: "Fatigue", value: fatigue, color: fatigue < 0.25 ? "#4caf50" : fatigue < 0.5 ? "#ffb300" : "#e53935" },
@@ -1011,7 +1023,7 @@ const FLOAT_MS = 800;
       movementRemaining,
       specialty: specialty ? { icon: specialtyIcon(specialty.tag), label: specialty.tag } : undefined,
       stats: statsFor(combatant),
-      metrics: metricsFor(),
+      metrics: metricsFor(combatant),
       winChanceVs: winner ? { entries: winner.entries, label: `Platoon ${winner.slotIndex + 1}` } : undefined,
       anchorX: anchor.x,
       anchorY: anchor.y,
@@ -1701,7 +1713,7 @@ function finishBattle(): void {
           ? {
               unitTypes: state.unitTypes,
               stats: statsFor(c),
-              metrics: metricsFor(),
+              metrics: metricsFor(c),
               movementRemaining: getMovementRange(state, c).length,
               canAct: actableSlots.includes(c.slotIndex),
             }

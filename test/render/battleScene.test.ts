@@ -64,6 +64,8 @@ function makeCombatant(overrides: Partial<Combatant> & { entries: PlatoonEntry[]
     position: { q: 0, r: 0 },
     maxHealth: totalHealth(overrides.entries, UNIT_TYPES),
     hasCounterCharge: true,
+    morale: 100,
+    fatigue: 0,
     retreated: false,
     ...overrides,
   };

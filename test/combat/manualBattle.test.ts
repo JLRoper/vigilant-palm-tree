@@ -5,6 +5,9 @@ import {
   attackWithPlatoon,
   endPlatoonTurn,
   executeAiPlan,
+  FATIGUE_DECAY_PER_TURN,
+  FATIGUE_PER_ATTACK,
+  FATIGUE_PER_MOVE,
   finalizeManualBattle,
   getApproachHexes,
   getCombatant,
@@ -14,11 +17,16 @@ import {
   getValidMeleeTargets,
   hasLineOfSight,
   isBattleOver,
+  MORALE_GAIN_PER_KILL,
+  MORALE_LOSS_PER_ADJACENT_DEATH,
+  MORALE_LOSS_PER_CASUALTY,
   movePlatoon,
   pickTarget,
   planAiTurn,
   startManualBattle,
   unactedLivingSlots,
+  type BattleLogEntry,
+  type ManualBattleState,
 } from "@heroes/engine";
 import { estimateWinChance } from "@heroes/engine";
 import { ARMY_STACK_SLOTS, type Platoon, type UnitType } from "../../src/state/units";
@@ -485,4 +493,136 @@ test("estimateWinChance: symmetric for identical platoons, skewed toward the str
   const weakChance = estimateWinChance(weak, strong, unitTypes);
   assert.ok(strongChance > 90, `expected the hero to be heavily favored, got ${strongChance}%`);
   assert.equal(strongChance + weakChance, 100);
+});
+
+// ---- Morale & fatigue (docs/morale-fatigue-plan.md) ------------------------
+
+type MoraleChangeEntry = Extract<BattleLogEntry, { kind: "morale_change" }>;
+
+function isMoraleChange(e: BattleLogEntry): e is MoraleChangeEntry {
+  return e.kind === "morale_change";
+}
+
+function firstDamageOf(state: ManualBattleState): number {
+  for (const e of state.log) {
+    if (e.kind === "damage") return e.damage;
+  }
+  return -1;
+}
+
+function stackPlatoons(list: { unitTypeId: string; count: number }[][]): Platoon[] {
+  const out: Platoon[] = list.map((entries) => ({ entries }));
+  while (out.length < ARMY_STACK_SLOTS) out.push({ entries: [] });
+  return out;
+}
+
+test("fatigue accrues per move and per attack, decays at the round boundary, and every change is logged", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 50 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 4, rows: 1 }, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const enemy = getCombatant(state, "defender", 0)!;
+
+  assert.equal(movePlatoon(state, "attacker", 0, { q: 2, r: 0 }), true);
+  assert.equal(actor.fatigue, FATIGUE_PER_MOVE, "one move action accrues exactly FATIGUE_PER_MOVE");
+
+  assert.equal(attackWithPlatoon(state, "attacker", 0, enemy.slotIndex), true);
+  assert.equal(actor.fatigue, FATIGUE_PER_MOVE + FATIGUE_PER_ATTACK, "the attack stacks fatigue on the move's");
+
+  assert.equal(endPlatoonTurn(state, "defender", 0), true);
+  assert.equal(state.round, 2, "both sides having acted advances the round");
+  assert.equal(
+    actor.fatigue,
+    FATIGUE_PER_MOVE + FATIGUE_PER_ATTACK - FATIGUE_DECAY_PER_TURN,
+    "the round boundary is every living platoon's turn start, so fatigue partially recovers",
+  );
+  assert.equal(getCombatant(state, "defender", 0)!.fatigue, 0, "decay never pushes fatigue below zero");
+
+  const reasons = state.log.filter(isMoraleChange).map((e) => e.reason);
+  assert.ok(reasons.includes("move"), "move fatigue is a logged morale_change entry");
+  assert.ok(reasons.includes("attack"), "attack fatigue is a logged morale_change entry");
+  assert.ok(reasons.includes("turn_start"), "turn-start decay is a logged morale_change entry");
+  const moveEntry = state.log.filter(isMoraleChange).find((e) => e.reason === "move")!;
+  assert.deepEqual(
+    { moraleDelta: moveEntry.moraleDelta, fatigueDelta: moveEntry.fatigueDelta, morale: moveEntry.morale, fatigue: moveEntry.fatigue },
+    { moraleDelta: 0, fatigueDelta: FATIGUE_PER_MOVE, morale: 100, fatigue: FATIGUE_PER_MOVE },
+    "the log entry carries the applied deltas and the resulting values",
+  );
+});
+
+test("morale drops on casualties taken, wavers next to a destroyed ally, and rises on a kill", () => {
+  const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+  const defender = makePlatoons([{ unitTypeId: "weak", count: 50 }]);
+  const state = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 4, rows: 1 }, fixedObstacles: [] });
+  const actor = getCombatant(state, "attacker", 0)!;
+  const enemy = getCombatant(state, "defender", 0)!;
+
+  // Close to melee first (deployments start 3 hexes apart), then attack.
+  // footman×5 (with move fatigue + the infantry-beats-cavalry ×1.3) deals
+  // exactly 31 damage to weak (hp 5): 6 units lost, -12 morale.
+  assert.equal(movePlatoon(state, "attacker", 0, { q: 2, r: 0 }), true);
+  assert.equal(attackWithPlatoon(state, "attacker", 0, enemy.slotIndex), true);
+  assert.equal(enemy.entries[0].count, 44, "6 weak units lost to the attack");
+  assert.equal(enemy.morale, 100 - 6 * MORALE_LOSS_PER_CASUALTY, "each unit lost costs the platoon its own morale");
+  const casualtyEntry = state.log.filter(isMoraleChange).find((e) => e.reason === "casualties")!;
+  assert.equal(casualtyEntry.slotIndex, enemy.slotIndex);
+  assert.equal(casualtyEntry.moraleDelta, -6 * MORALE_LOSS_PER_CASUALTY);
+
+  // Now the kill case: hero (atk 200) wipes a 1-unit platoon; allies next to
+  // the loss waver, an ally 3 hexes away does not, and the killer recovers
+  // morale (pre-dropped below the clamp so the gain is observable).
+  const defenders = stackPlatoons([
+    [{ unitTypeId: "weak", count: 1 }],
+    [{ unitTypeId: "weak", count: 1 }],
+    [{ unitTypeId: "weak", count: 1 }],
+  ]);
+  const killState = startManualBattle(makePlatoons([{ unitTypeId: "hero", count: 1 }]), defenders, {
+    unitTypes,
+    grid: { cols: 7, rows: 5 },
+    fixedObstacles: [],
+  });
+  const hero = getCombatant(killState, "attacker", 0)!;
+  const doomed = getCombatant(killState, "defender", 0)!;
+  const adjacentAlly = getCombatant(killState, "defender", 1)!;
+  const farAlly = getCombatant(killState, "defender", 2)!;
+  doomed.position = { q: 3, r: 2 };
+  adjacentAlly.position = { q: 4, r: 2 };
+  farAlly.position = { q: 6, r: 2 };
+  hero.position = { q: 2, r: 2 };
+  hero.morale = 50;
+
+  assert.equal(attackWithPlatoon(killState, "attacker", 0, doomed.slotIndex), true);
+  assert.ok(!doomed.entries.some((e) => e.count > 0), "hero wipes the 1-unit platoon");
+  assert.equal(hero.morale, 50 + MORALE_GAIN_PER_KILL, "destroying an enemy platoon restores morale");
+  assert.equal(adjacentAlly.morale, 100 - MORALE_LOSS_PER_ADJACENT_DEATH, "an ally next to the loss wavers");
+  assert.equal(farAlly.morale, 100, "an ally 3 hexes from the loss is unaffected");
+  const reasons = killState.log.filter(isMoraleChange).map((e) => e.reason);
+  assert.ok(reasons.includes("kill"));
+  assert.ok(reasons.includes("ally_destroyed"));
+});
+
+test("fatigue and morale measurably dull the attack through the real engine path", () => {
+  function freshBattle() {
+    const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
+    const defender = makePlatoons([{ unitTypeId: "weak", count: 50 }]);
+    const state = startManualBattle(attacker, defender, { unitTypes, grid: { cols: 4, rows: 1 }, fixedObstacles: [] });
+    return { state, actor: getCombatant(state, "attacker", 0)! };
+  }
+
+  const fresh = freshBattle();
+  assert.equal(movePlatoon(fresh.state, "attacker", 0, { q: 2, r: 0 }), true);
+  assert.equal(attackWithPlatoon(fresh.state, "attacker", 0, 0), true);
+  const freshDamage = firstDamageOf(fresh.state);
+
+  const tired = freshBattle();
+  assert.equal(movePlatoon(tired.state, "attacker", 0, { q: 2, r: 0 }), true);
+  tired.actor.fatigue = 100;
+  tired.actor.morale = 0;
+  assert.equal(attackWithPlatoon(tired.state, "attacker", 0, 0), true);
+  const tiredDamage = firstDamageOf(tired.state);
+
+  // Both runs make the same approach move first; fresh: effAttack
+  // 25 × 0.979 (move fatigue) → 24 damage. Fully fatigued and demoralized:
+  // effAttack 25 × 0.65 × 0.7 → 10.
+  assert.ok(tiredDamage < freshDamage, `expected a worn-out platoon to hit softer (${tiredDamage} vs ${freshDamage})`);
 });

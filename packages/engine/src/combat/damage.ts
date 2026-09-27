@@ -1,5 +1,11 @@
 import type { PlatoonEntry, UnitType } from "../units";
-import { TYPE_ADVANTAGE_MULTIPLIER, TYPE_DISADVANTAGE_MULTIPLIER, TYPE_TRIANGLE } from "../combatConfig";
+import {
+  FATIGUE_MAX_PENALTY,
+  MORALE_MAX_ATTACK_PENALTY,
+  TYPE_ADVANTAGE_MULTIPLIER,
+  TYPE_DISADVANTAGE_MULTIPLIER,
+  TYPE_TRIANGLE,
+} from "../combatConfig";
 
 export function totalHealth(entries: readonly PlatoonEntry[], unitTypes: Record<string, UnitType>): number {
   let hp = 0;
@@ -64,6 +70,29 @@ export function typeMultiplier(
   return { multiplier: 1, advantageBonus: false, disadvantagePenalty: false };
 }
 
+// The slice of Combatant the damage math reads — structural, so callers pass
+// the combatant itself. Omitted stats mean a fresh platoon (fatigue 0,
+// morale 100), which keeps every pre-existing computeDamage caller (win
+// estimates, prediction popups) on the "no degradation" curve.
+export interface CombatantStats {
+  morale: number;
+  fatigue: number;
+}
+
+// Fatigue dulls both the platoon's punch and its resilience: 1 at 0, linear
+// down to 1 - FATIGUE_MAX_PENALTY at 100.
+export function fatigueMultiplier(fatigue: number): number {
+  const f = Math.min(100, Math.max(0, fatigue));
+  return 1 - (f / 100) * FATIGUE_MAX_PENALTY;
+}
+
+// Low morale dulls the attack only: 1 at morale 100, linear down to
+// 1 - MORALE_MAX_ATTACK_PENALTY at 0.
+export function moraleAttackMultiplier(morale: number): number {
+  const m = Math.min(100, Math.max(0, morale));
+  return 1 - ((100 - m) / 100) * MORALE_MAX_ATTACK_PENALTY;
+}
+
 export interface DamageComputation {
   damage: number;
   advantageBonus: boolean;
@@ -74,15 +103,20 @@ export interface DamageComputation {
 // feature-plans/CombatResolutionEngine.md "Damage formula & type-advantage
 // chart"): effAttack^2 / (effAttack + effDefense), scaled by the
 // type-advantage multiplier and a caller modifier (e.g. a future Day/Night
-// hook).
+// hook). The attacker's fatigue/morale and the defender's fatigue scale
+// effAttack/effDefense before the ratio, same shape as the typeMultiplier
+// step (docs/morale-fatigue-plan.md step 5).
 export function computeDamage(
   attackerEntries: readonly PlatoonEntry[],
   defenderEntries: readonly PlatoonEntry[],
   unitTypes: Record<string, UnitType>,
   modifier: number,
+  attackerStats?: CombatantStats,
+  defenderStats?: CombatantStats,
 ): DamageComputation {
   let effAttack = 0;
   for (const e of attackerEntries) effAttack += (unitTypes[e.unitTypeId]?.attack ?? 0) * e.count;
+  effAttack *= fatigueMultiplier(attackerStats?.fatigue ?? 0) * moraleAttackMultiplier(attackerStats?.morale ?? 100);
 
   let defWeighted = 0;
   let defenderCount = 0;
@@ -90,7 +124,7 @@ export function computeDamage(
     defWeighted += (unitTypes[e.unitTypeId]?.defence ?? 0) * e.count;
     defenderCount += e.count;
   }
-  const effDefense = defenderCount > 0 ? defWeighted / defenderCount : 0;
+  const effDefense = (defenderCount > 0 ? defWeighted / defenderCount : 0) * fatigueMultiplier(defenderStats?.fatigue ?? 0);
 
   const rawDamage = effAttack + effDefense > 0 ? (effAttack * effAttack) / (effAttack + effDefense) : 0;
   const { multiplier, advantageBonus, disadvantagePenalty } = typeMultiplier(attackerEntries, defenderEntries, unitTypes);

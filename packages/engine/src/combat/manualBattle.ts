@@ -14,6 +14,9 @@ import { PLATOON_RETREAT_LOSS, RANGED_ATTACK_RANGE } from "../combatConfig";
 import { applyRetreatLoss } from "./damage";
 import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT, makeBattleGrid } from "./grid";
 import {
+  applyAllyDeathMorale,
+  applyMoveFatigue,
+  applyTurnStartRecovery,
   buildCombatants,
   buildResults,
   DEFAULT_MAX_ROUNDS,
@@ -383,6 +386,11 @@ function checkRoundAdvance(state: ManualBattleState): void {
       state.log.push({ round: state.round, kind: "stalemate", detail: `battle exceeded ${state.maxRounds} rounds` });
       return;
     }
+    // Round boundary = the start of every living platoon's own turn, so
+    // fatigue partially recovers across the board (the manual battle's
+    // equivalent of resolveBattle's per-turn hasCounterCharge/decay seam).
+    for (const c of livingCombatants(state.attacker)) applyTurnStartRecovery(c, state.round, state.log);
+    for (const c of livingCombatants(state.defender)) applyTurnStartRecovery(c, state.round, state.log);
     state.unactedAttacker = new Set(livingCombatants(state.attacker).map((c) => c.slotIndex));
     state.unactedDefender = new Set(livingCombatants(state.defender).map((c) => c.slotIndex));
     state.moveBudgetAttacker = new Map();
@@ -407,6 +415,7 @@ export function movePlatoon(state: ManualBattleState, side: BattleSide, slotInde
   if (cost === undefined || cost === 0) return false;
   combatant.position = destination;
   moveBudgetSetFor(state, side).set(slotIndex, budget - cost);
+  applyMoveFatigue(combatant, state.round, state.log);
   return true;
 }
 
@@ -421,6 +430,11 @@ export function attackWithPlatoon(state: ManualBattleState, side: BattleSide, sl
   const target = getValidAttackTargets(state, actor).find((t) => t.slotIndex === targetSlotIndex);
   if (!target) return false;
   resolveAttack(actor, target, state.unitTypes, 1, false, state.round, state.log);
+  // resolveAttack already applied the kill's morale lift to the attacker;
+  // here the board context exists to shake allies adjacent to the loss.
+  if (!target.entries.some((e) => e.count > 0)) {
+    applyAllyDeathMorale(target, combatantsFor(state, enemySideOf(side)), state.round, state.log);
+  }
   unacted.delete(slotIndex);
   checkRoundAdvance(state);
   return true;

@@ -1,5 +1,18 @@
+import { hexDistance } from "@heroes/contracts";
 import type { Platoon, PlatoonEntry, UnitType } from "../units";
-import { DEFAULT_MAX_ROUNDS, HERO_RETREAT_PENALTY, PLATOON_RETREAT_LOSS } from "../combatConfig";
+import {
+  DEFAULT_MAX_ROUNDS,
+  FATIGUE_DECAY_PER_TURN,
+  FATIGUE_PER_ATTACK,
+  FATIGUE_PER_MOVE,
+  HERO_RETREAT_PENALTY,
+  MORALE_GAIN_PER_KILL,
+  MORALE_LOSS_PER_ADJACENT_DEATH,
+  MORALE_LOSS_PER_CASUALTY,
+  MORALE_LOW_THRESHOLD,
+  MORALE_RETREAT_THRESHOLD_REDUCTION,
+  PLATOON_RETREAT_LOSS,
+} from "../combatConfig";
 import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT, deploymentPosition, makeBattleGrid } from "./grid";
 import { applyCasualties, applyRetreatLoss, computeDamage, totalHealth } from "./damage";
 import type {
@@ -12,6 +25,7 @@ import type {
   CombatantOutcome,
   CombatantResult,
   CombatEffect,
+  MoraleFatigueReason,
   ResolveBattleOptions,
   RetreatDecision,
   RetreatPolicy,
@@ -37,6 +51,8 @@ export function buildCombatants(
       entries,
       maxHealth: totalHealth(entries, unitTypes),
       hasCounterCharge: true,
+      morale: 100,
+      fatigue: 0,
       retreated: false,
     });
   });
@@ -62,8 +78,92 @@ export function cloneCombatant(c: Combatant): Combatant {
   return { ...c, entries: c.entries.map((e) => ({ ...e })) };
 }
 
+// ── Morale & fatigue (docs/morale-fatigue-plan.md) ──────────────────────────
+
+function clampStat(value: number): number {
+  return Math.min(100, Math.max(0, value));
+}
+
+// Single seam every morale/fatigue mutation goes through: clamps to 0-100 and
+// mirrors the change into the log as a morale_change entry carrying the
+// actually-applied deltas plus the resulting values, so the battle log alone
+// re-derives both stats for the future legality-check consumer. A change
+// fully absorbed by the clamp (e.g. decay at fatigue 0) writes nothing.
+function applyStatChange(
+  target: Combatant,
+  moraleDelta: number,
+  fatigueDelta: number,
+  reason: MoraleFatigueReason,
+  round: number,
+  log: BattleLogEntry[],
+): void {
+  const moraleBefore = target.morale;
+  const fatigueBefore = target.fatigue;
+  target.morale = clampStat(moraleBefore + moraleDelta);
+  target.fatigue = clampStat(fatigueBefore + fatigueDelta);
+  const appliedMorale = target.morale - moraleBefore;
+  const appliedFatigue = target.fatigue - fatigueBefore;
+  if (appliedMorale === 0 && appliedFatigue === 0) return;
+  log.push({
+    round,
+    kind: "morale_change",
+    side: target.side,
+    slotIndex: target.slotIndex,
+    moraleDelta: appliedMorale,
+    fatigueDelta: appliedFatigue,
+    morale: target.morale,
+    fatigue: target.fatigue,
+    reason,
+  });
+}
+
+// Fatigue from one applied move action in the manual battle — may fire more
+// than once per round for a platoon that splits its movement.
+export function applyMoveFatigue(target: Combatant, round: number, log: BattleLogEntry[]): void {
+  applyStatChange(target, 0, FATIGUE_PER_MOVE, "move", round, log);
+}
+
+// Fatigue from one applied attack swing. resolveAttack calls this so BOTH
+// engines accrue identically and counterattacks count as exertion too.
+export function applyAttackFatigue(target: Combatant, round: number, log: BattleLogEntry[]): void {
+  applyStatChange(target, 0, FATIGUE_PER_ATTACK, "attack", round, log);
+}
+
+// Start of the platoon's own turn: fatigue partially recovers. resolveBattle
+// calls this right where hasCounterCharge refills; the manual battle
+// batch-applies it at the round boundary (its "turn start" for every living
+// platoon at once).
+export function applyTurnStartRecovery(target: Combatant, round: number, log: BattleLogEntry[]): void {
+  applyStatChange(target, 0, -FATIGUE_DECAY_PER_TURN, "turn_start", round, log);
+}
+
+// A platoon was destroyed: same-side platoons adjacent to the loss waver.
+// `allies` is the dead platoon's full side roster (including it).
+export function applyAllyDeathMorale(dead: Combatant, allies: Combatant[], round: number, log: BattleLogEntry[]): void {
+  for (const ally of allies) {
+    if (ally === dead || ally.retreated || !ally.entries.some((e) => e.count > 0)) continue;
+    if (hexDistance(ally.position, dead.position) !== 1) continue;
+    applyStatChange(ally, -MORALE_LOSS_PER_ADJACENT_DEATH, 0, "ally_destroyed", round, log);
+  }
+}
+
+// The "auto" retreat policy's self-retreat HP threshold for a platoon with
+// the given morale: at or above MORALE_LOW_THRESHOLD the caller's threshold
+// applies unchanged; below it the threshold rises (never above 1), so a
+// demoralized platoon withdraws EARLIER — low morale makes troops rout
+// before they are ground down. (Owner decision 2026-09-27, overriding the
+// plan's literal "lowers the threshold" wording.)
+export function effectiveSelfRetreatHpPct(basePct: number, morale: number): number {
+  if (morale >= MORALE_LOW_THRESHOLD) return basePct;
+  return Math.min(1, basePct + MORALE_RETREAT_THRESHOLD_REDUCTION);
+}
+
 // resolveAttack(): the seam a future ability layer (heal/regen/AoE) can
 // extend with new CombatEffect kinds without restructuring the turn loop.
+// Also the single morale/fatigue seam shared by both engines: the attacker's
+// fatigue/morale and the target's fatigue scale the damage, casualties dent
+// the target's morale, destroying the target lifts the attacker's, and the
+// swing itself tires the attacker (counterattacks included).
 export function resolveAttack(
   actor: Combatant,
   target: Combatant,
@@ -73,7 +173,7 @@ export function resolveAttack(
   round: number,
   log: BattleLogEntry[],
 ): CombatEffect {
-  const { damage, advantageBonus, disadvantagePenalty } = computeDamage(actor.entries, target.entries, unitTypes, modifier);
+  const { damage, advantageBonus, disadvantagePenalty } = computeDamage(actor.entries, target.entries, unitTypes, modifier, actor, target);
   const { entries, casualties } = applyCasualties(target.entries, unitTypes, damage);
   target.entries = entries;
   const effect: CombatEffect = {
@@ -88,6 +188,10 @@ export function resolveAttack(
     isCounterattack,
   };
   log.push({ round, ...effect });
+  const unitsLost = casualties.reduce((sum, c) => sum + c.count, 0);
+  if (unitsLost > 0) applyStatChange(target, -unitsLost * MORALE_LOSS_PER_CASUALTY, 0, "casualties", round, log);
+  if (!target.entries.some((e) => e.count > 0)) applyStatChange(actor, MORALE_GAIN_PER_KILL, 0, "kill", round, log);
+  applyAttackFatigue(actor, round, log);
   return effect;
 }
 
@@ -118,7 +222,7 @@ function applyRetreatPolicy(
     } else {
       for (const c of living) {
         const pct = c.maxHealth > 0 ? totalHealth(c.entries, unitTypes) / c.maxHealth : 0;
-        if (pct <= policy.selfRetreatHpPct) decisions.push({ slotIndex: c.slotIndex, scope: "platoon" });
+        if (pct <= effectiveSelfRetreatHpPct(policy.selfRetreatHpPct, c.morale)) decisions.push({ slotIndex: c.slotIndex, scope: "platoon" });
       }
     }
   }
@@ -221,6 +325,7 @@ export function resolveBattle(
     for (const actor of turnQueue) {
       if (actor.retreated || !actor.entries.some((e) => e.count > 0)) continue;
       actor.hasCounterCharge = true; // refills at the start of its own turn
+      applyTurnStartRecovery(actor, round, log);
       const enemies = actor.side === "attacker" ? defender : attacker;
       const target = pickTarget(enemies, unitTypes);
       if (!target) break;
@@ -237,7 +342,11 @@ export function resolveBattle(
         resolveAttack(current, opponent, unitTypes, modifier, isCounter, round, log);
         if (livingCombatants(attacker).length === 0 || livingCombatants(defender).length === 0) break;
         const opponentSurvived = opponent.entries.some((e) => e.count > 0);
-        if (!opponentSurvived || !opponent.hasCounterCharge) break;
+        if (!opponentSurvived) {
+          applyAllyDeathMorale(opponent, opponent.side === "attacker" ? attacker : defender, round, log);
+          break;
+        }
+        if (!opponent.hasCounterCharge) break;
         opponent.hasCounterCharge = false;
         [current, opponent] = [opponent, current];
         isCounter = true;

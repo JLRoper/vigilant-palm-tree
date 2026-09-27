@@ -27,6 +27,12 @@ export interface Combatant {
   // Refills to true at the start of this platoon's own turn; flips to false
   // the moment it spends a counterattack. See "Counterattacks (resolved)".
   hasCounterCharge: boolean;
+  // Live battle stats, 0-100: morale starts at 100, fatigue at 0. Accrual,
+  // decay and the damage multipliers they feed live in combatConfig.ts and
+  // damage.ts; every change is mirrored into the log as a morale_change
+  // entry so both stats stay re-derivable from the battle log alone.
+  morale: number;
+  fatigue: number;
   retreated: boolean;
 }
 
@@ -52,10 +58,35 @@ export interface CombatEffect {
   isCounterattack: boolean;
 }
 
+// Why a morale_change entry was written: casualties the platoon took, a kill
+// it scored, an adjacent ally being destroyed, or fatigue accrual from a
+// move / attack / own-turn-start recovery.
+export type MoraleFatigueReason =
+  | "casualties"
+  | "kill"
+  | "ally_destroyed"
+  | "move"
+  | "attack"
+  | "turn_start";
+
 export type BattleLogEntry =
   | ({ round: number } & CombatEffect)
   | { round: number; kind: "self_retreat"; side: BattleSide; slotIndex: number; casualties: PlatoonEntry[] }
   | { round: number; kind: "hero_retreat"; side: BattleSide }
+  // Every morale/fatigue mutation, carrying the signed deltas applied this
+  // event plus the resulting (clamped) values — the battle log alone is
+  // enough to replay both stats (roadmap coordination rule 2).
+  | {
+      round: number;
+      kind: "morale_change";
+      side: BattleSide;
+      slotIndex: number;
+      moraleDelta: number;
+      fatigueDelta: number;
+      morale: number;
+      fatigue: number;
+      reason: MoraleFatigueReason;
+    }
   | { round: number; kind: "stalemate"; detail: string };
 
 export interface CombatantResult {

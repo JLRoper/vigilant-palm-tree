@@ -201,6 +201,8 @@ function makeCombatant(slotIndex: number, side: BattleSide, q: number, r: number
     retreated: false,
     maxHealth,
     hasCounterCharge: true,
+    morale: 100,
+    fatigue: 0,
   };
 }
 
