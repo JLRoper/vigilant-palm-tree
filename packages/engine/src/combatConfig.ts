@@ -88,3 +88,31 @@ export const MORALE_MAX_ATTACK_PENALTY = 0.3;
 // plan's literal "lowers the threshold" wording).
 export const MORALE_LOW_THRESHOLD = 30;
 export const MORALE_RETREAT_THRESHOLD_REDUCTION = 0.15;
+
+// ── Spellcasting v1 (docs/spellcasting-plan.md) ─────────────────────────────
+// Owner-locked formulas (2026-09-27): Intelligence sizes the mana pool,
+// Arcane sizes spell power, mana is the only cast limiter, and mana refills
+// fully on the overworld day tick. Definitions live in combat/spells.ts.
+
+// heroMaxMana = intelligence × MANA_PER_INTELLIGENCE.
+export const MANA_PER_INTELLIGENCE = 10;
+// Damage-spell magnitude = arcane × SPELL_POWER_PER_ARCANE (flat — a spell
+// skips the atk/def ratio and the type multiplier entirely).
+export const SPELL_POWER_PER_ARCANE = 5;
+// Fixed v1 starting stats for heroes that don't carry their own (old saves
+// are backfilled with these at hydrate; leveling/progression is later).
+export const DEFAULT_HERO_INTELLIGENCE = 2;
+export const DEFAULT_HERO_ARCANE = 2;
+// Mana cost of one cast — shared by both v1 spells (one tuning knob per the
+// roadmap's "mana cost vs. pool size" limiter). With the default Int 2 pool
+// of 20, a hero gets two casts per full bar.
+export const SPELL_MANA_COST = 10;
+// Bless: timed attack multiplier applied to one friendly platoon via
+// Combatant.activeEffects, expiring (inclusive) at expiresRound.
+export const SPELL_BUFF_MULTIPLIER = 1.5;
+export const SPELL_BUFF_DURATION_ROUNDS = 3;
+// Flat v1 hero combat stats for the hero info panel — HeroState carries no
+// per-hero attack/defence yet (units do; the hero's own stats are a
+// progression feature), so the panel shows these constants instead.
+export const HERO_BASE_ATTACK = 2;
+export const HERO_BASE_DEFENCE = 2;

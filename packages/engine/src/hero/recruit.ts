@@ -1,6 +1,8 @@
 import type { GameState, HeroState, HorseVariantId, PlayerId, RecruitHeroResult, SettlementId } from "@heroes/contracts";
 import { MOVEMENT_PER_TURN } from "@heroes/contracts";
 import { normalizePlatoons } from "../units";
+import { DEFAULT_HERO_ARCANE, DEFAULT_HERO_INTELLIGENCE } from "../combatConfig";
+import { DEFAULT_HERO_SPELL, maxManaFor } from "../combat/spells";
 
 export const MAX_HEROES_PER_PLAYER = 5;
 export const HERO_RECRUIT_COST = 1;
@@ -58,6 +60,13 @@ export function recruitHero(
     isChartering: false,
     charterId: null,
     horseVariant,
+    // Spellcasting v1: every recruited hero starts as a Magic Arrow mage
+    // with the fixed v1 stat block (roadmap §"Spellcasting v1", decision 7).
+    arcane: DEFAULT_HERO_ARCANE,
+    intelligence: DEFAULT_HERO_INTELLIGENCE,
+    heroMana: maxManaFor(DEFAULT_HERO_INTELLIGENCE),
+    heroMaxMana: maxManaFor(DEFAULT_HERO_INTELLIGENCE),
+    heroSpell: DEFAULT_HERO_SPELL,
   };
 
   return {

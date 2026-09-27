@@ -2,6 +2,7 @@ import { axialToPixel, hexCorners, hexDistance, HEX_SIZE, type Axial } from "../
 import type { GameMap } from "../../../map/gameMap";
 import type { Hero } from "../../../entities/hero";
 import type { Castle } from "../../../entities/settlement";
+import { caravanTile } from "@heroes/engine";
 import type { RenderOptions } from "../../renderTypes";
 import { computeVision, isVisible } from "../../fog";
 import { computeReachableSplit } from "../../overlays/pathOverlay";
@@ -59,6 +60,27 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       if (!isVisible(visible, q, r)) continue;
       nodes.push({ kind: "resourceIcon", q, r, world: axialToPixel(q, r), resource: tile.resource });
     }
+  }
+
+  // Trade-route caravan markers (docs/wagons-stockpiles-trade-routes-plan.md
+  // §5.2): one wagon marker per route, at the caravan's current tile (the
+  // origin settlement while it loads). Drawn regardless of fog -- knowing a
+  // caravan is on the road is public information; raiding is a later phase.
+  for (const route of opts.tradeRoutes ?? []) {
+    const from = castles.find((c) => c.id === route.fromSettlementId);
+    const to = castles.find((c) => c.id === route.toSettlementId);
+    if (!from || !to) continue;
+    const tile = route.caravan
+      ? caravanTile(route.caravan, from.tile)
+      : { q: from.tile.q, r: from.tile.r };
+    nodes.push({
+      kind: "caravanMarker",
+      q: tile.q,
+      r: tile.r,
+      world: axialToPixel(tile.q, tile.r),
+      color: opts.colorForOwner(from.ownerId),
+      wagons: route.wagons,
+    });
   }
 
   for (const charter of opts.activeCharters ?? []) {

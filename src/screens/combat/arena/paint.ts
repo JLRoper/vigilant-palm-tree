@@ -30,6 +30,7 @@ export interface PaintSceneForArenaArgs {
   readonly selectedSlot: number | null;
   readonly moveRange: Axial[];
   readonly attackTargets: Combatant[];
+  readonly spellTargets: Combatant[];
   readonly aiActing: boolean;
   readonly aiActingSlot: number | null;
   readonly aiTargetHex: Axial | null;
@@ -62,6 +63,7 @@ export function paintSceneForArena(args: PaintSceneForArenaArgs): void {
     // pass the caller's arrays through without per-frame copies.
     moveRange: args.moveRange,
     attackTargets: args.attackTargets,
+    spellTargets: args.spellTargets,
     aiActing: args.aiActing,
     aiActingSlot: args.aiActingSlot,
     aiTargetHex: args.aiTargetHex,

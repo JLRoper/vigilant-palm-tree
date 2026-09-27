@@ -10,11 +10,12 @@
 
 import { type Axial, axialRound, HEX_DIRECTIONS, hexDistance } from "@heroes/contracts";
 import type { Platoon, PlatoonEntry, UnitType } from "../units";
-import { PLATOON_RETREAT_LOSS, RANGED_ATTACK_RANGE } from "../combatConfig";
-import { applyRetreatLoss } from "./damage";
+import { PLATOON_RETREAT_LOSS, RANGED_ATTACK_RANGE, SPELL_BUFF_DURATION_ROUNDS, SPELL_BUFF_MULTIPLIER } from "../combatConfig";
+import { applyRetreatLoss, applyCasualties } from "./damage";
 import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT, makeBattleGrid } from "./grid";
 import {
   applyAllyDeathMorale,
+  applyCasualtyMorale,
   applyMoveFatigue,
   applyTurnStartRecovery,
   buildCombatants,
@@ -24,6 +25,12 @@ import {
   pickTarget,
   resolveAttack,
 } from "./resolveBattle";
+import {
+  activeEffectMultiplier,
+  pruneExpiredEffects,
+  spellDef,
+  type HeroSpellLoadout,
+} from "./spells";
 import type { BattleGrid, BattleLogEntry, BattleResult, BattleSide, Combatant } from "./types";
 
 export { pickTarget } from "./resolveBattle";
@@ -48,6 +55,12 @@ export interface ManualBattleOptions {
   grid?: { cols: number; rows: number; obstacleCount?: number };
   sideChoice?: BattleSide;
   maxRounds?: number;
+  // Spellcasting v1: each side's hero spell loadout (spell known, mana
+  // walked in with, arcane-scaled power). A side omitted here (the default)
+  // has no spellcasting hero — casting is refused for it. The AI never
+  // casts in v1 (locked decision), so production threads only the human
+  // side's loadout; the engine still models both for symmetry.
+  heroSpells?: Partial<Record<BattleSide, HeroSpellLoadout>>;
 }
 
 export interface ManualBattleState {
@@ -76,6 +89,10 @@ export interface ManualBattleState {
   // finalizeManualBattle reads this to assign the `retreated_hero` outcome
   // instead of `lost_all_troops` when one side has voluntarily conceded.
   sidesRetreated: Set<BattleSide>;
+  // Spellcasting v1: per-side hero spell loadout, null when that hero casts
+  // nothing. Mana is the only cast limiter (locked decision 5) — casting
+  // never consumes a platoon's turn or touches the unacted sets.
+  heroSpells: { attacker: HeroSpellLoadout | null; defender: HeroSpellLoadout | null };
 }
 
 function hexKey(a: Axial): string {
@@ -141,6 +158,10 @@ export function startManualBattle(
     obstacleSeed,
     over: false,
     sidesRetreated: new Set(),
+    heroSpells: {
+      attacker: options.heroSpells?.attacker ?? null,
+      defender: options.heroSpells?.defender ?? null,
+    },
   };
 }
 
@@ -391,6 +412,10 @@ function checkRoundAdvance(state: ManualBattleState): void {
     // equivalent of resolveBattle's per-turn hasCounterCharge/decay seam).
     for (const c of livingCombatants(state.attacker)) applyTurnStartRecovery(c, state.round, state.log);
     for (const c of livingCombatants(state.defender)) applyTurnStartRecovery(c, state.round, state.log);
+    // Timed spell buffs expire (inclusive at their expiresRound) once the
+    // counter has moved past them.
+    for (const c of livingCombatants(state.attacker)) pruneExpiredEffects(c, state.round);
+    for (const c of livingCombatants(state.defender)) pruneExpiredEffects(c, state.round);
     state.unactedAttacker = new Set(livingCombatants(state.attacker).map((c) => c.slotIndex));
     state.unactedDefender = new Set(livingCombatants(state.defender).map((c) => c.slotIndex));
     state.moveBudgetAttacker = new Map();
@@ -501,6 +526,86 @@ export function endPlatoonTurn(state: ManualBattleState, side: BattleSide, slotI
   unacted.delete(slotIndex);
   checkRoundAdvance(state);
   return true;
+}
+
+// ── Spellcasting v1 (docs/spellcasting-plan.md) ─────────────────────────────
+
+// Living platoons the hero on `side` may target with their one spell:
+// enemies for damage spells, own living platoons for buffs. No range limit
+// in v1 — the plan's targeting flow only gates on "living" + spell-kind side.
+export function getValidSpellTargets(state: ManualBattleState, side: BattleSide): Combatant[] {
+  const loadout = state.heroSpells[side];
+  if (!loadout) return [];
+  const def = spellDef(loadout.spell);
+  const targetSide = def.targets === "enemy" ? enemySideOf(side) : side;
+  return livingCombatants(combatantsFor(state, targetSide));
+}
+
+export type SpellCastResult = Extract<BattleLogEntry, { kind: "spell_cast" }>;
+
+// Casts the hero's one v1 spell at a target platoon. `targetSlotIndex` is
+// the slot number WITHIN the legal target pool's side (enemy slots for
+// damage spells, own slots for buffs) — the same convention
+// attackWithPlatoon uses for its target slot. Validates loadout, mana (the
+// only limiter — locked decision 5), and that the target is currently
+// legal; on success deducts mana, applies the effect and pushes one
+// spell_cast log entry with full audit context. Deliberately never touches
+// the unacted sets or the round counter (the Spy pattern: casting is a
+// hero-level action outside the per-platoon turn structure), so a cast can
+// never advance the round or consume anyone's turn.
+export function castSpell(state: ManualBattleState, side: BattleSide, targetSlotIndex: number): SpellCastResult | null {
+  const loadout = state.heroSpells[side];
+  if (!loadout) return null;
+  const def = spellDef(loadout.spell);
+  if (loadout.mana < def.manaCost) return null;
+  const target = getValidSpellTargets(state, side).find((t) => t.slotIndex === targetSlotIndex);
+  if (!target) return null;
+
+  loadout.mana -= def.manaCost;
+  const entry: SpellCastResult = {
+    round: state.round,
+    kind: "spell_cast",
+    spell: loadout.spell,
+    side,
+    targetSlot: target.slotIndex,
+    manaSpent: def.manaCost,
+    casualties: [],
+  };
+
+  if (def.targets === "enemy") {
+    // Flat damage via applyCasualties — skips computeDamage()'s atk/def
+    // ratio and the type multiplier entirely (a spell is not a unit-vs-unit
+    // matchup). Casualties dent the target's morale exactly like a swing's
+    // would; the kill-lift does not apply (the hero scored it, not a
+    // platoon); adjacent allies of a destroyed target waver via the board
+    // context, same as attackWithPlatoon.
+    const { entries, casualties } = applyCasualties(target.entries, state.unitTypes, loadout.power);
+    target.entries = entries;
+    entry.damage = loadout.power;
+    entry.casualties = casualties;
+    applyCasualtyMorale(target, casualties.reduce((sum, c) => sum + c.count, 0), state.round, state.log);
+    if (!target.entries.some((e) => e.count > 0)) {
+      applyAllyDeathMorale(target, combatantsFor(state, target.side), state.round, state.log);
+    }
+  } else {
+    // Timed buff on a friendly platoon via its own activeEffects field (the
+    // plan's open question #5 resolution — SideModifiers is per-battle
+    // static and does not fit). resolveAttack folds the multiplier into the
+    // swing when the buff is live; checkRoundAdvance prunes at expiry.
+    const expiresRound = state.round + SPELL_BUFF_DURATION_ROUNDS - 1;
+    target.activeEffects.push({ multiplier: SPELL_BUFF_MULTIPLIER, expiresRound });
+    entry.multiplier = SPELL_BUFF_MULTIPLIER;
+    entry.expiresRound = expiresRound;
+  }
+
+  state.log.push(entry);
+  return entry;
+}
+
+// A blessed platoon's live multiplier — surfaced for UI/tests; resolveAttack
+// applies it internally.
+export function spellBuffMultiplierFor(combatant: Combatant, round: number): number {
+  return activeEffectMultiplier(combatant, round);
 }
 
 function closestHexTo(candidates: Axial[], target: Axial, current: Axial): Axial | null {

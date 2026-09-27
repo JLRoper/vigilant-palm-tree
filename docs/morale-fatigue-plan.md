@@ -116,6 +116,27 @@ need restructuring.
   the battle log — the legality-check constraint from the battle updates
   roadmap.
 
+## As built (2026-09-27)
+
+Shipped per this plan (8/8 phases). Constants in
+`packages/engine/src/combatConfig.ts`, all owner-tunable:
+
+| Constant | Value | Effect |
+|---|---|---|
+| `FATIGUE_PER_MOVE` / `FATIGUE_PER_ATTACK` / `FATIGUE_DECAY_PER_TURN` | 6 / 15 / 5 | ~+10 net/round for a once-per-round fighter |
+| `FATIGUE_MAX_PENALTY` | 0.35 | atk **and** def mult 1 → 0.65 at fatigue 100 |
+| `MORALE_LOSS_PER_CASUALTY` / `_ADJACENT_DEATH` / `GAIN_PER_KILL` | 2 / 10 / 10 | ~5 heavy hits break an uneven fight |
+| `MORALE_MAX_ATTACK_PENALTY` | 0.3 | attack-only mult 1 → 0.7 at morale 0 |
+| `MORALE_LOW_THRESHOLD` / `_RETREAT_THRESHOLD_REDUCTION` | 30 / 0.15 | below 30 morale the auto-retreat HP threshold **rises** 0.15 — demoralized platoons rout EARLIER (owner decision, overriding this doc's literal "lowers the threshold" wording) |
+
+Implementation notes: attack fatigue accrual lives in `resolveAttack`
+(the seam shared by both engines, so counterattacks count); every
+mutation emits a `morale_change` log entry with deltas + resulting
+values (legality-checker constraint); the arena's roster rail, info
+popup, and battle scene read the real values. Canonical as-built
+narrative: [battle-view-architecture.md](./battle-view-architecture.md)
+§"Combat stats & spellcasting".
+
 ## Suggested implementation order
 
 1. Data model + constants (steps 1-2) — no behavior change yet, just the

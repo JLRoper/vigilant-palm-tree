@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./damage";
 export * from "./grid";
+export * from "./spells";
 export {
   resolveBattle,
   DEFAULT_MAX_ROUNDS,

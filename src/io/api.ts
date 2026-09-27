@@ -253,7 +253,7 @@ export const api = {
       attackerId: string;
       defenderId: string;
       seq: number;
-      phase: "start" | "move" | "attack" | "retreat" | "surrender" | "end";
+      phase: "start" | "move" | "attack" | "retreat" | "surrender" | "spell" | "end";
       payload: Record<string, unknown>;
     },
   ): Promise<boolean> => {

@@ -1,5 +1,5 @@
 import type { DrawBuildingContext } from "./types";
-import { darken, drawIsoBox, buildingHeight, getOpts } from "./primitives";
+import { darken, drawIsoBox, buildingHeight, getOpts, drawArcaneFontAccent } from "./primitives";
 import { BUILDING_PALETTES } from "../palettes";
 
 export function drawIndustrial(opts: DrawBuildingContext): void {
@@ -66,4 +66,10 @@ export function drawIndustrial(opts: DrawBuildingContext): void {
     ctx.fillStyle = "#111";
     ctx.fillRect(cx - bw / 2, cy - H * 0.5, bw, bh);
   }
+
+  if (kind === "arcaneFont") drawArcaneFontAccent(ctx, cx, cy, hw, hh, H, getOwnerColor(opts));
+}
+
+function getOwnerColor(opts: DrawBuildingContext): string {
+  return opts.ownerColor;
 }

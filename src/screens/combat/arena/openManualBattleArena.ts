@@ -28,14 +28,19 @@ import {
   getMovementRange,
   getValidAttackTargets,
   getValidMeleeTargets,
+  getValidSpellTargets,
   isBattleOver,
   isRangedPlatoon,
   pickTarget,
   platoonSpeed,
+  SPELL_CATALOG,
+  spellDef,
+  defaultSpellLoadout,
   startManualBattle,
   timeOfDayForRound,
   unactedLivingSlots,
   type BattleResult,
+  type HeroSpellLoadout,
   type TimeOfDay,
 } from "@heroes/engine";
 import type { BattleLogEntry, BattleSide, Combatant } from "@heroes/engine";
@@ -51,7 +56,7 @@ import { applyLeaveBehind, openLeaveBehindDialog } from "./leaveBehind";
 import { attachRailHover, buildPlatoonStrip } from "./view";
 import { createArenaInput, type ArenaInput } from "./input";
 import { createArenaAi, type ArenaAi } from "./ai";
-import { attackFromSelectedHex, attackFromTarget, endPlatoonTurnAction, moveSelectedTo, retreatAction, surrenderAction, type BattleActionEmit, type BattleActionPhase } from "./state";
+import { attackFromSelectedHex, attackFromTarget, castSpellAction, endPlatoonTurnAction, moveSelectedTo, retreatAction, surrenderAction, type BattleActionEmit, type BattleActionPhase } from "./state";
 import { buildArenaPaint2dDeps, paintSceneForArena, readUseSceneBuilder } from "./paint";
 
 // Key for indexing a specific unit entry inside the arena's combatant list.
@@ -87,6 +92,13 @@ export interface ManualBattleArenaOptions {
   // passes the human hero's actual purse.
   heroGold?: number;
   surrenderCost?: number;
+  // Spellcasting v1 (docs/spellcasting-plan.md): the human hero's spell
+  // loadout — which spell they know, the mana they walk in with, and their
+  // arcane-scaled spell power. Defaults to the v1 standard loadout (Magic
+  // Arrow, default stat block, full bar) so the Test Battle sandbox can
+  // cast; pass `null` for a spellcaster-less hero. The AI never casts in v1
+  // (locked decision 4), so only the human side carries a loadout.
+  heroSpell?: HeroSpellLoadout | null;
   // Production flow only (work item 3): resolves the caller's wait once the
   // battle has finalized. When provided, the arena does NOT show its own
   // result card and does NOT close itself — the caller submits the outcome
@@ -116,6 +128,7 @@ export function openManualBattleArena(
   const aiSide: BattleSide = humanSide === "attacker" ? "defender" : "attacker";
   const attackerPlatoons = humanSide === "attacker" ? playerPlatoons : aiPlatoons;
   const defenderPlatoons = humanSide === "attacker" ? aiPlatoons : playerPlatoons;
+  const heroSpell = options.heroSpell === undefined ? defaultSpellLoadout() : options.heroSpell;
   const state = startManualBattle(attackerPlatoons, defenderPlatoons, {
     unitTypes,
     obstacleSeed: Math.floor(Math.random() * 1_000_000),
@@ -123,6 +136,7 @@ export function openManualBattleArena(
     // right, regardless of which role (attacker/defender) the human picked —
     // otherwise the AI ends up on the left whenever the human plays defender.
     sideChoice: humanSide,
+    heroSpells: heroSpell ? (humanSide === "attacker" ? { attacker: heroSpell } : { defender: heroSpell }) : {},
   });
 
   // Gold the human hero brings into this battle. Defaults to a low value
@@ -216,6 +230,13 @@ export function openManualBattleArena(
           `dmg=${entry.damage}`,
           flags.length ? `[${flags.join(", ")}]` : "",
           `casualties=${casualties}`,
+        );
+      } else if (entry.kind === "spell_cast") {
+        const targetSide = entry.side === "attacker" ? "defender" : "attacker";
+        debugLog(
+          `spell: ${sideName(entry.side)} cast ${SPELL_CATALOG[entry.spell].name} -> ${platoonLabel(targetSide, entry.targetSlot)}`,
+          `mana=-${entry.manaSpent}`,
+          entry.damage !== undefined ? `dmg=${entry.damage}` : `mult=x${entry.multiplier} (expires R${entry.expiresRound})`,
         );
       } else if (entry.kind === "self_retreat") {
         debugLog(`retreat: ${platoonLabel(entry.side, entry.slotIndex)} self-retreated`);
@@ -379,6 +400,13 @@ export function openManualBattleArena(
   let moveRange: Axial[] = [];
   let attackTargets: Combatant[] = [];
   let hoveredHex: Axial | null = null;
+
+  // Spellcasting v1 targeting mode (the Spy pattern's replace): armed by the
+  // hero panel's Cast Spell button, cleared by a cast, a cancel click, any
+  // platoon action, or the battle ending. While armed, canvas clicks are
+  // intercepted before the select/attack/move chain — see handleClick.
+  let castMode = false;
+  let castTargets: Combatant[] = [];
 
   // Directional melee targeting is owned by the arena/input module — see
   // createArenaInput below. The latch survives the cursor leaving the enemy
@@ -586,6 +614,27 @@ const FLOAT_MS = 800;
       if (entry.fatigueDelta !== 0) parts.push(`fatigue ${entry.fatigueDelta > 0 ? "+" : "−"}${Math.abs(entry.fatigueDelta)} → ${entry.fatigue}`);
       return `R${entry.round} · ${sideName(entry.side)} P${entry.slotIndex + 1} ${parts.join(", ")} (${entry.reason})`;
     }
+    if (entry.kind === "spell_cast") {
+      const targetSide: BattleSide = entry.side === "attacker" ? "defender" : "attacker";
+      const detail =
+        entry.damage !== undefined
+          ? `${entry.damage} dmg`
+          : entry.multiplier !== undefined
+            ? `×${entry.multiplier} atk (to R${entry.expiresRound})`
+            : "";
+      return (
+        `R${entry.round} · ${sideName(entry.side)} cast ${SPELL_CATALOG[entry.spell].name} → ` +
+        `${sideName(targetSide)} P${entry.targetSlot + 1}` +
+        (detail !== "" ? ` · ${detail}` : "") +
+        ` · ${entry.manaSpent} mana`
+      );
+    }
+    // spell_damage/spell_buff effect entries are type-permitted but never
+    // written to the log (castSpell writes the spell_cast entry instead) —
+    // this line exists for type exhaustiveness only.
+    if (entry.kind === "spell_damage" || entry.kind === "spell_buff") {
+      return `R${entry.round} · ${sideName(entry.side)} spell effect → P${entry.targetSlot + 1}`;
+    }
     return `R${entry.round} · Stalemate — ${entry.detail}`;
   }
 
@@ -709,7 +758,11 @@ const FLOAT_MS = 800;
       ? "Battle over."
       : waitingOnAi
         ? "The AI is making its move..."
-        : selectedSlot === null
+        : castMode
+          ? humanSpell && spellDef(humanSpell.spell).targets === "enemy"
+            ? "Click a glowing enemy platoon to cast. Click anywhere else to cancel."
+            : "Click a glowing platoon of yours to cast. Click anywhere else to cancel."
+          : selectedSlot === null
           ? "Click one of your outlined platoons — on the grid or in the left rail — to act. Hover any platoon for its full details."
           : input.getPendingTarget() !== null
             ? "The arrow shows which side you'll attack from — move the cursor around the enemy to swing it, then click to close in and fight. Click the marked hex itself if you'd rather pick it directly."
@@ -720,7 +773,7 @@ const FLOAT_MS = 800;
               : moveRange.length > 0
                 ? "Hover an enemy in reach to choose the side you attack from, or click a highlighted hex to just move (landing beside a lone enemy fights immediately). Move again, attack, or End Turn when done."
                 : "Out of movement — hover an adjacent enemy to attack from where you stand, or End Turn.";
-    endTurnBtn.style.display = selectedSlot !== null && !over && !ai.isActing() ? "" : "none";
+    endTurnBtn.style.display = selectedSlot !== null && !over && !ai.isActing() && !castMode ? "" : "none";
 
     // Cast Spell, Retreat, and Surrender live under the human's hero portrait
     // and only make sense while it's actually the human's turn to act — which
@@ -730,14 +783,39 @@ const FLOAT_MS = 800;
     humanCastBtn.style.display = showHumanActions ? "" : "none";
     retreatBtn.style.display = showHumanActions ? "" : "none";
     surrenderBtn.style.display = showHumanActions ? "" : "none";
+
+    // The cast button is enabled exactly when the hero's mana covers the
+    // spell's cost and something legal is on the board to target — real
+    // mana availability, not the old permanent stub-disable. Mana reads out
+    // beside it so the enabled state is explicable.
+    const spell = humanSpell ? spellDef(humanSpell.spell) : null;
+    const castable =
+      showHumanActions &&
+      humanSpell !== null &&
+      spell !== null &&
+      humanSpell.mana >= spell.manaCost &&
+      getValidSpellTargets(state, humanSide).length > 0;
+    humanCastBtn.disabled = !castable;
+    humanCastBtn.style.opacity = castable ? "1" : "0.4";
+    humanCastBtn.style.cursor = castable ? "pointer" : "not-allowed";
+    humanCastBtn.title = humanSpell
+      ? `${spell!.name} — ${spell!.description} Costs ${spell!.manaCost} mana.`
+      : "This hero knows no spells.";
+    if (humanManaEl) {
+      humanManaEl.textContent = humanSpell
+        ? `Mana ${humanSpell.mana}/${humanSpell.maxMana}`
+        : "No mana";
+    }
   }
 
   // Hero portraits flank the battlefield, HoMM3-style — they stand outside
   // the grid rather than occupying a hex. Laid out horizontally (portrait
   // beside name + Cast Spell) rather than as a tall centered stack, so the
-  // rail spends its height on platoons instead of chrome. Cast Spell is a
-  // stub for now: no spell system exists yet, so the button just says so.
-  function buildHeroPanel(label: string, accent: string): { panel: HTMLElement; castBtn: HTMLButtonElement } {
+  // rail spends its height on platoons instead of chrome. Cast Spell is
+  // enabled/disabled by renderActions() from the hero's real mana and legal
+  // targets; its click arms the cast targeting mode (handleClick intercepts
+  // armed clicks before the select/attack/move chain).
+  function buildHeroPanel(label: string, accent: string): { panel: HTMLElement; castBtn: HTMLButtonElement; manaEl: HTMLElement | null } {
     const panel = document.createElement("div");
     Object.assign(panel.style, {
       display: "flex",
@@ -778,16 +856,16 @@ const FLOAT_MS = 800;
     const castBtn = document.createElement("button");
     castBtn.textContent = "Cast Spell";
     styleButton(castBtn);
-    castBtn.disabled = true;
-    castBtn.style.opacity = "0.4";
-    castBtn.style.cursor = "not-allowed";
     castBtn.style.fontSize = "10.5px";
     castBtn.style.padding = "3px 7px";
-    castBtn.title = "Spellcasting isn't implemented yet";
     meta.appendChild(castBtn);
 
+    const manaEl = document.createElement("div");
+    Object.assign(manaEl.style, { fontSize: "9.5px", opacity: "0.7", fontVariantNumeric: "tabular-nums" });
+    meta.appendChild(manaEl);
+
     panel.appendChild(meta);
-    return { panel, castBtn };
+    return { panel, castBtn, manaEl };
   }
 
   // The player's own roster rail: hero panel, then a scrolling column of
@@ -802,7 +880,7 @@ const FLOAT_MS = 800;
     heroLabel: string,
     railLabel: string,
     accent: string,
-  ): { rail: HTMLElement; list: HTMLElement; castBtn: HTMLButtonElement; actions: HTMLElement } {
+  ): { rail: HTMLElement; list: HTMLElement; castBtn: HTMLButtonElement; manaEl: HTMLElement | null; actions: HTMLElement } {
     const rail = document.createElement("div");
     Object.assign(rail.style, {
       width: `${RAIL_WIDTH}px`,
@@ -845,7 +923,7 @@ const FLOAT_MS = 800;
     Object.assign(actions.style, { display: "flex", flexDirection: "column", gap: "4px", flexShrink: "0" });
     rail.appendChild(actions);
 
-    return { rail, list, castBtn: hero.castBtn, actions };
+    return { rail, list, castBtn: hero.castBtn, manaEl: hero.manaEl, actions };
   }
 
   const humanRail = buildRail("You", "Your Army", humanAccent);
@@ -889,6 +967,44 @@ const FLOAT_MS = 800;
   // the turn-gated visibility.
   humanRail.actions.append(retreatBtn, surrenderBtn);
   const humanCastBtn = humanRail.castBtn;
+  const humanManaEl = humanRail.manaEl;
+  // The human hero's spell loadout, straight from the engine state — mana
+  // spent in battle updates it, and renderActions() reads it for the
+  // button's enabled state and mana readout.
+  const humanSpell = state.heroSpells[humanSide];
+
+  // Arms/disarms the cast targeting mode. A cast needs a legal target on the
+  // board; with none (or no spell / no mana), the button is disabled by
+  // renderActions, so this only fires when casting is genuinely possible.
+  function toggleCastMode(): void {
+    if (castMode) {
+      cancelCastMode();
+      return;
+    }
+    const targets = getValidSpellTargets(state, humanSide);
+    if (!humanSpell || targets.length === 0) return;
+    debugLog(`cast mode armed: ${SPELL_CATALOG[humanSpell.spell].name}, ${targets.length} legal target(s)`);
+    castMode = true;
+    castTargets = targets;
+    input.clearPendingAttack();
+    refresh();
+  }
+
+  function cancelCastMode(): void {
+    if (!castMode) return;
+    castMode = false;
+    castTargets = [];
+    refresh();
+  }
+
+  // Silent variant for paths that refresh() themselves right after (select,
+  // afterPlayerAction) — avoids a double re-render.
+  function cancelCastModeQuiet(): void {
+    castMode = false;
+    castTargets = [];
+  }
+
+  humanCastBtn.addEventListener("click", toggleCastMode);
 
   // The hex size is solved for the available battlefield box on every layout
   // change, rather than drawing at a fixed size and scaling the bitmap down.
@@ -1046,6 +1162,7 @@ const FLOAT_MS = 800;
         selectedSlot,
         moveRange,
         attackTargets,
+        spellTargets: castTargets,
         aiActing: ai.isActing(),
         aiActingSlot: ai.getActingSlot(),
         aiTargetHex: ai.getTargetHex(),
@@ -1127,6 +1244,20 @@ const FLOAT_MS = 800;
       ctx.arc(x, y, hexSize * 0.8, 0, Math.PI * 2);
       ctx.strokeStyle = "#e05050";
       ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Cast-mode spell targets: a third ring style (violet, with a faint
+    // glow fill) distinct from the red attack ring and the gold unacted
+    // outline. Mirrored in the scenebuilder path by battleSpellTargetRing.
+    for (const t of castTargets) {
+      const { x, y } = toCanvas(t.position.q, t.position.r);
+      ctx.beginPath();
+      ctx.arc(x, y, hexSize * 0.8, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(178, 122, 232, 0.16)";
+      ctx.fill();
+      ctx.strokeStyle = "#b27ae8";
+      ctx.lineWidth = 2.5;
       ctx.stroke();
     }
 
@@ -1263,6 +1394,7 @@ const FLOAT_MS = 800;
   function selectPlatoon(slotIndex: number): void {
     selectedSlot = slotIndex;
     input.clearPendingAttack();
+    cancelCastModeQuiet();
     const combatant = getCombatant(state, humanSide, slotIndex);
     if (!combatant) {
       selectedSlot = null;
@@ -1357,6 +1489,7 @@ const FLOAT_MS = 800;
     selectedSlot = null;
     moveRange = [];
     attackTargets = [];
+    cancelCastModeQuiet();
     input.clearPendingAttack();
     infoPopup.hide();
     ai.advance();
@@ -1365,14 +1498,16 @@ const FLOAT_MS = 800;
   // Every damage entry appended by the beat we just resolved becomes a
   // floating casualty count over whoever took it. Driven off the engine log
   // rather than before/after health diffing, so a counterattack shows up as
-  // its own float on the other platoon without any special casing.
+  // its own float on the other platoon without any special casing. Spell
+  // damage rides the same path via its spell_cast entry.
   function spawnDamageFloats(sinceLength: number): void {
     for (let i = sinceLength; i < state.log.length; i++) {
       const entry = state.log[i];
-      if (entry.kind !== "damage") continue;
+      if (entry.kind !== "damage" && entry.kind !== "spell_cast") continue;
       const targetSide: BattleSide = entry.side === "attacker" ? "defender" : "attacker";
       const victim = getCombatant(state, targetSide, entry.targetSlot);
       if (!victim) continue;
+      if (entry.kind === "spell_cast" && entry.damage === undefined) continue;
       const lost = entry.casualties.reduce((sum, c) => sum + c.count, 0);
       floats.push({
         hex: { ...victim.position },
@@ -1430,6 +1565,7 @@ function finishBattle(): void {
     selectedSlot = null;
     moveRange = [];
     attackTargets = [];
+    cancelCastModeQuiet();
     input.clearPendingAttack();
     infoPopup.hide();
     refresh();
@@ -1484,6 +1620,42 @@ function finishBattle(): void {
     // click lands. Ignore input until it hands control back.
     if (ai.isActing()) {
       debugLog(`click ${fmtHex(hex)} -> ignored (AI is acting)`);
+      return;
+    }
+
+    // Cast targeting is armed: the click means "cast at this platoon" or
+    // "cancel" — never select/attack/move. Checked before the whole normal
+    // chain so an armed click can't be misread as a platoon selection.
+    if (castMode) {
+      const target = castTargets.find((t) => t.position.q === hex.q && t.position.r === hex.r);
+      castMode = false;
+      castTargets = [];
+      if (target) {
+        const beforeLog = state.log.length;
+        debugLog(`click ${fmtHex(hex)} -> cast ${humanSpell ? SPELL_CATALOG[humanSpell.spell].name : "?"} at ${platoonLabel(target.side, target.slotIndex)}`);
+        const cast = castSpellAction(state, humanSide, target.slotIndex, emit);
+        if (cast) {
+          logNewBattleEvents(beforeLog);
+          spawnDamageFloats(beforeLog);
+          // A killing blow (the spell wiped the last enemy platoon) ends the
+          // battle exactly like a decisive attack does — casting itself never
+          // advances the round or consumes a turn, but a won battle is won.
+          if (isBattleOver(state)) {
+            refresh();
+            finishBattle();
+            return;
+          }
+          refresh();
+        } else {
+          // Previewed as legal but the engine refused (e.g. mana drained by a
+          // race): nothing mutated, nothing streamed — just leave cast mode.
+          debugLog(`click ${fmtHex(hex)} -> cast REJECTED by engine (was previewed as legal)`);
+          refresh();
+        }
+      } else {
+        debugLog(`click ${fmtHex(hex)} -> cast cancelled (not a legal spell target)`);
+        refresh();
+      }
       return;
     }
 

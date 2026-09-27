@@ -376,6 +376,7 @@ export class GameEngine {
       },
       gs.activeCharters,
       this.validCharterHexes,
+      gs.tradeRoutes,
     );
     this.view.drawCityOverlay(this.ui.getCityView());
   }
@@ -418,6 +419,7 @@ export class GameEngine {
       spots as unknown as Parameters<typeof cityView.open>[4],
       mines as unknown as Parameters<typeof cityView.open>[5],
       castle.buildings,
+      gs.castleSeed,
     );
   }
 

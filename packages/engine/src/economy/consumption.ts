@@ -1,5 +1,6 @@
 import type { SettlementState, Warehouse } from "@heroes/contracts";
 import { buildingUpkeep } from "../buildingRegistry";
+import { settlementTreasuryCap, treasuryHeadroom } from "../settlement/capacity";
 
 export const FOOD_PER_POPULATION = 100;
 export const MORALE_DECAY_PER_DEFICIT_RATIO = 10;
@@ -80,5 +81,6 @@ export function applyMoraleDecay(s: SettlementState): SettlementState {
 
 export function applyEffectiveIncome(s: SettlementState): SettlementState {
   const inc = effectiveIncome(s);
-  return { ...s, gold: s.gold + inc };
+  const headroom = treasuryHeadroom(s.gold, settlementTreasuryCap(s));
+  return { ...s, gold: s.gold + Math.min(inc, headroom) };
 }

@@ -6,6 +6,7 @@ import { ARMY_STACK_SLOTS, type Platoon } from "../../state/units";
 import { catalogReady, catalogFailed, getCachedUnit, loadUnitCatalog } from "../../data/unitCatalog";
 import { getUnitImageUrl } from "../../data/unitImages";
 import { HERO_BANNERS } from "../../render/assetDescriptors";
+import { HERO_BASE_ATTACK, HERO_BASE_DEFENCE } from "@heroes/engine";
 
 const MOVEMENT_PER_TURN = 7;
 
@@ -541,6 +542,30 @@ export class HeroInfoMenu {
     this.withdrawBtn.style.cursor = this.withdrawBtn.disabled ? "default" : "pointer";
     this.depositBtn.style.cursor = this.depositBtn.disabled ? "default" : "pointer";
     this.renderArmy(hero.stacks);
+    this.renderStats(hero);
+  }
+
+  // Wires the four stat rows to real values (spellcasting v1's side effect —
+  // roadmap §"Spellcasting v1", decision 3): Arcane/Intelligence read the
+  // new HeroState fields; Attack/Defence show the flat v1 hero constants
+  // from combatConfig — HeroState carries no per-hero attack/defence yet
+  // (units do; hero stat progression is a later feature).
+  private renderStats(hero: Hero): void {
+    const values: Record<string, number> = {
+      Attack: HERO_BASE_ATTACK,
+      Defence: HERO_BASE_DEFENCE,
+      Arcane: hero.arcane,
+      Intelligence: hero.intelligence,
+    };
+    for (const [stat, value] of Object.entries(values)) {
+      const el = this.statValues[stat];
+      if (!el) continue;
+      el.textContent = String(value);
+      const row = el.parentElement;
+      if (row) {
+        row.style.opacity = "0.85";
+      }
+    }
   }
 
   private toggleArmy(): void {

@@ -193,6 +193,17 @@ export class SettlementInfoMenu {
       });
       cell.appendChild(img);
 
+      // Label under each pile so the food sprite (golden grain) isn't
+      // mistaken for a gold stockpile — gold lives in the treasury above.
+      const name = document.createElement("span");
+      name.textContent = r.charAt(0).toUpperCase() + r.slice(1);
+      Object.assign(name.style, {
+        fontSize: "9px",
+        opacity: "0.6",
+        lineHeight: "1",
+      });
+      cell.appendChild(name);
+
       const value = document.createElement("span");
       value.textContent = "0";
       Object.assign(value.style, {

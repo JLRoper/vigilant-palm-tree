@@ -23,6 +23,13 @@ import {
   cleanupDefeatedHeroCharters,
   startBuildingUpgrade,
   startSettlementUpgrade,
+  applyPlaceBuildings,
+  transferResources,
+  assignWagons,
+  transferCargoLoot,
+  buyWagons,
+  createTradeRoute as createTradeRouteReducer,
+  updateTradeRoute as updateTradeRouteReducer,
 } from "@heroes/engine";
 import type { EngineCtx, HydratableGameRow, UnitType, BattleResult, MapSize } from "@heroes/engine";
 import { hexDistance } from "@heroes/contracts";
@@ -35,6 +42,7 @@ import type {
   HeroState,
   Player,
   Platoon,
+  TradeRouteState,
   SettlementId,
   SettlementState,
   StartCharterPayload,
@@ -67,20 +75,21 @@ import { hydrateFromRepos } from "../persistence/hydrate";
 // the wiring half.
 export interface GameRepo {
   load(name: string): Promise<HydratableGameRow>;
-  saveHeroesAndSettlements(
-    name: string,
-    heroes: Record<HeroId, HeroState>,
-    settlements: Record<SettlementId, SettlementState>,
-    extra?: {
-      players?: Player[];
-      gold?: number;
-      round?: number;
-      day?: number;
-      active_player_id?: number;
-      next_charter_id?: number;
-      next_settlement_id?: number;
-    },
-  ): Promise<void>;
+    saveHeroesAndSettlements(
+      name: string,
+      heroes: Record<HeroId, HeroState>,
+      settlements: Record<SettlementId, SettlementState>,
+      extra?: {
+        players?: Player[];
+        gold?: number;
+        round?: number;
+        day?: number;
+        active_player_id?: number;
+        next_charter_id?: number;
+        next_settlement_id?: number;
+        trade_routes?: TradeRouteState[];
+      },
+    ): Promise<void>;
   insertSettlementSnapshots(gameName: string, snapshots: SettlementSnapshotInput[]): Promise<void>;
   insertResourceTransactions(gameName: string, transactions: ResourceTransactionInput[]): Promise<void>;
 }
@@ -153,6 +162,9 @@ export interface CommandResult {
   day?: number;
   activePlayerId?: number;
   players?: Player[];
+  // EndTurn + PlaceBuildings/CreateTradeRoute/UpdateTradeRoute: the full
+  // post-change routes array (caravans move on EndTurn's round wrap).
+  tradeRoutes?: TradeRouteState[];
   // TradeResources: the two settlements it actually touches (mirrors
   // TransferGold's hero/settlement pair above -- named fields for the
   // specific affected entities, not the full map EndTurn returns).
@@ -228,32 +240,46 @@ async function dualWriteEntities(
 // same JSONB-fallback charter gate EndTurn/ResolveBattle/StartCharter use.
 // ---------------------------------------------------------------------------
 
-function buildPostBattleHeroes(
-  allHeroes: Record<HeroId, HeroState>,
-  attackerHero: HeroState,
-  defenderHero: HeroState,
-  attackerStacks: Platoon[],
-  defenderStacks: Platoon[],
-  defenderLostAllTroops: boolean,
-): { heroes: Record<HeroId, HeroState>; lootedGold: number } {
-  // Hero entities are never deleted here -- a no-retreat loss just
-  // empties their platoons, matching the old route's own comment
-  // (what happens to a fully-defeated hero is a later phase's
-  // concern, per feature-plans/CombatResolutionEngine.md).
-  const lootedGold = defenderLostAllTroops ? Number(defenderHero.gold) || 0 : 0;
-  const heroes: Record<HeroId, HeroState> = { ...allHeroes };
-  heroes[attackerHero.id] = {
-    ...attackerHero,
-    gold: (Number(attackerHero.gold) || 0) + lootedGold,
-    stacks: attackerStacks,
-  };
-  heroes[defenderHero.id] = {
-    ...defenderHero,
-    gold: lootedGold > 0 ? 0 : defenderHero.gold,
-    stacks: defenderStacks,
-  };
-  return { heroes, lootedGold };
-}
+  function buildPostBattleHeroes(
+    allHeroes: Record<HeroId, HeroState>,
+    attackerHero: HeroState,
+    defenderHero: HeroState,
+    attackerStacks: Platoon[],
+    defenderStacks: Platoon[],
+    defenderLostAllTroops: boolean,
+  ): { heroes: Record<HeroId, HeroState>; lootedGold: number } {
+    // Hero entities are never deleted here -- a no-retreat loss just
+    // empties their platoons, matching the old route's own comment
+    // (what happens to a fully-defeated hero is a later phase's
+    // concern, per feature-plans/CombatResolutionEngine.md).
+    if (defenderLostAllTroops) {
+      // Winner-takes-loot, now wagon-capped (docs/wagons-stockpiles-trade-
+      // routes-plan.md §4.2): the attacker pockets as much of the purse as
+      // fits their gold cap and loots the defender's cargo up to their own
+      // cargo caps. A winner already at cap leaves the loser's gold intact
+      // -- soft caps never destroy.
+      const normalized = {
+        ...allHeroes,
+        [attackerHero.id]: { ...attackerHero, gold: Number(attackerHero.gold) || 0 },
+        [defenderHero.id]: { ...defenderHero, gold: Number(defenderHero.gold) || 0 },
+      };
+      const loot = transferCargoLoot(normalized, attackerHero.id, defenderHero.id);
+      const heroes: Record<HeroId, HeroState> = { ...loot.heroes };
+      heroes[attackerHero.id] = { ...heroes[attackerHero.id], stacks: attackerStacks };
+      heroes[defenderHero.id] = { ...heroes[defenderHero.id], stacks: defenderStacks };
+      return { heroes, lootedGold: loot.gold };
+    }
+    const heroes: Record<HeroId, HeroState> = { ...allHeroes };
+    heroes[attackerHero.id] = {
+      ...attackerHero,
+      stacks: attackerStacks,
+    };
+    heroes[defenderHero.id] = {
+      ...defenderHero,
+      stacks: defenderStacks,
+    };
+    return { heroes, lootedGold: 0 };
+  }
 
 async function persistBattleOutcome(
   deps: CommandDeps,
@@ -421,7 +447,12 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // See server/app/turnService.ts for the pipeline itself and its
       // documented charter-advancement limitation (no DB column for
       // activeCharters yet).
-      const { state: finalState, wrapped, transfers } = runEndTurn(state, clampGrowthRate(command.growthRate));
+      // Caravans path with A* on the deterministic rebuilt map -- only pay
+      // the generation cost when routes actually exist (plan §5.2).
+      const map = (state.tradeRoutes?.length ?? 0) > 0
+        ? new GameMap(Number(row.seed) || 1, row.map_size as MapSize)
+        : null;
+      const { state: finalState, wrapped, transfers } = runEndTurn(state, clampGrowthRate(command.growthRate), map);
       const legacyGold = sumPlayerGold(finalState.players, finalState.heroes, finalState.settlements);
       await deps.gameRepo.saveHeroesAndSettlements(
         command.gameName,
@@ -433,6 +464,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
           day: finalState.day,
           active_player_id: finalState.activePlayerId,
           gold: legacyGold,
+          trade_routes: finalState.tradeRoutes,
         },
       );
       // advanceRound() internally runs advanceCharters() (days-remaining
@@ -537,6 +569,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         day: finalState.day,
         activePlayerId: finalState.activePlayerId,
         players: finalState.players,
+        tradeRoutes: finalState.tradeRoutes,
       };
     }
     case "TradeResources": {
@@ -1174,6 +1207,149 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
+    }
+    case "PlaceBuildings": {
+      // F4 closer: the city view's working cart commits server-side. The
+      // reducer re-derives the net cost against the server's own row
+      // (placement costs minus the 50% destroy refund), revalidates
+      // affordability, and recomputes construction timers for brand-new
+      // placements -- a modified client can't ship a free or 0-day build.
+      const result = applyPlaceBuildings(state, command.settlementId, command.actor, command.buildings, command.initialLayout === true);
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "BuildingsPlaced",
+        actor: command.actor,
+        settlementId: command.settlementId,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
+    }
+    case "TransferResources": {
+      const result = transferResources(state, command.actor, command.heroId, command.settlementId, command.direction, command.amounts);
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "ResourcesTransferred",
+        actor: command.actor,
+        heroId: command.heroId,
+        settlementId: command.settlementId,
+        direction: command.direction,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return {
+        ok: true,
+        events: [event],
+        lastEventId,
+        hero: result.state.heroes[command.heroId],
+        settlement: result.state.settlements[command.settlementId],
+      };
+    }
+    case "AssignWagons": {
+      const result = assignWagons(state, command.actor, command.heroId, command.delta);
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      const event: EngineEvent = {
+        type: "WagonsAssigned",
+        actor: command.actor,
+        heroId: command.heroId,
+        delta: command.delta,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, hero: result.state.heroes[command.heroId] };
+    }
+    case "BuyWagons": {
+      const result = buyWagons(state, command.actor, command.settlementId, command.count);
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "WagonsBought",
+        actor: command.actor,
+        settlementId: command.settlementId,
+        count: command.count,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
+    }
+    case "CreateTradeRoute": {
+      const result = createTradeRouteReducer(
+        state,
+        command.actor,
+        command.fromSettlementId,
+        command.toSettlementId,
+        command.resource,
+        command.wagons,
+      );
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+        { players: result.state.players, trade_routes: result.state.tradeRoutes },
+      );
+      const event: EngineEvent = {
+        type: "TradeRouteCreated",
+        actor: command.actor,
+        routeId: result.route!.id,
+        fromSettlementId: command.fromSettlementId,
+        toSettlementId: command.toSettlementId,
+        resource: command.resource,
+        wagons: command.wagons,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, tradeRoutes: result.state.tradeRoutes };
+    }
+    case "UpdateTradeRoute": {
+      const result = updateTradeRouteReducer(state, command.actor, command.routeId, {
+        resource: command.resource,
+        wagonsDelta: command.wagonsDelta,
+        remove: command.remove,
+      });
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+        { players: result.state.players, trade_routes: result.state.tradeRoutes },
+      );
+      const event: EngineEvent = {
+        type: "TradeRouteUpdated",
+        actor: command.actor,
+        routeId: command.routeId,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, tradeRoutes: result.state.tradeRoutes };
     }
     case "UpgradeSettlement": {
       const settlement = row.settlements[command.settlementId];

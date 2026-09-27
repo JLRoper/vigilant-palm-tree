@@ -4,6 +4,7 @@ import { startManualBattle, type BattleSide, type ManualBattleState, type UnitTy
 import {
   attackFromSelectedHex,
   attackFromTarget,
+  castSpellAction,
   moveSelectedTo,
   retreatAction,
   surrenderAction,
@@ -168,4 +169,56 @@ test("attackFromSelectedHex streams the approach-hex move+attack as a single att
   );
   const payload = rows[0].payload as Record<string, unknown>;
   assert.deepEqual(payload.from, { q: 5, r: 5 });
+});
+
+// ---- Spellcasting v1 (roadmap §"Spellcasting v1", wiring requirement) ------
+
+function spellState(): { state: ManualBattleState } {
+  const playerPlatoons = [{ entries: [{ unitTypeId: "footman", count: 5 }] }];
+  const aiPlatoons = [{ entries: [{ unitTypeId: "footman", count: 4 }] }];
+  const loadout = { spell: "magic_arrow" as const, mana: 20, maxMana: 20, power: 10 };
+  const state = startManualBattle(playerPlatoons, aiPlatoons, {
+    unitTypes,
+    obstacleSeed: 1,
+    sideChoice: "attacker",
+    heroSpells: { attacker: loadout },
+  });
+  return { state };
+}
+
+test("castSpellAction streams one spell row with spell id, sides, target, damage and mana", () => {
+  const { state } = spellState();
+  const { rows, emit } = spy();
+
+  const cast = castSpellAction(state, "attacker", 0, emit);
+  assert.ok(cast, "the cast applied");
+  assert.equal(rows.length, 1, "an applied cast streams exactly one row");
+  assert.equal(rows[0].phase, "spell");
+  const payload = rows[0].payload as Record<string, unknown>;
+  assert.equal(payload.side, "attacker");
+  assert.equal(payload.spell, "magic_arrow");
+  assert.equal(payload.targetSlotIndex, 0);
+  assert.equal(payload.damage, 10, "the flat arcane-scaled damage rides the row");
+  assert.equal(payload.manaSpent, 10);
+  assert.equal(payload.round, state.round);
+  assert.equal(typeof payload.timeOfDay, "string", "time-of-day context rides every row");
+  assert.ok(Array.isArray(payload.casualties), "casualties ride the row for the future re-simulator");
+  assert.equal(state.heroSpells.attacker!.mana, 10, "the engine state's mana was spent before emission");
+});
+
+test("a rejected cast streams nothing (no state change, nothing to re-simulate)", () => {
+  // No loadout on this state: the engine refuses the cast and the wrapper
+  // must not emit a row.
+  const state = makeState();
+  const { rows, emit } = spy();
+  assert.equal(castSpellAction(state, "attacker", 0, emit), null);
+  assert.deepEqual(rows, []);
+});
+
+test("out-of-mana casts stream nothing", () => {
+  const { state } = spellState();
+  state.heroSpells.attacker!.mana = 0;
+  const { rows, emit } = spy();
+  assert.equal(castSpellAction(state, "attacker", 0, emit), null);
+  assert.deepEqual(rows, []);
 });

@@ -1,5 +1,5 @@
 import { Router, type Request } from "express";
-import type { BuildingUpgradeRequest, Command, Platoon } from "@heroes/contracts";
+import type { BuildingDef, BuildingUpgradeRequest, Command, Platoon } from "@heroes/contracts";
 import { VALID_HORSE_VARIANTS } from "@heroes/engine";
 import { handleCommandTransactional, createLiveCommandDeps, type LiveCommandDeps } from "../../app/commandHandler";
 import { touchSeat } from "../../app/dropPolicy";
@@ -332,6 +332,182 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     };
   }
 
+  if (b.kind === "PlaceBuildings") {
+    // Per-building shape gate, mirroring isBuildingUpgradeRequest's
+    // permissiveness: `kind`/`style` are non-empty strings (the handler
+    // resolves semantics), coordinates are ints, levels are 1..3, and an
+    // optional construction object must carry a non-negative integer
+    // daysRemaining -- though applyPlaceBuildings() recomputes that for
+    // brand-new placements server-side anyway, so a spoofed 0-day value
+    // only affects edits to buildings the server already knows about.
+    if (
+      typeof b.settlementId !== "string" ||
+      !Array.isArray(b.buildings) ||
+      !b.buildings.every((v: unknown) => {
+        if (!v || typeof v !== "object") return false;
+        const d = v as {
+          gx: unknown; gy: unknown; kind: unknown; level: unknown;
+          style: unknown; w?: unknown; h?: unknown; construction?: unknown;
+        };
+        if (
+          !Number.isInteger(d.gx) ||
+          !Number.isInteger(d.gy) ||
+          typeof d.kind !== "string" || d.kind.length === 0 ||
+          typeof d.level !== "number" || !Number.isInteger(d.level) ||
+          d.level < 1 || d.level > 3 ||
+          typeof d.style !== "string" || d.style.length === 0
+        ) {
+          return false;
+        }
+        if (d.w !== undefined && (!Number.isInteger(d.w) || (d.w as number) < 1)) return false;
+        if (d.h !== undefined && (!Number.isInteger(d.h) || (d.h as number) < 1)) return false;
+        if (d.construction !== undefined) {
+          if (typeof d.construction !== "object" || d.construction === null) return false;
+          const days = (d.construction as { daysRemaining?: unknown }).daysRemaining;
+          if (!isNonNegativeInt(days) || (days as number) > 30) return false;
+        }
+        return true;
+      })
+    ) {
+      return null;
+    }
+    return {
+      kind: "PlaceBuildings",
+      gameName,
+      actor: b.actor,
+      settlementId: b.settlementId,
+      buildings: b.buildings as BuildingDef[],
+      ...(b.initialLayout === true ? { initialLayout: true } : {}),
+    };
+  }
+
+  if (b.kind === "TransferResources") {
+    // Amounts: integers >= 0 per known warehouse resource; at least one
+    // positive amount (the reducer rejects all-zero as a 409 anyway, but a
+    // mistyped "-5" or "wood": "lots" is a malformed body, not a move).
+    if (
+      typeof b.heroId !== "string" ||
+      typeof b.settlementId !== "string" ||
+      (b.direction !== "load" && b.direction !== "unload") ||
+      !b.amounts ||
+      typeof b.amounts !== "object"
+    ) {
+      return null;
+    }
+    const amounts = b.amounts as Record<string, unknown>;
+    const clean: Partial<Record<string, number>> = {};
+    let any = false;
+    for (const r of ["wood", "stone", "iron", "arcane", "food"]) {
+      const v = amounts[r];
+      if (v === undefined) continue;
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0) return null;
+      if (v > 0) any = true;
+      clean[r] = v;
+    }
+    if (!any) return null;
+    return {
+      kind: "TransferResources",
+      gameName,
+      actor: b.actor,
+      heroId: b.heroId,
+      settlementId: b.settlementId,
+      direction: b.direction,
+      amounts: clean,
+    };
+  }
+
+  if (b.kind === "AssignWagons") {
+    if (
+      typeof b.heroId !== "string" ||
+      typeof b.delta !== "number" ||
+      !Number.isInteger(b.delta) ||
+      b.delta === 0
+    ) {
+      return null;
+    }
+    return {
+      kind: "AssignWagons",
+      gameName,
+      actor: b.actor,
+      heroId: b.heroId,
+      delta: b.delta,
+    };
+  }
+
+  if (b.kind === "BuyWagons") {
+    if (
+      typeof b.settlementId !== "string" ||
+      typeof b.count !== "number" ||
+      !Number.isInteger(b.count) ||
+      b.count <= 0 ||
+      b.count > 100
+    ) {
+      return null;
+    }
+    return {
+      kind: "BuyWagons",
+      gameName,
+      actor: b.actor,
+      settlementId: b.settlementId,
+      count: b.count,
+    };
+  }
+
+  const VALID_WAGON_RESOURCES = ["wood", "stone", "iron", "arcane", "food"] as const;
+
+  if (b.kind === "CreateTradeRoute") {
+    if (
+      typeof b.fromSettlementId !== "string" ||
+      typeof b.toSettlementId !== "string" ||
+      typeof b.resource !== "string" ||
+      !VALID_WAGON_RESOURCES.includes(b.resource as (typeof VALID_WAGON_RESOURCES)[number]) ||
+      typeof b.wagons !== "number" ||
+      !Number.isInteger(b.wagons) ||
+      b.wagons <= 0 ||
+      b.wagons > 100
+    ) {
+      return null;
+    }
+    return {
+      kind: "CreateTradeRoute",
+      gameName,
+      actor: b.actor,
+      fromSettlementId: b.fromSettlementId,
+      toSettlementId: b.toSettlementId,
+      resource: b.resource as (typeof VALID_WAGON_RESOURCES)[number],
+      wagons: b.wagons,
+    };
+  }
+
+  if (b.kind === "UpdateTradeRoute") {
+    if (typeof b.routeId !== "string") return null;
+    if (b.resource !== undefined) {
+      if (
+        typeof b.resource !== "string" ||
+        !VALID_WAGON_RESOURCES.includes(b.resource as (typeof VALID_WAGON_RESOURCES)[number])
+      ) {
+        return null;
+      }
+    }
+    if (b.wagonsDelta !== undefined) {
+      if (typeof b.wagonsDelta !== "number" || !Number.isInteger(b.wagonsDelta) || b.wagonsDelta === 0) {
+        return null;
+      }
+      if (Math.abs(b.wagonsDelta) > 100) return null;
+    }
+    if (b.remove !== undefined && typeof b.remove !== "boolean") return null;
+    if (b.resource === undefined && b.wagonsDelta === undefined && b.remove !== true) return null;
+    return {
+      kind: "UpdateTradeRoute",
+      gameName,
+      actor: b.actor,
+      routeId: b.routeId,
+      ...(b.resource !== undefined ? { resource: b.resource as (typeof VALID_WAGON_RESOURCES)[number] } : {}),
+      ...(b.wagonsDelta !== undefined ? { wagonsDelta: b.wagonsDelta } : {}),
+      ...(b.remove !== undefined ? { remove: b.remove } : {}),
+    };
+  }
+
   if (b.kind === "UpgradeSettlement") {
     // targetLevel is deliberately not read off the body -- the handler
     // derives it as settlement.level + 1 (server/app/commandHandler.ts's
@@ -498,6 +674,7 @@ commandsRouter.post("/", async (req: Request<{ name: string }>, res) => {
       day: result.day,
       activePlayerId: result.activePlayerId,
       players: result.players,
+      tradeRoutes: result.tradeRoutes,
       fromSettlement: result.fromSettlement,
       toSettlement: result.toSettlement,
       attackerHero: result.attackerHero,

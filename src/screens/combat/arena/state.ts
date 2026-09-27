@@ -1,6 +1,7 @@
 import {
   attackFromHex,
   attackWithPlatoon,
+  castSpell,
   endPlatoonTurn,
   getCombatant,
   getMovementRange,
@@ -9,6 +10,7 @@ import {
   timeOfDayForRound,
   type BattleSide,
   type ManualBattleState,
+  type SpellCastResult,
 } from "@heroes/engine";
 import { hexDistance, type Axial } from "./layout";
 
@@ -21,7 +23,7 @@ import { hexDistance, type Axial } from "./layout";
 // start ("start": obstacleSeed + initial stacks + sides, the mandatory
 // re-simulation seed row) and end ("end": outcome + survivors) rows are
 // emitted by openManualBattleArena, not here.
-export type BattleActionPhase = "start" | "move" | "attack" | "retreat" | "surrender" | "end";
+export type BattleActionPhase = "start" | "move" | "attack" | "retreat" | "surrender" | "spell" | "end";
 
 export interface BattleAction {
   phase: BattleActionPhase;
@@ -87,6 +89,37 @@ export function attackFromTarget(
     });
   }
   return ok;
+}
+
+// Spellcasting v1 (roadmap §"Spellcasting v1", wiring requirement): every
+// applied cast streams a battle_actions row like every other verb — the
+// future legality consumer needs the complete action log. The payload
+// mirrors the engine's spell_cast log entry (spell id, caster side, target
+// slot, damage/effect magnitude, mana spent, casualties) so the row alone
+// re-derives the cast. Rejected casts mutate nothing and stream nothing.
+export function castSpellAction(
+  state: ManualBattleState,
+  side: BattleSide,
+  targetSlotIndex: number,
+  emit?: BattleActionEmit,
+): SpellCastResult | null {
+  const cast = castSpell(state, side, targetSlotIndex);
+  if (cast && emit) {
+    safeEmit(emit, {
+      phase: "spell",
+      payload: {
+        ...actionContext(state),
+        side: cast.side,
+        spell: cast.spell,
+        targetSlotIndex: cast.targetSlot,
+        manaSpent: cast.manaSpent,
+        ...(cast.damage !== undefined ? { damage: cast.damage } : {}),
+        ...(cast.multiplier !== undefined ? { multiplier: cast.multiplier, expiresRound: cast.expiresRound } : {}),
+        casualties: cast.casualties,
+      },
+    });
+  }
+  return cast;
 }
 
 export function endPlatoonTurnAction(

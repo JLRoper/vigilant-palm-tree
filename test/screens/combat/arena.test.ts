@@ -203,6 +203,7 @@ function makeCombatant(slotIndex: number, side: BattleSide, q: number, r: number
     hasCounterCharge: true,
     morale: 100,
     fatigue: 0,
+    activeEffects: [],
   };
 }
 
@@ -213,6 +214,17 @@ function makeState(): ManualBattleState {
     unitTypes,
     obstacleSeed: 1,
     sideChoice: "attacker",
+  });
+}
+
+function makeSpellState(): ManualBattleState {
+  const playerPlatoons = [{ entries: [{ unitTypeId: "footman", count: 5 }] }];
+  const aiPlatoons = [{ entries: [{ unitTypeId: "footman", count: 4 }] }];
+  return startManualBattle(playerPlatoons, aiPlatoons, {
+    unitTypes,
+    obstacleSeed: 1,
+    sideChoice: "attacker",
+    heroSpells: { attacker: { spell: "magic_arrow", mana: 20, maxMana: 20, power: 10 } },
   });
 }
 
@@ -452,6 +464,7 @@ test("paintSceneForArena: paints the battle scene itself, with no legacy fallbac
     selectedSlot: 0,
     moveRange: [{ q: 1, r: 0 }],
     attackTargets: [],
+    spellTargets: [],
     aiActing: false,
     aiActingSlot: null,
     aiTargetHex: null,
@@ -494,6 +507,7 @@ test("paintSceneForArena: handles an active moveAnim without throwing", () => {
     selectedSlot: 0,
     moveRange: [{ q: 1, r: 0 }, { q: 2, r: 0 }],
     attackTargets: [],
+    spellTargets: [],
     aiActing: false,
     aiActingSlot: null,
     aiTargetHex: null,

@@ -24,6 +24,7 @@ export type SceneNode =
   | HeroTrailNode
   | HoverHighlightNode
   | SelectedTileHighlightNode
+  | CaravanMarkerNode
   | HeroNode
   | CitySkyboxNode
   | CityCellNode
@@ -34,6 +35,7 @@ export type SceneNode =
   | CityLabelNode
   | BattleHexNode
   | BattleAttackTargetRingNode
+  | BattleSpellTargetRingNode
   | BattleAiTelegraphHexNode
   | BattleMovePathNode
   | BattleImpactRingNode
@@ -70,6 +72,16 @@ export interface ResourceIconNode {
   r: number;
   world: WorldPoint;
   resource: ResourceType;
+}
+
+/** Trade-route caravan marker (docs/wagons-stockpiles-trade-routes-plan.md §5.2). */
+export interface CaravanMarkerNode {
+  kind: "caravanMarker";
+  q: number;
+  r: number;
+  world: WorldPoint;
+  color: string;
+  wagons: number;
 }
 
 export interface CharterOverlayNode {
@@ -213,6 +225,8 @@ export interface CityBuildingNode {
   ownerColor: string;
   style: GenerationStyle;
   selected: boolean;
+  /** Set while the building's upgrade is in flight; the painter swaps the real sprite for a shared construction-stage sprite. */
+  constructionStage?: 1 | 2 | 3;
 }
 
 export interface CityGhostBuildingNode {
@@ -255,6 +269,17 @@ export interface BattleHexNode {
 
 export interface BattleAttackTargetRingNode {
   kind: "battleAttackTargetRing";
+  side: BattleSide;
+  slotIndex: number;
+  world: WorldPoint;
+  radius: number;
+}
+
+// Cast-mode spell target highlight — the violet third ring style (red =
+// attack, gold outline = unacted, violet = spell target). Mirrors the legacy
+// drawLegacy() castTargets loop in openManualBattleArena.ts.
+export interface BattleSpellTargetRingNode {
+  kind: "battleSpellTargetRing";
   side: BattleSide;
   slotIndex: number;
   world: WorldPoint;

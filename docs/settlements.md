@@ -189,5 +189,6 @@ New event kinds:
 - How it produces per turn: [economy.md](./economy.md)
 - Who builds and captures them: [heroes.md](./heroes.md)
 - Inside a settlement: [city-view-impl-plan.md](./city-view-impl-plan.md)
+- As-built collection & building-economy reference: [resource-gathering.md](./resource-gathering.md)
 
 [← Back to index](./README.md)

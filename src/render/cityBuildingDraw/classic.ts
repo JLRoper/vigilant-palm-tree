@@ -1,5 +1,5 @@
 import type { DrawBuildingContext } from "./types";
-import { lighten, darken, drawIsoBox, buildingHeight, getOpts } from "./primitives";
+import { lighten, darken, drawIsoBox, buildingHeight, getOpts, drawArcaneFontAccent } from "./primitives";
 
 export function drawClassic(opts: DrawBuildingContext): void {
   const { ctx, cx, cy, hw, hh, kind, level, ownerColor } = getOpts(opts);
@@ -64,4 +64,6 @@ export function drawClassic(opts: DrawBuildingContext): void {
     ctx.lineWidth = 1.5;
     ctx.strokeRect(cx - w / 2, cy + hh * 0.1, w, h);
   }
+
+  if (kind === "arcaneFont") drawArcaneFontAccent(ctx, cx, cy, hw, hh, H, ownerColor);
 }

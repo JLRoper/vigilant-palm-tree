@@ -25,7 +25,12 @@ imported by both** the server command handler and the client arena
 > `SubmitBattleResult` command; every arena action streams to the
 > `battle_actions` table as it happens. Hero-vs-hero collisions between two
 > human players still quick-resolve — a client only ever plays its own
-> hero's army in the arena.
+> hero's army in the arena. **Morale & fatigue** and **Spellcasting v1**
+> shipped the same day — see
+> [Combat stats & spellcasting](#combat-stats--spellcasting-shipped-2026-09-27)
+> below and their plan docs
+> ([morale-fatigue-plan.md](./morale-fatigue-plan.md),
+> [spellcasting-plan.md](./spellcasting-plan.md)).
 
 > **On line numbers.** This doc deliberately references **symbols, not
 > line numbers**. The original draft cited a dozen exact lines and every
@@ -294,6 +299,76 @@ status bar / battle row / action + log bar:
 
 ---
 
+## Combat stats & spellcasting (shipped 2026-09-27)
+
+Two features layered onto the engine's extension seams — neither changes
+the alternating-turn loop's shape.
+
+### Morale & fatigue
+
+Every `Combatant` carries live `morale` (starts 100) and `fatigue`
+(starts 0):
+
+- **Fatigue** accrues +6 per move and +15 per attack (counterattacks
+  included — the accrual lives in `resolveAttack`, the seam shared by
+  both engines) and decays −5 at each own-turn start. It scales
+  `effAttack` **and** `effDefense` linearly down to 0.65× at fatigue
+  100, in `damage.ts` next to the existing `typeMultiplier` step.
+- **Morale** drops −2 per casualty and −10 when an adjacent same-side
+  platoon dies; kills grant +10. It is attack-only: a linear penalty
+  down to 0.7× at morale 0 (defense is discipline, not spirit).
+- **Low morale (< 30) makes a platoon rout EARLIER**: the `auto`
+  retreat policy's self-retreat HP threshold rises by 0.15 (owner
+  decision 2026-09-27, overriding the plan's literal "lowers the
+  threshold" wording).
+- Every mutation emits a `morale_change` `BattleLogEntry` carrying
+  deltas + resulting values, so battle state is fully determined by the
+  log (the future legality-check consumer re-derives it). The arena's
+  roster rail, info popup, and battle scene render the real values —
+  the hard-coded 100/0 placeholder bars are gone.
+- All tunables are named constants in `packages/engine/src/combatConfig.ts`
+  (owner-tunable; values listed in
+  [morale-fatigue-plan.md](./morale-fatigue-plan.md) §As built).
+
+### Spellcasting v1
+
+A hero-level action layered on top of the turn loop (never consumes a
+platoon's turn — the same out-of-band pattern the removed Spy action
+used):
+
+- **Persistent identity.** `HeroState` carries `arcane`,
+  `intelligence`, `heroMana`, `heroMaxMana`, and `heroSpell` (one
+  spell per hero for v1; every hero gets Magic Arrow by default).
+  Persisted in the games-row state JSONB with a read-path backfill —
+  no migration. The hero info panel's four stat rows show the real
+  values.
+- **Formulas** (constants in `combatConfig.ts`): pool =
+  `intelligence × MANA_PER_INTELLIGENCE (10)`; Magic Arrow deals
+  `arcane × SPELL_POWER_PER_ARCANE (5)` **flat** damage through
+  `applyCasualties()` (skips the atk/def ratio and type multiplier);
+  Bless applies a ×1.5 attack buff to one friendly platoon for 3
+  rounds via the per-`Combatant` `activeEffects` list (expired
+  entries are pruned at round advance). Casting costs
+  `SPELL_MANA_COST = 10` and is limited by mana only.
+- **Cast flow.** The hero panel's Cast button enables when mana
+  suffices; clicking enters `castMode`, living valid targets get a
+  violet ring (both the legacy canvas and the scenebuilder draw paths),
+  and a click on one resolves immediately — before the normal
+  select/attack/move chain in `handleClick`, so it can't be misread.
+- **Mana economy.** The pool persists across battles in `HeroState`;
+  the server refills it fully on the overworld day tick
+  (`advanceRound()` in `packages/engine/src/turn/round.ts` — the actual
+  day-increment seam). Battle-internal spending does not write back
+  mid-fight; the next day tick restores the pool.
+- **AI never casts in v1** (v1.1 fast-follow); the AI-side cast button
+  is not rendered.
+- **Streaming.** Every cast posts a `battle_actions` row with
+  `phase: "spell"` through the same telemetry wrappers as
+  move/attack/retreat — the action log stays complete for the future
+  legality-check consumer.
+
+---
+
 ## Module roles in the battle view surface
 
 | Module | Layer | Role |
@@ -318,10 +393,12 @@ status bar / battle row / action + log bar:
 | `src/io/api.ts` | Network | `postBattleAction` — fire-and-forget `battle_actions` POST (short timeout, swallows failures) |
 | `src/core/eventBus.ts` | Spine | `battle:resolved` event for downstream refresh |
 | `packages/engine/src/combat/grid.ts` | Engine | `makeBattleGrid` (odd-r offset), `deploymentPosition`, `columnOf` |
-| `packages/engine/src/combat/damage.ts` | Engine | Damage math + `totalHealth` / `estimateWinChance` estimators |
-| `packages/engine/src/combat/resolveBattle.ts` | Engine | Auto-resolver turn loop |
-| `packages/engine/src/combat/manualBattle.ts` | Engine | Interactive engine; `getApproachHexes`, `attackFromHex`, `planAiTurn`, `retreatHero`, `finalizeManualBattle`, `timeOfDayForRound` |
-| `packages/engine/src/combat/types.ts` | Engine | `BattleResult`, `Combatant`, `BattleSnapshot`, etc. |
+| `packages/engine/src/combat/damage.ts` | Engine | Damage math (attacker fatigue/morale scale `effAttack`, defender fatigue scales `effDefense`) + `totalHealth` / `estimateWinChance` estimators |
+| `packages/engine/src/combat/resolveBattle.ts` | Engine | Auto-resolver turn loop; `resolveAttack` (the shared fatigue/morale seam), `effectiveSelfRetreatHpPct` (low morale routs earlier) |
+| `packages/engine/src/combat/manualBattle.ts` | Engine | Interactive engine; `getApproachHexes`, `attackFromHex`, `castSpell`, `getValidSpellTargets`, `planAiTurn`, `retreatHero`, `finalizeManualBattle`, `timeOfDayForRound` |
+| `packages/engine/src/combat/spells.ts` | Engine | Spell catalog (Magic Arrow, Bless), `maxManaFor`/`spellDamageFor`, `regenerateHeroMana` (day-tick refill), `activeEffectMultiplier`/`pruneExpiredEffects`, `spellLoadoutForHero` backfill |
+| `packages/engine/src/combat/types.ts` | Engine | `BattleResult`, `Combatant` (incl. `morale`/`fatigue`/`activeEffects`), `CombatEffect` (`damage`/`spell_damage`/`spell_buff`), `BattleLogEntry` (incl. `morale_change`/`spell_cast`), `BattleSnapshot` |
+| `packages/engine/src/combatConfig.ts` | Engine | All combat tunables: type advantage, retreat loss, the morale/fatigue block, spell costs/power/buff duration |
 | `packages/contracts/src/commands/submitBattleResult.ts` | Contracts | The 15th command kind: submitted outcome + survivor stacks + rounds/obstacleSeed |
 | `server/app/commandHandler.ts` (`ResolveBattle` + `SubmitBattleResult` via `POST /games/:name/commands`) | Server | Loads DB row + `unit_types`; runs `resolveBattleEngine` or applies the submitted outcome — both through the shared `buildPostBattleHeroes`/`persistBattleOutcome` helpers |
 | `server/http/routes/battleActions.ts` | Server | `POST /games/:name/battle-actions` — telemetry-style insert into `battle_actions` (seat stamped from the session) |
@@ -369,3 +446,14 @@ status bar / battle row / action + log bar:
   `scoutedBy`/`markContacted` fog were removed as half-baked — every
   platoon is visible to both sides. The parked idea is written up in
    [`../.kilo/plan/2026-08-15-combat-reveal-fog-of-war.md`](../.kilo/plan/2026-08-15-combat-reveal-fog-of-war.md).
+- **Casting never consumes a platoon's turn.** `castSpell` deducts hero
+  mana and applies its effect without touching the `unacted` sets or the
+  round counter — spellcasting is an out-of-band hero action.
+- **The AI never casts (v1).** The AI-side cast button is not rendered
+  and `planAiTurn` has no casting branch; AI casting is a v1.1
+  fast-follow.
+- **Morale/fatigue are fully log-determined.** Every morale/fatigue
+  mutation emits a `morale_change` entry with deltas + resulting values,
+  and every spell cast emits `spell_cast` — the `battle_actions` stream
+  plus the log re-derive battle state, which is what the future
+  legality-check consumer will re-simulate against.

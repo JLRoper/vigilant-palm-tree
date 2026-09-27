@@ -155,6 +155,13 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
     case "CharterStarted":
     case "BuildingUpgradeStarted":
     case "SettlementUpgradeStarted":
+    case "BuildingsPlaced":
+    case "ResourcesTransferred":
+    case "WagonsAssigned":
+    case "WagonsBought":
+    case "TradeRouteCreated":
+    case "TradeRouteUpdated":
+    case "TradeRouteRemoved":
       return resync(state);
 
     default: {

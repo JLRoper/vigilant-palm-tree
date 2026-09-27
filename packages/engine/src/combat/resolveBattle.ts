@@ -14,6 +14,7 @@ import {
   PLATOON_RETREAT_LOSS,
 } from "../combatConfig";
 import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT, deploymentPosition, makeBattleGrid } from "./grid";
+import { activeEffectMultiplier } from "./spells";
 import { applyCasualties, applyRetreatLoss, computeDamage, totalHealth } from "./damage";
 import type {
   BattleGrid,
@@ -53,6 +54,7 @@ export function buildCombatants(
       hasCounterCharge: true,
       morale: 100,
       fatigue: 0,
+      activeEffects: [],
       retreated: false,
     });
   });
@@ -75,7 +77,12 @@ export function pickTarget(enemies: Combatant[], unitTypes: Record<string, UnitT
 }
 
 export function cloneCombatant(c: Combatant): Combatant {
-  return { ...c, entries: c.entries.map((e) => ({ ...e })) };
+  return {
+    ...c,
+    entries: c.entries.map((e) => ({ ...e })),
+    // Deep-copied so a snapshot can't be mutated by a later pruneExpiredEffects.
+    activeEffects: c.activeEffects.map((e) => ({ ...e })),
+  };
 }
 
 // ── Morale & fatigue (docs/morale-fatigue-plan.md) ──────────────────────────
@@ -158,6 +165,17 @@ export function effectiveSelfRetreatHpPct(basePct: number, morale: number): numb
   return Math.min(1, basePct + MORALE_RETREAT_THRESHOLD_REDUCTION);
 }
 
+// Casualty morale for out-of-band damage sources (the damage spell's flat
+// hit): same weighting as a weapon swing — each unit lost dents the target's
+// morale, mirrored as a morale_change entry. The kill-lift deliberately does
+// NOT apply here: a spell's caster is the hero, not a platoon, so no
+// platoon scored the destruction (adjacent-ally waver is the board layer's
+// job — applyAllyDeathMorale, which the manual battle's castSpell calls).
+export function applyCasualtyMorale(target: Combatant, unitsLost: number, round: number, log: BattleLogEntry[]): void {
+  if (unitsLost <= 0) return;
+  applyStatChange(target, -unitsLost * MORALE_LOSS_PER_CASUALTY, 0, "casualties", round, log);
+}
+
 // resolveAttack(): the seam a future ability layer (heal/regen/AoE) can
 // extend with new CombatEffect kinds without restructuring the turn loop.
 // Also the single morale/fatigue seam shared by both engines: the attacker's
@@ -173,7 +191,10 @@ export function resolveAttack(
   round: number,
   log: BattleLogEntry[],
 ): CombatEffect {
-  const { damage, advantageBonus, disadvantagePenalty } = computeDamage(actor.entries, target.entries, unitTypes, modifier, actor, target);
+  // Timed spell buffs on the actor (Bless) multiply the swing's damage —
+  // applied here, inside the shared seam, so both engines honor them.
+  const buffMultiplier = activeEffectMultiplier(actor, round);
+  const { damage, advantageBonus, disadvantagePenalty } = computeDamage(actor.entries, target.entries, unitTypes, modifier * buffMultiplier, actor, target);
   const { entries, casualties } = applyCasualties(target.entries, unitTypes, damage);
   target.entries = entries;
   const effect: CombatEffect = {
@@ -189,7 +210,7 @@ export function resolveAttack(
   };
   log.push({ round, ...effect });
   const unitsLost = casualties.reduce((sum, c) => sum + c.count, 0);
-  if (unitsLost > 0) applyStatChange(target, -unitsLost * MORALE_LOSS_PER_CASUALTY, 0, "casualties", round, log);
+  applyCasualtyMorale(target, unitsLost, round, log);
   if (!target.entries.some((e) => e.count > 0)) applyStatChange(actor, MORALE_GAIN_PER_KILL, 0, "kill", round, log);
   applyAttackFatigue(actor, round, log);
   return effect;

@@ -1,5 +1,5 @@
 import type { DrawBuildingContext } from "./types";
-import { lighten, darken, drawIsoBox, buildingHeight, getOpts } from "./primitives";
+import { lighten, darken, drawIsoBox, buildingHeight, getOpts, drawArcaneFontAccent } from "./primitives";
 import { BUILDING_PALETTES } from "../palettes";
 import type { BuildingPalette } from "../palettes";
 
@@ -78,6 +78,8 @@ export function drawOrganic(opts: DrawBuildingContext): void {
   ctx.moveTo(cx + hw * 0.2, cy - H * 0.3);
   ctx.quadraticCurveTo(cx + hw * 0.5, cy, cx + hw * 0.2, cy + H * 0.2);
   ctx.stroke();
+
+  if (kind === "arcaneFont") drawArcaneFontAccent(ctx, cx, cy, hw, hh, H, ownerColor);
 }
 
 export function drawOrganicApartment(

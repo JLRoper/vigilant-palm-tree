@@ -97,6 +97,7 @@ export interface ToolbarCallbacks {
   onEndTurn: () => void | Promise<void>;
   onHeroes?: () => void;
   onSettlements?: () => void;
+  onOpenLogistics?: () => void;
   onForget?: (id: number) => void;
   getMapInfo?: () => MapInfo | null;
   onStartCharter?: () => void;
@@ -344,6 +345,12 @@ export class Toolbar {
       this.opts.callbacks.onSettlements?.();
     });
 
+    const logisticsBtn = this.makeButton("🚚  Logistics", false);
+    logisticsBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      this.opts.callbacks.onOpenLogistics?.();
+    });
+
     this.charterBtn = this.makeButton("⚒  Charter Settlement", true);
     this.charterBtn.addEventListener("click", () => {
       if (this.busy) return;
@@ -360,6 +367,7 @@ export class Toolbar {
     buttonsRow.appendChild(this.endTurnBtn);
     buttonsRow.appendChild(this.heroesBtn);
     buttonsRow.appendChild(this.settlementsBtn);
+    buttonsRow.appendChild(logisticsBtn);
     buttonsRow.appendChild(this.charterBtn);
     buttonsRow.appendChild(this.testBattleBtn);
     buttonsRow.appendChild(menuWrap);

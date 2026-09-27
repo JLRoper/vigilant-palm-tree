@@ -13,6 +13,7 @@ import type {
   BattleHexNode,
   BattleImpactRingNode,
   BattleMovePathNode,
+  BattleSpellTargetRingNode,
 } from "../../src/render/scene/types";
 
 function nodesOfKind<K extends { kind: string }>(nodes: unknown[], kind: K["kind"]): K[] {
@@ -68,6 +69,7 @@ function makeCombatant(overrides: Partial<Combatant> & { entries: PlatoonEntry[]
     fatigue: 0,
     retreated: false,
     ...overrides,
+    activeEffects: overrides.activeEffects ?? [],
   };
 }
 
@@ -89,6 +91,7 @@ function makeState(overrides: Partial<ManualBattleState> = {}): ManualBattleStat
     obstacleSeed: 1,
     over: false,
     sidesRetreated: new Set(),
+    heroSpells: { attacker: null, defender: null },
     ...overrides,
   };
 }
@@ -101,6 +104,7 @@ function baseInput(overrides: Partial<BattleSceneInput> = {}): BattleSceneInput 
     selectedSlot: null,
     moveRange: [],
     attackTargets: [],
+    spellTargets: [],
     aiActing: false,
     aiActingSlot: null,
     aiTargetHex: null,
@@ -190,6 +194,20 @@ test("attack target rings: one per attackTarget, at the target's raw (non-interp
   assert.equal(rings[0].slotIndex, 1);
   assert.deepEqual(rings[0].world, axialToPixel(3, 2, 40));
   assert.equal(rings[0].radius, 32);
+});
+
+test("spell target rings: one battleSpellTargetRing per cast-mode target, same raw-position rule, distinct node kind", () => {
+  const target = makeCombatant({ side: "defender", slotIndex: 0, position: { q: 2, r: 0 }, entries: [{ unitTypeId: "archer", count: 4 }] });
+  const state = makeState({ defender: [target] });
+  const nodes = buildBattleScene(baseInput({ state, spellTargets: [target], hexSize: 40 }));
+  const rings = nodesOfKind<BattleSpellTargetRingNode>(nodes, "battleSpellTargetRing");
+  assert.equal(rings.length, 1);
+  assert.equal(rings[0].side, "defender");
+  assert.equal(rings[0].slotIndex, 0);
+  assert.deepEqual(rings[0].world, axialToPixel(2, 0, 40));
+  assert.equal(rings[0].radius, 32);
+  // No cross-talk: attack rings only when attackTargets were passed.
+  assert.equal(nodesOfKind<BattleAttackTargetRingNode>(nodes, "battleAttackTargetRing").length, 0);
 });
 
 test("battleCombatant: dead/retreated combatants are excluded; selected is gated on humanSide+selectedSlot; unitCount and hpRatio are computed from entries", () => {

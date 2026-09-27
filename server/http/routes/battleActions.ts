@@ -26,8 +26,9 @@ battleActionsRouter.use(attachAuth, attachPlayerSeat);
 
 // The arena-level action kinds. Mirrors the plan's phase enum; the seed row
 // ("start") and the terminal row ("end") are posted by the arena itself,
-// move/attack/retreat/surrender come from the arena/state.ts action sites.
-const VALID_PHASES = ["start", "move", "attack", "retreat", "surrender", "end"] as const;
+// move/attack/retreat/surrender come from the arena/state.ts action sites,
+// and "spell" is spellcasting v1's cast row (same wrapper file).
+const VALID_PHASES = ["start", "move", "attack", "retreat", "surrender", "spell", "end"] as const;
 
 function parseBattleAction(
   body: unknown,

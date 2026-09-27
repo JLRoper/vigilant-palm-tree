@@ -13,6 +13,12 @@ import type { UpgradeBuildingCommand } from "./upgradeBuilding";
 import type { UpgradeSettlementCommand } from "./upgradeSettlement";
 import type { AdvanceCharterTravelCommand } from "./advanceCharterTravel";
 import type { SubmitBattleResultCommand } from "./submitBattleResult";
+import type { PlaceBuildingsCommand } from "./placeBuildings";
+import type { TransferResourcesCommand } from "./transferResources";
+import type { AssignWagonsCommand } from "./assignWagons";
+import type { BuyWagonsCommand } from "./buyWagons";
+import type { CreateTradeRouteCommand } from "./createTradeRoute";
+import type { UpdateTradeRouteCommand } from "./updateTradeRoute";
 
 export * from "./moveHero";
 export * from "./transferGold";
@@ -29,6 +35,12 @@ export * from "./upgradeBuilding";
 export * from "./upgradeSettlement";
 export * from "./advanceCharterTravel";
 export * from "./submitBattleResult";
+export * from "./placeBuildings";
+export * from "./transferResources";
+export * from "./assignWagons";
+export * from "./buyWagons";
+export * from "./createTradeRoute";
+export * from "./updateTradeRoute";
 
 // Grows with each command port. Week 1 of Phase 3 Track 3.A shipped
 // MoveHero/TransferGold; EndTurn followed in Week 2
@@ -62,4 +74,10 @@ export type Command =
   | UpgradeBuildingCommand
   | UpgradeSettlementCommand
   | AdvanceCharterTravelCommand
-  | SubmitBattleResultCommand;
+  | SubmitBattleResultCommand
+  | PlaceBuildingsCommand
+  | TransferResourcesCommand
+  | AssignWagonsCommand
+  | BuyWagonsCommand
+  | CreateTradeRouteCommand
+  | UpdateTradeRouteCommand;

@@ -1,13 +1,26 @@
 # Spellcasting plan: from a disabled button to a real hero ability
 
-> **Status (2026-09-27):** all five open design questions ANSWERED — see
-> [the battle updates roadmap](../.kilo/plan/2026-09-27-battle-updates-roadmap.md)
-> §"Spellcasting v1" for the locked decisions (persistent HeroState mana,
-> Int=pool/Arcane=power, AI casting deferred to v1.1, mana-only limiter,
-> `activeEffects` per-Combatant field). Sequenced after morale/fatigue so
-> `Combatant` evolves once. Implementation-ready; file paths below predate
-> the `shared/` → `packages/engine` and `src/views/` → `src/screens/` moves
-> (roadmap lists canonical locations).
+> **Status (2026-09-27): ✅ SHIPPED (spellcasting v1).** All five open design
+> questions were ANSWERED — see [the battle updates roadmap](../.kilo/plan/2026-09-27-battle-updates-roadmap.md)
+> §"Spellcasting v1" for the locked decisions — and v1 is implemented on top
+> of the landed morale/fatigue feature. Canonical (as-shipped) homes:
+> `SpellId` on `packages/contracts/src/gameState.ts` (the wire type on
+> `HeroState`); the `SpellDef` catalog, stat→number formulas, loadout
+> mapping and `regenerateHeroMana` in `packages/engine/src/combat/spells.ts`;
+> all numbers in `packages/engine/src/combatConfig.ts`; `castSpell()` /
+> `getValidSpellTargets()` in `packages/engine/src/combat/manualBattle.ts`;
+> arena targeting/UI in `src/screens/combat/arena/*` (cast mode intercepts
+> `handleClick` before the select/attack/move chain; violet
+> `battleSpellTargetRing` in both `drawLegacy()` and the scenebuilder path);
+> day-tick mana refill in `packages/engine/src/turn/round.ts`'s
+> `advanceRound()` (the actual day-increment seam — not `endTurn.ts`, which
+> is per-player); battle_actions `phase: "spell"` streamed through
+> `src/screens/combat/arena/state.ts`'s `castSpellAction`. Known v1
+> boundaries: mana spent inside a battle does not write back to
+> `HeroState` (the next day tick refills anyway), and leveling/progression
+> of Arcane/Intelligence is a later feature. File paths below still predate
+> the `shared/` → `packages/engine` and `src/views/` → `src/screens/`
+> moves; the roadmap lists canonical locations.
 
 > **Note:** This doc originally used the manual battle arena's "Spy" action
 > (`spyOnPlatoon`/`spyBtn`/`spyMode` in `shared/combat/manualBattle.ts` and
@@ -228,10 +241,54 @@ the grid," and a cast-spell flow should mirror it structurally:
    depend on `heroMana >= spellManaCost` rather than the current permanent
    `true`.
 
+## As built (2026-09-27)
+
+Shipped exactly per the locked decisions above. The canonical as-built
+narrative lives in
+[battle-view-architecture.md](./battle-view-architecture.md)
+§"Combat stats & spellcasting"; this records the shipped facts:
+
+- **Data model.** `HeroState` (packages/contracts/src/gameState.ts)
+  carries `arcane`, `intelligence`, `heroMana`, `heroMaxMana`,
+  `heroSpell` — persisted in the games-row state JSONB, read-path
+  backfill via `spellLoadoutForHero`/`withDefaultSpellStats`
+  (`packages/engine/src/combat/spells.ts`). **No migration was
+  needed.** Every hero's default loadout is Magic Arrow.
+- **Formulas.** `heroMaxMana = intelligence × MANA_PER_INTELLIGENCE
+  (10)`; Magic Arrow = flat `arcane × SPELL_POWER_PER_ARCANE (5)` via
+  `applyCasualties()`; `SPELL_MANA_COST = 10`; Bless = ×1.5 attack for
+  `SPELL_BUFF_DURATION_ROUNDS (3)` on the caster's side via the
+  per-`Combatant` `activeEffects` list (pruned at round advance).
+- **Engine.** `castSpell()` / `getValidSpellTargets()` in
+  `packages/engine/src/combat/manualBattle.ts`; `CombatEffect` kinds
+  `spell_damage`/`spell_buff`; `BattleLogEntry` variant `spell_cast`;
+  the auto-resolver folds `activeEffectMultiplier` into swings; expiry
+  pruning at round advance; casting never touches the `unacted` sets.
+- **Mana regen.** Full refill on the overworld day tick — implemented
+  at `advanceRound()` in `packages/engine/src/turn/round.ts` (the
+  actual day-increment seam; the plan had guessed `endTurn.ts`), via
+  the pure `regenerateHeroMana(state)` helper.
+- **UI.** Cast button (hero panel footer) gated on mana; `castMode` +
+  violet target ring in both render paths; `handleClick` intercept
+  before the select/attack/move chain; help text branch. AI-side cast
+  button not rendered; `runAiTurn` untouched (v1.1 fast-follow).
+- **Streaming.** `castSpellAction` wrapper posts a `battle_actions`
+  row with `phase: "spell"` per cast; `"spell"` is a valid phase in the
+  route's validation.
+- **Tests.** `test/engine/spells.test.ts` (formulas, defaults, regen,
+  day-tick refill, loadout) + spell coverage in
+  `test/combat/manualBattle.test.ts`; battle-scene ring render tests.
+
 ## Open design questions
 
-These need a decision before implementation — this plan intentionally does
-not invent answers unsupported by existing code:
+These were the questions this plan intentionally did not invent answers
+unsupported by existing code. **All were answered on 2026-09-27** (see
+the status header and
+[the battle updates roadmap](../.kilo/plan/2026-09-27-battle-updates-roadmap.md)):
+#1 persistent on `HeroState`; #2 Int = mana pool, Arcane = spell power;
+#3 AI casting deferred to v1.1; #4 mana-only limiter; #5 per-`Combatant`
+`activeEffects`, landed after morale/fatigue so `Combatant` evolved
+once. They are kept below for the original design narrative.
 
 1. **Where does a hero's mana and spell come from?** No `HeroState` field,
    no `Combatant` field, nothing. This plan proposes hero-level

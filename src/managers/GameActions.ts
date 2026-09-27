@@ -4,7 +4,7 @@ import { showBattleModal } from "@screens/combat/battleModal";
 import { showBattleResultCard } from "@screens/combat/battleResultCard";
 import { openManualBattleArena, type ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
 import type { BattleActionPhase } from "@screens/combat/arena/state";
-import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, type BattleResult } from "@heroes/engine";
+import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, spellLoadoutForHero, type BattleResult } from "@heroes/engine";
 import type { GameState, HeroState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
@@ -180,6 +180,11 @@ export class GameActions {
         humanHero.id === attackerId ? "attacker" : "defender",
         {
           heroGold: Number(humanHero.gold) || 0,
+          // Spellcasting v1: the human hero's persistent mana/spell stats
+          // (HeroState) become the arena loadout, exactly like heroGold.
+          // The AI side never casts in v1 (locked decision), so only the
+          // human's loadout is threaded.
+          heroSpell: spellLoadoutForHero(humanHero),
           onComplete: resolve,
           telemetry,
         },

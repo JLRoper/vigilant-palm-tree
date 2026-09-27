@@ -66,11 +66,18 @@ function ids(gameName: string): { heroId: HeroId; settlementId: SettlementId } {
 // session also exercises the actor-vs-seat check's signed-in path: every
 // command below (all actor: 0) needs a token bound to that exact seat, or
 // it 403s, so this is the stricter path to keep covered by default.
-async function seedGame(name: string, settlement: SettlementState): Promise<string> {
+async function seedGame(
+  name: string,
+  settlement: SettlementState,
+  opts?: { players?: Player[]; extraSettlements?: SettlementState[] },
+): Promise<string> {
   const { heroId } = ids(name);
   const heroes: Record<HeroId, HeroState> = { [heroId]: makeHero(heroId, 0, 2, 2) };
-  const settlements: Record<SettlementId, SettlementState> = { [settlement.id]: settlement };
-  const players = [makePlayer(0, "player", [heroId], [settlement.id])];
+  const all = [settlement, ...(opts?.extraSettlements ?? [])];
+  const settlements: Record<SettlementId, SettlementState> = Object.fromEntries(
+    all.map((s) => [s.id, s]),
+  );
+  const players = opts?.players ?? [makePlayer(0, "player", [heroId], all.map((s) => s.id))];
   await pool.query(
     `INSERT INTO games (name, seed, hero_q, hero_r, active_player_id, players, heroes, settlements, map_size)
      VALUES ($1, 1, 2, 2, 0, $2::jsonb, $3::jsonb, $4::jsonb, 'small')`,
@@ -209,8 +216,174 @@ test("POST /games/:name/commands accepts AdvanceCharterTravel over HTTP (was a 4
   }
 });
 
-test("UpgradeBuilding with a malformed requests payload is a 400, not a handler-level crash", async () => {
+// Gold/warehouse above PlaceBuildings' net cost for a goldMine placement
+// (300g 6w 4s) minus the destroy refund for the seeded house (ceil(100/2)g,
+// ceil(5/2)w) -- the happy path's exact expected deltas.
+function placeBuildingsSettlement(name: string): SettlementState {
+  return makeSettlement(ids(name).settlementId, 0, 2, 2, {
+    gold: 1000,
+    warehouse: emptyWarehouse({ wood: 20, stone: 10, iron: 5, arcane: 2 }),
+    buildings: [{ gx: 1, gy: 1, kind: "house", level: 1, style: "classic" }],
+  });
+}
+
+test("POST /games/:name/commands accepts PlaceBuildings over HTTP and stamps the build timer server-side", async () => {
   const name = uniqueName();
+  const { settlementId } = ids(name);
+  const token = await seedGame(name, placeBuildingsSettlement(name));
+  try {
+    const res = await postCommand(name, {
+      kind: "PlaceBuildings",
+      actor: 0,
+      settlementId,
+      buildings: [{ gx: 2, gy: 2, kind: "goldMine", level: 1, style: "classic" }],
+    }, token);
+    assert.equal(res.status, 200, await res.clone().text());
+    const body = (await res.json()) as { settlement?: SettlementState };
+    const after = body.settlement;
+    assert.ok(after);
+    assert.equal(after.buildings.length, 1, "the house was destroyed in the same commit");
+    assert.equal(after.buildings[0].kind, "goldMine");
+    assert.equal(after.buildings[0].construction?.daysRemaining, 4, "build timer recomputed server-side");
+    assert.equal(after.gold, 1000 - (300 - 50));
+    assert.equal(after.warehouse.wood, 20 - (6 - 3));
+    assert.equal(after.warehouse.stone, 10 - 4);
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("PlaceBuildings with a malformed buildings payload is a 400", async () => {
+  const name = uniqueName();
+  const { settlementId } = ids(name);
+  const token = await seedGame(name, placeBuildingsSettlement(name));
+  try {
+    const missingKind = await postCommand(name, {
+      kind: "PlaceBuildings",
+      actor: 0,
+      settlementId,
+      buildings: [{ gx: 2, gy: 2, level: 1, style: "classic" }],
+    }, token);
+    assert.equal(missingKind.status, 400);
+
+    const levelTooHigh = await postCommand(name, {
+      kind: "PlaceBuildings",
+      actor: 0,
+      settlementId,
+      buildings: [{ gx: 2, gy: 2, kind: "goldMine", level: 4, style: "classic" }],
+    }, token);
+    assert.equal(levelTooHigh.status, 400);
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("PlaceBuildings the settlement cannot afford is a 409, not a silent placement", async () => {
+  const name = uniqueName();
+  const { settlementId } = ids(name);
+  const broke = makeSettlement(ids(name).settlementId, 0, 2, 2, {
+    gold: 100,
+    warehouse: emptyWarehouse({ wood: 20, stone: 10 }),
+    buildings: [],
+  });
+  const token = await seedGame(name, broke);
+  try {
+    const res = await postCommand(name, {
+      kind: "PlaceBuildings",
+      actor: 0,
+      settlementId,
+      buildings: [{ gx: 2, gy: 2, kind: "goldMine", level: 1, style: "classic" }],
+    }, token);
+    assert.equal(res.status, 409);
+    assert.equal(((await res.json()) as { error: string }).error, "not_enough_gold");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games/:name/commands accepts CreateTradeRoute over HTTP and returns the routes array", async () => {
+  const name = uniqueName();
+  const ids0 = ids(name);
+  const settlements = [
+    makeSettlement(ids0.settlementId, 0, 2, 2, {
+      gold: 1000,
+      warehouse: emptyWarehouse({ wood: 100 }),
+      buildings: [{ gx: 1, gy: 1, kind: "house", level: 1, style: "classic" }],
+    }),
+    makeSettlement("s1", 0, 6, 2, { warehouse: emptyWarehouse({ wood: 10 }) }),
+  ];
+  const players = [
+    { ...makePlayer(0, "player" as const, ["h0"], [ids0.settlementId, "s1"]), wagonsOwned: 4, wagonsUnassigned: 4 },
+    makePlayer(1, "ai" as const, ["h1"], []),
+  ];
+  const token = await seedGame(name, settlements[0], { players, extraSettlements: [settlements[1]] });
+  try {
+    const res = await postCommand(name, {
+      kind: "CreateTradeRoute",
+      actor: 0,
+      fromSettlementId: ids0.settlementId,
+      toSettlementId: "s1",
+      resource: "wood",
+      wagons: 2,
+    }, token);
+    assert.equal(res.status, 200, await res.clone().text());
+    const body = (await res.json()) as { tradeRoutes?: Array<{ id: string; wagons: number; resource: string }> };
+    assert.equal(body.tradeRoutes?.length, 1);
+    assert.equal(body.tradeRoutes[0].wagons, 2);
+    assert.equal(body.tradeRoutes[0].resource, "wood");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("CreateTradeRoute with no unassigned wagons is a 409", async () => {
+  const name = uniqueName();
+  const ids0 = ids(name);
+  const settlements = [
+    makeSettlement(ids0.settlementId, 0, 2, 2),
+    makeSettlement("s1", 0, 6, 2),
+  ];
+  const players = [
+    makePlayer(0, "player" as const, ["h0"], [ids0.settlementId, "s1"]),
+    makePlayer(1, "ai" as const, ["h1"], []),
+  ];
+  const token = await seedGame(name, settlements[0], { players, extraSettlements: [settlements[1]] });
+  try {
+    const res = await postCommand(name, {
+      kind: "CreateTradeRoute",
+      actor: 0,
+      fromSettlementId: ids0.settlementId,
+      toSettlementId: "s1",
+      resource: "wood",
+      wagons: 2,
+    }, token);
+    assert.equal(res.status, 409);
+    assert.equal(((await res.json()) as { error: string }).error, "not_enough_wagons_unassigned");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("CreateTradeRoute with a malformed payload is a 400", async () => {
+  const name = uniqueName();
+  const { settlementId } = ids(name);
+  const token = await seedGame(name, makeSettlement(settlementId, 0, 2, 2));
+  try {
+    const res = await postCommand(name, {
+      kind: "CreateTradeRoute",
+      actor: 0,
+      fromSettlementId: settlementId,
+      toSettlementId: settlementId,
+      resource: "unobtanium",
+      wagons: 2,
+    }, token);
+    assert.equal(res.status, 400);
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("UpgradeBuilding with a malformed requests payload is a 400, not a handler-level crash", async () => {  const name = uniqueName();
   const { settlementId } = ids(name);
   const token = await seedGame(name, buildingUpgradeSettlement(name));
   try {

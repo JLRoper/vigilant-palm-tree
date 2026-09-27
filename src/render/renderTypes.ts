@@ -2,7 +2,7 @@
 // renderer.ts nor minimap.ts owns them and dependent files (like
 // overlays/pathOverlay.ts) can pull them in without creating a cycle.
 
-import type { Axial } from "../core/hex";
+import type { Axial, TradeRouteState } from "@heroes/contracts";
 import type { CharterState } from "../state/gameState";
 
 export interface MinimapGeometry {
@@ -32,4 +32,6 @@ export interface RenderOptions {
   validCharterHexes?: Set<string> | null;
   /** The clicked/inspected tile driving the tile info panel, if any. Drawn as a persistent selection ring, even through fog. */
   inspectedTile?: Axial;
+  /** Trade routes whose caravans render as map markers (docs/wagons-stockpiles-trade-routes-plan.md §5.2). */
+  tradeRoutes?: readonly TradeRouteState[];
 }

@@ -227,5 +227,6 @@ export function makeCombatantForTest(opts: Partial<Combatant> & Pick<Combatant, 
     morale: 100,
     fatigue: 0,
     ...opts,
+    activeEffects: opts.activeEffects ?? [],
   };
 }

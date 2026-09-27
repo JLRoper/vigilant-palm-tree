@@ -23,12 +23,14 @@ A turn-based hex adventure map where the player moves a hero, claims resource ti
 | [heroes.md](./heroes.md) | Hero movement, chartering, capture-for-ransom | ✅ Locked (movement) / 🟡 Charter implemented / ⏸️ Ransom deferred |
 | [army.md](./army.md) | Unit roster, recruitment, food/upkeep, tactical combat | ⏸️ Deferred |
 | [economy.md](./economy.md) | Per-turn economy flow tying resources + settlements | ✅ Locked |
+| [resource-gathering.md](./resource-gathering.md) | As-built resource collection & building economy: pools, rate computation, per-turn pipeline, all sinks, wired-vs-dormant building effects, findings F1–F10; plus the shipped producer-mine & deterministic cell-multiplier design | ✅ Current |
+| [wagons-stockpiles-trade-routes-plan.md](./wagons-stockpiles-trade-routes-plan.md) | Design: stockpile caps (settlements by warehouse buildings, heroes by wagons), hero cargo, player wagon pool, distance-throttled trade routes; formulas, open questions, phased implementation | 📝 Proposed |
 | [map.md](./map.md) | Map generation, terrain, camera, fog of war (shipped) | ✅ Locked |
 | [map-gen.md](./map-gen.md) | Procedural terrain generation: current blob-growth algorithm (`gameMap.ts`) + ranked alternatives | ✅ Current |
 | [art-style.md](./art-style.md) | Sprite art direction: alchemical rune-stone resource icons, procedural castles/heroes; composition + palette rules | ✅ Current |
 | [ui-top-panel-plan.md](./ui-top-panel-plan.md) | Global top bar (turn/wealth/economy summary) + selection-driven contextual detail panels | 📋 Planned |
-| [morale-fatigue-plan.md](./morale-fatigue-plan.md) | Real morale/fatigue combat stats on the manual battle engine's `CombatEffect`/`SideModifiers` seams | 📋 Planned |
-| [spellcasting-plan.md](./spellcasting-plan.md) | Real hero spellcasting behind the arena's disabled Cast Spell stub, same `CombatEffect` seams | 📋 Planned |
+| [morale-fatigue-plan.md](./morale-fatigue-plan.md) | Real morale/fatigue combat stats on the manual battle engine (`Combatant.morale`/`fatigue`, `morale_change` log entries) | ✅ Shipped (2026-09-27; tunables flagged for owner tuning) |
+| [spellcasting-plan.md](./spellcasting-plan.md) | Real hero spellcasting behind the arena's disabled Cast Spell stub, same `CombatEffect` seams | ✅ Shipped (2026-09-27; persistent HeroState mana, Int = pool / Arcane = power, AI casting v1.1, mana-only limiter — see the as-built section) |
 | [terrain-plan.md](./terrain-plan.md) | Battle-grid terrain: per-hex combat bonus / movement cost (greenfield — no terrain concept in code today) | 📋 Planned |
 
 ## Code & architecture

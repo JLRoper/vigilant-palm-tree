@@ -1,4 +1,4 @@
-import type { BuildingKind, ResourceType } from "@heroes/contracts";
+import type { BuildingKind, ResourceType, WarehouseResource } from "@heroes/contracts";
 
 export interface RecruitEntry {
   unitTypeId: string;
@@ -22,6 +22,10 @@ export interface BuildingEffect {
     populationBonus?: number;
     defenseBonus?: number;
     unitCostReductionPct?: number;
+    /** Per-level storage capacity bonus (docs/wagons-stockpiles-trade-routes-plan.md §4.1). */
+    storageBonus?: Partial<Record<WarehouseResource, number>>;
+    /** Per-level treasury capacity bonus. */
+    treasuryBonus?: number;
   };
   playerEffects: {
     visionRangeBonus?: number;
@@ -90,6 +94,30 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     upkeepPerLevel: { wood: 2, stone: 0 },
     recruits: [],
     settlementEffects: { resourceYieldBonus: { wood: 3, stone: 3, iron: 3 } },
+    playerEffects: {},
+  },
+  stoneMine: {
+    kind: "stoneMine",
+    label: "Stone Mine",
+    description: "Cuts blocks of building stone from a worked rock face, shipping them to the warehouse each turn.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 4,
+    placementCost: { gold: 250, wood: 6, stone: 4 },
+    upkeepPerLevel: { wood: 2, stone: 0 },
+    recruits: [],
+    settlementEffects: { resourceYieldBonus: { stone: 3 } },
+    playerEffects: {},
+  },
+  ironMine: {
+    kind: "ironMine",
+    label: "Iron Mine",
+    description: "Digs iron ore from deep veins, feeding the settlement's forge-bound stockpile each turn.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 4,
+    placementCost: { gold: 250, wood: 6, stone: 4 },
+    upkeepPerLevel: { wood: 2, stone: 0 },
+    recruits: [],
+    settlementEffects: { resourceYieldBonus: { iron: 3 } },
     playerEffects: {},
   },
   market: {
@@ -185,7 +213,22 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 150, wood: 8, stone: 4 },
     upkeepPerLevel: { wood: 1, stone: 0 },
     recruits: [],
-    settlementEffects: { foodPerTurn: 3 },
+    settlementEffects: { foodPerTurn: 3, storageBonus: { food: 600 } },
+    playerEffects: {},
+  },
+  warehouse: {
+    kind: "warehouse",
+    label: "Warehouse",
+    description: "Walled storehouses with cellars and lofts, raising the settlement's stockpile capacity for every resource.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 3,
+    placementCost: { gold: 250, wood: 8, stone: 6 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [],
+    settlementEffects: {
+      storageBonus: { wood: 600, stone: 600, iron: 600, arcane: 600, food: 600 },
+      treasuryBonus: 500,
+    },
     playerEffects: {},
   },
   bank: {
@@ -197,7 +240,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 400, wood: 6, stone: 8 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
-    settlementEffects: { goldPerTurn: 60 },
+    settlementEffects: { goldPerTurn: 60, treasuryBonus: 2000 },
     playerEffects: {},
   },
   goldMine: {
@@ -222,6 +265,18 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     upkeepPerLevel: { wood: 1, stone: 0 },
     recruits: [],
     settlementEffects: { resourceYieldBonus: { wood: 3 } },
+    playerEffects: {},
+  },
+  arcaneFont: {
+    kind: "arcaneFont",
+    label: "Arcane Font",
+    description: "Draws raw power from a settled font of magic, condensing it into arcane dust each turn.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 4,
+    placementCost: { gold: 350, wood: 5, stone: 6 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [],
+    settlementEffects: { resourceYieldBonus: { arcane: 3 } },
     playerEffects: {},
   },
 };
@@ -257,6 +312,12 @@ export function buildingSettlementEffects(kind: BuildingKind, level: number) {
     populationBonus: (e.settlementEffects.populationBonus ?? 0) * level,
     defenseBonus: (e.settlementEffects.defenseBonus ?? 0) * level,
     unitCostReductionPct: e.settlementEffects.unitCostReductionPct ?? 0,
+    storageBonus: e.settlementEffects.storageBonus
+      ? Object.fromEntries(
+          Object.entries(e.settlementEffects.storageBonus).map(([r, v]) => [r, (v ?? 0) * level]),
+        )
+      : undefined,
+    treasuryBonus: (e.settlementEffects.treasuryBonus ?? 0) * level,
   };
 }
 

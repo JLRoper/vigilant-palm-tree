@@ -1,4 +1,5 @@
 import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload } from "./gameState";
+import type { BuildingDef } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
 import {
   selectHero as selectHeroReducer,
@@ -22,6 +23,12 @@ import {
   startTownHallUpgrade as startTownHallUpgradeReducer,
   startSettlementUpgrade as startSettlementUpgradeReducer,
   startBuildingUpgrade as startBuildingUpgradeReducer,
+  applyPlaceBuildings as applyPlaceBuildingsReducer,
+  transferResources as transferResourcesReducer,
+  assignWagons as assignWagonsReducer,
+  buyWagons as buyWagonsReducer,
+  createTradeRoute as createTradeRouteReducer,
+  updateTradeRoute as updateTradeRouteReducer,
   type BuildingUpgradeRequest,
 } from "./gameState";
 import { findPath } from "../map/pathfinding";
@@ -106,6 +113,32 @@ export interface TurnControllerHooks {
   // fire-and-forget shape as the rest of this block.
   onUpgradeBuilding(actor: number, settlementId: SettlementId, requests: BuildingUpgradeRequest[]): Promise<void>;
   onUpgradeSettlement(actor: number, settlementId: SettlementId, upgradePopulationGate: number): Promise<void>;
+  // F4 closer: fired on every city-view placement/destroy change with the
+  // full working cart. Tracked like the rest so End Turn drains it first --
+  // the server's EndTurn pipeline is what ticks BuildingDef.construction,
+  // so a raced PlaceBuildings means frozen construction stages.
+  onPlaceBuildings(actor: number, settlementId: SettlementId, buildings: BuildingDef[], initialLayout?: boolean): Promise<void>;
+  onTransferResources(
+    actor: number,
+    heroId: HeroId,
+    settlementId: SettlementId,
+    direction: "load" | "unload",
+    amounts: Partial<Record<WarehouseResource, number>>,
+  ): Promise<void>;
+  onAssignWagons(actor: number, heroId: HeroId, delta: number): Promise<void>;
+  onBuyWagons(actor: number, settlementId: SettlementId, count: number): Promise<void>;
+  onCreateTradeRoute(
+    actor: number,
+    fromSettlementId: SettlementId,
+    toSettlementId: SettlementId,
+    resource: WarehouseResource,
+    wagons: number,
+  ): Promise<void>;
+  onUpdateTradeRoute(
+    actor: number,
+    routeId: string,
+    change: { resource?: WarehouseResource; wagonsDelta?: number; remove?: boolean },
+  ): Promise<void>;
 }
 
 export class TurnController {
@@ -580,9 +613,125 @@ export class TurnController {
       type: "town_hall_upgrade_started",
       payload: { settlementId, targetLevel },
     });
-    this.trackCommand(
+    this.    trackCommand(
       this.hooks.onUpgradeTownHall(this.state.activePlayerId, settlementId, targetLevel),
       "onUpgradeTownHall",
+    );
+    return { ok: true, reason: "" };
+  }
+
+  placeBuildings(settlementId: string, buildings: BuildingDef[], initialLayout = false): { ok: boolean; reason: string } {
+    const result = applyPlaceBuildingsReducer(this.state, settlementId, this.state.activePlayerId, buildings, initialLayout);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "buildings_placed",
+      payload: { settlementId },
+    });
+    this.trackCommand(
+      this.hooks.onPlaceBuildings(this.state.activePlayerId, settlementId, buildings, initialLayout),
+      "onPlaceBuildings",
+    );
+    return { ok: true, reason: "" };
+  }
+
+  transferResources(
+    heroId: string,
+    settlementId: string,
+    direction: "load" | "unload",
+    amounts: Partial<Record<WarehouseResource, number>>,
+  ): { ok: boolean; reason: string } {
+    const result = transferResourcesReducer(this.state, this.state.activePlayerId, heroId, settlementId, direction, amounts);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "resources_transferred",
+      payload: { heroId, settlementId, direction },
+    });
+    this.trackCommand(
+      this.hooks.onTransferResources(this.state.activePlayerId, heroId, settlementId, direction, amounts),
+      "onTransferResources",
+    );
+    return { ok: true, reason: "" };
+  }
+
+  assignWagons(heroId: string, delta: number): { ok: boolean; reason: string } {
+    const result = assignWagonsReducer(this.state, this.state.activePlayerId, heroId, delta);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "wagons_assigned",
+      payload: { heroId, delta },
+    });
+    this.trackCommand(
+      this.hooks.onAssignWagons(this.state.activePlayerId, heroId, delta),
+      "onAssignWagons",
+    );
+    return { ok: true, reason: "" };
+  }
+
+  buyWagons(settlementId: string, count: number): { ok: boolean; reason: string } {
+    const result = buyWagonsReducer(this.state, this.state.activePlayerId, settlementId, count);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "wagons_bought",
+      payload: { settlementId, count },
+    });
+    this.trackCommand(
+      this.hooks.onBuyWagons(this.state.activePlayerId, settlementId, count),
+      "onBuyWagons",
+    );
+    return { ok: true, reason: "" };
+  }
+
+  createTradeRoute(
+    fromSettlementId: string,
+    toSettlementId: string,
+    resource: WarehouseResource,
+    wagons: number,
+  ): { ok: boolean; reason: string } {
+    const result = createTradeRouteReducer(
+      this.state,
+      this.state.activePlayerId,
+      fromSettlementId,
+      toSettlementId,
+      resource,
+      wagons,
+    );
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "trade_route_created",
+      payload: { routeId: result.route?.id, fromSettlementId, toSettlementId, resource, wagons },
+    });
+    this.trackCommand(
+      this.hooks.onCreateTradeRoute(
+        this.state.activePlayerId,
+        fromSettlementId,
+        toSettlementId,
+        resource,
+        wagons,
+      ),
+      "onCreateTradeRoute",
+    );
+    return { ok: true, reason: "" };
+  }
+
+  updateTradeRoute(
+    routeId: string,
+    change: { resource?: WarehouseResource; wagonsDelta?: number; remove?: boolean },
+  ): { ok: boolean; reason: string } {
+    const result = updateTradeRouteReducer(this.state, this.state.activePlayerId, routeId, change);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "trade_route_updated",
+      payload: { routeId, ...change },
+    });
+    this.trackCommand(
+      this.hooks.onUpdateTradeRoute(this.state.activePlayerId, routeId, change),
+      "onUpdateTradeRoute",
     );
     return { ok: true, reason: "" };
   }

@@ -129,5 +129,6 @@ All economy state is stored in the `games` table JSONB columns:
 - What happens inside a settlement: [city-view-impl-plan.md](./city-view-impl-plan.md)
 - Who triggers the loop: [heroes.md](./heroes.md)
 - Future combat impact: [army.md](./army.md)
+- As-built pipeline & sinks reference: [resource-gathering.md](./resource-gathering.md)
 
 [← Back to index](./README.md)

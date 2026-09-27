@@ -4,11 +4,13 @@ import type {
   HeroState,
   Player,
   SettlementState,
+  TradeRouteState,
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import { defaultPopulation, SETTLEMENT_GOLD_TAX } from "./economy/settlementRates";
 import { VALID_HORSE_VARIANTS } from "./horseVariants";
 import { normalizePlatoons } from "./units";
+import { withDefaultSpellStats } from "./combat/spells";
 
 export const CASTLE_COUNT_MIN = 4;
 export const CASTLE_COUNT_MAX = 15;
@@ -45,6 +47,8 @@ export interface HydratableGameRow {
   map_size?: string;
   next_charter_id?: number;
   next_settlement_id?: number;
+  /** games.trade_routes JSONB (docs/wagons-stockpiles-trade-routes-plan.md §5.2). */
+  trade_routes?: TradeRouteState[] | null;
 }
 
 function warnMissing(path: string, field: string): void {
@@ -59,7 +63,7 @@ function backfillHero(h: Partial<HeroState> & { id: HeroId; ownerId: number; q: 
   if (h.troops === undefined) warnMissing(path, "troops");
   if (h.stacks === undefined) warnMissing(path, "stacks");
   if (h.horseVariant === undefined) warnMissing(path, "horseVariant");
-  return {
+  return withDefaultSpellStats({
     movementRemaining: h.movementRemaining ?? 7,
     previousQ: h.previousQ ?? null,
     previousR: h.previousR ?? null,
@@ -70,13 +74,18 @@ function backfillHero(h: Partial<HeroState> & { id: HeroId; ownerId: number; q: 
     stacks: normalizePlatoons(h.stacks),
     isChartering: h.isChartering ?? false,
     charterId: h.charterId ?? null,
+    arcane: h.arcane,
+    intelligence: h.intelligence,
+    heroMana: h.heroMana,
+    heroMaxMana: h.heroMaxMana,
+    heroSpell: h.heroSpell,
     id: h.id,
     name: h.name ?? h.id,
     ownerId: h.ownerId,
     q: h.q,
     r: h.r,
     horseVariant: h.horseVariant ?? variantIds[0],
-  };
+  });
 }
 
 function emptyWarehouse(): SettlementState["warehouse"] {
@@ -165,6 +174,7 @@ export function hydrateGameState(
     dirty: false,
     castleSeed: opts?.castleSeed ?? defaultCastleSeedFromMapSeed(row.seed),
     castleCount: opts?.castleCount ?? CASTLE_COUNT_DEFAULT,
+    tradeRoutes: row.trade_routes ?? [],
     activeCharters: (row as unknown as { activeCharters?: GameState["activeCharters"] }).activeCharters ?? [],
     nextCharterId: row.next_charter_id ?? 0,
     // Math.max, not a plain `??`: a row created before this counter was

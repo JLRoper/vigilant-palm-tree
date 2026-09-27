@@ -6,6 +6,8 @@ export type BuildingKind =
   | "tower"
   | "mageGuild"
   | "mine"
+  | "stoneMine"
+  | "ironMine"
   | "market"
   | "barracks"
   | "smithy"
@@ -14,9 +16,11 @@ export type BuildingKind =
   | "farmhouse"
   | "archeryRange"
   | "granary"
+  | "warehouse"
   | "bank"
   | "goldMine"
-  | "woodcutterHut";
+  | "woodcutterHut"
+  | "arcaneFont";
 
 export interface BuildingDef {
   gx: number;
@@ -26,6 +30,8 @@ export interface BuildingDef {
   style: GenerationStyle;
   w?: number;
   h?: number;
+  /** Present while the building is under construction (new placements); removed on completion. */
+  construction?: { daysRemaining: number };
 }
 
 export interface BuildingRef {

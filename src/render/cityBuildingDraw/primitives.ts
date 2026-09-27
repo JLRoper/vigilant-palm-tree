@@ -54,6 +54,8 @@ export function buildingHeight(kind: BuildingKind, level: number): number {
     tower: 56,
     mageGuild: 40,
     mine: 16,
+    stoneMine: 16,
+    ironMine: 20,
     market: 32,
     barracks: 28,
     smithy: 24,
@@ -63,10 +65,38 @@ export function buildingHeight(kind: BuildingKind, level: number): number {
     archeryRange: 28,
     granary: 26,
     bank: 24,
+    warehouse: 24,
     goldMine: 20,
     woodcutterHut: 18,
+    arcaneFont: 34,
   };
   return (base[kind] ?? 24) + (level - 1) * 12;
+}
+
+export function drawArcaneFontAccent(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, hw: number, hh: number, H: number, ownerColor: string,
+): void {
+  const orbY = cy - hh * 0.8 - H * 0.95;
+  const r = Math.max(2.5, hw * 0.2);
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = lighten(ownerColor, 120);
+  ctx.beginPath();
+  ctx.arc(cx, orbY, r * 1.9, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = lighten(ownerColor, 60);
+  ctx.beginPath();
+  ctx.arc(cx, orbY, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = darken(ownerColor, 50);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = lighten(ownerColor, 110);
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.3, orbY - r * 0.3, r * 0.28, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 export function drawIsoBox(

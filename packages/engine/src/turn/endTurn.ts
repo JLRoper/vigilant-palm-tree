@@ -11,8 +11,8 @@ export function applyEndOfTurn(state: GameState): GameState {
 export function applyEndOfTurnDetailed(state: GameState): ApplyEndOfTurnResult {
   const playerId = state.activePlayerId;
   const newHeroes: Record<HeroId, HeroState> = resetHeroMovement(state.heroes, playerId);
-  // 1. Produce resources for ALL settlements
-  let newSettlements: Record<SettlementId, SettlementState> = produceSettlementResources(state.settlements);
+  // 1. Produce resources for ALL settlements (tile rates + producer mines)
+  let newSettlements: Record<SettlementId, SettlementState> = produceSettlementResources(state.settlements, state.castleSeed);
   // 2. Auto-trade for active player's settlements
   const autoTrade = runAutoTrade(newSettlements, playerId);
   newSettlements = autoTrade.settlements;
