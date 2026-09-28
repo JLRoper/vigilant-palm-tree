@@ -1,13 +1,13 @@
 # Multiplayer — LAN Seats, Sync, and Session Policy
 
-**Status:** ✅ Current (mechanics as built) — including the 2026-09-27 drop policy, shipped the same day (see [Drop policy](#2-drop-policy--grace-then-skip-decided-2026-09-27-shipped-2026-09-27)).
+**Status:** ✅ Current (mechanics as built) — including the 2026-09-27 drop policy (shipped the same day, see [Drop policy](#2-drop-policy--grace-then-skip-decided-2026-09-27-shipped-2026-09-27)) and the 2026-09-28 SSE event push (see [Sync model](#sync-model-srciomultiplayersyncts)).
 
 This is the design doc the multiplayer system never had (former open question #5). It records how LAN multiplayer actually works today, the session-policy decisions made on 2026-09-27, and the gap between the two.
 
 ## Scope
 
 - **LAN multiplayer, 2–4 human seats.** Host and Join flows from the home screen (`src/screens/multiplayer/multiplayerLobby.ts`).
-- **No internet play, no realtime layer.** All sync is HTTP polling against the Express API. `WS_PORT` remains reserved and dormant.
+- **No internet play, no WebSocket/broker layer.** Sync is SSE push (`GET /api/games/:name/events/stream`, shipped 2026-09-28) with the 2 s HTTP poll kept as the backstop; `WS_PORT` remains reserved and dormant.
 - **AI is not a seat.** The AI that exists is the wandering enemy-hero layer (`src/systems/enemyWander.ts`, `src/ai/aiBrain.ts`) — it does not own players or take turns.
 
 ## Current mechanics (as built)
@@ -27,7 +27,8 @@ This is the design doc the multiplayer system never had (former open question #5
 
 ### Sync model (`src/io/multiplayerSync.ts`)
 
-- **Poll cadence:** every 2s, `GET /api/games/:name/events?cursor=<last game_events.id>`.
+- **SSE push (shipped 2026-09-28):** `start()` additionally opens an `EventSource` on `GET /api/games/:name/events/stream?after=<cursor>`. The server replays everything past `after` as catch-up, then live-tails new `game_events` rows — `INSERT` fires a Postgres `NOTIFY` (`migration 017`), one dedicated `LISTEN` connection per API process (`server/persistence/eventsNotifier.ts`) wakes the route (`server/http/routes/eventStream.ts`), and each row goes out as an `id:`-carrying `event: log` frame with a `: ping` heartbeat every 25 s. Every frame feeds the same `applyRows` pipeline as a polled row, so a streamed row advances the cursor and the poll's next `after=cursor` query never re-delivers it. On disconnect the browser auto-reconnects with `Last-Event-ID` — the same cursor under a different name — and the poll covers correctness in the meantime.
+- **Poll cadence (backstop v1):** every 2s, `GET /api/games/:name/events?after=<last game_events.id>`. Unchanged by the SSE work; correctness never depends on the stream.
 - **Incremental apply:** each row that is a declared `EngineEvent` (14 kinds, see `ENGINE_EVENT_KINDS`) is applied via `applyEngineEvent` from `@heroes/engine`; the renderer's `EntityMirror` tween cache is advanced per event.
 - **Self-event dedup:** the client's own commands return `lastEventId`; those ids are skipped (a client must not re-apply its own mutations, which were applied locally). The `actor_seat` column covers the same ground whenever the local seat is known; the id set protects the unclaimed-seat case.
 - **Full resync** (`getGame` + `hydrateGameState`, cursor reseeded from `game.last_event_id`) on: initial load, an event the engine cannot derive (`event_not_derivable`), or a cursor gap. Rejoin after any absence heals through the same path — no special rejoin flow exists or is needed for state.
@@ -40,9 +41,9 @@ This is the design doc the multiplayer system never had (former open question #5
 
 **Decision:** a player may hold the turn indefinitely. No client or server timer in v1.
 
-**Rationale:** LAN sessions are intimate and cooperative by default; a stall is a social problem before it is a technical one. Enforcement-grade timers want the realtime layer (server push, reconnection UX) that does not exist yet.
+**Rationale:** LAN sessions are intimate and cooperative by default; a stall is a social problem before it is a technical one. Enforcement-grade timers want the realtime layer (server push, reconnection UX). Server push now exists — the 2026-09-28 SSE event stream — but reconnection UX is still just the browser's auto-reconnect, so the decision stands for v1.
 
-**Revisit trigger:** when `WS_PORT` wakes up, or when public-internet play becomes a goal.
+**Revisit trigger:** when public-internet play becomes a goal, or a WebSocket/broker layer with richer reconnection UX lands (the SSE push shipped 2026-09-28 removed the "no push at all" half of the original trigger).
 
 ### 2. Drop policy — grace, then skip (decided 2026-09-27, shipped 2026-09-27)
 
@@ -83,7 +84,7 @@ All four decisions below are shipped (2026-09-27). Test coverage: `test/server/d
 
 ## Out of scope
 
-Internet play, matchmaking, spectator seats, AI seats, simultaneous turns, and any WebSocket transport (see `plan/` → `.kilo/plan/` architecture walkthrough docs for the Tailscale/LAN deployment context).
+Internet play, matchmaking, spectator seats, AI seats, simultaneous turns, and any WebSocket transport — still true after the 2026-09-28 SSE event push: SSE is plain HTTP streaming, not a WebSocket (see `plan/` → `.kilo/plan/` architecture walkthrough docs for the Tailscale/LAN deployment context).
 
 ## See also
 

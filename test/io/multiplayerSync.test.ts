@@ -13,6 +13,46 @@ const timerStub = {
 };
 (globalThis as unknown as { window: unknown }).window = timerStub;
 
+// SSE transport (plan 2026-09-28-sse-event-push.md): the browser's
+// EventSource is replaced with a fake the tests drive by hand. Installed on
+// window AND globalThis before the module import; the module looks the
+// constructor up off window at start() time, so tests that never dispatch
+// frames just carry an idle open stream -- inert for their assertions.
+class FakeEventSource {
+  static created: FakeEventSource[] = [];
+  url: string;
+  closed = false;
+  onerror: ((ev: unknown) => void) | null = null;
+  private logListeners: Array<(ev: { data: string; lastEventId: string }) => void> = [];
+
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.created.push(this);
+  }
+
+  addEventListener(type: string, listener: (ev: { data: string; lastEventId: string }) => void): void {
+    if (type === "log") this.logListeners.push(listener);
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  /** Simulates the server writing one `event: log` frame. */
+  dispatchLog(data: unknown, id: string): void {
+    const ev = { data: typeof data === "string" ? data : JSON.stringify(data), lastEventId: id };
+    for (const listener of this.logListeners) listener(ev);
+  }
+
+  static latest(): FakeEventSource {
+    const source = FakeEventSource.created[FakeEventSource.created.length - 1];
+    assert.ok(source, "no EventSource was constructed");
+    return source;
+  }
+}
+(globalThis as unknown as { window: { EventSource?: unknown } }).window.EventSource = FakeEventSource;
+(globalThis as unknown as { EventSource?: unknown }).EventSource = FakeEventSource;
+
 const { MultiplayerSync } = await import("../../src/io/multiplayerSync");
 const { setInMemoryLocalPlayerId } = await import("../../src/players/localPlayer");
 const { bus } = await import("../../src/core/eventBus");
@@ -103,6 +143,7 @@ function installFetch(server: FakeServer): void {
 
 beforeEach(() => {
   bus.clear();
+  FakeEventSource.created.length = 0;
 });
 
 test("the first poll hydrates full state once and seeds the cursor from the same response", async () => {
@@ -401,5 +442,130 @@ test("a resync emits mp:presenceUpdated from the row's lobby presence", async ()
   for (const ev of events) {
     assert.deepEqual(ev.presence, server.game.lobby.presence);
   }
+  sync.stop();
+});
+
+// SSE transport (plan/2026-09-28-sse-event-push.md): frames land in
+// applyRows exactly like polled rows -- same cursor advance, same
+// filtering, same mp:logRow fan-out -- so the 2 s poll stays a pure
+// backstop and nothing downstream can tell which transport a row arrived
+// on. The fake above is inert in every earlier test: start() opens a
+// stream per test, but nothing dispatches into it.
+
+test("start() opens the stream at the current cursor; stop() closes it", async () => {
+  const server: FakeServer = { game: makeGameRow("gs1", { lastEventId: 7 }), events: [], calls: [] };
+  installFetch(server);
+  const sync = new MultiplayerSync();
+
+  sync.start("gs1");
+  const first = FakeEventSource.latest();
+  assert.equal(first.url, "/api/games/gs1/events/stream?after=0", "unseeded start streams from 0");
+  await sync.pollOnce();
+  assert.equal(sync.getCursor(), 7);
+  sync.stop();
+  assert.equal(first.closed, true, "stop() closes the stream");
+
+  sync.start("gs1", { cursor: 7 });
+  const second = FakeEventSource.latest();
+  assert.notEqual(second, first, "a start after stop opens a fresh source");
+  assert.equal(second.url, "/api/games/gs1/events/stream?after=7", "seeded start resumes at the cursor");
+  sync.stop();
+  assert.equal(second.closed, true);
+});
+
+test("restarting into a different game closes the old stream first", async () => {
+  const server: FakeServer = { game: makeGameRow("gs2", { lastEventId: 1 }), events: [], calls: [] };
+  installFetch(server);
+  const sync = new MultiplayerSync();
+
+  sync.start("gs2a");
+  const first = FakeEventSource.latest();
+  sync.start("gs2b");
+  assert.equal(first.closed, true, "the old game's stream is closed on re-start");
+  assert.equal(FakeEventSource.latest().url, "/api/games/gs2b/events/stream?after=0");
+  sync.stop();
+});
+
+test("an SSE log frame emits mp:logRow and applies the state delta", async () => {
+  const moved: EngineEvent = { type: "HeroMoved", actor: 1, heroId: "h1", to: { q: 9, r: 8 } };
+  const server: FakeServer = { game: makeGameRow("gs3", { lastEventId: 10 }), events: [], calls: [] };
+  installFetch(server);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("gs3", { cursor: 10, state: hydrateGameState(server.game) });
+  const es = FakeEventSource.latest();
+
+  const logRows: EventRow[] = [];
+  bus.on("mp:logRow", (ev: { row: EventRow }) => logRows.push(ev.row));
+  es.dispatchLog(row(11, moved, 1), "11");
+  await tick();
+
+  assert.equal(logRows.length, 1, "the frame fans out to the log before any filtering");
+  assert.equal(logRows[0].id, "11");
+  assert.equal(sync.getCursor(), 11, "the frame advances the cursor");
+  assert.equal(sync.getMirror().getHero("h1")?.moving, true, "the mirror started a tween for the move");
+
+  server.events.push(row(11, moved, 1));
+  await sync.pollOnce();
+  assert.equal(logRows.length, 1, "the poll backstop never re-delivers a streamed row");
+  sync.stop();
+});
+
+test("a legacy audit kind row via SSE still fans out to the log but never resyncs", async () => {
+  const server: FakeServer = { game: makeGameRow("gs4", { lastEventId: 10 }), events: [], calls: [] };
+  installFetch(server);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("gs4", { cursor: 10, state: hydrateGameState(server.game) });
+  const es = FakeEventSource.latest();
+
+  const logKinds: string[] = [];
+  bus.on("mp:logRow", (ev: { row: { kind: string } }) => logKinds.push(ev.row.kind));
+  const resyncs: string[] = [];
+  bus.on("mp:resynced", (ev: { reason: string }) => resyncs.push(ev.reason));
+  es.dispatchLog(
+    { id: "11", kind: "turn_ended", payload: { round: 1 }, actor_seat: null, created_at: "2026-09-28T00:00:00.000Z" },
+    "11",
+  );
+  await tick();
+
+  assert.deepEqual(logKinds, ["turn_ended"], "the log is an audit view: every kind streams");
+  assert.deepEqual(resyncs, [], "a non-engine kind carries no EngineEvent to fail on");
+  assert.equal(sync.getCursor(), 11);
+  sync.stop();
+});
+
+test("a self-seat row is skipped for state but still emitted as mp:logRow", async () => {
+  const mine: EngineEvent = {
+    type: "GoldTransferred",
+    actor: 0,
+    heroId: "h0",
+    settlementId: "s0",
+    direction: "deposit",
+  };
+  const server: FakeServer = {
+    game: makeGameRow("gs5", {
+      lastEventId: 5,
+      heroes: [makeHero("h0", 0, 2, 2, { gold: 100 })],
+      settlements: [makeSettlement("s0", 0, 2, 2, { gold: 0 })],
+    }),
+    events: [],
+    calls: [],
+  };
+  installFetch(server);
+  setInMemoryLocalPlayerId("gs5", 0);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("gs5", { cursor: 5, state: hydrateGameState(server.game) });
+  const es = FakeEventSource.latest();
+
+  const logRows: EventRow[] = [];
+  bus.on("mp:logRow", (ev: { row: EventRow }) => logRows.push(ev.row));
+  es.dispatchLog(row(6, mine, 0), "6");
+  await tick();
+
+  assert.equal(logRows.length, 1, "own-seat rows are not filtered out of the log");
+  assert.equal(sync.getCursor(), 6);
+  assert.equal(sync.getState()!.heroes.h0.gold, 100, "state was not re-applied");
   sync.stop();
 });

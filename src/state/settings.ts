@@ -24,6 +24,9 @@ export interface GameSettings {
   buildingUpgradeConfirm: boolean;
   parallaxEnabled: boolean;
   parallaxLayerCount: number;
+  // Log Message Panel (plan/2026-09-28-sse-event-push.md, use case 1):
+  // reveal + fill the game-log panel with every streamed game_events row.
+  showLogPanel: boolean;
 }
 
 const STORAGE_KEY = "heroesJs.settings";
@@ -78,6 +81,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   buildingUpgradeConfirm: true,
   parallaxEnabled: false,
   parallaxLayerCount: DEFAULT_PARALLAX_LAYERS,
+  showLogPanel: false,
 };
 
 let current: GameSettings = loadFromStorage();
@@ -164,6 +168,9 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
       ? patch.parallaxEnabled
       : current.parallaxEnabled,
     parallaxLayerCount: clampParallaxLayerCount(patch.parallaxLayerCount ?? current.parallaxLayerCount),
+    showLogPanel: typeof patch.showLogPanel === "boolean"
+      ? patch.showLogPanel
+      : current.showLogPanel,
   };
   current = next;
   try {
@@ -220,6 +227,9 @@ function loadFromStorage(): GameSettings {
         ? parsed.parallaxEnabled
         : false,
       parallaxLayerCount: clampParallaxLayerCount(parsed.parallaxLayerCount),
+      showLogPanel: typeof parsed.showLogPanel === "boolean"
+        ? parsed.showLogPanel
+        : false,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

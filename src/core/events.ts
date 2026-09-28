@@ -36,7 +36,8 @@ export type GameEvent =
   | MpTopologyUpdatedEvent
   | MpEventsAppliedEvent
   | MpResyncedEvent
-  | MpPresenceUpdatedEvent;
+  | MpPresenceUpdatedEvent
+  | MpLogRowEvent;
 
 export type ResyncReason = "initial" | "event_not_derivable" | "cursor_gap";
 
@@ -95,4 +96,35 @@ export type MpTurnStartedEvent = {
   type: "mp:turnStarted";
   gameName: string;
   activePlayerId: number;
+};
+
+/**
+ * One game_events row, as fanned out to the Log Message Panel (plan
+ * 2026-09-28-sse-event-push.md, use case 1). Structurally mirrors
+ * src/io/api.ts's GameEventRow -- declared separately because core/ is
+ * leaf-only (dependency-cruiser) and must not import from io/, the same
+ * reasoning as api.ts's client-side lobby types. `payload` is the persisted
+ * EngineEvent for the engine kinds and a bespoke audit blob for the legacy
+ * kinds, so it stays unknown and is narrowed at the point of use.
+ */
+export type MpLogRow = {
+  id: string;
+  kind: string;
+  payload: unknown;
+  actor_seat: number | null;
+  created_at: string;
+};
+
+/**
+ * Emitted by MultiplayerSync.applyRows at the top of its row loop -- for
+ * EVERY row it sees, engine or legacy audit kind, any seat including this
+ * client's own -- before any state filtering/skipping. The SSE and poll
+ * paths both funnel through applyRows, so this is exactly-once per row:
+ * SSE-delivered rows advance the cursor, so the poll backstop's
+ * `after=cursor` never re-delivers them.
+ */
+export type MpLogRowEvent = {
+  type: "mp:logRow";
+  gameName: string;
+  row: MpLogRow;
 };

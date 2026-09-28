@@ -1,4 +1,4 @@
-import { api, type Game, type GameEventRow } from "./api";
+import { api, eventStreamUrl, type Game, type GameEventRow } from "./api";
 import { applyEngineEvent, hydrateGameState } from "@heroes/engine";
 import type { EngineEvent, GameState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
@@ -10,6 +10,18 @@ import {
 } from "../players/localPlayer";
 
 type LobbyClaims = Record<string, { handle: string }>;
+
+// The slice of the browser's EventSource this class actually uses, declared
+// locally so the implementation and the node-test fake agree on the surface
+// without dragging DOM lib typing through casts. node tests stub window with
+// no EventSource at all, so the lookup below must tolerate its absence.
+type EventStreamFrame = { data: string; lastEventId: string };
+type EventStreamSource = {
+  addEventListener(type: string, listener: (ev: EventStreamFrame) => void): void;
+  onerror: ((ev: unknown) => void) | null;
+  close(): void;
+};
+type EventSourceCtor = new (url: string) => EventStreamSource;
 
 function readClaims(game: Game): LobbyClaims {
   return game.lobby?.claimed ?? {};
@@ -59,6 +71,7 @@ export class MultiplayerSync {
   private claims: LobbyClaims = {};
   private selfEventIds = new Set<number>();
   private mirror = new EntityMirror();
+  private eventSource: EventStreamSource | null = null;
 
   start(
     gameName: string,
@@ -78,6 +91,7 @@ export class MultiplayerSync {
     if (opts.state) this.mirror.bootstrap(opts.state);
     void this.pollOnce();
     this.timer = window.setInterval(() => void this.pollOnce(), this.intervalMs);
+    this.openEventStream(gameName);
   }
 
   stop(): void {
@@ -85,6 +99,7 @@ export class MultiplayerSync {
       window.clearInterval(this.timer);
       this.timer = null;
     }
+    this.closeEventSource();
     this.gameName = null;
     this.lastSeen = null;
     this.lastActivePlayerId = null;
@@ -95,6 +110,68 @@ export class MultiplayerSync {
 
   isRunning(): boolean {
     return this.timer !== null;
+  }
+
+  /**
+   * SSE accelerator (plan 2026-09-28-sse-event-push.md): opens the event
+   * stream alongside the poll. Frames land in applyRows like polled rows --
+   * same cursor advance, same filtering, same bus emissions -- so the 2 s
+   * poll stays as the pure backstop and nothing downstream can tell which
+   * transport a row arrived on. Deliberately skipped where EventSource
+   * doesn't exist (node tests): the poll alone is correct, SSE only makes it
+   * faster. isRunning() stays timer-based; the stream is an accelerator, not
+   * the run state.
+   */
+  private openEventStream(gameName: string): void {
+    this.closeEventSource();
+    if (typeof window === "undefined") return;
+    const ctor = (window as unknown as { EventSource?: EventSourceCtor }).EventSource;
+    if (typeof ctor !== "function") return;
+    try {
+      const source = new ctor(eventStreamUrl(gameName, this.cursor ?? 0));
+      source.addEventListener("log", (frame) => {
+        // A stale frame from a previous start() (or one landing after
+        // stop()) must not touch the current game's pipeline.
+        if (this.gameName !== gameName) return;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(frame.data);
+        } catch {
+          return;
+        }
+        if (typeof parsed !== "object" || parsed === null) return;
+        const candidate = parsed as Partial<GameEventRow>;
+        if (typeof candidate.id !== "string" || typeof candidate.kind !== "string") return;
+        const row: GameEventRow = {
+          id: candidate.id,
+          kind: candidate.kind,
+          payload: candidate.payload,
+          actor_seat: typeof candidate.actor_seat === "number" ? candidate.actor_seat : null,
+          created_at: typeof candidate.created_at === "string" ? candidate.created_at : "",
+        };
+        void this.applyRows(gameName, [row]);
+      });
+      // The browser auto-reconnects with Last-Event-ID (== our cursor) and
+      // the poll covers correctness while disconnected, so an error only
+      // warrants a warn.
+      source.onerror = () => {
+        console.warn("[mp] event stream error; browser will reconnect, poll backstop covers the gap");
+      };
+      this.eventSource = source;
+    } catch (e) {
+      console.warn("[mp] event stream unavailable:", e);
+    }
+  }
+
+  private closeEventSource(): void {
+    if (this.eventSource === null) return;
+    try {
+      this.eventSource.close();
+    } catch {
+      // A close() on an already-dead source is a no-op in every browser;
+      // nothing actionable if one disagrees.
+    }
+    this.eventSource = null;
   }
 
   /** Current poll cursor (game_events.id), or null while unseeded. */
@@ -164,6 +241,12 @@ export class MultiplayerSync {
     let cursor = this.cursor ?? 0;
 
     for (const row of rows) {
+      // Log-panel fan-out (plan 2026-09-28-sse-event-push.md, use case 1):
+      // every row, engine or legacy audit kind, any seat -- emitted before
+      // all filtering below. Both transports funnel through here, and
+      // SSE-delivered rows advance the cursor, so the poll's after=cursor
+      // query never re-delivers them: exactly-once per row.
+      bus.emit({ type: "mp:logRow", gameName, row });
       const id = Number(row.id);
       if (Number.isFinite(id) && id > cursor) cursor = id;
       if (this.selfEventIds.delete(id)) continue;

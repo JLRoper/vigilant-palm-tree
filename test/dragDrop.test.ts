@@ -162,7 +162,8 @@ async function run(): Promise<void> {
     // same way the visual-regression suite does: through home's own New Game
     // modal (home's root is appended after the toolbar, so its "New Game"
     // button is reliably the last one in document order).
-    await page.goto(WEB_URL, { waitUntil: "networkidle" });
+    // waitUntil "load", not "networkidle": once a session boots, its SSE event stream (/events/stream) holds a pending request forever, so networkidle can never fire.
+    await page.goto(WEB_URL, { waitUntil: "load" });
     await page.locator("button", { hasText: "New Game" }).last().click();
     await page.waitForTimeout(150);
     await page.locator("input[type=text]").first().fill(GAME_NAME);

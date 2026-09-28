@@ -274,3 +274,13 @@ export const api = {
   },
 };
 
+// SSE event stream (plan/2026-09-28-sse-event-push.md): the URL for the
+// /events/stream endpoint, whose `after` query is the same game_events.id
+// cursor the poll uses (the browser replays it as Last-Event-ID on
+// auto-reconnect). A plain string helper outside the api object because
+// EventSource takes no RequestInit -- fetchWithTimeout's timeout/abort
+// machinery has nothing to attach to.
+export function eventStreamUrl(name: string, after: number): string {
+  return `${BASE}/games/${encodeURIComponent(name)}/events/stream?after=${after}`;
+}
+
