@@ -35,10 +35,11 @@ export function recruitHero(
 
   const indices = Array.from({ length: MAX_HEROES_PER_PLAYER }, (_, i) => i);
   const usedIndices = new Set(
-    player.heroIds.map((id) => {
-      const num = parseInt(id.replace(/^h/, ""), 10);
-      return Number.isFinite(num) ? num : -1;
-    }),
+    Object.keys(state.heroes)
+      .map((id) => {
+        const m = /^h(\d+)$/.exec(id);
+        return m ? parseInt(m[1], 10) : -1;
+      }),
   );
   const nextIdx = indices.find((i) => !usedIndices.has(i)) ?? player.heroIds.length;
   const heroId = `h${nextIdx}`;

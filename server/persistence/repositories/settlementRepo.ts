@@ -166,18 +166,18 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
       const [resourcesResult, buildingsResult, platoonsResult] = await Promise.all([
         db.query<ResourceRow>(
           `SELECT settlement_id, resource, amount, rate FROM settlement_resources
-           WHERE settlement_id = ANY($1::text[])`,
-          [settlementIds],
+           WHERE game_id = $1 AND settlement_id = ANY($2::text[])`,
+          [gameId, settlementIds],
         ),
         db.query<BuildingRow>(
           `SELECT settlement_id, gx, gy, kind, level, style, w, h, construction FROM settlement_buildings
-           WHERE settlement_id = ANY($1::text[])`,
-          [settlementIds],
+           WHERE game_id = $1 AND settlement_id = ANY($2::text[])`,
+          [gameId, settlementIds],
         ),
         db.query<PlatoonRow>(
           `SELECT settlement_id, stack_index, unit_type_id, count FROM settlement_platoons
-           WHERE settlement_id = ANY($1::text[]) ORDER BY settlement_id, stack_index, unit_type_id`,
-          [settlementIds],
+           WHERE game_id = $1 AND settlement_id = ANY($2::text[]) ORDER BY settlement_id, stack_index, unit_type_id`,
+          [gameId, settlementIds],
         ),
       ]);
 
@@ -224,8 +224,7 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
                                      founded_on_resource, gold, gold_rate, morale, auto_trade,
                                      castle_variant, city_spots, city_mines, upgrade)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,$18::jsonb)
-           ON CONFLICT (id) DO UPDATE SET
-             game_id = EXCLUDED.game_id,
+           ON CONFLICT (game_id, id) DO UPDATE SET
              name = EXCLUDED.name,
              owner_id = EXCLUDED.owner_id,
              q = EXCLUDED.q,
@@ -267,22 +266,29 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
         // Resources, buildings, and garrison platoons are always replaced
         // wholesale alongside their parent settlement -- same full-sync
         // rule as the settlements table itself.
-        await db.query(`DELETE FROM settlement_resources WHERE settlement_id = $1`, [settlement.id]);
+        await db.query(`DELETE FROM settlement_resources WHERE game_id = $1 AND settlement_id = $2`, [
+          gameId,
+          settlement.id,
+        ]);
         for (const resource of WAREHOUSE_RESOURCES) {
           const rate = settlement.resourceRates[resource];
           await db.query(
-            `INSERT INTO settlement_resources (settlement_id, resource, amount, rate)
-             VALUES ($1, $2, $3, $4)`,
-            [settlement.id, resource, settlement.warehouse[resource], rate ?? null],
+            `INSERT INTO settlement_resources (game_id, settlement_id, resource, amount, rate)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [gameId, settlement.id, resource, settlement.warehouse[resource], rate ?? null],
           );
         }
 
-        await db.query(`DELETE FROM settlement_buildings WHERE settlement_id = $1`, [settlement.id]);
+        await db.query(`DELETE FROM settlement_buildings WHERE game_id = $1 AND settlement_id = $2`, [
+          gameId,
+          settlement.id,
+        ]);
         for (const building of settlement.buildings) {
           await db.query(
-            `INSERT INTO settlement_buildings (settlement_id, gx, gy, kind, level, style, w, h, construction)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            `INSERT INTO settlement_buildings (game_id, settlement_id, gx, gy, kind, level, style, w, h, construction)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
             [
+              gameId,
               settlement.id,
               building.gx,
               building.gy,
@@ -300,14 +306,17 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
         // settlement-side mirror of heroRepo's hero_platoons flattening.
         // settlementStacks() normalizes absent stacks to 8 empty platoons,
         // so a legacy settlement without a `stacks` field writes zero rows.
-        await db.query(`DELETE FROM settlement_platoons WHERE settlement_id = $1`, [settlement.id]);
+        await db.query(`DELETE FROM settlement_platoons WHERE game_id = $1 AND settlement_id = $2`, [
+          gameId,
+          settlement.id,
+        ]);
         const stacks = settlementStacks(settlement);
         for (let stackIndex = 0; stackIndex < stacks.length; stackIndex++) {
           for (const entry of stacks[stackIndex].entries) {
             await db.query(
-              `INSERT INTO settlement_platoons (settlement_id, stack_index, unit_type_id, count)
-               VALUES ($1, $2, $3, $4)`,
-              [settlement.id, stackIndex, entry.unitTypeId, entry.count],
+              `INSERT INTO settlement_platoons (game_id, settlement_id, stack_index, unit_type_id, count)
+               VALUES ($1, $2, $3, $4, $5)`,
+              [gameId, settlement.id, stackIndex, entry.unitTypeId, entry.count],
             );
           }
         }

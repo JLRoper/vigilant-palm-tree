@@ -80,8 +80,7 @@ export function createCharterRepo(db: Queryable): CharterRepo {
                                   phase, days_remaining, settlement_id, resource_rates,
                                   founded_on_resource, city_spots)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13::jsonb)
-           ON CONFLICT (id) DO UPDATE SET
-             game_id = EXCLUDED.game_id,
+           ON CONFLICT (game_id, id) DO UPDATE SET
              hero_id = EXCLUDED.hero_id,
              owner_id = EXCLUDED.owner_id,
              target_q = EXCLUDED.target_q,
