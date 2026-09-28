@@ -257,7 +257,7 @@ Each variant loads from `resources/units/horse/commander-{N}/`:
 | 8 | samurai | `horse.samurai.{dir}` | 4 | diags → cardinals |
 | 9 | drake | `horse.drake.{dir}` | 4 | diags → cardinals |
 
-**Run frames** (2-frame gallop cycle): any variant can adopt run frames one at a time by adding `{variant}-{dir}-2.png` files beside its base frames — the existing `import.meta.glob` picks them up with no code change, and variants without frame files silently use the base sprite. Drake (commander-9) is the only variant carrying them today: `drake-{e,n,s,w}-2.png` (512×512 second gallop poses, bbox-tuned to their base frames — content height, bottom edge and center matched, since sprites are bottom-anchored).
+**Run frames** (2-frame gallop cycle): any variant can adopt run frames one at a time by adding `{variant}-{dir}-2.png` files beside its base frames — the existing `import.meta.glob` picks them up with no code change, and variants without frame files silently use the base sprite. Every mounted variant carries them now (2026-09-28): bubbly (6, incl. diagonals) plus shadow/paladin/ranger/arcane/unicorn/samurai/drake (4 cardinals each). All are second gallop poses bbox-normalized to their base frames — content height, bottom edge and center matched, since sprites are bottom-anchored; `tools/sprites/tune-run-frames.mjs` normalizes new frames and `--check`-gates the alignment (centerX is advisory there when the art is clipped at a horizontal canvas edge, as with `drake-e-2`).
 
 ---
 
@@ -846,6 +846,7 @@ sequenceDiagram
 | `gemini-buildings.mjs` | `building-pixel-<camelCaseName>-<level>.png` | reference-image style match → PNG as-is |
 | `strip-checkerboard.mjs` | in-place alpha fix on any PNG | border flood-fill + gray erosion → real alpha |
 | `remove-specks.mjs` | in-place speck cleanup on any PNG | connected-component analysis: drops non-main, small, low-saturation opaque islands |
+| `tune-run-frames.mjs` | horse `-2` run frames, normalized in place against their base frame | canvas → base size + content-bbox height/bottom/centerX alignment (sprites are bottom-anchored); `--check` gates drift, centerX advisory when art is h-clipped |
 
 Wiring note: these files are not auto-registered — `pixel.granary.1/2/3` and `pixel.smithy.2` are the wired precedents in `assetDescriptors.ts`; the woodcutter hut pair and the gold mine tier 1–3 trio exist on disk only until descriptors land for them.
 
