@@ -46,8 +46,8 @@ A turn-based hex adventure map where the player moves a hero, claims resource ti
 | [pr-13-dev-console.md](./pr-13-dev-console.md) | PR record (merged) for the dev console: ring-buffer event log + pin/persist; float follow-up reverted pre-merge | ✅ Current |
 | [network-map.md](./network-map.md) | Dev overlay showing live client↔API routing topology (RTT, poll-failure rate, throughput); what each metric really measures and why three of four are proxies | ✅ Current |
 | [event-system.md](./event-system.md) | Planned `core/eventBus` refactor and event catalog (Phases 1–6) | 🟡 Partially shipped — typed bus + full `GameEvent` catalog live (2026-09-27); Phase-2+ listener migration still planned |
-| [multiplayer.md](./multiplayer.md) | LAN multiplayer design: lobby/seat identity, event-cursor sync, and session policy — no turn timer in v1, shipped drop policy (60s disconnect detection, grace-then-skip with server auto-EndTurn), email rejoin reclaim, no AI seats | ✅ Current |
-| [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) | **Multiplayer (LAN):** lobby seat claim + `lobby` jsonb column (§3), 2s polling sync (§5.9), lobby UI (§5.12), local seat identity (§5.16) | 🟡 Built, no design doc |
+| [multiplayer.md](./multiplayer.md) | LAN multiplayer design: lobby/seat identity, event-cursor sync (SSE push + 2s poll backstop, 2026-09-28), and session policy — no turn timer in v1, shipped drop policy (60s disconnect detection, grace-then-skip with server auto-EndTurn), email rejoin reclaim, no AI seats | ✅ Current |
+| [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) | **Multiplayer (LAN):** lobby seat claim + `lobby` jsonb column (§3), SSE push + 2s poll backstop sync (§5.9), lobby UI (§5.12), local seat identity (§5.16) | 🟡 Built, no design doc |
 | [../.kilo/plan/](../.kilo/plan/) | Architecture plans: walkthrough + Tailscale, bloat/scalability review, module expansion plan, modal viewport overflow, fight-screen redesign, combat reveal / fog of war | 📋 Planned |
 
 
