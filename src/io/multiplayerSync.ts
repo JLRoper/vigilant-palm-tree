@@ -1,57 +1,18 @@
 import { api, type Game, type GameEventRow } from "./api";
 import { applyEngineEvent, hydrateGameState } from "@heroes/engine";
-import type { EngineEvent, GameState, NetworkTopologySnapshot } from "@heroes/contracts";
+import type { EngineEvent, GameState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
+import type { ResyncReason } from "../core/events";
 import { EntityMirror } from "../render/scene/entityMirror";
 import {
   getInMemoryLocalPlayerId,
   setInMemoryLocalPlayerId,
 } from "../players/localPlayer";
 
-export interface MpStateChangedEvent {
-  type: "mp:stateChanged";
-  gameName: string;
-  prev: GameState | null;
-  next: GameState;
-  serverActivePlayerId: number;
-}
-
-export interface MpTurnStartedEvent {
-  type: "mp:turnStarted";
-  gameName: string;
-  activePlayerId: number;
-}
-
-/** Emitted once per poll cycle with the server's current view of the network topology (issue #51). */
-export interface MpTopologyUpdatedEvent {
-  type: "mp:topologyUpdated";
-  gameName: string;
-  snapshot: NetworkTopologySnapshot;
-}
-
-/** The delta events a poll actually applied, in log order (#146). */
-export interface MpEventsAppliedEvent {
-  type: "mp:eventsApplied";
-  gameName: string;
-  events: EngineEvent[];
-  cursor: number;
-}
-
-/** Emitted whenever the poller fell back to a full-state refetch (#146). */
-export interface MpResyncedEvent {
-  type: "mp:resynced";
-  gameName: string;
-  state: GameState;
-  cursor: number;
-  reason: ResyncReason;
-}
-
-export type ResyncReason = "initial" | "event_not_derivable" | "cursor_gap";
-
 type LobbyClaims = Record<string, { handle: string }>;
 
 function readClaims(game: Game): LobbyClaims {
-  return (game as unknown as { lobby?: { claimed?: LobbyClaims } }).lobby?.claimed ?? {};
+  return game.lobby?.claimed ?? {};
 }
 
 // The 14 variants packages/contracts/src/events/engineEvent.ts actually
@@ -249,6 +210,12 @@ export class MultiplayerSync {
       setInMemoryLocalPlayerId(gameName, 0);
     }
     this.reportTelemetry(gameName, rttMs, measureBytes(game), true);
+    // Drop-policy presence rides the row the resync just fetched (the
+    // per-poll delta cycles get theirs from the telemetry POST response).
+    const lobbyPresence = game.lobby?.presence;
+    if (lobbyPresence) {
+      bus.emit({ type: "mp:presenceUpdated", gameName, presence: lobbyPresence });
+    }
 
     const hydrated = hydrateGameState(game);
     const seeded = Number(game.last_event_id ?? 0);
@@ -282,6 +249,11 @@ export class MultiplayerSync {
    * this is best-effort debug data and must never delay or fail a poll cycle,
    * the same posture as the console.warn on a failed poll above.
    *
+   * The POST response now also carries the drop-policy seat-presence view
+   * (2026-09-27), so this same call is the per-poll presence read: any
+   * non-null presence goes on the bus as mp:presenceUpdated before the
+   * topology fetch, exactly as best-effort.
+   *
    * The bandwidth proxy now measures whatever the cycle actually fetched --
    * a delta page on a normal poll, a full row only on a resync. Shrinking
    * that number is the point of #146, so the map reads it unchanged.
@@ -302,10 +274,17 @@ export class MultiplayerSync {
 
     void api
       .reportTelemetry(gameName, { playerId, label, rttMs, responseBytes, ok })
-      .then(() => api.getTopology(gameName))
-      .then((snapshot) => {
-        // The poll loop keeps running across a game switch; drop a snapshot
+      .then((presence) => {
+        // The poll loop keeps running across a game switch; drop anything
         // that resolved after start() moved on to a different game.
+        if (this.gameName !== gameName) return;
+        if (presence) {
+          bus.emit({ type: "mp:presenceUpdated", gameName, presence });
+        }
+        return api.getTopology(gameName);
+      })
+      .then((snapshot) => {
+        if (!snapshot) return;
         if (this.gameName !== gameName) return;
         bus.emit({ type: "mp:topologyUpdated", gameName, snapshot });
       })

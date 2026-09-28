@@ -1,4 +1,11 @@
-import type { Axial, HeroId, SettlementId } from "@heroes/contracts";
+import type {
+  Axial,
+  EngineEvent,
+  GameState,
+  HeroId,
+  NetworkTopologySnapshot,
+  SettlementId,
+} from "@heroes/contracts";
 
 export type GameEvent =
   | { type: "state:committed" }
@@ -23,4 +30,69 @@ export type GameEvent =
   // CommandError), otherwise the raw failure text. Consumed by
   // src/screens/shared/toast.ts to give the player a visible notification
   // instead of the previous console.warn-only silence.
-  | { type: "command:rejected"; action: string; reason: string };
+  | { type: "command:rejected"; action: string; reason: string }
+  | MpStateChangedEvent
+  | MpTurnStartedEvent
+  | MpTopologyUpdatedEvent
+  | MpEventsAppliedEvent
+  | MpResyncedEvent
+  | MpPresenceUpdatedEvent;
+
+export type ResyncReason = "initial" | "event_not_derivable" | "cursor_gap";
+
+/** One seat's server-side presence, from the games row's lobby.presence (drop policy, shipped 2026-09-27). */
+export type MpSeatPresence = {
+  /** Server-side last-heartbeat time, ISO-8601. */
+  lastSeenAt: string;
+  connected: boolean;
+};
+
+/**
+ * Emitted whenever the poller learns a fresh seat-presence view: the
+ * per-poll telemetry POST response carries it, and a full resync carries it
+ * on the row's lobby.presence. Consumers render "(disconnected)" seat state
+ * (multiplayerLobby seat list, the in-game "waiting for seat N" hint).
+ */
+export type MpPresenceUpdatedEvent = {
+  type: "mp:presenceUpdated";
+  gameName: string;
+  presence: Record<string, MpSeatPresence>;
+};
+
+/** Emitted once per poll cycle with the server's current view of the network topology (issue #51). */
+export type MpTopologyUpdatedEvent = {
+  type: "mp:topologyUpdated";
+  gameName: string;
+  snapshot: NetworkTopologySnapshot;
+};
+
+/** The delta events a poll actually applied, in log order (#146). */
+export type MpEventsAppliedEvent = {
+  type: "mp:eventsApplied";
+  gameName: string;
+  events: EngineEvent[];
+  cursor: number;
+};
+
+/** Emitted whenever the poller fell back to a full-state refetch (#146). */
+export type MpResyncedEvent = {
+  type: "mp:resynced";
+  gameName: string;
+  state: GameState;
+  cursor: number;
+  reason: ResyncReason;
+};
+
+export type MpStateChangedEvent = {
+  type: "mp:stateChanged";
+  gameName: string;
+  prev: GameState | null;
+  next: GameState;
+  serverActivePlayerId: number;
+};
+
+export type MpTurnStartedEvent = {
+  type: "mp:turnStarted";
+  gameName: string;
+  activePlayerId: number;
+};

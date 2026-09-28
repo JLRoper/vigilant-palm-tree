@@ -14,10 +14,17 @@ import {
   startCharter,
   upgradeBuilding,
   upgradeSettlement,
+  placeBuildings as placeBuildingsCommand,
+  transferResources as transferResourcesCommand,
+  assignWagons as assignWagonsCommand,
+  buyWagons as buyWagonsCommand,
+  createTradeRoute as createTradeRouteCommand,
+  updateTradeRoute as updateTradeRouteCommand,
   advanceCharterTravel,
 } from "../io/commands";
 import type { EndTurnResult } from "../io/commands";
 import type {
+  BuildingDef,
   BuildingUpgradeRequest,
   GameState,
   HeroId,
@@ -284,19 +291,80 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         reportCommandFailure("Advance charter travel", e);
       }
     },
-    onUpgradeBuilding: async (
-      actor: number,
-      settlementId: SettlementId,
-      requests: BuildingUpgradeRequest[],
-    ): Promise<void> => {
-      const name = opts.gameName();
-      if (!name) return;
-      try {
-        await upgradeBuilding(name, { actor, settlementId, requests });
-      } catch (e) {
-        reportCommandFailure("Upgrade building", e);
-      }
-    },
+  onUpgradeBuilding: async (
+    actor: number,
+    settlementId: SettlementId,
+    requests: BuildingUpgradeRequest[],
+  ): Promise<void> => {
+    const name = opts.gameName();
+    if (!name) return;
+    try {
+      await upgradeBuilding(name, { actor, settlementId, requests });
+    } catch (e) {
+      reportCommandFailure("Upgrade building", e);
+    }
+  },
+  onTransferResources: async (
+    actor: number,
+    heroId: HeroId,
+    settlementId: SettlementId,
+    direction: "load" | "unload",
+    amounts: Partial<Record<WarehouseResource, number>>,
+  ): Promise<void> => {
+    const name = opts.gameName();
+    if (!name) return;
+    try {
+      await transferResourcesCommand(name, { actor, heroId, settlementId, direction, amounts });
+    } catch (e) {
+      reportCommandFailure("Transfer resources", e);
+    }
+  },
+  onAssignWagons: async (actor: number, heroId: HeroId, delta: number): Promise<void> => {
+    const name = opts.gameName();
+    if (!name) return;
+    try {
+      await assignWagonsCommand(name, { actor, heroId, delta });
+    } catch (e) {
+      reportCommandFailure("Assign wagons", e);
+    }
+  },
+  onBuyWagons: async (actor: number, settlementId: SettlementId, count: number): Promise<void> => {
+    const name = opts.gameName();
+    if (!name) return;
+    try {
+      await buyWagonsCommand(name, { actor, settlementId, count });
+    } catch (e) {
+      reportCommandFailure("Buy wagons", e);
+    }
+  },
+  onCreateTradeRoute: async (
+    actor: number,
+    fromSettlementId: SettlementId,
+    toSettlementId: SettlementId,
+    resource: WarehouseResource,
+    wagons: number,
+  ): Promise<void> => {
+    const name = opts.gameName();
+    if (!name) return;
+    try {
+      await createTradeRouteCommand(name, { actor, fromSettlementId, toSettlementId, resource, wagons });
+    } catch (e) {
+      reportCommandFailure("Create trade route", e);
+    }
+  },
+  onUpdateTradeRoute: async (
+    actor: number,
+    routeId: string,
+    change: { resource?: WarehouseResource; wagonsDelta?: number; remove?: boolean },
+  ): Promise<void> => {
+    const name = opts.gameName();
+    if (!name) return;
+    try {
+      await updateTradeRouteCommand(name, { actor, routeId, ...change });
+    } catch (e) {
+      reportCommandFailure("Update trade route", e);
+    }
+  },
     onUpgradeSettlement: async (
       actor: number,
       settlementId: SettlementId,
@@ -308,6 +376,20 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await upgradeSettlement(name, { actor, settlementId, upgradePopulationGate });
       } catch (e) {
         reportCommandFailure("Upgrade settlement", e);
+      }
+    },
+    onPlaceBuildings: async (
+      actor: number,
+      settlementId: SettlementId,
+      buildings: BuildingDef[],
+      initialLayout?: boolean,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await placeBuildingsCommand(name, { actor, settlementId, buildings, initialLayout });
+      } catch (e) {
+        reportCommandFailure("Place buildings", e);
       }
     },
     pickAiMove: (state: GameState, heroId: HeroId) => {
@@ -353,6 +435,9 @@ function mergeFromEndTurn(state: GameState, result: EndTurnResult): GameState {
     players: result.players,
     heroes: result.heroes,
     settlements: result.settlements,
+    // Caravans moved server-side this wrap -- the merged routes replace the
+    // client's wholesale, same as heroes/settlements.
+    tradeRoutes: result.tradeRoutes ?? state.tradeRoutes,
     phase,
     selectedHeroId: null,
     selectedSettlementId: null,

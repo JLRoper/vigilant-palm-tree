@@ -13,7 +13,8 @@ export type GenerationPattern =
 
 const ALL_KINDS: BuildingKind[] = [
   "townHall", "house", "tower", "mageGuild", "mine", "market", "barracks", "smithy",
-  "apartment", "farmField", "farmhouse", "archeryRange", "granary",
+  "apartment", "farmField", "farmhouse", "archeryRange", "granary", "bank", "goldMine",
+  "woodcutterHut",
 ];
 
 function seededRandom(seed: number): () => number {

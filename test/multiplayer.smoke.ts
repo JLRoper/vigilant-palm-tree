@@ -153,7 +153,29 @@ async function run() {
     const report = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/telemetry`, {
       data: { playerId: 0, label: "Host", rttMs: 37, responseBytes: 4096, ok: true },
     });
-    assert.equal(report.status(), 204, "telemetry report should return 204");
+    // Drop policy (2026-09-27): the report is now also the enforcement-grade
+    // seat heartbeat, and the 200 response body carries the seat-presence
+    // view (was 204 no-content before the presence read rode this call).
+    assert.equal(report.status(), 200, "telemetry report should return 200");
+    const reportBody = (await report.json()) as {
+      presence: Record<string, { lastSeenAt: string; connected: boolean }>;
+    };
+    // Earlier steps of this smoke already sent commands (which count as
+    // heartbeats by design), so other seats may legitimately appear too --
+    // assert on the reporting seat, not on exclusivity.
+    assert.ok(
+      reportBody.presence["0"],
+      "the reporting seat should appear in the presence view",
+    );
+    assert.equal(
+      reportBody.presence["0"].connected,
+      true,
+      "a seat that just reported is connected",
+    );
+    assert.ok(
+      !Number.isNaN(Date.parse(reportBody.presence["0"].lastSeenAt)),
+      "lastSeenAt should be an ISO timestamp",
+    );
 
     const badReport = await ctx.post(`${API_URL}/api/games/${lobbyGameName}/telemetry`, {
       data: { playerId: 0, label: "Host", rttMs: "fast", responseBytes: 4096, ok: true },

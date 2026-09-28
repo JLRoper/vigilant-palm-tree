@@ -15,6 +15,7 @@ import heroBannerRanger from "../resources/hero-banner-ranger.png?url";
 import heroBannerArcane from "../resources/hero-banner-arcane.png?url";
 import heroBannerUnicorn from "../resources/hero-banner-unicorn.png?url";
 import heroBannerSamurai from "../resources/hero-banner-samurai.png?url";
+import heroBannerDrake from "../resources/hero-banner-drake.png?url";
 import resourceGold from "../resources/resource-gold.png?url";
 import resourceWood from "../resources/resource-wood.png?url";
 import resourceStone from "../resources/resource-stone.png?url";
@@ -83,7 +84,22 @@ import buildingBlockyHouse2 from "../resources/buildings/building-blocky-house-2
 import buildingPixelGranary1 from "../resources/buildings/building-pixel-granary-1.png?url";
 import buildingPixelGranary2 from "../resources/buildings/building-pixel-granary-2.png?url";
 import buildingPixelGranary3 from "../resources/buildings/building-pixel-granary-3.png?url";
+import buildingPixelBank1 from "../resources/buildings/building-pixel-bank-1.png?url";
+import buildingPixelGoldMine1 from "../resources/buildings/building-pixel-goldMine-1.png?url";
+import buildingPixelGoldMine2 from "../resources/buildings/building-pixel-goldMine-2.png?url";
+import buildingPixelGoldMine3 from "../resources/buildings/building-pixel-goldMine-3.png?url";
+import buildingPixelWoodcutterHut1 from "../resources/buildings/building-pixel-woodcutterHut-1.png?url";
+import buildingPixelWoodcutterHut2 from "../resources/buildings/building-pixel-woodcutterHut-2.png?url";
 import buildingPixelSmithy2 from "../resources/buildings/building-pixel-smithy-2.png?url";
+import buildingPixelStoneMine1 from "../resources/buildings/building-pixel-stoneMine-1.png?url";
+import buildingPixelStoneMine2 from "../resources/buildings/building-pixel-stoneMine-2.png?url";
+import buildingPixelStoneMine3 from "../resources/buildings/building-pixel-stoneMine-3.png?url";
+import buildingPixelIronMine1 from "../resources/buildings/building-pixel-ironMine-1.png?url";
+import buildingPixelIronMine2 from "../resources/buildings/building-pixel-ironMine-2.png?url";
+import buildingPixelIronMine3 from "../resources/buildings/building-pixel-ironMine-3.png?url";
+import buildingPixelUnderConstruction1 from "../resources/buildings/building-pixel-underConstruction-1.png?url";
+import buildingPixelUnderConstruction2 from "../resources/buildings/building-pixel-underConstruction-2.png?url";
+import buildingPixelUnderConstruction3 from "../resources/buildings/building-pixel-underConstruction-3.png?url";
 import { Faction, Direction } from "../entities/hero";
 import type { CastleLevel, CastleVariant, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
@@ -151,6 +167,7 @@ export const HERO_BANNERS: Record<HorseVariantId, string> = {
   arcane: heroBannerArcane,
   unicorn: heroBannerUnicorn,
   samurai: heroBannerSamurai,
+  drake: heroBannerDrake,
 };
 
 export const RESOURCE_SPRITES: Record<ResourceType, string> = {
@@ -253,6 +270,24 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel.granary.1": buildingPixelGranary1,
   "pixel.granary.2": buildingPixelGranary2,
   "pixel.granary.3": buildingPixelGranary3,
+  "pixel.bank.1": buildingPixelBank1,
+  "pixel.bank.2": buildingPixelBank1,
+  "pixel.bank.3": buildingPixelBank1,
+  "pixel.goldMine.1": buildingPixelGoldMine1,
+  "pixel.goldMine.2": buildingPixelGoldMine2,
+  "pixel.goldMine.3": buildingPixelGoldMine3,
+  "pixel.woodcutterHut.1": buildingPixelWoodcutterHut1,
+  "pixel.woodcutterHut.2": buildingPixelWoodcutterHut2,
+  "pixel.woodcutterHut.3": buildingPixelWoodcutterHut2,
+  "pixel.stoneMine.1": buildingPixelStoneMine1,
+  "pixel.stoneMine.2": buildingPixelStoneMine2,
+  "pixel.stoneMine.3": buildingPixelStoneMine3,
+  "pixel.ironMine.1": buildingPixelIronMine1,
+  "pixel.ironMine.2": buildingPixelIronMine2,
+  "pixel.ironMine.3": buildingPixelIronMine3,
+  "pixel.underConstruction.1": buildingPixelUnderConstruction1,
+  "pixel.underConstruction.2": buildingPixelUnderConstruction2,
+  "pixel.underConstruction.3": buildingPixelUnderConstruction3,
   "pixel.smithy.2": buildingPixelSmithy2,
 };
 
@@ -619,6 +654,24 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.granary.1": 11,
   "building.pixel.granary.2": 25,
   "building.pixel.granary.3": 19,
+  "building.pixel.bank.1": 7,
+  "building.pixel.bank.2": 7,
+  "building.pixel.bank.3": 7,
+  "building.pixel.goldMine.1": 13,
+  "building.pixel.goldMine.2": 9,
+  "building.pixel.goldMine.3": 1,
+  "building.pixel.stoneMine.1": 12,
+  "building.pixel.stoneMine.2": 5,
+  "building.pixel.stoneMine.3": 13,
+  "building.pixel.ironMine.1": 10,
+  "building.pixel.ironMine.2": 10,
+  "building.pixel.ironMine.3": 10,
+  "building.pixel.underConstruction.1": 13,
+  "building.pixel.underConstruction.2": 11,
+  "building.pixel.underConstruction.3": 8,
+  "building.pixel.woodcutterHut.1": 4,
+  "building.pixel.woodcutterHut.2": 8,
+  "building.pixel.woodcutterHut.3": 8,
   "building.pixel.smithy.2": 4,
 };
 for (const [key, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {

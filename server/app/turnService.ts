@@ -1,4 +1,5 @@
 import { applyEndOfTurnDetailed, endTurn, advanceRound } from "@heroes/engine";
+import type { GameMap } from "@heroes/engine";
 import type { AutoTradeTransfer, GameState } from "@heroes/contracts";
 
 // Round advances and weekly-upkeep triggers, per
@@ -49,12 +50,12 @@ export function clampGrowthRate(rate: number | undefined): number {
   return Math.max(MIN_GROWTH_RATE, Math.min(MAX_GROWTH_RATE, rate));
 }
 
-export function runEndTurn(state: GameState, growthRate: number): EndTurnOutcome {
+export function runEndTurn(state: GameState, growthRate: number, map: GameMap | null = null): EndTurnOutcome {
   const afterEot = applyEndOfTurnDetailed(state);
   const afterPhase = endTurn(afterEot.state);
   if (afterPhase.phase.kind !== "ROUND_END") {
     return { state: afterPhase, wrapped: false, transfers: afterEot.transfers };
   }
-  const final = advanceRound(afterPhase, growthRate);
+  const final = advanceRound(afterPhase, growthRate, map);
   return { state: final, wrapped: true, transfers: afterEot.transfers };
 }

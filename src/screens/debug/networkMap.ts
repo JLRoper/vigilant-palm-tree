@@ -9,7 +9,7 @@ import {
   type NetworkLinkStatus,
   type NetworkTopologySnapshot,
 } from "@heroes/contracts";
-import type { MpTopologyUpdatedEvent } from "../../io/multiplayerSync";
+import type { MpTopologyUpdatedEvent } from "../../core/events";
 
 // Dev Network Map overlay (issue #51, plan/2026-08-17-issue-51-network-map.md §5).
 //

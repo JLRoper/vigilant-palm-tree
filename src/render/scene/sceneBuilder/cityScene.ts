@@ -1,6 +1,6 @@
 import type { CityViewSize } from "@heroes/engine";
-import { buildingFootprintFromRegistry, pickStyleForBuilding } from "@heroes/engine";
-import type { BuildingDef, BuildingKind, GenerationStyle } from "@heroes/contracts";
+import { buildingConstructionProgress, buildingFootprintFromRegistry, constructionStageFor, pickStyleForBuilding, upgradeProgress, upgradeRefs } from "@heroes/engine";
+import type { BuildingDef, BuildingKind, GenerationStyle, UpgradeState } from "@heroes/contracts";
 import { cellOrigin, cellsInDrawOrder, cellToScreen, computeCityScale, TILE_D, TILE_W } from "../../../core/cityGrid";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { GameSettings } from "../../../state/settings";
@@ -42,12 +42,16 @@ export interface CitySceneInput {
     GameSettings,
     "spriteVariant" | "parallaxEnabled" | "parallaxLayerCount" | "cityBgOffsetX" | "cityBgOffsetY"
   >;
+
+  /** The settlement's single in-flight upgrade, if any; targeted buildings render construction-stage sprites. */
+  upgrades?: UpgradeState;
 }
 
 export function buildCityScene(input: CitySceneInput): SceneNode[] {
   const {
     viewportW, viewportH, settlementName, size, hover,
     citySpots, cityMines, buildings, style, pattern, ghost, selectedKeys, citySettings,
+    upgrades,
   } = input;
   const ownerColor = input.ownerColor ?? "#888888";
   const nodes: SceneNode[] = [];
@@ -122,6 +126,19 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
   }
 
   const orderedBuildings = [...buildings].sort((a, b) => a.gx + a.gy - (b.gx + b.gy));
+  const constructionStages = (() => {
+    if (!upgrades || upgrades.kind === "settlement") return null;
+    const stage = constructionStageFor(upgradeProgress(upgrades));
+    const map = new Map<string, 1 | 2 | 3>();
+    if (upgrades.kind === "townHall") {
+      for (const b of orderedBuildings) {
+        if (b.kind === "townHall") map.set(`${b.gx},${b.gy},${b.kind}`, stage);
+      }
+    } else {
+      for (const ref of upgradeRefs(upgrades)) map.set(`${ref.gx},${ref.gy},${ref.kind}`, stage);
+    }
+    return map;
+  })();
   for (const b of orderedBuildings) {
     const fpSize = buildingFootprintFromRegistry(b.kind, b.level);
     const fp = buildingFootprint(b.gx, b.gy, gridOrigin, screenOrigin, tileScale, fpSize.w, fpSize.h);
@@ -137,6 +154,9 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
       ownerColor,
       style: b.style,
       selected: selectedKeys?.has(`${b.gx},${b.gy},${b.kind}`) ?? false,
+      constructionStage: b.construction
+        ? constructionStageFor(buildingConstructionProgress(b))
+        : constructionStages?.get(`${b.gx},${b.gy},${b.kind}`),
     });
   }
 

@@ -1,5 +1,5 @@
 import type { DrawBuildingContext } from "./types";
-import { lighten, darken, drawIsoBox, buildingHeight, getOpts } from "./primitives";
+import { lighten, darken, drawIsoBox, buildingHeight, getOpts, drawArcaneFontAccent } from "./primitives";
 import { BUILDING_PALETTES } from "../palettes";
 import type { BuildingPalette } from "../palettes";
 
@@ -71,6 +71,8 @@ export function drawBlocky(opts: DrawBuildingContext): void {
     ctx.fillRect(cx - hw * 0.35, doorY + H * 0.05, hw * 0.12, H * 0.1);
     ctx.fillRect(cx + hw * 0.15, doorY + H * 0.05, hw * 0.12, H * 0.1);
   }
+
+  if (kind === "arcaneFont") drawArcaneFontAccent(ctx, cx, cy, hw, hh, H, ownerColor);
 }
 
 export function drawBlockyArcheryRange(

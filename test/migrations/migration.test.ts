@@ -48,20 +48,29 @@ function byId<T extends { id: string }>(rows: T[]): Record<string, T> {
   return Object.fromEntries(rows.map((r) => [r.id, r]));
 }
 
+// Migration 014's hero columns carry defaults (wagons 5, empty cargo), so
+// loadAllForGame adds these keys to every loaded hero even when the seeded
+// JSONB omitted them.
+function withWagonDefaults(h: HeroState): HeroState {
+  return { ...h, wagons: 5, resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 } };
+}
+
 test("backfillGame round-trips a representative mix of heroes and settlements", async () => {
   const name = uniqueName();
   try {
     const heroes: Record<HeroId, HeroState> = {
-      h0: makeHero("h0", 0, 2, 2, {
+      // wagons/resources: the granular columns carry defaults (migration
+      // 014), so the round-trip adds these keys to every loaded hero.
+      h0: withWagonDefaults(makeHero("h0", 0, 2, 2, {
         gold: 40,
         troops: 12,
         stacks: [
           { entries: [{ unitTypeId: "archer", count: 5 }, { unitTypeId: "swordsman", count: 3 }] },
           { entries: [{ unitTypeId: "cavalry", count: 2 }] },
         ],
-      }),
-      h1: makeHero("h1", 0, 5, 5, { stacks: [] }),
-      h2: makeHero("h2", 1, 8, 8, { isChartering: true, charterId: "c-outstanding" }),
+      })),
+      h1: withWagonDefaults(makeHero("h1", 0, 5, 5, { stacks: [] })),
+      h2: withWagonDefaults(makeHero("h2", 1, 8, 8, { isChartering: true, charterId: "c-outstanding" })),
     };
     const settlements: Record<SettlementId, SettlementState> = {
       s0: makeSettlement("s0", 0, 2, 2, {
@@ -93,7 +102,7 @@ test("backfillGame round-trips a representative mix of heroes and settlements", 
 test("backfillGame is idempotent: running it twice converges to the same rows", async () => {
   const name = uniqueName();
   try {
-    const heroes: Record<HeroId, HeroState> = { h0: makeHero("h0", 0, 1, 1, { gold: 10 }) };
+    const heroes: Record<HeroId, HeroState> = { h0: withWagonDefaults(makeHero("h0", 0, 1, 1, { gold: 10 })) };
     const settlements: Record<SettlementId, SettlementState> = { s0: makeSettlement("s0", 0, 1, 1) };
     await seedLegacyGame(name, heroes, settlements);
 

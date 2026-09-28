@@ -66,6 +66,13 @@ function formatPlacementCost(kind: BuildingKind): string {
   return parts.length > 0 ? `Cost: ${parts.join(" ")}` : "";
 }
 
+export interface ProducerCellInfo {
+  multiplier: number;
+  resource: string;
+  basePerTurn: number;
+  amount: number;
+}
+
 export interface BuildingMenuOptions {
   onRecruitArcher?: () => void;
   onUpgradeTownHall?: () => void;
@@ -89,7 +96,14 @@ export class BuildingMenu {
     this.onUpgradeBuilding = opts.onUpgradeBuilding;
   }
 
-  show(building: BuildingDef, screenX: number, screenY: number, settlement?: SettlementState): void {
+  show(
+    building: BuildingDef,
+    screenX: number,
+    screenY: number,
+    settlement?: SettlementState,
+    producerCell?: ProducerCellInfo | null,
+    constructionDaysRemaining?: number,
+  ): void {
     this.hide();
 
     const x = Math.max(10, Math.min(screenX, window.innerWidth - 240));
@@ -129,6 +143,33 @@ export class BuildingMenu {
         effDiv.appendChild(el);
       }
       this.menu.appendContent(effDiv);
+    }
+
+    const producerLine = producerCell
+      ? `Cell ×${producerCell.multiplier.toFixed(2)} → +${producerCell.amount.toFixed(2)} ${producerCell.resource}/turn`
+      : null;
+    if (producerLine) {
+      const prodEl = document.createElement("div");
+      prodEl.textContent = producerLine;
+      Object.assign(prodEl.style, {
+        fontSize: "11px",
+        color: "#7fd0ff",
+        lineHeight: "1.5",
+        marginBottom: "4px",
+      });
+      this.menu.appendContent(prodEl);
+    }
+
+    if (constructionDaysRemaining !== undefined) {
+      const conEl = document.createElement("div");
+      conEl.textContent = `Under construction — ${constructionDaysRemaining} day${constructionDaysRemaining === 1 ? "" : "s"} remaining`;
+      Object.assign(conEl.style, {
+        fontSize: "11px",
+        color: "#f0c860",
+        lineHeight: "1.5",
+        marginBottom: "4px",
+      });
+      this.menu.appendContent(conEl);
     }
 
     const costStr = formatPlacementCost(building.kind);

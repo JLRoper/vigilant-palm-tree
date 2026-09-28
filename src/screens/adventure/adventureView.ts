@@ -3,12 +3,10 @@ import { Camera } from "../../render/camera";
 import { GameMap } from "../../map/gameMap";
 import { MapRenderer } from "../../render/renderer";
 import { Hero } from "../../entities/hero";
-import { findPath, computePathCost, NEIGHBOR_DIRS } from "../../map/pathfinding";
-import type { GameState, HeroId } from "../../state/gameState";
+import { findPath } from "../../map/pathfinding";
+import type { GameState } from "../../state/gameState";
 import type { TurnController } from "../../state/turnController";
-import { computeReachableSplit } from "../../render/overlays/pathOverlay";
 import type { PathPreviewLock } from "../../managers/GameStateManager";
-import { openCenteredModal, styleButton, styleInput } from "@screens/shared/menu";
 import {
   MinimapCamera,
   getFovFrameScreenPolygon,
@@ -16,6 +14,9 @@ import {
   isPointInMinimap,
   isPointInPolygon,
 } from "../../render/minimap";
+import { DragTracker } from "./dragTracker";
+import { resolveAdventureClick, type ClickIntent } from "./clickIntent";
+import { openCharterModal } from "./charterModal";
 
 export const MAP_SEED = 42;
 
@@ -48,8 +49,6 @@ export interface AdventureViewOptions {
   onTileInspect?: (tile: Axial | null) => void;
 }
 
-const DRAG_MOVE_THRESHOLD = 4;
-
 function hoverChanged(a: Axial | null, b: Axial | null): boolean {
   if (a === b) return false;
   if (!a || !b) return true;
@@ -71,6 +70,8 @@ function touchDist(a: Touch, b: Touch): number {
 function touchAngle(a: Touch, b: Touch): number {
   return Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
 }
+
+const DRAG_MOVE_THRESHOLD = 4;
 
 type MinimapDragTouchState = {
   id: number;
@@ -102,31 +103,14 @@ export class AdventureView {
 
   private inspectedTile: Axial | null = null;
 
-  private dragging = false;
-  private movedDuringDrag = false;
-  private dragStartX = 0;
-  private dragStartY = 0;
-  private lastX = 0;
-  private lastY = 0;
+  private drag = new DragTracker();
+  private minimapDrag = new DragTracker();
+  private frameDrag = new DragTracker();
 
   private pendingPointer: { x: number; y: number } | null = null;
   private pointerFrameRequested = false;
 
   private minimapTouch: MinimapTouchState | null = null;
-
-  private minimapDragging = false;
-  private minimapDragMoved = false;
-  private minimapDragStartX = 0;
-  private minimapDragStartY = 0;
-  private minimapLastX = 0;
-  private minimapLastY = 0;
-
-  private frameDragging = false;
-  private frameDragMoved = false;
-  private frameDragStartX = 0;
-  private frameDragStartY = 0;
-  private frameLastX = 0;
-  private frameLastY = 0;
 
   private readonly boundMouseUp = () => this.onMouseUp();
   private readonly boundMouseMove = (e: MouseEvent) => this.onMouseMove(e);
@@ -336,7 +320,7 @@ export class AdventureView {
   }
 
   private onMouseDown(e: MouseEvent): void {
-    this.movedDuringDrag = false;
+    this.drag.reset();
     const minimapGeo = getMinimapGeometry(this.opts.map);
     if (isPointInMinimap(e.clientX, e.clientY, minimapGeo)) {
       const framePoly = getFovFrameScreenPolygon(
@@ -347,33 +331,19 @@ export class AdventureView {
         window.innerHeight,
       );
       if (isPointInPolygon(e.clientX, e.clientY, framePoly)) {
-        this.frameDragging = true;
-        this.frameDragMoved = false;
-        this.frameDragStartX = e.clientX;
-        this.frameDragStartY = e.clientY;
-        this.frameLastX = e.clientX;
-        this.frameLastY = e.clientY;
+        this.frameDrag.begin(e.clientX, e.clientY);
         return;
       }
-      this.minimapDragging = true;
-      this.minimapDragMoved = false;
-      this.minimapDragStartX = e.clientX;
-      this.minimapDragStartY = e.clientY;
-      this.minimapLastX = e.clientX;
-      this.minimapLastY = e.clientY;
+      this.minimapDrag.begin(e.clientX, e.clientY);
       return;
     }
-    this.dragging = true;
-    this.dragStartX = e.clientX;
-    this.dragStartY = e.clientY;
-    this.lastX = e.clientX;
-    this.lastY = e.clientY;
+    this.drag.begin(e.clientX, e.clientY);
   }
 
   private onMouseUp(): void {
-    this.dragging = false;
-    this.minimapDragging = false;
-    this.frameDragging = false;
+    this.drag.end();
+    this.minimapDrag.end();
+    this.frameDrag.end();
   }
 
   private panMainCameraByFrameDrag(fromX: number, fromY: number, toX: number, toY: number): void {
@@ -387,45 +357,28 @@ export class AdventureView {
   }
 
   private onMouseMove(e: MouseEvent): void {
-    if (this.frameDragging) {
-      this.panMainCameraByFrameDrag(this.frameLastX, this.frameLastY, e.clientX, e.clientY);
-      this.frameLastX = e.clientX;
-      this.frameLastY = e.clientY;
-      if (
-        Math.abs(e.clientX - this.frameDragStartX) + Math.abs(e.clientY - this.frameDragStartY) >
-        DRAG_MOVE_THRESHOLD
-      ) {
-        this.frameDragMoved = true;
-      }
+    if (this.frameDrag.isActive()) {
+      const fromX = this.frameDrag.lastX;
+      const fromY = this.frameDrag.lastY;
+      this.frameDrag.moveTo(e.clientX, e.clientY);
+      this.panMainCameraByFrameDrag(fromX, fromY, e.clientX, e.clientY);
       this.opts.onRedraw();
       return;
     }
 
-    if (this.minimapDragging) {
+    if (this.minimapDrag.isActive()) {
+      const fromX = this.minimapDrag.lastX;
+      const fromY = this.minimapDrag.lastY;
+      this.minimapDrag.moveTo(e.clientX, e.clientY);
       const geo = getMinimapGeometry(this.opts.map);
-      this.opts.minimapCamera.panBy(this.minimapLastX, this.minimapLastY, e.clientX, e.clientY, geo, this.opts.map);
-      this.minimapLastX = e.clientX;
-      this.minimapLastY = e.clientY;
-      if (
-        Math.abs(e.clientX - this.minimapDragStartX) + Math.abs(e.clientY - this.minimapDragStartY) >
-        DRAG_MOVE_THRESHOLD
-      ) {
-        this.minimapDragMoved = true;
-      }
+      this.opts.minimapCamera.panBy(fromX, fromY, e.clientX, e.clientY, geo, this.opts.map);
       this.opts.onRedraw();
       return;
     }
 
-    if (this.dragging) {
-      this.opts.camera.pan(e.clientX - this.lastX, e.clientY - this.lastY);
-      this.lastX = e.clientX;
-      this.lastY = e.clientY;
-      if (
-        Math.abs(e.clientX - this.dragStartX) + Math.abs(e.clientY - this.dragStartY) >
-        DRAG_MOVE_THRESHOLD
-      ) {
-        this.movedDuringDrag = true;
-      }
+    if (this.drag.isActive()) {
+      const { dx, dy } = this.drag.moveTo(e.clientX, e.clientY);
+      this.opts.camera.pan(dx, dy);
     }
 
     // Ignore pointer updates when hovering over HTML UI overlays.
@@ -468,7 +421,7 @@ export class AdventureView {
   }
 
   private updatePath(): void {
-    if (this.dragging || !this.hover || !this.isPlayerTurn()) {
+    if (this.drag.isActive() || !this.hover || !this.isPlayerTurn()) {
       this.setPath([]);
       return;
     }
@@ -512,11 +465,12 @@ export class AdventureView {
 
     const minimapGeo = getMinimapGeometry(this.opts.map);
     const inMinimap = isPointInMinimap(e.clientX, e.clientY, minimapGeo);
+    const minimapMoved = this.minimapDrag.consumeMoved();
+    const frameMoved = this.frameDrag.consumeMoved();
+
     if (inMinimap) {
-      if (this.minimapDragMoved || this.movedDuringDrag || this.frameDragMoved) {
+      if (minimapMoved || this.drag.moved || frameMoved) {
         this.lastClickDebug.reason = "minimap_drag";
-        this.minimapDragMoved = false;
-        this.frameDragMoved = false;
         return;
       }
       const world = this.opts.minimapCamera.screenToWorld(e.clientX, e.clientY, minimapGeo);
@@ -526,10 +480,8 @@ export class AdventureView {
       return;
     }
 
-    if (this.minimapDragMoved || this.frameDragMoved) {
+    if (minimapMoved || frameMoved) {
       this.lastClickDebug.reason = "minimap_drag";
-      this.minimapDragMoved = false;
-      this.frameDragMoved = false;
       return;
     }
 
@@ -542,45 +494,30 @@ export class AdventureView {
     this.lastClickDebug.hover = t;
     if (t) this.setInspectedTile(t);
 
-    if (this.opts.getCharterMode?.() && this.opts.getValidCharterHexes?.()) {
-      if (t) {
-        const key = `${t.q},${t.r}`;
-        const validHexes = this.opts.getValidCharterHexes();
-        if (validHexes && validHexes.has(key)) {
-          const gs = this.opts.getGameState();
-          const selectedId = gs.selectedHeroId;
-          if (selectedId) {
-            const hero = gs.heroes[selectedId];
-            if (hero) {
-              void this.startCharterModal(t.q, t.r);
-              this.lastClickDebug.reason = "charter_modal_opened";
-            }
-          }
-        }
-      }
-      this.lastClickDebug.reason = "charter_invalid";
+    const intent = resolveAdventureClick({
+      map: this.opts.map,
+      heroes: this.opts.heroes(),
+      state: this.state,
+      hover: t,
+      movedDuringDrag: this.drag.moved,
+      isPlayerTurn: this.isPlayerTurn(),
+      charterMode: this.opts.getCharterMode?.() ?? false,
+      validCharterHexes: this.opts.getValidCharterHexes?.() ?? null,
+    });
+    this.applyClickIntent(intent);
+  }
+
+  private applyClickIntent(intent: ClickIntent): void {
+    if (intent.kind === "none") {
+      if (intent.debugPath) this.lastClickDebug.path = intent.debugPath;
+      this.lastClickDebug.reason = intent.reason;
       return;
     }
 
-    if (this.movedDuringDrag) {
-      this.lastClickDebug.reason = "movedDuringDrag";
-      return;
-    }
-    if (!this.isPlayerTurn()) {
-      this.lastClickDebug.reason = "not_player_turn";
-      return;
-    }
-    if (!t) {
-      this.lastClickDebug.reason = "no hover";
-      return;
-    }
-    const heroes = this.opts.heroes();
-    const clickedHero = Object.values(heroes).find(
-      (h) => h.tile.q === t.q && h.tile.r === t.r
-    );
-    if (clickedHero && clickedHero.ownerId === 0) {
-      const tc = this.opts.getTurnController();
-      tc.selectHero(clickedHero.id as HeroId);
+    const tc = this.opts.getTurnController();
+
+    if (intent.kind === "select-hero") {
+      tc.selectHero(intent.heroId);
       this.opts.onStateChanged?.();
       this.lastClickDebug.moved = false;
       this.lastClickDebug.reason = "select";
@@ -588,81 +525,8 @@ export class AdventureView {
       return;
     }
 
-    const selectedId = this.state.selectedHeroId;
-    const startTile = selectedId ? this.state.heroes[selectedId] : undefined;
-
-    const occupiedHexes = new Set<string>();
-    for (const [id, hero] of Object.entries(this.state.heroes)) {
-      if (id !== selectedId) {
-        occupiedHexes.add(`${hero.q},${hero.r}`);
-      }
-    }
-
-    const clickedEnemy = Object.values(heroes).find(
-      (h) => h.tile.q === t.q && h.tile.r === t.r && h.ownerId !== 0
-    );
-    if (clickedEnemy && selectedId && startTile) {
-      const adjacentTiles: Axial[] = [];
-      for (const dir of NEIGHBOR_DIRS) {
-        const nq = clickedEnemy.tile.q + dir.q;
-        const nr = clickedEnemy.tile.r + dir.r;
-        if (!this.opts.map.isPassable(nq, nr)) continue;
-        if (occupiedHexes.has(`${nq},${nr}`)) continue;
-        adjacentTiles.push({ q: nq, r: nr });
-      }
-
-      let bestPath: Axial[] | null = null;
-      let bestCost = Infinity;
-      for (const adj of adjacentTiles) {
-        const path = findPath(this.opts.map, { q: startTile.q, r: startTile.r }, adj, occupiedHexes);
-        if (path.length === 0) continue;
-        const cost = computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...path]);
-        if (cost < bestCost) {
-          bestCost = cost;
-          bestPath = path;
-        }
-      }
-
-      if (bestPath && bestPath.length > 0) {
-        const reachableIdx = computeReachableSplit(bestPath, this.opts.map, startTile.movementRemaining);
-        const clamped = reachableIdx < bestPath.length;
-        const actualCost = Math.min(
-          computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...bestPath.slice(0, reachableIdx)]),
-          startTile.movementRemaining,
-        );
-        if (reachableIdx > 0) {
-          const dest = bestPath[reachableIdx - 1];
-          const tc = this.opts.getTurnController();
-          const trailExtension = bestPath.slice(0, reachableIdx);
-          this.opts.setPathPreviewLock({ heroId: selectedId, waypoint: dest, reachableIdx });
-          const ok = tc.requestMove(selectedId, dest, actualCost, trailExtension);
-          if (!ok) {
-            this.opts.setPathPreviewLock(null);
-          }
-          this.opts.onStateChanged?.();
-          this.path = bestPath.slice(reachableIdx);
-          this.opts.onPathChanged(this.path);
-          this.lastClickDebug.moved = ok;
-          this.lastClickDebug.reason = ok
-            ? clamped
-              ? `attack clamped to ${dest.q},${dest.r}`
-              : "attack"
-            : "requestMove rejected";
-          this.opts.onHudUpdate();
-          this.opts.onRedraw();
-          return;
-        }
-      }
-      this.lastClickDebug.reason = "no attack path";
-      return;
-    }
-
-    const clickedSettlement = Object.values(this.state.settlements).find(
-      (s) => s.q === t.q && s.r === t.r
-    );
-    if (clickedSettlement && !selectedId) {
-      const tc = this.opts.getTurnController();
-      tc.selectSettlement(clickedSettlement.id);
+    if (intent.kind === "select-settlement") {
+      tc.selectSettlement(intent.settlementId);
       this.opts.onStateChanged?.();
       this.lastClickDebug.moved = false;
       this.lastClickDebug.reason = "settlement_select";
@@ -670,144 +534,51 @@ export class AdventureView {
       return;
     }
 
-    if (!selectedId) {
-      this.lastClickDebug.reason = "no selection";
+    if (intent.kind === "open-charter") {
+      openCharterModal(intent.targetQ, intent.targetR, {
+        onConfirm: (finalName) => {
+          if (this.opts.onStartCharter) {
+            const ok = this.opts.onStartCharter(intent.targetQ, intent.targetR, finalName);
+            if (ok) {
+              this.lastClickDebug.reason = "charter_started";
+              this.opts.setCharterMode?.(false);
+              this.opts.onStateChanged?.();
+              this.opts.onHudUpdate();
+              this.opts.onRedraw();
+            }
+          }
+        },
+        onCancel: () => {
+          this.lastClickDebug.reason = "charter_cancelled";
+        },
+      });
+      this.lastClickDebug.reason = "charter_modal_opened";
       return;
     }
-    if (!startTile) {
-      this.lastClickDebug.reason = "no hero";
-      return;
-    }
-    const newPath = findPath(this.opts.map, { q: startTile.q, r: startTile.r }, t, occupiedHexes);
-    this.lastClickDebug.path = newPath;
-    if (newPath.length === 0) {
-      this.lastClickDebug.reason = "empty path";
-      return;
-    }
-    const reachableIdx = computeReachableSplit(newPath, this.opts.map, startTile.movementRemaining);
-    const clamped = reachableIdx < newPath.length;
-    const actualCost = Math.min(
-      computePathCost(this.opts.map, [{ q: startTile.q, r: startTile.r }, ...newPath.slice(0, reachableIdx)]),
-      startTile.movementRemaining,
-    );
-    if (reachableIdx === 0) {
-      this.lastClickDebug.reason = "impassable first step";
-      return;
-    }
-    const dest = newPath[reachableIdx - 1];
-    const tc = this.opts.getTurnController();
-    const trailExtension = newPath.slice(0, reachableIdx);
-    this.opts.setPathPreviewLock({ heroId: selectedId, waypoint: dest, reachableIdx });
-    const ok = tc.requestMove(selectedId, dest, actualCost, trailExtension);
+
+    this.opts.setPathPreviewLock({ heroId: intent.heroId, waypoint: intent.dest, reachableIdx: intent.reachableIdx });
+    const ok = tc.requestMove(intent.heroId, intent.dest, intent.cost, intent.trailExtension);
     if (!ok) {
       this.opts.setPathPreviewLock(null);
     }
     this.opts.onStateChanged?.();
-    this.path = newPath.slice(reachableIdx);
+    this.path = intent.remainingPath;
     this.opts.onPathChanged(this.path);
     this.lastClickDebug.moved = ok;
+    if (intent.kind === "move") {
+      this.lastClickDebug.path = intent.debugPath;
+    }
     this.lastClickDebug.reason = ok
-      ? clamped
-        ? `clamped to ${dest.q},${dest.r}`
+      ? intent.clamped
+        ? intent.kind === "attack"
+          ? `attack clamped to ${intent.dest.q},${intent.dest.r}`
+          : `clamped to ${intent.dest.q},${intent.dest.r}`
+        : intent.kind === "attack"
+        ? "attack"
         : ""
       : "requestMove rejected";
     this.opts.onHudUpdate();
     this.opts.onRedraw();
-  }
-
-  private async startCharterModal(targetQ: number, targetR: number): Promise<void> {
-    return new Promise<void>((_) => {
-      let currentName = generateCharterName();
-      const modal = openCenteredModal(document.body, "Charter Settlement", 320);
-
-      const info = document.createElement("div");
-      info.style.fontSize = "14px";
-      info.style.opacity = "0.9";
-      info.style.textAlign = "center";
-      info.style.margin = "4px 0 12px";
-      info.textContent = `Found settlement at (${targetQ}, ${targetR})`;
-      modal.appendContent(info);
-
-      const cost = document.createElement("div");
-      cost.style.fontSize = "11px";
-      cost.style.opacity = "0.7";
-      cost.style.textAlign = "center";
-      cost.style.marginBottom = "10px";
-      cost.textContent = "Cost: 2500g + 20 wood + 15 stone";
-      modal.appendContent(cost);
-
-      const nameLabel = document.createElement("label");
-      nameLabel.textContent = "Settlement name";
-      nameLabel.style.fontSize = "11px";
-      nameLabel.style.opacity = "0.7";
-      modal.appendContent(nameLabel);
-
-      const nameRow = document.createElement("div");
-      nameRow.style.display = "flex";
-      nameRow.style.gap = "6px";
-      nameRow.style.alignItems = "center";
-
-      const nameInput = document.createElement("input");
-      nameInput.type = "text";
-      nameInput.value = currentName;
-      styleInput(nameInput);
-      nameInput.style.flex = "1";
-      nameRow.appendChild(nameInput);
-
-      const rerollBtn = document.createElement("button");
-      rerollBtn.textContent = "↻";
-      rerollBtn.title = "Re-roll name";
-      styleButton(rerollBtn);
-      rerollBtn.style.width = "32px";
-      rerollBtn.style.height = "100%";
-      rerollBtn.style.textAlign = "center";
-      rerollBtn.style.padding = "6px 0";
-      rerollBtn.addEventListener("click", () => {
-        currentName = generateCharterName();
-        nameInput.value = currentName;
-      });
-      nameRow.appendChild(rerollBtn);
-
-      modal.appendContent(nameRow);
-
-      const row = document.createElement("div");
-      row.style.display = "flex";
-      row.style.justifyContent = "flex-end";
-      row.style.gap = "8px";
-      row.style.marginTop = "12px";
-
-      const cancelBtn = document.createElement("button");
-      cancelBtn.textContent = "Cancel";
-      styleButton(cancelBtn);
-      cancelBtn.addEventListener("click", () => {
-        modal.close();
-        this.lastClickDebug.reason = "charter_cancelled";
-      });
-      row.appendChild(cancelBtn);
-
-      const confirmBtn = document.createElement("button");
-      confirmBtn.textContent = "Confirm";
-      styleButton(confirmBtn, true);
-      confirmBtn.addEventListener("click", () => {
-        const finalName = nameInput.value.trim() || currentName;
-        modal.close();
-        if (this.opts.onStartCharter) {
-          const ok = this.opts.onStartCharter(targetQ, targetR, finalName);
-          if (ok) {
-            this.lastClickDebug.reason = "charter_started";
-            this.opts.setCharterMode?.(false);
-            this.opts.onStateChanged?.();
-            this.opts.onHudUpdate();
-            this.opts.onRedraw();
-          }
-        }
-      });
-      row.appendChild(confirmBtn);
-
-      modal.appendContent(row);
-      nameInput.focus();
-      nameInput.select();
-    });
   }
 
   private onWheel(e: WheelEvent): void {
@@ -825,10 +596,7 @@ export class AdventureView {
 
   centerOn(q: number, r: number): void {
     const camera = this.opts.camera;
-    const SQRT3 = Math.sqrt(3);
-    const size = 32;
-    const wx = size * (SQRT3 * q + (SQRT3 / 2) * r);
-    const wy = size * (1.5 * r);
+    const { x: wx, y: wy } = axialToPixel(q, r);
     camera.x = window.innerWidth / 2 - wx * camera.zoom;
     camera.y = window.innerHeight / 2 - wy * camera.zoom;
   }
@@ -856,21 +624,3 @@ export class AdventureView {
 }
 
 export { axialToPixel };
-
-const CHARTER_NAME_PREFIXES = [
-  "Black", "Iron", "Silver", "Storm", "Frost",
-  "Dragon", "Wolf", "Raven", "Stone", "Dawn",
-  "Gold", "Ember", "Thorn", "Grim", "High",
-];
-
-const CHARTER_NAME_SUFFIXES = [
-  "hold", "keep", "watch", "spire", "fall",
-  "reach", "gate", "crest", "hollow", "rest",
-  "guard", "pass", "mark",
-];
-
-function generateCharterName(): string {
-  const p = CHARTER_NAME_PREFIXES[Math.floor(Math.random() * CHARTER_NAME_PREFIXES.length)];
-  const s = CHARTER_NAME_SUFFIXES[Math.floor(Math.random() * CHARTER_NAME_SUFFIXES.length)];
-  return `${p} ${s}`;
-}

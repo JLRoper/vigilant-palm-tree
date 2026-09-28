@@ -1,4 +1,5 @@
 import type { HeroId, HeroState, HorseVariantId, Platoon } from "@heroes/contracts";
+import { withDefaultSpellStats } from "@heroes/engine";
 import { resolveGameId } from "./gameRepo";
 import type { Queryable } from "./gameRepo";
 
@@ -35,6 +36,8 @@ interface HeroRow {
   is_chartering: boolean;
   charter_id: string | null;
   horse_variant: string;
+  wagons: number | null;
+  resources: HeroState["resources"] | null;
 }
 
 interface PlatoonRow {
@@ -45,10 +48,14 @@ interface PlatoonRow {
 }
 
 const HERO_COLUMNS =
-  "id, name, owner_id, q, r, movement_remaining, previous_q, previous_r, previous_movement_remaining, trail, gold, troops, is_chartering, charter_id, horse_variant";
+  "id, name, owner_id, q, r, movement_remaining, previous_q, previous_r, previous_movement_remaining, trail, gold, troops, is_chartering, charter_id, horse_variant, wagons, resources";
 
 function toHeroState(row: HeroRow, stacks: Platoon[]): HeroState {
-  return {
+  // The heroes table predates spellcasting v1 and has no spell columns (the
+  // locked decision persists mana via the games-row state jsonb instead), so
+  // the granular mirror read path backfills the v1 default spell stats — the
+  // same fallback hydrateGameState applies to old jsonb rows.
+  return withDefaultSpellStats({
     id: row.id,
     name: row.name,
     ownerId: row.owner_id,
@@ -65,7 +72,9 @@ function toHeroState(row: HeroRow, stacks: Platoon[]): HeroState {
     isChartering: row.is_chartering,
     charterId: row.charter_id,
     horseVariant: row.horse_variant as HorseVariantId,
-  };
+    ...(row.wagons !== null && row.wagons !== undefined ? { wagons: row.wagons } : {}),
+    ...(row.resources != null ? { resources: row.resources } : {}),
+  });
 }
 
 // Reassembles Platoon[] from hero_platoons' flattened (hero_id, stack_index,
@@ -124,8 +133,8 @@ export function createHeroRepo(db: Queryable): HeroRepo {
         await db.query(
           `INSERT INTO heroes (id, game_id, name, owner_id, q, r, movement_remaining, previous_q,
                                 previous_r, previous_movement_remaining, trail, gold, troops,
-                                is_chartering, charter_id, horse_variant)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16)
+                                is_chartering, charter_id, horse_variant, wagons, resources)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18::jsonb)
            ON CONFLICT (id) DO UPDATE SET
              game_id = EXCLUDED.game_id,
              name = EXCLUDED.name,
@@ -141,7 +150,9 @@ export function createHeroRepo(db: Queryable): HeroRepo {
              troops = EXCLUDED.troops,
              is_chartering = EXCLUDED.is_chartering,
              charter_id = EXCLUDED.charter_id,
-             horse_variant = EXCLUDED.horse_variant`,
+             horse_variant = EXCLUDED.horse_variant,
+             wagons = EXCLUDED.wagons,
+             resources = EXCLUDED.resources`,
           [
             hero.id,
             gameId,
@@ -159,6 +170,8 @@ export function createHeroRepo(db: Queryable): HeroRepo {
             hero.isChartering,
             hero.charterId,
             hero.horseVariant,
+            hero.wagons ?? 5,
+            JSON.stringify(hero.resources ?? {}),
           ],
         );
 

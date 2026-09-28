@@ -8,7 +8,7 @@ Sibling to [dev-console.md](./dev-console.md) — same family of dev tools, same
 "ships in `npm run build`, reachable from Developer Settings" posture.
 
 Built for [issue #51](https://github.com/JLRoper/vigilant-palm-tree/issues/51);
-design rationale in [../plan/2026-08-17-issue-51-network-map.md](../plan/2026-08-17-issue-51-network-map.md).
+design rationale in [../.kilo/plan/2026-08-17-issue-51-network-map.md](../.kilo/plan/2026-08-17-issue-51-network-map.md).
 
 ---
 

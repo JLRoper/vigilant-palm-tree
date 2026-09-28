@@ -71,5 +71,6 @@ None. All decisions made.
 - How they're collected: [settlements.md](./settlements.md)
 - How they flow into the economy loop: [economy.md](./economy.md)
 - Why food is missing from this list: [army.md](./army.md) (deferred)
+- As-built reference (pools, rate computation, turn pipeline, sinks): [resource-gathering.md](./resource-gathering.md)
 
 [← Back to index](./README.md)

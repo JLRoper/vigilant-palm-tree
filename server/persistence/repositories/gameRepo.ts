@@ -5,6 +5,7 @@ import type {
   Player,
   SettlementId,
   SettlementState,
+  TradeRouteState,
   Warehouse,
   WarehouseResource,
 } from "@heroes/contracts";
@@ -20,6 +21,11 @@ export interface LobbyState {
   humanSlots?: number;
   claimed?: Record<string, { handle: string; claimedAt: string }>;
   startedAt?: string;
+  // Drop-policy presence (server/app/dropPolicy.ts) -- listed so this row
+  // shape reflects what the column actually holds; the repo itself never
+  // reads or writes it (flushes are direct jsonb_set updates from the
+  // drop-policy module, and hydrate ignores lobby entirely).
+  presence?: Record<string, { lastSeenAt: string; connected: boolean }>;
 }
 
 export interface EnemyPos {
@@ -46,6 +52,7 @@ export interface GameRow {
   lobby: LobbyState;
   next_charter_id: number;
   next_settlement_id: number;
+  trade_routes: TradeRouteState[] | null;
   // TIMESTAMPTZ columns - node-postgres returns these as Date, not string.
   created_at: Date;
   updated_at: Date;
@@ -59,7 +66,7 @@ export class GameNotFoundError extends Error {
 }
 
 const GAME_COLUMNS =
-  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, next_charter_id, next_settlement_id, created_at, updated_at";
+  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, next_charter_id, next_settlement_id, trade_routes, created_at, updated_at";
 
 export interface SaveHeroesAndSettlementsExtra {
   players?: Player[];
@@ -76,6 +83,11 @@ export interface SaveHeroesAndSettlementsExtra {
   // before a reload can collide charterId/settlementId with the first.
   next_charter_id?: number;
   next_settlement_id?: number;
+  // Trade routes (docs/wagons-stockpiles-trade-routes-plan.md §5.2): always
+  // read/written whole per game (games.trade_routes JSONB), so any command
+  // that touches routes must pass the full array here or the next writer
+  // clobbers it with the previous value.
+  trade_routes?: TradeRouteState[];
 }
 
 // One row per settlement snapshot, matching the columns the now-dead
@@ -173,6 +185,10 @@ export function createGameRepo(db: Queryable): GameRepo {
       if (extra?.next_settlement_id !== undefined) {
         sets.push(`next_settlement_id = $${i++}`);
         vals.push(extra.next_settlement_id);
+      }
+      if (extra?.trade_routes !== undefined) {
+        sets.push(`trade_routes = $${i++}::jsonb`);
+        vals.push(JSON.stringify(extra.trade_routes));
       }
       sets.push("updated_at = now()");
       vals.push(name);

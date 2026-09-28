@@ -1,17 +1,9 @@
-import type { Game } from "../../io/api";
-import { api } from "../../io/api";
-import { forgetGame, listUserGames, type UserGameEntry } from "../../io/userGames";
 import type { GameState } from "../../state/gameState";
 import type { SaveStatus } from "../../managers/SessionManager";
-import { CASTLE_COUNT_MAX } from "../../map/castlePlacement";
 import { openSettingsMenu, type MapInfo } from "@screens/home/settingsMenu";
 import { openTestBattleSetup } from "@screens/combat/testBattleSetup";
-import {
-  menuTheme,
-  openCenteredModal,
-  styleButton,
-  styleInput,
-} from "./menu";
+import { openNewGameModal, type NewGameHandler } from "./newGameModal";
+import { openLoadGameModal, type LoadGameHandler } from "./loadGameModal";
 
 const headerTheme = {
   bg: "var(--header-blue, #1c2f57)",
@@ -85,18 +77,13 @@ export interface ToolbarState {
 }
 
 export interface ToolbarCallbacks {
-  onNew: (opts: {
-    name: string;
-    seed: number;
-    castleSeed?: number;
-    castleCount?: number;
-    mapSize?: "small" | "medium" | "large";
-  }) => void | Promise<void>;
-  onLoad: (game: Game, tiles: Awaited<ReturnType<typeof api.getTiles>>) => void | Promise<void>;
+  onNew: NewGameHandler;
+  onLoad: LoadGameHandler;
   onSave: () => void | Promise<void>;
   onEndTurn: () => void | Promise<void>;
   onHeroes?: () => void;
   onSettlements?: () => void;
+  onOpenLogistics?: () => void;
   onForget?: (id: number) => void;
   getMapInfo?: () => MapInfo | null;
   onStartCharter?: () => void;
@@ -239,7 +226,7 @@ export class Toolbar {
       if (this.opts.state.hasActiveGame()) {
         if (!confirm("Start a new game? Current game will be lost.")) return;
       }
-      this.openNewModal();
+      openNewGameModal({ onNew: this.opts.callbacks.onNew });
     });
     this.saveBtn.addEventListener("click", () => {
       closeDropdown();
@@ -251,7 +238,11 @@ export class Toolbar {
     this.loadBtn.addEventListener("click", () => {
       closeDropdown();
       if (this.busy) return;
-      void this.openLoadModal();
+      void openLoadGameModal({
+        backendOk: this.opts.state.backendOk,
+        onLoad: this.opts.callbacks.onLoad,
+        onForget: this.opts.callbacks.onForget,
+      });
     });
 
     const calendarWrap = document.createElement("div");
@@ -344,6 +335,12 @@ export class Toolbar {
       this.opts.callbacks.onSettlements?.();
     });
 
+    const logisticsBtn = this.makeButton("🚚  Logistics", false);
+    logisticsBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      this.opts.callbacks.onOpenLogistics?.();
+    });
+
     this.charterBtn = this.makeButton("⚒  Charter Settlement", true);
     this.charterBtn.addEventListener("click", () => {
       if (this.busy) return;
@@ -360,6 +357,7 @@ export class Toolbar {
     buttonsRow.appendChild(this.endTurnBtn);
     buttonsRow.appendChild(this.heroesBtn);
     buttonsRow.appendChild(this.settlementsBtn);
+    buttonsRow.appendChild(logisticsBtn);
     buttonsRow.appendChild(this.charterBtn);
     buttonsRow.appendChild(this.testBattleBtn);
     buttonsRow.appendChild(menuWrap);
@@ -456,331 +454,5 @@ export class Toolbar {
     } finally {
       this.setBusy(false);
     }
-  }
-
-  private randomSuffix(): string {
-    return Math.floor(Math.random() * 0xffff).toString(16).padStart(4, "0");
-  }
-
-  private defaultName(): string {
-    const d = new Date();
-    const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    return `user-${ymd}-${this.randomSuffix()}`;
-  }
-
-  private openNewModal(): void {
-    const content = document.createElement("div");
-    content.style.fontFamily = menuTheme.font;
-    content.style.fontSize = menuTheme.fontSize;
-    content.style.color = menuTheme.panel.color;
-    content.style.display = "flex";
-    content.style.flexDirection = "column";
-    content.style.gap = "6px";
-
-    const nameLabel = document.createElement("label");
-    nameLabel.textContent = "Name";
-    nameLabel.style.opacity = "0.7";
-    content.appendChild(nameLabel);
-
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.value = this.defaultName();
-    styleInput(nameInput);
-    content.appendChild(nameInput);
-
-    const seedLabel = document.createElement("label");
-    seedLabel.textContent = "Seed (random if blank)";
-    seedLabel.style.opacity = "0.7";
-    content.appendChild(seedLabel);
-
-    const seedInput = document.createElement("input");
-    seedInput.type = "number";
-    seedInput.placeholder = "random";
-    styleInput(seedInput);
-    content.appendChild(seedInput);
-
-    const castleSeedLabel = document.createElement("label");
-    castleSeedLabel.textContent = "Castle seed (random if blank)";
-    castleSeedLabel.style.opacity = "0.7";
-    content.appendChild(castleSeedLabel);
-
-    const castleSeedInput = document.createElement("input");
-    castleSeedInput.type = "number";
-    castleSeedInput.placeholder = "random";
-    styleInput(castleSeedInput);
-    content.appendChild(castleSeedInput);
-
-    const castleCountLabel = document.createElement("label");
-    castleCountLabel.textContent = `Castle count (2-${CASTLE_COUNT_MAX})`;
-    castleCountLabel.style.opacity = "0.7";
-    content.appendChild(castleCountLabel);
-
-    const castleCountInput = document.createElement("input");
-    castleCountInput.type = "number";
-    castleCountInput.min = "2";
-    castleCountInput.max = String(CASTLE_COUNT_MAX);
-    castleCountInput.value = "3";
-    styleInput(castleCountInput);
-    content.appendChild(castleCountInput);
-
-    const sizeLabel = document.createElement("label");
-    sizeLabel.textContent = "Map size";
-    sizeLabel.style.opacity = "0.7";
-    content.appendChild(sizeLabel);
-
-    const sizeSelect = document.createElement("select");
-    sizeSelect.style.width = "100%";
-    sizeSelect.style.padding = "8px";
-    sizeSelect.style.fontSize = "12px";
-    sizeSelect.style.border = "1px solid #444";
-    sizeSelect.style.borderRadius = "4px";
-    sizeSelect.style.backgroundColor = "#1a1a1a";
-    sizeSelect.style.color = "#eee";
-    const sizes: Array<{ value: string; label: string }> = [
-      { value: "small", label: "Small (24x18)" },
-      { value: "medium", label: "Medium (36x27)" },
-      { value: "large", label: "Large (48x36)" },
-    ];
-    for (const s of sizes) {
-      const opt = document.createElement("option");
-      opt.value = s.value;
-      opt.textContent = s.label;
-      sizeSelect.appendChild(opt);
-    }
-    sizeSelect.value = "small";
-    content.appendChild(sizeSelect);
-
-    const errorLine = document.createElement("div");
-    Object.assign(errorLine.style, { ...menuTheme.error, minHeight: "14px", marginTop: "4px" });
-    content.appendChild(errorLine);
-
-    const row = document.createElement("div");
-    row.style.display = "flex";
-    row.style.justifyContent = "flex-end";
-    row.style.gap = "8px";
-    row.style.marginTop = "10px";
-
-    const modal = openCenteredModal(document.body, "New Game", 400);
-    const cancel = document.createElement("button");
-    cancel.textContent = "Cancel";
-    styleButton(cancel);
-    cancel.addEventListener("click", () => modal.close());
-    row.appendChild(cancel);
-
-    const confirm = document.createElement("button");
-    confirm.textContent = "Create";
-    styleButton(confirm, true);
-    confirm.addEventListener("click", async () => {
-      const name = nameInput.value.trim();
-      if (!name) {
-        errorLine.textContent = "Name required.";
-        return;
-      }
-      let seed: number;
-      if (seedInput.value.trim() === "") {
-        seed = Math.floor(Math.random() * 0x7fffffff);
-      } else {
-        seed = Number(seedInput.value);
-        if (!Number.isFinite(seed)) {
-          errorLine.textContent = "Seed must be a number.";
-          return;
-        }
-      }
-      let castleSeed: number | undefined;
-      if (castleSeedInput.value.trim() !== "") {
-        const v = Number(castleSeedInput.value);
-        if (!Number.isFinite(v)) {
-          errorLine.textContent = "Castle seed must be a number.";
-          return;
-        }
-        castleSeed = v;
-      }
-      const castleCountRaw = Number(castleCountInput.value);
-      if (!Number.isFinite(castleCountRaw)) {
-        errorLine.textContent = "Castle count must be a number.";
-        return;
-      }
-      const castleCount = Math.max(2, Math.min(CASTLE_COUNT_MAX, Math.floor(castleCountRaw)));
-      const mapSize = (sizeSelect.value || "small") as "small" | "medium" | "large";
-      confirm.disabled = true;
-      cancel.disabled = true;
-      errorLine.textContent = "Creating…";
-      try {
-        await this.opts.callbacks.onNew({ name, seed, castleSeed, castleCount, mapSize });
-        modal.close();
-      } catch (e) {
-        confirm.disabled = false;
-        cancel.disabled = false;
-        const msg = e instanceof Error ? e.message : String(e);
-        errorLine.textContent = `Failed: ${msg}`;
-        console.error("[toolbar] new game failed:", e);
-      }
-    });
-    row.appendChild(confirm);
-
-    content.appendChild(row);
-    modal.setContent(content);
-    nameInput.focus();
-    nameInput.select();
-  }
-
-  private async openLoadModal(): Promise<void> {
-    let serverGames: Game[] = [];
-    try {
-      serverGames = await api.listGames();
-    } catch (e) {
-      console.error("[toolbar] listGames failed:", e);
-    }
-
-    const content = document.createElement("div");
-    content.style.fontFamily = menuTheme.font;
-    content.style.fontSize = menuTheme.fontSize;
-    content.style.color = menuTheme.panel.color;
-    content.style.display = "flex";
-    content.style.flexDirection = "column";
-    content.style.gap = "10px";
-
-    const userGames = this.opts.state.backendOk()
-      ? this.readUserGamesFromServer(serverGames)
-      : this.readUserGamesFromCacheOnly();
-
-    if (userGames.length === 0) {
-      const empty = document.createElement("div");
-      empty.textContent = "No saved games yet — start a new game to begin.";
-      empty.style.opacity = "0.7";
-      empty.style.padding = "6px 0";
-      content.appendChild(empty);
-    } else {
-      const list = document.createElement("div");
-      list.style.maxHeight = "320px";
-      list.style.overflowY = "auto";
-      list.style.border = "1px solid rgba(255,255,255,0.1)";
-      list.style.borderRadius = "3px";
-      for (const entry of userGames) {
-        list.appendChild(this.makeLoadRow(entry));
-      }
-      content.appendChild(list);
-    }
-
-    const closeRow = document.createElement("div");
-    closeRow.style.display = "flex";
-    closeRow.style.justifyContent = "flex-end";
-    const close = document.createElement("button");
-    close.textContent = "Close";
-    styleButton(close);
-    const modal = openCenteredModal(document.body, "Load Game", 420);
-    close.addEventListener("click", () => modal.close());
-    closeRow.appendChild(close);
-    content.appendChild(closeRow);
-
-    modal.setContent(content);
-  }
-
-  private readUserGamesFromCacheOnly(): UserGameEntry[] {
-    return sortByLastSeen(listUserGames());
-  }
-
-  private readUserGamesFromServer(serverGames: Game[]): Array<UserGameEntry & { server?: Game }> {
-    const cache = listUserGames();
-    const byId = new Map<number, Game>();
-    for (const g of serverGames) byId.set(g.id, g);
-    const out: Array<UserGameEntry & { server?: Game }> = [];
-    for (const entry of cache) {
-      const server = byId.get(entry.id);
-      if (server) {
-        out.push({ ...entry, server });
-        byId.delete(entry.id);
-      } else {
-        out.push({ ...entry });
-      }
-    }
-    return sortByLastSeen(out);
-  }
-
-  private makeLoadRow(entry: UserGameEntry & { server?: Game }): HTMLDivElement {
-    const row = document.createElement("div");
-    row.style.display = "flex";
-    row.style.alignItems = "center";
-    row.style.justifyContent = "space-between";
-    row.style.padding = "8px 10px";
-    row.style.borderBottom = "1px solid rgba(255,255,255,0.06)";
-    row.style.cursor = entry.server ? "pointer" : "default";
-    row.style.opacity = entry.server ? "1" : "0.5";
-
-    const left = document.createElement("div");
-    const nameDiv = document.createElement("div");
-    nameDiv.textContent = entry.server ? entry.name : `${entry.name} (missing)`;
-    nameDiv.style.fontWeight = "500";
-    left.appendChild(nameDiv);
-
-    const meta = document.createElement("div");
-    meta.style.opacity = "0.6";
-    meta.style.fontSize = "11px";
-    if (entry.server) {
-      meta.textContent = `turn ${entry.server.turn} · ${entry.server.gold}g · seen ${formatTime(entry.lastSeenAt)}`;
-    } else {
-      meta.textContent = `game no longer exists · seen ${formatTime(entry.lastSeenAt)}`;
-    }
-    left.appendChild(meta);
-
-    row.appendChild(left);
-
-    const right = document.createElement("div");
-    right.style.display = "flex";
-    right.style.gap = "6px";
-
-    if (entry.server) {
-      const open = document.createElement("button");
-      open.textContent = "Open";
-      styleButton(open);
-      open.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const originalLabel = open.textContent;
-        open.disabled = true;
-        open.textContent = "Loading…";
-        try {
-          const game = await api.getGame(entry.name);
-          const tiles = await api.getTiles(entry.name);
-          await this.opts.callbacks.onLoad(game, tiles);
-          this.closeAllModals();
-        } catch (err) {
-          open.disabled = false;
-          open.textContent = originalLabel ?? "Open";
-          console.error("[toolbar] load failed:", err);
-        }
-      });
-      right.appendChild(open);
-    }
-
-    const forget = document.createElement("button");
-    forget.textContent = "Forget";
-    styleButton(forget);
-    forget.addEventListener("click", (e) => {
-      e.stopPropagation();
-      forgetGame(entry.id);
-      this.opts.callbacks.onForget?.(entry.id);
-      row.remove();
-    });
-    right.appendChild(forget);
-
-    row.appendChild(right);
-    return row;
-  }
-
-  private closeAllModals(): void {
-    const overlays = document.body.querySelectorAll("div[style*='z-index: 100']");
-    overlays.forEach((el) => el.remove());
-  }
-}
-
-function sortByLastSeen<T extends { lastSeenAt: string }>(items: T[]): T[] {
-  return [...items].sort((a, b) => (a.lastSeenAt < b.lastSeenAt ? 1 : -1));
-}
-
-function formatTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
   }
 }

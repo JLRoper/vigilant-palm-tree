@@ -1,6 +1,6 @@
-import { TILE_W, TILE_D, cellOrigin } from "../../../core/cityGrid";
 import type { CityViewSize } from "@heroes/engine";
-import { computeCityScale, drawCityView } from "../../../render/cityRenderer";
+import { cityLayout, screenToGridCell } from "../../../core/cityGrid";
+import { drawCityView } from "../../../render/cityRenderer";
 import { buildCityScene } from "../../../render/scene/sceneBuilder/cityScene";
 import { createPaint2DDep } from "../../../render/paint2dDefaults";
 import { createSkyboxProvider } from "../../../render/skybox";
@@ -10,6 +10,7 @@ import type { SpriteProvider } from "../../../render/assets";
 import type { BuildingDef, GenerationStyle } from "../../../render/cityBuildingDraw";
 import { coversCell, buildingFootprint } from "../../../render/cityBuildingDraw";
 import { generateBuildings, type GenerationPattern } from "../../../render/cityBuildingGen";
+import { netDelta } from "./netCost";
 import { BuildingMenu, type BuildingMenuOptions } from "./buildingMenu";
 import { BuildingPlacer } from "./buildingPlacer";
 import { BuildingSelectionMenu, type SelectedBuildingEntry } from "./buildingSelectionMenu";
@@ -17,8 +18,26 @@ import { openConfirmDialog } from "@screens/shared/confirmDialog";
 import { settings } from "../../../state/settings";
 import type { SettlementState } from "../../../state/gameState";
 import type { BuildingUpgradeRequest } from "../../../state/gameState";
-import type { BuildingUpgradeCost } from "@heroes/engine";
+import type { BuildingUpgradeCost, ProducerOutput } from "@heroes/engine";
+import { producerTurnOutput } from "@heroes/engine";
 import { CityDesignBoxManager } from "./CityDesignBoxManager";
+
+const STYLE_KEYS: Record<string, GenerationStyle> = {
+  "1": "classic",
+  "2": "blocky",
+  "3": "crystalline",
+  "4": "organic",
+  "5": "industrial",
+};
+
+const PATTERN_KEYS: Record<string, GenerationPattern> = {
+  "!": "denseUrban",
+  "@": "sparseRural",
+  "#": "radial",
+  "$": "grid",
+  "%": "clustered",
+  "^": "sampler",
+};
 
 export class CityView {
   private designBox = new CityDesignBoxManager();
@@ -29,6 +48,10 @@ export class CityView {
   private hover: { gx: number; gy: number } | null = null;
   private citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }> = [];
   private cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }> = [];
+  private mapSeed: number | null = null;
+  /** True when the city view generated a starter layout for a previously-empty settlement (committed free). */
+  private freeInitialLayout = false;
+  private committedInitialLayout = false;
   private style: GenerationStyle = "classic";
   private pattern: GenerationPattern = "denseUrban";
   private seed = 42;
@@ -41,12 +64,15 @@ export class CityView {
   private selectionMenu: BuildingSelectionMenu;
   private selectedKeys: Set<string> = new Set();
   private selectionAnchor: { x: number; y: number } | null = null;
-  private onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>) => void;
+  private onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean) => void;
+  private onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean) => boolean;
+  /** Net cost already charged via incremental onPlaceBuildings commits since the view opened. */
+  private chargedNet: Partial<Record<ResourceType, number>> = {};
   private getSettlement: () => SettlementState | undefined;
   private onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string };
   private onKeyDown: (e: KeyboardEvent) => void;
 
-  constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>) => void; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string } }) {
+  constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean) => void; onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean) => boolean; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string } }) {
     this.paint2d = createPaint2DDep({
       spriteProvider: opts.provider,
       skybox: createSkyboxProvider(),
@@ -68,6 +94,7 @@ export class CityView {
       onUpgrade: (combined) => this.commitUpgrade(combined),
     });
     this.onClose = opts.onClose;
+    this.onPlaceBuildings = opts.onPlaceBuildings;
     this.getSettlement = opts.getSettlement;
     this.onUpgradeBuildings = opts.onUpgradeBuildings;
     this.onKeyDown = (e: KeyboardEvent) => {
@@ -113,19 +140,16 @@ export class CityView {
         }
         return;
       }
-      if (e.key >= "1" && e.key <= "5") {
-        const styles: GenerationStyle[] = ["classic", "blocky", "crystalline", "organic", "industrial"];
-        this.style = styles[parseInt(e.key) - 1];
+      const styleKey = STYLE_KEYS[e.key];
+      if (styleKey) {
+        this.style = styleKey;
         this.regenerate();
         return;
       }
-      if (e.key === "!" || e.key === "@" || e.key === "#" || e.key === "$" || e.key === "%" || e.key === "^") {
-        const patterns: GenerationPattern[] = ["denseUrban", "sparseRural", "radial", "grid", "clustered", "sampler"];
-        const idx = "!@#$%^".indexOf(e.key);
-        if (idx >= 0 && idx < patterns.length) {
-          this.pattern = patterns[idx];
-          this.regenerate();
-        }
+      const patternKey = PATTERN_KEYS[e.key];
+      if (patternKey) {
+        this.pattern = patternKey;
+        this.regenerate();
         return;
       }
       if (e.key === "r" || e.key === "R") {
@@ -141,6 +165,7 @@ export class CityView {
     spots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>,
     mines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>,
     buildings?: BuildingDef[],
+    mapSeed?: number,
   ): void {
     this.openSettlementId = settlementId;
     this.settlementName = name;
@@ -148,6 +173,7 @@ export class CityView {
     this.ownerColor = ownerColor;
     this.citySpots = spots;
     this.cityMines = mines;
+    this.mapSeed = mapSeed ?? null;
     this.hover = null;
     this.selectedKeys.clear();
     this.selectionAnchor = null;
@@ -155,9 +181,29 @@ export class CityView {
     const initialBuildings = buildings && buildings.length > 0
       ? buildings
       : this.generateBuildingsArray();
+    // A settlement with no persisted buildings gets its auto-generated
+    // starter layout committed FREE (docs plan §6.3 — historical behavior
+    // from the client-trusted era). Everything added on top is charged.
+    this.freeInitialLayout = !(buildings && buildings.length > 0);
+    this.committedInitialLayout = false;
     this.placer.init(size, { gx: Math.floor(size / 2), gy: Math.floor(size / 2) }, initialBuildings, this.style);
     this.refreshAffordability();
     this.placer.setOnConfirm(() => this.persistBuildings());
+    this.placer.setOnPlaced(() => this.persistBuildings());
+    this.chargedNet = {};
+
+    // Commit the generated starter layout immediately and FREE (docs plan
+    // §6.3 — historical behavior). Doing it at open — rather than lazily on
+    // the first placement — means user buildings are charged on their own:
+    // place a 100g house on top and the treasury/warehouse actually drop.
+    if (this.freeInitialLayout && this.openSettlementId) {
+      const ok = this.onPlaceBuildings(this.openSettlementId, [...this.placer.buildings], true);
+      if (ok) {
+        this.committedInitialLayout = true;
+        this.placer.markSynced();
+        this.refreshAffordability();
+      }
+    }
 
     this.designBox.show({
       onBuild: () => {
@@ -201,7 +247,8 @@ export class CityView {
       ownerColor: this.ownerColor,
       citySpots: this.citySpots,
       cityMines: this.cityMines,
-      buildings: this.placer.buildings,
+      upgrades: this.getSettlement()?.upgrade,
+      buildings: this.syncedBuildings(),
       style: this.style,
       pattern: this.pattern,
       ghost,
@@ -224,27 +271,8 @@ export class CityView {
     }
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
-    const tileScale = computeCityScale(this.size, viewportW, viewportH);
-    const tw = TILE_W * tileScale;
-    const td = TILE_D * tileScale;
-    const origin = cellOrigin(this.size);
-
-    const gridVCenter = (this.size - 1) * TILE_D / 2;
-    const buildingPad = this.size * TILE_D * 0.18;
-    const screenOriginY = viewportH / 2 - (gridVCenter + buildingPad) * tileScale;
-    const wdx = canvasX - viewportW / 2 - origin.x * tileScale;
-    const wdy = canvasY - screenOriginY - origin.y * tileScale;
-
-    const gxf = wdx / tw + wdy / td;
-    const gyf = wdy / td - wdx / tw;
-    const gx = Math.floor(gxf);
-    const gy = Math.floor(gyf);
-
-    if (gx < 0 || gx >= this.size || gy < 0 || gy >= this.size) {
-      this.hover = null;
-    } else {
-      this.hover = { gx, gy };
-    }
+    const layout = cityLayout(this.size, viewportW, viewportH);
+    this.hover = screenToGridCell(layout, this.size, viewportW, canvasX, canvasY);
 
     // delegate snap computation to placer when in placement mode
     if (this.placer.isActive()) {
@@ -256,24 +284,15 @@ export class CityView {
     if (!this.isOpen()) return;
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
-    const tileScale = computeCityScale(this.size, viewportW, viewportH);
-    const origin = cellOrigin(this.size);
-    const tw = TILE_W * tileScale;
-    const td = TILE_D * tileScale;
+    const layout = cityLayout(this.size, viewportW, viewportH);
+    const cell = screenToGridCell(layout, this.size, viewportW, canvasX, canvasY);
 
-    const screenOriginY = viewportH / 2 - ((this.size - 1) * TILE_D / 2 + this.size * TILE_D * 0.18) * tileScale;
-    const wdx = canvasX - viewportW / 2 - origin.x * tileScale;
-    const wdy = canvasY - screenOriginY - origin.y * tileScale;
-    const gxf = wdx / tw + wdy / td;
-    const gyf = wdy / td - wdx / tw;
-    const gx = Math.floor(gxf);
-    const gy = Math.floor(gyf);
-
-    if (gx < 0 || gx >= this.size || gy < 0 || gy >= this.size) {
+    if (!cell) {
       this.buildingMenu.hide();
       if (!modifier?.ctrlKey && !modifier?.metaKey) this.clearSelection();
       return;
     }
+    const { gx, gy } = cell;
 
     const ctrlLike = !!(modifier?.ctrlKey || modifier?.metaKey);
 
@@ -316,13 +335,24 @@ export class CityView {
     if (this.selectedKeys.size > 0) {
       this.clearSelection();
     }
-    const screenOrigin = { x: viewportW / 2, y: viewportH / 2 - ((this.size - 1) * TILE_D / 2 + this.size * TILE_D * 0.18) * tileScale };
-    const gridOrigin = cellOrigin(this.size);
     const w = building.w ?? 1;
     const h = building.h ?? 1;
-    const fp = buildingFootprint(building.gx, building.gy, gridOrigin, screenOrigin, tileScale, w, h);
+    const fp = buildingFootprint(building.gx, building.gy, layout.gridOrigin, layout.screenOrigin, layout.tileScale, w, h);
 
-    this.buildingMenu.show(building, fp.cx, fp.cy - fp.hh * 0.6, this.getSettlement());
+    this.buildingMenu.show(
+      building,
+      fp.cx,
+      fp.cy - fp.hh * 0.6,
+      this.getSettlement(),
+      this.cellOutputFor(building),
+      building.construction?.daysRemaining,
+    );
+  }
+
+  private cellOutputFor(building: BuildingDef): ProducerOutput | null {
+    const settlement = this.getSettlement();
+    if (!settlement || this.mapSeed === null) return null;
+    return producerTurnOutput(building, settlement, this.mapSeed);
   }
 
   private clearSelection(): void {
@@ -418,10 +448,47 @@ export class CityView {
 
   private persistBuildings(): void {
     if (!this.openSettlementId) return;
-    const netCost = this.placer.getNetCost();
-    this.onClose(this.openSettlementId, [...this.placer.buildings], netCost);
+    // Only the delta since the last incremental commit is charged -- every
+    // placement/destroy is committed immediately (locally below, and
+    // server-side via the PlaceBuildings command), so at close the
+    // remaining delta is always zero.
+    //
+    // The commit payload is the SYNCED cart, not the raw cart: EndTurn's
+    // round wrap replaces state objects (construction ticks down, builds
+    // complete) while the cart still holds the placement-time copies.
+    // Writing the raw cart would re-arm finished timers (user report,
+    // 2026-09-27: re-entering a city showed finished houses as tier-1
+    // in-progress again).
+    const delta = this.pendingNetDelta();
+    const synced = this.syncedBuildings();
+    this.onClose(this.openSettlementId, synced, delta, false);
+    const initialLayout = this.freeInitialLayout && !this.committedInitialLayout;
+    const result = this.onPlaceBuildings(this.openSettlementId, synced, initialLayout);
+    if (result) {
+      this.placer.markSynced();
+      if (initialLayout) this.committedInitialLayout = true;
+    }
+    this.chargedNet = { ...this.placer.getNetCost() };
     this.refreshAffordability();
     this.updateBuildButton();
+  }
+
+  /** Cart buildings with construction/level/style re-synced from live state -- EndTurn's round wrap replaces state objects, so the cart snapshot goes stale otherwise. */
+  private syncedBuildings(): BuildingDef[] {
+    const live = this.getSettlement();
+    if (!live) return this.placer.buildings;
+    return this.placer.buildings.map((b) => {
+      const liveB = live.buildings.find((m) => m.gx === b.gx && m.gy === b.gy && m.kind === b.kind);
+      if (!liveB) return b;
+      const merged: BuildingDef = { ...b, level: liveB.level, style: liveB.style };
+      if (liveB.construction) merged.construction = { ...liveB.construction };
+      else delete (merged as { construction?: unknown }).construction;
+      return merged;
+    });
+  }
+
+  private pendingNetDelta(): Partial<Record<ResourceType, number>> {
+    return netDelta(this.placer.getNetCost(), this.chargedNet);
   }
 
   private refreshAffordability(): void {
@@ -459,7 +526,9 @@ export class CityView {
     this.closing = true;
     const id = this.openSettlementId!;
     this.lastClosedId = id;
-    const finalBuildings = [...this.placer.buildings];
+    // Synced cart, not the raw snapshot — see persistBuildings(): the raw
+    // cart's stale construction timers would re-arm finished builds.
+    const finalBuildings = this.syncedBuildings();
     try {
       this.placer.cancelPlacement();
       this.placer.hidePalette();
@@ -471,7 +540,7 @@ export class CityView {
       this.selectionAnchor = null;
       this.openSettlementId = null;
       this.hover = null;
-      this.onClose(id, finalBuildings, this.placer.getNetCost());
+      this.onClose(id, finalBuildings, this.pendingNetDelta(), true);
       return id;
     } finally {
       this.closing = false;

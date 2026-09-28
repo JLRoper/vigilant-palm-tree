@@ -3,12 +3,21 @@ import cors from "cors";
 import { initSchema, pool } from "./db";
 import { router } from "./routes";
 import { errorHandler } from "./errorHandler";
+import { startDropPolicyScanner } from "./app/dropPolicy";
 
 const PORT = Number(process.env.API_PORT ?? 3001);
 const BIND_HOST = process.env.LAN_HOST === "1" ? "0.0.0.0" : "127.0.0.1";
 
 async function main() {
   await initSchema();
+  // Drop policy (docs/multiplayer.md, shipped 2026-09-27): the in-process
+  // scanner that marks silent seats disconnected and runs the grace-timed
+  // server-side EndTurn skip. Heartbeats themselves arrive via the
+  // telemetry/commands routes (touchSeat); this interval only re-examines.
+  // Everything it owns is in-process by design -- an API restart restarts
+  // any in-flight grace clock (accepted tradeoff, see the doc's locked
+  // decisions), and the unref'd timer never holds the process open.
+  startDropPolicyScanner();
   const app = express();
   app.use(cors());
   app.use(express.raw({ type: ["image/*", "application/octet-stream"], limit: "10mb" }));

@@ -4,6 +4,7 @@ import { Toolbar, type CalendarSnapshot } from "@screens/shared/toolbar";
 import { HeroInfoMenu } from "@screens/heroes/heroInfoMenu";
 import { HeroRosterMenu } from "@screens/heroes/heroRosterMenu";
 import { SettlementRosterMenu } from "@screens/settlements/settlementRosterMenu";
+import { openLogisticsModal } from "@screens/logistics/logisticsModal";
 import { SettlementInfoMenu } from "@screens/settlements/settlementInfoMenu";
 import { TileInfoPanel } from "@screens/adventure/tileInfoPanel";
 import { describeTile } from "@screens/adventure/tileInfo";
@@ -87,6 +88,7 @@ export class UIManager {
         getMapInfo: callbacks.getMapInfo,
         onStartCharter: callbacks.onStartCharter,
         canStartCharter: callbacks.canStartCharter,
+        onOpenLogistics: () => this.openLogisticsModal(),
       },
     });
 
@@ -186,7 +188,7 @@ export class UIManager {
         const openId = this.cityView?.getOpenSettlementId();
         return openId ? gs.settlements[openId] : undefined;
       },
-      onClose: (closedId, buildings, netCost) => {
+      onClose: (closedId, buildings, netCost, final) => {
         const gs = state().getState();
         const s = gs.settlements[closedId];
         if (s) {
@@ -213,6 +215,10 @@ export class UIManager {
           };
           state().replaceState(updated);
         }
+        // Incremental commits (every placement/destroy while the planner is
+        // open) skip the camera/select tail -- it would yank the viewport on
+        // every grid click. Only a real close re-selects and re-centers.
+        if (!final) return;
         const tc = state().getTurnController();
         tc.selectSettlement(closedId);
         state().replaceState(tc.getState());
@@ -220,6 +226,14 @@ export class UIManager {
         if (castle) {
           viewManager.centerOn(castle.tile.q, castle.tile.r);
         }
+      },
+      onPlaceBuildings: (settlementId, buildings, initialLayout) => {
+        const tc = state().getTurnController();
+        const result = tc.placeBuildings(settlementId, buildings, initialLayout === true);
+        if (result.ok) {
+          state().replaceState(tc.getState());
+        }
+        return result.ok;
       },
     });
   }
@@ -282,10 +296,9 @@ export class UIManager {
 
   private refreshSettlementInfoMenu(gameState: GameState): void {
     if (!this.settlementInfoMenu) return;
-    if (this.cityView?.isOpen()) {
-      this.settlementInfoMenu.hide();
-      return;
-    }
+    // Deliberately NO city-view check here: the stats menu stays open inside
+    // the city grid — that's where live stockpile info matters most while
+    // building (user request, 2026-09-27).
     const selectedId = gameState.selectedSettlementId;
     if (!selectedId) {
       this.settlementInfoMenu.hide();
@@ -355,6 +368,43 @@ export class UIManager {
     } else {
       this.settlementRosterMenu.show(state);
     }
+  }
+
+  private openLogisticsModal(): void {
+    if (!this.gameStateManager) return;
+    const stateManager = this.gameStateManager;
+    const tc = () => stateManager.getTurnController();
+    openLogisticsModal({
+      parent: document.body,
+      getState: () => stateManager.getState(),
+      actions: {
+        transferResources: (heroId, settlementId, direction, amounts) => {
+          const result = tc().transferResources(heroId, settlementId, direction, amounts);
+          if (result.ok) stateManager.replaceState(tc().getState());
+          return result;
+        },
+        assignWagons: (heroId, delta) => {
+          const result = tc().assignWagons(heroId, delta);
+          if (result.ok) stateManager.replaceState(tc().getState());
+          return result;
+        },
+        buyWagons: (settlementId, count) => {
+          const result = tc().buyWagons(settlementId, count);
+          if (result.ok) stateManager.replaceState(tc().getState());
+          return result;
+        },
+        createTradeRoute: (fromId, toId, resource, wagons) => {
+          const result = tc().createTradeRoute(fromId, toId, resource, wagons);
+          if (result.ok) stateManager.replaceState(tc().getState());
+          return result;
+        },
+        updateTradeRoute: (routeId, change) => {
+          const result = tc().updateTradeRoute(routeId, change);
+          if (result.ok) stateManager.replaceState(tc().getState());
+          return result;
+        },
+      },
+    });
   }
 
   private handleRosterHeroSelect(heroId: HeroId): void {

@@ -35,6 +35,7 @@ import type {
   BattleHexNode,
   BattleImpactRingNode,
   BattleMovePathNode,
+  BattleSpellTargetRingNode,
   CastleNode,
   CharterOverlayNode,
   CityBuildingNode,
@@ -56,6 +57,7 @@ import type {
   TerrainHexNode,
   TerritoryOutlineEdgeNode,
   ValidCharterHexNode,
+  CaravanMarkerNode,
 } from "../types";
 
 // Live colour constants, transcribed byte-for-byte from the per-kind painter
@@ -92,6 +94,8 @@ const BATTLE_HEX_IN_RANGE = "rgba(210,210,215,0.35)";
 const BATTLE_HEX_STROKE = "rgba(255,255,255,0.08)";
 const BATTLE_HEX_AVAILABLE_STROKE = "rgba(255,214,102,0.9)";
 const BATTLE_ATTACK_TARGET_STROKE = "#e05050";
+const BATTLE_SPELL_TARGET_STROKE = "#b27ae8";
+const BATTLE_SPELL_TARGET_FILL = "rgba(178, 122, 232, 0.16)";
 const BATTLE_AI_TELEGRAPH_FILL = "rgba(224,80,80,0.22)";
 const BATTLE_AI_TELEGRAPH_STROKE = "rgba(255,120,120,0.95)";
 const BATTLE_MOVE_PATH = "rgba(255,255,255,0.28)";
@@ -233,6 +237,9 @@ export function paintScene(
       case "selectedTileHighlight":
         paintSelectedTileHighlight(ctx, node, deps);
         break;
+      case "caravanMarker":
+        paintCaravanMarker(ctx, node);
+        break;
       case "hero":
         paintHero(ctx, node, deps);
         break;
@@ -272,6 +279,9 @@ export function paintScene(
         break;
       case "battleAttackTargetRing":
         paintBattleAttackTargetRing(ctx, node, deps);
+        break;
+      case "battleSpellTargetRing":
+        paintBattleSpellTargetRing(ctx, node, deps);
         break;
       case "battleAiTelegraphHex":
         paintBattleAiTelegraphHex(ctx, node, deps);
@@ -555,7 +565,36 @@ export function paintHoverHighlight(ctx: CanvasRenderingContext2D, node: HoverHi
   void deps;
 }
 
-export function paintSelectedTileHighlight(ctx: CanvasRenderingContext2D, node: SelectedTileHighlightNode, deps: Paint2DDep): void {
+export function paintCaravanMarker(ctx: CanvasRenderingContext2D, node: CaravanMarkerNode): void {
+  const { x, y } = node.world;
+  ctx.save();
+  // Wagon bed + canvas top.
+  ctx.fillStyle = "#8a5a2b";
+  ctx.strokeStyle = "#3a2a14";
+  ctx.lineWidth = 1.5;
+  ctx.fillRect(x - 9, y - 9, 18, 9);
+  ctx.strokeRect(x - 9, y - 9, 18, 9);
+  ctx.fillStyle = "#d9c9a3";
+  ctx.fillRect(x - 9, y - 12, 18, 4);
+  ctx.strokeRect(x - 9, y - 12, 18, 4);
+  // Wheels, tinted by the owning seat.
+  ctx.fillStyle = node.color;
+  ctx.strokeStyle = "#3a2a14";
+  for (const dx of [-5, 5]) {
+    ctx.beginPath();
+    ctx.arc(x + dx, y + 3, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  // Wagon count flag.
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 9px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(String(node.wagons), x, y - 15);
+  ctx.restore();
+}
+
+function paintSelectedTileHighlight(ctx: CanvasRenderingContext2D, node: SelectedTileHighlightNode, deps: Paint2DDep): void {
   ctx.lineWidth = 3;
   ctx.strokeStyle = SELECTED_TILE_STROKE;
   ctx.setLineDash([4, 3]);
@@ -774,9 +813,12 @@ export function paintCityMine(ctx: CanvasRenderingContext2D, node: CityMineNode,
 }
 
 export function paintCityBuilding(ctx: CanvasRenderingContext2D, node: CityBuildingNode, deps: Paint2DDep): void {
+  const sprite = node.constructionStage
+    ? deps.sprite.resolveSprite(`building.pixel.underConstruction.${node.constructionStage}`)
+    : deps.sprite.resolveSpriteForBuilding(node.style, node.buildingKind, node.level);
   drawBuildingInto(
     ctx,
-    deps.sprite.resolveSpriteForBuilding(node.style, node.buildingKind, node.level),
+    sprite,
     node.center.x,
     node.center.y,
     node.halfWidth * 2,
@@ -862,6 +904,17 @@ export function paintBattleAttackTargetRing(ctx: CanvasRenderingContext2D, node:
   ctx.arc(node.world.x, node.world.y, node.radius, 0, Math.PI * 2);
   ctx.strokeStyle = BATTLE_ATTACK_TARGET_STROKE;
   ctx.lineWidth = 2;
+  ctx.stroke();
+  void deps;
+}
+
+export function paintBattleSpellTargetRing(ctx: CanvasRenderingContext2D, node: BattleSpellTargetRingNode, deps: Paint2DDep): void {
+  ctx.beginPath();
+  ctx.arc(node.world.x, node.world.y, node.radius, 0, Math.PI * 2);
+  ctx.fillStyle = BATTLE_SPELL_TARGET_FILL;
+  ctx.fill();
+  ctx.strokeStyle = BATTLE_SPELL_TARGET_STROKE;
+  ctx.lineWidth = 2.5;
   ctx.stroke();
   void deps;
 }

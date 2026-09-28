@@ -33,12 +33,16 @@ test("heroRepo.loadAllForGame returns [] for a game with no heroes", async () =>
   });
 });
 
-test("heroRepo.upsertMany writes a hero and loadAllForGame reads it back", async () => {
+test("heroRepo.upsertMany writes a hero and loadAllForGame reads it back (incl. wagons + cargo)", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();
     await seedGame(client, name);
     const repo = createHeroRepo(client);
-    const hero = makeHero("h0", 0, 3, 4, { gold: 50, troops: 7 });
+    const hero = {
+      ...makeHero("h0", 0, 3, 4, { gold: 50, troops: 7 }),
+      wagons: 3,
+      resources: { wood: 10, stone: 0, iron: 0, arcane: 2, food: 0 },
+    };
 
     await repo.upsertMany(name, { h0: hero });
     const loaded = await repo.loadAllForGame(name);
@@ -111,6 +115,8 @@ test("heroRepo.upsertMany round-trips a fractional movementRemaining (forest/des
       previousQ: 2,
       previousR: 4,
       previousMovementRemaining: 3.4,
+      wagons: 5,
+      resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
     };
 
     await repo.upsertMany(name, { h0: hero });

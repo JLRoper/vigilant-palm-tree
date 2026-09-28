@@ -1,5 +1,6 @@
 import type { GameState, ResourceType, SettlementId, SettlementState, WarehouseResource } from "../../state/gameState";
 import { RESOURCES } from "../../map/resourceTiles";
+import { settlementResourceCap, settlementTreasuryCap, heroCargo, heroGoldCap, heroResourceCap, heroWagons, playerWagonsOwned, playerWagonsUnassigned } from "@heroes/engine";
 import { PopupMenu, menuTheme, styleButton, clampMenuIntoView } from "@screens/shared/menu";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import { openTradeModal } from "./tradeModal";
@@ -47,6 +48,24 @@ export interface SettlementPanelOptions {
   onSelect?: (settlementId: SettlementId) => void;
   onTrade?: TradeHandler;
   onToggleAutoTrade?: (settlementId: SettlementId, autoTrade: boolean) => void;
+  onBuyWagons?: (settlementId: SettlementId, count: number) => { ok: boolean; reason: string };
+  onTransferResources?: (
+    heroId: string,
+    settlementId: SettlementId,
+    direction: "load" | "unload",
+    amounts: Partial<Record<WarehouseResource, number>>,
+  ) => { ok: boolean; reason: string };
+  onAssignWagons?: (heroId: string, delta: number) => { ok: boolean; reason: string };
+  onCreateTradeRoute?: (
+    fromId: SettlementId,
+    toId: SettlementId,
+    resource: WarehouseResource,
+    wagons: number,
+  ) => { ok: boolean; reason: string };
+  onUpdateTradeRoute?: (
+    routeId: string,
+    change: { wagonsDelta?: number; remove?: boolean },
+  ) => { ok: boolean; reason: string };
 }
 
 export class SettlementPanel {
@@ -55,9 +74,33 @@ export class SettlementPanel {
   private onSelect?: (settlementId: SettlementId) => void;
   private onToggleAutoTrade?: (settlementId: SettlementId, autoTrade: boolean) => void;
   private onTrade?: TradeHandler;
+  private lastState?: GameState;
+  private onBuyWagons?: (settlementId: SettlementId, count: number) => { ok: boolean; reason: string };
+  private onTransferResources?: (
+    heroId: string,
+    settlementId: SettlementId,
+    direction: "load" | "unload",
+    amounts: Partial<Record<WarehouseResource, number>>,
+  ) => { ok: boolean; reason: string };
+  private onAssignWagons?: (heroId: string, delta: number) => { ok: boolean; reason: string };
+  private onCreateTradeRoute?: (
+    fromId: SettlementId,
+    toId: SettlementId,
+    resource: WarehouseResource,
+    wagons: number,
+  ) => { ok: boolean; reason: string };
+  private onUpdateTradeRoute?: (
+    routeId: string,
+    change: { wagonsDelta?: number; remove?: boolean },
+  ) => { ok: boolean; reason: string };
 
   constructor(opts: SettlementPanelOptions) {
     this.onSelect = opts.onSelect;
+    this.onBuyWagons = opts.onBuyWagons;
+    this.onTransferResources = opts.onTransferResources;
+    this.onAssignWagons = opts.onAssignWagons;
+    this.onCreateTradeRoute = opts.onCreateTradeRoute;
+    this.onUpdateTradeRoute = opts.onUpdateTradeRoute;
     this.onTrade = opts.onTrade;
     this.onToggleAutoTrade = opts.onToggleAutoTrade;
     this.menu = new PopupMenu({
@@ -82,6 +125,7 @@ export class SettlementPanel {
   }
 
   update(state: GameState): void {
+    this.lastState = state;
     this.body.replaceChildren();
 
     const grouped = new Map<number | null, Record<string, SettlementState>>();
@@ -237,7 +281,7 @@ export class SettlementPanel {
 
     const treasuryRow = makeRow();
     treasuryRow.left.textContent = "Treasury";
-    treasuryRow.right.textContent = `${s.gold}g`;
+    treasuryRow.right.textContent = `${s.gold}g / ${settlementTreasuryCap(s)}g`;
     card.appendChild(treasuryRow.row);
 
     if (s.foundedOnResource) {
@@ -273,8 +317,9 @@ export class SettlementPanel {
       const letter = r[0];
       return `${count}${letter}`;
     });
+    const caps = settlementResourceCap(s);
     const warehouseLine = document.createElement("div");
-    warehouseLine.textContent = `\u{1F3E0} ${warehouseParts.join(" ")}`;
+    warehouseLine.textContent = `\u{1F3E0} ${warehouseParts.join(" ")} / ${caps.wood}`;
     Object.assign(warehouseLine.style, {
       fontSize: "11px",
       opacity: "0.75",
@@ -282,6 +327,134 @@ export class SettlementPanel {
       fontVariantNumeric: "tabular-nums",
     });
     card.appendChild(warehouseLine);
+
+    const isOwn = s.ownerId !== null && s.ownerId === state.activePlayerId;
+
+    // Trade routes touching this settlement (docs plan §5.2).
+    if (isOwn && this.onUpdateTradeRoute && this.onCreateTradeRoute) {
+      const routes = state.tradeRoutes ?? [];
+      const touching = routes.filter(
+        (r) => r.fromSettlementId === s.id || r.toSettlementId === s.id,
+      );
+      for (const route of touching) {
+        const otherId = route.fromSettlementId === s.id ? route.toSettlementId : route.fromSettlementId;
+        const other = state.settlements[otherId];
+        const row = makeRow();
+        row.left.textContent = `${route.wagons}\u{1F69F} ${route.resource} \u2192 ${
+          route.fromSettlementId === s.id ? (other?.name ?? otherId) : `${s.name} (${other?.name ?? otherId})`
+        }`;
+        row.right.textContent = route.caravan
+          ? route.caravan.phase === "toDestination"
+            ? "\u2192 on road"
+            : "\u2190 returning"
+          : "loading";
+        row.row.title = "Click to remove the route (wagons return to the pool)";
+        row.row.style.cursor = "pointer";
+        row.row.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          this.onUpdateTradeRoute?.(route.id, { remove: true });
+        });
+        row.row.addEventListener("contextmenu", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          this.onUpdateTradeRoute?.(route.id, { wagonsDelta: -1 });
+        });
+        card.appendChild(row.row);
+      }
+
+      const player = state.players.find((p) => p.id === state.activePlayerId);
+      const unassigned = playerWagonsUnassigned(player ?? { id: 0, faction: "player", name: "", color: "", heroIds: [], settlementIds: [] });
+      const owned = playerWagonsOwned(player ?? { id: 0, faction: "player", name: "", color: "", heroIds: [], settlementIds: [] });
+      const poolRow = makeRow();
+      poolRow.left.textContent = "\u{1F69F} Wagons";
+      poolRow.right.textContent = `${unassigned} free / ${owned} owned`;
+      card.appendChild(poolRow.row);
+
+      if (this.onBuyWagons) {
+        const buyRow = document.createElement("div");
+        buyRow.style.display = "flex";
+        buyRow.style.gap = "6px";
+        buyRow.style.marginBottom = "2px";
+        const buyBtn = document.createElement("button");
+        buyBtn.textContent = "Buy wagon (200g 5w)";
+        styleButton(buyBtn);
+        buyBtn.style.fontSize = "10px";
+        buyBtn.style.padding = "2px 6px";
+        buyBtn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          this.onBuyWagons?.(s.id, 1);
+        });
+        buyRow.appendChild(buyBtn);
+        card.appendChild(buyRow);
+      }
+
+      if (unassigned > 0) {
+        const destinations = Object.values(state.settlements).filter(
+          (other) => other.id !== s.id && other.ownerId === s.ownerId,
+        );
+        if (destinations.length > 0) {
+          const createRow = document.createElement("div");
+          Object.assign(createRow.style, { display: "flex", gap: "4px", marginTop: "2px" });
+          const targetSel = document.createElement("select");
+          targetSel.style.flex = "1.4";
+          for (const d of destinations) {
+            const opt = document.createElement("option");
+            opt.value = d.id;
+            opt.textContent = d.name;
+            targetSel.appendChild(opt);
+          }
+          const resSel = document.createElement("select");
+          resSel.style.flex = "1";
+          for (const r of ["wood", "stone", "iron", "arcane", "food"] as WarehouseResource[]) {
+            const opt = document.createElement("option");
+            opt.value = r;
+            opt.textContent = `${RESOURCE_ICONS[r]} ${r}`;
+            resSel.appendChild(opt);
+          }
+          const wagonInput = document.createElement("input");
+          wagonInput.type = "number";
+          wagonInput.min = "1";
+          wagonInput.max = String(unassigned);
+          wagonInput.value = "1";
+          wagonInput.style.flex = "0.7";
+          const createBtn = document.createElement("button");
+          createBtn.textContent = "Route";
+          styleButton(createBtn);
+          createBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            this.onCreateTradeRoute?.(
+              s.id,
+              targetSel.value,
+              resSel.value as WarehouseResource,
+              Math.max(1, Math.floor(Number(wagonInput.value) || 1)),
+            );
+          });
+          createRow.append(targetSel, resSel, wagonInput, createBtn);
+          card.appendChild(createRow);
+        }
+      }
+    }
+
+    // Hero cargo / wagon assignment: any owned hero standing on this settlement.
+    if (isOwn && (this.onTransferResources || this.onAssignWagons)) {
+      const heroHere = Object.values(state.heroes).find(
+        (h) => h.ownerId === state.activePlayerId && h.q === s.q && h.r === s.r,
+      );
+      if (heroHere) {
+        const cargoBtn = document.createElement("button");
+        cargoBtn.textContent = `Cargo & wagons\u2026 (${heroWagons(heroHere)}\u{1F69F})`;
+        styleButton(cargoBtn);
+        cargoBtn.style.width = "100%";
+        cargoBtn.style.marginTop = "6px";
+        cargoBtn.style.fontSize = "11px";
+        cargoBtn.style.padding = "4px 6px";
+        cargoBtn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          this.openCargoModal(state, s, heroHere.id);
+        });
+        card.appendChild(cargoBtn);
+      }
+    }
 
     const canTrade =
       this.onTrade !== undefined &&
@@ -315,5 +488,101 @@ export class SettlementPanel {
     }
 
     return card;
+  }
+
+  /** Hero cargo load/unload + wagon assignment (docs plan §6/§7). */
+  private openCargoModal(state: GameState, s: SettlementState, heroId: string): void {
+    const hero = state.heroes[heroId];
+    if (!hero || !this.onTransferResources) return;
+    const modal = new PopupMenu({
+      parent: document.body,
+      title: `Cargo — ${hero.name}`,
+      initialPosition: { x: Math.max(0, window.innerWidth / 2 - 150), y: toolbarHeight() + 80 },
+      width: 320,
+      closeable: true,
+      zIndex: 90,
+    });
+    const render = (): void => {
+      const live = this.lastState;
+      if (!live) return;
+      const h = live.heroes[heroId];
+      const st = live.settlements[s.id];
+      if (!h || !st) return;
+      const cargo = heroCargo(h);
+      const cargoCaps = heroResourceCap(h);
+      const stockCaps = settlementResourceCap(st);
+      modal.body.replaceChildren();
+
+      const purse = document.createElement("div");
+      purse.textContent = `Purse ${h.gold}g / ${heroGoldCap(h)}g · Wagons ${heroWagons(h)}`;
+      Object.assign(purse.style, { fontSize: "12px", opacity: "0.85", marginBottom: "6px" });
+      modal.body.appendChild(purse);
+
+      if (this.onAssignWagons) {
+        const poolRow = document.createElement("div");
+        poolRow.style.display = "flex";
+        poolRow.style.gap = "6px";
+        poolRow.style.marginBottom = "6px";
+        const player = live.players.find((p) => p.id === h.ownerId);
+        const label = document.createElement("span");
+        label.style.fontSize = "12px";
+        label.textContent = `Pool: ${playerWagonsUnassigned(player ?? { id: 0, faction: "player", name: "", color: "", heroIds: [], settlementIds: [] })} free`;
+        const minus = document.createElement("button");
+        minus.textContent = "\u2212 wagon";
+        styleButton(minus);
+        minus.addEventListener("click", () => {
+          this.onAssignWagons?.(heroId, -1);
+          setTimeout(render, 30);
+        });
+        const plus = document.createElement("button");
+        plus.textContent = "+ wagon";
+        styleButton(plus);
+        plus.addEventListener("click", () => {
+          this.onAssignWagons?.(heroId, 1);
+          setTimeout(render, 30);
+        });
+        poolRow.append(label, minus, plus);
+        modal.body.appendChild(poolRow);
+      }
+
+      for (const r of ["wood", "stone", "iron", "arcane", "food"] as WarehouseResource[]) {
+        const row = document.createElement("div");
+        Object.assign(row.style, {
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          fontSize: "12px",
+          marginBottom: "4px",
+          fontVariantNumeric: "tabular-nums",
+        });
+        const amounts = document.createElement("span");
+        amounts.style.flex = "1";
+        amounts.textContent = `${RESOURCE_ICONS[r]} hero ${cargo[r] ?? 0}/${cargoCaps[r]} · town ${st.warehouse[r] ?? 0}/${stockCaps[r]}`;
+        const loadBtn = document.createElement("button");
+        loadBtn.textContent = "\u2191 load";
+        styleButton(loadBtn);
+        loadBtn.style.fontSize = "10px";
+        loadBtn.addEventListener("click", () => {
+          this.onTransferResources?.(heroId, s.id, "load", { [r]: cargoCaps[r] });
+          setTimeout(render, 30);
+        });
+        const unloadBtn = document.createElement("button");
+        unloadBtn.textContent = "\u2193 unload";
+        styleButton(unloadBtn);
+        unloadBtn.style.fontSize = "10px";
+        unloadBtn.addEventListener("click", () => {
+          this.onTransferResources?.(heroId, s.id, "unload", { [r]: stockCaps[r] });
+          setTimeout(render, 30);
+        });
+        row.append(amounts, loadBtn, unloadBtn);
+        modal.body.appendChild(row);
+      }
+      const hint = document.createElement("div");
+      hint.textContent = "load = wagon \u2192 town · unload = town \u2192 wagon (caps truncate)";
+      Object.assign(hint.style, { fontSize: "10px", opacity: "0.55", marginTop: "4px" });
+      modal.body.appendChild(hint);
+    };
+    render();
+    clampMenuIntoView(modal, toolbarHeight());
   }
 }

@@ -150,4 +150,4 @@ Three bugs found and fixed while building, all caught by looking at output rathe
 
 Verified: `npm run build`, `npm run models:check`, `npm run lint:deps` clean; 134 unit tests pass, including three new `battleScene.test.ts` cases covering `unitTypeId` / `facing` (including the swapped-column case). Rendered live in the Test Battle arena against the real 12-unit catalog — the archer platoon draws as a sprite, every other unit type falls back to a disc.
 
-**Known limits:** animations are generated but never played (see `plan/2026-08-29-unit-animation-plan.md`); only `e`/`w` facings are ever requested; the arena's human-side move is not animated at all, so platoons teleport.
+**Known limits:** animations are generated but never played (see `.kilo/plan/2026-08-29-unit-animation-plan.md`); only `e`/`w` facings are ever requested; the arena's human-side move is not animated at all, so platoons teleport.

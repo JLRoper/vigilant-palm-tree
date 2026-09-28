@@ -23,6 +23,7 @@ import { attachEventLog, type EventLog } from "../debug/eventLog";
 import { mountPersistentDevConsole, type DevConsoleHandle } from "../debug/devConsole";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { attachCommandFailureToasts } from "@screens/shared/toast";
+import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
 import { getEntityMirror } from "../io/multiplayerSync";
 
 export class GameEngine {
@@ -207,6 +208,10 @@ export class GameEngine {
     // (src/game/turnHooks.ts) rejects, instead of the previous
     // console.warn-only silence.
     attachCommandFailureToasts();
+    // Drop policy (2026-09-27): "waiting for seat N (disconnected)" hint
+    // while a disconnected seat holds the active turn (mp:presenceUpdated
+    // + mp:stateChanged off the bus).
+    attachMpPresenceHint();
   }
 
   // =========================================================================
@@ -371,6 +376,7 @@ export class GameEngine {
       },
       gs.activeCharters,
       this.validCharterHexes,
+      gs.tradeRoutes,
     );
     this.view.drawCityOverlay(this.ui.getCityView());
   }
@@ -413,6 +419,7 @@ export class GameEngine {
       spots as unknown as Parameters<typeof cityView.open>[4],
       mines as unknown as Parameters<typeof cityView.open>[5],
       castle.buildings,
+      gs.castleSeed,
     );
   }
 

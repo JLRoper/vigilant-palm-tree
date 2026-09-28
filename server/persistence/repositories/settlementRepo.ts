@@ -60,6 +60,7 @@ interface BuildingRow {
   style: string;
   w: number | null;
   h: number | null;
+  construction: { daysRemaining: number } | null;
 }
 
 const SETTLEMENT_COLUMNS =
@@ -86,6 +87,7 @@ function toSettlementState(
     style: b.style as BuildingDef["style"],
     ...(b.w !== null ? { w: b.w } : {}),
     ...(b.h !== null ? { h: b.h } : {}),
+    ...(b.construction != null ? { construction: b.construction as BuildingDef["construction"] } : {}),
   }));
 
   return {
@@ -135,7 +137,7 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
           [settlementIds],
         ),
         db.query<BuildingRow>(
-          `SELECT settlement_id, gx, gy, kind, level, style, w, h FROM settlement_buildings
+          `SELECT settlement_id, gx, gy, kind, level, style, w, h, construction FROM settlement_buildings
            WHERE settlement_id = ANY($1::text[])`,
           [settlementIds],
         ),
@@ -233,8 +235,8 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
         await db.query(`DELETE FROM settlement_buildings WHERE settlement_id = $1`, [settlement.id]);
         for (const building of settlement.buildings) {
           await db.query(
-            `INSERT INTO settlement_buildings (settlement_id, gx, gy, kind, level, style, w, h)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            `INSERT INTO settlement_buildings (settlement_id, gx, gy, kind, level, style, w, h, construction)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [
               settlement.id,
               building.gx,
@@ -244,6 +246,7 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
               building.style,
               building.w ?? null,
               building.h ?? null,
+              building.construction ? JSON.stringify(building.construction) : null,
             ],
           );
         }

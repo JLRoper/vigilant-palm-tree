@@ -137,8 +137,8 @@ After all 13 steps, the project must:
 
 ### Linked mitigation plans
 
-- `../plan/2026-08-09-risk-circular-imports.md` — ✅ resolved 2026-08-10 (commit `526398e`): layer rules machine-enforced via `dependency-cruiser.cjs` / `npm run lint:deps`; see resolution notes under "Risks" above
-- `../plan/2026-08-09-risk-gameDebug-contract.md` — still applicable (surface has grown past what the architecture doc described)
+- `../.kilo/plan/2026-08-09-risk-circular-imports.md` — ✅ resolved 2026-08-10 (commit `526398e`): layer rules machine-enforced via `dependency-cruiser.cjs` / `npm run lint:deps`; see resolution notes under "Risks" above
+- `../.kilo/plan/2026-08-09-risk-gameDebug-contract.md` — still applicable (surface has grown past what the architecture doc described)
 
 ## Out of scope
 
@@ -169,6 +169,26 @@ Server-side additions:
 | `server/schema.sql` | New tables: `auth_codes`, `user_sessions` (plus indexes). |
 
 Entry-point change in `src/main.ts`: after `engine.initBackend()`, a `HomeView` is constructed and shown. Its `onNewGame` / `onLoadGame` callbacks delegate to `engine.sessions.handleNewGame` / `engine.sessions.loadGame`; `onEnterGame` just hides the overlay (no loop teardown). `GameEngine.fullFrame()` was promoted from `private` to `public`, and a thin `refreshToolbarAndFrame()` helper was added so home-view callbacks can resync the toolbar after a load.
+
+### UI panel decompression + TurnController `commit()` dispatcher (2026-09-27)
+
+A five-step refactor shrank the largest UI modules by extracting their inner responsibilities into small shared modules (all unit-testable without a DOM where the logic is pure). `homeView` still owns its own modals — the extracted shared ones are used by `Toolbar`.
+
+| Module | Purpose |
+|---|---|
+| `src/screens/shared/newGameModal.ts` | `openNewGameModal` + `NewGameHandler`; the New Game modal extracted from `toolbar.ts` (with its `randomSuffix`/`defaultName` helpers). Toolbar keeps the button, not the modal. |
+| `src/screens/shared/loadGameModal.ts` | `openLoadGameModal` + `LoadGameHandler`; the Load Game modal extracted from `toolbar.ts` (with `makeLoadRow`/`readUserGamesFrom*`/`closeAllModals`/`sortByLastSeen`/`formatTime`). |
+| `src/screens/shared/dockedPanel.ts` | `DockedPanel`: shared `userMoved`/reposition/anchor policy used by `HeroInfoMenu` + `SettlementInfoMenu`. |
+| `src/screens/shared/panelWidgets.ts` | Shared `makeRow(label, { opacity? })` label/value row widget. |
+| `src/screens/adventure/dragTracker.ts` | `DragTracker`: one parameterized drag-state machine replacing three copy-pasted mousedown/mousemove/mouseup trios in `adventureView.ts`; `consumeMoved`/`reset` semantics. |
+| `src/screens/adventure/clickIntent.ts` | Pure `resolveAdventureClick` → discriminated `ClickIntent` union: the move/attack pathfinding + `computeReachableSplit` + clamping decision logic from `AdventureView.onClick`, unit-tested in `test/screens/adventure/clickIntent.test.ts`. |
+| `src/screens/adventure/charterModal.ts` | `openCharterModal`; charter naming + DOM moved out of `AdventureView`. |
+| `src/screens/heroes/armySection.ts` | `ArmySection`: collapsed tile grid + expanded row list + HTML5 drag reorder, extracted from `HeroInfoMenu`; replaces positional child-index DOM access with stored refs. |
+| `src/screens/settlements/cityView/netCost.ts` | `netDelta(net, charged)` pure helper (net building cost after charges), unit-tested in `test/screens/settlements/netDelta.test.ts`. |
+
+Shrinkage on the donor side: `toolbar.ts` is chrome-only now; `adventureView.ts` is input wiring only (click decisions live in `clickIntent.ts`); `heroInfoMenu.ts`'s constructor DOM moved into a `buildHeroPanelDom` factory; `settlementInfoMenu.ts` adopts `DockedPanel` + the shared `makeRow`; `cityView.ts`/`buildingPlacer.ts` do their screen→grid math via `core/cityGrid`'s new `cityLayout`/`screenToGridCell` pair (`BUILDING_PAD_RATIO = 0.18` moved there too — the three duplicated copies of that math, constant included, are gone; `computeCityScale` is no longer consumed through `cityRenderer`'s re-export).
+
+Two behavior-adjacent notes: `state/turnController.ts` gained a private `commit()` helper that collapses the reducer→assign→logEvent→`bus.emit`→`trackCommand` template across 15 command methods (`requestMove`/`startCharter`/`advanceAutoTravel` and the turn lifecycle stay explicit); and `HeroInfoMenu` now displays the hero's wagon cargo — a cargo/stockpile section reading `HeroState` wagon contents + per-resource caps through `heroCargo`/`heroWagons`/`heroResourceCap`/`heroGoldCap` from `@heroes/engine` (this changed the panel's measured height, hence the visual-baseline regeneration). New unit tests: `test/state/turnController.test.ts`, `test/screens/adventure/clickIntent.test.ts`, `test/screens/settlements/netDelta.test.ts`.
 
 ## See also
 

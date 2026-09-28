@@ -79,14 +79,14 @@ test("settlementRepo.upsertMany round-trips buildings", async () => {
     const settlement = makeSettlement("s0", 0, 3, 4, {
       buildings: [
         { gx: 1, gy: 2, kind: "house", level: 1, style: "classic" },
-        { gx: 3, gy: 4, kind: "market", level: 2, style: "blocky", w: 2, h: 2 },
+        { gx: 3, gy: 4, kind: "market", level: 2, style: "blocky", w: 2, h: 2, construction: { daysRemaining: 3 } },
       ],
     });
 
     await repo.upsertMany(name, { s0: settlement });
     const [loaded] = await repo.loadAllForGame(name);
 
-    assert.deepEqual(loaded.buildings, settlement.buildings);
+    assert.deepEqual(loaded.buildings, settlement.buildings, "construction state must round-trip; finished buildings must not gain a key");
   });
 });
 

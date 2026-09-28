@@ -46,7 +46,73 @@ export const DEFAULT_OBSTACLE_COUNT = 8;
 export const DEFAULT_MAX_ROUNDS = 30;
 
 // UnitType has no numeric range stat yet, so the manual battle arena
-// (shared/combat/manualBattle.ts) applies this one flat range to any platoon
+// (combat/manualBattle.ts) applies this one flat range to any platoon
 // whose entries are all advantageType "ranged" — melee/cavalry/monster
 // platoons always need hex-adjacency instead.
 export const RANGED_ATTACK_RANGE = 6;
+
+// ── Morale & fatigue (docs/morale-fatigue-plan.md) ──────────────────────────
+// Per-platoon battle stats, both clamped to 0-100: fatigue starts at 0 and
+// accrues per action, morale starts at 100 and moves on casualties, kills
+// and adjacent ally deaths. First-pass values — a platoon that swings every
+// round gains roughly +10 fatigue net of turn-start decay (twice that when
+// counterattacked, since each swing counts), so it lands mid-battle visibly
+// degraded but nowhere near the 0.65 floor, and an uneven fight breaks
+// morale in ~5 heavy hits without an even fight ever getting there. Owner
+// tuning pass can retune freely; nothing inlines these numbers.
+
+// Accrual per applied action. Both engines accrue attacks inside
+// resolveAttack (so counterattacks count); moves accrue in the manual
+// battle's movePlatoon — the auto-resolver never moves.
+export const FATIGUE_PER_MOVE = 6;
+export const FATIGUE_PER_ATTACK = 15;
+// Recovered at the start of each platoon's own turn.
+export const FATIGUE_DECAY_PER_TURN = 5;
+// Attack AND defense scaling: multiplier falls linearly from 1 (fresh) to
+// 1 - FATIGUE_MAX_PENALTY at fatigue 100.
+export const FATIGUE_MAX_PENALTY = 0.35;
+
+// Morale deltas. Casualties: per unit the platoon itself lost. Adjacent
+// death: same-side platoons standing next to a destroyed ally. Kill: the
+// platoon that destroyed an enemy platoon.
+export const MORALE_LOSS_PER_CASUALTY = 2;
+export const MORALE_LOSS_PER_ADJACENT_DEATH = 10;
+export const MORALE_GAIN_PER_KILL = 10;
+// Attack-only scaling (defense is discipline, not spirit): multiplier falls
+// linearly from 1 (morale 100) to 1 - MORALE_MAX_ATTACK_PENALTY at 0.
+export const MORALE_MAX_ATTACK_PENALTY = 0.3;
+// Below this morale the "auto" retreat policy's self-retreat HP threshold is
+// raised by MORALE_RETREAT_THRESHOLD_REDUCTION (clamped at 1): a demoralized
+// platoon is pulled off the field EARLIER — low morale makes troops rout
+// before they are ground down (owner decision 2026-09-27, overriding the
+// plan's literal "lowers the threshold" wording).
+export const MORALE_LOW_THRESHOLD = 30;
+export const MORALE_RETREAT_THRESHOLD_REDUCTION = 0.15;
+
+// ── Spellcasting v1 (docs/spellcasting-plan.md) ─────────────────────────────
+// Owner-locked formulas (2026-09-27): Intelligence sizes the mana pool,
+// Arcane sizes spell power, mana is the only cast limiter, and mana refills
+// fully on the overworld day tick. Definitions live in combat/spells.ts.
+
+// heroMaxMana = intelligence × MANA_PER_INTELLIGENCE.
+export const MANA_PER_INTELLIGENCE = 10;
+// Damage-spell magnitude = arcane × SPELL_POWER_PER_ARCANE (flat — a spell
+// skips the atk/def ratio and the type multiplier entirely).
+export const SPELL_POWER_PER_ARCANE = 5;
+// Fixed v1 starting stats for heroes that don't carry their own (old saves
+// are backfilled with these at hydrate; leveling/progression is later).
+export const DEFAULT_HERO_INTELLIGENCE = 2;
+export const DEFAULT_HERO_ARCANE = 2;
+// Mana cost of one cast — shared by both v1 spells (one tuning knob per the
+// roadmap's "mana cost vs. pool size" limiter). With the default Int 2 pool
+// of 20, a hero gets two casts per full bar.
+export const SPELL_MANA_COST = 10;
+// Bless: timed attack multiplier applied to one friendly platoon via
+// Combatant.activeEffects, expiring (inclusive) at expiresRound.
+export const SPELL_BUFF_MULTIPLIER = 1.5;
+export const SPELL_BUFF_DURATION_ROUNDS = 3;
+// Flat v1 hero combat stats for the hero info panel — HeroState carries no
+// per-hero attack/defence yet (units do; the hero's own stats are a
+// progression feature), so the panel shows these constants instead.
+export const HERO_BASE_ATTACK = 2;
+export const HERO_BASE_DEFENCE = 2;

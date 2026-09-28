@@ -1,4 +1,4 @@
-import type { Axial } from "@heroes/contracts";
+import type { Axial, SpellId } from "@heroes/contracts";
 import type { Platoon, PlatoonEntry, UnitType } from "../units";
 
 export type BattleSide = "attacker" | "defender";
@@ -27,7 +27,27 @@ export interface Combatant {
   // Refills to true at the start of this platoon's own turn; flips to false
   // the moment it spends a counterattack. See "Counterattacks (resolved)".
   hasCounterCharge: boolean;
+  // Live battle stats, 0-100: morale starts at 100, fatigue at 0. Accrual,
+  // decay and the damage multipliers they feed live in combatConfig.ts and
+  // damage.ts; every change is mirrored into the log as a morale_change
+  // entry so both stats stay re-derivable from the battle log alone.
+  morale: number;
+  fatigue: number;
+  // Timed spell buffs currently on this platoon (spellcasting v1 — the
+  // plan's open question #5): attack multipliers that apply while the
+  // battle's round counter is <= expiresRound. Spellcasting's own
+  // Combatant addition — SideModifiers.damageMultiplier is a per-battle
+  // static and cannot express a per-platoon timed buff. Pruned at round
+  // boundaries by the manual battle engine; applied inside resolveAttack.
+  activeEffects: ActiveSpellEffect[];
   retreated: boolean;
+}
+
+// One timed spell buff on a Combatant (the locked v1 shape from the
+// roadmap): a damage multiplier that stays active through expiresRound.
+export interface ActiveSpellEffect {
+  multiplier: number;
+  expiresRound: number;
 }
 
 export type CombatantOutcome =
@@ -37,10 +57,11 @@ export type CombatantOutcome =
   | "retreated_hero"
   | "survived";
 
-// The result of a single resolveAttack() call — the seam a future ability
-// layer (heal/regen/AoE) can extend with new effect kinds without
-// restructuring the turn loop.
-export interface CombatEffect {
+// A plain weapon-swing effect — the original resolveAttack() output. The
+// seam a future ability layer (heal/regen/AoE) extends with new effect
+// kinds without restructuring the turn loop; spellcasting v1 adds the two
+// spell kinds below.
+export interface DamageEffect {
   kind: "damage";
   side: BattleSide; // the attacking combatant's side
   attackerSlot: number;
@@ -52,10 +73,82 @@ export interface CombatEffect {
   isCounterattack: boolean;
 }
 
+// "Magic Arrow" — flat damage (arcane × SPELL_POWER_PER_ARCANE) applied via
+// applyCasualties(), deliberately skipping the atk/def ratio and the type
+// multiplier: a spell is not a unit-vs-unit matchup.
+export interface SpellDamageEffect {
+  kind: "spell_damage";
+  spell: SpellId;
+  side: BattleSide; // the casting hero's side
+  targetSlot: number;
+  damage: number;
+  casualties: PlatoonEntry[];
+  manaSpent: number;
+}
+
+// "Bless" — a timed attack multiplier attached to one friendly platoon's
+// activeEffects; the log entry records the attached effect so the battle
+// log alone re-derives when the buff was live.
+export interface SpellBuffEffect {
+  kind: "spell_buff";
+  spell: SpellId;
+  side: BattleSide;
+  targetSlot: number;
+  multiplier: number;
+  expiresRound: number;
+  manaSpent: number;
+}
+
+// The result of a single resolveAttack() / castSpell() call — the seam a
+// future ability layer (heal/regen/AoE) can extend with new effect kinds
+// without restructuring the turn loop.
+export type CombatEffect = DamageEffect | SpellDamageEffect | SpellBuffEffect;
+
+// Why a morale_change entry was written: casualties the platoon took, a kill
+// it scored, an adjacent ally being destroyed, or fatigue accrual from a
+// move / attack / own-turn-start recovery.
+export type MoraleFatigueReason =
+  | "casualties"
+  | "kill"
+  | "ally_destroyed"
+  | "move"
+  | "attack"
+  | "turn_start";
+
 export type BattleLogEntry =
   | ({ round: number } & CombatEffect)
   | { round: number; kind: "self_retreat"; side: BattleSide; slotIndex: number; casualties: PlatoonEntry[] }
   | { round: number; kind: "hero_retreat"; side: BattleSide }
+  // Every morale/fatigue mutation, carrying the signed deltas applied this
+  // event plus the resulting (clamped) values — the battle log alone is
+  // enough to replay both stats (roadmap coordination rule 2).
+  | {
+      round: number;
+      kind: "morale_change";
+      side: BattleSide;
+      slotIndex: number;
+      moraleDelta: number;
+      fatigueDelta: number;
+      morale: number;
+      fatigue: number;
+      reason: MoraleFatigueReason;
+    }
+  // Every spell cast, with enough context (spell id, caster side, target
+  // slot, effect magnitude, mana spent) for the battle_actions stream to
+  // audit/re-simulate it (roadmap coordination rule 2). Damage spells also
+  // carry the casualties the flat damage caused.
+  | {
+      round: number;
+      kind: "spell_cast";
+      spell: SpellId;
+      side: BattleSide;
+      targetSlot: number;
+      manaSpent: number;
+      damage?: number;
+      multiplier?: number;
+      expiresRound?: number;
+      casualties: PlatoonEntry[];
+    }
   | { round: number; kind: "stalemate"; detail: string };
 
 export interface CombatantResult {

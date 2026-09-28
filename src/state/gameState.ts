@@ -1,5 +1,7 @@
 import { normalizePlatoons } from "./units";
 import { MOVEMENT_PER_TURN } from "@heroes/contracts";
+import { DEFAULT_HERO_ARCANE, DEFAULT_HERO_INTELLIGENCE } from "@heroes/engine";
+import { DEFAULT_HERO_SPELL, maxManaFor } from "@heroes/engine";
 import type {
   Player,
   HeroState,
@@ -17,6 +19,11 @@ export {
   runAutoTrade,
   transferGold,
   tradeResources,
+  transferResources,
+  assignWagons,
+  buyWagons,
+  createTradeRoute,
+  updateTradeRoute,
 } from "@heroes/engine";
 
 export {
@@ -38,6 +45,7 @@ export {
   TOWN_HALL_COSTS,
   startSettlementUpgrade,
   SETTLEMENT_UPGRADE_COSTS,
+  applyPlaceBuildings,
 } from "@heroes/engine";
 
 export {
@@ -107,6 +115,8 @@ export function isHuman(p: Player): boolean {
   return p.faction === "player";
 }
 
+const MANA_POOL_V1 = maxManaFor(DEFAULT_HERO_INTELLIGENCE);
+
 function defaultPlayers(): Player[] {
   return [
     { id: 0, faction: "player", name: "Human", color: "#d62828", heroIds: ["h0"], settlementIds: ["s0"] },
@@ -116,8 +126,8 @@ function defaultPlayers(): Player[] {
 
 function defaultHeroes(): Record<HeroId, HeroState> {
   return {
-    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 300, troops: 1, stacks: normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 12 }] }, { entries: [{ unitTypeId: "archer", count: 8 }] }, { entries: [{ unitTypeId: "cavalry", count: 4 }] }]), isChartering: false, charterId: null, horseVariant: "bubbly" },
-    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 300, troops: 1, stacks: normalizePlatoons([{ entries: [{ unitTypeId: "crossbowman", count: 10 }] }, { entries: [{ unitTypeId: "griffin", count: 3 }] }]), isChartering: false, charterId: null, horseVariant: "shadow" },
+    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 300, troops: 1, stacks: normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 12 }] }, { entries: [{ unitTypeId: "archer", count: 8 }] }, { entries: [{ unitTypeId: "cavalry", count: 4 }] }]), isChartering: false, charterId: null, horseVariant: "bubbly", arcane: DEFAULT_HERO_ARCANE, intelligence: DEFAULT_HERO_INTELLIGENCE, heroMana: MANA_POOL_V1, heroMaxMana: MANA_POOL_V1, heroSpell: DEFAULT_HERO_SPELL },
+    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 300, troops: 1, stacks: normalizePlatoons([{ entries: [{ unitTypeId: "crossbowman", count: 10 }] }, { entries: [{ unitTypeId: "griffin", count: 3 }] }]), isChartering: false, charterId: null, horseVariant: "shadow", arcane: DEFAULT_HERO_ARCANE, intelligence: DEFAULT_HERO_INTELLIGENCE, heroMana: MANA_POOL_V1, heroMaxMana: MANA_POOL_V1, heroSpell: DEFAULT_HERO_SPELL },
   };
 }
 
@@ -198,6 +208,8 @@ export function createInitialState(opts?: InitialStateOptions): GameState {
     activeCharters: [],
     nextCharterId: 0,
     nextSettlementId: settlementCount,
+    tradeRoutes: [],
+    nextTradeRouteId: 0,
   };
 }
 

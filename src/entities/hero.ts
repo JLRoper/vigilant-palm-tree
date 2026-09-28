@@ -1,8 +1,10 @@
 import { Axial, axialToPixel } from "../core/hex";
-import type { Faction as StateFaction, HeroId, HeroState, PlayerId } from "@heroes/contracts";
+import type { Faction as StateFaction, HeroId, HeroState, PlayerId, SpellId } from "@heroes/contracts";
 import { normalizePlatoons, type Platoon } from "../state/units";
 import { settings } from "../state/settings";
 import type { HorseVariant } from "../state/settings";
+import { DEFAULT_HERO_ARCANE, DEFAULT_HERO_INTELLIGENCE } from "@heroes/engine";
+import { DEFAULT_HERO_SPELL, maxManaFor } from "@heroes/engine";
 
 export type Faction = "player" | "enemy";
 
@@ -69,6 +71,13 @@ export class Hero {
   isChartering = false;
   charterId: string | null = null;
   horseVariant: HorseVariant;
+  // Spellcasting v1 stat block (docs/spellcasting-plan.md) — defaults match
+  // the engine's v1 starting values and are overwritten by syncFromState.
+  arcane = DEFAULT_HERO_ARCANE;
+  intelligence = DEFAULT_HERO_INTELLIGENCE;
+  heroMana = maxManaFor(DEFAULT_HERO_INTELLIGENCE);
+  heroMaxMana = maxManaFor(DEFAULT_HERO_INTELLIGENCE);
+  heroSpell: SpellId | null = DEFAULT_HERO_SPELL;
 
   constructor(
     id: string,
@@ -177,6 +186,13 @@ export class Hero {
     this.isChartering = s.isChartering ?? false;
     this.charterId = s.charterId ?? null;
     this.horseVariant = s.horseVariant;
+    // Spellcasting v1 — `??` keeps stat-less sources (test fixtures, stale
+    // mirrors) on the v1 defaults instead of blanking the panel.
+    this.arcane = s.arcane ?? DEFAULT_HERO_ARCANE;
+    this.intelligence = s.intelligence ?? DEFAULT_HERO_INTELLIGENCE;
+    this.heroMaxMana = s.heroMaxMana ?? maxManaFor(this.intelligence);
+    this.heroMana = s.heroMana ?? this.heroMaxMana;
+    this.heroSpell = s.heroSpell ?? null;
     if (this.moving) return;
     if (this.tile.q === s.q && this.tile.r === s.r) return;
     const start: Axial = { ...this.tile };
@@ -203,6 +219,11 @@ export class Hero {
       isChartering: this.isChartering,
       charterId: this.charterId,
       horseVariant: this.horseVariant,
+      arcane: this.arcane,
+      intelligence: this.intelligence,
+      heroMana: this.heroMana,
+      heroMaxMana: this.heroMaxMana,
+      heroSpell: this.heroSpell,
     };
   }
 

@@ -9,6 +9,7 @@ import type {
   WarehouseResource,
 } from "@heroes/contracts";
 import { buildingUpkeepRequired, clampWarehouseNonNegative, foodRequired } from "./consumption";
+import { settlementResourceCap, warehouseHeadroom } from "../settlement/capacity";
 
 // computeDeficit below only ever returns non-zero for these three -- iron/
 // arcane have no consumption/upkeep concept, so they can never be in
@@ -42,14 +43,21 @@ export function tradeResources(
   if (from.gold < amount) {
     return { state, ok: false, reason: "insufficient_gold" };
   }
-  const newFromWarehouse: Warehouse = { ...from.warehouse, [resource]: from.warehouse[resource] - amount };
-  const newToWarehouse: Warehouse = { ...to.warehouse, [resource]: to.warehouse[resource] + amount };
+  // Destination stockpile caps gate receipts (soft caps): the transfer is
+  // truncated to headroom rather than rejected, matching production clamps.
+  const destCap = settlementResourceCap(to)[resource];
+  const deliverable = Math.min(amount, warehouseHeadroom(to.warehouse[resource] ?? 0, destCap));
+  if (deliverable <= 0) {
+    return { state, ok: false, reason: "destination_full" };
+  }
+  const newFromWarehouse: Warehouse = { ...from.warehouse, [resource]: from.warehouse[resource] - deliverable };
+  const newToWarehouse: Warehouse = { ...to.warehouse, [resource]: to.warehouse[resource] + deliverable };
   return {
     state: {
       ...state,
       settlements: {
         ...state.settlements,
-        [fromSettlementId]: { ...from, gold: from.gold - amount, warehouse: newFromWarehouse },
+        [fromSettlementId]: { ...from, gold: from.gold - deliverable, warehouse: newFromWarehouse },
         [toSettlementId]: { ...to, warehouse: newToWarehouse },
       },
       dirty: true,
@@ -76,10 +84,15 @@ export function runAutoTrade(
         (other) => other.id !== s.id && other.ownerId === playerId && (other.warehouse[r] ?? 0) > 0 && (other.gold ?? 0) > 0,
       );
       let remaining = deficit;
+      const destCap = settlementResourceCap(updatedS)[r];
       for (const src of sources) {
         if (remaining <= 0) break;
         const sourceUpd: SettlementState = { ...next[src.id] };
-        const transferable = Math.max(0, Math.min(sourceUpd.warehouse[r] ?? 0, sourceUpd.gold ?? 0, remaining));
+        const headroom = warehouseHeadroom(updatedS.warehouse[r] ?? 0, destCap);
+        const transferable = Math.max(
+          0,
+          Math.min(sourceUpd.warehouse[r] ?? 0, sourceUpd.gold ?? 0, remaining, headroom),
+        );
         if (transferable <= 0) continue;
         sourceUpd.warehouse = { ...sourceUpd.warehouse, [r]: clampWarehouseNonNegative((sourceUpd.warehouse[r] ?? 0) - transferable) };
         sourceUpd.gold = sourceUpd.gold - transferable;

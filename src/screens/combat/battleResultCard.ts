@@ -1,8 +1,9 @@
 // Reusable end-of-battle summary card: winner banner + per-platoon casualties
-// for both sides. Used today only by the Test Battle sandbox (manualBattleArena.ts),
-// but shaped generically (BattleResult + a single onCarryOn callback) so a
-// future production flow can reuse it with an additional "Manual Fight" retry
-// button without reshaping this component.
+// for both sides. Used by BOTH battle paths since the manual arena was wired
+// to the adventure map (plan/2026-09-27-manual-battle-wiring.md): the
+// auto-resolve and SubmitBattleResult flows show it with real hero labels,
+// and the Test Battle sandbox shows it with the generic You / AI Opponent
+// ones. Shaped generically (BattleResult + a single onCarryOn callback).
 
 import type { BattleResult, CombatantResult } from "@heroes/engine";
 import { getCachedUnit } from "../../data/unitCatalog";

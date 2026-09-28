@@ -1,6 +1,5 @@
-import { TILE_W, TILE_D, cellOrigin } from "../../../core/cityGrid";
+import { cityLayout, screenToGridCell } from "../../../core/cityGrid";
 import type { CityViewSize } from "@heroes/engine";
-import { computeCityScale } from "../../../render/cityRenderer";
 import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
 import { coversCell as reCoversCell } from "../../../render/cityBuildingDraw";
 import { PopupMenu, styleButton, menuTheme } from "@screens/shared/menu";
@@ -19,9 +18,10 @@ import resourceIronPileSmol from "../../../resources/resource-iron-pile-smol.png
 import resourceArcanePileSmol from "../../../resources/resource-arcane-pile-smol.png?url";
 
 const BUILDABLE_KINDS: BuildingKind[] = [
-  "townHall", "house", "tower", "archeryRange", "barracks", "smithy",
-  "market", "mine", "mageGuild", "apartment", "farmField", "farmhouse",
-  "granary",
+  "townHall", "house",
+  "goldMine", "woodcutterHut", "stoneMine", "ironMine", "arcaneFont",
+  "tower", "archeryRange", "barracks", "smithy", "market", "mageGuild",
+  "apartment", "farmField", "farmhouse", "granary", "warehouse", "bank",
 ];
 
 type PaletteMode = "build" | "destroy";
@@ -77,12 +77,15 @@ export class BuildingPlacer {
   private onConfirm: (() => void) | null = null;
   private originalBuildings: BuildingDef[] = [];
   private affordability: Affordability | null = null;
+  /** Net cost already committed server-side since the view opened; canAfford gates only the uncommitted remainder. */
+  private committedNet: Partial<Record<ResourceType, number>> = {};
 
   init(size: CityViewSize, center: { gx: number; gy: number }, initialBuildings: BuildingDef[], style: string): void {
     this.size = size;
     this.center = center;
     this.buildings = [...initialBuildings];
     this.originalBuildings = [...initialBuildings];
+    this.committedNet = {};
     this.style = style;
     this.active = null;
     this.hoverCell = null;
@@ -90,7 +93,7 @@ export class BuildingPlacer {
     this.selectedKind = null;
   }
 
-  setAffordability(aff: Affordability): void {
+  setAffordability(aff: Affordability | null): void {
     this.affordability = aff;
   }
 
@@ -111,6 +114,10 @@ export class BuildingPlacer {
 
   confirmPlacement(): boolean {
     if (!this.active || !this.hoverCell || !this.valid) return false;
+    // A placement that would push the cart past affordability is rejected
+    // outright -- the server applies the same check and a rejected command
+    // would leave a building on screen that was never paid for.
+    if (!this.canAfford()) return false;
     const style = pickStyleForBuilding(this.active, 1, this.style);
     const b: BuildingDef = {
       gx: this.hoverCell.gx,
@@ -120,6 +127,7 @@ export class BuildingPlacer {
       style: style as BuildingDef["style"],
       w: this.w,
       h: this.h,
+      construction: { daysRemaining: buildingBuildDays(this.active) },
     };
     this.buildings.push(b);
     this.onPlaced?.();
@@ -174,17 +182,23 @@ export class BuildingPlacer {
   canAfford(): boolean {
     if (!this.affordability) return true;
     const net = this.computeNetCost();
-    const goldCost = net.gold ?? 0;
+    const committed = this.committedNet;
+    const goldCost = Math.max(0, (net.gold ?? 0) - (committed.gold ?? 0));
     if (goldCost > this.affordability.gold) return false;
-    const woodCost = net.wood ?? 0;
+    const woodCost = Math.max(0, (net.wood ?? 0) - (committed.wood ?? 0));
     if (woodCost > this.affordability.warehouse.wood) return false;
-    const stoneCost = net.stone ?? 0;
+    const stoneCost = Math.max(0, (net.stone ?? 0) - (committed.stone ?? 0));
     if (stoneCost > this.affordability.warehouse.stone) return false;
-    const ironCost = net.iron ?? 0;
+    const ironCost = Math.max(0, (net.iron ?? 0) - (committed.iron ?? 0));
     if (ironCost > this.affordability.warehouse.iron) return false;
-    const arcaneCost = net.arcane ?? 0;
+    const arcaneCost = Math.max(0, (net.arcane ?? 0) - (committed.arcane ?? 0));
     if (arcaneCost > this.affordability.warehouse.arcane) return false;
     return true;
+  }
+
+  /** Called after a successful incremental PlaceBuildings commit: the baseline advances, so already-paid buildings stop counting toward affordability. */
+  markSynced(): void {
+    this.committedNet = { ...this.computeNetCost() };
   }
 
   canAffordSingle(kind: BuildingKind): boolean {
@@ -487,29 +501,17 @@ export class BuildingPlacer {
       return;
     }
 
-    const tileScale = computeCityScale(this.size, viewportW, viewportH);
-    const tw = TILE_W * tileScale;
-    const td = TILE_D * tileScale;
-    const origin = cellOrigin(this.size);
-    const gridVCenter = (this.size - 1) * TILE_D / 2;
-    const buildingPad = this.size * TILE_D * 0.18;
-    const screenOriginY = viewportH / 2 - (gridVCenter + buildingPad) * tileScale;
+    const layout = cityLayout(this.size, viewportW, viewportH);
+    const cell = screenToGridCell(layout, this.size, viewportW, canvasX, canvasY);
 
-    const wdx = canvasX - viewportW / 2 - origin.x * tileScale;
-    const wdy = canvasY - screenOriginY - origin.y * tileScale;
-    const gxf = wdx / tw + wdy / td;
-    const gyf = wdy / td - wdx / tw;
-    const gx = Math.floor(gxf);
-    const gy = Math.floor(gyf);
-
-    if (gx < 0 || gx >= this.size || gy < 0 || gy >= this.size) {
+    if (!cell) {
       this.hoverCell = null;
       this.valid = false;
       return;
     }
 
-    this.hoverCell = { gx, gy };
-    this.valid = this.canPlaceAt(gx, gy);
+    this.hoverCell = cell;
+    this.valid = this.canPlaceAt(cell.gx, cell.gy);
   }
 
   canPlaceAt(gx: number, gy: number): boolean {

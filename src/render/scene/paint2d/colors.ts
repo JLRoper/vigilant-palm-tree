@@ -47,6 +47,10 @@ export const BATTLE_HEX_IN_RANGE = "rgba(210,210,215,0.35)";
 export const BATTLE_HEX_STROKE = "rgba(255,255,255,0.08)";
 export const BATTLE_HEX_AVAILABLE_STROKE = "rgba(255,214,102,0.9)";
 export const BATTLE_ATTACK_TARGET_STROKE = "#e05050";
+// Cast-mode spell targets — the violet third ring (byte-exact with
+// drawLegacy()'s castTargets loop in openManualBattleArena.ts).
+export const BATTLE_SPELL_TARGET_STROKE = "#b27ae8";
+export const BATTLE_SPELL_TARGET_FILL = "rgba(178, 122, 232, 0.16)";
 export const BATTLE_AI_TELEGRAPH_FILL = "rgba(224,80,80,0.22)";
 export const BATTLE_AI_TELEGRAPH_STROKE = "rgba(255,120,120,0.95)";
 export const BATTLE_MOVE_PATH = "rgba(255,255,255,0.28)";

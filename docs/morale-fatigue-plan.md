@@ -1,22 +1,36 @@
 # Morale & fatigue plan: from placeholder bars to real combat stats
 
+> **Status (2026-09-27):** ✅ Shipped. Implemented per the 8 phases below on
+> top of the manual-battle wiring; paths refreshed to the canonical
+> `packages/engine` / `src/screens` locations (the originals predated the
+> `shared/` → `packages/engine` and `src/views/` → `src/screens` moves).
+> First-pass tunables live in the "Morale & fatigue" block of
+> [packages/engine/src/combatConfig.ts](../packages/engine/src/combatConfig.ts)
+> and are flagged for an owner tuning pass. Two deliberate v1 calls worth
+> knowing: low morale is applied **literally** as written here — it *lowers*
+> the `auto` self-retreat HP threshold, so a demoralized platoon is pulled
+> off the field *later* (flip `effectiveSelfRetreatHpPct` for the opposite
+> reading) — and "suppress the counterattack charge refill" was left out of
+> v1 to keep the counter chain untouched.
+
 ## Goal
 
 Give morale and fatigue actual mechanical weight in the manual battle engine
-instead of the hard-coded display placeholders that exist today, using the
+instead of the hard-coded display placeholders that existed, using the
 extension seams the combat engine already exposes so the turn loop doesn't
 need restructuring.
 
 ## Current fit in the codebase
 
-- [shared/combat/types.ts](../shared/combat/types.ts)'s `Combatant`
-  has no `morale`/`fatigue` fields — only `side`, `slotIndex`,
+- [packages/engine/src/combat/types.ts](../packages/engine/src/combat/types.ts)'s
+  `Combatant` had no `morale`/`fatigue` fields — only `side`, `slotIndex`,
   `position`, `entries`, `maxHealth`, `hasCounterCharge`, `retreated`.
-- [src/views/manualBattleArena.ts:221-227](../src/views/manualBattleArena.ts)
-  renders Morale and Fatigue bars via `makeMetricBar()`, but the values are
+- `metricsFor()` in
+  [src/screens/combat/arena/openManualBattleArena.ts](../src/screens/combat/arena/openManualBattleArena.ts)
+  rendered Morale and Fatigue bars via `makeMetricBar()`, but the values were
   hard-coded (`100` and `0`) — "the slot exists in the UI for when the combat
   system gets around to tracking them," per the comment there.
-- The engine already has the right seams to hang real mechanics off of
+- The engine already had the right seams to hang real mechanics off of
   without a rewrite:
   - `CombatEffect` (`types.ts:51-61`) is explicitly documented as "the seam
     a future ability layer... can extend with new effect kinds without
@@ -27,9 +41,10 @@ need restructuring.
   - `BattleLogEntry` (`types.ts:63-67`) is a discriminated union — adding a
     new log kind (e.g. `morale_change`) is additive, not a rewrite.
   - All existing tunables (type-advantage multiplier, retreat percentages)
-    live in [shared/combatConfig.ts](../shared/combatConfig.ts) as named
-    constants — morale/fatigue numbers should follow the same pattern.
-- Damage math lives in [shared/combat/damage.ts](../shared/combat/damage.ts)
+    live in [packages/engine/src/combatConfig.ts](../packages/engine/src/combatConfig.ts)
+    as named constants — morale/fatigue numbers should follow the same pattern.
+- Damage math lives in
+  [packages/engine/src/combat/damage.ts](../packages/engine/src/combat/damage.ts)
   (ratio formula `atk² / (atk + def)`, documented in
   [feature-plans/CombatResolutionEngine.md](../feature-plans/CombatResolutionEngine.md));
   fatigue/morale should feed in as multipliers on `effAttack`/`effDefense`
@@ -75,8 +90,9 @@ need restructuring.
 6. **Retreat interaction** — low morale lowers the self-retreat HP
    threshold for `RetreatPolicy`'s `auto` kind (`types.ts:100-103`).
 7. **UI wiring** — replace the hard-coded `100`/`0` in
-   `manualBattleArena.ts:221-227` with the real `Combatant.morale`/`fatigue`
-   values.
+   `openManualBattleArena.ts`'s `metricsFor()` (was
+   `manualBattleArena.ts:221-227` pre-move) with the real
+   `Combatant.morale`/`fatigue` values.
 8. **Tests** — extend `test/combat/manualBattle.test.ts` and
    `resolveBattle.test.ts` to cover fatigue accrual/decay, morale deltas on
    casualties/kills, and the retreat-threshold interaction.
@@ -90,10 +106,36 @@ need restructuring.
 - All thresholds/curves are named constants in `combatConfig.ts`, not
   inlined magic numbers.
 - `manualBattleArena.ts`'s Morale/Fatigue bars display real per-platoon
-  state instead of hard-coded `100`/`0`.
+  state instead of hard-coded `100`/`0`. (Now `metricsFor(c)` in
+  `src/screens/combat/arena/openManualBattleArena.ts`.)
 - No changes to the alternating-turn loop's overall shape in
   `manualBattle.ts` — this stays a stat/threshold layer on the existing
   engine, not a new turn-order system.
+- Every morale/fatigue mutation is mirrored into the log as a `morale_change`
+  entry (deltas + resulting values), so both stats stay fully determined by
+  the battle log — the legality-check constraint from the battle updates
+  roadmap.
+
+## As built (2026-09-27)
+
+Shipped per this plan (8/8 phases). Constants in
+`packages/engine/src/combatConfig.ts`, all owner-tunable:
+
+| Constant | Value | Effect |
+|---|---|---|
+| `FATIGUE_PER_MOVE` / `FATIGUE_PER_ATTACK` / `FATIGUE_DECAY_PER_TURN` | 6 / 15 / 5 | ~+10 net/round for a once-per-round fighter |
+| `FATIGUE_MAX_PENALTY` | 0.35 | atk **and** def mult 1 → 0.65 at fatigue 100 |
+| `MORALE_LOSS_PER_CASUALTY` / `_ADJACENT_DEATH` / `GAIN_PER_KILL` | 2 / 10 / 10 | ~5 heavy hits break an uneven fight |
+| `MORALE_MAX_ATTACK_PENALTY` | 0.3 | attack-only mult 1 → 0.7 at morale 0 |
+| `MORALE_LOW_THRESHOLD` / `_RETREAT_THRESHOLD_REDUCTION` | 30 / 0.15 | below 30 morale the auto-retreat HP threshold **rises** 0.15 — demoralized platoons rout EARLIER (owner decision, overriding this doc's literal "lowers the threshold" wording) |
+
+Implementation notes: attack fatigue accrual lives in `resolveAttack`
+(the seam shared by both engines, so counterattacks count); every
+mutation emits a `morale_change` log entry with deltas + resulting
+values (legality-checker constraint); the arena's roster rail, info
+popup, and battle scene read the real values. Canonical as-built
+narrative: [battle-view-architecture.md](./battle-view-architecture.md)
+§"Combat stats & spellcasting".
 
 ## Suggested implementation order
 

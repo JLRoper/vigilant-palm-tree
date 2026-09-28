@@ -77,6 +77,8 @@ interface FakeServer {
   game: ReturnType<typeof makeGameRow>;
   events: EventRow[];
   calls: string[];
+  // Drop policy (2026-09-27): what the telemetry POST responds with.
+  telemetryPresence?: Record<string, { lastSeenAt: string; connected: boolean }> | null;
 }
 
 function installFetch(server: FakeServer): void {
@@ -93,7 +95,7 @@ function installFetch(server: FakeServer): void {
       return body(server.events.filter((e) => Number(e.id) > after));
     }
     if (path.endsWith("/telemetry")) {
-      return body(init?.method === "POST" ? {} : { nodes: [], links: [], updatedAt: 0 });
+      return body(init?.method === "POST" ? { presence: server.telemetryPresence ?? null } : { nodes: [], links: [], updatedAt: 0 });
     }
     return body(server.game);
   };
@@ -314,5 +316,90 @@ test("a failed delta poll leaves the cursor where it was instead of rewinding", 
   await sync.pollOnce();
 
   assert.equal(sync.getCursor(), 3);
+  sync.stop();
+});
+
+// Drop policy (2026-09-27): the per-poll telemetry POST response carries the
+// server's seat-presence view, and a full resync carries it on the row's
+// lobby.presence -- both land on the bus as mp:presenceUpdated.
+
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+// Note: start() fires its own first poll immediately, and the tests below
+// call pollOnce() by hand right after -- two cycles can overlap, and each
+// cycle carries presence (that's the design: one read per poll). So these
+// tests assert "every cycle carried the same presence, at least one landed"
+// rather than an exact count; the exact-count semantics are the server
+// dropPolicy tests' job.
+
+test("seat presence from the telemetry response is emitted as mp:presenceUpdated", async () => {
+  const server: FakeServer = { game: makeGameRow("g10", { lastEventId: 2 }), events: [], calls: [] };
+  server.telemetryPresence = {
+    "1": { lastSeenAt: "2026-09-27T07:00:00.000Z", connected: false },
+  };
+  installFetch(server);
+  setInMemoryLocalPlayerId("g10", 0);
+  const sync = new MultiplayerSync();
+
+  const events: Array<{ presence: Record<string, { connected: boolean }> }> = [];
+  bus.on("mp:presenceUpdated", (ev: { presence: Record<string, { connected: boolean }> }) =>
+    events.push(ev),
+  );
+  sync.start("g10");
+  await sync.pollOnce();
+  await tick(); // the telemetry chain is fire-and-forget; let it land
+
+  assert.ok(events.length >= 1, "at least one presence event per poll cycle");
+  for (const ev of events) {
+    assert.deepEqual(
+      ev.presence,
+      server.telemetryPresence,
+      "every cycle carries the server's view verbatim",
+    );
+  }
+  sync.stop();
+});
+
+test("no presence in the telemetry response means no mp:presenceUpdated", async () => {
+  const server: FakeServer = { game: makeGameRow("g11", { lastEventId: 2 }), events: [], calls: [] };
+  installFetch(server);
+  setInMemoryLocalPlayerId("g11", 0);
+  const sync = new MultiplayerSync();
+
+  const events: unknown[] = [];
+  bus.on("mp:presenceUpdated", (ev: unknown) => events.push(ev));
+  sync.start("g11");
+  await sync.pollOnce();
+  await tick();
+
+  assert.deepEqual(events, [], "an old API process (or a 204) emits nothing");
+  sync.stop();
+});
+
+test("a resync emits mp:presenceUpdated from the row's lobby presence", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("g12", { lastEventId: 2 }),
+    events: [],
+    calls: [],
+  };
+  server.game.lobby = {
+    claimed: {},
+    presence: { "0": { lastSeenAt: "2026-09-27T07:00:00.000Z", connected: true } },
+  };
+  installFetch(server);
+  setInMemoryLocalPlayerId("g12", 0);
+  const sync = new MultiplayerSync();
+
+  const events: Array<{ presence: Record<string, { connected: boolean }> }> = [];
+  bus.on("mp:presenceUpdated", (ev: { presence: Record<string, { connected: boolean }> }) =>
+    events.push(ev),
+  );
+  sync.start("g12");
+  await sync.pollOnce();
+
+  assert.ok(events.length >= 1, "the resync's row carries presence onto the bus");
+  for (const ev of events) {
+    assert.deepEqual(ev.presence, server.game.lobby.presence);
+  }
   sync.stop();
 });

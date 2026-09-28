@@ -11,6 +11,7 @@ import type {
   Warehouse,
 } from "@heroes/contracts";
 import { MOVEMENT_PER_TURN } from "@heroes/contracts";
+import { withDefaultSpellStats } from "@heroes/engine";
 
 export function emptyWarehouse(overrides: Partial<Warehouse> = {}): Warehouse {
   return { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0, ...overrides };
@@ -31,10 +32,13 @@ export function makeHero(
   q: number,
   r: number,
   opts: Partial<
-    Pick<HeroState, "movementRemaining" | "gold" | "troops" | "isChartering" | "charterId" | "stacks" | "horseVariant">
+    Pick<HeroState, "movementRemaining" | "gold" | "troops" | "isChartering" | "charterId" | "stacks" | "horseVariant" | "arcane" | "intelligence" | "heroMana" | "heroMaxMana" | "heroSpell">
   > = {},
 ): HeroState {
-  return {
+  // withDefaultSpellStats backfills the spellcasting v1 stat block (fixed
+  // v1 starting values) so every fixture matches what the engine's hydrate
+  // and recruit paths produce.
+  return withDefaultSpellStats({
     id,
     name: id,
     ownerId,
@@ -51,7 +55,12 @@ export function makeHero(
     isChartering: opts.isChartering ?? false,
     charterId: opts.charterId ?? null,
     horseVariant: opts.horseVariant ?? "bubbly",
-  };
+    arcane: opts.arcane,
+    intelligence: opts.intelligence,
+    heroMana: opts.heroMana,
+    heroMaxMana: opts.heroMaxMana,
+    heroSpell: opts.heroSpell,
+  });
 }
 
 export function makeSettlement(

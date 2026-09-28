@@ -78,6 +78,13 @@ export class EntityMirror {
       case "CharterStarted":
       case "BuildingUpgradeStarted":
       case "SettlementUpgradeStarted":
+      case "BuildingsPlaced":
+      case "ResourcesTransferred":
+      case "WagonsAssigned":
+      case "WagonsBought":
+      case "TradeRouteCreated":
+      case "TradeRouteUpdated":
+      case "TradeRouteRemoved":
         return false;
       default: {
         const exhaustive: never = event;

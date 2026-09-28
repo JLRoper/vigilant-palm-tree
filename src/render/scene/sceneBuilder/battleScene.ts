@@ -49,6 +49,7 @@ export interface BattleSceneInput {
   selectedSlot: number | null;
   moveRange: Axial[];
   attackTargets: Combatant[];
+  spellTargets: Combatant[];
   aiActing: boolean;
   aiActingSlot: number | null;
   aiTargetHex: Axial | null;
@@ -182,6 +183,17 @@ export function buildBattleScene(input: BattleSceneInput): SceneNode[] {
       // reachable in practice, since aiActing blocks human input while any
       // moveAnim is playing, but faithfully preserved anyway) rings where
       // it *is*, not where it's currently drawn sliding to.
+      world: toWorld(input, t.position.q, t.position.r),
+      radius: input.hexSize * 0.8,
+    });
+  }
+
+  // Cast-mode spell targets: same raw-position rule as attack rings above.
+  for (const t of input.spellTargets) {
+    nodes.push({
+      kind: "battleSpellTargetRing",
+      side: t.side,
+      slotIndex: t.slotIndex,
       world: toWorld(input, t.position.q, t.position.r),
       radius: input.hexSize * 0.8,
     });

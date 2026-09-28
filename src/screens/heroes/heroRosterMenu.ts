@@ -8,6 +8,7 @@ import {
 } from "@screens/shared/panelRail";
 import type { GameState, HeroId } from "../../state/gameState";
 import { MOVEMENT_PER_TURN } from "../../state/gameState";
+import { heroCargo, heroGoldCap, heroResourceCap, heroWagons } from "@heroes/engine";
 import { HERO_BANNERS } from "../../render/assetDescriptors";
 
 export interface HeroRosterMenuOptions {
@@ -103,6 +104,8 @@ export class HeroRosterMenu {
         troops: h.troops, movementRemaining: h.movementRemaining,
         isChartering: h.isChartering, name: h.name,
         horseVariant: h.horseVariant,
+        wagons: h.wagons ?? 5,
+        resources: h.resources,
       })),
       canSelectHero,
       hasLocate,
@@ -179,7 +182,7 @@ export class HeroRosterMenu {
 
     const metaEl = document.createElement("div");
     const remaining = Math.round(Math.max(0, hero.movementRemaining));
-    metaEl.textContent = `(${hero.q}, ${hero.r}) · Move ${remaining}/${MOVEMENT_PER_TURN} · ${hero.gold}g · ${hero.troops} troops`;
+    metaEl.textContent = `(${hero.q}, ${hero.r}) · Move ${remaining}/${MOVEMENT_PER_TURN} · ${hero.gold}/${heroGoldCap(hero)}g · ${hero.troops} troops · 🛒 ${heroWagons(hero)}`;
     Object.assign(metaEl.style, {
       fontSize: "11px",
       opacity: "0.85",
@@ -189,6 +192,22 @@ export class HeroRosterMenu {
       textShadow: "0 1px 3px rgba(0,0,0,0.8)",
     });
     row.appendChild(metaEl);
+
+    // Cargo vs wagon caps (docs/wagons-stockpiles-trade-routes-plan.md §4.2).
+    const cargo = heroCargo(hero);
+    const caps = heroResourceCap(hero);
+    const cargoEl = document.createElement("div");
+    cargoEl.textContent = `Cargo ${cargo.wood}/${caps.wood}w ${cargo.stone}/${caps.stone}s ${cargo.iron}/${caps.iron}i ${cargo.arcane}/${caps.arcane}a ${cargo.food}/${caps.food}f`;
+    Object.assign(cargoEl.style, {
+      fontSize: "10px",
+      opacity: "0.75",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+      textShadow: "0 1px 3px rgba(0,0,0,0.8)",
+      fontVariantNumeric: "tabular-nums",
+    });
+    row.appendChild(cargoEl);
 
     return row;
   }

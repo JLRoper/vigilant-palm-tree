@@ -1,7 +1,9 @@
 import type { GameState, SettlementState } from "../../state/gameState";
 import { MAX_HEROES_PER_PLAYER, HERO_RECRUIT_COST, SETTLEMENT_UPGRADE_COSTS } from "../../state/gameState";
-import { PopupMenu, menuTheme, openCenteredModal, styleButton, anchorMenuToBottom, clampMenuIntoView } from "@screens/shared/menu";
+import { PopupMenu, menuTheme, openCenteredModal, styleButton } from "@screens/shared/menu";
 import { toolbarHeight } from "@screens/shared/panelRail";
+import { DockedPanel } from "@screens/shared/dockedPanel";
+import { makeRow } from "@screens/shared/panelWidgets";
 import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../../render/assetDescriptors";
 import { settings } from "../../state/settings";
 import type { HorseVariant } from "../../state/settings";
@@ -16,25 +18,6 @@ export interface SettlementInfoMenuOptions {
   onUpgradeSettlement?: () => void;
 }
 
-function makeRow(label: string): { row: HTMLDivElement; value: HTMLSpanElement } {
-  const row = document.createElement("div");
-  Object.assign(row.style, {
-    display: "flex",
-    justifyContent: "space-between",
-    width: "100%",
-    opacity: "0.85",
-    fontSize: "12px",
-  });
-  const lbl = document.createElement("span");
-  lbl.textContent = label;
-  row.appendChild(lbl);
-  const value = document.createElement("span");
-  value.textContent = "\u2014";
-  value.style.fontVariantNumeric = "tabular-nums";
-  row.appendChild(value);
-  return { row, value };
-}
-
 const WAREHOUSE_RESOURCE_ORDER = ["wood", "stone", "iron", "arcane", "food"] as const;
 
 const PANEL_X = 16;
@@ -43,9 +26,7 @@ export class SettlementInfoMenu {
   private menu: PopupMenu;
   private visible = false;
   private currentSettlementId: string | null = null;
-  // Once the player drags the panel, their position wins: reposition() then
-  // only clamps it back into view rather than re-anchoring it.
-  private userMoved = false;
+  private docked: DockedPanel;
   private nameEl: HTMLElement;
   private levelBadge: HTMLElement;
   private populationEl: HTMLSpanElement;
@@ -80,7 +61,7 @@ export class SettlementInfoMenu {
       zIndex: 60,
       minTop: toolbarHeight,
       onMove: () => {
-        this.userMoved = true;
+        this.docked.markUserMoved();
       },
       onClose: () => {
         this.visible = false;
@@ -88,6 +69,8 @@ export class SettlementInfoMenu {
         this.onCloseCallback?.();
       },
     });
+
+    this.docked = new DockedPanel(this.menu, PANEL_X);
 
     const body = this.menu.body;
 
@@ -193,6 +176,17 @@ export class SettlementInfoMenu {
       });
       cell.appendChild(img);
 
+      // Label under each pile so the food sprite (golden grain) isn't
+      // mistaken for a gold stockpile — gold lives in the treasury above.
+      const name = document.createElement("span");
+      name.textContent = r.charAt(0).toUpperCase() + r.slice(1);
+      Object.assign(name.style, {
+        fontSize: "9px",
+        opacity: "0.6",
+        lineHeight: "1",
+      });
+      cell.appendChild(name);
+
       const value = document.createElement("span");
       value.textContent = "0";
       Object.assign(value.style, {
@@ -274,10 +268,7 @@ export class SettlementInfoMenu {
   // rather than a constant. Must run *after* `display` is restored: a
   // `display: none` element measures 0x0 and would anchor a zero-height box.
   private reposition(): void {
-    if (!this.visible) return;
-    const minTop = toolbarHeight();
-    if (this.userMoved) clampMenuIntoView(this.menu, minTop);
-    else anchorMenuToBottom(this.menu, PANEL_X, minTop);
+    this.docked.reposition(this.visible);
   }
 
   show(settlement: SettlementState, state: GameState): void {

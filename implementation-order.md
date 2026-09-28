@@ -1,5 +1,17 @@
 # Kingdom Rule — Implementation Order (adjusted for FighterGame overlap)
 
+> **Status (2026-09-27).** This is the *Kingdom Rule* roadmap — a plan, not a
+> record of what exists. It cross-references two sibling projects that live
+> outside this repo (Kingdom Rule's `docs/GDD.md`, and FighterGame as the
+> economy/trade donor). Claims about *this* repo were last verified
+> 2026-09-26: economy and trade **are** implemented here
+> (`packages/engine/src/economy/`, the `TradeResources` command), combat
+> auto-resolution ships as a grid-based platoon resolver behind the
+> `ResolveBattle` command, and the old dedicated `resolve-battle` route is
+> gone (see the banner in
+> [`feature-plans/CombatResolutionEngine.md`](./feature-plans/CombatResolutionEngine.md)).
+> Treat every phase below as aspirational until it lands in code.
+
 Cross-referenced against FighterGame's actual implemented features (economy/
 resources, collector-style mines, settlement capture, turn/round loop, and
 trade are already ✅ there). **Phase 1 (Economy Foundation)** and **Phase 8

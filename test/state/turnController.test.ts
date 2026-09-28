@@ -338,7 +338,7 @@ test("pendingCommands empties after a tracked command settles, so the Set can't 
   );
 });
 
-test("coverage guard: every this.hooks.on*( call inside a TurnController mutation method is wrapped in trackCommand( (issue #151 §5)", async () => {
+test("coverage guard: every this.hooks.on*( call inside a TurnController mutation method is tracked via trackCommand( or the commit() dispatcher (issue #151 §5)", async () => {
   const { readFileSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
   const source = readFileSync(fileURLToPath(new URL("../../src/state/turnController.ts", import.meta.url)), "utf8");
@@ -356,6 +356,12 @@ test("coverage guard: every this.hooks.on*( call inside a TurnController mutatio
     "startBuildingUpgrade",
     "startSettlementUpgrade",
     "advanceAutoTravel",
+    "placeBuildings",
+    "transferResources",
+    "assignWagons",
+    "buyWagons",
+    "createTradeRoute",
+    "updateTradeRoute",
   ]);
 
   const lines = source.split("\n");
@@ -387,7 +393,7 @@ test("coverage guard: every this.hooks.on*( call inside a TurnController mutatio
   }
 
   const hookCallRe = /\bthis\.hooks\.on[A-Z][A-Za-z]*\s*\(/g;
-  const trackOpenRe = /\btrackCommand\s*\(/g;
+  const trackOpenRe = /\b(?:trackCommand|commit)\s*\(/g;
   const missing: string[] = [];
   for (const span of spans) {
     const block = lines.slice(span.start, span.end + 1).join("\n");
@@ -430,6 +436,40 @@ test("coverage guard: every this.hooks.on*( call inside a TurnController mutatio
   assert.deepEqual(
     missing,
     [],
-    "every this.hooks.on*( inside a TurnController mutation method must be wrapped in trackCommand(",
+    "every this.hooks.on*( inside a TurnController mutation method must be tracked (inside trackCommand( or the commit() dispatcher)",
+  );
+
+  const commitIdx = source.indexOf("private commit(");
+  assert.notEqual(commitIdx, -1, "the commit() dispatcher must exist");
+  let parenDepth = 0;
+  let bodyStart = -1;
+  for (let i = source.indexOf("(", commitIdx); i < source.length; i += 1) {
+    const ch = source[i]!;
+    if (ch === "(") parenDepth += 1;
+    else if (ch === ")") parenDepth -= 1;
+    else if (ch === "{" && parenDepth === 0) {
+      bodyStart = i;
+      break;
+    }
+  }
+  assert.notEqual(bodyStart, -1, "commit() body brace not found");
+  let cDepth = 0;
+  let commitEnd = source.length;
+  for (let i = bodyStart; i < source.length; i += 1) {
+    const ch = source[i]!;
+    if (ch === "{") cDepth += 1;
+    else if (ch === "}") {
+      cDepth -= 1;
+      if (cDepth === 0) {
+        commitEnd = i + 1;
+        break;
+      }
+    }
+  }
+  const commitBody = source.slice(commitIdx, commitEnd);
+  assert.match(
+    commitBody,
+    /this\.trackCommand\(\s*opts\.hook\(\)/,
+    "commit() must create-and-track its hook promise via trackCommand( -- it is the single choke point the union coverage above relies on",
   );
 });

@@ -1,8 +1,10 @@
 import type { Axial } from "../core/hex";
 import type {
+  BuildingDef,
   BuildingUpgradeRequest,
   HeroState,
   HorseVariantId,
+  Platoon,
   Player,
   SettlementState,
   WarehouseResource,
@@ -101,12 +103,30 @@ export type EndTurnResult = {
   players: Player[];
   heroes: Record<string, HeroState>;
   settlements: Record<string, SettlementState>;
+  tradeRoutes?: import("@heroes/contracts").TradeRouteState[];
 };
 
 export type ResolveBattleResult = {
   attackerHero: HeroState;
   defenderHero: HeroState;
   battle: import("@heroes/engine").BattleResult;
+};
+
+export type SubmitBattleResultPayload = {
+  actor: number;
+  attackerId: string;
+  defenderId: string;
+  outcome: "attackerWon" | "defenderWon" | "retreat" | "surrender" | "draw";
+  attackerStacks: Platoon[];
+  defenderStacks: Platoon[];
+  surrenderedGold?: number;
+  rounds: number;
+  obstacleSeed: number;
+};
+
+export type SubmitBattleResultResult = {
+  attackerHero: HeroState;
+  defenderHero: HeroState;
 };
 
 export type TransferGoldResult = {
@@ -158,6 +178,20 @@ export async function resolveBattle(
   payload: { actor: number; attackerId: string; defenderId: string }
 ): Promise<ResolveBattleResult> {
   return postCommand<ResolveBattleResult>(name, { kind: "ResolveBattle", ...payload });
+}
+
+// Manual-arena result submission (plan/2026-09-27-manual-battle-wiring.md,
+// work item 4): the 15th command kind. Unlike ResolveBattle -- where the
+// server runs the resolver -- this carries the arena's played-out outcome
+// and the server applies it through the same shared post-battle rules
+// (server/app/commandHandler.ts's buildPostBattleHeroes/persistBattleOutcome).
+// Awaited by GameActions.startBattleFlow's Fight path: the returned hero pair
+// is what the client merges before ending the BATTLE phase.
+export async function submitBattleResult(
+  name: string,
+  payload: SubmitBattleResultPayload,
+): Promise<SubmitBattleResultResult> {
+  return postCommand<SubmitBattleResultResult>(name, { kind: "SubmitBattleResult", ...payload });
 }
 
 export async function transferGold(
@@ -253,6 +287,75 @@ export async function upgradeBuilding(
   payload: { actor: number; settlementId: string; requests: BuildingUpgradeRequest[] }
 ): Promise<void> {
   await postCommand(name, { kind: "UpgradeBuilding", ...payload });
+}
+
+// F4 closer: commits the city view's working building cart (placements +
+// destroy-mode removals) server-side. The server re-derives the net cost
+// against its own row and revalidates affordability; the caller has already
+// applied the same change optimistically via applyPlaceBuildings().
+export async function placeBuildings(
+  name: string,
+  payload: { actor: number; settlementId: string; buildings: BuildingDef[]; initialLayout?: boolean }
+): Promise<void> {
+  await postCommand(name, { kind: "PlaceBuildings", ...payload });
+}
+
+// Hero cargo load/unload at a same-hex owned settlement (plan §6).
+export async function transferResources(
+  name: string,
+  payload: {
+    actor: number;
+    heroId: string;
+    settlementId: string;
+    direction: "load" | "unload";
+    amounts: Partial<Record<WarehouseResource, number>>;
+  }
+): Promise<void> {
+  await postCommand(name, { kind: "TransferResources", ...payload });
+}
+
+// Moves wagons between the player's unassigned pool and a hero (plan §6).
+export async function assignWagons(
+  name: string,
+  payload: { actor: number; heroId: string; delta: number }
+): Promise<void> {
+  await postCommand(name, { kind: "AssignWagons", ...payload });
+}
+
+// Buys wagons into the player's unassigned pool, paid from a settlement (plan §6).
+export async function buyWagons(
+  name: string,
+  payload: { actor: number; settlementId: string; count: number }
+): Promise<void> {
+  await postCommand(name, { kind: "BuyWagons", ...payload });
+}
+
+// Creates a trade route, committing wagons from the unassigned pool (plan §6).
+export async function createTradeRoute(
+  name: string,
+  payload: {
+    actor: number;
+    fromSettlementId: string;
+    toSettlementId: string;
+    resource: WarehouseResource;
+    wagons: number;
+  }
+): Promise<void> {
+  await postCommand(name, { kind: "CreateTradeRoute", ...payload });
+}
+
+// Updates (or removes) an existing trade route (plan §6).
+export async function updateTradeRoute(
+  name: string,
+  payload: {
+    actor: number;
+    routeId: string;
+    resource?: WarehouseResource;
+    wagonsDelta?: number;
+    remove?: boolean;
+  }
+): Promise<void> {
+  await postCommand(name, { kind: "UpdateTradeRoute", ...payload });
 }
 
 export async function upgradeSettlement(

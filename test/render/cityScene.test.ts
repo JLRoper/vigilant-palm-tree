@@ -132,8 +132,119 @@ test("buildings are emitted in ascending (gx+gy) draw order with correct footpri
   assert.equal(buildingNodes[0].halfHeight, fp.hh);
 });
 
-test("ghost building node is only present when a ghost is provided, and resolves its style via pickStyleForBuilding", () => {
-  const withoutGhost = buildCityScene(baseInput());
+test("no upgrade means no construction stage on any building node", () => {
+  const buildings: BuildingDef[] = [
+    { gx: 0, gy: 0, kind: "townHall", level: 1, style: "classic" },
+    { gx: 4, gy: 4, kind: "house", level: 1, style: "classic" },
+  ];
+  const nodes = buildCityScene(baseInput({ buildings }));
+  for (const b of nodesOfKind<CityBuildingNode>(nodes, "cityBuilding")) {
+    assert.equal(b.constructionStage, undefined);
+  }
+});
+
+test("a town hall upgrade in flight stages the town hall node by progress", () => {
+  const buildings: BuildingDef[] = [
+    { gx: 0, gy: 0, kind: "townHall", level: 1, style: "classic" },
+    { gx: 4, gy: 4, kind: "house", level: 1, style: "classic" },
+  ];
+  const base = { kind: "townHall" as const, targetLevel: 2 as const };
+
+  const justStarted = buildCityScene(baseInput({ buildings, upgrades: { ...base, daysRemaining: 7 } }));
+  const startedNodes = nodesOfKind<CityBuildingNode>(justStarted, "cityBuilding");
+  assert.equal(startedNodes.find((n) => n.buildingKind === "townHall")?.constructionStage, 1);
+  assert.equal(startedNodes.find((n) => n.buildingKind === "house")?.constructionStage, undefined);
+
+  const mid = buildCityScene(baseInput({ buildings, upgrades: { ...base, daysRemaining: 5 } }));
+  assert.equal(nodesOfKind<CityBuildingNode>(mid, "cityBuilding").find((n) => n.buildingKind === "townHall")?.constructionStage, 2);
+
+  const late = buildCityScene(baseInput({ buildings, upgrades: { ...base, daysRemaining: 1 } }));
+  assert.equal(nodesOfKind<CityBuildingNode>(late, "cityBuilding").find((n) => n.buildingKind === "townHall")?.constructionStage, 3);
+});
+
+test("a batch building upgrade stages only its requested buildings, at the max-days progress", () => {
+  const buildings: BuildingDef[] = [
+    { gx: 1, gy: 1, kind: "goldMine", level: 1, style: "classic" },
+    { gx: 2, gy: 1, kind: "house", level: 1, style: "classic" },
+    { gx: 3, gy: 1, kind: "market", level: 1, style: "classic" },
+  ];
+  const nodes = buildCityScene(
+    baseInput({
+      buildings,
+      upgrades: {
+        kind: "buildings",
+        targetLevel: 2,
+        daysRemaining: 1,
+        buildingRefs: [
+          { gx: 1, gy: 1, kind: "goldMine" },
+          { gx: 2, gy: 1, kind: "house" },
+        ],
+      },
+    }),
+  );
+  const buildingNodes = nodesOfKind<CityBuildingNode>(nodes, "cityBuilding");
+  assert.equal(buildingNodes.find((n) => n.buildingKind === "goldMine")?.constructionStage, 3, "goldMine total is 4 days, 3 elapsed = 75%");
+  assert.equal(buildingNodes.find((n) => n.buildingKind === "house")?.constructionStage, 3);
+  assert.equal(buildingNodes.find((n) => n.buildingKind === "market")?.constructionStage, undefined, "market is not part of the upgrade");
+});
+
+test("a settlement-tier upgrade does not stage any city building", () => {
+  const buildings: BuildingDef[] = [{ gx: 0, gy: 0, kind: "townHall", level: 1, style: "classic" }];
+  const nodes = buildCityScene(
+    baseInput({ buildings, upgrades: { kind: "settlement", targetLevel: 2, daysRemaining: 10 } }),
+  );
+  for (const b of nodesOfKind<CityBuildingNode>(nodes, "cityBuilding")) {
+    assert.equal(b.constructionStage, undefined);
+  }
+});
+
+test("newly placed buildings stage from their own construction timer", () => {
+  const buildings: BuildingDef[] = [
+    { gx: 0, gy: 0, kind: "goldMine", level: 1, style: "classic", construction: { daysRemaining: 4 } },
+    { gx: 1, gy: 1, kind: "goldMine", level: 1, style: "classic", construction: { daysRemaining: 1 } },
+    { gx: 2, gy: 1, kind: "woodcutterHut", level: 1, style: "classic", construction: { daysRemaining: 1 } },
+    { gx: 3, gy: 1, kind: "house", level: 1, style: "classic" },
+  ];
+  const nodes = buildCityScene(baseInput({ buildings }));
+  const buildingNodes = nodesOfKind<CityBuildingNode>(nodes, "cityBuilding");
+  assert.equal(
+    buildingNodes.find((n) => n.gx === 0)?.constructionStage,
+    1,
+    "goldMine total is 4 days, none elapsed = wood-pile plot",
+  );
+  assert.equal(
+    buildingNodes.find((n) => n.gx === 1)?.constructionStage,
+    3,
+    "goldMine at 3 of 4 days elapsed = 75% = near-complete scaffold",
+  );
+  assert.equal(
+    buildingNodes.find((n) => n.gx === 2)?.constructionStage,
+    2,
+    "woodcutter total is 3 days, 2 elapsed = 66.7% = scaffold",
+  );
+  assert.equal(buildingNodes.find((n) => n.buildingKind === "house")?.constructionStage, undefined);
+});
+
+test("placement construction takes precedence over upgrade staging", () => {
+  const buildings: BuildingDef[] = [
+    { gx: 1, gy: 1, kind: "goldMine", level: 1, style: "classic", construction: { daysRemaining: 4 } },
+  ];
+  const nodes = buildCityScene(
+    baseInput({
+      buildings,
+      upgrades: {
+        kind: "buildings",
+        targetLevel: 2,
+        daysRemaining: 1,
+        buildingRefs: [{ gx: 1, gy: 1, kind: "goldMine" }],
+      },
+    }),
+  );
+  const node = nodesOfKind<CityBuildingNode>(nodes, "cityBuilding")[0];
+  assert.equal(node.constructionStage, 1, "the in-flight placement wins over the (impossible-but-safe) upgrade path");
+});
+
+test("ghost building node is only present when a ghost is provided, and resolves its style via pickStyleForBuilding", () => {  const withoutGhost = buildCityScene(baseInput());
   assert.equal(nodesOfKind(withoutGhost, "cityGhostBuilding").length, 0);
 
   const nodes = buildCityScene(

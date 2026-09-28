@@ -1,5 +1,5 @@
 import type { DrawBuildingContext } from "./types";
-import { lighten, darken, buildingHeight, getOpts } from "./primitives";
+import { lighten, darken, buildingHeight, getOpts, drawArcaneFontAccent } from "./primitives";
 
 export function drawCrystalline(opts: DrawBuildingContext): void {
   const { ctx, cx, cy, hw, hh, kind, level, ownerColor } = getOpts(opts);
@@ -33,6 +33,8 @@ export function drawCrystalline(opts: DrawBuildingContext): void {
     ctx.fill();
     ctx.globalAlpha = 1;
   }
+
+  if (kind === "arcaneFont") drawArcaneFontAccent(ctx, cx, cy, hw, hh, H, ownerColor);
 }
 
 export function drawCrystalSpire(

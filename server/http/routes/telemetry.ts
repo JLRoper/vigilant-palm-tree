@@ -1,6 +1,7 @@
 import { Router, type Request } from "express";
 import type { ClientTelemetryReport } from "@heroes/contracts";
 import { getSnapshot, recordSample } from "../../telemetry/presenceRegistry";
+import { getPresence, touchSeat } from "../../app/dropPolicy";
 
 // POST/GET /api/games/:name/telemetry -- the dev Network Map's data plane
 // (issue #51, plan/2026-08-17-issue-51-network-map.md §2).
@@ -10,9 +11,12 @@ import { getSnapshot, recordSample } from "../../telemetry/presenceRegistry";
 // router.use(path, child) does not otherwise inherit the parent's matched
 // params. See server/http/routes/commands.ts's header for the full story.
 //
-// This router deliberately never touches the DB: presence is in-memory and
-// ephemeral by design, so a report for an unknown game name is simply
-// recorded rather than 404'd against `games`.
+// This router deliberately never touches the DB *schema's tables for game
+// state*: presence is in-memory and ephemeral by design, so a report for
+// an unknown game name is simply recorded rather than 404'd against
+// `games`. (The drop-policy presence module does write transition-driven
+// lobby.presence updates to the games row -- see server/app/dropPolicy.ts
+// -- but only for transitions, never per report.)
 export const telemetryRouter = Router({ mergeParams: true });
 
 function parseReport(body: unknown): ClientTelemetryReport | null {
@@ -51,7 +55,17 @@ telemetryRouter.post("/", (req: Request<{ name: string }>, res) => {
   // receivedAt is stamped server-side rather than trusted from the client, so
   // staleness expiry can't be skewed by a wrong clock on a player's machine.
   recordSample(req.params.name, { ...report, receivedAt: Date.now() });
-  res.status(204).end();
+  // Drop-policy heartbeat (docs/multiplayer.md, shipped 2026-09-27): the
+  // per-poll telemetry report doubles as the enforcement-grade seat
+  // heartbeat. touchSeat is in-memory plus transition-driven row writes, so
+  // this stays as cheap as the dev-registry recordSample beside it.
+  touchSeat(req.params.name, report.playerId);
+  // 200 + body (was 204): the response now carries the seat-presence view
+  // (drop policy's disconnected-seat signal) so the client's per-poll
+  // telemetry call -- which it already makes every cycle -- doubles as the
+  // lightweight per-poll presence read. Old clients that ignore the body
+  // are unaffected; a 204 from an older API process just parses as null.
+  res.json({ presence: getPresence(req.params.name) });
 });
 
 telemetryRouter.get("/", (req: Request<{ name: string }>, res) => {

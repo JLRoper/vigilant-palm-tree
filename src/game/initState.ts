@@ -22,6 +22,8 @@ import {
   generateSettlementName,
   SETTLEMENT_GOLD_TAX,
 } from "@heroes/engine";
+import { DEFAULT_HERO_ARCANE, DEFAULT_HERO_INTELLIGENCE, DEFAULT_HERO_WAGONS } from "@heroes/engine";
+import { DEFAULT_HERO_SPELL, maxManaFor } from "@heroes/engine";
 import { PLAYER_COLORS, MAX_PLAYERS } from "../state/playerColors";
 import { generateCitySpots, cityViewSizeFor } from "@heroes/engine";
 import { VALID_HORSE_VARIANTS } from "@heroes/engine";
@@ -69,8 +71,11 @@ function makePlayers(
       color: PLAYER_COLORS[i] ?? "#cccccc",
       heroIds: [heroIdFor(i)],
       settlementIds: settlementIds[`p${i}`] ?? [],
-    });
-  }
+      // Wagon pool (docs/wagons-stockpiles-trade-routes-plan.md §5.1): the
+      // 5 starting wagons are already assigned to the starting hero.
+      wagonsOwned: 5,
+      wagonsUnassigned: 0,
+    });  }
   return out;
 }
 
@@ -86,6 +91,7 @@ function makeHeroes(
     if (!castle) continue;
     const variantIds = VALID_HORSE_VARIANTS;
     const isHuman = i < humanSeatCount;
+    const manaPool = maxManaFor(DEFAULT_HERO_INTELLIGENCE);
     heroes.push({
       id: heroIdFor(i),
       name: isHuman ? "Commander" : "Warlord",
@@ -103,6 +109,17 @@ function makeHeroes(
       isChartering: false,
       charterId: null,
       horseVariant: variantIds[Math.floor(rng() * variantIds.length)],
+      // Spellcasting v1 (docs/spellcasting-plan.md): fixed starting stat
+      // block, full mana bar, Magic Arrow for every hero.
+      arcane: DEFAULT_HERO_ARCANE,
+      intelligence: DEFAULT_HERO_INTELLIGENCE,
+      heroMana: manaPool,
+      heroMaxMana: manaPool,
+      heroSpell: DEFAULT_HERO_SPELL,
+      // Wagons & cargo (docs/wagons-stockpiles-trade-routes-plan.md §4.2):
+      // 5 wagons = 2,500g purse cap, exactly the charter cost.
+      wagons: DEFAULT_HERO_WAGONS,
+      resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
     });
   }
   return heroes;

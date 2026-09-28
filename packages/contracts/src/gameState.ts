@@ -1,10 +1,17 @@
 import type { BuildingKind } from "./buildings";
 import type { CharterId, Faction, HeroId, HorseVariantId, PlayerId, SettlementId } from "./ids";
-import type { ResourceType, WarehouseResource } from "./resources";
+import type { ResourceType, Warehouse, WarehouseResource } from "./resources";
 import type { CharterState, SettlementState } from "./settlement";
 import type { Platoon } from "./units";
 
 export const MOVEMENT_PER_TURN = 7;
+
+// A hero's known spell (v1: exactly one per hero — see
+// docs/spellcasting-plan.md and the battle-updates roadmap §"Spellcasting
+// v1"). The spell definitions themselves (cost, magnitude, targeting) live
+// in @heroes/engine's combat/spells.ts; this union is just the id
+// vocabulary the persisted HeroState carries across the wire.
+export type SpellId = "magic_arrow" | "bless";
 
 export interface Player {
   id: PlayerId;
@@ -13,6 +20,11 @@ export interface Player {
   color: string;
   heroIds: HeroId[];
   settlementIds: SettlementId[];
+  // ── Wagon pool (docs/wagons-stockpiles-trade-routes-plan.md §5.1) ──
+  // Optional + helper-accessed so legacy saves and old JSONB rows stay
+  // valid; new wagons default via DEFAULT_HERO_WAGONS/player helpers.
+  wagonsOwned?: number;
+  wagonsUnassigned?: number;
 }
 
 export interface HeroState {
@@ -32,6 +44,26 @@ export interface HeroState {
   isChartering: boolean;
   charterId: CharterId | null;
   horseVariant: HorseVariantId;
+  // ── Spellcasting v1 (docs/spellcasting-plan.md) ──
+  // Spell power and mana-pool stats. v1 ships fixed starting values
+  // (DEFAULT_HERO_ARCANE / DEFAULT_HERO_INTELLIGENCE in engine
+  // combatConfig.ts); leveling/progression is explicitly later.
+  arcane: number;
+  intelligence: number;
+  // Persistent hero-level mana pool. heroMaxMana = intelligence *
+  // MANA_PER_INTELLIGENCE; refills fully on the overworld day tick
+  // (engine turn/round.ts's advanceRound). Casting spends mana; mana is
+  // the only cast limiter.
+  heroMana: number;
+  heroMaxMana: number;
+  // The one spell this hero knows (null = spellcaster-less hero; v1 seeds
+  // every hero with "magic_arrow").
+  heroSpell: SpellId | null;
+  // ── Wagons & cargo (docs/wagons-stockpiles-trade-routes-plan.md §4.2/§5.1) ──
+  // Optional + helper-accessed (heroWagons/heroCargo) so legacy saves stay
+  // valid; DEFAULT_HERO_WAGONS applies when absent.
+  wagons?: number;
+  resources?: Warehouse;
 }
 
 export type GamePhase =
@@ -39,6 +71,29 @@ export type GamePhase =
   | { kind: "AI_TURN"; playerId: PlayerId }
   | { kind: "BATTLE"; attackerId: HeroId; defenderId: HeroId }
   | { kind: "ROUND_END"; nextRound: number };
+
+/** docs/wagons-stockpiles-trade-routes-plan.md §5.2 — physical caravan cycle state. */
+export interface CaravanState {
+  phase: "toDestination" | "toHome";
+  cargo: number;
+  /** Remaining path, next tile first. */
+  path: { q: number; r: number }[];
+  /** Tiles of `path` already consumed this leg; the caravan occupies path[pathIndex - 1] (or the origin settlement at 0). */
+  pathIndex: number;
+}
+
+export type TradeRouteId = string;
+
+/** One trade route: a same-owner settlement pair, one resource, a wagon count, and its physical caravan. */
+export interface TradeRouteState {
+  id: TradeRouteId;
+  fromSettlementId: SettlementId;
+  toSettlementId: SettlementId;
+  resource: WarehouseResource;
+  wagons: number;
+  /** null while the caravan is at the origin, loading. */
+  caravan: CaravanState | null;
+}
 
 export interface GameState {
   round: number;
@@ -56,6 +111,9 @@ export interface GameState {
   activeCharters: CharterState[];
   nextCharterId: number;
   nextSettlementId: number;
+  /** Optional + defaulted ([]) so legacy saves and old JSONB rows stay valid. */
+  tradeRoutes?: TradeRouteState[];
+  nextTradeRouteId?: number;
 }
 
 export interface CalendarParts {

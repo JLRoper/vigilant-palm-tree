@@ -57,3 +57,22 @@ export function advanceSettlementUpgrades(state: GameState): GameState {
   if (!changed) return state;
   return { ...state, settlements: newSettlements, dirty: true };
 }
+
+export function advanceBuildingConstructions(state: GameState): GameState {
+  let changed = false;
+  const newSettlements: Record<SettlementId, SettlementState> = { ...state.settlements };
+  for (const [id, s] of Object.entries(newSettlements)) {
+    if (!s.buildings.some((b) => b.construction)) continue;
+    const buildings = s.buildings.map((b) => {
+      if (!b.construction) return b;
+      const daysRemaining = b.construction.daysRemaining - 1;
+      changed = true;
+      if (daysRemaining > 0) return { ...b, construction: { daysRemaining } };
+      const { construction: _completed, ...finished } = b;
+      return finished as BuildingDef;
+    });
+    newSettlements[id] = { ...s, buildings };
+  }
+  if (!changed) return state;
+  return { ...state, settlements: newSettlements, dirty: true };
+}

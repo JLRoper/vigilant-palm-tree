@@ -106,14 +106,65 @@ export type EngineEvent =
       settlementId: SettlementId;
       targetLevel: 2 | 3;
     }
-  | {
-      // #152: one hex-step of a charter's auto-travel, mirroring HeroMoved's
-      // shape exactly (same `to`-only payload, same reasoning: movement
-      // cost/whether-arrived isn't carried here, TurnEnded remains the
-      // resync boundary that re-syncs anything this event's replay drifts).
-      type: "CharterTravelAdvanced";
-      actor: PlayerSeat;
-      heroId: HeroId;
-      charterId: CharterId;
-      to: Axial;
-    };
+    | {
+        // #152: one hex-step of a charter's auto-travel, mirroring HeroMoved's
+        // shape exactly (same `to`-only payload, same reasoning: movement
+        // cost/whether-arrived isn't carried here, TurnEnded remains the
+        // resync boundary that re-syncs anything this event's replay drifts).
+        type: "CharterTravelAdvanced";
+        actor: PlayerSeat;
+        heroId: HeroId;
+        charterId: CharterId;
+        to: Axial;
+      }
+    | {
+        // The city view's PlaceBuildings command committing its working
+        // cart (palette placements + destroy-mode removals). Payload is
+        // intentionally minimal: remote seats re-sync the full buildings
+        // array via the same TurnEnded/poll resync boundary everything
+        // else uses -- entityMirror's handler for this is a documented
+        // no-op until the event carries per-building data worth applying.
+        type: "BuildingsPlaced";
+        actor: PlayerSeat;
+        settlementId: SettlementId;
+      }
+    | {
+        // Hero cargo load/unload at a same-hex owned settlement. Amounts
+        // ride the TurnEnded resync boundary, like BuildingsPlaced.
+        type: "ResourcesTransferred";
+        actor: PlayerSeat;
+        heroId: HeroId;
+        settlementId: SettlementId;
+        direction: "load" | "unload";
+      }
+    | {
+        type: "WagonsAssigned";
+        actor: PlayerSeat;
+        heroId: HeroId;
+        delta: number;
+      }
+    | {
+        type: "WagonsBought";
+        actor: PlayerSeat;
+        settlementId: SettlementId;
+        count: number;
+      }
+    | {
+        type: "TradeRouteCreated";
+        actor: PlayerSeat;
+        routeId: string;
+        fromSettlementId: SettlementId;
+        toSettlementId: SettlementId;
+        resource: WarehouseResource;
+        wagons: number;
+      }
+    | {
+        type: "TradeRouteUpdated";
+        actor: PlayerSeat;
+        routeId: string;
+      }
+    | {
+        type: "TradeRouteRemoved";
+        actor: PlayerSeat;
+        routeId: string;
+      };

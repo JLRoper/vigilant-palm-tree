@@ -129,15 +129,14 @@ export class EventLog {
   }
 
   attachToBus(types: ReadonlyArray<string> = DEFAULT_BUS_EVENT_TYPES): () => void {
-    for (const type of types) {
-      const handler = (ev: Record<string, unknown>) => {
-        const { type: _t, ...payload } = ev;
-        void _t;
-        this.record(type, "bus", payload as Record<string, unknown>);
-      };
-      bus.on(type, handler);
-      this.busUnsubscribers.push(() => bus.off(type, handler));
-    }
+    const wanted = new Set(types);
+    const unsubscribe = bus.onAny((ev) => {
+      if (!wanted.has(ev.type)) return;
+      const { type: _t, ...payload } = ev;
+      void _t;
+      this.record(ev.type, "bus", payload);
+    });
+    this.busUnsubscribers.push(unsubscribe);
     return () => this.detachFromBus();
   }
 

@@ -10,6 +10,9 @@ interface LobbySeat {
   id: number;
   handle?: string;
   isLocal: boolean;
+  // Drop policy (2026-09-27): the server marked this seat disconnected
+  // (60s without a heartbeat). Surface it in the seat grid.
+  disconnected: boolean;
 }
 
 interface LobbySnapshot {
@@ -34,21 +37,22 @@ function defaultGameName(): string {
 }
 
 function snapshotFromGame(game: Game, localPlayerId: number | null): LobbySnapshot {
-  const claimed = (game as unknown as { lobby?: { claimed?: Record<string, { handle: string }>; startedAt?: string; seats?: number } }).lobby ?? {};
-  const seatTotal = claimed.seats ?? game.players.length;
+  const lobby = game.lobby ?? {};
+  const seatTotal = lobby.seats ?? game.players.length;
   const seats: LobbySeat[] = [];
   for (let i = 0; i < seatTotal; i++) {
-    const claim = claimed.claimed?.[String(i)];
+    const claim = lobby.claimed?.[String(i)];
     seats.push({
       id: i,
       handle: claim?.handle,
       isLocal: localPlayerId === i,
+      disconnected: lobby.presence?.[String(i)]?.connected === false,
     });
   }
   return {
     gameName: game.name,
     seats,
-    started: Boolean(claimed.startedAt),
+    started: Boolean(lobby.startedAt),
   };
 }
 
@@ -433,9 +437,10 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
     const label = document.createElement("div");
     label.style.fontSize = "12px";
     label.textContent = seat.handle
-      ? `${seat.handle}${seat.isLocal ? " (you)" : ""}`
+      ? `${seat.handle}${seat.isLocal ? " (you)" : ""}${seat.disconnected ? " (disconnected)" : ""}`
       : `Seat ${seat.id} — open`;
     if (!seat.handle) label.style.opacity = "0.6";
+    if (seat.disconnected) label.style.color = "#f88";
     row.appendChild(label);
     return row;
   }

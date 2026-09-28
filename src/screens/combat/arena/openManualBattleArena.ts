@@ -1,9 +1,15 @@
 // Playable HoMM3-style manual fight arena: renders the battle grid on a
 // canvas and lets the player click their own platoons (in whatever order
 // they choose) to move + attack, alternating with a simple AI opponent, via
-// the engine in shared/combat/manualBattle.ts. Currently only reachable from
-// the "Test Battle" sandbox (src/screens/combat/testBattleSetup.ts) — see that file's
-// header for the scope boundary against the real game's battle flow.
+// the engine in shared/combat/manualBattle.ts. Reachable from the "Test
+// Battle" sandbox (src/screens/combat/testBattleSetup.ts) AND from the real
+// game's battle flow since plan/2026-09-27-manual-battle-wiring.md — when a
+// hero collision is fought rather than quick-resolved, GameActions opens
+// this arena with the two heroes' actual armies and receives the played-out
+// outcome through the onComplete callback (see ManualBattleOutcome). The
+// sandbox boundary that used to live here is documented from the other side
+// in GameActions.startBattleFlow: the sandbox passes no onComplete and no
+// telemetry, so it neither touches real game state nor streams actions.
 //
 // Layout is battlefield-first: the grid takes whatever room is left after one
 // narrow roster rail — the player's own — and it *reflows* (the hex size is
@@ -22,13 +28,19 @@ import {
   getMovementRange,
   getValidAttackTargets,
   getValidMeleeTargets,
+  getValidSpellTargets,
   isBattleOver,
   isRangedPlatoon,
   pickTarget,
   platoonSpeed,
+  SPELL_CATALOG,
+  spellDef,
+  defaultSpellLoadout,
   startManualBattle,
   timeOfDayForRound,
   unactedLivingSlots,
+  type BattleResult,
+  type HeroSpellLoadout,
   type TimeOfDay,
 } from "@heroes/engine";
 import type { BattleLogEntry, BattleSide, Combatant } from "@heroes/engine";
@@ -44,7 +56,7 @@ import { applyLeaveBehind, openLeaveBehindDialog } from "./leaveBehind";
 import { attachRailHover, buildPlatoonStrip } from "./view";
 import { createArenaInput, type ArenaInput } from "./input";
 import { createArenaAi, type ArenaAi } from "./ai";
-import { attackFromSelectedHex, attackFromTarget, endPlatoonTurnAction, moveSelectedTo, retreatAction, surrenderAction } from "./state";
+import { attackFromSelectedHex, attackFromTarget, castSpellAction, endPlatoonTurnAction, moveSelectedTo, retreatAction, surrenderAction, type BattleActionEmit, type BattleActionPhase } from "./state";
 import { buildArenaPaint2dDeps, paintSceneForArena, readUseSceneBuilder } from "./paint";
 import { createArenaSpriteResolver, resolveUnitSprite } from "../../../render/unitSprites";
 import { drawWithDescriptor } from "../../../render/scene/paint2d";
@@ -54,19 +66,72 @@ import { dominantUnitTypeId, facingFor, meanQ } from "../../../render/scene/scen
 // `slotIndex` is the army-stack slot, `unitTypeId` is which entry within
 // that slot (a platoon can hold up to MAX_PLATOON_ENTRIES distinct types).
 
+// Arena-level result handed to the production caller through `onComplete`
+// (plan/2026-09-27-manual-battle-wiring.md, work item 3). `outcome` is the
+// arena-level verdict — retreat/surrender are the human's concession
+// buttons, wins/draw come from finalizeManualBattle's winner. The survivor
+// platoons are the engine-role survivors exactly as finalizeManualBattle
+// built them (retreat's 15% loss and the surrender Leave-Behind strip are
+// already applied), and `surrenderedGold` is the gold actually paid to
+// surrender — 0 when the Leave-Behind path covered the shortfall with units
+// instead, and 0 on every non-surrender outcome. `result` is the full
+// engine BattleResult so the caller can show the shared result card without
+// re-deriving anything.
+export type ManualBattleOutcomeKind = "attackerWon" | "defenderWon" | "retreat" | "surrender" | "draw";
+
+export interface ManualBattleOutcome {
+  outcome: ManualBattleOutcomeKind;
+  attackerSurvivors: Platoon[];
+  defenderSurvivors: Platoon[];
+  surrenderedGold: number;
+  result: BattleResult;
+}
+
+export interface ManualBattleArenaOptions {
+  // Gold the human hero brings into this battle (drives the Surrender
+  // pricing and the Leave-Behind shortfall path). Defaults to a low value
+  // (300, matching gameState.ts's initial hero gold) so the Test Battle
+  // sandbox always exercises the "Leave Behind" path; the production flow
+  // passes the human hero's actual purse.
+  heroGold?: number;
+  surrenderCost?: number;
+  // Spellcasting v1 (docs/spellcasting-plan.md): the human hero's spell
+  // loadout — which spell they know, the mana they walk in with, and their
+  // arcane-scaled spell power. Defaults to the v1 standard loadout (Magic
+  // Arrow, default stat block, full bar) so the Test Battle sandbox can
+  // cast; pass `null` for a spellcaster-less hero. The AI never casts in v1
+  // (locked decision 4), so only the human side carries a loadout.
+  heroSpell?: HeroSpellLoadout | null;
+  // Production flow only (work item 3): resolves the caller's wait once the
+  // battle has finalized. When provided, the arena does NOT show its own
+  // result card and does NOT close itself — the caller submits the outcome
+  // server-side, applies the result, and shows the shared result card with
+  // real hero labels, closing the arena via the returned handle's `close`
+  // on Carry On. The Test Battle sandbox passes none and keeps the
+  // show-card-then-close behavior it has always had.
+  onComplete?: (outcome: ManualBattleOutcome) => void;
+  // Production flow only (work item 4b): the live action stream. Called once
+  // per applied action (plus the mandatory seq-0 "start" seed row and the
+  // terminal "end" row) with the arena-level phase and the full action +
+  // state context; the caller owns seq numbering and the actual POST, so a
+  // network failure can never block or fail the arena from inside it.
+  telemetry?: (phase: BattleActionPhase, payload: Record<string, unknown>) => void;
+}
+
 export function openManualBattleArena(
   playerPlatoons: Platoon[],
   aiPlatoons: Platoon[],
   unitTypes: Record<string, UnitType>,
   humanSide: BattleSide = "attacker",
-  options: { heroGold?: number; surrenderCost?: number } = {},
-): void {
+  options: ManualBattleArenaOptions = {},
+): { close: () => void } {
   // The engine's attacker/defender roles are fixed to their grid colors
   // (attacker always blue, defender always red) — humanSide picks which of
   // those two roles the player controls; the AI always takes the other one.
   const aiSide: BattleSide = humanSide === "attacker" ? "defender" : "attacker";
   const attackerPlatoons = humanSide === "attacker" ? playerPlatoons : aiPlatoons;
   const defenderPlatoons = humanSide === "attacker" ? aiPlatoons : playerPlatoons;
+  const heroSpell = options.heroSpell === undefined ? defaultSpellLoadout() : options.heroSpell;
   const state = startManualBattle(attackerPlatoons, defenderPlatoons, {
     unitTypes,
     obstacleSeed: Math.floor(Math.random() * 1_000_000),
@@ -74,6 +139,7 @@ export function openManualBattleArena(
     // right, regardless of which role (attacker/defender) the human picked —
     // otherwise the AI ends up on the left whenever the human plays defender.
     sideChoice: humanSide,
+    heroSpells: heroSpell ? (humanSide === "attacker" ? { attacker: heroSpell } : { defender: heroSpell }) : {},
   });
 
   // Gold the human hero brings into this battle. Defaults to a low value
@@ -83,6 +149,45 @@ export function openManualBattleArena(
   // defaults to SURRENDER_COST_GOLD.
   let currentHeroGold = options.heroGold ?? 300;
   const surrenderCost = options.surrenderCost ?? SURRENDER_COST_GOLD;
+
+  // Live action stream (work item 4b). The arena only builds context +
+  // payload; seq numbering and the actual POST belong to the caller's
+  // telemetry callback (GameActions wires it to api.postBattleAction with a
+  // per-battle counter), so a slow or failing endpoint can never block or
+  // fail the arena from inside it.
+  const telemetry = options.telemetry;
+  const emit: BattleActionEmit | undefined = telemetry
+    ? (action) => telemetry(action.phase, action.payload)
+    : undefined;
+
+  // Mandatory seed row (seq 0 on the caller's counter): the obstacle seed
+  // plus the initial stacks/sides/grid — the minimal input the future
+  // legality-check consumer needs to re-simulate the battle. The engine's
+  // AI (planAiTurn) is fully deterministic — verified while wiring this up:
+  // createArenaAi/planAiTurn/pickTarget use no Math.random() anywhere, only
+  // the obstacle layout above is seed-driven — so the AI's moves need no
+  // rows of their own; they're re-derivable from this seed row alone.
+  emit?.({
+    phase: "start",
+    payload: {
+      obstacleSeed: state.obstacleSeed,
+      humanSide,
+      attackerStacks: state.attackerOriginalPlatoons,
+      defenderStacks: state.defenderOriginalPlatoons,
+      grid: { cols: state.grid.cols, rows: state.grid.rows },
+      maxRounds: state.maxRounds,
+    },
+  });
+
+  // The human's concession, if any — set by the Retreat/Surrender buttons
+  // before finishBattle runs, and what the submitted outcome is derived
+  // from (a win/loss/draw can't be a concession by definition).
+  let concession: "retreat" | "surrender" | null = null;
+  // Gold actually paid to surrender: the direct path deducts the full
+  // price from currentHeroGold; the Leave-Behind path covers the shortfall
+  // with units instead (already stripped from the survivor platoons), so it
+  // pays 0 gold. Report exactly what was paid, not the list price.
+  let surrenderedGoldPaid = 0;
 
   // Running per-platoon move tally for the whole battle (both sides), keyed
   // by "side#slotIndex" — printed on demand via logMoveStats and dumped
@@ -129,10 +234,21 @@ export function openManualBattleArena(
           flags.length ? `[${flags.join(", ")}]` : "",
           `casualties=${casualties}`,
         );
+      } else if (entry.kind === "spell_cast") {
+        const targetSide = entry.side === "attacker" ? "defender" : "attacker";
+        debugLog(
+          `spell: ${sideName(entry.side)} cast ${SPELL_CATALOG[entry.spell].name} -> ${platoonLabel(targetSide, entry.targetSlot)}`,
+          `mana=-${entry.manaSpent}`,
+          entry.damage !== undefined ? `dmg=${entry.damage}` : `mult=x${entry.multiplier} (expires R${entry.expiresRound})`,
+        );
       } else if (entry.kind === "self_retreat") {
         debugLog(`retreat: ${platoonLabel(entry.side, entry.slotIndex)} self-retreated`);
       } else if (entry.kind === "hero_retreat") {
         debugLog(`retreat: ${entry.side} hero retreated`);
+      } else if (entry.kind === "morale_change") {
+        debugLog(
+          `stats: ${platoonLabel(entry.side, entry.slotIndex)} morale=${entry.morale} fatigue=${entry.fatigue} (${entry.reason})`,
+        );
       } else if (entry.kind === "stalemate") {
         debugLog(`stalemate: ${entry.detail}`);
       }
@@ -154,6 +270,8 @@ export function openManualBattleArena(
           units: c.entries.map((e) => `${state.unitTypes[e.unitTypeId]?.name ?? e.unitTypeId} x${e.count}`).join(", ") || "(empty)",
           speed: platoonSpeed(c, state.unitTypes),
           maxHealth: c.maxHealth,
+          morale: c.morale,
+          fatigue: c.fatigue,
           position: fmtHex(c.position),
         });
       }
@@ -287,6 +405,13 @@ export function openManualBattleArena(
   let moveRange: Axial[] = [];
   let attackTargets: Combatant[] = [];
   let hoveredHex: Axial | null = null;
+
+  // Spellcasting v1 targeting mode (the Spy pattern's replace): armed by the
+  // hero panel's Cast Spell button, cleared by a cast, a cancel click, any
+  // platoon action, or the battle ending. While armed, canvas clicks are
+  // intercepted before the select/attack/move chain — see handleClick.
+  let castMode = false;
+  let castTargets: Combatant[] = [];
 
   // Directional melee targeting is owned by the arena/input module — see
   // createArenaInput below. The latch survives the cursor leaving the enemy
@@ -488,6 +613,33 @@ const FLOAT_MS = 800;
     if (entry.kind === "hero_retreat") {
       return `R${entry.round} · ${sideName(entry.side)} hero left the field`;
     }
+    if (entry.kind === "morale_change") {
+      const parts: string[] = [];
+      if (entry.moraleDelta !== 0) parts.push(`morale ${entry.moraleDelta > 0 ? "+" : "−"}${Math.abs(entry.moraleDelta)} → ${entry.morale}`);
+      if (entry.fatigueDelta !== 0) parts.push(`fatigue ${entry.fatigueDelta > 0 ? "+" : "−"}${Math.abs(entry.fatigueDelta)} → ${entry.fatigue}`);
+      return `R${entry.round} · ${sideName(entry.side)} P${entry.slotIndex + 1} ${parts.join(", ")} (${entry.reason})`;
+    }
+    if (entry.kind === "spell_cast") {
+      const targetSide: BattleSide = entry.side === "attacker" ? "defender" : "attacker";
+      const detail =
+        entry.damage !== undefined
+          ? `${entry.damage} dmg`
+          : entry.multiplier !== undefined
+            ? `×${entry.multiplier} atk (to R${entry.expiresRound})`
+            : "";
+      return (
+        `R${entry.round} · ${sideName(entry.side)} cast ${SPELL_CATALOG[entry.spell].name} → ` +
+        `${sideName(targetSide)} P${entry.targetSlot + 1}` +
+        (detail !== "" ? ` · ${detail}` : "") +
+        ` · ${entry.manaSpent} mana`
+      );
+    }
+    // spell_damage/spell_buff effect entries are type-permitted but never
+    // written to the log (castSpell writes the spell_cast entry instead) —
+    // this line exists for type exhaustiveness only.
+    if (entry.kind === "spell_damage" || entry.kind === "spell_buff") {
+      return `R${entry.round} · ${sideName(entry.side)} spell effect → P${entry.targetSlot + 1}`;
+    }
     return `R${entry.round} · Stalemate — ${entry.detail}`;
   }
 
@@ -543,7 +695,8 @@ const FLOAT_MS = 800;
       destructive: true,
       onConfirm: () => {
         debugLog(`player retreats as ${humanSide}`);
-        retreatAction(state, humanSide);
+        concession = "retreat";
+        retreatAction(state, humanSide, emit);
         finishBattle();
       },
     });
@@ -569,7 +722,9 @@ const FLOAT_MS = 800;
         onConfirm: () => {
           debugLog(`player surrenders as ${humanSide} (paid ${surrenderCost}G)`);
           currentHeroGold -= surrenderCost;
-          surrenderAction(state, humanSide);
+          concession = "surrender";
+          surrenderedGoldPaid = surrenderCost;
+          surrenderAction(state, humanSide, emit);
           finishBattle();
         },
       });
@@ -585,7 +740,11 @@ const FLOAT_MS = 800;
         onConfirm: (leftBehind) => {
           debugLog(`player surrenders as ${humanSide} after leaving behind ${leftBehind} units`);
           applyLeaveBehind(state, humanSide, leftBehind);
-          surrenderAction(state, humanSide);
+          concession = "surrender";
+          // Leave-Behind covers the shortfall with units (already stripped
+          // from the survivors by applyLeaveBehind) — no gold changes hands.
+          surrenderedGoldPaid = 0;
+          surrenderAction(state, humanSide, emit);
           finishBattle();
         },
       });
@@ -604,7 +763,11 @@ const FLOAT_MS = 800;
       ? "Battle over."
       : waitingOnAi
         ? "The AI is making its move..."
-        : selectedSlot === null
+        : castMode
+          ? humanSpell && spellDef(humanSpell.spell).targets === "enemy"
+            ? "Click a glowing enemy platoon to cast. Click anywhere else to cancel."
+            : "Click a glowing platoon of yours to cast. Click anywhere else to cancel."
+          : selectedSlot === null
           ? "Click one of your outlined platoons — on the grid or in the left rail — to act. Hover any platoon for its full details."
           : input.getPendingTarget() !== null
             ? "The arrow shows which side you'll attack from — move the cursor around the enemy to swing it, then click to close in and fight. Click the marked hex itself if you'd rather pick it directly."
@@ -615,7 +778,7 @@ const FLOAT_MS = 800;
               : moveRange.length > 0
                 ? "Hover an enemy in reach to choose the side you attack from, or click a highlighted hex to just move (landing beside a lone enemy fights immediately). Move again, attack, or End Turn when done."
                 : "Out of movement — hover an adjacent enemy to attack from where you stand, or End Turn.";
-    endTurnBtn.style.display = selectedSlot !== null && !over && !ai.isActing() ? "" : "none";
+    endTurnBtn.style.display = selectedSlot !== null && !over && !ai.isActing() && !castMode ? "" : "none";
 
     // Cast Spell, Retreat, and Surrender live under the human's hero portrait
     // and only make sense while it's actually the human's turn to act — which
@@ -625,14 +788,39 @@ const FLOAT_MS = 800;
     humanCastBtn.style.display = showHumanActions ? "" : "none";
     retreatBtn.style.display = showHumanActions ? "" : "none";
     surrenderBtn.style.display = showHumanActions ? "" : "none";
+
+    // The cast button is enabled exactly when the hero's mana covers the
+    // spell's cost and something legal is on the board to target — real
+    // mana availability, not the old permanent stub-disable. Mana reads out
+    // beside it so the enabled state is explicable.
+    const spell = humanSpell ? spellDef(humanSpell.spell) : null;
+    const castable =
+      showHumanActions &&
+      humanSpell !== null &&
+      spell !== null &&
+      humanSpell.mana >= spell.manaCost &&
+      getValidSpellTargets(state, humanSide).length > 0;
+    humanCastBtn.disabled = !castable;
+    humanCastBtn.style.opacity = castable ? "1" : "0.4";
+    humanCastBtn.style.cursor = castable ? "pointer" : "not-allowed";
+    humanCastBtn.title = humanSpell
+      ? `${spell!.name} — ${spell!.description} Costs ${spell!.manaCost} mana.`
+      : "This hero knows no spells.";
+    if (humanManaEl) {
+      humanManaEl.textContent = humanSpell
+        ? `Mana ${humanSpell.mana}/${humanSpell.maxMana}`
+        : "No mana";
+    }
   }
 
   // Hero portraits flank the battlefield, HoMM3-style — they stand outside
   // the grid rather than occupying a hex. Laid out horizontally (portrait
   // beside name + Cast Spell) rather than as a tall centered stack, so the
-  // rail spends its height on platoons instead of chrome. Cast Spell is a
-  // stub for now: no spell system exists yet, so the button just says so.
-  function buildHeroPanel(label: string, accent: string): { panel: HTMLElement; castBtn: HTMLButtonElement } {
+  // rail spends its height on platoons instead of chrome. Cast Spell is
+  // enabled/disabled by renderActions() from the hero's real mana and legal
+  // targets; its click arms the cast targeting mode (handleClick intercepts
+  // armed clicks before the select/attack/move chain).
+  function buildHeroPanel(label: string, accent: string): { panel: HTMLElement; castBtn: HTMLButtonElement; manaEl: HTMLElement | null } {
     const panel = document.createElement("div");
     Object.assign(panel.style, {
       display: "flex",
@@ -673,16 +861,16 @@ const FLOAT_MS = 800;
     const castBtn = document.createElement("button");
     castBtn.textContent = "Cast Spell";
     styleButton(castBtn);
-    castBtn.disabled = true;
-    castBtn.style.opacity = "0.4";
-    castBtn.style.cursor = "not-allowed";
     castBtn.style.fontSize = "10.5px";
     castBtn.style.padding = "3px 7px";
-    castBtn.title = "Spellcasting isn't implemented yet";
     meta.appendChild(castBtn);
 
+    const manaEl = document.createElement("div");
+    Object.assign(manaEl.style, { fontSize: "9.5px", opacity: "0.7", fontVariantNumeric: "tabular-nums" });
+    meta.appendChild(manaEl);
+
     panel.appendChild(meta);
-    return { panel, castBtn };
+    return { panel, castBtn, manaEl };
   }
 
   // The player's own roster rail: hero panel, then a scrolling column of
@@ -697,7 +885,7 @@ const FLOAT_MS = 800;
     heroLabel: string,
     railLabel: string,
     accent: string,
-  ): { rail: HTMLElement; list: HTMLElement; castBtn: HTMLButtonElement; actions: HTMLElement } {
+  ): { rail: HTMLElement; list: HTMLElement; castBtn: HTMLButtonElement; manaEl: HTMLElement | null; actions: HTMLElement } {
     const rail = document.createElement("div");
     Object.assign(rail.style, {
       width: `${RAIL_WIDTH}px`,
@@ -740,7 +928,7 @@ const FLOAT_MS = 800;
     Object.assign(actions.style, { display: "flex", flexDirection: "column", gap: "4px", flexShrink: "0" });
     rail.appendChild(actions);
 
-    return { rail, list, castBtn: hero.castBtn, actions };
+    return { rail, list, castBtn: hero.castBtn, manaEl: hero.manaEl, actions };
   }
 
   const humanRail = buildRail("You", "Your Army", humanAccent);
@@ -784,6 +972,44 @@ const FLOAT_MS = 800;
   // the turn-gated visibility.
   humanRail.actions.append(retreatBtn, surrenderBtn);
   const humanCastBtn = humanRail.castBtn;
+  const humanManaEl = humanRail.manaEl;
+  // The human hero's spell loadout, straight from the engine state — mana
+  // spent in battle updates it, and renderActions() reads it for the
+  // button's enabled state and mana readout.
+  const humanSpell = state.heroSpells[humanSide];
+
+  // Arms/disarms the cast targeting mode. A cast needs a legal target on the
+  // board; with none (or no spell / no mana), the button is disabled by
+  // renderActions, so this only fires when casting is genuinely possible.
+  function toggleCastMode(): void {
+    if (castMode) {
+      cancelCastMode();
+      return;
+    }
+    const targets = getValidSpellTargets(state, humanSide);
+    if (!humanSpell || targets.length === 0) return;
+    debugLog(`cast mode armed: ${SPELL_CATALOG[humanSpell.spell].name}, ${targets.length} legal target(s)`);
+    castMode = true;
+    castTargets = targets;
+    input.clearPendingAttack();
+    refresh();
+  }
+
+  function cancelCastMode(): void {
+    if (!castMode) return;
+    castMode = false;
+    castTargets = [];
+    refresh();
+  }
+
+  // Silent variant for paths that refresh() themselves right after (select,
+  // afterPlayerAction) — avoids a double re-render.
+  function cancelCastModeQuiet(): void {
+    castMode = false;
+    castTargets = [];
+  }
+
+  humanCastBtn.addEventListener("click", toggleCastMode);
 
   // The hex size is solved for the available battlefield box on every layout
   // change, rather than drawing at a fixed size and scaling the bitmap down.
@@ -870,19 +1096,19 @@ const FLOAT_MS = 800;
     stats.push({ label: "Spd", value: String(platoonSpeed(c, state.unitTypes)) });
     stats.push({ label: "Rng", value: isRangedPlatoon(c, state.unitTypes) ? String(RANGED_ATTACK_RANGE) : "Melee" });
     // Terrain placeholder — the game has no terrain-bonus mechanic yet (see
-    // docs/terrain-plan.md). Same pattern as the Morale/Fatigue placeholders
-    // below: the slot exists ahead of the mechanic, so wiring in a real value
-    // later is a one-line change here.
+    // docs/terrain-plan.md). Same "the slot exists ahead of the mechanic"
+    // pattern the Morale/Fatigue bars used before the engine tracked them.
     stats.push({ label: "Terrain", value: "—" });
     return stats;
   }
 
-  // Morale + Fatigue placeholders. No mechanic behind these yet — the values
-  // are hard-coded (morale 100, fatigue 0) so the slot exists for when the
-  // combat system tracks them; see docs/morale-fatigue-plan.md.
-  function metricsFor(): { label: string; value: number; color: string }[] {
-    const morale = 1;
-    const fatigue = 0;
+  // Live per-platoon battle stats: the bars this arena reserved as
+  // hard-coded placeholders (morale 100, fatigue 0) now read the real
+  // Combatant.morale/fatigue the engine maintains; see
+  // docs/morale-fatigue-plan.md.
+  function metricsFor(c: Combatant): { label: string; value: number; color: string }[] {
+    const morale = c.morale / 100;
+    const fatigue = c.fatigue / 100;
     return [
       { label: "Morale", value: morale, color: morale > 0.5 ? "#4caf50" : morale > 0.25 ? "#ffb300" : "#e53935" },
       { label: "Fatigue", value: fatigue, color: fatigue < 0.25 ? "#4caf50" : fatigue < 0.5 ? "#ffb300" : "#e53935" },
@@ -918,7 +1144,7 @@ const FLOAT_MS = 800;
       movementRemaining,
       specialty: specialty ? { icon: specialtyIcon(specialty.tag), label: specialty.tag } : undefined,
       stats: statsFor(combatant),
-      metrics: metricsFor(),
+      metrics: metricsFor(combatant),
       winChanceVs: winner ? { entries: winner.entries, label: `Platoon ${winner.slotIndex + 1}` } : undefined,
       anchorX: anchor.x,
       anchorY: anchor.y,
@@ -941,6 +1167,7 @@ const FLOAT_MS = 800;
         selectedSlot,
         moveRange,
         attackTargets,
+        spellTargets: castTargets,
         aiActing: ai.isActing(),
         aiActingSlot: ai.getActingSlot(),
         aiTargetHex: ai.getTargetHex(),
@@ -1022,6 +1249,20 @@ const FLOAT_MS = 800;
       ctx.arc(x, y, hexSize * 0.8, 0, Math.PI * 2);
       ctx.strokeStyle = "#e05050";
       ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Cast-mode spell targets: a third ring style (violet, with a faint
+    // glow fill) distinct from the red attack ring and the gold unacted
+    // outline. Mirrored in the scenebuilder path by battleSpellTargetRing.
+    for (const t of castTargets) {
+      const { x, y } = toCanvas(t.position.q, t.position.r);
+      ctx.beginPath();
+      ctx.arc(x, y, hexSize * 0.8, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(178, 122, 232, 0.16)";
+      ctx.fill();
+      ctx.strokeStyle = "#b27ae8";
+      ctx.lineWidth = 2.5;
       ctx.stroke();
     }
 
@@ -1195,6 +1436,7 @@ const FLOAT_MS = 800;
   function selectPlatoon(slotIndex: number): void {
     selectedSlot = slotIndex;
     input.clearPendingAttack();
+    cancelCastModeQuiet();
     const combatant = getCombatant(state, humanSide, slotIndex);
     if (!combatant) {
       selectedSlot = null;
@@ -1252,7 +1494,7 @@ const FLOAT_MS = 800;
       const target = pickTarget(adjacentEnemies, state.unitTypes) ?? adjacentEnemies[0];
       debugLog(`bump attack: ${platoonLabel(humanSide, selectedSlot)} -> ${platoonLabel(target.side, target.slotIndex)}`);
       const beforeLog = state.log.length;
-      attackFromTarget(state, humanSide, selectedSlot, target.slotIndex);
+      attackFromTarget(state, humanSide, selectedSlot, target.slotIndex, emit);
       logNewBattleEvents(beforeLog);
       afterPlayerAction();
       return;
@@ -1289,6 +1531,7 @@ const FLOAT_MS = 800;
     selectedSlot = null;
     moveRange = [];
     attackTargets = [];
+    cancelCastModeQuiet();
     input.clearPendingAttack();
     infoPopup.hide();
     ai.advance();
@@ -1297,14 +1540,16 @@ const FLOAT_MS = 800;
   // Every damage entry appended by the beat we just resolved becomes a
   // floating casualty count over whoever took it. Driven off the engine log
   // rather than before/after health diffing, so a counterattack shows up as
-  // its own float on the other platoon without any special casing.
+  // its own float on the other platoon without any special casing. Spell
+  // damage rides the same path via its spell_cast entry.
   function spawnDamageFloats(sinceLength: number): void {
     for (let i = sinceLength; i < state.log.length; i++) {
       const entry = state.log[i];
-      if (entry.kind !== "damage") continue;
+      if (entry.kind !== "damage" && entry.kind !== "spell_cast") continue;
       const targetSide: BattleSide = entry.side === "attacker" ? "defender" : "attacker";
       const victim = getCombatant(state, targetSide, entry.targetSlot);
       if (!victim) continue;
+      if (entry.kind === "spell_cast" && entry.damage === undefined) continue;
       const lost = entry.casualties.reduce((sum, c) => sum + c.count, 0);
       floats.push({
         hex: { ...victim.position },
@@ -1362,9 +1607,44 @@ function finishBattle(): void {
     selectedSlot = null;
     moveRange = [];
     attackTargets = [];
+    cancelCastModeQuiet();
     input.clearPendingAttack();
     infoPopup.hide();
     refresh();
+    // Arena-level verdict (work item 3): a human concession wins, otherwise
+    // the engine's winner decides; "draw" is the max-rounds stalemate.
+    const outcome: ManualBattleOutcomeKind =
+      concession === "retreat" || concession === "surrender"
+        ? concession
+        : result.winner === "attacker"
+          ? "attackerWon"
+          : result.winner === "defender"
+            ? "defenderWon"
+            : "draw";
+    // Terminal row of the action stream (work item 4b): outcome + survivor
+    // stacks — everything the future legality-check consumer needs to close
+    // out the battle it re-simulated.
+    emit?.({
+      phase: "end",
+      payload: {
+        outcome,
+        rounds: result.rounds,
+        attackerSurvivors: result.attackerPlatoons,
+        defenderSurvivors: result.defenderPlatoons,
+        surrenderedGold: surrenderedGoldPaid,
+      },
+    });
+    if (options.onComplete) {
+      // Production flow (plan/2026-09-27-manual-battle-wiring.md, work item
+      // 3): hand the outcome to the caller instead of showing the card here —
+      // it submits the result server-side (SubmitBattleResult), applies the
+      // returned heroes, and shows the shared result card with real hero
+      // labels, closing this arena via the returned handle's `close` when
+      // the card is carried on. The arena overlay stays up under that card
+      // so the world behind it only appears once the state is consistent.
+      options.onComplete({ outcome, attackerSurvivors: result.attackerPlatoons, defenderSurvivors: result.defenderPlatoons, surrenderedGold: surrenderedGoldPaid, result });
+      return;
+    }
     showBattleResultCard({
       result,
       attackerLabel: humanSide === "attacker" ? "You" : "AI Opponent",
@@ -1382,6 +1662,42 @@ function finishBattle(): void {
     // click lands. Ignore input until it hands control back.
     if (ai.isActing()) {
       debugLog(`click ${fmtHex(hex)} -> ignored (AI is acting)`);
+      return;
+    }
+
+    // Cast targeting is armed: the click means "cast at this platoon" or
+    // "cancel" — never select/attack/move. Checked before the whole normal
+    // chain so an armed click can't be misread as a platoon selection.
+    if (castMode) {
+      const target = castTargets.find((t) => t.position.q === hex.q && t.position.r === hex.r);
+      castMode = false;
+      castTargets = [];
+      if (target) {
+        const beforeLog = state.log.length;
+        debugLog(`click ${fmtHex(hex)} -> cast ${humanSpell ? SPELL_CATALOG[humanSpell.spell].name : "?"} at ${platoonLabel(target.side, target.slotIndex)}`);
+        const cast = castSpellAction(state, humanSide, target.slotIndex, emit);
+        if (cast) {
+          logNewBattleEvents(beforeLog);
+          spawnDamageFloats(beforeLog);
+          // A killing blow (the spell wiped the last enemy platoon) ends the
+          // battle exactly like a decisive attack does — casting itself never
+          // advances the round or consumes a turn, but a won battle is won.
+          if (isBattleOver(state)) {
+            refresh();
+            finishBattle();
+            return;
+          }
+          refresh();
+        } else {
+          // Previewed as legal but the engine refused (e.g. mana drained by a
+          // race): nothing mutated, nothing streamed — just leave cast mode.
+          debugLog(`click ${fmtHex(hex)} -> cast REJECTED by engine (was previewed as legal)`);
+          refresh();
+        }
+      } else {
+        debugLog(`click ${fmtHex(hex)} -> cast cancelled (not a legal spell target)`);
+        refresh();
+      }
       return;
     }
 
@@ -1426,7 +1742,7 @@ function finishBattle(): void {
           `from ${fmtHex(from)} -> ${platoonLabel(input.getPendingTarget()!.side, input.getPendingTarget()!.slotIndex)}`,
         );
         const beforeLog = state.log.length;
-        if (attackFromSelectedHex(state, humanSide, selectedSlot, input.getPendingTarget()!.slotIndex, from)) {
+        if (attackFromSelectedHex(state, humanSide, selectedSlot, input.getPendingTarget()!.slotIndex, from, emit)) {
           if (distance > 0) recordMove(humanSide, selectedSlot, distance);
           logNewBattleEvents(beforeLog);
           afterPlayerAction();
@@ -1443,14 +1759,14 @@ function finishBattle(): void {
     if (target) {
       debugLog(`click ${fmtHex(hex)} -> attack: ${platoonLabel(humanSide, selectedSlot)} -> ${platoonLabel(target.side, target.slotIndex)}`);
       const beforeLog = state.log.length;
-      attackFromTarget(state, humanSide, selectedSlot, target.slotIndex);
+      attackFromTarget(state, humanSide, selectedSlot, target.slotIndex, emit);
       logNewBattleEvents(beforeLog);
       afterPlayerAction();
       return;
     }
 
     if (moveRange.some((h) => h.q === hex.q && h.r === hex.r)) {
-      const result = moveSelectedTo(state, humanSide, selectedSlot, hex);
+      const result = moveSelectedTo(state, humanSide, selectedSlot, hex, emit);
       const from = result.from ?? hex;
       if (result.moved) {
         recordMove(humanSide, selectedSlot, result.distance);
@@ -1611,7 +1927,7 @@ function finishBattle(): void {
           ? {
               unitTypes: state.unitTypes,
               stats: statsFor(c),
-              metrics: metricsFor(),
+              metrics: metricsFor(c),
               movementRemaining: getMovementRange(state, c).length,
               canAct: actableSlots.includes(c.slotIndex),
             }
@@ -1637,4 +1953,11 @@ function finishBattle(): void {
 
   relayoutCanvas();
   refresh();
+
+  // Production callers (GameActions) need to close the arena themselves —
+  // after submitting the played-out result and showing the shared result
+  // card, the card's Carry On dismisses this overlay. Same teardown as the
+  // sandbox's internal closeArena(), exposed rather than self-invoked so
+  // the overlay outlives finishBattle() until the caller is done with it.
+  return { close: closeArena };
 }
