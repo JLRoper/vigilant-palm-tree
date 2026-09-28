@@ -25,4 +25,5 @@ export type HorseVariantId =
   | "arcane"
   | "unicorn"
   | "samurai"
+  | "drake"
   | "hero";

@@ -59,8 +59,8 @@ Source: `computeSettlementRates()` in [`packages/engine/src/economy/settlementRa
 | Event | Where | Level used |
 |-------|-------|-----------|
 | Initial castles at game start | `src/game/initState.ts:118` | castle's level (1–3) |
-| Charter initiated | `src/state/turnController.ts:361` (client) / `server/app/commandHandler.ts:899` (server-authoritative) | 1 |
-| Settlement upgrade initiated | `src/state/turnController.ts:612` / `server/app/commandHandler.ts:1064` | target level, precomputed into `UpgradeState.newResourceRates` |
+| Charter initiated | `src/state/turnController.ts` `startCharter()` (client) / `server/app/commandHandler.ts:899` (server-authoritative) | 1 |
+| Settlement upgrade initiated | `src/state/turnController.ts` `startSettlementUpgrade()` / `server/app/commandHandler.ts:1064` | target level, precomputed into `UpgradeState.newResourceRates` |
 | Capture | — | **rates are NOT recomputed**; the stored rates carry over to the new owner |
 
 Charter rates ride on `CharterState.resourceRates` until the settlement is founded (`packages/engine/src/charter/advance.ts` copies them verbatim). Consequence: an L1 charter founded on a resource-free tile has **all-zero rates** and produces nothing from tiles.

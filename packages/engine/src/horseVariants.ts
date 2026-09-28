@@ -6,6 +6,7 @@ export const HORSE_VARIANT_REGISTRY = [
   { id: "arcane", label: "Arcane Spellrider", commanderDir: 6 },
   { id: "unicorn", label: "Dark Unicorn", commanderDir: 7 },
   { id: "samurai", label: "Samurai Warrior", commanderDir: 8 },
+  { id: "drake", label: "Drake Rider", commanderDir: 9 },
   { id: "hero", label: "Knight", commanderDir: 1 },
 ] as const;
 

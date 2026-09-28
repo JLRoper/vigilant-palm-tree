@@ -1,6 +1,5 @@
-import { TILE_W, TILE_D, cellOrigin } from "../../../core/cityGrid";
+import { cityLayout, screenToGridCell } from "../../../core/cityGrid";
 import type { CityViewSize } from "@heroes/engine";
-import { computeCityScale } from "../../../render/cityRenderer";
 import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
 import { coversCell as reCoversCell } from "../../../render/cityBuildingDraw";
 import { PopupMenu, styleButton, menuTheme } from "@screens/shared/menu";
@@ -502,29 +501,17 @@ export class BuildingPlacer {
       return;
     }
 
-    const tileScale = computeCityScale(this.size, viewportW, viewportH);
-    const tw = TILE_W * tileScale;
-    const td = TILE_D * tileScale;
-    const origin = cellOrigin(this.size);
-    const gridVCenter = (this.size - 1) * TILE_D / 2;
-    const buildingPad = this.size * TILE_D * 0.18;
-    const screenOriginY = viewportH / 2 - (gridVCenter + buildingPad) * tileScale;
+    const layout = cityLayout(this.size, viewportW, viewportH);
+    const cell = screenToGridCell(layout, this.size, viewportW, canvasX, canvasY);
 
-    const wdx = canvasX - viewportW / 2 - origin.x * tileScale;
-    const wdy = canvasY - screenOriginY - origin.y * tileScale;
-    const gxf = wdx / tw + wdy / td;
-    const gyf = wdy / td - wdx / tw;
-    const gx = Math.floor(gxf);
-    const gy = Math.floor(gyf);
-
-    if (gx < 0 || gx >= this.size || gy < 0 || gy >= this.size) {
+    if (!cell) {
       this.hoverCell = null;
       this.valid = false;
       return;
     }
 
-    this.hoverCell = { gx, gy };
-    this.valid = this.canPlaceAt(gx, gy);
+    this.hoverCell = cell;
+    this.valid = this.canPlaceAt(cell.gx, cell.gy);
   }
 
   canPlaceAt(gx: number, gy: number): boolean {

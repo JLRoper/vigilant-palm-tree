@@ -118,7 +118,7 @@ bus.on("state:committed", () => {
 - `src/managers/GameActions.ts`: `handleEndTurn()` (L66), `startBattleFlow()` (L34)
 - `src/managers/GameEngine.ts`: transferGold (L139), reorderStack (L151), `handleStartCharter()` (L285)
 - `src/managers/UIManager.ts`: closeHeroInfoMenu (L110), closeSettlementInfoMenu (L124), `handleRosterHeroSelect()` (L263), `handleRecruitHero()` (L289)
-- `src/views/adventureView.ts`: onClick charter/select/attack/settlement (L250,292,353,371,344,404)
+- `src/screens/adventure/adventureView.ts`: click handling (`onClick`) — the charter/select/attack/settlement decision logic now lives in `src/screens/adventure/clickIntent.ts` as `resolveAdventureClick()` returning a `ClickIntent` union (2026-09-27 refactor); AdventureView consumes the intent.
 - `src/io/debugCommands.ts`: `requestMove()` (L67), `captureSettlement()` (L81), `tradeResources()` (L89), `teleportHero()` (L99)
 - **Note:** `debugCommands.ts` is also extended to forward `eventLog` into the
   `__gameDebug.events` surface (see [`dev-console.md`](./dev-console.md)). That

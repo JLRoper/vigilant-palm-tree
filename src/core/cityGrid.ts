@@ -90,3 +90,55 @@ export function cellsInDrawOrder(size: CityViewSize): CityCell[] {
   }
   return out;
 }
+
+// Vertical pad added below the grid so tall isometric buildings at the south
+// edge have room; a fraction of the grid's full depth.
+export const BUILDING_PAD_RATIO = 0.18;
+
+export interface CityLayout {
+  tileScale: number;
+  tw: number;
+  td: number;
+  gridOrigin: { x: number; y: number };
+  screenOrigin: { x: number; y: number };
+}
+
+// Same pure-context note as computeCityScale: importable from contexts
+// without a bundler asset pipeline (e.g. plain node:test).
+export function cityLayout(
+  size: CityViewSize,
+  viewportW: number,
+  viewportH: number,
+): CityLayout {
+  const tileScale = computeCityScale(size, viewportW, viewportH);
+  const tw = TILE_W * tileScale;
+  const td = TILE_D * tileScale;
+  const gridOrigin = cellOrigin(size);
+  const gridVCenter = (size - 1) * TILE_D / 2;
+  const buildingPad = size * TILE_D * BUILDING_PAD_RATIO;
+  const screenOriginY = viewportH / 2 - (gridVCenter + buildingPad) * tileScale;
+  return {
+    tileScale,
+    tw,
+    td,
+    gridOrigin,
+    screenOrigin: { x: viewportW / 2, y: screenOriginY },
+  };
+}
+
+export function screenToGridCell(
+  layout: CityLayout,
+  size: CityViewSize,
+  viewportW: number,
+  canvasX: number,
+  canvasY: number,
+): CityCell | null {
+  const wdx = canvasX - viewportW / 2 - layout.gridOrigin.x * layout.tileScale;
+  const wdy = canvasY - layout.screenOrigin.y - layout.gridOrigin.y * layout.tileScale;
+  const gxf = wdx / layout.tw + wdy / layout.td;
+  const gyf = wdy / layout.td - wdx / layout.tw;
+  const gx = Math.floor(gxf);
+  const gy = Math.floor(gyf);
+  if (gx < 0 || gx >= size || gy < 0 || gy >= size) return null;
+  return { gx, gy };
+}

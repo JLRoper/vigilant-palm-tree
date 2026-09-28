@@ -28,7 +28,10 @@ function startApi(): ChildProcess {
 }
 
 function startWeb(): ChildProcess {
-  const child = spawn("npx", ["vite", "preview", "--port", String(WEB_PORT)], {
+  // Dev server (not `vite preview`): the production bundle's auto-starter
+  // flow 500s against preview, so create the game explicitly instead (same
+  // bootstrap as test/visualRegression.test.ts).
+  const child = spawn("npx", ["vite", "--port", String(WEB_PORT), "--strictPort"], {
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
     shell: true,
@@ -74,8 +77,12 @@ async function readArmyTiles(page: import("playwright").Page): Promise<string[]>
     // Filter to only the in-menu army tiles (not resource icons on the map).
     // The collapsed army tiles live inside the hero info popup body.
     const popup = document.querySelector(".popup-body") ?? document.body;
+    // Chromium serializes the inline `aspect-ratio: 1` declaration as
+    // "1 / 1" (older builds returned the literal "1"), so accept both forms.
+    // The predicate stays an inline arrow: a named function expression here
+    // would drag esbuild's __name helper into the serialized page.evaluate.
     const inPopup = Array.from(popup.querySelectorAll<HTMLDivElement>("div"))
-      .filter((d) => d.style.aspectRatio === "1");
+      .filter((d) => d.style.aspectRatio === "1" || d.style.aspectRatio === "1 / 1");
     return inPopup.map((d) => {
       const img = d.querySelector<HTMLImageElement>("img");
       const src = img?.getAttribute("src") ?? "";
@@ -93,7 +100,7 @@ async function performDrag(page: import("playwright").Page, fromIdx: number, toI
   await page.evaluate(
     ({ fromIdx, toIdx }) => {
       const tiles = Array.from(document.querySelectorAll<HTMLDivElement>("div"))
-        .filter((d) => d.style.aspectRatio === "1");
+        .filter((d) => d.style.aspectRatio === "1" || d.style.aspectRatio === "1 / 1");
       const src = tiles[fromIdx];
       const dst = tiles[toIdx];
       if (!src || !dst) throw new Error(`tiles not found: ${fromIdx} -> ${toIdx}`);
@@ -101,23 +108,28 @@ async function performDrag(page: import("playwright").Page, fromIdx: number, toI
       const rect = dst.getBoundingClientRect();
       const dropX = rect.left + rect.width / 2;
       const dropY = rect.top + rect.height / 2;
-      const fire = (el: Element, type: string, x: number, y: number) => {
-        const ev = new DragEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          dataTransfer: dt,
-          clientX: x,
-          clientY: y,
-        });
-        el.dispatchEvent(ev);
-        return ev;
-      };
-      fire(src, "dragstart", 0, 0);
-      fire(dst, "dragenter", dropX, dropY);
-      fire(dst, "dragover", dropX, dropY);
-      fire(dst, "drop", dropX, dropY);
-      fire(src, "dragend", dropX, dropY);
+      // Dispatch via a data loop rather than a named helper function: named
+      // function bindings inside a page.evaluate callback drag esbuild's
+      // __name helper into the serialized source, which the page can't see.
+      const dispatches: Array<[Element, string, number, number]> = [
+        [src, "dragstart", 0, 0],
+        [dst, "dragenter", dropX, dropY],
+        [dst, "dragover", dropX, dropY],
+        [dst, "drop", dropX, dropY],
+        [src, "dragend", dropX, dropY],
+      ];
+      for (const [el, type, x, y] of dispatches) {
+        el.dispatchEvent(
+          new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            dataTransfer: dt,
+            clientX: x,
+            clientY: y,
+          }),
+        );
+      }
     },
     { fromIdx, toIdx },
   );
@@ -146,13 +158,23 @@ async function run(): Promise<void> {
     });
     page.on("pageerror", (e) => browserLogs.push(`[pageerror] ${e.message}`));
 
+    // The app boots into a full-screen home overlay, so create the game the
+    // same way the visual-regression suite does: through home's own New Game
+    // modal (home's root is appended after the toolbar, so its "New Game"
+    // button is reliably the last one in document order).
     await page.goto(WEB_URL, { waitUntil: "networkidle" });
-    await page.evaluate(() => localStorage.clear());
-    await page.reload({ waitUntil: "networkidle" });
+    await page.locator("button", { hasText: "New Game" }).last().click();
+    await page.waitForTimeout(150);
+    await page.locator("input[type=text]").first().fill(GAME_NAME);
+    await page.locator("input[type=number]").first().fill("90210");
+    await page.locator("button", { hasText: "Create Game" }).click();
+    // The auto-starter game is usually already active by now, so waiting for
+    // "some game is active" races the swap -- select the hero only after the
+    // created game is the one actually loaded (same as the visual suite).
     await page.waitForFunction(
-      () => (window as unknown as { __gameDebug?: { activeGameName?: string } }).__gameDebug?.activeGameName != null,
-      null,
-      { timeout: 15_000 },
+      (name) => (window as unknown as { __gameDebug?: { activeGameName?: string } }).__gameDebug?.activeGameName === name,
+      GAME_NAME,
+      { timeout: 20_000 },
     );
 
     // Find the player hero's id via the game state, then select it
@@ -174,16 +196,55 @@ async function run(): Promise<void> {
     });
     if (!heroId) throw new Error("could not find player hero or setSelectedHero");
     console.log(`>> selected hero ${heroId} programmatically`);
+
+    // The panel only opens once the legacy Hero-entity mirror has the selected
+    // hero (UIManager.refreshHeroInfoMenu hides it otherwise), so wait for the
+    // mirror to populate rather than a fixed delay.
+    await page.waitForFunction(
+      () => ((window as unknown as { __gameDebug?: { getHeroes?: () => unknown[] } }).__gameDebug?.getHeroes?.() ?? []).length > 0,
+      null,
+      { timeout: 20_000 },
+    );
     await page.waitForTimeout(400);
 
-    // Wait for the hero info menu to be visible.
-    await page.waitForSelector("text=Hero", { timeout: 5_000 });
+    // Wait for the hero info menu to actually be open ("Army" only exists in
+    // the panel body -- "text=Hero" also matches the toolbar's Heroes button).
+    await page.waitForSelector("text=Army", { timeout: 5_000 });
     await page.waitForTimeout(200);
 
     const before = await readArmyTiles(page);
     console.log(">> BEFORE reorder, tiles:", JSON.stringify(before));
 
     if (before.length !== 8) {
+      const diag = await page.evaluate(() => {
+        const dbg = window as unknown as {
+          __gameDebug?: {
+            getGameState?: () => { selectedHeroId?: string; activeGameName?: string };
+            getHeroes?: () => unknown[];
+          };
+        };
+        return {
+          activeGameName: dbg.__gameDebug?.getGameState?.().activeGameName,
+          selectedHeroId: dbg.__gameDebug?.getGameState?.().selectedHeroId,
+          mirrorHeroes: (dbg.__gameDebug?.getHeroes?.() ?? []).length,
+          popupBodyCount: document.querySelectorAll(".popup-body").length,
+          heroPanelDisplay: Array.from(document.body.children)
+            .find((el) => el.textContent?.startsWith("Hero"))
+            ?.style?.display,
+          aspectValues: Array.from(new Set(
+            Array.from(document.querySelectorAll("div"))
+              .map((d) => d.style.aspectRatio)
+              .filter((v) => v !== ""),
+          )),
+          heroPanelHtmlLen: Array.from(document.body.children)
+            .find((el) => el.textContent?.startsWith("Hero"))
+            ?.innerHTML?.length,
+          heroPanelHtmlSample: Array.from(document.body.children)
+            .find((el) => el.textContent?.startsWith("Hero"))
+            ?.innerHTML?.slice(-600),
+        };
+      });
+      console.log(">> DIAGNOSTICS:", JSON.stringify(diag, null, 1));
       throw new Error(`expected 8 army tiles, found ${before.length}: ${JSON.stringify(before)}`);
     }
 

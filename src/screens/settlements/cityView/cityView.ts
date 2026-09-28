@@ -1,6 +1,6 @@
-import { TILE_W, TILE_D, cellOrigin } from "../../../core/cityGrid";
 import type { CityViewSize } from "@heroes/engine";
-import { computeCityScale, drawCityView } from "../../../render/cityRenderer";
+import { cityLayout, screenToGridCell } from "../../../core/cityGrid";
+import { drawCityView } from "../../../render/cityRenderer";
 import { buildCityScene } from "../../../render/scene/sceneBuilder/cityScene";
 import { createPaint2DDep } from "../../../render/paint2dDefaults";
 import { createSkyboxProvider } from "../../../render/skybox";
@@ -10,6 +10,7 @@ import type { SpriteProvider } from "../../../render/assets";
 import type { BuildingDef, GenerationStyle } from "../../../render/cityBuildingDraw";
 import { coversCell, buildingFootprint } from "../../../render/cityBuildingDraw";
 import { generateBuildings, type GenerationPattern } from "../../../render/cityBuildingGen";
+import { netDelta } from "./netCost";
 import { BuildingMenu, type BuildingMenuOptions } from "./buildingMenu";
 import { BuildingPlacer } from "./buildingPlacer";
 import { BuildingSelectionMenu, type SelectedBuildingEntry } from "./buildingSelectionMenu";
@@ -20,6 +21,23 @@ import type { BuildingUpgradeRequest } from "../../../state/gameState";
 import type { BuildingUpgradeCost, ProducerOutput } from "@heroes/engine";
 import { producerTurnOutput } from "@heroes/engine";
 import { CityDesignBoxManager } from "./CityDesignBoxManager";
+
+const STYLE_KEYS: Record<string, GenerationStyle> = {
+  "1": "classic",
+  "2": "blocky",
+  "3": "crystalline",
+  "4": "organic",
+  "5": "industrial",
+};
+
+const PATTERN_KEYS: Record<string, GenerationPattern> = {
+  "!": "denseUrban",
+  "@": "sparseRural",
+  "#": "radial",
+  "$": "grid",
+  "%": "clustered",
+  "^": "sampler",
+};
 
 export class CityView {
   private designBox = new CityDesignBoxManager();
@@ -122,19 +140,16 @@ export class CityView {
         }
         return;
       }
-      if (e.key >= "1" && e.key <= "5") {
-        const styles: GenerationStyle[] = ["classic", "blocky", "crystalline", "organic", "industrial"];
-        this.style = styles[parseInt(e.key) - 1];
+      const styleKey = STYLE_KEYS[e.key];
+      if (styleKey) {
+        this.style = styleKey;
         this.regenerate();
         return;
       }
-      if (e.key === "!" || e.key === "@" || e.key === "#" || e.key === "$" || e.key === "%" || e.key === "^") {
-        const patterns: GenerationPattern[] = ["denseUrban", "sparseRural", "radial", "grid", "clustered", "sampler"];
-        const idx = "!@#$%^".indexOf(e.key);
-        if (idx >= 0 && idx < patterns.length) {
-          this.pattern = patterns[idx];
-          this.regenerate();
-        }
+      const patternKey = PATTERN_KEYS[e.key];
+      if (patternKey) {
+        this.pattern = patternKey;
+        this.regenerate();
         return;
       }
       if (e.key === "r" || e.key === "R") {
@@ -256,27 +271,8 @@ export class CityView {
     }
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
-    const tileScale = computeCityScale(this.size, viewportW, viewportH);
-    const tw = TILE_W * tileScale;
-    const td = TILE_D * tileScale;
-    const origin = cellOrigin(this.size);
-
-    const gridVCenter = (this.size - 1) * TILE_D / 2;
-    const buildingPad = this.size * TILE_D * 0.18;
-    const screenOriginY = viewportH / 2 - (gridVCenter + buildingPad) * tileScale;
-    const wdx = canvasX - viewportW / 2 - origin.x * tileScale;
-    const wdy = canvasY - screenOriginY - origin.y * tileScale;
-
-    const gxf = wdx / tw + wdy / td;
-    const gyf = wdy / td - wdx / tw;
-    const gx = Math.floor(gxf);
-    const gy = Math.floor(gyf);
-
-    if (gx < 0 || gx >= this.size || gy < 0 || gy >= this.size) {
-      this.hover = null;
-    } else {
-      this.hover = { gx, gy };
-    }
+    const layout = cityLayout(this.size, viewportW, viewportH);
+    this.hover = screenToGridCell(layout, this.size, viewportW, canvasX, canvasY);
 
     // delegate snap computation to placer when in placement mode
     if (this.placer.isActive()) {
@@ -288,24 +284,15 @@ export class CityView {
     if (!this.isOpen()) return;
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
-    const tileScale = computeCityScale(this.size, viewportW, viewportH);
-    const origin = cellOrigin(this.size);
-    const tw = TILE_W * tileScale;
-    const td = TILE_D * tileScale;
+    const layout = cityLayout(this.size, viewportW, viewportH);
+    const cell = screenToGridCell(layout, this.size, viewportW, canvasX, canvasY);
 
-    const screenOriginY = viewportH / 2 - ((this.size - 1) * TILE_D / 2 + this.size * TILE_D * 0.18) * tileScale;
-    const wdx = canvasX - viewportW / 2 - origin.x * tileScale;
-    const wdy = canvasY - screenOriginY - origin.y * tileScale;
-    const gxf = wdx / tw + wdy / td;
-    const gyf = wdy / td - wdx / tw;
-    const gx = Math.floor(gxf);
-    const gy = Math.floor(gyf);
-
-    if (gx < 0 || gx >= this.size || gy < 0 || gy >= this.size) {
+    if (!cell) {
       this.buildingMenu.hide();
       if (!modifier?.ctrlKey && !modifier?.metaKey) this.clearSelection();
       return;
     }
+    const { gx, gy } = cell;
 
     const ctrlLike = !!(modifier?.ctrlKey || modifier?.metaKey);
 
@@ -348,11 +335,9 @@ export class CityView {
     if (this.selectedKeys.size > 0) {
       this.clearSelection();
     }
-    const screenOrigin = { x: viewportW / 2, y: viewportH / 2 - ((this.size - 1) * TILE_D / 2 + this.size * TILE_D * 0.18) * tileScale };
-    const gridOrigin = cellOrigin(this.size);
     const w = building.w ?? 1;
     const h = building.h ?? 1;
-    const fp = buildingFootprint(building.gx, building.gy, gridOrigin, screenOrigin, tileScale, w, h);
+    const fp = buildingFootprint(building.gx, building.gy, layout.gridOrigin, layout.screenOrigin, layout.tileScale, w, h);
 
     this.buildingMenu.show(
       building,
@@ -503,13 +488,7 @@ export class CityView {
   }
 
   private pendingNetDelta(): Partial<Record<ResourceType, number>> {
-    const net = this.placer.getNetCost();
-    const delta: Partial<Record<ResourceType, number>> = {};
-    for (const r of ["gold", "wood", "stone", "iron", "arcane"] as const) {
-      const d = (net[r] ?? 0) - (this.chargedNet[r] ?? 0);
-      if (d !== 0) delta[r] = d;
-    }
-    return delta;
+    return netDelta(this.placer.getNetCost(), this.chargedNet);
   }
 
   private refreshAffordability(): void {

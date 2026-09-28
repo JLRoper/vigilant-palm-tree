@@ -59,6 +59,11 @@ const HERO_NAMES: readonly string[] = [
   "Sakura Dawnstrider",
   "Katsuro Steelheart",
   "Miyuki Wintersong",
+  "Kaelith Emberwing",
+  "Syrax Flintscale",
+  "Morgra Duskfire",
+  "Rhaegos Ashmaw",
+  "Vyra Cinderhorn",
 ];
 
 let usedNames: Set<string> | null = null;

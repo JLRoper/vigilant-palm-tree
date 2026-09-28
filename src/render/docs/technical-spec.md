@@ -114,7 +114,7 @@ Key helper functions generate the correct keys:
 - `castleKey(level, variant?)` — returns `castle.${level}` or `castle-alt.${level}` based on optional variant
 - `resourceKey(type)` / `resourceCartKey(type)` / `resourceStyleKey(type, style)` — resource naming
 - `heroKey(faction)` / `heroDirectionKey("player", dir)` — hero sprite lookup
-- `horseBubblyKey(dir)` through `horseSamuraiKey(dir)` — per-variant directional lookup
+- `horseVariantKey(variant, dir)` — generic per-variant directional lookup for any registry variant (legacy `horseBubblyKey(dir)` through `horseSamuraiKey(dir)` remain as sugar wrappers)
 - `buildingKey(style, kind, level)` — city building lookup
 
 ### 1.2 SpriteDescriptor
@@ -223,10 +223,12 @@ sequenceDiagram
 | `RESOURCE_PILE_BUBBLY_DESCRIPTORS` | `resource-pile-bubbly.{...}` | 6 |
 | `HERO_PLAYER_DESCRIPTORS` | `hero.player.{n,ne,e,se,s,sw,w,nw}` | 8 |
 | `HERO_DESCRIPTORS` | `hero.player`, `hero.enemy` | 2 |
-| `HORSE_BUBBLY_DESCRIPTORS` through `HORSE_SAMURAI_DESCRIPTORS` | 7 variants × 4–8 directions each | ~42 |
+| `HORSE_VARIANT_DESCRIPTORS` | `horse.{variant}.{dir}` — one sub-record per `HORSE_VARIANT_REGISTRY` entry | 9 variants × 4–8 directions each | 42 |
 | `BUILDING_DESCRIPTORS` | `building.{style}.{kind}.{level}` | 6 |
 
 `ALL_DESCRIPTORS` concatenates all of the above into a flat array used by `createDefaultProvider()`.
+
+The horse-variant descriptors are registry-driven rather than hand-listed: `assetDescriptors.ts` generates `HORSE_VARIANT_DESCRIPTORS` for all 9 `HORSE_VARIANT_REGISTRY` entries (`packages/engine/src/horseVariants.ts`) from an `import.meta.glob` of `units/horse/commander-*/*.png` — adding a variant is a registry entry plus a `commander-{N}/` sprite folder. Bubbly keeps its `naturalSize: 64` special case (everything else uses 512), and non-hero variants get diagonal→cardinal URL fallbacks (`ne/nw→n`, `se/sw→s`) applied at descriptor build time. `HORSE_VARIANT_DESCRIPTORS` / `horseVariantKey(variant, dir)` are the generic accessors; the legacy per-variant key wrappers remain as sugar.
 
 #### Castle Sprites
 
@@ -252,6 +254,7 @@ Each variant loads from `resources/units/horse/commander-{N}/`:
 | 6 | arcane | `horse.arcane.{dir}` | 4 | diags → cardinals |
 | 7 | unicorn | `horse.unicorn.{dir}` | 4 | diags → cardinals |
 | 8 | samurai | `horse.samurai.{dir}` | 4 | diags → cardinals |
+| 9 | drake | `horse.drake.{dir}` | 4 | diags → cardinals |
 
 ---
 
@@ -399,7 +402,7 @@ ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, dpr * x, dpr * y)
 - Supports vertical scale animation via `scaleY` parameter (bobbing when moving)
 
 **`drawHorseSprite(ctx, provider, variant, cx, cy, direction, hexSize)`**
-- Handles 7 image-based horse variants: bubbly, shadow, paladin, ranger, arcane, unicorn, samurai
+- Handles the 8 image-based mounted variants: bubbly, shadow, paladin, ranger, arcane, unicorn, samurai, drake (the on-foot player knight from `commander-1` goes through `drawHeroSprite()` instead)
 - Uses directional fallback for missing diagonal sprites
 - `HORSE_VARIANT_KEYS` maps each variant name to its key-generating function
 
@@ -439,7 +442,7 @@ Issue #148 split every world-space overlay into its two halves: the *what to dra
 
 `overlays/pathOverlay.ts` is down to two exports:
 
-- **`computeReachableSplit(path, map, movementRemaining)`** — walks the path accumulating terrain movement costs. Returns the index where cumulative cost exceeds `movementRemaining`, splitting the path into reachable (gold) and unreachable (dim) segments. Called by `buildAdventureScene()` (and by `adventureView.ts` for its own hit-testing), not by any painter.
+- **`computeReachableSplit(path, map, movementRemaining)`** — walks the path accumulating terrain movement costs. Returns the index where cumulative cost exceeds `movementRemaining`, splitting the path into reachable (gold) and unreachable (dim) segments. Called by `buildAdventureScene()` and by `src/screens/adventure/clickIntent.ts` (the adventure click-intent resolver, which took over `AdventureView.onClick`'s hit-testing in 2026-09-27), not by any painter.
 - **`drawMinimapPath(ctx, path, minimapCamera, geo)`** — draws path cells on the minimap grid. Stays here because the minimap is not part of the scene graph.
 
 The proposed route and the hero's history trail are now `pathSegment` / `heroTrail` nodes, painted by `paintPathSegment()` / `paintHeroTrail()`.
@@ -492,7 +495,7 @@ The old 12-field `DrawCityViewOptions` bag was scene-builder input, not painter 
 
 The four `?url` skybox PNG imports and the module-scope `skyboxCache`/`layerCanvasCache` maps that used to live in this file moved to `src/render/skybox.ts`.
 
-**`computeCityScale(size, viewportW, viewportH)`** — computes the tile scale so the full city fits within 85% of the viewport. Still re-exported from `cityRenderer.ts` for `buildingPlacer.ts`/`cityView.ts`, but it lives in `core/cityGrid.ts`.
+**`computeCityScale(size, viewportW, viewportH)`** — computes the tile scale so the full city fits within 85% of the viewport. Lives in `core/cityGrid.ts`; `cityRenderer.ts` still re-exports it, but since 2026-09-27 `cityView.ts`/`buildingPlacer.ts` no longer consume it through that re-export — they use `core/cityGrid.ts` directly (along with the `cityLayout`/`screenToGridCell` pair).
 
 **Render order** (back-to-front for correct z-ordering):
 
@@ -947,7 +950,7 @@ Deleted by issue #148: `painter/*` (7 classes + barrel, 395 lines), `overlays/re
 ### External Dependencies
 
 - `src/core/hex.ts` — Hex coordinate math (`axialToPixel`, `pixelToAxial`, `hexCorners`, `hexDistance`, `HEX_SIZE`)
-- `src/core/cityGrid.ts` — City grid coordinate math (`cellOrigin`, `cellToScreen`, `cellsInDrawOrder`, `computeCityScale`, `TILE_W`, `TILE_D`, `CityViewSize`). `computeCityScale` moved here from `cityRenderer.ts` (which re-exports it for its existing callers) so it's importable without pulling in `cityRenderer.ts`'s module-scope Vite `?url` PNG imports — see §7.
+- `src/core/cityGrid.ts` — City grid coordinate math (`cellOrigin`, `cellToScreen`, `cellsInDrawOrder`, `computeCityScale`, `cityLayout`, `screenToGridCell`, `BUILDING_PAD_RATIO`, `TILE_W`, `TILE_D`, `CityViewSize`). `computeCityScale` moved here from `cityRenderer.ts` (which still re-exports it, though `cityView.ts`/`buildingPlacer.ts` now import from this module directly) so it's importable without pulling in `cityRenderer.ts`'s module-scope Vite `?url` PNG imports — see §7.
 - `src/core/control.ts` — Territory control logic (`controlledPositions`, `territoryBoundaryEdges`, `controlRange`)
 - `src/map/terrain.ts` — `TERRAIN_COLORS`, `Terrain` type, `TERRAIN_COST`
 - `src/map/resourceTiles.ts` — `ResourceType`, `RESOURCES`
@@ -960,7 +963,7 @@ Deleted by issue #148: `painter/*` (7 classes + barrel, 395 lines), `overlays/re
 
 1. **Sprite fallback chain**: PNG images are preferred; procedural canvas rendering is the fallback. The `CompositeSpriteSource` checks images first, then procedural. This means FLUX-generated sprites take priority over the hand-coded procedural ones.
 
-2. **Per-entity variant system**: Castles have `castleVariant: 0 | 1` and heroes have `horseVariant: HorseVariant` (8 values). These are stored on the game-state entities, not as global settings. The renderer reads each entity's variant to determine which sprite to draw.
+2. **Per-entity variant system**: Castles have `castleVariant: 0 | 1` and heroes have `horseVariant: HorseVariant` (9 values). These are stored on the game-state entities, not as global settings. The renderer reads each entity's variant to determine which sprite to draw.
 
 3. **City view style system**: 5 visual styles × 6 layout patterns = 30 combinations per settlement. Style and pattern are selected per-city-view session (default `classic` + `denseUrban`), with keyboard shortcuts for runtime switching.
 

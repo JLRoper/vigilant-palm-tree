@@ -185,6 +185,23 @@ export class TurnController {
     await this.drainPendingCommands();
   }
 
+  private commit(
+    next: GameState,
+    opts: {
+      log?: { type: string; payload: Record<string, unknown> };
+      events?: Parameters<typeof bus.emit>[0][];
+      hook?: () => Promise<void>;
+      hookLabel?: string;
+    },
+  ): void {
+    this.state = next;
+    if (opts.log) this.hooks.logEvent(opts.log);
+    for (const event of opts.events ?? []) bus.emit(event);
+    if (opts.hook) {
+      this.trackCommand(opts.hook(), opts.hookLabel ?? opts.log?.type ?? "commit");
+    }
+  }
+
   selectHero(heroId: HeroId): void {
     if (this.state.phase.kind !== "PLAYER_TURN") return;
     const hero = this.state.heroes[heroId];
@@ -248,19 +265,23 @@ export class TurnController {
   captureSettlement(heroId: HeroId, settlementId: SettlementId): boolean {
     const result = captureSettlementReducer(this.state, heroId, settlementId);
     if (!result.captured) return false;
-    this.state = result.state;
-    bus.emit({ type: "settlement:captured", heroId, settlementId });
-    this.hooks.logEvent({
-      type: "settlement_captured",
-      payload: {
-        heroId,
-        settlementId,
-        newOwnerId: this.state.heroes[heroId]?.ownerId,
-        previousOwnerId: result.previousOwnerId,
+    this.commit(result.state, {
+      events: [{ type: "settlement:captured", heroId, settlementId }],
+      log: {
+        type: "settlement_captured",
+        payload: {
+          heroId,
+          settlementId,
+          newOwnerId: result.state.heroes[heroId]?.ownerId,
+          previousOwnerId: result.previousOwnerId,
+        },
       },
+      hook: () => {
+        const actor = result.state.heroes[heroId]?.ownerId ?? result.state.activePlayerId;
+        return this.hooks.onCaptureSettlement(actor, heroId, settlementId);
+      },
+      hookLabel: "onCaptureSettlement",
     });
-    const actor = this.state.heroes[heroId]?.ownerId ?? this.state.activePlayerId;
-    this.trackCommand(this.hooks.onCaptureSettlement(actor, heroId, settlementId), "onCaptureSettlement");
     return true;
   }
 
@@ -283,15 +304,21 @@ export class TurnController {
       direction === "deposit"
         ? this.state.heroes[heroId]?.gold ?? 0
         : this.state.settlements[settlementId]?.gold ?? 0;
-    this.state = result.state;
-    bus.emit({ type: "economy:goldChanged", entityId: heroId, entityType: "hero", amount: this.state.heroes[heroId]?.gold ?? 0 });
-    bus.emit({ type: "economy:goldChanged", entityId: settlementId, entityType: "settlement", amount: this.state.settlements[settlementId]?.gold ?? 0 });
-    this.hooks.logEvent({
-      type: "transfer_gold",
-      payload: { heroId, settlementId, direction, amount },
+    this.commit(result.state, {
+      events: [
+        { type: "economy:goldChanged", entityId: heroId, entityType: "hero", amount: result.state.heroes[heroId]?.gold ?? 0 },
+        { type: "economy:goldChanged", entityId: settlementId, entityType: "settlement", amount: result.state.settlements[settlementId]?.gold ?? 0 },
+      ],
+      log: {
+        type: "transfer_gold",
+        payload: { heroId, settlementId, direction, amount },
+      },
+      hook: () => {
+        const actor = result.state.heroes[heroId]?.ownerId ?? result.state.activePlayerId;
+        return this.hooks.onTransferGold(actor, heroId, settlementId, direction);
+      },
+      hookLabel: "onTransferGold",
     });
-    const actor = this.state.heroes[heroId]?.ownerId ?? this.state.activePlayerId;
-    this.trackCommand(this.hooks.onTransferGold(actor, heroId, settlementId, direction), "onTransferGold");
     return { ok: true, reason: "" };
   }
 
@@ -303,17 +330,18 @@ export class TurnController {
   ): { ok: boolean; reason: string } {
     const result = tradeResourcesReducer(this.state, fromId, toId, resource, amount);
     if (!result.ok) return { ok: false, reason: result.reason };
-    this.state = result.state;
-    bus.emit({ type: "economy:warehouseChanged", settlementId: fromId, resource, amount: this.state.settlements[fromId]?.warehouse?.[resource] ?? 0 });
-    bus.emit({ type: "economy:warehouseChanged", settlementId: toId, resource, amount: this.state.settlements[toId]?.warehouse?.[resource] ?? 0 });
-    this.hooks.logEvent({
-      type: "resources_traded",
-      payload: { fromId, toId, resource, amount },
+    this.commit(result.state, {
+      events: [
+        { type: "economy:warehouseChanged", settlementId: fromId, resource, amount: result.state.settlements[fromId]?.warehouse?.[resource] ?? 0 },
+        { type: "economy:warehouseChanged", settlementId: toId, resource, amount: result.state.settlements[toId]?.warehouse?.[resource] ?? 0 },
+      ],
+      log: {
+        type: "resources_traded",
+        payload: { fromId, toId, resource, amount },
+      },
+      hook: () => this.hooks.onTradeResources(result.state.activePlayerId, fromId, toId, resource, amount),
+      hookLabel: "onTradeResources",
     });
-    this.trackCommand(
-      this.hooks.onTradeResources(this.state.activePlayerId, fromId, toId, resource, amount),
-      "onTradeResources",
-    );
     return { ok: true, reason: "" };
   }
 
@@ -324,13 +352,17 @@ export class TurnController {
   ): { ok: boolean; reason: string } {
     const result = reorderStackReducer(this.state, heroId, fromIdx, toIdx);
     if (!result.ok) return { ok: false, reason: result.reason };
-    this.state = result.state;
-    this.hooks.logEvent({
-      type: "stack_reordered",
-      payload: { heroId, fromIdx, toIdx },
+    this.commit(result.state, {
+      log: {
+        type: "stack_reordered",
+        payload: { heroId, fromIdx, toIdx },
+      },
+      hook: () => {
+        const actor = result.state.heroes[heroId]?.ownerId ?? result.state.activePlayerId;
+        return this.hooks.onReorderStack(actor, heroId, fromIdx, toIdx);
+      },
+      hookLabel: "onReorderStack",
     });
-    const actor = this.state.heroes[heroId]?.ownerId ?? this.state.activePlayerId;
-    this.trackCommand(this.hooks.onReorderStack(actor, heroId, fromIdx, toIdx), "onReorderStack");
     return { ok: true, reason: "" };
   }
 
@@ -340,31 +372,28 @@ export class TurnController {
     if (before.ownerId !== this.state.activePlayerId) return false;
     const next = setAutoTradeReducer(this.state, settlementId, autoTrade);
     if (next === this.state) return false;
-    this.state = next;
-    this.hooks.logEvent({
-      type: "auto_trade_toggled",
-      payload: { settlementId, autoTrade },
+    this.commit(next, {
+      log: {
+        type: "auto_trade_toggled",
+        payload: { settlementId, autoTrade },
+      },
+      hook: () => this.hooks.onSetAutoTrade(next.activePlayerId, settlementId, autoTrade),
+      hookLabel: "onSetAutoTrade",
     });
-    this.trackCommand(
-      this.hooks.onSetAutoTrade(this.state.activePlayerId, settlementId, autoTrade),
-      "onSetAutoTrade",
-    );
     return true;
   }
 
   recruitHero(heroName: string, settlementId: SettlementId, horseVariant: HorseVariant): RecruitHeroResult {
     const result = recruitHeroReducer(this.state, this.state.activePlayerId, heroName, settlementId, horseVariant);
-    if (result.hero) {
-    this.state = result.state;
-    this.hooks.logEvent({
+    if (!result.hero) return result;
+    this.commit(result.state, {
+      log: {
         type: "hero_recruited",
-        payload: { heroId: result.hero.id, name: heroName, playerId: this.state.activePlayerId },
-      });
-      this.trackCommand(
-        this.hooks.onRecruitHero(this.state.activePlayerId, heroName, settlementId, horseVariant),
-        "onRecruitHero",
-      );
-    }
+        payload: { heroId: result.hero.id, name: heroName, playerId: result.state.activePlayerId },
+      },
+      hook: () => this.hooks.onRecruitHero(result.state.activePlayerId, heroName, settlementId, horseVariant),
+      hookLabel: "onRecruitHero",
+    });
     return result;
   }
 
@@ -608,30 +637,28 @@ export class TurnController {
   startTownHallUpgrade(settlementId: string, targetLevel: 2 | 3): { ok: boolean; reason: string } {
     const result = startTownHallUpgradeReducer(this.state, settlementId, targetLevel);
     if (!result.ok) return { ok: false, reason: result.reason };
-    this.state = result.state;
-    this.hooks.logEvent({
-      type: "town_hall_upgrade_started",
-      payload: { settlementId, targetLevel },
+    this.commit(result.state, {
+      log: {
+        type: "town_hall_upgrade_started",
+        payload: { settlementId, targetLevel },
+      },
+      hook: () => this.hooks.onUpgradeTownHall(result.state.activePlayerId, settlementId, targetLevel),
+      hookLabel: "onUpgradeTownHall",
     });
-    this.    trackCommand(
-      this.hooks.onUpgradeTownHall(this.state.activePlayerId, settlementId, targetLevel),
-      "onUpgradeTownHall",
-    );
     return { ok: true, reason: "" };
   }
 
   placeBuildings(settlementId: string, buildings: BuildingDef[], initialLayout = false): { ok: boolean; reason: string } {
     const result = applyPlaceBuildingsReducer(this.state, settlementId, this.state.activePlayerId, buildings, initialLayout);
     if (!result.ok) return { ok: false, reason: result.reason };
-    this.state = result.state;
-    this.hooks.logEvent({
-      type: "buildings_placed",
-      payload: { settlementId },
+    this.commit(result.state, {
+      log: {
+        type: "buildings_placed",
+        payload: { settlementId },
+      },
+      hook: () => this.hooks.onPlaceBuildings(result.state.activePlayerId, settlementId, buildings, initialLayout),
+      hookLabel: "onPlaceBuildings",
     });
-    this.trackCommand(
-      this.hooks.onPlaceBuildings(this.state.activePlayerId, settlementId, buildings, initialLayout),
-      "onPlaceBuildings",
-    );
     return { ok: true, reason: "" };
   }
 
@@ -643,45 +670,42 @@ export class TurnController {
   ): { ok: boolean; reason: string } {
     const result = transferResourcesReducer(this.state, this.state.activePlayerId, heroId, settlementId, direction, amounts);
     if (!result.ok) return { ok: false, reason: result.reason };
-    this.state = result.state;
-    this.hooks.logEvent({
-      type: "resources_transferred",
-      payload: { heroId, settlementId, direction },
+    this.commit(result.state, {
+      log: {
+        type: "resources_transferred",
+        payload: { heroId, settlementId, direction },
+      },
+      hook: () => this.hooks.onTransferResources(result.state.activePlayerId, heroId, settlementId, direction, amounts),
+      hookLabel: "onTransferResources",
     });
-    this.trackCommand(
-      this.hooks.onTransferResources(this.state.activePlayerId, heroId, settlementId, direction, amounts),
-      "onTransferResources",
-    );
     return { ok: true, reason: "" };
   }
 
   assignWagons(heroId: string, delta: number): { ok: boolean; reason: string } {
     const result = assignWagonsReducer(this.state, this.state.activePlayerId, heroId, delta);
     if (!result.ok) return { ok: false, reason: result.reason };
-    this.state = result.state;
-    this.hooks.logEvent({
-      type: "wagons_assigned",
-      payload: { heroId, delta },
+    this.commit(result.state, {
+      log: {
+        type: "wagons_assigned",
+        payload: { heroId, delta },
+      },
+      hook: () => this.hooks.onAssignWagons(result.state.activePlayerId, heroId, delta),
+      hookLabel: "onAssignWagons",
     });
-    this.trackCommand(
-      this.hooks.onAssignWagons(this.state.activePlayerId, heroId, delta),
-      "onAssignWagons",
-    );
     return { ok: true, reason: "" };
   }
 
   buyWagons(settlementId: string, count: number): { ok: boolean; reason: string } {
     const result = buyWagonsReducer(this.state, this.state.activePlayerId, settlementId, count);
     if (!result.ok) return { ok: false, reason: result.reason };
-    this.state = result.state;
-    this.hooks.logEvent({
-      type: "wagons_bought",
-      payload: { settlementId, count },
+    this.commit(result.state, {
+      log: {
+        type: "wagons_bought",
+        payload: { settlementId, count },
+      },
+      hook: () => this.hooks.onBuyWagons(result.state.activePlayerId, settlementId, count),
+      hookLabel: "onBuyWagons",
     });
-    this.trackCommand(
-      this.hooks.onBuyWagons(this.state.activePlayerId, settlementId, count),
-      "onBuyWagons",
-    );
     return { ok: true, reason: "" };
   }
 
@@ -700,21 +724,21 @@ export class TurnController {
       wagons,
     );
     if (!result.ok) return { ok: false, reason: result.reason };
-    this.state = result.state;
-    this.hooks.logEvent({
-      type: "trade_route_created",
-      payload: { routeId: result.route?.id, fromSettlementId, toSettlementId, resource, wagons },
+    this.commit(result.state, {
+      log: {
+        type: "trade_route_created",
+        payload: { routeId: result.route?.id, fromSettlementId, toSettlementId, resource, wagons },
+      },
+      hook: () =>
+        this.hooks.onCreateTradeRoute(
+          result.state.activePlayerId,
+          fromSettlementId,
+          toSettlementId,
+          resource,
+          wagons,
+        ),
+      hookLabel: "onCreateTradeRoute",
     });
-    this.trackCommand(
-      this.hooks.onCreateTradeRoute(
-        this.state.activePlayerId,
-        fromSettlementId,
-        toSettlementId,
-        resource,
-        wagons,
-      ),
-      "onCreateTradeRoute",
-    );
     return { ok: true, reason: "" };
   }
 
@@ -724,30 +748,28 @@ export class TurnController {
   ): { ok: boolean; reason: string } {
     const result = updateTradeRouteReducer(this.state, this.state.activePlayerId, routeId, change);
     if (!result.ok) return { ok: false, reason: result.reason };
-    this.state = result.state;
-    this.hooks.logEvent({
-      type: "trade_route_updated",
-      payload: { routeId, ...change },
+    this.commit(result.state, {
+      log: {
+        type: "trade_route_updated",
+        payload: { routeId, ...change },
+      },
+      hook: () => this.hooks.onUpdateTradeRoute(result.state.activePlayerId, routeId, change),
+      hookLabel: "onUpdateTradeRoute",
     });
-    this.trackCommand(
-      this.hooks.onUpdateTradeRoute(this.state.activePlayerId, routeId, change),
-      "onUpdateTradeRoute",
-    );
     return { ok: true, reason: "" };
   }
 
   startBuildingUpgrade(settlementId: string, requests: BuildingUpgradeRequest[]): { ok: boolean; reason: string } {
     const result = startBuildingUpgradeReducer(this.state, settlementId, requests);
     if (!result.ok) return { ok: false, reason: result.reason };
-    this.state = result.state;
-    this.hooks.logEvent({
-      type: "building_upgrade_started",
-      payload: { settlementId, requests },
+    this.commit(result.state, {
+      log: {
+        type: "building_upgrade_started",
+        payload: { settlementId, requests },
+      },
+      hook: () => this.hooks.onUpgradeBuilding(result.state.activePlayerId, settlementId, requests),
+      hookLabel: "onUpgradeBuilding",
     });
-    this.trackCommand(
-      this.hooks.onUpgradeBuilding(this.state.activePlayerId, settlementId, requests),
-      "onUpgradeBuilding",
-    );
     return { ok: true, reason: "" };
   }
 
@@ -775,15 +797,15 @@ export class TurnController {
       settings().upgradePopulationGate,
     );
     if (!result.ok) return { ok: false, reason: result.reason };
-    this.state = result.state;
-    this.hooks.logEvent({
-      type: "settlement_upgrade_started",
-      payload: { settlementId, targetLevel },
+    this.commit(result.state, {
+      log: {
+        type: "settlement_upgrade_started",
+        payload: { settlementId, targetLevel },
+      },
+      hook: () =>
+        this.hooks.onUpgradeSettlement(result.state.activePlayerId, settlementId, settings().upgradePopulationGate),
+      hookLabel: "onUpgradeSettlement",
     });
-    this.trackCommand(
-      this.hooks.onUpgradeSettlement(this.state.activePlayerId, settlementId, settings().upgradePopulationGate),
-      "onUpgradeSettlement",
-    );
     return { ok: true, reason: "" };
   }
 
