@@ -12,6 +12,11 @@ import {
   setAutoTrade,
   reorderStack,
   captureSettlement,
+  recruitUnits,
+  transferUnits,
+  applySettlementBattleResult,
+  settlementStacks,
+  platoonsHaveTroops,
   effectiveIncome,
   clampMorale,
   GameMap,
@@ -281,6 +286,40 @@ async function dualWriteEntities(
     return { heroes, lootedGold: 0 };
   }
 
+// Post-battle capture (unit-recruitment/garrison plan task 7): after a
+// hero-vs-hero battle, an attacker who kept the collision hex (never
+// cancelMove'd -- retreat/surrender restored their pre-move position
+// instead), still has troops, and stands on an enemy-owned settlement whose
+// garrison is empty, captures it in the same persist -- owner flip +
+// CAPTURE_GOLD_REWARD, identical to a walk-in CaptureSettlement. Returns
+// null whenever no settlement hex qualifies (the overwhelmingly common
+// case, and always for the existing battle tests' rows).
+function applyPostBattleCapture(
+  state: GameState,
+  attackerId: HeroId,
+  heroes: Record<HeroId, HeroState>,
+): { heroes: Record<HeroId, HeroState>; settlements: Record<SettlementId, SettlementState>; players: Player[] } | null {
+  const attacker = heroes[attackerId];
+  if (!attacker) return null;
+  if (!platoonsHaveTroops(normalizePlatoons(attacker.stacks))) return null;
+  const settlement = Object.values(state.settlements).find(
+    (s) =>
+      s.q === attacker.q &&
+      s.r === attacker.r &&
+      s.ownerId !== null &&
+      s.ownerId !== attacker.ownerId,
+  );
+  if (!settlement) return null;
+  if (platoonsHaveTroops(settlementStacks(settlement))) return null;
+  const capture = captureSettlement({ ...state, heroes }, attackerId, settlement.id);
+  if (!capture.captured) return null;
+  return {
+    heroes: capture.state.heroes,
+    settlements: capture.state.settlements,
+    players: capture.state.players,
+  };
+}
+
 async function persistBattleOutcome(
   deps: CommandDeps,
   gameName: string,
@@ -289,8 +328,19 @@ async function persistBattleOutcome(
   newHeroes: Record<HeroId, HeroState>,
   defenderId: HeroId,
   defenderLostAllTroops: boolean,
+  capture?: {
+    heroes: Record<HeroId, HeroState>;
+    settlements: Record<SettlementId, SettlementState>;
+    players: Player[];
+  } | null,
 ): Promise<void> {
-  const legacyGold = sumPlayerGold(state.players, newHeroes, state.settlements);
+  const finalHeroes = capture ? capture.heroes : newHeroes;
+  const finalSettlements = capture ? capture.settlements : state.settlements;
+  const legacyGold = sumPlayerGold(
+    capture ? capture.players : state.players,
+    finalHeroes,
+    finalSettlements,
+  );
   // A chartering hero can end up as either combatant (traveling heroes
   // can walk adjacent to an enemy mid-route; constructing heroes can be
   // attacked at their target) -- mirrors src/state/turnController.ts's
@@ -301,20 +351,26 @@ async function persistBattleOutcome(
   let finalActiveCharters = state.activeCharters;
   if (defenderLostAllTroops) {
     finalActiveCharters = cleanupDefeatedHeroCharters(
-      { ...state, heroes: newHeroes },
+      { ...state, heroes: finalHeroes },
       defenderId,
     ).activeCharters;
   }
   await deps.gameRepo.saveHeroesAndSettlements(
     gameName,
-    newHeroes,
-    state.settlements,
-    { gold: legacyGold },
+    finalHeroes,
+    finalSettlements,
+    {
+      gold: legacyGold,
+      // Only a post-battle capture changes players (settlementIds move
+      // between seats); every other battle outcome leaves them untouched.
+      ...(capture ? { players: capture.players } : {}),
+    },
   );
-  // settlements is passed through unchanged (state.settlements, same
-  // reference) -- neither battle command ever touches settlement state,
-  // only the two combatants' hero rows, so this only ever calls heroRepo.
-  await dualWriteEntities(deps, gameName, state, { heroes: newHeroes, settlements: state.settlements });
+  // settlements is state.settlements unless a post-battle capture flipped
+  // an owner -- in which case the capture's settlements record (and the
+  // players array above) ride the same persist, so the granular dual-write
+  // below syncs both halves of the capture in one transaction.
+  await dualWriteEntities(deps, gameName, state, { heroes: finalHeroes, settlements: finalSettlements });
   if (finalActiveCharters !== state.activeCharters && source === "granular") {
     // Source gate matches the EndTurn case above: on JSONB fallback,
     // state.activeCharters is always [] regardless of the charters
@@ -671,6 +727,9 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         battle.defenderPlatoons,
         defenderLostAllTroops,
       );
+      // The auto-resolver never cancels the attacker's move, so a surviving
+      // attacker is always still standing where the collision happened.
+      const capture = applyPostBattleCapture(state, command.attackerId, newHeroes);
       await persistBattleOutcome(
         deps,
         command.gameName,
@@ -679,6 +738,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         newHeroes,
         command.defenderId,
         defenderLostAllTroops,
+        capture,
       );
       const event: EngineEvent = {
         type: "BattleResolved",
@@ -697,7 +757,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         ok: true,
         events: [event],
         lastEventId,
-        attackerHero: newHeroes[command.attackerId],
+        attackerHero: (capture?.heroes ?? newHeroes)[command.attackerId],
         defenderHero: newHeroes[command.defenderId],
         battle,
       };
@@ -835,6 +895,14 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // header comment for why this can't be left to the engine function.
       if (hero.q !== settlement.q || hero.r !== settlement.r) {
         return { ok: false, reason: "hero_not_at_settlement", events: [] };
+      }
+      // Garrison gate (unit-recruitment/garrison plan task 7): a settlement
+      // with troops in its garrison must be defeated in the arena first --
+      // a walk-in capture only applies to an emptied (or never-garrisoned)
+      // settlement. The client should have fought a SETTLEMENT_BATTLE and
+      // submitted SubmitSettlementBattleResult instead.
+      if (platoonsHaveTroops(settlementStacks(settlement))) {
+        return { ok: false, reason: "garrison_not_defeated", events: [] };
       }
       const result = captureSettlement(state, command.heroId, command.settlementId);
       if (!result.captured) {
@@ -1111,6 +1179,14 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
           gold: (Number(newHeroes[concedingHero.id].gold) || 0) - surrenderedGold,
         };
       }
+      // Retreat/surrender restored the attacker's pre-move position
+      // (baseState came from cancelMove), so they are no longer standing on
+      // the collision hex -- post-battle capture only applies when the
+      // attacker kept it (win/draw/loss-with-survivors).
+      const capture =
+        baseState === state
+          ? applyPostBattleCapture(state, command.attackerId, newHeroes)
+          : null;
       await persistBattleOutcome(
         deps,
         command.gameName,
@@ -1119,6 +1195,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         newHeroes,
         command.defenderId,
         defenderLostAllTroops,
+        capture,
       );
       // The existing BattleResolved event, derived from the submitted
       // outcome so battle:resolved UI/bus consumers keep working on every
@@ -1176,7 +1253,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         ok: true,
         events: [event],
         lastEventId,
-        attackerHero: newHeroes[command.attackerId],
+        attackerHero: (capture?.heroes ?? newHeroes)[command.attackerId],
         defenderHero: newHeroes[command.defenderId],
       };
     }
@@ -1403,6 +1480,183 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
     }
+    case "RecruitUnits": {
+      // Ladder mirrors UpgradeTownHall's: settlement existence, then
+      // ownership, then the engine reducer's own building/level/construction/
+      // catalog/cost/garrison-capacity checks.
+      const settlement = row.settlements[command.settlementId];
+      if (!settlement) {
+        return { ok: false, reason: "no_settlement", events: [] };
+      }
+      if (settlement.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
+      }
+      const result = recruitUnits(state, {
+        settlementId: command.settlementId,
+        buildingKind: command.buildingKind,
+        gx: command.gx,
+        gy: command.gy,
+        unitTypeId: command.unitTypeId,
+        count: command.count,
+      });
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "UnitsRecruited",
+        actor: command.actor,
+        settlementId: command.settlementId,
+        unitTypeId: command.unitTypeId,
+        count: command.count,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
+    }
+    case "TransferUnits": {
+      // Same ladder ReorderStack uses for the hero half (existence +
+      // ownership -- transferUnits() has no actor notion) plus
+      // UpgradeTownHall's settlement half.
+      const hero = row.heroes[command.heroId];
+      if (!hero) {
+        return { ok: false, reason: "no_hero", events: [] };
+      }
+      if (hero.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_hero", events: [] };
+      }
+      const settlement = row.settlements[command.settlementId];
+      if (!settlement) {
+        return { ok: false, reason: "no_settlement", events: [] };
+      }
+      if (settlement.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
+      }
+      const result = transferUnits(state, {
+        heroId: command.heroId,
+        settlementId: command.settlementId,
+        direction: command.direction,
+        unitTypeId: command.unitTypeId,
+        count: command.count,
+        ...(command.toSlot !== undefined ? { toSlot: command.toSlot } : {}),
+      });
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "UnitsTransferred",
+        actor: command.actor,
+        heroId: command.heroId,
+        settlementId: command.settlementId,
+        direction: command.direction,
+        unitTypeId: command.unitTypeId,
+        count: command.count,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return {
+        ok: true,
+        events: [event],
+        lastEventId,
+        hero: result.state.heroes[command.heroId],
+        settlement: result.state.settlements[command.settlementId],
+      };
+    }
+    case "SubmitSettlementBattleResult": {
+      // Manual-arena result submission for a settlement-garrison battle,
+      // mirroring the SubmitBattleResult case command-for-command (same v1
+      // trust model); the shape half is wire-validated in parseCommand.
+      const attackerHero = row.heroes[command.attackerId];
+      if (!attackerHero) {
+        return { ok: false, reason: "hero_not_found", events: [] };
+      }
+      if (attackerHero.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_hero", events: [] };
+      }
+      const settlement = row.settlements[command.settlementId];
+      if (!settlement) {
+        return { ok: false, reason: "no_settlement", events: [] };
+      }
+      if (settlement.ownerId === null) {
+        return { ok: false, reason: "unowned_settlement", events: [] };
+      }
+      if (settlement.ownerId === attackerHero.ownerId) {
+        return { ok: false, reason: "not_enemy_settlement", events: [] };
+      }
+      // "Phase is SETTLEMENT_BATTLE for this pair" (plan §8's client phase),
+      // re-derived server-side: the attacker owned by the active seat and
+      // standing ON the settlement tile with a live garrison is exactly the
+      // precondition startSettlementBattle encodes.
+      if (attackerHero.q !== settlement.q || attackerHero.r !== settlement.r) {
+        return { ok: false, reason: "hero_not_at_settlement", events: [] };
+      }
+      if (!platoonsHaveTroops(settlementStacks(settlement))) {
+        return { ok: false, reason: "garrison_empty", events: [] };
+      }
+      // Semantic half of the survivor-stack check, identical to
+      // SubmitBattleResult's: every named unit must exist in the server's
+      // own DB-backed catalog.
+      const catalogIds = new Set(deps.ctx.catalog.unitTypes.map((u) => u.id));
+      const unknownUnit = [...command.attackerStacks, ...command.defenderStacks].some((p) =>
+        p.entries.some((e) => !catalogIds.has(e.unitTypeId)),
+      );
+      if (unknownUnit) {
+        return { ok: false, reason: "unknown_unit_type", events: [] };
+      }
+      // Surrender's priced gold, capped by the attacker's actual purse --
+      // same rule (and same rejection reason) as SubmitBattleResult.
+      let surrenderedGold = command.surrenderedGold ?? 0;
+      if (command.outcome === "surrender" && surrenderedGold > (Number(attackerHero.gold) || 0)) {
+        return { ok: false, reason: "surrender_gold_exceeds_purse", events: [] };
+      }
+      if (command.outcome !== "surrender") {
+        surrenderedGold = 0;
+      }
+      const result = applySettlementBattleResult(state, {
+        attackerId: command.attackerId,
+        settlementId: command.settlementId,
+        outcome: command.outcome,
+        attackerStacks: command.attackerStacks,
+        defenderStacks: command.defenderStacks,
+        ...(surrenderedGold > 0 ? { surrenderedGold } : {}),
+      });
+      // attackerWon runs captureSettlement() inside the reducer (owner
+      // flip + CAPTURE_GOLD_REWARD), so players move too -- persist them
+      // alongside, same as CaptureSettlement's own case.
+      const legacyGold = sumPlayerGold(result.state.players, result.state.heroes, result.state.settlements);
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+        { players: result.state.players, gold: legacyGold },
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "SettlementBattleResolved",
+        actor: command.actor,
+        attackerId: command.attackerId,
+        settlementId: command.settlementId,
+        winner: command.outcome === "attackerWon" ? "attacker" : "defender",
+        captured: result.captured,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return {
+        ok: true,
+        events: [event],
+        lastEventId,
+        attackerHero: result.state.heroes[command.attackerId],
+        settlement: result.state.settlements[command.settlementId],
+      };
+    }
   }
 
   // Exhaustiveness check: every Command variant returns inside its own case
@@ -1428,7 +1682,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
 // time, so route registration itself still doesn't block on a DB round-trip.
 export async function createLiveCommandDeps(): Promise<LiveCommandDeps> {
   const unitTypesResult = await pool.query<UnitTypeRow>(
-    `SELECT id, name, attack, defence, health, speed, description, advantage_type, specialty, specialty_priority
+    `SELECT id, name, attack, defence, health, speed, description, advantage_type, specialty, specialty_priority,
+            tier, upkeep_gold, upkeep_food, range
        FROM unit_types`,
   );
   const unitTypes: UnitType[] = unitTypesResult.rows.map((r) => ({
@@ -1442,6 +1697,10 @@ export async function createLiveCommandDeps(): Promise<LiveCommandDeps> {
     advantageType: r.advantage_type,
     specialty: r.specialty,
     specialtyPriority: r.specialty_priority,
+    tier: r.tier as UnitType["tier"],
+    upkeepGold: r.upkeep_gold,
+    upkeepFood: r.upkeep_food,
+    range: r.range,
   }));
   return {
     gameRepo: createGameRepo(pool),
@@ -1598,4 +1857,8 @@ type UnitTypeRow = {
   advantage_type: UnitType["advantageType"];
   specialty: string;
   specialty_priority: number;
+  tier: number;
+  upkeep_gold: number;
+  upkeep_food: number;
+  range: number;
 };

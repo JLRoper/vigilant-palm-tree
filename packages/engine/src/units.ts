@@ -18,6 +18,28 @@ export interface UnitType {
   advantageType: AdvantageType;
   specialty: string;
   specialtyPriority: number;
+  // Optional so pre-migration catalogs (and the ~dozens of UnitType literals
+  // in tests) stay valid; the helpers below apply the defaults.
+  tier?: 1 | 2 | 3;
+  upkeepGold?: number;
+  upkeepFood?: number;
+  range?: number;
+}
+
+export function unitTier(t: UnitType | undefined): 1 | 2 | 3 {
+  return t?.tier ?? 1;
+}
+
+export function unitUpkeepGold(t: UnitType | undefined): number {
+  return t?.upkeepGold ?? 1;
+}
+
+export function unitUpkeepFood(t: UnitType | undefined): number {
+  return t?.upkeepFood ?? 1;
+}
+
+export function unitRange(t: UnitType | undefined): number {
+  return t?.range ?? 1;
 }
 
 export const ARMY_STACK_SLOTS = 8;
@@ -47,6 +69,58 @@ export function normalizePlatoons(platoons: readonly Platoon[] | undefined | nul
   return out;
 }
 
+export function settlementStacks(s: { stacks?: Platoon[] } | undefined): Platoon[] {
+  return normalizePlatoons(s?.stacks);
+}
+
 export function platoonsHaveTroops(platoons: readonly Platoon[]): boolean {
   return platoons.some((p) => p.entries.some((e) => e.count > 0));
+}
+
+export function platoonTroopTotal(platoons: readonly Platoon[]): number {
+  let total = 0;
+  for (const p of platoons) {
+    for (const e of p.entries) {
+      total += e.count;
+    }
+  }
+  return total;
+}
+
+export function trimPlatoonsFromEnd(
+  platoons: readonly Platoon[],
+  remove: number,
+): Platoon[] {
+  const out = platoons.map((p) => ({ entries: p.entries.map((e) => ({ ...e })) }));
+  for (let i = out.length - 1; i >= 0 && remove > 0; i--) {
+    const entries = out[i].entries;
+    while (remove > 0 && entries.length > 0) {
+      const last = entries[entries.length - 1];
+      const take = Math.min(last.count, remove);
+      last.count -= take;
+      remove -= take;
+      if (last.count === 0) entries.pop();
+    }
+  }
+  return out;
+}
+
+// Demo armies assigned to heroes on fresh game creation so the Hero Info menu
+// has real data to display. Keys are hero index -> player index (0 = human).
+export function demoPlatoonsForPlayer(playerIdx: number): Platoon[] {
+  switch (playerIdx) {
+    case 0:
+      return [
+        { entries: [{ unitTypeId: "swordsman", count: 12 }] },
+        { entries: [{ unitTypeId: "archer", count: 8 }] },
+        { entries: [{ unitTypeId: "cavalry", count: 4 }] },
+      ];
+    case 1:
+      return [
+        { entries: [{ unitTypeId: "crossbowman", count: 10 }] },
+        { entries: [{ unitTypeId: "griffin", count: 3 }] },
+      ];
+    default:
+      return [];
+  }
 }

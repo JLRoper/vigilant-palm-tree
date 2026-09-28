@@ -20,7 +20,8 @@ export type BuildingKind =
   | "bank"
   | "goldMine"
   | "woodcutterHut"
-  | "arcaneFont";
+  | "arcaneFont"
+  | "stables";
 
 export interface BuildingDef {
   gx: number;

@@ -21,7 +21,7 @@
 // Enemy platoons have no rail to expand into, so clicking one on the
 // battlefield still opens the floating info card — see showInfoPopupFor.
 
-import { RANGED_ATTACK_RANGE, SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "@heroes/engine";
+import { SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "@heroes/engine";
 import {
   finalizeManualBattle,
   getCombatant,
@@ -30,8 +30,8 @@ import {
   getValidMeleeTargets,
   getValidSpellTargets,
   isBattleOver,
-  isRangedPlatoon,
   pickTarget,
+  platoonRange,
   platoonSpeed,
   SPELL_CATALOG,
   spellDef,
@@ -113,6 +113,15 @@ export interface ManualBattleArenaOptions {
   // state context; the caller owns seq numbering and the actual POST, so a
   // network failure can never block or fail the arena from inside it.
   telemetry?: (phase: BattleActionPhase, payload: Record<string, unknown>) => void;
+  // Display-name overrides for the engine's attacker/defender sides, used
+  // wherever a side is named: the human rail's hero panel, the battle log's
+  // per-side prefixes, and the sandbox path's own result card. Defaults keep
+  // today's labels exactly ("You"/"Enemy" in-runs, "You"/"AI Opponent" on
+  // the sandbox card). Production callers pass e.g. defenderLabel
+  // "<Settlement> Garrison" so a settlement battle never renders as a
+  // missing hero name.
+  attackerLabel?: string;
+  defenderLabel?: string;
 }
 
 export function openManualBattleArena(
@@ -281,6 +290,8 @@ export function openManualBattleArena(
   const ATTACKER_ACCENT = "#3070c0";
   const DEFENDER_ACCENT = "#c04040";
   const humanAccent = humanSide === "attacker" ? ATTACKER_ACCENT : DEFENDER_ACCENT;
+  const attackerLabel = options.attackerLabel ?? (humanSide === "attacker" ? "You" : "Enemy");
+  const defenderLabel = options.defenderLabel ?? (humanSide === "defender" ? "You" : "Enemy");
 
   // Dev-only paint2d/ SceneNode[] rendering path. Off by default; opt in via
   // ?paint=scenebuilder in the URL. Per
@@ -583,7 +594,7 @@ const FLOAT_MS = 800;
   });
 
   function sideName(side: BattleSide): string {
-    return side === humanSide ? "You" : "Enemy";
+    return side === "attacker" ? attackerLabel : defenderLabel;
   }
 
   function describeLogEntry(entry: BattleLogEntry): string {
@@ -753,7 +764,7 @@ const FLOAT_MS = 800;
     // Ranged platoons have no approach side to pick — they shoot from where
     // they stand — so they must never be told to hover for a direction.
     const selected = selectedSlot === null ? undefined : getCombatant(state, humanSide, selectedSlot);
-    const ranged = selected ? isRangedPlatoon(selected, state.unitTypes) : false;
+    const ranged = selected ? platoonRange(selected.entries, state.unitTypes) > 1 : false;
     helpTextEl.textContent = over
       ? "Battle over."
       : waitingOnAi
@@ -926,7 +937,7 @@ const FLOAT_MS = 800;
     return { rail, list, castBtn: hero.castBtn, manaEl: hero.manaEl, actions };
   }
 
-  const humanRail = buildRail("You", "Your Army", humanAccent);
+  const humanRail = buildRail(humanSide === "attacker" ? attackerLabel : defenderLabel, "Your Army", humanAccent);
 
   // Takes all the width the rail doesn't. flex-basis 0 plus min-width/
   // min-height 0 makes this box's size depend purely on the row, never on the
@@ -1089,7 +1100,7 @@ const FLOAT_MS = 800;
       stats.push({ label: "Def", value: String(unit.defence) });
     }
     stats.push({ label: "Spd", value: String(platoonSpeed(c, state.unitTypes)) });
-    stats.push({ label: "Rng", value: isRangedPlatoon(c, state.unitTypes) ? String(RANGED_ATTACK_RANGE) : "Melee" });
+    stats.push({ label: "Rng", value: String(platoonRange(c.entries, state.unitTypes)) });
     // Terrain placeholder — the game has no terrain-bonus mechanic yet (see
     // docs/terrain-plan.md). Same "the slot exists ahead of the mechanic"
     // pattern the Morale/Fatigue bars used before the engine tracked them.
@@ -1605,8 +1616,8 @@ function finishBattle(): void {
     }
     showBattleResultCard({
       result,
-      attackerLabel: humanSide === "attacker" ? "You" : "AI Opponent",
-      defenderLabel: humanSide === "defender" ? "You" : "AI Opponent",
+      attackerLabel: options.attackerLabel ?? (humanSide === "attacker" ? "You" : "AI Opponent"),
+      defenderLabel: options.defenderLabel ?? (humanSide === "defender" ? "You" : "AI Opponent"),
       onCarryOn: () => { closeArena(); },
     });
   }

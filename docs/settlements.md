@@ -135,14 +135,27 @@ Source: [`src/state/gameState.ts`](../src/state/gameState.ts) (`startTownHallUpg
 
 ## Capture
 
-If an enemy hero walks onto a settlement tile, ownership **flips** to that hero's faction. The settlement stays at its current level and continues producing.
+A hero walking onto an enemy settlement tile captures it — **only if the garrison is empty**. The settlement stays at its current level and continues producing.
 
+- **Garrison gate:** if the settlement's garrison has troops, the tile walk enters the `SETTLEMENT_BATTLE` phase instead — the garrison defends in the manual arena (attacker vs *"<name> Garrison"*), resolved via `SubmitSettlementBattleResult` (`startSettlementBattle` / `applySettlementBattleResult` in `@heroes/engine`). The direct `CaptureSettlement` command rejects a non-empty garrison (`garrison_not_defeated`).
+- **Post-battle capture:** when the victorious attacker stands on an enemy settlement whose garrison is now empty, capture fires automatically (`TurnController.captureAfterBattleIfNeeded`, wired on both the hero-battle and settlement-battle paths).
 - Captured settlements produce for the new owner starting the next turn.
 - Capturing is the only way settlements change hands in v1.
-- A player can recapture their own settlements by walking their hero back onto them.
+- A player can recapture their own settlements by walking their hero back onto them (same garrison gate).
 - **Active upgrades survive capture.** If a settlement is mid-upgrade, construction continues under the new owner.
 
 ✅ **Locked:** no other form of destruction. Settlements are permanent until captured — no spells, no demolition, no decay.
+
+## Garrison (✅ implemented)
+
+Every settlement can hold troops: `SettlementState.stacks?: Platoon[]` — the same `Platoon[]` shape as hero stacks (null-safe accessor: `settlementStacks` in `@heroes/engine`'s `units.ts`).
+
+- **In:** `RecruitUnits` lands newly recruited units here (garrison-first — see [army.md](./army.md)); `TransferUnits` with `direction: "toGarrison"` pulls troops off a hero standing on the tile.
+- **Out:** `TransferUnits` with `"toHero"` loads the hero's platoons — the hero **must stand on the settlement**.
+- **Upkeep:** weekly (inside `applyWeeklyUpkeep`) via `applyGarrisonUpkeep` — 1 gold/troop from the settlement treasury + 1 food/troop from its warehouse; shortfalls trim stacks from the end.
+- **Defense:** a non-empty garrison must be defeated in the arena before capture succeeds (see Capture above).
+
+Buildings gate what a settlement can recruit; the newest is **stables** (placement 350g + 10 wood + 5 stone; recruits cavalry for 400g + 2 iron; `defenseBonus: 1`). The full building→unit table lives in [army.md](./army.md).
 
 ## Building persistence (✅ implemented)
 
@@ -174,6 +187,7 @@ State types defined in [`src/state/gameState.ts`](../src/state/gameState.ts):
 - `UpgradeState` — `{ kind: "townHall"|"settlement", targetLevel: 2|3, daysRemaining, newResourceRates?, newCitySpots? }`
 - `SettlementState.buildings` — `BuildingDef[]` (persisted building array)
 - `SettlementState.upgrade` — `UpgradeState?` (active upgrade, if any)
+- `SettlementState.stacks` — `Platoon[]?` (settlement garrison; persisted via the `settlement_platoons` table, migration `016_settlement_platoons.sql`, dual-written by `settlementRepo` and reassembled by the granular hydrate path)
 
 New event kinds:
 - `charter_started`
@@ -182,6 +196,11 @@ New event kinds:
 - `town_hall_upgrade_started`
 - `settlement_upgrade_started`
 - (battle resolution handles `charter_lost` implicitly via `cleanupDefeatedHeroCharters`)
+
+Recruitment/garrison event kinds (`@heroes/contracts` `EngineEvent`s):
+- `UnitsRecruited`
+- `UnitsTransferred`
+- `SettlementBattleResolved`
 
 ## Cross-references
 

@@ -70,6 +70,9 @@ export type GamePhase =
   | { kind: "PLAYER_TURN"; playerId: PlayerId }
   | { kind: "AI_TURN"; playerId: PlayerId }
   | { kind: "BATTLE"; attackerId: HeroId; defenderId: HeroId }
+  // Client-only (like BATTLE): a manual settlement-garrison battle in
+  // flight; the server never persists this phase.
+  | { kind: "SETTLEMENT_BATTLE"; attackerId: HeroId; settlementId: SettlementId }
   | { kind: "ROUND_END"; nextRound: number };
 
 /** docs/wagons-stockpiles-trade-routes-plan.md §5.2 — physical caravan cycle state. */

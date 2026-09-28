@@ -1,6 +1,7 @@
 import type { Axial } from "../core/hex";
 import type {
   BuildingDef,
+  BuildingKind,
   BuildingUpgradeRequest,
   HeroState,
   HorseVariantId,
@@ -194,6 +195,37 @@ export async function submitBattleResult(
   return postCommand<SubmitBattleResultResult>(name, { kind: "SubmitBattleResult", ...payload });
 }
 
+// Settlement-garrison battle result submission
+// (plan/1790560842471-unit-recruitment-garrison-plan.md §8): mirrors
+// submitBattleResult command-for-command -- carries the arena's played-out
+// outcome against a settlement garrison; on attackerWon the server applies
+// the capture, on every other outcome it bounces the attacker's move with
+// garrison survivors persisting. The returned hero + settlement pair is
+// what the client merges before leaving the SETTLEMENT_BATTLE phase.
+export type SubmitSettlementBattleResultPayload = {
+  actor: number;
+  attackerId: string;
+  settlementId: string;
+  outcome: "attackerWon" | "defenderWon" | "retreat" | "surrender" | "draw";
+  attackerStacks: Platoon[];
+  defenderStacks: Platoon[];
+  surrenderedGold?: number;
+  rounds: number;
+  obstacleSeed: number;
+};
+
+export type SubmitSettlementBattleResultResult = {
+  attackerHero: HeroState;
+  settlement: SettlementState;
+};
+
+export async function submitSettlementBattleResult(
+  name: string,
+  payload: SubmitSettlementBattleResultPayload,
+): Promise<SubmitSettlementBattleResultResult> {
+  return postCommand<SubmitSettlementBattleResultResult>(name, { kind: "SubmitSettlementBattleResult", ...payload });
+}
+
 export async function transferGold(
   name: string,
   payload: {
@@ -381,4 +413,39 @@ export async function advanceCharterTravel(
   }
 ): Promise<void> {
   await postCommand(name, { kind: "AdvanceCharterTravel", ...payload });
+}
+
+// Unit recruitment into a settlement garrison + garrison<->hero platoon
+// transfers (plan/1790560842471-unit-recruitment-garrison-plan.md §8): same
+// fire-and-forget shape as recruitHero/captureSettlement above -- called
+// from src/game/turnHooks.ts right after the local engine reducer already
+// applied, so these response bodies are unused by the callers too.
+export async function recruitUnits(
+  name: string,
+  payload: {
+    actor: number;
+    settlementId: string;
+    buildingKind: BuildingKind;
+    gx: number;
+    gy: number;
+    unitTypeId: string;
+    count: number;
+  }
+): Promise<void> {
+  await postCommand(name, { kind: "RecruitUnits", ...payload });
+}
+
+export async function transferUnits(
+  name: string,
+  payload: {
+    actor: number;
+    heroId: string;
+    settlementId: string;
+    direction: "toHero" | "toGarrison";
+    unitTypeId: string;
+    count: number;
+    toSlot?: number;
+  }
+): Promise<void> {
+  await postCommand(name, { kind: "TransferUnits", ...payload });
 }

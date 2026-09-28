@@ -4,12 +4,12 @@ import { showBattleModal } from "@screens/combat/battleModal";
 import { showBattleResultCard } from "@screens/combat/battleResultCard";
 import { openManualBattleArena, type ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
 import type { BattleActionPhase } from "@screens/combat/arena/state";
-import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, spellLoadoutForHero, type BattleResult } from "@heroes/engine";
+import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, settlementStacks, spellLoadoutForHero, type BattleResult } from "@heroes/engine";
 import type { GameState, HeroState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { catalogFailed, loadUnitCatalog } from "../data/unitCatalog";
-import { submitBattleResult, type SubmitBattleResultResult } from "../io/commands";
+import { submitBattleResult, submitSettlementBattleResult, type SubmitBattleResultResult, type SubmitSettlementBattleResultResult } from "../io/commands";
 import { api } from "../io/api";
 
 /**
@@ -31,11 +31,16 @@ export class GameActions {
     onChanged();
   }
 
-  /** Possibly start battle flow if in BATTLE phase. */
+  /** Possibly start battle flow if in BATTLE or SETTLEMENT_BATTLE phase. */
   maybeAutoResolveBattle(): boolean {
     const gs = this.state.getState();
-    if (gs.phase.kind === "BATTLE" && !this.battleInFlight) {
+    if (this.battleInFlight) return false;
+    if (gs.phase.kind === "BATTLE") {
       void this.startBattleFlow();
+      return true;
+    }
+    if (gs.phase.kind === "SETTLEMENT_BATTLE") {
+      void this.startSettlementBattleFlow();
       return true;
     }
     return false;
@@ -87,6 +92,7 @@ export class GameActions {
         const fought = await this.fightInArena(gameName, attackerId, defenderId, localIsAttacker ? attacker : defender, localIsAttacker ? defender : attacker);
         if (fought.kind === "applied") {
           this.state.replaceState(fought.state);
+          this.captureAfterBattleIfNeeded(attackerId);
           showBattleResultCard({
             result: fought.result,
             attackerLabel: `Hero ${attackerName}`,
@@ -114,6 +120,7 @@ export class GameActions {
         tc.cancelMove(attackerId);
       }
       this.state.replaceState(tc.getState());
+      this.captureAfterBattleIfNeeded(attackerId);
       if (battle) {
         showBattleResultCard({
           result: battle,
@@ -238,6 +245,139 @@ export class GameActions {
       attackerSurvived: platoonsHaveTroops(server.attackerHero.stacks),
     });
     return { kind: "applied", state: next, result: outcome.result, closeArena };
+  }
+
+  /**
+   * Fight a SETTLEMENT_BATTLE phase out in the manual arena
+   * (plan/1790560842471-unit-recruitment-garrison-plan.md §9): the attacker
+   * hero's platoons vs the garrison's, the human always in the attacker
+   * role, the rails/log labeled "<Settlement name> Garrison" instead of a
+   * defender hero. Submits via SubmitSettlementBattleResult; on success the
+   * authoritative hero + settlement pair is merged, the phase is ended
+   * client-side (the server's applySettlementBattleResult already captured
+   * on a win / bounced the attacker on every other outcome), and the shared
+   * result card closes the arena. Submission failure mirrors fightInArena:
+   * the pre-battle position is restored with flee semantics and the flow
+   * ends without an applied result.
+   */
+  private async startSettlementBattleFlow(): Promise<void> {
+    const gs = this.state.getState();
+    if (gs.phase.kind !== "SETTLEMENT_BATTLE" || this.battleInFlight) return;
+    this.battleInFlight = true;
+    try {
+      const { attackerId, settlementId } = gs.phase;
+      const attacker = gs.heroes[attackerId];
+      const settlement = gs.settlements[settlementId];
+      if (!attacker || !settlement) return;
+
+      // The arena resolves unit stats from the server-backed catalog. If it
+      // is unavailable there is nothing to fight with: bounce the attacker
+      // (flee semantics) so the game is not stuck in the phase.
+      const catalog = await loadUnitCatalog();
+      if (catalogFailed() || catalog.length === 0) {
+        const tc = this.state.getTurnController();
+        tc.cancelMove(attackerId);
+        this.state.replaceState(tc.getState());
+        return;
+      }
+      const unitTypes = Object.fromEntries(catalog.map((u) => [u.id, u]));
+
+      const gameName = this.session.getActiveGameName();
+      const defenderLabel = `${settlement.name} Garrison`;
+      // Live action stream: same fire-and-forget shape as the hero battle,
+      // keyed attacker hero vs settlement (battle_actions only needs a
+      // non-empty defender string).
+      let actionSeq = 0;
+      const telemetry = gameName
+        ? (phase: BattleActionPhase, payload: Record<string, unknown>) => {
+            void api.postBattleAction(gameName, { attackerId, defenderId: settlementId, seq: actionSeq++, phase, payload });
+          }
+        : undefined;
+
+      let closeArena: () => void = () => {};
+      const outcome: ManualBattleOutcome = await new Promise<ManualBattleOutcome>((resolve) => {
+        const handle = openManualBattleArena(
+          attacker.stacks,
+          settlementStacks(settlement),
+          unitTypes,
+          "attacker",
+          {
+            heroGold: Number(attacker.gold) || 0,
+            heroSpell: spellLoadoutForHero(attacker),
+            onComplete: resolve,
+            telemetry,
+            defenderLabel,
+          },
+        );
+        closeArena = handle.close;
+      });
+
+      // Re-grab the controller after the arena: a multiplayerSync poll may
+      // have replaceState()'d underneath the overlay while the fight played
+      // out. The phase must still be THIS attacker-vs-settlement pair.
+      const tc = this.state.getTurnController();
+      const current = tc.getState();
+      const phase = current.phase;
+      if (phase.kind !== "SETTLEMENT_BATTLE" || phase.attackerId !== attackerId || phase.settlementId !== settlementId) {
+        return;
+      }
+
+      const server = await submitSettlementBattleResult(gameName ?? "", {
+        actor: attacker.ownerId,
+        attackerId,
+        settlementId,
+        outcome: outcome.outcome,
+        attackerStacks: outcome.attackerSurvivors,
+        defenderStacks: outcome.defenderSurvivors,
+        ...(outcome.surrenderedGold > 0 ? { surrenderedGold: outcome.surrenderedGold } : {}),
+        rounds: outcome.result.rounds,
+        obstacleSeed: outcome.result.obstacleSeed,
+      }).catch((err: unknown): SubmitSettlementBattleResultResult | null => {
+        bus.emit({ type: "command:rejected", action: "SubmitSettlementBattleResult", reason: String(err) });
+        tc.cancelMove(attackerId);
+        this.state.replaceState(tc.getState());
+        return null;
+      });
+      if (!server) return;
+
+      const next = endBattlePhase({
+        ...current,
+        heroes: { ...current.heroes, [attackerId]: server.attackerHero },
+        settlements: { ...current.settlements, [settlementId]: server.settlement },
+      });
+      this.state.replaceState(next);
+      bus.emit({
+        type: "battle:resolved",
+        attackerId,
+        defenderId: settlementId,
+        attackerSurvived: platoonsHaveTroops(server.attackerHero.stacks),
+      });
+      showBattleResultCard({
+        result: outcome.result,
+        attackerLabel: `Hero ${attacker.name}`,
+        defenderLabel,
+        onCarryOn: closeArena,
+      });
+    } finally {
+      this.battleInFlight = false;
+    }
+  }
+
+  // Post-battle capture re-check (plan §9): after a hero-vs-hero battle the
+  // attacker may now stand on an enemy settlement tile whose defending hero
+  // is gone and whose garrison is empty — tryCaptureAt deferred entirely to
+  // the battle in that case, so the capture check runs again here. Runs on
+  // the CURRENT controller (state was already battle-applied and
+  // replaceState'd); replaces state only when the check actually captured,
+  // so the no-capture common case emits no redundant state:committed.
+  private captureAfterBattleIfNeeded(heroId: string): void {
+    const tc = this.state.getTurnController();
+    const before = tc.getState();
+    tc.captureAfterBattleIfNeeded(heroId);
+    const after = tc.getState();
+    if (after !== before) {
+      this.state.replaceState(after);
+    }
   }
 
   async handleEndTurn(): Promise<void> {

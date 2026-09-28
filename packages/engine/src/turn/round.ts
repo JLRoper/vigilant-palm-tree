@@ -2,6 +2,7 @@ import type { GameState, HeroId, HeroState } from "@heroes/contracts";
 import { resetHeroMovement } from "../hero/move";
 import { applyHeroUpkeep } from "../hero/upkeep";
 import { applyPopulationGrowth } from "../settlement/populationGrowth";
+import { applyGarrisonUpkeep } from "../settlement/garrisonUpkeep";
 import { advanceCharters } from "../charter/advance";
 import { advanceSettlementUpgrades, advanceBuildingConstructions } from "../settlement/advance";
 import { advanceTradeRoutes } from "../logistics";
@@ -10,7 +11,7 @@ import { regenerateHeroMana } from "../combat/spells";
 
 export function applyWeeklyUpkeep(state: GameState, growthRate: number): GameState {
   const newHeroes = applyHeroUpkeep(state.heroes);
-  const newSettlements = applyPopulationGrowth(state.settlements, growthRate);
+  const newSettlements = applyGarrisonUpkeep(applyPopulationGrowth(state.settlements, growthRate));
   return { ...state, heroes: newHeroes, settlements: newSettlements, dirty: true };
 }
 

@@ -1,7 +1,7 @@
 import {
   getApproachHexes,
   getCombatant,
-  isRangedPlatoon,
+  platoonRange,
   type BattleSide,
   type Combatant,
   type ManualBattleState,
@@ -76,7 +76,7 @@ function resolveHover(
   const state = deps.getState();
   const humanSide = deps.getHumanSide();
   const actor = getCombatant(state, humanSide, deps.getSelectedSlot()!);
-  if (!actor || isRangedPlatoon(actor, state.unitTypes)) return null;
+  if (!actor || platoonRange(actor.entries, state.unitTypes) > 1) return null;
 
   const enemy = livingEnemyAt(deps, hex);
   if (enemy) {

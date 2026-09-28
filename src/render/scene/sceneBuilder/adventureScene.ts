@@ -150,6 +150,7 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
     const swingPhase = hero.moveProgress * Math.PI * 2;
     const bobY = hero.moving ? -Math.sin(swingPhase) * bobAmplitude : 0;
     const scaleY = hero.moving ? 1.0 + 0.06 * Math.sin(swingPhase) : 1.0;
+    const runFrame: 0 | 1 = hero.moving && Math.floor(hero.moveProgress * 2) % 2 === 1 ? 1 : 0;
     nodes.push({
       kind: "hero",
       heroId: hero.id,
@@ -160,6 +161,7 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       horseVariant: hero.horseVariant,
       faction: hero.faction,
       scaleY,
+      runFrame,
       color: opts.colorForOwner(hero.ownerId),
       selected: opts.selectedHeroId === hero.id,
     });

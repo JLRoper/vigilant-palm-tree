@@ -1,10 +1,4 @@
 /** @type {import('dependency-cruiser').IConfiguration} */
-// Documented exceptions (scoped out of the error rules via pathNot on the
-// `from` side; tracked as follow-up plans in
-// plan/2026-08-09-bloat-scalability-review.md):
-//   - server/routes.ts → src/game/initState.ts (makeInitialStatePayload is the
-//     map-gen + castle-placement + economy-init orchestrator; full extraction
-//     to shared/map/initState is R11).
 module.exports = {
   forbidden: [
     {
@@ -52,7 +46,7 @@ module.exports = {
     {
       name: "no-server-from-src",
       severity: "error",
-      from: { path: "^server", pathNot: "^server/routes\\.ts$" },
+      from: { path: "^server" },
       to: {
         path: "^src/",
         dependencyTypesNot: ["type-only"],

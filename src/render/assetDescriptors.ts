@@ -121,6 +121,7 @@ export type SpriteKey =
   | `hero.${Faction}`
   | `hero.player.${Direction}`
   | `horse.${string}.${Direction}`
+  | `horse.${string}.${Direction}.${number}`
   | `building.${string}.${string}.${number}`;
 
 export type Anchor = "bottom" | "center";
@@ -349,46 +350,66 @@ export const RESOURCE_DESCRIPTORS: Record<`resource.${ResourceType}`, SpriteDesc
     ])
   ) as Record<`resource.${ResourceType}`, SpriteDescriptor>;
 
-function loadDirectionalSprites(
-  glob: Record<string, { default: string }>,
-  pattern: RegExp,
-  fallbacks: Partial<Record<Direction, Direction>> = {}
-): Record<Direction, string | null> {
-  const images: Record<Direction, string | null> = {
-    n: null, ne: null, e: null, se: null, s: null, sw: null, w: null, nw: null,
-  };
+interface DirectionalSpriteSet {
+  base: Record<Direction, string | null>;
+  frame2: Partial<Record<Direction, string>>;
+}
 
-  for (const [key, mod] of Object.entries(glob)) {
-    const match = key.match(pattern);
-    if (match && mod.default) {
-      const dir = match[1] as Direction;
-      if (dir in images) {
-        images[dir] = mod.default;
-      }
-    }
-  }
-
+function applyDirectionFallbacks<T>(
+  images: Partial<Record<Direction, T>>,
+  fallbacks: Partial<Record<Direction, Direction>>
+): void {
   for (const [missing, fallback] of Object.entries(fallbacks)) {
     if (!images[missing as Direction] && images[fallback]) {
       images[missing as Direction] = images[fallback]!;
     }
   }
+}
 
-  return images;
+function loadDirectionalSprites(
+  glob: Record<string, { default: string }>,
+  pattern: RegExp,
+  fallbacks: Partial<Record<Direction, Direction>> = {}
+): DirectionalSpriteSet {
+  const base: Record<Direction, string | null> = {
+    n: null, ne: null, e: null, se: null, s: null, sw: null, w: null, nw: null,
+  };
+  const frame2: Partial<Record<Direction, string>> = {};
+
+  for (const [key, mod] of Object.entries(glob)) {
+    const match = key.match(pattern);
+    if (match && mod.default) {
+      const dir = match[1] as Direction;
+      if (dir in base) {
+        if (match[2]) frame2[dir] = mod.default;
+        else base[dir] = mod.default;
+      }
+    }
+  }
+
+  applyDirectionFallbacks(base, fallbacks);
+  applyDirectionFallbacks(frame2, fallbacks);
+
+  return { base, frame2 };
 }
 
 function createDirectionalDescriptors(
   prefix: string,
-  images: Record<Direction, string | null>,
+  images: DirectionalSpriteSet,
   anchor: Anchor = "bottom",
   sizing: Sizing = { kind: "fitHeight", hexSizeMul: 1.0 },
   naturalSize?: number
 ): Record<string, SpriteDescriptor> {
   const descriptors: Record<string, SpriteDescriptor> = {};
 
-  for (const [dir, url] of Object.entries(images)) {
+  for (const [dir, url] of Object.entries(images.base)) {
     if (!url) continue;
     const key = `${prefix}.${dir}` as SpriteKey;
+    descriptors[key] = { key, url, anchor, sizing, naturalSize };
+  }
+  for (const [dir, url] of Object.entries(images.frame2)) {
+    if (!url) continue;
+    const key = `${prefix}.${dir}.2` as SpriteKey;
     descriptors[key] = { key, url, anchor, sizing, naturalSize };
   }
   return descriptors;
@@ -402,7 +423,7 @@ const HERO_PLAYER_GLOB = import.meta.glob(
 
 const HERO_PLAYER_IMAGES = loadDirectionalSprites(
   HERO_PLAYER_GLOB,
-  /hero-player-(n|ne|e|se|s|sw|w|nw)\.png$/
+  /hero-player-(n|ne|e|se|s|sw|w|nw)(?:-(2))?\.png$/
 );
 
 export const HERO_PLAYER_DESCRIPTORS: Record<`hero.player.${Direction}`, SpriteDescriptor> =
@@ -420,7 +441,7 @@ const ALL_HORSE_FILES = import.meta.glob(
   { eager: true }
 ) as Record<string, { default: string }>;
 
-const HORSE_VARIANT_IMAGES: Record<string, Record<Direction, string | null>> = {};
+const HORSE_VARIANT_IMAGES: Record<string, DirectionalSpriteSet> = {};
 
 for (const entry of HORSE_VARIANT_REGISTRY) {
   const dirPrefix = `commander-${entry.commanderDir}/`;
@@ -432,8 +453,8 @@ for (const entry of HORSE_VARIANT_REGISTRY) {
   }
 
   const filePattern = entry.id === "hero"
-    ? /hero-player-(n|ne|e|se|s|sw|w|nw)\.png$/
-    : new RegExp(`${entry.id}-(n|ne|e|se|s|sw|w|nw)\\.png$`);
+    ? /hero-player-(n|ne|e|se|s|sw|w|nw)(?:-(2))?\.png$/
+    : new RegExp(`${entry.id}-(n|ne|e|se|s|sw|w|nw)(?:-(2))?\\.png$`);
 
   const fallbacks: Partial<Record<Direction, Direction>> = {};
   if (entry.id === "bubbly") {
@@ -462,8 +483,14 @@ for (const entry of HORSE_VARIANT_REGISTRY) {
 }
 
 // Horse variant key functions auto-generated from registry
-export function horseVariantKey(variant: HorseVariantId, direction: Direction): `horse.${string}.${Direction}` {
-  return `horse.${variant}.${direction}` as `horse.${string}.${Direction}`;
+export function horseVariantKey(
+  variant: HorseVariantId,
+  direction: Direction,
+  frame?: number
+): `horse.${string}.${Direction}` | `horse.${string}.${Direction}.${number}` {
+  return frame === 1
+    ? (`horse.${variant}.${direction}.2` as `horse.${string}.${Direction}.${number}`)
+    : (`horse.${variant}.${direction}` as `horse.${string}.${Direction}`);
 }
 
 export function horseBubblyKey(direction: Direction): `horse.bubbly.${Direction}` {

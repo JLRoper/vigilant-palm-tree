@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TurnController, type TurnControllerHooks } from "../../src/state/turnController";
-import { makeCharter, makeHero, makeState } from "../charter/_helpers";
+import { emptyWarehouse, makeCharter, makeHero, makeSettlement, makeState } from "../charter/_helpers";
+import { normalizePlatoons } from "@heroes/engine";
 import type { GameState } from "@heroes/contracts";
 
 interface Deferred<T> {
@@ -72,6 +73,9 @@ function buildHooks(initial: GameState): TurnControllerHooks {
     onUpgradeBuilding: noop,
     onUpgradeSettlement: noop,
     onAdvanceCharterTravel: noop,
+    onRecruitUnits: noop,
+    onTransferUnits: noop,
+    onSubmitSettlementBattleResult: noop,
   };
   (hooks as unknown as TestHooks).onHumanTurnEndSpy = onHumanTurnEndSpy;
   return hooks;
@@ -362,6 +366,8 @@ test("coverage guard: every this.hooks.on*( call inside a TurnController mutatio
     "buyWagons",
     "createTradeRoute",
     "updateTradeRoute",
+    "recruitUnits",
+    "transferUnits",
   ]);
 
   const lines = source.split("\n");
@@ -472,4 +478,153 @@ test("coverage guard: every this.hooks.on*( call inside a TurnController mutatio
     /this\.trackCommand\(\s*opts\.hook\(\)/,
     "commit() must create-and-track its hook promise via trackCommand( -- it is the single choke point the union coverage above relies on",
   );
+});
+
+test("recruitUnits applies the garrison deposit locally and blocks End Turn on the in-flight onRecruitUnits command", async () => {
+  const initial = makeState({
+    settlements: [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 1000,
+        warehouse: emptyWarehouse({ wood: 100 }),
+        buildings: [{ gx: 0, gy: 0, kind: "archeryRange", level: 1, style: "classic" }],
+      }),
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+
+  const command = deferred<void>();
+  hooks.onRecruitUnits = (() => command.promise) as TurnControllerHooks["onRecruitUnits"];
+
+  const controller = new TurnController(initial, hooks);
+  assert.equal(controller.recruitUnits("s0", "archeryRange", 0, 0, "archer", 3), true);
+
+  const s0 = controller.getState().settlements["s0"];
+  assert.equal(s0?.gold, 250, "3 archers at 250g each must deduct from the settlement treasury");
+  assert.deepEqual(s0?.stacks?.[0]?.entries, [{ unitTypeId: "archer", count: 3 }], "recruits land in the garrison");
+
+  const endTurnPromise = controller.endHumanTurn();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(
+    endTurnSpy.mock.callCount(),
+    0,
+    "End Turn must not race past the still-in-flight onRecruitUnits command",
+  );
+
+  command.resolve();
+  await endTurnPromise;
+  assert.equal(endTurnSpy.mock.callCount(), 1);
+});
+
+test("recruitUnits returns false without committing when the engine rejects the purchase", () => {
+  const initial = makeState();
+  const controller = new TurnController(initial, buildHooks(initial));
+  assert.equal(controller.recruitUnits("s0", "archeryRange", 0, 0, "archer", 1), false, "no archeryRange at s0");
+  assert.equal(controller.getState(), initial, "state must be untouched on a rejected recruit");
+});
+
+test("transferUnits moves garrison troops onto a hero standing on the settlement tile and tracks the hook", async () => {
+  const s0 = makeSettlement("s0", 0, 2, 2);
+  s0.stacks = normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 10 }] }]);
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 2, 2)],
+    settlements: [s0, makeSettlement("s1", 1, 18, 4)],
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+
+  const command = deferred<void>();
+  hooks.onTransferUnits = (() => command.promise) as TurnControllerHooks["onTransferUnits"];
+
+  const controller = new TurnController(initial, hooks);
+  assert.equal(controller.transferUnits("h0", "s0", "toHero", "swordsman", 4), true);
+
+  const state = controller.getState();
+  assert.deepEqual(state.heroes["h0"]?.stacks[0]?.entries, [{ unitTypeId: "swordsman", count: 4 }]);
+  assert.deepEqual(state.settlements["s0"]?.stacks?.[0]?.entries, [{ unitTypeId: "swordsman", count: 6 }]);
+
+  const endTurnPromise = controller.endHumanTurn();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(endTurnSpy.mock.callCount(), 0, "onTransferUnits must be tracked like every other command hook");
+  command.resolve();
+  await endTurnPromise;
+  assert.equal(endTurnSpy.mock.callCount(), 1);
+});
+
+test("transferUnits returns false when the hero is not on the settlement tile", () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 5, 5)],
+    settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, 18, 4)],
+  });
+  const controller = new TurnController(initial, buildHooks(initial));
+  assert.equal(controller.transferUnits("h0", "s0", "toHero", "swordsman", 1), false, "hero_not_at_settlement");
+});
+
+test("tryCaptureAt gate: a garrisoned enemy settlement triggers SETTLEMENT_BATTLE instead of a walk-in capture", () => {
+  const s1 = makeSettlement("s1", 1, 2, 2);
+  s1.stacks = normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 5 }] }]);
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 2, 2)],
+    settlements: [makeSettlement("s0", 0, 18, 4), s1],
+  });
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  controller.selectHero("h0");
+
+  const phase = controller.getState().phase;
+  assert.equal(phase.kind, "SETTLEMENT_BATTLE");
+  assert.equal(phase.kind === "SETTLEMENT_BATTLE" ? phase.settlementId : null, "s1");
+  assert.equal(controller.getState().settlements["s1"]?.ownerId, 1, "ownership must not flip when the garrison fights");
+});
+
+test("tryCaptureAt gate: a defending hero on the settlement tile defers to the adjacent-enemy battle (no capture, no settlement battle)", () => {
+  const s1 = makeSettlement("s1", 1, 2, 2);
+  s1.stacks = normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 5 }] }]);
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 2, 2), makeHero("h1", 1, 2, 2)],
+    settlements: [makeSettlement("s0", 0, 18, 4), s1],
+  });
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  controller.selectHero("h0");
+
+  assert.equal(controller.getState().phase.kind, "PLAYER_TURN", "tryCaptureAt must bail without capturing or starting a settlement battle");
+  assert.equal(controller.getState().settlements["s1"]?.ownerId, 1);
+});
+
+test("tryCaptureAt gate: an empty-garrison enemy settlement still captures on walk-in", () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 2, 2)],
+    settlements: [makeSettlement("s0", 0, 18, 4), makeSettlement("s1", 1, 2, 2)],
+  });
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  controller.selectHero("h0");
+
+  assert.equal(controller.getState().settlements["s1"]?.ownerId, 0, "empty garrison captures exactly as before the gate");
+  assert.equal(controller.getState().phase.kind, "PLAYER_TURN");
+});
+
+test("captureAfterBattleIfNeeded re-runs the capture check on the hero's current tile after a hero battle", () => {
+  const s1 = makeSettlement("s1", 1, 2, 2);
+  s1.stacks = normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 2 }] }]);
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 2, 2)],
+    settlements: [makeSettlement("s0", 0, 18, 4), s1],
+  });
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  controller.captureAfterBattleIfNeeded("h0");
+
+  assert.equal(controller.getState().phase.kind, "SETTLEMENT_BATTLE", "garrison still holds, so the settlement battle fires");
+});
+
+test("captureAfterBattleIfNeeded is a no-op for an unknown hero id", () => {
+  const initial = makeState();
+  const controller = new TurnController(initial, buildHooks(initial));
+  controller.captureAfterBattleIfNeeded("hX");
+  assert.equal(controller.getState(), initial);
 });

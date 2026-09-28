@@ -29,17 +29,18 @@ import {
   type HeroId,
   type GamePhase,
 } from "../../src/state/gameState";
+import { normalizePlatoons } from "../../src/state/units";
 
 function makePlayer(id: PlayerId, faction: Player["faction"], name: string, heroIds: HeroId[], settlementIds: string[]): Player {
   return { id, faction, name, heroIds, settlementIds };
 }
 
 function makeHero(id: HeroId, ownerId: PlayerId, q: number, r: number, movementRemaining = MOVEMENT_PER_TURN, gold = 0, troops = 1): HeroState {
-  return { id, name: id, ownerId, q, r, movementRemaining, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q, r }], gold, troops, stacks: [], isChartering: false, charterId: null };
+  return { id, name: id, ownerId, q, r, movementRemaining, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q, r }], gold, troops, stacks: troops > 0 ? normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: troops }] }]) : [], isChartering: false, charterId: null };
 }
 
 function emptyWarehouse() {
-  return { wood: 0, stone: 0, iron: 0, arcane: 0 };
+  return { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
 }
 
 function makeSettlement(
@@ -63,6 +64,7 @@ function makeSettlement(
     warehouse: opts.warehouse ?? emptyWarehouse(),
     morale: opts.morale ?? 100,
     autoTrade: opts.autoTrade ?? true,
+    buildings: [],
   };
 }
 

@@ -10,8 +10,6 @@ import {
   clampMorale,
   clampWarehouseNonNegative,
   FOOD_PER_POPULATION,
-  BUILDING_UPKEEP_WOOD,
-  BUILDING_UPKEEP_STONE,
   MORALE_DECAY_PER_DEFICIT_RATIO,
   LOW_MORALE_EXTRA_DECAY,
   MORALE_TAX_INCOME_DIVISOR,
@@ -34,6 +32,7 @@ function makeSettlement(overrides: Partial<SettlementState> = {}): SettlementSta
     warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
     morale: 100,
     autoTrade: true,
+    buildings: [],
     ...overrides,
   };
 }
@@ -50,12 +49,16 @@ test("FOOD_PER_POPULATION defaults to 100", () => {
   assert.equal(FOOD_PER_POPULATION, 100);
 });
 
-test("buildingUpkeepRequired returns BUILDING_UPKEEP_* scaled by level (0 for now)", () => {
+test("buildingUpkeepRequired sums per-building registry upkeep (0 with no buildings)", () => {
   assert.deepEqual(buildingUpkeepRequired(makeSettlement({ level: 1 })), { wood: 0, stone: 0 });
-  assert.deepEqual(buildingUpkeepRequired(makeSettlement({ level: 2 })), { wood: 0, stone: 0 });
   assert.deepEqual(buildingUpkeepRequired(makeSettlement({ level: 3 })), { wood: 0, stone: 0 });
-  assert.equal(BUILDING_UPKEEP_WOOD, 0);
-  assert.equal(BUILDING_UPKEEP_STONE, 0);
+  const built = makeSettlement({
+    buildings: [
+      { gx: 1, gy: 1, kind: "house", level: 1, style: "classic" },
+      { gx: 2, gy: 2, kind: "tower", level: 2, style: "classic" },
+    ],
+  });
+  assert.deepEqual(buildingUpkeepRequired(built), { wood: 3, stone: 2 });
 });
 
 test("foodDeficitRatio: 0 when warehouse has enough food", () => {
@@ -79,7 +82,7 @@ test("foodDeficitRatio: partial ratio when partial food", () => {
   assert.equal(foodDeficitRatio(s), 0.5);
 });
 
-test("suppliesDeficitRatio: 0 because BUILDING_UPKEEP is 0", () => {
+test("suppliesDeficitRatio: 0 with no buildings (no upkeep required)", () => {
   const s = makeSettlement({ warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 } });
   assert.equal(suppliesDeficitRatio(s), 0);
 });

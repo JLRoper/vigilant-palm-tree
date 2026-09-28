@@ -135,6 +135,12 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     castleVariant: s.castleVariant ?? 0,
     buildings: s.buildings ?? [],
     upgrade: s.upgrade ?? undefined,
+    // Garrison passthrough (unit-recruitment/garrison plan task 7): rows
+    // written after garrisons existed carry stacks directly in the JSONB;
+    // normalize them so the fallback path matches settlementRepo's granular
+    // assembly. Absent stays absent -- readers go through settlementStacks(),
+    // which treats undefined as 8 empty platoons.
+    ...(s.stacks !== undefined ? { stacks: normalizePlatoons(s.stacks) } : {}),
   };
 }
 

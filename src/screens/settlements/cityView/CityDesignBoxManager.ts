@@ -120,4 +120,9 @@ export class CityDesignBoxManager {
   isOpen(): boolean {
     return this.box !== null;
   }
+
+  /** The box element, for collision-aware placement of other floating panels; null while hidden. */
+  getElement(): HTMLDivElement | null {
+    return this.box;
+  }
 }

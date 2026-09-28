@@ -9,7 +9,7 @@ The actors on the map. Heroes move tile-to-tile, claim [settlements](./settlemen
 - A faction (`player` or `enemy`).
 - An ID, name, owner, and movement animation state.
 - A personal **gold purse** (persists with the hero; captured on defeat).
-- A set of **army stacks** (unit types + counts, see [`src/data/unitCatalog.ts`](../src/data/unitCatalog.ts)).
+- A set of **army stacks** (unit types + counts). Recruits land in the source settlement's **garrison** first; a hero pulls them onto its platoons with `TransferUnits` while standing on that settlement — see [army.md](./army.md).
 - Movement points per turn (7 base, refreshed each `advanceRound`).
 - A **trail** of visited hexes.
 - **Chartering** state (`isChartering`, `charterId`) — see below.
@@ -45,7 +45,7 @@ The game operates on a **round-based** cycle:
 - Selected hero's gold/resources are shown in the hero info panel.
 - Chartering heroes auto-move at turn start (no manual input).
 - AI heroes move automatically via `pickAiMove` (wander + basic targeting).
-- After all players act, `advanceRound` runs: day increments, all heroes reset movement, settlements produce resources, morale decays, charters advance.
+- After all players act, `advanceRound` runs: day increments, all heroes reset movement, settlements produce resources, morale decays, charters advance — and every 7th day the weekly upkeep applies: 1g/troop from each hero's purse plus the **garrison upkeep** (1g/troop from each settlement's treasury + 1 food/troop from its warehouse, trimming stacks from the end when short).
 
 ## Hero gold & economy
 
@@ -59,11 +59,11 @@ Settlements track gold separately in their treasury (`settlement.gold`).
 ## Combat
 
 When a hero moves adjacent to an enemy hero, battle triggers:
-- Auto-resolve formula determines winner (see [army.md](./army.md)).
+- The Fight / Quick Resolve / Flee modal opens (see [army.md](./army.md)); garrison battles run through the same arena via the `SETTLEMENT_BATTLE` phase.
 - Loser is removed from the map.
 - Winner gains loser's hero gold.
 - If loser was chartering, the charter is cancelled (costs forfeited).
-- Battle resolution persists via the `ResolveBattle` command on `/api/games/:name/commands`.
+- Battle resolution persists via the `ResolveBattle` command (Quick Resolve) or `SubmitBattleResult` (played-out arena fights) on `/api/games/:name/commands`; settlement battles via `SubmitSettlementBattleResult`.
 
 ## Enemy heroes
 

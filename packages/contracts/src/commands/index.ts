@@ -19,6 +19,9 @@ import type { AssignWagonsCommand } from "./assignWagons";
 import type { BuyWagonsCommand } from "./buyWagons";
 import type { CreateTradeRouteCommand } from "./createTradeRoute";
 import type { UpdateTradeRouteCommand } from "./updateTradeRoute";
+import type { RecruitUnitsCommand } from "./recruitUnits";
+import type { TransferUnitsCommand } from "./transferUnits";
+import type { SubmitSettlementBattleResultCommand } from "./submitSettlementBattleResult";
 
 export * from "./moveHero";
 export * from "./transferGold";
@@ -41,6 +44,9 @@ export * from "./assignWagons";
 export * from "./buyWagons";
 export * from "./createTradeRoute";
 export * from "./updateTradeRoute";
+export * from "./recruitUnits";
+export * from "./transferUnits";
+export * from "./submitSettlementBattleResult";
 
 // Grows with each command port. Week 1 of Phase 3 Track 3.A shipped
 // MoveHero/TransferGold; EndTurn followed in Week 2
@@ -80,4 +86,7 @@ export type Command =
   | AssignWagonsCommand
   | BuyWagonsCommand
   | CreateTradeRouteCommand
-  | UpdateTradeRouteCommand;
+  | UpdateTradeRouteCommand
+  | RecruitUnitsCommand
+  | TransferUnitsCommand
+  | SubmitSettlementBattleResultCommand;

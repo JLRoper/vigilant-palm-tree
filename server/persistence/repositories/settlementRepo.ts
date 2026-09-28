@@ -1,6 +1,7 @@
 import type {
   BuildingDef,
   CastleVariant,
+  Platoon,
   ResourceType,
   SettlementId,
   SettlementState,
@@ -8,6 +9,7 @@ import type {
   WarehouseResource,
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+import { normalizePlatoons, settlementStacks } from "@heroes/engine";
 import { resolveGameId } from "./gameRepo";
 import type { Queryable } from "./gameRepo";
 
@@ -20,7 +22,8 @@ export interface SettlementRepo {
   // Full sync, same rule as heroRepo.upsertMany: commandHandler.ts always
   // passes the *entire* settlements record, so this deletes any row for the
   // game not present in `settlements`, then upserts everything that is,
-  // replacing each settlement's resources/buildings rowset alongside it.
+  // replacing each settlement's resources/buildings/platoons rowset
+  // alongside it.
   upsertMany(gameName: string, settlements: Record<SettlementId, SettlementState>): Promise<void>;
 }
 
@@ -63,6 +66,13 @@ interface BuildingRow {
   construction: { daysRemaining: number } | null;
 }
 
+interface PlatoonRow {
+  settlement_id: string;
+  stack_index: number;
+  unit_type_id: string;
+  count: number;
+}
+
 const SETTLEMENT_COLUMNS =
   "id, name, owner_id, q, r, level, population, gold_tax, founded_on_resource, gold, gold_rate, morale, auto_trade, castle_variant, city_spots, city_mines, upgrade";
 
@@ -70,6 +80,7 @@ function toSettlementState(
   row: SettlementRow,
   resourceRows: ResourceRow[],
   buildingRows: BuildingRow[],
+  platoonRows: PlatoonRow[],
 ): SettlementState {
   const warehouse: SettlementState["warehouse"] = { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
   const resourceRates: Partial<Record<ResourceType, number>> = {};
@@ -116,7 +127,29 @@ function toSettlementState(
     // settlement built without ever touching `upgrade` (every test fixture,
     // and every settlement that's never started an upgrade).
     ...(row.upgrade !== null ? { upgrade: row.upgrade } : {}),
+    // Garrison assembly (unit-recruitment/garrison plan task 7), same
+    // conditional-spread rule as `upgrade`: a settlement with no platoon
+    // rows round-trips without the optional `stacks` key at all (readers
+    // go through settlementStacks(), which treats absent as 8 empty
+    // platoons); one with rows gets the normalized 8-slot Platoon[] back.
+    ...(platoonRows.length > 0
+      ? { stacks: normalizePlatoons(assemblePlatoons(platoonRows)) }
+      : {}),
   };
+}
+
+// Reassembles Platoon[] from settlement_platoons' flattened rows -- the
+// inverse of upsertMany's flattening below, mirroring heroRepo's identical
+// helper. Sparse stack_index values leave a hole with an empty-entries
+// Platoon rather than shifting later stacks into the gap, since stack
+// position is meaningful.
+function assemblePlatoons(rows: PlatoonRow[]): Platoon[] {
+  const stacks: Platoon[] = [];
+  for (const row of rows) {
+    for (let i = stacks.length; i <= row.stack_index; i++) stacks[i] = { entries: [] };
+    stacks[row.stack_index].entries.push({ unitTypeId: row.unit_type_id, count: row.count });
+  }
+  return stacks;
 }
 
 export function createSettlementRepo(db: Queryable): SettlementRepo {
@@ -130,7 +163,7 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
       if (settlementsResult.rowCount === 0) return [];
 
       const settlementIds = settlementsResult.rows.map((s) => s.id);
-      const [resourcesResult, buildingsResult] = await Promise.all([
+      const [resourcesResult, buildingsResult, platoonsResult] = await Promise.all([
         db.query<ResourceRow>(
           `SELECT settlement_id, resource, amount, rate FROM settlement_resources
            WHERE settlement_id = ANY($1::text[])`,
@@ -139,6 +172,11 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
         db.query<BuildingRow>(
           `SELECT settlement_id, gx, gy, kind, level, style, w, h, construction FROM settlement_buildings
            WHERE settlement_id = ANY($1::text[])`,
+          [settlementIds],
+        ),
+        db.query<PlatoonRow>(
+          `SELECT settlement_id, stack_index, unit_type_id, count FROM settlement_platoons
+           WHERE settlement_id = ANY($1::text[]) ORDER BY settlement_id, stack_index, unit_type_id`,
           [settlementIds],
         ),
       ]);
@@ -155,12 +193,19 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
         rows.push(row);
         buildingsBySettlement.set(row.settlement_id, rows);
       }
+      const platoonsBySettlement = new Map<string, PlatoonRow[]>();
+      for (const row of platoonsResult.rows) {
+        const rows = platoonsBySettlement.get(row.settlement_id) ?? [];
+        rows.push(row);
+        platoonsBySettlement.set(row.settlement_id, rows);
+      }
 
       return settlementsResult.rows.map((row) =>
         toSettlementState(
           row,
           resourcesBySettlement.get(row.id) ?? [],
           buildingsBySettlement.get(row.id) ?? [],
+          platoonsBySettlement.get(row.id) ?? [],
         ),
       );
     },
@@ -219,9 +264,9 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
           ],
         );
 
-        // Resources and buildings are always replaced wholesale alongside
-        // their parent settlement -- same full-sync rule as the settlements
-        // table itself.
+        // Resources, buildings, and garrison platoons are always replaced
+        // wholesale alongside their parent settlement -- same full-sync
+        // rule as the settlements table itself.
         await db.query(`DELETE FROM settlement_resources WHERE settlement_id = $1`, [settlement.id]);
         for (const resource of WAREHOUSE_RESOURCES) {
           const rate = settlement.resourceRates[resource];
@@ -249,6 +294,22 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
               building.construction ? JSON.stringify(building.construction) : null,
             ],
           );
+        }
+
+        // Garrison platoons (unit-recruitment/garrison plan task 2), the
+        // settlement-side mirror of heroRepo's hero_platoons flattening.
+        // settlementStacks() normalizes absent stacks to 8 empty platoons,
+        // so a legacy settlement without a `stacks` field writes zero rows.
+        await db.query(`DELETE FROM settlement_platoons WHERE settlement_id = $1`, [settlement.id]);
+        const stacks = settlementStacks(settlement);
+        for (let stackIndex = 0; stackIndex < stacks.length; stackIndex++) {
+          for (const entry of stacks[stackIndex].entries) {
+            await db.query(
+              `INSERT INTO settlement_platoons (settlement_id, stack_index, unit_type_id, count)
+               VALUES ($1, $2, $3, $4)`,
+              [settlement.id, stackIndex, entry.unitTypeId, entry.count],
+            );
+          }
         }
       }
     },

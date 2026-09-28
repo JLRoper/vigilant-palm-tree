@@ -21,13 +21,18 @@ import {
   createTradeRoute as createTradeRouteCommand,
   updateTradeRoute as updateTradeRouteCommand,
   advanceCharterTravel,
+  recruitUnits as recruitUnitsCommand,
+  transferUnits as transferUnitsCommand,
+  submitSettlementBattleResult,
 } from "../io/commands";
 import type { EndTurnResult } from "../io/commands";
 import type {
   BuildingDef,
+  BuildingKind,
   BuildingUpgradeRequest,
   GameState,
   HeroId,
+  Platoon,
   SettlementId,
   TransferDirection,
   WarehouseResource,
@@ -378,6 +383,69 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         reportCommandFailure("Upgrade settlement", e);
       }
     },
+    onRecruitUnits: async (
+      actor: number,
+      settlementId: SettlementId,
+      buildingKind: BuildingKind,
+      gx: number,
+      gy: number,
+      unitTypeId: string,
+      count: number,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await recruitUnitsCommand(name, { actor, settlementId, buildingKind, gx, gy, unitTypeId, count });
+      } catch (e) {
+        reportCommandFailure("Recruit units", e);
+      }
+    },
+    onTransferUnits: async (
+      actor: number,
+      heroId: HeroId,
+      settlementId: SettlementId,
+      direction: "toHero" | "toGarrison",
+      unitTypeId: string,
+      count: number,
+      toSlot?: number,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await transferUnitsCommand(name, { actor, heroId, settlementId, direction, unitTypeId, count, toSlot });
+      } catch (e) {
+        reportCommandFailure("Transfer units", e);
+      }
+    },
+    onSubmitSettlementBattleResult: async (
+      actor: number,
+      attackerId: HeroId,
+      settlementId: SettlementId,
+      outcome: "attackerWon" | "defenderWon" | "draw" | "retreat" | "surrender",
+      attackerStacks: Platoon[],
+      defenderStacks: Platoon[],
+      surrenderedGold: number | undefined,
+      rounds: number,
+      obstacleSeed: number,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await submitSettlementBattleResult(name, {
+          actor,
+          attackerId,
+          settlementId,
+          outcome,
+          attackerStacks,
+          defenderStacks,
+          surrenderedGold,
+          rounds,
+          obstacleSeed,
+        });
+      } catch (e) {
+        reportCommandFailure("Settlement battle result", e);
+      }
+    },
     onPlaceBuildings: async (
       actor: number,
       settlementId: SettlementId,
@@ -414,7 +482,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
   };
 }
 
-function mergeFromEndTurn(state: GameState, result: EndTurnResult): GameState {
+export function mergeFromEndTurn(state: GameState, result: EndTurnResult): GameState {
   // The server now runs the whole end-turn pipeline authoritatively
   // (simple next-player advance, or a full round wrap -- see
   // server/app/turnService.ts), so result.activePlayerId/players are
@@ -427,6 +495,13 @@ function mergeFromEndTurn(state: GameState, result: EndTurnResult): GameState {
     nextPlayer?.faction === "ai"
       ? { kind: "AI_TURN", playerId: result.activePlayerId }
       : { kind: "PLAYER_TURN", playerId: result.activePlayerId };
+  // A selection is client-local UI state: keep it while the entity still
+  // exists, across every ending player's merge (the AI hand-offs flow
+  // through this same hook), so panels survive End Turn and the AI phase.
+  const selectedHero = state.selectedHeroId != null ? result.heroes[state.selectedHeroId] : undefined;
+  const selectedHeroId = selectedHero ? state.selectedHeroId : null;
+  const selectedSettlement = state.selectedSettlementId != null ? result.settlements[state.selectedSettlementId] : undefined;
+  const selectedSettlementId = selectedSettlement ? state.selectedSettlementId : null;
   return {
     ...state,
     round: result.round,
@@ -439,8 +514,8 @@ function mergeFromEndTurn(state: GameState, result: EndTurnResult): GameState {
     // client's wholesale, same as heroes/settlements.
     tradeRoutes: result.tradeRoutes ?? state.tradeRoutes,
     phase,
-    selectedHeroId: null,
-    selectedSettlementId: null,
+    selectedHeroId,
+    selectedSettlementId,
     dirty: true,
   };
 }

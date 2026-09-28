@@ -210,6 +210,9 @@ async function run(): Promise<void> {
     // Wait for the hero info menu to actually be open ("Army" only exists in
     // the panel body -- "text=Hero" also matches the toolbar's Heroes button).
     await page.waitForSelector("text=Army", { timeout: 5_000 });
+    // The Army section is an accordion that starts collapsed to one line;
+    // expand it so the tiles are laid out and hit-testable for the drag.
+    await page.locator('[data-accordion="Army"]').click();
     await page.waitForTimeout(200);
 
     const before = await readArmyTiles(page);

@@ -2,6 +2,7 @@ import type { BuildingDef, BuildingRef } from "./buildings";
 import type { CastleVariant } from "./castle";
 import type { CharterId, HeroId, PlayerId, SettlementId } from "./ids";
 import type { ResourceType, Warehouse } from "./resources";
+import type { Platoon } from "./units";
 
 export type CharterPhase = "traveling" | "constructing";
 
@@ -50,4 +51,7 @@ export interface SettlementState {
   castleVariant: CastleVariant;
   buildings: BuildingDef[];
   upgrade?: UpgradeState;
+  // Garrison platoons defending this settlement. Optional + helper-accessed
+  // so legacy saves and old JSONB rows stay valid (HeroState.stacks precedent).
+  stacks?: Platoon[];
 }

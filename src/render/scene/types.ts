@@ -162,6 +162,8 @@ export interface HeroNode {
   horseVariant: HorseVariant;
   faction: Faction;
   scaleY: number;
+  /** Which run-cycle pose to draw while moving; absent/0 = base sprite. Derived from moveProgress by the scene builder. */
+  runFrame?: 0 | 1;
   color: string;
   selected: boolean;
 }

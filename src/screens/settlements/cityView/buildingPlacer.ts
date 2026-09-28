@@ -3,12 +3,15 @@ import type { CityViewSize } from "@heroes/engine";
 import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
 import { coversCell as reCoversCell } from "../../../render/cityBuildingDraw";
 import { PopupMenu, styleButton, menuTheme } from "@screens/shared/menu";
+import { savePanelGeometry } from "@screens/shared/panelLayout";
+import { toolbarHeight } from "@screens/shared/panelRail";
 import {
   buildingPlacementCost,
   buildingLabel,
   buildingBuildDays,
   buildingFootprintFromRegistry,
 } from "@heroes/engine";
+import { buildListSections } from "./buildListSections";
 import { pickStyleForBuilding } from "../../../render/assetDescriptors";
 import type { ResourceType } from "../../../state/gameState";
 import resourceGoldPileSmol from "../../../resources/resource-gold-pile-smol.png?url";
@@ -16,13 +19,6 @@ import resourceWoodPileSmol from "../../../resources/resource-wood-pile-smol.png
 import resourceStonePileSmol from "../../../resources/resource-stone-pile-smol.png?url";
 import resourceIronPileSmol from "../../../resources/resource-iron-pile-smol.png?url";
 import resourceArcanePileSmol from "../../../resources/resource-arcane-pile-smol.png?url";
-
-const BUILDABLE_KINDS: BuildingKind[] = [
-  "townHall", "house",
-  "goldMine", "woodcutterHut", "stoneMine", "ironMine", "arcaneFont",
-  "tower", "archeryRange", "barracks", "smithy", "market", "mageGuild",
-  "apartment", "farmField", "farmhouse", "granary", "warehouse", "bank",
-];
 
 type PaletteMode = "build" | "destroy";
 
@@ -237,7 +233,10 @@ export class BuildingPlacer {
       title: "Building Palette",
       width: 240,
       initialPosition: { x: anchorX, y: anchorY },
+      minTop: toolbarHeight,
+      zIndex: 75,
       onClose: () => this.handlePaletteClose(),
+      onMove: (pos) => savePanelGeometry("buildPalette", pos),
     });
     this.palette.setDraggable(true);
 
@@ -367,91 +366,105 @@ export class BuildingPlacer {
       padding: "2px",
     });
 
-    for (const kind of BUILDABLE_KINDS) {
-      const row = document.createElement("button");
-      const label = buildingLabel(kind);
-      const cost = buildingPlacementCost(kind);
-      const days = buildingBuildDays(kind);
-      const canAfford = this.canAffordSingle(kind);
-      const hasTownHall = kind === "townHall" && this.buildings.some((b) => b.kind === "townHall");
-      const isSelected = this.selectedKind === kind;
-      const disabled = !canAfford || hasTownHall;
+    const sections = buildListSections();
 
-      Object.assign(row.style, {
-        width: "100%",
-        textAlign: "left",
-        padding: "3px 6px",
-        marginBottom: "1px",
-        background: isSelected ? "rgba(60,120,60,0.6)" : "rgba(255,255,255,0.04)",
-        color: disabled ? "#666" : "#eee",
-        border: isSelected ? "1px solid rgba(100,200,100,0.4)" : "1px solid transparent",
-        borderRadius: "2px",
-        fontSize: "11px",
-        cursor: disabled ? "not-allowed" : "pointer",
-        fontFamily: menuTheme.button.fontFamily,
-        opacity: disabled ? "0.5" : "1",
-        display: "flex",
-        alignItems: "center",
-        gap: "4px",
+    for (const { title: sectionTitle, kinds } of sections) {
+      if (kinds.length === 0) continue;
+      const header = document.createElement("div");
+      header.textContent = sectionTitle;
+      Object.assign(header.style, {
+        fontSize: "10px",
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        opacity: "0.5",
+        margin: "4px 4px 2px",
       });
+      scrollWrap.appendChild(header);
+      for (const kind of kinds) {
+        const row = document.createElement("button");
+        const label = buildingLabel(kind);
+        const cost = buildingPlacementCost(kind);
+        const days = buildingBuildDays(kind);
+        const canAfford = this.canAffordSingle(kind);
+        const hasTownHall = kind === "townHall" && this.buildings.some((b) => b.kind === "townHall");
+        const isSelected = this.selectedKind === kind;
+        const disabled = !canAfford || hasTownHall;
 
-      const costWrap = document.createElement("span");
-      Object.assign(costWrap.style, {
-        display: "flex",
-        alignItems: "center",
-        gap: "1px",
-        flexShrink: "0",
-      });
-
-      if (days > 0) {
-        const hgIcon = document.createElement("img");
-        hgIcon.src = HOURGLASS_SVG;
-        Object.assign(hgIcon.style, {
-          width: `${ICON_SIZE}px`,
-          height: `${ICON_SIZE}px`,
-          imageRendering: "pixelated",
+        Object.assign(row.style, {
+          width: "100%",
+          textAlign: "left",
+          padding: "3px 6px",
+          marginBottom: "1px",
+          background: isSelected ? "rgba(60,120,60,0.6)" : "rgba(255,255,255,0.04)",
+          color: disabled ? "#666" : "#eee",
+          border: isSelected ? "1px solid rgba(100,200,100,0.4)" : "1px solid transparent",
+          borderRadius: "2px",
+          fontSize: "11px",
+          cursor: disabled ? "not-allowed" : "pointer",
+          fontFamily: menuTheme.button.fontFamily,
+          opacity: disabled ? "0.5" : "1",
+          display: "flex",
+          alignItems: "center",
+          gap: "4px",
         });
-        costWrap.appendChild(hgIcon);
-        const hgNum = document.createElement("span");
-        hgNum.textContent = `${days}`;
-        Object.assign(hgNum.style, { fontSize: "10px", marginRight: "3px" });
-        costWrap.appendChild(hgNum);
-      }
 
-      for (const r of RESOURCE_ORDER) {
-        const v = cost[r];
-        if (!v) continue;
-        const url = RESOURCE_ICON_URLS[r];
-        if (url) {
-          const icon = document.createElement("img");
-          icon.src = url;
-          Object.assign(icon.style, {
+        const costWrap = document.createElement("span");
+        Object.assign(costWrap.style, {
+          display: "flex",
+          alignItems: "center",
+          gap: "1px",
+          flexShrink: "0",
+        });
+
+        if (days > 0) {
+          const hgIcon = document.createElement("img");
+          hgIcon.src = HOURGLASS_SVG;
+          Object.assign(hgIcon.style, {
             width: `${ICON_SIZE}px`,
             height: `${ICON_SIZE}px`,
             imageRendering: "pixelated",
           });
-          costWrap.appendChild(icon);
+          costWrap.appendChild(hgIcon);
+          const hgNum = document.createElement("span");
+          hgNum.textContent = `${days}`;
+          Object.assign(hgNum.style, { fontSize: "10px", marginRight: "3px" });
+          costWrap.appendChild(hgNum);
         }
-        const num = document.createElement("span");
-        num.textContent = `${v}`;
-        Object.assign(num.style, { fontSize: "10px", marginRight: "3px" });
-        costWrap.appendChild(num);
+
+        for (const r of RESOURCE_ORDER) {
+          const v = cost[r];
+          if (!v) continue;
+          const url = RESOURCE_ICON_URLS[r];
+          if (url) {
+            const icon = document.createElement("img");
+            icon.src = url;
+            Object.assign(icon.style, {
+              width: `${ICON_SIZE}px`,
+              height: `${ICON_SIZE}px`,
+              imageRendering: "pixelated",
+            });
+            costWrap.appendChild(icon);
+          }
+          const num = document.createElement("span");
+          num.textContent = `${v}`;
+          Object.assign(num.style, { fontSize: "10px", marginRight: "3px" });
+          costWrap.appendChild(num);
+        }
+
+        const labelSpan = document.createElement("span");
+        labelSpan.textContent = hasTownHall ? `${label} (built)` : label;
+        Object.assign(labelSpan.style, { flex: "1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+
+        row.appendChild(costWrap);
+        row.appendChild(labelSpan);
+
+        row.addEventListener("click", () => {
+          if (disabled) return;
+          this.selectBuilding(kind);
+        });
+        scrollWrap.appendChild(row);
       }
-
-      const labelSpan = document.createElement("span");
-      labelSpan.textContent = hasTownHall ? `${label} (built)` : label;
-      Object.assign(labelSpan.style, { flex: "1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
-
-      row.appendChild(costWrap);
-      row.appendChild(labelSpan);
-
-      row.addEventListener("click", () => {
-        if (disabled) return;
-        this.selectBuilding(kind);
-      });
-      scrollWrap.appendChild(row);
     }
-
     this.palette.appendContent(scrollWrap);
 
     const hint = document.createElement("div");
