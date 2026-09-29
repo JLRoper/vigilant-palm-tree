@@ -35,7 +35,7 @@ When chartering:
 - `charterId` links to the active `CharterState`
 - **Traveling phase**: hero auto-paths toward target, one step per owner-turn
 - **Constructing phase**: hero is stationary for 10 days
-- If defeated at any point: charter is lost, costs forfeited, hero deleted (standard combat resolution)
+- Defeat at any point removes the hero, and the charter cleanup (`cleanupDefeatedHeroCharters`) cancels their charter — costs forfeited. Since the 2026-09-29 outcomes this runs for **every removed hero**, attacker or defender. A hero who **retreats or surrenders** keeps their active charter: nothing is forfeited, and auto-travel resumes from the relocated position (see [Combat](#combat)).
 
 ## Player turn
 
@@ -61,9 +61,19 @@ Settlements track gold separately in their treasury (`settlement.gold`).
 When a hero moves adjacent to an enemy hero, battle triggers:
 - The Fight / Quick Resolve / Flee modal opens (see [army.md](./army.md)); garrison battles run through the same arena via the `SETTLEMENT_BATTLE` phase.
 - **AI-involved battles auto-resolve** (2026-09-29): any battle whose attacker is not the local human — AI-vs-AI, or an AI attacking you — quick-resolves silently through the existing `maybeAutoResolveBattle` predicate; the result card still shows. A human attacker keeps the modal even against an AI.
-- Loser is removed from the map.
-- Winner gains loser's hero gold.
-- If loser was chartering, the charter is cancelled (costs forfeited).
+- **Per-hero outcome** (2026-09-29): every battle ends in a verdict per side — `defeated` / `retreated` / `surrendered` / `stood`:
+
+  | Verdict | How it happens | Hero on the map | Troops | Purse |
+  |---|---|---|---|---|
+  | **Defeated** | side wiped to zero troops (`lost_all_troops`) | **Removed** from the adventure map — state record, owner's `heroIds`, `hero_platoons` rows | gone | looted by the winner (wagon-capped, cargo included) |
+  | **Retreated** | manual-arena retreat | Respawn at the nearest **owned** settlement; with none owned, stays at the cancelled position (edge D1) | **all lost** (stacks zeroed server-side — the arena's 15% pre-loss is subsumed) | kept |
+  | **Surrendered** | manual-arena surrender | Teleport to the nearest **owned** settlement (same D1 edge) | kept | pays the surrender cost, rest kept |
+  | **Stood** | won / survived (stalemate) | unchanged | survivors | kept |
+
+- The auto-resolver never concedes (no retreat policies are passed server-side), so AI-involved battles only ever **remove** a loser or leave both standing — retreat/surrender are manual-arena actions.
+- A defeated hero's charter is cancelled (costs forfeited); retreating/surrendering heroes keep theirs (see [Chartering](#chartering-implemented)).
+- **Flee** is not an outcome: it cancels the attack before the battle starts.
+- Verdicts ride the `BattleResolved` event and both command results (heroes are optional in results — absence means the hero was removed); the result card and AI toasts speak them ("slain" / "retreated to \<name\>" / "surrendered to \<name\>").
 - Battle resolution persists via the `ResolveBattle` command (Quick Resolve) or `SubmitBattleResult` (played-out arena fights) on `/api/games/:name/commands`; settlement battles via `SubmitSettlementBattleResult`.
 
 ## Enemy heroes
@@ -77,15 +87,9 @@ Enemy heroes exist when the game was created with AI enemies — the New Game sc
 - AI heroes with `isChartering: true` are skipped in the tick loop (future-proofing).
 - Known limitation: the AI actor is host-client only — if seat 0 is absent in a LAN game, AI turns stall.
 
-## Future: hero death & capture-for-ransom
+## Hero death (capture-for-ransom plan superseded)
 
-⏸️ **Deferred** — applies once the [army system](./army.md) ships.
-
-When a hero's army is destroyed in combat:
-- Hero is **captured for ransom**.
-- Removed from the map until ransom is paid.
-- **Ransom:** fixed amount (**TBD when army ships**), paid from inventory. Hero released immediately with 1 peasant unit.
-- Settlements the hero founded stay with the player — settlements belong to the player, not the hero.
+⏸️ The original plan — a hero whose army is destroyed is **captured for ransom** (fixed amount TBD, held off-map until paid, released with 1 peasant; settlements stay with the player) — was **superseded on 2026-09-29** by the shipped [outcome rules](#combat): a defeated hero is simply **removed** from the map (no capture state, no ransom). The manual arena's retreat/surrender are the escape valves instead. Hero death for non-battle causes remains out of scope.
 
 ## Future: hero stats
 

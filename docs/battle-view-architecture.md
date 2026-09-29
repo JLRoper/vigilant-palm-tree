@@ -223,23 +223,41 @@ flowchart TB
    persists a BATTLE phase), validates survivor unit ids against the same
    catalog the auto-resolver uses, then runs the **same shared post-battle
    helpers** as `ResolveBattle` (`buildPostBattleHeroes` +
-   `persistBattleOutcome`): loot-on-wipe, charter cleanup for a wiped
-   defender, legacy-gold accounting, granular dual-write. Retreat and
-   surrender additionally cancel the attacker's move server-side
-   (`cancelMove`); surrender debits the conceding hero's purse (validated
-   against it first). A `BattleResolved` event is emitted on every path.
-8. **Apply + notify.** The client merges the authoritative hero pair,
+   `applyHeroBattleOutcomes` + `persistBattleOutcome`): loot-on-wipe
+   (purse + cargo, wagon-capped), per-side hero verdicts applied — defeat
+   **deletes** the hero from the record and prunes their owner's `heroIds`;
+   retreat/surrender relocate to the nearest owned settlement (none → the
+   hero stays at its cancelled position, plan edge D1) — charter cleanup
+   for **every removed hero** (attacker included), legacy-gold accounting,
+   granular dual-write, players persisted on every outcome (so the
+   `heroIds` prune can't dangle). Retreat and surrender additionally cancel
+   the attacker's move server-side (`cancelMove`) before relocation
+   overwrites the restored position; surrender debits the conceding hero's
+   purse (validated against it first). A `BattleResolved` event is emitted
+   on every path, now carrying optional per-side verdicts
+   (`HeroBattleVerdict`: `defeated`/`retreated`/`surrendered`/`stood`) —
+   the outcome enum still collapses retreat and surrender both onto
+   `retreated_hero`, so the verdict field is the only thing that
+   discriminates them (plan edge D5).
+8. **Apply + notify.** The client merges the authoritative hero pair —
+   an **absent** hero now means delete (`mergeBattleOutcomeHeroes` in
+   `src/game/turnHooks.ts`: drop the local row, prune `heroIds`, clear a
+   selection pointing at it) —
    runs `endBattlePhase` + `cleanupDefeatedHeroCharters` (mirroring
    `resolveCurrentBattle()`), shows the shared result card with real hero
-   labels, and emits `bus.emit({ type: "battle:resolved", ... })`.
+   labels and per-side verdict lines (`battleResultText.ts`: "slain" /
+   "retreated to \<name\>" / "surrendered to \<name\>"), and emits
+   `bus.emit({ type: "battle:resolved", ... })`.
 9. **Quick Resolve path.** Unchanged from before the wiring:
    `TurnController.resolveCurrentBattle()` →
    `hooks.onBattleResolved(state)` (`src/game/turnHooks.ts` →
    `io/commands.resolveBattle()` → `POST /api/games/:name/commands`,
    `ResolveBattle` command) → server runs
    `resolveBattleEngine(...)` inside a PG transaction, loots the wiped
-   defender, writes the updated heroes, and returns the new state +
-   `BattleResult`. Same shared post-battle helpers as step 7.
+   defender, applies the same hero outcomes as step 7 (a defeated hero is
+   absent from the returned record; retreat/surrender can't occur here —
+   the auto-resolver is run with no retreat policies), and returns the new
+   state + `BattleResult`. Same shared post-battle helpers as step 7.
 
 ### Test Battle (sandbox)
 
@@ -388,7 +406,8 @@ used):
 | `src/state/turnController.ts` | Orchestrator | `enterBattle` (mover = attacker), `resolveCurrentBattle` (Quick Resolve), `cancelMove` (Flee) |
 | `src/managers/GameActions.ts` | Orchestrator | `maybeAutoResolveBattle`, `startBattleFlow`, `fightInArena` (Fight path: arena → `SubmitBattleResult` → merge → end phase); gates re-entry with `battleInFlight` |
 | `src/screens/combat/battleModal.ts` | UI (DOM) | Fight / Quick Resolve / Flee prompt before anything is resolved |
-| `src/screens/combat/battleResultCard.ts` | UI (DOM) | Per-platoon survivors + losses summary — used by **both** paths |
+| `src/screens/combat/battleResultCard.ts` | UI (DOM) | Per-platoon survivors + losses summary — used by **both** paths; renders the per-side verdict lines from `battleResultText.ts` under the winner banner |
+| `src/screens/combat/battleResultText.ts` | UI (pure) | Verdict wording (2026-09-29 hero outcomes): `battleVerdictCardLine` / `battleVerdictToastPhrase` / `battleToastMessage` / `settlementNameAt` — "slain" / "retreated to \<name\>" / "surrendered to \<name\>"; an absent verdict (pre-W1 server) renders nothing |
 | `src/screens/combat/arena/openManualBattleArena.ts` | UI (canvas+DOM) | HoMM3-style interactive arena; production callers get `onComplete` (outcome) + `telemetry` (action stream) and a `{ close }` handle |
 | `src/screens/combat/arena/state.ts` | Arena wrappers | Thin wrappers over the engine's apply-functions; stream one `battle_actions` row per applied action (`safeEmit` guard — telemetry can never fail the arena) |
 | `src/screens/combat/arena/ai.ts` | Arena AI | `createArenaAi` → engine `planAiTurn` (deterministic — no AI action rows needed) |
@@ -411,7 +430,8 @@ used):
 | `packages/engine/src/combat/types.ts` | Engine | `BattleResult`, `Combatant` (incl. `morale`/`fatigue`/`activeEffects`), `CombatEffect` (`damage`/`spell_damage`/`spell_buff`), `BattleLogEntry` (incl. `morale_change`/`spell_cast`), `BattleSnapshot` |
 | `packages/engine/src/combatConfig.ts` | Engine | All combat tunables: type advantage, retreat loss, the morale/fatigue block, spell costs/power/buff duration |
 | `packages/contracts/src/commands/submitBattleResult.ts` | Contracts | The 15th command kind: submitted outcome + survivor stacks + rounds/obstacleSeed |
-| `server/app/commandHandler.ts` (`ResolveBattle` + `SubmitBattleResult` via `POST /games/:name/commands`) | Server | Loads DB row + `unit_types`; runs `resolveBattleEngine` or applies the submitted outcome — both through the shared `buildPostBattleHeroes`/`persistBattleOutcome` helpers |
+| `server/app/commandHandler.ts` (`ResolveBattle` + `SubmitBattleResult` via `POST /games/:name/commands`) | Server | Loads DB row + `unit_types`; runs `resolveBattleEngine` or applies the submitted outcome — both through the shared `buildPostBattleHeroes`/`applyHeroBattleOutcomes`/`persistBattleOutcome` helpers (verdict application: defeat deletes the hero, retreat/surrender relocate; plan `2026-09-29-hero-outcomes.md`) |
+| `packages/engine/src/combat/battleOutcome.ts` | Engine (pure) | `deriveHeroVerdict(sideOutcome, conceded?)` → `defeated`/`retreated`/`surrendered`/`stood`; `nearestOwnedSettlement` (hexDistance min; null when the owner holds nothing — the D1 stay-put edge); `relocateHeroToSettlement` (q/r set, previous*/trail reset) |
 | `server/http/routes/battleActions.ts` | Server | `POST /games/:name/battle-actions` — telemetry-style insert into `battle_actions` (seat stamped from the session) |
 | `server/migrations/012_battle_actions.sql` | Schema | `battle_actions` table + per-battle replay index |
 
@@ -427,9 +447,14 @@ used):
   re-derivation, survivor unit ids against the catalog, surrender gold ≤
   purse) and the full per-action stream lands in `battle_actions` for the
   future legality-check consumer.
-- **No hero entity is deleted on loss.** A no-retreat loss just empties
-  the platoons and may loot gold; capture / ransom is explicitly out of
-  scope.
+- **Defeat deletes the hero.** (Rewritten 2026-09-29 — this used to say
+  "no hero entity is deleted on loss".) A side wiped to zero troops
+  (`lost_all_troops`) is removed from the heroes record, pruned from their
+  owner's `heroIds`, and their `hero_platoons` rows swept (`heroRepo`'s
+  NOT-IN cleanup); winner-takes-loot and charter cleanup apply to every
+  removed hero. The auto path never passes retreat policies, so
+  AI-involved losers are always removals. The capture/ransom plan stays
+  out of scope, superseded by these outcomes.
 - **`battleInFlight` re-entry guard** in `GameActions` prevents the modal
   being opened twice if the tick fires again before the promise resolves —
   and it now stays set for the whole arena session, so nothing can
@@ -438,11 +463,18 @@ used):
 - **The two resolvers apply identical world rules.** `resolveBattle.ts` is
   the auto path, `manualBattle.ts` the played-out path; both server-side
   applications run the same shared helpers (`buildPostBattleHeroes` /
-  `persistBattleOutcome` in `server/app/commandHandler.ts`) so loot, survivor
-  stacks, charter cleanup, and event emission cannot drift between them.
-- **Retreat/surrender cancel the attacker's move.** Both client
-  (`tc.cancelMove`) and server (`cancelMove` on the submitted command)
-  restore the mover's pre-collision position — decision 3 of the wiring plan.
+  `applyHeroBattleOutcomes` / `persistBattleOutcome` in
+  `server/app/commandHandler.ts`) so loot, survivor stacks, verdicts
+  (defeat removal, retreat/surrender relocation), charter cleanup, and
+  event emission cannot drift between them.
+- **Retreat/surrender cancel the attacker's move, then relocate.** Both
+  client (`tc.cancelMove`) and server (`cancelMove` on the submitted
+  command) restore the mover's pre-collision position — decision 3 of the
+  wiring plan — and the server's `applyHeroBattleOutcomes` then relocates
+  the conceder to the nearest settlement their owner holds (retreat with
+  stacks zeroed, surrender keeping them); with none owned, the hero
+  remains at the cancelled position (2026-09-29 hero outcomes, plan edge
+  D1).
 - **The two engines never mix.** `resolveBattle.ts` is the only resolver
   the server imports; `manualBattle.ts` is only ever driven from the
   client arena. `manualBattle` imports `resolveBattle` for shared

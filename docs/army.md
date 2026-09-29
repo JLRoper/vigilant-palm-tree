@@ -40,7 +40,7 @@ The other four catalog entries — **griffin, hydra, wisp, black_dragon** — ar
 
 ## Combat resolution
 
-**Hero vs hero (live):** an adventure-map collision opens the Fight / Quick Resolve / Flee modal. Fight plays out in the manual arena (`manualBattle.ts`; per-platoon attack range via `platoonRange` — the minimum per-unit `range` stat across the platoon's entries, replacing the old flat `RANGED_ATTACK_RANGE`) and submits `SubmitBattleResult`; Quick Resolve runs the server auto-resolver `shared/combat/resolveBattle.ts`. Both paths share the same server-side post-battle helpers (loot, charter cleanup, dual-write). **AI-involved exception (2026-09-29):** when the attacker is not the local human — AI-vs-AI, or an AI attacking you — the collision quick-resolves silently through the same `ResolveBattle` path (`maybeAutoResolveBattle`'s predicate keys on the local seat vs. the attacker); only the result card shows. A human attacker keeps the modal even against an AI.
+**Hero vs hero (live):** an adventure-map collision opens the Fight / Quick Resolve / Flee modal. Fight plays out in the manual arena (`manualBattle.ts`; per-platoon attack range via `platoonRange` — the minimum per-unit `range` stat across the platoon's entries, replacing the old flat `RANGED_ATTACK_RANGE`) and submits `SubmitBattleResult`; Quick Resolve runs the server auto-resolver `shared/combat/resolveBattle.ts`. Both paths share the same server-side post-battle helpers (loot, hero outcomes, charter cleanup, dual-write). **Hero outcomes (2026-09-29):** the server maps each side's result to a verdict — a side wiped to zero troops is **defeated** and removed from the map entirely (heroes record + `player.heroIds` + `hero_platoons` rows; winner-takes-loot and charter cleanup apply to any removed hero); an arena **retreat** empties the hero's stacks server-side (subsuming the arena's 15% pre-loss) and respawns them at the nearest owned settlement; a **surrender** teleports there keeping troops (the surrender gold deduction is unchanged); with no owned settlement, a retreating/surrendering hero stays at its cancelled position instead. The auto-resolver never concedes, so AI-involved losses are always removals. See [heroes.md](./heroes.md) → Combat. **AI-involved exception (2026-09-29):** when the attacker is not the local human — AI-vs-AI, or an AI attacking you — the collision quick-resolves silently through the same `ResolveBattle` path (`maybeAutoResolveBattle`'s predicate keys on the local seat vs. the attacker); only the result card shows. A human attacker keeps the modal even against an AI.
 
 **Garrison defense (live):** attacking a settlement whose garrison has troops enters `SETTLEMENT_BATTLE` (`startSettlementBattle`); the garrison fights in the same arena under the *"<name> Garrison"* label, and the played-out result applies via `applySettlementBattleResult` (`SubmitSettlementBattleResult`). An emptied garrison lets the standing attacker capture — see [settlements.md](./settlements.md) → Capture.
 
@@ -48,11 +48,12 @@ The other four catalog entries — **griffin, hydra, wisp, black_dragon** — ar
 
 ## Hero death
 
-✅ **Locked:** **captured for ransom.**
+✅ **Implemented (2026-09-29): defeat removes the hero.** The previously locked plan — **captured for ransom** (fixed amount, released on payment with 1 peasant; settlements stay with the player) — is **superseded**:
 
-- Ransom: fixed amount (TBD), paid from inventory.
-- Hero released immediately with 1 peasant.
-- Settlements stay with the player.
+- A hero whose army is wiped in battle is **deleted** from the adventure map: the state heroes record, their owner's `heroIds`, and their `hero_platoons` rows (orphan sweep in `heroRepo`'s full-sync upsert).
+- Winner takes the loser's purse (wagon-capped) and cargo; a chartering loser's charter is cancelled, costs forfeited.
+- The manual arena's **Retreat** (respawn at the nearest owned settlement, all troops lost, purse kept) and **Surrender** (teleport there, troops kept, gold cost paid) are the escape valves — full table in [heroes.md](./heroes.md) → Combat.
+- No capture state exists; hero death for non-battle causes remains out of scope.
 
 ## Upkeep (✅ implemented, flat)
 

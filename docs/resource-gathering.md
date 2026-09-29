@@ -14,7 +14,7 @@ Gold is deliberately different from everything else — it has **no warehouse en
 
 | Pool | Field | Moves with | Spent on |
 |------|-------|-----------|----------|
-| Hero purse | `HeroState.gold` | the hero | chartering (2500g), captured on defeat |
+| Hero purse | `HeroState.gold` | the hero | chartering (2500g); looted by the winner **on defeat** only (2026-09-29 outcomes) — retreat keeps it, surrender pays its gold cost |
 | Settlement treasury | `SettlementState.gold` | the settlement | building placement/upgrades, recruitment, trading, auto-trade |
 
 The other five are `WarehouseResource`s, held in the per-settlement `Warehouse` (`{ wood, stone, iron, arcane, food }`).
@@ -173,7 +173,7 @@ Founding a settlement costs, immediately and non-refundably (`packages/engine/sr
 - **Weekly upkeep** (`packages/engine/src/hero/upkeep.ts`): 1g per troop, deducted from the purse; if the purse can't cover it, gold drops to 0 and **troops are lost down to the gold that was available**.
 - **Hero recruitment**: `recruitHero` costs **1g** — a placeholder (max 5 heroes/player, `packages/engine/src/hero/recruit.ts:5-6`).
 - **Deposit/withdraw** (`transferGold`, `packages/engine/src/economy/transfer.ts`): hero ↔ settlement treasury, same-hex only, **all-or-nothing** (see [finding F9](#F9)).
-- **Combat**: the winner takes the loser's entire purse; a chartering hero's defeat forfeits all charter costs.
+- **Combat** (2026-09-29 hero outcomes): the purse is looted — wagon-capped, cargo included — only when a hero is **defeated** (wiped to zero troops; the hero is then removed from the map, and a chartering loser's charter is cancelled, costs forfeited). A **retreating** hero keeps the purse (its stacks are zeroed instead) and a **surrendering** hero pays the surrender cost and keeps the rest; both relocate to the nearest owned settlement.
 
 ## 7. Buildings ↔ resources
 
