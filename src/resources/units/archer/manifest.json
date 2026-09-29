@@ -1,0 +1,35 @@
+{
+  "id": "archer",
+  "frameSize": 128,
+  "directions": [
+    "n",
+    "ne",
+    "e",
+    "se",
+    "s",
+    "sw",
+    "w",
+    "nw"
+  ],
+  "still": "still/archer-{dir}.png",
+  "animations": [
+    {
+      "name": "idle",
+      "frames": 8,
+      "loop": true,
+      "strip": "anim/archer-idle-{dir}.png"
+    },
+    {
+      "name": "draw",
+      "frames": 8,
+      "loop": false,
+      "strip": "anim/archer-draw-{dir}.png"
+    },
+    {
+      "name": "loose",
+      "frames": 5,
+      "loop": false,
+      "strip": "anim/archer-loose-{dir}.png"
+    }
+  ]
+}
