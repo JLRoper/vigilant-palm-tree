@@ -7,6 +7,7 @@ export type NewGameHandler = (opts: {
   castleSeed?: number;
   castleCount?: number;
   mapSize?: "small" | "medium" | "large";
+  enemyCount?: 0 | 1 | 2 | 3;
 }) => void | Promise<void>;
 
 export interface NewGameModalOptions {
@@ -105,6 +106,51 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
   sizeSelect.value = "small";
   content.appendChild(sizeSelect);
 
+  const enemyLabel = document.createElement("label");
+  enemyLabel.textContent = "AI enemies";
+  enemyLabel.style.opacity = "0.7";
+  content.appendChild(enemyLabel);
+
+  const enemyWrap = document.createElement("div");
+  enemyWrap.style.display = "flex";
+  enemyWrap.style.gap = "8px";
+  let enemyCount: 0 | 1 | 2 | 3 = 0;
+  const enemyButtons: Array<{ value: 0 | 1 | 2 | 3; btn: HTMLButtonElement }> = [];
+  function refreshEnemies(): void {
+    for (const { value, btn } of enemyButtons) {
+      const active = value === enemyCount;
+      btn.style.background = active
+        ? "linear-gradient(180deg, #c9a227 0%, #a6801a 100%)"
+        : "#1a1a1a";
+      btn.style.color = active ? "#241a05" : "#eee";
+      btn.style.borderColor = active ? "#e9cf7d" : "#444";
+      btn.style.fontWeight = active ? "700" : "400";
+    }
+  }
+  for (const n of [0, 1, 2, 3] as const) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = String(n);
+    Object.assign(btn.style, {
+      flex: "1",
+      padding: "8px",
+      fontSize: "12px",
+      border: "1px solid #444",
+      borderRadius: "4px",
+      backgroundColor: "#1a1a1a",
+      color: "#eee",
+      cursor: "pointer",
+    });
+    btn.addEventListener("click", () => {
+      enemyCount = n;
+      refreshEnemies();
+    });
+    enemyButtons.push({ value: n, btn });
+    enemyWrap.appendChild(btn);
+  }
+  content.appendChild(enemyWrap);
+  refreshEnemies();
+
   const errorLine = document.createElement("div");
   Object.assign(errorLine.style, { ...menuTheme.error, minHeight: "14px", marginTop: "4px" });
   content.appendChild(errorLine);
@@ -161,7 +207,7 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
     cancel.disabled = true;
     errorLine.textContent = "Creating…";
     try {
-      await opts.onNew({ name, seed, castleSeed, castleCount, mapSize });
+      await opts.onNew({ name, seed, castleSeed, castleCount, mapSize, enemyCount });
       modal.close();
     } catch (e) {
       confirm.disabled = false;

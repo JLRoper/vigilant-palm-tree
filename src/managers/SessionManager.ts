@@ -80,8 +80,8 @@ export class SessionManager {
     return { savedAt };
   }
 
-  async createGame(name: string, seed: number, heroQ: number, heroR: number, enemyPositions: { q: number; r: number }[], mapSize?: "small" | "medium" | "large", humanSeatCount?: number): Promise<Game> {
-    return await api.createGame(name, seed, heroQ, heroR, enemyPositions, mapSize, humanSeatCount);
+  async createGame(name: string, seed: number, heroQ: number, heroR: number, enemyPositions: { q: number; r: number }[], mapSize?: "small" | "medium" | "large", humanSeatCount?: number, enemySlots: number = 0): Promise<Game> {
+    return await api.createGame(name, seed, heroQ, heroR, enemyPositions, mapSize, humanSeatCount, enemySlots);
   }
 
   async claimLobbySeat(name: string, seat: number, handle: string): Promise<Game> {

@@ -223,9 +223,35 @@ test("startMove rejects when not active player", () => {
   if (!result.ok) assert.equal(result.reason, "not_owner");
 });
 
-test("startMove rejects when phase is not PLAYER_TURN", () => {
+test("startMove admits the active AI seat's own hero during AI_TURN", () => {
   const s = makeState({
+    activePlayerId: 1,
     phase: { kind: "AI_TURN", playerId: 1 },
+    selectedHeroId: "h1",
+  });
+  const result = startMove(s, "h1", { q: 3, r: 2 }, 1);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.state.heroes.h1.q, 3);
+    assert.equal(result.state.heroes.h1.movementRemaining, MOVEMENT_PER_TURN - 1);
+    assert.equal(result.state.dirty, true);
+  }
+});
+
+test("startMove rejects a hero owned by another seat during AI_TURN", () => {
+  const s = makeState({
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+    selectedHeroId: "h0",
+  });
+  const result = startMove(s, "h0", { q: 3, r: 2 }, 1);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "not_player_turn");
+});
+
+test("startMove rejects when phase is not a turn phase", () => {
+  const s = makeState({
+    phase: { kind: "ROUND_END", nextRound: 2 },
     selectedHeroId: "h1",
   });
   const result = startMove(s, "h1", { q: 3, r: 2 }, 1);

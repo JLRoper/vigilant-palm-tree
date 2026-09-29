@@ -63,6 +63,12 @@ export class GameEngine {
       () => this.gameMap,
       (m) => { this.gameMap = m; },
     );
+    // plan/2026-09-29-ai-enemies.md D3: seat 0's client drives the AI turn;
+    // solo/no-server games have no in-memory seat and default to 0 (primary).
+    this.state.setPrimaryActorSource(() => {
+      const gameName = this.session.getActiveGameName();
+      return (getInMemoryLocalPlayerId(gameName ?? "") ?? 0) === 0;
+    });
   }
 
   // =========================================================================

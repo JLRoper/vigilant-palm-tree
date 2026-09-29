@@ -25,7 +25,7 @@ import { ViewManager } from "./ViewManager";
 import type { MapInfo } from "@screens/home/settingsMenu";
 
 type ToolbarCallbacks = {
-  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" }) => void;
+  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; enemyCount?: number }) => void;
   onLoad: (loaded: import("../io/api").Game, tiles: import("../io/api").TileRow[]) => void;
   onSave: () => void;
   onEndTurn: () => void;

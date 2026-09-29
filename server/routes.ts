@@ -8,6 +8,7 @@ import {
   makeInitialStatePayload,
   mulberry32,
   validateGameRow,
+  MAX_PLAYERS,
   type MapSize,
   type UnitType,
 } from "@heroes/engine";
@@ -368,6 +369,7 @@ router.post("/games", async (req, res) => {
       mapSize,
       lobby,
       humanSlots,
+      enemySlots,
     } = req.body ?? {};
     if (typeof name !== "string" || !name) {
       res.status(400).json({ error: "name required" });
@@ -381,16 +383,26 @@ router.post("/games", async (req, res) => {
     const lobbyHumanSlots =
       lobbyObj && Number.isInteger(lobbyObj.humanSlots) ? (lobbyObj.humanSlots as number) : null;
     const humanCount = topHumanSlots ?? lobbyHumanSlots;
+    const rawEnemySlots =
+      Number.isInteger(enemySlots) && (enemySlots as number) >= 0 ? (enemySlots as number) : 0;
+    const enemySlotsSafe =
+      humanCount !== null
+        ? Math.max(0, Math.min(rawEnemySlots, MAX_PLAYERS - humanCount))
+        : 0;
     const initOpts =
       humanCount !== null
-        ? { playerCount: humanCount, humanSeatCount: humanCount }
+        ? {
+            playerCount: humanCount + enemySlotsSafe,
+            humanSeatCount: humanCount,
+            enemyCount: enemySlotsSafe,
+          }
         : undefined;
     const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179), initOpts);
 
     let lobbyState: LobbyState = {};
     const explicitSeats =
       lobbyObj && Number.isInteger(lobbyObj.seats) ? (lobbyObj.seats as number) : null;
-    const seats = explicitSeats ?? (humanCount !== null ? initial.players.length : null);
+    const seats = explicitSeats ?? (humanCount !== null ? humanCount : null);
     if (seats !== null && seats >= 1 && humanCount !== null && humanCount >= 1 && humanCount <= seats) {
       lobbyState = { seats, humanSlots: humanCount, claimed: {} };
     }

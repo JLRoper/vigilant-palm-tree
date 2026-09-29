@@ -176,9 +176,14 @@ export interface TurnControllerHooks {
   ): Promise<void>;
 }
 
+export interface TurnControllerOptions {
+  isPrimaryActor?: () => boolean;
+}
+
 export class TurnController {
   private state: GameState;
   private readonly hooks: TurnControllerHooks;
+  private readonly opts: TurnControllerOptions;
   private aiAwaitingPersist = false;
   private aiEnding = false;
   // #114 / plan/2026-08-17-issue-88-remaining-command-ports.md §"Race-avoidance
@@ -192,9 +197,10 @@ export class TurnController {
   // server-side first.
   private readonly pendingCommands = new Set<Promise<void>>();
 
-  constructor(initial: GameState, hooks: TurnControllerHooks) {
+  constructor(initial: GameState, hooks: TurnControllerHooks, opts: TurnControllerOptions = {}) {
     this.state = initial;
     this.hooks = hooks;
+    this.opts = opts;
   }
 
   getState(): GameState {
@@ -659,7 +665,20 @@ export class TurnController {
     // unit-type/counter catalog), so fetch its result before closing out the
     // BATTLE phase locally.
     const { state: resolved, battle } = await this.hooks.onBattleResolved(this.state);
-    this.state = endBattlePhaseReducer(resolved);
+    // endBattlePhase() unconditionally reopens PLAYER_TURN for
+    // state.activePlayerId. When the battle was entered from tick() during
+    // AI_TURN (an AI attacker), that leaves an AI seat holding a human
+    // phase: tick() gates on AI_TURN and canEndTurn() rejects AI factions,
+    // so neither side could ever end the turn. Re-map it so the AI turn
+    // resumes; human seats keep the exact PLAYER_TURN endBattlePhase gives.
+    let closed = endBattlePhaseReducer(resolved);
+    if (closed.phase.kind === "PLAYER_TURN") {
+      const active = closed.players.find((p) => p.id === closed.activePlayerId);
+      if (active?.faction === "ai") {
+        closed = { ...closed, phase: { kind: "AI_TURN", playerId: closed.activePlayerId } };
+      }
+    }
+    this.state = closed;
     const attackerAfter = this.state.heroes[attackerId];
     const defenderAfter = this.state.heroes[defenderId];
     const attackerSurvived = attackerAfter ? platoonsHaveTroops(attackerAfter.stacks) : false;
@@ -926,6 +945,7 @@ export class TurnController {
 
   tick(_dtMs: number): void {
     if (this.state.phase.kind !== "AI_TURN") return;
+    if (this.opts.isPrimaryActor && !this.opts.isPrimaryActor()) return;
     if (this.aiAwaitingPersist || this.aiEnding) return;
 
     const aiPlayerId = this.state.activePlayerId;
@@ -941,7 +961,10 @@ export class TurnController {
       if (!move) continue;
       const map = this.hooks.getMap();
       const path = findPath(map, { q: hero.q, r: hero.r }, move.toTile);
-      const result = startMoveReducer(this.state, heroId, move.toTile, move.cost, path);
+      // startMove's not_selected gate guards a client-UI concept the AI tick
+      // doesn't have; satisfy it the same way the server does for every
+      // MoveHero command (commandHandler.ts): name the mover as selected.
+      const result = startMoveReducer({ ...this.state, selectedHeroId: heroId }, heroId, move.toTile, move.cost, path);
       if (!result.ok) continue;
       this.state = result.state;
       moved = true;
@@ -950,6 +973,16 @@ export class TurnController {
         payload: { heroId, to: move.toTile, cost: move.cost },
       });
       this.tryCaptureAt(heroId, move.toTile.q, move.toTile.r);
+      // Battles only ever start here after a successful move (same rule as
+      // requestMove/advanceAutoTravel). Resolution is deliberately NOT done
+      // inline: once phase is BATTLE the phase guard stops this tick, the
+      // frame loop's maybeAutoResolveBattle quick-resolves an AI attack, and
+      // resolveCurrentBattle re-maps the phase back to AI_TURN so the next
+      // tick resumes (or ends) the turn.
+      const defenderId = detectAdjacentEnemyFn(this.state, heroId);
+      if (defenderId) {
+        this.enterBattle(heroId, defenderId);
+      }
       this.aiAwaitingPersist = true;
       void this.hooks.onAiMove(this.state, heroId, move.toTile).finally(() => {
         this.aiAwaitingPersist = false;

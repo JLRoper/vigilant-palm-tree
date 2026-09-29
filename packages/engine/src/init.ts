@@ -42,11 +42,20 @@ export interface BuildInitialOptions {
   castleCount?: number;
   playerCount?: number;
   humanSeatCount?: number;
+  enemyCount?: number;
 }
 
 function clampPlayerCount(n: number | undefined): number {
   if (!n || !Number.isFinite(n)) return DEFAULT_PLAYER_COUNT;
   return Math.max(2, Math.min(MAX_PLAYER_COUNT, Math.floor(n)));
+}
+
+function enemyDerivedPlayerCount(opts: BuildInitialOptions | undefined): number | null {
+  const enemyCount = opts?.enemyCount;
+  if (enemyCount === undefined || !Number.isFinite(enemyCount)) return null;
+  const rawHumans = opts?.humanSeatCount;
+  const humans = Number.isFinite(rawHumans) ? Math.max(1, Math.floor(rawHumans as number)) : 1;
+  return Math.min(MAX_PLAYERS, Math.max(humans, humans + Math.floor(enemyCount)));
 }
 
 function clampHumanSeatCount(n: number | undefined, playerCount: number): number {
@@ -273,7 +282,7 @@ export function buildInitialGameState(
 ): GameState {
   const mapSeed = opts?.castleSeed ?? 1;
   const castleSeed = opts?.castleSeed ?? defaultCastleSeedFromMapSeed(mapSeed);
-  const playerCount = clampPlayerCount(opts?.playerCount);
+  const playerCount = enemyDerivedPlayerCount(opts) ?? clampPlayerCount(opts?.playerCount);
   const humanSeatCount = clampHumanSeatCount(opts?.humanSeatCount, playerCount);
   const castleCount = opts?.castleCount ?? (2 * playerCount);
 
@@ -312,7 +321,7 @@ export function makeInitialStatePayload(
 ): InitialStatePayload {
   const mapSeed = opts?.castleSeed ?? 1;
   const castleSeed = opts?.castleSeed ?? defaultCastleSeedFromMapSeed(mapSeed);
-  const playerCount = opts?.playerCount ?? 3;
+  const playerCount = enemyDerivedPlayerCount(opts) ?? (opts?.playerCount ?? 3);
   const humanSeatCount = clampHumanSeatCount(opts?.humanSeatCount, playerCount);
   const castleCount = opts?.castleCount ?? (2 * playerCount);
 

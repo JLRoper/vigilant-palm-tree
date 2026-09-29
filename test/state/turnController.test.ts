@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { TurnController, type TurnControllerHooks } from "../../src/state/turnController";
 import { emptyWarehouse, makeCharter, makeHero, makeSettlement, makeState } from "../charter/_helpers";
 import { normalizePlatoons } from "@heroes/engine";
-import type { GameState } from "@heroes/contracts";
+import { MOVEMENT_PER_TURN, type GameState } from "@heroes/contracts";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -641,4 +641,163 @@ test("selectHero clears a prior settlement selection", () => {
 
   assert.equal(controller.getState().selectedHeroId, "h0");
   assert.equal(controller.getState().selectedSettlementId, null);
+});
+
+function stubOpenMap(): TurnControllerHooks["getMap"] {
+  return (() => ({
+    isPassable: () => true,
+    cost: () => 1,
+  })) as unknown as TurnControllerHooks["getMap"];
+}
+
+async function settlePersist(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
+test("AI tick moves the active AI hero, spends movement, persists via onAiMove with the AI seat as actor, and ends the turn once no moves remain", async () => {
+  const initial = makeState({
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  hooks.getMap = stubOpenMap();
+  const moves = [
+    { toTile: { q: 18, r: 5 }, cost: 1 },
+    { toTile: { q: 18, r: 6 }, cost: 1 },
+  ];
+  hooks.pickAiMove = (() => (moves.length > 0 ? moves.shift()! : null)) as TurnControllerHooks["pickAiMove"];
+  const aiMoveCalls: unknown[][] = [];
+  hooks.onAiMove = ((...args: unknown[]) => {
+    aiMoveCalls.push(args);
+    return Promise.resolve();
+  }) as TurnControllerHooks["onAiMove"];
+
+  const controller = new TurnController(initial, hooks);
+  controller.tick(16);
+
+  const moved = controller.getState().heroes["h1"];
+  assert.equal(moved?.q, 18);
+  assert.equal(moved?.r, 5);
+  assert.equal(moved?.movementRemaining, MOVEMENT_PER_TURN - 1);
+  assert.equal(aiMoveCalls.length, 1, "the move must persist via onAiMove");
+  const [aiState, aiHeroId, aiToTile] = aiMoveCalls[0] as [GameState, string, { q: number; r: number }];
+  assert.equal(aiHeroId, "h1");
+  assert.deepEqual(aiToTile, { q: 18, r: 5 });
+  assert.equal(aiState.activePlayerId, 1, "the persisting seat is the AI seat");
+  assert.equal(endTurnSpy.mock.callCount(), 0, "the in-flight persist holds the turn open");
+
+  await settlePersist();
+  controller.tick(16);
+  assert.equal(controller.getState().heroes["h1"]?.r, 6);
+  assert.equal(controller.getState().heroes["h1"]?.movementRemaining, MOVEMENT_PER_TURN - 2);
+  assert.equal(endTurnSpy.mock.callCount(), 0, "the hero still has movement, so the turn continues");
+
+  await settlePersist();
+  hooks.pickAiMove = (() => null) as TurnControllerHooks["pickAiMove"];
+  controller.tick(16);
+  await settlePersist();
+
+  assert.equal(endTurnSpy.mock.callCount(), 1, "no moves left -> endCurrentTurn fires");
+  const endedState = endTurnSpy.mock.calls[0]![0] as GameState;
+  assert.equal(endedState.activePlayerId, 1, "the AI seat ends its own turn");
+  assert.equal(endedState.phase.kind, "AI_TURN");
+});
+
+test("AI hero moving adjacent to an enemy enters BATTLE; after the loop's quick-resolve the AI turn resumes and completes", async () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 12, 10), makeHero("h1", 1, 10, 10)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+
+  assert.equal(controller.getState().heroes["h1"]?.q, 11, "the move itself landed");
+  const phase = controller.getState().phase;
+  assert.equal(phase.kind, "BATTLE", "landing adjacent to an enemy must enter the battle phase");
+  assert.equal(phase.kind === "BATTLE" ? phase.attackerId : null, "h1");
+  assert.equal(phase.kind === "BATTLE" ? phase.defenderId : null, "h0");
+  assert.equal(endTurnSpy.mock.callCount(), 0, "a mid-turn battle must not end the AI turn");
+
+  await controller.resolveCurrentBattle();
+
+  const after = controller.getState().phase;
+  assert.equal(
+    after.kind,
+    "AI_TURN",
+    "endBattlePhase's PLAYER_TURN must be re-mapped so an AI seat can resume (tick and canEndTurn both gate on AI_TURN)",
+  );
+  assert.equal(after.kind === "AI_TURN" ? after.playerId : null, 1);
+
+  hooks.pickAiMove = (() => null) as TurnControllerHooks["pickAiMove"];
+  await settlePersist();
+  controller.tick(16);
+  await settlePersist();
+
+  assert.equal(endTurnSpy.mock.callCount(), 1, "after the battle the AI turn resumes and completes");
+  const endedState = endTurnSpy.mock.calls[0]![0] as GameState;
+  assert.equal(endedState.activePlayerId, 1);
+});
+
+test("isPrimaryActor: () => false blocks the AI tick entirely (non-primary clients only watch)", () => {
+  const initial = makeState({
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  let pickCalls = 0;
+  hooks.pickAiMove = (() => {
+    pickCalls += 1;
+    return null;
+  }) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => false });
+  controller.tick(16);
+
+  assert.equal(controller.getState(), initial, "state must be untouched on a non-primary client");
+  assert.equal(pickCalls, 0, "the AI brain must not even be consulted");
+  assert.equal(endTurnSpy.mock.callCount(), 0, "a non-primary client must not end the AI seat's turn");
+});
+
+test("AI walking onto a neutral settlement captures it via tryCaptureAt", async () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 2, 2), makeHero("h1", 1, 18, 4)],
+    settlements: [
+      makeSettlement("s0", 0, 2, 2),
+      makeSettlement("s1", 1, 20, 8),
+      makeSettlement("s2", null, 18, 5),
+    ],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 18, r: 5 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  const captureCalls: unknown[][] = [];
+  hooks.onCaptureSettlement = ((...args: unknown[]) => {
+    captureCalls.push(args);
+    return Promise.resolve();
+  }) as TurnControllerHooks["onCaptureSettlement"];
+
+  const controller = new TurnController(initial, hooks);
+  controller.tick(16);
+
+  assert.equal(controller.getState().settlements["s2"]?.ownerId, 1, "the neutral settlement flips to the AI seat");
+  assert.equal(controller.getState().heroes["h1"]?.gold, 100, "CAPTURE_GOLD_REWARD lands on the mover");
+  assert.deepEqual(captureCalls[0], [1, "h1", "s2"], "onCaptureSettlement fires with the AI seat as actor");
+  assert.ok(controller.getState().players[1]?.settlementIds.includes("s2"));
+  assert.equal(controller.getState().phase.kind, "AI_TURN", "a plain capture leaves the AI turn running");
+  assert.equal(endTurnSpy.mock.callCount(), 0);
 });
