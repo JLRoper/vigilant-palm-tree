@@ -265,6 +265,7 @@ async function runBattleArenaScene(
   const page = await newPage(context, urlSuffix);
   await dismissHomeAndCreateGame(page, `${GAME_NAME}-${name}`, SEED);
 
+  await page.locator('#toolbar button[title="Menu"]').click();
   const testBattleBtn = page.locator("#toolbar button", { hasText: "Test Battle" });
   await testBattleBtn.click();
   await page.locator("button", { hasText: "Start Battle" }).click({ timeout: 15_000 });
