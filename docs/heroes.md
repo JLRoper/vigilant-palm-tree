@@ -74,15 +74,15 @@ When a hero moves adjacent to an enemy hero, battle triggers:
 - A defeated hero's charter is cancelled (costs forfeited); retreating/surrendering heroes keep theirs (see [Chartering](#chartering-implemented)).
 - **Flee** is not an outcome: it cancels the attack before the battle starts.
 - Verdicts ride the `BattleResolved` event and both command results (heroes are optional in results — absence means the hero was removed); the result card and AI toasts speak them ("slain" / "retreated to \<name\>" / "surrendered to \<name\>").
-- Battle resolution persists via the `ResolveBattle` command (Quick Resolve) or `SubmitBattleResult` (played-out arena fights) on `/api/games/:name/commands`; settlement battles via `SubmitSettlementBattleResult`.
+- Battle resolution persists via the `ResolveBattle` command (Quick Resolve) or `SubmitBattleResult` (played-out arena fights) on `/api/games/:name/commands`; settlement battles via `SubmitSettlementBattleResult`, whose result carries the same optional hero + verdict fields since the 2026-09-29 capture/garrison wave — `attackerHero` absent means the attacking hero was removed, and the verdict wording (card/toast) is shared with hero battles.
 
 ## Enemy heroes
 
 Enemy heroes exist when the game was created with AI enemies — the New Game screens (home + toolbar) have an "AI enemies" chip row (0–3, default 0); `playerCount = humans + enemies` (clamped ≤ 10). AI seats spawn castles and **"Warlord"** heroes at game start. Their turns (`AI_TURN`) are driven by the primary client's tick (`turnController.tick`, local seat 0; non-primary browsers watch via sync):
 
-- AI picks a move target via `pickAiMove` (`src/ai/aiBrain.ts`): enemy heroes within reach 7 (priority `1000 − dist·10`), then neutral settlements (reach 8), unclaimed resources (reach 8), else wanders.
-- Walking onto an empty enemy/neutral settlement captures it (existing rule); garrisoned enemy settlements are refused as steps.
-- Post-move adjacency starts a battle — AI-involved battles auto-resolve (see [Combat](#combat)).
+- AI picks a move target via `pickAiMove` (`src/ai/aiBrain.ts`): enemy heroes within reach 7 (priority `1000 − dist·10`), then settlements within reach 8 — garrisoned ones it can beat (`GARRISON_ATTACK_RATIO = 1.5`, priority `700 − dist·5`), empty enemy-owned (`650 − dist·5`), neutral (`600 − dist·5`) — then unclaimed resources (reach 8), else wanders.
+- Walking onto an empty enemy/neutral settlement captures it (existing rule); since the 2026-09-29 capture/garrison wave, walking onto a garrisoned settlement it can beat ends the path there and starts a settlement battle (auto-resolved), while an unfavorable garrison is still refused as a step. AI walk-in captures serialize behind the move persist like the human path's.
+- Post-move adjacency starts a battle — AI-involved battles auto-resolve (see [Combat](#combat)); a walk-in settlement battle resolves the same silent way via `TurnController.resolveSettlementBattle`, with the result card/toast instead of the arena.
 - AI does not charter settlements in v1.
 - AI heroes with `isChartering: true` are skipped in the tick loop (future-proofing).
 - Known limitation: the AI actor is host-client only — if seat 0 is absent in a LAN game, AI turns stall.
