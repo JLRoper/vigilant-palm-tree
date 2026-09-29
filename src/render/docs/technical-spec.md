@@ -846,7 +846,7 @@ sequenceDiagram
 | `gemini-buildings.mjs` | `building-pixel-<camelCaseName>-<level>.png` | reference-image style match → PNG as-is |
 | `strip-checkerboard.mjs` | in-place alpha fix on any PNG | border flood-fill + gray erosion → real alpha |
 | `remove-specks.mjs` | in-place speck cleanup on any PNG | connected-component analysis: drops non-main, small, low-saturation opaque islands |
-| `tune-run-frames.mjs` | horse `-2` run frames, normalized in place against their base frame | canvas → base size + content-bbox height/bottom/centerX alignment (sprites are bottom-anchored); `--check` gates drift, centerX advisory when art is h-clipped |
+| `tune-run-frames.mjs` | horse `-2` run frames, normalized in place against their base frame | canvas → base size + content-bbox height/bottom/centerX alignment (sprites are bottom-anchored); `--check` gates drift, centerX advisory when art is h-clipped — `validate-assets` runs this check over every committed run frame as its alignment stage |
 
 Wiring note: these files are not auto-registered — `pixel.granary.1/2/3` and `pixel.smithy.2` are the wired precedents in `assetDescriptors.ts`; the woodcutter hut pair and the gold mine tier 1–3 trio exist on disk only until descriptors land for them.
 
