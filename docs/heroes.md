@@ -44,7 +44,7 @@ The game operates on a **round-based** cycle:
 - Human player clicks to select hero, clicks map to move (A* pathfinding + terrain costs).
 - Selected hero's gold/resources are shown in the hero info panel.
 - Chartering heroes auto-move at turn start (no manual input).
-- AI heroes move automatically via `pickAiMove` (wander + basic targeting).
+- AI heroes move automatically during their `AI_TURN` phase via `pickAiMove` (`src/ai/aiBrain.ts`) — see [Enemy heroes](#enemy-heroes).
 - After all players act, `advanceRound` runs: day increments, all heroes reset movement, settlements produce resources, morale decays, charters advance — and every 7th day the weekly upkeep applies: 1g/troop from each hero's purse plus the **garrison upkeep** (1g/troop from each settlement's treasury + 1 food/troop from its warehouse, trimming stacks from the end when short).
 
 ## Hero gold & economy
@@ -60,6 +60,7 @@ Settlements track gold separately in their treasury (`settlement.gold`).
 
 When a hero moves adjacent to an enemy hero, battle triggers:
 - The Fight / Quick Resolve / Flee modal opens (see [army.md](./army.md)); garrison battles run through the same arena via the `SETTLEMENT_BATTLE` phase.
+- **AI-involved battles auto-resolve** (2026-09-29): any battle whose attacker is not the local human — AI-vs-AI, or an AI attacking you — quick-resolves silently through the existing `maybeAutoResolveBattle` predicate; the result card still shows. A human attacker keeps the modal even against an AI.
 - Loser is removed from the map.
 - Winner gains loser's hero gold.
 - If loser was chartering, the charter is cancelled (costs forfeited).
@@ -67,10 +68,14 @@ When a hero moves adjacent to an enemy hero, battle triggers:
 
 ## Enemy heroes
 
-Enemy heroes spawn with initial castles. They **wander** independently:
-- AI picks a move target via `pickAiMove` (wander logic + basic targeting).
+Enemy heroes exist when the game was created with AI enemies — the New Game screens (home + toolbar) have an "AI enemies" chip row (0–3, default 0); `playerCount = humans + enemies` (clamped ≤ 10). AI seats spawn castles and **"Warlord"** heroes at game start. Their turns (`AI_TURN`) are driven by the primary client's tick (`turnController.tick`, local seat 0; non-primary browsers watch via sync):
+
+- AI picks a move target via `pickAiMove` (`src/ai/aiBrain.ts`): enemy heroes within reach 7 (priority `1000 − dist·10`), then neutral settlements (reach 8), unclaimed resources (reach 8), else wanders.
+- Walking onto an empty enemy/neutral settlement captures it (existing rule); garrisoned enemy settlements are refused as steps.
+- Post-move adjacency starts a battle — AI-involved battles auto-resolve (see [Combat](#combat)).
 - AI does not charter settlements in v1.
 - AI heroes with `isChartering: true` are skipped in the tick loop (future-proofing).
+- Known limitation: the AI actor is host-client only — if seat 0 is absent in a LAN game, AI turns stall.
 
 ## Future: hero death & capture-for-ransom
 

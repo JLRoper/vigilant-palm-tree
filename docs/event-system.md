@@ -142,7 +142,7 @@ bus.on("state:committed", () => {
 
 **Listeners:**
 - Economy pipeline (produce, consume, income, morale) subscribes to `turn:ended`
-- AI tick loop subscribes to `phase:changed` (detects AI_TURN)
+- ~~AI tick loop subscribes to `phase:changed` (detects AI_TURN)~~ — **shipped 2026-09-29, client-side**: the AI tick is `turnController.tick()` off the frame loop (checked each frame against `phase.kind === "AI_TURN"`, not a bus subscription — that still lands with the Phase-2+ listener migration), gated to the primary client (`isPrimaryActor` = local seat 0; non-primary browsers watch via sync)
 - Fog-of-war recompute subscribes to `phase:changed`
 - UI calendar/hud subscribes to `day:changed`
 

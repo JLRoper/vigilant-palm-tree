@@ -23,9 +23,12 @@ imported by both** the server command handler and the client arena
 > `GameActions.startBattleFlow` opens it as the default collision outcome
 > with the phase's real armies and submits the played-out result through the
 > `SubmitBattleResult` command; every arena action streams to the
-> `battle_actions` table as it happens. Hero-vs-hero collisions between two
-> human players still quick-resolve — a client only ever plays its own
-> hero's army in the arena. **Morale & fatigue** and **Spellcasting v1**
+> `battle_actions` table as it happens. Any battle whose **attacker is not
+> the local human** quick-resolves — the `maybeAutoResolveBattle` predicate
+> keys on the local seat vs. the attacker, so PvP human pairs (2026-09-27)
+> and, since the 2026-09-29 AI enemies, AI-vs-AI and AI-attacker-vs-human
+> all skip the modal; a client only ever plays its own hero's army in the
+> arena. **Morale & fatigue** and **Spellcasting v1**
 > shipped the same day — see
 > [Combat stats & spellcasting](#combat-stats--spellcasting-shipped-2026-09-27)
 > below and their plan docs
@@ -191,8 +194,11 @@ flowchart TB
 3. **User choice.** `startBattleFlow()` opens `showBattleModal()`
    (`src/screens/combat/battleModal.ts`) — **Fight** (primary, the tactical
    arena), **Quick Resolve** (the server auto-resolver), or **Flee** (cancels
-   the attacker's move via `tc.cancelMove(attackerId)`). Hero-vs-hero
-   collisions between two human players skip the modal and quick-resolve.
+   the attacker's move via `tc.cancelMove(attackerId)`). Collisions whose
+   attacker is not the local human skip the modal and quick-resolve —
+   PvP human pairs, and since the 2026-09-29 AI enemies also AI-vs-AI and
+   AI-attacker-vs-human (auto-resolved silently; the result card still
+   shows). A human attacker keeps the modal, including against an AI.
 4. **Fight path.** `GameActions.fightInArena()` loads the unit catalog,
    opens `openManualBattleArena(...)` with the two heroes' real stacks and
    the local player in their phase role, and awaits the played-out

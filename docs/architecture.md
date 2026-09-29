@@ -227,6 +227,26 @@ Behavior notes, by fix group: **city-view input guard** — `AdventureView` take
 
 Visual baselines (`adventure-overview`, both charter scenes, both city views) were regenerated for the pixel-affecting subset. New/extended unit tests: `pathOverlay`, `adventureScene`, `paint2d`, `cityScene`, `cityBuildingGen`, `charterRequirements`, `panelRects`, `hud`, `toastDedupe`, `tileInfo`, `netDelta`, `clickIntent`, `state/gameState`, `state/turnController`.
 
+### AI enemies (2026-09-29)
+
+Plan: [`.kilo/plan/2026-09-29-ai-enemies.md`](../.kilo/plan/2026-09-29-ai-enemies.md) — AI enemy seats end-to-end: a New Game "AI enemies" option (0–3), AI seats that spawn and take turns, wander/fight/capture behavior, and auto-resolved AI battles. `playerCount = humanSeatCount + enemyCount` (clamped ≤ `MAX_PLAYERS` 10); AI seats are **not** claimable lobby seats (`seats` stays = humanSlots, claiming one is a 400 `seat_out_of_range`); the LAN lobby path is unchanged (no `enemySlots` in v1) and its label now reads "Number of human players".
+
+| Module | Purpose |
+|---|---|
+| `packages/engine/src/init.ts` | `BuildInitialOptions.enemyCount`; `buildInitialGameState` + `makeInitialStatePayload` derive `playerCount = humanSeatCount + enemyCount` (legacy behavior when absent). AI seats spawn castles + "Warlord" heroes. |
+| `packages/engine/src/hero/move.ts` | `startMove`'s phase gate now admits `AI_TURN` when the mover is the active AI seat (`hero.ownerId === activePlayerId`); ownership/selection checks unchanged (the AI tick satisfies selection the same way the server does — naming the mover as selected). |
+| `server/routes.ts` | `POST /games` destructures + clamps `enemySlots` (int, 0..10−humanSlots); `initOpts { playerCount: humanSlots + enemySlots, humanSeatCount: humanSlots }`; lobby `seats` = humanSlots (start gate untouched); `generateCastles` preview uses the total count. |
+| `src/io/api.ts` + `src/managers/SessionManager.ts` + `src/managers/GameSessionManager.ts` | `enemySlots` param end-to-end: `api.createGame` body, `SessionManager.createGame`, `handleNewGame` (clamps 0–3). |
+| `src/screens/home/newGameScreen.ts` + `src/screens/shared/newGameModal.ts` | "Number of AI enemies" chip row (0–3, default 0) mirroring the players row on both New Game UIs; `NewGameFormValues.enemyCount` / `NewGameHandler.enemyCount`; `homeView` payload + `GameEngine` passthrough wired. |
+| `src/screens/multiplayer/multiplayerLobby.ts` | Stale "humans + AIs" seat-count label corrected to "Number of human players" (AI seats aren't lobby seats). |
+| `src/state/turnController.ts` | The AI tick runs during `AI_TURN`, gated to the **primary client** (`TurnControllerOptions.isPrimaryActor` — local seat 0, wired from GameEngine; non-primary browsers watch via sync). Post-move adjacency → `enterBattle`; `resolveCurrentBattle` re-maps the phase back to `AI_TURN` when an AI initiated the battle (was a stall bug). Selection override is the server's commandHandler trick. |
+| `src/ai/aiBrain.ts` | **Now live** (was already imported via turnHooks): targets enemy heroes within reach 7 (priority `1000 − dist·10`), neutral settlements and resources within reach 8, else wanders; fixed the path off-by-one that made enemy targeting illegal; approach/reposition beside enemies; garrisoned enemy settlements excluded as steps. |
+| ~~`src/systems/enemyWander.ts`~~ | **Deleted** — zero imports, unwired dead code (the repo's "unwired parallel implementation" lesson again). |
+
+Behavior notes: walking onto an empty enemy/neutral settlement captures it (`tryCaptureAt`, existing rule); AI-involved battles auto-resolve silently through the existing `maybeAutoResolveBattle` predicate — AI-vs-AI and AI-attacker-vs-human show only the result card, while a human attacker keeps the Fight/Quick-Resolve/Flee modal. Known v1 limitation: no server-side AI actor — if seat 0 is absent in a LAN game, AI turns stall until it returns. No AI chartering (unchanged). AI behavior is `aiBrain`'s current weights; smarter targeting was an explicit non-goal.
+
+Test inventory: new suites `test/ai/aiBrain.test.ts` (`test:unit` glob extended with `test/ai/*.test.ts`), `test/engine/init.test.ts` (enemyCount player-count derivation), `test/server/createGameRoute.test.ts` (`enemySlots` clamp, lobby seats humans-only); extended `test/state/gameState.test.ts` (the `AI_TURN` move-gate pins) and `test/state/turnController.test.ts` (AI tick moves, AI-initiated battle → auto-resolve → `AI_TURN` restore, primary-actor gate).
+
 ## See also
 
 - [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) — current module-by-module dependency map for `src/`, `server/`, `shared/`, `test/`, `tools/`, `scripts/`. This doc (`architecture.md`) is the executed **plan** that established the layout; the dependency map is the maintained **current state** and reflects any drift since the move.
