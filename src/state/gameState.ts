@@ -125,7 +125,7 @@ export function selectHero(state: GameState, heroId: HeroId): GameState {
   if (!hero) return state;
   if (hero.ownerId !== state.activePlayerId) return state;
   if (hero.isChartering) return state;
-  return { ...state, selectedHeroId: heroId };
+  return { ...state, selectedHeroId: heroId, selectedSettlementId: null };
 }
 
 export function clearSelection(state: GameState): GameState {

@@ -122,6 +122,11 @@ export interface ManualBattleArenaOptions {
   // missing hero name.
   attackerLabel?: string;
   defenderLabel?: string;
+  // Top-bar title. Defaults to the Test Battle sandbox's ("Test Battle —
+  // Manual Fight"); the production settlement-battle flow passes
+  // "Assault on <Settlement name>" so a real fight is never titled like the
+  // dev sandbox.
+  title?: string;
 }
 
 export function openManualBattleArena(
@@ -342,7 +347,7 @@ export function openManualBattleArena(
 
   const titleEl = document.createElement("div");
   Object.assign(titleEl.style, { fontWeight: "600", fontSize: "13px" });
-  titleEl.textContent = "Test Battle — Manual Fight";
+  titleEl.textContent = options.title ?? "Test Battle — Manual Fight";
   topBar.appendChild(titleEl);
 
   const sideTag = document.createElement("span");

@@ -16,6 +16,10 @@ const MOVEMENT_PER_TURN = 7;
 
 const PANEL_X = 16;
 
+const MOVEMENT_BAR_GREEN = "linear-gradient(90deg, #2d8a2d 0%, #4cd964 100%)";
+const MOVEMENT_BAR_AMBER = "linear-gradient(90deg, #8a6d2d 0%, #d9a94c 100%)";
+const MOVEMENT_BAR_RED = "linear-gradient(90deg, #8a2d2d 0%, #d94c4c 100%)";
+
 export type TransferHandler = (
   heroId: string,
   settlementId: string,
@@ -188,7 +192,7 @@ function buildHeroPanelDom(
   Object.assign(movementFill.style, {
     height: "100%",
     width: "100%",
-    background: "linear-gradient(90deg, #2d8a2d 0%, #4cd964 100%)",
+    background: MOVEMENT_BAR_GREEN,
     transition: "width 180ms ease-out",
   });
   barTrack.appendChild(movementFill);
@@ -408,8 +412,11 @@ export class HeroInfoMenu {
     this.dom.foodEl.textContent = `${cargoFood} food`;
     const remaining = Math.max(0, hero.movementRemaining);
     const shown = Math.round(remaining);
-    const pct = Math.max(0, Math.min(1, remaining / MOVEMENT_PER_TURN)) * 100;
+    const fraction = remaining / MOVEMENT_PER_TURN;
+    const pct = Math.max(0, Math.min(1, fraction)) * 100;
     this.dom.movementFill.style.width = `${pct}%`;
+    this.dom.movementFill.style.background =
+      remaining <= 0 ? MOVEMENT_BAR_RED : fraction <= 0.25 ? MOVEMENT_BAR_AMBER : MOVEMENT_BAR_GREEN;
     this.dom.movementLabel.textContent = `${shown} / ${MOVEMENT_PER_TURN}`;
     const troopTotal = platoonTroopTotal(hero.stacks);
     this.dom.troopsEl.textContent = `${troopTotal} \u00B7 Upkeep: ${troopTotal}g + ${troopTotal} food/wk`;
@@ -430,6 +437,16 @@ export class HeroInfoMenu {
       this.settlementAtTile.ownerId === hero.ownerId;
     this.dom.withdrawBtn.disabled = !canTransfer || settlementGold <= 0;
     this.dom.depositBtn.disabled = !canTransfer || hero.gold <= 0;
+    this.dom.withdrawBtn.title = !canTransfer
+      ? "Move your hero onto a friendly settlement to transfer gold"
+      : settlementGold <= 0
+        ? "The settlement treasury is empty"
+        : "Take the settlement treasury into the hero's purse";
+    this.dom.depositBtn.title = !canTransfer
+      ? "Move your hero onto a friendly settlement to transfer gold"
+      : hero.gold <= 0
+        ? "The hero's purse is empty"
+        : "Move the hero's purse into the settlement treasury";
     this.dom.withdrawBtn.style.opacity = this.dom.withdrawBtn.disabled ? "0.4" : "1";
     this.dom.depositBtn.style.opacity = this.dom.depositBtn.disabled ? "0.4" : "1";
     this.dom.withdrawBtn.style.cursor = this.dom.withdrawBtn.disabled ? "default" : "pointer";

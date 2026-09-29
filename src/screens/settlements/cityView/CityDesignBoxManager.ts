@@ -1,3 +1,11 @@
+import { toolbarHeight } from "@screens/shared/panelRail";
+import {
+  DESIGN_BOX_INSET,
+  collectPanelRects,
+  resolveDesignBoxPlacement,
+  type FloatingPanelRectProvider,
+} from "./panelRects";
+
 export interface CityDesignBoxCallbacks {
   onBuild: () => void;
   onGenerate: () => void;
@@ -15,14 +23,15 @@ export class CityDesignBoxManager {
   private generateBtn: HTMLButtonElement | null = null;
   private backBtn: HTMLButtonElement | null = null;
 
-  show(callbacks: CityDesignBoxCallbacks): void {
+  show(callbacks: CityDesignBoxCallbacks, panelRects?: FloatingPanelRectProvider): void {
     this.hide();
 
     this.box = document.createElement("div");
     Object.assign(this.box.style, {
       position: "fixed",
-      left: "12px",
-      bottom: "12px",
+      left: "0px",
+      top: "0px",
+      visibility: "hidden",
       zIndex: "100",
       display: "flex",
       flexDirection: "column",
@@ -100,6 +109,23 @@ export class CityDesignBoxManager {
     this.body.appendChild(this.backBtn);
 
     document.body.appendChild(this.box);
+
+    const measured = this.box.getBoundingClientRect();
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    const resolved = measured.width > 0 && measured.height > 0
+      ? resolveDesignBoxPlacement(
+          measured.width,
+          measured.height,
+          collectPanelRects(panelRects),
+          viewport,
+          toolbarHeight(),
+        )
+      : { x: DESIGN_BOX_INSET, y: viewport.height - DESIGN_BOX_INSET - measured.height };
+    Object.assign(this.box.style, {
+      left: `${resolved.x}px`,
+      top: `${resolved.y}px`,
+      visibility: "visible",
+    });
   }
 
   setBuildPaletteOpen(isOpen: boolean): void {

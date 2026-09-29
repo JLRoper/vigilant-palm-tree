@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  SURRENDER_COST_GOLD,
+  SURRENDER_UNIT_VALUE_GOLD,
   startManualBattle,
   type BattleSide,
   type Combatant,
@@ -9,7 +11,7 @@ import {
 import type { UnitType } from "../../../src/state/units";
 import { fitHexSize, gridExtent, type GridExtent } from "../../../src/screens/combat/arena/layout";
 import { buildPlatoonStrip } from "../../../src/screens/combat/arena/view";
-import { applyLeaveBehind } from "../../../src/screens/combat/arena/leaveBehind";
+import { applyLeaveBehind, openLeaveBehindDialog } from "../../../src/screens/combat/arena/leaveBehind";
 import { buildArenaPaint2dDeps, paintSceneForArena, readUseSceneBuilder, PAINT_MODE_QUERY_KEY, PAINT_MODE_SCENEBUILDER } from "../../../src/screens/combat/arena/paint";
 
 // ---- Hand-rolled minimal DOM mock -----------------------------------------
@@ -121,6 +123,10 @@ class MockNode {
   dispatch(event: string, ...args: unknown[]): void {
     const list = this.listeners.get(event) ?? [];
     for (const h of list) h(...args);
+  }
+
+  remove(): void {
+    if (this.parent) this.parent.removeChild(this);
   }
 }
 
@@ -391,6 +397,102 @@ test("applyLeaveBehind: ignores entries for retreated combatants", () => {
   state.attacker[0].retreated = true;
   applyLeaveBehind(state, "attacker", new Map([["0:footman", 2]]));
   assert.equal(state.attacker[0].entries.find((e) => e.unitTypeId === "footman")!.count, 5);
+});
+
+// Collects every button under `root` whose label matches exactly. The dialog
+// tests below need to reach the Confirm/Cancel/+ buttons through the tree
+// (openLeaveBehindDialog keeps no handle on them).
+function findButtons(root: MockNode, label: string): MockElement[] {
+  const found: MockElement[] = [];
+  const walk = (node: MockNode): void => {
+    for (const child of node.children) {
+      if (child instanceof MockElement && child.tagName === "BUTTON" && child.textContent === label) {
+        found.push(child);
+      }
+      walk(child);
+    }
+  };
+  walk(root);
+  return found;
+}
+
+function dialogBody(): MockElement {
+  return (globalThis as { document: { body: MockElement } }).document.body;
+}
+
+test("openLeaveBehindDialog: builds the whole dialog — Confirm/Cancel land in the DOM, Confirm enables once the shortfall is covered", () => {
+  installDom();
+  try {
+    const state = makeState();
+    const confirmed: Array<Map<string, number>> = [];
+    // 300g purse vs the 500g SURRENDER_COST_GOLD → 200g shortfall → 2 units
+    // at SURRENDER_UNIT_VALUE_GOLD each: the reachable starter-scale shape.
+    // Regression pin for the TDZ crash: the first platoon row's update()
+    // runs refresh() while constructing, and refresh() writes
+    // confirmBtn.disabled — before the hoist fix that read a
+    // not-yet-initialized const and aborted construction after row 1
+    // (Cancel/Confirm never entered the DOM).
+    openLeaveBehindDialog({
+      state,
+      side: "attacker",
+      unitTypes,
+      shortfall: SURRENDER_COST_GOLD - 300,
+      unitValue: SURRENDER_UNIT_VALUE_GOLD,
+      onConfirm: (leftBehind) => confirmed.push(leftBehind),
+    });
+    const body = dialogBody();
+    const confirmBtns = findButtons(body, "Confirm Surrender");
+    const cancelBtns = findButtons(body, "Cancel");
+    assert.equal(confirmBtns.length, 1, "Confirm Surrender must be in the DOM after construction");
+    assert.equal(cancelBtns.length, 1, "Cancel must be in the DOM after construction");
+    const confirmBtn = confirmBtns[0];
+    assert.equal(confirmBtn.disabled, true, "nothing picked yet — Confirm must start disabled");
+
+    // makeState()'s attacker carries two survivor entries (footman ×5,
+    // archer ×3) → two rows, each with a +/− pair.
+    const pluses = findButtons(body, "+");
+    assert.equal(pluses.length, 2, "one + button per survivor entry");
+    pluses[0].dispatch("click");
+    assert.equal(confirmBtn.disabled, true, "1 unit × 100G does not cover the 200G shortfall");
+    pluses[0].dispatch("click");
+    assert.equal(confirmBtn.disabled, false, "2 units × 100G cover the 200G shortfall");
+
+    confirmBtn.dispatch("click");
+    assert.equal(confirmed.length, 1, "Confirm fires onConfirm exactly once");
+    assert.deepEqual([...confirmed[0]], [["0:footman", 2]]);
+    assert.equal(dialogBody().children.length, 0, "the dialog wrapper is detached after confirming");
+  } finally {
+    restoreDom();
+  }
+});
+
+test("openLeaveBehindDialog: Cancel closes without confirming", () => {
+  installDom();
+  try {
+    const state = makeState();
+    let confirmCalls = 0;
+    openLeaveBehindDialog({
+      state,
+      side: "attacker",
+      unitTypes,
+      shortfall: 200,
+      unitValue: SURRENDER_UNIT_VALUE_GOLD,
+      onConfirm: () => {
+        confirmCalls++;
+      },
+    });
+    findButtons(dialogBody(), "Cancel")[0].dispatch("click");
+    assert.equal(confirmCalls, 0, "Cancel must not fire onConfirm");
+  } finally {
+    restoreDom();
+  }
+});
+
+test("SURRENDER_COST_GOLD: surrender is reachable at starter scale (500g over the 300g starter purse = 2 leave-behind units)", () => {
+  // Was 5000g — above the 2500g purse cap and any realistic starter army
+  // value, so Confirm could never enable early-game.
+  assert.equal(SURRENDER_COST_GOLD, 500);
+  assert.equal(Math.ceil((SURRENDER_COST_GOLD - 300) / SURRENDER_UNIT_VALUE_GOLD), 2);
 });
 
 // ---- paint tests ----------------------------------------------------------

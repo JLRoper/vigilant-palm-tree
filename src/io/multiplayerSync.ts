@@ -27,12 +27,16 @@ function readClaims(game: Game): LobbyClaims {
   return game.lobby?.claimed ?? {};
 }
 
-// The 14 variants packages/contracts/src/events/engineEvent.ts actually
+// The 17 variants packages/contracts/src/events/engineEvent.ts actually
 // declares. game_events also carries four legacy audit kinds
 // (turn_ended/round_ended/round_started/ai_turn_started, appended alongside
 // TurnEnded by server/app/commandHandler.ts) whose payloads are not
 // EngineEvents -- this set is what separates the two. StructureBuilt is
 // deliberately absent: it is plan-doc prose, not a declared variant.
+// SettlementBattleResolved is admitted knowing applyEngineEvent answers it
+// with "resync": its payload (winner/captured only) cannot re-derive the
+// resulting stacks/gold/hero outcomes, so it flows through the full-refetch
+// path below instead of being dropped as an unknown kind.
 const ENGINE_EVENT_KINDS = new Set<EngineEvent["type"]>([
   "HeroMoved",
   "GoldTransferred",
@@ -48,6 +52,9 @@ const ENGINE_EVENT_KINDS = new Set<EngineEvent["type"]>([
   "BuildingUpgradeStarted",
   "SettlementUpgradeStarted",
   "CharterTravelAdvanced",
+  "UnitsRecruited",
+  "UnitsTransferred",
+  "SettlementBattleResolved",
 ]);
 
 export function isEngineEventRow(row: GameEventRow): boolean {

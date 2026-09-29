@@ -3,7 +3,7 @@ import { Hero } from "../entities/hero";
 import { Castle } from "../entities/settlement";
 import { findPath } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
-import { TurnController } from "../state/turnController";
+import { TurnController, type TurnControllerOptions } from "../state/turnController";
 import type { TurnControllerHooks } from "../state/turnController";
 import type { Axial } from "../core/hex";
 import { bus } from "../core/eventBus";
@@ -21,10 +21,24 @@ export class GameStateManager {
   private settlements: Record<string, Castle> = {};
   private gameMap!: GameMap;
   private hooks: TurnControllerHooks | null = null;
+  private primaryActorSource: (() => boolean) | null = null;
   private pathPreviewLock: PathPreviewLock | null = null;
 
   setHooks(hooks: TurnControllerHooks): void {
     this.hooks = hooks;
+  }
+
+  // plan/2026-09-29-ai-enemies.md D3: only the primary client drives the AI
+  // tick. The source is read lazily at tick time because the active game
+  // name changes over the session (adopt/load).
+  setPrimaryActorSource(source: (() => boolean) | null): void {
+    this.primaryActorSource = source;
+  }
+
+  private makeTurnController(state: GameState): TurnController {
+    const opts: TurnControllerOptions = {};
+    if (this.primaryActorSource) opts.isPrimaryActor = this.primaryActorSource;
+    return new TurnController(state, this.hooks ?? ({} as TurnControllerHooks), opts);
   }
 
   setGameMap(map: GameMap): void {
@@ -63,12 +77,12 @@ export class GameStateManager {
 
   setState(state: GameState): void {
     this.gameState = state;
-    this.turnController = new TurnController(state, this.hooks ?? ({} as TurnControllerHooks));
+    this.turnController = this.makeTurnController(state);
   }
 
   replaceState(state: GameState): void {
     this.gameState = state;
-    this.turnController = new TurnController(state, this.hooks ?? ({} as TurnControllerHooks));
+    this.turnController = this.makeTurnController(state);
     bus.emit({ type: "state:committed" });
   }
 

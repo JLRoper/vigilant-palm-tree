@@ -76,6 +76,10 @@ export function generateBuildings(config: GenerationConfig): BuildingDef[] {
     enrich(buildings, config.size, config.townHallAt, rng, config.style);
   }
 
+  if (config.pattern === "denseUrban") {
+    carveGuaranteedClear2x2(buildings, config.size, config.townHallAt, rng);
+  }
+
   return buildings;
 }
 
@@ -422,5 +426,52 @@ function fillRemaining(
         buildings.push({ gx, gy, kind: "house", level: 1, style });
       }
     }
+  }
+}
+
+function buildingOverlapsBlock(b: BuildingDef, gx: number, gy: number): boolean {
+  const fp = buildingFootprintFromRegistry(b.kind, b.level);
+  const w = b.w ?? fp.w;
+  const h = b.h ?? fp.h;
+  return b.gx < gx + 2 && b.gx + w > gx && b.gy < gy + 2 && b.gy + h > gy;
+}
+
+function blockOccupiedCells(buildings: BuildingDef[], gx: number, gy: number): number {
+  let count = 0;
+  for (let dx = 0; dx < 2; dx++) {
+    for (let dy = 0; dy < 2; dy++) {
+      if (buildings.some((b) => coversCell(b, gx + dx, gy + dy))) count++;
+    }
+  }
+  return count;
+}
+
+// denseUrban at 70% fill on 5x5 essentially never leaves a clear 2x2, which
+// locked 2x2 footprints (farmField, upgraded townHall) out of the starter
+// town. Guarantee one: pick the non-center block with the fewest occupied
+// cells (seeded-rng tie-break), then remove every building overlapping it.
+// Town-hall-overlapping blocks are skipped entirely so the carve can never
+// demolish the town hall.
+function carveGuaranteedClear2x2(
+  buildings: BuildingDef[],
+  size: CityViewSize,
+  center: { gx: number; gy: number },
+  rng: () => number,
+): void {
+  const townHalls = buildings.filter((b) => b.kind === "townHall");
+  let best: { gx: number; gy: number; count: number } | null = null;
+  for (let gx = 0; gx + 2 <= size; gx++) {
+    for (let gy = 0; gy + 2 <= size; gy++) {
+      if (gx <= center.gx && center.gx < gx + 2 && gy <= center.gy && center.gy < gy + 2) continue;
+      if (townHalls.some((b) => buildingOverlapsBlock(b, gx, gy))) continue;
+      const count = blockOccupiedCells(buildings, gx, gy);
+      if (best === null || count < best.count || (count === best.count && rng() < 0.5)) {
+        best = { gx, gy, count };
+      }
+    }
+  }
+  if (!best || best.count === 0) return;
+  for (let i = buildings.length - 1; i >= 0; i--) {
+    if (buildingOverlapsBlock(buildings[i], best.gx, best.gy)) buildings.splice(i, 1);
   }
 }

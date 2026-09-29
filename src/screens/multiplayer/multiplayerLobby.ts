@@ -145,7 +145,7 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
     hostPanel.appendChild(nameInput);
 
     const seatsLabel = document.createElement("label");
-    seatsLabel.textContent = "Number of players (humans + AIs)";
+    seatsLabel.textContent = "Number of human players";
     seatsLabel.style.opacity = "0.7";
     seatsLabel.style.fontSize = "11px";
     hostPanel.appendChild(seatsLabel);

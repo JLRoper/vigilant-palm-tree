@@ -31,8 +31,9 @@ import type {
   BuildingKind,
   BuildingUpgradeRequest,
   GameState,
+  HeroBattleVerdict,
   HeroId,
-  Platoon,
+  HeroState,
   SettlementId,
   TransferDirection,
   WarehouseResource,
@@ -45,6 +46,8 @@ import type { Axial } from "../core/hex";
 import { getMultiplayerSync } from "../io/multiplayerSync";
 import { settings, type HorseVariant } from "../state/settings";
 import { bus } from "../core/eventBus";
+import { takeLastAppliedBuildDelta } from "./buildCommitLedger";
+import type { NetCost } from "../screens/settlements/cityView/netCost";
 
 // #100: src/state/turnController.ts calls each of the eight
 // TurnControllerHooks methods below fire-and-forget (`void this.hooks.onXxx(
@@ -67,9 +70,27 @@ export interface BuildTurnHooksOptions {
   gameMap: () => GameMap;
   rng: () => number;
   logToConsole?: boolean;
+  onPlaceBuildingsRejected?: (settlementId: SettlementId, appliedDelta: NetCost) => void;
 }
 
 let lastBattle: { attackerId: HeroId; defenderId: HeroId } | null = null;
+
+export interface ResolveBattleVerdicts {
+  attackerVerdict?: HeroBattleVerdict;
+  defenderVerdict?: HeroBattleVerdict;
+}
+
+// Verdicts from the most recent successful resolveBattle round-trip, consumed
+// by GameActions after resolveCurrentBattle() for the result card / AI toast
+// wording. Cleared at every onBattleResolved entry so a failed resolve never
+// surfaces a previous battle's verdicts.
+let lastResolveVerdicts: ResolveBattleVerdicts | null = null;
+
+export function consumeResolveBattleVerdicts(): ResolveBattleVerdicts {
+  const v = lastResolveVerdicts;
+  lastResolveVerdicts = null;
+  return v ?? {};
+}
 
 export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks {
   return {
@@ -139,6 +160,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     ): Promise<{ state: GameState; battle: BattleResult | null }> => {
       const cached = lastBattle;
       lastBattle = null;
+      lastResolveVerdicts = null;
       const name = opts.gameName();
       if (!name || !cached) return { state, battle: null };
       const attackerHeroBefore = state.heroes[cached.attackerId];
@@ -154,15 +176,12 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
           attackerId: cached.attackerId,
           defenderId: cached.defenderId,
         });
+        lastResolveVerdicts = {
+          attackerVerdict: result.attackerVerdict,
+          defenderVerdict: result.defenderVerdict,
+        };
         return {
-          state: {
-            ...state,
-            heroes: {
-              ...state.heroes,
-              [cached.attackerId]: result.attackerHero,
-              [cached.defenderId]: result.defenderHero,
-            },
-          },
+          state: mergeBattleOutcomeHeroes(state, cached.attackerId, cached.defenderId, result),
           battle: result.battle,
         };
       } catch (e) {
@@ -249,7 +268,20 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         await captureSettlement(name, { actor, heroId, settlementId });
       } catch (e) {
+        // Benign: the server already has this capture -- most commonly
+        // because it captured inline with a post-battle persist or the
+        // settlement-battle result before this serialized POST landed. The
+        // local optimistic capture already matches server state, so there is
+        // nothing to roll back and no error to surface to the player.
+        if (e instanceof CommandError && e.reason === "already_owned") {
+          console.warn("[turnHooks] capture already owned server-side; keeping local capture");
+          return;
+        }
         reportCommandFailure("Capture settlement", e);
+        // Rethrow so TurnController.captureSettlement's serialized dispatch
+        // rolls the optimistic capture back (owner/roster/gold) -- the same
+        // record-then-undo-on-rejection shape as the build-commit ledger.
+        throw e;
       }
     },
     onTransferGold: async (
@@ -417,31 +449,11 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         reportCommandFailure("Transfer units", e);
       }
     },
-    onSubmitSettlementBattleResult: async (
-      actor: number,
-      attackerId: HeroId,
-      settlementId: SettlementId,
-      outcome: "attackerWon" | "defenderWon" | "draw" | "retreat" | "surrender",
-      attackerStacks: Platoon[],
-      defenderStacks: Platoon[],
-      surrenderedGold: number | undefined,
-      rounds: number,
-      obstacleSeed: number,
-    ): Promise<void> => {
+    onSettlementBattleSubmitted: async (payload): Promise<void> => {
       const name = opts.gameName();
       if (!name) return;
       try {
-        await submitSettlementBattleResult(name, {
-          actor,
-          attackerId,
-          settlementId,
-          outcome,
-          attackerStacks,
-          defenderStacks,
-          surrenderedGold,
-          rounds,
-          obstacleSeed,
-        });
+        await submitSettlementBattleResult(name, payload);
       } catch (e) {
         reportCommandFailure("Settlement battle result", e);
       }
@@ -457,6 +469,8 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         await placeBuildingsCommand(name, { actor, settlementId, buildings, initialLayout });
       } catch (e) {
+        const applied = takeLastAppliedBuildDelta(settlementId);
+        if (applied) opts.onPlaceBuildingsRejected?.(settlementId, applied);
         reportCommandFailure("Place buildings", e);
       }
     },
@@ -480,6 +494,57 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     getMap: () => opts.gameMap(),
     rng: opts.rng,
   };
+}
+
+// Single-hero half of mergeBattleOutcomeHeroes, shared with the settlement
+// battle flow (GameActions.startSettlementBattleFlow) where there is no
+// defender hero to name: absent means delete (row + owner heroIds + selection
+// clear), present merges as today. Reference-stable no-op when nothing
+// changed.
+export function mergeBattleOutcomeHero(
+  state: GameState,
+  heroId: HeroId,
+  hero: HeroState | undefined,
+): GameState {
+  let heroes = { ...state.heroes };
+  let players = state.players;
+  let changed = false;
+  if (hero) {
+    if (heroes[heroId] !== hero) {
+      heroes[heroId] = hero;
+      changed = true;
+    }
+  } else {
+    const before = state.heroes[heroId];
+    if (before) {
+      delete heroes[heroId];
+      if (players.some((p) => p.id === before.ownerId && p.heroIds.includes(heroId))) {
+        players = players.map((p) =>
+          p.id === before.ownerId ? { ...p, heroIds: p.heroIds.filter((h) => h !== heroId) } : p,
+        );
+      }
+      changed = true;
+    }
+  }
+  if (!changed) return state;
+  const selectedHeroId =
+    state.selectedHeroId != null && heroes[state.selectedHeroId] ? state.selectedHeroId : null;
+  return { ...state, heroes, players, selectedHeroId };
+}
+
+export function mergeBattleOutcomeHeroes(
+  state: GameState,
+  attackerId: HeroId,
+  defenderId: HeroId,
+  result: { attackerHero?: HeroState; defenderHero?: HeroState },
+): GameState {
+  // Hero-outcomes plan W2b: the server omits a hero that died in the battle
+  // (defeat → removed server-side). Absent here means delete: drop the local
+  // hero row, prune its owner's heroIds, and clear a selection pointing at it
+  // (existence-checked like mergeFromEndTurn). Present heroes merge as today.
+  let next = mergeBattleOutcomeHero(state, attackerId, result.attackerHero);
+  next = mergeBattleOutcomeHero(next, defenderId, result.defenderHero);
+  return next;
 }
 
 export function mergeFromEndTurn(state: GameState, result: EndTurnResult): GameState {

@@ -1,6 +1,6 @@
 # Multiplayer — LAN Seats, Sync, and Session Policy
 
-**Status:** ✅ Current (mechanics as built) — including the 2026-09-27 drop policy (shipped the same day, see [Drop policy](#2-drop-policy--grace-then-skip-decided-2026-09-27-shipped-2026-09-27)) and the 2026-09-28 SSE event push (see [Sync model](#sync-model-srciomultiplayersyncts)).
+**Status:** ✅ Current (mechanics as built) — including the 2026-09-27 drop policy (shipped the same day, see [Drop policy](#2-drop-policy--grace-then-skip-decided-2026-09-27-shipped-2026-09-27)), the 2026-09-28 SSE event push (see [Sync model](#sync-model-srciomultiplayersyncts)), and the 2026-09-29 AI-enemy combatant seats (see [Decision 3](#3-ai-enemies--non-lobby-combatants-host-client-actor-2026-09-29)).
 
 This is the design doc the multiplayer system never had (former open question #5). It records how LAN multiplayer actually works today, the session-policy decisions made on 2026-09-27, and the gap between the two.
 
@@ -8,7 +8,7 @@ This is the design doc the multiplayer system never had (former open question #5
 
 - **LAN multiplayer, 2–4 human seats.** Host and Join flows from the home screen (`src/screens/multiplayer/multiplayerLobby.ts`).
 - **No internet play, no WebSocket/broker layer.** Sync is SSE push (`GET /api/games/:name/events/stream`, shipped 2026-09-28) with the 2 s HTTP poll kept as the backstop; `WS_PORT` remains reserved and dormant.
-- **AI is not a seat.** The AI that exists is the wandering enemy-hero layer (`src/systems/enemyWander.ts`, `src/ai/aiBrain.ts`) — it does not own players or take turns.
+- **AI seats are combatants, not lobby seats.** Since 2026-09-29 a new game can add 0–3 AI enemy seats — real players that spawn castles + heroes and take turns (driven by the primary client, see [Decision 3](#3-ai-enemies--non-lobby-combatants-host-client-actor-2026-09-29)). They are not claimable lobby seats, and the LAN lobby flow still creates humans only in v1.
 
 ## Current mechanics (as built)
 
@@ -29,7 +29,7 @@ This is the design doc the multiplayer system never had (former open question #5
 
 - **SSE push (shipped 2026-09-28):** `start()` additionally opens an `EventSource` on `GET /api/games/:name/events/stream?after=<cursor>`. The server replays everything past `after` as catch-up, then live-tails new `game_events` rows — `INSERT` fires a Postgres `NOTIFY` (`migration 017`), one dedicated `LISTEN` connection per API process (`server/persistence/eventsNotifier.ts`) wakes the route (`server/http/routes/eventStream.ts`), and each row goes out as an `id:`-carrying `event: log` frame with a `: ping` heartbeat every 25 s. Every frame feeds the same `applyRows` pipeline as a polled row, so a streamed row advances the cursor and the poll's next `after=cursor` query never re-delivers it. On disconnect the browser auto-reconnects with `Last-Event-ID` — the same cursor under a different name — and the poll covers correctness in the meantime.
 - **Poll cadence (backstop v1):** every 2s, `GET /api/games/:name/events?after=<last game_events.id>`. Unchanged by the SSE work; correctness never depends on the stream.
-- **Incremental apply:** each row that is a declared `EngineEvent` (14 kinds, see `ENGINE_EVENT_KINDS`) is applied via `applyEngineEvent` from `@heroes/engine`; the renderer's `EntityMirror` tween cache is advanced per event.
+- **Incremental apply:** each row that is a declared `EngineEvent` (17 kinds since the 2026-09-29 capture/garrison wave — `UnitsRecruited`/`UnitsTransferred`/`SettlementBattleResolved` added; see `ENGINE_EVENT_KINDS`) is applied via `applyEngineEvent` from `@heroes/engine`; the renderer's `EntityMirror` tween cache is advanced per event. Garrison deltas additionally reach the live TurnController through `src/game/garrisonEventBridge.ts` (safe-phase gated, FIFO-deferred; `SettlementBattleResolved` arrives as the full-refetch snapshot behind `mp:resynced` — its winner/captured payload can't re-derive the resulting stacks/gold/hero outcomes).
 - **Self-event dedup:** the client's own commands return `lastEventId`; those ids are skipped (a client must not re-apply its own mutations, which were applied locally). The `actor_seat` column covers the same ground whenever the local seat is known; the id set protects the unclaimed-seat case.
 - **Full resync** (`getGame` + `hydrateGameState`, cursor reseeded from `game.last_event_id`) on: initial load, an event the engine cannot derive (`event_not_derivable`), or a cursor gap. Rejoin after any absence heals through the same path — no special rejoin flow exists or is needed for state.
 - **Turn flow:** strict round-robin. The server enforces turn ownership on every command (`server/app/commandHandler.ts` guard); `activePlayerId` changes on the client emit `mp:turnStarted` off the bus.
@@ -71,11 +71,23 @@ All four decisions below are shipped (2026-09-27). Test coverage: `test/server/d
 3. **Timings** — 60s disconnect detection / 2-minute active-turn grace, server-enforced constants (not per-lobby configurable in v1).
 4. **Presence transport** — games row (`lobby` jsonb), not the topology snapshot; `presenceRegistry` remains dev-overlay-only.
 
-### 3. AI fill — no AI seats in v1
+### 3. AI enemies — non-lobby combatants, host-client actor (2026-09-29)
 
-**Decision:** unclaimed seats stay empty. AI never owns a player seat or takes turns; AI remains the wandering enemy-hero layer.
+**Decision:** a new game can add 0–3 AI enemy seats ("Number of AI enemies" chip row on the home Create Game screen and the toolbar New Game modal, default 0). An AI seat is a real player in the engine — `playerCount = humanSeatCount + enemyCount` (clamped ≤ MAX_PLAYERS 10): it spawns a castle and a "Warlord" hero at init and takes its own `AI_TURN` phase. But AI seats are **not lobby seats**: `seats` stays = humanSlots, so claim/reclaim/start are unchanged (claiming an AI seat is a 400 `seat_out_of_range`). The LAN lobby path itself sends no `enemySlots` — humans-only in v1 (its seat-count label now reads "Number of human players").
 
-**Rationale:** matches current code and keeps scope small. Full-turn AI (chartering, trading, recruiting) is a large surface with no current consumer; revisit only if solo-against-AI playtest demand appears.
+**As built (2026-09-29):**
+
+| Piece | Implementation |
+|---|---|
+| Wire + transport | `enemyCount` client-side → `enemySlots` on the wire: `POST /games` body (server clamps int 0..10−humanSlots), `api.createGame` / `SessionManager.createGame` / `handleNewGame` (clamps 0–3); `initOpts { playerCount: humanSlots + enemySlots, humanSeatCount: humanSlots }`. `generateCastles` preview uses the total count. |
+| Turn actor | The client AI tick (`turnController.tick` + `src/ai/aiBrain.ts`) is gated to the **primary client** (`isPrimaryActor` = local seat 0): in solo play that's you; in LAN games seat 0's browser drives every AI turn and non-primary clients watch via sync. Engine `startMove` (`packages/engine/src/hero/move.ts`) admits `AI_TURN` moves for the active AI seat (ownership-checked). |
+| Battles | After a successful AI move, adjacency → `enterBattle`. Resolution rides the existing quick-resolve predicate (`GameActions.maybeAutoResolveBattle`): any battle whose attacker is not the local human auto-resolves silently (AI-vs-AI and AI-attacker-vs-human; the result card still shows), while a human attacker keeps the Fight/Quick-Resolve/Flee modal. An AI-initiated battle returns the phase to `AI_TURN` (was a stall bug, fixed). A walk-in onto a beatable garrisoned settlement opens a `SETTLEMENT_BATTLE` that resolves through the same silent policy (`TurnController.resolveSettlementBattle` → fire-and-forget `SubmitSettlementBattleResult` for persistence; 2026-09-29 capture/garrison wave), and the AI's own walk-in capture serializes behind the move persist like the human path's. |
+| Behavior | `aiBrain` targets enemy heroes within reach 7 (priority `1000 − dist·10`), then settlements within reach 8 — garrisoned ones it can beat (`GARRISON_ATTACK_RATIO = 1.5`: troop total ≥ 1.5× the garrison's, priority `700 − dist·5`), empty enemy-owned (`650 − dist·5`), neutral (`600 − dist·5`) — then unclaimed resources (reach 8), else wanders; walks onto empty enemy/neutral settlements to capture; an unfavorable garrison is still refused as a path step. AI does not charter (unchanged). |
+| Garrison sync | `ENGINE_EVENT_KINDS` 14 → 17 (2026-09-29 capture/garrison wave): `UnitsRecruited`/`UnitsTransferred` apply as deltas through `applyEvent.ts`'s new applied-reducers (the recruit replay deposits into the garrison only — settled gold/warehouse follow at the TurnEnded resync boundary), `SettlementBattleResolved` is answered by a full-refetch resync. `src/game/garrisonEventBridge.ts` carries both into the live TurnController: safe-phase gating (blocked mid-battle, during ROUND_END, and the primary client's own `AI_TURN`; a snapshot landing during the local seat's own `PLAYER_TURN` is dropped, never queued), FIFO deferral with retry on `state:committed`, `flushPendingCommands()` before every merge. |
+
+**Known v1 limitation:** there is no server-side AI actor — the host-client drives. If seat 0 is absent in a LAN game (its browser closed), AI turns stall until seat 0 returns.
+
+**Rationale:** supersedes the earlier "no AI seats in v1" decision — its revisit trigger (solo-against-AI playtest demand) arrived. Keeping AI seats out of the lobby leaves the human seat-claim/reclaim machinery untouched; making seat 0's client the actor keeps the AI logic client-side for v1 (server-side actor is a non-goal).
 
 ## Open questions
 
@@ -84,7 +96,7 @@ All four decisions below are shipped (2026-09-27). Test coverage: `test/server/d
 
 ## Out of scope
 
-Internet play, matchmaking, spectator seats, AI seats, simultaneous turns, and any WebSocket transport — still true after the 2026-09-28 SSE event push: SSE is plain HTTP streaming, not a WebSocket (see `plan/` → `.kilo/plan/` architecture walkthrough docs for the Tailscale/LAN deployment context).
+Internet play, matchmaking, spectator seats, claimable AI lobby seats (AI enemy seats exist as non-lobby combatants since 2026-09-29 — Decision 3), simultaneous turns, and any WebSocket transport — still true after the 2026-09-28 SSE event push: SSE is plain HTTP streaming, not a WebSocket (see `plan/` → `.kilo/plan/` architecture walkthrough docs for the Tailscale/LAN deployment context).
 
 ## See also
 

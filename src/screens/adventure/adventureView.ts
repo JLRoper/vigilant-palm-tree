@@ -15,8 +15,11 @@ import {
   isPointInPolygon,
 } from "../../render/minimap";
 import { DragTracker } from "./dragTracker";
-import { resolveAdventureClick, type ClickIntent } from "./clickIntent";
+import { resolveAdventureClick, clickRejectionToast, type ClickIntent } from "./clickIntent";
 import { openCharterModal } from "./charterModal";
+import { showToast } from "../shared/toast";
+import type { PathCostReadout } from "../shared/hud";
+import { computeReachableSplitDetailed } from "../../render/overlays/pathOverlay";
 
 export const MAP_SEED = 42;
 
@@ -47,6 +50,7 @@ export interface AdventureViewOptions {
   setCharterMode?: (v: boolean) => void;
   getValidCharterHexes?: () => Set<string> | null;
   onTileInspect?: (tile: Axial | null) => void;
+  isCityOpen?: () => boolean;
 }
 
 function hoverChanged(a: Axial | null, b: Axial | null): boolean {
@@ -100,6 +104,7 @@ export class AdventureView {
   hover: Axial | null = null;
   path: Axial[] = [];
   lastClickDebug: LastClickDebug = { hover: null, path: [], reason: "", moved: false };
+  pathCostReadout: PathCostReadout | null = null;
 
   private inspectedTile: Axial | null = null;
 
@@ -320,6 +325,7 @@ export class AdventureView {
   }
 
   private onMouseDown(e: MouseEvent): void {
+    if (this.opts.isCityOpen?.()) return;
     this.drag.reset();
     const minimapGeo = getMinimapGeometry(this.opts.map);
     if (isPointInMinimap(e.clientX, e.clientY, minimapGeo)) {
@@ -357,6 +363,15 @@ export class AdventureView {
   }
 
   private onMouseMove(e: MouseEvent): void {
+    if (this.opts.isCityOpen?.()) {
+      if (this.hover) {
+        this.hover = null;
+        this.updatePath();
+        this.opts.onHudUpdate();
+        this.opts.onRedraw();
+      }
+      return;
+    }
     if (this.frameDrag.isActive()) {
       const fromX = this.frameDrag.lastX;
       const fromY = this.frameDrag.lastY;
@@ -455,12 +470,38 @@ export class AdventureView {
   }
 
   private setPath(path: Axial[]): void {
-    if (pathsEqual(this.path, path)) return;
+    const changed = !pathsEqual(this.path, path);
     this.path = path;
-    this.opts.onPathChanged(this.path);
+    this.refreshPathCostReadout();
+    if (changed) this.opts.onPathChanged(this.path);
+  }
+
+  // F10 (playtest fixes 2026-09-29): keeps the HUD's path-cost readout in
+  // sync with the currently displayed path. Recomputed even when the path
+  // itself didn't change, because the preview hero's movementRemaining may
+  // have moved underneath it (e.g. after requestMove).
+  private refreshPathCostReadout(): void {
+    if (this.path.length === 0) {
+      this.pathCostReadout = null;
+      return;
+    }
+    const lock = this.opts.getPathPreviewLock();
+    const previewHeroId = lock?.heroId ?? this.state.selectedHeroId;
+    const hero = previewHeroId ? this.state.heroes[previewHeroId] : undefined;
+    if (!hero) {
+      this.pathCostReadout = null;
+      return;
+    }
+    const detailed = computeReachableSplitDetailed(this.path, this.opts.map, hero.movementRemaining);
+    this.pathCostReadout = {
+      costToSplit: detailed.costToSplit,
+      totalCost: detailed.totalCost,
+      destinationReachable: detailed.index === this.path.length,
+    };
   }
 
   private onClick(e: MouseEvent): void {
+    if (this.opts.isCityOpen?.()) return;
     this.lastClickDebug.reason = "";
 
     const minimapGeo = getMinimapGeometry(this.opts.map);
@@ -511,6 +552,8 @@ export class AdventureView {
     if (intent.kind === "none") {
       if (intent.debugPath) this.lastClickDebug.path = intent.debugPath;
       this.lastClickDebug.reason = intent.reason;
+      const rejection = clickRejectionToast(intent.reason, intent.movementRemaining);
+      if (rejection) showToast(rejection.message, rejection.kind);
       return;
     }
 
@@ -545,6 +588,8 @@ export class AdventureView {
               this.opts.onStateChanged?.();
               this.opts.onHudUpdate();
               this.opts.onRedraw();
+            } else {
+              showToast("Charter failed — requirements not met", "error");
             }
           }
         },
@@ -560,10 +605,12 @@ export class AdventureView {
     const ok = tc.requestMove(intent.heroId, intent.dest, intent.cost, intent.trailExtension);
     if (!ok) {
       this.opts.setPathPreviewLock(null);
+      showToast("Move rejected", "error");
+    } else if (intent.clamped) {
+      showToast("Out of movement — the rest continues next turn", "info");
     }
     this.opts.onStateChanged?.();
-    this.path = intent.remainingPath;
-    this.opts.onPathChanged(this.path);
+    this.setPath(intent.remainingPath);
     this.lastClickDebug.moved = ok;
     if (intent.kind === "move") {
       this.lastClickDebug.path = intent.debugPath;
@@ -582,6 +629,7 @@ export class AdventureView {
   }
 
   private onWheel(e: WheelEvent): void {
+    if (this.opts.isCityOpen?.()) return;
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
     const minimapGeo = getMinimapGeometry(this.opts.map);

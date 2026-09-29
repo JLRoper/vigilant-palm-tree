@@ -305,8 +305,12 @@ export class PopupMenu {
   }
 
   close(): void {
-    this.root.remove();
+    // onClose runs while root is still attached: callbacks may remove the
+    // wrapper (or otherwise reason about root's placement) and rely on the
+    // pre-close DOM. root.remove() afterwards is idempotent for callbacks
+    // that already detached it.
     this.onClose?.();
+    this.root.remove();
   }
 
   private attachDrag(): void {
@@ -384,6 +388,7 @@ export function openCenteredModal(
   width = 360,
   draggable = false,
   closeable = true,
+  onClose?: () => void,
 ): PopupMenu {
   const wrapper = document.createElement("div");
   Object.assign(wrapper.style, {
@@ -407,6 +412,7 @@ export function openCenteredModal(
     draggable,
     closeable,
     onClose: () => {
+      onClose?.();
       window.removeEventListener("resize", clampIntoView);
       wrapper.remove();
     },
@@ -430,5 +436,20 @@ export function openCenteredModal(
   }
 
   window.addEventListener("resize", clampIntoView);
+
+  // The wrapper cleanup above must survive a later setOnClose(): consumers
+  // replace onClose for their own teardown (battleResultCard, the
+  // multiplayer lobby's stopPolling) and previously clobbered the wrapper
+  // removal, stranding a fullscreen rgba(0,0,0,0.6) overlay that intercepts
+  // all input. Re-wrap setOnClose so wrapper removal always chains.
+  const baseSetOnClose = menu.setOnClose.bind(menu);
+  menu.setOnClose = (fn: () => void): void => {
+    baseSetOnClose(() => {
+      fn();
+      window.removeEventListener("resize", clampIntoView);
+      wrapper.remove();
+    });
+  };
+
   return menu;
 }

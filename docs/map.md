@@ -4,7 +4,7 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 
 ## Status
 
-✅ **Implemented.** Procedural map generation, 6 terrain types, biome-aware resource placement, server-side tile persistence, isometric rendering, camera (pan/zoom, DPR-aware), and minimap all ship in v1.
+✅ **Implemented.** Procedural map generation, 6 terrain types, biome-aware resource placement, server-side tile persistence, isometric rendering, camera (pan/zoom, DPR-aware), fog of war, and minimap all ship in v1.
 
 ## Grid
 
@@ -99,9 +99,16 @@ Because the client only reads the table, all of these are server-only changes. N
 - Path: translucent overlay.
 - ✅ Resource tiles: small amber dot indicator (per-resource tint optional).
 
-## Fog of war (deferred)
+## Fog of war
 
-⏸️ **Deferred entirely.** Resource tiles stay **always visible** for v1 — no fog hiding them. If/when fog ships later, this decision will be revisited.
+✅ **Implemented** (shipped long before the 2026-09-29 playtest pass; this section replaced a stale "deferred entirely" note). Visibility is computed per frame in [`src/render/fog.ts`](../src/render/fog.ts) as the union of:
+
+- **Hero vision rings** — radius 4 (`VISION_RANGE`) around every hero's position.
+- **Settlement vision rings** — radius `controlRange(level)` around every castle (grows with settlement level).
+
+Non-visible hexes are covered with a semi-transparent fog overlay on the map and render black on the minimap. Resource deposits are hidden under fog too — the old "resource tiles stay always visible" v1 decision is superseded. Moving into fog is **allowed by design** (HoMM-style); path segments crossing fogged tiles draw brighter over a dark under-stroke so a planned move stays legible.
+
+**Unexplored tiles reveal no terrain info until seen** (locked decision, 2026-09-29 playtest fixes): the tile popup on a fogged tile shows coordinates + "Unexplored" only — `TileInfo.terrain` is null and the terrain/move-cost/deposit/settlement/heroes/charter/territory lines are all suppressed (`src/screens/adventure/tileInfo.ts`; the existing exception — tiles you own stay visible — is kept). The server-side `tiles` table still holds the full grid; the gate is a client presentation rule, not an information-model change.
 
 ## Cross-references
 

@@ -16,15 +16,40 @@ export function computeReachableSplit(
   map: GameMap,
   movementRemaining: number,
 ): number {
-  let cumulative = 0;
+  return computeReachableSplitDetailed(path, map, movementRemaining).index;
+}
+
+export interface ReachableSplitDetailed {
+  index: number;
+  costToSplit: number;
+  totalCost: number;
+}
+
+export function computeReachableSplitDetailed(
+  path: readonly Axial[],
+  map: GameMap,
+  movementRemaining: number,
+): ReachableSplitDetailed {
+  let costToSplit = 0;
+  let totalCost = 0;
+  let index = path.length;
   for (let i = 0; i < path.length; i++) {
     const t = map.get(path[i].q, path[i].r);
     const stepCost = t ? TERRAIN_COST[t] : Infinity;
-    if (!Number.isFinite(stepCost) || stepCost <= 0) return i;
-    if (cumulative >= movementRemaining) return i;
-    cumulative += stepCost;
+    if (!Number.isFinite(stepCost) || stepCost <= 0) {
+      if (index === path.length) index = i;
+      break;
+    }
+    if (index === path.length) {
+      if (costToSplit >= movementRemaining) {
+        index = i;
+      } else {
+        costToSplit += stepCost;
+      }
+    }
+    totalCost += stepCost;
   }
-  return path.length;
+  return { index, costToSplit, totalCost };
 }
 
 export function drawMinimapPath(

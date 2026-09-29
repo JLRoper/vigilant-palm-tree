@@ -102,7 +102,7 @@ export function makeRecordingCtx(): RecordingCtx {
   }
   // Common property setters the painters use. Logged via a Reflect-based
   // setter so the recording captures things like `ctx.fillStyle = "#fff"`.
-  const propertyNames = ["fillStyle", "strokeStyle", "lineWidth", "lineJoin", "lineCap", "font", "textAlign", "textBaseline", "globalAlpha", "globalCompositeOperation"];
+  const propertyNames = ["fillStyle", "strokeStyle", "lineWidth", "lineJoin", "lineCap", "font", "textAlign", "textBaseline", "globalAlpha", "globalCompositeOperation", "shadowColor", "shadowBlur"];
   for (const name of propertyNames) {
     target[name] = undefined;
   }

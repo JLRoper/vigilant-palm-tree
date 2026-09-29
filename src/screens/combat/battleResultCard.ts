@@ -5,15 +5,24 @@
 // and the Test Battle sandbox shows it with the generic You / AI Opponent
 // ones. Shaped generically (BattleResult + a single onCarryOn callback).
 
+import type { HeroBattleVerdict } from "@heroes/contracts";
 import type { BattleResult, CombatantResult } from "@heroes/engine";
 import { getCachedUnit } from "../../data/unitCatalog";
 import { menuTheme, openCenteredModal, styleButton } from "@screens/shared/menu";
+import { battleVerdictCardLine } from "./battleResultText";
 
 export interface BattleResultCardOptions {
   result: BattleResult;
   attackerLabel: string;
   defenderLabel: string;
   onCarryOn: () => void;
+  // Hero-outcomes plan W2b: optional per-side verdicts from the server result
+  // ("defeated" = hero removed, "retreated"/"surrendered" = relocated to the
+  // settlement named in the matching *SettlementName field, "stood" = silent).
+  attackerVerdict?: HeroBattleVerdict;
+  defenderVerdict?: HeroBattleVerdict;
+  attackerSettlementName?: string;
+  defenderSettlementName?: string;
 }
 
 function unitName(unitTypeId: string): string {
@@ -73,9 +82,14 @@ function renderSideResults(title: string, results: CombatantResult[]): HTMLEleme
 
 export function showBattleResultCard(opts: BattleResultCardOptions): void {
   const modal = openCenteredModal(document.body, "Battle Results", 480, false, false);
+  // Capture the fullscreen wrapper by reference NOW: dereferencing
+  // root.parentElement inside onClose breaks if root was already detached
+  // (close()-ordering changes), and a missed removal strands an
+  // input-intercepting overlay forever.
+  const wrapper = modal.root.parentElement;
 
   modal.setOnClose(() => {
-    modal.root.parentElement?.remove();
+    wrapper?.remove();
     opts.onCarryOn();
   });
 
@@ -92,6 +106,23 @@ export function showBattleResultCard(opts: BattleResultCardOptions): void {
   banner.style.textAlign = "center";
   banner.style.margin = "4px 0 4px";
   modal.appendContent(banner);
+
+  const verdictLines: Array<[string, HeroBattleVerdict | undefined, string | undefined]> = [
+    [opts.attackerLabel, opts.attackerVerdict, opts.attackerSettlementName],
+    [opts.defenderLabel, opts.defenderVerdict, opts.defenderSettlementName],
+  ];
+  for (const [label, verdict, settlementName] of verdictLines) {
+    if (!verdict) continue;
+    const line = battleVerdictCardLine(label, verdict, settlementName);
+    if (!line) continue;
+    const el = document.createElement("div");
+    el.textContent = line;
+    el.style.fontSize = "12px";
+    el.style.textAlign = "center";
+    el.style.color = verdict === "defeated" ? "#f88" : "rgba(241,228,195,0.85)";
+    el.style.margin = "2px 0 0";
+    modal.appendContent(el);
+  }
 
   const roundsLine = document.createElement("div");
   roundsLine.textContent = `Resolved in ${opts.result.rounds} round${opts.result.rounds === 1 ? "" : "s"}.`;

@@ -246,6 +246,54 @@ async function testEscapeHandling(page: Page): Promise<void> {
   console.log(">> 3rd Escape closes city view ✓");
 }
 
+async function testCityClicksDoNotReachMap(page: Page, settlementId: string): Promise<void> {
+  console.log(">> Test: F1 — city view clicks do not reach the adventure map");
+
+  await page.evaluate(() => {
+    const dbg = (window as any).__gameDebug;
+    const hero = (dbg?.getHeroes?.() ?? []).find((h: any) => h.ownerId === 0);
+    if (hero) dbg.setSelectedHero?.(hero.id);
+  });
+  await wait(300);
+
+  await openCityView(page, settlementId);
+
+  const baseline = await page.evaluate(() => {
+    const hero = ((window as any).__gameDebug?.getHeroes?.() ?? []).find(
+      (h: any) => h.ownerId === 0
+    );
+    return hero ? { q: hero.q, r: hero.r, movementRemaining: hero.movementRemaining } : null;
+  });
+  assert(baseline, "Player hero should exist after opening the city view");
+
+  for (let i = 0; i < 10; i++) {
+    const x = 420 + ((i * 149) % 1080);
+    const y = 260 + ((i * 97) % 520);
+    await page.mouse.click(x, y);
+    await wait(80);
+  }
+
+  await page.keyboard.press("Escape"); await wait(200);
+  if (await page.evaluate(paletteQuery())) { await page.keyboard.press("Escape"); await wait(200); }
+  await page.keyboard.press("Escape"); await wait(400);
+
+  const after = await page.evaluate(() => {
+    const hero = ((window as any).__gameDebug?.getHeroes?.() ?? []).find(
+      (h: any) => h.ownerId === 0
+    );
+    return hero ? { q: hero.q, r: hero.r, movementRemaining: hero.movementRemaining } : null;
+  });
+  assert(after, "Player hero should exist after closing the city view");
+  assert.strictEqual(
+    after.movementRemaining,
+    baseline.movementRemaining,
+    `movementRemaining changed across city clicks: ${baseline.movementRemaining} -> ${after.movementRemaining}`
+  );
+  assert.strictEqual(after.q, baseline.q, "hero q changed across city clicks");
+  assert.strictEqual(after.r, baseline.r, "hero r changed across city clicks");
+  console.log(">> City clicks left the hidden adventure map untouched ✓");
+}
+
 async function testPersistence(page: Page, settlementId: string): Promise<void> {
   console.log(">> Test: buildings persist in state");
 
@@ -421,6 +469,11 @@ async function run() {
     }
 
     await page.waitForFunction(() => !!(window as any).__gameDebug, { timeout: 20000 });
+    await page.waitForFunction(
+      () => (window as any).__gameDebug?.activeGameName != null,
+      null,
+      { timeout: 20000 }
+    );
     await wait(500);
 
     const settlementId = await setupTestGame(page);
@@ -431,6 +484,7 @@ async function run() {
     await testPlacement(page);
     await testDestroyMode(page);
     await testEscapeHandling(page);
+    await testCityClicksDoNotReachMap(page, settlementId);
     await testPersistence(page, settlementId);
 
     await openCityView(page, settlementId);

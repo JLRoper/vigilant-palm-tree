@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { CharterState } from "@heroes/contracts";
 import { Hero } from "../../src/entities/hero";
 import { Castle } from "../../src/entities/settlement";
-import { axialToPixel } from "../../src/core/hex";
+import { axialToPixel, type Axial } from "../../src/core/hex";
 import { computeReachableSplit } from "../../src/render/overlays/pathOverlay";
 import { buildAdventureScene } from "../../src/render/scene/sceneBuilder/adventureScene";
 import type {
@@ -339,4 +339,83 @@ test("no heroes or no proposed path -> no path/trail nodes at all", () => {
 
   const noHeroes = buildAdventureScene({ map, heroes: [], castles: [], path: [{ q: 1, r: 0 }], hover: null, opts });
   assert.equal(nodesOfKind(noHeroes, "pathSegment").length, 0);
+});
+
+test("path segments are marked fogged when any tile they span lies under fog (F4)", () => {
+  const map = makeGrassMap(7, 1);
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0, 1);
+  const path = [
+    { q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 },
+    { q: 4, r: 0 }, { q: 5, r: 0 }, { q: 6, r: 0 },
+  ];
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path,
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const segments = nodesOfKind<PathSegmentNode>(nodes, "pathSegment");
+  const reachable = segments.find((s) => s.reachable);
+  const unreachable = segments.find((s) => !s.reachable);
+  assert.ok(!reachable?.fogged, "origin + first step are within VISION_RANGE=4 of the hero");
+  assert.equal(unreachable?.fogged, true, "the dim tail reaches q=5, outside VISION_RANGE=4");
+});
+
+test("a fully visible path carries no fogged flag (F4)", () => {
+  const map = makeGrassMap(4, 1);
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0, 10);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [{ q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 }],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const segments = nodesOfKind<PathSegmentNode>(nodes, "pathSegment");
+  assert.equal(segments.length, 1);
+  assert.notEqual(segments[0].fogged, true);
+});
+
+test("a fogged pathOrigin marks the reachable segment fogged too, so bright segments get the under-stroke (F4)", () => {
+  const map = makeGrassMap(7, 1);
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0, 10);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [{ q: 1, r: 0 }, { q: 2, r: 0 }],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, pathOrigin: { q: 6, r: 0 }, pathReachableIdx: 1 }),
+  });
+
+  const reachable = nodesOfKind<PathSegmentNode>(nodes, "pathSegment").find((s) => s.reachable);
+  assert.deepEqual(reachable?.points, [axialToPixel(6, 0), axialToPixel(1, 0)]);
+  assert.equal(reachable?.fogged, true, "the overridden origin (6,0) sits in fog");
+});
+
+test("hero trail points are capped to the last 25, render-side only (F14)", () => {
+  const map = makeGrassMap(3, 1);
+  const trail: Axial[] = [];
+  for (let i = 39; i >= 0; i--) trail.push({ q: -i, r: 0 });
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0, 10, trail);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [{ q: 1, r: 0 }],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const trails = nodesOfKind<HeroTrailNode>(nodes, "heroTrail");
+  assert.equal(trails.length, 1);
+  assert.equal(trails[0].points.length, 25);
+  assert.deepEqual(trails[0].points[24], axialToPixel(0, 0), "the newest trail point (last entry) is kept");
+  assert.deepEqual(trails[0].points[0], axialToPixel(-24, 0), "the oldest kept point is 25 back");
+  assert.equal(hero.trail.length, 40, "the hero's own trail history is untouched");
 });

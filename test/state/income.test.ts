@@ -51,7 +51,7 @@ test("settlementIncome: level 3 (5000 pop × 3 tax) = 15000", () => {
 test("playerIncome sums only settlements owned by the given player", () => {
   const state: GameState = createInitialState({
     seedPlayers: [
-      { id: 0, faction: "player", name: "Human", color: "#fff", heroIds: ["h0"], settlementIds: ["s0", "s1"] },
+      { id: 0, faction: "player", name: "Player 1", color: "#fff", heroIds: ["h0"], settlementIds: ["s0", "s1"] },
       { id: 1, faction: "ai", name: "AI", color: "#000", heroIds: ["h1"], settlementIds: ["s2"] },
     ],
     seedHeroes: [

@@ -14,7 +14,7 @@ Gold is deliberately different from everything else — it has **no warehouse en
 
 | Pool | Field | Moves with | Spent on |
 |------|-------|-----------|----------|
-| Hero purse | `HeroState.gold` | the hero | chartering (2500g), captured on defeat |
+| Hero purse | `HeroState.gold` | the hero | chartering (2500g); looted by the winner **on defeat** only (2026-09-29 outcomes) — retreat keeps it, surrender pays its gold cost |
 | Settlement treasury | `SettlementState.gold` | the settlement | building placement/upgrades, recruitment, trading, auto-trade |
 
 The other five are `WarehouseResource`s, held in the per-settlement `Warehouse` (`{ wood, stone, iron, arcane, food }`).
@@ -119,6 +119,8 @@ There are two "income" functions and they **disagree** (see [finding F2](#F2)):
 
 Building `goldPerTurn` therefore *appears* in the HUD but never lands in the treasury.
 
+*(2026-09-29: the HUD economy row now carries a hover tooltip — `economyBreakdown()` in `src/screens/shared/hud.ts` — that spells the discrepancy out line by line: gross taxes → morale scaling → upkeep/food → the `goldPerTurn` HUD-vs-accrual difference. Presentation only; the underlying inconsistency itself remains open as [F2](#F2).)*
+
 ### 6.3 Building placement
 
 Placement happens in the city view as a client-side **shopping cart** (`src/screens/settlements/cityView/buildingPlacer.ts`):
@@ -171,7 +173,7 @@ Founding a settlement costs, immediately and non-refundably (`packages/engine/sr
 - **Weekly upkeep** (`packages/engine/src/hero/upkeep.ts`): 1g per troop, deducted from the purse; if the purse can't cover it, gold drops to 0 and **troops are lost down to the gold that was available**.
 - **Hero recruitment**: `recruitHero` costs **1g** — a placeholder (max 5 heroes/player, `packages/engine/src/hero/recruit.ts:5-6`).
 - **Deposit/withdraw** (`transferGold`, `packages/engine/src/economy/transfer.ts`): hero ↔ settlement treasury, same-hex only, **all-or-nothing** (see [finding F9](#F9)).
-- **Combat**: the winner takes the loser's entire purse; a chartering hero's defeat forfeits all charter costs.
+- **Combat** (2026-09-29 hero outcomes): the purse is looted — wagon-capped, cargo included — only when a hero is **defeated** (wiped to zero troops; the hero is then removed from the map, and a chartering loser's charter is cancelled, costs forfeited). A **retreating** hero keeps the purse (its stacks are zeroed instead) and a **surrendering** hero pays the surrender cost and keeps the rest; both relocate to the nearest owned settlement.
 
 ## 7. Buildings ↔ resources
 
@@ -289,7 +291,7 @@ Each finding: behavior, evidence, suggestion. All are documentation-only observa
 **F1 — Food is a dead-end resource (highest impact).** Food has no production source — zero tile density (§2), `foodPerTurn` never applied (§7) — yet every settlement consumes `ceil(pop/100)` per turn (§6.1). Warehouses hit 0 food almost immediately, so food-deficit morale decay is effectively permanent and gold income is permanently suppressed. *Suggest:* wire `foodPerTurn` into the production tick and/or give food a tile density; until then, the guaranteed-deficit behavior should at least be a conscious decision.
 
 <a id="F2"></a>
-**F2 — HUD income ≠ actual income.** `playerIncome()` includes building `goldPerTurn` and feeds the HUD's next-turn gold (`src/managers/UIManager.ts:473`), but `applyEffectiveIncome()` accrues only `pop × tax × morale/100` (§6.2). *Suggest:* either include `goldPerTurn` in `effectiveIncome` or exclude it from the HUD number.
+**F2 — HUD income ≠ actual income.** `playerIncome()` includes building `goldPerTurn` and feeds the HUD's next-turn gold (`src/managers/UIManager.ts:473`), but `applyEffectiveIncome()` accrues only `pop × tax × morale/100` (§6.2). *Suggest:* either include `goldPerTurn` in `effectiveIncome` or exclude it from the HUD number. (The HUD hover breakdown added 2026-09-29 — see §6.2 — surfaces this in-game; the numbers themselves are unchanged.)
 
 <a id="F3"></a>
 **F3 — Defined-but-unwired building effects.** `foodPerTurn` (farmField/farmhouse/granary), `resourceYieldBonus` (mine/mageGuild/woodcutterHut), and `populationBonus` (house/apartment/farmhouse) exist in the registry and render in menus, but nothing applies them to warehouses or population. `defenseBonus`, `unitCostReductionPct`, and the vision/speed/attack player effects are display-only too — the only wired player effect is `controlRangeBonus`. *Suggest:* an `applyBuildingSettlementEffects` step in the EndTurn pipeline, a population-formula hook, and combat/fog wiring for the player effects — or delete the dead fields (the repo's own lesson: an unwired parallel implementation is not a safe intermediate state).

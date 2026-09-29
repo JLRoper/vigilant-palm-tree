@@ -81,7 +81,7 @@ interface StateOverrides {
 
 function makeState(overrides: StateOverrides = {}): GameState {
   const players = overrides.players ?? [
-    makePlayer(0, "player", "Human", ["h0"], ["s0"]),
+    makePlayer(0, "player", "Player 1", ["h0"], ["s0"]),
     makePlayer(1, "ai", "AI", ["h1"], ["s1"]),
   ];
   const heroes = overrides.heroes ?? [
@@ -141,6 +141,14 @@ test("selectHero accepts owned hero of active human player", () => {
   assert.equal(next.selectedHeroId, "h0");
 });
 
+test("selectHero clears a prior settlement selection", () => {
+  const s = makeState();
+  const withSettlement: GameState = { ...s, selectedSettlementId: "s0" };
+  const next = selectHero(withSettlement, "h0");
+  assert.equal(next.selectedHeroId, "h0");
+  assert.equal(next.selectedSettlementId, null);
+});
+
 test("selectHero rejects when no hero exists", () => {
   const s = makeState();
   const next = selectHero(s, "ghost");
@@ -161,7 +169,7 @@ test("selectHero rejects during AI_TURN phase", () => {
 
 test("selectHero rejects when active player is ai faction", () => {
   const s = makeState({
-    players: [makePlayer(0, "ai", "AI1", ["h0"], ["s0"]), makePlayer(1, "player", "Human", ["h1"], ["s1"])],
+    players: [makePlayer(0, "ai", "AI1", ["h0"], ["s0"]), makePlayer(1, "player", "Player 2", ["h1"], ["s1"])],
     heroes: [makeHero("h0", 0, 0, 0), makeHero("h1", 1, 10, 10)],
     settlements: [
       { id: "s0", ownerId: 0, q: 0, r: 0, level: 1 },
@@ -215,9 +223,35 @@ test("startMove rejects when not active player", () => {
   if (!result.ok) assert.equal(result.reason, "not_owner");
 });
 
-test("startMove rejects when phase is not PLAYER_TURN", () => {
+test("startMove admits the active AI seat's own hero during AI_TURN", () => {
   const s = makeState({
+    activePlayerId: 1,
     phase: { kind: "AI_TURN", playerId: 1 },
+    selectedHeroId: "h1",
+  });
+  const result = startMove(s, "h1", { q: 3, r: 2 }, 1);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.state.heroes.h1.q, 3);
+    assert.equal(result.state.heroes.h1.movementRemaining, MOVEMENT_PER_TURN - 1);
+    assert.equal(result.state.dirty, true);
+  }
+});
+
+test("startMove rejects a hero owned by another seat during AI_TURN", () => {
+  const s = makeState({
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+    selectedHeroId: "h0",
+  });
+  const result = startMove(s, "h0", { q: 3, r: 2 }, 1);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "not_player_turn");
+});
+
+test("startMove rejects when phase is not a turn phase", () => {
+  const s = makeState({
+    phase: { kind: "ROUND_END", nextRound: 2 },
     selectedHeroId: "h1",
   });
   const result = startMove(s, "h1", { q: 3, r: 2 }, 1);
@@ -270,7 +304,7 @@ test("detectAdjacentEnemy returns enemy hero id when adjacent", () => {
 test("detectAdjacentEnemy returns null when friendly adjacent", () => {
   const s = makeState({
     players: [
-      makePlayer(0, "player", "Human", ["h0", "h0b"], ["s0"]),
+      makePlayer(0, "player", "Player 1", ["h0", "h0b"], ["s0"]),
       makePlayer(1, "ai", "AI", ["h1"], ["s1"]),
     ],
     heroes: [
@@ -304,7 +338,7 @@ test("startBattle transitions to BATTLE phase", () => {
 
 test("endBattlePhase transitions BATTLE back to PLAYER_TURN without touching heroes", () => {
   const s = makeState({
-    players: [makePlayer(0, "player", "Human", ["h0"], ["s0"]), makePlayer(1, "ai", "AI", ["h1"], ["s1"])],
+    players: [makePlayer(0, "player", "Player 1", ["h0"], ["s0"]), makePlayer(1, "ai", "AI", ["h1"], ["s1"])],
     heroes: [makeHero("h0", 0, 2, 2, 7, 10), makeHero("h1", 1, 3, 2, 7, 75)],
     phase: { kind: "BATTLE", attackerId: "h0", defenderId: "h1" },
   });
@@ -399,7 +433,7 @@ test("applyEndOfTurn resets movement to 7 for current player heroes", () => {
 test("applyEndOfTurn awards population*goldTax into each owned settlement's treasury", () => {
   const s = makeState({
     players: [
-      makePlayer(0, "player", "Human", ["h0"], ["s0", "s0b"]),
+      makePlayer(0, "player", "Player 1", ["h0"], ["s0", "s0b"]),
       makePlayer(1, "ai", "AI", ["h1"], ["s1"]),
     ],
     settlements: [

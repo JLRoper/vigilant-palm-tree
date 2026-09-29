@@ -76,7 +76,7 @@ function makeSettlement(
 }
 
 const PLAYERS: Player[] = [
-  { id: 0, faction: "player", name: "Human", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
+  { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
   { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: ["s1"] },
 ];
 
@@ -280,7 +280,7 @@ test("TransferGold rejects when the hero is not at the settlement", async () => 
 });
 
 const SOLO_PLAYER: Player[] = [
-  { id: 0, faction: "player", name: "Human", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
+  { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
 ];
 
 test("EndTurn advances to the next player without wrapping the round", async () => {
@@ -415,7 +415,7 @@ test("EndTurn writes one resource_transactions row per auto-trade transfer that 
   // it. runAutoTrade (packages/engine/src/economy/trade.ts) should move
   // exactly ceil(100/100) = 1 food from s1 -> s0, gold-for-gold.
   const players: Player[] = [
-    { id: 0, faction: "player", name: "Human", color: "#000000", heroIds: ["h0"], settlementIds: ["s0", "s1"] },
+    { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0", "s1"] },
     { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: ["s2"] },
   ];
   const row = makeRow(
@@ -537,10 +537,19 @@ test("ResolveBattle resolves combat, loots gold from a wiped defender, and persi
   assert.equal(result.ok, true);
   assert.equal(result.battle?.winner, "attacker");
   assert.equal(result.battle?.defenderOutcome, "lost_all_troops");
-  assert.equal(result.attackerHero?.gold, 40, "looted gold from the wiped defender");
-  assert.equal(result.defenderHero?.gold, 0);
+  assert.equal(result.attackerHero?.gold, 40, "looted gold from the wiped defender -- loot lands BEFORE the removal");
   assert.equal(gameRepo.rows["test-game"].heroes.h0.gold, 40);
+  assert.equal(gameRepo.rows["test-game"].heroes.h1, undefined, "the wiped defender is removed from the heroes record");
+  assert.deepEqual(
+    gameRepo.rows["test-game"].players.find((p) => p.id === 1)?.heroIds,
+    [],
+    "removed defender pruned from their owner's heroIds",
+  );
+  assert.equal(result.defenderHero, undefined, "the removed defender is omitted from the result");
+  assert.equal(result.attackerVerdict, "stood");
+  assert.equal(result.defenderVerdict, "defeated");
   assert.equal(eventRepo.events.map((e) => e.kind).join(","), "BattleResolved");
+  assert.equal((eventRepo.events[0].payload as { defenderVerdict: string }).defenderVerdict, "defeated");
   // ctx.rng is fixed at 0.5 in makeDeps() -- obstacleSeed is deterministic,
   // and it's the OLD /resolve-battle route's own Date.now()-based seed that
   // never got persisted anywhere at all (plan/2026-08-16-phase-3-parallel-dev-plan.md).
@@ -607,7 +616,59 @@ test("ResolveBattle cleans up the defender's charter when it loses all troops mi
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, true);
   assert.equal(result.battle?.defenderOutcome, "lost_all_troops");
+  assert.equal(result.defenderHero, undefined, "the wiped chartering defender is removed outright");
   assert.equal(charterRepo.calls.length, 1, "cleanupDefeatedHeroCharters removing ch0 should trigger a charterRepo sync");
+  assert.deepEqual(charterRepo.calls[0].value, []);
+  assert.equal(charterRepo.rows["test-game"].length, 0);
+});
+
+test("ResolveBattle cleans up the ATTACKER's charter too when the attacker loses all troops (removal covers both sides)", async () => {
+  // plan/2026-09-29-hero-outcomes.md extends the old defender-wipe-only
+  // cleanupDefeatedHeroCharters call: an ATTACKER wiped mid-charter is
+  // removed just like a wiped defender, and their outstanding charter must
+  // not orphan. Mirrors the defender-side coverage above with the roles
+  // flipped (the chartering h0 attacks with the weak stack and loses).
+  const h0 = makeHero("h0", 0, 2, 2, {
+    stacks: [makeSingleEntryPlatoon("weak_unit", 1)],
+    isChartering: true,
+    charterId: "ch0",
+  });
+  const h1 = makeHero("h1", 1, 3, 2, { gold: 40, stacks: [makeSingleEntryPlatoon("hero_unit", 10)] });
+  const s0 = makeSettlement("s0", 0, 2, 2);
+  const row = makeRow([h0, h1], [s0]);
+  const { deps, gameRepo, charterRepo, heroRepo, settlementRepo } = makeDeps(row, RESOLVE_BATTLE_UNIT_TYPES);
+  heroRepo.rows["test-game"] = { h0, h1 };
+  settlementRepo.rows["test-game"] = { s0 };
+  const charter: CharterState = {
+    id: "ch0",
+    heroId: "h0",
+    ownerId: 0,
+    targetQ: 3,
+    targetR: 2,
+    settlementName: "Doomed Road",
+    phase: "traveling",
+    daysRemaining: 10,
+    settlementId: "s5",
+    resourceRates: {},
+    foundedOnResource: null,
+    citySpots: [],
+  };
+  charterRepo.rows["test-game"] = [charter];
+
+  const command: Command = { kind: "ResolveBattle", gameName: "test-game", actor: 0, attackerId: "h0", defenderId: "h1" };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.battle?.attackerOutcome, "lost_all_troops");
+  assert.equal(result.attackerVerdict, "defeated");
+  assert.equal(result.attackerHero, undefined, "the wiped attacker is removed");
+  assert.deepEqual(result.defenderHero?.gold, 40, "the standing defender keeps their purse");
+  assert.equal(gameRepo.rows["test-game"].heroes.h0, undefined);
+  assert.deepEqual(
+    gameRepo.rows["test-game"].players.find((p) => p.id === 0)?.heroIds,
+    [],
+    "removed attacker pruned from their owner's heroIds",
+  );
+  assert.equal(charterRepo.calls.length, 1, "the removed chartering attacker's charter is synced away");
   assert.deepEqual(charterRepo.calls[0].value, []);
   assert.equal(charterRepo.rows["test-game"].length, 0);
 });

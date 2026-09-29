@@ -364,3 +364,175 @@ test("the six events whose effect isn't in their payload all ask for a resync", 
     assert.equal(result.state, state, `${event.type} should not touch state`);
   }
 });
+
+function garrisonTotal(stacks: { entries: { unitTypeId: string; count: number }[] }[]): number {
+  let total = 0;
+  for (const p of stacks) {
+    for (const e of p.entries) total += e.count;
+  }
+  return total;
+}
+
+test("UnitsRecruited deposits the units into the settlement garrison", () => {
+  const state = makeState({
+    heroes: [],
+    settlements: [{ ...makeSettlement("s1", 1, 8, 8) }],
+  });
+  const result = applyEngineEvent(state, {
+    type: "UnitsRecruited",
+    actor: 1,
+    settlementId: "s1",
+    unitTypeId: "pikeman",
+    count: 5,
+  });
+
+  assert.equal(result.outcome, "applied");
+  const stacks = result.state.settlements.s1.stacks ?? [];
+  assert.equal(garrisonTotal(stacks), 5);
+  assert.equal(stacks.length, 8, "the garrison is normalized to 8 platoon slots");
+  assert.equal(state.settlements.s1.stacks, undefined, "input state is not mutated");
+});
+
+test("UnitsRecruited grows an existing entry of the same type in place", () => {
+  const state = makeState({
+    heroes: [],
+    settlements: [
+      {
+        ...makeSettlement("s1", 1, 8, 8),
+        stacks: [{ entries: [{ unitTypeId: "pikeman", count: 3 }] }],
+      },
+    ],
+  });
+  const result = applyEngineEvent(state, {
+    type: "UnitsRecruited",
+    actor: 1,
+    settlementId: "s1",
+    unitTypeId: "pikeman",
+    count: 2,
+  });
+
+  assert.equal(result.outcome, "applied");
+  const stacks = result.state.settlements.s1.stacks ?? [];
+  assert.equal(stacks[0]?.entries[0]?.unitTypeId, "pikeman");
+  assert.equal(stacks[0]?.entries[0]?.count, 5);
+});
+
+test("UnitsRecruited against a missing settlement or a full garrison resyncs", () => {
+  const full = Array.from({ length: 8 }, (_, i) => ({
+    entries: [
+      { unitTypeId: `a${i}`, count: 1 },
+      { unitTypeId: `b${i}`, count: 1 },
+      { unitTypeId: `c${i}`, count: 1 },
+    ],
+  }));
+  const ghost = makeState({ heroes: [], settlements: [] });
+  const packed = makeState({
+    heroes: [],
+    settlements: [{ ...makeSettlement("s1", 1, 8, 8), stacks: full }],
+  });
+
+  assert.equal(
+    applyEngineEvent(ghost, {
+      type: "UnitsRecruited",
+      actor: 1,
+      settlementId: "s1",
+      unitTypeId: "pikeman",
+      count: 1,
+    }).outcome,
+    "resync",
+  );
+  assert.equal(
+    applyEngineEvent(packed, {
+      type: "UnitsRecruited",
+      actor: 1,
+      settlementId: "s1",
+      unitTypeId: "pikeman",
+      count: 1,
+    }).outcome,
+    "resync",
+  );
+});
+
+test("UnitsTransferred toHero moves the units from garrison to hero stacks", () => {
+  const state = makeState({
+    heroes: [makeHero("h1", 1, 8, 8)],
+    settlements: [
+      {
+        ...makeSettlement("s1", 1, 8, 8),
+        stacks: [{ entries: [{ unitTypeId: "pikeman", count: 4 }] }],
+      },
+    ],
+  });
+  const result = applyEngineEvent(state, {
+    type: "UnitsTransferred",
+    actor: 1,
+    heroId: "h1",
+    settlementId: "s1",
+    direction: "toHero",
+    unitTypeId: "pikeman",
+    count: 3,
+  });
+
+  assert.equal(result.outcome, "applied");
+  assert.equal(garrisonTotal(result.state.heroes.h1.stacks), 3);
+  assert.equal(garrisonTotal(result.state.settlements.s1.stacks ?? []), 1);
+});
+
+test("UnitsTransferred toGarrison moves the units from hero stacks to the garrison", () => {
+  const state = makeState({
+    heroes: [makeHero("h1", 1, 8, 8, { stacks: [{ entries: [{ unitTypeId: "pikeman", count: 6 }] }] })],
+    settlements: [{ ...makeSettlement("s1", 1, 8, 8) }],
+  });
+  const result = applyEngineEvent(state, {
+    type: "UnitsTransferred",
+    actor: 1,
+    heroId: "h1",
+    settlementId: "s1",
+    direction: "toGarrison",
+    unitTypeId: "pikeman",
+    count: 6,
+  });
+
+  assert.equal(result.outcome, "applied");
+  assert.equal(garrisonTotal(result.state.heroes.h1.stacks), 0);
+  assert.equal(garrisonTotal(result.state.settlements.s1.stacks ?? []), 6);
+});
+
+test("UnitsTransferred against drifted positions resyncs untouched", () => {
+  const state = makeState({
+    heroes: [makeHero("h1", 1, 5, 5)],
+    settlements: [
+      {
+        ...makeSettlement("s1", 1, 8, 8),
+        stacks: [{ entries: [{ unitTypeId: "pikeman", count: 4 }] }],
+      },
+    ],
+  });
+  const result = applyEngineEvent(state, {
+    type: "UnitsTransferred",
+    actor: 1,
+    heroId: "h1",
+    settlementId: "s1",
+    direction: "toHero",
+    unitTypeId: "pikeman",
+    count: 1,
+  });
+
+  assert.equal(result.outcome, "resync");
+  assert.equal(result.state, state);
+});
+
+test("SettlementBattleResolved still asks for a resync -- stacks/gold are not in its payload", () => {
+  const state = makeState();
+  const result = applyEngineEvent(state, {
+    type: "SettlementBattleResolved",
+    actor: 0,
+    attackerId: "h0",
+    settlementId: "s1",
+    winner: "attacker",
+    captured: true,
+  });
+
+  assert.equal(result.outcome, "resync");
+  assert.equal(result.state, state);
+});

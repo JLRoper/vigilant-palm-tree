@@ -5,6 +5,9 @@ import { setAutoTrade } from "../settlement/autoTrade";
 import { reorderStack } from "../hero/stacks";
 import { captureSettlement } from "../settlement/capture";
 import { startTownHallUpgrade } from "../settlement/upgradeTownHall";
+import { depositIntoGarrison } from "../settlement/recruitUnits";
+import { transferUnits } from "../settlement/transferUnits";
+import { settlementStacks } from "../units";
 
 // Phase 5.A (#146): the reducer the event-cursor client sync applies each
 // polled EngineEvent through. Six variants carry only the *fact* of a change
@@ -85,6 +88,57 @@ function applyCharterTravelAdvanced(
   };
 }
 
+// UnitsRecruited carries the garrison delta (unitTypeId + count) but not the
+// recruiting building or its per-unit cost, so the replay deposits the units
+// only -- the settled gold/warehouse follow at the TurnEnded resync boundary
+// (same bounded-drift policy as applyHeroMoved leaving movementRemaining).
+function applyUnitsRecruited(
+  state: GameState,
+  settlementId: string,
+  unitTypeId: string,
+  count: number,
+): ApplyEngineEventResult {
+  const settlement = state.settlements[settlementId];
+  if (!settlement) return resync(state);
+  const deposit = depositIntoGarrison(settlementStacks(settlement), unitTypeId, count);
+  if (!deposit.ok) return resync(state);
+  return {
+    state: {
+      ...state,
+      settlements: {
+        ...state.settlements,
+        [settlementId]: { ...settlement, stacks: deposit.stacks },
+      },
+      dirty: true,
+    },
+    outcome: "applied",
+  };
+}
+
+// The event's fields map 1:1 onto transferUnits()'s opts minus toSlot (not
+// carried, so a slot-targeted original replay deposits by the default rule --
+// a slot-level placement drift the TurnEnded resync reconciles). Any
+// rejection here means this client's state drifted from the server's
+// pre-command state.
+function applyUnitsTransferred(
+  state: GameState,
+  heroId: string,
+  settlementId: string,
+  direction: "toHero" | "toGarrison",
+  unitTypeId: string,
+  count: number,
+): ApplyEngineEventResult {
+  const result = transferUnits(state, {
+    heroId,
+    settlementId,
+    direction,
+    unitTypeId,
+    count,
+  });
+  if (!result.ok) return resync(state);
+  return { state: result.state, outcome: "applied" };
+}
+
 export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEngineEventResult {
   switch (event.type) {
     case "HeroMoved":
@@ -147,6 +201,19 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
       return { state: result.state, outcome: "applied" };
     }
 
+    case "UnitsRecruited":
+      return applyUnitsRecruited(state, event.settlementId, event.unitTypeId, event.count);
+
+    case "UnitsTransferred":
+      return applyUnitsTransferred(
+        state,
+        event.heroId,
+        event.settlementId,
+        event.direction,
+        event.unitTypeId,
+        event.count,
+      );
+
     // Listed per variant rather than swept into `default:` so a new
     // EngineEvent variant trips the exhaustiveness check below.
     case "TurnEnded":
@@ -162,8 +229,9 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
     case "TradeRouteCreated":
     case "TradeRouteUpdated":
     case "TradeRouteRemoved":
-    case "UnitsRecruited":
-    case "UnitsTransferred":
+    // SettlementBattleResolved carries only winner/captured -- the resulting
+    // stacks, gold, and attacker relocation/removal are battle-internal and
+    // not derivable from the payload, so the caller refetches.
     case "SettlementBattleResolved":
       return resync(state);
 

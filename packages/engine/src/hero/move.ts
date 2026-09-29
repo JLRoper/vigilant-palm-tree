@@ -13,11 +13,14 @@ export function startMove(
   // reflects the actual route.
   trailExtension?: { q: number; r: number }[],
 ): StartMoveResult {
-  if (state.phase.kind !== "PLAYER_TURN") {
-    return { state, ok: false, reason: "not_player_turn" };
-  }
   const hero = state.heroes[heroId];
   if (!hero) return { state, ok: false, reason: "no_hero" };
+  const phaseAdmitsMove =
+    state.phase.kind === "PLAYER_TURN" ||
+    (state.phase.kind === "AI_TURN" && hero.ownerId === state.phase.playerId);
+  if (!phaseAdmitsMove) {
+    return { state, ok: false, reason: "not_player_turn" };
+  }
   if (hero.isChartering) {
     return { state, ok: false, reason: "is_chartering" };
   }

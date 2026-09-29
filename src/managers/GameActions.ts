@@ -2,15 +2,33 @@ import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { showBattleModal } from "@screens/combat/battleModal";
 import { showBattleResultCard } from "@screens/combat/battleResultCard";
+import { shouldShowResultCard } from "@screens/combat/resultCardPolicy";
+import { showToast } from "@screens/shared/toast";
 import { openManualBattleArena, type ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
 import type { BattleActionPhase } from "@screens/combat/arena/state";
 import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, settlementStacks, spellLoadoutForHero, type BattleResult } from "@heroes/engine";
-import type { GameState, HeroState } from "@heroes/contracts";
+import type { GameState, HeroBattleVerdict, HeroState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { catalogFailed, loadUnitCatalog } from "../data/unitCatalog";
+import type { UnitType } from "../state/units";
 import { submitBattleResult, submitSettlementBattleResult, type SubmitBattleResultResult, type SubmitSettlementBattleResultResult } from "../io/commands";
+import { consumeResolveBattleVerdicts, mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../game/turnHooks";
+import { battleToastMessage, settlementNameAt } from "@screens/combat/battleResultText";
 import { api } from "../io/api";
+
+// Settlement name for a relocated hero's verdict line ("retreated to <name>").
+// Only retreat/surrender relocate (hero present post-merge); defeat leaves no
+// hero to look up and "stood" renders no line.
+function verdictSettlementName(
+  state: GameState,
+  heroId: string,
+  verdict: HeroBattleVerdict | undefined,
+): string | undefined {
+  if (!verdict || verdict === "stood" || verdict === "defeated") return undefined;
+  const hero = state.heroes[heroId];
+  return hero ? settlementNameAt(state.settlements, hero.q, hero.r) : undefined;
+}
 
 /**
  * Handles game-flow actions: end turn, manual save, battle resolution.
@@ -40,7 +58,19 @@ export class GameActions {
       return true;
     }
     if (gs.phase.kind === "SETTLEMENT_BATTLE") {
-      void this.startSettlementBattleFlow();
+      // The arena is a human-controlled surface, so it only fits a battle
+      // the local seat fights. An AI attacker's settlement battle exists
+      // only on the primary client (the SETTLEMENT_BATTLE phase is
+      // client-local and only the primary browser runs the AI tick); it
+      // resolves silently there and surfaces a card/toast.
+      const attacker = gs.heroes[gs.phase.attackerId];
+      const gameName = this.session.getActiveGameName();
+      const localSeat = getInMemoryLocalPlayerId(gameName ?? "") ?? 0;
+      if (attacker && attacker.ownerId === localSeat) {
+        void this.startSettlementBattleFlow();
+      } else {
+        void this.autoResolveSettlementBattle(gs.phase.attackerId, gs.phase.settlementId);
+      }
       return true;
     }
     return false;
@@ -98,6 +128,10 @@ export class GameActions {
             attackerLabel: `Hero ${attackerName}`,
             defenderLabel: `Hero ${defenderName}`,
             onCarryOn: fought.closeArena,
+            attackerVerdict: fought.attackerVerdict,
+            defenderVerdict: fought.defenderVerdict,
+            attackerSettlementName: fought.attackerSettlementName,
+            defenderSettlementName: fought.defenderSettlementName,
           });
           return;
         }
@@ -122,12 +156,48 @@ export class GameActions {
       this.state.replaceState(tc.getState());
       this.captureAfterBattleIfNeeded(attackerId);
       if (battle) {
-        showBattleResultCard({
-          result: battle,
-          attackerLabel: `Hero ${attackerName}`,
-          defenderLabel: `Hero ${defenderName}`,
-          onCarryOn: () => {},
-        });
+        const verdicts = consumeResolveBattleVerdicts();
+        const after = this.state.getState();
+        // D4 display policy (plan/2026-09-29-ai-enemies.md): a result card
+        // only when the local human's hero was attacker or defender;
+        // AI-vs-AI (and remote-human-vs-remote-human) auto-resolves are
+        // silent -- one info toast, max. Stacked un-clicked cards were the
+        // symptom; suppression is the policy-level fix.
+        if (shouldShowResultCard(localSeat, attacker.ownerId, defender.ownerId)) {
+          showBattleResultCard({
+            result: battle,
+            attackerLabel: `Hero ${attackerName}`,
+            defenderLabel: `Hero ${defenderName}`,
+            onCarryOn: () => {},
+            attackerVerdict: verdicts.attackerVerdict,
+            defenderVerdict: verdicts.defenderVerdict,
+            attackerSettlementName: verdictSettlementName(after, attackerId, verdicts.attackerVerdict),
+            defenderSettlementName: verdictSettlementName(after, defenderId, verdicts.defenderVerdict),
+          });
+        } else {
+          const attackerPlayer = gs.players.find((p) => p.id === attacker.ownerId);
+          const defenderPlayer = gs.players.find((p) => p.id === defender.ownerId);
+          const attackerSide = `${attackerPlayer?.name ?? "AI"}'s ${attacker.name}`;
+          const defenderSide = `${defenderPlayer?.name ?? "AI"}'s ${defender.name}`;
+          showToast(
+            battleToastMessage({
+              attackerLabel: attackerSide,
+              defenderLabel: defenderSide,
+              winner: battle.winner,
+              attacker: {
+                verdict: verdicts.attackerVerdict,
+                ownerName: attackerPlayer?.name,
+                settlementName: verdictSettlementName(after, attackerId, verdicts.attackerVerdict),
+              },
+              defender: {
+                verdict: verdicts.defenderVerdict,
+                ownerName: defenderPlayer?.name,
+                settlementName: verdictSettlementName(after, defenderId, verdicts.defenderVerdict),
+              },
+            }),
+            "info",
+          );
+        }
       }
     } finally {
       this.battleInFlight = false;
@@ -156,7 +226,16 @@ export class GameActions {
     humanHero: HeroState,
     enemyHero: HeroState,
   ): Promise<
-    | { kind: "applied"; state: GameState; result: BattleResult; closeArena: () => void }
+    | {
+        kind: "applied";
+        state: GameState;
+        result: BattleResult;
+        closeArena: () => void;
+        attackerVerdict?: HeroBattleVerdict;
+        defenderVerdict?: HeroBattleVerdict;
+        attackerSettlementName?: string;
+        defenderSettlementName?: string;
+      }
     | { kind: "done" }
     | { kind: "unavailable" }
   > {
@@ -229,22 +308,91 @@ export class GameActions {
     if (!server) return { kind: "done" };
 
     // Mirror resolveCurrentBattle()'s post-server application: authoritative
-    // heroes in, charter cleanup for a wiped defender, then end the phase.
-    // (The BATTLE phase itself never left client state — the arena played
-    // out over it — so endBattlePhase() is what actually closes it.)
-    let next = { ...current, heroes: { ...current.heroes, [attackerId]: server.attackerHero, [defenderId]: server.defenderHero } };
+    // heroes in (absent = defeated → removed locally, heroIds pruned,
+    // selection cleared), charter cleanup for a wiped defender, then end the
+    // phase. (The BATTLE phase itself never left client state — the arena
+    // played out over it — so endBattlePhase() is what actually closes it.)
+    let next = mergeBattleOutcomeHeroes(current, attackerId, defenderId, server);
     const defenderAfter = next.heroes[defenderId];
     if (defenderAfter && !platoonsHaveTroops(defenderAfter.stacks) && defenderAfter.isChartering) {
       next = cleanupDefeatedHeroCharters(next, defenderId);
     }
     next = endBattlePhase(next);
+    const attackerAfter = next.heroes[attackerId];
     bus.emit({
       type: "battle:resolved",
       attackerId,
       defenderId,
-      attackerSurvived: platoonsHaveTroops(server.attackerHero.stacks),
+      attackerSurvived: attackerAfter ? platoonsHaveTroops(attackerAfter.stacks) : false,
     });
-    return { kind: "applied", state: next, result: outcome.result, closeArena };
+    return {
+      kind: "applied",
+      state: next,
+      result: outcome.result,
+      closeArena,
+      attackerVerdict: server.attackerVerdict,
+      defenderVerdict: server.defenderVerdict,
+      attackerSettlementName: verdictSettlementName(next, attackerId, server.attackerVerdict),
+      defenderSettlementName: verdictSettlementName(next, defenderId, server.defenderVerdict),
+    };
+  }
+
+  /**
+   * Silent auto-resolve of a SETTLEMENT_BATTLE whose attacker is not the
+   * local human seat (an AI attacker on the primary client). The controller
+   * runs the engine auto-resolver, applies and POSTs the result; the D4
+   * display policy then decides card vs toast exactly like the hero-battle
+   * quick-resolve path -- a card when the local human owned the attacker or
+   * the defending settlement, a one-line info toast otherwise.
+   */
+  private async autoResolveSettlementBattle(attackerId: string, settlementId: string): Promise<void> {
+    this.battleInFlight = true;
+    try {
+      const gs = this.state.getState();
+      const attackerBefore = gs.heroes[attackerId];
+      const settlementBefore = gs.settlements[settlementId];
+      if (!attackerBefore || !settlementBefore) return;
+      const gameName = this.session.getActiveGameName();
+      const localSeat = getInMemoryLocalPlayerId(gameName ?? "") ?? 0;
+      const attackerPlayer = gs.players.find((p) => p.id === attackerBefore.ownerId);
+      const defenderLabel = `${settlementBefore.name} Garrison`;
+      const catalog = await loadUnitCatalog();
+      const unitTypes: Record<string, UnitType> | null =
+        catalogFailed() || catalog.length === 0 ? null : Object.fromEntries(catalog.map((u) => [u.id, u]));
+      const tc = this.state.getTurnController();
+      const outcome = await tc.resolveSettlementBattle(unitTypes);
+      this.state.replaceState(tc.getState());
+      if (!outcome) return;
+      const after = this.state.getState();
+      // A neutral settlement has no owner seat, so it can never involve the
+      // local human: -1 matches no seat in the display policy.
+      if (shouldShowResultCard(localSeat, attackerBefore.ownerId, settlementBefore.ownerId ?? -1)) {
+        showBattleResultCard({
+          result: outcome.battle,
+          attackerLabel: `Hero ${attackerBefore.name}`,
+          defenderLabel,
+          onCarryOn: () => {},
+          attackerVerdict: outcome.attackerVerdict,
+          attackerSettlementName: verdictSettlementName(after, attackerId, outcome.attackerVerdict),
+        });
+      } else {
+        showToast(
+          battleToastMessage({
+            attackerLabel: `${attackerPlayer?.name ?? "AI"}'s ${attackerBefore.name}`,
+            defenderLabel,
+            winner: outcome.battle.winner,
+            attacker: {
+              verdict: outcome.attackerVerdict,
+              ownerName: attackerPlayer?.name,
+              settlementName: verdictSettlementName(after, attackerId, outcome.attackerVerdict),
+            },
+          }),
+          "info",
+        );
+      }
+    } finally {
+      this.battleInFlight = false;
+    }
   }
 
   /**
@@ -307,6 +455,7 @@ export class GameActions {
             onComplete: resolve,
             telemetry,
             defenderLabel,
+            title: `Assault on ${settlement.name}`,
           },
         );
         closeArena = handle.close;
@@ -340,23 +489,33 @@ export class GameActions {
       });
       if (!server) return;
 
-      const next = endBattlePhase({
-        ...current,
-        heroes: { ...current.heroes, [attackerId]: server.attackerHero },
-        settlements: { ...current.settlements, [settlementId]: server.settlement },
+      // Mirror the hero-battle outcome rules (2026-09-29 hero outcomes): a
+      // defeated attacker is absent from the result — drop their outstanding
+      // charter while the row is still readable, then remove the hero
+      // locally (heroIds prune + selection clear via the shared merge);
+      // retreat/surrender come back already relocated server-side and merge
+      // as a plain row replace.
+      let next = current;
+      if (!server.attackerHero) next = cleanupDefeatedHeroCharters(next, attackerId);
+      next = mergeBattleOutcomeHero(next, attackerId, server.attackerHero);
+      next = endBattlePhase({
+        ...next,
+        settlements: { ...next.settlements, [settlementId]: server.settlement },
       });
       this.state.replaceState(next);
       bus.emit({
         type: "battle:resolved",
         attackerId,
         defenderId: settlementId,
-        attackerSurvived: platoonsHaveTroops(server.attackerHero.stacks),
+        attackerSurvived: platoonsHaveTroops(server.attackerHero?.stacks ?? []),
       });
       showBattleResultCard({
         result: outcome.result,
         attackerLabel: `Hero ${attacker.name}`,
         defenderLabel,
         onCarryOn: closeArena,
+        attackerVerdict: server.attackerVerdict,
+        attackerSettlementName: verdictSettlementName(next, attackerId, server.attackerVerdict),
       });
     } finally {
       this.battleInFlight = false;

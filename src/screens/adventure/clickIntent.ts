@@ -3,7 +3,40 @@ import type { GameMap } from "../../map/gameMap";
 import type { Hero } from "../../entities/hero";
 import type { GameState, HeroId } from "../../state/gameState";
 import { computePathCost, findPath, NEIGHBOR_DIRS } from "../../map/pathfinding";
-import { computeReachableSplit } from "../../render/overlays/pathOverlay";
+import { computeReachableSplitDetailed } from "../../render/overlays/pathOverlay";
+import type { ToastKind } from "../shared/toast";
+
+export interface ClickRejectionToast {
+  message: string;
+  kind: ToastKind;
+}
+
+// F9 (playtest fixes 2026-09-29): maps a `kind: "none"` rejection reason from
+// resolveAdventureClick to user-facing toast text. "movedDuringDrag" and
+// "no hover" deliberately map to null -- a drag or an off-map click is not an
+// attempted action, and toasting those would fire on every camera pan.
+export function clickRejectionToast(reason: string, movementRemaining?: number): ClickRejectionToast | null {
+  switch (reason) {
+    case "not_player_turn":
+      return { message: "It's not your turn", kind: "info" };
+    case "no selection":
+      return { message: "Select a hero first", kind: "info" };
+    case "no hero":
+      return { message: "The selected hero no longer exists", kind: "error" };
+    case "empty path":
+    case "no attack path":
+      return { message: "No path there", kind: "info" };
+    case "impassable first step":
+      if (movementRemaining !== undefined && movementRemaining <= 0) {
+        return { message: "Out of movement — the rest continues next turn", kind: "info" };
+      }
+      return { message: "No path there", kind: "info" };
+    case "charter_invalid":
+      return { message: "Pick a highlighted hex for the new settlement", kind: "info" };
+    default:
+      return null;
+  }
+}
 
 export interface MoveIntentBase {
   heroId: HeroId;
@@ -16,7 +49,7 @@ export interface MoveIntentBase {
 }
 
 export type ClickIntent =
-  | { kind: "none"; reason: string; debugPath?: Axial[] }
+  | { kind: "none"; reason: string; debugPath?: Axial[]; movementRemaining?: number }
   | { kind: "select-hero"; heroId: HeroId }
   | { kind: "select-settlement"; settlementId: string }
   | { kind: "open-charter"; targetQ: number; targetR: number }
@@ -97,12 +130,10 @@ export function resolveAdventureClick(input: ClickIntentInput): ClickIntent {
     }
 
     if (bestPath && bestPath.length > 0) {
-      const reachableIdx = computeReachableSplit(bestPath, map, startTile.movementRemaining);
+      const split = computeReachableSplitDetailed(bestPath, map, startTile.movementRemaining);
+      const reachableIdx = split.index;
       const clamped = reachableIdx < bestPath.length;
-      const actualCost = Math.min(
-        computePathCost(map, [{ q: startTile.q, r: startTile.r }, ...bestPath.slice(0, reachableIdx)]),
-        startTile.movementRemaining,
-      );
+      const actualCost = Math.min(split.costToSplit, startTile.movementRemaining);
       if (reachableIdx > 0) {
         const dest = bestPath[reachableIdx - 1];
         return {
@@ -134,14 +165,17 @@ export function resolveAdventureClick(input: ClickIntentInput): ClickIntent {
   if (newPath.length === 0) {
     return { kind: "none", reason: "empty path", debugPath: newPath };
   }
-  const reachableIdx = computeReachableSplit(newPath, map, startTile.movementRemaining);
+  const split = computeReachableSplitDetailed(newPath, map, startTile.movementRemaining);
+  const reachableIdx = split.index;
   const clamped = reachableIdx < newPath.length;
-  const actualCost = Math.min(
-    computePathCost(map, [{ q: startTile.q, r: startTile.r }, ...newPath.slice(0, reachableIdx)]),
-    startTile.movementRemaining,
-  );
+  const actualCost = Math.min(split.costToSplit, startTile.movementRemaining);
   if (reachableIdx === 0) {
-    return { kind: "none", reason: "impassable first step", debugPath: newPath };
+    return {
+      kind: "none",
+      reason: "impassable first step",
+      debugPath: newPath,
+      movementRemaining: startTile.movementRemaining,
+    };
   }
   const dest = newPath[reachableIdx - 1];
   return {

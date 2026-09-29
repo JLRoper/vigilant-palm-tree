@@ -96,18 +96,20 @@ export class GameSessionManager {
     }
   }
 
-  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number }): Promise<void> {
+  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number; enemyCount?: number }): Promise<void> {
     const effectiveCastleSeed =
       typeof opts.castleSeed === "number" && Number.isFinite(opts.castleSeed)
         ? opts.castleSeed
         : defaultCastleSeedFromMapSeed(opts.seed);
     const playerCount = opts.playerCount ?? 3;
     const humanSeatCount = Math.max(1, Math.min(playerCount, opts.humanSeatCount ?? 1));
-    const effectiveCastleCount = opts.castleCount ?? (2 * playerCount);
+    const enemyCount = Math.max(0, Math.min(3, Math.floor(opts.enemyCount ?? 0)));
+    const totalPlayers = humanSeatCount + enemyCount;
+    const effectiveCastleCount = opts.castleCount ?? (2 * totalPlayers);
     const castles = generateCastles(this.getGameMap(), {
       castleSeed: effectiveCastleSeed,
-      playerCount,
-      castleCount: Math.max(effectiveCastleCount, playerCount),
+      playerCount: totalPlayers,
+      castleCount: Math.max(effectiveCastleCount, totalPlayers),
     });
     const localCastle = castles.find((c) => c.ownerId === 0);
     const aiCastles = castles.filter((c) => c.ownerId !== null && c.ownerId !== 0);
@@ -116,7 +118,7 @@ export class GameSessionManager {
     const enemyPositions = aiCastles.length
       ? aiCastles.map((c) => ({ q: c.tile.q, r: c.tile.r }))
       : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
-    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount);
+    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount, enemyCount);
     // Issue #179: same self-claim as createFreshStarter() below -- the "New
     // Game" toolbar flow loads straight into the game rather than routing
     // through the multiplayer lobby UI. Claiming is optional (sign-in is
@@ -124,8 +126,9 @@ export class GameSessionManager {
     // the extra actor-vs-seat protection commandsRouter offers claimed
     // seats; an anonymous creator still claims fine, just without a bound
     // email, same as multiplayer's own anonymous-claim path.
-    const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? "Player";
-    await this.session.claimLobbySeat(created.name, 0, handle);
+    const seat = 0;
+    const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? `Player ${seat + 1}`;
+    await this.session.claimLobbySeat(created.name, seat, handle);
     const gameTiles = await this.session.getTiles(created.name);
     await this.loadGame(created, gameTiles);
     void this.session.logEvent(created.name, "new_game", {
@@ -163,8 +166,9 @@ export class GameSessionManager {
       // caller -- but doing it here binds a signed-in player's identity to
       // the seat, which is what lets commandsRouter's actor-vs-seat check
       // offer them extra protection later.
-      const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? "Player";
-      await this.session.claimLobbySeat(created.name, 0, handle);
+      const seat = 0;
+      const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? `Player ${seat + 1}`;
+      await this.session.claimLobbySeat(created.name, seat, handle);
       const tiles = await this.session.getTiles(created.name);
       await this.loadGame(created, tiles);
       void this.session.logEvent(created.name, "session_start", {

@@ -135,9 +135,11 @@ Source: [`src/state/gameState.ts`](../src/state/gameState.ts) (`startTownHallUpg
 
 ## Capture
 
-A hero walking onto an enemy settlement tile captures it — **only if the garrison is empty**. The settlement stays at its current level and continues producing.
+A hero walking onto an enemy settlement tile captures it — **only if the garrison is empty**. The settlement stays at its current level and continues producing. A **neutral** (ownerless) settlement behaves like an enemy-owned one for both the garrison gate and the capture reward.
 
-- **Garrison gate:** if the settlement's garrison has troops, the tile walk enters the `SETTLEMENT_BATTLE` phase instead — the garrison defends in the manual arena (attacker vs *"<name> Garrison"*), resolved via `SubmitSettlementBattleResult` (`startSettlementBattle` / `applySettlementBattleResult` in `@heroes/engine`). The direct `CaptureSettlement` command rejects a non-empty garrison (`garrison_not_defeated`).
+- **Garrison gate:** if the settlement's garrison has troops — enemy-owned **or neutral** (the `unowned_settlement` gate was removed in the 2026-09-29 capture/garrison wave) — the tile walk enters the `SETTLEMENT_BATTLE` phase instead: a local-human attacker fights the garrison in the manual arena (attacker vs *"<name> Garrison"*, arena titled "Assault on \<name\>"), a non-local attacker auto-resolves silently (result card/toast) — either way resolved via `SubmitSettlementBattleResult` (`startSettlementBattle` / `applySettlementBattleResult` in `@heroes/engine`). The direct `CaptureSettlement` command rejects a non-empty garrison (`garrison_not_defeated`).
+- **Serialized capture (2026-09-29):** the optimistic local capture applies immediately, but its `CaptureSettlement` POST waits for the triggering move's persist (`TurnController.lastMovePersist`) — the server's hero-standing-on-the-settlement precondition only holds once the move has landed (this killed a live-verified ~50% `hero_not_at_settlement` 409 race, human and AI). A server rejection rolls the capture back (`rollbackCaptureSettlement` in `@heroes/engine`: owner/roster restore, clamped gold subtraction); `already_owned` — the server captured inline with a post-battle persist — is treated as benign, since the local capture already matches.
+- **Settlement-battle loser outcomes (2026-09-29):** the attacking hero follows the hero-battle verdict rules — defeat removes them from the map (hero row + `heroIds` + charter folded), retreat empties the stacks and relocates to the nearest owned settlement (stay-put when none is owned), surrender relocates keeping troops. See [army.md](./army.md) → Combat resolution.
 - **Post-battle capture:** when the victorious attacker stands on an enemy settlement whose garrison is now empty, capture fires automatically (`TurnController.captureAfterBattleIfNeeded`, wired on both the hero-battle and settlement-battle paths).
 - Captured settlements produce for the new owner starting the next turn.
 - Capturing is the only way settlements change hands in v1.
@@ -153,7 +155,7 @@ Every settlement can hold troops: `SettlementState.stacks?: Platoon[]` — the s
 - **In:** `RecruitUnits` lands newly recruited units here (garrison-first — see [army.md](./army.md)); `TransferUnits` with `direction: "toGarrison"` pulls troops off a hero standing on the tile.
 - **Out:** `TransferUnits` with `"toHero"` loads the hero's platoons — the hero **must stand on the settlement**.
 - **Upkeep:** weekly (inside `applyWeeklyUpkeep`) via `applyGarrisonUpkeep` — 1 gold/troop from the settlement treasury + 1 food/troop from its warehouse; shortfalls trim stacks from the end.
-- **Defense:** a non-empty garrison must be defeated in the arena before capture succeeds (see Capture above).
+- **Defense:** a non-empty garrison must be defeated before capture succeeds — in the manual arena for a local-human attacker, auto-resolved otherwise (see Capture above); since the 2026-09-29 capture/garrison wave the losing attacker suffers the hero-battle outcomes (defeat removes the hero, retreat/surrender relocate).
 
 Buildings gate what a settlement can recruit; the newest is **stables** (placement 350g + 10 wood + 5 stone; recruits cavalry for 400g + 2 iron; `defenseBonus: 1`). The full building→unit table lives in [army.md](./army.md).
 

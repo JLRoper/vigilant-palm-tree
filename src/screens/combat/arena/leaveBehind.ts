@@ -99,6 +99,19 @@ function openLeaveBehindDialog(opts: {
   });
   menu.appendContent(list);
 
+  // Created BEFORE the platoon rows below: each row's update() calls
+  // refresh(), which writes confirmBtn.disabled — creating the buttons
+  // after the rows ran left refresh() reading a still-TDZ const and
+  // crashed dialog construction right after the first row (Cancel and
+  // Confirm never entered the DOM).
+  const confirmBtn = document.createElement("button");
+  confirmBtn.textContent = "Confirm Surrender";
+  styleButton(confirmBtn, false);
+  confirmBtn.style.background = "rgba(120,40,40,0.7)";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.textContent = "Cancel";
+  styleButton(cancelBtn);
+
   for (const c of combatants) {
     if (c.retreated) continue;
     if (c.entries.every((e) => e.count <= 0)) continue;
@@ -165,14 +178,6 @@ function openLeaveBehindDialog(opts: {
       update();
     }
   }
-
-  const confirmBtn = document.createElement("button");
-  confirmBtn.textContent = "Confirm Surrender";
-  styleButton(confirmBtn, false);
-  confirmBtn.style.background = "rgba(120,40,40,0.7)";
-  const cancelBtn = document.createElement("button");
-  cancelBtn.textContent = "Cancel";
-  styleButton(cancelBtn);
 
   const row = document.createElement("div");
   Object.assign(row.style, {

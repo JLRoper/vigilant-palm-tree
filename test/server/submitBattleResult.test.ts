@@ -1,9 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Command, HeroId, HeroState, Player, Platoon, SettlementId, SettlementState } from "@heroes/contracts";
+import { MOVEMENT_PER_TURN } from "@heroes/contracts";
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
 import { normalizePlatoons } from "@heroes/engine";
 import { handleCommand } from "../../server/app/commandHandler";
+import { createHeroRepo } from "../../server/persistence/repositories/heroRepo";
+import type { Queryable } from "../../server/persistence/repositories/gameRepo";
 import {
   createMockCharterRepo,
   createMockEventRepo,
@@ -20,7 +23,12 @@ import { makeCharter } from "../charter/_helpers";
 // assertions below pin the parity that factoring was supposed to guarantee:
 // loot-on-wipe identical to ResolveBattle's shape, survivor stacks restored
 // verbatim, retreat/surrender cancelling the attacker's move, and the
-// BattleResolved event derived from the submitted outcome. handleCommand is
+// BattleResolved event derived from the submitted outcome. Since
+// plan/2026-09-29-hero-outcomes.md (W2a) the post-battle rules extend with
+// per-hero verdicts: a defeated side's hero is deleted outright (heroes
+// record + owner heroIds + platoon rows), retreat relocates the conceder to
+// the nearest OWNED settlement with emptied stacks (or keeps them put, D1),
+// surrender relocates keeping stacks and the gold debit. handleCommand is
 // called directly against test/helpers/mockRepos.ts (same harness as
 // commandHandler.test.ts); the wire-shape half of the validation lives in
 // parseCommand, which this harness never runs -- see commandsRoute.test.ts's
@@ -79,7 +87,7 @@ function makeSettlement(
 }
 
 const PLAYERS: Player[] = [
-  { id: 0, faction: "player", name: "Human", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
+  { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
   { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: ["s1"] },
 ];
 
@@ -167,19 +175,24 @@ function submitCommand(overrides: Partial<Extract<Command, { kind: "SubmitBattle
   };
 }
 
-test("attackerWon loots the wiped defender's purse and applies survivor stacks, exactly like the auto-resolver's win path", async () => {
+test("attackerWon loots the wiped defender's purse, then REMOVES the defender (hero row, heroIds, platoons)", async () => {
   const row = makeBattleRow();
-  const { gameRepo, eventRepo, deps } = makeDeps(row);
+  const { gameRepo, eventRepo, heroRepo, deps } = makeDeps(row);
   const result = await handleCommand(submitCommand(), deps);
   assert.equal(result.ok, true);
 
-  const saved = gameRepo.rows["test-game"].heroes;
-  // Attacker: submitted survivors + the defender's looted gold.
-  assert.equal(saved.h0.gold, 100 + 250);
-  assert.deepEqual(saved.h0.stacks, normalizePlatoons([stack("swordsman", 3)]));
-  // Defender: wiped to no troops and no gold (loot zeroes the purse).
-  assert.equal(saved.h1.gold, 0);
-  assert.deepEqual(saved.h1.stacks, normalizePlatoons([]));
+  const saved = gameRepo.rows["test-game"];
+  // Attacker: submitted survivors + the defender's looted gold (loot lands
+  // BEFORE the removal -- the winner keeps the purse).
+  assert.equal(saved.heroes.h0.gold, 100 + 250);
+  assert.deepEqual(saved.heroes.h0.stacks, normalizePlatoons([stack("swordsman", 3)]));
+  assert.equal(saved.heroes.h1, undefined, "the wiped defender's hero row is deleted");
+  assert.deepEqual(
+    saved.players.find((p) => p.id === 1)?.heroIds,
+    [],
+    "removed hero pruned from their owner's heroIds",
+  );
+  assert.equal("h1" in heroRepo.calls[0].value, false, "the granular heroes upsert is a full sync -- h1 is gone there too");
 
   const event = eventRepo.events[0];
   assert.equal(event.kind, "BattleResolved");
@@ -191,17 +204,21 @@ test("attackerWon loots the wiped defender's purse and applies survivor stacks, 
     winner: "attacker",
     attackerOutcome: "won",
     defenderOutcome: "lost_all_troops",
+    attackerVerdict: "stood",
+    defenderVerdict: "defeated",
     rewardGold: 250,
     rounds: 7,
     obstacleSeed: 42,
   });
   // The command's rounds/obstacleSeed ride the event verbatim -- the seed
   // must be the arena's real one for the future re-simulation consumer.
-  assert.deepEqual(result.attackerHero, saved.h0);
-  assert.deepEqual(result.defenderHero, saved.h1);
+  assert.deepEqual(result.attackerHero, saved.heroes.h0);
+  assert.equal(result.defenderHero, undefined, "the removed defender is omitted from the result");
+  assert.equal(result.attackerVerdict, "stood");
+  assert.equal(result.defenderVerdict, "defeated");
 });
 
-test("retreat restores submitted stacks to BOTH sides and cancels the attacker's move", async () => {
+test("retreat empties the conceding hero's stacks and relocates them to the nearest OWNED settlement", async () => {
   const row = makeBattleRow({ stacks: [stack("swordsman", 4)] }, { stacks: [stack("swordsman", 2)] });
   const { gameRepo, eventRepo, deps } = makeDeps(row);
   const result = await handleCommand(
@@ -215,15 +232,20 @@ test("retreat restores submitted stacks to BOTH sides and cancels the attacker's
   assert.equal(result.ok, true);
 
   const saved = gameRepo.rows["test-game"].heroes;
-  // Attacker walked back to (2,2) with pre-move movement restored, keeping
-  // the submitted (post-15%-loss) survivors.
-  assert.equal(saved.h0.q, 2);
-  assert.equal(saved.h0.r, 2);
-  assert.equal(saved.h0.movementRemaining, 7);
+  // s0 (0,0) is seat 0's only settlement: h0 respawns there regardless of
+  // the submitted survivors -- retreat loses ALL troops server-side (the
+  // arena's pre-submitted 15%-loss stacks are subsumed), and the
+  // cancelMove-restored position is overwritten by the relocation.
+  assert.equal(saved.h0.q, 0);
+  assert.equal(saved.h0.r, 0);
+  assert.equal(saved.h0.movementRemaining, MOVEMENT_PER_TURN);
   assert.equal(saved.h0.previousQ, null);
+  assert.deepEqual(saved.h0.trail, [{ q: 0, r: 0 }]);
   assert.equal(saved.h0.gold, 100, "no loot on a retreat");
-  assert.deepEqual(saved.h0.stacks, normalizePlatoons([stack("swordsman", 3)]));
-  // Defender keeps their survivors and purse untouched.
+  assert.deepEqual(saved.h0.stacks, normalizePlatoons([]));
+  assert.equal(saved.h0.troops, 0, "the denormalized troops counter is zeroed along with the stacks");
+  // The defender stood: survivors and purse untouched at the collision hex.
+  assert.equal(saved.h1.q, 3);
   assert.deepEqual(saved.h1.stacks, normalizePlatoons([stack("swordsman", 2)]));
   assert.equal(saved.h1.gold, 250);
 
@@ -231,10 +253,43 @@ test("retreat restores submitted stacks to BOTH sides and cancels the attacker's
   assert.equal(event.payload.winner, "defender");
   assert.equal(event.payload.attackerOutcome, "retreated_hero");
   assert.equal(event.payload.defenderOutcome, "won");
+  assert.equal(event.payload.attackerVerdict, "retreated");
+  assert.equal(event.payload.defenderVerdict, "stood");
   assert.equal(event.payload.rewardGold, 0);
+  assert.deepEqual(result.attackerHero, saved.h0);
+  assert.deepEqual(result.defenderHero, saved.h1);
+  assert.equal(result.attackerVerdict, "retreated");
 });
 
-test("surrender deducts the paid gold from the CONCEDING hero and keeps both armies", async () => {
+test("retreat with no owned settlement keeps the hero at the cancelled position with empty stacks (D1)", async () => {
+  const row = makeBattleRow({ stacks: [stack("swordsman", 4)] }, { stacks: [stack("swordsman", 2)] });
+  // Seat 0 holds nothing: s0 belongs to the AI, so relocation has nothing to
+  // respawn to -- the hero stays where cancelMove put it, troops still lost.
+  row.settlements = { s0: makeSettlement("s0", 1, 0, 0) };
+  row.players = [
+    { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: [] },
+    { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: ["s0"] },
+  ];
+  const { gameRepo, deps } = makeDeps(row);
+  const result = await handleCommand(
+    submitCommand({
+      outcome: "retreat",
+      attackerStacks: [stack("swordsman", 3)],
+      defenderStacks: [stack("swordsman", 2)],
+    }),
+    deps,
+  );
+  assert.equal(result.ok, true);
+
+  const saved = gameRepo.rows["test-game"].heroes;
+  assert.equal(saved.h0.q, 2, "stays at the cancelMove-restored position");
+  assert.equal(saved.h0.r, 2);
+  assert.equal(saved.h0.previousQ, null, "the cancel itself still applies");
+  assert.deepEqual(saved.h0.stacks, normalizePlatoons([]), "troops still lost without a relocation target");
+  assert.equal(saved.h0.troops, 0, "troops counter zeroed even on the D1 stay-put edge");
+});
+
+test("surrender deducts the paid gold from the CONCEDING hero and relocates them, keeping their army", async () => {
   const row = makeBattleRow({ stacks: [stack("swordsman", 5)] }, { stacks: [stack("swordsman", 6)] });
   const { gameRepo, eventRepo, deps } = makeDeps(row);
   const result = await handleCommand(
@@ -250,9 +305,11 @@ test("surrender deducts the paid gold from the CONCEDING hero and keeps both arm
 
   const saved = gameRepo.rows["test-game"].heroes;
   // The actor (seat 0) owns h0, so h0 is the conceding hero: purse debited,
-  // move cancelled, army kept whole (surrender skips the retreat loss).
+  // relocated to s0 (0,0) with the submitted army kept whole (surrender skips
+  // the retreat loss, unlike a retreat's stack wipe).
   assert.equal(saved.h0.gold, 100 - 40);
-  assert.equal(saved.h0.q, 2, "surrender cancels the attacker's move like a retreat");
+  assert.equal(saved.h0.q, 0, "surrender relocates like a retreat");
+  assert.equal(saved.h0.r, 0);
   assert.deepEqual(saved.h0.stacks, normalizePlatoons([stack("swordsman", 5)]));
   assert.deepEqual(saved.h1.stacks, normalizePlatoons([stack("swordsman", 6)]));
   assert.equal(saved.h1.gold, 250);
@@ -260,7 +317,11 @@ test("surrender deducts the paid gold from the CONCEDING hero and keeps both arm
   const event = eventRepo.events[0];
   assert.equal(event.payload.winner, "defender");
   assert.equal(event.payload.attackerOutcome, "retreated_hero");
+  assert.equal(event.payload.attackerVerdict, "surrendered");
+  assert.equal(event.payload.defenderVerdict, "stood");
   assert.equal(event.payload.rewardGold, 0);
+  assert.equal(result.attackerVerdict, "surrendered");
+  assert.deepEqual(result.attackerHero, saved.h0);
 });
 
 test("surrender is rejected when the paid gold exceeds the conceding hero's purse", async () => {
@@ -277,10 +338,10 @@ test("surrender is rejected when the paid gold exceeds the conceding hero's purs
   assert.equal(gameRepo.rows["test-game"].heroes.h0.gold, 100);
 });
 
-test("surrender by a DEFENDER-side human debits the defender (conceding hero is derived from actor ownership)", async () => {
+test("surrender by a DEFENDER-side human debits and relocates the defender (conceding hero is derived from actor ownership)", async () => {
   // The "enemy moved onto me" case: seat 0's hero is the defender. The
-  // arena's surrender is the human's action, so the deduction must land on
-  // h0 (owned by the actor), not on the attacker role.
+  // arena's surrender is the human's action, so the deduction and the
+  // relocation must land on h1 (owned by the actor), not on the attacker role.
   const row = makeBattleRow(
     { ownerId: 1, gold: 300, stacks: [stack("swordsman", 4)] },
     { ownerId: 0, gold: 90, stacks: [stack("swordsman", 7)] },
@@ -299,12 +360,17 @@ test("surrender by a DEFENDER-side human debits the defender (conceding hero is 
   assert.equal(result.ok, true);
   const saved = gameRepo.rows["test-game"].heroes;
   assert.equal(saved.h1.gold, 90 - 30, "defender-side concession debits the defender (h1 is owned by the actor)");
+  assert.equal(saved.h1.q, 0, "the conceding defender relocates to their seat's settlement");
+  assert.equal(saved.h1.r, 0);
+  assert.deepEqual(saved.h1.stacks, normalizePlatoons([stack("swordsman", 7)]), "surrender keeps the submitted stacks");
   assert.equal(saved.h0.gold, 300, "attacker keeps their purse");
+  assert.deepEqual(saved.h0.stacks, normalizePlatoons([stack("swordsman", 4)]), "the stood attacker keeps their survivors");
   // The ATTACKER's move is the one cancelled (decision 3 applies to the
-  // mover regardless of who conceded) -- h0 is the attacker role here even
+  // mover regardless of who conceded), and with no concession the attacker
+  // keeps that cancelled position -- h0 is the attacker role here even
   // though seat 1 owns it.
   assert.equal(saved.h0.q, 2, "attacker's move cancelled server-side");
-  assert.equal(saved.h1.q, 3, "defender never moved -- position unchanged");
+  assert.equal(saved.h0.r, 2);
 });
 
 test("draw keeps both armies and loots nobody", async () => {
@@ -329,27 +395,39 @@ test("draw keeps both armies and loots nobody", async () => {
   assert.equal(event.payload.winner, "draw");
   assert.equal(event.payload.attackerOutcome, "survived");
   assert.equal(event.payload.defenderOutcome, "survived");
+  assert.equal(event.payload.attackerVerdict, "stood");
+  assert.equal(event.payload.defenderVerdict, "stood");
 });
 
-test("defenderWon empties the attacker and leaves the defender's purse alone (no reverse loot)", async () => {
+test("defenderWon REMOVES the wiped attacker entirely; no reverse loot", async () => {
   const row = makeBattleRow({ stacks: [stack("swordsman", 5)] }, { stacks: [stack("swordsman", 8)] });
-  const { gameRepo, eventRepo, deps } = makeDeps(row);
+  const { gameRepo, eventRepo, heroRepo, deps } = makeDeps(row);
   const result = await handleCommand(
     submitCommand({ outcome: "defenderWon", attackerStacks: [], defenderStacks: [stack("swordsman", 8)] }),
     deps,
   );
   assert.equal(result.ok, true);
-  const saved = gameRepo.rows["test-game"].heroes;
-  assert.deepEqual(saved.h0.stacks, normalizePlatoons([]));
-  assert.equal(saved.h0.gold, 100, "attacker keeps their purse -- loot only ever flows defender→attacker");
-  assert.equal(saved.h1.gold, 250);
-  assert.deepEqual(saved.h1.stacks, normalizePlatoons([stack("swordsman", 8)]));
+  const saved = gameRepo.rows["test-game"];
+  assert.equal(saved.heroes.h0, undefined, "the wiped attacker is deleted from the heroes record");
+  assert.deepEqual(
+    saved.players.find((p) => p.id === 0)?.heroIds,
+    [],
+    "attacker pruned from seat 0's heroIds",
+  );
+  assert.equal("h0" in heroRepo.calls[0].value, false);
+  assert.equal(saved.heroes.h1.gold, 250, "loot only ever flows defender→attacker -- no reverse loot");
+  assert.deepEqual(saved.heroes.h1.stacks, normalizePlatoons([stack("swordsman", 8)]));
 
   const event = eventRepo.events[0];
   assert.equal(event.payload.winner, "defender");
   assert.equal(event.payload.attackerOutcome, "lost_all_troops");
   assert.equal(event.payload.defenderOutcome, "won");
+  assert.equal(event.payload.attackerVerdict, "defeated");
+  assert.equal(event.payload.defenderVerdict, "stood");
   assert.equal(event.payload.rewardGold, 0);
+  assert.equal(result.attackerHero, undefined, "the removed attacker is omitted from the result");
+  assert.deepEqual(result.defenderHero, saved.heroes.h1);
+  assert.equal(result.attackerVerdict, "defeated");
 });
 
 test("non-adjacent heroes are rejected -- the server-side equivalent of 'phase is BATTLE for this pair'", async () => {
@@ -391,5 +469,30 @@ test("a wiped chartering defender gets their charters cleaned up, same as the au
   const result = await handleCommand(submitCommand(), deps);
   assert.equal(result.ok, true);
   assert.deepEqual(seeded.rows["test-game"], [], "the wiped hero's outstanding charter is gone");
-  assert.equal(gameRepo.rows["test-game"].heroes.h1.gold, 0);
+  assert.equal(gameRepo.rows["test-game"].heroes.h1, undefined, "the wiped chartering defender is removed outright");
+});
+
+test("heroRepo.upsertMany sweeps hero_platoons rows for heroes absent from the record (defeat cleanup)", async () => {
+  // The mock heroRepo doubles don't model the platoon table, so this pins the
+  // REAL repo's full-sync sweep against a recording fake Queryable: a hero
+  // missing from the upsert record (a defeated hero) must lose its
+  // hero_platoons rows via the same NOT-IN delete shape the heroes table
+  // already uses -- the per-hero delete at the bottom of the loop only ever
+  // covers heroes still present.
+  const queries: Array<{ sql: string; params?: unknown[] }> = [];
+  const db = {
+    async query(sql: string, params?: unknown[]) {
+      queries.push({ sql, params });
+      if (sql.trim() === "SELECT id FROM games WHERE name = $1") {
+        return { rows: [{ id: 7 }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  };
+  const repo = createHeroRepo(db as unknown as Queryable);
+  await repo.upsertMany("test-game", { h0: makeHero("h0", 0, 2, 2) });
+  const sweep = queries.find((q) => q.sql.includes("DELETE FROM hero_platoons"));
+  assert.ok(sweep, "a platoon delete is issued in the same upsert path");
+  assert.match(sweep.sql, /NOT \(hero_id = ANY\(\$2::text\[\]\)\)/, "the sweep is the NOT-IN form that covers REMOVED heroes");
+  assert.deepEqual(sweep.params, [7, ["h0"]]);
 });

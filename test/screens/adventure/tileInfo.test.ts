@@ -25,7 +25,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     day: 1,
     activePlayerId: 0,
     players: [
-      { id: 0, faction: "player", name: "Human", color: "#d62828", heroIds: [], settlementIds: [] },
+      { id: 0, faction: "player", name: "Player 1", color: "#d62828", heroIds: [], settlementIds: [] },
       { id: 1, faction: "ai", name: "AI", color: "#1d7dd1", heroIds: [], settlementIds: [] },
     ],
     heroes: {},
@@ -128,7 +128,7 @@ test("resource deposit reports workedBy only within the settlement's rate radius
   assert.equal(unclaimed!.deposit!.workedBy, null);
 });
 
-test("fogged tile: terrain still reported; deposit/charter suppressed; enemy hero and settlement hidden", () => {
+test("fogged unowned tile: no terrain/cost or world info, coordinates only", () => {
   const map = makeGrassMap(10, 1, [{ q: 9, r: 0, resource: "gold" }]);
   // Owned hero far from (9,0) -- hex-distance 9, well outside VISION_RANGE=4 -- so (9,0) is fogged for player 0.
   const ownHero = new Hero("h0", "Hero", 0, 0, "player", 0);
@@ -147,11 +147,27 @@ test("fogged tile: terrain still reported; deposit/charter suppressed; enemy her
 
   assert.ok(info);
   assert.equal(info!.fogged, true);
-  assert.equal(info!.terrain.kind, "grass", "terrain is drawn even under fog, so it's still reported");
+  assert.equal(info!.terrain, null, "unexplored tiles reveal nothing terrain-related until seen");
   assert.equal(info!.deposit, null);
   assert.equal(info!.charter, null);
+  assert.equal(info!.territory, null);
   assert.equal(info!.settlement, null, "enemy settlement is suppressed under fog");
   assert.deepEqual(info!.heroes, [], "enemy hero is suppressed under fog");
+});
+
+test("own settlement's tile still shows its info (settlement vision covers its own tile)", () => {
+  const map = makeGrassMap(10, 1);
+  const ownHero = new Hero("h0", "Hero", 0, 0, "player", 0);
+  const { state: ownSettlementState, castle: ownCastle } = makeSettlement("s0", 9, 0, 1, 0, "Goldcrest");
+  const state = makeState({ settlements: { s0: ownSettlementState } });
+
+  const info = describeTile({ map, state, heroes: [ownHero], castles: [ownCastle], viewPlayerId: 0, tile: { q: 9, r: 0 } });
+
+  assert.ok(info);
+  assert.ok(info!.settlement, "own settlement info is shown");
+  assert.equal(info!.settlement!.owned, true);
+  assert.equal(info!.settlement!.name, "Goldcrest");
+  assert.ok(info!.terrain, "terrain is reported once the tile has been seen");
 });
 
 test("out-of-bounds tile returns null", () => {

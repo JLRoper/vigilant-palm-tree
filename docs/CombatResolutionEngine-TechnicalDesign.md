@@ -15,8 +15,9 @@ A pure, deterministic hex-battle resolver (`shared/combat/resolveBattle.ts`) —
 `POST /games/:name/commands`. Given two 8-slot platoon rosters, it plays
 out stat-comparison combat with type advantages, counterattacks, and
 per-side retreat policies, and returns a full result + replayable log. The
-route now applies that result to `heroes` JSONB instead of deleting the
-defender.
+route applies that result to `heroes` JSONB through the shared post-battle
+helpers (wipe loot + the 2026-09-29 hero outcomes: defeat removes the
+hero — see §8).
 
 ## 2. Dependencies
 
@@ -127,7 +128,7 @@ That responsibility moved entirely server-side.
 **Scope boundary — manual-arena surrender.** The Test Battle UI
 (`src/views/manualBattleArena.ts`) adds a separate gold-gated
 side-concession that is *not* part of this resolver's `RetreatPolicy`
-system: the player's Surrender button costs `SURRENDER_COST_GOLD` (5000G,
+system: the player's Surrender button costs `SURRENDER_COST_GOLD` (500G,
 from `shared/combatConfig.ts`); if the hero can't cover it, a Leave
 Behind picker opens at `SURRENDER_UNIT_VALUE_GOLD` (100G) per unit,
 strips the chosen counts off the surviving platoons (so they surface as
@@ -135,7 +136,15 @@ casualties on the result card via the same `buildResults` diff), and
 then calls `retreatHero(... applyLoss: false)`. The auto-resolve
 `RetreatPolicy` (auto/custom/fight) still governs in-flight
 retreats during the turn loop; the manual surrender is purely a player
-action that sits on top.
+action that sits on top. **World-level outcome (2026-09-29 hero
+outcomes):** the arena-side mechanics are unchanged, but what happens
+afterward is not — the surrendering hero **keeps** its troops (minus the
+paid gold) and is **relocated** to the nearest settlement its owner
+holds; a retreating hero relocates the same way with all stacks zeroed
+server-side (the arena's 15% pre-loss is subsumed). With no owned
+settlement the hero stays at its post-cancel position. See
+[`./battle-view-architecture.md`](./battle-view-architecture.md) and
+[heroes.md](./heroes.md) → Combat.
 
 ## 4. Objects / types (`shared/combat/types.ts` unless noted)
 
@@ -288,11 +297,17 @@ The `ResolveBattle` command (`POST /games/:name/commands`):
 - **Event log:** `combat_won` → `combat_resolved`, payload now includes
   `winner`, `attackerOutcome`, `defenderOutcome`, `rounds` alongside the
   existing `attackerId`/`defenderId`/`attackerOwnerId`/`rewardGold`.
-- **Gold/loot:** only transferred when `defenderOutcome === "lost_all_troops"`
-  (previously: always, since the defender was always deleted). Hero
-  entities are **never deleted** now — a fully-defeated hero just ends up
-  with empty platoons; what happens to that hero (capture/ransom/etc.) is
-  explicitly out of scope for this engine.
+- **Gold/loot:** still transferred only when the loser is wiped
+  (`defenderOutcome === "lost_all_troops"`) — purse + cargo, wagon-capped
+  (2026-09-29 hero outcomes). The older "hero entities are **never
+  deleted**" note is **superseded**: a wiped hero is now **removed** from
+  the record (and their owner's `heroIds`, plus the `hero_platoons` rows)
+  by `applyHeroBattleOutcomes` in `server/app/commandHandler.ts`, and an
+  arena retreat/surrender **relocates** the conceder to their nearest
+  owned settlement (retreat with stacks zeroed, surrender keeping them;
+  no owned settlement → stay put). Removal/relocation remains the command
+  layer's job — this engine stays pure and out of that business (see
+  [`./battle-view-architecture.md`](./battle-view-architecture.md)).
 
 ## 9. Known gaps / not yet implemented
 

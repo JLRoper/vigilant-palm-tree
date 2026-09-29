@@ -25,7 +25,7 @@ Implementation: [`src/state/gameState.ts`](../src/state/gameState.ts) (reducers)
 ## Resource pools
 
 Gold is held in two separate pools:
-- **Hero purse** (`hero.gold`) — moves with the hero; spent on chartering (2500g); captured on defeat
+- **Hero purse** (`hero.gold`) — moves with the hero; spent on chartering (2500g); looted by the winner **on defeat** (wiped in battle — the hero is then removed from the map, 2026-09-29 outcomes). A retreat keeps the purse (loses its troops instead); a surrender pays its gold cost and keeps the rest
 - **Settlement treasury** (`settlement.gold`) — funds recruitment, building, trade; grows from `population × gold_tax × morale` per round
 
 Warehouse resources held per-settlement:

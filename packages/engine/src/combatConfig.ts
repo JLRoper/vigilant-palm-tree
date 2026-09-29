@@ -32,7 +32,7 @@ export const HERO_RETREAT_PENALTY = 0.5;
 // until the shortfall is made up — those units are stripped from the
 // surviving platoons before the battle finalizes, so they show up as
 // casualties on the result card.
-export const SURRENDER_COST_GOLD = 5000;
+export const SURRENDER_COST_GOLD = 500;
 export const SURRENDER_UNIT_VALUE_GOLD = 100;
 
 export const DEFAULT_GRID_COLS = 15;

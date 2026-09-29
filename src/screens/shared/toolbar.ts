@@ -4,6 +4,7 @@ import { openSettingsMenu, type MapInfo } from "@screens/home/settingsMenu";
 import { openTestBattleSetup } from "@screens/combat/testBattleSetup";
 import { openNewGameModal, type NewGameHandler } from "./newGameModal";
 import { openLoadGameModal, type LoadGameHandler } from "./loadGameModal";
+import { openHotkeysModal, attachHotkeysShortcut } from "./hotkeysModal";
 
 const headerTheme = {
   bg: "var(--header-blue, #1c2f57)",
@@ -106,7 +107,6 @@ export class Toolbar {
   private heroesBtn: HTMLButtonElement;
   private settlementsBtn: HTMLButtonElement;
   private charterBtn: HTMLButtonElement;
-  private testBattleBtn: HTMLButtonElement;
   private calendarEl: HTMLElement;
   private calendarActiveEl: HTMLElement;
   private busy = false;
@@ -214,11 +214,28 @@ export class Toolbar {
     });
     dropdown.appendChild(divider);
 
+    const testBattleItem = makeMenuItem("⚔ Test Battle");
+    testBattleItem.title = "Sandbox: player vs AI manual-fight arena (no effect on your real game)";
+    testBattleItem.addEventListener("click", () => {
+      closeDropdown();
+      if (this.busy) return;
+      openTestBattleSetup();
+    });
+
+    const hotkeysItem = makeMenuItem("⌨ Shortcuts");
+    hotkeysItem.title = "Keyboard & mouse reference (also press ?)";
+    hotkeysItem.addEventListener("click", () => {
+      closeDropdown();
+      openHotkeysModal();
+    });
+
     const settingsItem = makeMenuItem("⚙ Settings");
     settingsItem.addEventListener("click", () => {
       closeDropdown();
       openSettingsMenu({ parent: document.body, getMapInfo: this.opts.callbacks.getMapInfo });
     });
+
+    attachHotkeysShortcut();
 
     this.newBtn.addEventListener("click", () => {
       closeDropdown();
@@ -347,19 +364,11 @@ export class Toolbar {
       this.opts.callbacks.onStartCharter?.();
     });
 
-    this.testBattleBtn = this.makeButton("Test Battle", false);
-    this.testBattleBtn.title = "Sandbox: player vs AI manual-fight arena (no effect on your real game)";
-    this.testBattleBtn.addEventListener("click", () => {
-      if (this.busy) return;
-      openTestBattleSetup();
-    });
-
     buttonsRow.appendChild(this.endTurnBtn);
     buttonsRow.appendChild(this.heroesBtn);
     buttonsRow.appendChild(this.settlementsBtn);
     buttonsRow.appendChild(logisticsBtn);
     buttonsRow.appendChild(this.charterBtn);
-    buttonsRow.appendChild(this.testBattleBtn);
     buttonsRow.appendChild(menuWrap);
     buttonsWrap.appendChild(buttonsRow);
 
@@ -380,14 +389,15 @@ export class Toolbar {
     this.setEnabled(this.endTurnBtn, endTurnOk && !this.busy);
     this.setEnabled(this.heroesBtn, hasGameState && !this.busy);
     this.setEnabled(this.settlementsBtn, hasGameState && !this.busy);
-    this.setEnabled(this.testBattleBtn, !this.busy);
 
     if (this.charterBtn) {
-      const canCharter = hasGameState && !this.busy && (this.opts.callbacks.canStartCharter?.() ?? false);
-      this.setEnabled(this.charterBtn, canCharter);
-      this.charterBtn.title = canCharter
-        ? "Found a new settlement (2500g + 20 wood + 15 stone)"
-        : "Hero must be on a friendly settlement with enough resources";
+      const canOpen = hasGameState && !this.busy && (this.opts.callbacks.canStartCharter?.() ?? false);
+      this.setEnabled(this.charterBtn, canOpen);
+      this.charterBtn.title = !hasGameState
+        ? "No active game"
+        : canOpen
+          ? "Charter a new settlement — 2500g + 20 wood + 15 stone"
+          : "Requires a selected hero on your turn";
     }
 
     this.newBtn.title = !ok ? "Backend unavailable" : active ? "New game (current game will be lost)" : "Start a new game";

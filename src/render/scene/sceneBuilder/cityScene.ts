@@ -38,6 +38,10 @@ export interface CitySceneInput {
   pattern: string;
   ghost?: { gx: number; gy: number; kind: BuildingKind; w: number; h: number; valid: boolean } | null;
   selectedKeys?: ReadonlySet<string>;
+  /** CSS px to shift the two corner labels down by (the fixed toolbar overlays the canvas top; render must not measure it itself). */
+  labelOffsetY?: number;
+  /** Cells (keys `"gx,gy"`) the active build placer can accept a building on; flagged on the matching cityCell nodes for the tint paint. */
+  buildableCells?: ReadonlySet<string>;
   citySettings: Pick<
     GameSettings,
     "spriteVariant" | "parallaxEnabled" | "parallaxLayerCount" | "cityBgOffsetX" | "cityBgOffsetY"
@@ -51,9 +55,10 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
   const {
     viewportW, viewportH, settlementName, size, hover,
     citySpots, cityMines, buildings, style, pattern, ghost, selectedKeys, citySettings,
-    upgrades,
+    upgrades, labelOffsetY, buildableCells,
   } = input;
   const ownerColor = input.ownerColor ?? "#888888";
+  const labelY = labelOffsetY ?? 0;
   const nodes: SceneNode[] = [];
 
   nodes.push({
@@ -91,6 +96,7 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
       halfWidth: tw / 2,
       halfHeight: td / 2,
       hovered: hover !== null && hover.gx === cell.gx && hover.gy === cell.gy,
+      buildable: buildableCells?.has(`${cell.gx},${cell.gy}`) ?? false,
     });
   }
 
@@ -175,12 +181,12 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
     });
   }
 
-  nodes.push({ kind: "cityLabel", text: settlementName, x: 12, y: 12, fontPx: 14, alpha: 1 });
+  nodes.push({ kind: "cityLabel", text: settlementName, x: 12, y: 12 + labelY, fontPx: 14, alpha: 1 });
   nodes.push({
     kind: "cityLabel",
     text: `${TIER_LABELS[size]}  \u2014  ${STYLE_LABELS[style]}  \u2014  ${pattern}`,
     x: 12,
-    y: 30,
+    y: 30 + labelY,
     fontPx: 11,
     alpha: 0.7,
   });

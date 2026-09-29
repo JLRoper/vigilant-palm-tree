@@ -1,9 +1,11 @@
 // Full-screen "Create Game" panel. Hosted by homeView (replaces the landing
 // button stack while the user is filling out the form). Owns Name + Map Size
-// + Number of Human Players + Map Seed fields and a Create / Cancel action row.
+// + Number of Human Players + Number of AI Enemies + Map Seed fields and a
+// Create / Cancel action row.
 //
 // Map seed defaults to a fresh random 31-bit int; the user can edit it.
-// "Number of human players" is exposed as a small chip selector (1/2/3/4).
+// "Number of human players" and "Number of AI enemies" are small chip
+// selectors (1/2/3/4 and 0/1/2/3).
 // Map size stays a dropdown because we ship three named presets.
 
 import { styleButton } from "@screens/shared/menu";
@@ -13,6 +15,7 @@ export type NewGameFormValues = {
   seed: number;
   mapSize: "small" | "medium" | "large";
   playerCount: 1 | 2 | 3 | 4;
+  enemyCount: 0 | 1 | 2 | 3;
 };
 
 export interface NewGameScreenOptions {
@@ -33,6 +36,7 @@ export interface NewGameScreen {
 }
 
 const PLAYER_CHOICES: Array<1 | 2 | 3 | 4> = [1, 2, 3, 4];
+const ENEMY_CHOICES: Array<0 | 1 | 2 | 3> = [0, 1, 2, 3];
 
 export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
   const root = document.createElement("div");
@@ -95,6 +99,65 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
     return { row, label, control };
   };
 
+  const makeChipRow = <T extends number>(
+    labelText: string,
+    values: readonly T[],
+    initial: T,
+    onPick: (value: T) => void,
+  ): { setDisabled: (disabled: boolean) => void } => {
+    const field = makeFieldRow(labelText);
+    const wrap = document.createElement("div");
+    Object.assign(wrap.style, {
+      display: "flex",
+      gap: "6px",
+    });
+    let selected = initial;
+    const buttons = new Map<T, HTMLButtonElement>();
+    const refresh = (): void => {
+      for (const n of values) {
+        const b = buttons.get(n);
+        if (!b) continue;
+        const active = n === selected;
+        b.style.background = active
+          ? "linear-gradient(180deg, #c9a227 0%, #a6801a 100%)"
+          : "rgba(20, 33, 69, 0.85)";
+        b.style.color = active ? "#241a05" : "#f1e4c3";
+        b.style.borderColor = active ? "#e9cf7d" : "rgba(201,162,39,0.45)";
+        b.style.fontWeight = active ? "700" : "400";
+      }
+    };
+    for (const n of values) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = String(n);
+      Object.assign(b.style, {
+        flex: "1",
+        padding: "8px 10px",
+        fontSize: "14px",
+        fontFamily: "Georgia, 'Times New Roman', serif",
+        background: "rgba(20, 33, 69, 0.85)",
+        color: "#f1e4c3",
+        border: "1px solid rgba(201,162,39,0.45)",
+        borderRadius: "3px",
+        cursor: "pointer",
+      });
+      b.addEventListener("click", () => {
+        selected = n;
+        refresh();
+        onPick(n);
+      });
+      buttons.set(n, b);
+      wrap.appendChild(b);
+    }
+    field.control.appendChild(wrap);
+    refresh();
+    return {
+      setDisabled: (disabled) => {
+        for (const b of buttons.values()) b.disabled = disabled;
+      },
+    };
+  };
+
   const styleTextInput = (el: HTMLInputElement): void => {
     Object.assign(el.style, {
       width: "100%",
@@ -141,53 +204,25 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
   sizeSelect.value = "small";
   sizeField.control.appendChild(sizeSelect);
 
-  const playersField = makeFieldRow("Number of human players");
-  const playersWrap = document.createElement("div");
-  Object.assign(playersWrap.style, {
-    display: "flex",
-    gap: "6px",
-  });
   let selectedPlayers: 1 | 2 | 3 | 4 = 1;
-  const playerButtons: Record<1 | 2 | 3 | 4, HTMLButtonElement> = {} as Record<
-    1 | 2 | 3 | 4,
-    HTMLButtonElement
-  >;
-  function refreshPlayers(): void {
-    for (const n of PLAYER_CHOICES) {
-      const b = playerButtons[n];
-      const active = n === selectedPlayers;
-      b.style.background = active
-        ? "linear-gradient(180deg, #c9a227 0%, #a6801a 100%)"
-        : "rgba(20, 33, 69, 0.85)";
-      b.style.color = active ? "#241a05" : "#f1e4c3";
-      b.style.borderColor = active ? "#e9cf7d" : "rgba(201,162,39,0.45)";
-      b.style.fontWeight = active ? "700" : "400";
-    }
-  }
-  for (const n of PLAYER_CHOICES) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.textContent = String(n);
-    Object.assign(b.style, {
-      flex: "1",
-      padding: "8px 10px",
-      fontSize: "14px",
-      fontFamily: "Georgia, 'Times New Roman', serif",
-      background: "rgba(20, 33, 69, 0.85)",
-      color: "#f1e4c3",
-      border: "1px solid rgba(201,162,39,0.45)",
-      borderRadius: "3px",
-      cursor: "pointer",
-    });
-    b.addEventListener("click", () => {
+  const playersRow = makeChipRow(
+    "Number of human players",
+    PLAYER_CHOICES,
+    selectedPlayers,
+    (n) => {
       selectedPlayers = n;
-      refreshPlayers();
-    });
-    playerButtons[n] = b;
-    playersWrap.appendChild(b);
-  }
-  playersField.control.appendChild(playersWrap);
-  refreshPlayers();
+    },
+  );
+
+  let selectedEnemies: 0 | 1 | 2 | 3 = 0;
+  const enemiesRow = makeChipRow(
+    "Number of AI enemies",
+    ENEMY_CHOICES,
+    selectedEnemies,
+    (n) => {
+      selectedEnemies = n;
+    },
+  );
 
   const seedField = makeFieldRow("Map seed");
   const seedInput = document.createElement("input");
@@ -278,6 +313,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
       seed,
       mapSize,
       playerCount: selectedPlayers,
+      enemyCount: selectedEnemies,
     });
   });
 
@@ -295,7 +331,8 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
     sizeSelect.disabled = value;
     seedInput.disabled = value;
     reRollBtn.disabled = value;
-    for (const n of PLAYER_CHOICES) playerButtons[n].disabled = value;
+    playersRow.setDisabled(value);
+    enemiesRow.setDisabled(value);
     createBtn.style.opacity = value ? "0.6" : "1";
     createBtn.textContent = value ? "Creating…" : "Create Game";
   }

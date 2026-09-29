@@ -24,6 +24,7 @@ export interface HomeViewOptions {
     mapSize?: "small" | "medium" | "large";
     playerCount?: 1 | 2 | 3 | 4;
     humanSeatCount?: number;
+    enemyCount?: number;
   }) => Promise<void>;
   onLoadGame: (game: Game) => Promise<void>;
   isBackendOk: () => boolean;
@@ -233,6 +234,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
             mapSize: values.mapSize,
             playerCount: values.playerCount,
             humanSeatCount: values.playerCount,
+            enemyCount: values.enemyCount,
           });
           rememberGameEntry(values.name);
           screen.destroy();

@@ -1,6 +1,17 @@
 import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload } from "./gameState";
-import type { BuildingDef, BuildingKind, Platoon } from "@heroes/contracts";
-import { bus } from "../core/eventBus";
+import type { BuildingDef, BuildingKind, HeroBattleVerdict, Platoon } from "@heroes/contracts";
+import { platoonsHaveTroops, platoonTroopTotal, settlementStacks, normalizePlatoons } from "./units";
+import type { GameMap } from "../map/gameMap";
+import {
+  applySettlementBattleResult,
+  computeSettlementRates,
+  generateCitySpots,
+  cityViewSizeFor,
+  resolveBattle,
+  rollbackCaptureSettlement,
+} from "@heroes/engine";
+import { settings, type HorseVariant } from "./settings";
+import type { BattleResult, SettlementBattleOutcome, UnitType } from "@heroes/engine";
 import {
   selectHero as selectHeroReducer,
   selectSettlement as selectSettlementReducer,
@@ -36,11 +47,7 @@ import {
 } from "./gameState";
 import { findPath } from "../map/pathfinding";
 import { hexDistance } from "../core/hex";
-import { platoonsHaveTroops, settlementStacks } from "./units";
-import type { GameMap } from "../map/gameMap";
-import { computeSettlementRates, generateCitySpots, cityViewSizeFor } from "@heroes/engine";
-import { settings, type HorseVariant } from "./settings";
-import type { BattleResult } from "@heroes/engine";
+import { bus } from "../core/eventBus";
 
 export interface TurnControllerHooks {
   onHumanTurnEnd(state: GameState): Promise<GameState>;
@@ -163,22 +170,42 @@ export interface TurnControllerHooks {
     count: number,
     toSlot?: number,
   ): Promise<void>;
-  onSubmitSettlementBattleResult(
-    actor: number,
-    attackerId: HeroId,
-    settlementId: SettlementId,
-    outcome: "attackerWon" | "defenderWon" | "draw" | "retreat" | "surrender",
-    attackerStacks: Platoon[],
-    defenderStacks: Platoon[],
-    surrenderedGold: number | undefined,
-    rounds: number,
-    obstacleSeed: number,
-  ): Promise<void>;
+  // Fire-and-forget POST of an auto-resolved settlement-garrison battle
+  // result (AI-attacker path). The local engine reducer has already applied
+  // the outcome by the time this is called -- same client-trusts-local-
+  // computation philosophy as the rest of this block.
+  onSettlementBattleSubmitted(payload: {
+    actor: number;
+    attackerId: HeroId;
+    settlementId: SettlementId;
+    outcome: SettlementBattleOutcome;
+    attackerStacks: Platoon[];
+    defenderStacks: Platoon[];
+    surrenderedGold?: number;
+    rounds: number;
+    obstacleSeed: number;
+  }): Promise<void>;
+}
+
+export interface TurnControllerOptions {
+  isPrimaryActor?: () => boolean;
+}
+
+export interface SettlementBattleResolution {
+  attackerId: HeroId;
+  settlementId: SettlementId;
+  attackerOwnerId: number;
+  settlementOwnerId: number | null;
+  outcome: SettlementBattleOutcome;
+  captured: boolean;
+  attackerVerdict: HeroBattleVerdict;
+  battle: BattleResult;
 }
 
 export class TurnController {
   private state: GameState;
   private readonly hooks: TurnControllerHooks;
+  private readonly opts: TurnControllerOptions;
   private aiAwaitingPersist = false;
   private aiEnding = false;
   // #114 / plan/2026-08-17-issue-88-remaining-command-ports.md §"Race-avoidance
@@ -191,26 +218,44 @@ export class TurnController {
   // onHumanTurnEnd so a command already in flight is guaranteed to land
   // server-side first.
   private readonly pendingCommands = new Set<Promise<void>>();
+  // The most recent move persist (onHumanMove/onAiMove), kept so a walk-in
+  // capture triggered by that same move can serialize its CaptureSettlement
+  // POST behind it: tryCaptureAt runs inside the same synchronous block that
+  // dispatches the persist, so this field is the triggering move's promise at
+  // capture time. Without this ordering the capture POST can win the race,
+  // 409 hero_not_at_settlement server-side, and the optimistic capture
+  // becomes a phantom until reload.
+  private lastMovePersist: Promise<void> | null = null;
 
-  constructor(initial: GameState, hooks: TurnControllerHooks) {
+  constructor(initial: GameState, hooks: TurnControllerHooks, opts: TurnControllerOptions = {}) {
     this.state = initial;
     this.hooks = hooks;
+    this.opts = opts;
   }
 
   getState(): GameState {
     return this.state;
   }
 
-  private trackCommand(promise: Promise<void>, label: string): void {
+  private trackCommand(promise: Promise<void>, label: string): Promise<void> {
     const tracked = promise.catch((e) => {
       console.warn(`[turnController] ${label} failed:`, e);
     });
     this.pendingCommands.add(tracked);
     void tracked.finally(() => this.pendingCommands.delete(tracked));
+    return tracked;
   }
 
   private async drainPendingCommands(): Promise<void> {
-    await Promise.all(this.pendingCommands);
+    // Loop, not a one-shot Promise.all: commands registered while an earlier
+    // drain is awaiting (e.g. a persist fired between ticks) must also
+    // settle before the barrier releases. Every tracked promise self-removes
+    // on settle, so the loop terminates. do-while keeps the one guaranteed
+    // await tick the old single-shot form had even when the set is empty
+    // (the drain must never run the next stage synchronously).
+    do {
+      await Promise.all([...this.pendingCommands]);
+    } while (this.pendingCommands.size > 0);
   }
 
   /** Public entry point for callers outside the class (manual save) to wait
@@ -275,12 +320,28 @@ export class TurnController {
       type: "move_completed",
       payload: { heroId, to: toTile, cost },
     });
+    // Dispatch (and track) the move persist BEFORE tryCaptureAt so a walk-in
+    // capture can chain its own POST behind this exact promise -- the
+    // CaptureSettlement precondition (hero standing on the settlement) only
+    // holds server-side once this MoveHero/SpendMovement has landed.
+    this.lastMovePersist = this.trackCommand(
+      this.hooks.onHumanMove(this.state, heroId, toTile, cost),
+      "onHumanMove",
+    );
     this.tryCaptureAt(heroId, toTile.q, toTile.r);
-    const defenderId = detectAdjacentEnemyFn(this.state, heroId);
-    if (defenderId) {
-      this.enterBattle(heroId, defenderId);
+    // A SETTLEMENT_BATTLE opened by this move owns the phase until it
+    // resolves (resolveSettlementBattle closes it). Entering a hero BATTLE
+    // here would clobber it -- startBattle overwrites the phase wholesale --
+    // so the adjacency check is skipped for this move and re-fires on the
+    // next one.
+    if (this.state.phase.kind === "PLAYER_TURN") {
+      const defenderId = detectAdjacentEnemyFn(this.state, heroId);
+      // Same 0-troop guard as the AI tick: a wiped enemy hero standing
+      // adjacent must not open a pointless battle.
+      if (defenderId && platoonTroopTotal(this.state.heroes[defenderId]?.stacks ?? []) > 0) {
+        this.enterBattle(heroId, defenderId);
+      }
     }
-    this.trackCommand(this.hooks.onHumanMove(this.state, heroId, toTile, cost), "onHumanMove");
     return true;
   }
 
@@ -301,7 +362,18 @@ export class TurnController {
           }
         }
         if (platoonsHaveTroops(settlementStacks(s))) {
-          this.enterSettlementBattle(heroId, sid);
+          if (this.enterSettlementBattle(heroId, sid)) return;
+          // enterSettlementBattle failed (state moved under us between the
+          // troop check above and the reducer's own gates). Do not silently
+          // abandon: re-read the garrison NOW and fall back to a walk-in
+          // capture only if it is actually empty; otherwise surface a
+          // diagnostic so the walk-in is not a silent no-op.
+          const live = this.state.settlements[sid];
+          if (live && !platoonsHaveTroops(settlementStacks(live))) {
+            this.captureSettlement(heroId, sid);
+          } else {
+            bus.emit({ type: "command:rejected", action: "Settlement battle", reason: "could_not_start_settlement_battle" });
+          }
           return;
         }
         this.captureSettlement(heroId, sid);
@@ -323,6 +395,8 @@ export class TurnController {
   captureSettlement(heroId: HeroId, settlementId: SettlementId): boolean {
     const result = captureSettlementReducer(this.state, heroId, settlementId);
     if (!result.captured) return false;
+    const previousOwnerId = result.previousOwnerId;
+    const afterMove = this.lastMovePersist;
     this.commit(result.state, {
       events: [{ type: "settlement:captured", heroId, settlementId }],
       log: {
@@ -331,16 +405,38 @@ export class TurnController {
           heroId,
           settlementId,
           newOwnerId: result.state.heroes[heroId]?.ownerId,
-          previousOwnerId: result.previousOwnerId,
+          previousOwnerId,
         },
       },
-      hook: () => {
-        const actor = result.state.heroes[heroId]?.ownerId ?? result.state.activePlayerId;
-        return this.hooks.onCaptureSettlement(actor, heroId, settlementId);
+      hook: async () => {
+        // Serialize the CaptureSettlement POST behind the triggering move's
+        // persist (see lastMovePersist): the optimistic capture above is
+        // applied immediately, but the server only accepts the command once
+        // the hero's move has landed. On rejection the optimistic capture is
+        // rolled back (rollbackCapture); already_owned never reaches this
+        // catch because turnHooks' onCaptureSettlement treats it as benign.
+        if (afterMove) await afterMove;
+        const actor = this.state.heroes[heroId]?.ownerId ?? this.state.activePlayerId;
+        try {
+          await this.hooks.onCaptureSettlement(actor, heroId, settlementId);
+        } catch {
+          this.rollbackCapture(heroId, settlementId, previousOwnerId);
+        }
       },
       hookLabel: "onCaptureSettlement",
     });
     return true;
+  }
+
+  private rollbackCapture(heroId: HeroId, settlementId: SettlementId, previousOwnerId: number | null): void {
+    const next = rollbackCaptureSettlement(this.state, heroId, settlementId, previousOwnerId);
+    if (!next) return;
+    this.state = next;
+    this.hooks.logEvent({
+      type: "capture_rolled_back",
+      payload: { heroId, settlementId, previousOwnerId },
+    });
+    bus.emit({ type: "economy:goldChanged", entityId: heroId, entityType: "hero", amount: next.heroes[heroId]?.gold ?? 0 });
   }
 
   enterBattle(attackerId: HeroId, defenderId: HeroId): void {
@@ -655,11 +751,36 @@ export class TurnController {
   async resolveCurrentBattle(): Promise<BattleResult | null> {
     if (this.state.phase.kind !== "BATTLE") return null;
     const { attackerId, defenderId } = this.state.phase;
+    // Serialize AFTER the move persist: drain every in-flight command (the
+    // AI tick's onAiMove, a human onHumanMove, captures...) before asking
+    // the server to resolve, so the server's adjacency check sees the
+    // mover's final position. Without this, the quick-resolve fired by the
+    // frame loop could beat SpendMovement server-side, 409 not_adjacent,
+    // and the catch below would clear the phase with no casualties -- the
+    // same two heroes re-fighting every round. This is the same
+    // pendingCommands barrier endCurrentTurn() drains.
+    await this.drainPendingCommands();
+    // The battle can evaporate while draining (a sync replaceState, or the
+    // phase already closed): re-check before dispatching.
+    if (this.state.phase.kind !== "BATTLE") return null;
     // The server is authoritative for combat resolution (it owns the
     // unit-type/counter catalog), so fetch its result before closing out the
     // BATTLE phase locally.
     const { state: resolved, battle } = await this.hooks.onBattleResolved(this.state);
-    this.state = endBattlePhaseReducer(resolved);
+    // endBattlePhase() unconditionally reopens PLAYER_TURN for
+    // state.activePlayerId. When the battle was entered from tick() during
+    // AI_TURN (an AI attacker), that leaves an AI seat holding a human
+    // phase: tick() gates on AI_TURN and canEndTurn() rejects AI factions,
+    // so neither side could ever end the turn. Re-map it so the AI turn
+    // resumes; human seats keep the exact PLAYER_TURN endBattlePhase gives.
+    let closed = endBattlePhaseReducer(resolved);
+    if (closed.phase.kind === "PLAYER_TURN") {
+      const active = closed.players.find((p) => p.id === closed.activePlayerId);
+      if (active?.faction === "ai") {
+        closed = { ...closed, phase: { kind: "AI_TURN", playerId: closed.activePlayerId } };
+      }
+    }
+    this.state = closed;
     const attackerAfter = this.state.heroes[attackerId];
     const defenderAfter = this.state.heroes[defenderId];
     const attackerSurvived = attackerAfter ? platoonsHaveTroops(attackerAfter.stacks) : false;
@@ -673,6 +794,125 @@ export class TurnController {
       payload: {},
     });
     return battle;
+  }
+
+  // Settlement-garrison twin of resolveCurrentBattle(): resolves the
+  // client-local SETTLEMENT_BATTLE phase with the engine auto-resolver (the
+  // same resolveBattle() call the server's ResolveBattle command runs, with
+  // no retreat policies, so a conceded verdict never occurs), applies it via
+  // applySettlementBattleResult (capture on a win, bounced attacker with the
+  // submitted garrison otherwise, full hero outcomes), POSTs the result
+  // fire-and-forget for server persistence, and re-maps the phase back to
+  // AI_TURN so the tick resumes. unitTypes is the /api/units catalog the
+  // caller holds (the controller stays network-free); null means the
+  // catalog is unavailable and no casualty report can be computed -- the
+  // attacker is bounced (flee semantics) and the phase cleared instead of
+  // inventing a result.
+  async resolveSettlementBattle(
+    unitTypes: Record<string, UnitType> | null,
+  ): Promise<SettlementBattleResolution | null> {
+    if (this.state.phase.kind !== "SETTLEMENT_BATTLE") return null;
+    const { attackerId, settlementId } = this.state.phase;
+    // Same move-then-resolve barrier as resolveCurrentBattle: the server's
+    // hero_not_at_settlement gate only holds once the triggering move
+    // persist has landed.
+    await this.drainPendingCommands();
+    if (this.state.phase.kind !== "SETTLEMENT_BATTLE") return null;
+    const phase = this.state.phase;
+    if (phase.kind !== "SETTLEMENT_BATTLE" || phase.attackerId !== attackerId || phase.settlementId !== settlementId) {
+      return null;
+    }
+    const pre = this.state;
+    const attacker = pre.heroes[attackerId];
+    const settlement = pre.settlements[settlementId];
+    if (!attacker || !settlement) {
+      this.clearSettlementBattlePhase();
+      return null;
+    }
+    if (!unitTypes || Object.keys(unitTypes).length === 0) {
+      this.state = cancelMoveReducer(pre, attackerId);
+      this.clearSettlementBattlePhase();
+      this.hooks.logEvent({
+        type: "settlement_battle_unresolved",
+        payload: { attackerId, settlementId, reason: "unit_catalog_unavailable" },
+      });
+      return null;
+    }
+    const battle = resolveBattle(normalizePlatoons(attacker.stacks), normalizePlatoons(settlementStacks(settlement)), {
+      unitTypes,
+      obstacleSeed: Math.floor(this.hooks.rng() * 0x1_0000_0000) >>> 0,
+    });
+    const outcome: SettlementBattleOutcome =
+      battle.winner === "attacker" ? "attackerWon" : battle.winner === "defender" ? "defenderWon" : "draw";
+    const applied = applySettlementBattleResult(pre, {
+      attackerId,
+      settlementId,
+      outcome,
+      attackerStacks: battle.attackerPlatoons,
+      defenderStacks: battle.defenderPlatoons,
+    });
+    let next = applied.state;
+    // Hero-outcomes parity with the server-response merge in
+    // GameActions.startSettlementBattleFlow: a removed attacker clears a
+    // selection pointing at it (the engine reducer prunes heroIds but never
+    // touches client-local selection state).
+    if (applied.removedHeroIds.includes(attackerId) && next.selectedHeroId === attackerId) {
+      next = { ...next, selectedHeroId: null };
+    }
+    // applySettlementBattleResult closed the phase via endBattlePhase; an
+    // AI-seat active player needs the same re-map as resolveCurrentBattle
+    // or neither tick() nor canEndTurn() could ever advance the turn.
+    if (next.phase.kind === "PLAYER_TURN") {
+      const active = next.players.find((p) => p.id === next.activePlayerId);
+      if (active?.faction === "ai") {
+        next = { ...next, phase: { kind: "AI_TURN", playerId: next.activePlayerId } };
+      }
+    }
+    this.state = next;
+    this.trackCommand(
+      this.hooks.onSettlementBattleSubmitted({
+        actor: attacker.ownerId,
+        attackerId,
+        settlementId,
+        outcome,
+        attackerStacks: battle.attackerPlatoons,
+        defenderStacks: battle.defenderPlatoons,
+        rounds: battle.rounds,
+        obstacleSeed: battle.obstacleSeed,
+      }),
+      "onSettlementBattleSubmitted",
+    );
+    bus.emit({
+      type: "battle:resolved",
+      attackerId,
+      defenderId: settlementId,
+      attackerSurvived: platoonsHaveTroops(next.heroes[attackerId]?.stacks ?? []),
+    });
+    this.hooks.logEvent({
+      type: "settlement_battle_resolved",
+      payload: { attackerId, settlementId, outcome, captured: applied.captured },
+    });
+    return {
+      attackerId,
+      settlementId,
+      attackerOwnerId: attacker.ownerId,
+      settlementOwnerId: settlement.ownerId,
+      outcome,
+      captured: applied.captured,
+      attackerVerdict: applied.attackerVerdict,
+      battle,
+    };
+  }
+
+  private clearSettlementBattlePhase(): void {
+    let closed = endBattlePhaseReducer(this.state);
+    if (closed.phase.kind === "PLAYER_TURN") {
+      const active = closed.players.find((p) => p.id === closed.activePlayerId);
+      if (active?.faction === "ai") {
+        closed = { ...closed, phase: { kind: "AI_TURN", playerId: closed.activePlayerId } };
+      }
+    }
+    this.state = closed;
   }
 
   async endHumanTurn(): Promise<void> {
@@ -926,6 +1166,7 @@ export class TurnController {
 
   tick(_dtMs: number): void {
     if (this.state.phase.kind !== "AI_TURN") return;
+    if (this.opts.isPrimaryActor && !this.opts.isPrimaryActor()) return;
     if (this.aiAwaitingPersist || this.aiEnding) return;
 
     const aiPlayerId = this.state.activePlayerId;
@@ -941,7 +1182,10 @@ export class TurnController {
       if (!move) continue;
       const map = this.hooks.getMap();
       const path = findPath(map, { q: hero.q, r: hero.r }, move.toTile);
-      const result = startMoveReducer(this.state, heroId, move.toTile, move.cost, path);
+      // startMove's not_selected gate guards a client-UI concept the AI tick
+      // doesn't have; satisfy it the same way the server does for every
+      // MoveHero command (commandHandler.ts): name the mover as selected.
+      const result = startMoveReducer({ ...this.state, selectedHeroId: heroId }, heroId, move.toTile, move.cost, path);
       if (!result.ok) continue;
       this.state = result.state;
       moved = true;
@@ -949,11 +1193,41 @@ export class TurnController {
         type: "move_completed",
         payload: { heroId, to: move.toTile, cost: move.cost },
       });
-      this.tryCaptureAt(heroId, move.toTile.q, move.toTile.r);
       this.aiAwaitingPersist = true;
-      void this.hooks.onAiMove(this.state, heroId, move.toTile).finally(() => {
+      // Tracked in pendingCommands (same barrier End Turn drains) so
+      // resolveCurrentBattle can hold ResolveBattle until the move POST has
+      // landed -- the server validates battle adjacency from positions, so a
+      // resolve that outruns the persist 409s not_adjacent and the fight
+      // just re-fires next round with no casualties. Recorded as
+      // lastMovePersist so a walk-in capture chains behind it too.
+      this.lastMovePersist = this.trackCommand(
+        this.hooks.onAiMove(this.state, heroId, move.toTile).catch((e: unknown) => {
+          console.warn("[turnController] onAiMove failed:", e);
+        }),
+        "onAiMove",
+      );
+      void this.lastMovePersist.finally(() => {
         this.aiAwaitingPersist = false;
       });
+      this.tryCaptureAt(heroId, move.toTile.q, move.toTile.r);
+      // Battles only ever start here after a successful move (same rule as
+      // requestMove/advanceAutoTravel). Resolution is deliberately NOT done
+      // inline: once phase is BATTLE the phase guard stops this tick, the
+      // frame loop's maybeAutoResolveBattle quick-resolves an AI attack, and
+      // resolveCurrentBattle re-maps the phase back to AI_TURN so the next
+      // tick resumes (or ends) the turn. A SETTLEMENT_BATTLE opened by
+      // tryCaptureAt owns the phase the same way -- entering a hero BATTLE
+      // here would clobber it (startBattle overwrites the phase), so the
+      // adjacency check is skipped for this move and the persist/
+      // aiAwaitingPersist bookkeeping above still runs; the settlement
+      // battle resolves via resolveSettlementBattle and re-maps to AI_TURN.
+      if (this.state.phase.kind !== "AI_TURN") {
+        break;
+      }
+      const defenderId = detectAdjacentEnemyFn(this.state, heroId);
+      if (defenderId && platoonTroopTotal(this.state.heroes[defenderId]?.stacks ?? []) > 0) {
+        this.enterBattle(heroId, defenderId);
+      }
       break;
     }
 

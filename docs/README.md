@@ -11,7 +11,7 @@ Game design and architecture documentation for the Heroes of Might & Magic-inspi
 
 ## Game vision (one paragraph)
 
-A turn-based hex adventure map where the player moves a hero, claims resource tiles by building settlements on them, and defends them against enemy heroes that wander the map. Resources accumulate per turn and fund growth. New settlements are founded via charter expeditions (hero travels to target and constructs for 10 days). Deeper systems (full army roster, tactical battlefield, capture-for-ransom) are layered on later milestones without re-architecting the base.
+A turn-based hex adventure map where the player moves a hero, claims resource tiles by building settlements on them, and defends them against enemy heroes that wander the map. Resources accumulate per turn and fund growth. New settlements are founded via charter expeditions (hero travels to target and constructs for 10 days). Deeper systems (full army roster, tactical battlefield, hero battle outcomes) are layered on later milestones without re-architecting the base.
 
 ## The design docs
 
@@ -20,7 +20,7 @@ A turn-based hex adventure map where the player moves a hero, claims resource ti
 | [resources.md](./resources.md) | 5 resource types, tile distribution, yields | ✅ Locked |
 | [settlements.md](./settlements.md) | Build cost, charter expeditions, settlement limits, capture, levels | ✅ Locked |
 | [city-view-impl-plan.md](./city-view-impl-plan.md) | Tiered (5×5/10×10/15×15) isometric settlement interior, mines, per-resource yield | ✅ Shipped (buildings + mines live; mine upgrades above Level 1 not in UI) |
-| [heroes.md](./heroes.md) | Hero movement, chartering, capture-for-ransom | ✅ Locked (movement) / 🟡 Charter implemented / ⏸️ Ransom deferred |
+| [heroes.md](./heroes.md) | Hero movement, chartering, battle outcomes (defeat removes; retreat/surrender relocate) | ✅ Locked (movement) / 🟡 Charter implemented / ✅ Battle outcomes shipped (2026-09-29) |
 | [army.md](./army.md) | Unit roster, recruitment, food/upkeep, tactical combat | ⏸️ Deferred |
 | [economy.md](./economy.md) | Per-turn economy flow tying resources + settlements | ✅ Locked |
 | [resource-gathering.md](./resource-gathering.md) | As-built resource collection & building economy: pools, rate computation, per-turn pipeline, all sinks, wired-vs-dormant building effects, findings F1–F10; plus the shipped producer-mine & deterministic cell-multiplier design | ✅ Current |
@@ -46,7 +46,7 @@ A turn-based hex adventure map where the player moves a hero, claims resource ti
 | [pr-13-dev-console.md](./pr-13-dev-console.md) | PR record (merged) for the dev console: ring-buffer event log + pin/persist; float follow-up reverted pre-merge | ✅ Current |
 | [network-map.md](./network-map.md) | Dev overlay showing live client↔API routing topology (RTT, poll-failure rate, throughput); what each metric really measures and why three of four are proxies | ✅ Current |
 | [event-system.md](./event-system.md) | Planned `core/eventBus` refactor and event catalog (Phases 1–6) | 🟡 Partially shipped — typed bus + full `GameEvent` catalog live (2026-09-27); Phase-2+ listener migration still planned |
-| [multiplayer.md](./multiplayer.md) | LAN multiplayer design: lobby/seat identity, event-cursor sync (SSE push + 2s poll backstop, 2026-09-28), and session policy — no turn timer in v1, shipped drop policy (60s disconnect detection, grace-then-skip with server auto-EndTurn), email rejoin reclaim, no AI seats | ✅ Current |
+| [multiplayer.md](./multiplayer.md) | LAN multiplayer design: lobby/seat identity, event-cursor sync (SSE push + 2s poll backstop, 2026-09-28), and session policy — no turn timer in v1, shipped drop policy (60s disconnect detection, grace-then-skip with server auto-EndTurn), email rejoin reclaim, AI enemy seats as non-lobby combatants (2026-09-29; LAN lobby humans-only in v1) | ✅ Current |
 | [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) | **Multiplayer (LAN):** lobby seat claim + `lobby` jsonb column (§3), SSE push + 2s poll backstop sync (§5.9), lobby UI (§5.12), local seat identity (§5.16) | 🟡 Built, no design doc |
 | [../.kilo/plan/](../.kilo/plan/) | Architecture plans: walkthrough + Tailscale, bloat/scalability review, module expansion plan, modal viewport overflow, fight-screen redesign, combat reveal / fog of war | 📋 Planned |
 
@@ -69,11 +69,11 @@ map.md → resources.md → settlements.md → city-view.md
 
 All major questions resolved. Remaining minor ones:
 
-1. **Ransom amount** — TBD when [army system](./army.md) ships.
+1. ~~**Ransom amount** — TBD when [army system](./army.md) ships.~~ Superseded 2026-09-29: capture-for-ransom was replaced by the shipped hero battle outcomes (defeat removes the hero; retreat/surrender relocate — see [heroes.md](./heroes.md) → Combat).
 2. **City view mine upgrades** — schema supports Level 1–3, UI ships Level 1 only.
 3. **Map fog of war** — resolved, shipped: heroes reveal a 4-hex vision ring and castles reveal by control range (`src/render/fog.ts`); unexplored tiles render under fog, and resource tiles appear only inside a vision ring.
 4. **AI chartering** — deferred; only human player can charter settlements currently.
-5. **Multiplayer design doc** — ~~never written down~~ now exists and matches the build: [multiplayer.md](./multiplayer.md) records the mechanics plus the 2026-09-27 policy decisions (no turn timer in v1; dropped seats get ~60s disconnect detection + ~2min active-turn grace, then the server auto-EndTurns — shipped 2026-09-27; no AI seats).
+5. **Multiplayer design doc** — ~~never written down~~ now exists and matches the build: [multiplayer.md](./multiplayer.md) records the mechanics plus the 2026-09-27 policy decisions (no turn timer in v1; dropped seats get ~60s disconnect detection + ~2min active-turn grace, then the server auto-EndTurns — shipped 2026-09-27) and the 2026-09-29 AI-enemy combatant seats (non-lobby; LAN lobby humans-only in v1).
 6. **~~`src/factions/` is staged but unwired~~** — resolved 2026-09-27: the directory was **deleted** (zero imports, overlapped the DB `unit_types` seed — the repo's "unwired parallel implementation" lesson). The live unit data remains the server catalog (`data/unitCatalog.ts`) and `state/units.ts`. If multi-faction rosters ship later, the concept should be resurrected in `packages/engine` + DB seed, not as client-side staged data.
 7. **Combat reveal / fog of war in battle** — the Spy action and its `scoutedBy`/`markContacted` fog were removed as half-baked; the parked idea is written up in [../.kilo/plan/2026-08-15-combat-reveal-fog-of-war.md](../.kilo/plan/2026-08-15-combat-reveal-fog-of-war.md).
 
@@ -93,9 +93,9 @@ Full details in the individual docs, but the big ones:
 - **Yield timing:** resources tick per round (all players act, then advanceRound)
 - **Schema anticipates 3 levels** but only Level 1 ships in v1 for player-founded settlements
 - **City view:** double-click settlement → city grid → build mines on resource spots
-- **Combat (current / in progress):** hero collisions on the adventure map run the **temporary default auto-resolver** at [`packages/engine/src/combat/resolveBattle.ts`](../packages/engine/src/combat/resolveBattle.ts): collision → BATTLE phase → `GameActions.maybeAutoResolveBattle()` → battle modal → `ResolveBattle` command on `POST /api/games/:name/commands`. The **tactical (manual) resolver** at [`packages/engine/src/combat/manualBattle.ts`](../packages/engine/src/combat/manualBattle.ts) + [`src/screens/combat/manualBattleArena.ts`](../src/screens/combat/manualBattleArena.ts) is the target; engine + dev Test Battle arena shipped, and wiring the manual arena in as the collision outcome is pending (the arena is dev-only today). See [`docs/army.md`](./army.md).
+- **Combat (current):** hero collisions on the adventure map open the Fight / Quick Resolve / Flee modal (2026-09-27 wiring): **Fight** plays the manual arena (`Fight` → `SubmitBattleResult`), Quick Resolve runs the server auto-resolver (`ResolveBattle`) — both through the same shared post-battle helpers on `POST /api/games/:name/commands`. **Hero outcomes (2026-09-29):** a side wiped to zero troops is **defeated** and removed from the map (record + `heroIds` + platoon rows); arena **retreat** respawns at the nearest owned settlement with all troops lost; **surrender** teleports there keeping troops (surrender gold deduction unchanged); no owned settlement → the hero stays at its cancelled position; stalemates leave both standing. The auto-resolver never concedes, so AI-involved losses are always removals. See [`docs/heroes.md`](./heroes.md) → Combat. **AI-involved collisions auto-resolve** (2026-09-29): any battle whose attacker is not the local human — AI-vs-AI or an AI attacking you — quick-resolves silently through the same predicate (the result card still shows); a human attacker keeps the Fight/Quick-Resolve/Flee modal. See [`docs/battle-view-architecture.md`](./battle-view-architecture.md).
 - **Recruitment (future):** instant at friendly settlement
-- **Hero death (future):** captured for ransom
+- **Hero death:** defeat removes the hero from the map (2026-09-29) — the old capture-for-ransom plan is superseded; arena retreat/surrender relocate the hero to the nearest owned settlement (troops lost / kept respectively)
 - **Unit cap (future):** base 10 + 1 per owned settlement
 - **No food in v1** — returns with army system, where every human unit costs 1 food/day
-- **Multiplayer (LAN) policy:** no turn timer in v1; a dropped seat gets ~60s disconnect detection + ~2min active-turn grace, then the server auto-EndTurns (shipped 2026-09-27, `server/app/dropPolicy.ts`); no AI seats — unclaimed seats stay empty. See [multiplayer.md](./multiplayer.md).
+- **Multiplayer (LAN) policy:** no turn timer in v1; a dropped seat gets ~60s disconnect detection + ~2min active-turn grace, then the server auto-EndTurns (shipped 2026-09-27, `server/app/dropPolicy.ts`); AI enemy seats (0–3 per new game, 2026-09-29) are non-lobby combatants driven by the primary client — lobby seats stay humans-only, unclaimed seats stay empty; if seat 0 is absent in a LAN game, AI turns stall. See [multiplayer.md](./multiplayer.md).
