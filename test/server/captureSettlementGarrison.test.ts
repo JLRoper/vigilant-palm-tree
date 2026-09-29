@@ -109,7 +109,7 @@ function makeDeps(row: HydratableGameRow) {
 
 test("CaptureSettlement with a live garrison is rejected (garrison_not_defeated)", async () => {
   const players: Player[] = [
-    { id: 0, faction: "player", name: "Human", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
+    { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
     { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: ["s1"] },
   ];
   const row: HydratableGameRow = {
@@ -138,7 +138,7 @@ test("CaptureSettlement with a live garrison is rejected (garrison_not_defeated)
 
 test("CaptureSettlement with an explicitly emptied garrison still captures as before", async () => {
   const players: Player[] = [
-    { id: 0, faction: "player", name: "Human", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
+    { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
     { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: ["s1"] },
   ];
   const row: HydratableGameRow = {
@@ -167,7 +167,7 @@ test("CaptureSettlement with an explicitly emptied garrison still captures as be
 
 function makePostBattleRow(withEnemySettlementOnTile: boolean): HydratableGameRow {
   const players: Player[] = [
-    { id: 0, faction: "player", name: "Human", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
+    { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
     { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: withEnemySettlementOnTile ? ["s1"] : [] },
   ];
   const settlements: Record<SettlementId, SettlementState> = { s0: makeSettlement("s0", 0, 0, 0) };

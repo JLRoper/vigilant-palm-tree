@@ -45,6 +45,8 @@ import type { Axial } from "../core/hex";
 import { getMultiplayerSync } from "../io/multiplayerSync";
 import { settings, type HorseVariant } from "../state/settings";
 import { bus } from "../core/eventBus";
+import { takeLastAppliedBuildDelta } from "./buildCommitLedger";
+import type { NetCost } from "../screens/settlements/cityView/netCost";
 
 // #100: src/state/turnController.ts calls each of the eight
 // TurnControllerHooks methods below fire-and-forget (`void this.hooks.onXxx(
@@ -67,6 +69,7 @@ export interface BuildTurnHooksOptions {
   gameMap: () => GameMap;
   rng: () => number;
   logToConsole?: boolean;
+  onPlaceBuildingsRejected?: (settlementId: SettlementId, appliedDelta: NetCost) => void;
 }
 
 let lastBattle: { attackerId: HeroId; defenderId: HeroId } | null = null;
@@ -457,6 +460,8 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         await placeBuildingsCommand(name, { actor, settlementId, buildings, initialLayout });
       } catch (e) {
+        const applied = takeLastAppliedBuildDelta(settlementId);
+        if (applied) opts.onPlaceBuildingsRejected?.(settlementId, applied);
         reportCommandFailure("Place buildings", e);
       }
     },

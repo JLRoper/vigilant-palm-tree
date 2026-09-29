@@ -56,7 +56,7 @@ function clampHumanSeatCount(n: number | undefined, playerCount: number): number
 
 function defaultPlayers(): Player[] {
   return [
-    { id: 0, faction: "player", name: "Human", color: "#d62828", heroIds: ["h0"], settlementIds: ["s0"] },
+    { id: 0, faction: "player", name: "Player 1", color: "#d62828", heroIds: ["h0"], settlementIds: ["s0"] },
     { id: 1, faction: "ai", name: "AI", color: "#1d7dd1", heroIds: ["h1"], settlementIds: ["s1"] },
   ];
 }
@@ -161,7 +161,7 @@ function makePlayers(
   for (let i = 0; i < playerCount; i++) {
     const isHuman = i < humanSeatCount;
     const faction: Player["faction"] = isHuman ? "player" : "ai";
-    const name = isHuman ? (i === 0 ? "Human" : `Human ${i + 1}`) : `AI ${i + 1 - humanSeatCount}`;
+    const name = isHuman ? `Player ${i + 1}` : `AI ${i + 1 - humanSeatCount}`;
     out.push({
       id: i,
       faction,

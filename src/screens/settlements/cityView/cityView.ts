@@ -1,5 +1,5 @@
 import type { CityViewSize } from "@heroes/engine";
-import { cityLayout, screenToGridCell } from "../../../core/cityGrid";
+import { cellsInDrawOrder, cityLayout, screenToGridCell } from "../../../core/cityGrid";
 import { drawCityView } from "../../../render/cityRenderer";
 import { buildCityScene } from "../../../render/scene/sceneBuilder/cityScene";
 import { createPaint2DDep } from "../../../render/paint2dDefaults";
@@ -10,7 +10,7 @@ import type { SpriteProvider } from "../../../render/assets";
 import type { BuildingDef, GenerationStyle } from "../../../render/cityBuildingDraw";
 import { coversCell, buildingFootprint } from "../../../render/cityBuildingDraw";
 import { generateBuildings, type GenerationPattern } from "../../../render/cityBuildingGen";
-import { netDelta } from "./netCost";
+import { advanceChargedOnCommit, netDelta, resetChargedToPlacerNet } from "./netCost";
 import { BuildingMenu, type BuildingMenuOptions } from "./buildingMenu";
 import { BuildingPlacer } from "./buildingPlacer";
 import { BuildingSelectionMenu, type SelectedBuildingEntry } from "./buildingSelectionMenu";
@@ -24,6 +24,7 @@ import type { BuildingUpgradeRequest } from "../../../state/gameState";
 import type { BuildingUpgradeCost, ProducerOutput } from "@heroes/engine";
 import { producerTurnOutput } from "@heroes/engine";
 import { CityDesignBoxManager } from "./CityDesignBoxManager";
+import { collectPanelRects, elementRect } from "./panelRects";
 
 const STYLE_KEYS: Record<string, GenerationStyle> = {
   "1": "classic",
@@ -76,7 +77,7 @@ export class CityView {
   private selectionMenu: BuildingSelectionMenu;
   private selectedKeys: Set<string> = new Set();
   private selectionAnchor: { x: number; y: number } | null = null;
-  private onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null) => void;
+  private onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null) => boolean;
   private onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean) => boolean;
   /** Net cost already charged via incremental onPlaceBuildings commits since the view opened. */
   private chargedNet: Partial<Record<ResourceType, number>> = {};
@@ -87,7 +88,7 @@ export class CityView {
   private preCitySelection: CitySelectionSnapshot | null = null;
   private onKeyDown: (e: KeyboardEvent) => void;
 
-  constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null) => void; onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean) => boolean; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string }; getSelection?: () => CitySelectionSnapshot; getFloatingPanelRects?: () => Array<PanelRect | null> }) {
+  constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null) => boolean; onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean) => boolean; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string }; getSelection?: () => CitySelectionSnapshot; getFloatingPanelRects?: () => Array<PanelRect | null> }) {
     this.paint2d = createPaint2DDep({
       spriteProvider: opts.provider,
       skybox: createSkyboxProvider(),
@@ -234,7 +235,7 @@ export class CityView {
       },
       onGenerate: () => this.regenerate(),
       onBack: () => this.handleClose(),
-    });
+    }, this.getFloatingPanelRects);
 
     window.addEventListener("keydown", this.onKeyDown);
   }
@@ -271,6 +272,8 @@ export class CityView {
       pattern: this.pattern,
       ghost,
       selectedKeys: this.selectedKeys,
+      labelOffsetY: toolbarHeight(),
+      buildableCells: this.buildableCells(),
       citySettings: {
         spriteVariant: s.spriteVariant,
         parallaxEnabled: s.parallaxEnabled,
@@ -282,8 +285,17 @@ export class CityView {
     drawCityView(ctx, nodes, this.paint2d, { viewportW, viewportH });
   }
 
-  updateMouse(canvasX: number, canvasY: number): void {
-    if (!this.isOpen()) {
+  /** Free cells for the placement tint, recomputed per draw only while the build placer is active. */
+  private buildableCells(): Set<string> {
+    const cells = new Set<string>();
+    if (!this.placer.isActive()) return cells;
+    for (const cell of cellsInDrawOrder(this.size)) {
+      if (this.placer.canPlaceAt(cell.gx, cell.gy)) cells.add(`${cell.gx},${cell.gy}`);
+    }
+    return cells;
+  }
+
+  updateMouse(canvasX: number, canvasY: number): void {    if (!this.isOpen()) {
       this.hover = null;
       return;
     }
@@ -454,6 +466,7 @@ export class CityView {
     this.placer.cancelPlacement();
     this.placer.hidePalette();
     this.placer.init(this.size, { gx: Math.floor(this.size / 2), gy: Math.floor(this.size / 2) }, buildings, this.style);
+    this.chargedNet = resetChargedToPlacerNet(this.placer.getNetCost());
     this.updateBuildButton();
   }
 
@@ -471,17 +484,9 @@ export class CityView {
   }
 
   private collectOccupiedRects(): PanelRect[] {
-    const out: PanelRect[] = [];
-    for (const rect of this.getFloatingPanelRects?.() ?? []) {
-      if (rect) out.push(rect);
-    }
-    const box = this.designBox.getElement();
-    if (box) {
-      const rect = box.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        out.push({ x: rect.left, y: rect.top, w: rect.width, h: rect.height });
-      }
-    }
+    const out = collectPanelRects(this.getFloatingPanelRects);
+    const rect = elementRect(this.designBox.getElement());
+    if (rect) out.push(rect);
     return out;
   }
 
@@ -500,14 +505,14 @@ export class CityView {
     // in-progress again).
     const delta = this.pendingNetDelta();
     const synced = this.syncedBuildings();
-    this.onClose(this.openSettlementId, synced, delta, false, null);
+    const accepted = this.onClose(this.openSettlementId, synced, delta, false, null);
     const initialLayout = this.freeInitialLayout && !this.committedInitialLayout;
-    const result = this.onPlaceBuildings(this.openSettlementId, synced, initialLayout);
+    const result = accepted ? this.onPlaceBuildings(this.openSettlementId, synced, initialLayout) : false;
+    this.chargedNet = advanceChargedOnCommit(result, this.placer.getNetCost(), this.chargedNet);
     if (result) {
       this.placer.markSynced();
       if (initialLayout) this.committedInitialLayout = true;
     }
-    this.chargedNet = { ...this.placer.getNetCost() };
     this.refreshAffordability();
     this.updateBuildButton();
   }

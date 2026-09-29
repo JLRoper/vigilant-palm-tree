@@ -17,7 +17,7 @@ export interface TileInfo {
   q: number;
   r: number;
   fogged: boolean;
-  terrain: { kind: Terrain; label: string; cost: number; passable: boolean };
+  terrain: { kind: Terrain; label: string; cost: number; passable: boolean } | null;
   deposit: {
     resource: ResourceType;
     yield: number;
@@ -174,7 +174,9 @@ export function describeTile(input: {
     q: tile.q,
     r: tile.r,
     fogged,
-    terrain: { kind, label: terrainLabel(kind), cost: TERRAIN_COST[kind], passable: isPassable(kind) },
+    terrain: fogged
+      ? null
+      : { kind, label: terrainLabel(kind), cost: TERRAIN_COST[kind], passable: isPassable(kind) },
     deposit: fogged ? null : describeDeposit(map, castles, tile.q, tile.r),
     settlement: describeSettlement(state, tile.q, tile.r, fogged, viewPlayerId),
     heroes: describeHeroes(state, heroes, tile.q, tile.r, fogged, viewPlayerId),

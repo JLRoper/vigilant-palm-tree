@@ -26,8 +26,8 @@ function makeLine(text: string, opts: { dim?: boolean; bold?: boolean } = {}): H
   return line;
 }
 
-function terrainLine(info: TileInfo): string {
-  const { label, cost, passable } = info.terrain;
+function terrainLine(terrain: NonNullable<TileInfo["terrain"]>): string {
+  const { label, cost, passable } = terrain;
   return passable ? `${label} · move cost ${cost}` : `${label} · impassable`;
 }
 
@@ -62,7 +62,8 @@ function signatureFor(info: TileInfo): string {
 }
 
 function renderLines(info: TileInfo): HTMLElement[] {
-  const lines: HTMLElement[] = [makeLine(terrainLine(info))];
+  if (!info.terrain) return [makeLine("Unexplored", { dim: true })];
+  const lines: HTMLElement[] = [makeLine(terrainLine(info.terrain))];
   if (info.fogged) lines.push(makeLine("Unexplored", { dim: true }));
   if (info.deposit) lines.push(makeLine(depositLine(info.deposit)));
   if (info.settlement) lines.push(makeLine(settlementLine(info.settlement), { bold: info.settlement.owned }));

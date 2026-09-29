@@ -628,3 +628,17 @@ test("captureAfterBattleIfNeeded is a no-op for an unknown hero id", () => {
   controller.captureAfterBattleIfNeeded("hX");
   assert.equal(controller.getState(), initial);
 });
+
+test("selectHero clears a prior settlement selection", () => {
+  const initial = makeState();
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  controller.selectSettlement("s0");
+  assert.equal(controller.getState().selectedSettlementId, "s0");
+  assert.equal(controller.getState().selectedHeroId, null);
+
+  controller.selectHero("h0");
+
+  assert.equal(controller.getState().selectedHeroId, "h0");
+  assert.equal(controller.getState().selectedSettlementId, null);
+});

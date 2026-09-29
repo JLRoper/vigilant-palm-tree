@@ -124,8 +124,9 @@ export class GameSessionManager {
     // the extra actor-vs-seat protection commandsRouter offers claimed
     // seats; an anonymous creator still claims fine, just without a bound
     // email, same as multiplayer's own anonymous-claim path.
-    const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? "Player";
-    await this.session.claimLobbySeat(created.name, 0, handle);
+    const seat = 0;
+    const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? `Player ${seat + 1}`;
+    await this.session.claimLobbySeat(created.name, seat, handle);
     const gameTiles = await this.session.getTiles(created.name);
     await this.loadGame(created, gameTiles);
     void this.session.logEvent(created.name, "new_game", {
@@ -163,8 +164,9 @@ export class GameSessionManager {
       // caller -- but doing it here binds a signed-in player's identity to
       // the seat, which is what lets commandsRouter's actor-vs-seat check
       // offer them extra protection later.
-      const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? "Player";
-      await this.session.claimLobbySeat(created.name, 0, handle);
+      const seat = 0;
+      const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? `Player ${seat + 1}`;
+      await this.session.claimLobbySeat(created.name, seat, handle);
       const tiles = await this.session.getTiles(created.name);
       await this.loadGame(created, tiles);
       void this.session.logEvent(created.name, "session_start", {

@@ -23,7 +23,7 @@ export function makePlayer(
   heroIds: HeroId[],
   settlementIds: SettlementId[],
 ): Player {
-  return { id, faction, name: faction === "player" ? "Human" : "AI", color: "#000000", heroIds, settlementIds };
+  return { id, faction, name: faction === "player" ? `Player ${id + 1}` : "AI", color: "#000000", heroIds, settlementIds };
 }
 
 export function makeHero(

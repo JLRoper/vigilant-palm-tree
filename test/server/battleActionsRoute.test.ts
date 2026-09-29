@@ -108,7 +108,7 @@ test("a signed-in seat claim stamps the row's seat from the session, not the bod
     await pool.query(
       `INSERT INTO games (name, seed, hero_q, hero_r, active_player_id, players, map_size)
        VALUES ($1, 1, 0, 0, 0, $2::jsonb, 'small')`,
-      [name, JSON.stringify([{ id: 0, faction: "player", name: "Human", color: "#000000", heroIds: [], settlementIds: [] }])],
+      [name, JSON.stringify([{ id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: [], settlementIds: [] }])],
     );
     // A real claimed session (same flow the production client uses) -- the
     // route must derive `seat` from req.playerSeat, and there is no seat

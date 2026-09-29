@@ -1,4 +1,4 @@
-import { buildHud, updateHud, canEndTurn, type HudHandles } from "@screens/shared/hud";
+import { buildHud, updateHud, canEndTurn, type HudHandles, type PathCostReadout } from "@screens/shared/hud";
 import type { PlayerId } from "../state/gameState";
 import { Toolbar, type CalendarSnapshot } from "@screens/shared/toolbar";
 import { HeroInfoMenu } from "@screens/heroes/heroInfoMenu";
@@ -11,6 +11,8 @@ import { describeTile } from "@screens/adventure/tileInfo";
 import { setMinimapReserve } from "@screens/shared/panelRail";
 import { getMinimapReserveHeight } from "../render/minimap";
 import { CityView, type CitySelectionSnapshot } from "@screens/settlements/cityView/cityView";
+import { settleNet } from "@screens/settlements/cityView/netCost";
+import { recordBuildCommit } from "../game/buildCommitLedger";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
 import type { HeroId, SettlementState } from "../state/gameState";
 import type { Axial } from "../core/hex";
@@ -223,34 +225,50 @@ export class UIManager {
       onClose: (closedId, buildings, netCost, final, preCitySelection) => {
         const gs = state().getState();
         const s = gs.settlements[closedId];
+        let written = true;
         if (s) {
-          const updatedSettlement: SettlementState = {
-            ...s,
-            buildings,
-            gold: s.gold - (netCost.gold ?? 0),
-            warehouse: {
-              ...s.warehouse,
-              wood: Math.max(0, (s.warehouse.wood ?? 0) - (netCost.wood ?? 0)),
-              stone: Math.max(0, (s.warehouse.stone ?? 0) - (netCost.stone ?? 0)),
-              iron: Math.max(0, (s.warehouse.iron ?? 0) - (netCost.iron ?? 0)),
-              arcane: Math.max(0, (s.warehouse.arcane ?? 0) - (netCost.arcane ?? 0)),
-              food: s.warehouse.food ?? 0,
+          const settled = settleNet(
+            {
+              gold: s.gold,
+              wood: s.warehouse.wood ?? 0,
+              stone: s.warehouse.stone ?? 0,
+              iron: s.warehouse.iron ?? 0,
+              arcane: s.warehouse.arcane ?? 0,
             },
-          };
-          const updated = {
-            ...gs,
-            settlements: {
-              ...gs.settlements,
-              [closedId]: updatedSettlement,
-            },
-            dirty: true,
-          };
-          state().replaceState(updated);
+            netCost,
+          );
+          if (settled.ok) {
+            recordBuildCommit(closedId, netCost);
+            const updatedSettlement: SettlementState = {
+              ...s,
+              buildings,
+              gold: settled.gold,
+              warehouse: {
+                ...s.warehouse,
+                wood: settled.wood,
+                stone: settled.stone,
+                iron: settled.iron,
+                arcane: settled.arcane,
+                food: s.warehouse.food ?? 0,
+              },
+            };
+            const updated = {
+              ...gs,
+              settlements: {
+                ...gs.settlements,
+                [closedId]: updatedSettlement,
+              },
+              dirty: true,
+            };
+            state().replaceState(updated);
+          } else {
+            written = false;
+          }
         }
         // Incremental commits (every placement/destroy while the planner is
         // open) skip the camera/select tail -- it would yank the viewport on
         // every grid click. Only a real close re-selects and re-centers.
-        if (!final) return;
+        if (!final) return written;
         // Restore the selection captured at open() instead of force-selecting
         // the closed settlement: leaving the city must hand each floating
         // panel back exactly the open/closed state it had on entry.
@@ -273,6 +291,7 @@ export class UIManager {
         if (castle) {
           viewManager.centerOn(castle.tile.q, castle.tile.r);
         }
+        return written;
       },
       onPlaceBuildings: (settlementId, buildings, initialLayout) => {
         const tc = state().getTurnController();
@@ -309,12 +328,20 @@ export class UIManager {
       lastSavedAt,
       this.hudHandles,
       localPlayerId,
+      this.hudPathReadout(),
     );
     this.refreshHeroInfoMenu(gameState, heroes);
     this.refreshSettlementInfoMenu(gameState);
     this.refreshTileInfoPanel(gameState, heroes, localPlayerId);
     this.refreshRosterMenus(gameState);
     this.toolbar?.refresh();
+  }
+
+  // F10 (playtest fixes 2026-09-29): the AdventureView owns the hovered
+  // path's cost numbers; the HUD snapshot pulls them at refresh time (the
+  // frame loop refreshes the HUD every frame, so no extra wiring needed).
+  private hudPathReadout(): PathCostReadout | null {
+    return this.viewManager?.view.pathCostReadout ?? null;
   }
 
   private refreshHeroInfoMenu(gameState: GameState, heroes: Record<string, Hero>): void {

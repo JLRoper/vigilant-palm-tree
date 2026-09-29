@@ -76,7 +76,7 @@ function makeSettlement(
 }
 
 const PLAYERS: Player[] = [
-  { id: 0, faction: "player", name: "Human", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
+  { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
   { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: ["s1"] },
 ];
 
@@ -280,7 +280,7 @@ test("TransferGold rejects when the hero is not at the settlement", async () => 
 });
 
 const SOLO_PLAYER: Player[] = [
-  { id: 0, faction: "player", name: "Human", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
+  { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
 ];
 
 test("EndTurn advances to the next player without wrapping the round", async () => {
@@ -415,7 +415,7 @@ test("EndTurn writes one resource_transactions row per auto-trade transfer that 
   // it. runAutoTrade (packages/engine/src/economy/trade.ts) should move
   // exactly ceil(100/100) = 1 food from s1 -> s0, gold-for-gold.
   const players: Player[] = [
-    { id: 0, faction: "player", name: "Human", color: "#000000", heroIds: ["h0"], settlementIds: ["s0", "s1"] },
+    { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0", "s1"] },
     { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: ["s2"] },
   ];
   const row = makeRow(
