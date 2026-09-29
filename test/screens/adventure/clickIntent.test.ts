@@ -202,6 +202,34 @@ test("F9: every user-facing rejection reason maps to a toast, drags and off-map 
   assert.equal(clickRejectionToast("something new"), null);
 });
 
+test("a 0-movement rejection reports exhaustion instead of claiming no path", () => {
+  assert.deepEqual(clickRejectionToast("impassable first step", 0), {
+    message: "Out of movement — the rest continues next turn",
+    kind: "info",
+  });
+  assert.deepEqual(clickRejectionToast("impassable first step", 2), { message: "No path there", kind: "info" }, "a genuinely unaffordable first step still reads as no path");
+});
+
+test("a hero with no movement left clicking an open tile carries the 0-movement context", () => {
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 0, 0, { movementRemaining: 0 })],
+    selectedHeroId: "h0",
+  });
+  const intent = resolve({
+    state,
+    heroes: { h0: stubHero("h0", 0, 0, 0, 0) },
+    hover: { q: 4, r: 0 },
+  });
+  assert.equal(intent.kind, "none");
+  if (intent.kind !== "none") return;
+  assert.equal(intent.reason, "impassable first step");
+  assert.equal(intent.movementRemaining, 0);
+  assert.deepEqual(clickRejectionToast(intent.reason, intent.movementRemaining), {
+    message: "Out of movement — the rest continues next turn",
+    kind: "info",
+  });
+});
+
 test("F10: a clamped move intent's cost equals the detailed split's costToSplit clamped to remaining movement", () => {
   const state = makeState({
     heroes: [makeHero("h0", 0, 0, 0, { movementRemaining: 1.5 })],

@@ -15,7 +15,7 @@ export interface ClickRejectionToast {
 // resolveAdventureClick to user-facing toast text. "movedDuringDrag" and
 // "no hover" deliberately map to null -- a drag or an off-map click is not an
 // attempted action, and toasting those would fire on every camera pan.
-export function clickRejectionToast(reason: string): ClickRejectionToast | null {
+export function clickRejectionToast(reason: string, movementRemaining?: number): ClickRejectionToast | null {
   switch (reason) {
     case "not_player_turn":
       return { message: "It's not your turn", kind: "info" };
@@ -24,8 +24,12 @@ export function clickRejectionToast(reason: string): ClickRejectionToast | null 
     case "no hero":
       return { message: "The selected hero no longer exists", kind: "error" };
     case "empty path":
-    case "impassable first step":
     case "no attack path":
+      return { message: "No path there", kind: "info" };
+    case "impassable first step":
+      if (movementRemaining !== undefined && movementRemaining <= 0) {
+        return { message: "Out of movement — the rest continues next turn", kind: "info" };
+      }
       return { message: "No path there", kind: "info" };
     case "charter_invalid":
       return { message: "Pick a highlighted hex for the new settlement", kind: "info" };
@@ -45,7 +49,7 @@ export interface MoveIntentBase {
 }
 
 export type ClickIntent =
-  | { kind: "none"; reason: string; debugPath?: Axial[] }
+  | { kind: "none"; reason: string; debugPath?: Axial[]; movementRemaining?: number }
   | { kind: "select-hero"; heroId: HeroId }
   | { kind: "select-settlement"; settlementId: string }
   | { kind: "open-charter"; targetQ: number; targetR: number }
@@ -166,7 +170,12 @@ export function resolveAdventureClick(input: ClickIntentInput): ClickIntent {
   const clamped = reachableIdx < newPath.length;
   const actualCost = Math.min(split.costToSplit, startTile.movementRemaining);
   if (reachableIdx === 0) {
-    return { kind: "none", reason: "impassable first step", debugPath: newPath };
+    return {
+      kind: "none",
+      reason: "impassable first step",
+      debugPath: newPath,
+      movementRemaining: startTile.movementRemaining,
+    };
   }
   const dest = newPath[reachableIdx - 1];
   return {

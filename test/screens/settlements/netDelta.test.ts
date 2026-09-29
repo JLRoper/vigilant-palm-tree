@@ -9,6 +9,11 @@ import {
   settleNet,
 } from "../../../src/screens/settlements/cityView/netCost";
 import { emptyWarehouse, makeSettlement, makeState } from "../../charter/_helpers";
+import {
+  pendingBuildCommitCount,
+  recordBuildCommit,
+  takeLastAppliedBuildDelta,
+} from "../../../src/game/buildCommitLedger";
 
 test("empty carts yield an empty delta", () => {
   assert.deepEqual(netDelta({}, {}), {});
@@ -140,4 +145,35 @@ test("applying an inverse delta leaves other settlements untouched", () => {
   assert.ok(rolledBack);
   assert.equal(rolledBack!.settlements["s0"].gold, 600);
   assert.equal(rolledBack!.settlements["s1"].gold, 123);
+});
+
+test("build ledger: a single pending commit is returned FIFO for rollback", () => {
+  assert.equal(pendingBuildCommitCount("ledger-solo"), 0);
+  recordBuildCommit("ledger-solo", { gold: -220, wood: -2 });
+  assert.equal(pendingBuildCommitCount("ledger-solo"), 1);
+  assert.deepEqual(takeLastAppliedBuildDelta("ledger-solo"), { gold: -220, wood: -2 });
+  assert.equal(pendingBuildCommitCount("ledger-solo"), 0);
+  assert.equal(takeLastAppliedBuildDelta("ledger-solo"), undefined);
+});
+
+test("build ledger: zero-value deltas are never recorded", () => {
+  recordBuildCommit("ledger-empty", {});
+  recordBuildCommit("ledger-empty", { gold: 0 });
+  assert.equal(pendingBuildCommitCount("ledger-empty"), 0);
+});
+
+test("build ledger: multiple pending commits drop the whole ledger and roll back nothing", () => {
+  recordBuildCommit("ledger-spam", { gold: -100 });
+  recordBuildCommit("ledger-spam", { gold: -120 });
+  assert.equal(pendingBuildCommitCount("ledger-spam"), 2);
+  assert.equal(takeLastAppliedBuildDelta("ledger-spam"), undefined);
+  assert.equal(pendingBuildCommitCount("ledger-spam"), 0, "the whole queue is dropped, not just the oldest delta");
+  assert.equal(takeLastAppliedBuildDelta("ledger-spam"), undefined);
+});
+
+test("build ledger: settlements keep independent queues", () => {
+  recordBuildCommit("ledger-a", { gold: -1 });
+  recordBuildCommit("ledger-b", { gold: -2 });
+  assert.deepEqual(takeLastAppliedBuildDelta("ledger-b"), { gold: -2 });
+  assert.deepEqual(takeLastAppliedBuildDelta("ledger-a"), { gold: -1 });
 });

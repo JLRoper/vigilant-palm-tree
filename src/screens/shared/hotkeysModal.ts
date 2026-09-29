@@ -43,7 +43,14 @@ const SECTIONS: HotkeySection[] = [
 export function openHotkeysModal(): void {
   if (document.querySelector("[data-hotkeys-modal]")) return;
 
-  const modal = openCenteredModal(document.body, "Keyboard & Mouse", 420, false);
+  const onKeyDown = (e: KeyboardEvent): void => {
+    if (e.key !== "Escape") return;
+    modal.close();
+  };
+  const modal = openCenteredModal(document.body, "Keyboard & Mouse", 420, false, true, () => {
+    document.removeEventListener("keydown", onKeyDown);
+  });
+  document.addEventListener("keydown", onKeyDown);
   modal.root.dataset.hotkeysModal = "true";
 
   for (const section of SECTIONS) {

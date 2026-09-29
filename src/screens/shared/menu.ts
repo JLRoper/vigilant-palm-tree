@@ -384,6 +384,7 @@ export function openCenteredModal(
   width = 360,
   draggable = false,
   closeable = true,
+  onClose?: () => void,
 ): PopupMenu {
   const wrapper = document.createElement("div");
   Object.assign(wrapper.style, {
@@ -407,6 +408,7 @@ export function openCenteredModal(
     draggable,
     closeable,
     onClose: () => {
+      onClose?.();
       window.removeEventListener("resize", clampIntoView);
       wrapper.remove();
     },

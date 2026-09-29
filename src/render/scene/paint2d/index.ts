@@ -84,8 +84,8 @@ const CITY_BG = "#1a1620";
 const CITY_CELL_FILL = "#2a2438";
 const CITY_CELL_STROKE = "#3a3450";
 const CITY_HOVER_STROKE = "#ffcc00";
-const CITY_BUILDABLE_FILL = "rgba(255,255,255,0.05)";
-const CITY_BUILDABLE_STROKE = "rgba(255,255,255,0.22)";
+const CITY_BUILDABLE_FILL = "rgba(255,255,255,0.09)";
+const CITY_BUILDABLE_STROKE = "rgba(255,255,255,0.32)";
 const CITY_TEXT = "#ffffff";
 const CITY_SELECTION_STROKE = "#66ccff";
 const CITY_GHOST_VALID_STROKE = "#44ff44";
@@ -928,6 +928,8 @@ export function paintCityGhostBuilding(ctx: CanvasRenderingContext2D, node: City
 export function paintCityLabel(ctx: CanvasRenderingContext2D, node: CityLabelNode, deps: Paint2DDep): void {
   ctx.save();
   ctx.globalAlpha = node.alpha;
+  ctx.shadowColor = "rgba(0,0,0,0.55)";
+  ctx.shadowBlur = 3;
   ctx.fillStyle = CITY_TEXT;
   ctx.font = `${node.fontPx}px ${deps.fontFamily}`;
   ctx.textBaseline = "top";

@@ -552,7 +552,7 @@ export class AdventureView {
     if (intent.kind === "none") {
       if (intent.debugPath) this.lastClickDebug.path = intent.debugPath;
       this.lastClickDebug.reason = intent.reason;
-      const rejection = clickRejectionToast(intent.reason);
+      const rejection = clickRejectionToast(intent.reason, intent.movementRemaining);
       if (rejection) showToast(rejection.message, rejection.kind);
       return;
     }

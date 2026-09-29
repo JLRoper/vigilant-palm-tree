@@ -465,9 +465,9 @@ test("paintCityCell: a buildable cell gets the subtle white tint fill + brighter
   const { ctx, calls } = makeRecordingCtx();
   paintCityCell(ctx, { kind: "cityCell", gx: 1, gy: 1, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: false, buildable: true }, makeNoopPaint2DDep());
   const fills = calls.filter((c) => c.name === "set:fillStyle").map((c) => c.args[0]);
-  assert.deepEqual(fills, ["#2a2438", "rgba(255,255,255,0.05)"], "base fill then the subtle buildable tint");
+  assert.deepEqual(fills, ["#2a2438", "rgba(255,255,255,0.09)"], "base fill then the buildable tint");
   const stroke = calls.find((c) => c.name === "set:strokeStyle");
-  assert.equal(stroke?.args[0], "rgba(255,255,255,0.22)", "unhovered buildable cell strokes brighter than #3a3450");
+  assert.equal(stroke?.args[0], "rgba(255,255,255,0.32)", "unhovered buildable cell strokes brighter than #3a3450");
   const lw = calls.find((c) => c.name === "set:lineWidth");
   assert.deepEqual(lw?.args, [1], "buildable keeps the 1px stroke");
 });
@@ -559,6 +559,13 @@ test("paintCityLabel: emits a fillText with the node's text and fontPx", () => {
   assert.equal(text?.args?.[2], 20);
   const font = calls.find((c) => c.name === "set:font");
   assert.ok(font?.args?.[0]?.includes("14px"), "label should use 14px font");
+  const shadowColor = calls.find((c) => c.name === "set:shadowColor");
+  assert.equal(shadowColor?.args?.[0], "rgba(0,0,0,0.55)", "label carries a dark shadow so it reads on the bright skybox");
+  const shadowBlur = calls.find((c) => c.name === "set:shadowBlur");
+  assert.equal(shadowBlur?.args?.[0], 3);
+  const shadowIdx = calls.findIndex((c) => c.name === "set:shadowColor");
+  const textIdx = calls.findIndex((c) => c.name === "fillText");
+  assert.ok(shadowIdx >= 0 && shadowIdx < textIdx, "shadow must be set before fillText");
 });
 
 test("paintBattleHex: inMoveRange uses rgba(210,210,215,0.35) fill, available uses bright gold stroke", () => {

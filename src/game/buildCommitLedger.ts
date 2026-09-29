@@ -17,10 +17,18 @@ export function recordBuildCommit(settlementId: SettlementId, delta: NetCost): v
   pending.set(settlementId, queue);
 }
 
+export function pendingBuildCommitCount(settlementId: SettlementId): number {
+  return pending.get(settlementId)?.length ?? 0;
+}
+
 export function takeLastAppliedBuildDelta(settlementId: SettlementId): NetCost | undefined {
   const queue = pending.get(settlementId);
   if (!queue || queue.length === 0) return undefined;
+  if (queue.length > 1) {
+    pending.delete(settlementId);
+    return undefined;
+  }
   const delta = queue.shift();
-  if (queue.length === 0) pending.delete(settlementId);
+  pending.delete(settlementId);
   return delta;
 }
