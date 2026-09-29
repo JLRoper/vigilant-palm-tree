@@ -4,6 +4,8 @@ export interface RecruitEntry {
   unitTypeId: string;
   goldCost: number;
   resourceCost?: Partial<Record<Exclude<ResourceType, "gold">, number>>;
+  /** Lowest building level offering this unit (default 1). */
+  minLevel?: number;
 }
 
 export interface BuildingEffect {
@@ -75,12 +77,15 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   mageGuild: {
     kind: "mageGuild",
     label: "Mage Guild",
-    description: "Arcane research and spellcraft. Recruits mages.",
+    description: "Arcane research and spellcraft. Recruits monks and mages.",
     footprint: { w: 1, h: 1 },
     buildDays: 6,
     placementCost: { gold: 400, wood: 5, stone: 8, arcane: 2 },
     upkeepPerLevel: { wood: 1, stone: 1 },
-    recruits: [{ unitTypeId: "mage", goldCost: 500, resourceCost: { arcane: 2 } }],
+    recruits: [
+      { unitTypeId: "monk", goldCost: 300, resourceCost: { arcane: 1 }, minLevel: 1 },
+      { unitTypeId: "mage", goldCost: 500, resourceCost: { arcane: 2 }, minLevel: 2 },
+    ],
     settlementEffects: { resourceYieldBonus: { arcane: 3 } },
     playerEffects: {},
   },
@@ -140,7 +145,11 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     buildDays: 5,
     placementCost: { gold: 300, wood: 10, stone: 6 },
     upkeepPerLevel: { wood: 2, stone: 1 },
-    recruits: [{ unitTypeId: "swordsman", goldCost: 200 }],
+    recruits: [
+      { unitTypeId: "swordsman", goldCost: 200, minLevel: 1 },
+      { unitTypeId: "pikeman", goldCost: 250, resourceCost: { iron: 3 }, minLevel: 2 },
+      { unitTypeId: "crusader", goldCost: 500, resourceCost: { iron: 5 }, minLevel: 3 },
+    ],
     settlementEffects: { defenseBonus: 2 },
     playerEffects: {},
   },
@@ -188,7 +197,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     buildDays: 2,
     placementCost: { gold: 80, wood: 4 },
     upkeepPerLevel: { wood: 1, stone: 0 },
-    recruits: [],
+    recruits: [{ unitTypeId: "peasant", goldCost: 25, minLevel: 1 }],
     settlementEffects: { foodPerTurn: 2, populationBonus: 20 },
     playerEffects: {},
   },
@@ -200,9 +209,24 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     buildDays: 4,
     placementCost: { gold: 350, wood: 8, stone: 5 },
     upkeepPerLevel: { wood: 1, stone: 1 },
-    recruits: [{ unitTypeId: "archer", goldCost: 250, resourceCost: { wood: 2 } }],
+    recruits: [
+      { unitTypeId: "archer", goldCost: 250, resourceCost: { wood: 2 }, minLevel: 1 },
+      { unitTypeId: "crossbowman", goldCost: 350, resourceCost: { iron: 2 }, minLevel: 2 },
+    ],
     settlementEffects: { defenseBonus: 1 },
     playerEffects: { heroAttackBonus: 1 },
+  },
+  stables: {
+    kind: "stables",
+    label: "Stables",
+    description: "Mounts and trains cavalry.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 4,
+    placementCost: { gold: 350, wood: 10, stone: 5 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [{ unitTypeId: "cavalry", goldCost: 400, resourceCost: { iron: 2 }, minLevel: 1 }],
+    settlementEffects: { defenseBonus: 1 },
+    playerEffects: {},
   },
   granary: {
     kind: "granary",

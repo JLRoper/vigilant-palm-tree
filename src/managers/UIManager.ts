@@ -10,7 +10,7 @@ import { TileInfoPanel } from "@screens/adventure/tileInfoPanel";
 import { describeTile } from "@screens/adventure/tileInfo";
 import { setMinimapReserve } from "@screens/shared/panelRail";
 import { getMinimapReserveHeight } from "../render/minimap";
-import { CityView } from "@screens/settlements/cityView/cityView";
+import { CityView, type CitySelectionSnapshot } from "@screens/settlements/cityView/cityView";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
 import type { HeroId, SettlementState } from "../state/gameState";
 import type { Axial } from "../core/hex";
@@ -136,6 +136,22 @@ export class UIManager {
       },
       onRecruitHero: (name, variant) => this.handleRecruitHero(name, variant),
       onUpgradeSettlement: () => this.handleUpgradeSettlement(),
+      getHeroesAtSettlement: (settlementId) => {
+        if (!this.gameStateManager) return [];
+        const gs = this.gameStateManager.getState();
+        const s = gs.settlements[settlementId];
+        if (!s) return [];
+        return Object.values(gs.heroes).filter(
+          (h) => h.q === s.q && h.r === s.r && h.ownerId === s.ownerId,
+        );
+      },
+      onTransferUnits: (heroId, settlementId, direction, unitTypeId, count) => {
+        if (!this.gameStateManager) return false;
+        const tc = this.gameStateManager.getTurnController();
+        if (!tc.transferUnits(heroId, settlementId, direction, unitTypeId, count)) return false;
+        this.gameStateManager.replaceState(tc.getState());
+        return true;
+      },
     });
   }
 
@@ -175,6 +191,14 @@ export class UIManager {
           state().replaceState(tc.getState());
         }
       },
+      onRecruitUnits: (building, unitTypeId, count) => {
+        const openId = this.cityView?.getOpenSettlementId();
+        if (!openId) return;
+        const tc = state().getTurnController();
+        if (tc.recruitUnits(openId, building.kind, building.gx, building.gy, unitTypeId, count)) {
+          state().replaceState(tc.getState());
+        }
+      },
       onUpgradeBuildings: (settlementId, requests) => {
         const tc = state().getTurnController();
         const result = tc.startBuildingUpgrade(settlementId, requests);
@@ -188,7 +212,15 @@ export class UIManager {
         const openId = this.cityView?.getOpenSettlementId();
         return openId ? gs.settlements[openId] : undefined;
       },
-      onClose: (closedId, buildings, netCost, final) => {
+      getSelection: (): CitySelectionSnapshot => {
+        const gs = getStateMgr().getState();
+        return { heroId: gs.selectedHeroId, settlementId: gs.selectedSettlementId };
+      },
+      getFloatingPanelRects: () => [
+        this.heroInfoMenu?.floatingRect() ?? null,
+        this.settlementInfoMenu?.floatingRect() ?? null,
+      ],
+      onClose: (closedId, buildings, netCost, final, preCitySelection) => {
         const gs = state().getState();
         const s = gs.settlements[closedId];
         if (s) {
@@ -219,8 +251,23 @@ export class UIManager {
         // open) skip the camera/select tail -- it would yank the viewport on
         // every grid click. Only a real close re-selects and re-centers.
         if (!final) return;
+        // Restore the selection captured at open() instead of force-selecting
+        // the closed settlement: leaving the city must hand each floating
+        // panel back exactly the open/closed state it had on entry.
         const tc = state().getTurnController();
-        tc.selectSettlement(closedId);
+        const after = state().getState();
+        const heroId = preCitySelection?.heroId ?? null;
+        if (heroId && after.heroes[heroId]) {
+          tc.selectHero(heroId);
+        }
+        if (tc.getState().selectedHeroId === null) {
+          const settlementId = preCitySelection?.settlementId ?? null;
+          if (settlementId && after.settlements[settlementId]) {
+            tc.selectSettlement(settlementId);
+          } else {
+            tc.clearSelection();
+          }
+        }
         state().replaceState(tc.getState());
         const castle = state().getSettlement(closedId);
         if (castle) {

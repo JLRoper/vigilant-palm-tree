@@ -1,6 +1,8 @@
 import { PopupMenu, styleButton } from "@screens/shared/menu";
 import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
 import type { SettlementState } from "../../../state/gameState";
+import { catalogFailed, catalogReady, getCachedUnit, loadUnitCatalog } from "../../../data/unitCatalog";
+import { getUnitImageUrl } from "../../../data/unitImages";
 import {
   buildingLabel,
   buildingDescription,
@@ -10,7 +12,9 @@ import {
   buildingUpkeep,
   buildingUpgradeCost,
   getBuildingEffect,
+  type RecruitEntry,
 } from "@heroes/engine";
+import type { Warehouse } from "@heroes/contracts";
 
 function formatEffectLine(kind: BuildingKind, level: number): string[] {
   const lines: string[] = [];
@@ -40,18 +44,17 @@ function formatEffectLine(kind: BuildingKind, level: number): string[] {
     lines.push(`Upkeep: ${parts.join(" ")}/turn`);
   }
 
-  const effect = getBuildingEffect(kind);
-  for (const r of effect.recruits) {
-    const costParts = [`${r.goldCost}g`];
-    if (r.resourceCost) {
-      for (const [res, v] of Object.entries(r.resourceCost)) {
-        if (v > 0) costParts.push(`${v}${res[0]}`);
-      }
-    }
-    lines.push(`Recruit: ${r.unitTypeId} (${costParts.join(" ")})`);
-  }
-
   return lines;
+}
+
+function formatRecruitCost(entry: RecruitEntry, count: number): string {
+  const parts = [`${entry.goldCost * count}g`];
+  if (entry.resourceCost) {
+    for (const [res, v] of Object.entries(entry.resourceCost)) {
+      if (v > 0) parts.push(`${v * count}${res[0]}`);
+    }
+  }
+  return parts.join(" ");
 }
 
 function formatPlacementCost(kind: BuildingKind): string {
@@ -74,7 +77,7 @@ export interface ProducerCellInfo {
 }
 
 export interface BuildingMenuOptions {
-  onRecruitArcher?: () => void;
+  onRecruitUnits?: (building: BuildingDef, unitTypeId: string, count: number) => void;
   onUpgradeTownHall?: () => void;
   onUpgradeBuilding?: (building: BuildingDef) => void;
 }
@@ -84,19 +87,41 @@ const TOWN_HALL_UPGRADE_COSTS: Record<number, { gold: number; wood: number; ston
   2: { gold: 5000, wood: 40, stone: 25, days: 12 },
 };
 
+interface ShowArgs {
+  building: BuildingDef;
+  screenX: number;
+  screenY: number;
+  settlement?: SettlementState;
+  producerCell?: ProducerCellInfo | null;
+  constructionDaysRemaining?: number;
+}
+
 export class BuildingMenu {
   private menu: PopupMenu | null = null;
-  private onRecruitArcher: (() => void) | undefined;
+  private onRecruitUnits: ((building: BuildingDef, unitTypeId: string, count: number) => void) | undefined;
   private onUpgradeTownHall: (() => void) | undefined;
   private onUpgradeBuilding: ((building: BuildingDef) => void) | undefined;
+  private lastShow: ShowArgs | null = null;
 
   constructor(opts: BuildingMenuOptions = {}) {
-    this.onRecruitArcher = opts.onRecruitArcher;
+    this.onRecruitUnits = opts.onRecruitUnits;
     this.onUpgradeTownHall = opts.onUpgradeTownHall;
     this.onUpgradeBuilding = opts.onUpgradeBuilding;
   }
 
   show(
+    building: BuildingDef,
+    screenX: number,
+    screenY: number,
+    settlement?: SettlementState,
+    producerCell?: ProducerCellInfo | null,
+    constructionDaysRemaining?: number,
+  ): void {
+    this.lastShow = { building, screenX, screenY, settlement, producerCell, constructionDaysRemaining };
+    this.showMenu(building, screenX, screenY, settlement, producerCell, constructionDaysRemaining);
+  }
+
+  private showMenu(
     building: BuildingDef,
     screenX: number,
     screenY: number,
@@ -270,23 +295,133 @@ export class BuildingMenu {
       }
     }
 
-    if (building.kind === "archeryRange") {
-      const row = document.createElement("div");
-      row.style.display = "flex";
-      row.style.justifyContent = "flex-end";
-      row.style.gap = "8px";
-
-      const recruitBtn = document.createElement("button");
-      recruitBtn.textContent = "Recruit Archer";
-      styleButton(recruitBtn, true);
-      recruitBtn.addEventListener("click", () => {
-        this.onRecruitArcher?.();
-        this.hide();
-      });
-      row.appendChild(recruitBtn);
-
-      this.menu.appendContent(row);
+    if (constructionDaysRemaining === undefined) {
+      const effect = getBuildingEffect(building.kind);
+      const entries = effect.recruits.filter((r) => (r.minLevel ?? 1) <= building.level);
+      if (!catalogReady() && !catalogFailed()) {
+        void loadUnitCatalog().then(() => {
+          if (this.menu && this.lastShow && this.lastShow.building === building) {
+            this.show(this.lastShow.building, this.lastShow.screenX, this.lastShow.screenY, this.lastShow.settlement, this.lastShow.producerCell, this.lastShow.constructionDaysRemaining);
+          }
+        });
+      }
+      for (const entry of entries) {
+        this.menu.appendContent(this.buildRecruitRow(building, entry, settlement));
+      }
     }
+  }
+
+  private buildRecruitRow(building: BuildingDef, entry: RecruitEntry, settlement?: SettlementState): HTMLDivElement {
+    const wrap = document.createElement("div");
+    Object.assign(wrap.style, {
+      marginTop: "4px",
+      paddingTop: "6px",
+      borderTop: "1px solid rgba(255,255,255,0.08)",
+    });
+
+    const row = document.createElement("div");
+    Object.assign(row.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "6px",
+    });
+
+    const icon = document.createElement("img");
+    icon.src = getUnitImageUrl(entry.unitTypeId);
+    Object.assign(icon.style, {
+      width: "24px",
+      height: "24px",
+      imageRendering: "pixelated",
+      objectFit: "contain",
+      flexShrink: "0",
+    });
+    icon.alt = entry.unitTypeId;
+    row.appendChild(icon);
+
+    const name = document.createElement("span");
+    name.textContent = getCachedUnit(entry.unitTypeId)?.name ?? entry.unitTypeId;
+    name.style.flex = "1";
+    name.style.fontSize = "11px";
+    row.appendChild(name);
+
+    const countInput = document.createElement("input");
+    countInput.type = "number";
+    countInput.min = "1";
+    countInput.max = "99";
+    countInput.value = "1";
+    Object.assign(countInput.style, {
+      width: "46px",
+      padding: "2px 4px",
+      fontSize: "11px",
+      background: "#0e0e0e",
+      color: "#eee",
+      border: "1px solid rgba(255,255,255,0.2)",
+      borderRadius: "3px",
+      fontFamily: "inherit",
+      boxSizing: "border-box",
+    });
+    row.appendChild(countInput);
+
+    const totalRow = document.createElement("div");
+    Object.assign(totalRow.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginTop: "4px",
+    });
+
+    const total = document.createElement("span");
+    total.style.fontSize = "10px";
+    total.style.opacity = "0.75";
+    total.style.fontVariantNumeric = "tabular-nums";
+    totalRow.appendChild(total);
+
+    const recruitBtn = document.createElement("button");
+    recruitBtn.textContent = "Recruit";
+    styleButton(recruitBtn, true);
+    recruitBtn.style.padding = "2px 8px";
+    recruitBtn.style.fontSize = "11px";
+    totalRow.appendChild(recruitBtn);
+
+    const clampCount = (): number => {
+      const parsed = parseInt(countInput.value, 10);
+      if (!Number.isInteger(parsed) || parsed < 1) return 1;
+      return Math.min(99, parsed);
+    };
+    const canAfford = (n: number): boolean => {
+      if (!settlement) return false;
+      if (settlement.gold < entry.goldCost * n) return false;
+      if (entry.resourceCost) {
+        for (const [res, v] of Object.entries(entry.resourceCost)) {
+          if (v > 0 && (settlement.warehouse[res as keyof Warehouse] ?? 0) < v * n) return false;
+        }
+      }
+      return true;
+    };
+    const refresh = (): void => {
+      const n = clampCount();
+      total.textContent = formatRecruitCost(entry, n);
+      const afford = canAfford(n);
+      recruitBtn.disabled = !afford;
+      recruitBtn.style.opacity = afford ? "1" : "0.4";
+      recruitBtn.style.cursor = afford ? "pointer" : "not-allowed";
+    };
+
+    countInput.addEventListener("input", refresh);
+    countInput.addEventListener("blur", () => {
+      countInput.value = String(clampCount());
+      refresh();
+    });
+    recruitBtn.addEventListener("click", () => {
+      const n = clampCount();
+      this.onRecruitUnits?.(building, entry.unitTypeId, n);
+      this.hide();
+    });
+    refresh();
+
+    wrap.appendChild(row);
+    wrap.appendChild(totalRow);
+    return wrap;
   }
 
   hide(): void {

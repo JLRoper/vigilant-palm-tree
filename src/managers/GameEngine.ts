@@ -24,6 +24,7 @@ import { mountPersistentDevConsole, type DevConsoleHandle } from "../debug/devCo
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { attachCommandFailureToasts } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
+import { createLogPanel } from "@screens/shared/logPanel";
 import { getEntityMirror } from "../io/multiplayerSync";
 
 export class GameEngine {
@@ -212,6 +213,11 @@ export class GameEngine {
     // while a disconnected seat holds the active turn (mp:presenceUpdated
     // + mp:stateChanged off the bus).
     attachMpPresenceHint();
+    // Log Message Panel (plan 2026-09-28-sse-event-push.md, use case 1):
+    // attach is unconditional like the toasts above -- the panel itself
+    // gates visibility and buffering on settings().showLogPanel, so the
+    // settings toggle works mid-session without re-attaching.
+    createLogPanel();
   }
 
   // =========================================================================

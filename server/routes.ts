@@ -1,25 +1,31 @@
 ﻿import { Router } from "express";
 import { pool, withTransaction } from "./db";
-import { GameMap, type MapSize } from "@heroes/engine";
-import { mulberry32 } from "@heroes/engine";
-import { makeInitialStatePayload } from "../src/game/initState";
-import { applyEndOfTurnDetailed } from "@heroes/engine";
-import type { AutoTradeTransfer } from "@heroes/contracts";
-import type { PoolClient } from "pg";
+import {
+  applyEndOfTurnDetailed,
+  applyHeroUpkeep,
+  GameMap,
+  isHealthy,
+  makeInitialStatePayload,
+  mulberry32,
+  validateGameRow,
+  type MapSize,
+  type UnitType,
+} from "@heroes/engine";
 import type {
+  AutoTradeTransfer,
   GameState,
   HeroState,
   Player,
   SettlementState,
-} from "../src/state/gameState";
-import type { UnitType } from "@heroes/engine";
+} from "@heroes/contracts";
+import type { PoolClient } from "pg";
 import { assetRouter } from "./assetRoutes";
 import { authRouter, attachAuth } from "./auth";
 import { invalidateMembershipCache } from "./middleware/attachPlayerSeat";
-import { validateGameRow, isHealthy } from "@heroes/engine";
 import { commandsRouter } from "./http/routes/commands";
 import { telemetryRouter } from "./http/routes/telemetry";
 import { battleActionsRouter } from "./http/routes/battleActions";
+import { eventStreamRouter } from "./http/routes/eventStream";
 
 export const router = Router();
 
@@ -28,6 +34,7 @@ router.use("/auth", authRouter);
 router.use("/games/:name/commands", commandsRouter);
 router.use("/games/:name/telemetry", telemetryRouter);
 router.use("/games/:name/battle-actions", battleActionsRouter);
+router.use("/games/:name/events/stream", eventStreamRouter);
 
 type EnemyPos = { q: number; r: number };
 type TileRow = {
@@ -142,12 +149,17 @@ type UnitTypeRow = {
   advantage_type: UnitType["advantageType"];
   specialty: string;
   specialty_priority: number;
+  tier: number;
+  upkeep_gold: number;
+  upkeep_food: number;
+  range: number;
 };
 
 router.get("/units", async (_req, res) => {
   try {
     const r = await pool.query<UnitTypeRow>(
-      `SELECT id, name, attack, defence, health, speed, description, advantage_type, specialty, specialty_priority
+      `SELECT id, name, attack, defence, health, speed, description, advantage_type, specialty, specialty_priority,
+              tier, upkeep_gold, upkeep_food, range
          FROM unit_types ORDER BY attack ASC, id ASC`
     );
     const units: UnitType[] = r.rows.map((row) => ({
@@ -161,6 +173,10 @@ router.get("/units", async (_req, res) => {
       advantageType: row.advantage_type,
       specialty: row.specialty,
       specialtyPriority: row.specialty_priority,
+      tier: row.tier as UnitType["tier"],
+      upkeepGold: row.upkeep_gold,
+      upkeepFood: row.upkeep_food,
+      range: row.range,
     }));
     res.json(units);
   } catch (err) {
@@ -595,16 +611,7 @@ router.post("/games/:name/end-turn", async (req, res) => {
       // Apply weekly upkeep when wrapping into a new round on a day divisible by 7.
       let workingHeroes: Record<string, HeroState> = incomingState.heroes;
       if (wrapped && newDay % 7 === 0) {
-        const updated: Record<string, HeroState> = { ...incomingState.heroes };
-        for (const [id, h] of Object.entries(incomingState.heroes)) {
-          const cost = (h.troops ?? 1) * 1;
-          if ((Number(h.gold) || 0) >= cost) {
-            updated[id] = { ...h, gold: (Number(h.gold) || 0) - cost };
-          } else {
-            updated[id] = { ...h, gold: 0, troops: (Number(h.gold) || 0) };
-          }
-        }
-        workingHeroes = updated;
+        workingHeroes = applyHeroUpkeep(incomingState.heroes);
       }
 
       // Legacy `gold` column is the sum of all players' purses (backward compat).

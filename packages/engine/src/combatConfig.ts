@@ -45,10 +45,10 @@ export const DEFAULT_GRID_ROWS = 13;
 export const DEFAULT_OBSTACLE_COUNT = 8;
 export const DEFAULT_MAX_ROUNDS = 30;
 
-// UnitType has no numeric range stat yet, so the manual battle arena
-// (combat/manualBattle.ts) applies this one flat range to any platoon
-// whose entries are all advantageType "ranged" — melee/cavalry/monster
-// platoons always need hex-adjacency instead.
+// Legacy flat ranged range, kept for callers that predate the per-unit
+// range stat. The manual battle engine now reads UnitType.range per platoon
+// via platoonRange() (combat/manualBattle.ts); missing catalog stats default
+// to 1 there, not to this value.
 export const RANGED_ATTACK_RANGE = 6;
 
 // ── Morale & fatigue (docs/morale-fatigue-plan.md) ──────────────────────────

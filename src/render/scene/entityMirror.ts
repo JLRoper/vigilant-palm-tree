@@ -85,6 +85,9 @@ export class EntityMirror {
       case "TradeRouteCreated":
       case "TradeRouteUpdated":
       case "TradeRouteRemoved":
+      case "UnitsRecruited":
+      case "UnitsTransferred":
+      case "SettlementBattleResolved":
         return false;
       default: {
         const exhaustive: never = event;

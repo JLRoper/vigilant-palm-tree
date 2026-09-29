@@ -16,8 +16,11 @@ design rationale in [../.kilo/plan/2026-08-17-issue-51-network-map.md](../.kilo/
 
 **Read this before trusting a number on the overlay.** Issue #51 asked for a
 P2P/relay network map with packet loss and bandwidth. heroes-js has no socket
-transport — multiplayer is a 2s HTTP poll against one Express API
-(`src/io/multiplayerSync.ts`). Three of the four metrics are therefore proxies,
+transport — state sync is a 2s HTTP poll backstopped by the SSE event stream
+(`GET /events/stream`, shipped 2026-09-28; `src/io/multiplayerSync.ts`), and
+**every metric here is still derived from the poll cycle only** — the SSE
+connection carries no telemetry, so sub-second push latency shows up in no
+number below. Three of the four metrics are therefore proxies,
 and the overlay says so in its own subtitle:
 
 | Field | What it really is | Real measurement? |

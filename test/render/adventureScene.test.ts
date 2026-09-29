@@ -64,9 +64,35 @@ test("an owned hero's vision clears fog and the hero itself is drawn", () => {
   assert.equal(node.ownerId, 0);
   assert.deepEqual(node.world, axialToPixel(0, 0));
   assert.equal(node.scaleY, 1.0, "not moving -> no squash/stretch");
+  assert.equal(node.runFrame, 0, "not moving -> base sprite");
   assert.equal(node.facingDirection, "n");
   assert.equal(node.color, stubColorForOwner(0));
   assert.equal(node.selected, false);
+});
+
+test("runFrame: moving heroes alternate poses on moveProgress halves, stationary stays 0", () => {
+  const map = makeGrassMap(3, 1);
+  const stationary = new Hero("h0", "Hero", 0, 0, "player", 0);
+  const firstHalf = new Hero("h1", "Hero", 0, 0, "player", 0);
+  firstHalf.moving = true;
+  firstHalf.moveProgress = 0.25;
+  const secondHalf = new Hero("h2", "Hero", 0, 0, "player", 0);
+  secondHalf.moving = true;
+  secondHalf.moveProgress = 0.75;
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [stationary, firstHalf, secondHalf],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const heroNodes = nodesOfKind<HeroNode>(nodes, "hero");
+  const byId = new Map(heroNodes.map((n) => [n.heroId, n]));
+  assert.equal(byId.get("h0")!.runFrame, 0);
+  assert.equal(byId.get("h1")!.runFrame, 0, "moveProgress < 0.5 is the base pose");
+  assert.equal(byId.get("h2")!.runFrame, 1, "moveProgress >= 0.5 is the frame-2 pose");
 });
 
 test("resource icons only render on visible tiles", () => {

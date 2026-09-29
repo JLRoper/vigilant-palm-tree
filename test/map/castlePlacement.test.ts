@@ -24,7 +24,7 @@ test("clampCastleCount clamps below MIN to MIN", () => {
 });
 
 test("clampCastleCount clamps above MAX to MAX", () => {
-  assert.equal(clampCastleCount(6), CASTLE_COUNT_MAX);
+  assert.equal(clampCastleCount(CASTLE_COUNT_MAX + 1), CASTLE_COUNT_MAX);
   assert.equal(clampCastleCount(99), CASTLE_COUNT_MAX);
 });
 
@@ -34,10 +34,12 @@ test("clampCastleCount returns DEFAULT for non-finite", () => {
 });
 
 test("clampCastleCount accepts values in range", () => {
-  assert.equal(clampCastleCount(2), 2);
-  assert.equal(clampCastleCount(3), 3);
-  assert.equal(clampCastleCount(4), 4);
-  assert.equal(clampCastleCount(5), 5);
+  assert.equal(clampCastleCount(CASTLE_COUNT_MIN), CASTLE_COUNT_MIN);
+  assert.equal(clampCastleCount(CASTLE_COUNT_DEFAULT), CASTLE_COUNT_DEFAULT);
+  assert.equal(clampCastleCount(CASTLE_COUNT_MAX), CASTLE_COUNT_MAX);
+  for (let n = CASTLE_COUNT_MIN; n <= CASTLE_COUNT_MAX; n++) {
+    assert.equal(clampCastleCount(n), n, `count ${n} is in range and must pass through`);
+  }
 });
 
 test("defaultCastleSeedFromMapSeed is non-zero and deterministic", () => {
@@ -51,34 +53,47 @@ test("defaultCastleSeedFromMapSeed is non-zero and deterministic", () => {
 
 test("generateCastles returns exactly castleCount castles", () => {
   const map = newMap(42);
-  for (const n of [2, 3, 4, 5]) {
-    const castles = generateCastles(map, { castleSeed: 1, castleCount: n });
+  for (const n of [CASTLE_COUNT_MIN, 5, 6]) {
+    const castles = generateCastles(map, { castleSeed: 1, castleCount: n, playerCount: 3 });
     assert.equal(castles.length, n, `count ${n}: expected ${n} castles, got ${castles.length}`);
   }
 });
 
-test("generateCastles assigns roles in order: player L1, AI L2, rest L3 neutral", () => {
+test("generateCastles clamps below-MIN castleCount up to CASTLE_COUNT_MIN", () => {
   const map = newMap(42);
-  const castles = generateCastles(map, { castleSeed: 1, castleCount: 5 });
+  const castles = generateCastles(map, { castleSeed: 1, castleCount: 2, playerCount: 3 });
+  assert.equal(castles.length, CASTLE_COUNT_MIN);
+});
+
+test("generateCastles assigns roles in order: player L1 + player L2, AI L3, rest neutral L3", () => {
+  const map = newMap(42);
+  const castles = generateCastles(map, { castleSeed: 1, castleCount: 5, playerCount: 3 });
   assert.equal(castles[0].ownerId, 0);
   assert.equal(castles[0].level, 1);
-  assert.equal(castles[1].ownerId, 1);
+  assert.equal(castles[1].ownerId, 0);
   assert.equal(castles[1].level, 2);
-  for (let i = 2; i < castles.length; i++) {
+  assert.equal(castles[2].ownerId, 1);
+  assert.equal(castles[2].level, 3);
+  assert.equal(castles[3].ownerId, 2);
+  assert.equal(castles[3].level, 3);
+  for (let i = 4; i < castles.length; i++) {
     assert.equal(castles[i].ownerId, null);
     assert.equal(castles[i].level, 3);
   }
 });
 
-test("generateCastles places player in left half and AI in right half", () => {
+test("generateCastles places the player's first castle left and second right", () => {
   const map = newMap(42);
-  const castles = generateCastles(map, { castleSeed: 1, castleCount: 3 });
+  const castles = generateCastles(map, { castleSeed: 1, castleCount: 3, playerCount: 2 });
   const p = playerCastle(castles);
   const a = aiCastle(castles);
   assert.ok(p, "player castle present");
   assert.ok(a, "ai castle present");
   assert.ok(p!.tile.q < map.width / 2, `player q=${p!.tile.q} should be < ${map.width / 2}`);
-  assert.ok(a!.tile.q >= map.width / 2, `ai q=${a!.tile.q} should be >= ${map.width / 2}`);
+  const second = castles[1];
+  assert.equal(second.ownerId, 0, "second castle belongs to the player");
+  assert.ok(second.tile.q >= map.width / 2, `second player castle q=${second.tile.q} should be >= ${map.width / 2}`);
+  assert.equal(a!.level, 3, "ai castle is level 3");
 });
 
 test("generateCastles respects edge buffer", () => {

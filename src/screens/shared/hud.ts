@@ -1,5 +1,5 @@
 import type { GameState, PlayerId } from "../../state/gameState";
-import { effectiveIncome, playerWealth } from "@heroes/engine";
+import { effectiveIncome, playerWealth, platoonTroopTotal } from "@heroes/engine";
 
 export { canEndTurn } from "@heroes/engine";
 
@@ -67,8 +67,8 @@ function playerEffectiveIncome(state: GameState, ownerId: PlayerId): string {
 
 function playerUpkeep(state: GameState, ownerId: PlayerId): string {
   const owned = Object.values(state.heroes).filter((h) => h.ownerId === ownerId);
-  const cost = owned.reduce((acc, h) => acc + h.troops, 0);
-  return `Empire Upkeep: ${cost}g/week`;
+  const cost = owned.reduce((acc, h) => acc + platoonTroopTotal(h.stacks), 0);
+  return `Empire Upkeep: ${cost}g + ${cost} food/wk`;
 }
 
 function formatTime(iso: string): string {

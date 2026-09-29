@@ -16,7 +16,7 @@ Per **round** (all players act, then `advanceRound`):
 4. **Consumption** — active player's settlements consume food and building upkeep from warehouses.
 5. **Morale decay** — active player's settlements lose morale based on deficits.
 6. **Effective income** — `population × goldTax × (morale / 100)` is added to each settlement's treasury.
-7. **Advance round** — day increments, all heroes get movement reset, hero weekly upkeep (1g/troop every 7 days), settlement population growth (weekly), upgrade timer advancement.
+7. **Advance round** — day increments, all heroes get movement reset, hero weekly upkeep (1g/troop every 7 days), **garrison weekly upkeep** (1g/troop from each settlement's treasury + 1 food/troop from its warehouse, trimming stacks from the end when short — `applyGarrisonUpkeep`), settlement population growth (weekly), upgrade timer advancement.
 8. **Charter advancement** — constructing charters decrement `daysRemaining`; completed charters spawn new settlements.
 9. **Upgrade advancement** — active settlement and town hall upgrades decrement `daysRemaining`; completed upgrades apply level-up (rates, spots, TH level).
 
@@ -33,7 +33,7 @@ Warehouse resources held per-settlement:
 - Spent on charter provisioning (20 wood + 15 stone from settlement warehouse)
 - Traded between owned settlements (manual or auto-trade)
 - Consumed by building upkeep
-- (future) `food` — for army upkeep, deferred
+- `food` — consumed by population growth checks and the weekly **garrison upkeep** (1/troop); no longer deferred
 
 ## Charter expedition costs
 

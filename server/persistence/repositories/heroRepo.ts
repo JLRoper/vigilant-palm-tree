@@ -106,8 +106,8 @@ export function createHeroRepo(db: Queryable): HeroRepo {
       const heroIds = heroesResult.rows.map((h) => h.id);
       const platoonsResult = await db.query<PlatoonRow>(
         `SELECT hero_id, stack_index, unit_type_id, count FROM hero_platoons
-         WHERE hero_id = ANY($1::text[]) ORDER BY hero_id, stack_index, unit_type_id`,
-        [heroIds],
+         WHERE game_id = $1 AND hero_id = ANY($2::text[]) ORDER BY hero_id, stack_index, unit_type_id`,
+        [gameId, heroIds],
       );
       const platoonsByHero = new Map<string, PlatoonRow[]>();
       for (const row of platoonsResult.rows) {
@@ -135,8 +135,7 @@ export function createHeroRepo(db: Queryable): HeroRepo {
                                 previous_r, previous_movement_remaining, trail, gold, troops,
                                 is_chartering, charter_id, horse_variant, wagons, resources)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18::jsonb)
-           ON CONFLICT (id) DO UPDATE SET
-             game_id = EXCLUDED.game_id,
+           ON CONFLICT (game_id, id) DO UPDATE SET
              name = EXCLUDED.name,
              owner_id = EXCLUDED.owner_id,
              q = EXCLUDED.q,
@@ -178,13 +177,16 @@ export function createHeroRepo(db: Queryable): HeroRepo {
         // Stacks are always replaced wholesale along with their parent hero
         // (never diffed entry-by-entry) -- same full-sync rule as the
         // heroes table itself, and simpler than reconciling stack reorders.
-        await db.query(`DELETE FROM hero_platoons WHERE hero_id = $1`, [hero.id]);
+        await db.query(`DELETE FROM hero_platoons WHERE game_id = $1 AND hero_id = $2`, [
+          gameId,
+          hero.id,
+        ]);
         for (let stackIndex = 0; stackIndex < hero.stacks.length; stackIndex++) {
           for (const entry of hero.stacks[stackIndex].entries) {
             await db.query(
-              `INSERT INTO hero_platoons (hero_id, stack_index, unit_type_id, count)
-               VALUES ($1, $2, $3, $4)`,
-              [hero.id, stackIndex, entry.unitTypeId, entry.count],
+              `INSERT INTO hero_platoons (game_id, hero_id, stack_index, unit_type_id, count)
+               VALUES ($1, $2, $3, $4, $5)`,
+              [gameId, hero.id, stackIndex, entry.unitTypeId, entry.count],
             );
           }
         }

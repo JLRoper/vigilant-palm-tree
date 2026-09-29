@@ -291,6 +291,10 @@ status bar / battle row / action + log bar:
   side. The latch survives the cursor moving onto one of the approach
   hexes, so clicking that hex directly also works. **Melee only** —
   ranged platoons shoot from where they stand and get their own help text.
+  Attack range is **per platoon**: `platoonRange` takes the minimum
+  per-unit `range` stat across the platoon's entries (catalog-driven;
+  `unit_types.range` since migration 015), replacing the old flat
+  `RANGED_ATTACK_RANGE` constant.
 - **AI turn.** Stepped on a timer — telegraph the acting platoon with a
   white ring (~320ms), then resolve and repaint (~260ms) — rather than
   resolved synchronously in one repaint.
@@ -395,7 +399,7 @@ used):
 | `packages/engine/src/combat/grid.ts` | Engine | `makeBattleGrid` (odd-r offset), `deploymentPosition`, `columnOf` |
 | `packages/engine/src/combat/damage.ts` | Engine | Damage math (attacker fatigue/morale scale `effAttack`, defender fatigue scales `effDefense`) + `totalHealth` / `estimateWinChance` estimators |
 | `packages/engine/src/combat/resolveBattle.ts` | Engine | Auto-resolver turn loop; `resolveAttack` (the shared fatigue/morale seam), `effectiveSelfRetreatHpPct` (low morale routs earlier) |
-| `packages/engine/src/combat/manualBattle.ts` | Engine | Interactive engine; `getApproachHexes`, `attackFromHex`, `castSpell`, `getValidSpellTargets`, `planAiTurn`, `retreatHero`, `finalizeManualBattle`, `timeOfDayForRound` |
+| `packages/engine/src/combat/manualBattle.ts` | Engine | Interactive engine; `platoonRange` (min per-unit `range` stat across the platoon's entries — the single source of attack-range truth), `getApproachHexes`, `attackFromHex`, `castSpell`, `getValidSpellTargets`, `planAiTurn`, `retreatHero`, `finalizeManualBattle`, `timeOfDayForRound` |
 | `packages/engine/src/combat/spells.ts` | Engine | Spell catalog (Magic Arrow, Bless), `maxManaFor`/`spellDamageFor`, `regenerateHeroMana` (day-tick refill), `activeEffectMultiplier`/`pruneExpiredEffects`, `spellLoadoutForHero` backfill |
 | `packages/engine/src/combat/types.ts` | Engine | `BattleResult`, `Combatant` (incl. `morale`/`fatigue`/`activeEffects`), `CombatEffect` (`damage`/`spell_damage`/`spell_buff`), `BattleLogEntry` (incl. `morale_change`/`spell_cast`), `BattleSnapshot` |
 | `packages/engine/src/combatConfig.ts` | Engine | All combat tunables: type advantage, retreat loss, the morale/fatigue block, spell costs/power/buff duration |
@@ -437,8 +441,9 @@ used):
   client arena. `manualBattle` imports `resolveBattle` for shared
   helpers (`pickTarget`), not the other way around.
 - **Approach-hex selection is melee-only.** `getApproachHexes` and
-  `attackFromHex` reject ranged actors; ranged platoons attack from
-  where they stand.
+  `attackFromHex` reject ranged actors (any platoon with `platoonRange`
+  > 1); ranged platoons attack from where they stand, within their
+  per-unit `range` (min across the platoon's entries).
 - **`attackFromHex` validates before it moves.** Everything is checked
   up front, so a rejected move-and-attack can never leave a platoon
   half-committed.

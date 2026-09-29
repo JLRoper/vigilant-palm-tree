@@ -15,6 +15,9 @@ import { BuildingMenu, type BuildingMenuOptions } from "./buildingMenu";
 import { BuildingPlacer } from "./buildingPlacer";
 import { BuildingSelectionMenu, type SelectedBuildingEntry } from "./buildingSelectionMenu";
 import { openConfirmDialog } from "@screens/shared/confirmDialog";
+import { loadPanelGeometry } from "@screens/shared/panelLayout";
+import { resolvePanelPlacement, type PanelRect } from "@screens/shared/panelPlacement";
+import { toolbarHeight } from "@screens/shared/panelRail";
 import { settings } from "../../../state/settings";
 import type { SettlementState } from "../../../state/gameState";
 import type { BuildingUpgradeRequest } from "../../../state/gameState";
@@ -38,6 +41,15 @@ const PATTERN_KEYS: Record<string, GenerationPattern> = {
   "%": "clustered",
   "^": "sampler",
 };
+
+/** Pre-city selection, captured at open() so close can restore the exact panel state the player left behind. */
+export interface CitySelectionSnapshot {
+  heroId: string | null;
+  settlementId: string | null;
+}
+
+const PALETTE_W = 240;
+const PALETTE_H = 480;
 
 export class CityView {
   private designBox = new CityDesignBoxManager();
@@ -64,22 +76,25 @@ export class CityView {
   private selectionMenu: BuildingSelectionMenu;
   private selectedKeys: Set<string> = new Set();
   private selectionAnchor: { x: number; y: number } | null = null;
-  private onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean) => void;
+  private onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null) => void;
   private onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean) => boolean;
   /** Net cost already charged via incremental onPlaceBuildings commits since the view opened. */
   private chargedNet: Partial<Record<ResourceType, number>> = {};
   private getSettlement: () => SettlementState | undefined;
   private onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string };
+  private getSelection?: () => CitySelectionSnapshot;
+  private getFloatingPanelRects?: () => Array<PanelRect | null>;
+  private preCitySelection: CitySelectionSnapshot | null = null;
   private onKeyDown: (e: KeyboardEvent) => void;
 
-  constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean) => void; onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean) => boolean; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string } }) {
+  constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null) => void; onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean) => boolean; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string }; getSelection?: () => CitySelectionSnapshot; getFloatingPanelRects?: () => Array<PanelRect | null> }) {
     this.paint2d = createPaint2DDep({
       spriteProvider: opts.provider,
       skybox: createSkyboxProvider(),
       colorForOwner: () => this.ownerColor,
     });
     this.buildingMenu = new BuildingMenu({
-      onRecruitArcher: opts.onRecruitArcher,
+      onRecruitUnits: opts.onRecruitUnits,
       onUpgradeTownHall: opts.onUpgradeTownHall,
       onUpgradeBuilding: (building) => {
         const settlement = this.getSettlement();
@@ -97,6 +112,8 @@ export class CityView {
     this.onPlaceBuildings = opts.onPlaceBuildings;
     this.getSettlement = opts.getSettlement;
     this.onUpgradeBuildings = opts.onUpgradeBuildings;
+    this.getSelection = opts.getSelection;
+    this.getFloatingPanelRects = opts.getFloatingPanelRects;
     this.onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (this.selectionMenu.isOpen()) {
@@ -177,6 +194,7 @@ export class CityView {
     this.hover = null;
     this.selectedKeys.clear();
     this.selectionAnchor = null;
+    this.preCitySelection = this.getSelection?.() ?? null;
 
     const initialBuildings = buildings && buildings.length > 0
       ? buildings
@@ -311,7 +329,7 @@ export class CityView {
     }
 
     // inspection / selection mode
-    const building = this.placer.buildings.find((b) => coversCell(b, gx, gy));
+    const building = this.syncedBuildings().find((b) => coversCell(b, gx, gy));
     if (!building) {
       this.buildingMenu.hide();
       if (!ctrlLike) this.clearSelection();
@@ -371,7 +389,7 @@ export class CityView {
       const [gxs, gys, kind] = key.split(",");
       const gx = parseInt(gxs);
       const gy = parseInt(gys);
-      const b = this.placer.buildings.find((x) => x.gx === gx && x.gy === gy && x.kind === kind);
+      const b = this.syncedBuildings().find((x) => x.gx === gx && x.gy === gy && x.kind === kind);
       if (b) entries.push({ key, building: b });
     }
     const settlement = this.getSettlement() ?? null;
@@ -440,10 +458,31 @@ export class CityView {
   }
 
   private openBuildPalette(): void {
-    const x = 12;
-    const y = Math.max(20, window.innerHeight - 480);
-    this.placer.showPalette(document.body, x, y);
+    const stored = loadPanelGeometry("buildPalette");
+    const desired = stored ?? { x: 12, y: Math.max(20, window.innerHeight - PALETTE_H) };
+    const resolved = resolvePanelPlacement(
+      { x: desired.x, y: desired.y, w: PALETTE_W, h: PALETTE_H },
+      this.collectOccupiedRects(),
+      { width: window.innerWidth, height: window.innerHeight },
+      toolbarHeight(),
+    );
+    this.placer.showPalette(document.body, resolved.x, resolved.y);
     this.updateBuildButton();
+  }
+
+  private collectOccupiedRects(): PanelRect[] {
+    const out: PanelRect[] = [];
+    for (const rect of this.getFloatingPanelRects?.() ?? []) {
+      if (rect) out.push(rect);
+    }
+    const box = this.designBox.getElement();
+    if (box) {
+      const rect = box.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        out.push({ x: rect.left, y: rect.top, w: rect.width, h: rect.height });
+      }
+    }
+    return out;
   }
 
   private persistBuildings(): void {
@@ -461,7 +500,7 @@ export class CityView {
     // in-progress again).
     const delta = this.pendingNetDelta();
     const synced = this.syncedBuildings();
-    this.onClose(this.openSettlementId, synced, delta, false);
+    this.onClose(this.openSettlementId, synced, delta, false, null);
     const initialLayout = this.freeInitialLayout && !this.committedInitialLayout;
     const result = this.onPlaceBuildings(this.openSettlementId, synced, initialLayout);
     if (result) {
@@ -540,7 +579,7 @@ export class CityView {
       this.selectionAnchor = null;
       this.openSettlementId = null;
       this.hover = null;
-      this.onClose(id, finalBuildings, this.pendingNetDelta(), true);
+      this.onClose(id, finalBuildings, this.pendingNetDelta(), true, this.preCitySelection);
       return id;
     } finally {
       this.closing = false;

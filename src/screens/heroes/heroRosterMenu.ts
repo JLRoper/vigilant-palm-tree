@@ -8,7 +8,7 @@ import {
 } from "@screens/shared/panelRail";
 import type { GameState, HeroId } from "../../state/gameState";
 import { MOVEMENT_PER_TURN } from "../../state/gameState";
-import { heroCargo, heroGoldCap, heroResourceCap, heroWagons } from "@heroes/engine";
+import { heroCargo, heroGoldCap, heroResourceCap, heroWagons, platoonTroopTotal } from "@heroes/engine";
 import { HERO_BANNERS } from "../../render/assetDescriptors";
 
 export interface HeroRosterMenuOptions {
@@ -101,7 +101,7 @@ export class HeroRosterMenu {
       phaseKind: state.phase.kind,
       heroes: heroes.map((h) => ({
         id: h.id, q: h.q, r: h.r, gold: h.gold,
-        troops: h.troops, movementRemaining: h.movementRemaining,
+        troops: platoonTroopTotal(h.stacks), movementRemaining: h.movementRemaining,
         isChartering: h.isChartering, name: h.name,
         horseVariant: h.horseVariant,
         wagons: h.wagons ?? 5,
@@ -182,7 +182,7 @@ export class HeroRosterMenu {
 
     const metaEl = document.createElement("div");
     const remaining = Math.round(Math.max(0, hero.movementRemaining));
-    metaEl.textContent = `(${hero.q}, ${hero.r}) · Move ${remaining}/${MOVEMENT_PER_TURN} · ${hero.gold}/${heroGoldCap(hero)}g · ${hero.troops} troops · 🛒 ${heroWagons(hero)}`;
+    metaEl.textContent = `(${hero.q}, ${hero.r}) · Move ${remaining}/${MOVEMENT_PER_TURN} · ${hero.gold}/${heroGoldCap(hero)}g · ${platoonTroopTotal(hero.stacks)} troops · 🛒 ${heroWagons(hero)}`;
     Object.assign(metaEl.style, {
       fontSize: "11px",
       opacity: "0.85",

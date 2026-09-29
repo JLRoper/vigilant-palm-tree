@@ -233,7 +233,7 @@ User-directed design, locked and implemented 2026-09-27.
 | iron | `ironMine` | 3 iron × level | Warehouse |
 | arcane | **"Arcane Font" (new kind, shipped)** | 3 arcane × level | Warehouse |
 
-Legacy `mine` (pre-split saves) still produces — iron on an iron spot, stone otherwise — but is no longer offered in the build palette. Every resource now has exactly one dedicated gathering building in the palette, grouped directly under Town Hall/House so they are visible without scrolling.
+Legacy `mine` (pre-split saves) still produces — iron on an iron spot, stone otherwise — but is no longer offered in the build palette. Every resource now has exactly one dedicated gathering building in the palette, grouped together in the palette's **Production** section — the build list is classified into Troop Buildings / Production / Civilian by registry data (`buildListSections.ts`, 2026-09-28).
 
 - **Placement:** producers are placeable on **any empty buildable cell** — not only on matching spots. A spot's value is that its own resource peaks at **3.0×** there (§10); off-spot placement is legal but usually mediocre. Existing overlap rules apply (footprint per cell, center reserved).
 - **Output numbers** reuse existing registry constants (`goldMine.goldPerTurn = 40`; the shared `+3` magnitude). Level scaling follows the registry's ×level convention; producers upgrade via the existing L2/L3 path (cost ×1.5 / ×3).

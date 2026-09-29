@@ -41,6 +41,7 @@ import {
   paintBattleFloatingText,
 } from "../../src/render/scene/paint2d";
 import type { SceneNode } from "../../src/render/scene/types";
+import type { Paint2DSpriteResolver } from "../../src/render/scene/paint2d/deps";
 import { makeNoopPaint2DDep, makeRecordingCtx } from "./_helpers";
 
 test("paintScene: empty input is a no-op (no calls emitted, no throw)", () => {
@@ -351,6 +352,30 @@ test("paintHero: the walk-cycle squash applies to the on-foot hero only, never a
   const { ctx: mounted, calls: mountedCalls } = makeRecordingCtx();
   paintHero(mounted, { kind: "hero", heroId: "h", ownerId: 0, world: { x: 0, y: 0 }, markerWorld: { x: 0, y: 0 }, facingDirection: "n", horseVariant: "bubbly", faction: "player", scaleY: 1.06, color: "#fff", selected: false }, makeNoopPaint2DDep());
   assert.ok(!mountedCalls.some((c) => c.name === "scale"), "drawHorseSprite never took a scaleY");
+});
+
+test("paintHero: passes node.runFrame through to the sprite resolver", () => {
+  const deps = makeNoopPaint2DDep();
+  const calls: Array<Parameters<Paint2DSpriteResolver["resolveSpriteForHero"]>> = [];
+  deps.sprite.resolveSpriteForHero = (...args) => {
+    calls.push(args);
+    return undefined;
+  };
+  const { ctx } = makeRecordingCtx();
+  paintHero(ctx, { kind: "hero", heroId: "h", ownerId: 0, world: { x: 0, y: 0 }, markerWorld: { x: 0, y: 0 }, facingDirection: "e", horseVariant: "drake", faction: "player", scaleY: 1, runFrame: 1, color: "#fff", selected: false }, deps);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1], "e");
+  assert.equal(calls[0][2], "drake");
+  assert.equal(calls[0][3], 1, "runFrame must reach the resolver as the frame argument");
+
+  const { ctx: ctxBase, calls: baseCalls } = makeRecordingCtx();
+  const baseFrames: Array<number | undefined> = [];
+  deps.sprite.resolveSpriteForHero = (_faction, _dir, _variant, frame) => {
+    baseFrames.push(frame);
+    return undefined;
+  };
+  paintHero(ctxBase, { kind: "hero", heroId: "h", ownerId: 0, world: { x: 0, y: 0 }, markerWorld: { x: 0, y: 0 }, facingDirection: "e", horseVariant: "drake", faction: "player", scaleY: 1, color: "#fff", selected: false }, deps);
+  assert.deepEqual(baseFrames, [undefined], "an absent runFrame passes undefined, not 0");
 });
 
 test("paintCitySkybox: without skybox provider, falls back to the CITY_BG fillRect", () => {

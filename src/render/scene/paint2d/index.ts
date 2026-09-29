@@ -616,7 +616,7 @@ export function paintHero(ctx: CanvasRenderingContext2D, node: HeroNode, deps: P
     ctx.scale(1, node.scaleY);
     ctx.translate(-node.world.x, -anchorY);
   }
-  const r = deps.sprite.resolveSpriteForHero(node.faction, node.facingDirection, variant);
+  const r = deps.sprite.resolveSpriteForHero(node.faction, node.facingDirection, variant, node.runFrame);
   if (r && r.ready) {
     drawWithDescriptor(ctx, r.drawable, r.descriptor, node.world.x, node.world.y, HEX_SIZE);
   }

@@ -1,5 +1,5 @@
 import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload } from "./gameState";
-import type { BuildingDef } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, Platoon } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
 import {
   selectHero as selectHeroReducer,
@@ -29,11 +29,14 @@ import {
   buyWagons as buyWagonsReducer,
   createTradeRoute as createTradeRouteReducer,
   updateTradeRoute as updateTradeRouteReducer,
+  recruitUnits as recruitUnitsReducer,
+  transferUnits as transferUnitsReducer,
+  startSettlementBattle as startSettlementBattleReducer,
   type BuildingUpgradeRequest,
 } from "./gameState";
 import { findPath } from "../map/pathfinding";
 import { hexDistance } from "../core/hex";
-import { platoonsHaveTroops } from "./units";
+import { platoonsHaveTroops, settlementStacks } from "./units";
 import type { GameMap } from "../map/gameMap";
 import { computeSettlementRates, generateCitySpots, cityViewSizeFor } from "@heroes/engine";
 import { settings, type HorseVariant } from "./settings";
@@ -138,6 +141,38 @@ export interface TurnControllerHooks {
     actor: number,
     routeId: string,
     change: { resource?: WarehouseResource; wagonsDelta?: number; remove?: boolean },
+  ): Promise<void>;
+  // Unit recruitment / garrison transfers / settlement-garrison battle result
+  // (plan/1790560842471-unit-recruitment-garrison-plan.md §8): same
+  // fire-and-forget shape as the rest of this block.
+  onRecruitUnits(
+    actor: number,
+    settlementId: SettlementId,
+    buildingKind: BuildingKind,
+    gx: number,
+    gy: number,
+    unitTypeId: string,
+    count: number,
+  ): Promise<void>;
+  onTransferUnits(
+    actor: number,
+    heroId: HeroId,
+    settlementId: SettlementId,
+    direction: "toHero" | "toGarrison",
+    unitTypeId: string,
+    count: number,
+    toSlot?: number,
+  ): Promise<void>;
+  onSubmitSettlementBattleResult(
+    actor: number,
+    attackerId: HeroId,
+    settlementId: SettlementId,
+    outcome: "attackerWon" | "defenderWon" | "draw" | "retreat" | "surrender",
+    attackerStacks: Platoon[],
+    defenderStacks: Platoon[],
+    surrenderedGold: number | undefined,
+    rounds: number,
+    obstacleSeed: number,
   ): Promise<void>;
 }
 
@@ -252,10 +287,33 @@ export class TurnController {
   private tryCaptureAt(heroId: HeroId, q: number, r: number): void {
     for (const [sid, s] of Object.entries(this.state.settlements)) {
       if (s.q === q && s.r === r && s.ownerId !== this.state.heroes[heroId]?.ownerId) {
+        const moverOwner = this.state.heroes[heroId]?.ownerId;
+        // plan/1790560842471-unit-recruitment-garrison-plan.md §8 gate, in
+        // order: (a) a defending hero holds the tile -- defer entirely to
+        // the adjacent-enemy battle check that runs right after this in
+        // requestMove (post-battle capture re-checks via
+        // captureAfterBattleIfNeeded); (b) a garrison with troops fights
+        // the manual settlement battle instead of a walk-in capture;
+        // (c) otherwise capture as before.
+        for (const [otherId, other] of Object.entries(this.state.heroes)) {
+          if (otherId !== heroId && other.q === q && other.r === r && other.ownerId !== moverOwner) {
+            return;
+          }
+        }
+        if (platoonsHaveTroops(settlementStacks(s))) {
+          this.enterSettlementBattle(heroId, sid);
+          return;
+        }
         this.captureSettlement(heroId, sid);
         return;
       }
     }
+  }
+
+  captureAfterBattleIfNeeded(heroId: HeroId): void {
+    const hero = this.state.heroes[heroId];
+    if (!hero) return;
+    this.tryCaptureAt(heroId, hero.q, hero.r);
   }
 
   cancelMove(heroId: HeroId): void {
@@ -291,6 +349,17 @@ export class TurnController {
       type: "battle_started",
       payload: { attackerId, defenderId },
     });
+  }
+
+  enterSettlementBattle(attackerId: HeroId, settlementId: SettlementId): boolean {
+    const result = startSettlementBattleReducer(this.state, attackerId, settlementId);
+    if (!result.ok) return false;
+    this.state = result.state;
+    this.hooks.logEvent({
+      type: "settlement_battle_started",
+      payload: { attackerId, settlementId },
+    });
+    return true;
   }
 
   transferGold(
@@ -395,6 +464,52 @@ export class TurnController {
       hookLabel: "onRecruitHero",
     });
     return result;
+  }
+
+  recruitUnits(
+    settlementId: SettlementId,
+    buildingKind: BuildingKind,
+    gx: number,
+    gy: number,
+    unitTypeId: string,
+    count: number,
+  ): boolean {
+    const result = recruitUnitsReducer(this.state, { settlementId, buildingKind, gx, gy, unitTypeId, count });
+    if (!result.ok) return false;
+    this.commit(result.state, {
+      log: {
+        type: "units_recruited",
+        payload: { settlementId, unitTypeId, count },
+      },
+      hook: () =>
+        this.hooks.onRecruitUnits(result.state.activePlayerId, settlementId, buildingKind, gx, gy, unitTypeId, count),
+      hookLabel: "onRecruitUnits",
+    });
+    return true;
+  }
+
+  transferUnits(
+    heroId: HeroId,
+    settlementId: SettlementId,
+    direction: "toHero" | "toGarrison",
+    unitTypeId: string,
+    count: number,
+    toSlot?: number,
+  ): boolean {
+    const result = transferUnitsReducer(this.state, { heroId, settlementId, direction, unitTypeId, count, toSlot });
+    if (!result.ok) return false;
+    this.commit(result.state, {
+      log: {
+        type: "units_transferred",
+        payload: { heroId, settlementId, direction, unitTypeId, count },
+      },
+      hook: () => {
+        const actor = result.state.heroes[heroId]?.ownerId ?? result.state.activePlayerId;
+        return this.hooks.onTransferUnits(actor, heroId, settlementId, direction, unitTypeId, count, toSlot);
+      },
+      hookLabel: "onTransferUnits",
+    });
+    return true;
   }
 
   // =========================================================================

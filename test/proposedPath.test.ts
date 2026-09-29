@@ -72,9 +72,10 @@ async function run(): Promise<void> {
     page.on("console", (msg) => browserLogs.push(`[${msg.type()}] ${msg.text()}`));
     page.on("pageerror", (e) => browserLogs.push(`[pageerror] ${e.message}`));
 
-    await page.goto(WEB_URL, { waitUntil: "networkidle" });
+    // waitUntil "load", not "networkidle": once a session boots, its SSE event stream (/events/stream) holds a pending request forever, so networkidle can never fire.
+    await page.goto(WEB_URL, { waitUntil: "load" });
     await page.evaluate(() => localStorage.clear());
-    await page.reload({ waitUntil: "networkidle" });
+    await page.reload({ waitUntil: "load" });
     await page.waitForFunction(
       () => (window as unknown as { __gameDebug?: { activeGameName?: string } }).__gameDebug?.activeGameName != null,
       null,

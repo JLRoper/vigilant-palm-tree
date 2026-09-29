@@ -1,16 +1,18 @@
 // Interactive (HoMM3-style) battle engine for the manual-fight arena. Built
 // on the same primitives as resolveBattle.ts (damage/casualty math, grid,
 // combatant/result building) but replaces the auto-resolved turn loop with
-// player/AI-driven per-platoon actions: melee platoons must move to an
-// adjacent hex before attacking, ranged platoons need RANGED_ATTACK_RANGE and
-// an unobstructed line of sight. The player chooses which of their own live
+// player/AI-driven per-platoon actions: a platoon attacks within the minimum
+// per-unit `range` stat across its entries (platoonRange) — range 1 means
+// hex-adjacency, anything more needs an unobstructed line of sight. The
+// player chooses which of their own live
 // platoons acts next each round; the AI does the same for its side via a
 // simple heuristic (see runAiTurn). See feature-plans/CombatResolutionEngine.md
 // for the underlying damage/type-advantage rules this reuses unchanged.
 
 import { type Axial, axialRound, HEX_DIRECTIONS, hexDistance } from "@heroes/contracts";
 import type { Platoon, PlatoonEntry, UnitType } from "../units";
-import { PLATOON_RETREAT_LOSS, RANGED_ATTACK_RANGE, SPELL_BUFF_DURATION_ROUNDS, SPELL_BUFF_MULTIPLIER } from "../combatConfig";
+import { unitRange } from "../units";
+import { PLATOON_RETREAT_LOSS, SPELL_BUFF_DURATION_ROUNDS, SPELL_BUFF_MULTIPLIER } from "../combatConfig";
 import { applyRetreatLoss, applyCasualties } from "./damage";
 import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT, makeBattleGrid } from "./grid";
 import {
@@ -301,20 +303,34 @@ export function isRangedPlatoon(combatant: Combatant, unitTypes: Record<string, 
   return combatant.entries.length > 0 && combatant.entries.every((e) => unitTypes[e.unitTypeId]?.advantageType === "ranged");
 }
 
+// Attack range of a platoon: the minimum per-unit `range` stat across its
+// entries (missing catalog stats default to 1); empty entries → 1. This is
+// the single source of range truth for attack targeting, approach-hex
+// eligibility, and the AI's movement decisions.
+export function platoonRange(entries: readonly PlatoonEntry[], unitTypes: Record<string, UnitType>): number {
+  let min = Infinity;
+  for (const e of entries) {
+    const range = unitRange(unitTypes[e.unitTypeId]);
+    if (range < min) min = range;
+  }
+  return Number.isFinite(min) ? min : 1;
+}
+
 export function getValidMeleeTargets(state: ManualBattleState, combatant: Combatant): Combatant[] {
   const enemies = livingCombatants(combatantsFor(state, enemySideOf(combatant.side)));
   return enemies.filter((e) => canMeleeAttack(combatant, e));
 }
 
 export function getValidRangedTargets(state: ManualBattleState, combatant: Combatant): Combatant[] {
+  const range = platoonRange(combatant.entries, state.unitTypes);
   const enemies = livingCombatants(combatantsFor(state, enemySideOf(combatant.side)));
   return enemies.filter(
-    (e) => hexDistance(combatant.position, e.position) <= RANGED_ATTACK_RANGE && hasLineOfSight(state.grid, combatant.position, e.position),
+    (e) => hexDistance(combatant.position, e.position) <= range && hasLineOfSight(state.grid, combatant.position, e.position),
   );
 }
 
 export function getValidAttackTargets(state: ManualBattleState, combatant: Combatant): Combatant[] {
-  return isRangedPlatoon(combatant, state.unitTypes)
+  return platoonRange(combatant.entries, state.unitTypes) > 1
     ? getValidRangedTargets(state, combatant)
     : getValidMeleeTargets(state, combatant);
 }
@@ -336,7 +352,7 @@ export function getApproachHexes(
   actor: Combatant,
   target: Combatant,
 ): { hex: Axial; cost: number }[] {
-  if (isRangedPlatoon(actor, state.unitTypes)) return [];
+  if (platoonRange(actor.entries, state.unitTypes) > 1) return [];
   const costs = movementCosts(state, actor, remainingMovement(state, actor));
   const out: { hex: Axial; cost: number }[] = [];
   for (const dir of HEX_DIRECTIONS) {
@@ -368,7 +384,7 @@ export function attackFromHex(
   if (!unactedSetFor(state, side).has(slotIndex)) return false;
   const actor = getCombatant(state, side, slotIndex);
   if (!actor || actor.retreated || !actor.entries.some((e) => e.count > 0)) return false;
-  if (isRangedPlatoon(actor, state.unitTypes)) return false;
+  if (platoonRange(actor.entries, state.unitTypes) > 1) return false;
 
   const enemies = livingCombatants(combatantsFor(state, enemySideOf(side)));
   const target = enemies.find((e) => e.slotIndex === targetSlotIndex);
@@ -655,13 +671,14 @@ export function planAiTurn(state: ManualBattleState, side: BattleSide): AiTurnPl
   if (!target) return { slotIndex, moveTo: null, attackTargetSlot: null };
 
   const range = getMovementRange(state, actor);
+  const attackRange = platoonRange(actor.entries, state.unitTypes);
 
-  if (isRangedPlatoon(actor, state.unitTypes)) {
-    if (hexDistance(actor.position, target.position) <= RANGED_ATTACK_RANGE && hasLineOfSight(state.grid, actor.position, target.position)) {
+  if (attackRange > 1) {
+    if (hexDistance(actor.position, target.position) <= attackRange && hasLineOfSight(state.grid, actor.position, target.position)) {
       return { slotIndex, moveTo: null, attackTargetSlot: target.slotIndex };
     }
     const reposition = range.find(
-      (h) => hexDistance(h, target.position) <= RANGED_ATTACK_RANGE && hasLineOfSight(state.grid, h, target.position),
+      (h) => hexDistance(h, target.position) <= attackRange && hasLineOfSight(state.grid, h, target.position),
     );
     if (reposition) return { slotIndex, moveTo: reposition, attackTargetSlot: target.slotIndex };
     return { slotIndex, moveTo: closestHexTo(range, target.position, actor.position), attackTargetSlot: null };

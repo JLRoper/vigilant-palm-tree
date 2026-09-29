@@ -4,10 +4,12 @@
 > files exist: `src/core/eventBus.ts` is a fully typed pub/sub (no `any` —
 > handler payloads resolve via `Extract` on the `GameEvent` union), and
 > `src/core/events.ts` holds the complete catalog incl. the `mp:*` multiplayer
-> sync events. The bus is live across 10+ modules (state/turn/movement/economy
-> emit; UI, toast, dev console, and network map listen). What remains of this
-> plan is the Phase-2+ listener migration (single `registerAllListeners()`
-> flow replacing callback chains).
+> sync events (six since 2026-09-28's SSE event push, which added `mp:logRow` —
+> every server `game_events` row, fanned out by `MultiplayerSync.applyRows`
+> before state filtering, feeding the Log Message Panel). The bus is live
+> across 10+ modules (state/turn/movement/economy emit; UI, toast, dev console,
+> and network map listen). What remains of this plan is the Phase-2+ listener
+> migration (single `registerAllListeners()` flow replacing callback chains).
 
 ## Overview
 
@@ -27,7 +29,7 @@ Handlers receive a mutable event payload. They mutate it in-place. No return val
 
 ### `src/core/events.ts` — Event type catalog
 
-All events are a discriminated union on `type`. Each event has exactly the fields its handlers need — no more.
+All events are a discriminated union on `type`. Each event has exactly the fields its handlers need — no more. The catalog includes the six `mp:*` multiplayer sync events; the sixth, `mp:logRow` (`MpLogRowEvent`, 2026-09-28), carries one server `game_events` row — engine or legacy audit kind, any seat — emitted by `MultiplayerSync.applyRows` before its own state filtering, so the Log Message Panel sees the whole log, not just state-relevant deltas.
 
 ### `src/core/eventRegistry.ts` — Handler registration
 
@@ -54,7 +56,7 @@ Each domain file registers its own handlers. Domain files never import each othe
 | File | Contents |
 |---|---|
 | `src/core/eventBus.ts` | EventBus class + singleton `bus` |
-| `src/core/events.ts` | All `GameEvent` types |
+| `src/core/events.ts` | All `GameEvent` types — incl. the six `mp:*` multiplayer sync events (`mp:logRow` added 2026-09-28 with the SSE event push) |
 | `src/core/eventRegistry.ts` | `registerAllListeners()` |
 
 **`eventBus.ts` implementation (shipped 2026-09-27):**

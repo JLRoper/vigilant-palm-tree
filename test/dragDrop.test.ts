@@ -162,7 +162,8 @@ async function run(): Promise<void> {
     // same way the visual-regression suite does: through home's own New Game
     // modal (home's root is appended after the toolbar, so its "New Game"
     // button is reliably the last one in document order).
-    await page.goto(WEB_URL, { waitUntil: "networkidle" });
+    // waitUntil "load", not "networkidle": once a session boots, its SSE event stream (/events/stream) holds a pending request forever, so networkidle can never fire.
+    await page.goto(WEB_URL, { waitUntil: "load" });
     await page.locator("button", { hasText: "New Game" }).last().click();
     await page.waitForTimeout(150);
     await page.locator("input[type=text]").first().fill(GAME_NAME);
@@ -210,6 +211,9 @@ async function run(): Promise<void> {
     // Wait for the hero info menu to actually be open ("Army" only exists in
     // the panel body -- "text=Hero" also matches the toolbar's Heroes button).
     await page.waitForSelector("text=Army", { timeout: 5_000 });
+    // The Army section is an accordion that starts collapsed to one line;
+    // expand it so the tiles are laid out and hit-testable for the drag.
+    await page.locator('[data-accordion="Army"]').click();
     await page.waitForTimeout(200);
 
     const before = await readArmyTiles(page);

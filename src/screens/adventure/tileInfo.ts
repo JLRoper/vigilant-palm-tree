@@ -9,7 +9,7 @@ import type { Hero } from "../../entities/hero";
 import type { Castle } from "../../entities/settlement";
 import type { GameState, PlayerId } from "../../state/gameState";
 import type { CharterPhase } from "@heroes/contracts";
-import { settlementRateRadius, controlledPositions } from "@heroes/engine";
+import { settlementRateRadius, controlledPositions, platoonTroopTotal } from "@heroes/engine";
 import { colorForOwner } from "../../state/playerColors";
 import { isTileVisibleTo } from "../../render/fog";
 
@@ -112,7 +112,7 @@ function describeHeroes(
       name: hero.name,
       ownerName: playerName(state, hero.ownerId),
       ownerColor: colorForOwner(hero.ownerId),
-      troops: hero.troops,
+      troops: platoonTroopTotal(hero.stacks),
       movementRemaining: owned ? hero.movementRemaining : null,
       owned,
     });

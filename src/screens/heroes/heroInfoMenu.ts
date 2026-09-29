@@ -3,10 +3,12 @@ import type { Hero } from "../../entities/hero";
 import { PopupMenu, menuTheme } from "@screens/shared/menu";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import { DockedPanel } from "@screens/shared/dockedPanel";
-import { makeRow } from "@screens/shared/panelWidgets";
+import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayout";
+import type { PanelRect } from "@screens/shared/panelPlacement";
+import { AccordionSection, makeRow } from "@screens/shared/panelWidgets";
 import { ArmySection, type ReorderHandler } from "./armySection";
 import { HERO_BANNERS, RESOURCE_PILE_BUBBLY_SPRITES } from "../../render/assetDescriptors";
-import { HERO_BASE_ATTACK, HERO_BASE_DEFENCE, heroCargo, heroGoldCap, heroResourceCap, heroWagons } from "@heroes/engine";
+import { HERO_BASE_ATTACK, HERO_BASE_DEFENCE, heroCargo, heroGoldCap, heroResourceCap, heroWagons, platoonTroopTotal } from "@heroes/engine";
 import type { WarehouseResource } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 
@@ -48,6 +50,7 @@ interface HeroPanelDom {
 function buildHeroPanelDom(
   body: HTMLElement,
   onTransferClick: (direction: "deposit" | "withdraw") => void,
+  onSectionToggle: () => void,
 ): HeroPanelDom {
   const bannerEl = document.createElement("img");
   Object.assign(bannerEl.style, {
@@ -108,6 +111,23 @@ function buildHeroPanelDom(
   resourcesRow.appendChild(foodWrap);
 
   body.appendChild(resourcesRow);
+
+  const troopsRow = document.createElement("div");
+  Object.assign(troopsRow.style, {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+    fontSize: "11px",
+    opacity: "0.85",
+    marginTop: "4px",
+  });
+  const troopsLabel = document.createElement("span");
+  troopsLabel.textContent = "Troops";
+  troopsRow.appendChild(troopsLabel);
+  const troopsEl = document.createElement("span");
+  troopsEl.style.fontVariantNumeric = "tabular-nums";
+  troopsRow.appendChild(troopsEl);
+  body.appendChild(troopsRow);
 
   const transferRow = document.createElement("div");
   Object.assign(transferRow.style, {
@@ -176,32 +196,9 @@ function buildHeroPanelDom(
 
   body.appendChild(movementSection);
 
-  const cargoBlock = document.createElement("div");
-  Object.assign(cargoBlock.style, {
-    marginTop: "4px",
-    paddingTop: "8px",
-    borderTop: "1px solid rgba(255,255,255,0.08)",
-  });
-
-  const cargoHeader = document.createElement("div");
-  Object.assign(cargoHeader.style, {
-    display: "flex",
-    justifyContent: "space-between",
-    fontSize: "11px",
-    letterSpacing: "0.06em",
-    textTransform: "uppercase",
-    opacity: "0.55",
-    marginBottom: "6px",
-  });
-  const cargoTitle = document.createElement("span");
-  cargoTitle.textContent = "Cargo";
-  cargoHeader.appendChild(cargoTitle);
-  const cargoWagonsEl = document.createElement("span");
-  cargoWagonsEl.textContent = "0 wagons";
-  cargoWagonsEl.style.textTransform = "none";
-  cargoWagonsEl.style.letterSpacing = "0";
-  cargoHeader.appendChild(cargoWagonsEl);
-  cargoBlock.appendChild(cargoHeader);
+  const cargo = new AccordionSection({ label: "Cargo", onToggle: onSectionToggle });
+  cargo.rightEl.textContent = "0 wagons";
+  const cargoWagonsEl = cargo.rightEl;
 
   const cargoGrid = document.createElement("div");
   Object.assign(cargoGrid.style, {
@@ -254,42 +251,10 @@ function buildHeroPanelDom(
     cargoEls[r as WarehouseResource] = value;
     cargoGrid.appendChild(cell);
   }
-  cargoBlock.appendChild(cargoGrid);
-  body.appendChild(cargoBlock);
+  cargo.body.appendChild(cargoGrid);
+  body.appendChild(cargo.element);
 
-  const troopsRow = document.createElement("div");
-  Object.assign(troopsRow.style, {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "baseline",
-    fontSize: "11px",
-    opacity: "0.85",
-    marginTop: "4px",
-  });
-  const troopsLabel = document.createElement("span");
-  troopsLabel.textContent = "Troops";
-  troopsRow.appendChild(troopsLabel);
-  const troopsEl = document.createElement("span");
-  troopsEl.style.fontVariantNumeric = "tabular-nums";
-  troopsRow.appendChild(troopsEl);
-  body.appendChild(troopsRow);
-
-  const statsBlock = document.createElement("div");
-  Object.assign(statsBlock.style, {
-    marginTop: "4px",
-    paddingTop: "8px",
-    borderTop: "1px solid rgba(255,255,255,0.08)",
-  });
-  const statsHeader = document.createElement("div");
-  statsHeader.textContent = "Stats & Army";
-  Object.assign(statsHeader.style, {
-    fontSize: "11px",
-    letterSpacing: "0.06em",
-    textTransform: "uppercase",
-    opacity: "0.55",
-    marginBottom: "6px",
-  });
-  statsBlock.appendChild(statsHeader);
+  const stats = new AccordionSection({ label: "Stats & Army", onToggle: onSectionToggle });
 
   const statsGrid = document.createElement("div");
   Object.assign(statsGrid.style, {
@@ -306,9 +271,9 @@ function buildHeroPanelDom(
     statsGrid.appendChild(row);
     statValues[stat] = value;
   }
-  statsBlock.appendChild(statsGrid);
+  stats.body.appendChild(statsGrid);
 
-  body.appendChild(statsBlock);
+  body.appendChild(stats.element);
 
   return {
     bannerEl,
@@ -353,8 +318,9 @@ export class HeroInfoMenu {
       draggable: true,
       zIndex: 60,
       minTop: toolbarHeight,
-      onMove: () => {
+      onMove: (pos) => {
         this.docked.markUserMoved();
+        savePanelGeometry("heroInfo", pos);
       },
       onClose: () => {
         this.visible = false;
@@ -363,14 +329,14 @@ export class HeroInfoMenu {
       },
     });
 
-    this.docked = new DockedPanel(this.menu, PANEL_X);
+    this.docked = new DockedPanel(this.menu, PANEL_X, loadPanelGeometry("heroInfo"));
 
     this.army = new ArmySection({
       onReorder: opts.onReorder,
       onToggle: () => this.reposition(),
     });
 
-    this.dom = buildHeroPanelDom(this.menu.body, (direction) => this.handleTransfer(direction));
+    this.dom = buildHeroPanelDom(this.menu.body, (direction) => this.handleTransfer(direction), () => this.reposition());
     this.menu.body.appendChild(this.army.element);
 
     this.menu.root.style.display = "none";
@@ -421,6 +387,14 @@ export class HeroInfoMenu {
     return this.visible;
   }
 
+  /** Viewport rect for collision-aware placement of other floating panels; null while hidden. */
+  floatingRect(): PanelRect | null {
+    if (!this.visible) return null;
+    const rect = this.menu.root.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
+  }
+
   getCurrentHeroId(): string | null {
     return this.currentHeroId;
   }
@@ -429,13 +403,17 @@ export class HeroInfoMenu {
     this.dom.nameEl.textContent = hero.name;
     this.dom.bannerEl.src = HERO_BANNERS[hero.horseVariant] ?? HERO_BANNERS["bubbly"];
     this.dom.goldEl.textContent = `${hero.gold}g`;
-    this.dom.foodEl.textContent = "0 food";
+    const heroState = state.heroes[hero.id];
+    const cargoFood = heroState ? (heroCargo(heroState).food ?? 0) : 0;
+    this.dom.foodEl.textContent = `${cargoFood} food`;
     const remaining = Math.max(0, hero.movementRemaining);
     const shown = Math.round(remaining);
     const pct = Math.max(0, Math.min(1, remaining / MOVEMENT_PER_TURN)) * 100;
     this.dom.movementFill.style.width = `${pct}%`;
     this.dom.movementLabel.textContent = `${shown} / ${MOVEMENT_PER_TURN}`;
-    this.dom.troopsEl.textContent = `${hero.troops}  Â·  Upkeep: ${hero.troops}g/week`;
+    const troopTotal = platoonTroopTotal(hero.stacks);
+    this.dom.troopsEl.textContent = `${troopTotal} \u00B7 Upkeep: ${troopTotal}g + ${troopTotal} food/wk`;
+    this.dom.troopsEl.title = `Weekly upkeep: ${troopTotal}g from the purse + ${troopTotal} food from cargo; unpaid gold makes troops desert`;
 
     this.renderCargo(hero, state);
 

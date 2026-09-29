@@ -14,10 +14,11 @@ export function startBattle(state: GameState, attackerId: HeroId, defenderId: He
 // server-authoritative — see POST /games/:name/commands (kind: "ResolveBattle")
 // and packages/engine/src/combat/resolveBattle.ts — because it needs the
 // DB-backed unit-type catalog. This just closes out the local BATTLE phase
-// once the caller has the server's result in hand; heroes/players are
+// (or the client-only SETTLEMENT_BATTLE phase, same transition) once the
+// caller has the server's result in hand; heroes/players are
 // merged in separately.
 export function endBattlePhase(state: GameState): GameState {
-  if (state.phase.kind !== "BATTLE") return state;
+  if (state.phase.kind !== "BATTLE" && state.phase.kind !== "SETTLEMENT_BATTLE") return state;
   return {
     ...state,
     phase: { kind: "PLAYER_TURN", playerId: state.activePlayerId },

@@ -167,4 +167,28 @@ export type EngineEvent =
         type: "TradeRouteRemoved";
         actor: PlayerSeat;
         routeId: string;
+      }
+    | {
+        type: "UnitsRecruited";
+        actor: PlayerSeat;
+        settlementId: SettlementId;
+        unitTypeId: string;
+        count: number;
+      }
+    | {
+        type: "UnitsTransferred";
+        actor: PlayerSeat;
+        heroId: HeroId;
+        settlementId: SettlementId;
+        direction: "toHero" | "toGarrison";
+        unitTypeId: string;
+        count: number;
+      }
+    | {
+        type: "SettlementBattleResolved";
+        actor: PlayerSeat;
+        attackerId: HeroId;
+        settlementId: SettlementId;
+        winner: "attacker" | "defender";
+        captured: boolean;
       };

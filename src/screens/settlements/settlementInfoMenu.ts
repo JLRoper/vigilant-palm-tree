@@ -1,9 +1,14 @@
-import type { GameState, SettlementState } from "../../state/gameState";
+import type { GameState, HeroState, SettlementState } from "../../state/gameState";
 import { MAX_HEROES_PER_PLAYER, HERO_RECRUIT_COST, SETTLEMENT_UPGRADE_COSTS } from "../../state/gameState";
+import { settlementStacks, type Platoon } from "../../state/units";
+import { catalogReady, catalogFailed, getCachedUnit, loadUnitCatalog } from "../../data/unitCatalog";
+import { getUnitImageUrl } from "../../data/unitImages";
 import { PopupMenu, menuTheme, openCenteredModal, styleButton } from "@screens/shared/menu";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import { DockedPanel } from "@screens/shared/dockedPanel";
-import { makeRow } from "@screens/shared/panelWidgets";
+import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayout";
+import type { PanelRect } from "@screens/shared/panelPlacement";
+import { AccordionSection, makeRow } from "@screens/shared/panelWidgets";
 import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../../render/assetDescriptors";
 import { settings } from "../../state/settings";
 import type { HorseVariant } from "../../state/settings";
@@ -16,6 +21,8 @@ export interface SettlementInfoMenuOptions {
   onClose?: () => void;
   onRecruitHero?: (name: string, variant: HorseVariant) => void;
   onUpgradeSettlement?: () => void;
+  getHeroesAtSettlement?: (settlementId: string) => HeroState[];
+  onTransferUnits?: (heroId: string, settlementId: string, direction: "toHero" | "toGarrison", unitTypeId: string, count: number) => boolean;
 }
 
 const WAREHOUSE_RESOURCE_ORDER = ["wood", "stone", "iron", "arcane", "food"] as const;
@@ -44,11 +51,18 @@ export class SettlementInfoMenu {
   private upgradeContainer: HTMLDivElement;
   private upgradeBtn: HTMLButtonElement;
   private upgradeInfo: HTMLSpanElement;
+  private getHeroesAtSettlement?: (settlementId: string) => HeroState[];
+  private onTransferUnits?: (heroId: string, settlementId: string, direction: "toHero" | "toGarrison", unitTypeId: string, count: number) => boolean;
+  private garrisonAccordion: AccordionSection;
+  private garrisonBody: HTMLDivElement;
+  private garrisonSignature: string | null = null;
 
   constructor(opts: SettlementInfoMenuOptions) {
     this.onCloseCallback = opts.onClose;
     this.onRecruitHero = opts.onRecruitHero;
     this.onUpgradeSettlement = opts.onUpgradeSettlement;
+    this.getHeroesAtSettlement = opts.getHeroesAtSettlement;
+    this.onTransferUnits = opts.onTransferUnits;
     this.menu = new PopupMenu({
       parent: opts.parent,
       title: "Settlement",
@@ -60,8 +74,9 @@ export class SettlementInfoMenu {
       draggable: true,
       zIndex: 60,
       minTop: toolbarHeight,
-      onMove: () => {
+      onMove: (pos) => {
         this.docked.markUserMoved();
+        savePanelGeometry("settlementInfo", pos);
       },
       onClose: () => {
         this.visible = false;
@@ -70,7 +85,7 @@ export class SettlementInfoMenu {
       },
     });
 
-    this.docked = new DockedPanel(this.menu, PANEL_X);
+    this.docked = new DockedPanel(this.menu, PANEL_X, loadPanelGeometry("settlementInfo"));
 
     const body = this.menu.body;
 
@@ -133,16 +148,8 @@ export class SettlementInfoMenu {
     });
     body.appendChild(divider);
 
-    const warehouseLabel = document.createElement("div");
-    warehouseLabel.textContent = "Warehouse";
-    Object.assign(warehouseLabel.style, {
-      fontSize: "11px",
-      letterSpacing: "0.06em",
-      textTransform: "uppercase",
-      opacity: "0.55",
-      marginBottom: "6px",
-    });
-    body.appendChild(warehouseLabel);
+    const warehouse = new AccordionSection({ label: "Warehouse", onToggle: () => this.reposition() });
+    body.appendChild(warehouse.element);
 
     const grid = document.createElement("div");
     Object.assign(grid.style, {
@@ -154,7 +161,7 @@ export class SettlementInfoMenu {
       marginBottom: "4px",
       justifyItems: "center",
     });
-    body.appendChild(grid);
+    warehouse.body.appendChild(grid);
 
     this.warehouseEls = {};
     for (const r of WAREHOUSE_RESOURCE_ORDER) {
@@ -203,6 +210,12 @@ export class SettlementInfoMenu {
 
     this.recruitContainer = document.createElement("div");
     body.appendChild(this.recruitContainer);
+
+    this.garrisonAccordion = new AccordionSection({ label: "Garrison", onToggle: () => this.reposition() });
+    body.insertBefore(this.garrisonAccordion.element, this.recruitContainer);
+
+    this.garrisonBody = document.createElement("div");
+    this.garrisonAccordion.body.appendChild(this.garrisonBody);
 
     this.recruitBtn = document.createElement("button");
     Object.assign(this.recruitBtn.style, {
@@ -303,6 +316,14 @@ export class SettlementInfoMenu {
     return this.visible;
   }
 
+  /** Viewport rect for collision-aware placement of other floating panels; null while hidden. */
+  floatingRect(): PanelRect | null {
+    if (!this.visible) return null;
+    const rect = this.menu.root.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
+  }
+
   getCurrentSettlementId(): string | null {
     return this.currentSettlementId;
   }
@@ -392,7 +413,163 @@ export class SettlementInfoMenu {
     } else {
       this.upgradeContainer.style.display = "none";
     }
+
+    this.updateGarrison(settlement, state);
   }
+
+  // Garrison + transfer section. Rebuilt only when the stack content or the
+  // garrisoned hero changes (signature compare) so the rows — and their
+  // transfer buttons — are not torn down under the pointer on every refresh
+  // tick. A successful transfer replaceState()s, and the resulting
+  // state:committed → update() cycle rebuilds with the new counts.
+  private updateGarrison(settlement: SettlementState, state: GameState): void {
+    const owned = settlement.ownerId !== null && settlement.ownerId === state.activePlayerId;
+    this.garrisonAccordion.element.style.display = owned ? "" : "none";
+    if (!owned) {
+      this.garrisonSignature = null;
+      return;
+    }
+
+    const garrison = stackTotals(settlementStacks(settlement));
+    const candidate = this.getHeroesAtSettlement?.(settlement.id)[0] ?? null;
+    const heroHere = candidate && candidate.ownerId === settlement.ownerId ? candidate : null;
+    const heroArmy = heroHere ? stackTotals(heroHere.stacks) : [];
+
+    const signature = JSON.stringify({
+      id: settlement.id,
+      garrison,
+      heroId: heroHere?.id ?? null,
+      heroArmy,
+      // In the signature so rows rebuild with real names once the catalog
+      // fetch resolves (until then names fall back to raw unit ids).
+      catalog: catalogReady(),
+    });
+    const totalUnits = garrison.reduce((sum, e) => sum + e.count, 0);
+    this.garrisonAccordion.rightEl.textContent = totalUnits > 0 ? `${totalUnits} units` : "";
+    if (signature === this.garrisonSignature) return;
+    this.garrisonSignature = signature;
+
+    if (!catalogReady() && !catalogFailed()) {
+      void loadUnitCatalog();
+    }
+
+    this.garrisonBody.replaceChildren();
+
+    if (garrison.length === 0) {
+      this.garrisonBody.appendChild(makeDimRow("No units garrisoned"));
+    }
+    for (const entry of garrison) {
+      this.garrisonBody.appendChild(this.makeTransferRow(
+        entry.unitTypeId,
+        entry.count,
+        heroHere ? "→ Hero" : null,
+        heroHere ? () => this.postTransfer(heroHere.id, settlement.id, "toHero", entry.unitTypeId, entry.count) : null,
+      ));
+    }
+
+    if (heroHere) {
+      const heroHeader = document.createElement("div");
+      heroHeader.textContent = `${heroHere.name}'s Army`;
+      Object.assign(heroHeader.style, {
+        fontSize: "10px",
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        opacity: "0.55",
+        marginTop: "6px",
+      });
+      this.garrisonBody.appendChild(heroHeader);
+      if (heroArmy.length === 0) {
+        this.garrisonBody.appendChild(makeDimRow("No units"));
+      }
+      for (const entry of heroArmy) {
+        this.garrisonBody.appendChild(this.makeTransferRow(
+          entry.unitTypeId,
+          entry.count,
+          "→ Garrison",
+          () => this.postTransfer(heroHere.id, settlement.id, "toGarrison", entry.unitTypeId, entry.count),
+        ));
+      }
+    }
+  }
+
+  private makeTransferRow(unitTypeId: string, count: number, transferLabel: string | null, onTransfer: (() => void) | null): HTMLDivElement {
+    const row = document.createElement("div");
+    Object.assign(row.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "6px",
+      marginBottom: "3px",
+    });
+
+    const icon = document.createElement("img");
+    icon.src = getUnitImageUrl(unitTypeId);
+    Object.assign(icon.style, {
+      width: "20px",
+      height: "20px",
+      imageRendering: "pixelated",
+      objectFit: "contain",
+      flexShrink: "0",
+    });
+    icon.alt = unitTypeId;
+    row.appendChild(icon);
+
+    const name = document.createElement("span");
+    name.textContent = getCachedUnit(unitTypeId)?.name ?? unitTypeId;
+    name.style.flex = "1";
+    name.style.fontSize = "11px";
+    name.style.opacity = "0.85";
+    row.appendChild(name);
+
+    const countEl = document.createElement("span");
+    countEl.textContent = `×${count}`;
+    countEl.style.fontSize = "11px";
+    countEl.style.fontVariantNumeric = "tabular-nums";
+    countEl.style.opacity = "0.7";
+    row.appendChild(countEl);
+
+    if (transferLabel && onTransfer) {
+      const btn = document.createElement("button");
+      btn.textContent = transferLabel;
+      styleButton(btn);
+      btn.style.padding = "1px 6px";
+      btn.style.fontSize = "10px";
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onTransfer();
+      });
+      row.appendChild(btn);
+    }
+
+    return row;
+  }
+
+  private postTransfer(heroId: string, settlementId: string, direction: "toHero" | "toGarrison", unitTypeId: string, count: number): void {
+    this.onTransferUnits?.(heroId, settlementId, direction, unitTypeId, count);
+  }
+}
+
+function makeDimRow(text: string): HTMLDivElement {
+  const el = document.createElement("div");
+  el.textContent = text;
+  Object.assign(el.style, { fontSize: "11px", opacity: "0.5" });
+  return el;
+}
+
+// One aggregated row per distinct unit type across a platoon set — the
+// transfer engine addresses both sides as a type-keyed pool, so per-type
+// totals are the transferable "whole entry".
+function stackTotals(stacks: Platoon[]): Array<{ unitTypeId: string; count: number }> {
+  const order: string[] = [];
+  const totals = new Map<string, number>();
+  for (const p of stacks) {
+    for (const e of p.entries) {
+      if (e.count <= 0) continue;
+      const prev = totals.get(e.unitTypeId) ?? 0;
+      if (prev === 0) order.push(e.unitTypeId);
+      totals.set(e.unitTypeId, prev + e.count);
+    }
+  }
+  return order.map((unitTypeId) => ({ unitTypeId, count: totals.get(unitTypeId) ?? 0 }));
 }
 
 function openRecruitHeroModal(onRecruit: (name: string, variant: HorseVariant) => void): void {

@@ -162,6 +162,9 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
     case "TradeRouteCreated":
     case "TradeRouteUpdated":
     case "TradeRouteRemoved":
+    case "UnitsRecruited":
+    case "UnitsTransferred":
+    case "SettlementBattleResolved":
       return resync(state);
 
     default: {

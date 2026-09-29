@@ -21,6 +21,7 @@ Two project scripts do the work (both plain Node, no build step):
 | `scripts/gemini-buildings.mjs` (in this skill folder) | Sends a reference PNG + prompt to `google/gemini-2.5-flash-image` via the OpenRouter chat-completions API and saves the returned image. Stores no prompts — every invocation passes `--name` plus `--prompt`/`--prompt-file`, so multiple agents can run it concurrently without editing anything. Auto-runs the strip post-pass on every output. |
 | `scripts/strip-checkerboard.mjs` (in this skill folder) | Converts the model's fake "transparent" background (a baked-in gray checkerboard) into real alpha. Runs automatically after each generation; also usable standalone. |
 | `scripts/remove-specks.mjs` (in this skill folder) | Removes isolated background specks (checker islands the border flood-fill cannot reach) via connected-component analysis. Deletes only non-main, small, low-saturation opaque components — colored details like gold flecks and the main sprite always survive. |
+| `scripts/repair-alpha.mjs` (in this skill folder) | Seals the thin transparent seams that over-aggressive stripping can carve along art boundaries — seams that shatter a sprite into disconnected fragments with see-through slits (the drake commander sprites failed exactly this way). Bridges seams, re-opens legit enclosed background, fills enclosed holes, snaps interior partial-alpha pixels. Runs automatically after each generation; also usable standalone with `--check` as a clean/damaged gate. |
 
 ## Prerequisites
 
@@ -121,7 +122,38 @@ flood-fill cannot reach), clean them with:
 node .kilo/skills/building-sprite-gen/scripts/remove-specks.mjs src/resources/buildings/<file>.png
 ```
 
-### 4. Verify visually
+### 4. Repair alpha seams (automatic)
+
+Stripping can over-erode: 1-5px transparent seams along art boundaries that
+shatter the sprite into disconnected opaque fragments with see-through slits
+(this happened to the drake commander sprites, which needed a manual repair —
+one came out in 95 disconnected pieces). `gemini-buildings.mjs` therefore runs
+`repair-alpha.mjs` on every output right after the strip pass (opt out with
+`--no-repair`). It seals transparent channels up to 3px wide that have art on
+both sides, re-opens any legit background pocket the bridging accidentally
+enclosed (wing scallops, under-belly windows), fills remaining enclosed holes
+above the under-belly line, and snaps interior partial-alpha pixels to opaque.
+Existing opaque pixels' RGB is never modified, and a file with no detected
+defects is left byte-identical — it is safe to run repeatedly.
+
+Run it manually on any PNG that was hand-edited or cleaned by other means:
+
+```
+node .kilo/skills/building-sprite-gen/scripts/repair-alpha.mjs src/resources/buildings/<file>.png
+```
+
+`--check` reports defects without writing and exits 1 when it finds any
+(enclosed holes above the under-belly line, interior partial-alpha pixels, or
+heavy fragmentation), so it works as a CI-able gate:
+
+```
+node .kilo/skills/building-sprite-gen/scripts/repair-alpha.mjs src/resources/buildings/*.png --check
+```
+
+Small detached islands (foot-claw highlights etc.) and enclosed pockets in the
+bottom third of the sprite are reported but are never touched.
+
+### 5. Verify visually
 
 Open the PNG (or have the agent read it as an image) and check: all requested
 elements present, no checker remnants, background actually transparent, sprite

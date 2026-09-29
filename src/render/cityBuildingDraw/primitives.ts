@@ -69,6 +69,7 @@ export function buildingHeight(kind: BuildingKind, level: number): number {
     goldMine: 20,
     woodcutterHut: 18,
     arcaneFont: 34,
+    stables: 28,
   };
   return (base[kind] ?? 24) + (level - 1) * 12;
 }

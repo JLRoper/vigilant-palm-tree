@@ -1,6 +1,6 @@
 import { Router, type Request } from "express";
-import type { BuildingDef, BuildingUpgradeRequest, Command, Platoon } from "@heroes/contracts";
-import { VALID_HORSE_VARIANTS } from "@heroes/engine";
+import type { BuildingDef, BuildingKind, BuildingUpgradeRequest, Command, Platoon } from "@heroes/contracts";
+import { ARMY_STACK_SLOTS, VALID_HORSE_VARIANTS } from "@heroes/engine";
 import { handleCommandTransactional, createLiveCommandDeps, type LiveCommandDeps } from "../../app/commandHandler";
 import { touchSeat } from "../../app/dropPolicy";
 import { attachAuth } from "../../auth";
@@ -604,6 +604,99 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       actor: b.actor,
       attackerId: b.attackerId,
       defenderId: b.defenderId,
+      outcome: b.outcome as (typeof VALID_SUBMITTED_OUTCOMES)[number],
+      attackerStacks: b.attackerStacks,
+      defenderStacks: b.defenderStacks,
+      ...(b.surrenderedGold !== undefined ? { surrenderedGold: b.surrenderedGold } : {}),
+      rounds: b.rounds,
+      obstacleSeed: b.obstacleSeed,
+    };
+  }
+
+  if (b.kind === "RecruitUnits") {
+    // buildingKind is a non-empty string rather than a BuildingKind check:
+    // the union is type-only (no runtime list), and the handler resolves it
+    // against the settlement's own buildings + the recruit registry -- an
+    // unknown kind falls out there as "no_building"/"not_recruitable" 409s.
+    if (
+      typeof b.settlementId !== "string" ||
+      typeof b.buildingKind !== "string" ||
+      b.buildingKind.length === 0 ||
+      !Number.isInteger(b.gx) ||
+      !Number.isInteger(b.gy) ||
+      typeof b.unitTypeId !== "string" ||
+      b.unitTypeId.length === 0 ||
+      typeof b.count !== "number" ||
+      !Number.isInteger(b.count) ||
+      b.count <= 0
+    ) {
+      return null;
+    }
+    return {
+      kind: "RecruitUnits",
+      gameName,
+      actor: b.actor,
+      settlementId: b.settlementId,
+      buildingKind: b.buildingKind as BuildingKind,
+      gx: b.gx as number,
+      gy: b.gy as number,
+      unitTypeId: b.unitTypeId,
+      count: b.count,
+    };
+  }
+
+  if (b.kind === "TransferUnits") {
+    const toSlot = b.toSlot;
+    const hasSlot = typeof toSlot === "number";
+    if (
+      typeof b.heroId !== "string" ||
+      typeof b.settlementId !== "string" ||
+      (b.direction !== "toHero" && b.direction !== "toGarrison") ||
+      typeof b.unitTypeId !== "string" ||
+      b.unitTypeId.length === 0 ||
+      typeof b.count !== "number" ||
+      !Number.isInteger(b.count) ||
+      b.count <= 0 ||
+      (hasSlot && (!Number.isInteger(toSlot) || toSlot < 0 || toSlot >= ARMY_STACK_SLOTS))
+    ) {
+      return null;
+    }
+    return {
+      kind: "TransferUnits",
+      gameName,
+      actor: b.actor,
+      heroId: b.heroId,
+      settlementId: b.settlementId,
+      direction: b.direction,
+      unitTypeId: b.unitTypeId,
+      count: b.count,
+      ...(hasSlot ? { toSlot } : {}),
+    };
+  }
+
+  if (b.kind === "SubmitSettlementBattleResult") {
+    // Field-for-field mirror of SubmitBattleResult above, with the target
+    // hero pair replaced by the settlement under attack (the defender side
+    // is its garrison); survivor stacks reuse isSurvivorStacks.
+    if (
+      typeof b.attackerId !== "string" ||
+      typeof b.settlementId !== "string" ||
+      typeof b.outcome !== "string" ||
+      !VALID_SUBMITTED_OUTCOMES.includes(b.outcome as (typeof VALID_SUBMITTED_OUTCOMES)[number]) ||
+      !isSurvivorStacks(b.attackerStacks) ||
+      !isSurvivorStacks(b.defenderStacks) ||
+      !isNonNegativeInt(b.rounds) ||
+      !isNonNegativeInt(b.obstacleSeed) ||
+      (b.surrenderedGold !== undefined && !isNonNegativeInt(b.surrenderedGold))
+    ) {
+      return null;
+    }
+    return {
+      kind: "SubmitSettlementBattleResult",
+      gameName,
+      actor: b.actor,
+      attackerId: b.attackerId,
+      settlementId: b.settlementId,
       outcome: b.outcome as (typeof VALID_SUBMITTED_OUTCOMES)[number],
       attackerStacks: b.attackerStacks,
       defenderStacks: b.defenderStacks,

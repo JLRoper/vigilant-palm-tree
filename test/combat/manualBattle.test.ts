@@ -26,11 +26,13 @@ import {
   movePlatoon,
   pickTarget,
   planAiTurn,
+  platoonRange,
   SPELL_BUFF_DURATION_ROUNDS,
   SPELL_BUFF_MULTIPLIER,
   SPELL_MANA_COST,
   startManualBattle,
   unactedLivingSlots,
+  unitRange,
   type BattleLogEntry,
   type HeroSpellLoadout,
   type ManualBattleState,
@@ -39,10 +41,12 @@ import { estimateWinChance } from "@heroes/engine";
 import { ARMY_STACK_SLOTS, type Platoon, type UnitType } from "../../src/state/units";
 
 const unitTypes: Record<string, UnitType> = {
-  footman: { id: "footman", name: "Footman", attack: 5, defence: 5, health: 20, speed: 3, description: "", advantageType: "infantry" },
-  bowman: { id: "bowman", name: "Bowman", attack: 5, defence: 2, health: 10, speed: 3, description: "", advantageType: "ranged" },
-  weak: { id: "weak", name: "Weak", attack: 1, defence: 1, health: 5, speed: 1, description: "", advantageType: "cavalry" },
-  hero: { id: "hero", name: "Hero", attack: 200, defence: 0, health: 100, speed: 5, description: "", advantageType: "infantry" },
+  footman: { id: "footman", name: "Footman", attack: 5, defence: 5, health: 20, speed: 3, description: "", advantageType: "infantry", range: 1 },
+  bowman: { id: "bowman", name: "Bowman", attack: 5, defence: 2, health: 10, speed: 3, description: "", advantageType: "ranged", range: 6 },
+  weak: { id: "weak", name: "Weak", attack: 1, defence: 1, health: 5, speed: 1, description: "", advantageType: "cavalry", range: 1 },
+  hero: { id: "hero", name: "Hero", attack: 200, defence: 0, health: 100, speed: 5, description: "", advantageType: "infantry", range: 1 },
+  archer: { id: "archer", name: "Archer", attack: 5, defence: 2, health: 10, speed: 3, description: "", advantageType: "ranged", range: 5 },
+  swordsman: { id: "swordsman", name: "Swordsman", attack: 5, defence: 5, health: 20, speed: 3, description: "", advantageType: "infantry", range: 1 },
 };
 
 function makePlatoons(entries: { unitTypeId: string; count: number }[]): Platoon[] {
@@ -185,7 +189,7 @@ test("hasLineOfSight: blocked by an obstacle directly between shooter and target
   assert.equal(hasLineOfSight(blocked.grid, { q: 0, r: 0 }, { q: 6, r: 0 }), false);
 });
 
-test("attackWithPlatoon: melee rejected when not adjacent, ranged rejected beyond RANGED_ATTACK_RANGE", () => {
+test("attackWithPlatoon: melee rejected when not adjacent, ranged rejected beyond the platoon's range", () => {
   const attacker = makePlatoons([{ unitTypeId: "footman", count: 5 }]);
   const defender = makePlatoons([{ unitTypeId: "weak", count: 1 }]);
   // Default 15x11 grid deploys the two sides on opposite outer columns —
@@ -201,10 +205,22 @@ test("attackWithPlatoon: melee rejected when not adjacent, ranged rejected beyon
     grid: { cols: 7, rows: 1 },
     fixedObstacles: [],
   });
-  // Distance here is exactly 6 (== RANGED_ATTACK_RANGE), so this should succeed.
+  // Distance here is exactly 6 (== bowman's range stat), so this should succeed.
   const rangedActor = getCombatant(rangedState, "attacker", 0)!;
   assert.equal(getValidAttackTargets(rangedState, rangedActor).length, 1);
   assert.equal(attackWithPlatoon(rangedState, "attacker", 0, 0), true);
+});
+
+test("platoonRange: minimum per-unit range across entries, defaulting to 1", () => {
+  assert.equal(platoonRange([{ unitTypeId: "archer", count: 3 }], unitTypes), 5, "a pure archer platoon shoots at the roster's archer range");
+  assert.equal(
+    platoonRange([{ unitTypeId: "archer", count: 2 }, { unitTypeId: "swordsman", count: 2 }], unitTypes),
+    1,
+    "one melee entry drags the platoon's range down to 1",
+  );
+  assert.equal(platoonRange([], unitTypes), 1, "empty entries default to 1");
+  assert.equal(platoonRange([{ unitTypeId: "not_in_catalog", count: 1 }], unitTypes), 1, "unknown unitTypeId defaults to 1");
+  assert.equal(unitRange(undefined), 1, "unitRange defaults a missing catalog stat to 1");
 });
 
 test("isBattleOver / finalizeManualBattle: detects a wipeout and reports the winner", () => {

@@ -21,6 +21,10 @@ export interface SelectedBuildingEntry {
   building: BuildingDef;
 }
 
+export function hasConstructingEntry(entries: SelectedBuildingEntry[]): boolean {
+  return entries.some((e) => e.building.construction !== undefined);
+}
+
 function fmt(v: number, suffix: string): string {
   return `${v}${suffix}`;
 }
@@ -207,6 +211,8 @@ export class BuildingSelectionMenu {
       marginBottom: "8px",
     });
     this.menu.appendContent(costDiv);
+
+    if (hasConstructingEntry(entries)) return;
 
     const row = document.createElement("div");
     Object.assign(row.style, {

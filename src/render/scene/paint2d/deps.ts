@@ -66,9 +66,13 @@ export interface ResolvedSprite {
 // (that's the Vite pitfall we're buying seam against). Instead the four
 // per-kind helpers below wrap the *Key constructors from assetDescriptors.ts,
 // with the constructors living in src/render/paint2dDefaults.ts.
+//
+// resolveSpriteForHero's optional `frame` is the run-cycle pose (0|1) derived
+// by the scene builder; 1 asks for the variant's optional frame-2 sprite, and
+// the deps builder falls back to the base sprite when it doesn't exist.
 export interface Paint2DSpriteResolver {
   resolveSpriteForResource(resource: ResourceType): ResolvedSprite | undefined;
-  resolveSpriteForHero(faction: Faction, dir: HeroDirection, variant: HorseVariant): ResolvedSprite | undefined;
+  resolveSpriteForHero(faction: Faction, dir: HeroDirection, variant: HorseVariant, frame?: 0 | 1): ResolvedSprite | undefined;
   resolveSpriteForBuilding(style: GenerationStyle, kind: BuildingKind, level: number): ResolvedSprite | undefined;
   resolveSpriteForCastle(level: CastleLevel, variant: CastleVariant): ResolvedSprite | undefined;
   // Per-unit-type battlefield sprites (src/resources/units/<id>/still/).

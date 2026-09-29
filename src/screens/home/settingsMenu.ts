@@ -690,6 +690,43 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     children.push(parallaxToggleRow);
 
+    const logPanelToggleRow = document.createElement("div");
+    logPanelToggleRow.style.display = "flex";
+    logPanelToggleRow.style.flexDirection = "column";
+    logPanelToggleRow.style.gap = "6px";
+
+    const logPanelToggleLabel = document.createElement("span");
+    logPanelToggleLabel.textContent = "Game log panel";
+    logPanelToggleRow.appendChild(logPanelToggleLabel);
+
+    const logPanelToggleRow2 = document.createElement("div");
+    logPanelToggleRow2.style.display = "flex";
+    logPanelToggleRow2.style.alignItems = "center";
+    logPanelToggleRow2.style.gap = "8px";
+
+    const logPanelCheck = document.createElement("input");
+    logPanelCheck.type = "checkbox";
+    logPanelCheck.style.accentColor = "#f77f00";
+    logPanelCheck.checked = current.showLogPanel;
+    logPanelToggleRow2.appendChild(logPanelCheck);
+
+    const logPanelCheckLabel = document.createElement("span");
+    logPanelCheckLabel.textContent = "Show the game log panel (streams every event row for the current game)";
+    logPanelCheckLabel.style.fontSize = "12px";
+    logPanelToggleRow2.appendChild(logPanelCheckLabel);
+
+    logPanelToggleRow.appendChild(logPanelToggleRow2);
+
+    logPanelCheck.addEventListener("change", () => {
+      updateSettings({ showLogPanel: logPanelCheck.checked });
+    });
+
+    refreshList.push(() => {
+      logPanelCheck.checked = settings().showLogPanel;
+    });
+
+    children.push(logPanelToggleRow);
+
     makeFoldableSection(content, "Visual", children, true);
   }
 
@@ -713,6 +750,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
       cityBgOffsetY: bgBounds.default,
       parallaxEnabled: false,
       parallaxLayerCount: pBounds.default,
+      showLogPanel: false,
     });
     for (const fn of refreshList) fn();
   });

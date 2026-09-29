@@ -1,7 +1,8 @@
 // Gemini building sprite generator via OpenRouter (image-in → image-out).
 // Sends a style reference PNG + prompt to google/gemini-2.5-flash-image and
 // saves the result into src/resources/buildings/, then auto-runs
-// strip-checkerboard.mjs on it (fake checkerboard → real alpha).
+// strip-checkerboard.mjs on it (fake checkerboard → real alpha) and
+// repair-alpha.mjs (seals the over-erosion seams those passes can leave).
 // It stores NO prompts — the caller passes --name plus --prompt or
 // --prompt-file every time, so concurrent agents never edit this file.
 //
@@ -18,6 +19,7 @@
 //   --ref <path>         style-reference PNG (default: src/resources/buildings/building-pixel-granary-1.png)
 //   --model <id>         OpenRouter model id (default: google/gemini-2.5-flash-image)
 //   --no-strip           skip the automatic strip-checkerboard.mjs post-pass
+//   --no-repair          skip the automatic repair-alpha.mjs post-pass
 //   --dry-run            print what would run (name, model, out path, reference) and exit — no API call, no billing
 //   --help               show this text
 
@@ -29,14 +31,15 @@ import { spawnSync } from "node:child_process";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.resolve(__dirname, "..", "..", "..", "..", "src", "resources", "buildings");
 const stripScript = path.join(__dirname, "strip-checkerboard.mjs");
+const repairScript = path.join(__dirname, "repair-alpha.mjs");
 const API = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL = "google/gemini-2.5-flash-image";
 const apiKey = process.env.OPENROUTER_API_KEY;
 
-function usage() { console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(0, 22).join("\n")); }
+function usage() { console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(0, 23).join("\n")); }
 
 const argv = process.argv.slice(2);
-const flags = { prompt: null, promptFile: null, name: null, ref: null, model: MODEL, strip: true, dryRun: false };
+const flags = { prompt: null, promptFile: null, name: null, ref: null, model: MODEL, strip: true, repair: true, dryRun: false };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === "--help" || a === "-h") { usage(); process.exit(0); }
@@ -46,6 +49,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === "--ref") flags.ref = argv[++i];
   else if (a === "--model") flags.model = argv[++i];
   else if (a === "--no-strip") flags.strip = false;
+  else if (a === "--no-repair") flags.repair = false;
   else if (a === "--dry-run") flags.dryRun = true;
   else { console.error(`Unexpected argument: ${a}\n`); usage(); process.exit(1); }
 }
@@ -111,9 +115,17 @@ function strip(file) {
   }
 }
 
+function repair(file) {
+  const r = spawnSync(process.execPath, [repairScript, file], { stdio: "inherit" });
+  if (r.status !== 0) {
+    console.error(`  auto-repair failed; run manually: node ${repairScript} ${file}`);
+  }
+}
+
 console.log(`Generating ${flags.name} ...`);
 const buf = await gen(prompt);
 const out = path.join(outDir, flags.name);
 writeFileSync(out, buf);
 console.log(`  wrote ${out} (${(buf.length / 1024).toFixed(0)} KB)`);
 if (flags.strip) strip(out);
+if (flags.repair) repair(out);

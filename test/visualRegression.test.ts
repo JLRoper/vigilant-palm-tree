@@ -15,6 +15,7 @@ import {
   getClientPort,
   shouldUpdateBaselines,
   spawnLogged,
+  waitForApiHealth,
   waitForUrl,
   treeKill,
   reapPreviousRunPids,
@@ -94,9 +95,13 @@ async function newPage(context: BrowserContext, urlSuffix = ""): Promise<Page> {
   });
   page.on("pageerror", (e) => console.log(`[browser pageerror] ${e.message}`));
   await page.addInitScript(seededRandomInitScript(RNG_SEED), RNG_SEED);
-  await page.goto(`${WEB_URL}${urlSuffix}`, { waitUntil: "networkidle" });
+  // Boot-race warmup: the page's own /api fetches raced the last moments of
+  // api/web boot and logged benign "Failed to fetch" warnings.
+  await waitForApiHealth(API_URL);
+  // waitUntil "load", not "networkidle": once a session boots, its SSE event stream (/events/stream) holds a pending request forever, so networkidle can never fire.
+  await page.goto(`${WEB_URL}${urlSuffix}`, { waitUntil: "load" });
   await page.evaluate(() => localStorage.clear());
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "load" });
   await page.waitForFunction(
     () => (window as unknown as { __gameDebug?: { activeGameName?: string } }).__gameDebug?.activeGameName != null,
     null,

@@ -15,6 +15,7 @@ import {
   getShutdownAfterMs,
   reapPreviousRunPids,
   spawnLogged,
+  waitForApiHealth,
   waitForUrl,
   registerPid,
   treeKill,
@@ -456,6 +457,7 @@ async function run() {
       throw err;
     }
     await waitForUrl(WEB_URL);
+    await waitForApiHealth(API_URL);
     console.log(">> api + web up");
 
     const ctx = await pwRequest.newContext();
@@ -488,9 +490,10 @@ async function run() {
       if (msg.type() === "error") console.error("[browser error]", text);
     });
 
-    await page.goto(WEB_URL, { waitUntil: "networkidle" });
+    // waitUntil "load", not "networkidle": once a session boots, its SSE event stream (/events/stream) holds a pending request forever, so networkidle can never fire.
+    await page.goto(WEB_URL, { waitUntil: "load" });
     await page.evaluate(() => localStorage.clear());
-    await page.reload({ waitUntil: "networkidle" });
+    await page.reload({ waitUntil: "load" });
 
     // Wait for client initialization, with stronger diagnostics on timeout
     try {
