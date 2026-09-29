@@ -1,8 +1,8 @@
 import { Axial, hexDistance } from "../core/hex";
 import { findPath, NEIGHBOR_DIRS } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
-import type { GameState, HeroState } from "@heroes/contracts";
-import { platoonTroopTotal, platoonsHaveTroops, settlementStacks } from "@heroes/engine";
+import type { GameState, HeroState, SettlementState } from "@heroes/contracts";
+import { platoonTroopTotal, settlementStacks } from "@heroes/engine";
 import { TERRAIN_COST } from "../map/terrain";
 
 export interface AiMove {
@@ -10,7 +10,7 @@ export interface AiMove {
   cost: number;
 }
 
-type TargetKind = "enemy" | "neutral_settlement" | "resource" | "wander";
+type TargetKind = "enemy" | "garrisoned_settlement" | "enemy_settlement" | "neutral_settlement" | "resource" | "wander";
 
 interface Target {
   kind: TargetKind;
@@ -23,6 +23,24 @@ const SETTLEMENT_REACH = 8;
 const RESOURCE_REACH = 8;
 const SETTLEMENT_RESOURCE_BUFFER = 2;
 
+// Target priority bands (higher wins; ties break by distance decay). Enemy
+// heroes stay the top band; the settlement bands sit between heroes and
+// resources so the AI prefers fights it can win over empty expansion, and
+// empty expansion over resource pickups. Decay is per hex of straight-line
+// distance inside each band.
+const GARRISON_ATTACK_RATIO = 1.5;
+const GARRISONED_SETTLEMENT_PRIORITY = 700;
+const ENEMY_SETTLEMENT_PRIORITY = 650;
+const NEUTRAL_SETTLEMENT_PRIORITY = 600;
+const SETTLEMENT_PRIORITY_DECAY = 5;
+
+// The AI attacks a non-owned garrisoned settlement (enemy-owned or neutral)
+// when its troop total is at least this multiple of the garrison's; weaker
+// armies treat the garrison as a path obstacle and route around it.
+function attackerBeatsGarrison(attackerTroops: number, garrison: SettlementState): boolean {
+  return attackerTroops >= GARRISON_ATTACK_RATIO * platoonTroopTotal(settlementStacks(garrison));
+}
+
 export function pickAiMove(
   state: GameState,
   heroId: string,
@@ -34,12 +52,18 @@ export function pickAiMove(
   if (hero.movementRemaining <= 0) return null;
 
   const blocked = new Set<string>();
+  const attackerTroops = platoonTroopTotal(hero.stacks);
   for (const [id, other] of Object.entries(state.heroes)) {
     if (id === heroId) continue;
     blocked.add(`${other.q},${other.r}`);
   }
   for (const s of Object.values(state.settlements)) {
-    if (s.ownerId !== hero.ownerId && platoonsHaveTroops(settlementStacks(s))) {
+    if (s.ownerId === hero.ownerId) continue;
+    // Only an unfavourable garrison is a path obstacle: a garrison the AI
+    // judges it can beat must stay pathable so the approach can END on the
+    // settlement tile (the walk-in gates there turn it into a battle or a
+    // capture). Empty garrisons were never blocked.
+    if (!attackerBeatsGarrison(attackerTroops, s)) {
       blocked.add(`${s.q},${s.r}`);
     }
   }
@@ -56,10 +80,18 @@ export function pickAiMove(
   }
 
   for (const s of Object.values(state.settlements)) {
-    if (s.ownerId !== null) continue;
+    if (s.ownerId === hero.ownerId) continue;
     const dist = hexDistance(hero, s);
     if (dist > SETTLEMENT_REACH) continue;
-    targets.push({ kind: "neutral_settlement", tile: { q: s.q, r: s.r }, priority: 600 - dist * 5 });
+    const tile = { q: s.q, r: s.r };
+    if (platoonTroopTotal(settlementStacks(s)) > 0) {
+      if (!attackerBeatsGarrison(attackerTroops, s)) continue;
+      targets.push({ kind: "garrisoned_settlement", tile, priority: GARRISONED_SETTLEMENT_PRIORITY - dist * SETTLEMENT_PRIORITY_DECAY });
+    } else if (s.ownerId !== null) {
+      targets.push({ kind: "enemy_settlement", tile, priority: ENEMY_SETTLEMENT_PRIORITY - dist * SETTLEMENT_PRIORITY_DECAY });
+    } else {
+      targets.push({ kind: "neutral_settlement", tile, priority: NEUTRAL_SETTLEMENT_PRIORITY - dist * SETTLEMENT_PRIORITY_DECAY });
+    }
   }
 
   for (let r = 0; r < map.height; r++) {

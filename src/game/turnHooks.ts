@@ -34,7 +34,6 @@ import type {
   HeroBattleVerdict,
   HeroId,
   HeroState,
-  Platoon,
   SettlementId,
   TransferDirection,
   WarehouseResource,
@@ -269,7 +268,20 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       try {
         await captureSettlement(name, { actor, heroId, settlementId });
       } catch (e) {
+        // Benign: the server already has this capture -- most commonly
+        // because it captured inline with a post-battle persist or the
+        // settlement-battle result before this serialized POST landed. The
+        // local optimistic capture already matches server state, so there is
+        // nothing to roll back and no error to surface to the player.
+        if (e instanceof CommandError && e.reason === "already_owned") {
+          console.warn("[turnHooks] capture already owned server-side; keeping local capture");
+          return;
+        }
         reportCommandFailure("Capture settlement", e);
+        // Rethrow so TurnController.captureSettlement's serialized dispatch
+        // rolls the optimistic capture back (owner/roster/gold) -- the same
+        // record-then-undo-on-rejection shape as the build-commit ledger.
+        throw e;
       }
     },
     onTransferGold: async (
@@ -437,31 +449,11 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         reportCommandFailure("Transfer units", e);
       }
     },
-    onSubmitSettlementBattleResult: async (
-      actor: number,
-      attackerId: HeroId,
-      settlementId: SettlementId,
-      outcome: "attackerWon" | "defenderWon" | "draw" | "retreat" | "surrender",
-      attackerStacks: Platoon[],
-      defenderStacks: Platoon[],
-      surrenderedGold: number | undefined,
-      rounds: number,
-      obstacleSeed: number,
-    ): Promise<void> => {
+    onSettlementBattleSubmitted: async (payload): Promise<void> => {
       const name = opts.gameName();
       if (!name) return;
       try {
-        await submitSettlementBattleResult(name, {
-          actor,
-          attackerId,
-          settlementId,
-          outcome,
-          attackerStacks,
-          defenderStacks,
-          surrenderedGold,
-          rounds,
-          obstacleSeed,
-        });
+        await submitSettlementBattleResult(name, payload);
       } catch (e) {
         reportCommandFailure("Settlement battle result", e);
       }
@@ -504,6 +496,42 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
   };
 }
 
+// Single-hero half of mergeBattleOutcomeHeroes, shared with the settlement
+// battle flow (GameActions.startSettlementBattleFlow) where there is no
+// defender hero to name: absent means delete (row + owner heroIds + selection
+// clear), present merges as today. Reference-stable no-op when nothing
+// changed.
+export function mergeBattleOutcomeHero(
+  state: GameState,
+  heroId: HeroId,
+  hero: HeroState | undefined,
+): GameState {
+  let heroes = { ...state.heroes };
+  let players = state.players;
+  let changed = false;
+  if (hero) {
+    if (heroes[heroId] !== hero) {
+      heroes[heroId] = hero;
+      changed = true;
+    }
+  } else {
+    const before = state.heroes[heroId];
+    if (before) {
+      delete heroes[heroId];
+      if (players.some((p) => p.id === before.ownerId && p.heroIds.includes(heroId))) {
+        players = players.map((p) =>
+          p.id === before.ownerId ? { ...p, heroIds: p.heroIds.filter((h) => h !== heroId) } : p,
+        );
+      }
+      changed = true;
+    }
+  }
+  if (!changed) return state;
+  const selectedHeroId =
+    state.selectedHeroId != null && heroes[state.selectedHeroId] ? state.selectedHeroId : null;
+  return { ...state, heroes, players, selectedHeroId };
+}
+
 export function mergeBattleOutcomeHeroes(
   state: GameState,
   attackerId: HeroId,
@@ -514,33 +542,9 @@ export function mergeBattleOutcomeHeroes(
   // (defeat → removed server-side). Absent here means delete: drop the local
   // hero row, prune its owner's heroIds, and clear a selection pointing at it
   // (existence-checked like mergeFromEndTurn). Present heroes merge as today.
-  let heroes = { ...state.heroes };
-  let players = state.players;
-  let changed = false;
-  const apply = (heroId: HeroId, hero: HeroState | undefined): void => {
-    if (hero) {
-      if (heroes[heroId] !== hero) {
-        heroes[heroId] = hero;
-        changed = true;
-      }
-      return;
-    }
-    const before = state.heroes[heroId];
-    if (!before) return;
-    delete heroes[heroId];
-    if (players.some((p) => p.id === before.ownerId && p.heroIds.includes(heroId))) {
-      players = players.map((p) =>
-        p.id === before.ownerId ? { ...p, heroIds: p.heroIds.filter((h) => h !== heroId) } : p,
-      );
-    }
-    changed = true;
-  };
-  apply(attackerId, result.attackerHero);
-  apply(defenderId, result.defenderHero);
-  if (!changed) return state;
-  const selectedHeroId =
-    state.selectedHeroId != null && heroes[state.selectedHeroId] ? state.selectedHeroId : null;
-  return { ...state, heroes, players, selectedHeroId };
+  let next = mergeBattleOutcomeHero(state, attackerId, result.attackerHero);
+  next = mergeBattleOutcomeHero(next, defenderId, result.defenderHero);
+  return next;
 }
 
 export function mergeFromEndTurn(state: GameState, result: EndTurnResult): GameState {

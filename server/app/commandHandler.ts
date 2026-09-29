@@ -1745,16 +1745,15 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       if (!settlement) {
         return { ok: false, reason: "no_settlement", events: [] };
       }
-      if (settlement.ownerId === null) {
-        return { ok: false, reason: "unowned_settlement", events: [] };
-      }
       if (settlement.ownerId === attackerHero.ownerId) {
         return { ok: false, reason: "not_enemy_settlement", events: [] };
       }
       // "Phase is SETTLEMENT_BATTLE for this pair" (plan §8's client phase),
       // re-derived server-side: the attacker owned by the active seat and
       // standing ON the settlement tile with a live garrison is exactly the
-      // precondition startSettlementBattle encodes.
+      // precondition startSettlementBattle encodes. A NEUTRAL (ownerId null)
+      // garrisoned settlement qualifies like an enemy-owned one -- the gate
+      // is only "not the attacker's own settlement".
       if (attackerHero.q !== settlement.q || attackerHero.r !== settlement.r) {
         return { ok: false, reason: "hero_not_at_settlement", events: [] };
       }
@@ -1790,7 +1789,12 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       });
       // attackerWon runs captureSettlement() inside the reducer (owner
       // flip + CAPTURE_GOLD_REWARD), so players move too -- persist them
-      // alongside, same as CaptureSettlement's own case.
+      // alongside, same as CaptureSettlement's own case. The reducer also
+      // applies the attacker's hero outcome (hero-outcomes parity): defeat
+      // deletes the hero and prunes owner heroIds (players ride the same
+      // persist), retreat/surrender relocate; removedHeroIds drive the
+      // charter fold whose granular-gated persist mirrors
+      // persistBattleOutcome's.
       const legacyGold = sumPlayerGold(result.state.players, result.state.heroes, result.state.settlements);
       await deps.gameRepo.saveHeroesAndSettlements(
         command.gameName,
@@ -1799,6 +1803,9 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         { players: result.state.players, gold: legacyGold },
       );
       await dualWriteEntities(deps, command.gameName, state, result.state);
+      if (result.state.activeCharters !== state.activeCharters && source === "granular") {
+        await deps.charterRepo.upsertMany(command.gameName, result.state.activeCharters);
+      }
       const event: EngineEvent = {
         type: "SettlementBattleResolved",
         actor: command.actor,
@@ -1814,6 +1821,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         lastEventId,
         attackerHero: result.state.heroes[command.attackerId],
         settlement: result.state.settlements[command.settlementId],
+        attackerVerdict: result.attackerVerdict,
       };
     }
   }

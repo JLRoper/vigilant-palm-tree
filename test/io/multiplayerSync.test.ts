@@ -569,3 +569,164 @@ test("a self-seat row is skipped for state but still emitted as mp:logRow", asyn
   assert.equal(sync.getState()!.heroes.h0.gold, 100, "state was not re-applied");
   sync.stop();
 });
+
+// Garrison sync: the three unit-recruitment/garrison-plan kinds. Deltas
+// (UnitsRecruited/UnitsTransferred) apply incrementally; the settlement
+// battle outcome is not derivable from its payload and rides the existing
+// full-refetch resync path instead.
+
+function stackTotal(stacks: { entries: { count: number }[] }[] | undefined): number {
+  let total = 0;
+  for (const p of stacks ?? []) {
+    for (const e of p.entries) total += e.count;
+  }
+  return total;
+}
+
+test("UnitsRecruited and UnitsTransferred deltas apply to the sync state and fan out", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("gm1", {
+      lastEventId: 10,
+      heroes: [makeHero("h1", 1, 8, 8)],
+      settlements: [
+        {
+          ...makeSettlement("s0", 1, 8, 8),
+          stacks: [{ entries: [{ unitTypeId: "pikeman", count: 4 }] }],
+        },
+      ],
+      players: [makePlayer(0, "player", ["h0"], []), makePlayer(1, "player", ["h1"], ["s0"])],
+    }),
+    events: [],
+    calls: [],
+  };
+  installFetch(server);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("gm1", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const logKinds: string[] = [];
+  bus.on("mp:logRow", (ev: { row: { kind: string } }) => logKinds.push(ev.row.kind));
+  const batches: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => batches.push(ev.events));
+
+  const recruited: EngineEvent = {
+    type: "UnitsRecruited",
+    actor: 1,
+    settlementId: "s0",
+    unitTypeId: "pikeman",
+    count: 5,
+  };
+  const transferred: EngineEvent = {
+    type: "UnitsTransferred",
+    actor: 1,
+    heroId: "h1",
+    settlementId: "s0",
+    direction: "toHero",
+    unitTypeId: "pikeman",
+    count: 2,
+  };
+  server.events.push(row(11, recruited, 1), row(12, transferred, 1));
+  await sync.pollOnce();
+
+  assert.deepEqual(logKinds, ["UnitsRecruited", "UnitsTransferred"], "both rows fan out to the log");
+  assert.deepEqual(batches, [[recruited, transferred]]);
+  assert.equal(sync.getCursor(), 12);
+  assert.equal(stackTotal(sync.getState()?.settlements.s0.stacks), 7, "recruit +5, transfer -2");
+  assert.equal(stackTotal(sync.getState()?.heroes.h1.stacks), 2, "the hero picked up the transferred units");
+  sync.stop();
+});
+
+test("SettlementBattleResolved flows through as one full resync with the fetched state applied", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("gm2", {
+      lastEventId: 10,
+      heroes: [makeHero("h1", 1, 8, 8)],
+      settlements: [makeSettlement("s0", 0, 8, 8)],
+      players: [makePlayer(0, "player", ["h0"], []), makePlayer(1, "player", ["h1"], [])],
+    }),
+    events: [],
+    calls: [],
+  };
+  installFetch(server);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("gm2", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const resyncs: string[] = [];
+  bus.on("mp:resynced", (ev: { reason: string }) => resyncs.push(ev.reason));
+  const batches: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => batches.push(ev.events));
+
+  server.game = makeGameRow("gm2", {
+    lastEventId: 13,
+    heroes: [makeHero("h1", 1, 8, 8)],
+    settlements: [
+      {
+        ...makeSettlement("s0", 1, 8, 8),
+        stacks: [{ entries: [{ unitTypeId: "pikeman", count: 5 }] }],
+      },
+    ],
+    players: [makePlayer(0, "player", ["h0"], []), makePlayer(1, "player", ["h1"], ["s0"])],
+  });
+  server.events.push(
+    row(
+      13,
+      {
+        type: "SettlementBattleResolved",
+        actor: 1,
+        attackerId: "h1",
+        settlementId: "s0",
+        winner: "attacker",
+        captured: true,
+      },
+      1,
+    ),
+  );
+  await sync.pollOnce();
+
+  assert.deepEqual(resyncs, ["event_not_derivable"], "one full refetch, from the outcome row");
+  assert.deepEqual(batches, [], "a non-derivable event never lands in the applied batch");
+  assert.equal(sync.getCursor(), 13);
+  const state = sync.getState()!;
+  assert.equal(state.settlements.s0.ownerId, 1, "the capture flipped the owner");
+  assert.equal(stackTotal(state.settlements.s0.stacks), 5, "the fetched garrison replaced the local view");
+  sync.stop();
+});
+
+test("a self-seat garrison delta is skipped for state but still fans out and advances the cursor", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("gm3", {
+      lastEventId: 10,
+      heroes: [makeHero("h1", 1, 8, 8)],
+      settlements: [
+        {
+          ...makeSettlement("s0", 1, 8, 8),
+          stacks: [{ entries: [{ unitTypeId: "pikeman", count: 4 }] }],
+        },
+      ],
+    }),
+    events: [],
+    calls: [],
+  };
+  installFetch(server);
+  setInMemoryLocalPlayerId("gm3", 1);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("gm3", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const logKinds: string[] = [];
+  bus.on("mp:logRow", (ev: { row: { kind: string } }) => logKinds.push(ev.row.kind));
+  const batches: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => batches.push(ev.events));
+
+  server.events.push(
+    row(11, { type: "UnitsRecruited", actor: 1, settlementId: "s0", unitTypeId: "pikeman", count: 5 }, 1),
+  );
+  await sync.pollOnce();
+
+  assert.deepEqual(logKinds, ["UnitsRecruited"], "own rows still reach the log");
+  assert.deepEqual(batches, [], "own rows are not re-applied on top of the local reducer");
+  assert.equal(sync.getCursor(), 11);
+  assert.equal(stackTotal(sync.getState()?.settlements.s0.stacks), 4);
+  sync.stop();
+});

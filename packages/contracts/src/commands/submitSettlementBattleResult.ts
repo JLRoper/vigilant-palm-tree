@@ -1,4 +1,7 @@
+import type { HeroBattleVerdict } from "../events/engineEvent";
 import type { HeroId, PlayerSeat, SettlementId } from "../ids";
+import type { HeroState } from "../gameState";
+import type { SettlementState } from "../settlement";
 import type { Platoon } from "../units";
 
 // Settlement-garrison battle result submission, mirroring SubmitBattleResult
@@ -27,4 +30,16 @@ export interface SubmitSettlementBattleResultCommand {
   surrenderedGold?: number;
   rounds: number;
   obstacleSeed: number;
+}
+
+// Post-battle attacker (hero-outcomes parity with ResolveBattleResult /
+// SubmitBattleResultResult): the settlement always comes back (every outcome
+// touches it), but the attacker hero is OPTIONAL — a defeat removes the hero
+// server-side (state.heroes + owner heroIds), so absence here is the deletion
+// signal. The verdict carries the retreat/surrender/defeat discrimination the
+// client can't re-derive from the outcome enum alone.
+export interface SubmitSettlementBattleResultResult {
+  attackerHero?: HeroState;
+  settlement: SettlementState;
+  attackerVerdict?: HeroBattleVerdict;
 }

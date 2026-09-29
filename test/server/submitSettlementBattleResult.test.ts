@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Command, HeroId, HeroState, Player, Platoon, SettlementId, SettlementState } from "@heroes/contracts";
+import { MOVEMENT_PER_TURN } from "@heroes/contracts";
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
 import { normalizePlatoons } from "@heroes/engine";
 import { handleCommand } from "../../server/app/commandHandler";
+import { makeCharter } from "../charter/_helpers";
 import {
   createMockCharterRepo,
   createMockEventRepo,
@@ -196,8 +198,8 @@ test("attackerWon captures the settlement: owner flips, garrison empties, attack
   assert.equal(settlementRepo.calls[0].value.s1.ownerId, 0);
 });
 
-test("defenderWon persists the garrison survivors and cancels the attacker's move", async () => {
-  const { gameRepo, eventRepo, deps } = makeDeps(makeSettlementBattleRow());
+test("defenderWon REMOVES the wiped attacker: row gone, heroIds pruned, platoons swept, verdict defeated", async () => {
+  const { gameRepo, eventRepo, heroRepo, deps } = makeDeps(makeSettlementBattleRow());
   const result = await handleCommand(
     settlementBattleCommand({
       outcome: "defenderWon",
@@ -209,14 +211,20 @@ test("defenderWon persists the garrison survivors and cancels the attacker's mov
   assert.equal(result.ok, true);
 
   const saved = gameRepo.rows["test-game"];
+  assert.equal(saved.heroes.h0, undefined, "the wiped attacker is deleted from the heroes record");
+  assert.deepEqual(
+    saved.players.find((p) => p.id === 0)?.heroIds,
+    [],
+    "attacker pruned from seat 0's heroIds",
+  );
+  assert.equal("h0" in heroRepo.calls[0].value, false, "the granular upsert omits the removed hero (NOT-IN platoon sweep input)");
   assert.equal(saved.settlements.s1.ownerId, 1, "no capture on a loss");
   assert.deepEqual(saved.settlements.s1.stacks, normalizePlatoons([stack("swordsman", 2)]), "garrison survivors persist");
-  assert.equal(saved.heroes.h0.q, 4, "cancelMove restored the pre-move hex");
-  assert.equal(saved.heroes.h0.r, 5);
-  assert.equal(saved.heroes.h0.movementRemaining, 7, "pre-move movement restored");
-  assert.equal(saved.heroes.h0.previousQ, null);
-  assert.deepEqual(saved.heroes.h0.stacks, normalizePlatoons([]));
-  assert.equal(saved.heroes.h0.gold, 100, "no capture reward without a capture");
+  assert.equal(saved.heroes.h0?.gold, undefined);
+
+  assert.equal(result.attackerHero, undefined, "the removed attacker is omitted from the result");
+  assert.equal(result.attackerVerdict, "defeated");
+  assert.deepEqual(result.settlement?.stacks, normalizePlatoons([stack("swordsman", 2)]));
 
   assert.deepEqual(eventRepo.events[0].payload, {
     type: "SettlementBattleResolved",
@@ -228,7 +236,27 @@ test("defenderWon persists the garrison survivors and cancels the attacker's mov
   });
 });
 
-test("retreat leaves the garrison intact (pre-battle stacks) and bounces the attacker", async () => {
+test("a defeat removes a chartering attacker's outstanding charter (granular charters persisted)", async () => {
+  const row = makeSettlementBattleRow({ isChartering: true, charterId: "c-traveling" });
+  const { gameRepo, deps } = makeDeps(row);
+  const seeded = createMockCharterRepo({
+    "test-game": [makeCharter({ id: "c-traveling", heroId: "h0", ownerId: 0 })],
+  });
+  deps.charterRepo = seeded;
+  const result = await handleCommand(
+    settlementBattleCommand({
+      outcome: "defenderWon",
+      attackerStacks: [],
+      defenderStacks: [stack("swordsman", 2)],
+    }),
+    deps,
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(seeded.rows["test-game"], [], "the removed attacker's outstanding charter is gone");
+  assert.equal(gameRepo.rows["test-game"].heroes.h0, undefined, "the chartering attacker is removed outright");
+});
+
+test("retreat zeroes the stacks and relocates the attacker to their nearest OWNED settlement", async () => {
   const { gameRepo, eventRepo, deps } = makeDeps(makeSettlementBattleRow());
   const result = await handleCommand(
     settlementBattleCommand({
@@ -247,15 +275,44 @@ test("retreat leaves the garrison intact (pre-battle stacks) and bounces the att
     "a retreat never touches the garrison",
   );
   assert.equal(saved.settlements.s1.ownerId, 1);
-  assert.equal(saved.heroes.h0.q, 4, "attacker bounced back");
-  assert.equal(saved.heroes.h0.r, 5);
-  assert.equal(saved.heroes.h0.movementRemaining, 7);
-  assert.equal(saved.heroes.h0.previousQ, null);
+  const retreated = saved.heroes.h0;
+  assert.ok(retreated, "a retreat keeps the hero");
+  assert.equal(retreated.q, 0, "relocated to the owner's nearest settlement (s0 at 0,0)");
+  assert.equal(retreated.r, 0);
+  assert.equal(retreated.movementRemaining, MOVEMENT_PER_TURN, "fresh-turn movement at the relocation hex");
+  assert.deepEqual(retreated.trail, [{ q: 0, r: 0 }], "trail reseeded at the settlement");
+  assert.deepEqual(retreated.stacks, normalizePlatoons([]), "retreat loses ALL troops");
+  assert.equal(retreated.troops, 0);
+  assert.equal(result.attackerVerdict, "retreated");
+  assert.deepEqual(result.attackerHero, retreated);
   assert.equal(eventRepo.events[0].payload.captured, false);
   assert.equal(eventRepo.events[0].payload.winner, "defender");
 });
 
-test("surrender deducts the priced gold from the attacker and keeps both armies", async () => {
+test("retreat with no owned settlement stays at the post-cancel position (D1)", async () => {
+  const row = makeSettlementBattleRow();
+  row.settlements.s0 = makeSettlement("s0", null, 0, 0);
+  const { gameRepo, deps } = makeDeps(row);
+  const result = await handleCommand(
+    settlementBattleCommand({
+      outcome: "retreat",
+      attackerStacks: [stack("swordsman", 3)],
+      defenderStacks: [stack("swordsman", 2)],
+    }),
+    deps,
+  );
+  assert.equal(result.ok, true);
+
+  const retreated = gameRepo.rows["test-game"].heroes.h0;
+  assert.ok(retreated, "D1 keeps the hero in the record");
+  assert.equal(retreated.q, 4, "stays at the cancelled pre-move hex");
+  assert.equal(retreated.r, 5);
+  assert.equal(retreated.movementRemaining, 7, "cancelMove's movement restoration stands");
+  assert.deepEqual(retreated.stacks, normalizePlatoons([]), "troops are still lost");
+  assert.equal(result.attackerVerdict, "retreated");
+});
+
+test("surrender deducts the priced gold, relocates to the nearest OWNED settlement, keeps the army", async () => {
   const { gameRepo, eventRepo, deps } = makeDeps(makeSettlementBattleRow());
   const result = await handleCommand(
     settlementBattleCommand({
@@ -269,11 +326,50 @@ test("surrender deducts the priced gold from the attacker and keeps both armies"
   assert.equal(result.ok, true);
 
   const saved = gameRepo.rows["test-game"];
-  assert.equal(saved.heroes.h0.gold, 60, "surrender price debited from the attacker's purse");
-  assert.equal(saved.heroes.h0.q, 4, "surrender cancels the attacker's move like a retreat");
-  assert.deepEqual(saved.heroes.h0.stacks, normalizePlatoons([stack("swordsman", 5)]));
+  const conceded = saved.heroes.h0;
+  assert.ok(conceded, "a surrender keeps the hero");
+  assert.equal(conceded.gold, 60, "surrender price debited from the attacker's purse");
+  assert.equal(conceded.q, 0, "relocated to the owner's nearest settlement (s0 at 0,0)");
+  assert.equal(conceded.r, 0);
+  assert.deepEqual(conceded.trail, [{ q: 0, r: 0 }]);
+  assert.deepEqual(conceded.stacks, normalizePlatoons([stack("swordsman", 5)]), "surrender keeps the army");
   assert.deepEqual(saved.settlements.s1.stacks, normalizePlatoons([stack("swordsman", 2)]), "garrison intact");
   assert.equal(saved.settlements.s1.ownerId, 1);
+  assert.equal(result.attackerVerdict, "surrendered");
+  assert.deepEqual(result.attackerHero, conceded);
+  assert.deepEqual(eventRepo.events[0].payload, {
+    type: "SettlementBattleResolved",
+    actor: 0,
+    attackerId: "h0",
+    settlementId: "s1",
+    winner: "defender",
+    captured: false,
+  });
+});
+
+test("a draw with survivors on both sides bounces the attacker unchanged (verdict stood)", async () => {
+  const { gameRepo, eventRepo, heroRepo, deps } = makeDeps(makeSettlementBattleRow());
+  const result = await handleCommand(
+    settlementBattleCommand({
+      outcome: "draw",
+      attackerStacks: [stack("swordsman", 3)],
+      defenderStacks: [stack("swordsman", 2)],
+    }),
+    deps,
+  );
+  assert.equal(result.ok, true);
+
+  const saved = gameRepo.rows["test-game"];
+  const hero = saved.heroes.h0;
+  assert.ok(hero, "a stalemate keeps the attacker standing");
+  assert.equal(hero.q, 4, "bounce to the pre-move hex");
+  assert.equal(hero.r, 5);
+  assert.equal(hero.movementRemaining, 7, "pre-move movement restored");
+  assert.deepEqual(hero.stacks, normalizePlatoons([stack("swordsman", 3)]), "survivor stacks kept");
+  assert.deepEqual(saved.settlements.s1.stacks, normalizePlatoons([stack("swordsman", 2)]), "garrison replaced with submitted survivors");
+  assert.equal(result.attackerVerdict, "stood");
+  assert.deepEqual(result.attackerHero, hero);
+  assert.equal("h0" in heroRepo.calls[0].value, true, "the surviving attacker persists");
   assert.deepEqual(eventRepo.events[0].payload, {
     type: "SettlementBattleResolved",
     actor: 0,
@@ -334,4 +430,56 @@ test("a hero the actor doesn't own is rejected (forbidden_not_your_hero)", async
   assert.equal(result.ok, false);
   assert.equal(result.reason, "forbidden_not_your_hero");
   assert.equal(eventRepo.events.length, 0);
+});
+
+test("a NEUTRAL garrisoned settlement accepts the battle win and captures for the attacker", async () => {
+  const players: Player[] = [
+    { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
+    { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: ["s1"] },
+  ];
+  const row: HydratableGameRow = {
+    name: "test-game",
+    seed: 1,
+    round: 1,
+    day: 1,
+    active_player_id: 0,
+    players,
+    heroes: {
+      h0: makeHero("h0", 0, 5, 5, {
+        gold: 100,
+        stacks: [stack("swordsman", 5)],
+        previousQ: 4,
+        previousR: 5,
+        previousMovementRemaining: 7,
+        movementRemaining: 6,
+      }),
+      h1: makeHero("h1", 1, 18, 4),
+    },
+    settlements: {
+      s0: makeSettlement("s0", 0, 0, 0),
+      s2: makeSettlement("s2", null, 5, 5, { stacks: [stack("swordsman", 2)] }),
+    },
+  };
+  const { gameRepo, eventRepo, settlementRepo, deps } = makeDeps(row);
+  const command = settlementBattleCommand({ settlementId: "s2" });
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true, `neutral garrisoned settlement must be fightable: ${result.reason}`);
+
+  assert.equal(result.settlement?.ownerId, 0, "neutral settlement flipped to the attacker");
+  assert.deepEqual(result.settlement?.stacks, normalizePlatoons([]));
+  assert.equal(result.attackerHero?.gold, 200, "100 purse + CAPTURE_GOLD_REWARD (100)");
+  assert.deepEqual(eventRepo.events[0].payload, {
+    type: "SettlementBattleResolved",
+    actor: 0,
+    attackerId: "h0",
+    settlementId: "s2",
+    winner: "attacker",
+    captured: true,
+  });
+
+  const saved = gameRepo.rows["test-game"];
+  assert.equal(saved.settlements.s2.ownerId, 0);
+  assert.ok(saved.players.find((p) => p.id === 0)?.settlementIds.includes("s2"), "attacker's seat gains the neutral settlement");
+  assert.ok(!saved.players.find((p) => p.id === 1)?.settlementIds.includes("s2"));
+  assert.equal(settlementRepo.calls[0].value.s2.ownerId, 0);
 });

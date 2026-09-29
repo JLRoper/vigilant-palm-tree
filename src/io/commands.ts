@@ -227,9 +227,14 @@ export type SubmitSettlementBattleResultPayload = {
   obstacleSeed: number;
 };
 
+// Mirrors the contracts SubmitSettlementBattleResultResult (hero-outcomes
+// parity): the settlement always rides back, the attacker hero is OPTIONAL —
+// absence is the deletion signal for a defeated attacker — and the verdict
+// carries the retreat/surrender/defeat discrimination for the result card.
 export type SubmitSettlementBattleResultResult = {
-  attackerHero: HeroState;
+  attackerHero?: HeroState;
   settlement: SettlementState;
+  attackerVerdict?: HeroBattleVerdict;
 };
 
 export async function submitSettlementBattleResult(

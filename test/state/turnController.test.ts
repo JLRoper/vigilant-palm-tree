@@ -1,10 +1,28 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TurnController, type TurnControllerHooks } from "../../src/state/turnController";
-import { mergeBattleOutcomeHeroes } from "../../src/game/turnHooks";
+import { mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../../src/game/turnHooks";
 import { emptyWarehouse, makeCharter, makeHero, makeSettlement, makeState } from "../charter/_helpers";
-import { normalizePlatoons } from "@heroes/engine";
-import { MOVEMENT_PER_TURN, type GameState } from "@heroes/contracts";
+import { cleanupDefeatedHeroCharters, normalizePlatoons, relocateHeroToSettlement } from "@heroes/engine";
+import { MOVEMENT_PER_TURN, type GameState, type HeroId, type SettlementId } from "@heroes/contracts";
+import type { UnitType } from "../../src/state/units";
+import { bus } from "../../src/core/eventBus";
+
+const BATTLE_UNIT_TYPES: Record<string, UnitType> = {
+  champ: { id: "champ", name: "Champ", attack: 100, defence: 100, health: 100, speed: 5, description: "", advantageType: "ranged", specialty: "", specialtyPriority: 0 },
+  trash: { id: "trash", name: "Trash", attack: 1, defence: 1, health: 1, speed: 1, description: "", advantageType: "ranged", specialty: "", specialtyPriority: 0 },
+  wall: { id: "wall", name: "Wall", attack: 1, defence: 1000, health: 10, speed: 1, description: "", advantageType: "ranged", specialty: "", specialtyPriority: 0 },
+};
+
+function stackOf(unitTypeId: string, count: number) {
+  return normalizePlatoons([{ entries: [{ unitTypeId, count }] }]);
+}
+
+function garrisonedAt(id: string, owner: 0 | 1 | null, q: number, r: number, unitTypeId: string, count: number) {
+  const s = makeSettlement(id, owner, q, r);
+  s.stacks = stackOf(unitTypeId, count);
+  return s;
+}
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -76,7 +94,7 @@ function buildHooks(initial: GameState): TurnControllerHooks {
     onAdvanceCharterTravel: noop,
     onRecruitUnits: noop,
     onTransferUnits: noop,
-    onSubmitSettlementBattleResult: noop,
+    onSettlementBattleSubmitted: noop,
   };
   (hooks as unknown as TestHooks).onHumanTurnEndSpy = onHumanTurnEndSpy;
   return hooks;
@@ -1019,6 +1037,48 @@ test("mergeBattleOutcomeHeroes tolerates already-absent heroes: idempotent re-me
   assert.deepEqual(kept.players[0]?.heroIds, ["h0"]);
 });
 
+test("settlement battle merge removes a defeated attacker: charter folded pre-merge, row deleted, heroIds pruned, selection cleared", () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 5, 5, { isChartering: true, charterId: "c1" }), makeHero("h1", 1, 18, 4)],
+    activeCharters: [makeCharter({ id: "c1", heroId: "h0", ownerId: 0 })],
+    selectedHeroId: "h0",
+  });
+
+  const folded = cleanupDefeatedHeroCharters(initial, "h0");
+  const merged = mergeBattleOutcomeHero(folded, "h0", undefined);
+
+  assert.deepEqual(merged.activeCharters, [], "the outstanding charter dropped before the row removal");
+  assert.equal(merged.heroes["h0"], undefined, "the omitted attacker is deleted from state.heroes");
+  assert.deepEqual(merged.players[0]?.heroIds, [], "the owner's heroIds are pruned");
+  assert.equal(merged.selectedHeroId, null, "a selection pointing at the removed hero clears");
+  assert.ok(merged.heroes["h1"], "unrelated heroes survive");
+  assert.equal(merged.players[0]?.settlementIds.includes("s0"), true, "settlement roster untouched");
+});
+
+test("settlement battle merge applies a relocated retreat/surrender attacker: position + trail reseed merge, selection survives", () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 5, 5), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, 18, 4)],
+    selectedHeroId: "h0",
+  });
+  const home = initial.settlements["s0"];
+  const relocated = relocateHeroToSettlement(
+    { ...initial.heroes["h0"], stacks: [], troops: 0 },
+    home,
+  );
+
+  const merged = mergeBattleOutcomeHero(initial, "h0", relocated);
+
+  assert.equal(merged.heroes["h0"], relocated, "the relocated row replaces the local hero wholesale");
+  assert.equal(merged.heroes["h0"]?.q, 2, "position merged at the settlement hex");
+  assert.equal(merged.heroes["h0"]?.r, 2);
+  assert.deepEqual(merged.heroes["h0"]?.trail, [{ q: 2, r: 2 }], "trail reseeded at the settlement");
+  assert.equal(merged.heroes["h0"]?.movementRemaining, MOVEMENT_PER_TURN);
+  assert.deepEqual(merged.players[0]?.heroIds, ["h0"], "heroIds keep the retreated hero");
+  assert.equal(merged.selectedHeroId, "h0", "a surviving selected hero keeps client-local selection");
+  assert.equal(merged.settlements, initial.settlements, "settlements untouched by the hero merge");
+});
+
 test("AI walking onto a neutral settlement captures it via tryCaptureAt", async () => {
   const initial = makeState({
     heroes: [makeHero("h0", 0, 2, 2), makeHero("h1", 1, 18, 4)],
@@ -1046,8 +1106,534 @@ test("AI walking onto a neutral settlement captures it via tryCaptureAt", async 
 
   assert.equal(controller.getState().settlements["s2"]?.ownerId, 1, "the neutral settlement flips to the AI seat");
   assert.equal(controller.getState().heroes["h1"]?.gold, 100, "CAPTURE_GOLD_REWARD lands on the mover");
-  assert.deepEqual(captureCalls[0], [1, "h1", "s2"], "onCaptureSettlement fires with the AI seat as actor");
+  await settlePersist();
+  assert.deepEqual(captureCalls[0], [1, "h1", "s2"], "onCaptureSettlement fires with the AI seat as actor (after the move persist settles)");
   assert.ok(controller.getState().players[1]?.settlementIds.includes("s2"));
   assert.equal(controller.getState().phase.kind, "AI_TURN", "a plain capture leaves the AI turn running");
   assert.equal(endTurnSpy.mock.callCount(), 0);
+});
+
+function walkInCaptureState(overrides: { heroQ?: number; heroR?: number; settlementQ?: number; settlementR?: number } = {}): GameState {
+  return makeState({
+    selectedHeroId: "h0",
+    heroes: [makeHero("h0", 0, overrides.heroQ ?? 4, overrides.heroR ?? 2), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, overrides.settlementQ ?? 5, overrides.settlementR ?? 2)],
+  });
+}
+
+test("walk-in capture (human path): the CaptureSettlement POST dispatches only after the move persist settles", async () => {
+  const initial = walkInCaptureState();
+  const hooks = buildHooks(initial);
+  const order: string[] = [];
+  const movePersist = deferred<void>();
+  const capturePost = deferred<void>();
+  hooks.onHumanMove = (() => {
+    order.push("onHumanMove");
+    return movePersist.promise;
+  }) as TurnControllerHooks["onHumanMove"];
+  hooks.onCaptureSettlement = (() => {
+    order.push("onCaptureSettlement");
+    return capturePost.promise;
+  }) as TurnControllerHooks["onCaptureSettlement"];
+
+  const controller = new TurnController(initial, hooks);
+  assert.equal(controller.requestMove("h0", { q: 5, r: 2 }, 1), true);
+
+  assert.equal(controller.getState().settlements["s1"]?.ownerId, 0, "the optimistic capture applies immediately");
+  assert.equal(controller.getState().heroes["h0"]?.gold, 100, "CAPTURE_GOLD_REWARD lands optimistically");
+  assert.deepEqual(order, ["onHumanMove"], "only the move persist may have fired at move time");
+
+  await settlePersist();
+  assert.deepEqual(
+    order,
+    ["onHumanMove"],
+    "onCaptureSettlement must not fire while the triggering move persist is in flight (the 409 hero_not_at_settlement race)",
+  );
+
+  movePersist.resolve();
+  await settlePersist();
+  assert.deepEqual(order, ["onHumanMove", "onCaptureSettlement"], "the capture POST follows the settled move persist");
+  assert.equal(controller.getState().settlements["s1"]?.ownerId, 0, "the local capture stands when the server accepts");
+
+  capturePost.resolve();
+  await settlePersist();
+});
+
+test("walk-in capture (AI tick path): the CaptureSettlement POST dispatches only after the onAiMove persist settles", async () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 2, 2), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, 20, 8), makeSettlement("s2", null, 18, 5)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 18, r: 5 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  const order: string[] = [];
+  const captureCalls: unknown[][] = [];
+  const movePersist = deferred<void>();
+  const capturePost = deferred<void>();
+  hooks.onAiMove = (() => {
+    order.push("onAiMove");
+    return movePersist.promise;
+  }) as TurnControllerHooks["onAiMove"];
+  hooks.onCaptureSettlement = ((...args: unknown[]) => {
+    order.push("onCaptureSettlement");
+    captureCalls.push(args);
+    return capturePost.promise;
+  }) as TurnControllerHooks["onCaptureSettlement"];
+
+  const controller = new TurnController(initial, hooks);
+  controller.tick(16);
+
+  assert.equal(controller.getState().settlements["s2"]?.ownerId, 1, "the optimistic capture applies immediately");
+  assert.deepEqual(order, ["onAiMove"], "only the AI move persist may have fired at tick time");
+
+  await settlePersist();
+  assert.deepEqual(order, ["onAiMove"], "onCaptureSettlement must not fire while the AI move persist is in flight");
+
+  movePersist.resolve();
+  await settlePersist();
+  assert.deepEqual(order, ["onAiMove", "onCaptureSettlement"]);
+  assert.deepEqual(captureCalls[0], [1, "h1", "s2"], "the capture POST fires with the AI seat as actor");
+
+  capturePost.resolve();
+  await settlePersist();
+});
+
+test("a rejected CaptureSettlement rolls the optimistic capture back: owner, roster, and gold restored", async () => {
+  const initial = walkInCaptureState();
+  const hooks = buildHooks(initial);
+  const logs: { type: string; payload: Record<string, unknown> }[] = [];
+  hooks.logEvent = (event) => {
+    logs.push(event);
+  };
+  hooks.onHumanMove = (() => Promise.resolve()) as TurnControllerHooks["onHumanMove"];
+  hooks.onCaptureSettlement = (() => Promise.reject(new Error("hero_not_at_settlement"))) as TurnControllerHooks["onCaptureSettlement"];
+
+  const consoleWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const controller = new TurnController(initial, hooks);
+    assert.equal(controller.requestMove("h0", { q: 5, r: 2 }, 1), true);
+    assert.equal(controller.getState().settlements["s1"]?.ownerId, 0, "optimistic capture in place before the rejection arrives");
+
+    await settlePersist();
+
+    const after = controller.getState();
+    assert.equal(after.settlements["s1"]?.ownerId, 1, "previous owner restored");
+    assert.equal(after.heroes["h0"]?.gold, 0, "capture reward subtracted back to the starting purse");
+    assert.deepEqual(after.players[0]?.settlementIds, ["s0"], "capturing seat's roster no longer lists the settlement");
+    assert.deepEqual(after.players[1]?.settlementIds, ["s1"], "previous owner's roster restored");
+    assert.ok(logs.some((l) => l.type === "capture_rolled_back"), "the rollback is logged");
+  } finally {
+    console.warn = consoleWarn;
+  }
+});
+
+test("rollback is a no-op when the optimistic capture is no longer in place (sync already corrected ownership)", async () => {
+  const initial = walkInCaptureState();
+  const hooks = buildHooks(initial);
+  let rejectCapture: ((reason: unknown) => void) | null = null;
+  hooks.onHumanMove = (() => Promise.resolve()) as TurnControllerHooks["onHumanMove"];
+  hooks.onCaptureSettlement = (() => new Promise<void>((_res, rej) => { rejectCapture = rej; })) as TurnControllerHooks["onCaptureSettlement"];
+
+  const consoleWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const controller = new TurnController(initial, hooks);
+    controller.requestMove("h0", { q: 5, r: 2 }, 1);
+    assert.equal(controller.getState().settlements["s1"]?.ownerId, 0);
+
+    await settlePersist();
+
+    // A multiplayer sync replaces the controller's state while the capture
+    // POST is in flight: the settlement flips back server-truth-side, so the
+    // late rejection must NOT re-flip it.
+    const synced = {
+      ...controller.getState(),
+      settlements: {
+        ...controller.getState().settlements,
+        s1: { ...controller.getState().settlements["s1"]!, ownerId: 1 },
+      },
+    };
+    (controller as unknown as { state: GameState }).state = synced;
+
+    rejectCapture!(new Error("hero_not_at_settlement"));
+    await settlePersist();
+
+    assert.equal(controller.getState().settlements["s1"]?.ownerId, 1, "the guarded rollback left the synced ownership alone");
+  } finally {
+    console.warn = consoleWarn;
+  }
+});
+
+test("tryCaptureAt gate: a NEUTRAL settlement with a live garrison enters SETTLEMENT_BATTLE on walk-in", () => {
+  const s2 = makeSettlement("s2", null, 2, 2);
+  s2.stacks = normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 4 }] }]);
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 2, 2)],
+    settlements: [makeSettlement("s0", 0, 18, 4), s2],
+  });
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  controller.selectHero("h0");
+
+  const phase = controller.getState().phase;
+  assert.equal(phase.kind, "SETTLEMENT_BATTLE", "neutral garrisoned settlements fight like enemy-owned ones");
+  assert.equal(phase.kind === "SETTLEMENT_BATTLE" ? phase.settlementId : null, "s2");
+  assert.equal(controller.getState().settlements["s2"]?.ownerId, null, "ownership unchanged while the garrison fights");
+});
+
+test("requestMove adjacent to a 0-troop enemy hero does NOT enter battle (human-path parity with the AI tick guard)", () => {
+  const initial = makeState({
+    selectedHeroId: "h0",
+    heroes: [makeHero("h0", 0, 4, 2), makeHero("h1", 1, 5, 2, { stacks: [] })],
+    settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, 18, 4)],
+  });
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  assert.equal(controller.requestMove("h0", { q: 5, r: 3 }, 1), true, "adjacent to the wiped hero at (5,2)");
+
+  assert.equal(controller.getState().phase.kind, "PLAYER_TURN", "a zero-troop enemy must not open a battle");
+});
+
+test("requestMove adjacent to an enemy hero WITH troops still enters battle (guard is specific to 0-troop defenders)", () => {
+  const initial = makeState({
+    selectedHeroId: "h0",
+    heroes: [
+      makeHero("h0", 0, 4, 2),
+      makeHero("h1", 1, 5, 2, { stacks: normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 3 }] }]) }),
+    ],
+    settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, 18, 4)],
+  });
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  assert.equal(controller.requestMove("h0", { q: 5, r: 3 }, 1), true);
+
+  const phase = controller.getState().phase;
+  assert.equal(phase.kind, "BATTLE");
+  assert.equal(phase.kind === "BATTLE" ? phase.attackerId : null, "h0");
+  assert.equal(phase.kind === "BATTLE" ? phase.defenderId : null, "h1");
+});
+
+test("requestMove onto a garrisoned enemy settlement with an enemy adjacent: the settlement battle is not clobbered by a BATTLE", async () => {
+  const initial = makeState({
+    selectedHeroId: "h0",
+    heroes: [
+      makeHero("h0", 0, 4, 2),
+      makeHero("h1", 1, 5, 3, { stacks: normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 3 }] }]) }),
+    ],
+    settlements: [
+      makeSettlement("s0", 0, 2, 2),
+      garrisonedAt("s1", 1, 5, 2, "swordsman", 4),
+    ],
+  });
+  const hooks = buildHooks(initial);
+  hooks.onSettlementBattleSubmitted = async () => {};
+  const controller = new TurnController(initial, hooks);
+
+  assert.equal(controller.requestMove("h0", { q: 5, r: 2 }, 1), true, "the move onto the settlement lands");
+
+  const phase = controller.getState().phase;
+  assert.equal(
+    phase.kind,
+    "SETTLEMENT_BATTLE",
+    "the garrisoned settlement opens the settlement battle and keeps the phase",
+  );
+  assert.equal(phase.kind === "SETTLEMENT_BATTLE" ? phase.settlementId : null, "s1");
+  assert.notEqual(phase.kind, "BATTLE", "the adjacent h1 must not clobber it with a hero BATTLE");
+
+  const resolution = await controller.resolveSettlementBattle(BATTLE_UNIT_TYPES);
+
+  assert.ok(resolution);
+  assert.equal(controller.getState().phase.kind, "PLAYER_TURN", "the human attacker's phase closes normally");
+});
+
+test("tryCaptureAt: a failed enterSettlementBattle falls back to a walk-in capture when the garrison is actually empty", () => {
+  const s1 = makeSettlement("s1", 1, 2, 2);
+  s1.stacks = normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 5 }] }]);
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 2, 2)],
+    settlements: [makeSettlement("s0", 0, 18, 4), s1],
+  });
+  const hooks = buildHooks(initial);
+  const controller = new TurnController(initial, hooks);
+  controller.enterSettlementBattle = (_attackerId: HeroId, settlementId: SettlementId): boolean => {
+    const s = controller.getState().settlements[settlementId];
+    if (s) {
+      (controller as unknown as { state: GameState }).state = {
+        ...controller.getState(),
+        settlements: { ...controller.getState().settlements, [settlementId]: { ...s, stacks: normalizePlatoons([]) } },
+      };
+    }
+    return false;
+  };
+
+  controller.selectHero("h0");
+
+  assert.equal(controller.getState().phase.kind, "PLAYER_TURN");
+  assert.equal(controller.getState().settlements["s1"]?.ownerId, 0, "the emptied garrison falls back to a walk-in capture");
+});
+
+test("tryCaptureAt: a failed enterSettlementBattle with a live garrison surfaces a diagnostic instead of silently abandoning", () => {
+  const s1 = makeSettlement("s1", 1, 2, 2);
+  s1.stacks = normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 5 }] }]);
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 2, 2)],
+    settlements: [makeSettlement("s0", 0, 18, 4), s1],
+  });
+  const controller = new TurnController(initial, buildHooks(initial));
+  controller.enterSettlementBattle = (): boolean => false;
+  const rejections: unknown[] = [];
+  const handler = (e: unknown): void => {
+    rejections.push(e);
+  };
+  bus.on("command:rejected", handler);
+
+  try {
+    controller.selectHero("h0");
+  } finally {
+    bus.off("command:rejected", handler);
+  }
+
+  assert.equal(controller.getState().phase.kind, "PLAYER_TURN");
+  assert.equal(controller.getState().settlements["s1"]?.ownerId, 1, "no capture while the garrison still holds");
+  assert.equal(rejections.length, 1, "exactly one diagnostic reached the toast layer");
+});
+
+test("AI walking onto a favorable garrisoned settlement auto-resolves a win: owner flips, garrison zeroed, AI turn completes", async () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 2, 2, { stacks: [] }),
+      makeHero("h1", 1, 10, 10, { stacks: stackOf("champ", 15) }),
+    ],
+    settlements: [garrisonedAt("s0", 0, 11, 10, "trash", 1)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  const submissions: Parameters<TurnControllerHooks["onSettlementBattleSubmitted"]>[0][] = [];
+  hooks.onSettlementBattleSubmitted = async (payload) => {
+    submissions.push(payload);
+  };
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+
+  const phase = controller.getState().phase;
+  assert.equal(phase.kind, "SETTLEMENT_BATTLE", "the garrison holds the tile, so walk-in opens the settlement battle");
+  assert.equal(phase.kind === "SETTLEMENT_BATTLE" ? phase.attackerId : null, "h1");
+  assert.equal(phase.kind === "SETTLEMENT_BATTLE" ? phase.settlementId : null, "s0");
+
+  const resolution = await controller.resolveSettlementBattle(BATTLE_UNIT_TYPES);
+
+  assert.ok(resolution, "the auto-resolver must produce a resolution");
+  assert.equal(resolution!.outcome, "attackerWon");
+  assert.equal(resolution!.captured, true, "a won settlement battle captures inline");
+  assert.equal(resolution!.battle.winner, "attacker");
+  const after = controller.getState();
+  assert.equal(after.settlements["s0"]?.ownerId, 1, "the capture flips ownership to the AI seat");
+  assert.deepEqual(after.settlements["s0"]?.stacks, normalizePlatoons([]), "the garrison is zeroed on a win");
+  assert.equal(after.players[1]?.settlementIds.includes("s0"), true, "the AI seat's roster gains the settlement");
+  assert.equal(
+    after.phase.kind,
+    "AI_TURN",
+    "endBattlePhase's PLAYER_TURN must be re-mapped so the AI tick resumes",
+  );
+  assert.equal(submissions.length, 1, "the result is POSTed fire-and-forget");
+  assert.equal(submissions[0]!.actor, 1, "the AI seat is the command actor");
+  assert.equal(submissions[0]!.outcome, "attackerWon");
+  assert.equal(submissions[0]!.attackerId, "h1");
+  assert.equal(submissions[0]!.settlementId, "s0");
+
+  hooks.pickAiMove = (() => null) as TurnControllerHooks["pickAiMove"];
+  await settlePersist();
+  controller.tick(16);
+  await settlePersist();
+
+  assert.equal(endTurnSpy.mock.callCount(), 1, "after the battle the AI turn resumes and completes");
+  const endedState = endTurnSpy.mock.calls[0]![0] as GameState;
+  assert.equal(endedState.activePlayerId, 1);
+});
+
+test("an auto-resolved settlement-battle defeat removes the AI attacker and the turn still completes", async () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 2, 2, { stacks: [] }),
+      makeHero("h1", 1, 10, 10, { stacks: stackOf("trash", 1) }),
+    ],
+    settlements: [garrisonedAt("s0", 0, 11, 10, "champ", 20)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  hooks.onSettlementBattleSubmitted = async () => {};
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  assert.equal(controller.getState().phase.kind, "SETTLEMENT_BATTLE");
+
+  const resolution = await controller.resolveSettlementBattle(BATTLE_UNIT_TYPES);
+
+  assert.ok(resolution);
+  assert.equal(resolution!.outcome, "defenderWon");
+  assert.equal(resolution!.captured, false);
+  assert.equal(resolution!.attackerVerdict, "defeated", "a wiped attacker is defeated, not merely stood");
+  const after = controller.getState();
+  assert.equal(after.heroes["h1"], undefined, "the defeated attacker is deleted from state.heroes");
+  assert.equal(after.players[1]?.heroIds.includes("h1"), false, "the owner's heroIds are pruned");
+  assert.equal(after.settlements["s0"]?.ownerId, 0, "the garrison held: ownership unchanged");
+  assert.equal(after.phase.kind, "AI_TURN", "the AI tick resumes even though the attacker is gone");
+
+  await settlePersist();
+  controller.tick(16);
+  await settlePersist();
+
+  assert.equal(endTurnSpy.mock.callCount(), 1, "with no heroIds left the AI turn completes");
+});
+
+test("a stalemate settlement battle bounces the attacker and the garrison persists per the submitted stacks", async () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 2, 2, { stacks: [] }),
+      makeHero("h1", 1, 10, 10, { stacks: stackOf("wall", 5) }),
+    ],
+    settlements: [garrisonedAt("s0", 0, 11, 10, "wall", 5)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  const submissions: Parameters<TurnControllerHooks["onSettlementBattleSubmitted"]>[0][] = [];
+  hooks.onSettlementBattleSubmitted = async (payload) => {
+    submissions.push(payload);
+  };
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  assert.equal(controller.getState().phase.kind, "SETTLEMENT_BATTLE");
+
+  const resolution = await controller.resolveSettlementBattle(BATTLE_UNIT_TYPES);
+
+  assert.ok(resolution);
+  assert.equal(resolution!.outcome, "draw", "walls grind to the 30-round cap: both sides survive");
+  assert.equal(resolution!.captured, false);
+  assert.equal(resolution!.attackerVerdict, "stood", "survivors mean no removal and no relocation");
+  const after = controller.getState();
+  assert.equal(after.heroes["h1"]?.q, 10, "the bounced attacker is back at its pre-battle tile");
+  assert.equal(after.heroes["h1"]?.r, 10);
+  assert.equal(after.settlements["s0"]?.ownerId, 0, "no capture on a stalemate");
+  assert.deepEqual(
+    after.settlements["s0"]?.stacks,
+    normalizePlatoons(submissions[0]!.defenderStacks),
+    "the persisted garrison equals the submitted defender stacks",
+  );
+  assert.equal(after.phase.kind, "AI_TURN", "the AI tick resumes after the bounce");
+
+  hooks.pickAiMove = (() => null) as TurnControllerHooks["pickAiMove"];
+  await settlePersist();
+  controller.tick(16);
+  await settlePersist();
+
+  assert.equal(endTurnSpy.mock.callCount(), 1, "the AI turn completes after the bounced attack");
+});
+
+test("a capture-triggered settlement battle suppresses the same-move adjacency enterBattle (no phase clobber)", async () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 11, 9, { stacks: stackOf("champ", 5) }),
+      makeHero("h1", 1, 10, 10, { stacks: stackOf("champ", 15) }),
+    ],
+    settlements: [garrisonedAt("s0", 0, 11, 10, "trash", 1)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  hooks.onSettlementBattleSubmitted = async () => {};
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+
+  const phase = controller.getState().phase;
+  assert.equal(
+    phase.kind,
+    "SETTLEMENT_BATTLE",
+    "the settlement battle opened by tryCaptureAt must own the phase",
+  );
+  assert.notEqual(
+    phase.kind,
+    "BATTLE",
+    "the adjacent enemy hero (h0) must not clobber the settlement battle with a hero BATTLE",
+  );
+  assert.equal(phase.kind === "SETTLEMENT_BATTLE" ? phase.settlementId : null, "s0");
+});
+
+test("isPrimaryActor: false keeps the AI from even walking into a garrisoned settlement", () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 2, 2, { stacks: [] }),
+      makeHero("h1", 1, 10, 10, { stacks: stackOf("champ", 15) }),
+    ],
+    settlements: [garrisonedAt("s0", 0, 11, 10, "trash", 1)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => false });
+  controller.tick(16);
+
+  assert.equal(controller.getState(), initial, "state must be untouched on a non-primary client");
+  assert.equal(controller.getState().phase.kind, "AI_TURN", "no settlement battle forms off the primary actor");
+});
+
+test("resolveSettlementBattle without a unit catalog bounces the attacker instead of inventing a result", async () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 2, 2, { stacks: [] }),
+      makeHero("h1", 1, 10, 10, { stacks: stackOf("champ", 15) }),
+    ],
+    settlements: [garrisonedAt("s0", 0, 11, 10, "trash", 1)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  let submitted = 0;
+  hooks.onSettlementBattleSubmitted = async () => {
+    submitted += 1;
+  };
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  assert.equal(controller.getState().phase.kind, "SETTLEMENT_BATTLE");
+
+  const resolution = await controller.resolveSettlementBattle(null);
+
+  assert.equal(resolution, null, "no catalog means no casualty report and no resolution");
+  assert.equal(submitted, 0, "nothing is POSTed when the battle could not resolve");
+  const after = controller.getState();
+  assert.equal(after.heroes["h1"]?.q, 10, "the attacker is bounced back to its pre-battle tile");
+  assert.equal(after.settlements["s0"]?.ownerId, 0, "no capture without a resolution");
+  assert.equal(after.phase.kind, "AI_TURN", "the phase clears so the tick can resume");
 });

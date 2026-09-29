@@ -26,6 +26,7 @@ import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
 import { attachFirstTurnHint } from "@screens/shared/firstTurnHint";
 import { createLogPanel } from "@screens/shared/logPanel";
 import { getEntityMirror } from "../io/multiplayerSync";
+import { attachGarrisonEventBridge } from "../game/garrisonEventBridge";
 import { applyNetToSettlement, invertNet } from "@screens/settlements/cityView/netCost";
 import { evaluateCharterRequirements } from "@screens/adventure/charterRequirements";
 import { openCharterRequirementsModal } from "@screens/adventure/charterModal";
@@ -239,6 +240,16 @@ export class GameEngine {
     // gates visibility and buffering on settings().showLogPanel, so the
     // settings toggle works mid-session without re-attaching.
     createLogPanel();
+    // Multiplayer garrison sync (UnitsRecruited/UnitsTransferred deltas +
+    // SettlementBattleResolved's full-refetch snapshot) into the live
+    // TurnController. Same explicit-attach convention as the consumers
+    // above; safe-phase gates live in the bridge itself.
+    attachGarrisonEventBridge({
+      getController: () => this.state.getTurnController(),
+      replaceState: (next) => this.state.replaceState(next),
+      isPrimaryActor: () => (getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0) === 0,
+      localSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
+    });
   }
 
   // =========================================================================
