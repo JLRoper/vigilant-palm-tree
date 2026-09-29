@@ -216,7 +216,15 @@ export class TurnController {
   }
 
   private async drainPendingCommands(): Promise<void> {
-    await Promise.all(this.pendingCommands);
+    // Loop, not a one-shot Promise.all: commands registered while an earlier
+    // drain is awaiting (e.g. a persist fired between ticks) must also
+    // settle before the barrier releases. Every tracked promise self-removes
+    // on settle, so the loop terminates. do-while keeps the one guaranteed
+    // await tick the old single-shot form had even when the set is empty
+    // (the drain must never run the next stage synchronously).
+    do {
+      await Promise.all([...this.pendingCommands]);
+    } while (this.pendingCommands.size > 0);
   }
 
   /** Public entry point for callers outside the class (manual save) to wait
@@ -661,6 +669,18 @@ export class TurnController {
   async resolveCurrentBattle(): Promise<BattleResult | null> {
     if (this.state.phase.kind !== "BATTLE") return null;
     const { attackerId, defenderId } = this.state.phase;
+    // Serialize AFTER the move persist: drain every in-flight command (the
+    // AI tick's onAiMove, a human onHumanMove, captures...) before asking
+    // the server to resolve, so the server's adjacency check sees the
+    // mover's final position. Without this, the quick-resolve fired by the
+    // frame loop could beat SpendMovement server-side, 409 not_adjacent,
+    // and the catch below would clear the phase with no casualties -- the
+    // same two heroes re-fighting every round. This is the same
+    // pendingCommands barrier endCurrentTurn() drains.
+    await this.drainPendingCommands();
+    // The battle can evaporate while draining (a sync replaceState, or the
+    // phase already closed): re-check before dispatching.
+    if (this.state.phase.kind !== "BATTLE") return null;
     // The server is authoritative for combat resolution (it owns the
     // unit-type/counter catalog), so fetch its result before closing out the
     // BATTLE phase locally.
@@ -984,7 +1004,16 @@ export class TurnController {
         this.enterBattle(heroId, defenderId);
       }
       this.aiAwaitingPersist = true;
-      void this.hooks.onAiMove(this.state, heroId, move.toTile).finally(() => {
+      // Tracked in pendingCommands (same barrier End Turn drains) so
+      // resolveCurrentBattle can hold ResolveBattle until the move POST has
+      // landed -- the server validates battle adjacency from positions, so a
+      // resolve that outruns the persist 409s not_adjacent and the fight
+      // just re-fires next round with no casualties.
+      const persist = this.hooks.onAiMove(this.state, heroId, move.toTile).catch((e: unknown) => {
+        console.warn("[turnController] onAiMove failed:", e);
+      });
+      this.trackCommand(persist, "onAiMove");
+      void persist.finally(() => {
         this.aiAwaitingPersist = false;
       });
       break;

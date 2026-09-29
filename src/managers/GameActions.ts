@@ -2,6 +2,8 @@ import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { showBattleModal } from "@screens/combat/battleModal";
 import { showBattleResultCard } from "@screens/combat/battleResultCard";
+import { shouldShowResultCard } from "@screens/combat/resultCardPolicy";
+import { showToast } from "@screens/shared/toast";
 import { openManualBattleArena, type ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
 import type { BattleActionPhase } from "@screens/combat/arena/state";
 import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, settlementStacks, spellLoadoutForHero, type BattleResult } from "@heroes/engine";
@@ -122,12 +124,31 @@ export class GameActions {
       this.state.replaceState(tc.getState());
       this.captureAfterBattleIfNeeded(attackerId);
       if (battle) {
-        showBattleResultCard({
-          result: battle,
-          attackerLabel: `Hero ${attackerName}`,
-          defenderLabel: `Hero ${defenderName}`,
-          onCarryOn: () => {},
-        });
+        // D4 display policy (plan/2026-09-29-ai-enemies.md): a result card
+        // only when the local human's hero was attacker or defender;
+        // AI-vs-AI (and remote-human-vs-remote-human) auto-resolves are
+        // silent -- one info toast, max. Stacked un-clicked cards were the
+        // symptom; suppression is the policy-level fix.
+        if (shouldShowResultCard(localSeat, attacker.ownerId, defender.ownerId)) {
+          showBattleResultCard({
+            result: battle,
+            attackerLabel: `Hero ${attackerName}`,
+            defenderLabel: `Hero ${defenderName}`,
+            onCarryOn: () => {},
+          });
+        } else {
+          const attackerPlayer = gs.players.find((p) => p.id === attacker.ownerId);
+          const defenderPlayer = gs.players.find((p) => p.id === defender.ownerId);
+          const attackerSide = `${attackerPlayer?.name ?? "AI"}'s ${attacker.name}`;
+          const defenderSide = `${defenderPlayer?.name ?? "AI"}'s ${defender.name}`;
+          if (battle.winner === "draw") {
+            showToast(`${attackerSide} vs ${defenderSide}: both sides fell.`, "info");
+          } else {
+            const winner = battle.winner === "attacker" ? attackerSide : defenderSide;
+            const loser = battle.winner === "attacker" ? defenderSide : attackerSide;
+            showToast(`${winner} defeated ${loser}.`, "info");
+          }
+        }
       }
     } finally {
       this.battleInFlight = false;

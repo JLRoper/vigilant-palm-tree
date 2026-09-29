@@ -73,9 +73,14 @@ function renderSideResults(title: string, results: CombatantResult[]): HTMLEleme
 
 export function showBattleResultCard(opts: BattleResultCardOptions): void {
   const modal = openCenteredModal(document.body, "Battle Results", 480, false, false);
+  // Capture the fullscreen wrapper by reference NOW: dereferencing
+  // root.parentElement inside onClose breaks if root was already detached
+  // (close()-ordering changes), and a missed removal strands an
+  // input-intercepting overlay forever.
+  const wrapper = modal.root.parentElement;
 
   modal.setOnClose(() => {
-    modal.root.parentElement?.remove();
+    wrapper?.remove();
     opts.onCarryOn();
   });
 

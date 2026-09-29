@@ -747,6 +747,89 @@ test("AI hero moving adjacent to an enemy enters BATTLE; after the loop's quick-
   assert.equal(endedState.activePlayerId, 1);
 });
 
+test("resolveCurrentBattle holds onBattleResolved until the in-flight onAiMove persist settles (move-then-resolve ordering)", async () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 12, 10), makeHero("h1", 1, 10, 10)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  const movePersist = deferred<void>();
+  const order: string[] = [];
+  hooks.onAiMove = (() => {
+    order.push("onAiMove");
+    return movePersist.promise;
+  }) as TurnControllerHooks["onAiMove"];
+  hooks.onBattleResolved = (async (s: GameState) => {
+    order.push("onBattleResolved");
+    return { state: s, battle: null };
+  }) as TurnControllerHooks["onBattleResolved"];
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+
+  assert.equal(controller.getState().phase.kind, "BATTLE", "the move landed adjacent and entered battle");
+  assert.deepEqual(order, ["onAiMove"], "the move persist fired with the tick");
+
+  const resolving = controller.resolveCurrentBattle();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(
+    order,
+    ["onAiMove"],
+    "ResolveBattle must not dispatch while the move persist is still in flight (the 409 not_adjacent race)",
+  );
+
+  movePersist.resolve();
+  await resolving;
+
+  assert.deepEqual(
+    order,
+    ["onAiMove", "onBattleResolved"],
+    "the resolve dispatch must follow the settled persist, in that order",
+  );
+  assert.equal(controller.getState().phase.kind, "AI_TURN", "the battle phase must clear after the resolution attempt");
+});
+
+test("ResolveBattle failure (hook returns no battle): no result surfaces, the battle phase clears, and the AI tick resumes", async () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 12, 10), makeHero("h1", 1, 10, 10)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  let resolveCalls = 0;
+  hooks.onBattleResolved = (async (s: GameState) => {
+    resolveCalls += 1;
+    return { state: s, battle: null };
+  }) as TurnControllerHooks["onBattleResolved"];
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  assert.equal(controller.getState().phase.kind, "BATTLE");
+
+  const battle = await controller.resolveCurrentBattle();
+
+  assert.equal(battle, null, "a failed resolution must surface no battle result (no card payload for the caller)");
+  assert.equal(resolveCalls, 1, "the resolve dispatch must happen exactly once -- no re-resolve loop");
+  const phase = controller.getState().phase;
+  assert.equal(phase.kind, "AI_TURN", "the evaporation path must clear the battle phase so the tick can resume");
+  assert.equal(phase.kind === "AI_TURN" ? phase.playerId : null, 1);
+
+  hooks.pickAiMove = (() => null) as TurnControllerHooks["pickAiMove"];
+  await settlePersist();
+  controller.tick(16);
+  await settlePersist();
+
+  assert.equal(endTurnSpy.mock.callCount(), 1, "the AI turn completes on the next tick after the failed resolution");
+});
+
 test("isPrimaryActor: () => false blocks the AI tick entirely (non-primary clients only watch)", () => {
   const initial = makeState({
     activePlayerId: 1,
