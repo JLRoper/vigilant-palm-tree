@@ -10,9 +10,9 @@ machine, the server resolver, and the shared combat engine. There are
    back to the server auto-resolver; both apply the same post-battle rules).
 2. **Test Battle (sandbox)** — the manual HoMM3-style arena used to
    exercise `packages/engine/src/combat/manualBattle.ts`. Reachable from the
-   main toolbar **and** from Developer Settings; identical arena, no
-   `onComplete` callback and no action stream, so it never touches real
-   game state.
+   toolbar's gear menu (⚔ Test Battle) **and** from Developer Settings;
+   identical arena, no `onComplete` callback and no action stream, so it
+   never touches real game state.
 
 The shared `packages/engine/src/combat/*` engine is the **only module
 imported by both** the server command handler and the client arena
@@ -90,7 +90,7 @@ flowchart TB
     end
 
     subgraph VIEWS_DEV["Test Battle UI (src/screens/combat/)"]
-        P["toolbar.ts / developerSettingsMenu.ts"]
+        P["toolbar.ts gear menu (⚔ Test Battle) /<br/>developerSettingsMenu.ts"]
         Q["testBattleSetup.ts<br/>roster pick + Reroll AI"]
         R2["platoonInfoPopup.ts<br/>hover/selection info card"]
         S["battleResultCard.ts"]
@@ -243,9 +243,10 @@ end-to-end without an adventure-map collision. The sandbox passes neither
 `onComplete` nor `telemetry`, so it never touches real game state and
 streams nothing.
 
-1. **Entry.** `toolbar.ts` ("Test Battle" button, titled *"Sandbox:
-   player vs AI manual-fight arena (no effect on your real game)"*) or
-   `developerSettingsMenu.ts` → `openTestBattleSetup()`
+1. **Entry.** `toolbar.ts`'s gear dropdown ("⚔ Test Battle" menu item,
+   titled *"Sandbox: player vs AI manual-fight arena (no effect on your real
+   game)"*; moved out of the main button row by the 2026-09-29 playtest
+   fixes) or `developerSettingsMenu.ts` → `openTestBattleSetup()`
    (`src/screens/combat/testBattleSetup.ts`). Player roster is fixed
    (`testArmies.fixedTestPlayerPlatoons`); AI roster is
    `randomAiPlatoons(unitTypes)` with a Reroll button. Human picks Blue
@@ -387,7 +388,7 @@ used):
 | `src/screens/combat/arena/ai.ts` | Arena AI | `createArenaAi` → engine `planAiTurn` (deterministic — no AI action rows needed) |
 | `src/screens/combat/platoonInfoPopup.ts` | UI (DOM) | Hover/selection info card; win-odds vs. your selected platoon |
 | `src/screens/combat/testBattleSetup.ts` | UI (DOM) | Test Battle roster pick (sandbox — no `onComplete`, no telemetry) |
-| `src/screens/combat/toolbar.ts` | UI (DOM) | "Test Battle" entry button |
+| `src/screens/shared/toolbar.ts` | UI (DOM) | "Test Battle" entry — a gear-dropdown menu item (⚔ Test Battle, 2026-09-29; no longer a main-row button) |
 | `src/screens/combat/developerSettingsMenu.ts` | UI (DOM) | Alternate Test Battle entry + Asset Manager |
 | `src/combat/testArmies.ts` | Fixtures | `fixedTestPlayerPlatoons()`, `randomAiPlatoons(unitTypes)` |
 | `src/data/unitCatalog.ts` | Catalog cache | `/api/units` loader used by the arena and Test Battle |
