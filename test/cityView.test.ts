@@ -7,6 +7,7 @@ import {
   getApiPort,
   getClientPort,
   spawnLogged,
+  waitForApiHealth,
   waitForUrl,
   treeKill,
   reapPreviousRunPids,
@@ -396,6 +397,7 @@ async function run() {
   try {
     await waitForUrl(`${API_URL}/api/health`);
     await waitForUrl(WEB_URL);
+    await waitForApiHealth(API_URL);
     console.log(">> API + Web ready");
 
     browser = await chromium.launch({ headless: true });

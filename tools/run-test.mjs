@@ -13,12 +13,13 @@ const ENTRIES = {
   smoke: "test/smoke.ts",
   multiplayer: "test/multiplayer.smoke.ts",
   cityview: "test/cityView.test.ts",
+  logpanel: "test/logPanel.browser.test.ts",
   visual: "test/visualRegression.test.ts",
 };
 
 // "visual" runs last -- it's the slowest suite (several game setups, each
 // spinning up its own scene) and gains nothing from running earlier.
-const ALL_ORDER = ["smoke", "multiplayer", "cityview", "visual"];
+const ALL_ORDER = ["smoke", "multiplayer", "cityview", "logpanel", "visual"];
 
 function readEnvPort(name, fallback) {
   try {
@@ -100,7 +101,7 @@ function runOne(entry, opts) {
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
-    console.error("usage: node tools/run-test.mjs <smoke|multiplayer|cityview|visual|all> [--auto-close] [--shutdown-after-ms=N] [--update-baselines]");
+    console.error("usage: node tools/run-test.mjs <smoke|multiplayer|cityview|logpanel|visual|all> [--auto-close] [--shutdown-after-ms=N] [--update-baselines]");
     process.exit(2);
   }
 

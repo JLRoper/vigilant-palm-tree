@@ -10,7 +10,7 @@ const IS_WINDOWS = process.platform === "win32";
 
 export interface TestRequest {
   runId: string;
-  entry: "smoke" | "multiplayer" | "cityview" | "visual";
+  entry: "smoke" | "multiplayer" | "cityview" | "visual" | "logpanel";
   apiPort: number;
   clientPort: number;
   autoClose: boolean;
@@ -137,6 +137,28 @@ export async function waitForUrl(url: string, timeoutMs = 15000): Promise<void> 
     await wait(300);
   }
   throw new Error(`server at ${url} did not respond within ${timeoutMs}ms (${String(lastErr)})`);
+}
+
+/**
+ * Polls /api/health until it answers HTTP 200 -- stricter than waitForUrl,
+ * which accepts any status < 500. Call before a browser suite's first
+ * page.goto: the page's own /api fetches used to race the last moments of
+ * api/web boot and surface as benign "Failed to fetch" console warnings.
+ */
+export async function waitForApiHealth(apiUrl: string, timeoutMs = 10_000, intervalMs = 250): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let last = "never reached";
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${apiUrl}/api/health`);
+      if (res.status === 200) return;
+      last = `status ${res.status}`;
+    } catch (e) {
+      last = String(e);
+    }
+    await wait(intervalMs);
+  }
+  throw new Error(`api health at ${apiUrl}/api/health never returned 200 within ${timeoutMs}ms (${last})`);
 }
 
 export const constants = { ROOT, REQUEST_PATH, PID_REGISTRY_PATH };

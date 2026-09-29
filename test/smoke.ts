@@ -15,6 +15,7 @@ import {
   getShutdownAfterMs,
   reapPreviousRunPids,
   spawnLogged,
+  waitForApiHealth,
   waitForUrl,
   registerPid,
   treeKill,
@@ -456,6 +457,7 @@ async function run() {
       throw err;
     }
     await waitForUrl(WEB_URL);
+    await waitForApiHealth(API_URL);
     console.log(">> api + web up");
 
     const ctx = await pwRequest.newContext();
