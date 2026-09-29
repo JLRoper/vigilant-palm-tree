@@ -772,6 +772,8 @@ commandsRouter.post("/", async (req: Request<{ name: string }>, res) => {
       toSettlement: result.toSettlement,
       attackerHero: result.attackerHero,
       defenderHero: result.defenderHero,
+      attackerVerdict: result.attackerVerdict,
+      defenderVerdict: result.defenderVerdict,
       battle: result.battle,
     });
   } catch (err) {

@@ -30,6 +30,8 @@ import {
   SPELL_BUFF_DURATION_ROUNDS,
   SPELL_BUFF_MULTIPLIER,
   SPELL_MANA_COST,
+  SURRENDER_COST_GOLD,
+  SURRENDER_UNIT_VALUE_GOLD,
   startManualBattle,
   unactedLivingSlots,
   unitRange,
@@ -861,4 +863,13 @@ test("Bless: cannot reach an enemy platoon", () => {
   assert.equal(getCombatant(state, "defender", 1)!.entries[0].count, enemyBefore);
   assert.equal(state.log.length, 0);
   assert.equal(state.heroSpells.attacker!.mana, 20, "no mana spent");
+});
+
+test("SURRENDER_COST_GOLD: surrender is reachable at starter scale", () => {
+  // Was 5000g — above the 2500g purse cap and any realistic starter army
+  // value, so the arena's Confirm could never enable early-game. Pinned at
+  // 500g: over the 300g starter purse that leaves a 200g shortfall, i.e. 2
+  // units left behind at SURRENDER_UNIT_VALUE_GOLD — reachable.
+  assert.equal(SURRENDER_COST_GOLD, 500);
+  assert.equal(Math.ceil((SURRENDER_COST_GOLD - 300) / SURRENDER_UNIT_VALUE_GOLD), 2);
 });

@@ -243,6 +243,7 @@ test("retreat empties the conceding hero's stacks and relocates them to the near
   assert.deepEqual(saved.h0.trail, [{ q: 0, r: 0 }]);
   assert.equal(saved.h0.gold, 100, "no loot on a retreat");
   assert.deepEqual(saved.h0.stacks, normalizePlatoons([]));
+  assert.equal(saved.h0.troops, 0, "the denormalized troops counter is zeroed along with the stacks");
   // The defender stood: survivors and purse untouched at the collision hex.
   assert.equal(saved.h1.q, 3);
   assert.deepEqual(saved.h1.stacks, normalizePlatoons([stack("swordsman", 2)]));
@@ -285,6 +286,7 @@ test("retreat with no owned settlement keeps the hero at the cancelled position 
   assert.equal(saved.h0.r, 2);
   assert.equal(saved.h0.previousQ, null, "the cancel itself still applies");
   assert.deepEqual(saved.h0.stacks, normalizePlatoons([]), "troops still lost without a relocation target");
+  assert.equal(saved.h0.troops, 0, "troops counter zeroed even on the D1 stay-put edge");
 });
 
 test("surrender deducts the paid gold from the CONCEDING hero and relocates them, keeping their army", async () => {

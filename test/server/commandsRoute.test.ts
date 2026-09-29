@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
+import { normalizePlatoons } from "@heroes/engine";
 import type { HeroId, HeroState, SettlementId, SettlementState } from "@heroes/contracts";
 import { pool } from "../../server/persistence/db";
 import { router } from "../../server/routes";
@@ -69,10 +70,10 @@ function ids(gameName: string): { heroId: HeroId; settlementId: SettlementId } {
 async function seedGame(
   name: string,
   settlement: SettlementState,
-  opts?: { players?: Player[]; extraSettlements?: SettlementState[] },
+  opts?: { players?: Player[]; extraSettlements?: SettlementState[]; heroes?: Record<HeroId, HeroState> },
 ): Promise<string> {
   const { heroId } = ids(name);
-  const heroes: Record<HeroId, HeroState> = { [heroId]: makeHero(heroId, 0, 2, 2) };
+  const heroes = opts?.heroes ?? { [heroId]: makeHero(heroId, 0, 2, 2) };
   const all = [settlement, ...(opts?.extraSettlements ?? [])];
   const settlements: Record<SettlementId, SettlementState> = Object.fromEntries(
     all.map((s) => [s.id, s]),
@@ -470,6 +471,76 @@ test("POST /games/:name/commands succeeds with no Authorization header at all --
       }),
     });
     assert.equal(res.status, 200, await res.clone().text());
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+// Regression pin (2026-09-29 hero-outcomes follow-up): the route's response
+// mapping whitelisted fields and dropped attackerVerdict/defenderVerdict --
+// the handler returned them, but the client's resolve/submit merges
+// (turnHooks/GameActions) never received them over HTTP. Drives the full
+// path for SubmitBattleResult (which rides the same res.json mapping as
+// ResolveBattle) through a real retreat over a seeded adjacent pair, and
+// doubles as the HTTP-level pin for the denormalized `troops` counter being
+// zeroed with the retreated stacks.
+test("SubmitBattleResult over HTTP returns the per-hero verdicts and both heroes (retreat)", async () => {
+  const name = uniqueName();
+  const { heroId, settlementId } = ids(name);
+  const defenderId: HeroId = `${name}-h1`;
+  // Adjacent enemy pair (h0 at (2,2), h1 at (2,3)) with the owned settlement
+  // s0 under the attacker -- the canonical collision shape, seeded through
+  // the legacy JSONB columns like the rest of this file.
+  const token = await seedGame(name, makeSettlement(settlementId, 0, 2, 2), {
+    players: [
+      makePlayer(0, "player", [heroId], [settlementId]),
+      makePlayer(1, "ai", [defenderId], []),
+    ],
+    heroes: {
+      [heroId]: makeHero(heroId, 0, 2, 2, {
+        gold: 100,
+        troops: 5,
+        stacks: [{ entries: [{ unitTypeId: "swordsman", count: 5 }] }],
+      }),
+      [defenderId]: makeHero(defenderId, 1, 2, 3, {
+        gold: 250,
+        troops: 4,
+        stacks: [{ entries: [{ unitTypeId: "swordsman", count: 4 }] }],
+      }),
+    },
+  });
+  try {
+    const res = await postCommand(name, {
+      kind: "SubmitBattleResult",
+      actor: 0,
+      attackerId: heroId,
+      defenderId,
+      outcome: "retreat",
+      attackerStacks: [{ entries: [{ unitTypeId: "swordsman", count: 3 }] }],
+      defenderStacks: [{ entries: [{ unitTypeId: "swordsman", count: 2 }] }],
+      rounds: 5,
+      obstacleSeed: 42,
+    }, token);
+    assert.equal(res.status, 200, await res.clone().text());
+    const body = (await res.json()) as {
+      attackerVerdict?: string;
+      defenderVerdict?: string;
+      attackerHero?: HeroState;
+      defenderHero?: HeroState;
+      events?: Array<{ type: string }>;
+    };
+    assert.equal(body.attackerVerdict, "retreated");
+    assert.equal(body.defenderVerdict, "stood");
+    assert.equal(body.events?.[0]?.type, "BattleResolved");
+    assert.equal(body.attackerHero?.q, 2, "the retreated attacker relocated to the nearest owned settlement");
+    assert.equal(body.attackerHero?.r, 2);
+    assert.deepEqual(body.attackerHero?.stacks, normalizePlatoons([]), "retreat empties the stacks server-side");
+    assert.equal(body.attackerHero?.troops, 0, "the denormalized troops counter is zeroed with the stacks");
+    assert.deepEqual(
+      body.defenderHero?.stacks,
+      normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 2 }] }]),
+      "the standing defender keeps their submitted survivors",
+    );
   } finally {
     await cleanupGame(name);
   }

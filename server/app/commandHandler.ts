@@ -355,8 +355,11 @@ function applyHeroBattleOutcomes(
       return;
     }
     if (verdict === "retreated" || verdict === "surrendered") {
+      // Zero the denormalized troops counter along with the stacks: a
+      // retreat must not leave hero.troops reading its pre-battle total
+      // while stacks are empty.
       const postBattleHero =
-        verdict === "retreated" ? { ...hero, stacks: normalizePlatoons([]) } : hero;
+        verdict === "retreated" ? { ...hero, stacks: normalizePlatoons([]), troops: 0 } : hero;
       const nearest = nearestOwnedSettlement({ settlements }, postBattleHero);
       heroes = {
         ...heroes,
