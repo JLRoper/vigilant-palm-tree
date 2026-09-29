@@ -35,6 +35,9 @@ import {
   buyWagons,
   createTradeRoute as createTradeRouteReducer,
   updateTradeRoute as updateTradeRouteReducer,
+  deriveHeroVerdict,
+  nearestOwnedSettlement,
+  relocateHeroToSettlement,
 } from "@heroes/engine";
 import type { EngineCtx, HydratableGameRow, UnitType, BattleResult, MapSize } from "@heroes/engine";
 import { hexDistance } from "@heroes/contracts";
@@ -43,6 +46,7 @@ import type {
   Command,
   EngineEvent,
   GameState,
+  HeroBattleVerdict,
   HeroId,
   HeroState,
   Player,
@@ -175,12 +179,17 @@ export interface CommandResult {
   // specific affected entities, not the full map EndTurn returns).
   fromSettlement?: SettlementState;
   toSettlement?: SettlementState;
-  // ResolveBattle: both combatants plus the full engine BattleResult the
-  // client's battle UI needs (log, grid, per-round detail) -- none of
-  // that is reconstructable from the summary fields on the persisted
-  // BattleResolved event alone.
+  // ResolveBattle/SubmitBattleResult: both combatants plus the full engine
+  // BattleResult the client's battle UI needs (log, grid, per-round detail) --
+  // none of that is reconstructable from the summary fields on the persisted
+  // BattleResolved event alone. Both hero fields are OPTIONAL as of
+  // hero-outcomes plan W1: a defeated side's hero row is deleted, so only
+  // survivors come back; the verdicts carry the retreat/surrender
+  // discrimination the client can't re-derive from the event outcomes (D5).
   attackerHero?: HeroState;
   defenderHero?: HeroState;
+  attackerVerdict?: HeroBattleVerdict;
+  defenderVerdict?: HeroBattleVerdict;
   battle?: BattleResult;
 }
 
@@ -239,10 +248,15 @@ async function dualWriteEntities(
 //
 // buildPostBattleHeroes is the pure half: survivor stacks onto the hero pair
 // plus the one asymmetric gold rule (a defender who lost every troop is
-// looted down to 0 and the attacker pockets the purse). persistBattleOutcome
-// is the I/O half: charter cleanup when the defender was wiped, legacy-gold
-// accounting, the row save, and the granular dual-write -- including the
-// same JSONB-fallback charter gate EndTurn/ResolveBattle/StartCharter use.
+// looted down to 0 and the attacker pockets the purse). applyHeroBattleOutcomes
+// is the hero-outcomes half (plan/2026-09-29-hero-outcomes.md, W2a): defeat
+// deletes the hero from the record and prunes their owner's heroIds; retreat
+// empties stacks and relocates to the nearest owned settlement; surrender
+// relocates keeping stacks. persistBattleOutcome is the I/O half: charter
+// cleanup for every removed hero, legacy-gold accounting, the row save (always
+// carrying players, so the heroIds prune persists), and the granular
+// dual-write -- including the same JSONB-fallback charter gate
+// EndTurn/ResolveBattle/StartCharter use.
 // ---------------------------------------------------------------------------
 
   function buildPostBattleHeroes(
@@ -253,10 +267,11 @@ async function dualWriteEntities(
     defenderStacks: Platoon[],
     defenderLostAllTroops: boolean,
   ): { heroes: Record<HeroId, HeroState>; lootedGold: number } {
-    // Hero entities are never deleted here -- a no-retreat loss just
-    // empties their platoons, matching the old route's own comment
-    // (what happens to a fully-defeated hero is a later phase's
-    // concern, per feature-plans/CombatResolutionEngine.md).
+    // This helper still only sets survivor stacks and the wipe-loot gold:
+    // actual hero removal/relocation is applyHeroBattleOutcomes' job, which
+    // runs on its output so loot (gold + cargo) is transferred to the winner
+    // BEFORE the loser is deleted from the record (plan/2026-09-29-hero-
+    // outcomes.md -- winner-takes-loot survives the defeat removal).
     if (defenderLostAllTroops) {
       // Winner-takes-loot, now wagon-capped (docs/wagons-stockpiles-trade-
       // routes-plan.md §4.2): the attacker pockets as much of the purse as
@@ -285,6 +300,96 @@ async function dualWriteEntities(
     };
     return { heroes, lootedGold: 0 };
   }
+
+// Hero-outcomes application (plan/2026-09-29-hero-outcomes.md, W2a): maps the
+// two per-side verdicts onto the heroes record AFTER buildPostBattleHeroes has
+// run (winner-takes-loot fires there, BEFORE the loser is removed below).
+//   "defeated"    -> hero deleted from the record + pruned from their owner's
+//                    player.heroIds. The granular heroes upsert is a full sync,
+//                    so the row (and, with heroRepo's platoon NOT-IN sweep, its
+//                    hero_platoons rows) falls out of the DB for free.
+//   "retreated"   -> stacks emptied server-side regardless of what the arena
+//                    submitted (retreat loses ALL troops; the arena's
+//                    pre-submitted 15%-loss stacks are subsumed), then the
+//                    hero relocated to the nearest settlement their owner
+//                    holds -- or left at the post-battle position (post-
+//                    cancelMove for the manual path) when the owner holds
+//                    none (plan D1).
+//   "surrendered" -> same relocation, keeping the submitted stacks (the
+//                    surrender gold deduction is the caller's, applied before
+//                    this helper so the relocated copy carries it).
+//   "stood"       -> untouched.
+// The returned players array carries the heroIds prune so persistBattleOutcome
+// can always save players.
+function applyHeroBattleOutcomes(
+  battleHeroes: Record<HeroId, HeroState>,
+  players: Player[],
+  settlements: Record<SettlementId, SettlementState>,
+  verdicts: {
+    attackerId: HeroId;
+    defenderId: HeroId;
+    attackerVerdict: HeroBattleVerdict;
+    defenderVerdict: HeroBattleVerdict;
+  },
+): {
+  heroes: Record<HeroId, HeroState>;
+  players: Player[];
+  removedHeroIds: HeroId[];
+} {
+  let heroes = { ...battleHeroes };
+  let nextPlayers = players;
+  const removedHeroIds: HeroId[] = [];
+  const apply = (heroId: HeroId, verdict: HeroBattleVerdict): void => {
+    const hero = heroes[heroId];
+    if (!hero) return;
+    if (verdict === "defeated") {
+      const remaining = { ...heroes };
+      delete remaining[heroId];
+      heroes = remaining;
+      nextPlayers = nextPlayers.map((p) =>
+        p.id === hero.ownerId && p.heroIds.includes(heroId)
+          ? { ...p, heroIds: p.heroIds.filter((id) => id !== heroId) }
+          : p,
+      );
+      removedHeroIds.push(heroId);
+      return;
+    }
+    if (verdict === "retreated" || verdict === "surrendered") {
+      const postBattleHero =
+        verdict === "retreated" ? { ...hero, stacks: normalizePlatoons([]) } : hero;
+      const nearest = nearestOwnedSettlement({ settlements }, postBattleHero);
+      heroes = {
+        ...heroes,
+        [heroId]: nearest ? relocateHeroToSettlement(postBattleHero, nearest) : postBattleHero,
+      };
+    }
+  };
+  apply(verdicts.attackerId, verdicts.attackerVerdict);
+  apply(verdicts.defenderId, verdicts.defenderVerdict);
+  return { heroes, players: nextPlayers, removedHeroIds };
+}
+
+// Charter cleanup for EVERY removed hero (plan/2026-09-29-hero-outcomes.md
+// extends the old defender-wipe-only call): a chartering hero removed by
+// defeat must not leave an orphaned charter row, whether they were the
+// attacker or the defender. cleanupDefeatedHeroCharters() reads the hero off
+// state.heroes, so the fold runs against the PRE-removal battle record; a
+// non-chartering hero is a reference-stable no-op, keeping
+// persistBattleOutcome's !== + granular-source gate quiet on the common path.
+function foldRemovedHeroCharters(
+  state: GameState,
+  battleHeroes: Record<HeroId, HeroState>,
+  removedHeroIds: HeroId[],
+): CharterState[] {
+  let activeCharters = state.activeCharters;
+  for (const heroId of removedHeroIds) {
+    activeCharters = cleanupDefeatedHeroCharters(
+      { ...state, heroes: battleHeroes, activeCharters },
+      heroId,
+    ).activeCharters;
+  }
+  return activeCharters;
+}
 
 // Post-battle capture (unit-recruitment/garrison plan task 7): after a
 // hero-vs-hero battle, an attacker who kept the collision hex (never
@@ -326,8 +431,8 @@ async function persistBattleOutcome(
   state: GameState,
   source: "granular" | "jsonb",
   newHeroes: Record<HeroId, HeroState>,
-  defenderId: HeroId,
-  defenderLostAllTroops: boolean,
+  players: Player[],
+  activeCharters: CharterState[],
   capture?: {
     heroes: Record<HeroId, HeroState>;
     settlements: Record<SettlementId, SettlementState>;
@@ -336,34 +441,24 @@ async function persistBattleOutcome(
 ): Promise<void> {
   const finalHeroes = capture ? capture.heroes : newHeroes;
   const finalSettlements = capture ? capture.settlements : state.settlements;
+  const finalPlayers = capture ? capture.players : players;
   const legacyGold = sumPlayerGold(
-    capture ? capture.players : state.players,
+    finalPlayers,
     finalHeroes,
     finalSettlements,
   );
-  // A chartering hero can end up as either combatant (traveling heroes
-  // can walk adjacent to an enemy mid-route; constructing heroes can be
-  // attacked at their target) -- mirrors src/state/turnController.ts's
-  // own resolveCurrentBattle(), which likewise only checks the
-  // DEFENDER's defeat this way (an attacker losing while chartering
-  // isn't handled there either; matched as-is rather than expanding
-  // scope beyond that existing client behavior).
-  let finalActiveCharters = state.activeCharters;
-  if (defenderLostAllTroops) {
-    finalActiveCharters = cleanupDefeatedHeroCharters(
-      { ...state, heroes: finalHeroes },
-      defenderId,
-    ).activeCharters;
-  }
   await deps.gameRepo.saveHeroesAndSettlements(
     gameName,
     finalHeroes,
     finalSettlements,
     {
       gold: legacyGold,
-      // Only a post-battle capture changes players (settlementIds move
-      // between seats); every other battle outcome leaves them untouched.
-      ...(capture ? { players: capture.players } : {}),
+      // players ride every battle persist now (hero-outcomes plan W2a): a
+      // defeat prunes the removed hero from their owner's heroIds, and the
+      // old capture-only conditional left that prune unpersisted whenever no
+      // capture happened. capture.players already carry it (the capture is
+      // fed the pruned array); this branch covers every other outcome.
+      players: finalPlayers,
     },
   );
   // settlements is state.settlements unless a post-battle capture flipped
@@ -371,14 +466,14 @@ async function persistBattleOutcome(
   // players array above) ride the same persist, so the granular dual-write
   // below syncs both halves of the capture in one transaction.
   await dualWriteEntities(deps, gameName, state, { heroes: finalHeroes, settlements: finalSettlements });
-  if (finalActiveCharters !== state.activeCharters && source === "granular") {
+  if (activeCharters !== state.activeCharters && source === "granular") {
     // Source gate matches the EndTurn case above: on JSONB fallback,
     // state.activeCharters is always [] regardless of the charters
     // table's real contents, so an upsertMany([]) here would silently
-    // delete them. (finalActiveCharters !== state.activeCharters gates
-    // out the common case where the defender either survived or wasn't
-    // chartering; the source gate is what catches the fallback path.)
-    await deps.charterRepo.upsertMany(gameName, finalActiveCharters);
+    // delete them. (activeCharters comes in already folded by
+    // foldRemovedHeroCharters; the !== reference gate passes it through
+    // untouched when no removed hero was chartering.)
+    await deps.charterRepo.upsertMany(gameName, activeCharters);
   }
 }
 
@@ -727,17 +822,36 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         battle.defenderPlatoons,
         defenderLostAllTroops,
       );
-      // The auto-resolver never cancels the attacker's move, so a surviving
-      // attacker is always still standing where the collision happened.
-      const capture = applyPostBattleCapture(state, command.attackerId, newHeroes);
+      // The auto-resolver never passes retreat policies (D4 in
+      // plan/2026-09-29-hero-outcomes.md), so a concession verdict can't
+      // occur here -- only defeated (hero removed) or stood. A retreated_self
+      // outcome (self-retreat policy, not wired server-side today) would
+      // still relocate via applyHeroBattleOutcomes' general retreat rule.
+      const attackerVerdict = deriveHeroVerdict(battle.attackerOutcome);
+      const defenderVerdict = deriveHeroVerdict(battle.defenderOutcome);
+      const outcome = applyHeroBattleOutcomes(newHeroes, state.players, state.settlements, {
+        attackerId: command.attackerId,
+        defenderId: command.defenderId,
+        attackerVerdict,
+        defenderVerdict,
+      });
+      // Post-verdict: a removed attacker can't capture (they're gone), and a
+      // relocated one no longer stands on the collision hex. The capture is
+      // fed the pruned players so its SettlementCaptured players output
+      // carries the heroIds prune too.
+      const capture = applyPostBattleCapture(
+        { ...state, players: outcome.players },
+        command.attackerId,
+        outcome.heroes,
+      );
       await persistBattleOutcome(
         deps,
         command.gameName,
         state,
         source,
-        newHeroes,
-        command.defenderId,
-        defenderLostAllTroops,
+        outcome.heroes,
+        outcome.players,
+        foldRemovedHeroCharters(state, newHeroes, outcome.removedHeroIds),
         capture,
       );
       const event: EngineEvent = {
@@ -748,6 +862,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         winner: battle.winner,
         attackerOutcome: battle.attackerOutcome,
         defenderOutcome: battle.defenderOutcome,
+        attackerVerdict,
+        defenderVerdict,
         rewardGold: lootedGold,
         rounds: battle.rounds,
         obstacleSeed,
@@ -757,8 +873,10 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         ok: true,
         events: [event],
         lastEventId,
-        attackerHero: (capture?.heroes ?? newHeroes)[command.attackerId],
-        defenderHero: newHeroes[command.defenderId],
+        attackerHero: (capture?.heroes ?? outcome.heroes)[command.attackerId],
+        defenderHero: outcome.heroes[command.defenderId],
+        attackerVerdict,
+        defenderVerdict,
         battle,
       };
     }
@@ -1162,6 +1280,27 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       const defenderLostAllTroops =
         command.outcome === "attackerWon" ||
         (command.outcome === "draw" && defenderStacks.every((p) => p.entries.length === 0));
+      // Per-side verdicts (hero-outcomes plan W2a). The conceding side's
+      // verdict comes straight from the submitted outcome (only the arena's
+      // human side retreats/surrenders -- the same ownership derivation as
+      // concedingHero above); the OPPOSING side gets deriveHeroVerdict over
+      // its side's outcome, with a wipe read off the submitted stacks beating
+      // a mapped "survived" (mirrors the defenderLostAllTroops shape: an
+      // explicit loss always wipes, a stalemate wipes only when that side
+      // submitted zero survivors).
+      const attackerWipedAllTroops =
+        command.outcome === "defenderWon" ||
+        (command.outcome === "draw" && attackerStacks.every((p) => p.entries.length === 0));
+      const concedingOutcome =
+        command.outcome === "retreat" || command.outcome === "surrender" ? command.outcome : undefined;
+      const attackerConceded = concedingIsAttacker ? concedingOutcome : undefined;
+      const defenderConceded = concedingIsAttacker ? undefined : concedingOutcome;
+      const attackerVerdict: HeroBattleVerdict = attackerConceded
+        ? deriveHeroVerdict("retreated_hero", attackerConceded)
+        : deriveHeroVerdict(attackerWipedAllTroops ? "lost_all_troops" : "survived");
+      const defenderVerdict: HeroBattleVerdict = defenderConceded
+        ? deriveHeroVerdict("retreated_hero", defenderConceded)
+        : deriveHeroVerdict(defenderLostAllTroops ? "lost_all_troops" : "survived");
       const { heroes: newHeroes, lootedGold } = buildPostBattleHeroes(
         baseState.heroes,
         cancelledAttacker,
@@ -1179,22 +1318,35 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
           gold: (Number(newHeroes[concedingHero.id].gold) || 0) - surrenderedGold,
         };
       }
+      // Hero outcomes run AFTER the gold deduction so the relocated
+      // surrendering copy carries the debited purse. Retreat/surrender
+      // relocation overwrites the cancelMove-restored position when the
+      // conceder's owner holds a settlement; with none they stay at the
+      // cancelled position (plan D1). A wiped (defeated) side is deleted
+      // from the record here, after buildPostBattleHeroes' loot transfer.
+      const outcome = applyHeroBattleOutcomes(newHeroes, state.players, state.settlements, {
+        attackerId: command.attackerId,
+        defenderId: command.defenderId,
+        attackerVerdict,
+        defenderVerdict,
+      });
       // Retreat/surrender restored the attacker's pre-move position
       // (baseState came from cancelMove), so they are no longer standing on
       // the collision hex -- post-battle capture only applies when the
-      // attacker kept it (win/draw/loss-with-survivors).
+      // attacker kept it (win/draw/loss-with-survivors). Fed the pruned
+      // players so the capture's players output carries the heroIds prune.
       const capture =
         baseState === state
-          ? applyPostBattleCapture(state, command.attackerId, newHeroes)
+          ? applyPostBattleCapture({ ...state, players: outcome.players }, command.attackerId, outcome.heroes)
           : null;
       await persistBattleOutcome(
         deps,
         command.gameName,
         state,
         source,
-        newHeroes,
-        command.defenderId,
-        defenderLostAllTroops,
+        outcome.heroes,
+        outcome.players,
+        foldRemovedHeroCharters(state, newHeroes, outcome.removedHeroIds),
         capture,
       );
       // The existing BattleResolved event, derived from the submitted
@@ -1202,8 +1354,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // path. The engine's outcome union already carries retreated_hero/
       // survived (verified: no event-shape extension needed -- see
       // packages/contracts/src/events/engineEvent.ts), so retreat and
-      // surrender both map onto retreated_hero; the persisted survivor
-      // stacks and surrenderedGold deduction carry the difference.
+      // surrender both map onto retreated_hero; the explicit per-side
+      // verdicts are what discriminates them for the client (D5).
       type ResolvedWinner = Extract<EngineEvent, { type: "BattleResolved" }>["winner"];
       type ResolvedOutcome = Extract<EngineEvent, { type: "BattleResolved" }>["attackerOutcome"];
       const winner: ResolvedWinner =
@@ -1244,6 +1396,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         winner,
         attackerOutcome,
         defenderOutcome,
+        attackerVerdict,
+        defenderVerdict,
         rewardGold: lootedGold,
         rounds: command.rounds,
         obstacleSeed: command.obstacleSeed,
@@ -1253,8 +1407,10 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         ok: true,
         events: [event],
         lastEventId,
-        attackerHero: (capture?.heroes ?? newHeroes)[command.attackerId],
-        defenderHero: newHeroes[command.defenderId],
+        attackerHero: (capture?.heroes ?? outcome.heroes)[command.attackerId],
+        defenderHero: outcome.heroes[command.defenderId],
+        attackerVerdict,
+        defenderVerdict,
       };
     }
     case "UpgradeBuilding": {

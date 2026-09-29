@@ -218,10 +218,15 @@ test("post-battle capture: a won hero battle on an empty-garrison enemy settleme
 
   const saved = gameRepo.rows["test-game"];
   assert.equal(saved.heroes.h0.gold, 450, "250 looted from the wiped defender + CAPTURE_GOLD_REWARD (100)");
+  assert.equal(saved.heroes.h1, undefined, "the wiped defender is removed from the heroes record");
+  assert.ok(!saved.players.find((p) => p.id === 1)?.heroIds.includes("h1"), "removed defender pruned from heroIds");
+  assert.equal("h1" in heroRepo.calls[0].value, false, "granular upsert is a full sync -- h1 gone there too");
   assert.equal(saved.settlements.s1.ownerId, 0, "settlement captured in the same persist");
   assert.ok(saved.players.find((p) => p.id === 0)?.settlementIds.includes("s1"), "winner's seat gains the settlement");
   assert.ok(!saved.players.find((p) => p.id === 1)?.settlementIds.includes("s1"), "loser's seat loses it");
   assert.equal(result.attackerHero?.gold, 450);
+  assert.equal(result.defenderHero, undefined, "the removed defender is omitted from the result");
+  assert.equal(result.defenderVerdict, "defeated");
   assert.equal(eventRepo.events.map((e) => e.kind).join(","), "BattleResolved", "capture rides the battle persist, no extra event");
   assert.equal(heroRepo.calls.length, 1);
   assert.equal(settlementRepo.calls.length, 1);
@@ -235,9 +240,12 @@ test("post-battle capture control: with no settlement on the post-win tile, the 
 
   const saved = gameRepo.rows["test-game"];
   assert.equal(saved.heroes.h0.gold, 350, "loot only, no capture reward");
+  assert.equal(saved.heroes.h1, undefined, "the wiped defender is removed even with no capture");
+  assert.deepEqual(saved.players.find((p) => p.id === 1)?.heroIds, []);
   assert.equal(saved.settlements.s0.ownerId, 0, "own settlement untouched");
   assert.equal(saved.settlements.s1, undefined);
   assert.equal(result.attackerHero?.gold, 350);
+  assert.equal(result.defenderHero, undefined);
   assert.equal(eventRepo.events.map((e) => e.kind).join(","), "BattleResolved");
   assert.equal(heroRepo.calls.length, 1);
   assert.equal(settlementRepo.calls.length, 0, "no settlement reference changed, dual-write gate skips the settlement repo");

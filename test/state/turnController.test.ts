@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TurnController, type TurnControllerHooks } from "../../src/state/turnController";
+import { mergeBattleOutcomeHeroes } from "../../src/game/turnHooks";
 import { emptyWarehouse, makeCharter, makeHero, makeSettlement, makeState } from "../charter/_helpers";
 import { normalizePlatoons } from "@heroes/engine";
 import { MOVEMENT_PER_TURN, type GameState } from "@heroes/contracts";
@@ -891,6 +892,131 @@ test("isPrimaryActor: () => false blocks the AI tick entirely (non-primary clien
   assert.equal(controller.getState(), initial, "state must be untouched on a non-primary client");
   assert.equal(pickCalls, 0, "the AI brain must not even be consulted");
   assert.equal(endTurnSpy.mock.callCount(), 0, "a non-primary client must not end the AI seat's turn");
+});
+
+test("AI battle merge removes a defeated attacker: hero deleted, heroIds pruned, selection cleared, and the AI turn resumes", async () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 12, 10, { stacks: normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 5 }] }]) }),
+      makeHero("h1", 1, 10, 10),
+    ],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  hooks.onBattleResolved = (async (s: GameState) => {
+    const defender = s.heroes["h0"];
+    return {
+      state: mergeBattleOutcomeHeroes(s, "h1", "h0", {
+        attackerVerdict: "defeated",
+        defenderHero: defender
+          ? { ...defender, stacks: normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 2 }] }]) }
+          : undefined,
+      }),
+      battle: null,
+    };
+  }) as TurnControllerHooks["onBattleResolved"];
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  assert.equal(controller.getState().phase.kind, "BATTLE");
+  assert.equal(controller.getState().selectedHeroId, null, "startBattle clears selection before the resolve");
+
+  await controller.resolveCurrentBattle();
+
+  const after = controller.getState();
+  assert.equal(after.heroes["h1"], undefined, "the defeated attacker must be deleted from state.heroes");
+  assert.equal(after.players[1]?.heroIds.includes("h1"), false, "the owner's heroIds must be pruned");
+  assert.equal(after.selectedHeroId, null, "the removal must not resurrect a selection");
+  assert.ok(after.heroes["h0"], "the surviving defender stays in state.heroes");
+  assert.equal(after.players[0]?.heroIds.includes("h0"), true, "the survivor's heroIds entry is untouched");
+  assert.equal(after.phase.kind, "AI_TURN", "the AI turn resumes after the removal");
+
+  hooks.pickAiMove = (() => null) as TurnControllerHooks["pickAiMove"];
+  await settlePersist();
+  controller.tick(16);
+  await settlePersist();
+
+  assert.equal(endTurnSpy.mock.callCount(), 1, "the AI turn completes with its hero gone");
+  const endedState = endTurnSpy.mock.calls[0]![0] as GameState;
+  assert.equal(endedState.players[1]?.heroIds.includes("h1"), false);
+});
+
+test("AI battle merge relocates a retreated attacker: new position merges, heroIds and selection survive, AI turn resumes", async () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 12, 10, { stacks: normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 5 }] }]) }),
+      makeHero("h1", 1, 10, 10),
+    ],
+    settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, 18, 4)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  hooks.onBattleResolved = (async (s: GameState) => {
+    const attacker = s.heroes["h1"];
+    return {
+      state: mergeBattleOutcomeHeroes(s, "h1", "h0", {
+        attackerHero: attacker
+          ? { ...attacker, q: 18, r: 4, stacks: [], movementRemaining: 0, trail: [{ q: 18, r: 4 }] }
+          : undefined,
+        attackerVerdict: "retreated",
+        defenderHero: s.heroes["h0"],
+      }),
+      battle: null,
+    };
+  }) as TurnControllerHooks["onBattleResolved"];
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  assert.equal(controller.getState().phase.kind, "BATTLE");
+
+  await controller.resolveCurrentBattle();
+
+  const after = controller.getState();
+  assert.equal(after.heroes["h1"]?.q, 18, "the retreated attacker merged at its relocation hex");
+  assert.equal(after.heroes["h1"]?.r, 4);
+  assert.ok(after.heroes["h1"] && after.heroes["h0"], "both heroes survive the retreat");
+  assert.equal(after.players[1]?.heroIds.includes("h1"), true, "heroIds keep the retreated hero");
+  assert.equal(after.players[0]?.heroIds.includes("h0"), true);
+  assert.equal(after.selectedHeroId, null, "selection stays null through the battle flow (startBattle cleared it)");
+  assert.equal(after.phase.kind, "AI_TURN", "the AI turn resumes after the retreat");
+
+  hooks.pickAiMove = (() => null) as TurnControllerHooks["pickAiMove"];
+  await settlePersist();
+  controller.tick(16);
+  await settlePersist();
+
+  assert.equal(endTurnSpy.mock.callCount(), 1, "the AI turn completes after the retreat");
+});
+
+test("mergeBattleOutcomeHeroes tolerates already-absent heroes: idempotent re-merge is a reference-stable no-op", () => {
+  const initial = makeState({ selectedHeroId: "h0" });
+  const once = mergeBattleOutcomeHeroes(initial, "h0", "h1", {});
+  assert.equal(once.heroes["h0"], undefined);
+  assert.equal(once.heroes["h1"], undefined);
+  assert.deepEqual(once.players[0]?.heroIds, []);
+  assert.deepEqual(once.players[1]?.heroIds, []);
+  assert.equal(once.selectedHeroId, null, "a selection pointing at a removed hero must clear");
+  const twice = mergeBattleOutcomeHeroes(once, "h0", "h1", {});
+  assert.equal(twice, once, "re-merging an already-applied omission must not throw and must not rebuild state");
+
+  const withSurvivor = makeState({ selectedHeroId: "h0" });
+  const kept = mergeBattleOutcomeHeroes(withSurvivor, "h1", "h0", {
+    defenderHero: withSurvivor.heroes["h0"],
+  });
+  assert.equal(kept.selectedHeroId, "h0", "a surviving selected hero keeps client-local selection");
+  assert.equal(kept.heroes["h1"], undefined, "the omitted attacker is still removed");
+  assert.deepEqual(kept.players[1]?.heroIds, []);
+  assert.deepEqual(kept.players[0]?.heroIds, ["h0"]);
 });
 
 test("AI walking onto a neutral settlement captures it via tryCaptureAt", async () => {

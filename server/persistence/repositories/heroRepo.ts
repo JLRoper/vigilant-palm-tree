@@ -128,6 +128,15 @@ export function createHeroRepo(db: Queryable): HeroRepo {
         gameId,
         ids,
       ]);
+      // Same full-sync sweep for the platoon rows (hero-outcomes plan W2a):
+      // a hero removed from the record never reaches the per-hero loop below,
+      // so its hero_platoons rows would otherwise orphan -- defeat now
+      // deletes heroes outright, and the per-hero delete at the bottom of the
+      // loop only covers heroes still present.
+      await db.query(`DELETE FROM hero_platoons WHERE game_id = $1 AND NOT (hero_id = ANY($2::text[]))`, [
+        gameId,
+        ids,
+      ]);
 
       for (const hero of Object.values(heroes)) {
         await db.query(
@@ -177,6 +186,8 @@ export function createHeroRepo(db: Queryable): HeroRepo {
         // Stacks are always replaced wholesale along with their parent hero
         // (never diffed entry-by-entry) -- same full-sync rule as the
         // heroes table itself, and simpler than reconciling stack reorders.
+        // (A REMOVED hero's rows were already swept by the NOT-IN delete
+        // above; this per-hero pass only covers surviving heroes.)
         await db.query(`DELETE FROM hero_platoons WHERE game_id = $1 AND hero_id = $2`, [
           gameId,
           hero.id,

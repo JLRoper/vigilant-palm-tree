@@ -3,6 +3,7 @@ import type {
   BuildingDef,
   BuildingKind,
   BuildingUpgradeRequest,
+  HeroBattleVerdict,
   HeroState,
   HorseVariantId,
   Platoon,
@@ -107,9 +108,16 @@ export type EndTurnResult = {
   tradeRoutes?: import("@heroes/contracts").TradeRouteState[];
 };
 
+// Mirrors the contracts ResolveBattleResult (hero-outcomes plan W1) plus the
+// client-only `battle` payload the result card renders from. Both heroes are
+// OPTIONAL: a defeated side's hero row is deleted server-side and omitted
+// here; verdicts ride along so the client can message "slain" / "retreated to
+// <name>" / "surrendered" without re-deriving them.
 export type ResolveBattleResult = {
-  attackerHero: HeroState;
-  defenderHero: HeroState;
+  attackerHero?: HeroState;
+  defenderHero?: HeroState;
+  attackerVerdict?: HeroBattleVerdict;
+  defenderVerdict?: HeroBattleVerdict;
   battle: import("@heroes/engine").BattleResult;
 };
 
@@ -125,9 +133,14 @@ export type SubmitBattleResultPayload = {
   obstacleSeed: number;
 };
 
+// Mirrors the contracts SubmitBattleResultResult: both heroes optional
+// (defeated heroes are omitted — no respawn/teleport), verdicts carry the
+// retreat/surrender discrimination the arena knows from `outcome`.
 export type SubmitBattleResultResult = {
-  attackerHero: HeroState;
-  defenderHero: HeroState;
+  attackerHero?: HeroState;
+  defenderHero?: HeroState;
+  attackerVerdict?: HeroBattleVerdict;
+  defenderVerdict?: HeroBattleVerdict;
 };
 
 export type TransferGoldResult = {

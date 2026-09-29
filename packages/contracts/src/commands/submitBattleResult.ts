@@ -1,4 +1,6 @@
+import type { HeroBattleVerdict } from "../events/engineEvent";
 import type { HeroId, PlayerSeat } from "../ids";
+import type { HeroState } from "../gameState";
 import type { Platoon } from "../units";
 
 // Manual-battle result submission (plan/2026-09-27-manual-battle-wiring.md,
@@ -59,4 +61,16 @@ export interface SubmitBattleResultCommand {
   // obstacleSeed mirrors the battle_actions seed row (work item 4b seq 0).
   rounds: number;
   obstacleSeed: number;
+}
+
+// Post-battle hero pair for the manual-arena path (hero-outcomes plan W1).
+// Both heroes are OPTIONAL: a defeated side's hero row is deleted (no
+// respawn/teleport), and only surviving heroes come back. Verdicts carry the
+// retreat/surrender discrimination the arena knows from `outcome` but the
+// engine's retreated_hero outcome does not.
+export interface SubmitBattleResultResult {
+  attackerHero?: HeroState;
+  defenderHero?: HeroState;
+  attackerVerdict?: HeroBattleVerdict;
+  defenderVerdict?: HeroBattleVerdict;
 }

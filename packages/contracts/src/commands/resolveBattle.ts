@@ -1,4 +1,6 @@
+import type { HeroBattleVerdict } from "../events/engineEvent";
 import type { HeroId, PlayerSeat } from "../ids";
+import type { HeroState } from "../gameState";
 
 // Discriminated-union command for the port of server/routes.ts's
 // /resolve-battle endpoint (plan/2026-08-16-phase-3-parallel-dev-plan.md,
@@ -15,4 +17,17 @@ export interface ResolveBattleCommand {
   actor: PlayerSeat;
   attackerId: HeroId;
   defenderId: HeroId;
+}
+
+// Post-battle hero pair (hero-outcomes plan W1). Both heroes are OPTIONAL:
+// a defeated side's hero row is deleted (state.heroes + player.heroIds), so
+// the result only carries the heroes that survived the battle. Verdicts ride
+// alongside so the client can message "slain" / "retreated to <name>" /
+// "surrendered" without re-deriving them (retreat vs surrender are
+// indistinguishable in the event's retreated_hero outcome).
+export interface ResolveBattleResult {
+  attackerHero?: HeroState;
+  defenderHero?: HeroState;
+  attackerVerdict?: HeroBattleVerdict;
+  defenderVerdict?: HeroBattleVerdict;
 }

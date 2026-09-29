@@ -31,7 +31,9 @@ import type {
   BuildingKind,
   BuildingUpgradeRequest,
   GameState,
+  HeroBattleVerdict,
   HeroId,
+  HeroState,
   Platoon,
   SettlementId,
   TransferDirection,
@@ -73,6 +75,23 @@ export interface BuildTurnHooksOptions {
 }
 
 let lastBattle: { attackerId: HeroId; defenderId: HeroId } | null = null;
+
+export interface ResolveBattleVerdicts {
+  attackerVerdict?: HeroBattleVerdict;
+  defenderVerdict?: HeroBattleVerdict;
+}
+
+// Verdicts from the most recent successful resolveBattle round-trip, consumed
+// by GameActions after resolveCurrentBattle() for the result card / AI toast
+// wording. Cleared at every onBattleResolved entry so a failed resolve never
+// surfaces a previous battle's verdicts.
+let lastResolveVerdicts: ResolveBattleVerdicts | null = null;
+
+export function consumeResolveBattleVerdicts(): ResolveBattleVerdicts {
+  const v = lastResolveVerdicts;
+  lastResolveVerdicts = null;
+  return v ?? {};
+}
 
 export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks {
   return {
@@ -142,6 +161,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     ): Promise<{ state: GameState; battle: BattleResult | null }> => {
       const cached = lastBattle;
       lastBattle = null;
+      lastResolveVerdicts = null;
       const name = opts.gameName();
       if (!name || !cached) return { state, battle: null };
       const attackerHeroBefore = state.heroes[cached.attackerId];
@@ -157,15 +177,12 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
           attackerId: cached.attackerId,
           defenderId: cached.defenderId,
         });
+        lastResolveVerdicts = {
+          attackerVerdict: result.attackerVerdict,
+          defenderVerdict: result.defenderVerdict,
+        };
         return {
-          state: {
-            ...state,
-            heroes: {
-              ...state.heroes,
-              [cached.attackerId]: result.attackerHero,
-              [cached.defenderId]: result.defenderHero,
-            },
-          },
+          state: mergeBattleOutcomeHeroes(state, cached.attackerId, cached.defenderId, result),
           battle: result.battle,
         };
       } catch (e) {
@@ -485,6 +502,45 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     getMap: () => opts.gameMap(),
     rng: opts.rng,
   };
+}
+
+export function mergeBattleOutcomeHeroes(
+  state: GameState,
+  attackerId: HeroId,
+  defenderId: HeroId,
+  result: { attackerHero?: HeroState; defenderHero?: HeroState },
+): GameState {
+  // Hero-outcomes plan W2b: the server omits a hero that died in the battle
+  // (defeat → removed server-side). Absent here means delete: drop the local
+  // hero row, prune its owner's heroIds, and clear a selection pointing at it
+  // (existence-checked like mergeFromEndTurn). Present heroes merge as today.
+  let heroes = { ...state.heroes };
+  let players = state.players;
+  let changed = false;
+  const apply = (heroId: HeroId, hero: HeroState | undefined): void => {
+    if (hero) {
+      if (heroes[heroId] !== hero) {
+        heroes[heroId] = hero;
+        changed = true;
+      }
+      return;
+    }
+    const before = state.heroes[heroId];
+    if (!before) return;
+    delete heroes[heroId];
+    if (players.some((p) => p.id === before.ownerId && p.heroIds.includes(heroId))) {
+      players = players.map((p) =>
+        p.id === before.ownerId ? { ...p, heroIds: p.heroIds.filter((h) => h !== heroId) } : p,
+      );
+    }
+    changed = true;
+  };
+  apply(attackerId, result.attackerHero);
+  apply(defenderId, result.defenderHero);
+  if (!changed) return state;
+  const selectedHeroId =
+    state.selectedHeroId != null && heroes[state.selectedHeroId] ? state.selectedHeroId : null;
+  return { ...state, heroes, players, selectedHeroId };
 }
 
 export function mergeFromEndTurn(state: GameState, result: EndTurnResult): GameState {

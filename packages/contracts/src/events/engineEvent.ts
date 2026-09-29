@@ -3,6 +3,14 @@ import type { CharterId, HeroId, HorseVariantId, PlayerSeat, SettlementId } from
 import type { TransferDirection } from "../gameState";
 import type { WarehouseResource } from "../resources";
 
+// Per-hero battle verdict (hero-outcomes plan W1): how a hero finished a
+// battle. Declared here because contracts is the single source (engine
+// imports this union; it cannot be the other way around) and the
+// BattleResolved event carries it per side. "defeated" = lost_all_troops
+// (hero removed), "retreated"/"surrendered" = conceded retreat/surrender
+// (hero relocated to nearest owned settlement), "stood" = won/survived.
+export type HeroBattleVerdict = "defeated" | "retreated" | "surrendered" | "stood";
+
 // Named EngineEvent, not GameEvent -- src/core/events.ts already has an
 // unrelated GameEvent (the client-side UI-event-bus payload union). See
 // plan/2026-08-16-phase-3-parallel-dev-plan.md's naming-collision note.
@@ -43,6 +51,11 @@ export type EngineEvent =
       // this file's own header comment / packages/contracts/src/index.ts).
       attackerOutcome: "won" | "lost_all_troops" | "retreated_self" | "retreated_hero" | "survived";
       defenderOutcome: "won" | "lost_all_troops" | "retreated_self" | "retreated_hero" | "survived";
+      // Optional so pre-W1 events without verdicts stay valid. "surrendered"
+      // vs "retreated" cannot be re-derived from the outcomes alone (both
+      // collapse to retreated_hero) -- only this field discriminates them.
+      attackerVerdict?: HeroBattleVerdict;
+      defenderVerdict?: HeroBattleVerdict;
       rewardGold: number;
       rounds: number;
       // Persisted here so a battle can be replayed later -- the old
