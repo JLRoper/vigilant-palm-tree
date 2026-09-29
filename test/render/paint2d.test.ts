@@ -42,6 +42,7 @@ import {
 } from "../../src/render/scene/paint2d";
 import type { SceneNode } from "../../src/render/scene/types";
 import type { Paint2DSpriteResolver } from "../../src/render/scene/paint2d/deps";
+import { HEX_SIZE } from "../../src/core/hex";
 import { makeNoopPaint2DDep, makeRecordingCtx } from "./_helpers";
 
 test("paintScene: empty input is a no-op (no calls emitted, no throw)", () => {
@@ -202,13 +203,13 @@ test("paintFogHex: emits the live fog rgba fill + a stroke", () => {
   assert.ok(calls.some((c) => c.name === "stroke"), "fog should stroke");
 });
 
-test("paintHoverHighlight: emits hexPath + 3px stroke in the live #ffcc00", () => {
+test("paintHoverHighlight: emits hexPath + 2px stroke in the live #ffcc00 (de-emphasized from 3px, F7c)", () => {
   const { ctx, calls } = makeRecordingCtx();
   paintHoverHighlight(ctx, { kind: "hoverHighlight", q: 0, r: 0, world: { x: 0, y: 0 } }, makeNoopPaint2DDep());
   const stroke = calls.find((c) => c.name === "set:strokeStyle");
   assert.equal(stroke?.args[0], "#ffcc00", "hover stroke must match the live #ffcc00");
   const lineWidth = calls.find((c) => c.name === "set:lineWidth");
-  assert.deepEqual(lineWidth?.args, [3], "hover stroke must be 3px to match the live renderer");
+  assert.deepEqual(lineWidth?.args, [2], "hover stroke must be 2px (de-emphasized) to match the live renderer");
   assert.ok(calls.some((c) => c.name === "beginPath"), "hover should begin a hex path");
   assert.ok(calls.some((c) => c.name === "stroke"), "hover should stroke");
   assert.ok(!calls.some((c) => c.name === "fill"), "hover should not fill");
@@ -220,6 +221,34 @@ test("paintCastle: emits an arc border; dashed when ownerId is null", () => {
   assert.ok(calls.some((c) => c.name === "arc"), "should draw an arc border");
   const setDash = calls.filter((c) => c.name === "setLineDash");
   assert.ok(setDash.length >= 1, "should call setLineDash at least once (4,4 for unowned)");
+});
+
+test("paintCastle: unselected owned ring dims to 0.45 alpha; selected becomes a full-alpha double ring (F7b)", () => {
+  const { ctx: ctxU, calls: callsU } = makeRecordingCtx();
+  paintCastle(ctxU, { kind: "castle", settlementId: "s", world: { x: 0, y: 0 }, level: 1, variant: 0, ownerId: 0, selected: false, color: "#ff0000", dashedBorder: false }, makeNoopPaint2DDep());
+  assert.equal(callsU.filter((c) => c.name === "arc").length, 1, "unselected keeps a single ownership ring");
+  const alphaU = callsU.filter((c) => c.name === "set:globalAlpha").map((c) => c.args[0]);
+  assert.deepEqual(alphaU, [0.45], "unselected ownership ring reads at 0.45 alpha");
+
+  const { ctx: ctxS, calls: callsS } = makeRecordingCtx();
+  paintCastle(ctxS, { kind: "castle", settlementId: "s", world: { x: 0, y: 0 }, level: 1, variant: 0, ownerId: 0, selected: true, color: "#ff0000", dashedBorder: false }, makeNoopPaint2DDep());
+  const arcs = callsS.filter((c) => c.name === "arc");
+  assert.equal(arcs.length, 2, "selected = double ring");
+  assert.deepEqual(arcs.map((c) => c.args[2]), [HEX_SIZE * 1.05, HEX_SIZE * 1.18], "inner 1.05 ring + outer ~1.18 ring");
+  assert.deepEqual(callsS.filter((c) => c.name === "set:globalAlpha"), [], "selected rings draw at full alpha (no globalAlpha)");
+  const widths = callsS.filter((c) => c.name === "set:lineWidth").map((c) => c.args[0]);
+  assert.deepEqual(widths, [3, 1.5]);
+  const strokes = callsS.filter((c) => c.name === "set:strokeStyle").map((c) => c.args[0]);
+  assert.deepEqual(strokes, ["#ff0000", "#ff0000"], "both selected rings keep the owner color");
+});
+
+test("paintCastle: a selected neutral settlement gets the white double ring (F7b)", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintCastle(ctx, { kind: "castle", settlementId: "s", world: { x: 0, y: 0 }, level: 1, variant: 0, ownerId: null, selected: true, color: "rgba(255,255,255,0.18)", dashedBorder: true }, makeNoopPaint2DDep());
+  const arcs = calls.filter((c) => c.name === "arc");
+  assert.equal(arcs.length, 2, "selected neutral also gets the double ring");
+  const strokes = calls.filter((c) => c.name === "set:strokeStyle").map((c) => c.args[0]);
+  assert.ok(strokes.every((s) => s.startsWith("rgba(255,255,255")), "selected neutral rings are white");
 });
 
 test("paintCharterOverlay: traveling phase uses dashed stroke, constructing uses solid + two house triangles", () => {
@@ -257,6 +286,24 @@ test("paintPathSegment: reachable uses 4px width + 6px midpoint dots, unreachabl
   assert.deepEqual(lwU?.args, [3], "unreachable path uses 3px line width");
 });
 
+test("paintPathSegment: a fogged dim segment brightens to 0.50 gold and under-strokes dark first (F4)", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintPathSegment(ctx, { kind: "pathSegment", reachable: false, fogged: true, points: [{ x: 0, y: 0 }, { x: 10, y: 10 }] }, makeNoopPaint2DDep());
+  const strokes = calls.filter((c) => c.name === "set:strokeStyle").map((c) => c.args[0]);
+  assert.deepEqual(strokes, ["rgba(0,0,0,0.5)", "rgba(255, 204, 0, 0.50)"], "dark under-stroke paints before the brightened gold");
+  const widths = calls.filter((c) => c.name === "set:lineWidth").map((c) => c.args[0]);
+  assert.deepEqual(widths, [5, 3], "under-stroke is width+2, then the regular 3px line");
+});
+
+test("paintPathSegment: a fogged reachable segment keeps its bright gold alpha but gains the under-stroke (F4)", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintPathSegment(ctx, { kind: "pathSegment", reachable: true, fogged: true, points: [{ x: 0, y: 0 }, { x: 10, y: 10 }] }, makeNoopPaint2DDep());
+  const strokes = calls.filter((c) => c.name === "set:strokeStyle").map((c) => c.args[0]);
+  assert.deepEqual(strokes, ["rgba(0,0,0,0.5)", "rgba(255, 204, 0, 0.85)"]);
+  const widths = calls.filter((c) => c.name === "set:lineWidth").map((c) => c.args[0]);
+  assert.deepEqual(widths, [6, 4]);
+});
+
 test("paintHeroTrail: emits two save()/restore() pairs (per-traversal) + the dot arc + the line stroke", () => {
   const { ctx, calls } = makeRecordingCtx();
   paintHeroTrail(ctx, { kind: "heroTrail", heroId: "h", color: "#fff", points: [{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 20, y: 20 }] }, makeNoopPaint2DDep());
@@ -264,6 +311,22 @@ test("paintHeroTrail: emits two save()/restore() pairs (per-traversal) + the dot
   assert.ok(calls.some((c) => c.name === "restore"), "should restore ctx state");
   assert.ok(calls.some((c) => c.name === "arc"), "should draw trail dots");
   assert.ok(calls.some((c) => c.name === "stroke"), "should stroke the trail line");
+});
+
+test("paintHeroTrail: alpha ramps per index -- oldest faintest, newest at full base alpha (F14)", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  const points = Array.from({ length: 5 }, (_, i) => ({ x: i * 10, y: 0 }));
+  paintHeroTrail(ctx, { kind: "heroTrail", heroId: "h", color: "#fff", points }, makeNoopPaint2DDep());
+  const alphas = calls.filter((c) => c.name === "set:globalAlpha").map((c) => c.args[0]) as number[];
+  // Per i: dot (0.55 base) then polyline segment (0.35 base), both ramped.
+  assert.ok(alphas.length === 8, "4 segments x (dot alpha + line alpha)");
+  for (let i = 1; i < 4; i++) {
+    assert.ok(alphas[2 * (i - 1)] < alphas[2 * i], `index ${i} dot paints fainter than index ${i + 1}`);
+  }
+  assert.ok(Math.abs(alphas[6] - 0.55) < 1e-9, "newest dot reaches the full 0.55 base alpha");
+  assert.ok(Math.abs(alphas[7] - 0.35) < 1e-9, "newest polyline segment reaches the full 0.35 base alpha");
+  const ramp1 = 0.35 + 0.65 * (1 / 4);
+  assert.ok(Math.abs(alphas[0] - 0.55 * ramp1) < 1e-9, "oldest dot is 0.55 * (0.35 + 0.65 * i/(n-1))");
 });
 
 test("paintTerritoryOutlineEdge: emits a 0.45-alpha line + uses deps.getTerritoryBorderWidth() as lineWidth", () => {
@@ -396,6 +459,17 @@ test("paintCityCell: hovered uses 3px gold stroke, unhovered uses 1px #3a3450", 
   paintCityCell(ctxU, { kind: "cityCell", gx: 0, gy: 0, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: false }, makeNoopPaint2DDep());
   const lwU = callsU.find((c) => c.name === "set:lineWidth");
   assert.deepEqual(lwU?.args, [1], "unhovered cell uses 1px stroke");
+});
+
+test("paintCityCell: a buildable cell gets the subtle white tint fill + brighter stroke (F16b)", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintCityCell(ctx, { kind: "cityCell", gx: 1, gy: 1, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: false, buildable: true }, makeNoopPaint2DDep());
+  const fills = calls.filter((c) => c.name === "set:fillStyle").map((c) => c.args[0]);
+  assert.deepEqual(fills, ["#2a2438", "rgba(255,255,255,0.05)"], "base fill then the subtle buildable tint");
+  const stroke = calls.find((c) => c.name === "set:strokeStyle");
+  assert.equal(stroke?.args[0], "rgba(255,255,255,0.22)", "unhovered buildable cell strokes brighter than #3a3450");
+  const lw = calls.find((c) => c.name === "set:lineWidth");
+  assert.deepEqual(lw?.args, [1], "buildable keeps the 1px stroke");
 });
 
 test("paintCityResourceSpot: without a sprite, falls back to the diamond shape with RESOURCE_PAL colors", () => {

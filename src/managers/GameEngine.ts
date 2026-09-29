@@ -8,7 +8,6 @@ import { buildInitialGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";
 import { cityViewSizeFor } from "@heroes/engine";
 import { hexDistance } from "../core/hex";
-import { CHARTER_GOLD_COST, CHARTER_WAREHOUSE_COST } from "../state/gameState";
 
 import { SessionManager } from "./SessionManager";
 import { GameStateManager, type PathPreviewLock } from "./GameStateManager";
@@ -22,10 +21,14 @@ import { registerAllListeners } from "../core/eventRegistry";
 import { attachEventLog, type EventLog } from "../debug/eventLog";
 import { mountPersistentDevConsole, type DevConsoleHandle } from "../debug/devConsole";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
-import { attachCommandFailureToasts } from "@screens/shared/toast";
+import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
+import { attachFirstTurnHint } from "@screens/shared/firstTurnHint";
 import { createLogPanel } from "@screens/shared/logPanel";
 import { getEntityMirror } from "../io/multiplayerSync";
+import { applyNetToSettlement, invertNet } from "@screens/settlements/cityView/netCost";
+import { evaluateCharterRequirements } from "@screens/adventure/charterRequirements";
+import { openCharterRequirementsModal } from "@screens/adventure/charterModal";
 
 export class GameEngine {
   // Infrastructure
@@ -105,6 +108,10 @@ export class GameEngine {
       gameName: () => this.session.getActiveGameName(),
       gameMap: () => this.gameMap,
       rng,
+      onPlaceBuildingsRejected: (settlementId, appliedDelta) => {
+        const next = applyNetToSettlement(this.state.getState(), settlementId, invertNet(appliedDelta));
+        if (next) this.state.replaceState(next);
+      },
     });
     this.state.setHooks(attached.wrapHooks(hooks));
     const initialState = buildInitialGameState(this.gameMap, rng);
@@ -133,6 +140,7 @@ export class GameEngine {
         this.ui.setInspectedTile(tile);
         this.fullFrame();
       },
+      isCityOpen: () => this.ui.getCityView()?.isOpen() ?? false,
     });
   }
 
@@ -147,8 +155,8 @@ export class GameEngine {
       onEndTurn: () => void this.actions.handleEndTurn().then(() => this.fullFrame()),
       onForget: (_id) => this.ui.getToolbar()?.refresh(),
       getMapInfo: () => this.getMapInfo(),
-      onStartCharter: () => this.enterCharterMode(),
-      canStartCharter: () => this.canStartCharter(),
+      onStartCharter: () => this.openCharterRequirements(),
+      canStartCharter: () => this.canOpenCharterFlow(),
     }, () => this.view.camera.zoom);
     this.ui.initHeroMenu(
       (heroId, settlementId, direction) => {
@@ -213,6 +221,13 @@ export class GameEngine {
     // while a disconnected seat holds the active turn (mp:presenceUpdated
     // + mp:stateChanged off the bus).
     attachMpPresenceHint();
+    // F12a (playtest fixes 2026-09-29): one-time first-turn hint. Shows on
+    // the first state:committed after a game becomes active (SessionManager
+    // adopt() precedes loadGame's replaceState, so activeGameName is already
+    // set when that commit fires); skipped permanently via the persisted
+    // heroesJs.firstTurnHint.v1 flag. The panel is pointer-events:none with
+    // only its button clickable, so it cannot intercept canvas input.
+    attachFirstTurnHint({ hasActiveGame: () => this.session.getActiveGameName() != null });
     // Log Message Panel (plan 2026-09-28-sse-event-push.md, use case 1):
     // attach is unconditional like the toasts above -- the panel itself
     // gates visibility and buffering on settings().showLogPanel, so the
@@ -249,21 +264,38 @@ export class GameEngine {
   // CHARTER
   // =========================================================================
 
-  private canStartCharter(): boolean {
+  // Gate for opening the charter flow (toolbar button): player turn with a
+  // hero selected. Resource/position requirements are surfaced by the
+  // requirements modal instead of disabling the button (F15).
+  private canOpenCharterFlow(): boolean {
     const gs = this.state.getState();
     const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
     if (!gs || gs.phase.kind !== "PLAYER_TURN" || gs.activePlayerId !== localId) return false;
     const selectedId = gs.selectedHeroId;
-    if (!selectedId) return false;
-    const hero = gs.heroes[selectedId];
-    if (!hero || hero.isChartering || hero.gold < CHARTER_GOLD_COST) return false;
-    const settlement = Object.values(gs.settlements).find(
-      (s) => s.q === hero.q && s.r === hero.r && s.ownerId === hero.ownerId,
-    );
-    if (!settlement) return false;
-    if ((settlement.warehouse.wood ?? 0) < CHARTER_WAREHOUSE_COST.wood) return false;
-    if ((settlement.warehouse.stone ?? 0) < CHARTER_WAREHOUSE_COST.stone) return false;
-    return true;
+    return selectedId != null && gs.heroes[selectedId] != null;
+  }
+
+  private openCharterRequirements(): void {
+    const gs = this.state.getState();
+    if (!gs || !this.canOpenCharterFlow()) return;
+    const heroId = gs.selectedHeroId;
+    if (!heroId) return;
+    openCharterRequirementsModal(evaluateCharterRequirements(gs, heroId), {
+      onConfirm: () => {
+        if (!this.canStartCharter()) {
+          showToast("Charter requirements are no longer met", "error");
+          return;
+        }
+        this.enterCharterMode();
+      },
+    });
+  }
+
+  private canStartCharter(): boolean {
+    const gs = this.state.getState();
+    const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
+    if (!gs || gs.phase.kind !== "PLAYER_TURN" || gs.activePlayerId !== localId) return false;
+    return evaluateCharterRequirements(gs, gs.selectedHeroId).canStart;
   }
 
   private enterCharterMode(): void {
@@ -320,6 +352,7 @@ export class GameEngine {
     const result = tc.startCharter(targetQ, targetR, name);
     if (!result.ok) {
       console.warn("[charter] start failed:", result.reason);
+      showToast(`Charter failed: ${result.reason}`, "error");
       return false;
     }
 

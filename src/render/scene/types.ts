@@ -125,6 +125,8 @@ export interface PathSegmentNode {
   kind: "pathSegment";
   reachable: boolean;
   points: WorldPoint[];
+  /** Set when any tile this segment spans is under fog of war; the painter brightens the dim gold and adds a dark under-stroke so the path reads against the fog overlay. */
+  fogged?: boolean;
 }
 
 export interface HeroTrailNode {
@@ -192,6 +194,8 @@ export interface CityCellNode {
   halfWidth: number;
   halfHeight: number;
   hovered: boolean;
+  /** Set while the build placer is active and the pending building can be placed here; the painter adds a subtle tint so free cells are scannable. */
+  buildable?: boolean;
 }
 
 export interface CityResourceSpotNode {

@@ -58,6 +58,7 @@ import type {
   TerritoryOutlineEdgeNode,
   ValidCharterHexNode,
   CaravanMarkerNode,
+  WorldPoint,
 } from "../types";
 
 // Live colour constants, transcribed byte-for-byte from the per-kind painter
@@ -83,6 +84,8 @@ const CITY_BG = "#1a1620";
 const CITY_CELL_FILL = "#2a2438";
 const CITY_CELL_STROKE = "#3a3450";
 const CITY_HOVER_STROKE = "#ffcc00";
+const CITY_BUILDABLE_FILL = "rgba(255,255,255,0.05)";
+const CITY_BUILDABLE_STROKE = "rgba(255,255,255,0.22)";
 const CITY_TEXT = "#ffffff";
 const CITY_SELECTION_STROKE = "#66ccff";
 const CITY_GHOST_VALID_STROKE = "#44ff44";
@@ -412,19 +415,42 @@ export function paintCastle(ctx: CanvasRenderingContext2D, node: CastleNode, dep
     drawWithDescriptor(ctx, r.drawable, r.descriptor, node.world.x, node.world.y, HEX_SIZE);
   }
   const { x: cx, y: cy } = node.world;
-  const radius = node.selected ? HEX_SIZE * 1.05 : HEX_SIZE * 0.95;
+  const ringY = cy + HEX_SIZE * 0.55;
+  if (node.selected) {
+    // Double ring = selected. Full alpha so it clearly out-weights the
+    // always-on ownership ring; white for neutrals, owner colour otherwise.
+    const ringColor = node.dashedBorder ? "rgba(255,255,255,0.9)" : node.color;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(cx, ringY, HEX_SIZE * 1.05, 0, Math.PI * 2);
+    ctx.strokeStyle = ringColor;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, ringY, HEX_SIZE * 1.18, 0, Math.PI * 2);
+    ctx.strokeStyle = ringColor;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    return;
+  }
   ctx.beginPath();
-  ctx.arc(cx, cy + HEX_SIZE * 0.55, radius, 0, Math.PI * 2);
+  ctx.arc(cx, ringY, HEX_SIZE * 0.95, 0, Math.PI * 2);
+  ctx.lineWidth = 2;
   if (node.dashedBorder) {
+    // Neutral settlements keep the faint dashed-white ring.
     ctx.strokeStyle = "rgba(255,255,255,0.18)";
     ctx.setLineDash([4, 4]);
-  } else {
-    ctx.strokeStyle = node.color;
+    ctx.stroke();
     ctx.setLineDash([]);
+  } else {
+    // Always-on ownership ring: dimmed so it stops reading as a selection.
+    ctx.strokeStyle = node.color;
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    ctx.stroke();
+    ctx.restore();
   }
-  ctx.lineWidth = node.selected ? 3 : 2;
-  ctx.stroke();
-  ctx.setLineDash([]);
+  void deps;
 }
 
 export function paintCharterOverlay(ctx: CanvasRenderingContext2D, node: CharterOverlayNode, deps: Paint2DDep): void {
@@ -502,17 +528,23 @@ export function paintTerritoryOutlineEdges(
 
 export function paintPathSegment(ctx: CanvasRenderingContext2D, node: PathSegmentNode, deps: Paint2DDep): void {
   if (node.points.length < 2) return;
-  const color = node.reachable ? "rgba(255, 204, 0, 0.85)" : "rgba(255, 204, 0, 0.30)";
-  ctx.lineWidth = node.reachable ? 4 : 3;
-  ctx.strokeStyle = color;
+  const color = node.reachable
+    ? "rgba(255, 204, 0, 0.85)"
+    : node.fogged
+    ? "rgba(255, 204, 0, 0.50)"
+    : "rgba(255, 204, 0, 0.30)";
+  const width = node.reachable ? 4 : 3;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.beginPath();
-  for (let i = 0; i < node.points.length; i++) {
-    const p = node.points[i];
-    if (i === 0) ctx.moveTo(p.x, p.y);
-    else ctx.lineTo(p.x, p.y);
+  if (node.fogged) {
+    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+    ctx.lineWidth = width + 2;
+    tracePoints(ctx, node.points);
+    ctx.stroke();
   }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  tracePoints(ctx, node.points);
   ctx.stroke();
   const dotRadius = node.reachable ? 6 : 4;
   const alpha = color.replace(/[\d.]+\)$/, "0.5)");
@@ -529,36 +561,47 @@ export function paintPathSegment(ctx: CanvasRenderingContext2D, node: PathSegmen
   void deps;
 }
 
+function tracePoints(ctx: CanvasRenderingContext2D, points: readonly WorldPoint[]): void {
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  }
+}
+
 export function paintHeroTrail(ctx: CanvasRenderingContext2D, node: HeroTrailNode, deps: Paint2DDep): void {
   if (node.points.length < 2) return;
   const color = node.color;
+  const n = node.points.length;
   ctx.save();
   ctx.fillStyle = color;
-  ctx.globalAlpha = 0.55;
-  for (let i = 1; i < node.points.length; i++) {
-    const p = node.points[i];
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 0.35;
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.beginPath();
-  for (let i = 0; i < node.points.length; i++) {
+  // Index-based fade: oldest point faintest, newest at full base alpha. The
+  // polyline is stroked per segment so the ramp applies to it too.
+  for (let i = 1; i < n; i++) {
+    const prev = node.points[i - 1];
     const p = node.points[i];
-    if (i === 0) ctx.moveTo(p.x, p.y);
-    else ctx.lineTo(p.x, p.y);
+    const ramp = 0.35 + 0.65 * (i / (n - 1 || 1));
+    ctx.globalAlpha = 0.55 * ramp;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.35 * ramp;
+    ctx.beginPath();
+    ctx.moveTo(prev.x, prev.y);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
   }
-  ctx.stroke();
   ctx.restore();
   void deps;
 }
 
 export function paintHoverHighlight(ctx: CanvasRenderingContext2D, node: HoverHighlightNode, deps: Paint2DDep): void {
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 2;
   ctx.strokeStyle = HOVER_STROKE;
   hexPath(ctx, node.world.x, node.world.y);
   ctx.stroke();
@@ -711,9 +754,16 @@ export function paintCityCell(ctx: CanvasRenderingContext2D, node: CityCellNode,
   ctx.closePath();
   ctx.fillStyle = CITY_CELL_FILL;
   ctx.fill();
+  if (node.buildable) {
+    ctx.fillStyle = CITY_BUILDABLE_FILL;
+    ctx.fill();
+  }
   if (node.hovered) {
     ctx.strokeStyle = CITY_HOVER_STROKE;
     ctx.lineWidth = 3;
+  } else if (node.buildable) {
+    ctx.strokeStyle = CITY_BUILDABLE_STROKE;
+    ctx.lineWidth = 1;
   } else {
     ctx.strokeStyle = CITY_CELL_STROKE;
     ctx.lineWidth = 1;

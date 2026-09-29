@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { GameMap } from "../../../src/map/gameMap";
 import type { Hero } from "../../../src/entities/hero";
 import { makeHero, makeState } from "../../charter/_helpers";
-import { resolveAdventureClick } from "../../../src/screens/adventure/clickIntent";
+import { clickRejectionToast, resolveAdventureClick } from "../../../src/screens/adventure/clickIntent";
 
 function stubHero(id: string, ownerId: number, q: number, r: number, movementRemaining = 10): Hero {
   return { id, ownerId, tile: { q, r }, movementRemaining } as unknown as Hero;
@@ -187,4 +187,34 @@ test("moving with no selection reports no selection", () => {
   assert.equal(intent.kind, "none");
   if (intent.kind !== "none") return;
   assert.equal(intent.reason, "no selection");
+});
+
+test("F9: every user-facing rejection reason maps to a toast, drags and off-map clicks stay silent", () => {
+  assert.deepEqual(clickRejectionToast("not_player_turn"), { message: "It's not your turn", kind: "info" });
+  assert.deepEqual(clickRejectionToast("no selection"), { message: "Select a hero first", kind: "info" });
+  assert.deepEqual(clickRejectionToast("no hero"), { message: "The selected hero no longer exists", kind: "error" });
+  assert.deepEqual(clickRejectionToast("empty path"), { message: "No path there", kind: "info" });
+  assert.deepEqual(clickRejectionToast("impassable first step"), { message: "No path there", kind: "info" });
+  assert.deepEqual(clickRejectionToast("no attack path"), { message: "No path there", kind: "info" });
+  assert.deepEqual(clickRejectionToast("charter_invalid"), { message: "Pick a highlighted hex for the new settlement", kind: "info" });
+  assert.equal(clickRejectionToast("movedDuringDrag"), null);
+  assert.equal(clickRejectionToast("no hover"), null);
+  assert.equal(clickRejectionToast("something new"), null);
+});
+
+test("F10: a clamped move intent's cost equals the detailed split's costToSplit clamped to remaining movement", () => {
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 0, 0, { movementRemaining: 1.5 })],
+    selectedHeroId: "h0",
+  });
+  const intent = resolve({ state, hover: { q: 4, r: 0 } });
+  assert.equal(intent.kind, "move");
+  if (intent.kind !== "move") return;
+  assert.equal(intent.clamped, true);
+  assert.equal(intent.reachableIdx, 2);
+  assert.equal(intent.cost, 1.5);
+  assert.deepEqual(intent.remainingPath, [
+    { q: 3, r: 0 },
+    { q: 4, r: 0 },
+  ]);
 });

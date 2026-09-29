@@ -10,6 +10,7 @@ import { controlledPositions, territoryBoundaryEdges } from "@heroes/engine";
 import type {
   SceneNode,
   HeroTrailNode,
+  PathSegmentNode,
   TerritoryOutlineEdgeNode,
   WorldPoint,
 } from "../types";
@@ -125,7 +126,7 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
     nodes.push(edge);
   }
 
-  for (const node of buildPathNodes(heroes, path, map, opts)) {
+  for (const node of buildPathNodes(heroes, path, map, opts, visible)) {
     nodes.push(node);
   }
 
@@ -245,16 +246,21 @@ function buildTerritoryOutlineEdges(
   return edges;
 }
 
-function buildPathNodes(heroes: Hero[], path: Axial[], map: GameMap, opts: RenderOptions): SceneNode[] {
+function buildPathNodes(heroes: Hero[], path: Axial[], map: GameMap, opts: RenderOptions, visible: Set<string>): SceneNode[] {
   if (path.length === 0 || heroes.length === 0) return [];
 
   const pathPx = path.map((t) => axialToPixel(t.q, t.r));
-  const originPx = opts.pathOrigin
-    ? axialToPixel(opts.pathOrigin.q, opts.pathOrigin.r)
-    : opts.selectedHeroTile
-    ? axialToPixel(opts.selectedHeroTile.q, opts.selectedHeroTile.r)
-    : axialToPixel(heroes[0].tile.q, heroes[0].tile.r);
+  const originTile = opts.pathOrigin ?? opts.selectedHeroTile ?? heroes[0].tile;
+  const originPx = axialToPixel(originTile.q, originTile.r);
   const fullPx = [originPx, ...pathPx];
+  // Per-point fog flags, aligned with fullPx: index 0 is the origin tile,
+  // index i >= 1 is path[i - 1]. A segment counts as fogged when ANY of the
+  // tiles it spans is fogged -- the split index itself is always the last
+  // reachable tile, so an "all fogged" rule would never fire on the dim tail.
+  const pointFog = [
+    !isVisible(visible, originTile.q, originTile.r),
+    ...path.map((t) => !isVisible(visible, t.q, t.r)),
+  ];
 
   const selectedHero = opts.selectedHeroId ? heroes.find((h) => h.id === opts.selectedHeroId) : heroes[0];
   const movementRemaining = selectedHero?.movementRemaining ?? 0;
@@ -266,12 +272,16 @@ function buildPathNodes(heroes: Hero[], path: Axial[], map: GameMap, opts: Rende
   const nodes: SceneNode[] = [];
   const reachable = slicePoints(fullPx, 0, splitIdx + 1);
   if (reachable.length >= 2) {
-    nodes.push({ kind: "pathSegment", reachable: true, points: reachable });
+    const reachableNode: PathSegmentNode = { kind: "pathSegment", reachable: true, points: reachable };
+    if (pointFog.slice(0, splitIdx + 1).some(Boolean)) reachableNode.fogged = true;
+    nodes.push(reachableNode);
   }
   if (splitIdx < path.length) {
     const unreachable = slicePoints(fullPx, splitIdx, pathPx.length);
     if (unreachable.length >= 2) {
-      nodes.push({ kind: "pathSegment", reachable: false, points: unreachable });
+      const unreachableNode: PathSegmentNode = { kind: "pathSegment", reachable: false, points: unreachable };
+      if (pointFog.slice(splitIdx, pathPx.length).some(Boolean)) unreachableNode.fogged = true;
+      nodes.push(unreachableNode);
     }
   }
 
@@ -280,7 +290,7 @@ function buildPathNodes(heroes: Hero[], path: Axial[], map: GameMap, opts: Rende
       kind: "heroTrail",
       heroId: selectedHero.id,
       color: opts.colorForOwner(selectedHero.ownerId),
-      points: selectedHero.trail.map((p) => axialToPixel(p.q, p.r)),
+      points: selectedHero.trail.slice(-25).map((p) => axialToPixel(p.q, p.r)),
     };
     nodes.push(trailNode);
   }

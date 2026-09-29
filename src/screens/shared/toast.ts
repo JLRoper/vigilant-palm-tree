@@ -17,6 +17,34 @@ const TOAST_Z_INDEX = 10_000;
 
 export type ToastKind = "error" | "info";
 
+const DEDUPE_WINDOW_MS = 1500;
+
+export interface ToastRecord {
+  message: string;
+  kind: ToastKind;
+  timestamp: number;
+}
+
+// Pure dedupe decision (F9): the same message+kind inside the window is a
+// repeat (click spam, per-frame rejection) and must refresh the existing
+// toast instead of stacking a new node. Unit-tested in
+// test/screens/shared/toastDedupe.test.ts without a DOM.
+export function isDuplicateToast(
+  last: ToastRecord | null,
+  message: string,
+  kind: ToastKind,
+  now: number,
+  dedupeWindowMs: number = DEDUPE_WINDOW_MS,
+): boolean {
+  if (!last) return false;
+  if (last.message !== message || last.kind !== kind) return false;
+  return now - last.timestamp < dedupeWindowMs;
+}
+
+let lastToast: ToastRecord | null = null;
+let lastToastEl: HTMLDivElement | null = null;
+let lastToastTimer: number | null = null;
+
 function getOrCreateContainer(): HTMLDivElement {
   const existing = document.getElementById(CONTAINER_ID);
   if (existing instanceof HTMLDivElement) return existing;
@@ -43,6 +71,18 @@ const KIND_STYLES: Record<ToastKind, { background: string; border: string }> = {
 };
 
 export function showToast(message: string, kind: ToastKind = "error", durationMs = DEFAULT_DURATION_MS): void {
+  const now = Date.now();
+  if (
+    isDuplicateToast(lastToast, message, kind, now) &&
+    lastToastEl &&
+    lastToastEl.isConnected
+  ) {
+    lastToast = { message, kind, timestamp: now };
+    if (lastToastTimer !== null) window.clearTimeout(lastToastTimer);
+    const el = lastToastEl;
+    lastToastTimer = window.setTimeout(() => el.remove(), durationMs);
+    return;
+  }
   const container = getOrCreateContainer();
   const toast = document.createElement("div");
   const style = KIND_STYLES[kind];
@@ -65,7 +105,9 @@ export function showToast(message: string, kind: ToastKind = "error", durationMs
   const dismiss = () => toast.remove();
   toast.addEventListener("click", dismiss);
   container.appendChild(toast);
-  window.setTimeout(dismiss, durationMs);
+  lastToast = { message, kind, timestamp: now };
+  lastToastEl = toast;
+  lastToastTimer = window.setTimeout(dismiss, durationMs);
 }
 
 export interface CommandFailureToastsHandle {

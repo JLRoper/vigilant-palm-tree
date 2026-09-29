@@ -279,3 +279,22 @@ test("exactly two labels: settlement name, then tier/style/pattern subtitle", ()
     alpha: 0.7,
   });
 });
+
+test("labelOffsetY shifts both labels below the fixed toolbar overlay (F16a)", () => {
+  const nodes = buildCityScene(baseInput({ labelOffsetY: 125 }));
+  const labels = nodesOfKind<CityLabelNode>(nodes, "cityLabel");
+  assert.equal(labels.length, 2);
+  assert.equal(labels[0].y, 137, "name label 12 + 125");
+  assert.equal(labels[1].y, 155, "subtitle label 30 + 125");
+  assert.equal(labels[0].x, 12, "x positions are untouched");
+});
+
+test("buildableCells flags exactly the free cells, keyed \"gx,gy\" (F16b)", () => {
+  const nodes = buildCityScene(baseInput({ buildableCells: new Set(["0,0", "2,3"]) }));
+  const cells = nodesOfKind<CityCellNode>(nodes, "cityCell");
+  const buildable = cells.filter((c) => c.buildable).map((c) => `${c.gx},${c.gy}`).sort();
+  assert.deepEqual(buildable, ["0,0", "2,3"]);
+
+  const none = buildCityScene(baseInput());
+  assert.ok(nodesOfKind<CityCellNode>(none, "cityCell").every((c) => !c.buildable), "no buildableCells input -> every cell unflagged");
+});
