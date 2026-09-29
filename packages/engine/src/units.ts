@@ -107,6 +107,9 @@ export function trimPlatoonsFromEnd(
 
 // Demo armies assigned to heroes on fresh game creation so the Hero Info menu
 // has real data to display. Keys are hero index -> player index (0 = human).
+// Seats beyond the two hand-written rows cycle the table deterministically
+// (seat i gets row i % 2) so every seat up to MAX_PLAYERS spawns a non-empty
+// starter army.
 export function demoPlatoonsForPlayer(playerIdx: number): Platoon[] {
   switch (playerIdx) {
     case 0:
@@ -120,7 +123,9 @@ export function demoPlatoonsForPlayer(playerIdx: number): Platoon[] {
         { entries: [{ unitTypeId: "crossbowman", count: 10 }] },
         { entries: [{ unitTypeId: "griffin", count: 3 }] },
       ];
-    default:
-      return [];
+    default: {
+      const row = demoPlatoonsForPlayer(Math.abs(playerIdx) % 2);
+      return row.map((p) => ({ entries: p.entries.map((e) => ({ ...e })) }));
+    }
   }
 }

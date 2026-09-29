@@ -707,7 +707,10 @@ test("AI tick moves the active AI hero, spends movement, persists via onAiMove w
 
 test("AI hero moving adjacent to an enemy enters BATTLE; after the loop's quick-resolve the AI turn resumes and completes", async () => {
   const initial = makeState({
-    heroes: [makeHero("h0", 0, 12, 10), makeHero("h1", 1, 10, 10)],
+    heroes: [
+      makeHero("h0", 0, 12, 10, { stacks: normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 5 }] }]) }),
+      makeHero("h1", 1, 10, 10),
+    ],
     activePlayerId: 1,
     phase: { kind: "AI_TURN", playerId: 1 },
   });
@@ -747,9 +750,44 @@ test("AI hero moving adjacent to an enemy enters BATTLE; after the loop's quick-
   assert.equal(endedState.activePlayerId, 1);
 });
 
+test("AI moving adjacent to a 0-troop enemy hero does NOT enter battle: the AI turn continues and completes", async () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 12, 10, { stacks: [] }), makeHero("h1", 1, 10, 10)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+
+  assert.equal(controller.getState().heroes["h1"]?.q, 11, "the move itself landed adjacent to the wiped hero");
+  const phase = controller.getState().phase;
+  assert.equal(phase.kind, "AI_TURN", "a zero-troop defender must not trigger the battle phase");
+  assert.equal(phase.kind === "AI_TURN" ? phase.playerId : null, 1);
+  assert.equal(endTurnSpy.mock.callCount(), 0, "the AI seat still holds its turn after the guarded move");
+
+  hooks.pickAiMove = (() => null) as TurnControllerHooks["pickAiMove"];
+  await settlePersist();
+  controller.tick(16);
+  await settlePersist();
+
+  assert.equal(endTurnSpy.mock.callCount(), 1, "the AI turn completes on the next tick with no battle in between");
+  const endedState = endTurnSpy.mock.calls[0]![0] as GameState;
+  assert.equal(endedState.activePlayerId, 1);
+  assert.equal(endedState.phase.kind, "AI_TURN");
+});
+
 test("resolveCurrentBattle holds onBattleResolved until the in-flight onAiMove persist settles (move-then-resolve ordering)", async () => {
   const initial = makeState({
-    heroes: [makeHero("h0", 0, 12, 10), makeHero("h1", 1, 10, 10)],
+    heroes: [
+      makeHero("h0", 0, 12, 10, { stacks: normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 5 }] }]) }),
+      makeHero("h1", 1, 10, 10),
+    ],
     activePlayerId: 1,
     phase: { kind: "AI_TURN", playerId: 1 },
   });
@@ -795,7 +833,10 @@ test("resolveCurrentBattle holds onBattleResolved until the in-flight onAiMove p
 
 test("ResolveBattle failure (hook returns no battle): no result surfaces, the battle phase clears, and the AI tick resumes", async () => {
   const initial = makeState({
-    heroes: [makeHero("h0", 0, 12, 10), makeHero("h1", 1, 10, 10)],
+    heroes: [
+      makeHero("h0", 0, 12, 10, { stacks: normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 5 }] }]) }),
+      makeHero("h1", 1, 10, 10),
+    ],
     activePlayerId: 1,
     phase: { kind: "AI_TURN", playerId: 1 },
   });

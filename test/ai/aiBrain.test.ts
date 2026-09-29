@@ -12,6 +12,11 @@ function garrisoned(settlement: ReturnType<typeof makeSettlement>): ReturnType<t
   return settlement;
 }
 
+function withTroops(hero: ReturnType<typeof makeHero>): ReturnType<typeof makeHero> {
+  hero.stacks = normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 5 }] }]);
+  return hero;
+}
+
 function grassMap(width: number, height: number): GameMap {
   const rows: TileRow[] = [];
   for (let r = 0; r < height; r++) {
@@ -45,7 +50,7 @@ test("an adjacent enemy is targeted: the step repositions beside it instead of o
     [2, 3, "grass"],
     [3, 3, "grass"],
   ]);
-  const state = aiTurnState([makeHero("h0", 0, 3, 2), makeHero("h1", 1, 2, 2)]);
+  const state = aiTurnState([withTroops(makeHero("h0", 0, 3, 2)), makeHero("h1", 1, 2, 2)]);
 
   const move = pickAiMove(state, "h1", map, () => 0.9);
 
@@ -58,7 +63,7 @@ test("an adjacent enemy is targeted: the step repositions beside it instead of o
 
 test("an enemy within reach is approached: the step closes distance instead of wandering", () => {
   const map = grassMap(8, 8);
-  const state = aiTurnState([makeHero("h0", 0, 5, 2), makeHero("h1", 1, 2, 2)]);
+  const state = aiTurnState([withTroops(makeHero("h0", 0, 5, 2)), makeHero("h1", 1, 2, 2)]);
 
   const move = pickAiMove(state, "h1", map, () => 0.9);
 
@@ -70,6 +75,23 @@ test("an enemy within reach is approached: the step closes distance instead of w
     "the step must close the distance to the enemy (3 -> 2)",
   );
   assert.notDeepEqual(move!.toTile, { q: 5, r: 2 }, "never steps onto the enemy tile");
+  assert.equal(move!.cost, 1);
+});
+
+test("a 0-troop enemy hero within reach is not targeted: the hero wanders instead of approaching", () => {
+  const map = grassMap(8, 8);
+  const wiped = makeHero("h0", 0, 5, 2, { stacks: [] });
+  const state = aiTurnState([wiped, makeHero("h1", 1, 2, 2)]);
+
+  const move = pickAiMove(state, "h1", map, () => 0.05);
+
+  assert.ok(move, "open map with movement left must produce a move");
+  assert.equal(
+    hexDistance(move!.toTile, { q: 5, r: 2 }),
+    4,
+    "the empty hero is no target: the wander dest (0,0) leads AWAY from it (3 -> 4; an approach would close 3 -> 2)",
+  );
+  assert.notDeepEqual(move!.toTile, { q: 5, r: 2 }, "never steps onto the empty hero's tile");
   assert.equal(move!.cost, 1);
 });
 
@@ -91,7 +113,7 @@ test("impassable and unreachable targets return null without crashing", () => {
     [3, 2, "water"],
     [4, 2, "water"],
   ]);
-  const state = aiTurnState([makeHero("h0", 0, 3, 2), makeHero("h1", 1, 2, 2)], [
+  const state = aiTurnState([withTroops(makeHero("h0", 0, 3, 2)), makeHero("h1", 1, 2, 2)], [
     makeSettlement("s2", null, 4, 2),
   ]);
 
@@ -113,7 +135,7 @@ test("a hero with no movement left returns null", () => {
 test("a garrisoned enemy settlement is never a step: the approach routes around it", () => {
   const map = grassMap(8, 8);
   const state = aiTurnState(
-    [makeHero("h0", 0, 5, 2), makeHero("h1", 1, 2, 2)],
+    [withTroops(makeHero("h0", 0, 5, 2)), makeHero("h1", 1, 2, 2)],
     [garrisoned(makeSettlement("s0", 0, 3, 2))],
   );
 

@@ -36,7 +36,7 @@ import {
 } from "./gameState";
 import { findPath } from "../map/pathfinding";
 import { hexDistance } from "../core/hex";
-import { platoonsHaveTroops, settlementStacks } from "./units";
+import { platoonsHaveTroops, platoonTroopTotal, settlementStacks } from "./units";
 import type { GameMap } from "../map/gameMap";
 import { computeSettlementRates, generateCitySpots, cityViewSizeFor } from "@heroes/engine";
 import { settings, type HorseVariant } from "./settings";
@@ -1000,7 +1000,7 @@ export class TurnController {
       // resolveCurrentBattle re-maps the phase back to AI_TURN so the next
       // tick resumes (or ends) the turn.
       const defenderId = detectAdjacentEnemyFn(this.state, heroId);
-      if (defenderId) {
+      if (defenderId && platoonTroopTotal(this.state.heroes[defenderId]?.stacks ?? []) > 0) {
         this.enterBattle(heroId, defenderId);
       }
       this.aiAwaitingPersist = true;

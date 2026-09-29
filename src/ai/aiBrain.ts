@@ -2,7 +2,7 @@ import { Axial, hexDistance } from "../core/hex";
 import { findPath, NEIGHBOR_DIRS } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
 import type { GameState, HeroState } from "@heroes/contracts";
-import { platoonsHaveTroops, settlementStacks } from "@heroes/engine";
+import { platoonTroopTotal, platoonsHaveTroops, settlementStacks } from "@heroes/engine";
 import { TERRAIN_COST } from "../map/terrain";
 
 export interface AiMove {
@@ -49,6 +49,7 @@ export function pickAiMove(
   for (const [otherId, otherHero] of Object.entries(state.heroes)) {
     if (otherId === heroId) continue;
     if (otherHero.ownerId === hero.ownerId) continue;
+    if (platoonTroopTotal(otherHero.stacks) === 0) continue;
     const dist = hexDistance(hero, otherHero);
     if (dist > ENEMY_REACH) continue;
     targets.push({ kind: "enemy", tile: { q: otherHero.q, r: otherHero.r }, priority: 1000 - dist * 10 });

@@ -4,12 +4,22 @@ import {
   GameMap,
   MAX_PLAYERS,
   buildInitialGameState,
+  createInitialState,
+  demoPlatoonsForPlayer,
   makeInitialStatePayload,
   mulberry32,
 } from "@heroes/engine";
 
 function build(opts?: Parameters<typeof buildInitialGameState>[2]) {
   return buildInitialGameState(new GameMap(7, "small"), mulberry32(42), opts);
+}
+
+function troopSumOf(hero: { stacks: { entries: { count: number }[] }[] } | undefined): number {
+  if (!hero) return 0;
+  return hero.stacks.reduce(
+    (sum, platoon) => sum + platoon.entries.reduce((s, e) => s + e.count, 0),
+    0,
+  );
 }
 
 function settlementsOwnedBy(state: ReturnType<typeof build>, ownerId: number): string[] {
@@ -109,4 +119,56 @@ test("non-finite enemyCount falls back to legacy behavior", () => {
   const legacy = build();
   const nan = build({ enemyCount: NaN });
   assert.deepEqual(nan, legacy);
+});
+
+test("every spawned hero across 1 human + 3 AI seats has a non-empty starter army", () => {
+  const state = build({ enemyCount: 3, humanSeatCount: 1 });
+  assert.equal(state.players.length, 4);
+  for (const p of state.players) {
+    const hero = state.heroes[p.heroIds[0]];
+    assert.ok(hero, `player ${p.id} has a hero`);
+    const sum = troopSumOf(hero);
+    assert.ok(sum > 0, `player ${p.id} (seat ${p.id}) spawns with troops, got ${sum}`);
+    assert.equal(hero.troops, sum, `player ${p.id} troops field matches platoon sum`);
+    assert.ok(
+      hero.stacks.some((pl) => pl.entries.some((e) => e.count > 0)),
+      `player ${p.id} has at least one non-empty platoon`,
+    );
+  }
+});
+
+test("seat 2 (the regression) spawns with the cycled seat-0 composition: 24 troops", () => {
+  const state = build({ enemyCount: 2, humanSeatCount: 1 });
+  const h2 = state.heroes["p2-hero"];
+  assert.ok(h2);
+  assert.equal(h2.troops, 24);
+  assert.deepEqual(troopSumOf(h2), 24);
+  assert.deepEqual(
+    h2.stacks.filter((pl) => pl.entries.length > 0).map((pl) => pl.entries.map((e) => e.unitTypeId)),
+    [["swordsman"], ["archer"], ["cavalry"]],
+  );
+});
+
+test("demoPlatoonsForPlayer cycles deterministically for every seat up to MAX_PLAYERS", () => {
+  for (let i = 0; i < MAX_PLAYERS; i++) {
+    const platoons = demoPlatoonsForPlayer(i);
+    assert.ok(
+      platoons.some((pl) => pl.entries.some((e) => e.count > 0)),
+      `seat ${i} gets a non-empty demo army`,
+    );
+    const expected = demoPlatoonsForPlayer(i % 2);
+    assert.deepEqual(
+      platoons.map((pl) => pl.entries),
+      expected.map((pl) => pl.entries),
+      `seat ${i} matches the cycled composition of seat ${i % 2}`,
+    );
+  }
+});
+
+test("legacy default hero fixtures keep their exact starter armies", () => {
+  const state = createInitialState();
+  assert.equal(state.heroes["h0"].troops, 24);
+  assert.equal(state.heroes["h1"].troops, 13);
+  assert.equal(troopSumOf(state.heroes["h0"]), 24);
+  assert.equal(troopSumOf(state.heroes["h1"]), 13);
 });

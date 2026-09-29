@@ -6,5 +6,6 @@ export {
   MAX_PLATOON_ENTRIES,
   normalizePlatoons,
   platoonsHaveTroops,
+  platoonTroopTotal,
   settlementStacks,
 } from "@heroes/engine";
