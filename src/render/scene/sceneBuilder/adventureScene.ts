@@ -247,10 +247,16 @@ function buildTerritoryOutlineEdges(
 }
 
 function buildPathNodes(heroes: Hero[], path: Axial[], map: GameMap, opts: RenderOptions, visible: Set<string>): SceneNode[] {
-  if (path.length === 0 || heroes.length === 0) return [];
+  // Path preview and trail render only for the local viewer's OWN selected
+  // hero: a foreign selection (e.g. leaked through a turn hand-off) would
+  // draw a bright-gold route from a fog-hidden hero's tile, revealing its
+  // position. No selection (or a hero the mirror no longer carries) means no
+  // path/trail nodes at all.
+  const selectedHero = opts.selectedHeroId ? heroes.find((h) => h.id === opts.selectedHeroId) : undefined;
+  if (!selectedHero || selectedHero.ownerId !== opts.viewPlayerId || path.length === 0) return [];
 
   const pathPx = path.map((t) => axialToPixel(t.q, t.r));
-  const originTile = opts.pathOrigin ?? opts.selectedHeroTile ?? heroes[0].tile;
+  const originTile = opts.pathOrigin ?? opts.selectedHeroTile ?? { q: selectedHero.tile.q, r: selectedHero.tile.r };
   const originPx = axialToPixel(originTile.q, originTile.r);
   const fullPx = [originPx, ...pathPx];
   // Per-point fog flags, aligned with fullPx: index 0 is the origin tile,
@@ -262,10 +268,8 @@ function buildPathNodes(heroes: Hero[], path: Axial[], map: GameMap, opts: Rende
     ...path.map((t) => !isVisible(visible, t.q, t.r)),
   ];
 
-  const selectedHero = opts.selectedHeroId ? heroes.find((h) => h.id === opts.selectedHeroId) : heroes[0];
-  const movementRemaining = selectedHero?.movementRemaining ?? 0;
   const splitIdx = Math.min(
-    opts.pathReachableIdx ?? computeReachableSplit(path, map, movementRemaining),
+    opts.pathReachableIdx ?? computeReachableSplit(path, map, selectedHero.movementRemaining),
     path.length,
   );
 
@@ -285,7 +289,7 @@ function buildPathNodes(heroes: Hero[], path: Axial[], map: GameMap, opts: Rende
     }
   }
 
-  if (selectedHero && selectedHero.trail.length >= 2) {
+  if (selectedHero.trail.length >= 2) {
     const trailNode: HeroTrailNode = {
       kind: "heroTrail",
       heroId: selectedHero.id,

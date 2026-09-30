@@ -38,6 +38,11 @@ export function getCachedUnit(id: string | null): UnitType | null {
   return cache.get(id) ?? null;
 }
 
+export function cachedUnitTypes(): Record<string, UnitType> {
+  if (!cache) return {};
+  return Object.fromEntries(cache);
+}
+
 export function catalogReady(): boolean {
   return cache !== null;
 }

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { TurnController, type TurnControllerHooks } from "../../src/state/turnController";
+import { TurnController, createAiTurnMemory, type AiTurnMemory, type TurnControllerHooks } from "../../src/state/turnController";
+import { GameStateManager } from "../../src/managers/GameStateManager";
 import { mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../../src/game/turnHooks";
 import { emptyWarehouse, makeCharter, makeHero, makeSettlement, makeState } from "../charter/_helpers";
 import { cleanupDefeatedHeroCharters, normalizePlatoons, relocateHeroToSettlement } from "@heroes/engine";
@@ -722,6 +723,53 @@ test("AI tick moves the active AI hero, spends movement, persists via onAiMove w
   const endedState = endTurnSpy.mock.calls[0]![0] as GameState;
   assert.equal(endedState.activePlayerId, 1, "the AI seat ends its own turn");
   assert.equal(endedState.phase.kind, "AI_TURN");
+});
+
+test("AI tick's selection override never leaks: a prior human selection survives the AI turn", async () => {
+  const initial = makeState({
+    selectedHeroId: "h0",
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 18, r: 5 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+
+  const controller = new TurnController(initial, hooks);
+  controller.tick(16);
+
+  assert.equal(controller.getState().heroes["h1"]?.q, 18, "the move itself landed");
+  assert.equal(
+    controller.getState().selectedHeroId,
+    "h0",
+    "the pre-AI human selection must not be replaced by the AI hero the reducer was tricked into accepting",
+  );
+
+  await settlePersist();
+  controller.tick(16);
+  hooks.pickAiMove = (() => null) as TurnControllerHooks["pickAiMove"];
+  controller.tick(16);
+  await settlePersist();
+
+  assert.equal(controller.getState().selectedHeroId, "h0", "the human selection is still intact after the AI turn completes");
+});
+
+test("AI tick with no prior selection leaves selectedHeroId null after the move", async () => {
+  const initial = makeState({
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 18, r: 5 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+
+  const controller = new TurnController(initial, hooks);
+  controller.tick(16);
+
+  assert.equal(controller.getState().heroes["h1"]?.q, 18);
+  assert.equal(controller.getState().selectedHeroId, null, "the not_selected-gate override must not leak the AI hero as selected");
 });
 
 test("AI hero moving adjacent to an enemy enters BATTLE; after the loop's quick-resolve the AI turn resumes and completes", async () => {
@@ -1636,4 +1684,497 @@ test("resolveSettlementBattle without a unit catalog bounces the attacker instea
   assert.equal(after.heroes["h1"]?.q, 10, "the attacker is bounced back to its pre-battle tile");
   assert.equal(after.settlements["s0"]?.ownerId, 0, "no capture without a resolution");
   assert.equal(after.phase.kind, "AI_TURN", "the phase clears so the tick can resume");
+});
+
+test("a rejected AI move persist rolls the walk-in back, cancels the battle it opened, submits nothing, and the turn still ends server-visibly", async () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 2, 2, { stacks: [] }),
+      makeHero("h1", 1, 10, 10, { stacks: stackOf("champ", 15) }),
+    ],
+    settlements: [garrisonedAt("s0", 0, 11, 10, "trash", 1)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  hooks.getMap = stubOpenMap();
+  hooks.pickAiMove = (() => ({ toTile: { q: 11, r: 10 }, cost: 1 })) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.reject(new Error("hero_not_at_fromTile"))) as TurnControllerHooks["onAiMove"];
+  let submitted = 0;
+  hooks.onSettlementBattleSubmitted = async () => {
+    submitted += 1;
+  };
+  const logs: { type: string; payload: Record<string, unknown> }[] = [];
+  hooks.logEvent = (event) => {
+    logs.push(event);
+  };
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  assert.equal(controller.getState().phase.kind, "SETTLEMENT_BATTLE", "the walk-in opens the assault optimistically");
+  assert.equal(controller.getState().heroes["h1"]?.q, 11, "the optimistic move put the hero on the settlement");
+
+  await settlePersist();
+
+  const after = controller.getState();
+  assert.equal(after.phase.kind, "AI_TURN", "the battle opened behind the failed persist is cancelled");
+  assert.equal(after.heroes["h1"]?.q, 10, "the optimistic move is un-walked back to the server's tile");
+  assert.equal(after.heroes["h1"]?.r, 10);
+  assert.equal(
+    after.heroes["h1"]?.movementRemaining,
+    MOVEMENT_PER_TURN,
+    "the spent movement is restored so the tick can re-plan",
+  );
+  assert.ok(
+    logs.some((l) => l.type === "ai_move_persist_failed"),
+    "the rollback is visible in the event log",
+  );
+  assert.equal(await controller.resolveSettlementBattle(BATTLE_UNIT_TYPES), null, "no resolution runs against the phantom position");
+  assert.equal(submitted, 0, "no battle result is POSTed for the cancelled battle");
+
+  hooks.pickAiMove = (() => null) as TurnControllerHooks["pickAiMove"];
+  controller.tick(16);
+  await settlePersist();
+  assert.equal(getEndTurnSpy(hooks).mock.callCount(), 1, "the turn still ends (the EndTurn POST is attempted) after the rollback");
+});
+
+test("resolveSettlementBattle gates the next AI move until the battle submit settles", async () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 2, 2, { stacks: [] }),
+      makeHero("h1", 1, 10, 10, { stacks: stackOf("wall", 5) }),
+    ],
+    settlements: [garrisonedAt("s0", 0, 11, 10, "wall", 5)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  hooks.getMap = stubOpenMap();
+  const pickCalls: number[] = [];
+  hooks.pickAiMove = (() => {
+    pickCalls.push(pickCalls.length);
+    return { toTile: { q: 11, r: 10 }, cost: 1 };
+  }) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  const order: string[] = [];
+  const submitPost = deferred<void>();
+  hooks.onSettlementBattleSubmitted = async () => {
+    order.push("submit");
+    await submitPost.promise;
+  };
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  assert.equal(controller.getState().phase.kind, "SETTLEMENT_BATTLE");
+
+  const resolutionPromise = controller.resolveSettlementBattle(BATTLE_UNIT_TYPES);
+  await settlePersist();
+  assert.deepEqual(order, ["submit"], "the submit fired but has not settled");
+  assert.equal(pickCalls.length, 1, "no further move was planned while the submit is in flight");
+
+  controller.tick(16);
+  assert.equal(pickCalls.length, 1, "the tick is gated (aiAwaitingPersist) until the submit settles");
+
+  submitPost.resolve();
+  const resolution = await resolutionPromise;
+  await settlePersist();
+  assert.equal(resolution?.outcome, "draw", "the walled garrison holds (draw -> bounced attacker, movement restored)");
+
+  hooks.pickAiMove = (() => {
+    pickCalls.push(pickCalls.length);
+    return { toTile: { q: 18, r: 4 }, cost: 1 };
+  }) as TurnControllerHooks["pickAiMove"];
+  controller.tick(16);
+  assert.equal(pickCalls.length, 2, "the tick resumes once the submit settled");
+});
+
+test("cancelSettlementBattle ends the phase with the hero on the tile, the garrison intact, and nothing submitted", () => {
+  const s1 = makeSettlement("s1", 1, 2, 2);
+  s1.stacks = normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 5 }] }]);
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 2, 2)],
+    settlements: [makeSettlement("s0", 0, 18, 4), s1],
+  });
+  const hooks = buildHooks(initial);
+  let submitted = 0;
+  hooks.onSettlementBattleSubmitted = async () => {
+    submitted += 1;
+  };
+  const controller = new TurnController(initial, hooks);
+
+  controller.selectHero("h0");
+  assert.equal(controller.getState().phase.kind, "SETTLEMENT_BATTLE");
+
+  assert.equal(controller.cancelSettlementBattle(), true);
+  const after = controller.getState();
+  assert.equal(after.phase.kind, "PLAYER_TURN", "the phase ends without resolving or submitting anything");
+  assert.equal(after.heroes["h0"]?.q, 2, "the hero stays standing on the settlement tile");
+  assert.equal(after.heroes["h0"]?.r, 2);
+  assert.equal(
+    after.heroes["h0"]?.movementRemaining,
+    MOVEMENT_PER_TURN,
+    "the already-persisted walk-in move is not rolled back",
+  );
+  assert.equal(after.settlements["s1"]?.ownerId, 1, "no capture");
+  assert.deepEqual(
+    after.settlements["s1"]?.stacks?.[0]?.entries,
+    [{ unitTypeId: "swordsman", count: 5 }],
+    "the garrison is untouched",
+  );
+  assert.equal(after.selectedHeroId, "h0", "the hero selection survives the cancel");
+  assert.equal(submitted, 0, "no battle result is POSTed");
+
+  controller.selectHero("h0");
+  assert.equal(
+    controller.getState().phase.kind,
+    "SETTLEMENT_BATTLE",
+    "re-selecting the hero re-runs tryCaptureAt and re-opens the assault flow",
+  );
+});
+
+test("cancelSettlementBattle is a no-op outside SETTLEMENT_BATTLE", () => {
+  const initial = makeState();
+  const controller = new TurnController(initial, buildHooks(initial));
+  assert.equal(controller.cancelSettlementBattle(), false);
+  assert.equal(controller.getState(), initial);
+});
+
+// ---------------------------------------------------------------------------
+// B1: AI garrison recruitment through the existing RecruitUnits command path
+// ---------------------------------------------------------------------------
+
+function aiTown(gold: number, buildings: Array<{ gx: number; gy: number; kind: "farmhouse" | "barracks"; level: number }>) {
+  return makeSettlement("s1", 1, 18, 4, {
+    gold,
+    buildings: buildings.map((b) => ({ ...b, style: "classic" as const })),
+  });
+}
+
+function aiRecruitState(town: ReturnType<typeof makeSettlement>, heroOverrides: { movementRemaining?: number } = {}) {
+  return makeState({
+    heroes: [makeHero("h0", 0, 2, 2), makeHero("h1", 1, 10, 10, heroOverrides)],
+    settlements: [makeSettlement("s0", 0, 2, 2), town],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+}
+
+test("B1: the AI tick submits RecruitUnits with the AI seat as actor; the garrison grows and gold drops", async () => {
+  const initial = aiRecruitState(aiTown(500, [{ gx: 2, gy: 2, kind: "farmhouse", level: 1 }]), { movementRemaining: 0 });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  const recruitCalls: unknown[][] = [];
+  hooks.onRecruitUnits = ((...args: unknown[]) => {
+    recruitCalls.push(args);
+    return Promise.resolve();
+  }) as TurnControllerHooks["onRecruitUnits"];
+  hooks.pickGarrisonRecruitment = () => [
+    { settlementId: "s1", buildingKind: "farmhouse", gx: 2, gy: 2, unitTypeId: "peasant", count: 2 },
+  ];
+  backoffRoundAdvance(hooks);
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  await settlePersist();
+
+  const town = controller.getState().settlements["s1"];
+  assert.deepEqual(town?.stacks?.[0]?.entries, [{ unitTypeId: "peasant", count: 2 }], "the optimistic garrison deposit applied locally");
+  assert.equal(town?.gold, 450, "2 peasants at 25g each were paid from the settlement treasury");
+  assert.deepEqual(recruitCalls[0], [1, "s1", "farmhouse", 2, 2, "peasant", 2], "onRecruitUnits fired with the AI seat as actor");
+  assert.equal(endTurnSpy.mock.callCount(), 1, "the recruit command was drained before the turn ended");
+});
+
+test("B1: recruitment runs once per AI turn -- repeated ticks don't re-recruit, the next round does", async () => {
+  const initial = aiRecruitState(aiTown(500, [{ gx: 2, gy: 2, kind: "farmhouse", level: 1 }]));
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  let recruitSubmissions = 0;
+  hooks.onRecruitUnits = (() => {
+    recruitSubmissions += 1;
+    return Promise.resolve();
+  }) as TurnControllerHooks["onRecruitUnits"];
+  hooks.pickGarrisonRecruitment = () => [
+    { settlementId: "s1", buildingKind: "farmhouse", gx: 2, gy: 2, unitTypeId: "peasant", count: 1 },
+  ];
+  let pickCalls = 0;
+  hooks.pickAiMove = (() => (pickCalls++ === 0 ? { toTile: { q: 11, r: 10 }, cost: 1 } : null)) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  hooks.getMap = stubOpenMap();
+  backoffRoundAdvance(hooks);
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  assert.equal(recruitSubmissions, 1, "the turn's first tick recruits");
+  await settlePersist();
+
+  controller.tick(16);
+  await settlePersist();
+  assert.equal(recruitSubmissions, 1, "the same round+seat never re-recruits");
+  assert.equal(endTurnSpy.mock.callCount(), 1, "the round-1 turn completed");
+
+  controller.tick(16);
+  await settlePersist();
+  assert.equal(recruitSubmissions, 2, "a new round recruits again");
+  assert.equal(controller.getState().settlements["s1"]?.gold, 450, "two rounds of 1-peasant recruits at 25g each");
+});
+
+test("B1: rejected recruit entries log and continue -- the AI turn still completes", async () => {
+  const initial = aiRecruitState(aiTown(500, [{ gx: 2, gy: 2, kind: "farmhouse", level: 1 }]), { movementRemaining: 0 });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  const rejections: Array<Record<string, unknown>> = [];
+  hooks.logEvent = (event) => {
+    if (event.type === "ai_garrison_recruit_rejected") rejections.push(event.payload);
+  };
+  let submitted = 0;
+  hooks.onRecruitUnits = (() => {
+    submitted += 1;
+    return Promise.resolve();
+  }) as TurnControllerHooks["onRecruitUnits"];
+  hooks.pickGarrisonRecruitment = () => [
+    { settlementId: "s1", buildingKind: "barracks", gx: 9, gy: 9, unitTypeId: "swordsman", count: 1 },
+    { settlementId: "sX", buildingKind: "farmhouse", gx: 2, gy: 2, unitTypeId: "peasant", count: 1 },
+  ];
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  await settlePersist();
+
+  assert.equal(submitted, 0, "neither rejected entry reached the command hook");
+  assert.equal(rejections.length, 2, "each rejection is logged with its item");
+  assert.deepEqual(rejections[0], { seat: 1, settlementId: "s1", unitTypeId: "swordsman", count: 1 });
+  assert.equal(endTurnSpy.mock.callCount(), 1, "the AI turn completes despite both rejections");
+});
+
+// ---------------------------------------------------------------------------
+// I1: AI re-attack backoff
+// ---------------------------------------------------------------------------
+
+function backoffRoundAdvance(hooks: TurnControllerHooks): void {
+  const inner = hooks.onHumanTurnEnd;
+  hooks.onHumanTurnEnd = async (s: GameState): Promise<GameState> => {
+    void inner(s);
+    return {
+      ...s,
+      round: s.round + 1,
+      activePlayerId: 1,
+      phase: { kind: "AI_TURN", playerId: 1 },
+    };
+  };
+}
+
+test("I1: a drawn garrison assault excludes the settlement for the backoff window, then expires", async () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 2, 2, { stacks: [] }),
+      makeHero("h1", 1, 10, 10, { stacks: stackOf("wall", 5) }),
+    ],
+    settlements: [garrisonedAt("s0", 0, 11, 10, "wall", 5)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+    round: 5,
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  hooks.getMap = stubOpenMap();
+  const exclusionsByTick: Array<ReadonlySet<string>> = [];
+  let moving = true;
+  hooks.pickAiMove = ((_state: GameState, _heroId: HeroId, excluded?: ReadonlySet<string>) => {
+    exclusionsByTick.push(excluded ?? new Set<string>());
+    return moving ? { toTile: { q: 11, r: 10 }, cost: 1 } : null;
+  }) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  hooks.onSettlementBattleSubmitted = async () => {};
+  backoffRoundAdvance(hooks);
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  assert.equal(controller.getState().phase.kind, "SETTLEMENT_BATTLE", "the walk-in opened the assault");
+  const resolution = await controller.resolveSettlementBattle(BATTLE_UNIT_TYPES);
+  assert.equal(resolution!.outcome, "draw", "walls vs walls grind to the cap: the garrison held");
+
+  moving = false;
+  await settlePersist();
+  controller.tick(16);
+  await settlePersist();
+  controller.tick(16);
+  await settlePersist();
+  controller.tick(16);
+  await settlePersist();
+
+  assert.deepEqual(exclusionsByTick[0], new Set(), "the attacking tick itself has no exclusions yet");
+  assert.deepEqual(exclusionsByTick[1], new Set(["s0"]), "the tick after the bounce excludes the settlement (recorded round 5, expiry 7)");
+  assert.deepEqual(exclusionsByTick[2], new Set(["s0"]), "round 6 is still inside the window");
+  assert.deepEqual(exclusionsByTick[3], new Set(), "round 7 = expiry: the settlement is targetable again");
+  assert.equal(endTurnSpy.mock.callCount(), 3, "every post-battle tick ended its turn cleanly");
+});
+
+test("I1: a won settlement battle creates no backoff entry", async () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 2, 2, { stacks: [] }),
+      makeHero("h1", 1, 10, 10, { stacks: stackOf("champ", 15) }),
+    ],
+    settlements: [garrisonedAt("s0", 0, 11, 10, "trash", 1)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+    round: 5,
+  });
+  const hooks = buildHooks(initial);
+  hooks.getMap = stubOpenMap();
+  const exclusionsByTick: Array<ReadonlySet<string>> = [];
+  let moving = true;
+  hooks.pickAiMove = ((_state: GameState, _heroId: HeroId, excluded?: ReadonlySet<string>) => {
+    exclusionsByTick.push(excluded ?? new Set<string>());
+    return moving ? { toTile: { q: 11, r: 10 }, cost: 1 } : null;
+  }) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  hooks.onSettlementBattleSubmitted = async () => {};
+  backoffRoundAdvance(hooks);
+
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true });
+  controller.tick(16);
+  const resolution = await controller.resolveSettlementBattle(BATTLE_UNIT_TYPES);
+
+  assert.equal(resolution!.outcome, "attackerWon");
+  assert.equal(controller.getState().settlements["s0"]?.ownerId, 1, "the win captured the settlement");
+
+  moving = false;
+  await settlePersist();
+  controller.tick(16);
+  await settlePersist();
+
+  assert.deepEqual(exclusionsByTick[1], new Set(), "a win never backs off: the next tick has no exclusions");
+});
+
+test("I1: a human-attacker settlement battle resolution never records a backoff entry", async () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 10, 10, { stacks: stackOf("wall", 5) }), makeHero("h1", 1, 18, 4)],
+    settlements: [garrisonedAt("s1", 1, 11, 10, "wall", 5)],
+    selectedHeroId: "h0",
+  });
+  const hooks = buildHooks(initial);
+  hooks.onSettlementBattleSubmitted = async () => {};
+  const controller = new TurnController(initial, hooks);
+  (controller as unknown as { state: GameState }).state = {
+    ...initial,
+    phase: { kind: "SETTLEMENT_BATTLE", attackerId: "h0", settlementId: "s1" },
+  };
+
+  const resolution = await controller.resolveSettlementBattle(BATTLE_UNIT_TYPES);
+
+  assert.equal(resolution!.outcome, "draw", "walls vs walls: the assault bounced");
+  assert.equal(
+    (controller as unknown as { aiMemory: AiTurnMemory }).aiMemory.garrisonBackoff.size,
+    0,
+    "human attackers never enter the backoff map",
+  );
+});
+
+test("I1: the backoff survives a controller rebuild on a shared AiTurnMemory (the replaceState path)", async () => {
+  const initial = makeState({
+    heroes: [
+      makeHero("h0", 0, 2, 2, { stacks: [] }),
+      makeHero("h1", 1, 10, 10, { stacks: stackOf("wall", 5) }),
+    ],
+    settlements: [garrisonedAt("s0", 0, 11, 10, "wall", 5)],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+    round: 5,
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  hooks.getMap = stubOpenMap();
+  const exclusionsByTick: Array<ReadonlySet<string>> = [];
+  let moving = true;
+  hooks.pickAiMove = ((_state: GameState, _heroId: HeroId, excluded?: ReadonlySet<string>) => {
+    exclusionsByTick.push(excluded ?? new Set<string>());
+    return moving ? { toTile: { q: 11, r: 10 }, cost: 1 } : null;
+  }) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  hooks.onSettlementBattleSubmitted = async () => {};
+  backoffRoundAdvance(hooks);
+
+  const memory = createAiTurnMemory();
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true, aiMemory: memory });
+  controller.tick(16);
+  assert.equal(controller.getState().phase.kind, "SETTLEMENT_BATTLE", "the walk-in opened the assault");
+  const resolution = await controller.resolveSettlementBattle(BATTLE_UNIT_TYPES);
+  assert.equal(resolution!.outcome, "draw", "walls vs walls grind to the cap: the garrison held");
+
+  const rebuilt = new TurnController(controller.getState(), hooks, {
+    isPrimaryActor: () => true,
+    aiMemory: memory,
+  });
+  assert.equal(
+    (rebuilt as unknown as { aiMemory: AiTurnMemory }).aiMemory,
+    memory,
+    "the rebuilt controller holds the same memory instance",
+  );
+
+  moving = false;
+  await settlePersist();
+  rebuilt.tick(16);
+  await settlePersist();
+  rebuilt.tick(16);
+  await settlePersist();
+  rebuilt.tick(16);
+  await settlePersist();
+
+  assert.deepEqual(exclusionsByTick[1], new Set(["s0"]), "the REBUILT controller still excludes the settlement inside the window");
+  assert.deepEqual(exclusionsByTick[2], new Set(["s0"]), "round 6 is still inside the window");
+  assert.deepEqual(exclusionsByTick[3], new Set(), "round 7 = expiry: targetable again after the rebuild");
+  assert.equal(endTurnSpy.mock.callCount(), 3, "every post-battle tick ended its turn cleanly");
+});
+
+test("B1: the once-per-turn recruit guard survives a controller rebuild on a shared AiTurnMemory", async () => {
+  const initial = aiRecruitState(aiTown(500, [{ gx: 2, gy: 2, kind: "farmhouse", level: 1 }]));
+  const hooks = buildHooks(initial);
+  let recruitSubmissions = 0;
+  hooks.onRecruitUnits = (() => {
+    recruitSubmissions += 1;
+    return Promise.resolve();
+  }) as TurnControllerHooks["onRecruitUnits"];
+  hooks.pickGarrisonRecruitment = () => [
+    { settlementId: "s1", buildingKind: "farmhouse", gx: 2, gy: 2, unitTypeId: "peasant", count: 1 },
+  ];
+  let pickCalls = 0;
+  hooks.pickAiMove = (() => (pickCalls++ === 0 ? { toTile: { q: 11, r: 10 }, cost: 1 } : null)) as TurnControllerHooks["pickAiMove"];
+  hooks.onAiMove = (() => Promise.resolve()) as TurnControllerHooks["onAiMove"];
+  hooks.getMap = stubOpenMap();
+  backoffRoundAdvance(hooks);
+
+  const memory = createAiTurnMemory();
+  const controller = new TurnController(initial, hooks, { isPrimaryActor: () => true, aiMemory: memory });
+  controller.tick(16);
+  assert.equal(recruitSubmissions, 1, "the turn's first tick recruits");
+  await settlePersist();
+
+  const rebuilt = new TurnController(controller.getState(), hooks, {
+    isPrimaryActor: () => true,
+    aiMemory: memory,
+  });
+  rebuilt.tick(16);
+  await settlePersist();
+  assert.equal(recruitSubmissions, 1, "the rebuilt controller still honors the same round+seat guard");
+
+  rebuilt.tick(16);
+  await settlePersist();
+  assert.equal(recruitSubmissions, 2, "a new round recruits again through the rebuilt controller");
+});
+
+test("GameStateManager threads one AiTurnMemory across setState/replaceState; resetAiTurnMemory installs a fresh one", () => {
+  const manager = new GameStateManager();
+  const peek = (c: TurnController) => (c as unknown as { aiMemory: AiTurnMemory }).aiMemory;
+
+  manager.setState(makeState());
+  const first = peek(manager.getTurnController());
+  manager.replaceState(makeState());
+  const second = peek(manager.getTurnController());
+  assert.equal(second, first, "replaceState carries the same memory into the rebuilt controller");
+
+  manager.resetAiTurnMemory();
+  manager.replaceState(makeState());
+  const third = peek(manager.getTurnController());
+  assert.notEqual(third, first, "a game-session reset installs a fresh memory");
 });

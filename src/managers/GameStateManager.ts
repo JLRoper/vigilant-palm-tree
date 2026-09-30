@@ -3,7 +3,7 @@ import { Hero } from "../entities/hero";
 import { Castle } from "../entities/settlement";
 import { findPath } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
-import { TurnController, type TurnControllerOptions } from "../state/turnController";
+import { TurnController, createAiTurnMemory, type AiTurnMemory, type TurnControllerOptions } from "../state/turnController";
 import type { TurnControllerHooks } from "../state/turnController";
 import type { Axial } from "../core/hex";
 import { bus } from "../core/eventBus";
@@ -23,6 +23,13 @@ export class GameStateManager {
   private hooks: TurnControllerHooks | null = null;
   private primaryActorSource: (() => boolean) | null = null;
   private pathPreviewLock: PathPreviewLock | null = null;
+  // Owner of the AI-turn state (I1 garrison backoff, B1 recruit guard) that
+  // must survive a controller rebuild: every makeTurnController() call hands
+  // this one instance to the new controller, so replaceState()'s rebuild --
+  // auto-resolve settle, SSE full-refetch resync, save, sync merge -- carries
+  // the state across instead of wiping it. resetAiTurnMemory() drops it only
+  // when a different game session is loaded.
+  private aiMemory: AiTurnMemory = createAiTurnMemory();
 
   setHooks(hooks: TurnControllerHooks): void {
     this.hooks = hooks;
@@ -36,9 +43,16 @@ export class GameStateManager {
   }
 
   private makeTurnController(state: GameState): TurnController {
-    const opts: TurnControllerOptions = {};
+    const opts: TurnControllerOptions = { aiMemory: this.aiMemory };
     if (this.primaryActorSource) opts.isPrimaryActor = this.primaryActorSource;
     return new TurnController(state, this.hooks ?? ({} as TurnControllerHooks), opts);
+  }
+
+  // Fresh AI-turn memory for a newly loaded game session: backoff and
+  // recruit-guard entries are round/hero/settlement-id-keyed for the game
+  // that produced them and must not leak into the next game's ids.
+  resetAiTurnMemory(): void {
+    this.aiMemory = createAiTurnMemory();
   }
 
   setGameMap(map: GameMap): void {

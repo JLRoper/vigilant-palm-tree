@@ -61,7 +61,7 @@ function garrisonFixture(
   });
 }
 
-function harness() {
+function harness(localSeat: number | null = 0) {
   let tc: TurnController | null = null;
   const flags = { primary: false };
   const replaces: GameState[] = [];
@@ -69,7 +69,7 @@ function harness() {
     getController: () => tc,
     replaceState: (next) => replaces.push(next),
     isPrimaryActor: () => flags.primary,
-    localSeat: () => 0,
+    localSeat: () => localSeat,
   });
   return {
     detach,
@@ -213,6 +213,38 @@ test("a resync whose snapshot no longer has the selected hero clears the selecti
   assert.equal(h.replaces.length, 1);
   assert.equal(h.replaces[0].selectedHeroId, null, "a dead selection is cleared");
   h.detach();
+});
+
+test("a resync drops a FOREIGN-seat hero selection and keeps the viewer's own (garrisonEventMerge)", async () => {
+  const foreign = harness(0);
+  foreign.setController(new TurnController(garrisonFixture({ selectedHeroId: "h1" }), stubHooks()));
+  const resynced = garrisonFixture();
+
+  bus.emit({ type: "mp:resynced", gameName: "g", state: resynced, cursor: 24, reason: "event_not_derivable" });
+  await tick();
+
+  assert.equal(foreign.replaces.length, 1);
+  assert.equal(
+    foreign.replaces[0].selectedHeroId,
+    null,
+    "h1 exists in the snapshot but belongs to seat 1 -- a foreign selection must not re-enter shared state",
+  );
+  foreign.detach();
+
+  const own = harness(1);
+  own.setController(
+    new TurnController(
+      garrisonFixture({ activePlayerId: 0, phase: { kind: "PLAYER_TURN", playerId: 0 }, selectedHeroId: "h1" }),
+      stubHooks(),
+    ),
+  );
+
+  bus.emit({ type: "mp:resynced", gameName: "g", state: resynced, cursor: 25, reason: "event_not_derivable" });
+  await tick();
+
+  assert.equal(own.replaces.length, 1);
+  assert.equal(own.replaces[0].selectedHeroId, "h1", "the same selection survives for the seat that owns the hero");
+  own.detach();
 });
 
 test("a resync during the local seat's own turn is dropped, and so are non-derivable-unrelated reasons", async () => {

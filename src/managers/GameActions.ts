@@ -15,6 +15,11 @@ import type { UnitType } from "../state/units";
 import { submitBattleResult, submitSettlementBattleResult, type SubmitBattleResultResult, type SubmitSettlementBattleResultResult } from "../io/commands";
 import { consumeResolveBattleVerdicts, mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../game/turnHooks";
 import { battleToastMessage, settlementNameAt } from "@screens/combat/battleResultText";
+import {
+  formatStacksLabel,
+  openAssaultConfirmModal,
+  type AssaultConfirmChoice,
+} from "@screens/combat/assaultConfirmModal";
 import { api } from "../io/api";
 
 // Settlement name for a relocated hero's verdict line ("retreated to <name>").
@@ -400,7 +405,11 @@ export class GameActions {
    * (plan/1790560842471-unit-recruitment-garrison-plan.md §9): the attacker
    * hero's platoons vs the garrison's, the human always in the attacker
    * role, the rails/log labeled "<Settlement name> Garrison" instead of a
-   * defender hero. Submits via SubmitSettlementBattleResult; on success the
+   * defender hero. An assault-confirm modal (B5) runs first: Assault enters
+   * this arena, Auto-resolve delegates to autoResolveSettlementBattle(),
+   * Cancel ends the phase via TurnController.cancelSettlementBattle() with
+   * the hero still on the settlement tile and nothing resolved. Submits via
+   * SubmitSettlementBattleResult; on success the
    * authoritative hero + settlement pair is merged, the phase is ended
    * client-side (the server's applySettlementBattleResult already captured
    * on a win / bounced the attacker on every other outcome), and the shared
@@ -429,6 +438,38 @@ export class GameActions {
         return;
       }
       const unitTypes = Object.fromEntries(catalog.map((u) => [u.id, u]));
+
+      // B5 assault confirm: the local-human attacker confirms before the
+      // arena. Assault continues into the arena flow below unchanged;
+      // Auto-resolve takes the same silent controller path an AI attacker
+      // gets; Cancel ends the phase with the hero standing on the
+      // settlement tile (the walk-in move is already persisted, the
+      // garrison is untouched, nothing is submitted) — a later
+      // re-selection of the hero re-runs tryCaptureAt and re-opens this
+      // flow.
+      const unitNames: Record<string, string> = {};
+      for (const u of catalog) unitNames[u.id] = u.name;
+      const choice = await new Promise<AssaultConfirmChoice>((resolve) => {
+        openAssaultConfirmModal({
+          settlementName: settlement.name,
+          attackerSummary: formatStacksLabel(attacker.stacks, unitNames),
+          garrisonSummary: formatStacksLabel(settlementStacks(settlement), unitNames),
+          onAssault: () => resolve("assault"),
+          onAutoResolve: () => resolve("autoResolve"),
+          onCancel: () => resolve("cancel"),
+        });
+      });
+      if (choice === "cancel") {
+        const tc = this.state.getTurnController();
+        if (tc.cancelSettlementBattle()) {
+          this.state.replaceState(tc.getState());
+        }
+        return;
+      }
+      if (choice === "autoResolve") {
+        await this.autoResolveSettlementBattle(attackerId, settlementId);
+        return;
+      }
 
       const gameName = this.session.getActiveGameName();
       const defenderLabel = `${settlement.name} Garrison`;

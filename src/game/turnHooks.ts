@@ -34,13 +34,15 @@ import type {
   HeroBattleVerdict,
   HeroId,
   HeroState,
+  PlayerId,
   SettlementId,
   TransferDirection,
   WarehouseResource,
 } from "@heroes/contracts";
 import type { TurnControllerHooks } from "../state/turnController";
 import type { BattleResult } from "@heroes/engine";
-import { pickAiMove as pickAiMoveBrain } from "../ai/aiBrain";
+import { pickAiMove as pickAiMoveBrain, pickGarrisonRecruitment } from "../ai/aiBrain";
+import { cachedUnitTypes } from "../data/unitCatalog";
 import type { GameMap } from "../map/gameMap";
 import type { Axial } from "../core/hex";
 import { getMultiplayerSync } from "../io/multiplayerSync";
@@ -71,6 +73,10 @@ export interface BuildTurnHooksOptions {
   rng: () => number;
   logToConsole?: boolean;
   onPlaceBuildingsRejected?: (settlementId: SettlementId, appliedDelta: NetCost) => void;
+  // Local viewer's seat, used by mergeFromEndTurn to keep a hero selection
+  // only when it belongs to this browser. Null/unknown seat falls back to the
+  // legacy existence-only preservation.
+  localSeat?: () => PlayerId | null;
 }
 
 let lastBattle: { attackerId: HeroId; defenderId: HeroId } | null = null;
@@ -106,7 +112,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       sync.stop();
       try {
         const result = await endTurn(name, state.activePlayerId, settings().populationGrowthRate);
-        const merged = mergeFromEndTurn(state, result);
+        const merged = mergeFromEndTurn(state, result, opts.localSeat?.() ?? null);
         sync.start(name);
         return merged;
       } catch (e) {
@@ -120,18 +126,19 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       if (!name) return;
       const hero = state.heroes[heroId];
       if (!hero) return;
-      try {
-        const previousCost = (hero.previousMovementRemaining ?? hero.movementRemaining) - hero.movementRemaining;
-        await spendMovement(name, {
-          actor: hero.ownerId,
-          heroId,
-          fromTile: { q: hero.previousQ ?? hero.q, r: hero.previousR ?? hero.r },
-          toTile,
-          cost: previousCost > 0 ? previousCost : 1,
-        });
-      } catch (e) {
-        console.warn("[turnHooks] spendMovement failed:", e);
-      }
+      // Deliberately NO catch here: the AI tick's serialization owns this
+      // promise and must know when the persist failed -- a silently-swallowed
+      // rejection leaves the client's optimistic move un-landed server-side
+      // and every later command in the turn 409s against the stale server
+      // position (turnController.recoverFailedAiMovePersist).
+      const previousCost = (hero.previousMovementRemaining ?? hero.movementRemaining) - hero.movementRemaining;
+      await spendMovement(name, {
+        actor: hero.ownerId,
+        heroId,
+        fromTile: { q: hero.previousQ ?? hero.q, r: hero.previousR ?? hero.r },
+        toTile,
+        cost: previousCost > 0 ? previousCost : 1,
+      });
     },
     onHumanMove: async (
       state: GameState,
@@ -474,8 +481,11 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         reportCommandFailure("Place buildings", e);
       }
     },
-    pickAiMove: (state: GameState, heroId: HeroId) => {
-      return pickAiMoveBrain(state, heroId, opts.gameMap(), opts.rng);
+    pickAiMove: (state: GameState, heroId: HeroId, excludedSettlementIds?: ReadonlySet<string>) => {
+      return pickAiMoveBrain(state, heroId, opts.gameMap(), opts.rng, cachedUnitTypes(), excludedSettlementIds);
+    },
+    pickGarrisonRecruitment: (state: GameState, seat: number) => {
+      return pickGarrisonRecruitment(state, seat, cachedUnitTypes());
     },
     logEvent: (event: { type: string; payload: Record<string, unknown> }) => {
       const name = opts.gameName();
@@ -547,7 +557,7 @@ export function mergeBattleOutcomeHeroes(
   return next;
 }
 
-export function mergeFromEndTurn(state: GameState, result: EndTurnResult): GameState {
+export function mergeFromEndTurn(state: GameState, result: EndTurnResult, localSeat?: PlayerId | null): GameState {
   // The server now runs the whole end-turn pipeline authoritatively
   // (simple next-player advance, or a full round wrap -- see
   // server/app/turnService.ts), so result.activePlayerId/players are
@@ -563,8 +573,13 @@ export function mergeFromEndTurn(state: GameState, result: EndTurnResult): GameS
   // A selection is client-local UI state: keep it while the entity still
   // exists, across every ending player's merge (the AI hand-offs flow
   // through this same hook), so panels survive End Turn and the AI phase.
+  // With a known local seat, only the viewer's OWN hero stays selected: a
+  // foreign selection leaked into shared state would otherwise render a
+  // movement path/trail from a fog-hidden hero's tile. Unknown seat (tests,
+  // headless embeds) keeps the legacy existence-only rule.
   const selectedHero = state.selectedHeroId != null ? result.heroes[state.selectedHeroId] : undefined;
-  const selectedHeroId = selectedHero ? state.selectedHeroId : null;
+  const selectedHeroId =
+    selectedHero && (localSeat == null || selectedHero.ownerId === localSeat) ? state.selectedHeroId : null;
   const selectedSettlement = state.selectedSettlementId != null ? result.settlements[state.selectedSettlementId] : undefined;
   const selectedSettlementId = selectedSettlement ? state.selectedSettlementId : null;
   return {

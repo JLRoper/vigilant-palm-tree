@@ -64,6 +64,7 @@ export class GameSessionManager {
     this.setGameMap(map);
     this.state.setGameMap(map);
     const hydrated = hydrateGameState(loaded);
+    this.state.resetAiTurnMemory();
     this.state.replaceState(hydrated);
     this.view.updateMap(map);
     const center = this.state.getHero(playerHeroId())?.tile ?? { q: 6, r: 5 };

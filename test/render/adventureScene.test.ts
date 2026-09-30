@@ -250,7 +250,7 @@ test("path nodes: fully reachable path produces one segment plus the hero's trai
     castles: [],
     path,
     hover: null,
-    opts: makeRenderOptions({ viewPlayerId: 0 }),
+    opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h0" }),
   });
 
   const splitIdx = computeReachableSplit(path, map, hero.movementRemaining);
@@ -281,7 +281,7 @@ test("path nodes: partially reachable path splits into reachable/unreachable seg
     castles: [],
     path,
     hover: null,
-    opts: makeRenderOptions({ viewPlayerId: 0 }),
+    opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h0" }),
   });
 
   const splitIdx = computeReachableSplit(path, map, hero.movementRemaining);
@@ -316,6 +316,7 @@ test("pathReachableIdx and pathOrigin overrides are honored", () => {
     hover: null,
     opts: makeRenderOptions({
       viewPlayerId: 0,
+      selectedHeroId: "h0",
       pathReachableIdx: 1,
       pathOrigin: { q: -2, r: 0 },
     }),
@@ -339,6 +340,41 @@ test("no heroes or no proposed path -> no path/trail nodes at all", () => {
 
   const noHeroes = buildAdventureScene({ map, heroes: [], castles: [], path: [{ q: 1, r: 0 }], hover: null, opts });
   assert.equal(nodesOfKind(noHeroes, "pathSegment").length, 0);
+
+  const noSelection = buildAdventureScene({ map, heroes: [hero], castles: [], path: [{ q: 1, r: 0 }], hover: null, opts });
+  assert.equal(nodesOfKind(noSelection, "pathSegment").length, 0, "no selectedHeroId -> no path (no heroes[0] fallback)");
+
+  const staleSelection = buildAdventureScene({
+    map, heroes: [hero], castles: [], path: [{ q: 1, r: 0 }], hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h-gone" }),
+  });
+  assert.equal(nodesOfKind(staleSelection, "pathSegment").length, 0, "a selection the hero list no longer carries emits nothing");
+  assert.equal(nodesOfKind(staleSelection, "heroTrail").length, 0);
+});
+
+test("path/trail nodes render only for the viewer's OWN selected hero (fog-position leak defense)", () => {
+  const map = makeGrassMap(4, 1);
+  const own = new Hero("h0", "Own", 0, 0, "player", 0, 10, [{ q: -1, r: 0 }, { q: 0, r: 0 }]);
+  const foreign = new Hero("h1", "Foe", 3, 0, "enemy", 1, 10, [{ q: 4, r: 0 }, { q: 3, r: 0 }]);
+  const path = [{ q: 1, r: 0 }, { q: 2, r: 0 }];
+
+  const foreignSelected = buildAdventureScene({
+    map, heroes: [own, foreign], castles: [], path, hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h1" }),
+  });
+  assert.equal(nodesOfKind(foreignSelected, "pathSegment").length, 0, "a foreign selected hero emits no path segments");
+  assert.equal(nodesOfKind(foreignSelected, "heroTrail").length, 0, "a foreign selected hero emits no trail");
+
+  const ownSelected = buildAdventureScene({
+    map, heroes: [own, foreign], castles: [], path, hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h0" }),
+  });
+  const segments = nodesOfKind<PathSegmentNode>(ownSelected, "pathSegment");
+  assert.ok(segments.length >= 1, "own selection emits the path as before");
+  assert.ok(segments.every((s) => s.points[0] !== axialToPixel(3, 0)), "no segment anchors at the foreign hero's tile");
+  const trails = nodesOfKind<HeroTrailNode>(ownSelected, "heroTrail");
+  assert.equal(trails.length, 1);
+  assert.equal(trails[0].heroId, "h0");
 });
 
 test("path segments are marked fogged when any tile they span lies under fog (F4)", () => {
@@ -354,7 +390,7 @@ test("path segments are marked fogged when any tile they span lies under fog (F4
     castles: [],
     path,
     hover: null,
-    opts: makeRenderOptions({ viewPlayerId: 0 }),
+    opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h0" }),
   });
 
   const segments = nodesOfKind<PathSegmentNode>(nodes, "pathSegment");
@@ -373,7 +409,7 @@ test("a fully visible path carries no fogged flag (F4)", () => {
     castles: [],
     path: [{ q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 }],
     hover: null,
-    opts: makeRenderOptions({ viewPlayerId: 0 }),
+    opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h0" }),
   });
 
   const segments = nodesOfKind<PathSegmentNode>(nodes, "pathSegment");
@@ -390,7 +426,7 @@ test("a fogged pathOrigin marks the reachable segment fogged too, so bright segm
     castles: [],
     path: [{ q: 1, r: 0 }, { q: 2, r: 0 }],
     hover: null,
-    opts: makeRenderOptions({ viewPlayerId: 0, pathOrigin: { q: 6, r: 0 }, pathReachableIdx: 1 }),
+    opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h0", pathOrigin: { q: 6, r: 0 }, pathReachableIdx: 1 }),
   });
 
   const reachable = nodesOfKind<PathSegmentNode>(nodes, "pathSegment").find((s) => s.reachable);
@@ -409,7 +445,7 @@ test("hero trail points are capped to the last 25, render-side only (F14)", () =
     castles: [],
     path: [{ q: 1, r: 0 }],
     hover: null,
-    opts: makeRenderOptions({ viewPlayerId: 0 }),
+    opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h0" }),
   });
 
   const trails = nodesOfKind<HeroTrailNode>(nodes, "heroTrail");

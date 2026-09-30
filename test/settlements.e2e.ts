@@ -10,7 +10,8 @@ import {
 
 // Settlement capture / garrison-battle e2e regressions (Playwright + real API + real DB):
 // (A) human walk-in capture persists server-side (the 409 race), 3 fresh games;
-// (B) NEUTRAL garrisoned walk-in triggers a settlement battle, not a silent no-op;
+// (B) NEUTRAL garrisoned walk-in: B5 assault-confirm modal, then Assault opens the
+//     arena (not a silent no-op);
 // (C) AI vs beatable garrison auto-resolves silently, turn completes, capture persists.
 
 const API_PORT = getApiPort(3001);
@@ -216,23 +217,42 @@ async function walkInCapturePersisted(browser: Browser): Promise<void> {
 }
 
 async function neutralGarrisonedTriggersBattle(browser: Browser): Promise<void> {
-  console.log(">> [B] neutral garrisoned walk-in triggers a settlement battle (not a silent no-op)");
+  console.log(">> [B] neutral garrisoned walk-in: assault-confirm modal, then Assault opens the arena (not a silent no-op)");
   const name = "settle-e2e-garrison";
   const { gameId, sid, neutral } = await seedAtNeutral(name, "p0-hero", [{ entries: [{ unitTypeId: "swordsman", count: 3 }] }]);
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await openGame(page, name, gameId);
   await page.evaluate(() => (window as any).__gameDebug.setSelectedHero("p0-hero"));
   await page.evaluate((t: Axial) => (window as any).__gameDebug.requestMove("p0-hero", t.q, t.r), neutral);
+
+  // B5: the assault-confirm modal fronts the arena for local-human attackers.
+  let modalShown = true;
+  try {
+    await page.locator("button", { hasText: /^Assault$/ }).first().waitFor({ timeout: 10000 });
+  } catch { modalShown = false; }
+  const modal = await page.evaluate(() => ({
+    title: Array.from(document.body.querySelectorAll("div"))
+      .map((d) => d.textContent?.trim() ?? "")
+      .find((t) => /^Assault on .+/.test(t) && t.length < 80) ?? "",
+    garrison: Array.from(document.body.querySelectorAll("div"))
+      .map((d) => d.textContent?.trim() ?? "")
+      .find((t) => /^Garrison: .+/.test(t) && t.length < 200) ?? "",
+  }));
+  assert(modalShown, "no assault-confirm modal on neutral garrisoned walk-in (silent no-op regression)");
+  assert(/^Assault on .+/.test(modal.title), `confirm modal title missing, got "${modal.title}"`);
+  assert(/^Garrison: .+/.test(modal.garrison), `confirm modal Garrison line missing, got "${modal.garrison}"`);
+  await page.locator("button", { hasText: /^Assault$/ }).first().click();
+
   let arenaOpened = true;
   try {
     await page.locator("button", { hasText: "Surrender" }).first().waitFor({ timeout: 10000 });
   } catch { arenaOpened = false; }
   const st = await clientState(page);
   const after = await serverRow(name);
-  assert(arenaOpened, "no arena on neutral garrisoned walk-in (silent no-op regression)");
+  assert(arenaOpened, "no arena after clicking Assault on the confirm modal (neutral garrisoned walk-in regression)");
   assert.equal(st?.phase?.kind, "SETTLEMENT_BATTLE", `phase=${st?.phase?.kind}, expected SETTLEMENT_BATTLE`);
   assert.equal(after.settlements[sid]?.ownerId ?? null, null, "walk-in must not flip owner before the battle resolves");
-  console.log(">> [B] arena opened, phase=SETTLEMENT_BATTLE, garrison still holds (no instant capture)");
+  console.log(">> [B] confirm modal shown, Assault opened the arena, phase=SETTLEMENT_BATTLE, garrison still holds (no instant capture)");
   await page.close();
   await deleteGame(name);
 }
@@ -251,12 +271,15 @@ async function aiBeatableGarrisonAutoResolves(browser: Browser): Promise<void> {
   await openGame(page, name, gameId);
   await page.evaluate(() => { void (window as any).__gameDebug.endTurn(); });
   const t0 = Date.now();
-  let backToPlayer = false, arenaSeen = false;
+  let backToPlayer = false, arenaSeen = false, confirmModalSeen = false;
   while (Date.now() - t0 < 45000) {
     await wait(400);
     arenaSeen = arenaSeen || (await page.evaluate(() =>
       Array.from(document.body.querySelectorAll("button")).some((b) =>
         ["Surrender", "Flee", "Quick Resolve"].includes(b.textContent?.trim() ?? ""))).catch(() => false));
+    confirmModalSeen = confirmModalSeen || (await page.evaluate(() =>
+      Array.from(document.body.querySelectorAll("button")).some((b) =>
+        b.textContent?.trim() === "Auto-resolve")).catch(() => false));
     const snap = await clientState(page);
     if (snap?.phase?.kind === "PLAYER_TURN" && snap.activePlayerId === 0 && Date.now() - t0 > 2500) { backToPlayer = true; break; }
   }
@@ -275,6 +298,7 @@ async function aiBeatableGarrisonAutoResolves(browser: Browser): Promise<void> {
   }
   assert(backToPlayer, `AI turn did not complete within 45s (stall); phase=${(await clientState(page))?.phase?.kind}`);
   assert(!arenaSeen, "arena opened for an AI-attacker settlement battle (must auto-resolve silently)");
+  assert(!confirmModalSeen, "assault-confirm modal appeared on the AI-attacker path (must auto-resolve silently)");
   assert(battleEvent, "no SettlementBattleResolved event persisted server-side");
   assert.equal(owner, 1, `settlement owner=${owner}, expected 1 (AI capture not persisted)`);
   assert(rostered, "settlement missing from AI roster server-side");

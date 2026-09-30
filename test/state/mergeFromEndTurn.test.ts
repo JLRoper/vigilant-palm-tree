@@ -83,3 +83,53 @@ test("mergeFromEndTurn leaves absent selections as null", () => {
   assert.equal(merged.selectedHeroId, null);
   assert.equal(merged.selectedSettlementId, null);
 });
+
+test("mergeFromEndTurn with a known local seat drops a FOREIGN-seat hero selection", () => {
+  const state = {
+    ...makeState({
+      heroes: [makeHero("h0", 0, 2, 2), makeHero("h1", 1, 18, 4)],
+      settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, 18, 4)],
+      selectedHeroId: "h1",
+      activePlayerId: 1,
+    }),
+    selectedSettlementId: "s0" as SettlementId | null,
+  };
+
+  const merged = mergeFromEndTurn(state, buildResult(state), 0);
+
+  assert.equal(merged.selectedHeroId, null, "a foreign hero's selection must not survive the merge (it would render its path/trail through fog)");
+  assert.equal(merged.selectedSettlementId, "s0", "settlement selections keep the existence-only rule");
+});
+
+test("mergeFromEndTurn with a known local seat keeps the viewer's OWN hero selection", () => {
+  const state = {
+    ...makeState({
+      heroes: [makeHero("h0", 0, 2, 2), makeHero("h1", 1, 18, 4)],
+      settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, 18, 4)],
+      selectedHeroId: "h0",
+      activePlayerId: 1,
+    }),
+    selectedSettlementId: null as SettlementId | null,
+  };
+
+  const merged = mergeFromEndTurn(state, buildResult(state), 0);
+
+  assert.equal(merged.selectedHeroId, "h0");
+});
+
+test("mergeFromEndTurn ownership follows the merged hero's owner, not the pre-wrap one", () => {
+  const state = {
+    ...makeState({
+      heroes: [makeHero("h0", 0, 2, 2), makeHero("h1", 1, 18, 4)],
+      settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, 18, 4)],
+      selectedHeroId: "h0",
+      activePlayerId: 1,
+    }),
+    selectedSettlementId: null as SettlementId | null,
+  };
+  const heroes = { ...state.heroes, h0: makeHero("h0", 1, 2, 2) };
+
+  const merged = mergeFromEndTurn(state, buildResult(state, { heroes }), 0);
+
+  assert.equal(merged.selectedHeroId, null, "once the selected hero belongs to another seat it must be dropped for the local viewer");
+});

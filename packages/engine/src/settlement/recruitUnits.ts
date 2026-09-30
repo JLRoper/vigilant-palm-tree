@@ -7,7 +7,31 @@ import type {
 } from "@heroes/contracts";
 import type { Platoon } from "../units";
 import { MAX_PLATOON_ENTRIES, normalizePlatoons, settlementStacks } from "../units";
-import { getBuildingEffect } from "../buildingRegistry";
+import { getBuildingEffect, type RecruitEntry } from "../buildingRegistry";
+
+// The recruit-eligibility gate shared by the RecruitUnits command and the AI
+// garrison planner: a building offers a unit only when construction finished
+// and the unit's minLevel is met. The command keeps its granular per-check
+// reason codes; this helper is the single source of "what can this settlement
+// recruit right now".
+export interface RecruitSource {
+  buildingKind: BuildingKind;
+  gx: number;
+  gy: number;
+  entry: RecruitEntry;
+}
+
+export function eligibleRecruitSources(settlement: SettlementState): RecruitSource[] {
+  const out: RecruitSource[] = [];
+  for (const building of settlement.buildings) {
+    if (building.construction) continue;
+    for (const entry of getBuildingEffect(building.kind).recruits) {
+      if ((entry.minLevel ?? 1) > building.level) continue;
+      out.push({ buildingKind: building.kind, gx: building.gx, gy: building.gy, entry });
+    }
+  }
+  return out;
+}
 
 // Merge `count` units of one type into a platoon set: an entry of the same
 // type grows in place, else the first platoon below MAX_PLATOON_ENTRIES gets

@@ -48,6 +48,7 @@ import {
 import { findPath } from "../map/pathfinding";
 import { hexDistance } from "../core/hex";
 import { bus } from "../core/eventBus";
+import { GARRISON_BACKOFF_ROUNDS, type GarrisonRecruitment } from "../ai/aiBrain";
 
 export interface TurnControllerHooks {
   onHumanTurnEnd(state: GameState): Promise<GameState>;
@@ -62,7 +63,13 @@ export interface TurnControllerHooks {
   pickAiMove(
     state: GameState,
     heroId: HeroId,
+    excludedSettlementIds?: ReadonlySet<string>,
   ): { toTile: { q: number; r: number }; cost: number } | null;
+  // B1 (plan/2026-09-29-settlement-battle-followups.md): the AI's garrison
+  // shopping list for the given seat, computed by the aiBrain against the
+  // caller-held unit catalog. Optional so tests and headless embeds can omit
+  // it (the tick then skips recruitment entirely).
+  pickGarrisonRecruitment?(state: GameState, seat: number): GarrisonRecruitment[];
   logEvent(event: { type: string; payload: Record<string, unknown> }): void;
   getMap(): GameMap;
   rng(): number;
@@ -187,8 +194,32 @@ export interface TurnControllerHooks {
   }): Promise<void>;
 }
 
+// AI-turn state that must outlive a TurnController rebuild: GameStateManager
+// (or a test) owns one instance and threads it through TurnControllerOptions
+// into every controller it constructs, so replaceState()'s rebuild no longer
+// discards it. A controller built without the option gets its own private
+// store, which is the pre-I1-fix behavior direct constructors always had.
+export interface AiTurnMemory {
+  // I1 re-attack backoff (plan/2026-09-29-settlement-battle-followups.md):
+  // per-hero -> per-settlement -> expiry round, recorded after an AI-seat
+  // hero loses or draws a garrison assault (resolveSettlementBattle) and
+  // consulted by the AI tick to keep pickAiMove from re-targeting the
+  // settlement until GameState.round reaches the expiry. In-memory on the
+  // primary client by design (the tick only runs there); entries expire
+  // silently on consultation.
+  garrisonBackoff: Map<HeroId, Map<SettlementId, number>>;
+  // B1: the round+seat the AI last ran garrison recruitment for, so the
+  // shopping list runs at most once per AI turn even across repeated ticks.
+  aiRecruitedFor: { round: number; seat: number } | null;
+}
+
+export function createAiTurnMemory(): AiTurnMemory {
+  return { garrisonBackoff: new Map(), aiRecruitedFor: null };
+}
+
 export interface TurnControllerOptions {
   isPrimaryActor?: () => boolean;
+  aiMemory?: AiTurnMemory;
 }
 
 export interface SettlementBattleResolution {
@@ -226,11 +257,20 @@ export class TurnController {
   // 409 hero_not_at_settlement server-side, and the optimistic capture
   // becomes a phantom until reload.
   private lastMovePersist: Promise<void> | null = null;
+  // I1 + B1 per-controller AI state lives in one shared AiTurnMemory whose
+  // OWNER is GameStateManager: it hands the SAME instance to every controller
+  // it builds, so the rebuild on every full-state replaceState (auto-resolve
+  // settle, SSE SettlementBattleResolved refetch, save, sync merge) carries
+  // the backoff/recruit-guard across instead of silently wiping them
+  // mid-campaign (the 2026-09-29 AI re-attack-storm defect: a drawn assault
+  // re-targeted forever, 62 battles in 12 s).
+  private readonly aiMemory: AiTurnMemory;
 
   constructor(initial: GameState, hooks: TurnControllerHooks, opts: TurnControllerOptions = {}) {
     this.state = initial;
     this.hooks = hooks;
     this.opts = opts;
+    this.aiMemory = opts.aiMemory ?? createAiTurnMemory();
   }
 
   getState(): GameState {
@@ -389,6 +429,28 @@ export class TurnController {
   }
 
   cancelMove(heroId: HeroId): void {
+    this.state = cancelMoveReducer(this.state, heroId);
+  }
+
+  // A rejected MoveHero persist leaves the client's optimistic move
+  // un-landed server-side: every later command in the turn would fail the
+  // server's position gates (hero_not_at_fromTile / hero_not_at_settlement)
+  // in a cascade, and a settlement battle opened behind the failed walk-in
+  // would resolve against a position the server never accepted. Mirror the
+  // human path's rollback semantics (GameActions.startSettlementBattleFlow's
+  // cancelMove-on-submit-reject): un-walk the optimistic move and clear a
+  // SETTLEMENT_BATTLE phase it opened, so the tick re-plans from the
+  // server's actual position and the turn still ends server-visibly.
+  // cancelMoveReducer itself no-ops when previous* is already null.
+  private recoverFailedAiMovePersist(heroId: HeroId, toTile: { q: number; r: number }): void {
+    this.hooks.logEvent({
+      type: "ai_move_persist_failed",
+      payload: { heroId, to: toTile },
+    });
+    const phase = this.state.phase;
+    if (phase.kind === "SETTLEMENT_BATTLE" && phase.attackerId === heroId) {
+      this.clearSettlementBattlePhase();
+    }
     this.state = cancelMoveReducer(this.state, heroId);
   }
 
@@ -869,19 +931,37 @@ export class TurnController {
       }
     }
     this.state = next;
-    this.trackCommand(
-      this.hooks.onSettlementBattleSubmitted({
-        actor: attacker.ownerId,
-        attackerId,
-        settlementId,
-        outcome,
-        attackerStacks: battle.attackerPlatoons,
-        defenderStacks: battle.defenderPlatoons,
-        rounds: battle.rounds,
-        obstacleSeed: battle.obstacleSeed,
-      }),
-      "onSettlementBattleSubmitted",
-    );
+    // Await (not fire-and-forget) AND gate the tick while it is in flight:
+    // this.state is already AI_TURN here, so without the gate the very next
+    // frame's tick would dispatch the wander move and its MoveHero could
+    // overtake this submit on the wire -- landing the wander first moves the
+    // attacker off the settlement server-side and the submit 409s
+    // hero_not_at_settlement (the server never records a battle the client
+    // already applied). The controller instance is stable for the whole
+    // await (the caller only replaceState()s after this returns, which is
+    // what rebuilds it), so the instance flag gates exactly the dangerous
+    // window. The hook still swallows its own HTTP errors
+    // (reportCommandFailure), so this adds ordering, never a new failure
+    // path; staying in pendingCommands keeps the EndTurn drain barrier
+    // identical.
+    this.aiAwaitingPersist = true;
+    try {
+      await this.trackCommand(
+        this.hooks.onSettlementBattleSubmitted({
+          actor: attacker.ownerId,
+          attackerId,
+          settlementId,
+          outcome,
+          attackerStacks: battle.attackerPlatoons,
+          defenderStacks: battle.defenderPlatoons,
+          rounds: battle.rounds,
+          obstacleSeed: battle.obstacleSeed,
+        }),
+        "onSettlementBattleSubmitted",
+      );
+    } finally {
+      this.aiAwaitingPersist = false;
+    }
     bus.emit({
       type: "battle:resolved",
       attackerId,
@@ -892,6 +972,12 @@ export class TurnController {
       type: "settlement_battle_resolved",
       payload: { attackerId, settlementId, outcome, captured: applied.captured },
     });
+    // I1: a bounced AI attacker (loss or draw — the garrison held) backs off
+    // this settlement for GARRISON_BACKOFF_ROUNDS. Wins/captures and
+    // human-attacker battles never create entries.
+    if (outcome !== "attackerWon" && pre.players.find((p) => p.id === attacker.ownerId)?.faction === "ai") {
+      this.recordGarrisonBackoff(attackerId, settlementId);
+    }
     return {
       attackerId,
       settlementId,
@@ -913,6 +999,74 @@ export class TurnController {
       }
     }
     this.state = closed;
+  }
+
+  cancelSettlementBattle(): boolean {
+    if (this.state.phase.kind !== "SETTLEMENT_BATTLE") return false;
+    const { attackerId, settlementId } = this.state.phase;
+    this.clearSettlementBattlePhase();
+    this.hooks.logEvent({
+      type: "settlement_battle_cancelled",
+      payload: { attackerId, settlementId },
+    });
+    return true;
+  }
+
+  // B1: at most once per AI turn (guarded by round + seat so a repeat tick
+  // in the same turn is a no-op), ask the aiBrain for the seat's garrison
+  // shopping list and submit each entry through the existing recruitUnits
+  // command path -- the commit() dispatcher already registers the
+  // onRecruitUnits POST in pendingCommands (the same barrier End Turn
+  // drains), so the recruits serialize exactly like the move persist.
+  // Per-item local rejections (building-gate drift etc.) log and continue;
+  // they never stall the AI turn. An empty list costs nothing.
+  private runAiGarrisonRecruitment(seat: number): void {
+    if (this.aiMemory.aiRecruitedFor?.round === this.state.round && this.aiMemory.aiRecruitedFor.seat === seat) return;
+    this.aiMemory.aiRecruitedFor = { round: this.state.round, seat };
+    const recruitments = this.hooks.pickGarrisonRecruitment?.(this.state, seat) ?? [];
+    for (const item of recruitments) {
+      const ok = this.recruitUnits(
+        item.settlementId,
+        item.buildingKind,
+        item.gx,
+        item.gy,
+        item.unitTypeId,
+        item.count,
+      );
+      if (!ok) {
+        this.hooks.logEvent({
+          type: "ai_garrison_recruit_rejected",
+          payload: { seat, settlementId: item.settlementId, unitTypeId: item.unitTypeId, count: item.count },
+        });
+      }
+    }
+  }
+
+  // Active I1 backoff exclusions for one hero: settlement ids whose backoff
+  // window still covers the current round. Expired entries are pruned here
+  // (silent expiry, filter by round).
+  private activeGarrisonBackoff(heroId: HeroId): Set<string> {
+    const bySettlement = this.aiMemory.garrisonBackoff.get(heroId);
+    const out = new Set<string>();
+    if (!bySettlement) return out;
+    for (const [settlementId, expiryRound] of bySettlement) {
+      if (expiryRound <= this.state.round) {
+        bySettlement.delete(settlementId);
+        continue;
+      }
+      out.add(settlementId);
+    }
+    if (bySettlement.size === 0) this.aiMemory.garrisonBackoff.delete(heroId);
+    return out;
+  }
+
+  private recordGarrisonBackoff(heroId: HeroId, settlementId: SettlementId): void {
+    let bySettlement = this.aiMemory.garrisonBackoff.get(heroId);
+    if (!bySettlement) {
+      bySettlement = new Map<SettlementId, number>();
+      this.aiMemory.garrisonBackoff.set(heroId, bySettlement);
+    }
+    bySettlement.set(settlementId, this.state.round + GARRISON_BACKOFF_ROUNDS);
   }
 
   async endHumanTurn(): Promise<void> {
@@ -1173,21 +1327,28 @@ export class TurnController {
     const aiPlayer = this.state.players.find((p) => p.id === aiPlayerId);
     if (!aiPlayer) return;
 
+    this.runAiGarrisonRecruitment(aiPlayerId);
+
     let moved = false;
     for (const heroId of aiPlayer.heroIds) {
       const hero = this.state.heroes[heroId];
       if (!hero || hero.movementRemaining <= 0) continue;
       if (hero.isChartering) continue;
-      const move = this.hooks.pickAiMove(this.state, heroId);
+      const move = this.hooks.pickAiMove(this.state, heroId, this.activeGarrisonBackoff(heroId));
       if (!move) continue;
       const map = this.hooks.getMap();
       const path = findPath(map, { q: hero.q, r: hero.r }, move.toTile);
       // startMove's not_selected gate guards a client-UI concept the AI tick
       // doesn't have; satisfy it the same way the server does for every
       // MoveHero command (commandHandler.ts): name the mover as selected.
+      // startMove spreads the state it receives into its result, so the
+      // override must not survive the adoption below -- a leaked foreign
+      // selection renders the AI hero's path/trail and corrupts the charter
+      // flow after the hand-off.
+      const priorSelectedHeroId = this.state.selectedHeroId;
       const result = startMoveReducer({ ...this.state, selectedHeroId: heroId }, heroId, move.toTile, move.cost, path);
       if (!result.ok) continue;
-      this.state = result.state;
+      this.state = { ...result.state, selectedHeroId: priorSelectedHeroId };
       moved = true;
       this.hooks.logEvent({
         type: "move_completed",
@@ -1199,11 +1360,19 @@ export class TurnController {
       // landed -- the server validates battle adjacency from positions, so a
       // resolve that outruns the persist 409s not_adjacent and the fight
       // just re-fires next round with no casualties. Recorded as
-      // lastMovePersist so a walk-in capture chains behind it too.
+      // lastMovePersist so a walk-in capture chains behind it too. A
+      // REJECTED persist is recovered (not swallowed): the recovery runs off
+      // the raw promise below, before any barrier continuation observes the
+      // settle.
+      const persist = this.hooks.onAiMove(this.state, heroId, move.toTile);
       this.lastMovePersist = this.trackCommand(
-        this.hooks.onAiMove(this.state, heroId, move.toTile).catch((e: unknown) => {
-          console.warn("[turnController] onAiMove failed:", e);
-        }),
+        persist.then(
+          () => {},
+          (e: unknown) => {
+            console.warn("[turnController] onAiMove failed:", e);
+            this.recoverFailedAiMovePersist(heroId, move.toTile);
+          },
+        ),
         "onAiMove",
       );
       void this.lastMovePersist.finally(() => {

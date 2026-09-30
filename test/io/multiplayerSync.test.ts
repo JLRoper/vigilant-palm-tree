@@ -730,3 +730,126 @@ test("a self-seat garrison delta is skipped for state but still fans out and adv
   assert.equal(stackTotal(sync.getState()?.settlements.s0.stacks), 4);
   sync.stop();
 });
+
+// Driven AI seats (2026-09-29 garrison-divergence defect): the primary
+// client (seat 0) runs the AI tick, so an AI-seat row arriving off the log
+// must be skipped exactly like a self-seat row -- same cursor advance, same
+// mp:logRow fan-out, no state mutation -- while a non-primary client keeps
+// applying it as its only source.
+
+test("a driven AI-seat row is skipped on the primary client exactly like a self-seat row", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("gm4", {
+      lastEventId: 10,
+      heroes: [makeHero("h1", 1, 8, 8)],
+      settlements: [
+        {
+          ...makeSettlement("s0", 1, 8, 8),
+          stacks: [{ entries: [{ unitTypeId: "pikeman", count: 4 }] }],
+        },
+      ],
+      players: [makePlayer(0, "player", ["h0"], []), makePlayer(1, "ai", ["h1"], ["s0"])],
+    }),
+    events: [],
+    calls: [],
+  };
+  installFetch(server);
+  setInMemoryLocalPlayerId("gm4", 0);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("gm4", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const logKinds: string[] = [];
+  bus.on("mp:logRow", (ev: { row: { kind: string } }) => logKinds.push(ev.row.kind));
+  const batches: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => batches.push(ev.events));
+
+  server.events.push(
+    row(11, { type: "UnitsRecruited", actor: 1, settlementId: "s0", unitTypeId: "pikeman", count: 5 }, 1),
+  );
+  await sync.pollOnce();
+
+  assert.deepEqual(logKinds, ["UnitsRecruited"], "AI-seat rows still reach the log");
+  assert.deepEqual(batches, [], "the primary client already applied the AI recruit via its own command merge");
+  assert.equal(sync.getCursor(), 11, "the cursor still advances past the skipped row");
+  assert.equal(stackTotal(sync.getState()?.settlements.s0.stacks), 4, "the garrison was not double-deposited");
+  sync.stop();
+});
+
+test("a driven AI-seat row still applies on a non-primary client", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("gm5", {
+      lastEventId: 10,
+      heroes: [makeHero("h2", 2, 8, 8)],
+      settlements: [
+        {
+          ...makeSettlement("s0", 2, 8, 8),
+          stacks: [{ entries: [{ unitTypeId: "pikeman", count: 4 }] }],
+        },
+      ],
+      players: [
+        makePlayer(0, "player", ["h0"], []),
+        makePlayer(1, "player", ["h1"], []),
+        makePlayer(2, "ai", ["h2"], ["s0"]),
+      ],
+    }),
+    events: [],
+    calls: [],
+  };
+  installFetch(server);
+  setInMemoryLocalPlayerId("gm5", 1);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("gm5", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const batches: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => batches.push(ev.events));
+
+  server.events.push(
+    row(11, { type: "UnitsRecruited", actor: 2, settlementId: "s0", unitTypeId: "pikeman", count: 5 }, 2),
+  );
+  await sync.pollOnce();
+
+  assert.deepEqual(batches.length, 1, "the AI event is the non-primary client's only source");
+  assert.equal(stackTotal(sync.getState()?.settlements.s0.stacks), 9, "the recruit applied once");
+  sync.stop();
+});
+
+test("a remote human-seat row still applies on the primary client (only AI seats are driven)", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("gm6", {
+      lastEventId: 10,
+      heroes: [makeHero("h2", 2, 8, 8)],
+      settlements: [
+        {
+          ...makeSettlement("s0", 2, 8, 8),
+          stacks: [{ entries: [{ unitTypeId: "pikeman", count: 4 }] }],
+        },
+      ],
+      players: [
+        makePlayer(0, "player", ["h0"], []),
+        makePlayer(1, "player", ["h1"], []),
+        makePlayer(2, "player", ["h2"], ["s0"]),
+      ],
+    }),
+    events: [],
+    calls: [],
+  };
+  installFetch(server);
+  setInMemoryLocalPlayerId("gm6", 0);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("gm6", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const batches: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => batches.push(ev.events));
+
+  server.events.push(
+    row(11, { type: "UnitsRecruited", actor: 2, settlementId: "s0", unitTypeId: "pikeman", count: 5 }, 2),
+  );
+  await sync.pollOnce();
+
+  assert.deepEqual(batches.length, 1, "a human seat's event is never a driven-seat skip");
+  assert.equal(stackTotal(sync.getState()?.settlements.s0.stacks), 9);
+  sync.stop();
+});

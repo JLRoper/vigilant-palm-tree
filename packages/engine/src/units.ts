@@ -87,6 +87,26 @@ export function platoonTroopTotal(platoons: readonly Platoon[]): number {
   return total;
 }
 
+// Per-unit strength weight: attack + defence, the two stats the battle
+// auto-resolver scores armies with (effective attack and count-average
+// defence in combat/damage.ts). Unknown unit ids follow the units.ts
+// helper convention of tier-1 defaults (1 + 1): a catalog-less comparison
+// scales both sides uniformly, so a ratio gate on power degrades exactly
+// to a troop-count comparison instead of marking every garrison free.
+export function unitPower(t: UnitType | undefined): number {
+  return (t?.attack ?? 1) + (t?.defence ?? 1);
+}
+
+export function platoonPower(platoons: readonly Platoon[], unitTypes: Record<string, UnitType>): number {
+  let power = 0;
+  for (const p of platoons) {
+    for (const e of p.entries) {
+      power += e.count * unitPower(unitTypes[e.unitTypeId]);
+    }
+  }
+  return power;
+}
+
 export function trimPlatoonsFromEnd(
   platoons: readonly Platoon[],
   remove: number,

@@ -115,6 +115,7 @@ export class GameEngine {
       gameName: () => this.session.getActiveGameName(),
       gameMap: () => this.gameMap,
       rng,
+      localSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
       onPlaceBuildingsRejected: (settlementId, appliedDelta) => {
         const next = applyNetToSettlement(this.state.getState(), settlementId, invertNet(appliedDelta));
         if (next) this.state.replaceState(next);

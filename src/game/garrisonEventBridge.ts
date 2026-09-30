@@ -41,12 +41,15 @@ function applyDeltas(start: GameState, events: EngineEvent[]): GameState | null 
 
 // The resynced state is a full server hydrate and is taken wholesale (the
 // mergeFromEndTurn shape), except that selections are client-local UI state:
-// they survive only while the selected entity still exists.
-function mergeResynced(current: GameState, resynced: GameState): GameState {
+// they survive only while the selected entity still exists -- and a hero
+// selection only while it belongs to the local viewer's seat, so a foreign
+// selection can never re-enter shared state and light up a fog-hidden
+// hero's path/trail. Unknown seat keeps the legacy existence-only rule.
+function mergeResynced(current: GameState, resynced: GameState, localSeat: number | null): GameState {
+  const selectedHero =
+    current.selectedHeroId != null ? resynced.heroes[current.selectedHeroId] : undefined;
   const selectedHeroId =
-    current.selectedHeroId != null && resynced.heroes[current.selectedHeroId]
-      ? current.selectedHeroId
-      : null;
+    selectedHero && (localSeat == null || selectedHero.ownerId === localSeat) ? current.selectedHeroId : null;
   const selectedSettlementId =
     current.selectedSettlementId != null && resynced.settlements[current.selectedSettlementId]
       ? current.selectedSettlementId
@@ -141,7 +144,7 @@ export function attachGarrisonEventBridge(deps: GarrisonEventBridgeDeps): () => 
         if (!safeForResync()) return;
         const current = deps.getController();
         if (!current) return;
-        deps.replaceState(mergeResynced(current.getState(), ev.state));
+        deps.replaceState(mergeResynced(current.getState(), ev.state, deps.localSeat()));
       } finally {
         merging = false;
       }

@@ -66,6 +66,25 @@ export function isEngineEventRow(row: GameEventRow): boolean {
   );
 }
 
+const NO_SEATS: ReadonlySet<number> = new Set();
+
+// Driven AI seats (2026-09-29 garrison-divergence defect): the primary
+// client (seat 0) runs the AI tick, so its command merges already applied
+// every AI-seat mutation locally -- a server UnitsRecruited row whose actor
+// is the AI seat must then be skipped exactly like an own-seat row, or the
+// additive applied-reducers (applyUnitsRecruited etc.) deposit the same
+// troops a second time (server 270 peasants, client 540+). Only a KNOWN
+// seat 0 drives: a null localSeat (unclaimed seat, node tests) keeps
+// applying, which is the non-primary client's only source of AI state.
+function aiSeatsOf(state: GameState | null): ReadonlySet<number> {
+  const seats = new Set<number>();
+  if (!state) return seats;
+  for (const player of state.players) {
+    if (player.faction === "ai") seats.add(player.id);
+  }
+  return seats;
+}
+
 export class MultiplayerSync {
   private timer: number | null = null;
   private gameName: string | null = null;
@@ -242,6 +261,7 @@ export class MultiplayerSync {
 
   private async applyRows(gameName: string, rows: GameEventRow[]): Promise<void> {
     const localSeat = getInMemoryLocalPlayerId(gameName);
+    const drivenAiSeats = localSeat === 0 ? aiSeatsOf(this.lastSeen) : NO_SEATS;
     const prev = this.lastSeen;
     let state = this.lastSeen;
     const applied: EngineEvent[] = [];
@@ -258,6 +278,7 @@ export class MultiplayerSync {
       if (Number.isFinite(id) && id > cursor) cursor = id;
       if (this.selfEventIds.delete(id)) continue;
       if (localSeat !== null && row.actor_seat === localSeat) continue;
+      if (row.actor_seat !== null && drivenAiSeats.has(row.actor_seat)) continue;
       if (!isEngineEventRow(row)) continue;
       if (!state) {
         await this.resync(gameName, "cursor_gap");
