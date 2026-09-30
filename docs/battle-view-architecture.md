@@ -138,7 +138,7 @@ flowchart TB
     E -->|"BattleResult"| G
     X --> BUS
     E2 --> BUS
-    BUS -->|"GameStateManager / UIManager refresh"| C
+    BUS -->|"dev EventLog telemetry only —<br/>production refresh rides the<br/>command result merge, not the bus"| C
 
     %% --- action stream (Fight path only) ---
     R --> T1
@@ -247,7 +247,9 @@ flowchart TB
    `resolveCurrentBattle()`), shows the shared result card with real hero
    labels and per-side verdict lines (`battleResultText.ts`: "slain" /
    "retreated to \<name\>" / "surrendered to \<name\>"), and emits
-   `bus.emit({ type: "battle:resolved", ... })`.
+   `bus.emit({ type: "battle:resolved", ... })` — dev-log telemetry only
+   (the EventLog whitelist); the card/toast data comes from the command
+   return values, not the bus.
 9. **Quick Resolve path.** Unchanged from before the wiring:
    `TurnController.resolveCurrentBattle()` →
    `hooks.onBattleResolved(state)` (`src/game/turnHooks.ts` →
@@ -421,7 +423,7 @@ used):
 | `src/game/turnHooks.ts` | Adapter | `onBattleResolved(state)` → `io/commands.resolveBattle` (Quick Resolve path) |
 | `src/io/commands.ts` | Network | `resolveBattle()` + `submitBattleResult()` (`SubmitBattleResult`) POST wrappers |
 | `src/io/api.ts` | Network | `postBattleAction` — fire-and-forget `battle_actions` POST (short timeout, swallows failures) |
-| `src/core/eventBus.ts` | Spine | `battle:resolved` event for downstream refresh |
+| `src/core/eventBus.ts` | Telemetry | `battle:resolved` emission is dev-log telemetry only (EventLog whitelist); production result cards/toasts consume command return data + `consumeResolveBattleVerdicts`, not the bus |
 | `packages/engine/src/combat/grid.ts` | Engine | `makeBattleGrid` (odd-r offset), `deploymentPosition`, `columnOf` |
 | `packages/engine/src/combat/damage.ts` | Engine | Damage math (attacker fatigue/morale scale `effAttack`, defender fatigue scales `effDefense`) + `totalHealth` / `estimateWinChance` estimators |
 | `packages/engine/src/combat/resolveBattle.ts` | Engine | Auto-resolver turn loop; `resolveAttack` (the shared fatigue/morale seam), `effectiveSelfRetreatHpPct` (low morale routs earlier) |

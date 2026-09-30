@@ -25,8 +25,10 @@ interface GameEventRow {
 }
 
 // Exact poll-route SQL (server/routes.ts GET /games/:name/events) so both
-// transports can never drift apart in what a cursor means.
-const ROWS_AFTER_SQL =
+// transports can never drift apart in what a cursor means. The poll route
+// imports this constant, so the guarantee is structural -- one shared
+// string -- not two copies kept in sync by convention.
+export const ROWS_AFTER_SQL =
   "SELECT id, kind, payload, actor_seat, created_at FROM game_events WHERE game_id = $1 AND id > $2 ORDER BY id ASC";
 
 const HEARTBEAT_MS = 25_000; // below typical 30-60s proxy idle timeouts

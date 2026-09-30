@@ -328,7 +328,7 @@ test("TownHallUpgradeStarted deducts the cost and starts the upgrade; an in-flig
   );
 });
 
-test("the six events whose effect isn't in their payload all ask for a resync", () => {
+test("the payload-fact-only events all ask for a resync", () => {
   const state = makeState();
   const notDerivable: EngineEvent[] = [
     { type: "TurnEnded", actor: 0, round: 2, day: 2, activePlayerId: 1, wrapped: false },
@@ -356,6 +356,29 @@ test("the six events whose effect isn't in their payload all ask for a resync", 
     },
     { type: "BuildingUpgradeStarted", actor: 0, settlementId: "s0" },
     { type: "SettlementUpgradeStarted", actor: 0, settlementId: "s0", targetLevel: 2 },
+    { type: "BuildingsPlaced", actor: 0, settlementId: "s0" },
+    { type: "ResourcesTransferred", actor: 0, heroId: "h0", settlementId: "s0", direction: "load" },
+    { type: "WagonsAssigned", actor: 0, heroId: "h0", delta: 1 },
+    { type: "WagonsBought", actor: 0, settlementId: "s0", count: 2 },
+    {
+      type: "TradeRouteCreated",
+      actor: 0,
+      routeId: "r0",
+      fromSettlementId: "s0",
+      toSettlementId: "s1",
+      resource: "wood",
+      wagons: 1,
+    },
+    { type: "TradeRouteUpdated", actor: 0, routeId: "r0" },
+    { type: "TradeRouteRemoved", actor: 0, routeId: "r0" },
+    {
+      type: "SettlementBattleResolved",
+      actor: 0,
+      attackerId: "h0",
+      settlementId: "s1",
+      winner: "attacker",
+      captured: true,
+    },
   ];
 
   for (const event of notDerivable) {

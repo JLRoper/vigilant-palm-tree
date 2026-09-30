@@ -1,0 +1,18 @@
+-- Composite cursor index for the game_events log read path. The cursor
+-- query -- "SELECT id, kind, payload, actor_seat, created_at FROM
+-- game_events WHERE game_id = $1 AND id > $2 ORDER BY id ASC", shared by
+-- the 2 s poll route and the SSE stream route as one constant
+-- (server/http/routes/eventStream.ts's ROWS_AFTER_SQL, imported by
+-- server/routes.ts) -- currently filters via game_events_game_id_idx and
+-- then sorts the matches by id. game_events grows monotonically forever
+-- (BIGSERIAL id, rows never trimmed), so that sort cost grows unboundedly
+-- with the table; the composite (game_id, id) index turns the query into
+-- an index-ordered range scan with no sort step.
+--
+-- (game_id, id) subsumes the older game_events_game_id_idx (schema.sql);
+-- the old index is kept for now -- dropping it is a future cleanup.
+--
+-- Idempotent: CREATE INDEX IF NOT EXISTS, so re-running at every boot
+-- (server/db.ts initSchema() reads server/migrations/*.sql sorted and
+-- pool.query()s each) is a no-op.
+CREATE INDEX IF NOT EXISTS game_events_game_id_id_idx ON game_events(game_id, id);

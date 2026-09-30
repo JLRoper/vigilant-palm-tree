@@ -10,17 +10,60 @@ import { transferUnits } from "../settlement/transferUnits";
 import { settlementStacks } from "../units";
 
 // Phase 5.A (#146): the reducer the event-cursor client sync applies each
-// polled EngineEvent through. Six variants carry only the *fact* of a change
-// and not the derived state it produced (TurnEnded's production/upkeep/
-// movement reset, BattleResolved's troop losses, HeroRecruited's starting
-// stacks, the rng-derived rates behind SettlementUpgradeStarted) -- those
-// return "resync" so the caller refetches rather than guesses.
+// polled EngineEvent through. Fourteen variants carry only the *fact* of a
+// change and not the derived state it produced (TurnEnded's production/
+// upkeep/movement reset, BattleResolved's troop losses, HeroRecruited's
+// starting stacks, the rng-derived rates behind SettlementUpgradeStarted) --
+// those return "resync" so the caller refetches rather than guesses. The
+// trade/wagon/building kinds (BuildingsPlaced, ResourcesTransferred,
+// Wagons*, TradeRoute*) carry intentionally minimal payloads: their state
+// effects are not payload-derivable either, so they land in the same resync
+// arm (and are classified "ignore" for the sync layer in
+// ENGINE_EVENT_SYNC_CLASS below).
 export type EngineEventOutcome = "applied" | "noop" | "resync";
 
 export interface ApplyEngineEventResult {
   state: GameState;
   outcome: EngineEventOutcome;
 }
+
+export type EngineEventSyncClass = "apply" | "resync" | "ignore";
+
+// Declarative classification of every EngineEvent variant for the client
+// sync layer (src/io/multiplayerSync.ts derives its admitted-kinds set from
+// this). The Record<EngineEvent["type"], ...> annotation makes adding a new
+// EngineEvent variant without classifying it here a compile error -- that is
+// the point. This registry is data only: applyEngineEvent's switch below is
+// NOT driven from it and keeps its own exhaustive default. "ignore" means
+// the server may append the kind, but its state effects are not
+// payload-derivable, so the client sync skips it and the effects arrive at
+// the TurnEnded/poll resync boundary.
+export const ENGINE_EVENT_SYNC_CLASS: Record<EngineEvent["type"], EngineEventSyncClass> = {
+  HeroMoved: "apply",
+  GoldTransferred: "apply",
+  TurnEnded: "resync",
+  ResourcesTraded: "apply",
+  BattleResolved: "resync",
+  HeroRecruited: "resync",
+  TownHallUpgradeStarted: "apply",
+  AutoTradeToggled: "apply",
+  StackReordered: "apply",
+  SettlementCaptured: "apply",
+  CharterStarted: "resync",
+  BuildingUpgradeStarted: "resync",
+  SettlementUpgradeStarted: "resync",
+  CharterTravelAdvanced: "apply",
+  BuildingsPlaced: "ignore",
+  ResourcesTransferred: "ignore",
+  WagonsAssigned: "ignore",
+  WagonsBought: "ignore",
+  TradeRouteCreated: "ignore",
+  TradeRouteUpdated: "ignore",
+  TradeRouteRemoved: "ignore",
+  UnitsRecruited: "apply",
+  UnitsTransferred: "apply",
+  SettlementBattleResolved: "resync",
+};
 
 function resync(state: GameState): ApplyEngineEventResult {
   return { state, outcome: "resync" };

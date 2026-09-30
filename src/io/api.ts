@@ -67,9 +67,11 @@ export type Game = {
 
 // One row of GET /games/:name/events. Raw DB shape (snake_case, id and
 // actor_seat straight off the row) -- `payload` is the persisted EngineEvent
-// for the 13 EngineEvent kinds and a bespoke audit blob for the legacy
+// for the engine kinds and a bespoke audit blob for the legacy
 // turn_ended/round_ended/round_started/ai_turn_started kinds, so it stays
-// unknown here and is narrowed at the point of use.
+// unknown here and is narrowed at the point of use. Which kinds the client
+// admits as engine events is owned by ENGINE_EVENT_KINDS in
+// src/io/multiplayerSync.ts.
 export type GameEventRow = {
   id: string;
   kind: string;
@@ -200,7 +202,7 @@ export const api = {
         body: JSON.stringify({ kind, payload }),
       },
       5_000
-    ).then((r) => json<{ id: number; kind: string }>(r)),
+    ).then((r) => json<{ id: string; kind: string; payload: unknown; created_at: string }>(r)),
   // ?after=<cursor> is the event-cursor poll (#146/#145). 0 means "the whole
   // log"; the server rejects a non-integer cursor with a 400 rather than
   // silently refetching everything.

@@ -17,7 +17,6 @@ import { GameActions } from "./GameActions";
 import { GameSessionManager } from "./GameSessionManager";
 import { attachDebugApi } from "../io/debugCommands";
 import { bus } from "../core/eventBus";
-import { registerAllListeners } from "../core/eventRegistry";
 import { attachEventLog, type EventLog } from "../debug/eventLog";
 import { mountPersistentDevConsole, type DevConsoleHandle } from "../debug/devConsole";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
@@ -84,7 +83,6 @@ export class GameEngine {
     this.initInput();
     this.initDebug();
     this.initEventListeners();
-    registerAllListeners();
 
     const center = this.state.getHero("pa-hero")?.tile ?? { q: 6, r: 5 };
     this.view.centerOn(center.q, center.r);

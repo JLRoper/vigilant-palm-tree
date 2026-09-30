@@ -26,7 +26,10 @@ import { invalidateMembershipCache } from "./middleware/attachPlayerSeat";
 import { commandsRouter } from "./http/routes/commands";
 import { telemetryRouter } from "./http/routes/telemetry";
 import { battleActionsRouter } from "./http/routes/battleActions";
-import { eventStreamRouter } from "./http/routes/eventStream";
+import {
+  eventStreamRouter,
+  ROWS_AFTER_SQL,
+} from "./http/routes/eventStream";
 
 export const router = Router();
 
@@ -482,6 +485,15 @@ router.post("/games/:name/events", async (req, res) => {
     res.status(400).json({ error: "kind required" });
     return;
   }
+  if (!/^[a-z0-9_]{1,64}$/.test(kind)) {
+    res.status(400).json({ error: "invalid kind" });
+    return;
+  }
+  const payloadJson = JSON.stringify(payload ?? {});
+  if (payloadJson.length > 8192) {
+    res.status(400).json({ error: "payload too large" });
+    return;
+  }
   const game = await pool.query<{ id: number }>(
     "SELECT id FROM games WHERE name = $1",
     [req.params.name]
@@ -491,8 +503,8 @@ router.post("/games/:name/events", async (req, res) => {
     return;
   }
   const r = await pool.query(
-    "INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3) RETURNING id, kind, payload, created_at",
-    [game.rows[0].id, kind, payload]
+    "INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3::jsonb) RETURNING id, kind, payload, created_at",
+    [game.rows[0].id, kind, payloadJson]
   );
   res.status(201).json(r.rows[0]);
 });
@@ -528,10 +540,7 @@ router.get("/games/:name/events", async (req, res) => {
   // actor_seat is returned so the client can skip events its own commands
   // caused (it already applied them locally) -- the read half of #144's
   // column, which had a writer but no reader until this cursor sync.
-  const r = await pool.query(
-    "SELECT id, kind, payload, actor_seat, created_at FROM game_events WHERE game_id = $1 AND id > $2 ORDER BY id ASC",
-    [game.rows[0].id, after]
-  );
+  const r = await pool.query(ROWS_AFTER_SQL, [game.rows[0].id, after]);
   res.json(r.rows);
 });
 

@@ -67,6 +67,14 @@ function reportCommandFailure(action: string, e: unknown): void {
   bus.emit({ type: "command:rejected", action, reason });
 }
 
+// Server's EndTurn command path (server/app/commandHandler.ts) appends the authoritative copies of these audit kinds itself; the client posts were byte-identical duplicates (actor_seat NULL on top).
+const SERVER_APPENDED_AUDIT_KINDS: ReadonlySet<string> = new Set([
+  "turn_ended",
+  "round_ended",
+  "round_started",
+  "ai_turn_started",
+]);
+
 export interface BuildTurnHooksOptions {
   gameName: () => string | null;
   gameMap: () => GameMap;
@@ -499,6 +507,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         }
       }
       if (!name) return;
+      if (SERVER_APPENDED_AUDIT_KINDS.has(event.type)) return;
       void api.logEvent(name, event.type, event.payload).catch(() => {});
     },
     getMap: () => opts.gameMap(),
