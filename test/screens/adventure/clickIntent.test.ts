@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { GameMap } from "../../../src/map/gameMap";
 import type { Hero } from "../../../src/entities/hero";
-import { makeHero, makeState } from "../../charter/_helpers";
+import { makeHero, makePlayer, makeState } from "../../charter/_helpers";
 import { clickRejectionToast, resolveAdventureClick } from "../../../src/screens/adventure/clickIntent";
 
 function stubHero(id: string, ownerId: number, q: number, r: number, movementRemaining = 10): Hero {
@@ -29,6 +29,7 @@ function resolve(overrides: Partial<Parameters<typeof resolveAdventureClick>[0]>
     isPlayerTurn: true,
     charterMode: false,
     validCharterHexes: null,
+    localSeat: 0,
     ...overrides,
   });
 }
@@ -245,4 +246,92 @@ test("F10: a clamped move intent's cost equals the detailed split's costToSplit 
     { q: 3, r: 0 },
     { q: 4, r: 0 },
   ]);
+});
+
+test("seat 1 clicking its own hero selects it", () => {
+  const state = makeState({ selectedHeroId: null });
+  const intent = resolve({
+    state,
+    heroes: { h1: stubHero("h1", 1, 0, 0) },
+    localSeat: 1,
+    hover: { q: 0, r: 0 },
+  });
+  assert.deepEqual(intent, { kind: "select-hero", heroId: "h1" });
+});
+
+test("seat 1 clicking a seat-0 hero yields an attack intent from its own hero", () => {
+  const state = makeState({
+    players: [
+      makePlayer(0, "player", ["h0"], ["s0"]),
+      makePlayer(1, "player", ["h1"], ["s1"]),
+    ],
+    heroes: [makeHero("h1", 1, 0, 0), makeHero("h0", 0, 2, 0)],
+    selectedHeroId: "h1",
+    activePlayerId: 1,
+  });
+  const intent = resolve({
+    state,
+    heroes: { h1: stubHero("h1", 1, 0, 0), h0: stubHero("h0", 0, 2, 0) },
+    localSeat: 1,
+    hover: { q: 2, r: 0 },
+  });
+  assert.equal(intent.kind, "attack");
+  if (intent.kind !== "attack") return;
+  assert.equal(intent.heroId, "h1");
+  assert.deepEqual(intent.dest, { q: 1, r: 0 });
+  assert.equal(intent.cost, 1);
+  assert.equal(intent.reachableIdx, 1);
+  assert.equal(intent.clamped, false);
+  assert.deepEqual(intent.remainingPath, []);
+});
+
+test("hostility is owner-only: seat 1 attacks a faction-ai hero the same way", () => {
+  const state = makeState({
+    players: [
+      makePlayer(0, "player", ["h0"], ["s0"]),
+      makePlayer(1, "player", ["h1"], ["s1"]),
+      makePlayer(2, "ai", ["h2"], ["s2"]),
+    ],
+    heroes: [makeHero("h1", 1, 0, 0), makeHero("h2", 2, 2, 0)],
+    selectedHeroId: "h1",
+    activePlayerId: 1,
+  });
+  const intent = resolve({
+    state,
+    heroes: { h1: stubHero("h1", 1, 0, 0), h2: stubHero("h2", 2, 2, 0) },
+    localSeat: 1,
+    hover: { q: 2, r: 0 },
+  });
+  assert.equal(intent.kind, "attack");
+  if (intent.kind !== "attack") return;
+  assert.equal(intent.heroId, "h1");
+  assert.deepEqual(intent.dest, { q: 1, r: 0 });
+});
+
+test("a null localSeat pins to seat 0 for hero selection", () => {
+  const state = makeState({ selectedHeroId: null });
+  const intent = resolve({
+    state,
+    heroes: { h0: stubHero("h0", 0, 0, 0) },
+    localSeat: null,
+    hover: { q: 0, r: 0 },
+  });
+  assert.deepEqual(intent, { kind: "select-hero", heroId: "h0" });
+});
+
+test("a null localSeat pins to seat 0 for attacks", () => {
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 0, 0), makeHero("h1", 1, 2, 0)],
+    selectedHeroId: "h0",
+  });
+  const intent = resolve({
+    state,
+    heroes: { h0: stubHero("h0", 0, 0, 0), h1: stubHero("h1", 1, 2, 0) },
+    localSeat: null,
+    hover: { q: 2, r: 0 },
+  });
+  assert.equal(intent.kind, "attack");
+  if (intent.kind !== "attack") return;
+  assert.equal(intent.heroId, "h0");
+  assert.deepEqual(intent.dest, { q: 1, r: 0 });
 });

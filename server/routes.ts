@@ -1,8 +1,6 @@
 ﻿import { Router } from "express";
 import { pool, withTransaction } from "./db";
 import {
-  applyEndOfTurnDetailed,
-  applyHeroUpkeep,
   GameMap,
   isHealthy,
   makeInitialStatePayload,
@@ -13,8 +11,6 @@ import {
   type UnitType,
 } from "@heroes/engine";
 import type {
-  AutoTradeTransfer,
-  GameState,
   HeroState,
   Player,
   SettlementState,
@@ -23,7 +19,7 @@ import type { PoolClient } from "pg";
 import { assetRouter } from "./assetRoutes";
 import { authRouter, attachAuth } from "./auth";
 import { invalidateMembershipCache } from "./middleware/attachPlayerSeat";
-import { commandsRouter } from "./http/routes/commands";
+import { commandsRouter, invalidateAiSeatCache } from "./http/routes/commands";
 import { telemetryRouter } from "./http/routes/telemetry";
 import { battleActionsRouter } from "./http/routes/battleActions";
 import {
@@ -85,6 +81,11 @@ export interface LobbyState {
   // poll. Seats with no entry have not transitioned since this API process
   // started tracking the game -- absence reads as "nothing to flag".
   presence?: Record<string, { lastSeenAt: string; connected: boolean }>;
+  // Server-side AI actor flag (plan/2026-09-30-server-side-ai-actor.md D1):
+  // "server" on any game created with enemySlots > 0 -- the API's
+  // aiDriver scanner owns those AI seats' turns end-to-end. Absent (=
+  // browser-driven) on legacy/starter/lobby games (D2).
+  aiDriver?: "server";
 }
 
 const GAME_COLUMNS =
@@ -119,22 +120,6 @@ async function generateAndInsertTiles(
     `INSERT INTO tiles (game_id, q, r, terrain, resource) VALUES ${values.join(", ")} ${suffix}`,
     params
   );
-}
-
-function sumPlayerGold(
-  players: Player[],
-  heroes: Record<string, HeroState>,
-  settlements: Record<string, SettlementState>,
-): number {
-  let total = 0;
-  const playerIds = new Set(players.map((p) => p.id));
-  for (const h of Object.values(heroes)) {
-    if (playerIds.has(h.ownerId) && Number.isFinite(h.gold)) total += h.gold;
-  }
-  for (const s of Object.values(settlements)) {
-    if (s.ownerId !== null && playerIds.has(s.ownerId) && Number.isFinite(s.gold)) total += s.gold;
-  }
-  return total;
 }
 
 router.get("/health", async (_req, res) => {
@@ -413,6 +398,12 @@ router.post("/games", async (req, res) => {
       res.status(400).json({ error: "humanSlots must be >= 1" });
       return;
     }
+    // D1: any game created with AI enemies is server-driven -- the flag
+    // rides the lobby jsonb (no schema migration) out on every
+    // game-bearing response via GAME_COLUMNS.
+    if (enemySlotsSafe > 0) {
+      lobbyState = { ...lobbyState, aiDriver: "server" };
+    }
 
     const game = await withTransaction(async (client) => {
       const r = await client.query<FullGameRow>(
@@ -456,11 +447,14 @@ router.post("/games", async (req, res) => {
           JSON.stringify(lobbyState),
         ]
       );
-      const row = r.rows[0];
-      await generateAndInsertTiles(client, row.id, row.seed, "upsert", storedMapSize as MapSize);
-      return row;
-    });
-    res.status(201).json(game);
+    const row = r.rows[0];
+    await generateAndInsertTiles(client, row.id, row.seed, "upsert", storedMapSize as MapSize);
+    return row;
+  });
+  // The recreation (ON CONFLICT (name)) may have flipped the aiDriver flag;
+  // the commands route's cached ai-seat info must not outlive it.
+  invalidateAiSeatCache(name);
+  res.status(201).json(game);
   } catch (err) {
     console.error("[api] POST /games threw:", err);
     res.status(500).json({
@@ -573,199 +567,17 @@ router.get("/games/:name/tiles", async (req, res) => {
   res.json(tiles.rows);
 });
 
-router.post("/games/:name/end-turn", async (req, res) => {
-  const body = req.body ?? {};
-  const incomingState = body.state as GameState | undefined;
-  if (
-    !incomingState ||
-    typeof incomingState !== "object" ||
-    typeof incomingState.activePlayerId !== "number" ||
-    !Array.isArray(incomingState.players) ||
-    typeof incomingState.heroes !== "object" ||
-    typeof incomingState.settlements !== "object"
-  ) {
-    res.status(400).json({ error: "state payload required" });
-    return;
-  }
-  try {
-    const result = await withTransaction(async (client) => {
-      const gr = await client.query<FullGameRow>(
-        `SELECT ${GAME_COLUMNS} FROM games WHERE name = $1`,
-        [req.params.name]
-      );
-      if (gr.rowCount === 0) return { status: 404 as const };
-      const row = gr.rows[0];
-
-      if (incomingState.activePlayerId !== row.active_player_id) {
-        return {
-          status: 409 as const,
-          error: "activePlayerId mismatch",
-          serverActivePlayerId: row.active_player_id,
-        };
-      }
-
-      const players: Player[] = incomingState.players.map((p) => ({
-        id: p.id,
-        faction: p.faction,
-        name: p.name,
-        color: p.color,
-        heroIds: Array.isArray(p.heroIds) ? [...p.heroIds] : [],
-        settlementIds: Array.isArray(p.settlementIds) ? [...p.settlementIds] : [],
-      }));
-
-
-      // Run the full per-day pipeline (produce -> auto-trade -> consume -> morale -> effective income).
-      // The client computes this too; we re-run here so DB matches client state (drift-safe).
-      const pipeline = applyEndOfTurnDetailed({
-        ...incomingState,
-        activePlayerId: row.active_player_id,
-      } as GameState);
-      const newSettlements: Record<string, SettlementState> = { ...pipeline.state.settlements };
-      const transfers: AutoTradeTransfer[] = pipeline.transfers;
-      // Advance active_player_id; wrap when we go past the last player, incrementing round + day.
-      const playerCount = players.length;
-      const wrapped = playerCount > 0 && row.active_player_id + 1 >= playerCount;
-      const nextActive = playerCount === 0 ? 0 : (row.active_player_id + 1) % playerCount;
-      const newRound = wrapped ? row.round + 1 : row.round;
-      const newDay = wrapped ? (incomingState.day ?? row.day) + 1 : (incomingState.day ?? row.day);
-
-      // Apply weekly upkeep when wrapping into a new round on a day divisible by 7.
-      let workingHeroes: Record<string, HeroState> = incomingState.heroes;
-      if (wrapped && newDay % 7 === 0) {
-        workingHeroes = applyHeroUpkeep(incomingState.heroes);
-      }
-
-      // Legacy `gold` column is the sum of all players' purses (backward compat).
-      const legacyGold = sumPlayerGold(players, incomingState.heroes, newSettlements);
-
-      await client.query(
-        `UPDATE games SET
-           round = $1,
-           day = $2,
-           active_player_id = $3,
-           players = $4::jsonb,
-           heroes = $5::jsonb,
-           settlements = $6::jsonb,
-           gold = $7,
-           updated_at = now()
-         WHERE id = $8`,
-        [
-          newRound,
-          newDay,
-          nextActive,
-          JSON.stringify(players),
-          JSON.stringify(workingHeroes),
-          JSON.stringify(newSettlements),
-          legacyGold,
-          row.id,
-        ]
-      );
-
-
-      // Insert settlement_snapshots rows (one per settlement, for the new day).
-      // Only snapshot settlements owned by the player whose turn just ended.
-      const snapshotDay = wrapped ? newDay : (incomingState.day ?? row.day);
-      for (const [sid, s] of Object.entries(newSettlements)) {
-        if (s.ownerId !== row.active_player_id) continue;
-        const inc = s.population * s.goldTax;
-        const morale = Math.max(0, Math.min(100, Math.round(Number(s.morale ?? 100))));
-        await client.query(
-          `INSERT INTO settlement_snapshots
-             (game_id, settlement_id, day, gold, warehouse, morale, effective_income)
-           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
-           ON CONFLICT (game_id, settlement_id, day) DO NOTHING`,
-          [
-            row.id,
-            sid,
-            snapshotDay,
-            Number(s.gold ?? 0),
-            JSON.stringify(s.warehouse ?? {}),
-            morale,
-            Math.round((inc * morale) / 100),
-          ]
-        );
-      }
-
-      // Log resource_transactions rows for any auto-trade transfers that fired.
-      for (const t of transfers) {
-        await client.query(
-          `INSERT INTO resource_transactions
-             (game_id, from_settlement_id, to_settlement_id, resource, amount, gold_paid, reason)
-           VALUES ($1, $2, $3, $4, $5, $6, 'auto_trade')`,
-          [
-            row.id,
-            t.fromSettlementId,
-            t.toSettlementId,
-            t.resource,
-            t.amount,
-            t.goldPaid,
-          ]
-        );
-      }
-
-      const events: Array<{ kind: string; payload: Record<string, unknown> }> = [
-        {
-          kind: "turn_ended",
-          payload: {
-            playerId: row.active_player_id,
-            round: row.round,
-          },
-        },
-      ];
-      if (wrapped) {
-        events.push({ kind: "round_ended", payload: { round: row.round } });
-        events.push({ kind: "round_started", payload: { round: newRound } });
-      }
-      const nextPlayer = players.find((p) => p.id === nextActive);
-      if (nextPlayer && nextPlayer.faction === "ai") {
-        events.push({
-          kind: "ai_turn_started",
-          payload: { playerId: nextActive, round: newRound },
-        });
-      }
-      for (const ev of events) {
-        await client.query(
-          `INSERT INTO game_events (game_id, kind, payload) VALUES ($1, $2, $3::jsonb)`,
-          [row.id, ev.kind, JSON.stringify(ev.payload)]
-        );
-      }
-
-      return {
-        status: 200 as const,
-        result: {
-          round: newRound,
-          day: newDay,
-          activePlayerId: nextActive,
-          players,
-        },
-      };
-    });
-
-    if (result.status === 404) {
-      res.status(404).json({ error: "not found" });
-      return;
-    }
-    if (result.status === 409) {
-      res.status(409).json({
-        error: result.error,
-        serverActivePlayerId: result.serverActivePlayerId,
-      });
-      return;
-    }
-    res.json(result.result);
-  } catch (err) {
-    console.error("[api] POST /games/:name/end-turn threw:", err);
-    res.status(500).json({
-      error: "internal",
-      message: err instanceof Error ? err.message : String(err),
-    });
-  }
-});
-
 // POST /games/:name/resolve-battle and POST /games/:name/trade were
 // retired here (Phase 3 Track A Week 3+,
 // plan/2026-08-16-phase-3-parallel-dev-plan.md) -- both are now
 // ResolveBattle/TradeResources on the POST /games/:name/commands bus
 // (server/http/routes/commands.ts, server/app/commandHandler.ts), the
 // same cutover Week 2 already did for spend_movement/transfer/end-turn.
+// POST /games/:name/end-turn was retired 2026-09-30 -- it was the
+// client-supplied-state variant kept for stale LAN bundles after every
+// repo caller moved to EndTurn on the POST /games/:name/commands bus,
+// which recomputes the same pipeline server-side and writes the same
+// settlement_snapshots / resource_transactions / turn-lifecycle audit
+// rows; stale bundles POSTing here now get a 404 and must use the
+// command bus.
 

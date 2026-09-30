@@ -118,7 +118,6 @@ The log is **not solely server-authored**:
 - Clients post audit kinds through `api.logEvent`:
   - `GameSessionManager`: `new_game` (:135), `load_game` (:73), `session_start` (:175);
   - `TurnController` hooks (`hooks.logEvent` → `turnHooks.ts:498-511` → `api.logEvent`): `battle_started`, `battle_resolved`, `settlement_captured`, `settlement_battle_started`, `settlement_battle_unresolved`, `settlement_battle_resolved`, `settlement_battle_cancelled`, `settlement_upgrade_started`, `charter_started`, `charter_arrived`, `charter_travel_blocked`, `ai_move_persist_failed`, `ai_garrison_recruit_rejected`, `move_completed`, `capture_rolled_back`. The four turn-lifecycle kinds (`turn_ended`, `round_ended`, `round_started`, `ai_turn_started`) are **no longer client-posted** — the hook skips them (`SERVER_APPENDED_AUDIT_KINDS`); the server's `EndTurn` command appends the authoritative copies with identical payload shapes (§2.2).
-- The legacy `POST /games/:name/end-turn` route (`routes.ts:576`) still runs the same EndTurn pipeline and writes the same four audit kinds — a **dual writer** for turn-lifecycle rows alongside the `EndTurn` command.
 
 The separate `battle_actions` table (manual-arena telemetry, `server/http/routes/battleActions.ts`) is **not** part of this system.
 
@@ -201,7 +200,7 @@ Full refetch: `GET /games/:name` → `hydrateGameState` → cursor = `last_event
 
 ### 5.1 EngineEvent kinds (contracts)
 
-`packages/contracts/src/events/engineEvent.ts` declares **24** variants. The client's admitted set, `ENGINE_EVENT_KINDS` (`multiplayerSync.ts:49-53`), is **derived**, not hand-listed: it is built from `ENGINE_EVENT_SYNC_CLASS` (`packages/engine/src/events/applyEvent.ts:41-66`), an exhaustive `Record<EngineEvent["type"], EngineEventSyncClass>` (`"apply" | "resync" | "ignore"`) over every variant — 10 `apply` + 7 `resync` kinds are admitted (17), and the 7 `ignore` kinds form the boundary set whose state effects arrive via the `TurnEnded`/poll resync boundary. Because the Record's key type is the full event union, adding a new EngineEvent variant without classifying it here is a compile error. The registry is data only: `applyEngineEvent`'s reducer switch stays the executor and keeps its own exhaustive default. Per kind:
+`packages/contracts/src/events/engineEvent.ts` declares **24** variants. The client's admitted set, `ENGINE_EVENT_KINDS` (`multiplayerSync.ts:49-53`), is **derived**, not hand-listed: it is built from `ENGINE_EVENT_SYNC_CLASS` (`packages/engine/src/events/applyEvent.ts:41-66`), an exhaustive `Record<EngineEvent["type"], EngineEventSyncClass>` (`"apply" | "resync" | "ignore"`) over every variant — 11 `apply` + 7 `resync` kinds are admitted (18), and the 6 `ignore` kinds form the boundary set whose state effects arrive via the `TurnEnded`/poll resync boundary. (`TradeRouteCreated` moved from the ignore set to the applied set 2026-09-30.) Because the Record's key type is the full event union, adding a new EngineEvent variant without classifying it here is a compile error. The registry is data only: `applyEngineEvent`'s reducer switch stays the executor and keeps its own exhaustive default. Per kind:
 
 | # | Kind | In ENGINE_EVENT_KINDS | Client outcome | Why |
 |---|---|---|---|---|
@@ -226,7 +225,7 @@ Full refetch: `GET /games/:name` → `hydrateGameState` → cursor = `last_event
 | 19 | `ResourcesTransferred` | **no** | ignored by sync | Amounts ride the resync boundary. |
 | 20 | `WagonsAssigned` | **no** | ignored by sync | Same boundary. |
 | 21 | `WagonsBought` | **no** | ignored by sync | Same boundary. |
-| 22 | `TradeRouteCreated` | **no** | ignored by sync | Same boundary. |
+| 22 | `TradeRouteCreated` | yes | **applied** (delta) | `applyTradeRouteCreated` constructs the route (targeted construction); the `routeId` is taken from the event verbatim — server route ids derive from a counter hydration never restores, so the id cannot be re-derived locally. (Moved from the ignore set 2026-09-30.) |
 | 23 | `TradeRouteUpdated` | **no** | ignored by sync | Same boundary. |
 | 24 | `TradeRouteRemoved` | **no** | ignored by sync | Same boundary. |
 
@@ -234,7 +233,7 @@ Full refetch: `GET /games/:name` → `hydrateGameState` → cursor = `last_event
 
 ### 5.2 Legacy audit kinds (snake_case, non-EngineEvent payloads)
 
-`turn_ended`, `round_ended`, `round_started`, `ai_turn_started` (server, EndTurn command + legacy end-turn route), `turn_skipped` (server drop policy), plus every client-posted kind from §2.4. All flow to the Log Panel via `mp:logRow` and are ignored by state sync (`isEngineEventRow` rejects them).
+`turn_ended`, `round_ended`, `round_started`, `ai_turn_started` (server, EndTurn command), `turn_skipped` (server drop policy), plus every client-posted kind from §2.4. All flow to the Log Panel via `mp:logRow` and are ignored by state sync (`isEngineEventRow` rejects them).
 
 ## 6. The client event bus
 
@@ -266,13 +265,14 @@ The poll route (`GET /games/:name/events`) is a pull transport, not a push consu
 | # | Site (file:line) | Signal | Behavior | Gating |
 |---|---|---|---|---|
 | 1 | `src/managers/GameEngine.ts:216` | `state:committed` | `rebuildHeroesFromState()` + `rebuildSettlementsFromState()` + `syncHeroVisualsToState()` + `fullFrame()` — the wholesale rebuild-on-commit that keeps the `Hero`/`Castle` wrapper collections in step with the authoritative state. | Fires on every commit; no gating. |
-| 2 | `src/game/garrisonEventBridge.ts:154-156` | `mp:eventsApplied` + `mp:resynced` + `state:committed` | Filters `mp:eventsApplied` to garrison deltas (`UnitsRecruited`/`UnitsTransferred`), replays them through `applyEngineEvent` onto the live TurnController state and `replaceState`s; merges `mp:resynced` snapshots wholesale (selections preserved existence-checked; a hero selection only while `ownerId === localSeat`, unknown seat = legacy existence-only rule). Runs `flushPendingCommands()` before every merge. | Deltas are blocked during `BATTLE`/`SETTLEMENT_BATTLE`/`ROUND_END` and during `AI_TURN` when the local client is the primary actor — those **queue FIFO** and retry on `state:committed` and every new batch. Snapshots are additionally blocked during the local seat's own `PLAYER_TURN` and a snapshot landing while unsafe is **dropped, never queued** (queueing would rewind newer local state). Resync snapshots are accepted only for reason `event_not_derivable`. Attached from `GameEngine.initEventListeners` (:246). |
+| 2 | `src/game/garrisonEventBridge.ts:154-156` | `mp:eventsApplied` + `mp:resynced` + `state:committed` | Filters `mp:eventsApplied` to bridgeable deltas (`isBridgedDelta`: `UnitsRecruited`/`UnitsTransferred` and, since 2026-09-30, `TradeRouteCreated` — so remote maps show new caravan routes mid-turn), replays them through `applyEngineEvent` onto the live TurnController state and `replaceState`s; merges `mp:resynced` snapshots wholesale (selections preserved existence-checked; a hero selection only while `ownerId === localSeat`, unknown seat = legacy existence-only rule). Runs `flushPendingCommands()` before every merge. | Deltas are blocked during `BATTLE`/`SETTLEMENT_BATTLE`/`ROUND_END` and during `AI_TURN` when the local client is the primary actor — those **queue FIFO** and retry on `state:committed` and every new batch. Snapshots are additionally blocked during the local seat's own `PLAYER_TURN` and a snapshot landing while unsafe is **dropped, never queued** (queueing would rewind newer local state). Resync snapshots are accepted only for reason `event_not_derivable`. Attached from `GameEngine.initEventListeners` (:246). |
 | 3 | `src/screens/shared/logPanel.ts:185` | `mp:logRow` | `LOG_PANEL_CAPACITY = 500` ring buffer, **no filtering** — every row, every seat, own included (an audit view, not a state view). One backlog hydrate via `api.getEvents(name, 0)` when the buffer needs it, id-dedupe so a backlog fetch racing the live stream cannot duplicate; pause/clear; autoscroll with stick-threshold. | Panel attach is unconditional; visibility and buffering gate on `settings().showLogPanel` via `subscribeSettings` (logPanel.ts:315) so the toggle works mid-session. |
 | 4 | `src/screens/shared/toast.ts:126` | `command:rejected` | Error toast `"<action> failed: <reason>"`; 1.5 s dedupe window (`isDuplicateToast`, pure + unit-tested) — a duplicate **refreshes** the existing toast instead of stacking. Publishers: `turnHooks.reportCommandFailure` (turnHooks.ts:67), `GameActions` (:308, :526), `turnController` (:415). | Attached unconditionally (`attachCommandFailureToasts`, GameEngine.ts:225). |
 | 5 | `src/screens/shared/mpPresenceHint.ts:83-84` | `mp:stateChanged` + `mp:presenceUpdated` | "Waiting for seat N (disconnected)" hint. Only the blocking case surfaces: a disconnected seat that currently **holds the turn**; other disconnected seats stay quiet (the lobby seat list shows those). Presence for a moved-on game is ignored. | Shows only when both a game and an active player are known and a disconnected seat matches `activePlayerId`. |
-| 6 | `src/screens/shared/firstTurnHint.ts:143` | `state:committed` | One-time first-turn onboarding hint. | `localStorage` latch (`heroesJs.firstTurnHint.v1`) + active-game gate (`hasActiveGame`); pointer-events:none panel. Attached from GameEngine.ts:236. |
-| 7 | `src/screens/debug/networkMap.ts:201` | `mp:topologyUpdated` | Dev network-topology graph redraw. | Dev tool; unsubscribes on close. |
-| 8 | `src/debug/eventLog.ts:133` | `bus.onAny` (whitelist) + hook capture | Dev 500-entry ring buffer. `DEFAULT_BUS_EVENT_TYPES` whitelist (10 kinds): `state:committed`, `hero:moved`, `settlement:captured`, `battle:resolved`, `turn:ended`, `phase:changed`, `round:changed`, `day:changed`, `economy:goldChanged`, `economy:warehouseChanged`. `wrapHooks` also captures every `hooks.logEvent` call (source `hook`), which is how `battle_started` is staged for `onBattleResolved`. Consumed by `devConsole` and `debugCommands`. | Dev only (`attachEventLog`, GameEngine.ts:110). |
+| 6 | `src/screens/shared/aiThinkingHint.ts:111-112` | `mp:turnStarted` + `mp:stateChanged` | "X is thinking…" status hint while an AI seat holds the turn — the server-side-AI-actor plan's anticipated indicator, now built (2026-09-30) and `mp:turnStarted`'s first production subscriber. Pure `shouldShowAiThinking(state, activePlayerId, localSeat)` predicate (active seat's faction is `"ai"` and it is not the local seat); fixed HUD status-row element bottom-left, stacked above `mpPresenceHint`. | Attached from `GameEngine.initEventListeners` (`attachAiThinkingHint`); unit-tested in `test/screens/shared/aiThinkingHint.test.ts`. |
+| 7 | `src/screens/shared/firstTurnHint.ts:143` | `state:committed` | One-time first-turn onboarding hint. | `localStorage` latch (`heroesJs.firstTurnHint.v1`) + active-game gate (`hasActiveGame`); pointer-events:none panel. Attached from GameEngine.ts:236. |
+| 8 | `src/screens/debug/networkMap.ts:201` | `mp:topologyUpdated` | Dev network-topology graph redraw. | Dev tool; unsubscribes on close. |
+| 9 | `src/debug/eventLog.ts:133` | `bus.onAny` (whitelist) + hook capture | Dev 500-entry ring buffer. `DEFAULT_BUS_EVENT_TYPES` whitelist (10 kinds): `state:committed`, `hero:moved`, `settlement:captured`, `battle:resolved`, `turn:ended`, `phase:changed`, `round:changed`, `day:changed`, `economy:goldChanged`, `economy:warehouseChanged`. `wrapHooks` also captures every `hooks.logEvent` call (source `hook`), which is how `battle_started` is staged for `onBattleResolved`. Consumed by `devConsole` and `debugCommands`. | Dev only (`attachEventLog`, GameEngine.ts:110). |
 
 ### 7.4 Signal disposition — every `GameEvent` type
 
@@ -283,10 +283,10 @@ The poll route (`GET /games/:name/events`) is a pull transport, not a push consu
 | `mp:logRow` | multiplayerSync.ts:271 | logPanel.ts:185 | Live |
 | `mp:eventsApplied` | multiplayerSync.ts:298 | garrisonEventBridge.ts:154 | Live |
 | `mp:resynced` | multiplayerSync.ts:333 | garrisonEventBridge.ts:155 | Live |
-| `mp:stateChanged` | multiplayerSync.ts:340 | mpPresenceHint.ts:83 | Live |
+| `mp:stateChanged` | multiplayerSync.ts:340 | mpPresenceHint.ts:83, aiThinkingHint.ts:111 | Live |
 | `mp:presenceUpdated` | multiplayerSync.ts:323, :388 | mpPresenceHint.ts:84 | Live |
 | `mp:topologyUpdated` | multiplayerSync.ts:395 | networkMap.ts:201 (dev) | Dev-only consumer |
-| `mp:turnStarted` | multiplayerSync.ts:348 | **none** | Emit-only, zero subscribers today; retained deliberately — the server-side-AI-actor plan (`.kilo/plan/2026-09-30-server-side-ai-actor.md`) anticipates an "AI is thinking" indicator consuming it |
+| `mp:turnStarted` | multiplayerSync.ts:348 | aiThinkingHint.ts:112 | Live — the server-side-AI-actor plan's anticipated "AI is thinking" indicator shipped 2026-09-30 (`aiThinkingHint.ts`); no longer emit-only |
 | `turn:ended` | turnController.ts:1118 | dev log only | Emit-only |
 | `phase:changed` | turnController.ts:1122 | dev log only | Emit-only |
 | `round:changed` | turnController.ts:1128 | dev log only | Emit-only |
@@ -354,21 +354,20 @@ Decision-relevant: none of the following can be used as integration points witho
 
 | Surface | State |
 |---|---|
-| `mp:turnStarted` | Emitted (multiplayerSync.ts:348); **zero** subscribers (retained deliberately, §7.4). |
 | `battle:resolved` | 4 emit sites, no production subscriber; result cards/toasts consume command return data + `consumeResolveBattleVerdicts`. Dev EventLog is the only listener. |
 | `economy:moraleChanged`, `calc:controlRange`, `calc:visionRange`, `calc:heroSpeed` | Declared in the union; never emitted, never consumed. |
-| `EntityMirror` (`src/render/scene/entityMirror.ts`) | Its **input** is wired: `multiplayerSync` bootstraps it on resync and feeds `applyEvent` per applied delta, and `GameEngine.initRendering` (GameEngine.ts:130) passes `getEntityMirror()` into `ViewManager.initializeRenderer` → the `MapRenderer` constructor (stored as a field with accessors at `renderer.ts:81` / `ViewManager.ts:37`). But its **output is read by nobody**: no caller reads `MultiplayerSync.getMirror()`/`ViewManager.getMirror()`/`MapRenderer.getMirror()`, nothing ever calls `mirror.update(dtMs)` to tick the tweens, and the `heroes`/`castles` maps are never read outside the class — rendering draws from the `GameStateManager`-derived `Hero[]`/`Castle[]` arrays passed to `MapRenderer.draw()`. A tween cache computing into the void. Wiring it fully is currently low-value: `GameStateManager.syncHeroVisualsToState` already tweens the only remotely-visible moves at the `TurnEnded` boundary, and `garrisonEventBridge` merges only garrison deltas mid-turn, so remote hero moves do not reach the live controller between boundaries either. Recommendation: wire it only alongside a live remote-hero merge path; otherwise delete it. |
+| `EntityMirror` (`src/render/scene/entityMirror.ts`) | Its **input** is wired: `multiplayerSync` bootstraps it on resync and feeds `applyEvent` per applied delta, and `GameEngine.initRendering` (GameEngine.ts:130) passes `getEntityMirror()` into `ViewManager.initializeRenderer` → the `MapRenderer` constructor (stored as a field with accessors at `renderer.ts:81` / `ViewManager.ts:37`). But its **output is read by nobody**: no caller reads `MultiplayerSync.getMirror()`/`ViewManager.getMirror()`/`MapRenderer.getMirror()`, nothing ever calls `mirror.update(dtMs)` to tick the tweens, and the `heroes`/`castles` maps are never read outside the class — rendering draws from the `GameStateManager`-derived `Hero[]`/`Castle[]` arrays passed to `MapRenderer.draw()`. A tween cache computing into the void. Wiring it fully is currently low-value: `GameStateManager.syncHeroVisualsToState` already tweens the only remotely-visible moves at the `TurnEnded` boundary, and `garrisonEventBridge` merges only the `isBridgedDelta` kinds (`UnitsRecruited`/`UnitsTransferred`/`TradeRouteCreated`) mid-turn, so remote hero moves do not reach the live controller between boundaries either. Owner decision 2026-09-30: **retained — keep, wire later.** When wired, prefer extending the bridge merge and letting `GameStateManager.syncHeroVisualsToState` do the tweening over introducing a second tween cache. |
 | `bus.once()` / `emitRaw` | `once()` defined, never used anywhere. `emitRaw` has one dev caller (developerSettingsMenu's "Fire" buttons, developerSettingsMenu.ts:102). |
 
 ## 10. Sharp edges and observations
 
-1. **7 engine kinds are invisible to the delta path** (§5.1 #18-24). Their state effects only arrive when a `TurnEnded` (or any resync) refetches — mid-turn, a remote seat may briefly miss `BuildingsPlaced`/wagon/trade-route changes until the next boundary.
+1. **6 engine kinds are invisible to the delta path** (§5.1 #18-21 and #23-24 — `TradeRouteCreated` left the set 2026-09-30). Their state effects only arrive when a `TurnEnded` (or any resync) refetches — mid-turn, a remote seat may briefly miss `BuildingsPlaced`/wagon/trade-route changes until the next boundary.
 2. **The log is not solely server-authored.** `POST /api/games/:name/events` accepts unauthenticated kinds by design, now bounded: `kind` must match `^[a-z0-9_]{1,64}$` and the payload JSON is capped at 8192 chars (both 400 before the game 404).
-3. **Dual writers for turn lifecycle.** The `EndTurn` command (`commandHandler.ts:689-714`) and the legacy `POST /games/:name/end-turn` route both append the same four audit kinds; the client no longer duplicates them (§2.4).
+3. **Dual writers for turn lifecycle — resolved.** The legacy `POST /games/:name/end-turn` route (the client-supplied-state variant) was removed 2026-09-30; the `EndTurn` command (the `commandHandler.ts` `EndTurn` case) is now the sole writer of the four turn-lifecycle audit kinds (`turn_ended`, `round_ended`, `round_started`, `ai_turn_started`), and the client no longer duplicates them (§2.4).
 4. **One LISTEN connection per API process.** Multi-process deployments each hold their own connection and fan-out — the explicitly noted cue for the future broker stage of the SSE plan.
 5. **`append()` returns 0 as a nothing-inserted sentinel** (BIGSERIAL starts at 1) rather than widening to `number | null` for a path callers never hit (they append only after the game is known to exist).
 6. **The mirror renders nothing** (§9) — any future "smooth remote-hero tween" work must first make someone actually read `EntityMirror`'s entities and tick it.
-7. **Beware the emit-only bus family** (§7.4): ten `state:`-family signals are heard only by the dev EventLog. Wiring a production consumer onto one is safe (they are emitted); wiring onto `economy:moraleChanged`/`calc:*` is not (nothing fires), and `mp:turnStarted` fires but has zero production subscribers (retained deliberately, §7.4).
+7. **Beware the emit-only bus family** (§7.4): ten `state:`-family signals are heard only by the dev EventLog. Wiring a production consumer onto one is safe (they are emitted); wiring onto `economy:moraleChanged`/`calc:*` is not (nothing fires). (`mp:turnStarted` left this club on 2026-09-30 — `aiThinkingHint.ts` is its first production consumer.)
 
 ## 2026-09-30 organization pass
 
@@ -377,22 +376,24 @@ A consistency pass over the event pipeline: machine-enforced classification, one
 | Change | Where |
 |---|---|
 | Engine-event classification registry: `EngineEventSyncClass` (`"apply" \| "resync" \| "ignore"`) + `ENGINE_EVENT_SYNC_CLASS`, an exhaustive `Record` over all 24 EngineEvent variants — adding a variant without classifying it is a compile error. The reducer switch is unchanged (still the executor) | `packages/engine/src/events/applyEvent.ts` |
-| `ENGINE_EVENT_KINDS` (admitted set, 17) derived from the registry by filtering out `"ignore"`; the hardcoded 17-kind list deleted | `src/io/multiplayerSync.ts` |
+| `ENGINE_EVENT_KINDS` (admitted set, 17 at this pass; 18 since `TradeRouteCreated` joined the applied set below) derived from the registry by filtering out `"ignore"`; the hardcoded 17-kind list deleted | `src/io/multiplayerSync.ts` |
 | The SSE tail's and the poll route's cursor query collapsed into one shared exported constant (`ROWS_AFTER_SQL`) — drift protection structural, was comment-only | `server/http/routes/eventStream.ts`, `server/routes.ts` |
 | Composite cursor index `(game_id, id)` (idempotent; the subsumed `game_events_game_id_idx` kept for now) | `server/migrations/019_game_events_game_id_id_idx.sql` |
 | `POST /games/:name/events` hardening: `kind` must match `^[a-z0-9_]{1,64}$` (400 `invalid kind`), payload JSON capped at 8192 chars (400 `payload too large`); both checked before the game 404. Still unauthenticated by design | `server/routes.ts` |
 | Duplicate turn-lifecycle audit rows removed: `turnHooks.logEvent` no longer POSTs `turn_ended`/`round_ended`/`round_started`/`ai_turn_started` — the server's `EndTurn` command appends the authoritative copies (identical payload shapes; the client copies were byte-identical duplicates with `actor_seat` NULL). `console.log` + dev EventLog capture unchanged | `src/game/turnHooks.ts` |
 | `eventRegistry.ts` deleted (empty-bodied `registerAllListeners` vestige); GameEngine no longer imports/calls it | `src/core/eventRegistry.ts` (removed), `src/managers/GameEngine.ts` |
 | Stale comment/type fixes: `applyEvent.ts` header resync-variant count, `multiplayerSync.ts` comment block, `api.ts` `GameEventRow` comment (no brittle count; points at `ENGINE_EVENT_KINDS`); `api.logEvent` return type corrected to `{ id: string; kind: string; payload: unknown; created_at: string }` (`id` is a string — `int8` over the wire) | `packages/engine/src/events/applyEvent.ts`, `src/io/multiplayerSync.ts`, `src/io/api.ts` |
+| Legacy `POST /games/:name/end-turn` retired (route handler + its private `sumPlayerGold` helper deleted) — replaced by the `EndTurn` command on the `POST /games/:name/commands` bus, the sole writer of the turn-lifecycle audit rows | `server/routes.ts` |
+| `TradeRouteCreated` reclassified `"ignore"` → `"apply"`: new `applyTradeRouteCreated` performs targeted construction, taking the event's `routeId` verbatim (server route ids derive from a counter hydration never restores, so the id cannot be re-derived locally) — classification now 11 apply / 7 resync / 6 ignore; `garrisonEventBridge`'s delta filter (renamed `isBridgedDelta`) admits it, so remote maps show new caravan routes mid-turn | `packages/engine/src/events/applyEvent.ts`, `src/game/garrisonEventBridge.ts` |
+| "AI is thinking" indicator: `aiThinkingHint.ts` — consumes `mp:turnStarted` + `mp:stateChanged`, pure `shouldShowAiThinking(state, activePlayerId, localSeat)` predicate (faction `"ai"` + not the local seat), HUD status-row element bottom-left stacked above `mpPresenceHint`; `mp:turnStarted`'s first production subscriber | `src/screens/shared/aiThinkingHint.ts` |
 
 Findings from the same pass:
 
 - **`TradeRouteRemoved` is a phantom kind** — declared in the union but never emitted: `UpdateTradeRoute` carries a remove flag and emits `TradeRouteUpdated` (`server/app/commandHandler.ts:1567-1588`).
-- **Remote non-garrison state generally arrives only at turn boundaries** — `garrisonEventBridge` merges only `UnitsRecruited`/`UnitsTransferred` mid-turn — so the 7 boundary kinds (§5.1 #18-24) are not uniquely second-class; the whole delta path is.
+- **Remote non-garrison state generally arrives only at turn boundaries** — `garrisonEventBridge` merges only `UnitsRecruited`/`UnitsTransferred`/`TradeRouteCreated` mid-turn — so the 6 remaining boundary kinds (§5.1 #18-21, #23-24) are not uniquely second-class; the whole delta path is.
 
 Recommendations not yet taken:
 
-- **EntityMirror wire-or-delete** (§9).
-- **Boundary-kind delta appliers**: only `TradeRouteCreated` is payload-derivable (its caravan markers are the only observable staleness); `BuildingsPlaced`'s payload is too thin, and the city view is own-only.
-- **Retire the legacy `POST /games/:name/end-turn` route**: no repo callers; kept for stale LAN bundles; already client-trusted/drifted.
+- **EntityMirror** (§9): **decided 2026-09-30 — retained** (keep, wire later); when wired, prefer extending the bridge merge + `GameStateManager.syncHeroVisualsToState` tweening over a second tween cache.
+- **Boundary-kind delta appliers**: taken for `TradeRouteCreated` (now an applied delta, §5.1 #22); of the 6 remaining boundary kinds, `BuildingsPlaced`'s payload is too thin, and the city view is own-only.
 - **Drop the subsumed `game_events_game_id_idx`** once 019 has soaked.

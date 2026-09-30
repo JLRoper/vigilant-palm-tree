@@ -70,6 +70,8 @@ export function buildingHeight(kind: BuildingKind, level: number): number {
     woodcutterHut: 18,
     arcaneFont: 34,
     stables: 28,
+    huntingLodge: 24,
+    eyrie: 40,
   };
   return (base[kind] ?? 24) + (level - 1) * 12;
 }

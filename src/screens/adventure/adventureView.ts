@@ -5,6 +5,7 @@ import { MapRenderer } from "../../render/renderer";
 import { Hero } from "../../entities/hero";
 import { findPath } from "../../map/pathfinding";
 import type { GameState } from "../../state/gameState";
+import type { PlayerId } from "@heroes/contracts";
 import type { TurnController } from "../../state/turnController";
 import type { PathPreviewLock } from "../../managers/GameStateManager";
 import {
@@ -51,6 +52,7 @@ export interface AdventureViewOptions {
   getValidCharterHexes?: () => Set<string> | null;
   onTileInspect?: (tile: Axial | null) => void;
   isCityOpen?: () => boolean;
+  getLocalSeat?: () => PlayerId | null;
 }
 
 function hoverChanged(a: Axial | null, b: Axial | null): boolean {
@@ -135,7 +137,7 @@ export class AdventureView {
   }
 
   private isPlayerTurn(): boolean {
-    return this.state.phase.kind === "PLAYER_TURN" && this.state.activePlayerId === 0;
+    return this.state.phase.kind === "PLAYER_TURN" && this.state.activePlayerId === (this.opts.getLocalSeat?.() ?? 0);
   }
 
   setMap(map: GameMap): void {
@@ -544,6 +546,7 @@ export class AdventureView {
       isPlayerTurn: this.isPlayerTurn(),
       charterMode: this.opts.getCharterMode?.() ?? false,
       validCharterHexes: this.opts.getValidCharterHexes?.() ?? null,
+      localSeat: this.opts.getLocalSeat?.() ?? null,
     });
     this.applyClickIntent(intent);
   }

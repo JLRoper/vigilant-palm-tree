@@ -21,7 +21,9 @@ export type BuildingKind =
   | "goldMine"
   | "woodcutterHut"
   | "arcaneFont"
-  | "stables";
+  | "stables"
+  | "huntingLodge"
+  | "eyrie";
 
 export interface BuildingDef {
   gx: number;

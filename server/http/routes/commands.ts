@@ -3,6 +3,7 @@ import type { BuildingDef, BuildingKind, BuildingUpgradeRequest, Command, Platoo
 import { ARMY_STACK_SLOTS, VALID_HORSE_VARIANTS } from "@heroes/engine";
 import { handleCommandTransactional, createLiveCommandDeps, type LiveCommandDeps } from "../../app/commandHandler";
 import { touchSeat } from "../../app/dropPolicy";
+import { pool } from "../../persistence/db";
 import { attachAuth } from "../../auth";
 import { attachPlayerSeat } from "../../middleware/attachPlayerSeat";
 
@@ -709,6 +710,52 @@ function parseCommand(body: unknown, gameName: string): Command | null {
   return null;
 }
 
+// D10 (plan/2026-09-30-server-side-ai-actor.md): client-origin commands
+// naming an AI seat of a server-driven game are rejected before any state
+// is touched -- the driver is the only legitimate actor for those seats,
+// and old-browser AI-seat commands (anonymous callers fully trust
+// command.actor) must not race it. Checked AFTER actor_mismatch (a
+// signed-in caller asserting a seat that isn't theirs is rejected first)
+// and BEFORE touchSeat, so AI seats never enter the presence map
+// (neutralizing the dropPolicy turn-skip hazard class by construction).
+// One cheap cached read per game (attachPlayerSeat's membership-cache
+// pattern: 5s TTL, in-memory map keyed by game name); the driver and
+// dropPolicy dispatch internally and never pass through this route.
+const AI_SEAT_CACHE_TTL_MS = 5_000;
+
+interface AiSeatInfo {
+  serverDriven: boolean;
+  aiSeats: ReadonlySet<number>;
+  loadedAt: number;
+}
+
+const aiSeatCache = new Map<string, AiSeatInfo>();
+
+async function loadAiSeatInfo(gameName: string): Promise<AiSeatInfo | null> {
+  const cached = aiSeatCache.get(gameName);
+  if (cached && Date.now() - cached.loadedAt < AI_SEAT_CACHE_TTL_MS) {
+    return cached;
+  }
+  const r = await pool.query<{ ai_driver: string | null; players: { id: number; faction: string }[] | null }>(
+    `SELECT (lobby->>'aiDriver') AS ai_driver, players FROM games WHERE name = $1`,
+    [gameName],
+  );
+  if (r.rowCount === 0) return null;
+  const players = r.rows[0].players ?? [];
+  const info: AiSeatInfo = {
+    serverDriven: r.rows[0].ai_driver === "server",
+    aiSeats: new Set(players.filter((p) => p.faction === "ai").map((p) => p.id)),
+    loadedAt: Date.now(),
+  };
+  aiSeatCache.set(gameName, info);
+  return info;
+}
+
+/** Test/cache hook: drop the cached ai-seat info for one game (POST /games recreations). */
+export function invalidateAiSeatCache(gameName: string): void {
+  aiSeatCache.delete(gameName);
+}
+
 // req.params is typed explicitly here because this router is mounted by
 // routes.ts on a path that carries :name ("/games/:name/commands") --
 // Express's own typings only see this router's own "/" pattern, not its
@@ -729,6 +776,11 @@ commandsRouter.post("/", async (req: Request<{ name: string }>, res) => {
   // back to trusting command.actor, same as the app worked before #179.
   if (req.playerSeat !== undefined && command.actor !== req.playerSeat) {
     res.status(403).json({ error: "actor_mismatch" });
+    return;
+  }
+  const aiSeatInfo = await loadAiSeatInfo(gameName);
+  if (aiSeatInfo?.serverDriven && aiSeatInfo.aiSeats.has(command.actor)) {
+    res.status(403).json({ error: "ai_seat_command_forbidden" });
     return;
   }
   // Drop-policy heartbeat (docs/multiplayer.md, shipped 2026-09-27): a

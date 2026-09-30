@@ -1504,7 +1504,9 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         command.gameName,
         result.state.heroes,
         result.state.settlements,
+        { players: result.state.players },
       );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
       const event: EngineEvent = {
         type: "WagonsAssigned",
         actor: command.actor,
@@ -1523,6 +1525,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         command.gameName,
         result.state.heroes,
         result.state.settlements,
+        { players: result.state.players },
       );
       await dualWriteEntities(deps, command.gameName, state, result.state);
       const event: EngineEvent = {

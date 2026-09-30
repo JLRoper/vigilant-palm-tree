@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { EngineEvent } from "@heroes/contracts";
 import { applyEngineEvent } from "@heroes/engine";
-import { emptyWarehouse, makeCharter, makeHero, makeSettlement, makeState } from "../charter/_helpers";
+import { emptyWarehouse, makeCharter, makeHero, makePlayer, makeSettlement, makeState } from "../charter/_helpers";
 
 test("HeroMoved moves the hero, records the previous tile, and extends the trail", () => {
   const state = makeState({ heroes: [makeHero("h1", 1, 5, 5)], settlements: [] });
@@ -360,15 +360,6 @@ test("the payload-fact-only events all ask for a resync", () => {
     { type: "ResourcesTransferred", actor: 0, heroId: "h0", settlementId: "s0", direction: "load" },
     { type: "WagonsAssigned", actor: 0, heroId: "h0", delta: 1 },
     { type: "WagonsBought", actor: 0, settlementId: "s0", count: 2 },
-    {
-      type: "TradeRouteCreated",
-      actor: 0,
-      routeId: "r0",
-      fromSettlementId: "s0",
-      toSettlementId: "s1",
-      resource: "wood",
-      wagons: 1,
-    },
     { type: "TradeRouteUpdated", actor: 0, routeId: "r0" },
     { type: "TradeRouteRemoved", actor: 0, routeId: "r0" },
     {
@@ -543,6 +534,115 @@ test("UnitsTransferred against drifted positions resyncs untouched", () => {
 
   assert.equal(result.outcome, "resync");
   assert.equal(result.state, state);
+});
+
+test("TradeRouteCreated appends the route with the event's id and debits the actor's wagons", () => {
+  const state = makeState({
+    players: [
+      { ...makePlayer(0, "player", ["h0"], ["s0"]), wagonsUnassigned: 5 },
+      makePlayer(1, "ai", ["h1"], []),
+    ],
+    settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 0, 4, 4)],
+  });
+  const result = applyEngineEvent(state, {
+    type: "TradeRouteCreated",
+    actor: 0,
+    routeId: "route7",
+    fromSettlementId: "s0",
+    toSettlementId: "s1",
+    resource: "wood",
+    wagons: 3,
+  });
+
+  assert.equal(result.outcome, "applied");
+  const routes = result.state.tradeRoutes ?? [];
+  assert.equal(routes.length, 1);
+  assert.deepEqual(routes[0], {
+    id: "route7",
+    fromSettlementId: "s0",
+    toSettlementId: "s1",
+    resource: "wood",
+    wagons: 3,
+    caravan: null,
+  });
+  assert.equal(result.state.players.find((p) => p.id === 0)?.wagonsUnassigned, 2);
+  assert.equal(result.state.nextTradeRouteId, 8, "the counter bumps monotonically past the event's id");
+  assert.equal(result.state.dirty, true);
+  assert.equal(state.tradeRoutes, undefined, "input state is not mutated");
+});
+
+test("an exact-tuple TradeRouteCreated duplicate is a noop, not a second route", () => {
+  const state = makeState({
+    players: [
+      { ...makePlayer(0, "player", ["h0"], ["s0"]), wagonsUnassigned: 5 },
+      makePlayer(1, "ai", ["h1"], []),
+    ],
+    settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 0, 4, 4)],
+  });
+  const event = {
+    type: "TradeRouteCreated",
+    actor: 0,
+    routeId: "route0",
+    fromSettlementId: "s0",
+    toSettlementId: "s1",
+    resource: "wood",
+    wagons: 3,
+  } as const;
+
+  const once = applyEngineEvent(state, event);
+  assert.equal(once.outcome, "applied");
+  assert.equal(
+    applyEngineEvent(once.state, event).outcome,
+    "noop",
+    "the id + endpoints + resource + wagons + null-caravan match is what an already-applied event looks like",
+  );
+  assert.equal((once.state.tradeRoutes ?? []).length, 1);
+});
+
+test("TradeRouteCreated resyncs untouched on a missing settlement, player, or insufficient wagons", () => {
+  const state = makeState({
+    players: [
+      { ...makePlayer(0, "player", ["h0"], ["s0"]), wagonsUnassigned: 5 },
+      makePlayer(1, "ai", ["h1"], []),
+    ],
+    settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 0, 4, 4)],
+  });
+
+  const ghostSettlement = applyEngineEvent(state, {
+    type: "TradeRouteCreated",
+    actor: 0,
+    routeId: "route0",
+    fromSettlementId: "ghost",
+    toSettlementId: "s1",
+    resource: "wood",
+    wagons: 3,
+  });
+  assert.equal(ghostSettlement.outcome, "resync");
+  assert.equal(ghostSettlement.state, state);
+
+  const ghostPlayer = applyEngineEvent(state, {
+    type: "TradeRouteCreated",
+    actor: 5,
+    routeId: "route0",
+    fromSettlementId: "s0",
+    toSettlementId: "s1",
+    resource: "wood",
+    wagons: 3,
+  });
+  assert.equal(ghostPlayer.outcome, "resync");
+  assert.equal(ghostPlayer.state, state);
+
+  const insufficient = applyEngineEvent(state, {
+    type: "TradeRouteCreated",
+    actor: 0,
+    routeId: "route0",
+    fromSettlementId: "s0",
+    toSettlementId: "s1",
+    resource: "wood",
+    wagons: 9,
+  });
+  assert.equal(insufficient.outcome, "resync", "the route is absent and the player cannot cover the wagons");
+  assert.equal(insufficient.state, state);
 });
 
 test("SettlementBattleResolved still asks for a resync -- stacks/gold are not in its payload", () => {

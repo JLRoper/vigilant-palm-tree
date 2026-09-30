@@ -20,8 +20,10 @@ import { bus } from "../core/eventBus";
 import { attachEventLog, type EventLog } from "../debug/eventLog";
 import { mountPersistentDevConsole, type DevConsoleHandle } from "../debug/devConsole";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
+import { shouldDriveAi } from "../io/serverDrivenGames";
 import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
+import { attachAiThinkingHint } from "@screens/shared/aiThinkingHint";
 import { attachFirstTurnHint } from "@screens/shared/firstTurnHint";
 import { createLogPanel } from "@screens/shared/logPanel";
 import { getEntityMirror } from "../io/multiplayerSync";
@@ -65,9 +67,12 @@ export class GameEngine {
     );
     // plan/2026-09-29-ai-enemies.md D3: seat 0's client drives the AI turn;
     // solo/no-server games have no in-memory seat and default to 0 (primary).
+    // Server-side AI actor (plan/2026-09-30-server-side-ai-actor.md Phase 1,
+    // Gate 1): a flagged game (lobby.aiDriver === "server") never drives
+    // locally -- the server's aiDriver owns those turns.
     this.state.setPrimaryActorSource(() => {
       const gameName = this.session.getActiveGameName();
-      return (getInMemoryLocalPlayerId(gameName ?? "") ?? 0) === 0;
+      return shouldDriveAi(gameName, getInMemoryLocalPlayerId(gameName ?? ""));
     });
   }
 
@@ -147,6 +152,7 @@ export class GameEngine {
         this.fullFrame();
       },
       isCityOpen: () => this.ui.getCityView()?.isOpen() ?? false,
+      getLocalSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
     });
   }
 
@@ -227,6 +233,9 @@ export class GameEngine {
     // while a disconnected seat holds the active turn (mp:presenceUpdated
     // + mp:stateChanged off the bus).
     attachMpPresenceHint();
+    // "AI is thinking" turn indicator while an AI seat holds the turn
+    // (mp:stateChanged + mp:turnStarted off the bus); auto-hides on turn end.
+    attachAiThinkingHint();
     // F12a (playtest fixes 2026-09-29): one-time first-turn hint. Shows on
     // the first state:committed after a game becomes active (SessionManager
     // adopt() precedes loadGame's replaceState, so activeGameName is already
@@ -246,7 +255,14 @@ export class GameEngine {
     attachGarrisonEventBridge({
       getController: () => this.state.getTurnController(),
       replaceState: (next) => this.state.replaceState(next),
-      isPrimaryActor: () => (getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0) === 0,
+      // Server-side AI actor Gate 2: same policy as Gate 1 -- a flagged
+      // game's local client never mutates during AI turns, so the bridge's
+      // safe-phase gates open up there while unflagged behavior is
+      // byte-identical. localSeat stays the real seat (selection rules).
+      isPrimaryActor: () => {
+        const gameName = this.session.getActiveGameName();
+        return shouldDriveAi(gameName, getInMemoryLocalPlayerId(gameName ?? ""));
+      },
       localSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
     });
   }

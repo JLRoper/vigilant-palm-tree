@@ -2141,3 +2141,109 @@ test("UpgradeSettlement survives an EndTurn round-trip -- the gap this port clos
     "settlement upgrade must survive EndTurn's hydrate-then-persist cycle",
   );
 });
+
+// Wagon-pool persistence regression: the games.players JSONB column is the
+// player's ONLY persistence home (players aren't dual-written anywhere), so
+// a command that mutates the pool but persists without extra.players lets
+// the pool resurrect on the very next command's rehydration.
+test("AssignWagons persists the pool and hero wagons across rehydration", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { wagons: 0 })],
+    [makeSettlement("s0", 0, 2, 2)],
+    {
+      players: [
+        { ...PLAYERS[0], wagonsOwned: 5, wagonsUnassigned: 2 },
+        PLAYERS[1],
+      ],
+    },
+  );
+  const { gameRepo, heroRepo, deps } = makeDeps(row);
+  const assign: Command = { kind: "AssignWagons", gameName: "test-game", actor: 0, heroId: "h0", delta: 2 };
+  const result = await handleCommand(assign, deps);
+  assert.equal(result.ok, true);
+  assert.equal(
+    gameRepo.rows["test-game"].players[0].wagonsUnassigned,
+    0,
+    "pool decrement must reach the games.players JSONB",
+  );
+  assert.equal(
+    heroRepo.rows["test-game"].h0.wagons,
+    2,
+    "hero wagons must reach the granular dual-write",
+  );
+
+  const again = await handleCommand(assign, deps);
+  assert.equal(again.ok, false, "pre-fix the stale pool resurrected and this re-dispatch succeeded");
+  assert.equal(again.reason, "not_enough_wagons_unassigned");
+});
+
+test("BuyWagons persists the pool across rehydration", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 1000,
+        warehouse: { wood: 50, stone: 0, iron: 0, arcane: 0, food: 0 },
+      }),
+    ],
+    {
+      players: [
+        { ...PLAYERS[0], wagonsOwned: 0, wagonsUnassigned: 0 },
+        PLAYERS[1],
+      ],
+    },
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const buy: Command = { kind: "BuyWagons", gameName: "test-game", actor: 0, settlementId: "s0", count: 2 };
+  const result = await handleCommand(buy, deps);
+  assert.equal(result.ok, true);
+  assert.equal(gameRepo.rows["test-game"].players[0].wagonsOwned, 2);
+  assert.equal(gameRepo.rows["test-game"].players[0].wagonsUnassigned, 2);
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 600);
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.warehouse.wood, 40);
+
+  const assign = await handleCommand(
+    { kind: "AssignWagons", gameName: "test-game", actor: 0, heroId: "h0", delta: 2 },
+    deps,
+  );
+  assert.equal(assign.ok, true, "pre-fix the unpersisted pool reverted to 0 and this assign failed");
+});
+
+test("AssignWagons persists the pool on the JSONB-fallback hydration path too", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { wagons: 0 })],
+    [makeSettlement("s0", 0, 2, 2)],
+    {
+      players: [
+        { ...PLAYERS[0], wagonsOwned: 5, wagonsUnassigned: 2 },
+        PLAYERS[1],
+      ],
+    },
+  );
+  const gameRepo = createMockGameRepo({ [row.name as string]: row });
+  const eventRepo = createMockEventRepo();
+  const heroRepo = createMockHeroRepo();
+  const settlementRepo = createMockSettlementRepo();
+  const charterRepo = createMockCharterRepo();
+  const deps = {
+    gameRepo,
+    eventRepo,
+    heroRepo,
+    settlementRepo,
+    charterRepo,
+    ctx: { rng: () => 0.5, catalog: { unitTypes: [] as UnitType[] } },
+  };
+
+  const assign: Command = { kind: "AssignWagons", gameName: "test-game", actor: 0, heroId: "h0", delta: 2 };
+  const result = await handleCommand(assign, deps);
+  assert.equal(result.ok, true);
+  assert.equal(
+    gameRepo.rows["test-game"].players[0].wagonsUnassigned,
+    0,
+    "pool decrement must reach the games.players JSONB even when hydration fell back to it",
+  );
+
+  const again = await handleCommand(assign, deps);
+  assert.equal(again.ok, false);
+  assert.equal(again.reason, "not_enough_wagons_unassigned");
+});

@@ -20,13 +20,13 @@ export interface UnitType {
   specialtyPriority: number;
   // Optional so pre-migration catalogs (and the ~dozens of UnitType literals
   // in tests) stay valid; the helpers below apply the defaults.
-  tier?: 1 | 2 | 3;
+  tier?: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   upkeepGold?: number;
   upkeepFood?: number;
   range?: number;
 }
 
-export function unitTier(t: UnitType | undefined): 1 | 2 | 3 {
+export function unitTier(t: UnitType | undefined): 1 | 2 | 3 | 4 | 5 | 6 | 7 {
   return t?.tier ?? 1;
 }
 

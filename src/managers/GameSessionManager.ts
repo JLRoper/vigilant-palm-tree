@@ -13,6 +13,7 @@ import type { Game, TileRow } from "../io/api";
 import { notePersisted } from "../io/commands";
 import { setInMemoryLocalPlayerId } from "../players/localPlayer";
 import { getMultiplayerSync } from "../io/multiplayerSync";
+import { clearServerDriven, syncServerDrivenFromGame } from "../io/serverDrivenGames";
 import { getCachedAuth } from "../io/authStorage";
 
 /**
@@ -60,6 +61,14 @@ export class GameSessionManager {
     notePersisted(loaded.updated_at);
     const map = GameMap.fromTiles(tiles);
     const inferredSize = this.inferMapSize(map);
+    // Server-driven flag (plan/2026-09-30-server-side-ai-actor.md D8): every
+    // creation/load path funnels through here, so this is the registry's
+    // feed point for game-bearing responses; a switch to a different game
+    // drops the previous game's entry.
+    if (this.currentGameName !== null && this.currentGameName !== loaded.name) {
+      clearServerDriven(this.currentGameName);
+    }
+    syncServerDrivenFromGame(loaded);
     this.syncMetadata(loaded.name, loaded.seed, inferredSize);
     this.setGameMap(map);
     this.state.setGameMap(map);

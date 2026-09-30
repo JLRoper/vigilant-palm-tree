@@ -4,6 +4,7 @@ import { initSchema, pool } from "./db";
 import { router } from "./routes";
 import { errorHandler } from "./errorHandler";
 import { startDropPolicyScanner } from "./app/dropPolicy";
+import { startAiDriver } from "./app/aiDriver";
 
 const PORT = Number(process.env.API_PORT ?? 3001);
 const BIND_HOST = process.env.LAN_HOST === "1" ? "0.0.0.0" : "127.0.0.1";
@@ -18,6 +19,12 @@ async function main() {
   // any in-flight grace clock (accepted tradeoff, see the doc's locked
   // decisions), and the unref'd timer never holds the process open.
   startDropPolicyScanner();
+  // Server-side AI actor (plan/2026-09-30-server-side-ai-actor.md Phase 1):
+  // the scanner that drives AI seats end-to-end for games flagged
+  // lobby.aiDriver === "server" (created with enemySlots > 0). Same
+  // in-process, unref'd-interval shape as the drop policy scanner; its
+  // commands dispatch through handleCommandTransactional, never HTTP.
+  startAiDriver();
   const app = express();
   app.use(cors());
   app.use(express.raw({ type: ["image/*", "application/octet-stream"], limit: "10mb" }));

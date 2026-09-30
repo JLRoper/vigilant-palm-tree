@@ -853,3 +853,182 @@ test("a remote human-seat row still applies on the primary client (only AI seats
   assert.equal(stackTotal(sync.getState()?.settlements.s0.stacks), 9);
   sync.stop();
 });
+
+// Trade routes (2026-09-30): TradeRouteCreated joined the applied deltas --
+// the sync reconstructs the route from the event's own routeId (the server
+// derives ids from a counter hydration never restores, so the event payload
+// is the only source of truth for the id).
+
+test("a TradeRouteCreated delta applies to the sync state and fans out", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("gm7", {
+      lastEventId: 10,
+      heroes: [makeHero("h1", 1, 8, 8)],
+      settlements: [makeSettlement("s0", 1, 8, 8), makeSettlement("s1", 1, 10, 10)],
+      players: [
+        makePlayer(0, "player", ["h0"], []),
+        { ...makePlayer(1, "player", ["h1"], ["s0", "s1"]), wagonsUnassigned: 4 },
+      ],
+    }),
+    events: [],
+    calls: [],
+  };
+  installFetch(server);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("gm7", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const logKinds: string[] = [];
+  bus.on("mp:logRow", (ev: { row: { kind: string } }) => logKinds.push(ev.row.kind));
+  const batches: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => batches.push(ev.events));
+
+  const created: EngineEvent = {
+    type: "TradeRouteCreated",
+    actor: 1,
+    routeId: "route0",
+    fromSettlementId: "s0",
+    toSettlementId: "s1",
+    resource: "wood",
+    wagons: 2,
+  };
+  server.events.push(row(11, created, 1));
+  await sync.pollOnce();
+
+  assert.deepEqual(logKinds, ["TradeRouteCreated"], "the row fans out to the log");
+  assert.deepEqual(batches, [[created]]);
+  assert.equal(sync.getCursor(), 11);
+  const routes = sync.getState()?.tradeRoutes ?? [];
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0]?.id, "route0", "the route carries the event's routeId");
+  assert.equal(routes[0]?.caravan, null, "the caravan starts null, at origin");
+  assert.equal(
+    sync.getState()?.players.find((p) => p.id === 1)?.wagonsUnassigned,
+    2,
+    "the actor's unassigned wagons were debited",
+  );
+  sync.stop();
+});
+
+// Server-side AI actor (plan/2026-09-30-server-side-ai-actor.md Phase 1,
+// Gate 3): on a flagged game (lobby.aiDriver === "server") the seat-0
+// browser no longer drives the AI tick, so AI-seat rows must APPLY here --
+// skipping a TurnEnded row would take its load-bearing full-refetch resync
+// with it and freeze the spectator mid-AI-turn. Unflagged games keep the
+// 2026-09-29 skip (the gm4/gm5/gm6 pins above stay authoritative).
+
+const serverDrivenPolicy = await import("../../src/io/serverDrivenGames");
+
+function flaggedLobby(): { claimed: {}; aiDriver: "server" } {
+  return { claimed: {}, aiDriver: "server" };
+}
+
+test("a flagged game's AI-seat rows apply on the seat-0 client", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("sda1", {
+      lastEventId: 10,
+      heroes: [makeHero("h1", 1, 8, 8)],
+      settlements: [
+        {
+          ...makeSettlement("s0", 1, 8, 8),
+          stacks: [{ entries: [{ unitTypeId: "pikeman", count: 4 }] }],
+        },
+      ],
+      players: [makePlayer(0, "player", ["h0"], []), makePlayer(1, "ai", ["h1"], ["s0"])],
+    }),
+    events: [],
+    calls: [],
+  };
+  server.game.lobby = flaggedLobby();
+  installFetch(server);
+  serverDrivenPolicy.clearServerDriven("sda1");
+  serverDrivenPolicy.syncServerDrivenFromGame(server.game);
+  setInMemoryLocalPlayerId("sda1", 0);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("sda1", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const batches: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => batches.push(ev.events));
+
+  server.events.push(
+    row(11, { type: "UnitsRecruited", actor: 1, settlementId: "s0", unitTypeId: "pikeman", count: 5 }, 1),
+  );
+  await sync.pollOnce();
+
+  assert.deepEqual(batches.length, 1, "the driver's recruit is the spectator's state source");
+  assert.equal(stackTotal(sync.getState()?.settlements.s0.stacks), 9, "applied exactly once");
+  assert.equal(sync.getCursor(), 11);
+  sync.stop();
+  serverDrivenPolicy.clearServerDriven("sda1");
+});
+
+test("a flagged game's TurnEnded row still fires the full-refetch resync on seat 0", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("sda2", { lastEventId: 10, activePlayerId: 1 }),
+    events: [],
+    calls: [],
+  };
+  server.game.lobby = flaggedLobby();
+  installFetch(server);
+  serverDrivenPolicy.clearServerDriven("sda2");
+  serverDrivenPolicy.syncServerDrivenFromGame(server.game);
+  setInMemoryLocalPlayerId("sda2", 0);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("sda2", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const resyncs: string[] = [];
+  bus.on("mp:resynced", (ev: { reason: string }) => resyncs.push(ev.reason));
+  const batches: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => batches.push(ev.events));
+
+  server.game = makeGameRow("sda2", { lastEventId: 11, activePlayerId: 0 });
+  server.game.lobby = flaggedLobby();
+  server.events.push(
+    row(11, { type: "TurnEnded", actor: 1, round: 1, day: 2, activePlayerId: 0, wrapped: false }, 1),
+  );
+  await sync.pollOnce();
+
+  assert.deepEqual(resyncs, ["event_not_derivable"], "the AI turn's completion repairs the spectator");
+  assert.deepEqual(batches, [], "a resync-class row never lands in the applied batch");
+  assert.equal(sync.getCursor(), 11);
+  assert.equal(sync.getState()?.activePlayerId, 0, "the fetched state ended the AI turn");
+  sync.stop();
+  serverDrivenPolicy.clearServerDriven("sda2");
+});
+
+test("resync() reads the aiDriver flag off the fetched row, including a rollback flip", async () => {
+  const server: FakeServer = { game: makeGameRow("sda3", { lastEventId: 2 }), events: [], calls: [] };
+  server.game.lobby = flaggedLobby();
+  installFetch(server);
+  serverDrivenPolicy.clearServerDriven("sda3");
+  serverDrivenPolicy.clearServerDriven("sda4");
+  serverDrivenPolicy.registerServerDriven("sda4");
+  const sync = new MultiplayerSync();
+
+  sync.start("sda3");
+  await sync.pollOnce();
+  assert.equal(
+    serverDrivenPolicy.isServerDriven("sda3"),
+    true,
+    "the resync's full game object feeds the registry (D8 read-point)",
+  );
+
+  server.game.lobby = { claimed: {} };
+  sync.stop();
+  sync.start("sda3");
+  await sync.pollOnce();
+  assert.equal(
+    serverDrivenPolicy.isServerDriven("sda3"),
+    false,
+    "a refetch without the flag clears the registration (server-controlled rollback)",
+  );
+  assert.equal(
+    serverDrivenPolicy.isServerDriven("sda4"),
+    true,
+    "only the fetched game's registration is touched",
+  );
+  sync.stop();
+  serverDrivenPolicy.clearServerDriven("sda4");
+});

@@ -2,6 +2,7 @@ import type { EngineEvent, GamePhase, GameState } from "@heroes/contracts";
 import { applyEngineEvent } from "@heroes/engine";
 import { bus } from "../core/eventBus";
 import type { MpEventsAppliedEvent, MpResyncedEvent } from "../core/events";
+import { isServerDriven } from "../io/serverDrivenGames";
 import type { TurnController } from "../state/turnController";
 
 export interface GarrisonEventBridgeDeps {
@@ -13,12 +14,18 @@ export interface GarrisonEventBridgeDeps {
 
 // The slice of the engine event stream this bridge carries into the local
 // TurnController: garrison writes (UnitsRecruited/UnitsTransferred arrive as
-// applied deltas) and settlement-garrison battle outcomes
-// (SettlementBattleResolved is not derivable from its payload, so it reaches
-// the controller as the full-refetch snapshot behind mp:resynced). Other
-// engine kinds keep their existing transport (mergeFromEndTurn / game load).
-function isGarrisonDelta(event: EngineEvent): boolean {
-  return event.type === "UnitsRecruited" || event.type === "UnitsTransferred";
+// applied deltas), trade-route creation (TradeRouteCreated likewise arrives
+// as an applied delta, targeted-constructed from its payload), and
+// settlement-garrison battle outcomes (SettlementBattleResolved is not
+// derivable from its payload, so it reaches the controller as the
+// full-refetch snapshot behind mp:resynced). Other engine kinds keep their
+// existing transport (mergeFromEndTurn / game load).
+function isBridgedDelta(event: EngineEvent): boolean {
+  return (
+    event.type === "UnitsRecruited" ||
+    event.type === "UnitsTransferred" ||
+    event.type === "TradeRouteCreated"
+  );
 }
 
 function blockedPhase(phase: GamePhase): boolean {
@@ -55,6 +62,23 @@ function mergeResynced(current: GameState, resynced: GameState, localSeat: numbe
       ? current.selectedSettlementId
       : null;
   return { ...resynced, selectedHeroId, selectedSettlementId, dirty: true };
+}
+
+// Turn-boundary reconciliation for server-driven games (plan
+// 2026-09-30-server-side-ai-actor.md Phase 1): onHumanTurnEnd restarts sync
+// unseeded, so the initial catch-up may already contain the aiDriver's
+// completed TurnEnded -- no future row will ever repair the live controller
+// parked in that AI turn. For a flagged game the local controller NEVER
+// mutates during an AI turn (the tick is gated off), so a full fetch that
+// shows the server has LEFT the AI turn the local controller sits in is
+// safe to adopt wholesale. A fetch still inside that same AI turn (same
+// round + seat) is a mid-turn snapshot: adopting it would rewind the deltas
+// already applied locally, so it is left to the deltas and the eventual
+// TurnEnded resync.
+function aiTurnSuperseded(local: GameState, fetched: GameState): boolean {
+  if (local.phase.kind !== "AI_TURN") return false;
+  if (fetched.phase.kind !== "AI_TURN") return true;
+  return fetched.activePlayerId !== local.activePlayerId || fetched.round > local.round;
 }
 
 export function attachGarrisonEventBridge(deps: GarrisonEventBridgeDeps): () => void {
@@ -118,7 +142,7 @@ export function attachGarrisonEventBridge(deps: GarrisonEventBridgeDeps): () => 
   };
 
   const onEventsApplied = (ev: MpEventsAppliedEvent): void => {
-    const batch = ev.events.filter(isGarrisonDelta);
+    const batch = ev.events.filter(isBridgedDelta);
     if (batch.length === 0) return;
     deferredDeltas.push(...batch);
     void runDeferredDeltas();
@@ -131,10 +155,18 @@ export function attachGarrisonEventBridge(deps: GarrisonEventBridgeDeps): () => 
   // Resync snapshots are self-contained server truths, so only safety gates
   // apply -- a snapshot that lands while unsafe is dropped outright, never
   // queued: queueing would apply a stale fetch over newer local state later.
+  // Server-driven games additionally reconcile initial/cursor_gap fetches
+  // (aiTurnSuperseded): unflagged games keep the event_not_derivable-only
+  // behavior byte-identical.
   const onResynced = (ev: MpResyncedEvent): void => {
-    if (ev.reason !== "event_not_derivable") return;
+    const serverDriven = isServerDriven(ev.gameName);
+    if (!serverDriven && ev.reason !== "event_not_derivable") return;
     if (merging) return;
     if (!safeForResync()) return;
+    if (serverDriven && ev.reason !== "event_not_derivable") {
+      const tc = deps.getController();
+      if (!tc || !aiTurnSuperseded(tc.getState(), ev.state)) return;
+    }
     void (async () => {
       merging = true;
       try {
@@ -144,6 +176,15 @@ export function attachGarrisonEventBridge(deps: GarrisonEventBridgeDeps): () => 
         if (!safeForResync()) return;
         const current = deps.getController();
         if (!current) return;
+        // The snapshot is server truth at its fetch cursor, so every queued
+        // delta is already baked into ev.state; adopting the snapshot with
+        // the queue intact re-applies each queued delta on top of it (W5-4:
+        // garrison peasantx270 doubled to x540). Discard at the adoption
+        // point -- nothing legitimate is lost, because resync() takes the
+        // snapshot and its cursor from the same GET, so any event committed
+        // after the fetch has an id above that cursor and the poll re-delivers
+        // it as a fresh delta.
+        deferredDeltas = [];
         deps.replaceState(mergeResynced(current.getState(), ev.state, deps.localSeat()));
       } finally {
         merging = false;

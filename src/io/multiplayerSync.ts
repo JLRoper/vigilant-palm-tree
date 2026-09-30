@@ -1,4 +1,5 @@
 import { api, eventStreamUrl, type Game, type GameEventRow } from "./api";
+import { isServerDriven, syncServerDrivenFromGame } from "./serverDrivenGames";
 import { applyEngineEvent, ENGINE_EVENT_SYNC_CLASS, hydrateGameState } from "@heroes/engine";
 import type { EngineEvent, GameState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
@@ -256,7 +257,15 @@ export class MultiplayerSync {
 
   private async applyRows(gameName: string, rows: GameEventRow[]): Promise<void> {
     const localSeat = getInMemoryLocalPlayerId(gameName);
-    const drivenAiSeats = localSeat === 0 ? aiSeatsOf(this.lastSeen) : NO_SEATS;
+    // Server-side AI actor Gate 3 (plan/2026-09-30-server-side-ai-actor.md):
+    // on a flagged game the local seat-0 client no longer drives the AI
+    // tick, so AI-seat rows must APPLY here (a skipped TurnEnded row would
+    // take its load-bearing full-refetch resync with it and freeze the
+    // spectator mid-AI-turn). The explicit localSeat === 0 (not
+    // shouldDriveAi) keeps the unknown-seat semantics: a null seat keeps
+    // applying, which is the non-primary client's only source of AI state.
+    const drivenAiSeats =
+      localSeat === 0 && !isServerDriven(gameName) ? aiSeatsOf(this.lastSeen) : NO_SEATS;
     const prev = this.lastSeen;
     let state = this.lastSeen;
     const applied: EngineEvent[] = [];
@@ -312,6 +321,10 @@ export class MultiplayerSync {
     const rttMs = performance.now() - startedAt;
     if (this.gameName !== gameName) return;
     this.claims = readClaims(game);
+    // D8 read-point: the resync holds the full game object, so it both
+    // discovers a late flag and propagates a server-side rollback (flag
+    // flipped off) on the next full fetch.
+    syncServerDrivenFromGame(game);
     if (getInMemoryLocalPlayerId(gameName) === null && this.claims[String(0)] && game.players[0]) {
       setInMemoryLocalPlayerId(gameName, 0);
     }

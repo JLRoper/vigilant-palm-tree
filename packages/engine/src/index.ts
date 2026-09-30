@@ -49,6 +49,7 @@ export * from "./settlement/advance";
 export * from "./settlement/populationGrowth";
 export * from "./settlement/produceResources";
 export * from "./hero/move";
+export * from "./ai/aiBrain";
 export * from "./hero/recruit";
 export * from "./hero/stacks";
 export * from "./hero/upkeep";

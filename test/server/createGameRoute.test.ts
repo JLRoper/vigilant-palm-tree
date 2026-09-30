@@ -41,6 +41,7 @@ type CreatedRow = {
     seats?: number;
     humanSlots?: number;
     claimed?: Record<string, unknown>;
+    aiDriver?: string;
   };
 };
 
@@ -151,5 +152,34 @@ test("legacy path without humanSlots keeps the old default row (no lobby, engine
     assert.equal(row.players[0].faction, "player");
   } finally {
     await cleanupGame(name);
+  }
+});
+
+// D1 (plan/2026-09-30-server-side-ai-actor.md): the aiDriver flag rides the
+// lobby jsonb on every game created with enemySlots > 0; legacy/starter/
+// lobby games (D2) stay browser-driven.
+test("enemySlots > 0 persists lobby.aiDriver = 'server' inside the lobby jsonb", async () => {
+  const name = uniqueName();
+  try {
+    const { row } = await createGame({ name, humanSlots: 1, enemySlots: 2 });
+    assert.equal(row.lobby.aiDriver, "server");
+    assert.equal(row.lobby.seats, 1, "the flag does not disturb the human-based seat count");
+    assert.deepEqual(row.lobby.claimed, {});
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("games without enemySlots carry no aiDriver flag (browser-driven, D2)", async () => {
+  const legacy = uniqueName();
+  const lobbyOnly = uniqueName();
+  try {
+    const legacyRow = await createGame({ name: legacy });
+    assert.equal(legacyRow.row.lobby.aiDriver, undefined, "the legacy starter row has no flag despite its default AI seats");
+    const lobbyRow = await createGame({ name: lobbyOnly, humanSlots: 2 });
+    assert.equal(lobbyRow.row.lobby.aiDriver, undefined, "a plain multiplayer lobby has no flag");
+  } finally {
+    await cleanupGame(legacy);
+    await cleanupGame(lobbyOnly);
   }
 });

@@ -8,6 +8,7 @@ import type { HeroId, HeroState, SettlementId, SettlementState } from "@heroes/c
 import { pool } from "../../server/persistence/db";
 import { router } from "../../server/routes";
 import { errorHandler } from "../../server/errorHandler";
+import { getPresence } from "../../server/app/dropPolicy";
 import { emptyWarehouse, makeHero, makePlayer, makeSettlement } from "../charter/_helpers";
 import { loginAndClaim, authHeader } from "../helpers/authFlow";
 
@@ -541,6 +542,106 @@ test("SubmitBattleResult over HTTP returns the per-hero verdicts and both heroes
       normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 2 }] }]),
       "the standing defender keeps their submitted survivors",
     );
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// D10 (plan/2026-09-30-server-side-ai-actor.md): the ai-seat route block.
+// A server-driven game's AI seats are driven exclusively by the in-process
+// aiDriver (server/app/aiDriver.ts); client-origin commands naming such a
+// seat are 403'd BEFORE touchSeat, so AI seats never enter the presence
+// map. These pins drive the real Express + real Postgres harness above.
+// ---------------------------------------------------------------------------
+
+const ROUTE_TEST_PLAYERS = [
+  { id: 0, faction: "player", name: "P0", color: "#000000", heroIds: [], settlementIds: [] },
+  { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: [], settlementIds: [] },
+];
+
+async function seedAiDriverGame(
+  name: string,
+  opts: { aiDriver: boolean; activePlayerId: number },
+): Promise<void> {
+  const { heroId, settlementId } = ids(name);
+  const heroes = { [heroId]: makeHero(heroId, 0, 2, 2) };
+  const settlement = makeSettlement(settlementId, 0, 2, 2);
+  await pool.query(
+    `INSERT INTO games (name, seed, hero_q, hero_r, active_player_id, players, heroes, settlements, map_size, lobby)
+     VALUES ($1, 1, 2, 2, $2, $3::jsonb, $4::jsonb, $5::jsonb, 'small', $6::jsonb)`,
+    [
+      name,
+      opts.activePlayerId,
+      JSON.stringify(ROUTE_TEST_PLAYERS),
+      JSON.stringify(heroes),
+      JSON.stringify({ [settlementId]: settlement }),
+      JSON.stringify(opts.aiDriver ? { aiDriver: "server" } : {}),
+    ],
+  );
+}
+
+test("D10: an AI-seat command on a server-driven game is 403 ai_seat_command_forbidden before any presence write", async () => {
+  const name = uniqueName();
+  await seedAiDriverGame(name, { aiDriver: true, activePlayerId: 1 });
+  try {
+    const res = await fetch(`${baseUrl}/games/${name}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "EndTurn", actor: 1 }),
+    });
+    assert.equal(res.status, 403, await res.clone().text());
+    assert.deepEqual(await res.json(), { error: "ai_seat_command_forbidden" });
+    // The block sits BEFORE touchSeat: the AI seat never entered the
+    // presence map, so the drop-policy skip machinery never sees it.
+    assert.equal(getPresence(name)["1"], undefined, "no presence entry for the AI seat");
+    assert.equal(getPresence(name)["0"], undefined, "no presence entry for any seat");
+    const events = await pool.query(
+      `SELECT 1 FROM game_events WHERE kind = 'TurnEnded'
+        AND game_id = (SELECT id FROM games WHERE name = $1)`,
+      [name],
+    );
+    assert.equal(events.rowCount, 0, "the command never reached the handler");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("D10: the same AI-seat command on an unflagged game keeps today's behavior (accepted)", async () => {
+  const name = uniqueName();
+  await seedAiDriverGame(name, { aiDriver: false, activePlayerId: 1 });
+  try {
+    const res = await fetch(`${baseUrl}/games/${name}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "EndTurn", actor: 1 }),
+    });
+    assert.equal(res.status, 200, await res.clone().text());
+    const active = await pool.query<{ active_player_id: number }>(
+      `SELECT active_player_id FROM games WHERE name = $1`,
+      [name],
+    );
+    assert.equal(active.rows[0].active_player_id, 0, "the EndTurn ran the real pipeline");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("D10: a human actor on a server-driven game is accepted", async () => {
+  const name = uniqueName();
+  await seedAiDriverGame(name, { aiDriver: true, activePlayerId: 0 });
+  try {
+    const res = await fetch(`${baseUrl}/games/${name}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "EndTurn", actor: 0 }),
+    });
+    assert.equal(res.status, 200, await res.clone().text());
+    const active = await pool.query<{ active_player_id: number }>(
+      `SELECT active_player_id FROM games WHERE name = $1`,
+      [name],
+    );
+    assert.equal(active.rows[0].active_player_id, 1, "the human's EndTurn ran and advanced to the AI seat");
   } finally {
     await cleanupGame(name);
   }

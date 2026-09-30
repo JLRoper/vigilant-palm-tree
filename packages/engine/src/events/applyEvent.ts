@@ -1,4 +1,13 @@
-import type { EngineEvent, GameState, HeroState } from "@heroes/contracts";
+import type {
+  EngineEvent,
+  GameState,
+  HeroState,
+  PlayerSeat,
+  SettlementId,
+  TradeRouteId,
+  TradeRouteState,
+  WarehouseResource,
+} from "@heroes/contracts";
 import { transferGold } from "../economy/transfer";
 import { tradeResources } from "../economy/trade";
 import { setAutoTrade } from "../settlement/autoTrade";
@@ -10,16 +19,21 @@ import { transferUnits } from "../settlement/transferUnits";
 import { settlementStacks } from "../units";
 
 // Phase 5.A (#146): the reducer the event-cursor client sync applies each
-// polled EngineEvent through. Fourteen variants carry only the *fact* of a
+// polled EngineEvent through. Thirteen variants carry only the *fact* of a
 // change and not the derived state it produced (TurnEnded's production/
 // upkeep/movement reset, BattleResolved's troop losses, HeroRecruited's
 // starting stacks, the rng-derived rates behind SettlementUpgradeStarted) --
 // those return "resync" so the caller refetches rather than guesses. The
-// trade/wagon/building kinds (BuildingsPlaced, ResourcesTransferred,
-// Wagons*, TradeRoute*) carry intentionally minimal payloads: their state
-// effects are not payload-derivable either, so they land in the same resync
-// arm (and are classified "ignore" for the sync layer in
-// ENGINE_EVENT_SYNC_CLASS below).
+// trade/wagon/building kinds (TradeRouteUpdated/Removed, Wagons*,
+// BuildingsPlaced, ResourcesTransferred) carry intentionally minimal
+// payloads: their state effects are not payload-derivable either, so they
+// land in the same resync arm (and are classified "ignore" for the sync
+// layer in ENGINE_EVENT_SYNC_CLASS below). TradeRouteCreated is the one
+// exception: applyTradeRouteCreated below reconstructs its state by
+// targeted construction (the applyUnitsRecruited pattern) because the
+// server derives route ids from a counter hydration never restores, so a
+// reducer re-run could not reproduce the event's routeId -- the applier
+// builds the route with the event's routeId verbatim instead.
 export type EngineEventOutcome = "applied" | "noop" | "resync";
 
 export interface ApplyEngineEventResult {
@@ -57,7 +71,7 @@ export const ENGINE_EVENT_SYNC_CLASS: Record<EngineEvent["type"], EngineEventSyn
   ResourcesTransferred: "ignore",
   WagonsAssigned: "ignore",
   WagonsBought: "ignore",
-  TradeRouteCreated: "ignore",
+  TradeRouteCreated: "apply",
   TradeRouteUpdated: "ignore",
   TradeRouteRemoved: "ignore",
   UnitsRecruited: "apply",
@@ -182,6 +196,71 @@ function applyUnitsTransferred(
   return { state: result.state, outcome: "applied" };
 }
 
+// TradeRouteCreated's payload is enough to rebuild the route record, but a
+// reducer re-run is not an option: createTradeRoute() derives the route id
+// from state.nextTradeRouteId, which hydration never restores (and the
+// server re-hydrates per command), so the server's id is not reproducible
+// from hydrated state. The applier therefore builds the route with the
+// event's routeId verbatim (the applyUnitsRecruited targeted-construction
+// pattern), debits the actor's unassigned wagons exactly as the reducer
+// does, and bumps the counter monotonically past the event's id so a later
+// reducer-created id cannot collide with it. An exact-tuple duplicate (id,
+// endpoints, resource, wagons, no caravan yet) is what an already-applied
+// event looks like -- the server can legitimately re-derive e.g. "route0"
+// after a hydration reset, so the full-tuple match, not the id alone, is
+// what makes the noop correct. Settlement ownership is not re-checked: the
+// event is authoritative history.
+function applyTradeRouteCreated(
+  state: GameState,
+  actor: PlayerSeat,
+  routeId: TradeRouteId,
+  fromSettlementId: SettlementId,
+  toSettlementId: SettlementId,
+  resource: WarehouseResource,
+  wagons: number,
+): ApplyEngineEventResult {
+  const routes = state.tradeRoutes ?? [];
+  const existing = routes.find((r) => r.id === routeId);
+  if (existing) {
+    if (
+      existing.fromSettlementId === fromSettlementId &&
+      existing.toSettlementId === toSettlementId &&
+      existing.resource === resource &&
+      existing.wagons === wagons &&
+      existing.caravan === null
+    ) {
+      return { state, outcome: "noop" };
+    }
+  }
+  if (!state.settlements[fromSettlementId] || !state.settlements[toSettlementId]) return resync(state);
+  const player = state.players.find((p) => p.id === actor);
+  if (!player) return resync(state);
+  const unassigned = player.wagonsUnassigned ?? 0;
+  if (!existing && wagons > unassigned) return resync(state);
+  const route: TradeRouteState = {
+    id: routeId,
+    fromSettlementId,
+    toSettlementId,
+    resource,
+    wagons,
+    caravan: null,
+  };
+  const suffix = Number.parseInt(routeId.replace(/^route/, ""), 10);
+  const derived = Number.isNaN(suffix) ? 0 : suffix + 1;
+  return {
+    state: {
+      ...state,
+      tradeRoutes: [...routes, route],
+      nextTradeRouteId: Math.max(state.nextTradeRouteId ?? 0, derived),
+      players: state.players.map((p) =>
+        p.id === actor ? { ...p, wagonsUnassigned: unassigned - wagons } : p,
+      ),
+      dirty: true,
+    },
+    outcome: "applied",
+  };
+}
+
 export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEngineEventResult {
   switch (event.type) {
     case "HeroMoved":
@@ -257,6 +336,17 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
         event.count,
       );
 
+    case "TradeRouteCreated":
+      return applyTradeRouteCreated(
+        state,
+        event.actor,
+        event.routeId,
+        event.fromSettlementId,
+        event.toSettlementId,
+        event.resource,
+        event.wagons,
+      );
+
     // Listed per variant rather than swept into `default:` so a new
     // EngineEvent variant trips the exhaustiveness check below.
     case "TurnEnded":
@@ -269,7 +359,6 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
     case "ResourcesTransferred":
     case "WagonsAssigned":
     case "WagonsBought":
-    case "TradeRouteCreated":
     case "TradeRouteUpdated":
     case "TradeRouteRemoved":
     // SettlementBattleResolved carries only winner/captured -- the resulting

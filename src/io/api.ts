@@ -8,6 +8,7 @@ import type {
   SettlementState,
 } from "@heroes/contracts";
 import { getCachedAuth } from "./authStorage";
+import { clearServerDriven } from "./serverDrivenGames";
 
 export type {
   GameState,
@@ -36,6 +37,11 @@ export type GameLobbyState = {
   // connected<->disconnected transitions. Seats with no entry have not
   // transitioned -- absence reads as "nothing to flag".
   presence?: Record<string, SeatPresence>;
+  // Server-side AI actor flag (plan/2026-09-30-server-side-ai-actor.md D1):
+  // "server" on any game created with enemySlots > 0 -- the API's aiDriver
+  // scanner owns those AI seats' turns end-to-end. Absent (= browser-driven)
+  // on legacy/starter/lobby games (D2). Mirrors server/routes.ts LobbyState.
+  aiDriver?: "server";
 };
 
 export type Game = {
@@ -163,6 +169,7 @@ export const api = {
       const text = await res.text().catch(() => "");
       throw new Error(`${res.status} ${res.statusText} ${text}`);
     }
+    clearServerDriven(name);
   },
   createGame: (
     name: string,
