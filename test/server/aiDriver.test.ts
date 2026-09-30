@@ -700,6 +700,76 @@ test("D4 stream continuation: identical state with a progressed stream re-plans 
   assert.notDeepEqual(moves[0], moves[1], "the retried wander step differs (continued stream -> no livelock)");
 });
 
+test("boot-token scoping: matching-token and tokenless candidates are driven, foreign tokens are skipped", async () => {
+  const world = aiTurnWorld([makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { movementRemaining: 0 })]);
+  const endTurns: Command[] = [];
+  configureAiDriver({
+    scanIntervalMs: 60_000,
+    pacingMs: 0,
+    now: () => 1_000_000,
+    driverToken: "tok-mine",
+    withGameLock: async (_gameName, _gameId, drive) => ({ locked: true, value: await drive() }),
+    loadCandidates: async () => [
+      { name: "drv-mine", id: 1, active_player_id: 1, aiDriverToken: "tok-mine" },
+      { name: "drv-foreign", id: 2, active_player_id: 1, aiDriverToken: "tok-other" },
+      { name: "drv-legacy", id: 3, active_player_id: 1, aiDriverToken: null },
+      { name: "drv-empty", id: 4, active_player_id: 1, aiDriverToken: "" },
+    ],
+    loadGame: async () => world,
+    loadCatalog: async () => CATALOG,
+    runCommand: async (command) => {
+      if (command.kind === "EndTurn") endTurns.push(command);
+      return { ok: true };
+    },
+    appendAudit: async () => {},
+  });
+
+  await scanOnce();
+
+  const ended = endTurns.map((c) => c.gameName);
+  assert.ok(ended.includes("drv-mine"), "the matching-token game was driven");
+  assert.ok(ended.includes("drv-legacy"), "a tokenless legacy flagged game was adopted");
+  assert.ok(ended.includes("drv-empty"), "an empty token reads as tokenless (adoption path)");
+  assert.ok(!ended.includes("drv-foreign"), "a foreign-token game is never driven by this process");
+  assert.equal(isGameTrackedByDriver("drv-foreign"), false, "the skipped game left no driver memory");
+});
+
+test("advisory lock: a game whose lock is held by another server is skipped, then driven once it frees", async () => {
+  const world = aiTurnWorld([makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { movementRemaining: 0 })]);
+  const endTurns: Command[] = [];
+  const LOCK_KEY = 987_654_321_000; // bigint key far above any real serial game id
+  const holder = await pool.connect();
+  try {
+    const locked = await holder.query<{ locked: boolean }>(
+      `SELECT pg_try_advisory_lock($1::bigint) AS locked`,
+      [LOCK_KEY],
+    );
+    assert.ok(locked.rows[0].locked, "the test took the foreign server's advisory lock");
+    configureAiDriver({
+      scanIntervalMs: 60_000,
+      pacingMs: 0,
+      now: () => 1_000_000,
+      loadCandidates: async () => [{ name: GAME, id: LOCK_KEY, active_player_id: 1 }],
+      loadGame: async () => world,
+      loadCatalog: async () => CATALOG,
+      runCommand: async (command) => {
+        if (command.kind === "EndTurn") endTurns.push(command);
+        return { ok: true };
+      },
+      appendAudit: async () => {},
+    });
+
+    await scanOnce();
+    assert.equal(endTurns.length, 0, "another server holds the advisory lock -> this scan skipped the game");
+
+    await holder.query(`SELECT pg_advisory_unlock($1::bigint)`, [LOCK_KEY]);
+    await scanOnce();
+    assert.equal(endTurns.length, 1, "with the lock freed, the next scan drives the game (real-SQL lock path)");
+  } finally {
+    holder.release();
+  }
+});
+
 test("forbidden_not_your_turn passes over: no EndTurn, no audit, driving stops", async () => {
   const world = aiTurnWorld([
     makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { movementRemaining: 2, troops: 5, stacks: troopStacks("swordsman", 5) }),
@@ -786,10 +856,12 @@ async function cleanupRow(name: string): Promise<void> {
 test("default loadCandidates/loadGame pick up flagged games with an active AI seat and skip unflagged ones", async () => {
   const flagged = `test-ai-driver-flagged-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const unflagged = `test-ai-driver-plain-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const foreign = `test-ai-driver-foreign-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const endTurns: Command[] = [];
   try {
     await seedRow(flagged, { aiDriver: "server" }, 1);
     await seedRow(unflagged, {}, 1);
+    await seedRow(foreign, { aiDriver: "server", aiDriverToken: "another-servers-boot-token" }, 1);
     resetAiDriver();
     configureAiDriver({
       scanIntervalMs: 60_000,
@@ -804,7 +876,18 @@ test("default loadCandidates/loadGame pick up flagged games with an active AI se
 
     await scanOnce();
 
-    assert.deepEqual(endTurns.map((c) => c.gameName), [flagged], "only the flagged game was driven");
+    assert.ok(
+      endTurns.some((c) => c.gameName === flagged),
+      "the flagged fixture game was driven (contains, not exact-set: the scan reads the SHARED game_db, where live flagged games may legitimately exist)",
+    );
+    assert.ok(
+      !endTurns.some((c) => c.gameName === unflagged),
+      "the unflagged fixture game was never driven",
+    );
+    assert.ok(
+      !endTurns.some((c) => c.gameName === foreign),
+      "a flagged game stamped with another server's boot token is never driven (default SQL + token filter)",
+    );
     const active = await pool.query<{ active_player_id: number }>(
       `SELECT active_player_id FROM games WHERE name = $1`,
       [flagged],
@@ -813,5 +896,6 @@ test("default loadCandidates/loadGame pick up flagged games with an active AI se
   } finally {
     await cleanupRow(flagged);
     await cleanupRow(unflagged);
+    await cleanupRow(foreign);
   }
 });

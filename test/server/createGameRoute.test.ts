@@ -6,6 +6,7 @@ import express from "express";
 import { pool } from "../../server/persistence/db";
 import { router } from "../../server/routes";
 import { errorHandler } from "../../server/errorHandler";
+import { aiDriverBootToken } from "../../server/app/aiDriverToken";
 
 let server: Server;
 let baseUrl: string;
@@ -42,6 +43,7 @@ type CreatedRow = {
     humanSlots?: number;
     claimed?: Record<string, unknown>;
     aiDriver?: string;
+    aiDriverToken?: string;
   };
 };
 
@@ -181,5 +183,46 @@ test("games without enemySlots carry no aiDriver flag (browser-driven, D2)", asy
   } finally {
     await cleanupGame(legacy);
     await cleanupGame(lobbyOnly);
+  }
+});
+
+// Boot-token scoping (cross-server race fix, 2026-09-30): the create route
+// stamps THIS process's boot token beside the aiDriver flag, so shared-DB
+// neighbor servers never drive each other's AI games.
+test("enemySlots > 0 stamps lobby.aiDriverToken with this server's boot token", async () => {
+  const name = uniqueName();
+  try {
+    const { row } = await createGame({ name, humanSlots: 1, enemySlots: 2 });
+    assert.equal(row.lobby.aiDriver, "server");
+    assert.equal(row.lobby.aiDriverToken, aiDriverBootToken(), "the stamp is this process's boot token");
+    assert.ok(row.lobby.aiDriverToken.length > 0, "the token is a non-empty string");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("ON CONFLICT (name) resurrection re-stamps a drifted lobby.aiDriverToken", async () => {
+  const name = uniqueName();
+  try {
+    await createGame({ name, humanSlots: 1, enemySlots: 1 });
+    await pool.query(`UPDATE games SET lobby = lobby || $1::jsonb WHERE name = $2`, [
+      JSON.stringify({ aiDriverToken: "stale-foreign-token" }),
+      name,
+    ]);
+    const { row } = await createGame({ name, humanSlots: 1, enemySlots: 1 });
+    assert.equal(row.lobby.aiDriver, "server");
+    assert.equal(row.lobby.aiDriverToken, aiDriverBootToken(), "the fresh lobby write replaced the drifted token");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("games without enemySlots carry no aiDriverToken either", async () => {
+  const name = uniqueName();
+  try {
+    const { row } = await createGame({ name, humanSlots: 2 });
+    assert.equal(row.lobby.aiDriverToken, undefined, "a plain multiplayer lobby is tokenless");
+  } finally {
+    await cleanupGame(name);
   }
 });

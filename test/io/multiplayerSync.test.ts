@@ -1032,3 +1032,150 @@ test("resync() reads the aiDriver flag off the fetched row, including a rollback
   sync.stop();
   serverDrivenPolicy.clearServerDriven("sda4");
 });
+
+// B6/D6 battle-outcome feedback (server-side AI actor plan Phase 2): both
+// battle kinds fan out `mp:battleOutcome` at the mp:logRow point --
+// unconditionally, before the self/seat skips and before the resync
+// early-return -- so every spectator receives every driver-resolved battle
+// exactly once per row.
+
+const HERO_BATTLE: EngineEvent = {
+  type: "BattleResolved",
+  actor: 1,
+  attackerId: "h1",
+  defenderId: "h0",
+  winner: "attacker",
+  attackerOutcome: "won",
+  defenderOutcome: "lost_all_troops",
+  attackerVerdict: "stood",
+  defenderVerdict: "defeated",
+  rewardGold: 50,
+  rounds: 3,
+  obstacleSeed: 1234,
+};
+
+const SETTLEMENT_BATTLE: EngineEvent = {
+  type: "SettlementBattleResolved",
+  actor: 1,
+  attackerId: "h1",
+  settlementId: "s0",
+  winner: "attacker",
+  captured: true,
+  outcome: "attackerWon",
+  attackerVerdict: "stood",
+};
+
+interface OutcomeEmission {
+  gameName: string;
+  id: string;
+  kind: string;
+  payload: EngineEvent;
+  actorSeat: number | null;
+}
+
+function collectOutcomes(): OutcomeEmission[] {
+  const emissions: OutcomeEmission[] = [];
+  bus.on(
+    "mp:battleOutcome",
+    (ev: { gameName: string; id: string; kind: string; payload: EngineEvent; actorSeat: number | null }) =>
+      emissions.push(ev),
+  );
+  return emissions;
+}
+
+test("both battle kinds fan out mp:battleOutcome exactly once; the poll backstop never re-delivers an SSE row", async () => {
+  const server: FakeServer = { game: makeGameRow("bo1", { lastEventId: 10 }), events: [], calls: [] };
+  installFetch(server);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("bo1", { cursor: 10, state: hydrateGameState(server.game) });
+  const es = FakeEventSource.latest();
+
+  const emissions = collectOutcomes();
+  const resyncs: string[] = [];
+  bus.on("mp:resynced", (ev: { reason: string }) => resyncs.push(ev.reason));
+
+  es.dispatchLog(row(11, HERO_BATTLE, 1), "11");
+  await tick();
+  server.game = makeGameRow("bo1", { lastEventId: 12 });
+  es.dispatchLog(row(12, SETTLEMENT_BATTLE, 1), "12");
+  await tick();
+
+  assert.equal(emissions.length, 2, "one emission per battle row");
+  assert.deepEqual(
+    emissions.map((e) => [e.id, e.kind, e.actorSeat]),
+    [
+      ["11", "heroBattle", 1],
+      ["12", "settlementBattle", 1],
+    ],
+  );
+  assert.equal((emissions[0].payload as Extract<EngineEvent, { type: "BattleResolved" }>).attackerVerdict, "stood");
+  assert.equal(
+    (emissions[1].payload as Extract<EngineEvent, { type: "SettlementBattleResolved" }>).outcome,
+    "attackerWon",
+    "the event payload rides through untouched",
+  );
+  assert.deepEqual(
+    resyncs,
+    ["event_not_derivable", "event_not_derivable"],
+    "both battle kinds are resync-answered; the fan-out happened before that early-return",
+  );
+
+  server.events.push(row(11, HERO_BATTLE, 1), row(12, SETTLEMENT_BATTLE, 1));
+  await sync.pollOnce();
+  assert.equal(emissions.length, 2, "the poll backstop never re-delivers a streamed row");
+  assert.equal(sync.getCursor(), 12);
+  sync.stop();
+});
+
+test("a flagged game's actor-1 settlement battle row emits for the seat-0 spectator", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("bo2", { lastEventId: 10, activePlayerId: 1 }),
+    events: [],
+    calls: [],
+  };
+  server.game.lobby = flaggedLobby();
+  installFetch(server);
+  serverDrivenPolicy.clearServerDriven("bo2");
+  serverDrivenPolicy.syncServerDrivenFromGame(server.game);
+  setInMemoryLocalPlayerId("bo2", 0);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("bo2", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const emissions = collectOutcomes();
+  server.game = makeGameRow("bo2", { lastEventId: 11, activePlayerId: 1 });
+  server.game.lobby = flaggedLobby();
+  server.events.push(row(11, SETTLEMENT_BATTLE, 1));
+  await sync.pollOnce();
+
+  assert.equal(emissions.length, 1, "the flagged game's AI-attacker battle reaches the spectator");
+  assert.deepEqual(emissions[0], {
+    type: "mp:battleOutcome",
+    gameName: "bo2",
+    id: "11",
+    kind: "settlementBattle",
+    payload: SETTLEMENT_BATTLE,
+    actorSeat: 1,
+  });
+  assert.equal(sync.getCursor(), 11);
+  sync.stop();
+  serverDrivenPolicy.clearServerDriven("bo2");
+});
+
+test("own-seat battle rows still emit mp:battleOutcome (the direct-response copy; the consumer gates)", async () => {
+  const server: FakeServer = { game: makeGameRow("bo3", { lastEventId: 10 }), events: [], calls: [] };
+  installFetch(server);
+  setInMemoryLocalPlayerId("bo3", 0);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("bo3", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const emissions = collectOutcomes();
+  server.events.push(row(11, SETTLEMENT_BATTLE, 0));
+  await sync.pollOnce();
+
+  assert.equal(emissions.length, 1, "emission is unconditional; the consumer skips own-actor events");
+  assert.equal(emissions[0].actorSeat, 0);
+  sync.stop();
+});

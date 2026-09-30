@@ -23,6 +23,7 @@ import {
   handleCommandTransactional,
   type LiveCommandDeps,
 } from "./commandHandler";
+import { aiDriverBootToken } from "./aiDriverToken";
 
 // Server-side AI actor (plan/2026-09-30-server-side-ai-actor.md, Phase 1).
 // For games flagged lobby.aiDriver === "server" (D1: any game created with
@@ -43,6 +44,16 @@ import {
 // it is keyed by game name + the row's NUMERIC id: POST /games uses
 // ON CONFLICT (name) and can resurrect a name with a new id, so an id
 // mismatch resets the whole per-game memory.
+//
+// Cross-server coordination (2026-09-30 fix): two API processes scanning
+// one shared game_db used to race the same AI turn (first-writer-wins on
+// commands, lost battle submits, stalled e2e gates). Two guards close it:
+// (1) a per-game Postgres advisory lock held on a dedicated pooled client
+// for the whole pass -- if another server holds it, the game is skipped
+// this scan; (2) boot-token scoping -- POST /games stamps this process's
+// aiDriverBootToken() into lobby.aiDriverToken, and the scanner only
+// drives games carrying its own token (or no token: the legacy adoption
+// path, where the advisory lock arbitrates).
 
 /** D3: pause between driver actions (0 disables). */
 export const AI_ACTION_PACING_MS = 250;
@@ -60,6 +71,11 @@ export interface AiDriverCandidate {
   name: string;
   id: number;
   active_player_id: number;
+  /**
+   * lobby.aiDriverToken: the boot token of the server process that created
+   * the game. Absent/null on legacy pre-token flagged games (adoption path).
+   */
+  aiDriverToken?: string | null;
 }
 
 /** What the driver needs per (re-)hydration: the state plus the row bits the state does not carry. */
@@ -77,11 +93,25 @@ export interface AiDriverCommandOutcome {
   attackerVerdict?: HeroBattleVerdict;
 }
 
+/** Result of attempting the per-game advisory lock: busy means another server is driving. */
+export type GameLockOutcome<T> = { locked: true; value: T } | { locked: false };
+
+/**
+ * Runs `drive` while holding the game's cross-process advisory lock.
+ * `{ locked: false }` = the lock is held elsewhere; the drive never ran.
+ */
+export type WithGameLock = <T>(
+  gameName: string,
+  gameId: number,
+  drive: () => Promise<T>,
+) => Promise<GameLockOutcome<T>>;
+
 export type AiDriveOutcome =
   | "ended_turn"
   | "ended_turn_exhausted"
   | "turn_lost"
   | "game_gone"
+  | "skipped_locked"
   | "failed";
 
 interface GameDriverMemory {
@@ -101,23 +131,37 @@ interface ResolvedConfig {
   pacingMs: number;
   actionBudget: number;
   passDeadlineMs: number;
+  driverToken: string;
   now: () => number;
   loadCandidates: () => Promise<AiDriverCandidate[]>;
   loadGame: (gameName: string) => Promise<AiDriverGameSnapshot | null>;
   loadCatalog: () => Promise<Record<string, UnitType>>;
   runCommand: (command: Command) => Promise<AiDriverCommandOutcome>;
   appendAudit: (gameName: string, kind: string, payload: unknown) => Promise<void>;
+  withGameLock: WithGameLock;
 }
 
 async function defaultLoadCandidates(): Promise<AiDriverCandidate[]> {
-  const r = await pool.query<{ name: string; id: number; active_player_id: number; players: Player[] }>(
-    `SELECT name, id, active_player_id, players FROM games WHERE lobby->>'aiDriver' = 'server'`,
+  const r = await pool.query<{
+    name: string;
+    id: number;
+    active_player_id: number;
+    players: Player[];
+    ai_driver_token: string | null;
+  }>(
+    `SELECT name, id, active_player_id, players, lobby->>'aiDriverToken' AS ai_driver_token
+     FROM games WHERE lobby->>'aiDriver' = 'server'`,
   );
   // Hydrate derives AI_TURN exactly when the active player's faction is "ai"
   // (packages/engine/src/hydrate.ts), so this filter IS the phase gate.
-  return r.rows.filter(
-    (row) => row.players.find((p) => p.id === row.active_player_id)?.faction === "ai",
-  );
+  return r.rows
+    .filter((row) => row.players.find((p) => p.id === row.active_player_id)?.faction === "ai")
+    .map(({ name, id, active_player_id, ai_driver_token }) => ({
+      name,
+      id,
+      active_player_id,
+      aiDriverToken: ai_driver_token,
+    }));
 }
 
 function mapSizeFrom(value: string | null | undefined): MapSize | undefined {
@@ -171,18 +215,67 @@ async function defaultAppendAudit(gameName: string, kind: string, payload: unkno
   );
 }
 
+/**
+ * Cross-process mutual exclusion for the drive (first-writer-wins across
+ * dev servers sharing one game_db): a per-game Postgres ADVISORY lock.
+ * Advisory locks are session-scoped, so the lock is taken and held on one
+ * DEDICATED pooled client for the whole pass -- pool.query would land on an
+ * arbitrary client per call and silently split the lock across sessions.
+ * Postgres releases it automatically when the session dies (crash-safe);
+ * the explicit unlock + release in `finally` covers the normal path.
+ *
+ * Deadlock-safe by single lock ordering: this session takes ONLY the
+ * advisory lock; dispatched commands run on OTHER pool clients and take
+ * only row locks (BEGIN/COMMIT per command), so no session ever waits on
+ * the advisory lock while holding a row lock.
+ *
+ * The lock key is the game's numeric id (stable per row; a name
+ * resurrection gets a new id and resets driver memory anyway).
+ */
+async function defaultWithGameLock<T>(
+  gameName: string,
+  gameId: number,
+  drive: () => Promise<T>,
+): Promise<GameLockOutcome<T>> {
+  const client = await pool.connect();
+  let acquired = false;
+  try {
+    const r = await client.query<{ locked: boolean }>(
+      `SELECT pg_try_advisory_lock($1::bigint) AS locked`,
+      [gameId],
+    );
+    acquired = r.rows[0]?.locked === true;
+    if (!acquired) return { locked: false };
+    return { locked: true, value: await drive() };
+  } finally {
+    if (acquired) {
+      try {
+        await client.query(`SELECT pg_advisory_unlock($1::bigint)`, [gameId]);
+      } catch (err) {
+        console.warn(
+          `[aiDriver] advisory unlock for "${gameName}" failed (the session close releases it):`,
+          err,
+        );
+      }
+    }
+    client.release();
+  }
+}
+
 function resolveConfig(): ResolvedConfig {
   return {
     scanIntervalMs: DEFAULT_SCAN_INTERVAL_MS,
     pacingMs: AI_ACTION_PACING_MS,
     actionBudget: AI_TURN_ACTION_BUDGET,
     passDeadlineMs: AI_TURN_PASS_DEADLINE_MS,
+    driverToken: aiDriverBootToken(),
     now: () => Date.now(),
     loadCandidates: defaultLoadCandidates,
     loadGame: defaultLoadGame,
     loadCatalog: defaultLoadCatalog,
     runCommand: defaultRunCommand,
     appendAudit: defaultAppendAudit,
+    withGameLock: defaultWithGameLock,
   };
 }
 
@@ -193,12 +286,16 @@ export interface AiDriverOptions {
   pacingMs?: number;
   actionBudget?: number;
   passDeadlineMs?: number;
+  /** Override of this process's boot token (test seam; default aiDriverBootToken()). */
+  driverToken?: string;
   now?: () => number;
   loadCandidates?: () => Promise<AiDriverCandidate[]>;
   loadGame?: (gameName: string) => Promise<AiDriverGameSnapshot | null>;
   loadCatalog?: () => Promise<Record<string, UnitType>>;
   runCommand?: (command: Command) => Promise<AiDriverCommandOutcome>;
   appendAudit?: (gameName: string, kind: string, payload: unknown) => Promise<void>;
+  /** Override of the per-game advisory-lock guard (test seam; default real SQL). */
+  withGameLock?: WithGameLock;
 }
 
 /** Test seam: override any clock, delay, or pipeline hook (configureDropPolicy pattern). */
@@ -634,9 +731,21 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
 }
 
 /**
+ * Boot-token scoping: a server drives only the games IT created (matching
+ * token). A missing/empty token marks a legacy pre-token flagged game --
+ * any server may adopt it, and the advisory lock makes that
+ * first-claimed-wins per scan.
+ */
+function driverOwnsCandidate(candidate: AiDriverCandidate): boolean {
+  const token = candidate.aiDriverToken;
+  return token === undefined || token === null || token === "" || token === cfg.driverToken;
+}
+
+/**
  * One scanner pass: find flagged games whose active seat is an AI faction
  * (== hydrated AI_TURN) and drive each one's whole turn, sequentially, with
- * per-game in-flight + exception isolation. Idempotent; safe on any cadence.
+ * per-game in-flight + boot-token filtering + cross-process advisory-lock
+ * isolation. Idempotent; safe on any cadence.
  */
 export async function scanOnce(): Promise<void> {
   let candidates: AiDriverCandidate[];
@@ -648,10 +757,20 @@ export async function scanOnce(): Promise<void> {
   }
   for (const candidate of candidates) {
     if (inFlight.has(candidate.name)) continue;
-    const run = driveGameTurn(candidate).catch((err): AiDriveOutcome => {
-      console.error(`[aiDriver] driving "${candidate.name}" failed:`, err);
-      return "failed";
-    });
+    if (!driverOwnsCandidate(candidate)) continue;
+    const run = cfg
+      .withGameLock(candidate.name, candidate.id, () => driveGameTurn(candidate))
+      .then((held): AiDriveOutcome => {
+        if (held.locked) return held.value;
+        console.info(
+          `[aiDriver] "${candidate.name}" is being driven by another server (advisory lock held); skipping this scan`,
+        );
+        return "skipped_locked";
+      })
+      .catch((err): AiDriveOutcome => {
+        console.error(`[aiDriver] driving "${candidate.name}" failed:`, err);
+        return "failed";
+      });
     inFlight.set(candidate.name, run);
     try {
       await run;

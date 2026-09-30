@@ -202,6 +202,17 @@ export type EngineEvent =
         actor: PlayerSeat;
         attackerId: HeroId;
         settlementId: SettlementId;
+        // Legacy collapsed winner, kept for existing consumers: a draw (and
+        // every concession outcome) reports defender-won. The truthful
+        // representation rides `outcome` + `attackerVerdict` below (B6/D6,
+        // server-side AI actor plan Phase 2).
         winner: "attacker" | "defender";
         captured: boolean;
+        // The battle-level outcome without the draw collapse. Optional so
+        // rows persisted by pre-B6 servers stay valid; consumers normalize
+        // an absent outcome back off `winner`.
+        outcome?: "attackerWon" | "defenderWon" | "draw";
+        // Optional so pre-B6 events without verdicts stay valid -- the same
+        // style as BattleResolved's verdict fields above.
+        attackerVerdict?: HeroBattleVerdict;
       };

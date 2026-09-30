@@ -3,7 +3,11 @@ import { isServerDriven, syncServerDrivenFromGame } from "./serverDrivenGames";
 import { applyEngineEvent, ENGINE_EVENT_SYNC_CLASS, hydrateGameState } from "@heroes/engine";
 import type { EngineEvent, GameState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
-import type { ResyncReason } from "../core/events";
+import type {
+  BattleOutcomeEventPayload,
+  BattleOutcomeKind,
+  ResyncReason,
+} from "../core/events";
 import { EntityMirror } from "../render/scene/entityMirror";
 import {
   getInMemoryLocalPlayerId,
@@ -63,6 +67,16 @@ export function isEngineEventRow(row: GameEventRow): boolean {
 }
 
 const NO_SEATS: ReadonlySet<number> = new Set();
+
+// B6/D6 battle-outcome feedback (server-side AI actor plan Phase 2): the two
+// battle kinds whose verdicts ride the event log. Emitted (unconditionally)
+// from applyRows at the same exactly-once-per-row point as the mp:logRow
+// fan-out, so a spectator on a flagged game receives every driver-resolved
+// battle even though no client ever saw the command response.
+const BATTLE_OUTCOME_ROW_KINDS: ReadonlyMap<string, BattleOutcomeKind> = new Map([
+  ["BattleResolved", "heroBattle"],
+  ["SettlementBattleResolved", "settlementBattle"],
+]);
 
 // Driven AI seats (2026-09-29 garrison-divergence defect): the primary
 // client (seat 0) runs the AI tick, so its command merges already applied
@@ -278,6 +292,25 @@ export class MultiplayerSync {
       // SSE-delivered rows advance the cursor, so the poll's after=cursor
       // query never re-delivers them: exactly-once per row.
       bus.emit({ type: "mp:logRow", gameName, row });
+      // Battle-outcome feedback fan-out, same point, same exactly-once-per-
+      // row guarantee: both battle kinds are resync-answered, and the
+      // fan-out below runs before that early-return (and before the
+      // self/seat skips) so spectators see battles their own seat fought
+      // through the direct-response path too -- the consumer gates. A
+      // settlement battle on a flagged game is the D5 window this closes:
+      // the driving client is gone, so this event is the only verdict
+      // signal any browser gets.
+      const outcomeKind = BATTLE_OUTCOME_ROW_KINDS.get(row.kind);
+      if (outcomeKind !== undefined && isEngineEventRow(row)) {
+        bus.emit({
+          type: "mp:battleOutcome",
+          gameName,
+          id: row.id,
+          kind: outcomeKind,
+          payload: row.payload as BattleOutcomeEventPayload,
+          actorSeat: row.actor_seat,
+        });
+      }
       const id = Number(row.id);
       if (Number.isFinite(id) && id > cursor) cursor = id;
       if (this.selfEventIds.delete(id)) continue;

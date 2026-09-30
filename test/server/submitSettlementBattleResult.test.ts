@@ -185,6 +185,8 @@ test("attackerWon captures the settlement: owner flips, garrison empties, attack
     settlementId: "s1",
     winner: "attacker",
     captured: true,
+    outcome: "attackerWon",
+    attackerVerdict: "stood",
   });
 
   const saved = gameRepo.rows["test-game"];
@@ -233,6 +235,8 @@ test("defenderWon REMOVES the wiped attacker: row gone, heroIds pruned, platoons
     settlementId: "s1",
     winner: "defender",
     captured: false,
+    outcome: "defenderWon",
+    attackerVerdict: "defeated",
   });
 });
 
@@ -344,6 +348,8 @@ test("surrender deducts the priced gold, relocates to the nearest OWNED settleme
     settlementId: "s1",
     winner: "defender",
     captured: false,
+    outcome: "defenderWon",
+    attackerVerdict: "surrendered",
   });
 });
 
@@ -375,8 +381,12 @@ test("a draw with survivors on both sides bounces the attacker unchanged (verdic
     actor: 0,
     attackerId: "h0",
     settlementId: "s1",
+    // Legacy collapsed winner stays defender; the truthful draw rides
+    // `outcome` (B6/D6) so event-derived wording can say stalemate.
     winner: "defender",
     captured: false,
+    outcome: "draw",
+    attackerVerdict: "stood",
   });
 });
 
@@ -475,6 +485,8 @@ test("a NEUTRAL garrisoned settlement accepts the battle win and captures for th
     settlementId: "s2",
     winner: "attacker",
     captured: true,
+    outcome: "attackerWon",
+    attackerVerdict: "stood",
   });
 
   const saved = gameRepo.rows["test-game"];

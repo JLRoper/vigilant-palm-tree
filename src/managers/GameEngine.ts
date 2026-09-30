@@ -23,6 +23,7 @@ import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { shouldDriveAi } from "../io/serverDrivenGames";
 import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
+import { attachBattleOutcomeFeedback } from "@screens/combat/battleOutcomeFeedback";
 import { attachAiThinkingHint } from "@screens/shared/aiThinkingHint";
 import { attachFirstTurnHint } from "@screens/shared/firstTurnHint";
 import { createLogPanel } from "@screens/shared/logPanel";
@@ -264,6 +265,16 @@ export class GameEngine {
         return shouldDriveAi(gameName, getInMemoryLocalPlayerId(gameName ?? ""));
       },
       localSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
+    });
+    // D5 parity (server-side AI actor plan Phase 2): verdict result cards /
+    // info toasts derived from battle events on server-driven games, where
+    // the AI driver resolves battles server-side and no browser sees the
+    // command response. Unflagged games are ignored by the consumer, so the
+    // direct-response arena paths stay byte-identical.
+    attachBattleOutcomeFeedback({
+      getState: () => this.state.getState(),
+      getGameName: () => this.session.getActiveGameName(),
+      getLocalSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
     });
   }
 

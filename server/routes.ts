@@ -20,6 +20,7 @@ import { assetRouter } from "./assetRoutes";
 import { authRouter, attachAuth } from "./auth";
 import { invalidateMembershipCache } from "./middleware/attachPlayerSeat";
 import { commandsRouter, invalidateAiSeatCache } from "./http/routes/commands";
+import { aiDriverBootToken } from "./app/aiDriverToken";
 import { telemetryRouter } from "./http/routes/telemetry";
 import { battleActionsRouter } from "./http/routes/battleActions";
 import {
@@ -86,6 +87,12 @@ export interface LobbyState {
   // aiDriver scanner owns those AI seats' turns end-to-end. Absent (=
   // browser-driven) on legacy/starter/lobby games (D2).
   aiDriver?: "server";
+  // Boot token of the API process that created this game (cross-server
+  // race fix, 2026-09-30): the scanner only drives games stamped with its
+  // own aiDriverBootToken(), so dev worktrees sharing one game_db never
+  // drive each other's AI games. Absent on legacy flagged games =
+  // adoption path (any server, arbitrated by the per-game advisory lock).
+  aiDriverToken?: string;
 }
 
 const GAME_COLUMNS =
@@ -400,9 +407,12 @@ router.post("/games", async (req, res) => {
     }
     // D1: any game created with AI enemies is server-driven -- the flag
     // rides the lobby jsonb (no schema migration) out on every
-    // game-bearing response via GAME_COLUMNS.
+    // game-bearing response via GAME_COLUMNS. The boot token scopes it to
+    // THIS process so shared-DB neighbor servers never race its AI turns;
+    // the ON CONFLICT (name) resurrection replaces the whole lobby (token
+    // included) with the fresh write.
     if (enemySlotsSafe > 0) {
-      lobbyState = { ...lobbyState, aiDriver: "server" };
+      lobbyState = { ...lobbyState, aiDriver: "server", aiDriverToken: aiDriverBootToken() };
     }
 
     const game = await withTransaction(async (client) => {

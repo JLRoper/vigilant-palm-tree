@@ -1814,8 +1814,20 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         actor: command.actor,
         attackerId: command.attackerId,
         settlementId: command.settlementId,
+        // Legacy collapsed winner for existing consumers: draws and the
+        // retreat/surrender concessions keep reporting defender-won. The
+        // truthful outcome + verdict ride the additive fields (B6/D6,
+        // server-side AI actor plan Phase 2) so event-derived result
+        // cards/toasts can word a draw or a concession accurately.
         winner: command.outcome === "attackerWon" ? "attacker" : "defender",
         captured: result.captured,
+        outcome:
+          command.outcome === "attackerWon"
+            ? "attackerWon"
+            : command.outcome === "draw"
+              ? "draw"
+              : "defenderWon",
+        attackerVerdict: result.attackerVerdict,
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return {

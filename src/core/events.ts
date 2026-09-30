@@ -37,7 +37,8 @@ export type GameEvent =
   | MpEventsAppliedEvent
   | MpResyncedEvent
   | MpPresenceUpdatedEvent
-  | MpLogRowEvent;
+  | MpLogRowEvent
+  | MpBattleOutcomeEvent;
 
 export type ResyncReason = "initial" | "event_not_derivable" | "cursor_gap";
 
@@ -127,4 +128,37 @@ export type MpLogRowEvent = {
   type: "mp:logRow";
   gameName: string;
   row: MpLogRow;
+};
+
+/**
+ * Which battle family a `mp:battleOutcome` payload belongs to -- the two
+ * server producers of battle verdicts (server/app/commandHandler.ts's
+ * ResolveBattle and SubmitSettlementBattleResult cases, driven directly by
+ * the AI driver on flagged games).
+ */
+export type BattleOutcomeKind = "heroBattle" | "settlementBattle";
+
+/** The persisted EngineEvent payloads carried by a `mp:battleOutcome`. */
+export type BattleOutcomeEventPayload =
+  | Extract<EngineEvent, { type: "BattleResolved" }>
+  | Extract<EngineEvent, { type: "SettlementBattleResolved" }>;
+
+/**
+ * One resolved battle, fanned out by MultiplayerSync.applyRows at the same
+ * exactly-once-per-row point as `mp:logRow` -- before the self/seat skips,
+ * so every seat (including the driver-resolved battles no client ever saw a
+ * direct response for) receives it; the consumer gates. This is the D5
+ * parity path (server-side AI actor plan Phase 2): on a server-driven game
+ * the battle verdict reaches every browser as an event, and the event-
+ * derived card/toast layer words it.
+ */
+export type MpBattleOutcomeEvent = {
+  type: "mp:battleOutcome";
+  gameName: string;
+  /** The game_events row id -- the cross-transport dedupe key. */
+  id: string;
+  kind: BattleOutcomeKind;
+  payload: BattleOutcomeEventPayload;
+  /** The acting (attacking) seat, or null when the row carried none. */
+  actorSeat: number | null;
 };
