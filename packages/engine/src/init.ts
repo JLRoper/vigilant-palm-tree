@@ -1,4 +1,5 @@
 import type {
+  CastleVariant,
   GameState,
   HeroId,
   HeroState,
@@ -242,6 +243,7 @@ function makeSettlements(
     const computed = computeSettlementRates(map, c.tile.q, c.tile.r, c.level);
     const size = cityViewSizeFor(c.level);
     const { spots, mines } = generateCitySpots(size, rng);
+    const castleRoll = rng();
     return {
       id: c.id,
       name: generateSettlementName(rng, c.ownerId),
@@ -259,7 +261,7 @@ function makeSettlements(
       cityMines: mines,
       morale: 100,
       autoTrade: true,
-      castleVariant: rng() < 0.5 ? 1 : 0,
+      castleVariant: (Math.floor(castleRoll * 4) as CastleVariant),
       buildings: [],
     };
   });

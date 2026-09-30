@@ -158,7 +158,7 @@ Every settlement can hold troops: `SettlementState.stacks?: Platoon[]` — the s
 - **Defense:** a non-empty garrison must be defeated before capture succeeds — in the manual arena for a local-human attacker (behind the assault-confirm modal), auto-resolved otherwise (see Capture above); since the 2026-09-29 capture/garrison wave the losing attacker suffers the hero-battle outcomes (defeat removes the hero, retreat/surrender relocate).
 - **AI-held garrisons (2026-09-29 follow-ups, B1):** AI seats spend their own treasuries on garrison troops during their turns — threat-sized (`pickGarrisonRecruitment`: target power = 1.0 × nearby enemy-hero power within reach 8, floor 4, gold reserve 100), bought through the same `RecruitUnits` path and building gates as a player's recruits. An AI town left alone grows a garrison instead of falling to the first walk-in.
 
-Buildings gate what a settlement can recruit; the newest is **stables** (placement 350g + 10 wood + 5 stone; recruits cavalry for 400g + 2 iron; `defenseBonus: 1`). The full building→unit table lives in [army.md](./army.md).
+Buildings gate what a settlement can recruit; the newest are **huntingLodge** (placement 250g + 8 wood; recruits warhound for 180g; `defenseBonus: 1`) and **eyrie** (placement 500g + 12 wood + 8 stone; recruits giant_eagle 1400g + 2 arcane at L1, eagle_prince 2400g + 4 arcane at L2). The full building→unit table lives in [army.md](./army.md).
 
 ## Building persistence (✅ implemented)
 

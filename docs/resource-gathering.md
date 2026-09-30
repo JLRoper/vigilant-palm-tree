@@ -177,7 +177,7 @@ Founding a settlement costs, immediately and non-refundably (`packages/engine/sr
 
 ## 7. Buildings ↔ resources
 
-The registry is [`packages/engine/src/buildingRegistry.ts`](../packages/engine/src/buildingRegistry.ts) (16 kinds). Placement gold → treasury; materials → warehouse.
+The registry is [`packages/engine/src/buildingRegistry.ts`](../packages/engine/src/buildingRegistry.ts) (18 kinds). Placement gold → treasury; materials → warehouse.
 
 | Kind | Placement cost | Build days | Upkeep ×level (wood/stone) | Settlement effects | Player effects | Recruits |
 |------|---------------|-----------|---------------------------|--------------------|----------------|----------|
@@ -200,6 +200,8 @@ The registry is [`packages/engine/src/buildingRegistry.ts`](../packages/engine/s
 | goldMine | 300g 6w 4s | 4 | 2 / 0 | gold +40/turn | — | — |
 | woodcutterHut | 150g 5w | 3 | 1 / 0 | wood yield +3 | — | — |
 | arcaneFont | 350g 5w 6s | 4 | 1 / 1 | arcane yield +3 | — | — |
+| huntingLodge | 250g 8w | 3 | 2 / 1 | defense +1 | — | warhound 180g |
+| eyrie | 500g 12w 8s | 6 | 2 / 1 | — | — | giant_eagle 1400g + 2a (L1); eagle_prince 2400g + 4a (L2) |
 
 **Wired vs. dormant — which of these actually do anything:**
 
@@ -213,7 +215,7 @@ The registry is [`packages/engine/src/buildingRegistry.ts`](../packages/engine/s
 
 Level-scaling nuances (`buildingSettlementEffects`, `buildingRegistry.ts:249-261`): `goldPerTurn`, `foodPerTurn`, `populationBonus`, and `defenseBonus` scale ×level; `resourceYieldBonus` and `unitCostReductionPct` are returned **flat** (no ×level).
 
-Recruit costs (`RecruitEntry`) are shown in the building menu; actual unit recruitment is not wired ([F7](#F7)).
+Recruit costs (`RecruitEntry`) are charged by the wired `RecruitUnits` command — gold from the settlement treasury, materials from its warehouse, units into the garrison (see [army.md](./army.md)).
 
 ## 8. City spots & mines (status)
 
@@ -306,7 +308,7 @@ Each finding: behavior, evidence, suggestion. All are documentation-only observa
 **F6 — No warehouse capacity.** Warehouses are uncapped, and granary's description ("increases food storage") promises a mechanic that doesn't exist. *Suggest:* either implement caps (granary/granary levels raising them) or reword the description.
 
 <a id="F7"></a>
-**F7 — Recruitment is display-only.** `RecruitEntry` costs render in the building menu, but the archery-range button's `onRecruitArcher` callback is never supplied (`initCityView` passes no such handler), so no unit recruitment deducts resources. Consistent with the army milestone deferral ([army.md](./army.md)). *Suggest:* wire recruitment through a server command when army.md lands.
+**F7 — ~~Recruitment is display-only~~ RESOLVED (2026-09-29 unit-recruitment/garrison milestone).** Recruitment runs through the `RecruitUnits` command: registry gates (unit offered at that building, level ≥ `minLevel`), gold/warehouse charges, garrison deposit; documented in [army.md](./army.md). *(Was: `RecruitEntry` costs rendered in the building menu with no handler attached.)*
 
 <a id="F8"></a>
 **F8 — Trade asymmetries.** The engine permits trading food; the UI excludes it. Auto-trade covers only food/wood/stone deficits (iron/arcane can never be deficit-covered — by design, they have no upkeep). The flat 1:1 gold rate is steep against high-yield tiles. *Suggest:* align UI and engine on food, and consider a rate/margin pass when the economy gets tuning.

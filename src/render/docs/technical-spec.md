@@ -226,13 +226,13 @@ sequenceDiagram
 | `HERO_DESCRIPTORS` | `hero.player`, `hero.enemy` | 2 |
 | `HORSE_VARIANT_DESCRIPTORS` | `horse.{variant}.{dir}` — one sub-record per `HORSE_VARIANT_REGISTRY` entry | 9 variants × 4–8 directions each | 42 |
 | `BUILDING_DESCRIPTORS` | `building.{style}.{kind}.{level}` | 6 |
-| `UNIT_ARENA_DESCRIPTORS` | `unit.{unitTypeId}.{idle,attack,move}` | 12 |
+| `UNIT_ARENA_DESCRIPTORS` | `unit.{unitTypeId}.{idle,attack,move}` | 45 |
 
 `ALL_DESCRIPTORS` concatenates all of the above into a flat array used by `createDefaultProvider()`.
 
 The horse-variant descriptors are registry-driven rather than hand-listed: `assetDescriptors.ts` generates `HORSE_VARIANT_DESCRIPTORS` for all 9 `HORSE_VARIANT_REGISTRY` entries (`packages/engine/src/horseVariants.ts`) from an `import.meta.glob` of `units/horse/commander-*/*.png` — adding a variant is a registry entry plus a `commander-{N}/` sprite folder. Bubbly keeps its `naturalSize: 64` special case (everything else uses 512), and non-hero variants get diagonal→cardinal URL fallbacks (`ne/nw→n`, `se/sw→s`) applied at descriptor build time. The filename regexes also capture an optional `-2` run-frame suffix (`drake-e-2.png` → key `horse.drake.e.2`); `loadDirectionalSprites` returns `{ base, frame2 }`, frame-2 descriptors get identical anchor/sizing/naturalSize and are emitted only for files that exist, and the diagonal→cardinal fallbacks run per tier — a frame-2 diagonal aliases only a frame-2 cardinal, never frame-1. `HORSE_VARIANT_DESCRIPTORS` / `horseVariantKey(variant, dir, frame?)` are the generic accessors; the legacy per-variant key wrappers remain as sugar.
 
-The unit-arena descriptors are registry-driven the same way: `assetDescriptors.ts` generates `UNIT_ARENA_DESCRIPTORS` from an `import.meta.glob` of `units/arena/<unitTypeId>-<pose>.png` (`UnitArenaPose` = `idle | attack | move`; `unitArenaKey(unitTypeId, pose)` is the accessor), so dropping a PNG into the folder resolves as `unit.<unitTypeId>.<pose>` with zero descriptor code. All 12 current sprites are `idle` poses — 128px natural, bottom-anchored, `fitHeight` with `hexSizeMul: 1.3`. Art is authored facing right once; the battle painter mirrors defenders (see §7).
+The unit-arena descriptors are registry-driven the same way: `assetDescriptors.ts` generates `UNIT_ARENA_DESCRIPTORS` from an `import.meta.glob` of `units/arena/<unitTypeId>-<pose>.png` (`UnitArenaPose` = `idle | attack | move`; `unitArenaKey(unitTypeId, pose)` is the accessor), so dropping a PNG into the folder resolves as `unit.<unitTypeId>.<pose>` with zero descriptor code. All 15 ids carry idle/attack/move poses — 128px natural, bottom-anchored, `fitHeight` with `hexSizeMul: 1.3`. Art is authored facing right once; the battle painter mirrors defenders (see §7).
 
 #### Castle Sprites
 
@@ -626,7 +626,7 @@ graph TD
 ```typescript
 interface BuildingDef {
   gx, gy: number;       // grid position
-  kind: BuildingKind;   // 21 types (contracts union)
+  kind: BuildingKind;   // 23 types (contracts union)
   level: number;        // 1–3
   style: GenerationStyle;
   w?, h?: number;       // multi-cell width/height (default 1)
@@ -635,9 +635,9 @@ interface BuildingDef {
 
 ### 3.3 Building Drawing (`cityBuildingDraw.ts`)
 
-**`BuildingKind`** (21 types, re-exported from `@heroes/contracts`): `townHall`, `house`, `tower`, `mageGuild`, `mine`, `stoneMine`, `ironMine`, `market`, `barracks`, `smithy`, `apartment`, `farmField`, `farmhouse`, `archeryRange`, `granary`, `warehouse`, `bank`, `goldMine`, `woodcutterHut`, `arcaneFont`, `stables`
+**`BuildingKind`** (23 types, re-exported from `@heroes/contracts`): `townHall`, `house`, `tower`, `mageGuild`, `mine`, `stoneMine`, `ironMine`, `market`, `barracks`, `smithy`, `apartment`, `farmField`, `farmhouse`, `archeryRange`, `granary`, `warehouse`, `bank`, `goldMine`, `woodcutterHut`, `arcaneFont`, `stables`, `huntingLodge`, `eyrie`
 
-`stables` is the newest kind (unit-recruitment/garrison milestone: recruits cavalry, `defenseBonus: 1`). It has **no dedicated sprite asset yet** — like the other un-sprited kinds it draws through the procedural per-style fallback path.
+`huntingLodge` and `eyrie` are the newest kinds (2026-09-30 faction-roster expansion: warhound; giant_eagle/eagle_prince). Like `stables` they have **no dedicated sprite asset yet** — un-sprited kinds draw through the procedural per-style fallback path.
 
 **Building drawing flow**:
 
@@ -826,7 +826,7 @@ Central registry of all sprite filenames. Used by `pixel-gen.mjs` for the proced
 
 Three scripts cover the `pixel` building sprites — `building-pixel-<camelCaseName>-<level>.png` in `src/resources/buildings/` (e.g. `building-pixel-granary-1.png`, `building-pixel-woodcutterHut-2.png`), a naming scheme separate from the FLUX `building-{style}-{kind}-{level}.png` files. They live in `.kilo/skills/building-sprite-gen/scripts/` (see that folder's `SKILL.md` for the full workflow).
 
-The same scripts generated the unit battle art: the arena battle sprites (`units/arena/<unitId>-<pose>.png` — `unit.<id>.<pose>` keys, 12 ids × idle/attack/move; the 2026-09-29 pose wave ran on `google/gemini-3-pro-image` with each unit's own idle sprite passed as `--ref`) and the hero-panel unit icons (`units/icons/<unitId>.png`), all via OpenRouter Gemini image models. Acceptance gates for the arena art (128×128 + transparent border) live as local helper scripts under `design/arena-unit-sprites/` — not repo tooling.
+The same scripts generated the unit battle art: the arena battle sprites (`units/arena/<unitId>-<pose>.png` — `unit.<id>.<pose>` keys, 15 ids × idle/attack/move; the 2026-09-29 pose wave ran on `google/gemini-3-pro-image` with each unit's own idle sprite passed as `--ref`; the 2026-09-30 roster wave added warhound/giant_eagle/eagle_prince the same way) and the hero-panel unit icons (`units/icons/<unitId>.png`), all via OpenRouter Gemini image models. Acceptance gates for the arena art (128×128 + transparent border) live as local helper scripts under `design/arena-unit-sprites/` — not repo tooling.
 
 ```mermaid
 sequenceDiagram

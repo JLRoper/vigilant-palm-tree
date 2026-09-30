@@ -15,8 +15,8 @@ import { resolve } from "node:path";
 const ARENA_DIR = resolve(process.cwd(), "src", "resources", "units", "arena");
 const DESCRIPTORS_SOURCE = resolve(process.cwd(), "src", "render", "assetDescriptors.ts");
 
-// The 12 unit-type ids the battle catalog serves (server/migrations/
-// 002_unit_types.sql). Static on purpose — "no DB".
+// The unit-type ids the battle catalog serves (server/migrations/
+// 002_unit_types.sql + 020_faction_ladder_units.sql). Static on purpose — "no DB".
 const UNIT_CATALOG_IDS = [
   "peasant",
   "archer",
@@ -30,6 +30,9 @@ const UNIT_CATALOG_IDS = [
   "hydra",
   "wisp",
   "black_dragon",
+  "warhound",
+  "giant_eagle",
+  "eagle_prince",
 ] as const;
 
 const POSES = ["idle", "attack", "move"] as const;

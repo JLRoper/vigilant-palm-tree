@@ -26,7 +26,7 @@ test("farmhouse classifies as a troop building (it recruits peasants)", () => {
 
 test("exact section membership in BUILDABLE_KINDS order", () => {
   const sections = buildListSections();
-  assert.deepEqual(sections[0]?.kinds, ["archeryRange", "barracks", "mageGuild", "farmhouse", "stables"]);
+  assert.deepEqual(sections[0]?.kinds, ["archeryRange", "barracks", "mageGuild", "farmhouse", "stables", "huntingLodge", "eyrie"]);
   assert.deepEqual(sections[1]?.kinds, ["goldMine", "woodcutterHut", "stoneMine", "ironMine", "arcaneFont"]);
   assert.deepEqual(sections[2]?.kinds, [
     "townHall", "house", "tower", "smithy", "market", "apartment", "farmField", "granary", "warehouse", "bank",

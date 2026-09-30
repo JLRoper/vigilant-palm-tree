@@ -4,6 +4,8 @@ import castleL3 from "../resources/castle-l3.png?url";
 import castleAltL1 from "../resources/castle-l1-alt.png?url";
 import castleAltL2 from "../resources/castle-l2-alt.png?url";
 import castleAltL3 from "../resources/castle-l3-alt.png?url";
+import castleAlt2L1 from "../resources/castle-l1-alt2.png?url";
+import castleAlt3L1 from "../resources/castle-l1-alt3.png?url";
 import settlementBanner from "../resources/settlement-banner.png?url";
 import cityBanner from "../resources/city-banner.png?url";
 import castleBanner from "../resources/castle-banner.png?url";
@@ -110,6 +112,8 @@ import { pickStyleForBuilding } from "@heroes/engine";
 export type SpriteKey =
   | `castle.${CastleLevel}`
   | `castle-alt.${CastleLevel}`
+  | `castle-alt2.${CastleLevel}`
+  | `castle-alt3.${CastleLevel}`
   | `resource.${ResourceType}`
   | `resource-cart.${ResourceType}`
   | `resource-illust.${ResourceType}`
@@ -153,6 +157,21 @@ export const CASTLE_ALT_SPRITES: Record<CastleLevel, string> = {
   1: castleAltL1,
   2: castleAltL2,
   3: castleAltL3,
+};
+
+// alt2/alt3 ship tier-1 art only; a variant-2/3 settlement that upgrades to
+// level 2/3 aliases the variant-1 sprite so the key still resolves (a resolver
+// miss would draw nothing).
+export const CASTLE_ALT2_SPRITES: Record<CastleLevel, string> = {
+  1: castleAlt2L1,
+  2: CASTLE_ALT_SPRITES[2],
+  3: CASTLE_ALT_SPRITES[3],
+};
+
+export const CASTLE_ALT3_SPRITES: Record<CastleLevel, string> = {
+  1: castleAlt3L1,
+  2: CASTLE_ALT_SPRITES[2],
+  3: CASTLE_ALT_SPRITES[3],
 };
 
 export const SETTLEMENT_BANNERS: Record<CastleLevel, string> = {
@@ -334,6 +353,52 @@ export const CASTLE_ALT_DESCRIPTORS: Record<`castle-alt.${CastleLevel}`, SpriteD
   "castle-alt.3": {
     key: "castle-alt.3",
     url: CASTLE_ALT_SPRITES[3],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 3.0 },
+    anchorOffsetY: 16,
+  },
+};
+
+export const CASTLE_ALT2_DESCRIPTORS: Record<`castle-alt2.${CastleLevel}`, SpriteDescriptor> = {
+  "castle-alt2.1": {
+    key: "castle-alt2.1",
+    url: CASTLE_ALT2_SPRITES[1],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.5 },
+  },
+  "castle-alt2.2": {
+    key: "castle-alt2.2",
+    url: CASTLE_ALT2_SPRITES[2],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 2.2 },
+    anchorOffsetY: 8,
+  },
+  "castle-alt2.3": {
+    key: "castle-alt2.3",
+    url: CASTLE_ALT2_SPRITES[3],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 3.0 },
+    anchorOffsetY: 16,
+  },
+};
+
+export const CASTLE_ALT3_DESCRIPTORS: Record<`castle-alt3.${CastleLevel}`, SpriteDescriptor> = {
+  "castle-alt3.1": {
+    key: "castle-alt3.1",
+    url: CASTLE_ALT3_SPRITES[1],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.5 },
+  },
+  "castle-alt3.2": {
+    key: "castle-alt3.2",
+    url: CASTLE_ALT3_SPRITES[2],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 2.2 },
+    anchorOffsetY: 8,
+  },
+  "castle-alt3.3": {
+    key: "castle-alt3.3",
+    url: CASTLE_ALT3_SPRITES[3],
     anchor: "bottom",
     sizing: { kind: "fitHeight", hexSizeMul: 3.0 },
     anchorOffsetY: 16,
@@ -644,7 +709,7 @@ export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> =
 //   => anchorOffsetY = bottomPad * (sh/128), with sh = tw * 0.9 = 86.4
 const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.classic.apartment.1": 3,
-  "building.classic.archeryRange.1": 8,
+  "building.classic.archeryRange.1": 10,
   "building.classic.barracks.1": 11,
   "building.classic.farmField.1": 14,
   "building.classic.farmField.1_variant2": 5,
@@ -703,6 +768,8 @@ for (const entry of HORSE_VARIANT_REGISTRY) {
 export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(CASTLE_DESCRIPTORS),
   ...Object.values(CASTLE_ALT_DESCRIPTORS),
+  ...Object.values(CASTLE_ALT2_DESCRIPTORS),
+  ...Object.values(CASTLE_ALT3_DESCRIPTORS),
   ...Object.values(RESOURCE_DESCRIPTORS),
   ...Object.values(RESOURCE_CART_DESCRIPTORS),
   ...Object.values(RESOURCE_ILLUST_DESCRIPTORS),
@@ -718,7 +785,12 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(UNIT_ARENA_DESCRIPTORS),
 ];
 
-export function castleKey(level: CastleLevel, variant?: CastleVariant): `castle.${CastleLevel}` | `castle-alt.${CastleLevel}` {
+export function castleKey(
+  level: CastleLevel,
+  variant?: CastleVariant,
+): `castle.${CastleLevel}` | `castle-alt.${CastleLevel}` | `castle-alt2.${CastleLevel}` | `castle-alt3.${CastleLevel}` {
+  if (variant === 2) return `castle-alt2.${level}`;
+  if (variant === 3) return `castle-alt3.${level}`;
   return variant ? `castle-alt.${level}` : `castle.${level}`;
 }
 
