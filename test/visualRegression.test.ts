@@ -16,6 +16,7 @@ import {
   shouldUpdateBaselines,
   spawnLogged,
   waitForApiHealth,
+  waitForPortReleased,
   waitForUrl,
   treeKill,
   reapPreviousRunPids,
@@ -95,13 +96,17 @@ async function newPage(context: BrowserContext, urlSuffix = ""): Promise<Page> {
   });
   page.on("pageerror", (e) => console.log(`[browser pageerror] ${e.message}`));
   await page.addInitScript(seededRandomInitScript(RNG_SEED), RNG_SEED);
-  // Boot-race warmup: the page's own /api fetches raced the last moments of
-  // api/web boot and logged benign "Failed to fetch" warnings.
+  // Clear storage before any app code runs instead of goto+reload: the app
+  // fires its boot fetches at module evaluation, so a reload right after the
+  // load event aborts an in-flight createGame and surfaces as a benign
+  // "Failed to fetch" console warning (and can kill the page's own New Game
+  // round-trip when it lands later). One load, no in-flight aborts.
+  await page.addInitScript(() => {
+    try { localStorage.clear(); } catch {}
+  });
   await waitForApiHealth(API_URL);
   // waitUntil "load", not "networkidle": once a session boots, its SSE event stream (/events/stream) holds a pending request forever, so networkidle can never fire.
   await page.goto(`${WEB_URL}${urlSuffix}`, { waitUntil: "load" });
-  await page.evaluate(() => localStorage.clear());
-  await page.reload({ waitUntil: "load" });
   await page.waitForFunction(
     () => (window as unknown as { __gameDebug?: { activeGameName?: string } }).__gameDebug?.activeGameName != null,
     null,
@@ -286,9 +291,16 @@ async function run(): Promise<void> {
   let exitCode = 1;
   let browser: Browser | undefined;
   try {
+    // Belt-and-suspenders for direct (non-wrapper) invocations: chained runs
+    // reuse this suite's ports for the previous entry's force-killed
+    // api/web, which can still answer boot probes while dying. Spawn only
+    // once both ports refuse connections, so every probe below can only be
+    // answered by THIS suite's servers.
+    await waitForPortReleased(API_PORT);
+    await waitForPortReleased(WEB_PORT);
     startApi();
     startWeb();
-    await waitForUrl(`${API_URL}/api/health`);
+    await waitForApiHealth(API_URL);
     await waitForUrl(WEB_URL);
     console.log(">> api + web up");
 

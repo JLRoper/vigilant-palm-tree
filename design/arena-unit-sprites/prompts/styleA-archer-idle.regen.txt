@@ -1,0 +1,7 @@
+Side-view pixel art game asset of a single fantasy battle unit, matching the attached reference image exactly in style: same chunky pixel size, same thick dark outlines around every shape, same slightly desaturated color palette, same clean fully transparent background, square 1:1 canvas.
+
+Subject: a woodland archer in a green hood and leather bracers, holding a longbow lowered in his left hand and reaching an arrow from the quiver on his back with his right hand, standing relaxed.
+
+Single centered figure facing right, full body visible from head to feet, filling about 75% of the canvas height, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.
+
+Background rules: the entire canvas behind the figure must be one single flat solid color that can be made transparent, never a checkerboard pattern anywhere. The figure must have no enclosed openings through which the background shows: fill the space between the bow, its string, and the archer's body so the bow area is solid, and draw the legs close enough that no background gap shows between them. Absolutely no ground shadow or ground patch under the feet.

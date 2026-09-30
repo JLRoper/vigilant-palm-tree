@@ -17,3 +17,9 @@ test/.baseline-snapshot.txt
 test/.test-timing.txt
 test/visual-baselines/*.diff.png
 jlr/
+
+# local art-generation workspace: heavy 1024px masters stay local;
+# the committed provenance is prompts/, review sheets, and helper scripts
+design/arena-unit-sprites/*-1024/
+design/arena-unit-sprites/pose-test/
+design/arena-unit-sprites/style*-*.png
