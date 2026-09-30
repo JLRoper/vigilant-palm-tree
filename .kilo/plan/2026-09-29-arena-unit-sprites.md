@@ -1,6 +1,6 @@
 # Battle arena unit sprites — integration plan
 
-**Status:** Planning only — no existing source file was modified for this plan. Styling samples live in `design/arena-unit-sprites/` (new, untracked). Written 2026-09-29; **decisions locked the same day — see "Decisions" below** (Style B chosen; full idle set being produced into `src/resources/units/arena/`).
+**Status:** Executed 2026-09-29/30 (commits `c0778d2`, `640a13a`, `38449a1`). Descriptors + `resolveSpriteForUnit` + scene-node fields + attacker-window tracking + sprite-first painter with byte-identical circle fallback are live; the arena render path defaults to the scenebuilder painter (`?paint=legacy` escape hatch); 3 arena visual baselines added; all 12 units have idle + attack + move art (pose wave generated on `google/gemini-3-pro-image` with per-unit idle refs). Summary entry in `docs/architecture.md` ("Unit battle art"); this plan and `.kilo/plan/2026-09-29-unit-army-icons.md` remain the authoritative details.
 
 ## Problem
 

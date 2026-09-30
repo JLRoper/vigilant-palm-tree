@@ -313,6 +313,16 @@ Behavior notes: the assault confirm is client-local — Cancel submits no comman
 
 Test inventory: new `test/screens/combat/assaultConfirmModal.test.ts` + `test/engine/unitPower.test.ts`; extended `test/ai/aiBrain.test.ts` (garrison planner, power gating, backoff exclusions), `test/state/turnController.test.ts` (cancel, recruit tick, memory persistence across rebuilds), `test/state/mergeFromEndTurn.test.ts` (seat-gated selection preservation), `test/state/garrisonEventMerge.test.ts`, `test/render/adventureScene.test.ts` (own-seat-only path/trail), `test/io/multiplayerSync.test.ts` (driven-seat skip). Full suite 944/944.
 
+### Unit battle art: arena sprites, hero-panel icons, pose wave (2026-09-29/30)
+
+Plans: [`.kilo/plan/2026-09-29-arena-unit-sprites.md`](../.kilo/plan/2026-09-29-arena-unit-sprites.md) + [`.kilo/plan/2026-09-29-unit-army-icons.md`](../.kilo/plan/2026-09-29-unit-army-icons.md) are the authoritative details; summary here.
+
+**Battle arena unit sprites.** Registry-driven `UNIT_ARENA_DESCRIPTORS` — `unit.<id>.<pose>` keys over `src/resources/units/arena/<id>-<pose>.png` via `unitArenaKey`; dropping a PNG into the folder resolves it with zero descriptor code. `Paint2DDep` gained its fifth per-kind resolver, `resolveSpriteForUnit(unitTypeId, pose)`, wired via `src/render/paint2dDefaults.ts` (a process-lifetime arena-only `SpriteProvider` + `preloadUnitArenaSprites()`). `battleCombatant` scene nodes carry additive `unitTypeId` (the platoon's dominant entry — highest count, first stored wins ties) / `pose` / `mirror` / `hexSize`; the manual arena records an `attacker` window to drive the attack pose; `paintBattleCombatant` is sprite-first (bottom-anchored, defenders mirrored, owner dot/count text/HP bar carried over) and falls back to the byte-identical circle rendering on a resolver miss. The arena's render path flipped to scenebuilder-default (`?paint=legacy` escape hatch). Three new arena visual baselines.
+
+**Hero panel army icons.** `src/data/unitImages.ts`'s `KNOWN` map wires all 12 unit-catalog ids to 128px busts in `src/resources/units/icons/` (consumers: `armySection`, `settlementInfoMenu`, `buildingMenu`); the legacy `units/{swordsman,archer,cavalry}.png` placeholder art is unreferenced (kept on disk).
+
+**Pose wave (38449a1).** Idle/attack/move for all 12 units — 24 new PNGs picked up by the registry with zero code changes, so moving/attacking platoons render pose art. Generated on `google/gemini-3-pro-image` (Nano Banana Pro) with each unit's own idle sprite as the style reference via the building-sprite-gen scripts (`--model` + `--ref`); see §5.4 of [`src/render/docs/technical-spec.md`](../src/render/docs/technical-spec.md).
+
 ## See also
 
 - [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) — current module-by-module dependency map for `src/`, `server/`, `shared/`, `test/`, `tools/`, `scripts/`. This doc (`architecture.md`) is the executed **plan** that established the layout; the dependency map is the maintained **current state** and reflects any drift since the move.

@@ -1,6 +1,6 @@
 # Hero panel army icons — plan
 
-**Status:** Art delivered; **no code changed** (user constraint). Sister plan to [2026-09-29-arena-unit-sprites.md](./2026-09-29-arena-unit-sprites.md) — same Style B unit identity, different render surface (DOM `<img>`, not canvas). Written 2026-09-29.
+**Status:** Executed 2026-09-29/30 (commit `c0778d2`): all 12 catalog ids wired via `unitImages.ts`'s `KNOWN` map to the icons in `src/resources/units/icons/`; coverage tests added (and `test/data/` joined the `test:unit` glob). The legacy placeholder PNGs remain on disk unreferenced — their retirement/overwrite is still awaiting a user nod. Sister plan to [2026-09-29-arena-unit-sprites.md](./2026-09-29-arena-unit-sprites.md) — same Style B unit identity, different render surface (DOM `<img>`, not canvas). Written 2026-09-29.
 
 ## Problem
 
