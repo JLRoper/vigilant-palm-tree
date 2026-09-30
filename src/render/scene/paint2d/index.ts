@@ -108,6 +108,13 @@ const BATTLE_COMBATANT_ATTACKER_SELECTED = "#5fb0ff";
 const BATTLE_COMBATANT_DEFENDER = "#c04040";
 const BATTLE_COMBATANT_DEFENDER_SELECTED = "#ff7a7a";
 const BATTLE_COMBATANT_STROKE = "#fff";
+// Legibility shadow for the unit-count text when it overlays unit art (same
+// pattern as paintBattleFloatingText's strokeText outline).
+const BATTLE_COMBATANT_TEXT_SHADOW = "rgba(0,0,0,0.85)";
+const BATTLE_COMBATANT_TEXT_SHADOW_WIDTH = 3;
+// Adventure-map-style owner dot at a sprite-mode combatant's base (plan
+// decision #6) — the side accent, so teams read even with both figures upright.
+const BATTLE_COMBATANT_OWNER_DOT_RADIUS = 3;
 
 type Drawable = HTMLImageElement | HTMLCanvasElement;
 
@@ -1014,6 +1021,60 @@ export function paintBattleAiActingRing(ctx: CanvasRenderingContext2D, node: Bat
 }
 
 export function paintBattleCombatant(ctx: CanvasRenderingContext2D, node: BattleCombatantNode, deps: Paint2DDep): void {
+  // Sprite-first (plan/2026-09-29-arena-unit-sprites.md): resolve the
+  // combatant's dominant unit art; on a ready hit, draw it bottom-anchored at
+  // the combatant's world point (descriptor anchor "bottom" = feet at the
+  // hex's south vertex, the same convention as every other world sprite),
+  // mirrored for defenders. On a miss/unready sprite, fall through to the
+  // original circle rendering below — byte-identical to pre-sprite output.
+  const unitSprite = node.unitTypeId
+    ? deps.sprite.resolveSpriteForUnit(node.unitTypeId, node.pose ?? "idle")
+    : undefined;
+  if (unitSprite && unitSprite.ready) {
+    const hexSize = node.hexSize ?? node.radius / 0.55;
+
+    if (node.selected) {
+      ctx.beginPath();
+      ctx.arc(node.world.x, node.world.y, node.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = node.side === "attacker" ? BATTLE_COMBATANT_ATTACKER_SELECTED : BATTLE_COMBATANT_DEFENDER_SELECTED;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    if (node.mirror) {
+      ctx.save();
+      ctx.translate(node.world.x, node.world.y);
+      ctx.scale(-1, 1);
+      ctx.translate(-node.world.x, -node.world.y);
+      drawWithDescriptor(ctx, unitSprite.drawable, unitSprite.descriptor, node.world.x, node.world.y, hexSize);
+      ctx.restore();
+    } else {
+      drawWithDescriptor(ctx, unitSprite.drawable, unitSprite.descriptor, node.world.x, node.world.y, hexSize);
+    }
+
+    ctx.beginPath();
+    ctx.arc(node.world.x, node.world.y + hexSize * 0.5, BATTLE_COMBATANT_OWNER_DOT_RADIUS, 0, Math.PI * 2);
+    ctx.fillStyle = deps.battleAccent(node.side, "ring");
+    ctx.fill();
+
+    ctx.fillStyle = "#fff";
+    ctx.font = `${Math.round(node.radius * 0.7)}px ${deps.fontFamily}`;
+    ctx.textAlign = "center";
+    ctx.lineWidth = BATTLE_COMBATANT_TEXT_SHADOW_WIDTH;
+    ctx.strokeStyle = BATTLE_COMBATANT_TEXT_SHADOW;
+    ctx.strokeText(String(node.unitCount), node.world.x, node.world.y + node.radius * 0.14);
+    ctx.fillText(String(node.unitCount), node.world.x, node.world.y + node.radius * 0.14);
+
+    const barW = node.radius * 2;
+    const barX = node.world.x - barW / 2;
+    const barY = node.world.y + node.radius + 3;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(barX, barY, barW, 4);
+    ctx.fillStyle = node.hpRatio > 0.5 ? "#4caf50" : node.hpRatio > 0.25 ? "#ffb300" : "#e53935";
+    ctx.fillRect(barX, barY, barW * node.hpRatio, 4);
+    return;
+  }
+
   ctx.beginPath();
   ctx.arc(node.world.x, node.world.y, node.radius, 0, Math.PI * 2);
   ctx.fillStyle = node.side === "attacker"

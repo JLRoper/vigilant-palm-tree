@@ -252,10 +252,16 @@ async function runGameScenes(context: BrowserContext): Promise<void> {
   await page.close();
 }
 
-// ── Battle arena: legacy paint path vs. the ?paint=scenebuilder path ──
-// First real regression check for #143's double-paint bug -- the two
-// screenshots below are diffed against each other, not just their own
-// baselines.
+// ── Battle arena: three captures per plan/2026-09-29-arena-unit-sprites.md ──
+// The scene path is the arena DEFAULT now (plan decision #4), so the arena
+// scenes pin all three states:
+//   - battle-arena-legacy       `?paint=legacy`   → the circle escape hatch
+//   - battle-arena-scenebuilder `?paint=scenebuilder` → scene path (accepted no-op)
+//   - battle-arena-default      no flag            → must equal scenebuilder
+// The default-vs-scenebuilder cross-diff (identical pixels) is what actually
+// pins the flip — it replaces #143's legacy-vs-scenebuilder equality check,
+// whose premise ("both paths render identically") is obsolete now that the
+// scene path draws unit art and legacy intentionally stays circles.
 
 async function runBattleArenaScene(
   context: BrowserContext,
@@ -291,11 +297,12 @@ async function run(): Promise<void> {
 
     await runGameScenes(context);
 
-    const legacyPng = await runBattleArenaScene(context, "battle-arena-legacy", "");
+    await runBattleArenaScene(context, "battle-arena-legacy", "/?paint=legacy");
     const scenebuilderPng = await runBattleArenaScene(context, "battle-arena-scenebuilder", "/?paint=scenebuilder");
-    const crossDiff = diffPngBuffers(legacyPng, scenebuilderPng);
-    results.push({ name: "battle-arena-legacy-vs-scenebuilder", ok: crossDiff.ok, reason: crossDiff.reason });
-    console.log(`>> [${crossDiff.ok ? "OK" : "FAIL"}] battle-arena-legacy-vs-scenebuilder${crossDiff.reason ? ` -- ${crossDiff.reason}` : ""}`);
+    const defaultPng = await runBattleArenaScene(context, "battle-arena-default", "");
+    const crossDiff = diffPngBuffers(defaultPng, scenebuilderPng);
+    results.push({ name: "battle-arena-default-vs-scenebuilder", ok: crossDiff.ok, reason: crossDiff.reason });
+    console.log(`>> [${crossDiff.ok ? "OK" : "FAIL"}] battle-arena-default-vs-scenebuilder${crossDiff.reason ? ` -- ${crossDiff.reason}` : ""}`);
 
     const failed = results.filter((r) => !r.ok);
     if (UPDATE_BASELINES) {

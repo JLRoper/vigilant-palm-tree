@@ -122,7 +122,10 @@ export type SpriteKey =
   | `hero.player.${Direction}`
   | `horse.${string}.${Direction}`
   | `horse.${string}.${Direction}.${number}`
-  | `building.${string}.${string}.${number}`;
+  | `building.${string}.${string}.${number}`
+  | `unit.${string}.${UnitArenaPose}`;
+
+export type UnitArenaPose = "idle" | "attack" | "move";
 
 export type Anchor = "bottom" | "center";
 
@@ -482,6 +485,32 @@ for (const entry of HORSE_VARIANT_REGISTRY) {
   );
 }
 
+// Arena unit sprites: registry-driven like the horse variants — drop a
+// `<unitTypeId>-<pose>.png` into resources/units/arena/ and it resolves as
+// `unit.<unitTypeId>.<pose>` with zero descriptor code. Art is authored
+// facing right once; the battle painter mirrors defenders. transparent PNGs,
+// 128px natural, bottom-anchored so the figure's feet sit on the hex.
+const UNIT_ARENA_GLOB = import.meta.glob("../resources/units/arena/*.png", {
+  eager: true,
+}) as Record<string, { default: string }>;
+
+const UNIT_ARENA_FILE_PATTERN = /([^/]+)-(idle|attack|move)\.png$/;
+
+export const UNIT_ARENA_DESCRIPTORS: Record<`unit.${string}.${UnitArenaPose}`, SpriteDescriptor> = {};
+
+for (const [path, mod] of Object.entries(UNIT_ARENA_GLOB)) {
+  const match = path.match(UNIT_ARENA_FILE_PATTERN);
+  if (!match || !mod.default) continue;
+  const key = unitArenaKey(match[1], match[2] as UnitArenaPose);
+  UNIT_ARENA_DESCRIPTORS[key] = {
+    key,
+    url: mod.default,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.3 },
+    naturalSize: 128,
+  };
+}
+
 // Horse variant key functions auto-generated from registry
 export function horseVariantKey(
   variant: HorseVariantId,
@@ -686,6 +715,7 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(HERO_DESCRIPTORS),
   ...ALL_HORSE_DESCRIPTORS,
   ...Object.values(BUILDING_DESCRIPTORS),
+  ...Object.values(UNIT_ARENA_DESCRIPTORS),
 ];
 
 export function castleKey(level: CastleLevel, variant?: CastleVariant): `castle.${CastleLevel}` | `castle-alt.${CastleLevel}` {
@@ -724,6 +754,10 @@ export function heroDirectionKey(_faction: "player", direction: Direction): `her
 
 export function buildingKey(style: string, kind: string, level: number): SpriteKey {
   return `building.${style}.${kind}.${level}`;
+}
+
+export function unitArenaKey(unitTypeId: string, pose: UnitArenaPose): `unit.${string}.${UnitArenaPose}` {
+  return `unit.${unitTypeId}.${pose}`;
 }
 
 export { pickStyleForBuilding };

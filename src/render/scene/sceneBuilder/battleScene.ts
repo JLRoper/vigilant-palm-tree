@@ -6,6 +6,7 @@ import {
   type BattleSide,
   type Combatant,
   type ManualBattleState,
+  type PlatoonEntry,
 } from "@heroes/engine";
 import type { SceneNode, WorldPoint } from "../types";
 
@@ -54,6 +55,12 @@ export interface BattleSceneInput {
   aiTargetHex: Axial | null;
   moveAnim: { side: BattleSide; slotIndex: number; path: Axial[]; startedAt: number; durationMs: number } | null;
   impact: { hex: Axial; startedAt: number } | null;
+  // The platoon that just landed an attack, recorded by the arena when it
+  // dispatches one (human and AI paths both). Drives the combatant's "attack"
+  // pose for the IMPACT_MS window, exactly like `impact` drives its ring; an
+  // entry older than IMPACT_MS is treated as absent (same purity rule as
+  // activeImpact above — the builder never mutates the caller's state).
+  attacker?: { side: BattleSide; slotIndex: number; startedAt: number } | null;
   floats: { hex: Axial; text: string; startedAt: number }[];
   // Solved per-layout by manualBattleArena.ts's fitHexSize()/
   // relayoutCanvas() -- this screen's bespoke stand-in for a Camera (see
@@ -79,6 +86,16 @@ function hpRatioFor(state: ManualBattleState, c: Combatant): number {
 
 function clamp01(n: number): number {
   return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
+// Dominant entry of a platoon: highest count, first stored entry wins ties
+// (plan decision #2 — sprite shows the dominant unit of mixed platoons).
+function dominantUnitTypeId(entries: readonly PlatoonEntry[]): string | undefined {
+  let best: PlatoonEntry | undefined;
+  for (const e of entries) {
+    if (!best || e.count > best.count) best = e;
+  }
+  return best?.unitTypeId;
 }
 
 function toWorld(input: BattleSceneInput, q: number, r: number): WorldPoint {
@@ -116,6 +133,8 @@ export function buildBattleScene(input: BattleSceneInput): SceneNode[] {
   const activeMoveAnim: ActiveMoveAnim | null =
     input.moveAnim && input.nowMs - input.moveAnim.startedAt < input.moveAnim.durationMs ? input.moveAnim : null;
   const activeImpact = input.impact && input.nowMs - input.impact.startedAt < IMPACT_MS ? input.impact : null;
+  const activeAttacker =
+    input.attacker && input.nowMs - input.attacker.startedAt < IMPACT_MS ? input.attacker : null;
   const activeFloats = input.floats.filter((f) => input.nowMs - f.startedAt < FLOAT_MS);
 
   const moveRangeSet = new Set(input.moveRange.map(hexKey));
@@ -214,6 +233,13 @@ export function buildBattleScene(input: BattleSceneInput): SceneNode[] {
   for (const side of ["attacker", "defender"] as const) {
     for (const c of side === "attacker" ? input.state.attacker : input.state.defender) {
       if (!isAlive(c)) continue;
+      // Pose: "move" while this combatant is the interpolated mover, else
+      // "attack" while it is the recorded attacker within the impact window,
+      // else "idle". A mid-move attacker draws "move" — the slide animation
+      // is the stronger signal, and the arena clears moveAnim before an
+      // attack lands anyway.
+      const isMoving = activeMoveAnim !== null && activeMoveAnim.side === c.side && activeMoveAnim.slotIndex === c.slotIndex;
+      const isAttacking = activeAttacker !== null && activeAttacker.side === c.side && activeAttacker.slotIndex === c.slotIndex;
       nodes.push({
         kind: "battleCombatant",
         side,
@@ -223,6 +249,11 @@ export function buildBattleScene(input: BattleSceneInput): SceneNode[] {
         selected: side === input.humanSide && c.slotIndex === input.selectedSlot,
         unitCount: c.entries.reduce((sum, e) => sum + e.count, 0),
         hpRatio: hpRatioFor(input.state, c),
+        unitTypeId: dominantUnitTypeId(c.entries),
+        pose: isMoving ? "move" : isAttacking ? "attack" : "idle",
+        // Art is authored facing right once; defenders mirror (plan decision #5).
+        mirror: side === "defender",
+        hexSize: input.hexSize,
       });
     }
   }

@@ -55,9 +55,10 @@ import { axialToPixel, fmtHex, gridExtent, fitHexSize, hexCorners, hexDistance, 
 import { applyLeaveBehind, openLeaveBehindDialog } from "./leaveBehind";
 import { attachRailHover, buildPlatoonStrip } from "./view";
 import { createArenaInput, type ArenaInput } from "./input";
-import { createArenaAi, type ArenaAi } from "./ai";
+import { createArenaAi, type ArenaAi, type AttackerFx } from "./ai";
 import { attackFromSelectedHex, attackFromTarget, castSpellAction, endPlatoonTurnAction, moveSelectedTo, retreatAction, surrenderAction, type BattleActionEmit, type BattleActionPhase } from "./state";
 import { buildArenaPaint2dDeps, paintSceneForArena, readUseSceneBuilder } from "./paint";
+import { createUnitSpriteResolver, preloadUnitArenaSprites } from "../../../render/paint2dDefaults";
 
 // Key for indexing a specific unit entry inside the arena's combatant list.
 // `slotIndex` is the army-stack slot, `unitTypeId` is which entry within
@@ -298,17 +299,26 @@ export function openManualBattleArena(
   const attackerLabel = options.attackerLabel ?? (humanSide === "attacker" ? "You" : "Enemy");
   const defenderLabel = options.defenderLabel ?? (humanSide === "defender" ? "You" : "Enemy");
 
-  // Dev-only paint2d/ SceneNode[] rendering path. Off by default; opt in via
-  // ?paint=scenebuilder in the URL. Per
+  // paint2d/ SceneNode[] rendering path — the arena's DEFAULT (plan decision
+  // #4 in plan/2026-09-29-arena-unit-sprites.md: the unit-sprite look only
+  // exists on this path, so defaulting to legacy would make the flag flip the
+  // arena's look — the exact divergence issue #148 warns about).
+  // `?paint=legacy` is the escape hatch back to the circle rendering;
+  // `?paint=scenebuilder` is still accepted as a no-op. Per
   // plan/2026-08-17-combat-decomposition-finishing-breakout.md §9.4. All eight
-  // battle-kind painters are real transcriptions now (5.B P1 #5, PR #136), so
+  // battle-kind painters are real transcriptions (5.B P1 #5, PR #136), so
   // this path renders standalone -- draw() no longer falls back to drawLegacy().
   const useSceneBuilder = readUseSceneBuilder(window.location.search);
   const arenaPaint2dDeps = buildArenaPaint2dDeps({
     fontFamily: menuTheme.font,
     attackerAccent: ATTACKER_ACCENT,
     defenderAccent: DEFENDER_ACCENT,
+    resolveSpriteForUnit: createUnitSpriteResolver(),
   });
+  // Kick the unit-art image loads now that the arena exists; until each image
+  // decodes the painter resolves undefined and keeps drawing the circle
+  // fallback, so there is no blank-frame risk.
+  preloadUnitArenaSprites();
 
   // The fight takes over the whole viewport. Three stacked bands: a status
   // bar, the battle row (rail | battlefield | rail), and an action + log bar.
@@ -452,6 +462,10 @@ const FLOAT_MS = 800;
   // makes draw() render it somewhere along the path for the next few frames.
   let moveAnim: { side: BattleSide; slotIndex: number; path: Axial[]; startedAt: number; durationMs: number } | null = null;
   let impact: { hex: Axial; startedAt: number } | null = null;
+  // The platoon that just landed an attack (human or AI). Drives the scene
+  // path's "attack" pose on the same IMPACT_MS beat as `impact`, which only
+  // names the victim's hex (plan/2026-09-29-arena-unit-sprites.md step 5).
+  let attacker: AttackerFx | null = null;
   const floats: { hex: Axial; text: string; startedAt: number }[] = [];
   let animFrame: number | null = null;
 
@@ -459,6 +473,7 @@ const FLOAT_MS = 800;
     const now = performance.now();
     if (moveAnim) return true;
     if (impact && now - impact.startedAt < IMPACT_MS) return true;
+    if (attacker && now - attacker.startedAt < IMPACT_MS) return true;
     return floats.length > 0;
   }
 
@@ -471,9 +486,19 @@ const FLOAT_MS = 800;
   function pruneExpiredEffects(now: number): void {
     if (moveAnim && now - moveAnim.startedAt >= moveAnim.durationMs) moveAnim = null;
     if (impact && now - impact.startedAt >= IMPACT_MS) impact = null;
+    if (attacker && now - attacker.startedAt >= IMPACT_MS) attacker = null;
     for (let i = floats.length - 1; i >= 0; i--) {
       if (now - floats[i].startedAt >= FLOAT_MS) floats.splice(i, 1);
     }
+  }
+
+  // Records the attacking platoon the moment a dispatch actually lands, on
+  // both the human and AI paths. Pumps the animation so the "attack" pose is
+  // actually painted for its IMPACT_MS window rather than only on whatever
+  // repaint happens to come next.
+  function recordAttacker(side: BattleSide, slotIndex: number): void {
+    attacker = { side, slotIndex, startedAt: performance.now() };
+    pumpAnimation();
   }
 
   // Repaints the canvas only — not the rails or the log, which rebuild their
@@ -495,6 +520,7 @@ const FLOAT_MS = 800;
     }
     moveAnim = null;
     impact = null;
+    attacker = null;
     floats.length = 0;
   }
 
@@ -1184,6 +1210,7 @@ const FLOAT_MS = 800;
         aiTargetHex: ai.getTargetHex(),
         moveAnim,
         impact,
+        attacker,
         floats,
         hexSize,
         offsetX,
@@ -1468,7 +1495,8 @@ const FLOAT_MS = 800;
       const target = pickTarget(adjacentEnemies, state.unitTypes) ?? adjacentEnemies[0];
       debugLog(`bump attack: ${platoonLabel(humanSide, selectedSlot)} -> ${platoonLabel(target.side, target.slotIndex)}`);
       const beforeLog = state.log.length;
-      attackFromTarget(state, humanSide, selectedSlot, target.slotIndex, emit);
+      const bumped = attackFromTarget(state, humanSide, selectedSlot, target.slotIndex, emit);
+      if (bumped) recordAttacker(humanSide, selectedSlot);
       logNewBattleEvents(beforeLog);
       afterPlayerAction();
       return;
@@ -1568,6 +1596,9 @@ const ai: ArenaAi = createArenaAi({
   },
   setImpact: (fx) => {
     impact = fx;
+  },
+  setAttacker: (fx) => {
+    attacker = fx;
   },
 });
 // decomposition-finishing-breakout.md §6.2.
@@ -1718,6 +1749,7 @@ function finishBattle(): void {
         const beforeLog = state.log.length;
         if (attackFromSelectedHex(state, humanSide, selectedSlot, input.getPendingTarget()!.slotIndex, from, emit)) {
           if (distance > 0) recordMove(humanSide, selectedSlot, distance);
+          recordAttacker(humanSide, selectedSlot);
           logNewBattleEvents(beforeLog);
           afterPlayerAction();
         } else {
@@ -1733,7 +1765,8 @@ function finishBattle(): void {
     if (target) {
       debugLog(`click ${fmtHex(hex)} -> attack: ${platoonLabel(humanSide, selectedSlot)} -> ${platoonLabel(target.side, target.slotIndex)}`);
       const beforeLog = state.log.length;
-      attackFromTarget(state, humanSide, selectedSlot, target.slotIndex, emit);
+      const struck = attackFromTarget(state, humanSide, selectedSlot, target.slotIndex, emit);
+      if (struck) recordAttacker(humanSide, selectedSlot);
       logNewBattleEvents(beforeLog);
       afterPlayerAction();
       return;

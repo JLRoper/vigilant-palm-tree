@@ -110,6 +110,7 @@ function baseInput(overrides: Partial<BattleSceneInput> = {}): BattleSceneInput 
     aiTargetHex: null,
     moveAnim: null,
     impact: null,
+    attacker: null,
     floats: [],
     hexSize: 32,
     offsetX: 0,
@@ -311,6 +312,120 @@ test("impact ring radius grows and alpha fades with elapsed time, and disappears
 
   const expired = buildBattleScene(baseInput({ impact: { hex: { q: 1, r: 1 }, startedAt: 0 }, nowMs: 300 }));
   assert.equal(nodesOfKind(expired, "battleImpactRing").length, 0);
+});
+
+test("battleCombatant unitTypeId is the platoon's dominant entry: highest count, first stored entry wins ties", () => {
+  const mixed = makeCombatant({
+    side: "attacker",
+    slotIndex: 0,
+    position: { q: 0, r: 0 },
+    entries: [{ unitTypeId: "sword", count: 3 }, { unitTypeId: "archer", count: 7 }],
+  });
+  const tied = makeCombatant({
+    side: "attacker",
+    slotIndex: 1,
+    position: { q: 0, r: 1 },
+    entries: [{ unitTypeId: "sword", count: 4 }, { unitTypeId: "archer", count: 4 }],
+  });
+  const withWipedEntry = makeCombatant({
+    side: "attacker",
+    slotIndex: 2,
+    position: { q: 0, r: 2 },
+    entries: [{ unitTypeId: "sword", count: 0 }, { unitTypeId: "archer", count: 2 }],
+  });
+  const single = makeCombatant({
+    side: "defender",
+    slotIndex: 0,
+    position: { q: 3, r: 0 },
+    entries: [{ unitTypeId: "archer", count: 5 }],
+  });
+  const state = makeState({ attacker: [mixed, tied, withWipedEntry], defender: [single] });
+  const nodes = nodesOfKind<BattleCombatantNode>(buildBattleScene(baseInput({ state })), "battleCombatant");
+
+  const bySlot = (side: string, slot: number) => nodes.find((n) => n.side === side && n.slotIndex === slot)!;
+  assert.equal(bySlot("attacker", 0).unitTypeId, "archer", "highest count wins in a mixed platoon");
+  assert.equal(bySlot("attacker", 1).unitTypeId, "sword", "exact tie resolves to the first stored entry");
+  assert.equal(bySlot("attacker", 2).unitTypeId, "archer", "a wiped (0-count) entry never dominates");
+  assert.equal(bySlot("defender", 0).unitTypeId, "archer", "single-entry platoons pass their type straight through");
+});
+
+test("battleCombatant pose: move while mid-moveAnim, attack while the recorded attacker is inside its window, idle otherwise", () => {
+  const human = makeCombatant({ side: "attacker", slotIndex: 0, position: { q: 0, r: 0 }, entries: [{ unitTypeId: "sword", count: 5 }] });
+  const enemy = makeCombatant({ side: "defender", slotIndex: 0, position: { q: 3, r: 0 }, entries: [{ unitTypeId: "archer", count: 5 }] });
+  const state = makeState({ attacker: [human], defender: [enemy] });
+
+  const moving = nodesOfKind<BattleCombatantNode>(
+    buildBattleScene(baseInput({
+      state,
+      moveAnim: { side: "attacker", slotIndex: 0, path: [{ q: 0, r: 0 }, { q: 1, r: 0 }], startedAt: 0, durationMs: 1000 },
+      nowMs: 500,
+    })),
+    "battleCombatant",
+  );
+  assert.equal(moving.find((n) => n.side === "attacker")!.pose, "move", "the mover draws its move pose");
+  assert.equal(moving.find((n) => n.side === "defender")!.pose, "idle", "everyone else stays idle during a move");
+
+  const attacking = nodesOfKind<BattleCombatantNode>(
+    buildBattleScene(baseInput({ state, attacker: { side: "attacker", slotIndex: 0, startedAt: 900 }, nowMs: 1_000 })),
+    "battleCombatant",
+  );
+  assert.equal(attacking.find((n) => n.side === "attacker")!.pose, "attack", "the recorded attacker draws its attack pose inside the IMPACT_MS window");
+  assert.equal(attacking.find((n) => n.side === "defender")!.pose, "idle", "the victim keeps its idle pose (the impact ring marks it)");
+
+  const idle = nodesOfKind<BattleCombatantNode>(buildBattleScene(baseInput({ state })), "battleCombatant");
+  assert.ok(idle.every((n) => n.pose === "idle"), "no overlays -> every combatant is idle");
+});
+
+test("battleCombatant pose: move beats attack when both name the same combatant", () => {
+  const mover = makeCombatant({ side: "attacker", slotIndex: 0, position: { q: 0, r: 0 }, entries: [{ unitTypeId: "sword", count: 5 }] });
+  const state = makeState({ attacker: [mover] });
+  const nodes = nodesOfKind<BattleCombatantNode>(
+    buildBattleScene(baseInput({
+      state,
+      moveAnim: { side: "attacker", slotIndex: 0, path: [{ q: 0, r: 0 }, { q: 1, r: 0 }], startedAt: 0, durationMs: 1000 },
+      attacker: { side: "attacker", slotIndex: 0, startedAt: 0 },
+      nowMs: 500,
+    })),
+    "battleCombatant",
+  );
+  assert.equal(nodes[0].pose, "move");
+});
+
+test("battleCombatant pose: an attacker entry at or past IMPACT_MS is treated as absent", () => {
+  const human = makeCombatant({ side: "attacker", slotIndex: 0, position: { q: 0, r: 0 }, entries: [{ unitTypeId: "sword", count: 5 }] });
+  const state = makeState({ attacker: [human] });
+
+  const atBoundary = nodesOfKind<BattleCombatantNode>(
+    buildBattleScene(baseInput({ state, attacker: { side: "attacker", slotIndex: 0, startedAt: 0 }, nowMs: 300 })),
+    "battleCombatant",
+  );
+  assert.equal(atBoundary[0].pose, "idle", "exactly IMPACT_MS elapsed -> expired, same boundary as the impact ring");
+
+  const inside = nodesOfKind<BattleCombatantNode>(
+    buildBattleScene(baseInput({ state, attacker: { side: "attacker", slotIndex: 0, startedAt: 0 }, nowMs: 299 })),
+    "battleCombatant",
+  );
+  assert.equal(inside[0].pose, "attack", "one millisecond inside the window still counts");
+});
+
+test("battleCombatant mirror: defenders mirror (art faces right once), attackers don't, regardless of which side is human", () => {
+  const attackerC = makeCombatant({ side: "attacker", slotIndex: 0, position: { q: 0, r: 0 }, entries: [{ unitTypeId: "sword", count: 1 }] });
+  const defenderC = makeCombatant({ side: "defender", slotIndex: 0, position: { q: 3, r: 0 }, entries: [{ unitTypeId: "archer", count: 1 }] });
+  const state = makeState({ attacker: [attackerC], defender: [defenderC] });
+
+  for (const [humanSide, aiSide] of [["attacker", "defender"], ["defender", "attacker"]] as const) {
+    const nodes = nodesOfKind<BattleCombatantNode>(buildBattleScene(baseInput({ state, humanSide, aiSide })), "battleCombatant");
+    assert.equal(nodes.find((n) => n.side === "attacker")!.mirror, false);
+    assert.equal(nodes.find((n) => n.side === "defender")!.mirror, true);
+  }
+});
+
+test("battleCombatant carries the builder's hexSize so the painter draws sprites at the arena's real hex scale", () => {
+  const human = makeCombatant({ side: "attacker", slotIndex: 0, position: { q: 0, r: 0 }, entries: [{ unitTypeId: "sword", count: 5 }] });
+  const state = makeState({ attacker: [human] });
+  const nodes = nodesOfKind<BattleCombatantNode>(buildBattleScene(baseInput({ state, hexSize: 27 })), "battleCombatant");
+  assert.equal(nodes[0].hexSize, 27);
+  assert.equal(nodes[0].radius, 27 * 0.55);
 });
 
 test("floating text drifts upward and fades on the same schedule as draw(), and disappears once FLOAT_MS has elapsed", () => {

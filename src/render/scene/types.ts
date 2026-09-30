@@ -331,6 +331,17 @@ export interface BattleCombatantNode {
   selected: boolean;
   unitCount: number;
   hpRatio: number;
+  // Optional additive unit-sprite fields (plan/2026-09-29-arena-unit-sprites.md).
+  // Absent unitTypeId (or a resolver miss) keeps the painter on its original
+  // circle rendering; `pose` defaults to "idle" painter-side; `mirror` is set
+  // for defenders because the art is authored facing right once. `hexSize` is
+  // the arena hex size the node was built with — carried explicitly rather
+  // than re-derived from radius (radius = 0.55 × hexSize) so the sprite draw
+  // reads the same number the builder used for every other node.
+  unitTypeId?: string;
+  pose?: "idle" | "attack" | "move";
+  mirror?: boolean;
+  hexSize?: number;
 }
 
 export interface BattleFloatingTextNode {

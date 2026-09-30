@@ -57,20 +57,30 @@ export interface ResolvedSprite {
 }
 
 // Sprite / image resolution. The painter never names a key string directly
-// (that's the Vite pitfall we're buying seam against). Instead the four
+// (that's the Vite pitfall we're buying seam against). Instead the five
 // per-kind helpers below wrap the *Key constructors from assetDescriptors.ts,
 // with the constructors living in src/render/paint2dDefaults.ts.
 //
 // resolveSpriteForHero's optional `frame` is the run-cycle pose (0|1) derived
 // by the scene builder; 1 asks for the variant's optional frame-2 sprite, and
 // the deps builder falls back to the base sprite when it doesn't exist.
+//
+// resolveSpriteForUnit is the battle-arena unit art (plan/
+// 2026-09-29-arena-unit-sprites.md): `unit.<unitTypeId>.<pose>` over the
+// registry-driven UNIT_ARENA_DESCRIPTORS. `unitTypeId` is a catalog id string
+// (the painter never names one; the scene builder derives it from the
+// combatant's dominant platoon entry). Resolvers return undefined for
+// missing/not-yet-loaded art so painters keep their fallback rendering.
+export type UnitArenaPose = "idle" | "attack" | "move";
+
 export interface Paint2DSpriteResolver {
   resolveSpriteForResource(resource: ResourceType): ResolvedSprite | undefined;
   resolveSpriteForHero(faction: Faction, dir: HeroDirection, variant: HorseVariant, frame?: 0 | 1): ResolvedSprite | undefined;
   resolveSpriteForBuilding(style: GenerationStyle, kind: BuildingKind, level: number): ResolvedSprite | undefined;
   resolveSpriteForCastle(level: CastleLevel, variant: CastleVariant): ResolvedSprite | undefined;
+  resolveSpriteForUnit(unitTypeId: string, pose: UnitArenaPose): ResolvedSprite | undefined;
   // Escape hatch for tests/fixtures that already have a key in hand. Production
-  // painters should prefer the four per-kind helpers above.
+  // painters should prefer the five per-kind helpers above.
   resolveSprite(key: SpriteKey): ResolvedSprite | undefined;
 }
 

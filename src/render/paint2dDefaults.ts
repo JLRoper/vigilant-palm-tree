@@ -43,8 +43,12 @@ import {
   heroKey,
   horseVariantKey,
   resourceStyleKey,
+  UNIT_ARENA_DESCRIPTORS,
+  unitArenaKey,
   type SpriteKey,
+  type UnitArenaPose,
 } from "./assetDescriptors";
+import { ImageSpriteSource } from "./assetSource";
 import { SpriteProvider } from "./assets";
 import type { ResolvedSprite as LiveResolvedSprite } from "./assets";
 
@@ -119,6 +123,7 @@ function warmHorseRunFrameCache(provider: SpriteProvider): void {
 
 function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
   warmHorseRunFrameCache(provider);
+  const resolveUnit = createUnitSpriteResolver();
   return {
     resolveSpriteForResource(resource: ResourceType): ResolvedSprite | undefined {
       const key = resourceStyleKey(resource, settings().resourceStyle) as SpriteKey;
@@ -161,6 +166,9 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
     ): ResolvedSprite | undefined {
       const key = castleKey(level, variant) as SpriteKey;
       return narrowResolvedSprite(provider.resolve(key));
+    },
+    resolveSpriteForUnit(unitTypeId: string, pose: UnitArenaPose): ResolvedSprite | undefined {
+      return resolveUnit(unitTypeId, pose);
     },
     resolveSprite(key: SpriteKey): ResolvedSprite | undefined {
       return narrowResolvedSprite(provider.resolve(key));
@@ -225,4 +233,48 @@ export function createPaint2DDep(
     charterStyle: options.charterStyle ?? defaultCharterStyle,
     validCharterStyle: options.validCharterStyle ?? VALID_CHARTER_HEX,
   };
+}
+
+// ---- Arena unit sprites (plan/2026-09-29-arena-unit-sprites.md) -----------
+//
+// A dedicated SpriteProvider over UNIT_ARENA_DESCRIPTORS only, held for the
+// process lifetime so the decoded <img> cache survives arena open/close (the
+// arena opens lazily and may be opened many times per session). Backed by an
+// ImageSpriteSource, so nothing loads until preloadUnitArenaSprites() kicks
+// preload — resolve() simply returns undefined before that, which keeps
+// createPaint2DDep() safe to call outside a browser (node:test) and keeps the
+// battle painter on its byte-identical circle fallback until art is ready.
+//
+// Unready images also resolve to undefined (not just !ready pass-throughs):
+// the arena repaints every frame, so a sprite appears the moment its image
+// finishes decoding, and until then the painter draws today's circle.
+
+let unitArenaProvider: SpriteProvider | null = null;
+
+function getUnitArenaProvider(): SpriteProvider {
+  if (!unitArenaProvider) {
+    const descriptors = Object.values(UNIT_ARENA_DESCRIPTORS);
+    const urls: Record<string, string> = {};
+    for (const d of descriptors) {
+      if (d.url) urls[d.key] = d.url;
+    }
+    unitArenaProvider = new SpriteProvider(new ImageSpriteSource(urls), descriptors);
+  }
+  return unitArenaProvider;
+}
+
+export type UnitSpriteResolver = Paint2DSpriteResolver["resolveSpriteForUnit"];
+
+export function createUnitSpriteResolver(): UnitSpriteResolver {
+  const provider = getUnitArenaProvider();
+  return (unitTypeId: string, pose: UnitArenaPose): ResolvedSprite | undefined => {
+    const resolved = provider.resolve(unitArenaKey(unitTypeId, pose));
+    if (!resolved || !resolved.ready) return undefined;
+    return narrowResolvedSprite(resolved);
+  };
+}
+
+/** Kick the unit-sprite image loads. Called when the arena opens; safe to call repeatedly (already-cached images are skipped). */
+export function preloadUnitArenaSprites(): void {
+  getUnitArenaProvider().preload();
 }
