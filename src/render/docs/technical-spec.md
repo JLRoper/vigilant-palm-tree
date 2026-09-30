@@ -826,6 +826,8 @@ Central registry of all sprite filenames. Used by `pixel-gen.mjs` for the proced
 
 Three scripts cover the `pixel` building sprites — `building-pixel-<camelCaseName>-<level>.png` in `src/resources/buildings/` (e.g. `building-pixel-granary-1.png`, `building-pixel-woodcutterHut-2.png`), a naming scheme separate from the FLUX `building-{style}-{kind}-{level}.png` files. They live in `.kilo/skills/building-sprite-gen/scripts/` (see that folder's `SKILL.md` for the full workflow).
 
+The same scripts generated the unit battle art: the arena battle sprites (`units/arena/<unitId>-<pose>.png` — `unit.<id>.<pose>` keys, 12 ids × idle/attack/move; the 2026-09-29 pose wave ran on `google/gemini-3-pro-image` with each unit's own idle sprite passed as `--ref`) and the hero-panel unit icons (`units/icons/<unitId>.png`), all via OpenRouter Gemini image models. Acceptance gates for the arena art (128×128 + transparent border) live as local helper scripts under `design/arena-unit-sprites/` — not repo tooling.
+
 ```mermaid
 sequenceDiagram
     participant S as gemini-buildings.mjs
