@@ -35,6 +35,16 @@ export interface ImpactFx {
   startedAt: number;
 }
 
+// The platoon that just landed an attack. Recorded alongside ImpactFx (which
+// names the victim's hex) so the scene path can put the attacker into its
+// "attack" pose for the same IMPACT_MS window (plan/2026-09-29-arena-unit-
+// sprites.md step 5).
+export interface AttackerFx {
+  side: BattleSide;
+  slotIndex: number;
+  startedAt: number;
+}
+
 export interface FloatFx {
   hex: Axial;
   text: string;
@@ -55,6 +65,7 @@ export interface ArenaAiDeps {
   endAiPhase: () => void;
   setMoveAnim: (anim: MoveAnim | null) => void;
   setImpact: (impact: ImpactFx | null) => void;
+  setAttacker: (attacker: AttackerFx | null) => void;
 }
 
 export interface ArenaAi {
@@ -155,7 +166,9 @@ export function createArenaAi(deps: ArenaAiDeps): ArenaAi {
     deps.logNewBattleEvents(beforeLog);
     const landedHits = state.log.length > beforeLog;
     if (landedHits) {
-      if (struck) deps.setImpact({ hex: { ...struck.position }, startedAt: performance.now() });
+      const now = performance.now();
+      if (struck) deps.setImpact({ hex: { ...struck.position }, startedAt: now });
+      deps.setAttacker({ side: aiSide, slotIndex: plan.slotIndex, startedAt: now });
       deps.spawnDamageFloats(beforeLog);
       deps.pumpAnimation();
     }
