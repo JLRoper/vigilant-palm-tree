@@ -4,7 +4,8 @@ import { Hero } from "../entities/hero";
 import { Castle } from "../entities/settlement";
 import { GameMap } from "../map/gameMap";
 import { SpriteProvider } from "./assets";
-import { computeVision } from "./fog";
+import { computeVision, isVisible } from "./fog";
+import { heroFadeAlpha, observeHeroSightings, pruneHeroSightings } from "./heroSpotted";
 import { MinimapCamera } from "./minimapCamera";
 import { drawMinimap } from "./minimap";
 import type { RenderOptions } from "./renderTypes";
@@ -57,7 +58,19 @@ export class MapRenderer {
     ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 
     const visible = computeVision(heroes, castles, opts.viewPlayerId);
-    const nodes = buildAdventureScene({ map: this.map, heroes, castles, path, hover, opts, visible });
+    const nowMs = performance.now();
+    const sighted: string[] = [];
+    for (const h of heroes) {
+      if (h.ownerId !== opts.viewPlayerId && isVisible(visible, h.tile.q, h.tile.r)) sighted.push(h.id);
+    }
+    observeHeroSightings(sighted, nowMs);
+    pruneHeroSightings(new Set(heroes.map((h) => h.id)));
+    const heroAlpha: Record<string, number> = {};
+    for (const id of sighted) {
+      const a = heroFadeAlpha(id, nowMs);
+      if (a < 1) heroAlpha[id] = a;
+    }
+    const nodes = buildAdventureScene({ map: this.map, heroes, castles, path, hover, opts: { ...opts, heroAlpha }, visible });
 
     ctx.save();
     this.camera.apply(ctx);

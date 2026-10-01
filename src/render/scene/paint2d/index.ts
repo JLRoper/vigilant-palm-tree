@@ -581,6 +581,7 @@ export function paintHeroTrail(ctx: CanvasRenderingContext2D, node: HeroTrailNod
   if (node.points.length < 2) return;
   const color = node.color;
   const n = node.points.length;
+  const intensity = node.intensity ?? 1;
   ctx.save();
   ctx.fillStyle = color;
   ctx.strokeStyle = color;
@@ -593,11 +594,11 @@ export function paintHeroTrail(ctx: CanvasRenderingContext2D, node: HeroTrailNod
     const prev = node.points[i - 1];
     const p = node.points[i];
     const ramp = 0.35 + 0.65 * (i / (n - 1 || 1));
-    ctx.globalAlpha = 0.55 * ramp;
+    ctx.globalAlpha = 0.55 * ramp * intensity;
     ctx.beginPath();
     ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
     ctx.fill();
-    ctx.globalAlpha = 0.35 * ramp;
+    ctx.globalAlpha = 0.35 * ramp * intensity;
     ctx.beginPath();
     ctx.moveTo(prev.x, prev.y);
     ctx.lineTo(p.x, p.y);
@@ -655,6 +656,12 @@ function paintSelectedTileHighlight(ctx: CanvasRenderingContext2D, node: Selecte
 }
 
 export function paintHero(ctx: CanvasRenderingContext2D, node: HeroNode, deps: Paint2DDep): void {
+  const alpha = node.alpha ?? 1;
+  const faded = alpha < 1;
+  if (faded) {
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+  }
   const variant = node.horseVariant;
   // The walk-cycle vertical squash applies to the on-foot hero sprite only --
   // drawHorseSprite() never took a scaleY. Mounted heroes bob but don't squash.
@@ -687,6 +694,7 @@ export function paintHero(ctx: CanvasRenderingContext2D, node: HeroNode, deps: P
     ctx.arc(node.markerWorld.x, node.markerWorld.y, SELECTED_HERO_RING_RADIUS, 0, Math.PI * 2);
     ctx.stroke();
   }
+  if (faded) ctx.restore();
 }
 
 export function paintCitySkybox(ctx: CanvasRenderingContext2D, node: CitySkyboxNode, deps: Paint2DDep, frame?: Paint2DFrame): void {

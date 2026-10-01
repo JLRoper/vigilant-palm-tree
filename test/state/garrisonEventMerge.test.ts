@@ -600,3 +600,120 @@ test("W5-4: an event_not_derivable resync also discards its deferred deltas at a
 
   h.detach();
 });
+
+// Server-driven AI (plan 2026-09-30-server-side-ai-actor.md): on a flagged
+// game the browser never drives the AI turn, so the server's per-step
+// HeroMoved rows must reach the live controller -- through
+// applyRemoteHeroMove (a quiet state replacement GameStateManager tweens),
+// never through replaceState, which snaps every hero on the map.
+function aiSeatMoveFixture(overrides: { phase?: GamePhase } = {}): GameState {
+  const base = garrisonFixture({ activePlayerId: 1, phase: overrides.phase ?? { kind: "AI_TURN", playerId: 1 } });
+  return {
+    ...base,
+    players: base.players.map((p) => (p.id === 1 ? { ...p, faction: "ai" as const } : p)),
+  };
+}
+
+test("a flagged game replays an AI seat's HeroMoved onto the controller without a replaceState snap", async () => {
+  serverDrivenPolicy.registerServerDriven("sdr-move-1");
+  const h = harness();
+  h.setController(new TurnController(aiSeatMoveFixture(), stubHooks()));
+
+  bus.emit({
+    type: "mp:eventsApplied",
+    gameName: "sdr-move-1",
+    cursor: 50,
+    events: [{ type: "HeroMoved", actor: 1, heroId: "h1", to: { q: 9, r: 8 } }],
+  });
+  await tick();
+
+  const hero = h.controller().getState().heroes.h1;
+  assert.equal(hero?.q, 9, "the AI hero steps onto the event's tile");
+  assert.equal(hero?.r, 8);
+  assert.deepEqual(h.replaces, [], "replaceState would snap every hero -- the teleport this avoids");
+  h.detach();
+  serverDrivenPolicy.clearServerDriven("sdr-move-1");
+});
+
+test("a flagged game does not replay a remote human seat's HeroMoved", async () => {
+  serverDrivenPolicy.registerServerDriven("sdr-move-2");
+  const h = harness();
+  h.setController(new TurnController(garrisonFixture(), stubHooks()));
+
+  bus.emit({
+    type: "mp:eventsApplied",
+    gameName: "sdr-move-2",
+    cursor: 51,
+    events: [{ type: "HeroMoved", actor: 1, heroId: "h1", to: { q: 9, r: 8 } }],
+  });
+  await tick();
+
+  assert.equal(h.controller().getState().heroes.h1?.q, 8, "a player-faction hero is not this bridge's business");
+  assert.deepEqual(h.replaces, []);
+  h.detach();
+  serverDrivenPolicy.clearServerDriven("sdr-move-2");
+});
+
+test("an unflagged game never replays an AI hero's HeroMoved (the seat-0 client drives its own AI tick)", async () => {
+  const h = harness();
+  h.setController(new TurnController(aiSeatMoveFixture(), stubHooks()));
+
+  bus.emit({
+    type: "mp:eventsApplied",
+    gameName: "g",
+    cursor: 52,
+    events: [{ type: "HeroMoved", actor: 1, heroId: "h1", to: { q: 9, r: 8 } }],
+  });
+  await tick();
+
+  assert.equal(h.controller().getState().heroes.h1?.q, 8, "browser-driven games keep byte-identical behavior");
+  assert.deepEqual(h.replaces, []);
+  h.detach();
+});
+
+test("a flagged game's HeroMoved arriving in a blocked phase is dropped, not queued", async () => {
+  serverDrivenPolicy.registerServerDriven("sdr-move-3");
+  const h = harness();
+  h.setController(
+    new TurnController(
+      aiSeatMoveFixture({ phase: { kind: "BATTLE", attackerId: "h0", defenderId: "h1" } }),
+      stubHooks(),
+    ),
+  );
+
+  bus.emit({
+    type: "mp:eventsApplied",
+    gameName: "sdr-move-3",
+    cursor: 53,
+    events: [{ type: "HeroMoved", actor: 1, heroId: "h1", to: { q: 9, r: 8 } }],
+  });
+  await tick();
+  bus.emit({ type: "state:committed" });
+  await tick();
+
+  assert.equal(h.controller().getState().heroes.h1?.q, 8, "the move never lands and is never replayed later");
+  assert.deepEqual(h.replaces, [], "the blocked phase must not even queue a wholesale replace");
+  h.detach();
+  serverDrivenPolicy.clearServerDriven("sdr-move-3");
+});
+
+test("a flagged game's HeroMoved for an unknown hero is a no-op, not a throw", async () => {
+  serverDrivenPolicy.registerServerDriven("sdr-move-4");
+  const h = harness();
+  const controller = new TurnController(aiSeatMoveFixture(), stubHooks());
+  h.setController(controller);
+  const before = controller.getState();
+
+  bus.emit({
+    type: "mp:eventsApplied",
+    gameName: "sdr-move-4",
+    cursor: 54,
+    events: [{ type: "HeroMoved", actor: 1, heroId: "ghost", to: { q: 9, r: 8 } }],
+  });
+  await tick();
+
+  assert.equal(controller.getState(), before, "an unknown hero leaves the controller state identity untouched");
+  assert.deepEqual(h.replaces, []);
+  h.detach();
+  serverDrivenPolicy.clearServerDriven("sdr-move-4");
+});

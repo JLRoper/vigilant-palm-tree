@@ -363,7 +363,15 @@ test("path/trail nodes render only for the viewer's OWN selected hero (fog-posit
     opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h1" }),
   });
   assert.equal(nodesOfKind(foreignSelected, "pathSegment").length, 0, "a foreign selected hero emits no path segments");
-  assert.equal(nodesOfKind(foreignSelected, "heroTrail").length, 0, "a foreign selected hero emits no trail");
+  const foreignTrails = nodesOfKind<HeroTrailNode>(foreignSelected, "heroTrail");
+  assert.ok(
+    foreignTrails.every((t) => t.heroId !== "h0"),
+    "a foreign selection must not unlock the viewer's own-hero trail",
+  );
+  assert.ok(
+    foreignTrails.every((t) => t.intensity === 0.45),
+    "the only trail allowed here is the dim enemy-reveal trail, never a full-alpha own-hero trail",
+  );
 
   const ownSelected = buildAdventureScene({
     map, heroes: [own, foreign], castles: [], path, hover: null,
@@ -373,8 +381,93 @@ test("path/trail nodes render only for the viewer's OWN selected hero (fog-posit
   assert.ok(segments.length >= 1, "own selection emits the path as before");
   assert.ok(segments.every((s) => s.points[0] !== axialToPixel(3, 0)), "no segment anchors at the foreign hero's tile");
   const trails = nodesOfKind<HeroTrailNode>(ownSelected, "heroTrail");
+  const ownTrail = trails.find((t) => t.heroId === "h0");
+  assert.ok(ownTrail, "the own selection still renders its own trail");
+  assert.equal(ownTrail.intensity, undefined, "the own trail is drawn at full intensity");
+});
+
+test("a fog-hidden foreign hero leaks nothing: no path, and no reveal trail", () => {
+  const map = makeGrassMap(12, 1);
+  const own = new Hero("h0", "Own", 0, 0, "player", 0, 10, [{ q: -1, r: 0 }, { q: 0, r: 0 }]);
+  const foreign = new Hero("h1", "Foe", 9, 0, "enemy", 1, 10, [
+    { q: 11, r: 0 }, { q: 10, r: 0 }, { q: 9, r: 0 },
+  ]);
+  const path = [{ q: 1, r: 0 }, { q: 2, r: 0 }];
+
+  const nodes = buildAdventureScene({
+    map, heroes: [own, foreign], castles: [], path, hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h1" }),
+  });
+
+  assert.equal(nodesOfKind<PathSegmentNode>(nodes, "pathSegment").length, 0);
+  assert.equal(
+    nodesOfKind<HeroTrailNode>(nodes, "heroTrail").filter((t) => t.heroId === "h1").length,
+    0,
+    "q=9 is outside VISION_RANGE=4, so its trail must not be drawn",
+  );
+});
+
+test("a visible enemy hero gets one dim reveal trail capped to the last 8 points", () => {
+  const map = makeGrassMap(4, 1);
+  const own = new Hero("h0", "Own", 0, 0, "player", 0, 10);
+  const enemyTrail: Axial[] = [];
+  for (let i = 9; i >= 0; i--) enemyTrail.push({ q: 2 - i, r: 0 });
+  const enemy = new Hero("h1", "Foe", 2, 0, "enemy", 1, 10, enemyTrail);
+
+  const nodes = buildAdventureScene({
+    map, heroes: [own, enemy], castles: [], path: [], hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const trails = nodesOfKind<HeroTrailNode>(nodes, "heroTrail");
   assert.equal(trails.length, 1);
-  assert.equal(trails[0].heroId, "h0");
+  const [trail] = trails;
+  assert.equal(trail.heroId, "h1");
+  assert.equal(trail.intensity, 0.45, "an enemy trail is dimmer than the viewer's own");
+  assert.equal(trail.color, stubColorForOwner(1));
+  assert.equal(trail.points.length, 8, "the reveal trail keeps a short recent history");
+  assert.deepEqual(trail.points[0], axialToPixel(-5, 0), "the oldest kept point is 8 back");
+  assert.deepEqual(trail.points[7], axialToPixel(2, 0), "the newest kept point is the hero's last trail entry");
+  assert.equal(enemy.trail.length, enemyTrail.length, "the hero's own trail history is untouched");
+});
+
+test("an enemy hero with no trail history emits no trail node", () => {
+  const map = makeGrassMap(4, 1);
+  const own = new Hero("h0", "Own", 0, 0, "player", 0, 10);
+  const enemy = new Hero("h1", "Foe", 2, 0, "enemy", 1, 10);
+  const nodes = buildAdventureScene({
+    map, heroes: [own, enemy], castles: [], path: [], hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  assert.equal(nodesOfKind<HeroTrailNode>(nodes, "heroTrail").length, 0);
+});
+
+test("opts.heroAlpha fades non-own heroes only, and is absent when there is no fade", () => {
+  const map = makeGrassMap(4, 1);
+  const own = new Hero("h0", "Own", 0, 0, "player", 0, 10);
+  const fading = new Hero("h1", "Foe", 1, 0, "enemy", 1, 10);
+  const steady = new Hero("h2", "Foe", 2, 0, "enemy", 2, 10);
+  const nodes = buildAdventureScene({
+    map, heroes: [own, fading, steady], castles: [], path: [], hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, heroAlpha: { h1: 0.5 } }),
+  });
+
+  const byId = new Map(nodesOfKind<HeroNode>(nodes, "hero").map((n) => [n.heroId, n]));
+  assert.equal(byId.get("h1")!.alpha, 0.5, "a hero with a pending fade carries the alpha");
+  assert.ok(!("alpha" in byId.get("h2")!), "an enemy absent from heroAlpha has NO alpha field");
+  assert.ok(!("alpha" in byId.get("h0")!), "an own hero never carries an alpha field");
+});
+
+test("a heroAlpha entry of 1 is dropped rather than written as a redundant 1", () => {
+  const map = makeGrassMap(4, 1);
+  const own = new Hero("h0", "Own", 0, 0, "player", 0, 10);
+  const enemy = new Hero("h1", "Foe", 1, 0, "enemy", 1, 10);
+  const nodes = buildAdventureScene({
+    map, heroes: [own, enemy], castles: [], path: [], hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, heroAlpha: { h1: 1 } }),
+  });
+  const hero = nodesOfKind<HeroNode>(nodes, "hero").find((n) => n.heroId === "h1");
+  assert.ok(!("alpha" in hero!), "no fade means the field stays absent so painters take their default path");
 });
 
 test("path segments are marked fogged when any tile they span lies under fog (F4)", () => {

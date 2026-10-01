@@ -3,6 +3,7 @@ import type { BuildingDef, BuildingKind, HeroBattleVerdict, Platoon } from "@her
 import { platoonsHaveTroops, platoonTroopTotal, settlementStacks, normalizePlatoons } from "./units";
 import type { GameMap } from "../map/gameMap";
 import {
+  applyEngineEvent,
   applySettlementBattleResult,
   computeSettlementRates,
   generateCitySpots,
@@ -343,6 +344,19 @@ export class TurnController {
 
   clearSelection(): void {
     this.state = clearSelectionReducer(this.state);
+  }
+
+  // Quiet state replacement, never commit(): GameStateManager's identity diff tweens the hero, while state:committed would snap every hero.
+  applyRemoteHeroMove(event: { heroId: HeroId; to: { q: number; r: number } }): boolean {
+    const result = applyEngineEvent(this.state, {
+      type: "HeroMoved",
+      actor: this.state.heroes[event.heroId]?.ownerId ?? 0,
+      heroId: event.heroId,
+      to: event.to,
+    });
+    if (result.outcome !== "applied") return false;
+    this.state = result.state;
+    return true;
   }
 
   requestMove(

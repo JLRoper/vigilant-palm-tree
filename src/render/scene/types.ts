@@ -134,6 +134,8 @@ export interface HeroTrailNode {
   heroId: string;
   color: string;
   points: WorldPoint[];
+  /** Alpha multiplier for the whole trail; absent = 1. Enemy heroes' trails carry a dimmer value than the viewer's own. */
+  intensity?: number;
 }
 
 export interface HoverHighlightNode {
@@ -168,6 +170,8 @@ export interface HeroNode {
   runFrame?: 0 | 1;
   color: string;
   selected: boolean;
+  /** Fade-in alpha for a non-own hero newly revealed from fog; absent = 1. */
+  alpha?: number;
 }
 
 // City-view node kinds. `screen`/`center` coordinates below are the same

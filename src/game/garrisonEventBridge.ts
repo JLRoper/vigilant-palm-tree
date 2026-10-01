@@ -141,7 +141,25 @@ export function attachGarrisonEventBridge(deps: GarrisonEventBridgeDeps): () => 
     }
   };
 
+  // Flagged games only: replays AI-seat HeroMoved straight onto the live controller (dropped, never queued, while unsafe) so the hero tweens instead of snapping at the TurnEnded resync.
+  const replayServerAiHeroMoves = (ev: MpEventsAppliedEvent): void => {
+    if (!isServerDriven(ev.gameName)) return;
+    if (!safeForDeltas()) return;
+    const tc = deps.getController();
+    if (!tc) return;
+    for (const event of ev.events) {
+      if (event.type !== "HeroMoved") continue;
+      const state = tc.getState();
+      const hero = state.heroes[event.heroId];
+      if (!hero) continue;
+      const owner = state.players.find((p) => p.id === hero.ownerId);
+      if (owner?.faction !== "ai") continue;
+      tc.applyRemoteHeroMove(event);
+    }
+  };
+
   const onEventsApplied = (ev: MpEventsAppliedEvent): void => {
+    replayServerAiHeroMoves(ev);
     const batch = ev.events.filter(isBridgedDelta);
     if (batch.length === 0) return;
     deferredDeltas.push(...batch);

@@ -3,6 +3,7 @@ import {
   settings,
   updateSettings,
   settingsBounds,
+  enemyMoveDurationBounds,
   borderWidthBounds,
   resourceStyleOptions,
   growthRateBounds,
@@ -124,6 +125,7 @@ function makeFoldableSection(
 export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   const parent = opts.parent ?? document.body;
   const bounds = settingsBounds();
+  const enemyBounds = enemyMoveDurationBounds();
   const borderBounds = borderWidthBounds();
   const growthBounds = growthRateBounds();
   const gateBounds = upgradeGateBounds();
@@ -231,6 +233,51 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     refreshList.push(() => refresh(settings()));
 
     children.push(heroRow);
+
+    const enemyRow = document.createElement("div");
+    enemyRow.style.display = "flex";
+    enemyRow.style.flexDirection = "column";
+    enemyRow.style.gap = "6px";
+
+    const enemyLabelRow = document.createElement("div");
+    enemyLabelRow.style.display = "flex";
+    enemyLabelRow.style.justifyContent = "space-between";
+    enemyLabelRow.style.alignItems = "baseline";
+
+    const enemyLabel = document.createElement("span");
+    enemyLabel.textContent = "Enemy movement speed";
+    enemyLabelRow.appendChild(enemyLabel);
+
+    const enemyValue = document.createElement("span");
+    enemyValue.style.fontVariantNumeric = "tabular-nums";
+    enemyLabelRow.appendChild(enemyValue);
+
+    const enemySlider = document.createElement("input");
+    enemySlider.type = "range";
+    enemySlider.min = String(enemyBounds.min);
+    enemySlider.max = String(enemyBounds.max);
+    enemySlider.step = "10";
+    enemySlider.style.width = "100%";
+    enemySlider.style.accentColor = "#f77f00";
+    enemyRow.appendChild(enemySlider);
+
+    const enemyHint = document.createElement("div");
+    enemyHint.style.fontSize = "10px";
+    enemyHint.style.opacity = "0.55";
+    enemyRow.appendChild(enemyHint);
+
+    function refreshEnemy(next: GameSettings): void {
+      enemySlider.value = String(next.enemyMoveDurationMs);
+      enemyValue.textContent = `${next.enemyMoveDurationMs}ms \u00b7 ${labelFor(next.enemyMoveDurationMs)}`;
+      enemyHint.textContent = `Heroes of other seats (AI enemies and remote players), animated in this browser. (Range ${enemyBounds.min}\u2013${enemyBounds.max}ms)`;
+    }
+    refreshEnemy(current);
+    enemySlider.addEventListener("input", () => {
+      updateSettings({ enemyMoveDurationMs: Number(enemySlider.value) });
+    });
+    refreshList.push(() => refreshEnemy(settings()));
+
+    children.push(enemyRow);
 
     // Border thickness
     const borderRow = document.createElement("div");
@@ -741,6 +788,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     const pBounds = parallaxLayerCountBounds();
     updateSettings({
       moveDurationMs: bounds.default,
+      enemyMoveDurationMs: enemyBounds.default,
       resourceStyle: "rune-stone",
       territoryBorderWidth: borderBounds.default,
       populationGrowthRate: growthBounds.default,

@@ -106,11 +106,15 @@ export class GameStateManager {
       const existing = this.heroes[id];
       if (existing) {
         existing.syncFromState(h);
-        existing.tile = { q: h.q, r: h.r };
+        // A hero mid-tween keeps its tween; syncFromState's own moving guard
+        // skips the position, so the four snap lines below must be skipped too.
+        if (!existing.moving) {
+          existing.tile = { q: h.q, r: h.r };
         existing.fromTile = { q: h.q, r: h.r };
-        existing.toTile = { q: h.q, r: h.r };
-        existing.moving = false;
-        existing.pixelOffset = { x: 0, y: 0 };
+          existing.toTile = { q: h.q, r: h.r };
+          existing.moving = false;
+          existing.pixelOffset = { x: 0, y: 0 };
+        }
         next[id] = existing;
       } else {
         next[id] = Hero.fromGameState(h);
@@ -153,13 +157,16 @@ export class GameStateManager {
 
   update(dtMs: number): boolean {
     let changed = false;
+    let heroFinishedMove = false;
     for (const hero of Object.values(this.heroes)) {
+      const wasMoving = hero.moving;
       hero.update(dtMs);
+      if (wasMoving && !hero.moving) heroFinishedMove = true;
     }
     if (this.turnController) {
       this.turnController.tick(dtMs);
       const nextState = this.turnController.getState();
-      if (nextState !== this.gameState) {
+      if (nextState !== this.gameState || heroFinishedMove) {
         this.gameState = nextState;
         this.syncHeroVisualsToState();
         changed = true;

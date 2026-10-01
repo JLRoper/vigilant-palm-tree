@@ -34,4 +34,6 @@ export interface RenderOptions {
   inspectedTile?: Axial;
   /** Trade routes whose caravans render as map markers (docs/wagons-stockpiles-trade-routes-plan.md §5.2). */
   tradeRoutes?: readonly TradeRouteState[];
+  /** Per non-own-hero fade alpha from the spotted tracker; an absent entry = 1. */
+  heroAlpha?: Readonly<Record<string, number>>;
 }

@@ -2,6 +2,7 @@ import { Axial, axialToPixel } from "../core/hex";
 import type { Faction as StateFaction, HeroId, HeroState, PlayerId, SpellId } from "@heroes/contracts";
 import { normalizePlatoons, type Platoon } from "../state/units";
 import { settings } from "../state/settings";
+import { viewSeat } from "../state/viewSeat";
 import type { HorseVariant } from "../state/settings";
 import { DEFAULT_HERO_ARCANE, DEFAULT_HERO_INTELLIGENCE } from "@heroes/engine";
 import { DEFAULT_HERO_SPELL, maxManaFor } from "@heroes/engine";
@@ -110,7 +111,9 @@ export class Hero {
   }
 
   get moveDurationMs(): number {
-    return settings().moveDurationMs;
+    return this.ownerId === viewSeat()
+      ? settings().moveDurationMs
+      : settings().enemyMoveDurationMs;
   }
 
   startMoveToPath(path: Axial[]) {
@@ -224,6 +227,13 @@ export class Hero {
       heroMana: this.heroMana,
       heroMaxMana: this.heroMaxMana,
       heroSpell: this.heroSpell,
+      // Upkeep shortfall is authoritative live state, not a visual property:
+      // the mirror carries no such field, so it round-trips paid up (same
+      // treatment as previousQ/previousR above).
+      morale: 100,
+      upkeepUnpaidSinceDay: null,
+      upkeepUnpaidTroops: 0,
+      upkeepUnpaidGold: 0,
     };
   }
 

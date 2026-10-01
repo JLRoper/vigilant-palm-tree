@@ -14,6 +14,7 @@ export type ResourceStyle =
 
 export interface GameSettings {
   moveDurationMs: number;
+  enemyMoveDurationMs: number;
   resourceStyle: ResourceStyle;
   territoryBorderWidth: number;
   populationGrowthRate: number;
@@ -33,6 +34,9 @@ const STORAGE_KEY = "heroesJs.settings";
 const MIN_MOVE_MS = 40;
 const MAX_MOVE_MS = 1000;
 const DEFAULT_MOVE_MS = 220;
+const MIN_ENEMY_MOVE_MS = 40;
+const MAX_ENEMY_MOVE_MS = 1000;
+const DEFAULT_ENEMY_MOVE_MS = 220;
 const MIN_BORDER_WIDTH = 1.5;
 const MAX_BORDER_WIDTH = 6;
 const DEFAULT_BORDER_WIDTH = 1.5;
@@ -71,6 +75,7 @@ export { VALID_HORSE_VARIANTS, HORSE_VARIANT_REGISTRY };
 
 export const DEFAULT_SETTINGS: GameSettings = {
   moveDurationMs: DEFAULT_MOVE_MS,
+  enemyMoveDurationMs: DEFAULT_ENEMY_MOVE_MS,
   resourceStyle: DEFAULT_RESOURCE_STYLE,
   territoryBorderWidth: DEFAULT_BORDER_WIDTH,
   populationGrowthRate: DEFAULT_GROWTH_RATE,
@@ -95,6 +100,11 @@ export function settings(): GameSettings {
 export function clampMoveDurationMs(ms: number): number {
   if (!Number.isFinite(ms)) return DEFAULT_MOVE_MS;
   return Math.max(MIN_MOVE_MS, Math.min(MAX_MOVE_MS, Math.round(ms)));
+}
+
+export function clampEnemyMoveDurationMs(ms: number): number {
+  if (!Number.isFinite(ms)) return DEFAULT_ENEMY_MOVE_MS;
+  return Math.max(MIN_ENEMY_MOVE_MS, Math.min(MAX_ENEMY_MOVE_MS, Math.round(ms)));
 }
 
 export function clampBorderWidth(w: number): number {
@@ -154,6 +164,7 @@ export function spriteVariantOptions(): readonly number[] {
 export function updateSettings(patch: Partial<GameSettings>): GameSettings {
   const next: GameSettings = {
     moveDurationMs: clampMoveDurationMs(patch.moveDurationMs ?? current.moveDurationMs),
+    enemyMoveDurationMs: clampEnemyMoveDurationMs(patch.enemyMoveDurationMs ?? current.enemyMoveDurationMs),
     resourceStyle: clampResourceStyle(patch.resourceStyle ?? current.resourceStyle),
     territoryBorderWidth: clampBorderWidth(patch.territoryBorderWidth ?? current.territoryBorderWidth),
     populationGrowthRate: clampGrowthRate(patch.populationGrowthRate ?? current.populationGrowthRate),
@@ -189,6 +200,10 @@ export function settingsBounds(): { min: number; max: number; default: number } 
   return { min: MIN_MOVE_MS, max: MAX_MOVE_MS, default: DEFAULT_MOVE_MS };
 }
 
+export function enemyMoveDurationBounds(): { min: number; max: number; default: number } {
+  return { min: MIN_ENEMY_MOVE_MS, max: MAX_ENEMY_MOVE_MS, default: DEFAULT_ENEMY_MOVE_MS };
+}
+
 export function borderWidthBounds(): { min: number; max: number; default: number } {
   return { min: MIN_BORDER_WIDTH, max: MAX_BORDER_WIDTH, default: DEFAULT_BORDER_WIDTH };
 }
@@ -213,6 +228,7 @@ function loadFromStorage(): GameSettings {
     const parsed = JSON.parse(raw) as Partial<GameSettings>;
     return {
       moveDurationMs: clampMoveDurationMs(parsed.moveDurationMs ?? DEFAULT_MOVE_MS),
+      enemyMoveDurationMs: clampEnemyMoveDurationMs(parsed.enemyMoveDurationMs ?? DEFAULT_ENEMY_MOVE_MS),
       resourceStyle: clampResourceStyle(parsed.resourceStyle),
       territoryBorderWidth: clampBorderWidth(parsed.territoryBorderWidth ?? DEFAULT_BORDER_WIDTH),
       populationGrowthRate: clampGrowthRate(parsed.populationGrowthRate ?? DEFAULT_GROWTH_RATE),

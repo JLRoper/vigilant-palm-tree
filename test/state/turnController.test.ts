@@ -2178,3 +2178,77 @@ test("GameStateManager threads one AiTurnMemory across setState/replaceState; re
   const third = peek(manager.getTurnController());
   assert.notEqual(third, first, "a game-session reset installs a fresh memory");
 });
+
+// Server-driven AI (plan 2026-09-30-server-side-ai-actor.md): the browser
+// never drives an AI turn on a flagged game, so each server-side HeroMoved is
+// replayed onto the live controller through applyRemoteHeroMove. It must move
+// the hero and nothing else -- no phase turn, no selection churn, no state
+// replacement when the hero is unknown.
+test("applyRemoteHeroMove moves the hero, records previousQ/R and appends the trail", () => {
+  const initial = makeState();
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  const applied = controller.applyRemoteHeroMove({ heroId: "h1", to: { q: 17, r: 5 } });
+
+  assert.equal(applied, true, "a known AI hero's move applies");
+  const hero = controller.getState().heroes.h1;
+  assert.equal(hero?.q, 17, "the hero stands on the event's tile");
+  assert.equal(hero?.r, 5);
+  assert.equal(hero?.previousQ, 18, "the old tile is kept for the visual tween");
+  assert.equal(hero?.previousR, 4);
+  assert.deepEqual(
+    hero?.trail,
+    [{ q: 18, r: 4 }, { q: 17, r: 5 }],
+    "the trail gains the arrival tile (the fixture seeds it with its own tile)",
+  );
+  assert.deepEqual(
+    controller.getState().heroes.h0,
+    initial.heroes.h0,
+    "an unrelated hero is untouched",
+  );
+});
+
+test("applyRemoteHeroMove returns false for an unknown hero and leaves the state identity alone", () => {
+  const initial = makeState();
+  const controller = new TurnController(initial, buildHooks(initial));
+  const before = controller.getState();
+
+  const applied = controller.applyRemoteHeroMove({ heroId: "ghost", to: { q: 3, r: 3 } });
+
+  assert.equal(applied, false, "a move for a hero this client does not know is rejected");
+  assert.equal(controller.getState(), before, "a rejected move must not even replace the state object");
+});
+
+test("applyRemoteHeroMove leaves the phase, active seat and both selections untouched", () => {
+  const base = makeState({
+    activePlayerId: 0,
+    phase: { kind: "PLAYER_TURN", playerId: 0 },
+  });
+  const initial: GameState = { ...base, selectedHeroId: "h0", selectedSettlementId: "s0" };
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  assert.equal(controller.applyRemoteHeroMove({ heroId: "h1", to: { q: 17, r: 5 } }), true);
+
+  const after = controller.getState();
+  assert.deepEqual(after.phase, initial.phase, "a remote move never opens or closes a phase");
+  assert.equal(after.activePlayerId, 0, "the active seat is untouched");
+  assert.equal(after.selectedHeroId, "h0", "the viewer's hero selection survives");
+  assert.equal(after.selectedSettlementId, "s0", "the viewer's settlement selection survives");
+});
+
+test("applyRemoteHeroMove works mid-AI_TURN (the phase the server driver is playing)", () => {
+  const initial = makeState({
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const controller = new TurnController(initial, buildHooks(initial), { isPrimaryActor: () => false });
+
+  assert.equal(controller.applyRemoteHeroMove({ heroId: "h1", to: { q: 17, r: 5 } }), true);
+
+  const after = controller.getState();
+  assert.equal(after.heroes.h1?.q, 17, "the parked AI-turn controller takes the step");
+  assert.equal(after.heroes.h1?.r, 5);
+  assert.equal(after.phase.kind, "AI_TURN", "the controller stays parked in the AI turn");
+  assert.equal(after.phase.kind === "AI_TURN" ? after.phase.playerId : null, 1);
+  assert.equal(after.activePlayerId, 1);
+});

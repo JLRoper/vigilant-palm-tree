@@ -9,6 +9,7 @@ import { computeReachableSplit } from "../../overlays/pathOverlay";
 import { controlledPositions, territoryBoundaryEdges } from "@heroes/engine";
 import type {
   SceneNode,
+  HeroNode,
   HeroTrailNode,
   PathSegmentNode,
   TerritoryOutlineEdgeNode,
@@ -152,7 +153,8 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
     const bobY = hero.moving ? -Math.sin(swingPhase) * bobAmplitude : 0;
     const scaleY = hero.moving ? 1.0 + 0.06 * Math.sin(swingPhase) : 1.0;
     const runFrame: 0 | 1 = hero.moving && Math.floor(hero.moveProgress * 2) % 2 === 1 ? 1 : 0;
-    nodes.push({
+    const fadeAlpha = hero.ownerId !== opts.viewPlayerId ? opts.heroAlpha?.[hero.id] : undefined;
+    const node: HeroNode = {
       kind: "hero",
       heroId: hero.id,
       ownerId: hero.ownerId,
@@ -165,7 +167,9 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       runFrame,
       color: opts.colorForOwner(hero.ownerId),
       selected: opts.selectedHeroId === hero.id,
-    });
+    };
+    if (fadeAlpha !== undefined && fadeAlpha < 1) node.alpha = fadeAlpha;
+    nodes.push(node);
   }
 
   return nodes;
@@ -252,49 +256,65 @@ function buildPathNodes(heroes: Hero[], path: Axial[], map: GameMap, opts: Rende
   // draw a bright-gold route from a fog-hidden hero's tile, revealing its
   // position. No selection (or a hero the mirror no longer carries) means no
   // path/trail nodes at all.
-  const selectedHero = opts.selectedHeroId ? heroes.find((h) => h.id === opts.selectedHeroId) : undefined;
-  if (!selectedHero || selectedHero.ownerId !== opts.viewPlayerId || path.length === 0) return [];
-
-  const pathPx = path.map((t) => axialToPixel(t.q, t.r));
-  const originTile = opts.pathOrigin ?? opts.selectedHeroTile ?? { q: selectedHero.tile.q, r: selectedHero.tile.r };
-  const originPx = axialToPixel(originTile.q, originTile.r);
-  const fullPx = [originPx, ...pathPx];
-  // Per-point fog flags, aligned with fullPx: index 0 is the origin tile,
-  // index i >= 1 is path[i - 1]. A segment counts as fogged when ANY of the
-  // tiles it spans is fogged -- the split index itself is always the last
-  // reachable tile, so an "all fogged" rule would never fire on the dim tail.
-  const pointFog = [
-    !isVisible(visible, originTile.q, originTile.r),
-    ...path.map((t) => !isVisible(visible, t.q, t.r)),
-  ];
-
-  const splitIdx = Math.min(
-    opts.pathReachableIdx ?? computeReachableSplit(path, map, selectedHero.movementRemaining),
-    path.length,
-  );
-
   const nodes: SceneNode[] = [];
-  const reachable = slicePoints(fullPx, 0, splitIdx + 1);
-  if (reachable.length >= 2) {
-    const reachableNode: PathSegmentNode = { kind: "pathSegment", reachable: true, points: reachable };
-    if (pointFog.slice(0, splitIdx + 1).some(Boolean)) reachableNode.fogged = true;
-    nodes.push(reachableNode);
-  }
-  if (splitIdx < path.length) {
-    const unreachable = slicePoints(fullPx, splitIdx, pathPx.length);
-    if (unreachable.length >= 2) {
-      const unreachableNode: PathSegmentNode = { kind: "pathSegment", reachable: false, points: unreachable };
-      if (pointFog.slice(splitIdx, pathPx.length).some(Boolean)) unreachableNode.fogged = true;
-      nodes.push(unreachableNode);
+  const selectedHero = opts.selectedHeroId ? heroes.find((h) => h.id === opts.selectedHeroId) : undefined;
+  if (selectedHero && selectedHero.ownerId === opts.viewPlayerId && path.length > 0) {
+    const pathPx = path.map((t) => axialToPixel(t.q, t.r));
+    const originTile = opts.pathOrigin ?? opts.selectedHeroTile ?? { q: selectedHero.tile.q, r: selectedHero.tile.r };
+    const originPx = axialToPixel(originTile.q, originTile.r);
+    const fullPx = [originPx, ...pathPx];
+    // Per-point fog flags, aligned with fullPx: index 0 is the origin tile,
+    // index i >= 1 is path[i - 1]. A segment counts as fogged when ANY of the
+    // tiles it spans is fogged -- the split index itself is always the last
+    // reachable tile, so an "all fogged" rule would never fire on the dim tail.
+    const pointFog = [
+      !isVisible(visible, originTile.q, originTile.r),
+      ...path.map((t) => !isVisible(visible, t.q, t.r)),
+    ];
+
+    const splitIdx = Math.min(
+      opts.pathReachableIdx ?? computeReachableSplit(path, map, selectedHero.movementRemaining),
+      path.length,
+    );
+
+    const reachable = slicePoints(fullPx, 0, splitIdx + 1);
+    if (reachable.length >= 2) {
+      const reachableNode: PathSegmentNode = { kind: "pathSegment", reachable: true, points: reachable };
+      if (pointFog.slice(0, splitIdx + 1).some(Boolean)) reachableNode.fogged = true;
+      nodes.push(reachableNode);
+    }
+    if (splitIdx < path.length) {
+      const unreachable = slicePoints(fullPx, splitIdx, pathPx.length);
+      if (unreachable.length >= 2) {
+        const unreachableNode: PathSegmentNode = { kind: "pathSegment", reachable: false, points: unreachable };
+        if (pointFog.slice(splitIdx, pathPx.length).some(Boolean)) unreachableNode.fogged = true;
+        nodes.push(unreachableNode);
+      }
+    }
+
+    if (selectedHero.trail.length >= 2) {
+      const trailNode: HeroTrailNode = {
+        kind: "heroTrail",
+        heroId: selectedHero.id,
+        color: opts.colorForOwner(selectedHero.ownerId),
+        points: selectedHero.trail.slice(-25).map((p) => axialToPixel(p.q, p.r)),
+      };
+      nodes.push(trailNode);
     }
   }
 
-  if (selectedHero.trail.length >= 2) {
+  // Enemy trails: a visible foreign hero shows where it walked from. The trail
+  // points are NOT fog-gated -- walking out of the fog is the whole reveal.
+  for (const hero of heroes) {
+    if (hero.ownerId === opts.viewPlayerId) continue;
+    if (!isVisible(visible, hero.tile.q, hero.tile.r)) continue;
+    if (hero.trail.length < 2) continue;
     const trailNode: HeroTrailNode = {
       kind: "heroTrail",
-      heroId: selectedHero.id,
-      color: opts.colorForOwner(selectedHero.ownerId),
-      points: selectedHero.trail.slice(-25).map((p) => axialToPixel(p.q, p.r)),
+      heroId: hero.id,
+      color: opts.colorForOwner(hero.ownerId),
+      points: hero.trail.slice(-8).map((p) => axialToPixel(p.q, p.r)),
+      intensity: 0.45,
     };
     nodes.push(trailNode);
   }
