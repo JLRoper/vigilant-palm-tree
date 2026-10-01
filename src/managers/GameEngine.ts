@@ -20,6 +20,8 @@ import { bus } from "../core/eventBus";
 import { attachEventLog, type EventLog } from "../debug/eventLog";
 import { mountPersistentDevConsole, type DevConsoleHandle } from "../debug/devConsole";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
+import { setViewSeat } from "../state/viewSeat";
+import { createFrameErrorLog } from "../core/frameErrors";
 import { shouldDriveAi } from "../io/serverDrivenGames";
 import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
@@ -32,6 +34,10 @@ import { attachGarrisonEventBridge } from "../game/garrisonEventBridge";
 import { applyNetToSettlement, invertNet } from "@screens/settlements/cityView/netCost";
 import { evaluateCharterRequirements } from "@screens/adventure/charterRequirements";
 import { openCharterRequirementsModal } from "@screens/adventure/charterModal";
+
+// One per process: a fault that persists across frames must not turn into a
+// console flood, while a NEW fault still has to surface immediately.
+const frameErrors = createFrameErrorLog();
 
 export class GameEngine {
   // Infrastructure
@@ -421,15 +427,29 @@ export class GameEngine {
     this.fullFrame();
   }
 
+  // The frame must ALWAYS be rescheduled. requestAnimationFrame used to be
+  // the last statement, so any throw in state.update / maybeAutoResolveBattle
+  // / fullFrame killed the loop permanently -- the client froze with a stale
+  // toolbar and dead input, and the only evidence was one uncaught console
+  // error. try/finally keeps the loop alive; the body is idempotent (it
+  // recomputes from live state every frame), so a rethrow next frame is
+  // harmless and gets its own chance.
   loop(now: number): void {
-    const dt = now - this.lastTime;
-    this.lastTime = now;
-    const changed = this.state.update(dt);
-    if (changed) {
-      this.actions.maybeAutoResolveBattle();
+    try {
+      // Per frame: the active game and the local seat both change on load/adopt.
+      setViewSeat(getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""));
+      const dt = now - this.lastTime;
+      this.lastTime = now;
+      const changed = this.state.update(dt);
+      if (changed) {
+        this.actions.maybeAutoResolveBattle();
+      }
+      this.fullFrame();
+    } catch (e) {
+      frameErrors.report(e);
+    } finally {
+      requestAnimationFrame((t) => this.loop(t));
     }
-    this.fullFrame();
-    requestAnimationFrame((t) => this.loop(t));
   }
 
   // =========================================================================

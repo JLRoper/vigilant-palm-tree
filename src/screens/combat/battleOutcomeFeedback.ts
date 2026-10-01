@@ -89,6 +89,52 @@ interface TrackedOutcome {
   timer: ReturnType<typeof setTimeout>;
 }
 
+// A server-driven AI game fires a battle the local seat is involved in every
+// few turns, and each one rendered a card only its own "Carry On" button could
+// close. On the full-viewport z-300 wrapper that wedged the client: the card
+// was still up when the player reached for End Turn, the click landed on the
+// overlay, and the toolbar went dead with no error and no network request. The
+// card is a notification, not a decision, so it also takes a backdrop click
+// and Escape (opt-in on openCenteredModal), plus this bounded timer so it
+// cannot outlive its usefulness even when none of those are used.
+export const VERDICT_CARD_AUTO_DISMISS_MS = 8_000;
+
+export interface VerdictCardDismissTimers {
+  schedule: (fn: () => void, ms: number) => number;
+  cancel: (handle: number) => void;
+}
+
+/**
+ * The verdict card's bounded auto-dismiss. Returns the two operations the
+ * renderer needs: `start` (arm it) and `cancel` (any earlier dismissal --
+ * Carry On, backdrop, Escape -- must cancel it, or the timer would fire a
+ * second close on an already-removed card). The timer seams are injectable so
+ * the whole thing is unit-testable without a DOM.
+ */
+export function createVerdictCardAutoDismiss(
+  close: () => void,
+  timers?: Partial<VerdictCardDismissTimers>,
+  autoDismissMs: number = VERDICT_CARD_AUTO_DISMISS_MS,
+): { start: () => number; cancel: () => void } {
+  const schedule = timers?.schedule ?? ((fn, ms) => globalThis.setTimeout(fn, ms) as unknown as number);
+  const cancelTimer = timers?.cancel ?? ((handle: number) => globalThis.clearTimeout(handle));
+  let handle: number | null = null;
+  return {
+    start: () => {
+      if (handle !== null) cancelTimer(handle);
+      handle = schedule(() => {
+        handle = null;
+        close();
+      }, autoDismissMs);
+      return handle;
+    },
+    cancel: () => {
+      if (handle !== null) cancelTimer(handle);
+      handle = null;
+    },
+  };
+}
+
 export interface BattleOutcomeCardModel {
   family: "hero" | "settlement";
   banner: string;
@@ -298,10 +344,18 @@ export function buildToastText(pending: PendingBattleOutcome, state: GameState |
   });
 }
 
-function showVerdictCard(model: BattleOutcomeCardModel): void {
-  const modal = openCenteredModal(document.body, "Battle Results", 420, false, false);
+export function showVerdictCard(model: BattleOutcomeCardModel, autoDismissMs = VERDICT_CARD_AUTO_DISMISS_MS): void {
+  const modal = openCenteredModal(document.body, "Battle Results", 420, false, false, undefined, {
+    backdropClick: true,
+    escape: true,
+  });
   const wrapper = modal.root.parentElement;
+  const autoDismiss = createVerdictCardAutoDismiss(() => modal.close(), undefined, autoDismissMs);
   modal.setOnClose(() => {
+    // Every dismissal route lands here -- Carry On, backdrop click, Escape,
+    // and the timer itself -- so cancelling here is what stops the timer from
+    // firing a second close against an already-removed card.
+    autoDismiss.cancel();
     wrapper?.remove();
   });
 
@@ -334,6 +388,8 @@ function showVerdictCard(model: BattleOutcomeCardModel): void {
   carryOnBtn.addEventListener("click", () => modal.close());
   row.appendChild(carryOnBtn);
   modal.appendContent(row);
+
+  autoDismiss.start();
 }
 
 let activeDetach: (() => void) | null = null;

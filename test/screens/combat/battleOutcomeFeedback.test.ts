@@ -6,8 +6,10 @@ import {
   buildCardModel,
   buildPendingOutcome,
   buildToastText,
+  createVerdictCardAutoDismiss,
   detachBattleOutcomeFeedback,
   isLocalSeatInvolved,
+  VERDICT_CARD_AUTO_DISMISS_MS,
   type BattleOutcomeCardModel,
   type PendingBattleOutcome,
 } from "../../../src/screens/combat/battleOutcomeFeedback";
@@ -448,4 +450,88 @@ test("pure builders: pending capture and render-time wording", () => {
   assert.equal(pending.family, "settlement");
   assert.equal(buildCardModel(pending, preState).banner, "AI's h1 captured s0!");
   assert.equal(buildToastText(pending, preState), "AI's h1 captured s0.");
+});
+
+// ---- the wedged-UI fix -------------------------------------------------------
+// A battle card rendered on a server-driven game was only dismissible with its
+// own "Carry On" button. Sitting on openCenteredModal's full-viewport z-300
+// wrapper, it swallowed the player's End Turn click: no error, no request, a
+// dead toolbar. The card is a notification, so it now also takes a backdrop
+// click and Escape (wired through openCenteredModal's opt-in dismiss options,
+// covered in test/screens/shared/menuDismiss.test.ts) AND carries this bounded
+// auto-dismiss as a third, self-clearing route.
+
+function timerHarness() {
+  let next = 1;
+  const scheduled = new Map<number, { fn: () => void; ms: number }>();
+  return {
+    scheduled,
+    timers: {
+      schedule: (fn: () => void, ms: number) => {
+        const handle = next;
+        next += 1;
+        scheduled.set(handle, { fn, ms });
+        return handle;
+      },
+      cancel: (handle: number) => {
+        scheduled.delete(handle);
+      },
+    },
+    fire(handle: number): boolean {
+      const entry = scheduled.get(handle);
+      if (!entry) return false;
+      scheduled.delete(handle);
+      entry.fn();
+      return true;
+    },
+  };
+}
+
+test("the verdict card auto-dismisses after a bounded window", () => {
+  const h = timerHarness();
+  let closes = 0;
+  const autoDismiss = createVerdictCardAutoDismiss(() => { closes += 1; }, h.timers);
+  const handle = autoDismiss.start();
+
+  assert.equal(h.scheduled.get(handle)?.ms, VERDICT_CARD_AUTO_DISMISS_MS);
+  assert.equal(closes, 0, "nothing closes before the window elapses");
+
+  assert.equal(h.fire(handle), true);
+  assert.equal(closes, 1, "the timer is what eventually frees the toolbar");
+  assert.equal(h.scheduled.size, 0, "the fired timer is not left pending");
+});
+
+test("the auto-dismiss window is short and bounded", () => {
+  assert.ok(
+    VERDICT_CARD_AUTO_DISMISS_MS > 0 && VERDICT_CARD_AUTO_DISMISS_MS <= 10_000,
+    `expected a positive, bounded window, got ${VERDICT_CARD_AUTO_DISMISS_MS}`,
+  );
+});
+
+test("an earlier dismissal cancels the timer (no second close on a removed card)", () => {
+  const h = timerHarness();
+  let closes = 0;
+  const autoDismiss = createVerdictCardAutoDismiss(() => { closes += 1; }, h.timers);
+  const handle = autoDismiss.start();
+
+  // Carry On / backdrop / Escape all route through modal.close() -> setOnClose,
+  // which is where the card calls cancel().
+  autoDismiss.cancel();
+  assert.equal(h.scheduled.size, 0, "cancel drops the pending timer");
+
+  assert.equal(h.fire(handle), false, "the cancelled timer can no longer fire");
+  assert.equal(closes, 0, "a card dismissed early is not closed a second time");
+});
+
+test("re-arming replaces the previous timer rather than stacking two", () => {
+  const h = timerHarness();
+  let closes = 0;
+  const autoDismiss = createVerdictCardAutoDismiss(() => { closes += 1; }, h.timers);
+  const first = autoDismiss.start();
+  const second = autoDismiss.start();
+
+  assert.equal(h.scheduled.size, 1, "one live timer, not two");
+  assert.equal(h.fire(first), false, "the superseded timer is dead");
+  assert.equal(h.fire(second), true);
+  assert.equal(closes, 1);
 });

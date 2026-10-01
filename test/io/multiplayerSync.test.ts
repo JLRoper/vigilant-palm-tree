@@ -360,6 +360,90 @@ test("a failed delta poll leaves the cursor where it was instead of rewinding", 
   sync.stop();
 });
 
+// Resync-fetch retry (the "End Turn stuck" fix): on a server-driven game the
+// API is busy driving AI seats and a non-SSE GET can stall past apiFetch's 10s
+// default, losing the turn-boundary snapshot. One bounded retry with a short
+// backoff recovers the transient case; a genuinely dead API still gives up
+// (one extra request, not an unbounded loop), and the cursor never rewinds.
+
+test("a resync fetch that times out once is retried and still lands", async () => {
+  const ended: EngineEvent = {
+    type: "TurnEnded",
+    actor: 0,
+    round: 1,
+    day: 2,
+    activePlayerId: 1,
+    wrapped: false,
+  };
+  const server: FakeServer = { game: makeGameRow("g12", { lastEventId: 5 }), events: [], calls: [] };
+  installFetch(server);
+  const sync = new MultiplayerSync();
+
+  sync.start("g12");
+  await sync.pollOnce();
+
+  // First game fetch stalls the way a busy AI drive does; the retry succeeds.
+  let stalls = 0;
+  const realFetch = (globalThis as unknown as { fetch: typeof fetch }).fetch;
+  (globalThis as unknown as { fetch: unknown }).fetch = async (url: string, init?: RequestInit) => {
+    if (String(url).endsWith("/games/g12")) {
+      stalls += 1;
+      if (stalls === 1) throw new Error("request timed out after 10000ms");
+      server.game = makeGameRow("g12", { lastEventId: 6, activePlayerId: 1 });
+    }
+    return realFetch(url, init);
+  };
+
+  const resynced: string[] = [];
+  bus.on("mp:resynced", (ev: { reason: string }) => resynced.push(ev.reason));
+  server.events.push(row(6, ended, 0));
+  await sync.pollOnce();
+
+  assert.equal(stalls, 2, "one failed attempt plus exactly one retry");
+  assert.deepEqual(resynced, ["event_not_derivable"], "the turn-boundary snapshot still lands");
+  assert.equal(sync.getState()?.activePlayerId, 1);
+  assert.equal(sync.getCursor(), 6);
+  sync.stop();
+});
+
+test("a resync fetch that keeps failing gives up after the single retry", async () => {
+  const ended: EngineEvent = {
+    type: "TurnEnded",
+    actor: 0,
+    round: 1,
+    day: 2,
+    activePlayerId: 1,
+    wrapped: false,
+  };
+  const server: FakeServer = { game: makeGameRow("g13", { lastEventId: 4 }), events: [], calls: [] };
+  installFetch(server);
+  const sync = new MultiplayerSync();
+
+  sync.start("g13");
+  await sync.pollOnce();
+
+  const cursorBefore = sync.getCursor();
+  const realFetch = (globalThis as unknown as { fetch: typeof fetch }).fetch;
+  let attempts = 0;
+  (globalThis as unknown as { fetch: unknown }).fetch = async (url: string, init?: RequestInit) => {
+    if (String(url).endsWith("/games/g13")) {
+      attempts += 1;
+      throw new Error("request timed out after 10000ms");
+    }
+    return realFetch(url, init);
+  };
+
+  const resynced: string[] = [];
+  bus.on("mp:resynced", (ev: { reason: string }) => resynced.push(ev.reason));
+  server.events.push(row(5, ended, 0));
+  await sync.pollOnce();
+
+  assert.equal(attempts, 2, "exactly one retry -- the poll cadence provides the next attempt");
+  assert.deepEqual(resynced, [], "a fetch that never succeeds reports nothing");
+  assert.equal(sync.getCursor(), cursorBefore, "a failed resync never rewinds the cursor");
+  sync.stop();
+});
+
 // Drop policy (2026-09-27): the per-poll telemetry POST response carries the
 // server's seat-presence view, and a full resync carries it on the row's
 // lobby.presence -- both land on the bus as mp:presenceUpdated.

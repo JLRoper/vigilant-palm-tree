@@ -124,7 +124,13 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         sync.start(name);
         return merged;
       } catch (e) {
-        console.warn("[turnHooks] endTurn failed:", e);
+        // The state comes back unchanged, so without this the click is
+        // invisible: the EndTurn POST failed (403 forbidden_not_your_turn /
+        // actor_mismatch / ai_seat_command_forbidden, a 5xx, or the 10s
+        // TimeoutError) and the player is left with a toolbar that looks live
+        // but does nothing. Every other hook here reports its failure, so this
+        // one must too.
+        reportCommandFailure("End turn", e);
         sync.start(name);
         return state;
       }

@@ -95,6 +95,11 @@ function aiSeatsOf(state: GameState | null): ReadonlySet<number> {
   return seats;
 }
 
+// Backoff before the single resync-fetch retry. Short enough to stay inside
+// one 2s poll interval, long enough to let a busy server finish the AI drive
+// that stalled the GET.
+const RESYNC_RETRY_BACKOFF_MS = 750;
+
 export class MultiplayerSync {
   private timer: number | null = null;
   private gameName: string | null = null;
@@ -341,11 +346,30 @@ export class MultiplayerSync {
     this.emitStateChanged(gameName, prev, state);
   }
 
+  // A resync is the turn-boundary snapshot, and on a server-driven game the
+  // API is busy driving AI seats: a non-SSE GET can stall past apiFetch's 10s
+  // default and throw. One bounded retry with a short backoff recovers a
+  // transient stall without touching the shared timeout or the poll cadence.
+  private async fetchGameWithRetry(gameName: string): Promise<Game> {
+    try {
+      return await api.getGame(gameName);
+    } catch (firstError) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, RESYNC_RETRY_BACKOFF_MS);
+      });
+      // A game switch/stop during the backoff makes a retry pointless (and
+      // would re-fetch a game nobody is watching), so surface the first error.
+      if (this.gameName !== gameName) throw firstError;
+      console.warn("[mp] resync fetch retrying after:", firstError);
+      return api.getGame(gameName);
+    }
+  }
+
   private async resync(gameName: string, reason: ResyncReason): Promise<void> {
     const startedAt = performance.now();
     let game: Game;
     try {
-      game = await api.getGame(gameName);
+      game = await this.fetchGameWithRetry(gameName);
     } catch (e) {
       console.warn("[mp] resync failed:", e);
       this.reportTelemetry(gameName, performance.now() - startedAt, 0, false);
