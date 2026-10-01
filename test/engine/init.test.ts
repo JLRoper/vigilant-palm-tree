@@ -172,3 +172,41 @@ test("legacy default hero fixtures keep their exact starter armies", () => {
   assert.equal(troopSumOf(state.heroes["h0"]), 24);
   assert.equal(troopSumOf(state.heroes["h1"]), 13);
 });
+
+test("every hero and settlement spawned at game start is content and paid up (weekly upkeep shortfall v1)", () => {
+  const state = build({ enemyCount: 3, humanSeatCount: 1 });
+  const heroes = Object.values(state.heroes);
+  const settlements = Object.values(state.settlements);
+  assert.ok(heroes.length > 0 && settlements.length > 0);
+
+  for (const hero of heroes) {
+    assert.equal(hero.morale, 100, `${hero.id} starts at full morale`);
+    assert.equal(hero.upkeepUnpaidSinceDay, null, `${hero.id} has no unpaid-upkeep streak`);
+    assert.equal(hero.upkeepUnpaidTroops, 0, `${hero.id} has no unfed troops`);
+    assert.equal(hero.upkeepUnpaidGold, 0, `${hero.id} has no upkeep deficit`);
+  }
+  for (const settlement of settlements) {
+    assert.equal(settlement.garrisonUnpaidSinceDay, null, `${settlement.id} has no unpaid-upkeep streak`);
+    assert.equal(settlement.garrisonUnpaidTroops, 0, `${settlement.id} has no unfed garrison`);
+    assert.equal(settlement.garrisonUnpaidGold, 0, `${settlement.id} has no upkeep deficit`);
+  }
+});
+
+test("makeInitialStatePayload's heroes and settlements start content and paid up too", () => {
+  const payload = makeInitialStatePayload(
+    new GameMap(7, "small"),
+    mulberry32(42),
+    { enemyCount: 2, humanSeatCount: 1 },
+  );
+  for (const hero of Object.values(payload.heroes)) {
+    assert.equal(hero.morale, 100);
+    assert.equal(hero.upkeepUnpaidSinceDay, null);
+    assert.equal(hero.upkeepUnpaidTroops, 0);
+    assert.equal(hero.upkeepUnpaidGold, 0);
+  }
+  for (const settlement of Object.values(payload.settlements)) {
+    assert.equal(settlement.garrisonUnpaidSinceDay, null);
+    assert.equal(settlement.garrisonUnpaidTroops, 0);
+    assert.equal(settlement.garrisonUnpaidGold, 0);
+  }
+});

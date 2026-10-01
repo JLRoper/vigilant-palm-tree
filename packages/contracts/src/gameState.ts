@@ -59,6 +59,19 @@ export interface HeroState {
   // The one spell this hero knows (null = spellcaster-less hero; v1 seeds
   // every hero with "magic_arrow").
   heroSpell: SpellId | null;
+  // ── Upkeep shortfall (weekly upkeep pass) ──
+  /** 0..100, the hero-side morale analogue of SettlementState.morale. 100 = content. */
+  morale: number;
+  /**
+   * Calendar day of the FIRST weekly upkeep charge this hero could not pay.
+   * null means paid up; it is never reset downward while a shortfall runs, so
+   * a long-unfed hero accumulates a visible streak.
+   */
+  upkeepUnpaidSinceDay: number | null;
+  /** How many troops are currently unfed (unpaid gold, or no food). */
+  upkeepUnpaidTroops: number;
+  /** The weekly gold cost attributable to those unfed troops (the deficit magnitude). */
+  upkeepUnpaidGold: number;
   // ── Wagons & cargo (docs/wagons-stockpiles-trade-routes-plan.md §4.2/§5.1) ──
   // Optional + helper-accessed (heroWagons/heroCargo) so legacy saves stay
   // valid; DEFAULT_HERO_WAGONS applies when absent.

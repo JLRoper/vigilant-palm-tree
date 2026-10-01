@@ -79,6 +79,13 @@ function backfillHero(h: Partial<HeroState> & { id: HeroId; ownerId: number; q: 
     heroMana: h.heroMana,
     heroMaxMana: h.heroMaxMana,
     heroSpell: h.heroSpell,
+    // Upkeep shortfall (weekly upkeep pass): absent on every pre-migration
+    // row, so each field is defaulted defensively rather than warned about --
+    // they're brand new, not a legacy save losing real state.
+    morale: h.morale ?? 100,
+    upkeepUnpaidSinceDay: h.upkeepUnpaidSinceDay ?? null,
+    upkeepUnpaidTroops: h.upkeepUnpaidTroops ?? 0,
+    upkeepUnpaidGold: h.upkeepUnpaidGold ?? 0,
     id: h.id,
     name: h.name ?? h.id,
     ownerId: h.ownerId,
@@ -127,6 +134,11 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     citySpots: s.citySpots ?? [],
     cityMines: s.cityMines ?? [],
     morale: s.morale ?? 100,
+    // Garrison upkeep shortfall, same defaulting rationale as the hero
+    // fields above.
+    garrisonUnpaidSinceDay: s.garrisonUnpaidSinceDay ?? null,
+    garrisonUnpaidTroops: s.garrisonUnpaidTroops ?? 0,
+    garrisonUnpaidGold: s.garrisonUnpaidGold ?? 0,
     autoTrade: s.autoTrade ?? true,
     q: s.q,
     r: s.r,

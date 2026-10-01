@@ -91,6 +91,11 @@ export class Castle {
       citySpots: this.citySpots,
       cityMines: this.cityMines,
       morale: this.morale,
+      // Garrison upkeep shortfall is authoritative live state, not a visual
+      // property: the mirror carries no such field, so it round-trips paid up.
+      garrisonUnpaidSinceDay: null,
+      garrisonUnpaidTroops: 0,
+      garrisonUnpaidGold: 0,
       autoTrade: this.autoTrade,
       castleVariant: this.castleVariant,
       buildings: this.buildings,

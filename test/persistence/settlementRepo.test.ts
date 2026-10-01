@@ -127,3 +127,49 @@ test("settlementRepo.upsertMany replaces buildings on update rather than merging
     assert.deepEqual(loaded.buildings, updated.buildings);
   });
 });
+
+test("settlementRepo.upsertMany round-trips the garrison unpaid-upkeep shortfall counters", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createSettlementRepo(client);
+    // Non-default values on all three: the paid-up default is already
+    // exercised by every other round-trip in this file.
+    const settlement = makeSettlement("s0", 0, 3, 4, {
+      garrisonUnpaidSinceDay: 21,
+      garrisonUnpaidTroops: 14,
+      garrisonUnpaidGold: 112,
+    });
+
+    await repo.upsertMany(name, { s0: settlement });
+    const [loaded] = await repo.loadAllForGame(name);
+
+    assert.equal(loaded.garrisonUnpaidSinceDay, 21);
+    assert.equal(loaded.garrisonUnpaidTroops, 14);
+    assert.equal(loaded.garrisonUnpaidGold, 112);
+    assert.deepEqual(loaded, settlement);
+  });
+});
+
+test("settlementRepo.upsertMany clears the garrison upkeep streak back to paid up on update", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createSettlementRepo(client);
+    await repo.upsertMany(name, {
+      s0: makeSettlement("s0", 0, 1, 1, {
+        garrisonUnpaidSinceDay: 8,
+        garrisonUnpaidTroops: 6,
+        garrisonUnpaidGold: 48,
+      }),
+    });
+
+    const paidUp = makeSettlement("s0", 0, 1, 1);
+    await repo.upsertMany(name, { s0: paidUp });
+    const [loaded] = await repo.loadAllForGame(name);
+
+    assert.equal(loaded.garrisonUnpaidSinceDay, null);
+    assert.equal(loaded.garrisonUnpaidTroops, 0);
+    assert.equal(loaded.garrisonUnpaidGold, 0);
+  });
+});

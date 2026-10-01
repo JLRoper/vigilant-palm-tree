@@ -125,6 +125,72 @@ export function trimPlatoonsFromEnd(
   return out;
 }
 
+export interface DesertionResult {
+  stacks: Platoon[];
+  removed: number;
+  removedCost: number;
+}
+
+// Weighted removal by weekly upkeep cost: keep removing individual units
+// until the accumulated REMOVED weekly cost reaches targetCost (or the army
+// runs out). Which unit leaves each round is a weighted draw whose weight is
+// that unit's unitUpkeepGold, so an Eagle Prince (10g) walks ten times as
+// often as a peasant (1g) -- "20% of what upkeep couldn't cover" costs an
+// Eagle Prince as much as ten peasants.
+//
+// Conventions mirror trimPlatoonsFromEnd above: the input array length and
+// platoon order are preserved, entries are cloned, and an entry that reaches
+// count 0 is dropped. Unlike trimPlatoonsFromEnd this NEVER writes a
+// fractional count -- the target is an integer ceiling and every weight is an
+// integer, so each step removes exactly one unit. Callers recompute
+// platoonTroopTotal() on the returned stacks rather than trusting a scalar.
+export function desertTroopsByCost(
+  stacks: readonly Platoon[],
+  targetCost: number,
+  unitTypes: Record<string, UnitType>,
+  rng: () => number,
+): DesertionResult {
+  const out = stacks.map((p) => ({ entries: p.entries.map((e) => ({ ...e })) }));
+  let remaining = Math.ceil(targetCost);
+  let removed = 0;
+  let removedCost = 0;
+  while (remaining > 0) {
+    let totalWeight = 0;
+    for (const p of out) {
+      for (const e of p.entries) totalWeight += e.count * unitUpkeepGold(unitTypes[e.unitTypeId]);
+    }
+    if (totalWeight <= 0) break;
+    // Roll in weight-space, then walk the entries consuming the roll until
+    // the winning unit is found. Clamped so a degenerate rng() >= 1 (or a
+    // NaN) still resolves to the last live unit instead of running off the end.
+    let roll = rng() * totalWeight;
+    if (!Number.isFinite(roll) || roll < 0) roll = 0;
+    if (roll >= totalWeight) roll = totalWeight - Number.MIN_VALUE;
+    let picked: PlatoonEntry | null = null;
+    for (const p of out) {
+      let found = false;
+      for (const e of p.entries) {
+        const w = e.count * unitUpkeepGold(unitTypes[e.unitTypeId]);
+        if (roll < w) {
+          picked = e;
+          found = true;
+          break;
+        }
+        roll -= w;
+      }
+      if (found) break;
+    }
+    if (!picked) break;
+    const cost = unitUpkeepGold(unitTypes[picked.unitTypeId]);
+    picked.count -= 1;
+    removed += 1;
+    removedCost += cost;
+    remaining -= cost;
+  }
+  for (const p of out) p.entries = p.entries.filter((e) => e.count > 0);
+  return { stacks: out, removed, removedCost };
+}
+
 // Demo armies assigned to heroes on fresh game creation so the Hero Info menu
 // has real data to display. Keys are hero index -> player index (0 = human).
 // Seats beyond the two hand-written rows cycle the table deterministically

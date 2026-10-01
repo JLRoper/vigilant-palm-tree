@@ -177,6 +177,78 @@ test("hydrateGame round-trips next_charter_id/next_settlement_id once they're pe
   });
 });
 
+// A row shaped just well enough for hydrateGameState's own reads (players is
+// indexed for the AI_TURN check); every other field is defaulted by the
+// function itself, which is exactly the point here.
+function hydrateRow(
+  heroes: Record<HeroId, Partial<HeroState>>,
+  settlements: Record<SettlementId, Partial<SettlementState>>,
+): Parameters<typeof hydrateGameState>[0] {
+  return {
+    round: 1,
+    day: 1,
+    active_player_id: 0,
+    players: [{ id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: [], settlementIds: [] }],
+    heroes,
+    settlements,
+  } as unknown as Parameters<typeof hydrateGameState>[0];
+}
+
+test("hydrateGameState defaults the weekly-upkeep shortfall fields for a legacy row that predates them", () => {
+  // A pre-migration row: the heroes/settlements JSONB carries no morale /
+  // unpaid-upkeep keys at all (021 added them), so hydrateGameState's
+  // defensive `?? ` defaults are what keeps such a game playable.
+  const legacyHero = makeHero("h0", 0, 2, 2);
+  delete (legacyHero as unknown as Record<string, unknown>).morale;
+  delete (legacyHero as unknown as Record<string, unknown>).upkeepUnpaidSinceDay;
+  delete (legacyHero as unknown as Record<string, unknown>).upkeepUnpaidTroops;
+  delete (legacyHero as unknown as Record<string, unknown>).upkeepUnpaidGold;
+  const legacySettlement = makeSettlement("s0", 0, 2, 2);
+  delete (legacySettlement as unknown as Record<string, unknown>).garrisonUnpaidSinceDay;
+  delete (legacySettlement as unknown as Record<string, unknown>).garrisonUnpaidTroops;
+  delete (legacySettlement as unknown as Record<string, unknown>).garrisonUnpaidGold;
+
+  const state = hydrateGameState(hydrateRow({ h0: legacyHero }, { s0: legacySettlement }));
+
+  assert.equal(state.heroes["h0"].morale, 100);
+  assert.equal(state.heroes["h0"].upkeepUnpaidSinceDay, null);
+  assert.equal(state.heroes["h0"].upkeepUnpaidTroops, 0);
+  assert.equal(state.heroes["h0"].upkeepUnpaidGold, 0);
+  assert.equal(state.settlements["s0"].garrisonUnpaidSinceDay, null);
+  assert.equal(state.settlements["s0"].garrisonUnpaidTroops, 0);
+  assert.equal(state.settlements["s0"].garrisonUnpaidGold, 0);
+});
+
+test("hydrateGameState preserves real upkeep-shortfall values when the row carries them", () => {
+  const state = hydrateGameState(
+    hydrateRow(
+      {
+        h0: makeHero("h0", 0, 2, 2, {
+          morale: 55,
+          upkeepUnpaidSinceDay: 19,
+          upkeepUnpaidTroops: 7,
+          upkeepUnpaidGold: 49,
+        }),
+      },
+      {
+        s0: makeSettlement("s0", 0, 2, 2, {
+          garrisonUnpaidSinceDay: 19,
+          garrisonUnpaidTroops: 11,
+          garrisonUnpaidGold: 88,
+        }),
+      },
+    ),
+  );
+
+  assert.equal(state.heroes["h0"].morale, 55);
+  assert.equal(state.heroes["h0"].upkeepUnpaidSinceDay, 19);
+  assert.equal(state.heroes["h0"].upkeepUnpaidTroops, 7);
+  assert.equal(state.heroes["h0"].upkeepUnpaidGold, 49);
+  assert.equal(state.settlements["s0"].garrisonUnpaidSinceDay, 19);
+  assert.equal(state.settlements["s0"].garrisonUnpaidTroops, 11);
+  assert.equal(state.settlements["s0"].garrisonUnpaidGold, 88);
+});
+
 test("hydrateGame floors next_settlement_id at the real settlement count for a game that predates the counter", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();

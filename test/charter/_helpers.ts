@@ -32,7 +32,25 @@ export function makeHero(
   q: number,
   r: number,
   opts: Partial<
-    Pick<HeroState, "movementRemaining" | "gold" | "troops" | "isChartering" | "charterId" | "stacks" | "horseVariant" | "arcane" | "intelligence" | "heroMana" | "heroMaxMana" | "heroSpell">
+    Pick<
+      HeroState,
+      | "movementRemaining"
+      | "gold"
+      | "troops"
+      | "isChartering"
+      | "charterId"
+      | "stacks"
+      | "horseVariant"
+      | "arcane"
+      | "intelligence"
+      | "heroMana"
+      | "heroMaxMana"
+      | "heroSpell"
+      | "morale"
+      | "upkeepUnpaidSinceDay"
+      | "upkeepUnpaidTroops"
+      | "upkeepUnpaidGold"
+    >
   > = {},
 ): HeroState {
   // withDefaultSpellStats backfills the spellcasting v1 stat block (fixed
@@ -60,6 +78,10 @@ export function makeHero(
     heroMana: opts.heroMana,
     heroMaxMana: opts.heroMaxMana,
     heroSpell: opts.heroSpell,
+    morale: opts.morale ?? 100,
+    upkeepUnpaidSinceDay: opts.upkeepUnpaidSinceDay ?? null,
+    upkeepUnpaidTroops: opts.upkeepUnpaidTroops ?? 0,
+    upkeepUnpaidGold: opts.upkeepUnpaidGold ?? 0,
   });
 }
 
@@ -69,7 +91,22 @@ export function makeSettlement(
   q: number,
   r: number,
   opts: Partial<
-    Pick<SettlementState, "population" | "goldTax" | "gold" | "resourceRates" | "morale" | "autoTrade" | "warehouse" | "level" | "buildings" | "citySpots">
+    Pick<
+      SettlementState,
+      | "population"
+      | "goldTax"
+      | "gold"
+      | "resourceRates"
+      | "morale"
+      | "garrisonUnpaidSinceDay"
+      | "garrisonUnpaidTroops"
+      | "garrisonUnpaidGold"
+      | "autoTrade"
+      | "warehouse"
+      | "level"
+      | "buildings"
+      | "citySpots"
+    >
   > = {},
 ): SettlementState {
   return {
@@ -88,6 +125,9 @@ export function makeSettlement(
     citySpots: opts.citySpots ?? [],
     cityMines: [],
     morale: opts.morale ?? 100,
+    garrisonUnpaidSinceDay: opts.garrisonUnpaidSinceDay ?? null,
+    garrisonUnpaidTroops: opts.garrisonUnpaidTroops ?? 0,
+    garrisonUnpaidGold: opts.garrisonUnpaidGold ?? 0,
     autoTrade: opts.autoTrade ?? true,
     castleVariant: 0,
     buildings: opts.buildings ?? [],

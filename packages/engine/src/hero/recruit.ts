@@ -68,6 +68,12 @@ export function recruitHero(
     heroMana: maxManaFor(DEFAULT_HERO_INTELLIGENCE),
     heroMaxMana: maxManaFor(DEFAULT_HERO_INTELLIGENCE),
     heroSpell: DEFAULT_HERO_SPELL,
+    // Upkeep shortfall (weekly upkeep pass): a newly recruited hero starts
+    // paid up and content.
+    morale: 100,
+    upkeepUnpaidSinceDay: null,
+    upkeepUnpaidTroops: 0,
+    upkeepUnpaidGold: 0,
   };
 
   return {

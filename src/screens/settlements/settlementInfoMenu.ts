@@ -9,6 +9,7 @@ import { DockedPanel } from "@screens/shared/dockedPanel";
 import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayout";
 import type { PanelRect } from "@screens/shared/panelPlacement";
 import { AccordionSection, makeRow } from "@screens/shared/panelWidgets";
+import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
 import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../../render/assetDescriptors";
 import { settings } from "../../state/settings";
 import type { HorseVariant } from "../../state/settings";
@@ -40,6 +41,8 @@ export class SettlementInfoMenu {
   private incomeEl: HTMLSpanElement;
   private treasuryEl: HTMLSpanElement;
   private moraleEl: HTMLSpanElement;
+  private upkeepRow: HTMLDivElement;
+  private upkeepEl: HTMLSpanElement;
   private foodEl: HTMLSpanElement;
   private bannerEl: HTMLImageElement;
   private warehouseEls: Record<string, HTMLSpanElement>;
@@ -138,6 +141,13 @@ export class SettlementInfoMenu {
     const { row: moraleRow, value: moraleVal } = makeRow("Morale");
     this.moraleEl = moraleVal;
     body.appendChild(moraleRow);
+
+    // Unpaid-upkeep badge. Hidden entirely while the settlement pays its way;
+    // a row that reads "—" forever would train the player to ignore it.
+    const { row: upkeepRow, value: upkeepVal } = makeRow("Upkeep");
+    this.upkeepRow = upkeepRow;
+    this.upkeepEl = upkeepVal;
+    body.appendChild(upkeepRow);
 
     const { row: foodRow, value: foodVal } = makeRow("Food");
     this.foodEl = foodVal;
@@ -349,6 +359,8 @@ export class SettlementInfoMenu {
     const foodReq = Math.ceil((settlement.population ?? 0) / 100);
     this.foodEl.textContent = `${settlement.warehouse.food ?? 0} / ${foodReq} req`;
 
+    this.updateUpkeep(settlement, state.day);
+
     this.warehouseEls["wood"].textContent = String(settlement.warehouse.wood ?? 0);
     this.warehouseEls["stone"].textContent = String(settlement.warehouse.stone ?? 0);
     this.warehouseEls["iron"].textContent = String(settlement.warehouse.iron ?? 0);
@@ -422,6 +434,27 @@ export class SettlementInfoMenu {
     }
 
     this.updateGarrison(settlement, state);
+  }
+
+  // Upkeep badge: days short, how many garrison troops are going unfed, and
+  // the morale that shortfall is dragging down. Runs inside the per-frame
+  // update() like every other row here — one display flip plus two text writes
+  // on the common path, nothing when the settlement is paid up.
+  private updateUpkeep(settlement: SettlementState, day: number): void {
+    const sinceDay = settlement.garrisonUnpaidSinceDay;
+    if (sinceDay === null) {
+      this.upkeepRow.style.display = "none";
+      return;
+    }
+    const daysUnpaid = Math.max(0, day - sinceDay);
+    const weeksUnpaid = Math.floor(daysUnpaid / 7);
+    const unfed = settlement.garrisonUnpaidTroops;
+    this.upkeepRow.style.display = "";
+    this.upkeepEl.textContent = `${daysUnpaid}d · ${unfed} troops · morale ${Math.round(settlement.morale)}%`;
+    this.upkeepEl.title =
+      weeksUnpaid >= DESERTION_AFTER_WEEKS
+        ? `Garrison upkeep unpaid for ${daysUnpaid} days — ${unfed} troops unfed (${settlement.garrisonUnpaidGold}g/wk short). Troops are deserting.`
+        : `Garrison upkeep unpaid for ${daysUnpaid} days — ${unfed} troops unfed (${settlement.garrisonUnpaidGold}g/wk short). Troops desert after ${DESERTION_AFTER_WEEKS - weeksUnpaid} more week(s).`;
   }
 
   // Garrison + transfer section. Rebuilt only when the stack content or the

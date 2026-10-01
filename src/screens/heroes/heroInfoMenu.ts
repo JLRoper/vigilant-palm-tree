@@ -1,4 +1,4 @@
-import type { GameState, Player, SettlementState } from "../../state/gameState";
+import type { GameState, HeroState, Player, SettlementState } from "../../state/gameState";
 import type { Hero } from "../../entities/hero";
 import { PopupMenu, menuTheme } from "@screens/shared/menu";
 import { toolbarHeight } from "@screens/shared/panelRail";
@@ -6,6 +6,7 @@ import { DockedPanel } from "@screens/shared/dockedPanel";
 import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayout";
 import type { PanelRect } from "@screens/shared/panelPlacement";
 import { AccordionSection, makeRow } from "@screens/shared/panelWidgets";
+import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
 import { ArmySection, type ReorderHandler } from "./armySection";
 import { HERO_BANNERS, RESOURCE_PILE_BUBBLY_SPRITES } from "../../render/assetDescriptors";
 import { HERO_BASE_ATTACK, HERO_BASE_DEFENCE, heroCargo, heroGoldCap, heroResourceCap, heroWagons, platoonTroopTotal } from "@heroes/engine";
@@ -46,6 +47,9 @@ interface HeroPanelDom {
   movementFill: HTMLElement;
   movementLabel: HTMLElement;
   troopsEl: HTMLElement;
+  moraleEl: HTMLSpanElement;
+  upkeepRow: HTMLDivElement;
+  upkeepEl: HTMLSpanElement;
   cargoWagonsEl: HTMLElement;
   cargoEls: Record<string, HTMLSpanElement>;
   statValues: Record<string, HTMLSpanElement>;
@@ -200,6 +204,16 @@ function buildHeroPanelDom(
 
   body.appendChild(movementSection);
 
+  // Always-visible upkeep block. Morale sits outside the Stats & Army
+  // accordion on purpose: it falls for reasons other than unpaid upkeep, and
+  // the accordions are collapsed by default.
+  const { row: moraleRow, value: moraleVal } = makeRow("Morale");
+  body.appendChild(moraleRow);
+
+  // Hidden while this hero pays its way — see SettlementInfoMenu's twin row.
+  const { row: upkeepRow, value: upkeepVal } = makeRow("Upkeep");
+  body.appendChild(upkeepRow);
+
   const cargo = new AccordionSection({ label: "Cargo", onToggle: onSectionToggle });
   cargo.rightEl.textContent = "0 wagons";
   const cargoWagonsEl = cargo.rightEl;
@@ -290,6 +304,9 @@ function buildHeroPanelDom(
     movementFill,
     movementLabel,
     troopsEl,
+    moraleEl: moraleVal,
+    upkeepRow,
+    upkeepEl: upkeepVal,
     cargoWagonsEl,
     cargoEls,
     statValues,
@@ -423,6 +440,8 @@ export class HeroInfoMenu {
     this.dom.troopsEl.textContent = `${troopTotal} \u00B7 Upkeep: ${troopTotal}g + ${troopTotal} food/wk`;
     this.dom.troopsEl.title = `Weekly upkeep: ${troopTotal}g from the purse + ${troopTotal} food from cargo; unpaid gold makes troops desert`;
 
+    this.updateUpkeep(heroState, state.day);
+
     this.renderCargo(hero, state);
 
     this.settlementAtTile = null;
@@ -454,6 +473,32 @@ export class HeroInfoMenu {
     this.dom.depositBtn.style.cursor = this.dom.depositBtn.disabled ? "default" : "pointer";
     this.army.render(hero.stacks);
     this.renderStats(hero);
+  }
+
+  // Morale is always on screen; the upkeep row appears only while this hero is
+  // short. Cheap by construction — no allocation, no rebuild, just text writes
+  // on an update() that already runs every frame.
+  private updateUpkeep(heroState: HeroState | undefined, day: number): void {
+    if (!heroState) {
+      this.dom.moraleEl.textContent = "—";
+      this.dom.upkeepRow.style.display = "none";
+      return;
+    }
+    this.dom.moraleEl.textContent = `${Math.round(heroState.morale)}%`;
+    const sinceDay = heroState.upkeepUnpaidSinceDay;
+    if (sinceDay === null) {
+      this.dom.upkeepRow.style.display = "none";
+      return;
+    }
+    const daysUnpaid = Math.max(0, day - sinceDay);
+    const weeksUnpaid = Math.floor(daysUnpaid / 7);
+    const unfed = heroState.upkeepUnpaidTroops;
+    this.dom.upkeepRow.style.display = "";
+    this.dom.upkeepEl.textContent = `${daysUnpaid}d · ${unfed} troops · ${heroState.upkeepUnpaidGold}g/wk`;
+    this.dom.upkeepEl.title =
+      weeksUnpaid >= DESERTION_AFTER_WEEKS
+        ? `Upkeep unpaid for ${daysUnpaid} days — ${unfed} troops unfed. Troops are deserting.`
+        : `Upkeep unpaid for ${daysUnpaid} days — ${unfed} troops unfed. Troops desert after ${DESERTION_AFTER_WEEKS - weeksUnpaid} more week(s).`;
   }
 
   // Cargo shows the hero's wagon stockpile: every warehouse resource the hero

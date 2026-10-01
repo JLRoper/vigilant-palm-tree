@@ -16,6 +16,12 @@ import { submitBattleResult, submitSettlementBattleResult, type SubmitBattleResu
 import { consumeResolveBattleVerdicts, mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../game/turnHooks";
 import { battleToastMessage, settlementNameAt } from "@screens/combat/battleResultText";
 import {
+  evaluateUpkeepWarnings,
+  upkeepSummaryToastMessage,
+  upkeepToastMessage,
+  UPKEEP_SUMMARY_OFFENDER_LIMIT,
+} from "@screens/shared/upkeepWarnings";
+import {
   formatStacksLabel,
   openAssaultConfirmModal,
   type AssaultConfirmChoice,
@@ -586,7 +592,28 @@ export class GameActions {
     const tc = this.state.getTurnController();
     await tc.endHumanTurn();
     this.state.replaceState(tc.getState());
+    this.reportUnpaidUpkeep();
     this.session.setSaveStatus("saved");
     this.maybeAutoResolveBattle();
+  }
+
+  // Unpaid upkeep is otherwise invisible: consumption clamps at zero, morale
+  // decays, and troops desert with nothing on screen saying why. Runs on the
+  // post-EndTurn merged state (the weekly upkeep pass has already applied, so
+  // days/weeks-unpaid are current) and stays inside the toast surface — a modal
+  // was rejected for this because it can wedge the turn UI.
+  private reportUnpaidUpkeep(): void {
+    const merged = this.state.getState();
+    const gameName = this.session.getActiveGameName();
+    const seat = getInMemoryLocalPlayerId(gameName ?? "") ?? 0;
+    const rows = evaluateUpkeepWarnings(merged, seat);
+    if (rows.length === 0) return;
+    if (rows.length > UPKEEP_SUMMARY_OFFENDER_LIMIT) {
+      showToast(upkeepSummaryToastMessage(rows), "error");
+      return;
+    }
+    for (const row of rows) {
+      showToast(upkeepToastMessage(row), "error");
+    }
   }
 }

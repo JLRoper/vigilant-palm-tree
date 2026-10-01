@@ -30,13 +30,46 @@ import {
   type GamePhase,
 } from "../../src/state/gameState";
 import { normalizePlatoons } from "../../src/state/units";
+import {
+  DESERT_COST_SHARE,
+  DESERT_GRACE_WEEKS,
+  MORALE_UNPAID_LOSS_MAX,
+  desertionGateOpen,
+  evaluateTroopUpkeep,
+  platoonTroopTotal,
+  unpaidMoraleLoss,
+  weeksUnpaid,
+  type UnitType,
+} from "@heroes/engine";
+import { makeHero as makeFixtureHero } from "../charter/_helpers";
+import type { Platoon } from "@heroes/contracts";
+
+function upkeepUnit(id: string, upkeepGold: number, upkeepFood: number): UnitType {
+  return {
+    id,
+    name: id,
+    attack: 1,
+    defence: 1,
+    health: 1,
+    speed: 1,
+    description: "",
+    advantageType: "infantry",
+    specialty: "",
+    specialtyPriority: 0,
+    upkeepGold,
+    upkeepFood,
+  };
+}
 
 function makePlayer(id: PlayerId, faction: Player["faction"], name: string, heroIds: HeroId[], settlementIds: string[]): Player {
   return { id, faction, name, heroIds, settlementIds };
 }
 
 function makeHero(id: HeroId, ownerId: PlayerId, q: number, r: number, movementRemaining = MOVEMENT_PER_TURN, gold = 0, troops = 1): HeroState {
-  return { id, name: id, ownerId, q, r, movementRemaining, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q, r }], gold, troops, stacks: troops > 0 ? normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: troops }] }]) : [], isChartering: false, charterId: null };
+  // The upkeep-shortfall trio defaults to paid up (morale 100, no streak), which
+  // is what every hero the engine creates actually looks like -- a fixture that
+  // omitted them would run upkeep against `morale: undefined`.
+  return { id, name: id, ownerId, q, r, movementRemaining, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q, r }], gold, troops, stacks: troops > 0 ? normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: troops }] }]) : [], isChartering: false, charterId: null, morale: 100, upkeepUnpaidSinceDay: null, upkeepUnpaidTroops: 0, upkeepUnpaidGold: 0 };
 }
 
 function emptyWarehouse() {
@@ -50,6 +83,9 @@ function makeSettlement(
   r: number,
   opts: Partial<Pick<SettlementState, "population" | "goldTax" | "gold" | "resourceRates" | "morale" | "autoTrade" | "warehouse">> = {},
 ): SettlementState {
+  // The garrison-unpaid trio defaults to paid up, matching every settlement the
+  // engine creates; a fixture that omitted them would run garrison upkeep with
+  // `garrisonUnpaidSinceDay: undefined`.
   return {
     id,
     ownerId,
@@ -63,6 +99,9 @@ function makeSettlement(
     gold: opts.gold ?? 0,
     warehouse: opts.warehouse ?? emptyWarehouse(),
     morale: opts.morale ?? 100,
+    garrisonUnpaidSinceDay: null,
+    garrisonUnpaidTroops: 0,
+    garrisonUnpaidGold: 0,
     autoTrade: opts.autoTrade ?? true,
     buildings: [],
   };
@@ -614,24 +653,184 @@ test("applyEndOfTurn does not award gold to non-active-player settlements", () =
   assert.equal(next.settlements.s1.gold, 50);
 });
 
-test("applyWeeklyUpkeep deducts cost when hero can pay", () => {
-  const s = makeState({
-    heroes: [makeHero("h0", 0, 2, 2, 7, 100, 10), makeHero("h1", 1, 18, 4, 7, 5, 3)],
-  });
-  const next = applyWeeklyUpkeep(s, 0.1);
-  assert.equal(next.heroes.h0.gold, 90);
+// ── Weekly troop upkeep (morale / shortfall / desertion) ───────────────────
+// `applyWeeklyUpkeep` is a thin state-level wrapper: it threads day/round/
+// castleSeed into the shared rule in
+// packages/engine/src/economy/troopUpkeep.ts and runs it over BOTH heroes and
+// garrisons. These tests pin the wrapper, so every expectation is derived from
+// the engine's own exported helpers (evaluateTroopUpkeep / weeksUnpaid /
+// desertionGateOpen / unpaidMoraleLoss and the DESERT_* / MORALE_* constants)
+// rather than re-implementing the math here — a second copy of the formula in
+// the test is exactly how the old "100% of the shortfall deserts troops" pin
+// survived the rule change unnoticed.
+
+const UPKEEP_UNIT_TYPES: Record<string, UnitType> = {
+  peasant: upkeepUnit("peasant", 1, 1),
+  swordsman: upkeepUnit("swordsman", 2, 1),
+  eagle_prince: upkeepUnit("eagle_prince", 10, 3),
+};
+
+interface UpkeepHeroOpts {
+  stacks: Platoon[];
+  gold?: number;
+  food?: number;
+  morale?: number;
+  unpaidSinceDay?: number | null;
+  unpaidTroops?: number;
+  unpaidGold?: number;
+}
+
+function upkeepHero(opts: UpkeepHeroOpts, id = "h0"): HeroState {
+  return {
+    ...makeFixtureHero(id, 0, 2, 2, {
+      stacks: opts.stacks,
+      troops: platoonTroopTotal(opts.stacks),
+      gold: opts.gold ?? 0,
+      morale: opts.morale ?? 100,
+      upkeepUnpaidSinceDay: opts.unpaidSinceDay ?? null,
+      upkeepUnpaidTroops: opts.unpaidTroops ?? 0,
+      upkeepUnpaidGold: opts.unpaidGold ?? 0,
+    }),
+    resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: opts.food ?? 0 },
+  };
+}
+
+// One weekly charge at `day`, threading the previous charge's result forward
+// the way the engine's round tick does.
+function chargeUpkeep(state: GameState, day: number): GameState {
+  return applyWeeklyUpkeep({ ...state, day }, 0.1, UPKEEP_UNIT_TYPES);
+}
+
+function weeklyBill(stacks: readonly Platoon[]): { costGold: number; costFood: number } {
+  const evaluated = evaluateTroopUpkeep(stacks, UPKEEP_UNIT_TYPES, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+  return { costGold: evaluated.costGold, costFood: evaluated.costFood };
+}
+
+function stacksCostGold(stacks: readonly Platoon[]): number {
+  return weeklyBill(stacks).costGold;
+}
+
+test("applyWeeklyUpkeep charges a funded hero's weekly gold and food bill and clears the shortfall", () => {
+  const stacks: Platoon[] = [{ entries: [{ unitTypeId: "swordsman", count: 10 }] }];
+  const hero = upkeepHero({ stacks, gold: 100, food: 100, morale: 71, unpaidSinceDay: 3, unpaidTroops: 4, unpaidGold: 8 });
+  const bill = weeklyBill(stacks);
+  assert.deepEqual(bill, { costGold: 20, costFood: 10 }, "10 tier-2 swordsmen: 2 gold + 1 food each");
+
+  const next = chargeUpkeep(makeState({ heroes: [hero] }), 7);
+  assert.equal(next.heroes.h0.gold, 100 - bill.costGold);
+  assert.equal(next.heroes.h0.resources?.food, 100 - bill.costFood);
   assert.equal(next.heroes.h0.troops, 10);
-  assert.equal(next.heroes.h1.gold, 2);
-  assert.equal(next.heroes.h1.troops, 3);
+  assert.equal(platoonTroopTotal(next.heroes.h0.stacks), 10);
+  assert.equal(next.heroes.h0.morale, 71, "a paid charge neither costs nor restores morale");
+  assert.equal(next.heroes.h0.upkeepUnpaidSinceDay, null, "paying up clears the streak");
+  assert.equal(next.heroes.h0.upkeepUnpaidTroops, 0);
+  assert.equal(next.heroes.h0.upkeepUnpaidGold, 0);
 });
 
-test("applyWeeklyUpkeep sets gold to 0 and troops to previous gold when hero cannot pay", () => {
-  const s = makeState({
-    heroes: [makeHero("h0", 0, 2, 2, 7, 3, 10)],
-  });
-  const next = applyWeeklyUpkeep(s, 0.1);
-  assert.equal(next.heroes.h0.gold, 0);
-  assert.equal(next.heroes.h0.troops, 3);
+test("applyWeeklyUpkeep leaves a second, funded hero untouched when it can also pay", () => {
+  const stacks: Platoon[] = [{ entries: [{ unitTypeId: "peasant", count: 3 }] }];
+  const hero = upkeepHero({ stacks, gold: 5, food: 10 }, "h1");
+  const bill = weeklyBill(stacks);
+  const next = chargeUpkeep(makeState({ heroes: [hero] }), 7);
+  assert.equal(next.heroes.h1.gold, 5 - bill.costGold);
+  assert.equal(next.heroes.h1.troops, 3);
+  assert.equal(next.heroes.h1.morale, 100);
+  assert.equal(next.heroes.h1.upkeepUnpaidSinceDay, null);
+});
+
+test("an unpaid weekly charge spends what is there, stamps the streak, and costs morale without losing troops", () => {
+  // 10 swordsmen owe 20 gold / 10 food; the purse holds 3 and the wagon holds 0.
+  const stacks: Platoon[] = [{ entries: [{ unitTypeId: "swordsman", count: 10 }] }];
+  const hero = upkeepHero({ stacks, gold: 3, food: 0 });
+  const before = evaluateTroopUpkeep(stacks, UPKEEP_UNIT_TYPES, hero.gold, 0);
+  assert.equal(before.costGold, 20);
+  assert.equal(before.unfed, 10, "the empty larder starves the whole army, not just what 3 gold covers");
+  assert.equal(before.unfedCostGold, 20);
+
+  const next = chargeUpkeep(makeState({ heroes: [hero] }), 7);
+  assert.equal(next.heroes.h0.gold, 0, "no debt is carried across charges; the purse just runs dry");
+  assert.equal(next.heroes.h0.resources?.food, 0);
+  assert.equal(next.heroes.h0.troops, 10, "week 1 of a streak never loses a soldier");
+  assert.equal(
+    next.heroes.h0.morale,
+    100 - unpaidMoraleLoss(before.unfedCostGold, before.costGold),
+    "the morale bleed scales with the value that went unpaid",
+  );
+  assert.equal(next.heroes.h0.morale, 100 - MORALE_UNPAID_LOSS_MAX, "a fully unfed army bleeds the ceiling");
+  assert.equal(next.heroes.h0.upkeepUnpaidSinceDay, 7, "the streak is stamped with the FIRST unpaid charge");
+  assert.equal(next.heroes.h0.upkeepUnpaidTroops, before.unfed);
+  assert.equal(next.heroes.h0.upkeepUnpaidGold, before.unfedCostGold);
+  assert.equal(weeksUnpaid(7, next.heroes.h0.upkeepUnpaidSinceDay), 0);
+  assert.equal(desertionGateOpen(7, next.heroes.h0.upkeepUnpaidSinceDay), false);
+});
+
+test("the second unpaid weekly charge is still grace: morale bleeds, troops stay", () => {
+  const stacks: Platoon[] = [{ entries: [{ unitTypeId: "swordsman", count: 10 }] }];
+  const first = chargeUpkeep(makeState({ heroes: [upkeepHero({ stacks, gold: 3, food: 0 })] }), 7);
+  assert.equal(weeksUnpaid(14, first.heroes.h0.upkeepUnpaidSinceDay), 1);
+  assert.equal(desertionGateOpen(14, first.heroes.h0.upkeepUnpaidSinceDay), false);
+
+  const second = chargeUpkeep(first, 14);
+  assert.equal(second.heroes.h0.troops, 10, "week 2 is the last grace week");
+  assert.equal(platoonTroopTotal(second.heroes.h0.stacks), 10);
+  assert.equal(second.heroes.h0.morale, 100 - 2 * MORALE_UNPAID_LOSS_MAX);
+  assert.equal(second.heroes.h0.upkeepUnpaidSinceDay, 7, "the streak start is never moved forward");
+  assert.equal(second.heroes.h0.upkeepUnpaidGold, 20);
+  assert.equal(weeksUnpaid(21, second.heroes.h0.upkeepUnpaidSinceDay), DESERT_GRACE_WEEKS);
+});
+
+test("the third unpaid weekly charge is the first to desert, and only by the cost-based share", () => {
+  const stacks: Platoon[] = [{ entries: [{ unitTypeId: "swordsman", count: 10 }] }];
+  const third = chargeUpkeep(
+    chargeUpkeep(chargeUpkeep(makeState({ heroes: [upkeepHero({ stacks, gold: 3, food: 0 })] }), 7), 14),
+    21,
+  );
+  const hero = third.heroes.h0;
+  assert.equal(hero.upkeepUnpaidSinceDay, 7, "the streak start survives the desertion");
+  assert.equal(weeksUnpaid(21, hero.upkeepUnpaidSinceDay), DESERT_GRACE_WEEKS);
+  assert.equal(desertionGateOpen(21, hero.upkeepUnpaidSinceDay), true);
+
+  const bill = weeklyBill(stacks).costGold;
+  const removedCost = bill - stacksCostGold(hero.stacks);
+  const target = Math.ceil(DESERT_COST_SHARE * hero.upkeepUnpaidGold);
+  assert.equal(hero.upkeepUnpaidGold, 20, "the whole army is still unfed on the third charge");
+  assert.equal(target, 4, "20% of a 20-gold deficit");
+  assert.ok(removedCost >= target, `removed cost ${removedCost} reached the ${target} target`);
+  // The draw may stop on the first unit that covers the target, so the only
+  // bound available is the cost of one unit (2 gold per swordsman here).
+  assert.ok(removedCost <= target + 2, `removed cost ${removedCost} overshot by more than one swordsman`);
+  assert.ok(hero.troops < 10, "somebody walked");
+  assert.equal(platoonTroopTotal(hero.stacks), hero.troops, "the troops scalar stays consistent with the stacks");
+  for (const platoon of hero.stacks) {
+    for (const entry of platoon.entries) assert.equal(Number.isInteger(entry.count), true, "no fractional troop count");
+  }
+  assert.equal(hero.morale, 100 - 3 * MORALE_UNPAID_LOSS_MAX);
+  assert.equal(hero.gold, 0);
+});
+
+test("an expensive unpaid unit costs more desertion than a cheap one for the same deficit", () => {
+  // 1 Eagle Prince (10 gold) + 20 peasants (1 gold) = 30 gold owed. A purse of
+  // 20 buys every peasant and no Eagle Prince, so ONE troop is unfed and the
+  // deficit is the Eagle Prince's 10 gold — 20% of that is 2, which one
+  // Eagle Prince already covers, whereas 20% of the 1-gold shortfall would
+  // have cost two peasants.
+  const stacks: Platoon[] = [
+    { entries: [{ unitTypeId: "peasant", count: 20 }] },
+    { entries: [{ unitTypeId: "eagle_prince", count: 1 }] },
+  ];
+  const hero = upkeepHero({ stacks, gold: 20, food: 100, unpaidSinceDay: 7 });
+  const evaluated = evaluateTroopUpkeep(stacks, UPKEEP_UNIT_TYPES, hero.gold, hero.resources?.food ?? 0);
+  assert.equal(evaluated.costGold, 30);
+  assert.equal(evaluated.unfed, 1);
+  assert.equal(evaluated.unfedCostGold, 10, "the purse runs out at the top of the bill");
+
+  const after = chargeUpkeep(makeState({ heroes: [hero] }), 21);
+  const removedCost = weeklyBill(stacks).costGold - stacksCostGold(after.heroes.h0.stacks);
+  assert.equal(Math.ceil(DESERT_COST_SHARE * 10), 2);
+  assert.ok(removedCost >= 2, `removed cost ${removedCost} reached the cost-based target`);
+  assert.ok(removedCost <= 12, `removed cost ${removedCost} overshot by more than one Eagle Prince`);
+  assert.ok(after.heroes.h0.troops >= 15, `the army is bled, not wiped: ${after.heroes.h0.troops}`);
+  assert.equal(platoonTroopTotal(after.heroes.h0.stacks), after.heroes.h0.troops);
 });
 
 test("applyWeeklyUpkeep is no-op when hero has 0 troops and 0 gold", () => {

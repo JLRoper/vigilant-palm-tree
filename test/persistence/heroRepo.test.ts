@@ -126,6 +126,68 @@ test("heroRepo.upsertMany round-trips a fractional movementRemaining (forest/des
   });
 });
 
+test("heroRepo.upsertMany round-trips morale and the unpaid-upkeep shortfall counters", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createHeroRepo(client);
+    // Deliberately non-default across all four fields: the default
+    // (100/null/0/0) round-trip is already covered by every other test in
+    // this file, which would not catch a column wired to the wrong field.
+    const hero = {
+      ...makeHero("h0", 0, 3, 4, {
+        morale: 42,
+        upkeepUnpaidSinceDay: 17,
+        upkeepUnpaidTroops: 9,
+        upkeepUnpaidGold: 63,
+      }),
+      // Same reason the earlier round-trip test passes these: heroRepo
+      // materializes both on write (wagons defaults to 5, resources to {}),
+      // so omitting them from the fixture would fail the whole-object
+      // deepEqual below for reasons unrelated to the upkeep columns.
+      wagons: 3,
+      resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
+    };
+
+    await repo.upsertMany(name, { h0: hero });
+    const [loaded] = await repo.loadAllForGame(name);
+
+    assert.equal(loaded.morale, 42);
+    assert.equal(loaded.upkeepUnpaidSinceDay, 17);
+    assert.equal(loaded.upkeepUnpaidTroops, 9);
+    assert.equal(loaded.upkeepUnpaidGold, 63);
+    assert.deepEqual(loaded, hero);
+  });
+});
+
+test("heroRepo.upsertMany clears the unpaid-upkeep streak back to paid up on update", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createHeroRepo(client);
+    await repo.upsertMany(name, {
+      h0: makeHero("h0", 0, 1, 1, {
+        morale: 30,
+        upkeepUnpaidSinceDay: 12,
+        upkeepUnpaidTroops: 5,
+        upkeepUnpaidGold: 25,
+      }),
+    });
+
+    // Paying the arrears must reset the streak to NULL, not leave the old
+    // value behind -- the nullable since_day column is the one place a
+    // naive read-modify-write could drop the reset entirely.
+    const paidUp = makeHero("h0", 0, 1, 1, { morale: 100 });
+    await repo.upsertMany(name, { h0: paidUp });
+    const [loaded] = await repo.loadAllForGame(name);
+
+    assert.equal(loaded.morale, 100);
+    assert.equal(loaded.upkeepUnpaidSinceDay, null);
+    assert.equal(loaded.upkeepUnpaidTroops, 0);
+    assert.equal(loaded.upkeepUnpaidGold, 0);
+  });
+});
+
 test("heroRepo.upsertMany is a no-op for an empty record", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();

@@ -75,8 +75,8 @@ function defaultHeroes(): Record<HeroId, HeroState> {
   const h0Stacks = normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 12 }] }, { entries: [{ unitTypeId: "archer", count: 8 }] }, { entries: [{ unitTypeId: "cavalry", count: 4 }] }]);
   const h1Stacks = normalizePlatoons([{ entries: [{ unitTypeId: "crossbowman", count: 10 }] }, { entries: [{ unitTypeId: "griffin", count: 3 }] }]);
   return {
-    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 300, troops: platoonTroopTotal(h0Stacks), stacks: h0Stacks, isChartering: false, charterId: null, horseVariant: "bubbly", arcane: DEFAULT_HERO_ARCANE, intelligence: DEFAULT_HERO_INTELLIGENCE, heroMana: MANA_POOL_V1, heroMaxMana: MANA_POOL_V1, heroSpell: DEFAULT_HERO_SPELL },
-    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 300, troops: platoonTroopTotal(h1Stacks), stacks: h1Stacks, isChartering: false, charterId: null, horseVariant: "shadow", arcane: DEFAULT_HERO_ARCANE, intelligence: DEFAULT_HERO_INTELLIGENCE, heroMana: MANA_POOL_V1, heroMaxMana: MANA_POOL_V1, heroSpell: DEFAULT_HERO_SPELL },
+    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 300, troops: platoonTroopTotal(h0Stacks), stacks: h0Stacks, isChartering: false, charterId: null, horseVariant: "bubbly", arcane: DEFAULT_HERO_ARCANE, intelligence: DEFAULT_HERO_INTELLIGENCE, heroMana: MANA_POOL_V1, heroMaxMana: MANA_POOL_V1, heroSpell: DEFAULT_HERO_SPELL, morale: 100, upkeepUnpaidSinceDay: null, upkeepUnpaidTroops: 0, upkeepUnpaidGold: 0 },
+    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 300, troops: platoonTroopTotal(h1Stacks), stacks: h1Stacks, isChartering: false, charterId: null, horseVariant: "shadow", arcane: DEFAULT_HERO_ARCANE, intelligence: DEFAULT_HERO_INTELLIGENCE, heroMana: MANA_POOL_V1, heroMaxMana: MANA_POOL_V1, heroSpell: DEFAULT_HERO_SPELL, morale: 100, upkeepUnpaidSinceDay: null, upkeepUnpaidTroops: 0, upkeepUnpaidGold: 0 },
   };
 }
 
@@ -98,6 +98,9 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       citySpots: [],
       cityMines: [],
       morale: 100,
+      garrisonUnpaidSinceDay: null,
+      garrisonUnpaidTroops: 0,
+      garrisonUnpaidGold: 0,
       autoTrade: true,
       castleVariant: 0,
       buildings: [],
@@ -118,6 +121,9 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       citySpots: [],
       cityMines: [],
       morale: 100,
+      garrisonUnpaidSinceDay: null,
+      garrisonUnpaidTroops: 0,
+      garrisonUnpaidGold: 0,
       autoTrade: true,
       castleVariant: 0,
       buildings: [],
@@ -224,6 +230,12 @@ function makeHeroes(
       heroMana: manaPool,
       heroMaxMana: manaPool,
       heroSpell: DEFAULT_HERO_SPELL,
+      // Upkeep shortfall (weekly upkeep pass): every hero starts paid up and
+      // content; the weekly pass is what first sets these.
+      morale: 100,
+      upkeepUnpaidSinceDay: null,
+      upkeepUnpaidTroops: 0,
+      upkeepUnpaidGold: 0,
       // Wagons & cargo (docs/wagons-stockpiles-trade-routes-plan.md §4.2):
       // 5 wagons = 2,500g purse cap, exactly the charter cost.
       wagons: DEFAULT_HERO_WAGONS,
@@ -260,6 +272,10 @@ function makeSettlements(
       citySpots: spots,
       cityMines: mines,
       morale: 100,
+      // Garrison upkeep shortfall (weekly upkeep pass): starts paid up.
+      garrisonUnpaidSinceDay: null,
+      garrisonUnpaidTroops: 0,
+      garrisonUnpaidGold: 0,
       autoTrade: true,
       castleVariant: (Math.floor(castleRoll * 4) as CastleVariant),
       buildings: [],

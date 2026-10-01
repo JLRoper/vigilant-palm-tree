@@ -1,5 +1,5 @@
 import { applyEndOfTurnDetailed, endTurn, advanceRound } from "@heroes/engine";
-import type { GameMap } from "@heroes/engine";
+import type { GameMap, UnitType } from "@heroes/engine";
 import type { AutoTradeTransfer, GameState } from "@heroes/contracts";
 
 // Round advances and weekly-upkeep triggers, per
@@ -50,12 +50,21 @@ export function clampGrowthRate(rate: number | undefined): number {
   return Math.max(MIN_GROWTH_RATE, Math.min(MAX_GROWTH_RATE, rate));
 }
 
-export function runEndTurn(state: GameState, growthRate: number, map: GameMap | null = null): EndTurnOutcome {
+// `unitTypes` is the already-loaded EngineCtx catalog, threaded through to the
+// weekly upkeep charge: per-unit upkeepGold/upkeepFood is the rule, and the
+// desertion draw must replay identically on the server (it's the authority), so
+// the catalog cannot be omitted on this path.
+export function runEndTurn(
+  state: GameState,
+  growthRate: number,
+  map: GameMap | null = null,
+  unitTypes?: Record<string, UnitType>,
+): EndTurnOutcome {
   const afterEot = applyEndOfTurnDetailed(state);
   const afterPhase = endTurn(afterEot.state);
   if (afterPhase.phase.kind !== "ROUND_END") {
     return { state: afterPhase, wrapped: false, transfers: afterEot.transfers };
   }
-  const final = advanceRound(afterPhase, growthRate, map);
+  const final = advanceRound(afterPhase, growthRate, map, unitTypes);
   return { state: final, wrapped: true, transfers: afterEot.transfers };
 }

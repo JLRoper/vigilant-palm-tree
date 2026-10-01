@@ -40,6 +40,9 @@ interface SettlementRow {
   gold: number;
   gold_rate: string | null;
   morale: number;
+  garrison_unpaid_since_day: number | null;
+  garrison_unpaid_troops: number;
+  garrison_unpaid_gold: number;
   auto_trade: boolean;
   castle_variant: CastleVariant;
   city_spots: SettlementState["citySpots"];
@@ -74,7 +77,7 @@ interface PlatoonRow {
 }
 
 const SETTLEMENT_COLUMNS =
-  "id, name, owner_id, q, r, level, population, gold_tax, founded_on_resource, gold, gold_rate, morale, auto_trade, castle_variant, city_spots, city_mines, upgrade";
+  "id, name, owner_id, q, r, level, population, gold_tax, founded_on_resource, gold, gold_rate, morale, garrison_unpaid_since_day, garrison_unpaid_troops, garrison_unpaid_gold, auto_trade, castle_variant, city_spots, city_mines, upgrade";
 
 function toSettlementState(
   row: SettlementRow,
@@ -117,6 +120,11 @@ function toSettlementState(
     citySpots: row.city_spots,
     cityMines: row.city_mines,
     morale: row.morale,
+    // Garrison upkeep shortfall (weekly upkeep pass); `?? ` defends a granular
+    // row written by a pre-021 server, same spirit as above.
+    garrisonUnpaidSinceDay: row.garrison_unpaid_since_day ?? null,
+    garrisonUnpaidTroops: row.garrison_unpaid_troops ?? 0,
+    garrisonUnpaidGold: row.garrison_unpaid_gold ?? 0,
     autoTrade: row.auto_trade,
     castleVariant: row.castle_variant,
     buildings,
@@ -221,9 +229,10 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
       for (const settlement of Object.values(settlements)) {
         await db.query(
           `INSERT INTO settlements (id, game_id, name, owner_id, q, r, level, population, gold_tax,
-                                     founded_on_resource, gold, gold_rate, morale, auto_trade,
-                                     castle_variant, city_spots, city_mines, upgrade)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,$18::jsonb)
+                                     founded_on_resource, gold, gold_rate, morale,
+                                     garrison_unpaid_since_day, garrison_unpaid_troops, garrison_unpaid_gold,
+                                     auto_trade, castle_variant, city_spots, city_mines, upgrade)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20::jsonb,$21::jsonb)
            ON CONFLICT (game_id, id) DO UPDATE SET
              name = EXCLUDED.name,
              owner_id = EXCLUDED.owner_id,
@@ -236,6 +245,9 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
              gold = EXCLUDED.gold,
              gold_rate = EXCLUDED.gold_rate,
              morale = EXCLUDED.morale,
+             garrison_unpaid_since_day = EXCLUDED.garrison_unpaid_since_day,
+             garrison_unpaid_troops = EXCLUDED.garrison_unpaid_troops,
+             garrison_unpaid_gold = EXCLUDED.garrison_unpaid_gold,
              auto_trade = EXCLUDED.auto_trade,
              castle_variant = EXCLUDED.castle_variant,
              city_spots = EXCLUDED.city_spots,
@@ -255,6 +267,9 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
             settlement.gold,
             settlement.resourceRates.gold ?? null,
             settlement.morale,
+            settlement.garrisonUnpaidSinceDay,
+            settlement.garrisonUnpaidTroops,
+            settlement.garrisonUnpaidGold,
             settlement.autoTrade,
             settlement.castleVariant,
             JSON.stringify(settlement.citySpots),

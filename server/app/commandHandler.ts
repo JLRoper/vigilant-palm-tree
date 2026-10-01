@@ -606,7 +606,18 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       const map = (state.tradeRoutes?.length ?? 0) > 0
         ? new GameMap(Number(row.seed) || 1, row.map_size as MapSize)
         : null;
-      const { state: finalState, wrapped, transfers } = runEndTurn(state, clampGrowthRate(command.growthRate), map);
+      // The catalog is already loaded on deps.ctx (createLiveCommandDeps), and
+      // the weekly upkeep charge inside advanceRound needs it for per-unit
+      // upkeepGold/upkeepFood plus its deterministic desertion draw.
+      const upkeepUnitTypes: Record<string, UnitType> = Object.fromEntries(
+        deps.ctx.catalog.unitTypes.map((u) => [u.id, u]),
+      );
+      const { state: finalState, wrapped, transfers } = runEndTurn(
+        state,
+        clampGrowthRate(command.growthRate),
+        map,
+        upkeepUnitTypes,
+      );
       const legacyGold = sumPlayerGold(finalState.players, finalState.heroes, finalState.settlements);
       await deps.gameRepo.saveHeroesAndSettlements(
         command.gameName,
