@@ -118,6 +118,7 @@ export class SettlementPanel {
       draggable: true,
       zIndex: 55,
       minTop: toolbarHeight,
+      clickToFront: true,
     });
     this.body = this.menu.body;
     clampMenuIntoView(this.menu, toolbarHeight());

@@ -140,6 +140,7 @@ export class BuildingMenu {
       initialPosition: { x, y },
       width: 240,
       zIndex: 75,
+      clickToFront: true,
       onClose: () => { this.menu = null; },
     });
 

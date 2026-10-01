@@ -125,6 +125,7 @@ export class BuildingSelectionMenu {
       initialPosition: { x, y },
       width,
       zIndex: 75,
+      clickToFront: true,
       onClose: () => { this.menu = null; },
     });
 

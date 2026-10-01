@@ -1,3 +1,5 @@
+import { raisePanel, removePanel, type StackablePanel } from "./panelStack";
+
 const MENU_FONT = "system-ui, sans-serif";
 const MENU_FONT_SIZE = "13px";
 
@@ -82,9 +84,10 @@ export interface PopupMenuOptions {
   onClose?: () => void;
   onMove?: (pos: { x: number; y: number }) => void;
   minTop?: () => number;
+  clickToFront?: boolean;
 }
 
-export class PopupMenu {
+export class PopupMenu implements StackablePanel {
   readonly root: HTMLDivElement;
   readonly header: HTMLDivElement;
   readonly titleEl: HTMLDivElement;
@@ -198,6 +201,16 @@ export class PopupMenu {
 
     if (this.draggable) this.attachDrag();
 
+    if (this.opts.clickToFront) {
+      this.root.addEventListener(
+        "mousedown",
+        () => {
+          if (this.layout === "floating") raisePanel(this);
+        },
+        true,
+      );
+    }
+
     const parent = opts.parent ?? document.body;
     parent.appendChild(this.root);
   }
@@ -304,11 +317,16 @@ export class PopupMenu {
     this.header.style.cursor = value ? "move" : "default";
   }
 
+  setPanelZ(z: number): void {
+    this.root.style.zIndex = String(z);
+  }
+
   close(): void {
     // onClose runs while root is still attached: callbacks may remove the
     // wrapper (or otherwise reason about root's placement) and rely on the
     // pre-close DOM. root.remove() afterwards is idempotent for callbacks
     // that already detached it.
+    if (this.opts.clickToFront) removePanel(this);
     this.onClose?.();
     this.root.remove();
   }

@@ -90,6 +90,7 @@ export class TileInfoPanel {
       closeable: true,
       draggable: false,
       zIndex: PANEL_Z_INDEX,
+      clickToFront: true,
       onClose: () => {
         this.visible = false;
         this.lastSignature = null;

@@ -322,6 +322,7 @@ export class HeroInfoMenu {
       draggable: true,
       zIndex: 60,
       minTop: toolbarHeight,
+      clickToFront: true,
       onMove: (pos) => {
         this.docked.markUserMoved();
         savePanelGeometry("heroInfo", pos);

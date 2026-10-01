@@ -235,6 +235,7 @@ export class BuildingPlacer {
       initialPosition: { x: anchorX, y: anchorY },
       minTop: toolbarHeight,
       zIndex: 75,
+      clickToFront: true,
       onClose: () => this.handlePaletteClose(),
       onMove: (pos) => savePanelGeometry("buildPalette", pos),
     });

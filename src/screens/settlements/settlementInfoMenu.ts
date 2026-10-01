@@ -74,6 +74,7 @@ export class SettlementInfoMenu {
       draggable: true,
       zIndex: 60,
       minTop: toolbarHeight,
+      clickToFront: true,
       onMove: (pos) => {
         this.docked.markUserMoved();
         savePanelGeometry("settlementInfo", pos);

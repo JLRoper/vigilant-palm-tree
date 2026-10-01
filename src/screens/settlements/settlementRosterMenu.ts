@@ -32,6 +32,7 @@ export class SettlementRosterMenu {
       draggable: true,
       zIndex: 60,
       minTop: toolbarHeight,
+      clickToFront: true,
       onMove: (pos) => savePanelPosition("settlements", pos),
       onClose: () => {
         this.visible = false;
