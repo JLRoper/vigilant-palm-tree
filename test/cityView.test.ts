@@ -166,6 +166,32 @@ async function testCityViewCanvas(page: Page): Promise<void> {
   console.log(`>> ${nonBlack} non-black sample pixels ✓`);
 }
 
+async function testSettlementMenuAutoOpen(page: Page): Promise<void> {
+  console.log(">> Test: settlement info menu auto-opens expanded on city entry");
+
+  // panelWidgets structure: section > header[data-accordion] + body sibling
+  await page.waitForFunction(
+    () => {
+      const header = document.querySelector('[data-accordion="Warehouse"]');
+      if (!header) return false;
+      const body = header.nextElementSibling;
+      if (!(body instanceof HTMLElement)) return false;
+      return header.getClientRects().length > 0
+        && getComputedStyle(body).display !== "none";
+    },
+    null,
+    { timeout: 5000 }
+  );
+
+  const panelVisible = await page.evaluate(() => {
+    const header = document.querySelector('[data-accordion="Warehouse"]');
+    const panel = header?.closest("body > *") ?? null;
+    return !!panel && panel.getClientRects().length > 0;
+  });
+  assert(panelVisible, "Settlement info panel should be visible after entering the city");
+  console.log(">> Settlement menu auto-opened with Warehouse expanded ✓");
+}
+
 async function testPaletteToggle(page: Page): Promise<void> {
   console.log(">> Test: palette toggle with B key");
   assert(!(await page.evaluate(paletteQuery())), "Palette should not be visible");
@@ -479,6 +505,7 @@ async function run() {
     const settlementId = await setupTestGame(page);
     await openCityView(page, settlementId);
 
+    await testSettlementMenuAutoOpen(page);
     await testCityViewCanvas(page);
     await testPaletteToggle(page);
     await testPlacement(page);

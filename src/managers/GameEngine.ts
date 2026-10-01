@@ -503,6 +503,11 @@ export class GameEngine {
       castle.buildings,
       gs.castleSeed,
     );
+    if (cityView.isOpen() && gs.selectedSettlementId !== castle.id) {
+      const tc = this.state.getTurnController();
+      tc.selectSettlement(castle.id);
+      this.state.replaceState(tc.getState());
+    }
   }
 
   private handleMouseMove(e: MouseEvent): void {

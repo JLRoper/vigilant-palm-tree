@@ -53,6 +53,7 @@ export class SettlementInfoMenu {
   private upgradeInfo: HTMLSpanElement;
   private getHeroesAtSettlement?: (settlementId: string) => HeroState[];
   private onTransferUnits?: (heroId: string, settlementId: string, direction: "toHero" | "toGarrison", unitTypeId: string, count: number) => boolean;
+  private warehouseAccordion: AccordionSection;
   private garrisonAccordion: AccordionSection;
   private garrisonBody: HTMLDivElement;
   private garrisonSignature: string | null = null;
@@ -149,8 +150,8 @@ export class SettlementInfoMenu {
     });
     body.appendChild(divider);
 
-    const warehouse = new AccordionSection({ label: "Warehouse", onToggle: () => this.reposition() });
-    body.appendChild(warehouse.element);
+    this.warehouseAccordion = new AccordionSection({ label: "Warehouse", onToggle: () => this.reposition() });
+    body.appendChild(this.warehouseAccordion.element);
 
     const grid = document.createElement("div");
     Object.assign(grid.style, {
@@ -162,7 +163,7 @@ export class SettlementInfoMenu {
       marginBottom: "4px",
       justifyItems: "center",
     });
-    warehouse.body.appendChild(grid);
+    this.warehouseAccordion.body.appendChild(grid);
 
     this.warehouseEls = {};
     for (const r of WAREHOUSE_RESOURCE_ORDER) {
@@ -288,6 +289,11 @@ export class SettlementInfoMenu {
   show(settlement: SettlementState, state: GameState): void {
     this.currentSettlementId = settlement.id;
     this.update(settlement, state);
+    // Entering a settlement / switching the displayed settlement re-expands
+    // every section so resources are readable; per-frame update() deliberately
+    // does not, so a collapse sticks while the menu stays on one settlement.
+    this.warehouseAccordion.setExpanded(true);
+    this.garrisonAccordion.setExpanded(true);
     if (!this.visible) {
       if (!this.menu.root.parentNode) {
         document.body.appendChild(this.menu.root);

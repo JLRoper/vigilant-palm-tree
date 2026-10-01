@@ -12,6 +12,7 @@ import {
   buildingFootprintFromRegistry,
 } from "@heroes/engine";
 import { buildListSections } from "./buildListSections";
+import { buildConfirmStatus, buildEntryStatus } from "./buildEntryStatus";
 import { pickStyleForBuilding } from "../../../render/assetDescriptors";
 import type { ResourceType } from "../../../state/gameState";
 import resourceGoldPileSmol from "../../../resources/resource-gold-pile-smol.png?url";
@@ -197,17 +198,6 @@ export class BuildingPlacer {
     this.committedNet = { ...this.computeNetCost() };
   }
 
-  canAffordSingle(kind: BuildingKind): boolean {
-    if (!this.affordability) return true;
-    const cost = buildingPlacementCost(kind);
-    if ((cost.gold ?? 0) > this.affordability.gold) return false;
-    if ((cost.wood ?? 0) > this.affordability.warehouse.wood) return false;
-    if ((cost.stone ?? 0) > this.affordability.warehouse.stone) return false;
-    if ((cost.iron ?? 0) > this.affordability.warehouse.iron) return false;
-    if ((cost.arcane ?? 0) > this.affordability.warehouse.arcane) return false;
-    return true;
-  }
-
   getNetCostSummary(): string {
     const net = this.computeNetCost();
     const parts: string[] = [];
@@ -304,7 +294,11 @@ export class BuildingPlacer {
     if (!this.canAfford()) {
       confirmBtn.style.opacity = "0.4";
       confirmBtn.style.cursor = "not-allowed";
-      confirmBtn.title = "Cannot afford the net cost of these changes";
+      confirmBtn.title = buildConfirmStatus({
+        net: this.getNetCost(),
+        charged: this.committedNet,
+        affordability: this.affordability,
+      }).title;
     }
     confirmBtn.addEventListener("click", () => {
       if (!this.canAfford()) return;
@@ -386,10 +380,10 @@ export class BuildingPlacer {
         const label = buildingLabel(kind);
         const cost = buildingPlacementCost(kind);
         const days = buildingBuildDays(kind);
-        const canAfford = this.canAffordSingle(kind);
         const hasTownHall = kind === "townHall" && this.buildings.some((b) => b.kind === "townHall");
         const isSelected = this.selectedKind === kind;
-        const disabled = !canAfford || hasTownHall;
+        const status = buildEntryStatus({ kind, affordability: this.affordability, hasTownHall });
+        const disabled = status.disabled;
 
         Object.assign(row.style, {
           width: "100%",
@@ -408,6 +402,7 @@ export class BuildingPlacer {
           alignItems: "center",
           gap: "4px",
         });
+        row.title = status.title;
 
         const costWrap = document.createElement("span");
         Object.assign(costWrap.style, {
