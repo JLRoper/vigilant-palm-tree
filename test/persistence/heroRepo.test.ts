@@ -199,6 +199,31 @@ test("heroRepo.upsertMany round-trips morale and the unpaid-upkeep shortfall cou
   });
 });
 
+test("heroRepo.upsertMany round-trips fractional gold + morale at full precision (migration 027 NUMERIC columns)", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createHeroRepo(client);
+    // A purse fraction comes from settlement-to-hero transfers, loot, and
+    // partial payments; a morale fraction from the continuous
+    // foodDeficitRatio. Under the old INTEGER columns the write boundary
+    // rounded both (up to half a coin lost per quantity per command); the
+    // NUMERIC columns must round-trip them exactly.
+    const hero = {
+      ...makeHero("h0", 0, 3, 4, { gold: 499.55, morale: 93.4 }),
+      wagons: 5,
+      resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
+    };
+
+    await repo.upsertMany(name, { h0: hero });
+    const [loaded] = await repo.loadAllForGame(name);
+
+    assert.equal(loaded.gold, 499.55);
+    assert.equal(loaded.morale, 93.4);
+    assert.deepEqual(loaded, hero);
+  });
+});
+
 test("heroRepo.upsertMany clears the unpaid-upkeep streak back to paid up on update", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();

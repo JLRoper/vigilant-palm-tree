@@ -8,6 +8,7 @@ import { mulberry32 } from "../src/core/rng";
 import { placeResourceTiles, RESOURCES } from "../src/map/resourceTiles";
 import { axialToPixel } from "../src/core/hex";
 import { Pool } from "pg";
+import "../server/persistence/pgTypes";
 import {
   getApiPort,
   getClientPort,

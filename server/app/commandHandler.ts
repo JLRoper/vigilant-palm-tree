@@ -213,10 +213,12 @@ export interface CommandResult {
 // The returned total is deliberately NOT rounded here. Gold values are
 // legitimately 2-decimal floats in the engine (produceResources' round2, and
 // auto-trade paying a fractional food amount out of a treasury), and this
-// function is the exact accounting sum of them. The rounding to the column's
-// INTEGER type happens once, at the write boundary, in
-// server/persistence/integerColumns.ts -- see that file's header for why an
-// unrounded write aborted the whole command (the every-EndTurn-500 bug).
+// function is the exact accounting sum of them. The columns it lands in are
+// NUMERIC (migration 027_numeric_columns.sql), so the sum persists at full
+// precision through the toNumericColumn() write guard in
+// server/persistence/integerColumns.ts -- that file's header carries the
+// history of why an unrounded write once aborted every command (the
+// INTEGER-column every-EndTurn-500 bug).
 function sumPlayerGold(
   players: Player[],
   heroes: Record<string, HeroState>,

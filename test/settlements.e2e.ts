@@ -3,6 +3,7 @@ import { ChildProcess } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import assert from "node:assert/strict";
 import { Pool } from "pg";
+import "../server/persistence/pgTypes";
 import {
   getApiPort, getClientPort, spawnLogged, waitForApiHealth, waitForUrl,
   treeKill, reapPreviousRunPids, clearRegisteredPids,

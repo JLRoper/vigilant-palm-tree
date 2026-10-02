@@ -1,6 +1,6 @@
 import type { HeroId, HeroState, HorseVariantId, Platoon } from "@heroes/contracts";
 import { withDefaultSpellStats } from "@heroes/engine";
-import { toIntColumn } from "../integerColumns";
+import { toNumericColumn } from "../integerColumns";
 import { resolveGameId } from "./gameRepo";
 import type { Queryable } from "./gameRepo";
 
@@ -201,10 +201,11 @@ await db.query(
             hero.previousR,
             hero.previousMovementRemaining,
             JSON.stringify(hero.trail),
-            // heroes.gold and heroes.morale are INTEGER; a purse can carry a
-            // fraction (settlement-to-hero transfers, loot, partial payments)
-            // and morale is a continuous 0..100. See ../integerColumns.ts.
-            toIntColumn(hero.gold),
+            // heroes.gold and heroes.morale are NUMERIC (migration 027); a
+            // purse can carry a fraction (settlement-to-hero transfers, loot,
+            // partial payments) and morale is a continuous 0..100 -- both
+            // persist at full precision now. See ../integerColumns.ts.
+            toNumericColumn(hero.gold),
             hero.troops,
             hero.isChartering,
             hero.charterId,
@@ -215,7 +216,7 @@ await db.query(
             // state the engine soft-defaults to 5 carts / a 2,500g purse,
             // and an explicit 0 is a real, different value.
             hero.treasuryWagons ?? null,
-            toIntColumn(hero.morale),
+            toNumericColumn(hero.morale),
             hero.upkeepUnpaidSinceDay,
             hero.upkeepUnpaidTroops,
             hero.upkeepUnpaidGold,

@@ -1,4 +1,5 @@
 import { Pool, type PoolClient } from "pg";
+import "./pgTypes";
 
 export const pool = new Pool({
   host: process.env.PGHOST ?? "localhost",

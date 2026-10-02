@@ -9,7 +9,7 @@ import type {
   Warehouse,
   WarehouseResource,
 } from "@heroes/contracts";
-import { toIntColumn } from "../integerColumns";
+import { toNumericColumn } from "../integerColumns";
 
 // Accepts either the shared pool (reads, or writes outside a transaction) or
 // a PoolClient already inside a caller-owned transaction (writes that must
@@ -174,11 +174,13 @@ export function createGameRepo(db: Queryable): GameRepo {
         vals.push(JSON.stringify(extra.players));
       }
       if (extra?.gold !== undefined) {
-        // games.gold is INTEGER; the legacy total is a sum of 2-dp purses.
-        // See ../integerColumns.ts for the rounding rule and why an unrounded
-        // write aborted the whole command (the every-EndTurn-500 bug).
+        // games.gold is NUMERIC (migration 027); the legacy total is an exact
+        // sum of 2-dp purses and persists at full precision. The old INTEGER
+        // column rejected unrounded floats outright (the every-EndTurn-500
+        // bug) and its interim Math.round fix left a rounding shadow — see
+        // ../integerColumns.ts for that history.
         sets.push(`gold = $${i++}`);
-        vals.push(toIntColumn(extra.gold));
+        vals.push(toNumericColumn(extra.gold));
       }
       if (extra?.round !== undefined) {
         sets.push(`round = $${i++}`);
@@ -222,12 +224,12 @@ export function createGameRepo(db: Queryable): GameRepo {
              (game_id, settlement_id, day, gold, warehouse, morale, effective_income)
            VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
            ON CONFLICT (game_id, settlement_id, day) DO NOTHING`,
-          // gold / morale / effective_income are all INTEGER. morale and
-          // effective_income already arrive integral from their call sites
-          // (clampMorale + Math.round / effectiveIncome's own Math.round); the
-          // coercion is belt-and-braces so this repo's type contract holds for
+          // gold / morale / effective_income are NUMERIC (migration 027).
+          // morale and effective_income mostly arrive integral from their call
+          // sites (applyMoraleDecay's rounding / effectiveIncome's own
+          // Math.round); the guard is so this repo's type contract holds for
           // any caller. See ../integerColumns.ts.
-          [gameId, s.settlementId, s.day, toIntColumn(s.gold), JSON.stringify(s.warehouse), toIntColumn(s.morale), toIntColumn(s.effectiveIncome)],
+          [gameId, s.settlementId, s.day, toNumericColumn(s.gold), JSON.stringify(s.warehouse), toNumericColumn(s.morale), toNumericColumn(s.effectiveIncome)],
         );
       }
     },
@@ -240,11 +242,11 @@ export function createGameRepo(db: Queryable): GameRepo {
           `INSERT INTO resource_transactions
              (game_id, from_settlement_id, to_settlement_id, resource, amount, gold_paid, reason)
            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          // amount / gold_paid are INTEGER, and runAutoTrade pays out
-          // `min(stock, gold, remaining, headroom)` -- a fractional food
-          // amount once food producers made fractional warehouse stock
+          // amount / gold_paid are NUMERIC (migration 027), and runAutoTrade
+          // pays out `min(stock, gold, remaining, headroom)` -- a fractional
+          // food amount once food producers made fractional warehouse stock
           // reachable. See ../integerColumns.ts.
-          [gameId, t.fromSettlementId, t.toSettlementId, t.resource, toIntColumn(t.amount), toIntColumn(t.goldPaid), t.reason ?? "auto_trade"],
+          [gameId, t.fromSettlementId, t.toSettlementId, t.resource, toNumericColumn(t.amount), toNumericColumn(t.goldPaid), t.reason ?? "auto_trade"],
         );
       }
     },

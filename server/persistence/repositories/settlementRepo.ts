@@ -10,7 +10,7 @@ import type {
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import { normalizePlatoons, settlementStacks } from "@heroes/engine";
-import { toIntColumn } from "../integerColumns";
+import { toNumericColumn } from "../integerColumns";
 import { resolveGameId } from "./gameRepo";
 import type { Queryable } from "./gameRepo";
 
@@ -280,13 +280,13 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
             settlement.population,
             settlement.goldTax,
             settlement.foundedOnResource,
-            // settlements.gold and settlements.morale are INTEGER; both are
-            // 2-dp floats in the engine (round2'd gold production, and a
-            // continuous foodDeficitRatio driving morale). See
-            // ../integerColumns.ts.
-            toIntColumn(settlement.gold),
+            // settlements.gold and settlements.morale are NUMERIC (migration
+            // 027); both are 2-dp floats in the engine (round2'd gold
+            // production, and a continuous foodDeficitRatio driving morale)
+            // and persist at full precision now. See ../integerColumns.ts.
+            toNumericColumn(settlement.gold),
             settlement.resourceRates.gold ?? null,
-            toIntColumn(settlement.morale),
+            toNumericColumn(settlement.morale),
             settlement.garrisonUnpaidSinceDay,
             settlement.garrisonUnpaidTroops,
             settlement.garrisonUnpaidGold,
@@ -310,11 +310,12 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
           await db.query(
             `INSERT INTO settlement_resources (game_id, settlement_id, resource, amount, rate)
              VALUES ($1, $2, $3, $4, $5)`,
-            // amount is INTEGER, and a food producer's per-turn output is a
-            // 2-dp float (producers.ts rounds to 100ths), so the warehouse
-            // total is fractional too. `rate` is NUMERIC and stays exact.
-            // See ../integerColumns.ts.
-            [gameId, settlement.id, resource, toIntColumn(settlement.warehouse[resource]), rate ?? null],
+            // amount is NUMERIC (migration 027), and a food producer's
+            // per-turn output is a 2-dp float (producers.ts rounds to 100ths),
+            // so the warehouse total is fractional too -- it round-trips at
+            // full precision now. `rate` is NUMERIC and stays exact. See
+            // ../integerColumns.ts.
+            [gameId, settlement.id, resource, toNumericColumn(settlement.warehouse[resource]), rate ?? null],
           );
         }
 

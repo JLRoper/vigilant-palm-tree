@@ -50,6 +50,35 @@ test("settlementRepo.upsertMany writes a settlement and loadAllForGame reads it 
   });
 });
 
+test("settlementRepo.upsertMany round-trips fractional gold/morale/warehouse at full precision (migration 027 NUMERIC columns)", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createSettlementRepo(client);
+    // The fractional shapes the engine actually produces: round2'd gold
+    // production (500.55), a continuous foodDeficitRatio morale (90.4), and a
+    // hundredths-rounded food output in the warehouse (6.45). Under the old
+    // INTEGER columns the write boundary rounded all three; the granular read
+    // is what hydrateFromRepos PREFERS, so that rounding was a recurring
+    // per-command loss.
+    const settlement = makeSettlement("s0", 0, 3, 4, {
+      gold: 500.55,
+      morale: 90.4,
+      warehouse: emptyWarehouse({ wood: 12.25, food: 6.45 }),
+    });
+
+    await repo.upsertMany(name, { s0: settlement });
+    const loaded = await repo.loadAllForGame(name);
+
+    assert.equal(loaded.length, 1);
+    assert.equal(loaded[0].gold, 500.55);
+    assert.equal(loaded[0].morale, 90.4);
+    assert.equal(loaded[0].warehouse.wood, 12.25);
+    assert.equal(loaded[0].warehouse.food, 6.45);
+    assert.deepEqual(loaded[0], settlement);
+  });
+});
+
 test("settlementRepo.upsertMany round-trips a partial resourceRates including gold", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();

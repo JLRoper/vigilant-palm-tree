@@ -2,6 +2,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import type { HeroId, HeroState, SettlementId, SettlementState } from "@heroes/contracts";
 import { pool } from "../../server/persistence/db";
+import { initSchema } from "../../server/db";
 import { createHeroRepo } from "../../server/persistence/repositories/heroRepo";
 import { createSettlementRepo } from "../../server/persistence/repositories/settlementRepo";
 import { backfillGame } from "../../scripts/migrate-jsonb-to-tables";
@@ -59,6 +60,80 @@ function byId<T extends { id: string }>(rows: T[]): Record<string, T> {
 function withWagonDefaults(h: HeroState): HeroState {
   return { ...h, wagons: 5, treasuryWagons: 5, resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 } };
 }
+
+test("migration 027 leaves every numeric game column NUMERIC and re-applies cleanly against a populated DB", async () => {
+  // initSchema() is what the server runs at every boot and what fresh
+  // environments get on first boot, so re-running it here against this
+  // already-populated database proves two things at once: the INTEGER ->
+  // NUMERIC widening applies cleanly over existing rows, and a second pass is
+  // an accepted no-op (ALTER COLUMN TYPE to the type it already has).
+  await initSchema();
+
+  const r = await pool.query<{ table_name: string; column_name: string; data_type: string }>(
+    `SELECT table_name, column_name, data_type
+       FROM information_schema.columns
+      WHERE (table_name = 'games' AND column_name = 'gold')
+         OR (table_name = 'settlements' AND column_name IN ('gold', 'morale'))
+         OR (table_name = 'settlement_resources' AND column_name = 'amount')
+         OR (table_name = 'heroes' AND column_name IN ('gold', 'morale'))
+         OR (table_name = 'settlement_snapshots' AND column_name IN ('gold', 'morale', 'effective_income'))
+         OR (table_name = 'resource_transactions' AND column_name IN ('amount', 'gold_paid'))`,
+  );
+  const byColumn = new Map(r.rows.map((row) => [`${row.table_name}.${row.column_name}`, row.data_type]));
+  const expected = [
+    "games.gold",
+    "settlements.gold",
+    "settlements.morale",
+    "settlement_resources.amount",
+    "heroes.gold",
+    "heroes.morale",
+    "settlement_snapshots.gold",
+    "settlement_snapshots.morale",
+    "settlement_snapshots.effective_income",
+    "resource_transactions.amount",
+    "resource_transactions.gold_paid",
+  ];
+  assert.equal(r.rowCount, expected.length, `expected exactly the migrated columns, got: ${[...byColumn.keys()].join(", ")}`);
+  for (const column of expected) {
+    assert.equal(byColumn.get(column), "numeric", `${column} must be NUMERIC after migration 027`);
+  }
+});
+
+test("backfillGame round-trips fractional engine values through the granular tables at full precision", async () => {
+  // The rounding-shadow regression, at the layer it lived: a legacy JSONB
+  // blob holding the engine's 2-decimal floats must survive backfillGame()
+  // (the granular dual-write) WITHOUT losing its fraction. Under the old
+  // INTEGER columns the write boundary rounded here -- the shadow that made
+  // every granular-read game shed up to half a coin per quantity per command.
+  const name = uniqueName();
+  try {
+    const heroes: Record<HeroId, HeroState> = {
+      h0: withWagonDefaults(makeHero("h0", 0, 2, 2, { gold: 499.55, morale: 93.4 })),
+    };
+    const settlements: Record<SettlementId, SettlementState> = {
+      s0: makeSettlement("s0", 0, 2, 2, {
+        gold: 500.55,
+        morale: 90.4,
+        resourceRates: { wood: 15 },
+        warehouse: { wood: 12.25, stone: 0, iron: 0, arcane: 0, food: 6.45 },
+      }),
+    };
+    await seedLegacyGame(name, heroes, settlements);
+
+    await backfillGame(name);
+
+    const [loadedHero] = await createHeroRepo(pool).loadAllForGame(name);
+    const [loadedSettlement] = await createSettlementRepo(pool).loadAllForGame(name);
+    assert.equal(loadedHero.gold, 499.55);
+    assert.equal(loadedHero.morale, 93.4);
+    assert.equal(loadedSettlement.gold, 500.55);
+    assert.equal(loadedSettlement.morale, 90.4);
+    assert.equal(loadedSettlement.warehouse.wood, 12.25);
+    assert.equal(loadedSettlement.warehouse.food, 6.45);
+  } finally {
+    await pool.query("DELETE FROM games WHERE name = $1", [name]);
+  }
+});
 
 test("backfillGame round-trips a representative mix of heroes and settlements", async () => {
   const name = uniqueName();
