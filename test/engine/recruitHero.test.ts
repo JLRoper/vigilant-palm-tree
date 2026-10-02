@@ -65,3 +65,44 @@ test("recruitHero ignores non-h{id} hero ids when scanning for a free index", ()
   assert.equal(result.error, undefined);
   assert.equal(result.hero?.id, "h0", "h0 is free (the named starting hero doesn't collide)");
 });
+
+test("recruitHero draws its starting wagons and carts from the unassigned pools, clamped to what is there", () => {
+  // Phase 1: a recruit used to get 5 free wagons because neither the hero
+  // field nor the pool was touched (assignWagons(+1) on it then SHRANK its
+  // purse cap). The complement now comes out of the pools.
+  const state = recruitState();
+  state.players = state.players.map((p) =>
+    p.id === 0
+      ? { ...p, wagonsOwned: 7, wagonsUnassigned: 3, treasuryWagonsOwned: 9, treasuryWagonsUnassigned: 7 }
+      : p,
+  );
+
+  const result = recruitHero(state, 0, "Scout", "s0", "bubbly");
+  assert.equal(result.error, undefined);
+  assert.equal(result.hero?.wagons, 3, "the 5-wagon complement clamps to the pool's actual 3");
+  assert.equal(result.hero?.treasuryWagons, 5, "the 5-cart complement fits the pool's 7");
+  const player = result.state.players[0];
+  assert.equal(player.wagonsUnassigned, 0, "cargo pool debited by what the hero took");
+  assert.equal(player.treasuryWagonsUnassigned, 2, "treasury pool debited by what the hero took");
+  assert.equal(player.wagonsOwned, 7, "owned counters never move on a recruit");
+  assert.equal(player.treasuryWagonsOwned, 9);
+});
+
+test("recruitHero from empty pools yields explicit 0s, never free out-of-thin-air wagons", () => {
+  // makePlayer's cargo pool defaults to 0/0 and the treasury pool to 5/0 --
+  // level both to empty so the clamp's floor is exercised per slot.
+  const state = recruitState();
+  state.players = state.players.map((p) =>
+    p.id === 0
+      ? { ...p, wagonsOwned: 0, wagonsUnassigned: 0, treasuryWagonsOwned: 0, treasuryWagonsUnassigned: 0 }
+      : p,
+  );
+
+  const result = recruitHero(state, 0, "Scout", "s0", "bubbly");
+  assert.equal(result.error, undefined);
+  assert.equal(result.hero?.wagons, 0, "no pool, no wagons -- a real 0-cap cargo slot to buy and assign for");
+  assert.equal(result.hero?.treasuryWagons, 0, "no pool, no carts -- a real 0g purse cap, not a free 2,500g one");
+  const player = result.state.players[0];
+  assert.equal(player.wagonsUnassigned, 0, "the pool invariant holds: unassigned never goes negative");
+  assert.equal(player.treasuryWagonsUnassigned, 0);
+});

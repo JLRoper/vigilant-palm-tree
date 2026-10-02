@@ -39,6 +39,7 @@ interface HeroRow {
   horse_variant: string;
   wagons: number | null;
   resources: HeroState["resources"] | null;
+  treasury_wagons: number | null;
   morale: number;
   upkeep_unpaid_since_day: number | null;
   upkeep_unpaid_troops: number;
@@ -53,7 +54,7 @@ interface PlatoonRow {
 }
 
 const HERO_COLUMNS =
-  "id, name, owner_id, q, r, movement_remaining, previous_q, previous_r, previous_movement_remaining, trail, gold, troops, is_chartering, charter_id, horse_variant, wagons, resources, morale, upkeep_unpaid_since_day, upkeep_unpaid_troops, upkeep_unpaid_gold";
+  "id, name, owner_id, q, r, movement_remaining, previous_q, previous_r, previous_movement_remaining, trail, gold, troops, is_chartering, charter_id, horse_variant, wagons, resources, treasury_wagons, morale, upkeep_unpaid_since_day, upkeep_unpaid_troops, upkeep_unpaid_gold";
 
 function toHeroState(row: HeroRow, stacks: Platoon[]): HeroState {
   // The heroes table predates spellcasting v1 and has no spell columns (the
@@ -79,6 +80,14 @@ function toHeroState(row: HeroRow, stacks: Platoon[]): HeroState {
     horseVariant: row.horse_variant as HorseVariantId,
     ...(row.wagons !== null && row.wagons !== undefined ? { wagons: row.wagons } : {}),
     ...(row.resources != null ? { resources: row.resources } : {}),
+    // Treasury carts (Phase 1): NULL = the field is absent from HeroState
+    // (a pre-023 hero), and absence must round-trip as absence because the
+    // engine soft-defaults it to 5 (DEFAULT_TREASURY_WAGONS) -- see
+    // migrations/023_treasury_wagons.sql. An explicit 0 is a real 0g purse
+    // cap and passes through like any other value.
+    ...(row.treasury_wagons !== null && row.treasury_wagons !== undefined
+      ? { treasuryWagons: row.treasury_wagons }
+      : {}),
     // Upkeep shortfall (weekly upkeep pass). The columns are NOT NULL DEFAULT
     // as of migration 021, but `?? ` defends a granular row written by an
     // older server, same spirit as the spell-stat backfill above.
@@ -151,33 +160,35 @@ export function createHeroRepo(db: Queryable): HeroRepo {
       ]);
 
       for (const hero of Object.values(heroes)) {
-        await db.query(
+await db.query(
           `INSERT INTO heroes (id, game_id, name, owner_id, q, r, movement_remaining, previous_q,
                                 previous_r, previous_movement_remaining, trail, gold, troops,
                                 is_chartering, charter_id, horse_variant, wagons, resources,
-                                morale, upkeep_unpaid_since_day, upkeep_unpaid_troops, upkeep_unpaid_gold)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22)
+                                treasury_wagons, morale, upkeep_unpaid_since_day, upkeep_unpaid_troops,
+                                upkeep_unpaid_gold)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23)
            ON CONFLICT (game_id, id) DO UPDATE SET
-             name = EXCLUDED.name,
-             owner_id = EXCLUDED.owner_id,
-             q = EXCLUDED.q,
-             r = EXCLUDED.r,
-             movement_remaining = EXCLUDED.movement_remaining,
-             previous_q = EXCLUDED.previous_q,
-             previous_r = EXCLUDED.previous_r,
-             previous_movement_remaining = EXCLUDED.previous_movement_remaining,
-             trail = EXCLUDED.trail,
-             gold = EXCLUDED.gold,
-             troops = EXCLUDED.troops,
-             is_chartering = EXCLUDED.is_chartering,
-             charter_id = EXCLUDED.charter_id,
-             horse_variant = EXCLUDED.horse_variant,
-             wagons = EXCLUDED.wagons,
-             resources = EXCLUDED.resources,
-             morale = EXCLUDED.morale,
-             upkeep_unpaid_since_day = EXCLUDED.upkeep_unpaid_since_day,
-             upkeep_unpaid_troops = EXCLUDED.upkeep_unpaid_troops,
-             upkeep_unpaid_gold = EXCLUDED.upkeep_unpaid_gold`,
+              name = EXCLUDED.name,
+              owner_id = EXCLUDED.owner_id,
+              q = EXCLUDED.q,
+              r = EXCLUDED.r,
+              movement_remaining = EXCLUDED.movement_remaining,
+              previous_q = EXCLUDED.previous_q,
+              previous_r = EXCLUDED.previous_r,
+              previous_movement_remaining = EXCLUDED.previous_movement_remaining,
+              trail = EXCLUDED.trail,
+              gold = EXCLUDED.gold,
+              troops = EXCLUDED.troops,
+              is_chartering = EXCLUDED.is_chartering,
+              charter_id = EXCLUDED.charter_id,
+              horse_variant = EXCLUDED.horse_variant,
+              wagons = EXCLUDED.wagons,
+              resources = EXCLUDED.resources,
+              treasury_wagons = EXCLUDED.treasury_wagons,
+              morale = EXCLUDED.morale,
+              upkeep_unpaid_since_day = EXCLUDED.upkeep_unpaid_since_day,
+              upkeep_unpaid_troops = EXCLUDED.upkeep_unpaid_troops,
+              upkeep_unpaid_gold = EXCLUDED.upkeep_unpaid_gold`,
           [
             hero.id,
             gameId,
@@ -200,6 +211,10 @@ export function createHeroRepo(db: Queryable): HeroRepo {
             hero.horseVariant,
             hero.wagons ?? 5,
             JSON.stringify(hero.resources ?? {}),
+            // NULL (not 0) for an absent field: absence is the pre-023
+            // state the engine soft-defaults to 5 carts / a 2,500g purse,
+            // and an explicit 0 is a real, different value.
+            hero.treasuryWagons ?? null,
             toIntColumn(hero.morale),
             hero.upkeepUnpaidSinceDay,
             hero.upkeepUnpaidTroops,

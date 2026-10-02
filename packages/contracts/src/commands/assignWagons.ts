@@ -9,4 +9,9 @@ export interface AssignWagonsCommand {
   actor: PlayerSeat;
   heroId: HeroId;
   delta: number;
+  // Which slot the delta moves (Phase 1 treasury-wagons split): "cargo"
+  // (default, army wagons <-> wagonsUnassigned pool, resources cap) or
+  // "treasury" (treasury carts <-> treasuryWagonsUnassigned pool, gold
+  // cap). Optional so pre-split senders keep the cargo behavior.
+  slot?: "cargo" | "treasury";
 }

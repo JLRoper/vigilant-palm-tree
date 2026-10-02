@@ -8,7 +8,7 @@ import {
 } from "@screens/shared/panelRail";
 import type { GameState, HeroId } from "../../state/gameState";
 import { MOVEMENT_PER_TURN } from "../../state/gameState";
-import { heroCargo, heroGoldCap, heroResourceCap, heroWagons, platoonTroopTotal } from "@heroes/engine";
+import { heroCargo, heroGoldCap, heroResourceCap, heroTreasuryWagons, heroWagons, platoonTroopTotal } from "@heroes/engine";
 import { HERO_BANNERS } from "../../render/assetDescriptors";
 
 export interface HeroRosterMenuOptions {
@@ -183,7 +183,9 @@ export class HeroRosterMenu {
 
     const metaEl = document.createElement("div");
     const remaining = Math.round(Math.max(0, hero.movementRemaining));
-    metaEl.textContent = `(${hero.q}, ${hero.r}) · Move ${remaining}/${MOVEMENT_PER_TURN} · ${hero.gold}/${heroGoldCap(hero)}g · ${platoonTroopTotal(hero.stacks)} troops · 🛒 ${heroWagons(hero)}`;
+    // Phase 1 treasury-wagons split: show BOTH counts -- army cargo wagons
+    // and treasury carts are independent slots now.
+    metaEl.textContent = `(${hero.q}, ${hero.r}) · Move ${remaining}/${MOVEMENT_PER_TURN} · ${hero.gold}/${heroGoldCap(hero)}g · ${platoonTroopTotal(hero.stacks)} troops · 🛒 ${heroWagons(hero)} · 🏦 ${heroTreasuryWagons(hero)}`;
     Object.assign(metaEl.style, {
       fontSize: "11px",
       opacity: "0.85",

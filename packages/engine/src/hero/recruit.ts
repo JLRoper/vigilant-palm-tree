@@ -3,6 +3,7 @@ import { MOVEMENT_PER_TURN } from "@heroes/contracts";
 import { normalizePlatoons } from "../units";
 import { DEFAULT_HERO_ARCANE, DEFAULT_HERO_INTELLIGENCE } from "../combatConfig";
 import { DEFAULT_HERO_SPELL, maxManaFor } from "../combat/spells";
+import { DEFAULT_HERO_WAGONS, DEFAULT_TREASURY_WAGONS, playerTreasuryWagonsUnassigned, playerWagonsUnassigned } from "../settlement/capacity";
 
 export const MAX_HEROES_PER_PLAYER = 5;
 export const HERO_RECRUIT_COST = 1;
@@ -44,6 +45,17 @@ export function recruitHero(
   const nextIdx = indices.find((i) => !usedIndices.has(i)) ?? player.heroIds.length;
   const heroId = `h${nextIdx}`;
 
+  // Wagons are a real, counted resource (Phase 1): a recruited hero used to
+  // get 5 free wagons because neither `wagons` nor the pool was touched --
+  // assignWagons(+1) on such a hero then SHRANK its purse cap. The recruit
+  // now draws its starting complement from the player's unassigned pools,
+  // clamped to what is actually there so the pool invariant
+  // (unassigned >= 0) always holds -- an empty pool yields a hero with 0
+  // cargo wagons / 0 treasury carts (explicit 0, i.e. real 0-cap slots the
+  // player can buy and assign carts for), never a free out-of-thin-air 5.
+  const cargoWagons = Math.min(DEFAULT_HERO_WAGONS, playerWagonsUnassigned(player));
+  const treasuryCarts = Math.min(DEFAULT_TREASURY_WAGONS, playerTreasuryWagonsUnassigned(player));
+
   const hero: HeroState = {
     id: heroId,
     name: heroName,
@@ -74,6 +86,9 @@ export function recruitHero(
     upkeepUnpaidSinceDay: null,
     upkeepUnpaidTroops: 0,
     upkeepUnpaidGold: 0,
+    wagons: cargoWagons,
+    treasuryWagons: treasuryCarts,
+    resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
   };
 
   return {
@@ -85,7 +100,14 @@ export function recruitHero(
         [settlement.id]: { ...settlement, gold: settlement.gold - HERO_RECRUIT_COST },
       },
       players: state.players.map((p) =>
-        p.id === playerId ? { ...p, heroIds: [...p.heroIds, heroId] } : p,
+        p.id === playerId
+          ? {
+              ...p,
+              heroIds: [...p.heroIds, heroId],
+              wagonsUnassigned: playerWagonsUnassigned(p) - cargoWagons,
+              treasuryWagonsUnassigned: playerTreasuryWagonsUnassigned(p) - treasuryCarts,
+            }
+          : p,
       ),
       dirty: true,
     },

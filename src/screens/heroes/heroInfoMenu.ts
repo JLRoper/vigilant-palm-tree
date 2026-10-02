@@ -10,7 +10,7 @@ import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
 import { heroUpkeepLabel, heroUpkeepTitle, liveHeroUpkeepCost } from "@screens/shared/heroUpkeepCost";
 import { ArmySection, type ReorderHandler } from "./armySection";
 import { HERO_BANNERS, RESOURCE_PILE_BUBBLY_SPRITES } from "../../render/assetDescriptors";
-import { HERO_BASE_ATTACK, HERO_BASE_DEFENCE, heroCargo, heroGoldCap, heroResourceCap, heroWagons } from "@heroes/engine";
+import { HERO_BASE_ATTACK, HERO_BASE_DEFENCE, heroCargo, heroGoldCap, heroResourceCap, heroTreasuryWagons, heroWagons } from "@heroes/engine";
 import type { WarehouseResource } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 
@@ -518,8 +518,11 @@ const upkeep = liveHeroUpkeepCost(hero.stacks);
       el.title = `${r}: ${cargo[r] ?? 0} / ${caps[r]} cap`;
     }
     const wagons = heroWagons(heroState);
-    this.dom.cargoWagonsEl.textContent = `${wagons} wagons`;
-    this.dom.cargoWagonsEl.title = `Gold purse capacity: ${heroGoldCap(heroState)}g`;
+    this.dom.cargoWagonsEl.textContent = `${wagons} cargo wagons`;
+    // Phase 1 treasury-wagons split: the purse cap rides the SEPARATE
+    // treasury-cart slot, so the tooltip names it -- "Gold purse capacity:
+    // 2,500g (5 treasury carts x 500)" reads honestly post-split.
+    this.dom.cargoWagonsEl.title = `Resource capacity: ${caps.wood} per resource via ${wagons} cargo wagons. Gold purse capacity: ${heroGoldCap(heroState)}g via ${heroTreasuryWagons(heroState)} treasury carts.`;
   }
 
   // Wires the four stat rows to real values (spellcasting v1's side effect —

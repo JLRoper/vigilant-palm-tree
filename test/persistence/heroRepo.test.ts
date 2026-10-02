@@ -33,7 +33,7 @@ test("heroRepo.loadAllForGame returns [] for a game with no heroes", async () =>
   });
 });
 
-test("heroRepo.upsertMany writes a hero and loadAllForGame reads it back (incl. wagons + cargo)", async () => {
+test("heroRepo.upsertMany writes a hero and loadAllForGame reads it back (incl. wagons + cargo + treasury carts)", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();
     await seedGame(client, name);
@@ -41,6 +41,7 @@ test("heroRepo.upsertMany writes a hero and loadAllForGame reads it back (incl. 
     const hero = {
       ...makeHero("h0", 0, 3, 4, { gold: 50, troops: 7 }),
       wagons: 3,
+      treasuryWagons: 2,
       resources: { wood: 10, stone: 0, iron: 0, arcane: 2, food: 0 },
     };
 
@@ -48,7 +49,45 @@ test("heroRepo.upsertMany writes a hero and loadAllForGame reads it back (incl. 
     const loaded = await repo.loadAllForGame(name);
 
     assert.equal(loaded.length, 1);
-    assert.deepEqual(loaded[0], hero);
+    assert.deepEqual(loaded[0], hero, "treasury_wagons round-trips with the rest of the wagon/cargo block");
+  });
+});
+
+test("heroRepo.upsertMany leaves an absent treasuryWagons ABSENT: the 023 column is NULL, not a materialized default", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createHeroRepo(client);
+    // A pre-split hero: no treasuryWagons key at all. Absence must
+    // round-trip as absence because the ENGINE soft-defaults it to 5
+    // (DEFAULT_TREASURY_WAGONS, a 2,500g purse cap) -- materializing
+    // 0 here would zero every legacy hero's purse, and materializing 5
+    // would erase the absent/0 distinction (an explicit 0 is a real 0g
+    // cap). See migrations/023_treasury_wagons.sql.
+    const hero = {
+      ...makeHero("h0", 0, 3, 4, { wagons: 3 }),
+    };
+    delete hero.treasuryWagons;
+
+    await repo.upsertMany(name, { h0: hero });
+    const [loaded] = await repo.loadAllForGame(name);
+
+    assert.equal("treasuryWagons" in loaded, false, "absent stays absent across the round-trip (NULL column, not a default)");
+    assert.equal(loaded.wagons, 3, "the neighboring wagon field is untouched by the discipline");
+  });
+});
+
+test("heroRepo.upsertMany round-trips an explicit treasuryWagons: 0 distinctly from an absent field", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createHeroRepo(client);
+    const hero = { ...makeHero("h0", 0, 3, 4), treasuryWagons: 0 };
+
+    await repo.upsertMany(name, { h0: hero });
+    const [loaded] = await repo.loadAllForGame(name);
+
+    assert.equal(loaded.treasuryWagons, 0, "explicit 0 (a real 0g purse cap) round-trips as 0, never as absent/5");
   });
 });
 

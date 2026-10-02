@@ -9,4 +9,14 @@ export interface BuyWagonsCommand {
   actor: PlayerSeat;
   settlementId: SettlementId;
   count: number;
+  // Which pool the wagons land in (Phase 1 treasury-wagons split): "cargo"
+  // (default, wagonsOwned/wagonsUnassigned) or "treasury"
+  // (treasuryWagonsOwned/treasuryWagonsUnassigned). Same cost either way.
+  // Optional so pre-split senders keep the cargo behavior. NOTE: the brief's
+  // locked field name was `kind`, but `kind` is this union's discriminator
+  // ("BuyWagons") -- a duplicate identifier is illegal in TS and the wire
+  // body's `kind` must stay "BuyWagons" for the route to match -- so the
+  // slot discriminator is named `slot`, matching AssignWagons and both
+  // wagon event payloads.
+  slot?: "cargo" | "treasury";
 }

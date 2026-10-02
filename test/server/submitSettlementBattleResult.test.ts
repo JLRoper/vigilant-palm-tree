@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { Command, HeroId, HeroState, Player, Platoon, SettlementId, SettlementState } from "@heroes/contracts";
 import { MOVEMENT_PER_TURN } from "@heroes/contracts";
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
-import { normalizePlatoons } from "@heroes/engine";
+import { CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS, WAGON_GOLD_CAPACITY, normalizePlatoons } from "@heroes/engine";
 import { handleCommand } from "../../server/app/commandHandler";
 import { makeCharter } from "../charter/_helpers";
 import {
@@ -175,7 +175,14 @@ test("attackerWon captures the settlement: owner flips, garrison empties, attack
 
   assert.equal(result.settlement?.ownerId, 0, "settlement flipped to the attacker's seat");
   assert.deepEqual(result.settlement?.stacks, normalizePlatoons([]), "garrison destroyed on capture");
-  assert.equal(result.attackerHero?.gold, 200, "100 purse + CAPTURE_GOLD_REWARD (100)");
+  // Phase 1 heroGoldCap enforcement: the capture reward is clamped to the
+  // attacker's treasury-cart purse headroom; this hero holds the legacy
+  // soft default (2,500g cap) with 100g in it, so the full 100g lands.
+  assert.equal(
+    result.attackerHero?.gold,
+    100 + Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY - 100),
+    "100 purse + the headroom-clamped CAPTURE_GOLD_REWARD",
+  );
 
   assert.equal(result.lastEventId, 1);
   assert.deepEqual(eventRepo.events[0].payload, {
@@ -192,7 +199,7 @@ test("attackerWon captures the settlement: owner flips, garrison empties, attack
   const saved = gameRepo.rows["test-game"];
   assert.equal(saved.settlements.s1.ownerId, 0);
   assert.deepEqual(saved.settlements.s1.stacks, normalizePlatoons([]));
-  assert.equal(saved.heroes.h0.gold, 200);
+  assert.equal(saved.heroes.h0.gold, 100 + Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY - 100));
   assert.ok(saved.players.find((p) => p.id === 0)?.settlementIds.includes("s1"), "winner's seat gains the settlement");
   assert.ok(!saved.players.find((p) => p.id === 1)?.settlementIds.includes("s1"), "loser's seat loses it");
   assert.equal(heroRepo.calls.length, 1, "heroes dual-written");
@@ -477,7 +484,13 @@ test("a NEUTRAL garrisoned settlement accepts the battle win and captures for th
 
   assert.equal(result.settlement?.ownerId, 0, "neutral settlement flipped to the attacker");
   assert.deepEqual(result.settlement?.stacks, normalizePlatoons([]));
-  assert.equal(result.attackerHero?.gold, 200, "100 purse + CAPTURE_GOLD_REWARD (100)");
+  // Same clamped-reward shape as the enemy-settlement case: 100 purse +
+  // min(100, headroom of the 2,500g soft-default cap) = 200 (Phase 1).
+  assert.equal(
+    result.attackerHero?.gold,
+    100 + Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY - 100),
+    "100 purse + the headroom-clamped CAPTURE_GOLD_REWARD",
+  );
   assert.deepEqual(eventRepo.events[0].payload, {
     type: "SettlementBattleResolved",
     actor: 0,
