@@ -1,12 +1,13 @@
 import type { GameState, HeroId, HeroState } from "@heroes/contracts";
 import type { UnitType } from "../units";
 import { resetHeroMovement } from "../hero/move";
-import { applyHeroUpkeep } from "../hero/upkeep";
+import { applySuppliedHeroUpkeep } from "../hero/upkeep";
 import { applyPopulationGrowth } from "../settlement/populationGrowth";
 import { applyGarrisonUpkeep } from "../settlement/garrisonUpkeep";
 import { advanceCharters } from "../charter/advance";
 import { advanceSettlementUpgrades, advanceBuildingConstructions } from "../settlement/advance";
 import { advanceTradeRoutes } from "../logistics";
+import { accrueBankInterest, matureBankWithdrawals } from "../economy/bank";
 import type { GameMap } from "../map/gameMap";
 import { regenerateHeroMana } from "../combat/spells";
 
@@ -27,12 +28,21 @@ export function applyWeeklyUpkeep(
     round: state.round,
     castleSeed: state.castleSeed,
   };
-  const newHeroes = applyHeroUpkeep(state.heroes, upkeepOptions);
+  // Heroes first, and settlement-funded: a hero standing on one of its own
+  // settlements draws its food bill out of its owner's warehouses (hero/upkeep.ts)
+  // BEFORE the garrison bill below runs, and both read the same post-consumption
+  // stock -- turn/endTurn.ts's production/consumption pass already ran this turn,
+  // so a settlement is never paying out food it was about to consume itself.
+  const supplied = applySuppliedHeroUpkeep(state.heroes, state.settlements, upkeepOptions);
+  const newHeroes = supplied.heroes;
   const newSettlements = applyGarrisonUpkeep(
-    applyPopulationGrowth(state.settlements, growthRate),
+    applyPopulationGrowth(supplied.settlements, growthRate),
     upkeepOptions,
   );
-  return { ...state, heroes: newHeroes, settlements: newSettlements, dirty: true };
+  // Bank pots earn on the weekly tick, next to the garrison bill -- same
+  // cadence as the rest of the recurring upkeep.
+  const withBankInterest = accrueBankInterest({ ...state, heroes: newHeroes, settlements: newSettlements });
+  return { ...withBankInterest, dirty: true };
 }
 
 export function advanceRound(
@@ -61,6 +71,13 @@ export function advanceRound(
   // Caravans need the (deterministically rebuilt) map for A*; without one
   // they simply wait at their current stop (docs plan §5.2).
   withDay = advanceTradeRoutes(withDay, map);
+  // Bank withdrawal maturity is a COUNTDOWN, so it runs every day, not on the
+  // weekly branch: a 7-day request must land on its own day. state.day has
+  // already been incremented above (nextDay), which is deliberate --
+  // matureBankWithdrawals compares maturesOnDay <= state.day, so a withdrawal
+  // requested on day D matures exactly on day D + BANK_WITHDRAWAL_DAYS, with
+  // no off-by-one.
+  withDay = matureBankWithdrawals(withDay);
   if (nextDay % 7 === 0) return applyWeeklyUpkeep(withDay, growthRate, unitTypes);
   return withDay;
 }
