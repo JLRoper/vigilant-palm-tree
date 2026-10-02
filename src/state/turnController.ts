@@ -1,4 +1,4 @@
-import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload } from "./gameState";
+import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload, TradeRouteEndpoint, TradeRoutePayload } from "./gameState";
 import type { BuildingDef, BuildingKind, HeroBattleVerdict, Platoon } from "@heroes/contracts";
 import { platoonsHaveTroops, platoonTroopTotal, settlementStacks, normalizePlatoons } from "./units";
 import type { GameMap } from "../map/gameMap";
@@ -29,7 +29,6 @@ import {
   reorderStack as reorderStackReducer,
   detectAdjacentEnemy as detectAdjacentEnemyFn,
   transferGold as transferGoldReducer,
-  tradeResources as tradeResourcesReducer,
   setAutoTrade as setAutoTradeReducer,
   recruitHero as recruitHeroReducer,
   startCharter as startCharterReducer,
@@ -91,13 +90,6 @@ export interface TurnControllerHooks {
   // next mergeFromEndTurn). Callers don't await the returned promise or
   // use its resolved value -- same "client trusts its own local
   // computation, eventual consistency via sync" philosophy as onAiMove.
-  onTradeResources(
-    actor: number,
-    fromSettlementId: SettlementId,
-    toSettlementId: SettlementId,
-    resource: WarehouseResource,
-    amount: number,
-  ): Promise<void>;
   onRecruitHero(
     actor: number,
     heroName: string,
@@ -148,13 +140,13 @@ export interface TurnControllerHooks {
     direction: "load" | "unload",
     amounts: Partial<Record<WarehouseResource, number>>,
   ): Promise<void>;
-  onAssignWagons(actor: number, heroId: HeroId, delta: number): Promise<void>;
-  onBuyWagons(actor: number, settlementId: SettlementId, count: number): Promise<void>;
+  onAssignWagons(actor: number, heroId: HeroId, delta: number, slot?: "cargo" | "treasury"): Promise<void>;
+  onBuyWagons(actor: number, settlementId: SettlementId, count: number, slot?: "cargo" | "treasury"): Promise<void>;
   onCreateTradeRoute(
     actor: number,
-    fromSettlementId: SettlementId,
-    toSettlementId: SettlementId,
-    resource: WarehouseResource,
+    from: TradeRouteEndpoint,
+    to: TradeRouteEndpoint,
+    payload: TradeRoutePayload,
     wagons: number,
   ): Promise<void>;
   onUpdateTradeRoute(
@@ -578,29 +570,6 @@ export class TurnController {
         return this.hooks.onTransferGold(actor, heroId, settlementId, direction);
       },
       hookLabel: "onTransferGold",
-    });
-    return { ok: true, reason: "" };
-  }
-
-  tradeResources(
-    fromId: SettlementId,
-    toId: SettlementId,
-    resource: WarehouseResource,
-    amount: number,
-  ): { ok: boolean; reason: string } {
-    const result = tradeResourcesReducer(this.state, fromId, toId, resource, amount);
-    if (!result.ok) return { ok: false, reason: result.reason };
-    this.commit(result.state, {
-      events: [
-        { type: "economy:warehouseChanged", settlementId: fromId, resource, amount: result.state.settlements[fromId]?.warehouse?.[resource] ?? 0 },
-        { type: "economy:warehouseChanged", settlementId: toId, resource, amount: result.state.settlements[toId]?.warehouse?.[resource] ?? 0 },
-      ],
-      log: {
-        type: "resources_traded",
-        payload: { fromId, toId, resource, amount },
-      },
-      hook: () => this.hooks.onTradeResources(result.state.activePlayerId, fromId, toId, resource, amount),
-      hookLabel: "onTradeResources",
     });
     return { ok: true, reason: "" };
   }
@@ -1256,60 +1225,53 @@ export class TurnController {
     return { ok: true, reason: "" };
   }
 
-  assignWagons(heroId: string, delta: number): { ok: boolean; reason: string } {
-    const result = assignWagonsReducer(this.state, this.state.activePlayerId, heroId, delta);
+  assignWagons(heroId: string, delta: number, slot: "cargo" | "treasury" = "cargo"): { ok: boolean; reason: string } {
+    const result = assignWagonsReducer(this.state, this.state.activePlayerId, heroId, delta, slot);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
       log: {
         type: "wagons_assigned",
-        payload: { heroId, delta },
+        payload: { heroId, delta, slot },
       },
-      hook: () => this.hooks.onAssignWagons(result.state.activePlayerId, heroId, delta),
+      hook: () => this.hooks.onAssignWagons(result.state.activePlayerId, heroId, delta, slot),
       hookLabel: "onAssignWagons",
     });
     return { ok: true, reason: "" };
   }
 
-  buyWagons(settlementId: string, count: number): { ok: boolean; reason: string } {
-    const result = buyWagonsReducer(this.state, this.state.activePlayerId, settlementId, count);
+  buyWagons(settlementId: string, count: number, slot: "cargo" | "treasury" = "cargo"): { ok: boolean; reason: string } {
+    const result = buyWagonsReducer(this.state, this.state.activePlayerId, settlementId, count, slot);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
       log: {
         type: "wagons_bought",
-        payload: { settlementId, count },
+        payload: { settlementId, count, slot },
       },
-      hook: () => this.hooks.onBuyWagons(result.state.activePlayerId, settlementId, count),
+      hook: () => this.hooks.onBuyWagons(result.state.activePlayerId, settlementId, count, slot),
       hookLabel: "onBuyWagons",
     });
     return { ok: true, reason: "" };
   }
 
   createTradeRoute(
-    fromSettlementId: string,
-    toSettlementId: string,
-    resource: WarehouseResource,
+    from: TradeRouteEndpoint,
+    to: TradeRouteEndpoint,
+    payload: TradeRoutePayload,
     wagons: number,
   ): { ok: boolean; reason: string } {
-    const result = createTradeRouteReducer(
-      this.state,
-      this.state.activePlayerId,
-      fromSettlementId,
-      toSettlementId,
-      resource,
-      wagons,
-    );
+    const result = createTradeRouteReducer(this.state, this.state.activePlayerId, from, to, payload, wagons);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
       log: {
         type: "trade_route_created",
-        payload: { routeId: result.route?.id, fromSettlementId, toSettlementId, resource, wagons },
+        payload: { routeId: result.route?.id, from, to, payload, wagons },
       },
       hook: () =>
         this.hooks.onCreateTradeRoute(
           result.state.activePlayerId,
-          fromSettlementId,
-          toSettlementId,
-          resource,
+          from,
+          to,
+          payload,
           wagons,
         ),
       hookLabel: "onCreateTradeRoute",

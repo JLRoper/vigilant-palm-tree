@@ -3,14 +3,13 @@ import type {
   GameState,
   HeroState,
   PlayerSeat,
-  SettlementId,
+  TradeRouteEndpoint,
   TradeRouteId,
+  TradeRoutePayload,
   TradeRouteState,
-  WarehouseResource,
 } from "@heroes/contracts";
 import { transferGold } from "../economy/transfer";
 import { depositIntoBank, requestBankWithdrawal } from "../economy/bank";
-import { tradeResources } from "../economy/trade";
 import { setAutoTrade } from "../settlement/autoTrade";
 import { reorderStack } from "../hero/stacks";
 import { captureSettlement } from "../settlement/capture";
@@ -18,6 +17,7 @@ import { startTownHallUpgrade } from "../settlement/upgradeTownHall";
 import { depositIntoGarrison } from "../settlement/recruitUnits";
 import { transferUnits } from "../settlement/transferUnits";
 import { settlementStacks } from "../units";
+import { isTradeRouteEndpoint, isTradeRoutePayload, legacyTradeRouteShape } from "../hydrate";
 
 // Phase 5.A (#146): the reducer the event-cursor client sync applies each
 // polled EngineEvent through. Thirteen variants carry only the *fact* of a
@@ -32,9 +32,11 @@ import { settlementStacks } from "../units";
 // layer in ENGINE_EVENT_SYNC_CLASS below). TradeRouteCreated is the one
 // exception: applyTradeRouteCreated below reconstructs its state by
 // targeted construction (the applyUnitsRecruited pattern) because the
-// server derives route ids from a counter hydration never restores, so a
-// reducer re-run could not reproduce the event's routeId -- the applier
-// builds the route with the event's routeId verbatim instead.
+// server derives route ids from a counter a replay cannot re-derive from
+// the event alone, so a reducer re-run could not reproduce the event's
+// routeId -- the applier builds the route with the event's routeId
+// verbatim instead (normalizing both the current endpoint/payload event
+// shape and the legacy flat rows still in the events table).
 export type EngineEventOutcome = "applied" | "noop" | "resync";
 
 export interface ApplyEngineEventResult {
@@ -58,7 +60,6 @@ export const ENGINE_EVENT_SYNC_CLASS: Record<EngineEvent["type"], EngineEventSyn
   GoldTransferred: "apply",
   BankGoldMoved: "apply",
   TurnEnded: "resync",
-  ResourcesTraded: "apply",
   BattleResolved: "resync",
   HeroRecruited: "resync",
   TownHallUpgradeStarted: "apply",
@@ -200,50 +201,65 @@ function applyUnitsTransferred(
 
 // TradeRouteCreated's payload is enough to rebuild the route record, but a
 // reducer re-run is not an option: createTradeRoute() derives the route id
-// from state.nextTradeRouteId, which hydration never restores (and the
-// server re-hydrates per command), so the server's id is not reproducible
-// from hydrated state. The applier therefore builds the route with the
-// event's routeId verbatim (the applyUnitsRecruited targeted-construction
+// from state.nextTradeRouteId, so the server's id is not reproducible from
+// hydrated state. The applier therefore builds the route with the event's
+// routeId verbatim (the applyUnitsRecruited targeted-construction
 // pattern), debits the actor's unassigned wagons exactly as the reducer
 // does, and bumps the counter monotonically past the event's id so a later
 // reducer-created id cannot collide with it. An exact-tuple duplicate (id,
-// endpoints, resource, wagons, no caravan yet) is what an already-applied
-// event looks like -- the server can legitimately re-derive e.g. "route0"
-// after a hydration reset, so the full-tuple match, not the id alone, is
-// what makes the noop correct. Settlement ownership is not re-checked: the
-// event is authoritative history.
+// endpoint pair, payload, wagons, no caravan yet) is what an
+// already-applied event looks like -- the full-tuple match, not the id
+// alone, is what makes the noop correct. Ownership is not re-checked: the
+// event is authoritative history. Endpoint EXISTENCE is: a dead hero
+// endpoint (either side) means this state has drifted or the route
+// outlived its endpoint -- a resync, never a noop (the same rule keeps a
+// missing settlement endpoint a resync).
+function sameEndpoint(a: TradeRouteEndpoint, b: TradeRouteEndpoint): boolean {
+  return a.kind === b.kind && a.id === b.id;
+}
+
+function samePayload(a: TradeRoutePayload, b: TradeRoutePayload): boolean {
+  if (a.kind === "gold" || b.kind === "gold") return a.kind === b.kind;
+  return a.resource === b.resource;
+}
+
 function applyTradeRouteCreated(
   state: GameState,
   actor: PlayerSeat,
   routeId: TradeRouteId,
-  fromSettlementId: SettlementId,
-  toSettlementId: SettlementId,
-  resource: WarehouseResource,
+  from: TradeRouteEndpoint,
+  to: TradeRouteEndpoint,
+  payload: TradeRoutePayload,
   wagons: number,
 ): ApplyEngineEventResult {
+  // Hero-existence check first (the dead-hero rule): a dead hero endpoint
+  // must resync, never noop -- even when a same-id route already exists.
+  if (from.kind === "hero" && !state.heroes[from.id]) return resync(state);
+  if (to.kind === "hero" && !state.heroes[to.id]) return resync(state);
+
   const routes = state.tradeRoutes ?? [];
   const existing = routes.find((r) => r.id === routeId);
-  if (existing) {
-    if (
-      existing.fromSettlementId === fromSettlementId &&
-      existing.toSettlementId === toSettlementId &&
-      existing.resource === resource &&
-      existing.wagons === wagons &&
-      existing.caravan === null
-    ) {
-      return { state, outcome: "noop" };
-    }
+  if (
+    existing &&
+    sameEndpoint(existing.from, from) &&
+    sameEndpoint(existing.to, to) &&
+    samePayload(existing.payload, payload) &&
+    existing.wagons === wagons &&
+    existing.caravan === null
+  ) {
+    return { state, outcome: "noop" };
   }
-  if (!state.settlements[fromSettlementId] || !state.settlements[toSettlementId]) return resync(state);
+  if (from.kind === "settlement" && !state.settlements[from.id]) return resync(state);
+  if (to.kind === "settlement" && !state.settlements[to.id]) return resync(state);
   const player = state.players.find((p) => p.id === actor);
   if (!player) return resync(state);
   const unassigned = player.wagonsUnassigned ?? 0;
   if (!existing && wagons > unassigned) return resync(state);
   const route: TradeRouteState = {
     id: routeId,
-    fromSettlementId,
-    toSettlementId,
-    resource,
+    from,
+    to,
+    payload,
     wagons,
     caravan: null,
   };
@@ -252,7 +268,7 @@ function applyTradeRouteCreated(
   return {
     state: {
       ...state,
-      tradeRoutes: [...routes, route],
+      tradeRoutes: existing ? routes.map((r) => (r.id === routeId ? route : r)) : [...routes, route],
       nextTradeRouteId: Math.max(state.nextTradeRouteId ?? 0, derived),
       players: state.players.map((p) =>
         p.id === actor ? { ...p, wagonsUnassigned: unassigned - wagons } : p,
@@ -315,18 +331,6 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
       return { state: result.state, outcome: "applied" };
     }
 
-    case "ResourcesTraded": {
-      const result = tradeResources(
-        state,
-        event.fromSettlementId,
-        event.toSettlementId,
-        event.resource,
-        event.amount,
-      );
-      if (!result.ok) return resync(state);
-      return { state: result.state, outcome: "applied" };
-    }
-
     case "AutoTradeToggled": {
       if (!state.settlements[event.settlementId]) return resync(state);
       const next = setAutoTrade(state, event.settlementId, event.autoTrade);
@@ -380,16 +384,28 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
         event.count,
       );
 
-    case "TradeRouteCreated":
+    case "TradeRouteCreated": {
+      // Rows persisted before the endpoint/payload model carry the legacy
+      // flat fromSettlementId/toSettlementId/resource fields; both event
+      // generations normalize to the endpoint shape before applying (the
+      // same mapping hydrate's normalizeTradeRoute uses for JSONB rows).
+      // A row of neither generation is drift: resync.
+      const raw = event as unknown as Record<string, unknown>;
+      const shape =
+        isTradeRouteEndpoint(raw.from) && isTradeRouteEndpoint(raw.to) && isTradeRoutePayload(raw.payload)
+          ? { from: raw.from, to: raw.to, payload: raw.payload }
+          : legacyTradeRouteShape(raw);
+      if (!shape) return resync(state);
       return applyTradeRouteCreated(
         state,
         event.actor,
         event.routeId,
-        event.fromSettlementId,
-        event.toSettlementId,
-        event.resource,
+        shape.from,
+        shape.to,
+        shape.payload,
         event.wagons,
       );
+    }
 
     // Listed per variant rather than swept into `default:` so a new
     // EngineEvent variant trips the exhaustiveness check below.

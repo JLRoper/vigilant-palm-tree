@@ -4,7 +4,6 @@ transferGold,
   depositIntoBank,
   requestBankWithdrawal,
   mulberry32,
-  tradeResources,
   resolveBattle as resolveBattleEngine,
   normalizePlatoons,
   detectAdjacentEnemy,
@@ -38,6 +37,7 @@ transferGold,
   buyWagons,
   createTradeRoute as createTradeRouteReducer,
   updateTradeRoute as updateTradeRouteReducer,
+  endpointOwner,
   deriveHeroVerdict,
   nearestOwnedSettlement,
   relocateHeroToSettlement,
@@ -59,7 +59,7 @@ import type {
   SettlementState,
   StartCharterPayload,
 } from "@heroes/contracts";
-import { runEndTurn, clampGrowthRate } from "./turnService";
+import { runEndTurn, clampGrowthRate, removedTradeRouteIds } from "./turnService";
 import { pool } from "../persistence/db";
 import { createGameRepo, GameNotFoundError, type SettlementSnapshotInput, type ResourceTransactionInput } from "../persistence/repositories/gameRepo";
 import { createEventRepo } from "../persistence/repositories/eventRepo";
@@ -85,8 +85,17 @@ import { hydrateFromRepos } from "../persistence/hydrate";
 // 3.B's real implementations (server/persistence/repositories/gameRepo.ts)
 // land the persistence-layer half; this file's EndTurn case (below) is
 // the wiring half.
+//
+// The row this interface returns carries the slice of the lobby jsonb the
+// command cases read. `legacyAutoTrade` is the instant auto-trade gate
+// (2026-10-02): ABSENT means true, so every pre-flag save keeps firing
+// auto-trade; POST /games writes false on new games.
+export interface GameLobbyFlags {
+  legacyAutoTrade?: boolean;
+}
+
 export interface GameRepo {
-  load(name: string): Promise<HydratableGameRow>;
+  load(name: string): Promise<HydratableGameRow & { lobby?: GameLobbyFlags }>;
     saveHeroesAndSettlements(
       name: string,
       heroes: Record<HeroId, HeroState>,
@@ -177,11 +186,6 @@ export interface CommandResult {
   // EndTurn + PlaceBuildings/CreateTradeRoute/UpdateTradeRoute: the full
   // post-change routes array (caravans move on EndTurn's round wrap).
   tradeRoutes?: TradeRouteState[];
-  // TradeResources: the two settlements it actually touches (mirrors
-  // TransferGold's hero/settlement pair above -- named fields for the
-  // specific affected entities, not the full map EndTurn returns).
-  fromSettlement?: SettlementState;
-  toSettlement?: SettlementState;
   // ResolveBattle/SubmitBattleResult: both combatants plus the full engine
   // BattleResult the client's battle UI needs (log, grid, per-round detail) --
   // none of that is reconstructable from the summary fields on the persisted
@@ -526,7 +530,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
   // Note for whoever touches this next: several cases below still read
   // command.actor's target hero/settlement off `row` directly (the raw
   // JSONB row) for their own existence/ownership/position pre-checks --
-  // MoveHero's staleness guard, TradeResources/ResolveBattle/UpgradeTownHall/
+  // MoveHero's staleness guard, ResolveBattle/UpgradeTownHall/
   // SetAutoTrade/ReorderStack/CaptureSettlement's "does this exist"/
   // ownership checks -- rather than reading the same thing off `state`
   // (which may now be granular-sourced). That's intentional, not an
@@ -661,11 +665,18 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       const upkeepUnitTypes: Record<string, UnitType> = Object.fromEntries(
         deps.ctx.catalog.unitTypes.map((u) => [u.id, u]),
       );
+      // Legacy instant auto-trade gate (2026-10-02): the games row's lobby
+      // jsonb carries it, ABSENT -> true. Every pre-flag save keeps firing
+      // runAutoTrade exactly as it always did; POST /games writes an explicit
+      // false on new games, whose end turns then move nothing -- food logistics
+      // ride the caravan routes instead.
+      const legacyAutoTrade = row.lobby?.legacyAutoTrade ?? true;
       const { state: finalState, wrapped, transfers } = runEndTurn(
         state,
         clampGrowthRate(command.growthRate),
         map,
         upkeepUnitTypes,
+        legacyAutoTrade,
       );
       const legacyGold = sumPlayerGold(finalState.players, finalState.heroes, finalState.settlements);
       await deps.gameRepo.saveHeroesAndSettlements(
@@ -729,6 +740,25 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // straight through, `reason` defaults to "auto_trade" in the repo
       // method itself, same as the old route's hardcoded literal.
       await deps.gameRepo.insertResourceTransactions(command.gameName, transfers);
+      // Weekly caravan-maintenance desertion auto-removed these routes
+      // inside advanceRound (applyCaravanUpkeep); append a TradeRouteRemoved
+      // row per removal BEFORE the TurnEnded row so the stream reads
+      // chronologically. The route's origin owner is the actor -- it always
+      // resolves (dead-origin routes are skipped by maintenance) -- with the
+      // ending seat as a defensive fallback.
+      const beforeRoutes = state.tradeRoutes ?? [];
+      let lastEventId = 0;
+      for (const removedId of removedTradeRouteIds(state, finalState)) {
+        const removed = beforeRoutes.find((r) => r.id === removedId);
+        const owner = removed ? endpointOwner(removed.from, state) : null;
+        const actor: number = owner ?? command.actor;
+        const removedEvent: EngineEvent = {
+          type: "TradeRouteRemoved",
+          actor,
+          routeId: removedId,
+        };
+        lastEventId = await deps.eventRepo.append(command.gameName, removedEvent.type, removedEvent, actor);
+      }
       const event: EngineEvent = {
         type: "TurnEnded",
         actor: command.actor,
@@ -745,8 +775,10 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // result.events entry never made it into the DB event stream at
       // all under its own name, which is exactly the kind of
       // per-command inconsistency a future kind-based consumer of
-      // game_events would trip over.
-      let lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      // game_events would trip over. lastEventId was declared above for
+      // the removal rows and is reassigned through each append below so it
+      // ends up holding the highest id this command caused.
+      lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       // In addition to that, preserve the old /end-turn route's exact
       // game_events `kind` strings (turn_ended/round_ended/round_started/
       // ai_turn_started) as their own rows -- nothing in this codebase
@@ -784,55 +816,6 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         activePlayerId: finalState.activePlayerId,
         players: finalState.players,
         tradeRoutes: finalState.tradeRoutes,
-      };
-    }
-    case "TradeResources": {
-      const from = row.settlements[command.fromSettlementId];
-      const to = row.settlements[command.toSettlementId];
-      if (!from || !to) {
-        return { ok: false, reason: "settlement_not_found", events: [] };
-      }
-      // tradeResources() itself only requires from.ownerId === to.ownerId
-      // -- it never compares either to command.actor. Without this
-      // explicit check, command.actor (already confirmed above to be the
-      // active player) could trade between two OTHER players'
-      // settlements as long as those two happen to share an owner.
-      if (from.ownerId !== command.actor || to.ownerId !== command.actor) {
-        return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
-      }
-      const result = tradeResources(
-        state,
-        command.fromSettlementId,
-        command.toSettlementId,
-        command.resource,
-        command.amount,
-      );
-      if (!result.ok) {
-        return { ok: false, reason: result.reason, events: [] };
-      }
-      const legacyGold = sumPlayerGold(state.players, state.heroes, result.state.settlements);
-      await deps.gameRepo.saveHeroesAndSettlements(
-        command.gameName,
-        result.state.heroes,
-        result.state.settlements,
-        { gold: legacyGold },
-      );
-      await dualWriteEntities(deps, command.gameName, state, result.state);
-      const event: EngineEvent = {
-        type: "ResourcesTraded",
-        actor: command.actor,
-        fromSettlementId: command.fromSettlementId,
-        toSettlementId: command.toSettlementId,
-        resource: command.resource,
-        amount: command.amount,
-      };
-      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return {
-        ok: true,
-        events: [event],
-        lastEventId,
-        fromSettlement: result.state.settlements[command.fromSettlementId],
-        toSettlement: result.state.settlements[command.toSettlementId],
       };
     }
     case "ResolveBattle": {
@@ -947,7 +930,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // recruitHero() itself checks settlement.ownerId !== playerId, and
       // command.actor === row.active_player_id is already enforced above
       // -- between the two, there's no separate ownership hole to close
-      // here the way TradeResources/UpgradeTownHall/etc. need.
+      // here the way UpgradeTownHall/etc. need.
       const result = recruitHero(state, command.actor, command.heroName, command.settlementId, command.horseVariant);
       if (!result.hero) {
         return { ok: false, reason: result.error ?? "recruit_failed", events: [] };
@@ -1559,7 +1542,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       };
     }
     case "AssignWagons": {
-      const result = assignWagons(state, command.actor, command.heroId, command.delta);
+      const result = assignWagons(state, command.actor, command.heroId, command.delta, command.slot);
       if (!result.ok) {
         return { ok: false, reason: result.reason, events: [] };
       }
@@ -1575,12 +1558,13 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         actor: command.actor,
         heroId: command.heroId,
         delta: command.delta,
+        ...(command.slot !== undefined ? { slot: command.slot } : {}),
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, hero: result.state.heroes[command.heroId] };
     }
     case "BuyWagons": {
-      const result = buyWagons(state, command.actor, command.settlementId, command.count);
+      const result = buyWagons(state, command.actor, command.settlementId, command.count, command.slot);
       if (!result.ok) {
         return { ok: false, reason: result.reason, events: [] };
       }
@@ -1596,6 +1580,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         actor: command.actor,
         settlementId: command.settlementId,
         count: command.count,
+        ...(command.slot !== undefined ? { slot: command.slot } : {}),
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
@@ -1604,9 +1589,9 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       const result = createTradeRouteReducer(
         state,
         command.actor,
-        command.fromSettlementId,
-        command.toSettlementId,
-        command.resource,
+        command.from,
+        command.to,
+        command.payload,
         command.wagons,
       );
       if (!result.ok) {
@@ -1618,13 +1603,17 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         result.state.settlements,
         { players: result.state.players, trade_routes: result.state.tradeRoutes },
       );
+      // The event carries the endpoint/payload shape verbatim (routes
+      // between settlements, heroes, or either direction) so every replay
+      // transport can rebuild the route; the persisted JSONB dual-write
+      // above serializes the same shape.
       const event: EngineEvent = {
         type: "TradeRouteCreated",
         actor: command.actor,
         routeId: result.route!.id,
-        fromSettlementId: command.fromSettlementId,
-        toSettlementId: command.toSettlementId,
-        resource: command.resource,
+        from: command.from,
+        to: command.to,
+        payload: command.payload,
         wagons: command.wagons,
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
@@ -1645,11 +1634,14 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         result.state.settlements,
         { players: result.state.players, trade_routes: result.state.tradeRoutes },
       );
-      const event: EngineEvent = {
-        type: "TradeRouteUpdated",
-        actor: command.actor,
-        routeId: command.routeId,
-      };
+      // A remove is a removal, not an update: the never-before-emitted
+      // TradeRouteRemoved kind finally rides the stream here (manual disband)
+      // and from the EndTurn case below (weekly maintenance desertion).
+      // Remote seats treat the kind as "ignore" and converge at the resync
+      // boundary -- same as every other minimal-payload trade kind.
+      const event: EngineEvent = command.remove
+        ? { type: "TradeRouteRemoved", actor: command.actor, routeId: command.routeId }
+        : { type: "TradeRouteUpdated", actor: command.actor, routeId: command.routeId };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, tradeRoutes: result.state.tradeRoutes };
     }
@@ -1998,7 +1990,7 @@ export async function handleCommandTransactional(
     // transaction; a second concurrent command against the same game
     // blocks here until COMMIT/ROLLBACK, so it then sees the post-state
     // and re-runs validation against it. Without this, two
-    // MoveHero/TradeResources/whatever commands issued in the same
+    // MoveHero/whatever commands issued in the same
     // millisecond each load the pre-state, each compute their own delta,
     // and each issue saveHeroesAndSettlements; the second write silently
     // clobbers the first.

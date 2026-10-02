@@ -13,7 +13,6 @@ export {
   applyEffectiveIncome,
   runAutoTrade,
   transferGold,
-  tradeResources,
   transferResources,
   assignWagons,
   buyWagons,
@@ -89,7 +88,6 @@ export type {
   ApplyEndOfTurnResult,
   TransferDirection,
   TransferResult,
-  TradeResult,
   RecruitHeroResult,
   StartCharterPayload,
   StartCharterResult,
@@ -110,6 +108,10 @@ export type {
   UpgradeState,
   Warehouse,
   WarehouseResource,
+  TradeRouteEndpoint,
+  TradeRoutePayload,
+  TradeRouteState,
+  TradeRouteId,
 } from "@heroes/contracts";
 
 export function isHuman(p: Player): boolean {

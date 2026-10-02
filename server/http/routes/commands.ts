@@ -1,6 +1,6 @@
 import { Router, type Request } from "express";
 import type { BuildingDef, BuildingKind, BuildingUpgradeRequest, Command, Platoon } from "@heroes/contracts";
-import { ARMY_STACK_SLOTS, VALID_HORSE_VARIANTS } from "@heroes/engine";
+import { ARMY_STACK_SLOTS, VALID_HORSE_VARIANTS, isTradeRouteEndpoint, isTradeRoutePayload } from "@heroes/engine";
 import { handleCommandTransactional, createLiveCommandDeps, type LiveCommandDeps } from "../../app/commandHandler";
 import { touchSeat } from "../../app/dropPolicy";
 import { pool } from "../../persistence/db";
@@ -89,15 +89,9 @@ function isBuildingUpgradeRequest(v: unknown): boolean {
   );
 }
 
-// Matches the old /trade route's own VALID_RESOURCES list (server/routes.ts)
-// -- "food" is deliberately excluded, see
-// packages/contracts/src/commands/tradeResources.ts's header comment.
-const VALID_TRADE_RESOURCES = ["wood", "stone", "iron", "arcane"] as const;
-
 // SubmitBattleResult's outcome enum — mirrors
 // packages/contracts/src/commands/submitBattleResult.ts's
-// SubmittedBattleOutcome (type-only there, so a runtime list lives here;
-// same pattern as VALID_TRADE_RESOURCES above).
+// SubmittedBattleOutcome (type-only there, so a runtime list lives here).
 const VALID_SUBMITTED_OUTCOMES = [
   "attackerWon",
   "defenderWon",
@@ -279,29 +273,6 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       gameName,
       actor: b.actor,
       growthRate: b.growthRate as number | undefined,
-    };
-  }
-
-  if (b.kind === "TradeResources") {
-    if (
-      typeof b.fromSettlementId !== "string" ||
-      typeof b.toSettlementId !== "string" ||
-      typeof b.resource !== "string" ||
-      !VALID_TRADE_RESOURCES.includes(b.resource as (typeof VALID_TRADE_RESOURCES)[number]) ||
-      typeof b.amount !== "number" ||
-      !Number.isInteger(b.amount) ||
-      b.amount <= 0
-    ) {
-      return null;
-    }
-    return {
-      kind: "TradeResources",
-      gameName,
-      actor: b.actor,
-      fromSettlementId: b.fromSettlementId,
-      toSettlementId: b.toSettlementId,
-      resource: b.resource as (typeof VALID_TRADE_RESOURCES)[number],
-      amount: b.amount,
     };
   }
 
@@ -509,12 +480,18 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     ) {
       return null;
     }
+    // Phase 1 treasury-wagons split: optional slot discriminator.
+    const slot = b.slot;
+    if (slot !== undefined && slot !== "cargo" && slot !== "treasury") {
+      return null;
+    }
     return {
       kind: "AssignWagons",
       gameName,
       actor: b.actor,
       heroId: b.heroId,
       delta: b.delta,
+      ...(slot !== undefined ? { slot } : {}),
     };
   }
 
@@ -528,23 +505,36 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     ) {
       return null;
     }
+    // Phase 1 treasury-wagons split: optional pool slot discriminator.
+    // (Named `slot`, not `kind` -- `kind` is the body's command tag.)
+    const slot = b.slot;
+    if (slot !== undefined && slot !== "cargo" && slot !== "treasury") {
+      return null;
+    }
     return {
       kind: "BuyWagons",
       gameName,
       actor: b.actor,
       settlementId: b.settlementId,
       count: b.count,
+      ...(slot !== undefined ? { slot } : {}),
     };
   }
 
   const VALID_WAGON_RESOURCES = ["wood", "stone", "iron", "arcane", "food"] as const;
 
   if (b.kind === "CreateTradeRoute") {
+    // Endpoints and payload are validated with @heroes/engine's runtime
+    // guards (hydrate.ts's isTradeRouteEndpoint/isTradeRoutePayload) so the
+    // wire gate and the JSONB normalizer share one definition of the two
+    // discriminated shapes. Legacy bodies (flat fromSettlementId/
+    // toSettlementId/resource) are NOT accepted here -- persisted rows are
+    // normalized in hydrate, but the client ships in lockstep with this
+    // route, so an old body shape is malformed, not legacy.
     if (
-      typeof b.fromSettlementId !== "string" ||
-      typeof b.toSettlementId !== "string" ||
-      typeof b.resource !== "string" ||
-      !VALID_WAGON_RESOURCES.includes(b.resource as (typeof VALID_WAGON_RESOURCES)[number]) ||
+      !isTradeRouteEndpoint(b.from) ||
+      !isTradeRouteEndpoint(b.to) ||
+      !isTradeRoutePayload(b.payload) ||
       typeof b.wagons !== "number" ||
       !Number.isInteger(b.wagons) ||
       b.wagons <= 0 ||
@@ -556,9 +546,9 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       kind: "CreateTradeRoute",
       gameName,
       actor: b.actor,
-      fromSettlementId: b.fromSettlementId,
-      toSettlementId: b.toSettlementId,
-      resource: b.resource as (typeof VALID_WAGON_RESOURCES)[number],
+      from: b.from,
+      to: b.to,
+      payload: b.payload,
       wagons: b.wagons,
     };
   }
@@ -903,8 +893,6 @@ commandsRouter.post("/", async (req: Request<{ name: string }>, res) => {
       activePlayerId: result.activePlayerId,
       players: result.players,
       tradeRoutes: result.tradeRoutes,
-      fromSettlement: result.fromSettlement,
-      toSettlement: result.toSettlement,
       attackerHero: result.attackerHero,
       defenderHero: result.defenderHero,
       attackerVerdict: result.attackerVerdict,

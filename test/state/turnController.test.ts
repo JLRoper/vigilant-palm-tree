@@ -4,7 +4,14 @@ import { TurnController, createAiTurnMemory, type AiTurnMemory, type TurnControl
 import { GameStateManager } from "../../src/managers/GameStateManager";
 import { mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../../src/game/turnHooks";
 import { emptyWarehouse, makeCharter, makeHero, makeSettlement, makeState } from "../charter/_helpers";
-import { cleanupDefeatedHeroCharters, normalizePlatoons, relocateHeroToSettlement } from "@heroes/engine";
+import {
+  CAPTURE_GOLD_REWARD,
+  DEFAULT_TREASURY_WAGONS,
+  WAGON_GOLD_CAPACITY,
+  cleanupDefeatedHeroCharters,
+  normalizePlatoons,
+  relocateHeroToSettlement,
+} from "@heroes/engine";
 import { MOVEMENT_PER_TURN, type GameState, type HeroId, type SettlementId } from "@heroes/contracts";
 import type { UnitType } from "../../src/state/units";
 import { bus } from "../../src/core/eventBus";
@@ -82,7 +89,6 @@ function buildHooks(initial: GameState): TurnControllerHooks {
       throw new Error("getMap not used in these tests");
     },
     rng: () => 0,
-    onTradeResources: noop,
     onRecruitHero: noop,
     onUpgradeTownHall: noop,
     onSetAutoTrade: noop,
@@ -372,7 +378,6 @@ test("coverage guard: every this.hooks.on*( call inside a TurnController mutatio
     "requestMove",
     "captureSettlement",
     "transferGold",
-    "tradeResources",
     "setAutoTrade",
     "reorderStack",
     "recruitHero",
@@ -1241,7 +1246,11 @@ test("AI walking onto a neutral settlement captures it via tryCaptureAt", async 
   controller.tick(16);
 
   assert.equal(controller.getState().settlements["s2"]?.ownerId, 1, "the neutral settlement flips to the AI seat");
-  assert.equal(controller.getState().heroes["h1"]?.gold, 100, "CAPTURE_GOLD_REWARD lands on the mover");
+  assert.equal(
+    controller.getState().heroes["h1"]?.gold,
+    Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY),
+    "the headroom-clamped CAPTURE_GOLD_REWARD lands on the mover (full 100g: empty purse, 2,500g soft-default cap)",
+  );
   await settlePersist();
   assert.deepEqual(captureCalls[0], [1, "h1", "s2"], "onCaptureSettlement fires with the AI seat as actor (after the move persist settles)");
   assert.ok(controller.getState().players[1]?.settlementIds.includes("s2"));
@@ -1276,7 +1285,11 @@ test("walk-in capture (human path): the CaptureSettlement POST dispatches only a
   assert.equal(controller.requestMove("h0", { q: 5, r: 2 }, 1), true);
 
   assert.equal(controller.getState().settlements["s1"]?.ownerId, 0, "the optimistic capture applies immediately");
-  assert.equal(controller.getState().heroes["h0"]?.gold, 100, "CAPTURE_GOLD_REWARD lands optimistically");
+  assert.equal(
+    controller.getState().heroes["h0"]?.gold,
+    Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY),
+    "the headroom-clamped CAPTURE_GOLD_REWARD lands optimistically (Phase 1 purse-cap clamp)",
+  );
   assert.deepEqual(order, ["onHumanMove"], "only the move persist may have fired at move time");
 
   await settlePersist();

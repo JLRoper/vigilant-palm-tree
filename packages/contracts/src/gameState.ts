@@ -25,6 +25,12 @@ export interface Player {
   // valid; new wagons default via DEFAULT_HERO_WAGONS/player helpers.
   wagonsOwned?: number;
   wagonsUnassigned?: number;
+  // Treasury-cart pool (Phase 1 treasury-wagons split): the gold-carrying
+  // slot's own pool, mirroring the cargo pool above field-for-field.
+  // Optional + helper-accessed (playerTreasuryWagonsOwned/Unassigned) so
+  // legacy saves stay valid; starting players carry 5/0.
+  treasuryWagonsOwned?: number;
+  treasuryWagonsUnassigned?: number;
 }
 
 export interface HeroState {
@@ -74,8 +80,17 @@ export interface HeroState {
   upkeepUnpaidGold: number;
   // ── Wagons & cargo (docs/wagons-stockpiles-trade-routes-plan.md §4.2/§5.1) ──
   // Optional + helper-accessed (heroWagons/heroCargo) so legacy saves stay
-  // valid; DEFAULT_HERO_WAGONS applies when absent.
+  // valid; DEFAULT_HERO_WAGONS applies when absent. `wagons` governs the
+  // RESOURCE cargo cap only (heroResourceCap).
   wagons?: number;
+  // Treasury carts (Phase 1 treasury-wagons split): the gold-purse slot,
+  // deliberately NOT shared with army wagons ("the hero can carry more gold
+  // if they have treasury carts on their person (they get their own slot,
+  // not shared with army slots)"). Optional + helper-accessed
+  // (heroTreasuryWagons) so legacy saves stay valid; DEFAULT_TREASURY_WAGONS
+  // (5) applies when absent, preserving the 5-cart <-> 2,500g-charter
+  // pairing for every pre-split hero.
+  treasuryWagons?: number;
   resources?: Warehouse;
 }
 
@@ -100,15 +115,46 @@ export interface CaravanState {
 
 export type TradeRouteId = string;
 
-/** One trade route: a same-owner settlement pair, one resource, a wagon count, and its physical caravan. */
+/**
+ * One end of a trade route: a settlement or a hero. Settlement ids and hero
+ * ids are disjoint namespaces (`s{n}` / `h{n}`), so `kind` is the only
+ * discriminator a route ever needs. Heroes move and can die; the endpoint is
+ * an id, never a position -- resolvers (engine `endpointTile`/`endpointOwner`)
+ * read the live position/owner per use.
+ */
+export type TradeRouteEndpoint =
+  | { kind: "settlement"; id: SettlementId }
+  | { kind: "hero"; id: HeroId };
+
+/**
+ * What a route's caravan carries. "resource" is a cargo caravan hauling one
+ * non-gold warehouse resource; "gold" is a treasure caravan hauling gold.
+ * `CaravanState.cargo` holds units-of-resource for the former and gold for
+ * the latter -- one number field, two units, discriminated here.
+ */
+export type TradeRoutePayload =
+  | { kind: "resource"; resource: WarehouseResource }
+  | { kind: "gold" };
+
+/**
+ * One trade route: a same-owner endpoint pair (settlement or hero, any
+ * direction), one payload (a warehouse resource for a cargo caravan, gold
+ * for a treasure caravan), a wagon count drawn from the player's unassigned
+ * pool, and its physical caravan.
+ */
 export interface TradeRouteState {
   id: TradeRouteId;
-  fromSettlementId: SettlementId;
-  toSettlementId: SettlementId;
-  resource: WarehouseResource;
+  from: TradeRouteEndpoint;
+  to: TradeRouteEndpoint;
+  payload: TradeRoutePayload;
   wagons: number;
   /** null while the caravan is at the origin, loading. */
   caravan: CaravanState | null;
+  /**
+   * Day of the first unpaid weekly maintenance charge (caravanUpkeep);
+   * null/absent = paid up. Optional so legacy JSONB rows stay valid.
+   */
+  unpaidSinceDay?: number | null;
 }
 
 export interface GameState {
@@ -181,12 +227,6 @@ export interface ApplyEndOfTurnResult {
 export type TransferDirection = "deposit" | "withdraw";
 
 export interface TransferResult {
-  state: GameState;
-  ok: boolean;
-  reason: string;
-}
-
-export interface TradeResult {
   state: GameState;
   ok: boolean;
   reason: string;

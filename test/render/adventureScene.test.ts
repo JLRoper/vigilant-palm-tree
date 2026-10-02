@@ -7,6 +7,7 @@ import { axialToPixel, type Axial } from "../../src/core/hex";
 import { computeReachableSplit } from "../../src/render/overlays/pathOverlay";
 import { buildAdventureScene } from "../../src/render/scene/sceneBuilder/adventureScene";
 import type {
+  CaravanMarkerNode,
   CastleNode,
   CharterOverlayNode,
   FogHexNode,
@@ -547,4 +548,42 @@ test("hero trail points are capped to the last 25, render-side only (F14)", () =
   assert.deepEqual(trails[0].points[24], axialToPixel(0, 0), "the newest trail point (last entry) is kept");
   assert.deepEqual(trails[0].points[0], axialToPixel(-24, 0), "the oldest kept point is 25 back");
   assert.equal(hero.trail.length, 40, "the hero's own trail history is untouched");
+});
+
+test("caravan markers share the hero fog gate: hidden in fog, drawn in vision, own seat exempt", () => {
+  const map = makeGrassMap(10, 1);
+  const caravan = { q: 6, r: 0, ownerId: 1, wagons: 3 };
+  const enemyHero = new Hero("h-foe", "Foe", 6, 0, "enemy", 1);
+
+  const fogged = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, caravans: [caravan] }),
+  });
+  assert.equal(nodesOfKind(fogged, "caravanMarker").length, 0, "no vision at all -> the enemy caravan is invisible");
+  assert.equal(nodesOfKind<HeroNode>(fogged, "hero").length, 0, "same for the enemy hero on that tile");
+
+  const seen = buildAdventureScene({
+    map,
+    heroes: [new Hero("h0", "Hero", 2, 0, "player", 0), enemyHero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, caravans: [caravan] }),
+  });
+  assert.equal(nodesOfKind<CaravanMarkerNode>(seen, "caravanMarker").length, 1, "an own hero 4 tiles away brings the tile into vision");
+  assert.equal(nodesOfKind<HeroNode>(seen, "hero").length, 2, "hero and caravan gates agree on the same tile");
+
+  const own = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, caravans: [{ q: 6, r: 0, ownerId: 0, wagons: 3 }] }),
+  });
+  assert.equal(nodesOfKind(own, "caravanMarker").length, 1, "own caravan bypasses the fog set exactly like own heroes and castles");
 });

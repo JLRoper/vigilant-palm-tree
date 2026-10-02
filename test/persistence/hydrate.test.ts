@@ -112,6 +112,58 @@ test("hydrateGame reads from the granular tables once populated, matching the JS
   });
 });
 
+test("backfillHero passes wagons/resources/treasuryWagons through BOTH hydration paths (Phase 1a data-loss regression)", async () => {
+  // The pre-Phase-1 bug: backfillHero rebuilt each hero from an explicit
+  // field list that OMITTED wagons and resources, so a persisted
+  // `wagons: 3` silently re-defaulted to 5 and real cargo read as
+  // all-zero on BOTH read paths (legacy JSONB directly; granular via
+  // server/persistence/hydrate.ts feeding heroRepo-loaded heroes back
+  // through hydrateGameState). Phase 1 adds treasuryWagons to the same
+  // passthrough, so a 2-cart hero (a 1,000g purse cap) must survive too.
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    const persisted = makeHero("h0", 0, 2, 2, {
+      gold: 15,
+      wagons: 3,
+      treasuryWagons: 2,
+      resources: { wood: 40, stone: 0, iron: 0, arcane: 7, food: 0 },
+    });
+    const legacy = makeHero("h1", 1, 8, 8);
+    delete legacy.wagons;
+    delete legacy.resources;
+    delete legacy.treasuryWagons;
+    const heroes: Record<HeroId, HeroState> = { h0: persisted, h1: legacy };
+    const settlements: Record<SettlementId, SettlementState> = { s0: makeSettlement("s0", 0, 2, 2) };
+    await seedLegacyGame(client, name, heroes, settlements);
+
+    // Path 1: legacy JSONB row -> hydrateGameState directly.
+    const row = await createGameRepo(client).load(name);
+    const fromJsonb = hydrateGameState(row);
+    assert.equal(fromJsonb.heroes.h0.wagons, 3, "JSONB path: persisted wagons survive backfillHero");
+    assert.equal(fromJsonb.heroes.h0.treasuryWagons, 2, "JSONB path: persisted treasury carts survive backfillHero");
+    assert.deepEqual(
+      fromJsonb.heroes.h0.resources,
+      { wood: 40, stone: 0, iron: 0, arcane: 7, food: 0 },
+      "JSONB path: real cargo survives backfillHero",
+    );
+    assert.equal("treasuryWagons" in fromJsonb.heroes.h1, false, "absent stays absent -- the soft default is applied by the accessors, never materialized here");
+
+    // Path 2: granular tables -> heroRepo -> hydrateFromRepos -> hydrateGameState.
+    await createHeroRepo(client).upsertMany(name, heroes);
+    await createSettlementRepo(client).upsertMany(name, settlements);
+    const granular = await hydrateGame(client, name);
+    assert.equal(granular.source, "granular");
+    assert.equal(granular.state.heroes.h0.wagons, 3, "granular path: persisted wagons survive backfillHero");
+    assert.equal(granular.state.heroes.h0.treasuryWagons, 2, "granular path: persisted treasury carts survive backfillHero");
+    assert.deepEqual(
+      granular.state.heroes.h0.resources,
+      { wood: 40, stone: 0, iron: 0, arcane: 7, food: 0 },
+      "granular path: real cargo survives backfillHero",
+    );
+    assert.deepEqual(granular.state.heroes.h0, fromJsonb.heroes.h0, "both hydration paths agree on the loaded hero byte-for-byte");
+  });
+});
+
 test("hydrateGame's granular path surfaces real charters, which the legacy JSONB path can never produce", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();

@@ -940,8 +940,8 @@ test("a remote human-seat row still applies on the primary client (only AI seats
 
 // Trade routes (2026-09-30): TradeRouteCreated joined the applied deltas --
 // the sync reconstructs the route from the event's own routeId (the server
-// derives ids from a counter hydration never restores, so the event payload
-// is the only source of truth for the id).
+// derives ids from a counter the client cannot re-derive from the event
+// alone, so the event payload is the only source of truth for the id).
 
 test("a TradeRouteCreated delta applies to the sync state and fans out", async () => {
   const server: FakeServer = {
@@ -971,9 +971,9 @@ test("a TradeRouteCreated delta applies to the sync state and fans out", async (
     type: "TradeRouteCreated",
     actor: 1,
     routeId: "route0",
-    fromSettlementId: "s0",
-    toSettlementId: "s1",
-    resource: "wood",
+    from: { kind: "settlement", id: "s0" },
+    to: { kind: "settlement", id: "s1" },
+    payload: { kind: "resource", resource: "wood" },
     wagons: 2,
   };
   server.events.push(row(11, created, 1));

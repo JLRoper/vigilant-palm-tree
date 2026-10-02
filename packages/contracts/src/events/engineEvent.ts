@@ -1,7 +1,6 @@
 import type { Axial } from "../geometry";
 import type { CharterId, HeroId, HorseVariantId, PlayerSeat, SettlementId } from "../ids";
-import type { TransferDirection } from "../gameState";
-import type { WarehouseResource } from "../resources";
+import type { TransferDirection, TradeRouteEndpoint, TradeRoutePayload } from "../gameState";
 
 // Per-hero battle verdict (hero-outcomes plan W1): how a hero finished a
 // battle. Declared here because contracts is the single source (engine
@@ -30,14 +29,6 @@ export type EngineEvent =
       day: number;
       activePlayerId: number;
       wrapped: boolean;
-    }
-  | {
-      type: "ResourcesTraded";
-      actor: PlayerSeat;
-      fromSettlementId: SettlementId;
-      toSettlementId: SettlementId;
-      resource: WarehouseResource;
-      amount: number;
     }
   | {
       type: "BattleResolved";
@@ -155,20 +146,33 @@ export type EngineEvent =
         actor: PlayerSeat;
         heroId: HeroId;
         delta: number;
+        // Which slot moved (Phase 1 treasury-wagons split). Optional so
+        // pre-split rows keep reading as cargo assignments.
+        slot?: "cargo" | "treasury";
       }
     | {
         type: "WagonsBought";
         actor: PlayerSeat;
         settlementId: SettlementId;
         count: number;
+        // Which pool grew (Phase 1 treasury-wagons split). Optional so
+        // pre-split rows keep reading as cargo purchases. Named `slot`
+        // (not the brief's `kind`) to match AssignWagons and
+        // WagonsAssigned -- one discriminator name for the same concept.
+        slot?: "cargo" | "treasury";
       }
     | {
         type: "TradeRouteCreated";
         actor: PlayerSeat;
         routeId: string;
-        fromSettlementId: SettlementId;
-        toSettlementId: SettlementId;
-        resource: WarehouseResource;
+        // The route's endpoints and payload ride verbatim so a replaying
+        // client can rebuild the route record (applyTradeRouteCreated's
+        // targeted construction). Rows persisted by the pre-endpoint
+        // generation carry the legacy flat fromSettlementId/toSettlementId/
+        // resource fields instead; the applier normalizes both shapes.
+        from: TradeRouteEndpoint;
+        to: TradeRouteEndpoint;
+        payload: TradeRoutePayload;
         wagons: number;
       }
     | {

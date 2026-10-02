@@ -16,7 +16,6 @@ import {
   advanceRound,
   markSaved,
   transferGold,
-  tradeResources,
   setAutoTrade,
   runAutoTrade,
   reorderStack,
@@ -573,6 +572,49 @@ test("transferGold withdraw moves all settlement treasury to hero purse", () => 
   }
 });
 
+test("transferGold withdraw clamps to the treasury-cart purse headroom; the excess STAYS in the treasury", () => {
+  // Phase 1 heroGoldCap enforcement: this was one of the two uncapped gold
+  // sites. The hero holds 2,400g of a 2,500g purse cap (the 5-cart soft
+  // default), so an 800g treasury can only hand over 100g.
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 2400), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2, { gold: 800 }), makeSettlement("s1", 1, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s0", "withdraw");
+  assert.equal(next.ok, true);
+  if (next.ok) {
+    assert.equal(next.state.heroes.h0.gold, 2500, "credited exactly to the purse cap, never above it");
+    assert.equal(next.state.settlements.s0.gold, 700, "the clamped excess stays in the settlement treasury -- not destroyed");
+  }
+});
+
+test("transferGold withdraw rejects purse_full when the hero is at its cap", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 2500), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2, { gold: 800 }), makeSettlement("s1", 1, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s0", "withdraw");
+  assert.equal(next.ok, false);
+  if (!next.ok) {
+    assert.equal(next.reason, "purse_full");
+    assert.equal(next.state.settlements.s0.gold, 800, "nothing moved");
+    assert.equal(next.state.heroes.h0.gold, 2500);
+  }
+});
+
+test("transferGold withdraw against a 0-cart hero (explicit treasuryWagons: 0 = a 0g purse cap) is purse_full", () => {
+  const s = makeState({
+    heroes: [{ ...makeHero("h0", 0, 2, 2, 7, 0), treasuryWagons: 0 }, makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2, { gold: 800 }), makeSettlement("s1", 1, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s0", "withdraw");
+  assert.equal(next.ok, false);
+  if (!next.ok) {
+    assert.equal(next.reason, "purse_full", "an explicit 0 carts is a real 0g cap, not the absent-field soft default");
+    assert.equal(next.state.settlements.s0.gold, 800);
+  }
+});
+
 test("transferGold rejects when hero is not at settlement tile", () => {
   const s = makeState({
     heroes: [makeHero("h0", 0, 5, 5, 7, 50), makeHero("h1", 1, 18, 4)],
@@ -912,83 +954,6 @@ test("advanceRound matures a bank withdrawal on day + 7 and not before", () => {
   assert.deepEqual(matured.settlements.s0.buildings[0].bank?.pendingOut, []);
 });
 
-test("tradeResources moves resources between same-owner settlements and charges gold", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
-      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
-      makeSettlement("s1", 1, 18, 4),
-    ],
-  });
-  const next = tradeResources(s, "s0", "s0b", "wood", 3);
-  assert.equal(next.ok, true);
-  if (next.ok) {
-    assert.equal(next.state.settlements.s0.warehouse.wood, 7);
-    assert.equal(next.state.settlements.s0.gold, 97);
-    assert.equal(next.state.settlements.s0b.warehouse.wood, 3);
-    assert.equal(next.state.dirty, true);
-  }
-});
-
-test("tradeResources rejects when settlements have different owners", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
-      { ...makeSettlement("s1", 1, 18, 4, { gold: 100 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
-    ],
-  });
-  const next = tradeResources(s, "s0", "s1", "wood", 2);
-  assert.equal(next.ok, false);
-  if (!next.ok) assert.equal(next.reason, "different_owners");
-});
-
-test("tradeResources rejects when from settlement has insufficient resource", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 1, stone: 0, iron: 0, arcane: 0 } },
-      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
-    ],
-  });
-  const next = tradeResources(s, "s0", "s0b", "wood", 5);
-  assert.equal(next.ok, false);
-  if (!next.ok) assert.equal(next.reason, "insufficient_resource");
-});
-
-test("tradeResources rejects when from settlement has insufficient gold", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { gold: 1 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
-      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
-    ],
-  });
-  const next = tradeResources(s, "s0", "s0b", "wood", 5);
-  assert.equal(next.ok, false);
-  if (!next.ok) assert.equal(next.reason, "insufficient_gold");
-});
-
-test("tradeResources rejects when either settlement is unowned (neutral)", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
-      { ...makeSettlement("sN", null, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
-    ],
-  });
-  const next = tradeResources(s, "s0", "sN", "wood", 1);
-  assert.equal(next.ok, false);
-  if (!next.ok) assert.equal(next.reason, "unowned_settlement");
-});
-
-test("tradeResources rejects non-positive or non-integer amount", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
-      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
-    ],
-  });
-  assert.equal(tradeResources(s, "s0", "s0b", "wood", 0).ok, false);
-  assert.equal(tradeResources(s, "s0", "s0b", "wood", -3).ok, false);
-  assert.equal(tradeResources(s, "s0", "s0b", "wood", 1.5).ok, false);
-});
 test("applyEndOfTurn consumes food from the warehouse for the active player", () => {
   const s = makeState({
     settlements: [
@@ -1058,16 +1023,29 @@ test("applyEndOfTurnDetailed returns transfers array alongside state", () => {
   assert.equal(detail.state.settlements.s0b.warehouse.wood, 0);
 });
 
-test("runAutoTrade returns no transfers when all warehouses are stocked", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 10 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0, food: 5 }, morale: 100, autoTrade: true },
-      { ...makeSettlement("s0b", 0, 3, 3, { population: 500, goldTax: 1, gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 5 }, morale: 100, autoTrade: true },
-      makeSettlement("s1", 1, 18, 4),
-    ],
-  });
-  const result = runAutoTrade(s.settlements, 0);
-  assert.equal(result.transfers.length, 0);
+test("runAutoTrade honours the legacy gate: absent flag ON, explicit false moves nothing", () => {
+  // The donor/deficit fixture that fires below the gate: a hungry sibling, a
+  // gold-holding source with exportable surplus.
+  const settlements = () =>
+    makeState({
+      settlements: [
+        { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 100 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 20 }, morale: 100, autoTrade: true },
+        { ...makeSettlement("s0b", 0, 3, 3, { population: 500, goldTax: 1, gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 }, morale: 100, autoTrade: true },
+        makeSettlement("s1", 1, 18, 4),
+      ],
+    });
+  // Existing-save shape: the flag is absent on pre-2026-10-02 rows and runAutoTrade's
+  // optional third parameter resolves it true -- instant auto-trade fires.
+  const legacy = runAutoTrade(settlements().settlements, 0);
+  assert.equal(legacy.transfers.length, 1);
+  assert.equal(legacy.transfers[0].amount, 5);
+  // New-game shape: POST /games writes lobby.legacyAutoTrade = false and the
+  // EndTurn command case threads that boolean down -- nothing moves.
+  const gated = runAutoTrade(settlements().settlements, 0, false);
+  assert.equal(gated.transfers.length, 0);
+  assert.equal(gated.settlements.s0.warehouse.food, 20, "the donor keeps its surplus");
+  assert.equal(gated.settlements.s0.gold, 100);
+  assert.equal(gated.settlements.s0b.warehouse.food, 0, "the deficit goes unfilled by the gate");
 });
 
 test("setAutoTrade toggles a settlement's autoTrade flag", () => {

@@ -9,6 +9,8 @@ import type {
   Platoon,
   Player,
   SettlementState,
+  TradeRouteEndpoint,
+  TradeRoutePayload,
   WarehouseResource,
 } from "@heroes/contracts";
 import { apiFetch } from "./api";
@@ -155,11 +157,6 @@ export type BankGoldResult = {
   settlement: SettlementState;
 };
 
-export type TradeResourcesResult = {
-  fromSettlement: SettlementState;
-  toSettlement: SettlementState;
-};
-
 // Server is now fully authoritative for end-turn (Phase 3 Track A Week 2):
 // this no longer sends the client's GameState at all. The old route
 // trusted incomingState.heroes/players wholesale and only re-ran the
@@ -281,21 +278,6 @@ export async function bankGold(
   return postCommand<BankGoldResult>(name, { kind: "BankGold", ...payload });
 }
 
-// Phase 3 Track A Week 3+: ported from the old dedicated /trade route to
-// the /commands bus.
-export async function tradeResources(
-  name: string,
-  payload: {
-    actor: number;
-    fromSettlementId: string;
-    toSettlementId: string;
-    resource: Exclude<WarehouseResource, "food">;
-    amount: number;
-  }
-): Promise<TradeResourcesResult> {
-  return postCommand<TradeResourcesResult>(name, { kind: "TradeResources", ...payload });
-}
-
 // The five functions below are new in Phase 3 Track A Week 3+ -- none of
 // RecruitHero/UpgradeTownHall/SetAutoTrade/ReorderStack/CaptureSettlement
 // had any server round-trip at all before this (see this port's PR
@@ -390,29 +372,34 @@ export async function transferResources(
 }
 
 // Moves wagons between the player's unassigned pool and a hero (plan §6).
+// `slot` picks the pool ("cargo" army wagons, or "treasury" carts); absent
+// means cargo (the pre-split behavior).
 export async function assignWagons(
   name: string,
-  payload: { actor: number; heroId: string; delta: number }
+  payload: { actor: number; heroId: string; delta: number; slot?: "cargo" | "treasury" }
 ): Promise<void> {
   await postCommand(name, { kind: "AssignWagons", ...payload });
 }
 
 // Buys wagons into the player's unassigned pool, paid from a settlement (plan §6).
+// `slot` picks the pool the wagons land in; absent means cargo.
 export async function buyWagons(
   name: string,
-  payload: { actor: number; settlementId: string; count: number }
+  payload: { actor: number; settlementId: string; count: number; slot?: "cargo" | "treasury" }
 ): Promise<void> {
   await postCommand(name, { kind: "BuyWagons", ...payload });
 }
 
 // Creates a trade route, committing wagons from the unassigned pool (plan §6).
+// Endpoints are settlement-or-hero (`kind` discriminates); the payload picks
+// the caravan type (a warehouse resource = cargo, "gold" = treasure).
 export async function createTradeRoute(
   name: string,
   payload: {
     actor: number;
-    fromSettlementId: string;
-    toSettlementId: string;
-    resource: WarehouseResource;
+    from: TradeRouteEndpoint;
+    to: TradeRouteEndpoint;
+    payload: TradeRoutePayload;
     wagons: number;
   }
 ): Promise<void> {

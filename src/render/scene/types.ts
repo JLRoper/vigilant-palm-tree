@@ -82,6 +82,8 @@ export interface CaravanMarkerNode {
   world: WorldPoint;
   color: string;
   wagons: number;
+  /** Additive: threaded from CaravanMarkerSpec for a future gold-tinted treasure marker; no painter reads it yet. */
+  payloadKind?: "resource" | "gold";
 }
 
 export interface CharterOverlayNode {

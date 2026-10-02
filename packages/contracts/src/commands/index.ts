@@ -2,7 +2,6 @@ import type { MoveHeroCommand } from "./moveHero";
 import type { TransferGoldCommand } from "./transferGold";
 import type { BankGoldCommand } from "./bankGold";
 import type { EndTurnCommand } from "./endTurn";
-import type { TradeResourcesCommand } from "./tradeResources";
 import type { ResolveBattleCommand } from "./resolveBattle";
 import type { RecruitHeroCommand } from "./recruitHero";
 import type { UpgradeTownHallCommand } from "./upgradeTownHall";
@@ -28,7 +27,6 @@ export * from "./moveHero";
 export * from "./transferGold";
 export * from "./bankGold";
 export * from "./endTurn";
-export * from "./tradeResources";
 export * from "./resolveBattle";
 export * from "./recruitHero";
 export * from "./upgradeTownHall";
@@ -53,7 +51,7 @@ export * from "./submitSettlementBattleResult";
 // Grows with each command port. Week 1 of Phase 3 Track 3.A shipped
 // MoveHero/TransferGold; EndTurn followed in Week 2
 // (plan/2026-08-16-phase-3-parallel-dev-plan.md's port order). Week 3
-// added TradeResources, ResolveBattle, RecruitHero, UpgradeTownHall,
+// added ResolveBattle, RecruitHero, UpgradeTownHall,
 // SetAutoTrade, ReorderStack, and CaptureSettlement. StartCharter followed
 // once the activeCharters schema gap closed
 // (plan/2026-08-17-consolidated-phase-1-5-track-map.md §5.1 R5).
@@ -71,12 +69,16 @@ export * from "./submitSettlementBattleResult";
 // in one command (treasury -> pot, or a 7-day countdown out of the pot). The
 // pot's fields ride BuildingDef (`bank?: BankPot`), which the PlaceBuildings
 // shape gate has to preserve or every pot zeroes on the next build commit.
+// TradeResources was deleted 2026-10-02 (dead code): the manual
+// settlement-to-settlement teleport had no UI caller, and both of its jobs --
+// deficit fill and surplus moving -- belong to the caravan routes now
+// (economy/tradeNeeds.ts + logistics.ts). Legacy instant auto-trade survives
+// behind lobby.legacyAutoTrade instead.
 export type Command =
   | MoveHeroCommand
   | TransferGoldCommand
   | BankGoldCommand
   | EndTurnCommand
-  | TradeResourcesCommand
   | ResolveBattleCommand
   | RecruitHeroCommand
   | UpgradeTownHallCommand

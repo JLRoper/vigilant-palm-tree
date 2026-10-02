@@ -10,7 +10,7 @@ import { SpriteProvider } from "../render/assets";
 import type { Axial } from "../core/hex";
 import type { CityView } from "@screens/settlements/cityView/cityView";
 import type { CharterState } from "../state/gameState";
-import type { TradeRouteState } from "@heroes/contracts";
+import type { CaravanMarkerSpec } from "../render/renderTypes";
 import type { EntityMirror } from "../render/scene/entityMirror";
 
 export class ViewManager {
@@ -69,10 +69,10 @@ export class ViewManager {
     opts: RenderOptions,
     activeCharters?: readonly CharterState[],
     validCharterHexes?: Set<string> | null,
-    tradeRoutes?: readonly TradeRouteState[],
+    caravans?: readonly CaravanMarkerSpec[],
   ): void {
     if (!this.mapRenderer) return;
-    const fullOpts: RenderOptions = { ...opts, activeCharters, validCharterHexes, tradeRoutes };
+    const fullOpts: RenderOptions = { ...opts, activeCharters, validCharterHexes, caravans };
     this.mapRenderer.draw(hover, heroes, path, castles, fullOpts);
   }
 

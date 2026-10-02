@@ -465,18 +465,18 @@ export class UIManager {
           if (result.ok) stateManager.replaceState(tc().getState());
           return result;
         },
-        assignWagons: (heroId, delta) => {
-          const result = tc().assignWagons(heroId, delta);
+        assignWagons: (heroId, delta, slot) => {
+          const result = tc().assignWagons(heroId, delta, slot);
           if (result.ok) stateManager.replaceState(tc().getState());
           return result;
         },
-        buyWagons: (settlementId, count) => {
-          const result = tc().buyWagons(settlementId, count);
+        buyWagons: (settlementId, count, slot) => {
+          const result = tc().buyWagons(settlementId, count, slot);
           if (result.ok) stateManager.replaceState(tc().getState());
           return result;
         },
-        createTradeRoute: (fromId, toId, resource, wagons) => {
-          const result = tc().createTradeRoute(fromId, toId, resource, wagons);
+        createTradeRoute: (from, to, payload, wagons) => {
+          const result = tc().createTradeRoute(from, to, payload, wagons);
           if (result.ok) stateManager.replaceState(tc().getState());
           return result;
         },

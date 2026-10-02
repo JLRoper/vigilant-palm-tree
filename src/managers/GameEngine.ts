@@ -24,6 +24,7 @@ import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { setViewSeat } from "../state/viewSeat";
 import { createFrameErrorLog } from "../core/frameErrors";
 import { shouldDriveAi } from "../io/serverDrivenGames";
+import { resolveCaravanMarkers } from "../render/caravanMarkers";
 import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
 import { attachBattleOutcomeFeedback } from "@screens/combat/battleOutcomeFeedback";
@@ -483,7 +484,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       },
       gs.activeCharters,
       this.validCharterHexes,
-      gs.tradeRoutes,
+      resolveCaravanMarkers(gs.tradeRoutes, gs.settlements, gs.heroes),
     );
     this.view.drawCityOverlay(this.ui.getCityView());
   }

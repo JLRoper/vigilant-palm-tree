@@ -618,30 +618,40 @@ export function paintHoverHighlight(ctx: CanvasRenderingContext2D, node: HoverHi
 
 export function paintCaravanMarker(ctx: CanvasRenderingContext2D, node: CaravanMarkerNode): void {
   const { x, y } = node.world;
+  // Visual size cue: a longer string of wagons draws a proportionally bigger
+  // cart, capped so an extreme route cannot swallow the map. Base size is
+  // ~0.4 of a hex (2x HEX_SIZE wide); the cap lands at ~0.8.
+  const s = Math.min(1 + (node.wagons - 1) * 0.12, 2);
+  const bodyW = 26 * s;
+  const bodyH = 10 * s;
+  const wheelR = 3.5 * s;
+  const bodyTop = y - bodyH - wheelR;
   ctx.save();
-  // Wagon bed + canvas top.
+  // Wagon bed, anchored bottom-centre on the tile centre like other entities.
   ctx.fillStyle = "#8a5a2b";
   ctx.strokeStyle = "#3a2a14";
   ctx.lineWidth = 1.5;
-  ctx.fillRect(x - 9, y - 9, 18, 9);
-  ctx.strokeRect(x - 9, y - 9, 18, 9);
-  ctx.fillStyle = "#d9c9a3";
-  ctx.fillRect(x - 9, y - 12, 18, 4);
-  ctx.strokeRect(x - 9, y - 12, 18, 4);
-  // Wheels, tinted by the owning seat.
+  ctx.fillRect(x - bodyW / 2, bodyTop, bodyW, bodyH);
+  ctx.strokeRect(x - bodyW / 2, bodyTop, bodyW, bodyH);
+  // Owner-coloured canvas top arcing over the bed.
+  ctx.beginPath();
+  ctx.arc(x, bodyTop, bodyW / 2, Math.PI, 0);
+  ctx.closePath();
   ctx.fillStyle = node.color;
-  ctx.strokeStyle = "#3a2a14";
-  for (const dx of [-5, 5]) {
+  ctx.fill();
+  ctx.stroke();
+  // Wheels peeking below the bed, resting on the anchor line.
+  ctx.fillStyle = "#3a2a14";
+  for (const dx of [-bodyW * 0.3, bodyW * 0.3]) {
     ctx.beginPath();
-    ctx.arc(x + dx, y + 3, 3.2, 0, Math.PI * 2);
+    ctx.arc(x + dx, y - wheelR, wheelR, 0, Math.PI * 2);
     ctx.fill();
-    ctx.stroke();
   }
   // Wagon count flag.
   ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 9px sans-serif";
+  ctx.font = `bold ${Math.round(9 * s)}px sans-serif`;
   ctx.textAlign = "center";
-  ctx.fillText(String(node.wagons), x, y - 15);
+  ctx.fillText(String(node.wagons), x, bodyTop - bodyW / 2 - 3 * s);
   ctx.restore();
 }
 

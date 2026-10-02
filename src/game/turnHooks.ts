@@ -4,7 +4,6 @@ import {
   spendMovement,
   resolveBattle,
   transferGold,
-  tradeResources,
   recruitHero,
   upgradeTownHall,
   setAutoTrade,
@@ -37,6 +36,8 @@ import type {
   HeroState,
   PlayerId,
   SettlementId,
+  TradeRouteEndpoint,
+  TradeRoutePayload,
   TransferDirection,
   WarehouseResource,
 } from "@heroes/contracts";
@@ -211,21 +212,6 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         return { state, battle: null };
       }
     },
-    onTradeResources: async (
-      actor: number,
-      fromSettlementId: SettlementId,
-      toSettlementId: SettlementId,
-      resource: WarehouseResource,
-      amount: number,
-    ): Promise<void> => {
-      const name = opts.gameName();
-      if (!name || resource === "food") return;
-      try {
-        await tradeResources(name, { actor, fromSettlementId, toSettlementId, resource, amount });
-      } catch (e) {
-        reportCommandFailure("Trade resources", e);
-      }
-    },
     onRecruitHero: async (
       actor: number,
       heroName: string,
@@ -378,35 +364,35 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       reportCommandFailure("Transfer resources", e);
     }
   },
-  onAssignWagons: async (actor: number, heroId: HeroId, delta: number): Promise<void> => {
+  onAssignWagons: async (actor: number, heroId: HeroId, delta: number, slot?: "cargo" | "treasury"): Promise<void> => {
     const name = opts.gameName();
     if (!name) return;
     try {
-      await assignWagonsCommand(name, { actor, heroId, delta });
+      await assignWagonsCommand(name, { actor, heroId, delta, slot });
     } catch (e) {
       reportCommandFailure("Assign wagons", e);
     }
   },
-  onBuyWagons: async (actor: number, settlementId: SettlementId, count: number): Promise<void> => {
+  onBuyWagons: async (actor: number, settlementId: SettlementId, count: number, slot?: "cargo" | "treasury"): Promise<void> => {
     const name = opts.gameName();
     if (!name) return;
     try {
-      await buyWagonsCommand(name, { actor, settlementId, count });
+      await buyWagonsCommand(name, { actor, settlementId, count, slot });
     } catch (e) {
       reportCommandFailure("Buy wagons", e);
     }
   },
   onCreateTradeRoute: async (
     actor: number,
-    fromSettlementId: SettlementId,
-    toSettlementId: SettlementId,
-    resource: WarehouseResource,
+    from: TradeRouteEndpoint,
+    to: TradeRouteEndpoint,
+    payload: TradeRoutePayload,
     wagons: number,
   ): Promise<void> => {
     const name = opts.gameName();
     if (!name) return;
     try {
-      await createTradeRouteCommand(name, { actor, fromSettlementId, toSettlementId, resource, wagons });
+      await createTradeRouteCommand(name, { actor, from, to, payload, wagons });
     } catch (e) {
       reportCommandFailure("Create trade route", e);
     }

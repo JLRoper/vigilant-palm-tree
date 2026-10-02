@@ -323,16 +323,57 @@ test("POST /games/:name/commands accepts CreateTradeRoute over HTTP and returns 
     const res = await postCommand(name, {
       kind: "CreateTradeRoute",
       actor: 0,
-      fromSettlementId: ids0.settlementId,
-      toSettlementId: "s1",
-      resource: "wood",
+      from: { kind: "settlement", id: ids0.settlementId },
+      to: { kind: "settlement", id: "s1" },
+      payload: { kind: "resource", resource: "wood" },
       wagons: 2,
     }, token);
     assert.equal(res.status, 200, await res.clone().text());
-    const body = (await res.json()) as { tradeRoutes?: Array<{ id: string; wagons: number; resource: string }> };
+    const body = (await res.json()) as {
+      tradeRoutes?: Array<{
+        id: string;
+        wagons: number;
+        from: { kind: string; id: string };
+        to: { kind: string; id: string };
+        payload: { kind: string; resource?: string };
+      }>;
+    };
     assert.equal(body.tradeRoutes?.length, 1);
     assert.equal(body.tradeRoutes[0].wagons, 2);
-    assert.equal(body.tradeRoutes[0].resource, "wood");
+    assert.deepEqual(body.tradeRoutes[0].from, { kind: "settlement", id: ids0.settlementId });
+    assert.deepEqual(body.tradeRoutes[0].to, { kind: "settlement", id: "s1" });
+    assert.deepEqual(body.tradeRoutes[0].payload, { kind: "resource", resource: "wood" });
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("CreateTradeRoute to a hero endpoint with a gold payload rides the same HTTP path", async () => {
+  const name = uniqueName();
+  const { heroId, settlementId } = ids(name);
+  const players = [
+    { ...makePlayer(0, "player" as const, [heroId], [settlementId]), wagonsOwned: 2, wagonsUnassigned: 2 },
+    makePlayer(1, "ai" as const, ["h1"], []),
+  ];
+  const token = await seedGame(name, makeSettlement(settlementId, 0, 2, 2, { gold: 2500 }), {
+    players,
+    heroes: { [heroId]: makeHero(heroId, 0, 2, 2) },
+  });
+  try {
+    const res = await postCommand(name, {
+      kind: "CreateTradeRoute",
+      actor: 0,
+      from: { kind: "settlement", id: settlementId },
+      to: { kind: "hero", id: heroId },
+      payload: { kind: "gold" },
+      wagons: 1,
+    }, token);
+    assert.equal(res.status, 200, await res.clone().text());
+    const body = (await res.json()) as {
+      tradeRoutes?: Array<{ to: { kind: string; id: string }; payload: { kind: string } }>;
+    };
+    assert.deepEqual(body.tradeRoutes?.[0]?.to, { kind: "hero", id: heroId }, "the hero endpoint survives the round-trip");
+    assert.deepEqual(body.tradeRoutes?.[0]?.payload, { kind: "gold" }, "a treasure caravan is creatable over the wire");
   } finally {
     await cleanupGame(name);
   }
@@ -354,9 +395,9 @@ test("CreateTradeRoute with no unassigned wagons is a 409", async () => {
     const res = await postCommand(name, {
       kind: "CreateTradeRoute",
       actor: 0,
-      fromSettlementId: ids0.settlementId,
-      toSettlementId: "s1",
-      resource: "wood",
+      from: { kind: "settlement", id: ids0.settlementId },
+      to: { kind: "settlement", id: "s1" },
+      payload: { kind: "resource", resource: "wood" },
       wagons: 2,
     }, token);
     assert.equal(res.status, 409);
@@ -366,20 +407,64 @@ test("CreateTradeRoute with no unassigned wagons is a 409", async () => {
   }
 });
 
-test("CreateTradeRoute with a malformed payload is a 400", async () => {
+test("CreateTradeRoute with a malformed endpoint or payload shape is a 400", async () => {
   const name = uniqueName();
   const { settlementId } = ids(name);
   const token = await seedGame(name, makeSettlement(settlementId, 0, 2, 2));
+  const wellFormed = {
+    kind: "CreateTradeRoute",
+    actor: 0,
+    from: { kind: "settlement", id: settlementId },
+    to: { kind: "settlement", id: "s1" },
+    payload: { kind: "resource", resource: "wood" },
+    wagons: 2,
+  };
   try {
-    const res = await postCommand(name, {
+    const badEndpointKind = await postCommand(name, {
+      ...wellFormed,
+      from: { kind: "village", id: settlementId },
+    }, token);
+    assert.equal(badEndpointKind.status, 400, "endpoint kind must be one of the two literals");
+
+    const missingEndpointId = await postCommand(name, {
+      ...wellFormed,
+      from: { kind: "settlement" },
+    }, token);
+    assert.equal(missingEndpointId.status, 400, "endpoint ids must be non-empty strings");
+
+    const endpointNotAnObject = await postCommand(name, {
+      ...wellFormed,
+      to: "s1",
+    }, token);
+    assert.equal(endpointNotAnObject.status, 400);
+
+    const badPayloadKind = await postCommand(name, {
+      ...wellFormed,
+      payload: { kind: "silver" },
+    }, token);
+    assert.equal(badPayloadKind.status, 400, "payload kind must be gold or resource");
+
+    const badPayloadResource = await postCommand(name, {
+      ...wellFormed,
+      payload: { kind: "resource", resource: "unobtanium" },
+    }, token);
+    assert.equal(badPayloadResource.status, 400);
+
+    const legacyBody = await postCommand(name, {
       kind: "CreateTradeRoute",
       actor: 0,
       fromSettlementId: settlementId,
-      toSettlementId: settlementId,
-      resource: "unobtanium",
+      toSettlementId: "s1",
+      resource: "wood",
       wagons: 2,
     }, token);
-    assert.equal(res.status, 400);
+    assert.equal(legacyBody.status, 400, "the legacy flat body is malformed on the wire -- only persisted rows normalize");
+
+    const badWagons = await postCommand(name, {
+      ...wellFormed,
+      wagons: 0,
+    }, token);
+    assert.equal(badWagons.status, 400);
   } finally {
     await cleanupGame(name);
   }

@@ -2,7 +2,6 @@ import { axialToPixel, hexCorners, hexDistance, HEX_SIZE, type Axial } from "../
 import type { GameMap } from "../../../map/gameMap";
 import type { Hero } from "../../../entities/hero";
 import type { Castle } from "../../../entities/settlement";
-import { caravanTile } from "@heroes/engine";
 import type { RenderOptions } from "../../renderTypes";
 import { computeVision, isVisible } from "../../fog";
 import { computeReachableSplit } from "../../overlays/pathOverlay";
@@ -64,27 +63,6 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
     }
   }
 
-  // Trade-route caravan markers (docs/wagons-stockpiles-trade-routes-plan.md
-  // §5.2): one wagon marker per route, at the caravan's current tile (the
-  // origin settlement while it loads). Drawn regardless of fog -- knowing a
-  // caravan is on the road is public information; raiding is a later phase.
-  for (const route of opts.tradeRoutes ?? []) {
-    const from = castles.find((c) => c.id === route.fromSettlementId);
-    const to = castles.find((c) => c.id === route.toSettlementId);
-    if (!from || !to) continue;
-    const tile = route.caravan
-      ? caravanTile(route.caravan, from.tile)
-      : { q: from.tile.q, r: from.tile.r };
-    nodes.push({
-      kind: "caravanMarker",
-      q: tile.q,
-      r: tile.r,
-      world: axialToPixel(tile.q, tile.r),
-      color: opts.colorForOwner(from.ownerId),
-      wagons: route.wagons,
-    });
-  }
-
   for (const charter of opts.activeCharters ?? []) {
     if (!isVisible(visible, charter.targetQ, charter.targetR)) continue;
     nodes.push({
@@ -142,6 +120,26 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
 
   if (hover && isVisible(visible, hover.q, hover.r)) {
     nodes.push({ kind: "hoverHighlight", q: hover.q, r: hover.r, world: axialToPixel(hover.q, hover.r) });
+  }
+
+  // Trade-route caravan markers (docs/wagons-stockpiles-trade-routes-plan.md
+  // §5.2): pre-resolved by the caller (a still-loading caravan never gets
+  // this far) and fog-gated exactly like hero and castle nodes -- a caravan
+  // hidden in enemy fog is invisible. Emitted after the path/overlay layers
+  // and before heroes so the marker paints with the entity layer, with a
+  // hero drawing above a caravan sharing its tile.
+  for (const caravan of opts.caravans ?? []) {
+    const canSee = caravan.ownerId === opts.viewPlayerId || isVisible(visible, caravan.q, caravan.r);
+    if (!canSee) continue;
+    nodes.push({
+      kind: "caravanMarker",
+      q: caravan.q,
+      r: caravan.r,
+      world: axialToPixel(caravan.q, caravan.r),
+      color: opts.colorForOwner(caravan.ownerId),
+      wagons: caravan.wagons,
+      ...(caravan.payloadKind !== undefined ? { payloadKind: caravan.payloadKind } : {}),
+    });
   }
 
   for (const hero of heroes) {
