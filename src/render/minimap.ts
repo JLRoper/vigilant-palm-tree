@@ -1,6 +1,7 @@
 import { Hero } from "../entities/hero";
 import { GameMap } from "../map/gameMap";
 import { TERRAIN_COLORS } from "../map/terrain";
+import { decorationSeed } from "./decorationSeed";
 import { drawMinimapPath } from "./overlays/pathOverlay";
 import { isVisible } from "./fog";
 import type { Axial } from "../core/hex";
@@ -145,23 +146,24 @@ function isVisionEdge(visible: Set<string>, q: number, r: number): boolean {
   return false;
 }
 
-function drawMistCell(
+export function drawMistCell(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   size: number,
-  time: number,
   q: number,
   r: number,
   opacity: number,
 ): void {
-  const driftA = time * 24;
-  const driftB = time * 16;
-  const oxA = Math.sin((r * 1.35 + time * 1.4) * 1.3) * size * 0.26;
-  const oyA = Math.cos((q * 1.1 + time * 1.1) * 1.2) * size * 0.26;
-  const oxB = Math.sin((q * 1.7 - time * 1.2) * 1.1) * size * 0.34;
-  const oyB = Math.cos((r * 1.55 - time * 1.5) * 1.05) * size * 0.34;
-  const pulse = (Math.sin(time * 2.2 + q * 0.9 + r * 1.3) + 1) * 0.5;
+  const seed = decorationSeed(q, r);
+  const phase = seed - Math.floor(seed);
+  const driftA = phase * 24;
+  const driftB = phase * 16;
+  const oxA = Math.sin((r * 1.35 + phase * 1.4) * 1.3) * size * 0.26;
+  const oyA = Math.cos((q * 1.1 + phase * 1.1) * 1.2) * size * 0.26;
+  const oxB = Math.sin((q * 1.7 - phase * 1.2) * 1.1) * size * 0.34;
+  const oyB = Math.cos((r * 1.55 - phase * 1.5) * 1.05) * size * 0.34;
+  const pulse = (Math.sin(phase * 2.2 + q * 0.9 + r * 1.3) + 1) * 0.5;
 
   const g1 = ctx.createLinearGradient(
     x - size * 0.5 + oxA + driftA,
@@ -223,7 +225,6 @@ export function drawMinimap(
   const cellSize = geo.baseScale * minimapCamera.zoom;
   const half = cellSize / 2;
   const cullMargin = cellSize + 24;
-  const mistTime = performance.now() * 0.001;
 
   for (let r = 0; r < map.height; r++) {
     for (let q = 0; q < map.width; q++) {
@@ -247,9 +248,9 @@ export function drawMinimap(
       ctx.fillRect(cellX, cellY, cellSize + 0.5, cellSize + 0.5);
 
       if (!canSee) {
-        drawMistCell(ctx, cellX, cellY, cellSize + 0.5, mistTime, q, r, 1.22);
+        drawMistCell(ctx, cellX, cellY, cellSize + 0.5, q, r, 1.22);
       } else if (edgeOfVision) {
-        drawMistCell(ctx, cellX, cellY, cellSize + 0.5, mistTime, q, r, 0.14);
+        drawMistCell(ctx, cellX, cellY, cellSize + 0.5, q, r, 0.14);
       }
     }
   }
