@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildingFootprintFromRegistry, pickStyleForBuilding } from "@heroes/engine";
+import { buildingFootprintFromRegistry, farmFieldStyleAt, pickStyleForBuilding } from "@heroes/engine";
 import type { BuildingDef } from "@heroes/contracts";
 import { cellOrigin, cellToScreen, computeCityScale, TILE_D, TILE_W } from "../../src/core/cityGrid";
 import { buildingFootprint, buildingHeight, coversCell } from "../../src/render/cityBuildingDraw/primitives";
@@ -343,4 +343,30 @@ test("buildableCells flags exactly the free cells, keyed \"gx,gy\" (F16b)", () =
 
   const none = buildCityScene(baseInput());
   assert.ok(nodesOfKind<CityCellNode>(none, "cityCell").every((c) => !c.buildable), "no buildableCells input -> every cell unflagged");
+});
+
+test("legacy classic-styled farmField nodes resolve to the pixel farm styles deterministically", () => {
+  const farms: BuildingDef[] = [
+    { gx: 0, gy: 2, kind: "farmField", level: 1, style: "classic", w: 2, h: 2 },
+    { gx: 3, gy: 0, kind: "farmField", level: 1, style: "classic", w: 2, h: 2 },
+    { gx: 1, gy: 3, kind: "farmField", level: 2, style: "classic", w: 2, h: 2 },
+  ];
+  const nodes = buildCityScene(baseInput({ buildings: farms }));
+  const buildingNodes = nodesOfKind<CityBuildingNode>(nodes, "cityBuilding");
+  assert.deepEqual(
+    buildingNodes.map((n) => n.style),
+    [farmFieldStyleAt("Home", 0, 2), farmFieldStyleAt("Home", 3, 0), farmFieldStyleAt("Home", 1, 3)],
+  );
+  assert.ok(buildingNodes.every((n) => n.style === "pixel" || n.style === "pixel-alt"));
+});
+
+test("non-classic farmField styles and other buildings pass through untouched", () => {
+  const mixed: BuildingDef[] = [
+    { gx: 0, gy: 2, kind: "farmField", level: 1, style: "organic", w: 2, h: 2 },
+    { gx: 3, gy: 0, kind: "farmField", level: 1, style: "pixel", w: 2, h: 2 },
+    { gx: 2, gy: 2, kind: "townHall", level: 1, style: "classic" },
+  ];
+  const nodes = buildCityScene(baseInput({ buildings: mixed }));
+  const buildingNodes = nodesOfKind<CityBuildingNode>(nodes, "cityBuilding");
+  assert.deepEqual(buildingNodes.map((n) => n.style), ["organic", "pixel", "classic"]);
 });

@@ -10,6 +10,7 @@ import {
   buildingLabel,
   buildingBuildDays,
   buildingFootprintFromRegistry,
+  randomFarmFieldStyle,
 } from "@heroes/engine";
 import { buildListSections } from "./buildListSections";
 import { buildConfirmStatus, buildEntryStatus } from "./buildEntryStatus";
@@ -116,7 +117,9 @@ export class BuildingPlacer {
     // outright -- the server applies the same check and a rejected command
     // would leave a building on screen that was never paid for.
     if (!this.canAfford()) return false;
-    const style = pickStyleForBuilding(this.active, 1, this.style);
+    const style = this.active === "farmField"
+      ? randomFarmFieldStyle()
+      : pickStyleForBuilding(this.active, 1, this.style);
     const b: BuildingDef = {
       gx: this.hoverCell.gx,
       gy: this.hoverCell.gy,

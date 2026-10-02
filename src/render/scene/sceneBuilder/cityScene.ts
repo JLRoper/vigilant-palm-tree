@@ -1,5 +1,5 @@
 import type { CityViewSize } from "@heroes/engine";
-import { buildingConstructionProgress, buildingFootprintFromRegistry, constructionStageFor, pickStyleForBuilding, upgradeProgress, upgradeRefs } from "@heroes/engine";
+import { buildingConstructionProgress, buildingFootprintFromRegistry, constructionStageFor, farmFieldStyleAt, pickStyleForBuilding, upgradeProgress, upgradeRefs } from "@heroes/engine";
 import type { BuildingDef, BuildingKind, GenerationStyle, UpgradeState } from "@heroes/contracts";
 import { cellOrigin, cellsInDrawOrder, cellToScreen, computeCityScale, TILE_D, TILE_W } from "../../../core/cityGrid";
 import type { ResourceType } from "../../../map/resourceTiles";
@@ -158,7 +158,7 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
       halfWidth: fp.hw,
       halfHeight: fp.hh,
       ownerColor,
-      style: b.style,
+      style: b.kind === "farmField" && b.style === "classic" ? farmFieldStyleAt(settlementName, b.gx, b.gy) : b.style,
       selected: selectedKeys?.has(`${b.gx},${b.gy},${b.kind}`) ?? false,
       constructionStage: b.construction
         ? constructionStageFor(buildingConstructionProgress(b))

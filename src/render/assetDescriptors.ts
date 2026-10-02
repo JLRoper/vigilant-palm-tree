@@ -62,8 +62,6 @@ import resourceFoodPileBubbly from "../resources/resource-food-pile-bubbly.png?u
 import buildingClassicApartment1 from "../resources/buildings/building-classic-apartment-1.png?url";
 import buildingClassicArcheryRange1 from "../resources/buildings/building-classic-archeryRange-1.png?url";
 import buildingClassicBarracks1 from "../resources/buildings/building-classic-barracks-1.png?url";
-import buildingClassicFarmField1 from "../resources/buildings/building-classic-farmField-1.png?url";
-import buildingClassicFarmField1Variant2 from "../resources/buildings/building-classic-farmField-1-variant2.png?url";
 import buildingClassicFarmhouse1 from "../resources/buildings/building-classic-farmhouse-1.png?url";
 import buildingClassicHouse1 from "../resources/buildings/building-classic-house-1.png?url";
 import buildingClassicHouse2 from "../resources/buildings/building-classic-house-2.png?url";
@@ -122,6 +120,8 @@ import buildingPixelGroveSanctum1 from "../resources/buildings/building-pixel-gr
 import buildingPixelWarrenLodge1 from "../resources/buildings/building-pixel-warrenLodge-1.png?url";
 import buildingPixelSylvanStables1 from "../resources/buildings/building-pixel-sylvanStables-1.png?url";
 import buildingPixelWorldrootGrove1 from "../resources/buildings/building-pixel-worldrootGrove-1.png?url";
+import buildingPixelFarmField1 from "../resources/buildings/building-pixel-farmField-1.png?url";
+import buildingPixelFarmFieldAlt1 from "../resources/buildings/building-pixel-farmField-1-alt.png?url";
 import { Faction, Direction } from "../entities/hero";
 import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
@@ -289,8 +289,6 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "classic.apartment.1": buildingClassicApartment1,
   "classic.archeryRange.1": buildingClassicArcheryRange1,
   "classic.barracks.1": buildingClassicBarracks1,
-  "classic.farmField.1": buildingClassicFarmField1,
-  "classic.farmField.1_variant2": buildingClassicFarmField1Variant2,
   "classic.farmhouse.1": buildingClassicFarmhouse1,
   "classic.house.1": buildingClassicHouse1,
   "classic.house.2": buildingClassicHouse2,
@@ -350,6 +348,12 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel.warrenLodge.1": buildingPixelWarrenLodge1,
   "pixel.sylvanStables.1": buildingPixelSylvanStables1,
   "pixel.worldrootGrove.1": buildingPixelWorldrootGrove1,
+  "pixel.farmField.1": buildingPixelFarmField1,
+  "pixel.farmField.2": buildingPixelFarmField1,
+  "pixel.farmField.3": buildingPixelFarmField1,
+  "pixel-alt.farmField.1": buildingPixelFarmFieldAlt1,
+  "pixel-alt.farmField.2": buildingPixelFarmFieldAlt1,
+  "pixel-alt.farmField.3": buildingPixelFarmFieldAlt1,
 };
 
 export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescriptor> = {
@@ -779,8 +783,6 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.classic.apartment.1": 3,
   "building.classic.archeryRange.1": 10,
   "building.classic.barracks.1": 11,
-  "building.classic.farmField.1": 14,
-  "building.classic.farmField.1_variant2": 5,
   "building.classic.farmhouse.1": 11,
   "building.classic.house.1": 4,
   "building.classic.house.2": 6,
@@ -840,6 +842,12 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.warrenLodge.1": 8,
   "building.pixel.sylvanStables.1": 10,
   "building.pixel.worldrootGrove.1": 6,
+  "building.pixel.farmField.1": 17,
+  "building.pixel.farmField.2": 17,
+  "building.pixel.farmField.3": 17,
+  "building.pixel-alt.farmField.1": 17,
+  "building.pixel-alt.farmField.2": 17,
+  "building.pixel-alt.farmField.3": 17,
 };
 for (const [key, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {
   const desc = BUILDING_DESCRIPTORS[key];

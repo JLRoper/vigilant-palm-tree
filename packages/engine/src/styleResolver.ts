@@ -4,8 +4,6 @@ export const BUILDING_SPRITE_KEYS: readonly string[] = [
   "classic.apartment.1",
   "classic.archeryRange.1",
   "classic.barracks.1",
-  "classic.farmField.1",
-  "classic.farmField.1_variant2",
   "classic.farmhouse.1",
   "classic.house.1",
   "classic.house.2",
@@ -65,6 +63,9 @@ export const BUILDING_SPRITE_KEYS: readonly string[] = [
   "pixel.warrenLodge.1",
   "pixel.sylvanStables.1",
   "pixel.worldrootGrove.1",
+  "pixel.farmField.1",
+  "pixel.farmField.2",
+  "pixel.farmField.3",
 ] as const;
 
 const BUILDING_SPRITE_KEY_SET = new Set<string>(BUILDING_SPRITE_KEYS);
@@ -89,4 +90,18 @@ export function pickStyleForBuilding(
     }
   }
   return preferred as GenerationStyle;
+}
+
+export function randomFarmFieldStyle(): GenerationStyle {
+  return (Math.random() < 0.5 ? "pixel" : "pixel-alt") as GenerationStyle;
+}
+
+export function farmFieldStyleAt(seed: string, gx: number, gy: number): GenerationStyle {
+  let h = 2166136261;
+  const s = `${seed}:${gx},${gy}`;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 2 === 0 ? "pixel" : "pixel-alt") as GenerationStyle;
 }
