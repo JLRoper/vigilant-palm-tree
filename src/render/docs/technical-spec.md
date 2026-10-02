@@ -633,7 +633,7 @@ graph TD
 ```typescript
 interface BuildingDef {
   gx, gy: number;       // grid position
-  kind: BuildingKind;   // 28 types (contracts union)
+  kind: BuildingKind;   // 36 types (contracts union)
   level: number;        // 1–3
   style: GenerationStyle;
   w?, h?: number;       // multi-cell width/height (default 1)
@@ -956,7 +956,7 @@ classDiagram
 | `assets.ts` | 67 | `SpriteProvider` class, `createDefaultProvider()` factory |
 | `assetSource.ts` | 80 | `ImageSpriteSource`, `ProceduralSpriteSource`, `CompositeSpriteSource` |
 | `camera.ts` | 35 | Viewport pan, zoom, pixel ratio, canvas transform |
-| `cityBuildingDraw.ts` | 1392 | Building rendering: 5 styles, 12 building kinds, spots, mines |
+| `cityBuildingDraw.ts` | 1392 | Building rendering: 5 styles, 36 building kinds, spots, mines |
 | `cityBuildingGen.ts` | 439 | Procedural building layout generation: 6 patterns, seeded RNG |
 | `cityRenderer.ts` | 33 | City-view paint entry: canvas framing around one `paintScene()` call |
 | `fog.ts` | 41 | Fog of war: visibility computation from heroes and castles |
