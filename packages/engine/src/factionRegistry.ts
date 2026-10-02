@@ -3,10 +3,10 @@
 // FactionId without an entry here is a tsc error, the same compile
 // enforcement buildingRegistry.ts's Record<BuildingKind, BuildingEffect>
 // uses. `roster` is the unit-id membership list the parity test pins against
-// the unit_types DB column; ashen/ironmark/verdant ship EMPTY rosters until
-// their content plans land (their entries exist so ids resolve and banners
-// can be addressed), and their label/motto/palette values are the seeds
-// their plans refine.
+// the unit_types DB column; ashen/verdant ship EMPTY rosters until their
+// content plans land (their entries exist so ids resolve and banners can
+// be addressed), and their label/motto/palette values are the seeds their
+// plans refine.
 import type { FactionDef, FactionId } from "@heroes/contracts";
 
 export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
@@ -44,9 +44,18 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
     id: "ironmark",
     label: "The Ironmark Holds",
     motto: "The mountain remembers every debt.",
-    description: "Placeholder entry until the Ironmark Holds content plan lands its roster.",
+    description:
+      "Clan-holds carved under the Ironmark peaks: everything armored, expensive, and nearly immobile — grind them down or be ground. Ranged comes from gunpowder, elites from runeforged tradition.",
     palette: { primary: "#3f5c78", secondary: "#6b7280", accent: "#e0a526" },
-    roster: [],
+    roster: [
+      "dwarf_axeman",
+      "shield_bearer",
+      "hand_gunner",
+      "ironsworn",
+      "iron_golem",
+      "runesmith",
+      "forge_lord",
+    ],
   },
   verdant: {
     id: "verdant",

@@ -110,6 +110,10 @@ import buildingPixelIronMine3 from "../resources/buildings/building-pixel-ironMi
 import buildingPixelUnderConstruction1 from "../resources/buildings/building-pixel-underConstruction-1.png?url";
 import buildingPixelUnderConstruction2 from "../resources/buildings/building-pixel-underConstruction-2.png?url";
 import buildingPixelUnderConstruction3 from "../resources/buildings/building-pixel-underConstruction-3.png?url";
+import buildingPixelForgeHall1 from "../resources/buildings/building-pixel-forgeHall-1.png?url";
+import buildingPixelGunnersRedoubt1 from "../resources/buildings/building-pixel-gunnersRedoubt-1.png?url";
+import buildingPixelGolemFoundry1 from "../resources/buildings/building-pixel-golemFoundry-1.png?url";
+import buildingPixelDeepAnvil1 from "../resources/buildings/building-pixel-deepAnvil-1.png?url";
 import { Faction, Direction } from "../entities/hero";
 import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
@@ -326,6 +330,10 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel.underConstruction.2": buildingPixelUnderConstruction2,
   "pixel.underConstruction.3": buildingPixelUnderConstruction3,
   "pixel.smithy.2": buildingPixelSmithy2,
+  "pixel.forgeHall.1": buildingPixelForgeHall1,
+  "pixel.gunnersRedoubt.1": buildingPixelGunnersRedoubt1,
+  "pixel.golemFoundry.1": buildingPixelGolemFoundry1,
+  "pixel.deepAnvil.1": buildingPixelDeepAnvil1,
 };
 
 export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescriptor> = {
@@ -804,6 +812,10 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.woodcutterHut.2": 8,
   "building.pixel.woodcutterHut.3": 8,
   "building.pixel.smithy.2": 4,
+  "building.pixel.forgeHall.1": 8,
+  "building.pixel.gunnersRedoubt.1": 11,
+  "building.pixel.golemFoundry.1": 8,
+  "building.pixel.deepAnvil.1": 2,
 };
 for (const [key, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {
   const desc = BUILDING_DESCRIPTORS[key];

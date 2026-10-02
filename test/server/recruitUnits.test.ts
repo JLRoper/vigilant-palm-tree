@@ -13,6 +13,7 @@ import type {
 import type { HydratableGameRow } from "@heroes/engine";
 import { normalizePlatoons } from "@heroes/engine";
 import { handleCommand } from "../../server/app/commandHandler";
+import type { UnitType } from "@heroes/engine";
 import {
   createMockCharterRepo,
   createMockEventRepo,
@@ -100,7 +101,7 @@ function makeRow(
   };
 }
 
-function makeDeps(row: HydratableGameRow) {
+function makeDeps(row: HydratableGameRow, catalogUnitTypes: UnitType[] = []) {
   const gameRepo = createMockGameRepo({ [row.name as string]: row });
   const eventRepo = createMockEventRepo();
   const heroRepo = createMockHeroRepo({ [row.name as string]: row.heroes });
@@ -112,7 +113,7 @@ function makeDeps(row: HydratableGameRow) {
     heroRepo,
     settlementRepo,
     charterRepo,
-    deps: { gameRepo, eventRepo, heroRepo, settlementRepo, charterRepo, ctx: { rng: () => 0.5, catalog: { unitTypes: [] } } },
+    deps: { gameRepo, eventRepo, heroRepo, settlementRepo, charterRepo, ctx: { rng: () => 0.5, catalog: { unitTypes: catalogUnitTypes } } },
   };
 }
 
@@ -213,5 +214,75 @@ test("RecruitUnits rejects a count of 0", async () => {
   const result = await handleCommand(recruitCommand({ count: 0 }), deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "invalid_count");
+  assert.equal(eventRepo.events.length, 0);
+});
+
+// ── Ironmark Holds faction gating (025_ironmark_holds): the server path ──
+
+function ironmarkCatalogUnit(id: string): UnitType {
+  return {
+    id,
+    name: id,
+    attack: 1,
+    defence: 1,
+    health: 1,
+    speed: 1,
+    description: "",
+    advantageType: "infantry",
+    specialty: "sword",
+    specialtyPriority: 1.0,
+    factionId: "ironmark",
+  };
+}
+
+const FORGE_HALL = { gx: 2, gy: 3 };
+
+function forgeHallRow(actorFactionId?: "ironmark"): HydratableGameRow {
+  const players: Player[] = [
+    {
+      id: 0,
+      faction: "player",
+      name: "Player 1",
+      color: "#000000",
+      heroIds: ["h0"],
+      settlementIds: ["s0"],
+      ...(actorFactionId ? { factionId: actorFactionId } : {}),
+    },
+  ];
+  return makeRow(
+    [makeHero("h0", 0, 9, 9)],
+    [makeSettlement("s0", 0, 5, 5, { gold: 1000, buildings: [building("forgeHall", FORGE_HALL.gx, FORGE_HALL.gy)] })],
+    { players, active_player_id: 0 },
+  );
+}
+
+function forgeHallCommand(): Extract<Command, { kind: "RecruitUnits" }> {
+  return {
+    kind: "RecruitUnits",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    buildingKind: "forgeHall",
+    gx: FORGE_HALL.gx,
+    gy: FORGE_HALL.gy,
+    unitTypeId: "dwarf_axeman",
+    count: 2,
+  };
+}
+
+test("RecruitUnits lets an ironmark seat recruit dwarf_axeman from a forgeHall", async () => {
+  const { deps, eventRepo } = makeDeps(forgeHallRow("ironmark"), [ironmarkCatalogUnit("dwarf_axeman")]);
+  const result = await handleCommand(forgeHallCommand(), deps);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.settlement?.stacks[0]?.entries, [{ unitTypeId: "dwarf_axeman", count: 2 }]);
+  assert.equal(result.settlement?.gold, 1000 - 440, "2 dwarf axemen at 220g each");
+  assert.equal(eventRepo.events[0].payload.unitTypeId, "dwarf_axeman");
+});
+
+test("RecruitUnits rejects an ironmark-tagged unit for a human seat (unit_not_in_seat_faction)", async () => {
+  const { deps, eventRepo } = makeDeps(forgeHallRow(), [ironmarkCatalogUnit("dwarf_axeman")]);
+  const result = await handleCommand(forgeHallCommand(), deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "unit_not_in_seat_faction");
   assert.equal(eventRepo.events.length, 0);
 });

@@ -1,9 +1,10 @@
 // Parity pins for the faction registry (faction-registry foundation):
-// FACTION_REGISTRY rosters vs the shared 16-id list, vs the unit_types DB
-// column, and the banner-file assertion the glob-driven FACTION_BANNERS map
-// needs. assetDescriptors.ts is Vite-?url-coupled and cannot be imported
-// under bare node:test, so the banner is checked from the filesystem the
-// same way unitIcons.coverage.test.ts checks icon coverage.
+// FACTION_REGISTRY rosters vs the shared unit-catalog id list, vs the
+// unit_types DB column, and the banner-file assertion the glob-driven
+// FACTION_BANNERS map needs. assetDescriptors.ts is Vite-?url-coupled and
+// cannot be imported under bare node:test, so the banner is checked from
+// the filesystem the same way unitIcons.coverage.test.ts checks icon
+// coverage.
 //
 // The DB half runs initSchema() in before() (the same convention as
 // test/server/eventStreamRoute.test.ts): tests run under plain tsx --test
@@ -29,7 +30,7 @@ after(() => pool.end());
 
 const ALL_ROSTER_IDS = Object.values(FACTION_REGISTRY).flatMap((f) => [...f.roster]);
 
-test("registry rosters union equals the shared 16-id catalog list", () => {
+test("registry rosters union equals the shared catalog id list", () => {
   assert.deepEqual([...ALL_ROSTER_IDS].sort(), [...UNIT_CATALOG_IDS].sort());
 });
 

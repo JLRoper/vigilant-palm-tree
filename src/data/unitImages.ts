@@ -24,6 +24,13 @@ import blackDragon from "../resources/units/icons/black_dragon.png?url";
 import warhound from "../resources/units/icons/warhound.png?url";
 import giantEagle from "../resources/units/icons/giant_eagle.png?url";
 import eaglePrince from "../resources/units/icons/eagle_prince.png?url";
+import dwarfAxeman from "../resources/units/icons/dwarf_axeman.png?url";
+import shieldBearer from "../resources/units/icons/shield_bearer.png?url";
+import handGunner from "../resources/units/icons/hand_gunner.png?url";
+import ironsworn from "../resources/units/icons/ironsworn.png?url";
+import ironGolem from "../resources/units/icons/iron_golem.png?url";
+import runesmith from "../resources/units/icons/runesmith.png?url";
+import forgeLord from "../resources/units/icons/forge_lord.png?url";
 
 const KNOWN: Record<string, string> = {
   peasant,
@@ -41,6 +48,13 @@ const KNOWN: Record<string, string> = {
   warhound,
   giant_eagle: giantEagle,
   eagle_prince: eaglePrince,
+  dwarf_axeman: dwarfAxeman,
+  shield_bearer: shieldBearer,
+  hand_gunner: handGunner,
+  ironsworn,
+  iron_golem: ironGolem,
+  runesmith,
+  forge_lord: forgeLord,
 };
 
 export const PLACEHOLDER_UNIT_IMAGE = placeholder;

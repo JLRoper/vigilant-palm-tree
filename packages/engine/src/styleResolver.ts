@@ -53,6 +53,10 @@ export const BUILDING_SPRITE_KEYS: readonly string[] = [
   "pixel.woodcutterHut.2",
   "pixel.woodcutterHut.3",
   "pixel.smithy.2",
+  "pixel.forgeHall.1",
+  "pixel.gunnersRedoubt.1",
+  "pixel.golemFoundry.1",
+  "pixel.deepAnvil.1",
 ] as const;
 
 const BUILDING_SPRITE_KEY_SET = new Set<string>(BUILDING_SPRITE_KEYS);
