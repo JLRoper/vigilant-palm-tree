@@ -81,6 +81,10 @@ export function buildingHeight(kind: BuildingKind, level: number): number {
     gunnersRedoubt: 30,
     golemFoundry: 46,
     deepAnvil: 52,
+    groveSanctum: 26,
+    warrenLodge: 24,
+    sylvanStables: 32,
+    worldrootGrove: 50,
   };
   return (base[kind] ?? 24) + (level - 1) * 12;
 }

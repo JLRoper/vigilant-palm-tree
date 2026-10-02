@@ -32,7 +32,11 @@ export type BuildingKind =
   | "forgeHall"
   | "gunnersRedoubt"
   | "golemFoundry"
-  | "deepAnvil";
+  | "deepAnvil"
+  | "groveSanctum"
+  | "warrenLodge"
+  | "sylvanStables"
+  | "worldrootGrove";
 
 export interface BuildingDef {
   gx: number;

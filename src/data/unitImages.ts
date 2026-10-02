@@ -38,6 +38,13 @@ import ironsworn from "../resources/units/icons/ironsworn.png?url";
 import ironGolem from "../resources/units/icons/iron_golem.png?url";
 import runesmith from "../resources/units/icons/runesmith.png?url";
 import forgeLord from "../resources/units/icons/forge_lord.png?url";
+import forestScout from "../resources/units/icons/forest_scout.png?url";
+import briarWarden from "../resources/units/icons/briar_warden.png?url";
+import warbeast from "../resources/units/icons/warbeast.png?url";
+import thornArcher from "../resources/units/icons/thorn_archer.png?url";
+import elkRider from "../resources/units/icons/elk_rider.png?url";
+import treantElder from "../resources/units/icons/treant_elder.png?url";
+import stagKnight from "../resources/units/icons/stag_knight.png?url";
 
 const KNOWN: Record<string, string> = {
   peasant,
@@ -69,6 +76,13 @@ const KNOWN: Record<string, string> = {
   iron_golem: ironGolem,
   runesmith,
   forge_lord: forgeLord,
+  forest_scout: forestScout,
+  briar_warden: briarWarden,
+  warbeast,
+  thorn_archer: thornArcher,
+  elk_rider: elkRider,
+  treant_elder: treantElder,
+  stag_knight: stagKnight,
 };
 
 export const PLACEHOLDER_UNIT_IMAGE = placeholder;

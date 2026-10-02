@@ -118,6 +118,10 @@ import buildingPixelForgeHall1 from "../resources/buildings/building-pixel-forge
 import buildingPixelGunnersRedoubt1 from "../resources/buildings/building-pixel-gunnersRedoubt-1.png?url";
 import buildingPixelGolemFoundry1 from "../resources/buildings/building-pixel-golemFoundry-1.png?url";
 import buildingPixelDeepAnvil1 from "../resources/buildings/building-pixel-deepAnvil-1.png?url";
+import buildingPixelGroveSanctum1 from "../resources/buildings/building-pixel-groveSanctum-1.png?url";
+import buildingPixelWarrenLodge1 from "../resources/buildings/building-pixel-warrenLodge-1.png?url";
+import buildingPixelSylvanStables1 from "../resources/buildings/building-pixel-sylvanStables-1.png?url";
+import buildingPixelWorldrootGrove1 from "../resources/buildings/building-pixel-worldrootGrove-1.png?url";
 import { Faction, Direction } from "../entities/hero";
 import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
@@ -342,6 +346,10 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel.gunnersRedoubt.1": buildingPixelGunnersRedoubt1,
   "pixel.golemFoundry.1": buildingPixelGolemFoundry1,
   "pixel.deepAnvil.1": buildingPixelDeepAnvil1,
+  "pixel.groveSanctum.1": buildingPixelGroveSanctum1,
+  "pixel.warrenLodge.1": buildingPixelWarrenLodge1,
+  "pixel.sylvanStables.1": buildingPixelSylvanStables1,
+  "pixel.worldrootGrove.1": buildingPixelWorldrootGrove1,
 };
 
 export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescriptor> = {
@@ -828,6 +836,10 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.gunnersRedoubt.1": 11,
   "building.pixel.golemFoundry.1": 8,
   "building.pixel.deepAnvil.1": 2,
+  "building.pixel.groveSanctum.1": 9,
+  "building.pixel.warrenLodge.1": 8,
+  "building.pixel.sylvanStables.1": 10,
+  "building.pixel.worldrootGrove.1": 6,
 };
 for (const [key, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {
   const desc = BUILDING_DESCRIPTORS[key];

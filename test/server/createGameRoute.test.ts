@@ -292,3 +292,14 @@ test("POST /games rejects seatFactions entries outside the registry", async () =
     await cleanupGame(name);
   }
 });
+
+test("POST /games seatFactions ['verdant'] stamps a verdant seat (the 026 content faction)", async () => {
+  const name = uniqueName();
+  try {
+    const { row } = await createGame({ name, humanSlots: 1, seatFactions: ["verdant"] });
+    assert.equal(row.players[0].factionId, "verdant");
+    assert.equal(row.players[0].faction, "player", "the roster faction never disturbs the seat's player/ai faction");
+  } finally {
+    await cleanupGame(name);
+  }
+});

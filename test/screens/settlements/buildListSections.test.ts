@@ -36,6 +36,14 @@ test("farmhouse classifies as a troop building (it recruits peasants)", () => {
   assert.ok(troop.kinds.includes("farmhouse"), "farmhouse missing from Troop Buildings");
 });
 
+test("the four Verdant Wild buildings are troop buildings", () => {
+  const troop = buildListSections().find((s) => s.title === "Troop Buildings");
+  assert.ok(troop, "Troop Buildings section missing");
+  for (const kind of ["groveSanctum", "warrenLodge", "sylvanStables", "worldrootGrove"] as const) {
+    assert.ok(troop.kinds.includes(kind), `${kind} missing from Troop Buildings`);
+  }
+});
+
 test("farmhouse is also a food producer, but its recruit role wins the section", () => {
   assert.equal(isProducerKind("farmhouse"), true, "farmhouse produces food");
   const troop = buildListSections().find((s) => s.title === "Troop Buildings");
@@ -58,7 +66,7 @@ test("the food producers are Production (granary is a producer+storage hybrid)",
 
 test("exact section membership in BUILDABLE_KINDS order", () => {
   const sections = buildListSections();
-  assert.deepEqual(sections[0]?.kinds, ["archeryRange", "barracks", "mageGuild", "farmhouse", "stables", "huntingLodge", "eyrie", "crypt", "ossuary", "wraithBarrows", "spireOfAsh", "forgeHall", "gunnersRedoubt", "golemFoundry", "deepAnvil"]);
+  assert.deepEqual(sections[0]?.kinds, ["archeryRange", "barracks", "mageGuild", "farmhouse", "stables", "huntingLodge", "eyrie", "crypt", "ossuary", "wraithBarrows", "spireOfAsh", "forgeHall", "gunnersRedoubt", "golemFoundry", "deepAnvil", "groveSanctum", "warrenLodge", "sylvanStables", "worldrootGrove"]);
   assert.deepEqual(sections[1]?.kinds, ["goldMine", "woodcutterHut", "stoneMine", "ironMine", "arcaneFont", "farmField", "granary"]);
   assert.deepEqual(sections[2]?.kinds, [
     "townHall", "house", "tower", "smithy", "market", "apartment", "warehouse", "bank", "treasury",

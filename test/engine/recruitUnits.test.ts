@@ -327,3 +327,63 @@ test("iron_golem (monster-advantage, faction-rostered) is recruitable only by ir
     );
   }
 });
+
+// ── The Verdant Wild roster (026_verdant_wild): the sylvan buildings offer
+// their units to a verdant seat and to nobody else. ──
+
+const SYLVAN_BUILDINGS: BuildingDef[] = [
+  building("groveSanctum", 4, 4, 2),
+  building("warrenLodge", 5, 5, 2),
+  building("sylvanStables", 6, 6, 2),
+  building("worldrootGrove", 7, 7, 1),
+];
+
+const VERDANT_CATALOG = {
+  swordsman: catalogUnit("swordsman", "human"),
+  forest_scout: catalogUnit("forest_scout", "verdant"),
+  thorn_archer: catalogUnit("thorn_archer", "verdant"),
+  briar_warden: catalogUnit("briar_warden", "verdant"),
+  warbeast: catalogUnit("warbeast", "verdant"),
+  elk_rider: catalogUnit("elk_rider", "verdant"),
+  stag_knight: catalogUnit("stag_knight", "verdant"),
+  treant_elder: catalogUnit("treant_elder", "verdant"),
+};
+
+test("eligibleRecruitSources: a verdant seat sees the full sylvan roster", () => {
+  const state = recruitState({}, [building("barracks", BARRACKS.gx, BARRACKS.gy, 3), ...SYLVAN_BUILDINGS]);
+  assert.deepEqual(
+    sourcesOf(state, { unitTypes: VERDANT_CATALOG, seatFactionId: "verdant" }),
+    [
+      "briar_warden",
+      "elk_rider",
+      "forest_scout",
+      "stag_knight",
+      "thorn_archer",
+      "treant_elder",
+      "warbeast",
+    ],
+  );
+});
+
+test("eligibleRecruitSources: human, ashen, and ironmark seats cannot recruit the sylvan roster", () => {
+  const state = recruitState({}, [building("barracks", BARRACKS.gx, BARRACKS.gy, 3), ...SYLVAN_BUILDINGS]);
+  for (const seat of ["human", "ashen", "ironmark"] as const) {
+    const seen = sourcesOf(state, { unitTypes: VERDANT_CATALOG, seatFactionId: seat });
+    for (const id of [
+      "forest_scout",
+      "briar_warden",
+      "warbeast",
+      "thorn_archer",
+      "elk_rider",
+      "treant_elder",
+      "stag_knight",
+    ]) {
+      assert.ok(!seen.includes(id), `a ${seat} seat must not see the sylvan ${id}`);
+    }
+  }
+  assert.deepEqual(
+    sourcesOf(state, { unitTypes: VERDANT_CATALOG, seatFactionId: "human" }),
+    ["crusader", "pikeman", "swordsman"],
+    "a human seat keeps its own roster (pikeman/crusader default human via the D3 fallback)",
+  );
+});
