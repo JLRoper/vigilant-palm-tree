@@ -6,8 +6,12 @@ import {
   moraleDecay,
   playerIncome,
   playerWealth,
-  platoonTroopTotal,
 } from "@heroes/engine";
+import {
+  empireUpkeepLabel,
+  empireUpkeepTitleClause,
+  liveEmpireUpkeepCost,
+} from "./heroUpkeepCost";
 
 export { canEndTurn } from "@heroes/engine";
 
@@ -83,8 +87,7 @@ function playerEffectiveIncome(state: GameState, ownerId: PlayerId): string {
 
 function playerUpkeep(state: GameState, ownerId: PlayerId): string {
   const owned = Object.values(state.heroes).filter((h) => h.ownerId === ownerId);
-  const cost = owned.reduce((acc, h) => acc + platoonTroopTotal(h.stacks), 0);
-  return `Empire Upkeep: ${cost}g + ${cost} food/wk`;
+  return empireUpkeepLabel(liveEmpireUpkeepCost(owned));
 }
 
 // F10 (playtest fixes 2026-09-29): "· Path 4.6/7" while the previewed
@@ -122,13 +125,11 @@ function economyBreakdown(state: GameState, ownerId: PlayerId): string {
     { wood: 0, stone: 0 },
   );
   const decay = owned.reduce((acc, s) => acc + moraleDecay(s), 0);
-  const troops = Object.values(state.heroes)
-    .filter((h) => h.ownerId === ownerId)
-    .reduce((acc, h) => acc + platoonTroopTotal(h.stacks), 0);
+  const troopBill = liveEmpireUpkeepCost(Object.values(state.heroes).filter((h) => h.ownerId === ownerId));
   const moraleTrend = decay > 0 ? `morale −${fmtNum(decay)}/round` : "morale stable";
   return [
     `Income: settlements ${fmtNum(popTax)}g gross → morale ${morale}% → ${fmtNum(eff)}g/round to treasuries`,
-    `Upkeep: troops ${fmtNum(troops)}g + ${fmtNum(troops)} food/wk (hero purse & packs) · buildings ${fmtNum(upkeep.wood)} wood + ${fmtNum(upkeep.stone)} stone/wk · food ${fmtNum(foodHave)}/${fmtNum(foodNeed)} → ${moraleTrend}`,
+    `${empireUpkeepTitleClause(troopBill)} · buildings ${fmtNum(upkeep.wood)} wood + ${fmtNum(upkeep.stone)} stone/wk · food ${fmtNum(foodHave)}/${fmtNum(foodNeed)} → ${moraleTrend}`,
     `Building gold/turn +${fmtNum(buildingGold)}g counts toward next-turn gold (${fmtNum(nextGold)}g), not "Empire Income"`,
   ].join("\n");
 }

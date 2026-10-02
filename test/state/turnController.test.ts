@@ -95,6 +95,7 @@ function buildHooks(initial: GameState): TurnControllerHooks {
     onAdvanceCharterTravel: noop,
     onRecruitUnits: noop,
     onTransferUnits: noop,
+    onBankGold: noop,
     onSettlementBattleSubmitted: noop,
   };
   (hooks as unknown as TestHooks).onHumanTurnEndSpy = onHumanTurnEndSpy;
@@ -543,6 +544,93 @@ test("recruitUnits returns false without committing when the engine rejects the 
   const controller = new TurnController(initial, buildHooks(initial));
   assert.equal(controller.recruitUnits("s0", "archeryRange", 0, 0, "archer", 1), false, "no archeryRange at s0");
   assert.equal(controller.getState(), initial, "state must be untouched on a rejected recruit");
+});
+
+test("bankGold deposit moves treasury -> pot locally and blocks End Turn on the in-flight command", async () => {
+  const initial = makeState({
+    day: 11,
+    settlements: [
+      makeSettlement("s0", 0, 2, 2, { gold: 1000, buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic" }] }),
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  const seen: unknown[][] = [];
+  const command = deferred<void>();
+  hooks.onBankGold = ((...args: unknown[]) => {
+    seen.push(args);
+    return command.promise;
+  }) as TurnControllerHooks["onBankGold"];
+
+  const controller = new TurnController(initial, hooks);
+  const result = controller.bankGold("s0", 1, 1, 400, "deposit");
+  assert.deepEqual(result, { ok: true, reason: "" });
+
+  const s0 = controller.getState().settlements["s0"];
+  assert.equal(s0?.gold, 600, "the deposit leaves the treasury immediately");
+  assert.deepEqual(s0?.buildings[0].bank, { gold: 400, pendingOut: [] }, "the pot carries the gold locally");
+
+  // The local apply is load-bearing: multiplayerSync skips the client's OWN
+  // event id, so a POST-only path would leave this pot stale until a resync.
+  assert.deepEqual(seen, [[0, "s0", 1, 1, 400, "deposit"]]);
+
+  const endTurnPromise = controller.endHumanTurn();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(endTurnSpy.mock.callCount(), 0, "End Turn must not race past the in-flight onBankGold command");
+  command.resolve();
+  await endTurnPromise;
+  assert.equal(endTurnSpy.mock.callCount(), 1);
+});
+
+test("bankGold withdrawal starts the 7-day countdown out of the pot, not into the treasury", () => {
+  const initial = makeState({
+    day: 11,
+    settlements: [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 100,
+        buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 900, pendingOut: [] } }],
+      }),
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const controller = new TurnController(initial, buildHooks(initial));
+  assert.deepEqual(controller.bankGold("s0", 1, 1, 300, "withdraw"), { ok: true, reason: "" });
+
+  const s0 = controller.getState().settlements["s0"];
+  assert.equal(s0?.gold, 100, "the treasury does not receive the gold until it matures");
+  assert.deepEqual(s0?.buildings[0].bank, { gold: 600, pendingOut: [{ gold: 300, maturesOnDay: 18 }] });
+});
+
+test("bankGold returns the reducer's reason and dispatches nothing when it rejects", () => {
+  const initial = makeState({
+    settlements: [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 100,
+        buildings: [
+          { gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 100, pendingOut: [] } },
+          { gx: 0, gy: 0, kind: "house", level: 1, style: "classic" },
+        ],
+      }),
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const hooks = buildHooks(initial);
+  let called = 0;
+  hooks.onBankGold = (() => {
+    called++;
+    return Promise.resolve();
+  }) as TurnControllerHooks["onBankGold"];
+  const controller = new TurnController(initial, hooks);
+
+  assert.deepEqual(controller.bankGold("s0", 1, 1, 500, "deposit"), { ok: false, reason: "not_enough_gold" });
+  assert.deepEqual(controller.bankGold("s0", 0, 0, 10, "deposit"), { ok: false, reason: "not_a_bank" });
+  assert.deepEqual(controller.bankGold("s0", 1, 1, 600, "withdraw"), { ok: false, reason: "not_enough_in_pot" });
+  assert.deepEqual(controller.bankGold("nope", 1, 1, 10, "deposit"), { ok: false, reason: "no_settlement" });
+  assert.deepEqual(controller.bankGold("s0", 1, 1, 0, "deposit"), { ok: false, reason: "nothing_to_deposit" });
+  assert.equal(called, 0, "a rejected move must not POST");
+  assert.equal(controller.getState(), initial, "state must be untouched on a rejected move");
 });
 
 test("transferUnits moves garrison troops onto a hero standing on the settlement tile and tracks the hook", async () => {

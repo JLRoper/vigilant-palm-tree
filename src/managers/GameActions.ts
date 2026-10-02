@@ -22,6 +22,12 @@ import {
   UPKEEP_SUMMARY_OFFENDER_LIMIT,
 } from "@screens/shared/upkeepWarnings";
 import {
+  newlyCappedSettlements,
+  treasuryCapSummaryToastMessage,
+  treasuryCapToastMessage,
+  TREASURY_CAP_SUMMARY_OFFENDER_LIMIT,
+} from "@screens/settlements/treasuryCap";
+import {
   formatStacksLabel,
   openAssaultConfirmModal,
   type AssaultConfirmChoice,
@@ -593,8 +599,37 @@ export class GameActions {
     await tc.endHumanTurn();
     this.state.replaceState(tc.getState());
     this.reportUnpaidUpkeep();
+    this.reportTreasuryCaps(gs);
     this.session.setSaveStatus("saved");
     this.maybeAutoResolveBattle();
+  }
+
+  // A full treasury throws away the settlement's entire gold income with
+  // nothing on screen saying why, so the player watches an income rate pay
+  // nothing. Fires on the TRANSITION into the cap, not on every turn spent
+  // there, which is the whole reason the pre-EndTurn state is threaded through
+  // as `previous`: it is the record of what was already capped, recomputed from
+  // the game on every turn. Unlike reportUnpaidUpkeep (which re-reports an
+  // ongoing shortfall each turn) there is deliberately no "already warned"
+  // bookkeeping to reset on game load -- a module-level Set would survive a
+  // reload's state and either re-toast or stay silent forever, and a
+  // GameSettings record would make the one-time toast load-bearing state that
+  // could disagree with the server's gold. `previous` is stale-by-construction
+  // safe: the reducers replace the state object (see endCurrentTurn's own
+  // stateBeforeEnd reference check), so it still reads the pre-turn values.
+  private reportTreasuryCaps(previous: GameState): void {
+    const merged = this.state.getState();
+    const gameName = this.session.getActiveGameName();
+    const seat = getInMemoryLocalPlayerId(gameName ?? "") ?? 0;
+    const rows = newlyCappedSettlements(previous, merged, seat);
+    if (rows.length === 0) return;
+    if (rows.length > TREASURY_CAP_SUMMARY_OFFENDER_LIMIT) {
+      showToast(treasuryCapSummaryToastMessage(rows), "info");
+      return;
+    }
+    for (const row of rows) {
+      showToast(treasuryCapToastMessage(row), "info");
+    }
   }
 
   // Unpaid upkeep is otherwise invisible: consumption clamps at zero, morale

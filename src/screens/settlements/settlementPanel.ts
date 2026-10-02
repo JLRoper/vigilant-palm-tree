@@ -1,9 +1,9 @@
 import type { GameState, ResourceType, SettlementId, SettlementState, WarehouseResource } from "../../state/gameState";
-import { RESOURCES } from "../../map/resourceTiles";
-import { settlementResourceCap, settlementTreasuryCap, heroCargo, heroGoldCap, heroResourceCap, heroWagons, playerWagonsOwned, playerWagonsUnassigned } from "@heroes/engine";
+import { settlementResourceCap, settlementTreasuryCap, heroCargo, heroGoldCap, heroResourceCap, heroWagons, playerWagonsOwned, playerWagonsUnassigned, warehouseRates } from "@heroes/engine";
 import { PopupMenu, menuTheme, styleButton, clampMenuIntoView } from "@screens/shared/menu";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import { openTradeModal } from "./tradeModal";
+import { TREASURY_CAP_AMBER, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
 
 const RESOURCE_ICONS: Record<ResourceType, string> = {
   gold: "\u{1F4B0}",
@@ -283,6 +283,16 @@ export class SettlementPanel {
     const treasuryRow = makeRow();
     treasuryRow.left.textContent = "Treasury";
     treasuryRow.right.textContent = `${s.gold}g / ${settlementTreasuryCap(s)}g`;
+    // A full treasury discards the settlement's whole gold income
+    // (applyEffectiveIncome pays Math.min(income, headroom)); this row already
+    // shows gold against the cap, so the amber is the cue that the two numbers
+    // being equal is a problem rather than a coincidence. Own settlements only.
+    // This card is rebuilt wholesale on every update(), so setting the colour
+    // here is self-clearing when the settlement un-caps.
+    if (s.ownerId !== null && s.ownerId === state.activePlayerId && treasuryCapped(s)) {
+      treasuryRow.right.style.color = TREASURY_CAP_AMBER;
+      treasuryRow.right.title = treasuryCapMessage(s);
+    }
     card.appendChild(treasuryRow.row);
 
     if (s.foundedOnResource) {
@@ -292,8 +302,12 @@ export class SettlementPanel {
       card.appendChild(foundedRow.row);
     }
 
-    const rateKeys = RESOURCES.filter((r) => (s.resourceRates[r] ?? 0) > 0);
-    if (rateKeys.length > 0) {
+    // Only the rates the warehouse actually receives. resourceRates also carries
+    // a gold entry for settlements founded near a map gold tile, but nothing
+    // delivers it (gold is not a warehouse resource), so listing it here showed
+    // an income the turn loop never paid.
+    const rateRows = warehouseRates(s.resourceRates);
+    if (rateRows.length > 0) {
       const ratesHeader = document.createElement("div");
       ratesHeader.textContent = "Resource rates";
       Object.assign(ratesHeader.style, {
@@ -305,10 +319,10 @@ export class SettlementPanel {
       });
       card.appendChild(ratesHeader);
 
-      for (const r of rateKeys) {
+      for (const { resource, perTurn } of rateRows) {
         const rRow = makeRow();
-        rRow.left.textContent = `${RESOURCE_ICONS[r]} ${r}`;
-        rRow.right.textContent = `${s.resourceRates[r]}/turn`;
+        rRow.left.textContent = `${RESOURCE_ICONS[resource]} ${resource}`;
+        rRow.right.textContent = `${perTurn}/turn`;
         card.appendChild(rRow.row);
       }
     }

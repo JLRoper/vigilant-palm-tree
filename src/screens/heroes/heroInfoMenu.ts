@@ -7,9 +7,10 @@ import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayou
 import type { PanelRect } from "@screens/shared/panelPlacement";
 import { AccordionSection, makeRow } from "@screens/shared/panelWidgets";
 import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
+import { heroUpkeepLabel, heroUpkeepTitle, liveHeroUpkeepCost } from "@screens/shared/heroUpkeepCost";
 import { ArmySection, type ReorderHandler } from "./armySection";
 import { HERO_BANNERS, RESOURCE_PILE_BUBBLY_SPRITES } from "../../render/assetDescriptors";
-import { HERO_BASE_ATTACK, HERO_BASE_DEFENCE, heroCargo, heroGoldCap, heroResourceCap, heroWagons, platoonTroopTotal } from "@heroes/engine";
+import { HERO_BASE_ATTACK, HERO_BASE_DEFENCE, heroCargo, heroGoldCap, heroResourceCap, heroWagons } from "@heroes/engine";
 import type { WarehouseResource } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 
@@ -436,9 +437,9 @@ export class HeroInfoMenu {
     this.dom.movementFill.style.background =
       remaining <= 0 ? MOVEMENT_BAR_RED : fraction <= 0.25 ? MOVEMENT_BAR_AMBER : MOVEMENT_BAR_GREEN;
     this.dom.movementLabel.textContent = `${shown} / ${MOVEMENT_PER_TURN}`;
-    const troopTotal = platoonTroopTotal(hero.stacks);
-    this.dom.troopsEl.textContent = `${troopTotal} \u00B7 Upkeep: ${troopTotal}g + ${troopTotal} food/wk`;
-    this.dom.troopsEl.title = `Weekly upkeep: ${troopTotal}g from the purse + ${troopTotal} food from cargo; unpaid gold makes troops desert`;
+const upkeep = liveHeroUpkeepCost(hero.stacks);
+    this.dom.troopsEl.textContent = heroUpkeepLabel(upkeep);
+    this.dom.troopsEl.title = heroUpkeepTitle(upkeep);
 
     this.updateUpkeep(heroState, state.day);
 

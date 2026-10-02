@@ -49,7 +49,10 @@ test("hud: economy breakdown title explains income scaling, upkeep, and the next
   const lines = title.split("\n");
   assert.equal(lines.length, 3);
   assert.match(lines[0], /Income: settlements 1000g gross → morale 90% → 900g\/round to treasuries/);
-  assert.match(lines[1], /Upkeep: troops 0g \+ 0 food\/wk \(hero purse & packs\) · buildings 1 wood \+ 1 stone\/wk · food 4\/10 → morale −6\/round/);
+  assert.match(
+    lines[1],
+    /Upkeep: troops 0g \+ 0 food\/wk \(hero purse; larder first, then your own settlements' food while standing on one\) · buildings 1 wood \+ 1 stone\/wk · food 4\/10 → morale −6\/round/,
+  );
   assert.match(lines[2], /Building gold\/turn \+40g counts toward next-turn gold \(1040g\), not "Empire Income"/);
 });
 
