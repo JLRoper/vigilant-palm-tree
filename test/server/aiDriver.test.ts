@@ -7,12 +7,14 @@ import {
   pickAiMove,
   pickGarrisonRecruitment,
   resolveBattle,
+  evaluateTradeNeeds,
   type MapSize,
   type UnitType,
 } from "@heroes/engine";
 import { hexDistance, HEX_DIRECTIONS } from "@heroes/contracts";
 import type { Axial, Command, HeroId } from "@heroes/contracts";
 import {
+  AI_MAX_ROUTES_PER_SEAT,
   AI_TURN_ACTION_BUDGET,
   AI_TURN_PASS_DEADLINE_MS,
   configureAiDriver,
@@ -505,6 +507,118 @@ test("game-recreate invalidation: same name with a new numeric id resets the rec
 
   await scanOnce();
   assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, expected.length * 2, "the new memory's guard holds again");
+});
+
+// ── Phase 5: trade-route auto-accept ───────────────────────────────────────
+
+function tradeWorld(): AiDriverGameSnapshot {
+  // s-rich is the food surplus source AND can afford wagons; s-low is below
+  // 25% of its weekly food requirement. One recommendation total.
+  const rich = makeSettlement("s-rich", 1, 20, 14, {
+    gold: 1000,
+    warehouse: emptyWarehouse({ wood: 100, food: 500 }),
+  });
+  const low = makeSettlement("s-low", 1, 24, 14, { population: 400, warehouse: emptyWarehouse() });
+  return aiTurnWorld(
+    [makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { movementRemaining: 0 })],
+    { settlements: [rich, low] },
+  );
+}
+
+function tradeOverride(world: AiDriverGameSnapshot) {
+  return (command: Command): AiDriverCommandOutcome | undefined => {
+    if (command.kind === "BuyWagons") {
+      const settlement = world.state.settlements[command.settlementId];
+      if (!settlement || settlement.gold < 200 * command.count) return { ok: false, reason: "not_enough_gold" };
+      settlement.gold -= 200 * command.count;
+      world.state.players = world.state.players.map((p) =>
+        p.id === command.actor
+          ? { ...p, wagonsOwned: (p.wagonsOwned ?? 0) + command.count, wagonsUnassigned: (p.wagonsUnassigned ?? 0) + command.count }
+          : p,
+      );
+      return { ok: true };
+    }
+    if (command.kind === "CreateTradeRoute") {
+      const player = world.state.players.find((p) => p.id === command.actor);
+      if ((player?.wagonsUnassigned ?? 0) < command.wagons) return { ok: false, reason: "not_enough_wagons_unassigned" };
+      world.state.tradeRoutes = [
+        ...(world.state.tradeRoutes ?? []),
+        {
+          id: `route${world.state.tradeRoutes?.length ?? 0}`,
+          from: command.from,
+          to: command.to,
+          payload: command.payload,
+          wagons: command.wagons,
+          caravan: null,
+        },
+      ];
+      world.state.players = world.state.players.map((p) =>
+        p.id === command.actor ? { ...p, wagonsUnassigned: (p.wagonsUnassigned ?? 0) - command.wagons } : p,
+      );
+      return { ok: true };
+    }
+    return undefined;
+  };
+}
+
+test("constants: AI_MAX_ROUTES_PER_SEAT matches the plan", () => {
+  assert.equal(AI_MAX_ROUTES_PER_SEAT, 3);
+});
+
+test("Phase 5 auto-accept: BuyWagons (empty pool) then CreateTradeRoute with the suggested wagons, once per round+seat", async () => {
+  const world = tradeWorld();
+  const expected = evaluateTradeNeeds(world.state, 1, CATALOG);
+  assert.equal(expected.length, 1, "the fixture produces exactly one recommendation");
+  assert.equal(expected[0].wagons, 1, "need 4 food -> 1 wagon suggested");
+  const harness = installHarness(world, { override: tradeOverride(world) });
+
+  await scanOnce();
+
+  const buys = commandsOfKind(harness.commands, "BuyWagons");
+  const creates = commandsOfKind(harness.commands, "CreateTradeRoute");
+  assert.equal(buys.length, 1, "the empty pool triggered exactly one wagon buy");
+  assert.equal(buys[0].settlementId, "s-rich", "wagons are bought at the ORIGIN settlement");
+  assert.equal(buys[0].count, 1);
+  assert.equal(creates.length, 1, "one route created from the accepted recommendation");
+  assert.equal(creates[0].from.id, "s-rich");
+  assert.equal(creates[0].to.id, "s-low");
+  assert.deepEqual(creates[0].payload, { kind: "resource", resource: "food" });
+  assert.equal(creates[0].wagons, expected[0].wagons);
+  assert.ok(
+    harness.commands.indexOf(buys[0]) < harness.commands.indexOf(creates[0]),
+    "the wagon buy is ensured BEFORE the create",
+  );
+  assert.equal(harness.endTurns.length, 1, "the turn still completes");
+  assert.equal(world.state.tradeRoutes?.length, 1, "the scripted handler applied the route");
+
+  await scanOnce();
+  assert.equal(commandsOfKind(harness.commands, "CreateTradeRoute").length, 1, "the round+seat guard blocks a second accept");
+});
+
+test("Phase 5 auto-accept: a rejected CreateTradeRoute is tolerated and the turn still ends", async () => {
+  const world = tradeWorld();
+  const harness = installHarness(world, {
+    override: (command) => (command.kind === "CreateTradeRoute" ? { ok: false, reason: "not_enough_wagons_unassigned" } : tradeOverride(world)(command)),
+  });
+
+  await scanOnce();
+
+  assert.equal(commandsOfKind(harness.commands, "CreateTradeRoute").length, 1, "the create was still dispatched");
+  assert.equal(harness.endTurns.length, 1, "the turn still completes after the rejection");
+  assert.equal(harness.audits.length, 0, "a tolerated route rejection is not a turn-skipping audit");
+});
+
+test("Phase 5 auto-accept: every command is budget-counted (a tiny budget stops the accept, the turn still ends)", async () => {
+  const world = tradeWorld();
+  const harness = installHarness(world, { actionBudget: 1, override: tradeOverride(world) });
+
+  await scanOnce();
+
+  assert.equal(commandsOfKind(harness.commands, "BuyWagons").length, 1, "the buy consumed the one budgeted action");
+  assert.equal(commandsOfKind(harness.commands, "CreateTradeRoute").length, 0, "the create never fit the budget");
+  assert.equal(harness.endTurns.length, 1, "the exhaustion path still best-effort EndTurns");
+  assert.equal(harness.audits.length, 1);
+  assert.equal(harness.audits[0].kind, "turn_skipped");
 });
 
 test("per-game isolation: one throwing game never skips the others", async () => {

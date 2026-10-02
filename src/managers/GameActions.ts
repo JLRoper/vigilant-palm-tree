@@ -10,7 +10,7 @@ import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTr
 import type { GameState, HeroBattleVerdict, HeroState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
-import { catalogFailed, loadUnitCatalog } from "../data/unitCatalog";
+import { catalogFailed, cachedUnitTypes, loadUnitCatalog } from "../data/unitCatalog";
 import type { UnitType } from "../state/units";
 import { submitBattleResult, submitSettlementBattleResult, type SubmitBattleResultResult, type SubmitSettlementBattleResultResult } from "../io/commands";
 import { consumeResolveBattleVerdicts, mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../game/turnHooks";
@@ -27,6 +27,7 @@ import {
   treasuryCapToastMessage,
   TREASURY_CAP_SUMMARY_OFFENDER_LIMIT,
 } from "@screens/settlements/treasuryCap";
+import { evaluateTradeReminder } from "@screens/shared/tradeNeedsReminder";
 import {
   formatStacksLabel,
   openAssaultConfirmModal,
@@ -600,6 +601,7 @@ export class GameActions {
     this.state.replaceState(tc.getState());
     this.reportUnpaidUpkeep();
     this.reportTreasuryCaps(gs);
+    this.remindTradeRoutes();
     this.session.setSaveStatus("saved");
     this.maybeAutoResolveBattle();
   }
@@ -630,6 +632,20 @@ export class GameActions {
     for (const row of rows) {
       showToast(treasuryCapToastMessage(row), "info");
     }
+  }
+
+  // Phase 5 trade-route reminder: recommendations exist and the player has
+  // ZERO configured routes -> one summary toast. TOAST ONLY (see the
+  // module's header for why a blocking surface is categorically off the
+  // table), deduped once per session per distinct recommendation inside the
+  // pure module. Reads the post-EndTurn merged state, like
+  // reportUnpaidUpkeep.
+  private remindTradeRoutes(): void {
+    const merged = this.state.getState();
+    const gameName = this.session.getActiveGameName();
+    const seat = getInMemoryLocalPlayerId(gameName ?? "");
+    const message = evaluateTradeReminder(merged, seat, cachedUnitTypes());
+    if (message) showToast(message, "info");
   }
 
   // Unpaid upkeep is otherwise invisible: consumption clamps at zero, morale

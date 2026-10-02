@@ -3,6 +3,7 @@ import {
   GARRISON_BACKOFF_ROUNDS,
   GameMap,
   detectAdjacentEnemy,
+  evaluateTradeNeeds,
   mulberry32,
   normalizePlatoons,
   pickAiMove,
@@ -64,6 +65,9 @@ export const AI_TURN_ACTION_BUDGET = 64;
 /** D12: per-game pass deadline, checked BETWEEN actions (never aborts mid-command). */
 export const AI_TURN_PASS_DEADLINE_MS = 25_000;
 
+/** Phase 5: trade-route recommendations the AI auto-accepts per round+seat. */
+export const AI_MAX_ROUTES_PER_SEAT = 3;
+
 const DEFAULT_SCAN_INTERVAL_MS = 5_000;
 
 /** Wire shape of one driver candidate row. */
@@ -121,6 +125,8 @@ interface GameDriverMemory {
   rng: () => number;
   garrisonBackoff: Map<HeroId, Map<SettlementId, number>>;
   recruitedTurns: Set<string>;
+  /** `${round}:${seat}` keys already served by the trade-route auto-accept (Phase 5, the recruitedTurns pattern). */
+  tradeRouteTurns: Set<string>;
 }
 
 const memory = new Map<string, GameDriverMemory>();
@@ -330,6 +336,7 @@ function syncMemory(gameName: string, gameId: number): GameDriverMemory {
     rng: () => 0,
     garrisonBackoff: new Map(),
     recruitedTurns: new Set(),
+    tradeRouteTurns: new Set(),
   };
   memory.set(gameName, fresh);
   return fresh;
@@ -340,10 +347,14 @@ function streamFor(mem: GameDriverMemory, seed: number, round: number, seat: num
   if (mem.turnKey !== key) {
     mem.turnKey = key;
     mem.rng = mulberry32((seed ^ round ^ seat) >>> 0);
-    // Prune recruit-guard entries from finished rounds (keyed "round:seat").
+    // Prune recruit-guard and trade-route entries from finished rounds (keyed "round:seat").
     for (const entry of mem.recruitedTurns) {
       const entryRound = Number(entry.slice(0, entry.indexOf(":")));
       if (Number.isInteger(entryRound) && entryRound < round) mem.recruitedTurns.delete(entry);
+    }
+    for (const entry of mem.tradeRouteTurns) {
+      const entryRound = Number(entry.slice(0, entry.indexOf(":")));
+      if (Number.isInteger(entryRound) && entryRound < round) mem.tradeRouteTurns.delete(entry);
     }
   }
   return mem.rng;
@@ -568,6 +579,70 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
       if (!recruited.outcome.ok) {
         console.info(
           `[aiDriver] "${gameName}" garrison recruit rejected (${recruited.outcome.reason}): ${item.unitTypeId} x${item.count} @ ${item.settlementId}`,
+        );
+      }
+    }
+  }
+
+  // Phase 5: trade-route auto-accept, once per round+seat (the D13 pattern
+  // above): the SAME evaluator the player's logistics modal uses runs for
+  // the AI seat, and up to AI_MAX_ROUTES_PER_SEAT recommendations are
+  // accepted. Per accepted rec: ensure the unassigned wagon pool covers the
+  // suggestion (BuyWagons at the rec's ORIGIN settlement when affordable —
+  // 200g + 5 wood per wagon, rejection tolerated), then CreateTradeRoute
+  // with the suggested wagons clamped to whatever pool actually exists.
+  // Every command is budget-counted via dispatch; per-item rejections are
+  // logged and never stall the turn; exhaustion (budget/deadline) breaks
+  // out exactly like the recruit loop.
+  const tradeKey = `${snap.state.round}:${seat}`;
+  if (!mem.tradeRouteTurns.has(tradeKey)) {
+    mem.tradeRouteTurns.add(tradeKey);
+    const recommendations = evaluateTradeNeeds(snap.state, seat, catalog).slice(0, AI_MAX_ROUTES_PER_SEAT);
+    for (const rec of recommendations) {
+      if (rec.from.kind !== "settlement") continue;
+      const seatPlayer = snap.state.players.find((p) => p.id === seat);
+      let pool = seatPlayer?.wagonsUnassigned ?? 0;
+      if (pool < rec.wagons) {
+        const bought = await dispatch(ctx, {
+          kind: "BuyWagons",
+          gameName,
+          actor: seat,
+          settlementId: rec.from.id,
+          count: rec.wagons - pool,
+        });
+        if ("stop" in bought) {
+          if (bought.stop === "turn_lost") return "turn_lost";
+          exhausted = bought.stop;
+          break;
+        }
+        // Trust an accepted buy (the handler re-validates affordability
+        // against authoritative state) but not a rejected one: the driver's
+        // snapshot is stale by construction, so the pool is tracked locally.
+        if (bought.outcome.ok) pool += rec.wagons - pool;
+      }
+      if (pool < 1) {
+        console.info(
+          `[aiDriver] "${gameName}" trade route to ${JSON.stringify(rec.to)} skipped: no wagons in the unassigned pool`,
+        );
+        continue;
+      }
+      const created = await dispatch(ctx, {
+        kind: "CreateTradeRoute",
+        gameName,
+        actor: seat,
+        from: rec.from,
+        to: rec.to,
+        payload: rec.payload,
+        wagons: Math.min(rec.wagons, pool),
+      });
+      if ("stop" in created) {
+        if (created.stop === "turn_lost") return "turn_lost";
+        exhausted = created.stop;
+        break;
+      }
+      if (!created.outcome.ok) {
+        console.info(
+          `[aiDriver] "${gameName}" CreateTradeRoute rejected (${created.outcome.reason}): ${JSON.stringify(rec.from)} -> ${JSON.stringify(rec.to)}`,
         );
       }
     }
