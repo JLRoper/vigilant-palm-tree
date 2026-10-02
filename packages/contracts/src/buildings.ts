@@ -24,7 +24,19 @@ export type BuildingKind =
   | "arcaneFont"
   | "stables"
   | "huntingLodge"
-  | "eyrie";
+  | "eyrie"
+  | "crypt"
+  | "ossuary"
+  | "wraithBarrows"
+  | "spireOfAsh"
+  | "forgeHall"
+  | "gunnersRedoubt"
+  | "golemFoundry"
+  | "deepAnvil"
+  | "groveSanctum"
+  | "warrenLodge"
+  | "sylvanStables"
+  | "worldrootGrove";
 
 export interface BuildingDef {
   gx: number;

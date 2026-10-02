@@ -188,6 +188,37 @@ test("non-finite enemyCount falls back to legacy behavior", () => {
   assert.deepEqual(nan, legacy);
 });
 
+test("seatFactions assigns per-seat roster factions; uncovered seats carry no key", () => {
+  const state = build({ enemyCount: 1, humanSeatCount: 1, seatFactions: ["ashen"] });
+  assert.equal(state.players[0].factionId, "ashen");
+  assert.equal("factionId" in state.players[1], false, "short array = the seat keeps the human default with no key");
+  assert.equal(state.players[1].faction, "ai", "the seat faction (player|ai) is untouched by the roster faction");
+});
+
+test("seatFactions absent keeps the snapshot byte-identical: no factionId key anywhere", () => {
+  const legacy = build({ enemyCount: 1, humanSeatCount: 1 });
+  for (const p of legacy.players) {
+    assert.equal("factionId" in p, false, "absent option must not add the key (deepStrictEqual rule)");
+  }
+});
+
+test("seatFactions entries beyond the seat count are never read (the clamp)", () => {
+  const state = build({ enemyCount: 0, humanSeatCount: 2, seatFactions: ["ironmark", "verdant", "ashen"] });
+  assert.equal(state.players.length, 2, "the third entry cannot create a seat");
+  assert.equal(state.players[0].factionId, "ironmark");
+  assert.equal(state.players[1].factionId, "verdant");
+});
+
+test("makeInitialStatePayload threads seatFactions the same way (the POST /games path)", () => {
+  const payload = makeInitialStatePayload(new GameMap(7, "small"), mulberry32(42), {
+    enemyCount: 1,
+    humanSeatCount: 1,
+    seatFactions: ["verdant", "human"],
+  });
+  assert.equal(payload.players[0].factionId, "verdant");
+  assert.equal(payload.players[1].factionId, "human");
+});
+
 test("every spawned hero across 1 human + 3 AI seats has a non-empty starter army", () => {
   const state = build({ enemyCount: 3, humanSeatCount: 1 });
   assert.equal(state.players.length, 4);

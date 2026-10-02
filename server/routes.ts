@@ -1,6 +1,7 @@
 ﻿import { Router } from "express";
 import { pool, withTransaction } from "./db";
 import {
+  FACTION_REGISTRY,
   GameMap,
   isHealthy,
   makeInitialStatePayload,
@@ -11,6 +12,7 @@ import {
   type UnitType,
 } from "@heroes/engine";
 import type {
+  FactionId,
   HeroState,
   Player,
   SettlementState,
@@ -165,6 +167,7 @@ type UnitTypeRow = {
   upkeep_gold: number;
   upkeep_food: number;
   range: number;
+  faction_id: UnitType["factionId"];
 };
 
 router.get("/units", async (_req, res) => {
@@ -188,7 +191,7 @@ router.get("/units", async (_req, res) => {
 async function loadUnitCatalog(): Promise<UnitType[]> {
   const r = await pool.query<UnitTypeRow>(
     `SELECT id, name, attack, defence, health, speed, description, advantage_type, specialty, specialty_priority,
-            tier, upkeep_gold, upkeep_food, range
+            tier, upkeep_gold, upkeep_food, range, faction_id
        FROM unit_types ORDER BY attack ASC, id ASC`,
   );
   return r.rows.map((row) => ({
@@ -205,7 +208,8 @@ async function loadUnitCatalog(): Promise<UnitType[]> {
     tier: row.tier as UnitType["tier"],
     upkeepGold: row.upkeep_gold,
     upkeepFood: row.upkeep_food,
-range: row.range,
+    range: row.range,
+    factionId: row.faction_id,
   }));
 }
 
@@ -391,6 +395,7 @@ router.post("/games", async (req, res) => {
       humanSlots,
       enemySlots,
       legacyAutoTrade: legacyAutoTradeOptIn,
+      seatFactions,
     } = req.body ?? {};
     if (typeof name !== "string" || !name) {
       res.status(400).json({ error: "name required" });
@@ -410,6 +415,21 @@ router.post("/games", async (req, res) => {
       humanCount !== null
         ? Math.max(0, Math.min(rawEnemySlots, MAX_PLAYERS - humanCount))
         : 0;
+    // Seat factions (faction-registry foundation): the creator's local
+    // per-seat faction choice, riding the enemySlots precedent. Absent or
+    // short = every seat stays "human" (the engine default); entries beyond
+    // the seat count are never read by makePlayers, which is the clamp.
+    let seatFactionsSafe: FactionId[] | undefined;
+    if (seatFactions !== undefined) {
+      if (
+        !Array.isArray(seatFactions) ||
+        seatFactions.some((f) => typeof f !== "string" || !(f in FACTION_REGISTRY))
+      ) {
+        res.status(400).json({ error: "seatFactions must be an array of faction ids" });
+        return;
+      }
+      seatFactionsSafe = seatFactions as FactionId[];
+    }
     const initOptsBase =
       humanCount !== null
         ? {
@@ -427,7 +447,11 @@ router.post("/games", async (req, res) => {
     } catch (err) {
       console.warn("[api] POST /games: unit catalog unavailable, starter food bill uses 1g/1f defaults:", err);
     }
-    const initOpts = { ...initOptsBase, unitTypes: initUnitTypes };
+    const initOpts = {
+      ...initOptsBase,
+      unitTypes: initUnitTypes,
+      ...(seatFactionsSafe ? { seatFactions: seatFactionsSafe } : {}),
+    };
     const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179), initOpts);
 
     let lobbyState: LobbyState = {

@@ -1,4 +1,5 @@
 import type { BuildingKind } from "./buildings";
+import type { FactionId } from "./factions";
 import type { CharterId, Faction, HeroId, HorseVariantId, PlayerId, SettlementId } from "./ids";
 import type { ResourceType, Warehouse, WarehouseResource } from "./resources";
 import type { CharterState, SettlementState } from "./settlement";
@@ -20,6 +21,11 @@ export interface Player {
   color: string;
   heroIds: HeroId[];
   settlementIds: SettlementId[];
+  // ── Roster faction (faction-registry foundation) ──
+  // The seat's playable faction — deliberately NOT the `faction` above,
+  // which is the player|ai turn machinery. Optional so legacy JSONB rows
+  // stay valid; absent reads as "human" (engine playerFactionId).
+  factionId?: FactionId;
   // ── Wagon pool (docs/wagons-stockpiles-trade-routes-plan.md §5.1) ──
   // Optional + helper-accessed so legacy saves and old JSONB rows stay
   // valid; new wagons default via DEFAULT_HERO_WAGONS/player helpers.

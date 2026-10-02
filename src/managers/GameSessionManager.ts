@@ -10,6 +10,7 @@ import { CASTLE_COUNT_DEFAULT, defaultCastleSeedFromMapSeed, generateCastles } f
 import { loadUnitCatalog } from "../data/unitCatalog";
 import { MAP_SEED } from "@screens/adventure/adventureView";
 import type { Game, TileRow } from "../io/api";
+import type { FactionId } from "@heroes/contracts";
 import { notePersisted } from "../io/commands";
 import { setInMemoryLocalPlayerId } from "../players/localPlayer";
 import { getMultiplayerSync } from "../io/multiplayerSync";
@@ -106,7 +107,7 @@ export class GameSessionManager {
     }
   }
 
-  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number; enemyCount?: number }): Promise<void> {
+  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number; enemyCount?: number; factionId?: FactionId }): Promise<void> {
     const effectiveCastleSeed =
       typeof opts.castleSeed === "number" && Number.isFinite(opts.castleSeed)
         ? opts.castleSeed
@@ -115,6 +116,13 @@ export class GameSessionManager {
     const humanSeatCount = Math.max(1, Math.min(playerCount, opts.humanSeatCount ?? 1));
     const enemyCount = Math.max(0, Math.min(3, Math.floor(opts.enemyCount ?? 0)));
     const totalPlayers = humanSeatCount + enemyCount;
+    // Only the creator's seat (seat 0) takes the picked roster faction; every
+    // other seat — human or AI — stays "human" in v1. Passing no seatFactions
+    // at all (no pick, or the human default) keeps the legacy request shape.
+    const seatFactions: FactionId[] | undefined =
+      opts.factionId && opts.factionId !== "human"
+        ? [opts.factionId, ...Array.from({ length: Math.max(totalPlayers - 1, 0) }, () => "human" as FactionId)]
+        : undefined;
     const effectiveCastleCount = opts.castleCount ?? (2 * totalPlayers);
     const castles = generateCastles(this.getGameMap(), {
       castleSeed: effectiveCastleSeed,
@@ -128,7 +136,7 @@ export class GameSessionManager {
     const enemyPositions = aiCastles.length
       ? aiCastles.map((c) => ({ q: c.tile.q, r: c.tile.r }))
       : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
-    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount, enemyCount);
+    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount, enemyCount, seatFactions);
     // Issue #179: same self-claim as createFreshStarter() below -- the "New
     // Game" toolbar flow loads straight into the game rather than routing
     // through the multiplayer lobby UI. Claiming is optional (sign-in is

@@ -107,11 +107,23 @@ import buildingPixelStoneMine3 from "../resources/buildings/building-pixel-stone
 import buildingPixelIronMine1 from "../resources/buildings/building-pixel-ironMine-1.png?url";
 import buildingPixelIronMine2 from "../resources/buildings/building-pixel-ironMine-2.png?url";
 import buildingPixelIronMine3 from "../resources/buildings/building-pixel-ironMine-3.png?url";
+import buildingPixelCrypt1 from "../resources/buildings/building-pixel-crypt-1.png?url";
+import buildingPixelOssuary1 from "../resources/buildings/building-pixel-ossuary-1.png?url";
+import buildingPixelWraithBarrows1 from "../resources/buildings/building-pixel-wraithBarrows-1.png?url";
+import buildingPixelSpireOfAsh1 from "../resources/buildings/building-pixel-spireOfAsh-1.png?url";
 import buildingPixelUnderConstruction1 from "../resources/buildings/building-pixel-underConstruction-1.png?url";
 import buildingPixelUnderConstruction2 from "../resources/buildings/building-pixel-underConstruction-2.png?url";
 import buildingPixelUnderConstruction3 from "../resources/buildings/building-pixel-underConstruction-3.png?url";
+import buildingPixelForgeHall1 from "../resources/buildings/building-pixel-forgeHall-1.png?url";
+import buildingPixelGunnersRedoubt1 from "../resources/buildings/building-pixel-gunnersRedoubt-1.png?url";
+import buildingPixelGolemFoundry1 from "../resources/buildings/building-pixel-golemFoundry-1.png?url";
+import buildingPixelDeepAnvil1 from "../resources/buildings/building-pixel-deepAnvil-1.png?url";
+import buildingPixelGroveSanctum1 from "../resources/buildings/building-pixel-groveSanctum-1.png?url";
+import buildingPixelWarrenLodge1 from "../resources/buildings/building-pixel-warrenLodge-1.png?url";
+import buildingPixelSylvanStables1 from "../resources/buildings/building-pixel-sylvanStables-1.png?url";
+import buildingPixelWorldrootGrove1 from "../resources/buildings/building-pixel-worldrootGrove-1.png?url";
 import { Faction, Direction } from "../entities/hero";
-import type { CastleLevel, CastleVariant, ResourceType } from "@heroes/contracts";
+import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
 import type { ResourceStyle } from "../state/settings";
 import { HORSE_VARIANT_REGISTRY, type HorseVariantId } from "@heroes/engine";
@@ -135,7 +147,8 @@ export type SpriteKey =
   | `horse.${string}.${Direction}`
   | `horse.${string}.${Direction}.${number}`
   | `building.${string}.${string}.${number}`
-  | `unit.${string}.${UnitArenaPose}`;
+  | `unit.${string}.${UnitArenaPose}`
+  | `faction-banner.${FactionId}`;
 
 export type UnitArenaPose = "idle" | "attack" | "move";
 
@@ -321,10 +334,22 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel.ironMine.1": buildingPixelIronMine1,
   "pixel.ironMine.2": buildingPixelIronMine2,
   "pixel.ironMine.3": buildingPixelIronMine3,
+  "pixel.crypt.1": buildingPixelCrypt1,
+  "pixel.ossuary.1": buildingPixelOssuary1,
+  "pixel.wraithBarrows.1": buildingPixelWraithBarrows1,
+  "pixel.spireOfAsh.1": buildingPixelSpireOfAsh1,
   "pixel.underConstruction.1": buildingPixelUnderConstruction1,
   "pixel.underConstruction.2": buildingPixelUnderConstruction2,
   "pixel.underConstruction.3": buildingPixelUnderConstruction3,
   "pixel.smithy.2": buildingPixelSmithy2,
+  "pixel.forgeHall.1": buildingPixelForgeHall1,
+  "pixel.gunnersRedoubt.1": buildingPixelGunnersRedoubt1,
+  "pixel.golemFoundry.1": buildingPixelGolemFoundry1,
+  "pixel.deepAnvil.1": buildingPixelDeepAnvil1,
+  "pixel.groveSanctum.1": buildingPixelGroveSanctum1,
+  "pixel.warrenLodge.1": buildingPixelWarrenLodge1,
+  "pixel.sylvanStables.1": buildingPixelSylvanStables1,
+  "pixel.worldrootGrove.1": buildingPixelWorldrootGrove1,
 };
 
 export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescriptor> = {
@@ -590,6 +615,28 @@ for (const [path, mod] of Object.entries(UNIT_ARENA_GLOB)) {
   };
 }
 
+// Faction banners: registry-driven like the arena unit sprites — drop a
+// `faction-banner-<id>.png` into resources/factions/ and it resolves with
+// zero descriptor code. A missing banner is an absent map entry, never a
+// broken ?url import, so foundation can ship human-only and each faction
+// plan lands its PNG in the same change; the parity test
+// (test/data/unitCatalogParity.test.ts) asserts every non-neutral faction
+// has its file. Consumers land with the faction-picker UI.
+const FACTION_BANNER_GLOB = import.meta.glob(
+  "../resources/factions/faction-banner-*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const FACTION_BANNER_FILE_PATTERN = /faction-banner-([a-z]+)\.png$/;
+
+export const FACTION_BANNERS: Partial<Record<FactionId, string>> = {};
+
+for (const [path, mod] of Object.entries(FACTION_BANNER_GLOB)) {
+  const match = path.match(FACTION_BANNER_FILE_PATTERN);
+  if (!match || !mod.default) continue;
+  FACTION_BANNERS[match[1] as FactionId] = mod.default;
+}
+
 // Horse variant key functions auto-generated from registry
 export function horseVariantKey(
   variant: HorseVariantId,
@@ -774,6 +821,10 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.ironMine.1": 10,
   "building.pixel.ironMine.2": 10,
   "building.pixel.ironMine.3": 10,
+  "building.pixel.crypt.1": 11,
+  "building.pixel.ossuary.1": 11,
+  "building.pixel.wraithBarrows.1": 11,
+  "building.pixel.spireOfAsh.1": 7,
   "building.pixel.underConstruction.1": 13,
   "building.pixel.underConstruction.2": 11,
   "building.pixel.underConstruction.3": 8,
@@ -781,6 +832,14 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.woodcutterHut.2": 8,
   "building.pixel.woodcutterHut.3": 8,
   "building.pixel.smithy.2": 4,
+  "building.pixel.forgeHall.1": 8,
+  "building.pixel.gunnersRedoubt.1": 11,
+  "building.pixel.golemFoundry.1": 8,
+  "building.pixel.deepAnvil.1": 2,
+  "building.pixel.groveSanctum.1": 9,
+  "building.pixel.warrenLodge.1": 8,
+  "building.pixel.sylvanStables.1": 10,
+  "building.pixel.worldrootGrove.1": 6,
 };
 for (const [key, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {
   const desc = BUILDING_DESCRIPTORS[key];
@@ -857,6 +916,10 @@ export function buildingKey(style: string, kind: string, level: number): SpriteK
 
 export function unitArenaKey(unitTypeId: string, pose: UnitArenaPose): `unit.${string}.${UnitArenaPose}` {
   return `unit.${unitTypeId}.${pose}`;
+}
+
+export function factionBannerKey(id: FactionId): `faction-banner.${FactionId}` {
+  return `faction-banner.${id}`;
 }
 
 export { pickStyleForBuilding };

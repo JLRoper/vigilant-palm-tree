@@ -108,7 +108,9 @@ export type SpriteKey =
   | `hero.${Faction}`                 // "hero.player" | "hero.enemy" (procedural)
   | `horse.${string}.${Direction}`    // horse variant directional sprites
   | `horse.${string}.${Direction}.${number}` // horse run-frame sprites ("horse.drake.e.2")
-  | `building.${string}.${string}.${number}`; // "building.classic.house.2"
+  | `building.${string}.${string}.${number}` // "building.classic.house.2"
+  | `unit.${string}.${UnitArenaPose}` // "unit.swordsman.idle"
+  | `faction-banner.${FactionId}`; // "faction-banner.human" (2026-10-02 faction foundation)
 ```
 
 Key helper functions generate the correct keys:
@@ -117,6 +119,8 @@ Key helper functions generate the correct keys:
 - `heroKey(faction)` / `heroDirectionKey("player", dir)` — hero sprite lookup
 - `horseVariantKey(variant, dir, frame?)` — generic per-variant directional lookup for any registry variant; `frame: 1` appends a `.2` suffix for that variant's optional run-frame sprite (legacy `horseBubblyKey(dir)` through `horseSamuraiKey(dir)` remain as sugar wrappers)
 - `buildingKey(style, kind, level)` — city building lookup
+- `unitArenaKey(unitTypeId, pose)` — battle-arena unit art lookup
+- `factionBannerKey(id)` — faction banner lookup (`faction-banner.${id}`)
 
 ### 1.2 SpriteDescriptor
 
@@ -226,13 +230,16 @@ sequenceDiagram
 | `HERO_DESCRIPTORS` | `hero.player`, `hero.enemy` | 2 |
 | `HORSE_VARIANT_DESCRIPTORS` | `horse.{variant}.{dir}` — one sub-record per `HORSE_VARIANT_REGISTRY` entry | 9 variants × 4–8 directions each | 42 |
 | `BUILDING_DESCRIPTORS` | `building.{style}.{kind}.{level}` | 6 |
-| `UNIT_ARENA_DESCRIPTORS` | `unit.{unitTypeId}.{idle,attack,move}` | 45 |
+| `UNIT_ARENA_DESCRIPTORS` | `unit.{unitTypeId}.{idle,attack,move}` | 66 (15 ids × 3 poses + the 7 Ashen, 7 Ironmark, and 7 Verdant ids' idles — Phase A; attack/move pending the art Phase B go-ahead) |
+| `FACTION_BANNERS` (URL map, not descriptors) | `faction-banner.{human,ashen,ironmark,verdant}` — `Partial<Record<FactionId, string>>` of `?url`s, consumer-addressed via `factionBannerKey(id)` | 4 of 4 (human, ashen, ironmark, verdant) |
 
 `ALL_DESCRIPTORS` concatenates all of the above into a flat array used by `createDefaultProvider()`.
 
 The horse-variant descriptors are registry-driven rather than hand-listed: `assetDescriptors.ts` generates `HORSE_VARIANT_DESCRIPTORS` for all 9 `HORSE_VARIANT_REGISTRY` entries (`packages/engine/src/horseVariants.ts`) from an `import.meta.glob` of `units/horse/commander-*/*.png` — adding a variant is a registry entry plus a `commander-{N}/` sprite folder. Bubbly keeps its `naturalSize: 64` special case (everything else uses 512), and non-hero variants get diagonal→cardinal URL fallbacks (`ne/nw→n`, `se/sw→s`) applied at descriptor build time. The filename regexes also capture an optional `-2` run-frame suffix (`drake-e-2.png` → key `horse.drake.e.2`); `loadDirectionalSprites` returns `{ base, frame2 }`, frame-2 descriptors get identical anchor/sizing/naturalSize and are emitted only for files that exist, and the diagonal→cardinal fallbacks run per tier — a frame-2 diagonal aliases only a frame-2 cardinal, never frame-1. `HORSE_VARIANT_DESCRIPTORS` / `horseVariantKey(variant, dir, frame?)` are the generic accessors; the legacy per-variant key wrappers remain as sugar.
 
-The unit-arena descriptors are registry-driven the same way: `assetDescriptors.ts` generates `UNIT_ARENA_DESCRIPTORS` from an `import.meta.glob` of `units/arena/<unitTypeId>-<pose>.png` (`UnitArenaPose` = `idle | attack | move`; `unitArenaKey(unitTypeId, pose)` is the accessor), so dropping a PNG into the folder resolves as `unit.<unitTypeId>.<pose>` with zero descriptor code. All 15 ids carry idle/attack/move poses — 128px natural, bottom-anchored, `fitHeight` with `hexSizeMul: 1.3`. Art is authored facing right once; the battle painter mirrors defenders (see §7).
+The unit-arena descriptors are registry-driven the same way: `assetDescriptors.ts` generates `UNIT_ARENA_DESCRIPTORS` from an `import.meta.glob` of `units/arena/<unitTypeId>-<pose>.png` (`UnitArenaPose` = `idle | attack | move`; `unitArenaKey(unitTypeId, pose)` is the accessor), so dropping a PNG into the folder resolves as `unit.<unitTypeId>.<pose>` with zero descriptor code. All 15 human-roster ids carry idle/attack/move poses; the 7 Ashen Court ids, the seven Ironmark ids, and the seven Verdant Wild ids (2026-10-02 Phase A waves) ship **idle only** — attack/move are the deferred Phase B, and a missing pose resolves to `undefined` with the battle painter falling back to its circle rendering — and mage remains the known no-art gap. All are 128px natural, bottom-anchored, `fitHeight` with `hexSizeMul: 1.3`. Art is authored facing right once; the battle painter mirrors defenders (see §7).
+
+`FACTION_BANNERS` (2026-10-02 faction-registry foundation) is registry-driven the same way — an `import.meta.glob` of `resources/factions/faction-banner-*.png` — but deliberately **not** a descriptor record: it is a `Partial<Record<FactionId, string>>` URL map (the `HERO_BANNERS` consumption pattern), so a missing banner file is an absent map entry rather than a broken `?url` import. The "every non-neutral faction has a banner file" rule is asserted by `test/data/unitCatalogParity.test.ts`; the first consumer is the New Game "Your faction" chip row (`src/screens/shared/factionChoices.ts`, 2026-10-02 Ashen wave) — each chip renders the picked faction's banner thumbnail + label.
 
 #### Castle Sprites
 
@@ -627,7 +634,7 @@ graph TD
 ```typescript
 interface BuildingDef {
   gx, gy: number;       // grid position
-  kind: BuildingKind;   // 23 types (contracts union)
+  kind: BuildingKind;   // 36 types (contracts union)
   level: number;        // 1–3
   style: GenerationStyle;
   w?, h?: number;       // multi-cell width/height (default 1)
@@ -636,9 +643,9 @@ interface BuildingDef {
 
 ### 3.3 Building Drawing (`cityBuildingDraw.ts`)
 
-**`BuildingKind`** (24 types, re-exported from `@heroes/contracts`): `townHall`, `house`, `tower`, `mageGuild`, `mine`, `stoneMine`, `ironMine`, `market`, `barracks`, `smithy`, `apartment`, `farmField`, `farmhouse`, `archeryRange`, `granary`, `warehouse`, `bank`, `treasury`, `goldMine`, `woodcutterHut`, `arcaneFont`, `stables`, `huntingLodge`, `eyrie`
+**`BuildingKind`** (36 types, re-exported from `@heroes/contracts`): `townHall`, `house`, `tower`, `mageGuild`, `mine`, `stoneMine`, `ironMine`, `market`, `barracks`, `smithy`, `apartment`, `farmField`, `farmhouse`, `archeryRange`, `granary`, `warehouse`, `bank`, `treasury`, `goldMine`, `woodcutterHut`, `arcaneFont`, `stables`, `huntingLodge`, `eyrie`, `crypt`, `ossuary`, `wraithBarrows`, `spireOfAsh`, `forgeHall`, `gunnersRedoubt`, `golemFoundry`, `deepAnvil`, `groveSanctum`, `warrenLodge`, `sylvanStables`, `worldrootGrove`
 
-`huntingLodge` and `eyrie` are the newest roster kinds (2026-09-30 faction-roster expansion: warhound; giant_eagle/eagle_prince). `treasury` is the newest **building** kind (2026-10-01). `stables`, `huntingLodge`, and `eyrie` have **no dedicated sprite asset** in the classic/FLUX set — un-sprited kinds draw through the procedural per-style fallback path.
+`crypt`, `ossuary`, `wraithBarrows`, and `spireOfAsh` are the Ashen Court faction's recruit buildings (2026-10-02, The Ashen Court content wave: ghoul / bone_archer+bone_pikeman / wraith+blood_knight / vampire_lord+lich); `forgeHall`, `gunnersRedoubt`, `golemFoundry`, and `deepAnvil` are the Ironmark Holds faction's recruit buildings (2026-10-02, The Ironmark Holds content wave: dwarf_axeman+shield_bearer / hand_gunner / ironsworn+iron_golem / runesmith+forge_lord); `groveSanctum`, `warrenLodge`, `sylvanStables`, and `worldrootGrove` are the Verdant Wild faction's recruit buildings (2026-10-02, The Verdant Wild content wave: forest_scout+thorn_archer / briar_warden+warbeast / elk_rider+stag_knight / treant_elder). `huntingLodge` and `eyrie` are the prior roster kinds (2026-09-30 faction-roster expansion: warhound; giant_eagle/eagle_prince). `treasury` was the newest **building** kind (2026-10-01). `stables`, `huntingLodge`, and `eyrie` have **no dedicated sprite asset** in the classic/FLUX set — un-sprited kinds draw through the procedural per-style fallback path (the twelve 2026-10-02 faction kinds ship `pixel.*.1` sprites from their waves; L2/L3 fall back procedurally until the deferred Phase C).
 
 **Footprints matter to placement, not just art.** `warehouse` is **2×2** (2026-10-01) — four blocked grid cells, which is why its placement cost doubled; `archeryRange` is 1×2 and `townHall`/`apartment`/`farmField` are 2×2. The registry's legacy 1.5×1.5 L2/L3 *visual* override deliberately excludes every 2×2 kind: `coversCell` uses `gx < b.gx + w`, so a 1.5 footprint blocks only 2 cells, and applying the override to `warehouse` would free two cells on upgrade and break cell exclusivity. `src/screens/settlements/cityView/footprint.ts` reports the **blocked** (ceiled) footprint in palette tooltips, palette labels, and the building popup so the number the player sees matches what the placer enforces.
 
@@ -829,7 +836,7 @@ Central registry of all sprite filenames. Used by `pixel-gen.mjs` for the proced
 
 Three scripts cover the `pixel` building sprites — `building-pixel-<camelCaseName>-<level>.png` in `src/resources/buildings/` (e.g. `building-pixel-granary-1.png`, `building-pixel-woodcutterHut-2.png`), a naming scheme separate from the FLUX `building-{style}-{kind}-{level}.png` files. They live in `.kilo/skills/building-sprite-gen/scripts/` (see that folder's `SKILL.md` for the full workflow).
 
-The same scripts generated the unit battle art: the arena battle sprites (`units/arena/<unitId>-<pose>.png` — `unit.<id>.<pose>` keys, 15 ids × idle/attack/move; the 2026-09-29 pose wave ran on `google/gemini-3-pro-image` with each unit's own idle sprite passed as `--ref`; the 2026-09-30 roster wave added warhound/giant_eagle/eagle_prince the same way) and the hero-panel unit icons (`units/icons/<unitId>.png`), all via OpenRouter Gemini image models. Acceptance gates for the arena art (128×128 + transparent border) live as local helper scripts under `design/arena-unit-sprites/` — not repo tooling.
+The same scripts generated the unit battle art: the arena battle sprites (`units/arena/<unitId>-<pose>.png` — `unit.<id>.<pose>` keys, 15 ids × idle/attack/move; the 2026-09-29 pose wave ran on `google/gemini-3-pro-image` with each unit's own idle sprite passed as `--ref`; the 2026-09-30 roster wave added warhound/giant_eagle/eagle_prince the same way; the 2026-10-02 Ironmark wave added the seven Hold units' idles the same way, attack/move deferred) and the hero-panel unit icons (`units/icons/<unitId>.png`), all via OpenRouter Gemini image models. Acceptance gates for the arena art (128×128 + transparent border) live as local helper scripts under `design/arena-unit-sprites/` — not repo tooling.
 
 ```mermaid
 sequenceDiagram
@@ -858,9 +865,9 @@ sequenceDiagram
 | `remove-specks.mjs` | in-place speck cleanup on any PNG | connected-component analysis: drops non-main, small, low-saturation opaque islands |
 | `tune-run-frames.mjs` | horse `-2` run frames, normalized in place against their base frame | canvas → base size + content-bbox height/bottom/centerX alignment (sprites are bottom-anchored); `--check` gates drift, centerX advisory when art is h-clipped — `validate-assets` runs this check over every committed run frame as its alignment stage |
 
-Wiring note: these files are **not** auto-registered — each key is wired by hand in `assetDescriptors.ts`'s `BUILDING_SPRITES` map. Currently wired: `pixel.granary.1/2/3`, `pixel.smithy.2`, `pixel.bank.1/2/3`, `pixel.treasury.1/2/3`, `pixel.warehouse.1/2/3`, `pixel.goldMine.1/2/3`, `pixel.woodcutterHut.1/2` (note: `.3` is a duplicate import of `.2`), `pixel.stoneMine.1/2/3`, `pixel.ironMine.1/2/3`, `pixel.underConstruction.1/2/3`. The woodcutter-hut `.3` duplication and the fact that `stables`/`huntingLodge`/`eyrie` have no `pixel.*` art are the known gaps.
+Wiring note: these files are **not** auto-registered — each key is wired by hand in `assetDescriptors.ts`'s `BUILDING_SPRITES` map. Currently wired: `pixel.granary.1/2/3`, `pixel.smithy.2`, `pixel.bank.1/2/3`, `pixel.treasury.1/2/3`, `pixel.warehouse.1/2/3`, `pixel.goldMine.1/2/3`, `pixel.woodcutterHut.1/2` (note: `.3` is a duplicate import of `.2`), `pixel.stoneMine.1/2/3`, `pixel.ironMine.1/2/3`, `pixel.crypt.1`, `pixel.ossuary.1`, `pixel.wraithBarrows.1`, `pixel.spireOfAsh.1` (the four Ashen Court kinds, 2026-10-02 Phase A — L2/L3 sprites deferred to Phase C), `pixel.forgeHall.1`, `pixel.gunnersRedoubt.1`, `pixel.golemFoundry.1`, `pixel.deepAnvil.1` (the four Ironmark kinds, 2026-10-02 — L1 only, honest per-level art; L2/L3 are the deferred Phase C), `pixel.groveSanctum.1`, `pixel.warrenLodge.1`, `pixel.sylvanStables.1`, `pixel.worldrootGrove.1` (the four Verdant kinds, 2026-10-02 — L1 only; L2/L3 deferred to Phase C), `pixel.underConstruction.1/2/3`. The woodcutter-hut `.3` duplication, the faction kinds' missing L2/L3 art, and the fact that `stables`/`huntingLodge`/`eyrie` have no `pixel.*` art are the known gaps.
 
-**Canvas size in the `anchorOffsetY` formula.** Every `building-pixel-*` asset is authored on a **1024×1024** canvas — the 128px figure only applies to the older classic/FLUX `building-{style}-{kind}-{level}.png` set. The `BUILDING_ANCHOR_OVERRIDES` formula comment in `assetDescriptors.ts` was corrected accordingly: the divisor must be the PNG's *actual* canvas height (`dh`), not a nominal 128, because `sh/dh` is ~8× smaller for a 1024 asset (a 79-row bottom pad on `warehouse-1` is 7px, not 53). Measured bottom-pad offsets for the newest sprites: warehouse 7/8/9, `bank.2` = 6, `bank.3` = 6, treasury 5/4/4. Do not assume the 128px figure applies to any `pixel.*` asset.
+**Canvas size in the `anchorOffsetY` formula.** Every `building-pixel-*` asset is authored on a **1024×1024** canvas — the 128px figure only applies to the older classic/FLUX `building-{style}-{kind}-{level}.png` set. The `BUILDING_ANCHOR_OVERRIDES` formula comment in `assetDescriptors.ts` was corrected accordingly: the divisor must be the PNG's *actual* canvas height (`dh`), not a nominal 128, because `sh/dh` is ~8× smaller for a 1024 asset (a 79-row bottom pad on `warehouse-1` is 7px, not 53). Measured bottom-pad offsets for the newest sprites: warehouse 7/8/9, `bank.2` = 6, `bank.3` = 6, treasury 5/4/4, crypt 11 (133 rows), ossuary 11 (131), wraithBarrows 11 (131), spireOfAsh 7 (84). Do not assume the 128px figure applies to any `pixel.*` asset.
 
 ---
 
@@ -950,7 +957,7 @@ classDiagram
 | `assets.ts` | 67 | `SpriteProvider` class, `createDefaultProvider()` factory |
 | `assetSource.ts` | 80 | `ImageSpriteSource`, `ProceduralSpriteSource`, `CompositeSpriteSource` |
 | `camera.ts` | 35 | Viewport pan, zoom, pixel ratio, canvas transform |
-| `cityBuildingDraw.ts` | 1392 | Building rendering: 5 styles, 12 building kinds, spots, mines |
+| `cityBuildingDraw.ts` | 1392 | Building rendering: 5 styles, 36 building kinds, spots, mines |
 | `cityBuildingGen.ts` | 439 | Procedural building layout generation: 6 patterns, seeded RNG |
 | `cityRenderer.ts` | 33 | City-view paint entry: canvas framing around one `paintScene()` call |
 | `fog.ts` | 41 | Fog of war: visibility computation from heroes and castles |

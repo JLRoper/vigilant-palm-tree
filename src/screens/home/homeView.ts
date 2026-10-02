@@ -13,6 +13,7 @@ import { openCenteredModal, styleButton, styleInput, menuTheme } from "@screens/
 import { openSettingsMenu } from "./settingsMenu";
 import { createNewGameScreen } from "./newGameScreen";
 import { createMultiplayerLobby } from "@screens/multiplayer/multiplayerLobby";
+import type { FactionId } from "@heroes/contracts";
 
 export interface HomeViewOptions {
   onEnterGame: () => void;
@@ -25,6 +26,7 @@ export interface HomeViewOptions {
     playerCount?: 1 | 2 | 3 | 4;
     humanSeatCount?: number;
     enemyCount?: number;
+    factionId?: FactionId;
   }) => Promise<void>;
   onLoadGame: (game: Game) => Promise<void>;
   isBackendOk: () => boolean;
@@ -235,6 +237,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
             playerCount: values.playerCount,
             humanSeatCount: values.playerCount,
             enemyCount: values.enemyCount,
+            factionId: values.factionId,
           });
           rememberGameEntry(values.name);
           screen.destroy();

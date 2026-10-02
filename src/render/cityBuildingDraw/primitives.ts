@@ -73,6 +73,18 @@ export function buildingHeight(kind: BuildingKind, level: number): number {
     stables: 28,
     huntingLodge: 24,
     eyrie: 40,
+    crypt: 28,
+    ossuary: 34,
+    wraithBarrows: 40,
+    spireOfAsh: 52,
+    forgeHall: 34,
+    gunnersRedoubt: 30,
+    golemFoundry: 46,
+    deepAnvil: 52,
+    groveSanctum: 26,
+    warrenLodge: 24,
+    sylvanStables: 32,
+    worldrootGrove: 50,
   };
   return (base[kind] ?? 24) + (level - 1) * 12;
 }

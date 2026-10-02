@@ -2,6 +2,7 @@ import type { Terrain } from "../map/terrain";
 import type { ResourceType } from "../map/resourceTiles";
 import type {
   ClientTelemetryReport,
+  FactionId,
   HeroState,
   NetworkTopologySnapshot,
   Player,
@@ -180,12 +181,13 @@ export const api = {
     mapSize?: "small" | "medium" | "large",
     humanSlots?: number,
     enemySlots: number = 0,
+    seatFactions?: FactionId[],
   ) => {
     console.log("[api] createGame mapSize:", mapSize);
     return fetchWithTimeout(`${BASE}/games`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize, humanSlots, enemySlots }),
+      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize, humanSlots, enemySlots, seatFactions }),
     }).then((r) => json<Game>(r));
   },
   claimLobbySeat: (name: string, seat: number, handle: string) =>

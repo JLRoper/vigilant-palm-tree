@@ -15,6 +15,8 @@ transferGold,
   captureSettlement,
   recruitUnits,
   transferUnits,
+  unitAllowedForSeatFaction,
+  playerFactionId,
   applySettlementBattleResult,
   settlementStacks,
   platoonsHaveTroops,
@@ -1702,7 +1704,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
     }
     case "RecruitUnits": {
       // Ladder mirrors UpgradeTownHall's: settlement existence, then
-      // ownership, then the engine reducer's own building/level/construction/
+      // ownership, then the seat's faction roster (the gate above the
+      // reducer), then the engine reducer's own building/level/construction/
       // catalog/cost/garrison-capacity checks.
       const settlement = row.settlements[command.settlementId];
       if (!settlement) {
@@ -1710,6 +1713,22 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       }
       if (settlement.ownerId !== command.actor) {
         return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
+      }
+      // Faction gate (faction-registry foundation, D5): the server enforces
+      // the acting seat's roster and never trusts the client. Deliberately
+      // checked on the requested unit alone, BEFORE the reducer, so the
+      // reducer's own building/level/construction/cost reason codes stay
+      // exactly as they are. Dormant today: every seat defaults "human"
+      // (playerFactionId), every recruitable unit is human-tagged, and an
+      // unknown catalog id also defaults "human" — so nothing is rejected
+      // until a non-human faction's units exist.
+      if (
+        !unitAllowedForSeatFaction(command.unitTypeId, {
+          unitTypes: Object.fromEntries(deps.ctx.catalog.unitTypes.map((u) => [u.id, u])),
+          seatFactionId: playerFactionId(row.players.find((p) => p.id === command.actor)),
+        })
+      ) {
+        return { ok: false, reason: "unit_not_in_seat_faction", events: [] };
       }
       const result = recruitUnits(state, {
         settlementId: command.settlementId,
@@ -1923,7 +1942,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
 export async function createLiveCommandDeps(): Promise<LiveCommandDeps> {
   const unitTypesResult = await pool.query<UnitTypeRow>(
     `SELECT id, name, attack, defence, health, speed, description, advantage_type, specialty, specialty_priority,
-            tier, upkeep_gold, upkeep_food, range
+            tier, upkeep_gold, upkeep_food, range, faction_id
        FROM unit_types`,
   );
   const unitTypes: UnitType[] = unitTypesResult.rows.map((r) => ({
@@ -1941,6 +1960,7 @@ export async function createLiveCommandDeps(): Promise<LiveCommandDeps> {
     upkeepGold: r.upkeep_gold,
     upkeepFood: r.upkeep_food,
     range: r.range,
+    factionId: r.faction_id,
   }));
   return {
     gameRepo: createGameRepo(pool),
@@ -2101,4 +2121,5 @@ type UnitTypeRow = {
   upkeep_gold: number;
   upkeep_food: number;
   range: number;
+  faction_id: UnitType["factionId"];
 };

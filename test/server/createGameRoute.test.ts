@@ -36,7 +36,7 @@ async function cleanupGame(name: string): Promise<void> {
 }
 
 type CreatedRow = {
-  players: { id: number; faction: string; name: string }[];
+  players: { id: number; faction: string; name: string; factionId?: string }[];
   heroes: Record<string, { id: string; ownerId: number; name: string }>;
   lobby: {
     seats?: number;
@@ -262,5 +262,82 @@ test("every new game carries lobby.legacyAutoTrade = false unless the body opts 
     await cleanupGame(plain);
     await cleanupGame(optedIn);
     await cleanupGame(junk);
+  }
+});
+
+// ── seatFactions (faction-registry foundation): the creator's local
+// per-seat roster-faction choice, riding the enemySlots precedent. ──
+
+test("POST /games seatFactions rides through to the players jsonb and clamps beyond the seat count", async () => {
+  const name = uniqueName();
+  try {
+    const { row } = await createGame({
+      name,
+      humanSlots: 1,
+      enemySlots: 1,
+      seatFactions: ["ashen", "human", "verdant"],
+    });
+    assert.equal(row.players.length, 2, "the third entry is beyond the seat count and is never read");
+    assert.equal(row.players[0].factionId, "ashen");
+    assert.equal(row.players[1].factionId, "human");
+    assert.equal(row.players[0].faction, "player", "the seat faction is untouched by the roster faction");
+    assert.equal(row.players[1].faction, "ai");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games without seatFactions keeps the legacy player shape (no factionId key)", async () => {
+  const name = uniqueName();
+  try {
+    const { row } = await createGame({ name, humanSlots: 2 });
+    for (const p of row.players) {
+      assert.equal("factionId" in p, false, "absent param must not add the key");
+    }
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+// ── Ironmark Holds (025_ironmark_holds): an ironmark seat is creatable now
+// that the registry faction carries a shipped roster. ──
+
+test("POST /games seatFactions [\"ironmark\"] stamps the seat with the Ironmark Holds", async () => {
+  const name = uniqueName();
+  try {
+    const { row } = await createGame({ name, humanSlots: 1, seatFactions: ["ironmark"] });
+    assert.equal(row.players.length, 1);
+    assert.equal(row.players[0].factionId, "ironmark");
+    assert.equal(row.players[0].faction, "player", "the seat faction is untouched by the roster faction");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games rejects seatFactions entries outside the registry", async () => {
+  const name = uniqueName();
+  try {
+    for (const seatFactions of [["elves"], ["human", 42], "ashen", ["human", "ELVES"]]) {
+      const res = await fetch(`${baseUrl}/games`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, seed: 99, hero_q: 2, hero_r: 2, enemy_positions: [], mapSize: "small", humanSlots: 1, seatFactions }),
+      });
+      assert.equal(res.status, 400, `seatFactions ${JSON.stringify(seatFactions)} must be rejected`);
+      assert.deepEqual(await res.json(), { error: "seatFactions must be an array of faction ids" });
+    }
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games seatFactions ['verdant'] stamps a verdant seat (the 026 content faction)", async () => {
+  const name = uniqueName();
+  try {
+    const { row } = await createGame({ name, humanSlots: 1, seatFactions: ["verdant"] });
+    assert.equal(row.players[0].factionId, "verdant");
+    assert.equal(row.players[0].faction, "player", "the roster faction never disturbs the seat's player/ai faction");
+  } finally {
+    await cleanupGame(name);
   }
 });

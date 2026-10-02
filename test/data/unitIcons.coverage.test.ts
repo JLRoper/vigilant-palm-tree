@@ -11,24 +11,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { UNIT_CATALOG_IDS } from "../helpers/unitIds";
 
-const UNIT_ICON_IDS = [
-  "peasant",
-  "archer",
-  "crossbowman",
-  "swordsman",
-  "pikeman",
-  "cavalry",
-  "monk",
-  "crusader",
-  "griffin",
-  "hydra",
-  "wisp",
-  "black_dragon",
-  "warhound",
-  "giant_eagle",
-  "eagle_prince",
-] as const;
+// The known, deliberate icon gap: mage still ships the placeholder bust
+// (no dedicated icon PNG). Everything else in the catalog must be wired.
+const EXPECTED_ICON_GAPS: readonly string[] = ["mage"];
+
+const UNIT_ICON_IDS = UNIT_CATALOG_IDS.filter(
+  (id) => !EXPECTED_ICON_GAPS.includes(id),
+);
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 

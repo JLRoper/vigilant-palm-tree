@@ -81,6 +81,8 @@ export interface BuildingMenuOptions {
   onRecruitUnits?: (building: BuildingDef, unitTypeId: string, count: number) => void;
   onUpgradeTownHall?: () => void;
   onUpgradeBuilding?: (building: BuildingDef) => void;
+  /** Faction gate for the recruit list: false hides the row. Absent = no gate (today's behavior). */
+  isUnitRecruitable?: (unitTypeId: string) => boolean;
 }
 
 const TOWN_HALL_UPGRADE_COSTS: Record<number, { gold: number; wood: number; stone: number; days: number }> = {
@@ -102,12 +104,14 @@ export class BuildingMenu {
   private onRecruitUnits: ((building: BuildingDef, unitTypeId: string, count: number) => void) | undefined;
   private onUpgradeTownHall: (() => void) | undefined;
   private onUpgradeBuilding: ((building: BuildingDef) => void) | undefined;
+  private isUnitRecruitable: ((unitTypeId: string) => boolean) | undefined;
   private lastShow: ShowArgs | null = null;
 
   constructor(opts: BuildingMenuOptions = {}) {
     this.onRecruitUnits = opts.onRecruitUnits;
     this.onUpgradeTownHall = opts.onUpgradeTownHall;
     this.onUpgradeBuilding = opts.onUpgradeBuilding;
+    this.isUnitRecruitable = opts.isUnitRecruitable;
   }
 
   show(
@@ -311,7 +315,11 @@ export class BuildingMenu {
 
     if (constructionDaysRemaining === undefined) {
       const effect = getBuildingEffect(building.kind);
-      const entries = effect.recruits.filter((r) => (r.minLevel ?? 1) <= building.level);
+      const entries = effect.recruits.filter(
+        (r) =>
+          (r.minLevel ?? 1) <= building.level &&
+          (this.isUnitRecruitable ? this.isUnitRecruitable(r.unitTypeId) : true),
+      );
       if (!catalogReady() && !catalogFailed()) {
         void loadUnitCatalog().then(() => {
           if (this.menu && this.lastShow && this.lastShow.building === building) {

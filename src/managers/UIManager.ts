@@ -18,14 +18,16 @@ import type { HeroId, SettlementState } from "../state/gameState";
 import type { Axial } from "../core/hex";
 import { Hero } from "../entities/hero";
 import { SpriteProvider } from "../render/assets";
-import { playerIncome, playerWealth } from "@heroes/engine";
+import { cachedUnitTypes } from "../data/unitCatalog";
+import { playerFactionId, playerIncome, playerWealth, unitAllowedForSeatFaction } from "@heroes/engine";
 import { SessionManager } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
 import type { MapInfo } from "@screens/home/settingsMenu";
+import type { FactionId } from "@heroes/contracts";
 
 type ToolbarCallbacks = {
-  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; enemyCount?: number }) => void;
+  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; enemyCount?: number; factionId?: FactionId }) => void;
   onLoad: (loaded: import("../io/api").Game, tiles: import("../io/api").TileRow[]) => void;
   onSave: () => void;
   onEndTurn: () => void;
@@ -182,11 +184,23 @@ export class UIManager {
   initCityView(
     state: () => GameStateManager,
     viewManager: ViewManager,
+    getLocalSeat?: () => PlayerId | null,
   ): void {
     this.viewManager = viewManager;
     const getStateMgr = () => state();
     this.cityView = new CityView({
       provider: this.spriteProvider,
+      isUnitRecruitable: getLocalSeat
+        ? (unitTypeId) => {
+            const gs = getStateMgr().getState();
+            const seat = getLocalSeat();
+            const player = seat !== null ? gs.players.find((p) => p.id === seat) : undefined;
+            return unitAllowedForSeatFaction(unitTypeId, {
+              unitTypes: cachedUnitTypes(),
+              seatFactionId: playerFactionId(player),
+            });
+          }
+        : undefined,
       onUpgradeTownHall: () => {
         const openId = this.cityView?.getOpenSettlementId();
         if (!openId) return;

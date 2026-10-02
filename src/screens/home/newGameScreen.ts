@@ -1,14 +1,16 @@
 // Full-screen "Create Game" panel. Hosted by homeView (replaces the landing
-// button stack while the user is filling out the form). Owns Name + Map Size
-// + Number of Human Players + Number of AI Enemies + Map Seed fields and a
-// Create / Cancel action row.
+// button stack while the user is filling out the form). Owns Name + Your
+// Faction + Map Size + Number of Human Players + Number of AI Enemies +
+// Map Seed fields and a Create / Cancel action row.
 //
 // Map seed defaults to a fresh random 31-bit int; the user can edit it.
-// "Number of human players" and "Number of AI enemies" are small chip
-// selectors (1/2/3/4 and 0/1/2/3).
+// "Your faction", "Number of human players", and "Number of AI enemies" are
+// small chip selectors (registry-driven / 1/2/3/4 / 0/1/2/3).
 // Map size stays a dropdown because we ship three named presets.
 
 import { styleButton } from "@screens/shared/menu";
+import type { FactionId } from "@heroes/contracts";
+import { seatFactionChoices } from "@screens/shared/factionChoices";
 
 export type NewGameFormValues = {
   name: string;
@@ -16,6 +18,7 @@ export type NewGameFormValues = {
   mapSize: "small" | "medium" | "large";
   playerCount: 1 | 2 | 3 | 4;
   enemyCount: 0 | 1 | 2 | 3;
+  factionId: FactionId;
 };
 
 export interface NewGameScreenOptions {
@@ -158,6 +161,84 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
     };
   };
 
+  const makeFactionChipRow = (
+    labelText: string,
+    initial: FactionId,
+    onPick: (value: FactionId) => void,
+  ): { setDisabled: (disabled: boolean) => void } => {
+    const choices = seatFactionChoices();
+    const field = makeFieldRow(labelText);
+    const wrap = document.createElement("div");
+    Object.assign(wrap.style, {
+      display: "flex",
+      gap: "6px",
+    });
+    let selected = initial;
+    const buttons = new Map<FactionId, HTMLButtonElement>();
+    const refresh = (): void => {
+      for (const choice of choices) {
+        const b = buttons.get(choice.id);
+        if (!b) continue;
+        const active = choice.id === selected;
+        b.style.background = active
+          ? `linear-gradient(180deg, ${choice.def.palette.primary} 0%, ${choice.def.palette.accent} 160%)`
+          : "rgba(20, 33, 69, 0.85)";
+        b.style.color = "#f1e4c3";
+        b.style.borderColor = active ? choice.def.palette.accent : "rgba(201,162,39,0.45)";
+        b.style.fontWeight = active ? "700" : "400";
+      }
+    };
+    for (const choice of choices) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.title = choice.def.motto;
+      Object.assign(b.style, {
+        flex: "1",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "6px",
+        padding: "6px 10px",
+        fontSize: "13px",
+        fontFamily: "Georgia, 'Times New Roman', serif",
+        background: "rgba(20, 33, 69, 0.85)",
+        color: "#f1e4c3",
+        border: "1px solid rgba(201,162,39,0.45)",
+        borderRadius: "3px",
+        cursor: "pointer",
+      });
+      if (choice.banner) {
+        const img = document.createElement("img");
+        img.src = choice.banner;
+        img.alt = choice.def.label;
+        Object.assign(img.style, {
+          height: "22px",
+          maxWidth: "16px",
+          objectFit: "contain",
+          imageRendering: "pixelated",
+        });
+        b.appendChild(img);
+      }
+      const label = document.createElement("span");
+      label.textContent = choice.def.label;
+      b.appendChild(label);
+      b.addEventListener("click", () => {
+        selected = choice.id;
+        refresh();
+        onPick(choice.id);
+      });
+      buttons.set(choice.id, b);
+      wrap.appendChild(b);
+    }
+    field.control.appendChild(wrap);
+    refresh();
+    return {
+      setDisabled: (disabled) => {
+        for (const b of buttons.values()) b.disabled = disabled;
+      },
+    };
+  };
+
   const styleTextInput = (el: HTMLInputElement): void => {
     Object.assign(el.style, {
       width: "100%",
@@ -178,6 +259,16 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
   nameInput.value = opts.defaultName;
   styleTextInput(nameInput);
   nameField.control.appendChild(nameInput);
+
+  const factionChoices = seatFactionChoices();
+  let selectedFaction: FactionId = factionChoices[0]?.id ?? "human";
+  const factionRow = makeFactionChipRow(
+    "Your faction",
+    selectedFaction,
+    (id) => {
+      selectedFaction = id;
+    },
+  );
 
   const sizeField = makeFieldRow("Map size");
   const sizeSelect = document.createElement("select");
@@ -314,6 +405,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
       mapSize,
       playerCount: selectedPlayers,
       enemyCount: selectedEnemies,
+      factionId: selectedFaction,
     });
   });
 
@@ -333,6 +425,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
     reRollBtn.disabled = value;
     playersRow.setDisabled(value);
     enemiesRow.setDisabled(value);
+    factionRow.setDisabled(value);
     createBtn.style.opacity = value ? "0.6" : "1";
     createBtn.textContent = value ? "Creating…" : "Create Game";
   }

@@ -24,6 +24,27 @@ import blackDragon from "../resources/units/icons/black_dragon.png?url";
 import warhound from "../resources/units/icons/warhound.png?url";
 import giantEagle from "../resources/units/icons/giant_eagle.png?url";
 import eaglePrince from "../resources/units/icons/eagle_prince.png?url";
+import ghoul from "../resources/units/icons/ghoul.png?url";
+import bonePikeman from "../resources/units/icons/bone_pikeman.png?url";
+import boneArcher from "../resources/units/icons/bone_archer.png?url";
+import wraith from "../resources/units/icons/wraith.png?url";
+import bloodKnight from "../resources/units/icons/blood_knight.png?url";
+import vampireLord from "../resources/units/icons/vampire_lord.png?url";
+import lich from "../resources/units/icons/lich.png?url";
+import dwarfAxeman from "../resources/units/icons/dwarf_axeman.png?url";
+import shieldBearer from "../resources/units/icons/shield_bearer.png?url";
+import handGunner from "../resources/units/icons/hand_gunner.png?url";
+import ironsworn from "../resources/units/icons/ironsworn.png?url";
+import ironGolem from "../resources/units/icons/iron_golem.png?url";
+import runesmith from "../resources/units/icons/runesmith.png?url";
+import forgeLord from "../resources/units/icons/forge_lord.png?url";
+import forestScout from "../resources/units/icons/forest_scout.png?url";
+import briarWarden from "../resources/units/icons/briar_warden.png?url";
+import warbeast from "../resources/units/icons/warbeast.png?url";
+import thornArcher from "../resources/units/icons/thorn_archer.png?url";
+import elkRider from "../resources/units/icons/elk_rider.png?url";
+import treantElder from "../resources/units/icons/treant_elder.png?url";
+import stagKnight from "../resources/units/icons/stag_knight.png?url";
 
 const KNOWN: Record<string, string> = {
   peasant,
@@ -41,6 +62,27 @@ const KNOWN: Record<string, string> = {
   warhound,
   giant_eagle: giantEagle,
   eagle_prince: eaglePrince,
+  ghoul,
+  bone_pikeman: bonePikeman,
+  bone_archer: boneArcher,
+  wraith,
+  blood_knight: bloodKnight,
+  vampire_lord: vampireLord,
+  lich,
+  dwarf_axeman: dwarfAxeman,
+  shield_bearer: shieldBearer,
+  hand_gunner: handGunner,
+  ironsworn,
+  iron_golem: ironGolem,
+  runesmith,
+  forge_lord: forgeLord,
+  forest_scout: forestScout,
+  briar_warden: briarWarden,
+  warbeast,
+  thorn_archer: thornArcher,
+  elk_rider: elkRider,
+  treant_elder: treantElder,
+  stag_knight: stagKnight,
 };
 
 export const PLACEHOLDER_UNIT_IMAGE = placeholder;
