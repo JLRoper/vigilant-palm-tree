@@ -200,7 +200,7 @@ Full refetch: `GET /games/:name` → `hydrateGameState` → cursor = `last_event
 
 ### 5.1 EngineEvent kinds (contracts)
 
-`packages/contracts/src/events/engineEvent.ts` declares **24** variants. The client's admitted set, `ENGINE_EVENT_KINDS` (`multiplayerSync.ts:49-53`), is **derived**, not hand-listed: it is built from `ENGINE_EVENT_SYNC_CLASS` (`packages/engine/src/events/applyEvent.ts:41-66`), an exhaustive `Record<EngineEvent["type"], EngineEventSyncClass>` (`"apply" | "resync" | "ignore"`) over every variant — 11 `apply` + 7 `resync` kinds are admitted (18), and the 6 `ignore` kinds form the boundary set whose state effects arrive via the `TurnEnded`/poll resync boundary. (`TradeRouteCreated` moved from the ignore set to the applied set 2026-09-30.) Because the Record's key type is the full event union, adding a new EngineEvent variant without classifying it here is a compile error. The registry is data only: `applyEngineEvent`'s reducer switch stays the executor and keeps its own exhaustive default. Per kind:
+`packages/contracts/src/events/engineEvent.ts` declares **25** variants. The client's admitted set, `ENGINE_EVENT_KINDS` (`multiplayerSync.ts:49-53`), is **derived**, not hand-listed: it is built from `ENGINE_EVENT_SYNC_CLASS` (`packages/engine/src/events/applyEvent.ts:41-66`), an exhaustive `Record<EngineEvent["type"], EngineEventSyncClass>` (`"apply" | "resync" | "ignore"`) over every variant — 12 `apply` + 7 `resync` kinds are admitted (19), and the 6 `ignore` kinds form the boundary set whose state effects arrive via the `TurnEnded`/poll resync boundary. (`TradeRouteCreated` moved from the ignore set to the applied set 2026-09-30; `BankGoldMoved` joined the applied set 2026-10-01.) Because the Record's key type is the full event union, adding a new EngineEvent variant without classifying it here is a compile error. The registry is data only: `applyEngineEvent`'s reducer switch stays the executor and keeps its own exhaustive default. Per kind:
 
 | # | Kind | In ENGINE_EVENT_KINDS | Client outcome | Why |
 |---|---|---|---|---|
@@ -228,6 +228,7 @@ Full refetch: `GET /games/:name` → `hydrateGameState` → cursor = `last_event
 | 22 | `TradeRouteCreated` | yes | **applied** (delta) | `applyTradeRouteCreated` constructs the route (targeted construction); the `routeId` is taken from the event verbatim — server route ids derive from a counter hydration never restores, so the id cannot be re-derived locally. (Moved from the ignore set 2026-09-30.) |
 | 23 | `TradeRouteUpdated` | **no** | ignored by sync | Same boundary. |
 | 24 | `TradeRouteRemoved` | **no** | ignored by sync | Same boundary. |
+| 25 | `BankGoldMoved` | yes | **applied** (delta) | A bank pot's gold moved (`depositIntoBank`/`requestBankWithdrawal`); the event carries every field the reducer needs. A rejection because the treasury/pot can no longer cover the move = `noop`; every other rejection (no settlement, not a bank, pot at its cap) = resync. Not unambiguously idempotent (partial amounts, unlike `GoldTransferred`'s move-everything) — same bounded-drift policy as `UnitsTransferred`. (Added 2026-10-01.) |
 
 `StructureBuilt` appears in plan prose but was never a declared variant. The exhaustive `ENGINE_EVENT_SYNC_CLASS` Record makes stale kind counts in prose the only remaining failure mode — the compiler now catches any unclassified variant.
 
@@ -375,8 +376,8 @@ A consistency pass over the event pipeline: machine-enforced classification, one
 
 | Change | Where |
 |---|---|
-| Engine-event classification registry: `EngineEventSyncClass` (`"apply" \| "resync" \| "ignore"`) + `ENGINE_EVENT_SYNC_CLASS`, an exhaustive `Record` over all 24 EngineEvent variants — adding a variant without classifying it is a compile error. The reducer switch is unchanged (still the executor) | `packages/engine/src/events/applyEvent.ts` |
-| `ENGINE_EVENT_KINDS` (admitted set, 17 at this pass; 18 since `TradeRouteCreated` joined the applied set below) derived from the registry by filtering out `"ignore"`; the hardcoded 17-kind list deleted | `src/io/multiplayerSync.ts` |
+| Engine-event classification registry: `EngineEventSyncClass` (`"apply" \| "resync" \| "ignore"`) + `ENGINE_EVENT_SYNC_CLASS`, an exhaustive `Record` over all 25 EngineEvent variants — adding a variant without classifying it is a compile error. The reducer switch is unchanged (still the executor) | `packages/engine/src/events/applyEvent.ts` |
+| `ENGINE_EVENT_KINDS` (admitted set, 17 at this pass; 18 since `TradeRouteCreated` joined the applied set below; 19 since `BankGoldMoved` did) derived from the registry by filtering out `"ignore"`; the hardcoded 17-kind list deleted | `src/io/multiplayerSync.ts` |
 | The SSE tail's and the poll route's cursor query collapsed into one shared exported constant (`ROWS_AFTER_SQL`) — drift protection structural, was comment-only | `server/http/routes/eventStream.ts`, `server/routes.ts` |
 | Composite cursor index `(game_id, id)` (idempotent; the subsumed `game_events_game_id_idx` kept for now) | `server/migrations/019_game_events_game_id_id_idx.sql` |
 | `POST /games/:name/events` hardening: `kind` must match `^[a-z0-9_]{1,64}$` (400 `invalid kind`), payload JSON capped at 8192 chars (400 `payload too large`); both checked before the game 404. Still unauthenticated by design | `server/routes.ts` |

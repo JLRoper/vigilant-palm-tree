@@ -509,7 +509,7 @@ The four `?url` skybox PNG imports and the module-scope `skyboxCache`/`layerCanv
 
 1. Background fill (`#1a1620`)
 2. Grid cells: diamond tiles in draw order (`cellsInDrawOrder()`), fill `#2a2438`, stroke `#3a3450`, hovered cell gets gold stroke; while the build placer is active, cells it accepts (`CitySceneInput.buildableCells` → `cityCell.buildable`, 2026-09-29) get a subtle buildable tint + lighter stroke so free cells are scannable
-3. Resource spots: colored diamonds with rune icon (attempts sprite first, falls back to `RESOURCE_PAL` procedural shape)
+3. Resource spots: colored diamonds with rune icon (attempts sprite first, falls back to `RESOURCE_PAL` procedural shape). **A spot may be `food`** since 2026-10-01 — a city spot is the only tile a farm building can exploit for the 3.0 multiplier, and the vestigial `isMineable` filter that hid them was removed from `GameEngine.handleDblClick`
 4. Mines: isometric boxes (walls + roof) with resource palette, level number label, and resource spot icon behind
 5. Buildings: sorted by `gx + gy` (painter's algorithm), each drawn via `drawBuilding()`
 6. Ghost building: transparent preview (green = valid, red = invalid) at the hovered cell
@@ -635,9 +635,11 @@ interface BuildingDef {
 
 ### 3.3 Building Drawing (`cityBuildingDraw.ts`)
 
-**`BuildingKind`** (23 types, re-exported from `@heroes/contracts`): `townHall`, `house`, `tower`, `mageGuild`, `mine`, `stoneMine`, `ironMine`, `market`, `barracks`, `smithy`, `apartment`, `farmField`, `farmhouse`, `archeryRange`, `granary`, `warehouse`, `bank`, `goldMine`, `woodcutterHut`, `arcaneFont`, `stables`, `huntingLodge`, `eyrie`
+**`BuildingKind`** (24 types, re-exported from `@heroes/contracts`): `townHall`, `house`, `tower`, `mageGuild`, `mine`, `stoneMine`, `ironMine`, `market`, `barracks`, `smithy`, `apartment`, `farmField`, `farmhouse`, `archeryRange`, `granary`, `warehouse`, `bank`, `treasury`, `goldMine`, `woodcutterHut`, `arcaneFont`, `stables`, `huntingLodge`, `eyrie`
 
-`huntingLodge` and `eyrie` are the newest kinds (2026-09-30 faction-roster expansion: warhound; giant_eagle/eagle_prince). Like `stables` they have **no dedicated sprite asset yet** — un-sprited kinds draw through the procedural per-style fallback path.
+`huntingLodge` and `eyrie` are the newest roster kinds (2026-09-30 faction-roster expansion: warhound; giant_eagle/eagle_prince). `treasury` is the newest **building** kind (2026-10-01). `stables`, `huntingLodge`, and `eyrie` have **no dedicated sprite asset** in the classic/FLUX set — un-sprited kinds draw through the procedural per-style fallback path.
+
+**Footprints matter to placement, not just art.** `warehouse` is **2×2** (2026-10-01) — four blocked grid cells, which is why its placement cost doubled; `archeryRange` is 1×2 and `townHall`/`apartment`/`farmField` are 2×2. The registry's legacy 1.5×1.5 L2/L3 *visual* override deliberately excludes every 2×2 kind: `coversCell` uses `gx < b.gx + w`, so a 1.5 footprint blocks only 2 cells, and applying the override to `warehouse` would free two cells on upgrade and break cell exclusivity. `src/screens/settlements/cityView/footprint.ts` reports the **blocked** (ceiled) footprint in palette tooltips, palette labels, and the building popup so the number the player sees matches what the placer enforces.
 
 **Building drawing flow**:
 
@@ -855,7 +857,9 @@ sequenceDiagram
 | `remove-specks.mjs` | in-place speck cleanup on any PNG | connected-component analysis: drops non-main, small, low-saturation opaque islands |
 | `tune-run-frames.mjs` | horse `-2` run frames, normalized in place against their base frame | canvas → base size + content-bbox height/bottom/centerX alignment (sprites are bottom-anchored); `--check` gates drift, centerX advisory when art is h-clipped — `validate-assets` runs this check over every committed run frame as its alignment stage |
 
-Wiring note: these files are not auto-registered — `pixel.granary.1/2/3` and `pixel.smithy.2` are the wired precedents in `assetDescriptors.ts`; the woodcutter hut pair and the gold mine tier 1–3 trio exist on disk only until descriptors land for them.
+Wiring note: these files are **not** auto-registered — each key is wired by hand in `assetDescriptors.ts`'s `BUILDING_SPRITES` map. Currently wired: `pixel.granary.1/2/3`, `pixel.smithy.2`, `pixel.bank.1/2/3`, `pixel.treasury.1/2/3`, `pixel.warehouse.1/2/3`, `pixel.goldMine.1/2/3`, `pixel.woodcutterHut.1/2` (note: `.3` is a duplicate import of `.2`), `pixel.stoneMine.1/2/3`, `pixel.ironMine.1/2/3`, `pixel.underConstruction.1/2/3`. The woodcutter-hut `.3` duplication and the fact that `stables`/`huntingLodge`/`eyrie` have no `pixel.*` art are the known gaps.
+
+**Canvas size in the `anchorOffsetY` formula.** Every `building-pixel-*` asset is authored on a **1024×1024** canvas — the 128px figure only applies to the older classic/FLUX `building-{style}-{kind}-{level}.png` set. The `BUILDING_ANCHOR_OVERRIDES` formula comment in `assetDescriptors.ts` was corrected accordingly: the divisor must be the PNG's *actual* canvas height (`dh`), not a nominal 128, because `sh/dh` is ~8× smaller for a 1024 asset (a 79-row bottom pad on `warehouse-1` is 7px, not 53). Measured bottom-pad offsets for the newest sprites: warehouse 7/8/9, `bank.2` = 6, `bank.3` = 6, treasury 5/4/4. Do not assume the 128px figure applies to any `pixel.*` asset.
 
 ---
 

@@ -380,6 +380,34 @@ Two small city-view UX changes: the build palette's disabled entries now explain
 
 Test inventory: new `test/screens/settlements/buildEntryStatus.test.ts` (17 cases, node:test, picked up by the existing `test:unit` glob); `test/cityView.test.ts` gained `testSettlementMenuAutoOpen` after the first `openCityView(...)` — asserts the `[data-accordion="Warehouse"]` header is visible and its body not `display:none`.
 
+### Economy & storage: food, caps, bank pots (2026-10-01)
+
+A large economy/storage pass, landed uncommitted in one working tree. The as-built numeric reference is [`docs/resource-gathering.md`](./resource-gathering.md); this section covers only the *module* additions and the wiring decisions that are not obvious from that doc.
+
+**Bank pots** — a `bank` holds gold of its own, separate from the settlement treasury.
+
+| Piece | Where |
+|---|---|
+| `BankPot` type | `packages/contracts/src/buildings.ts` — `BuildingDef.bank?: BankPot` = `{ gold, pendingOut: { gold, maturesOnDay }[] }`. **Absent means no pot**, and the key must be *absent* rather than `undefined` (the repo's documented `deepStrictEqual` rule; `settlementRepo`'s conditional spread treats the two differently) |
+| Pot mechanics | `packages/engine/src/economy/bank.ts` — `depositIntoBank` / `requestBankWithdrawal` / `matureBankWithdrawals` (**daily** tick) / `accrueBankInterest` (**weekly**, on the existing `day % 7` boundary). `BANK_WITHDRAWAL_DAYS = 7`, `BANK_WEEKLY_INTEREST_RATE = 0.05` (flat, deliberately *not* level-scaled — capacity scales instead, `bankGoldCap(b) = 5000 × b.level`). Both maturity and interest are clamped by treasury headroom with the remainder pushed back to `pendingOut`/left in the pot: **nothing is destroyed**, because clamping interest at the treasury cap would make the cap a game-breaking gate and a pot-capped bank silently ceasing to earn would trap the player |
+| Persistence | New nullable JSONB column `settlement_buildings.bank` — migration `server/migrations/022_bank_pot.sql`, following the `construction` precedent exactly (migration 013) |
+| Command | `BankGoldCommand` — `packages/contracts/src/commands/bankGold.ts`, `{ kind, gameName, actor, settlementId, gx, gy, amount, direction }`, added to the `Command` union; handled in `server/app/commandHandler.ts` |
+| Event | `BankGoldMoved` (`EngineEvent`), classified `"apply"` in `ENGINE_EVENT_SYNC_CLASS` with a replay reducer in `packages/engine/src/events/applyEvent.ts`. The `EngineEvent` union is now **25 variants (12 apply / 7 resync / 6 ignore)**. Adding either a command or an event requires updating **four** exhaustive unions/Records: `ENGINE_EVENT_SYNC_CLASS`, `applyEngineEvent`, `entityMirror.applyEvent`'s switch, and the `Command` union |
+| Wire validation | `server/http/routes/commands.ts` validates and bounds the pot on `PlaceBuildings`. Note the gate ends in a **type assertion** (`buildings: b.buildings as BuildingDef[]`), *not* a field projection — so pots already survived before the validation existed; the gap was that `bank` was unvalidated, so a spoofed `{gold: -9999}` could reach persisted state. Bounds: `MAX_BANK_PENDING_ENTRIES = 64`, `MAX_BANK_MATURES_ON_DAY = 100_000`, `MAX_BANK_GOLD_MOVE = 1_000_000` |
+| Client path | **Reducer-first**: `TurnController.bankGold` → reducer → `commit()` → POST. The UI deliberately does *not* call the `io/commands.ts` wrapper directly, because `multiplayerSync.applyRows` drops the client's own event id — a POST-only path would leave the initiator's own pot stale until the next resync |
+| Client UI | `settlementInfoMenu.ts` — a **Banking** accordion (`data-accordion="Banking"`, collapsed by default, hidden when there is no bank): per-bank stored/capacity, pending-withdrawal countdowns, Deposit/Withdraw buttons pre-disabled with reason tooltips, plus the interest rate and 7-day delay in a terms line, and a separate Treasury-capacity row. Rejections surface twice — inline in the amount modal via `bankRejectionMessage`, and as a `command:rejected` toast via `reportCommandFailure` |
+
+**Starter layout** — `packages/engine/src/settlement/starterLayout.ts`. `buildStarterLayout` is the single definition of a new settlement's city (`townHall1 + farmField1 + house×2`, 5 wood + 2 stone per turn) and `starterCityOnOpen({ existing })` is the guard that makes the city view's free commit safe: a settlement that already has buildings returns its own array with `free: false`, so no `PlaceBuildings` is sent and the town hall is never dropped. `starterFarmsNeeded(pop)` sizes a food-hungry settlement's farmland. This replaced the hand-off of `cityBuildingGen`'s denseUrban layout (now only used by the City Design box's Generate button), which charged ~24 wood + 14 stone per turn with no producer at all.
+
+**Integer columns** — `server/persistence/integerColumns.ts` exports `toIntColumn()` = `Math.round` (non-finite → 0), applied at all 8 numeric write sites (`gameRepo` ×3, `settlementRepo` ×3, `heroRepo` ×2). The engine deliberately models these quantities as 2-decimal floats while every column is `INTEGER`; without this, one food-producing settlement made **every** `EndTurn` return HTTP 500. `Math.floor` was rejected on purpose — it would silently destroy 0.6 of real farm gold per persist. **Known limitation, not fixed:** the granular `INTEGER` tables are now a rounded shadow of the full-precision `games.settlements` JSONB, and `hydrateFromRepos` prefers them when both are non-empty; the proper fix is `NUMERIC` columns plus a node-postgres type parser.
+
+**Extracted client helpers** (both unit-tested because `cityView.ts` cannot be imported under bare `node:test` — its import chain reaches Vite `?url` PNGs):
+
+| Module | Purpose |
+|---|---|
+| `src/screens/settlements/cityView/syncedBuildings.ts` | Pure `syncCartBuilding`/`syncCartBuildings` — re-syncs the city view's working cart against live state, including `bank` (a real staleness bug: `level`/`style`/`construction` were refreshed but `bank` was not, so a pot changed mid-view was written back stale) |
+| `src/screens/settlements/cityView/footprint.ts` | `footprintCells`/`footprintLine`/`footprintSuffix` report **blocked** cells (`ceil`), matching `coversCell`, so the registry's fractional 1.5×1.5 overrides read as 2×2 and the new 2×2 `warehouse` says so in the palette tooltip, palette label, and building popup |
+
 ## See also
 
 - [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) — current module-by-module dependency map for `src/`, `server/`, `shared/`, `test/`, `tools/`, `scripts/`. This doc (`architecture.md`) is the executed **plan** that established the layout; the dependency map is the maintained **current state** and reflects any drift since the move.

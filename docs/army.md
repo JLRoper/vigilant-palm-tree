@@ -27,7 +27,7 @@ Purchasable units (building-gated; `minLevel` = lowest building level offering t
 
 The other four catalog entries — **griffin, hydra, wisp, black_dragon** — are **monsters**: catalog-only neutral content with a **NULL tier** (outside the 1–7 faction ladder since migration 020), never offered by any building's `recruits` list, range 1. Griffin deliberately remains non-recruitable.
 
-**Upkeep is flat 1 gold + 1 food per troop per week** for every unit type (`upkeep_gold`/`upkeep_food` all ship at 1); per-type tuning is deferred until the engine consumes those catalog columns (see [Upkeep](#upkeep-implemented-flat) below).
+**Upkeep is billed from the per-unit catalog** (`upkeep_gold`/`upkeep_food`, all currently shipping at 1, so 1 gold + 1 food per troop per week) and the engine now consumes those columns. How a shortfall is punished is *not* a flat trim — see [Upkeep](#upkeep-implemented-per-unit-catalog-bill) below.
 
 ## Recruitment (✅ implemented)
 
@@ -58,11 +58,17 @@ The other four catalog entries — **griffin, hydra, wisp, black_dragon** — ar
 - The manual arena's **Retreat** (respawn at the nearest owned settlement, all troops lost, purse kept) and **Surrender** (teleport there, troops kept, gold cost paid) are the escape valves — full table in [heroes.md](./heroes.md) → Combat.
 - No capture state exists; hero death for non-battle causes remains out of scope.
 
-## Upkeep (✅ implemented, flat)
+## Upkeep (✅ implemented, per-unit catalog bill)
 
-- **Heroes:** weekly (`applyWeeklyUpkeep`, day % 7 === 0), 1 gold per troop from the hero purse (existing `applyHeroUpkeep`).
-- **Garrisons:** weekly in the same pass via `applyGarrisonUpkeep` (`packages/engine/src/settlement/garrisonUpkeep.ts`) — 1 gold per troop from the settlement **treasury** and 1 food per troop from its **warehouse**; when a pool runs short, stacks are **trimmed from the end**.
-- Per-type upkeep values exist in `unit_types` (`upkeep_gold`/`upkeep_food`) but all ship at 1/1; wiring the engine to consume them per type is deferred.
+Heroes and garrisons run the **same** rule through one module — `resolveTroopUpkeep` in [`packages/engine/src/economy/troopUpkeep.ts`](../packages/engine/src/economy/troopUpkeep.ts); the two call sites (`hero/upkeep.ts`, `settlement/garrisonUpkeep.ts`) only map their own entity fields in and out, so the two copies cannot drift. The charge is weekly (`day % 7 === 0`).
+
+1. **Bill from the per-unit catalog**, never a flat 1g/1f: `costGold = Σ count × unitUpkeepGold(unit)`, same for food (`unit_types.upkeep_gold`/`upkeep_food`; the server path always passes `EngineCtx.catalog.unitTypes`, and a catalog-less caller falls back to the per-unit 1g/1f defaults). Money comes from the hero's **purse** + wagon cargo, or a settlement's **treasury** + warehouse food.
+2. **Shortfall by cost, not headcount.** Gold and food each starve their own count, cheapest-units-first and whole units only, and the **worse of the two wins** — one unfed soldier is one unfed soldier whichever shortage caused it. No debt is carried across charges (both pools clamp at 0).
+3. **Paid in full** → shortfall bookkeeping cleared, morale unchanged.
+4. **Short** → the first-unpaid day is stamped, morale bleeds in proportion to how much weekly *cost* went unpaid (1-point floor, `MORALE_UNPAID_LOSS_MAX = 25` ceiling), and whatever is there is paid.
+5. **Desertion** only after `DESERT_GRACE_WEEKS = 2` unpaid charges, and then only `DESERT_COST_SHARE = 0.2` of the unfed shortfall's **cost** per week — expressed in cost rather than headcount, so an Eagle Prince counts as many peasants, and the draw is seeded from `castleSeed ^ round ^ day ^ entityId` so the server replays a charge bit-for-bit.
+
+The unpaid-streak bookkeeping lives on the entity: `upkeepUnpaidSinceDay`/`upkeepUnpaidTroops`/`upkeepUnpaidGold` on a hero, `garrisonUnpaidSinceDay`/`garrisonUnpaidTroops`/`garrisonUnpaidGold` on a settlement. The catalog's own `upkeep_gold`/`upkeep_food` columns still all ship at 1/1, so the *numbers* are currently 1 gold + 1 food per troop per week — but the engine consumes those columns now, and the shortfall handling is no longer a flat trim-from-the-end.
 
 ## DB schema
 
