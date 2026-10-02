@@ -13,12 +13,12 @@
 --
 -- advantage_type stays a combat-triangle value (infantry/cavalry/ranged/
 -- monster) exactly like every other unit; faction_id = 'ashen' is the roster
--- tag (023's column). All seven ship at the roster-flat upkeep_gold/
+-- tag (006's column). All seven ship at the roster-flat upkeep_gold/
 -- upkeep_food DEFAULT 1/1 like every existing unit — per-type tuning is a
 -- later migration (021's source-of-truth rule).
 --
 -- The guarded pattern (specialty UPDATE AND specialty = 'militia',
--- faction_id UPDATE AND faction_id = 'neutral') matches 020/023: re-runs
+-- faction_id UPDATE AND faction_id = 'neutral') matches 020/006: re-runs
 -- only touch rows that still carry their DEFAULTs, so a later tuning pass
 -- is never clobbered. Migrations re-run at every boot (server/db.ts), sorted
 -- by filename.
@@ -58,7 +58,7 @@ UPDATE unit_types SET tier = 5 WHERE id = 'blood_knight';
 UPDATE unit_types SET tier = 6 WHERE id = 'vampire_lord';
 UPDATE unit_types SET tier = 7 WHERE id = 'lich';
 
--- Roster tag (023's guarded pattern: only fill rows still on the DEFAULT).
+-- Roster tag (006's guarded pattern: only fill rows still on the DEFAULT).
 UPDATE unit_types SET faction_id = 'ashen'
   WHERE id IN ('ghoul','bone_pikeman','bone_archer','wraith','blood_knight','vampire_lord','lich')
     AND faction_id = 'neutral';

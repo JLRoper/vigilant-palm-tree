@@ -1,7 +1,7 @@
 -- Idempotent migration: The Ironmark Holds roster (faction content wave).
 --
 -- Fills the ironmark roster on the faction-foundation column
--- (023_faction_rosters.sql's unit_types.faction_id): 7 units, tiers 2-7.
+-- (006_faction_rosters.sql's unit_types.faction_id): 7 units, tiers 2-7.
 -- The roster's only monster-triangle entry (iron_golem) rides the same
 -- documented debt as warhound/giant_eagle: advantage_type 'monster' means
 -- an always-advantaged attacker (005_unit_counters.sql), which is deliberate
@@ -56,7 +56,7 @@ UPDATE unit_types SET tier = 6 WHERE id IN ('iron_golem', 'runesmith');
 UPDATE unit_types SET tier = 7 WHERE id = 'forge_lord';
 
 -- Roster faction. Guarded on faction_id = 'neutral' (the column DEFAULT)
--- like 023's backfill, so a re-run never clobbers a later retag.
+-- like 006's backfill, so a re-run never clobbers a later retag.
 UPDATE unit_types SET faction_id = 'ironmark'
   WHERE id IN ('dwarf_axeman', 'shield_bearer', 'hand_gunner', 'ironsworn',
                'iron_golem', 'runesmith', 'forge_lord')

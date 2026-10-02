@@ -8,7 +8,7 @@
 -- packages/engine/src/buildingRegistry.ts: groveSanctum, warrenLodge,
 -- sylvanStables, worldrootGrove).
 --
--- Re-run safety follows 020/023's guarded-UPDATE pattern: the faction_id and
+-- Re-run safety follows 020/006's guarded-UPDATE pattern: the faction_id and
 -- specialty UPDATEs only touch rows that still carry their column DEFAULT, so
 -- a later tuning pass is never clobbered by a re-run (migrations re-run at
 -- every boot, server/db.ts, sorted by filename).
@@ -50,7 +50,7 @@ UPDATE unit_types SET tier = 5 WHERE id = 'elk_rider';
 UPDATE unit_types SET tier = 6 WHERE id = 'treant_elder';
 UPDATE unit_types SET tier = 7 WHERE id = 'stag_knight';
 
--- Roster faction: guarded on the column DEFAULT like 023's backfill, so a
+-- Roster faction: guarded on the column DEFAULT like 006's backfill, so a
 -- re-run never clobbers a later retag.
 UPDATE unit_types SET faction_id = 'verdant'
   WHERE id IN ('forest_scout', 'briar_warden', 'warbeast', 'thorn_archer',

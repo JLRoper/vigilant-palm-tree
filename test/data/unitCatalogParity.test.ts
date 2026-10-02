@@ -10,7 +10,7 @@
 // test/server/eventStreamRoute.test.ts): tests run under plain tsx --test
 // with no server boot, and initSchema() is idempotent by design (it runs at
 // every server start), so this is the cheap way to guarantee migration
-// 023's faction_id column is in place on a fresh DB.
+// 006's faction_id column is in place on a fresh DB.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -78,7 +78,7 @@ test("every faction with a shipped roster has a banner file on disk", () => {
   }
 });
 
-test("the unit_types.faction_id column matches the registry rosters (migration 023)", async () => {
+test("the unit_types.faction_id column matches the registry rosters (migration 006)", async () => {
   const r = await pool.query<{ id: string; faction_id: string }>(
     "SELECT id, faction_id FROM unit_types",
   );
