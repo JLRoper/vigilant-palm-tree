@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type {
   BuildingDef,
   Command,
+  FactionId,
   HeroId,
   HeroState,
   Player,
@@ -10,7 +11,7 @@ import type {
   SettlementId,
   SettlementState,
 } from "@heroes/contracts";
-import type { HydratableGameRow } from "@heroes/engine";
+import type { HydratableGameRow, UnitType } from "@heroes/engine";
 import { normalizePlatoons } from "@heroes/engine";
 import { handleCommand } from "../../server/app/commandHandler";
 import {
@@ -100,7 +101,7 @@ function makeRow(
   };
 }
 
-function makeDeps(row: HydratableGameRow) {
+function makeDeps(row: HydratableGameRow, unitTypes: UnitType[] = []) {
   const gameRepo = createMockGameRepo({ [row.name as string]: row });
   const eventRepo = createMockEventRepo();
   const heroRepo = createMockHeroRepo({ [row.name as string]: row.heroes });
@@ -112,7 +113,7 @@ function makeDeps(row: HydratableGameRow) {
     heroRepo,
     settlementRepo,
     charterRepo,
-    deps: { gameRepo, eventRepo, heroRepo, settlementRepo, charterRepo, ctx: { rng: () => 0.5, catalog: { unitTypes: [] } } },
+    deps: { gameRepo, eventRepo, heroRepo, settlementRepo, charterRepo, ctx: { rng: () => 0.5, catalog: { unitTypes } } },
   };
 }
 
@@ -213,5 +214,97 @@ test("RecruitUnits rejects a count of 0", async () => {
   const result = await handleCommand(recruitCommand({ count: 0 }), deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "invalid_count");
+  assert.equal(eventRepo.events.length, 0);
+});
+
+// ── Seat-faction gate (026_verdant_wild): the server path pins ──
+// commandHandler checks unitAllowedForSeatFaction on the requested unit
+// BEFORE the reducer, so a seat never recruits another faction's roster.
+
+function catalogUnit(id: string, factionId: FactionId): UnitType {
+  return {
+    id,
+    name: id,
+    attack: 1,
+    defence: 1,
+    health: 1,
+    speed: 1,
+    description: "",
+    advantageType: "infantry",
+    specialty: "",
+    specialtyPriority: 0,
+    factionId,
+  };
+}
+
+const SYLVAN_STABLES = { gx: 4, gy: 4 };
+
+function factionRow(seatFactionId?: FactionId): HydratableGameRow {
+  const players: Player[] = PLAYERS.map((p) =>
+    p.id === 0 ? { ...p, ...(seatFactionId !== undefined ? { factionId: seatFactionId } : {}) } : p,
+  );
+  return makeRow(
+    [makeHero("h0", 0, 9, 9)],
+    [
+      makeSettlement("s0", 0, 5, 5, {
+        gold: 5000,
+        warehouse: { wood: 20, stone: 0, iron: 0, arcane: 10, food: 0 },
+        buildings: [
+          building("barracks", BARRACKS.gx, BARRACKS.gy),
+          building("sylvanStables", SYLVAN_STABLES.gx, SYLVAN_STABLES.gy, 2),
+        ],
+      }),
+      makeSettlement("s1", 1, 18, 4),
+    ],
+    { players },
+  );
+}
+
+const FACTION_CATALOG: UnitType[] = [
+  catalogUnit("swordsman", "human"),
+  catalogUnit("elk_rider", "verdant"),
+  catalogUnit("stag_knight", "verdant"),
+];
+
+test("RecruitUnits: a verdant seat recruits elk_rider from sylvanStables (its own faction passes the gate)", async () => {
+  const { deps, eventRepo } = makeDeps(factionRow("verdant"), FACTION_CATALOG);
+  const result = await handleCommand(
+    recruitCommand({
+      buildingKind: "sylvanStables",
+      gx: SYLVAN_STABLES.gx,
+      gy: SYLVAN_STABLES.gy,
+      unitTypeId: "elk_rider",
+      count: 1,
+    }),
+    deps,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.settlement?.gold, 5000 - 450, "1 elk rider at 450g");
+  assert.deepEqual((result.settlement?.stacks ?? [])[0].entries, [{ unitTypeId: "elk_rider", count: 1 }]);
+  assert.equal(eventRepo.events.length, 1);
+});
+
+test("RecruitUnits: a human (default) seat cannot recruit the verdant roster — unit_not_in_seat_faction", async () => {
+  const { deps, eventRepo } = makeDeps(factionRow(), FACTION_CATALOG);
+  const result = await handleCommand(
+    recruitCommand({
+      buildingKind: "sylvanStables",
+      gx: SYLVAN_STABLES.gx,
+      gy: SYLVAN_STABLES.gy,
+      unitTypeId: "elk_rider",
+      count: 1,
+    }),
+    deps,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "unit_not_in_seat_faction");
+  assert.equal(eventRepo.events.length, 0);
+});
+
+test("RecruitUnits: the gate is symmetric — a verdant seat cannot recruit human units", async () => {
+  const { deps, eventRepo } = makeDeps(factionRow("verdant"), FACTION_CATALOG);
+  const result = await handleCommand(recruitCommand({ unitTypeId: "swordsman", count: 1 }), deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "unit_not_in_seat_faction");
   assert.equal(eventRepo.events.length, 0);
 });

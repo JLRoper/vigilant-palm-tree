@@ -3,7 +3,8 @@
 // FactionId without an entry here is a tsc error, the same compile
 // enforcement buildingRegistry.ts's Record<BuildingKind, BuildingEffect>
 // uses. `roster` is the unit-id membership list the parity test pins against
-// the unit_types DB column; ashen/ironmark/verdant ship EMPTY rosters until
+// the unit_types DB column; verdant's roster landed with its content plan
+// (026_verdant_wild.sql), while ashen/ironmark ship EMPTY rosters until
 // their content plans land (their entries exist so ids resolve and banners
 // can be addressed), and their label/motto/palette values are the seeds
 // their plans refine.
@@ -52,9 +53,18 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
     id: "verdant",
     label: "The Verdant Wild",
     motto: "The forest keeps what the forest grows.",
-    description: "Placeholder entry until the Verdant Wild content plan lands its roster.",
+    description:
+      "Beastkin lodges and grove-wardens: the cheapest ranged and beast units in the game, the fastest cavalry, and two walking natural disasters at the top. Builds in wood, pays in favors.",
     palette: { primary: "#3f6212", secondary: "#5c4033", accent: "#d4a017" },
-    roster: [],
+    roster: [
+      "forest_scout",
+      "briar_warden",
+      "warbeast",
+      "thorn_archer",
+      "elk_rider",
+      "treant_elder",
+      "stag_knight",
+    ],
   },
   neutral: {
     id: "neutral",

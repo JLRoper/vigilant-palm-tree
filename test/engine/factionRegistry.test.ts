@@ -46,6 +46,19 @@ test("FACTION_REGISTRY is exhaustive over FactionId and every entry's id matches
   }
 });
 
+test("FACTION_REGISTRY.verdant carries the shipped Verdant Wild roster (026_verdant_wild)", () => {
+  assert.deepEqual(FACTION_REGISTRY.verdant.roster, [
+    "forest_scout",
+    "briar_warden",
+    "warbeast",
+    "thorn_archer",
+    "elk_rider",
+    "treant_elder",
+    "stag_knight",
+  ]);
+  assert.notEqual(FACTION_REGISTRY.verdant.description, "", "the placeholder description is replaced by real content");
+});
+
 test("unitFactionId defaults absent and unknown entries to human", () => {
   assert.equal(unitFactionId(undefined), "human");
   assert.equal(unitFactionId(unit("swordsman")), "human");

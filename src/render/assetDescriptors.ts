@@ -110,6 +110,10 @@ import buildingPixelIronMine3 from "../resources/buildings/building-pixel-ironMi
 import buildingPixelUnderConstruction1 from "../resources/buildings/building-pixel-underConstruction-1.png?url";
 import buildingPixelUnderConstruction2 from "../resources/buildings/building-pixel-underConstruction-2.png?url";
 import buildingPixelUnderConstruction3 from "../resources/buildings/building-pixel-underConstruction-3.png?url";
+import buildingPixelGroveSanctum1 from "../resources/buildings/building-pixel-groveSanctum-1.png?url";
+import buildingPixelWarrenLodge1 from "../resources/buildings/building-pixel-warrenLodge-1.png?url";
+import buildingPixelSylvanStables1 from "../resources/buildings/building-pixel-sylvanStables-1.png?url";
+import buildingPixelWorldrootGrove1 from "../resources/buildings/building-pixel-worldrootGrove-1.png?url";
 import { Faction, Direction } from "../entities/hero";
 import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
@@ -326,6 +330,10 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel.underConstruction.2": buildingPixelUnderConstruction2,
   "pixel.underConstruction.3": buildingPixelUnderConstruction3,
   "pixel.smithy.2": buildingPixelSmithy2,
+  "pixel.groveSanctum.1": buildingPixelGroveSanctum1,
+  "pixel.warrenLodge.1": buildingPixelWarrenLodge1,
+  "pixel.sylvanStables.1": buildingPixelSylvanStables1,
+  "pixel.worldrootGrove.1": buildingPixelWorldrootGrove1,
 };
 
 export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescriptor> = {
@@ -804,6 +812,10 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.woodcutterHut.2": 8,
   "building.pixel.woodcutterHut.3": 8,
   "building.pixel.smithy.2": 4,
+  "building.pixel.groveSanctum.1": 9,
+  "building.pixel.warrenLodge.1": 8,
+  "building.pixel.sylvanStables.1": 10,
+  "building.pixel.worldrootGrove.1": 6,
 };
 for (const [key, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {
   const desc = BUILDING_DESCRIPTORS[key];
