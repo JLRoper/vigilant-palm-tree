@@ -109,10 +109,13 @@ test("water and mountain terrain report passable: false", () => {
 });
 
 test("resource deposit reports workedBy only within the settlement's rate radius", () => {
-  // Level-2 settlement -> settlementRateRadius(2) = 1.
+  // Level-2 settlement -> settlementRateRadius(2) = 2 (the radius is `level`, not
+  // `level - 1`: an L1 settlement may not stand on a resource tile, so a radius of
+  // 0 would scan its own tile alone and earn nothing at all).
   const map = makeGrassMap(6, 1, [
     { q: 3, r: 0, resource: "iron" }, // hex-distance 1 from the settlement -> worked
-    { q: 4, r: 0, resource: "iron" }, // hex-distance 2 -> one hex outside the radius, unclaimed
+    { q: 4, r: 0, resource: "iron" }, // hex-distance 2 -> the edge of the radius, worked
+    { q: 5, r: 0, resource: "iron" }, // hex-distance 3 -> one hex outside the radius, unclaimed
   ]);
   const { state: settlementState, castle } = makeSettlement("s0", 2, 0, 2, 0, "Ironhold");
   const hero = new Hero("h0", "Hero", 2, 0, "player", 0);
@@ -123,7 +126,11 @@ test("resource deposit reports workedBy only within the settlement's rate radius
   assert.equal(worked!.deposit!.yield, RESOURCE_YIELD.iron);
   assert.deepEqual(worked!.deposit!.workedBy, { name: "Ironhold", ownerId: 0 });
 
-  const unclaimed = describeTile({ map, state, heroes: [hero], castles: [castle], viewPlayerId: 0, tile: { q: 4, r: 0 } });
+  const edge = describeTile({ map, state, heroes: [hero], castles: [castle], viewPlayerId: 0, tile: { q: 4, r: 0 } });
+  assert.ok(edge!.deposit);
+  assert.deepEqual(edge!.deposit!.workedBy, { name: "Ironhold", ownerId: 0 }, "the ring extends to radius 2");
+
+  const unclaimed = describeTile({ map, state, heroes: [hero], castles: [castle], viewPlayerId: 0, tile: { q: 5, r: 0 } });
   assert.ok(unclaimed!.deposit);
   assert.equal(unclaimed!.deposit!.workedBy, null);
 });
