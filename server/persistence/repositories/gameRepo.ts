@@ -71,7 +71,12 @@ export class GameNotFoundError extends Error {
   }
 }
 
-const GAME_COLUMNS =
+// Canonical games column list. Exported for every other SELECT/RETURNING
+// over the games table (routes.ts, commandHandler.ts) -- duplicate column
+// lists drift, and the drift is client-visible: routes.ts's copy once
+// omitted trade_routes/next_charter_id/next_settlement_id, so every GET
+// returned games without them and the client hydrated tradeRoutes: [].
+export const GAME_COLUMNS =
   "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, next_charter_id, next_settlement_id, trade_routes, created_at, updated_at";
 
 export interface SaveHeroesAndSettlementsExtra {

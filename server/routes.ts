@@ -14,8 +14,16 @@ import type {
   HeroState,
   Player,
   SettlementState,
+  TradeRouteState,
 } from "@heroes/contracts";
 import type { PoolClient } from "pg";
+// Canonical games column list, imported from gameRepo (the single source).
+// The local copy that used to live here omitted trade_routes,
+// next_charter_id and next_settlement_id once the repo's list grew them --
+// every GET/RETURNING in this file then came back without those columns and
+// the client hydrated tradeRoutes: [] on reload. Duplicate column lists
+// drift; this import is the fix and the prevention.
+import { GAME_COLUMNS } from "./persistence/repositories/gameRepo";
 import { assetRouter } from "./assetRoutes";
 import { authRouter, attachAuth } from "./auth";
 import { invalidateMembershipCache } from "./middleware/attachPlayerSeat";
@@ -62,6 +70,9 @@ type FullGameRow = {
   settlements: Record<string, SettlementState>;
   map_size: string;
   lobby: LobbyState;
+  next_charter_id: number;
+  next_settlement_id: number;
+  trade_routes: TradeRouteState[] | null;
   created_at: string;
   updated_at: string;
 };
@@ -102,9 +113,6 @@ export interface LobbyState {
   // caravan recommender (economy/tradeNeeds.ts) instead of the teleport.
   legacyAutoTrade?: boolean;
 }
-
-const GAME_COLUMNS =
-  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, created_at, updated_at";
 
 async function generateAndInsertTiles(
   client: PoolClient,
