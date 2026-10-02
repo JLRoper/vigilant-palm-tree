@@ -15,6 +15,7 @@ import {
   type RecruitEntry,
 } from "@heroes/engine";
 import type { Warehouse } from "@heroes/contracts";
+import { footprintLine } from "./footprint";
 
 function formatEffectLine(kind: BuildingKind, level: number): string[] {
   const lines: string[] = [];
@@ -208,6 +209,18 @@ export class BuildingMenu {
         marginBottom: "4px",
       });
       this.menu.appendContent(costDiv);
+    }
+
+    const footprintStr = footprintLine(building.kind, building.level);
+    if (footprintStr) {
+      const fpDiv = document.createElement("div");
+      fpDiv.textContent = footprintStr;
+      Object.assign(fpDiv.style, {
+        fontSize: "10px",
+        opacity: "0.6",
+        marginBottom: "4px",
+      });
+      this.menu.appendContent(fpDiv);
     }
 
     if (building.kind === "townHall" && building.level < 3 && this.onUpgradeTownHall) {

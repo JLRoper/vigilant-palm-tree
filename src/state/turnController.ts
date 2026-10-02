@@ -6,8 +6,11 @@ import {
   applyEngineEvent,
   applySettlementBattleResult,
   computeSettlementRates,
+  depositIntoBank,
   generateCitySpots,
   cityViewSizeFor,
+  foodBiasForTerrain,
+  requestBankWithdrawal,
   resolveBattle,
   rollbackCaptureSettlement,
 } from "@heroes/engine";
@@ -50,6 +53,8 @@ import { findPath } from "../map/pathfinding";
 import { hexDistance } from "../core/hex";
 import { bus } from "../core/eventBus";
 import { GARRISON_BACKOFF_ROUNDS, type GarrisonRecruitment } from "../ai/aiBrain";
+
+export type BankGoldDirection = "deposit" | "withdraw";
 
 export interface TurnControllerHooks {
   onHumanTurnEnd(state: GameState): Promise<GameState>;
@@ -177,6 +182,20 @@ export interface TurnControllerHooks {
     unitTypeId: string,
     count: number,
     toSlot?: number,
+  ): Promise<void>;
+  // A bank pot moved (treasury -> pot, or pot -> a 7-day pending withdrawal).
+  // Same fire-and-forget shape as the rest of this block: the local
+  // depositIntoBank/requestBankWithdrawal call has already applied, which is
+  // also load-bearing — multiplayerSync skips the client's OWN event id
+  // (noteSelfEventId from postCommand), so a POST-only path would leave the
+  // initiator's own pot stale until the next resync.
+  onBankGold(
+    actor: number,
+    settlementId: SettlementId,
+    gx: number,
+    gy: number,
+    amount: number,
+    direction: BankGoldDirection,
   ): Promise<void>;
   // Fire-and-forget POST of an auto-resolved settlement-garrison battle
   // result (AI-attacker path). The local engine reducer has already applied
@@ -684,6 +703,36 @@ export class TurnController {
     return true;
   }
 
+  /**
+   * Moves gold between a settlement's treasury and one of its bank pots.
+   * Returns the reducer's own `reason` string so the caller can show why
+   * nothing happened instead of clicking a dead button; `ok: true` means the
+   * local state already moved and the POST is in flight.
+   */
+  bankGold(
+    settlementId: SettlementId,
+    gx: number,
+    gy: number,
+    amount: number,
+    direction: BankGoldDirection,
+  ): { ok: boolean; reason: string } {
+    const result =
+      direction === "deposit"
+        ? depositIntoBank(this.state, settlementId, gx, gy, amount)
+        : requestBankWithdrawal(this.state, settlementId, gx, gy, amount);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    const actor = result.state.activePlayerId;
+    this.commit(result.state, {
+      log: {
+        type: "bank_gold_moved",
+        payload: { settlementId, gx, gy, amount, direction },
+      },
+      hook: () => this.hooks.onBankGold(actor, settlementId, gx, gy, amount, direction),
+      hookLabel: "onBankGold",
+    });
+    return { ok: true, reason: "" };
+  }
+
   // =========================================================================
   // CHARTER SETTLEMENTS
   // =========================================================================
@@ -709,7 +758,10 @@ export class TurnController {
 
     const computed = computeSettlementRates(map, targetQ, targetR, 1);
     const size = cityViewSizeFor(1);
-    const { spots } = generateCitySpots(size, () => rng);
+    // Terrain biases the chartered city's food-spot roll (StartCharter).
+    const { spots } = generateCitySpots(size, () => rng, {
+      foodBias: foodBiasForTerrain(map.get(targetQ, targetR) ?? ""),
+    });
 
     const payload: StartCharterPayload = {
       heroId,
@@ -1306,7 +1358,10 @@ export class TurnController {
     const computed = computeSettlementRates(map, s.q, s.r, targetLevel);
     const size = cityViewSizeFor(targetLevel);
     const rng = () => this.hooks.rng();
-    const { spots } = generateCitySpots(size, rng);
+    // Terrain biases the food-spot roll of the new ring of cells (upgrade).
+    const { spots } = generateCitySpots(size, rng, {
+      foodBias: foodBiasForTerrain(map.get(s.q, s.r) ?? ""),
+    });
     const newCitySpots = spots.filter(
       (spot) => !s.citySpots.some((cs) => cs.cell.x === spot.cell.x && cs.cell.y === spot.cell.y),
     );

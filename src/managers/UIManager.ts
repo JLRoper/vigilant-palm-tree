@@ -154,6 +154,14 @@ export class UIManager {
         this.gameStateManager.replaceState(tc.getState());
         return true;
       },
+      onBankGold: (settlementId, gx, gy, amount, direction) => {
+        if (!this.gameStateManager) return { ok: false, reason: "no_settlement" };
+        const tc = this.gameStateManager.getTurnController();
+        const result = tc.bankGold(settlementId, gx, gy, amount, direction);
+        if (!result.ok) return result;
+        this.gameStateManager.replaceState(tc.getState());
+        return result;
+      },
     });
   }
 

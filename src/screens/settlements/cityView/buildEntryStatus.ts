@@ -1,6 +1,7 @@
 import type { BuildingKind } from "@heroes/contracts";
 import { buildingPlacementCost, buildingUpkeep } from "@heroes/engine";
 import type { NetCost } from "./netCost";
+import { footprintLine } from "./footprint";
 
 const COST_RESOURCES = ["gold", "wood", "stone", "iron", "arcane"] as const;
 
@@ -52,6 +53,8 @@ export function buildEntryStatus(opts: BuildEntryStatusOptions): BuildEntryStatu
   }
   if (opts.hasTownHall) blocking.push("A town hall already exists in this settlement");
   const reasons = [...blocking];
+  const size = footprintLine(opts.kind);
+  if (size) reasons.push(size);
   const upkeep = upkeepLine(opts.kind);
   if (upkeep) reasons.push(upkeep);
   return { disabled: blocking.length > 0, reasons, title: reasons.join("\n") };

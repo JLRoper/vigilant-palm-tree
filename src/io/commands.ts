@@ -148,6 +148,13 @@ export type TransferGoldResult = {
   settlement: SettlementState;
 };
 
+// The authoritative settlement row after a BankGold move: its treasury gold AND
+// the bank pot (`building.bank`) the mutation landed in. Mirrors the shape
+// commandHandler.ts's `case "BankGold"` returns.
+export type BankGoldResult = {
+  settlement: SettlementState;
+};
+
 export type TradeResourcesResult = {
   fromSettlement: SettlementState;
   toSettlement: SettlementState;
@@ -254,6 +261,24 @@ export async function transferGold(
   }
 ): Promise<TransferGoldResult> {
   return postCommand<TransferGoldResult>(name, { kind: "TransferGold", ...payload });
+}
+
+// One command for both pot directions, matching the contracts
+// BankGoldCommand: "deposit" moves settlement treasury -> the bank's pot,
+// "withdraw" starts the 7-day countdown out of it (the gold leaves the pot at
+// once and matures into the treasury on state.day + BANK_WITHDRAWAL_DAYS).
+export async function bankGold(
+  name: string,
+  payload: {
+    actor: number;
+    settlementId: string;
+    gx: number;
+    gy: number;
+    amount: number;
+    direction: "deposit" | "withdraw";
+  }
+): Promise<BankGoldResult> {
+  return postCommand<BankGoldResult>(name, { kind: "BankGold", ...payload });
 }
 
 // Phase 3 Track A Week 3+: ported from the old dedicated /trade route to

@@ -13,6 +13,7 @@ import {
 } from "@heroes/engine";
 import { buildListSections } from "./buildListSections";
 import { buildConfirmStatus, buildEntryStatus } from "./buildEntryStatus";
+import { footprintSuffix } from "./footprint";
 import { pickStyleForBuilding } from "../../../render/assetDescriptors";
 import type { ResourceType } from "../../../state/gameState";
 import resourceGoldPileSmol from "../../../resources/resource-gold-pile-smol.png?url";
@@ -448,7 +449,7 @@ export class BuildingPlacer {
         }
 
         const labelSpan = document.createElement("span");
-        labelSpan.textContent = hasTownHall ? `${label} (built)` : label;
+        labelSpan.textContent = `${hasTownHall ? `${label} (built)` : label}${footprintSuffix(kind)}`;
         Object.assign(labelSpan.style, { flex: "1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
 
         row.appendChild(costWrap);

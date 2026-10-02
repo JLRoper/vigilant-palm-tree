@@ -23,6 +23,7 @@ import {
   advanceCharterTravel,
   recruitUnits as recruitUnitsCommand,
   transferUnits as transferUnitsCommand,
+  bankGold as bankGoldCommand,
   submitSettlementBattleResult,
 } from "../io/commands";
 import type { EndTurnResult } from "../io/commands";
@@ -468,6 +469,22 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await transferUnitsCommand(name, { actor, heroId, settlementId, direction, unitTypeId, count, toSlot });
       } catch (e) {
         reportCommandFailure("Transfer units", e);
+      }
+    },
+    onBankGold: async (
+      actor: number,
+      settlementId: SettlementId,
+      gx: number,
+      gy: number,
+      amount: number,
+      direction: "deposit" | "withdraw",
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await bankGoldCommand(name, { actor, settlementId, gx, gy, amount, direction });
+      } catch (e) {
+        reportCommandFailure(direction === "deposit" ? "Bank deposit" : "Bank withdrawal", e);
       }
     },
     onSettlementBattleSubmitted: async (payload): Promise<void> => {

@@ -23,11 +23,24 @@ test("affordable entry is enabled with only the upkeep line as its tooltip", () 
   assert.equal(status.title, "Upkeep: 1 wood per turn");
 });
 
-test("a zero-upkeep kind produces an empty tooltip when affordable", () => {
+test("a zero-upkeep kind produces only its footprint line as tooltip when affordable", () => {
   const status = buildEntryStatus({ kind: "farmField", affordability: FULL });
   assert.equal(status.disabled, false);
-  assert.deepEqual(status.reasons, []);
-  assert.equal(status.title, "");
+  assert.deepEqual(status.reasons, ["Takes 2\u00D72 tiles (4)"]);
+  assert.equal(status.title, "Takes 2\u00D72 tiles (4)");
+});
+
+test("a 1x1 kind adds no footprint line to the tooltip", () => {
+  const status = buildEntryStatus({ kind: "house", affordability: FULL });
+  assert.equal(status.disabled, false);
+  assert.deepEqual(status.reasons, ["Upkeep: 1 wood per turn"]);
+  assert.equal(status.reasons.some((r) => r.includes("tiles")), false);
+});
+
+test("the 2x2 warehouse states its footprint (2026-10-01: it used to be 1x1)", () => {
+  const status = buildEntryStatus({ kind: "warehouse", affordability: FULL });
+  assert.equal(status.disabled, false);
+  assert.deepEqual(status.reasons, ["Takes 2\u00D72 tiles (4)", "Upkeep: 1 wood, 1 stone per turn"]);
 });
 
 test("gold shortfall names the needed and available amounts", () => {
@@ -95,6 +108,7 @@ test("hasTownHall disables an otherwise affordable town hall with its own reason
   assert.equal(status.disabled, true);
   assert.deepEqual(status.reasons, [
     "A town hall already exists in this settlement",
+    "Takes 2\u00D72 tiles (4)",
     "Upkeep: 3 wood, 2 stone per turn",
   ]);
 });
@@ -102,7 +116,7 @@ test("hasTownHall disables an otherwise affordable town hall with its own reason
 test("town hall is enabled when none exists yet", () => {
   const status = buildEntryStatus({ kind: "townHall", affordability: FULL, hasTownHall: false });
   assert.equal(status.disabled, false);
-  assert.deepEqual(status.reasons, ["Upkeep: 3 wood, 2 stone per turn"]);
+  assert.deepEqual(status.reasons, ["Takes 2\u00D72 tiles (4)", "Upkeep: 3 wood, 2 stone per turn"]);
 });
 
 test("null affordability is affordable with no shortfall reasons", () => {
