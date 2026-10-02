@@ -7,11 +7,12 @@ import { computeSettlementRates, GameMap, produceSettlementResources, warehouseR
 import { emptyWarehouse, makeSettlement } from "../charter/_helpers";
 
 // `resourceRates` is computed from map resource tiles, so a settlement founded
-// near a gold tile carries a gold entry -- and the settlement panel rendered it
-// as "N/turn". Nothing ever paid it: gold is not a WAREHOUSE_RESOURCE, so
-// produceSettlementResources cannot deliver it and the turn loop credits gold
-// only from effectiveIncome (tax) and gold producers. The panel now lists the
-// rates through warehouseRates, the same function production uses.
+// near a gold tile carries a gold entry -- and the deleted settlementPanel.ts
+// once rendered it as "N/turn". Nothing ever paid it: gold is not a
+// WAREHOUSE_RESOURCE, so produceSettlementResources cannot deliver it and the
+// turn loop credits gold only from effectiveIncome (tax) and gold producers.
+// warehouseRates is the one filter production consumes; any future rates
+// display must list through it too.
 
 test("gold is not a warehouse resource, so it can never appear as a delivered rate", () => {
   assert.equal(WAREHOUSE_RESOURCES.includes("gold" as ResourceType), false);
@@ -44,7 +45,7 @@ test("produceSettlementResources never credits a gold rate map entry to the trea
   assert.equal(after.warehouse.wood, 3, "the warehouse rates it advertises are the ones it pays");
 });
 
-test("every rate the panel can list is credited at exactly that rate", () => {
+test("every rate warehouseRates can list is credited at exactly that rate", () => {
   const rates = { gold: 40, wood: 12, stone: 4, iron: 0, arcane: 6, food: 2 };
   const settlement = makeSettlement("s0", 0, 2, 2, {
     gold: 0,
@@ -53,11 +54,11 @@ test("every rate the panel can list is credited at exactly that rate", () => {
   });
   const [after] = Object.values(produceSettlementResources({ s0: settlement }, 7));
   for (const { resource, perTurn } of warehouseRates(rates)) {
-    assert.equal(after.warehouse[resource], perTurn, `${resource} pays the rate the panel shows`);
+    assert.equal(after.warehouse[resource], perTurn, `${resource} pays the rate warehouseRates shows`);
   }
 });
 
-test("computeSettlementRates really does produce the gold entry the panel used to render", () => {
+test("computeSettlementRates really does produce the gold entry, and warehouseRates drops it", () => {
   // Pins WHY the gold line existed: the map scan adds every resource type it
   // finds, gold included. The fix is the display side; this test keeps the
   // producer side honest so nobody "fixes" it by deleting the rate instead.
@@ -74,18 +75,27 @@ test("computeSettlementRates really does produce the gold entry the panel used t
   assert.equal(warehouseRates(computeSettlementRates(map, 2, 2, 1).rates).some((r) => r.resource === "gold"), false);
 });
 
-test("the settlement panel renders through warehouseRates and no longer indexes resourceRates", () => {
-  // settlementPanel.ts is a DOM module (its import graph reaches Vite ?url
-  // assets), so this is a source guard in the coverage-guard style of
-  // test/data/unitIcons.coverage.test.ts rather than a live render.
+test("production delivers rates through warehouseRates and never indexes resourceRates", () => {
+  // The panel that rendered resourceRates.gold as a phantom "40/turn" income
+  // line (src/screens/settlements/settlementPanel.ts, deleted) was the only
+  // rates display; no live settlement surface renders per-turn rates today, so
+  // the invariant lives at the one live consumer of resourceRates: the
+  // production loop. It must deliver through the warehouseRates filter -- the
+  // same function any future display must list through -- and never index the
+  // raw map, which is how the phantom gold line comes back. The positive half
+  // anchors on the consumption site because the scanned module also defines
+  // warehouseRates, and a bare "warehouseRates(" would match the definition.
   const source = readFileSync(
-    fileURLToPath(new URL("../../src/screens/settlements/settlementPanel.ts", import.meta.url)),
+    fileURLToPath(new URL("../../packages/engine/src/settlement/produceResources.ts", import.meta.url)),
     "utf8",
   );
-  assert.ok(source.includes("warehouseRates("), "the panel must list rates through warehouseRates");
+  assert.ok(
+    source.includes("warehouseRates(s.resourceRates)"),
+    "production must deliver the rates through warehouseRates",
+  );
   assert.equal(
     source.includes("resourceRates["),
     false,
-    "the panel must not index resourceRates directly -- that is how the phantom gold line came back",
+    "production must not index resourceRates directly -- that is how the phantom gold line comes back",
   );
 });

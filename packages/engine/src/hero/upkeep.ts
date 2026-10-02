@@ -37,73 +37,75 @@ export function evaluateHeroUpkeep(
 
 // ── Settlement-funded food upkeep ──────────────────────────────────────────
 // A hero's larder is only ever filled by a manual "unload at a settlement"
-// action (logistics.ts's transferResources), so an army that never got that
-// action faced a food bill no default game ever paid: `hero.resources.food`
-// starts at 0 (init.ts) and the bill is charged in full every week, so
-// `unpaidMoraleLoss` returned its 25-point cap every charge forever -- morale 0
-// by day 28, troops deserting from turn 22, in a game where the hero never
-// attacks anything to refill the larder. Gold was never the constraint; 3,000
-// gold still left the army fully unfed.
+// action (logistics.ts's transferResources) or by a caravan delivering to a
+// hero endpoint (docs/wagons-stockpiles-trade-routes-plan.md §5.2), so an
+// army that never got either faced a food bill no default game ever paid:
+// `hero.resources.food` starts at 0 (init.ts) and the bill is charged in full
+// every week, so `unpaidMoraleLoss` returned its 25-point cap every charge
+// forever -- morale 0 by day 28, troops deserting from turn 22, in a game
+// where the hero never attacks anything to refill the larder. Gold was never
+// the constraint; 3,000 gold still left the army fully unfed.
 //
-// The rule: a hero standing on one of its OWN settlements draws its weekly
-// food bill out of its owner's settlement warehouses -- the hero's larder
-// first, then the pool, never more than the pool actually holds. Standing on a
-// neutral or enemy town, or in the field, funds nothing and the charge simply
-// goes unpaid exactly as before.
+// The rule (narrowed 2026-10-02): a hero standing on one of its OWN
+// settlements draws its weekly food bill out of THAT settlement's warehouse
+// -- the hero's larder first, then the city it stands on, never more than it
+// holds. Standing on a neutral or enemy town, or in the field, funds nothing
+// and the charge simply goes unpaid exactly as before. Nothing travels: the
+// old owner-wide pool moved food up to 15+ hexes in a turn, which is exactly
+// the teleport this pass removes.
 //
-// The pool is the OWNER's, not one settlement's, and deliberately so: a
-// player's settlements already share one bill and one pool of everything else
-// (economy/consumption.ts's foodRequiredForPopulations,
-// settlement/starterLayout.ts's starterFarmsNeeded, economy/trade.ts's
-// auto-trade), and the default 1-player game's hero starts on the level-1 keep
-// -- which held 0..4 food at the day-7 charge across 10 seeded games, because
-// auto-trade tops it up to exactly foodRequired(pop) and the same turn's
-// consumption spends it, while the 5-farm level-2 town of the same owner held
-// tens to several hundred. A per-settlement draw would leave the hero's
-// 40-food bill ~90% unfunded and the spiral exactly as it is.
+// Why the narrow gate is survivable now (it was not when the pool landed):
+// instant auto-trade drained every settlement down to exactly
+// foodRequired(population) each turn, so the keep's stock read 0 at every
+// weekly charge and only the owner's distant surplus could pay. With
+// auto-trade OFF for new games (lobby.legacyAutoTrade, economy/trade.ts),
+// each settlement ACCUMULATES its own production surplus instead -- the keep
+// holds real stock at the charge (init.ts sizes its farmland against its own
+// population bill plus the starting hero's weekly bill), and a hero that
+// marched away from its food is the one that goes unfed. The caravan chain is
+// the replacement logistics: the recommender (economy/tradeNeeds.ts) proposes
+// routes, routes carry caravans (logistics.ts), caravans top up warehouses
+// and hero larders, and the weekly charge draws on what physically arrived.
 //
 // Ordering: `turn/endTurn.ts`'s production/trade/consumption pass runs BEFORE
 // this charge (turn/round.ts's advanceRound runs it on the day-7 branch), so
-// the warehouses drawn from are already net of the turn's population food bill
+// the warehouse drawn from is already net of the turn's population food bill
 // -- a settlement can never pay out food it was about to consume itself. What
-// the hero takes is genuinely gone: it is deducted from the settlement, and the
-// next turn's auto-trade/production has to earn it back.
+// the hero takes is genuinely gone: it is deducted from the settlement, and
+// the next turn's production (or a caravan) has to earn it back.
 
-// What a hero at this hex may draw on, in the order it is drawn: the
-// settlement under it first, then the rest of the owner's holdings by id so the
-// split never depends on the record's insertion order. `available` is what is
-// left of that settlement's food after the heroes charged before this one.
+// The one settlement a hero may draw on beyond its larder: the city it stands
+// on. `available` is what is left of its food after the heroes charged before
+// this one. Kept as a list so the draw loop and the shared-warehouse
+// bookkeeping below do not care that there is at most one entry.
 interface FoodSource {
   id: SettlementId;
   available: number;
-  /** True for the settlement the hero is standing on: it pays before any other. */
-  underHero: boolean;
 }
 
-// The settlements that may fund `hero`'s food bill, or [] when it may not be
-// funded at all (in the field, or on someone else's town). Mutates nothing.
+// The settlement that may fund `hero`'s food bill, or [] when it may not be
+// funded at all (in the field, or on someone else's town): larder first
+// (applied by the caller), then ONLY a settlement with the hero's hex AND the
+// hero's owner -- the "picking it up at a city" mechanism, automated by
+// physical presence. Mutates nothing.
 function foodSources(
   hero: HeroState,
   settlements: Record<SettlementId, SettlementState>,
   drawnSoFar: Record<string, number>,
 ): FoodSource[] {
-  let standingOnOwn = false;
   const sources: FoodSource[] = [];
   for (const s of Object.values(settlements)) {
     // A neutral settlement (ownerId null) is nobody's bill and nobody's larder
-    // (turn/endTurn.ts's consumption loop and trade.ts both skip it), so it can
-    // never fund an army.
+    // (turn/endTurn.ts's consumption loop skips it), so it can never fund an
+    // army -- and neither can another seat's town under the hero's boots.
     if (s.ownerId === null || s.ownerId !== hero.ownerId) continue;
-    const underHero = s.q === hero.q && s.r === hero.r;
-    if (underHero) standingOnOwn = true;
+    if (!(s.q === hero.q && s.r === hero.r)) continue;
     const available = Math.max(0, (s.warehouse.food ?? 0) - (drawnSoFar[s.id] ?? 0));
-    if (available > 0) sources.push({ id: s.id, available, underHero });
+    if (available > 0) sources.push({ id: s.id, available });
   }
-  if (!standingOnOwn) return [];
-  sources.sort((a, b) => {
-    if (a.underHero !== b.underHero) return a.underHero ? -1 : 1;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
+  // Insertion order of the settlement record is the only tie-break there can
+  // be (one settlement per hex); sort by id so the split never depends on it.
+  sources.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return sources;
 }
 

@@ -20,30 +20,6 @@ export function foodRequiredForPopulation(population: number): number {
   return Math.ceil(pop / FOOD_PER_POPULATION);
 }
 
-/**
- * Food a GROUP of populations must eat per turn, summed per headcount rather
- * than as `ceil(total / FOOD_PER_POPULATION)`: two settlements of 60 each eat
- * 2, not 1.
- *
- * This is the budget a player's holdings are sized against, not one
- * settlement's. A player who starts with a level-1 keep (500) and a level-2
- * town (1,500) eats 5 + 15 = 20 food/turn out of ONE pool of farms -- the
- * farms live in a single city grid, and auto-trade moves the surplus between
- * the player's own settlements (economy/trade.ts). Sizing farmland against
- * either settlement alone left the pair 5 food/turn short (measured: 29/60
- * seeded games net-negative, 11/60 at morale 0).
- *
- * Neutral settlements (ownerId null) are deliberately NOT a player's bill: they
- * are never consumed from, never morale-decayed and never traded with -- see
- * turn/endTurn.ts, whose consumption loop is gated on `s.ownerId === playerId`,
- * and trade.ts's `unowned_settlement` refusal.
- */
-export function foodRequiredForPopulations(populations: Iterable<number>): number {
-  let total = 0;
-  for (const population of populations) total += foodRequiredForPopulation(population);
-  return total;
-}
-
 export function foodRequired(s: SettlementState): number {
   return foodRequiredForPopulation(s.population ?? 0);
 }

@@ -11,7 +11,6 @@ import {
   demoPlatoonsForPlayer,
   evaluateTroopUpkeep,
   foodRequiredForPopulation,
-  foodRequiredForPopulations,
   heroFoodPerTurn,
   isProducerKind,
   producerBasePerTurn,
@@ -271,20 +270,20 @@ test("the starter set is style-stamped but otherwise seed-free", () => {
   );
 });
 
-// A settlement's farm count is sized against the food bill of everything its
-// OWNER holds -- a 1-player game starts seat 0 with a 500-population keep AND a
-// 1500-population town, and both eat out of one pool of farm fields. Sizing each
-// city against its own population (the pre-2026-10-01 rule) gave 1 + 4 farms
-// sized for a 15/turn bill and left the 20/turn pair 5 food/turn short.
+// A settlement's farm count is sized against ITS OWN food bill -- its
+// population, plus the weekly bill of the starting hero standing on it (the
+// keep, for seat 0), because hero/upkeep.ts's under-hero rule draws that bill
+// out of exactly this settlement's warehouse. The whole-owner pool this used to
+// size (keep + town + heroes through one host city) died with the instant
+// auto-trade teleport it existed to feed (lobby.legacyAutoTrade false for new
+// games, 2026-10-02): no settlement can borrow a sibling's surplus anymore, so
+// each city's farmland covers its own mouths.
 //
-// The bill has a third term since the hero bill landed: the owner's HEROES draw
-// their weekly upkeep food out of the same warehouses, which the population bill
-// alone left 40 food/week short of. `heroFoodPerTurn` is the engine's own
-// evaluateTroopUpkeep bill spread over the charge interval.
-//
-// Who gets the pool (init.ts's seedStarterBuildings) and whether the total
-// actually covers the bill on real seeds (init.test.ts / foodProduction.test.ts)
-// are both tested there; this file owns the layout and the count itself.
+// `heroFoodPerTurn` is the engine's own evaluateTroopUpkeep bill spread over
+// the charge interval. Where the bill is computed (init.ts's
+// seedStarterBuildings) and whether it actually covers on real seeds
+// (init.test.ts / foodProduction.test.ts) are both tested there; this file owns
+// the layout and the count itself.
 
 test("starterFarmsNeeded takes a FOOD BILL (food/turn), not a population", () => {
   assert.equal(starterFarmsNeeded(0), STARTER_BASE_FARMS);
@@ -294,18 +293,10 @@ test("starterFarmsNeeded takes a FOOD BILL (food/turn), not a population", () =>
   assert.equal(starterFarmsNeeded(50), 11, "a neutral 5000-population castle eats 50 food/turn");
   assert.equal(STARTER_FARM_VARIANCE_HEADROOM, 1, "one farm of variance headroom, as measured");
 
-  // The bill is the SUM over a player's settlements, not one settlement's
-  // requirement and not ceil of the summed population (two settlements of 60
-  // each eat 2, not 1).
-  assert.equal(foodRequiredForPopulations([500, 1500]), 20, "the pair's bill");
-  assert.equal(foodRequiredForPopulations([60, 60]), 2, "ceil(120/100) would under-count this as 1");
-  assert.equal(foodRequiredForPopulation(500) + foodRequiredForPopulation(1500), 20);
-  assert.equal(starterFarmsNeeded(foodRequiredForPopulations([500, 1500])), 5);
-  assert.notEqual(
-    starterFarmsNeeded(foodRequiredForPopulations([500, 1500])),
-    starterFarmsNeeded(foodRequiredForPopulation(1500)),
-    "sizing against the town alone is the bug this parameter change exists to prevent",
-  );
+  // The bill is summed per settlement, never ceil of a summed population (two
+  // settlements of 60 each eat 2, not 1) -- which is why the caller passes one
+  // settlement's bill at a time and the engine never sums populations itself.
+  assert.equal(foodRequiredForPopulation(60) + foodRequiredForPopulation(60), 2, "ceil(120/100) would under-count this as 1");
 
   // Sufficiency, derived rather than hardcoded: whatever the count, the peak
   // output must cover the requirement for every population the game creates.
@@ -350,22 +341,22 @@ test("heroFoodPerTurn is the engine's own weekly bill, spread over the charge in
 
 test("the hero bill is INCLUDED in the starter farm count", () => {
   const stacks = demoPlatoonsForPlayer(0);
-  const populationBill = foodRequiredForPopulations([500, 1500]);
+  const populationBill = foodRequiredForPopulation(500);
   const heroBill = heroFoodPerTurn(stacks, CATALOG);
   const combined = populationBill + heroBill;
 
   // The counterfactual this pins: the sizing used to be derived from the
-  // population term alone, which is what left the pool short from the FIRST
+  // population term alone, which is what left the keep short from the FIRST
   // weekly charge (day 7) on 2 of 6 measured seeds.
-  assert.equal(starterFarmsNeeded(populationBill), 5, "population bill alone");
-  assert.equal(starterFarmsNeeded(combined), 7, "population + the hero's 40/week bills 7 farms");
+  assert.equal(starterFarmsNeeded(populationBill), 1, "the keep's population bill alone");
+  assert.equal(starterFarmsNeeded(combined), 4, "population + the hero's 40/week bills 4 farms");
   assert.ok(
     starterFarmsNeeded(combined) > starterFarmsNeeded(populationBill),
     "adding the hero's food bill must change the count -- this is the bug",
   );
 
   // Sufficiency at the peak, derived: whatever the count, the peak output covers
-  // the WHOLE bill, population and heroes together.
+  // the WHOLE bill, population and hero together.
   const perFarm = (buildingSettlementEffects("farmField", STARTER_BUILDING_LEVEL).foodPerTurn ?? 0) * CELL_MULTIPLIER_PEAK;
   assert.ok(perFarm > 0);
   assert.ok(
@@ -373,14 +364,21 @@ test("the hero bill is INCLUDED in the starter farm count", () => {
     `${starterFarmsNeeded(combined)} farms x ${perFarm} must cover ${combined} food/turn at peak`,
   );
 
-  // And the count fits the host grid: the pool lives in the owner's largest city,
-  // a level-2 town at 10x10, so all 7 fields must actually be placed.
-  const set = buildStarterLayout({ size: 10, style: "classic", farms: starterFarmsNeeded(combined) });
-  assert.equal(countOf(set, "farmField"), starterFarmsNeeded(combined));
-  assert.equal(countOf(set, "townHall"), 1);
-  assert.equal(countOf(set, STARTER_WOOD_PRODUCER), 1, "an extra farm must not displace a producer");
-  assert.equal(countOf(set, STARTER_STONE_PRODUCER), 1);
-  assert.equal(countOf(set, "house"), 2);
+  // The ask is 4 but the keep's 5x5 grid holds at most three 2x2 farms beside
+  // the 2x2 town hall: the placer honours the count and silently clamps at
+  // capacity (init.test.ts pins the resulting 3, foodProduction.test.ts
+  // measures the coverage of the clamped count over real seeds).
+  const keep = buildStarterLayout({ size: 5, style: "classic", farms: starterFarmsNeeded(combined) });
+  assert.equal(countOf(keep, "farmField"), 3, "5x5 capacity: 25 cells - 4 town hall - 2 houses - 2 producers");
+  assert.equal(countOf(keep, "townHall"), 1);
+  assert.equal(countOf(keep, STARTER_WOOD_PRODUCER), 1, "the clamp never displaces a producer");
+  assert.equal(countOf(keep, STARTER_STONE_PRODUCER), 1);
+  assert.equal(countOf(keep, "house"), 2);
+
+  // A grid that CAN host the ask places it in full (an AI seat's hero spawns on
+  // a 15x15 castle; the same math must not clamp there).
+  const castle = buildStarterLayout({ size: 15, style: "classic", farms: starterFarmsNeeded(50 + heroBill) });
+  assert.equal(countOf(castle, "farmField"), starterFarmsNeeded(50 + heroBill));
 });
 
 test("the default farm count is the historical one, so the level-1 starter set is byte-identical", () => {

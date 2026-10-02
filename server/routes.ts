@@ -93,6 +93,14 @@ export interface LobbyState {
   // drive each other's AI games. Absent on legacy flagged games =
   // adoption path (any server, arbitrated by the per-game advisory lock).
   aiDriverToken?: string;
+  // Legacy instant auto-trade gate (2026-10-02, Rec 4): ON for existing
+  // saves, OFF for new games. ABSENT reads as `true` -- every pre-flag save
+  // (created before POST /games started writing this) keeps the instant
+  // end-of-turn auto-trade it was balanced around. New games are written
+  // with an explicit `false` (optional `legacyAutoTrade` request body, an
+  // opt-IN for the legacy behaviour), so their food logistics go through the
+  // caravan recommender (economy/tradeNeeds.ts) instead of the teleport.
+  legacyAutoTrade?: boolean;
 }
 
 const GAME_COLUMNS =
@@ -374,6 +382,7 @@ router.post("/games", async (req, res) => {
       lobby,
       humanSlots,
       enemySlots,
+      legacyAutoTrade: legacyAutoTradeOptIn,
     } = req.body ?? {};
     if (typeof name !== "string" || !name) {
       res.status(400).json({ error: "name required" });
@@ -413,7 +422,13 @@ router.post("/games", async (req, res) => {
     const initOpts = { ...initOptsBase, unitTypes: initUnitTypes };
     const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179), initOpts);
 
-    let lobbyState: LobbyState = {};
+    let lobbyState: LobbyState = {
+      // Rec 4: new games run WITHOUT instant auto-trade (explicit false, so
+      // "absent → true" can never resurrect it on a fresh row); a request
+      // body of `legacyAutoTrade: true` opts a new game back into the legacy
+      // behaviour. Non-boolean junk reads as the default (false).
+      legacyAutoTrade: legacyAutoTradeOptIn === true,
+    };
     const explicitSeats =
       lobbyObj && Number.isInteger(lobbyObj.seats) ? (lobbyObj.seats as number) : null;
     const seats = explicitSeats ?? (humanCount !== null ? humanCount : null);
@@ -599,7 +614,7 @@ router.get("/games/:name/tiles", async (req, res) => {
 // POST /games/:name/resolve-battle and POST /games/:name/trade were
 // retired here (Phase 3 Track A Week 3+,
 // plan/2026-08-16-phase-3-parallel-dev-plan.md) -- both are now
-// ResolveBattle/TradeResources on the POST /games/:name/commands bus
+// ResolveBattle on the POST /games/:name/commands bus
 // (server/http/routes/commands.ts, server/app/commandHandler.ts), the
 // same cutover Week 2 already did for spend_movement/transfer/end-turn.
 // POST /games/:name/end-turn was retired 2026-09-30 -- it was the

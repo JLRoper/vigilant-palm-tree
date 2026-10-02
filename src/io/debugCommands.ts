@@ -91,14 +91,6 @@ export function attachDebugApi(engine: AttachDebugApiEngine): void {
       return ok;
     },
 
-    tradeResources: (fromId: string, toId: string, resource: "wood" | "stone" | "iron" | "arcane", amount: number) => {
-      const tc = engine.state.getTurnController();
-      const result = tc.tradeResources(fromId, toId, resource, amount);
-      engine.syncFromController();
-      engine.refresh();
-      return result;
-    },
-
     teleportHero: (id: HeroId, q: number, r: number) => {
       const tc = engine.state.getTurnController();
       const gs = tc.getState();

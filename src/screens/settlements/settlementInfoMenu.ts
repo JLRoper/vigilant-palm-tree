@@ -830,10 +830,10 @@ export interface BankAmountModalOptions {
   onConfirm: (amount: number) => { ok: boolean; reason: string };
 }
 
-// Amount prompt for one bank pot, same shape as tradeModal.ts: a number input
-// clamped to what this move can actually carry, an inline context line, and the
-// reducer's own reason rendered inline rather than swallowed -- a silent failure
-// here is the "the button did nothing" bug the panel must not repeat.
+// Amount prompt for one bank pot: a number input clamped to what this move can
+// actually carry, an inline context line, and the reducer's own reason rendered
+// inline rather than swallowed -- a silent failure here is the "the button did
+// nothing" bug the panel must not repeat.
 export function openBankAmountModal(opts: BankAmountModalOptions): void {
   const verb = opts.direction === "deposit" ? "Deposit" : "Withdraw";
   const modal = openCenteredModal(opts.parent, `${verb} — Bank L${opts.level}`, 320);

@@ -20,11 +20,24 @@ import { makeHero, makeSettlement, makeState } from "../charter/_helpers";
 // ── The bug this file pins ────────────────────────────────────────────────
 // The starting hero's weekly food bill was charged against a wagon larder that
 // starts at 0 (engine init.ts) and that nothing in a default game ever fills --
-// the only writer is a manual "unload at a settlement" action. So every charge
+// the only writer was a manual "unload at a settlement" action. So every charge
 // was fully unfed: 25 morale per week from the first one (day 7), morale 0 by
 // day 28, troops deserting from turn 22, byte-identically on every seed. The
-// fix: a hero standing on one of its OWN settlements draws that bill out of its
-// owner's warehouses (hero/upkeep.ts's applySuppliedHeroUpkeep).
+// fix: a hero standing on one of its OWN settlements draws that bill out of
+// THAT settlement's warehouse.
+//
+// The draw is NARROW since 2026-10-02: larder first, then ONLY the settlement
+// under the hero's boots (same hex, same owner). Nothing travels -- the old
+// owner-wide pool moved food up to 15+ hexes in a turn, which is exactly the
+// teleport this pass removes. The narrow gate is survivable because new games
+// run without instant auto-trade (lobby.legacyAutoTrade false): each
+// settlement ACCUMULATES its own production surplus instead of being drained
+// to exactly foodRequired every turn, so the keep holds real stock at the
+// charge (init.ts sizes its farms against its population bill plus the
+// starting hero's weekly bill). A hero that marched away from its food is the
+// one that goes unfed -- the honest cliff, now the design; the caravan chain
+// (economy/tradeNeeds.ts recommender -> route -> caravan -> larder/warehouse)
+// is the replacement logistics.
 
 // The real catalog's upkeep numbers for the demo platoon, from
 // server/migrations/021_upkeep_shortfall.sql: upkeep_gold = tier,
@@ -124,9 +137,11 @@ test("a hero standing on its own settlement's tile is fed from that settlement's
   assert.equal(home.s0.warehouse.food, 60, "the input record is never mutated");
 });
 
-test("a hero with NO settlement at its hex gets no food, does not crash, and starves as before", () => {
+test("CLIFF: a hero with no settlement at its hex gets no food, even from its own well-stocked town elsewhere", () => {
+  // The narrow rule, pinned from the unhappy side: the owner's town holds 500
+  // food eleven hexes away and sends none of it. Nothing travels; the army in
+  // the field pays the full penalty (and a caravan route is the designed fix).
   const hero = heroAt(9, 9);
-  // A settlement on another tile, owned by the hero's own seat: still no food.
   const settlements = { s0: settlementWith("s0", 0, 2, 2, 500) };
   const { hero: after, foodDrawn, settlements: afterSettlements } = charge(hero, settlements);
 
@@ -152,36 +167,38 @@ test("an enemy or NEUTRAL town under the hero funds nothing", () => {
   assert.equal(enemy.hero.upkeepUnpaidSinceDay, 7);
 
   const neutral = charge(heroAt(2, 2), { sn: settlementWith("sn", null, 2, 2, 500) });
-  assert.equal(neutral.foodDrawn, 0, "a neutral is nobody's bill (turn/endTurn.ts, economy/trade.ts)");
+  assert.equal(neutral.foodDrawn, 0, "a neutral is nobody's bill (turn/endTurn.ts's consumption gate)");
   assert.equal(neutral.hero.upkeepUnpaidSinceDay, 7);
 });
 
-test("the pool is the OWNER's, not one settlement's: the keep has nothing and the town pays", () => {
-  // The default 1-player game's shape, measured: the hero stands on the L1 keep,
-  // whose warehouse is empty at every weekly tick because auto-trade tops it up
-  // to exactly foodRequired and the same turn's consumption spends it. The
-  // 5-farm L2 town of the same owner holds the season's surplus. A per-settlement
-  // draw would leave a 40-food bill ~97% unfunded and the spiral intact.
+test("CLIFF: the well-stocked distant town is never drawn, even when the town under the hero runs dry", () => {
+  // The old rule's centerpiece fixture, inverted: the keep under the hero is
+  // empty and the owner's L2 town holds the season's surplus. The pool used to
+  // pay from the town; the narrow rule lets the charge go short instead --
+  // moving food was the teleport this pass removes.
   const settlements = {
     keep: settlementWith("keep", 0, 4, 7, 0),
     town: settlementWith("town", 0, 17, 4, 144),
   };
   const { hero: after, settlements: afterSettlements, foodDrawn } = charge(heroAt(4, 7), settlements);
 
-  assert.equal(foodDrawn, 40);
-  assert.equal(afterSettlements.town.warehouse.food, 104, "the town paid, out of its own surplus");
-  assert.equal(afterSettlements.keep.warehouse.food, 0, "the empty keep is untouched");
-  assert.equal(after.upkeepUnpaidSinceDay, null);
-  assert.equal(after.morale, 100);
+  assert.equal(foodDrawn, 0, "the empty keep under the hero cannot pay, and the town does not travel");
+  assert.equal(afterSettlements.keep.warehouse.food, 0);
+  assert.equal(afterSettlements.town.warehouse.food, 144, "the distant surplus is untouched");
+  assert.equal(after.upkeepUnpaidSinceDay, 7, "the shortfall streak starts");
+  assert.equal(after.upkeepUnpaidTroops, 24);
+  assert.equal(after.morale, 100 - MORALE_UNPAID_LOSS_MAX);
 });
 
-test("the settlement under the hero is drawn first", () => {
+test("the only draw is the settlement under the hero's own hex, by id-independent of record order", () => {
+  // Both towns belong to the hero; only the one at the hero's hex (zzz) is a
+  // legal source, and the far one keeps its stock no matter where it sorts.
   const { settlements: afterSettlements } = charge(heroAt(2, 2), {
     aaa: settlementWith("aaa", 0, 9, 9, 100),
     zzz: settlementWith("zzz", 0, 2, 2, 100),
   });
-  assert.equal(afterSettlements.zzz.warehouse.food, 60, "the town it is standing on pays first");
-  assert.equal(afterSettlements.aaa.warehouse.food, 100, "the far town is only a fallback");
+  assert.equal(afterSettlements.zzz.warehouse.food, 60, "the town under the hero pays the bill");
+  assert.equal(afterSettlements.aaa.warehouse.food, 100, "no other settlement is ever drawn");
 });
 
 test("a short warehouse feeds what it has and the hero takes the morale penalty for the rest", () => {
@@ -202,7 +219,7 @@ test("a short warehouse feeds what it has and the hero takes the morale penalty 
   assert.equal(after.troops, 24, "the two-charge grace still holds");
 });
 
-test("an empty warehouse is not free food: the hero pays the full penalty", () => {
+test("an empty warehouse under the hero is not free food: the hero pays the full penalty", () => {
   const { hero: after, foodDrawn } = charge(heroAt(2, 2), { s0: settlementWith("s0", 0, 2, 2, 0) });
   assert.equal(foodDrawn, 0);
   assert.equal(after.upkeepUnpaidSinceDay, 7);
@@ -211,14 +228,14 @@ test("an empty warehouse is not free food: the hero pays the full penalty", () =
   assert.equal(after.morale, 100 - MORALE_UNPAID_LOSS_MAX);
 });
 
-test("the larder pays first; the pool only covers what is left of the bill", () => {
+test("the larder pays first; the city under the hero only covers what is left of the bill", () => {
   const hero = heroAt(2, 2, {
     resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 30 },
   });
   const { hero: after, settlements: afterSettlements, foodDrawn } = charge(hero, {
     s0: settlementWith("s0", 0, 2, 2, 500),
   });
-  assert.equal(foodDrawn, 10, "only the last 10 of the 40-food bill comes from the town");
+  assert.equal(foodDrawn, 10, "only the last 10 of the 40-food bill comes from the city");
   assert.equal(afterSettlements.s0.warehouse.food, 490);
   assert.equal(after.resources?.food, 0);
   assert.equal(after.upkeepUnpaidSinceDay, null);
@@ -263,7 +280,7 @@ test("the charge is deterministic: the same inputs replay identically", () => {
   assert.deepEqual(charge(hero, settlements), charge(hero, settlements));
 });
 
-// ── The regression: a default 1-player game must not starve its hero ──────
+// ── The regression: a default 1-player game's hero stands on its keep ─────
 
 function defaultGame(seed: number): GameState {
   return buildInitialGameState(new GameMap(seed, "small"), mulberry32(seed), {
@@ -272,15 +289,15 @@ function defaultGame(seed: number): GameState {
     humanSeatCount: 1,
     // The real POST /games path prices the starter farmland against the catalog
     // too (server/routes.ts reads unit_types and passes BuildInitialOptions.unitTypes),
-    // so the seeded farm pool already covers 20 population + 40/7 hero food/turn.
+    // so the keep's farms are sized against 5 population + 40/7 hero food/turn.
     unitTypes: CATALOG,
   });
 }
 
 interface ChargeTrace {
   day: number;
-  /** The owner's whole food stock at the instant the charge ran. */
-  pool: number;
+  /** The keep's own stock at the instant the charge ran -- the ONLY source the under-hero rule can draw. */
+  keepFood: number;
   unpaidTroops: number;
   unpaidSinceDay: number | null;
   morale: number;
@@ -292,27 +309,28 @@ interface ChargeTrace {
  * 24 turns of a default 1-player game with no player action, composed exactly
  * the way server/app/turnService.ts's runEndTurn does -- but with the
  * end-of-turn pass and the day tick split apart, so the stock the weekly charge
- * sees is observable.
+ * sees is observable. New-game shape end to end: the auto-trade gate resolves
+ * FALSE (init.ts also leaves every settlement autoTrade:false), so nothing
+ * teleports and the keep accumulates its own surplus.
  */
 function playDefaultGame(seed: number): ChargeTrace[] {
   let state = defaultGame(seed);
   const heroId = state.players[0].heroIds[0];
+  const keepId = state.players[0].settlementIds[0];
   const traces: ChargeTrace[] = [];
   for (let turn = 0; turn < 24; turn++) {
-    const phase = endTurn(applyEndOfTurnDetailed(state).state);
+    const phase = endTurn(applyEndOfTurnDetailed(state, { legacyAutoTrade: false }).state);
     if (phase.phase.kind !== "ROUND_END") {
       state = phase;
       continue;
     }
-    const pool = Object.values(phase.settlements)
-      .filter((s) => s.ownerId === 0)
-      .reduce((total, s) => total + (s.warehouse.food ?? 0), 0);
+    const keepFood = phase.settlements[keepId]?.warehouse.food ?? 0;
     state = advanceRound(phase, 0.1, null, CATALOG);
     if (state.day % 7 !== 0) continue;
     const hero = state.heroes[heroId];
     traces.push({
       day: state.day,
-      pool,
+      keepFood,
       unpaidTroops: hero.upkeepUnpaidTroops,
       unpaidSinceDay: hero.upkeepUnpaidSinceDay,
       morale: hero.morale,
@@ -325,16 +343,14 @@ function playDefaultGame(seed: number): ChargeTrace[] {
 
 const DEFAULT_GAME_SEEDS = [1000, 8919, 16838, 24757, 32676, 40595, 48514, 56433, 64352, 72271];
 
-test("REGRESSION: the default 1-player hero is paid up through 3 weekly charges on 10 of 10 seeds", () => {
-  // Before the fix every one of these seeds read
-  //   day 7/14/21 -> morale 75/50/25, upkeepUnpaidSinceDay 7, troops deserting
-  // from turn 22, byte-identically. The hero's larder starts empty and nothing
-  // in a default game ever filled it.
-  //
-  // 9 of 10 once the settlement-funded draw landed; 10 of 10 since the starter
-  // farm pool was sized against the hero's 40-food weekly bill as well as the
-  // 20/turn population one (starterLayout's heroFoodPerTurn). The shortfall
-  // branch below stays as the penalty-shape guard for a future regression.
+test("REGRESSION: the default 1-player hero is fully funded on every charge on 8 of 10 seeds", () => {
+  // The keep now feeds its own hero out of its own accumulated surplus: the
+  // 5x5 keep carries 3 farm fields (starterFarmsNeeded(5 + 40/7) asks 4; the
+  // grid holds 3), sized against its population bill AND the hero's weekly one,
+  // measured 98.05% turn-1 coverage over 4000 seeds. These 10 fixed seeds land
+  // 8/10 fully funded; the two misses are the honest cliff of the narrow rule
+  // (seed 32676's keep chronically runs ~half a bill short), not a teleport to
+  // fix -- a caravan route is the designed remedy.
   let funded = 0;
   const shortfalls: string[] = [];
   for (const seed of DEFAULT_GAME_SEEDS) {
@@ -345,7 +361,7 @@ test("REGRESSION: the default 1-player hero is paid up through 3 weekly charges 
       [7, 14, 21],
       `seed ${seed}: the charges land on the day-7 cadence`,
     );
-    if (traces.every((t) => t.unpaidSinceDay === null && t.morale === 100 && t.troops === 24)) {
+    if (traces.every((t) => t.unpaidSinceDay === null && t.unpaidTroops === 0 && t.morale === 100 && t.troops === 24)) {
       funded++;
       assert.deepEqual(
         traces.map((t) => t.gold),
@@ -354,53 +370,54 @@ test("REGRESSION: the default 1-player hero is paid up through 3 weekly charges 
       );
     } else {
       // Not a spiral, a bounded shortfall. The penalty must stay proportional to
-      // what the pool genuinely could not cover.
+      // what the keep genuinely could not cover.
       shortfalls.push(seed.toString());
       for (const t of traces) {
-        const affordable = evaluateTroopUpkeep(demoStacks(), CATALOG, 300, t.pool);
-        assert.equal(t.unpaidTroops, affordable.unfed, `seed ${seed} day ${t.day}: charged more than the pool lacked`);
-        assert.ok(t.morale >= 85, `seed ${seed} day ${t.day}: morale ${t.morale} is the old spiral`);
+        const affordable = evaluateTroopUpkeep(demoStacks(), CATALOG, 300, t.keepFood);
+        assert.equal(t.unpaidTroops, affordable.unfed, `seed ${seed} day ${t.day}: charged more than the keep lacked`);
+        assert.ok(t.morale >= 60, `seed ${seed} day ${t.day}: morale ${t.morale} is a collapse, not the honest cliff`);
       }
     }
   }
-  assert.equal(funded, 10, `only ${funded}/10 default games kept the hero paid up (short on: ${shortfalls.join(", ")})`);
+  assert.equal(funded, 8, `expected exactly 8/10 funded default games under the narrow rule (short on: ${shortfalls.join(", ")})`);
 });
 
-test("REGRESSION: the pool draw is exactly what the hero's bill needed, no more", () => {
-  // One seed, three charges, the warehouse read at each one: 40 food a week
-  // leaves the settlements' pool, and the hero's larder stays empty (the food
-  // is eaten, never banked in a wagon where the player could hoard it).
+test("REGRESSION: the keep's draw is exactly what the hero's bill needed, no more", () => {
+  // One seed, three charges, the keep's own warehouse read at each one: 40 food
+  // a week leaves the city the hero stands on, and the hero's larder stays
+  // empty (the food is eaten, never banked in a wagon where the player could
+  // hoard it). The distant town is never drawn -- the keep covers the bill out
+  // of its own accumulated surplus and still GROWS week over week.
   let state = defaultGame(1000);
   const heroId = state.players[0].heroIds[0];
-  const pools: number[] = [];
+  const keepId = state.players[0].settlementIds[0];
+  const keeps: number[] = [];
   for (let turn = 0; turn < 24; turn++) {
-    const phase = endTurn(applyEndOfTurnDetailed(state).state);
+    const phase = endTurn(applyEndOfTurnDetailed(state, { legacyAutoTrade: false }).state);
     if (phase.phase.kind !== "ROUND_END") {
       state = phase;
       continue;
     }
-    const before = Object.values(phase.settlements)
-      .filter((s) => s.ownerId === 0)
-      .reduce((total, s) => total + (s.warehouse.food ?? 0), 0);
+    const before = phase.settlements[keepId]?.warehouse.food ?? 0;
     state = advanceRound(phase, 0.1, null, CATALOG);
     if (state.day % 7 !== 0) continue;
-    const after = Object.values(state.settlements)
-      .filter((s) => s.ownerId === 0)
-      .reduce((total, s) => total + (s.warehouse.food ?? 0), 0);
-    assert.equal(before - after, 40, `day ${state.day}: exactly the bill left the pool`);
+    const after = state.settlements[keepId]?.warehouse.food ?? 0;
+    assert.equal(before - after, 40, `day ${state.day}: exactly the bill left the keep`);
     assert.equal(state.heroes[heroId].resources?.food, 0, "settlement-funded food is eaten on the spot");
-    pools.push(before);
+    keeps.push(before);
   }
   assert.deepEqual(
-    pools,
-    [126, 233, 340],
-    "the pool grows as the farms out-produce the population AND the hero's weekly bill",
+    keeps,
+    [42, 51, 60],
+    "the keep accumulates: its 3 farms out-produce its population bill AND the hero's weekly one",
   );
 });
 
-test("REGRESSION COUNTERFACTUAL: with no pool (the old rule) the same seeds spiral as reported", () => {
-  // Proves the tests above measure the fix and not a passing-by-accident state.
-  // Same game, same bill, larder-only funding: 25 morale a week from day 7.
+test("REGRESSION COUNTERFACTUAL: with no city under the hero (the field rule) the same seeds spiral as reported", () => {
+  // Proves the tests above measure the funding and not a passing-by-accident
+  // state. Same game, same bill, larder-only funding: 25 morale a week from
+  // day 7. This is also exactly what a hero that marched away from its keep
+  // sees every week until a caravan finds it.
   let state = defaultGame(1000);
   const heroId = state.players[0].heroIds[0];
   const charged: { day: number; morale: number; unpaidSince: number | null }[] = [];
@@ -422,38 +439,77 @@ test("REGRESSION COUNTERFACTUAL: with no pool (the old rule) the same seeds spir
   ]);
 });
 
+test("PIN: a hero standing on its keep with accumulated surplus stays funded through 3+ weekly charges", () => {
+  // The survival chain of the narrow gate, pinned directly: an under-hero
+  // settlement whose farm output exceeds its population need BANKS the
+  // difference between charges, and every weekly draw lands in full while the
+  // stock keeps growing. 90 food/turn of production against a 5/turn
+  // population bill leaves +85/turn of accumulation, so the 40-food weekly
+  // draw never catches the stock.
+  let settlements: Record<string, SettlementState> = {
+    s0: settlementWith("s0", 0, 2, 2, 50),
+  };
+  const hero = heroAt(2, 2);
+  for (const day of [7, 14, 21, 28, 35]) {
+    // The week's farm production lands before the charge (turn/endTurn.ts's
+    // pass runs before turn/round.ts's weekly one).
+    settlements.s0 = {
+      ...settlements.s0,
+      warehouse: { ...settlements.s0.warehouse, food: (settlements.s0.warehouse.food ?? 0) + 90 * 7 - 5 * 7 },
+    };
+    const result = applySuppliedHeroUpkeep({ [hero.id]: hero }, settlements, { ...OPTIONS, day });
+    settlements = result.settlements;
+    const after = result.heroes[hero.id];
+    assert.equal(after.upkeepUnpaidSinceDay, null, `day ${day}: a surplus keep funds the whole bill`);
+    assert.equal(after.morale, 100, `day ${day}: a funded charge never bleeds morale`);
+    assert.equal(after.troops, 24, `day ${day}: nobody deserts a paid charge`);
+    assert.equal(after.gold, 300 - 76, `day ${day}: the purse paid the gold half`);
+    assert.equal(settlements.s0.warehouse.food, 50 + 555 * (day / 7), `day ${day}: the surplus keeps accumulating`);
+  }
+});
+
 test("applyWeeklyUpkeep is the same charge end to end (the server's day-7 path)", () => {
   let state = defaultGame(1000);
   const heroId = state.players[0].heroIds[0];
-  const ownerFood = (s: GameState): number =>
-    Object.values(s.settlements)
-      .filter((x) => x.ownerId === 0)
-      .reduce((total, x) => total + (x.warehouse.food ?? 0), 0);
-  // Play the real pipeline (production + consumption, then the day tick) up to
-  // the day before the first weekly charge.
-  for (let turn = 0; turn < 5 && state.day < 6; turn++) {
-    const phase = endTurn(applyEndOfTurnDetailed(state).state);
-    state = phase.phase.kind === "ROUND_END" ? advanceRound(phase, 0.1, null, CATALOG) : phase;
+  const keepId = state.players[0].settlementIds[0];
+  const keepFood = (s: GameState): number => s.settlements[keepId]?.warehouse.food ?? 0;
+  // Play the real pipeline (per-turn production + consumption, then the day
+  // tick -- composed exactly like server/app/turnService.ts's runEndTurn) with
+  // no player action. The weekly charge fires inside advanceRound at the day
+  // 6 -> 7 wrap, AFTER that turn's production pass -- so the stock visible on
+  // the wrapping phase is the stock the charge draws from.
+  let preChargeStock = 0;
+  for (let turn = 0; turn < 6; turn++) {
+    const phase = endTurn(applyEndOfTurnDetailed(state, { legacyAutoTrade: false }).state);
+    if (phase.phase.kind !== "ROUND_END") {
+      state = phase;
+      continue;
+    }
+    if (state.day < 6) {
+      assert.equal(state.heroes[heroId].gold, 300, `day ${state.day}: no weekly charge has run yet`);
+      assert.equal(state.heroes[heroId].upkeepUnpaidSinceDay, null);
+    }
+    preChargeStock = phase.settlements[keepId]?.warehouse.food ?? 0;
+    state = advanceRound(phase, 0.1, null, CATALOG);
   }
-  assert.equal(state.day, 6, "no weekly charge has run yet");
-  assert.equal(state.heroes[heroId].gold, 300);
-  assert.equal(state.heroes[heroId].upkeepUnpaidSinceDay, null);
-  const pool = ownerFood(state);
-  assert.ok(pool >= 40, `the owner's pool (${pool}) must cover the 40-food bill`);
+  assert.equal(state.day, 7, "six turns of a 1-player game wrap to the day-7 weekly boundary");
+  assert.ok(preChargeStock >= 40, `the keep's stock (${preChargeStock}) must cover the 40-food bill`);
 
-  // The weekly pass itself -- what the server's advanceRound calls on day 7.
-  const charged = applyWeeklyUpkeep(state, 0.1, CATALOG);
-  assert.equal(charged.heroes[heroId].gold, 300 - 76, "the purse paid the gold half");
-  assert.equal(charged.heroes[heroId].upkeepUnpaidSinceDay, null);
-  assert.equal(charged.heroes[heroId].upkeepUnpaidTroops, 0);
-  assert.equal(charged.heroes[heroId].morale, 100);
-  assert.equal(charged.heroes[heroId].troops, 24);
-  assert.equal(pool - ownerFood(charged), 40, "40 food left the settlements' warehouses");
+  // The charge that ran inside that wrap is exactly what applyWeeklyUpkeep
+  // does on the day-7 branch: the purse paid the gold half, the keep paid the
+  // food half, nobody went unfed.
+  const hero = state.heroes[heroId];
+  assert.equal(hero.gold, 300 - 76, "the purse paid the gold half");
+  assert.equal(hero.upkeepUnpaidSinceDay, null);
+  assert.equal(hero.upkeepUnpaidTroops, 0);
+  assert.equal(hero.morale, 100);
+  assert.equal(hero.troops, 24);
+  assert.equal(preChargeStock - keepFood(state), 40, "40 food left the keep's warehouse");
 });
 
 test("a garrison at the same settlement is charged from what is left after the heroes", () => {
-  // Shared-pool contention, pinned so it cannot drift silently: the hero's bill
-  // is charged first (turn/round.ts's existing composition order), and the
+  // Same-warehouse contention, pinned so it cannot drift silently: the hero's
+  // bill is charged first (turn/round.ts's existing composition order), and the
   // garrison then takes the remainder. 50 food - 40 for the hero leaves 10 of
   // the garrison's 12 peasants: a 2-troop shortfall, not a wiped garrison.
   const settlement: SettlementState = {

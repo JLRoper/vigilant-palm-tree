@@ -23,9 +23,9 @@ export type GameEvent =
   | { type: "calc:visionRange"; settlementId: SettlementId; level: number; range: number }
   | { type: "calc:heroSpeed"; heroId: HeroId; baseSpeed: number; speed: number }
   // #100: emitted by src/game/turnHooks.ts when a fire-and-forget command
-  // (onTradeResources/onHumanMove/etc. -- see src/state/turnController.ts's
+  // (onRecruitHero/onHumanMove/etc. -- see src/state/turnController.ts's
   // TurnControllerHooks) rejects. `action` is a short human label for what
-  // was attempted ("Move hero", "Trade resources", ...); `reason` is the
+  // was attempted ("Move hero", "Recruit hero", ...); `reason` is the
   // server's own error code/message where available (see src/io/commands.ts's
   // CommandError), otherwise the raw failure text. Consumed by
   // src/screens/shared/toast.ts to give the player a visible notification

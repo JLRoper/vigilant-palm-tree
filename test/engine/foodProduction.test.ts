@@ -1,20 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { GameState, SettlementState } from "@heroes/contracts";
+import type { GameState, SettlementState, UnitType } from "@heroes/contracts";
 import {
   CELL_MULTIPLIER_PEAK,
   DEFAULT_FOOD_BIAS,
   GameMap,
   RESOURCE_DENSITY,
   RESOURCES,
-  applyEndOfTurn,
+  applyEndOfTurnDetailed,
   buildInitialGameState,
   buildingSettlementEffects,
   cellMultiplier,
   foodBiasForTerrain,
   foodRequired,
-  foodRequiredForPopulations,
+  foodRequiredForPopulation,
   generateCitySpots,
+  heroFoodPerTurn,
   isProducerKind,
   mulberry32,
   produceSettlementResources,
@@ -24,6 +25,35 @@ import {
   starterFarmsNeeded,
 } from "@heroes/engine";
 import { emptyWarehouse, makeSettlement } from "../charter/_helpers";
+
+// The real catalog's upkeep columns (same fixture the sizing tests use):
+// upkeep_gold = tier, upkeep_food = clamp(ceil(tier / 2), 1, 3).
+function tierUnit(id: string, tier: number): UnitType {
+  return {
+    id,
+    name: id,
+    attack: 1,
+    defence: 1,
+    health: 1,
+    speed: 1,
+    description: "",
+    advantageType: "infantry",
+    specialty: "",
+    specialtyPriority: 0,
+    upkeepGold: tier,
+    upkeepFood: Math.min(3, Math.max(1, Math.ceil(tier / 2))),
+    tier,
+  } as UnitType;
+}
+
+const STARTER_CATALOG: Record<string, UnitType> = {
+  peasant: tierUnit("peasant", 1),
+  swordsman: tierUnit("swordsman", 2),
+  archer: tierUnit("archer", 4),
+  cavalry: tierUnit("cavalry", 5),
+  crossbowman: tierUnit("crossbowman", 4),
+  griffin: tierUnit("griffin", 8),
+};
 
 // Non-cyclic on purpose: running past the script throws, so every test below
 // also pins the rng draw count (one draw per cell attempt + ONE per resource
@@ -253,9 +283,11 @@ test("DESIGNER DECISION: food has no map-tile source anywhere", () => {
 
 // A 1-player game creates a level-2 town next to the level-1 keep: population
 // 1500 against foodRequired(1500) = 15 food/turn, and a warehouse that starts
-// empty. Created with no buildings it produced nothing, so auto-trade drained
-// the keep's surplus to cover the gap and both towns sat at morale 0 by turn
-// 12. It is now created with the farmland its food bill needs.
+// empty. Created with no buildings it produced nothing, and the old instant
+// auto-trade regime drained the keep's surplus to cover the gap until both
+// towns sat at morale 0 by turn 12. It is now created with the farmland its
+// own food bill needs -- and since the teleport's removal (lobby.legacyAutoTrade
+// false for new games), that self-sufficiency is the only thing feeding it.
 
 /** 40 distinct seeded games, each a fresh 1-player map. */
 function seededTownGames(count = 40): GameState[] {
@@ -324,12 +356,14 @@ test("one farm would not have fixed it: the same 40 games run a permanent full d
   assert.ok(fed / games.length <= 0.1, `a single farm covered ${fed}/${games.length} games -- the reported bug`);
 });
 
-// A 1-player game seats two settlements on the keep+town pair, and they eat out
-// of ONE pool of farm fields: auto-trade moves surplus between a player's own
-// settlements (economy/trade.ts) and that is the only thing that does. Sizing
-// the farmland against EITHER settlement's own population is therefore wrong --
-// 15/turn sized to 4 fields left the 20/turn pair short in 29 of 60 seeded games,
-// with 11 reaching morale 0. These sweep the whole player's bill.
+// A 1-player game seats two settlements on the keep+town pair. Instant
+// auto-trade used to move surplus between a player's own settlements, which is
+// why sizing was pooled into one host city. That teleport is gone for new games
+// (lobby.legacyAutoTrade false, 2026-10-02), so sizing is PER SETTLEMENT: each
+// city's farmland covers its own bill -- the town its 15/turn population, the
+// keep its 5/turn population PLUS the starting hero's weekly bill (the
+// under-hero draw rule, hero/upkeep.ts). No settlement can borrow a sibling's
+// surplus anymore; the settlement accumulates its own instead.
 
 const BUDGET_GAMES = 1000;
 
@@ -337,94 +371,127 @@ function budgetGames(): GameState[] {
   const out: GameState[] = [];
   for (let i = 0; i < BUDGET_GAMES; i++) {
     const seed = 1000 + i * 7919;
-    out.push(buildInitialGameState(new GameMap(seed, "small"), mulberry32(seed), { castleSeed: seed, enemyCount: 0, humanSeatCount: 1 }));
+    // The real POST /games path passes the catalog (server/routes.ts), which is
+    // what puts the hero's 40/week into the keep's sizing -- same here.
+    out.push(buildInitialGameState(new GameMap(seed, "small"), mulberry32(seed), { castleSeed: seed, enemyCount: 0, humanSeatCount: 1, unitTypes: STARTER_CATALOG }));
   }
   return out;
 }
 
-function ownedSettlements(state: GameState): SettlementState[] {
-  return Object.values(state.settlements).filter((s) => s.ownerId === 0);
+/** A settlement's own food bill: its population, plus the hero standing on it (the keep). */
+function ownFoodBill(s: SettlementState, state: GameState): number {
+  const hero = Object.values(state.heroes).find((h) => h.ownerId === s.ownerId && h.q === s.q && h.r === s.r);
+  return foodRequiredForPopulation(s.population) + (hero ? heroFoodPerTurn(hero.stacks, STARTER_CATALOG) : 0);
 }
 
-/** The player's whole food bill, summed over the settlements it owns. */
-function playerFoodBill(state: GameState): number {
-  return foodRequiredForPopulations(ownedSettlements(state).map((s) => s.population));
+function classOf(s: SettlementState): string {
+  return s.ownerId === null ? "neutral-L3" : s.level === 1 ? "keep-L1+hero" : "town-L2";
 }
 
-/** Food the player's own cities bank in one turn, production only. */
-function playerFoodProduced(state: GameState): number {
-  const after = produceSettlementResources(state.settlements, state.castleSeed);
-  return ownedSettlements(state).reduce((t, s) => t + (after[s.id].warehouse.food ?? 0), 0);
-}
-
-test("the PLAYER's farm output covers the PLAYER's whole food bill, on real cell multipliers", () => {
+test("every settlement's own farms cover ITS OWN food bill, on real cell multipliers", () => {
+  // Per-settlement coverage over 1000 seeded games (the 4000-seed sweep behind
+  // the counts measured keep 98.05% / town 98.25% / neutral 90.54%; this 1000-seed
+  // subset runs 98.80 / 98.70 / 89.55 -- the assertions sit just under those
+  // observed floors so a registry or multiplier change fails loudly instead of
+  // drifting).
   const games = budgetGames();
-  let covered = 0;
-  let worstRatio = Infinity;
+  const stats = new Map<string, { n: number; covered: number; worst: number }>();
   let minMultiplier = Infinity;
-  const shortfalls: number[] = [];
   for (const state of games) {
-    const bill = playerFoodBill(state);
-    assert.equal(bill, 20, "the 1-player keep (5) + town (15) bill");
-    const produced = playerFoodProduced(state);
-    // The real multipliers this game's farms actually rolled -- not the peak.
-    for (const s of ownedSettlements(state)) {
+    for (const s of Object.values(state.settlements)) {
+      const cls = classOf(s);
+      const bill = ownFoodBill(s, state);
+      const produced = foodProduced(s, state.castleSeed);
+      const rec = stats.get(cls) ?? { n: 0, covered: 0, worst: 0 };
+      rec.n++;
+      if (produced >= bill) rec.covered++;
+      rec.worst = Math.max(rec.worst, bill - produced);
+      stats.set(cls, rec);
       for (const b of s.buildings) {
-        if (b.kind !== "farmField") continue;
+        if (b.kind !== "farmField" || s.level !== 1) continue;
         minMultiplier = Math.min(
           minMultiplier,
           cellMultiplier({ seed: state.castleSeed, q: s.q, r: s.r, gx: b.gx, gy: b.gy, resource: "food", spots: s.citySpots }),
         );
       }
     }
-    worstRatio = Math.min(worstRatio, produced / bill);
-    if (produced >= bill) covered++;
-    else shortfalls.push(bill - produced);
   }
   // Not a best-case-float assertion: the multipliers behind it are the real
   // per-cell draws. The observed floor is far below the 1.0 peak the count is
-  // DERIVED from (measured 0.02 over 24,000 cells), which is exactly why
-  // STARTER_FARM_VARIANCE_HEADROOM exists and why the target is a coverage rate
-  // rather than a hard inequality.
+  // DERIVED from, which is exactly why STARTER_FARM_VARIANCE_HEADROOM exists
+  // and why the target is a coverage rate rather than a hard inequality.
   assert.ok(minMultiplier < 0.5, `expected a real spread of multipliers, floor was ${minMultiplier}`);
+
+  // The keep carries the hero term on top of its population and is CLAMPED at
+  // 3 farms (a 5x5 grid holds no fourth 2x2 beside the town hall) -- 98.8%
+  // coverage with a worst shortfall of 4.06 of its 10.71/turn bill.
+  const keep = stats.get("keep-L1+hero");
+  assert.ok(keep, "the sweep saw keeps");
+  assert.equal(keep.n, BUDGET_GAMES);
   assert.ok(
-    covered / games.length >= 0.99,
-    `only ${covered}/${games.length} seeded games cover the 20/turn bill (worst ratio ${worstRatio.toFixed(2)})`,
+    keep.covered / keep.n >= 0.98,
+    `only ${keep.covered}/${keep.n} seeded keeps cover the 5 + 40/7 bill (worst shortfall ${keep.worst.toFixed(2)})`,
   );
-  if (shortfalls.length > 0) {
-    const worst = Math.max(...shortfalls);
-    assert.ok(worst < bill * 0.15, `worst shortfall ${worst.toFixed(2)} of ${bill} food/turn is a rounding miss, not a collapse`);
-  }
+  assert.ok(keep.worst < 5, `worst keep shortfall ${keep.worst.toFixed(2)} is a variance miss, not a collapse`);
+
+  // The town asks for and GETS its full derived count (4 farms for 15/turn).
+  const town = stats.get("town-L2");
+  assert.ok(town, "the sweep saw towns");
+  assert.equal(town.n, BUDGET_GAMES);
+  assert.ok(
+    town.covered / town.n >= 0.98,
+    `only ${town.covered}/${town.n} seeded towns cover their own 15/turn (worst shortfall ${town.worst.toFixed(2)})`,
+  );
+
+  // Neutrals never consume and never decay (turn/endTurn.ts's gates), so their
+  // bill is NOTIONAL until someone captures them -- the loosest bar, recorded
+  // so a regression still shows up.
+  const neutral = stats.get("neutral-L3");
+  assert.ok(neutral && neutral.n > 0, "the sweep saw neutrals");
+  assert.ok(
+    neutral.covered / neutral.n >= 0.85,
+    `only ${neutral.covered}/${neutral.n} seeded neutrals cover their notional 50/turn`,
+  );
 });
 
-test("the old per-settlement sizing (1 + 4 farms) did NOT cover the pair -- the bug this sizing replaces", () => {
-  // Counterfactual on the same seeds: give each settlement what its OWN
-  // population asked for (the pre-2026-10-01 rule) and the pair comes up short.
+test("the old POOLED sizing (keep 1 farm, town the whole pool) cannot feed the keep's hero anymore", () => {
+  // Counterfactual on the same seeds: restore the pre-2026-10-02 allocation --
+  // the whole owner's farm pool concentrated in the town, the keep with the
+  // base single farm -- and the keep, which may draw ONLY from its own
+  // warehouse now (under-hero rule), is left covering 5 + 40/7 with one farm's
+  // ~5.3/turn. The pooling was viable only while auto-trade teleported the
+  // town's surplus to the keep every turn; that transport is gone.
   const games = budgetGames();
-  let covered = 0;
+  let keepCovered = 0;
   for (const state of games) {
-    let produced = 0;
-    for (const s of ownedSettlements(state)) {
-      // starterFarmsNeeded(its own bill), capped at what a 5x5 can hold (3).
-      const wanted = Math.min(3, starterFarmsNeeded(foodRequired(s)));
-      const stripped = { ...s, buildings: s.buildings.filter((b) => b.kind === "farmField").slice(0, wanted) };
-      produced += foodProduced(stripped, state.castleSeed);
-    }
-    if (produced >= playerFoodBill(state)) covered++;
+    const keep = Object.values(state.settlements).find((s) => s.ownerId === 0 && s.level === 1);
+    assert.ok(keep);
+    const oneFarmKeep = { ...keep, buildings: keep.buildings.filter((b) => b.kind === "farmField").slice(0, 1) };
+    if (foodProduced(oneFarmKeep, state.castleSeed) >= ownFoodBill(keep, state)) keepCovered++;
   }
   assert.ok(
-    covered / games.length < 0.9,
-    `per-settlement sizing covered ${covered}/${games.length} -- if this now passes the fix is measured wrong`,
+    keepCovered / games.length < 0.1,
+    `a single-farm keep covered ${keepCovered}/${games.length} games -- if that reads high the pooled era is back`,
   );
 });
 
-test("turn 22: no seed reaches morale 0 with the seeded pool (was 11/60)", () => {
+test("turn 22: no seed lets any settlement collapse to morale 0 (accumulated surplus is the buffer)", () => {
+  // The keep/town farm counts are sized per settlement and every city banks its
+  // own surplus between turns -- even a turn-1 shortfall town (worst ratio 0.88)
+  // bleeds slowly enough that 22 turns of production + consumption never empty
+  // it to a collapse. Measured over these same 1000 seeds: minimum town morale
+  // 78, keeps and neutrals untouched at 100.
   const games = budgetGames();
   let collapsed = 0;
+  let minTownMorale = 100;
   for (const state of games) {
     let cur = state;
-    for (let t = 0; t < 22; t++) cur = applyEndOfTurn(cur);
-    if (ownedSettlements(cur).some((s) => s.morale <= 0)) collapsed++;
+    for (let t = 0; t < 22; t++) cur = applyEndOfTurnDetailed(cur, { legacyAutoTrade: false }).state;
+    for (const s of Object.values(cur.settlements)) {
+      if (s.ownerId === 0 && s.level === 2) minTownMorale = Math.min(minTownMorale, s.morale ?? 100);
+      if ((s.morale ?? 100) <= 0) collapsed++;
+    }
   }
-  assert.equal(collapsed, 0, `${collapsed}/${games.length} seeded games still collapse to morale 0 by turn 22`);
+  assert.equal(collapsed, 0, `${collapsed}/${games.length} seeded games collapse to morale 0 by turn 22`);
+  assert.ok(minTownMorale >= 50, `worst town morale ${minTownMorale} by turn 22 is a collapse in slow motion`);
 });

@@ -40,16 +40,19 @@ async function seedGame(
   db: Pick<PoolClient, "query">,
   name: string,
   settlements: Record<string, SettlementState>,
+  lobby?: Record<string, unknown>,
 ): Promise<void> {
   await db.query(
     `INSERT INTO games (name, seed, hero_q, hero_r, round, day, active_player_id,
-                        players, heroes, settlements, map_size)
-     VALUES ($1, 4242, 0, 0, 1, 1, 0, $2::jsonb, $3::jsonb, $4::jsonb, 'standard')`,
+                        players, heroes, settlements, map_size, lobby)
+     VALUES ($1, 4242, 0, 0, 1, 1, 0, $2::jsonb, $3::jsonb, $4::jsonb, 'standard',
+             $5::jsonb)`,
     [
       name,
       JSON.stringify(PLAYERS),
       JSON.stringify({ h0: makeHero("h0", 0, 5, 5, { gold: 500 }) }),
       JSON.stringify(settlements),
+      JSON.stringify(lobby ?? {}),
     ],
   );
 }
@@ -227,6 +230,46 @@ test("EndTurn leaves every INTEGER game column holding an integer", async () => 
       assert.ok(Number.isInteger(t.amount), `resource_transactions.amount = ${t.amount}`);
       assert.ok(Number.isInteger(t.gold_paid), `resource_transactions.gold_paid = ${t.gold_paid}`);
     }
+  } finally {
+    await pool.query(`DELETE FROM games WHERE name = $1`, [name]);
+  }
+});
+test("EndTurn with lobby.legacyAutoTrade false writes zero resource_transactions and still survives the fractional purse", async () => {
+  // The gate variant: the same fractional fixture, but the game row carries the
+  // new-game flag (lobby '{"legacyAutoTrade": false}'), so runAutoTrade moves
+  // nothing and resource_transactions stays empty. The fractional-gold column
+  // coverage is NOT lost with it: the gold mine's hundredths-rounded yield
+  // still lands fractional gold in the settlements JSONB and the rounded
+  // INTEGER mirror columns, and every EndTurn must still commit.
+  const name = uniqueName();
+  await seedGame(pool, name, fractionalGoldPair(), { legacyAutoTrade: false });
+  try {
+    const deps = await createLiveCommandDeps();
+    for (let turn = 1; turn <= 2; turn++) {
+      const result = await handleCommandTransactional({ kind: "EndTurn", gameName: name, actor: 0 }, deps);
+      assert.equal(result.ok, true, `turn ${turn} rejected: ${result.reason}`);
+    }
+
+    const id = (await pool.query<{ id: number }>(`SELECT id FROM games WHERE name = $1`, [name])).rows[0].id;
+
+    const txns = await pool.query<{ amount: number }>(
+      `SELECT amount FROM resource_transactions WHERE game_id = $1`,
+      [id],
+    );
+    assert.deepEqual(txns.rows, [], "a gated game must not write auto-trade rows");
+
+    const settlements = await pool.query<{ gold: number; morale: number }>(
+      `SELECT gold, morale FROM settlements WHERE game_id = $1`,
+      [id],
+    );
+    assert.ok(settlements.rows.length > 0, "granular mirror empty -- the dual-write never ran");
+    for (const s of settlements.rows) {
+      assert.ok(Number.isInteger(s.gold), `settlements.gold = ${s.gold}`);
+      assert.ok(Number.isInteger(s.morale), `settlements.morale = ${s.morale}`);
+    }
+
+    const legacyGold = (await pool.query<{ gold: number }>(`SELECT gold FROM games WHERE name = $1`, [name])).rows[0];
+    assert.ok(Number.isInteger(legacyGold.gold), `games.gold = ${legacyGold.gold}`);
   } finally {
     await pool.query(`DELETE FROM games WHERE name = $1`, [name]);
   }

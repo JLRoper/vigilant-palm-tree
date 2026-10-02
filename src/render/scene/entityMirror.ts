@@ -70,7 +70,6 @@ export class EntityMirror {
       case "GoldTransferred":
       case "BankGoldMoved":
       case "TurnEnded":
-      case "ResourcesTraded":
       case "BattleResolved":
       case "HeroRecruited":
       case "TownHallUpgradeStarted":

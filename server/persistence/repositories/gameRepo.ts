@@ -27,6 +27,11 @@ export interface LobbyState {
   // reads or writes it (flushes are direct jsonb_set updates from the
   // drop-policy module, and hydrate ignores lobby entirely).
   presence?: Record<string, { lastSeenAt: string; connected: boolean }>;
+  // Legacy instant auto-trade gate (2026-10-02): written by POST /games
+  // (explicit false on new games, optional opt-in true), read by the EndTurn
+  // command case in server/app/commandHandler.ts. ABSENT (pre-flag rows read
+  // here) means ON -- existing saves keep working.
+  legacyAutoTrade?: boolean;
 }
 
 export interface EnemyPos {

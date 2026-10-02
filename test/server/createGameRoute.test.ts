@@ -226,3 +226,41 @@ test("games without enemySlots carry no aiDriverToken either", async () => {
     await cleanupGame(name);
   }
 });
+
+// Rec 4 (2026-10-02): the legacy instant auto-trade gate. POST /games writes
+// lobby.legacyAutoTrade explicitly on EVERY new game -- false by default, true
+// only on an explicit body opt-in -- so "absent" can never mean anything but
+// "pre-flag save" and existing saves keep firing auto-trade unchanged.
+test("every new game carries lobby.legacyAutoTrade = false unless the body opts in", async () => {
+  const plain = uniqueName();
+  const optedIn = uniqueName();
+  const junk = uniqueName();
+  try {
+    const plainRow = await createGame({ name: plain });
+    assert.equal(
+      plainRow.row.lobby.legacyAutoTrade,
+      false,
+      "the flag is written explicitly (not just absent) so absent stays reserved for pre-flag saves",
+    );
+
+    const optInRes = await fetch(`${baseUrl}/games`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: optedIn, legacyAutoTrade: true }),
+    });
+    assert.equal(optInRes.status, 201);
+    assert.equal(((await optInRes.json()) as CreatedRow).lobby.legacyAutoTrade, true, "the body param opts a new game back into the legacy behaviour");
+
+    const junkRes = await fetch(`${baseUrl}/games`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: junk, legacyAutoTrade: "yes" }),
+    });
+    assert.equal(junkRes.status, 201);
+    assert.equal(((await junkRes.json()) as CreatedRow).lobby.legacyAutoTrade, false, "non-boolean junk reads as the default");
+  } finally {
+    await cleanupGame(plain);
+    await cleanupGame(optedIn);
+    await cleanupGame(junk);
+  }
+});

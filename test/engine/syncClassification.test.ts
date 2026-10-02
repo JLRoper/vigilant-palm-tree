@@ -4,13 +4,16 @@ import { applyEngineEvent, ENGINE_EVENT_SYNC_CLASS } from "@heroes/engine";
 import { makeHero, makeSettlement, makeState } from "../charter/_helpers";
 
 test("every declared EngineEvent variant is classified exactly once", () => {
-  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 25);
+  // 25 -> 24 (2026-10-02): ResourcesTraded was deleted outright (dead code --
+  // no producer after the manual trade command's removal), so the union is one
+  // variant smaller and the registry tracks it.
+  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 24);
 });
 
-test("classification counts: 12 apply, 7 resync, 6 ignore", () => {
+test("classification counts: 11 apply, 7 resync, 6 ignore", () => {
   const counts = { apply: 0, resync: 0, ignore: 0 };
   for (const cls of Object.values(ENGINE_EVENT_SYNC_CLASS)) counts[cls] += 1;
-  assert.deepEqual(counts, { apply: 12, resync: 7, ignore: 6 });
+  assert.deepEqual(counts, { apply: 11, resync: 7, ignore: 6 });
 });
 
 test("class agrees with the reducer: BankGoldMoved is an apply kind that replays the reducer", () => {

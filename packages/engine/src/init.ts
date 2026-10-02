@@ -25,11 +25,11 @@ import {
 import { foodRequiredForPopulation } from "./economy/consumption";
 import { DEFAULT_HERO_ARCANE, DEFAULT_HERO_INTELLIGENCE } from "./combatConfig";
 import { DEFAULT_HERO_SPELL, maxManaFor } from "./combat/spells";
-import { DEFAULT_HERO_WAGONS } from "./settlement/capacity";
+import { DEFAULT_HERO_WAGONS, DEFAULT_TREASURY_WAGONS } from "./settlement/capacity";
 import { demoPlatoonsForPlayer, normalizePlatoons, platoonTroopTotal, type UnitType } from "./units";
 import { MAX_PLAYERS, PLAYER_COLORS } from "./playerColors";
 import { cityViewSizeFor, foodBiasForTerrain, generateCitySpots } from "./settlement/citySpots";
-import { buildStarterLayout, heroFoodPerTurn, STARTER_BASE_FARMS, starterFarmsNeeded } from "./settlement/starterLayout";
+import { buildStarterLayout, heroFoodPerTurn, starterFarmsNeeded } from "./settlement/starterLayout";
 import { VALID_HORSE_VARIANTS } from "./horseVariants";
 
 const DEFAULT_PLAYER_COUNT = 3;
@@ -114,7 +114,12 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       garrisonUnpaidSinceDay: null,
       garrisonUnpaidTroops: 0,
       garrisonUnpaidGold: 0,
-      autoTrade: true,
+      // New games start with per-settlement auto-trade OFF (2026-10-02): the
+      // game-level legacy gate (lobby.legacyAutoTrade, written false by
+      // POST /games) already disables runAutoTrade for them, and the logistics
+      // recommender (economy/tradeNeeds.ts) replaces it. Existing saves keep
+      // whatever they have stored -- only this default changed.
+      autoTrade: false,
       castleVariant: 0,
       buildings: [],
     },
@@ -137,7 +142,7 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       garrisonUnpaidSinceDay: null,
       garrisonUnpaidTroops: 0,
       garrisonUnpaidGold: 0,
-      autoTrade: true,
+      autoTrade: false,
       castleVariant: 0,
       buildings: [],
     },
@@ -202,6 +207,11 @@ function makePlayers(
       // 5 starting wagons are already assigned to the starting hero.
       wagonsOwned: 5,
       wagonsUnassigned: 0,
+      // Treasury-cart pool (Phase 1 treasury-wagons split): a second,
+      // independent 5-cart pool, likewise all pre-assigned to the starting
+      // hero so its purse cap stays at 2,500g (the charter pairing).
+      treasuryWagonsOwned: DEFAULT_TREASURY_WAGONS,
+      treasuryWagonsUnassigned: 0,
     });  }
   return out;
 }
@@ -274,8 +284,10 @@ function makeHeroes(
       upkeepUnpaidTroops: 0,
       upkeepUnpaidGold: 0,
       // Wagons & cargo (docs/wagons-stockpiles-trade-routes-plan.md §4.2):
-      // 5 wagons = 2,500g purse cap, exactly the charter cost.
+      // 5 cargo wagons = the 250-per-resource cap, and 5 treasury carts =
+      // a 2,500g purse cap, exactly the charter cost.
       wagons: DEFAULT_HERO_WAGONS,
+      treasuryWagons: DEFAULT_TREASURY_WAGONS,
       resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
     });
   }
@@ -318,7 +330,7 @@ function makeSettlements(
       garrisonUnpaidSinceDay: null,
       garrisonUnpaidTroops: 0,
       garrisonUnpaidGold: 0,
-      autoTrade: true,
+      autoTrade: false,
       castleVariant: (Math.floor(castleRoll * 4) as CastleVariant),
       // Filled in by seedStarterBuildings below, in a second pass so the rng
       // draw order above stays exactly as it was.
@@ -330,7 +342,13 @@ function makeSettlements(
 
 /**
  * Give every settlement the engine's starter set, and size its farmland
- * against the WHOLE food bill of whoever owns it.
+ * against ITS OWN food bill: its population, plus the weekly bill of the
+ * starting hero that stands on it (starting heroes spawn on their owner's
+ * FIRST castle -- the level-1 keep for seat 0, the level-3 castle for each AI
+ * seat), because hero/upkeep.ts's applySuppliedHeroUpkeep draws that bill out
+ * of the warehouse of the settlement the hero is standing on -- and ONLY that
+ * one (2026-10-02: the owner-wide pool is gone with the instant auto-trade
+ * teleport it existed to feed).
  *
  * Why every settlement, not just the big ones: a settlement that already has
  * buildings SKIPS the city view's free starter commit (starterCityOnOpen
@@ -341,98 +359,50 @@ function makeSettlements(
  * never opened its city, and when they did, only one farm against its own
  * 5 food/turn. Measured: `l1SeededWithBuildings` 0/60 seeds.
  *
- * Why the pool, not per-settlement: a 1-player game starts seat 0 with a
- * level-1 keep (500) AND a level-2 town (1,500) -- 5 + 15 = 20 food/turn out
- * of ONE pool of farm fields, since auto-trade moves surplus between a
- * player's own settlements (economy/trade.ts). Sizing each city against its
- * own population gave 1 + 4 = 5 farms sized for a 15/turn bill, leaving the
- * pair 5 food/turn short: 29/60 seeded games net-negative, 11/60 at morale 0.
+ * Why per-settlement sizing survives now (it did not when the pool landed):
+ * with auto-trade OFF for new games, each settlement ACCUMULATES its own
+ * production surplus instead of being drained to exactly foodRequired every
+ * turn -- the keep holds stock at the weekly hero charge where the old regime
+ * left it at 0. Coverage is measured over 4000 seeds with the real
+ * cellMultiplier (docs/resource-gathering.md); the one class the formula
+ * cannot fully satisfy is the 5x5 keep, where farm fields are 2x2 and the
+ * grid physically holds at most 3 beside the town hall --
+ * `starterFarmsNeeded(5 + 40/7)` asks for 4 and gets 3.
  *
- * Why the pool sits in ONE city (the owner's largest): the farms are physical
- * 2x2 cells, so a 5x5 level-1 keep can hold at most 3 of them -- the pool does
- * not fit in the small half of the pair. Concentrating the draws also
- * concentrates the cell-multiplier variance, which is what the count is sized
- * against. Every other settlement of the same owner keeps the base set's
- * single farm, which is spare capacity on top of the pool: measured over 4000
- * seeds (real cellMultiplier), keep 1 farm + town 7 fields covers the combined
- * ~25.7/turn bill 99.98% of the time, against 94.25% for the 5 fields the
- * population bill alone asked for.
- *
- * Neutral settlements (ownerId null) are each their OWN pool, sized on their own
- * population exactly as before: they eat nothing and trade with nobody (turn/
- * endTurn.ts's consumption loop is gated on `s.ownerId === playerId`; trade.ts
- * refuses `unowned_settlement`), so a neutral's food bill is its own and its
- * output is inert -- the food simply piles up at the warehouse cap. They are
- * not a player's food bill and are not part of one.
- *
- * Why the owner's HEROES are in the bill too: their weekly troop bill is drawn
- * out of these same warehouses (hero/upkeep.ts's applySuppliedHeroUpkeep, the
- * settlement the hero stands on first, then the owner's remaining holdings), so
- * a hero standing on its keep on day 7 eats straight out of the farm pool the
- * population bill is sized against. Pricing only the population left the pool
- * short from the FIRST charge on 2 of 6 measured seeds against a 40 food/week
- * bill, and one of those seeds still spiralled to hero morale 0 by turn 49. The
- * heroes' contribution is `heroFoodPerTurn` -- the engine's own
- * `evaluateTroopUpkeep` bill spread over UPKEEP_CHARGE_DAYS, because farms
- * produce per turn and the charge lands once a week -- added to the owner's
- * `player:` pool key, which no neutral can ever hold (a hero always has an
- * owner). Neutrals get no hero bill, which is correct: they have no heroes.
+ * Neutral settlements (ownerId null) have no hero and no trade partner (turn/
+ * endTurn.ts's consumption loop is gated on `s.ownerId === playerId`), so
+ * their bill is their own population and nothing else.
  */
 function seedStarterBuildings(
   settlements: readonly SettlementState[],
   heroStacks: ReadonlyMap<PlayerId, Platoon[]>,
   unitTypes: Record<string, UnitType>,
 ): SettlementState[] {
-  const byId = new Map(settlements.map((s) => [s.id, s]));
-  // Per pool key: the food bill everything in that pool eats, and the city that
-  // hosts its farm fields.
-  const bill = new Map<string, number>();
-  const host = new Map<string, SettlementId>();
+  // The settlement each seat's starting hero stands on: that owner's FIRST
+  // castle in generation order -- the same pick makeHeroes makes via
+  // castles.find((c) => c.ownerId === i), so the sizing and the spawn can
+  // never disagree about where the hero eats.
+  const heroKeeps = new Set<SettlementId>();
+  const seenOwners = new Set<PlayerId>();
   for (const s of settlements) {
-    const key = starterPoolKey(s);
-    bill.set(key, (bill.get(key) ?? 0) + foodRequiredForPopulation(s.population));
-    const held = host.get(key);
-    if (held === undefined || cityViewSizeFor(byId.get(held)?.level ?? 1) < cityViewSizeFor(s.level)) {
-      host.set(key, s.id);
-    }
-  }
-  for (const [ownerId, stacks] of heroStacks) {
-    const key = starterPlayerPoolKey(ownerId);
-    bill.set(key, (bill.get(key) ?? 0) + heroFoodPerTurn(stacks, unitTypes));
+    if (s.ownerId === null || seenOwners.has(s.ownerId) || !heroStacks.has(s.ownerId)) continue;
+    seenOwners.add(s.ownerId);
+    heroKeeps.add(s.id);
   }
   return settlements.map((s) => {
-    const key = starterPoolKey(s);
+    const heroStacksForOwner = s.ownerId !== null && heroKeeps.has(s.id) ? heroStacks.get(s.ownerId) : undefined;
+    const bill =
+      foodRequiredForPopulation(s.population) +
+      (heroStacksForOwner ? heroFoodPerTurn(heroStacksForOwner, unitTypes) : 0);
     return {
       ...s,
       buildings: buildStarterLayout({
         size: cityViewSizeFor(s.level),
         style: "classic",
-        farms: s.id === host.get(key) ? starterFarmsNeeded(bill.get(key) ?? 0) : STARTER_BASE_FARMS,
+        farms: starterFarmsNeeded(bill),
       }),
     };
   });
-}
-
-/**
- * The pool a settlement's farm sizing is grouped by. Everything one PLAYER owns
- * shares a pool, because that is the only grouping the game can actually feed
- * across: auto-trade moves surplus between a player's own settlements, and it
- * is the only thing that does. A NEUTRAL settlement shares with nobody -- trade
- * refuses `unowned_settlement` and nothing ever consumes it -- so each neutral
- * is its own pool, sized on its own population, which is what it got before
- * this rule existed.
- */
-function starterPoolKey(s: Pick<SettlementState, "id" | "ownerId">): string {
-  return s.ownerId === null ? `neutral:${s.id}` : starterPlayerPoolKey(s.ownerId);
-}
-
-/**
- * The pool key for an OWNER's holdings -- shared by their settlements and by
- * their heroes, since hero/upkeep.ts funds an army from the owner's settlement
- * warehouses and never from a neutral's.
- */
-function starterPlayerPoolKey(ownerId: PlayerId): string {
-  return `player:${ownerId}`;
 }
 
 function splitByOwner(settlements: SettlementState[]): Record<string, string[]> {

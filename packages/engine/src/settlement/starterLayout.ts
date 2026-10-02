@@ -12,13 +12,13 @@ import { CELL_MULTIPLIER_PEAK } from "./cityMultipliers";
 // layout of its own.
 //
 // Its farm count is a function of the food bill it has to feed
-// (starterFarmsNeeded), sized against the WHOLE owner's holdings rather than
-// one settlement's population: a 1-player game starts with a level-1 keep (500,
-// 5 food/turn) AND a level-2 town (1,500, 15/turn), and both eat out of one
-// pool of farm fields. That pool also feeds the owner's HEROES, whose weekly
-// troop bill (heroFoodPerTurn -- the engine's own evaluateTroopUpkeep) is drawn
-// out of these same warehouses on every weekly upkeep tick. See init.ts's
-// seedStarterBuildings for the allocation.
+// (starterFarmsNeeded), sized against the settlement's OWN bill -- its
+// population, plus the weekly bill of the starting hero that stands on it,
+// whose upkeep draw lands on exactly this settlement (hero/upkeep.ts's
+// under-hero rule). Since instant auto-trade was gated off for new games
+// (lobby.legacyAutoTrade, 2026-10-02) no settlement can borrow a sibling's
+// surplus, so each city's farmland covers its own mouths. See init.ts's
+// seedStarterBuildings for the per-settlement bill.
 //
 // It replaces the old behavior: a previously-empty settlement was handed the
 // DENSE PROCEDURAL city (cityBuildingGen's denseUrban pattern, ~14 buildings
@@ -119,22 +119,11 @@ export const STARTER_BASE_FARMS = 1;
  * 3 farms cover it 51.1% of the time, 4 farms 98.0%, 5 farms 100%. One farm of
  * headroom is what turns a coin flip into a town that actually eats.
  *
- * Headroom is cheap and the headroom is not re-tuned per requirement: a
- * farmField's upkeep is 0 wood / 0 stone, so an extra field costs only four
- * grid cells. Measured again over 4000 seeded 1-player games (32,000 real farm
- * cells, multiplier min 0.02 / mean 1.062 / max 3.86) against the ~25.7 food/turn
- * a keep + town + demo hero actually eat (20 population + 40/7 hero), and
- * counting the keep's base farm alongside the pool host's fields:
- *
- * | pool host fields | covers the combined bill |
- * |---|---|
- * | 5 (population bill only — the pre-hero-bill count) | 94.25% |
- * | 6 | 99.83% |
- * | **7 (`starterFarmsNeeded(25.714)`)** | **99.98%** |
- * | 8 | 100% |
- *
- * so the derived count buys ~5.7 points over what one more farm would. The one
- * uncovered seed is short 1.56 food/turn (a 0.94 ratio), not a collapse.
+ * Headroom is cheap and is not re-tuned per requirement: a farmField's upkeep
+ * is 0 wood / 0 stone, so an extra field costs only four grid cells. Re-measured
+ * per settlement class over 4000 seeded 1-player games (real cellMultiplier,
+ * multi-spot cities) once sizing went per-settlement (2026-10-02) -- see
+ * docs/resource-gathering.md for the per-class coverage table.
  */
 export const STARTER_FARM_VARIANCE_HEADROOM = 1;
 
@@ -166,20 +155,20 @@ const STARTER_PRODUCER_OFFSETS: readonly (readonly [number, number])[] = [
 ];
 
 /**
- * The food/turn an owner's heroes add to their pool's food bill.
+ * The food/turn the starting hero standing on a settlement adds to that
+ * settlement's food bill.
  *
  * `costFood` is the engine's own weekly troop bill — the exact call
  * `resolveTroopUpkeep` makes on the weekly charge (economy/troopUpkeep.ts) — so
  * the sizing cannot drift from what the game actually charges. It is divided by
  * UPKEEP_CHARGE_DAYS because farms produce per TURN while the charge lands once
- * every UPKEEP_CHARGE_DAYS turns: an owner whose only food source is farmland
- * has to earn the hero's bill as well as the population's.
+ * every UPKEEP_CHARGE_DAYS turns: a settlement whose only food source is
+ * farmland has to earn the hero's bill as well as its population's -- and with
+ * the under-hero draw rule (hero/upkeep.ts) the hero eats from THIS settlement
+ * alone, so the term belongs only to the city the hero spawns on.
  *
  * Measured for the default 1-player demo army (12 swordsman + 8 archer + 4
- * cavalry = 40 food/week under the catalog, ~5.7 food/turn): against the
- * population bill alone the pair produced 21-35 food/week of surplus, and the
- * pool was short from the FIRST charge (day 7) on 2 of 6 seeds, one of which
- * spiralled to hero morale 0 by turn 49.
+ * cavalry = 40 food/week under the catalog, ~5.7 food/turn).
  *
  * `unitTypes` is the unit catalog. Omitting it falls back to units.ts's flat
  * 1 gold / 1 food per troop, which UNDER-reports that army as 24 food/week --
@@ -201,15 +190,15 @@ export function heroFoodPerTurn(stacks: readonly Platoon[], unitTypes: Record<st
  * CELL_MULTIPLIER_PEAK), floored at STARTER_BASE_FARMS and padded by
  * STARTER_FARM_VARIANCE_HEADROOM.
  *
- * The argument is a FOOD BILL (food/turn), not a population. A player's
- * holdings eat one bill between them, so init.ts passes
- * `foodRequiredForPopulations` over every settlement the owner holds PLUS
- * `heroFoodPerTurn` over the owner's heroes -- 20 + 40/7 = ~25.7 food/turn for
- * the keep + town + demo army a 1-player game starts with, which sizes to 7
- * farms. Passing a single settlement's population instead is the bug this
- * parameter change exists to make impossible to write twice: 15 food/turn
- * sized to 4 farms left the pair 5 food/turn short, measured across 29 of 60
- * seeded games with 11 reaching morale 0.
+ * The argument is a FOOD BILL (food/turn), not a population. The caller adds
+ * every mouth that eats out of THIS settlement's warehouse: its population
+ * (`foodRequiredForPopulation`) plus the weekly bill of any starting hero that
+ * stands on it (`heroFoodPerTurn`) -- 5 + 40/7 = ~10.7 food/turn for the
+ * level-1 keep the 1-player demo hero spawns on, which asks for 4 farms (the
+ * 5x5 grid holds 3, so the keep runs on the capacity clamp + accumulated
+ * surplus; see init.ts's seedStarterBuildings). Passing a single settlement's
+ * population where the hero's bill also lands on it is the bug this parameter
+ * change exists to make impossible to write twice.
  */
 export function starterFarmsNeeded(foodRequiredPerTurn: number): number {
   const perFarm = (buildingSettlementEffects("farmField", STARTER_BUILDING_LEVEL).foodPerTurn ?? 0) * CELL_MULTIPLIER_PEAK;
@@ -259,13 +248,12 @@ export function starterCityOnOpen(input: {
  * it, and one wood + one stone producer. Legal on every city size (5/10/15),
  * non-overlapping, and byte-identical on every call for a given `farms`.
  *
- * `farms` is the caller's allocation of the food bill, not the settlement's own
- * requirement: init.ts sizes the pool against everything its owner holds (a
- * 1-player game's keep + town eat 20 food/turn between them) and puts the pool
- * in one city, giving every other settlement of the same owner the base
- * STARTER_BASE_FARMS. A settlement created later -- by a charter, or as a test
- * fixture -- just calls this with the default, which is the same set the city
- * view's free commit hands it. See starterFarmsNeeded.
+ * `farms` is the caller's allocation of THIS settlement's food bill: init.ts
+ * sizes it against the settlement's own population plus the weekly bill of the
+ * starting hero standing on it (a keep asks ~10.7 food/turn), a settlement
+ * created later -- by a charter, or as a test fixture -- just calls this with
+ * the default, which is the same set the city view's free commit hands it. See
+ * starterFarmsNeeded.
  */
 export function buildStarterLayout(options: StarterLayoutOptions): BuildingDef[] {
   const { size, style } = options;
