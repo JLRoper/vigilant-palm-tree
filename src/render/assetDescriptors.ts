@@ -107,6 +107,10 @@ import buildingPixelStoneMine3 from "../resources/buildings/building-pixel-stone
 import buildingPixelIronMine1 from "../resources/buildings/building-pixel-ironMine-1.png?url";
 import buildingPixelIronMine2 from "../resources/buildings/building-pixel-ironMine-2.png?url";
 import buildingPixelIronMine3 from "../resources/buildings/building-pixel-ironMine-3.png?url";
+import buildingPixelCrypt1 from "../resources/buildings/building-pixel-crypt-1.png?url";
+import buildingPixelOssuary1 from "../resources/buildings/building-pixel-ossuary-1.png?url";
+import buildingPixelWraithBarrows1 from "../resources/buildings/building-pixel-wraithBarrows-1.png?url";
+import buildingPixelSpireOfAsh1 from "../resources/buildings/building-pixel-spireOfAsh-1.png?url";
 import buildingPixelUnderConstruction1 from "../resources/buildings/building-pixel-underConstruction-1.png?url";
 import buildingPixelUnderConstruction2 from "../resources/buildings/building-pixel-underConstruction-2.png?url";
 import buildingPixelUnderConstruction3 from "../resources/buildings/building-pixel-underConstruction-3.png?url";
@@ -322,6 +326,10 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel.ironMine.1": buildingPixelIronMine1,
   "pixel.ironMine.2": buildingPixelIronMine2,
   "pixel.ironMine.3": buildingPixelIronMine3,
+  "pixel.crypt.1": buildingPixelCrypt1,
+  "pixel.ossuary.1": buildingPixelOssuary1,
+  "pixel.wraithBarrows.1": buildingPixelWraithBarrows1,
+  "pixel.spireOfAsh.1": buildingPixelSpireOfAsh1,
   "pixel.underConstruction.1": buildingPixelUnderConstruction1,
   "pixel.underConstruction.2": buildingPixelUnderConstruction2,
   "pixel.underConstruction.3": buildingPixelUnderConstruction3,
@@ -797,6 +805,10 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.ironMine.1": 10,
   "building.pixel.ironMine.2": 10,
   "building.pixel.ironMine.3": 10,
+  "building.pixel.crypt.1": 11,
+  "building.pixel.ossuary.1": 11,
+  "building.pixel.wraithBarrows.1": 11,
+  "building.pixel.spireOfAsh.1": 7,
   "building.pixel.underConstruction.1": 13,
   "building.pixel.underConstruction.2": 11,
   "building.pixel.underConstruction.3": 8,

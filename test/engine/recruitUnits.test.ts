@@ -245,3 +245,26 @@ test("eligibleRecruitSources with unknown catalog ids keeps the human default pe
     "an ashen seat gets nothing from the default-human fallback",
   );
 });
+
+// ── Ashen Court content pins (024): the crypt's ghoul is an ashen-roster
+// unit, so the gate splits the seam's answers by seat faction. ──
+
+test("eligibleRecruitSources: a human seat cannot see the built crypt's ghoul; an ashen seat can", () => {
+  const state = recruitState({}, [building("crypt", 1, 2)]);
+  const catalog = { ghoul: catalogUnit("ghoul", "ashen") };
+  assert.deepEqual(
+    sourcesOf(state, { unitTypes: catalog, seatFactionId: "human" }),
+    [],
+    "a human seat must not recruit the ashen ghoul even with a built crypt",
+  );
+  assert.deepEqual(
+    sourcesOf(state, { unitTypes: catalog, seatFactionId: "ashen" }),
+    ["ghoul"],
+    "an ashen seat sees its own roster",
+  );
+});
+
+test("eligibleRecruitSources: without gate opts the crypt lists its ghoul (the dormant seam)", () => {
+  const state = recruitState({}, [building("crypt", 1, 2)]);
+  assert.deepEqual(sourcesOf(state), ["ghoul"]);
+});

@@ -46,6 +46,18 @@ test("FACTION_REGISTRY is exhaustive over FactionId and every entry's id matches
   }
 });
 
+test("ashen ships its seven-unit roster (The Ashen Court content plan)", () => {
+  assert.deepEqual(FACTION_REGISTRY.ashen.roster, [
+    "ghoul",
+    "bone_pikeman",
+    "bone_archer",
+    "wraith",
+    "blood_knight",
+    "vampire_lord",
+    "lich",
+  ]);
+});
+
 test("unitFactionId defaults absent and unknown entries to human", () => {
   assert.equal(unitFactionId(undefined), "human");
   assert.equal(unitFactionId(unit("swordsman")), "human");
