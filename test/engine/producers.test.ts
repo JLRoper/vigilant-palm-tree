@@ -2,12 +2,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   applyEndOfTurn,
+  buildingSettlementEffects,
+  buildingUpkeep,
+  CELL_MULTIPLIER_PEAK,
   cellMultiplier,
   isProducerKind,
   produceSettlementResources,
   producerBasePerTurn,
   producerResource,
   producerTurnOutput,
+  SPOT_MULTIPLIER_PEAK,
 } from "@heroes/engine";
 import { emptyWarehouse, makeSettlement, makeState } from "../charter/_helpers";
 
@@ -48,6 +52,96 @@ test("producerBasePerTurn reads the registry: goldMine 40 gold, +3 magnitudes el
   assert.equal(producerBasePerTurn("mine", 1, "stone"), 3);
   assert.equal(producerBasePerTurn("mine", 1, "iron"), 3);
   assert.equal(producerBasePerTurn("arcaneFont", 1, "arcane"), 3);
+});
+
+// resourceYieldBonus used to be copied out of the registry unscaled, so a
+// woodcutter hut made the SAME 3 wood at L3 as at L1 while upkeepPerLevel
+// charged 3x the wood -- every upgrade was strictly negative ROI. It now
+// scales xlevel, like goldPerTurn/foodPerTurn.
+const LEVEL_SCALED_PRODUCERS: { kind: Parameters<typeof producerBasePerTurn>[0]; resource: Parameters<typeof producerBasePerTurn>[2] }[] = [
+  { kind: "woodcutterHut", resource: "wood" },
+  { kind: "stoneMine", resource: "stone" },
+  { kind: "ironMine", resource: "iron" },
+  { kind: "mine", resource: "stone" },
+  { kind: "mine", resource: "iron" },
+  { kind: "arcaneFont", resource: "arcane" },
+];
+
+test("resourceYieldBonus scales xlevel, so L2 > L1 and L3 > L2 output", () => {
+  for (const { kind, resource } of LEVEL_SCALED_PRODUCERS) {
+    const l1 = producerBasePerTurn(kind, 1, resource);
+    const l2 = producerBasePerTurn(kind, 2, resource);
+    const l3 = producerBasePerTurn(kind, 3, resource);
+    assert.ok(l2 > l1, `${kind}/${resource}: L2 (${l2}) must beat L1 (${l1})`);
+    assert.ok(l3 > l2, `${kind}/${resource}: L3 (${l3}) must beat L2 (${l2})`);
+    assert.equal(l2, l1 * 2, `${kind}/${resource}: L2 is exactly x2`);
+    assert.equal(l3, l1 * 3, `${kind}/${resource}: L3 is exactly x3`);
+  }
+});
+
+test("resourceYieldBonus scaling matches goldPerTurn/foodPerTurn (one rule, not two)", () => {
+  // goldMine's goldPerTurn already scaled (40/80/120) and the farm kinds'
+  // foodPerTurn already scaled (5/10/15). All five effect families must now
+  // share the L1 -> L2 -> L3 ratios, or the registry grows a second convention.
+  const ratios = (l1: number, l2: number, l3: number): string => `${l2 / l1}:${l3 / l1}`;
+  assert.equal(ratios(40, producerBasePerTurn("goldMine", 2, "gold"), producerBasePerTurn("goldMine", 3, "gold")), "2:3");
+  assert.equal(ratios(5, producerBasePerTurn("farmField", 2, "food"), producerBasePerTurn("farmField", 3, "food")), "2:3");
+  assert.equal(
+    ratios(3, producerBasePerTurn("woodcutterHut", 2, "wood"), producerBasePerTurn("woodcutterHut", 3, "wood")),
+    "2:3",
+  );
+  assert.equal(
+    buildingSettlementEffects("woodcutterHut", 3).resourceYieldBonus?.wood,
+    producerBasePerTurn("woodcutterHut", 3, "wood"),
+    "the registry effect and the producer read agree at every level",
+  );
+});
+
+test("upkeep still scales xlevel, unchanged by the yield fix", () => {
+  for (const { kind, resource } of LEVEL_SCALED_PRODUCERS) {
+    void resource;
+    const u1 = buildingUpkeep(kind, 1);
+    const u2 = buildingUpkeep(kind, 2);
+    const u3 = buildingUpkeep(kind, 3);
+    assert.equal(u2.wood, u1.wood * 2, `${kind}: wood upkeep x2`);
+    assert.equal(u3.wood, u1.wood * 3, `${kind}: wood upkeep x3`);
+    assert.equal(u2.stone, u1.stone * 2, `${kind}: stone upkeep x2`);
+    assert.equal(u3.stone, u1.stone * 3, `${kind}: stone upkeep x3`);
+  }
+});
+
+test("net-of-upkeep output still rises with level: the L3 upgrade pays for itself", () => {
+  // The defect was a strictly negative ROI: output flat, upkeep rising. Net
+  // output (yield minus upkeep, the resources actually banked) must rise.
+  for (const { kind, resource } of LEVEL_SCALED_PRODUCERS) {
+    const net = [1, 2, 3].map((level) => {
+      const u = buildingUpkeep(kind, level);
+      return producerBasePerTurn(kind, level, resource) - u.wood - u.stone;
+    });
+    assert.ok(net[1] > net[0], `${kind}: net L2 (${net[1]}) > net L1 (${net[0]})`);
+    assert.ok(net[2] > net[1], `${kind}: net L3 (${net[2]}) > net L2 (${net[1]})`);
+  }
+});
+
+test("a 3x spot at L1 exactly matches the same building at L3 on a plain cell", () => {
+  // Worth stating as a designed consequence rather than a coincidence: the
+  // level curve (x3) and the spot peak (SPOT_MULTIPLIER_PEAK = 3.0) are the
+  // same number, so a lucky L1 placement equals a fully-upgraded L3. That is
+  // NOT new imbalance -- goldMine's xlevel goldPerTurn (40/80/120) has the
+  // same tie today (120 vs 120), and the shipped farmField food path does too
+  // (5x3 = 15 vs 15). The spot stays a permanent x3, so an L3 spot producer
+  // (27) still dominates either alternative -- the placement decision, not the
+  // level grind, is what spots are for.
+  for (const { kind, resource } of LEVEL_SCALED_PRODUCERS) {
+    const l1OnSpot = producerBasePerTurn(kind, 1, resource) * SPOT_MULTIPLIER_PEAK;
+    const l3Plain = producerBasePerTurn(kind, 3, resource) * CELL_MULTIPLIER_PEAK;
+    assert.equal(l1OnSpot, l3Plain, `${kind}/${resource}: L1 on a 3.0x spot equals L3 plain`);
+    const l3OnSpot = producerBasePerTurn(kind, 3, resource) * SPOT_MULTIPLIER_PEAK;
+    assert.ok(
+      l3OnSpot > l1OnSpot && l3OnSpot > l3Plain,
+      `${kind}/${resource}: an L3 spot producer (${l3OnSpot}) must beat both the L1 spot (${l1OnSpot}) and the L3 plain (${l3Plain})`,
+    );
+  }
 });
 
 test("producerTurnOutput scales the base by the cell multiplier", () => {
