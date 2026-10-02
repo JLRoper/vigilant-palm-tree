@@ -1,5 +1,7 @@
 import { CASTLE_COUNT_MAX } from "../../map/castlePlacement";
 import { menuTheme, openCenteredModal, styleButton, styleInput } from "./menu";
+import type { FactionId } from "@heroes/contracts";
+import { seatFactionChoices } from "./factionChoices";
 
 export type NewGameHandler = (opts: {
   name: string;
@@ -8,6 +10,7 @@ export type NewGameHandler = (opts: {
   castleCount?: number;
   mapSize?: "small" | "medium" | "large";
   enemyCount?: 0 | 1 | 2 | 3;
+  factionId?: FactionId;
 }) => void | Promise<void>;
 
 export interface NewGameModalOptions {
@@ -151,6 +154,72 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
   content.appendChild(enemyWrap);
   refreshEnemies();
 
+  const factionLabel = document.createElement("label");
+  factionLabel.textContent = "Your faction";
+  factionLabel.style.opacity = "0.7";
+  content.appendChild(factionLabel);
+
+  const factionWrap = document.createElement("div");
+  factionWrap.style.display = "flex";
+  factionWrap.style.gap = "8px";
+  const factionChoices = seatFactionChoices();
+  let factionId: FactionId = factionChoices[0]?.id ?? "human";
+  const factionButtons: Array<{ id: FactionId; btn: HTMLButtonElement }> = [];
+  function refreshFactions(): void {
+    for (const { id, btn } of factionButtons) {
+      const choice = factionChoices.find((c) => c.id === id);
+      const active = id === factionId;
+      btn.style.background = active
+        ? `linear-gradient(180deg, ${choice?.def.palette.primary ?? "#c9a227"} 0%, ${choice?.def.palette.accent ?? "#a6801a"} 160%)`
+        : "#1a1a1a";
+      btn.style.color = "#eee";
+      btn.style.borderColor = active ? (choice?.def.palette.accent ?? "#e9cf7d") : "#444";
+      btn.style.fontWeight = active ? "700" : "400";
+    }
+  }
+  for (const choice of factionChoices) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.title = choice.def.motto;
+    Object.assign(btn.style, {
+      flex: "1",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: "6px",
+      padding: "6px 8px",
+      fontSize: "12px",
+      border: "1px solid #444",
+      borderRadius: "4px",
+      backgroundColor: "#1a1a1a",
+      color: "#eee",
+      cursor: "pointer",
+    });
+    if (choice.banner) {
+      const img = document.createElement("img");
+      img.src = choice.banner;
+      img.alt = choice.def.label;
+      Object.assign(img.style, {
+        height: "20px",
+        maxWidth: "14px",
+        objectFit: "contain",
+        imageRendering: "pixelated",
+      });
+      btn.appendChild(img);
+    }
+    const label = document.createElement("span");
+    label.textContent = choice.def.label;
+    btn.appendChild(label);
+    btn.addEventListener("click", () => {
+      factionId = choice.id;
+      refreshFactions();
+    });
+    factionButtons.push({ id: choice.id, btn });
+    factionWrap.appendChild(btn);
+  }
+  content.appendChild(factionWrap);
+  refreshFactions();
+
   const errorLine = document.createElement("div");
   Object.assign(errorLine.style, { ...menuTheme.error, minHeight: "14px", marginTop: "4px" });
   content.appendChild(errorLine);
@@ -207,7 +276,7 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
     cancel.disabled = true;
     errorLine.textContent = "Creating…";
     try {
-      await opts.onNew({ name, seed, castleSeed, castleCount, mapSize, enemyCount });
+      await opts.onNew({ name, seed, castleSeed, castleCount, mapSize, enemyCount, factionId });
       modal.close();
     } catch (e) {
       confirm.disabled = false;

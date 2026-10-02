@@ -201,7 +201,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     );
     this.ui.initSettlementInfo();
     this.ui.initTileInfo();
-    this.ui.initCityView(() => this.state, this.view);
+    this.ui.initCityView(() => this.state, this.view, () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""));
   }
 
   private initInput(): void {

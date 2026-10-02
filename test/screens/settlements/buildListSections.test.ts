@@ -50,7 +50,7 @@ test("the food producers are Production (granary is a producer+storage hybrid)",
 
 test("exact section membership in BUILDABLE_KINDS order", () => {
   const sections = buildListSections();
-  assert.deepEqual(sections[0]?.kinds, ["archeryRange", "barracks", "mageGuild", "farmhouse", "stables", "huntingLodge", "eyrie"]);
+  assert.deepEqual(sections[0]?.kinds, ["archeryRange", "barracks", "mageGuild", "farmhouse", "stables", "huntingLodge", "eyrie", "crypt", "ossuary", "wraithBarrows", "spireOfAsh"]);
   assert.deepEqual(sections[1]?.kinds, ["goldMine", "woodcutterHut", "stoneMine", "ironMine", "arcaneFont", "farmField", "granary"]);
   assert.deepEqual(sections[2]?.kinds, [
     "townHall", "house", "tower", "smithy", "market", "apartment", "warehouse", "bank", "treasury",

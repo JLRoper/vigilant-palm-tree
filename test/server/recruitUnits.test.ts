@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type {
   BuildingDef,
   Command,
+  FactionId,
   HeroId,
   HeroState,
   Player,
@@ -10,7 +11,7 @@ import type {
   SettlementId,
   SettlementState,
 } from "@heroes/contracts";
-import type { HydratableGameRow } from "@heroes/engine";
+import type { HydratableGameRow, UnitType } from "@heroes/engine";
 import { normalizePlatoons } from "@heroes/engine";
 import { handleCommand } from "../../server/app/commandHandler";
 import {
@@ -112,7 +113,7 @@ function makeDeps(row: HydratableGameRow) {
     heroRepo,
     settlementRepo,
     charterRepo,
-    deps: { gameRepo, eventRepo, heroRepo, settlementRepo, charterRepo, ctx: { rng: () => 0.5, catalog: { unitTypes: [] } } },
+    deps: { gameRepo, eventRepo, heroRepo, settlementRepo, charterRepo, ctx: { rng: () => 0.5, catalog: { unitTypes: [] as UnitType[] } } },
   };
 }
 
@@ -214,4 +215,55 @@ test("RecruitUnits rejects a count of 0", async () => {
   assert.equal(result.ok, false);
   assert.equal(result.reason, "invalid_count");
   assert.equal(eventRepo.events.length, 0);
+});
+
+// ── Faction gate (migration 024): the crypt's ghoul is an ashen-roster
+// unit, so the server-side gate rejects it for a human seat and admits it
+// for an ashen seat — the same crypt, the same command, only the acting
+// seat's factionId differs. ──
+
+function ghoulCatalogUnit(): UnitType {
+  return {
+    id: "ghoul",
+    name: "Ghoul",
+    attack: 3,
+    defence: 1,
+    health: 5,
+    speed: 5,
+    description: "",
+    advantageType: "infantry",
+    factionId: "ashen",
+  };
+}
+
+function cryptRow(seatFactionId: FactionId): HydratableGameRow {
+  const row = recruitRow({ buildings: [building("crypt", 1, 2)] });
+  return {
+    ...row,
+    players: [{ ...PLAYERS[0], factionId: seatFactionId }, PLAYERS[1]],
+  };
+}
+
+function cryptCommand(): Extract<Command, { kind: "RecruitUnits" }> {
+  return recruitCommand({ buildingKind: "crypt", gx: 1, gy: 2, unitTypeId: "ghoul", count: 1 });
+}
+
+test("RecruitUnits rejects the ashen ghoul for a human seat even with a built crypt", async () => {
+  const { gameRepo, eventRepo, deps } = makeDeps(cryptRow("human"));
+  deps.ctx.catalog.unitTypes = [ghoulCatalogUnit()];
+  const result = await handleCommand(cryptCommand(), deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "unit_not_in_seat_faction");
+  assert.equal(eventRepo.events.length, 0);
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 1000, "nothing persisted on rejection");
+});
+
+test("RecruitUnits admits the ashen ghoul for an ashen seat and charges the crypt's 40g", async () => {
+  const { gameRepo, eventRepo, deps } = makeDeps(cryptRow("ashen"));
+  deps.ctx.catalog.unitTypes = [ghoulCatalogUnit()];
+  const result = await handleCommand(cryptCommand(), deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.settlement?.gold, 960, "1 ghoul at 40g");
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 960);
+  assert.equal(eventRepo.events.length, 1);
 });

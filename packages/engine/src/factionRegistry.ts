@@ -36,9 +36,18 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
     id: "ashen",
     label: "The Ashen Court",
     motto: "What death releases, the Court reclaims.",
-    description: "Placeholder entry until the Ashen Court content plan lands its roster.",
+    description:
+      "A necropolis-confederacy that raises its levies from the barrow fields: cheap fast infantry swarms, spectral ranged, and an elite undead aristocracy. No living soldiers — even its bowmen are revenants.",
     palette: { primary: "#2b2b33", secondary: "#e8e0d0", accent: "#ff6b35" },
-    roster: [],
+    roster: [
+      "ghoul",
+      "bone_pikeman",
+      "bone_archer",
+      "wraith",
+      "blood_knight",
+      "vampire_lord",
+      "lich",
+    ],
   },
   ironmark: {
     id: "ironmark",

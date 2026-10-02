@@ -98,6 +98,7 @@ export class CityView {
     });
     this.buildingMenu = new BuildingMenu({
       onRecruitUnits: opts.onRecruitUnits,
+      isUnitRecruitable: opts.isUnitRecruitable,
       onUpgradeTownHall: opts.onUpgradeTownHall,
       onUpgradeBuilding: (building) => {
         const settlement = this.getSettlement();
