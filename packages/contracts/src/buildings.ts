@@ -18,6 +18,7 @@ export type BuildingKind =
   | "granary"
   | "warehouse"
   | "bank"
+  | "treasury"
   | "goldMine"
   | "woodcutterHut"
   | "arcaneFont"
@@ -35,6 +36,19 @@ export interface BuildingDef {
   h?: number;
   /** Present while the building is under construction (new placements); removed on completion. */
   construction?: { daysRemaining: number };
+  /**
+   * Present only on a bank that has a pot (per-building gold storage).
+   * Absent means no pot -- mirrors `construction`, so a building written
+   * before banks had pots round-trips without ever gaining the key.
+   */
+  bank?: BankPot;
+}
+
+export interface BankPot {
+  /** Gold currently held in this bank's pot. */
+  gold: number;
+  /** Withdrawals requested but not yet matured. */
+  pendingOut: { gold: number; maturesOnDay: number }[];
 }
 
 export interface BuildingRef {

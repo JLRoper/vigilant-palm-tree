@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { buildingFootprintFromRegistry, pickStyleForBuilding } from "@heroes/engine";
 import type { BuildingDef } from "@heroes/contracts";
 import { cellOrigin, cellToScreen, computeCityScale, TILE_D, TILE_W } from "../../src/core/cityGrid";
-import { buildingFootprint } from "../../src/render/cityBuildingDraw/primitives";
+import { buildingFootprint, buildingHeight, coversCell } from "../../src/render/cityBuildingDraw/primitives";
 import { buildCityScene, type CitySceneInput } from "../../src/render/scene/sceneBuilder/cityScene";
 import type {
   CityBuildingNode,
@@ -130,6 +130,52 @@ test("buildings are emitted in ascending (gx+gy) draw order with correct footpri
   assert.deepEqual(buildingNodes[0].center, { x: fp.cx, y: fp.cy });
   assert.equal(buildingNodes[0].halfWidth, fp.hw);
   assert.equal(buildingNodes[0].halfHeight, fp.hh);
+});
+
+test("warehouse is 2x2 and covers all four of its cells at every level", () => {
+  assert.deepEqual(
+    buildingFootprintFromRegistry("warehouse", 1),
+    { w: 2, h: 2 },
+    "a 2x2 footprint at L1",
+  );
+  // Deliberately pinned per level: buildingFootprintFromRegistry has a 1.5x1.5
+  // L2/L3 override list, and a 2x2 kind landing in it would SHALLOW to 2 cells
+  // on upgrade, freeing the other two. warehouse must stay out of that list.
+  for (const level of [1, 2, 3]) {
+    assert.deepEqual(
+      buildingFootprintFromRegistry("warehouse", level),
+      { w: 2, h: 2 },
+      `warehouse must stay 2x2 at level ${level}`,
+    );
+  }
+
+  const warehouse: BuildingDef = { gx: 1, gy: 1, kind: "warehouse", level: 1, style: "classic" };
+  for (const [gx, gy] of [[1, 1], [2, 1], [1, 2], [2, 2]] as const) {
+    assert.ok(coversCell(warehouse, gx, gy), `(${gx},${gy}) is inside the 2x2 warehouse`);
+  }
+  for (const [gx, gy] of [[0, 1], [1, 0], [3, 1], [1, 3], [3, 3]] as const) {
+    assert.ok(!coversCell(warehouse, gx, gy), `(${gx},${gy}) is outside the 2x2 warehouse`);
+  }
+
+  // A 2x2 building must also be drawn on the footprint the registry reports,
+  // not a 1x1 tile -- the scene node geometry is the only place the sprite's
+  // visual size comes from.
+  const nodes = buildCityScene(baseInput({ buildings: [warehouse] }));
+  const [node] = nodesOfKind<CityBuildingNode>(nodes, "cityBuilding");
+  const tileScale = computeCityScale(5, 800, 600);
+  const gridOrigin = cellOrigin(5);
+  // Mirrors cityScene.ts's own screenOrigin: gridVCenter is the grid's vertical
+  // midpoint for the city size, not the building's gx.
+  const gridVCenter = ((5 - 1) * TILE_D) / 2;
+  const screenOrigin = { x: 400, y: 300 - (gridVCenter + 5 * TILE_D * 0.18) * tileScale };
+  const fp = buildingFootprint(1, 1, gridOrigin, screenOrigin, tileScale, 2, 2);
+  assert.deepEqual(node?.center, { x: fp.cx, y: fp.cy });
+  assert.equal(node?.halfWidth, fp.hw);
+});
+
+test("treasury is a 1x1 footprint and has a nonzero procedural height", () => {
+  assert.deepEqual(buildingFootprintFromRegistry("treasury", 1), { w: 1, h: 1 });
+  assert.ok(buildingHeight("treasury", 1) > 0, "buildingHeight must cover treasury (exhaustive record)");
 });
 
 test("no upgrade means no construction stage on any building node", () => {

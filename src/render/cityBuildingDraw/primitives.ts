@@ -65,6 +65,7 @@ export function buildingHeight(kind: BuildingKind, level: number): number {
     archeryRange: 28,
     granary: 26,
     bank: 24,
+    treasury: 26,
     warehouse: 24,
     goldMine: 20,
     woodcutterHut: 18,

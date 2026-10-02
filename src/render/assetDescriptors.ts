@@ -87,6 +87,14 @@ import buildingPixelGranary1 from "../resources/buildings/building-pixel-granary
 import buildingPixelGranary2 from "../resources/buildings/building-pixel-granary-2.png?url";
 import buildingPixelGranary3 from "../resources/buildings/building-pixel-granary-3.png?url";
 import buildingPixelBank1 from "../resources/buildings/building-pixel-bank-1.png?url";
+import buildingPixelBank2 from "../resources/buildings/building-pixel-bank-2.png?url";
+import buildingPixelBank3 from "../resources/buildings/building-pixel-bank-3.png?url";
+import buildingPixelTreasury1 from "../resources/buildings/building-pixel-treasury-1.png?url";
+import buildingPixelTreasury2 from "../resources/buildings/building-pixel-treasury-2.png?url";
+import buildingPixelTreasury3 from "../resources/buildings/building-pixel-treasury-3.png?url";
+import buildingPixelWarehouse1 from "../resources/buildings/building-pixel-warehouse-1.png?url";
+import buildingPixelWarehouse2 from "../resources/buildings/building-pixel-warehouse-2.png?url";
+import buildingPixelWarehouse3 from "../resources/buildings/building-pixel-warehouse-3.png?url";
 import buildingPixelGoldMine1 from "../resources/buildings/building-pixel-goldMine-1.png?url";
 import buildingPixelGoldMine2 from "../resources/buildings/building-pixel-goldMine-2.png?url";
 import buildingPixelGoldMine3 from "../resources/buildings/building-pixel-goldMine-3.png?url";
@@ -293,8 +301,14 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel.granary.2": buildingPixelGranary2,
   "pixel.granary.3": buildingPixelGranary3,
   "pixel.bank.1": buildingPixelBank1,
-  "pixel.bank.2": buildingPixelBank1,
-  "pixel.bank.3": buildingPixelBank1,
+  "pixel.bank.2": buildingPixelBank2,
+  "pixel.bank.3": buildingPixelBank3,
+  "pixel.treasury.1": buildingPixelTreasury1,
+  "pixel.treasury.2": buildingPixelTreasury2,
+  "pixel.treasury.3": buildingPixelTreasury3,
+  "pixel.warehouse.1": buildingPixelWarehouse1,
+  "pixel.warehouse.2": buildingPixelWarehouse2,
+  "pixel.warehouse.3": buildingPixelWarehouse3,
   "pixel.goldMine.1": buildingPixelGoldMine1,
   "pixel.goldMine.2": buildingPixelGoldMine2,
   "pixel.goldMine.3": buildingPixelGoldMine3,
@@ -702,11 +716,18 @@ export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> =
 // base lands slightly above the south vertex (visible ~4-7px above).
 // Per-sprite overrides so each building's visible base sits at the cell's
 // south vertex. The universal -12 default below pulls every sprite up by
-// (12 + bottomPad*sh/128)px above the vertex. The overrides below cancel that
+// (12 + bottomPad * sh / dh)px above the vertex, where sh is the drawn sprite
+// height and dh the PNG's own canvas height. The overrides below cancel that
 // overshoot using each PNG's measured transparent bottom padding.
-//   formula: visibleBase = y + td*0.5 + anchorOffsetY - bottomPad*(sh/128)
+//   formula: visibleBase = y + td*0.5 + anchorOffsetY - bottomPad*(sh/dh)
 //   target:  visibleBase = y + td*0.5
-//   => anchorOffsetY = bottomPad * (sh/128), with sh = tw * 0.9 = 86.4
+//   => anchorOffsetY = bottomPad * (sh/dh)
+// The divisor must be the PNG's ACTUAL canvas height, not a nominal 128: every
+// building-pixel-* asset is authored on a 1024 canvas, so sh/dh is ~8x smaller
+// than sh/128 would suggest (a 79-row pad on warehouse-1 is 7px, not 53).
+// This table uses the de-facto convention sh = tw*0.9 = 86.4 (the 1x1 width)
+// for every key regardless of its real footprint, which reproduces the values
+// below; it is an eyeballed baseline, not a strict geometric solve.
 const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.classic.apartment.1": 3,
   "building.classic.archeryRange.1": 10,
@@ -736,8 +757,14 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.granary.2": 25,
   "building.pixel.granary.3": 19,
   "building.pixel.bank.1": 7,
-  "building.pixel.bank.2": 7,
-  "building.pixel.bank.3": 7,
+  "building.pixel.bank.2": 6,
+  "building.pixel.bank.3": 6,
+  "building.pixel.treasury.1": 5,
+  "building.pixel.treasury.2": 4,
+  "building.pixel.treasury.3": 4,
+  "building.pixel.warehouse.1": 7,
+  "building.pixel.warehouse.2": 8,
+  "building.pixel.warehouse.3": 9,
   "building.pixel.goldMine.1": 13,
   "building.pixel.goldMine.2": 9,
   "building.pixel.goldMine.3": 1,

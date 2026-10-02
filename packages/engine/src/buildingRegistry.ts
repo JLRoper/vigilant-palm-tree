@@ -271,9 +271,12 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     kind: "warehouse",
     label: "Warehouse",
     description: "Walled storehouses with cellars and lofts, raising the settlement's stockpile capacity for every resource.",
-    footprint: { w: 1, h: 1 },
+    // 2x2 (not 1x1) so a warehouse is a real space commitment. That is also
+    // why the placement cost doubled: four tiles is 19% of a level-1 town's
+    // usable space, versus one tile at 5% before.
+    footprint: { w: 2, h: 2 },
     buildDays: 3,
-    placementCost: { gold: 250, wood: 8, stone: 6 },
+    placementCost: { gold: 500, wood: 16, stone: 12 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
     settlementEffects: {
@@ -285,13 +288,32 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   bank: {
     kind: "bank",
     label: "Bank",
-    description: "Secure vaults and ledger houses that store and compound the settlement's gold each turn.",
+    description:
+      "A vaulted strongroom that holds a bank pot of its own, and widens the settlement's treasury so more gold can be held at all. The treasury-cap role is shared with the treasury; the pot is the bank's own.",
     footprint: { w: 1, h: 1 },
     buildDays: 5,
     placementCost: { gold: 400, wood: 6, stone: 8 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
-    settlementEffects: { goldPerTurn: 60, treasuryBonus: 2000 },
+    // No goldPerTurn: only goldMine's gold actually accrues per turn, so the
+    // 60g this used to advertise was never applied by the economy and the
+    // description promised an effect the game did not have.
+    settlementEffects: { treasuryBonus: 2000 },
+    playerEffects: {},
+  },
+  treasury: {
+    kind: "treasury",
+    label: "Treasury",
+    description:
+      "A great counting-house that raises the settlement's treasury capacity, letting it hold more gold. It does nothing else.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 5,
+    placementCost: { gold: 400, wood: 6, stone: 8 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [],
+    // settlementTreasuryCap sums treasuryBonus over every building, so a new
+    // cap-building needs no capacity.ts change -- it contributes on sight.
+    settlementEffects: { treasuryBonus: 2000 },
     playerEffects: {},
   },
   goldMine: {
@@ -357,8 +379,15 @@ export function buildingSettlementEffects(kind: BuildingKind, level: number) {
   return {
     goldPerTurn: (e.settlementEffects.goldPerTurn ?? 0) * level,
     foodPerTurn: (e.settlementEffects.foodPerTurn ?? 0) * level,
+    // ×level, like goldPerTurn/foodPerTurn above and the convention
+    // docs/resource-gathering.md pins for producers. It used to be a flat
+    // copy: a woodcutter hut produced the SAME 3 wood at L3 as at L1 while
+    // upkeepPerLevel charged 3× the wood, so every upgrade was strictly
+    // negative ROI. producerBasePerTurn reads exactly this map.
     resourceYieldBonus: e.settlementEffects.resourceYieldBonus
-      ? { ...e.settlementEffects.resourceYieldBonus }
+      ? Object.fromEntries(
+          Object.entries(e.settlementEffects.resourceYieldBonus).map(([r, v]) => [r, (v ?? 0) * level]),
+        )
       : undefined,
     populationBonus: (e.settlementEffects.populationBonus ?? 0) * level,
     defenseBonus: (e.settlementEffects.defenseBonus ?? 0) * level,
@@ -386,6 +415,11 @@ export function buildingFootprintFromRegistry(kind: BuildingKind, level?: number
   // Level-specific overrides: 2x2 grid footprint with 1.5x1.5 visual rendering.
   // (coversCell rounds the fractional footprint down to integer cells, so the
   // sprite visually occupies 1.5x1.5 but blocks 4 grid cells for placement.)
+  //
+  // Deliberately 1x1 kinds only. Adding a 2x2 kind here (warehouse became 2x2)
+  // would make it SMALLER on upgrade: 1.5x1.5 covers only 2 cells, so coversCell
+  // would free the other two and two buildings could claim the same cells. The
+  // other 2x2 kinds (apartment, farmField) stay out for the same reason.
   if (kind === "townHall" && level === 2) {
     return { w: 1.5, h: 1.5 };
   }
