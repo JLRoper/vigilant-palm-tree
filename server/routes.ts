@@ -153,28 +153,7 @@ type UnitTypeRow = {
 
 router.get("/units", async (_req, res) => {
   try {
-    const r = await pool.query<UnitTypeRow>(
-      `SELECT id, name, attack, defence, health, speed, description, advantage_type, specialty, specialty_priority,
-              tier, upkeep_gold, upkeep_food, range
-         FROM unit_types ORDER BY attack ASC, id ASC`
-    );
-    const units: UnitType[] = r.rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      attack: row.attack,
-      defence: row.defence,
-      health: row.health,
-      speed: row.speed,
-      description: row.description,
-      advantageType: row.advantage_type,
-      specialty: row.specialty,
-      specialtyPriority: row.specialty_priority,
-      tier: row.tier as UnitType["tier"],
-      upkeepGold: row.upkeep_gold,
-      upkeepFood: row.upkeep_food,
-      range: row.range,
-    }));
-    res.json(units);
+    res.json(await loadUnitCatalog());
   } catch (err) {
     console.error("[api] GET /units threw:", err);
     res.status(500).json({
@@ -183,6 +162,36 @@ router.get("/units", async (_req, res) => {
     });
   }
 });
+
+/**
+ * The unit catalog as `Record<id, UnitType>`, straight from `unit_types`. Used by
+ * GET /units and by POST /games, which needs it to price the starting heroes'
+ * weekly food bill against the seeded starter farmland (engine init.ts's
+ * seedStarterBuildings reads BuildInitialOptions.unitTypes).
+ */
+async function loadUnitCatalog(): Promise<UnitType[]> {
+  const r = await pool.query<UnitTypeRow>(
+    `SELECT id, name, attack, defence, health, speed, description, advantage_type, specialty, specialty_priority,
+            tier, upkeep_gold, upkeep_food, range
+       FROM unit_types ORDER BY attack ASC, id ASC`,
+  );
+  return r.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    attack: row.attack,
+    defence: row.defence,
+    health: row.health,
+    speed: row.speed,
+    description: row.description,
+    advantageType: row.advantage_type,
+    specialty: row.specialty,
+    specialtyPriority: row.specialty_priority,
+    tier: row.tier as UnitType["tier"],
+    upkeepGold: row.upkeep_gold,
+    upkeepFood: row.upkeep_food,
+range: row.range,
+  }));
+}
 
 router.get("/games", async (_req, res) => {
   const r = await pool.query<FullGameRow>(
@@ -384,14 +393,24 @@ router.post("/games", async (req, res) => {
       humanCount !== null
         ? Math.max(0, Math.min(rawEnemySlots, MAX_PLAYERS - humanCount))
         : 0;
-    const initOpts =
+    const initOptsBase =
       humanCount !== null
         ? {
             playerCount: humanCount + enemySlotsSafe,
             humanSeatCount: humanCount,
             enemyCount: enemySlotsSafe,
           }
-        : undefined;
+        : {};
+    // The catalog prices the starting heroes' weekly food bill against the
+    // seeded starter farmland. Best-effort: without it the engine falls back to
+    // the flat 1g/1f per-unit default rather than failing game creation.
+    let initUnitTypes: Record<string, UnitType> = {};
+    try {
+      initUnitTypes = Object.fromEntries((await loadUnitCatalog()).map((u) => [u.id, u]));
+    } catch (err) {
+      console.warn("[api] POST /games: unit catalog unavailable, starter food bill uses 1g/1f defaults:", err);
+    }
+    const initOpts = { ...initOptsBase, unitTypes: initUnitTypes };
     const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179), initOpts);
 
     let lobbyState: LobbyState = {};

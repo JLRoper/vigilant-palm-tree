@@ -7,6 +7,7 @@ import { colorForOwner } from "../state/playerColors";
 import { buildInitialGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";
 import { cityViewSizeFor } from "@heroes/engine";
+import { cachedUnitTypes } from "../data/unitCatalog";
 import { hexDistance } from "../core/hex";
 
 import { SessionManager } from "./SessionManager";
@@ -132,7 +133,11 @@ export class GameEngine {
       },
     });
     this.state.setHooks(attached.wrapHooks(hooks));
-    const initialState = buildInitialGameState(this.gameMap, rng);
+    // The catalog prices the starting heroes' weekly food bill against the starter
+// farmland (engine init.ts's seedStarterBuildings). Empty when the catalog has
+// not loaded, which falls back to the flat 1g/1f per-unit default -- never
+// worse than today's population-only sizing.
+const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cachedUnitTypes() });
     this.state.setState(initialState);
     this.state.rebuildHeroesFromState();
     this.state.rebuildSettlementsFromState();
@@ -510,16 +515,21 @@ export class GameEngine {
     if (!t) return;
     const castle = this.state.getSettlements().find((c) => c.tile.q === t.q && c.tile.r === t.r);
     if (!castle || castle.ownerId !== localId) return;
-    const isMineable = (r: import("../state/gameState").ResourceType): r is Exclude<import("../state/gameState").ResourceType, "food"> => r !== "food";
-    const spots = castle.citySpots.filter((s) => isMineable(s.resource));
-    const mines = castle.cityMines.filter((m) => isMineable(m.resource));
+    // Every spot is shown, food included: food spots exist (citySpots.ts's
+    // RESOURCE_POOL rolls them, terrain-biased) and a farm on one earns the
+    // ~3x spot multiplier, which is the whole placement decision. They also
+    // render fine -- RESOURCE_PAL has a food entry and `resource.food` has a
+    // descriptor, so paintCityResourceSpot draws art (procedural fallback
+    // otherwise). The old `isMineable` filter predates food spots entirely
+    // (citySpots.ts's pool was gold/wood/stone/iron/arcane only), so it
+    // filtered nothing and hid a real mechanic once food was added.
     const cityView = this.ui.getCityView();
     if (!cityView) return;
     cityView.open(
       castle.id, castle.name, cityViewSizeFor(castle.level),
       colorForOwner(castle.ownerId),
-      spots as unknown as Parameters<typeof cityView.open>[4],
-      mines as unknown as Parameters<typeof cityView.open>[5],
+      castle.citySpots,
+      castle.cityMines,
       castle.buildings,
       gs.castleSeed,
     );

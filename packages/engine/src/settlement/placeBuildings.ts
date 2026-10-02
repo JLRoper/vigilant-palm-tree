@@ -51,9 +51,9 @@ function sanitize(
   // New placements get their construction timer recomputed server-side (a
   // modified client can't ship a 0-day build); existing buildings keep the
   // server's own construction state verbatim -- the array round-trips
-  // through the client cart between commits. An initial starter layout
-  // (freeInitialLayout) commits ALREADY CONSTRUCTED: those buildings are
-  // the historical free city, not new work, so no timers are stamped.
+  // through the client cart between commits. A settlement's free starter set
+  // (freeInitialLayout) commits ALREADY CONSTRUCTED: those buildings are the
+  // town the player starts with, not new work, so no timers are stamped.
   const prev = previous.find((b) => b.gx === incoming.gx && b.gy === incoming.gy && b.kind === incoming.kind);
   const construction = prev
     ? prev.construction
@@ -77,11 +77,10 @@ export function applyPlaceBuildings(
   if (!s) return { ok: false, state, reason: "no_settlement" };
   if (s.ownerId !== actor) return { ok: false, state, reason: "forbidden_not_your_settlement" };
 
-  // The auto-generated starter layout of a previously-empty settlement is
-  // free (historical behavior from the client-trusted era, kept intentional
-  // under the command flow) and arrives ALREADY CONSTRUCTED — no build
-  // timers. Any later commit pays full net cost and stamps timers on the
-  // genuinely new placements only.
+  // A previously-empty settlement's starter set (buildStarterLayout's town
+  // hall + farm + 2 houses) is free by design and arrives ALREADY CONSTRUCTED
+  // — no build timers, no cost. Any later commit pays full net cost and
+  // stamps timers on the genuinely new placements only.
   const freeInitialLayout = initialLayout && s.buildings.length === 0;
   const net: CityBuildNetCost = freeInitialLayout ? {} : cityBuildNetCost(s.buildings, buildings);
 
