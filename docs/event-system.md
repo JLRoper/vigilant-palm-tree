@@ -200,35 +200,36 @@ Full refetch: `GET /games/:name` → `hydrateGameState` → cursor = `last_event
 
 ### 5.1 EngineEvent kinds (contracts)
 
-`packages/contracts/src/events/engineEvent.ts` declares **25** variants. The client's admitted set, `ENGINE_EVENT_KINDS` (`multiplayerSync.ts:49-53`), is **derived**, not hand-listed: it is built from `ENGINE_EVENT_SYNC_CLASS` (`packages/engine/src/events/applyEvent.ts:41-66`), an exhaustive `Record<EngineEvent["type"], EngineEventSyncClass>` (`"apply" | "resync" | "ignore"`) over every variant — 12 `apply` + 7 `resync` kinds are admitted (19), and the 6 `ignore` kinds form the boundary set whose state effects arrive via the `TurnEnded`/poll resync boundary. (`TradeRouteCreated` moved from the ignore set to the applied set 2026-09-30; `BankGoldMoved` joined the applied set 2026-10-01.) Because the Record's key type is the full event union, adding a new EngineEvent variant without classifying it here is a compile error. The registry is data only: `applyEngineEvent`'s reducer switch stays the executor and keeps its own exhaustive default. Per kind:
+`packages/contracts/src/events/engineEvent.ts` declares **24** variants. The client's admitted set, `ENGINE_EVENT_KINDS` (`multiplayerSync.ts:49-53`), is **derived**, not hand-listed: it is built from `ENGINE_EVENT_SYNC_CLASS` (`packages/engine/src/events/applyEvent.ts`), an exhaustive `Record<EngineEvent["type"], EngineEventSyncClass>` (`"apply" | "resync" | "ignore"`) over every variant — 11 `apply` + 7 `resync` kinds are admitted (18), and the 6 `ignore` kinds form the boundary set whose state effects arrive via the `TurnEnded`/poll resync boundary. (`TradeRouteCreated` moved from the ignore set to the applied set 2026-09-30; `BankGoldMoved` joined the applied set 2026-10-01; `ResourcesTraded` was **deleted** 2026-10-02 with the manual `tradeResources` command it replayed, taking the count 25 → 24.) Because the Record's key type is the full event union, adding a new EngineEvent variant without classifying it here is a compile error. The registry is data only: `applyEngineEvent`'s reducer switch stays the executor and keeps its own exhaustive default. Per kind:
 
 | # | Kind | In ENGINE_EVENT_KINDS | Client outcome | Why |
 |---|---|---|---|---|
 | 1 | `HeroMoved` | yes | **applied** (delta) | Sets q/r/previous/trail; movementRemaining deliberately untouched (TurnEnded reconciles). Consumer note: on a **server-driven** game the bridge's `replayServerAiHeroMoves` (§7.3 #2) hands AI-seat ones to `TurnController.applyRemoteHeroMove`, so the hero tweens mid-turn instead of popping in at the `TurnEnded` resync. It is deliberately **not** in `isBridgedDelta`. |
 | 2 | `CharterTravelAdvanced` | yes | **applied** (delta) | Same shape as HeroMoved + flips the charter to `constructing` on arrival. |
 | 3 | `GoldTransferred` | yes | **applied** (delta) | `transferGold`; empty purse = `noop` (what an already-applied transfer looks like from behind). |
-| 4 | `ResourcesTraded` | yes | **applied** (delta) | `tradeResources`; rejection → resync. |
-| 5 | `AutoTradeToggled` | yes | **applied** (delta) | `setAutoTrade`; no-change = `noop`. |
-| 6 | `StackReordered` | yes | **applied** (delta) | `reorderStack`. |
-| 7 | `SettlementCaptured` | yes | **applied** (delta) | `captureSettlement`; already-owned = `noop`, capture failure = resync. |
-| 8 | `TownHallUpgradeStarted` | yes | **applied** (delta) | `startTownHallUpgrade`; already upgrading = `noop`. |
-| 9 | `UnitsRecruited` | yes | **applied** (partial delta) | Deposits the garrison units only — the recruiting building/per-unit cost isn't carried, so gold/warehouse settle at the TurnEnded resync boundary. |
-| 10 | `UnitsTransferred` | yes | **applied** (partial delta) | Maps 1:1 onto `transferUnits` minus `toSlot` (slot-level placement drift the resync reconciles). |
-| 11 | `TurnEnded` | yes | **resync** | Production/upkeep/movement reset not re-derivable. The boundary event. |
-| 12 | `BattleResolved` | yes | **resync** | Troop losses / hero outcomes not re-derivable. |
-| 13 | `HeroRecruited` | yes | **resync** | Starting gold/troops/stacks not carried. |
-| 14 | `CharterStarted` | yes | **resync** | Rng-derived placement effects. |
-| 15 | `BuildingUpgradeStarted` | yes | **resync** | rng-derived rates behind it. |
-| 16 | `SettlementUpgradeStarted` | yes | **resync** | rng-derived rates behind it. |
-| 17 | `SettlementBattleResolved` | yes | **resync** | Payload carries winner/captured only; stacks/gold/attacker relocation-removal are battle-internal. Admitted knowing it answers "resync" so it flows through the full-refetch path instead of being dropped as unknown. |
-| 18 | `BuildingsPlaced` | **no** | ignored by sync | Remote seats re-sync the full buildings array via the TurnEnded/poll boundary. |
-| 19 | `ResourcesTransferred` | **no** | ignored by sync | Amounts ride the resync boundary. |
-| 20 | `WagonsAssigned` | **no** | ignored by sync | Same boundary. |
-| 21 | `WagonsBought` | **no** | ignored by sync | Same boundary. |
-| 22 | `TradeRouteCreated` | yes | **applied** (delta) | `applyTradeRouteCreated` constructs the route (targeted construction); the `routeId` is taken from the event verbatim — server route ids derive from a counter hydration never restores, so the id cannot be re-derived locally. (Moved from the ignore set 2026-09-30.) |
-| 23 | `TradeRouteUpdated` | **no** | ignored by sync | Same boundary. |
-| 24 | `TradeRouteRemoved` | **no** | ignored by sync | Same boundary. |
-| 25 | `BankGoldMoved` | yes | **applied** (delta) | A bank pot's gold moved (`depositIntoBank`/`requestBankWithdrawal`); the event carries every field the reducer needs. A rejection because the treasury/pot can no longer cover the move = `noop`; every other rejection (no settlement, not a bank, pot at its cap) = resync. Not unambiguously idempotent (partial amounts, unlike `GoldTransferred`'s move-everything) — same bounded-drift policy as `UnitsTransferred`. (Added 2026-10-01.) |
+| 4 | `AutoTradeToggled` | yes | **applied** (delta) | `setAutoTrade`; no-change = `noop`. |
+| 5 | `StackReordered` | yes | **applied** (delta) | `reorderStack`. |
+| 6 | `SettlementCaptured` | yes | **applied** (delta) | `captureSettlement`; already-owned = `noop`, capture failure = resync. |
+| 7 | `TownHallUpgradeStarted` | yes | **applied** (delta) | `startTownHallUpgrade`; already upgrading = `noop`. |
+| 8 | `UnitsRecruited` | yes | **applied** (partial delta) | Deposits the garrison units only — the recruiting building/per-unit cost isn't carried, so gold/warehouse settle at the TurnEnded resync boundary. |
+| 9 | `UnitsTransferred` | yes | **applied** (partial delta) | Maps 1:1 onto `transferUnits` minus `toSlot` (slot-level placement drift the resync reconciles). |
+| 10 | `TurnEnded` | yes | **resync** | Production/upkeep/movement reset not re-derivable. The boundary event. |
+| 11 | `BattleResolved` | yes | **resync** | Troop losses / hero outcomes not re-derivable. |
+| 12 | `HeroRecruited` | yes | **resync** | Starting gold/troops/stacks not carried. |
+| 13 | `CharterStarted` | yes | **resync** | Rng-derived placement effects. |
+| 14 | `BuildingUpgradeStarted` | yes | **resync** | rng-derived rates behind it. |
+| 15 | `SettlementUpgradeStarted` | yes | **resync** | rng-derived rates behind it. |
+| 16 | `SettlementBattleResolved` | yes | **resync** | Payload carries winner/captured only; stacks/gold/attacker relocation-removal are battle-internal. Admitted knowing it answers "resync" so it flows through the full-refetch path instead of being dropped as unknown. |
+| 17 | `BuildingsPlaced` | **no** | ignored by sync | Remote seats re-sync the full buildings array via the TurnEnded/poll boundary. |
+| 18 | `ResourcesTransferred` | **no** | ignored by sync | Amounts ride the resync boundary. |
+| 19 | `WagonsAssigned` | **no** | ignored by sync | Same boundary. |
+| 20 | `WagonsBought` | **no** | ignored by sync | Same boundary. |
+| 21 | `TradeRouteCreated` | yes | **applied** (delta) | `applyTradeRouteCreated` constructs the route (targeted construction); the `routeId` is taken from the event verbatim — the local `nextTradeRouteId` (hydrated as one-past the highest persisted route id since the 2026-10-02 fix) can still sit behind the server's counter mid-stream, so the id cannot be re-derived locally. Carries the endpoint/payload shape (`from`/`to` as `TradeRouteEndpoint`, `payload` as `TradeRoutePayload`); rows persisted by the pre-endpoint generation (flat `fromSettlementId`/`toSettlementId`/`resource`) normalize in the applier, a replayed creation whose endpoint tuple + payload already exists is a `noop`, and a dead hero endpoint is a resync, never a noop. (Moved from the ignore set 2026-09-30.) |
+| 22 | `TradeRouteUpdated` | **no** | ignored by sync | Same boundary. |
+| 23 | `TradeRouteRemoved` | **no** | ignored by sync | Same boundary. Emitted since 2026-10-02 on **both** removal paths — a manual `UpdateTradeRoute { remove: true }` and the auto-disband when caravan desertion takes a route's last wagons (the server derives removals by route-id set difference after the weekly caravan charge; previously declared-never-emitted). |
+| 24 | `BankGoldMoved` | yes | **applied** (delta) | A bank pot's gold moved (`depositIntoBank`/`requestBankWithdrawal`); the event carries every field the reducer needs. A rejection because the treasury/pot can no longer cover the move = `noop`; every other rejection (no settlement, not a bank, pot at its cap) = resync. Not unambiguously idempotent (partial amounts, unlike `GoldTransferred`'s move-everything) — same bounded-drift policy as `UnitsTransferred`. (Added 2026-10-01.) |
+
+(`ResourcesTraded` — the manual settlement↔settlement transfer's replay — held row 4 until 2026-10-02, when the `tradeResources` command was deleted as dead code and the variant removed from the union; the table renumbered accordingly.)
 
 `StructureBuilt` appears in plan prose but was never a declared variant. The exhaustive `ENGINE_EVENT_SYNC_CLASS` Record makes stale kind counts in prose the only remaining failure mode — the compiler now catches any unclassified variant.
 
@@ -347,7 +348,7 @@ Triggers (reasons): the **initial** unseeded cursor (`"initial"`), a delta arriv
 
 ### 8.4 Command rejection → toast
 
-`turnHooks` fire-and-forget command (e.g. `onTradeResources`) rejects → `reportCommandFailure(action, e)` (console.warn kept) → `bus.emit({ type: "command:rejected", action, reason })` → `toast.ts:126` handler → `showToast(...)`; a same-message/same-kind toast inside 1.5 s refreshes instead of stacking.
+`turnHooks` fire-and-forget command (e.g. `onBankGold`) rejects → `reportCommandFailure(action, e)` (console.warn kept) → `bus.emit({ type: "command:rejected", action, reason })` → `toast.ts:126` handler → `showToast(...)`; a same-message/same-kind toast inside 1.5 s refreshes instead of stacking.
 
 ## 9. Dead and unwired surfaces
 
@@ -362,7 +363,7 @@ Decision-relevant: none of the following can be used as integration points witho
 
 ## 10. Sharp edges and observations
 
-1. **6 engine kinds are invisible to the delta path** (§5.1 #18-21 and #23-24 — `TradeRouteCreated` left the set 2026-09-30). Their state effects only arrive when a `TurnEnded` (or any resync) refetches — mid-turn, a remote seat may briefly miss `BuildingsPlaced`/wagon/trade-route changes until the next boundary.
+1. **6 engine kinds are invisible to the delta path** (§5.1 #17-20 and #22-23 — `TradeRouteCreated` left the set 2026-09-30). Their state effects only arrive when a `TurnEnded` (or any resync) refetches — mid-turn, a remote seat may briefly miss `BuildingsPlaced`/wagon/trade-route changes until the next boundary.
 2. **The log is not solely server-authored.** `POST /api/games/:name/events` accepts unauthenticated kinds by design, now bounded: `kind` must match `^[a-z0-9_]{1,64}$` and the payload JSON is capped at 8192 chars (both 400 before the game 404).
 3. **Dual writers for turn lifecycle — resolved.** The legacy `POST /games/:name/end-turn` route (the client-supplied-state variant) was removed 2026-09-30; the `EndTurn` command (the `commandHandler.ts` `EndTurn` case) is now the sole writer of the four turn-lifecycle audit kinds (`turn_ended`, `round_ended`, `round_started`, `ai_turn_started`), and the client no longer duplicates them (§2.4).
 4. **One LISTEN connection per API process.** Multi-process deployments each hold their own connection and fan-out — the explicitly noted cue for the future broker stage of the SSE plan.
@@ -390,8 +391,8 @@ A consistency pass over the event pipeline: machine-enforced classification, one
 
 Findings from the same pass:
 
-- **`TradeRouteRemoved` is a phantom kind** — declared in the union but never emitted: `UpdateTradeRoute` carries a remove flag and emits `TradeRouteUpdated` (`server/app/commandHandler.ts:1567-1588`).
-- **Remote non-garrison state generally arrives only at turn boundaries** — `garrisonEventBridge` merges only `UnitsRecruited`/`UnitsTransferred`/`TradeRouteCreated` mid-turn — so the 6 remaining boundary kinds (§5.1 #18-21, #23-24) are not uniquely second-class; the whole delta path is. *(Amended 2026-10-01: no longer true for enemy hero positions on a server-driven game — `replayServerAiHeroMoves` (§7.3 #2) merges AI-seat `HeroMoved` mid-turn for animation, and it is a display-only merge: the controller still issues no commands while the seat holds the turn.)*
+- **~~`TradeRouteRemoved` is a phantom kind~~ RESOLVED (2026-10-02).** It was declared but never emitted (`UpdateTradeRoute` carried a remove flag and emitted `TradeRouteUpdated`). It is now emitted on **both** removal paths: a manual remove and the weekly caravan-maintenance auto-disband (the EndTurn case derives removals by route-id set difference over `applyCaravanUpkeep`'s result and appends one `TradeRouteRemoved` per vanished id). It stays sync-`"ignore"` — a remote seat's route list corrects at the resync boundary.
+- **Remote non-garrison state generally arrives only at turn boundaries** — `garrisonEventBridge` merges only `UnitsRecruited`/`UnitsTransferred`/`TradeRouteCreated` mid-turn — so the 6 remaining boundary kinds (§5.1 #17-20, #22-23) are not uniquely second-class; the whole delta path is. *(Amended 2026-10-01: no longer true for enemy hero positions on a server-driven game — `replayServerAiHeroMoves` (§7.3 #2) merges AI-seat `HeroMoved` mid-turn for animation, and it is a display-only merge: the controller still issues no commands while the seat holds the turn.)*
 
 Recommendations not yet taken:
 

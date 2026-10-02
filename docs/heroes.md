@@ -45,16 +45,19 @@ The game operates on a **round-based** cycle:
 - Selected hero's gold/resources are shown in the hero info panel.
 - Chartering heroes auto-move at turn start (no manual input).
 - AI heroes move automatically during their `AI_TURN` phase via `pickAiMove` (`src/ai/aiBrain.ts`) — see [Enemy heroes](#enemy-heroes).
-- After all players act, `advanceRound` runs: day increments, all heroes reset movement, settlements produce resources, morale decays, charters advance — and every 7th day the weekly upkeep applies: 1g/troop from each hero's purse plus the **garrison upkeep** (1g/troop from each settlement's treasury + 1 food/troop from its warehouse, trimming stacks from the end when short).
+- After all players act, `advanceRound` runs: day increments, all heroes reset movement, settlements produce resources, morale decays, charters advance — and every 7th day the weekly upkeep applies: **caravan maintenance first** (`wagons × (1g + 1 food)` per trade route, `economy/caravanUpkeep.ts`), then the per-unit catalog bill for heroes (gold from the purse, food from the larder + the settlement physically under the hero — see [army.md](./army.md) → Upkeep) and garrisons (treasury + warehouse).
 
 ## Hero gold & economy
 
-Each hero carries their own gold purse (`hero.gold`):
-- Earned from combat (defeating enemies loots their gold).
-- Spent on chartering (2500g cost from hero purse).
-- Deposited to / withdrawn from settlement treasuries (hero must stand on matching settlement).
+Each hero carries their own gold purse (`hero.gold`), capped by **treasury carts**: `heroGoldCap = treasuryWagons × 500` (`packages/engine/src/settlement/capacity.ts`; soft default 5 carts, migration `023_treasury_wagons.sql`). The carts are a separate slot from the army `wagons` that cap cargo at ×50 per resource — `BuyWagons`/`AssignWagons` take `slot: "cargo" | "treasury"`, and `recruitHero` allocates 5 + 5 from the player's two pools. The cap clamps all three gold landing sites (loot, capture reward, treasury withdrawal — excess stays put, nothing destroyed).
 
-Settlements track gold separately in their treasury (`settlement.gold`).
+The designer's three ways gold reaches a purse:
+
+- **Pick up at a city** — deposit/withdraw against a settlement treasury (`transferGold`, same-hex only).
+- **Battle or find on the map** — defeating a hero loots their purse (wagon-capped, cargo included); capturing a settlement pays a reward, clamped to `heroGoldCap`.
+- **Treasure caravans** — a trade route with payload `{ kind: "gold" }` (`wagons × 500` per load, headroom-clamped) delivers into the destination purse or treasury; see [economy.md](./economy.md) → Trade routes & caravans.
+
+Purse gold is spent on chartering (2500g cost from hero purse). Settlements track gold separately in their treasury (`settlement.gold`).
 
 ## Combat
 

@@ -2,6 +2,13 @@
 
 **Status:** ✅ Shipped (Phases 1–4, 2026-09-27). Decisions locked same day (§8 answers folded in): player wagon pool, **physical caravans**, gate-additions overflow, auto-trade unchanged v1. Numbers below are tunable constants, centralized in `packages/engine/src/settlement/capacity.ts` + `logistics.ts`. Phase 5 (auto-trade through routes, raiding, AI logistics) remains deferred.
 
+> **Supersessions (2026-10-02, no-shared-storage rework — this section wins where it conflicts with §1/§3/§8):**
+> - **Q5 is superseded** by designer directive — auto-trade is **not** unchanged: the instant transfer is legacy-only behind the game-level `lobby.legacyAutoTrade` flag (absent → `true`, so every pre-2026-10-02 save is untouched; `POST /games` writes `false` on every new game). Routes are now the *only* resource transport in new games — see §8 below and [resource-gathering.md](./resource-gathering.md) §6.6.
+> - **Routes connect heroes too**: `TradeRouteEndpoint = { kind: "settlement" | "hero"; id }`, payloads are `resource` **or `gold`** (treasure caravans) — broader than §5.2's settlement-pair, single-resource sketch, which was the shipped v1 shape until this pass.
+> - **Caravan maintenance** (`packages/engine/src/economy/caravanUpkeep.ts`) bills `wagons × (1 gold + 1 food)` weekly, **paid FIRST** in `applyWeeklyUpkeep`, with the shared troop-upkeep desertion ladder (2-week grace, then wagons lost per unpaid week — deserted wagons are gone, deviating on purpose from assumption 1's "returns wagons" half).
+> - **Phase 5 partially landed**: the recommendation engine (`packages/engine/src/economy/tradeNeeds.ts`) + one-click logistics panel (`src/screens/logistics/logisticsModal.ts`) + AI auto-accept (`server/app/aiDriver.ts`) shipped 2026-10-02; raiding is still deferred.
+> - **§5.2's "caravans are visible on the adventure map" is now true**: the owner-colored `caravanMarker` scene node shipped (`src/render/caravanMarkers.ts`, wired into the adventure scene 2026-10-01) — at the census that ran against the earlier build this was aspirational prose.
+
 ---
 
 ## 1. Context (as-built baseline, 2026-09-27)
@@ -121,8 +128,8 @@ Events: `ResourcesTransferred`, `WagonsBought`, `WagonsAssigned`, `TradeRouteCre
 - **Q2 Route mechanics → physical caravans** (hex-path travel over days, map-visible, raidable in a later phase). ✅ — see §5.2.
 - **Q3 Hero cargo contents → all five resources including food** (uniform Warehouse shape). ✅
 - **Q4 Overflow → gate additions**, never destroy stored surplus. ✅
-- **Q5 Auto-trade → unchanged v1** (plus the phase-1 headroom check). ✅
-- **Q6 Scope → Phases 1–4 this session.** ✅
+- **Q5 Auto-trade → unchanged v1** (plus the phase-1 headroom check). ✅ **— SUPERSEDED 2026-10-02** by designer directive: the instant auto-trade teleport is gone for new games (`lobby.legacyAutoTrade: false` at `POST /games`; absent → `true` keeps every pre-flag save byte-identical). Trade routes — city↔city and city↔hero, cargo or treasure payloads — are the resource transport now, with caravan maintenance billed first weekly. Kept verbatim above for history; the live behavior is [resource-gathering.md](./resource-gathering.md) §6.6.
+- **Q6 Scope → Phases 1–4 this session.** ✅ *(Phase 5 partially landed 2026-10-02: recommendations + logistics panel + AI auto-accept; raiding still deferred.)*
 
 ## 9. Concerns / risks
 
