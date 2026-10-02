@@ -17,9 +17,10 @@ export interface PlaceBuildingsCommand {
   buildings: BuildingDef[];
   /**
    * Set when this commit is the starter set of a previously-empty settlement
-   * (the engine's buildStarterLayout: town hall + farm field + 2 houses + a wood
-   * and a stone producer). The server accepts it free of charge and already
-   * constructed iff the settlement's stored buildings array is still empty.
+   * (the engine's buildStarterLayout: town hall + farm field + 2 houses + two
+   * wood producers and a stone producer). The server accepts it free of charge
+   * and already constructed iff the settlement's stored buildings array is
+   * still empty.
    *
    * Every settlement is seeded at game creation, so this only fires for one
    * created later -- by a charter, or as a test fixture. It is deliberately NOT

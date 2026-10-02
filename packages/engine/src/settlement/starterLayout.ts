@@ -5,11 +5,11 @@ import type { UnitType } from "../units";
 import type { CityViewSize } from "./citySpots";
 import { CELL_MULTIPLIER_PEAK } from "./cityMultipliers";
 
-// The starter city of a brand-new settlement: town hall, farm, two houses, and
-// one wood and one stone producer. This is the ONE definition of that set --
-// init.ts seeds EVERY settlement with it at game creation, and the city view's
-// empty-settlement commit calls the same function rather than re-deriving a
-// layout of its own.
+// The starter city of a brand-new settlement: town hall, farm, two houses,
+// two wood producers, and one stone producer. This is the ONE definition of
+// that set -- init.ts seeds EVERY settlement with it at game creation, and the
+// city view's empty-settlement commit calls the same function rather than
+// re-deriving a layout of its own.
 //
 // Its farm count is a function of the food bill it has to feed
 // (starterFarmsNeeded), sized against the settlement's OWN bill -- its
@@ -25,33 +25,38 @@ import { CELL_MULTIPLIER_PEAK } from "./cityMultipliers";
 // including a level-2 town hall) for free and already constructed. That layout
 // charged roughly 24 wood + 14 stone per turn in upkeep against a 300/300
 // starting stock -- bankruptcy by roughly turn 12, before the player had done
-// anything -- while containing no producer at all. The set below costs 8 wood
+// anything -- while containing no producer at all. The set below costs 9 wood
 // + 2 stone per turn (townHall L1 3+2, house L1 1+0 twice, woodcutterHut L1
-// 1+0, stoneMine L1 2+0, farmField L1 0+0 each), and the two producers return
-// 3 wood and 3 stone per turn -- each scaled by its OWN cell multiplier
-// (settlement/cityMultipliers.ts), and truncated to whole units because
-// consumption floors the whole stock every turn, so a producer really banks
-// floor(3 x multiplier) per turn.
+// 1+0 twice, stoneMine L1 2+0, farmField L1 0+0 each), and the three producers
+// return 6 wood (two huts) and 3 stone per turn -- each scaled by its OWN cell
+// multiplier (settlement/cityMultipliers.ts), and truncated to whole units
+// because consumption floors the whole stock every turn, so a producer really
+// banks floor(3 x multiplier) per turn.
 //
-// THE SET IS NET WOOD-NEGATIVE. It does not pay for itself. Per turn:
-//   wood  = floor(3 x m_wood) - 8  = -7..-4, median -5  (m_wood 0.60..1.51)
-//   stone = floor(3 x m_stone) - 2 = 0..+3, median  0
-// (both measured over 10 seeds with produceSettlementResources +
-// applySettlementConsumption and no map income). So a starter settlement on a
-// map with no wood or stone tiles at all drains its 300 wood start at ~5 wood
-// per turn -- roughly 60 turns of runway, ~50 at the worst measured cell -- and
-// the map's own resource tiles are what keeps it solvent in practice. On the
-// default map those tiles are still a lottery for wood: 3 of 10 seeded
-// 1-player games had a wood-yielding map (15..45 wood/turn) and their level-1
-// keep ran +9/turn, while the other 7 ran the set's own -5/turn.
+// THE SET IS STILL NET WOOD-NEGATIVE, but only just. Per turn:
+//   wood  = floor(3 x m1) + floor(3 x m2) - 9 = -7..-1, median -3
+//   stone = floor(3 x m_stone) - 2            = 0..+3, median  0
+// (both over 400 seeded 1-player games with produceSettlementResources and the
+// map's resource-tile rates zeroed, i.e. a settlement on a map with no wood or
+// stone tiles at all). The second hut is the 2026-10-02 balance fix: with one
+// hut the same measurement ran -4..-7, median -5, so a keep drained its 300
+// wood in ~60 turns and a town in ~43 at the worst cell -- and after wood hit
+// 0, settlement morale decayed ~8-10 per turn. Two huts cost +1 wood of upkeep
+// and bring back another ~3, roughly doubling the runway: ~100 turns at the
+// median cell, ~43 at the worst measured one. The set still does not pay for
+// itself -- the map's own resource tiles are what keeps a settlement solvent
+// in practice. On the default map those tiles are a lottery for wood: over the
+// same 400 seeds about a fifth of keeps sat on a wood-yielding tile and ran
+// +9..+55 wood/turn, while the rest ran the set's own deficit -- which is why
+// the fix targets the floor every city shares, not the lottery.
 //
-// What the producers actually buy is the stone line: it stops draining, and the
-// wood line does not get any worse than it was without them. The pre-producer
-// set (townHall + 2 houses, 5w + 2s upkeep, no production) also ran -5 wood /
-// -2 stone per turn. The woodcutterHut (+1w upkeep) and the stoneMine (+2w)
-// together cost exactly the 3 wood/turn the hut brings back, so wood lands on
-// the same -5 and the mine lifts stone from -2 to ~0. That is what removed the
-// ~24 wood/turn dense layout and the bankruptcy by turn 12 (measured: a
+// What the producers actually buy is the stone line -- it stops draining
+// outright -- and a wood line that only sinks ~3/turn instead of ~5. The
+// pre-producer set (townHall + 2 houses, 5w + 2s upkeep, no production) ran
+// -5 wood / -2 stone per turn; the woodcutterHuts and the stoneMine together
+// cost 4 wood of upkeep against 6 wood + 3 stone of production, so wood lands
+// 2/turn better than that bare set at the median cell. That is what removed
+// the ~24 wood/turn dense layout and the bankruptcy by turn 12 (measured: a
 // `{gold: 40}` seed drained 300 -> 195 wood over 22 turns, a `{wood: 180}` seed
 // did not) -- it is not, and is not meant to be, where the wood balance is
 // settled. Whether a starter city should be wood-positive is a separate balance
@@ -74,9 +79,12 @@ export const STARTER_BUILDING_LEVEL = 1;
  * The starter set's wood and stone producers. Both are the cheapest dedicated
  * producer for their resource in the registry (150g/5w and 250g/6w/4s to
  * place, 1+0 and 2+0 wood upkeep per level) and both produce 3/turn at L1 --
- * the shared producer magnitude -- so the set's stone line never drains and its
- * wood line drains no faster than it did without them (the arithmetic at the top
- * of this file). The wood line is still the map's to settle.
+ * the shared producer magnitude. The WOOD producer ships TWICE (2026-10-02
+ * balance): one hut's 3 wood/turn only cancelled the set's own producer
+ * upkeep, leaving every starter city net wood-negative (-4..-7, median -5) no
+ * matter the map; the second hut's +3 (median) roughly doubles the wood
+ * runway (the arithmetic at the top of this file). The stone line never
+ * drains and one mine is enough for it.
  *
  * Gold deliberately gets no producer: `applyEffectiveIncome` already pays
  * `population * goldTax * morale / 100` every turn regardless of the map (5/turn
@@ -86,8 +94,12 @@ export const STARTER_BUILDING_LEVEL = 1;
 export const STARTER_WOOD_PRODUCER: BuildingKind = "woodcutterHut";
 export const STARTER_STONE_PRODUCER: BuildingKind = "stoneMine";
 
-/** The starter set's producer kinds, in commit order. */
-export const STARTER_PRODUCER_KINDS: readonly BuildingKind[] = [STARTER_WOOD_PRODUCER, STARTER_STONE_PRODUCER];
+/** The starter set's producer kinds, in commit order: the wood producer twice, then stone. */
+export const STARTER_PRODUCER_KINDS: readonly BuildingKind[] = [
+  STARTER_WOOD_PRODUCER,
+  STARTER_STONE_PRODUCER,
+  STARTER_WOOD_PRODUCER,
+];
 
 /** The base set's contents, in commit order, at STARTER_BASE_FARMS. Farm before the houses so a footprint clash resolves onto a house cell, not the field; the producers come last for the same reason (they are 1x1, so they are the cheapest thing to displace). A food-hungry settlement repeats the farmField entry `farms - STARTER_BASE_FARMS` more times; derive the set with buildStarterLayout rather than from this list. */
 export const STARTER_BUILDING_KINDS: readonly BuildingKind[] = [
@@ -148,6 +160,8 @@ const STARTER_FARM_OFFSETS: readonly (readonly [number, number])[] = [
  * LAST so a footprint change in the registry can only displace a producer --
  * never eat a farm or a house cell. On a 5x5 grid neither offset is in bounds
  * (centre + 3 = 5), so both degrade to "first free cell", deterministically.
+ * The second wood hut (the third producer) has no named offset: like a farm
+ * past its ring, it takes the first free cell.
  */
 const STARTER_PRODUCER_OFFSETS: readonly (readonly [number, number])[] = [
   [2, 3],
@@ -245,8 +259,9 @@ export function starterCityOnOpen(input: {
 /**
  * The free, already-constructed starting city of a settlement: one level-1 town
  * hall on the centre cell, `farms` 2x2 farm fields around it, two houses above
- * it, and one wood + one stone producer. Legal on every city size (5/10/15),
- * non-overlapping, and byte-identical on every call for a given `farms`.
+ * it, and two wood producers + one stone producer. Legal on every city size
+ * (5/10/15), non-overlapping, and byte-identical on every call for a given
+ * `farms`.
  *
  * `farms` is the caller's allocation of THIS settlement's food bill: init.ts
  * sizes it against the settlement's own population plus the weekly bill of the
