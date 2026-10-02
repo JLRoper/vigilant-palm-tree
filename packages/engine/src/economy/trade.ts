@@ -81,7 +81,11 @@ export function runAutoTrade(
       const deficit = computeDeficit(updatedS, r);
       if (deficit <= 0) continue;
       const sources = Object.values(next).filter(
-        (other) => other.id !== s.id && other.ownerId === playerId && (other.warehouse[r] ?? 0) > 0 && (other.gold ?? 0) > 0,
+        (other) =>
+          other.id !== s.id &&
+          other.ownerId === playerId &&
+          exportableStock(other, r) > 0 &&
+          (other.gold ?? 0) > 0,
       );
       let remaining = deficit;
       const destCap = settlementResourceCap(updatedS)[r];
@@ -91,7 +95,7 @@ export function runAutoTrade(
         const headroom = warehouseHeadroom(updatedS.warehouse[r] ?? 0, destCap);
         const transferable = Math.max(
           0,
-          Math.min(sourceUpd.warehouse[r] ?? 0, sourceUpd.gold ?? 0, remaining, headroom),
+          Math.min(exportableStock(sourceUpd, r), sourceUpd.gold ?? 0, remaining, headroom),
         );
         if (transferable <= 0) continue;
         sourceUpd.warehouse = { ...sourceUpd.warehouse, [r]: clampWarehouseNonNegative((sourceUpd.warehouse[r] ?? 0) - transferable) };
@@ -124,4 +128,28 @@ function computeDeficit(s: SettlementState, r: WarehouseResource): number {
     return Math.max(0, buildingUpkeepRequired(s).stone - (s.warehouse.stone ?? 0));
   }
   return 0;
+}
+
+// How much of `s`'s stock of `r` auto-trade is allowed to move. Everything in
+// AUTO_TRADE_RESOURCES is fungible between a player's own settlements EXCEPT
+// food: a settlement needs foodRequired(population) to feed its own people this
+// turn, and applyEndOfTurnDetailed evaluates morale on the PRE-consumption
+// settlement (turn/endTurn.ts -- runAutoTrade runs before consumption). A
+// settlement that sells its whole food stock therefore gets charged a full
+// foodDeficitRatio of 1.0 -- a 100% morale penalty -- for food it grew itself,
+// every turn, with no way out: that is the death spiral the starter L1 walked
+// into with +1.4 food/turn of surplus. Anything ABOVE foodRequired is a genuine
+// surplus and still trades, so auto-trade stays useful.
+//
+// Note what is deliberately NOT reserved: the garrison's weekly food bill
+// (settlement/garrisonUpkeep.ts -> troopUpkeep.ts's costFood, charged by
+// turn/round.ts only when day % 7 === 0, not every turn). It needs the unit
+// catalog to compute, which runAutoTrade is not given, and it runs on a
+// different cadence than the per-turn consumption this reservation protects --
+// so a settlement can still fail its weekly garrison bill out of stock it
+// legitimately treated as surplus.
+function exportableStock(s: SettlementState, r: WarehouseResource): number {
+  const stock = s.warehouse[r] ?? 0;
+  if (r !== "food") return stock;
+  return Math.max(0, stock - foodRequired(s));
 }

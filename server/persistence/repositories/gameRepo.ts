@@ -9,6 +9,7 @@ import type {
   Warehouse,
   WarehouseResource,
 } from "@heroes/contracts";
+import { toIntColumn } from "../integerColumns";
 
 // Accepts either the shared pool (reads, or writes outside a transaction) or
 // a PoolClient already inside a caller-owned transaction (writes that must
@@ -163,8 +164,11 @@ export function createGameRepo(db: Queryable): GameRepo {
         vals.push(JSON.stringify(extra.players));
       }
       if (extra?.gold !== undefined) {
+        // games.gold is INTEGER; the legacy total is a sum of 2-dp purses.
+        // See ../integerColumns.ts for the rounding rule and why an unrounded
+        // write aborted the whole command (the every-EndTurn-500 bug).
         sets.push(`gold = $${i++}`);
-        vals.push(extra.gold);
+        vals.push(toIntColumn(extra.gold));
       }
       if (extra?.round !== undefined) {
         sets.push(`round = $${i++}`);
@@ -208,7 +212,12 @@ export function createGameRepo(db: Queryable): GameRepo {
              (game_id, settlement_id, day, gold, warehouse, morale, effective_income)
            VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
            ON CONFLICT (game_id, settlement_id, day) DO NOTHING`,
-          [gameId, s.settlementId, s.day, s.gold, JSON.stringify(s.warehouse), s.morale, s.effectiveIncome],
+          // gold / morale / effective_income are all INTEGER. morale and
+          // effective_income already arrive integral from their call sites
+          // (clampMorale + Math.round / effectiveIncome's own Math.round); the
+          // coercion is belt-and-braces so this repo's type contract holds for
+          // any caller. See ../integerColumns.ts.
+          [gameId, s.settlementId, s.day, toIntColumn(s.gold), JSON.stringify(s.warehouse), toIntColumn(s.morale), toIntColumn(s.effectiveIncome)],
         );
       }
     },
@@ -221,7 +230,11 @@ export function createGameRepo(db: Queryable): GameRepo {
           `INSERT INTO resource_transactions
              (game_id, from_settlement_id, to_settlement_id, resource, amount, gold_paid, reason)
            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [gameId, t.fromSettlementId, t.toSettlementId, t.resource, t.amount, t.goldPaid, t.reason ?? "auto_trade"],
+          // amount / gold_paid are INTEGER, and runAutoTrade pays out
+          // `min(stock, gold, remaining, headroom)` -- a fractional food
+          // amount once food producers made fractional warehouse stock
+          // reachable. See ../integerColumns.ts.
+          [gameId, t.fromSettlementId, t.toSettlementId, t.resource, toIntColumn(t.amount), toIntColumn(t.goldPaid), t.reason ?? "auto_trade"],
         );
       }
     },

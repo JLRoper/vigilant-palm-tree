@@ -1,5 +1,6 @@
 import type { HeroId, HeroState, HorseVariantId, Platoon } from "@heroes/contracts";
 import { withDefaultSpellStats } from "@heroes/engine";
+import { toIntColumn } from "../integerColumns";
 import { resolveGameId } from "./gameRepo";
 import type { Queryable } from "./gameRepo";
 
@@ -189,14 +190,17 @@ export function createHeroRepo(db: Queryable): HeroRepo {
             hero.previousR,
             hero.previousMovementRemaining,
             JSON.stringify(hero.trail),
-            hero.gold,
+            // heroes.gold and heroes.morale are INTEGER; a purse can carry a
+            // fraction (settlement-to-hero transfers, loot, partial payments)
+            // and morale is a continuous 0..100. See ../integerColumns.ts.
+            toIntColumn(hero.gold),
             hero.troops,
             hero.isChartering,
             hero.charterId,
             hero.horseVariant,
             hero.wagons ?? 5,
             JSON.stringify(hero.resources ?? {}),
-            hero.morale,
+            toIntColumn(hero.morale),
             hero.upkeepUnpaidSinceDay,
             hero.upkeepUnpaidTroops,
             hero.upkeepUnpaidGold,

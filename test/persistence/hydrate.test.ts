@@ -1,7 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import type { PoolClient } from "pg";
-import { hydrateGameState } from "@heroes/engine";
+import { hydrateGameState, GameMap, makeInitialStatePayload, mulberry32 } from "@heroes/engine";
 import type { HeroId, HeroState, SettlementId, SettlementState } from "@heroes/contracts";
 import { withRollback } from "../helpers/pgTestTx";
 import { pool } from "../../server/persistence/db";
@@ -297,5 +297,65 @@ test("hydrateGame falls back to the JSONB path when only one granular table has 
     // (normalizePlatoons pads stacks to 8 slots either way).
     const row = await createGameRepo(client).load(name);
     assert.deepEqual(result.state, hydrateGameState(row));
+  });
+});
+
+test("a newly created game's seeded starter set reaches hydrated live state on BOTH read paths", async () => {
+  // The real creation payload (POST /games -> makeInitialStatePayload ->
+  // games.settlements JSONB), for the 1-player game whose level-2 town hosts
+  // the farm pool sized against the keep+town food bill (20/turn) and whose
+  // level-1 keep is seeded with the base set rather than left empty. Path 1 is a
+  // brand-new game, read from JSONB because the granular tables are still empty;
+  // path 2 is the same game after the first persist has written
+  // settlement_buildings. Both settlements' sets must survive both -- a seeded
+  // settlement skips the city view's free starter commit, so losing them here
+  // would leave it with no town hall forever.
+  const payload = makeInitialStatePayload(new GameMap(424242, "small"), mulberry32(424242), {
+    castleSeed: 424242,
+    enemyCount: 0,
+    humanSeatCount: 1,
+  });
+  const town = Object.values(payload.settlements).find((s) => s.level === 2);
+  const keep = Object.values(payload.settlements).find((s) => s.ownerId === 0 && s.level === 1);
+  assert.ok(town && keep, "the 1-player payload has a keep and a level-2 town");
+
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedLegacyGame(client, name, payload.heroes, payload.settlements);
+
+    const assertLiveState = (source: "jsonb" | "granular", settlements: Record<SettlementId, SettlementState>): void => {
+      const live = settlements[town.id];
+      assert.equal(live.buildings.filter((b) => b.kind === "townHall").length, 1, `${source}: the town keeps its town hall`);
+      assert.ok(
+        live.buildings.filter((b) => b.kind === "farmField").length >= 2,
+        `${source}: the town keeps its farmland (${live.buildings.filter((b) => b.kind === "farmField").length} fields)`,
+      );
+      assert.deepEqual(live.buildings, town.buildings, `${source}: buildings are byte-identical to the created payload`);
+      assert.deepEqual(
+        settlements[keep.id].buildings,
+        keep.buildings,
+        `${source}: the keep's starter set survives too (it is seeded, not free-committed)`,
+      );
+      assert.ok(
+        settlements[keep.id].buildings.length > 0,
+        `${source}: the keep is not empty -- the free city-view commit is not what gives it a city`,
+      );
+      assert.equal(
+        settlements[keep.id].buildings.filter((b) => b.kind === "townHall").length,
+        1,
+        `${source}: the keep keeps its town hall`,
+      );
+    };
+
+    const fresh = await hydrateGame(client, name);
+    assert.equal(fresh.source, "jsonb", "a brand-new game reads from the JSONB payload");
+    assertLiveState(fresh.source, fresh.state.settlements);
+
+    await createHeroRepo(client).upsertMany(name, payload.heroes);
+    await createSettlementRepo(client).upsertMany(name, payload.settlements);
+
+    const persisted = await hydrateGame(client, name);
+    assert.equal(persisted.source, "granular", "after the first persist the granular tables win");
+    assertLiveState(persisted.source, persisted.state.settlements);
   });
 });
