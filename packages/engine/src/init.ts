@@ -1,6 +1,7 @@
 import type {
   BuildingDef,
   CastleVariant,
+  FactionId,
   GameState,
   HeroId,
   HeroState,
@@ -57,6 +58,14 @@ export interface BuildInitialOptions {
    * under-reports the demo army as 24 food/week instead of the catalog's 40.
    */
   unitTypes?: Record<string, UnitType>;
+  /**
+   * Per-seat roster factions (faction-registry foundation): entry i is seat
+   * i's FactionId. Absent or short = every seat (covered or not) stays
+   * "human" — byte-identical to today's snapshot, which is why the Player
+   * field is only spread in when an entry exists. Entries beyond the seat
+   * count are never read, which is the clamp.
+   */
+  seatFactions?: FactionId[];
 }
 
 function clampPlayerCount(n: number | undefined): number {
@@ -185,12 +194,14 @@ function makePlayers(
   settlementIds: Record<string, string[]>,
   playerCount: number,
   humanSeatCount: number,
+  seatFactions?: readonly FactionId[],
 ): Player[] {
   const out: Player[] = [];
   for (let i = 0; i < playerCount; i++) {
     const isHuman = i < humanSeatCount;
     const faction: Player["faction"] = isHuman ? "player" : "ai";
     const name = isHuman ? `Player ${i + 1}` : `AI ${i + 1 - humanSeatCount}`;
+    const factionId = seatFactions?.[i];
     out.push({
       id: i,
       faction,
@@ -202,6 +213,7 @@ function makePlayers(
       // 5 starting wagons are already assigned to the starting hero.
       wagonsOwned: 5,
       wagonsUnassigned: 0,
+      ...(factionId !== undefined ? { factionId } : {}),
     });  }
   return out;
 }
@@ -465,7 +477,7 @@ export function buildInitialGameState(
   const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes);
   const settlementIds = splitByOwner(settlements);
   return createInitialState({
-    seedPlayers: makePlayers(settlementIds, playerCount, humanSeatCount),
+    seedPlayers: makePlayers(settlementIds, playerCount, humanSeatCount, opts?.seatFactions),
     seedHeroes: makeHeroes(castles, playerCount, rng, humanSeatCount),
     seedSettlements: settlements,
     seedRound: 1,
@@ -502,7 +514,7 @@ export function makeInitialStatePayload(
   });
   const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes);
   const settlementIds = splitByOwner(settlements);
-  const players = makePlayers(settlementIds, playerCount, humanSeatCount);
+  const players = makePlayers(settlementIds, playerCount, humanSeatCount, opts?.seatFactions);
   const heroes = makeHeroes(castles, playerCount, rng, humanSeatCount);
   return {
     round: 1,

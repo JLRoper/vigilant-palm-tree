@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { recruitUnits, settlementStacks } from "@heroes/engine";
-import type { BuildingDef, GameState, Platoon, SettlementState } from "@heroes/contracts";
+import { eligibleRecruitSources, recruitUnits, settlementStacks, type UnitType } from "@heroes/engine";
+import type { BuildingDef, FactionId, GameState, Platoon, SettlementState } from "@heroes/contracts";
 import { emptyWarehouse, makeSettlement, makeState } from "../charter/_helpers";
 
 const STOCK_WAREHOUSE = emptyWarehouse({ wood: 20, stone: 10, iron: 10, arcane: 10 });
@@ -159,4 +159,89 @@ test("recruitUnits: a recruit entry without resourceCost (farmhouse peasant) wor
   assert.equal(after.gold, 1000 - 75, "3 peasants at 25g each");
   assert.deepEqual(after.warehouse, STOCK_WAREHOUSE, "peasant has no resourceCost");
   assert.deepEqual(settlementStacks(after)[0].entries, [{ unitTypeId: "peasant", count: 3 }]);
+});
+
+// ── Faction gate seam (faction-registry foundation, D5) ──
+
+function catalogUnit(id: string, factionId: FactionId): UnitType {
+  return {
+    id,
+    name: id,
+    attack: 1,
+    defence: 1,
+    health: 1,
+    speed: 1,
+    description: "",
+    advantageType: "infantry",
+    specialty: "",
+    specialtyPriority: 0,
+    factionId,
+  };
+}
+
+function sourcesOf(state: GameState, opts?: Parameters<typeof eligibleRecruitSources>[1]) {
+  return eligibleRecruitSources(state.settlements.s0, opts)
+    .map((s) => s.entry.unitTypeId)
+    .sort();
+}
+
+test("eligibleRecruitSources without opts lists today's roster (the dormant gate)", () => {
+  const state = recruitState({}, [building("barracks", BARRACKS.gx, BARRACKS.gy, 3), building("archeryRange", 4, 4, 2)]);
+  assert.deepEqual(sourcesOf(state), ["archer", "crossbowman", "crusader", "pikeman", "swordsman"]);
+});
+
+test("eligibleRecruitSources with a human gate lists the same roster (byte-identical today)", () => {
+  const state = recruitState({}, [building("barracks", BARRACKS.gx, BARRACKS.gy, 3), building("archeryRange", 4, 4, 2)]);
+  const catalog = {
+    swordsman: catalogUnit("swordsman", "human"),
+    pikeman: catalogUnit("pikeman", "human"),
+    crusader: catalogUnit("crusader", "human"),
+    archer: catalogUnit("archer", "human"),
+    crossbowman: catalogUnit("crossbowman", "human"),
+  };
+  assert.deepEqual(sourcesOf(state, { unitTypes: catalog, seatFactionId: "human" }), [
+    "archer",
+    "crossbowman",
+    "crusader",
+    "pikeman",
+    "swordsman",
+  ]);
+});
+
+test("eligibleRecruitSources filters entries outside the seat's faction", () => {
+  const state = recruitState({}, [building("barracks", BARRACKS.gx, BARRACKS.gy, 3), building("archeryRange", 4, 4, 2)]);
+  const catalog = {
+    swordsman: catalogUnit("swordsman", "ashen"),
+    pikeman: catalogUnit("pikeman", "human"),
+    crusader: catalogUnit("crusader", "human"),
+    archer: catalogUnit("archer", "neutral"),
+    crossbowman: catalogUnit("crossbowman", "human"),
+  };
+  assert.deepEqual(sourcesOf(state, { unitTypes: catalog, seatFactionId: "human" }), [
+    "crossbowman",
+    "crusader",
+    "pikeman",
+  ], "ashen swordsman and neutral archer are gated out for a human seat");
+  assert.deepEqual(sourcesOf(state, { unitTypes: catalog, seatFactionId: "ashen" }), [
+    "swordsman",
+  ], "an ashen seat sees only the ashen-tagged entry");
+  assert.deepEqual(
+    sourcesOf(state, { unitTypes: catalog, seatFactionId: "neutral" }),
+    ["archer"],
+    "the symmetric rule: a neutral-tagged entry matches only a neutral seat",
+  );
+});
+
+test("eligibleRecruitSources with unknown catalog ids keeps the human default per entry", () => {
+  const state = recruitState({}, [building("barracks", BARRACKS.gx, BARRACKS.gy, 3)]);
+  assert.deepEqual(
+    sourcesOf(state, { unitTypes: {}, seatFactionId: "human" }),
+    ["crusader", "pikeman", "swordsman"],
+    "catalog misses default human, so a human seat keeps the full roster",
+  );
+  assert.deepEqual(
+    sourcesOf(state, { unitTypes: {}, seatFactionId: "ashen" }),
+    [],
+    "an ashen seat gets nothing from the default-human fallback",
+  );
 });

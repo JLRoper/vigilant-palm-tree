@@ -108,7 +108,9 @@ export type SpriteKey =
   | `hero.${Faction}`                 // "hero.player" | "hero.enemy" (procedural)
   | `horse.${string}.${Direction}`    // horse variant directional sprites
   | `horse.${string}.${Direction}.${number}` // horse run-frame sprites ("horse.drake.e.2")
-  | `building.${string}.${string}.${number}`; // "building.classic.house.2"
+  | `building.${string}.${string}.${number}` // "building.classic.house.2"
+  | `unit.${string}.${UnitArenaPose}` // "unit.swordsman.idle"
+  | `faction-banner.${FactionId}`; // "faction-banner.human" (2026-10-02 faction foundation)
 ```
 
 Key helper functions generate the correct keys:
@@ -117,6 +119,8 @@ Key helper functions generate the correct keys:
 - `heroKey(faction)` / `heroDirectionKey("player", dir)` — hero sprite lookup
 - `horseVariantKey(variant, dir, frame?)` — generic per-variant directional lookup for any registry variant; `frame: 1` appends a `.2` suffix for that variant's optional run-frame sprite (legacy `horseBubblyKey(dir)` through `horseSamuraiKey(dir)` remain as sugar wrappers)
 - `buildingKey(style, kind, level)` — city building lookup
+- `unitArenaKey(unitTypeId, pose)` — battle-arena unit art lookup
+- `factionBannerKey(id)` — faction banner lookup (`faction-banner.${id}`)
 
 ### 1.2 SpriteDescriptor
 
@@ -227,12 +231,15 @@ sequenceDiagram
 | `HORSE_VARIANT_DESCRIPTORS` | `horse.{variant}.{dir}` — one sub-record per `HORSE_VARIANT_REGISTRY` entry | 9 variants × 4–8 directions each | 42 |
 | `BUILDING_DESCRIPTORS` | `building.{style}.{kind}.{level}` | 6 |
 | `UNIT_ARENA_DESCRIPTORS` | `unit.{unitTypeId}.{idle,attack,move}` | 45 |
+| `FACTION_BANNERS` (URL map, not descriptors) | `faction-banner.{human,ashen,ironmark,verdant}` — `Partial<Record<FactionId, string>>` of `?url`s, consumer-addressed via `factionBannerKey(id)` | 1 of 4 (human; each faction plan lands its own) |
 
 `ALL_DESCRIPTORS` concatenates all of the above into a flat array used by `createDefaultProvider()`.
 
 The horse-variant descriptors are registry-driven rather than hand-listed: `assetDescriptors.ts` generates `HORSE_VARIANT_DESCRIPTORS` for all 9 `HORSE_VARIANT_REGISTRY` entries (`packages/engine/src/horseVariants.ts`) from an `import.meta.glob` of `units/horse/commander-*/*.png` — adding a variant is a registry entry plus a `commander-{N}/` sprite folder. Bubbly keeps its `naturalSize: 64` special case (everything else uses 512), and non-hero variants get diagonal→cardinal URL fallbacks (`ne/nw→n`, `se/sw→s`) applied at descriptor build time. The filename regexes also capture an optional `-2` run-frame suffix (`drake-e-2.png` → key `horse.drake.e.2`); `loadDirectionalSprites` returns `{ base, frame2 }`, frame-2 descriptors get identical anchor/sizing/naturalSize and are emitted only for files that exist, and the diagonal→cardinal fallbacks run per tier — a frame-2 diagonal aliases only a frame-2 cardinal, never frame-1. `HORSE_VARIANT_DESCRIPTORS` / `horseVariantKey(variant, dir, frame?)` are the generic accessors; the legacy per-variant key wrappers remain as sugar.
 
 The unit-arena descriptors are registry-driven the same way: `assetDescriptors.ts` generates `UNIT_ARENA_DESCRIPTORS` from an `import.meta.glob` of `units/arena/<unitTypeId>-<pose>.png` (`UnitArenaPose` = `idle | attack | move`; `unitArenaKey(unitTypeId, pose)` is the accessor), so dropping a PNG into the folder resolves as `unit.<unitTypeId>.<pose>` with zero descriptor code. All 15 ids carry idle/attack/move poses — 128px natural, bottom-anchored, `fitHeight` with `hexSizeMul: 1.3`. Art is authored facing right once; the battle painter mirrors defenders (see §7).
+
+`FACTION_BANNERS` (2026-10-02 faction-registry foundation) is registry-driven the same way — an `import.meta.glob` of `resources/factions/faction-banner-*.png` — but deliberately **not** a descriptor record: it is a `Partial<Record<FactionId, string>>` URL map (the `HERO_BANNERS` consumption pattern), so a missing banner file is an absent map entry rather than a broken `?url` import. Foundation ships `faction-banner-human.png` only; the "every non-neutral faction has a banner file" rule is asserted by `test/data/unitCatalogParity.test.ts`, and consumers (the faction picker, per-faction theming) land with the faction content plans.
 
 #### Castle Sprites
 

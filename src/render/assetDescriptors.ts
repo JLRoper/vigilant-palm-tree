@@ -111,7 +111,7 @@ import buildingPixelUnderConstruction1 from "../resources/buildings/building-pix
 import buildingPixelUnderConstruction2 from "../resources/buildings/building-pixel-underConstruction-2.png?url";
 import buildingPixelUnderConstruction3 from "../resources/buildings/building-pixel-underConstruction-3.png?url";
 import { Faction, Direction } from "../entities/hero";
-import type { CastleLevel, CastleVariant, ResourceType } from "@heroes/contracts";
+import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
 import type { ResourceStyle } from "../state/settings";
 import { HORSE_VARIANT_REGISTRY, type HorseVariantId } from "@heroes/engine";
@@ -135,7 +135,8 @@ export type SpriteKey =
   | `horse.${string}.${Direction}`
   | `horse.${string}.${Direction}.${number}`
   | `building.${string}.${string}.${number}`
-  | `unit.${string}.${UnitArenaPose}`;
+  | `unit.${string}.${UnitArenaPose}`
+  | `faction-banner.${FactionId}`;
 
 export type UnitArenaPose = "idle" | "attack" | "move";
 
@@ -590,6 +591,28 @@ for (const [path, mod] of Object.entries(UNIT_ARENA_GLOB)) {
   };
 }
 
+// Faction banners: registry-driven like the arena unit sprites — drop a
+// `faction-banner-<id>.png` into resources/factions/ and it resolves with
+// zero descriptor code. A missing banner is an absent map entry, never a
+// broken ?url import, so foundation can ship human-only and each faction
+// plan lands its PNG in the same change; the parity test
+// (test/data/unitCatalogParity.test.ts) asserts every non-neutral faction
+// has its file. Consumers land with the faction-picker UI.
+const FACTION_BANNER_GLOB = import.meta.glob(
+  "../resources/factions/faction-banner-*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const FACTION_BANNER_FILE_PATTERN = /faction-banner-([a-z]+)\.png$/;
+
+export const FACTION_BANNERS: Partial<Record<FactionId, string>> = {};
+
+for (const [path, mod] of Object.entries(FACTION_BANNER_GLOB)) {
+  const match = path.match(FACTION_BANNER_FILE_PATTERN);
+  if (!match || !mod.default) continue;
+  FACTION_BANNERS[match[1] as FactionId] = mod.default;
+}
+
 // Horse variant key functions auto-generated from registry
 export function horseVariantKey(
   variant: HorseVariantId,
@@ -857,6 +880,10 @@ export function buildingKey(style: string, kind: string, level: number): SpriteK
 
 export function unitArenaKey(unitTypeId: string, pose: UnitArenaPose): `unit.${string}.${UnitArenaPose}` {
   return `unit.${unitTypeId}.${pose}`;
+}
+
+export function factionBannerKey(id: FactionId): `faction-banner.${FactionId}` {
+  return `faction-banner.${id}`;
 }
 
 export { pickStyleForBuilding };

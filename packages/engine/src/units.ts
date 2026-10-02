@@ -1,5 +1,5 @@
 import type { AdvantageType } from "./combatConfig";
-import type { Platoon, PlatoonEntry } from "@heroes/contracts";
+import type { FactionId, Platoon, PlatoonEntry } from "@heroes/contracts";
 
 export type { AdvantageType };
 // Platoon/PlatoonEntry now live in @heroes/contracts (Track A / Phase 1,
@@ -24,10 +24,17 @@ export interface UnitType {
   upkeepGold?: number;
   upkeepFood?: number;
   range?: number;
+  // Roster faction (unit_types.faction_id, migration 023). Optional for the
+  // same reason as tier: absent reads as "human" via unitFactionId below.
+  factionId?: FactionId;
 }
 
 export function unitTier(t: UnitType | undefined): 1 | 2 | 3 | 4 | 5 | 6 | 7 {
   return t?.tier ?? 1;
+}
+
+export function unitFactionId(t: UnitType | undefined): FactionId {
+  return t?.factionId ?? "human";
 }
 
 export function unitUpkeepGold(t: UnitType | undefined): number {

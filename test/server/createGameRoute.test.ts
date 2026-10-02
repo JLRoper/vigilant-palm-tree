@@ -36,7 +36,7 @@ async function cleanupGame(name: string): Promise<void> {
 }
 
 type CreatedRow = {
-  players: { id: number; faction: string; name: string }[];
+  players: { id: number; faction: string; name: string; factionId?: string }[];
   heroes: Record<string, { id: string; ownerId: number; name: string }>;
   lobby: {
     seats?: number;
@@ -222,6 +222,57 @@ test("games without enemySlots carry no aiDriverToken either", async () => {
   try {
     const { row } = await createGame({ name, humanSlots: 2 });
     assert.equal(row.lobby.aiDriverToken, undefined, "a plain multiplayer lobby is tokenless");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+// ── seatFactions (faction-registry foundation): the creator's local
+// per-seat roster-faction choice, riding the enemySlots precedent. ──
+
+test("POST /games seatFactions rides through to the players jsonb and clamps beyond the seat count", async () => {
+  const name = uniqueName();
+  try {
+    const { row } = await createGame({
+      name,
+      humanSlots: 1,
+      enemySlots: 1,
+      seatFactions: ["ashen", "human", "verdant"],
+    });
+    assert.equal(row.players.length, 2, "the third entry is beyond the seat count and is never read");
+    assert.equal(row.players[0].factionId, "ashen");
+    assert.equal(row.players[1].factionId, "human");
+    assert.equal(row.players[0].faction, "player", "the seat faction is untouched by the roster faction");
+    assert.equal(row.players[1].faction, "ai");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games without seatFactions keeps the legacy player shape (no factionId key)", async () => {
+  const name = uniqueName();
+  try {
+    const { row } = await createGame({ name, humanSlots: 2 });
+    for (const p of row.players) {
+      assert.equal("factionId" in p, false, "absent param must not add the key");
+    }
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games rejects seatFactions entries outside the registry", async () => {
+  const name = uniqueName();
+  try {
+    for (const seatFactions of [["elves"], ["human", 42], "ashen", ["human", "ELVES"]]) {
+      const res = await fetch(`${baseUrl}/games`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, seed: 99, hero_q: 2, hero_r: 2, enemy_positions: [], mapSize: "small", humanSlots: 1, seatFactions }),
+      });
+      assert.equal(res.status, 400, `seatFactions ${JSON.stringify(seatFactions)} must be rejected`);
+      assert.deepEqual(await res.json(), { error: "seatFactions must be an array of faction ids" });
+    }
   } finally {
     await cleanupGame(name);
   }

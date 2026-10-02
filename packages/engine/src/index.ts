@@ -11,6 +11,7 @@ export * from "./map/terrain";
 export * from "./map/resourceTiles";
 export * from "./map/castlePlacement";
 export * from "./playerColors";
+export * from "./factionRegistry";
 export * from "./init";
 export * from "./rng";
 export * from "./styleResolver";
