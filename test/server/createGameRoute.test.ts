@@ -261,6 +261,21 @@ test("POST /games without seatFactions keeps the legacy player shape (no faction
   }
 });
 
+// ── Ironmark Holds (025_ironmark_holds): an ironmark seat is creatable now
+// that the registry faction carries a shipped roster. ──
+
+test("POST /games seatFactions [\"ironmark\"] stamps the seat with the Ironmark Holds", async () => {
+  const name = uniqueName();
+  try {
+    const { row } = await createGame({ name, humanSlots: 1, seatFactions: ["ironmark"] });
+    assert.equal(row.players.length, 1);
+    assert.equal(row.players[0].factionId, "ironmark");
+    assert.equal(row.players[0].faction, "player", "the seat faction is untouched by the roster faction");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
 test("POST /games rejects seatFactions entries outside the registry", async () => {
   const name = uniqueName();
   try {

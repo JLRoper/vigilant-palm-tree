@@ -31,6 +31,13 @@ import wraith from "../resources/units/icons/wraith.png?url";
 import bloodKnight from "../resources/units/icons/blood_knight.png?url";
 import vampireLord from "../resources/units/icons/vampire_lord.png?url";
 import lich from "../resources/units/icons/lich.png?url";
+import dwarfAxeman from "../resources/units/icons/dwarf_axeman.png?url";
+import shieldBearer from "../resources/units/icons/shield_bearer.png?url";
+import handGunner from "../resources/units/icons/hand_gunner.png?url";
+import ironsworn from "../resources/units/icons/ironsworn.png?url";
+import ironGolem from "../resources/units/icons/iron_golem.png?url";
+import runesmith from "../resources/units/icons/runesmith.png?url";
+import forgeLord from "../resources/units/icons/forge_lord.png?url";
 
 const KNOWN: Record<string, string> = {
   peasant,
@@ -55,6 +62,13 @@ const KNOWN: Record<string, string> = {
   blood_knight: bloodKnight,
   vampire_lord: vampireLord,
   lich,
+  dwarf_axeman: dwarfAxeman,
+  shield_bearer: shieldBearer,
+  hand_gunner: handGunner,
+  ironsworn,
+  iron_golem: ironGolem,
+  runesmith,
+  forge_lord: forgeLord,
 };
 
 export const PLACEHOLDER_UNIT_IMAGE = placeholder;

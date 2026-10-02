@@ -28,7 +28,11 @@ export type BuildingKind =
   | "crypt"
   | "ossuary"
   | "wraithBarrows"
-  | "spireOfAsh";
+  | "spireOfAsh"
+  | "forgeHall"
+  | "gunnersRedoubt"
+  | "golemFoundry"
+  | "deepAnvil";
 
 export interface BuildingDef {
   gx: number;

@@ -4,7 +4,7 @@
 
 ## Unit roster (✅ live catalog)
 
-The `unit_types` table is the authoritative roster — **23 units** after migrations `015_unit_catalog_v1` (the `tier` / `upkeep_gold` / `upkeep_food` / `range` columns + the 13th unit, **mage**: 6 atk / 3 def / 6 hp / 4 spd, ranged, arcane specialty ×1.2), `020_faction_ladder_units` (**warhound**, **giant_eagle**, **eagle_prince** + the tier redefinition below), and `024_ashen_court` (the seven Ashen Court units below). The client caches it via [`src/data/unitCatalog.ts`](../src/data/unitCatalog.ts) (`GET /api/units`). Migration 020 also **redefined `tier`**: it is no longer "lowest building level offering the unit" (that's the registry's per-entry `minLevel` on building levels 1–3) but the unit's faction power-band classification, 1–7.
+The `unit_types` table is the authoritative roster — **30 units** after migrations `015_unit_catalog_v1` (the `tier` / `upkeep_gold` / `upkeep_food` / `range` columns + the 13th unit, **mage**: 6 atk / 3 def / 6 hp / 4 spd, ranged, arcane specialty ×1.2), `020_faction_ladder_units` (**warhound**, **giant_eagle**, **eagle_prince** + the tier redefinition below), `024_ashen_court` (the seven Ashen Court units below), and `025_ironmark_holds` (the seven Ironmark units below). The client caches it via [`src/data/unitCatalog.ts`](../src/data/unitCatalog.ts) (`GET /api/units`). Migration 020 also **redefined `tier`**: it is no longer "lowest building level offering the unit" (that's the registry's per-entry `minLevel` on building levels 1–3) but the unit's faction power-band classification, 1–7.
 
 Purchasable units (building-gated; `minLevel` = lowest building level offering the unit):
 
@@ -25,9 +25,25 @@ Purchasable units (building-gated; `minLevel` = lowest building level offering t
 
 (`w`=wood, `i`=iron, `a`=arcane dust)
 
+### The Ironmark Holds roster (✅ migration `025`, 2026-10-02)
+
+The mountain-hold dwarves — slow, armored, gold/stone/iron-heavy, the anti-thesis of fast swarms. Ranged comes from gunpowder (the faction's one innovation), elites from runeforged tradition. All seven are tagged `faction_id = 'ironmark'`, so only an ironmark seat can recruit them (the `RecruitUnits` gate); the faction's banner is `faction-banner-ironmark.png`.
+
+| Unit | Tier | Recruited at | Cost | Min level | Range |
+|------|------|--------------|------|-----------|-------|
+| Dwarf Axeman | 2 | Forge Hall | 220g | 1 | 1 |
+| Shield Bearer | 3 | Forge Hall | 280g, 2i | 2 | 1 |
+| Hand Gunner | 4 | Gunners' Redoubt | 380g, 2i | 1 | 6 |
+| Ironsworn | 5 | Golem Foundry | 550g, 4i | 1 | 1 |
+| Iron Golem | 6 | Golem Foundry | 1200g, 4s, 4i | 2 | 1 |
+| Runesmith | 6 | Deep Anvil | 550g, 3a | 1 | 4 |
+| Forge Lord | 7 | Deep Anvil | 2200g, 6i, 2a | 2 | 1 |
+
+(`s`=stone) Notes: `iron_golem` rides the **monster advantage type** (`advantage_type = 'monster'`, the always-advantaged attacker per `005_unit_counters.sql`) — deliberate for a construct, and consistent with how `warhound`/`giant_eagle` already ride it inside the Crownlands roster. Upkeep is the roster-wide flat 1g + 1f per troop per week.
+
 The other four catalog entries — **griffin, hydra, wisp, black_dragon** — are **monsters**: catalog-only neutral content with a **NULL tier** (outside the 1–7 faction ladder since migration 020), never offered by any building's `recruits` list, range 1. Griffin deliberately remains non-recruitable.
 
-**Roster factions (2026-10-02 foundation).** Migration `023_faction_rosters.sql` adds `unit_types.faction_id` — the roster-faction tag from the `FactionId` union (`human | ashen | ironmark | verdant | neutral`, CHECK-constrained): the 12 purchasable units are tagged `human` (the Crownlands roster), the four monsters `neutral` (DEFAULT `'neutral'` is fail-safe — an untagged future unit is recruitable by nobody, not by everyone). Do **not** confuse it with `advantage_type`: that column is the combat triangle (`infantry/cavalry/ranged/monster`, unchanged) — a Pikeman is `infantry` on the triangle and `human` on the roster, and a Warhound is `monster` on the triangle but a Crownlands ladder-3 unit on the roster. The engine-side registry is `packages/engine/src/factionRegistry.ts` (`FACTION_REGISTRY`: label/motto/palette/roster per faction — ironmark/verdant ship empty rosters until their content plans land; ashen's landed 2026-10-02, see the next paragraph). Seats pick a faction via `Player.factionId` (optional; absent = human) and the `RecruitUnits` command gates on it through `eligibleRecruitSources`' new faction seam — dormant while all factions share the human roster. The parity test `test/data/unitCatalogParity.test.ts` pins rosters ↔ the DB column and requires a banner file per non-neutral faction.
+**Roster factions (2026-10-02 foundation).** Migration `023_faction_rosters.sql` adds `unit_types.faction_id` — the roster-faction tag from the `FactionId` union (`human | ashen | ironmark | verdant | neutral`, CHECK-constrained): the 12 purchasable units are tagged `human` (the Crownlands roster), the four monsters `neutral` (DEFAULT `'neutral'` is fail-safe — an untagged future unit is recruitable by nobody, not by everyone), the seven Ashen Court units `ashen` (migration 024), and the seven Ironmark units `ironmark` (migration 025). Do **not** confuse it with `advantage_type`: that column is the combat triangle (`infantry/cavalry/ranged/monster`, unchanged) — a Pikeman is `infantry` on the triangle and `human` on the roster, a Warhound is `monster` on the triangle but a Crownlands ladder-3 unit on the roster, and the Iron Golem is `monster` on the triangle but an Ironmark ladder-6 unit on the roster. The engine-side registry is `packages/engine/src/factionRegistry.ts` (`FACTION_REGISTRY`: label/motto/palette/roster per faction — ashen and ironmark ship their seven-unit rosters; verdant still ships an empty roster until its content plan lands). Seats pick a faction via `Player.factionId` (optional; absent = human) and the `RecruitUnits` command gates on it through `eligibleRecruitSources`' faction seam — active for ashen and ironmark seats since migrations 024/025 (a human seat recruiting `ghoul` or `dwarf_axeman` is rejected `unit_not_in_seat_faction`). The parity test `test/data/unitCatalogParity.test.ts` pins rosters ↔ the DB column and requires a banner file per non-neutral faction.
 
 **The Ashen Court (2026-10-02, the game's second playable faction).** Migration `024_ashen_court.sql` fills the `ashen` roster with seven undead units — the catalog grows to **23 units** — and `FACTION_REGISTRY.ashen` ships its roster ("What death releases, the Court reclaims."): a necropolis-confederacy of cheap fast infantry swarms, spectral ranged, and an elite undead aristocracy; even its bowmen are revenants. A seat playing `ashen` sees **only** these units in its recruit lists (the `unitAllowedForSeatFaction` gate, active on both the server's `RecruitUnits` command and the client's building menu), and a `human` seat can neither see nor recruit any of them:
 

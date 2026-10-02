@@ -268,3 +268,62 @@ test("eligibleRecruitSources: without gate opts the crypt lists its ghoul (the d
   const state = recruitState({}, [building("crypt", 1, 2)]);
   assert.deepEqual(sourcesOf(state), ["ghoul"]);
 });
+
+// ── Ironmark Holds roster gating (025_ironmark_holds) ──
+
+const IRONMARK_CATALOG: Record<string, UnitType> = {
+  dwarf_axeman: catalogUnit("dwarf_axeman", "ironmark"),
+  shield_bearer: catalogUnit("shield_bearer", "ironmark"),
+  hand_gunner: catalogUnit("hand_gunner", "ironmark"),
+  ironsworn: catalogUnit("ironsworn", "ironmark"),
+  iron_golem: catalogUnit("iron_golem", "ironmark"),
+  runesmith: catalogUnit("runesmith", "ironmark"),
+  forge_lord: catalogUnit("forge_lord", "ironmark"),
+};
+
+function ironmarkHoldState(): GameState {
+  return recruitState(
+    {},
+    [
+      building("forgeHall", 1, 1, 2),
+      building("gunnersRedoubt", 2, 2),
+      building("golemFoundry", 3, 3, 2),
+      building("deepAnvil", 4, 4, 2),
+    ],
+  );
+}
+
+test("an ironmark seat recruits the Holds' roster from the four new buildings", () => {
+  assert.deepEqual(
+    sourcesOf(ironmarkHoldState(), { unitTypes: IRONMARK_CATALOG, seatFactionId: "ironmark" }),
+    ["dwarf_axeman", "forge_lord", "hand_gunner", "iron_golem", "ironsworn", "runesmith", "shield_bearer"],
+  );
+});
+
+test("a human seat cannot recruit dwarf_axeman; an ironmark seat can", () => {
+  const state = recruitState({}, [building("forgeHall", 1, 1)]);
+  assert.deepEqual(
+    sourcesOf(state, { unitTypes: IRONMARK_CATALOG, seatFactionId: "human" }),
+    [],
+    "the forgeHall recruits are ironmark-tagged, so a human seat sees none of them",
+  );
+  assert.deepEqual(
+    sourcesOf(state, { unitTypes: IRONMARK_CATALOG, seatFactionId: "ironmark" }),
+    ["dwarf_axeman"],
+  );
+});
+
+test("iron_golem (monster-advantage, faction-rostered) is recruitable only by ironmark", () => {
+  const state = recruitState({}, [building("golemFoundry", 3, 3, 2)]);
+  assert.deepEqual(
+    sourcesOf(state, { unitTypes: IRONMARK_CATALOG, seatFactionId: "ironmark" }),
+    ["iron_golem", "ironsworn"],
+  );
+  for (const seat of ["human", "ashen", "verdant", "neutral"] as const) {
+    assert.deepEqual(
+      sourcesOf(state, { unitTypes: IRONMARK_CATALOG, seatFactionId: seat }),
+      [],
+      `a ${seat} seat must not recruit the ironmark-tagged iron_golem`,
+    );
+  }
+});

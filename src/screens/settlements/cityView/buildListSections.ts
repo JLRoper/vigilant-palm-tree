@@ -8,6 +8,7 @@ export const BUILDABLE_KINDS: readonly BuildingKind[] = [
   "apartment", "farmField", "farmhouse", "granary", "warehouse", "bank", "treasury",
   "stables", "huntingLodge", "eyrie",
   "crypt", "ossuary", "wraithBarrows", "spireOfAsh",
+  "forgeHall", "gunnersRedoubt", "golemFoundry", "deepAnvil",
 ];
 
 export const BUILD_LIST_SECTION_TITLES = ["Troop Buildings", "Production", "Civilian"] as const;

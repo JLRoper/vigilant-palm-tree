@@ -58,6 +58,18 @@ test("ashen ships its seven-unit roster (The Ashen Court content plan)", () => {
   ]);
 });
 
+test("ironmark ships The Ironmark Holds' 7-unit roster (025_ironmark_holds)", () => {
+  assert.deepEqual(FACTION_REGISTRY.ironmark.roster, [
+    "dwarf_axeman",
+    "shield_bearer",
+    "hand_gunner",
+    "ironsworn",
+    "iron_golem",
+    "runesmith",
+    "forge_lord",
+  ]);
+});
+
 test("unitFactionId defaults absent and unknown entries to human", () => {
   assert.equal(unitFactionId(undefined), "human");
   assert.equal(unitFactionId(unit("swordsman")), "human");

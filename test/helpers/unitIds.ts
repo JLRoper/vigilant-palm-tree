@@ -1,10 +1,11 @@
 // The single shared list of unit-catalog ids (server/migrations/
 // 002_unit_types.sql + 015_unit_catalog_v1.sql's mage + 020_faction_ladder_
-// units.sql's three + 024_ashen_court.sql's seven). Every consumer that used
-// to hand-duplicate the list (unitIcons.coverage.test.ts,
-// unitArenaDescriptors.test.ts) imports this instead; unitCatalogParity.test.ts
-// pins it against the DB column and the faction registry so a catalog change
-// fails a test instead of drifting. Static on purpose — "no DB" for consumers
+// units.sql's three + 024_ashen_court.sql's and 025_ironmark_holds.sql's
+// seven each). Every consumer that used to hand-duplicate the list
+// (unitIcons.coverage.test.ts, unitArenaDescriptors.test.ts) imports this
+// instead; unitCatalogParity.test.ts pins it against the DB column and the
+// faction registry so a catalog change fails a test instead of drifting.
+// Static on purpose — "no DB" for consumers
 // that only need the ids.
 
 export const UNIT_CATALOG_IDS = [
@@ -31,6 +32,13 @@ export const UNIT_CATALOG_IDS = [
   "blood_knight",
   "vampire_lord",
   "lich",
+  "dwarf_axeman",
+  "shield_bearer",
+  "hand_gunner",
+  "ironsworn",
+  "iron_golem",
+  "runesmith",
+  "forge_lord",
 ] as const;
 
 export type UnitCatalogId = (typeof UNIT_CATALOG_IDS)[number];
