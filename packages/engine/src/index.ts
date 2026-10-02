@@ -22,6 +22,8 @@ export * from "./control";
 export * from "./economy/income";
 export * from "./economy/consumption";
 export * from "./economy/troopUpkeep";
+export * from "./economy/caravanUpkeep";
+export * from "./economy/tradeNeeds";
 export * from "./economy/settlementRates";
 export * from "./economy/trade";
 export * from "./economy/transfer";

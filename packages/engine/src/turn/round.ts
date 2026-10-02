@@ -7,6 +7,7 @@ import { applyGarrisonUpkeep } from "../settlement/garrisonUpkeep";
 import { advanceCharters } from "../charter/advance";
 import { advanceSettlementUpgrades, advanceBuildingConstructions } from "../settlement/advance";
 import { advanceTradeRoutes } from "../logistics";
+import { applyCaravanUpkeep } from "../economy/caravanUpkeep";
 import { accrueBankInterest, matureBankWithdrawals } from "../economy/bank";
 import type { GameMap } from "../map/gameMap";
 import { regenerateHeroMana } from "../combat/spells";
@@ -28,20 +29,36 @@ export function applyWeeklyUpkeep(
     round: state.round,
     castleSeed: state.castleSeed,
   };
-  // Heroes first, and settlement-funded: a hero standing on one of its own
+  // Caravan maintenance is charged FIRST — the designer's ordering guarantee
+  // ("they are the first to get paid so they start deserting last"). On a
+  // shortage week the caravans are paid out of the route's origin store and
+  // the HERO below is the consumer that goes unfed. Routes auto-removed by
+  // desertion (wagons at 0) simply vanish from tradeRoutes here; the server's
+  // EndTurn case derives the removals by route-id set difference and appends
+  // the TradeRouteRemoved events.
+  const caravanBilled = applyCaravanUpkeep(state, state.day);
+  // Heroes second, and settlement-funded: a hero standing on one of its own
   // settlements draws its food bill out of its owner's warehouses (hero/upkeep.ts)
   // BEFORE the garrison bill below runs, and both read the same post-consumption
   // stock -- turn/endTurn.ts's production/consumption pass already ran this turn,
   // so a settlement is never paying out food it was about to consume itself.
-  const supplied = applySuppliedHeroUpkeep(state.heroes, state.settlements, upkeepOptions);
+  const supplied = applySuppliedHeroUpkeep(caravanBilled.state.heroes, caravanBilled.state.settlements, upkeepOptions);
   const newHeroes = supplied.heroes;
   const newSettlements = applyGarrisonUpkeep(
     applyPopulationGrowth(supplied.settlements, growthRate),
     upkeepOptions,
   );
   // Bank pots earn on the weekly tick, next to the garrison bill -- same
-  // cadence as the rest of the recurring upkeep.
-  const withBankInterest = accrueBankInterest({ ...state, heroes: newHeroes, settlements: newSettlements });
+  // cadence as the rest of the recurring upkeep. The base is
+  // caravanBilled.state: its tradeRoutes carry the maintenance streaks and
+  // its heroes/settlements the caravan payments -- spreading the ORIGINAL
+  // state here would silently drop the charge (the settlements chain below
+  // happens to re-derive from caravanBilled, the routes would not).
+  const withBankInterest = accrueBankInterest({
+    ...caravanBilled.state,
+    heroes: newHeroes,
+    settlements: newSettlements,
+  });
   return { ...withBankInterest, dirty: true };
 }
 
