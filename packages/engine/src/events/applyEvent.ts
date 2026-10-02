@@ -9,6 +9,7 @@ import type {
   WarehouseResource,
 } from "@heroes/contracts";
 import { transferGold } from "../economy/transfer";
+import { depositIntoBank, requestBankWithdrawal } from "../economy/bank";
 import { tradeResources } from "../economy/trade";
 import { setAutoTrade } from "../settlement/autoTrade";
 import { reorderStack } from "../hero/stacks";
@@ -55,6 +56,7 @@ export type EngineEventSyncClass = "apply" | "resync" | "ignore";
 export const ENGINE_EVENT_SYNC_CLASS: Record<EngineEvent["type"], EngineEventSyncClass> = {
   HeroMoved: "apply",
   GoldTransferred: "apply",
+  BankGoldMoved: "apply",
   TurnEnded: "resync",
   ResourcesTraded: "apply",
   BattleResolved: "resync",
@@ -261,6 +263,38 @@ function applyTradeRouteCreated(
   };
 }
 
+// BankGoldMoved carries everything the reducer needs (cell, amount,
+// direction), so the replay is a straight re-run -- the GoldTransferred shape,
+// with its same rejection handling: a move the treasury/pot can no longer
+// cover (not_enough_gold / not_enough_in_pot) is what already-applied looks
+// like from behind -> noop; every other rejection (no settlement, not a bank,
+// pot at its cap) means this client has drifted and the caller refetches.
+// Unlike GoldTransferred this is not UNAMBIGUOUS -- BankGold moves a partial
+// amount, so a state that still affords the move replays it a second time. The
+// drift is bounded and already the norm for the partial-payload kinds (see
+// applyUnitsTransferred's header): the client advances its cursor past its own
+// command's events (lastEventId), so its own row is never re-delivered, and
+// TurnEnded's resync re-derives authoritative state at every week boundary.
+function applyBankGoldMoved(
+  state: GameState,
+  settlementId: string,
+  gx: number,
+  gy: number,
+  amount: number,
+  direction: "deposit" | "withdraw",
+): ApplyEngineEventResult {
+  const result =
+    direction === "deposit"
+      ? depositIntoBank(state, settlementId, gx, gy, amount)
+      : requestBankWithdrawal(state, settlementId, gx, gy, amount);
+  if (!result.ok) {
+    const emptyPurse =
+      result.reason === "not_enough_gold" || result.reason === "not_enough_in_pot";
+    return emptyPurse ? { state, outcome: "noop" } : resync(state);
+  }
+  return { state: result.state, outcome: "applied" };
+}
+
 export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEngineEventResult {
   switch (event.type) {
     case "HeroMoved":
@@ -322,6 +356,16 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
       if (!result.ok) return resync(state);
       return { state: result.state, outcome: "applied" };
     }
+
+    case "BankGoldMoved":
+      return applyBankGoldMoved(
+        state,
+        event.settlementId,
+        event.gx,
+        event.gy,
+        event.amount,
+        event.direction,
+      );
 
     case "UnitsRecruited":
       return applyUnitsRecruited(state, event.settlementId, event.unitTypeId, event.count);

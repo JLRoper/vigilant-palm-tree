@@ -1483,6 +1483,158 @@ test("TransferGold dual-writes both heroRepo and settlementRepo (both sides chan
   assert.equal(settlementRepo.calls[0].value.s0.gold, 60);
 });
 
+test("BankGold deposit moves treasury gold into the pot and emits BankGoldMoved", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [
+    makeSettlement("s0", 0, 2, 2, {
+      gold: 1000,
+      buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 0, pendingOut: [] } }],
+    }),
+  ]);
+  const { gameRepo, eventRepo, settlementRepo, deps } = makeDeps(row);
+  const command: Command = {
+    kind: "BankGold",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    gx: 1,
+    gy: 1,
+    amount: 400,
+    direction: "deposit",
+  };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  const persisted = gameRepo.rows["test-game"].settlements.s0;
+  assert.equal(persisted.gold, 600);
+  assert.equal(persisted.buildings[0].bank?.gold, 400);
+  assert.equal(settlementRepo.calls.length, 1);
+  assert.equal(eventRepo.events.length, 1);
+  assert.equal(eventRepo.events[0].kind, "BankGoldMoved");
+  assert.deepEqual(eventRepo.events[0].payload, {
+    type: "BankGoldMoved",
+    actor: 0,
+    settlementId: "s0",
+    gx: 1,
+    gy: 1,
+    amount: 400,
+    direction: "deposit",
+  });
+});
+
+test("BankGold withdraw starts the 7-day countdown out of the pot", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 0,
+        buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 1000, pendingOut: [] } }],
+      }),
+    ],
+    { day: 10 },
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const result = await handleCommand(
+    { kind: "BankGold", gameName: "test-game", actor: 0, settlementId: "s0", gx: 1, gy: 1, amount: 300, direction: "withdraw" },
+    deps,
+  );
+  assert.equal(result.ok, true);
+  const persisted = gameRepo.rows["test-game"].settlements.s0;
+  assert.equal(persisted.buildings[0].bank?.gold, 700);
+  assert.deepEqual(persisted.buildings[0].bank?.pendingOut, [{ gold: 300, maturesOnDay: 17 }]);
+  assert.equal(persisted.gold, 0, "not spendable yet");
+});
+
+test("BankGold rejects a settlement the actor doesn't own", async () => {
+  const foreign = makeRow([makeHero("h0", 0, 2, 2)], [
+    makeSettlement("s0", 1, 2, 2, {
+      gold: 1000,
+      buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 0, pendingOut: [] } }],
+    }),
+  ]);
+  const { deps: foreignDeps } = makeDeps(foreign);
+  const rejected = await handleCommand(
+    { kind: "BankGold", gameName: "test-game", actor: 0, settlementId: "s0", gx: 1, gy: 1, amount: 100, direction: "deposit" },
+    foreignDeps,
+  );
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.reason, "forbidden_not_your_settlement");
+});
+
+test("BankGold rejects a deposit the pot cap or the treasury cannot cover", async () => {
+  const capped = makeRow([makeHero("h0", 0, 2, 2)], [
+    makeSettlement("s0", 0, 2, 2, {
+      gold: 100000,
+      buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 4900, pendingOut: [] } }],
+    }),
+  ]);
+  const { deps } = makeDeps(capped);
+  const overCap = await handleCommand(
+    { kind: "BankGold", gameName: "test-game", actor: 0, settlementId: "s0", gx: 1, gy: 1, amount: 200, direction: "deposit" },
+    deps,
+  );
+  assert.equal(overCap.ok, false);
+  assert.equal(overCap.reason, "pot_full");
+
+  const broke = makeRow([makeHero("h0", 0, 2, 2)], [
+    makeSettlement("s0", 0, 2, 2, {
+      gold: 10,
+      buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 0, pendingOut: [] } }],
+    }),
+  ]);
+  const { deps: brokeDeps } = makeDeps(broke);
+  const overGold = await handleCommand(
+    { kind: "BankGold", gameName: "test-game", actor: 0, settlementId: "s0", gx: 1, gy: 1, amount: 100, direction: "deposit" },
+    brokeDeps,
+  );
+  assert.equal(overGold.ok, false);
+  assert.equal(overGold.reason, "not_enough_gold");
+});
+
+test("BankGold rejects a cell that isn't a bank", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [
+    makeSettlement("s0", 0, 2, 2, { gold: 1000, buildings: [{ gx: 1, gy: 1, kind: "house", level: 1, style: "classic" }] }),
+  ]);
+  const { deps } = makeDeps(row);
+  const result = await handleCommand(
+    { kind: "BankGold", gameName: "test-game", actor: 0, settlementId: "s0", gx: 1, gy: 1, amount: 100, direction: "deposit" },
+    deps,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "not_a_bank");
+});
+
+test("PlaceBuildings preserves a bank pot through an unrelated build commit", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [
+    makeSettlement("s0", 0, 2, 2, {
+      gold: 5000,
+      warehouse: { wood: 100, stone: 100, iron: 0, arcane: 0, food: 0 },
+      buildings: [
+        { gx: 1, gy: 1, kind: "bank", level: 2, style: "classic", bank: { gold: 4200, pendingOut: [{ gold: 250, maturesOnDay: 17 }] } },
+      ],
+    }),
+  ]);
+  const { gameRepo, deps } = makeDeps(row);
+  // Place a second bank alongside the existing one -- an unrelated edit that
+  // rewrites the whole cart. The pot must survive verbatim.
+  const result = await handleCommand(
+    {
+      kind: "PlaceBuildings",
+      gameName: "test-game",
+      actor: 0,
+      settlementId: "s0",
+      buildings: [
+        { gx: 1, gy: 1, kind: "bank", level: 2, style: "classic", bank: { gold: 4200, pendingOut: [{ gold: 250, maturesOnDay: 17 }] } },
+        { gx: 3, gy: 3, kind: "bank", level: 1, style: "classic" },
+      ],
+    },
+    deps,
+  );
+  assert.equal(result.ok, true);
+  const persisted = gameRepo.rows["test-game"].settlements.s0.buildings;
+  assert.equal(persisted.length, 2);
+  assert.deepEqual(persisted[0].bank, { gold: 4200, pendingOut: [{ gold: 250, maturesOnDay: 17 }] });
+  assert.equal(persisted[1].bank, undefined, "a pot-less bank never gains the key");
+});
+
 test("TradeResources dual-writes settlementRepo but never calls heroRepo (heroes unchanged)", async () => {
   const row = makeRow(
     [makeHero("h0", 0, 2, 2)],

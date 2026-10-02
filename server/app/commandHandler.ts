@@ -1,6 +1,8 @@
 import {
   startMove,
-  transferGold,
+transferGold,
+  depositIntoBank,
+  requestBankWithdrawal,
   mulberry32,
   tradeResources,
   resolveBattle as resolveBattleEngine,
@@ -22,6 +24,7 @@ import {
   GameMap,
   computeSettlementRates,
   cityViewSizeFor,
+  foodBiasForTerrain,
   generateCitySpots,
   startCharter,
   stepTravelCharter,
@@ -194,12 +197,20 @@ export interface CommandResult {
 }
 
 // Legacy `gold` column is the sum of all players' purses (backward compat
-// with reads that predate the heroes/settlements JSONB columns -- see
-// server/routes.ts's own sumPlayerGold, which every other route that
-// mutates heroes/settlements/players also calls). Duplicated rather than
-// imported: routes.ts's copy is a private, unexported helper, and pulling
-// it out into a shared module for one ~10-line accounting function isn't
-// worth the churn across every one of its call sites today.
+// with reads that predate the heroes/settlements JSONB columns).
+//
+// Single definition since the legacy `POST /games/:name/end-turn` route was
+// retired -- server/routes.ts's own private copy of this function went with it
+// (docs/event-system.md, "2026-09-30 organization pass"), so there is nothing
+// left to import it from or drift against.
+//
+// The returned total is deliberately NOT rounded here. Gold values are
+// legitimately 2-decimal floats in the engine (produceResources' round2, and
+// auto-trade paying a fractional food amount out of a treasury), and this
+// function is the exact accounting sum of them. The rounding to the column's
+// INTEGER type happens once, at the write boundary, in
+// server/persistence/integerColumns.ts -- see that file's header for why an
+// unrounded write aborted the whole command (the every-EndTurn-500 bug).
 function sumPlayerGold(
   players: Player[],
   heroes: Record<string, HeroState>,
@@ -596,6 +607,44 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         hero: result.state.heroes[command.heroId],
         settlement: result.state.settlements[command.settlementId],
       };
+    }
+    case "BankGold": {
+      // Same five-step shape as TransferGold above: reducer -> save ->
+      // dualWrite -> event -> append.
+      const settlement = row.settlements[command.settlementId];
+      if (!settlement) {
+        return { ok: false, reason: "no_settlement", events: [] };
+      }
+      // The pot is per-settlement state, so the same gap UpgradeBuilding
+      // closes applies: neither depositIntoBank nor requestBankWithdrawal
+      // checks ownership themselves.
+      if (settlement.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
+      }
+      const result =
+        command.direction === "deposit"
+          ? depositIntoBank(state, command.settlementId, command.gx, command.gy, command.amount)
+          : requestBankWithdrawal(state, command.settlementId, command.gx, command.gy, command.amount);
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "BankGoldMoved",
+        actor: command.actor,
+        settlementId: command.settlementId,
+        gx: command.gx,
+        gy: command.gy,
+        amount: command.amount,
+        direction: command.direction,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
     }
     case "EndTurn": {
       // See server/app/turnService.ts for the pipeline itself and its
@@ -1099,7 +1148,10 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         }
       }
       const computed = computeSettlementRates(map, command.targetQ, command.targetR, 1);
-      const { spots } = generateCitySpots(cityViewSizeFor(1), deps.ctx.rng);
+      // Terrain biases the chartered city's food-spot roll (StartCharter).
+      const { spots } = generateCitySpots(cityViewSizeFor(1), deps.ctx.rng, {
+        foodBias: foodBiasForTerrain(map.get(command.targetQ, command.targetR) ?? ""),
+      });
       // Unlike recruitHero() (self-allocating), startCharter() does not
       // allocate settlementId/charterId itself -- see
       // packages/contracts/src/commands/startCharter.ts's header comment.
@@ -1619,7 +1671,10 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // by test/server/gameMapReconstruction.test.ts).
       const map = new GameMap(row.seed, row.map_size as MapSize | undefined);
       const computed = computeSettlementRates(map, settlement.q, settlement.r, targetLevel);
-      const { spots } = generateCitySpots(cityViewSizeFor(targetLevel), deps.ctx.rng);
+      // Terrain biases the food-spot roll of the new ring of cells (upgrade).
+      const { spots } = generateCitySpots(cityViewSizeFor(targetLevel), deps.ctx.rng, {
+        foodBias: foodBiasForTerrain(map.get(settlement.q, settlement.r) ?? ""),
+      });
       const newCitySpots = spots.filter(
         (spot) =>
           !settlement.citySpots.some((cs) => cs.cell.x === spot.cell.x && cs.cell.y === spot.cell.y),

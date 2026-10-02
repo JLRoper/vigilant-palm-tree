@@ -138,6 +138,59 @@ function isNonNegativeInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= 0;
 }
 
+// BankGold's per-move gold ceiling (see its parseCommand branch). Generous
+// relative to the biggest legal move (a level-3 bank's 15,000g pot cap), tight
+// enough that a nonsense value is a clean 400 instead of a number the reducer
+// has to reject.
+const MAX_BANK_GOLD_MOVE = 1_000_000;
+
+// PendingOut entry ceiling, mirroring `construction`'s daysRemaining <= 30
+// bound: a maturesOnDay further out than this is not something a 7-day
+// countdown can produce, so the entry is malformed. Kept finite so a body
+// can't smuggle an unbounded array through this gate.
+const MAX_BANK_PENDING_ENTRIES = 64;
+const MAX_BANK_MATURES_ON_DAY = 100_000;
+
+// BuildingDef.bank shape gate. `undefined` is valid (a bank with no pot yet --
+// absent means no pot, mirroring `construction`). Present means a real pot:
+// non-negative integer gold plus an optional pendingOut array of matured-countdown
+// entries, each a non-negative integer gold and a maturesOnDay integer. Bound
+// like `construction`'s daysRemaining so a spoofed pot can't smuggle an
+// unbounded array or a negative/absurd balance into persisted state.
+function isBankPot(v: unknown): boolean {
+  if (v === undefined) return true;
+  if (!v || typeof v !== "object") return false;
+  const pot = v as { gold?: unknown; pendingOut?: unknown };
+  if (!isNonNegativeInt(pot.gold)) return false;
+  if (pot.pendingOut === undefined) return true;
+  if (!Array.isArray(pot.pendingOut) || pot.pendingOut.length > MAX_BANK_PENDING_ENTRIES) return false;
+  return pot.pendingOut.every((e) => {
+    if (!e || typeof e !== "object") return false;
+    const entry = e as { gold?: unknown; maturesOnDay?: unknown };
+    return isNonNegativeInt(entry.gold) && isNonNegativeInt(entry.maturesOnDay) &&
+      (entry.maturesOnDay as number) <= MAX_BANK_MATURES_ON_DAY;
+  });
+}
+
+/**
+ * PlaceBuildings' per-entry passthrough. The gate above validates every known
+ * field; this copies the entry and re-attaches the pot explicitly so `bank` can
+ * never be lost by a future projection of the BuildingDef (a bank pot is
+ * state, not construction metadata). Entries without a pot are returned
+ * untouched, so a pre-bank building never gains the key.
+ */
+function passthroughBuilding(v: unknown): BuildingDef {
+  const raw = v as BuildingDef;
+  if (raw.bank === undefined) return raw;
+  return {
+    ...raw,
+    bank: {
+      gold: raw.bank.gold,
+      pendingOut: raw.bank.pendingOut.map((e) => ({ gold: e.gold, maturesOnDay: e.maturesOnDay })),
+    },
+  };
+}
+
 // Real per-field validation, not just a `kind` check -- a malformed
 // MoveHero/TransferGold body (missing/mistyped field) is rejected as a
 // clean 400 here instead of reaching handleCommand and failing with an
@@ -183,6 +236,36 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       actor: b.actor,
       heroId: b.heroId,
       settlementId: b.settlementId,
+      direction: b.direction,
+    };
+  }
+
+  if (b.kind === "BankGold") {
+    // amount is bounded at 1_000_000 gold: a level-3 bank's pot cap is 15,000
+    // and no legal deposit/withdrawal can exceed that, so anything above it is
+    // a malformed body rather than a request the reducer would have to
+    // round-reject. The treasury cap is far lower, which is a 409
+    // (not_enough_gold), not a 400.
+    if (
+      typeof b.settlementId !== "string" ||
+      b.settlementId.length === 0 ||
+      !isNonNegativeInt(b.gx) ||
+      !isNonNegativeInt(b.gy) ||
+      !isNonNegativeInt(b.amount) ||
+      b.amount <= 0 ||
+      b.amount > MAX_BANK_GOLD_MOVE ||
+      (b.direction !== "deposit" && b.direction !== "withdraw")
+    ) {
+      return null;
+    }
+    return {
+      kind: "BankGold",
+      gameName,
+      actor: b.actor,
+      settlementId: b.settlementId,
+      gx: b.gx,
+      gy: b.gy,
+      amount: b.amount,
       direction: b.direction,
     };
   }
@@ -348,7 +431,7 @@ function parseCommand(body: unknown, gameName: string): Command | null {
         if (!v || typeof v !== "object") return false;
         const d = v as {
           gx: unknown; gy: unknown; kind: unknown; level: unknown;
-          style: unknown; w?: unknown; h?: unknown; construction?: unknown;
+          style: unknown; w?: unknown; h?: unknown; construction?: unknown; bank?: unknown;
         };
         if (
           !Number.isInteger(d.gx) ||
@@ -367,7 +450,7 @@ function parseCommand(body: unknown, gameName: string): Command | null {
           const days = (d.construction as { daysRemaining?: unknown }).daysRemaining;
           if (!isNonNegativeInt(days) || (days as number) > 30) return false;
         }
-        return true;
+        return isBankPot(d.bank);
       })
     ) {
       return null;
@@ -377,7 +460,7 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       gameName,
       actor: b.actor,
       settlementId: b.settlementId,
-      buildings: b.buildings as BuildingDef[],
+      buildings: b.buildings.map(passthroughBuilding),
       ...(b.initialLayout === true ? { initialLayout: true } : {}),
     };
   }

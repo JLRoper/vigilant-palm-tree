@@ -90,6 +90,51 @@ test("settlementRepo.upsertMany round-trips buildings", async () => {
   });
 });
 
+test("settlementRepo round-trips a per-building bank pot (and absent stays absent)", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createSettlementRepo(client);
+    const settlement = makeSettlement("s0", 0, 3, 4, {
+      buildings: [
+        {
+          gx: 1,
+          gy: 1,
+          kind: "bank",
+          level: 2,
+          style: "classic",
+          bank: {
+            gold: 1234,
+            pendingOut: [
+              { gold: 100, maturesOnDay: 12 },
+              { gold: 250, maturesOnDay: 19 },
+            ],
+          },
+        },
+        // No pot: the key must be absent on the way back out, never
+        // `undefined` -- an explicit undefined key is not deepStrictEqual to
+        // an omitted one, which is the same trap `construction` documents.
+        { gx: 4, gy: 4, kind: "treasury", level: 1, style: "classic" },
+        // Empty pot (0 gold, nothing pending) is NOT the same as absent and
+        // must still round-trip -- `bank: {}` is falsy-adjacent but truthy.
+        { gx: 6, gy: 6, kind: "bank", level: 1, style: "classic", bank: { gold: 0, pendingOut: [] } },
+      ],
+    });
+
+    await repo.upsertMany(name, { s0: settlement });
+    const [loaded] = await repo.loadAllForGame(name);
+
+    assert.deepEqual(loaded.buildings, settlement.buildings, "pot state must round-trip byte-for-byte");
+    assert.equal(loaded.buildings[0]?.bank?.gold, 1234);
+    assert.equal(loaded.buildings[0]?.bank?.pendingOut.length, 2);
+    assert.ok(
+      !("bank" in (loaded.buildings[1] as object)),
+      "a building with no pot must come back without the key at all",
+    );
+    assert.ok("bank" in (loaded.buildings[2] as object), "an opened-but-empty pot still carries the key");
+  });
+});
+
 test("settlementRepo.upsertMany is a full sync: a settlement missing from the record is deleted", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();

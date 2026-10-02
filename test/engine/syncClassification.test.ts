@@ -1,16 +1,67 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applyEngineEvent, ENGINE_EVENT_SYNC_CLASS } from "@heroes/engine";
-import { makeHero, makeState } from "../charter/_helpers";
+import { makeHero, makeSettlement, makeState } from "../charter/_helpers";
 
 test("every declared EngineEvent variant is classified exactly once", () => {
-  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 24);
+  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 25);
 });
 
-test("classification counts: 11 apply, 7 resync, 6 ignore", () => {
+test("classification counts: 12 apply, 7 resync, 6 ignore", () => {
   const counts = { apply: 0, resync: 0, ignore: 0 };
   for (const cls of Object.values(ENGINE_EVENT_SYNC_CLASS)) counts[cls] += 1;
-  assert.deepEqual(counts, { apply: 11, resync: 7, ignore: 6 });
+  assert.deepEqual(counts, { apply: 12, resync: 7, ignore: 6 });
+});
+
+test("class agrees with the reducer: BankGoldMoved is an apply kind that replays the reducer", () => {
+  assert.equal(ENGINE_EVENT_SYNC_CLASS.BankGoldMoved, "apply");
+  const state = makeState({
+    settlements: [
+      {
+        ...makeSettlement("s0", 0, 2, 2, { gold: 900 }),
+        buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 100, pendingOut: [] } }],
+      },
+    ],
+  });
+  const deposit = applyEngineEvent(state, {
+    type: "BankGoldMoved",
+    actor: 0,
+    settlementId: "s0",
+    gx: 1,
+    gy: 1,
+    amount: 400,
+    direction: "deposit",
+  });
+  assert.equal(deposit.outcome, "applied");
+  assert.equal(deposit.state.settlements.s0.gold, 500);
+  assert.equal(deposit.state.settlements.s0.buildings[0].bank?.gold, 500);
+  // A rejection on replay (the treasury/ pot can no longer cover the move) is
+  // what already-applied looks like from behind -> noop, not a resync storm.
+  const drained = {
+    ...deposit.state,
+    settlements: { ...deposit.state.settlements, s0: { ...deposit.state.settlements.s0, gold: 0 } },
+  };
+  const replay = applyEngineEvent(drained, {
+    type: "BankGoldMoved",
+    actor: 0,
+    settlementId: "s0",
+    gx: 1,
+    gy: 1,
+    amount: 400,
+    direction: "deposit",
+  });
+  assert.equal(replay.outcome, "noop");
+  // ...but a real drift (no such settlement) still refetches.
+  const drifted = applyEngineEvent(state, {
+    type: "BankGoldMoved",
+    actor: 0,
+    settlementId: "nope",
+    gx: 9,
+    gy: 9,
+    amount: 400,
+    direction: "deposit",
+  });
+  assert.equal(drifted.outcome, "resync");
 });
 
 test("class agrees with the reducer: an apply kind replays through applyEngineEvent", () => {

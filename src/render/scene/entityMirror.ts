@@ -68,6 +68,7 @@ export class EntityMirror {
       // the fresh GameState instead. Listed per variant rather than left to
       // `default:` so a new EngineEvent variant trips the check below.
       case "GoldTransferred":
+      case "BankGoldMoved":
       case "TurnEnded":
       case "ResourcesTraded":
       case "BattleResolved":

@@ -607,6 +607,158 @@ test("D10: an AI-seat command on a server-driven game is 403 ai_seat_command_for
   }
 });
 
+// Gold above every pot cap so the BankGold shape gate is the only thing under
+// test here (not affordability), and a bank with a pot so the pot-preservation
+// test below has something to preserve.
+function bankSettlement(name: string): SettlementState {
+  return makeSettlement(ids(name).settlementId, 0, 2, 2, {
+    gold: 100000,
+    warehouse: emptyWarehouse({ wood: 100, stone: 100 }),
+    buildings: [
+      { gx: 1, gy: 1, kind: "bank", level: 2, style: "classic", bank: { gold: 1234, pendingOut: [{ gold: 200, maturesOnDay: 17 }] } },
+    ],
+  });
+}
+
+test("POST /games/:name/commands accepts BankGold over HTTP (was a 400 -- parseCommand had no branch for it)", async () => {
+  const name = uniqueName();
+  const { settlementId } = ids(name);
+  const token = await seedGame(name, bankSettlement(name));
+  try {
+    const res = await postCommand(name, {
+      kind: "BankGold",
+      actor: 0,
+      settlementId,
+      gx: 1,
+      gy: 1,
+      amount: 500,
+      direction: "deposit",
+    }, token);
+    assert.equal(res.status, 200, await res.clone().text());
+    const body = (await res.json()) as { settlement?: SettlementState; events?: { type: string }[] };
+    assert.equal(body.settlement?.gold, 100000 - 500);
+    assert.equal(body.settlement?.buildings[0].bank?.gold, 1234 + 500);
+    assert.deepEqual(body.settlement?.buildings[0].bank?.pendingOut, [{ gold: 200, maturesOnDay: 17 }]);
+
+    // The event row the command appended must exist under its own kind, so a
+    // poller picking it up by kind sees it.
+    const events = await pool.query<{ kind: string; payload: { amount: number; direction: string } }>(
+      `SELECT kind, payload FROM game_events WHERE game_id = (SELECT id FROM games WHERE name = $1) AND kind = 'BankGoldMoved'`,
+      [name],
+    );
+    assert.equal(events.rowCount, 1);
+    assert.equal(events.rows[0].payload.amount, 500);
+    assert.equal(events.rows[0].payload.direction, "deposit");
+
+    // ...and the withdraw direction of the same command kind.
+    const withdraw = await postCommand(name, {
+      kind: "BankGold",
+      actor: 0,
+      settlementId,
+      gx: 1,
+      gy: 1,
+      amount: 500,
+      direction: "withdraw",
+    }, token);
+    assert.equal(withdraw.status, 200, await withdraw.clone().text());
+    const wbody = (await withdraw.json()) as { settlement?: SettlementState };
+    assert.equal(wbody.settlement?.buildings[0].bank?.gold, 1234);
+    assert.equal(wbody.settlement?.buildings[0].bank?.pendingOut?.length, 2);
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("BankGold with a malformed field is a 400, not a handler-level crash", async () => {
+  const name = uniqueName();
+  const { settlementId } = ids(name);
+  const token = await seedGame(name, bankSettlement(name));
+  const base = {
+    kind: "BankGold",
+    actor: 0,
+    settlementId,
+    gx: 1,
+    gy: 1,
+    amount: 100,
+    direction: "deposit",
+  };
+  const bad: unknown[] = [
+    { ...base, settlementId: 7 },
+    { ...base, gx: -1 },
+    { ...base, gy: 1.5 },
+    { ...base, amount: 0 },
+    { ...base, amount: -100 },
+    { ...base, amount: 12.5 },
+    { ...base, amount: 2_000_000 },
+    { ...base, direction: "drip" },
+    { ...base, direction: undefined },
+  ];
+  try {
+    for (const body of bad) {
+      const res = await postCommand(name, body, token);
+      assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(body)}`);
+    }
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("PlaceBuildings keeps a bank pot through an unrelated commit (bank must not be stripped)", async () => {
+  const name = uniqueName();
+  const { settlementId } = ids(name);
+  const token = await seedGame(name, bankSettlement(name));
+  try {
+    const res = await postCommand(name, {
+      kind: "PlaceBuildings",
+      actor: 0,
+      settlementId,
+      buildings: [
+        // The same bank, untouched -- its pot must round-trip verbatim.
+        { gx: 1, gy: 1, kind: "bank", level: 2, style: "classic", bank: { gold: 1234, pendingOut: [{ gold: 200, maturesOnDay: 17 }] } },
+        // ...plus a brand-new pot-less bank.
+        { gx: 3, gy: 3, kind: "bank", level: 1, style: "classic" },
+      ],
+    }, token);
+    assert.equal(res.status, 200, await res.clone().text());
+    const body = (await res.json()) as { settlement?: SettlementState };
+    assert.equal(body.settlement?.buildings.length, 2);
+    assert.deepEqual(body.settlement?.buildings[0].bank, {
+      gold: 1234,
+      pendingOut: [{ gold: 200, maturesOnDay: 17 }],
+    });
+    assert.equal(body.settlement?.buildings[1].bank, undefined);
+
+    // ...and it survives the DB round-trip too (settlement_buildings.bank JSONB).
+    const stored = await pool.query<{ bank: { gold: number } | null }>(
+      `SELECT bank FROM settlement_buildings WHERE settlement_id = $1 AND gx = 1 AND gy = 1`,
+      [settlementId],
+    );
+    assert.equal(stored.rows[0]?.bank?.gold, 1234);
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("PlaceBuildings rejects a malformed bank pot with a 400", async () => {
+  const name = uniqueName();
+  const { settlementId } = ids(name);
+  const token = await seedGame(name, bankSettlement(name));
+  const mk = (bank: unknown) => ({
+    kind: "PlaceBuildings",
+    actor: 0,
+    settlementId,
+    buildings: [{ gx: 1, gy: 1, kind: "bank", level: 2, style: "classic", bank }],
+  });
+  try {
+    for (const bank of [{ gold: -1 }, { gold: 1.5 }, { gold: 10, pendingOut: "soon" }, { gold: 10, pendingOut: [{ gold: -1, maturesOnDay: 3 }] }, { pendingOut: [] }]) {
+      const res = await postCommand(name, mk(bank), token);
+      assert.equal(res.status, 400, `expected 400 for pot ${JSON.stringify(bank)}`);
+    }
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
 test("D10: the same AI-seat command on an unflagged game keeps today's behavior (accepted)", async () => {
   const name = uniqueName();
   await seedAiDriverGame(name, { aiDriver: false, activePlayerId: 1 });

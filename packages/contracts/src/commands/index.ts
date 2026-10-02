@@ -1,5 +1,6 @@
 import type { MoveHeroCommand } from "./moveHero";
 import type { TransferGoldCommand } from "./transferGold";
+import type { BankGoldCommand } from "./bankGold";
 import type { EndTurnCommand } from "./endTurn";
 import type { TradeResourcesCommand } from "./tradeResources";
 import type { ResolveBattleCommand } from "./resolveBattle";
@@ -25,6 +26,7 @@ import type { SubmitSettlementBattleResultCommand } from "./submitSettlementBatt
 
 export * from "./moveHero";
 export * from "./transferGold";
+export * from "./bankGold";
 export * from "./endTurn";
 export * from "./tradeResources";
 export * from "./resolveBattle";
@@ -65,9 +67,14 @@ export * from "./submitSettlementBattleResult";
 // (plan/2026-09-27-manual-battle-wiring.md, work item 4) is the 15th kind:
 // the manual arena's played-out outcome, applied server-side with the same
 // post-battle rules the auto-resolver uses.
+// BankGold is the 25th kind: a bank building's own gold pot, both directions
+// in one command (treasury -> pot, or a 7-day countdown out of the pot). The
+// pot's fields ride BuildingDef (`bank?: BankPot`), which the PlaceBuildings
+// shape gate has to preserve or every pot zeroes on the next build commit.
 export type Command =
   | MoveHeroCommand
   | TransferGoldCommand
+  | BankGoldCommand
   | EndTurnCommand
   | TradeResourcesCommand
   | ResolveBattleCommand

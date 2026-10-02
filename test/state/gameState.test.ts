@@ -29,6 +29,7 @@ import {
   type HeroId,
   type GamePhase,
 } from "../../src/state/gameState";
+import { foodRequired, MORALE_RECOVERY_PER_SUPPLIED_TURN } from "@heroes/engine";
 import { normalizePlatoons } from "../../src/state/units";
 import {
   DESERT_COST_SHARE,
@@ -868,6 +869,49 @@ test("advanceRound does not fire applyWeeklyUpkeep on non-week days", () => {
   assert.equal(next.heroes.h0.troops, 10);
 });
 
+// Bank pots: interest accrues on the weekly branch and a 7-day withdrawal
+// matures on its own day (the daily tick), both wired in turn/round.ts.
+function bankState(day: number, pot: { gold: number; pendingOut: { gold: number; maturesOnDay: number }[] }) {
+  const base = makeState({
+    round: day,
+    day,
+    phase: { kind: "ROUND_END", nextRound: day + 1 },
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2), buildings: [{ gx: 1, gy: 1, kind: "bank" as const, level: 1, style: "classic" as const, bank: pot }] },
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  return base;
+}
+
+test("advanceRound accrues bank interest exactly on the day-7 boundary", () => {
+  const before = advanceRound(bankState(5, { gold: 1000, pendingOut: [] }), 0.1);
+  assert.equal(before.day, 6);
+  assert.equal(before.settlements.s0.buildings[0].bank?.gold, 1000, "no interest off the weekly branch");
+  const onDay7 = advanceRound(before, 0.1);
+  assert.equal(onDay7.day, 7);
+  assert.equal(onDay7.settlements.s0.buildings[0].bank?.gold, 1050, "5% of the pot on day 7");
+  const day8 = advanceRound(onDay7, 0.1);
+  assert.equal(day8.day, 8);
+  assert.equal(day8.settlements.s0.buildings[0].bank?.gold, 1050, "and not again the next day");
+});
+
+test("advanceRound matures a bank withdrawal on day + 7 and not before", () => {
+  const requested = bankState(10, { gold: 1000, pendingOut: [{ gold: 400, maturesOnDay: 17 }] });
+  const day11 = advanceRound(requested, 0.1);
+  assert.equal(day11.settlements.s0.gold, 0, "not spendable while pending");
+  assert.equal(day11.settlements.s0.buildings[0].bank?.pendingOut.length, 1);
+  // Days 12..17: advance six more times, still pending until the 7th day.
+  let s = day11;
+  for (let i = 0; i < 5; i++) s = advanceRound(s, 0.1);
+  assert.equal(s.day, 16);
+  assert.equal(s.settlements.s0.gold, 0);
+  const matured = advanceRound(s, 0.1);
+  assert.equal(matured.day, 17);
+  assert.equal(matured.settlements.s0.gold, 400, "lands in the treasury on its maturity day");
+  assert.deepEqual(matured.settlements.s0.buildings[0].bank?.pendingOut, []);
+});
+
 test("tradeResources moves resources between same-owner settlements and charges gold", () => {
   const s = makeState({
     settlements: [
@@ -970,6 +1014,22 @@ test("applyEndOfTurn decays morale when food missing", () => {
   assert.ok((next.settlements.s0.morale ?? 100) >= 0);
 });
 
+test("applyEndOfTurn does not charge food morale decay to a settlement holding exactly its food requirement", () => {
+  // The exact-food case the pre-consumption morale fix exists for: population 500
+  // needs 5 food and the larder holds exactly 5. Reading morale off the
+  // POST-consumption settlement (food now 0) charged a full -10 for being fed.
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 5 } },
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  assert.equal(foodRequired(s.settlements.s0), 5, "the fixture is exactly fed, not over- or under-fed");
+  const next = applyEndOfTurn(s);
+  assert.equal(next.settlements.s0.warehouse.food, 0, "the exact requirement is still consumed");
+  assert.equal(next.settlements.s0.morale, 100, "being exactly fed costs no morale");
+});
+
 test("applyEndOfTurn awards effective income scaled by morale", () => {
   const s = makeState({
     settlements: [
@@ -978,7 +1038,10 @@ test("applyEndOfTurn awards effective income scaled by morale", () => {
     ],
   });
   const next = applyEndOfTurn(s);
-  assert.equal(next.settlements.s0.gold, 250);
+  // Fully supplied, so morale recovers 50 -> 54 BEFORE income is scaled, and the
+  // income reads that post-recovery morale: 500 * 1 * 54/100 = 270, not a flat 250.
+  assert.equal(next.settlements.s0.morale, 50 + MORALE_RECOVERY_PER_SUPPLIED_TURN);
+  assert.equal(next.settlements.s0.gold, 270);
 });
 
 test("applyEndOfTurnDetailed returns transfers array alongside state", () => {

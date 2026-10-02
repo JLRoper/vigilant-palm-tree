@@ -215,4 +215,19 @@ export type EngineEvent =
         // Optional so pre-B6 events without verdicts stay valid -- the same
         // style as BattleResolved's verdict fields above.
         attackerVerdict?: HeroBattleVerdict;
+      }
+    | {
+        // A bank pot moved gold: "deposit" is treasury -> pot, "withdraw"
+        // starts the 7-day countdown (the pot drops immediately; the money
+        // lands in the treasury when it matures). Classified "apply" in
+        // ENGINE_EVENT_SYNC_CLASS -- every field the reducer needs rides the
+        // event, so a replaying client re-runs the same reducer rather than
+        // guessing.
+        type: "BankGoldMoved";
+        actor: PlayerSeat;
+        settlementId: SettlementId;
+        gx: number;
+        gy: number;
+        amount: number;
+        direction: "deposit" | "withdraw";
       };

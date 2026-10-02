@@ -10,6 +10,7 @@ import type {
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import { normalizePlatoons, settlementStacks } from "@heroes/engine";
+import { toIntColumn } from "../integerColumns";
 import { resolveGameId } from "./gameRepo";
 import type { Queryable } from "./gameRepo";
 
@@ -67,6 +68,7 @@ interface BuildingRow {
   w: number | null;
   h: number | null;
   construction: { daysRemaining: number } | null;
+  bank: BuildingDef["bank"] | null;
 }
 
 interface PlatoonRow {
@@ -102,6 +104,10 @@ function toSettlementState(
     ...(b.w !== null ? { w: b.w } : {}),
     ...(b.h !== null ? { h: b.h } : {}),
     ...(b.construction != null ? { construction: b.construction as BuildingDef["construction"] } : {}),
+    // Bank pots (migration 022) follow the `construction` rule verbatim: a
+    // NULL column means no pot, and the key must be absent rather than
+    // undefined for the same deepStrictEqual reason documented below.
+    ...(b.bank != null ? { bank: b.bank as BuildingDef["bank"] } : {}),
   }));
 
   return {
@@ -178,8 +184,18 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
           [gameId, settlementIds],
         ),
         db.query<BuildingRow>(
-          `SELECT settlement_id, gx, gy, kind, level, style, w, h, construction FROM settlement_buildings
-           WHERE game_id = $1 AND settlement_id = ANY($2::text[])`,
+          // ORDER BY id, not left to the planner: the UNIQUE
+          // (game_id, settlement_id, gx, gy) index is what this predicate
+          // actually scans, so without it Postgres returns buildings in (gx, gy)
+          // order while the JSONB read path returns them in the order they were
+          // persisted. Two read paths disagreeing on the same row is exactly
+          // what hydrate.test.ts's read-path parity case exists to catch, and a
+          // starter set's 6-10 buildings is enough to make the divergence
+          // visible. upsertMany re-inserts in array order, so the BIGSERIAL id
+          // IS the persisted order.
+          `SELECT settlement_id, gx, gy, kind, level, style, w, h, construction, bank FROM settlement_buildings
+             WHERE game_id = $1 AND settlement_id = ANY($2::text[])
+             ORDER BY settlement_id, id`,
           [gameId, settlementIds],
         ),
         db.query<PlatoonRow>(
@@ -264,9 +280,13 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
             settlement.population,
             settlement.goldTax,
             settlement.foundedOnResource,
-            settlement.gold,
+            // settlements.gold and settlements.morale are INTEGER; both are
+            // 2-dp floats in the engine (round2'd gold production, and a
+            // continuous foodDeficitRatio driving morale). See
+            // ../integerColumns.ts.
+            toIntColumn(settlement.gold),
             settlement.resourceRates.gold ?? null,
-            settlement.morale,
+            toIntColumn(settlement.morale),
             settlement.garrisonUnpaidSinceDay,
             settlement.garrisonUnpaidTroops,
             settlement.garrisonUnpaidGold,
@@ -290,7 +310,11 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
           await db.query(
             `INSERT INTO settlement_resources (game_id, settlement_id, resource, amount, rate)
              VALUES ($1, $2, $3, $4, $5)`,
-            [gameId, settlement.id, resource, settlement.warehouse[resource], rate ?? null],
+            // amount is INTEGER, and a food producer's per-turn output is a
+            // 2-dp float (producers.ts rounds to 100ths), so the warehouse
+            // total is fractional too. `rate` is NUMERIC and stays exact.
+            // See ../integerColumns.ts.
+            [gameId, settlement.id, resource, toIntColumn(settlement.warehouse[resource]), rate ?? null],
           );
         }
 
@@ -300,8 +324,8 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
         ]);
         for (const building of settlement.buildings) {
           await db.query(
-            `INSERT INTO settlement_buildings (game_id, settlement_id, gx, gy, kind, level, style, w, h, construction)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            `INSERT INTO settlement_buildings (game_id, settlement_id, gx, gy, kind, level, style, w, h, construction, bank)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
             [
               gameId,
               settlement.id,
@@ -313,6 +337,8 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
               building.w ?? null,
               building.h ?? null,
               building.construction ? JSON.stringify(building.construction) : null,
+              // Absent pot writes NULL, never the string "undefined".
+              building.bank ? JSON.stringify(building.bank) : null,
             ],
           );
         }
