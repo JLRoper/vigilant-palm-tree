@@ -131,9 +131,16 @@ import buildingPixelDeepAnvil1 from "../resources/buildings/building-pixel-deepA
 import buildingPixelDeepAnvil2 from "../resources/buildings/building-pixel-deepAnvil-2.png?url";
 import buildingPixelDeepAnvil3 from "../resources/buildings/building-pixel-deepAnvil-3.png?url";
 import buildingPixelGroveSanctum1 from "../resources/buildings/building-pixel-groveSanctum-1.png?url";
+import buildingPixelGroveSanctum2 from "../resources/buildings/building-pixel-groveSanctum-2.png?url";
+import buildingPixelGroveSanctum3 from "../resources/buildings/building-pixel-groveSanctum-3.png?url";
 import buildingPixelWarrenLodge1 from "../resources/buildings/building-pixel-warrenLodge-1.png?url";
+import buildingPixelWarrenLodge2 from "../resources/buildings/building-pixel-warrenLodge-2.png?url";
+import buildingPixelWarrenLodge3 from "../resources/buildings/building-pixel-warrenLodge-3.png?url";
 import buildingPixelSylvanStables1 from "../resources/buildings/building-pixel-sylvanStables-1.png?url";
+import buildingPixelSylvanStables2 from "../resources/buildings/building-pixel-sylvanStables-2.png?url";
+import buildingPixelSylvanStables3 from "../resources/buildings/building-pixel-sylvanStables-3.png?url";
 import buildingPixelWorldrootGrove1 from "../resources/buildings/building-pixel-worldrootGrove-1.png?url";
+import buildingPixelWorldrootGrove3 from "../resources/buildings/building-pixel-worldrootGrove-3.png?url";
 import buildingPixelFarmField1 from "../resources/buildings/building-pixel-farmField-1.png?url";
 import buildingPixelFarmFieldAlt1 from "../resources/buildings/building-pixel-farmField-1-alt.png?url";
 import { Faction, Direction } from "../entities/hero";
@@ -373,9 +380,16 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel.deepAnvil.2": buildingPixelDeepAnvil2,
   "pixel.deepAnvil.3": buildingPixelDeepAnvil3,
   "pixel.groveSanctum.1": buildingPixelGroveSanctum1,
+  "pixel.groveSanctum.2": buildingPixelGroveSanctum2,
+  "pixel.groveSanctum.3": buildingPixelGroveSanctum3,
   "pixel.warrenLodge.1": buildingPixelWarrenLodge1,
+  "pixel.warrenLodge.2": buildingPixelWarrenLodge2,
+  "pixel.warrenLodge.3": buildingPixelWarrenLodge3,
   "pixel.sylvanStables.1": buildingPixelSylvanStables1,
+  "pixel.sylvanStables.2": buildingPixelSylvanStables2,
+  "pixel.sylvanStables.3": buildingPixelSylvanStables3,
   "pixel.worldrootGrove.1": buildingPixelWorldrootGrove1,
+  "pixel.worldrootGrove.3": buildingPixelWorldrootGrove3,
   "pixel.farmField.1": buildingPixelFarmField1,
   "pixel.farmField.2": buildingPixelFarmField1,
   "pixel.farmField.3": buildingPixelFarmField1,
@@ -881,9 +895,16 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.deepAnvil.2": 2,
   "building.pixel.deepAnvil.3": 2,
   "building.pixel.groveSanctum.1": 9,
+  "building.pixel.groveSanctum.2": 8,
+  "building.pixel.groveSanctum.3": 6,
   "building.pixel.warrenLodge.1": 8,
+  "building.pixel.warrenLodge.2": 7,
+  "building.pixel.warrenLodge.3": 4,
   "building.pixel.sylvanStables.1": 10,
+  "building.pixel.sylvanStables.2": 10,
+  "building.pixel.sylvanStables.3": 3,
   "building.pixel.worldrootGrove.1": 6,
+  "building.pixel.worldrootGrove.3": 0,
   "building.pixel.farmField.1": 17,
   "building.pixel.farmField.2": 17,
   "building.pixel.farmField.3": 17,

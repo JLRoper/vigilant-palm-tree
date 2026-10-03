@@ -1,0 +1,9 @@
+Side-view pixel art game asset of a single fantasy battle unit in a dramatic tabletop-miniature style: chunky readable pixels, rich saturated colors with strong three-tone shading ramps and bright rim highlights, bold dark outlines, high contrast that stays readable at small size, fully transparent background, square 1:1 canvas.
+
+Match the attached reference image exactly: it shows this exact unit at rest — same character, same colors, same outfit and proportions, same facing-right side view. Only the pose changes, as described below.
+
+Subject: a thorn-plated lodge guard mid spear-thrust: the towering thorn-tipped spear lunged forward two-handed, body twisted into the strike, living briar armor and bark plates over bark-brown leather strained, thorn shoots curling from the shoulder guards.
+
+Single centered figure facing right, full body visible from head to feet, filling about 75% of the canvas height, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.
+
+This is an armored footman figure, not a building — no walls, roofs, doors, fences, or architecture.
