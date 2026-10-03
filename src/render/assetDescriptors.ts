@@ -106,9 +106,16 @@ import buildingPixelIronMine1 from "../resources/buildings/building-pixel-ironMi
 import buildingPixelIronMine2 from "../resources/buildings/building-pixel-ironMine-2.png?url";
 import buildingPixelIronMine3 from "../resources/buildings/building-pixel-ironMine-3.png?url";
 import buildingPixelCrypt1 from "../resources/buildings/building-pixel-crypt-1.png?url";
+import buildingPixelCrypt3 from "../resources/buildings/building-pixel-crypt-3.png?url";
 import buildingPixelOssuary1 from "../resources/buildings/building-pixel-ossuary-1.png?url";
+import buildingPixelOssuary2 from "../resources/buildings/building-pixel-ossuary-2.png?url";
+import buildingPixelOssuary3 from "../resources/buildings/building-pixel-ossuary-3.png?url";
 import buildingPixelWraithBarrows1 from "../resources/buildings/building-pixel-wraithBarrows-1.png?url";
+import buildingPixelWraithBarrows2 from "../resources/buildings/building-pixel-wraithBarrows-2.png?url";
+import buildingPixelWraithBarrows3 from "../resources/buildings/building-pixel-wraithBarrows-3.png?url";
 import buildingPixelSpireOfAsh1 from "../resources/buildings/building-pixel-spireOfAsh-1.png?url";
+import buildingPixelSpireOfAsh2 from "../resources/buildings/building-pixel-spireOfAsh-2.png?url";
+import buildingPixelSpireOfAsh3 from "../resources/buildings/building-pixel-spireOfAsh-3.png?url";
 import buildingPixelUnderConstruction1 from "../resources/buildings/building-pixel-underConstruction-1.png?url";
 import buildingPixelUnderConstruction2 from "../resources/buildings/building-pixel-underConstruction-2.png?url";
 import buildingPixelUnderConstruction3 from "../resources/buildings/building-pixel-underConstruction-3.png?url";
@@ -340,9 +347,16 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel.ironMine.2": buildingPixelIronMine2,
   "pixel.ironMine.3": buildingPixelIronMine3,
   "pixel.crypt.1": buildingPixelCrypt1,
+  "pixel.crypt.3": buildingPixelCrypt3,
   "pixel.ossuary.1": buildingPixelOssuary1,
+  "pixel.ossuary.2": buildingPixelOssuary2,
+  "pixel.ossuary.3": buildingPixelOssuary3,
   "pixel.wraithBarrows.1": buildingPixelWraithBarrows1,
+  "pixel.wraithBarrows.2": buildingPixelWraithBarrows2,
+  "pixel.wraithBarrows.3": buildingPixelWraithBarrows3,
   "pixel.spireOfAsh.1": buildingPixelSpireOfAsh1,
+  "pixel.spireOfAsh.2": buildingPixelSpireOfAsh2,
+  "pixel.spireOfAsh.3": buildingPixelSpireOfAsh3,
   "pixel.underConstruction.1": buildingPixelUnderConstruction1,
   "pixel.underConstruction.2": buildingPixelUnderConstruction2,
   "pixel.underConstruction.3": buildingPixelUnderConstruction3,
@@ -838,9 +852,16 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.ironMine.2": 10,
   "building.pixel.ironMine.3": 10,
   "building.pixel.crypt.1": 11,
+  "building.pixel.crypt.3": 12,
   "building.pixel.ossuary.1": 11,
+  "building.pixel.ossuary.2": 11,
+  "building.pixel.ossuary.3": 8,
   "building.pixel.wraithBarrows.1": 11,
+  "building.pixel.wraithBarrows.2": 11,
+  "building.pixel.wraithBarrows.3": 11,
   "building.pixel.spireOfAsh.1": 7,
+  "building.pixel.spireOfAsh.2": 7,
+  "building.pixel.spireOfAsh.3": 6,
   "building.pixel.underConstruction.1": 13,
   "building.pixel.underConstruction.2": 11,
   "building.pixel.underConstruction.3": 8,

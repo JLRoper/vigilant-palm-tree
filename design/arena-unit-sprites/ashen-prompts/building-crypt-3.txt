@@ -1,0 +1,7 @@
+Isometric pixel art game asset for a fantasy city-builder, matching the attached reference image exactly in style and content: same chunky pixel size, same 2:1 dimetric isometric projection (standard 30 degree angle), same thick dark outlines around every shape, same pale bone-cream stone with dark charcoal recessed panels and dark slate roof palette, same sandy desert lot, same transparent background, square 1:1 canvas.
+
+Subject: a grand level-3 crypt mausoleum — the burial crypt from the reference grown to its largest and most imposing form: a wide pale bone-cream stone mausoleum body with dark charcoal recessed panels carrying carved bone reliefs, heavy corner pillars built from stacked pale bones, a broad stepped dark slate roof crowned by a small stone cupola holding the same orange-glowing lantern on a finial, and a grand arched iron-barred portal with stone steps at the base.
+
+Plot: a square 20x20 meter lot shown as a diamond, topped with light sandy ground with darker speckles and a few tiny grass tufts, and a thin darker soil slab visible along the front two edges. Pale bones and a few small skull stones scattered along the plot edges, and pale stepping stones leading to the portal. The crypt covers a bit more than half of the footprint.
+
+Single centered asset, nothing outside the plot, clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.

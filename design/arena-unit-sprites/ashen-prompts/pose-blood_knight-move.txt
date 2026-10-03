@@ -1,0 +1,7 @@
+Side-view pixel art game asset of a single fantasy battle unit in a dramatic tabletop-miniature style, matching the attached reference image exactly: the very same character — same black plate armor with red accents, same flowing red cloak, same pale skull-like face under a dark helm, same black warhorse with red caparison details, same proportions and palette — only in a new pose. Chunky readable pixels, rich saturated colors with strong three-tone shading ramps and bright rim highlights, bold dark outlines, high contrast that stays readable at small size, fully transparent background, square 1:1 canvas.
+
+Subject: the blood knight galloping hard to the right: warhorse at full stretch, all hooves airborne mid-gallop, the knight leaning low over the horse's neck with his longsword held low and behind, red cape streaming horizontally.
+
+Single centered horse-and-rider figure facing right, full horse and rider visible, filling about 80% of the canvas width, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.
+
+This is a warrior portrait-free full-body figure, not a building — no walls, roofs, doors, or architecture.
