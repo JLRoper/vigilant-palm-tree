@@ -588,20 +588,11 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     // UpgradeSettlement case). A client that sends one is ignored, not
     // rejected, same as any other extra field on a command body.
     //
-    // upgradePopulationGate IS trusted from the client (see
-    // packages/contracts/src/commands/upgradeSettlement.ts's header for
-    // why that's a deliberate, temporary exception), but only within its
-    // actual domain: it's a fraction of the level's population cap
-    // (packages/engine/src/settlement/upgradeSettlement.ts multiplies it
-    // by POP_BY_LEVEL), so anything outside 0..1 is malformed, not just
-    // unfavorable. 0 is allowed -- it means "no population requirement".
-    if (
-      typeof b.settlementId !== "string" ||
-      typeof b.upgradePopulationGate !== "number" ||
-      !Number.isFinite(b.upgradePopulationGate) ||
-      b.upgradePopulationGate < 0 ||
-      b.upgradePopulationGate > 1
-    ) {
+    // Same for the former upgradePopulationGate field (issue #153): the
+    // population requirement is server-owned now (UPGRADE_POPULATION_GATE
+    // in packages/engine/src/settlement/upgradeSettlement.ts), so a stale
+    // client that still sends the field is ignored, not rejected.
+    if (typeof b.settlementId !== "string") {
       return null;
     }
     return {
@@ -609,7 +600,6 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       gameName,
       actor: b.actor,
       settlementId: b.settlementId,
-      upgradePopulationGate: b.upgradePopulationGate,
     };
   }
 

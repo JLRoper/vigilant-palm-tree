@@ -422,7 +422,7 @@ export async function updateTradeRoute(
 
 export async function upgradeSettlement(
   name: string,
-  payload: { actor: number; settlementId: string; upgradePopulationGate: number }
+  payload: { actor: number; settlementId: string }
 ): Promise<void> {
   await postCommand(name, { kind: "UpgradeSettlement", ...payload });
 }

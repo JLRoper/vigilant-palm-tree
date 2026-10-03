@@ -18,7 +18,6 @@ export interface GameSettings {
   resourceStyle: ResourceStyle;
   territoryBorderWidth: number;
   populationGrowthRate: number;
-  upgradePopulationGate: number;
   spriteVariant: number;
   cityBgOffsetX: number;
   cityBgOffsetY: number;
@@ -54,9 +53,6 @@ const DEFAULT_SPRITE_VARIANT = 1;
 const MIN_GROWTH_RATE = 0.01;
 const MAX_GROWTH_RATE = 0.50;
 const DEFAULT_GROWTH_RATE = 0.10;
-const MIN_UPGRADE_GATE = 0.25;
-const MAX_UPGRADE_GATE = 1.00;
-const DEFAULT_UPGRADE_GATE = 0.85;
 const MIN_BG_OFFSET = -500;
 const MAX_BG_OFFSET = 500;
 const DEFAULT_BG_OFFSET = 0;
@@ -79,7 +75,6 @@ export const DEFAULT_SETTINGS: GameSettings = {
   resourceStyle: DEFAULT_RESOURCE_STYLE,
   territoryBorderWidth: DEFAULT_BORDER_WIDTH,
   populationGrowthRate: DEFAULT_GROWTH_RATE,
-  upgradePopulationGate: DEFAULT_UPGRADE_GATE,
   spriteVariant: DEFAULT_SPRITE_VARIANT,
   cityBgOffsetX: DEFAULT_BG_OFFSET,
   cityBgOffsetY: DEFAULT_BG_OFFSET,
@@ -124,12 +119,6 @@ export function clampGrowthRate(r: number): number {
   return Math.round(clamped * 100) / 100;
 }
 
-export function clampUpgradeGate(g: number): number {
-  if (!Number.isFinite(g)) return DEFAULT_UPGRADE_GATE;
-  const clamped = Math.max(MIN_UPGRADE_GATE, Math.min(MAX_UPGRADE_GATE, g));
-  return Math.round(clamped * 100) / 100;
-}
-
 export function clampSpriteVariant(v: unknown): number {
   if (typeof v === "number" && Number.isFinite(v)) {
     return Math.max(MIN_SPRITE_VARIANT, Math.min(MAX_SPRITE_VARIANT, Math.round(v)));
@@ -168,7 +157,6 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
     resourceStyle: clampResourceStyle(patch.resourceStyle ?? current.resourceStyle),
     territoryBorderWidth: clampBorderWidth(patch.territoryBorderWidth ?? current.territoryBorderWidth),
     populationGrowthRate: clampGrowthRate(patch.populationGrowthRate ?? current.populationGrowthRate),
-    upgradePopulationGate: clampUpgradeGate(patch.upgradePopulationGate ?? current.upgradePopulationGate),
     spriteVariant: clampSpriteVariant(patch.spriteVariant ?? current.spriteVariant),
     cityBgOffsetX: clampBgOffset(patch.cityBgOffsetX ?? current.cityBgOffsetX),
     cityBgOffsetY: clampBgOffset(patch.cityBgOffsetY ?? current.cityBgOffsetY),
@@ -216,10 +204,6 @@ export function growthRateBounds(): { min: number; max: number; default: number 
   return { min: MIN_GROWTH_RATE, max: MAX_GROWTH_RATE, default: DEFAULT_GROWTH_RATE };
 }
 
-export function upgradeGateBounds(): { min: number; max: number; default: number } {
-  return { min: MIN_UPGRADE_GATE, max: MAX_UPGRADE_GATE, default: DEFAULT_UPGRADE_GATE };
-}
-
 function loadFromStorage(): GameSettings {
   if (typeof localStorage === "undefined") return { ...DEFAULT_SETTINGS };
   try {
@@ -232,7 +216,6 @@ function loadFromStorage(): GameSettings {
       resourceStyle: clampResourceStyle(parsed.resourceStyle),
       territoryBorderWidth: clampBorderWidth(parsed.territoryBorderWidth ?? DEFAULT_BORDER_WIDTH),
       populationGrowthRate: clampGrowthRate(parsed.populationGrowthRate ?? DEFAULT_GROWTH_RATE),
-      upgradePopulationGate: clampUpgradeGate(parsed.upgradePopulationGate ?? DEFAULT_UPGRADE_GATE),
       spriteVariant: clampSpriteVariant(parsed.spriteVariant),
       cityBgOffsetX: clampBgOffset(parsed.cityBgOffsetX ?? DEFAULT_BG_OFFSET),
       cityBgOffsetY: clampBgOffset(parsed.cityBgOffsetY ?? DEFAULT_BG_OFFSET),

@@ -1949,7 +1949,6 @@ test("UpgradeSettlement starts an upgrade on a level-1 settlement with enough re
     gameName: "test-game",
     actor: 0,
     settlementId: "s0",
-    upgradePopulationGate: 0,
   };
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, true);
@@ -1967,7 +1966,6 @@ test("UpgradeSettlement rejects a missing settlement", async () => {
     gameName: "test-game",
     actor: 0,
     settlementId: "does-not-exist",
-    upgradePopulationGate: 0,
   };
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, false);
@@ -1993,18 +1991,16 @@ test("UpgradeSettlement rejects a settlement the actor doesn't own -- startSettl
     gameName: "test-game",
     actor: 0,
     settlementId: "s0",
-    upgradePopulationGate: 0,
   };
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "forbidden_not_your_settlement");
 });
 
-test("UpgradeSettlement rejects when population is below the client-supplied gate", async () => {
-  // upgradePopulationGate is trusted from the client (see
-  // packages/contracts/src/commands/upgradeSettlement.ts's header comment)
-  // -- this pins down that the server still enforces whatever gate value it
-  // was sent, not that it ignores the gate entirely.
+test("UpgradeSettlement enforces the server-owned population gate regardless of what the client sends", async () => {
+  // issue #153: the gate used to be client-trusted (0 == "no requirement").
+  // Now the engine constant UPGRADE_POPULATION_GATE applies, and a spoofed /
+  // stale upgradePopulationGate field on the body is ignored, not honored.
   const row = makeRow(
     [makeHero("h0", 0, 2, 2)],
     [
@@ -2018,13 +2014,13 @@ test("UpgradeSettlement rejects when population is below the client-supplied gat
     ],
   );
   const { deps } = makeDeps(row);
-  const command: Command = {
+  const command = {
     kind: "UpgradeSettlement",
     gameName: "test-game",
     actor: 0,
     settlementId: "s0",
-    upgradePopulationGate: 1,
-  };
+    upgradePopulationGate: 0,
+  } as unknown as Command;
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "population_too_low");
@@ -2242,7 +2238,6 @@ test("UpgradeSettlement survives an EndTurn round-trip -- the gap this port clos
     gameName: "test-game",
     actor: 0,
     settlementId: "s0",
-    upgradePopulationGate: 0,
   };
   assert.equal((await handleCommand(upgrade, deps)).ok, true);
 

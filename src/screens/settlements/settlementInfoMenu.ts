@@ -13,9 +13,8 @@ import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
 import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../../render/assetDescriptors";
 import { bankRejectionMessage, bankRowModel, treasuryRowModel, type BankGoldDirection, type BankRowModel } from "./bankRows";
 import { TREASURY_CAP_AMBER, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
-import { settings } from "../../state/settings";
 import type { HorseVariant } from "../../state/settings";
-import { POP_BY_LEVEL } from "@heroes/engine";
+import { POP_BY_LEVEL, UPGRADE_POPULATION_GATE } from "@heroes/engine";
 import { pickHeroName } from "../../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 
@@ -438,7 +437,7 @@ export class SettlementInfoMenu {
       } else {
         this.upgradeInfo.style.display = "";
         const cost = SETTLEMENT_UPGRADE_COSTS[settlement.level];
-        const gatePct = settings().upgradePopulationGate;
+        const gatePct = UPGRADE_POPULATION_GATE;
         const levelMax = POP_BY_LEVEL[settlement.level] ?? 500;
         const popReq = Math.ceil(gatePct * levelMax);
         const townHall = settlement.buildings.find((b) => b.kind === "townHall");

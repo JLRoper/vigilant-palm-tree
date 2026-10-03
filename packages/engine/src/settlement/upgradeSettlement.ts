@@ -6,13 +6,20 @@ export const SETTLEMENT_UPGRADE_COSTS: Record<number, { gold: number; wood: numb
   2: { gold: 15000, wood: 80, stone: 60, iron: 50, arcane: 20, days: 25 },
 };
 
+// Server-owned population requirement for settlement-level upgrades, as a
+// fraction of the level's population cap (POP_BY_LEVEL). Replaces the
+// former client-trusted upgradePopulationGate command field (issue #153):
+// the value used to ride a user-adjustable settings slider, and 0 was a
+// wire-valid "no requirement" bypass. If difficulty scaling ever needs a
+// per-game gate, promote this to a BuildInitialOptions-derived value.
+export const UPGRADE_POPULATION_GATE = 0.85;
+
 export function startSettlementUpgrade(
   state: GameState,
   settlementId: SettlementId,
   targetLevel: 2 | 3,
   newResourceRates: Partial<Record<ResourceType, number>>,
   newCitySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>,
-  upgradePopulationGate: number,
 ): StartUpgradeResult {
   const s = state.settlements[settlementId];
   if (!s) return { state, ok: false, reason: "no_settlement" };
@@ -27,7 +34,7 @@ export function startSettlementUpgrade(
   if ((s.warehouse.arcane ?? 0) < cost.arcane) return { state, ok: false, reason: "insufficient_arcane" };
 
   const levelMax = POP_BY_LEVEL[s.level] ?? 500;
-  if (s.population < upgradePopulationGate * levelMax) return { state, ok: false, reason: "population_too_low" };
+  if (s.population < UPGRADE_POPULATION_GATE * levelMax) return { state, ok: false, reason: "population_too_low" };
 
   const townHall = s.buildings.find((b) => b.kind === "townHall");
   if (!townHall || townHall.level < targetLevel) return { state, ok: false, reason: "town_hall_level_too_low" };

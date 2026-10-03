@@ -1681,10 +1681,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         targetLevel,
         computed.rates,
         newCitySpots,
-        // upgradePopulationGate is trusted from the client -- see
-        // packages/contracts/src/commands/upgradeSettlement.ts's header
-        // comment for why this is a deliberate, temporary exception.
-        command.upgradePopulationGate,
+        // The population requirement is server-owned: UPGRADE_POPULATION_GATE
+        // inside the engine (issue #153 closed the client-trusted field).
       );
       if (!result.ok) {
         return { ok: false, reason: result.reason, events: [] };

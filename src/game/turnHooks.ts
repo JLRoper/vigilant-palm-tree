@@ -413,12 +413,11 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     onUpgradeSettlement: async (
       actor: number,
       settlementId: SettlementId,
-      upgradePopulationGate: number,
     ): Promise<void> => {
       const name = opts.gameName();
       if (!name) return;
       try {
-        await upgradeSettlement(name, { actor, settlementId, upgradePopulationGate });
+        await upgradeSettlement(name, { actor, settlementId });
       } catch (e) {
         reportCommandFailure("Upgrade settlement", e);
       }

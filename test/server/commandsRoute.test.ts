@@ -154,7 +154,6 @@ test("POST /games/:name/commands accepts UpgradeSettlement over HTTP (was a 400 
       kind: "UpgradeSettlement",
       actor: 0,
       settlementId,
-      upgradePopulationGate: 0.85,
     }, token);
     assert.equal(res.status, 200, await res.clone().text());
     const body = (await res.json()) as { settlement?: SettlementState };
@@ -177,7 +176,6 @@ test("UpgradeSettlement ignores a client-supplied targetLevel and derives it ser
       kind: "UpgradeSettlement",
       actor: 0,
       settlementId,
-      upgradePopulationGate: 0.85,
       targetLevel: 3,
     }, token);
     assert.equal(res.status, 200, await res.clone().text());
@@ -512,26 +510,33 @@ test("UpgradeBuilding with an empty requests array reaches the reducer as a 409,
   }
 });
 
-test("UpgradeSettlement with an out-of-domain upgradePopulationGate is a 400", async () => {
+test("UpgradeSettlement ignores a stale/spoofed upgradePopulationGate field (issue #153)", async () => {
   const name = uniqueName();
   const { settlementId } = ids(name);
   const token = await seedGame(name, settlementUpgradeSettlement(name));
   try {
-    // The gate is a fraction of the level's population cap, so anything
-    // outside 0..1 (or not a number at all) is malformed rather than merely
-    // unfavorable.
-    for (const upgradePopulationGate of [1.5, -0.1, "0.85"]) {
+    // The population requirement is server-owned now (UPGRADE_POPULATION_GATE
+    // in the engine), so the former client-supplied gate is just an extra
+    // body field: ignored, not validated, not honored. No value may 400
+    // anymore; the first (a real upgrade command) proceeds on its merits and
+    // the rest hit upgrade_in_progress once it has started.
+    let first = true;
+    for (const upgradePopulationGate of [1.5, -0.1, "0.85", 0]) {
       const res = await postCommand(name, {
         kind: "UpgradeSettlement",
         actor: 0,
         settlementId,
         upgradePopulationGate,
       }, token);
-      assert.equal(
+      assert.notEqual(
         res.status,
         400,
-        `gate ${JSON.stringify(upgradePopulationGate)} should be rejected`,
+        `gate ${JSON.stringify(upgradePopulationGate)} should be ignored, not rejected`,
       );
+      if (first) {
+        assert.equal(res.status, 200, await res.clone().text());
+        first = false;
+      }
     }
   } finally {
     await cleanupGame(name);

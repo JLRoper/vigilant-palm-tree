@@ -89,7 +89,7 @@ Settlements gain population weekly during `applyWeeklyUpkeep` (day % 7 === 0), p
 - **Cap:** Population cannot exceed the level's maximum (see [settlements.md](./settlements.md) level table)
 - **No food penalty:** Population simply doesn't grow; existing morale decay still applies
 
-Growth rate and the upgrade population gate percentage are player-configurable in Settings.
+Growth rate is player-configurable in Settings. The upgrade population gate is not — it is the engine-owned constant `UPGRADE_POPULATION_GATE` (85% of level cap, `packages/engine/src/settlement/upgradeSettlement.ts`, issue #153).
 
 ## Morale
 

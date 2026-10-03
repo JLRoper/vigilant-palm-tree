@@ -70,12 +70,11 @@ Settlements grow naturally each week, provided they have enough food to sustain 
 - **Cap:** Level's maximum population (500 / 1,500 / 5,000)
 - **No growth penalty:** When food is short, population simply doesn't grow (morale decay handles the penalty separately)
 
-The growth rate and upgrade population gate are configurable in Settings:
+The growth rate is configurable in Settings; the upgrade population gate is **not** player-configurable — it is the engine-owned constant `UPGRADE_POPULATION_GATE` (85%, `packages/engine/src/settlement/upgradeSettlement.ts`, issue #153):
 
 | Setting | Default | Range | Step |
 |---------|---------|-------|------|
 | Population Growth Rate | 10% | 1%–50% | 1% |
-| Upgrade Population Gate | 85% | 25%–100% | 5% |
 
 Source: [`src/state/settings.ts`](../src/state/settings.ts), growth logic in [`src/state/gameState.ts`](../src/state/gameState.ts) `applyWeeklyUpkeep`.
 
@@ -107,7 +106,7 @@ Settlements can be upgraded to the next tier through an active construction proc
 
 ### Process
 
-1. **Pre-requisite check:** Population must meet the gate threshold (default 85% of level cap), and Town Hall must be at or above the target level.
+1. **Pre-requisite check:** Population must meet the gate threshold (85% of level cap — the engine constant `UPGRADE_POPULATION_GATE`, not player-configurable), and Town Hall must be at or above the target level.
 2. **Initiation:** Player clicks the upgrade button in the settlement info panel. Costs are deducted immediately from the settlement treasury and warehouse.
 3. **Construction:** `daysRemaining` counts down each `advanceRound`. Settlement operates normally during construction (production, income, growth continue).
 4. **Completion:** When `daysRemaining` reaches 0:

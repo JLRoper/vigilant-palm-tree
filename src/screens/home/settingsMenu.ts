@@ -7,7 +7,6 @@ import {
   borderWidthBounds,
   resourceStyleOptions,
   growthRateBounds,
-  upgradeGateBounds,
   spriteVariantOptions,
   bgOffsetBounds,
   parallaxLayerCountBounds,
@@ -128,7 +127,6 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   const enemyBounds = enemyMoveDurationBounds();
   const borderBounds = borderWidthBounds();
   const growthBounds = growthRateBounds();
-  const gateBounds = upgradeGateBounds();
   const current = settings();
   const mapInfo = opts.getMapInfo?.() ?? null;
   const refreshList: Array<() => void> = [];
@@ -378,52 +376,6 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     refreshList.push(() => refreshGrowth(settings()));
 
     children.push(growthRow);
-
-    // Upgrade gate
-    const gateRow = document.createElement("div");
-    gateRow.style.display = "flex";
-    gateRow.style.flexDirection = "column";
-    gateRow.style.gap = "6px";
-
-    const gateLabelRow = document.createElement("div");
-    gateLabelRow.style.display = "flex";
-    gateLabelRow.style.justifyContent = "space-between";
-    gateLabelRow.style.alignItems = "baseline";
-
-    const gateLabel = document.createElement("span");
-    gateLabel.textContent = "Upgrade population gate";
-    gateLabelRow.appendChild(gateLabel);
-
-    const gateValue = document.createElement("span");
-    gateValue.style.fontVariantNumeric = "tabular-nums";
-    gateLabelRow.appendChild(gateValue);
-
-    const gateSlider = document.createElement("input");
-    gateSlider.type = "range";
-    gateSlider.min = String(gateBounds.min);
-    gateSlider.max = String(gateBounds.max);
-    gateSlider.step = "0.05";
-    gateSlider.style.width = "100%";
-    gateSlider.style.accentColor = "#f77f00";
-    gateRow.appendChild(gateSlider);
-
-    const gateHint = document.createElement("div");
-    gateHint.style.fontSize = "10px";
-    gateHint.style.opacity = "0.55";
-    gateRow.appendChild(gateHint);
-
-    function refreshGate(next: GameSettings): void {
-      gateSlider.value = String(next.upgradePopulationGate);
-      gateValue.textContent = `${Math.round(next.upgradePopulationGate * 100)}%`;
-      gateHint.textContent = `% of level cap needed before upgrading a settlement. (Range ${Math.round(gateBounds.min * 100)}\u2013${Math.round(gateBounds.max * 100)}%)`;
-    }
-    refreshGate(current);
-    gateSlider.addEventListener("input", () => {
-      updateSettings({ upgradePopulationGate: Number(gateSlider.value) });
-    });
-    refreshList.push(() => refreshGate(settings()));
-
-    children.push(gateRow);
 
     makeFoldableSection(content, "Population", children, true);
   }
@@ -792,7 +744,6 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
       resourceStyle: "rune-stone",
       territoryBorderWidth: borderBounds.default,
       populationGrowthRate: growthBounds.default,
-      upgradePopulationGate: gateBounds.default,
       spriteVariant: 1,
       cityBgOffsetX: bgBounds.default,
       cityBgOffsetY: bgBounds.default,

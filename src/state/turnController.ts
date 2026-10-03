@@ -14,7 +14,7 @@ import {
   resolveBattle,
   rollbackCaptureSettlement,
 } from "@heroes/engine";
-import { settings, type HorseVariant } from "./settings";
+import type { HorseVariant } from "./settings";
 import type { BattleResult, SettlementBattleOutcome, UnitType } from "@heroes/engine";
 import {
   selectHero as selectHeroReducer,
@@ -127,7 +127,7 @@ export interface TurnControllerHooks {
   // plan/2026-08-17-issue-88-remaining-command-ports.md Tracks 1/2: same
   // fire-and-forget shape as the rest of this block.
   onUpgradeBuilding(actor: number, settlementId: SettlementId, requests: BuildingUpgradeRequest[]): Promise<void>;
-  onUpgradeSettlement(actor: number, settlementId: SettlementId, upgradePopulationGate: number): Promise<void>;
+  onUpgradeSettlement(actor: number, settlementId: SettlementId): Promise<void>;
   // F4 closer: fired on every city-view placement/destroy change with the
   // full working cart. Tracked like the rest so End Turn drains it first --
   // the server's EndTurn pipeline is what ticks BuildingDef.construction,
@@ -1334,7 +1334,6 @@ export class TurnController {
       targetLevel,
       computed.rates,
       newCitySpots,
-      settings().upgradePopulationGate,
     );
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
@@ -1342,8 +1341,7 @@ export class TurnController {
         type: "settlement_upgrade_started",
         payload: { settlementId, targetLevel },
       },
-      hook: () =>
-        this.hooks.onUpgradeSettlement(result.state.activePlayerId, settlementId, settings().upgradePopulationGate),
+      hook: () => this.hooks.onUpgradeSettlement(result.state.activePlayerId, settlementId),
       hookLabel: "onUpgradeSettlement",
     });
     return { ok: true, reason: "" };

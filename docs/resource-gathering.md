@@ -188,7 +188,7 @@ All upgrades deduct costs **immediately at initiation** and are **server-authori
   | Arcane | — | 20 |
   | Days | 15 | 25 |
 
-  Requires population ≥ the configurable gate (default 85% of level cap) and Town Hall level ≥ target. On completion, the precomputed `newResourceRates` (computed at the **target** level) replace the old rates.
+  Requires population ≥ the engine-owned gate (`UPGRADE_POPULATION_GATE`, 85% of level cap — not player-configurable) and Town Hall level ≥ target. On completion, the precomputed `newResourceRates` (computed at the **target** level) replace the old rates.
 
 - **In-progress visuals (shipped):** while an upgrade is in flight, the city view renders targeted buildings with shared construction-stage sprites instead of the finished building: stage 1 (staked plot + wood pile) below 5% progress, stage 2 (foundation + low scaffolding) from 5%, stage 3 (scaffolded near-complete shell) at ≥ 75%, then the real building sprite on completion. Progress = `1 − daysRemaining / totalDays`, where `totalDays` is derived from the cost tables (`upgradeTotalDays`, `packages/engine/src/settlement/construction.ts`) — TH 7/12d, buildings 4/7d (max across batch requests), settlement tier 15/25d. The `settlement`-tier upgrade stages nothing (it has no grid building). Wiring: `CitySceneInput.upgrades` → `CityBuildingNode.constructionStage` → `paintCityBuilding` resolves `building.pixel.underConstruction.{stage}`.
 
