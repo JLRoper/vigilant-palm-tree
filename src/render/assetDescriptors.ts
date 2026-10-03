@@ -113,9 +113,16 @@ import buildingPixelUnderConstruction1 from "../resources/buildings/building-pix
 import buildingPixelUnderConstruction2 from "../resources/buildings/building-pixel-underConstruction-2.png?url";
 import buildingPixelUnderConstruction3 from "../resources/buildings/building-pixel-underConstruction-3.png?url";
 import buildingPixelForgeHall1 from "../resources/buildings/building-pixel-forgeHall-1.png?url";
+import buildingPixelForgeHall2 from "../resources/buildings/building-pixel-forgeHall-2.png?url";
+import buildingPixelForgeHall3 from "../resources/buildings/building-pixel-forgeHall-3.png?url";
 import buildingPixelGunnersRedoubt1 from "../resources/buildings/building-pixel-gunnersRedoubt-1.png?url";
+import buildingPixelGunnersRedoubt3 from "../resources/buildings/building-pixel-gunnersRedoubt-3.png?url";
 import buildingPixelGolemFoundry1 from "../resources/buildings/building-pixel-golemFoundry-1.png?url";
+import buildingPixelGolemFoundry2 from "../resources/buildings/building-pixel-golemFoundry-2.png?url";
+import buildingPixelGolemFoundry3 from "../resources/buildings/building-pixel-golemFoundry-3.png?url";
 import buildingPixelDeepAnvil1 from "../resources/buildings/building-pixel-deepAnvil-1.png?url";
+import buildingPixelDeepAnvil2 from "../resources/buildings/building-pixel-deepAnvil-2.png?url";
+import buildingPixelDeepAnvil3 from "../resources/buildings/building-pixel-deepAnvil-3.png?url";
 import buildingPixelGroveSanctum1 from "../resources/buildings/building-pixel-groveSanctum-1.png?url";
 import buildingPixelWarrenLodge1 from "../resources/buildings/building-pixel-warrenLodge-1.png?url";
 import buildingPixelSylvanStables1 from "../resources/buildings/building-pixel-sylvanStables-1.png?url";
@@ -341,9 +348,16 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel.underConstruction.3": buildingPixelUnderConstruction3,
   "pixel.smithy.2": buildingPixelSmithy2,
   "pixel.forgeHall.1": buildingPixelForgeHall1,
+  "pixel.forgeHall.2": buildingPixelForgeHall2,
+  "pixel.forgeHall.3": buildingPixelForgeHall3,
   "pixel.gunnersRedoubt.1": buildingPixelGunnersRedoubt1,
+  "pixel.gunnersRedoubt.3": buildingPixelGunnersRedoubt3,
   "pixel.golemFoundry.1": buildingPixelGolemFoundry1,
+  "pixel.golemFoundry.2": buildingPixelGolemFoundry2,
+  "pixel.golemFoundry.3": buildingPixelGolemFoundry3,
   "pixel.deepAnvil.1": buildingPixelDeepAnvil1,
+  "pixel.deepAnvil.2": buildingPixelDeepAnvil2,
+  "pixel.deepAnvil.3": buildingPixelDeepAnvil3,
   "pixel.groveSanctum.1": buildingPixelGroveSanctum1,
   "pixel.warrenLodge.1": buildingPixelWarrenLodge1,
   "pixel.sylvanStables.1": buildingPixelSylvanStables1,
@@ -835,9 +849,16 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.woodcutterHut.3": 8,
   "building.pixel.smithy.2": 4,
   "building.pixel.forgeHall.1": 8,
+  "building.pixel.forgeHall.2": 8,
+  "building.pixel.forgeHall.3": 8,
   "building.pixel.gunnersRedoubt.1": 11,
+  "building.pixel.gunnersRedoubt.3": 11,
   "building.pixel.golemFoundry.1": 8,
+  "building.pixel.golemFoundry.2": 8,
+  "building.pixel.golemFoundry.3": 8,
   "building.pixel.deepAnvil.1": 2,
+  "building.pixel.deepAnvil.2": 2,
+  "building.pixel.deepAnvil.3": 2,
   "building.pixel.groveSanctum.1": 9,
   "building.pixel.warrenLodge.1": 8,
   "building.pixel.sylvanStables.1": 10,
