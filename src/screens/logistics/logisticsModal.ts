@@ -10,14 +10,54 @@ import {
   playerTreasuryWagonsUnassigned,
   playerWagonsOwned,
   playerWagonsUnassigned,
+  routeOwnerId,
+  settlementProductionRates,
   settlementResourceCap,
   settlementTreasuryCap,
-  warehouseRates,
 } from "@heroes/engine";
 import { cachedUnitTypes } from "../../data/unitCatalog";
+import { showToast } from "../shared/toast";
 import { openCenteredModal, styleButton, styleInput } from "@screens/shared/menu";
 
 const RES: WarehouseResource[] = ["wood", "stone", "iron", "arcane", "food"];
+
+// U2 (logistics-interface-fixes plan §5.8): local {ok, reason} rejections used
+// to vanish — with the standard 0-wagon starting pool, Accept and wagon "+1"
+// silently did nothing. The same toast surface reportCommandFailure feeds
+// (src/screens/shared/toast.ts) now carries the engine's reason codes.
+const REJECTION_MESSAGES: Record<string, string> = {
+  not_your_turn: "it is not your turn",
+  no_hero: "the hero no longer exists",
+  no_settlement: "the settlement no longer exists",
+  no_player: "the player seat no longer exists",
+  no_route: "the route no longer exists",
+  forbidden_not_your_hero: "the hero is not yours",
+  forbidden_not_your_settlement: "the settlement is not yours",
+  not_enough_gold: "not enough gold in the settlement treasury",
+  not_enough_wood: "not enough wood in the settlement warehouse",
+  not_enough_wagons: "the hero has no wagons of that slot to give back",
+  not_enough_wagons_unassigned: "no unassigned wagons — buy one below",
+  no_unassigned_wagons: "no unassigned wagons — buy one below",
+  same_endpoint: "origin and destination are the same endpoint",
+  same_tile: "origin and destination share a tile — a caravan could never load",
+  route_in_flight: "the caravan is mid-flight — wait for it to come home",
+  route_needs_a_wagon: "a route always keeps at least one wagon",
+  invalid_amount: "invalid wagon count",
+  invalid_resource: "invalid payload resource",
+  nothing_transferred: "nothing was transferred",
+};
+
+function rejectionToast(action: string, reason: string): void {
+  const known = REJECTION_MESSAGES[reason];
+  showToast(`Logistics — ${action} failed: ${known ?? reason.replace(/_/g, " ")}`, "error");
+}
+
+function setUnavailable(btn: HTMLButtonElement, title: string): void {
+  btn.disabled = true;
+  btn.style.opacity = "0.4";
+  btn.style.cursor = "default";
+  btn.title = title;
+}
 
 /** Display label for a route endpoint: settlement names as-is, heroes distinctly. */
 function endpointLabel(state: GameState, endpoint: TradeRouteEndpoint): string {
@@ -134,8 +174,12 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
           styleButton(btn);
           btn.style.fontSize = "10px";
           btn.style.padding = "1px 6px";
+          if (delta > 0 && poolUnassigned <= 0) {
+            setUnavailable(btn, "no unassigned wagons — buy one below");
+          }
           btn.addEventListener("click", () => {
-            opts.actions.assignWagons(hero.id, delta, slot);
+            const result = opts.actions.assignWagons(hero.id, delta, slot);
+            if (!result.ok) rejectionToast(delta > 0 ? "wagon assignment" : "wagon return", result.reason);
             setTimeout(render, 30);
           });
           row.appendChild(btn);
@@ -176,15 +220,19 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       ).join(" · ");
       stock.style.opacity = "0.8";
       row.appendChild(stock);
-      // Per-turn production rates — the Phase 0 rates surface, restored from
-      // warehouseRates() (the same loop production delivers through; never
-      // the raw resourceRates map, whose gold entry nothing ever pays).
-      const rates = warehouseRates(s.resourceRates);
+      // Per-turn production rates — BOTH halves of the production loop,
+      // combined by settlementProductionRates: the warehouseRates() tile
+      // rates plus the per-building producers (farmField/farmhouse/granary
+      // food, woodcutterHut wood, goldMine gold; in-construction buildings
+      // contribute nothing). Gold goes to the treasury, not the warehouse, so
+      // it is shown as its own segment; the tile rate map's gold entry is
+      // never paid and is deliberately absent.
+      const production = settlementProductionRates(s, state.castleSeed);
+      const productionParts = production.rates.map((r) => `${r.perTurn} ${r.resource}`);
+      if (production.goldPerTurn > 0) productionParts.push(`${production.goldPerTurn} gold (treasury)`);
       const ratesRow = document.createElement("div");
       ratesRow.textContent =
-        rates.length > 0
-          ? `+${rates.map((r) => `${r.perTurn} ${r.resource}`).join(", +")}/turn`
-          : "no warehouse production";
+        productionParts.length > 0 ? `+${productionParts.join(", +")}/turn` : "no production";
       ratesRow.style.cssText = "font-size:11px;opacity:0.65;";
       row.appendChild(ratesRow);
       const buyRow = document.createElement("div");
@@ -200,7 +248,8 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         buyBtn.style.fontSize = "10px";
         buyBtn.style.padding = "1px 6px";
         buyBtn.addEventListener("click", () => {
-          opts.actions.buyWagons(s.id, 1, slot);
+          const result = opts.actions.buyWagons(s.id, 1, slot);
+          if (!result.ok) rejectionToast("wagon purchase", result.reason);
           setTimeout(render, 30);
         });
         buyRow.appendChild(buyBtn);
@@ -218,6 +267,10 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
     const recommendations = evaluateTradeNeeds(state, state.activePlayerId, cachedUnitTypes());
     if (recommendations.length > 0) {
       section("Recommended routes");
+      const poolFor = (payload: TradeRoutePayload): number =>
+        payload.kind === "gold"
+          ? (player?.treasuryWagonsUnassigned ?? 0)
+          : (player?.wagonsUnassigned ?? 0);
       for (const rec of recommendations) {
         const row = document.createElement("div");
         row.style.cssText =
@@ -234,8 +287,12 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         styleButton(acceptBtn);
         acceptBtn.style.fontSize = "10px";
         acceptBtn.style.padding = "1px 8px";
+        if (poolFor(rec.payload) <= 0) {
+          setUnavailable(acceptBtn, "no unassigned wagons — buy one below");
+        }
         acceptBtn.addEventListener("click", () => {
-          opts.actions.createTradeRoute(rec.from, rec.to, rec.payload, rec.wagons);
+          const result = opts.actions.createTradeRoute(rec.from, rec.to, rec.payload, rec.wagons);
+          if (!result.ok) rejectionToast("route creation", result.reason);
           setTimeout(render, 30);
         });
         row.appendChild(acceptBtn);
@@ -247,9 +304,30 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       acceptAll.style.fontSize = "10px";
       acceptAll.style.padding = "1px 8px";
       acceptAll.addEventListener("click", () => {
+        // Continues past failures (a mid-list rejection used to silently
+        // strand the rest) and summarizes the outcome — created N, failed M
+        // with the reasons — instead of breaking on the first rejection.
+        let created = 0;
+        const failures = new Map<string, number>();
         for (const rec of recommendations) {
           const result = opts.actions.createTradeRoute(rec.from, rec.to, rec.payload, rec.wagons);
-          if (!result.ok) break;
+          if (result.ok) {
+            created++;
+          } else {
+            failures.set(result.reason, (failures.get(result.reason) ?? 0) + 1);
+          }
+        }
+        const failed = [...failures.values()].reduce((a, b) => a + b, 0);
+        const reasonText = [...failures.entries()]
+          .map(([reason, count]) => `${count}× ${REJECTION_MESSAGES[reason] ?? reason}`)
+          .join("; ");
+        if (failed === 0) {
+          showToast(`Created ${created} trade route${created === 1 ? "" : "s"}.`, "info");
+        } else {
+          showToast(
+            `Trade routes — created ${created}, failed ${failed}${reasonText ? `: ${reasonText}` : ""}.`,
+            created > 0 ? "info" : "error",
+          );
         }
         setTimeout(render, 30);
       });
@@ -259,14 +337,12 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
     // ── Trade routes ──
     section("Trade routes");
     const routes = state.tradeRoutes ?? [];
-    // A route belongs to the active player when its FROM endpoint does --
-    // settlement or hero, resolved per kind.
-    const playerRoutes = routes.filter((r) => {
-      if (r.from.kind === "settlement") {
-        return state.settlements[r.from.id]?.ownerId === state.activePlayerId;
-      }
-      return state.heroes[r.from.id]?.ownerId === state.activePlayerId;
-    });
+    // U3: a route belongs to its persisted owner when stamped (hydrated
+    // routes always carry one) — the old FROM-endpoint-only derivation
+    // misfiled a captured origin under the capturer and made a route vanish
+    // entirely once its origin hero died. Absent stamp falls back to the
+    // FROM endpoint's live owner (legacy rows).
+    const playerRoutes = routes.filter((r) => routeOwnerId(r, state) === state.activePlayerId);
     if (playerRoutes.length === 0) {
       const empty = document.createElement("div");
       empty.textContent = "No routes yet.";
@@ -297,7 +373,8 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         btn.style.fontSize = "10px";
         btn.style.padding = "1px 5px";
         btn.addEventListener("click", () => {
-          opts.actions.updateTradeRoute(route.id, { wagonsDelta: delta });
+          const result = opts.actions.updateTradeRoute(route.id, { wagonsDelta: delta });
+          if (!result.ok) rejectionToast("route update", result.reason);
           setTimeout(render, 30);
         });
         row.appendChild(btn);
@@ -307,8 +384,10 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       styleButton(removeBtn);
       removeBtn.style.fontSize = "10px";
       removeBtn.style.padding = "1px 6px";
+      removeBtn.title = "Disband this route (wagons return to the pool; cargo aboard is lost)";
       removeBtn.addEventListener("click", () => {
-        opts.actions.updateTradeRoute(route.id, { remove: true });
+        const result = opts.actions.updateTradeRoute(route.id, { remove: true });
+        if (!result.ok) rejectionToast("route removal", result.reason);
         setTimeout(render, 30);
       });
       row.appendChild(removeBtn);
@@ -372,6 +451,28 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       const createBtn = document.createElement("button");
       createBtn.textContent = "Create";
       styleButton(createBtn);
+      // U4: the engine rejects an over-pool create (not_enough_wagons_unassigned)
+      // rather than clamping, so the button pre-disables to match and says why.
+      const updateCreateAvailability = (): void => {
+        const isGold = payloadSel.value === "gold";
+        const pool = isGold
+          ? (player?.treasuryWagonsUnassigned ?? 0)
+          : (player?.wagonsUnassigned ?? 0);
+        const wanted = Math.max(1, Math.floor(Number(wagonInput.value) || 1));
+        if (wanted > pool) {
+          setUnavailable(
+            createBtn,
+            `needs ${wanted} unassigned ${isGold ? "carts" : "wagons"} — the pool has ${pool} (buy more below)`,
+          );
+        } else {
+          createBtn.disabled = false;
+          createBtn.style.opacity = "1";
+          createBtn.style.cursor = "pointer";
+          createBtn.title = "";
+        }
+      };
+      wagonInput.addEventListener("input", updateCreateAvailability);
+      payloadSel.addEventListener("change", updateCreateAvailability);
       createBtn.addEventListener("click", () => {
         const parseEndpoint = (value: string): TradeRouteEndpoint | null => {
           if (value.startsWith("s:")) return { kind: "settlement", id: value.slice(2) };
@@ -387,16 +488,18 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
             ? { kind: "gold" }
             : { kind: "resource", resource: payloadSel.value as WarehouseResource };
         const wagons = Math.max(1, Math.floor(Number(wagonInput.value) || 1));
-        opts.actions.createTradeRoute(from, to, payload, wagons);
+        const result = opts.actions.createTradeRoute(from, to, payload, wagons);
+        if (!result.ok) rejectionToast("route creation", result.reason);
         setTimeout(render, 30);
       });
       createRow.append(fromSel, toSel, payloadSel, wagonInput, createBtn);
+      updateCreateAvailability();
       modal.body.appendChild(createRow);
     }
 
     const hint = document.createElement("div");
     hint.textContent =
-      "Cargo caravans carry one resource (wagons\u00d750); treasure caravans carry gold (wagons\u00d7500). They walk 4 tiles/day, re-path daily to reach a moving hero endpoint, and wait (never lose cargo) when the destination is full.";
+      "Cargo caravans carry one resource (wagons\u00d750); treasure caravans carry gold (wagons\u00d7500). They walk 4 tiles/day, re-path daily to reach a moving hero endpoint, and wait (never lose cargo) when the destination is full. A route whose origin is lost or captured goes dormant: it bills nothing and never deserts, and resumes if you retake it. When a route's last wagon deserts, the route disbands and returns what fits at the origin — the rest is lost. Removing a route manually also loses its aboard cargo.";
     hint.style.cssText = "font-size:10px;opacity:0.55;margin-top:10px;line-height:1.4;";
     modal.body.appendChild(hint);
   };

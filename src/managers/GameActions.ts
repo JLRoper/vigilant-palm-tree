@@ -22,6 +22,7 @@ import {
   UPKEEP_SUMMARY_OFFENDER_LIMIT,
 } from "@screens/shared/upkeepWarnings";
 import {
+  applyTreasuryCapSessionDedupe,
   newlyCappedSettlements,
   treasuryCapSummaryToastMessage,
   treasuryCapToastMessage,
@@ -611,19 +612,26 @@ export class GameActions {
   // nothing. Fires on the TRANSITION into the cap, not on every turn spent
   // there, which is the whole reason the pre-EndTurn state is threaded through
   // as `previous`: it is the record of what was already capped, recomputed from
-  // the game on every turn. Unlike reportUnpaidUpkeep (which re-reports an
-  // ongoing shortfall each turn) there is deliberately no "already warned"
-  // bookkeeping to reset on game load -- a module-level Set would survive a
-  // reload's state and either re-toast or stay silent forever, and a
-  // GameSettings record would make the one-time toast load-bearing state that
-  // could disagree with the server's gold. `previous` is stale-by-construction
+  // the game on every turn. On top of that sits the per-session dedupe
+  // (E1a): a capped treasury that oscillates below cap and back (weekly route
+  // upkeep, a bank deposit) would re-cross the transition every cycle, so
+  // each settlement toasts once per session while it stays capped and only
+  // re-arms once it is observed below cap. Both layers are in-memory only, so
+  // there is no "already warned" state to reset on game load -- a reload's
+  // fresh page re-toasts once, which is the honest reading after a reload.
+  // `previous` is stale-by-construction
   // safe: the reducers replace the state object (see endCurrentTurn's own
   // stateBeforeEnd reference check), so it still reads the pre-turn values.
   private reportTreasuryCaps(previous: GameState): void {
     const merged = this.state.getState();
     const gameName = this.session.getActiveGameName();
     const seat = getInMemoryLocalPlayerId(gameName ?? "") ?? 0;
-    const rows = newlyCappedSettlements(previous, merged, seat);
+    const rows = applyTreasuryCapSessionDedupe(
+      gameName,
+      merged,
+      seat,
+      newlyCappedSettlements(previous, merged, seat),
+    );
     if (rows.length === 0) return;
     if (rows.length > TREASURY_CAP_SUMMARY_OFFENDER_LIMIT) {
       showToast(treasuryCapSummaryToastMessage(rows), "info");

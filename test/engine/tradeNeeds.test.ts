@@ -236,6 +236,46 @@ test("the source never doubles as its own destination", () => {
   }
 });
 
+test("skips hero recommendations whose best source stands on the hero's tile (the same-tile stall)", () => {
+  // The hero is short and stands on the seat's RICHEST settlement: the
+  // gold recommendation must be skipped (a same-tile route can never load),
+  // and the evaluator must fall through to the legal farther source for
+  // food rather than emitting a route that would burn maintenance forever.
+  const hero = makeHero("h0", 0, 2, 2, {
+    troops: 5,
+    stacks: stack("peasant", 5),
+    gold: 2,
+    resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 3 },
+  });
+  const state = makeState({
+    players: [
+      makePlayer(0, "player", ["h0"], ["s-onhero", "s-far"], { wagonsOwned: 4, wagonsUnassigned: 4 }),
+      makePlayer(1, "ai", ["h1"], ["s1"]),
+    ],
+    heroes: [hero, makeHero("h1", 1, 18, 4)],
+    settlements: [
+      settlement("s-onhero", 0, 2, 2, { food: 500, gold: 1000 }),
+      settlement("s-far", 0, 20, 20, { food: 600, gold: 800 }),
+      settlement("s1", 1, 18, 4),
+    ],
+    day: 1,
+  });
+  const recs = evaluateTradeNeeds(state, 0, { peasant });
+  assert.ok(recs.length > 0, "the evaluator still recommends from the legal source");
+  for (const rec of recs) {
+    const source = rec.from.kind === "settlement" ? state.settlements[rec.from.id] : null;
+    const dest = rec.to.kind === "hero" ? state.heroes[rec.to.id] : state.settlements[rec.to.id];
+    assert.ok(
+      !source || !dest || source.q !== dest.q || source.r !== dest.r,
+      `no recommendation connects two endpoints standing on one tile (${JSON.stringify(rec)})`,
+    );
+  }
+  assert.ok(
+    recs.some((rec) => rec.to.kind === "hero" && rec.to.id === "h0"),
+    "the hero's need is met by the legal source, not dropped wholesale",
+  );
+});
+
 test("caps the list at 5 and is deterministic across runs", () => {
   const settlements = [settlement("s-src", 0, 0, 0, { food: 10_000, gold: 10_000 })];
   for (let i = 0; i < 8; i++) {

@@ -91,6 +91,29 @@ test("a walking caravan occupies the last consumed path tile (path[pathIndex - 1
   assert.deepEqual(specs[0], { q: 3, r: 0, ownerId: 2, wagons: 7, payloadKind: "resource" }, "pathIndex 3 -> path[2] = (3,0)");
 });
 
+test("a returning caravan (toHome, pathIndex >= 1) resolves to its real path tile, never the origin-tile fallback", () => {
+  const settlements = {
+    "s-a": makeSettlement("s-a", 1, 3, 2),
+    "s-b": makeSettlement("s-b", 1, 3, 8),
+  };
+  // The return-leg shape the advance builds on every toHome flip: path[0]
+  // is the caravan's real departure tile and pathIndex starts at 1, so the
+  // marker sits on the walked tile. The pathIndex-0 origin-tile fallback
+  // only ever applies to OUTBOUND loading (pinned above).
+  const caravan: CaravanState = {
+    phase: "toHome",
+    cargo: 0,
+    path: [{ q: 3, r: 7 }, { q: 3, r: 6 }, { q: 3, r: 5 }, { q: 3, r: 4 }, { q: 3, r: 3 }],
+    pathIndex: 1,
+  };
+  const specs = resolveCaravanMarkers([makeRoute("r0", "s-a", "s-b", 4, caravan)], settlements);
+  assert.deepEqual(
+    specs,
+    [{ q: 3, r: 7, ownerId: 1, wagons: 4, payloadKind: "resource" }],
+    "pathIndex 1 -> path[0] = (3,7), the real departure tile (the origin at (3,2) is never reported for a walked toHome caravan)",
+  );
+});
+
 test("a hero-origin route resolves tile and owner from the heroes record", () => {
   const settlements = { "s-b": makeSettlement("s-b", 1, 6, 0) };
   const hero: HeroState = makeHero("h-0", 1, 3, 2);

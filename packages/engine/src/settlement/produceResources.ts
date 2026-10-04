@@ -34,6 +34,49 @@ export function warehouseRates(rates: Partial<Record<ResourceType, number>>): Wa
   return out;
 }
 
+export interface SettlementProductionRates {
+  /** Combined per-turn warehouse income: tile rates + building producers, per WAREHOUSE_RESOURCE, in warehouse order. */
+  rates: WarehouseRate[];
+  /** Gold producers' per-turn total — real income paid to the treasury, kept out of `rates` (gold is not a warehouse resource). */
+  goldPerTurn: number;
+}
+
+/**
+ * The full per-turn production picture a settlement panel should display: the
+ * warehouseRates() tile half merged with the producerTurnOutput() building
+ * half per warehouse resource (in-construction buildings contribute nothing,
+ * the same rule the production loop itself applies). The plan's U1: a
+ * farm-only settlement must not read "no warehouse production" while its
+ * warehouse receives food every turn. `seed` is the game seed the production
+ * loop passes (state.castleSeed client-side), so the numbers shown are the
+ * numbers paid.
+ */
+export function settlementProductionRates(
+  settlement: Pick<SettlementState, "resourceRates" | "buildings" | "q" | "r" | "citySpots">,
+  seed: number,
+): SettlementProductionRates {
+  const totals = new Map<WarehouseResource, number>();
+  for (const { resource, perTurn } of warehouseRates(settlement.resourceRates)) {
+    totals.set(resource, (totals.get(resource) ?? 0) + perTurn);
+  }
+  let gold = 0;
+  for (const b of settlement.buildings) {
+    const output = producerTurnOutput(b, settlement, seed);
+    if (!output) continue;
+    if (output.resource === "gold") {
+      gold += output.amount;
+    } else {
+      totals.set(output.resource, (totals.get(output.resource) ?? 0) + output.amount);
+    }
+  }
+  const rates: WarehouseRate[] = [];
+  for (const resource of WAREHOUSE_RESOURCES) {
+    const perTurn = totals.get(resource) ?? 0;
+    if (perTurn > 0) rates.push({ resource, perTurn: round2(perTurn) });
+  }
+  return { rates, goldPerTurn: round2(gold) };
+}
+
 export function produceSettlementResources(
   settlements: Record<SettlementId, SettlementState>,
   seed: number,

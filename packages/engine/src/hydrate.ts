@@ -12,6 +12,7 @@ import type {
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import { defaultPopulation, SETTLEMENT_GOLD_TAX } from "./economy/settlementRates";
+import { endpointOwner } from "./logistics";
 import { VALID_HORSE_VARIANTS } from "./horseVariants";
 import { normalizePlatoons } from "./units";
 import { withDefaultSpellStats } from "./combat/spells";
@@ -226,13 +227,30 @@ function isCaravanState(v: unknown): v is CaravanState {
   if (!v || typeof v !== "object") return false;
   const c = v as { phase?: unknown; cargo?: unknown; path?: unknown; pathIndex?: unknown };
   if (c.phase !== "toDestination" && c.phase !== "toHome") return false;
-  if (typeof c.cargo !== "number" || !Number.isFinite(c.cargo)) return false;
-  if (!Array.isArray(c.path) || !c.path.every((t) => {
+  // A negative (or fractional) cargo would apply a NEGATIVE delivery delta
+  // on advance -- the corrupted row would STEAL from the destination -- so
+  // the guard demands a finite, non-negative amount.
+  if (typeof c.cargo !== "number" || !Number.isFinite(c.cargo) || c.cargo < 0) return false;
+  // A departed caravan always stands on a real tile: at least one path tile,
+  // each an integer axial coordinate, with the consumed index in range
+  // (0..length). Anything else could not advance safely.
+  if (!Array.isArray(c.path) || c.path.length < 1) return false;
+  if (!c.path.every((t) => {
     if (!t || typeof t !== "object") return false;
     const axial = t as { q?: unknown; r?: unknown };
-    return typeof axial.q === "number" && typeof axial.r === "number";
+    return (
+      typeof axial.q === "number" &&
+      Number.isInteger(axial.q) &&
+      typeof axial.r === "number" &&
+      Number.isInteger(axial.r)
+    );
   })) return false;
-  return typeof c.pathIndex === "number" && Number.isInteger(c.pathIndex) && c.pathIndex >= 0;
+  return (
+    typeof c.pathIndex === "number" &&
+    Number.isInteger(c.pathIndex) &&
+    c.pathIndex >= 0 &&
+    c.pathIndex <= c.path.length
+  );
 }
 
 /**
@@ -278,6 +296,11 @@ export function normalizeTradeRoute(raw: unknown): TradeRouteState | null {
       : r.unpaidSinceDay === null
         ? null
         : undefined;
+  // Route ownership (when the raw row carries it) passes through verbatim;
+  // absent stays absent here -- endpoint-derived backfill needs the live
+  // settlement/hero records, which hydrateGameState owns, so it completes
+  // the chain there (raw -> FROM -> TO -> null).
+  const ownerId = typeof r.ownerId === "number" && Number.isInteger(r.ownerId) ? r.ownerId : undefined;
   return {
     id: r.id,
     from: parts.from,
@@ -285,6 +308,7 @@ export function normalizeTradeRoute(raw: unknown): TradeRouteState | null {
     payload: parts.payload,
     wagons: r.wagons,
     caravan: r.caravan ? r.caravan : null,
+    ...(ownerId !== undefined ? { ownerId } : {}),
     ...(unpaidSinceDay !== undefined ? { unpaidSinceDay } : {}),
   };
 }
@@ -295,7 +319,10 @@ export function normalizeTradeRoute(raw: unknown): TradeRouteState | null {
 // collides with an existing route -- the latent collision bug
 // docs/event-system.md documented. Non-"route<n>" ids do not contribute
 // (NaN suffixes are skipped), matching the applier's own counter bump.
-function deriveNextTradeRouteId(routes: readonly TradeRouteState[]): number {
+// Exported for the client sync layer: merges that replace the route array
+// wholesale (EndTurn merges, command-result merges) must re-derive the
+// counter the same way hydration does.
+export function deriveNextTradeRouteId(routes: readonly TradeRouteState[]): number {
   return routes.reduce((max, route) => {
     const suffix = Number.parseInt(route.id.replace(/^route/, ""), 10);
     return Number.isNaN(suffix) ? max : Math.max(max, suffix + 1);
@@ -325,10 +352,20 @@ export function hydrateGameState(
   const settlementCount = Object.keys(settlementsRecord).length;
   // Trade routes normalize per record (either persisted generation), and
   // the id counter derives from the normalized ids -- see
-  // normalizeTradeRoute/deriveNextTradeRouteId above.
+  // normalizeTradeRoute/deriveNextTradeRouteId above. Route ownership is
+  // backfilled in the same pass: a row without a persisted ownerId derives
+  // it from the FROM endpoint's live owner, then the TO endpoint's
+  // (settlement endpoints always resolve), and ends at an explicit null
+  // only when both ends are dead heroes -- the updateTradeRoute gate falls
+  // back to the same chain, so null keeps the route removable by nobody
+  // until a resync, never misattributed.
+  const records = { settlements: settlementsRecord, heroes: heroesRecord };
   const tradeRoutes = (row.trade_routes ?? []).flatMap((raw) => {
     const normalized = normalizeTradeRoute(raw);
-    return normalized ? [normalized] : [];
+    if (!normalized) return [];
+    if (normalized.ownerId !== undefined) return [normalized];
+    const derived = endpointOwner(normalized.from, records) ?? endpointOwner(normalized.to, records);
+    return [{ ...normalized, ownerId: derived }];
   });
   return {
     round: row.round,

@@ -355,7 +355,9 @@ test("CreateTradeRoute to a hero endpoint with a gold payload rides the same HTT
   ];
   const token = await seedGame(name, makeSettlement(settlementId, 0, 2, 2, { gold: 2500 }), {
     players,
-    heroes: { [heroId]: makeHero(heroId, 0, 2, 2) },
+    // Off the settlement tile: a hero standing ON the origin settlement is a
+    // same-tile pair, rejected at create (the L1 stall guard).
+    heroes: { [heroId]: makeHero(heroId, 0, 4, 2) },
   });
   try {
     const res = await postCommand(name, {

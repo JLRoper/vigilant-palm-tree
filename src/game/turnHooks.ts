@@ -41,8 +41,9 @@ import type {
   TransferDirection,
   WarehouseResource,
 } from "@heroes/contracts";
-import type { TurnControllerHooks } from "../state/turnController";
+import type { TurnController, TurnControllerHooks } from "../state/turnController";
 import type { BattleResult } from "@heroes/engine";
+import { deriveNextTradeRouteId } from "@heroes/engine";
 import { pickAiMove as pickAiMoveBrain, pickGarrisonRecruitment } from "../ai/aiBrain";
 import { cachedUnitTypes } from "../data/unitCatalog";
 import type { GameMap } from "../map/gameMap";
@@ -87,6 +88,12 @@ export interface BuildTurnHooksOptions {
   // only when it belongs to this browser. Null/unknown seat falls back to the
   // legacy existence-only preservation.
   localSeat?: () => PlayerId | null;
+  // S1 (logistics-interface-fixes plan §5.8): the four logistics hooks hand
+  // their command results to the live controller's mergeCommandResult through
+  // this getter, so the optimistic route id / wagon pools reconcile with the
+  // server's instead of diverging until a resync. Resolved lazily at result
+  // time (the controller does not exist when hooks are built).
+  getController?: () => TurnController | null;
 }
 
 let lastBattle: { attackerId: HeroId; defenderId: HeroId } | null = null;
@@ -368,7 +375,8 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     const name = opts.gameName();
     if (!name) return;
     try {
-      await assignWagonsCommand(name, { actor, heroId, delta, slot });
+      const result = await assignWagonsCommand(name, { actor, heroId, delta, slot });
+      opts.getController?.()?.mergeCommandResult(result);
     } catch (e) {
       reportCommandFailure("Assign wagons", e);
     }
@@ -377,7 +385,8 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     const name = opts.gameName();
     if (!name) return;
     try {
-      await buyWagonsCommand(name, { actor, settlementId, count, slot });
+      const result = await buyWagonsCommand(name, { actor, settlementId, count, slot });
+      opts.getController?.()?.mergeCommandResult(result);
     } catch (e) {
       reportCommandFailure("Buy wagons", e);
     }
@@ -392,7 +401,8 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     const name = opts.gameName();
     if (!name) return;
     try {
-      await createTradeRouteCommand(name, { actor, from, to, payload, wagons });
+      const result = await createTradeRouteCommand(name, { actor, from, to, payload, wagons });
+      opts.getController?.()?.mergeCommandResult(result);
     } catch (e) {
       reportCommandFailure("Create trade route", e);
     }
@@ -405,7 +415,8 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     const name = opts.gameName();
     if (!name) return;
     try {
-      await updateTradeRouteCommand(name, { actor, routeId, ...change });
+      const result = await updateTradeRouteCommand(name, { actor, routeId, ...change });
+      opts.getController?.()?.mergeCommandResult(result);
     } catch (e) {
       reportCommandFailure("Update trade route", e);
     }
@@ -599,7 +610,12 @@ export function mergeFromEndTurn(state: GameState, result: EndTurnResult, localS
     selectedHero && (localSeat == null || selectedHero.ownerId === localSeat) ? state.selectedHeroId : null;
   const selectedSettlement = state.selectedSettlementId != null ? result.settlements[state.selectedSettlementId] : undefined;
   const selectedSettlementId = selectedSettlement ? state.selectedSettlementId : null;
-  return {
+  // S2 (logistics-interface-fixes plan §5.8): the routes replace wholesale, so
+  // the id counter must re-derive the same way hydration does -- otherwise it
+  // can regress below the max persisted id after a missed/self-skipped
+  // TradeRouteCreated event and the next create collides.
+  const tradeRoutes = result.tradeRoutes ?? state.tradeRoutes;
+  const merged: GameState = {
     ...state,
     round: result.round,
     day: result.day,
@@ -609,10 +625,12 @@ export function mergeFromEndTurn(state: GameState, result: EndTurnResult, localS
     settlements: result.settlements,
     // Caravans moved server-side this wrap -- the merged routes replace the
     // client's wholesale, same as heroes/settlements.
-    tradeRoutes: result.tradeRoutes ?? state.tradeRoutes,
+    tradeRoutes,
     phase,
     selectedHeroId,
     selectedSettlementId,
     dirty: true,
   };
+  if (tradeRoutes) merged.nextTradeRouteId = deriveNextTradeRouteId(tradeRoutes);
+  return merged;
 }

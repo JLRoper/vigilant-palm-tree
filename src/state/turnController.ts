@@ -1,11 +1,12 @@
-import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload, TradeRouteEndpoint, TradeRoutePayload } from "./gameState";
-import type { BuildingDef, BuildingKind, HeroBattleVerdict, Platoon } from "@heroes/contracts";
+import type { GameState, HeroId, PlayerId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload, TradeRouteEndpoint, TradeRoutePayload } from "./gameState";
+import type { BuildingDef, BuildingKind, HeroBattleVerdict, HeroState, Platoon, Player, SettlementState, TradeRouteState } from "@heroes/contracts";
 import { platoonsHaveTroops, platoonTroopTotal, settlementStacks, normalizePlatoons } from "./units";
 import type { GameMap } from "../map/gameMap";
 import {
   applyEngineEvent,
   applySettlementBattleResult,
   computeSettlementRates,
+  deriveNextTradeRouteId,
   depositIntoBank,
   generateCitySpots,
   cityViewSizeFor,
@@ -232,6 +233,26 @@ export function createAiTurnMemory(): AiTurnMemory {
 export interface TurnControllerOptions {
   isPrimaryActor?: () => boolean;
   aiMemory?: AiTurnMemory;
+  // S3 (plan .plans/20261003-2359_logistics-interface-fixes §5.8): the local
+  // viewer's seat. When known, the five logistics methods (transferResources,
+  // assignWagons, buyWagons, createTradeRoute, updateTradeRoute) act only
+  // during the local seat's own PLAYER_TURN -- otherwise they would optimistically
+  // mutate the WRONG seat's pools during an AI/foreign turn before the server
+  // 403'd them. Absent/unknown (tests, headless embeds) keeps the old
+  // activePlayerId-actor behavior.
+  localSeat?: PlayerId | null;
+}
+
+// Structural shape of the four logistics command results the server now
+// returns (CreateTradeRoute/UpdateTradeRoute/BuyWagons/AssignWagons, plan
+// §5.7): the touched slices the acting client reconciles into its optimistic
+// state via mergeCommandResult. Defined locally so the controller needs no
+// import from io/.
+export interface LogisticsCommandMerge {
+  tradeRoutes?: TradeRouteState[];
+  players?: Player[];
+  hero?: HeroState;
+  settlement?: SettlementState;
 }
 
 export interface SettlementBattleResolution {
@@ -368,6 +389,49 @@ export class TurnController {
     if (result.outcome !== "applied") return false;
     this.state = result.state;
     return true;
+  }
+
+  // S3: the five logistics methods only act during the local seat's own
+  // PLAYER_TURN. Unknown localSeat keeps the pre-gate behavior (the callers
+  // that construct without the option are tests/headless embeds).
+  private logisticsTurnGateBlocked(): boolean {
+    const seat = this.opts.localSeat;
+    if (seat == null) return false;
+    return this.state.phase.kind !== "PLAYER_TURN" || this.state.activePlayerId !== seat;
+  }
+
+  // Safe-phase predicate for merging a logistics command's server result
+  // (plan §5.8 S1/S2 -- the garrisonEventBridge pattern scoped to this merge):
+  // only the local seat's PLAYER_TURN. A result landing mid-battle or after
+  // the turn advanced would rewind newer local state, so it is skipped
+  // entirely -- the resync boundary reconciles instead.
+  private safeForLogisticsMerge(): boolean {
+    if (this.state.phase.kind !== "PLAYER_TURN") return false;
+    const seat = this.opts.localSeat;
+    return seat == null || this.state.activePlayerId === seat;
+  }
+
+  // Quiet reconciliation (no commit(): the optimistic reducer already applied
+  // and the acting client's own event id is skipped by the sync layer, so
+  // this result IS the server truth arriving -- nothing to log or re-broadcast).
+  // Assigns the touched slices and re-derives the route-id counter, closing
+  // the optimistic-id divergence when the server assigned a different id.
+  mergeCommandResult(result: LogisticsCommandMerge): void {
+    if (!this.safeForLogisticsMerge()) return;
+    let next = this.state;
+    if (result.tradeRoutes) {
+      next = {
+        ...next,
+        tradeRoutes: result.tradeRoutes,
+        nextTradeRouteId: deriveNextTradeRouteId(result.tradeRoutes),
+      };
+    }
+    if (result.players) next = { ...next, players: result.players };
+    if (result.hero) next = { ...next, heroes: { ...next.heroes, [result.hero.id]: result.hero } };
+    if (result.settlement) {
+      next = { ...next, settlements: { ...next.settlements, [result.settlement.id]: result.settlement } };
+    }
+    if (next !== this.state) this.state = next;
   }
 
   requestMove(
@@ -1212,6 +1276,7 @@ export class TurnController {
     direction: "load" | "unload",
     amounts: Partial<Record<WarehouseResource, number>>,
   ): { ok: boolean; reason: string } {
+    if (this.logisticsTurnGateBlocked()) return { ok: false, reason: "not_your_turn" };
     const result = transferResourcesReducer(this.state, this.state.activePlayerId, heroId, settlementId, direction, amounts);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
@@ -1226,6 +1291,7 @@ export class TurnController {
   }
 
   assignWagons(heroId: string, delta: number, slot: "cargo" | "treasury" = "cargo"): { ok: boolean; reason: string } {
+    if (this.logisticsTurnGateBlocked()) return { ok: false, reason: "not_your_turn" };
     const result = assignWagonsReducer(this.state, this.state.activePlayerId, heroId, delta, slot);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
@@ -1240,6 +1306,7 @@ export class TurnController {
   }
 
   buyWagons(settlementId: string, count: number, slot: "cargo" | "treasury" = "cargo"): { ok: boolean; reason: string } {
+    if (this.logisticsTurnGateBlocked()) return { ok: false, reason: "not_your_turn" };
     const result = buyWagonsReducer(this.state, this.state.activePlayerId, settlementId, count, slot);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
@@ -1259,6 +1326,7 @@ export class TurnController {
     payload: TradeRoutePayload,
     wagons: number,
   ): { ok: boolean; reason: string } {
+    if (this.logisticsTurnGateBlocked()) return { ok: false, reason: "not_your_turn" };
     const result = createTradeRouteReducer(this.state, this.state.activePlayerId, from, to, payload, wagons);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
@@ -1283,6 +1351,7 @@ export class TurnController {
     routeId: string,
     change: { resource?: WarehouseResource; wagonsDelta?: number; remove?: boolean },
   ): { ok: boolean; reason: string } {
+    if (this.logisticsTurnGateBlocked()) return { ok: false, reason: "not_your_turn" };
     const result = updateTradeRouteReducer(this.state, this.state.activePlayerId, routeId, change);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {

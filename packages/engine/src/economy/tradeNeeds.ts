@@ -202,6 +202,12 @@ export function evaluateTradeNeeds(
     const from = payload.kind === "gold" ? pickGoldSource(settlements, excludeId) : pickFoodSource(settlements, excludeId);
     if (!from) return;
     const fromEndpoint: TradeRouteEndpoint = { kind: "settlement", id: from.id };
+    // A source standing ON the destination tile can never load (the
+    // same-tile stall createTradeRoute now rejects) -- skip the pair rather
+    // than recommend a route that would burn weekly maintenance doing
+    // nothing. excludeId above still covers the same-ENDPOINT case.
+    const toEntity = to.kind === "hero" ? state.heroes[to.id] : state.settlements[to.id];
+    if (toEntity && toEntity.q === from.q && toEntity.r === from.r) return;
     if (pairConnected(routes, fromEndpoint, to, payload)) return;
     const perWagon = payload.kind === "gold" ? WAGON_GOLD_CAPACITY : WAGON_RESOURCE_CAPACITY;
     const wagons = Math.max(1, Math.min(unassigned, Math.ceil(need / perWagon)));

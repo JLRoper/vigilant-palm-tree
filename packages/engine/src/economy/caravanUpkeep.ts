@@ -6,6 +6,13 @@ import type {
   TradeRouteState,
 } from "@heroes/contracts";
 import {
+  heroApplyDelivery,
+  heroDeliveryHeadroom,
+  routeOwnerId,
+  settlementApplyDelivery,
+  settlementDeliveryHeadroom,
+} from "../logistics";
+import {
   DESERT_COST_SHARE,
   desertionGateOpen,
 } from "./troopUpkeep";
@@ -42,10 +49,22 @@ import {
 // whole time either way — an idle-at-home caravan is a garrisoned expense,
 // not a free one — so "bills" is simply `route.wagons > 0`.
 //
-// Dead-origin edge: a route whose origin endpoint no longer resolves (the
-// origin hero died) is skipped entirely — no bill, no streak change, no
-// desertion. logistics.ts's advanceTradeRoutes already handles the caravan
-// itself (return-home), and the route's fate stays with the manual remove.
+// Lost/dormant-origin edge: a route whose ORIGIN endpoint no longer
+// resolves (the origin hero died) or no longer belongs to the route's owner
+// (a captured/lost settlement origin) is DORMANT here — skipped entirely,
+// no bill, no streak change, no desertion, so a captured origin stops
+// draining the capturer's treasury and food. The route itself stays
+// (advanceTradeRoutes's dormant semantics mirror this: no reload for the
+// new owner, in-flight legs finish only) and remains removable by its
+// persisted owner via updateTradeRoute({remove:true}) — the ownerId gate.
+//
+// Desertion disband: when the last wagon deserts and the route auto-removes,
+// the aboard cargo (already debited from the origin at load) is returned
+// first — what fits at the origin, owner-checked and headroom-clamped with
+// the SAME settlement/hero delivery math the advance path uses; the rest is
+// lost with the route ("desertion returns what fits at the origin; the rest
+// is lost with the route"). Manual remove keeps its documented
+// lose-the-aboard-cargo semantics — the player's explicit choice.
 
 export const CARAVAN_UPKEEP_GOLD_PER_WAGON = 1;
 export const CARAVAN_UPKEEP_FOOD_PER_WAGON = 1;
@@ -95,10 +114,16 @@ export function applyCaravanUpkeep(state: GameState, day?: number): CaravanUpkee
     let paidGold = 0;
     let paidFood = 0;
 
+    // The route's true owner (persisted stamp, else the FROM endpoint's
+    // live owner for legacy rows) — the same resolution the advance path's
+    // dormant-route checks use.
+    const owner = routeOwnerId(route, { settlements: nextSettlements, heroes: nextHeroes });
+
     if (route.from.kind === "settlement") {
       const origin = nextSettlements[route.from.id];
-      if (!origin) {
-        // Dead origin: skip maintenance entirely (see module header).
+      if (!origin || origin.ownerId !== owner) {
+        // Dead or captured/lost origin: dormant, skip maintenance entirely
+        // (see module header) — the capturer is never billed.
         newRoutes.push(route);
         continue;
       }
@@ -114,7 +139,10 @@ export function applyCaravanUpkeep(state: GameState, day?: number): CaravanUpkee
       }
     } else {
       const origin = nextHeroes[route.from.id];
-      if (!origin) {
+      if (!origin || origin.ownerId !== owner) {
+        // Dead or owner-mismatched origin: dormant, skip maintenance
+        // entirely (see module header) — heroes cannot normally change
+        // owner, so this is defense in depth mirroring the advance path.
         newRoutes.push(route);
         continue;
       }
@@ -155,6 +183,35 @@ export function applyCaravanUpkeep(state: GameState, day?: number): CaravanUpkee
     // Wagons desert; they are gone, not pooled (module header, rule 5).
     const remaining = route.wagons - caravanDesertion(route.wagons);
     if (remaining <= 0) {
+      // The route disbands. Desertion returns what fits at the origin
+      // (module header): owner-checked and headroom-clamped with the same
+      // delivery math the advance path uses; the rest is lost with the
+      // route. Cargo is never left with a capturer (owner mismatch), and a
+      // manual remove keeps its documented lose-everything semantics.
+      const caravan = route.caravan;
+      if (caravan && caravan.cargo > 0) {
+        if (route.from.kind === "settlement") {
+          const origin = nextSettlements[route.from.id];
+          if (origin && origin.ownerId === owner) {
+            const headroom = settlementDeliveryHeadroom(route.payload, origin);
+            const returned = Math.max(0, Math.min(caravan.cargo, headroom));
+            if (returned > 0) {
+              settlementsChanged = true;
+              nextSettlements[route.from.id] = settlementApplyDelivery(origin, route.payload, returned);
+            }
+          }
+        } else {
+          const origin = nextHeroes[route.from.id];
+          if (origin && origin.ownerId === owner) {
+            const headroom = heroDeliveryHeadroom(route.payload, origin);
+            const returned = Math.max(0, Math.min(caravan.cargo, headroom));
+            if (returned > 0) {
+              heroesChanged = true;
+              nextHeroes[route.from.id] = heroApplyDelivery(origin, route.payload, returned);
+            }
+          }
+        }
+      }
       removedRouteIds.push(route.id);
       continue;
     }

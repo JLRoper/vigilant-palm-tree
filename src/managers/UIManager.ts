@@ -1,5 +1,6 @@
 import { buildHud, updateHud, canEndTurn, type HudHandles, type PathCostReadout } from "@screens/shared/hud";
 import type { PlayerId } from "../state/gameState";
+import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { Toolbar, type CalendarSnapshot } from "@screens/shared/toolbar";
 import { HeroInfoMenu } from "@screens/heroes/heroInfoMenu";
 import { HeroRosterMenu } from "@screens/heroes/heroRosterMenu";
@@ -73,6 +74,15 @@ export class UIManager {
         backendOk: () => session.isBackendOk(),
         hasActiveGame: () => session.getActiveGameId() !== null,
         canEndTurnNow: () => canEndTurn(state.getState()),
+        // S3 (logistics-interface-fixes plan §5.8): mirrors the controller's
+        // turn gate. Unknown local seat keeps the button enabled (today's
+        // behavior) -- the controller rejects only a known mismatched seat.
+        canOpenLogistics: () => {
+          const gs = state.getState();
+          if (!gs) return false;
+          const seat = getInMemoryLocalPlayerId(session.getActiveGameName() ?? "");
+          return seat == null || (gs.phase.kind === "PLAYER_TURN" && gs.activePlayerId === seat);
+        },
         getCalendar,
         getSaveStatus: () => session.getSaveStatus(),
         getLastSavedAt: () => session.getLastSavedAt(),

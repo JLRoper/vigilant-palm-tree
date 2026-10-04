@@ -262,6 +262,10 @@ function applyTradeRouteCreated(
     payload,
     wagons,
     caravan: null,
+    // The event's actor is the creating seat: the replay carries the same
+    // ownership stamp createTradeRoute writes, so remote seats derive the
+    // same route owner the acting client (and the server) hold.
+    ownerId: actor,
   };
   const suffix = Number.parseInt(routeId.replace(/^route/, ""), 10);
   const derived = Number.isNaN(suffix) ? 0 : suffix + 1;

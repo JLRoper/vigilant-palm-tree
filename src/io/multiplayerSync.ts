@@ -32,25 +32,27 @@ function readClaims(game: Game): LobbyClaims {
   return game.lobby?.claimed ?? {};
 }
 
-// The 17 admitted of the 24 EngineEvent variants declared in
+// The 18 admitted of the 24 EngineEvent variants declared in
 // packages/contracts/src/events/engineEvent.ts, derived from
-// ENGINE_EVENT_SYNC_CLASS (packages/engine/src/events/applyEvent.ts): the 10
+// ENGINE_EVENT_SYNC_CLASS (packages/engine/src/events/applyEvent.ts): the 11
 // "apply" kinds replay through the reducer below, and the 7 "resync" kinds
 // are admitted knowing applyEngineEvent answers them with "resync" (a full
-// refetch) rather than a guess. The 7 "ignore" boundary kinds
+// refetch) rather than a guess. The 6 "ignore" boundary kinds
 // (BuildingsPlaced, ResourcesTransferred, WagonsAssigned, WagonsBought,
-// TradeRouteCreated, TradeRouteUpdated, TradeRouteRemoved) are skipped here:
-// their state effects are not payload-derivable, so they arrive via the
-// TurnEnded/poll resync boundary instead. game_events also carries four
-// legacy audit kinds (turn_ended/round_ended/round_started/ai_turn_started,
-// appended alongside TurnEnded by server/app/commandHandler.ts) whose
-// payloads are not EngineEvents -- the payload.type===kind check in
-// isEngineEventRow is what separates the two. StructureBuilt is plan-doc
-// prose, not a declared variant. SettlementBattleResolved is admitted
-// knowing applyEngineEvent answers it with "resync": its payload
-// (winner/captured only) cannot re-derive the resulting stacks/gold/hero
-// outcomes, so it flows through the full-refetch path below instead of
-// being dropped as an unknown kind.
+// TradeRouteUpdated, TradeRouteRemoved) are skipped here: their state
+// effects are not payload-derivable, so they arrive via the TurnEnded/poll
+// resync boundary instead. TradeRouteCreated is not one of them:
+// applyTradeRouteCreated reconstructs the route from the event (the route id
+// rides the event verbatim), so it replays as an applied delta.
+// game_events also carries four legacy audit kinds
+// (turn_ended/round_ended/round_started/ai_turn_started, appended alongside
+// TurnEnded by server/app/commandHandler.ts) whose payloads are not
+// EngineEvents -- the payload.type===kind check in isEngineEventRow is what
+// separates the two. StructureBuilt is plan-doc prose, not a declared
+// variant. SettlementBattleResolved is admitted knowing applyEngineEvent
+// answers it with "resync": its payload (winner/captured only) cannot
+// re-derive the resulting stacks/gold/hero outcomes, so it flows through the
+// full-refetch path below instead of being dropped as an unknown kind.
 const ENGINE_EVENT_KINDS: ReadonlySet<EngineEvent["type"]> = new Set(
   Object.entries(ENGINE_EVENT_SYNC_CLASS)
     .filter(([, cls]) => cls !== "ignore")

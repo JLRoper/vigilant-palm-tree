@@ -2272,6 +2272,7 @@ test("AssignWagons persists the pool and hero wagons across rehydration", async 
   const assign: Command = { kind: "AssignWagons", gameName: "test-game", actor: 0, heroId: "h0", delta: 2 };
   const result = await handleCommand(assign, deps);
   assert.equal(result.ok, true);
+  assert.equal(result.players?.find((p) => p.id === 0)?.wagonsUnassigned, 0, "§5.7: pool delta visible on the result");
   assert.equal(
     gameRepo.rows["test-game"].players[0].wagonsUnassigned,
     0,
@@ -2308,6 +2309,7 @@ test("BuyWagons persists the pool across rehydration", async () => {
   const buy: Command = { kind: "BuyWagons", gameName: "test-game", actor: 0, settlementId: "s0", count: 2 };
   const result = await handleCommand(buy, deps);
   assert.equal(result.ok, true);
+  assert.equal(result.players?.find((p) => p.id === 0)?.wagonsUnassigned, 2, "§5.7: pool delta visible on the result");
   assert.equal(gameRepo.rows["test-game"].players[0].wagonsOwned, 2);
   assert.equal(gameRepo.rows["test-game"].players[0].wagonsUnassigned, 2);
   assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 600);
@@ -2386,6 +2388,11 @@ test("AssignWagons with slot 'treasury' persists the cart pool and hero treasury
   const result = await handleCommand(assign, deps);
   assert.equal(result.ok, true);
   assert.equal(
+    result.players?.find((p) => p.id === 0)?.treasuryWagonsUnassigned,
+    1,
+    "§5.7: the cart pool delta is visible on the result too",
+  );
+  assert.equal(
     gameRepo.rows["test-game"].players[0].treasuryWagonsUnassigned,
     1,
     "treasury pool decrement must reach the games.players JSONB",
@@ -2452,6 +2459,7 @@ test("BuyWagons with slot 'treasury' persists the cart pool across rehydration, 
   const result = await handleCommand(buy, deps);
   assert.equal(result.ok, true);
   assert.equal(gameRepo.rows["test-game"].players[0].treasuryWagonsOwned, 2);
+  assert.equal(result.players?.find((p) => p.id === 0)?.treasuryWagonsUnassigned, 2, "§5.7: cart pool delta visible on the result");
   assert.equal(gameRepo.rows["test-game"].players[0].treasuryWagonsUnassigned, 2);
   assert.equal(gameRepo.rows["test-game"].players[0].wagonsOwned, undefined, "the treasury buy never touches the cargo pool");
   assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 600, "same 200g cost as a cargo wagon");
@@ -2472,7 +2480,9 @@ test("BuyWagons with slot 'treasury' persists the cart pool across rehydration, 
 // per-command rehydrate.
 test("CreateTradeRoute persists the endpoint shape, emits the event, and never collides ids across rehydration", async () => {
   const row = makeRow(
-    [makeHero("h0", 0, 2, 2)],
+    // Off the settlement tiles: a hero standing ON s0 would now be a
+    // same-tile pair, rejected at create (the L1 stall guard).
+    [makeHero("h0", 0, 4, 2)],
     [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 0, 8, 2)],
     {
       players: [
@@ -2494,6 +2504,10 @@ test("CreateTradeRoute persists the endpoint shape, emits the event, and never c
   };
   const created = await handleCommand(create, deps);
   assert.equal(created.ok, true);
+  // §5.7: the acting client reconciles the pool delta from the response.
+  assert.equal(created.players?.find((p) => p.id === 0)?.wagonsUnassigned, 2, "4 unassigned - 2 committed");
+  assert.equal(created.tradeRoutes?.length, 1);
+  assert.equal(created.tradeRoutes?.[0].ownerId, 0, "the created route carries the persisted owner stamp");
 
   const persisted = gameRepo.rows["test-game"].trade_routes as Array<{
     id: string;
@@ -2535,10 +2549,11 @@ test("CreateTradeRoute persists the endpoint shape, emits the event, and never c
     deps,
   );
   assert.equal(second.ok, true, "the hero endpoint + gold payload pass the handler");
-  const routes = gameRepo.rows["test-game"].trade_routes as Array<{ id: string; to: { kind: string; id: string } }>;
+  const routes = gameRepo.rows["test-game"].trade_routes as Array<{ id: string; to: { kind: string; id: string }; ownerId?: number }>;
   assert.equal(routes.length, 2);
   assert.equal(routes[1].id, "route1", "nextTradeRouteId hydrates from the persisted ids -- no more route0 collisions");
   assert.deepEqual(routes[1].to, { kind: "hero", id: "h0" });
+  assert.equal(routes[0].ownerId, 0, "the first route's owner stamp survived the JSONB rehydrate for the second command");
 });
 
 test("UpdateTradeRoute reallocates wagons and a remove persists through the JSONB", async () => {
@@ -2579,6 +2594,7 @@ test("UpdateTradeRoute reallocates wagons and a remove persists through the JSON
     deps,
   );
   assert.equal(shrunk.ok, true);
+  assert.equal(shrunk.players?.find((p) => p.id === 0)?.wagonsUnassigned, 2, "§5.7: pool delta visible on the result");
   assert.equal(gameRepo.rows["test-game"].players[0].wagonsUnassigned, 2, "1 wagon returned to the pool");
   const persisted = gameRepo.rows["test-game"].trade_routes as Array<{ wagons: number }>;
   assert.equal(persisted[0].wagons, 2, "the realloc persists through the JSONB");
@@ -2594,6 +2610,8 @@ test("UpdateTradeRoute reallocates wagons and a remove persists through the JSON
     deps,
   );
   assert.equal(removed.ok, true);
+  assert.equal(removed.players?.find((p) => p.id === 0)?.wagonsUnassigned, 4, "§5.7: the released pool is on the result");
+  assert.equal(removed.tradeRoutes?.length, 0, "§5.7: the post-change routes array rides the result too");
   assert.equal((gameRepo.rows["test-game"].trade_routes as unknown[]).length, 0, "the removal persists");
   assert.equal(gameRepo.rows["test-game"].players[0].wagonsUnassigned, 4, "all wagons released back to the pool");
 });
@@ -2691,6 +2709,136 @@ test("EndTurn weekly caravan desertion auto-removes the route and appends TradeR
     eventRepo.events.map((e) => e.kind).join(","),
     "TradeRouteRemoved,TurnEnded,turn_ended,round_ended,round_started",
   );
+});
+
+// ---------------------------------------------------------------------------
+// Deferred §5.1 bullet (logistics interface fixes): the EndTurn removal
+// event's actor is the route's TRUE owner -- routeOwnerId (persisted stamp,
+// else the FROM endpoint's live owner) -- never the acting turn player.
+// Post-dormancy (§5.2/§5.3) a stamped captured-origin route never deserts,
+// so the three shapes below pin what IS reachable: dormancy itself, the
+// owner-vs-acting-seat attribution, and the legacy ownerless fallback.
+// ---------------------------------------------------------------------------
+
+test("EndTurn leaves a captured-origin route dormant: no TradeRouteRemoved event, nothing misattributed", async () => {
+  // The route's stamp (owner 0) outlives the origin: s0 was captured by
+  // seat 1. Maintenance treats the route as dormant -- no bill, no
+  // desertion, no removal -- so no removal event exists to misattribute,
+  // and the route survives the wrap for its true owner to disband.
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { troops: 1 })],
+    [makeSettlement("s0", 1, 2, 2), makeSettlement("s1", 0, 8, 2)],
+    {
+      players: SOLO_PLAYER,
+      day: 6,
+      trade_routes: [
+        {
+          id: "route0",
+          from: { kind: "settlement", id: "s0" },
+          to: { kind: "settlement", id: "s1" },
+          payload: { kind: "resource", resource: "wood" },
+          wagons: 1,
+          caravan: null,
+          unpaidSinceDay: -7,
+          ownerId: 0,
+        },
+      ],
+    },
+  );
+  const { gameRepo, eventRepo, deps } = makeDeps(row);
+  const result = await handleCommand({ kind: "EndTurn", gameName: "test-game", actor: 0 }, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.day, 7);
+  const persisted = gameRepo.rows["test-game"].trade_routes as Array<{ id: string; wagons: number }>;
+  assert.equal(persisted.length, 1, "the dormant route survives the wrap");
+  assert.equal(persisted[0].wagons, 1, "no wagons deserted while dormant");
+  assert.equal(
+    eventRepo.events.filter((e) => e.kind === "TradeRouteRemoved").length,
+    0,
+    "no removal row -- nothing to attribute",
+  );
+  assert.equal(eventRepo.events[0].kind, "TurnEnded");
+});
+
+test("EndTurn removal event is attributed to the route's stamped owner, not the acting turn player", async () => {
+  // Player 1 ends the turn and wraps the round; the weekly upkeep that runs
+  // inside that wrap bills EVERY seat's routes, and player 0's unpaid route
+  // deserts. The removal row must name the route's owner (0, the stamp),
+  // not the seat whose EndTurn happened to trigger the ladder (1).
+  const players: Player[] = [
+    { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
+    { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: [], settlementIds: ["s1"] },
+  ];
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { troops: 1 })],
+    [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, 8, 2)],
+    {
+      players,
+      active_player_id: 1,
+      day: 6,
+      trade_routes: [
+        {
+          id: "route0",
+          from: { kind: "settlement", id: "s0" },
+          to: { kind: "settlement", id: "s1" },
+          payload: { kind: "resource", resource: "wood" },
+          wagons: 1,
+          caravan: null,
+          unpaidSinceDay: -7,
+          ownerId: 0,
+        },
+      ],
+    },
+  );
+  const { eventRepo, deps } = makeDeps(row);
+  const result = await handleCommand({ kind: "EndTurn", gameName: "test-game", actor: 1 }, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.day, 7);
+  assert.equal(eventRepo.events[0].kind, "TradeRouteRemoved");
+  assert.deepEqual(eventRepo.events[0].payload, {
+    type: "TradeRouteRemoved",
+    actor: 0,
+    routeId: "route0",
+  }, "the route's stamped owner, not the acting seat (1)");
+  assert.equal(eventRepo.events[0].actorSeat, 0);
+  assert.equal(eventRepo.events[1].kind, "TurnEnded");
+});
+
+test("a legacy ownerless removal falls back to the live FROM-endpoint owner (the pre-stamp attribution)", async () => {
+  // Pre-stamp JSONB row: no ownerId on the route. Hydration backfills it
+  // from the FROM endpoint's live owner (s0's capturer, seat 1), so the
+  // removal is attributed to 1 -- exactly the old endpointOwner behavior --
+  // and never to the acting seat (0) nor derived from the TO endpoint.
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { troops: 1 })],
+    [makeSettlement("s0", 1, 2, 2), makeSettlement("s1", 0, 8, 2)],
+    {
+      players: SOLO_PLAYER,
+      day: 6,
+      trade_routes: [
+        {
+          id: "route0",
+          from: { kind: "settlement", id: "s0" },
+          to: { kind: "settlement", id: "s1" },
+          payload: { kind: "resource", resource: "wood" },
+          wagons: 1,
+          caravan: null,
+          unpaidSinceDay: -7,
+        },
+      ],
+    },
+  );
+  const { eventRepo, deps } = makeDeps(row);
+  const result = await handleCommand({ kind: "EndTurn", gameName: "test-game", actor: 0 }, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.day, 7);
+  assert.equal(eventRepo.events[0].kind, "TradeRouteRemoved");
+  assert.deepEqual(eventRepo.events[0].payload, {
+    type: "TradeRouteRemoved",
+    actor: 1,
+    routeId: "route0",
+  }, "the live FROM-endpoint owner (the capturer), matching the pre-stamp fallback");
+  assert.equal(eventRepo.events[0].actorSeat, 1);
 });
 
 test("EndTurn without any removal appends no TradeRouteRemoved rows (a fully-paid route survives the weekly charge)", async () => {

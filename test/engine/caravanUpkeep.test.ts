@@ -183,6 +183,105 @@ test("a dead-origin route skips maintenance entirely (no bill, no streak, no des
   assert.equal(result.removedRouteIds.length, 0);
 });
 
+test("a captured-origin route (stamped ownerId, origin now enemy-owned) skips maintenance entirely", () => {
+  const route = makeTradeRoute({
+    id: "route0",
+    from: settlementEndpoint("s0"),
+    to: settlementEndpoint("s1"),
+    payload: { kind: "gold" },
+    wagons: 2,
+    ownerId: 0,
+    caravan: { phase: "toHome", cargo: 500, path: [{ q: 5, r: 2 }, { q: 2, r: 2 }], pathIndex: 2 },
+  });
+  const state = makeState({
+    settlements: [
+      makeSettlement("s0", 1, 2, 2, { gold: 100, warehouse: emptyWarehouse({ food: 100 }) }),
+      makeSettlement("s1", 0, 8, 2),
+    ],
+    tradeRoutes: [route],
+    day: 7,
+  });
+  const result = applyCaravanUpkeep(state, 21);
+  assert.equal(result.state, state, "nothing changed anywhere — same state identity");
+  assert.equal(result.state.settlements.s0.gold, 100, "the capturer's treasury is not drained");
+  assert.equal(result.state.tradeRoutes?.length, 1, "the dormant route survives (the advance-side semantics keep it too)");
+  assert.equal(result.removedRouteIds.length, 0);
+});
+
+test("a legacy route (no ownerId) on a captured origin still bills — its owner derives from the origin itself, so the capturer pays", () => {
+  const route = makeTradeRoute({
+    id: "route0",
+    from: settlementEndpoint("s0"),
+    to: settlementEndpoint("s1"),
+    payload: { kind: "gold" },
+    wagons: 2,
+  });
+  const state = makeState({
+    settlements: [
+      makeSettlement("s0", 1, 2, 2, { gold: 100, warehouse: emptyWarehouse({ food: 100 }) }),
+      makeSettlement("s1", 0, 8, 2),
+    ],
+    tradeRoutes: [route],
+    day: 7,
+  });
+  const result = applyCaravanUpkeep(state, 7);
+  assert.equal(result.state.settlements.s0.gold, 100 - 2, "the origin-derived owner (the capturer, seat 1) pays the bill");
+});
+
+test("desertion disband returns what fits of the aboard cargo at the settlement origin; the rest is lost with the route", () => {
+  const route = makeTradeRoute({
+    id: "route0",
+    from: settlementEndpoint("s0"),
+    to: settlementEndpoint("s1"),
+    payload: { kind: "resource", resource: "wood" },
+    wagons: 1,
+    unpaidSinceDay: 7,
+    caravan: { phase: "toDestination", cargo: 100, path: [{ q: 3, r: 2 }, { q: 4, r: 2 }], pathIndex: 1 },
+  });
+  // A broke origin whose warehouse already holds 460 wood (level-1 cap 500
+  // -> headroom 40): the bill is unpaid, the ladder runs to its end.
+  const origin = makeSettlement("s0", 0, 2, 2, { gold: 0, warehouse: emptyWarehouse({ wood: 460 }) });
+  const state = makeState({
+    settlements: [origin, makeSettlement("s1", 0, 8, 2)],
+    tradeRoutes: [route],
+    day: 7,
+  });
+  const result = applyCaravanUpkeep(state, 21);
+  assert.deepEqual(result.removedRouteIds, ["route0"], "the last wagon deserts and the route disbands");
+  assert.equal(result.state.tradeRoutes?.length, 0);
+  assert.equal(result.state.settlements.s0.warehouse.wood, 500, "the 40 wood that fit return to the warehouse");
+  assert.equal(result.state.settlements.s1.warehouse.wood, 0, "the remaining 60 wood are lost with the route (the documented remainder)");
+});
+
+test("desertion disband returns aboard gold to a hero origin's purse (cart-cap clamped); the rest is lost", () => {
+  const route = makeTradeRoute({
+    id: "route0",
+    from: heroEndpoint("h0"),
+    to: settlementEndpoint("s1"),
+    payload: { kind: "gold" },
+    wagons: 1,
+    unpaidSinceDay: 7,
+    caravan: { phase: "toDestination", cargo: 500, path: [{ q: 3, r: 2 }, { q: 4, r: 2 }], pathIndex: 1 },
+  });
+  // A hero with a 2,400g purse (2,500g cart cap -> 100g headroom) and an
+  // empty larder: the gold bill is paid, the food bill is not, so the
+  // ladder runs — the deposit must land inside the purse cap.
+  const hero = makeHero("h0", 0, 2, 2, { gold: 2400 });
+  const state = makeState({
+    heroes: [hero],
+    settlements: [makeSettlement("s1", 0, 8, 2)],
+    tradeRoutes: [route],
+    day: 7,
+  });
+  const result = applyCaravanUpkeep(state, 21);
+  assert.deepEqual(result.removedRouteIds, ["route0"]);
+  assert.equal(
+    result.state.heroes.h0.gold,
+    2500,
+    "2,400 - 1 (gold bill) + 100 (what fits the 2,500g cart cap) — the 399g remainder is lost with the route",
+  );
+});
+
 test("a zero-wagon route bills nothing and a routeless state is a no-op", () => {
   const zeroWagon = makeTradeRoute({
     id: "route0",

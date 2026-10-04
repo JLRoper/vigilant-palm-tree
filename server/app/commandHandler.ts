@@ -39,7 +39,7 @@ transferGold,
   buyWagons,
   createTradeRoute as createTradeRouteReducer,
   updateTradeRoute as updateTradeRouteReducer,
-  endpointOwner,
+  routeOwnerId,
   deriveHeroVerdict,
   nearestOwnedSettlement,
   relocateHeroToSettlement,
@@ -747,14 +747,18 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // Weekly caravan-maintenance desertion auto-removed these routes
       // inside advanceRound (applyCaravanUpkeep); append a TradeRouteRemoved
       // row per removal BEFORE the TurnEnded row so the stream reads
-      // chronologically. The route's origin owner is the actor -- it always
-      // resolves (dead-origin routes are skipped by maintenance) -- with the
-      // ending seat as a defensive fallback.
+      // chronologically. Attribution is the route's TRUE owner: the
+      // persisted stamp when present, else the FROM endpoint's live owner
+      // (routeOwnerId -- the same resolution maintenance, the advance
+      // path's dormant checks, and the update gate all use), so a
+      // captured-origin route's removal is never attributed to the acting
+      // turn player. Undeterminable (no stamp, dead/missing origin) falls
+      // back to the ending seat.
       const beforeRoutes = state.tradeRoutes ?? [];
       let lastEventId = 0;
       for (const removedId of removedTradeRouteIds(state, finalState)) {
         const removed = beforeRoutes.find((r) => r.id === removedId);
-        const owner = removed ? endpointOwner(removed.from, state) : null;
+        const owner = removed ? routeOwnerId(removed, state) : null;
         const actor: number = owner ?? command.actor;
         const removedEvent: EngineEvent = {
           type: "TradeRouteRemoved",
@@ -1565,7 +1569,16 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         ...(command.slot !== undefined ? { slot: command.slot } : {}),
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], lastEventId, hero: result.state.heroes[command.heroId] };
+      // players rides every logistics result: the acting client reconciles
+      // the wagon-pool delta (and, for routes, the routes array) from the
+      // response instead of waiting for the next resync (logistics plan §5.7).
+      return {
+        ok: true,
+        events: [event],
+        lastEventId,
+        hero: result.state.heroes[command.heroId],
+        players: result.state.players,
+      };
     }
     case "BuyWagons": {
       const result = buyWagons(state, command.actor, command.settlementId, command.count, command.slot);
@@ -1587,7 +1600,13 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         ...(command.slot !== undefined ? { slot: command.slot } : {}),
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
+      return {
+        ok: true,
+        events: [event],
+        lastEventId,
+        settlement: result.state.settlements[command.settlementId],
+        players: result.state.players,
+      };
     }
     case "CreateTradeRoute": {
       const result = createTradeRouteReducer(
@@ -1621,7 +1640,13 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         wagons: command.wagons,
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], lastEventId, tradeRoutes: result.state.tradeRoutes };
+      return {
+        ok: true,
+        events: [event],
+        lastEventId,
+        tradeRoutes: result.state.tradeRoutes,
+        players: result.state.players,
+      };
     }
     case "UpdateTradeRoute": {
       const result = updateTradeRouteReducer(state, command.actor, command.routeId, {
@@ -1647,7 +1672,13 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         ? { type: "TradeRouteRemoved", actor: command.actor, routeId: command.routeId }
         : { type: "TradeRouteUpdated", actor: command.actor, routeId: command.routeId };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], lastEventId, tradeRoutes: result.state.tradeRoutes };
+      return {
+        ok: true,
+        events: [event],
+        lastEventId,
+        tradeRoutes: result.state.tradeRoutes,
+        players: result.state.players,
+      };
     }
     case "UpgradeSettlement": {
       const settlement = row.settlements[command.settlementId];

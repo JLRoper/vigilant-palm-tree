@@ -100,3 +100,46 @@ export function newlyCappedSettlements(
   }
   return cappedSettlements(next, seat).filter((s) => !wasCapped.has(s.id));
 }
+
+// E1(a) (logistics-interface-fixes plan §3/§5.8): the transition rows above
+// still re-toast whenever a capped treasury oscillates — weekly route upkeep
+// or a bank deposit drops it below the cap, the next turn's income refills
+// it, and the "just became capped" comparison fires again every cycle. This
+// per-session guard (the tradeNeedsReminder.ts pattern) lets each settlement
+// toast ONCE while it stays at cap; its id is released only when the treasury
+// is observed below cap, so a genuinely new crossing toasts again. A
+// module-level Set dies with the page, so there is no bookkeeping to reset on
+// game load; the session key scopes ids so two games played in one session
+// never suppress each other's first toast. `resetTreasuryCapDedupe` exists
+// for tests and nothing else.
+const toastedSessionKeys = new Set<string>();
+
+export function resetTreasuryCapDedupe(): void {
+  toastedSessionKeys.clear();
+}
+
+function capDedupeKey(sessionKey: string | null, settlementId: string): string {
+  return sessionKey === null ? settlementId : `${sessionKey}:${settlementId}`;
+}
+
+/**
+ * Filters the transition rows down to the ones this session has not toasted
+ * yet, marks what it returns, and releases every OWN settlement observed
+ * below cap in `next` so a later re-cap can toast again. Compose AFTER
+ * newlyCappedSettlements in the toast caller.
+ */
+export function applyTreasuryCapSessionDedupe(
+  sessionKey: string | null,
+  next: GameState,
+  seat: PlayerId | null,
+  rows: SettlementState[],
+): SettlementState[] {
+  if (seat !== null) {
+    for (const s of Object.values(next.settlements)) {
+      if (s.ownerId === seat && !treasuryCapped(s)) toastedSessionKeys.delete(capDedupeKey(sessionKey, s.id));
+    }
+  }
+  const out = rows.filter((s) => !toastedSessionKeys.has(capDedupeKey(sessionKey, s.id)));
+  for (const s of out) toastedSessionKeys.add(capDedupeKey(sessionKey, s.id));
+  return out;
+}

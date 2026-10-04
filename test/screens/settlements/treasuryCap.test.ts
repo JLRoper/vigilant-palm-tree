@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import type { BuildingDef, GameState, Player, SettlementId, SettlementState } from "@heroes/contracts";
 import { BASE_TREASURY, settlementTreasuryCap } from "@heroes/engine";
 import {
+  applyTreasuryCapSessionDedupe,
   cappedSettlements,
   newlyCappedSettlements,
+  resetTreasuryCapDedupe,
   TREASURY_CAP_AMBER,
   TREASURY_CAP_SUMMARY_OFFENDER_LIMIT,
   treasuryCapMessage,
@@ -218,4 +220,52 @@ test("transition: a bank that raises the cap un-caps, then a refill re-caps", ()
     settlement("s0", 0, { level: 1, gold: 3500, buildings: [building("bank")] }),
   ]);
   assert.deepEqual(newlyCappedSettlements(banked, refilled, 0).map((s) => s.id), ["s0"]);
+});
+
+test("session dedupe (E1a): each settlement toasts once per session while it stays at cap", () => {
+  resetTreasuryCapDedupe();
+  const capped = makeState([settlement("s0", 0, { gold: 1500 })]);
+  const first = applyTreasuryCapSessionDedupe("g1", capped, 0, newlyCappedSettlements(null, capped, 0));
+  assert.deepEqual(first.map((s) => s.id), ["s0"]);
+
+  // The transition comparison re-fires (a stale `previous`, a server round-wrap
+  // merge that dipped gold and recovered between turns) — the session guard
+  // still suppresses the repeat while the treasury never dropped below cap.
+  const repeat = applyTreasuryCapSessionDedupe("g1", capped, 0, newlyCappedSettlements(null, capped, 0));
+  assert.deepEqual(repeat, []);
+});
+
+test("session dedupe (E1a): a settlement observed below cap re-arms and toasts again on the next cap", () => {
+  resetTreasuryCapDedupe();
+  const capped = makeState([settlement("s0", 0, { gold: 1500 })]);
+  assert.deepEqual(applyTreasuryCapSessionDedupe("g1", capped, 0, newlyCappedSettlements(null, capped, 0)).map((s) => s.id), ["s0"]);
+
+  // Weekly route upkeep (or a bank deposit) drops it below cap — the release.
+  const below = makeState([settlement("s0", 0, { gold: 1200 })]);
+  assert.deepEqual(applyTreasuryCapSessionDedupe("g1", below, 0, newlyCappedSettlements(capped, below, 0)), []);
+
+  // The next turn's income refills it — a genuinely new crossing, toast again.
+  const refilled = makeState([settlement("s0", 0, { gold: 1500 })]);
+  const again = applyTreasuryCapSessionDedupe("g1", refilled, 0, newlyCappedSettlements(below, refilled, 0));
+  assert.deepEqual(again.map((s) => s.id), ["s0"]);
+});
+
+test("session dedupe (E1a): the session key scopes ids across games", () => {
+  resetTreasuryCapDedupe();
+  const capped = makeState([settlement("s0", 0, { gold: 1500 })]);
+  assert.deepEqual(applyTreasuryCapSessionDedupe("game-a", capped, 0, newlyCappedSettlements(null, capped, 0)).map((s) => s.id), ["s0"]);
+  assert.deepEqual(
+    applyTreasuryCapSessionDedupe("game-b", capped, 0, newlyCappedSettlements(null, capped, 0)).map((s) => s.id),
+    ["s0"],
+    "a different game's s0 is not suppressed by the first game's toast",
+  );
+});
+
+test("session dedupe (E1a): foreign settlements and an unknown seat dedupe nothing", () => {
+  resetTreasuryCapDedupe();
+  const capped = makeState([settlement("theirs", 1, { gold: 1500 })]);
+  const rows = newlyCappedSettlements(null, capped, 0);
+  assert.deepEqual(rows, []);
+  assert.deepEqual(applyTreasuryCapSessionDedupe("g1", capped, 0, rows), []);
+  assert.deepEqual(applyTreasuryCapSessionDedupe("g1", capped, null, []), []);
 });

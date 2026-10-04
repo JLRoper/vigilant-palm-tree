@@ -9,6 +9,7 @@ import {
   findPath,
   GameMap,
   hexDistance,
+  heroGoldCap,
   hydrateGameState,
   normalizeTradeRoute,
   transferCargoLoot,
@@ -162,6 +163,31 @@ test("assignWagons with slot 'treasury' moves carts between the treasury pool an
   const drainedPool = assignWagons(partial.state, 0, "h0", 1, "treasury");
   assert.equal(drainedPool.ok, false);
   assert.equal(drainedPool.reason, "not_enough_wagons_unassigned");
+});
+
+test("assignWagons on a pre-028 hero (absent treasuryWagons) seeds the slot from the 5-cart default, never from 0", () => {
+  const state = logisticsState();
+  const legacy = { ...state.heroes.h0 };
+  delete legacy.treasuryWagons;
+  const seeded: GameState = { ...state, heroes: { ...state.heroes, h0: legacy } };
+  assert.equal(heroGoldCap(seeded.heroes.h0), 2500, "fixture: the absent field soft-defaults to a 2,500g purse cap");
+
+  const up = assignWagons(seeded, 0, "h0", 1, "treasury");
+  assert.equal(up.ok, true);
+  assert.equal(
+    up.state.heroes.h0.treasuryWagons,
+    6,
+    "5 (soft default) + 1 — the materialized count can never sit below the default, so the purse cap cannot shrink",
+  );
+  assert.equal(heroGoldCap(up.state.heroes.h0), 3000);
+
+  const down = assignWagons(seeded, 0, "h0", -1, "treasury");
+  assert.equal(down.ok, true, "the absent field soft-defaults to 5 carts, so -1 is a legal move");
+  assert.equal(down.state.heroes.h0.treasuryWagons, 4);
+
+  const drained = assignWagons(down.state, 0, "h0", -10, "treasury");
+  assert.equal(drained.ok, true);
+  assert.equal(drained.state.heroes.h0.treasuryWagons, 0, "the negative delta clamps against the real 4 carts, not 0");
 });
 
 test("buyWagons deducts 200g + 5 wood each and grows the pool", () => {
@@ -339,7 +365,7 @@ test("createTradeRoute accepts hero endpoints in both directions and rejects for
   assert.deepEqual(toHero.route!.to, { kind: "hero", id: "h0" });
   assert.deepEqual(toHero.route!.payload, { kind: "resource", resource: "wood" });
 
-  const fromHero = createTradeRoute(toHero.state, 0, heroEndpoint("h0"), settlementEndpoint("s0"), GOLD, 2);
+  const fromHero = createTradeRoute(toHero.state, 0, heroEndpoint("h0"), settlementEndpoint("s1"), GOLD, 2);
   assert.equal(fromHero.ok, true, fromHero.reason);
   assert.deepEqual(fromHero.route!.from, { kind: "hero", id: "h0" });
   assert.deepEqual(fromHero.route!.payload, { kind: "gold" });
@@ -609,6 +635,7 @@ test("a legacy-shaped trade route hydrates to the endpoint shape and advances un
       payload: { kind: "resource", resource: "wood" },
       wagons: 2,
       caravan: null,
+      ownerId: 0,
     },
   ]);
   assert.equal(state.nextTradeRouteId, 1, "the id counter derives from the hydrated route ids");
@@ -698,6 +725,163 @@ test("hydrated route ids seed nextTradeRouteId so a new route never collides (la
 
   const emptyRow = { ...row, name: "counter-empty", trade_routes: [] };
   assert.equal(hydrateGameState(emptyRow).nextTradeRouteId, 0, "no routes -> counter 0");
+});
+
+// ---- Route ownership (ownerId stamp, update gate, hydrate backfill) ---------
+
+test("createTradeRoute stamps the creating seat and rejects a same-tile endpoint pair", () => {
+  const state = grantWagons(
+    makeState({
+      heroes: [makeHero("h0", 0, 2, 2)],
+      settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 0, 8, 2)],
+      activePlayerId: 0,
+    }),
+    2,
+  );
+  const created = createTradeRoute(state, 0, settlementEndpoint("s0"), settlementEndpoint("s1"), WOOD, 1);
+  assert.equal(created.ok, true, created.reason);
+  assert.equal(created.route!.ownerId, 0, "the creating seat is stamped on the route");
+
+  // Same TILE, different endpoints: the hero stands on s0. The pair is
+  // distinct but a route between them can never load.
+  const sameTile = createTradeRoute(state, 0, settlementEndpoint("s0"), heroEndpoint("h0"), WOOD, 1);
+  assert.equal(sameTile.ok, false);
+  assert.equal(sameTile.reason, "same_tile");
+});
+
+test("updateTradeRoute gates on the persisted owner: a captured-origin route belongs to (and is removable by) its true owner, not the capturer", () => {
+  const state = grantWagons(
+    makeState({
+      heroes: [],
+      settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 0, 8, 2)],
+      activePlayerId: 0,
+    }),
+    2,
+  );
+  const created = createTradeRoute(state, 0, settlementEndpoint("s0"), settlementEndpoint("s1"), WOOD, 1);
+  assert.equal(created.ok, true, created.reason);
+  const captured: GameState = {
+    ...created.state,
+    settlements: {
+      ...created.state.settlements,
+      s0: { ...created.state.settlements.s0, ownerId: 1 },
+    },
+  };
+  const byCapturer = updateTradeRoute(captured, 1, created.route!.id, { remove: true });
+  assert.equal(byCapturer.ok, false, "the capturer does not own the route");
+  const byOwner = updateTradeRoute(captured, 0, created.route!.id, { remove: true });
+  assert.equal(byOwner.ok, true, "the true owner can still remove it");
+});
+
+test("updateTradeRoute rejects a payload switch while the caravan is in flight, and a wagon delta that would zero the route", () => {
+  const route = makeTradeRoute({
+    id: "route0",
+    from: settlementEndpoint("s0"),
+    to: settlementEndpoint("s1"),
+    payload: { kind: "gold" },
+    wagons: 2,
+    caravan: { phase: "toDestination", cargo: 500, path: [{ q: 3, r: 2 }], pathIndex: 1 },
+  });
+  const state = makeState({
+    heroes: [],
+    settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 0, 8, 2)],
+    tradeRoutes: [route],
+    activePlayerId: 0,
+  });
+  state.players = state.players.map((p) => (p.id === 0 ? { ...p, wagonsOwned: 2, wagonsUnassigned: 2 } : p));
+
+  const flipped = updateTradeRoute(state, 0, "route0", { resource: "wood" });
+  assert.equal(flipped.ok, false, "the aboard cargo has no label; a mid-flight switch would reinterpret it at delivery");
+  assert.equal(flipped.reason, "route_in_flight");
+
+  const shrunk = updateTradeRoute(state, 0, "route0", { wagonsDelta: -2 });
+  assert.equal(shrunk.ok, false, "a route always keeps at least one wagon -- no clamp to 0");
+  assert.equal(shrunk.reason, "route_needs_a_wagon");
+
+  const grownMidFlight = updateTradeRoute(state, 0, "route0", { wagonsDelta: 1 });
+  assert.equal(grownMidFlight.ok, true, "a wagon delta mid-flight only affects the next load and stays legal");
+  assert.equal(grownMidFlight.state.tradeRoutes[0].wagons, 3);
+});
+
+test("hydration backfills route ownership: the raw row wins, then the FROM endpoint's owner, then the TO's, else null", () => {
+  const row = {
+    name: "owner-backfill",
+    seed: 1,
+    round: 1,
+    day: 1,
+    active_player_id: 0,
+    players: [makePlayer(0, "player", [], ["s0", "s1"], { wagonsOwned: 2, wagonsUnassigned: 2 }), makePlayer(2, "player", [], [])],
+    heroes: {},
+    settlements: {
+      s0: makeSettlement("s0", 2, 2, 2),
+      s1: makeSettlement("s1", 0, 8, 2),
+    },
+  };
+  const shaped = (overrides: Record<string, unknown>) => ({
+    id: "route0",
+    from: { kind: "settlement", id: "s0" },
+    to: { kind: "settlement", id: "s1" },
+    payload: { kind: "gold" },
+    wagons: 1,
+    caravan: null,
+    ...overrides,
+  });
+
+  assert.equal(
+    hydrateGameState({ ...row, trade_routes: [shaped({ ownerId: 9 })] }).tradeRoutes![0].ownerId,
+    9,
+    "a persisted ownerId is trusted verbatim",
+  );
+  assert.equal(
+    hydrateGameState({ ...row, trade_routes: [shaped({})] }).tradeRoutes![0].ownerId,
+    2,
+    "no raw ownerId -> the FROM endpoint's owner",
+  );
+  assert.equal(
+    hydrateGameState({
+      ...row,
+      trade_routes: [
+        { id: "route0", from: { kind: "hero", id: "h-gone" }, to: { kind: "settlement", id: "s1" }, payload: { kind: "gold" }, wagons: 1, caravan: null },
+      ],
+    }).tradeRoutes![0].ownerId,
+    0,
+    "a dead hero FROM endpoint falls back to the TO endpoint's owner",
+  );
+  const bothDead = hydrateGameState({
+    ...row,
+    trade_routes: [
+      { id: "route0", from: { kind: "hero", id: "h-gone" }, to: { kind: "hero", id: "h-gone2" }, payload: { kind: "gold" }, wagons: 1, caravan: null },
+    ],
+  });
+  assert.equal(
+    bothDead.tradeRoutes![0].ownerId,
+    null,
+    "dead endpoints on both sides -> explicit null (the gate falls back; never misattributed)",
+  );
+});
+
+test("normalizeTradeRoute passes a persisted ownerId through and drops corrupt caravans at the documented bounds", () => {
+  const owned = normalizeTradeRoute({ id: "route0", fromSettlementId: "s0", toSettlementId: "s1", resource: "wood", wagons: 1, ownerId: 3, caravan: null });
+  assert.equal(owned?.ownerId, 3, "a legacy row's persisted ownerId survives normalization");
+  const unowned = normalizeTradeRoute({ id: "route0", fromSettlementId: "s0", toSettlementId: "s1", resource: "wood", wagons: 1, caravan: null });
+  assert.equal(unowned === null || !("ownerId" in unowned), true, "no raw ownerId stays absent at the normalize layer (never ownerId: undefined)");
+
+  const base = {
+    id: "route0",
+    from: { kind: "settlement", id: "s0" },
+    to: { kind: "settlement", id: "s1" },
+    payload: { kind: "resource", resource: "wood" },
+    wagons: 1,
+  };
+  assert.equal(normalizeTradeRoute({ ...base, caravan: { phase: "toDestination", cargo: -1, path: [{ q: 3, r: 2 }], pathIndex: 0 } }), null, "negative cargo drops the route");
+  const fractional = normalizeTradeRoute({ ...base, caravan: { phase: "toDestination", cargo: 1.5, path: [{ q: 3, r: 2 }], pathIndex: 0 } });
+  assert.equal(fractional?.caravan?.cargo, 1.5, "fractional cargo stays (settlement stocks are 2-decimal since the NUMERIC migration)");
+  assert.equal(normalizeTradeRoute({ ...base, caravan: { phase: "toDestination", cargo: 10, path: [], pathIndex: 0 } }), null, "an empty path drops the route");
+  assert.equal(normalizeTradeRoute({ ...base, caravan: { phase: "toDestination", cargo: 10, path: [{ q: 3, r: 2 }], pathIndex: 2 } }), null, "pathIndex beyond the path drops the route");
+  assert.equal(normalizeTradeRoute({ ...base, caravan: { phase: "toDestination", cargo: 10, path: [{ q: 3, r: 2 }], pathIndex: -1 } }), null, "a negative pathIndex drops the route");
+  assert.equal(normalizeTradeRoute({ ...base, caravan: { phase: "toDestination", cargo: 10, path: [{ q: 3.5, r: 2 }], pathIndex: 0 } }), null, "fractional path coordinates drop the route");
+  const arrived = normalizeTradeRoute({ ...base, caravan: { phase: "toDestination", cargo: 10, path: [{ q: 3, r: 2 }], pathIndex: 1 } });
+  assert.equal(arrived?.caravan?.pathIndex, 1, "pathIndex === path.length (arrived) is in range and kept");
 });
 
 test("transferCargoLoot: the winner takes the purse and cargo up to their own caps", () => {

@@ -4,7 +4,7 @@ import type { PoolClient } from "pg";
 import { withRollback } from "../helpers/pgTestTx";
 import { pool } from "../../server/persistence/db";
 import { createGameRepo, GameNotFoundError } from "../../server/persistence/repositories/gameRepo";
-import { emptyWarehouse, makeHero, makePlayer, makeSettlement } from "../charter/_helpers";
+import { emptyWarehouse, makeHero, makePlayer, makeSettlement, makeTradeRoute } from "../charter/_helpers";
 
 // withRollback pulls in the shared pg pool; close it once this file's tests
 // are done so node:test's process can exit promptly instead of waiting out
@@ -58,6 +58,40 @@ test("gameRepo.saveHeroesAndSettlements persists heroes and settlements", async 
 
     assert.deepEqual(row.heroes, { h0: hero });
     assert.deepEqual(row.settlements, { s0: settlement });
+  });
+});
+
+test("gameRepo.saveHeroesAndSettlements round-trips trade-route ownerId through the trade_routes JSONB", async () => {
+  // Logistics interface fixes §5.1/§5.7: routes are persisted whole (this
+  // extra field), so a stamped ownerId must come back verbatim -- both the
+  // present-number shape createTradeRoute writes and the explicit null a
+  // dead-both-ends hydration backfills. The engine-side hydrate pins live
+  // in test/engine/logistics.test.ts; this is the storage half of the
+  // round trip.
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createGameRepo(client);
+    const stamped = makeTradeRoute({
+      id: "route0",
+      from: { kind: "settlement", id: "s0" },
+      to: { kind: "settlement", id: "s1" },
+      payload: { kind: "resource", resource: "wood" },
+      ownerId: 0,
+    });
+    const ownerless = makeTradeRoute({
+      id: "route1",
+      from: { kind: "settlement", id: "s0" },
+      to: { kind: "hero", id: "h0" },
+      payload: { kind: "gold" },
+      wagons: 1,
+      ownerId: null,
+    });
+
+    await repo.saveHeroesAndSettlements(name, {}, {}, { trade_routes: [stamped, ownerless] });
+    const row = await repo.load(name);
+
+    assert.deepEqual(row.trade_routes, [stamped, ownerless], "ownerId survives the JSONB round trip verbatim");
   });
 });
 

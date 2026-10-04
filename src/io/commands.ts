@@ -11,6 +11,7 @@ import type {
   SettlementState,
   TradeRouteEndpoint,
   TradeRoutePayload,
+  TradeRouteState,
   WarehouseResource,
 } from "@heroes/contracts";
 import { apiFetch } from "./api";
@@ -108,6 +109,33 @@ export type EndTurnResult = {
   heroes: Record<string, HeroState>;
   settlements: Record<string, SettlementState>;
   tradeRoutes?: import("@heroes/contracts").TradeRouteState[];
+};
+
+// The four logistics command responses (logistics interface fixes §5.7):
+// each carries the post-mutation players array -- the wagon-pool delta the
+// acting client reconciles from the response instead of waiting for a
+// resync -- plus the touched entity slice: the full post-change routes
+// array for create/update, the settlement for buy, the hero for assign.
+// Mirrors the CommandResult fields commandHandler.ts's four cases return;
+// the /commands route forwards all of them verbatim.
+export type CreateTradeRouteResult = {
+  tradeRoutes: TradeRouteState[];
+  players: Player[];
+};
+
+export type UpdateTradeRouteResult = {
+  tradeRoutes: TradeRouteState[];
+  players: Player[];
+};
+
+export type BuyWagonsResult = {
+  settlement: SettlementState;
+  players: Player[];
+};
+
+export type AssignWagonsResult = {
+  hero: HeroState;
+  players: Player[];
 };
 
 // Mirrors the contracts ResolveBattleResult (hero-outcomes plan W1) plus the
@@ -373,26 +401,31 @@ export async function transferResources(
 
 // Moves wagons between the player's unassigned pool and a hero (plan §6).
 // `slot` picks the pool ("cargo" army wagons, or "treasury" carts); absent
-// means cargo (the pre-split behavior).
+// means cargo (the pre-split behavior). The response carries the updated
+// hero plus the post-mutation players array (§5.7) -- today's caller stays
+// fire-and-forget, but the client merge wave consumes it.
 export async function assignWagons(
   name: string,
   payload: { actor: number; heroId: string; delta: number; slot?: "cargo" | "treasury" }
-): Promise<void> {
-  await postCommand(name, { kind: "AssignWagons", ...payload });
+): Promise<AssignWagonsResult> {
+  return postCommand<AssignWagonsResult>(name, { kind: "AssignWagons", ...payload });
 }
 
 // Buys wagons into the player's unassigned pool, paid from a settlement (plan §6).
-// `slot` picks the pool the wagons land in; absent means cargo.
+// `slot` picks the pool the wagons land in; absent means cargo. Response
+// carries the updated settlement plus the post-mutation players array (§5.7).
 export async function buyWagons(
   name: string,
   payload: { actor: number; settlementId: string; count: number; slot?: "cargo" | "treasury" }
-): Promise<void> {
-  await postCommand(name, { kind: "BuyWagons", ...payload });
+): Promise<BuyWagonsResult> {
+  return postCommand<BuyWagonsResult>(name, { kind: "BuyWagons", ...payload });
 }
 
 // Creates a trade route, committing wagons from the unassigned pool (plan §6).
 // Endpoints are settlement-or-hero (`kind` discriminates); the payload picks
-// the caravan type (a warehouse resource = cargo, "gold" = treasure).
+// the caravan type (a warehouse resource = cargo, "gold" = treasure). Response
+// carries the full post-change routes array plus the post-mutation players
+// array (§5.7).
 export async function createTradeRoute(
   name: string,
   payload: {
@@ -402,11 +435,12 @@ export async function createTradeRoute(
     payload: TradeRoutePayload;
     wagons: number;
   }
-): Promise<void> {
-  await postCommand(name, { kind: "CreateTradeRoute", ...payload });
+): Promise<CreateTradeRouteResult> {
+  return postCommand<CreateTradeRouteResult>(name, { kind: "CreateTradeRoute", ...payload });
 }
 
-// Updates (or removes) an existing trade route (plan §6).
+// Updates (or removes) an existing trade route (plan §6). Response carries
+// the full post-change routes array plus the post-mutation players array (§5.7).
 export async function updateTradeRoute(
   name: string,
   payload: {
@@ -416,8 +450,8 @@ export async function updateTradeRoute(
     wagonsDelta?: number;
     remove?: boolean;
   }
-): Promise<void> {
-  await postCommand(name, { kind: "UpdateTradeRoute", ...payload });
+): Promise<UpdateTradeRouteResult> {
+  return postCommand<UpdateTradeRouteResult>(name, { kind: "UpdateTradeRoute", ...payload });
 }
 
 export async function upgradeSettlement(

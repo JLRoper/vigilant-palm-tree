@@ -157,6 +157,16 @@ export interface TradeRouteState {
   /** null while the caravan is at the origin, loading. */
   caravan: CaravanState | null;
   /**
+   * The seat that created and owns the route (stamped at creation, replayed
+   * from TradeRouteCreated's actor, backfilled at hydration from the raw row
+   * then the FROM then the TO endpoint's owner). Optional so legacy JSONB
+   * rows stay valid; absent reads as the FROM endpoint's live owner. Removal
+   * and the daily advance gate on this field first so a route stays its true
+   * owner's property — and removable by them — even when the origin endpoint
+   * dies or is captured.
+   */
+  ownerId?: PlayerId | null;
+  /**
    * Day of the first unpaid weekly maintenance charge (caravanUpkeep);
    * null/absent = paid up. Optional so legacy JSONB rows stay valid.
    */

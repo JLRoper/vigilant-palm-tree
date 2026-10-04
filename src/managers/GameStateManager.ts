@@ -1,4 +1,4 @@
-import type { GameState, HeroId } from "../state/gameState";
+import type { GameState, HeroId, PlayerId } from "../state/gameState";
 import { Hero } from "../entities/hero";
 import { Castle } from "../entities/settlement";
 import { findPath } from "../map/pathfinding";
@@ -22,6 +22,10 @@ export class GameStateManager {
   private gameMap!: GameMap;
   private hooks: TurnControllerHooks | null = null;
   private primaryActorSource: (() => boolean) | null = null;
+  // S3 (logistics-interface-fixes plan §5.8): the local viewer's seat, read
+  // lazily at construction time -- the active game (and its seat) changes on
+  // adopt/load, same lifecycle as primaryActorSource.
+  private localSeatSource: (() => PlayerId | null) | null = null;
   private pathPreviewLock: PathPreviewLock | null = null;
   // Owner of the AI-turn state (I1 garrison backoff, B1 recruit guard) that
   // must survive a controller rebuild: every makeTurnController() call hands
@@ -42,9 +46,14 @@ export class GameStateManager {
     this.primaryActorSource = source;
   }
 
+  setLocalSeatSource(source: (() => PlayerId | null) | null): void {
+    this.localSeatSource = source;
+  }
+
   private makeTurnController(state: GameState): TurnController {
     const opts: TurnControllerOptions = { aiMemory: this.aiMemory };
     if (this.primaryActorSource) opts.isPrimaryActor = this.primaryActorSource;
+    if (this.localSeatSource) opts.localSeat = this.localSeatSource();
     return new TurnController(state, this.hooks ?? ({} as TurnControllerHooks), opts);
   }
 

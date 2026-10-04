@@ -83,6 +83,10 @@ export class GameEngine {
       const gameName = this.session.getActiveGameName();
       return shouldDriveAi(gameName, getInMemoryLocalPlayerId(gameName ?? ""));
     });
+    // S3 (logistics-interface-fixes plan §5.8): the five logistics controller
+    // methods gate on the local seat's own PLAYER_TURN; the seat is re-read on
+    // every controller rebuild (each game load rebuilds it).
+    this.state.setLocalSeatSource(() => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""));
   }
 
   // =========================================================================
@@ -128,6 +132,11 @@ export class GameEngine {
       gameMap: () => this.gameMap,
       rng,
       localSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
+      // S1 (logistics-interface-fixes plan §5.8): the logistics hooks merge
+      // their command results back into the live controller through this
+      // getter -- resolved lazily at result time, long after the controller
+      // exists.
+      getController: () => this.state.getTurnController(),
       onPlaceBuildingsRejected: (settlementId, appliedDelta) => {
         const next = applyNetToSettlement(this.state.getState(), settlementId, invertNet(appliedDelta));
         if (next) this.state.replaceState(next);

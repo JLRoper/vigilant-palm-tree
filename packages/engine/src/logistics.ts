@@ -16,8 +16,9 @@ import type {
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import type { GameMap } from "./map/gameMap";
-import { findPath } from "./map/pathfinding";
+import { findPath, hexDistance } from "./map/pathfinding";
 import {
+  DEFAULT_TREASURY_WAGONS,
   WAGON_COST,
   WAGON_GOLD_CAPACITY,
   WAGON_RESOURCE_CAPACITY,
@@ -30,8 +31,8 @@ import {
   warehouseHeadroom,
 } from "./settlement/capacity";
 
-// docs/wagons-stockpiles-trade-routes-plan.md Â§4.2/Â§6 â€” hero cargo
-// transfers (load/unload at a same-hex owned settlement) and wagon
+// docs/wagons-stockpiles-trade-routes-plan.md sections 4.2 and 6: hero
+// cargo transfers (load/unload at a same-hex owned settlement) and wagon
 // assignment between the player pool and a hero.
 
 export interface TransferResourcesResult {
@@ -124,7 +125,13 @@ export function assignWagons(
   // army-wagon behavior byte-for-byte (the default for legacy senders).
   const unassigned = slot === "treasury" ? (player.treasuryWagonsUnassigned ?? 0) : (player.wagonsUnassigned ?? 0);
   const owned = slot === "treasury" ? (player.treasuryWagonsOwned ?? 0) : (player.wagonsOwned ?? 0);
-  const current = slot === "treasury" ? (hero.treasuryWagons ?? 0) : (hero.wagons ?? 0);
+  // Belt over the migration gap (028 backfills NULL rows to 5): an absent
+  // treasuryWagons is a pre-023 hero whose carts soft-default to 5 — seeding
+  // the slot from 0 would materialize a sub-default cart count and SHRINK
+  // the purse cap below 2,500g, and a negative delta must clamp against the
+  // carts the hero really has.
+  const current =
+    slot === "treasury" ? (hero.treasuryWagons ?? DEFAULT_TREASURY_WAGONS) : (hero.wagons ?? 0);
   const move = delta > 0 ? Math.min(delta, unassigned) : Math.max(delta, -current);
   if (move === 0) {
     return { ok: false, state, reason: delta > 0 ? "not_enough_wagons_unassigned" : "not_enough_wagons" };
@@ -272,7 +279,7 @@ export function tradeRoutesOf(state: GameState): TradeRouteState[] {
 }
 
 /** Structural records-only view of GameState: full states and the mutable `{ settlements, heroes }` pairs inside advanceTradeRoutes both satisfy it. */
-type EndpointRecords = Pick<GameState, "settlements" | "heroes">;
+export type EndpointRecords = Pick<GameState, "settlements" | "heroes">;
 
 /** The endpoint's live tile, or null when the endpoint no longer exists (a dead hero; settlements are never deleted, only captured). */
 export function endpointTile(endpoint: TradeRouteEndpoint, state: EndpointRecords): Axial | null {
@@ -322,6 +329,15 @@ export function createTradeRoute(
   if (from.kind === to.kind && from.id === to.id) {
     return { ok: false, state, reason: "same_endpoint" };
   }
+  // Same-TILE, not same-endpoint: a settlement and a hero standing on it are
+  // distinct endpoints on one tile, and a route between them can never load
+  // (findPath returns [] for start===goal) -- it would sit "loading" forever
+  // while weekly maintenance bills it. Reject at creation.
+  const fromTile = endpointTile(from, state);
+  const toTile = endpointTile(to, state);
+  if (fromTile && toTile && isSameTile(fromTile, toTile)) {
+    return { ok: false, state, reason: "same_tile" };
+  }
   if (!Number.isInteger(wagons) || wagons <= 0) {
     return { ok: false, state, reason: "invalid_amount" };
   }
@@ -338,6 +354,7 @@ export function createTradeRoute(
     payload,
     wagons,
     caravan: null,
+    ownerId: actor,
   };
   return {
     ok: true,
@@ -364,7 +381,14 @@ export function updateTradeRoute(
   const routes = tradeRoutesOf(state);
   const route = routes.find((r) => r.id === routeId);
   if (!route) return { ok: false, state, reason: "no_route" };
-  if (endpointOwner(route.from, state) !== actor) {
+  // The persisted owner decides (when present): a route outlives a dead or
+  // captured ORIGIN endpoint, and its true owner must still be able to
+  // remove it -- a gate on the FROM endpoint's live owner would make a
+  // dead-hero-origin route unremovable by anyone and a captured origin
+  // removable by the capturer. Absent (legacy rows) falls back to the
+  // FROM endpoint's live owner, the pre-ownerId behavior.
+  const owner = route.ownerId ?? endpointOwner(route.from, state);
+  if (owner !== actor) {
     return { ok: false, state, reason: endpointForbiddenReason(route.from) };
   }
   const player = state.players.find((p) => p.id === actor);
@@ -399,6 +423,12 @@ export function updateTradeRoute(
         reason: wagonsDelta > 0 ? "not_enough_wagons_unassigned" : "not_enough_wagons",
       };
     }
+    // A route always keeps at least one wagon: clamping a negative delta to
+    // 0 would mint a zombie route that maintenance skips and nothing ever
+    // removes.
+    if (wagons + move < 1) {
+      return { ok: false, state, reason: "route_needs_a_wagon" };
+    }
     wagons += move;
     wagonsDelta = move;
   }
@@ -407,6 +437,12 @@ export function updateTradeRoute(
   // without one the payload -- including a gold payload -- rides unchanged.
   let payload = route.payload;
   if (change.resource !== undefined) {
+    // The cargo aboard has no label; re-targeting mid-flight would make the
+    // delivery reinterpret it under the NEW payload (500 gold landing as 500
+    // wood), so a payload switch must wait for the caravan to come home.
+    if (route.caravan !== null) {
+      return { ok: false, state, reason: "route_in_flight" };
+    }
     if (!WAREHOUSE_RESOURCES.includes(change.resource)) {
       return { ok: false, state, reason: "invalid_resource" };
     }
@@ -436,32 +472,109 @@ function caravanCapacity(payload: TradeRoutePayload, wagons: number): number {
   return payload.kind === "gold" ? wagons * WAGON_GOLD_CAPACITY : wagons * WAGON_RESOURCE_CAPACITY;
 }
 
-/** Deliverable headroom at a settlement, per payload kind (treasury cap or warehouse per-resource cap). */
-function settlementDeliveryHeadroom(payload: TradeRoutePayload, s: SettlementState): number {
+/** Deliverable headroom at a settlement, per payload kind (treasury cap or warehouse per-resource cap). Shared with caravanUpkeep's desertion return — one source of the clamp math. */
+export function settlementDeliveryHeadroom(payload: TradeRoutePayload, s: SettlementState): number {
   if (payload.kind === "gold") return treasuryHeadroom(s.gold, settlementTreasuryCap(s));
   return warehouseHeadroom(s.warehouse[payload.resource] ?? 0, settlementResourceCap(s)[payload.resource]);
 }
 
-/** Deliverable headroom at a hero, per payload kind (treasury carts for gold, cargo wagons for resources). */
-function heroDeliveryHeadroom(payload: TradeRoutePayload, h: HeroState): number {
+/** Deliverable headroom at a hero, per payload kind (treasury carts for gold, cargo wagons for resources). Shared with caravanUpkeep's desertion return. */
+export function heroDeliveryHeadroom(payload: TradeRoutePayload, h: HeroState): number {
   if (payload.kind === "gold") return treasuryHeadroom(h.gold, heroGoldCap(h));
   return warehouseHeadroom(heroCargo(h)[payload.resource] ?? 0, heroResourceCap(h)[payload.resource]);
 }
 
-/** Applies a payload delta to a settlement (treasury or warehouse); negative deltas are loads out of the origin. */
-function settlementApplyDelivery(s: SettlementState, payload: TradeRoutePayload, delta: number): SettlementState {
+/** Applies a payload delta to a settlement (treasury or warehouse); negative deltas are loads out of the origin. Shared with caravanUpkeep's desertion return. */
+export function settlementApplyDelivery(s: SettlementState, payload: TradeRoutePayload, delta: number): SettlementState {
   if (payload.kind === "gold") return { ...s, gold: s.gold + delta };
   return { ...s, warehouse: { ...s.warehouse, [payload.resource]: (s.warehouse[payload.resource] ?? 0) + delta } };
 }
 
-/** Applies a payload delta to a hero (purse or wagon cargo); negative deltas are loads out of the origin. */
-function heroApplyDelivery(h: HeroState, payload: TradeRoutePayload, delta: number): HeroState {
+/** Applies a payload delta to a hero (purse or wagon cargo); negative deltas are loads out of the origin. Shared with caravanUpkeep's desertion return. */
+export function heroApplyDelivery(h: HeroState, payload: TradeRoutePayload, delta: number): HeroState {
   if (payload.kind === "gold") return { ...h, gold: h.gold + delta };
   const cargo = heroCargo(h);
   return { ...h, resources: { ...cargo, [payload.resource]: (cargo[payload.resource] ?? 0) + delta } };
 }
 
+/**
+ * The route's true owner seat: the persisted stamp when present, else the
+ * FROM endpoint's live owner (legacy rows predate the stamp). One source of
+ * truth for every owner re-validation: advanceTradeRoutes's dormant-route
+ * checks, updateTradeRoute's removal gate, and caravanUpkeep's
+ * maintenance-skip / desertion-return all resolve ownership through this.
+ */
+export function routeOwnerId(route: TradeRouteState, records: EndpointRecords): PlayerId | null {
+  return route.ownerId ?? endpointOwner(route.from, records);
+}
+
+/**
+ * The owner's nearest owned settlement to a tile (hexDistance min,
+ * record-order tie-break), or null when the seat holds no settlement.
+ */
+function nearestSettlementOwnedBy(records: EndpointRecords, owner: PlayerId | null, from: Axial): SettlementState | null {
+  if (owner === null) return null;
+  let best: SettlementState | null = null;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const s of Object.values(records.settlements)) {
+    if (s.ownerId !== owner) continue;
+    const d = hexDistance(from, s);
+    if (d < bestDist) {
+      best = s;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+/**
+ * The toHome caravan after a delivery/dead-endpoint flip. The return leg is
+ * a fresh path from the caravan's REAL tile (the last tile it occupies --
+ * which after a chase is the delivery tile, not the outbound path's end) to
+ * the origin endpoint's CURRENT tile (heroes move), so the arrival deposit
+ * always happens where the caravan physically stands and the round-trip
+ * throughput model survives a chase. pathIndex starts at 1 so caravanTile
+ * reports the real departure tile from the flip onward. Falls back to the
+ * legacy reversed path (pathIndex 0) only when no path exists -- the origin
+ * is unreachable (or the map is missing this tick), where the old walk-home
+ * semantics are the only option.
+ */
+function returnLegCaravan(
+  cargo: number,
+  realTile: Axial,
+  originTile: Axial | null,
+  map: GameMap | null,
+  previousPath: { q: number; r: number }[],
+): CaravanState {
+  if (originTile && isSameTile(realTile, originTile)) {
+    return { phase: "toHome" as const, cargo, path: [realTile], pathIndex: 1 };
+  }
+  const leg = map && originTile ? findPath(map, realTile, originTile) : [];
+  if (leg.length > 0) {
+    return { phase: "toHome" as const, cargo, path: [realTile, ...leg], pathIndex: 1 };
+  }
+  return { phase: "toHome" as const, cargo, path: [...previousPath].reverse(), pathIndex: 0 };
+}
+
 // Advance notes (docs plan §5.2 + the endpoints/catch-up rules):
+// - Ownership: a route belongs to the seat stamped on it (ownerId, else the
+//   FROM endpoint's live owner for legacy rows). A route whose ORIGIN
+//   endpoint no longer belongs to that seat is DORMANT: the loading branch
+//   skips it (no reload for a capturer), and in-flight caravans finish the
+//   current leg only. The weekly maintenance mirror of this rule lives in
+//   economy/caravanUpkeep.ts.
+// - A captured DESTINATION receives nothing (no gifts to the enemy): the
+//   arriving caravan flips toHome with its cargo intact instead of
+//   delivering. Symmetrically, a hero destination owned by another seat is
+//   skipped the same way (heroes cannot normally change owner; this is
+//   defense in depth).
+// - The toHome flip rebuilds the return path from the caravan's real tile
+//   to the origin endpoint's CURRENT tile (see returnLegCaravan): arrival
+//   deposits where the caravan physically stands.
+// - At home, a returning caravan deposits into the origin ONLY while the
+//   origin still belongs to the route owner; a lost origin reroutes the
+//   cargo to the owner's nearest owned settlement, and an owner with no
+//   settlement left holds the cargo aboard (never destroyed).
 // - Loading happens at the origin endpoint's tile, per payload kind, out of
 //   the origin's stock (settlement warehouse/treasury or hero cargo/purse).
 // - Delivery caps at the destination: warehouseHeadroom/treasuryHeadroom for
@@ -472,8 +585,8 @@ function heroApplyDelivery(h: HeroState, payload: TradeRoutePayload, delta: numb
 //   hero's current position) and continues, cargo intact, up to
 //   CARAVAN_CATCHUP_REPATHS_PER_DAY re-paths per daily call; past the cap
 //   (or on an unreachable target) it waits for the next daily tick.
-// - A dead hero destination flips the caravan toHome with the reversed path
-//   (returning cargo); a dead hero origin leaves a returning caravan
+// - A dead hero destination flips the caravan toHome with the return leg
+//   built above; a dead hero origin leaves a returning caravan
 //   holding its cargo at the path's end -- the route's fate is decided by
 //   updateTradeRoute({remove}) or a later phase, cargo is never destroyed.
 export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameState {
@@ -498,6 +611,12 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
     // Loading at origin.
     if (!route.caravan) {
       if (!originTile || !destTile || !map) return route;
+      // A dormant route (the origin endpoint changed hands) never reloads:
+      // the capturer must not run the old owner's supply line, and the old
+      // owner must not draw from a captured store. Legacy routes (no stamp)
+      // derive their owner from the origin itself, so this is a no-op for
+      // them.
+      if (endpointOwner(route.from, records) !== routeOwnerId(route, records)) return route;
       if (route.from.kind === "settlement") {
         const from = next[route.from.id];
         if (!from) return route;
@@ -555,20 +674,24 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
         if (route.to.kind === "settlement") {
           const to = next[route.to.id];
           if (!to) return route;
+          if (to.ownerId !== routeOwnerId(route, records)) {
+            // Captured destination: no gifts to the enemy -- the caravan
+            // turns around with its cargo intact.
+            changed = true;
+            return {
+              ...route,
+              caravan: returnLegCaravan(caravan.cargo, caravanTile(caravan, here), originTile, map, caravan.path),
+            };
+          }
           const headroom = settlementDeliveryHeadroom(route.payload, to);
-          const delivered = Math.min(caravan.cargo, headroom);
+          const delivered = Math.max(0, Math.min(caravan.cargo, headroom));
           changed = true;
           next[route.to.id] = settlementApplyDelivery(to, route.payload, delivered);
           const cargoLeft = caravan.cargo - delivered;
           if (cargoLeft <= 0) {
             return {
               ...route,
-              caravan: {
-                phase: "toHome" as const,
-                cargo: 0,
-                path: [...caravan.path].reverse(),
-                pathIndex: 0,
-              },
+              caravan: returnLegCaravan(0, caravanTile(caravan, here), originTile, map, caravan.path),
             };
           }
           return { ...route, caravan: { ...caravan, cargo: cargoLeft } };
@@ -580,12 +703,16 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
           changed = true;
           return {
             ...route,
-            caravan: {
-              phase: "toHome" as const,
-              cargo: caravan.cargo,
-              path: [...caravan.path].reverse(),
-              pathIndex: 0,
-            },
+            caravan: returnLegCaravan(caravan.cargo, caravanTile(caravan, here), originTile, map, caravan.path),
+          };
+        }
+        if (hero.ownerId !== routeOwnerId(route, records)) {
+          // A destination owned by another seat receives nothing (heroes
+          // cannot normally change owner -- defense in depth).
+          changed = true;
+          return {
+            ...route,
+            caravan: returnLegCaravan(caravan.cargo, caravanTile(caravan, here), originTile, map, caravan.path),
           };
         }
         // Catch-up: while the hero is not on the caravan's tile, re-path
@@ -617,19 +744,14 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
           return { ...route, caravan };
         }
         const headroom = heroDeliveryHeadroom(route.payload, hero);
-        const delivered = Math.min(caravan.cargo, headroom);
+        const delivered = Math.max(0, Math.min(caravan.cargo, headroom));
         const cargoLeft = caravan.cargo - delivered;
         changed = true;
         touchHero(route.to.id, heroApplyDelivery(hero, route.payload, delivered));
         if (cargoLeft <= 0) {
           return {
             ...route,
-            caravan: {
-              phase: "toHome" as const,
-              cargo: 0,
-              path: [...caravan.path].reverse(),
-              pathIndex: 0,
-            },
+            caravan: returnLegCaravan(0, caravanTile(caravan, here), originTile, map, caravan.path),
           };
         }
         return { ...route, caravan: { ...caravan, cargo: cargoLeft } };
@@ -637,13 +759,29 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
 
       // toHome: arrive at the origin. Any cargo still aboard (a hero-death
       // return) is deposited back, headroom-clamped; leftover stays aboard.
+      // The deposit goes to the origin ONLY while it still belongs to the
+      // route owner -- a lost origin reroutes the return cargo to the
+      // owner's nearest owned settlement, and an owner with no settlement
+      // holds the cargo aboard (never destroyed).
       if (route.from.kind === "settlement") {
         const from = next[route.from.id];
         if (!from) return route;
         let cargo = caravan.cargo;
+        const owner = routeOwnerId(route, records);
+        if (cargo > 0 && from.ownerId !== owner) {
+          const target = nearestSettlementOwnedBy(records, owner, here);
+          if (!target) return route;
+          const headroom = settlementDeliveryHeadroom(route.payload, target);
+          const returned = Math.max(0, Math.min(cargo, headroom));
+          changed = true;
+          next[target.id] = settlementApplyDelivery(target, route.payload, returned);
+          cargo -= returned;
+          if (cargo > 0) return { ...route, caravan: { ...caravan, cargo } };
+          return { ...route, caravan: null };
+        }
         if (cargo > 0) {
           const headroom = settlementDeliveryHeadroom(route.payload, from);
-          const returned = Math.min(cargo, headroom);
+          const returned = Math.max(0, Math.min(cargo, headroom));
           changed = true;
           next[route.from.id] = settlementApplyDelivery(from, route.payload, returned);
           cargo -= returned;
@@ -680,7 +818,7 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
       let cargo = caravan.cargo;
       if (cargo > 0) {
         const headroom = heroDeliveryHeadroom(route.payload, homeHero);
-        const returned = Math.min(cargo, headroom);
+        const returned = Math.max(0, Math.min(cargo, headroom));
         changed = true;
         touchHero(route.from.id, heroApplyDelivery(homeHero, route.payload, returned));
         cargo -= returned;

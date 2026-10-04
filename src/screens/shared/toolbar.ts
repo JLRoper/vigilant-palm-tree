@@ -71,6 +71,11 @@ export interface ToolbarState {
   backendOk: () => boolean;
   hasActiveGame: () => boolean;
   canEndTurnNow: () => boolean;
+  // S3 (logistics-interface-fixes plan §5.8): the Logistics button mirrors the
+  // controller's turn gate -- enabled only during the local seat's own
+  // PLAYER_TURN. Absent provider keeps the button always enabled (today's
+  // behavior).
+  canOpenLogistics?: () => boolean;
   getCalendar: () => CalendarSnapshot | null;
   getSaveStatus: () => SaveStatus;
   getLastSavedAt: () => string | null;
@@ -106,6 +111,7 @@ export class Toolbar {
   private endTurnBtn: HTMLButtonElement;
   private heroesBtn: HTMLButtonElement;
   private settlementsBtn: HTMLButtonElement;
+  private logisticsBtn: HTMLButtonElement;
   private charterBtn: HTMLButtonElement;
   private calendarEl: HTMLElement;
   private calendarActiveEl: HTMLElement;
@@ -352,8 +358,8 @@ export class Toolbar {
       this.opts.callbacks.onSettlements?.();
     });
 
-    const logisticsBtn = this.makeButton("🚚  Logistics", false);
-    logisticsBtn.addEventListener("click", () => {
+    this.logisticsBtn = this.makeButton("🚚  Logistics", false);
+    this.logisticsBtn.addEventListener("click", () => {
       if (this.busy) return;
       this.opts.callbacks.onOpenLogistics?.();
     });
@@ -367,7 +373,7 @@ export class Toolbar {
     buttonsRow.appendChild(this.endTurnBtn);
     buttonsRow.appendChild(this.heroesBtn);
     buttonsRow.appendChild(this.settlementsBtn);
-    buttonsRow.appendChild(logisticsBtn);
+    buttonsRow.appendChild(this.logisticsBtn);
     buttonsRow.appendChild(this.charterBtn);
     buttonsRow.appendChild(menuWrap);
     buttonsWrap.appendChild(buttonsRow);
@@ -389,6 +395,11 @@ export class Toolbar {
     this.setEnabled(this.endTurnBtn, endTurnOk && !this.busy);
     this.setEnabled(this.heroesBtn, hasGameState && !this.busy);
     this.setEnabled(this.settlementsBtn, hasGameState && !this.busy);
+    const logisticsOk = hasGameState && !this.busy && (this.opts.state.canOpenLogistics?.() ?? true);
+    this.setEnabled(this.logisticsBtn, logisticsOk);
+    this.logisticsBtn.title = logisticsOk
+      ? "Wagon pools, stockpiles and trade routes"
+      : "Available on your turn";
 
     if (this.charterBtn) {
       const canOpen = hasGameState && !this.busy && (this.opts.callbacks.canStartCharter?.() ?? false);

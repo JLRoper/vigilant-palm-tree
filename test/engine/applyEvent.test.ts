@@ -548,6 +548,7 @@ test("TradeRouteCreated appends the route with the event's id and debits the act
     payload: { kind: "resource", resource: "wood" },
     wagons: 3,
     caravan: null,
+    ownerId: 0,
   });
   assert.equal(result.state.players.find((p) => p.id === 0)?.wagonsUnassigned, 2);
   assert.equal(result.state.nextTradeRouteId, 8, "the counter bumps monotonically past the event's id");
@@ -657,6 +658,7 @@ test("TradeRouteCreated with a hero endpoint builds the route against the live h
       payload: { kind: "gold" },
       wagons: 2,
       caravan: null,
+      ownerId: 0,
     },
   ]);
 });
@@ -741,6 +743,7 @@ test("a legacy TradeRouteCreated event row (flat fields) normalizes and applies"
       payload: { kind: "resource", resource: "stone" },
       wagons: 1,
       caravan: null,
+      ownerId: 0,
     },
   ]);
 });
