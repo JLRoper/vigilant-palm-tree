@@ -87,12 +87,42 @@ test("moveSelectedTo streams one move row with side/slot/from/to/distance and ro
   assert.equal(typeof payload.timeOfDay, "string", "time-of-day context rides every row");
 });
 
+test("moveSelectedTo returns the hex-by-hex walk path for the glide animation", () => {
+  // The arena animates the platoon along the route the engine actually took
+  // (getMovementPath computed before the move mutates position): excluding
+  // the origin, ending on the destination. [from, ...path] is the full walk.
+  const state = makeState();
+  state.attacker[0].position = { q: 2, r: 2 };
+
+  const single = moveSelectedTo(state, "attacker", 0, { q: 3, r: 2 });
+  assert.deepEqual(single.path, [{ q: 3, r: 2 }], "a 1-hex move's path is just the destination");
+
+  const multi = moveSelectedTo(state, "attacker", 0, { q: 5, r: 2 });
+  assert.deepEqual(
+    multi.path,
+    [{ q: 4, r: 2 }, { q: 5, r: 2 }],
+    "a multi-hex move walks every intermediate hex in order (origin excluded)",
+  );
+  assert.equal(multi.distance, 2, "distance is the hex length of this walk, budget-capped");
+  assert.deepEqual(
+    [multi.from, ...multi.path],
+    [{ q: 3, r: 2 }, { q: 4, r: 2 }, { q: 5, r: 2 }],
+    "from + path reconstructs the full visual walk",
+  );
+  assert.deepEqual(
+    [single.from, ...single.path],
+    [{ q: 2, r: 2 }, { q: 3, r: 2 }],
+    "from + path reconstructs the full visual walk",
+  );
+});
+
 test("a rejected move streams nothing (no state change, nothing to re-simulate)", () => {
   const state = makeState();
   const { rows, emit } = spy();
   // 20 hexes away: far outside any platoon's movement budget.
   const result = moveSelectedTo(state, "attacker", 0, { q: state.attacker[0].position.q + 20, r: state.attacker[0].position.r }, emit);
   assert.equal(result.moved, false);
+  assert.deepEqual(result.path, [], "a rejected move carries no walk path to animate");
   assert.deepEqual(rows, []);
 });
 

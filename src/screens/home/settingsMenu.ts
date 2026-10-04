@@ -4,6 +4,7 @@ import {
   updateSettings,
   settingsBounds,
   enemyMoveDurationBounds,
+  arenaMoveMsPerHexBounds,
   borderWidthBounds,
   resourceStyleOptions,
   growthRateBounds,
@@ -125,6 +126,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   const parent = opts.parent ?? document.body;
   const bounds = settingsBounds();
   const enemyBounds = enemyMoveDurationBounds();
+  const arenaBounds = arenaMoveMsPerHexBounds();
   const borderBounds = borderWidthBounds();
   const growthBounds = growthRateBounds();
   const current = settings();
@@ -276,6 +278,53 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     refreshList.push(() => refreshEnemy(settings()));
 
     children.push(enemyRow);
+
+    // Battle arena move animation speed (also covers the player's own
+    // platoons — they glide like the AI's now). 0 = instant.
+    const arenaRow = document.createElement("div");
+    arenaRow.style.display = "flex";
+    arenaRow.style.flexDirection = "column";
+    arenaRow.style.gap = "6px";
+
+    const arenaLabelRow = document.createElement("div");
+    arenaLabelRow.style.display = "flex";
+    arenaLabelRow.style.justifyContent = "space-between";
+    arenaLabelRow.style.alignItems = "baseline";
+
+    const arenaLabel = document.createElement("span");
+    arenaLabel.textContent = "Battle move animation speed";
+    arenaLabelRow.appendChild(arenaLabel);
+
+    const arenaValue = document.createElement("span");
+    arenaValue.style.fontVariantNumeric = "tabular-nums";
+    arenaLabelRow.appendChild(arenaValue);
+
+    const arenaSlider = document.createElement("input");
+    arenaSlider.type = "range";
+    arenaSlider.min = String(arenaBounds.min);
+    arenaSlider.max = String(arenaBounds.max);
+    arenaSlider.step = "10";
+    arenaSlider.style.width = "100%";
+    arenaSlider.style.accentColor = "#f77f00";
+    arenaRow.appendChild(arenaSlider);
+
+    const arenaHint = document.createElement("div");
+    arenaHint.style.fontSize = "10px";
+    arenaHint.style.opacity = "0.55";
+    arenaRow.appendChild(arenaHint);
+
+    function refreshArena(next: GameSettings): void {
+      arenaSlider.value = String(next.arenaMoveMsPerHex);
+      arenaValue.textContent = `${next.arenaMoveMsPerHex}ms/hex \u00b7 ${labelFor(next.arenaMoveMsPerHex)}`;
+      arenaHint.textContent = `Walk animations in the battle arena — yours and the AI's. 0 = instant. (Range ${arenaBounds.min}\u2013${arenaBounds.max}ms per hex)`;
+    }
+    refreshArena(current);
+    arenaSlider.addEventListener("input", () => {
+      updateSettings({ arenaMoveMsPerHex: Number(arenaSlider.value) });
+    });
+    refreshList.push(() => refreshArena(settings()));
+
+    children.push(arenaRow);
 
     // Border thickness
     const borderRow = document.createElement("div");
@@ -741,6 +790,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     updateSettings({
       moveDurationMs: bounds.default,
       enemyMoveDurationMs: enemyBounds.default,
+      arenaMoveMsPerHex: arenaBounds.default,
       resourceStyle: "rune-stone",
       territoryBorderWidth: borderBounds.default,
       populationGrowthRate: growthBounds.default,

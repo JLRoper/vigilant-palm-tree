@@ -15,6 +15,9 @@ export type ResourceStyle =
 export interface GameSettings {
   moveDurationMs: number;
   enemyMoveDurationMs: number;
+  // Manual battle arena: per-hex walk-animation pace for BOTH sides' platoons
+  // (the AI's beats and the player's own glide share one dial). 0 = instant.
+  arenaMoveMsPerHex: number;
   resourceStyle: ResourceStyle;
   territoryBorderWidth: number;
   populationGrowthRate: number;
@@ -36,6 +39,11 @@ const DEFAULT_MOVE_MS = 220;
 const MIN_ENEMY_MOVE_MS = 40;
 const MAX_ENEMY_MOVE_MS = 1000;
 const DEFAULT_ENEMY_MOVE_MS = 220;
+const MIN_ARENA_MOVE_MS_PER_HEX = 0;
+const MAX_ARENA_MOVE_MS_PER_HEX = 500;
+// Matches the arena AI's historical 90 ms/hex walk pace, so the default
+// behavior is byte-identical to before the setting existed.
+const DEFAULT_ARENA_MOVE_MS_PER_HEX = 90;
 const MIN_BORDER_WIDTH = 1.5;
 const MAX_BORDER_WIDTH = 6;
 const DEFAULT_BORDER_WIDTH = 1.5;
@@ -72,6 +80,7 @@ export { VALID_HORSE_VARIANTS, HORSE_VARIANT_REGISTRY };
 export const DEFAULT_SETTINGS: GameSettings = {
   moveDurationMs: DEFAULT_MOVE_MS,
   enemyMoveDurationMs: DEFAULT_ENEMY_MOVE_MS,
+  arenaMoveMsPerHex: DEFAULT_ARENA_MOVE_MS_PER_HEX,
   resourceStyle: DEFAULT_RESOURCE_STYLE,
   territoryBorderWidth: DEFAULT_BORDER_WIDTH,
   populationGrowthRate: DEFAULT_GROWTH_RATE,
@@ -100,6 +109,11 @@ export function clampMoveDurationMs(ms: number): number {
 export function clampEnemyMoveDurationMs(ms: number): number {
   if (!Number.isFinite(ms)) return DEFAULT_ENEMY_MOVE_MS;
   return Math.max(MIN_ENEMY_MOVE_MS, Math.min(MAX_ENEMY_MOVE_MS, Math.round(ms)));
+}
+
+export function clampArenaMoveMsPerHex(ms: number): number {
+  if (!Number.isFinite(ms)) return DEFAULT_ARENA_MOVE_MS_PER_HEX;
+  return Math.max(MIN_ARENA_MOVE_MS_PER_HEX, Math.min(MAX_ARENA_MOVE_MS_PER_HEX, Math.round(ms)));
 }
 
 export function clampBorderWidth(w: number): number {
@@ -154,6 +168,7 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
   const next: GameSettings = {
     moveDurationMs: clampMoveDurationMs(patch.moveDurationMs ?? current.moveDurationMs),
     enemyMoveDurationMs: clampEnemyMoveDurationMs(patch.enemyMoveDurationMs ?? current.enemyMoveDurationMs),
+    arenaMoveMsPerHex: clampArenaMoveMsPerHex(patch.arenaMoveMsPerHex ?? current.arenaMoveMsPerHex),
     resourceStyle: clampResourceStyle(patch.resourceStyle ?? current.resourceStyle),
     territoryBorderWidth: clampBorderWidth(patch.territoryBorderWidth ?? current.territoryBorderWidth),
     populationGrowthRate: clampGrowthRate(patch.populationGrowthRate ?? current.populationGrowthRate),
@@ -192,6 +207,10 @@ export function enemyMoveDurationBounds(): { min: number; max: number; default: 
   return { min: MIN_ENEMY_MOVE_MS, max: MAX_ENEMY_MOVE_MS, default: DEFAULT_ENEMY_MOVE_MS };
 }
 
+export function arenaMoveMsPerHexBounds(): { min: number; max: number; default: number } {
+  return { min: MIN_ARENA_MOVE_MS_PER_HEX, max: MAX_ARENA_MOVE_MS_PER_HEX, default: DEFAULT_ARENA_MOVE_MS_PER_HEX };
+}
+
 export function borderWidthBounds(): { min: number; max: number; default: number } {
   return { min: MIN_BORDER_WIDTH, max: MAX_BORDER_WIDTH, default: DEFAULT_BORDER_WIDTH };
 }
@@ -213,6 +232,7 @@ function loadFromStorage(): GameSettings {
     return {
       moveDurationMs: clampMoveDurationMs(parsed.moveDurationMs ?? DEFAULT_MOVE_MS),
       enemyMoveDurationMs: clampEnemyMoveDurationMs(parsed.enemyMoveDurationMs ?? DEFAULT_ENEMY_MOVE_MS),
+      arenaMoveMsPerHex: clampArenaMoveMsPerHex(parsed.arenaMoveMsPerHex ?? DEFAULT_ARENA_MOVE_MS_PER_HEX),
       resourceStyle: clampResourceStyle(parsed.resourceStyle),
       territoryBorderWidth: clampBorderWidth(parsed.territoryBorderWidth ?? DEFAULT_BORDER_WIDTH),
       populationGrowthRate: clampGrowthRate(parsed.populationGrowthRate ?? DEFAULT_GROWTH_RATE),

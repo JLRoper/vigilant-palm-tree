@@ -12,12 +12,14 @@ import {
   type ManualBattleState,
 } from "@heroes/engine";
 import { fmtHex, hexDistance, platoonLabel, type Axial } from "./layout";
+import { settings } from "../../../state/settings";
 
 export const AI_TELEGRAPH_MS = 320;
 export const AI_STEP_MS = 260;
-// Per hex of the walk, capped so a full-speed dash across the field still
-// resolves promptly rather than making the player wait out every step.
-export const AI_MOVE_MS_PER_HEX = 90;
+// Hard cap on the AI's walk animation so a full-speed dash across the field
+// still resolves promptly rather than making the player wait out every step.
+// The per-hex pace itself is user-controlled via settings().arenaMoveMsPerHex
+// (default 90 ms/hex — the historical constant pace, byte-identical default).
 export const AI_MOVE_MS_MAX = 620;
 export const AI_ARRIVE_PAUSE_MS = 140;
 export const AI_IMPACT_HOLD_MS = 420;
@@ -135,21 +137,27 @@ export function createArenaAi(deps: ArenaAiDeps): ArenaAi {
       const path = getMovementPath(state, actor, plan.moveTo);
       const distance = hexDistance(from, plan.moveTo);
       movePlatoon(state, aiSide, plan.slotIndex, plan.moveTo);
+      // Per-hex glide pace is the shared arena setting; 0 means instant —
+      // the move still applies, only the walk animation and its arrive
+      // pause are skipped.
+      const msPerHex = settings().arenaMoveMsPerHex;
       if (path.length > 0) {
         deps.recordMove(aiSide, plan.slotIndex, distance);
         deps.debugLog(
           `ai move: ${platoonLabel(aiSide, plan.slotIndex)}: ${fmtHex(from)} -> ${fmtHex(plan.moveTo)} (${distance} hex${distance === 1 ? "" : "es"})`,
         );
-        const durationMs = Math.min(path.length * AI_MOVE_MS_PER_HEX, AI_MOVE_MS_MAX);
-        deps.setMoveAnim({
-          side: aiSide,
-          slotIndex: plan.slotIndex,
-          path: [from, ...path],
-          startedAt: performance.now(),
-          durationMs,
-        });
-        deps.pumpAnimation();
-        if (!(await aiWait(durationMs + AI_ARRIVE_PAUSE_MS)) || token !== aiRunToken) return;
+        if (msPerHex > 0) {
+          const durationMs = Math.min(path.length * msPerHex, AI_MOVE_MS_MAX);
+          deps.setMoveAnim({
+            side: aiSide,
+            slotIndex: plan.slotIndex,
+            path: [from, ...path],
+            startedAt: performance.now(),
+            durationMs,
+          });
+          deps.pumpAnimation();
+          if (!(await aiWait(durationMs + AI_ARRIVE_PAUSE_MS)) || token !== aiRunToken) return;
+        }
       }
       deps.setMoveAnim(null);
     }

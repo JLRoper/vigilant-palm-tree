@@ -4,6 +4,7 @@ import {
   castSpell,
   endPlatoonTurn,
   getCombatant,
+  getMovementPath,
   getMovementRange,
   movePlatoon,
   retreatHero,
@@ -155,12 +156,19 @@ export interface MoveResult {
   distance: number;
   remainingSteps: number;
   from: Axial | null;
+  // The hex-by-hex route the platoon actually walked, excluding the origin
+  // and ending on the destination (engine getMovementPath, computed BEFORE
+  // the move mutates the platoon's position). Empty for a rejected move or
+  // a zero-distance move. The arena animates the glide along this path;
+  // the full visual walk is [from, ...path].
+  path: Axial[];
 }
 
 // Atomic move of the selected human platoon to `hex`. Returns enough info for
-// the caller to log the move (distance, from hex, remaining range) without
-// having to read state again. `moved=false` means the engine rejected the
-// move (impassable/occupied/out of range) -- nothing mutated, nothing streamed.
+// the caller to log the move (distance, from hex, remaining range) and to
+// animate it (path) without having to read state again. `moved=false` means
+// the engine rejected the move (impassable/occupied/out of range) -- nothing
+// mutated, nothing streamed.
 export function moveSelectedTo(
   state: ManualBattleState,
   humanSide: BattleSide,
@@ -171,6 +179,7 @@ export function moveSelectedTo(
   const actorBefore = getCombatant(state, humanSide, selectedSlot);
   const from = actorBefore ? { ...actorBefore.position } : null;
   const distance = from ? hexDistance(from, hex) : 0;
+  const path = actorBefore ? getMovementPath(state, actorBefore, hex) : [];
   const moved = movePlatoon(state, humanSide, selectedSlot, hex);
   const stillActor = moved ? getCombatant(state, humanSide, selectedSlot) : null;
   const remainingSteps = stillActor ? getMovementRange(state, stillActor).length : 0;
@@ -180,5 +189,5 @@ export function moveSelectedTo(
       payload: { ...actionContext(state), side: humanSide, slotIndex: selectedSlot, from, to: hex, distance },
     });
   }
-  return { moved, distance, remainingSteps, from };
+  return { moved, distance, remainingSteps, from, path };
 }

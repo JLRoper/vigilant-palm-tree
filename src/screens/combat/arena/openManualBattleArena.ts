@@ -25,6 +25,7 @@ import { SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "@heroes/engine";
 import {
   finalizeManualBattle,
   getCombatant,
+  getMovementPath,
   getMovementRange,
   getValidAttackTargets,
   getValidMeleeTargets,
@@ -55,7 +56,8 @@ import { axialToPixel, fmtHex, gridExtent, fitHexSize, hexCorners, hexDistance, 
 import { applyLeaveBehind, openLeaveBehindDialog } from "./leaveBehind";
 import { attachRailHover, buildPlatoonStrip } from "./view";
 import { createArenaInput, type ArenaInput } from "./input";
-import { createArenaAi, type ArenaAi, type AttackerFx } from "./ai";
+import { createArenaAi, type ArenaAi, type AttackerFx, AI_ARRIVE_PAUSE_MS } from "./ai";
+import { settings } from "../../../state/settings";
 import { attackFromSelectedHex, attackFromTarget, castSpellAction, endPlatoonTurnAction, moveSelectedTo, retreatAction, surrenderAction, type BattleActionEmit, type BattleActionPhase } from "./state";
 import { buildArenaPaint2dDeps, paintSceneForArena, readUseSceneBuilder } from "./paint";
 import { createUnitSpriteResolver, preloadUnitArenaSprites } from "../../../render/paint2dDefaults";
@@ -518,10 +520,50 @@ const FLOAT_MS = 800;
       window.cancelAnimationFrame(animFrame);
       animFrame = null;
     }
+    if (glideTimer !== null) {
+      window.clearTimeout(glideTimer);
+      glideTimer = null;
+    }
     moveAnim = null;
     impact = null;
     attacker = null;
     floats.length = 0;
+  }
+
+  // ---- player move glide ---------------------------------------------------
+  // The player's platoons used to snap to their destination the moment the
+  // engine applied the move, while the AI's walked hex-by-hex via the moveAnim
+  // cosmetic. The player path now rides the same machinery: startGlide replays
+  // the walk the engine has ALREADY applied (moveAnim only rewinds the drawing
+  // position — see renderPixelFor) and defers the click's post-action
+  // continuation until the platoon arrives. While a glide is pending the board
+  // is input-gated exactly like the AI's turn (see handleClick), because the
+  // deferred continuation may bump-attack or hand the turn over. The pace is
+  // the shared arenaMoveMsPerHex setting (0 = instant); unlike the AI's capped
+  // walks the player's own glide is uncapped — it's the pace the user chose
+  // for their own pieces.
+  let glideTimer: number | null = null;
+
+  function isGliding(): boolean {
+    return glideTimer !== null;
+  }
+
+  function startGlide(side: BattleSide, slotIndex: number, path: Axial[], onDone: () => void): void {
+    const msPerHex = settings().arenaMoveMsPerHex;
+    // path includes the origin, so a real walk has >= 2 entries. With no walk
+    // (or 0 ms/hex) there is nothing to animate: run the continuation now.
+    if (path.length < 2 || msPerHex <= 0) {
+      onDone();
+      return;
+    }
+    const durationMs = (path.length - 1) * msPerHex;
+    moveAnim = { side, slotIndex, path, startedAt: performance.now(), durationMs };
+    pumpAnimation();
+    glideTimer = window.setTimeout(() => {
+      glideTimer = null;
+      moveAnim = null;
+      onDone();
+    }, durationMs + AI_ARRIVE_PAUSE_MS);
   }
 
   const battleRow = document.createElement("div");
@@ -568,7 +610,7 @@ const FLOAT_MS = 800;
   endTurnBtn.textContent = "End Turn (Don't Attack)";
   styleButton(endTurnBtn, true);
   endTurnBtn.addEventListener("click", () => {
-    if (selectedSlot === null) return;
+    if (selectedSlot === null || isGliding()) return;
     debugLog(`click End Turn -> ${platoonLabel(humanSide, selectedSlot)} ends its turn without attacking`);
     endPlatoonTurnAction(state, humanSide, selectedSlot);
     afterPlayerAction();
@@ -815,13 +857,14 @@ const FLOAT_MS = 800;
               : moveRange.length > 0
                 ? "Hover an enemy in reach to choose the side you attack from, or click a highlighted hex to just move (landing beside a lone enemy fights immediately). Move again, attack, or End Turn when done."
                 : "Out of movement — hover an adjacent enemy to attack from where you stand, or End Turn.";
-    endTurnBtn.style.display = selectedSlot !== null && !over && !ai.isActing() && !castMode ? "" : "none";
+    endTurnBtn.style.display = selectedSlot !== null && !over && !ai.isActing() && !isGliding() && !castMode ? "" : "none";
 
     // Cast Spell, Retreat, and Surrender live under the human's hero portrait
     // and only make sense while it's actually the human's turn to act — which
-    // now excludes the beats where the AI is mid-move.
+    // now excludes the beats where the AI is mid-move and the player's own
+    // glide windows (their deferred continuation may still attack or yield).
     const humanActing = unactedLivingSlots(state, humanSide).length > 0;
-    const showHumanActions = !over && !ai.isActing() && humanActing;
+    const showHumanActions = !over && !ai.isActing() && !isGliding() && humanActing;
     humanCastBtn.style.display = showHumanActions ? "" : "none";
     retreatBtn.style.display = showHumanActions ? "" : "none";
     surrenderBtn.style.display = showHumanActions ? "" : "none";
@@ -1669,6 +1712,13 @@ function finishBattle(): void {
       debugLog(`click ${fmtHex(hex)} -> ignored (AI is acting)`);
       return;
     }
+    // Same gate for the player's own glide windows: the move is already
+    // applied engine-side, but its deferred continuation (bump attack or turn
+    // hand-off) hasn't run yet, so a click now would race it.
+    if (isGliding()) {
+      debugLog(`click ${fmtHex(hex)} -> ignored (platoon still gliding)`);
+      return;
+    }
 
     // Cast targeting is armed: the click means "cast at this platoon" or
     // "cancel" — never select/attack/move. Checked before the whole normal
@@ -1741,6 +1791,10 @@ function finishBattle(): void {
         const from = clickedApproach ? clickedApproach.hex : input.getApproachChoice()!;
         const actorBefore = getCombatant(state, humanSide, selectedSlot);
         const origin = actorBefore ? { ...actorBefore.position } : from;
+        // Capture the walk route BEFORE the attack applies it — the engine
+        // wrapper moves the platoon to the approach hex and strikes in one
+        // atomic action; the glide below only replays the walk visually.
+        const walkPath = actorBefore ? getMovementPath(state, actorBefore, from) : [];
         const distance = hexDistance(origin, from);
         debugLog(
           `click ${fmtHex(hex)} -> directional attack: ${platoonLabel(humanSide, selectedSlot)}`,
@@ -1749,9 +1803,23 @@ function finishBattle(): void {
         const beforeLog = state.log.length;
         if (attackFromSelectedHex(state, humanSide, selectedSlot, input.getPendingTarget()!.slotIndex, from, emit)) {
           if (distance > 0) recordMove(humanSide, selectedSlot, distance);
-          recordAttacker(humanSide, selectedSlot);
           logNewBattleEvents(beforeLog);
-          afterPlayerAction();
+          const glidePath = [origin, ...walkPath];
+          if (glidePath.length >= 2) {
+            // The approach walk plays before the blow lands visually —
+            // attacker pose + turn hand-off wait for arrival, mirroring the
+            // AI's walk/arrive/strike beat order. The slot is captured in a
+            // const because the deferred callback runs after the narrowed
+            // `selectedSlot` binding has left scope.
+            const attackerSlot = selectedSlot;
+            startGlide(humanSide, selectedSlot, glidePath, () => {
+              recordAttacker(humanSide, attackerSlot);
+              afterPlayerAction();
+            });
+          } else {
+            recordAttacker(humanSide, selectedSlot);
+            afterPlayerAction();
+          }
         } else {
           debugLog(`click ${fmtHex(hex)} -> directional attack REJECTED by engine (was previewed as legal)`);
           input.clearPendingAttack();
@@ -1785,7 +1853,11 @@ function finishBattle(): void {
       } else {
         debugLog(`click ${fmtHex(hex)} -> move REJECTED by engine for ${platoonLabel(humanSide, selectedSlot)} (was shown in range)`);
       }
-      refreshAfterMove();
+      // Glide the walk the engine just applied, then run the post-move
+      // continuation (bump attack / auto-end / re-range). With animations at
+      // 0 ms/hex (or a rejected move) startGlide runs it synchronously —
+      // today's behavior.
+      startGlide(humanSide, selectedSlot, result.from ? [result.from, ...result.path] : [], () => refreshAfterMove());
       return;
     }
 

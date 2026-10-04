@@ -325,6 +325,12 @@ status bar / battle row / action + log bar:
 - **AI turn.** Stepped on a timer — telegraph the acting platoon with a
   white ring (~320ms), then resolve and repaint (~260ms) — rather than
   resolved synchronously in one repaint.
+- **Player moves glide the same beat** (2026-10-04): the arena replays the
+  engine walk (`getMovementPath`) hex-by-hex through the same `moveAnim`
+  cosmetic the AI uses, defers the post-move continuation (bump attack /
+  hand-off) until arrival, and gates input while gliding (mirroring the
+  AI-acting gate). Pace is the shared `arenaMoveMsPerHex` setting
+  (0 = instant, uncapped for the player; the AI keeps its 620 ms cap).
 - **Battle log.** The engine's log is surfaced in the footer, collapsed
   to one line and expandable. It previously only reached `console.log`.
 
@@ -411,8 +417,8 @@ used):
 | `src/screens/combat/battleResultCard.ts` | UI (DOM) | Per-platoon survivors + losses summary — used by **both** paths; renders the per-side verdict lines from `battleResultText.ts` under the winner banner |
 | `src/screens/combat/battleResultText.ts` | UI (pure) | Verdict wording (2026-09-29 hero outcomes): `battleVerdictCardLine` / `battleVerdictToastPhrase` / `battleToastMessage` / `settlementNameAt` — "slain" / "retreated to \<name\>" / "surrendered to \<name\>"; an absent verdict (pre-W1 server) renders nothing |
 | `src/screens/combat/arena/openManualBattleArena.ts` | UI (canvas+DOM) | HoMM3-style interactive arena; production callers get `onComplete` (outcome) + `telemetry` (action stream) and a `{ close }` handle |
-| `src/screens/combat/arena/state.ts` | Arena wrappers | Thin wrappers over the engine's apply-functions; stream one `battle_actions` row per applied action (`safeEmit` guard — telemetry can never fail the arena) |
-| `src/screens/combat/arena/ai.ts` | Arena AI | `createArenaAi` → engine `planAiTurn` (deterministic — no AI action rows needed) |
+| `src/screens/combat/arena/state.ts` | Arena wrappers | Thin wrappers over the engine's apply-functions; stream one `battle_actions` row per applied action (`safeEmit` guard — telemetry can never fail the arena). `moveSelectedTo` returns the walk `path` in `MoveResult`, which the arena glides the player's platoon along (paced by the shared `arenaMoveMsPerHex` setting) |
+| `src/screens/combat/arena/ai.ts` | Arena AI | `createArenaAi` → engine `planAiTurn` (deterministic — no AI action rows needed); walk beat paced by the shared `arenaMoveMsPerHex` setting under a 620 ms cap (the `AI_MOVE_MS_PER_HEX` constant was removed) |
 | `src/screens/combat/platoonInfoPopup.ts` | UI (DOM) | Hover/selection info card; win-odds vs. your selected platoon |
 | `src/screens/combat/testBattleSetup.ts` | UI (DOM) | Test Battle roster pick (sandbox — no `onComplete`, no telemetry) |
 | `src/screens/shared/toolbar.ts` | UI (DOM) | "Test Battle" entry — a gear-dropdown menu item (⚔ Test Battle, 2026-09-29; no longer a main-row button) |

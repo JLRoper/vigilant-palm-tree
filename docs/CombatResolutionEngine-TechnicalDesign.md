@@ -226,7 +226,9 @@ today only from the Test Battle sandbox (`src/views/testBattleSetup.ts`).
   does *not* consume its action; attacking (or `endPlatoonTurn`) does.
   `getMovementPath()` returns the hex-by-hex route to a destination —
   informational only, for animating the walk; `movePlatoon()` still takes a
-  destination and re-derives the cost itself.
+  destination and re-derives the cost itself. Player moves are now rendered
+  as a walk along this route too (2026-10-04): the "so the UI can animate"
+  comment serves both sides, not just the AI's `executeAiPlan()` walk.
 - **Turn order is strict alternation**, enforced by the arena rather than the
   engine: one player platoon acts, then one AI platoon, back and forth. Every
   path by which a player platoon can finish — attacking, bumping into melee,
