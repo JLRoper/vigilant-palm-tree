@@ -404,7 +404,11 @@ test("a 1-player game's level-2 town starts with a town hall and farmland sized 
   for (const b of town.buildings) {
     assert.equal(b.level, 1, `${b.kind} is level 1: a free level-2 hall would unlock upgrades on turn 0`);
     assert.equal("construction" in b, false, `${b.kind} arrives already built`);
-    assert.equal(b.style, "classic");
+    // buildStarterLayout resolves sprite-bearing kinds onto their art's style
+    // (starterStyleFor); farmField keeps the caller's "classic" so the render
+    // shim keeps its per-position pixel/pixel-alt variety.
+    const expectedStyle = b.kind === "woodcutterHut" || b.kind === "stoneMine" ? "pixel" : "classic";
+    assert.equal(b.style, expectedStyle, `${b.kind} carries its resolved sprite style`);
   }
 });
 

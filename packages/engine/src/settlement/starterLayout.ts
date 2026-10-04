@@ -1,6 +1,7 @@
 import type { BuildingDef, BuildingKind, GenerationStyle, Platoon } from "@heroes/contracts";
 import { buildingFootprintFromRegistry, buildingSettlementEffects } from "../buildingRegistry";
 import { evaluateTroopUpkeep, UPKEEP_CHARGE_DAYS } from "../economy/troopUpkeep";
+import { pickStyleForBuilding } from "../styleResolver";
 import type { UnitType } from "../units";
 import type { CityViewSize } from "./citySpots";
 import { CELL_MULTIPLIER_PEAK } from "./cityMultipliers";
@@ -135,7 +136,7 @@ export const STARTER_BUILDING_KINDS: readonly BuildingKind[] = [
 export interface StarterLayoutOptions {
   /** City grid edge length (5 = settlement, 10 = town, 15 = castle). */
   size: CityViewSize;
-  /** Visual style stamped on every building in the set. */
+  /** Preferred visual style: kinds with committed sprite art resolve to that art's style instead (see starterStyleFor). */
   style: GenerationStyle;
   /** Farm fields in the set. Defaults to STARTER_BASE_FARMS (1). */
   farms?: number;
@@ -302,7 +303,7 @@ export function buildStarterLayout(options: StarterLayoutOptions): BuildingDef[]
   const farms = Math.max(STARTER_BASE_FARMS, Math.floor(options.farms ?? STARTER_BASE_FARMS));
 
   const put = (kind: BuildingKind, gx: number, gy: number): void => {
-    buildings.push({ gx, gy, kind, level: STARTER_BUILDING_LEVEL, style });
+    buildings.push({ gx, gy, kind, level: STARTER_BUILDING_LEVEL, style: starterStyleFor(kind, style) });
   };
 
   // The town hall's registry footprint is 2x2 at level 1 (the 1.5x1.5 override
@@ -357,7 +358,23 @@ function placeAt(
     ? { gx, gy }
     : firstFreeCell(buildings, size, w, h);
   if (!target) return;
-  buildings.push({ gx: target.gx, gy: target.gy, kind, level: STARTER_BUILDING_LEVEL, style });
+  buildings.push({ gx: target.gx, gy: target.gy, kind, level: STARTER_BUILDING_LEVEL, style: starterStyleFor(kind, style) });
+}
+
+/**
+ * The style a starter building is persisted with. Kinds with committed sprite
+ * art resolve to it (woodcutterHut/stoneMine carry pixel.* sprites;
+ * townHall/house/farmhouse resolve to their classic ones) so a starter city
+ * renders real sprites instead of the procedural fallback drawings the raw
+ * "classic" stamp used to produce for un-sprited kinds. The farmField keeps
+ * the caller's style so the render-time legacy shim (cityScene's
+ * farmFieldStyleAt) keeps giving starter farms their deterministic
+ * pixel/pixel-alt variety. Deterministic: pickStyleForBuilding is pure, so
+ * the byte-identical-per-call contract holds.
+ */
+function starterStyleFor(kind: BuildingKind, style: GenerationStyle): GenerationStyle {
+  if (kind === "farmField") return style;
+  return pickStyleForBuilding(kind, STARTER_BUILDING_LEVEL, style);
 }
 
 function firstFreeCell(

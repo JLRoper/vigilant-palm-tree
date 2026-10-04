@@ -284,16 +284,21 @@ test("the starter set is legal on every city size: in bounds, nothing overlappin
   }
 });
 
-test("the starter set is style-stamped but otherwise seed-free", () => {
+test("the starter set resolves onto sprite-bearing styles and stays seed-free", () => {
   const organic = buildStarterLayout({ size: 5, style: "organic" });
   assert.deepEqual(
     organic.map((b) => b.style),
-    ["organic", "organic", "organic", "organic", "organic", "organic", "organic", "organic"],
+    ["classic", "organic", "classic", "classic", "pixel", "pixel", "pixel", "classic"],
+  );
+  const classic = buildStarterLayout({ size: 5, style: "classic" });
+  assert.deepEqual(
+    classic.map((b) => b.style),
+    ["classic", "classic", "classic", "classic", "pixel", "pixel", "pixel", "classic"],
   );
   assert.deepEqual(
     organic.map(({ style: _style, ...rest }) => rest),
-    buildStarterLayout({ size: 5, style: "classic" }).map(({ style: _s, ...rest }) => rest),
-    "only the visual style varies with the caller's style",
+    classic.map(({ style: _s, ...rest }) => rest),
+    "only the styles differ between caller styles",
   );
 });
 
