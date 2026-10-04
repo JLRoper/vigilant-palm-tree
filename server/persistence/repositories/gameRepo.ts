@@ -32,6 +32,11 @@ export interface LobbyState {
   // command case in server/app/commandHandler.ts. ABSENT (pre-flag rows read
   // here) means ON -- existing saves keep working.
   legacyAutoTrade?: boolean;
+  // Pending battle offer (defender-chosen flow, 2026-10-04): stamped by the
+  // EnterBattle command case, read via @heroes/engine's readPendingBattle,
+  // cleared when the battle resolves / the offer goes stale. Optional --
+  // every pre-offer row simply lacks the key.
+  pendingBattle?: import("@heroes/engine").PendingBattleMarker | null;
 }
 
 export interface EnemyPos {
@@ -139,6 +144,7 @@ export interface GameRepo {
     settlements: Record<SettlementId, SettlementState>,
     extra?: SaveHeroesAndSettlementsExtra,
   ): Promise<void>;
+  saveLobby(name: string, lobby: unknown): Promise<void>;
   insertSettlementSnapshots(gameName: string, snapshots: SettlementSnapshotInput[]): Promise<void>;
   insertResourceTransactions(gameName: string, transactions: ResourceTransactionInput[]): Promise<void>;
 }
@@ -211,6 +217,19 @@ export function createGameRepo(db: Queryable): GameRepo {
       const r = await db.query(
         `UPDATE games SET ${sets.join(", ")} WHERE name = $${i}`,
         vals,
+      );
+      if (r.rowCount === 0) throw new GameNotFoundError(name);
+    },
+
+    // Whole-lobby write, used inside the caller's transaction (same
+    // PoolClient discipline as saveHeroesAndSettlements above). Callers own
+    // read-modify-write of the bag: the EnterBattle case spreads the loaded
+    // row.lobby and adds/removes pendingBattle, so other keys (aiDriver,
+    // legacyAutoTrade, seat claims, presence) survive untouched.
+    async saveLobby(name, lobby) {
+      const r = await db.query(
+        "UPDATE games SET lobby = $1::jsonb, updated_at = now() WHERE name = $2",
+        [JSON.stringify(lobby), name],
       );
       if (r.rowCount === 0) throw new GameNotFoundError(name);
     },

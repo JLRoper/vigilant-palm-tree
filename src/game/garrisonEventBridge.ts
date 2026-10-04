@@ -21,10 +21,12 @@ export interface GarrisonEventBridgeDeps {
 // full-refetch snapshot behind mp:resynced). Other engine kinds keep their
 // existing transport (mergeFromEndTurn / game load).
 function isBridgedDelta(event: EngineEvent): boolean {
+  // BattleOffered: a server-offered defender battle must flip the client into the BATTLE phase so the defender's choice modal opens.
   return (
     event.type === "UnitsRecruited" ||
     event.type === "UnitsTransferred" ||
-    event.type === "TradeRouteCreated"
+    event.type === "TradeRouteCreated" ||
+    event.type === "BattleOffered"
   );
 }
 

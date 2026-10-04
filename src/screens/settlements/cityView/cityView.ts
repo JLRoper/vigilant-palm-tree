@@ -203,8 +203,9 @@ export class CityView {
     const starter = starterCityOnOpen({ size: this.size, style: this.style, existing: buildings });
     const initialBuildings = starter.buildings;
     // A settlement with no persisted buildings gets the explicit starter set
-    // committed FREE (townHall L1 + farm field + 2 houses + a woodcutter's hut
-    // and a stone mine, engine buildStarterLayout) -- not a procedurally
+    // committed FREE (townHall L1 + farm field + 2 houses + two woodcutter's
+    // huts, a stone mine and the farmhouse troop producer, engine
+    // buildStarterLayout) -- not a procedurally
     // generated city. The old dense-procedural free layout charged ~24 wood +
     // 14 stone per turn against a 300/300 start and had no producer; see
     // packages/engine/src/settlement/starterLayout.ts. Everything added on top

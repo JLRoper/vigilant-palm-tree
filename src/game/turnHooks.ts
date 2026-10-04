@@ -51,6 +51,7 @@ import type { Axial } from "../core/hex";
 import { getMultiplayerSync } from "../io/multiplayerSync";
 import { settings, type HorseVariant } from "../state/settings";
 import { bus } from "../core/eventBus";
+import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { takeLastAppliedBuildDelta } from "./buildCommitLedger";
 import type { NetCost } from "../screens/settlements/cityView/netCost";
 
@@ -195,6 +196,14 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       if (!name || !cached) return { state, battle: null };
       const attackerHeroBefore = state.heroes[cached.attackerId];
       if (!attackerHeroBefore) return { state, battle: null };
+      // On server-driven games the attacker's owner is often an AI seat and
+      // the command route rejects AI-seat actors (ai_seat_command_forbidden):
+      // act as the local seat whenever it owns either combatant.
+      const local = getInMemoryLocalPlayerId(name) ?? 0;
+      const ownsAttacker = attackerHeroBefore.ownerId === local;
+      const defenderHeroBefore = state.heroes[cached.defenderId];
+      const ownsDefender = defenderHeroBefore?.ownerId === local;
+      const actor = ownsAttacker || ownsDefender ? local : attackerHeroBefore.ownerId;
       try {
         // No longer sends the client's GameState at all (Phase 3 Track A
         // Week 3+) -- the server loads its own row and its own unit_types
@@ -202,7 +211,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         // so this only needs to carry who's attacking whom and on whose
         // behalf.
         const result = await resolveBattle(name, {
-          actor: attackerHeroBefore.ownerId,
+          actor,
           attackerId: cached.attackerId,
           defenderId: cached.defenderId,
         });

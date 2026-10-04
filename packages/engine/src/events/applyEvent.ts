@@ -16,6 +16,7 @@ import { captureSettlement } from "../settlement/capture";
 import { startTownHallUpgrade } from "../settlement/upgradeTownHall";
 import { depositIntoGarrison } from "../settlement/recruitUnits";
 import { transferUnits } from "../settlement/transferUnits";
+import { startBattle } from "../turn/phases";
 import { settlementStacks } from "../units";
 import { isTradeRouteEndpoint, isTradeRoutePayload, legacyTradeRouteShape } from "../hydrate";
 
@@ -61,6 +62,7 @@ export const ENGINE_EVENT_SYNC_CLASS: Record<EngineEvent["type"], EngineEventSyn
   BankGoldMoved: "apply",
   TurnEnded: "resync",
   BattleResolved: "resync",
+  BattleOffered: "apply",
   HeroRecruited: "resync",
   TownHallUpgradeStarted: "apply",
   AutoTradeToggled: "apply",
@@ -315,6 +317,31 @@ function applyBankGoldMoved(
   return { state: result.state, outcome: "applied" };
 }
 
+// BattleOffered carries only the fact that an attacker offered battle to a
+// defender, so the replay is a straight re-run through startBattle -- the
+// phase flip is fully derivable from the pair. A pair already in BATTLE is
+// what an already-applied offer looks like from behind -> noop; every other
+// shape (missing hero, a DIFFERENT pair already in BATTLE) means this
+// client's state has drifted and the caller refetches.
+function applyBattleOffered(
+  state: GameState,
+  attackerId: string,
+  defenderId: string,
+): ApplyEngineEventResult {
+  const attacker = state.heroes[attackerId];
+  const defender = state.heroes[defenderId];
+  if (!attacker || !defender) return resync(state);
+  if (state.phase.kind === "BATTLE") {
+    return state.phase.attackerId === attackerId && state.phase.defenderId === defenderId
+      ? { state, outcome: "noop" }
+      : resync(state);
+  }
+  return {
+    state: startBattle(state, attackerId, defenderId),
+    outcome: "applied",
+  };
+}
+
 export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEngineEventResult {
   switch (event.type) {
     case "HeroMoved":
@@ -410,6 +437,9 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
         event.wagons,
       );
     }
+
+    case "BattleOffered":
+      return applyBattleOffered(state, event.attackerId, event.defenderId);
 
     // Listed per variant rather than swept into `default:` so a new
     // EngineEvent variant trips the exhaustiveness check below.

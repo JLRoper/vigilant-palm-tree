@@ -78,7 +78,7 @@ Each settlement produces:
 - **Gold:** `population × goldTax × (morale / 100)` per round (effective income) — plus a `goldMine` producer's output, and a bank's weekly interest and matured withdrawals
 - **Resources:** `resourceRates[r]` per round per resource type, where `resourceRates` is computed at settlement creation time from nearby resource tiles within `settlementRateRadius(level) = level` × level, **plus** every producer building's `base × cell multiplier` (a farm on a matching city spot peaks at 3×)
 
-Initial castles start with population 500, gold tax 1, morale 100, and a seeded starter city (town hall + farm field + 2 houses). Charter-founded settlements start with population 50, gold tax 1, morale 50, `autoTrade: false`, and a free starter set committed when the city view first opens.
+Initial castles start with population 500, gold tax 1, morale 100, and a seeded starter city (town hall, farm field, 2 houses, 2 woodcutter huts, stone mine, farmhouse — 10 wood + 2 stone/turn). Charter-founded settlements start with population 50, gold tax 1, morale 50, `autoTrade: false`, and a free starter set committed when the city view first opens.
 
 ## Population growth (✅ implemented)
 

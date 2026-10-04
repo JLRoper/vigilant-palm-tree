@@ -9,11 +9,14 @@ import {
   resolveBattle,
   evaluateTradeNeeds,
   type MapSize,
+  type PendingBattleMarker,
   type UnitType,
 } from "@heroes/engine";
 import { hexDistance, HEX_DIRECTIONS } from "@heroes/contracts";
 import type { Axial, Command, HeroId } from "@heroes/contracts";
 import {
+  AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND,
+  AI_DEFENDER_WAIT_TIMEOUT_MS,
   AI_MAX_ROUTES_PER_SEAT,
   AI_TURN_ACTION_BUDGET,
   AI_TURN_PASS_DEADLINE_MS,
@@ -21,8 +24,11 @@ import {
   isGameTrackedByDriver,
   resetAiDriver,
   scanOnce,
+  type AiDriveOutcome,
   type AiDriverCommandOutcome,
   type AiDriverGameSnapshot,
+  type GameLockOutcome,
+  type WithGameLock,
 } from "../../server/app/aiDriver";
 import { pool } from "../../server/persistence/db";
 import { makeHero, makePlayer, makeSettlement, makeState, emptyWarehouse } from "../charter/_helpers";
@@ -106,7 +112,13 @@ function aiTurnWorld(
   });
   // The snapshot seed MUST be the seed the fixture geometry (hero/settlement
   // tiles) was chosen from -- the driver reconstructs GameMap from it.
-  return { gameId: opts?.gameId ?? 1, seed: opts?.seed ?? SEED, mapSize: MAP_SIZE, state };
+  return {
+    gameId: opts?.gameId ?? 1,
+    seed: opts?.seed ?? SEED,
+    mapSize: MAP_SIZE,
+    pendingBattle: null,
+    state,
+  };
 }
 
 interface ScriptedHarness {
@@ -126,17 +138,21 @@ function installHarness(
     candidates?: Array<{ name: string; id: number; active_player_id: number }>;
     actionBudget?: number;
     passDeadlineMs?: number;
+    defenderWaitTimeoutMs?: number;
+    now?: () => number;
     override?: (command: Command) => AiDriverCommandOutcome | undefined;
   },
 ): ScriptedHarness {
   const candidates = opts?.candidates ?? [{ name: GAME, id: world.gameId, active_player_id: 1 }];
   const harness: ScriptedHarness = { commands: [], endTurns: [], audits: [], gameGone: { value: false } };
+  const clock = opts?.now ?? (() => 1_000_000);
   configureAiDriver({
     scanIntervalMs: 60_000,
     pacingMs: 0,
     actionBudget: opts?.actionBudget ?? AI_TURN_ACTION_BUDGET,
     passDeadlineMs: opts?.passDeadlineMs ?? AI_TURN_PASS_DEADLINE_MS,
-    now: () => 1_000_000,
+    defenderWaitTimeoutMs: opts?.defenderWaitTimeoutMs ?? AI_DEFENDER_WAIT_TIMEOUT_MS,
+    now: clock,
     loadCandidates: async () => candidates,
     loadGame: async () => (harness.gameGone.value ? null : world),
     loadCatalog: async () => CATALOG,
@@ -178,6 +194,18 @@ function installHarness(
         }
         return { ok: true };
       }
+      if (command.kind === "EnterBattle") {
+        // The handler persists games.lobby.pendingBattle (attacker, defender,
+        // since) and appends BattleOffered; the driver only consumes the
+        // marker, so the scripted branch mirrors the persisted shape, stamped
+        // with the harness clock.
+        world.pendingBattle = {
+          attackerId: command.attackerId,
+          defenderId: command.defenderId,
+          since: clock(),
+        } satisfies PendingBattleMarker;
+        return { ok: true };
+      }
       if (command.kind === "ResolveBattle") {
         const attacker = world.state.heroes[command.attackerId];
         if (!attacker) return { ok: false, reason: "hero_not_found" };
@@ -185,6 +213,10 @@ function installHarness(
         world.state.players = world.state.players.map((p) =>
           p.id !== attacker.ownerId ? { ...p, heroIds: p.heroIds.filter((id) => id !== command.defenderId) } : p,
         );
+        // Resolving the offered pair clears the pending marker and hands the
+        // turn back to the AI seat (the handler's behavior on success).
+        world.pendingBattle = null;
+        world.state.phase = { kind: "AI_TURN", playerId: world.state.activePlayerId };
         return { ok: true };
       }
       return { ok: true };
@@ -194,6 +226,18 @@ function installHarness(
     },
   });
   return harness;
+}
+
+// Captures driveGameTurn's outcome through the withGameLock seam -- the only
+// place scanOnce exposes the per-game AiDriveOutcome to a test.
+function captureOutcome(): { captured: AiDriveOutcome[]; withGameLock: WithGameLock } {
+  const captured: AiDriveOutcome[] = [];
+  const withGameLock: WithGameLock = async (_gameName, _gameId, drive) => {
+    const value = await drive();
+    if (typeof value === "string") captured.push(value as AiDriveOutcome);
+    return { locked: true, value } satisfies GameLockOutcome<AiDriveOutcome>;
+  };
+  return { captured, withGameLock };
 }
 
 beforeEach(() => {
@@ -209,6 +253,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 test("constants match the plan values (D3/D12)", () => {
   assert.equal(AI_TURN_ACTION_BUDGET, 64);
   assert.equal(AI_TURN_PASS_DEADLINE_MS, 25_000);
+  assert.equal(AI_DEFENDER_WAIT_TIMEOUT_MS, 300_000);
 });
 
 test("whole-turn drive per pass: two heroes spend their movement across sweeps, then EndTurn with no growthRate", async () => {
@@ -361,12 +406,13 @@ test("D15 immediate-submit chaining: after an ok hero battle on a garrisoned til
   // Geometry: the settlement tile is occupied by a defending enemy hero, so
   // the move ends beside it and the post-move adjacency battle fires; the
   // scripted ResolveBattle removes the defender and lands the attacker ON
-  // the (still-garrisoned) settlement tile -- exactly the D15 shape.
-  const defender = makeHero("h0d", 0, settlementTile.q, settlementTile.r, { troops: 1, stacks: troopStacks("peasant", 1) });
+  // the (still-garrisoned) settlement tile -- exactly the D15 shape. The
+  // defender is AI-seat 2: a HUMAN-defender owner would now be offered an
+  // EnterBattle and stop the pass (the pending-defender flow), which would
+  // never reach the chaining under test.
+  const defender = makeHero("h0d", 2, settlementTile.q, settlementTile.r, { troops: 1, stacks: troopStacks("peasant", 1) });
   world.state.heroes["h0d"] = defender;
-  world.state.players = world.state.players.map((p) =>
-    p.id === 0 ? { ...p, heroIds: [...p.heroIds, "h0d"] } : p,
-  );
+  world.state.players = [...world.state.players, makePlayer(2, "ai", ["h0d"], [])];
   const harness = installHarness(world, {
     override: (command) => {
       if (command.kind === "ResolveBattle") {
@@ -375,7 +421,7 @@ test("D15 immediate-submit chaining: after an ok hero battle on a garrisoned til
         attacker.q = settlementTile.q;
         attacker.r = settlementTile.r;
         world.state.players = world.state.players.map((p) =>
-          p.id === 0 ? { ...p, heroIds: p.heroIds.filter((id) => id !== "h0d") } : p,
+          p.id === 2 ? { ...p, heroIds: p.heroIds.filter((id) => id !== "h0d") } : p,
         );
         return { ok: true };
       }
@@ -943,6 +989,254 @@ test("a live garrison fights a settlement battle and is never walk-in captured",
   const sequence = harness.commands.map((c) => c.kind);
   assert.ok(sequence.includes("SubmitSettlementBattleResult"), "a live garrison fights a settlement battle");
   assert.ok(!sequence.includes("CaptureSettlement"), "a live garrison is never walk-in captured");
+});
+
+// ---------------------------------------------------------------------------
+// Pending-defender battles: the EnterBattle offer for HUMAN defenders, the
+// wait, the force-resolve past the wait deadline, and the AI-defender
+// regression. The fixture seed is chosen by SIMULATING pickAiMove so the
+// approach move is guaranteed to land the AI hero inside the defender's
+// adjacency on the first move (the D4 fixture's simulation precedent).
+// ---------------------------------------------------------------------------
+
+function firstDefenderApproachTriple(seed: number): [Axial, Axial, Axial] | null {
+  const map = new GameMap(seed, MAP_SIZE);
+  const usable = (q: number, r: number) => map.isPassable(q, r) && map.resourceTileAt(q, r) === undefined;
+  for (const mid of passableTiles(seed)) {
+    for (const dir of HEX_DIRECTIONS) {
+      const defender = { q: mid.q + dir.q, r: mid.r + dir.r };
+      const hero = { q: mid.q - dir.q, r: mid.r - dir.r };
+      if (usable(defender.q, defender.r) && usable(hero.q, hero.r)) return [hero, mid, defender];
+    }
+  }
+  return null;
+}
+
+const APPROACH = (() => {
+  for (let seed = 1; seed < 500; seed++) {
+    const triple = firstDefenderApproachTriple(seed);
+    if (!triple) continue;
+    const [heroTile, , defenderTile] = triple;
+    const state = makeState({
+      players: [makePlayer(0, "player", ["d0"], []), makePlayer(1, "ai", ["h1"], [])],
+      heroes: [
+        makeHero("h1", 1, heroTile.q, heroTile.r, { movementRemaining: 4, troops: 5, stacks: troopStacks("swordsman", 5) }),
+        makeHero("d0", 0, defenderTile.q, defenderTile.r, { troops: 1, stacks: troopStacks("peasant", 1) }),
+      ],
+      activePlayerId: 1,
+      phase: { kind: "AI_TURN", playerId: 1 },
+    });
+    const move = pickAiMove(
+      state,
+      "h1",
+      new GameMap(seed, MAP_SIZE),
+      mulberry32((seed ^ 1 ^ 1) >>> 0),
+      CATALOG,
+      new Set<string>(),
+    );
+    if (!move) continue;
+    if (move.cost > 4) continue;
+    if (hexDistance(move.toTile, defenderTile) !== 1) continue;
+    return { seed, heroTile, defenderTile };
+  }
+  throw new Error("no seed under 500 gives a one-move approach into the defender's adjacency");
+})();
+
+// The AI seat's hero one move away from a defender (owner configurable by
+// the caller's surgery); the fixture's distant h0 is dropped so the defender
+// is the ONLY enemy target and the approach is deterministic.
+function defenderApproachWorld(): AiDriverGameSnapshot {
+  const world = aiTurnWorld(
+    [makeHero("h1", 1, APPROACH.heroTile.q, APPROACH.heroTile.r, { movementRemaining: 4, troops: 5, stacks: troopStacks("swordsman", 5) })],
+    { seed: APPROACH.seed },
+  );
+  delete world.state.heroes["h0"];
+  world.state.players = world.state.players.map((p) =>
+    p.id === 0 ? { ...p, heroIds: p.heroIds.filter((id) => id !== "h0") } : p,
+  );
+  return world;
+}
+
+function humanDefenderWorld(): AiDriverGameSnapshot {
+  const world = defenderApproachWorld();
+  world.state.heroes["d0"] = makeHero("d0", 0, APPROACH.defenderTile.q, APPROACH.defenderTile.r, {
+    troops: 1,
+    stacks: troopStacks("peasant", 1),
+  });
+  world.state.players = world.state.players.map((p) =>
+    p.id === 0 ? { ...p, heroIds: [...p.heroIds, "d0"] } : p,
+  );
+  return world;
+}
+
+test("human-defender adjacency: the driver offers EnterBattle and waits instead of auto-resolving", async () => {
+  const world = humanDefenderWorld();
+  const harness = installHarness(world);
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  await scanOnce();
+
+  assert.equal(cap.captured[0], "waiting_for_defender", "the pass stops to wait after the offer");
+  const enters = commandsOfKind(harness.commands, "EnterBattle");
+  assert.equal(enters.length, 1, "exactly one EnterBattle offer");
+  assert.equal(enters[0].attackerId, "h1");
+  assert.equal(enters[0].defenderId, "d0");
+  assert.equal(enters[0].actor, 1, "the AI seat offers as the actor");
+  assert.equal(commandsOfKind(harness.commands, "ResolveBattle").length, 0, "a human defender is never auto-resolved");
+  assert.equal(harness.endTurns.length, 0, "NO EndTurn while an offer is pending");
+  assert.equal(harness.audits.length, 0);
+  assert.deepEqual(
+    world.pendingBattle,
+    { attackerId: "h1", defenderId: "d0", since: 1_000_000 },
+    "the pending-battle marker is persisted for the handler",
+  );
+  const sequence = harness.commands.map((c) => c.kind);
+  assert.ok(sequence.indexOf("EnterBattle") > sequence.indexOf("MoveHero"), "the offer chains behind the approach move");
+});
+
+test("pending defender battle (fresh marker): the pass waits with zero dispatched commands and no audit", async () => {
+  const world = recruitWorld();
+  world.pendingBattle = { attackerId: "h1", defenderId: "h0", since: 1_000_000 };
+  world.state.phase = { kind: "BATTLE", attackerId: "h1", defenderId: "h0" };
+  const harness = installHarness(world);
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  await scanOnce();
+
+  assert.equal(cap.captured[0], "waiting_for_defender");
+  assert.equal(harness.commands.length, 0, "no recruitment, no moves, nothing dispatched while waiting");
+  assert.equal(harness.endTurns.length, 0);
+  assert.equal(harness.audits.length, 0, "waiting appends no audit row");
+});
+
+test("pending defender battle past the deadline: one force-resolve, wait-expired audit, then the sweep continues", async () => {
+  const world = humanDefenderWorld();
+  world.pendingBattle = { attackerId: "h1", defenderId: "d0", since: 1_000_000_000 };
+  world.state.phase = { kind: "BATTLE", attackerId: "h1", defenderId: "d0" };
+  const harness = installHarness(world, {
+    defenderWaitTimeoutMs: 5_000,
+    now: () => 1_000_006_000,
+  });
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  await scanOnce();
+
+  const resolves = commandsOfKind(harness.commands, "ResolveBattle");
+  assert.equal(resolves.length, 1, "exactly one force-resolve for the pending pair");
+  assert.equal(resolves[0].attackerId, "h1");
+  assert.equal(resolves[0].defenderId, "d0");
+  assert.equal(commandsOfKind(harness.commands, "EnterBattle").length, 0, "no NEW offer is dispatched");
+  const sequence = harness.commands.map((c) => c.kind);
+  assert.ok(
+    sequence.indexOf("ResolveBattle") < sequence.indexOf("MoveHero"),
+    "the force-resolve precedes the resumed sweep",
+  );
+  assert.ok(commandsOfKind(harness.commands, "MoveHero").length >= 1, "the sweep resumed after the force-resolve");
+  assert.equal(harness.endTurns.length, 1, "the resumed turn terminates with EndTurn");
+  assert.equal(cap.captured[0], "ended_turn");
+  assert.equal(harness.audits.length, 1, "exactly one wait-expired audit row");
+  assert.equal(harness.audits[0].kind, AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND);
+  const payload = harness.audits[0].payload as { attackerId: string; defenderId: string; waitedMs: number; round: number };
+  assert.equal(payload.attackerId, "h1");
+  assert.equal(payload.defenderId, "d0");
+  assert.equal(payload.waitedMs, 6_000);
+  assert.equal(payload.round, 1);
+});
+
+test("resolved defender battle: a snapshot without the marker resumes the normal sweep", async () => {
+  const world = humanDefenderWorld();
+  // The handler resolved the pair: the defender is gone and no marker is set.
+  delete world.state.heroes["d0"];
+  world.state.players = world.state.players.map((p) =>
+    p.id === 0 ? { ...p, heroIds: p.heroIds.filter((id) => id !== "d0") } : p,
+  );
+  const harness = installHarness(world);
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  await scanOnce();
+
+  assert.equal(cap.captured[0], "ended_turn", "the pass drives normally, no waiting");
+  assert.ok(commandsOfKind(harness.commands, "MoveHero").length >= 1);
+  assert.equal(commandsOfKind(harness.commands, "ResolveBattle").length, 0);
+  assert.equal(commandsOfKind(harness.commands, "EnterBattle").length, 0);
+  assert.equal(harness.endTurns.length, 1);
+  assert.equal(harness.audits.length, 0);
+});
+
+test("AI defender regression: an adjacent AI-seat defender still auto-resolves via ResolveBattle", async () => {
+  const world = defenderApproachWorld();
+  world.state.players = [...world.state.players, makePlayer(2, "ai", ["d2"], [])];
+  world.state.heroes["d2"] = makeHero("d2", 2, APPROACH.defenderTile.q, APPROACH.defenderTile.r, {
+    troops: 1,
+    stacks: troopStacks("peasant", 1),
+  });
+  const harness = installHarness(world);
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  await scanOnce();
+
+  assert.equal(commandsOfKind(harness.commands, "EnterBattle").length, 0, "an AI defender is never offered the battle");
+  const resolves = commandsOfKind(harness.commands, "ResolveBattle");
+  assert.equal(resolves.length, 1, "the old path auto-resolves an AI defender");
+  assert.equal(resolves[0].attackerId, "h1");
+  assert.equal(resolves[0].defenderId, "d2");
+  assert.equal(resolves[0].actor, 1);
+  assert.equal(cap.captured[0], "ended_turn", "the AI-vs-AI battle does not stop the pass");
+});
+
+test("budget exhaustion cannot EndTurn past a pending offer (the offer returns before the exhaustion block)", async () => {
+  const world = humanDefenderWorld();
+  const harness = installHarness(world, { actionBudget: 2 });
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  await scanOnce();
+
+  assert.equal(cap.captured[0], "waiting_for_defender");
+  assert.equal(harness.endTurns.length, 0, "no exhaustion EndTurn may follow an offer");
+  assert.equal(harness.audits.length, 0, "no turn_skipped audit may follow an offer");
+  const enters = commandsOfKind(harness.commands, "EnterBattle");
+  assert.equal(enters.length, 1);
+  // The gate strictly follows a successful MoveHero dispatch, so the
+  // tightest budget that can REACH an offer is 2 (move + offer): the pin is
+  // that the offer may spend the LAST budgeted action and the pass still
+  // returns waiting_for_defender instead of falling into the exhaustion
+  // EndTurn + audit.
+  assert.equal(harness.commands.length, 2);
+});
+
+test("aiStillActive accepts the offered-battle BATTLE phase for the seat's own attacker", async () => {
+  const world = humanDefenderWorld();
+  world.pendingBattle = { attackerId: "h1", defenderId: "d0", since: 1_000_000 };
+  world.state.phase = { kind: "BATTLE", attackerId: "h1", defenderId: "d0" };
+  const harness = installHarness(world);
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  await scanOnce();
+  assert.equal(
+    cap.captured[0],
+    "waiting_for_defender",
+    "the BATTLE phase derived from the marker is not a lost turn",
+  );
+  assert.equal(harness.commands.length, 0);
+
+  // Contrast: a BATTLE phase whose attacker is NOT the seat's hero is a
+  // genuinely lost turn (the marker gate is seat-checked).
+  const foreign = humanDefenderWorld();
+  foreign.pendingBattle = { attackerId: "d0", defenderId: "h1", since: 1_000_000 };
+  foreign.state.phase = { kind: "BATTLE", attackerId: "d0", defenderId: "h1" };
+  installHarness(foreign);
+  const capForeign = captureOutcome();
+  configureAiDriver({ withGameLock: capForeign.withGameLock });
+
+  await scanOnce();
+  assert.equal(capForeign.captured[0], "turn_lost", "a BATTLE phase attacking from another seat is a lost turn");
 });
 
 // ---------------------------------------------------------------------------

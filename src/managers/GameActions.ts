@@ -2,6 +2,7 @@ import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { showBattleModal } from "@screens/combat/battleModal";
 import { showBattleResultCard } from "@screens/combat/battleResultCard";
+import { resolveBattleChoice } from "@screens/combat/battleChoicePolicy";
 import { shouldShowResultCard } from "@screens/combat/resultCardPolicy";
 import { showToast } from "@screens/shared/toast";
 import { openManualBattleArena, type ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
@@ -13,6 +14,7 @@ import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { catalogFailed, cachedUnitTypes, loadUnitCatalog } from "../data/unitCatalog";
 import type { UnitType } from "../state/units";
 import { submitBattleResult, submitSettlementBattleResult, type SubmitBattleResultResult, type SubmitSettlementBattleResultResult } from "../io/commands";
+import { isServerDriven } from "../io/serverDrivenGames";
 import { consumeResolveBattleVerdicts, mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../game/turnHooks";
 import { battleToastMessage, settlementNameAt } from "@screens/combat/battleResultText";
 import {
@@ -118,20 +120,25 @@ export class GameActions {
       const localIsAttacker = attacker.ownerId === localSeat;
       const localIsDefender = defender.ownerId === localSeat;
 
-      // Hero-vs-hero collisions between two human players stay on the
-      // auto-resolver (plan decision 1): a client only ever plays its OWN
-      // hero's army in the arena, so a fight between two remote human seats
-      // has no local side to hand the mouse to. Quick-resolve it silently —
-      // the modal's Fight button would be a lie for both players.
-      const defenderOwnerIsHuman =
-        gs.players.find((p) => p.id === defender.ownerId)?.faction === "player";
-      const pvp = !localIsAttacker && !localIsDefender ? true : !localIsAttacker && defenderOwnerIsHuman;
+      // Who resolves this battle? battleChoicePolicy replaces the old
+      // `pvp` predicate: the local defender now gets the modal too (minus
+      // Flee), a server-driven spectator never resolves (the server driver
+      // or the defender owns it -- the outcome surfaces later via
+      // battleOutcomeFeedback), and the driving client auto-resolves
+      // AI-vs-AI / remote-human pairs exactly as before.
+      const plan = resolveBattleChoice({
+        localIsAttacker,
+        localIsDefender,
+        serverDriven: isServerDriven(gameName ?? ""),
+      });
+      if (plan.kind === "spectate") return;
 
       let choice: "fight" | "quickResolve" | "cancel" = "quickResolve";
-      if (!pvp) {
+      if (plan.kind === "modal") {
         choice = await showBattleModal({
           attackerName: `Hero ${attackerName}`,
           defenderName: `Hero ${defenderName}`,
+          hideFlee: plan.hideFlee,
         });
       }
 
@@ -337,6 +344,15 @@ export class GameActions {
       next = cleanupDefeatedHeroCharters(next, defenderId);
     }
     next = endBattlePhase(next);
+    // Mirror resolveCurrentBattle()'s AI_TURN re-map: a defender-fought
+    // battle can now run during the AI's turn, and endBattlePhase()
+    // unconditionally reopens PLAYER_TURN.
+    if (next.phase.kind === "PLAYER_TURN") {
+      const active = next.players.find((p) => p.id === next.activePlayerId);
+      if (active?.faction === "ai") {
+        next = { ...next, phase: { kind: "AI_TURN", playerId: next.activePlayerId } };
+      }
+    }
     const attackerAfter = next.heroes[attackerId];
     bus.emit({
       type: "battle:resolved",

@@ -57,6 +57,18 @@ export type EngineEvent =
       obstacleSeed: number;
     }
   | {
+      // Marks a pending human-defended battle the defender must resolve
+      // (AI-initiated battles no longer auto-resolve against a human
+      // defender). Classified "apply": replaying it through startBattle
+      // sets the BATTLE phase; the phase itself is re-derived at hydrate
+      // from games.lobby.pendingBattle (the BATTLE phase is never
+      // persisted as a phase).
+      type: "BattleOffered";
+      actor: PlayerSeat;
+      attackerId: HeroId;
+      defenderId: HeroId;
+    }
+  | {
       type: "HeroRecruited";
       actor: PlayerSeat;
       heroId: HeroId;

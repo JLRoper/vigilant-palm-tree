@@ -3,6 +3,7 @@ import type { TransferGoldCommand } from "./transferGold";
 import type { BankGoldCommand } from "./bankGold";
 import type { EndTurnCommand } from "./endTurn";
 import type { ResolveBattleCommand } from "./resolveBattle";
+import type { EnterBattleCommand } from "./enterBattle";
 import type { RecruitHeroCommand } from "./recruitHero";
 import type { UpgradeTownHallCommand } from "./upgradeTownHall";
 import type { SetAutoTradeCommand } from "./setAutoTrade";
@@ -28,6 +29,7 @@ export * from "./transferGold";
 export * from "./bankGold";
 export * from "./endTurn";
 export * from "./resolveBattle";
+export * from "./enterBattle";
 export * from "./recruitHero";
 export * from "./upgradeTownHall";
 export * from "./setAutoTrade";
@@ -98,4 +100,5 @@ export type Command =
   | UpdateTradeRouteCommand
   | RecruitUnitsCommand
   | TransferUnitsCommand
-  | SubmitSettlementBattleResultCommand;
+  | SubmitSettlementBattleResultCommand
+  | EnterBattleCommand;

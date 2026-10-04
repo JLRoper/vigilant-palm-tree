@@ -5,15 +5,17 @@ import { makeHero, makeSettlement, makeState } from "../charter/_helpers";
 
 test("every declared EngineEvent variant is classified exactly once", () => {
   // 25 -> 24 (2026-10-02): ResourcesTraded was deleted outright (dead code --
-  // no producer after the manual trade command's removal), so the union is one
-  // variant smaller and the registry tracks it.
-  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 24);
+  // no producer after the manual trade command's removal), so the union was one
+  // variant smaller. 24 -> 25 (2026-10-04): BattleOffered added -- an
+  // AI-initiated battle offer waits for its human defender instead of
+  // auto-resolving.
+  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 25);
 });
 
-test("classification counts: 11 apply, 7 resync, 6 ignore", () => {
+test("classification counts: 12 apply, 7 resync, 6 ignore", () => {
   const counts = { apply: 0, resync: 0, ignore: 0 };
   for (const cls of Object.values(ENGINE_EVENT_SYNC_CLASS)) counts[cls] += 1;
-  assert.deepEqual(counts, { apply: 11, resync: 7, ignore: 6 });
+  assert.deepEqual(counts, { apply: 12, resync: 7, ignore: 6 });
 });
 
 test("class agrees with the reducer: BankGoldMoved is an apply kind that replays the reducer", () => {
@@ -65,6 +67,46 @@ test("class agrees with the reducer: BankGoldMoved is an apply kind that replays
     direction: "deposit",
   });
   assert.equal(drifted.outcome, "resync");
+});
+
+test("class agrees with the reducer: BattleOffered is an apply kind that sets the BATTLE phase", () => {
+  assert.equal(ENGINE_EVENT_SYNC_CLASS.BattleOffered, "apply");
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 2, 2), makeHero("h1", 1, 18, 4), makeHero("h2", 0, 5, 5)],
+  });
+  const offered = applyEngineEvent(state, {
+    type: "BattleOffered",
+    actor: 1,
+    attackerId: "h1",
+    defenderId: "h0",
+  });
+  assert.equal(offered.outcome, "applied");
+  assert.deepEqual(offered.state.phase, { kind: "BATTLE", attackerId: "h1", defenderId: "h0" });
+  // Replaying the same offer (the event redelivered behind the cursor) is
+  // what already-applied looks like -> noop, not a second phase flip.
+  const replay = applyEngineEvent(offered.state, {
+    type: "BattleOffered",
+    actor: 1,
+    attackerId: "h1",
+    defenderId: "h0",
+  });
+  assert.equal(replay.outcome, "noop");
+  // A DIFFERENT pair while a battle is already pending is real drift -> refetch.
+  const drifted = applyEngineEvent(offered.state, {
+    type: "BattleOffered",
+    actor: 1,
+    attackerId: "h1",
+    defenderId: "h2",
+  });
+  assert.equal(drifted.outcome, "resync");
+  // ...and so is either hero missing.
+  const missing = applyEngineEvent(state, {
+    type: "BattleOffered",
+    actor: 1,
+    attackerId: "h1",
+    defenderId: "nope",
+  });
+  assert.equal(missing.outcome, "resync");
 });
 
 test("class agrees with the reducer: an apply kind replays through applyEngineEvent", () => {

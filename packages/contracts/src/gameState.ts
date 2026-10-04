@@ -103,9 +103,13 @@ export interface HeroState {
 export type GamePhase =
   | { kind: "PLAYER_TURN"; playerId: PlayerId }
   | { kind: "AI_TURN"; playerId: PlayerId }
+  // Never persisted as a phase, but re-derived at hydrate from
+  // games.lobby.pendingBattle when a server-offered battle awaits its
+  // defender (BattleOffered).
   | { kind: "BATTLE"; attackerId: HeroId; defenderId: HeroId }
-  // Client-only (like BATTLE): a manual settlement-garrison battle in
-  // flight; the server never persists this phase.
+  // Client-only (never persisted as a phase, like BATTLE): a manual
+  // settlement-garrison battle in flight; the server never persists this
+  // phase.
   | { kind: "SETTLEMENT_BATTLE"; attackerId: HeroId; settlementId: SettlementId }
   | { kind: "ROUND_END"; nextRound: number };
 

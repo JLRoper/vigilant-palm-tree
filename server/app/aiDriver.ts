@@ -10,9 +10,11 @@ import {
   pickGarrisonRecruitment,
   platoonsHaveTroops,
   platoonTroopTotal,
+  readPendingBattle,
   resolveBattle,
   settlementStacks,
   type MapSize,
+  type PendingBattleMarker,
   type SettlementBattleOutcome,
   type UnitType,
 } from "@heroes/engine";
@@ -29,14 +31,19 @@ import { aiDriverBootToken } from "./aiDriverToken";
 // Server-side AI actor (plan/2026-09-30-server-side-ai-actor.md, Phase 1).
 // For games flagged lobby.aiDriver === "server" (D1: any game created with
 // enemySlots > 0), this scanner drives AI seats end-to-end in-process:
-// hydrate -> D13 garrison recruitment (once per round+seat) -> per-hero
+// hydrate -> pending-defender wait check (a human-defender battle the pass
+// offered earlier: wait, or force-resolve once AI_DEFENDER_WAIT_TIMEOUT_MS
+// is exceeded) -> D13 garrison recruitment (once per round+seat) -> per-hero
 // pickAiMove/MoveHero sweeps -> walk-in gates in the client's order
 // (defending hero defers -> garrison battle via D11 compute-once + submit,
-// never applied locally -> walk-in capture -> adjacent-hero ResolveBattle,
-// with D15 immediate-submit chaining after a hero battle) -> EndTurn without
-// growthRate (D14). Dispatch goes through handleCommandTransactional (never
-// HTTP), so the D10 route block in server/http/routes/commands.ts cannot
-// gate it; AI seats never enter the presence map.
+// never applied locally -> walk-in capture -> adjacent-hero battle -- a
+// HUMAN defender gets an EnterBattle offer and the pass STOPS with no
+// EndTurn until the handler clears the marker, an AI defender auto-resolves
+// via ResolveBattle, with D15 immediate-submit chaining after a hero
+// battle) -> EndTurn without growthRate (D14). Dispatch goes through
+// handleCommandTransactional (never HTTP), so the D10 route block in
+// server/http/routes/commands.ts cannot gate it; AI seats never enter the
+// presence map.
 //
 // Driver memory (D9) is in-process per game: the D4 RNG stream
 // (mulberry32(seed ^ round ^ seat), one per (game, round, seat), CONTINUED
@@ -68,6 +75,18 @@ export const AI_TURN_PASS_DEADLINE_MS = 25_000;
 /** Phase 5: trade-route recommendations the AI auto-accepts per round+seat. */
 export const AI_MAX_ROUTES_PER_SEAT = 3;
 
+/**
+ * How long an offered defender battle (games.lobby.pendingBattle, dispatched
+ * as EnterBattle for a HUMAN defender) may sit before the driver stops
+ * waiting and force-resolves it server-side via ResolveBattle -- the human
+ * defender's browser may be closed or the offer stale, and the AI turn must
+ * never stall on it.
+ */
+export const AI_DEFENDER_WAIT_TIMEOUT_MS = 300_000;
+
+/** Audit kind for the force-resolve above (turn_skipped convention). */
+export const AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND = "ai_defender_wait_expired";
+
 const DEFAULT_SCAN_INTERVAL_MS = 5_000;
 
 /** Wire shape of one driver candidate row. */
@@ -87,6 +106,14 @@ export interface AiDriverGameSnapshot {
   gameId: number;
   seed: number;
   mapSize: MapSize | undefined;
+  /**
+   * games.lobby.pendingBattle: a battle the driver offered a HUMAN defender
+   * (EnterBattle) that has not been resolved yet. Null = nothing pending.
+   * The hydrate derives phase.kind === "BATTLE" from it, so the pass must
+   * treat a live marker as "stop and wait" (or force-resolve past the wait
+   * deadline), never as a lost turn.
+   */
+  pendingBattle: PendingBattleMarker | null;
   state: GameState;
 }
 
@@ -113,6 +140,7 @@ export type WithGameLock = <T>(
 export type AiDriveOutcome =
   | "ended_turn"
   | "ended_turn_exhausted"
+  | "waiting_for_defender"
   | "turn_lost"
   | "game_gone"
   | "skipped_locked"
@@ -137,6 +165,7 @@ interface ResolvedConfig {
   pacingMs: number;
   actionBudget: number;
   passDeadlineMs: number;
+  defenderWaitTimeoutMs: number;
   driverToken: string;
   now: () => number;
   loadCandidates: () => Promise<AiDriverCandidate[]>;
@@ -175,14 +204,25 @@ function mapSizeFrom(value: string | null | undefined): MapSize | undefined {
 }
 
 async function defaultLoadGame(gameName: string): Promise<AiDriverGameSnapshot | null> {
-  const meta = await pool.query<{ id: number; seed: number; map_size: string | null }>(
-    `SELECT id, seed, map_size FROM games WHERE name = $1`,
+  const meta = await pool.query<{
+    id: number;
+    seed: number;
+    map_size: string | null;
+    pending_battle: unknown;
+  }>(
+    `SELECT id, seed, map_size, lobby->'pendingBattle' AS pending_battle FROM games WHERE name = $1`,
     [gameName],
   );
   if (meta.rowCount === 0) return null;
   const row = meta.rows[0];
   const { state } = await hydrateGame(pool, gameName);
-  return { gameId: row.id, seed: row.seed, mapSize: mapSizeFrom(row.map_size), state };
+  return {
+    gameId: row.id,
+    seed: row.seed,
+    mapSize: mapSizeFrom(row.map_size),
+    pendingBattle: readPendingBattle({ pendingBattle: row.pending_battle }),
+    state,
+  };
 }
 
 let liveDepsPromise: Promise<LiveCommandDeps> | null = null;
@@ -274,6 +314,7 @@ function resolveConfig(): ResolvedConfig {
     pacingMs: AI_ACTION_PACING_MS,
     actionBudget: AI_TURN_ACTION_BUDGET,
     passDeadlineMs: AI_TURN_PASS_DEADLINE_MS,
+    defenderWaitTimeoutMs: AI_DEFENDER_WAIT_TIMEOUT_MS,
     driverToken: aiDriverBootToken(),
     now: () => Date.now(),
     loadCandidates: defaultLoadCandidates,
@@ -292,6 +333,8 @@ export interface AiDriverOptions {
   pacingMs?: number;
   actionBudget?: number;
   passDeadlineMs?: number;
+  /** Override of the defender-offer wait deadline (test seam; default AI_DEFENDER_WAIT_TIMEOUT_MS). */
+  defenderWaitTimeoutMs?: number;
   /** Override of this process's boot token (test seam; default aiDriverBootToken()). */
   driverToken?: string;
   now?: () => number;
@@ -386,8 +429,16 @@ function recordBackoff(
   perHero.set(settlementId, round + GARRISON_BACKOFF_ROUNDS);
 }
 
+// The seat's turn is live either in AI_TURN, or mid-pending-defender:
+// packages/engine/src/hydrate.ts derives phase.kind === "BATTLE" from the
+// lobby.pendingBattle marker (the pass's own EnterBattle offer), so the
+// gate must accept that phase while the attacker is still the seat's hero.
 function aiStillActive(state: GameState, seat: number): boolean {
-  return state.phase.kind === "AI_TURN" && state.activePlayerId === seat;
+  return (
+    state.activePlayerId === seat &&
+    (state.phase.kind === "AI_TURN" ||
+      (state.phase.kind === "BATTLE" && state.heroes[state.phase.attackerId]?.ownerId === seat))
+  );
 }
 
 function settlementBattleOutcome(winner: "attacker" | "defender" | "draw"): SettlementBattleOutcome {
@@ -540,6 +591,44 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
   }
   if (!aiStillActive(snap.state, candidate.active_player_id)) return "turn_lost";
   const seat = snap.state.activePlayerId;
+
+  // A battle this pass (or a previous one) offered a HUMAN defender is still
+  // pending: wait for their Fight/Auto-resolve choice instead of driving on.
+  // Past the deadline the defender never answered (closed browser, stale
+  // offer) -- force the server auto-resolver so the AI turn cannot stall,
+  // unbudgeted and unpaced (the termination-EndTurn pattern, not dispatch()),
+  // then fall through to the sweep. The handler clears the marker on success
+  // AND on permanent rejection, so a stale marker cannot wedge the pass.
+  if (snap.pendingBattle) {
+    const pending = snap.pendingBattle;
+    const waitedMs = cfg.now() - pending.since;
+    if (waitedMs <= cfg.defenderWaitTimeoutMs) {
+      return "waiting_for_defender";
+    }
+    const forced = await cfg.runCommand({
+      kind: "ResolveBattle",
+      gameName,
+      actor: seat,
+      attackerId: pending.attackerId,
+      defenderId: pending.defenderId,
+    });
+    if (!forced.ok) {
+      console.info(
+        `[aiDriver] "${gameName}" force-resolve of the expired defender battle rejected (${forced.reason}); falling through to the sweep`,
+      );
+    }
+    try {
+      await cfg.appendAudit(gameName, AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND, {
+        attackerId: pending.attackerId,
+        defenderId: pending.defenderId,
+        waitedMs,
+        round: snap.state.round,
+      });
+    } catch (err) {
+      console.error(`[aiDriver] "${gameName}" defender-wait audit append failed:`, err);
+    }
+  }
+
   const mem = syncMemory(gameName, snap.gameId);
   const catalog = await cfg.loadCatalog();
   const ctx: PassContext = { gameName, seat, mem, catalog, actions: 0, startedAtMs: cfg.now() };
@@ -730,6 +819,39 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
         if (!attacker) break;
         const defenderId = detectAdjacentEnemy(adj.state, heroId);
         if (defenderId && platoonTroopTotal(adj.state.heroes[defenderId]?.stacks ?? []) > 0) {
+          const defenderHero = adj.state.heroes[defenderId];
+          const defenderOwner = defenderHero
+            ? adj.state.players.find((p) => p.id === defenderHero.ownerId)
+            : undefined;
+          if (defenderOwner && defenderOwner.faction !== "ai") {
+            // Human defender: offer the battle and wait for their choice
+            // instead of auto-resolving. The handler persists the pending
+            // battle and notifies clients; the next scan resumes once it is
+            // resolved (or the wait deadline expires). The return (not a
+            // break) exits driveGameTurn entirely, so neither the
+            // exhaustion EndTurn below nor the termination EndTurn can run
+            // while an offer is pending.
+            const offered = await dispatch(ctx, {
+              kind: "EnterBattle",
+              gameName,
+              actor: seat,
+              attackerId: heroId,
+              defenderId,
+            });
+            if ("stop" in offered) {
+              if (offered.stop === "turn_lost") return "turn_lost";
+              exhausted = offered.stop;
+              break sweep;
+            }
+            if (!offered.outcome.ok) {
+              console.info(
+                `[aiDriver] "${gameName}" EnterBattle rejected (${offered.outcome.reason}); dropping the action for this pass`,
+              );
+              skippedHeroes.add(heroId);
+              break;
+            }
+            return "waiting_for_defender";
+          }
           const resolved = await dispatch(ctx, {
             kind: "ResolveBattle",
             gameName,

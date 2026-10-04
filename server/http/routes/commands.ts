@@ -289,6 +289,24 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     };
   }
 
+  if (b.kind === "EnterBattle") {
+    if (
+      typeof b.attackerId !== "string" ||
+      b.attackerId.length === 0 ||
+      typeof b.defenderId !== "string" ||
+      b.defenderId.length === 0
+    ) {
+      return null;
+    }
+    return {
+      kind: "EnterBattle",
+      gameName,
+      actor: b.actor,
+      attackerId: b.attackerId,
+      defenderId: b.defenderId,
+    };
+  }
+
   if (b.kind === "RecruitHero") {
     if (
       typeof b.heroName !== "string" ||

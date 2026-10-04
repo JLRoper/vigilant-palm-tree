@@ -189,6 +189,58 @@ test("a remote TradeRouteCreated adds the route to the controller state", async 
   h.detach();
 });
 
+test("a server-offered BattleOffered flips the controller into the BATTLE phase so the defender's modal opens", async () => {
+  serverDrivenPolicy.registerServerDriven("sdr-battle-1");
+  const h = harness();
+  h.setController(
+    new TurnController(
+      garrisonFixture({ activePlayerId: 1, phase: { kind: "AI_TURN", playerId: 1 }, selectedHeroId: "h0" }),
+      stubHooks(),
+    ),
+  );
+
+  bus.emit({
+    type: "mp:eventsApplied",
+    gameName: "sdr-battle-1",
+    cursor: 60,
+    events: [{ type: "BattleOffered", actor: 1, attackerId: "h1", defenderId: "h0" }],
+  });
+  await tick();
+
+  assert.equal(h.replaces.length, 1);
+  assert.deepEqual(h.replaces[0].phase, { kind: "BATTLE", attackerId: "h1", defenderId: "h0" });
+  assert.equal(h.replaces[0].selectedHeroId, null, "startBattle clears a live selection");
+  h.detach();
+  serverDrivenPolicy.clearServerDriven("sdr-battle-1");
+});
+
+test("a BattleOffered arriving while the local phase is blocked queues and opens the phase once safe", async () => {
+  const h = harness();
+  h.setController(
+    new TurnController(
+      garrisonFixture({ phase: { kind: "SETTLEMENT_BATTLE", attackerId: "h0", settlementId: "s1" } }),
+      stubHooks(),
+    ),
+  );
+
+  bus.emit({
+    type: "mp:eventsApplied",
+    gameName: "g",
+    cursor: 61,
+    events: [{ type: "BattleOffered", actor: 1, attackerId: "h1", defenderId: "h0" }],
+  });
+  await tick();
+  assert.deepEqual(h.replaces, [], "queued, not dropped, while the local phase is blocked");
+
+  h.setController(new TurnController(garrisonFixture(), stubHooks()));
+  bus.emit({ type: "state:committed" });
+  await tick();
+
+  assert.equal(h.replaces.length, 1, "the deferred offer re-opens the BATTLE phase");
+  assert.deepEqual(h.replaces[0].phase, { kind: "BATTLE", attackerId: "h1", defenderId: "h0" });
+  h.detach();
+});
+
 test("a delta that no longer replays against local state is skipped without touching the controller", async () => {
   const h = harness();
   h.setController(new TurnController(garrisonFixture(), stubHooks()));

@@ -43,8 +43,9 @@ transferGold,
   deriveHeroVerdict,
   nearestOwnedSettlement,
   relocateHeroToSettlement,
+  readPendingBattle,
 } from "@heroes/engine";
-import type { EngineCtx, HydratableGameRow, UnitType, BattleResult, MapSize } from "@heroes/engine";
+import type { EngineCtx, HydratableGameRow, UnitType, BattleResult, MapSize, PendingBattleMarker } from "@heroes/engine";
 import { hexDistance } from "@heroes/contracts";
 import type {
   CharterState,
@@ -94,6 +95,10 @@ import { hydrateFromRepos } from "../persistence/hydrate";
 // auto-trade; POST /games writes false on new games.
 export interface GameLobbyFlags {
   legacyAutoTrade?: boolean;
+  // The pending battle offer (EnterBattle's marker): read via readPendingBattle
+  // by the battle cases below and cleared when the battle resolves or the
+  // offer goes stale. Optional -- every pre-offer row simply lacks the key.
+  pendingBattle?: PendingBattleMarker | null;
 }
 
 export interface GameRepo {
@@ -113,6 +118,7 @@ export interface GameRepo {
         trade_routes?: TradeRouteState[];
       },
     ): Promise<void>;
+  saveLobby(name: string, lobby: unknown): Promise<void>;
   insertSettlementSnapshots(gameName: string, snapshots: SettlementSnapshotInput[]): Promise<void>;
   insertResourceTransactions(gameName: string, transactions: ResourceTransactionInput[]): Promise<void>;
 }
@@ -499,6 +505,33 @@ async function persistBattleOutcome(
   }
 }
 
+// Does the row's pendingBattle marker name exactly this command's pair?
+// All battle-case marker decisions (idempotent re-offer, stale-offer
+// self-heal, resolve-time clear) go through this one predicate so the
+// matching rule can't drift between them.
+function pendingMatchesBattle(
+  pending: PendingBattleMarker | null,
+  attackerId: HeroId,
+  defenderId: HeroId,
+): boolean {
+  return pending !== null && pending.attackerId === attackerId && pending.defenderId === defenderId;
+}
+
+// Rewrite the lobby WITHOUT its pendingBattle key, preserving every other
+// key (POST /games writes aiDriver/legacyAutoTrade/seat claims beside it).
+// A spread + delete keeps the key ABSENT rather than `undefined`: hydrate's
+// readPendingBattle treats both as "no offer", but the absent-key form is
+// the one the repo's deepStrictEqual conventions expect.
+async function clearPendingBattle(
+  deps: CommandDeps,
+  gameName: string,
+  lobby: GameLobbyFlags | undefined,
+): Promise<void> {
+  const rest: GameLobbyFlags = { ...lobby };
+  delete rest.pendingBattle;
+  await deps.gameRepo.saveLobby(gameName, rest);
+}
+
 // The central transaction loop: load state via repos -> call the matching
 // @heroes/engine reducer -> persist the delta -> append the resulting
 // event(s). @heroes/engine's reducers (startMove, transferGold, ...) are
@@ -520,7 +553,20 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
   // It also doubles as EndTurn's ownership check for free: only the
   // current active player can end their own turn.
   if (command.actor !== row.active_player_id) {
-    return { ok: false, reason: "forbidden_not_your_turn", events: [] };
+    // Battle commands are resolvable by either combatant's owner: the
+    // defender-chosen flow (EnterBattle) submits ResolveBattle /
+    // SubmitBattleResult from the human DEFENDER's seat during the AI's
+    // turn. The battle cases' own adjacency re-derivation stays the
+    // live-collision precondition, so an owner of one of the two named
+    // combatants may proceed. EnterBattle and EndTurn are NOT exempt --
+    // those still require the active player.
+    const battlePairOwner =
+      (command.kind === "ResolveBattle" || command.kind === "SubmitBattleResult") &&
+      (row.heroes[command.attackerId]?.ownerId === command.actor ||
+        row.heroes[command.defenderId]?.ownerId === command.actor);
+    if (!battlePairOwner) {
+      return { ok: false, reason: "forbidden_not_your_turn", events: [] };
+    }
   }
 
   // Phase 4 Track A read-path cutover (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md):
@@ -696,6 +742,15 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
           trade_routes: finalState.tradeRoutes,
         },
       );
+      // Stale-offer safety: a pendingBattle marker is an offer to the
+      // DEFENDER of the turn that just ended -- it must never outlive that
+      // turn (the defender's choice window closed with it), so a marker
+      // surviving into the next turn's persist is cleared here, in the
+      // same transaction. Normal flow never reaches this: the battle
+      // cases clear the marker when the battle resolves.
+      if (readPendingBattle(row.lobby)) {
+        await clearPendingBattle(deps, command.gameName, row.lobby);
+      }
       // advanceRound() internally runs advanceCharters() (days-remaining
       // countdown + settlement founding) whenever this EndTurn wraps the
       // round -- persist whatever it did to finalState.activeCharters the
@@ -826,17 +881,82 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         tradeRoutes: finalState.tradeRoutes,
       };
     }
-    case "ResolveBattle": {
+    case "EnterBattle": {
+      // Defender-chosen battle offer (AI-initiated attacks no longer
+      // auto-resolve against a human defender). The trusted in-process AI
+      // driver is the only legitimate dispatcher: browser clients can never
+      // reach this case because the command route rejects AI-seat actors on
+      // server-driven games (403 ai_seat_command_forbidden) before the
+      // handler runs, and the generic guard above still requires the
+      // ACTIVE player (the AI seat) here.
       const attackerHero = row.heroes[command.attackerId];
       const defenderHero = row.heroes[command.defenderId];
       if (!attackerHero || !defenderHero) {
         return { ok: false, reason: "hero_not_found", events: [] };
       }
-      // command.actor === row.active_player_id is already enforced above;
-      // this additionally confirms the ATTACKER's hero belongs to that
-      // same actor (the old /resolve-battle route's exact check), since
-      // the two aren't otherwise tied together anywhere.
       if (attackerHero.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_hero", events: [] };
+      }
+      // Same live-collision precondition the battle cases re-derive: the
+      // named pair must actually be adjacent right now.
+      if (detectAdjacentEnemy(state, command.attackerId) !== command.defenderId) {
+        return { ok: false, reason: "not_adjacent", events: [] };
+      }
+      // Only a human defender may be offered the choice; AI-vs-AI keeps the
+      // driver's own auto-resolve path.
+      const defenderOwner = row.players.find((p) => p.id === defenderHero.ownerId);
+      if (!defenderOwner || defenderOwner.faction === "ai") {
+        return { ok: false, reason: "defender_not_human", events: [] };
+      }
+      const pending = readPendingBattle(row.lobby);
+      if (pending) {
+        // Idempotent re-offer of the same pair (a driver retry after a lost
+        // response): succeed without a second event, lobby untouched.
+        if (pendingMatchesBattle(pending, command.attackerId, command.defenderId)) {
+          return { ok: true, events: [] };
+        }
+        return { ok: false, reason: "battle_already_pending", events: [] };
+      }
+      const marker: PendingBattleMarker = {
+        attackerId: command.attackerId,
+        defenderId: command.defenderId,
+        since: Date.now(),
+      };
+      // Preserve every other lobby key (aiDriver, legacyAutoTrade, seat
+      // claims, presence) -- the marker rides beside them in the same jsonb.
+      await deps.gameRepo.saveLobby(command.gameName, { ...(row.lobby ?? {}), pendingBattle: marker });
+      const event: EngineEvent = {
+        type: "BattleOffered",
+        actor: command.actor,
+        attackerId: command.attackerId,
+        defenderId: command.defenderId,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId };
+    }
+    case "ResolveBattle": {
+      // Pending-offer bookkeeping (defender-chosen flow): the marker names
+      // this pair only when the human defender is resolving an AI-offered
+      // battle, and it must clear on success AND on the permanent
+      // rejections (stale-offer self-heal) -- but stay in place on
+      // retryable ones.
+      const pending = readPendingBattle(row.lobby);
+      const attackerHero = row.heroes[command.attackerId];
+      const defenderHero = row.heroes[command.defenderId];
+      if (!attackerHero || !defenderHero) {
+        if (pendingMatchesBattle(pending, command.attackerId, command.defenderId)) {
+          await clearPendingBattle(deps, command.gameName, row.lobby);
+        }
+        return { ok: false, reason: "hero_not_found", events: [] };
+      }
+      // The resolving seat must own one of the two combatants: the
+      // attacker's owner (the classic path) or the DEFENDER's owner -- the
+      // defender-chosen flow lets the human defender quick-resolve an
+      // AI-offered battle during the AI's own turn (the generic guard above
+      // exempts the pair on the same grounds). It can't own both:
+      // detectAdjacentEnemy below skips same-owner heroes, so a same-owner
+      // pair could never have collided in the first place.
+      if (attackerHero.ownerId !== command.actor && defenderHero.ownerId !== command.actor) {
         return { ok: false, reason: "forbidden_not_your_hero", events: [] };
       }
       // Neither the old route nor @heroes/engine's resolveBattle() itself
@@ -846,6 +966,9 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // the server to resolve it. Re-derive and verify it server-side
       // instead of trusting the pairing the command names.
       if (detectAdjacentEnemy(state, command.attackerId) !== command.defenderId) {
+        if (pendingMatchesBattle(pending, command.attackerId, command.defenderId)) {
+          await clearPendingBattle(deps, command.gameName, row.lobby);
+        }
         return { ok: false, reason: "not_adjacent", events: [] };
       }
       const unitTypes: Record<string, UnitType> = Object.fromEntries(
@@ -908,6 +1031,12 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         foldRemovedHeroCharters(state, newHeroes, outcome.removedHeroIds),
         capture,
       );
+      // The offered battle resolved: clear the marker (same pair only --
+      // an unrelated pending offer belongs to a different collision and
+      // stays).
+      if (pendingMatchesBattle(pending, command.attackerId, command.defenderId)) {
+        await clearPendingBattle(deps, command.gameName, row.lobby);
+      }
       const event: EngineEvent = {
         type: "BattleResolved",
         actor: command.actor,
@@ -1268,9 +1397,15 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // accepted); everything this case validates is cheap and structural,
       // and the full per-action stream lives in battle_actions (work item
       // 4b) for the future legality-check consumer.
+      // Pending-offer bookkeeping: same clear policy as ResolveBattle's --
+      // on success and on the permanent rejections, never on retryable ones.
+      const pending = readPendingBattle(row.lobby);
       const attackerHero = row.heroes[command.attackerId];
       const defenderHero = row.heroes[command.defenderId];
       if (!attackerHero || !defenderHero) {
+        if (pendingMatchesBattle(pending, command.attackerId, command.defenderId)) {
+          await clearPendingBattle(deps, command.gameName, row.lobby);
+        }
         return { ok: false, reason: "hero_not_found", events: [] };
       }
       // The submitting seat must own one of the two combatants -- its
@@ -1288,6 +1423,9 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // + one of them owned by the still-active submitting seat is exactly
       // the live-collision precondition the client's BATTLE phase encodes.
       if (detectAdjacentEnemy(state, command.attackerId) !== command.defenderId) {
+        if (pendingMatchesBattle(pending, command.attackerId, command.defenderId)) {
+          await clearPendingBattle(deps, command.gameName, row.lobby);
+        }
         return { ok: false, reason: "not_adjacent", events: [] };
       }
       // Survivors shape was wire-validated in parseCommand; this is the
@@ -1406,6 +1544,12 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         foldRemovedHeroCharters(state, newHeroes, outcome.removedHeroIds),
         capture,
       );
+      // The offered battle resolved: clear the marker (same pair only --
+      // an unrelated pending offer belongs to a different collision and
+      // stays).
+      if (pendingMatchesBattle(pending, command.attackerId, command.defenderId)) {
+        await clearPendingBattle(deps, command.gameName, row.lobby);
+      }
       // The existing BattleResolved event, derived from the submitted
       // outcome so battle:resolved UI/bus consumers keep working on every
       // path. The engine's outcome union already carries retreated_hero/

@@ -60,6 +60,43 @@ export interface HydratableGameRow {
    * generation at read time.
    */
   trade_routes?: readonly unknown[] | null;
+  /**
+   * games.lobby.pendingBattle (a server-offered battle awaiting its human
+   * defender, stamped by the server's EnterBattle handling). The BATTLE
+   * phase is re-derived from this at hydrate -- the phase itself is never
+   * persisted. Optional + structurally validated (readPendingBattle below):
+   * a malformed marker is ignored, falling back to the faction-derived
+   * phase rather than throwing.
+   */
+  pendingBattle?: PendingBattleMarker | null;
+}
+
+// A pending-battle marker as persisted in games.lobby.pendingBattle.
+export interface PendingBattleMarker {
+  attackerId: HeroId;
+  defenderId: HeroId;
+  since: number;
+}
+
+/**
+ * Structural validation of the pending-battle marker carried in an untyped
+ * jsonb bag (games.lobby on the server; the hydrate row's pendingBattle
+ * field on this side -- both are objects with a pendingBattle property, so
+ * readPendingBattle(row) validates the row's own field). Returns null
+ * unless the marker is a well-formed { attackerId, defenderId, since }:
+ * ids non-empty strings, since a finite number. A null result means "no
+ * battle offered" -- malformed data falls back to the faction-derived
+ * phase rather than throwing.
+ */
+export function readPendingBattle(lobby: unknown): PendingBattleMarker | null {
+  if (!lobby || typeof lobby !== "object") return null;
+  const raw = (lobby as { pendingBattle?: unknown }).pendingBattle;
+  if (!raw || typeof raw !== "object") return null;
+  const marker = raw as { attackerId?: unknown; defenderId?: unknown; since?: unknown };
+  if (typeof marker.attackerId !== "string" || marker.attackerId.length === 0) return null;
+  if (typeof marker.defenderId !== "string" || marker.defenderId.length === 0) return null;
+  if (typeof marker.since !== "number" || !Number.isFinite(marker.since)) return null;
+  return { attackerId: marker.attackerId, defenderId: marker.defenderId, since: marker.since };
 }
 
 function warnMissing(path: string, field: string): void {
@@ -350,6 +387,11 @@ export function hydrateGameState(
     });
   }
   const settlementCount = Object.keys(settlementsRecord).length;
+  // A valid pendingBattle marker overrides the faction-derived phase: the
+  // game is mid-battle-offer (the defender must choose), so the turn state
+  // the active player's faction would imply is not the truth. Malformed /
+  // absent -> the faction-derived behavior below, unchanged.
+  const pendingBattle = readPendingBattle(row);
   // Trade routes normalize per record (either persisted generation), and
   // the id counter derives from the normalized ids -- see
   // normalizeTradeRoute/deriveNextTradeRouteId above. Route ownership is
@@ -374,8 +416,9 @@ export function hydrateGameState(
     players: row.players,
     heroes: heroesRecord,
     settlements: settlementsRecord,
-    phase:
-      row.players.find((p) => p.id === row.active_player_id)?.faction === "ai"
+    phase: pendingBattle
+      ? { kind: "BATTLE", attackerId: pendingBattle.attackerId, defenderId: pendingBattle.defenderId }
+      : row.players.find((p) => p.id === row.active_player_id)?.faction === "ai"
         ? { kind: "AI_TURN", playerId: row.active_player_id }
         : { kind: "PLAYER_TURN", playerId: row.active_player_id },
     selectedHeroId: null,
