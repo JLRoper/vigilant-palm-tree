@@ -343,12 +343,13 @@ function playDefaultGame(seed: number): ChargeTrace[] {
 
 const DEFAULT_GAME_SEEDS = [1000, 8919, 16838, 24757, 32676, 40595, 48514, 56433, 64352, 72271];
 
-test("REGRESSION: the default 1-player hero is fully funded on every charge on 8 of 10 seeds", () => {
+test("REGRESSION: the default 1-player hero is fully funded on every charge on 9 of 10 seeds", () => {
   // The keep now feeds its own hero out of its own accumulated surplus: the
   // 5x5 keep carries 3 farm fields (starterFarmsNeeded(5 + 40/7) asks 4; the
   // grid holds 3), sized against its population bill AND the hero's weekly one,
   // measured 98.05% turn-1 coverage over 4000 seeds. These 10 fixed seeds land
-  // 8/10 fully funded; the two misses are the honest cliff of the narrow rule
+  // 9/10 fully funded (the starter farmhouse's +2 food/turn lifted the marginal
+  // seed over the line); the one miss is the honest cliff of the narrow rule
   // (seed 32676's keep chronically runs ~half a bill short), not a teleport to
   // fix -- a caravan route is the designed remedy.
   let funded = 0;
@@ -379,7 +380,7 @@ test("REGRESSION: the default 1-player hero is fully funded on every charge on 8
       }
     }
   }
-  assert.equal(funded, 8, `expected exactly 8/10 funded default games under the narrow rule (short on: ${shortfalls.join(", ")})`);
+  assert.equal(funded, 9, `expected exactly 9/10 funded default games under the narrow rule (short on: ${shortfalls.join(", ")})`);
 });
 
 test("REGRESSION: the keep's draw is exactly what the hero's bill needed, no more", () => {
@@ -408,8 +409,8 @@ test("REGRESSION: the keep's draw is exactly what the hero's bill needed, no mor
   }
   assert.deepEqual(
     keeps,
-    [42, 51, 60],
-    "the keep accumulates: its 3 farms out-produce its population bill AND the hero's weekly one",
+    [54, 77, 100],
+    "the keep accumulates: its 3 farms out-produce its population bill AND the hero's weekly one (the starter farmhouse's +2 food/turn adds to the surplus)",
   );
 });
 

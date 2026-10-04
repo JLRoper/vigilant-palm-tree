@@ -6,10 +6,10 @@ import type { CityViewSize } from "./citySpots";
 import { CELL_MULTIPLIER_PEAK } from "./cityMultipliers";
 
 // The starter city of a brand-new settlement: town hall, farm, two houses,
-// two wood producers, and one stone producer. This is the ONE definition of
-// that set -- init.ts seeds EVERY settlement with it at game creation, and the
-// city view's empty-settlement commit calls the same function rather than
-// re-deriving a layout of its own.
+// two wood producers, one stone producer, and the troop producer (the
+// farmhouse). This is the ONE definition of that set -- init.ts seeds EVERY
+// settlement with it at game creation, and the city view's empty-settlement
+// commit calls the same function rather than re-deriving a layout of its own.
 //
 // Its farm count is a function of the food bill it has to feed
 // (starterFarmsNeeded), sized against the settlement's OWN bill -- its
@@ -25,20 +25,26 @@ import { CELL_MULTIPLIER_PEAK } from "./cityMultipliers";
 // including a level-2 town hall) for free and already constructed. That layout
 // charged roughly 24 wood + 14 stone per turn in upkeep against a 300/300
 // starting stock -- bankruptcy by roughly turn 12, before the player had done
-// anything -- while containing no producer at all. The set below costs 9 wood
-// + 2 stone per turn (townHall L1 3+2, house L1 1+0 twice, woodcutterHut L1
-// 1+0 twice, stoneMine L1 2+0, farmField L1 0+0 each), and the three producers
+// anything -- while containing no producer at all. The set below costs 10
+// wood + 2 stone per turn (townHall L1 3+2, house L1 1+0 twice, woodcutterHut
+// L1 1+0 twice, stoneMine L1 2+0, farmField L1 0+0 each, farmhouse L1 1+0),
+// and the three producers
 // return 6 wood (two huts) and 3 stone per turn -- each scaled by its OWN cell
 // multiplier (settlement/cityMultipliers.ts), and truncated to whole units
 // because consumption floors the whole stock every turn, so a producer really
 // banks floor(3 x multiplier) per turn.
 //
 // THE SET IS STILL NET WOOD-NEGATIVE, but only just. Per turn:
-//   wood  = floor(3 x m1) + floor(3 x m2) - 9 = -7..-1, median -3
-//   stone = floor(3 x m_stone) - 2            = 0..+3, median  0
+//   wood  = floor(3 x m1) + floor(3 x m2) - 10 = -8..-2, median -4
+//   stone = floor(3 x m_stone) - 2             = 0..+3, median  0
 // (both over 400 seeded 1-player games with produceSettlementResources and the
 // map's resource-tile rates zeroed, i.e. a settlement on a map with no wood or
-// stone tiles at all). The second hut is the 2026-10-02 balance fix: with one
+// stone tiles at all; the wood figure includes the 2026-10-04 farmhouse, whose
+// +1 upkeep moved the median from -3 -- before it the same measurement ran
+// -7..-1, median -3). The farmhouse's food production (+2/turn at L1, scaled
+// by cell multiplier like every producer) partially offsets its own inclusion
+// on the food side, and its recruit entry is the point -- garrison troops for
+// everyone from turn 0. The second hut is the 2026-10-02 balance fix: with one
 // hut the same measurement ran -4..-7, median -5, so a keep drained its 300
 // wood in ~60 turns and a town in ~43 at the worst cell -- and after wood hit
 // 0, settlement morale decayed ~8-10 per turn. Two huts cost +1 wood of upkeep
@@ -51,11 +57,13 @@ import { CELL_MULTIPLIER_PEAK } from "./cityMultipliers";
 // the fix targets the floor every city shares, not the lottery.
 //
 // What the producers actually buy is the stone line -- it stops draining
-// outright -- and a wood line that only sinks ~3/turn instead of ~5. The
+// outright -- and a wood line that only sinks ~4/turn instead of ~5. The
 // pre-producer set (townHall + 2 houses, 5w + 2s upkeep, no production) ran
 // -5 wood / -2 stone per turn; the woodcutterHuts and the stoneMine together
 // cost 4 wood of upkeep against 6 wood + 3 stone of production, so wood lands
-// 2/turn better than that bare set at the median cell. That is what removed
+// 1/turn better than that bare set at the median cell (the farmhouse's +1
+// upkeep buys the recruit entry and a small food line, not wood). That is what
+// removed
 // the ~24 wood/turn dense layout and the bankruptcy by turn 12 (measured: a
 // `{gold: 40}` seed drained 300 -> 195 wood over 22 turns, a `{wood: 180}` seed
 // did not) -- it is not, and is not meant to be, where the wood balance is
@@ -94,6 +102,19 @@ export const STARTER_BUILDING_LEVEL = 1;
 export const STARTER_WOOD_PRODUCER: BuildingKind = "woodcutterHut";
 export const STARTER_STONE_PRODUCER: BuildingKind = "stoneMine";
 
+/**
+ * The starter set's troop producer -- the registry's lowest-tier one
+ * (buildingRegistry.ts: the farmhouse recruits the tier-1 peasant at 25g,
+ * minLevel 1), so every settlement the game creates -- player keep, AI castle,
+ * chartered town -- can raise garrison troops from the moment it exists.
+ * Recruits flow through the same RecruitUnits gate the AI garrison planner
+ * shops from (eligibleRecruitSources), so this one entry turns on player AND
+ * AI garrison recruitment from turn 0. Cheapest troop building to run (1 wood
+ * + 0 stone upkeep at L1) and a small food producer (+2 food/turn at L1), so
+ * it feeds the food line it taxes nothing.
+ */
+export const STARTER_TROOP_BUILDING: BuildingKind = "farmhouse";
+
 /** The starter set's producer kinds, in commit order: the wood producer twice, then stone. */
 export const STARTER_PRODUCER_KINDS: readonly BuildingKind[] = [
   STARTER_WOOD_PRODUCER,
@@ -101,13 +122,14 @@ export const STARTER_PRODUCER_KINDS: readonly BuildingKind[] = [
   STARTER_WOOD_PRODUCER,
 ];
 
-/** The base set's contents, in commit order, at STARTER_BASE_FARMS. Farm before the houses so a footprint clash resolves onto a house cell, not the field; the producers come last for the same reason (they are 1x1, so they are the cheapest thing to displace). A food-hungry settlement repeats the farmField entry `farms - STARTER_BASE_FARMS` more times; derive the set with buildStarterLayout rather than from this list. */
+/** The base set's contents, in commit order, at STARTER_BASE_FARMS. Farm before the houses so a footprint clash resolves onto a house cell, not the field; the producers come last for the same reason (they are 1x1, so they are the cheapest thing to displace), and the troop building after the producers (also 1x1 -- a footprint change can only ever displace a producer or the troop building). A food-hungry settlement repeats the farmField entry `farms - STARTER_BASE_FARMS` more times; derive the set with buildStarterLayout rather than from this list. */
 export const STARTER_BUILDING_KINDS: readonly BuildingKind[] = [
   "townHall",
   "farmField",
   "house",
   "house",
   ...STARTER_PRODUCER_KINDS,
+  STARTER_TROOP_BUILDING,
 ];
 
 export interface StarterLayoutOptions {
@@ -157,8 +179,10 @@ const STARTER_FARM_OFFSETS: readonly (readonly [number, number])[] = [
  * Producer cell offsets, in STARTER_PRODUCER_KINDS order, from the town hall's
  * centre. They sit two rows below the farm ring's deepest row so they never
  * collide with a farm field or a house on any grid size, and both are placed
- * LAST so a footprint change in the registry can only displace a producer --
- * never eat a farm or a house cell. On a 5x5 grid neither offset is in bounds
+ * after every farm and house so a footprint change in the registry can only
+ * displace a producer -- never eat a farm or a house cell (the troop building
+ * places after them, so a clash displaces the producer first). On a 5x5 grid
+ * neither offset is in bounds
  * (centre + 3 = 5), so both degrade to "first free cell", deterministically.
  * The second wood hut (the third producer) has no named offset: like a farm
  * past its ring, it takes the first free cell.
@@ -259,7 +283,8 @@ export function starterCityOnOpen(input: {
 /**
  * The free, already-constructed starting city of a settlement: one level-1 town
  * hall on the centre cell, `farms` 2x2 farm fields around it, two houses above
- * it, and two wood producers + one stone producer. Legal on every city size
+ * it, two wood producers + one stone producer, and the troop producer (the
+ * farmhouse). Legal on every city size
  * (5/10/15), non-overlapping, and byte-identical on every call for a given
  * `farms`.
  *
@@ -293,8 +318,9 @@ export function buildStarterLayout(options: StarterLayoutOptions): BuildingDef[]
   }
   placeAt(buildings, size, style, "house", center, center - 2);
   placeAt(buildings, size, style, "house", center, center - 1);
-  // Last, so a footprint change in the registry displaces a producer (1x1, the
-  // cheapest thing to move) rather than a farm field or a house.
+  // Last among the food/wood/stone infrastructure, so a footprint change in
+  // the registry displaces a producer (1x1, the cheapest thing to move)
+  // rather than a farm field or a house.
   for (let i = 0; i < STARTER_PRODUCER_KINDS.length; i++) {
     const offset = STARTER_PRODUCER_OFFSETS[i];
     placeAt(
@@ -306,6 +332,12 @@ export function buildStarterLayout(options: StarterLayoutOptions): BuildingDef[]
       offset ? center + offset[1] : null,
     );
   }
+  // The troop producer, after the producers: named offset (2, 0) puts it right
+  // of the town hall, beside it like the houses sit above it; when that cell
+  // is taken it degrades to the first free cell deterministically (placeAt's
+  // fallback). A registry footprint change can only displace a producer or
+  // this building -- never a farm or a house.
+  placeAt(buildings, size, style, STARTER_TROOP_BUILDING, center + 2, center);
   return buildings;
 }
 

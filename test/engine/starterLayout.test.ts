@@ -9,18 +9,22 @@ import {
   buildingSettlementEffects,
   buildingUpkeepRequired,
   demoPlatoonsForPlayer,
+  eligibleRecruitSources,
   evaluateTroopUpkeep,
   foodRequiredForPopulation,
   heroFoodPerTurn,
   isProducerKind,
+  pickGarrisonRecruitment,
   producerBasePerTurn,
   producerResource,
+  recruitUnits,
   STARTER_BASE_FARMS,
   STARTER_BUILDING_KINDS,
   STARTER_BUILDING_LEVEL,
   STARTER_FARM_VARIANCE_HEADROOM,
   STARTER_PRODUCER_KINDS,
   STARTER_STONE_PRODUCER,
+  STARTER_TROOP_BUILDING,
   STARTER_WOOD_PRODUCER,
   starterCityOnOpen,
   starterFarmsNeeded,
@@ -83,7 +87,7 @@ function kindsOf(buildings: readonly BuildingDef[]): string[] {
   return buildings.map((b) => b.kind);
 }
 
-test("a previously-empty settlement's free starter commit is townHall + farm + 2 houses + 2 wood producers + stone", () => {
+test("a previously-empty settlement's free starter commit is townHall + farm + 2 houses + 2 wood producers + stone + farmhouse", () => {
   const settlement = makeSettlement("s0", 0, 2, 2, {
     gold: 300,
     warehouse: { wood: 300, stone: 300, iron: 0, arcane: 0, food: 0 },
@@ -104,10 +108,11 @@ test("a previously-empty settlement's free starter commit is townHall + farm + 2
     STARTER_WOOD_PRODUCER,
     STARTER_STONE_PRODUCER,
     STARTER_WOOD_PRODUCER,
+    STARTER_TROOP_BUILDING,
   ]);
   assert.deepEqual(
     after.buildings.map((b) => b.level),
-    [1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
     "starter set is level 1 throughout",
   );
   assert.deepEqual(kindsOf(starter), [...STARTER_BUILDING_KINDS]);
@@ -117,6 +122,7 @@ test("a previously-empty settlement's free starter commit is townHall + farm + 2
   assert.equal(countOf(after.buildings, "farmField"), 1);
   assert.equal(countOf(after.buildings, STARTER_WOOD_PRODUCER), 2);
   assert.equal(countOf(after.buildings, STARTER_STONE_PRODUCER), 1);
+  assert.equal(countOf(after.buildings, STARTER_TROOP_BUILDING), 1);
 });
 
 test("the starter set costs nothing and arrives already constructed", () => {
@@ -141,7 +147,7 @@ test("the starter set costs nothing and arrives already constructed", () => {
   }
 });
 
-test("the starter set's upkeep is 9 wood + 2 stone per turn -- 33 turns of runway from 300/300", () => {
+test("the starter set's upkeep is 10 wood + 2 stone per turn -- 30 turns of runway from 300/300", () => {
   const settlement = makeSettlement("s0", 0, 2, 2, {
     gold: 300,
     warehouse: { wood: 300, stone: 300, iron: 0, arcane: 0, food: 0 },
@@ -151,17 +157,18 @@ test("the starter set's upkeep is 9 wood + 2 stone per turn -- 33 turns of runwa
   const result = applyPlaceBuildings(state, "s0", 0, buildStarterLayout({ size: 5, style: "classic" }), true);
 
   const upkeep = buildingUpkeepRequired(result.state.settlements.s0);
-  // townHall 3w+2s, house 1w x2, woodcutterHut 1w x2, stoneMine 2w, farmField 0+0.
-  assert.deepEqual(upkeep, { wood: 9, stone: 2 });
+  // townHall 3w+2s, house 1w x2, woodcutterHut 1w x2, stoneMine 2w, farmField 0+0, farmhouse 1w+0s.
+  assert.deepEqual(upkeep, { wood: 10, stone: 2 });
   // The old dense layout's ~24 wood + ~14 stone ran a 300/300 start dry by
   // roughly turn 12. The pre-producer set (5w) stretched that to 60 turns; the
   // three producers cost 4 wood of upkeep and buy 6 wood + 3 stone per turn
-  // back, so 33 turns of GUARANTEED runway is the price -- and the map is no
+  // back, so 30 turns of GUARANTEED runway is the price -- and the map is no
   // longer the only thing keeping a settlement solvent. The second hut (the
   // 2026-10-02 balance fix) spends that +1 wood of upkeep to roughly DOUBLE the
   // effective runway at the median cell: the set's net wood goes -5 -> -3, so
-  // 300 wood lasts ~100 turns, not ~60.
-  assert.equal(Math.floor(300 / upkeep.wood), 33, "wood covers 33 turns of upkeep even with zero map income");
+  // 300 wood lasts ~100 turns, not ~60. The farmhouse (2026-10-04) spends one
+  // more wood of upkeep on its recruit entry -- 33 guaranteed turns became 30.
+  assert.equal(Math.floor(300 / upkeep.wood), 30, "wood covers 30 turns of upkeep even with zero map income");
   assert.equal(Math.floor(300 / upkeep.stone), 150);
 });
 
@@ -176,6 +183,10 @@ test("the starter set carries two wood producers and one stone producer", () => 
   assert.equal(producerResource(STARTER_STONE_PRODUCER, [], 0, 0), "stone");
   assert.equal(producerBasePerTurn(STARTER_WOOD_PRODUCER, 1, "wood"), 3);
   assert.equal(producerBasePerTurn(STARTER_STONE_PRODUCER, 1, "stone"), 3);
+  assert.equal(producerBasePerTurn("farmhouse", 1, "food"), 2);
+  // The troop building doubles as a small food producer, so it shows up in the
+  // producing set below -- its point is the peasant recruit entry, not the food.
+  assert.equal(isProducerKind(STARTER_TROOP_BUILDING), true);
 
   // The producers are the cheapest dedicated source for their resource in the
   // registry, and the arithmetic per settlement at the median cell (x1.0):
@@ -189,13 +200,15 @@ test("the starter set carries two wood producers and one stone producer", () => 
   assert.equal(buildingSettlementEffects(STARTER_WOOD_PRODUCER, 1).resourceYieldBonus?.wood, 3);
   assert.equal(buildingSettlementEffects(STARTER_STONE_PRODUCER, 1).resourceYieldBonus?.stone, 3);
   assert.equal(buildingSettlementEffects("farmField", 1).foodPerTurn, 5, "the farm field is still the food source");
-  // Only the farm fields and the three producers produce anything at all.
+  // Only the farm fields, the three producers, and the farmhouse produce
+  // anything at all (the farmhouse's +2 food/turn makes it a producer kind).
   const producing = starter.filter((b) => isProducerKind(b.kind));
   assert.deepEqual(kindsOf(producing), [
     "farmField",
     STARTER_WOOD_PRODUCER,
     STARTER_STONE_PRODUCER,
     STARTER_WOOD_PRODUCER,
+    STARTER_TROOP_BUILDING,
   ]);
 });
 
@@ -208,13 +221,13 @@ test("the starter set is deterministic: two calls are byte-identical, and it tak
   assert.deepEqual(a, buildStarterLayout({ size: 5, style: "classic" }));
 });
 
-test("the starter set is the explicit 7-building set, not a generated city", () => {
+test("the starter set is the explicit 8-building set, not a generated city", () => {
   const starter = buildStarterLayout({ size: 5, style: "classic" });
-  assert.equal(starter.length, 7, "a starter town is 7 buildings, not the ~14 denseUrban produced");
+  assert.equal(starter.length, 8, "a starter town is 8 buildings, not the ~14 denseUrban produced");
   assert.deepEqual(
     [...new Set(kindsOf(starter))].sort(),
-    ["farmField", "house", "stoneMine", "townHall", "woodcutterHut"],
-    "no market/smithy/tower/mine/granary — only the town hall, a farm, two houses, two wood producers, and one stone producer",
+    ["farmField", "farmhouse", "house", "stoneMine", "townHall", "woodcutterHut"],
+    "no market/smithy/tower/mine/granary — only the town hall, a farm, two houses, two wood producers, one stone producer, and the farmhouse",
   );
   assert.equal(
     starter.find((b) => b.kind === "townHall")?.level,
@@ -275,7 +288,7 @@ test("the starter set is style-stamped but otherwise seed-free", () => {
   const organic = buildStarterLayout({ size: 5, style: "organic" });
   assert.deepEqual(
     organic.map((b) => b.style),
-    ["organic", "organic", "organic", "organic", "organic", "organic", "organic"],
+    ["organic", "organic", "organic", "organic", "organic", "organic", "organic", "organic"],
   );
   assert.deepEqual(
     organic.map(({ style: _style, ...rest }) => rest),
@@ -383,7 +396,7 @@ test("the hero bill is INCLUDED in the starter farm count", () => {
   // capacity (init.test.ts pins the resulting 3, foodProduction.test.ts
   // measures the coverage of the clamped count over real seeds).
   const keep = buildStarterLayout({ size: 5, style: "classic", farms: starterFarmsNeeded(combined) });
-  assert.equal(countOf(keep, "farmField"), 3, "5x5 capacity: 25 cells - 4 town hall - 2 houses - 3 producers");
+  assert.equal(countOf(keep, "farmField"), 3, "5x5 capacity: 25 cells - 4 town hall - 2 houses - 3 producers - 1 farmhouse");
   assert.equal(countOf(keep, "townHall"), 1);
   assert.equal(countOf(keep, STARTER_WOOD_PRODUCER), 2, "the clamp never displaces a producer");
   assert.equal(countOf(keep, STARTER_STONE_PRODUCER), 1);
@@ -402,7 +415,7 @@ test("the default farm count is the historical one, so the level-1 starter set i
   assert.deepEqual(kindsOf(buildStarterLayout({ size: 5, style: "classic" })), [...STARTER_BUILDING_KINDS]);
 });
 
-test("a food-hungry settlement's set is town hall + its farms + the same two houses + the producers", () => {
+test("a food-hungry settlement's set is town hall + its farms + the same two houses + the producers + the troop building", () => {
   const farms = starterFarmsNeeded(20);
   const set = buildStarterLayout({ size: 10, style: "classic", farms });
   assert.equal(countOf(set, "townHall"), 1, "the town hall matters: an already-seeded settlement skips the free commit");
@@ -414,6 +427,7 @@ test("a food-hungry settlement's set is town hall + its farms + the same two hou
     "house",
     "house",
     ...STARTER_PRODUCER_KINDS,
+    STARTER_TROOP_BUILDING,
   ]);
 });
 
@@ -445,11 +459,12 @@ test("a multi-farm set is legal, deterministic, and costs no upkeep beyond the b
       assert.equal(countOf(set, STARTER_STONE_PRODUCER), 1, `stoneMine survives size ${size} farms ${farms}`);
       assert.equal(countOf(set, "house"), 2, `both houses survive size ${size} farms ${farms}`);
       assert.equal(countOf(set, "townHall"), 1, `the town hall survives size ${size} farms ${farms}`);
+      assert.equal(countOf(set, STARTER_TROOP_BUILDING), 1, `the farmhouse survives size ${size} farms ${farms} (1x1 fits at every combination)`);
     }
   }
   // farmField upkeep is 0 wood / 0 stone, so extra farmland is free to run.
   const upkeep = makeSettlement("s0", 0, 2, 2, { buildings: buildStarterLayout({ size: 10, style: "classic", farms: 5 }) });
-  assert.deepEqual(buildingUpkeepRequired(upkeep), { wood: 9, stone: 2 }, "5 farms cost the same upkeep as 1");
+  assert.deepEqual(buildingUpkeepRequired(upkeep), { wood: 10, stone: 2 }, "5 farms cost the same upkeep as 1");
 });
 
 test("every settlement the game can create gets ALL the farms its food requirement asks for", () => {
@@ -491,4 +506,62 @@ test("starterCityOnOpen: an empty settlement gets the free set, one with buildin
   const builtOpen = starterCityOnOpen({ size: 5, style: "classic", existing: built });
   assert.equal(builtOpen.free, false);
   assert.equal(builtOpen.buildings, built);
+});
+
+test("the starter city can recruit garrison troops from turn 0", () => {
+  const starter = buildStarterLayout({ size: 5, style: "classic" });
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    gold: 300,
+    warehouse: { wood: 300, stone: 300, iron: 0, arcane: 0, food: 0 },
+    buildings: starter,
+  });
+  const state = makeState({ settlements: [settlement] });
+
+  for (const b of state.settlements.s0.buildings) {
+    assert.equal("construction" in b, false, `${b.kind} arrives constructed, so the eligibility gate passes immediately`);
+  }
+
+  const gx = starter.find((b) => b.kind === STARTER_TROOP_BUILDING)?.gx;
+  const gy = starter.find((b) => b.kind === STARTER_TROOP_BUILDING)?.gy;
+  assert.ok(gx !== undefined && gy !== undefined, "the starter set carries the troop building");
+
+  const sources = eligibleRecruitSources(state.settlements.s0);
+  assert.equal(sources.length, 1, "the farmhouse is the starter set's only recruit source");
+  assert.equal(sources[0].buildingKind, "farmhouse");
+  assert.equal(sources[0].gx, gx);
+  assert.equal(sources[0].gy, gy);
+  assert.equal(sources[0].entry.unitTypeId, "peasant");
+  assert.equal(sources[0].entry.goldCost, 25);
+  assert.equal(sources[0].entry.minLevel ?? 1, 1);
+
+  const recruited = recruitUnits(state, {
+    settlementId: "s0",
+    buildingKind: "farmhouse",
+    gx,
+    gy,
+    unitTypeId: "peasant",
+    count: 5,
+  });
+  assert.equal(recruited.ok, true, "a fresh settlement recruits peasants from its farmhouse");
+  const after = recruited.state.settlements.s0;
+  const peasantCount = (after.stacks ?? []).reduce(
+    (total, platoon) => total + platoon.entries.filter((e) => e.unitTypeId === "peasant").reduce((n, e) => n + e.count, 0),
+    0,
+  );
+  assert.equal(peasantCount, 5, "the garrison holds the 5 recruited peasants");
+  assert.equal(after.gold, 175, "5 peasants at 25g each debits 300 -> 175");
+
+  // The AI garrison planner shops from the same gate: a settlement with no
+  // hero on it gets a purchase through the farmhouse. No hero anywhere (the
+  // default fixture spawns one on s0, which would make the planner skip it);
+  // with the tier-1 catalog, power-per-peasant is 2, so the planner's floor
+  // target of 4 power asks for at least two peasants.
+  const aiState = makeState({ settlements: [settlement], heroes: [] });
+  const purchases = pickGarrisonRecruitment(aiState, 0, CATALOG);
+  assert.equal(purchases.length, 1);
+  assert.equal(purchases[0].buildingKind, "farmhouse");
+  assert.equal(purchases[0].unitTypeId, "peasant");
+  assert.equal(purchases[0].gx, gx);
+  assert.equal(purchases[0].gy, gy);
+  assert.ok(purchases[0].count >= 1, "the planner buys at least one peasant through the farmhouse");
 });

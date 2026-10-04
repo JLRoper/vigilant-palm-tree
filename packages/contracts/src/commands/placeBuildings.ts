@@ -18,7 +18,8 @@ export interface PlaceBuildingsCommand {
   /**
    * Set when this commit is the starter set of a previously-empty settlement
    * (the engine's buildStarterLayout: town hall + farm field + 2 houses + two
-   * wood producers and a stone producer). The server accepts it free of charge
+   * wood producers, a stone producer, and the farmhouse troop producer). The
+   * server accepts it free of charge
    * and already constructed iff the settlement's stored buildings array is
    * still empty.
    *

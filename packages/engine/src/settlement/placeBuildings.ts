@@ -78,8 +78,8 @@ export function applyPlaceBuildings(
   if (s.ownerId !== actor) return { ok: false, state, reason: "forbidden_not_your_settlement" };
 
   // A previously-empty settlement's starter set (buildStarterLayout's town
-  // hall + farm + 2 houses + 2 wood producers + stone mine) is free by design
-  // and arrives ALREADY CONSTRUCTED — no build timers, no cost. Any later
+  // hall + farm + 2 houses + 2 wood producers + stone mine + farmhouse) is
+  // free by design and arrives ALREADY CONSTRUCTED — no build timers, no cost. Any later
   // commit pays full net cost and stamps timers on the genuinely new
   // placements only.
   const freeInitialLayout = initialLayout && s.buildings.length === 0;

@@ -23,8 +23,10 @@ import type { SettlementSnapshotInput, ResourceTransactionInput } from "../../se
 // repositories/gameRepo.ts) does carry it, though, and saveHeroesAndSettlements's
 // `extra.gold` needs somewhere to land here too, or the mock silently drops
 // it while the real repo persists it -- widen the stored row type by one
-// optional field rather than diverge from GameRepo's actual contract.
-type MockGameRow = HydratableGameRow & { gold?: number };
+// optional field rather than diverge from GameRepo's actual contract. Same
+// for `lobby`: the real column is an untyped jsonb bag the EnterBattle/battle
+// cases read-modify-write via saveLobby.
+type MockGameRow = HydratableGameRow & { gold?: number; lobby?: unknown };
 
 export function createMockGameRepo(
   seed: Record<string, HydratableGameRow>,
@@ -75,6 +77,11 @@ export function createMockGameRepo(
         ...(extra?.next_settlement_id !== undefined ? { next_settlement_id: extra.next_settlement_id } : {}),
         ...(extra?.trade_routes !== undefined ? { trade_routes: extra.trade_routes } : {}),
       };
+    },
+    async saveLobby(name: string, lobby: unknown): Promise<void> {
+      const row = rows[name];
+      if (!row) throw new Error(`mock game not found: ${name}`);
+      rows[name] = { ...row, lobby };
     },
     async insertSettlementSnapshots(
       gameName: string,

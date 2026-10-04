@@ -503,12 +503,12 @@ test("REGRESSION: every NEW settlement is born autoTrade:false (the recommender 
   }
 });
 
-test("wood and stone: the starter set drains only ~3 wood/turn at the median cell -- 33 turns of guaranteed runway", () => {
+test("wood and stone: the starter set drains only ~4 wood/turn at the median cell -- 30 turns of guaranteed runway", () => {
   const state = onePlayerGame();
   for (const s of Object.values(state.settlements)) {
     const upkeep = buildingUpkeepRequired(s);
-    assert.deepEqual(upkeep, { wood: 9, stone: 2 }, `${s.id}: townHall 3+2, 2 houses 1+0, 2 huts 1+0 each, mine 2, farms 0`);
-    assert.equal(Math.floor(300 / upkeep.wood), 33, `${s.id}: 33 turns of wood runway from the starting stock`);
+    assert.deepEqual(upkeep, { wood: 10, stone: 2 }, `${s.id}: townHall 3+2, 2 houses 1+0, 2 huts 1+0 each, mine 2, farms 0, farmhouse 1+0`);
+    assert.equal(Math.floor(300 / upkeep.wood), 30, `${s.id}: 30 turns of wood runway from the starting stock`);
     assert.equal(Math.floor(300 / upkeep.stone), 150, `${s.id}: 150 turns of stone runway`);
     // Producers, actually wired as producers (producerBasePerTurn > 0). The
     // wood producer ships TWICE (2026-10-02 balance: one hut left every starter
@@ -519,10 +519,11 @@ test("wood and stone: the starter set drains only ~3 wood/turn at the median cel
     assert.equal(stone, 3, "the stone mine returns 3 stone/turn at the median cell");
     // Net at the median cell: the three producers return 6 wood + 3 stone
     // against 4 wood of their own upkeep, out-earning themselves by 2 and
-    // cutting the set's whole-set wood drain to 9 - 6 = 3/turn (was 5 with one
-    // hut). The map's resource tiles cover the rest in practice.
+    // cutting the set's whole-set wood drain to 10 - 6 = 4/turn (was 3 before
+    // the 2026-10-04 farmhouse, 5 with one hut). The map's resource tiles
+    // cover the rest in practice.
     assert.equal(2 * wood - 2 - 2, 2, "the two huts out-produce the producers' own 4 wood upkeep by 2");
-    assert.equal(upkeep.wood - 2 * wood, 3, "the whole set drains just 3 wood/turn at the median cell");
+    assert.equal(upkeep.wood - 2 * wood, 4, "the whole set drains just 4 wood/turn at the median cell");
     assert.equal(stone - upkeep.stone + 2, 3, "stone stays pure gain at the median cell");
   }
 });
@@ -554,7 +555,7 @@ test("re-committing a seeded city's cart is a zero-cost no-op, not a charge and 
   // that anti-spoof guard).
   assert.equal(committed.state.settlements[town.id].gold, 300, "no charge");
   assert.deepEqual(committed.state.settlements[town.id].warehouse, town.warehouse, "no refund, no charge");
-  assert.deepEqual(buildingUpkeepRequired(committed.state.settlements[town.id]), { wood: 9, stone: 2 });
+  assert.deepEqual(buildingUpkeepRequired(committed.state.settlements[town.id]), { wood: 10, stone: 2 });
 });
 
 test("makeInitialStatePayload -- the POST /games path -- carries the same seeded pair", () => {
