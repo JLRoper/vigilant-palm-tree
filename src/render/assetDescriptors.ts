@@ -143,6 +143,50 @@ import buildingPixelWorldrootGrove1 from "../resources/buildings/building-pixel-
 import buildingPixelWorldrootGrove3 from "../resources/buildings/building-pixel-worldrootGrove-3.png?url";
 import buildingPixelFarmField1 from "../resources/buildings/building-pixel-farmField-1.png?url";
 import buildingPixelFarmFieldAlt1 from "../resources/buildings/building-pixel-farmField-1-alt.png?url";
+import buildingPixelTownHall1 from "../resources/buildings/building-pixel-townHall-1.png?url";
+import buildingPixelTownHall2 from "../resources/buildings/building-pixel-townHall-2.png?url";
+import buildingPixelTownHall3 from "../resources/buildings/building-pixel-townHall-3.png?url";
+import buildingPixelHouse1 from "../resources/buildings/building-pixel-house-1.png?url";
+import buildingPixelHouse2 from "../resources/buildings/building-pixel-house-2.png?url";
+import buildingPixelHouse3 from "../resources/buildings/building-pixel-house-3.png?url";
+import buildingPixelTower1 from "../resources/buildings/building-pixel-tower-1.png?url";
+import buildingPixelTower2 from "../resources/buildings/building-pixel-tower-2.png?url";
+import buildingPixelTower3 from "../resources/buildings/building-pixel-tower-3.png?url";
+import buildingPixelMageGuild1 from "../resources/buildings/building-pixel-mageGuild-1.png?url";
+import buildingPixelMageGuild2 from "../resources/buildings/building-pixel-mageGuild-2.png?url";
+import buildingPixelMageGuild3 from "../resources/buildings/building-pixel-mageGuild-3.png?url";
+import buildingPixelMarket1 from "../resources/buildings/building-pixel-market-1.png?url";
+import buildingPixelMarket2 from "../resources/buildings/building-pixel-market-2.png?url";
+import buildingPixelMarket3 from "../resources/buildings/building-pixel-market-3.png?url";
+import buildingPixelBarracks1 from "../resources/buildings/building-pixel-barracks-1.png?url";
+import buildingPixelBarracks2 from "../resources/buildings/building-pixel-barracks-2.png?url";
+import buildingPixelBarracks3 from "../resources/buildings/building-pixel-barracks-3.png?url";
+import buildingPixelSmithy1 from "../resources/buildings/building-pixel-smithy-1.png?url";
+import buildingPixelSmithy3 from "../resources/buildings/building-pixel-smithy-3.png?url";
+import buildingPixelApartment1 from "../resources/buildings/building-pixel-apartment-1.png?url";
+import buildingPixelApartment2 from "../resources/buildings/building-pixel-apartment-2.png?url";
+import buildingPixelApartment3 from "../resources/buildings/building-pixel-apartment-3.png?url";
+import buildingPixelFarmhouse1 from "../resources/buildings/building-pixel-farmhouse-1.png?url";
+import buildingPixelFarmhouse2 from "../resources/buildings/building-pixel-farmhouse-2.png?url";
+import buildingPixelFarmhouse3 from "../resources/buildings/building-pixel-farmhouse-3.png?url";
+import buildingPixelArcheryRange1 from "../resources/buildings/building-pixel-archeryRange-1.png?url";
+import buildingPixelArcheryRange2 from "../resources/buildings/building-pixel-archeryRange-2.png?url";
+import buildingPixelArcheryRange3 from "../resources/buildings/building-pixel-archeryRange-3.png?url";
+import buildingPixelStables1 from "../resources/buildings/building-pixel-stables-1.png?url";
+import buildingPixelStables2 from "../resources/buildings/building-pixel-stables-2.png?url";
+import buildingPixelStables3 from "../resources/buildings/building-pixel-stables-3.png?url";
+import buildingPixelHuntingLodge1 from "../resources/buildings/building-pixel-huntingLodge-1.png?url";
+import buildingPixelHuntingLodge2 from "../resources/buildings/building-pixel-huntingLodge-2.png?url";
+import buildingPixelHuntingLodge3 from "../resources/buildings/building-pixel-huntingLodge-3.png?url";
+import buildingPixelEyrie1 from "../resources/buildings/building-pixel-eyrie-1.png?url";
+import buildingPixelEyrie2 from "../resources/buildings/building-pixel-eyrie-2.png?url";
+import buildingPixelEyrie3 from "../resources/buildings/building-pixel-eyrie-3.png?url";
+import buildingPixelArcaneFont1 from "../resources/buildings/building-pixel-arcaneFont-1.png?url";
+import buildingPixelArcaneFont2 from "../resources/buildings/building-pixel-arcaneFont-2.png?url";
+import buildingPixelArcaneFont3 from "../resources/buildings/building-pixel-arcaneFont-3.png?url";
+import buildingPixelCrypt2 from "../resources/buildings/building-pixel-crypt-2.png?url";
+import buildingPixelGunnersRedoubt2 from "../resources/buildings/building-pixel-gunnersRedoubt-2.png?url";
+import buildingPixelWorldrootGrove2 from "../resources/buildings/building-pixel-worldrootGrove-2.png?url";
 import { Faction, Direction } from "../entities/hero";
 import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
@@ -396,6 +440,53 @@ export const BUILDING_SPRITES: Record<string, string> = {
   "pixel-alt.farmField.1": buildingPixelFarmFieldAlt1,
   "pixel-alt.farmField.2": buildingPixelFarmFieldAlt1,
   "pixel-alt.farmField.3": buildingPixelFarmFieldAlt1,
+  "pixel.townHall.1": buildingPixelTownHall1,
+  "pixel.townHall.2": buildingPixelTownHall2,
+  "pixel.townHall.3": buildingPixelTownHall3,
+  "pixel.house.1": buildingPixelHouse1,
+  "pixel.house.2": buildingPixelHouse2,
+  "pixel.house.3": buildingPixelHouse3,
+  "pixel.tower.1": buildingPixelTower1,
+  "pixel.tower.2": buildingPixelTower2,
+  "pixel.tower.3": buildingPixelTower3,
+  "pixel.mageGuild.1": buildingPixelMageGuild1,
+  "pixel.mageGuild.2": buildingPixelMageGuild2,
+  "pixel.mageGuild.3": buildingPixelMageGuild3,
+  "pixel.market.1": buildingPixelMarket1,
+  "pixel.market.2": buildingPixelMarket2,
+  "pixel.market.3": buildingPixelMarket3,
+  "pixel.barracks.1": buildingPixelBarracks1,
+  "pixel.barracks.2": buildingPixelBarracks2,
+  "pixel.barracks.3": buildingPixelBarracks3,
+  "pixel.smithy.1": buildingPixelSmithy1,
+  "pixel.smithy.3": buildingPixelSmithy3,
+  "pixel.apartment.1": buildingPixelApartment1,
+  "pixel.apartment.2": buildingPixelApartment2,
+  "pixel.apartment.3": buildingPixelApartment3,
+  "pixel.farmhouse.1": buildingPixelFarmhouse1,
+  "pixel.farmhouse.2": buildingPixelFarmhouse2,
+  "pixel.farmhouse.3": buildingPixelFarmhouse3,
+  "pixel.archeryRange.1": buildingPixelArcheryRange1,
+  "pixel.archeryRange.2": buildingPixelArcheryRange2,
+  "pixel.archeryRange.3": buildingPixelArcheryRange3,
+  "pixel.stables.1": buildingPixelStables1,
+  "pixel.stables.2": buildingPixelStables2,
+  "pixel.stables.3": buildingPixelStables3,
+  "pixel.huntingLodge.1": buildingPixelHuntingLodge1,
+  "pixel.huntingLodge.2": buildingPixelHuntingLodge2,
+  "pixel.huntingLodge.3": buildingPixelHuntingLodge3,
+  "pixel.eyrie.1": buildingPixelEyrie1,
+  "pixel.eyrie.2": buildingPixelEyrie2,
+  "pixel.eyrie.3": buildingPixelEyrie3,
+  "pixel.arcaneFont.1": buildingPixelArcaneFont1,
+  "pixel.arcaneFont.2": buildingPixelArcaneFont2,
+  "pixel.arcaneFont.3": buildingPixelArcaneFont3,
+  "pixel.crypt.2": buildingPixelCrypt2,
+  "pixel.gunnersRedoubt.2": buildingPixelGunnersRedoubt2,
+  "pixel.worldrootGrove.2": buildingPixelWorldrootGrove2,
+  "pixel.mine.1": buildingPixelStoneMine1,
+  "pixel.mine.2": buildingPixelStoneMine2,
+  "pixel.mine.3": buildingPixelStoneMine3,
 };
 
 export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescriptor> = {
@@ -911,6 +1002,53 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel-alt.farmField.1": 17,
   "building.pixel-alt.farmField.2": 17,
   "building.pixel-alt.farmField.3": 17,
+  "building.pixel.townHall.1": 9,
+  "building.pixel.townHall.2": 9,
+  "building.pixel.townHall.3": 6,
+  "building.pixel.house.1": 10,
+  "building.pixel.house.2": 9,
+  "building.pixel.house.3": 9,
+  "building.pixel.tower.1": 11,
+  "building.pixel.tower.2": 7,
+  "building.pixel.tower.3": 7,
+  "building.pixel.mageGuild.1": 11,
+  "building.pixel.mageGuild.2": 11,
+  "building.pixel.mageGuild.3": 11,
+  "building.pixel.market.1": 10,
+  "building.pixel.market.2": 10,
+  "building.pixel.market.3": 9,
+  "building.pixel.barracks.1": 12,
+  "building.pixel.barracks.2": 12,
+  "building.pixel.barracks.3": 9,
+  "building.pixel.smithy.1": 12,
+  "building.pixel.smithy.3": 7,
+  "building.pixel.apartment.1": 7,
+  "building.pixel.apartment.2": 7,
+  "building.pixel.apartment.3": 5,
+  "building.pixel.farmhouse.1": 10,
+  "building.pixel.farmhouse.2": 8,
+  "building.pixel.farmhouse.3": 5,
+  "building.pixel.archeryRange.1": 10,
+  "building.pixel.archeryRange.2": 10,
+  "building.pixel.archeryRange.3": 5,
+  "building.pixel.stables.1": 9,
+  "building.pixel.stables.2": 9,
+  "building.pixel.stables.3": 9,
+  "building.pixel.huntingLodge.1": 10,
+  "building.pixel.huntingLodge.2": 11,
+  "building.pixel.huntingLodge.3": 7,
+  "building.pixel.eyrie.1": 5,
+  "building.pixel.eyrie.2": 3,
+  "building.pixel.eyrie.3": 5,
+  "building.pixel.arcaneFont.1": 14,
+  "building.pixel.arcaneFont.2": 15,
+  "building.pixel.arcaneFont.3": 14,
+  "building.pixel.crypt.2": 11,
+  "building.pixel.gunnersRedoubt.2": 11,
+  "building.pixel.worldrootGrove.2": 5,
+  "building.pixel.mine.1": 12,
+  "building.pixel.mine.2": 5,
+  "building.pixel.mine.3": 13,
 };
 for (const [key, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {
   const desc = BUILDING_DESCRIPTORS[key];
