@@ -58,11 +58,6 @@ export function advanceChargedOnCommit(commitOk: boolean, net: NetCost, charged:
   return commitOk ? { ...net } : { ...charged };
 }
 
-/** After placer.init() the cart baseline is fresh, so charged tracking restarts from the placer's own (empty-diff) net. */
-export function resetChargedToPlacerNet(placerNet: NetCost): NetCost {
-  return { ...placerNet };
-}
-
 export function applyNetToSettlement(state: GameState, settlementId: string, net: NetCost): GameState | null {
   const s: SettlementState | undefined = state.settlements[settlementId];
   if (!s) return null;

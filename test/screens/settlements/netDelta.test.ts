@@ -5,7 +5,6 @@ import {
   applyNetToSettlement,
   invertNet,
   netDelta,
-  resetChargedToPlacerNet,
   settleNet,
 } from "../../../src/screens/settlements/cityView/netCost";
 import { emptyWarehouse, makeSettlement, makeState } from "../../charter/_helpers";
@@ -56,19 +55,6 @@ test("a failed commit keeps the previous charged snapshot without aliasing it", 
   const kept = advanceChargedOnCommit(false, { gold: -100 }, charged);
   assert.deepEqual(kept, charged);
   assert.notEqual(kept, charged);
-});
-
-test("regenerate resets charged tracking to the placer's fresh net", () => {
-  const freshNet = { gold: -100, wood: -2 };
-  const reset = resetChargedToPlacerNet(freshNet);
-  assert.deepEqual(reset, freshNet);
-  assert.notEqual(reset, freshNet);
-  assert.deepEqual(netDelta(freshNet, reset), {});
-});
-
-test("after a regenerate only post-regeneration changes count as uncommitted", () => {
-  const baseline = resetChargedToPlacerNet({ gold: -100 });
-  assert.deepEqual(netDelta({ gold: -150 }, baseline), { gold: -50 });
 });
 
 test("settleNet aborts when gold would go negative, with the computed numbers intact", () => {

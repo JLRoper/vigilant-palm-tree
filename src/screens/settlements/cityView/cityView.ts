@@ -7,11 +7,10 @@ import { createSkyboxProvider } from "../../../render/skybox";
 import type { Paint2DDep } from "../../../render/scene/paint2d/deps";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { SpriteProvider } from "../../../render/assets";
-import type { BuildingDef, GenerationStyle } from "@heroes/contracts";
+import type { BuildingDef } from "@heroes/contracts";
 import { buildingFootprint, coversCell } from "../../../core/cityGrid";
-import { generateBuildings, type GenerationPattern } from "../../../render/cityBuildingGen";
 import { starterCityOnOpen } from "@heroes/engine";
-import { advanceChargedOnCommit, netDelta, resetChargedToPlacerNet } from "./netCost";
+import { advanceChargedOnCommit, netDelta } from "./netCost";
 import { syncCartBuildings } from "./syncedBuildings";
 import { BuildingMenu, type BuildingMenuOptions } from "./buildingMenu";
 import { BuildingPlacer } from "./buildingPlacer";
@@ -27,23 +26,6 @@ import type { BuildingUpgradeCost, ProducerOutput } from "@heroes/engine";
 import { producerTurnOutput } from "@heroes/engine";
 import { CityDesignBoxManager } from "./CityDesignBoxManager";
 import { collectPanelRects, elementRect } from "./panelRects";
-
-const STYLE_KEYS: Record<string, GenerationStyle> = {
-  "1": "classic",
-  "2": "blocky",
-  "3": "crystalline",
-  "4": "organic",
-  "5": "industrial",
-};
-
-const PATTERN_KEYS: Record<string, GenerationPattern> = {
-  "!": "denseUrban",
-  "@": "sparseRural",
-  "#": "radial",
-  "$": "grid",
-  "%": "clustered",
-  "^": "sampler",
-};
 
 /** Pre-city selection, captured at open() so close can restore the exact panel state the player left behind. */
 export interface CitySelectionSnapshot {
@@ -67,9 +49,6 @@ export class CityView {
   /** True when the city view handed a previously-empty settlement its free starter set (buildStarterLayout). */
   private freeInitialLayout = false;
   private committedInitialLayout = false;
-  private style: GenerationStyle = "classic";
-  private pattern: GenerationPattern = "denseUrban";
-  private seed = 42;
   // One dep for the lifetime of the view: the skybox provider owns the decoded
   // image + parallax layer-canvas caches, so rebuilding it per frame would
   // re-split the skybox on every draw.
@@ -161,23 +140,6 @@ export class CityView {
         }
         return;
       }
-      const styleKey = STYLE_KEYS[e.key];
-      if (styleKey) {
-        this.style = styleKey;
-        this.regenerate();
-        return;
-      }
-      const patternKey = PATTERN_KEYS[e.key];
-      if (patternKey) {
-        this.pattern = patternKey;
-        this.regenerate();
-        return;
-      }
-      if (e.key === "r" || e.key === "R") {
-        this.seed = Math.floor(Math.random() * 100000);
-        this.regenerate();
-        return;
-      }
     };
   }
 
@@ -200,7 +162,7 @@ export class CityView {
     this.selectionAnchor = null;
     this.preCitySelection = this.getSelection?.() ?? null;
 
-    const starter = starterCityOnOpen({ size: this.size, style: "pixel" as GenerationStyle, existing: buildings });
+    const starter = starterCityOnOpen({ size: this.size, style: "pixel" as BuildingDef["style"], existing: buildings });
     const initialBuildings = starter.buildings;
     // A settlement with no persisted buildings gets the explicit starter set
     // committed FREE (townHall L1 + farm field + 2 houses + two woodcutter's
@@ -246,7 +208,6 @@ export class CityView {
         }
         this.updateBuildButton();
       },
-      onGenerate: () => this.regenerate(),
       onBack: () => this.handleClose(),
     }, this.getFloatingPanelRects);
 
@@ -458,28 +419,6 @@ export class CityView {
     } else {
       perform();
     }
-  }
-
-  /** The design box's Generate button: a procedural preview layout (and the only remaining consumer of cityBuildingGen). Not a starting city — a settlement's starter set is the engine's buildStarterLayout. */
-  private generateBuildingsArray(): BuildingDef[] {
-    const center = Math.floor(this.size / 2);
-    return generateBuildings({
-      size: this.size,
-      pattern: this.pattern,
-      style: this.style,
-      seed: this.seed,
-      townHallAt: { gx: center, gy: center },
-    });
-  }
-
-  private regenerate(): void {
-    if (!this.isOpen()) return;
-    const buildings = this.generateBuildingsArray();
-    this.placer.cancelPlacement();
-    this.placer.hidePalette();
-    this.placer.init(this.size, { gx: Math.floor(this.size / 2), gy: Math.floor(this.size / 2) }, buildings);
-    this.chargedNet = resetChargedToPlacerNet(this.placer.getNetCost());
-    this.updateBuildButton();
   }
 
   private openBuildPalette(): void {

@@ -33,9 +33,6 @@ const SECTIONS: HotkeySection[] = [
       { keys: "Esc", description: "Close menus / cancel placement / leave the city" },
       { keys: "B", description: "Toggle the build palette" },
       { keys: "Del / Backspace", description: "Remove the building under the cursor" },
-      { keys: "1 2 3 4 5", description: "Style: classic, blocky, crystalline, organic, industrial" },
-      { keys: "! @ # $ % ^", description: "Pattern: denseUrban, sparseRural, radial, grid, clustered, sampler" },
-      { keys: "R", description: "Regenerate the layout with a new seed" },
     ],
   },
 ];
