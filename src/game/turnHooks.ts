@@ -189,7 +189,19 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     onBattleResolved: async (
       state: GameState,
     ): Promise<{ state: GameState; battle: BattleResult | null }> => {
-      const cached = lastBattle;
+      // The pair normally comes from enterBattle()'s battle_started log (the
+      // loop/tick detection path). A battle OFFERED by the server's AI driver
+      // reaches this client through the garrison bridge's BattleOffered delta,
+      // which flips the phase without going through enterBattle() -- for that
+      // path the live BATTLE phase itself names the pair; without this
+      // fallback Quick Resolve would no-op locally (no ResolveBattle POST, no
+      // BattleResolved event, server marker stranded until the 300s
+      // force-resolve).
+      const cached =
+        lastBattle ??
+        (state.phase.kind === "BATTLE"
+          ? { attackerId: state.phase.attackerId, defenderId: state.phase.defenderId }
+          : null);
       lastBattle = null;
       lastResolveVerdicts = null;
       const name = opts.gameName();

@@ -43,6 +43,11 @@ export type GameLobbyState = {
   // scanner owns those AI seats' turns end-to-end. Absent (= browser-driven)
   // on legacy/starter/lobby games (D2). Mirrors server/routes.ts LobbyState.
   aiDriver?: "server";
+  // Pending battle offer (defender-chosen flow, 2026-10-04): stamped by the
+  // EnterBattle command case, read via @heroes/engine's readPendingBattle,
+  // cleared when the battle resolves / the offer goes stale. Optional --
+  // every pre-offer row simply lacks the key. Mirrors server LobbyState.
+  pendingBattle?: { attackerId: string; defenderId: string; since: number } | null;
 };
 
 export type Game = {

@@ -208,9 +208,15 @@ flowchart TB
    `games.lobby.pendingBattle` and appends `BattleOffered` (an apply-class
    delta `garrisonEventBridge` replays through `startBattle`), so the
    defender's client sits in `BATTLE` — hydrate also re-derives the phase
-   from the marker on reload, and the driver's pass returns
-   `waiting_for_defender` (no `EndTurn`) until the battle resolves or its
-   300 s wait deadline (`AI_DEFENDER_WAIT_TIMEOUT_MS`) force-resolves it.
+   from the marker on reload (the client maps the nested marker through
+   `src/io/hydrateClientGame.ts` on both `loadGame` and `resync`), and the
+   driver's pass returns `waiting_for_defender` (no `EndTurn`) until the
+   battle resolves or its 300 s wait deadline
+   (`AI_DEFENDER_WAIT_TIMEOUT_MS`) force-resolves it. Because that delta is
+   merged through the bridge's `replaceState`, which the rAF loop's change
+   detection never sees, the `state:committed` listener itself also calls
+   `maybeAutoResolveBattle()` (2026-10-05) — that call is what actually
+   opens the defender's modal; `battleInFlight` keeps it idempotent.
 3. **User choice.** The plan decides who resolves
    (`src/screens/combat/battleChoicePolicy.ts`): the **local attacker or
    local defender** gets `showBattleModal()`
@@ -218,7 +224,13 @@ flowchart TB
    arena), **Quick Resolve** (the server auto-resolver) — plus **Flee**
    (cancels the attacker's move via `tc.cancelMove(attackerId)`) for the
    **attacker only**; the defender's modal hides Flee (`hideFlee`, since
-   fleeing is not a defender choice). A **server-driven non-participant**
+   fleeing is not a defender choice). For a server-offered battle the
+   opening call is the `state:committed` listener's
+   `maybeAutoResolveBattle()` (step 2), not the loop tick, and the modal
+   is deliberately **non-dismissible** (no × button, 2026-10-05): its
+   choices are the only exits, because dismissing it would leave
+   `battleInFlight` set and stall the AI turn until the force-resolve.
+   A **server-driven non-participant**
    spectates (returns; `battleOutcomeFeedback` shows the outcome later).
    The **driving client auto-resolves** AI-vs-AI and remote-human PvP pairs
    silently (the result card still shows) — under the old `pvp` predicate
@@ -442,7 +454,7 @@ used):
 | `src/state/turnController.ts` | Orchestrator | `enterBattle` (mover = attacker), `resolveCurrentBattle` (Quick Resolve), `cancelMove` (Flee) |
 | `src/managers/GameActions.ts` | Orchestrator | `maybeAutoResolveBattle` (who resolves is `resolveBattleChoice`'s call, 2026-10-04), `startBattleFlow`, `fightInArena` (Fight path: arena → `SubmitBattleResult` → merge → end phase; a defender-fought battle re-maps the phase back to `AI_TURN` when the AI holds the turn — `endBattlePhase` unconditionally reopens `PLAYER_TURN`); gates re-entry with `battleInFlight` |
 | `src/screens/combat/battleChoicePolicy.ts` | Policy (pure) | `resolveBattleChoice({ localIsAttacker, localIsDefender, serverDriven })` → `spectate` \| `modal { hideFlee }` \| `autoResolve` — the single who-resolves decision (2026-10-04), unit-tested without a DOM |
-| `src/screens/combat/battleModal.ts` | UI (DOM) | Fight / Quick Resolve / Flee prompt before anything is resolved; `hideFlee` (2026-10-04) omits the Flee button and the flee sentence for a defending seat |
+| `src/screens/combat/battleModal.ts` | UI (DOM) | Fight / Quick Resolve / Flee prompt before anything is resolved; `hideFlee` (2026-10-04) omits the Flee button and the flee sentence for a defending seat. Deliberately non-dismissible (2026-10-05): `openCenteredModal(..., closeable: false)` — no × button, because a dismissed choice would leave `battleInFlight` set and stall the AI turn until the 300 s force-resolve; `test/aiDefender.e2e.ts` scenario A covers the auto-open + Quick Resolve path |
 | `src/screens/combat/battleResultCard.ts` | UI (DOM) | Per-platoon survivors + losses summary — used by **both** paths; renders the per-side verdict lines from `battleResultText.ts` under the winner banner |
 | `src/screens/combat/battleResultText.ts` | UI (pure) | Verdict wording (2026-09-29 hero outcomes): `battleVerdictCardLine` / `battleVerdictToastPhrase` / `battleToastMessage` / `settlementNameAt` — "slain" / "retreated to \<name\>" / "surrendered to \<name\>"; an absent verdict (pre-W1 server) renders nothing |
 | `src/screens/combat/arena/openManualBattleArena.ts` | UI (canvas+DOM) | HoMM3-style interactive arena; production callers get `onComplete` (outcome) + `telemetry` (action stream) and a `{ close }` handle |
@@ -455,7 +467,7 @@ used):
 | `src/combat/testArmies.ts` | Fixtures | `fixedTestPlayerPlatoons()`, `randomAiPlatoons(unitTypes)` |
 | `src/data/unitCatalog.ts` | Catalog cache | `/api/units` loader used by the arena and Test Battle |
 | `src/core/hex.ts` | Geometry | `HEX_DIRECTIONS`, `nearestHexEdge` — canonical direction math |
-| `src/game/turnHooks.ts` | Adapter | `onBattleResolved(state)` → `io/commands.resolveBattle` (Quick Resolve path); since 2026-10-04 the POST's actor is the **local seat whenever it owns either combatant** — on server-driven games the attacker's owner is an AI seat the command route would reject (`ai_seat_command_forbidden`) |
+| `src/game/turnHooks.ts` | Adapter | `onBattleResolved(state)` → `io/commands.resolveBattle` (Quick Resolve path); since 2026-10-04 the POST's actor is the **local seat whenever it owns either combatant** — on server-driven games the attacker's owner is an AI seat the command route would reject (`ai_seat_command_forbidden`); since 2026-10-05 it also falls back to the live `BATTLE` phase's attacker/defender pair when `lastBattle` is null (set only by `TurnController.enterBattle()`) — a remotely offered battle never calls `enterBattle()`, so without the fallback Quick Resolve no-op'd locally (no POST, server marker stranded until the 300 s force-resolve) |
 | `src/io/commands.ts` | Network | `resolveBattle()` + `submitBattleResult()` (`SubmitBattleResult`) POST wrappers |
 | `src/io/api.ts` | Network | `postBattleAction` — fire-and-forget `battle_actions` POST (short timeout, swallows failures) |
 | `src/core/eventBus.ts` | Telemetry | `battle:resolved` emission is dev-log telemetry only (EventLog whitelist); production result cards/toasts consume command return data + `consumeResolveBattleVerdicts`, not the bus |
@@ -469,11 +481,14 @@ used):
 | `packages/contracts/src/commands/submitBattleResult.ts` | Contracts | The 15th command kind: submitted outcome + survivor stacks + rounds/obstacleSeed |
 | `packages/contracts/src/commands/enterBattle.ts` | Contracts | The 25th command kind (2026-10-04): `{ kind, gameName, actor, attackerId, defenderId }` — the AI driver's battle offer to a human defender; dispatched only by the trusted in-process driver (the command route rejects AI-seat actors on server-driven games), so a browser can never forge an offer |
 | `packages/engine/src/events/applyEvent.ts` + `packages/engine/src/hydrate.ts` | Engine | `BattleOffered` — sync class `"apply"` (the union is 25 variants: 12 apply / 7 resync / 6 ignore); its replay runs `startBattle` (same-pair replay = `noop`, drift = resync). `PendingBattleMarker` + `readPendingBattle(lobby)` — `hydrateGameState` re-derives the `BATTLE` phase from a valid `games.lobby.pendingBattle` marker (the phase is still never persisted as a phase); malformed markers fall back to the faction-derived phase |
+| `src/io/hydrateClientGame.ts` | Client hydrate | **New (2026-10-05).** `hydrateClientGame(game)` maps the nested `game.lobby.pendingBattle` onto the engine hydrate's top-level `pendingBattle` (via engine `readPendingBattle`) for `GameSessionManager.loadGame` and `multiplayerSync.resync()` — a reload/resync mid-offer re-derives the `BATTLE` phase and re-opens the modal; `GameLobbyState` (`src/io/api.ts`) carries the optional marker field. Unit-tested in `test/io/hydrateClientGame.test.ts` |
 | `server/app/commandHandler.ts` (`ResolveBattle` + `SubmitBattleResult` + `EnterBattle` via `POST /games/:name/commands`) | Server | Loads DB row + `unit_types`; runs `resolveBattleEngine` or applies the submitted outcome — both through the shared `buildPostBattleHeroes`/`applyHeroBattleOutcomes`/`persistBattleOutcome` helpers (verdict application: defeat deletes the hero, retreat/surrender relocate; plan `2026-09-29-hero-outcomes.md`). The `EnterBattle` case (2026-10-04) re-derives adjacency server-side, requires a human defender (`defender_not_human` otherwise), is idempotent on a same-pair re-offer, rejects a different pending pair (`battle_already_pending`), then stamps `games.lobby.pendingBattle` + appends `BattleOffered`. The generic turn-ownership guard **exempts the battle pair** — `ResolveBattle`/`SubmitBattleResult` may be submitted by the owner of either named combatant (the defender resolves from its own seat during the AI's turn); `EnterBattle` and `EndTurn` still require the active player. The marker clears when the battle resolves and on the permanent rejections (stale-offer self-heal); an `EndTurn` clears any marker that survived into the next turn |
-| `server/app/aiDriver.ts` | Server | The defender-offer wait (2026-10-04): a pass finding `lobby.pendingBattle` live returns `waiting_for_defender` — no `EndTurn` while the offer stands; past `AI_DEFENDER_WAIT_TIMEOUT_MS` (300 s) it force-resolves via `ResolveBattle` (unbudgeted/unpaced, the exhaustion-EndTurn pattern) and appends the `ai_defender_wait_expired` audit, so a closed defender browser cannot stall the AI turn |
+| `server/app/aiDriver.ts` | Server | The defender-offer wait (2026-10-04): a pass finding `lobby.pendingBattle` live returns `waiting_for_defender` — no `EndTurn` while the offer stands; past `AI_DEFENDER_WAIT_TIMEOUT_MS` (300 s) it force-resolves via `ResolveBattle` (unbudgeted/unpaced, the exhaustion-EndTurn pattern) and appends the `ai_defender_wait_expired` audit, so a closed defender browser cannot stall the AI turn. 2026-10-05: an adjacent defender hero whose owner player is missing from the snapshot no longer falls through to a doomed `ResolveBattle` — the pass warns, appends the `ai_defender_owner_missing` audit, and drops the collision for the pass (pinned in `test/server/aiDriver.test.ts`) |
 | `packages/engine/src/combat/battleOutcome.ts` | Engine (pure) | `deriveHeroVerdict(sideOutcome, conceded?)` → `defeated`/`retreated`/`surrendered`/`stood`; `nearestOwnedSettlement` (hexDistance min; null when the owner holds nothing — the D1 stay-put edge); `relocateHeroToSettlement` (q/r set, previous*/trail reset) |
 | `server/http/routes/battleActions.ts` | Server | `POST /games/:name/battle-actions` — telemetry-style insert into `battle_actions` (seat stamped from the session) |
 | `server/migrations/012_battle_actions.sql` | Schema | `battle_actions` table + per-battle replay index |
+
+Test inventory (2026-10-05): `test/io/hydrateClientGame.test.ts` (nested-marker mapping), `test/aiDefender.e2e.ts` (scenario A — modal auto-open + Quick Resolve + no stall; scenario B — reload mid-offer re-opens from hydration; npm `test:aiDefender`, wired into `test:all` between settlements and logpanel), and the new `ai_defender_owner_missing` case in `test/server/aiDriver.test.ts`.
 
 ---
 
@@ -510,9 +525,17 @@ used):
 - **Flee is attacker-only.** (2026-10-04.) Fleeing cancels the *attacker's*
   move, so it is not a defender choice: `showBattleModal`'s `hideFlee`
   option omits the button (and the flee sentence) whenever the local seat
-  is the defender. The arena's retreat/surrender remain attacker actions
+  is the defender; a server-offered battle's modal is opened by the
+  `state:committed` listener's `maybeAutoResolveBattle()` call (step 2),
+  not the loop tick. The arena's retreat/surrender remain attacker actions
   too — the defender's played-out outcomes are the same removal/relocation
   rules the auto path applies.
+- **The battle modal is non-dismissible.** (2026-10-05.)
+  `showBattleModal` opens with `closeable: false` (no × button): a battle
+  choice is blocking, and dismissing without choosing would leave
+  `battleInFlight` set and stall the AI turn until the 300 s
+  force-resolve. Fight / Quick Resolve (and Flee for the attacker) are the
+  only exits.
 - **The defender resolves from its own seat.** (2026-10-04.) A
   server-offered battle is resolved by the human defender's client during
   the AI's turn: the generic turn-ownership guard in

@@ -1,6 +1,7 @@
 import { api, eventStreamUrl, type Game, type GameEventRow } from "./api";
+import { hydrateClientGame } from "./hydrateClientGame";
 import { isServerDriven, syncServerDrivenFromGame } from "./serverDrivenGames";
-import { applyEngineEvent, ENGINE_EVENT_SYNC_CLASS, hydrateGameState } from "@heroes/engine";
+import { applyEngineEvent, ENGINE_EVENT_SYNC_CLASS } from "@heroes/engine";
 import type { EngineEvent, GameState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
 import type {
@@ -395,7 +396,7 @@ export class MultiplayerSync {
       bus.emit({ type: "mp:presenceUpdated", gameName, presence: lobbyPresence });
     }
 
-    const hydrated = hydrateGameState(game);
+    const hydrated = hydrateClientGame(game);
     const seeded = Number(game.last_event_id ?? 0);
     this.cursor = Number.isFinite(seeded) && seeded >= 0 ? seeded : 0;
     this.selfEventIds.clear();

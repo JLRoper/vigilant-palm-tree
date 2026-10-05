@@ -15,6 +15,7 @@ import {
 import { hexDistance, HEX_DIRECTIONS } from "@heroes/contracts";
 import type { Axial, Command, HeroId } from "@heroes/contracts";
 import {
+  AI_DEFENDER_OWNER_MISSING_AUDIT_KIND,
   AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND,
   AI_DEFENDER_WAIT_TIMEOUT_MS,
   AI_MAX_ROUTES_PER_SEAT,
@@ -1218,6 +1219,38 @@ test("AI defender regression: an adjacent AI-seat defender still auto-resolves v
   assert.equal(resolves[0].defenderId, "d2");
   assert.equal(resolves[0].actor, 1);
   assert.equal(cap.captured[0], "ended_turn", "the AI-vs-AI battle does not stop the pass");
+});
+
+test("missing defender owner: the collision is audited and skipped without ResolveBattle or EnterBattle", async () => {
+  const world = humanDefenderWorld();
+  // Corrupt/desynced snapshot: the defender hero exists with troops, but its
+  // owner player is absent from state.players. Neither battle command can
+  // succeed; the driver must surface the anomaly and skip the collision
+  // instead of falling through to a doomed ResolveBattle.
+  world.state.players = world.state.players.filter((p) => p.id !== 0);
+  const harness = installHarness(world);
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  await scanOnce();
+
+  assert.ok(commandsOfKind(harness.commands, "MoveHero").length >= 1, "the approach move still happened");
+  assert.equal(commandsOfKind(harness.commands, "EnterBattle").length, 0, "no offer for an unowned defender");
+  assert.equal(commandsOfKind(harness.commands, "ResolveBattle").length, 0, "no auto-resolve for an unowned defender");
+  assert.equal(harness.audits.length, 1, "exactly one missing-owner audit row");
+  assert.equal(harness.audits[0].kind, AI_DEFENDER_OWNER_MISSING_AUDIT_KIND);
+  const payload = harness.audits[0].payload as {
+    attackerId: string;
+    defenderId: string;
+    reason: string;
+    round: number;
+  };
+  assert.equal(payload.attackerId, "h1");
+  assert.equal(payload.defenderId, "d0");
+  assert.equal(payload.reason, "defender_owner_missing");
+  assert.equal(payload.round, 1);
+  assert.equal(cap.captured[0], "ended_turn", "the pass terminates normally instead of stalling");
+  assert.equal(harness.endTurns.length, 1, "the turn still ends");
 });
 
 test("budget exhaustion cannot EndTurn past a pending offer (the offer returns before the exhaustion block)", async () => {

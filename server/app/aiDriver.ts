@@ -87,6 +87,9 @@ export const AI_DEFENDER_WAIT_TIMEOUT_MS = 300_000;
 /** Audit kind for the force-resolve above (turn_skipped convention). */
 export const AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND = "ai_defender_wait_expired";
 
+/** Audit kind for a collision whose defender hero has no owner player in the snapshot. */
+export const AI_DEFENDER_OWNER_MISSING_AUDIT_KIND = "ai_defender_owner_missing";
+
 /**
  * Phase 3 watchdog: floor for how stale an owned candidate's
  * lobby.aiDriverBeat (or, for beat-less pre-watchdog rows, games.updated_at)
@@ -917,7 +920,30 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
           const defenderOwner = defenderHero
             ? adj.state.players.find((p) => p.id === defenderHero.ownerId)
             : undefined;
-          if (defenderOwner && defenderOwner.faction !== "ai") {
+          if (!defenderOwner) {
+            // R4 hardening: the defender hero is present with troops but its
+            // owner player is missing from the snapshot -- neither battle
+            // command can succeed against it (the handler rejects on the
+            // owner). Surface the anomaly, audit it, and drop the collision
+            // for this pass instead of silently falling through to a doomed
+            // ResolveBattle.
+            console.warn(
+              `[aiDriver] "${gameName}" defender ${defenderId} has no owner player in the snapshot (attacker ${heroId}); dropping the collision for this pass`,
+            );
+            try {
+              await cfg.appendAudit(gameName, AI_DEFENDER_OWNER_MISSING_AUDIT_KIND, {
+                attackerId: heroId,
+                defenderId,
+                reason: "defender_owner_missing",
+                round: adj.state.round,
+              });
+            } catch (err) {
+              console.error(`[aiDriver] "${gameName}" defender-owner-missing audit append failed:`, err);
+            }
+            skippedHeroes.add(heroId);
+            break;
+          }
+          if (defenderOwner.faction !== "ai") {
             // Human defender: offer the battle and wait for their choice
             // instead of auto-resolving. The handler persists the pending
             // battle and notifies clients; the next scan resumes once it is

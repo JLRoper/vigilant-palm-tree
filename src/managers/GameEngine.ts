@@ -246,6 +246,10 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       this.state.rebuildSettlementsFromState();
       this.state.syncHeroVisualsToState();
       this.fullFrame();
+      // Battle offers arrive via the bridge's replaceState path, which bypasses
+      // the rAF loop's `changed` detection -- trigger the (phase-gated,
+      // battleInFlight-guarded) battle flow here so the defender's modal opens.
+      void this.actions.maybeAutoResolveBattle();
     });
     // #100: surfaces a toast whenever a fire-and-forget command hook
     // (src/game/turnHooks.ts) rejects, instead of the previous

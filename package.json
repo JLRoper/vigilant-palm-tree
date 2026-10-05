@@ -23,6 +23,7 @@
     "test": "tsx --env-file=.env --env-file=.env.test test/smoke.ts",
     "test:cityview": "tsx scripts/allocate-ports.ts && tsx --env-file=.env --env-file=.env.test test/cityView.test.ts",
     "test:settlements": "tsx scripts/allocate-ports.ts && tsx --env-file=.env --env-file=.env.test test/settlements.e2e.ts",
+    "test:aiDefender": "tsx scripts/allocate-ports.ts && tsx --env-file=.env --env-file=.env.test test/aiDefender.e2e.ts",
     "test:logpanel": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs logpanel --auto-close",
     "test:visual": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs visual --auto-close",
     "test:visual:update-baselines": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs visual --auto-close --update-baselines",

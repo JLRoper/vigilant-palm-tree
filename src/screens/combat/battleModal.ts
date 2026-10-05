@@ -15,7 +15,10 @@ export type BattleModalResult = "fight" | "quickResolve" | "cancel";
 
 export function showBattleModal(opts: BattleModalOptions): Promise<BattleModalResult> {
   return new Promise<BattleModalResult>((resolve) => {
-    const modal = openCenteredModal(document.body, "Battle!", 320);
+    // Deliberately non-dismissible (no × button): a battle choice is blocking,
+    // and dismissing without choosing would leave battleInFlight stuck forever
+    // (the AI turn would stall until the server's 300 s force-resolve).
+    const modal = openCenteredModal(document.body, "Battle!", 320, false, false);
 
     const intro = document.createElement("div");
     intro.textContent = `${opts.attackerName} vs ${opts.defenderName}`;
