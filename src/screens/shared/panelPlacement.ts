@@ -28,14 +28,39 @@ export function resolvePanelPlacement(
     const candidate: PanelRect = { x, y, w: desired.w, h: desired.h };
     return occupied.some((o) => rectsOverlap(candidate, o));
   };
+  const overlapAreaAt = (x: number, y: number): number => {
+    let area = 0;
+    for (const o of occupied) {
+      const w = Math.min(x + desired.w, o.x + o.w) - Math.max(x, o.x);
+      const h = Math.min(y + desired.h, o.y + o.h) - Math.max(y, o.y);
+      if (w > 0 && h > 0) area += w * h;
+    }
+    return area;
+  };
+  const candidates: Array<{ x: number; y: number }> = [];
   if (!overlapsAt(base.x, base.y)) return base;
+  candidates.push(base);
   const stepX = desired.w + STEP_GAP;
   for (let x = base.x + stepX; x <= maxX; x += stepX) {
     if (!overlapsAt(x, base.y)) return { x, y: base.y };
+    candidates.push({ x, y: base.y });
   }
   const stepY = desired.h + STEP_GAP;
   for (let y = base.y - stepY; y >= minTop; y -= stepY) {
     if (!overlapsAt(base.x, y)) return { x: base.x, y };
+    candidates.push({ x: base.x, y });
   }
-  return base;
+  const rightAligned = { x: maxX, y: base.y };
+  if (!overlapsAt(rightAligned.x, rightAligned.y)) return rightAligned;
+  candidates.push(rightAligned);
+  let best = candidates[0];
+  let bestArea = Infinity;
+  for (const candidate of candidates) {
+    const area = overlapAreaAt(candidate.x, candidate.y);
+    if (area < bestArea) {
+      bestArea = area;
+      best = candidate;
+    }
+  }
+  return best;
 }

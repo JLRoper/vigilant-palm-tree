@@ -25,7 +25,7 @@ import type { BuildingUpgradeRequest } from "../../../state/gameState";
 import type { BuildingUpgradeCost, ProducerOutput } from "@heroes/engine";
 import { producerTurnOutput } from "@heroes/engine";
 import { CityDesignBoxManager } from "./CityDesignBoxManager";
-import { collectPanelRects, elementRect } from "./panelRects";
+import { cityGridRect, collectPanelRects, elementRect } from "./panelRects";
 
 /** Pre-city selection, captured at open() so close can restore the exact panel state the player left behind. */
 export interface CitySelectionSnapshot {
@@ -424,9 +424,11 @@ export class CityView {
   private openBuildPalette(): void {
     const stored = loadPanelGeometry("buildPalette");
     const desired = stored ?? { x: 12, y: Math.max(20, window.innerHeight - PALETTE_H) };
+    const occupied = this.collectOccupiedRects();
+    occupied.push(cityGridRect(this.size, window.innerWidth, window.innerHeight));
     const resolved = resolvePanelPlacement(
       { x: desired.x, y: desired.y, w: PALETTE_W, h: PALETTE_H },
-      this.collectOccupiedRects(),
+      occupied,
       { width: window.innerWidth, height: window.innerHeight },
       toolbarHeight(),
     );

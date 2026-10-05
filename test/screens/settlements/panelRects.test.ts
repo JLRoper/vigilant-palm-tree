@@ -1,16 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  CITY_GRID_PAD,
   DESIGN_BOX_INSET,
+  cityGridRect,
   collectPanelRects,
   resolveDesignBoxPlacement,
 } from "../../../src/screens/settlements/cityView/panelRects";
+import { cityLayout } from "../../../src/core/cityGrid";
 import type { PanelRect } from "../../../src/screens/shared/panelPlacement";
 
 const VIEWPORT = { width: 1920, height: 1080 };
 const BOX_W = 110;
 const BOX_H = 90;
 const MIN_TOP = 125;
+
+function assertClose(actual: number, expected: number, message: string): void {
+  assert.ok(Math.abs(actual - expected) < 1e-6, `${message}: expected ${expected}, got ${actual}`);
+}
 
 test("an unobstructed design box sits at the bottom-left inset anchor", () => {
   assert.deepEqual(
@@ -55,4 +62,37 @@ test("collectPanelRects drops null entries and tolerates a missing provider", ()
   const provider = (): Array<PanelRect | null> => [null, rect, null];
   assert.deepEqual(collectPanelRects(provider), [rect]);
   assert.deepEqual(collectPanelRects(undefined), []);
+});
+
+test("cityGridRect bounds a 5x5 grid at 1280x800", () => {
+  const rect = cityGridRect(5, 1280, 800, 0);
+  assert.equal(rect.x, 402, "grid left edge");
+  assert.equal(rect.w, 480, "grid width");
+  assertClose(rect.y, 238.8, "grid top edge");
+  assertClose(rect.h, 240, "grid height");
+});
+
+test("cityGridRect bounds a 10x10 grid at 1280x800", () => {
+  const rect = cityGridRect(10, 1280, 800, 0);
+  assert.equal(rect.w, 960, "grid width");
+  assert.equal(rect.h, 480, "grid height");
+  assertClose(rect.x, 164.5, "grid left edge");
+  assertClose(rect.y, 78.1, "grid top edge");
+});
+
+test("cityGridRect scales a 15x15 grid down to fit the viewport", () => {
+  const rect = cityGridRect(15, 1280, 800, 0);
+  assert.ok(cityLayout(15, 1280, 800).tileScale < 1, "15x15 is width-constrained at 1280x800");
+  assertClose(rect.w, 1088, "grid width");
+  assertClose(rect.h, 544, "grid height");
+});
+
+test("cityGridRect applies pad on all four sides and defaults to CITY_GRID_PAD", () => {
+  const bare = cityGridRect(5, 1280, 800, 0);
+  const padded = cityGridRect(5, 1280, 800, CITY_GRID_PAD);
+  assertClose(padded.x, bare.x - CITY_GRID_PAD, "left pad");
+  assertClose(padded.y, bare.y - CITY_GRID_PAD, "top pad");
+  assertClose(padded.w, bare.w + CITY_GRID_PAD * 2, "width pad");
+  assertClose(padded.h, bare.h + CITY_GRID_PAD * 2, "height pad");
+  assert.deepEqual(cityGridRect(5, 1280, 800), padded, "default pad is CITY_GRID_PAD");
 });
