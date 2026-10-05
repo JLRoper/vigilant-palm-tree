@@ -19,17 +19,24 @@ import {
   AI_DEFENDER_WAIT_TIMEOUT_MS,
   AI_MAX_ROUTES_PER_SEAT,
   AI_TURN_ACTION_BUDGET,
+  AI_TURN_ADOPTED_AUDIT_KIND,
+  AI_TURN_HEARTBEAT_STALE_MS,
   AI_TURN_PASS_DEADLINE_MS,
   configureAiDriver,
+  defaultAdoptGame,
+  defaultStampHeartbeats,
   isGameTrackedByDriver,
   resetAiDriver,
   scanOnce,
+  type AiDriverBeat,
+  type AiDriverCandidate,
   type AiDriveOutcome,
   type AiDriverCommandOutcome,
   type AiDriverGameSnapshot,
   type GameLockOutcome,
   type WithGameLock,
 } from "../../server/app/aiDriver";
+import { aiDriverBootToken } from "../../server/app/aiDriverToken";
 import { pool } from "../../server/persistence/db";
 import { makeHero, makePlayer, makeSettlement, makeState, emptyWarehouse } from "../charter/_helpers";
 
@@ -125,6 +132,8 @@ interface ScriptedHarness {
   commands: Command[];
   endTurns: Command[];
   audits: Array<{ gameName: string; kind: string; payload: unknown }>;
+  stamps: AiDriverCandidate[];
+  adoptions: Array<{ candidate: AiDriverCandidate; previousToken: string }>;
   gameGone: { value: boolean };
 }
 
@@ -135,23 +144,36 @@ interface ScriptedHarness {
 function installHarness(
   world: AiDriverGameSnapshot,
   opts?: {
-    candidates?: Array<{ name: string; id: number; active_player_id: number }>;
+    candidates?: AiDriverCandidate[];
     actionBudget?: number;
     passDeadlineMs?: number;
     defenderWaitTimeoutMs?: number;
     now?: () => number;
+    watchdogStaleMs?: number;
+    driverToken?: string;
+    scanIntervalMs?: number;
+    stampHeartbeats?: (candidates: AiDriverCandidate[]) => Promise<void>;
+    adoptGame?: (candidate: AiDriverCandidate, previousToken: string) => Promise<boolean>;
     override?: (command: Command) => AiDriverCommandOutcome | undefined;
   },
 ): ScriptedHarness {
   const candidates = opts?.candidates ?? [{ name: GAME, id: world.gameId, active_player_id: 1 }];
-  const harness: ScriptedHarness = { commands: [], endTurns: [], audits: [], gameGone: { value: false } };
+  const harness: ScriptedHarness = {
+    commands: [],
+    endTurns: [],
+    audits: [],
+    stamps: [],
+    adoptions: [],
+    gameGone: { value: false },
+  };
   const clock = opts?.now ?? (() => 1_000_000);
-  configureAiDriver({
-    scanIntervalMs: 60_000,
+  const options: Parameters<typeof configureAiDriver>[0] = {
+    scanIntervalMs: opts?.scanIntervalMs ?? 5_000,
     pacingMs: 0,
     actionBudget: opts?.actionBudget ?? AI_TURN_ACTION_BUDGET,
     passDeadlineMs: opts?.passDeadlineMs ?? AI_TURN_PASS_DEADLINE_MS,
     defenderWaitTimeoutMs: opts?.defenderWaitTimeoutMs ?? AI_DEFENDER_WAIT_TIMEOUT_MS,
+    watchdogStaleMs: opts?.watchdogStaleMs ?? AI_TURN_HEARTBEAT_STALE_MS,
     now: clock,
     loadCandidates: async () => candidates,
     loadGame: async () => (harness.gameGone.value ? null : world),
@@ -224,7 +246,13 @@ function installHarness(
     appendAudit: async (gameName, kind, payload) => {
       harness.audits.push({ gameName, kind, payload });
     },
-  });
+    stampHeartbeats: opts?.stampHeartbeats ?? (async (stamped) => {
+      harness.stamps.push(...stamped);
+    }),
+    adoptGame: opts?.adoptGame ?? (async () => false),
+  };
+  if (opts?.driverToken !== undefined) options.driverToken = opts.driverToken;
+  configureAiDriver(options);
   return harness;
 }
 
@@ -254,6 +282,8 @@ test("constants match the plan values (D3/D12)", () => {
   assert.equal(AI_TURN_ACTION_BUDGET, 64);
   assert.equal(AI_TURN_PASS_DEADLINE_MS, 25_000);
   assert.equal(AI_DEFENDER_WAIT_TIMEOUT_MS, 300_000);
+  assert.equal(AI_TURN_HEARTBEAT_STALE_MS, 60_000);
+  assert.equal(AI_TURN_ADOPTED_AUDIT_KIND, "ai_turn_adopted");
 });
 
 test("whole-turn drive per pass: two heroes spend their movement across sweeps, then EndTurn with no growthRate", async () => {
@@ -319,6 +349,7 @@ test("re-entrancy: a second scan while a game is driving is a no-op for that gam
       return { ok: true };
     },
     appendAudit: async () => {},
+    stampHeartbeats: async () => {},
   });
 
   const first = scanOnce();
@@ -1240,6 +1271,198 @@ test("aiStillActive accepts the offered-battle BATTLE phase for the seat's own a
 });
 
 // ---------------------------------------------------------------------------
+// Phase 3 watchdog: heartbeat stamps, stale-boot adoption, CAS races. The
+// harness clock is pinned so beat ages are exact.
+// ---------------------------------------------------------------------------
+
+const NOW = 10_000_000;
+
+function foreignCandidates(
+  beat: AiDriverBeat | null,
+  over: Partial<AiDriverCandidate> = {},
+): AiDriverCandidate[] {
+  return [
+    {
+      name: GAME,
+      id: 1,
+      active_player_id: 1,
+      aiDriverToken: "dead-boot-token",
+      aiDriverBeat: beat,
+      updatedAt: null,
+      ...over,
+    },
+  ];
+}
+
+function recorderAdopt(
+  adoptions: Array<{ candidate: AiDriverCandidate; previousToken: string }>,
+  result: boolean,
+) {
+  return async (candidate: AiDriverCandidate, previousToken: string): Promise<boolean> => {
+    adoptions.push({ candidate, previousToken });
+    return result;
+  };
+}
+
+test("owned candidates are heartbeat-stamped each scan; foreign tokens are not", async () => {
+  const world = aiTurnWorld([makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { movementRemaining: 0 })]);
+  const harness = installHarness(world, {
+    driverToken: "boot-A",
+    candidates: [{ name: GAME, id: 1, active_player_id: 1, aiDriverToken: "boot-A" }],
+  });
+
+  await scanOnce();
+
+  assert.equal(harness.stamps.length, 1, "the owned candidate was stamped");
+  assert.equal(harness.stamps[0].aiDriverToken, "boot-A");
+  assert.equal(harness.endTurns.length, 1, "the owned game drives normally");
+});
+
+test("a foreign token with a fresh beat is left completely alone", async () => {
+  const world = aiTurnWorld([makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { movementRemaining: 0 })]);
+  const adoptions: Array<{ candidate: AiDriverCandidate; previousToken: string }> = [];
+  const harness = installHarness(world, {
+    now: () => NOW,
+    watchdogStaleMs: 60_000,
+    candidates: foreignCandidates({ token: "dead-boot-token", at: NOW - 1_000 }),
+    adoptGame: recorderAdopt(adoptions, true),
+  });
+
+  await scanOnce();
+
+  assert.equal(adoptions.length, 0, "no adoption attempted for a fresh beat");
+  assert.equal(harness.stamps.length, 0, "foreign games are never stamped");
+  assert.equal(harness.commands.length, 0, "a foreign game is never driven");
+  assert.equal(harness.audits.length, 0);
+});
+
+test("a foreign token with a stale beat is adopted, audited, and driven", async () => {
+  const world = aiTurnWorld([makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { movementRemaining: 0 })]);
+  const adoptions: Array<{ candidate: AiDriverCandidate; previousToken: string }> = [];
+  const harness = installHarness(world, {
+    now: () => NOW,
+    watchdogStaleMs: 60_000,
+    candidates: foreignCandidates({ token: "dead-boot-token", at: NOW - 61_000 }),
+    adoptGame: recorderAdopt(adoptions, true),
+  });
+
+  await scanOnce();
+
+  assert.equal(adoptions.length, 1, "the stale-boot game was adopted");
+  assert.equal(adoptions[0].previousToken, "dead-boot-token");
+  assert.equal(harness.audits.length, 1, "exactly one adoption audit row");
+  assert.equal(harness.audits[0].kind, AI_TURN_ADOPTED_AUDIT_KIND);
+  const payload = harness.audits[0].payload as {
+    gameId: number;
+    fromToken: string;
+    toToken: string;
+    beatAt: number | null;
+    beatAgeMs: number | null;
+  };
+  assert.equal(payload.gameId, 1);
+  assert.equal(payload.fromToken, "dead-boot-token");
+  assert.ok(typeof payload.toToken === "string" && payload.toToken.length > 0, "toToken is this boot");
+  assert.equal(payload.beatAt, NOW - 61_000);
+  assert.equal(payload.beatAgeMs, 61_000);
+  assert.equal(harness.endTurns.length, 1, "the adopted turn is driven to its EndTurn");
+  assert.equal(harness.stamps.length, 1, "the adopted game is stamped as ours after adoption");
+});
+
+test("a foreign token with NO beat adopts on games.updated_at staleness, not before", async () => {
+  const world = aiTurnWorld([makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { movementRemaining: 0 })]);
+  const adoptions: Array<{ candidate: AiDriverCandidate; previousToken: string }> = [];
+  const harness = installHarness(world, {
+    now: () => NOW,
+    watchdogStaleMs: 60_000,
+    candidates: foreignCandidates(null, { updatedAt: NOW - 1_000 }),
+    adoptGame: recorderAdopt(adoptions, true),
+  });
+
+  await scanOnce();
+  assert.equal(adoptions.length, 0, "a freshly-updated beat-less row belongs to a live pre-watchdog boot");
+  assert.equal(harness.commands.length, 0);
+
+  const harness2 = installHarness(world, {
+    now: () => NOW,
+    watchdogStaleMs: 60_000,
+    candidates: foreignCandidates(null, { updatedAt: NOW - 61_000 }),
+    adoptGame: recorderAdopt(adoptions, true),
+  });
+  await scanOnce();
+  assert.equal(adoptions.length, 1, "a silent beat-less row is adopted");
+  assert.equal(harness2.audits[0]?.kind, AI_TURN_ADOPTED_AUDIT_KIND);
+  const payload = harness2.audits[0].payload as { beatAt: number | null; beatAgeMs: number | null };
+  assert.equal(payload.beatAt, null);
+  assert.equal(payload.beatAgeMs, null);
+});
+
+test("a lost adoption CAS drives nothing", async () => {
+  const world = aiTurnWorld([makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { movementRemaining: 0 })]);
+  const adoptions: Array<{ candidate: AiDriverCandidate; previousToken: string }> = [];
+  const harness = installHarness(world, {
+    now: () => NOW,
+    watchdogStaleMs: 60_000,
+    candidates: foreignCandidates({ token: "dead-boot-token", at: NOW - 61_000 }),
+    adoptGame: recorderAdopt(adoptions, false),
+  });
+
+  await scanOnce();
+
+  assert.equal(adoptions.length, 1, "the CAS was attempted");
+  assert.equal(harness.commands.length, 0, "a lost race drives nothing");
+  assert.equal(harness.stamps.length, 0);
+  assert.equal(harness.audits.length, 0, "no audit row for a lost race");
+});
+
+test("a legacy NULL-token candidate never enters the watchdog", async () => {
+  const world = aiTurnWorld([makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { movementRemaining: 0 })]);
+  const adoptions: Array<{ candidate: AiDriverCandidate; previousToken: string }> = [];
+  const harness = installHarness(world, {
+    now: () => NOW,
+    watchdogStaleMs: 60_000,
+    candidates: foreignCandidates(null, { aiDriverToken: null, updatedAt: NOW - 10_000_000 }),
+    adoptGame: recorderAdopt(adoptions, true),
+  });
+
+  await scanOnce();
+
+  assert.equal(adoptions.length, 0, "NULL tokens use the existing any-boot adoption, not the watchdog");
+  assert.equal(harness.endTurns.length, 1, "the legacy game drives normally");
+});
+
+test("the stale threshold scales with the candidate count (single-flight scan lag)", async () => {
+  const world = aiTurnWorld([makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { movementRemaining: 0 })]);
+  const adoptions: Array<{ candidate: AiDriverCandidate; previousToken: string }> = [];
+  // N=2: threshold = max(1_000, 2*(5_000+5_000)+5_000) = 25_000 -> beat age
+  // 20_000 stays fresh. N=1: threshold = 15_000 -> the same age is stale.
+  const pairHarness = installHarness(world, {
+    now: () => NOW,
+    watchdogStaleMs: 1_000,
+    passDeadlineMs: 5_000,
+    scanIntervalMs: 5_000,
+    candidates: [
+      ...foreignCandidates({ token: "dead-boot-token", at: NOW - 20_000 }),
+      { name: "drv-owned", id: 2, active_player_id: 1, aiDriverToken: undefined, aiDriverBeat: null, updatedAt: null },
+    ],
+    adoptGame: recorderAdopt(adoptions, true),
+  });
+  await scanOnce();
+  assert.equal(adoptions.length, 0, "N=2 keeps the 20s-old beat fresh");
+  assert.ok(pairHarness.commands.every((c) => c.gameName !== GAME), "the foreign game was never driven");
+
+  installHarness(world, {
+    now: () => NOW,
+    watchdogStaleMs: 1_000,
+    passDeadlineMs: 5_000,
+    scanIntervalMs: 5_000,
+    candidates: foreignCandidates({ token: "dead-boot-token", at: NOW - 20_000 }),
+    adoptGame: recorderAdopt(adoptions, true),
+  });
+  await scanOnce();
+  assert.equal(adoptions.length, 1, "N=1 makes the same age stale");
+});
+
+// ---------------------------------------------------------------------------
 // Default-seam coverage (real Postgres): the candidate scan SQL + the
 // loadGame hydration against a real row.
 // ---------------------------------------------------------------------------
@@ -1269,7 +1492,7 @@ test("default loadCandidates/loadGame pick up flagged games with an active AI se
   try {
     await seedRow(flagged, { aiDriver: "server" }, 1);
     await seedRow(unflagged, {}, 1);
-    await seedRow(foreign, { aiDriver: "server", aiDriverToken: "another-servers-boot-token" }, 1);
+    await seedRow(foreign, { aiDriver: "server", aiDriverToken: "another-servers-boot-token", aiDriverBeat: { token: "another-servers-boot-token", at: Date.now() } }, 1);
     resetAiDriver();
     configureAiDriver({
       scanIntervalMs: 60_000,
@@ -1294,7 +1517,7 @@ test("default loadCandidates/loadGame pick up flagged games with an active AI se
     );
     assert.ok(
       !endTurns.some((c) => c.gameName === foreign),
-      "a flagged game stamped with another server's boot token is never driven (default SQL + token filter)",
+      "a flagged game stamped with another server's boot token is never driven (default SQL + token filter; a fresh beat means a live peer owns it)",
     );
     const active = await pool.query<{ active_player_id: number }>(
       `SELECT active_player_id FROM games WHERE name = $1`,
@@ -1305,5 +1528,60 @@ test("default loadCandidates/loadGame pick up flagged games with an active AI se
     await cleanupRow(flagged);
     await cleanupRow(unflagged);
     await cleanupRow(foreign);
+  }
+});
+
+test("default watchdog SQL: a stale-beat foreign row is adopted via the real CAS; a fresh-beat row is not", async () => {
+  const fresh = `test-ai-wd-fresh-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const stale = `test-ai-wd-stale-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const endTurns: Command[] = [];
+  const audits: Array<{ gameName: string; kind: string; payload: unknown }> = [];
+  try {
+    await seedRow(fresh, { aiDriver: "server", aiDriverToken: "another-boot", aiDriverBeat: { token: "another-boot", at: Date.now() } }, 1);
+    await seedRow(stale, { aiDriver: "server", aiDriverToken: "another-boot", aiDriverBeat: { token: "another-boot", at: Date.now() - 10 * 60_000 } }, 1);
+    await pool.query(`UPDATE games SET updated_at = now() - interval '10 minutes' WHERE name = $1`, [stale]);
+    resetAiDriver();
+    configureAiDriver({
+      scanIntervalMs: 60_000,
+      pacingMs: 0,
+      now: () => Date.now(),
+      runCommand: async (command) => {
+        if (command.kind === "EndTurn") endTurns.push(command);
+        return { ok: true };
+      },
+      appendAudit: async (gameName, kind, payload) => {
+        audits.push({ gameName, kind, payload });
+      },
+      // The DEFAULT SQL runs, but ONLY the stale fixture may adopt: shared-
+      // game_db rows of other boots are off-limits to this test process.
+      stampHeartbeats: (stamped) => defaultStampHeartbeats(stamped),
+      adoptGame: (candidate, previousToken) =>
+        candidate.name === stale ? defaultAdoptGame(candidate, previousToken) : Promise.resolve(false),
+    });
+
+    await scanOnce();
+
+    const freshRow = await pool.query<{ token: string | null; beat: unknown }>(
+      `SELECT lobby->>'aiDriverToken' AS token, lobby->'aiDriverBeat' AS beat FROM games WHERE name = $1`,
+      [fresh],
+    );
+    assert.equal(freshRow.rows[0].token, "another-boot", "a live peer's game is never restamped");
+    assert.ok(endTurns.every((c) => c.gameName !== fresh), "the fresh-beat game was never driven");
+
+    const staleRow = await pool.query<{ token: string | null; beat: { token?: string; at?: number } | null }>(
+      `SELECT lobby->>'aiDriverToken' AS token, lobby->'aiDriverBeat' AS beat FROM games WHERE name = $1`,
+      [stale],
+    );
+    assert.equal(staleRow.rows[0].token, aiDriverBootToken(), "the CAS restamped the row to THIS boot's token");
+    assert.equal(staleRow.rows[0].beat?.token, aiDriverBootToken(), "the adoption wrote this boot's beat");
+    assert.ok(endTurns.some((c) => c.gameName === stale), "the adopted game was driven to EndTurn");
+    const adoption = audits.find((a) => a.gameName === stale && a.kind === AI_TURN_ADOPTED_AUDIT_KIND);
+    assert.ok(adoption, "exactly the adoption audit was appended for the stale fixture");
+    const payload = adoption.payload as { fromToken: string; beatAgeMs: number | null };
+    assert.equal(payload.fromToken, "another-boot");
+    assert.ok(payload.beatAgeMs !== null && payload.beatAgeMs > 9 * 60_000, "the beat age reflects the 10-minute-old stamp");
+  } finally {
+    await cleanupRow(fresh);
+    await cleanupRow(stale);
   }
 });

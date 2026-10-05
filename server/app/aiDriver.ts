@@ -18,7 +18,7 @@ import {
   type SettlementBattleOutcome,
   type UnitType,
 } from "@heroes/engine";
-import { pool } from "../persistence/db";
+import { pool, type PoolClient } from "../persistence/db";
 import { hydrateGame } from "../persistence/hydrate";
 import {
   TURN_SKIPPED_AUDIT_KIND,
@@ -87,7 +87,26 @@ export const AI_DEFENDER_WAIT_TIMEOUT_MS = 300_000;
 /** Audit kind for the force-resolve above (turn_skipped convention). */
 export const AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND = "ai_defender_wait_expired";
 
+/**
+ * Phase 3 watchdog: floor for how stale an owned candidate's
+ * lobby.aiDriverBeat (or, for beat-less pre-watchdog rows, games.updated_at)
+ * may be before another boot may adopt its AI turn. Scaled up with the
+ * candidate count (watchdogStaleThresholdMs) because scanOnce is
+ * single-flight: with many active flagged games a healthy boot's stamps lag
+ * by up to ~N pass deadlines between scans.
+ */
+export const AI_TURN_HEARTBEAT_STALE_MS = 60_000;
+
+/** Audit kind for a watchdog adoption (the turn_skipped convention). */
+export const AI_TURN_ADOPTED_AUDIT_KIND = "ai_turn_adopted";
+
 const DEFAULT_SCAN_INTERVAL_MS = 5_000;
+
+/** lobby.aiDriverBeat: the owning boot's liveness stamp (Phase 3 watchdog). */
+export interface AiDriverBeat {
+  token: string;
+  at: number;
+}
 
 /** Wire shape of one driver candidate row. */
 export interface AiDriverCandidate {
@@ -99,6 +118,14 @@ export interface AiDriverCandidate {
    * the game. Absent/null on legacy pre-token flagged games (adoption path).
    */
   aiDriverToken?: string | null;
+  /**
+   * lobby.aiDriverBeat: the owning boot's liveness stamp. Null when absent
+   * or malformed -- absence makes a foreign-token row adoptable once its
+   * games.updated_at also goes stale (pre-watchdog rows).
+   */
+  aiDriverBeat?: AiDriverBeat | null;
+  /** games.updated_at as epoch ms when parseable; the beat-less adoption guard. */
+  updatedAt?: number | null;
 }
 
 /** What the driver needs per (re-)hydration: the state plus the row bits the state does not carry. */
@@ -173,7 +200,18 @@ interface ResolvedConfig {
   loadCatalog: () => Promise<Record<string, UnitType>>;
   runCommand: (command: Command) => Promise<AiDriverCommandOutcome>;
   appendAudit: (gameName: string, kind: string, payload: unknown) => Promise<void>;
+  watchdogStaleMs: number;
+  stampHeartbeats: (candidates: AiDriverCandidate[]) => Promise<void>;
+  adoptGame: (candidate: AiDriverCandidate, previousToken: string) => Promise<boolean>;
   withGameLock: WithGameLock;
+}
+
+function beatFrom(value: unknown): AiDriverBeat | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { token, at } = value as { token?: unknown; at?: unknown };
+  if (typeof token !== "string" || token === "") return null;
+  if (typeof at !== "number" || !Number.isFinite(at)) return null;
+  return { token, at };
 }
 
 async function defaultLoadCandidates(): Promise<AiDriverCandidate[]> {
@@ -183,19 +221,23 @@ async function defaultLoadCandidates(): Promise<AiDriverCandidate[]> {
     active_player_id: number;
     players: Player[];
     ai_driver_token: string | null;
+    ai_driver_beat: unknown;
+    updated_at: Date;
   }>(
-    `SELECT name, id, active_player_id, players, lobby->>'aiDriverToken' AS ai_driver_token
+    `SELECT name, id, active_player_id, players, updated_at, lobby->>'aiDriverToken' AS ai_driver_token, lobby->'aiDriverBeat' AS ai_driver_beat
      FROM games WHERE lobby->>'aiDriver' = 'server'`,
   );
   // Hydrate derives AI_TURN exactly when the active player's faction is "ai"
   // (packages/engine/src/hydrate.ts), so this filter IS the phase gate.
   return r.rows
     .filter((row) => row.players.find((p) => p.id === row.active_player_id)?.faction === "ai")
-    .map(({ name, id, active_player_id, ai_driver_token }) => ({
-      name,
-      id,
-      active_player_id,
-      aiDriverToken: ai_driver_token,
+    .map((row) => ({
+      name: row.name,
+      id: row.id,
+      active_player_id: row.active_player_id,
+      aiDriverToken: row.ai_driver_token,
+      aiDriverBeat: beatFrom(row.ai_driver_beat),
+      updatedAt: row.updated_at instanceof Date ? row.updated_at.getTime() : null,
     }));
 }
 
@@ -261,6 +303,40 @@ async function defaultAppendAudit(gameName: string, kind: string, payload: unkno
   );
 }
 
+// Phase 3 watchdog, write side: owner-guarded, single-statement lobby
+// writes (gameRepo.saveLobby is deliberately not used -- whole-lobby
+// read-modify-write is race-prone across processes and repositories/ is
+// import-forbidden from server/app/). updated_at is deliberately NOT
+// bumped: a 5 s heartbeat must not churn last-modified semantics.
+export async function defaultStampHeartbeats(candidates: AiDriverCandidate[]): Promise<void> {
+  const owned = candidates.filter(
+    (c) => c.aiDriverToken !== undefined && c.aiDriverToken !== null && c.aiDriverToken === cfg.driverToken,
+  );
+  if (owned.length === 0) return;
+  await pool.query(
+    `UPDATE games
+     SET lobby = jsonb_set(lobby, '{aiDriverBeat}', jsonb_build_object('token', $1::text, 'at', $2::bigint))
+     WHERE id = ANY($3::bigint[]) AND lobby->>'aiDriverToken' = $1::text`,
+    [cfg.driverToken, cfg.now(), owned.map((c) => c.id)],
+  );
+}
+
+export async function defaultAdoptGame(
+  candidate: AiDriverCandidate,
+  previousToken: string,
+): Promise<boolean> {
+  const r = await pool.query(
+    `UPDATE games
+     SET lobby = jsonb_set(
+           jsonb_set(lobby, '{aiDriverToken}', to_jsonb($2::text)),
+           '{aiDriverBeat}',
+           jsonb_build_object('token', $2::text, 'at', $3::bigint))
+     WHERE name = $4 AND id = $5 AND lobby->>'aiDriverToken' = $1::text`,
+    [previousToken, cfg.driverToken, cfg.now(), candidate.name, candidate.id],
+  );
+  return (r.rowCount ?? 0) === 1;
+}
+
 /**
  * Cross-process mutual exclusion for the drive (first-writer-wins across
  * dev servers sharing one game_db): a per-game Postgres ADVISORY lock.
@@ -283,7 +359,16 @@ async function defaultWithGameLock<T>(
   gameId: number,
   drive: () => Promise<T>,
 ): Promise<GameLockOutcome<T>> {
-  const client = await pool.connect();
+  let client: PoolClient;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    // Phase 3 pool hardening: connectionTimeoutMillis makes an exhausted
+    // pool fail fast; that is the same "cannot take the lock now" outcome
+    // as a held advisory lock -- skip the game this scan.
+    console.warn(`[aiDriver] "${gameName}" pool connect failed (skipping this scan):`, err);
+    return { locked: false };
+  }
   let acquired = false;
   try {
     const r = await client.query<{ locked: boolean }>(
@@ -322,6 +407,9 @@ function resolveConfig(): ResolvedConfig {
     loadCatalog: defaultLoadCatalog,
     runCommand: defaultRunCommand,
     appendAudit: defaultAppendAudit,
+    watchdogStaleMs: AI_TURN_HEARTBEAT_STALE_MS,
+    stampHeartbeats: defaultStampHeartbeats,
+    adoptGame: defaultAdoptGame,
     withGameLock: defaultWithGameLock,
   };
 }
@@ -343,6 +431,12 @@ export interface AiDriverOptions {
   loadCatalog?: () => Promise<Record<string, UnitType>>;
   runCommand?: (command: Command) => Promise<AiDriverCommandOutcome>;
   appendAudit?: (gameName: string, kind: string, payload: unknown) => Promise<void>;
+  /** Override of the watchdog staleness floor (test seam; default AI_TURN_HEARTBEAT_STALE_MS). */
+  watchdogStaleMs?: number;
+  /** Override of the heartbeat stamp (test seam; default real SQL). */
+  stampHeartbeats?: (candidates: AiDriverCandidate[]) => Promise<void>;
+  /** Override of the adoption CAS (test seam; default real SQL). */
+  adoptGame?: (candidate: AiDriverCandidate, previousToken: string) => Promise<boolean>;
   /** Override of the per-game advisory-lock guard (test seam; default real SQL). */
   withGameLock?: WithGameLock;
 }
@@ -938,11 +1032,70 @@ function driverOwnsCandidate(candidate: AiDriverCandidate): boolean {
   return token === undefined || token === null || token === "" || token === cfg.driverToken;
 }
 
+function watchdogStaleThresholdMs(candidateCount: number): number {
+  return Math.max(
+    cfg.watchdogStaleMs,
+    candidateCount * (cfg.passDeadlineMs + 5_000) + cfg.scanIntervalMs,
+  );
+}
+
+/**
+ * Phase 3 watchdog: a foreign-token candidate is adoptable when its beat is
+ * stale, or -- for rows that predate beats -- when the row itself has gone
+ * silent (games.updated_at older than the same threshold; an actively
+ * driven turn persists on every command). Recovery is a won CAS restamp
+ * followed by the ordinary drive; if the old boot finished the turn before
+ * dying, aiStillActive yields turn_lost and adoption was harmless.
+ */
+async function maybeAdoptStaleCandidate(
+  candidate: AiDriverCandidate,
+  candidateCount: number,
+): Promise<boolean> {
+  const token = candidate.aiDriverToken;
+  if (token === undefined || token === null || token === "") return false;
+  const beat = candidate.aiDriverBeat ?? null;
+  const staleMs = watchdogStaleThresholdMs(candidateCount);
+  const beatAgeMs = beat === null ? null : cfg.now() - beat.at;
+  const updatedAtAgeMs = candidate.updatedAt == null ? null : cfg.now() - candidate.updatedAt;
+  const stale =
+    beat !== null
+      ? beatAgeMs !== null && beatAgeMs > staleMs
+      : updatedAtAgeMs === null || updatedAtAgeMs > staleMs;
+  if (!stale) return false;
+  let adopted = false;
+  try {
+    adopted = await cfg.adoptGame(candidate, token);
+  } catch (err) {
+    console.warn(`[aiDriver] "${candidate.name}" watchdog adoption failed:`, err);
+    return false;
+  }
+  if (!adopted) return false;
+  console.info(
+    `[aiDriver] watchdog adopted "${candidate.name}" from boot token ${token.slice(0, 8)}... (beat ${
+      beatAgeMs === null ? "absent" : `${Math.round(beatAgeMs / 1000)}s old`
+    })`,
+  );
+  try {
+    await cfg.appendAudit(candidate.name, AI_TURN_ADOPTED_AUDIT_KIND, {
+      gameId: candidate.id,
+      fromToken: token,
+      toToken: cfg.driverToken,
+      beatAt: beat?.at ?? null,
+      beatAgeMs,
+    });
+  } catch (err) {
+    console.error(`[aiDriver] "${candidate.name}" adoption audit append failed:`, err);
+  }
+  return true;
+}
+
 /**
  * One scanner pass: find flagged games whose active seat is an AI faction
  * (== hydrated AI_TURN) and drive each one's whole turn, sequentially, with
  * per-game in-flight + boot-token filtering + cross-process advisory-lock
- * isolation. Idempotent; safe on any cadence.
+ * isolation. Idempotent; safe on any cadence. Phase 3: owned candidates are
+ * heartbeat-stamped, and foreign-token candidates whose beat/updated_at
+ * went stale are CAS-adopted before driving.
  */
 export async function scanOnce(): Promise<void> {
   let candidates: AiDriverCandidate[];
@@ -954,7 +1107,15 @@ export async function scanOnce(): Promise<void> {
   }
   for (const candidate of candidates) {
     if (inFlight.has(candidate.name)) continue;
-    if (!driverOwnsCandidate(candidate)) continue;
+    if (!driverOwnsCandidate(candidate)) {
+      const adopted = await maybeAdoptStaleCandidate(candidate, candidates.length);
+      if (!adopted) continue;
+    }
+    try {
+      await cfg.stampHeartbeats([candidate]);
+    } catch (err) {
+      console.warn(`[aiDriver] heartbeat stamp for "${candidate.name}" failed:`, err);
+    }
     const run = cfg
       .withGameLock(candidate.name, candidate.id, () => driveGameTurn(candidate))
       .then((held): AiDriveOutcome => {
