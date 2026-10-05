@@ -21,6 +21,7 @@ import griffin from "../resources/units/icons/griffin.png?url";
 import hydra from "../resources/units/icons/hydra.png?url";
 import wisp from "../resources/units/icons/wisp.png?url";
 import blackDragon from "../resources/units/icons/black_dragon.png?url";
+import mage from "../resources/units/icons/mage.png?url";
 import warhound from "../resources/units/icons/warhound.png?url";
 import giantEagle from "../resources/units/icons/giant_eagle.png?url";
 import eaglePrince from "../resources/units/icons/eagle_prince.png?url";
@@ -59,6 +60,7 @@ const KNOWN: Record<string, string> = {
   hydra,
   wisp,
   black_dragon: blackDragon,
+  mage,
   warhound,
   giant_eagle: giantEagle,
   eagle_prince: eaglePrince,

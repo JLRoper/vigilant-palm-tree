@@ -13,9 +13,8 @@ import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { UNIT_CATALOG_IDS } from "../helpers/unitIds";
 
-// The known, deliberate icon gap: mage still ships the placeholder bust
-// (no dedicated icon PNG). Everything else in the catalog must be wired.
-const EXPECTED_ICON_GAPS: readonly string[] = ["mage"];
+// No deliberate gaps: every unit-catalog id must ship its dedicated icon bust.
+const EXPECTED_ICON_GAPS: readonly string[] = [];
 
 const UNIT_ICON_IDS = UNIT_CATALOG_IDS.filter(
   (id) => !EXPECTED_ICON_GAPS.includes(id),
