@@ -139,8 +139,12 @@ export function screenToGridCell(
   const wdy = canvasY - layout.screenOrigin.y - layout.gridOrigin.y * layout.tileScale;
   const gxf = wdx / layout.tw + wdy / layout.td;
   const gyf = wdy / layout.td - wdx / layout.tw;
-  const gx = Math.floor(gxf);
-  const gy = Math.floor(gyf);
+  // Integer coords are the drawn diamonds' CENTERS, so each cell's pick region
+  // is the half-cell around it. Without the +0.5 shift the whole mapping is off
+  // by half a cell (24 px down at tileScale 1): only the bottom of a diamond
+  // selected its own cell and most of it selected a neighbour.
+  const gx = Math.floor(gxf + 0.5);
+  const gy = Math.floor(gyf + 0.5);
   if (gx < 0 || gx >= size || gy < 0 || gy >= size) return null;
   return { gx, gy };
 }
