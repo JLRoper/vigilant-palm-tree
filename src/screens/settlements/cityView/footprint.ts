@@ -5,7 +5,7 @@ import { buildingFootprintFromRegistry } from "@heroes/engine";
 //
 // The registry numbers are not always whole: the level-2/3 overrides for
 // granary / bank / goldMine / woodcutterHut are a visual 1.5x1.5 while
-// `coversCell` (cityBuildingDraw/primitives.ts) blocks every cell they touch --
+// `coversCell` (core/cityGrid.ts) blocks every cell they touch --
 // `gx < b.gx + 1.5` admits gx+0 and gx+1. So the number a player cares about
 // ("how much of my town does this eat") is the ceiling, and a 2x2 warehouse
 // that became 2x2 in the registry has to say so wherever the palette does.

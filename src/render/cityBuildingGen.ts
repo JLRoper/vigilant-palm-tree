@@ -1,7 +1,8 @@
-﻿import type { BuildingDef, BuildingKind, GenerationStyle } from "./cityBuildingDraw";
+﻿import type { BuildingDef, BuildingKind, GenerationStyle } from "@heroes/contracts";
 import type { CityViewSize } from "@heroes/engine";
 import { buildingFootprintFromRegistry } from "@heroes/engine";
-import { STYLE_IDS, type BuildingStyleId } from "./buildingStyles";
+
+const STYLE_IDS: readonly GenerationStyle[] = ["classic", "blocky", "crystalline", "organic", "industrial"];
 
 export type GenerationPattern =
   | "denseUrban"
@@ -41,7 +42,7 @@ type EnrichFn = (
   style: GenerationStyle,
 ) => void;
 
-const STYLE_ENRICHERS: Partial<Record<BuildingStyleId, EnrichFn>> = {
+const STYLE_ENRICHERS: Partial<Record<GenerationStyle, EnrichFn>> = {
   organic: enrichOrganic,
   blocky: enrichBlocky,
 };

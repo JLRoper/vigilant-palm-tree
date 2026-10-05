@@ -7,8 +7,8 @@ import { createSkyboxProvider } from "../../../render/skybox";
 import type { Paint2DDep } from "../../../render/scene/paint2d/deps";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { SpriteProvider } from "../../../render/assets";
-import type { BuildingDef, GenerationStyle } from "../../../render/cityBuildingDraw";
-import { coversCell, buildingFootprint } from "../../../render/cityBuildingDraw";
+import type { BuildingDef, GenerationStyle } from "@heroes/contracts";
+import { buildingFootprint, coversCell } from "../../../core/cityGrid";
 import { generateBuildings, type GenerationPattern } from "../../../render/cityBuildingGen";
 import { starterCityOnOpen } from "@heroes/engine";
 import { advanceChargedOnCommit, netDelta, resetChargedToPlacerNet } from "./netCost";
@@ -200,7 +200,7 @@ export class CityView {
     this.selectionAnchor = null;
     this.preCitySelection = this.getSelection?.() ?? null;
 
-    const starter = starterCityOnOpen({ size: this.size, style: this.style, existing: buildings });
+    const starter = starterCityOnOpen({ size: this.size, style: "pixel" as GenerationStyle, existing: buildings });
     const initialBuildings = starter.buildings;
     // A settlement with no persisted buildings gets the explicit starter set
     // committed FREE (townHall L1 + farm field + 2 houses + two woodcutter's
@@ -218,7 +218,7 @@ export class CityView {
     // what it is for.
     this.freeInitialLayout = starter.free;
     this.committedInitialLayout = false;
-    this.placer.init(size, { gx: Math.floor(size / 2), gy: Math.floor(size / 2) }, initialBuildings, this.style);
+    this.placer.init(size, { gx: Math.floor(size / 2), gy: Math.floor(size / 2) }, initialBuildings);
     this.refreshAffordability();
     this.placer.setOnConfirm(() => this.persistBuildings());
     this.placer.setOnPlaced(() => this.persistBuildings());
@@ -281,8 +281,6 @@ export class CityView {
       cityMines: this.cityMines,
       upgrades: this.getSettlement()?.upgrade,
       buildings: this.syncedBuildings(),
-      style: this.style,
-      pattern: this.pattern,
       ghost,
       selectedKeys: this.selectedKeys,
       labelOffsetY: toolbarHeight(),
@@ -479,7 +477,7 @@ export class CityView {
     const buildings = this.generateBuildingsArray();
     this.placer.cancelPlacement();
     this.placer.hidePalette();
-    this.placer.init(this.size, { gx: Math.floor(this.size / 2), gy: Math.floor(this.size / 2) }, buildings, this.style);
+    this.placer.init(this.size, { gx: Math.floor(this.size / 2), gy: Math.floor(this.size / 2) }, buildings);
     this.chargedNet = resetChargedToPlacerNet(this.placer.getNetCost());
     this.updateBuildButton();
   }

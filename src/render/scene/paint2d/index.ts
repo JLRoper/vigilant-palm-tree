@@ -17,14 +17,13 @@
 //
 // See src/render/scene/paint2d/README.md for the full boundary rationale.
 
-import type { Paint2DDep, ResolvedSpriteDescriptor } from "./deps";
+import type { Paint2DDep, ResolvedSprite, ResolvedSpriteDescriptor } from "./deps";
 import {
   hexPath,
 } from "./geometry";
 import { HEX_SIZE } from "../../../core/hex";
 import { decorationSeed } from "../../decorationSeed";
 import { TERRAIN_COLORS } from "../../../map/terrain";
-import { drawBuildingInto } from "./buildings";
 import { RESOURCE_PAL } from "../../palettes";
 import type {
   BattleAiActingRingNode,
@@ -887,21 +886,60 @@ export function paintCityMine(ctx: CanvasRenderingContext2D, node: CityMineNode,
   ctx.restore();
 }
 
+// Sprite-only city-building draw, the survivor of paint2d/buildings.ts's
+// drawBuildingInto(): buildings render exclusively from `building.pixel.*`
+// sprites (the five procedural style leaves were deleted with the style
+// system), so a resolver miss draws nothing. The sizing quirk is carried over
+// verbatim: the `fitHeight` branch scales off `tw`, not `td`.
+function drawCitySpriteInto(
+  ctx: CanvasRenderingContext2D,
+  sprite: ResolvedSprite | undefined,
+  x: number,
+  y: number,
+  tw: number,
+  td: number,
+): void {
+  if (!sprite || !sprite.ready) return;
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  const drawable = sprite.drawable;
+  const dw = (drawable as HTMLImageElement).naturalWidth ?? (drawable as HTMLCanvasElement).width;
+  const dh = (drawable as HTMLImageElement).naturalHeight ?? (drawable as HTMLCanvasElement).height;
+  const desc = sprite.descriptor;
+  const aspect = dw / dh;
+  let sw: number;
+  let sh: number;
+  if (desc.sizing.kind === "fitWidth") {
+    sw = tw * desc.sizing.hexSizeMul;
+    sh = sw / aspect;
+  } else if (desc.sizing.kind === "fitHeight") {
+    sh = tw * desc.sizing.hexSizeMul;
+    sw = sh * aspect;
+  } else {
+    sw = tw * 0.85;
+    sh = (tw * 0.85) / aspect;
+  }
+  const dx = x - sw / 2;
+  const dy = desc.anchor === "center"
+    ? y - sh / 2 + (desc.anchorOffsetY ?? 0)
+    : y + td * 0.5 - sh + (desc.anchorOffsetY ?? 0);
+  ctx.drawImage(drawable, dx, dy, sw, sh);
+  ctx.restore();
+}
+
 export function paintCityBuilding(ctx: CanvasRenderingContext2D, node: CityBuildingNode, deps: Paint2DDep): void {
   const sprite = node.constructionStage
     ? deps.sprite.resolveSprite(`building.pixel.underConstruction.${node.constructionStage}`)
-    : deps.sprite.resolveSpriteForBuilding(node.style, node.buildingKind, node.level);
-  drawBuildingInto(
+    : node.farmStyle !== undefined
+      ? deps.sprite.resolveSprite(`building.${node.farmStyle}.${node.buildingKind}.${node.level}`)
+      : deps.sprite.resolveSpriteForBuilding(node.buildingKind, node.level);
+  drawCitySpriteInto(
     ctx,
     sprite,
     node.center.x,
     node.center.y,
     node.halfWidth * 2,
     node.halfHeight * 2,
-    node.buildingKind,
-    node.level,
-    node.ownerColor,
-    node.style,
   );
 }
 
@@ -935,17 +973,13 @@ export function paintCityGhostBuilding(ctx: CanvasRenderingContext2D, node: City
   ctx.strokeStyle = node.valid ? CITY_GHOST_VALID_STROKE : CITY_GHOST_INVALID_STROKE;
   ctx.lineWidth = 3;
   ctx.strokeRect(node.center.x - node.halfWidth, node.center.y - node.halfHeight, node.halfWidth * 2, node.halfHeight * 2);
-  drawBuildingInto(
+  drawCitySpriteInto(
     ctx,
-    deps.sprite.resolveSpriteForBuilding(node.style, node.buildingKind, 1),
+    deps.sprite.resolveSpriteForBuilding(node.buildingKind, 1),
     node.center.x,
     node.center.y,
     node.halfWidth * 2,
     node.halfHeight * 2,
-    node.buildingKind,
-    1,
-    node.ownerColor,
-    node.style,
   );
   ctx.restore();
 }

@@ -59,28 +59,6 @@ import resourceStonePileBubbly from "../resources/resource-stone-pile-bubbly.png
 import resourceIronPileBubbly from "../resources/resource-iron-pile-bubbly.png?url";
 import resourceArcanePileBubbly from "../resources/resource-arcane-pile-bubbly.png?url";
 import resourceFoodPileBubbly from "../resources/resource-food-pile-bubbly.png?url";
-import buildingClassicApartment1 from "../resources/buildings/building-classic-apartment-1.png?url";
-import buildingClassicArcheryRange1 from "../resources/buildings/building-classic-archeryRange-1.png?url";
-import buildingClassicBarracks1 from "../resources/buildings/building-classic-barracks-1.png?url";
-import buildingClassicFarmhouse1 from "../resources/buildings/building-classic-farmhouse-1.png?url";
-import buildingClassicHouse1 from "../resources/buildings/building-classic-house-1.png?url";
-import buildingClassicHouse2 from "../resources/buildings/building-classic-house-2.png?url";
-import buildingClassicMageGuild1 from "../resources/buildings/building-classic-mageGuild-1.png?url";
-import buildingClassicMarket1 from "../resources/buildings/building-classic-market-1.png?url";
-import buildingClassicMarket1Variant2 from "../resources/buildings/building-classic-market-1-variant2.png?url";
-import buildingClassicMarket1Variant3 from "../resources/buildings/building-classic-market-1-variant3.png?url";
-import buildingClassicMarket1Variant4 from "../resources/buildings/building-classic-market-1-variant4.png?url";
-import buildingClassicMarket1Variant5 from "../resources/buildings/building-classic-market-1-variant5.png?url";
-import buildingClassicMarket2 from "../resources/buildings/building-classic-market-2.png?url";
-import buildingClassicMine1 from "../resources/buildings/building-classic-mine-1.png?url";
-import buildingClassicSmithy1 from "../resources/buildings/building-classic-smithy-1.png?url";
-import buildingClassicSmithy2 from "../resources/buildings/building-classic-smithy-2.png?url";
-import buildingClassicTower1 from "../resources/buildings/building-classic-tower-1.png?url";
-import buildingClassicTower2 from "../resources/buildings/building-classic-tower-2.png?url";
-import buildingClassicTownHall1 from "../resources/buildings/building-classic-townHall-1.png?url";
-import buildingClassicTownHall2 from "../resources/buildings/building-classic-townHall-2.png?url";
-import buildingBlockyArcheryRange1 from "../resources/buildings/building-blocky-archeryRange-1.png?url";
-import buildingBlockyHouse2 from "../resources/buildings/building-blocky-house-2.png?url";
 import buildingPixelGranary1 from "../resources/buildings/building-pixel-granary-1.png?url";
 import buildingPixelGranary2 from "../resources/buildings/building-pixel-granary-2.png?url";
 import buildingPixelGranary3 from "../resources/buildings/building-pixel-granary-3.png?url";
@@ -192,7 +170,6 @@ import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroe
 import { RESOURCES } from "../map/resourceTiles";
 import type { ResourceStyle } from "../state/settings";
 import { HORSE_VARIANT_REGISTRY, type HorseVariantId } from "@heroes/engine";
-import { pickStyleForBuilding } from "@heroes/engine";
 
 export type SpriteKey =
   | `castle.${CastleLevel}`
@@ -351,28 +328,6 @@ export const RESOURCE_PILE_BUBBLY_SPRITES: Record<ResourceType, string> = {
 };
 
 export const BUILDING_SPRITES: Record<string, string> = {
-  "classic.apartment.1": buildingClassicApartment1,
-  "classic.archeryRange.1": buildingClassicArcheryRange1,
-  "classic.barracks.1": buildingClassicBarracks1,
-  "classic.farmhouse.1": buildingClassicFarmhouse1,
-  "classic.house.1": buildingClassicHouse1,
-  "classic.house.2": buildingClassicHouse2,
-  "classic.mageGuild.1": buildingClassicMageGuild1,
-  "classic.market.1": buildingClassicMarket1,
-  "classic.market.1_variant2": buildingClassicMarket1Variant2,
-  "classic.market.1_variant3": buildingClassicMarket1Variant3,
-  "classic.market.1_variant4": buildingClassicMarket1Variant4,
-  "classic.market.1_variant5": buildingClassicMarket1Variant5,
-  "classic.market.2": buildingClassicMarket2,
-  "classic.mine.1": buildingClassicMine1,
-  "classic.smithy.1": buildingClassicSmithy1,
-  "classic.smithy.2": buildingClassicSmithy2,
-  "classic.tower.1": buildingClassicTower1,
-  "classic.tower.2": buildingClassicTower2,
-  "classic.townHall.1": buildingClassicTownHall1,
-  "classic.townHall.2": buildingClassicTownHall2,
-  "blocky.archeryRange.1": buildingBlockyArcheryRange1,
-  "blocky.house.2": buildingBlockyHouse2,
   "pixel.granary.1": buildingPixelGranary1,
   "pixel.granary.2": buildingPixelGranary2,
   "pixel.granary.3": buildingPixelGranary3,
@@ -913,28 +868,6 @@ export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> =
 // for every key regardless of its real footprint, which reproduces the values
 // below; it is an eyeballed baseline, not a strict geometric solve.
 const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
-  "building.classic.apartment.1": 3,
-  "building.classic.archeryRange.1": 10,
-  "building.classic.barracks.1": 11,
-  "building.classic.farmhouse.1": 11,
-  "building.classic.house.1": 4,
-  "building.classic.house.2": 6,
-  "building.classic.mageGuild.1": 5,
-  "building.classic.market.1": 6,
-  "building.classic.market.1_variant2": 3,
-  "building.classic.market.1_variant3": 12,
-  "building.classic.market.1_variant4": 2,
-  "building.classic.market.1_variant5": 0,
-  "building.classic.market.2": 0,
-  "building.classic.mine.1": 0,
-  "building.classic.smithy.1": 4,
-  "building.classic.smithy.2": 4,
-  "building.classic.tower.1": 5,
-  "building.classic.tower.2": 2,
-  "building.classic.townHall.1": 4,
-  "building.classic.townHall.2": 2,
-  "building.blocky.archeryRange.1": 7,
-  "building.blocky.house.2": 7,
   "building.pixel.granary.1": 11,
   "building.pixel.granary.2": 25,
   "building.pixel.granary.3": 19,
@@ -1130,5 +1063,3 @@ export function unitArenaKey(unitTypeId: string, pose: UnitArenaPose): `unit.${s
 export function factionBannerKey(id: FactionId): `faction-banner.${FactionId}` {
   return `faction-banner.${id}`;
 }
-
-export { pickStyleForBuilding };

@@ -153,11 +153,10 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
       return narrowResolvedSprite(provider.resolve(key));
     },
     resolveSpriteForBuilding(
-      style: string,
       kind: BuildingKind,
       level: number,
     ): ResolvedSprite | undefined {
-      const key = buildingKey(style, kind, level) as SpriteKey;
+      const key = buildingKey("pixel", kind, level) as SpriteKey;
       return narrowResolvedSprite(provider.resolve(key));
     },
     resolveSpriteForCastle(

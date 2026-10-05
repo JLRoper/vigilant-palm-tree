@@ -1,5 +1,5 @@
 import { PopupMenu, styleButton } from "@screens/shared/menu";
-import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
+import type { BuildingDef, BuildingKind } from "@heroes/contracts";
 import type { SettlementState } from "../../../state/gameState";
 import {
   buildingLabel,

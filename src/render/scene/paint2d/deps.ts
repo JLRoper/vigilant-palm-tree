@@ -15,7 +15,7 @@
 // rule paint2d-cannot-import-asset-descriptors enforces this at lint time.
 
 import type { ResourceType } from "../../../map/resourceTiles";
-import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase, GenerationStyle } from "@heroes/contracts";
+import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase } from "@heroes/contracts";
 import type { BattleSide } from "@heroes/engine";
 import type { Faction, HeroDirection } from "../../../entities/hero";
 import type { HorseVariant, ResourceStyle } from "../../../state/settings";
@@ -76,7 +76,7 @@ export type UnitArenaPose = "idle" | "attack" | "move";
 export interface Paint2DSpriteResolver {
   resolveSpriteForResource(resource: ResourceType): ResolvedSprite | undefined;
   resolveSpriteForHero(faction: Faction, dir: HeroDirection, variant: HorseVariant, frame?: 0 | 1): ResolvedSprite | undefined;
-  resolveSpriteForBuilding(style: GenerationStyle, kind: BuildingKind, level: number): ResolvedSprite | undefined;
+  resolveSpriteForBuilding(kind: BuildingKind, level: number): ResolvedSprite | undefined;
   resolveSpriteForCastle(level: CastleLevel, variant: CastleVariant): ResolvedSprite | undefined;
   resolveSpriteForUnit(unitTypeId: string, pose: UnitArenaPose): ResolvedSprite | undefined;
   // Escape hatch for tests/fixtures that already have a key in hand. Production

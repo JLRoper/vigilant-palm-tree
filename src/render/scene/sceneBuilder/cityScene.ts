@@ -1,11 +1,9 @@
 import type { CityViewSize } from "@heroes/engine";
-import { buildingConstructionProgress, buildingFootprintFromRegistry, constructionStageFor, farmFieldStyleAt, pickStyleForBuilding, upgradeProgress, upgradeRefs } from "@heroes/engine";
-import type { BuildingDef, BuildingKind, GenerationStyle, UpgradeState } from "@heroes/contracts";
-import { cellOrigin, cellsInDrawOrder, cellToScreen, computeCityScale, TILE_D, TILE_W } from "../../../core/cityGrid";
+import { buildingConstructionProgress, buildingFootprintFromRegistry, constructionStageFor, farmFieldStyleAt, upgradeProgress, upgradeRefs } from "@heroes/engine";
+import type { BuildingDef, BuildingKind, UpgradeState } from "@heroes/contracts";
+import { buildingFootprint, cellOrigin, cellsInDrawOrder, cellToScreen, computeCityScale, TILE_D, TILE_W } from "../../../core/cityGrid";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { GameSettings } from "../../../state/settings";
-import { BUILDING_STYLE_REGISTRY } from "../../buildingStyles";
-import { buildingFootprint } from "../../cityBuildingDraw/primitives";
 import type { SceneNode } from "../types";
 
 // Faithful decomposition of cityRenderer.ts's drawCityView()'s per-frame
@@ -20,10 +18,6 @@ const TIER_LABELS: Record<CityViewSize, string> = {
   15: "15\u00d715 Castle",
 };
 
-const STYLE_LABELS: Record<string, string> = Object.fromEntries(
-  BUILDING_STYLE_REGISTRY.map((s) => [s.id, s.label]),
-);
-
 export interface CitySceneInput {
   viewportW: number;
   viewportH: number;
@@ -34,8 +28,6 @@ export interface CitySceneInput {
   citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
   cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>;
   buildings: BuildingDef[];
-  style: GenerationStyle;
-  pattern: string;
   ghost?: { gx: number; gy: number; kind: BuildingKind; w: number; h: number; valid: boolean } | null;
   selectedKeys?: ReadonlySet<string>;
   /** CSS px to shift the two corner labels down by (the fixed toolbar overlays the canvas top; render must not measure it itself). */
@@ -54,7 +46,7 @@ export interface CitySceneInput {
 export function buildCityScene(input: CitySceneInput): SceneNode[] {
   const {
     viewportW, viewportH, settlementName, size, hover,
-    citySpots, cityMines, buildings, style, pattern, ghost, selectedKeys, citySettings,
+    citySpots, cityMines, buildings, ghost, selectedKeys, citySettings,
     upgrades, labelOffsetY, buildableCells,
   } = input;
   const ownerColor = input.ownerColor ?? "#888888";
@@ -158,7 +150,9 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
       halfWidth: fp.hw,
       halfHeight: fp.hh,
       ownerColor,
-      style: b.kind === "farmField" && b.style === "classic" ? farmFieldStyleAt(settlementName, b.gx, b.gy) : b.style,
+      ...(b.kind === "farmField"
+        ? { farmStyle: farmFieldStyleAt(settlementName, b.gx, b.gy) as "pixel" | "pixel-alt" }
+        : {}),
       selected: selectedKeys?.has(`${b.gx},${b.gy},${b.kind}`) ?? false,
       constructionStage: b.construction
         ? constructionStageFor(buildingConstructionProgress(b))
@@ -168,7 +162,6 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
 
   if (ghost) {
     const fp = buildingFootprint(ghost.gx, ghost.gy, gridOrigin, screenOrigin, tileScale, ghost.w, ghost.h);
-    const ghostStyle = pickStyleForBuilding(ghost.kind, 1, style);
     nodes.push({
       kind: "cityGhostBuilding",
       buildingKind: ghost.kind,
@@ -176,7 +169,6 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
       halfWidth: fp.hw,
       halfHeight: fp.hh,
       ownerColor,
-      style: ghostStyle as GenerationStyle,
       valid: ghost.valid,
     });
   }
@@ -184,7 +176,7 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
   nodes.push({ kind: "cityLabel", text: settlementName, x: 12, y: 12 + labelY, fontPx: 14, alpha: 1 });
   nodes.push({
     kind: "cityLabel",
-    text: `${TIER_LABELS[size]}  \u2014  ${STYLE_LABELS[style]}  \u2014  ${pattern}`,
+    text: TIER_LABELS[size],
     x: 12,
     y: 30 + labelY,
     fontPx: 11,

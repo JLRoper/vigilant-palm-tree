@@ -1,9 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildingFootprintFromRegistry, farmFieldStyleAt, pickStyleForBuilding } from "@heroes/engine";
+import { buildingFootprintFromRegistry, farmFieldStyleAt } from "@heroes/engine";
 import type { BuildingDef } from "@heroes/contracts";
-import { cellOrigin, cellToScreen, computeCityScale, TILE_D, TILE_W } from "../../src/core/cityGrid";
-import { buildingFootprint, buildingHeight, coversCell } from "../../src/render/cityBuildingDraw/primitives";
+import { buildingFootprint, cellOrigin, cellToScreen, computeCityScale, coversCell, TILE_D, TILE_W } from "../../src/core/cityGrid";
 import { buildCityScene, type CitySceneInput } from "../../src/render/scene/sceneBuilder/cityScene";
 import type {
   CityBuildingNode,
@@ -29,8 +28,6 @@ function baseInput(overrides: Partial<CitySceneInput> = {}): CitySceneInput {
     citySpots: [],
     cityMines: [],
     buildings: [],
-    style: "classic",
-    pattern: "grid-1",
     citySettings: {
       spriteVariant: 2,
       parallaxEnabled: true,
@@ -173,9 +170,8 @@ test("warehouse is 2x2 and covers all four of its cells at every level", () => {
   assert.equal(node?.halfWidth, fp.hw);
 });
 
-test("treasury is a 1x1 footprint and has a nonzero procedural height", () => {
+test("treasury is a 1x1 footprint", () => {
   assert.deepEqual(buildingFootprintFromRegistry("treasury", 1), { w: 1, h: 1 });
-  assert.ok(buildingHeight("treasury", 1) > 0, "buildingHeight must cover treasury (exhaustive record)");
 });
 
 test("no upgrade means no construction stage on any building node", () => {
@@ -290,7 +286,7 @@ test("placement construction takes precedence over upgrade staging", () => {
   assert.equal(node.constructionStage, 1, "the in-flight placement wins over the (impossible-but-safe) upgrade path");
 });
 
-test("ghost building node is only present when a ghost is provided, and resolves its style via pickStyleForBuilding", () => {  const withoutGhost = buildCityScene(baseInput());
+test("ghost building node is only present when a ghost is provided", () => {  const withoutGhost = buildCityScene(baseInput());
   assert.equal(nodesOfKind(withoutGhost, "cityGhostBuilding").length, 0);
 
   const nodes = buildCityScene(
@@ -300,7 +296,7 @@ test("ghost building node is only present when a ghost is provided, and resolves
   assert.equal(ghosts.length, 1);
   assert.equal(ghosts[0].buildingKind, "house");
   assert.equal(ghosts[0].valid, true);
-  assert.equal(ghosts[0].style, pickStyleForBuilding("house", 1, "classic"));
+  assert.equal("style" in ghosts[0], false, "ghost nodes carry no style");
 
   const tileScale = computeCityScale(5, 800, 600);
   const gridOrigin = cellOrigin(5);
@@ -311,14 +307,14 @@ test("ghost building node is only present when a ghost is provided, and resolves
   assert.deepEqual(ghosts[0].center, { x: fp.cx, y: fp.cy });
 });
 
-test("exactly two labels: settlement name, then tier/style/pattern subtitle", () => {
-  const nodes = buildCityScene(baseInput({ settlementName: "Home", size: 5, style: "classic", pattern: "grid-1" }));
+test("exactly two labels: settlement name, then tier-only subtitle", () => {
+  const nodes = buildCityScene(baseInput({ settlementName: "Home", size: 5 }));
   const labels = nodesOfKind<CityLabelNode>(nodes, "cityLabel");
   assert.equal(labels.length, 2);
   assert.deepEqual(labels[0], { kind: "cityLabel", text: "Home", x: 12, y: 12, fontPx: 14, alpha: 1 });
   assert.deepEqual(labels[1], {
     kind: "cityLabel",
-    text: "5\u00d75 Settlement  \u2014  Classic Fantasy  \u2014  grid-1",
+    text: "5\u00d75 Settlement",
     x: 12,
     y: 30,
     fontPx: 11,
@@ -345,28 +341,34 @@ test("buildableCells flags exactly the free cells, keyed \"gx,gy\" (F16b)", () =
   assert.ok(nodesOfKind<CityCellNode>(none, "cityCell").every((c) => !c.buildable), "no buildableCells input -> every cell unflagged");
 });
 
-test("legacy classic-styled farmField nodes resolve to the pixel farm styles deterministically", () => {
+test("every farmField node gets the deterministic pixel farm style, whatever its persisted def style", () => {
   const farms: BuildingDef[] = [
     { gx: 0, gy: 2, kind: "farmField", level: 1, style: "classic", w: 2, h: 2 },
-    { gx: 3, gy: 0, kind: "farmField", level: 1, style: "classic", w: 2, h: 2 },
-    { gx: 1, gy: 3, kind: "farmField", level: 2, style: "classic", w: 2, h: 2 },
+    { gx: 3, gy: 0, kind: "farmField", level: 1, style: "pixel", w: 2, h: 2 },
+    { gx: 1, gy: 3, kind: "farmField", level: 2, style: "organic", w: 2, h: 2 },
   ];
   const nodes = buildCityScene(baseInput({ buildings: farms }));
   const buildingNodes = nodesOfKind<CityBuildingNode>(nodes, "cityBuilding");
   assert.deepEqual(
-    buildingNodes.map((n) => n.style),
+    buildingNodes.map((n) => n.farmStyle),
     [farmFieldStyleAt("Home", 0, 2), farmFieldStyleAt("Home", 3, 0), farmFieldStyleAt("Home", 1, 3)],
   );
-  assert.ok(buildingNodes.every((n) => n.style === "pixel" || n.style === "pixel-alt"));
+  assert.ok(buildingNodes.every((n) => n.farmStyle === "pixel" || n.farmStyle === "pixel-alt"));
 });
 
-test("non-classic farmField styles and other buildings pass through untouched", () => {
+test("non-farm buildings carry no farmStyle, and farm variety keys off the settlement name", () => {
   const mixed: BuildingDef[] = [
-    { gx: 0, gy: 2, kind: "farmField", level: 1, style: "organic", w: 2, h: 2 },
-    { gx: 3, gy: 0, kind: "farmField", level: 1, style: "pixel", w: 2, h: 2 },
+    { gx: 0, gy: 2, kind: "farmField", level: 1, style: "pixel", w: 2, h: 2 },
     { gx: 2, gy: 2, kind: "townHall", level: 1, style: "classic" },
   ];
   const nodes = buildCityScene(baseInput({ buildings: mixed }));
   const buildingNodes = nodesOfKind<CityBuildingNode>(nodes, "cityBuilding");
-  assert.deepEqual(buildingNodes.map((n) => n.style), ["organic", "pixel", "classic"]);
+  assert.equal(buildingNodes.find((n) => n.buildingKind === "townHall")?.farmStyle, undefined);
+  const hall = buildingNodes.find((n) => n.buildingKind === "townHall")!;
+  assert.equal("style" in hall, false, "non-farm nodes carry no style at all");
+  assert.equal(
+    buildingNodes.find((n) => n.buildingKind === "farmField")?.farmStyle,
+    farmFieldStyleAt("Home", 0, 2),
+    "farm style is farmFieldStyleAt(settlementName, gx, gy)",
+  );
 });

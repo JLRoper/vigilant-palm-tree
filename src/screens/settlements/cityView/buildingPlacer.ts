@@ -1,7 +1,6 @@
-import { cityLayout, screenToGridCell } from "../../../core/cityGrid";
+import { cityLayout, coversCell as reCoversCell, screenToGridCell } from "../../../core/cityGrid";
 import type { CityViewSize } from "@heroes/engine";
-import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
-import { coversCell as reCoversCell } from "../../../render/cityBuildingDraw";
+import type { BuildingDef, BuildingKind } from "@heroes/contracts";
 import { PopupMenu, styleButton, menuTheme } from "@screens/shared/menu";
 import { savePanelGeometry } from "@screens/shared/panelLayout";
 import { toolbarHeight } from "@screens/shared/panelRail";
@@ -10,12 +9,10 @@ import {
   buildingLabel,
   buildingBuildDays,
   buildingFootprintFromRegistry,
-  randomFarmFieldStyle,
 } from "@heroes/engine";
 import { buildListSections } from "./buildListSections";
 import { buildConfirmStatus, buildEntryStatus } from "./buildEntryStatus";
 import { footprintSuffix } from "./footprint";
-import { pickStyleForBuilding } from "../../../render/assetDescriptors";
 import type { ResourceType } from "../../../state/gameState";
 import resourceGoldPileSmol from "../../../resources/resource-gold-pile-smol.png?url";
 import resourceWoodPileSmol from "../../../resources/resource-wood-pile-smol.png?url";
@@ -65,7 +62,6 @@ export class BuildingPlacer {
   hoverCell: { gx: number; gy: number } | null = null;
   valid = false;
   buildings: BuildingDef[] = [];
-  style: string = "classic";
 
   private size: CityViewSize = 5;
   private center: { gx: number; gy: number } = { gx: 2, gy: 2 };
@@ -79,13 +75,12 @@ export class BuildingPlacer {
   /** Net cost already committed server-side since the view opened; canAfford gates only the uncommitted remainder. */
   private committedNet: Partial<Record<ResourceType, number>> = {};
 
-  init(size: CityViewSize, center: { gx: number; gy: number }, initialBuildings: BuildingDef[], style: string): void {
+  init(size: CityViewSize, center: { gx: number; gy: number }, initialBuildings: BuildingDef[]): void {
     this.size = size;
     this.center = center;
     this.buildings = [...initialBuildings];
     this.originalBuildings = [...initialBuildings];
     this.committedNet = {};
-    this.style = style;
     this.active = null;
     this.hoverCell = null;
     this.valid = false;
@@ -117,15 +112,14 @@ export class BuildingPlacer {
     // outright -- the server applies the same check and a rejected command
     // would leave a building on screen that was never paid for.
     if (!this.canAfford()) return false;
-    const style = this.active === "farmField"
-      ? randomFarmFieldStyle()
-      : pickStyleForBuilding(this.active, 1, this.style);
+    // Interim until wave 3 removes BuildingDef.style end-to-end: every
+    // placement writes the constant pixel style (the style picker is gone).
     const b: BuildingDef = {
       gx: this.hoverCell.gx,
       gy: this.hoverCell.gy,
       kind: this.active,
       level: 1,
-      style: style as BuildingDef["style"],
+      style: "pixel" as BuildingDef["style"],
       w: this.w,
       h: this.h,
       construction: { daysRemaining: buildingBuildDays(this.active) },

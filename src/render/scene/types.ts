@@ -2,7 +2,7 @@ import type { Terrain } from "../../map/terrain";
 import type { ResourceType } from "../../map/resourceTiles";
 import type { Faction, HeroDirection } from "../../entities/hero";
 import type { HorseVariant } from "../../state/settings";
-import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase, GenerationStyle } from "@heroes/contracts";
+import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase } from "@heroes/contracts";
 import type { BattleSide } from "@heroes/engine";
 
 /** World-space pixel coordinates (pre-Camera-transform), same space axialToPixel() returns. */
@@ -235,7 +235,8 @@ export interface CityBuildingNode {
   halfWidth: number;
   halfHeight: number;
   ownerColor: string;
-  style: GenerationStyle;
+  /** Farm plots only: the deterministic pixel vs pixel-alt art pick (farmFieldStyleAt at scene-build time). Absent for every other kind. */
+  farmStyle?: "pixel" | "pixel-alt";
   selected: boolean;
   /** Set while the building's upgrade is in flight; the painter swaps the real sprite for a shared construction-stage sprite. */
   constructionStage?: 1 | 2 | 3;
@@ -248,7 +249,6 @@ export interface CityGhostBuildingNode {
   halfWidth: number;
   halfHeight: number;
   ownerColor: string;
-  style: GenerationStyle;
   valid: boolean;
 }
 

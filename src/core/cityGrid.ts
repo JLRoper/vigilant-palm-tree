@@ -1,4 +1,6 @@
+import type { BuildingDef } from "@heroes/contracts";
 import type { CityViewSize } from "@heroes/engine";
+import { buildingFootprintFromRegistry } from "@heroes/engine";
 
 export type CityCell = { gx: number; gy: number };
 
@@ -141,4 +143,33 @@ export function screenToGridCell(
   const gy = Math.floor(gyf);
   if (gx < 0 || gx >= size || gy < 0 || gy >= size) return null;
   return { gx, gy };
+}
+
+export function coversCell(b: BuildingDef, gx: number, gy: number): boolean {
+  const fp = buildingFootprintFromRegistry(b.kind, b.level);
+  const w = b.w ?? fp.w;
+  const h = b.h ?? fp.h;
+  return gx >= b.gx && gx < b.gx + w && gy >= b.gy && gy < b.gy + h;
+}
+
+export function buildingFootprint(
+  gx: number,
+  gy: number,
+  gridOrigin: { x: number; y: number },
+  screenOrigin: { x: number; y: number },
+  tileScale: number,
+  w = 1,
+  h = 1,
+): { cx: number; cy: number; hw: number; hh: number } {
+  const c = cellToScreen(gx, gy, gridOrigin);
+  const rootCx = screenOrigin.x + c.x * tileScale;
+  const rootCy = screenOrigin.y + c.y * tileScale;
+  const cx = rootCx + (w - h) * (TILE_W / 4) * tileScale;
+  const cy = rootCy + (w + h - 2) * (TILE_D / 4) * tileScale;
+  return {
+    cx,
+    cy,
+    hw: (w + h) * (TILE_W / 4) * tileScale,
+    hh: (w + h) * (TILE_D / 4) * tileScale,
+  };
 }
