@@ -25,7 +25,7 @@ import type { BuildingUpgradeRequest } from "../../../state/gameState";
 import type { BuildingUpgradeCost, ProducerOutput } from "@heroes/engine";
 import { producerTurnOutput } from "@heroes/engine";
 import { CityDesignBoxManager } from "./CityDesignBoxManager";
-import { cityGridRect, collectPanelRects, elementRect } from "./panelRects";
+import { CITY_GRID_PAD, cityGridRect, collectPanelRects, elementRect } from "./panelRects";
 
 /** Pre-city selection, captured at open() so close can restore the exact panel state the player left behind. */
 export interface CitySelectionSnapshot {
@@ -244,6 +244,7 @@ export class CityView {
       buildings: this.syncedBuildings(),
       ghost,
       selectedKeys: this.selectedKeys,
+      topInset: toolbarHeight(),
       labelOffsetY: toolbarHeight(),
       buildableCells: this.buildableCells(),
       citySettings: {
@@ -273,7 +274,7 @@ export class CityView {
     }
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
-    const layout = cityLayout(this.size, viewportW, viewportH);
+    const layout = cityLayout(this.size, viewportW, viewportH, toolbarHeight());
     this.hover = screenToGridCell(layout, this.size, viewportW, canvasX, canvasY);
 
     // delegate snap computation to placer when in placement mode
@@ -286,7 +287,7 @@ export class CityView {
     if (!this.isOpen()) return;
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
-    const layout = cityLayout(this.size, viewportW, viewportH);
+    const layout = cityLayout(this.size, viewportW, viewportH, toolbarHeight());
     const cell = screenToGridCell(layout, this.size, viewportW, canvasX, canvasY);
 
     if (!cell) {
@@ -425,7 +426,7 @@ export class CityView {
     const stored = loadPanelGeometry("buildPalette");
     const desired = stored ?? { x: 12, y: Math.max(20, window.innerHeight - PALETTE_H) };
     const occupied = this.collectOccupiedRects();
-    occupied.push(cityGridRect(this.size, window.innerWidth, window.innerHeight));
+    occupied.push(cityGridRect(this.size, window.innerWidth, window.innerHeight, CITY_GRID_PAD, toolbarHeight()));
     const resolved = resolvePanelPlacement(
       { x: desired.x, y: desired.y, w: PALETTE_W, h: PALETTE_H },
       occupied,

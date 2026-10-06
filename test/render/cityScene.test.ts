@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildingFootprintFromRegistry, farmFieldStyleAt } from "@heroes/engine";
 import type { BuildingDef } from "@heroes/contracts";
-import { buildingFootprint, cellOrigin, cellToScreen, computeCityScale, coversCell, TILE_D, TILE_W } from "../../src/core/cityGrid";
+import { buildingFootprint, cellOrigin, cellToScreen, cityLayout, computeCityScale, coversCell, TILE_D, TILE_W } from "../../src/core/cityGrid";
 import { buildCityScene, type CitySceneInput } from "../../src/render/scene/sceneBuilder/cityScene";
 import type {
   CityBuildingNode,
@@ -329,6 +329,19 @@ test("labelOffsetY shifts both labels below the fixed toolbar overlay (F16a)", (
   assert.equal(labels[0].y, 137, "name label 12 + 125");
   assert.equal(labels[1].y, 155, "subtitle label 30 + 125");
   assert.equal(labels[0].x, 12, "x positions are untouched");
+});
+
+test("topInset threads the safe-area clamp into cityCell screens (draw == layout)", () => {
+  const nodes = buildCityScene(baseInput({ viewportH: 500, topInset: 125 }));
+  const cells = nodesOfKind<CityCellNode>(nodes, "cityCell");
+  const layout = cityLayout(5, 800, 500, 125);
+  const legacyOriginY = 500 / 2 - ((4 * TILE_D) / 2 + 5 * TILE_D * 0.18) * layout.tileScale;
+  assert.ok(layout.screenOrigin.y > legacyOriginY + 40, "the clamp engages at 800x500");
+  const c = cellToScreen(cells[0].gx, cells[0].gy, layout.gridOrigin);
+  assert.deepEqual(cells[0].screen, {
+    x: layout.screenOrigin.x + c.x * layout.tileScale,
+    y: layout.screenOrigin.y + c.y * layout.tileScale,
+  });
 });
 
 test("buildableCells flags exactly the free cells, keyed \"gx,gy\" (F16b)", () => {

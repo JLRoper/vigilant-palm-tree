@@ -1,7 +1,7 @@
 import type { CityViewSize } from "@heroes/engine";
 import { buildingConstructionProgress, buildingFootprintFromRegistry, constructionStageFor, farmFieldStyleAt, upgradeProgress, upgradeRefs } from "@heroes/engine";
 import type { BuildingDef, BuildingKind, UpgradeState } from "@heroes/contracts";
-import { buildingFootprint, cellOrigin, cellsInDrawOrder, cellToScreen, computeCityScale, TILE_D, TILE_W } from "../../../core/cityGrid";
+import { buildingFootprint, cellsInDrawOrder, cellToScreen, cityLayout } from "../../../core/cityGrid";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { GameSettings } from "../../../state/settings";
 import type { SceneNode } from "../types";
@@ -30,6 +30,8 @@ export interface CitySceneInput {
   buildings: BuildingDef[];
   ghost?: { gx: number; gy: number; kind: BuildingKind; w: number; h: number; valid: boolean } | null;
   selectedKeys?: ReadonlySet<string>;
+  /** CSS px top overlay inset (fixed toolbar height); the grid fits below `topInset + CITY_VIEW_MARGIN`. */
+  topInset?: number;
   /** CSS px to shift the two corner labels down by (the fixed toolbar overlays the canvas top; render must not measure it itself). */
   labelOffsetY?: number;
   /** Cells (keys `"gx,gy"`) the active build placer can accept a building on; flagged on the matching cityCell nodes for the tint paint. */
@@ -47,7 +49,7 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
   const {
     viewportW, viewportH, settlementName, size, hover,
     citySpots, cityMines, buildings, ghost, selectedKeys, citySettings,
-    upgrades, labelOffsetY, buildableCells,
+    upgrades, labelOffsetY, buildableCells, topInset,
   } = input;
   const ownerColor = input.ownerColor ?? "#888888";
   const labelY = labelOffsetY ?? 0;
@@ -64,16 +66,7 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
     offsetY: citySettings.cityBgOffsetY,
   });
 
-  const tileScale = computeCityScale(size, viewportW, viewportH);
-  const tw = TILE_W * tileScale;
-  const td = TILE_D * tileScale;
-  const gridVCenter = ((size - 1) * TILE_D) / 2;
-  const buildingPad = size * TILE_D * 0.18;
-  const screenOrigin = {
-    x: viewportW / 2,
-    y: viewportH / 2 - (gridVCenter + buildingPad) * tileScale,
-  };
-  const gridOrigin = cellOrigin(size);
+  const { tileScale, tw, td, gridOrigin, screenOrigin } = cityLayout(size, viewportW, viewportH, topInset ?? 0);
   const cellScreen = (gx: number, gy: number) => {
     const c = cellToScreen(gx, gy, gridOrigin);
     return { x: screenOrigin.x + c.x * tileScale, y: screenOrigin.y + c.y * tileScale };

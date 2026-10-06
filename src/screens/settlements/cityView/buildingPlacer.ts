@@ -508,7 +508,7 @@ export class BuildingPlacer {
       return;
     }
 
-    const layout = cityLayout(this.size, viewportW, viewportH);
+    const layout = cityLayout(this.size, viewportW, viewportH, toolbarHeight());
     const cell = screenToGridCell(layout, this.size, viewportW, canvasX, canvasY);
 
     if (!cell) {

@@ -96,3 +96,8 @@ test("cityGridRect applies pad on all four sides and defaults to CITY_GRID_PAD",
   assertClose(padded.h, bare.h + CITY_GRID_PAD * 2, "height pad");
   assert.deepEqual(cityGridRect(5, 1280, 800), padded, "default pad is CITY_GRID_PAD");
 });
+
+test("cityGridRect's topInset threads the safe-area clamp through", () => {
+  assert.deepEqual(cityGridRect(5, 1280, 800, 0, 125), cityGridRect(5, 1280, 800, 0));
+  assert.equal(cityGridRect(15, 1280, 800, CITY_GRID_PAD, 125).y, 129);
+});

@@ -13,8 +13,9 @@ export function cityGridRect(
   viewportW: number,
   viewportH: number,
   pad = CITY_GRID_PAD,
+  topInset = 0,
 ): PanelRect {
-  const layout = cityLayout(size, viewportW, viewportH);
+  const layout = cityLayout(size, viewportW, viewportH, topInset);
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
