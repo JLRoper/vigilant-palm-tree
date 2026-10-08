@@ -20,7 +20,7 @@ import type { Axial } from "../core/hex";
 import { Hero } from "../entities/hero";
 import { SpriteProvider } from "../render/assets";
 import { cachedUnitTypes } from "../data/unitCatalog";
-import { playerFactionId, playerIncome, playerWealth, unitAllowedForSeatFaction } from "@heroes/engine";
+import { playerFactionId, playerIncome, playerWealth, playerEffectiveSettlementIncome, unitAllowedForSeatFaction } from "@heroes/engine";
 import { SessionManager } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
@@ -612,10 +612,7 @@ export class UIManager {
         : null;
     const effectiveIncome =
       ownedSettlements.length > 0
-        ? ownedSettlements.reduce((acc, s) => {
-            const m = Math.max(0, Math.min(100, s.morale ?? 100));
-            return acc + Math.round(((s.population ?? 0) * (s.goldTax ?? 0) * m) / 100);
-          }, 0)
+        ? playerEffectiveSettlementIncome(state, activePlayer.id)
         : null;
     return {
       day: state.day,

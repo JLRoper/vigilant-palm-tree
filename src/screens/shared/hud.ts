@@ -1,9 +1,9 @@
 import type { GameState, PlayerId } from "../../state/gameState";
 import {
-  effectiveIncome,
-  foodRequired,
   buildingUpkeepRequired,
+  foodRequired,
   moraleDecay,
+  playerEffectiveSettlementIncome,
   playerIncome,
   playerWealth,
 } from "@heroes/engine";
@@ -80,9 +80,9 @@ function playerMorale(state: GameState, ownerId: PlayerId): string {
 function playerEffectiveIncome(state: GameState, ownerId: PlayerId): string {
   const owned = Object.values(state.settlements).filter((s) => s.ownerId === ownerId);
   if (owned.length === 0) return "Empire Income: 0g";
-  const total = owned.reduce((acc, s) => acc + effectiveIncome(s), 0);
-  const base = owned.reduce((acc, s) => acc + (s.population ?? 0) * (s.goldTax ?? 0), 0);
-  return `Empire Income: ${total}/${base}g`;
+  const total = playerEffectiveSettlementIncome(state, ownerId);
+  const base = playerIncome(state, ownerId);
+  return `Empire Income: ${fmtNum(total)}/${fmtNum(base)}g`;
 }
 
 function playerUpkeep(state: GameState, ownerId: PlayerId): string {
@@ -104,14 +104,16 @@ function formatPathReadout(readout: PathCostReadout | null): string {
 // Presentation only -- every number comes from @heroes/engine's exported
 // formulas, mirroring what the round pipeline (applyEndOfTurn) actually does.
 // Set as the hud-text title attribute; newlines render as line breaks in the
-// native tooltip. States the x/y inconsistency: "Empire Income" is
-// morale-scaled population taxes only, while next-turn gold (playerIncome)
-// also includes building goldPerTurn.
+// native tooltip. "Empire Income" (playerEffectiveSettlementIncome) is the
+// morale-scaled population tax plus building goldPerTurn — matching what
+// applyEndOfTurn pays (produceSettlementResources pays building gold;
+// applyEffectiveIncome pays the morale-scaled tax). next-turn gold
+// (playerIncome) is the same figure without morale scaling on the tax half.
 function economyBreakdown(state: GameState, ownerId: PlayerId): string {
   const owned = Object.values(state.settlements).filter((s) => s.ownerId === ownerId);
   if (owned.length === 0) return "Empire Income: 0g — you own no settlements.";
   const popTax = owned.reduce((acc, s) => acc + (s.population ?? 0) * (s.goldTax ?? 0), 0);
-  const eff = owned.reduce((acc, s) => acc + effectiveIncome(s), 0);
+  const eff = playerEffectiveSettlementIncome(state, ownerId);
   const morale = Math.round(owned.reduce((acc, s) => acc + (s.morale ?? 100), 0) / owned.length);
   const nextGold = playerIncome(state, ownerId);
   const buildingGold = nextGold - popTax;
@@ -128,9 +130,9 @@ function economyBreakdown(state: GameState, ownerId: PlayerId): string {
   const troopBill = liveEmpireUpkeepCost(Object.values(state.heroes).filter((h) => h.ownerId === ownerId));
   const moraleTrend = decay > 0 ? `morale −${fmtNum(decay)}/round` : "morale stable";
   return [
-    `Income: settlements ${fmtNum(popTax)}g gross → morale ${morale}% → ${fmtNum(eff)}g/round to treasuries`,
+    `Income: settlements ${fmtNum(popTax)}g pop-tax + ${fmtNum(buildingGold)}g buildings → morale ${morale}% on tax → ${fmtNum(eff)}g/round to treasuries`,
     `${empireUpkeepTitleClause(troopBill)} · buildings ${fmtNum(upkeep.wood)} wood + ${fmtNum(upkeep.stone)} stone/wk · food ${fmtNum(foodHave)}/${fmtNum(foodNeed)} → ${moraleTrend}`,
-    `Building gold/turn +${fmtNum(buildingGold)}g counts toward next-turn gold (${fmtNum(nextGold)}g), not "Empire Income"`,
+    `${fmtNum(buildingGold)}g building gold is morale-stable and counted in both Empire Income (${fmtNum(eff)}g) and next-turn gold (${fmtNum(nextGold)}g)`,
   ].join("\n");
 }
 

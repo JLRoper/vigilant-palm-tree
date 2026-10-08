@@ -1,6 +1,7 @@
 ﻿import { test } from "node:test";
 import assert from "node:assert/strict";
-import { settlementIncome, playerIncome, playerWealth } from "@heroes/engine";
+import { settlementIncome, playerIncome, playerWealth, effectiveSettlementIncome, playerEffectiveSettlementIncome } from "@heroes/engine";
+import type { BuildingDef } from "@heroes/contracts";
 import { createInitialState, type GameState, type PlayerId, type SettlementState, type HeroState } from "../../src/state/gameState";
 
 function makeSettlement(id: string, ownerId: PlayerId | null, population: number, goldTax: number, gold = 0): SettlementState {
@@ -35,6 +36,8 @@ function makeHeroFields(overrides: Partial<HeroState> = {}): Partial<HeroState> 
     ...overrides,
   };
 }
+
+const MARKET_L1: BuildingDef = { gx: 0, gy: 0, kind: "market", level: 1 };
 
 test("settlementIncome: level 1 (500 pop × 1 tax) = 500", () => {
   assert.equal(settlementIncome(makeSettlement("s", 0, 500, 1)), 500);
@@ -125,6 +128,48 @@ test("playerWealth ignores unowned (other-player or neutral) entities", () => {
       makeSettlement("s_neutral", null, 0, 0, 9999),
     ],
   });
-  assert.equal(playerWealth(state, 0), 100);
-  assert.equal(playerWealth(state, 1), 200);
-});
+   assert.equal(playerWealth(state, 0), 100);
+   assert.equal(playerWealth(state, 1), 200);
+ });
+
+ test("effectiveSettlementIncome: no buildings, full morale = raw population tax", () => {
+   assert.equal(effectiveSettlementIncome(makeSettlement("s", 0, 500, 1)), 500);
+ });
+
+ test("effectiveSettlementIncome: no buildings, partial morale scales only the tax", () => {
+   assert.equal(effectiveSettlementIncome({ ...makeSettlement("s", 0, 1000, 1), morale: 50 }), 500);
+ });
+
+ test("effectiveSettlementIncome: building goldPerTurn is added unmodified by morale", () => {
+   const s = { ...makeSettlement("s", 0, 1000, 1), morale: 90, buildings: [MARKET_L1] };
+   // 1000 × 1 × 90% = 900 (tax) + 40 (building) = 940
+   assert.equal(effectiveSettlementIncome(s), 940);
+ });
+
+ test("effectiveSettlementIncome: building goldPerTurn is zero when no income buildings", () => {
+   const barracks: BuildingDef = { gx: 0, gy: 0, kind: "barracks", level: 1 };
+   const s = { ...makeSettlement("s", 0, 1000, 1), buildings: [barracks] };
+   // barracks has no goldPerTurn
+   assert.equal(effectiveSettlementIncome(s), 1000);
+ });
+
+ test("playerEffectiveSettlementIncome sums owned settlements including buildings", () => {
+   const state: GameState = createInitialState({
+     seedPlayers: [
+       { id: 0, faction: "player", name: "P0", color: "#fff", heroIds: ["h0"], settlementIds: ["s0", "s1"] },
+       { id: 1, faction: "ai", name: "AI", color: "#000", heroIds: ["h1"], settlementIds: ["s2"] },
+     ],
+     seedHeroes: [
+       { id: "h0", ownerId: 0, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
+       { id: "h1", ownerId: 1, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
+     ],
+     seedSettlements: [
+       { ...makeSettlement("s0", 0, 1000, 1), morale: 90, buildings: [MARKET_L1] },
+       makeSettlement("s1", 0, 500, 1),
+       makeSettlement("s2", 1, 5000, 3),
+     ],
+   });
+   // s0: 900 (tax) + 40 (market) = 940; s1: 500 (tax, full morale). s2 is not owned.
+   assert.equal(playerEffectiveSettlementIncome(state, 0), 940 + 500);
+   assert.equal(playerEffectiveSettlementIncome(state, 1), 15000);
+ });

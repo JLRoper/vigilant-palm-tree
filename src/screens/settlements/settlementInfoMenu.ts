@@ -14,7 +14,7 @@ import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../../render/a
 import { bankRejectionMessage, bankRowModel, treasuryRowModel, type BankGoldDirection, type BankRowModel } from "./bankRows";
 import { TREASURY_CAP_AMBER, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
 import type { HorseVariant } from "../../state/settings";
-import { POP_BY_LEVEL, UPGRADE_POPULATION_GATE } from "@heroes/engine";
+import { POP_BY_LEVEL, UPGRADE_POPULATION_GATE, effectiveSettlementIncome } from "@heroes/engine";
 import { pickHeroName } from "../../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 
@@ -392,7 +392,7 @@ export class SettlementInfoMenu {
     this.nameEl.childNodes[0].textContent = settlement.name;
     this.levelBadge.textContent = `L${settlement.level}`;
     this.populationEl.textContent = settlement.population.toLocaleString();
-    this.incomeEl.textContent = `${(settlement.population * settlement.goldTax).toLocaleString()}g`;
+    this.incomeEl.textContent = `${effectiveSettlementIncome(settlement).toLocaleString()}g`;
     this.treasuryEl.textContent = `${settlement.gold}g`;
     this.updateTreasuryRow(settlement, state);
     this.moraleEl.textContent = `${Math.round(settlement.morale ?? 100)}%${settlement.autoTrade ? " · auto" : ""}`;
