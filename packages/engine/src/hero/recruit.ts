@@ -1,12 +1,44 @@
-import type { GameState, HeroState, HorseVariantId, PlayerId, RecruitHeroResult, SettlementId } from "@heroes/contracts";
+import type { GameState, HeroState, HorseVariantId, Platoon, PlayerId, RecruitHeroResult, SettlementId } from "@heroes/contracts";
 import { MOVEMENT_PER_TURN } from "@heroes/contracts";
-import { normalizePlatoons } from "../units";
+import { normalizePlatoons, platoonTroopTotal } from "../units";
+import { hashString, mulberry32 } from "../rng";
 import { DEFAULT_HERO_ARCANE, DEFAULT_HERO_INTELLIGENCE } from "../combatConfig";
 import { DEFAULT_HERO_SPELL, maxManaFor } from "../combat/spells";
 import { DEFAULT_HERO_WAGONS, DEFAULT_TREASURY_WAGONS, playerTreasuryWagonsUnassigned, playerWagonsUnassigned } from "../settlement/capacity";
 
 export const MAX_HEROES_PER_PLAYER = 5;
-export const HERO_RECRUIT_COST = 1;
+export const HERO_RECRUIT_COST = 50;
+
+// Starter army for a recruited hero: 2-3 platoons of 2-3 troops each, drawn
+// without replacement from the first three unit tiers (peasant / pikeman /
+// archer) -- a 3-platoon draw covers all three.
+export const RECRUIT_STARTER_UNIT_IDS = ["peasant", "pikeman", "archer"] as const;
+export const RECRUIT_STARTER_MIN_PLATOONS = 2;
+export const RECRUIT_STARTER_MAX_PLATOONS = 3;
+export const RECRUIT_STARTER_MIN_TROOPS = 2;
+export const RECRUIT_STARTER_MAX_TROOPS = 3;
+
+// Deterministic seeded starter kit: same seed, same army on the client's
+// optimistic apply, the server's authoritative apply, and any reload. Draw
+// order is pinned (the exact regression pin in test/engine/recruitHero.test.ts
+// depends on it): platoon count, then per platoon its unit id (spliced out of
+// the remaining pool), then its troop count.
+export function starterRecruitPlatoons(seed: number): Platoon[] {
+  const rng = mulberry32(seed >>> 0);
+  const platoonCount =
+    RECRUIT_STARTER_MIN_PLATOONS +
+    Math.floor(rng() * (RECRUIT_STARTER_MAX_PLATOONS - RECRUIT_STARTER_MIN_PLATOONS + 1));
+  const pool: string[] = [...RECRUIT_STARTER_UNIT_IDS];
+  const platoons: Platoon[] = [];
+  for (let i = 0; i < platoonCount; i++) {
+    const unitTypeId = pool.splice(Math.floor(rng() * pool.length), 1)[0];
+    const count =
+      RECRUIT_STARTER_MIN_TROOPS +
+      Math.floor(rng() * (RECRUIT_STARTER_MAX_TROOPS - RECRUIT_STARTER_MIN_TROOPS + 1));
+    platoons.push({ entries: [{ unitTypeId, count }] });
+  }
+  return normalizePlatoons(platoons);
+}
 
 export function recruitHero(
   state: GameState,
@@ -45,6 +77,11 @@ export function recruitHero(
   const nextIdx = indices.find((i) => !usedIndices.has(i)) ?? player.heroIds.length;
   const heroId = `h${nextIdx}`;
 
+  // Starter kit seed: game + seat + hero id, so every apply path (client
+  // optimistic apply, server authoritative apply, reload) derives the same
+  // army from the same state.
+  const stacks = starterRecruitPlatoons(hashString(`recruit:${state.castleSeed}:${playerId}:${heroId}`));
+
   // Wagons are a real, counted resource (Phase 1): a recruited hero used to
   // get 5 free wagons because neither `wagons` nor the pool was touched --
   // assignWagons(+1) on such a hero then SHRANK its purse cap. The recruit
@@ -68,8 +105,8 @@ export function recruitHero(
     previousMovementRemaining: null,
     trail: [{ q: settlement.q, r: settlement.r }],
     gold: 0,
-    troops: 1,
-    stacks: normalizePlatoons([]),
+    troops: platoonTroopTotal(stacks),
+    stacks,
     isChartering: false,
     charterId: null,
     horseVariant,

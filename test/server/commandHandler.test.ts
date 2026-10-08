@@ -12,7 +12,7 @@ import type {
   SettlementState,
 } from "@heroes/contracts";
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
-import { CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS, GameMap, WAGON_GOLD_CAPACITY } from "@heroes/engine";
+import { CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS, GameMap, platoonTroopTotal, WAGON_GOLD_CAPACITY } from "@heroes/engine";
 import { hexDistance } from "@heroes/contracts";
 import { handleCommand, handleCommandTransactional } from "../../server/app/commandHandler";
 import {
@@ -881,9 +881,17 @@ test("RecruitHero adds a new hero, deducts the recruit cost, and updates the pla
   const newHeroId = result.hero!.id;
   assert.ok(gameRepo.rows["test-game"].heroes[newHeroId], "new hero should be persisted");
   assert.ok(result.players?.find((p) => p.id === 0)?.heroIds.includes(newHeroId));
-  // HERO_RECRUIT_COST is 1 gold (packages/engine/src/hero/recruit.ts).
-  assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 49);
+  // HERO_RECRUIT_COST is 50 gold (packages/engine/src/hero/recruit.ts).
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 0);
   assert.equal(eventRepo.events.map((e) => e.kind).join(","), "HeroRecruited");
+  const persistedHero = gameRepo.rows["test-game"].heroes[newHeroId];
+  assert.ok(
+    persistedHero.stacks.some((p) => p.entries.length > 0),
+    "the recruited hero must persist its starter platoons",
+  );
+  const starterTotal = platoonTroopTotal(persistedHero.stacks);
+  assert.ok(starterTotal >= 4 && starterTotal <= 9, `starter army total ${starterTotal}`);
+  assert.equal(persistedHero.troops, starterTotal, "troops is the denormalized platoon total");
 });
 
 test("RecruitHero rejects recruiting at a settlement the actor doesn't own", async () => {
