@@ -290,7 +290,7 @@ test("constants match the plan values (D3/D12)", () => {
 test("whole-turn drive per pass: two heroes spend their movement across sweeps, then EndTurn with no growthRate", async () => {
   const world = aiTurnWorld([
     makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { movementRemaining: 2, troops: 5, stacks: troopStacks("swordsman", 5) }),
-    makeHero("h2", 1, passableTiles(SEED)[50].q, passableTiles(SEED)[50].r, { movementRemaining: 2, troops: 5, stacks: troopStacks("swordsman", 5) }),
+    makeHero("h2", 1, passableTiles(SEED)[20].q, passableTiles(SEED)[20].r, { movementRemaining: 2, troops: 5, stacks: troopStacks("swordsman", 5) }),
   ]);
   const harness = installHarness(world);
 

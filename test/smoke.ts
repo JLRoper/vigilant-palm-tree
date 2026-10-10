@@ -23,7 +23,7 @@ import {
   clearRegisteredPids,
 } from "./_request";
 
-const TERRAINS = new Set(["grass", "dirt", "forest", "desert", "mountain", "water"]);
+const TERRAINS = new Set(["grass", "dirt", "forest", "desert", "mountain", "water", "swamp", "snow"]);
 const RESOURCE_SET = new Set(["gold", "wood", "stone", "iron", "arcane"]);
 
 const WEB_PORT = getClientPort(4173);
@@ -76,6 +76,7 @@ let browser: Browser | undefined;
 function runDeterminismChecks() {
   const m1 = new GameMap(42);
   const m2 = new GameMap(42);
+  assert.deepEqual(m1.tiles, m2.tiles, "tiles differ across same seed");
   assert.deepEqual(m1.resourceTiles, m2.resourceTiles, "resourceTiles differ across same seed");
   const total = m1.resourceTiles.filter((t): t is NonNullable<typeof t> => Boolean(t)).length;
   assert(total > 35 && total < 85, `resource count out of band: ${total}`);

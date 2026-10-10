@@ -108,6 +108,26 @@ test("water and mountain terrain report passable: false", () => {
   assert.equal(mountain!.terrain.passable, false);
 });
 
+test("swamp and snow tiles report cost 2, passable: true, with capitalised labels", () => {
+  const rows: TileRow[] = [
+    { q: 0, r: 0, terrain: "swamp", resource: null },
+    { q: 1, r: 0, terrain: "snow", resource: null },
+    { q: 2, r: 0, terrain: "grass", resource: null },
+  ];
+  const map = GameMap.fromTiles(rows);
+  const hero = new Hero("h0", "Hero", 2, 0, "player", 0);
+
+  const swamp = describeTile({ map, state: makeState(), heroes: [hero], castles: [], viewPlayerId: 0, tile: { q: 0, r: 0 } });
+  assert.ok(swamp);
+  assert.equal(swamp!.fogged, false);
+  assert.deepEqual(swamp!.terrain, { kind: "swamp", label: "Swamp", cost: 2, passable: true });
+
+  const snow = describeTile({ map, state: makeState(), heroes: [hero], castles: [], viewPlayerId: 0, tile: { q: 1, r: 0 } });
+  assert.ok(snow);
+  assert.equal(snow!.fogged, false);
+  assert.deepEqual(snow!.terrain, { kind: "snow", label: "Snow", cost: 2, passable: true });
+});
+
 test("resource deposit reports workedBy only within the settlement's rate radius", () => {
   // Level-2 settlement -> settlementRateRadius(2) = 2 (the radius is `level`, not
   // `level - 1`: an L1 settlement may not stand on a resource tile, so a radius of

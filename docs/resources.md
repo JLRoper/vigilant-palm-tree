@@ -38,14 +38,14 @@ So an L1 settlement on a forest with two wood-bearing forest tiles in radius pro
 
 Each resource has a density per terrain type. The placer picks the density for each tile by its terrain. Water and impassable mountain are excluded from resource placement entirely.
 
-| Resource ↓ \ Terrain → | Grass | Dirt | Forest | Desert | Mountain |
-|------------------------|-------|------|--------|--------|----------|
-| **Gold**               | 6%    | 5%   | 1%     | 1%     | 0%       |
-| **Wood**               | 2%    | 1%   | **18%**| 0.5%   | 0%       |
-| **Stone**              | 2%    | 6%   | 1%     | 1%     | **35%**  |
-| **Iron Ore**           | 0.5%  | 3%   | 0%     | 0%     | **12%**  |
-| **Arcane Dust**        | 0%    | 2%   | 0%     | **8%** | 0%       |
-| **Total per terrain**  | ~10.5%| ~17% | ~20%   | ~10.5% | ~47%     |
+| Resource ↓ \ Terrain → | Grass | Dirt | Forest | Desert | Swamp | Snow | Mountain |
+|------------------------|-------|------|--------|--------|-------|------|----------|
+| **Gold**               | 6%    | 5%   | 1%     | 1%     | 2%    | 1%   | 0%       |
+| **Wood**               | 2%    | 1%   | **18%**| 0.5%   | 10%   | 0.5% | 0%       |
+| **Stone**              | 2%    | 6%   | 1%     | 1%     | 0.5%  | 3%   | **35%**  |
+| **Iron Ore**           | 0.5%  | 3%   | 0%     | 0%     | 0%    | 1%   | **12%**  |
+| **Arcane Dust**        | 0%    | 2%   | 0%     | **8%** | 3%    | 0%   | 0%       |
+| **Total per terrain**  | ~10.5%| ~17% | ~20%   | ~10.5% | ~15.5%| ~5.5%| ~47%     |
 
 (Mountain's high total reflects that adjacent-to-mountain tiles (grass/dirt) get boosted stone density from spillover in the placement algorithm.)
 
@@ -56,6 +56,8 @@ Each resource has a density per terrain type. The placer picks the density for e
 - **Stone** — quarried from **mountains** primarily (35% of mountain *border* tiles — see note below). Some surface deposits on dirt (rocky outcrops).
 - **Iron Ore** — similar to stone but rarer, concentrated on mountain borders.
 - **Arcane Dust** — concentrated in **deserts** (8% of desert tiles). Thematically: ancient buried ruins leaking residual magic. Surface traces on dirt (collapsed sites).
+- **Swamp** — drowned groves make it the second wood biome (10% of swamp tiles); miasma leaks arcane dust (3%).
+- **Snow** — frozen rock surfaces yield stone (3%) and iron (1%); sparse otherwise.
 
 ### Mountain-spillover rule
 

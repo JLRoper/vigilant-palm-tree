@@ -286,7 +286,7 @@ Recruit costs (`RecruitEntry`) are charged by the wired `RecruitUnits` command �
 
 **Food joined the pool on 2026-10-01.** `RESOURCE_POOL` is now `gold, wood, stone, iron, arcane, food`, with a per-terrain `foodBias` (`DEFAULT_FOOD_BIAS = 0.35`, `foodBiasForTerrain(terrain)`): grass 0.55, forest 0.32, dirt 0.22, desert 0.05, mountain/water/unknown 0. One rng draw decides both halves of the pick — below `foodBias` the spot is food, otherwise the same value is rescaled across the non-food pool, so `foodBias: 0` reproduces the pre-food uniform pick exactly. Green plains get rich farmland; barrens barely any.
 
-**Map tiles still never carry food** (`RESOURCE_DENSITY.food === 0` on all six terrains, §2) — food is a *building* resource, and a city spot is the only place it can be. Food spots are now **visible** in the city view: the `isMineable` food filter in `src/managers/GameEngine.ts`'s `handleDblClick` was vestigial (added 2026-07-23 when `RESOURCE_POOL` had no food — it filtered nothing for its entire life) and has been removed, so `cityView.open()` receives `castle.citySpots` verbatim.
+**Map tiles still never carry food** (`RESOURCE_DENSITY.food === 0` on every terrain, §2) — food is a *building* resource, and a city spot is the only place it can be. Food spots are now **visible** in the city view: the `isMineable` food filter in `src/managers/GameEngine.ts`'s `handleDblClick` was vestigial (added 2026-07-23 when `RESOURCE_POOL` had no food — it filtered nothing for its entire life) and has been removed, so `cityView.open()` receives `castle.citySpots` verbatim.
 
 ---
 

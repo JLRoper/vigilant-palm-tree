@@ -4,7 +4,7 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 
 ## Status
 
-✅ **Implemented.** Procedural map generation, 6 terrain types, biome-aware resource placement, server-side tile persistence, isometric rendering, camera (pan/zoom, DPR-aware), fog of war, and minimap all ship in v1.
+✅ **Implemented.** Procedural map generation, 8 terrain types, biome-aware resource placement, server-side tile persistence, isometric rendering, camera (pan/zoom, DPR-aware), fog of war, and minimap all ship in v1.
 
 ## Grid
 
@@ -17,13 +17,15 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 | Terrain | Fill | Move cost | Notes |
 |---------|------|-----------|-------|
 | Grass   | green       | 1         | Default. Plains — most common terrain. |
-| Dirt    | brown       | 1.2       | Roads / paths. Exposed, barren ground — proxy for arid land in v1. |
-| Forest  | dark green  | 1.6       | Slow, decorative trees. Wood-bearing biome. |
+| Dirt    | brown       | 1         | Roads / paths. Exposed, barren ground — proxy for arid land in v1. |
+| Forest  | dark green  | 1.2       | Slow, decorative trees. Wood-bearing biome. |
 | Desert  | sand yellow | 1.4       | Passable but harsh. Arcane-bearing biome (ancient ruins). |
+| Swamp   | murky olive | 2         | Waterlogged bog. Slow going (2× a normal tile). |
+| Snow    | pale blue-white | 2     | Frozen ground. Slow going (2× a normal tile). |
 | Mountain| grey rock   | impassable| Peaks and ridges. Stone + iron-bearing biome. Lakes / rivers. |
 | Water   | blue        | impassable| Lakes / rivers. Never carries resources. |
 
-Generated via a deterministic pseudo-noise function on the map seed. Same seed → same map. Implementation: [`src/map/gameMap.ts`](../src/map/gameMap.ts), [`src/map/terrain.ts`](../src/map/terrain.ts). See [map-gen.md](./map-gen.md) for the algorithm.
+Generated via a deterministic pseudo-noise function on the map seed. Same seed → same map. Implementation: [`packages/engine/src/map/gameMap.ts`](../packages/engine/src/map/gameMap.ts), [`packages/engine/src/map/terrain.ts`](../packages/engine/src/map/terrain.ts). See [map-gen.md](./map-gen.md) for the algorithm.
 
 ## Resource tile placement
 
@@ -45,7 +47,7 @@ Implementation: [`src/map/resourceTiles.ts`](../src/map/resourceTiles.ts) (`plac
 
 - **Hex outline:** 1px darker stroke.
 - **Terrain fill:** flat colour from palette.
-- **Decoration overlay:** trees on forest, wave ripples on water, sand hatch on desert, peak silhouette on mountain (procedural).
+- **Decoration overlay:** trees on forest, wave ripples on water, sand hatch on desert, peak silhouette on mountain, murky pools + reeds on swamp, snow drifts on snow (procedural).
 - **Resource overlay:** small icon in the hex centre for unclaimed resource tiles.
 - **Settlement overlay:** town sprite on top of resource icon when claimed (procedural, owner-coloured).
 

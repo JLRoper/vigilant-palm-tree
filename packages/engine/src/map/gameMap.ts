@@ -107,6 +107,8 @@ function generateTerrain(rng: () => number, width: number, height: number): Terr
   const targets: Array<{ terrain: Terrain; fraction: number; blobs: number }> = [
     { terrain: "mountain", fraction: 0.03, blobs: 2 },
     { terrain: "desert", fraction: 0.05, blobs: 2 },
+    { terrain: "swamp", fraction: 0.06, blobs: 3 },
+    { terrain: "snow", fraction: 0.06, blobs: 3 },
     { terrain: "water", fraction: 0.10, blobs: 3 },
     { terrain: "forest", fraction: 0.15, blobs: 4 },
     { terrain: "dirt", fraction: 0.18, blobs: 5 },

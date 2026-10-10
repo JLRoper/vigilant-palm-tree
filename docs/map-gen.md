@@ -1,13 +1,13 @@
 # Procedural Map Generation
 
-> Status: ✅ Implemented. Current implementation: **blob growth** (see `src/map/gameMap.ts` → `generateTerrain`). This doc covers alternatives and when to swap.
+> Status: ✅ Implemented. Current implementation: **blob growth** (see `packages/engine/src/map/gameMap.ts` → `generateTerrain`, re-exported through the `src/map/gameMap.ts` shim). This doc covers alternatives and when to swap.
 
 ## Current implementation: blob growth
 
-`generateTerrain(rng, width, height)` in `src/map/gameMap.ts`:
+`generateTerrain(rng, width, height)` in `packages/engine/src/map/gameMap.ts`:
 
 1. Fill the grid with `grass`.
-2. For each non-grass terrain (`mountain`, `desert`, `water`, `forest`, `dirt`) in order of scarcity:
+2. For each non-grass terrain (`mountain`, `desert`, `swamp`, `snow`, `water`, `forest`, `dirt`) in order of scarcity:
    - Seed N random starting tiles (the "blobs").
    - Repeatedly pick a random tile from the growing frontier; if it's still grass, convert it to the target terrain and add its 6 hex neighbors to the frontier.
    - Stop at the target fraction of the map.
@@ -48,7 +48,7 @@ Generate a heightmap via 2–3 octaves of Perlin/Simplex. Then assign biomes by 
 - **Pros:** The most natural-looking terrain of any option. Mountain ranges form ridges, rivers naturally follow low points, biomes make geographic sense. This is what Civilization and most 4X games use.
 - **Cons:** ~100 lines of code (noise + thresholds + moisture pass). Two noise channels needed.
 - **Scale:** Linear. The 10× map size is the sweet spot for this approach.
-- **Swap cost:** Moderate. New module, new terrain types (beach, hill, swamp possible).
+- **Swap cost:** Moderate. New module, new terrain types (beach, hill possible).
 
 ### 4. Voronoi / cellular noise
 

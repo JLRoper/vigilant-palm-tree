@@ -7,6 +7,8 @@ export const RESOURCE_DENSITY: Record<string, Record<ResourceType, number>> = {
   dirt: { gold: 0.05, wood: 0.01, stone: 0.06, iron: 0.03, arcane: 0.02, food: 0 },
   forest: { gold: 0.01, wood: 0.18, stone: 0.01, iron: 0, arcane: 0, food: 0 },
   desert: { gold: 0.01, wood: 0.005, stone: 0.01, iron: 0, arcane: 0.08, food: 0 },
+  swamp: { gold: 0.02, wood: 0.10, stone: 0.005, iron: 0, arcane: 0.03, food: 0 },
+  snow: { gold: 0.01, wood: 0.005, stone: 0.03, iron: 0.01, arcane: 0, food: 0 },
   mountain: { gold: 0, wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
   water: { gold: 0, wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
 };

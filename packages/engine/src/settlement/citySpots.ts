@@ -45,6 +45,8 @@ const FOOD_BIAS_BY_TERRAIN: Record<string, number> = {
   forest: 0.32,
   dirt: 0.22,
   desert: 0.05,
+  swamp: 0.15,
+  snow: 0.02,
   mountain: 0,
   water: 0,
 };

@@ -407,9 +407,12 @@ test("REGRESSION: the keep's draw is exactly what the hero's bill needed, no mor
     assert.equal(state.heroes[heroId].resources?.food, 0, "settlement-funded food is eaten on the spot");
     keeps.push(before);
   }
+  // Re-measured 2026-10-05: the swamp/snow biomes changed generation RNG
+  // consumption, which moved this seed's castle placement (and with it the
+  // farm cells' multipliers). The mechanics asserted above are unchanged.
   assert.deepEqual(
     keeps,
-    [54, 77, 100],
+    [66, 103, 140],
     "the keep accumulates: its 3 farms out-produce its population bill AND the hero's weekly one (the starter farmhouse's +2 food/turn adds to the surplus)",
   );
 });

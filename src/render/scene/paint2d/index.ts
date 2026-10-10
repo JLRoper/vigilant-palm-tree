@@ -394,6 +394,33 @@ export function paintTerrainDecoration(ctx: CanvasRenderingContext2D, node: Terr
     ctx.lineTo(cx + ox + 4, cy + oy - 6);
     ctx.closePath();
     ctx.fill();
+  } else if (t === "swamp") {
+    ctx.fillStyle = "rgba(22, 34, 20, 0.7)";
+    ctx.beginPath();
+    ctx.arc(cx + ox, cy + oy + 3, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(108, 134, 66, 0.85)";
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.moveTo(cx + ox - 5, cy + oy + 2);
+    ctx.lineTo(cx + ox - 6, cy + oy - 6);
+    ctx.moveTo(cx + ox, cy + oy + 2);
+    ctx.lineTo(cx + ox + 1, cy + oy - 8);
+    ctx.moveTo(cx + ox + 5, cy + oy + 1);
+    ctx.lineTo(cx + ox + 6, cy + oy - 5);
+    ctx.stroke();
+  } else if (t === "snow") {
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.arc(cx + ox, cy + oy, 5, Math.PI * 1.1, Math.PI * 1.9);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.beginPath();
+    ctx.arc(cx + ox + 5, cy + oy + 3, 1.2, 0, Math.PI * 2);
+    ctx.arc(cx + ox - 6, cy + oy - 2, 1.2, 0, Math.PI * 2);
+    ctx.arc(cx + ox + 1, cy + oy + 6, 1.2, 0, Math.PI * 2);
+    ctx.fill();
   }
   void deps;
 }
