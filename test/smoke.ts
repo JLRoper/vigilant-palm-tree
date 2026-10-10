@@ -198,6 +198,8 @@ async function runNewLoadSaveFlow(
 ) {
   console.log(">> New/Load/Save flow");
 
+  page.on("dialog", (dialog) => dialog.accept());
+
   await ctx.delete(`${API_URL}/api/games/${TEST_NEW_NAME}`).catch(() => {});
 
   const menuBtn = page.locator("#toolbar button[title='Menu']");
@@ -273,8 +275,13 @@ async function runNewLoadSaveFlow(
   const restore = await ctx.get(`${API_URL}/api/games/${openFor}`);
   if (!restore.ok()) throw new Error(`Starter game missing before re-load`);
   await page.locator(`button:has-text("Open")`).first().click();
-  await wait(600);
-  const reloadedName = await page.evaluate(() => (window as any).__gameDebug?.activeGameName);
+  let reloadedName: string | null = null;
+  const loadDeadline = Date.now() + 10_000;
+  while (Date.now() < loadDeadline) {
+    reloadedName = await page.evaluate(() => (window as any).__gameDebug?.activeGameName);
+    if (reloadedName === openFor) break;
+    await wait(250);
+  }
   if (reloadedName !== openFor) {
     throw new Error(`Load failed: expected ${openFor}, got ${reloadedName}`);
   }
@@ -381,7 +388,7 @@ function startWeb(): ChildProcess {
     "web",
     "npx",
     ["vite", "preview", "--port", String(WEB_PORT), "--strictPort"],
-    {}
+    { API_PORT: String(API_PORT) }
   );
 }
 
@@ -543,7 +550,157 @@ async function run() {
     if (spawnInfo.aiSpawn) AI_SPAWN = spawnInfo.aiSpawn;
     console.log(`>> dynamic spawns: player=${JSON.stringify(PLAYER_SPAWN)} ai=${JSON.stringify(AI_SPAWN)}`);
 
-    // ... rest of the test flow unchanged ...
+    const bootName = await page.evaluate(() => (window as any).__gameDebug?.activeGameName);
+    if (typeof bootName !== "string" || !bootName.startsWith("starter-")) {
+      throw new Error(`Expected starter game, got activeGameName=${bootName}`);
+    }
+    await page.locator("button", { hasText: /^Load Game$/ }).last().click();
+    const openButtons = page.locator("button:visible", { hasText: /^Open$/ });
+    await openButtons.first().waitFor({ timeout: 10_000 });
+    const openCount = await openButtons.count();
+    let openedStarter = false;
+    for (let i = 0; i < openCount; i++) {
+      const rowText = await openButtons
+        .nth(i)
+        .evaluate((b: HTMLElement) => b.closest("div")?.parentElement?.textContent ?? "");
+      if (rowText.includes(bootName)) {
+        await openButtons.nth(i).click({ timeout: 10_000 });
+        openedStarter = true;
+        break;
+      }
+    }
+    if (!openedStarter) {
+      throw new Error(`home Load Game modal did not list active starter game ${bootName}`);
+    }
+    await page.waitForFunction(
+      () => {
+        const overlay = Array.from(document.querySelectorAll("div")).find(
+          (d) => (d as HTMLElement).style.zIndex === "200"
+        );
+        return !overlay || (overlay as HTMLElement).style.display === "none";
+      },
+      null,
+      { timeout: 10_000 }
+    );
+    const reloadedSpawn = await page.evaluate(() => {
+      const dbg = (window as any).__gameDebug;
+      const heroes = dbg?.getHeroes?.() ?? [];
+      const playerHero = heroes.find((h: any) => h.ownerId === 0);
+      return playerHero ? { q: playerHero.q, r: playerHero.r } : null;
+    });
+    if (reloadedSpawn) PLAYER_SPAWN = reloadedSpawn;
+    console.log(`>> home dismissed, starter game reloaded: ${bootName}`);
+
+    const activeName = await page.evaluate(() => (window as any).__gameDebug?.activeGameName);
+    if (typeof activeName !== "string" || !activeName.startsWith("starter-")) {
+      throw new Error(`Expected starter game, got activeGameName=${activeName}`);
+    }
+    console.log(`>> active game: ${activeName}`);
+
+    if (!(await isHumanTurn(page))) {
+      throw new Error("expected human PLAYER_TURN at boot");
+    }
+    console.log(">> human turn at boot");
+
+    const dbRow = await queryDbRow(activeName);
+    assert(dbRow.round >= 1, `expected round >= 1, got ${dbRow.round}`);
+    assert(dbRow.players.length > 0, "no players in DB row");
+    assert(Object.keys(dbRow.heroes).length > 0, "no heroes in DB row");
+    assert(Object.keys(dbRow.settlements).length > 0, "no settlements in DB row");
+    console.log(
+      `>> db row: round=${dbRow.round} activePlayer=${dbRow.active_player_id} ` +
+      `heroes=${Object.keys(dbRow.heroes).length} settlements=${Object.keys(dbRow.settlements).length}`
+    );
+
+    const nonBlack = await page.evaluate(() => {
+      const c = document.getElementById("game") as HTMLCanvasElement | null;
+      if (!c) return -1;
+      const ctx2 = c.getContext("2d");
+      if (!ctx2) return -1;
+      const { data } = ctx2.getImageData(0, 0, c.width, c.height);
+      let n = 0;
+      for (let i = 0; i < data.length; i += 4 * 131) {
+        if (data[i] + data[i + 1] + data[i + 2] > 24) n++;
+      }
+      return n;
+    });
+    if (nonBlack < 50) throw new Error(`Canvas appears blank (${nonBlack} non-black samples)`);
+    console.log(`>> canvas non-black samples: ${nonBlack}`);
+
+    const target = await pickClickTarget(ctx, activeName, PLAYER_SPAWN);
+    const heroStart = await page.evaluate(() => {
+      const dbg = (window as any).__gameDebug;
+      const heroes = dbg?.getHeroes?.() ?? [];
+      const h = heroes.find((x: any) => x.ownerId === 0) ?? heroes[0];
+      return h ? { id: h.id, q: h.q, r: h.r } : null;
+    });
+    if (!heroStart) throw new Error("no player hero found via __gameDebug.getHeroes");
+    console.log(`>> hero start: ${JSON.stringify(heroStart)} click target: ${JSON.stringify(target.tile)}`);
+
+    const heroScreen = await page.evaluate(
+      ({ q, r }) => (window as any).__gameDebug.screenFor(q, r),
+      { q: heroStart.q, r: heroStart.r }
+    );
+    await page.mouse.click(heroScreen.x, heroScreen.y);
+    await wait(150);
+    const screen = await page.evaluate(
+      ({ q, r }) => (window as any).__gameDebug.screenFor(q, r),
+      { q: target.tile.q, r: target.tile.r }
+    );
+    await page.mouse.move(screen.x, screen.y);
+    await wait(100);
+    await page.mouse.click(screen.x, screen.y);
+
+    let heroAfter: { id: string; q: number; r: number } | null = null;
+    const moveDeadline = Date.now() + 10_000;
+    while (Date.now() < moveDeadline) {
+      heroAfter = await page.evaluate(
+        (id: string) => {
+          const dbg = (window as any).__gameDebug;
+          const heroes = dbg?.getHeroes?.() ?? [];
+          const h = heroes.find((x: any) => x.id === id);
+          return h ? { id: h.id, q: h.q, r: h.r } : null;
+        },
+        heroStart.id
+      );
+      if (heroAfter && (heroAfter.q !== heroStart.q || heroAfter.r !== heroStart.r)) break;
+      await wait(200);
+    }
+    console.log(`>> hero after click: ${JSON.stringify(heroAfter)}`);
+    if (!heroAfter || (heroAfter.q === heroStart.q && heroAfter.r === heroStart.r)) {
+      throw new Error("Hero did not move after click");
+    }
+    if (heroAfter.q !== target.tile.q || heroAfter.r !== target.tile.r) {
+      throw new Error(
+        `Hero moved to (${heroAfter.q},${heroAfter.r}), expected target (${target.tile.q},${target.tile.r})`
+      );
+    }
+    console.log(`>> hero reached target tile`);
+
+    let lastEvent: { kind: string; payload: any } | null = null;
+    const eventDeadline = Date.now() + 10_000;
+    while (Date.now() < eventDeadline) {
+      lastEvent = await queryLastEvent(activeName);
+      if (lastEvent?.kind === "HeroMoved") break;
+      await wait(250);
+    }
+    if (lastEvent?.kind !== "HeroMoved") {
+      throw new Error(`expected HeroMoved as last event, got ${JSON.stringify(lastEvent)}`);
+    }
+    console.log(">> move persisted: last event HeroMoved");
+
+    const gameRes = await ctx.get(`${API_URL}/api/games/${activeName}`);
+    if (!gameRes.ok()) throw new Error(`GET /api/games/${activeName} not ok`);
+    const gameBody = (await gameRes.json()) as { updated_at: string };
+    const eventsRes = await ctx.get(`${API_URL}/api/games/${activeName}/events`);
+    if (!eventsRes.ok()) throw new Error(`GET events not ok`);
+    const eventsBody = (await eventsRes.json()) as Array<{ kind: string }>;
+    if (eventsBody.length < 1) throw new Error("No events logged");
+    console.log(`>> events logged: ${eventsBody.length}`);
+
+    await runTilesEndpointChecks(ctx, activeName);
+
+    await runNewLoadSaveFlow(page, ctx, activeName, gameBody.updated_at);
 
     console.log(">> ALL TESTS PASSED");
   } catch (err) {
