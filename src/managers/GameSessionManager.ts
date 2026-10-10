@@ -13,7 +13,7 @@ import { hydrateClientGame } from "../io/hydrateClientGame";
 import type { FactionId } from "@heroes/contracts";
 import { notePersisted } from "../io/commands";
 import { setInMemoryLocalPlayerId } from "../players/localPlayer";
-import { getMultiplayerSync } from "../io/multiplayerSync";
+import { getMultiplayerSync, getEntityMirror } from "../io/multiplayerSync";
 import { clearServerDriven, syncServerDrivenFromGame } from "../io/serverDrivenGames";
 import { getCachedAuth } from "../io/authStorage";
 
@@ -95,6 +95,7 @@ export class GameSessionManager {
     // and seed from that.
     const seededCursor = loaded.last_event_id === undefined ? undefined : Number(loaded.last_event_id);
     getMultiplayerSync().start(loaded.name, { cursor: seededCursor, state: hydrated });
+    getEntityMirror().syncWith(this.state.getHeroesMap(), this.state.getSettlementsMap());
   }
 
   async handleManualSave(): Promise<void> {
