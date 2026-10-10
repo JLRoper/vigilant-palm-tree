@@ -61,6 +61,7 @@ The former top-level `shared/` directory **no longer exists** — its contents w
 - Dev server **and** preview server: host `0.0.0.0`, port from `CLIENT_PORT` in `.env` (default `5173`); both proxy `/api/*` → `http://<API_HOST>:<API_PORT>` (defaults `127.0.0.1:3001`).
 - Entry HTML: [`index.html`](./index.html), loads `src/main.ts` as an ES module.
 - HTML mounts a full-viewport `<canvas id="game">` inside `#app` and a `#toolbar` slot. The `#hud` element is **not** in the HTML — it is created dynamically by `buildHud()` (`src/screens/shared/hud.ts`) into the toolbar's status slot; `index.html` only carries its CSS.
+- Build version stamping: `vite.config.ts` injects three compile-time `define`s — `__APP_VERSION__` (the `package.json` version), `__BUILD_TIME__` (ISO build timestamp), and `__BUILD_COMMIT__` (the `VITE_COMMIT_HASH` env var, else the short git hash; `"dev"` as fallback). [`src/core/version.ts`](./src/core/version.ts) consumes them (with node/test fallbacks) via `APP_VERSION` / `BUILD_TIME` / `BUILD_COMMIT` + `formatBuildTime` / `getBuildInfo`, and the settings menu shows `v<version> (<commit>)` and `Built: <formatted time>` in its bottom row (full ISO timestamp in the tooltip).
 
 ### JavaScript (Node ESM, `.mjs`)
 - Used for tooling scripts in `tools/` and `tools/sprites/` (sprite generation, test wrapper `tools/run-test.mjs`).
