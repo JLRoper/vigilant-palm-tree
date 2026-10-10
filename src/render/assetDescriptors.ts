@@ -867,6 +867,11 @@ export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> =
 // This table uses the de-facto convention sh = tw*0.9 = 86.4 (the 1x1 width)
 // for every key regardless of its real footprint, which reproduces the values
 // below; it is an eyeballed baseline, not a strict geometric solve.
+// Exception: the 2x2 farmField ground plots (art regenerated 2026-10-05) use
+// the geometric 2x2 solve anchorOffsetY = bottomPad * 172.8/1024 (172.8 being
+// the real 2x2 draw height, not 86.4) so the slab corner lands on the
+// footprint's south vertex; under the 86.4 convention they would float ~10px
+// high. Other 2x2 buildings (e.g. townHall) deliberately keep the 86.4 values.
 const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.granary.1": 11,
   "building.pixel.granary.2": 25,
@@ -929,12 +934,12 @@ const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
   "building.pixel.sylvanStables.3": 3,
   "building.pixel.worldrootGrove.1": 6,
   "building.pixel.worldrootGrove.3": 0,
-  "building.pixel.farmField.1": 17,
-  "building.pixel.farmField.2": 17,
-  "building.pixel.farmField.3": 17,
-  "building.pixel-alt.farmField.1": 17,
-  "building.pixel-alt.farmField.2": 17,
-  "building.pixel-alt.farmField.3": 17,
+  "building.pixel.farmField.1": 20,
+  "building.pixel.farmField.2": 20,
+  "building.pixel.farmField.3": 20,
+  "building.pixel-alt.farmField.1": 23,
+  "building.pixel-alt.farmField.2": 23,
+  "building.pixel-alt.farmField.3": 23,
   "building.pixel.townHall.1": 9,
   "building.pixel.townHall.2": 9,
   "building.pixel.townHall.3": 6,
