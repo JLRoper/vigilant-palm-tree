@@ -151,6 +151,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     this.state.setState(initialState);
     this.state.rebuildHeroesFromState();
     this.state.rebuildSettlementsFromState();
+    getEntityMirror().syncWith(this.state.getHeroesMap(), this.state.getSettlementsMap());
   }
 
   private initRendering(): void {
@@ -245,6 +246,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       this.state.rebuildHeroesFromState();
       this.state.rebuildSettlementsFromState();
       this.state.syncHeroVisualsToState();
+      getEntityMirror().syncWith(this.state.getHeroesMap(), this.state.getSettlementsMap());
       this.fullFrame();
       // Battle offers arrive via the bridge's replaceState path, which bypasses
       // the rAF loop's `changed` detection -- trigger the (phase-gated,
@@ -482,9 +484,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
     this.view.draw(
       this.view.getHover(),
-      this.state.getHeroes(),
       this.view.getPath(),
-      this.state.getSettlements(),
       {
         selectedHeroId: gs.selectedHeroId,
         selectedSettlementId: gs.selectedSettlementId,

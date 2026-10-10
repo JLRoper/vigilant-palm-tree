@@ -3,8 +3,6 @@ import { MapRenderer } from "../render/renderer";
 import type { RenderOptions } from "../render/renderTypes";
 import { MinimapCamera } from "../render/minimap";
 import { GameMap } from "../map/gameMap";
-import { Hero } from "../entities/hero";
-import { Castle } from "../entities/settlement";
 import { AdventureView, type AdventureViewOptions } from "@screens/adventure/adventureView";
 import { SpriteProvider } from "../render/assets";
 import type { Axial } from "../core/hex";
@@ -19,23 +17,17 @@ export class ViewManager {
   public mapRenderer!: MapRenderer;
   public view!: AdventureView;
   private ctx!: CanvasRenderingContext2D;
-  private mirror: EntityMirror | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private spriteProvider: SpriteProvider) {}
 
   initializeRenderer(map: GameMap, mirror: EntityMirror): void {
     this.ctx = this.canvas.getContext("2d")!;
-    this.mirror = mirror;
     if (this.minimapCamera) {
       this.minimapCamera.reset(map);
     } else {
       this.minimapCamera = new MinimapCamera(map);
     }
     this.mapRenderer = new MapRenderer(this.ctx, map, this.camera, this.spriteProvider, this.minimapCamera, mirror);
-  }
-
-  getMirror(): EntityMirror | null {
-    return this.mirror;
   }
 
   initializeAdventureView(
@@ -63,9 +55,7 @@ export class ViewManager {
 
   draw(
     hover: Axial | null,
-    heroes: Hero[],
     path: Axial[],
-    castles: Castle[],
     opts: RenderOptions,
     activeCharters?: readonly CharterState[],
     validCharterHexes?: Set<string> | null,
@@ -73,7 +63,7 @@ export class ViewManager {
   ): void {
     if (!this.mapRenderer) return;
     const fullOpts: RenderOptions = { ...opts, activeCharters, validCharterHexes, caravans };
-    this.mapRenderer.draw(hover, heroes, path, castles, fullOpts);
+    this.mapRenderer.draw(hover, path, fullOpts);
   }
 
   drawCityOverlay(cityView: CityView | undefined): void {

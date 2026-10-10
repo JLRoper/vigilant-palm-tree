@@ -6,6 +6,7 @@ import type { RenderOptions } from "../../renderTypes";
 import { computeVision, isVisible } from "../../fog";
 import { computeReachableSplit } from "../../overlays/pathOverlay";
 import { controlledPositions, territoryBoundaryEdges } from "@heroes/engine";
+import type { EntityMirror } from "../entityMirror";
 import type {
   SceneNode,
   HeroNode,
@@ -19,14 +20,14 @@ import type {
 // decisions into pure data. Not yet covered: the minimap (its own
 // self-contained secondary view, drawn outside the main camera transform).
 //
-// Takes the same Hero[]/Castle[] wrapper inputs MapRenderer.draw() takes today
-// rather than raw GameState — see entityMirror.ts for why that mirror isn't
-// replaced yet.
+// Hero/Castle entities are supplied via EntityMirror (or directly as arrays
+// for standalone unit tests).
 
 export interface AdventureSceneInput {
   map: GameMap;
-  heroes: Hero[];
-  castles: readonly Castle[];
+  mirror?: EntityMirror;
+  heroes?: Hero[];
+  castles?: readonly Castle[];
   path: Axial[];
   hover: Axial | null;
   opts: RenderOptions;
@@ -37,7 +38,9 @@ export interface AdventureSceneInput {
 }
 
 export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
-  const { map, heroes, castles, path, hover, opts } = input;
+  const { map, path, hover, opts } = input;
+  const heroes = input.heroes ?? input.mirror?.getHeroes() ?? [];
+  const castles = input.castles ?? input.mirror?.getSettlements() ?? [];
   const nodes: SceneNode[] = [];
   const visible = input.visible ?? computeVision(heroes, castles, opts.viewPlayerId);
 

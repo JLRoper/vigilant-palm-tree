@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import type { CharterState } from "@heroes/contracts";
 import { Hero } from "../../src/entities/hero";
 import { Castle } from "../../src/entities/settlement";
+import { EntityMirror } from "../../src/render/scene/entityMirror";
 import { axialToPixel, type Axial } from "../../src/core/hex";
 import { computeReachableSplit } from "../../src/render/overlays/pathOverlay";
 import { buildAdventureScene } from "../../src/render/scene/sceneBuilder/adventureScene";
+import { makeHero, makeSettlement, makeState } from "../charter/_helpers";
 import type {
   CaravanMarkerNode,
   CastleNode,
@@ -586,4 +588,101 @@ test("caravan markers share the hero fog gate: hidden in fog, drawn in vision, o
     opts: makeRenderOptions({ viewPlayerId: 0, caravans: [{ q: 6, r: 0, ownerId: 0, wagons: 3 }] }),
   });
   assert.equal(nodesOfKind(own, "caravanMarker").length, 1, "own caravan bypasses the fog set exactly like own heroes and castles");
+});
+
+test("buildAdventureScene reads heroes and settlements from mirror when supplied", () => {
+  const map = makeGrassMap(5, 5);
+  const mirror = new EntityMirror();
+  mirror.bootstrap(
+    makeState({
+      heroes: [makeHero("h0", 0, 1, 1), makeHero("h1", 1, 3, 3)],
+      settlements: [makeSettlement("s0", 0, 2, 2)],
+    }),
+  );
+
+  const nodes = buildAdventureScene({
+    map,
+    mirror,
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const heroNodes = nodesOfKind<HeroNode>(nodes, "hero");
+  assert.equal(heroNodes.length, 2, "both heroes visible on grass map");
+  assert.ok(heroNodes.some((n) => n.heroId === "h0" && n.ownerId === 0));
+  assert.ok(heroNodes.some((n) => n.heroId === "h1" && n.ownerId === 1));
+
+  const castleNodes = nodesOfKind<CastleNode>(nodes, "castle");
+  assert.equal(castleNodes.length, 1);
+  assert.equal(castleNodes[0].settlementId, "s0");
+  assert.equal(castleNodes[0].ownerId, 0);
+});
+
+test("moving hero in mirror reflects in emitted HeroNode coordinates and animation flags", () => {
+  const map = makeGrassMap(5, 5);
+  const mirror = new EntityMirror();
+  mirror.bootstrap(
+    makeState({
+      heroes: [makeHero("h0", 0, 1, 1)],
+      settlements: [],
+    }),
+  );
+
+  mirror.applyEvent({
+    type: "HeroMoved",
+    actor: 0,
+    heroId: "h0",
+    to: { q: 2, r: 1 },
+  });
+
+  // Tick a quarter through the move duration (55ms of 220ms, moveProgress = 0.25)
+  mirror.update(55);
+
+  const nodes = buildAdventureScene({
+    map,
+    mirror,
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const heroNodes = nodesOfKind<HeroNode>(nodes, "hero");
+  assert.equal(heroNodes.length, 1);
+  const [node] = heroNodes;
+  assert.equal(node.heroId, "h0");
+  assert.notEqual(node.scaleY, 1.0, "moving hero has vertical squash/stretch");
+  assert.ok(node.world.x > axialToPixel(1, 1).x, "interpolated world x advanced toward target");
+});
+
+test("settlement captured in mirror updates emitted CastleNode owner and color", () => {
+  const map = makeGrassMap(5, 5);
+  const mirror = new EntityMirror();
+  mirror.bootstrap(
+    makeState({
+      heroes: [makeHero("h0", 0, 0, 0)],
+      settlements: [makeSettlement("s0", 1, 2, 2)],
+    }),
+  );
+
+  mirror.applyEvent({
+    type: "SettlementCaptured",
+    actor: 0,
+    heroId: "h0",
+    settlementId: "s0",
+    previousOwnerId: 1,
+  });
+
+  const nodes = buildAdventureScene({
+    map,
+    mirror,
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const castleNodes = nodesOfKind<CastleNode>(nodes, "castle");
+  assert.equal(castleNodes.length, 1);
+  assert.equal(castleNodes[0].ownerId, 0, "castle owner updated to capturing player");
+  assert.equal(castleNodes[0].color, stubColorForOwner(0));
 });

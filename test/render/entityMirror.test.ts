@@ -119,3 +119,21 @@ test("update() returns false once nothing is animating, including with an empty 
   mirror.bootstrap(makeState({ heroes: [makeHero("h0", 0, 2, 2)], settlements: [] }));
   assert.equal(mirror.update(16), false, "no HeroMoved applied yet -- nothing should be moving");
 });
+
+test("syncWith adopts live Hero and Castle instances directly", () => {
+  const mirror = new EntityMirror();
+  const hero = makeHero("h0", 0, 2, 2);
+  const castle = makeSettlement("s0", 0, 3, 3);
+
+  mirror.syncWith([hero], [castle]);
+
+  assert.equal(mirror.getHeroes().length, 1);
+  assert.equal(mirror.getSettlements().length, 1);
+  assert.strictEqual(mirror.getHero("h0"), hero, "stores the exact same instance");
+  assert.strictEqual(mirror.getSettlement("s0"), castle, "stores the exact same instance");
+
+  // Reconciles when a hero is removed
+  mirror.syncWith([], [castle]);
+  assert.equal(mirror.getHeroes().length, 0);
+  assert.equal(mirror.getSettlements().length, 1);
+});
