@@ -22,7 +22,7 @@ import {
   reapPreviousRunPids,
   clearRegisteredPids,
 } from "./_request";
-import { comparePng, diffPngBuffers } from "./render/pixelDiff";
+import { comparePng, diffPngBuffers, MISMATCH_RATIO_THRESHOLD } from "./render/pixelDiff";
 import type { GameDebugApi } from "../src/io/debugCommands";
 
 const API_PORT = getApiPort(4000);
@@ -147,16 +147,24 @@ interface SceneResult {
   name: string;
   ok: boolean;
   reason?: string;
+  mismatchRatio?: number;
 }
 
 const results: SceneResult[] = [];
+
+function marginDetail(diff: { mismatchRatio?: number; mismatchedPixels?: number; totalPixels?: number }): string {
+  const { mismatchRatio, mismatchedPixels, totalPixels } = diff;
+  if (mismatchRatio == null || mismatchedPixels == null || totalPixels == null) return "";
+  const headroom = 1 - mismatchRatio / MISMATCH_RATIO_THRESHOLD;
+  return ` -- mismatch ${(mismatchRatio * 100).toFixed(3)}% (${mismatchedPixels}/${totalPixels} px, headroom ${(headroom * 100).toFixed(1)}% of the ${(MISMATCH_RATIO_THRESHOLD * 100).toFixed(1)}% budget)`;
+}
 
 async function captureAndCompare(name: string, page: Page): Promise<Buffer> {
   const png = await page.locator("canvas").last().screenshot();
   const baselinePath = resolve(BASELINE_DIR, `${name}.png`);
   const diff = comparePng(baselinePath, png, { updateBaseline: UPDATE_BASELINES });
-  results.push({ name, ok: diff.ok, reason: diff.reason });
-  console.log(`>> [${diff.ok ? "OK" : "FAIL"}] ${name}${diff.reason ? ` -- ${diff.reason}` : ""}`);
+  results.push({ name, ok: diff.ok, reason: diff.reason, mismatchRatio: diff.mismatchRatio });
+  console.log(`>> [${diff.ok ? "OK" : "FAIL"}] ${name}${marginDetail(diff)}${diff.reason ? ` -- ${diff.reason}` : ""}`);
   return png;
 }
 
@@ -303,8 +311,15 @@ async function run(): Promise<void> {
     const scenebuilderPng = await runBattleArenaScene(context, "battle-arena-scenebuilder", "/?paint=scenebuilder");
     const defaultPng = await runBattleArenaScene(context, "battle-arena-default", "");
     const crossDiff = diffPngBuffers(defaultPng, scenebuilderPng);
-    results.push({ name: "battle-arena-default-vs-scenebuilder", ok: crossDiff.ok, reason: crossDiff.reason });
-    console.log(`>> [${crossDiff.ok ? "OK" : "FAIL"}] battle-arena-default-vs-scenebuilder${crossDiff.reason ? ` -- ${crossDiff.reason}` : ""}`);
+    results.push({ name: "battle-arena-default-vs-scenebuilder", ok: crossDiff.ok, reason: crossDiff.reason, mismatchRatio: crossDiff.mismatchRatio });
+    console.log(`>> [${crossDiff.ok ? "OK" : "FAIL"}] battle-arena-default-vs-scenebuilder${marginDetail(crossDiff)}${crossDiff.reason ? ` -- ${crossDiff.reason}` : ""}`);
+
+    const marginScenes = results.filter((r): r is SceneResult & { mismatchRatio: number } => r.mismatchRatio != null);
+    if (marginScenes.length > 0) {
+      const tightest = marginScenes.reduce((a, b) => (b.mismatchRatio < a.mismatchRatio ? b : a));
+      const headroom = 1 - tightest.mismatchRatio / MISMATCH_RATIO_THRESHOLD;
+      console.log(`>> least headroom: ${tightest.name} -- mismatch ${(tightest.mismatchRatio * 100).toFixed(3)}% (headroom ${(headroom * 100).toFixed(1)}% of the ${(MISMATCH_RATIO_THRESHOLD * 100).toFixed(1)}% budget)`);
+    }
 
     const failed = results.filter((r) => !r.ok);
     if (UPDATE_BASELINES) {

@@ -13,7 +13,7 @@ export interface PixelDiffResult {
 }
 
 const CHANNEL_TOLERANCE = 24;
-const MISMATCH_RATIO_THRESHOLD = 0.005;
+export const MISMATCH_RATIO_THRESHOLD = 0.005;
 
 function channelsDiffer(a: PNG, b: PNG, i: number): boolean {
   for (let c = 0; c < 3; c++) {
