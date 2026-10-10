@@ -34,6 +34,8 @@
     "test:wrapper": "node --no-deprecation tools/run-test.mjs",
     "lint:deps": "depcruise src server packages --config dependency-cruiser.cjs",
     "validate-assets": "node tools/sprites/validate-assets.mjs",
+    "docker:build": "tsx scripts/docker-build.ts",
+    "version:bump": "node scripts/bump-version.mjs",
     "sprites:generate": "node tools/sprites/pixel-gen.mjs",
     "sprites:preview": "node tools/sprites/generate-preview.mjs",
     "gen:sprite-keys": "node tools/sprites/gen-building-sprite-keys.mjs",

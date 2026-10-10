@@ -3,6 +3,17 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# The client stamps version, commit hash and build time at compile time
+# (vite.config.ts -> __APP_VERSION__/__BUILD_COMMIT__/__BUILD_TIME__). The
+# version and build time resolve from files present here, but the commit hash
+# normally comes from `git rev-parse`, and .git is deliberately NOT in the
+# build context (179MB of PNG art history -- see .dockerignore). Without this
+# arg the build falls back to the literal "dev" and every deployed build
+# reports a commit it never had. `npm run docker:build` resolves the hash on
+# the host and passes it in; a bare `docker compose build` gets the "dev"
+# default below.
+ARG VITE_COMMIT_HASH=dev
+
 # Copy package files -- npm workspaces (packages/*) need their package.json
 # present on disk before `npm ci` runs, so they're linked correctly.
 COPY package.json package-lock.json ./

@@ -24,6 +24,11 @@ services:
       context: .
       dockerfile: docker/Dockerfile
       target: api-runtime
+      # Client build stamps the commit hash; .git is not in the build context,
+      # so it is passed in from the host. Use `npm run docker:build` (which
+      # resolves it from git) rather than a bare `docker compose build`.
+      args:
+        VITE_COMMIT_HASH: ${VITE_COMMIT_HASH:-dev}
     container_name: game_api
     restart: unless-stopped
     environment:
@@ -53,6 +58,8 @@ services:
       context: .
       dockerfile: docker/Dockerfile
       target: web-runtime
+      args:
+        VITE_COMMIT_HASH: ${VITE_COMMIT_HASH:-dev}
     container_name: game_web
     restart: unless-stopped
     ports:

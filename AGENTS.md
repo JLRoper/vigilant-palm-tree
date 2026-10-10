@@ -31,6 +31,28 @@ Before ANY `git commit`, `git switch -c`, `gh pr create`, or `gh repo create`:
 2. If it fails, do not commit/push/PR. Report the failure and ask the user how to proceed.
 The `/precommit` and `/pre-pr` slash commands are manual equivalents you can offer the user.
 
+## Versioning
+
+- **The root `package.json` `version` is the app version** — the single source
+  of truth. `vite.config.ts` stamps it into the client as `__APP_VERSION__`,
+  and the settings panel's build-info footer (bottom of the panel, next to
+  Close) shows `v<version> (<commit>)` plus `Built: <time>` via
+  `src/core/version.ts`. The workspace packages (`packages/*`, `0.0.1`) are
+  private internals and are deliberately not the app version.
+- **Bump with `npm run version:bump -- patch|minor|major|X.Y.Z`**. It rewrites
+  the version, prepends a `CHANGELOG.md` entry (commit-log summary by default,
+  or `-m "..."`), and prints the deploy command. It edits nothing else unless
+  you pass `--commit` / `--tag` / `--push`.
+- **Tags are `v<semver>`** and mean a release. While the major is `0`, a
+  **minor** bump is breaking and a **patch** bump is features/fixes.
+- **Docker builds must go through `npm run docker:build`**, not a bare
+  `docker compose build`. `.git` is excluded from the build context (179 MB of
+  PNG art history), so the container cannot resolve a commit hash on its own —
+  the wrapper resolves it on the host and passes it as a build arg. A bare
+  `docker compose build` stamps the literal fallback `"dev"` and the deployed
+  settings panel will read `v<version> (dev)`.
+- Run the pre-commit gate before committing a release (see above).
+
 ## Skills available
 - `/dev start|stop|restart` — manage the local dev environment (db + api + client).
 - `/review-issue [branch|PR#] [issue#]` — review a branch against the issue it claims to close, plus a general pass against the project docs. Read-only.
