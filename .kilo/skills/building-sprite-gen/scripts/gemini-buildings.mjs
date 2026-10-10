@@ -1,8 +1,10 @@
 // Gemini building sprite generator via OpenRouter (image-in → image-out).
 // Sends a style reference PNG + prompt to google/gemini-2.5-flash-image and
 // saves the result into src/resources/buildings/, then auto-runs
-// strip-checkerboard.mjs on it (fake checkerboard → real alpha) and
-// repair-alpha.mjs (seals the over-erosion seams those passes can leave).
+// strip-checkerboard.mjs on it (fake checkerboard → real alpha),
+// repair-alpha.mjs (seals the over-erosion seams those passes can leave), and
+// the key generator (regenerates packages/engine/src/generated/
+// buildingSpriteKeys.ts so the new sprite resolves with zero manual wiring).
 // It stores NO prompts — the caller passes --name plus --prompt or
 // --prompt-file every time, so concurrent agents never edit this file.
 //
@@ -20,6 +22,7 @@
 //   --model <id>         OpenRouter model id (default: google/gemini-2.5-flash-image)
 //   --no-strip           skip the automatic strip-checkerboard.mjs post-pass
 //   --no-repair          skip the automatic repair-alpha.mjs post-pass
+//   --no-regen-keys      skip the automatic buildingSpriteKeys.ts regeneration
 //   --dry-run            print what would run (name, model, out path, reference) and exit — no API call, no billing
 //   --help               show this text
 
@@ -39,7 +42,7 @@ const apiKey = process.env.OPENROUTER_API_KEY;
 function usage() { console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(0, 23).join("\n")); }
 
 const argv = process.argv.slice(2);
-const flags = { prompt: null, promptFile: null, name: null, ref: null, model: MODEL, strip: true, repair: true, dryRun: false };
+const flags = { prompt: null, promptFile: null, name: null, ref: null, model: MODEL, strip: true, repair: true, regenKeys: true, dryRun: false };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === "--help" || a === "-h") { usage(); process.exit(0); }
@@ -50,6 +53,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === "--model") flags.model = argv[++i];
   else if (a === "--no-strip") flags.strip = false;
   else if (a === "--no-repair") flags.repair = false;
+  else if (a === "--no-regen-keys") flags.regenKeys = false;
   else if (a === "--dry-run") flags.dryRun = true;
   else { console.error(`Unexpected argument: ${a}\n`); usage(); process.exit(1); }
 }
@@ -71,6 +75,7 @@ if (flags.dryRun) {
   console.log(`  model: ${flags.model}`);
   console.log(`  reference: ${refPath}`);
   console.log(`  prompt: ${prompt.length} chars, starts "${prompt.slice(0, 60).replace(/\n/g, " ")}..."`);
+  console.log(`  post-passes: ${flags.strip ? "strip " : ""}${flags.repair ? "repair " : ""}${flags.regenKeys ? "regen-keys" : ""}`.trimEnd());
   process.exit(0);
 }
 
@@ -122,6 +127,17 @@ function repair(file) {
   }
 }
 
+// Re-derive the generated key list from the files on disk. A name that misses
+// the grammar is warned about by the generator and simply not registered, so
+// running this unconditionally is safe.
+function regenerateKeys() {
+  const genScript = path.resolve(__dirname, "..", "..", "..", "..", "tools", "sprites", "gen-building-sprite-keys.mjs");
+  const r = spawnSync(process.execPath, [genScript], { stdio: "inherit" });
+  if (r.status !== 0) {
+    console.error("  key regeneration failed; run manually: npm run gen:sprite-keys");
+  }
+}
+
 console.log(`Generating ${flags.name} ...`);
 const buf = await gen(prompt);
 const out = path.join(outDir, flags.name);
@@ -129,3 +145,4 @@ writeFileSync(out, buf);
 console.log(`  wrote ${out} (${(buf.length / 1024).toFixed(0)} KB)`);
 if (flags.strip) strip(out);
 if (flags.repair) repair(out);
+if (flags.regenKeys) regenerateKeys();

@@ -15,6 +15,10 @@ export * from "./factionRegistry";
 export * from "./init";
 export * from "./rng";
 export * from "./styleResolver";
+// Explicit named export (not a star): BUILDING_SPRITE_KEYS already reaches the
+// barrel through styleResolver's re-export, and two star exports providing the
+// same name is a TS2308 ambiguity error.
+export { BUILDING_SPRITE_FILES, BUILDING_SPRITE_ALIASES } from "./generated/buildingSpriteKeys";
 export * from "./units";
 export * from "./validation/gameIntegrity";
 export * from "./buildingRegistry";

@@ -59,117 +59,11 @@ import resourceStonePileBubbly from "../resources/resource-stone-pile-bubbly.png
 import resourceIronPileBubbly from "../resources/resource-iron-pile-bubbly.png?url";
 import resourceArcanePileBubbly from "../resources/resource-arcane-pile-bubbly.png?url";
 import resourceFoodPileBubbly from "../resources/resource-food-pile-bubbly.png?url";
-import buildingPixelGranary1 from "../resources/buildings/building-pixel-granary-1.png?url";
-import buildingPixelGranary2 from "../resources/buildings/building-pixel-granary-2.png?url";
-import buildingPixelGranary3 from "../resources/buildings/building-pixel-granary-3.png?url";
-import buildingPixelBank1 from "../resources/buildings/building-pixel-bank-1.png?url";
-import buildingPixelBank2 from "../resources/buildings/building-pixel-bank-2.png?url";
-import buildingPixelBank3 from "../resources/buildings/building-pixel-bank-3.png?url";
-import buildingPixelTreasury1 from "../resources/buildings/building-pixel-treasury-1.png?url";
-import buildingPixelTreasury2 from "../resources/buildings/building-pixel-treasury-2.png?url";
-import buildingPixelTreasury3 from "../resources/buildings/building-pixel-treasury-3.png?url";
-import buildingPixelWarehouse1 from "../resources/buildings/building-pixel-warehouse-1.png?url";
-import buildingPixelWarehouse2 from "../resources/buildings/building-pixel-warehouse-2.png?url";
-import buildingPixelWarehouse3 from "../resources/buildings/building-pixel-warehouse-3.png?url";
-import buildingPixelGoldMine1 from "../resources/buildings/building-pixel-goldMine-1.png?url";
-import buildingPixelGoldMine2 from "../resources/buildings/building-pixel-goldMine-2.png?url";
-import buildingPixelGoldMine3 from "../resources/buildings/building-pixel-goldMine-3.png?url";
-import buildingPixelWoodcutterHut1 from "../resources/buildings/building-pixel-woodcutterHut-1.png?url";
-import buildingPixelWoodcutterHut2 from "../resources/buildings/building-pixel-woodcutterHut-2.png?url";
-import buildingPixelSmithy2 from "../resources/buildings/building-pixel-smithy-2.png?url";
-import buildingPixelStoneMine1 from "../resources/buildings/building-pixel-stoneMine-1.png?url";
-import buildingPixelStoneMine2 from "../resources/buildings/building-pixel-stoneMine-2.png?url";
-import buildingPixelStoneMine3 from "../resources/buildings/building-pixel-stoneMine-3.png?url";
-import buildingPixelIronMine1 from "../resources/buildings/building-pixel-ironMine-1.png?url";
-import buildingPixelIronMine2 from "../resources/buildings/building-pixel-ironMine-2.png?url";
-import buildingPixelIronMine3 from "../resources/buildings/building-pixel-ironMine-3.png?url";
-import buildingPixelCrypt1 from "../resources/buildings/building-pixel-crypt-1.png?url";
-import buildingPixelCrypt3 from "../resources/buildings/building-pixel-crypt-3.png?url";
-import buildingPixelOssuary1 from "../resources/buildings/building-pixel-ossuary-1.png?url";
-import buildingPixelOssuary2 from "../resources/buildings/building-pixel-ossuary-2.png?url";
-import buildingPixelOssuary3 from "../resources/buildings/building-pixel-ossuary-3.png?url";
-import buildingPixelWraithBarrows1 from "../resources/buildings/building-pixel-wraithBarrows-1.png?url";
-import buildingPixelWraithBarrows2 from "../resources/buildings/building-pixel-wraithBarrows-2.png?url";
-import buildingPixelWraithBarrows3 from "../resources/buildings/building-pixel-wraithBarrows-3.png?url";
-import buildingPixelSpireOfAsh1 from "../resources/buildings/building-pixel-spireOfAsh-1.png?url";
-import buildingPixelSpireOfAsh2 from "../resources/buildings/building-pixel-spireOfAsh-2.png?url";
-import buildingPixelSpireOfAsh3 from "../resources/buildings/building-pixel-spireOfAsh-3.png?url";
-import buildingPixelUnderConstruction1 from "../resources/buildings/building-pixel-underConstruction-1.png?url";
-import buildingPixelUnderConstruction2 from "../resources/buildings/building-pixel-underConstruction-2.png?url";
-import buildingPixelUnderConstruction3 from "../resources/buildings/building-pixel-underConstruction-3.png?url";
-import buildingPixelForgeHall1 from "../resources/buildings/building-pixel-forgeHall-1.png?url";
-import buildingPixelForgeHall2 from "../resources/buildings/building-pixel-forgeHall-2.png?url";
-import buildingPixelForgeHall3 from "../resources/buildings/building-pixel-forgeHall-3.png?url";
-import buildingPixelGunnersRedoubt1 from "../resources/buildings/building-pixel-gunnersRedoubt-1.png?url";
-import buildingPixelGunnersRedoubt3 from "../resources/buildings/building-pixel-gunnersRedoubt-3.png?url";
-import buildingPixelGolemFoundry1 from "../resources/buildings/building-pixel-golemFoundry-1.png?url";
-import buildingPixelGolemFoundry2 from "../resources/buildings/building-pixel-golemFoundry-2.png?url";
-import buildingPixelGolemFoundry3 from "../resources/buildings/building-pixel-golemFoundry-3.png?url";
-import buildingPixelDeepAnvil1 from "../resources/buildings/building-pixel-deepAnvil-1.png?url";
-import buildingPixelDeepAnvil2 from "../resources/buildings/building-pixel-deepAnvil-2.png?url";
-import buildingPixelDeepAnvil3 from "../resources/buildings/building-pixel-deepAnvil-3.png?url";
-import buildingPixelGroveSanctum1 from "../resources/buildings/building-pixel-groveSanctum-1.png?url";
-import buildingPixelGroveSanctum2 from "../resources/buildings/building-pixel-groveSanctum-2.png?url";
-import buildingPixelGroveSanctum3 from "../resources/buildings/building-pixel-groveSanctum-3.png?url";
-import buildingPixelWarrenLodge1 from "../resources/buildings/building-pixel-warrenLodge-1.png?url";
-import buildingPixelWarrenLodge2 from "../resources/buildings/building-pixel-warrenLodge-2.png?url";
-import buildingPixelWarrenLodge3 from "../resources/buildings/building-pixel-warrenLodge-3.png?url";
-import buildingPixelSylvanStables1 from "../resources/buildings/building-pixel-sylvanStables-1.png?url";
-import buildingPixelSylvanStables2 from "../resources/buildings/building-pixel-sylvanStables-2.png?url";
-import buildingPixelSylvanStables3 from "../resources/buildings/building-pixel-sylvanStables-3.png?url";
-import buildingPixelWorldrootGrove1 from "../resources/buildings/building-pixel-worldrootGrove-1.png?url";
-import buildingPixelWorldrootGrove3 from "../resources/buildings/building-pixel-worldrootGrove-3.png?url";
-import buildingPixelFarmField1 from "../resources/buildings/building-pixel-farmField-1.png?url";
-import buildingPixelFarmFieldAlt1 from "../resources/buildings/building-pixel-farmField-1-alt.png?url";
-import buildingPixelTownHall1 from "../resources/buildings/building-pixel-townHall-1.png?url";
-import buildingPixelTownHall2 from "../resources/buildings/building-pixel-townHall-2.png?url";
-import buildingPixelTownHall3 from "../resources/buildings/building-pixel-townHall-3.png?url";
-import buildingPixelHouse1 from "../resources/buildings/building-pixel-house-1.png?url";
-import buildingPixelHouse2 from "../resources/buildings/building-pixel-house-2.png?url";
-import buildingPixelHouse3 from "../resources/buildings/building-pixel-house-3.png?url";
-import buildingPixelTower1 from "../resources/buildings/building-pixel-tower-1.png?url";
-import buildingPixelTower2 from "../resources/buildings/building-pixel-tower-2.png?url";
-import buildingPixelTower3 from "../resources/buildings/building-pixel-tower-3.png?url";
-import buildingPixelMageGuild1 from "../resources/buildings/building-pixel-mageGuild-1.png?url";
-import buildingPixelMageGuild2 from "../resources/buildings/building-pixel-mageGuild-2.png?url";
-import buildingPixelMageGuild3 from "../resources/buildings/building-pixel-mageGuild-3.png?url";
-import buildingPixelMarket1 from "../resources/buildings/building-pixel-market-1.png?url";
-import buildingPixelMarket2 from "../resources/buildings/building-pixel-market-2.png?url";
-import buildingPixelMarket3 from "../resources/buildings/building-pixel-market-3.png?url";
-import buildingPixelBarracks1 from "../resources/buildings/building-pixel-barracks-1.png?url";
-import buildingPixelBarracks2 from "../resources/buildings/building-pixel-barracks-2.png?url";
-import buildingPixelBarracks3 from "../resources/buildings/building-pixel-barracks-3.png?url";
-import buildingPixelSmithy1 from "../resources/buildings/building-pixel-smithy-1.png?url";
-import buildingPixelSmithy3 from "../resources/buildings/building-pixel-smithy-3.png?url";
-import buildingPixelApartment1 from "../resources/buildings/building-pixel-apartment-1.png?url";
-import buildingPixelApartment2 from "../resources/buildings/building-pixel-apartment-2.png?url";
-import buildingPixelApartment3 from "../resources/buildings/building-pixel-apartment-3.png?url";
-import buildingPixelFarmhouse1 from "../resources/buildings/building-pixel-farmhouse-1.png?url";
-import buildingPixelFarmhouse2 from "../resources/buildings/building-pixel-farmhouse-2.png?url";
-import buildingPixelFarmhouse3 from "../resources/buildings/building-pixel-farmhouse-3.png?url";
-import buildingPixelArcheryRange1 from "../resources/buildings/building-pixel-archeryRange-1.png?url";
-import buildingPixelArcheryRange2 from "../resources/buildings/building-pixel-archeryRange-2.png?url";
-import buildingPixelArcheryRange3 from "../resources/buildings/building-pixel-archeryRange-3.png?url";
-import buildingPixelStables1 from "../resources/buildings/building-pixel-stables-1.png?url";
-import buildingPixelStables2 from "../resources/buildings/building-pixel-stables-2.png?url";
-import buildingPixelStables3 from "../resources/buildings/building-pixel-stables-3.png?url";
-import buildingPixelHuntingLodge1 from "../resources/buildings/building-pixel-huntingLodge-1.png?url";
-import buildingPixelHuntingLodge2 from "../resources/buildings/building-pixel-huntingLodge-2.png?url";
-import buildingPixelHuntingLodge3 from "../resources/buildings/building-pixel-huntingLodge-3.png?url";
-import buildingPixelEyrie1 from "../resources/buildings/building-pixel-eyrie-1.png?url";
-import buildingPixelEyrie2 from "../resources/buildings/building-pixel-eyrie-2.png?url";
-import buildingPixelEyrie3 from "../resources/buildings/building-pixel-eyrie-3.png?url";
-import buildingPixelArcaneFont1 from "../resources/buildings/building-pixel-arcaneFont-1.png?url";
-import buildingPixelArcaneFont2 from "../resources/buildings/building-pixel-arcaneFont-2.png?url";
-import buildingPixelArcaneFont3 from "../resources/buildings/building-pixel-arcaneFont-3.png?url";
-import buildingPixelCrypt2 from "../resources/buildings/building-pixel-crypt-2.png?url";
-import buildingPixelGunnersRedoubt2 from "../resources/buildings/building-pixel-gunnersRedoubt-2.png?url";
-import buildingPixelWorldrootGrove2 from "../resources/buildings/building-pixel-worldrootGrove-2.png?url";
 import { Faction, Direction } from "../entities/hero";
 import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
 import type { ResourceStyle } from "../state/settings";
-import { HORSE_VARIANT_REGISTRY, type HorseVariantId } from "@heroes/engine";
+import { HORSE_VARIANT_REGISTRY, BUILDING_SPRITE_FILES, BUILDING_SPRITE_ALIASES, type HorseVariantId } from "@heroes/engine";
 
 export type SpriteKey =
   | `castle.${CastleLevel}`
@@ -327,122 +221,45 @@ export const RESOURCE_PILE_BUBBLY_SPRITES: Record<ResourceType, string> = {
   food: resourceFoodPileBubbly,
 };
 
-export const BUILDING_SPRITES: Record<string, string> = {
-  "pixel.granary.1": buildingPixelGranary1,
-  "pixel.granary.2": buildingPixelGranary2,
-  "pixel.granary.3": buildingPixelGranary3,
-  "pixel.bank.1": buildingPixelBank1,
-  "pixel.bank.2": buildingPixelBank2,
-  "pixel.bank.3": buildingPixelBank3,
-  "pixel.treasury.1": buildingPixelTreasury1,
-  "pixel.treasury.2": buildingPixelTreasury2,
-  "pixel.treasury.3": buildingPixelTreasury3,
-  "pixel.warehouse.1": buildingPixelWarehouse1,
-  "pixel.warehouse.2": buildingPixelWarehouse2,
-  "pixel.warehouse.3": buildingPixelWarehouse3,
-  "pixel.goldMine.1": buildingPixelGoldMine1,
-  "pixel.goldMine.2": buildingPixelGoldMine2,
-  "pixel.goldMine.3": buildingPixelGoldMine3,
-  "pixel.woodcutterHut.1": buildingPixelWoodcutterHut1,
-  "pixel.woodcutterHut.2": buildingPixelWoodcutterHut2,
-  "pixel.woodcutterHut.3": buildingPixelWoodcutterHut2,
-  "pixel.stoneMine.1": buildingPixelStoneMine1,
-  "pixel.stoneMine.2": buildingPixelStoneMine2,
-  "pixel.stoneMine.3": buildingPixelStoneMine3,
-  "pixel.ironMine.1": buildingPixelIronMine1,
-  "pixel.ironMine.2": buildingPixelIronMine2,
-  "pixel.ironMine.3": buildingPixelIronMine3,
-  "pixel.crypt.1": buildingPixelCrypt1,
-  "pixel.crypt.3": buildingPixelCrypt3,
-  "pixel.ossuary.1": buildingPixelOssuary1,
-  "pixel.ossuary.2": buildingPixelOssuary2,
-  "pixel.ossuary.3": buildingPixelOssuary3,
-  "pixel.wraithBarrows.1": buildingPixelWraithBarrows1,
-  "pixel.wraithBarrows.2": buildingPixelWraithBarrows2,
-  "pixel.wraithBarrows.3": buildingPixelWraithBarrows3,
-  "pixel.spireOfAsh.1": buildingPixelSpireOfAsh1,
-  "pixel.spireOfAsh.2": buildingPixelSpireOfAsh2,
-  "pixel.spireOfAsh.3": buildingPixelSpireOfAsh3,
-  "pixel.underConstruction.1": buildingPixelUnderConstruction1,
-  "pixel.underConstruction.2": buildingPixelUnderConstruction2,
-  "pixel.underConstruction.3": buildingPixelUnderConstruction3,
-  "pixel.smithy.2": buildingPixelSmithy2,
-  "pixel.forgeHall.1": buildingPixelForgeHall1,
-  "pixel.forgeHall.2": buildingPixelForgeHall2,
-  "pixel.forgeHall.3": buildingPixelForgeHall3,
-  "pixel.gunnersRedoubt.1": buildingPixelGunnersRedoubt1,
-  "pixel.gunnersRedoubt.3": buildingPixelGunnersRedoubt3,
-  "pixel.golemFoundry.1": buildingPixelGolemFoundry1,
-  "pixel.golemFoundry.2": buildingPixelGolemFoundry2,
-  "pixel.golemFoundry.3": buildingPixelGolemFoundry3,
-  "pixel.deepAnvil.1": buildingPixelDeepAnvil1,
-  "pixel.deepAnvil.2": buildingPixelDeepAnvil2,
-  "pixel.deepAnvil.3": buildingPixelDeepAnvil3,
-  "pixel.groveSanctum.1": buildingPixelGroveSanctum1,
-  "pixel.groveSanctum.2": buildingPixelGroveSanctum2,
-  "pixel.groveSanctum.3": buildingPixelGroveSanctum3,
-  "pixel.warrenLodge.1": buildingPixelWarrenLodge1,
-  "pixel.warrenLodge.2": buildingPixelWarrenLodge2,
-  "pixel.warrenLodge.3": buildingPixelWarrenLodge3,
-  "pixel.sylvanStables.1": buildingPixelSylvanStables1,
-  "pixel.sylvanStables.2": buildingPixelSylvanStables2,
-  "pixel.sylvanStables.3": buildingPixelSylvanStables3,
-  "pixel.worldrootGrove.1": buildingPixelWorldrootGrove1,
-  "pixel.worldrootGrove.3": buildingPixelWorldrootGrove3,
-  "pixel.farmField.1": buildingPixelFarmField1,
-  "pixel.farmField.2": buildingPixelFarmField1,
-  "pixel.farmField.3": buildingPixelFarmField1,
-  "pixel-alt.farmField.1": buildingPixelFarmFieldAlt1,
-  "pixel-alt.farmField.2": buildingPixelFarmFieldAlt1,
-  "pixel-alt.farmField.3": buildingPixelFarmFieldAlt1,
-  "pixel.townHall.1": buildingPixelTownHall1,
-  "pixel.townHall.2": buildingPixelTownHall2,
-  "pixel.townHall.3": buildingPixelTownHall3,
-  "pixel.house.1": buildingPixelHouse1,
-  "pixel.house.2": buildingPixelHouse2,
-  "pixel.house.3": buildingPixelHouse3,
-  "pixel.tower.1": buildingPixelTower1,
-  "pixel.tower.2": buildingPixelTower2,
-  "pixel.tower.3": buildingPixelTower3,
-  "pixel.mageGuild.1": buildingPixelMageGuild1,
-  "pixel.mageGuild.2": buildingPixelMageGuild2,
-  "pixel.mageGuild.3": buildingPixelMageGuild3,
-  "pixel.market.1": buildingPixelMarket1,
-  "pixel.market.2": buildingPixelMarket2,
-  "pixel.market.3": buildingPixelMarket3,
-  "pixel.barracks.1": buildingPixelBarracks1,
-  "pixel.barracks.2": buildingPixelBarracks2,
-  "pixel.barracks.3": buildingPixelBarracks3,
-  "pixel.smithy.1": buildingPixelSmithy1,
-  "pixel.smithy.3": buildingPixelSmithy3,
-  "pixel.apartment.1": buildingPixelApartment1,
-  "pixel.apartment.2": buildingPixelApartment2,
-  "pixel.apartment.3": buildingPixelApartment3,
-  "pixel.farmhouse.1": buildingPixelFarmhouse1,
-  "pixel.farmhouse.2": buildingPixelFarmhouse2,
-  "pixel.farmhouse.3": buildingPixelFarmhouse3,
-  "pixel.archeryRange.1": buildingPixelArcheryRange1,
-  "pixel.archeryRange.2": buildingPixelArcheryRange2,
-  "pixel.archeryRange.3": buildingPixelArcheryRange3,
-  "pixel.stables.1": buildingPixelStables1,
-  "pixel.stables.2": buildingPixelStables2,
-  "pixel.stables.3": buildingPixelStables3,
-  "pixel.huntingLodge.1": buildingPixelHuntingLodge1,
-  "pixel.huntingLodge.2": buildingPixelHuntingLodge2,
-  "pixel.huntingLodge.3": buildingPixelHuntingLodge3,
-  "pixel.eyrie.1": buildingPixelEyrie1,
-  "pixel.eyrie.2": buildingPixelEyrie2,
-  "pixel.eyrie.3": buildingPixelEyrie3,
-  "pixel.arcaneFont.1": buildingPixelArcaneFont1,
-  "pixel.arcaneFont.2": buildingPixelArcaneFont2,
-  "pixel.arcaneFont.3": buildingPixelArcaneFont3,
-  "pixel.crypt.2": buildingPixelCrypt2,
-  "pixel.gunnersRedoubt.2": buildingPixelGunnersRedoubt2,
-  "pixel.worldrootGrove.2": buildingPixelWorldrootGrove2,
-  "pixel.mine.1": buildingPixelStoneMine1,
-  "pixel.mine.2": buildingPixelStoneMine2,
-  "pixel.mine.3": buildingPixelStoneMine3,
-};
+// Building sprites are registry-driven, not hand-wired: the key list and its
+// key -> filename map are generated from the building-pixel-*.png files on disk
+// (tools/sprites/gen-building-sprite-keys.mjs -> packages/engine/src/generated/
+// buildingSpriteKeys.ts), and the URLs come from one Vite glob below. Adding a
+// sprite is therefore: drop the PNG into src/resources/buildings/ and run
+// `npm run gen:sprite-keys` -- no edit to this file. The legacy
+// building-classic-*/building-blocky-* files in that folder stay out of the
+// glob because the pattern only matches building-pixel-*.
+const BUILDING_SPRITE_GLOB = import.meta.glob("../resources/buildings/building-pixel-*.png", {
+  eager: true,
+}) as Record<string, { default: string }>;
+
+const buildingUrlByFile = new Map<string, string>();
+for (const [filePath, mod] of Object.entries(BUILDING_SPRITE_GLOB)) {
+  buildingUrlByFile.set(filePath.slice(filePath.lastIndexOf("/") + 1), mod.default);
+}
+
+const warnedBuildingKeys = new Set<string>();
+
+export const BUILDING_SPRITES: Record<string, string> = {};
+for (const key of Object.keys(BUILDING_SPRITE_FILES)) {
+  const fileName = BUILDING_SPRITE_FILES[key];
+  const url = buildingUrlByFile.get(fileName);
+  if (!url) {
+    if (!warnedBuildingKeys.has(key)) {
+      warnedBuildingKeys.add(key);
+      console.warn(`assetDescriptors: no PNG on disk for building sprite key "${key}" (expected "${fileName}" in src/resources/buildings/)`);
+    }
+    continue;
+  }
+  BUILDING_SPRITES[key] = url;
+}
+
+// Keys with no file of their own (legacy `mine` kind, farm-plot L2/L3, and
+// woodcutterHut-3) resolve to the same URL as their target key.
+for (const [aliasKey, targetKey] of Object.entries(BUILDING_SPRITE_ALIASES)) {
+  const url = BUILDING_SPRITES[targetKey];
+  if (url) BUILDING_SPRITES[aliasKey] = url;
+}
 
 export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescriptor> = {
   "castle.1": {
