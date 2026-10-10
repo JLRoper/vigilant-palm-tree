@@ -6,6 +6,7 @@ import express from "express";
 import { normalizePlatoons } from "@heroes/engine";
 import type { HeroId, HeroState, SettlementId, SettlementState } from "@heroes/contracts";
 import { pool } from "../../server/persistence/db";
+import { createSettlementRepo } from "../../server/persistence/repositories/settlementRepo";
 import { router } from "../../server/routes";
 import { errorHandler } from "../../server/errorHandler";
 import { getPresence } from "../../server/app/dropPolicy";
@@ -248,6 +249,31 @@ test("POST /games/:name/commands accepts PlaceBuildings over HTTP and stamps the
     assert.equal(after.gold, 1000 - (300 - 50));
     assert.equal(after.warehouse.wood, 20 - (6 - 3));
     assert.equal(after.warehouse.stone, 10 - 4);
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games/:name/commands accepts a style-less PlaceBuildings entry and resolves the style server-side", async () => {
+  const name = uniqueName();
+  const { settlementId } = ids(name);
+  const token = await seedGame(name, placeBuildingsSettlement(name));
+  try {
+    const res = await postCommand(name, {
+      kind: "PlaceBuildings",
+      actor: 0,
+      settlementId,
+      buildings: [{ gx: 2, gy: 2, kind: "goldMine", level: 1 }],
+    }, token);
+    assert.equal(res.status, 200, await res.clone().text());
+    // style is optional on the wire now; the still-NOT NULL
+    // settlement_buildings.style column is fed by the engine resolver at the
+    // repo write boundary, never by trusting the client's value.
+    const repo = createSettlementRepo(pool);
+    const [loaded] = await repo.loadAllForGame(name);
+    const mine = loaded?.buildings.find((b) => b.kind === "goldMine");
+    assert.ok(mine, "the placed mine round-trips through the granular read path");
+    assert.equal(mine.style, "pixel", "an absent style is resolved, not written NULL");
   } finally {
     await cleanupGame(name);
   }

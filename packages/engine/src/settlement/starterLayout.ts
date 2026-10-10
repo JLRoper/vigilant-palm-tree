@@ -77,9 +77,10 @@ import { CELL_MULTIPLIER_PEAK } from "./cityMultipliers";
 // verified before use, so a footprint change in the registry degrades to "the
 // next free cell" instead of producing an illegal layout.
 //
-// src/render/cityBuildingGen.ts keeps its procedural layouts for the design
-// box's Generate button and for previewing generation styles; it is no longer
-// the source of a settlement's starting city.
+// No procedural generator competes with this set any more: the city view's
+// design sandbox (Generate button, pattern/seed keys) and
+// src/render/cityBuildingGen's layout patterns were both removed, so this is
+// the only starting city a settlement can be handed.
 
 /** Level 1 throughout: a free level-2 town hall would unlock settlement upgrades on turn 0. */
 export const STARTER_BUILDING_LEVEL = 1;
@@ -362,15 +363,14 @@ function placeAt(
 }
 
 /**
- * The style a starter building is persisted with. Kinds with committed sprite
- * art resolve to it (woodcutterHut/stoneMine carry pixel.* sprites;
- * townHall/house/farmhouse resolve to their classic ones) so a starter city
- * renders real sprites instead of the procedural fallback drawings the raw
- * "classic" stamp used to produce for un-sprited kinds. The farmField keeps
- * the caller's style so the render-time legacy shim (cityScene's
- * farmFieldStyleAt) keeps giving starter farms their deterministic
- * pixel/pixel-alt variety. Deterministic: pickStyleForBuilding is pure, so
- * the byte-identical-per-call contract holds.
+ * The style a starter building is persisted with. Every non-farmField kind
+ * resolves to "pixel": BUILDING_SPRITE_KEYS is pixel-only, so the fall-through
+ * finds the pixel art whatever style the caller prefers, and a starter city
+ * renders real sprites. The farmField keeps the caller's style so the
+ * render-time shim (cityScene's farmFieldStyleAt) keeps giving starter farms
+ * their deterministic pixel/pixel-alt variety. Deterministic:
+ * pickStyleForBuilding is pure, so the byte-identical-per-call contract
+ * holds.
  */
 function starterStyleFor(kind: BuildingKind, style: GenerationStyle): GenerationStyle {
   if (kind === "farmField") return style;

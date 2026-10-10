@@ -398,17 +398,16 @@ test("a 1-player game's level-2 town starts with a town hall and farmland sized 
   assert.equal(farms, 4, "15 food/turn sizes to 4 farms on the real registry rate");
   assert.deepEqual(
     town.buildings,
-    buildStarterLayout({ size: 10, style: "classic", farms }),
+    buildStarterLayout({ size: 10, style: "pixel", farms }),
     "the seeded set IS the engine starter layout -- no second placement routine",
   );
   for (const b of town.buildings) {
     assert.equal(b.level, 1, `${b.kind} is level 1: a free level-2 hall would unlock upgrades on turn 0`);
     assert.equal("construction" in b, false, `${b.kind} arrives already built`);
-    // buildStarterLayout resolves sprite-bearing kinds onto their art's style
-    // (starterStyleFor); farmField keeps the caller's "classic" so the render
-    // shim keeps its per-position pixel/pixel-alt variety.
-    const expectedStyle = b.kind === "woodcutterHut" || b.kind === "stoneMine" ? "pixel" : "classic";
-    assert.equal(b.style, expectedStyle, `${b.kind} carries its resolved sprite style`);
+    // The seed is uniformly "pixel": the render path resolves pixel art
+    // whatever the persisted style says, and the farm's plot variety comes
+    // from the render-time farmFieldStyleAt shim, not from b.style.
+    assert.equal(b.style, "pixel", `${b.kind} carries the seeded pixel style`);
   }
 });
 
@@ -421,7 +420,7 @@ test("REGRESSION: the level-1 keep is created WITH buildings, not empty", () => 
   assert.equal(keep.buildings.filter((b) => b.kind === "house").length, 2, "both houses");
   assert.equal(keep.buildings.filter((b) => b.kind === STARTER_WOOD_PRODUCER).length, 2, "two wood producers (one left the set net wood-negative)");
   assert.equal(keep.buildings.filter((b) => b.kind === STARTER_STONE_PRODUCER).length, 1, "a stone producer");
-  assert.deepEqual(keep.buildings, buildStarterLayout({ size: 5, style: "classic", farms: 4 }));
+  assert.deepEqual(keep.buildings, buildStarterLayout({ size: 5, style: "pixel", farms: 4 }));
 
   // A seeded settlement never gets the free commit, so opening its city must
   // hand back exactly what it already has -- no second city, no charge.
@@ -440,7 +439,7 @@ test("the keep is sized against its own bill PLUS the hero standing on it, and 5
   // The clamp is not a silent shortfall handed to the player: the keep's
   // remaining coverage comes from accumulated surplus (auto-trade is OFF for
   // new games), measured 98.05% over 4000 seeds -- see foodProduction.test.ts.
-  assert.deepEqual(keep.buildings, buildStarterLayout({ size: 5, style: "classic", farms: 4 }));
+  assert.deepEqual(keep.buildings, buildStarterLayout({ size: 5, style: "pixel", farms: 4 }));
 });
 
 test("every settlement the game creates is seeded, and each settlement gets ONE complete set for ITSELF", () => {
@@ -456,7 +455,7 @@ test("every settlement the game creates is seeded, and each settlement gets ONE 
       assert.ok(farms >= STARTER_BASE_FARMS, `${s.id} has at least the base farm`);
       assert.deepEqual(
         s.buildings,
-        buildStarterLayout({ size, style: "classic", farms }),
+        buildStarterLayout({ size, style: "pixel", farms }),
         `${s.id} is the engine starter layout, nothing bespoke`,
       );
     }

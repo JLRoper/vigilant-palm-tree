@@ -7,7 +7,7 @@ import { createSkyboxProvider } from "../../../render/skybox";
 import type { Paint2DDep } from "../../../render/scene/paint2d/deps";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { SpriteProvider } from "../../../render/assets";
-import type { BuildingDef } from "@heroes/contracts";
+import type { BuildingDef, GenerationStyle } from "@heroes/contracts";
 import { buildingFootprint, coversCell } from "../../../core/cityGrid";
 import { starterCityOnOpen } from "@heroes/engine";
 import { advanceChargedOnCommit, netDelta } from "./netCost";
@@ -162,7 +162,7 @@ export class CityView {
     this.selectionAnchor = null;
     this.preCitySelection = this.getSelection?.() ?? null;
 
-    const starter = starterCityOnOpen({ size: this.size, style: "pixel" as BuildingDef["style"], existing: buildings });
+    const starter = starterCityOnOpen({ size: this.size, style: "pixel" as GenerationStyle, existing: buildings });
     const initialBuildings = starter.buildings;
     // A settlement with no persisted buildings gets the explicit starter set
     // committed FREE (townHall L1 + farm field + 2 houses + two woodcutter's

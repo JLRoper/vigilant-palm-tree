@@ -6,7 +6,8 @@ import type { BuildingDef } from "@heroes/contracts";
 // node:test (the render module's documented pitfall).
 //
 // Every field the cart must never resurrect stale is copied here:
-//   - level / style: EndTurn's round wrap replaces state objects
+//   - level (and style, when the live building carries one): EndTurn's round
+//     wrap replaces state objects
 //   - construction: writing the placement-time copy re-arms finished timers
 //   - bank: a pot that changed while the city view was open (multiplayer, or a
 //     weekly-interest / 7-day-maturity boundary) would otherwise be written back
@@ -18,7 +19,7 @@ import type { BuildingDef } from "@heroes/contracts";
 // deepStrictEqual fixtures depend on the absent-key shape.
 
 export function syncCartBuilding(cartB: BuildingDef, liveB: BuildingDef): BuildingDef {
-  const merged: BuildingDef = { ...cartB, level: liveB.level, style: liveB.style };
+  const merged: BuildingDef = { ...cartB, level: liveB.level, ...(liveB.style !== undefined ? { style: liveB.style } : {}) };
   if (liveB.construction) merged.construction = { ...liveB.construction };
   else delete (merged as { construction?: unknown }).construction;
   if (liveB.bank) merged.bank = { ...liveB.bank, pendingOut: liveB.bank.pendingOut.map((e) => ({ ...e })) };

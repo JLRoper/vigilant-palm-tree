@@ -407,12 +407,13 @@ function parseCommand(body: unknown, gameName: string): Command | null {
 
   if (b.kind === "PlaceBuildings") {
     // Per-building shape gate, mirroring isBuildingUpgradeRequest's
-    // permissiveness: `kind`/`style` are non-empty strings (the handler
-    // resolves semantics), coordinates are ints, levels are 1..3, and an
-    // optional construction object must carry a non-negative integer
-    // daysRemaining -- though applyPlaceBuildings() recomputes that for
-    // brand-new placements server-side anyway, so a spoofed 0-day value
-    // only affects edits to buildings the server already knows about.
+    // permissiveness: `kind` is a non-empty string and `style`, when present,
+    // is one too (the handler resolves semantics), coordinates are ints,
+    // levels are 1..3, and an optional construction object must carry a
+    // non-negative integer daysRemaining -- though applyPlaceBuildings()
+    // recomputes that for brand-new placements server-side anyway, so a
+    // spoofed 0-day value only affects edits to buildings the server already
+    // knows about.
     if (
       typeof b.settlementId !== "string" ||
       !Array.isArray(b.buildings) ||
@@ -428,7 +429,7 @@ function parseCommand(body: unknown, gameName: string): Command | null {
           typeof d.kind !== "string" || d.kind.length === 0 ||
           typeof d.level !== "number" || !Number.isInteger(d.level) ||
           d.level < 1 || d.level > 3 ||
-          typeof d.style !== "string" || d.style.length === 0
+          (d.style !== undefined && (typeof d.style !== "string" || d.style.length === 0))
         ) {
           return false;
         }

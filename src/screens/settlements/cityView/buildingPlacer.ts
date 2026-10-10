@@ -9,6 +9,8 @@ import {
   buildingLabel,
   buildingBuildDays,
   buildingFootprintFromRegistry,
+  pickStyleForBuilding,
+  randomFarmFieldStyle,
 } from "@heroes/engine";
 import { buildListSections } from "./buildListSections";
 import { buildConfirmStatus, buildEntryStatus } from "./buildEntryStatus";
@@ -112,14 +114,14 @@ export class BuildingPlacer {
     // outright -- the server applies the same check and a rejected command
     // would leave a building on screen that was never paid for.
     if (!this.canAfford()) return false;
-    // Interim until wave 3 removes BuildingDef.style end-to-end: every
-    // placement writes the constant pixel style (the style picker is gone).
     const b: BuildingDef = {
       gx: this.hoverCell.gx,
       gy: this.hoverCell.gy,
       kind: this.active,
       level: 1,
-      style: "pixel" as BuildingDef["style"],
+      style: this.active === "farmField"
+        ? randomFarmFieldStyle()
+        : pickStyleForBuilding(this.active, 1, "pixel"),
       w: this.w,
       h: this.h,
       construction: { daysRemaining: buildingBuildDays(this.active) },

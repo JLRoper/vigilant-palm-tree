@@ -284,16 +284,16 @@ test("the starter set is legal on every city size: in bounds, nothing overlappin
   }
 });
 
-test("the starter set resolves onto sprite-bearing styles and stays seed-free", () => {
+test("every kind resolves to pixel; only farmField keeps the caller's style", () => {
   const organic = buildStarterLayout({ size: 5, style: "organic" });
   assert.deepEqual(
     organic.map((b) => b.style),
-    ["classic", "organic", "classic", "classic", "pixel", "pixel", "pixel", "classic"],
+    ["pixel", "organic", "pixel", "pixel", "pixel", "pixel", "pixel", "pixel"],
   );
   const classic = buildStarterLayout({ size: 5, style: "classic" });
   assert.deepEqual(
     classic.map((b) => b.style),
-    ["classic", "classic", "classic", "classic", "pixel", "pixel", "pixel", "classic"],
+    ["pixel", "classic", "pixel", "pixel", "pixel", "pixel", "pixel", "pixel"],
   );
   assert.deepEqual(
     organic.map(({ style: _style, ...rest }) => rest),

@@ -43,7 +43,8 @@ export interface BuildingDef {
   gy: number;
   kind: BuildingKind;
   level: number;
-  style: GenerationStyle;
+  // Optional since wave 3, but writers still resolve a value because settlement_buildings.style is NOT NULL until the deferred column drop.
+  style?: GenerationStyle;
   w?: number;
   h?: number;
   /** Present while the building is under construction (new placements); removed on completion. */

@@ -84,6 +84,15 @@ test("level and style still come from live state", () => {
   assert.equal(merged.style, "organic");
 });
 
+test("a live building with no style leaves the merged key absent, not undefined", () => {
+  const merged = syncCartBuilding(
+    { gx: 0, gy: 0, kind: "house", level: 1 },
+    { gx: 0, gy: 0, kind: "house", level: 3 },
+  );
+  assert.equal("style" in merged, false);
+  assert.equal(merged.level, 3);
+});
+
 test("cart entries with no live twin pass through untouched", () => {
   const fresh = cart({ gx: 4, gy: 4, construction: { daysRemaining: 5 } });
   const out = syncCartBuildings([fresh], [bank({ gx: 2, gy: 3 })]);

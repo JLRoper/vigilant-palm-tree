@@ -9,7 +9,7 @@ import type {
   WarehouseResource,
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
-import { normalizePlatoons, settlementStacks } from "@heroes/engine";
+import { normalizePlatoons, resolvedPersistedStyle, settlementStacks } from "@heroes/engine";
 import { toNumericColumn } from "../integerColumns";
 import { resolveGameId } from "./gameRepo";
 import type { Queryable } from "./gameRepo";
@@ -334,7 +334,11 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
               building.gy,
               building.kind,
               building.level,
-              building.style,
+              // style is NOT NULL and BuildingDef.style is optional, so an
+              // absent key is resolved through the engine here rather than
+              // written NULL. `??` only: a persisted value is never
+              // rewritten, or the round-trip parity pins would diverge.
+              building.style ?? resolvedPersistedStyle(settlement.name, building),
               building.w ?? null,
               building.h ?? null,
               building.construction ? JSON.stringify(building.construction) : null,

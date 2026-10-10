@@ -3,6 +3,7 @@ import type {
   CastleVariant,
   FactionId,
   GameState,
+  GenerationStyle,
   HeroId,
   HeroState,
   InitialStateOptions,
@@ -410,7 +411,7 @@ function seedStarterBuildings(
       ...s,
       buildings: buildStarterLayout({
         size: cityViewSizeFor(s.level),
-        style: "classic",
+        style: "pixel" as GenerationStyle,
         farms: starterFarmsNeeded(bill),
       }),
     };
