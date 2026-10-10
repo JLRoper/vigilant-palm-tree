@@ -546,3 +546,4 @@ The city-view build palette could park over the city grid, and since city input 
 ## See also
 
 - [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) — current module-by-module dependency map for `src/`, `server/`, `shared/`, `test/`, `tools/`, `scripts/`. This doc (`architecture.md`) is the executed **plan** that established the layout; the dependency map is the maintained **current state** and reflects any drift since the move.
+- [plans-track-map.md](./plans-track-map.md) — the published Phase 1–5 track map: what the multi-phase reorganisation covered, the per-item current status as of 2026-10-10, and how the gitignored `.plans/` session-plan scheme works.
