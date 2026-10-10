@@ -55,6 +55,7 @@ import { CANVAS_MARGIN, DEBUG_LOG, HEX_SIZE_MAX, LOG_PREFIX, RAIL_WIDTH, debugLo
 import { axialToPixel, fmtHex, gridExtent, fitHexSize, hexCorners, hexDistance, hpColor, hpRatio, isAlive, pixelToAxial, platoonLabel, specialtyIcon, visibleSpecialty, type Axial } from "./layout";
 import { applyLeaveBehind, openLeaveBehindDialog } from "./leaveBehind";
 import { attachRailHover, buildPlatoonStrip } from "./view";
+import { planArenaSides } from "./sides";
 import { createArenaInput, type ArenaInput } from "./input";
 import { createArenaAi, type ArenaAi, type AttackerFx, AI_ARRIVE_PAUSE_MS } from "./ai";
 import { settings } from "../../../state/settings";
@@ -142,17 +143,19 @@ export function openManualBattleArena(
   // The engine's attacker/defender roles are fixed to their grid colors
   // (attacker always blue, defender always red) — humanSide picks which of
   // those two roles the player controls; the AI always takes the other one.
-  const aiSide: BattleSide = humanSide === "attacker" ? "defender" : "attacker";
-  const attackerPlatoons = humanSide === "attacker" ? playerPlatoons : aiPlatoons;
-  const defenderPlatoons = humanSide === "attacker" ? aiPlatoons : playerPlatoons;
+  // Deployment follows the fixed arena convention instead (see planArenaSides):
+  // the attacker always starts on the grid's left column and the defender on
+  // the right, so the two armies face each other (defender sprites are
+  // mirrored) even when the human is the one being attacked.
+  const plan = planArenaSides(humanSide);
+  const aiSide: BattleSide = plan.aiSide;
+  const attackerPlatoons = plan.humanPlatoonsAreAttacker ? playerPlatoons : aiPlatoons;
+  const defenderPlatoons = plan.humanPlatoonsAreAttacker ? aiPlatoons : playerPlatoons;
   const heroSpell = options.heroSpell === undefined ? defaultSpellLoadout() : options.heroSpell;
   const state = startManualBattle(attackerPlatoons, defenderPlatoons, {
     unitTypes,
     obstacleSeed: Math.floor(Math.random() * 1_000_000),
-    // Deploy the human's side on the grid's left edge and the AI's on the
-    // right, regardless of which role (attacker/defender) the human picked —
-    // otherwise the AI ends up on the left whenever the human plays defender.
-    sideChoice: humanSide,
+    sideChoice: plan.leftColumnSide,
     heroSpells: heroSpell ? (humanSide === "attacker" ? { attacker: heroSpell } : { defender: heroSpell }) : {},
   });
 
@@ -300,6 +303,12 @@ export function openManualBattleArena(
   const humanAccent = humanSide === "attacker" ? ATTACKER_ACCENT : DEFENDER_ACCENT;
   const attackerLabel = options.attackerLabel ?? (humanSide === "attacker" ? "You" : "Enemy");
   const defenderLabel = options.defenderLabel ?? (humanSide === "defender" ? "You" : "Enemy");
+  // Battle-log tints follow the battlefield's role colors (attacker blue,
+  // defender red) so the player's own lines match their team's color; the
+  // fixed own=blue/enemy=red split read backwards for a defending player,
+  // whose army is the red one.
+  const ownLogTint = humanSide === "attacker" ? "#9ecbff" : "#ff9e9e";
+  const enemyLogTint = humanSide === "attacker" ? "#ff9e9e" : "#9ecbff";
 
   // paint2d/ SceneNode[] rendering path — the arena's DEFAULT (plan decision
   // #4 in plan/2026-09-29-arena-unit-sprites.md: the unit-sprite look only
@@ -746,7 +755,7 @@ const FLOAT_MS = 800;
         opacity: "0.85",
       });
       if (entry.kind !== "stalemate") {
-        line.style.color = entry.side === humanSide ? "#9ecbff" : "#ff9e9e";
+        line.style.color = entry.side === humanSide ? ownLogTint : enemyLogTint;
       }
       logFeed.appendChild(line);
     }
