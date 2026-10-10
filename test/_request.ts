@@ -1,6 +1,6 @@
 import { spawn, execSync } from "node:child_process";
 import { connect } from "node:net";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 
@@ -8,6 +8,24 @@ const ROOT = process.cwd();
 const REQUEST_PATH = resolve(ROOT, "local", ".test-request.json");
 const PID_REGISTRY_PATH = resolve(ROOT, "test", ".last-test-pids.json");
 const IS_WINDOWS = process.platform === "win32";
+
+/**
+ * A request file is only trustworthy if the current process could be the one
+ * a wrapper just spawned: tools/run-test.mjs writes it BEFORE spawning the
+ * entry, so a wrapper-written file is always newer than the entry that reads
+ * it. A file older than this process start is leftover from a DEAD run -- a
+ * crashed or killed wrapper never unlinks it in its `finally`. Direct-run
+ * suites (test:cityview, test:settlements, test:aiDefender, dragDrop,
+ * proposedPath) then honour an orphan's ports over the fresh .env their npm
+ * script just allocated, and every spawned server binds/points at the wrong
+ * port (observed 2026-10-10: a 12:19 "settlements" orphan pinned cityview to
+ * API=51231/WEB=51232 while .env said 54232/54233, so the browser probed a
+ * port nothing listened on). The grace window absorbs clock skew and slow
+ * process startup between the wrapper's write and our read, and must exceed
+ * tools/run-test.mjs's own pre-spawn wait (waitForPortReleased, up to 20s) so
+ * a wrapper-driven entry never mistakes its own fresh request for an orphan.
+ */
+const REQUEST_MAX_AGE_MS = 30_000;
 
 export interface TestRequest {
   runId: string;
@@ -22,7 +40,9 @@ export interface TestRequest {
 export function loadRequest(): TestRequest | null {
   if (!existsSync(REQUEST_PATH)) return null;
   try {
-    return JSON.parse(readFileSync(REQUEST_PATH, "utf8")) as TestRequest;
+    const req = JSON.parse(readFileSync(REQUEST_PATH, "utf8")) as TestRequest;
+    if (Date.now() - statSync(REQUEST_PATH).mtimeMs > REQUEST_MAX_AGE_MS) return null;
+    return req;
   } catch {
     return null;
   }

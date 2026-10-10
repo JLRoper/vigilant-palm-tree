@@ -168,6 +168,89 @@ const handle = mountPersistentDevConsole(log);
 `GameEngine.initDebug()` already calls this, so in normal use you don't need
 to.
 
+### `__gameDebug` — stable debug surface
+
+`window.__gameDebug` (attached by `attachDebugApi()` in `src/io/debugCommands.ts`,
+called from `GameEngine.initDebug()`) is the **only sanctioned way to poke game
+state from a page, test, or tool**. The surface is declared as a single exported
+TypeScript interface, `GameDebugApi`, and the attachment itself is typed
+(`const debugApi: GameDebugApi = { ... }`), so `tsc` enforces the contract at its
+definition. **Adding, renaming, or removing a key requires updating that
+interface** (and the attachment object to match) — `test/io/debugContract.test.ts`
+fails if you don't.
+
+All 25 top-level keys, grouped:
+
+| Key | Kind | Semantics |
+|---|---|---|
+| **State getters** | | |
+| `getState()` | function | Controller's state, falling back to the state manager's |
+| `getGameState()` | function | Raw state-manager snapshot |
+| `getTurnController()` | function | The live `TurnController` instance |
+| `phase` | getter | Current turn phase |
+| `round` | getter | Current round number |
+| **Actions** | | |
+| `endTurn()` | function | Ends the turn (fire-and-forget) |
+| `setSelectedHero(id)` | function | Selects a hero on the controller |
+| `requestMove(id, q, r)` | function | A\* path clamped to remaining movement; returns whether a move started |
+| `enterBattle(attackerId, defenderId)` | function | Opens a battle between two heroes |
+| `captureSettlement(heroId, settlementId)` | function | Walk-in capture; returns success |
+| `teleportHero(id, q, r)` | function | Moves a hero instantly, clearing its previous-move fields |
+| `debugInjectCharter(heroId, targetQ, targetR, phase, name)` | function | Injects a charter straight into local state for rendering (skips the command/round-trip) |
+| **Entity reads** | | |
+| `getHeroes()` | function | `DebugHeroSnapshot[]` — id, q/r, owner, movement left, trail, gold |
+| `getSettlements()` | function | `DebugSettlementSnapshot[]` — id, q/r, level, owner |
+| **Camera / input** | | |
+| `screenFor(q, r)` | function | Hex → screen coordinates through the live camera |
+| `hover` | getter | Latest hover pointer info, or `null` |
+| `lastClick` | getter | Latest click pointer info, or `null` |
+| `isPassable(q, r)` | function | Terrain passability from the game map |
+| `getMoveDurationMs()` | function | Current movement speed (per-seat, from the first hero) |
+| **Session** | | |
+| `activeGameId` | getter | Active game's numeric id, or `null` |
+| `activeGameName` | getter | Active game's name, or `null` |
+| **Nested** | | |
+| `eventLog` | property | The `EventLog` instance, or `null` (see `### EventLog`) |
+| `events` | property | `GameDebugEvents` (see `### __gameDebug.events`) |
+| `console` | property | `GameDebugConsole` (see `### __gameDebug.console`) |
+| `settings` | property | `GameDebugSettings` — `get()` / `update()` / `reset()` over `state/settings` |
+
+**Intentionally loose members.** `getTurnController()` is typed `unknown` — the
+interface deliberately does not depend on the controller class, so engine
+refactors cannot break consumers through this surface; callers narrow it
+themselves. `hover` and `lastClick` are `DebugPointerInfo`: optional `q`/`r`/`moved`
+plus an index signature (`[key: string]: unknown`) so the pointer payload can gain
+fields without an interface edit. The surface is coarse on purpose — it is a
+stability contract for browser tooling and e2e suites, not a typed SDK.
+
+**How to consume it from a Playwright page.** Import the interface type and cast
+through an anonymous shape — never `as any`:
+
+```ts
+import type { GameDebugApi } from "../src/io/debugCommands";
+
+const heroes = await page.evaluate(
+  () => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getHeroes()
+);
+```
+
+`waitForFunction` predicates may run before `initDebug` has attached the API, so
+they use the optional variant with `?.`:
+
+```ts
+await page.waitForFunction(
+  () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
+  { timeout: 20000 }
+);
+```
+
+**Enforcement.** `test/io/debugContract.test.ts` pins the surface: it asserts the
+attached key set equals the interface's key set **exactly** (an added, renamed, or
+removed key fails) and greps the repo for loose `(window as any).__gameDebug`
+casts, which are banned. Every e2e suite (`test/smoke.ts`, `test/cityView.test.ts`,
+`test/dragDrop.test.ts`, `test/proposedPath.test.ts`, …) consumes the API only
+through the typed pattern above.
+
 ### `__gameDebug.console` (browser console)
 
 Mirrors the active dev console handle (if any) so you can re-show / unpin from
@@ -229,7 +312,7 @@ Pick one or both:
   import { openDevConsole } from "./debug/devConsole";
   openDevConsole(__gameDebug.eventLog);
   ```
-  The Developer Settings menu (`src/views/developerSettingsMenu.ts`)
+  The Developer Settings menu (`src/screens/home/developerSettingsMenu.ts`)
   exposes a "Dev Console" button that does exactly this against the running
   engine's log.
 

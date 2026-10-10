@@ -7,6 +7,7 @@
 
 import { spawn, ChildProcess } from "node:child_process";
 import { chromium } from "playwright";
+import type { GameDebugApi } from "../src/io/debugCommands";
 
 const WEB_PORT = Number(process.env.CLIENT_PORT) || 4173;
 const API_PORT = Number(process.env.API_PORT) || 3001;
@@ -164,7 +165,21 @@ async function run(): Promise<void> {
     // button is reliably the last one in document order).
     // waitUntil "load", not "networkidle": once a session boots, its SSE event stream (/events/stream) holds a pending request forever, so networkidle can never fire.
     await page.goto(WEB_URL, { waitUntil: "load" });
-    await page.locator("button", { hasText: "New Game" }).last().click();
+    // The home overlay is only appended after the app's ASYNC boot finishes
+    // (main.ts awaits engine.initBackend(): /api/health + starter game),
+    // while the toolbar's own "New Game" item exists from first paint --
+    // disabled ("Backend unavailable", pre-boot render) inside a closed
+    // dropdown, so invisible. locator.click() resolves its target once and
+    // then polls actionability on that same element, never re-resolving:
+    // clicking straight after `load` latches onto the toolbar button and
+    // times out as "element is not visible" even after home appears (a
+    // load-dependent flake). waitFor() re-evaluates the selector each poll,
+    // so this resolves only once home's own visible button is the last match
+    // -- the same readiness discipline as visualRegression's
+    // activeGameName wait and smoke's waitForApiHealth.
+    const newGameBtn = page.locator("button", { hasText: "New Game" }).last();
+    await newGameBtn.waitFor({ state: "visible", timeout: 60_000 });
+    await newGameBtn.click();
     await page.waitForTimeout(150);
     await page.locator("input[type=text]").first().fill(GAME_NAME);
     await page.locator("input[type=number]").first().fill("90210");
@@ -173,7 +188,7 @@ async function run(): Promise<void> {
     // "some game is active" races the swap -- select the hero only after the
     // created game is the one actually loaded (same as the visual suite).
     await page.waitForFunction(
-      (name) => (window as unknown as { __gameDebug?: { activeGameName?: string } }).__gameDebug?.activeGameName === name,
+      (name) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === name,
       GAME_NAME,
       { timeout: 20_000 },
     );
@@ -182,12 +197,7 @@ async function run(): Promise<void> {
     // programmatically via __gameDebug.setSelectedHero (avoids dealing with
     // canvas pixel coords and the camera).
     const heroId = await page.evaluate(() => {
-      const dbg = (window as unknown as {
-        __gameDebug?: {
-          getGameState?: () => { heroes: Record<string, { ownerId: number }> };
-          setSelectedHero?: (id: string) => void;
-        };
-      }).__gameDebug;
+      const dbg = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug;
       const s = dbg?.getGameState?.();
       if (!s || !dbg?.setSelectedHero) return null;
       const h0 = Object.entries(s.heroes).find(([, h]) => h.ownerId === 0);
@@ -202,7 +212,7 @@ async function run(): Promise<void> {
     // hero (UIManager.refreshHeroInfoMenu hides it otherwise), so wait for the
     // mirror to populate rather than a fixed delay.
     await page.waitForFunction(
-      () => ((window as unknown as { __gameDebug?: { getHeroes?: () => unknown[] } }).__gameDebug?.getHeroes?.() ?? []).length > 0,
+      () => ((window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getHeroes?.() ?? []).length > 0,
       null,
       { timeout: 20_000 },
     );
@@ -221,12 +231,7 @@ async function run(): Promise<void> {
 
     if (before.length !== 8) {
       const diag = await page.evaluate(() => {
-        const dbg = window as unknown as {
-          __gameDebug?: {
-            getGameState?: () => { selectedHeroId?: string; activeGameName?: string };
-            getHeroes?: () => unknown[];
-          };
-        };
+        const dbg = window as unknown as { __gameDebug?: GameDebugApi };
         return {
           activeGameName: dbg.__gameDebug?.getGameState?.().activeGameName,
           selectedHeroId: dbg.__gameDebug?.getGameState?.().selectedHeroId,

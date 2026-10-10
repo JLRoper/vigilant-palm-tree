@@ -23,6 +23,7 @@ import {
   clearRegisteredPids,
 } from "./_request";
 import { comparePng, diffPngBuffers } from "./render/pixelDiff";
+import type { GameDebugApi } from "../src/io/debugCommands";
 
 const API_PORT = getApiPort(4000);
 const WEB_PORT = getClientPort(5173);
@@ -108,22 +109,11 @@ async function newPage(context: BrowserContext, urlSuffix = ""): Promise<Page> {
   // waitUntil "load", not "networkidle": once a session boots, its SSE event stream (/events/stream) holds a pending request forever, so networkidle can never fire.
   await page.goto(`${WEB_URL}${urlSuffix}`, { waitUntil: "load" });
   await page.waitForFunction(
-    () => (window as unknown as { __gameDebug?: { activeGameName?: string } }).__gameDebug?.activeGameName != null,
+    () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
     null,
     { timeout: 20_000 },
   );
   return page;
-}
-
-interface Dbg {
-  getGameState: () => any;
-  getHeroes: () => any[];
-  getSettlements: () => any[];
-  setSelectedHero: (id: string) => void;
-  isPassable: (q: number, r: number) => boolean;
-  screenFor: (q: number, r: number) => { x: number; y: number };
-  debugInjectCharter: (heroId: string, targetQ: number, targetR: number, phase: "traveling" | "constructing", name: string) => boolean;
-  settings: { update: (patch: Record<string, unknown>) => void };
 }
 
 // The app always boots into a full-screen home overlay (src/main.ts's
@@ -149,7 +139,7 @@ async function dismissHomeAndCreateGame(page: Page, name: string, seed: number):
   await page.locator("button", { hasText: "Create Game" }).click();
   await wait(1000);
 
-  const active = await page.evaluate(() => (window as unknown as { __gameDebug?: { activeGameName?: string } }).__gameDebug?.activeGameName);
+  const active = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName);
   if (active !== name) throw new Error(`New Game failed: activeGameName=${active}`);
 }
 
@@ -176,11 +166,11 @@ async function runGameScenes(context: BrowserContext): Promise<void> {
   const page = await newPage(context);
   await dismissHomeAndCreateGame(page, GAME_NAME, SEED);
 
-  const heroes = await page.evaluate(() => (window as unknown as { __gameDebug: Dbg }).__gameDebug.getHeroes());
+  const heroes = await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getHeroes());
   const playerHero = heroes.find((h: any) => h.ownerId === 0);
   if (!playerHero) throw new Error("no player hero in fixed game");
 
-  await page.evaluate((id) => (window as unknown as { __gameDebug: Dbg }).__gameDebug.setSelectedHero(id), playerHero.id);
+  await page.evaluate((id) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero(id), playerHero.id);
   await wait(300);
 
   // Hover a distant tile to draw the path overlay + trail (same technique as
@@ -205,12 +195,12 @@ async function runGameScenes(context: BrowserContext): Promise<void> {
   // The charter overlay only ever reads targetQ/targetR/phase to render
   // (adventureScene.ts / paint2d's paintCharterOverlay), so the injected object is
   // exactly as good a fixture as a persisted one for this screenshot.
-  const settlements = await page.evaluate(() => (window as unknown as { __gameDebug: Dbg }).__gameDebug.getSettlements());
+  const settlements = await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getSettlements());
   const homeSettlement = settlements.find((s: any) => s.ownerId === 0);
   if (!homeSettlement) throw new Error("no player-owned settlement in fixed game");
 
   const charterTarget = await page.evaluate(({ q, r }) => {
-    const d = (window as unknown as { __gameDebug: Dbg }).__gameDebug;
+    const d = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
     const dirs = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
     for (let radius = 4; radius <= 10; radius++) {
       for (const [dq, dr] of dirs) {
@@ -223,14 +213,14 @@ async function runGameScenes(context: BrowserContext): Promise<void> {
   if (!charterTarget) throw new Error("no passable charter target found near home settlement");
 
   await page.evaluate(
-    ({ heroId, q, r }) => (window as unknown as { __gameDebug: Dbg }).__gameDebug.debugInjectCharter(heroId, q, r, "traveling", "Outpost"),
+    ({ heroId, q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.debugInjectCharter(heroId, q, r, "traveling", "Outpost"),
     { heroId: playerHero.id, q: charterTarget.q, r: charterTarget.r },
   );
   await wait(300);
   await captureAndCompare("charter-traveling", page);
 
   await page.evaluate(
-    ({ heroId, q, r }) => (window as unknown as { __gameDebug: Dbg }).__gameDebug.debugInjectCharter(heroId, q, r, "constructing", "Outpost"),
+    ({ heroId, q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.debugInjectCharter(heroId, q, r, "constructing", "Outpost"),
     { heroId: playerHero.id, q: charterTarget.q, r: charterTarget.r },
   );
   await wait(300);
@@ -238,7 +228,7 @@ async function runGameScenes(context: BrowserContext): Promise<void> {
 
   // ── City view: parallax on/off ──
   const coords = await page.evaluate(
-    ({ q, r }) => (window as unknown as { __gameDebug: Dbg }).__gameDebug.screenFor(q, r),
+    ({ q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.screenFor(q, r),
     { q: homeSettlement.q, r: homeSettlement.r },
   );
   await page.mouse.click(coords.x, coords.y);
@@ -246,11 +236,11 @@ async function runGameScenes(context: BrowserContext): Promise<void> {
   await page.mouse.dblclick(coords.x, coords.y);
   await wait(600);
 
-  await page.evaluate(() => (window as unknown as { __gameDebug: Dbg }).__gameDebug.settings.update({ parallaxEnabled: true }));
+  await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ parallaxEnabled: true }));
   await wait(300);
   await captureAndCompare("city-view-parallax-on", page);
 
-  await page.evaluate(() => (window as unknown as { __gameDebug: Dbg }).__gameDebug.settings.update({ parallaxEnabled: false }));
+  await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ parallaxEnabled: false }));
   await wait(300);
   await captureAndCompare("city-view-parallax-off", page);
 

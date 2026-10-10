@@ -8,6 +8,7 @@ import {
   getApiPort, getClientPort, spawnLogged, waitForApiHealth, waitForUrl,
   treeKill, reapPreviousRunPids, clearRegisteredPids,
 } from "./_request";
+import type { GameDebugApi } from "../src/io/debugCommands";
 
 // AI-defender battle offer e2e regressions (Playwright + real API + real DB),
 // against a server-driven AI game (lobby.aiDriver === "server"):
@@ -203,7 +204,7 @@ async function openGame(page: Page, name: string, gameId: string): Promise<void>
     }, name);
     assert(clicked, `no Open row matched ${name}`);
   }
-  await page.waitForFunction((n) => (window as any).__gameDebug?.activeGameName === n, name, { timeout: 30000 });
+  await page.waitForFunction((n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === n, name, { timeout: 30000 });
   await wait(700);
   await page.keyboard.press("Escape").catch(() => {});
   await wait(300);
@@ -211,7 +212,7 @@ async function openGame(page: Page, name: string, gameId: string): Promise<void>
 
 async function clientPhase(page: Page): Promise<{ kind: string; activePlayerId: number } | null> {
   return page.evaluate(() => {
-    const st = (window as any).__gameDebug?.getState?.();
+    const st = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getState?.();
     if (!st) return null;
     return { kind: st.phase?.kind ?? "(none)", activePlayerId: st.activePlayerId };
   });
@@ -267,7 +268,7 @@ async function aiAttacksHumanModalAutoOpens(browser: Browser): Promise<void> {
     assert.equal(pre?.kind, "PLAYER_TURN", `pre-state phase=${pre?.kind}, expected PLAYER_TURN`);
     assert.equal(pre?.activePlayerId, 0, `pre-state activePlayerId=${pre?.activePlayerId}, expected 0`);
 
-    await page.evaluate(() => void (window as any).__gameDebug.endTurn());
+    await page.evaluate(() => void (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.endTurn());
 
     // (a) The modal must appear with NO user interaction.
     let snap: ModalSnapshot | null = null;
@@ -328,7 +329,7 @@ async function reloadMidOfferReopensModal(browser: Browser): Promise<void> {
   const t0 = Date.now();
   try {
     await openGame(page, name, game.id);
-    await page.evaluate(() => void (window as any).__gameDebug.endTurn());
+    await page.evaluate(() => void (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.endTurn());
 
     // Wait for the offer to land server-side (AI offered and is waiting).
     let offered = false;
@@ -400,7 +401,7 @@ async function fightAsDefenderDeploysAttackerLeft(browser: Browser): Promise<voi
     assert.equal(pre?.kind, "PLAYER_TURN", `pre-state phase=${pre?.kind}, expected PLAYER_TURN`);
     assert.equal(pre?.activePlayerId, 0, `pre-state activePlayerId=${pre?.activePlayerId}, expected 0`);
 
-    await page.evaluate(() => void (window as any).__gameDebug.endTurn());
+    await page.evaluate(() => void (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.endTurn());
 
     // Same recipe as A: the offer modal must auto-open (Quick Resolve +
     // Fight, no Flee -- the human is the defender).

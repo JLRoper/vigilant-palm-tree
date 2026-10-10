@@ -5,6 +5,7 @@
 import { spawn, ChildProcess } from "node:child_process";
 import { chromium } from "playwright";
 import { writeFileSync } from "node:fs";
+import type { GameDebugApi } from "../src/io/debugCommands";
 
 const WEB_PORT = 4174;
 const API_PORT = 3002;
@@ -76,20 +77,20 @@ async function run(): Promise<void> {
     await page.goto(WEB_URL, { waitUntil: "load" });
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: "load" });
+    // The clear+reload above costs a second full app boot (health + unit
+    // catalog + starter game), so this readiness gate is the suite's longest
+    // cold-start wait -- 15s was tighter than every sibling suite's (smoke
+    // and cityView boot-wait 60s) and flaked on a loaded machine once the
+    // reload made the boot do its work twice.
     await page.waitForFunction(
-      () => (window as unknown as { __gameDebug?: { activeGameName?: string } }).__gameDebug?.activeGameName != null,
+      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
       null,
-      { timeout: 15_000 },
+      { timeout: 60_000 },
     );
 
     // Select the player hero.
     const heroId = await page.evaluate(() => {
-      const dbg = (window as unknown as {
-        __gameDebug?: {
-          getGameState?: () => { heroes: Record<string, { ownerId: number }> };
-          setSelectedHero?: (id: string) => void;
-        };
-      }).__gameDebug;
+      const dbg = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug;
       const s = dbg?.getGameState?.();
       if (!s || !dbg?.setSelectedHero) return null;
       const h0 = Object.entries(s.heroes).find(([, h]) => h.ownerId === 0);
@@ -103,9 +104,7 @@ async function run(): Promise<void> {
 
     // Hover over a passable tile several hexes away to set the proposed path.
     const hero = await page.evaluate(() => {
-      const dbg = (window as unknown as {
-        __gameDebug?: { getGameState?: () => { heroes: Record<string, { q: number; r: number }> } };
-      }).__gameDebug;
+      const dbg = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug;
       const s = dbg?.getGameState?.();
       const h = s ? Object.values(s.heroes).find((x) => x.ownerId === 0) : null;
       return h ? { q: h.q, r: h.r } : null;
@@ -126,9 +125,7 @@ async function run(): Promise<void> {
 
     // Snapshot the proposed path state from the view.
     const pathState = await page.evaluate(() => {
-      const dbg = (window as unknown as {
-        __gameDebug?: { getGameState?: () => { heroes: Record<string, { trail: { q: number; r: number }[]; q: number; r: number }> } };
-      }).__gameDebug;
+      const dbg = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug;
       const s = dbg?.getGameState?.();
       const h = s ? Object.values(s.heroes).find((x) => x.ownerId === 0) : null;
       return h ? { q: h.q, r: h.r, trailLen: h.trail.length } : null;

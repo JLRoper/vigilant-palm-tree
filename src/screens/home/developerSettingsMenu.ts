@@ -3,6 +3,7 @@ import { bus } from "../../core/eventBus";
 import { openAssetManager } from "./assetManager";
 import { launchView, registerView } from "@screens/shared/viewLauncher";
 import { openDevConsole } from "../../debug/devConsole";
+import type { GameDebugApi } from "../../io/debugCommands";
 
 registerView("developerSettingsMenu", openDeveloperSettingsMenu);
 
@@ -173,7 +174,7 @@ export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
   devConsoleBtn.style.marginTop = "4px";
   devConsoleBtn.title = "Open the real-time event log console";
   devConsoleBtn.addEventListener("click", () => {
-    const log = (window as any).__gameDebug?.eventLog;
+    const log = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.eventLog ?? null;
     if (!log) {
       console.warn("[developerSettingsMenu] no __gameDebug.eventLog available; dev console disabled");
       return;

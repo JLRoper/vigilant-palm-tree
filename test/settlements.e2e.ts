@@ -8,6 +8,7 @@ import {
   getApiPort, getClientPort, spawnLogged, waitForApiHealth, waitForUrl,
   treeKill, reapPreviousRunPids, clearRegisteredPids,
 } from "./_request";
+import type { GameDebugApi } from "../src/io/debugCommands";
 
 // Settlement capture / garrison-battle e2e regressions (Playwright + real API + real DB):
 // (A) human walk-in capture persists server-side (the 409 race), 3 fresh games;
@@ -143,7 +144,7 @@ async function openGame(page: Page, name: string, gameId: string): Promise<void>
     }, name);
     assert(clicked, `no Open row matched ${name}`);
   }
-  await page.waitForFunction((n) => (window as any).__gameDebug?.activeGameName === n, name, { timeout: 30000 });
+  await page.waitForFunction((n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === n, name, { timeout: 30000 });
   await wait(700);
   await page.keyboard.press("Escape").catch(() => {});
   await wait(300);
@@ -151,7 +152,7 @@ async function openGame(page: Page, name: string, gameId: string): Promise<void>
 
 async function clientState(page: Page): Promise<{ phase: { kind: string }; activePlayerId: number; settlements: Record<string, { ownerId: number | null }> } | null> {
   return page.evaluate(() => {
-    const st = (window as any).__gameDebug?.getState?.();
+    const st = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getState?.();
     if (!st) return null;
     return {
       phase: st.phase, activePlayerId: st.activePlayerId,
@@ -194,8 +195,8 @@ async function walkInCapturePersisted(browser: Browser): Promise<void> {
     let saw409 = false;
     page.on("response", (r) => { if (r.status() === 409 && r.url().includes("/commands")) saw409 = true; });
     await openGame(page, name, gameId);
-    await page.evaluate(() => (window as any).__gameDebug.setSelectedHero("p0-hero"));
-    await page.evaluate((t: Axial) => (window as any).__gameDebug.requestMove("p0-hero", t.q, t.r), neutral);
+    await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero("p0-hero"));
+    await page.evaluate((t: Axial) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.requestMove("p0-hero", t.q, t.r), neutral);
 
     const deadline = Date.now() + 15000;
     let owner: number | null = null, rostered = false;
@@ -223,8 +224,8 @@ async function neutralGarrisonedTriggersBattle(browser: Browser): Promise<void> 
   const { gameId, sid, neutral } = await seedAtNeutral(name, "p0-hero", [{ entries: [{ unitTypeId: "swordsman", count: 3 }] }]);
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await openGame(page, name, gameId);
-  await page.evaluate(() => (window as any).__gameDebug.setSelectedHero("p0-hero"));
-  await page.evaluate((t: Axial) => (window as any).__gameDebug.requestMove("p0-hero", t.q, t.r), neutral);
+  await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero("p0-hero"));
+  await page.evaluate((t: Axial) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.requestMove("p0-hero", t.q, t.r), neutral);
 
   // B5: the assault-confirm modal fronts the arena for local-human attackers.
   let modalShown = true;
@@ -270,7 +271,7 @@ async function aiBeatableGarrisonAutoResolves(browser: Browser): Promise<void> {
 
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await openGame(page, name, gameId);
-  await page.evaluate(() => { void (window as any).__gameDebug.endTurn(); });
+  await page.evaluate(() => { void (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.endTurn(); });
   const t0 = Date.now();
   let backToPlayer = false, arenaSeen = false, confirmModalSeen = false;
   while (Date.now() - t0 < 45000) {

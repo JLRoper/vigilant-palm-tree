@@ -1,5 +1,6 @@
 import { chromium } from 'playwright';
 import path from 'path';
+import type { GameDebugApi } from "../src/io/debugCommands";
 
 const OUT_DIR = 'tmp/captures';
 
@@ -13,11 +14,11 @@ async function main() {
   const page = await context.newPage();
 
   await page.goto('http://localhost:5173/');
-  await page.waitForFunction(() => (window as any).__gameDebug != null, { timeout: 15000 });
+  await page.waitForFunction(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug != null, { timeout: 15000 });
   await sleep(1500);
 
   const { heroId, startQ, startR } = await page.evaluate(() => {
-    const heroes = (window as any).__gameDebug.getHeroes();
+    const heroes = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getHeroes();
     const hero = heroes.find((h: any) => h.ownerId === 0);
     if (!hero) throw new Error('no player hero');
     return { heroId: hero.id, startQ: hero.q, startR: hero.r };
@@ -25,7 +26,7 @@ async function main() {
   console.log('player hero', heroId, startQ, startR);
 
   // Select the hero
-  await page.evaluate(({ id }) => (window as any).__gameDebug.setSelectedHero(id), { id: heroId });
+  await page.evaluate(({ id }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero(id), { id: heroId });
   await sleep(300);
 
   // Try a ring of nearby tiles until a move succeeds
@@ -41,12 +42,12 @@ async function main() {
   }
 
   for (const t of spiral) {
-    const screen = await page.evaluate(({ q, r }) => (window as any).__gameDebug.screenFor(q, r) as { x: number; y: number }, t);
+    const screen = await page.evaluate(({ q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.screenFor(q, r) as { x: number; y: number }, t);
     await page.mouse.move(screen.x, screen.y);
     await sleep(250);
     await page.mouse.click(screen.x, screen.y);
     await sleep(250);
-    const lastClick = await page.evaluate(() => (window as any).__gameDebug.lastClick) as any;
+    const lastClick = await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.lastClick);
     console.log('tried', t.q, t.r, 'lastClick', lastClick);
     if (lastClick?.moved) {
       dest = t;
@@ -62,13 +63,13 @@ async function main() {
   console.log('reachable destination', dest.q, dest.r);
 
   // Reset hero to start so we can capture the whole flow
-  await page.evaluate(({ id, q, r }) => (window as any).__gameDebug.teleportHero(id, q, r), { id: heroId, q: startQ, r: startR });
+  await page.evaluate(({ id, q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.teleportHero(id, q, r), { id: heroId, q: startQ, r: startR });
   await sleep(300);
-  await page.evaluate(({ id }) => (window as any).__gameDebug.setSelectedHero(id), { id: heroId });
+  await page.evaluate(({ id }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero(id), { id: heroId });
   await sleep(200);
 
   // Screenshot 1: hover over destination before committing
-  const destScreen = await page.evaluate(({ q, r }) => (window as any).__gameDebug.screenFor(q, r) as { x: number; y: number }, dest);
+  const destScreen = await page.evaluate(({ q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.screenFor(q, r) as { x: number; y: number }, dest);
   await page.mouse.move(destScreen.x, destScreen.y);
   await sleep(350);
   await page.screenshot({ path: path.join(OUT_DIR, '01-hover-before-commit.png') });
@@ -81,7 +82,7 @@ async function main() {
   // Move cursor to a tile beyond the destination while hero animates
   const hoverQ = dest.q + 2;
   const hoverR = dest.r - 1;
-  const hoverScreen = await page.evaluate(({ q, r }) => (window as any).__gameDebug.screenFor(q, r), { q: hoverQ, r: hoverR });
+  const hoverScreen = await page.evaluate(({ q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.screenFor(q, r), { q: hoverQ, r: hoverR });
   await page.mouse.move(hoverScreen.x, hoverScreen.y);
   await sleep(100);
   await page.screenshot({ path: path.join(OUT_DIR, '03-hover-while-moving.png') });

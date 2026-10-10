@@ -7,6 +7,7 @@ import { GameMap } from "../src/map/gameMap";
 import { mulberry32 } from "../src/core/rng";
 import { placeResourceTiles, RESOURCES } from "../src/map/resourceTiles";
 import { axialToPixel } from "../src/core/hex";
+import type { GameDebugApi } from "../src/io/debugCommands";
 import { Pool } from "pg";
 import "../server/persistence/pgTypes";
 import {
@@ -215,7 +216,7 @@ async function runNewLoadSaveFlow(
   await createBtn.click();
   await wait(800);
 
-  const activeAfterNew = await page.evaluate(() => (window as any).__gameDebug?.activeGameName);
+  const activeAfterNew = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName);
   if (activeAfterNew !== TEST_NEW_NAME) {
     throw new Error(`New Game failed: activeGameName=${activeAfterNew}`);
   }
@@ -278,7 +279,7 @@ async function runNewLoadSaveFlow(
   let reloadedName: string | null = null;
   const loadDeadline = Date.now() + 10_000;
   while (Date.now() < loadDeadline) {
-    reloadedName = await page.evaluate(() => (window as any).__gameDebug?.activeGameName);
+    reloadedName = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName);
     if (reloadedName === openFor) break;
     await wait(250);
   }
@@ -354,7 +355,7 @@ async function queryLastEvent(name: string): Promise<{ kind: string; payload: an
 
 async function isHumanTurn(page: Page): Promise<boolean> {
   return page.evaluate(() => {
-    const state = (window as any).__gameDebug?.getGameState?.();
+    const state = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getGameState?.();
     if (!state || state.phase?.kind !== "PLAYER_TURN") return false;
     const p = state.players?.find((pl: any) => pl.id === state.phase.playerId);
     return p?.faction === "player";
@@ -507,7 +508,7 @@ async function run() {
     // Wait for client initialization, with stronger diagnostics on timeout
     try {
       await page.waitForFunction(
-        () => (window as any).__gameDebug?.activeGameName != null,
+        () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
         null,
         { timeout: 60_000 }
       );
@@ -536,7 +537,7 @@ async function run() {
     }
 
     const spawnInfo = await page.evaluate(() => {
-      const dbg = (window as any).__gameDebug;
+      const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
       const heroes = dbg?.getHeroes?.() ?? [];
       const settlements = dbg?.getSettlements?.() ?? [];
       const playerHero = heroes.find((h: any) => h.ownerId === 0);
@@ -550,7 +551,7 @@ async function run() {
     if (spawnInfo.aiSpawn) AI_SPAWN = spawnInfo.aiSpawn;
     console.log(`>> dynamic spawns: player=${JSON.stringify(PLAYER_SPAWN)} ai=${JSON.stringify(AI_SPAWN)}`);
 
-    const bootName = await page.evaluate(() => (window as any).__gameDebug?.activeGameName);
+    const bootName = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName);
     if (typeof bootName !== "string" || !bootName.startsWith("starter-")) {
       throw new Error(`Expected starter game, got activeGameName=${bootName}`);
     }
@@ -583,7 +584,7 @@ async function run() {
       { timeout: 10_000 }
     );
     const reloadedSpawn = await page.evaluate(() => {
-      const dbg = (window as any).__gameDebug;
+      const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
       const heroes = dbg?.getHeroes?.() ?? [];
       const playerHero = heroes.find((h: any) => h.ownerId === 0);
       return playerHero ? { q: playerHero.q, r: playerHero.r } : null;
@@ -591,7 +592,7 @@ async function run() {
     if (reloadedSpawn) PLAYER_SPAWN = reloadedSpawn;
     console.log(`>> home dismissed, starter game reloaded: ${bootName}`);
 
-    const activeName = await page.evaluate(() => (window as any).__gameDebug?.activeGameName);
+    const activeName = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName);
     if (typeof activeName !== "string" || !activeName.startsWith("starter-")) {
       throw new Error(`Expected starter game, got activeGameName=${activeName}`);
     }
@@ -629,7 +630,7 @@ async function run() {
 
     const target = await pickClickTarget(ctx, activeName, PLAYER_SPAWN);
     const heroStart = await page.evaluate(() => {
-      const dbg = (window as any).__gameDebug;
+      const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
       const heroes = dbg?.getHeroes?.() ?? [];
       const h = heroes.find((x: any) => x.ownerId === 0) ?? heroes[0];
       return h ? { id: h.id, q: h.q, r: h.r } : null;
@@ -638,13 +639,13 @@ async function run() {
     console.log(`>> hero start: ${JSON.stringify(heroStart)} click target: ${JSON.stringify(target.tile)}`);
 
     const heroScreen = await page.evaluate(
-      ({ q, r }) => (window as any).__gameDebug.screenFor(q, r),
+      ({ q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.screenFor(q, r),
       { q: heroStart.q, r: heroStart.r }
     );
     await page.mouse.click(heroScreen.x, heroScreen.y);
     await wait(150);
     const screen = await page.evaluate(
-      ({ q, r }) => (window as any).__gameDebug.screenFor(q, r),
+      ({ q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.screenFor(q, r),
       { q: target.tile.q, r: target.tile.r }
     );
     await page.mouse.move(screen.x, screen.y);
@@ -656,7 +657,7 @@ async function run() {
     while (Date.now() < moveDeadline) {
       heroAfter = await page.evaluate(
         (id: string) => {
-          const dbg = (window as any).__gameDebug;
+          const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
           const heroes = dbg?.getHeroes?.() ?? [];
           const h = heroes.find((x: any) => x.id === id);
           return h ? { id: h.id, q: h.q, r: h.r } : null;

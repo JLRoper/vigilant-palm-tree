@@ -4,6 +4,7 @@ import { setTimeout as wait } from "node:timers/promises";
 import { existsSync, readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { cellToScreen, cityLayout, coversCell } from "../src/core/cityGrid";
+import type { GameDebugApi } from "../src/io/debugCommands";
 import {
   getApiPort,
   getClientPort,
@@ -33,7 +34,9 @@ function startApi(): ChildProcess {
 }
 
 function startWeb(): ChildProcess {
-  const c = spawnLogged("web", "npx", ["vite", "--port", String(WEB_PORT), "--strictPort"], {});
+  const c = spawnLogged("web", "npx", ["vite", "--port", String(WEB_PORT), "--strictPort"], {
+    API_PORT: String(API_PORT),
+  });
   children.push(c);
   return c;
 }
@@ -66,31 +69,31 @@ async function setupTestGame(page: Page): Promise<string> {
   console.log(">> Setting up game: capture a player-owned settlement");
 
   let owned = await page.evaluate(() => {
-    return ((window as any).__gameDebug?.getSettlements?.() ?? []).find(
+    return ((window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getSettlements?.() ?? []).find(
       (s: any) => s.ownerId === 0
     );
   });
 
   if (!owned) {
     const target = await page.evaluate(() => {
-      return ((window as any).__gameDebug?.getSettlements?.() ?? []).find(
+      return ((window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getSettlements?.() ?? []).find(
         (s: any) => s.ownerId === null || s.ownerId !== 0
       );
     });
     if (!target) throw new Error("No settlements to capture");
 
     await page.evaluate(
-      ({ q, r }) => (window as any).__gameDebug.teleportHero?.("p0-hero", q, r),
+      ({ q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.teleportHero?.("p0-hero", q, r),
       { q: target.q, r: target.r }
     );
     await wait(200);
     await page.evaluate(
-      ({ sid }) => (window as any).__gameDebug.captureSettlement?.("p0-hero", sid),
+      ({ sid }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.captureSettlement?.("p0-hero", sid),
       { sid: target.id }
     );
     await wait(300);
     owned = await page.evaluate(() =>
-      ((window as any).__gameDebug?.getSettlements?.() ?? []).find(
+      ((window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getSettlements?.() ?? []).find(
         (s: any) => s.ownerId === 0
       )
     );
@@ -103,10 +106,10 @@ async function setupTestGame(page: Page): Promise<string> {
 
 async function openCityView(page: Page, settlementId: string): Promise<void> {
   const coords = await page.evaluate((sid: string) => {
-    const dbg = (window as any).__gameDebug;
+    const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
     const s = dbg?.getGameState?.()?.settlements?.[sid];
     if (!s) return null;
-    return (dbg as any).screenFor(s.q, s.r);
+    return dbg.screenFor(s.q, s.r);
   }, settlementId);
   if (!coords) throw new Error("Could not get screen coords");
 
@@ -215,7 +218,7 @@ async function testPaletteAvoidsGrid(page: Page, settlementId: string): Promise<
   await wait(500);
 
   const info = await page.evaluate((sid: string) => {
-    const dbg = (window as any).__gameDebug;
+    const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
     const s = dbg?.getGameState?.()?.settlements?.[sid];
     if (!s) return null;
     const W = window.innerWidth;
@@ -335,7 +338,7 @@ async function testPaletteAvoidsGrid(page: Page, settlementId: string): Promise<
   await wait(500);
 
   const afterCount = await page.evaluate((sid: string) => {
-    const s = (window as any).__gameDebug?.getGameState?.()?.settlements?.[sid];
+    const s = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getGameState?.()?.settlements?.[sid];
     return s?.buildings?.length ?? 0;
   }, settlementId);
   assert.equal(
@@ -439,7 +442,7 @@ async function testCityClicksDoNotReachMap(page: Page, settlementId: string): Pr
   console.log(">> Test: F1 — city view clicks do not reach the adventure map");
 
   await page.evaluate(() => {
-    const dbg = (window as any).__gameDebug;
+    const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
     const hero = (dbg?.getHeroes?.() ?? []).find((h: any) => h.ownerId === 0);
     if (hero) dbg.setSelectedHero?.(hero.id);
   });
@@ -448,7 +451,7 @@ async function testCityClicksDoNotReachMap(page: Page, settlementId: string): Pr
   await openCityView(page, settlementId);
 
   const baseline = await page.evaluate(() => {
-    const hero = ((window as any).__gameDebug?.getHeroes?.() ?? []).find(
+    const hero = ((window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getHeroes?.() ?? []).find(
       (h: any) => h.ownerId === 0
     );
     return hero ? { q: hero.q, r: hero.r, movementRemaining: hero.movementRemaining } : null;
@@ -467,7 +470,7 @@ async function testCityClicksDoNotReachMap(page: Page, settlementId: string): Pr
   await page.keyboard.press("Escape"); await wait(400);
 
   const after = await page.evaluate(() => {
-    const hero = ((window as any).__gameDebug?.getHeroes?.() ?? []).find(
+    const hero = ((window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getHeroes?.() ?? []).find(
       (h: any) => h.ownerId === 0
     );
     return hero ? { q: hero.q, r: hero.r, movementRemaining: hero.movementRemaining } : null;
@@ -500,7 +503,7 @@ async function testPersistence(page: Page, settlementId: string): Promise<void> 
   await openCityView(page, settlementId);
 
   const hasBuildings = await page.evaluate((sid: string) => {
-    const s = (window as any).__gameDebug?.getGameState?.()?.settlements?.[sid];
+    const s = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getGameState?.()?.settlements?.[sid];
     return (s?.buildings?.length ?? 0) > 0;
   }, settlementId);
   assert(hasBuildings, "Buildings should persist in settlement state");
@@ -546,7 +549,7 @@ async function testSkyboxVariantSwitch(page: Page): Promise<void> {
 
   for (const v of [2, 3, 4]) {
     await page.evaluate((variant) => {
-      (window as any).__gameDebug.settings.update({ spriteVariant: variant });
+      (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ spriteVariant: variant });
     }, v);
     await wait(1200);
 
@@ -559,7 +562,7 @@ async function testSkyboxVariantSwitch(page: Page): Promise<void> {
 
   // Reset to variant 1
   await page.evaluate(() => {
-    (window as any).__gameDebug.settings.update({ spriteVariant: 1 });
+    (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ spriteVariant: 1 });
   });
   await wait(1200);
 }
@@ -571,7 +574,7 @@ async function testParallaxMode(page: Page): Promise<void> {
 
   // Enable parallax with 4 layers
   await page.evaluate(() => {
-    (window as any).__gameDebug.settings.update({ parallaxEnabled: true, parallaxLayerCount: 4 });
+    (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ parallaxEnabled: true, parallaxLayerCount: 4 });
   });
   await wait(800);
 
@@ -581,7 +584,7 @@ async function testParallaxMode(page: Page): Promise<void> {
 
   // 2 layers
   await page.evaluate(() => {
-    (window as any).__gameDebug.settings.update({ parallaxLayerCount: 2 });
+    (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ parallaxLayerCount: 2 });
   });
   await wait(500);
   const para2 = await sampleSkyRegion(page);
@@ -590,7 +593,7 @@ async function testParallaxMode(page: Page): Promise<void> {
 
   // Disable parallax
   await page.evaluate(() => {
-    (window as any).__gameDebug.settings.update({ parallaxEnabled: false });
+    (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ parallaxEnabled: false });
   });
   await wait(500);
 
@@ -606,7 +609,7 @@ async function testBgOffset(page: Page): Promise<void> {
 
   // Pan right/down
   await page.evaluate(() => {
-    (window as any).__gameDebug.settings.update({ cityBgOffsetX: 200, cityBgOffsetY: -100 });
+    (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ cityBgOffsetX: 200, cityBgOffsetY: -100 });
   });
   await wait(500);
 
@@ -616,7 +619,7 @@ async function testBgOffset(page: Page): Promise<void> {
 
   // Reset
   await page.evaluate(() => {
-    (window as any).__gameDebug.settings.update({ cityBgOffsetX: 0, cityBgOffsetY: 0 });
+    (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ cityBgOffsetX: 0, cityBgOffsetY: 0 });
   });
   await wait(500);
 }
@@ -657,11 +660,11 @@ async function run() {
       }
     }
 
-    await page.waitForFunction(() => !!(window as any).__gameDebug, { timeout: 20000 });
+    await page.waitForFunction(() => !!(window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug, { timeout: 60000 });
     await page.waitForFunction(
-      () => (window as any).__gameDebug?.activeGameName != null,
+      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
       null,
-      { timeout: 20000 }
+      { timeout: 60000 }
     );
     await wait(500);
 

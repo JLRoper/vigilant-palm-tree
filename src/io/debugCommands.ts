@@ -5,6 +5,7 @@ import { axialToPixel } from "../core/hex";
 import type { EventLog, LogEntry, LogQuery, LogStats } from "../debug/eventLog";
 import type { DevConsoleHandle } from "../debug/devConsole";
 import { settings, updateSettings, DEFAULT_SETTINGS, type GameSettings } from "../state/settings";
+import type { GameState } from "../state/gameState";
 
 export interface AttachDebugApiEngine {
   getState: () => any;
@@ -37,12 +38,95 @@ export interface AttachDebugApiEngine {
   setConsoleHandle?: (handle: DevConsoleHandle | null) => void;
 }
 
+export interface DebugHeroSnapshot {
+  id: string;
+  q: number;
+  r: number;
+  ownerId: number;
+  movementRemaining: number;
+  trail: Array<{ q: number; r: number }>;
+  gold: number;
+}
+
+export interface DebugSettlementSnapshot {
+  id: string;
+  q: number;
+  r: number;
+  level: number;
+  ownerId: number | null;
+}
+
+export interface DebugPointerInfo {
+  q?: number;
+  r?: number;
+  moved?: boolean;
+  [key: string]: unknown;
+}
+
+export interface GameDebugEvents {
+  available(): boolean;
+  subscribe(handler: (entry: LogEntry) => void): () => void;
+  getEntries(query?: LogQuery): LogEntry[];
+  clear(): void;
+  stats(): LogStats | null;
+  setCapacity(n: number): void;
+}
+
+export interface GameDebugConsole {
+  readonly isOpen: boolean;
+  readonly isPinned: boolean;
+  show(): void;
+  hide(): void;
+  togglePin(): boolean;
+  setPinned(value: boolean): void;
+}
+
+export interface GameDebugSettings {
+  get(): GameSettings;
+  update(patch: Partial<GameSettings>): GameSettings;
+  reset(): GameSettings;
+}
+
+export interface GameDebugApi {
+  getState(): GameState;
+  getGameState(): GameState;
+  getTurnController(): unknown;
+  endTurn(): void;
+  setSelectedHero(id: HeroId): void;
+  requestMove(id: HeroId, q: number, r: number): boolean;
+  enterBattle(attackerId: HeroId, defenderId: HeroId): void;
+  captureSettlement(heroId: HeroId, settlementId: string): boolean;
+  teleportHero(id: HeroId, q: number, r: number): boolean;
+  debugInjectCharter(
+    heroId: HeroId,
+    targetQ: number,
+    targetR: number,
+    phase: "traveling" | "constructing",
+    settlementName: string
+  ): boolean;
+  getHeroes(): DebugHeroSnapshot[];
+  getSettlements(): DebugSettlementSnapshot[];
+  readonly hover: DebugPointerInfo | null;
+  readonly lastClick: DebugPointerInfo | null;
+  readonly phase: GameState["phase"];
+  readonly round: GameState["round"];
+  readonly activeGameId: number | null;
+  readonly activeGameName: string | null;
+  readonly screenFor: (q: number, r: number) => { x: number; y: number };
+  isPassable(q: number, r: number): boolean;
+  getMoveDurationMs(): number;
+  readonly eventLog: EventLog | null;
+  readonly events: GameDebugEvents;
+  readonly console: GameDebugConsole;
+  readonly settings: GameDebugSettings;
+}
+
 /**
  * Attaches the __gameDebug API to window.
  * All heavy logic delegates back to the engine via the provided callbacks.
  */
 export function attachDebugApi(engine: AttachDebugApiEngine): void {
-  (window as any).__gameDebug = {
+  const debugApi: GameDebugApi = {
     getState: () => engine.state.getTurnController()?.getState() ?? engine.state.getState(),
     getGameState: () => engine.state.getState(),
     getTurnController: () => engine.state.getTurnController(),
@@ -217,4 +301,5 @@ export function attachDebugApi(engine: AttachDebugApiEngine): void {
       reset: () => updateSettings({ ...DEFAULT_SETTINGS }),
     },
   };
+  (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug = debugApi;
 }
