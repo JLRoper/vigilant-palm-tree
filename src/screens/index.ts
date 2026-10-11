@@ -1,13 +1,13 @@
 // Side-effect barrel: imports each boot-critical view module so its
 // registerView(...) call fires at app startup. This keeps the viewLauncher
-// registry fully populated before any launchView() call can fire, and avoids
+// registry fully populated before any openView() call can fire, and avoids
 // side-effect imports between view files (which would create cycles between
 // settingsMenu <-> developerSettingsMenu <-> testBattleSetup <-> manualBattleArena).
 // Deferred views (developerSettingsMenu, testBattleSetup, manualBattleArena,
-// networkMap, multiplayerLobby) do NOT load at startup: they are registered
-// here as lazy loaders and await-loaded on first launchView/openView, which
-// keeps the battle-arena chain out of the entry chunk while preserving the
-// "a module registers itself at load" convention on both paths.
+// networkMap) do NOT load at startup: they are registered here as lazy loaders
+// and await-loaded on first openView, which keeps the battle-arena chain out
+// of the entry chunk while preserving the "a module registers itself at load"
+// convention on both paths. (multiplayerLobby is loaded on demand by homeView.)
 
 import { registerLazyView } from "@screens/shared/viewLauncher";
 
@@ -27,4 +27,3 @@ registerLazyView("developerSettingsMenu", () => import("@screens/home/developerS
 registerLazyView("testBattleSetup", () => import("@screens/combat/testBattleSetup"));
 registerLazyView("manualBattleArena", () => import("@screens/combat/manualBattleArena"));
 registerLazyView("networkMap", () => import("@screens/debug/networkMap"));
-registerLazyView("multiplayerLobby", () => import("@screens/multiplayer/multiplayerLobby"));

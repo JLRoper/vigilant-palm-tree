@@ -572,7 +572,7 @@ The Vite client build was code-split: one ~631 KiB entry became 18 JS chunks wit
 | Module | Purpose |
 |---|---|
 | `vite.config.ts` | New `build.rollupOptions.output.manualChunks(id)` (Windows-path normalized via `id.replace(/\\/g, "/")`) returning `"engine"` only for the `packages/engine` / `packages/contracts` paths, `undefined` otherwise; the `define` block with `__APP_VERSION__`/`__BUILD_TIME__`/`__BUILD_COMMIT__` is unchanged (`test/core/version.test.ts` reads the file as source text) |
-| `src/screens/shared/viewLauncher.ts` | `registerLazyView(name, loader)` + async `openView(name, opts)` beside the untouched sync `registerView`/`launchView`; `openView` awaits the loader and then launches through the normal registry, so a lazy module still self-registers on load |
+| `src/screens/shared/viewLauncher.ts` | `registerLazyView(name, loader)` + async `openView(name, opts)` beside the untouched sync `registerView`; `openView` awaits the loader and then launches through the normal registry, so a lazy module still self-registers on load |
 | `src/screens/index.ts` | Eager-for-boot barrel minus the deferred views: five `registerLazyView` calls (developerSettingsMenu, testBattleSetup, manualBattleArena, networkMap, multiplayerLobby) replace their side-effect imports |
 | `src/managers/GameActions.ts` | Its seven combat UI modules (openManualBattleArena, battleModal, battleResultCard, battleResultText, assaultConfirmModal, plus the battleChoicePolicy/resultCardPolicy gates) are `await import`-ed per use site; types stay `import type` |
 | `src/managers/UIManager.ts` | `ensureCityView()` / `constructCityView()` import and build `CityView` on the first open — the promise (not just the instance) is cached, so two fast double-clicks can't build two views; the import stays type-only |
@@ -580,7 +580,7 @@ The Vite client build was code-split: one ~631 KiB entry became 18 JS chunks wit
 | `src/screens/home/homeView.ts` | The multiplayer lobby is dynamic-imported inside the Multiplayer click handler instead of at module scope |
 | `src/screens/shared/toolbar.ts` | Test Battle opens via `void openView("testBattleSetup")` instead of a static import |
 
-Behavior notes: the registry convention is unchanged on both paths — a lazy module still self-registers when its loader fires, and `openView` launches it through the same registry `launchView` uses (five call sites migrated from `launchView` to `openView`; the Test Battle gear item moved from a static import to `openView`). developerSettingsMenu/networkMap remain in production bundles — they are lazily loaded, not DEV-gated. No runtime behavior changed: every surface still opens on the same user action, one tick later.
+Behavior notes: the registry convention is unchanged on both paths — a lazy module still self-registers when its loader fires, and `openView` launches it through the same registry `registerView` populates (the call sites migrated from the former sync `launchView` to `openView`; the Test Battle gear item moved from a static import to `openView`). developerSettingsMenu/networkMap remain in production bundles — they are lazily loaded, not DEV-gated. No runtime behavior changed: every surface still opens on the same user action, one tick later.
 
 ## See also
 

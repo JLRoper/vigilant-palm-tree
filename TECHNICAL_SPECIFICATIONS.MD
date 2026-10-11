@@ -190,7 +190,7 @@ Entry point: [`src/main.ts`](./src/main.ts:1) is a thin bootstrap — it constru
 | `src/render/` | Canvas rendering — see below and [`src/render/docs/technical-spec.md`](./src/render/docs/technical-spec.md) (authoritative; do not duplicate here) |
 | `src/resources/` | Static assets: castles (+ alt/FLUX variants), resource icon styles, unit/horse sprites (`units/horse/commander-1..8/`), arena unit battle sprites (`units/arena/<unitId>-<pose>.png`), hero-panel unit icons (`units/icons/<unitId>.png`), building style sprites, skybox parallax layers, banners |
 | `src/screens/` | All DOM UI, see table below |
-| `src/state/` | Game state: `gameState.ts` (typed store + pure reducers incl. charter logic; re-exports shared types from `@heroes/contracts`), `turnController.ts` (turn lifecycle, auto-travel, AI tick, battle trigger, recruitment/garrison transfers, the `tryCaptureAt` capture gate incl. `SETTLEMENT_BATTLE` vs a non-empty garrison), `units.ts` (Platoon/UnitType client model), `playerColors.ts`, `settings.ts` (persisted settings singleton incl. horse variant, resource style, borders) |
+| `src/state/` | Game state: `gameState.ts` (typed store + pure reducers incl. charter logic; re-exports shared types from `@heroes/contracts`), `turnController.ts` (turn lifecycle, auto-travel, AI tick, battle trigger, recruitment/garrison transfers, the `tryCaptureAt` capture gate incl. `SETTLEMENT_BATTLE` vs a non-empty garrison), `units.ts` (Platoon/UnitType client model), `playerColors.ts`, `settings.ts` (persisted settings singleton incl. horse variant, resource style, borders, toolbar style) |
 | `src/systems/` | Client behavioral system: `movement.ts` (hero arrival hook `onHeroArrived`) |
 | `src/ai/` | Compatibility shim re-exporting AI helpers from `@heroes/engine`; authoritative strategy is `packages/engine/src/ai/aiBrain.ts` |
 | `src/combat/` | `testArmies.ts` — sandbox army generators for the dev Test Battle setup |
@@ -198,7 +198,7 @@ Entry point: [`src/main.ts`](./src/main.ts:1) is a thin bootstrap — it constru
 
 ### `src/screens/` (UI layer)
 
-Navigation goes through a registry, not cross-imports: each view module calls `registerView("name", opener)` at module load ([`src/screens/shared/viewLauncher.ts`](./src/screens/shared/viewLauncher.ts)); cross-navigation calls `launchView("name", opts)`. [`src/screens/index.ts`](./src/screens/index.ts) is a side-effect barrel that imports every registering module so the registry is fully populated before `main.ts` proceeds (this broke the settings↔dev-settings↔test-battle↔arena import cycle).
+Navigation goes through a registry, not cross-imports: each view module calls `registerView("name", opener)` at module load ([`src/screens/shared/viewLauncher.ts`](./src/screens/shared/viewLauncher.ts)); cross-navigation calls `openView("name", opts)` (deferred views are registered with `registerLazyView` and their loader is awaited on first open). [`src/screens/index.ts`](./src/screens/index.ts) is a side-effect barrel that imports every registering module so the registry is fully populated before `main.ts` proceeds (this broke the settings↔dev-settings↔test-battle↔arena import cycle).
 
 | Subfolder | Contents |
 |---|---|
@@ -342,7 +342,7 @@ Vite auto-loads `.env`; `tsx` processes use `--env-file=.env`. Both Vite servers
   - `server/http/` and `server/app/` (except `commandHandler.ts` itself) never import `server/persistence/repositories/` directly.
   - `src/render/scene/paint2d/` cannot import the Vite-coupled asset modules or value-import `state/settings` — `paint2dDefaults.ts` and `skybox.ts` (outside `paint2d/`) are the only files allowed to touch those.
 - Domain types live in `@heroes/contracts` when they cross the client/server boundary (`GameState`, `HeroState`, `SettlementState`, `CharterState`, commands, `EngineEvent`s, `Axial`, ids, resources, units, telemetry); engine rules and their helpers live in `@heroes/engine`. There is no top-level `shared/` directory anymore.
-- View navigation goes through the `src/screens/shared/viewLauncher.ts` registry (`registerView`/`launchView`), populated by the `src/screens/index.ts` side-effect barrel — not direct cross-imports between view files.
+- View navigation goes through the `src/screens/shared/viewLauncher.ts` registry (`registerView`/`registerLazyView`/`openView`), populated by the `src/screens/index.ts` side-effect barrel — not direct cross-imports between view files.
 - Cross-cutting render types (`RenderOptions`, `MinimapGeometry`) live in `src/render/renderTypes.ts`; the `MinimapCamera` class lives in `src/render/minimapCamera.ts`.
 - Axial hex coordinates (`Axial`) are the universal map primitive; `axialToPixel` bridges to screen space.
 - All randomness goes through Mulberry32 with an explicit seed for determinism — the smoke test relies on this.

@@ -84,7 +84,8 @@ services:
     container_name: game_gateway
     restart: unless-stopped
     depends_on:
-      - web
+      web:
+        condition: service_healthy
     ports:
       - "5173:80"
     volumes:

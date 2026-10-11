@@ -12,7 +12,7 @@ You keep local `main` in sync with `origin/main` and then rebuild the dockerized
 - There is normally a single worktree checked out at a time, often sitting on a feature branch with uncommitted changes — not on `main`. Never assume the working tree is clean or already on `main`.
 - `game_db` (Postgres) is shared across worktrees/sessions and may be relied on elsewhere — never stop, remove, or `down` it as part of this routine.
 - Docker here runs **rootless**. Never run a recursive `chown`/`chgrp` (e.g. on the repo, a bind mount, or anything under the Docker data dir) — on this host that has previously killed the rootless daemon beyond user-level repair.
-- `docker-compose.yml` defines `api` (image target `api-runtime`) and `web` (image target `web-runtime`) built from `docker/Dockerfile`, plus `db` and `adminer`. "Rebuild the game" means rebuilding and restarting `api` and `web` — leave `db` and `adminer` alone.
+- `docker-compose.yml` defines `api` (image target `api-runtime`) and `web` (image target `web-runtime`) built from `docker/Dockerfile`, plus `gateway` (nginx:1.27-alpine, image-only — it fronts `web` and publishes host port 5173, which `web` no longer publishes itself), `db` and `adminer`. "Rebuild the game" means rebuilding/restarting `api` and `web`, and recreating `gateway` — leave `db` and `adminer` alone.
 
 ## Phase 1 — sync local main with origin/main
 
@@ -30,8 +30,8 @@ Only proceed here once Phase 1 finished cleanly (up to date, or merged with no c
 
 1. `docker compose build api web`.
    - If the build fails, stop and report the failing step/output — don't retry blindly or fall back to `--no-cache` on your own judgment; ask if a clean rebuild is wanted.
-2. `docker compose up -d api web` to recreate the containers from the new images.
-3. Poll `docker compose ps` for up to ~60s until `game_api` and `game_web` both report healthy (their healthchecks hit `/api/health` and `/` respectively).
+2. `docker compose up -d api web gateway` to recreate the containers from the new images.
+3. Poll `docker compose ps` for up to ~60s until `game_api` and `game_web` both report healthy (their healthchecks hit `/api/health` and `/` respectively) and `game_gateway` is running (it has no healthcheck of its own; `game_web` becoming healthy means the upstream it proxies is listening).
    - If either never becomes healthy, stop and surface `docker compose logs <service> --tail 50` for the unhealthy one rather than continuing to poll indefinitely.
 
 ## Final report

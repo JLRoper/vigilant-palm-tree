@@ -209,10 +209,14 @@ export class UIManager {
 
   // Single construction point, reached only from the open path. The promise
   // (not just the instance) is cached, so two fast double-clicks can never
-  // build two views; every sync path keeps using getCityView().
+  // build two views; every sync path keeps using getCityView(). A failed
+  // construction clears the cache so the next open retries.
   async ensureCityView(): Promise<CityView> {
     if (!this.cityViewPromise) {
-      this.cityViewPromise = this.constructCityView();
+      this.cityViewPromise = this.constructCityView().catch((err) => {
+        this.cityViewPromise = null;
+        throw err;
+      });
     }
     return this.cityViewPromise;
   }
