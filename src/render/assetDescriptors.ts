@@ -678,134 +678,37 @@ export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> =
 //   formula: visibleBase = y + td*0.5 + anchorOffsetY - bottomPad*(sh/dh)
 //   target:  visibleBase = y + td*0.5
 //   => anchorOffsetY = bottomPad * (sh/dh)
-// The divisor must be the PNG's ACTUAL canvas height, not a nominal 128: every
-// building-pixel-* asset is authored on a 1024 canvas, so sh/dh is ~8x smaller
-// than sh/128 would suggest (a 79-row pad on warehouse-1 is 7px, not 53).
-// This table uses the de-facto convention sh = tw*0.9 = 86.4 (the 1x1 width)
-// for every key regardless of its real footprint, which reproduces the values
-// below; it is an eyeballed baseline, not a strict geometric solve.
-// Exception: the 2x2 farmField ground plots (art regenerated 2026-10-05) use
-// the geometric 2x2 solve anchorOffsetY = bottomPad * 172.8/1024 (172.8 being
-// the real 2x2 draw height, not 86.4) so the slab corner lands on the
-// footprint's south vertex; under the 86.4 convention they would float ~10px
-// high. Other 2x2 buildings (e.g. townHall) deliberately keep the 86.4 values.
-const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
-  "building.pixel.granary.1": 11,
-  "building.pixel.granary.2": 25,
-  "building.pixel.granary.3": 19,
-  "building.pixel.bank.1": 7,
-  "building.pixel.bank.2": 6,
-  "building.pixel.bank.3": 6,
-  "building.pixel.treasury.1": 5,
-  "building.pixel.treasury.2": 4,
-  "building.pixel.treasury.3": 4,
-  "building.pixel.warehouse.1": 7,
-  "building.pixel.warehouse.2": 8,
-  "building.pixel.warehouse.3": 9,
-  "building.pixel.goldMine.1": 13,
-  "building.pixel.goldMine.2": 9,
-  "building.pixel.goldMine.3": 1,
-  "building.pixel.stoneMine.1": 12,
-  "building.pixel.stoneMine.2": 5,
-  "building.pixel.stoneMine.3": 13,
-  "building.pixel.ironMine.1": 10,
-  "building.pixel.ironMine.2": 10,
-  "building.pixel.ironMine.3": 10,
-  "building.pixel.crypt.1": 11,
-  "building.pixel.crypt.3": 12,
-  "building.pixel.ossuary.1": 11,
-  "building.pixel.ossuary.2": 11,
-  "building.pixel.ossuary.3": 8,
-  "building.pixel.wraithBarrows.1": 11,
-  "building.pixel.wraithBarrows.2": 11,
-  "building.pixel.wraithBarrows.3": 11,
-  "building.pixel.spireOfAsh.1": 7,
-  "building.pixel.spireOfAsh.2": 7,
-  "building.pixel.spireOfAsh.3": 6,
-  "building.pixel.underConstruction.1": 13,
-  "building.pixel.underConstruction.2": 11,
-  "building.pixel.underConstruction.3": 8,
-  "building.pixel.woodcutterHut.1": 4,
-  "building.pixel.woodcutterHut.2": 8,
-  "building.pixel.woodcutterHut.3": 8,
-  "building.pixel.smithy.2": 4,
-  "building.pixel.forgeHall.1": 8,
-  "building.pixel.forgeHall.2": 8,
-  "building.pixel.forgeHall.3": 8,
-  "building.pixel.gunnersRedoubt.1": 11,
-  "building.pixel.gunnersRedoubt.3": 11,
-  "building.pixel.golemFoundry.1": 8,
-  "building.pixel.golemFoundry.2": 8,
-  "building.pixel.golemFoundry.3": 8,
-  "building.pixel.deepAnvil.1": 2,
-  "building.pixel.deepAnvil.2": 2,
-  "building.pixel.deepAnvil.3": 2,
-  "building.pixel.groveSanctum.1": 9,
-  "building.pixel.groveSanctum.2": 8,
-  "building.pixel.groveSanctum.3": 6,
-  "building.pixel.warrenLodge.1": 8,
-  "building.pixel.warrenLodge.2": 7,
-  "building.pixel.warrenLodge.3": 4,
-  "building.pixel.sylvanStables.1": 10,
-  "building.pixel.sylvanStables.2": 10,
-  "building.pixel.sylvanStables.3": 3,
-  "building.pixel.worldrootGrove.1": 6,
-  "building.pixel.worldrootGrove.3": 0,
-  "building.pixel.farmField.1": 20,
-  "building.pixel.farmField.2": 20,
-  "building.pixel.farmField.3": 20,
-  "building.pixel-alt.farmField.1": 23,
-  "building.pixel-alt.farmField.2": 23,
-  "building.pixel-alt.farmField.3": 23,
-  "building.pixel.townHall.1": 9,
-  "building.pixel.townHall.2": 9,
-  "building.pixel.townHall.3": 6,
-  "building.pixel.house.1": 10,
-  "building.pixel.house.2": 9,
-  "building.pixel.house.3": 9,
-  "building.pixel.tower.1": 11,
-  "building.pixel.tower.2": 7,
-  "building.pixel.tower.3": 7,
-  "building.pixel.mageGuild.1": 11,
-  "building.pixel.mageGuild.2": 11,
-  "building.pixel.mageGuild.3": 11,
-  "building.pixel.market.1": 10,
-  "building.pixel.market.2": 10,
-  "building.pixel.market.3": 9,
-  "building.pixel.barracks.1": 12,
-  "building.pixel.barracks.2": 12,
-  "building.pixel.barracks.3": 9,
-  "building.pixel.smithy.1": 12,
-  "building.pixel.smithy.3": 7,
-  "building.pixel.apartment.1": 7,
-  "building.pixel.apartment.2": 7,
-  "building.pixel.apartment.3": 5,
-  "building.pixel.farmhouse.1": 10,
-  "building.pixel.farmhouse.2": 8,
-  "building.pixel.farmhouse.3": 5,
-  "building.pixel.archeryRange.1": 10,
-  "building.pixel.archeryRange.2": 10,
-  "building.pixel.archeryRange.3": 5,
-  "building.pixel.stables.1": 9,
-  "building.pixel.stables.2": 9,
-  "building.pixel.stables.3": 9,
-  "building.pixel.huntingLodge.1": 10,
-  "building.pixel.huntingLodge.2": 11,
-  "building.pixel.huntingLodge.3": 7,
-  "building.pixel.eyrie.1": 5,
-  "building.pixel.eyrie.2": 3,
-  "building.pixel.eyrie.3": 5,
-  "building.pixel.arcaneFont.1": 14,
-  "building.pixel.arcaneFont.2": 15,
-  "building.pixel.arcaneFont.3": 14,
-  "building.pixel.crypt.2": 11,
-  "building.pixel.gunnersRedoubt.2": 11,
-  "building.pixel.worldrootGrove.2": 5,
-  "building.pixel.mine.1": 12,
-  "building.pixel.mine.2": 5,
-  "building.pixel.mine.3": 13,
-};
-for (const [key, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {
+// The divisor must be the PNG's ACTUAL canvas height, not a nominal 128: nearly
+// every building-pixel-* asset is authored on a 1024 canvas, so sh/dh is ~8x
+// smaller than sh/128 would suggest (a 79-row pad on warehouse-1 is 7px, not
+// 53). The one exception is building-pixel-smithy-2.png, which is 128x128 --
+// the generator divides by the real measured height, so it needs no special
+// case, but do not hard-code 1024 for this family.
+//   => anchorOffsetY = bottomPad * (sh/dh)
+//
+// The table itself is no longer hand-maintained. It is generated from the PNGs
+// by tools/sprites/gen-building-anchors.mjs, which measures each sprite's
+// transparent bottom-pad rows (maxY = lowest row with alpha > 10,
+// padRows = height - 1 - maxY) and computes
+//   offsetY = round(padRows * divisor / height)
+// where divisor is the sprite's draw height, declared per key in the generator:
+// 86.4 (the 1x1 width, tw*0.9) for every key except the 2x2 farmField ground
+// plots, which use 172.8 (the real 2x2 draw height) so the plot's slab corner
+// lands on the footprint's south vertex -- under the 86.4 convention they float
+// ~10px high. Other 2x2 buildings (e.g. townHall) deliberately keep 86.4.
+//
+// Divisor 86.4 is a de-facto convention rather than a strict geometric solve:
+// it reproduces the previous hand-measured values for 106 of 114 keys. The 8
+// where it differs are corrections the measurement exposed -- five are +-1
+// rounding noise in the old table, and granary.2/granary.3 were sunk 8-10px
+// below their cell vertex by values that described art that no longer existed.
+//
+// Regenerate after adding or regenerating a sprite:
+//   npm run gen:building-anchors          (drift gate: npm run gen:building-anchors:check)
+import { BUILDING_ANCHOR_OVERRIDES } from "./generated/buildingAnchorOverrides";
+
+for (const [spriteKey, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {
+  const key = `building.${spriteKey}` as SpriteKey;
   const desc = BUILDING_DESCRIPTORS[key];
   if (desc) BUILDING_DESCRIPTORS[key] = { ...desc, anchorOffsetY: offsetY };
 }
