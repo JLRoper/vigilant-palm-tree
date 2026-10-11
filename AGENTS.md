@@ -1,13 +1,15 @@
 # Project Agent Instructions (heroes-js)
 
+<!-- docs:verified 2026-10-11 -->
+
 This file is loaded into every agent's context. Treat the rules below as non-negotiable unless the user overrides them in the current message.
 
 ## Project quick facts
 - Node/TypeScript/Vite single-page game (heroes-js).
 - Dev environment: `npm run dev` (vite client + tsx api, via concurrently). Ports are per-worktree and OS-assigned (random kernel-picked free ports) by `predev` via `scripts/allocate-ports.ts` — collision-free across concurrent runs.
 - Postgres dev DB: shared `game_db` container, fixed host port 5432. `npm run db:up` to start. Do NOT run `db:down` unless explicitly asked — other worktrees share it.
-- `.env` may point `PGHOST` at the shared **gameserver** instead of the local container (see `.env.example`). Tests must never follow it there: `test/smoke.ts` deletes every game in the database except its own fixtures. `.env.test` is loaded after `.env` by the `test` and `test:cityview` scripts to pin `PGHOST` back to `127.0.0.1` — do not remove it, and give any NEW test script that reads `.env` the same second `--env-file=.env.test`.
-- Build: `npm run build` (tsc + vite build). Tests: `npm run test:all` (smoke + multiplayer.smoke + cityView). Status: `npm run dev:status`.
+- `.env` may point `PGHOST` at the shared **gameserver** instead of the local container (see `.env.example`). Tests must never follow it there: `test/smoke.ts` deletes every game in the database except its own fixtures. DB-backed test scripts load `.env.test` after `.env` to pin `PGHOST` to `127.0.0.1` — preserve that order and give any NEW script that reads `.env` the same second `--env-file=.env.test`.
+- Build: `npm run build` (tsc + vite build). Full suite: `npm run test:all` (browser/e2e suites through `tools/run-test.mjs all`, followed by `npm run test:unit`). `npm test` is the smoke test. Documentation: `npm run docs:check` (maintained Markdown links/source paths and freshness markers; no DB). Status: `npm run dev:status`.
 - LAN multiplayer: set `LAN_HOST=1` in `.env` (or process env) before `npm run dev` to bind the API to `0.0.0.0`. `npm run dev:status` will print LAN URLs when `LAN_HOST=1`. `scripts/allocate-ports.ts` reserves `WS_PORT` for a future realtime layer; leave it dormant.
 
 ## Coding constraints
@@ -24,6 +26,16 @@ This file is loaded into every agent's context. Treat the rules below as non-neg
 - **`doc-updater`** — in your FIRST response, launch this via the `task` tool when the task may touch code (any implementation, refactor, config, dependency, or script change). Skippable for pure Q&A and conversation. Fast-return pattern: scan current docs, plan updates, return without blocking the user's actual work.
 
 When you finish the task, invoke `doc-updater` a second time if any doc actually needs updating.
+
+## Multi-session safety (added 2026-10-11)
+
+Incident-driven rules. Full detail lives in the `multi-agent-workspace` skill's "Human stop is a hard brake" and "Concurrent sessions in one working directory" sections:
+
+- **One live Kilo session per working directory.** Run parallel agents in Agent Manager worktrees (git worktrees under `.worktrees/`), not side by side in the main worktree. Two sessions sharing one directory crossed their session titles on 2026-10-11, because all workspace coordination is directory-scoped.
+- Two shared resources do not follow worktrees: the `game_db` Postgres container (fixed host port 5432, shared by design — already a rule above) and Docker Compose project names. `npm run test:all` / `test/smoke.ts` delete every game except their own fixtures, so test suites run from the main worktree — or only with explicit coordination — while another worktree is active.
+- Identity in this repo's coordination is `.agentboard/{PID}.json` + the `.plans/` file + `.alock` PIDs. Session titles are advisory — never route work by title.
+- A user "stop" is a hard brake: execute only the literal instruction, keep every other action read-only, and announce any still-running background task so the user can cancel it. An active goal's "proceed autonomously" never overrides it.
+- Session renames are done by the human in the client. Never have an agent run `alock session-name` to fix a title — that is the mechanism that crossed them.
 
 ## Pre-commit / pre-PR gate (automatic)
 Before ANY `git commit`, `git switch -c`, `gh pr create`, or `gh repo create`:

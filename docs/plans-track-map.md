@@ -1,6 +1,8 @@
 # Phase 1–5 Track Map (published)
 
-**Status:** Published 2026-10-10 from the retired session-plan track map. This is a **point-in-time snapshot**: the original was a working document maintained outside version control, and the per-item status below was re-verified against the tree on the publication date. It moves — the linked plan files and [architecture.md](./architecture.md) are the live record.
+<!-- docs:verified 2026-10-11 -->
+
+**Status:** Published 2026-10-10 from the retired session-plan track map. The per-item status below remains a **point-in-time snapshot** verified on that date; the dated update that follows records later changes. For the current source map use [module-documentation-and-relationships.md](./module-documentation-and-relationships.md); [`architecture.md`](./architecture.md) is the historical executed layout plan.
 
 ## What this is
 
@@ -12,7 +14,13 @@ Until 2026-10-10 none of that was in the repository. The track map lived in `pla
 
 The named source no longer exists on disk. `plan/2026-08-17-consolidated-phase-1-5-track-map.md` and its companion `plan/2026-08-19-phase-1-5-audit-issue-sequencing.md` were moved to `.plans/` by commit `01f7b48` and later retired under the `_COMPLETE` cleanup rule; because `.plans/` is gitignored, no history preserves them. Verified 2026-10-10: the only tracked artifact of the track map is [../analysis/2026-08-24-phase-1-5-track-map-audit.md](../analysis/2026-08-24-phase-1-5-track-map-audit.md), which audited the track map against the tree at `main@0cff923`.
 
-That audit, plus [architecture.md](./architecture.md) (the canonical current-state map, whose "Subsequent additions" sections record what landed after each phase) and the live `.plans/` filename suffixes, are what this document was written from. Per-item status below was re-checked, not copied — where the original document's prose was already stale, the status here follows the code.
+That audit, the dated status update below, and the local `.plans/` filename suffixes inform this document. The per-item table remains the verified 2026-10-10 snapshot; where it is now superseded, the update below points to current code.
+
+## Status Update (2026-10-11)
+
+This addendum does not rewrite the 2026-10-10 snapshot below. Source verification on 2026-10-11 confirms the server-side AI actor's Phase 3 heartbeat/watchdog and pool hardening are implemented, and B3 server-driven AI charter decisions/travel are live. See `server/app/aiDriver.ts`, `server/persistence/db.ts`, and `packages/engine/src/ai/aiBrain.ts`; the Phase 3 plan is [`../.plans/20261002-1900_ai-actor-phase-3_COMPLETE.md`](../.plans/20261002-1900_ai-actor-phase-3_COMPLETE.md), not an `_UNCLAIMED` item.
+
+The scene-graph cutover remains landed. The city render/generation files `src/render/cityBuildingDraw.ts` and `src/render/cityBuildingGen.ts` are absent; `src/render/cityRenderer.ts` remains as a thin `paintScene` wrapper. The broader removal of persisted/design-time building style metadata is still tracked separately, so the old style-system item below is only partially complete.
 
 ## Phase 1–5 item list and current status
 
@@ -30,7 +38,7 @@ Status values: **Landed** (shipped, verified in the tree), **Open** (not finishe
 | Item | Status | Evidence |
 |---|---|---|
 | `shared/` → `@heroes/engine` move (economy, charter, settlement, hero, turn) | Landed | `packages/engine/src/*` domain modules |
-| The 7-directory `src/` layout (`core/`, `entities/`, `io/`, `map/`, `render/`, `systems/`, `views/`) | Landed | [architecture.md](./architecture.md) is the executed plan for this move |
+| The historical 7-directory `src/` layout (`core/`, `entities/`, `io/`, `map/`, `render/`, `systems/`, `views/`) | Landed as a layout plan; UI later moved to `src/screens/` | [architecture.md](./architecture.md) preserves the original plan; see the [current module map](./module-documentation-and-relationships.md) |
 | Layer rules machine-enforced (`core/` leaf-only, no cycles, `paint2d/` asset seam) | Landed | `dependency-cruiser.cjs` via `npm run lint:deps` |
 | Intra-`src/` circular imports | Landed (7 fixed 2026-08-10) | commit `526398e`; see architecture.md's "Linked mitigation plans" |
 
@@ -75,7 +83,7 @@ Status values: **Landed** (shipped, verified in the tree), **Open** (not finishe
 | `scene/paint2d/` per-kind painters | Landed | 27 kinds behind the `Paint2DDep` seam; `?paint=legacy` is the escape hatch |
 | Renderer / city-renderer cutover (#148) | Landed | `MapRenderer.draw()` and `drawCityView()` both build `SceneNode[]` and call `paintScene()`; the parallel `painter/` implementation was deleted; `npm run test:visual` is the gate |
 | Arena scene-graph consumption and sprites | Landed | `src/screens/combat/arena/paint.ts`, registry-driven `UNIT_ARENA_DESCRIPTORS` |
-| Remove the city view's procedural building-style system | **Open** | `20261004-0627_remove-city-building-styles_UNCLAIMED.md` |
+| Remove the city view's procedural building-style system | **Open/partial (2026-10-11)** | The old city draw/generation files are gone; removal of the remaining style metadata/design-time surface is still tracked in `20261004-0627_remove-city-building-styles_UNCLAIMED.md` |
 
 ### Cross-cutting issues from the track map's issue table
 

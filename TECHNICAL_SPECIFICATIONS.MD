@@ -1,5 +1,7 @@
 # Technical Specifications — heroes-js
 
+<!-- docs:verified 2026-10-11 -->
+
 A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. This document captures the **tech stack** as it currently exists in the repository. Game design documentation lives under [`docs/`](./docs/README.md); the render module has its own authoritative spec at [`src/render/docs/technical-spec.md`](./src/render/docs/technical-spec.md).
 
 ---
@@ -9,7 +11,7 @@ A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. Thi
 | Aspect | Value |
 |---|---|
 | Project name | `heroes-js` |
-| Version | `0.3.0` |
+| Version | `0.3.4` (root `package.json` is the source of truth) |
 | Package type | ESM (`"type": "module"`) |
 | Engines | Node `>=22 <23` (`engines` field in `package.json`) |
 | Repo layout | npm **workspaces**: `packages/*` (two packages — see below) + root client/server/test tree |
@@ -34,10 +36,10 @@ Top-level directories:
 - `tools/` — sprite/test scripts (Node + Playwright)
 - `scripts/` — port allocation, cleanup, DB/asset helpers (TS, run via `tsx`)
 - `docs/` — game design documents (Markdown)
-- `docker/` — `Dockerfile` (multi-stage `api-runtime` / `web-runtime` targets)
+- `docker/` — `Dockerfile` (multi-stage `api-runtime` / `web-runtime` targets) + `nginx.conf` (the `gateway` reverse proxy)
 - `dist/` — Vite build output
 - `src/resources/` — baked-in sprite PNGs/SVGs (castles, resources, units — arena battle sprites + hero-panel icons, horses, buildings, skybox parallax layers)
-- `docker-compose.yml` — Postgres + API + web + Adminer
+- `docker-compose.yml` — Postgres + API + web + gateway (nginx reverse proxy) + Adminer
 
 The former top-level `shared/` directory **no longer exists** — its contents were moved into `packages/engine` / `packages/contracts`; no source file imports a `shared/` path anymore.
 
@@ -69,7 +71,7 @@ The former top-level `shared/` directory **no longer exists** — its contents w
 
 ### SQL
 - [`server/schema.sql`](./server/schema.sql) — baseline schema.
-- [`server/migrations/`](./server/migrations) — versioned migrations: `001_turn_state`, `002_unit_types`, `003_resource_tables`, `004_game_assets`, `005_unit_counters`, `007_unit_specialty`, `008_lobby`, `009_granular_entities`, `010_event_seq`, `011_movement_remaining_precision`, `012_battle_actions`, `013_settlement_building_construction`, `014_wagons_cargo_trade_routes`, `015_unit_catalog_v1`, `016_settlement_platoons`, `017_game_events_notify`, `018_scope_granular_ids`, `019_game_events_game_id_id_idx`, `020_faction_ladder_units` (no `006`).
+- [`server/migrations/`](./server/migrations) — 28 ordered migrations, `001` through `028`; `006_faction_rosters` is present. Recent additions include SSE notifications (`017`), bank/wagon storage (`022`–`023`), faction content (`024`–`026`), numeric precision (`027`), and treasury-wagon backfill (`028`).
 - Applied at startup by `initSchema()` in [`server/db.ts`](./server/db.ts:1).
 
 ---
@@ -90,9 +92,10 @@ The former top-level `shared/` directory **no longer exists** — its contents w
 ### Database (Postgres 16)
 - Local dev via [`docker-compose.yml`](./docker-compose.yml:1): service `db` uses `postgres:16-alpine` (container `game_db`), credentials `gameuser` / `gamepass`, database `game_poc`, fixed host port `5432`.
 - Healthcheck via `pg_isready`; persistence via named volume `game_db_data`; shared `heroes-network` bridge.
-- `docker-compose.yml` also defines `api` (`docker/Dockerfile` → `api-runtime`, `NODE_ENV=production`, port `3001`) and `web` (`web-runtime`, `vite preview` proxying `/api` to the `api` service, port `5173`), plus Adminer on `8080`. Local dev usually runs only `db:up` and runs api/web on the host.
+- `docker-compose.yml` also defines `api` (`docker/Dockerfile` → `api-runtime`, `NODE_ENV=production`, port `3001`), `web` (`web-runtime`, `vite preview` at `web:5173`, internal only — it publishes no host port and keeps proxying `/api` to the `api` service), and `gateway` (`nginx:1.27-alpine` with `docker/nginx.conf` bind-mounted at `/etc/nginx/conf.d/default.conf`, publishing host `5173:80` → `web:5173`), plus Adminer on `8080`. The external URL stays `http://<host>:5173`; there is no Dockerfile change and rollback is compose-only. Local dev usually runs only `db:up` and runs api/web on the host.
+- Gateway caching: `/assets/**` → `Cache-Control: public, max-age=31536000, immutable`; `/` (index.html) → `no-cache`; `/api/**` → `no-store` + `X-Accel-Buffering: no` with `proxy_buffering off` and a 75s read timeout, so the SSE event stream (`/api/games/:name/events/stream`, 25s heartbeat) is never buffered.
 - Server talks to it with the [`pg`](https://www.npmjs.com/package/pg) driver (`pg.Pool`, configured in `server/persistence/db.ts` from `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE`).
-- `.env` may point `PGHOST` at a shared remote gameserver; tests must never follow it there — `test`/`test:cityview` load `.env.test` **after** `.env`, pinning `PGHOST` back to `localhost`, because `test/smoke.ts` deletes every game except its own fixtures.
+- `.env` may point `PGHOST` at a shared remote gameserver; DB-backed tests must load `.env.test` **after** `.env`, pinning `PGHOST` to localhost, because `test/smoke.ts` deletes every game except its own fixtures.
 
 ---
 
@@ -152,8 +155,8 @@ Port allocation is OS-native and cross-platform (`scripts/allocate-ports.ts` use
 | `test:cityview` | `tsx scripts/allocate-ports.ts && tsx --env-file=.env --env-file=.env.test test/cityView.test.ts` | City view integration test |
 | `test:visual` | `… tools/run-test.mjs visual --auto-close` | Canvas screenshot-diff gate vs. `test/visual-baselines/` |
 | `test:visual:update-baselines` | `… tools/run-test.mjs visual --auto-close --update-baselines` | (Re)write the visual baselines |
-| `test:unit` | `tsx --test test/server/*.test.ts test/persistence/*.test.ts test/migrations/*.test.ts test/render/*.test.ts test/engine/*.test.ts test/io/*.test.ts test/net/*.test.ts test/screens/**/*.test.ts` | `node:test` unit suites (server, persistence, migrations, render scene builders, engine, io, net, screens) |
-| `test:all` | `… tools/run-test.mjs all --auto-close && npm run test:unit` | Full suite: smoke → multiplayer → cityview → visual, then all unit suites |
+| `test:unit` | `tsx --test --test-concurrency=1 …` | Serial `node:test` suites across server, state, charter, persistence, migrations, render, engine, io, logistics, network, combat, AI, core, data, and screens; exact globs are in `package.json` |
+| `test:all` | `… tools/run-test.mjs all --auto-close && npm run test:unit` | Eight browser/e2e suites (smoke, multiplayer, cityview, settlements, AI defender, AI charter, log panel, visual), then all unit suites |
 | `test:wrapper` | `node --no-deprecation tools/run-test.mjs` | Direct access to the test wrapper |
 | `lint:deps` | `depcruise src server packages --config dependency-cruiser.cjs` | Static check of cross-boundary imports (cycles + layering, incl. the workspace packages) |
 | `validate-assets` | `node tools/sprites/validate-assets.mjs` | Validate sprite assets against the manifest |
@@ -179,7 +182,7 @@ Entry point: [`src/main.ts`](./src/main.ts:1) is a thin bootstrap — it constru
 | `src/debug/` | Dev diagnostics: `devConsole.ts` (persistent dev console modal), `eventLog.ts` (bus/hook event ledger feeding it) |
 | `src/entities/` | Domain objects: `hero.ts` (Hero, Faction, Direction), `settlement.ts` (Castle, CastleLevel, CastleVariant) |
 | `src/game/` | Game lifecycle: `initState.ts` (build/hydrate initial state; also used server-side by `routes.ts` — the one depcruise exemption), `turnHooks.ts` (fire-and-forget command hooks for the turn controller; rejections surface via `command:rejected` bus → toasts) |
-| `src/io/` | External I/O: `api.ts` (typed REST client; attaches cached bearer token; `Game` row incl. `last_event_id` cursor), `commands.ts` (typed command senders for the 24 command kinds), `auth.ts` + `authStorage.ts` (magic-link client flow; localStorage token cache), `multiplayerSync.ts` (event-cursor poller, below), `userGames.ts` (localStorage saved-games index), `assetApi.ts` (custom-asset upload/list client), `debugCommands.ts` (`window.__gameDebug` surface) |
+| `src/io/` | External I/O: `api.ts` (typed REST client; cached bearer token; `last_event_id` cursor), `commands.ts` (typed senders for 25 command kinds), `auth.ts` + `authStorage.ts`, `multiplayerSync.ts` (SSE with poll backstop), `userGames.ts`, `assetApi.ts`, `debugCommands.ts` |
 | `src/managers/` | Orchestration: `GameEngine.ts` (composer: init phases, rAF `fullFrame()`), `GameStateManager.ts` (state ↔ entities sync), `ViewManager.ts` (renderer + cameras + adventure view), `UIManager.ts` (HUD, toolbar, menus, city view), `GameActions.ts` (end turn, save, hero + settlement-garrison battle flow), `SessionManager.ts` (backend/health/session lifecycle), `GameSessionManager.ts` (new-game/load-game orchestration) |
 | `src/map/` | Map generation and traversal: `gameMap.ts`, `terrain.ts`, `pathfinding.ts` (A\* over axial hex grid), `castlePlacement.ts`, `resourceTiles.ts` |
 | `src/players/` | `localPlayer.ts` — per-game local player id (localStorage + in-memory fallback) used by mp sync/telemetry |
@@ -187,8 +190,8 @@ Entry point: [`src/main.ts`](./src/main.ts:1) is a thin bootstrap — it constru
 | `src/resources/` | Static assets: castles (+ alt/FLUX variants), resource icon styles, unit/horse sprites (`units/horse/commander-1..8/`), arena unit battle sprites (`units/arena/<unitId>-<pose>.png`), hero-panel unit icons (`units/icons/<unitId>.png`), building style sprites, skybox parallax layers, banners |
 | `src/screens/` | All DOM UI (the former `src/views/` — that directory no longer exists), see table below |
 | `src/state/` | Game state: `gameState.ts` (typed store + pure reducers incl. charter logic; re-exports shared types from `@heroes/contracts`), `turnController.ts` (turn lifecycle, auto-travel, AI tick, battle trigger, recruitment/garrison transfers, the `tryCaptureAt` capture gate incl. `SETTLEMENT_BATTLE` vs a non-empty garrison), `units.ts` (Platoon/UnitType client model), `playerColors.ts`, `settings.ts` (persisted settings singleton incl. horse variant, resource style, borders) |
-| `src/systems/` | Behavioral systems: `enemyWander.ts` (`pickAiWanderTarget`), `movement.ts` (hero arrival hook `onHeroArrived`) |
-| `src/ai/` | AI: `aiBrain.ts` (`pickAiMove` heuristic over pathfinding + terrain cost) |
+| `src/systems/` | Client behavioral system: `movement.ts` (hero arrival hook `onHeroArrived`) |
+| `src/ai/` | Compatibility shim re-exporting AI helpers from `@heroes/engine`; authoritative strategy is `packages/engine/src/ai/aiBrain.ts` |
 | `src/combat/` | `testArmies.ts` — sandbox army generators for the dev Test Battle setup |
 | `src/vite-env.d.ts` | Vite type shims |
 
@@ -236,9 +239,12 @@ The scene-graph pipeline is **live** — it draws every frame on all three views
 | `server/routes.ts` | Remaining `/api` routes: `/health`, `/units`, games CRUD, `/games/:name/validate` (engine integrity check), lobby `claim`/`start` (claim supports the drop policy's email-bound rejoin reclaim on started games), tiles, events log (`GET /games/:name/events?after=<id>` cursor poll; `POST` appends audit events). Mounts the four sub-routers: `assetRouter` at `/assets`, `authRouter` at `/auth`, `commandsRouter` at `/games/:name/commands`, `telemetryRouter` at `/games/:name/telemetry`. `GET /games/:name` returns the row plus `last_event_id` (snapshot + cursor read in one statement, #146) and lobby seat availability (incl. `lobby.presence`) |
 | `server/auth.ts` | Email magic-link auth: `POST /auth/request-code`, `POST /auth/verify-code`, `GET /auth/session`, `POST /auth/logout`. 6-digit codes SHA-256 hashed (salted with the email) into `auth_codes` with a 10-minute TTL; `user_sessions` bearer tokens with a 30-day rolling expiry (`last_seen_at` refresh). When `NODE_ENV !== "production"` the code is also returned as `devCode` so the flow works without SMTP. Exports `attachAuth` middleware — **sign-in is optional; it never rejects a request**, it just sets `req.authEmail` |
 | `server/middleware/attachPlayerSeat.ts` | After `attachAuth`: if the caller is signed in and has claimed a lobby seat whose `email` matches (seat claims are email-bound server-side; anonymous claims allowed), sets `req.playerSeat`. 5-second in-process membership cache; `invalidateMembershipCache()` exported for the claim route |
-| `server/http/routes/commands.ts` | `POST /games/:name/commands` — `parseCommand()` does real per-field validation for all **24** command kinds: `MoveHero`, `TransferGold`, `BankGold`, `EndTurn`, `ResolveBattle`, `RecruitHero`, `UpgradeTownHall`, `SetAutoTrade`, `ReorderStack`, `CaptureSettlement`, `UpgradeBuilding`, `UpgradeSettlement`, `StartCharter`, `AdvanceCharterTravel`, `SubmitBattleResult`, `PlaceBuildings`, `TransferResources`, `AssignWagons`, `BuyWagons`, `CreateTradeRoute`, `UpdateTradeRoute`, `RecruitUnits`, `TransferUnits`, `SubmitSettlementBattleResult` — then dispatches through `handleCommandTransactional()`. Mounted with `mergeParams: true`; runs `attachAuth` + `attachPlayerSeat`; defense-in-depth `actor_mismatch` 403 when a *signed-in, seat-claimed* caller asserts a different `actor` (anonymous callers fall back to trusting `actor`, as before #179); after that guard, the parsed command doubles as a drop-policy heartbeat (`touchSeat`). Lazily awaits + memoizes `createLiveCommandDeps()` on first request (it's async; the memo clears on rejection). Response carries the applied `events`, the `lastEventId` cursor to skip self-events on the next poll, and the affected entities |
+| `server/http/routes/commands.ts` | `POST /games/:name/commands` — `parseCommand()` validates all **25** command kinds, including `EnterBattle`, then dispatches through `handleCommandTransactional()`. It runs `attachAuth` + `attachPlayerSeat`, rejects authenticated actor/seat mismatches, records valid commands as presence heartbeats, and returns applied events plus the cursor and affected entities |
 | `server/app/commandHandler.ts` | Command-bus core: loads the game row via `GameRepo`, enforces turn-ownership/authority guards, runs the matching `@heroes/engine` reducer (`turnService.ts` for `EndTurn`), appends `EngineEvent`s via `EventRepo`, persists via the granular repos, returns a `CommandResult` (incl. `lastEventId`). `createLiveCommandDeps()` wires the real Postgres-backed repos (async — pre-reads `unit_types` for the battle catalog). `handleCommandTransactional()` wraps a command in a pool transaction. EndTurn dual-writes `charters` and inserts settlement snapshots + auto-trade `resource_transactions` rows. The recruitment/garrison commands (`RecruitUnits`/`TransferUnits`/`SubmitSettlementBattleResult`) run the engine's settlement reducers behind full validation ladders; `CaptureSettlement` rejects a non-empty garrison (`garrison_not_defeated`), and `SubmitBattleResult`/`ResolveBattle` capture an enemy settlement when the victorious attacker stands on it with an emptied garrison. Also exports the drop policy's service-level entry `runServerEndTurnForSeat()` (server-internal EndTurn for a disconnected seat — same pipeline, plus a `turn_skipped` audit event; see `server/app/dropPolicy.ts`) |
-| `server/app/turnService.ts` | `runEndTurn()` — server-side EndTurn pipeline (`applyEndOfTurnDetailed` → `endTurn` → `advanceRound`), the same composition the client used to run; `clampGrowthRate()` bounds the client-supplied growth rate (0.01–0.5). Charter hex-by-hex travel remains client-driven by design (documented in-file) |
+| `packages/contracts/src/events/engineEvent.ts` + `packages/engine/src/events/applyEvent.ts` | The `EngineEvent` union has 25 variants. `ENGINE_EVENT_SYNC_CLASS` classifies 12 as apply, 7 as resync, and 6 as ignore. |
+| `server/app/turnService.ts` | `runEndTurn()` composes `applyEndOfTurnDetailed` → `endTurn` → `advanceRound`; `clampGrowthRate()` bounds the growth rate. Human charter travel is client-commanded; server-driven AI chartering is orchestrated by `aiDriver.ts`. |
+| `server/app/aiDriver.ts` | Drives flagged AI seats: garrison recruitment, up to three accepted trade recommendations, charter start/travel, movement, battles, capture, and turn end. Per-game advisory locks serialize work; boot tokens and heartbeats support multi-process ownership and stale-driver recovery. |
+| `server/app/aiDriverToken.ts` | Per-process AI-driver boot token used to distinguish current ownership from stale server instances. |
 | `server/persistence/db.ts` | `pg.Pool` + `withTransaction()` configured from `PG*` env vars; the single pool instance (re-exported by `server/db.ts`) |
 | `server/db.ts` | `initSchema()` — runs `schema.sql` then any pending `server/migrations/*.sql` in filename order; re-exports the pool |
 | `server/persistence/repositories/` | Granular Postgres repos: `gameRepo.ts` (load/save incl. snapshot + transaction inserts), `eventRepo.ts` (`game_events` append with `actor_seat`), `heroRepo.ts`, `settlementRepo.ts` (dual-writes `settlement_platoons` alongside the settlement row), `charterRepo.ts`, `tileRepo.ts` |
@@ -249,7 +255,7 @@ The scene-graph pipeline is **live** — it draws every frame on all three views
 | `server/app/dropPolicy.ts` | Drop policy (shipped 2026-09-27, spec in `docs/multiplayer.md`): per-seat last-seen heartbeat map (telemetry POSTs + valid commands), `DISCONNECT_AFTER_MS = 60_000` disconnect detection flushed transition-only into `games.lobby.presence`, and the skip lifecycle — `SKIP_GRACE_MS = 120_000` grace timer for a disconnected seat holding `active_player_id`, canceled by any heartbeat; on expiry re-validates against the live row, holds (5s re-checks) while `phase.kind === "BATTLE"`, then runs `runServerEndTurnForSeat`. 5s in-process scanner started from `server/index.ts`; everything is in-process (an API restart restarts a grace clock — accepted). Timings/seams injectable via `configureDropPolicy()` for tests |
 | `server/errorHandler.ts` | Global Express error middleware (#98), registered last — normalizes anything that escapes a route to `{ error: "internal", message }` JSON |
 | `server/schema.sql` | Base schema |
-| `server/migrations/` | `001_turn_state`, `002_unit_types`, `003_resource_tables`, `004_game_assets`, `005_unit_counters`, `007_unit_specialty`, `008_lobby`, `009_granular_entities` (per-entity hero/settlement/charter tables), `010_event_seq` (BIGSERIAL event ids as poll cursor), `011_movement_remaining_precision`, `012_battle_actions`, `013_settlement_building_construction`, `014_wagons_cargo_trade_routes`, `015_unit_catalog_v1` (`unit_types` gains `tier`/`upkeep_gold`/`upkeep_food`/`range`; inserts the 13th unit, mage), `016_settlement_platoons` (garrison platoon table), `017_game_events_notify` (`game_events` AFTER-INSERT NOTIFY trigger — the SSE wakeup), `018_scope_granular_ids` (granular tables re-scoped to `(game_id, id)` composite keys), `019_game_events_game_id_id_idx` (`game_events` cursor index), `020_faction_ladder_units` (warhound/giant_eagle/eagle_prince; `tier` redefined as the 1–7 faction ladder, monsters → NULL) |
+| `server/migrations/` | 28 ordered migrations (`001`–`028`); see §2 for the current sequence and notable schema steps. |
 
 Lobby state lives in the `games.lobby` jsonb column: `{ seats, humanSlots, claimed: { "<seat>": { handle, email?, claimedAt } }, startedAt, presence?: { "<seat>": { lastSeenAt, connected } } }`. Seat claims are bound to the **server-derived** auth email when the caller was signed in at claim time; anonymous claims remain valid (issue #179 follow-up) — the email only enables the commands route's optional actor-vs-seat binding. Since the 2026-09-27 drop policy, a STARTED game's email-bound seat can also be **reclaimed** by the same identity via the claim route (handle-only seats cannot rebind; new seats stay unclaimable after start), and `presence` carries the per-seat connected/disconnected signal written transition-only by `server/app/dropPolicy.ts` (never per 2s heartbeat).
 
@@ -266,15 +272,14 @@ API conventions:
 ## 8. Testing & QA
 
 - **Frameworks**: Node's built-in `node:test` + `assert/strict` for unit tests (`npm run test:unit`), Playwright (`chromium`) for browser-driven suites.
-- **Wired unit suites** (`test:unit`): `test/server/` (command handler, commands route, attachPlayerSeat, drop policy, errorHandler, events route, presence, map reconstruction), `test/persistence/` (six repos + hydrate), `test/migrations/`, `test/render/` (scene builders, entityMirror, paint2d incl. seam + adversarial tests), `test/engine/` (applyEvent), `test/io/` (commands, multiplayerSync), `test/net/` (link status), `test/screens/**` (tileInfo, arena, menuAnchor, panelRail).
-- **Other unit-ish tests** live under `test/state/`, `test/map/`, `test/charter/`, `test/combat/`, plus root-level `cityGrid/citySpots/minimap/dragDrop/proposedPath` tests — runnable ad hoc via `npx tsx --test <file>`; they are not part of the `test:unit` glob set.
+- **Wired unit suites** (`test:unit`) run serially and include `test/server/`, `test/state/`, `test/charter/`, `test/persistence/`, `test/migrations/`, `test/render/`, `test/engine/`, `test/io/`, `test/logistics-bugs/`, `test/net/`, `test/combat/`, `test/ai/`, `test/core/`, `test/data/`, and `test/screens/`; `package.json` is the exact glob source.
 - **Smoke test**: [`test/smoke.ts`](./test/smoke.ts:1) (`npm test`).
   - Reads its boot contract from `local/.test-request.json` and spawns the API + `vite preview` via `test/_request.ts`.
   - Uses Playwright to load the built app, talks to the API via Playwright's `request` API and via `pg.Pool`, asserts map determinism (same seed → same resource placement), then exercises the live UI.
   - Deletes every game in the database except its own fixtures — hence the `.env.test` `PGHOST` pin described in §3.
   - Supports `--shutdownAfterSeconds=<n>` (hard tree-kill after *n* seconds; CI safety) and `--auto-close` (tree-kill API/preview on exit so ports release immediately; used by the `test:*` wrapper entries).
-- **Multiplayer smoke** (`test/multiplayer.smoke.ts`), **city view** (`test/cityView.test.ts`), and the **visual-regression gate** (`test/visualRegression.test.ts`) share the same boot contract. The visual gate captures a fixed replay set — nine scenes: adventure overview with path/trail/territory/fog, both charter phases, city view with parallax on/off, and three battle-arena captures (`battle-arena-default`, `-legacy`, `-scenebuilder`, all committed baselines; a fourth `battle-arena-default-vs-scenebuilder` capture is a harness cross-check of the two arena renders, not a baseline file) — and pixel-diffs against committed baselines in `test/visual-baselines/` (`pngjs`-based diff); baseline churn must be justified in the PR (`battle-arena-default` was added by the 2026-09-29 arena unit sprites with the seven pre-existing baselines unchanged).
-- **Shared wrapper**: [`tools/run-test.mjs`](./tools/run-test.mjs:1) writes the per-run request file (`runId`, entry, ports, `autoClose`, `shutdownAfterMs`) to `local/.test-request.json` (gitignored, under `local/`, never committed), then launches the entry. `all` runs smoke → multiplayer → cityview → visual in that order. [`test/_request.ts`](./test/_request.ts:1) exposes the shared boot helpers (request URL, health-check wait, tree-kill on exit, straggler reaping via the previous run's PID ledger).
+- The browser/e2e entries are smoke, multiplayer, city view, settlements, AI defender, AI charter, log panel, and visual regression. The visual gate captures nine baseline scenes and pixel-diffs them against `test/visual-baselines/`.
+- **Shared wrapper**: [`tools/run-test.mjs`](./tools/run-test.mjs:1) writes the per-run request file (`runId`, entry, ports, `autoClose`, `shutdownAfterMs`) to `local/.test-request.json` (gitignored, under `local/`, never committed), then launches the entry. `all` runs smoke → multiplayer → cityview → settlements → AI defender → AI charter → log panel → visual, followed by `test:unit`. [`test/_request.ts`](./test/_request.ts:1) exposes the shared boot helpers (request URL, health-check wait, tree-kill on exit, straggler reaping via the previous run's PID ledger).
 - Logs from previous runs land at `test/*.log` / `test/*.err.log`; screenshots at `test/screenshot*.png`; PID ledger at `local/.test-request.json` / `test/.last-test-pids.json`.
 - Legacy helper: `tools/run-smoke.ps1` (PowerShell convenience wrapper) still exists beside the cross-platform `tools/run-test.mjs`.
 
@@ -315,7 +320,7 @@ API conventions:
 | Dynamic | WebSocket | `WS_PORT` in `.env`, allocated by `scripts/allocate-ports.ts` (**reserved/dormant** — no listener yet) |
 | `5432` | Postgres | `npm run db:up` (docker compose, fixed shared port) |
 | `8080` | Adminer (DB UI) | `npm run db:up` |
-| `3001` / `5173` | API / web containers | Fixed mappings when running the full `docker compose` stack |
+| `3001` / `5173` | API container / `gateway` container | Fixed mappings when running the full `docker compose` stack (the gateway publishes `5173:80`; `web` is internal-only) |
 
 `scripts/allocate-ports.ts` allocates free ports at dev/test startup (via npm `predev`/`pretest` hooks) and writes `API_PORT`, `CLIENT_PORT`, `WS_PORT` to `.env`. It uses Node's `net.Server.listen(0)` to ask the kernel for a free port — the same mechanism on Windows, Linux, and macOS — so allocations are collision-free across concurrent worktrees. It never allocates the DB port (`server/persistence/db.ts` reads only `PG*` vars).
 
@@ -343,8 +348,9 @@ Vite auto-loads `.env`; `tsx` processes use `--env-file=.env`. Both Vite servers
 - No secrets in source; DB credentials live only in `docker-compose.yml` / `.env` for local development. Nothing under `local/` is ever committed.
 - Asset files ship under `src/resources/` so Vite can bundle them; `assetsInlineLimit: 0` keeps them as separate files.
 
-### Known gaps / staged work (as of this writing)
+### Current Caveats
 
-- Spellcraft has no code (only flavor text on the mageGuild building); combat-level renown deltas are stubbed as future fields in `@heroes/engine` combat types. (Battle-level *morale/fatigue* — per-platoon stats with damage multipliers, `morale_change` log entries, and the low-morale auto-retreat interaction — **is** implemented; see `docs/morale-fatigue-plan.md`. Settlement *morale* — decay, income tax modifier, clamping — **is** also implemented in `@heroes/engine`'s economy and persisted per settlement.)
-- Battle resolution: hero-vs-hero encounters open the manual arena by default (Fight / Quick Resolve / Flee — wired 2026-09-27), and settlement garrisons defend through the same arena via the `SETTLEMENT_BATTLE` phase (`SubmitSettlementBattleResult`; post-battle capture when the attacker stands on an emptied enemy settlement). The Test Battle sandbox remains reachable from the toolbar / developer settings. Played-out outcomes are trusted with structural server validation only (the v1 LAN-trust posture); unit upkeep is flat 1 gold + 1 food per troop — the per-type `upkeep_gold`/`upkeep_food` catalog columns are not yet consumed by the engine.
-- `WS_PORT` is allocated but no realtime layer listens on it.
+- Market `goldPerTurn` is declared and included in `effectiveSettlementIncome()` projections, but End Turn currently credits `producerTurnOutput` plus morale-scaled tax; market income is not paid to the treasury. This remains open as finding F2 in [`docs/resource-gathering.md`](./docs/resource-gathering.md).
+- Real email delivery for sign-in codes is not configured; development exposes the code for testing.
+- `WS_PORT` is allocated but no realtime layer listens on it; multiplayer updates use SSE with polling as a backstop.
+- Spellcasting, morale/fatigue, recruitment, weekly upkeep, and hero/garrison battle outcomes are implemented; their plan documents are historical status records, not proof of remaining work.

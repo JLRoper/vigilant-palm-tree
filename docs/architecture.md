@@ -1,14 +1,16 @@
 ﻿# Architecture & Module Layout
 
-**Status:** Executed. Describes the current `src/` shape — this was the implementation plan, now applied. Originally written 2026-07-19 under a timestamped filename; renamed to `architecture.md` as the canonical name.
+**Status:** Historical executed layout plan. The target tree and file moves below describe the 2026-07-19 plan, not the current `src/` map. For current modules use [`module-documentation-and-relationships.md`](./module-documentation-and-relationships.md); the render implementation is maintained in [`../src/render/docs/technical-spec.md`](../src/render/docs/technical-spec.md).
+
+**Current status update (2026-10-11):** Server-side AI Phase 3 watchdog/pool hardening and B3 AI chartering are implemented. The target tree below remains historical; current screens live under `src/screens/` and shared rules under `packages/engine/`. Original local plan archives are collected under the gitignored `.plans/` directory.
 
 ## Context
 
-The repo started with 7 empty subdirectories under `src/` (`core/`, `entities/`, `io/`, `map/`, `render/`, `systems/`, `views/`) but every real module still lived flat at `src/` root. The design docs in this folder (`resources.md`, `settlements.md`, `heroes.md`, `map.md`, `economy.md`, `army.md`) are authoritative for *game* design but say nothing about TypeScript module layout. This plan filled that gap and gave the implementation agent an unambiguous file map.
+The repo started with 7 empty subdirectories under `src/` (`core/`, `entities/`, `io/`, `map/`, `render/`, `systems/`, `views/`) but every real module still lived flat at `src/` root. This plan recorded the intended move. Since then the UI moved to `src/screens/`, game rules moved into `packages/engine/`, and the original `src/views/` target was superseded.
 
 ## Goal
 
-Move the current flat `src/` modules into the 7 scaffolded subdirectories, in a way that maps 1:1 to the design-doc domains, so that the next milestone (planned items in `economy.md`, `settlements.md`, `map.md` resource-tile work, `city-view.md`) drops new files into obvious, pre-decided places.
+Move the current flat `src/` modules into the 7 scaffolded subdirectories, in a way that maps 1:1 to the design-doc domains, so that later resource-tile and city-view work had an agreed target. The city-view plan is retained as [`city-view-impl-plan.md`](./city-view-impl-plan.md); this file's target layout is historical.
 
 ## Non-goals
 
@@ -53,7 +55,7 @@ src/
     enemyWander.ts                 # pickWanderTarget (moved from ai.ts) + wander tick (split from main.updateEnemies)
   views/
     adventureView.ts               # canvas + camera + click/drag/wheel wiring (split from main.ts)
-    cityView.ts                    # 10x10 settlement interior (new, lands with city-view.md)
+     cityView.ts                    # 10x10 settlement interior (new in the historical city-view plan)
     hud.ts                         # bottom HUD text update (split from main.ts updateHud)
 ```
 
@@ -137,8 +139,8 @@ After all 13 steps, the project must:
 
 ### Linked mitigation plans
 
-- `../.kilo/plan/2026-08-09-risk-circular-imports.md` — ✅ resolved 2026-08-10 (commit `526398e`): layer rules machine-enforced via `dependency-cruiser.cjs` / `npm run lint:deps`; see resolution notes under "Risks" above
-- `../.kilo/plan/2026-08-09-risk-gameDebug-contract.md` — still applicable (surface has grown past what the architecture doc described)
+- Circular imports — resolved 2026-08-10 (commit `526398e`): layer rules are machine-enforced via `dependency-cruiser.cjs` / `npm run lint:deps`; see resolution notes under "Risks" above. The original local plan is no longer in the repository.
+- [`../.plans/2026-08-09-risk-gameDebug-contract_COMPLETE.md`](../.plans/2026-08-09-risk-gameDebug-contract_COMPLETE.md) — historical completed mitigation record; the live debug surface has since grown.
 
 ## Out of scope
 
@@ -231,7 +233,9 @@ Visual baselines (`adventure-overview`, both charter scenes, both city views) we
 
 ### AI enemies (2026-09-29)
 
-Plan: [`.kilo/plan/2026-09-29-ai-enemies.md`](../.kilo/plan/2026-09-29-ai-enemies.md) — AI enemy seats end-to-end: a New Game "AI enemies" option (0–3), AI seats that spawn and take turns, wander/fight/capture behavior, and auto-resolved AI battles. `playerCount = humanSeatCount + enemyCount` (clamped ≤ `MAX_PLAYERS` 10); AI seats are **not** claimable lobby seats (`seats` stays = humanSlots, claiming one is a 400 `seat_out_of_range`); the LAN lobby path is unchanged (no `enemySlots` in v1) and its label now reads "Number of human players".
+**Current-status correction (2026-10-11):** The 2026-09-29 behavior note below records the earlier no-charter state. Server AI chartering is now live: `pickCharterAction` issues charter commands and travel through `server/app/aiDriver.ts`; flagged games also use the completed heartbeat/watchdog and pool-hardening path described below.
+
+Plan record: historical `2026-09-29-ai-enemies.md` entry in the [local `.plans/` archive](../.plans/) — AI enemy seats end-to-end: a New Game "AI enemies" option (0–3), AI seats that spawn and take turns, wander/fight/capture behavior, and auto-resolved AI battles. `playerCount = humanSeatCount + enemyCount` (clamped ≤ `MAX_PLAYERS` 10); AI seats are **not** claimable lobby seats (`seats` stays = humanSlots, claiming one is a 400 `seat_out_of_range`); the LAN lobby path is unchanged (no `enemySlots` in v1) and its label now reads "Number of human players".
 
 | Module | Purpose |
 |---|---|
@@ -327,7 +331,7 @@ Plans: [`.kilo/plan/2026-09-29-arena-unit-sprites.md`](../.kilo/plan/2026-09-29-
 
 ### Server-side AI actor (2026-09-30)
 
-Plan: [`.plans/20260930-2306_server-side-ai-actor_COMPLETE.md`](../.plans/20260930-2306_server-side-ai-actor_COMPLETE.md) (decision record D1–D15 is authoritative; formerly `2026-09-30-server-side-ai-actor.md` — moved from `.kilo/plan/` to `.plans/` 2026-10-01, renamed to the current `_COMPLETE` convention 2026-10-04) — Phases 0+1+2 landed: the strategy module moves into the engine, a server scanner drives AI seats end-to-end for **flagged** games (a closed seat-0 browser no longer stalls AI turns), and Phase 2 delivers client experience parity — event-derived verdict cards/toasts (D5/D6) plus the cross-server race fixes (per-boot driver tokens + per-game advisory locks). Phase 3 (watchdog, pool hardening, B3 chartering) is not started and is tracked in [`20261002-1900_ai-actor-phase-3_UNCLAIMED.md`](../.plans/20261002-1900_ai-actor-phase-3_UNCLAIMED.md).
+Plan: [`.plans/20260930-2306_server-side-ai-actor_COMPLETE.md`](../.plans/20260930-2306_server-side-ai-actor_COMPLETE.md) (decision record D1–D15) — Phases 0–3 are implemented. Phase 3 added the AI-turn heartbeat/watchdog and pool hardening; B3 added server-driven charter decisions and travel. Current code is in `server/app/aiDriver.ts`, `server/persistence/db.ts`, and `packages/engine/src/ai/aiBrain.ts`; the former `_UNCLAIMED` status is obsolete.
 
 | Module | Purpose |
 |---|---|
@@ -424,6 +428,8 @@ The logistics rework: **no more shared storage** — nothing moves that isn't ph
 | Dead code | Manual `tradeResources` command (settlement↔settlement instant transfer) deleted end to end — reducer, `TradeResources` command, `ResourcesTraded` event (removed from the EngineEvent union, now 24 variants), handler, parse branch, client optimistic path, debug command; the `Command` union stays 24 kinds (`BankGold` in 2026-10-01, `TradeResources` out). `settlementPanel.ts` + `tradeModal.ts` were already deleted as an unwired second implementation |
 
 ### Faction registry foundation (2026-10-02)
+
+**Current-status correction (2026-10-11):** AI seats still default to the human roster unless a future seat-faction selection is added. That roster-selection limit does not prevent AI settlement chartering; B3 server-side charter decisions and travel are live.
 
 Behavior-neutral data model for roster factions, landed on branch `feat/factions` (worktree `.worktrees/factions`). The word "faction" already named two unrelated concepts — the seat faction `Faction = "player" | "ai"` (`packages/contracts/src/ids.ts`, drives `AI_TURN`/`shouldDriveAi`/the server AI driver) and the render faction `"player" | "enemy"` (`src/entities/hero.ts`, picks sprite art) — so the roster concept is deliberately named **`FactionId`** (`"human" | "ashen" | "ironmark" | "verdant" | "neutral"`) with the field `factionId`; the two existing `Faction` types are untouched. After this phase every seat still uses today's single roster and no screen changes: all defaults read as `"human"`, the recruit gate is dormant, and every snapshot is byte-identical (`Player.factionId` is spread in **only** when a seat choice exists — the `deepStrictEqual` absent-key rule).
 
