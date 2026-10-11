@@ -234,7 +234,7 @@ sequenceDiagram
 | `RESOURCE_PILE_BUBBLY_DESCRIPTORS` | `resource-pile-bubbly.{...}` | 6 |
 | `HERO_PLAYER_DESCRIPTORS` | `hero.player.{n,ne,e,se,s,sw,w,nw}` | 8 |
 | `HERO_DESCRIPTORS` | `hero.player`, `hero.enemy` | 2 |
-| `HORSE_VARIANT_DESCRIPTORS` | `horse.{variant}.{dir}` — one sub-record per `HORSE_VARIANT_REGISTRY` entry | 9 variants × 4–8 directions each | 42 |
+| `HORSE_VARIANT_DESCRIPTORS` | `horse.{variant}.{dir}` — one sub-record per `HORSE_VARIANT_REGISTRY` entry | 10 variants × 4–8 directions each | 46 |
 | `BUILDING_DESCRIPTORS` | `building.{style}.{kind}.{level}` — one per `BUILDING_SPRITES` key | 114 |
 | `UNIT_ARENA_DESCRIPTORS` | `unit.{unitTypeId}.{idle,attack,move}` | 108 (36 ids × 3 poses — every catalog id except mage) |
 | `FACTION_BANNERS` (URL map, not descriptors) | `faction-banner.{human,ashen,ironmark,verdant}` — `Partial<Record<FactionId, string>>` of `?url`s, consumer-addressed via `factionBannerKey(id)` | 4 of 4 (human, ashen, ironmark, verdant) |
@@ -243,7 +243,7 @@ Pixel building keys are generated from `src/resources/buildings/` into `packages
 
 `ALL_DESCRIPTORS` concatenates all of the above into a flat array used by `createDefaultProvider()`.
 
-The horse-variant descriptors are registry-driven rather than hand-listed: `assetDescriptors.ts` generates `HORSE_VARIANT_DESCRIPTORS` for all 9 `HORSE_VARIANT_REGISTRY` entries (`packages/engine/src/horseVariants.ts`) from an `import.meta.glob` of `units/horse/commander-*/*.png` — adding a variant is a registry entry plus a `commander-{N}/` sprite folder. Bubbly keeps its `naturalSize: 64` special case (everything else uses 512), and non-hero variants get diagonal→cardinal URL fallbacks (`ne/nw→n`, `se/sw→s`) applied at descriptor build time. The filename regexes also capture an optional `-2` run-frame suffix (`drake-e-2.png` → key `horse.drake.e.2`); `loadDirectionalSprites` returns `{ base, frame2 }`, frame-2 descriptors get identical anchor/sizing/naturalSize and are emitted only for files that exist, and the diagonal→cardinal fallbacks run per tier — a frame-2 diagonal aliases only a frame-2 cardinal, never frame-1. `HORSE_VARIANT_DESCRIPTORS` / `horseVariantKey(variant, dir, frame?)` are the generic accessors; the legacy per-variant key wrappers remain as sugar.
+The horse-variant descriptors are registry-driven rather than hand-listed: `assetDescriptors.ts` generates `HORSE_VARIANT_DESCRIPTORS` for all 10 `HORSE_VARIANT_REGISTRY` entries (`packages/engine/src/horseVariants.ts`) from an `import.meta.glob` of `units/horse/commander-*/*.png` — adding a variant is a registry entry plus a `commander-{N}/` sprite folder. Bubbly keeps its `naturalSize: 64` special case (everything else uses 512), and non-hero variants get diagonal→cardinal URL fallbacks (`ne/nw→n`, `se/sw→s`) applied at descriptor build time. The filename regexes also capture an optional `-2` run-frame suffix (`drake-e-2.png` → key `horse.drake.e.2`); `loadDirectionalSprites` returns `{ base, frame2 }`, frame-2 descriptors get identical anchor/sizing/naturalSize and are emitted only for files that exist, and the diagonal→cardinal fallbacks run per tier — a frame-2 diagonal aliases only a frame-2 cardinal, never frame-1. `HORSE_VARIANT_DESCRIPTORS` / `horseVariantKey(variant, dir, frame?)` are the generic accessors; the legacy per-variant key wrappers remain as sugar.
 
 The unit-arena descriptors are registry-driven the same way: `assetDescriptors.ts` generates `UNIT_ARENA_DESCRIPTORS` from an `import.meta.glob` of `units/arena/<unitTypeId>-<pose>.png` (`UnitArenaPose` = `idle | attack | move`; `unitArenaKey(unitTypeId, pose)` is the accessor), so dropping a PNG into the folder resolves as `unit.<unitTypeId>.<pose>` with zero descriptor code. All 36 catalog ids with art — the 15 human-roster ids plus the 7 Ashen Court, 7 Ironmark, and 7 Verdant Wild ids (2026-10-02 Phase A idles; attack/move poses landed 2026-10-03) — carry full idle/attack/move pose sets; a missing pose resolves to `undefined` with the battle painter falling back to its circle rendering, and mage remains the known no-art gap. All are 128px natural, bottom-anchored, `fitHeight` with `hexSizeMul: 1.3`. Art is authored facing right once; the battle painter mirrors defenders (see §7).
 
@@ -274,8 +274,9 @@ Each variant loads from `resources/units/horse/commander-{N}/`:
 | 7 | unicorn | `horse.unicorn.{dir}` | 4 | diags → cardinals |
 | 8 | samurai | `horse.samurai.{dir}` | 4 | diags → cardinals |
 | 9 | drake | `horse.drake.{dir}` | 4 | diags → cardinals |
+| 10 | lionheart | `horse.lionheart.{dir}` | 4 | diags → cardinals |
 
-**Run frames** (2-frame gallop cycle): any variant can adopt run frames one at a time by adding `{variant}-{dir}-2.png` files beside its base frames — the existing `import.meta.glob` picks them up with no code change, and variants without frame files silently use the base sprite. Every mounted variant carries them now (2026-09-28): bubbly (6, incl. diagonals) plus shadow/paladin/ranger/arcane/unicorn/samurai/drake (4 cardinals each). All are second gallop poses bbox-normalized to their base frames — content height, bottom edge and center matched, since sprites are bottom-anchored; `tools/sprites/tune-run-frames.mjs` normalizes new frames and `--check`-gates the alignment (centerX is advisory there when the art is clipped at a horizontal canvas edge, as with `drake-e-2`).
+**Run frames** (2-frame gallop cycle): any variant can adopt run frames one at a time by adding `{variant}-{dir}-2.png` files beside its base frames — the existing `import.meta.glob` picks them up with no code change, and variants without frame files silently use the base sprite. Every mounted variant carries them now (2026-09-28): bubbly (6, incl. diagonals) plus shadow/paladin/ranger/arcane/unicorn/samurai/drake (4 cardinals each) — lionheart (2026-10-11) deliberately ships base frames only (no `-2` files; both run frames render the base sprite). All are second gallop poses bbox-normalized to their base frames — content height, bottom edge and center matched, since sprites are bottom-anchored; `tools/sprites/tune-run-frames.mjs` normalizes new frames and `--check`-gates the alignment (centerX is advisory there when the art is clipped at a horizontal canvas edge, as with `drake-e-2`).
 
 ---
 
@@ -424,7 +425,7 @@ ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, dpr * x, dpr * y)
 - Supports vertical scale animation via `scaleY` parameter (bobbing when moving)
 
 **`drawHorseSprite(ctx, provider, variant, cx, cy, direction, hexSize)`**
-- Handles the 8 image-based mounted variants: bubbly, shadow, paladin, ranger, arcane, unicorn, samurai, drake (the on-foot player knight from `commander-1` goes through `drawHeroSprite()` instead)
+- Handles the 9 image-based mounted variants: bubbly, shadow, paladin, ranger, arcane, unicorn, samurai, drake, lionheart (the on-foot player knight from `commander-1` goes through `drawHeroSprite()` instead)
 - Uses directional fallback for missing diagonal sprites
 - `HORSE_VARIANT_KEYS` maps each variant name to its key-generating function
 
@@ -981,7 +982,7 @@ The former `painter/*` classes and separate resource/territory overlay painters 
 
 1. **Sprite fallback chain**: PNG images are preferred; procedural canvas rendering is the fallback. The `CompositeSpriteSource` checks images first, then procedural. This means FLUX-generated sprites take priority over the hand-coded procedural ones.
 
-2. **Per-entity variant system**: Castles have `castleVariant: 0 | 1` and heroes have `horseVariant: HorseVariant` (9 values). These are stored on the game-state entities, not as global settings. The renderer reads each entity's variant to determine which sprite to draw. Buildings have no separate variant field — their art choice rides the persisted `BuildingDef.style` (`buildingKey(style, kind, level)`); the 2026-10-02 farm swap made new `farmField` defs carry `"pixel"`/`"pixel-alt"` there, while legacy `"classic"` farm defs are re-styled deterministically at scene emission (`farmFieldStyleAt`).
+2. **Per-entity variant system**: Castles have `castleVariant: 0 | 1` and heroes have `horseVariant: HorseVariant` (10 values). These are stored on the game-state entities, not as global settings. The renderer reads each entity's variant to determine which sprite to draw. Buildings have no separate variant field — their art choice rides the persisted `BuildingDef.style` (`buildingKey(style, kind, level)`); the 2026-10-02 farm swap made new `farmField` defs carry `"pixel"`/`"pixel-alt"` there, while legacy `"classic"` farm defs are re-styled deterministically at scene emission (`farmFieldStyleAt`).
 
 3. **Historical city-style system**: the former 5-style × 6-pattern procedural city-building painter and generator are not current source modules. Pixel building sprites are the live render path; see §3.2 and the historical notes in §3.3–3.4.
 

@@ -52,10 +52,10 @@ Files live under `src/resources/` (`tools/sprites/manifest.mjs:1` names the root
 
 | Folder | Contents |
 |---|---|
-| `resources/` (root) | `castle-l{1,2,3}.png`, `castle-l{1,2,3}-alt{,2,3}.png`, `{settlement,city,castle,hero-*}-banner.png`, `resource-*.png` (rune-stone + 7 style variants) |
+| `resources/` (root) | `castle-l{1,2,3}.png`, `castle-l{1,2,3}-alt{,2,3}.png`, `{settlement,city,castle}-banner.png`, `hero-banner-<id>.png`, `resource-*.png` (rune-stone + 7 style variants) |
 | `resources/buildings/` | `building-pixel-<camelCaseKind>-<level>.png` (+ `-1-alt` plot variant) — the Gemini wave output |
 | `resources/units/arena/` | `<unitTypeId>-{idle,attack,move}.png` — glob-registered |
-| `resources/units/horse/commander-{1..9}/` | `<variant>-<dir>[-2].png` — glob-registered, 9 variants |
+| `resources/units/horse/commander-{1..10}/` | `<variant>-<dir>[-2].png` — glob-registered, 10 variants |
 | `resources/units/icons/` | `<unitTypeId>.png` busts — hand-wired in `src/data/unitImages.ts` |
 | `resources/factions/` | `faction-banner-<id>.png` — glob-registered |
 | `resources/skybox/` | `cityView-background-variant<n>-layer<m>.png` |
@@ -91,7 +91,7 @@ Descriptor maps and how they are populated:
 | `CASTLE_DESCRIPTORS`, `CASTLE_ALT{,2,3}_DESCRIPTORS` | hand-written | 12 | `fitHeight` 1.5/2.2/3.0, `anchorOffsetY` 8/16 |
 | `RESOURCE_*_DESCRIPTORS` (8 styles) | generated from `RESOURCES` | 48 | per-style `hexSizeMul` varies: 0.9 (default/cart/illust/constellation/crest), 0.95 (pile), 0.475 (smol), 0.71 (bubbly); all `anchor: "center"` |
 | `HERO_PLAYER_DESCRIPTORS` | **glob** `units/horse/commander-1/*.png` | 8 dirs (+ frame-2) | `fitHeight` 1.8, `naturalSize` 512 |
-| `HORSE_VARIANT_DESCRIPTORS` | **glob** `units/horse/commander-*/*.png`, filtered per `HORSE_VARIANT_REGISTRY` | 9 variants × 4–8 dirs | diagonal→cardinal fallbacks per variant; optional `-2` run frames; bubbly `naturalSize` 64 |
+| `HORSE_VARIANT_DESCRIPTORS` | **glob** `units/horse/commander-*/*.png`, filtered per `HORSE_VARIANT_REGISTRY` | 10 variants × 4–8 dirs | diagonal→cardinal fallbacks per variant; optional `-2` run frames; bubbly `naturalSize` 64 |
 | `BUILDING_DESCRIPTORS` | generated building keys + glob-resolved files | 114 | bottom-anchored pixel assets; offsets come from the generated anchor map |
 | `UNIT_ARENA_DESCRIPTORS` | **glob** `units/arena/*.png` | 36 ids × 3 poses (mage gap) | `bottom`, `fitHeight 1.3`, `naturalSize 128` |
 | `FACTION_BANNERS` | **glob** `factions/faction-banner-*.png` | 4 | a URL map, not descriptors |
@@ -274,7 +274,7 @@ only `src/render/skybox.ts` may import them (`?url`).
 |---|---|
 | `building.pixel.*` | **Generated + glob**: filename grammar → `packages/engine/src/generated/buildingSpriteKeys.ts`; alpha bounds → `src/render/generated/buildingAnchorOverrides.ts`. Key/anchor drift is checked by `npm run validate-assets`; per-kind/per-level expected coverage remains manual and unit-tested. |
 | `unit.<id>.<pose>` | **Automatic** (glob). Pose art for a new catalog id just drops in |
-| `horse.<variant>.<dir>` | **Automatic** (glob) for files; a *new variant* needs a `HORSE_VARIANT_REGISTRY` entry (engine) + a `commander-<N>/` folder (+ optional banner in `unitImages`-style maps) |
+| `horse.<variant>.<dir>` | **Automatic** (glob) for files; a *new variant* needs a `HORSE_VARIANT_REGISTRY` entry (engine), the contracts `HorseVariantId` literal, a `commander-<N>/` folder, and a `hero-banner-<id>.png` with its `HERO_BANNERS` import + entry; optional `-2` run frames |
 | `faction-banner.<id>` | **Automatic** (glob); parity test asserts the file exists once a roster ships |
 | unit icons | **Manual**: `src/data/unitImages.ts` `KNOWN` map (37 imports), guarded by `test/data/unitIcons.coverage.test.ts` |
 

@@ -64,6 +64,9 @@ const HERO_NAMES: readonly string[] = [
   "Morgra Duskfire",
   "Rhaegos Ashmaw",
   "Vyra Cinderhorn",
+  "Leon Lionheart",
+  "Aurelia the Lionheart",
+  "Bastian Goldmane",
 ];
 
 let usedNames: Set<string> | null = null;

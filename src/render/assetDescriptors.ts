@@ -18,6 +18,7 @@ import heroBannerArcane from "../resources/hero-banner-arcane.png?url";
 import heroBannerUnicorn from "../resources/hero-banner-unicorn.png?url";
 import heroBannerSamurai from "../resources/hero-banner-samurai.png?url";
 import heroBannerDrake from "../resources/hero-banner-drake.png?url";
+import heroBannerLionheart from "../resources/hero-banner-lionheart.png?url";
 import resourceGold from "../resources/resource-gold.png?url";
 import resourceWood from "../resources/resource-wood.png?url";
 import resourceStone from "../resources/resource-stone.png?url";
@@ -147,6 +148,7 @@ export const HERO_BANNERS: Record<HorseVariantId, string> = {
   unicorn: heroBannerUnicorn,
   samurai: heroBannerSamurai,
   drake: heroBannerDrake,
+  lionheart: heroBannerLionheart,
 };
 
 export const RESOURCE_SPRITES: Record<ResourceType, string> = {

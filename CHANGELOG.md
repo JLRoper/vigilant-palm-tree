@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.5.0] - 2026-10-11
+
+feat(heroes): add the lionheart mounted hero variant with banner, names and directional sprites
+
 ## [0.4.0] - 2026-10-11
 
 feat(ui): restyle the toolbar with a two-row layout and selectable modern/classic-blue themes
