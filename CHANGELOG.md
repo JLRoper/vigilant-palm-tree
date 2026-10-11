@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.3.8] - 2026-10-11
+
+test(visual): classify the real target-close message in isReloadRace
+
 ## [0.3.7] - 2026-10-11
 
 test(visual): harden the visual-regression gate against reload races

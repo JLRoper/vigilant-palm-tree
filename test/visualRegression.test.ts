@@ -174,7 +174,7 @@ async function captureAndCompare(name: string, page: Page): Promise<Buffer> {
 
 function isReloadRace(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : String(e);
-  return /Execution context was destroyed|detached frame|Target crashed|page has been closed/i.test(msg);
+  return /Execution context was destroyed|detached frame|Target crashed|has been closed/i.test(msg);
 }
 
 async function withPageRetry<T>(
