@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.3.2] - 2026-10-11
+
+Anchor the version gate's already-bumped check to the newest release tag so it stops going blind once another commit lands on top of a release.
+
 ## [0.3.1] - 2026-10-10
 
 ### Added

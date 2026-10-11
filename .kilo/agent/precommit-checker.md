@@ -20,17 +20,32 @@ and report.
 The app version is the root `package.json` `version` — the single source of truth
 that `vite.config.ts` stamps into the client and the settings panel displays.
 
-**First, check whether it has already been bumped.** Compare the committed version
-against the working tree:
+**First, work out whether the version has already been advanced past the last
+release.** The anchor is the newest `v*` tag, because that is the only durable
+record of "already released":
 
 ```bash
-git show HEAD:package.json | grep '"version"'
-node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)"
+git tag --list 'v*' --sort=-v:refname | head -1                  # e.g. v0.3.1
+git show <that tag>:package.json | grep '"version"'              # version at that tag
+node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)"   # current
+git log -1 --pretty=%s HEAD
+git show HEAD -- package.json | grep '"version"'
 ```
 
-- If they already differ, the bump is done — report
+- **current > tag version → already bumped.** Report
   `version already bumped: X -> Y (nothing to do)` and skip to the final report.
-- If they are equal, decide and apply.
+- **current == tag version (or there is no tag) → not yet bumped for the work
+  since that release.** Decide and apply.
+- Two fast paths also mean "already bumped", and skip ahead the same way: the tip
+  commit is itself a release (subject starts with `chore(release):`, or its diff
+  touches the `"version"` line — you are re-running the gate on a release
+  commit), or the working-tree/index version differs from `HEAD`'s (an
+  uncommitted bump is in flight).
+
+The tag comparison is the part that matters: inspecting only the tip commit is
+blind the moment any other commit lands on top of a release, which is the normal
+shape of this repo, and it would conclude "not bumped" for work that was already
+released — or double-bump.
 
 **Then decide: bug fix, or real game addition?**
 
