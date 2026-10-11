@@ -1,5 +1,7 @@
 # Settlements
 
+<!-- docs:verified 2026-10-11 -->
+
 The player's claim on the world. Settlements come in two forms: **initial castles** (pre-placed at game start via `castlePlacement`) and **charter-founded settlements** (created by heroes via expedition).
 
 ## Initial castles
@@ -37,7 +39,7 @@ If the hero is defeated during travel or construction, all costs are forfeited.
 
 - **No cap** on number of settlements per player
 - Voluntary cancellation not allowed
-- AI does not charter in this phase
+- **AI chartering is live:** the server-side AI driver can start and advance charter expeditions using the same cost, distance, travel, and construction rules as human players (B3; see [multiplayer.md](./multiplayer.md)).
 
 ### Hero state during charter
 
@@ -58,7 +60,7 @@ If the hero is defeated during travel or construction, all costs are forfeited.
 
 Charter-founded settlements always start at Level 1 with population 50 (not 500).
 
-Resource yield scales linearly with level: `level × base_yield`. Source: [`src/economy/settlementRates.ts`](../src/economy/settlementRates.ts), [`src/entities/settlement.ts`](../src/entities/settlement.ts).
+Resource rates scale with settlement level and nearby map resource tiles. Source: [`packages/engine/src/economy/settlementRates.ts`](../packages/engine/src/economy/settlementRates.ts) and the engine settlement reducers; client visual settlement entities remain under `src/entities/`.
 
 ## Population growth (✅ implemented)
 
@@ -76,7 +78,7 @@ The growth rate is configurable in Settings; the upgrade population gate is **no
 |---------|---------|-------|------|
 | Population Growth Rate | 10% | 1%–50% | 1% |
 
-Source: [`src/state/settings.ts`](../src/state/settings.ts), growth logic in [`src/state/gameState.ts`](../src/state/gameState.ts) `applyWeeklyUpkeep`.
+Source: [`src/state/settings.ts`](../src/state/settings.ts) for the client setting and `packages/engine` turn/upkeep reducers for authoritative weekly growth.
 
 ## Settlement upgrades (✅ implemented)
 
@@ -130,7 +132,7 @@ Settlements can be upgraded to the next tier through an active construction proc
 
 Starting a town-hall upgrade (`UpgradeTownHall`), a building upgrade (`UpgradeBuilding`), or a settlement upgrade (`UpgradeSettlement`) is now a server-authoritative command (`server/app/commandHandler.ts`) — the client's local `@heroes/engine` reducer call applies immediately for responsiveness, then a matching command round-trip (`src/io/commands.ts`, fired from `src/state/turnController.ts` via `src/game/turnHooks.ts`) persists it server-side, the same pattern `StartCharter` uses (see Persistence below). `advanceSettlementUpgrades` (completion, on round wrap) has been server-authoritative since `EndTurn`'s pipeline was ported (`server/app/turnService.ts`).
 
-Source: [`src/state/gameState.ts`](../src/state/gameState.ts) (`startTownHallUpgrade`, `startBuildingUpgrade`, `startSettlementUpgrade`, `advanceSettlementUpgrades`), [`server/app/commandHandler.ts`](../server/app/commandHandler.ts) (`UpgradeTownHall`/`UpgradeBuilding`/`UpgradeSettlement` cases), [`src/views/settlementInfoMenu.ts`](../src/views/settlementInfoMenu.ts), [`src/views/buildingMenu.ts`](../src/views/buildingMenu.ts).
+Source: `packages/engine/src/settlement/` upgrade reducers, [`server/app/commandHandler.ts`](../server/app/commandHandler.ts), and the current panels under `src/screens/settlements/`.
 
 ## Capture
 
@@ -188,7 +190,7 @@ Buildings placed in the city view are persisted to `SettlementState.buildings` (
 - **Generate button:** A small "Generate" button in the top-right of the city view replaces the entire buildings array with fresh generation. Useful for testing.
 - **Town Hall at center:** The center cell is always reserved for a Town Hall building.
 
-Source: [`src/views/cityView.ts`](../src/views/cityView.ts), [`src/views/buildingPlacer.ts`](../src/views/buildingPlacer.ts), and the layout/guard pair in `packages/engine/src/settlement/starterLayout.ts`. The city view's re-sync of its working cart against live state now goes through the pure `syncCartBuildings` (`src/screens/settlements/cityView/syncedBuildings.ts`) — it refreshes `level`/`style`/`construction` **and** `bank`, so a pot that changed while the city view was open is not written back stale (unit-tested, because `cityView.ts` cannot be imported under bare `node:test`).
+Source: [`src/screens/settlements/cityView/cityView.ts`](../src/screens/settlements/cityView/cityView.ts), [`src/screens/settlements/cityView/buildingPlacer.ts`](../src/screens/settlements/cityView/buildingPlacer.ts), and the layout/guard pair in `packages/engine/src/settlement/starterLayout.ts`. The city view's re-sync of its working cart against live state goes through the pure `syncCartBuildings` (`src/screens/settlements/cityView/syncedBuildings.ts`) — it refreshes `level`/`style`/`construction` **and** `bank`, so a pot that changed while the city view was open is not written back stale (unit-tested, because city view imports cannot be loaded under bare `node:test`).
 
 ## Map visualisation
 

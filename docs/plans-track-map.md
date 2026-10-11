@@ -20,7 +20,7 @@ That audit, the dated status update below, and the local `.plans/` filename suff
 
 This addendum does not rewrite the 2026-10-10 snapshot below. Source verification on 2026-10-11 confirms the server-side AI actor's Phase 3 heartbeat/watchdog and pool hardening are implemented, and B3 server-driven AI charter decisions/travel are live. See `server/app/aiDriver.ts`, `server/persistence/db.ts`, and `packages/engine/src/ai/aiBrain.ts`; the Phase 3 plan is [`../.plans/20261002-1900_ai-actor-phase-3_COMPLETE.md`](../.plans/20261002-1900_ai-actor-phase-3_COMPLETE.md), not an `_UNCLAIMED` item.
 
-The scene-graph cutover remains landed. The city render/generation files `src/render/cityBuildingDraw.ts` and `src/render/cityBuildingGen.ts` are absent; `src/render/cityRenderer.ts` remains as a thin `paintScene` wrapper. The broader removal of persisted/design-time building style metadata is still tracked separately, so the old style-system item below is only partially complete.
+The scene-graph cutover remains landed. The former city draw/generation helpers are absent; `src/render/cityRenderer.ts` remains as a thin `paintScene` wrapper. The broader removal of persisted/design-time building style metadata is still tracked separately, so the old style-system item below is only partially complete.
 
 ## Phase 1–5 item list and current status
 

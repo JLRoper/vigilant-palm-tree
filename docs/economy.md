@@ -1,10 +1,12 @@
 # Economy
 
+<!-- docs:verified 2026-10-11 -->
+
 The per-turn loop that ties [resources](./resources.md), [settlements](./settlements.md), and [heroes](./heroes.md) together.
 
 ## Status
 
-✅ **Implemented.** Per-round loop, resource accumulation, decay **and recovery**, storage/treasury caps, bank pots, charter costs, and — since 2026-10-02 — **trade-route caravans with weekly maintenance** (the instant auto-trade survives only behind the legacy `lobby.legacyAutoTrade` gate) all ship and are covered by tests. This page is the design-side view; [resource-gathering.md](./resource-gathering.md) is the as-built reference for exact numbers.
+Implemented systems described here include per-turn resource production, decay and recovery, storage/treasury caps, bank pots, charter costs, trade-route caravans, and weekly maintenance. This remains the design-side overview; [`resource-gathering.md`](./resource-gathering.md) is the as-built reference for exact numbers and known differences. In particular, market income finding F2 remains open.
 
 ## The loop
 
@@ -26,7 +28,7 @@ Implementation: the canonical reducers live in [`packages/engine/src/`](../packa
 
 Gold is held in two separate pools:
 - **Hero purse** (`hero.gold`) — moves with the hero; **capped by treasury carts** (`heroGoldCap = treasuryWagons × 500`, a slot separate from the army wagons — migration 023); spent on chartering (2500g); looted by the winner **on defeat** (wiped in battle — the hero is then removed from the map, 2026-09-29 outcomes). A retreat keeps the purse (loses its troops instead); a surrender pays its gold cost and keeps the rest
-- **Settlement treasury** (`settlement.gold`) — funds recruitment, building, caravan loading; grows from `population × gold_tax × morale` per round
+- **Settlement treasury** (`settlement.gold`) — funds recruitment, building, and caravan loading; grows from morale-scaled tax and `goldMine` producer output. `market.goldPerTurn` is not credited by End Turn (F2).
 
 > **Vocabulary (canonical, per the designer).** The **treasury** is the *gold store* — a settlement's `gold`, or a hero's purse — raised by `treasury`/`bank` buildings (and treasury carts on a hero). The **larder** is the *food store* — a settlement's `warehouse.food`, or the food in a hero's wagon cargo — raised by the `granary`. Hero upkeep and caravan bills are quoted in exactly these terms: gold from the treasury/purse, food from the larder/warehouse. Both bills are weekly, not per-turn: the charge runs only on `day % 7 === 0`, so a larder refilled between charge days is never charged at all, which is why the hero panel's food row now states its cadence (next charge in N days, weeks of coverage) instead of leaving it to be inferred.
 
@@ -75,10 +77,14 @@ All costs are deducted immediately at initiation. If the settlement is captured 
 ## Settlement income
 
 Each settlement produces:
-- **Gold:** `population × goldTax × (morale / 100)` per round (effective income) — plus a `goldMine` producer's output, and a bank's weekly interest and matured withdrawals
+- **Gold:** morale-scaled population tax per turn, plus a `goldMine` producer's output; bank interest and matured withdrawals are separate round-wrap credits. A market's `goldPerTurn` is currently only a projection and is not credited by End Turn (F2).
 - **Resources:** `resourceRates[r]` per round per resource type, where `resourceRates` is computed at settlement creation time from nearby resource tiles within `settlementRateRadius(level) = level` × level, **plus** every producer building's `base × cell multiplier` (a farm on a matching city spot peaks at 3×)
 
 Initial castles start with population 500, gold tax 1, morale 100, and a seeded starter city (town hall, farm field, 2 houses, 2 woodcutter huts, stone mine, farmhouse — 10 wood + 2 stone/turn). Charter-founded settlements start with population 50, gold tax 1, morale 50, `autoTrade: false`, and a free starter set committed when the city view first opens.
+
+### Design Intent vs. As-Built Income
+
+The design's market-income effect remains represented by `market.goldPerTurn` and by the `effectiveSettlementIncome()` projection helper. The current End Turn path instead credits `producerTurnOutput` plus morale-scaled tax; it does not pay the market effect. This is finding F2 in [`resource-gathering.md`](./resource-gathering.md) and is intentionally left open.
 
 ## Population growth (✅ implemented)
 
@@ -156,9 +162,9 @@ All economy state is stored in the `games` table JSONB columns:
 
 - What's produced: [resources.md](./resources.md)
 - What produces it: [settlements.md](./settlements.md)
-- What happens inside a settlement: [city-view-impl-plan.md](./city-view-impl-plan.md)
+- City-view implementation history: [city-view-impl-plan.md](./city-view-impl-plan.md); current renderer: [render technical spec](../src/render/docs/technical-spec.md)
 - Who triggers the loop: [heroes.md](./heroes.md)
-- Future combat impact: [army.md](./army.md)
+- Combat and upkeep rules: [army.md](./army.md)
 - As-built pipeline & sinks reference: [resource-gathering.md](./resource-gathering.md)
 
 [← Back to index](./README.md)

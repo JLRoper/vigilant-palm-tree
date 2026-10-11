@@ -14,7 +14,7 @@ A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. Thi
 | Version | `0.3.4` (root `package.json` is the source of truth) |
 | Package type | ESM (`"type": "module"`) |
 | Engines | Node `>=22 <23` (`engines` field in `package.json`) |
-| Repo layout | npm **workspaces**: `packages/*` (two packages — see below) + root client/server/test tree |
+| Repo layout | npm **workspaces**: `packages/*` (two packages — see below) plus root client, server, and test directories |
 | Languages | TypeScript (primary), plain JavaScript `.mjs` (sprite/test tooling), SQL (migrations), HTML/CSS (UI shell) |
 | License | Not declared |
 
@@ -25,7 +25,7 @@ Workspace packages (both `private`, both expose raw TS source via `"exports"` �
 | `@heroes/engine` | `packages/engine/` | Pure game rules: combat, economy, settlement, charter, turn, map, hydration. Depends on `@heroes/contracts` only. |
 | `@heroes/contracts` | `packages/contracts/` | The wire: shared types (`GameState`, `HeroState`, `SettlementState`, commands, `EngineEvent`s, geometry, ids, telemetry). Leaf — zero dependencies. |
 
-Vite (`resolve.alias`) and `tsconfig.json` (`paths`) both map `@heroes/contracts` / `@heroes/engine` to their `src/index.ts` entry points, plus `@screens/*` → `src/screens/*`.
+Vite (`resolve.alias`) and `tsconfig.json` (`paths`) map `@heroes/contracts` / `@heroes/engine` to their respective package entry points, plus `@screens/*` → `src/screens/*`.
 
 Top-level directories:
 
@@ -159,7 +159,8 @@ Port allocation is OS-native and cross-platform (`scripts/allocate-ports.ts` use
 | `test:all` | `… tools/run-test.mjs all --auto-close && npm run test:unit` | Eight browser/e2e suites (smoke, multiplayer, cityview, settlements, AI defender, AI charter, log panel, visual), then all unit suites |
 | `test:wrapper` | `node --no-deprecation tools/run-test.mjs` | Direct access to the test wrapper |
 | `lint:deps` | `depcruise src server packages --config dependency-cruiser.cjs` | Static check of cross-boundary imports (cycles + layering, incl. the workspace packages) |
-| `validate-assets` | `node tools/sprites/validate-assets.mjs` | Validate sprite assets against the manifest |
+| `validate-assets` | `node tools/sprites/validate-assets.mjs` | Validate legacy manifest, generated building keys/anchors, and horse run-frame gates |
+| `docs:check` | `node tools/docs-check.mjs` | Check maintained Markdown links/source paths and `docs:verified` marker age (no DB) |
 | `sprites:generate` | `node tools/sprites/pixel-gen.mjs` | Render pixel-art sprites into `src/resources/` |
 | `sprites:preview` | `node tools/sprites/generate-preview.mjs` | Build a sprite contact-sheet preview |
 | `assets:seed` | `tsx --env-file=.env scripts/seed-assets.ts` | Seed the `game_assets` table from `src/resources/` |
@@ -188,7 +189,7 @@ Entry point: [`src/main.ts`](./src/main.ts:1) is a thin bootstrap — it constru
 | `src/players/` | `localPlayer.ts` — per-game local player id (localStorage + in-memory fallback) used by mp sync/telemetry |
 | `src/render/` | Canvas rendering — see below and [`src/render/docs/technical-spec.md`](./src/render/docs/technical-spec.md) (authoritative; do not duplicate here) |
 | `src/resources/` | Static assets: castles (+ alt/FLUX variants), resource icon styles, unit/horse sprites (`units/horse/commander-1..8/`), arena unit battle sprites (`units/arena/<unitId>-<pose>.png`), hero-panel unit icons (`units/icons/<unitId>.png`), building style sprites, skybox parallax layers, banners |
-| `src/screens/` | All DOM UI (the former `src/views/` — that directory no longer exists), see table below |
+| `src/screens/` | All DOM UI, see table below |
 | `src/state/` | Game state: `gameState.ts` (typed store + pure reducers incl. charter logic; re-exports shared types from `@heroes/contracts`), `turnController.ts` (turn lifecycle, auto-travel, AI tick, battle trigger, recruitment/garrison transfers, the `tryCaptureAt` capture gate incl. `SETTLEMENT_BATTLE` vs a non-empty garrison), `units.ts` (Platoon/UnitType client model), `playerColors.ts`, `settings.ts` (persisted settings singleton incl. horse variant, resource style, borders) |
 | `src/systems/` | Client behavioral system: `movement.ts` (hero arrival hook `onHeroArrived`) |
 | `src/ai/` | Compatibility shim re-exporting AI helpers from `@heroes/engine`; authoritative strategy is `packages/engine/src/ai/aiBrain.ts` |

@@ -1,12 +1,14 @@
 # Render Module — Technical Specification
 
+<!-- docs:verified 2026-10-11 -->
+
 ## Overview
 
-The `src/render/` module is the entire visual layer of Heroes of JS. It draws the hex-map world, settlements, heroes, fog of war, minimap, overlays, and the isometric city view. It is organized into three layers:
+The `src/render/` module is the visual layer of Heroes of JS. Its live path is scene data from `scene/sceneBuilder/` into the Canvas2D painter in `scene/paint2d/index.ts`; asset and settings adapters live outside the pure painter. `src/render/cityRenderer.ts` still exists as a 28-line `paintScene` wrapper. City scene decisions live in `scene/sceneBuilder/cityScene.ts`. The former city-building drawing/generation modules and style folder are absent.
 
-1. **Asset Pipeline** — loading, caching, and resolving sprites (images and procedural canvases)
-2. **World Renderer** — rendering the hex map with heroes, castles, resources, territory, and fog
-3. **City View** — generating and drawing isometric settlement interiors
+1. **Scene builders** — pure `GameState`/entity inputs to `SceneNode[]`.
+2. **Painter** — one `paintScene()` dispatcher for adventure, city, and battle scenes.
+3. **Asset adapters** — `paint2dDefaults.ts` resolves Vite assets/settings; `skybox.ts` owns skybox URLs and caches.
 
 ```mermaid
 graph TD
@@ -15,9 +17,11 @@ graph TD
         C["camera.ts<br/>Viewport"]
         F["fog.ts<br/>Visibility"]
         S["sprites.ts<br/>Entity Sprites"]
-        CV["cityRenderer.ts<br/>City View"]
-        CBG["cityBuildingGen.ts<br/>Building Layouts"]
-        CBD["cityBuildingDraw.ts<br/>Building Art"]
+        CV["cityRenderer.ts<br/>thin paintScene wrapper"]
+        CS["sceneBuilder/cityScene.ts<br/>City SceneNode builder"]
+        P2D["scene/paint2d/index.ts<br/>Canvas2D painter"]
+        PD["paint2dDefaults.ts<br/>asset/settings adapters"]
+        SKY["skybox.ts<br/>skybox URLs + cache"]
         HS["heroSprites.ts<br/>Procedural Chars"]
         P["palettes.ts<br/>Colors"]
     end
@@ -29,9 +33,9 @@ graph TD
     end
 
     subgraph "Overlays"
-        PO["pathOverlay.ts"]
-        RI["resourceIcon.ts"]
-        TO["territoryOutline.ts"]
+        PO["sceneBuilder/adventureScene.ts"]
+        RI["paint2d resource painter"]
+        TO["paint2d territory painter"]
     end
 
     R --> C
@@ -43,10 +47,11 @@ graph TD
     S --> AP
     AP --> AD
     AP --> AS
-    CV --> CBD
-    CV --> CBG
-    CV --> P
-    CBD --> P
+    CV --> P2D
+    CS --> P2D
+    P2D --> PD
+    PD --> AD
+    PD --> SKY
     HS --> AS
 ```
 
@@ -73,9 +78,10 @@ graph TD
   - [2.7 Charter & Valid-Hex Overlays](#27-charter--valid-hex-overlays)
 - [3. City View](#3-city-view)
   - [3.1 City Renderer (`cityRenderer.ts`)](#31-city-renderer-cityrendererts)
-  - [3.2 Building Generation (`cityBuildingGen.ts`)](#32-building-generation-citybuildinggents)
-  - [3.3 Building Drawing (`cityBuildingDraw.ts`)](#33-building-drawing-citybuildingdrawts)
-  - [3.4 Procedural Hero Sprites (`heroSprites.ts`)](#34-procedural-hero-sprites-herospritests)
+  - [3.2 Current City Scene and Painter](#32-current-city-scene-and-painter)
+  - [3.3 Historical Building Generation Plan](#33-historical-building-generation-plan)
+  - [3.4 Historical Procedural Building Drawing](#34-historical-procedural-building-drawing)
+  - [3.5 Procedural Hero Sprites](#35-procedural-hero-sprites)
 - [4. Palettes](#4-palettes)
 - [5. Sprite Generation Tools](#5-sprite-generation-tools)
   - [5.1 Procedural (pixel-art.html + pixel-gen.mjs)](#51-procedural-pixel-arthtml--pixel-genmjs)
@@ -233,6 +239,8 @@ sequenceDiagram
 | `UNIT_ARENA_DESCRIPTORS` | `unit.{unitTypeId}.{idle,attack,move}` | 108 (36 ids × 3 poses — every catalog id except mage) |
 | `FACTION_BANNERS` (URL map, not descriptors) | `faction-banner.{human,ashen,ironmark,verdant}` — `Partial<Record<FactionId, string>>` of `?url`s, consumer-addressed via `factionBannerKey(id)` | 4 of 4 (human, ashen, ironmark, verdant) |
 
+Pixel building keys are generated from `src/resources/buildings/` into `packages/engine/src/generated/buildingSpriteKeys.ts`; descriptor URLs are resolved from a single building-asset glob. Anchor offsets are generated separately into `src/render/generated/buildingAnchorOverrides.ts`. Per-kind/per-level expected keys and explicit absences remain manually declared in the exhaustive `packages/engine/src/buildingSpriteCoverage.ts` record and are checked by its unit test.
+
 `ALL_DESCRIPTORS` concatenates all of the above into a flat array used by `createDefaultProvider()`.
 
 The horse-variant descriptors are registry-driven rather than hand-listed: `assetDescriptors.ts` generates `HORSE_VARIANT_DESCRIPTORS` for all 9 `HORSE_VARIANT_REGISTRY` entries (`packages/engine/src/horseVariants.ts`) from an `import.meta.glob` of `units/horse/commander-*/*.png` — adding a variant is a registry entry plus a `commander-{N}/` sprite folder. Bubbly keeps its `naturalSize: 64` special case (everything else uses 512), and non-hero variants get diagonal→cardinal URL fallbacks (`ne/nw→n`, `se/sw→s`) applied at descriptor build time. The filename regexes also capture an optional `-2` run-frame suffix (`drake-e-2.png` → key `horse.drake.e.2`); `loadDirectionalSprites` returns `{ base, frame2 }`, frame-2 descriptors get identical anchor/sizing/naturalSize and are emitted only for files that exist, and the diagonal→cardinal fallbacks run per tier — a frame-2 diagonal aliases only a frame-2 cardinal, never frame-1. `HORSE_VARIANT_DESCRIPTORS` / `horseVariantKey(variant, dir, frame?)` are the generic accessors; the legacy per-variant key wrappers remain as sugar.
@@ -277,7 +285,7 @@ Each variant loads from `resources/units/horse/commander-{N}/`:
 
 `renderer.ts` exports `MapRenderer`, the main game-world draw controller. `MapRenderer.draw()` is a thin orchestrator: it fills the background, calls `buildAdventureScene()` to turn this frame's `GameMap`/`Hero[]`/`Castle[]`/`RenderOptions` into a `SceneNode[]`, and hands that list to `paintScene()` inside the camera transform (`ctx.save` → `camera.apply` → `paintScene` → `ctx.restore`). The minimap is drawn afterwards, outside the transform, because the scene graph models no minimap node kinds. Between the background fill and the scene build it also advances the **`heroSpotted` tracker** (2026-10-01): every non-own hero standing on a fog-visible tile is a sighting, and the resulting per-hero fade alphas ride along in `RenderOptions.heroAlpha` (a hero first seen within 1000 ms of the first observation is never faded — that grace window is what keeps the visual baselines deterministic).
 
-It owns **no drawing code of its own**. The per-kind painter classes that used to live under `src/render/painter/` (`BackgroundPainter`, `HexTerrainPainter`, `CharterPainter`, `CastlePainter`, `HexHoverPainter`, `HeroPainter`, `SelectedTilePainter`) were deleted in issue #148 — they were a second, parallel implementation of the same drawing logic that `scene/paint2d/` already carried, and only one of the two could run. `scene/paint2d/` is the surviving set; see §7.3.
+It owns **no drawing code of its own**. The per-kind painter classes that used to live in the former painter directory (`BackgroundPainter`, `HexTerrainPainter`, `CharterPainter`, `CastlePainter`, `HexHoverPainter`, `HeroPainter`, `SelectedTilePainter`) were deleted in issue #148 — they were a second, parallel implementation of the same drawing logic that `scene/paint2d/` already carried, and only one of the two could run. `scene/paint2d/` is the surviving set; see §7.3.
 
 The public constructor signature, `draw(...)`, `hoverFromScreen(...)`, and the `map` field are unchanged — no caller (`ViewManager.ts`, `adventureView.ts`) needed touching for the cutover.
 
@@ -513,6 +521,8 @@ The four `?url` skybox PNG imports and the module-scope `skyboxCache`/`layerCanv
 
 **`computeCityScale(size, viewportW, viewportH, topInset = 0)`** — computes the tile scale so the full city fits within 85% of the viewport width and inside the safe band below the top overlay: the height limit is `(viewportH − topInset − 2·CITY_VIEW_MARGIN) / (size·TILE_D)`, where `CITY_VIEW_MARGIN` is 12px. `cityLayout(size, viewportW, viewportH, topInset)` additionally clamps the diamond-bbox apex to `topInset + CITY_VIEW_MARGIN`, so a 10x10/15x15 grid can never slide under the fixed toolbar (the old `size <= 10` bypass is retired). `topInset` defaults to 0 for pure-context callers; only the live `CityView` path passes `toolbarHeight()`. Lives in `core/cityGrid.ts`; `cityRenderer.ts` still re-exports it, but since 2026-09-27 `cityView.ts`/`buildingPlacer.ts` no longer consume it through that re-export — they use `core/cityGrid.ts` directly (along with the `cityLayout`/`screenToGridCell` pair).
 
+> **Historical render notes:** the numbered draw order and sequence diagram below preserve the pre-scene-graph direct-draw implementation. Current city scene construction and painting are described in §3.2.
+
 **Render order** (back-to-front for correct z-ordering):
 
 1. Background fill (`#1a1620`)
@@ -572,7 +582,17 @@ sequenceDiagram
     CR->>CR: fillText(name + tier + style labels)
 ```
 
-### 3.2 Building Generation (`cityBuildingGen.ts`)
+### 3.2 Current City Scene and Painter
+
+`CityView.draw()` gathers current settlement/city inputs and calls `buildCityScene(input)` in `scene/sceneBuilder/cityScene.ts`, which returns `SceneNode[]`. The city renderer remains a 28-line canvas-framing wrapper that calls `paintScene(ctx, nodes, deps, frame)`; it does not generate buildings or own building-art functions.
+
+The live painter is `scene/paint2d/index.ts`. It consumes city-cell, spot, mine, building, ghost-building, label, and skybox nodes. Geometry and cell ordering come from `src/core/cityGrid.ts`; the `Paint2DDep` instance is constructed outside the pure painter. `src/render/paint2dDefaults.ts` resolves sprite keys/settings, and `src/render/skybox.ts` owns the skybox `?url` imports and cache.
+
+Pixel buildings are sprite-first. Their keys are generated from the files on disk and their anchor offsets are generated from source-image alpha bounds; the exhaustive per-kind/per-level declaration remains in `packages/engine/src/buildingSpriteCoverage.ts`. Pixel styles have no procedural fallback, so the coverage test and asset-generation checks are important blank-tile guards. The old `cityBuildingDraw.ts`, `cityBuildingGen.ts`, `cityBuildingDraw/`, and `paint2d/buildings.ts` modules are absent.
+
+### 3.3 Historical Building Generation Plan (removed source)
+
+> Historical planning material only. `cityBuildingGen.ts` and its procedural layout code are not in the current tree. The following records the former plan and must not be used as a current source map.
 
 **`GenerationConfig`**:
 
@@ -641,7 +661,9 @@ interface BuildingDef {
 }
 ```
 
-### 3.3 Building Drawing (`cityBuildingDraw.ts`)
+### 3.4 Historical Procedural Building Drawing (removed source)
+
+> Historical drawing specification only. `cityBuildingDraw.ts` and the style-leaf folder are absent; live drawing is in `scene/paint2d/index.ts` and pixel building assets have no procedural fallback.
 
 **`BuildingKind`** (36 types, re-exported from `@heroes/contracts`): `townHall`, `house`, `tower`, `mageGuild`, `mine`, `stoneMine`, `ironMine`, `market`, `barracks`, `smithy`, `apartment`, `farmField`, `farmhouse`, `archeryRange`, `granary`, `warehouse`, `bank`, `treasury`, `goldMine`, `woodcutterHut`, `arcaneFont`, `stables`, `huntingLodge`, `eyrie`, `crypt`, `ossuary`, `wraithBarrows`, `spireOfAsh`, `forgeHall`, `gunnersRedoubt`, `golemFoundry`, `deepAnvil`, `groveSanctum`, `warrenLodge`, `sylvanStables`, `worldrootGrove`
 
@@ -683,7 +705,7 @@ interface BuildingDef {
 - `drawSpot()` — draws a resource icon on a city grid cell. Tries sprite provider first; falls back to a colored diamond from `RESOURCE_PAL`
 - `drawMine()` — draws a resource-styled isometric mine structure (walls + roof) with the resource spot icon behind it and a level number label
 
-### 3.4 Procedural Hero Sprites (`heroSprites.ts`)
+### 3.5 Procedural Hero Sprites (`heroSprites.ts`)
 
 Two hand-crafted pixel art sprites using character-array encoding:
 
@@ -702,6 +724,8 @@ Both center the sprite horizontally within the rendering canvas.
 ---
 
 ## 4. Palettes
+
+> The building-style palette details below are historical design material. The current city painter is sprite-first and has no procedural style-leaf fallback.
 
 `palettes.ts` defines two palette systems:
 
@@ -865,9 +889,11 @@ sequenceDiagram
 | `remove-specks.mjs` | in-place speck cleanup on any PNG | connected-component analysis: drops non-main, small, low-saturation opaque islands |
 | `tune-run-frames.mjs` | horse `-2` run frames, normalized in place against their base frame | canvas → base size + content-bbox height/bottom/centerX alignment (sprites are bottom-anchored); `--check` gates drift, centerX advisory when art is h-clipped — `validate-assets` runs this check over every committed run frame as its alignment stage |
 
-Wiring note (rewritten 2026-10-10 — these files used to be wired by hand): the pixel building family is now **registry-driven**. `tools/sprites/gen-building-sprite-keys.mjs` scans `src/resources/buildings/`, parses the filename grammar `building-pixel-<kind>-<level>[-alt].png`, and emits `packages/engine/src/generated/buildingSpriteKeys.ts` — `BUILDING_SPRITE_FILES` (key → filename, 106), `BUILDING_SPRITE_ALIASES` (8 keys with no file of their own: the legacy generic `mine` kind → stoneMine art, farmField L2/L3 → the L1 art, woodcutterHut-3 → the -2 art), and the 114-key sorted union `BUILDING_SPRITE_KEYS` (also what `engine/styleResolver`'s style fall-through consults). `assetDescriptors.ts` resolves each key's URL through one `import.meta.glob("../resources/buildings/building-pixel-*.png")`, so a correctly named PNG needs **no code edit** — run `npm run gen:sprite-keys` (drift gate `npm run gen:sprite-keys:check`, also inside `npm run validate-assets`), and the skill's `gemini-buildings.mjs` regenerates it automatically. The legacy `building-classic-*`/`building-blocky-*`/`-raw`/`-variant*` files in the same folder are excluded by the glob pattern and the grammar, not by an allowlist. What is still hand-written per sprite: the `BUILDING_ANCHOR_OVERRIDES` row (§ below) — the last hand-measured table in the family. What is *not* hand-maintained any more: which kinds and levels exist. `packages/engine/src/buildingSpriteCoverage.ts` declares a key for every `BuildingKind` at levels 1-3 as a `Record<BuildingKind, ...>`, so a new kind is a compile error until it is declared and a deliberately-absent level must record a reason; `test/engine/buildingSpriteCoverage.test.ts` derives both sides (the contracts union, and the generated key list) so the invariant cannot rot. That closes the blank-tile bug class — a building level with no key draws nothing, because pixel styles have no procedural fallback — at compile time rather than by inspection.
+Wiring note (rewritten 2026-10-10 — these files used to be wired by hand): the pixel building family is now **registry-driven**. `tools/sprites/gen-building-sprite-keys.mjs` scans `src/resources/buildings/`, parses the filename grammar `building-pixel-<kind>-<level>[-alt].png`, and emits `packages/engine/src/generated/buildingSpriteKeys.ts` — `BUILDING_SPRITE_FILES` (key → filename, 106), `BUILDING_SPRITE_ALIASES` (8 keys with no file of their own: the legacy generic `mine` kind → stoneMine art, farmField L2/L3 → the L1 art, woodcutterHut-3 → the -2 art), and the 114-key sorted union `BUILDING_SPRITE_KEYS` (also what `engine/styleResolver`'s style fall-through consults). `assetDescriptors.ts` resolves each key's URL through one `import.meta.glob("../resources/buildings/building-pixel-*.png")`, so a correctly named PNG needs **no code edit** — run `npm run gen:sprite-keys` (drift gate `npm run gen:sprite-keys:check`, also inside `npm run validate-assets`), and the skill's `gemini-buildings.mjs` regenerates it automatically. The legacy `building-classic-*`/`building-blocky-*`/`-raw`/`-variant*` files in the same folder are excluded by the glob pattern and the grammar, not by an allowlist. Building anchor offsets are generated from PNG alpha bounds by `tools/sprites/gen-building-anchors.mjs`; the remaining per-kind/per-level declaration is the exhaustive `packages/engine/src/buildingSpriteCoverage.ts`. What is *not* hand-maintained any more: which kinds and levels exist. `packages/engine/src/buildingSpriteCoverage.ts` declares a key for every `BuildingKind` at levels 1-3 as a `Record<BuildingKind, ...>`, so a new kind is a compile error until it is declared and a deliberately-absent level must record a reason; `test/engine/buildingSpriteCoverage.test.ts` derives both sides (the contracts union, and the generated key list) so the invariant cannot rot. That closes the blank-tile bug class — a building level with no key draws nothing, because pixel styles have no procedural fallback — at compile time rather than by inspection.
 
-**Canvas size in the `anchorOffsetY` formula.** Every `building-pixel-*` asset is authored on a **1024×1024** canvas — the 128px figure only applies to the older classic/FLUX `building-{style}-{kind}-{level}.png` set. The `BUILDING_ANCHOR_OVERRIDES` formula comment in `assetDescriptors.ts` was corrected accordingly: the divisor must be the PNG's *actual* canvas height (`dh`), not a nominal 128, because `sh/dh` is ~8× smaller for a 1024 asset (a 79-row bottom pad on `warehouse-1` is 7px, not 53). Measured bottom-pad offsets for the newest sprites: warehouse 7/8/9, `bank.2` = 6, `bank.3` = 6, treasury 5/4/4, crypt 11 (133 rows), ossuary 11 (131), wraithBarrows 11 (131), spireOfAsh 7 (84), farmField 20/23 (all six keys; art regenerated 2026-10-05 — 121 transparent bottom rows on `pixel` → offset 20, 137 on `pixel-alt` → offset 23, geometric 2x2 solve); and the 2026-10-03 faction phase-C wave: forgeHall 8/8, golemFoundry 8/8, deepAnvil 2/2, gunnersRedoubt-3 11; ossuary 11/8, wraithBarrows 11/11, spireOfAsh 7/6, crypt-3 12 (137 rows); groveSanctum 8/6, warrenLodge 7/4, sylvanStables 10/3, worldrootGrove-3 0 (art touches the canvas bottom). Do not assume the 128px figure applies to any `pixel.*` asset.
+**Generated pixel-building anchors (2026-10-11).** Building PNGs use a 1024×1024 canvas. `tools/sprites/gen-building-anchors.mjs` computes each anchor offset from the source alpha bounds and writes `src/render/generated/buildingAnchorOverrides.ts`; `--check` reports drift without writing. The calculation uses the actual image height, with a distinct 2×2 footprint scale for farmField. The generated 114-key anchor map is separate from `buildingSpriteCoverage.ts`, which still manually declares expected keys/explicit absences for every `BuildingKind` and levels 1–3.
+
+`npm run validate-assets` invokes `tools/sprites/validate-assets.mjs`. It checks the legacy manifest's 31 files, generated building-key drift, generated anchor-offset drift, and horse run-frame base/existence/alignment checks. `buildingSpriteCoverage.ts` completeness is checked separately by `test/engine/buildingSpriteCoverage.test.ts` in `npm run test:unit`; it is not a codegen output or an additional `validate-assets` stage.
 
 ---
 
@@ -875,22 +901,10 @@ Wiring note (rewritten 2026-10-10 — these files used to be wired by hand): the
 
 ```mermaid
 classDiagram
-    class Renderer {
-        +ctx CanvasRenderingContext2D
-        +map GameMap
-        -camera Camera
-        -sprites SpriteProvider
+    class MapRenderer {
         +draw(hover, path, opts)
-        -drawHex(cx, cy, t)
-        -drawDecoration(q, r, cx, cy, t)
-        -drawFogHex(cx, cy)
-        -drawCastleBorder(cx, cy, castle, opts)
-        -drawCharterOverlays(ctx, charters, visible)
-        -drawValidCharterHexes(ctx, hexes, visible)
-        -drawMinimap(heroes, path, opts, visible)
         +hoverFromScreen(sx, sy) Axial
     }
-
     class Camera {
         +x number
         +y number
@@ -900,86 +914,62 @@ classDiagram
         +zoomAt(sx, sy, factor)
         +apply(ctx)
     }
-
     class SpriteProvider {
         -descriptorMap Record~string, SpriteDescriptor~
         -source SpriteSource
         +preload()
         +resolve(key) ResolvedSprite
     }
-
-    class ImageSpriteSource {
-        -cache Map~string, HTMLImageElement~
-        -ready Map~string, boolean~
-        +preload()
-        +resolve(key) Drawable
+    class CitySceneBuilder {
+        +buildCityScene(input) SceneNode[]
     }
-
-    class ProceduralSpriteSource {
-        -cache Map~string, HTMLCanvasElement~
-        -drawers Record~string, ProceduralDrawer~
-        -renderScale number
-        +preload()
-        +resolve(key) Drawable
+    class Paint2D {
+        +paintScene(ctx, nodes, deps, frame)
     }
-
-    class drawCityView {
-        +drawCityView(ctx, opts)
-        +computeCityScale(size, vw, vh, topInset) number
+    class Paint2DDep {
+        +resolveSpriteForResource/Hero/Building/Castle/Unit()
+        +skybox SkyboxProvider
     }
-
-    class generateBuildings {
-        +generateBuildings(config) BuildingDef[]
-        +enrichOrganic(buildings, ...)
-        +enrichBlocky(buildings, ...)
+    class Paint2DDefaults {
+        +createPaint2DDep()
+        +createDefaultPaint2DDep()
     }
+    class SkyboxProvider
 
-    class drawBuilding {
-        +drawBuilding(ctx, x, y, tw, td, kind, level, color, style)
-        +drawBuildingFromContext(opts)
-        +drawIsoBox(ctx, cx, cy, hw, hh, h, l, r, t, inset)
-        +buildingFootprint(gx, gy, ...)
-        +buildingHeight(kind, level) number
-    }
-
-    Renderer --> Camera
-    Renderer --> SpriteProvider
-    SpriteProvider --> ImageSpriteSource : PNG images
-    SpriteProvider --> ProceduralSpriteSource : procedural fallback
-    Renderer ..> drawCityView : world map rendering
-    drawCityView --> generateBuildings : layout
-    drawCityView --> drawBuilding : isometric art
+    MapRenderer --> Camera
+    MapRenderer --> SpriteProvider
+    MapRenderer --> Paint2D
+    CitySceneBuilder --> Paint2D
+    Paint2D --> Paint2DDep
+    Paint2DDefaults --> SpriteProvider : asset descriptors
+    Paint2DDefaults --> SkyboxProvider
 ```
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| `assetDescriptors.ts` | 887 | Sprite key types, descriptors, URL imports, key generation functions, the building-sprite glob + generated-key resolution |
-| `assets.ts` | 67 | `SpriteProvider` class, `createDefaultProvider()` factory |
-| `assetSource.ts` | 80 | `ImageSpriteSource`, `ProceduralSpriteSource`, `CompositeSpriteSource` |
-| `camera.ts` | 35 | Viewport pan, zoom, pixel ratio, canvas transform |
-| `cityBuildingDraw.ts` | 1392 | Building rendering: 5 styles, 36 building kinds, spots, mines |
-| `cityBuildingGen.ts` | 439 | Procedural building layout generation: 6 patterns, seeded RNG |
-| `cityRenderer.ts` | 33 | City-view paint entry: canvas framing around one `paintScene()` call |
-| `fog.ts` | 41 | Fog of war: visibility computation from heroes and castles |
-| `heroSpotted.ts` | 32 | Reveal-fade tracker for heroes sighted from another seat (`observeHeroSightings` / `pruneHeroSightings` / `heroFadeAlpha` / `resetHeroSpotted`) |
-| `heroSprites.ts` | 139 | Procedural pixel-art knight and demon character sprites |
-| `overlays/pathOverlay.ts` | 69 | `computeReachableSplitDetailed` (scene-builder helper; `computeReachableSplit` is the legacy index-only wrapper) + `drawMinimapPath` |
-| `palettes.ts` | 86 | `GenerationStyle`, `RESOURCE_PAL`, `BUILDING_PALETTES` |
-| `paint2dDefaults.ts` | 280 | `Paint2DDep` builders (incl. the battle arena's `resolveSpriteForUnit` wiring); the only file allowed to touch `assetDescriptors.ts` |
-| `renderer.ts` | 97 | `MapRenderer`: background, `heroSpotted` tracker, `buildAdventureScene` → `paintScene`, minimap |
-| `skybox.ts` | 167 | `createSkyboxProvider()`; the only holder of the `?url` skybox PNGs |
-| `sprites.ts` | 161 | Entity sprite drawing: castles, resources, heroes, horses |
-| `scene/types.ts` | 356 | The `SceneNode` union |
-| `scene/sceneBuilder/*.ts` | 797 | `buildAdventureScene` / `buildCityScene` / `buildBattleScene` |
-| `scene/paint2d/*.ts` | 1,513 | `paintScene` + 27 per-kind painters, `deps.ts`, `colors.ts`, `geometry.ts`, `buildings.ts` |
+| File | Current responsibility |
+|---|---|
+| `assetDescriptors.ts` | Sprite keys/descriptors, asset globs, generated building-key and anchor-map imports |
+| `assets.ts`, `assetSource.ts` | `SpriteProvider` and image/on-demand/procedural sources |
+| `camera.ts`, `fog.ts`, `heroSpotted.ts` | View transform, visibility, and reveal-fade tracking |
+| `renderer.ts` | `MapRenderer`: adventure scene build → `paintScene`, background, minimap |
+| `cityRenderer.ts` | 28-line city canvas wrapper around `paintScene` |
+| `scene/sceneBuilder/{adventureScene,cityScene,battleScene}.ts` | Current scene decisions for map, city, and battle |
+| `scene/paint2d/index.ts` | Current per-kind Canvas2D painter, including city-building painting |
+| `scene/paint2d/{deps,colors,geometry}.ts` | Painter dependency contract, colors, and geometry helpers |
+| `paint2dDefaults.ts`, `skybox.ts` | Browser/Vite asset and settings adapters; skybox URL/cache owner |
+| `core/cityGrid.ts` | City grid geometry/order and safe-area layout |
+| `generated/buildingAnchorOverrides.ts` | Generated 114-key pixel-building anchor offsets |
+| `packages/engine/src/generated/buildingSpriteKeys.ts` | Generated pixel-building file map, aliases, and key union |
+| `packages/engine/src/buildingSpriteCoverage.ts` | Exhaustive manual per-kind/level coverage declaration, guarded by a unit test |
+| `tools/sprites/{gen-building-sprite-keys,gen-building-anchors,validate-assets}.mjs` | Generated-key/anchor updates and drift/asset validation |
+| `overlays/pathOverlay.ts`, `sprites.ts`, `heroSprites.ts` | Minimap path and legacy/procedural sprite helpers where still consumed |
 
-Deleted by issue #148: `painter/*` (7 classes + barrel, 395 lines), `overlays/resourceIcon.ts` (22), `overlays/territoryOutline.ts` (98). `renderer.ts` went 440 → 76 and `cityRenderer.ts` 409 → 33; that volume did not vanish, it moved into `scene/`, where the decision half and the drawing half are separable and unit-testable without a canvas.
+The former `painter/*` classes and separate resource/territory overlay painters were deleted by issue #148. The later `cityBuildingDraw.ts`, `cityBuildingGen.ts`, `cityBuildingDraw/`, and `paint2d/buildings.ts` paths are also absent; `cityRenderer.ts` remains the thin wrapper described above.
 
 ### External Dependencies
 
 - `src/core/hex.ts` — Hex coordinate math (`axialToPixel`, `pixelToAxial`, `hexCorners`, `hexDistance`, `HEX_SIZE`)
 - `src/core/cityGrid.ts` — City grid coordinate math (`cellOrigin`, `cellToScreen`, `cellsInDrawOrder`, `computeCityScale`, `cityLayout`, `screenToGridCell`, `BUILDING_PAD_RATIO`, `CITY_VIEW_MARGIN`, `TILE_W`, `TILE_D`, `CityViewSize`). `computeCityScale`/`cityLayout` take an optional `topInset` (default 0) and fit/clamp the grid below it with a 12px `CITY_VIEW_MARGIN`; `computeCityScale` moved here from `cityRenderer.ts` (which still re-exports it, though `cityView.ts`/`buildingPlacer.ts` now import from this module directly) so it's importable without pulling in `cityRenderer.ts`'s module-scope Vite `?url` PNG imports — see §7.
-- `src/core/control.ts` — Territory control logic (`controlledPositions`, `territoryBoundaryEdges`, `controlRange`)
+- `packages/engine/src/control.ts` — Territory control logic (`controlledPositions`, `territoryBoundaryEdges`, `controlRange`)
 - `src/map/terrain.ts` — `TERRAIN_COLORS`, `Terrain` type, `TERRAIN_COST`
 - `src/map/resourceTiles.ts` — `ResourceType`, `RESOURCES`
 - `src/entities/hero.ts` — `Hero`, `Faction`, `Direction`
@@ -993,7 +983,7 @@ Deleted by issue #148: `painter/*` (7 classes + barrel, 395 lines), `overlays/re
 
 2. **Per-entity variant system**: Castles have `castleVariant: 0 | 1` and heroes have `horseVariant: HorseVariant` (9 values). These are stored on the game-state entities, not as global settings. The renderer reads each entity's variant to determine which sprite to draw. Buildings have no separate variant field — their art choice rides the persisted `BuildingDef.style` (`buildingKey(style, kind, level)`); the 2026-10-02 farm swap made new `farmField` defs carry `"pixel"`/`"pixel-alt"` there, while legacy `"classic"` farm defs are re-styled deterministically at scene emission (`farmFieldStyleAt`).
 
-3. **City view style system**: 5 visual styles × 6 layout patterns = 30 combinations per settlement. Style and pattern are selected per-city-view session (default `classic` + `denseUrban`), with keyboard shortcuts for runtime switching.
+3. **Historical city-style system**: the former 5-style × 6-pattern procedural city-building painter and generator are not current source modules. Pixel building sprites are the live render path; see §3.2 and the historical notes in §3.3–3.4.
 
 4. **Fog of war visibility**: Computed each frame by union of hero vision rings (radius 4) and castle vision rings (radius varies by level). Non-visible hexes get a dark overlay; minimap shows them as black.
 
@@ -1005,23 +995,23 @@ Deleted by issue #148: `painter/*` (7 classes + barrel, 395 lines), `overlays/re
 
 ## 7. Scene Graph Seam (Phase 5 Track B)
 
-**This is the live render path.** As of issue #148, `MapRenderer.draw()` and `cityRenderer.ts`'s `drawCityView()` both consume `SceneNode[]` through `paintScene()`; the battle arena reaches the same painter through `arena/paint.ts` — the scenebuilder path is the arena's **default** since the 2026-09-29 arena unit sprites (`?paint=legacy` opts back to the old in-class draw). `src/render/scene/` is the pure `GameState/Hero[]/Castle[] + Camera -> SceneNode[]` seam that makes it possible for a painter to draw from immutable data instead of reaching back into game state, and it is what actually draws every frame. See `plan/2026-08-17-consolidated-phase-1-5-track-map.md` §7.2 for how it got here.
+**This is the live render path.** As of issue #148, `MapRenderer.draw()` and `cityRenderer.ts`'s `drawCityView()` both consume `SceneNode[]` through `paintScene()`; the battle arena reaches the same painter through `arena/paint.ts` — the scenebuilder path is the arena's **default** since the 2026-09-29 arena unit sprites (`?paint=legacy` opts back to the old in-class draw). `src/render/scene/` is the pure `GameState/Hero[]/Castle[] + Camera -> SceneNode[]` seam that makes it possible for a painter to draw from immutable data instead of reaching back into game state, and it is what actually draws every frame. See [`docs/plans-track-map.md`](../../../docs/plans-track-map.md) for the published track history.
 
 - **`scene/types.ts`** — `SceneNode`, a discriminated union keyed by `kind` (one variant per drawable thing: `terrainHex`, `fogHex`, `resourceIcon`, `castle`, `hero`, `cityCell`, `cityBuilding`, `citySkybox`, …), plus `WorldPoint`. The `hero` node (`HeroNode`) carries `runFrame?: 0 | 1` — which run-cycle pose to draw while moving; absent/0 is the base sprite, and the value is derived by the scene builder, not stored on the entity. Two more optional builder-derived flags landed with the 2026-09-29 playtest fixes: `pathSegment.fogged?` (any tile the segment spans is under fog — the painter brightens the dim gold and adds a dark under-stroke, see §2.5.1) and `cityCell.buildable?` (the active build placer accepts the cell — subtle tint). Two more followed on 2026-10-01 with the reveal features: `heroNode.alpha?` (fade-in for a non-own hero newly sighted from another seat; `paintHero` applies it via `save`/`globalAlpha`/`restore` only when `< 1`) and `HeroTrailNode.intensity?` (an alpha multiplier for the whole trail, which `paintHeroTrail` folds into its existing per-index ramp). The `caravanMarker` node (`CaravanMarkerNode`, trade-route wagon cart) carries `color`/`wagons`/`q`/`r`/`world` plus an additive `payloadKind?: "resource" | "gold"` (the route's payload kind, resolved at spec time by `resolveCaravanMarkers` — reserved for a future gold-tinted cart; nothing reads it yet) — the owner colour is resolved at emission via `colorForOwner`, matching how `CastleNode`/`HeroNode` carry colour strings.
 - **`scene/sceneBuilder/adventureScene.ts`** — `buildAdventureScene()`, a faithful pure decomposition of `Renderer.draw()`'s per-frame draw decisions. Takes today's `Hero[]`/`Castle[]`/`GameMap` inputs (not raw `GameState`) — replacing that mirror is `entityMirror.ts`'s job. Each hero node's `runFrame` is derived from `hero.moving` + `hero.moveProgress` (stationary heroes always 0; the pose flips at each half tile-step, ~110 ms per pose at the default 220 ms/step `settings().moveDurationMs` — which is per-seat since 2026-10-01, so a non-own hero's poses pace to `settings().enemyMoveDurationMs`). Movement-keyed by design, **not** wall-clock: timing resolved as pure input→data keeps paint2d pure and the visual baselines deterministic. It also sets each `pathSegment`'s `fogged` flag (a segment is fogged when *any* tile it spans is) and trims the trail node to the last 25 `hero.trail` points (2026-09-29). `buildPathNodes` emits the path preview **only** for an own-seat selected hero (a leaked foreign selection can no longer draw a route out of the fog); since 2026-10-01 it no longer early-returns, and the same call also emits a faint `heroTrail` (`intensity: 0.45`, last 8 points, **not** fog-gated — walking out of the fog *is* the reveal) for every **visible** non-own hero. Each non-own hero node also picks up `alpha` from `RenderOptions.heroAlpha` (the `heroSpotted` tracker); own heroes are never faded. **Caravan markers** (2026-10-01): `RenderOptions.caravans` carries the departed trade-route caravans **pre-resolved** by the caller (`resolveCaravanMarkers` in `src/render/caravanMarkers.ts`, wired from `GameEngine.fullFrame` — a still-loading `caravan === null` route never becomes a spec), and the builder emits one `caravanMarker` node per entry, fog-gated exactly like hero and castle nodes (`ownerId === viewPlayerId || isVisible(...)`), positioned via `axialToPixel`, colored via `colorForOwner`, placed after the path/overlay layers and before heroes so a hero sharing the tile draws above the cart. The route's `payload.kind` rides the node as `payloadKind` (reserved; see §7 `scene/types.ts` bullet).
-- **`scene/sceneBuilder/cityScene.ts`** — `buildCityScene()`, the same treatment for `cityRenderer.ts`'s `drawCityView()`. The skybox's actual image loading/caching/parallax-layer-splitting stays a future `paint2d` concern (stateful asset loading, not scene data); the `citySkybox` node only carries the resolved variant/parallax decision. Since 2026-09-29 `CitySceneInput` also carries `labelOffsetY` (CSS px to shift the two corner labels down — `CityView` passes the fixed toolbar's height, because the render path must not measure the DOM) and `buildableCells` (`"gx,gy"` keys flagged onto the matching `cityCell` nodes while the placer is active); since 2026-10-05 it carries `topInset` too (the grid's safe-area inset, threaded straight into `cityLayout` — separate from `labelOffsetY`).
+- **`scene/sceneBuilder/cityScene.ts`** — `buildCityScene()`, the same treatment for `cityRenderer.ts`'s `drawCityView()`. The `citySkybox` node carries the resolved variant/parallax decision; `Paint2DDep` supplies a `SkyboxProvider` created outside the painter. `src/render/skybox.ts` owns the skybox URLs and image/parallax caches, wired through `src/render/paint2dDefaults.ts`. Since 2026-09-29 `CitySceneInput` also carries `labelOffsetY` (CSS px to shift the two corner labels down — `CityView` passes the fixed toolbar's height, because the render path must not measure the DOM) and `buildableCells` (`"gx,gy"` keys flagged onto the matching `cityCell` nodes while the placer is active); since 2026-10-05 it carries `topInset` too (the grid's safe-area inset, threaded straight into `cityLayout` — separate from `labelOffsetY`).
 - **`scene/sceneBuilder/battleScene.ts`** — `buildBattleScene()`, the same treatment for `manualBattleArena.ts`'s `draw()`/`renderPixelFor()`. Unlike `adventureScene.ts`/`cityScene.ts`, there's no `Hero`-style ticked class already resolving animation timing before the builder runs, so it takes an explicit `nowMs` input field and resolves moveAnim/impact/floating-text progress itself. Since the 2026-09-29 arena unit sprites, `BattleSceneInput` also carries an optional `attacker` window — the platoon that just landed an attack, recorded by the arena when it dispatches one (human and AI paths both); an entry older than `IMPACT_MS` is treated as absent, the same purity rule as `activeImpact`. Each `battleCombatant` node gains additive optional fields: `unitTypeId` (the platoon's dominant entry — highest count, first stored wins ties), `pose` (`move` while the node is the interpolated mover, else `attack` within the attacker window, else `idle`), `mirror` (defenders — art is authored facing right once), and `hexSize`. All optional; an absent `unitTypeId` (or a resolver miss) keeps the painter on its original circle rendering.
 - **`scene/entityMirror.ts`** — `EntityMirror`, the visual `Hero[]`/`Castle[]` entity view over the live collections. `syncWith(heroes, castles)` reconciles the store's id -> instance mapping against live collections, while `bootstrap(state)` and `applyEvent(event)` serve standalone/headless and multiplayerSync paths. Directly consumed by `MapRenderer.draw()` and `buildAdventureScene()` (#180 step 2).
-- **`scene/paint2d/`** — `paintScene(ctx, nodes, deps, frame?)`, the Canvas2D consumer of the `SceneNode[]` union. Switches on `node.kind` and dispatches to a real per-kind painter for all 27 kinds. Two kinds are **run-batched** rather than painted one node at a time: consecutive same-owner `territoryOutlineEdge` nodes stroke as one path (at `globalAlpha` 0.45, per-edge strokes double-blend every shared endpoint), and a run of `cityBuilding` nodes paints every body before any selection ring. The Vite-`?url` seam is enforced: `paint2d/` declares a `Paint2DDep` interface (`deps.ts`) with five per-kind sprite-resolver helpers (`resolveSpriteForResource/Hero/Building/Castle/Unit` — the hero resolver takes an optional run-cycle `frame`, see §2.3; the unit resolver is the battle arena's `resolveSpriteForUnit(unitTypeId, pose)` over the registry-driven `UNIT_ARENA_DESCRIPTORS`, returning `undefined` for missing/not-yet-loaded art so the painter keeps its fallback) plus a `SkyboxProvider`, decision-time state getters (`getResourceStyle`, `getSpriteVariant`, `getParallaxEnabled`, `getParallaxLayerCount`, `getBgOffsetX/Y`, `getTerritoryBorderWidth`), `colorForOwner`, `battleAccent`, `fontFamily`, and `charterStyle`/`validCharterStyle`. The painter never names a key string, never reads `settings()` directly, and never imports `assetDescriptors.ts`/`assets.ts`/`sprites.ts`/`cityRenderer.ts`/`cityBuildingDraw.ts` (the barrel). The boundary is enforced by dependency-cruiser rules `paint2d-cannot-import-asset-descriptors` and `paint2d-cannot-value-import-state`, plus a runtime seam test (`test/render/paint2d.seam.test.ts`) that string-scans the painter's source AND `import()`s the module under bare `node:test` to prove it loads without Vite's loader. Charter/valid-charter palette constants live in `colors.ts`; shared geometry helpers (`hexPath`, `diamondPath`) in `geometry.ts`; the isometric building draw + its offscreen style-leaf cache in `buildings.ts`. 2026-09-29 arena unit sprites: `paintBattleCombatant` is sprite-first — a ready unit-sprite hit draws the dominant unit's art bottom-anchored at the combatant's point (mirrored for defenders, with owner dot, count text and HP bar carried over); a miss or unready sprite falls through to the original circle rendering, byte-identical to pre-sprite output. **Wired into `MapRenderer.draw()` and `drawCityView()`** (issue #148) and into `manualBattleArena` via `src/screens/combat/arena/paint.ts`'s `paintSceneForArena()` (CB-4) — the scenebuilder path is the arena's **default** since the 2026-09-29 arena unit sprites; `?paint=legacy` opts back to the in-class `drawLegacy()` path (whose double-paint is #143's business, not this module's).
+- **`scene/paint2d/`** — `paintScene(ctx, nodes, deps, frame?)`, the Canvas2D consumer of the `SceneNode[]` union. Switches on `node.kind` and dispatches to a real per-kind painter for all 27 kinds. Two kinds are **run-batched** rather than painted one node at a time: consecutive same-owner `territoryOutlineEdge` nodes stroke as one path (at `globalAlpha` 0.45, per-edge strokes double-blend every shared endpoint), and a run of `cityBuilding` nodes paints every body before any selection ring. The Vite-`?url` seam is enforced: `paint2d/` declares a `Paint2DDep` interface (`deps.ts`) with five per-kind sprite-resolver helpers (`resolveSpriteForResource/Hero/Building/Castle/Unit` — the hero resolver takes an optional run-cycle `frame`, see §2.3; the unit resolver is the battle arena's `resolveSpriteForUnit(unitTypeId, pose)` over the registry-driven `UNIT_ARENA_DESCRIPTORS`, returning `undefined` for missing/not-yet-loaded art so the painter keeps its fallback) plus a `SkyboxProvider`, decision-time state getters (`getResourceStyle`, `getSpriteVariant`, `getParallaxEnabled`, `getParallaxLayerCount`, `getBgOffsetX/Y`, `getTerritoryBorderWidth`), `colorForOwner`, `battleAccent`, `fontFamily`, and `charterStyle`/`validCharterStyle`. The painter never names a key string, never reads `settings()` directly, and never imports `assetDescriptors.ts`, `assets.ts`, `sprites.ts`, or `cityRenderer.ts`. The boundary is enforced by dependency-cruiser rules `paint2d-cannot-import-asset-descriptors` and `paint2d-cannot-value-import-state`, plus a runtime seam test (`test/render/paint2d.seam.test.ts`) that string-scans the painter's source AND `import()`s the module under bare `node:test` to prove it loads without Vite's loader. Charter/valid-charter palette constants live in `colors.ts`; shared geometry helpers (`hexPath`, `diamondPath`) in `geometry.ts`; the per-kind city/building drawing code in `index.ts`. 2026-09-29 arena unit sprites: `paintBattleCombatant` is sprite-first — a ready unit-sprite hit draws the dominant unit's art bottom-anchored at the combatant's point (mirrored for defenders, with owner dot, count text and HP bar carried over); a miss or unready sprite falls through to the original circle rendering, byte-identical to pre-sprite output. **Wired into `MapRenderer.draw()` and `drawCityView()`** (issue #148) and into `manualBattleArena` via `src/screens/combat/arena/paint.ts`'s `paintSceneForArena()` (CB-4) — the scenebuilder path is the arena's **default** since the 2026-09-29 arena unit sprites; `?paint=legacy` opts back to the in-class `drawLegacy()` path (whose double-paint is #143's business, not this module's).
 - **Default-deps builder + skybox module (now in place)**: `src/render/paint2dDefaults.ts` is the only file in the project allowed to touch `assetDescriptors.ts` — it wires `Paint2DDep` defaults from `assetDescriptors.ts`'s `*Key` constructors and `settings()`'s getters, plus `colorForOwner`/`battleAccent`/`fontFamily`/`charterStyle`/`validCharterStyle` defaults sourced from `paint2d/colors.ts`. Run frames resolve here too: hero resolver frame `1` on a mounted variant asks for `horseVariantKey(variant, dir, 1)` (the `.{2}` key) and falls back to the base sprite when no frame-2 descriptor exists — so any variant can adopt run frames one at a time — and `warmHorseRunFrameCache(provider)` runs once per dep build, pre-resolving every mounted variant's frame-2 keys because frame sprites are on-demand-loaded and an unwarmed first resolve would draw one blank frame. `createDefaultPaint2DDep()` returns `Promise<Paint2DDep>` because the optional `skybox` default lazily loads `createSkyboxProvider()` via dynamic import — the seam test on `paint2d/` stays clean, and the builder itself remains importable under bare `node:test` when callers pass `skybox: null` explicitly. `createPaint2DDep()` is the synchronous sibling for callers that already hold (or don't need) a `SkyboxProvider` — `MapRenderer` passes `skybox: null`, `CityView` passes one `createSkyboxProvider()` instance held for the life of the view. Building the dep per frame is a bug, not a style choice: the skybox provider owns the decoded image and parallax layer-canvas caches. `src/render/skybox.ts` is the only file allowed to take on `cityRenderer.ts`'s module-scope `?url` skybox PNG imports + `skyboxCache`/`layerCanvasCache` Maps — exports `createSkyboxProvider(): SkyboxProvider` (per-instance closure state, was cityRenderer.ts's module-scope `let`s) plus `SKYBOX_DEFAULTS` constants (`LAYER_BANDS`, `PARALLAX_SPEEDS`, `SKYBOX_URLS`, `CITY_BG_FALLBACK`).
 - **Testing**: `test/render/*.test.ts` (`node:test`, wired into `npm run test:unit`) unit-tests every scene builder and `entityMirror.ts` against hand-built `GameMap`/`Hero`/`Castle`/`GameState` fixtures — no DOM/canvas required, since everything here is pure data.
-- **Known pitfall for `paint2d/`** *(seam is now enforced — see the `scene/paint2d/` bullet above; this is the first module that actually exercises it)*: importing from `cityRenderer.ts`, or from the `cityBuildingDraw.ts` barrel (which pulls in `assetDescriptors.ts`'s dozens of Vite `?url` PNG imports), crashes under plain `node:test`/tsx — Node has no loader for `.png`/`?url` specifiers outside Vite's bundler. *(Confirmed *not* a factor for `battleScene.ts`, whose only imports are `core/hex.ts`, `@heroes/engine`, and the sibling `scene/types.ts`.)* Import pure helpers from their actual leaf module instead (e.g. `cityBuildingDraw/primitives.ts` for `buildingFootprint`, `core/cityGrid.ts` for `computeCityScale`), not through an asset-loading barrel.
+- **Historical pitfall (the city-building modules named below are absent) for `paint2d/`** *(seam is now enforced — see the `scene/paint2d/` bullet above; this is the first module that actually exercises it)*: importing from `cityRenderer.ts`, or from the `cityBuildingDraw.ts` barrel (which pulls in `assetDescriptors.ts`'s dozens of Vite `?url` PNG imports), crashes under plain `node:test`/tsx — Node has no loader for `.png`/`?url` specifiers outside Vite's bundler. *(Confirmed *not* a factor for `battleScene.ts`, whose only imports are `core/hex.ts`, `@heroes/engine`, and the sibling `scene/types.ts`.)* Import pure helpers from their actual leaf module instead (e.g. `core/cityGrid.ts` for `buildingFootprint` and `computeCityScale`), not through an asset-loading barrel.
 
 ### 7.3 Which painter set survives (issue #148)
 
-For a stretch the repo carried **two** independent per-kind painter sets drawing the same things: `src/render/painter/` (PR #122, wired into `MapRenderer.draw()`) and `src/render/scene/paint2d/` (Track 5.B, consuming `SceneNode[]`, wired into nothing). Only one of them ran, so they could — and did — drift apart silently.
+For a stretch the repo carried **two** independent per-kind painter sets drawing the same things: the legacy painter directory (PR #122, wired into `MapRenderer.draw()`) and `src/render/scene/paint2d/` (Track 5.B, consuming `SceneNode[]`, wired into nothing). Only one of them ran, so they could — and did — drift apart silently.
 
-**`scene/paint2d/` is the one that survives.** It is the set with the pure `SceneNode[]` seam, the dependency-cruiser boundary rules, and the `Paint2DDep` isolation from Vite's `?url` asset loader. `src/render/painter/` is deleted, along with `overlays/resourceIcon.ts` and `overlays/territoryOutline.ts`. There is now exactly one place a drawing change can go.
+**`scene/paint2d/` is the one that survives.** It is the set with the pure `SceneNode[]` seam, the dependency-cruiser boundary rules, and the `Paint2DDep` isolation from Vite's `?url` asset loader. The legacy painter directory was deleted, along with `overlays/resourceIcon.ts` and `overlays/territoryOutline.ts`. There is now exactly one place a drawing change can go.
 
 Reconciling the two turned up six behavioural differences, all of them fixed on the `paint2d/` side before the cutover, all of them things that would have shipped as visible regressions:
 
@@ -1035,7 +1025,7 @@ Reconciling the two turned up six behavioural differences, all of them fixed on 
 | Path waypoint dots | Every point after the first, including the last | Dropped the last point's dot |
 | Charter palette | `rgba(200,180,140,…)` / `rgba(200,160,80,…)` / `rgba(100,220,100,…)` | `colors.ts` carried an entirely invented palette while claiming to be byte-exact |
 
-The city painters needed the same treatment: `paintCityBuilding` sized sprites off `HEX_SIZE` instead of the tile footprint and had no procedural fallback at all, and `paintCityGhostBuilding` drew the placement outline without the building inside it. Both now go through `paint2d/buildings.ts`, a transcription of `cityBuildingDraw.ts`'s `drawBuilding()` plus its offscreen style-leaf cache (the barrel itself is import-forbidden here — it pulls in `buildingKey`).
+The city painters needed the same treatment: the former city-building helper paths were removed, and their current per-kind rendering lives in `scene/paint2d/index.ts`. There is no separate `paint2d/buildings.ts` module; the current painter boundary is described in [`scene/paint2d/README.md`](../scene/paint2d/README.md).
 
 **How byte-equivalence was established.** Not by inspection: the screenshot-diff gate from issue #149 (`npm run test:visual`) captures a fixed replay set — adventure overview with path/trail/territory/fog, both charter phases, and city view with parallax on and off — and diffs each against a committed baseline in `test/visual-baselines/`. All eight scenes match their pre-cutover baselines pixel-for-pixel. **No baseline was regenerated for this change**, which is the actual claim worth making: had any of the divergences above survived, the gate would have failed.
 
@@ -1043,7 +1033,7 @@ One latent bug surfaced on the way: `src/render/skybox.ts` imported its four sky
 
 ### 7.4 Selection-indicator restyle (2026-09-29 playtest fixes)
 
-Three paint2d tweaks from the playtest fixes (plan `.kilo/plan/2026-09-29-playtest-fixes.md` F7/F14) that changed pixels, so the `adventure-overview` + both charter-scene baselines were regenerated:
+Three paint2d tweaks from the playtest fixes (the 2026-09-29 playtest-fixes history, summarized in `docs/plans-track-map.md` F7/F14) that changed pixels, so the `adventure-overview` + both charter-scene baselines were regenerated:
 
 - **Castle rings** (`paintCastle`): the always-on ownership ring on unselected castles draws at `globalAlpha: 0.45` (at full alpha it read as "selected"); neutrals keep their faint dashed-white ring. The **selected** castle gets a clearly distinct double ring — `1.05×HEX_SIZE` at lineWidth 3 plus `1.18×` at 1.5, full alpha, white for neutrals / owner colour otherwise.
 - **Hover hex** (`paintHoverHighlight`): solid stroke thinned 3 → 2 — the most transient of the three stacked rings (hover + inspected tile + selection), so it de-emphasises first.

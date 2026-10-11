@@ -1,12 +1,14 @@
 # Event System
 
-**Status:** Describes the current implemented state of the project's event-driven system — the Postgres-backed event log, the LISTEN/NOTIFY → SSE streaming path, the client ingestion layer, the client event bus, and a complete inventory of every event consumer. Written 2026-09-30; organization pass same day. Companion to [./architecture.md](./architecture.md) (module layout) and [../src/render/docs/technical-spec.md](../src/render/docs/technical-spec.md) (render layer).
+<!-- docs:verified 2026-10-11 -->
+
+**Status:** Describes the current implemented event system: Postgres-backed event log, LISTEN/NOTIFY → SSE, client ingestion, event bus, and consumers. Companion to [module documentation](./module-documentation-and-relationships.md) and the [render spec](../src/render/docs/technical-spec.md).
 
 ## Context
 
 Every state mutation in a multiplayer game is recorded as a row in the `game_events` table. That table is simultaneously:
 
-- the **sync log** remote browsers replay to converge on the server's state (the event-cursor design, plan `.kilo/plan/2026-08-16-phase-3-parallel-dev-plan.md` Phase 5.A / `2026-09-28-sse-event-push.md`),
+- the **sync log** remote browsers replay to converge on the server's state (the event-cursor design; see [plans-track-map.md](./plans-track-map.md) for the published track summary),
 - the **audit trail** (legacy snake_case kinds ride the same table), and
 - the **push source** for the SSE stream that replaced poll-only sync.
 
@@ -384,7 +386,7 @@ A consistency pass over the event pipeline: machine-enforced classification, one
 | Composite cursor index `(game_id, id)` (idempotent; the subsumed `game_events_game_id_idx` kept for now) | `server/migrations/019_game_events_game_id_id_idx.sql` |
 | `POST /games/:name/events` hardening: `kind` must match `^[a-z0-9_]{1,64}$` (400 `invalid kind`), payload JSON capped at 8192 chars (400 `payload too large`); both checked before the game 404. Still unauthenticated by design | `server/routes.ts` |
 | Duplicate turn-lifecycle audit rows removed: `turnHooks.logEvent` no longer POSTs `turn_ended`/`round_ended`/`round_started`/`ai_turn_started` — the server's `EndTurn` command appends the authoritative copies (identical payload shapes; the client copies were byte-identical duplicates with `actor_seat` NULL). `console.log` + dev EventLog capture unchanged | `src/game/turnHooks.ts` |
-| `eventRegistry.ts` deleted (empty-bodied `registerAllListeners` vestige); GameEngine no longer imports/calls it | `src/core/eventRegistry.ts` (removed), `src/managers/GameEngine.ts` |
+| Legacy event-registry module deleted (empty-bodied `registerAllListeners` vestige); current client bus/event declarations live in `src/core/events.ts` | `src/core/events.ts`, `src/managers/GameEngine.ts` |
 | Stale comment/type fixes: `applyEvent.ts` header resync-variant count, `multiplayerSync.ts` comment block, `api.ts` `GameEventRow` comment (no brittle count; points at `ENGINE_EVENT_KINDS`); `api.logEvent` return type corrected to `{ id: string; kind: string; payload: unknown; created_at: string }` (`id` is a string — `int8` over the wire) | `packages/engine/src/events/applyEvent.ts`, `src/io/multiplayerSync.ts`, `src/io/api.ts` |
 | Legacy `POST /games/:name/end-turn` retired (route handler + its private `sumPlayerGold` helper deleted) — replaced by the `EndTurn` command on the `POST /games/:name/commands` bus, the sole writer of the turn-lifecycle audit rows | `server/routes.ts` |
 | `TradeRouteCreated` reclassified `"ignore"` → `"apply"`: new `applyTradeRouteCreated` performs targeted construction, taking the event's `routeId` verbatim (server route ids derive from a counter hydration never restores, so the id cannot be re-derived locally) — classification now 11 apply / 7 resync / 6 ignore; `garrisonEventBridge`'s delta filter (renamed `isBridgedDelta`) admits it, so remote maps show new caravan routes mid-turn | `packages/engine/src/events/applyEvent.ts`, `src/game/garrisonEventBridge.ts` |

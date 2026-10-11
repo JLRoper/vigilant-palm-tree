@@ -1,17 +1,17 @@
 # Sprite Pipelines — Deep Dive (Usage + Creation)
 
-**Status:** Deep-dive reference. Written 2026-10-10, read-only (nothing in this
-document was implemented). Purpose: a single map of how sprite assets flow from
-creation tools into rendered pixels, plus the findings (F1–F13) that motivate
-upgrades to the creation tooling, consolidation, and structural constraints.
+<!-- docs:verified 2026-10-11 -->
 
-**Tree-state caveat:** this workspace is mid-refactor. A sibling session's
-`remove-city-building-styles` work (plan `.plans/20261004-0627_remove-city-building-styles_UNCLAIMED.md`,
-waves 1–2 `_COMPLETE`, wave 3 handed back `_UNCLAIMED` the same day this doc was
-written) has already deleted `src/render/cityBuildingDraw/` and the five
-procedural building styles. **City buildings are now sprite-only**: a missing
-`building.pixel.*` sprite draws nothing. Several docs still describe the old
-style system — see finding F6.
+**Status:** Maintained as-built deep dive, updated 2026-10-11. It maps sprite
+assets from creation tools to rendered pixels and tracks findings F1–F13 with
+their current resolution status. Code and `npm run validate-assets` are the
+source of truth.
+
+**Current source note:** The former city-building draw/generation modules and style folder are absent. `cityRenderer.ts` remains the
+thin wrapper; city decisions are in `sceneBuilder/cityScene.ts`, and per-kind
+painting (including city buildings) is in `scene/paint2d/index.ts`. Pixel
+buildings are sprite-only; a missing pixel key draws nothing. The remaining
+building-style metadata cleanup is tracked separately from rendering.
 
 ---
 
@@ -36,12 +36,12 @@ unit-art waves ────┘                                    ▲           
   to draw) → `scene/paint2d/index.ts` (how to draw it). Enforced by
   `dependency-cruiser.cjs` + `test/render/paint2d.seam.test.ts` + a visual-
   baseline gate.
-- **Creation pipelines**: one deterministic local pipeline (procedural canvas),
-  one FLUX/DeepInfra pipeline (~21 one-off scripts), one Gemini/OpenRouter
-  pipeline (the `building-sprite-gen` kilo skill, 4 scripts), one unit-art wave
-  pipeline (`design/arena-unit-sprites`), one skybox pipeline. Wiring back into
-  the game is **mostly manual** (two hand-maintained key lists, a hand-measured
-  anchor table) except for three families that are `import.meta.glob`-driven.
+- **Creation pipelines**: procedural canvas, FLUX/DeepInfra, Gemini/OpenRouter
+  (`building-sprite-gen` skill), unit-art waves, and skybox assets. Pixel building
+  keys and anchor offsets are generated with drift checks; the exhaustive
+  per-kind/per-level coverage declaration remains manual and is guarded by a
+  compile-time type plus a unit test. Other families retain their own glob or
+  test-based coverage rules.
 
 ---
 
@@ -77,7 +77,7 @@ faction-banner.${FactionId}
 
 ## 3. The usage pipeline (how a key becomes pixels)
 
-### 3.1 Descriptor registry — `src/render/assetDescriptors.ts` (1070 lines)
+### 3.1 Descriptor registry — `src/render/assetDescriptors.ts`
 
 *Source of truth: `src/render/assetDescriptors.ts` itself (technical-spec §1.1/1.5 is the older description). Where they disagree, the code wins and this summary is stale.*
 
@@ -92,7 +92,7 @@ Descriptor maps and how they are populated:
 | `RESOURCE_*_DESCRIPTORS` (8 styles) | generated from `RESOURCES` | 48 | per-style `hexSizeMul` varies: 0.9 (default/cart/illust/constellation/crest), 0.95 (pile), 0.475 (smol), 0.71 (bubbly); all `anchor: "center"` |
 | `HERO_PLAYER_DESCRIPTORS` | **glob** `units/horse/commander-1/*.png` | 8 dirs (+ frame-2) | `fitHeight` 1.8, `naturalSize` 512 |
 | `HORSE_VARIANT_DESCRIPTORS` | **glob** `units/horse/commander-*/*.png`, filtered per `HORSE_VARIANT_REGISTRY` | 9 variants × 4–8 dirs | diagonal→cardinal fallbacks per variant; optional `-2` run frames; bubbly `naturalSize` 64 |
-| `BUILDING_DESCRIPTORS` | generated from `BUILDING_SPRITES` | 114 | defaults `anchor:"bottom"`, `anchorOffsetY:-12`, `fitWidth 0.9`, then per-key `BUILDING_ANCHOR_OVERRIDES` |
+| `BUILDING_DESCRIPTORS` | generated building keys + glob-resolved files | 114 | bottom-anchored pixel assets; offsets come from the generated anchor map |
 | `UNIT_ARENA_DESCRIPTORS` | **glob** `units/arena/*.png` | 36 ids × 3 poses (mage gap) | `bottom`, `fitHeight 1.3`, `naturalSize 128` |
 | `FACTION_BANNERS` | **glob** `factions/faction-banner-*.png` | 4 | a URL map, not descriptors |
 
@@ -101,18 +101,7 @@ Key helpers: `castleKey(level, variant)` (variant 2/3 supported),
 `horseVariantKey(variant, dir, frame?)` (`frame === 1` appends `.2`),
 `buildingKey(style, kind, level)`, `unitArenaKey`, `factionBannerKey`.
 
-**The anchor math** (`BUILDING_ANCHOR_OVERRIDES`, 114 rows, one per sprite key)
-cancels the universal `anchorOffsetY: -12` default so each sprite's visible base
-lands on the cell's south vertex:
-
-```
-visibleBase = y + td*0.5 + anchorOffsetY − bottomPad*(sh/dh)   ⇒   anchorOffsetY = bottomPad*(sh/dh)
-```
-
-The in-file comment is explicit that `sh = tw*0.9 = 86.4` is "an eyeballed
-baseline, not a strict geometric solve", and that the divisor must be the PNG's
-**actual canvas height (1024)**, not a nominal 128. The 2×2 `farmField` plots
-deliberately use a second convention (`172.8/1024`); everything else uses 86.4.
+**Generated anchor map:** `tools/sprites/gen-building-anchors.mjs` reads each PNG's alpha bounds and emits 114 offsets to `src/render/generated/buildingAnchorOverrides.ts`. It uses the actual canvas height (1024) and a separate 2×2 footprint scale for `farmField`. Run `npm run gen:building-anchors:check` to detect drift; do not hand-edit the generated map.
 
 ### 3.2 Provider & source chain — `assets.ts`, `assetSource.ts`
 
@@ -133,7 +122,7 @@ deliberately use a second convention (`172.8/1024`); everything else uses 86.4.
 
 ### 3.3 The painter seam — `paint2d/deps.ts` + `paint2dDefaults.ts`
 
-*Source of truth: `src/render/scene/paint2d/README.md` (boundary contract) over `deps.ts` (interface) and `src/render/paint2dDefaults.ts` (wiring). Where they disagree, the code wins — the README still whitelists the deleted style leaves.*
+*Source of truth: `src/render/scene/paint2d/README.md` (boundary contract) over `deps.ts` (interface) and `src/render/paint2dDefaults.ts` (wiring). The README boundary contract was refreshed on 2026-10-11 to match the current painter seam.*
 
 `paint2d/` must stay importable under bare `node:test` (Node cannot resolve Vite
 `?url` PNG specifiers). Therefore it declares `Paint2DDep` — every external
@@ -180,7 +169,7 @@ the seam test). It:
 
 ### 3.5 Painters — `src/render/scene/paint2d/index.ts` (1189 lines, single file + `colors.ts`/`geometry.ts`/`deps.ts`)
 
-*Source of truth: `src/render/scene/paint2d/index.ts` (technical-spec §7.3 describes this layer; its file table still lists the deleted `paint2d/buildings.ts`). Where they disagree, the code wins.*
+*Source of truth: `src/render/scene/paint2d/index.ts` (technical-spec §7.3 describes the painter). Where they disagree, current source wins.*
 
 `paintScene` (:184) switches on `node.kind`; 27 kinds; two are run-batched
 (`territoryOutlineEdge` strokes as one path per same-owner run — anti-beading at
@@ -283,21 +272,21 @@ only `src/render/skybox.ts` may import them (`?url`).
 
 | Asset family | Wiring |
 |---|---|
-| `building.pixel.*` | **Generated + glob** (landed 2026-10-10, see §4.8): filename grammar → `packages/engine/src/generated/buildingSpriteKeys.ts` (regenerate with `npm run gen:sprite-keys`) → URLs from one `import.meta.glob`. The measured `BUILDING_ANCHOR_OVERRIDES` row is still hand-written per sprite (finding F2) |
+| `building.pixel.*` | **Generated + glob**: filename grammar → `packages/engine/src/generated/buildingSpriteKeys.ts`; alpha bounds → `src/render/generated/buildingAnchorOverrides.ts`. Key/anchor drift is checked by `npm run validate-assets`; per-kind/per-level expected coverage remains manual and unit-tested. |
 | `unit.<id>.<pose>` | **Automatic** (glob). Pose art for a new catalog id just drops in |
 | `horse.<variant>.<dir>` | **Automatic** (glob) for files; a *new variant* needs a `HORSE_VARIANT_REGISTRY` entry (engine) + a `commander-<N>/` folder (+ optional banner in `unitImages`-style maps) |
 | `faction-banner.<id>` | **Automatic** (glob); parity test asserts the file exists once a roster ships |
 | unit icons | **Manual**: `src/data/unitImages.ts` `KNOWN` map (37 imports), guarded by `test/data/unitIcons.coverage.test.ts` |
 
-The canonical wiring recipe is `design/building-pixel-wave/README.md`: measure
-each PNG's transparent bottom-pad rows, `offsetY = round(padRows × 86.4 / 1024)`,
-validate the method against known-good anchors first, and never reuse another
-sprite's number.
+The current anchor recipe is `tools/sprites/gen-building-anchors.mjs`, which
+computes offsets from image alpha bounds and distinguishes 1×1 from `farmField`'s
+2×2 footprint. [`design/building-pixel-wave/README.md`](../design/building-pixel-wave/README.md)
+preserves the original manual measurement workflow.
 
 ### 4.7 The uncommitted toolbox (`local/`, gitignored)
 
-`local/measure-building-bottom-pad.mjs` (the measurement tool the recipe depends
-on), `local/farm-tools/` (`analyze-edges`, `clean-bg`, `inspect-islands`,
+`local/measure-building-bottom-pad.mjs` (the old manual measurement tool; no
+longer required by the generated anchor workflow), `local/farm-tools/` (`analyze-edges`, `clean-bg`, `inspect-islands`,
 `measure-sprite`, `render-preview`, `zoom-preview`), plus prompt caches
 (`local/sprite-prompts/`, `local/prompts/`, `local/farm-prompts/`) and wave logs.
 **Tooling the documented recipe requires is not in version control.**
@@ -334,11 +323,11 @@ Consequences worth knowing:
 - **Only `building-pixel-*` registers.** The legacy `building-classic-*`,
   `building-blocky-*`, `-raw`, `-variant*` files in the same folder are excluded
   by the glob pattern and the filename grammar, not by an allowlist.
-- **`assetDescriptors.ts` lost 106 `?url` imports and the 114-row record**; the
+- **`assetDescriptors.ts` lost 106 `?url` imports and the generated key list**; the
   missing-PNG failure mode those static imports used to give `tsc` is now a
   `console.warn` at module load plus the guard test.
-- **The stale two-list duplication (F1) is gone**, but `BUILDING_ANCHOR_OVERRIDES`
-  (F2) remains hand-measured — generating keys is not generating anchors.
+- **The stale two-list duplication (F1) is gone**, and F2's hand-measured anchor
+  table was replaced by generated alpha-bound offsets; see §4.9.
 - The engine's `pickStyleForBuilding` fall-through was made **order-independent**
   in the same change: a sorted key list would otherwise let the `pixel-alt`
   farm-plot art win the fall-through for `farmField`, because
@@ -347,6 +336,24 @@ Consequences worth knowing:
   and `test/engine/styleResolver.test.ts` pins it.
 - Drift gate: `npm run gen:sprite-keys:check` (also run by
   `npm run validate-assets`), plus `test/render/buildingSpriteKeys.test.ts`.
+
+### 4.9 Anchor codegen and exhaustive building coverage (2026-10-11)
+
+`tools/sprites/gen-building-anchors.mjs` scans `building-pixel-*.png` alpha
+bounds and writes the sorted 114-key
+`src/render/generated/buildingAnchorOverrides.ts`. `npm run
+gen:building-anchors:check` compares the generated values with the checked-in
+file. The `farmField` 2×2 plots use their own footprint scale; all other pixel
+buildings use the 1×1 scale.
+
+This codegen does not replace the manual coverage declaration:
+`packages/engine/src/buildingSpriteCoverage.ts` is an exhaustive
+`Record<BuildingKind, ...>` for levels 1–3, including a reason for every
+deliberately absent level. A missing BuildingKind therefore fails the type
+check, and `test/engine/buildingSpriteCoverage.test.ts` verifies declared keys
+against generated keys. `npm run validate-assets` checks key/anchor drift plus
+the legacy manifest and horse-frame gates; the BuildingKind coverage test runs
+separately in `npm run test:unit`.
 
 ---
 
@@ -360,14 +367,17 @@ Consequences worth knowing:
 | Arena art coverage | `test/render/unitArenaDescriptors.test.ts` | FS checks (every catalog id has idle art; every file matches `<id>-<pose>.png` with a known pose/id) + **static source-scan** of `assetDescriptors.ts` (glob, key template, `unitArenaKey`, ALL_DESCRIPTORS aggregation, `bottom`/`1.3`/`128` contract) |
 | Icon coverage | `test/data/unitIcons.coverage.test.ts` | every catalog id has a non-empty valid PNG + appears in `unitImages.ts`'s KNOWN map (source-scan) |
 | Roster/banner parity | `test/data/unitCatalogParity.test.ts` | rosters ↔ `UNIT_CATALOG_IDS` ↔ `unit_types.faction_id` (DB) + **every shipped faction has a banner file** |
-| Legacy manifest + building keys | `npm run validate-assets` → `tools/sprites/validate-assets.mjs` | `SPRITE_FILES` (31 legacy files) exist; horse run-frame alignment (`tune-run-frames.mjs --check`, ≤2px drift); **the generated building-sprite key list is in sync with disk (`gen-building-sprite-keys.mjs --check`)** |
+| Asset drift gates | `npm run validate-assets` → `tools/sprites/validate-assets.mjs` | 31 legacy manifest files exist; generated building keys and anchors match disk; horse run-frame base/existence/alignment checks pass |
+| Building-kind sprite coverage | `test/engine/buildingSpriteCoverage.test.ts` in `npm run test:unit` | Exhaustive manual `Record<BuildingKind, levels 1–3>` declarations match generated keys; intentional absences require reasons |
 | Pixels | `npm run test:visual` → `tools/run-test.mjs visual` → `test/visualRegression.test.ts` | 9 fixed scenes diffed against `test/visual-baselines/` (`adventure-overview`, `charter-traveling`, `charter-constructing`, `city-view-parallax-on/-off`, plus the 4 battle-arena scenes added with the 2026-09-29 arena sprites); `--update-baselines` script for deliberate churn |
-| Pre-commit | `precommit-checker` agent (`.kilo/agents/precommit-checker.md`) | `npm run build` + `lint:deps` + `test:all` |
+| Pre-commit | `precommit-checker` agent (`.kilo/agent/precommit-checker.md`) | `npm run build` + `lint:deps` + `test:all` |
 | Alpha damage | `repair-alpha.mjs --check` | available as a gate but **not wired into any npm script or the precommit gate** |
 
 ---
 
 ## 6. Findings (the upgrade input)
+
+F4/F5 retain 2026-10-10 inventory counts as historical snapshots; the status below records which structural gaps have since closed.
 
 **Consolidation**
 
@@ -382,16 +392,14 @@ Consequences worth knowing:
   source; the client consumes `BUILDING_SPRITE_FILES`/`BUILDING_SPRITE_ALIASES`
   from `@heroes/engine` and resolves URLs through one glob. Guarded by
   `test/render/buildingSpriteKeys.test.ts` plus `npm run validate-assets`.
-- **F2 — The anchor table is hand-measured and half-documented.** 114 rows of
-  `BUILDING_ANCHOR_OVERRIDES`, admitted in-file to be "an eyeballed baseline,
-  not a strict geometric solve", two formulas in play (86.4 vs farmField's
-  172.8), and the measurement tool lives in gitignored `local/`.
-- **F3 — `assetDescriptors.ts` had grown to 1070 lines with 167 hand-written
-  `?url` imports**, while the same file already proved the glob pattern for three
-  families (horse, arena, banners). ~~Buildings were the last hand-wired
-  family~~ — **RESOLVED 2026-10-10** by the codegen (§4.8); the building imports
-  and the 114-row record are gone. The remaining hand-written volume in that
-  file is the anchor table (F2) plus the castle/resource descriptor sets.
+- **F2 — The anchor table was hand-measured and half-documented. RESOLVED 2026-10-11.**
+  `gen-building-anchors.mjs` now generates all 114 alpha-bound offsets into
+  `src/render/generated/buildingAnchorOverrides.ts`; `--check` detects drift.
+  The 1×1 and `farmField` 2×2 conventions are documented in §4.9.
+- **F3 — Building registration was hand-wired. RESOLVED 2026-10-10/11.**
+  Building keys and anchor offsets are now code-generated; `assetDescriptors.ts`
+  resolves the files through one glob. Castle/resource descriptors and unit-icon
+  `KNOWN` wiring remain separate registries.
 - **F4 — `tools/sprites/` holds 34 files**, 25 of them one-off FLUX scripts
   (`flux-farm-variant2..5`, `flux-market-variant2..5`, …) with prompts embedded
   in code and each carrying its own copy of the downscale/outline HTML.
@@ -400,12 +408,10 @@ Consequences worth knowing:
   `idle-`, `pose-`, `styleA/B-`, `wave3-`, `.regen`, `.retry`, `-v3`). The 1024
   masters are gitignored, so reproducibility depends on that scattered prompt
   set being complete.
-- **F6 — Documentation drift.** The skill header says "Two project scripts" and
-  lists four; technical-spec §5.4 lists three (omits `repair-alpha.mjs`) and its
-  file table still lists `cityBuildingDraw.ts` (1392 lines, deleted) and
-  `paint2d/buildings.ts` (deleted); `paint2d/README.md` still whitelists the
-  deleted style leaves and calls the deps builder "forthcoming"; the
-  dep-cruiser rule comment and the seam test still name `cityBuildingDraw`.
+- **F6 — Documentation drift. RESOLVED 2026-10-11.** The render technical spec,
+  paint2d boundary README, this pipeline map, and the docs catalog now describe
+  the current scene/painter and generated-key/anchor paths; obsolete render paths
+  are explicitly labeled as historical.
 - **F7 — Dead legacy draw path.** `sprites.ts`'s `drawCastleSprite` /
   `drawResourceIcon` / `drawHeroSprite` / `drawHorseSprite` have no production
   caller (only `HERO_PROCEDURAL_DRAWERS` is imported, by `GameEngine.ts:3`), and
@@ -418,20 +424,22 @@ Consequences worth knowing:
 
 **Structural constraints that are missing**
 
-- **F9 — `validate-assets` covers only the 31-file legacy manifest.** Nothing
-  cross-checks `BUILDING_SPRITES` keys ↔ files on disk ↔ engine keys; the
-  arena/icon/banner guards are bespoke per-family tests rather than one shared
-  "registry ↔ disk" gate.
-- **F10 — No exhaustiveness constraint for buildings.** `BuildingKind` (36) ×
-  levels 1–3 has no compile-time or test-time completeness requirement; the
-  blank-tile bug class (crypt-2 / gunnersRedoubt-2 / worldrootGrove-2) is
-  exactly this gap. Since drawing is now sprite-only, a missing key is a
-  visible hole.
+- **F9 — Asset checks are split across generators and tests. PARTIALLY RESOLVED.**
+  `validate-assets` now checks the legacy manifest, generated building-key drift,
+  generated anchor drift, and horse-frame alignment. Separate unit tests guard
+  building completeness and arena/icon/banner parity; there is not yet one
+  registry-to-disk walk covering every asset family.
+- **F10 — No exhaustiveness constraint for buildings. RESOLVED 2026-10-11.**
+  `packages/engine/src/buildingSpriteCoverage.ts` is an exhaustive per-kind,
+  levels 1–3 `Record`; intentional gaps require a reason. Its unit test checks
+  the declared keys against generated keys, closing the blank-tile bug class.
 - **F11 — Icon wiring is hand-maintained** (`unitImages.ts`, 37 imports) even
   though `icons/` follows the same `<id>.png` convention the arena glob uses.
-- **F12 — No provenance index.** Asset → prompt → script invocation is not
-  recorded anywhere committed; prompts are split across five `design/` folders
-  and gitignored `local/`.
+- **F12 — Per-asset provenance is incomplete. PARTIALLY ADDRESSED.**
+  [`asset-provenance.md`](./asset-provenance.md) indexes the committed workflows
+  and records the metadata future assets should carry. Existing files still lack
+  a complete committed asset → prompt → model/request/seed record; no missing
+  historical metadata is inferred.
 - **F13 — The alpha/run-frame gates aren't in the standard gate.**
   `repair-alpha.mjs --check` and `tune-run-frames.mjs --check` are powerful
   CI-able gates, but only the latter runs (inside `validate-assets`), and
@@ -443,28 +451,24 @@ Consequences worth knowing:
 1. ~~**Single source of truth for building sprites**: make `BUILDING_SPRITES`
    glob-driven and derive the engine's `BUILDING_SPRITE_KEYS` from it, with a
    parity test (F1, F3).~~ **DONE 2026-10-10** — codegen landed; see §4.8.
-2. **Computed anchors**: move `BUILDING_ANCHOR_OVERRIDES` to a generated table
-   produced by a committed measurement script (promote `local/measure-building-bottom-pad.mjs`
-   into `tools/sprites/`), with the 2×2 farmField convention as the documented
-   default (F2).
+2. ~~**Computed anchors**: generate the anchor map from image alpha bounds and
+   document the 2×2 farmField convention (F2).~~ **DONE 2026-10-11** — see §4.9.
 3. **One post-process module**: factor the shared strip/repair/specks/outline
-   passes into a single `tools/sprites/postprocess.mjs` used by the skill, the
+   passes into a single shared post-process helper used by the skill, the
    FLUX scripts, and the wave downscalers (F4, F5).
 4. **One prompt registry**: consolidate `design/**/prompts` + `local/*prompts*`
    into `design/sprites/prompts/<family>/<asset>.txt` with a naming convention
    and an index (F12).
-5. **One shared registry↔disk gate**: a single `npm run validate-assets`
-   extension that walks every family (buildings, arena, icons, banners, horse
-   frames) and cross-checks keys ↔ files ↔ (engine list), plus wire
-   `repair-alpha --check` into `test:all` (F9, F13).
-6. **Compile-enforced building completeness**: an exhaustive
-   `Record<BuildingKind, Record<1|2|3, string>>` (or a test) so a missing level
-   fails the build (F10).
+5. **One shared registry↔disk gate** remains a follow-up: the building family
+   has generated key/anchor checks, while arena/icons/banners use focused tests;
+   `repair-alpha --check` is still outside the standard gate (F9, F13).
+6. ~~**Compile-enforced building completeness** (F10).~~ **DONE 2026-10-11** —
+   `buildingSpriteCoverage.ts` plus `test/engine/buildingSpriteCoverage.test.ts`.
 7. **Delete the dead path**: retire `sprites.ts`'s draw helpers to one
    `drawWithDescriptor` implementation (F7), and drop `ApiSpriteSource` /
    `VariantAwareSource` or give them real callers (F8).
-8. **Doc refresh** as part of any of the above: SKILL.md header count,
-   technical-spec §5.4 + file table, `paint2d/README.md` (F6).
+8. ~~**Doc refresh** for current codegen and painter paths (F6).~~ **DONE 2026-10-11** —
+   see the render spec, paint2d README, and this page.
 
 ---
 
@@ -472,24 +476,27 @@ Consequences worth knowing:
 
 | Path | Role |
 |---|---|
-| `src/render/assetDescriptors.ts` | keys, descriptors, globs, `BUILDING_SPRITES` (glob-resolved), `BUILDING_ANCHOR_OVERRIDES` |
+| `src/render/assetDescriptors.ts` | keys, descriptors, asset globs, generated building key/anchor imports |
 | `src/render/assets.ts`, `assetSource.ts` | `SpriteProvider` + source chain |
 | `src/render/paint2dDefaults.ts` | the only legal bridge to the Vite-`?url` layer; run-frame + arena resolvers |
 | `src/render/scene/paint2d/{index,deps,colors,geometry}.ts` | painter (single-file dispatcher) |
 | `src/render/scene/sceneBuilder/{adventure,city,battle}Scene.ts` | scene decisions |
+| `src/render/generated/buildingAnchorOverrides.ts` | generated 114-key alpha-bound building anchor map |
 | `src/render/renderer.ts`, `cityRenderer.ts`, `src/screens/combat/arena/paint.ts` | entry points |
 | `src/state/settings.ts` | user-facing sprite/style settings |
 | `src/data/unitImages.ts` | unit icon wiring (hand-maintained) |
 | `packages/engine/src/generated/buildingSpriteKeys.ts` | **generated** building-sprite keys (`BUILDING_SPRITE_FILES` / `_ALIASES` / `BUILDING_SPRITE_KEYS`) |
 | `tools/sprites/gen-building-sprite-keys.mjs` | the codegen: `npm run gen:sprite-keys` / `:check` |
+| `tools/sprites/gen-building-anchors.mjs` | generated alpha-bound offsets: `npm run gen:building-anchors` / `:check` |
 | `packages/engine/src/styleResolver.ts` | consumes the generated list; `pickStyleForBuilding` (order-independent fall-through), `farmFieldStyleAt` |
+| `packages/engine/src/buildingSpriteCoverage.ts` | exhaustive manual per-kind/level key declaration; separate unit-test coverage gate |
 | `.kilo/skills/building-sprite-gen/` | skill + 4 Gemini/alpha scripts (auto-regenerates keys) |
-| `tools/sprites/` (35 files) | procedural gen, FLUX scripts, the key codegen, validation, run-frame tuning |
+| `tools/sprites/` | procedural/FLUX helpers, building key and anchor generators, validation, run-frame tuning |
 | `design/arena-unit-sprites/`, `design/building-pixel-wave/` | wave masters/prompts/helpers, wiring recipe |
-| `local/` (gitignored) | measurement + probe tools, prompt caches, logs |
+| `local/` (gitignored) | historical measurement/probe tools, prompt caches, and logs; not required by current anchor codegen |
 | `dependency-cruiser.cjs`, `test/render/paint2d.*.test.ts` | structural constraints |
 | `test/data/unitIcons.coverage.test.ts`, `unitCatalogParity.test.ts`, `test/helpers/unitIds.ts` | coverage guards |
 | `test/render/buildingSpriteKeys.test.ts` | generated-keys ↔ disk ↔ engine parity + no-hand-wired-imports scan |
 | `test/visualRegression.test.ts`, `test/visual-baselines/` | pixel gate |
 | `docs/art-style.md` | canonical art direction + procedural extend recipe |
-| `src/render/docs/technical-spec.md` | render-module spec (partly stale — F6) |
+| `src/render/docs/technical-spec.md` | maintained render-module specification |

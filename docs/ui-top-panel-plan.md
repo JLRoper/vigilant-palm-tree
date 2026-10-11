@@ -1,5 +1,9 @@
 # UI panel plan: global top bar + contextual detail panels
 
+<!-- docs:verified 2026-10-11 -->
+
+**Status:** Historical proposal. Toolbar, selection panels, and shared menus have since evolved; do not treat the layout below as the current UI contract. Current screen code is under `src/screens/` and orchestration is in `src/managers/UIManager.ts`.
+
 ## Goal
 
 Move the most important game-wide information into a persistent top-of-screen panel, while keeping detailed information for heroes, villages, and settlements available only when the player selects or clicks them.
@@ -7,9 +11,9 @@ Move the most important game-wide information into a persistent top-of-screen pa
 ## Current fit in the codebase
 
 The existing UI is already split across a few places:
-- [src/views/hud.ts](../src/views/hud.ts) builds the current HUD text line.
+- [src/screens/shared/toolbar.ts](../src/screens/shared/toolbar.ts) builds the current HUD text line.
 - [src/managers/UIManager.ts](../src/managers/UIManager.ts) owns the HUD refresh cycle and opens the detail menus.
-- [src/views/heroInfoMenu.ts](../src/views/heroInfoMenu.ts) and [src/views/settlementInfoMenu.ts](../src/views/settlementInfoMenu.ts) already provide detailed panels for selected entities.
+- [src/screens/heroes/heroInfoMenu.ts](../src/screens/heroes/heroInfoMenu.ts) and [src/screens/settlements/settlementInfoMenu.ts](../src/screens/settlements/settlementInfoMenu.ts) already provide detailed panels for selected entities.
 - [index.html](../index.html) contains the fixed HUD container that can be expanded into a more structured top bar.
 
 ## Proposed layout

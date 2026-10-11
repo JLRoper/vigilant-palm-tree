@@ -1,6 +1,10 @@
 # City View — Implementation Plan
 
-Locked design for the in-settlement city screen. Supersedes the high-level design in `city-view.md` for tier sizing (this doc replaces the implicit "10×10 default" with a tiered scheme) and adds the isometric projection plan.
+<!-- docs:verified 2026-10-11 -->
+
+**Status:** Historical implementation plan; the city view shipped, and this proposal is not a current TODO list. Current settlement rules are in [`settlements.md`](./settlements.md); the current render path is documented in [`../src/render/docs/technical-spec.md`](../src/render/docs/technical-spec.md). The old high-level city-view brief referenced in the original planning round is not present; current settlement rules are in `settlements.md`.
+
+Locked design for the in-settlement city screen. This plan replaced the implicit "10×10 default" with tiered sizing and recorded the isometric projection proposal.
 
 ## Locked decisions (from planning round)
 
@@ -97,7 +101,7 @@ cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level
 buildings: Array<{ cell: { x: number; y: number }; kind: BuildingKind; level: 1|2|3 }>;
 ```
 
-Building kinds (v1, deferred beyond mines per `city-view.md`): `townHall`, `mageGuild`, `market` — declared but unused until UI ships.
+Building kinds (v1, deferred beyond mines per the original city-view design note): `townHall`, `mageGuild`, `market` — declared but unused until UI ships.
 
 DB: add three JSONB columns to the settlements JSONB blob, defaulting to `[]`. Migration is small.
 
@@ -108,7 +112,7 @@ DB: add three JSONB columns to the settlements JSONB blob, defaulting to `[]`. M
 - [ ] `cityGrid.ts` math + unit tests against hand-computed coords.
 - [ ] `cityRenderer.drawEmptyGrid(settlement)` — diamond tiles, no content.
 - [ ] `cityView.ts` opens on double-click of a friendly settlement; closes on Esc / "back".
-- [ ] Dim adventure map behind the overlay (existing battle modal pattern in `src/views/battleModal.ts` is the reference).
+- [ ] Dim adventure map behind the overlay (existing battle modal pattern in `src/screens/combat/battleModal.ts` is the reference).
 - [ ] Camera auto-frames per tier: 5×5 / 10×10 use fixed cell size; 15×15 fits to viewport with margin.
 
 **Done when:** opening any friendly settlement shows an empty diamond grid sized to its tier.
@@ -142,13 +146,13 @@ DB: add three JSONB columns to the settlements JSONB blob, defaulting to `[]`. M
 ### Phase 5 — Build UI
 
 - [ ] Click empty cell → build menu (mine types + cancel; placeholder for non-mine buildings).
-- [ ] Click resource spot → "Build X mine here" prompt (cost preview from `city-view.md:42-45`).
-- [ ] Click existing mine → info card + upgrade button (upgrade cost = 2× construction per `city-view.md:46`).
-- [ ] Per-turn income from mines flows into existing `src/economy/income.ts` (extend, don't rewrite).
+- [ ] Click resource spot → "Build X mine here" prompt (cost preview from `historical placement-cost assumption in this plan`).
+- [ ] Click existing mine → info card + upgrade button (upgrade cost = 2× construction per `historical mine-upgrade cost assumption in this plan`).
+- [ ] Per-turn income from mines flows into existing `packages/engine/src/economy/income.ts` (extend, don't rewrite).
 
 **Done when:** building a mine, ending the turn, and starting the next shows the income increased.
 
-### Defer (per `city-view.md` + this doc)
+### Defer (per `the original city-view design note` + this doc)
 
 - Walls / fortifications.
 - Building slots beyond mines.
@@ -160,15 +164,15 @@ DB: add three JSONB columns to the settlements JSONB blob, defaulting to `[]`. M
 
 1. **Cell size constant `TILE_W = 96`** is a guess. After phase 1 ships we should eyeball it on a 1920×1080 viewport and adjust.
 2. **Threshold for fit-to-view (currently `> 10×10`)** should be a single named constant in `cityView.ts`.
-3. **Spot count (currently 4–6 per `city-view.md:27`)** should scale with tier — 5×5 probably wants ~3, 15×15 wants ~8. Decide in phase 4.
+3. **Spot count (currently 4–6 per `historical spot-count assumption in this plan`)** should scale with tier — 5×5 probably wants ~3, 15×15 wants ~8. Decide in phase 4.
 4. **Animation on enter/leave** — current plan is instant cut between adventure map and city view. If it feels janky we can add a 200ms zoom/pan tween later (low cost with the math above).
 5. **`Castle.level` already exists in `src/entities/settlement.ts:4`** — verify it maps cleanly to the tier table before phase 4.
 
 ## Cross-references
 
-- High-level design (now superseded for tier sizing): `docs/city-view.md`
+- High-level design (now superseded for tier sizing): `docs/settlements.md`
 - Settlement data model: `src/entities/settlement.ts`, `docs/settlements.md`
-- Economy / per-turn yield: `src/economy/income.ts`, `docs/economy.md`
+- Economy / per-turn yield: `packages/engine/src/economy/income.ts`, `docs/economy.md`
 - Art direction for resource icons & skybox: `docs/art-style.md`
 - Skybox variant system & parallax layers: `scripts/split-skybox-layers.ts`, `tools/sprites/flux-skybox.mjs`
-- Overlay pattern (battle modal is the reference): `src/views/battleModal.ts`
+- Overlay pattern (battle modal is the reference): `src/screens/combat/battleModal.ts`

@@ -24,7 +24,7 @@ Captured from the Docker deployment (`docker compose up` → http://localhost:51
 | [Player guide](./player-guide.md) | New Game options, movement, chartering, combat, logistics, and hotkeys |
 | [Operations guide](./operations.md) | Local DB safety, ports, tests, migrations, LAN, AI driver, and deployment |
 | [Technical specification](../TECHNICAL_SPECIFICATIONS.MD) | Current system architecture and API/persistence model |
-| [Agent instructions](../AGENTS.md) | Workspace safety, test/build gates, and release/versioning rules |
+| [Agent instructions](../AGENTS.md) | Workspace safety, verification gates, and release/versioning rules |
 | [Current module map](./module-documentation-and-relationships.md) | Current packages and module boundaries |
 | [Render technical spec](../src/render/docs/technical-spec.md) | Live renderer and asset architecture |
 | [Paint2D boundary](../src/render/scene/paint2d/README.md) | Current scene painter seam |
@@ -41,6 +41,11 @@ Captured from the Docker deployment (`docker compose up` → http://localhost:51
 
 | Document | Scope and status |
 |---|---|
+| [README.md](./README.md) | This catalog and index of the documentation set. |
+| [player-guide.md](./player-guide.md) | Player-facing New Game options, movement, chartering, combat, logistics, and hotkeys. |
+| [operations.md](./operations.md) | Local development, database/test safety, AI driver, LAN, deployment, and versioning. |
+| [asset-provenance.md](./asset-provenance.md) | Existing asset workflows and provenance gaps; metadata to capture for future art. |
+| [sprite-pipelines.md](./sprite-pipelines.md) | Current asset generators, generated building keys/anchors, validation gates, and open provenance gaps. |
 | [resources.md](./resources.md) | Six game resources; food is not a world-map resource. Current tile rates and food spots. |
 | [resource-gathering.md](./resource-gathering.md) | As-built terrain densities, settlement rates, producers, costs, sinks, and open market-income finding F2. |
 | [economy.md](./economy.md) | High-level economy design intent; defer to resource-gathering for actual End Turn behavior. |

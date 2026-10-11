@@ -2,7 +2,7 @@
 
 <!-- docs:verified 2026-10-11 -->
 
-This is the current code map, verified against the repository on 2026-10-11. The executed layout plan in [`architecture.md`](./architecture.md) is historical. Current game rules and boundary types live in the workspace packages, not in a top-level `shared/` directory. There is no current `src/views/` or `src/economy/` directory.
+This is the current code map, verified against the repository on 2026-10-11. The executed layout plan in [`architecture.md`](./architecture.md) is historical. Shared boundary types live in `packages/contracts/`, game rules/economy in `packages/engine/`, and browser UI in `src/screens/`.
 
 ## Data Flow
 
@@ -60,7 +60,7 @@ The server does not depend on `src/screens/` or `src/render/`. Keep server behav
 | `src/core/`, `src/entities/`, `src/map/`, `src/data/`, `src/players/`, `src/debug/` | Client math/events, visual entities, map adapters, cached catalogs/assets, seat identity, and developer diagnostics. |
 | `src/ai/`, `src/systems/`, `src/combat/` | `src/ai/aiBrain.ts` is a compatibility re-export of engine AI; `src/systems/movement.ts` is the client arrival hook; `src/combat/testArmies.ts` supports the developer battle sandbox. |
 
-The current city scene builder is `src/render/scene/sceneBuilder/cityScene.ts`; the painter is `src/render/scene/paint2d/index.ts`. `src/render/cityBuildingDraw.ts`, `src/render/cityBuildingGen.ts`, the old `cityBuildingDraw/` folder, and `paint2d/buildings.ts` are absent. Do not use them as current module paths.
+The current city scene builder is `src/render/scene/sceneBuilder/cityScene.ts`; the painter is `src/render/scene/paint2d/index.ts`. The former procedural city-building draw/generation helpers and style-leaf folder have been retired; do not use those historical module names as current paths.
 
 ## Tests and Tooling
 

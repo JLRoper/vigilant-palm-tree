@@ -1,6 +1,8 @@
 # Resource Gathering & the Settlement Economy (as-built)
 
-**Status:** ✅ Current. This is the **as-built reference** for how resources are collected and how buildings use them, as the code actually behaves on **2026-10-01** (economy/storage/storage-cap milestone), with §4/§5/§6.6/§6.7 re-verified against the **2026-10-02 no-shared-storage / caravan logistics rework** (trade routes, caravan maintenance, recommendations, the `lobby.legacyAutoTrade` gate). Design *intent* lives in [resources.md](./resources.md) and [economy.md](./economy.md); where those older docs and this one disagree on numbers, this one matches the code (see the [drift appendix](#12-doc-drift-appendix)). Sections 9–10 were forward-looking specs when written and are **now implemented** (2026-09-27, same day) — they describe live behavior.
+<!-- docs:verified 2026-10-11 -->
+
+**Status:** Current as-built reference, re-verified against source on 2026-10-11. Design intent lives in [resources.md](./resources.md) and [economy.md](./economy.md); this page documents the actual rates, turn order, producers, sinks, and logistics. The resource definitions, terrain densities, and income code may differ from older design text; F2 remains open below.
 
 Source-of-truth paths cited below are in [`packages/engine/`](../packages/engine/src) and [`packages/contracts/`](../packages/contracts/src). The client under `src/` mirrors the same reducers (`src/state/turnController.ts` orchestrates locally; `server/app/turnService.ts` re-runs the same engine functions server-authoritatively).
 
@@ -28,18 +30,20 @@ Stockpiles are **capped, softly** (`packages/engine/src/settlement/capacity.ts`)
 - Each passable tile rolls once against a **per-terrain density table** (`RESOURCE_DENSITY`). Water and mountain are excluded entirely.
 - **Mountain spillover:** a passable tile adjacent to a mountain gets its stone and iron density boosted ×1.5 (caps 0.2 / 0.15) — mountains themselves can't hold tiles, so ore "spills" onto their borders.
 - Per-tile yields (`RESOURCE_YIELD`): **gold 20, wood 15, stone 12, iron 8, arcane 5, food 10**.
-- **Food's density is 0 on every terrain**, so food tiles never spawn and `RESOURCE_YIELD.food = 10` remains dead weight. That is a **deliberate design ruling, not a gap**: food comes from farm *buildings* inside a city, never from map tiles — see §9.
+- **Food's world-map density is 0 on every terrain**, so food resource tiles never spawn. Food is nevertheless live: city food spots drive farm-building cell multipliers, and farms, farmhouses, and granaries produce it (§8–10). `RESOURCE_YIELD.food = 10` is not a world-map food source.
 
 Density matrix as implemented:
 
-| Resource ↓ \ Terrain → | Grass | Dirt | Forest | Desert | Mountain | Water |
-|------------------------|-------|------|--------|--------|----------|-------|
-| Gold   | 6%   | 5%   | 1%    | 1%    | 0% | 0% |
-| Wood   | 2%   | 1%   | **18%** | 0.5% | 0% | 0% |
-| Stone  | 2%   | 6%   | 1%    | 1%    | 0% (spills) | 0% |
-| Iron   | 0.5% | 3%   | 0%    | 0%    | 0% (spills) | 0% |
-| Arcane | 0%   | 2%   | 0%    | **8%** | 0% | 0% |
-| Food   | 0%   | 0%   | 0%    | 0%    | 0% | 0% |
+| Resource ↓ / Terrain → | Grass | Dirt | Forest | Desert | Swamp | Snow | Mountain | Water |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Gold | 6% | 5% | 1% | 1% | 2% | 1% | 0% | 0% |
+| Wood | 2% | 1% | **18%** | 0.5% | 10% | 0.5% | 0% | 0% |
+| Stone | 2% | 6% | 1% | 1% | 0.5% | 3% | 0% | 0% |
+| Iron | 0.5% | 3% | 0% | 0% | 0% | 1% | 0% | 0% |
+| Arcane | 0% | 2% | 0% | **8%** | 3% | 0% | 0% | 0% |
+| Food | 0% | 0% | 0% | 0% | 0% | 0% | 0% | 0% |
+
+Mountain spillover applies to every adjacent **passable** terrain tile: stone and iron densities are multiplied by 1.5 and capped at 0.20 and 0.15. Mountain and water remain zero and never carry a resource tile.
 
 ## 3. Settlement resource rates (collection)
 
@@ -146,8 +150,8 @@ On the **round wrap** (last player ends) — [`advanceRound()`](../packages/engi
 
 There are three "income" surfaces and they **disagree** (see [finding F2](#F2)):
 
-- `settlementIncome()` / `playerIncome()` (`packages/engine/src/economy/income.ts`) = `pop × tax` **+ Σ building `goldPerTurn`** — this feeds the HUD's next-turn-gold display (`src/managers/UIManager.ts:473`).
-- `effectiveIncome()` (`consumption.ts:48`) = `pop × tax × morale/100` — this is what actually accrues.
+- `effectiveSettlementIncome()` (`packages/engine/src/economy/income.ts`) is a projection helper. It includes building `goldPerTurn` for display/forecasting but is not applied by End Turn.
+- End Turn pays `producerTurnOutput` plus `effectiveIncome()` (morale-scaled population tax); a `goldMine` producer is paid, but `market.goldPerTurn` is not credited.
 - `resourceRates.gold` (computed by `computeSettlementRates`, persisted, and previously rendered as a "40/turn" line) is a **phantom** — `produceSettlementResources` never consumed it, because gold is not a `WAREHOUSE_RESOURCE`. The per-turn rates display now renders **combined production** via `settlementProductionRates()` from `produceResources.ts` — `warehouseRates()`'s tile rates plus the per-building producers (§9) — (today in the logistics panel, `src/screens/logistics/logisticsModal.ts`, after the old settlement panel was deleted as an unwired second implementation): the *same loop body production uses*, so display and production cannot drift, and the panel's empty line reads **"no production"**. The persisted map is untouched.
 
 Building `goldPerTurn` therefore *appears* in the HUD but never lands in the treasury — the only gold that actually accrues from buildings is a `goldMine` producer's output (§9).
@@ -361,7 +365,7 @@ Each finding: behavior, evidence, suggestion. All are documentation-only observa
 **F1 — ~~Food is a dead-end resource~~ RESOLVED (2026-10-01).** Food now has three production sources: `farmField` / `farmhouse` / `granary` are `ProducerKind`s feeding the normal production tick (§9), every new settlement is seeded with farmland sized against **its own** food bill (§4), and morale can **recover** (§6.1) instead of being subtract-only. Before this, food had **zero** sources — tile density is 0 by design (§2) and `foodPerTurn` was never applied — so every settlement ran a permanent 100% food-deficit penalty and the economy was unwinnable. The zero tile density itself remains deliberate: food comes from farm buildings, not from tiles.
 
 <a id="F2"></a>
-**F2 — HUD income ≠ actual income (partly closed).** `playerIncome()` includes building `goldPerTurn` and feeds the HUD's next-turn gold (`src/managers/UIManager.ts:473`), but `applyEffectiveIncome()` accrues only `pop × tax × morale/100` (§6.2). *Suggest:* either include `goldPerTurn` in `effectiveIncome` or exclude it from the HUD number. *(2026-10-01: two of the three surfaces were cleaned up — `bank`'s dead `goldPerTurn: 60` was deleted from the registry, and the phantom `resourceRates.gold` line was replaced by real per-turn production — `warehouseRates()` then, combined with the building producers into `settlementProductionRates()` on 2026-10-04 — today rendered in the logistics panel, `src/screens/logistics/logisticsModal.ts`, after the old settlement panel was deleted. `market`'s HUD-only 40/turn and the HUD-vs-accrual difference itself are still open.)*
+**F2 — OPEN: market income projection is not paid by End Turn.** `effectiveSettlementIncome()` is a projection helper; it is not the End Turn credit path. End Turn pays `producerTurnOutput` plus morale-scaled population tax. `goldMine` output is paid as a producer; `market.goldPerTurn` is not credited to the treasury. The projected/HUD amount can therefore exceed actual income. Keep this finding open until the End Turn path or projection is deliberately changed.
 
 <a id="F3"></a>
 **F3 — ~~Defined-but-unwired building effects~~ PARTLY RESOLVED (2026-10-01).** `foodPerTurn` (farmField/farmhouse/granary) is now a **producer** input (§9), and `resourceYieldBonus` (mine/woodcutterHut/stoneMine/ironMine/arcaneFont) feeds producer bases at ×level (§7). Still unwired: `populationBonus` (house/apartment/farmhouse), `defenseBonus`, `unitCostReductionPct`, and the vision/speed/attack player effects — the only wired player effect is `controlRangeBonus`. *Suggest:* a population-formula hook and combat/fog wiring for the player effects — or delete the dead fields (the repo's own lesson: an unwired parallel implementation is not a safe intermediate state).
@@ -395,9 +399,9 @@ Stale claims in older docs, with corrections. The older docs were intentionally 
 |-----|-------------|----------|
 | [resources.md](./resources.md) | Aggregation over "radius of 3 hexes" | `level` → 1/2/3 hexes for L1/L2/L3 (`control.ts:13`; it was `level − 1` until 2026-10-01) |
 | [resources.md](./resources.md) | "5 resource types" | Code has 6 — food is in the type union and warehouse, and is **produced** by farm buildings (it has no tile source by design) |
-| [resources.md](./resources.md) | Source paths `src/map/resourceTiles.ts`, `src/economy/settlementRates.ts` | Engine lives in `packages/engine/src/map/` and `packages/engine/src/economy/` (client keeps `src/map/` mirrors) |
+| [resources.md](./resources.md) | Former source pointers used the old client map/economy layout | Map and settlement-rate rules live in `packages/engine/src/map/` and `packages/engine/src/economy/` |
 | [economy.md](./economy.md) | Warehouse lists wood/stone/iron/arcane only | `food` is a warehouse resource too, produced by farm producers (see F1) |
-| [economy.md](./economy.md), [settlements.md](./settlements.md) | Implementation pointers into `src/state/gameState.ts`, `src/views/…`, `src/economy/…` | Reducers are in `packages/engine/…` + `packages/contracts/…`; menus/screens under `src/screens/…`; the EndTurn pipeline is server-authoritative via `server/app/turnService.ts` |
+| [economy.md](./economy.md), [settlements.md](./settlements.md) | Older implementation pointers used the former client-side reducer/UI layout | Reducers are in `packages/engine/` + `packages/contracts/`; menus/screens under `src/screens/`; the EndTurn pipeline is server-authoritative via `server/app/turnService.ts` |
 | [README.md](./README.md) | "No food in v1" | Food exists end-to-end in the data model **and** is produced by farm buildings; only its *tile* source is zero, by design |
 
 ## 13. Cross-references
