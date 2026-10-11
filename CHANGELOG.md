@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.3.5] - 2026-10-11
+
+nginx cache gateway in front of vite preview: immutable hashed /assets, no-cache index.html, no-store and unbuffered /api so the SSE event stream is never stalled
+
 ## [0.3.4] - 2026-10-11
 
 fix(upkeep): suppress unfed-troops warnings while the entity is currently affordable (pure read-side evaluators, panel badge gates, weekly-charge cadence tooltips); the weekly charge itself is unchanged
