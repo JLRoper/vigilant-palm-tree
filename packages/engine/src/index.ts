@@ -34,6 +34,7 @@ export * from "./economy/trade";
 export * from "./economy/transfer";
 export * from "./economy/bank";
 export * from "./charter/start";
+export * from "./charter/requirements";
 export * from "./charter/travel";
 export * from "./charter/advance";
 export * from "./charter/cleanup";

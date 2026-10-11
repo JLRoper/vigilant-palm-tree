@@ -6,9 +6,8 @@ import { MAP_SEED } from "@screens/adventure/adventureView";
 import { colorForOwner } from "../state/playerColors";
 import { buildInitialGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";
-import { cityViewSizeFor } from "@heroes/engine";
+import { cityViewSizeFor, validCharterHexes } from "@heroes/engine";
 import { cachedUnitTypes } from "../data/unitCatalog";
-import { hexDistance } from "../core/hex";
 
 import { SessionManager } from "./SessionManager";
 import { GameStateManager, type PathPreviewLock } from "./GameStateManager";
@@ -379,39 +378,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
   }
 
   private computeValidCharterHexes(gs: import("../state/gameState").GameState): Set<string> {
-    const hexes = new Set<string>();
-    const settlementSet = new Set<string>();
-    for (const s of Object.values(gs.settlements)) {
-      settlementSet.add(`${s.q},${s.r}`);
-    }
-    const charterSet = new Set<string>();
-    for (const c of gs.activeCharters) {
-      charterSet.add(`${c.targetQ},${c.targetR}`);
-    }
-    const heroSet = new Set<string>();
-    for (const h of Object.values(gs.heroes)) {
-      heroSet.add(`${h.q},${h.r}`);
-    }
-
-    for (let r = 0; r < this.gameMap.height; r++) {
-      for (let q = 0; q < this.gameMap.width; q++) {
-        if (!this.gameMap.isPassable(q, r)) continue;
-        const key = `${q},${r}`;
-        if (settlementSet.has(key)) continue;
-        if (charterSet.has(key)) continue;
-        if (heroSet.has(key)) continue;
-        let tooClose = false;
-        for (const s of Object.values(gs.settlements)) {
-          if (hexDistance({ q, r }, { q: s.q, r: s.r }) < 4) {
-            tooClose = true;
-            break;
-          }
-        }
-        if (tooClose) continue;
-        hexes.add(key);
-      }
-    }
-    return hexes;
+    return validCharterHexes(gs, this.gameMap);
   }
 
   private handleStartCharter(targetQ: number, targetR: number, name: string): boolean {

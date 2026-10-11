@@ -4,9 +4,11 @@ import {
   GameMap,
   detectAdjacentEnemy,
   evaluateTradeNeeds,
+  findPath,
   mulberry32,
   normalizePlatoons,
   pickAiMove,
+  pickCharterAction,
   pickGarrisonRecruitment,
   platoonsHaveTroops,
   platoonTroopTotal,
@@ -33,8 +35,11 @@ import { aiDriverBootToken } from "./aiDriverToken";
 // enemySlots > 0), this scanner drives AI seats end-to-end in-process:
 // hydrate -> pending-defender wait check (a human-defender battle the pass
 // offered earlier: wait, or force-resolve once AI_DEFENDER_WAIT_TIMEOUT_MS
-// is exceeded) -> D13 garrison recruitment (once per round+seat) -> per-hero
-// pickAiMove/MoveHero sweeps -> walk-in gates in the client's order
+// is exceeded) -> D13 garrison recruitment (once per round+seat) -> trade-route
+// auto-accept (once per round+seat) -> B3 charter founding (StartCharter,
+// human-parity gated, once per round+seat per hero) -> per-hero sweeps
+// (pickAiMove/MoveHero, or one AdvanceCharterTravel step per iteration for a
+// chartering hero) -> walk-in gates in the client's order
 // (defending hero defers -> garrison battle via D11 compute-once + submit,
 // never applied locally -> walk-in capture -> adjacent-hero battle -- a
 // HUMAN defender gets an EnterBattle offer and the pass STOPS with no
@@ -48,7 +53,8 @@ import { aiDriverBootToken } from "./aiDriverToken";
 // Driver memory (D9) is in-process per game: the D4 RNG stream
 // (mulberry32(seed ^ round ^ seat), one per (game, round, seat), CONTINUED
 // across scans/actions, reset only when round/seat changes), the
-// once-per-round+seat recruit guard, and the garrison backoff map. All of
+// once-per-round+seat recruit and trade-route guards, the once-per-round+seat
+// per-hero B3 charter guard, and the garrison backoff map. All of
 // it is keyed by game name + the row's NUMERIC id: POST /games uses
 // ON CONFLICT (name) and can resurrect a name with a new id, so an id
 // mismatch resets the whole per-game memory.
@@ -185,6 +191,13 @@ interface GameDriverMemory {
   recruitedTurns: Set<string>;
   /** `${round}:${seat}` keys already served by the trade-route auto-accept (Phase 5, the recruitedTurns pattern). */
   tradeRouteTurns: Set<string>;
+  /**
+   * `${round}:${seat}:${heroId}` keys already attempted by the B3 charter-start
+   * section. Per-hero granularity: a hero holds at most one charter
+   * (already_chartering gates re-entry), and one broke hero must not block
+   * another rich hero's attempt.
+   */
+  charterTurns: Set<string>;
 }
 
 const memory = new Map<string, GameDriverMemory>();
@@ -477,6 +490,7 @@ function syncMemory(gameName: string, gameId: number): GameDriverMemory {
     garrisonBackoff: new Map(),
     recruitedTurns: new Set(),
     tradeRouteTurns: new Set(),
+    charterTurns: new Set(),
   };
   memory.set(gameName, fresh);
   return fresh;
@@ -487,7 +501,8 @@ function streamFor(mem: GameDriverMemory, seed: number, round: number, seat: num
   if (mem.turnKey !== key) {
     mem.turnKey = key;
     mem.rng = mulberry32((seed ^ round ^ seat) >>> 0);
-    // Prune recruit-guard and trade-route entries from finished rounds (keyed "round:seat").
+    // Prune recruit-guard, trade-route, and charter-guard entries from
+    // finished rounds (each key starts with "round:").
     for (const entry of mem.recruitedTurns) {
       const entryRound = Number(entry.slice(0, entry.indexOf(":")));
       if (Number.isInteger(entryRound) && entryRound < round) mem.recruitedTurns.delete(entry);
@@ -495,6 +510,10 @@ function streamFor(mem: GameDriverMemory, seed: number, round: number, seat: num
     for (const entry of mem.tradeRouteTurns) {
       const entryRound = Number(entry.slice(0, entry.indexOf(":")));
       if (Number.isInteger(entryRound) && entryRound < round) mem.tradeRouteTurns.delete(entry);
+    }
+    for (const entry of mem.charterTurns) {
+      const entryRound = Number(entry.slice(0, entry.indexOf(":")));
+      if (Number.isInteger(entryRound) && entryRound < round) mem.charterTurns.delete(entry);
     }
   }
   return mem.rng;
@@ -834,6 +853,66 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
     }
   }
 
+  // B3 chartering (plan .plans/20261002-1900_ai-actor-phase-3, item 7): AI
+  // seats may found settlements under the exact same rules as human players
+  // (user ruling: "Yes, AI charters with human-parity gating"). One
+  // re-hydrate first, because the recruit and trade-route sections earlier in
+  // this same pass mutate the very warehouse/purse the charter gate reads, so
+  // planning off the top-of-pass snapshot would manufacture guaranteed
+  // insufficient_wood-style rejections (the runWalkInGates re-hydrate
+  // precedent). Then one StartCharter attempt per hero not already attempted
+  // this round+seat: pickCharterAction runs the shared human-parity gate
+  // (evaluateCharterRequirements parity -- purse 2500g, founding settlement
+  // warehouse wood 20 / stone 15, hero standing on a friendly settlement, not
+  // already chartering) and the deterministic target rule (highest chartered-
+  // city production, then nearest, then record order). The guard key is added
+  // BEFORE the dispatch so exactly one attempt happens per hero per round
+  // whatever the outcome; a rejection is logged and the hero is retried next
+  // round (the recruit-loop pattern). Ordered after garrison recruitment and
+  // trade routes: the charter's 20 wood / 15 stone come from the founding
+  // settlement's warehouse, the same pool those draw from, while its 2500g
+  // comes from the hero purse, never the treasury. Deliberately NO AI
+  // treasury-withdrawal/funding step -- beyond the ruling's scope, so AI
+  // charters fire when its heroes are already funded.
+  const charterSnap = await cfg.loadGame(gameName);
+  if (!charterSnap) {
+    memory.delete(gameName);
+    return "game_gone";
+  }
+  if (!aiStillActive(charterSnap.state, seat)) return "turn_lost";
+  if (charterSnap.gameId !== mem.gameId) {
+    // The name was recreated with a new id mid-pass; stop driving. The next
+    // scan's syncMemory resets all memory for the game.
+    return "turn_lost";
+  }
+  const charterMap = new GameMap(charterSnap.seed, charterSnap.mapSize);
+  for (const heroId of heroIds) {
+    const charterKey = `${charterSnap.state.round}:${seat}:${heroId}`;
+    if (mem.charterTurns.has(charterKey)) continue;
+    mem.charterTurns.add(charterKey);
+    const action = pickCharterAction(charterSnap.state, heroId, charterMap, mem.rng);
+    if (!action) continue;
+    const started = await dispatch(ctx, {
+      kind: "StartCharter",
+      gameName,
+      actor: seat,
+      heroId,
+      targetQ: action.targetQ,
+      targetR: action.targetR,
+      settlementName: action.settlementName,
+    });
+    if ("stop" in started) {
+      if (started.stop === "turn_lost") return "turn_lost";
+      exhausted = started.stop;
+      break;
+    }
+    if (!started.outcome.ok) {
+      console.info(
+        `[aiDriver] "${gameName}" StartCharter for ${heroId} rejected (${started.outcome.reason}); no charter attempt for this hero this round`,
+      );
+    }
+  }
+
   // Whole-turn drive: sweeps of the hero roster until a full sweep moves
   // nobody, then the turn ends below. Every action re-hydrates first (D11);
   // removed heroes vanish from the loop.
@@ -861,6 +940,60 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
         const hero = snap.state.heroes[heroId];
         if (!hero) break;
         const map = new GameMap(snap.seed, snap.mapSize);
+        // B3b: a chartering hero travels its charter's route instead of
+        // taking a pickAiMove move -- startMove rejects is_chartering, so the
+        // two branches are mutually exclusive per hero and a chartering hero
+        // never produces a MoveHero. Parity reference: the human's
+        // advanceAutoTravel() (src/state/turnController.ts) -- one findPath
+        // step per iteration toward the charter target read from the hero's
+        // live charter record (never from a planning call), with other
+        // heroes' tiles blocked. The walk-in gates / adjacency-battle block
+        // is skipped for these steps, exactly like the human's own loop.
+        // Each successful step counts toward movedThisSweep so the sweep
+        // keeps running while charters travel; a rejected step drops the
+        // hero for the pass instead of spinning.
+        if (hero.isChartering) {
+          const charter = snap.state.activeCharters.find((c) => c.id === hero.charterId);
+          if (!charter || charter.phase !== "traveling") break;
+          if (hero.movementRemaining <= 0) break;
+          const occupiedHexes = new Set<string>();
+          for (const [otherId, other] of Object.entries(snap.state.heroes)) {
+            if (otherId !== heroId) occupiedHexes.add(`${other.q},${other.r}`);
+          }
+          const path = findPath(
+            map,
+            { q: hero.q, r: hero.r },
+            { q: charter.targetQ, r: charter.targetR },
+            occupiedHexes,
+          );
+          if (path.length === 0) break;
+          const nextStep = path[0];
+          const cost = map.cost(nextStep.q, nextStep.r);
+          if (!Number.isFinite(cost) || cost < 0) break;
+          const step = await dispatch(ctx, {
+            kind: "AdvanceCharterTravel",
+            gameName,
+            actor: seat,
+            heroId,
+            fromTile: { q: hero.q, r: hero.r },
+            toTile: nextStep,
+            cost,
+          });
+          if ("stop" in step) {
+            if (step.stop === "turn_lost") return "turn_lost";
+            exhausted = step.stop;
+            break sweep;
+          }
+          if (!step.outcome.ok) {
+            console.info(
+              `[aiDriver] "${gameName}" AdvanceCharterTravel for ${heroId} rejected (${step.outcome.reason}); dropping the action for this pass`,
+            );
+            skippedHeroes.add(heroId);
+            break;
+          }
+          movedThisSweep += 1;
+          continue;
+        }
         const move = pickAiMove(
           snap.state,
           heroId,

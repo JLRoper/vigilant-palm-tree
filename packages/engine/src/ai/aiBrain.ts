@@ -15,6 +15,9 @@ import {
   type RecruitSource,
 } from "../settlement/recruitUnits";
 import { TERRAIN_COST } from "../map/terrain";
+import { RESOURCES } from "../map/resourceTiles";
+import { computeSettlementRates, generateSettlementName } from "../economy/settlementRates";
+import { evaluateCharterRequirements, validCharterHexes } from "../charter/requirements";
 
 export interface AiMove {
   toTile: Axial;
@@ -187,6 +190,58 @@ function garrisonPurchases(
 
 function powerPerGold(source: RecruitSource, unitTypes: Record<string, UnitType>): number {
   return unitPower(unitTypes[source.entry.unitTypeId]) / source.entry.goldCost;
+}
+
+export interface CharterAction {
+  heroId: string;
+  targetQ: number;
+  targetR: number;
+  settlementName: string;
+}
+
+// A charter is only founded where the hero can plausibly walk soon — the same
+// reach style as the settlement target bands above.
+export const CHARTER_TARGET_REACH = 8;
+
+// B3 chartering: the human-parity gate first (the shared evaluator, so the AI
+// is held to exactly the purse/warehouse rules a human player is), then the
+// best legal target — highest chartered-city production, nearest to the hero,
+// then stable record order. Pure and deterministic: no rng is consumed unless
+// a name is actually drawn, and the legal target set is the same valid-hex
+// rule the client's placement overlay uses.
+export function pickCharterAction(
+  state: GameState,
+  heroId: string,
+  map: GameMap,
+  rng: () => number,
+): CharterAction | null {
+  if (!evaluateCharterRequirements(state, heroId).canStart) return null;
+  const hero = state.heroes[heroId];
+  if (!hero) return null;
+
+  const valid = validCharterHexes(state, map);
+  const candidates: Array<{ q: number; r: number; rateSum: number; dist: number }> = [];
+  for (let r = 0; r < map.height; r++) {
+    for (let q = 0; q < map.width; q++) {
+      if (!valid.has(`${q},${r}`)) continue;
+      const dist = hexDistance(hero, { q, r });
+      if (dist > CHARTER_TARGET_REACH) continue;
+      const rates = computeSettlementRates(map, q, r, 1).rates;
+      let rateSum = 0;
+      for (const resource of RESOURCES) rateSum += rates[resource] ?? 0;
+      candidates.push({ q, r, rateSum, dist });
+    }
+  }
+  if (candidates.length === 0) return null;
+
+  candidates.sort((a, b) => b.rateSum - a.rateSum || a.dist - b.dist || a.q - b.q || a.r - b.r);
+  const best = candidates[0];
+  return {
+    heroId,
+    targetQ: best.q,
+    targetR: best.r,
+    settlementName: generateSettlementName(rng, hero.ownerId),
+  };
 }
 
 export function pickAiMove(

@@ -5,15 +5,24 @@ import {
   mulberry32,
   normalizePlatoons,
   pickAiMove,
+  pickCharterAction,
   pickGarrisonRecruitment,
   resolveBattle,
   evaluateTradeNeeds,
+  buyWagons,
+  computeSettlementRates,
+  findPath,
+  startCharter,
+  stepTravelCharter,
+  CHARTER_GOLD_COST,
+  CHARTER_WAREHOUSE_COST,
+  WAGON_COST,
   type MapSize,
   type PendingBattleMarker,
   type UnitType,
 } from "@heroes/engine";
-import { hexDistance, HEX_DIRECTIONS } from "@heroes/contracts";
-import type { Axial, Command, HeroId } from "@heroes/contracts";
+import { hexDistance, HEX_DIRECTIONS, MOVEMENT_PER_TURN } from "@heroes/contracts";
+import type { Axial, CharterState, Command, HeroId } from "@heroes/contracts";
 import {
   AI_DEFENDER_OWNER_MISSING_AUDIT_KIND,
   AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND,
@@ -39,7 +48,7 @@ import {
 } from "../../server/app/aiDriver";
 import { aiDriverBootToken } from "../../server/app/aiDriverToken";
 import { pool } from "../../server/persistence/db";
-import { makeHero, makePlayer, makeSettlement, makeState, emptyWarehouse } from "../charter/_helpers";
+import { emptyWarehouse, makeCharter, makeHero, makePlayer, makeSettlement, makeState } from "../charter/_helpers";
 
 // Injectable-seam coverage for the server-side AI driver
 // (server/app/aiDriver.ts), on the configureDropPolicy pattern: the clock,
@@ -105,6 +114,7 @@ function aiTurnWorld(
     round?: number;
     seed?: number;
     settlements?: ReturnType<typeof makeSettlement>[];
+    activeCharters?: CharterState[];
   },
 ): AiDriverGameSnapshot {
   const state = makeState({
@@ -114,6 +124,7 @@ function aiTurnWorld(
     ],
     heroes: [...heroes, makeHero("h0", 0, 22, 16, { movementRemaining: 0 })],
     settlements: opts?.settlements ?? [],
+    activeCharters: opts?.activeCharters ?? [],
     activePlayerId: 1,
     phase: { kind: "AI_TURN", playerId: 1 },
     round: opts?.round ?? 1,
@@ -140,8 +151,9 @@ interface ScriptedHarness {
 
 // Scripted dispatch mirroring the real handlers' narrow behavior: the
 // MoveHero staleness guard, position application, walk-in capture owner
-// flip, settlement-battle outcome application, and a per-kind outcome
-// override map for rejection scenarios.
+// flip, settlement-battle outcome application, charter founding/travel
+// through the engine reducers, and a per-kind outcome override map for
+// rejection scenarios.
 function installHarness(
   world: AiDriverGameSnapshot,
   opts?: {
@@ -156,6 +168,7 @@ function installHarness(
     stampHeartbeats?: (candidates: AiDriverCandidate[]) => Promise<void>;
     adoptGame?: (candidate: AiDriverCandidate, previousToken: string) => Promise<boolean>;
     override?: (command: Command) => AiDriverCommandOutcome | undefined;
+    cloneHydrate?: boolean;
   },
 ): ScriptedHarness {
   const candidates = opts?.candidates ?? [{ name: GAME, id: world.gameId, active_player_id: 1 }];
@@ -177,7 +190,15 @@ function installHarness(
     watchdogStaleMs: opts?.watchdogStaleMs ?? AI_TURN_HEARTBEAT_STALE_MS,
     now: clock,
     loadCandidates: async () => candidates,
-    loadGame: async () => (harness.gameGone.value ? null : world),
+    loadGame: async () => {
+      if (harness.gameGone.value) return null;
+      // The real loadGame hydrates a FRESH state object per call, so a
+      // section planned off an earlier snapshot cannot see a later section's
+      // commits -- only a re-hydrate can. cloneHydrate reproduces that for the
+      // pins that depend on it; the shared-world default keeps every other
+      // test on the harness's long-standing semantics.
+      return opts?.cloneHydrate ? cloneSnapshot(world) : world;
+    },
     loadCatalog: async () => CATALOG,
     runCommand: async (command): Promise<AiDriverCommandOutcome> => {
       const overridden = opts?.override?.(command);
@@ -242,6 +263,71 @@ function installHarness(
         world.state.phase = { kind: "AI_TURN", playerId: world.state.activePlayerId };
         return { ok: true };
       }
+      if (command.kind === "StartCharter") {
+        // The handler's gate order (server/app/commandHandler.ts's
+        // StartCharter case): terrain and settlement-distance checks against
+        // the reconstructed map first, then the engine reducer's
+        // human-parity gate (hero on a friendly settlement, purse, warehouse
+        // wood/stone) with the server-recomputed settlementId/charterId
+        // counters. Applying the real reducer keeps every rejection reason
+        // -- insufficient_gold, insufficient_wood, already_chartering,
+        // hero_not_at_friendly_settlement -- byte-identical to the handler's.
+        const map = new GameMap(world.seed, world.mapSize);
+        if (!map.isPassable(command.targetQ, command.targetR)) {
+          return { ok: false, reason: "impassable_terrain" };
+        }
+        for (const s of Object.values(world.state.settlements)) {
+          if (hexDistance({ q: command.targetQ, r: command.targetR }, { q: s.q, r: s.r }) < 4) {
+            return { ok: false, reason: "too_close_to_settlement" };
+          }
+        }
+        const computed = computeSettlementRates(map, command.targetQ, command.targetR, 1);
+        const result = startCharter(world.state, {
+          heroId: command.heroId,
+          targetQ: command.targetQ,
+          targetR: command.targetR,
+          settlementName: command.settlementName,
+          settlementId: `s${world.state.nextSettlementId}`,
+          charterId: `ch${world.state.nextCharterId}`,
+          resourceRates: computed.rates,
+          foundedOnResource: computed.foundedOn,
+          citySpots: [],
+        });
+        if (!result.ok) return { ok: false, reason: result.reason };
+        world.state.heroes = result.state.heroes;
+        world.state.settlements = result.state.settlements;
+        world.state.activeCharters = result.state.activeCharters;
+        world.state.nextCharterId = result.state.nextCharterId;
+        world.state.nextSettlementId = result.state.nextSettlementId;
+        return { ok: true };
+      }
+      if (command.kind === "AdvanceCharterTravel") {
+        // The handler's gates in order: hero existence, ownership, the
+        // fromTile staleness guard, adjacency, toTile passability, then the
+        // real step reducer (position, trail, movement, and the charter's
+        // "constructing" flip on arrival). Cost is re-derived from the map,
+        // never trusted off the command.
+        const hero = world.state.heroes[command.heroId];
+        if (!hero) return { ok: false, reason: "no_hero" };
+        if (hero.ownerId !== command.actor) return { ok: false, reason: "forbidden_not_your_hero" };
+        if (hero.q !== command.fromTile.q || hero.r !== command.fromTile.r) {
+          return { ok: false, reason: "hero_not_at_fromTile" };
+        }
+        if (hexDistance(command.fromTile, command.toTile) !== 1) return { ok: false, reason: "not_adjacent" };
+        const map = new GameMap(world.seed, world.mapSize);
+        if (!map.isPassable(command.toTile.q, command.toTile.r)) return { ok: false, reason: "impassable" };
+        const result = stepTravelCharter(
+          world.state,
+          command.heroId,
+          command.toTile.q,
+          command.toTile.r,
+          map.cost(command.toTile.q, command.toTile.r),
+        );
+        if (!result.ok) return { ok: false, reason: result.reason };
+        world.state.heroes = result.state.heroes;
+        world.state.activeCharters = result.state.activeCharters;
+        return { ok: true };
+      }
       return { ok: true };
     },
     appendAudit: async (gameName, kind, payload) => {
@@ -255,6 +341,18 @@ function installHarness(
   if (opts?.driverToken !== undefined) options.driverToken = opts.driverToken;
   configureAiDriver(options);
   return harness;
+}
+
+// A per-call hydration copy for cloneHydrate: fresh state objects, so a
+// snapshot taken before a dispatch never observes it (exactly what a real
+// loadGame against Postgres returns). pendingBattle rides along shallow --
+// the driver only reads its three fields.
+function cloneSnapshot(world: AiDriverGameSnapshot): AiDriverGameSnapshot {
+  return {
+    ...world,
+    pendingBattle: world.pendingBattle ? { ...world.pendingBattle } : null,
+    state: structuredClone(world.state),
+  };
 }
 
 // Captures driveGameTurn's outcome through the withGameLock seam -- the only
@@ -1493,6 +1591,596 @@ test("the stale threshold scales with the candidate count (single-flight scan la
   });
   await scanOnce();
   assert.equal(adoptions.length, 1, "N=1 makes the same age stale");
+});
+
+// ---------------------------------------------------------------------------
+// B3 chartering: the AI seat FOUNDS settlements (StartCharter) and ADVANCES
+// the charters its heroes already carry (AdvanceCharterTravel) under the same
+// human-parity gate a player gets. Founding needs the provisioning: a hero
+// standing ON a friendly settlement whose warehouse holds the charter's
+// wood/stone while the hero's own purse holds its gold.
+// ---------------------------------------------------------------------------
+
+const CHARTER_MAP = new GameMap(SEED, MAP_SIZE);
+
+// The founding geometry, searched once: s-a sits ON the hero tile (the
+// founding settlement), s-b is a recruit source with no hero on it (the D13
+// section fires there), s-low is food-starved (the one trade recommendation
+// originates at s-a, whose acceptance buys a wagon OUT of s-a's warehouse --
+// 200g + 5 wood per WAGON_COST). s-a's initial wood is a fixture parameter:
+// the wagon buy spends 5 of it, so 25 leaves the 20 the charter needs and 20
+// does not. The assertions make the failure mode of a map-geometry change
+// loud instead of silently emptying these pins.
+const CHARTER_GEOMETRY = (() => {
+  const tiles = passableTiles(SEED);
+  const hero = tiles[0];
+  const rest = tiles.filter((t) => hexDistance(t, hero) > 6 && !(t.q === 22 && t.r === 16));
+  const geometry = { hero, sB: rest[0], sLow: rest[1] };
+  const state = charterStartWorld(geometry, CHARTER_GOLD_COST, 25, { movementRemaining: 0 }).state;
+  assert.ok(pickCharterAction(state, "h1", CHARTER_MAP, mulberry32(1)), "the fixture must be able to found a charter");
+  assert.equal(evaluateTradeNeeds(state, 1, CATALOG).length, 1, "the fixture produces exactly one trade recommendation");
+  assert.equal(pickGarrisonRecruitment(state, 1, CATALOG).length, 1, "the fixture produces exactly one recruit item");
+  return geometry;
+})();
+
+// The founding world: hero h1 on s-a with the charter provisioning (or a
+// named shortfall via heroGold/wood), s-b recruiting, s-low eating.
+function charterStartWorld(
+  geometry: { hero: Axial; sB: Axial; sLow: Axial },
+  heroGold: number,
+  wood: number,
+  opts?: { movementRemaining?: number },
+): AiDriverGameSnapshot {
+  return aiTurnWorld(
+    [makeHero("h1", 1, geometry.hero.q, geometry.hero.r, { gold: heroGold, movementRemaining: opts?.movementRemaining ?? 0 })],
+    {
+      settlements: [
+        makeSettlement("s-a", 1, geometry.hero.q, geometry.hero.r, {
+          gold: 1000,
+          warehouse: emptyWarehouse({ wood, stone: CHARTER_WAREHOUSE_COST.stone, food: 500 }),
+        }),
+        makeSettlement("s-b", 1, geometry.sB.q, geometry.sB.r, {
+          gold: 5000,
+          warehouse: emptyWarehouse({ wood: 500, stone: 500 }),
+          buildings: [{ gx: 2, gy: 2, kind: "barracks", level: 1, style: "classic" }],
+        }),
+        makeSettlement("s-low", 1, geometry.sLow.q, geometry.sLow.r, { population: 400, warehouse: emptyWarehouse() }),
+      ],
+    },
+  );
+}
+
+// A one-settlement founding world: no recruit source and no trade
+// recommendation, so the charter section is the only thing that can dispatch.
+function charterSoloWorld(heroGold: number, wood: number, opts?: { movementRemaining?: number }): AiDriverGameSnapshot {
+  return aiTurnWorld(
+    [makeHero("h1", 1, HERO_TILE.q, HERO_TILE.r, { gold: heroGold, movementRemaining: opts?.movementRemaining ?? 0 })],
+    {
+      settlements: [
+        makeSettlement("s-a", 1, HERO_TILE.q, HERO_TILE.r, {
+          gold: 1000,
+          warehouse: emptyWarehouse({ wood, stone: CHARTER_WAREHOUSE_COST.stone }),
+        }),
+      ],
+    },
+  );
+}
+
+// Two heroes of one seat standing on the SAME settlement: the warehouse gate
+// can only fund one founding, so the second is refused by the handler's own
+// gate. Cloned hydration reproduces the driver's single pre-loop re-hydrate
+// (the second hero still plans off the pre-founding snapshot), which is the
+// only path on which the scripted handler's charter gate mirror is exercised.
+function charterSharedSettlementWorld(): AiDriverGameSnapshot {
+  return aiTurnWorld(
+    [
+      makeHero("h1", 1, CHARTER_GEOMETRY.hero.q, CHARTER_GEOMETRY.hero.r, { gold: CHARTER_GOLD_COST, movementRemaining: 0 }),
+      makeHero("h2", 1, CHARTER_GEOMETRY.hero.q, CHARTER_GEOMETRY.hero.r, { gold: CHARTER_GOLD_COST, movementRemaining: 0 }),
+    ],
+    {
+      settlements: [
+        makeSettlement("s-a", 1, CHARTER_GEOMETRY.hero.q, CHARTER_GEOMETRY.hero.r, {
+          warehouse: emptyWarehouse({ wood: CHARTER_WAREHOUSE_COST.wood, stone: CHARTER_WAREHOUSE_COST.stone }),
+        }),
+      ],
+    },
+  );
+}
+
+// Two funded heroes of one seat on two settlements: per-hero granularity
+// means one broke hero must not block the other's attempt. No recruit source
+// (both settlements carry a hero) and no trade recommendation (neither is
+// food- or gold-low), so the charter section is the only thing that can
+// dispatch.
+const CHARTER_PAIR_TILES = (() => {
+  const tiles = passableTiles(SEED);
+  const h1 = tiles[0];
+  const h2 = tiles.find((t) => hexDistance(t, h1) >= 6 && !(t.q === 22 && t.r === 16));
+  assert.ok(h2, "the fixture seed must offer a second hero tile far from the first");
+  return { h1, h2 };
+})();
+
+function charterPairWorld(): AiDriverGameSnapshot {
+  const g = CHARTER_PAIR_TILES;
+  return aiTurnWorld(
+    [
+      makeHero("h1", 1, g.h1.q, g.h1.r, { gold: CHARTER_GOLD_COST, movementRemaining: 0 }),
+      makeHero("h2", 1, g.h2.q, g.h2.r, { gold: CHARTER_GOLD_COST, movementRemaining: 0 }),
+    ],
+    {
+      settlements: [
+        makeSettlement("s-a1", 1, g.h1.q, g.h1.r, {
+          warehouse: emptyWarehouse({ wood: CHARTER_WAREHOUSE_COST.wood, stone: CHARTER_WAREHOUSE_COST.stone }),
+        }),
+        makeSettlement("s-a2", 1, g.h2.q, g.h2.r, {
+          warehouse: emptyWarehouse({ wood: CHARTER_WAREHOUSE_COST.wood, stone: CHARTER_WAREHOUSE_COST.stone }),
+        }),
+      ],
+    },
+  );
+}
+
+// Travel fixtures: a hero pre-seeded with a charter (its founding happened in
+// an earlier pass) and two targets at known path distances. ARRIVE sits
+// comfortably inside a full turn of movement (the charter flips to
+// "constructing" on the last step); EXHAUST sits outside it (the final step
+// is dispatched, the handler refuses it for insufficient_movement, and the
+// hero is dropped for the pass).
+const TRAVEL = (() => {
+  const map = new GameMap(SEED, MAP_SIZE);
+  const hero = passableTiles(SEED)[5];
+  // The only other hero on the map (seat 0's, movement spent) blocks tiles
+  // exactly the way the driver's occupiedHexes set does.
+  const occupied = new Set<string>(["22,16"]);
+  const tiles = passableTiles(SEED);
+  const arrive = (() => {
+    for (const target of tiles) {
+      const path = findPath(map, hero, target, occupied);
+      if (path.length !== 3) continue;
+      const cost = path.reduce((sum, p) => sum + map.cost(p.q, p.r), 0);
+      // One full hex of headroom, so float slop can never turn the final step
+      // into a refused one.
+      if (cost > MOVEMENT_PER_TURN - 1) continue;
+      return { target, path, cost };
+    }
+    return null;
+  })();
+  assert.ok(arrive, "the fixture seed must offer a 3-step charter target a full turn can reach");
+  const exhaust = (() => {
+    for (const target of tiles) {
+      const path = findPath(map, hero, target, occupied);
+      if (path.length < 4) continue;
+      const cost = path.reduce((sum, p) => sum + map.cost(p.q, p.r), 0);
+      if (cost <= MOVEMENT_PER_TURN) continue;
+      return { target, path, cost };
+    }
+    return null;
+  })();
+  assert.ok(exhaust, "the fixture seed must offer a charter target a full turn cannot reach");
+  return { map, hero, occupied, arrive, exhaust };
+})();
+
+function charterTravelWorld(target: Axial, movementRemaining: number): AiDriverGameSnapshot {
+  const charter = makeCharter({
+    id: "ch-pre",
+    heroId: "h1",
+    ownerId: 1,
+    targetQ: target.q,
+    targetR: target.r,
+    settlementName: "Old Town",
+  });
+  return aiTurnWorld(
+    [makeHero("h1", 1, TRAVEL.hero.q, TRAVEL.hero.r, { movementRemaining, isChartering: true, charterId: charter.id })],
+    { activeCharters: [charter] },
+  );
+}
+
+// Mirrors the driver's B3b travel loop (server/app/aiDriver.ts): one findPath
+// step per iteration while movement remains, the charter flipping to
+// "constructing" (and the movement zeroing) on arrival, and a final step the
+// handler must refuse (insufficient_movement) which drops the hero. Pinning
+// the exact step sequence -- rather than "some movement happened" -- is what
+// makes "one hex per dispatch" and "until exhausted" testable.
+function expectedCharterSteps(
+  map: GameMap,
+  from: Axial,
+  target: Axial,
+  occupied: Set<string>,
+  movementRemaining: number,
+): { steps: Axial[]; remaining: number; arrived: boolean; refusedTail: boolean } {
+  const steps: Axial[] = [];
+  let at = { ...from };
+  let left = movementRemaining;
+  let arrived = false;
+  let refusedTail = false;
+  while (left > 0) {
+    const path = findPath(map, at, target, occupied);
+    if (path.length === 0) break;
+    const cost = map.cost(path[0].q, path[0].r);
+    if (!Number.isFinite(cost) || cost < 0) break;
+    steps.push(path[0]);
+    if (left < cost) {
+      // Dispatched, then refused by the handler: the driver logs it and drops
+      // the hero for the pass instead of spinning on it.
+      refusedTail = true;
+      break;
+    }
+    left -= cost;
+    at = path[0];
+    if (at.q === target.q && at.r === target.r) {
+      arrived = true;
+      left = 0;
+      break;
+    }
+  }
+  return { steps, remaining: left, arrived, refusedTail };
+}
+
+// The driver logs tolerated rejections via console.info (the recruit-loop
+// pattern); swapping the sink keeps those assertions hermetic.
+async function captureInfo(fn: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  const original = console.info;
+  console.info = (...args: unknown[]) => {
+    lines.push(args.map((a) => String(a)).join(" "));
+  };
+  try {
+    await fn();
+  } finally {
+    console.info = original;
+  }
+  return lines;
+}
+
+// The trade-route section's BuyWagons applied through the engine reducer --
+// the handler's own path: WAGON_COST gold + wood per wagon out of the ORIGIN
+// settlement, i.e. the same warehouse the charter gate reads. tradeOverride
+// itself deducts gold only, which would hide the very interaction the
+// re-hydrate pin below is about.
+function charterTradeOverride(world: AiDriverGameSnapshot) {
+  return (command: Command): AiDriverCommandOutcome | undefined => {
+    if (command.kind === "BuyWagons") {
+      const result = buyWagons(world.state, command.actor, command.settlementId, command.count);
+      if (!result.ok) return { ok: false, reason: result.reason };
+      world.state.settlements = result.state.settlements;
+      world.state.players = result.state.players;
+      return { ok: true };
+    }
+    if (command.kind === "CreateTradeRoute") return tradeOverride(world)(command);
+    return undefined;
+  };
+}
+
+test("B3 founding: the gate pass dispatches exactly one StartCharter per hero per round, after the same pass's other economy commands", async () => {
+  const world = charterStartWorld(CHARTER_GEOMETRY, CHARTER_GOLD_COST, 25, { movementRemaining: MOVEMENT_PER_TURN });
+  const harness = installHarness(world, { override: charterTradeOverride(world) });
+
+  await scanOnce();
+
+  const sequence = harness.commands.map((c) => c.kind);
+  const starts = commandsOfKind(harness.commands, "StartCharter");
+  assert.equal(starts.length, 1, "exactly one charter founding per hero per round");
+  assert.equal(starts[0].heroId, "h1");
+  assert.equal(starts[0].actor, 1, "the AI seat founds as the actor");
+  assert.ok(starts[0].settlementName.length > 0, "the charter carries a generated settlement name");
+  // Ordering: the recruit and trade-route sections of the SAME pass run
+  // first -- their commands spend the same warehouse/purse the charter gate
+  // reads, so founding behind them is what makes the gate honest.
+  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, 1, "the recruit fixture fires one item");
+  assert.equal(commandsOfKind(harness.commands, "BuyWagons").length, 1, "the trade section buys the suggested wagon");
+  assert.equal(commandsOfKind(harness.commands, "CreateTradeRoute").length, 1, "the trade section accepts the recommendation");
+  for (const earlier of ["RecruitUnits", "BuyWagons", "CreateTradeRoute"] as const) {
+    assert.ok(
+      sequence.indexOf("StartCharter") > sequence.indexOf(earlier),
+      `StartCharter is dispatched after the same pass's ${earlier}`,
+    );
+  }
+  // startCharter and startMove are mutually exclusive per hero: the charter
+  // is founded and then travels in the SAME pass, and never conquests.
+  const advances = commandsOfKind(harness.commands, "AdvanceCharterTravel");
+  assert.ok(advances.length >= 1, "the founded charter travels in the same pass");
+  assert.ok(sequence.indexOf("StartCharter") < sequence.indexOf("AdvanceCharterTravel"), "founding precedes travel");
+  assert.equal(commandsOfKind(harness.commands, "MoveHero").length, 0, "a chartering hero never MoveHeros");
+
+  // The scripted handler applied the engine reducer's effects: purse,
+  // provisioning warehouse, charter record, and counters.
+  const hero = world.state.heroes["h1"];
+  assert.equal(hero.gold, 0, "the purse paid CHARTER_GOLD_COST");
+  assert.equal(hero.isChartering, true);
+  assert.equal(hero.charterId, "ch0");
+  assert.equal(world.state.activeCharters.length, 1);
+  const charter = world.state.activeCharters[0];
+  assert.equal(charter.heroId, "h1");
+  assert.equal(charter.ownerId, 1);
+  assert.equal(charter.targetQ, starts[0].targetQ);
+  assert.equal(charter.targetR, starts[0].targetR);
+  assert.equal(charter.settlementName, starts[0].settlementName);
+  assert.equal(charter.phase, "traveling");
+  assert.equal(charter.daysRemaining, 10);
+  assert.equal(
+    world.state.settlements["s-a"].warehouse.wood,
+    25 - WAGON_COST.wood - CHARTER_WAREHOUSE_COST.wood,
+    "the wagon buy then the charter spent s-a's wood",
+  );
+  assert.equal(world.state.settlements["s-a"].warehouse.stone, 0, "the charter spent s-a's stone");
+  assert.equal(world.state.nextCharterId, 1, "nextCharterId advanced");
+  assert.equal(world.state.nextSettlementId, 101, "nextSettlementId advanced");
+
+  await scanOnce();
+  assert.equal(
+    commandsOfKind(harness.commands, "StartCharter").length,
+    1,
+    "the per-hero guard blocks a second founding in the same round",
+  );
+
+  // Round 2 re-arms the guard (the memory key carries the round).
+  world.state.round = 2;
+  hero.gold = CHARTER_GOLD_COST;
+  hero.isChartering = false;
+  hero.charterId = null;
+  hero.movementRemaining = 0;
+  hero.q = CHARTER_GEOMETRY.hero.q;
+  hero.r = CHARTER_GEOMETRY.hero.r;
+  hero.trail = [CHARTER_GEOMETRY.hero];
+  world.state.activeCharters = [];
+  const refreshed = world.state.settlements["s-a"];
+  refreshed.warehouse.wood = 25;
+  refreshed.warehouse.stone = CHARTER_WAREHOUSE_COST.stone;
+  await scanOnce();
+  assert.equal(commandsOfKind(harness.commands, "StartCharter").length, 2, "a new round re-arms the per-hero charter guard");
+});
+
+test("B3 gate fail: a short purse dispatches no charter command, appends no audit, and the turn still ends", async () => {
+  const world = charterSoloWorld(CHARTER_GOLD_COST - 1, CHARTER_WAREHOUSE_COST.wood);
+  const harness = installHarness(world);
+
+  await scanOnce();
+
+  assert.equal(commandsOfKind(harness.commands, "StartCharter").length, 0, "the human-parity gate refuses before any dispatch");
+  assert.equal(commandsOfKind(harness.commands, "AdvanceCharterTravel").length, 0);
+  assert.equal(world.state.activeCharters.length, 0, "no charter record was created");
+  assert.equal(world.state.heroes["h1"].isChartering, false);
+  assert.equal(world.state.heroes["h1"].gold, CHARTER_GOLD_COST - 1, "the purse is untouched");
+  assert.equal(
+    world.state.settlements["s-a"].warehouse.wood,
+    CHARTER_WAREHOUSE_COST.wood,
+    "the provisioning warehouse is untouched",
+  );
+  assert.equal(world.state.nextCharterId, 0, "no charter id was consumed");
+  assert.equal(harness.endTurns.length, 1, "the turn still completes");
+  assert.equal(harness.audits.length, 0, "a refused gate is not a turn-skipping audit");
+});
+
+test("B3 travel: a chartering hero steps one hex at a time to its target and flips the charter to constructing on arrival", async () => {
+  const world = charterTravelWorld(TRAVEL.arrive.target, MOVEMENT_PER_TURN);
+  const harness = installHarness(world);
+
+  await scanOnce();
+
+  const expected = expectedCharterSteps(
+    TRAVEL.map,
+    TRAVEL.hero,
+    TRAVEL.arrive.target,
+    TRAVEL.occupied,
+    MOVEMENT_PER_TURN,
+  );
+  assert.equal(expected.arrived, true, "a full turn of movement reaches the arrive target");
+  assert.ok(expected.steps.length >= 2, "the charter travels over several steps, not one jump");
+  const advances = commandsOfKind(harness.commands, "AdvanceCharterTravel");
+  assert.deepEqual(advances.map((a) => a.toTile), expected.steps, "the driver steps exactly the simulated route");
+  for (const step of advances) {
+    assert.equal(step.heroId, "h1");
+    assert.equal(step.actor, 1);
+    assert.equal(hexDistance(step.fromTile, step.toTile), 1, "one hex per dispatched step");
+  }
+  for (let i = 1; i < advances.length; i++) {
+    assert.deepEqual(advances[i].fromTile, advances[i - 1].toTile, "each step leaves from the previous step's tile");
+  }
+  const hero = world.state.heroes["h1"];
+  assert.equal(hero.q, TRAVEL.arrive.target.q);
+  assert.equal(hero.r, TRAVEL.arrive.target.r);
+  assert.equal(hero.movementRemaining, 0, "arrival zeroes the movement");
+  assert.deepEqual(hero.trail, [TRAVEL.hero, ...expected.steps], "the trail grows one entry per step");
+  assert.equal(world.state.activeCharters[0].phase, "constructing", "the charter flips on arrival");
+  assert.equal(commandsOfKind(harness.commands, "MoveHero").length, 0, "a chartering hero never MoveHeros");
+  assert.equal(commandsOfKind(harness.commands, "StartCharter").length, 0, "an already-chartering hero never re-founds");
+  assert.equal(harness.endTurns.length, 1, "the turn still completes");
+});
+
+test("B3 travel: steps continue until the movement runs out; the unaffordable final step is refused and dropped", async () => {
+  const world = charterTravelWorld(TRAVEL.exhaust.target, MOVEMENT_PER_TURN);
+  const harness = installHarness(world);
+  const lines = await captureInfo(() => scanOnce());
+
+  const expected = expectedCharterSteps(
+    TRAVEL.map,
+    TRAVEL.hero,
+    TRAVEL.exhaust.target,
+    TRAVEL.occupied,
+    MOVEMENT_PER_TURN,
+  );
+  assert.equal(expected.arrived, false, "the distant target is out of reach this turn");
+  assert.equal(expected.refusedTail, true, "the last step is dispatched and then refused");
+  assert.ok(expected.steps.length >= 3, "several steps fit before the movement runs out");
+  const advances = commandsOfKind(harness.commands, "AdvanceCharterTravel");
+  assert.deepEqual(advances.map((a) => a.toTile), expected.steps, "the driver steps exactly until the movement is exhausted");
+  assert.ok(lines.some((l) => l.includes("AdvanceCharterTravel for h1 rejected")), "the refused step is logged");
+  const hero = world.state.heroes["h1"];
+  assert.equal(hero.movementRemaining, expected.remaining, "the applied movement matches the simulated one");
+  assert.ok(hero.movementRemaining > 0, "movement is left, but not enough for the next hex");
+  assert.equal(world.state.activeCharters[0].phase, "traveling", "the charter stays traveling");
+  assert.equal(commandsOfKind(harness.commands, "MoveHero").length, 0, "a chartering hero never MoveHeros");
+  assert.equal(harness.endTurns.length, 1, "the turn still completes after the refused step");
+  assert.equal(harness.audits.length, 0);
+});
+
+test("B3 rejection: a refused StartCharter is logged, drops the hero for the round, and the turn still ends", async () => {
+  const world = charterSoloWorld(CHARTER_GOLD_COST, CHARTER_WAREHOUSE_COST.wood);
+  assert.ok(pickCharterAction(world.state, "h1", CHARTER_MAP, mulberry32(1)), "the fixture must be able to found a charter");
+  const harness = installHarness(world, {
+    override: (command) => (command.kind === "StartCharter" ? { ok: false, reason: "insufficient_wood" } : undefined),
+  });
+
+  const lines = await captureInfo(() => scanOnce());
+
+  assert.equal(commandsOfKind(harness.commands, "StartCharter").length, 1, "exactly one attempt per hero per round");
+  assert.ok(
+    lines.some((l) => l.includes("StartCharter for h1 rejected (insufficient_wood)")),
+    "the refusal is logged (the recruit-loop pattern)",
+  );
+  assert.equal(world.state.activeCharters.length, 0, "a refused founding applies nothing");
+  assert.equal(world.state.heroes["h1"].isChartering, false);
+  assert.equal(world.state.heroes["h1"].gold, CHARTER_GOLD_COST, "the purse is untouched");
+  assert.equal(world.state.settlements["s-a"].warehouse.wood, CHARTER_WAREHOUSE_COST.wood, "the warehouse is untouched");
+  assert.equal(world.state.nextCharterId, 0, "no charter id was consumed");
+  assert.equal(harness.endTurns.length, 1, "the turn still completes");
+  assert.equal(harness.audits.length, 0, "a tolerated refusal is not a turn-skipping audit");
+
+  await scanOnce();
+  assert.equal(
+    commandsOfKind(harness.commands, "StartCharter").length,
+    1,
+    "the hero is not retried within the round",
+  );
+
+  world.state.round = 2;
+  await scanOnce();
+  assert.equal(commandsOfKind(harness.commands, "StartCharter").length, 2, "the guard re-arms next round");
+});
+
+test("B3 rejection: a refused charter step drops the hero for the pass and the turn still ends", async () => {
+  const world = charterTravelWorld(TRAVEL.arrive.target, MOVEMENT_PER_TURN);
+  const harness = installHarness(world, {
+    override: (command) => (command.kind === "AdvanceCharterTravel" ? { ok: false, reason: "hero_not_at_fromTile" } : undefined),
+  });
+
+  const lines = await captureInfo(() => scanOnce());
+
+  assert.equal(
+    commandsOfKind(harness.commands, "AdvanceCharterTravel").length,
+    1,
+    "the refused step is dropped, not retried within the pass",
+  );
+  assert.equal(commandsOfKind(harness.commands, "MoveHero").length, 0, "a dropped chartering hero never falls back to MoveHero");
+  assert.ok(
+    lines.some((l) => l.includes("AdvanceCharterTravel for h1 rejected (hero_not_at_fromTile)")),
+    "the refused step is logged",
+  );
+  assert.equal(world.state.heroes["h1"].q, TRAVEL.hero.q, "nothing moved");
+  assert.equal(world.state.heroes["h1"].r, TRAVEL.hero.r);
+  assert.equal(world.state.activeCharters[0].phase, "traveling");
+  assert.equal(harness.endTurns.length, 1, "the turn still completes");
+  assert.equal(harness.audits.length, 0);
+});
+
+test("B3 budget: the StartCharter consumes the D12 action budget and exhaustion still EndTurns + audits", async () => {
+  const world = charterSoloWorld(CHARTER_GOLD_COST, CHARTER_WAREHOUSE_COST.wood);
+  assert.ok(pickCharterAction(world.state, "h1", CHARTER_MAP, mulberry32(1)), "the fixture must be able to found a charter");
+  const harness = installHarness(world, { actionBudget: 1 });
+
+  await scanOnce();
+
+  assert.equal(commandsOfKind(harness.commands, "StartCharter").length, 1, "the founding spent the one budgeted action");
+  assert.equal(commandsOfKind(harness.commands, "AdvanceCharterTravel").length, 0, "the travel never fit the budget");
+  assert.equal(commandsOfKind(harness.commands, "MoveHero").length, 0);
+  assert.equal(harness.endTurns.length, 1, "the exhaustion path still best-effort EndTurns");
+  assert.equal(harness.audits.length, 1, "exactly one audit row");
+  assert.equal(harness.audits[0].kind, "turn_skipped");
+  const payload = harness.audits[0].payload as { playerId: number; reason: string; actions: number };
+  assert.equal(payload.playerId, 1);
+  assert.equal(payload.reason, "ai_turn_budget_exhausted");
+  assert.equal(payload.actions, 1, "the audit carries the charter founding in the spent action count");
+});
+
+test("B3 budget: charter travel steps consume the D12 action budget and exhaustion still EndTurns + audits", async () => {
+  const world = charterTravelWorld(TRAVEL.exhaust.target, MOVEMENT_PER_TURN);
+  const harness = installHarness(world, { actionBudget: 1 });
+
+  await scanOnce();
+
+  assert.equal(commandsOfKind(harness.commands, "AdvanceCharterTravel").length, 1, "the travel step spent the one budgeted action");
+  assert.equal(commandsOfKind(harness.commands, "MoveHero").length, 0);
+  assert.equal(harness.endTurns.length, 1, "the exhaustion path still best-effort EndTurns");
+  assert.equal(harness.audits.length, 1);
+  assert.equal(harness.audits[0].kind, "turn_skipped");
+  const payload = harness.audits[0].payload as { playerId: number; reason: string; actions: number };
+  assert.equal(payload.playerId, 1);
+  assert.equal(payload.reason, "ai_turn_budget_exhausted");
+  assert.equal(payload.actions, 1, "the audit carries the charter step in the spent action count");
+});
+
+test("B3 re-hydrate: a same-pass BuyWagons that drains the founding warehouse prevents a now-unaffordable charter", async () => {
+  // 20 wood is EXACTLY the charter's need, so the fixture could found a
+  // charter but for the wagon buy the trade-route section performs first.
+  const world = charterStartWorld(CHARTER_GEOMETRY, CHARTER_GOLD_COST, CHARTER_WAREHOUSE_COST.wood);
+  assert.ok(pickCharterAction(world.state, "h1", CHARTER_MAP, mulberry32(1)), "with 20 wood the fixture is exactly affordable");
+  // Cloned hydrations: a section planned off an earlier snapshot cannot see a
+  // later section's commits, so the charter section must re-hydrate to notice
+  // the wagon buy just spent 5 of the founding warehouse's 20 wood.
+  const harness = installHarness(world, { cloneHydrate: true, override: charterTradeOverride(world) });
+
+  await scanOnce();
+
+  assert.equal(commandsOfKind(harness.commands, "BuyWagons").length, 1, "the trade-route section bought the wagon out of s-a");
+  assert.equal(commandsOfKind(harness.commands, "CreateTradeRoute").length, 1, "and accepted the recommendation");
+  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, 1, "the recruit section ran too");
+  assert.equal(
+    world.state.settlements["s-a"].warehouse.wood,
+    CHARTER_WAREHOUSE_COST.wood - WAGON_COST.wood,
+    "the wagon buy spent WAGON_COST.wood of the founding warehouse",
+  );
+  assert.equal(commandsOfKind(harness.commands, "StartCharter").length, 0, "no charter is dispatched against the drained warehouse");
+  assert.equal(world.state.activeCharters.length, 0, "no charter record exists");
+  assert.equal(world.state.heroes["h1"].gold, CHARTER_GOLD_COST, "the purse is untouched");
+  assert.equal(world.state.heroes["h1"].isChartering, false);
+  assert.equal(harness.endTurns.length, 1, "the turn still completes");
+  assert.equal(harness.audits.length, 0);
+});
+
+test("B3 cadence: per-hero granularity -- two heroes of one seat each get their own founding, and neither retries within the round", async () => {
+  const world = charterPairWorld();
+  assert.ok(pickCharterAction(world.state, "h1", CHARTER_MAP, mulberry32(1)), "h1's fixture must be able to found a charter");
+  assert.ok(pickCharterAction(world.state, "h2", CHARTER_MAP, mulberry32(2)), "h2's fixture must be able to found a charter");
+  const harness = installHarness(world);
+
+  await scanOnce();
+
+  const starts = commandsOfKind(harness.commands, "StartCharter");
+  assert.equal(starts.length, 2, "one attempt per hero, not one per seat");
+  assert.deepEqual([...new Set(starts.map((s) => s.heroId))].sort(), ["h1", "h2"], "each hero of the seat attempted its own founding");
+  assert.equal(world.state.heroes["h1"].isChartering, true, "h1 holds a charter");
+  assert.equal(world.state.heroes["h2"].isChartering, true, "h2 holds a charter");
+  assert.equal(world.state.activeCharters.length, 2, "both charters were founded");
+  assert.equal(world.state.nextCharterId, 2, "each founding consumed a charter id");
+
+  await scanOnce();
+  assert.equal(
+    commandsOfKind(harness.commands, "StartCharter").length,
+    2,
+    "neither hero is retried within the round",
+  );
+});
+
+test("B3 handler mirror: a second hero on the same settlement is refused by the scripted handler's own gate", async () => {
+  const world = charterSharedSettlementWorld();
+  assert.ok(pickCharterAction(world.state, "h1", CHARTER_MAP, mulberry32(1)), "the fixture must be able to found a charter");
+  assert.ok(pickCharterAction(world.state, "h2", CHARTER_MAP, mulberry32(2)), "and so must the second hero");
+  const harness = installHarness(world, { cloneHydrate: true });
+  const lines = await captureInfo(() => scanOnce());
+
+  const starts = commandsOfKind(harness.commands, "StartCharter");
+  assert.equal(starts.length, 2, "both heroes planned an attempt off the pre-loop snapshot");
+  assert.ok(
+    lines.some((l) => l.includes("StartCharter for h2 rejected (insufficient_wood)")),
+    "the scripted handler's engine gate refused the second founding",
+  );
+  assert.equal(world.state.activeCharters.length, 1, "only the first founding applied");
+  assert.equal(world.state.heroes["h1"].isChartering, true, "h1 holds the charter");
+  assert.equal(world.state.heroes["h2"].isChartering, false, "h2 does not");
+  assert.equal(world.state.heroes["h1"].gold, 0, "h1's purse paid");
+  assert.equal(world.state.heroes["h2"].gold, CHARTER_GOLD_COST, "h2's purse is intact");
+  assert.equal(world.state.nextCharterId, 1, "the refused founding consumed no charter id");
+  assert.equal(harness.endTurns.length, 1, "the turn still completes");
 });
 
 // ---------------------------------------------------------------------------

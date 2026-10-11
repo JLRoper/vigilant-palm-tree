@@ -12,12 +12,26 @@ export const CHARTER_WAREHOUSE_COST = { wood: 20, stone: 15 };
 export const CHARTER_CONSTRUCTION_DAYS = 10;
 
 export function startCharter(state: GameState, payload: StartCharterPayload): StartCharterResult {
-  if (state.phase.kind !== "PLAYER_TURN") {
+  const hero = state.heroes[payload.heroId];
+  if (!hero) return { state, ok: false, reason: "no_hero" };
+
+  // Phase parity with startMove (hero/move.ts:18-23): an AI seat's turn
+  // hydrates to AI_TURN, not PLAYER_TURN, so without this admission every
+  // server-actor-dispatched StartCharter fails not_player_turn before the
+  // human-parity gating below is ever consulted. The AI_TURN branch admits
+  // only the acting seat's own hero, exactly as startMove's gate does (a
+  // foreign hero during an AI turn is rejected right here, the same way
+  // startMove rejects it); the ownership check below still covers a foreign
+  // hero on a PLAYER_TURN. Unlike MoveHero this reducer needs no
+  // handler-side selection override because it has no selection concept of
+  // its own.
+  const phaseAdmitsCharter =
+    state.phase.kind === "PLAYER_TURN" ||
+    (state.phase.kind === "AI_TURN" && hero.ownerId === state.activePlayerId);
+  if (!phaseAdmitsCharter) {
     return { state, ok: false, reason: "not_player_turn" };
   }
 
-  const hero = state.heroes[payload.heroId];
-  if (!hero) return { state, ok: false, reason: "no_hero" };
   if (hero.ownerId !== state.activePlayerId) {
     return { state, ok: false, reason: "not_owner" };
   }

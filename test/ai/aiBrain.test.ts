@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { GARRISON_BACKOFF_ROUNDS, pickAiMove, pickGarrisonRecruitment } from "../../src/ai/aiBrain";
+import { CHARTER_TARGET_REACH, GARRISON_BACKOFF_ROUNDS, pickAiMove, pickCharterAction, pickGarrisonRecruitment } from "../../src/ai/aiBrain";
 import { GameMap, type TileRow } from "../../src/map/gameMap";
 import type { Terrain } from "../../src/map/terrain";
 import { hexDistance } from "../../src/core/hex";
-import { normalizePlatoons, platoonTroopTotal, settlementStacks, type UnitType } from "@heroes/engine";
+import { CHARTER_GOLD_COST, mulberry32, normalizePlatoons, platoonTroopTotal, settlementStacks, type UnitType } from "@heroes/engine";
 import type { BuildingKind } from "@heroes/contracts";
 import { makeHero, makeSettlement, makeState, emptyWarehouse } from "../charter/_helpers";
 
@@ -545,4 +545,241 @@ test("an excluded EMPTY enemy settlement is dropped from the walk-in capture cla
 
 test("GARRISON_BACKOFF_ROUNDS is the expiry contract the TurnController records against", () => {
   assert.equal(GARRISON_BACKOFF_ROUNDS, 2);
+});
+
+// ---------------------------------------------------------------------------
+// B3: pickCharterAction (plans/20261002-1900_ai-actor-phase-3.md, B3 spec §3)
+// ---------------------------------------------------------------------------
+
+type HeroOpts = Parameters<typeof makeHero>[4];
+
+// The funded-AI-hero baseline: a 2,500g hero standing on its own well-stocked
+// settlement at (8,8), during its own AI turn.
+function charterState(heroOpts: HeroOpts = {}, warehouse = { wood: 20, stone: 15 }) {
+  return makeState({
+    heroes: [makeHero("h1", 1, 8, 8, { gold: CHARTER_GOLD_COST, ...heroOpts })],
+    settlements: [makeSettlement("s1", 1, 8, 8, { warehouse: emptyWarehouse(warehouse) })],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+}
+
+function gridMap(
+  width: number,
+  height: number,
+  opts: {
+    terrain?: (q: number, r: number) => Terrain;
+    resources?: Array<[number, number, string]>;
+  } = {},
+): GameMap {
+  const resources = new Map((opts.resources ?? []).map(([q, r, res]) => [`${q},${r}`, res]));
+  const rows: TileRow[] = [];
+  for (let r = 0; r < height; r++) {
+    for (let q = 0; q < width; q++) {
+      rows.push({
+        q,
+        r,
+        terrain: opts.terrain ? opts.terrain(q, r) : "grass",
+        resource: resources.get(`${q},${r}`) ?? null,
+      });
+    }
+  }
+  return GameMap.fromTiles(rows);
+}
+
+const AXIAL_DIRS: ReadonlyArray<readonly [number, number]> = [
+  [1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1],
+];
+
+// Each resource tile sits on grass with its six neighbours under water, so the
+// ONLY hex carrying a nonzero rate sum is the resource tile itself: the rate
+// sums the planner compares are exactly RESOURCE_YIELD[resource].
+function isolatedResourceMap(
+  width: number,
+  height: number,
+  tiles: Array<[number, number, string]>,
+): GameMap {
+  const blocked = new Set<string>();
+  for (const [q, r] of tiles) {
+    for (const [dq, dr] of AXIAL_DIRS) blocked.add(`${q + dq},${r + dr}`);
+  }
+  return gridMap(width, height, {
+    terrain: (q, r) => (blocked.has(`${q},${r}`) ? "water" : "grass"),
+    resources: tiles,
+  });
+}
+
+function seededRng(seed: number) {
+  const rand = mulberry32(seed);
+  let draws = 0;
+  return {
+    rng: () => {
+      draws++;
+      return rand();
+    },
+    draws: () => draws,
+  };
+}
+
+test("pickCharterAction returns null on a short purse and consumes no rng", () => {
+  const rng = seededRng(1);
+  const map = gridMap(16, 16);
+
+  const action = pickCharterAction(charterState({ gold: CHARTER_GOLD_COST - 1 }), "h1", map, rng.rng);
+
+  assert.equal(action, null, "the shared gate rejects the hero before any planning");
+  assert.equal(rng.draws(), 0, "a gate failure must not advance the rng stream");
+});
+
+test("pickCharterAction returns null on short warehouse wood and consumes no rng", () => {
+  const rng = seededRng(1);
+  const map = gridMap(16, 16);
+
+  const action = pickCharterAction(charterState({}, { wood: 19, stone: 15 }), "h1", map, rng.rng);
+
+  assert.equal(action, null);
+  assert.equal(rng.draws(), 0);
+});
+
+test("pickCharterAction returns null on short warehouse stone and consumes no rng", () => {
+  const rng = seededRng(1);
+  const map = gridMap(16, 16);
+
+  const action = pickCharterAction(charterState({}, { wood: 20, stone: 14 }), "h1", map, rng.rng);
+
+  assert.equal(action, null);
+  assert.equal(rng.draws(), 0);
+});
+
+test("pickCharterAction returns null when the hero stands off a friendly settlement", () => {
+  const rng = seededRng(1);
+  const state = makeState({
+    heroes: [makeHero("h1", 1, 8, 9, { gold: CHARTER_GOLD_COST })],
+    settlements: [makeSettlement("s1", 1, 8, 8, { warehouse: emptyWarehouse({ wood: 20, stone: 15 }) })],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+
+  assert.equal(pickCharterAction(state, "h1", gridMap(16, 16), rng.rng), null);
+  assert.equal(rng.draws(), 0);
+});
+
+test("pickCharterAction returns null when the hero is already chartering", () => {
+  const rng = seededRng(1);
+
+  const action = pickCharterAction(
+    charterState({ isChartering: true, charterId: "c0" }),
+    "h1",
+    gridMap(16, 16),
+    rng.rng,
+  );
+
+  assert.equal(action, null);
+  assert.equal(rng.draws(), 0);
+});
+
+test("pickCharterAction returns null when no valid hex exists at all", () => {
+  const rng = seededRng(1);
+  // Passable only within distance 3 of the settlement: the shared <4 rule
+  // leaves the valid set empty.
+  const map = gridMap(16, 16, {
+    terrain: (q, r) => (hexDistance({ q, r }, { q: 8, r: 8 }) <= 3 ? "grass" : "water"),
+  });
+
+  const action = pickCharterAction(charterState(), "h1", map, rng.rng);
+
+  assert.equal(action, null);
+  assert.equal(rng.draws(), 0, "an empty candidate set returns before the name is drawn");
+});
+
+test("pickCharterAction returns null when the only valid hexes sit beyond CHARTER_TARGET_REACH", () => {
+  const rng = seededRng(1);
+  // Passable only at distance >= 9 from the settlement: valid hexes exist, but
+  // none is within the planner's reach cap.
+  const map = gridMap(20, 20, {
+    terrain: (q, r) => (q === 8 && r === 8) || hexDistance({ q, r }, { q: 8, r: 8 }) >= 9 ? "grass" : "water",
+  });
+
+  const action = pickCharterAction(charterState(), "h1", map, rng.rng);
+
+  assert.equal(action, null);
+  assert.equal(rng.draws(), 0);
+});
+
+test("pickCharterAction picks the highest-production hex over a nearer barren one", () => {
+  const map = isolatedResourceMap(16, 16, [
+    [4, 4, "gold"], // rate sum 20, distance 8 (the reach boundary)
+    [8, 1, "wood"], // rate sum 15, distance 7 (nearer, but poorer)
+  ]);
+
+  const action = pickCharterAction(charterState(), "h1", map, () => 0);
+
+  assert.ok(action);
+  assert.equal(action!.targetQ, 4, "rates-first: the gold hex wins despite being farther");
+  assert.equal(action!.targetR, 4);
+  assert.equal(action!.heroId, "h1");
+});
+
+test("pickCharterAction breaks equal rate sums by distance to the hero", () => {
+  const map = isolatedResourceMap(16, 16, [
+    [8, 1, "gold"], // distance 7
+    [4, 4, "gold"], // distance 8
+  ]);
+
+  const action = pickCharterAction(charterState(), "h1", map, () => 0);
+
+  assert.ok(action);
+  assert.deepEqual({ q: action!.targetQ, r: action!.targetR }, { q: 8, r: 1 }, "the nearer of two equal-rate hexes wins");
+});
+
+test("pickCharterAction breaks equal rate and distance ties by record order (q, then r)", () => {
+  const byQ = isolatedResourceMap(16, 16, [
+    [15, 8, "gold"], // distance 7
+    [8, 1, "gold"], // distance 7
+  ]);
+  const byR = isolatedResourceMap(16, 16, [
+    [8, 15, "gold"], // distance 7
+    [8, 1, "gold"], // distance 7
+  ]);
+
+  const first = pickCharterAction(charterState(), "h1", byQ, () => 0);
+  const second = pickCharterAction(charterState(), "h1", byR, () => 0);
+
+  assert.ok(first);
+  assert.ok(second);
+  assert.deepEqual({ q: first!.targetQ, r: first!.targetR }, { q: 8, r: 1 }, "smaller q wins the exact tie");
+  assert.deepEqual({ q: second!.targetQ, r: second!.targetR }, { q: 8, r: 1 }, "equal q falls through to smaller r");
+});
+
+test("pickCharterAction never targets a hex beyond CHARTER_TARGET_REACH", () => {
+  assert.equal(CHARTER_TARGET_REACH, 8);
+  const map = isolatedResourceMap(18, 18, [
+    [8, 17, "gold"], // distance 9: beyond the cap, and record-order-first
+    [15, 8, "gold"], // distance 7: the best legal choice
+  ]);
+
+  const action = pickCharterAction(charterState(), "h1", map, () => 0);
+
+  assert.ok(action);
+  assert.deepEqual(
+    { q: action!.targetQ, r: action!.targetR },
+    { q: 15, r: 8 },
+    "the out-of-reach hex is filtered out even though it would win the record-order tie-break",
+  );
+});
+
+test("pickCharterAction draws a deterministic name per rng seed and exactly two draws", () => {
+  const map = isolatedResourceMap(16, 16, [[4, 4, "gold"]]);
+
+  const first = seededRng(42);
+  const second = seededRng(42);
+  const a = pickCharterAction(charterState(), "h1", map, first.rng);
+  const b = pickCharterAction(charterState(), "h1", map, second.rng);
+
+  assert.ok(a);
+  assert.ok(b);
+  assert.deepEqual(a, b, "the same seed plans the identical action, name included");
+  assert.equal(first.draws(), 2, "one draw for the name prefix, one for the suffix");
+  assert.equal(second.draws(), 2);
+  assert.match(a!.settlementName, /^[A-Z][a-z]+ [a-z]+$/, "the name comes from the player wordlists");
 });
