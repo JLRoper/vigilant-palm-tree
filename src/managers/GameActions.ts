@@ -1,11 +1,7 @@
 import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
-import { showBattleModal } from "@screens/combat/battleModal";
-import { showBattleResultCard } from "@screens/combat/battleResultCard";
-import { resolveBattleChoice } from "@screens/combat/battleChoicePolicy";
-import { shouldShowResultCard } from "@screens/combat/resultCardPolicy";
 import { showToast } from "@screens/shared/toast";
-import { openManualBattleArena, type ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
+import type { ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
 import type { BattleActionPhase } from "@screens/combat/arena/state";
 import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, settlementStacks, spellLoadoutForHero, type BattleResult } from "@heroes/engine";
 import type { GameState, HeroBattleVerdict, HeroState } from "@heroes/contracts";
@@ -16,7 +12,6 @@ import type { UnitType } from "../state/units";
 import { submitBattleResult, submitSettlementBattleResult, type SubmitBattleResultResult, type SubmitSettlementBattleResultResult } from "../io/commands";
 import { isServerDriven } from "../io/serverDrivenGames";
 import { consumeResolveBattleVerdicts, mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../game/turnHooks";
-import { battleToastMessage, settlementNameAt } from "@screens/combat/battleResultText";
 import {
   evaluateUpkeepWarnings,
   upkeepSummaryToastMessage,
@@ -31,24 +26,23 @@ import {
   TREASURY_CAP_SUMMARY_OFFENDER_LIMIT,
 } from "@screens/settlements/treasuryCap";
 import { evaluateTradeReminder } from "@screens/shared/tradeNeedsReminder";
-import {
-  formatStacksLabel,
-  openAssaultConfirmModal,
-  type AssaultConfirmChoice,
-} from "@screens/combat/assaultConfirmModal";
+import type { AssaultConfirmChoice } from "@screens/combat/assaultConfirmModal";
 import { api } from "../io/api";
 
 // Settlement name for a relocated hero's verdict line ("retreated to <name>").
 // Only retreat/surrender relocate (hero present post-merge); defeat leaves no
-// hero to look up and "stood" renders no line.
-function verdictSettlementName(
+// hero to look up and "stood" renders no line. Async because battleResultText
+// is a lazy combat module; every caller is already inside an async flow.
+async function verdictSettlementName(
   state: GameState,
   heroId: string,
   verdict: HeroBattleVerdict | undefined,
-): string | undefined {
+): Promise<string | undefined> {
   if (!verdict || verdict === "stood" || verdict === "defeated") return undefined;
   const hero = state.heroes[heroId];
-  return hero ? settlementNameAt(state.settlements, hero.q, hero.r) : undefined;
+  if (!hero) return undefined;
+  const { settlementNameAt } = await import("@screens/combat/battleResultText");
+  return settlementNameAt(state.settlements, hero.q, hero.r);
 }
 
 /**
@@ -126,6 +120,7 @@ export class GameActions {
       // or the defender owns it -- the outcome surfaces later via
       // battleOutcomeFeedback), and the driving client auto-resolves
       // AI-vs-AI / remote-human pairs exactly as before.
+      const { resolveBattleChoice } = await import("@screens/combat/battleChoicePolicy");
       const plan = resolveBattleChoice({
         localIsAttacker,
         localIsDefender,
@@ -135,6 +130,7 @@ export class GameActions {
 
       let choice: "fight" | "quickResolve" | "cancel" = "quickResolve";
       if (plan.kind === "modal") {
+        const { showBattleModal } = await import("@screens/combat/battleModal");
         choice = await showBattleModal({
           attackerName: `Hero ${attackerName}`,
           defenderName: `Hero ${defenderName}`,
@@ -149,6 +145,7 @@ export class GameActions {
         if (fought.kind === "applied") {
           this.state.replaceState(fought.state);
           this.captureAfterBattleIfNeeded(attackerId);
+          const { showBattleResultCard } = await import("@screens/combat/battleResultCard");
           showBattleResultCard({
             result: fought.result,
             attackerLabel: `Hero ${attackerName}`,
@@ -189,7 +186,9 @@ export class GameActions {
         // AI-vs-AI (and remote-human-vs-remote-human) auto-resolves are
         // silent -- one info toast, max. Stacked un-clicked cards were the
         // symptom; suppression is the policy-level fix.
+        const { shouldShowResultCard } = await import("@screens/combat/resultCardPolicy");
         if (shouldShowResultCard(localSeat, attacker.ownerId, defender.ownerId)) {
+          const { showBattleResultCard } = await import("@screens/combat/battleResultCard");
           showBattleResultCard({
             result: battle,
             attackerLabel: `Hero ${attackerName}`,
@@ -197,10 +196,11 @@ export class GameActions {
             onCarryOn: () => {},
             attackerVerdict: verdicts.attackerVerdict,
             defenderVerdict: verdicts.defenderVerdict,
-            attackerSettlementName: verdictSettlementName(after, attackerId, verdicts.attackerVerdict),
-            defenderSettlementName: verdictSettlementName(after, defenderId, verdicts.defenderVerdict),
+            attackerSettlementName: await verdictSettlementName(after, attackerId, verdicts.attackerVerdict),
+            defenderSettlementName: await verdictSettlementName(after, defenderId, verdicts.defenderVerdict),
           });
         } else {
+          const { battleToastMessage } = await import("@screens/combat/battleResultText");
           const attackerPlayer = gs.players.find((p) => p.id === attacker.ownerId);
           const defenderPlayer = gs.players.find((p) => p.id === defender.ownerId);
           const attackerSide = `${attackerPlayer?.name ?? "AI"}'s ${attacker.name}`;
@@ -213,12 +213,12 @@ export class GameActions {
               attacker: {
                 verdict: verdicts.attackerVerdict,
                 ownerName: attackerPlayer?.name,
-                settlementName: verdictSettlementName(after, attackerId, verdicts.attackerVerdict),
+                settlementName: await verdictSettlementName(after, attackerId, verdicts.attackerVerdict),
               },
               defender: {
                 verdict: verdicts.defenderVerdict,
                 ownerName: defenderPlayer?.name,
-                settlementName: verdictSettlementName(after, defenderId, verdicts.defenderVerdict),
+                settlementName: await verdictSettlementName(after, defenderId, verdicts.defenderVerdict),
               },
             }),
             "info",
@@ -283,6 +283,7 @@ export class GameActions {
         }
       : undefined;
 
+    const { openManualBattleArena } = await import("@screens/combat/arena/openManualBattleArena");
     let closeArena: () => void = () => {};
     const outcome: ManualBattleOutcome = await new Promise<ManualBattleOutcome>((resolve) => {
       const handle = openManualBattleArena(
@@ -367,8 +368,8 @@ export class GameActions {
       closeArena,
       attackerVerdict: server.attackerVerdict,
       defenderVerdict: server.defenderVerdict,
-      attackerSettlementName: verdictSettlementName(next, attackerId, server.attackerVerdict),
-      defenderSettlementName: verdictSettlementName(next, defenderId, server.defenderVerdict),
+      attackerSettlementName: await verdictSettlementName(next, attackerId, server.attackerVerdict),
+      defenderSettlementName: await verdictSettlementName(next, defenderId, server.defenderVerdict),
     };
   }
 
@@ -401,16 +402,19 @@ export class GameActions {
       const after = this.state.getState();
       // A neutral settlement has no owner seat, so it can never involve the
       // local human: -1 matches no seat in the display policy.
+      const { shouldShowResultCard } = await import("@screens/combat/resultCardPolicy");
       if (shouldShowResultCard(localSeat, attackerBefore.ownerId, settlementBefore.ownerId ?? -1)) {
+        const { showBattleResultCard } = await import("@screens/combat/battleResultCard");
         showBattleResultCard({
           result: outcome.battle,
           attackerLabel: `Hero ${attackerBefore.name}`,
           defenderLabel,
           onCarryOn: () => {},
           attackerVerdict: outcome.attackerVerdict,
-          attackerSettlementName: verdictSettlementName(after, attackerId, outcome.attackerVerdict),
+          attackerSettlementName: await verdictSettlementName(after, attackerId, outcome.attackerVerdict),
         });
       } else {
+        const { battleToastMessage } = await import("@screens/combat/battleResultText");
         showToast(
           battleToastMessage({
             attackerLabel: `${attackerPlayer?.name ?? "AI"}'s ${attackerBefore.name}`,
@@ -419,7 +423,7 @@ export class GameActions {
             attacker: {
               verdict: outcome.attackerVerdict,
               ownerName: attackerPlayer?.name,
-              settlementName: verdictSettlementName(after, attackerId, outcome.attackerVerdict),
+              settlementName: await verdictSettlementName(after, attackerId, outcome.attackerVerdict),
             },
           }),
           "info",
@@ -479,6 +483,7 @@ export class GameActions {
       // flow.
       const unitNames: Record<string, string> = {};
       for (const u of catalog) unitNames[u.id] = u.name;
+      const { openAssaultConfirmModal, formatStacksLabel } = await import("@screens/combat/assaultConfirmModal");
       const choice = await new Promise<AssaultConfirmChoice>((resolve) => {
         openAssaultConfirmModal({
           settlementName: settlement.name,
@@ -513,6 +518,7 @@ export class GameActions {
           }
         : undefined;
 
+      const { openManualBattleArena } = await import("@screens/combat/arena/openManualBattleArena");
       let closeArena: () => void = () => {};
       const outcome: ManualBattleOutcome = await new Promise<ManualBattleOutcome>((resolve) => {
         const handle = openManualBattleArena(
@@ -580,13 +586,14 @@ export class GameActions {
         defenderId: settlementId,
         attackerSurvived: platoonsHaveTroops(server.attackerHero?.stacks ?? []),
       });
+      const { showBattleResultCard } = await import("@screens/combat/battleResultCard");
       showBattleResultCard({
         result: outcome.result,
         attackerLabel: `Hero ${attacker.name}`,
         defenderLabel,
         onCarryOn: closeArena,
         attackerVerdict: server.attackerVerdict,
-        attackerSettlementName: verdictSettlementName(next, attackerId, server.attackerVerdict),
+        attackerSettlementName: await verdictSettlementName(next, attackerId, server.attackerVerdict),
       });
     } finally {
       this.battleInFlight = false;

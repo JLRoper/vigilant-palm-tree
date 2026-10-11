@@ -50,7 +50,7 @@ import { showBattleResultCard } from "../battleResultCard";
 import { openConfirmDialog } from "@screens/shared/confirmDialog";
 import { menuTheme, styleButton } from "@screens/shared/menu";
 import { createPlatoonInfoPopup } from "../platoonInfoPopup";
-import { launchView } from "@screens/shared/viewLauncher";
+import { openView } from "@screens/shared/viewLauncher";
 import { CANVAS_MARGIN, DEBUG_LOG, HEX_SIZE_MAX, LOG_PREFIX, RAIL_WIDTH, debugLog } from "./constants";
 import { axialToPixel, fmtHex, gridExtent, fitHexSize, hexCorners, hexDistance, hpColor, hpRatio, isAlive, pixelToAxial, platoonLabel, specialtyIcon, visibleSpecialty, type Axial } from "./layout";
 import { applyLeaveBehind, openLeaveBehindDialog } from "./leaveBehind";
@@ -407,7 +407,7 @@ export function openManualBattleArena(
   styleButton(settingsBtn);
   settingsBtn.title = "Open game settings";
   settingsBtn.addEventListener("click", () => {
-    launchView("settingsMenu", { parent: overlay });
+    void openView("settingsMenu", { parent: overlay });
   });
   topBar.appendChild(settingsBtn);
 

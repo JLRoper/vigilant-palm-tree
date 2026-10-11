@@ -1,7 +1,7 @@
 import type { GameState } from "../../state/gameState";
 import type { SaveStatus } from "../../managers/SessionManager";
 import { openSettingsMenu, type MapInfo } from "@screens/home/settingsMenu";
-import { openTestBattleSetup } from "@screens/combat/testBattleSetup";
+import { openView } from "@screens/shared/viewLauncher";
 import { openNewGameModal, type NewGameHandler } from "./newGameModal";
 import { openLoadGameModal, type LoadGameHandler } from "./loadGameModal";
 import { openHotkeysModal, attachHotkeysShortcut } from "./hotkeysModal";
@@ -225,7 +225,7 @@ export class Toolbar {
     testBattleItem.addEventListener("click", () => {
       closeDropdown();
       if (this.busy) return;
-      openTestBattleSetup();
+      void openView("testBattleSetup");
     });
 
     const hotkeysItem = makeMenuItem("⌨ Shortcuts");

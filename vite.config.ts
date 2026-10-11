@@ -44,6 +44,16 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       assetsInlineLimit: 0,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            const normalized = id.replace(/\\/g, "/");
+            if (normalized.includes("/packages/engine/") || normalized.includes("/packages/contracts/")) {
+              return "engine";
+            }
+          },
+        },
+      },
     },
     server: {
       host: "0.0.0.0",

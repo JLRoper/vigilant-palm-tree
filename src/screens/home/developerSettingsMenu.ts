@@ -1,7 +1,7 @@
 import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
 import { bus } from "../../core/eventBus";
 import { openAssetManager } from "./assetManager";
-import { launchView, registerView } from "@screens/shared/viewLauncher";
+import { openView, registerView } from "@screens/shared/viewLauncher";
 import { openDevConsole } from "../../debug/devConsole";
 import type { GameDebugApi } from "../../io/debugCommands";
 
@@ -163,7 +163,9 @@ export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
   testBattleBtn.style.marginTop = "4px";
   testBattleBtn.addEventListener("click", () => {
     modal.close();
-    setTimeout(() => launchView("testBattleSetup"), 100);
+    setTimeout(() => {
+      void openView("testBattleSetup");
+    }, 100);
   });
   content.appendChild(testBattleBtn);
 
@@ -192,7 +194,9 @@ export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
   networkMapBtn.title = "Open the live network topology overlay";
   networkMapBtn.addEventListener("click", () => {
     modal.close();
-    setTimeout(() => launchView("networkMap"), 100);
+    setTimeout(() => {
+      void openView("networkMap");
+    }, 100);
   });
   content.appendChild(networkMapBtn);
 

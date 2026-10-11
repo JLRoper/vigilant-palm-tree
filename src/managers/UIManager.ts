@@ -11,7 +11,7 @@ import { TileInfoPanel } from "@screens/adventure/tileInfoPanel";
 import { describeTile } from "@screens/adventure/tileInfo";
 import { setMinimapReserve } from "@screens/shared/panelRail";
 import { getMinimapReserveHeight } from "../render/minimap";
-import { CityView, type CitySelectionSnapshot } from "@screens/settlements/cityView/cityView";
+import type { CityView, CitySelectionSnapshot } from "@screens/settlements/cityView/cityView";
 import { settleNet } from "@screens/settlements/cityView/netCost";
 import { recordBuildCommit } from "../game/buildCommitLedger";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
@@ -47,7 +47,10 @@ export class UIManager {
   private settlementInfoMenu?: SettlementInfoMenu;
   private tileInfoPanel?: TileInfoPanel;
   private inspectedTile: Axial | null = null;
-  private cityView?: CityView;
+  private cityView: CityView | null = null;
+  private cityViewPromise: Promise<CityView> | null = null;
+  private cityViewState?: () => GameStateManager;
+  private cityViewLocalSeat?: () => PlayerId | null;
   private gameStateManager?: GameStateManager;
   private viewManager?: ViewManager;
 
@@ -196,9 +199,34 @@ export class UIManager {
     viewManager: ViewManager,
     getLocalSeat?: () => PlayerId | null,
   ): void {
+    // Lazy: CityView (and its skybox/sprite/asset chain) is imported and
+    // constructed on the first open() -- a settlement double-click -- not at
+    // boot. Everything it needs is stashed here for constructCityView().
     this.viewManager = viewManager;
+    this.cityViewState = state;
+    this.cityViewLocalSeat = getLocalSeat;
+  }
+
+  // Single construction point, reached only from the open path. The promise
+  // (not just the instance) is cached, so two fast double-clicks can never
+  // build two views; every sync path keeps using getCityView().
+  async ensureCityView(): Promise<CityView> {
+    if (!this.cityViewPromise) {
+      this.cityViewPromise = this.constructCityView();
+    }
+    return this.cityViewPromise;
+  }
+
+  private async constructCityView(): Promise<CityView> {
+    const state = this.cityViewState;
+    const viewManager = this.viewManager;
+    if (!state || !viewManager) {
+      throw new Error("[ui] initCityView() must run before the city view can open");
+    }
+    const { CityView } = await import("@screens/settlements/cityView/cityView");
     const getStateMgr = () => state();
-    this.cityView = new CityView({
+    const getLocalSeat = this.cityViewLocalSeat;
+    const view = new CityView({
       provider: this.spriteProvider,
       isUnitRecruitable: getLocalSeat
         ? (unitTypeId) => {
@@ -334,10 +362,12 @@ export class UIManager {
         return result.ok;
       },
     });
+    this.cityView = view;
+    return view;
   }
 
   getToolbar(): Toolbar | undefined { return this.toolbar; }
-  getCityView(): CityView | undefined { return this.cityView; }
+  getCityView(): CityView | undefined { return this.cityView ?? undefined; }
 
   // Breathing room between the panel rail's hard stop and the minimap's own
   // drawn box, so the rail doesn't sit flush against it.

@@ -565,6 +565,23 @@ Behavior notes: suppression is display-only — the persisted streak fields keep
 
 Test inventory: new `test/engine/heroUpkeepReadSide.test.ts` (incl. the live-game scenario and a pin that the day-14 charge consumes the stocked larder and clears the streak); extended `test/screens/shared/upkeepWarnings.test.ts` (the suppression gate) and `test/screens/shared/heroUpkeepCost.test.ts` (cadence/title/gate cases).
 
+### Client bundle lazy-load code-split (2026-10-11)
+
+The Vite client build was code-split: one ~631 KiB entry became 18 JS chunks with a 399,184-byte entry (under Rollup's 500 kB minified-file warning). `packages/engine` + `packages/contracts` move into an `engine-*.js` chunk (118,170 bytes) via a new `build.rollupOptions.output.manualChunks(id)` in `vite.config.ts`, and every on-demand surface became a dynamic import: the manual battle-arena chain (openManualBattleArena ~52 kB, plus battleModal / battleResultCard / battleResultText / assaultConfirmModal / confirmDialog / choice policies), cityView (~42.5 kB), multiplayerLobby (~9.6 kB), developerSettingsMenu + networkMap (dev surfaces, still in prod builds — deliberately not DEV-gated), logPanel (created only when the showLogPanel setting is on), testBattleSetup, battleOutcomeFeedback. Plan: [`.plans/20261011-0624_lazy-load-chunks_COMPLETE.md`](../.plans/20261011-0624_lazy-load-chunks_COMPLETE.md) — implemented, chunks/sizes verified by build on 2026-10-11.
+
+| Module | Purpose |
+|---|---|
+| `vite.config.ts` | New `build.rollupOptions.output.manualChunks(id)` (Windows-path normalized via `id.replace(/\\/g, "/")`) returning `"engine"` only for the `packages/engine` / `packages/contracts` paths, `undefined` otherwise; the `define` block with `__APP_VERSION__`/`__BUILD_TIME__`/`__BUILD_COMMIT__` is unchanged (`test/core/version.test.ts` reads the file as source text) |
+| `src/screens/shared/viewLauncher.ts` | `registerLazyView(name, loader)` + async `openView(name, opts)` beside the untouched sync `registerView`/`launchView`; `openView` awaits the loader and then launches through the normal registry, so a lazy module still self-registers on load |
+| `src/screens/index.ts` | Eager-for-boot barrel minus the deferred views: five `registerLazyView` calls (developerSettingsMenu, testBattleSetup, manualBattleArena, networkMap, multiplayerLobby) replace their side-effect imports |
+| `src/managers/GameActions.ts` | Its seven combat UI modules (openManualBattleArena, battleModal, battleResultCard, battleResultText, assaultConfirmModal, plus the battleChoicePolicy/resultCardPolicy gates) are `await import`-ed per use site; types stay `import type` |
+| `src/managers/UIManager.ts` | `ensureCityView()` / `constructCityView()` import and build `CityView` on the first open — the promise (not just the instance) is cached, so two fast double-clicks can't build two views; the import stays type-only |
+| `src/managers/GameEngine.ts` | `ensureLogPanel()` imports the module and creates the panel at most once, only while `settings().showLogPanel` is on; `attachBattleOutcomeFeedback` is loaded by `void import(...)` |
+| `src/screens/home/homeView.ts` | The multiplayer lobby is dynamic-imported inside the Multiplayer click handler instead of at module scope |
+| `src/screens/shared/toolbar.ts` | Test Battle opens via `void openView("testBattleSetup")` instead of a static import |
+
+Behavior notes: the registry convention is unchanged on both paths — a lazy module still self-registers when its loader fires, and `openView` launches it through the same registry `launchView` uses (five call sites migrated from `launchView` to `openView`; the Test Battle gear item moved from a static import to `openView`). developerSettingsMenu/networkMap remain in production bundles — they are lazily loaded, not DEV-gated. No runtime behavior changed: every surface still opens on the same user action, one tick later.
+
 ## See also
 
 - [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) — current module-by-module dependency map for `src/`, `server/`, `shared/`, `test/`, `tools/`, `scripts/`. This doc (`architecture.md`) is the executed **plan** that established the layout; the dependency map is the maintained **current state** and reflects any drift since the move.

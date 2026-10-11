@@ -21,15 +21,14 @@ import { attachEventLog, type EventLog } from "../debug/eventLog";
 import { mountPersistentDevConsole, type DevConsoleHandle } from "../debug/devConsole";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { setViewSeat } from "../state/viewSeat";
+import { settings, subscribeSettings } from "../state/settings";
 import { createFrameErrorLog } from "../core/frameErrors";
 import { shouldDriveAi } from "../io/serverDrivenGames";
 import { resolveCaravanMarkers } from "../render/caravanMarkers";
 import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
-import { attachBattleOutcomeFeedback } from "@screens/combat/battleOutcomeFeedback";
 import { attachAiThinkingHint } from "@screens/shared/aiThinkingHint";
 import { attachFirstTurnHint } from "@screens/shared/firstTurnHint";
-import { createLogPanel } from "@screens/shared/logPanel";
 import { getEntityMirror } from "../io/multiplayerSync";
 import { attachGarrisonEventBridge } from "../game/garrisonEventBridge";
 import { applyNetToSettlement, invertNet } from "@screens/settlements/cityView/netCost";
@@ -61,6 +60,7 @@ export class GameEngine {
   private validCharterHexes: Set<string> | null = null;
   public eventLog: EventLog | null = null;
   public consoleHandle: DevConsoleHandle | null = null;
+  private logPanelEnsured = false;
 
   constructor() {
     this.canvas = document.getElementById("game") as HTMLCanvasElement;
@@ -215,7 +215,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
   }
 
   private initInput(): void {
-    this.canvas.addEventListener("dblclick", (e) => this.handleDblClick(e));
+    this.canvas.addEventListener("dblclick", (e) => void this.handleDblClick(e));
     this.canvas.addEventListener("mousemove", (e) => this.handleMouseMove(e));
     this.canvas.addEventListener("click", (e) => this.handleClick(e));
   }
@@ -271,10 +271,16 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     // only its button clickable, so it cannot intercept canvas input.
     attachFirstTurnHint({ hasActiveGame: () => this.session.getActiveGameName() != null });
     // Log Message Panel (plan 2026-09-28-sse-event-push.md, use case 1):
-    // attach is unconditional like the toasts above -- the panel itself
-    // gates visibility and buffering on settings().showLogPanel, so the
-    // settings toggle works mid-session without re-attaching.
-    createLogPanel();
+    // lazy-load-chunks Phase 3b -- the module is imported on demand and the
+    // panel is created only while settings().showLogPanel is on: once at
+    // boot if the flag is set, otherwise on the first OFF->ON toggle. The
+    // panel itself still gates visibility and buffering on settings() and
+    // subscribes to every later toggle, so mid-session behavior is
+    // unchanged and nothing is created while the flag stays off.
+    subscribeSettings((s) => {
+      if (s.showLogPanel) this.ensureLogPanel();
+    });
+    this.ensureLogPanel();
     // Multiplayer garrison sync (UnitsRecruited/UnitsTransferred deltas +
     // SettlementBattleResolved's full-refetch snapshot) into the live
     // TurnController. Same explicit-attach convention as the consumers
@@ -297,11 +303,27 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     // the AI driver resolves battles server-side and no browser sees the
     // command response. Unflagged games are ignored by the consumer, so the
     // direct-response arena paths stay byte-identical.
-    attachBattleOutcomeFeedback({
-      getState: () => this.state.getState(),
-      getGameName: () => this.session.getActiveGameName(),
-      getLocalSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
+    // Lazy-load-chunks: the module (and everything only it would have pulled,
+    // battleResultText in particular) loads at attach time, so the entry chunk
+    // stays clear of the combat-feedback text machinery. Same explicit attach
+    // position, same arguments, the ensureLogPanel void-import pattern.
+    void import("@screens/combat/battleOutcomeFeedback").then(({ attachBattleOutcomeFeedback }) => {
+      attachBattleOutcomeFeedback({
+        getState: () => this.state.getState(),
+        getGameName: () => this.session.getActiveGameName(),
+        getLocalSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
+      });
     });
+  }
+
+  // Lazy log panel (lazy-load-chunks plan Phase 3b): imports the module and
+  // creates the panel at most once, and only while showLogPanel is on. The
+  // settings subscription above drives the runtime OFF->ON transition.
+  private ensureLogPanel(): void {
+    if (this.logPanelEnsured) return;
+    if (!settings().showLogPanel) return;
+    this.logPanelEnsured = true;
+    void import("@screens/shared/logPanel").then(({ createLogPanel }) => createLogPanel());
   }
 
   // =========================================================================
@@ -504,8 +526,10 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     // otherwise). The old `isMineable` filter predates food spots entirely
     // (citySpots.ts's pool was gold/wood/stone/iron/arcane only), so it
     // filtered nothing and hid a real mechanic once food was added.
-    const cityView = this.ui.getCityView();
-    if (!cityView) return;
+    // Lazy city view (lazy-load-chunks plan Phase 2): the CityView module is
+    // imported and constructed here, on the first settlement double-click,
+    // and cached by UIManager afterwards.
+    const cityView = await this.ui.ensureCityView();
     cityView.open(
       castle.id, castle.name, cityViewSizeFor(castle.level),
       colorForOwner(castle.ownerId),
