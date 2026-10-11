@@ -1,9 +1,19 @@
 import type { GameState, PlayerId } from "@heroes/contracts";
+import { evaluateGarrisonUpkeep, evaluateSuppliedHeroUpkeep, type UnitType } from "@heroes/engine";
 
 // Weekly upkeep shortfalls are otherwise silent: settlement consumption clamps
 // at zero, morale decays, and troops desert with no on-screen explanation.
 // This module is the pure read-side of that state — DOM-free, so it can be
 // unit-tested and reused by the end-turn toast and the panel badges.
+//
+// The charge itself is WEEKLY (day % 7 === 0, engine's round.ts), so the
+// persisted streak fields are the record of the LAST charge, not a live
+// shortfall: a larder restocked between charge days can leave a streak set
+// against an army that is fully funded RIGHT NOW. A row is therefore emitted
+// only when the entity is short at this moment — funding is evaluated through
+// the same engine evaluators the charge uses (evaluateSuppliedHeroUpkeep /
+// evaluateGarrisonUpkeep), so a stale streak never keeps warning until the
+// next charge.
 
 /** Whole unpaid weeks an entity must accumulate before troops start deserting. */
 export const DESERTION_AFTER_WEEKS = 2;
@@ -57,10 +67,20 @@ function buildDetail(
  * opponent's unpaid upkeep is not this player's problem, and a neutral
  * settlement has no owner to warn.
  *
- * `seat === null` (the local seat is unknown) yields no rows rather than
- * guessing at ownership.
+ * `unitTypes` is the unit catalog; an empty record is the sanctioned
+ * catalog-less fallback (1 gold / 1 food per troop), which prices a bill the
+ * old headcount readout coincidentally matched.
+ *
+ * A streak alone is NOT enough for a row: the entity must also be short RIGHT
+ * NOW, judged by the same funding rule the weekly charge applies. A larder
+ * restocked after the charge that stamped the streak is fed, not starving, and
+ * warning about it until the next day-% 7 charge is the bug this gate closes.
  */
-export function evaluateUpkeepWarnings(state: GameState, seat: PlayerId | null): UpkeepWarningRow[] {
+export function evaluateUpkeepWarnings(
+  state: GameState,
+  seat: PlayerId | null,
+  unitTypes: Record<string, UnitType> = {},
+): UpkeepWarningRow[] {
   if (seat === null) return [];
   const rows: UpkeepWarningRow[] = [];
 
@@ -68,6 +88,7 @@ export function evaluateUpkeepWarnings(state: GameState, seat: PlayerId | null):
     if (hero.ownerId !== seat) continue;
     const sinceDay = hero.upkeepUnpaidSinceDay;
     if (sinceDay === null) continue;
+    if (evaluateSuppliedHeroUpkeep(hero, state.settlements, unitTypes).unfed === 0) continue;
     const daysUnpaid = Math.max(0, state.day - sinceDay);
     const weeksUnpaid = Math.floor(daysUnpaid / 7);
     const deserting = weeksUnpaid >= DESERTION_AFTER_WEEKS;
@@ -92,6 +113,7 @@ export function evaluateUpkeepWarnings(state: GameState, seat: PlayerId | null):
     if (settlement.ownerId !== seat) continue;
     const sinceDay = settlement.garrisonUnpaidSinceDay;
     if (sinceDay === null) continue;
+    if (evaluateGarrisonUpkeep(settlement, unitTypes).unfed === 0) continue;
     const daysUnpaid = Math.max(0, state.day - sinceDay);
     const weeksUnpaid = Math.floor(daysUnpaid / 7);
     const deserting = weeksUnpaid >= DESERTION_AFTER_WEEKS;

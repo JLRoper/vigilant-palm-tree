@@ -1,5 +1,11 @@
-import type { Platoon } from "@heroes/contracts";
-import { evaluateTroopUpkeep, platoonTroopTotal, type UnitType } from "@heroes/engine";
+import type { HeroState, Platoon, SettlementId, SettlementState } from "@heroes/contracts";
+import {
+  evaluateGarrisonUpkeep,
+  evaluateSuppliedHeroUpkeep,
+  evaluateTroopUpkeep,
+  platoonTroopTotal,
+  type UnitType,
+} from "@heroes/engine";
 import { cachedUnitTypes } from "../../data/unitCatalog";
 
 // The weekly troop bill, as the player is shown it. Every surface that used to
@@ -79,6 +85,43 @@ export function liveEmpireUpkeepCost(heroes: readonly { stacks: readonly Platoon
   return empireUpkeepCost(heroes, unitCatalog());
 }
 
+// ── Currently-unfed gates ──────────────────────────────────────────────────
+// The weekly charge only runs on day % 7 === 0, so the persisted streak fields
+// record the LAST charge, not a live shortfall. These ask the engine's own
+// read-side evaluators what the NEXT charge would see, which is what a warning
+// surface must gate on: a larder restocked between charge days is fed, and
+// warning about it until the next charge is the stale-streak bug.
+
+/** Would the next weekly charge see this hero's army as unfed? */
+export function heroUpkeepCurrentlyUnfed(
+  hero: HeroState,
+  settlements: Record<SettlementId, SettlementState>,
+  unitTypes: Record<string, UnitType>,
+): boolean {
+  return evaluateSuppliedHeroUpkeep(hero, settlements, unitTypes).unfed > 0;
+}
+
+/** `heroUpkeepCurrentlyUnfed` against the live catalog, for per-frame UI callers. */
+export function liveHeroUpkeepUnfed(
+  hero: HeroState,
+  settlements: Record<SettlementId, SettlementState>,
+): boolean {
+  return heroUpkeepCurrentlyUnfed(hero, settlements, unitCatalog());
+}
+
+/** The garrison twin: would the next weekly charge see this garrison as unfed? */
+export function settlementUpkeepCurrentlyUnfed(
+  settlement: SettlementState,
+  unitTypes: Record<string, UnitType>,
+): boolean {
+  return evaluateGarrisonUpkeep(settlement, unitTypes).unfed > 0;
+}
+
+/** `settlementUpkeepCurrentlyUnfed` against the live catalog, for per-frame UI callers. */
+export function liveSettlementUpkeepUnfed(settlement: SettlementState): boolean {
+  return settlementUpkeepCurrentlyUnfed(settlement, unitCatalog());
+}
+
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
@@ -121,5 +164,33 @@ export function empireUpkeepTitleClause(bill: UpkeepBill): string {
   return (
     `Upkeep: troops ${bill.gold}g + ${bill.food} food/wk ` +
     `(hero purse; larder first, then your own settlements' food while standing on one)`
+  );
+}
+
+/** Days until the next weekly charge (`day % 7 === 0`), so day 7 answers 7, not 0. */
+export function daysToWeeklyCharge(day: number): number {
+  return 7 - (day % 7);
+}
+
+/**
+ * The hero panel's food-row tooltip: the weekly cadence the bill is charged
+ * on, and how much cover the current larder buys.
+ *
+ * The cadence is the point. A player who sees "18 food/wk" and watches 100
+ * food sit untouched concludes the food is dead stock; the charge is simply
+ * weekly, so the larder is correct until the next day-% 7 charge.
+ */
+export function heroLarderTitle(bill: UpkeepBill, foodStock: number, day: number): string {
+  if (bill.food <= 0) {
+    return `Weekly upkeep: no food cost. Gold upkeep is ${bill.gold}g/wk from the purse.`;
+  }
+  const weeks = Math.floor(foodStock / bill.food);
+  const cover =
+    weeks >= 1
+      ? `this larder covers ~${weeks} week${weeks === 1 ? "" : "s"}`
+      : "this larder does not cover one week";
+  return (
+    `Weekly upkeep: ${bill.food} food charged every 7th day (next charge in ${daysToWeeklyCharge(day)} days) — ` +
+    `${cover}. Paid from the wagon larder first, then the settlement this hero stands on.`
   );
 }

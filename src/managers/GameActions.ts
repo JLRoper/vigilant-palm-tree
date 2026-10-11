@@ -676,12 +676,14 @@ export class GameActions {
   // decays, and troops desert with nothing on screen saying why. Runs on the
   // post-EndTurn merged state (the weekly upkeep pass has already applied, so
   // days/weeks-unpaid are current) and stays inside the toast surface — a modal
-  // was rejected for this because it can wedge the turn UI.
+  // was rejected for this because it can wedge the turn UI. The catalog is
+  // passed through so the module's affordability gate prices each entity's
+  // bill the way the charge does instead of the catalog-less 1g/1f default.
   private reportUnpaidUpkeep(): void {
     const merged = this.state.getState();
     const gameName = this.session.getActiveGameName();
     const seat = getInMemoryLocalPlayerId(gameName ?? "") ?? 0;
-    const rows = evaluateUpkeepWarnings(merged, seat);
+    const rows = evaluateUpkeepWarnings(merged, seat, cachedUnitTypes());
     if (rows.length === 0) return;
     if (rows.length > UPKEEP_SUMMARY_OFFENDER_LIMIT) {
       showToast(upkeepSummaryToastMessage(rows), "error");

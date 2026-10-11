@@ -10,6 +10,7 @@ import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayou
 import type { PanelRect } from "@screens/shared/panelPlacement";
 import { AccordionSection, makeRow } from "@screens/shared/panelWidgets";
 import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
+import { liveSettlementUpkeepUnfed } from "@screens/shared/heroUpkeepCost";
 import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../../render/assetDescriptors";
 import { bankRejectionMessage, bankRowModel, treasuryRowModel, type BankGoldDirection, type BankRowModel } from "./bankRows";
 import { TREASURY_CAP_AMBER, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
@@ -648,7 +649,10 @@ export class SettlementInfoMenu {
   // on the common path, nothing when the settlement is paid up.
   private updateUpkeep(settlement: SettlementState, day: number): void {
     const sinceDay = settlement.garrisonUnpaidSinceDay;
-    if (sinceDay === null) {
+    // Same gate as the hero panel: a weekly streak only means a CURRENT
+    // shortfall while the treasury and warehouse still cannot cover the bill,
+    // so a restocked warehouse hides the row until the next day-% 7 charge.
+    if (sinceDay === null || !liveSettlementUpkeepUnfed(settlement)) {
       this.upkeepRow.style.display = "none";
       return;
     }

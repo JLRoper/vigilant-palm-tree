@@ -1,15 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Platoon, UnitType } from "@heroes/engine";
+import type { HeroState, Platoon, SettlementId, SettlementState } from "@heroes/contracts";
+import type { UnitType } from "@heroes/engine";
 import { evaluateTroopUpkeep } from "@heroes/engine";
 import {
+  daysToWeeklyCharge,
   empireUpkeepCost,
   empireUpkeepLabel,
   empireUpkeepTitleClause,
+  heroLarderTitle,
   heroUpkeepCost,
+  heroUpkeepCurrentlyUnfed,
   heroUpkeepLabel,
   heroUpkeepTitle,
+  liveHeroUpkeepUnfed,
+  liveSettlementUpkeepUnfed,
+  settlementUpkeepCurrentlyUnfed,
 } from "@screens/shared/heroUpkeepCost";
+import { emptyWarehouse, makeHero, makeSettlement } from "../../charter/_helpers";
 
 // The upkeep readout used to interpolate raw troop HEADCOUNT into a bill: a
 // 24-troop army was told it cost "24g + 24 food" while the engine charged it
@@ -148,4 +156,123 @@ test("the HUD tooltip clause names the real sources, not 'purse & packs'", () =>
     "Upkeep: troops 76g + 40 food/wk (hero purse; larder first, then your own settlements' food while standing on one)",
   );
   assert.equal(clause.includes("packs"), false);
+});
+
+// ── Weekly cadence + the currently-unfed gate ─────────────────────────────
+// The charge runs on day % 7 === 0, so a player watching an untouched larder
+// reads it as dead stock. The larder tooltip states the cadence; the unfed
+// gates answer the question a warning surface must actually ask -- would the
+// NEXT charge see this entity as fed?
+
+const ONE_PEASANT: Platoon[] = [{ entries: [{ unitTypeId: "peasant", count: 1 }] }];
+
+/** A hero in the field: a one-peasant army, own town far away. */
+function fieldHero(overrides: Partial<HeroState> = {}): HeroState {
+  return {
+    ...makeHero("h0", 0, 2, 2, { gold: 100, troops: 1, stacks: ONE_PEASANT }),
+    ...overrides,
+  };
+}
+
+function settlementRecord(
+  settlement: SettlementState,
+): Record<SettlementId, SettlementState> {
+  return { [settlement.id]: settlement };
+}
+
+test("daysToWeeklyCharge counts down to the next day-% 7 charge", () => {
+  assert.equal(daysToWeeklyCharge(1), 6);
+  assert.equal(daysToWeeklyCharge(6), 1);
+  assert.equal(daysToWeeklyCharge(7), 7, "a charge day is a full week from the next one, not zero");
+  assert.equal(daysToWeeklyCharge(11), 3);
+  assert.equal(daysToWeeklyCharge(14), 7);
+});
+
+test("the larder tooltip names the cadence and the weeks of cover", () => {
+  // 90 food against an 18 food/wk bill: five weeks of cover, and on day 11 the
+  // next charge is 3 days out.
+  const title = heroLarderTitle({ troops: 14, gold: 34, food: 18 }, 90, 11);
+  assert.equal(
+    title,
+    "Weekly upkeep: 18 food charged every 7th day (next charge in 3 days) — " +
+      "this larder covers ~5 weeks. Paid from the wagon larder first, then the settlement this hero stands on.",
+  );
+  assert.match(title, /charged every 7th day/, "the weekly cadence is explicit");
+  assert.match(title, /next charge in 3 days/);
+  assert.match(title, /~5 weeks/);
+  // One week reads singular; two do not.
+  assert.match(heroLarderTitle({ troops: 2, gold: 2, food: 18 }, 18, 7), /~1 week\./);
+  assert.match(heroLarderTitle({ troops: 2, gold: 2, food: 18 }, 36, 7), /~2 weeks\./);
+});
+
+test("the larder tooltip says so when the stock cannot cover one week", () => {
+  const title = heroLarderTitle({ troops: 14, gold: 34, food: 18 }, 10, 11);
+  assert.match(title, /does not cover one week/);
+  assert.match(title, /next charge in 3 days/, "the cadence is stated even when the news is bad");
+});
+
+test("a zero food bill reads as a gold-only bill", () => {
+  assert.equal(
+    heroLarderTitle({ troops: 3, gold: 6, food: 0 }, 40, 5),
+    "Weekly upkeep: no food cost. Gold upkeep is 6g/wk from the purse.",
+  );
+});
+
+test("the hero gate asks what the next charge would see, not what the streak says", () => {
+  const distant = settlementRecord(
+    makeSettlement("s0", 0, 9, 9, { gold: 500, warehouse: emptyWarehouse({ food: 500 }) }),
+  );
+
+  // Purse + larder both cover the 1 peasant's 1g/1f bill.
+  const fed = fieldHero({ gold: 10, resources: emptyWarehouse({ food: 5 }) });
+  assert.equal(heroUpkeepCurrentlyUnfed(fed, distant, CATALOG), false);
+  assert.equal(liveHeroUpkeepUnfed(fed, distant), false, "the live twin prices the same bill");
+
+  // Empty purse and larder: a real shortfall.
+  const broke = fieldHero({ gold: 0, resources: emptyWarehouse() });
+  assert.equal(heroUpkeepCurrentlyUnfed(broke, distant, CATALOG), true);
+  assert.equal(liveHeroUpkeepUnfed(broke, distant), true);
+
+  // A brimming larder with an empty purse still starves: gold and food each
+  // starve their own count, so funding one half does not hide the other.
+  const goldShort = fieldHero({ gold: 0, resources: emptyWarehouse({ food: 50 }) });
+  assert.equal(heroUpkeepCurrentlyUnfed(goldShort, distant, CATALOG), true);
+  const foodShort = fieldHero({ gold: 500, resources: emptyWarehouse() });
+  assert.equal(heroUpkeepCurrentlyUnfed(foodShort, distant, CATALOG), true);
+});
+
+test("the settlement under the hero funds the food half of the bill", () => {
+  const atTown = fieldHero({ q: 4, r: 4, gold: 100, resources: emptyWarehouse() });
+
+  const own = settlementRecord(
+    makeSettlement("s0", 0, 4, 4, { gold: 0, warehouse: emptyWarehouse({ food: 50 }) }),
+  );
+  assert.equal(liveHeroUpkeepUnfed(atTown, own), false, "the city under the hero's boots is a legal source");
+
+  const neutral = settlementRecord(
+    makeSettlement("s0", null, 4, 4, { gold: 0, warehouse: emptyWarehouse({ food: 50 }) }),
+  );
+  assert.equal(liveHeroUpkeepUnfed(atTown, neutral), true, "a neutral town is nobody's larder");
+});
+
+test("the garrison twin reads treasury + warehouse", () => {
+  const stacks: Platoon[] = [{ entries: [{ unitTypeId: "peasant", count: 2 }] }];
+
+  const funded = {
+    ...makeSettlement("s0", 0, 1, 1, { gold: 100, warehouse: emptyWarehouse({ food: 50 }) }),
+    stacks,
+  };
+  assert.equal(settlementUpkeepCurrentlyUnfed(funded, CATALOG), false);
+  assert.equal(liveSettlementUpkeepUnfed(funded), false);
+
+  const broke = {
+    ...makeSettlement("s0", 0, 1, 1, { gold: 0, warehouse: emptyWarehouse() }),
+    stacks,
+  };
+  assert.equal(settlementUpkeepCurrentlyUnfed(broke, CATALOG), true);
+  assert.equal(liveSettlementUpkeepUnfed(broke), true);
+
+  // No garrison, no bill: a streak on an empty garrison has nothing to warn about.
+  const empty = makeSettlement("s0", 0, 1, 1, { gold: 0, warehouse: emptyWarehouse() });
+  assert.equal(liveSettlementUpkeepUnfed(empty), false);
 });

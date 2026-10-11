@@ -35,6 +35,22 @@ export function evaluateHeroUpkeep(
   return evaluateTroopUpkeep(hero.stacks, unitTypes, hero.gold, hero.resources?.food ?? 0);
 }
 
+// Read-side twin of applySuppliedHeroUpkeep: what the next weekly charge WOULD
+// see. Pure, mutates nothing. Exists so a warning surface can tell a current
+// shortfall from a weekly streak a since-restocked larder has already fixed --
+// the charge only runs on day % 7 === 0, so a streak stamped at day 7 keeps
+// reading "unfed" through day 13 even after the larder is funded.
+export function evaluateSuppliedHeroUpkeep(
+  hero: HeroState,
+  settlements: Record<SettlementId, SettlementState>,
+  unitTypes: Record<string, UnitType> = {},
+): TroopUpkeepEvaluation {
+  const sources = foodSources(hero, settlements, {});
+  const pool = sources.reduce((total, source) => total + source.available, 0);
+  const larder = hero.resources?.food ?? 0;
+  return evaluateTroopUpkeep(hero.stacks, unitTypes, hero.gold, larder + pool);
+}
+
 // ── Settlement-funded food upkeep ──────────────────────────────────────────
 // A hero's larder is only ever filled by a manual "unload at a settlement"
 // action (logistics.ts's transferResources) or by a caravan delivering to a

@@ -1,11 +1,23 @@
 import type { SettlementId, SettlementState } from "@heroes/contracts";
-import { platoonTroopTotal, settlementStacks } from "../units";
+import { platoonTroopTotal, settlementStacks, type UnitType } from "../units";
 import {
+  evaluateTroopUpkeep,
   resolveTroopUpkeep,
+  type TroopUpkeepEvaluation,
   type TroopUpkeepOptions,
 } from "../economy/troopUpkeep";
 
 export type GarrisonUpkeepOptions = TroopUpkeepOptions;
+
+// Read-side twin of applyGarrisonUpkeep's funding rule: treasury plays the
+// purse, warehouse food plays the larder, no charge is applied.
+export function evaluateGarrisonUpkeep(
+  settlement: SettlementState,
+  unitTypes: Record<string, UnitType> = {},
+): TroopUpkeepEvaluation {
+  const stacks = settlementStacks(settlement);
+  return evaluateTroopUpkeep(stacks, unitTypes, settlement.gold, settlement.warehouse.food ?? 0);
+}
 
 export function applyGarrisonUpkeep(
   settlements: Record<SettlementId, SettlementState>,

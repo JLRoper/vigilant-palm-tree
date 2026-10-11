@@ -59,6 +59,10 @@ The designer's three ways gold reaches a purse:
 
 Purse gold is spent on chartering (2500g cost from hero purse). Settlements track gold separately in their treasury (`settlement.gold`).
 
+### Feeding the army (larder & the weekly bill)
+
+The hero info panel's food row is the hero's larder (food in its wagon cargo) and its tooltip states the cadence in the player's terms — the weekly bill, in-game days until the next charge, and weeks of larder coverage (`heroLarderTitle`, [`src/screens/shared/heroUpkeepCost.ts`](../src/screens/shared/heroUpkeepCost.ts)). The bill is charged weekly only (`day % 7 === 0`), so a larder refilled between charge days is never charged. The panel's upkeep badge — like the End Turn "unfed troops" toast — reads the persisted unpaid-streak fields and is now suppressed while the hero is currently affordable (purse + larder, plus the settlement physically under the hero); a streak stamped on an earlier charge day stops warning once the larder is restocked. The streak itself, the morale bleed and the desertion ladder are unchanged (see [army.md](./army.md) → Upkeep).
+
 ## Combat
 
 When a hero moves adjacent to an enemy hero, battle triggers:

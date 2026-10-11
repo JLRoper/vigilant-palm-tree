@@ -7,6 +7,7 @@ import type {
   SettlementId,
   SettlementState,
 } from "@heroes/contracts";
+import type { UnitType } from "@heroes/engine";
 import {
   DESERTION_AFTER_WEEKS,
   evaluateUpkeepWarnings,
@@ -18,6 +19,11 @@ import {
 // Self-contained fixtures: the upkeep fields are required on HeroState /
 // SettlementState, and this suite must not depend on a shared fixture builder
 // that is still being migrated.
+//
+// Both defaults carry a one-peasant army with no funds: the affordability gate
+// (a row is only emitted when the entity is short RIGHT NOW) suppresses a row
+// for an army with no bill, so a fixture that modeled no troops at all would
+// make every "still warns" assertion vacuous.
 
 function makePlayer(id: number, heroIds: string[], settlementIds: string[]): Player {
   return {
@@ -48,7 +54,7 @@ function hero(
     trail: [],
     gold: 0,
     troops: 1,
-    stacks: [],
+    stacks: [{ entries: [{ unitTypeId: "peasant", count: 1 }] }],
     isChartering: false,
     charterId: null,
     horseVariant: "bubbly",
@@ -92,6 +98,7 @@ function settlement(
     autoTrade: true,
     castleVariant: 0,
     buildings: [],
+    stacks: [{ entries: [{ unitTypeId: "peasant", count: 1 }] }],
     ...overrides,
   };
 }
@@ -381,4 +388,153 @@ test("the summary toast counts every offender and names the top three", () => {
   assert.match(message, /Charlie/);
   assert.ok(!message.includes("Delta"));
   assert.match(message, /Morale is falling; troops desert after 2 unpaid weeks\.$/);
+});
+
+// ── The affordability gate ────────────────────────────────────────────────
+// The charge is weekly (day % 7 === 0), so the streak fields record the LAST
+// charge rather than a live shortfall. A row is only emitted when the entity is
+// short RIGHT NOW, judged by the same engine evaluators the charge uses.
+
+const EMPTY_WAREHOUSE = { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
+
+/** A catalog entry with explicit upkeep, for pinning what the gate prices. */
+function catalogUnit(id: string, gold: number, food: number): UnitType {
+  return {
+    id,
+    name: id,
+    attack: 1,
+    defence: 1,
+    health: 1,
+    speed: 1,
+    description: "",
+    advantageType: "infantry",
+    specialty: "",
+    specialtyPriority: 0,
+    upkeepGold: gold,
+    upkeepFood: food,
+    tier: 1,
+  } as UnitType;
+}
+
+/** The reported army's shape: a 14-troop field army on a day-7 streak, day 11. */
+function fieldArmyHero(food: number, gold: number): HeroState {
+  const stacks = Array.from({ length: 14 }, () => ({
+    entries: [{ unitTypeId: "peasant", count: 1 }],
+  }));
+  return hero("h0", 0, {
+    gold,
+    stacks,
+    upkeepUnpaidSinceDay: 7,
+    upkeepUnpaidTroops: 14,
+    upkeepUnpaidGold: 34,
+    resources: { ...EMPTY_WAREHOUSE, food },
+  });
+}
+
+test("a weekly streak with a stocked larder is not a current shortfall", () => {
+  // The live-game shape: the day-7 charge ran while the larder was empty, a
+  // caravan delivered 100 food on days 8-10, and no charge runs again until
+  // day 14 -- so the persisted streak says "unfed" against a fed army.
+  const state = makeState({ day: 11, heroes: [fieldArmyHero(100, 366)] });
+  assert.deepEqual(evaluateUpkeepWarnings(state, 0), []);
+});
+
+test("an empty larder still warns", () => {
+  // The same army with nothing to pay with is a genuine shortfall: the streak
+  // must not be suppressed just because the gate exists.
+  const state = makeState({ day: 11, heroes: [fieldArmyHero(0, 0)] });
+  const rows = evaluateUpkeepWarnings(state, 0);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].key, "hero:h0");
+  assert.equal(rows[0].unfedTroops, 14);
+  assert.equal(rows[0].unpaidGold, 34);
+});
+
+test("the settlement under the hero funds the bill", () => {
+  // Hero standing on its OWN town: that warehouse is the one legal source for
+  // the FOOD half, so the row is suppressed even with an empty larder -- the
+  // gold half still comes from the hero's own purse, like the charge itself.
+  const own = makeState({
+    day: 11,
+    heroes: [
+      hero("h0", 0, {
+        q: 3,
+        r: 3,
+        gold: 1000,
+        upkeepUnpaidSinceDay: 7,
+        resources: { ...EMPTY_WAREHOUSE, food: 0 },
+      }),
+    ],
+    settlements: [
+      settlement("s0", 0, {
+        gold: 1000,
+        warehouse: { ...EMPTY_WAREHOUSE, food: 50 },
+      }),
+    ],
+  });
+  assert.deepEqual(evaluateUpkeepWarnings(own, 0), []);
+
+  // A NEUTRAL town under the hero is nobody's larder: one row survives.
+  const neutral = makeState({
+    day: 11,
+    heroes: [
+      hero("h0", 0, {
+        q: 3,
+        r: 3,
+        gold: 1000,
+        upkeepUnpaidSinceDay: 7,
+        resources: { ...EMPTY_WAREHOUSE, food: 0 },
+      }),
+    ],
+    settlements: [
+      settlement("s0", null, {
+        gold: 1000,
+        warehouse: { ...EMPTY_WAREHOUSE, food: 50 },
+      }),
+    ],
+  });
+  const rows = evaluateUpkeepWarnings(neutral, 0);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].key, "hero:h0");
+});
+
+test("the catalog argument matters: the gate prices the bill, not the headcount", () => {
+  // 1 peasant, 5 gold, 1 food. Catalog-less (1g/1f) the army is fed and no row
+  // survives; with a peasant that costs 2 food the same stocks starve it.
+  const state = makeState({
+    day: 11,
+    heroes: [
+      hero("h0", 0, {
+        gold: 5,
+        upkeepUnpaidSinceDay: 7,
+        resources: { ...EMPTY_WAREHOUSE, food: 1 },
+      }),
+    ],
+  });
+  assert.deepEqual(evaluateUpkeepWarnings(state, 0), []);
+  const rows = evaluateUpkeepWarnings(state, 0, { peasant: catalogUnit("peasant", 2, 2) });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].key, "hero:h0");
+});
+
+test("a restocked warehouse suppresses the garrison warning", () => {
+  const garrison = settlement("s0", 0, {
+    garrisonUnpaidSinceDay: 7,
+    garrisonUnpaidTroops: 1,
+    garrisonUnpaidGold: 1,
+    gold: 100,
+    warehouse: { ...EMPTY_WAREHOUSE, food: 50 },
+  });
+  assert.deepEqual(evaluateUpkeepWarnings(makeState({ day: 11, settlements: [garrison] }), 0), []);
+
+  const broke = settlement("s0", 0, {
+    garrisonUnpaidSinceDay: 7,
+    garrisonUnpaidTroops: 1,
+    garrisonUnpaidGold: 1,
+    gold: 0,
+    warehouse: { ...EMPTY_WAREHOUSE, food: 0 },
+  });
+  const rows = evaluateUpkeepWarnings(makeState({ day: 11, settlements: [broke] }), 0);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].key, "settlement:s0");
 });

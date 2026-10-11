@@ -1,4 +1,4 @@
-import type { GameState, HeroState, Player, SettlementState } from "../../state/gameState";
+import type { GameState, HeroState, Player, SettlementId, SettlementState } from "../../state/gameState";
 import type { Hero } from "../../entities/hero";
 import { PopupMenu, menuTheme } from "@screens/shared/menu";
 import { toolbarHeight } from "@screens/shared/panelRail";
@@ -7,7 +7,13 @@ import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayou
 import type { PanelRect } from "@screens/shared/panelPlacement";
 import { AccordionSection, makeRow } from "@screens/shared/panelWidgets";
 import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
-import { heroUpkeepLabel, heroUpkeepTitle, liveHeroUpkeepCost } from "@screens/shared/heroUpkeepCost";
+import {
+  heroLarderTitle,
+  heroUpkeepLabel,
+  heroUpkeepTitle,
+  liveHeroUpkeepCost,
+  liveHeroUpkeepUnfed,
+} from "@screens/shared/heroUpkeepCost";
 import { ArmySection, type ReorderHandler } from "./armySection";
 import { HERO_BANNERS, RESOURCE_PILE_BUBBLY_SPRITES } from "../../render/assetDescriptors";
 import { HERO_BASE_ATTACK, HERO_BASE_DEFENCE, heroCargo, heroGoldCap, heroResourceCap, heroTreasuryWagons, heroWagons } from "@heroes/engine";
@@ -41,6 +47,7 @@ interface HeroPanelDom {
   bannerEl: HTMLImageElement;
   nameEl: HTMLElement;
   goldEl: HTMLElement;
+  foodWrap: HTMLDivElement;
   foodEl: HTMLElement;
   transferRow: HTMLDivElement;
   withdrawBtn: HTMLButtonElement;
@@ -298,6 +305,7 @@ function buildHeroPanelDom(
     bannerEl,
     nameEl,
     goldEl,
+    foodWrap,
     foodEl,
     transferRow,
     withdrawBtn,
@@ -437,11 +445,15 @@ export class HeroInfoMenu {
     this.dom.movementFill.style.background =
       remaining <= 0 ? MOVEMENT_BAR_RED : fraction <= 0.25 ? MOVEMENT_BAR_AMBER : MOVEMENT_BAR_GREEN;
     this.dom.movementLabel.textContent = `${shown} / ${MOVEMENT_PER_TURN}`;
-const upkeep = liveHeroUpkeepCost(hero.stacks);
+    const upkeep = liveHeroUpkeepCost(hero.stacks);
     this.dom.troopsEl.textContent = heroUpkeepLabel(upkeep);
     this.dom.troopsEl.title = heroUpkeepTitle(upkeep);
+    // The food row is where the "my larder never empties" confusion starts:
+    // the tooltip names the weekly cadence the bill is charged on and how many
+    // weeks the current stock covers.
+    this.dom.foodWrap.title = heroLarderTitle(upkeep, cargoFood, state.day);
 
-    this.updateUpkeep(heroState, state.day);
+    this.updateUpkeep(heroState, state.settlements, state.day);
 
     this.renderCargo(hero, state);
 
@@ -479,7 +491,11 @@ const upkeep = liveHeroUpkeepCost(hero.stacks);
   // Morale is always on screen; the upkeep row appears only while this hero is
   // short. Cheap by construction — no allocation, no rebuild, just text writes
   // on an update() that already runs every frame.
-  private updateUpkeep(heroState: HeroState | undefined, day: number): void {
+  private updateUpkeep(
+    heroState: HeroState | undefined,
+    settlements: Record<SettlementId, SettlementState>,
+    day: number,
+  ): void {
     if (!heroState) {
       this.dom.moraleEl.textContent = "—";
       this.dom.upkeepRow.style.display = "none";
@@ -487,7 +503,11 @@ const upkeep = liveHeroUpkeepCost(hero.stacks);
     }
     this.dom.moraleEl.textContent = `${Math.round(heroState.morale)}%`;
     const sinceDay = heroState.upkeepUnpaidSinceDay;
-    if (sinceDay === null) {
+    // A weekly streak is only a CURRENT shortfall while the hero still cannot
+    // cover its bill: between the charge that stamped the streak and the next
+    // day-% 7 charge, a restocked larder means the army is fed and this row
+    // would be a stale alarm.
+    if (sinceDay === null || !liveHeroUpkeepUnfed(heroState, settlements)) {
       this.dom.upkeepRow.style.display = "none";
       return;
     }
