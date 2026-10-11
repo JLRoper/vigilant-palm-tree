@@ -5,6 +5,8 @@
 // test/visual-baselines/. Run standalone with `npm run test:visual`, or
 // `npm run test:visual:update-baselines` to (re)write the baselines -- baseline
 // churn must be justified in the PR description, per the issue's own ask.
+// Set VISUAL_GAME_NAME_TAG to suffix the suite's game name and avoid clashing
+// with concurrent runs on the shared game DB (default: unsuffixed).
 
 import { chromium, Browser, Page, BrowserContext, request as pwRequest } from "playwright";
 import { ChildProcess } from "node:child_process";
@@ -35,7 +37,9 @@ const UPDATE_BASELINES = shouldUpdateBaselines();
 
 const SEED = 90210;
 const RNG_SEED = 424242;
-const GAME_NAME = "visual-regression-149";
+const GAME_NAME = process.env.VISUAL_GAME_NAME_TAG
+  ? `visual-regression-149-${process.env.VISUAL_GAME_NAME_TAG}`
+  : "visual-regression-149";
 
 const VIEWPORT = { width: 1280, height: 800 };
 
@@ -168,12 +172,38 @@ async function captureAndCompare(name: string, page: Page): Promise<Buffer> {
   return png;
 }
 
-// ── Adventure overview + charter phases + city view (one continuous game) ──
+function isReloadRace(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return /Execution context was destroyed|detached frame|Target crashed|page has been closed/i.test(msg);
+}
 
-async function runGameScenes(context: BrowserContext): Promise<void> {
-  const page = await newPage(context);
-  await dismissHomeAndCreateGame(page, GAME_NAME, SEED);
+async function withPageRetry<T>(
+  context: BrowserContext,
+  label: string,
+  body: (page: Page) => Promise<T>,
+  urlSuffix = "",
+): Promise<T> {
+  const page = await newPage(context, urlSuffix);
+  try {
+    const result = await body(page);
+    await page.close().catch(() => {});
+    return result;
+  } catch (e) {
+    await page.close().catch(() => {});
+    if (!isReloadRace(e)) throw e;
+    console.log(`>> ${label}: page reloaded mid-run; re-booting and re-running the scene`);
+    const fresh = await newPage(context, urlSuffix);
+    try {
+      return await body(fresh);
+    } finally {
+      await fresh.close().catch(() => {});
+    }
+  }
+}
 
+// ── Adventure overview + charter phases + city view (one scene per page) ──
+
+async function selectHeroAndHover(page: Page): Promise<void> {
   const heroes = await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getHeroes());
   const playerHero = heroes.find((h: any) => h.ownerId === 0);
   if (!playerHero) throw new Error("no player hero in fixed game");
@@ -191,18 +221,13 @@ async function runGameScenes(context: BrowserContext): Promise<void> {
   });
   await page.mouse.move(targetPx.x, targetPx.y);
   await wait(300);
-  await captureAndCompare("adventure-overview", page);
+}
 
-  // ── Charter: traveling / constructing ──
-  // Injected directly via debugInjectCharter rather than driven through the
-  // real startCharter command: that command's server-side persistence is
-  // gated on the game's storage having been migrated to granular entity
-  // tables (server/app/commandHandler.ts's StartCharter case, "Source gate
-  // FIRST" comment) -- a fresh game here is JSONB-backed, so a real
-  // StartCharter round-trip always fails with charters_persist_unavailable.
-  // The charter overlay only ever reads targetQ/targetR/phase to render
-  // (adventureScene.ts / paint2d's paintCharterOverlay), so the injected object is
-  // exactly as good a fixture as a persisted one for this screenshot.
+async function injectCharter(page: Page, phase: "traveling" | "constructing"): Promise<void> {
+  const heroes = await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getHeroes());
+  const playerHero = heroes.find((h: any) => h.ownerId === 0);
+  if (!playerHero) throw new Error("no player hero in fixed game");
+
   const settlements = await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getSettlements());
   const homeSettlement = settlements.find((s: any) => s.ownerId === 0);
   if (!homeSettlement) throw new Error("no player-owned settlement in fixed game");
@@ -220,21 +245,27 @@ async function runGameScenes(context: BrowserContext): Promise<void> {
   }, { q: homeSettlement.q, r: homeSettlement.r });
   if (!charterTarget) throw new Error("no passable charter target found near home settlement");
 
+  // Injected directly via debugInjectCharter rather than driven through the
+  // real startCharter command: that command's server-side persistence is
+  // gated on the game's storage having been migrated to granular entity
+  // tables (server/app/commandHandler.ts's StartCharter case, "Source gate
+  // FIRST" comment) -- a fresh game here is JSONB-backed, so a real
+  // StartCharter round-trip always fails with charters_persist_unavailable.
+  // The charter overlay only ever reads targetQ/targetR/phase to render
+  // (adventureScene.ts / paint2d's paintCharterOverlay), so the injected object is
+  // exactly as good a fixture as a persisted one for this screenshot.
   await page.evaluate(
-    ({ heroId, q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.debugInjectCharter(heroId, q, r, "traveling", "Outpost"),
-    { heroId: playerHero.id, q: charterTarget.q, r: charterTarget.r },
+    ({ heroId, q, r, phase }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.debugInjectCharter(heroId, q, r, phase, "Outpost"),
+    { heroId: playerHero.id, q: charterTarget.q, r: charterTarget.r, phase },
   );
   await wait(300);
-  await captureAndCompare("charter-traveling", page);
+}
 
-  await page.evaluate(
-    ({ heroId, q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.debugInjectCharter(heroId, q, r, "constructing", "Outpost"),
-    { heroId: playerHero.id, q: charterTarget.q, r: charterTarget.r },
-  );
-  await wait(300);
-  await captureAndCompare("charter-constructing", page);
+async function openCityAtHomeSettlement(page: Page): Promise<void> {
+  const settlements = await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getSettlements());
+  const homeSettlement = settlements.find((s: any) => s.ownerId === 0);
+  if (!homeSettlement) throw new Error("no player-owned settlement in fixed game");
 
-  // ── City view: parallax on/off ──
   const coords = await page.evaluate(
     ({ q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.screenFor(q, r),
     { q: homeSettlement.q, r: homeSettlement.r },
@@ -243,16 +274,6 @@ async function runGameScenes(context: BrowserContext): Promise<void> {
   await wait(150);
   await page.mouse.dblclick(coords.x, coords.y);
   await wait(600);
-
-  await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ parallaxEnabled: true }));
-  await wait(300);
-  await captureAndCompare("city-view-parallax-on", page);
-
-  await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ parallaxEnabled: false }));
-  await wait(300);
-  await captureAndCompare("city-view-parallax-off", page);
-
-  await page.close();
 }
 
 // ── Battle arena: three captures per plan/2026-09-29-arena-unit-sprites.md ──
@@ -271,18 +292,22 @@ async function runBattleArenaScene(
   name: string,
   urlSuffix: string,
 ): Promise<Buffer> {
-  const page = await newPage(context, urlSuffix);
-  await dismissHomeAndCreateGame(page, `${GAME_NAME}-${name}`, SEED);
+  return withPageRetry(
+    context,
+    name,
+    async (page) => {
+      await dismissHomeAndCreateGame(page, `${GAME_NAME}-${name}`, SEED);
 
-  await page.locator('#toolbar button[title="Menu"]').click();
-  const testBattleBtn = page.locator("#toolbar button", { hasText: "Test Battle" });
-  await testBattleBtn.click();
-  await page.locator("button", { hasText: "Start Battle" }).click({ timeout: 15_000 });
-  await wait(500);
+      await page.locator('#toolbar button[title="Menu"]').click();
+      const testBattleBtn = page.locator("#toolbar button", { hasText: "Test Battle" });
+      await testBattleBtn.click();
+      await page.locator("button", { hasText: "Start Battle" }).click({ timeout: 15_000 });
+      await wait(500);
 
-  const png = await captureAndCompare(name, page);
-  await page.close();
-  return png;
+      return captureAndCompare(name, page);
+    },
+    urlSuffix,
+  );
 }
 
 async function run(): Promise<void> {
@@ -305,7 +330,43 @@ async function run(): Promise<void> {
     browser = await chromium.launch();
     const context = await browser.newContext({ viewport: VIEWPORT });
 
-    await runGameScenes(context);
+    await withPageRetry(context, "adventure-overview", async (page) => {
+      await dismissHomeAndCreateGame(page, GAME_NAME, SEED);
+      await selectHeroAndHover(page);
+      await captureAndCompare("adventure-overview", page);
+    });
+
+    await withPageRetry(context, "charter-traveling", async (page) => {
+      await dismissHomeAndCreateGame(page, GAME_NAME, SEED);
+      await selectHeroAndHover(page);
+      await injectCharter(page, "traveling");
+      await captureAndCompare("charter-traveling", page);
+    });
+
+    await withPageRetry(context, "charter-constructing", async (page) => {
+      await dismissHomeAndCreateGame(page, GAME_NAME, SEED);
+      await selectHeroAndHover(page);
+      await injectCharter(page, "constructing");
+      await captureAndCompare("charter-constructing", page);
+    });
+
+    await withPageRetry(context, "city-view-parallax-on", async (page) => {
+      await dismissHomeAndCreateGame(page, GAME_NAME, SEED);
+      await selectHeroAndHover(page);
+      await openCityAtHomeSettlement(page);
+      await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ parallaxEnabled: true }));
+      await wait(300);
+      await captureAndCompare("city-view-parallax-on", page);
+    });
+
+    await withPageRetry(context, "city-view-parallax-off", async (page) => {
+      await dismissHomeAndCreateGame(page, GAME_NAME, SEED);
+      await selectHeroAndHover(page);
+      await openCityAtHomeSettlement(page);
+      await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ parallaxEnabled: false }));
+      await wait(300);
+      await captureAndCompare("city-view-parallax-off", page);
+    });
 
     await runBattleArenaScene(context, "battle-arena-legacy", "/?paint=legacy");
     const scenebuilderPng = await runBattleArenaScene(context, "battle-arena-scenebuilder", "/?paint=scenebuilder");
