@@ -43,8 +43,13 @@ The `/precommit` and `/pre-pr` slash commands are manual equivalents you can off
   the version, prepends a `CHANGELOG.md` entry (commit-log summary by default,
   or `-m "..."`), and prints the deploy command. It edits nothing else unless
   you pass `--commit` / `--tag` / `--push`.
-- **Tags are `v<semver>`** and mean a release. While the major is `0`, a
-  **minor** bump is breaking and a **patch** bump is features/fixes.
+- **Tags are `v<semver>`** and mean a release. **minor** is a real game
+  addition — new content or capability; **patch** is a bug fix, a chore, or
+  housekeeping (docs, tooling, tests). You do not have to choose: the pre-commit
+  gate decides for you from the intended commit type (`feat` -> minor, anything
+  else -> patch), or infers it from the changeset when no type is given, and it
+  reports its evidence so you can overrule it before committing. It only bumps
+  when the version has not already been bumped in that changeset.
 - **Docker builds must go through `npm run docker:build`**, not a bare
   `docker compose build`. `.git` is excluded from the build context (179 MB of
   PNG art history), so the container cannot resolve a commit hash on its own —

@@ -1,19 +1,78 @@
 ---
-description: Runs the build + test + dependency-cruiser gate (npm run build + lint:deps + test:all) and returns pass/fail. Invoke before any commit, branch creation, or PR.
+description: Runs the build + test + dependency-cruiser gate, then decides and applies the version bump, and returns pass/fail. Invoke before any commit, branch creation, or PR.
 mode: subagent
 hidden: true
 ---
 
-You run the project's build + test + dependency-layer gate and report pass/fail. You do not fix anything; if it fails, you stop and report.
+You run the project's build + test + dependency-layer gate, then the version-bump
+decision, and report pass/fail. You do not fix code; if a gate step fails, you stop
+and report.
 
 ## Procedure
 1. `npm run build` — capture full output. If it fails, return immediately with the failing file/line and the last ~30 lines of output.
 2. If build passes, `npm run lint:deps` — same. Documented exceptions in `dependency-cruiser.cjs` are warnings; new violations are the gate.
 3. If lint:deps passes, `npm run test:all` — same. (`pretest` runs `scripts/allocate-ports.ts` automatically, so don't worry about port setup.)
-4. All three passed → return "PASS" plus the test summary.
+4. **Version gate** — decide the bump yourself (rule below), and apply it only if it has not already been applied in this changeset.
+5. All passed → return "PASS" plus the test summary and the version decision.
+
+## The version gate
+
+The app version is the root `package.json` `version` — the single source of truth
+that `vite.config.ts` stamps into the client and the settings panel displays.
+
+**First, check whether it has already been bumped.** Compare the committed version
+against the working tree:
+
+```bash
+git show HEAD:package.json | grep '"version"'
+node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)"
+```
+
+- If they already differ, the bump is done — report
+  `version already bumped: X -> Y (nothing to do)` and skip to the final report.
+- If they are equal, decide and apply.
+
+**Then decide: bug fix, or real game addition?**
+
+- **patch** (`node scripts/bump-version.mjs patch`) — a bug fix, a chore, or
+  docs/tooling/test-only work.
+- **minor** (`node scripts/bump-version.mjs minor`) — a **real game addition**:
+  new game-facing content or capability.
+
+Decide in this order:
+
+1. **Caller-declared type wins.** If the invoking agent told you the intended
+   conventional-commit type (`feat`, `fix`, `chore`, `docs`, `test`, `refactor`,
+   `perf`), map `feat` -> minor and everything else -> patch. This is the most
+   reliable signal, because a bug fix and a new feature can look identical in a
+   diff.
+2. **Otherwise infer from the changeset** (`git status --porcelain` plus
+   `git diff HEAD --stat`):
+   - **minor** if the changeset **adds any new file** under `src/`, `packages/`,
+     or `server/` that is not a test file (not `*.test.ts`, not under a `test/`
+     directory) — new game modules are how new content arrives in this repo.
+   - **patch** for everything else: edits to existing game code, test-only,
+     docs, tooling, `package.json`, `docker/`, `.kilo/`, `scripts/`, root config.
+
+Always report the decision with its evidence (the rule that fired and the file
+that triggered it), so the primary agent can correct it before committing.
+
+When you apply the bump, pass a one-line summary as the changelog body:
+
+```
+node scripts/bump-version.mjs <patch|minor> -m "<one-line summary of the change>"
+```
+
+Never pass `--commit`, `--tag`, or `--push` — committing stays with the primary
+agent. Do not hand-edit `CHANGELOG.md`; the script owns it.
+
+Note that the file is expected to be dirty with another agent's work in a shared
+tree. Bump only the version line (the script does exactly that), and never run
+`git add` or `git checkout` on paths you were not asked to touch.
 
 ## Rules
-- Run sequentially. Build must pass before lint:deps, which must pass before tests.
+- Run sequentially. Build must pass before lint:deps, which must pass before tests, which must pass before the version gate.
 - Don't try to fix failures. The primary agent decides how to proceed.
 - Don't run `db:down` or `cleanup` as part of this gate.
-- Return a short report: status (PASS / BUILD FAIL / DEPS FAIL / TEST FAIL), failing file/line if any, and the relevant tail of output.
+- Don't commit, tag, or push — you prepare the version, the primary agent commits.
+- Return a short report: status (PASS / BUILD FAIL / DEPS FAIL / TEST FAIL), the failing file/line if any, the relevant tail of output, and the version decision (bumped X -> Y with reason, already bumped, or skipped with reason).
