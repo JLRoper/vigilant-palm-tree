@@ -50,8 +50,8 @@ The server does not depend on `src/screens/` or `src/render/`. Keep server behav
 |---|---|
 | `src/main.ts` | Bootstrap `GameEngine`, register screens, show the home view, and start the animation loop. |
 | `src/managers/` | App orchestration: `GameEngine`, state/entity synchronization, sessions, view setup, UI, and high-level actions. |
-| `src/state/` | Client-local state/controller facade. Reducers and authoritative game rules are imported from `@heroes/engine`. |
-| `src/screens/` | DOM UI and input: home, adventure, combat, settlement/city, logistics, multiplayer, shared menus/panels, and debug screens. View registration is through `src/screens/shared/viewLauncher.ts`. |
+| `src/state/` | Client-local state/controller facade: the persisted settings singleton (`settings.ts`, e.g. `toolbarStyle` — default `modern`, unknown values normalize to `modern`) and the toolbar theme token registry (`toolbarThemes.ts` — palette + shape tokens per theme). Reducers and authoritative game rules are imported from `@heroes/engine`. |
+| `src/screens/` | DOM UI and input: home, adventure, combat, settlement/city, logistics, multiplayer, shared menus/panels, and debug screens. The toolbar theme applier `src/screens/shared/toolbarTheme.ts` writes the `--tb-*` tokens onto the document root and reacts to settings changes; the Visual "Toolbar style" selector lives in `src/screens/home/settingsMenu.ts`. View registration is through `src/screens/shared/viewLauncher.ts`. |
 | `src/io/` | Typed REST/auth client, command sender, multiplayer SSE plus poll backstop, and local game index. |
 | `src/render/scene/sceneBuilder/` | Pure state-to-`SceneNode[]` builders for adventure, city, and battle views. |
 | `src/render/scene/paint2d/` | Canvas2D scene painter. `index.ts` contains per-kind drawing; `deps.ts`, `colors.ts`, and `geometry.ts` define the painter seam and helpers. |

@@ -389,7 +389,6 @@ export class UIManager {
   ): void {
     if (!this.hudHandles) return;
     updateHud(
-      this.toolbarEl,
       gameState,
       lastSavedAt,
       this.hudHandles,
@@ -629,7 +628,7 @@ export class UIManager {
     }
   }
 
-  static buildCalendarSnapshot(state: GameState): CalendarSnapshot | null {
+  static buildCalendarSnapshot(state: GameState, localPlayerId: PlayerId | null): CalendarSnapshot | null {
     if (!state.players.length) return null;
     const cal = calendarFromDay(state.day);
     const activePlayer =
@@ -657,6 +656,7 @@ export class UIManager {
       monthName: monthName(cal.month),
       activePlayerName: activePlayer.name,
       activePlayerColor: activePlayer.color,
+      activePlayerIsYou: localPlayerId != null && activePlayer.id === localPlayerId,
       nextTurnGold: playerIncome(state, activePlayer.id),
       wealth: playerWealth(state, activePlayer.id),
       morale,

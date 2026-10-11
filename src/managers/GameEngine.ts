@@ -502,14 +502,17 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
   }
 
   private getCalendar() {
-    return UIManager.buildCalendarSnapshot(this.state.getState());
+    return UIManager.buildCalendarSnapshot(
+      this.state.getState(),
+      getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
+    );
   }
 
   // =========================================================================
   // INPUT
   // =========================================================================
 
-  private handleDblClick(e: MouseEvent): void {
+  private async handleDblClick(e: MouseEvent): Promise<void> {
     if (this.ui.getCityView()?.isOpen()) return;
     const gs = this.state.getState();
     const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;

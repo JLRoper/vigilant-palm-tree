@@ -5,51 +5,77 @@ import { openView } from "@screens/shared/viewLauncher";
 import { openNewGameModal, type NewGameHandler } from "./newGameModal";
 import { openLoadGameModal, type LoadGameHandler } from "./loadGameModal";
 import { openHotkeysModal, attachHotkeysShortcut } from "./hotkeysModal";
+import { makeStatPill } from "./statPill";
 
 const headerTheme = {
-  bg: "var(--header-blue, #1c2f57)",
-  bgDark: "var(--header-blue-dark, #142145)",
-  gold: "var(--header-gold, #c9a227)",
-  goldLight: "var(--header-gold-light, #e9cf7d)",
-  cream: "var(--header-cream, #f1e4c3)",
-  font: "var(--header-font, Georgia, 'Times New Roman', serif)",
+  bgTop: "var(--tb-bg-top, #1b2334)",
+  bgBottom: "var(--tb-bg-bottom, #121826)",
+  strip: "var(--tb-strip, #10151f)",
+  surface: "var(--tb-surface, rgba(255,255,255,0.045))",
+  surfaceHover: "var(--tb-surface-hover, rgba(255,255,255,0.1))",
+  border: "var(--tb-border, rgba(148,163,184,0.22))",
+  text: "var(--tb-text, #e9eef8)",
+  textMuted: "var(--tb-text-muted, #9aa7bd)",
+  textDim: "var(--tb-text-dim, #b6c0d4)",
+  accent: "var(--tb-accent, #f2b93c)",
+  accentLight: "var(--tb-accent-light, #ffd479)",
+  accentInk: "var(--tb-accent-ink, #241a05)",
+  menuBg: "var(--tb-menu-bg, rgba(20,26,40,0.98))",
+  divider: "var(--tb-divider, rgba(148,163,184,0.18))",
+  font: "var(--tb-font, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif)",
 };
 
-function styleHeaderButton(btn: HTMLButtonElement, primary = false): void {
+const BUTTON_TRANSITION =
+  "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, filter 120ms ease, transform 80ms ease";
+
+const SECONDARY_SHADOW = "var(--tb-shadow-control, inset 0 1px 0 rgba(255,255,255,0.05))";
+// The ready ring is the header's "it's your turn" affordance: it only shows
+// while End Turn is actionable, so a disabled button never glows.
+const PRIMARY_READY_SHADOW =
+  "var(--tb-shadow-ready, inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 8px rgba(0,0,0,0.35), 0 0 0 3px rgba(242,185,60,0.16))";
+
+type ButtonVariant = "primary" | "secondary" | "ghost";
+
+function styleHeaderButton(btn: HTMLButtonElement, variant: ButtonVariant = "secondary"): void {
+  const primary = variant === "primary";
+  const ghost = variant === "ghost";
   Object.assign(btn.style, {
-    padding: "6px 12px",
-    background: primary ? headerTheme.gold : headerTheme.bgDark,
-    color: primary ? "#241a05" : headerTheme.cream,
-    border: `1px solid ${primary ? headerTheme.goldLight : headerTheme.gold}`,
-    borderRadius: "3px",
-    fontSize: "12px",
-    fontWeight: primary ? "700" : "400",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "7px",
+    padding: "7px 13px",
+    background: primary
+      ? `linear-gradient(180deg, ${headerTheme.accentLight}, ${headerTheme.accent})`
+      : ghost
+        ? "transparent"
+        : headerTheme.surface,
+    color: primary ? headerTheme.accentInk : ghost ? headerTheme.textDim : headerTheme.text,
+    border: `1px solid ${primary ? headerTheme.accentLight : headerTheme.border}`,
+    borderRadius: "var(--tb-radius-control, 8px)",
+    fontSize: "12.5px",
+    fontWeight: primary ? "650" : "500",
     fontFamily: headerTheme.font,
-    cursor: "pointer",
+    letterSpacing: "0.2px",
     whiteSpace: "nowrap",
+    transition: BUTTON_TRANSITION,
+    boxShadow: primary ? PRIMARY_READY_SHADOW : ghost ? "none" : SECONDARY_SHADOW,
   });
 }
 
-function makeStatChip(labelText: string): { chip: HTMLDivElement; value: HTMLSpanElement } {
-  const chip = document.createElement("div");
-  Object.assign(chip.style, {
-    display: "inline-flex",
-    alignItems: "baseline",
-    gap: "4px",
+function makeKbdHint(text: string, onPrimary = false): HTMLSpanElement {
+  const kbd = document.createElement("span");
+  kbd.textContent = text;
+  Object.assign(kbd.style, {
+    fontSize: "9px",
+    fontWeight: "700",
+    lineHeight: "1.2",
+    padding: "1px 4px",
+    borderRadius: "var(--tb-radius-kbd, 4px)",
+    color: onPrimary ? "rgba(36,26,5,0.55)" : headerTheme.textMuted,
+    border: `1px solid ${onPrimary ? "rgba(36,26,5,0.25)" : headerTheme.border}`,
   });
-  const label = document.createElement("span");
-  label.textContent = labelText;
-  Object.assign(label.style, {
-    opacity: "0.65",
-    fontSize: "10px",
-    textTransform: "uppercase",
-    letterSpacing: "0.4px",
-  });
-  const value = document.createElement("span");
-  Object.assign(value.style, { fontSize: "12px", fontWeight: "600" });
-  chip.appendChild(label);
-  chip.appendChild(value);
-  return { chip, value };
+  return kbd;
 }
 
 export interface CalendarSnapshot {
@@ -61,6 +87,7 @@ export interface CalendarSnapshot {
   monthName: string;
   activePlayerName: string;
   activePlayerColor: string;
+  activePlayerIsYou: boolean;
   nextTurnGold: number;
   wealth: number;
   morale: number | null;
@@ -102,6 +129,20 @@ export interface ToolbarOptions {
   callbacks: ToolbarCallbacks;
 }
 
+// Keyboard accelerators for the command row. They route through the same
+// buttons (and therefore the same enable/busy gates) as the mouse, so a
+// shortcut can never fire an action the toolbar would have refused.
+const HOTKEY_BUTTONS: Record<
+  string,
+  "endTurnBtn" | "heroesBtn" | "settlementsBtn" | "logisticsBtn" | "charterBtn"
+> = {
+  e: "endTurnBtn",
+  h: "heroesBtn",
+  s: "settlementsBtn",
+  l: "logisticsBtn",
+  c: "charterBtn",
+};
+
 export class Toolbar {
   readonly root: HTMLDivElement;
   readonly statusSlot: HTMLDivElement;
@@ -113,7 +154,6 @@ export class Toolbar {
   private settlementsBtn: HTMLButtonElement;
   private logisticsBtn: HTMLButtonElement;
   private charterBtn: HTMLButtonElement;
-  private calendarEl: HTMLElement;
   private calendarActiveEl: HTMLElement;
   private busy = false;
 
@@ -122,46 +162,208 @@ export class Toolbar {
     Object.assign(this.root.style, {
       width: "100%",
       boxSizing: "border-box",
-      background: headerTheme.bg,
-      borderBottom: `4px double ${headerTheme.gold}`,
-      boxShadow: "0 2px 10px rgba(0,0,0,0.5)",
+      background: `linear-gradient(180deg, ${headerTheme.bgTop}, ${headerTheme.bgBottom})`,
+      borderBottom: `1px solid ${headerTheme.border}`,
+      boxShadow: "var(--tb-shadow-header, 0 10px 28px rgba(0,0,0,0.45))",
       fontFamily: headerTheme.font,
-      color: headerTheme.cream,
+      color: headerTheme.text,
       userSelect: "none",
     });
 
+    // ── Row 1: status ────────────────────────────────────────────────
+    // One date pill, then the HUD economy pills (buildHud appends into
+    // statusSlot), then the turn indicator on the right.
+    const statusRow = document.createElement("div");
+    Object.assign(statusRow.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      padding: "0 20px",
+      minHeight: "34px",
+      background: headerTheme.strip,
+      borderBottom: `1px solid ${headerTheme.border}`,
+      fontSize: "11.5px",
+    });
+    this.root.appendChild(statusRow);
+
+    const datePill = makeStatPill();
+    datePill.value.id = "toolbar-date-value";
+    statusRow.appendChild(datePill.chip);
+
+    this.statusSlot = document.createElement("div");
+    Object.assign(this.statusSlot.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      flex: "1 1 auto",
+      minWidth: "0",
+    });
+    statusRow.appendChild(this.statusSlot);
+
+    this.calendarActiveEl = document.createElement("div");
+    Object.assign(this.calendarActiveEl.style, {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "8px",
+      marginLeft: "auto",
+      padding: "3px 12px 3px 10px",
+      background: "rgba(242,185,60,0.1)",
+      border: "1px solid rgba(242,185,60,0.45)",
+      borderRadius: "var(--tb-radius-chip, 999px)",
+      fontSize: "12px",
+    });
+    const swatch = document.createElement("span");
+    swatch.id = "toolbar-active-swatch";
+    Object.assign(swatch.style, {
+      display: "inline-block",
+      width: "9px",
+      height: "9px",
+      borderRadius: "50%",
+      background: "#888",
+      border: "1px solid rgba(0,0,0,0.4)",
+      boxShadow: "0 0 0 2px rgba(255,255,255,0.08)",
+    });
+    this.calendarActiveEl.appendChild(swatch);
+    const activeLabel = document.createElement("span");
+    activeLabel.id = "toolbar-active-label";
+    activeLabel.textContent = "—";
+    Object.assign(activeLabel.style, { fontWeight: "600", color: headerTheme.text });
+    this.calendarActiveEl.appendChild(activeLabel);
+    statusRow.appendChild(this.calendarActiveEl);
+
+    // ── Row 2: commands, grouped by frequency ────────────────────────
+    const buttonsWrap = document.createElement("div");
+    Object.assign(buttonsWrap.style, { padding: "9px 20px" });
+
+    const buttonsRow = document.createElement("div");
+    Object.assign(buttonsRow.style, {
+      display: "flex",
+      flexWrap: "wrap",
+      alignItems: "center",
+      gap: "8px",
+    });
+    buttonsWrap.appendChild(buttonsRow);
+
+    const makeGroup = (first: boolean): HTMLDivElement => {
+      const group = document.createElement("div");
+      Object.assign(group.style, {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "8px",
+      });
+      if (!first) {
+        group.style.marginLeft = "6px";
+        group.style.paddingLeft = "14px";
+        group.style.borderLeft = `1px solid ${headerTheme.divider}`;
+      }
+      buttonsRow.appendChild(group);
+      return group;
+    };
+
+    this.endTurnBtn = this.makeButton("▶ End Turn", "primary");
+    this.endTurnBtn.appendChild(makeKbdHint("E", true));
+    this.endTurnBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      if (!this.opts.state.canEndTurnNow()) return;
+      void this.runAsync(async () => {
+        await this.opts.callbacks.onEndTurn();
+      });
+    });
+    makeGroup(true).appendChild(this.endTurnBtn);
+
+    this.heroesBtn = this.makeButton("⚔ Heroes", "secondary");
+    this.heroesBtn.appendChild(makeKbdHint("H"));
+    this.heroesBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      this.opts.callbacks.onHeroes?.();
+    });
+
+    this.settlementsBtn = this.makeButton("⌂ Settlements", "secondary");
+    this.settlementsBtn.appendChild(makeKbdHint("S"));
+    this.settlementsBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      this.opts.callbacks.onSettlements?.();
+    });
+
+    this.logisticsBtn = this.makeButton("🚚 Logistics", "secondary");
+    this.logisticsBtn.appendChild(makeKbdHint("L"));
+    this.logisticsBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      this.opts.callbacks.onOpenLogistics?.();
+    });
+
+    const manageGroup = makeGroup(false);
+    manageGroup.append(this.heroesBtn, this.settlementsBtn, this.logisticsBtn);
+
+    this.saveBtn = this.makeButton("💾 Save", "ghost");
+    this.saveBtn.title = "Save game";
+    this.saveBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      void this.runAsync(async () => {
+        await this.opts.callbacks.onSave();
+      });
+    });
+
+    this.loadBtn = this.makeButton("📂 Load", "ghost");
+    this.loadBtn.title = "Load game";
+    this.loadBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      void openLoadGameModal({
+        backendOk: this.opts.state.backendOk,
+        onLoad: this.opts.callbacks.onLoad,
+        onForget: this.opts.callbacks.onForget,
+      });
+    });
+
+    const withGhostHover = (b: HTMLButtonElement): void => {
+      b.addEventListener("mouseenter", () => { b.style.background = headerTheme.surfaceHover; });
+      b.addEventListener("mouseleave", () => { b.style.background = "transparent"; });
+    };
+    withGhostHover(this.saveBtn);
+    withGhostHover(this.loadBtn);
+    makeGroup(false).append(this.saveBtn, this.loadBtn);
+
+    this.charterBtn = this.makeButton("⚒ Charter Settlement", "secondary");
+    this.charterBtn.appendChild(makeKbdHint("C"));
+    this.charterBtn.addEventListener("click", () => {
+      if (this.busy) return;
+      this.opts.callbacks.onStartCharter?.();
+    });
+    makeGroup(false).appendChild(this.charterBtn);
+
+    // ── Gear menu: rare + destructive actions only ───────────────────
     const menuWrap = document.createElement("div");
-    Object.assign(menuWrap.style, { position: "relative", flexShrink: "0", marginLeft: "auto" });
+    Object.assign(menuWrap.style, { position: "relative", flexShrink: "0", marginLeft: "auto", display: "flex", alignItems: "center" });
 
     const gear = document.createElement("button");
     gear.textContent = "⚙";
     gear.title = "Menu";
     Object.assign(gear.style, {
-      width: "24px",
-      height: "24px",
+      width: "30px",
+      height: "30px",
       padding: "0",
-      fontSize: "14px",
+      fontSize: "15px",
       lineHeight: "1",
-      cursor: "pointer",
-      background: headerTheme.bgDark,
-      border: `1px solid ${headerTheme.gold}`,
-      borderRadius: "3px",
-      color: headerTheme.cream,
+      background: headerTheme.surface,
+      border: `1px solid ${headerTheme.border}`,
+      borderRadius: "var(--tb-radius-control, 8px)",
+      color: headerTheme.text,
       fontFamily: headerTheme.font,
       flexShrink: "0",
+      transition: BUTTON_TRANSITION,
     });
     menuWrap.appendChild(gear);
 
     const dropdown = document.createElement("div");
     Object.assign(dropdown.style, {
       position: "absolute",
-      top: "calc(100% + 6px)",
+      top: "calc(100% + 8px)",
       right: "0",
-      minWidth: "170px",
-      background: headerTheme.bgDark,
-      border: `1px solid ${headerTheme.gold}`,
-      borderRadius: "4px",
-      boxShadow: "0 4px 14px rgba(0,0,0,0.6)",
+      minWidth: "210px",
+      background: headerTheme.menuBg,
+      border: `1px solid ${headerTheme.border}`,
+      borderRadius: "var(--tb-radius-menu, 12px)",
+      boxShadow: "0 18px 44px rgba(0,0,0,0.6)",
       padding: "6px",
       display: "none",
       flexDirection: "column",
@@ -169,16 +371,14 @@ export class Toolbar {
       zIndex: "50",
     });
     menuWrap.appendChild(dropdown);
+    buttonsRow.appendChild(menuWrap);
 
     const closeDropdown = () => {
       dropdown.style.display = "none";
     };
-    const toggleDropdown = () => {
-      dropdown.style.display = dropdown.style.display === "none" ? "flex" : "none";
-    };
     gear.addEventListener("click", (e) => {
       e.stopPropagation();
-      toggleDropdown();
+      dropdown.style.display = dropdown.style.display === "none" ? "flex" : "none";
     });
     document.addEventListener("click", (e) => {
       if (!menuWrap.contains(e.target as Node)) closeDropdown();
@@ -191,34 +391,30 @@ export class Toolbar {
         display: "block",
         width: "100%",
         textAlign: "left",
-        padding: "6px 10px",
+        padding: "7px 10px",
         background: "transparent",
-        color: headerTheme.cream,
+        color: headerTheme.text,
         border: "none",
-        borderRadius: "3px",
-        fontSize: "12px",
+        borderRadius: "var(--tb-radius-menu-item, 7px)",
+        fontSize: "12.5px",
         fontFamily: headerTheme.font,
-        cursor: "pointer",
+        transition: "background 120ms ease",
       });
-      item.addEventListener("mouseenter", () => { item.style.background = "rgba(201,162,39,0.18)"; });
+      item.addEventListener("mouseenter", () => { item.style.background = headerTheme.surfaceHover; });
       item.addEventListener("mouseleave", () => { item.style.background = "transparent"; });
       dropdown.appendChild(item);
       return item;
     };
 
-    this.newBtn = makeMenuItem("New Game");
-    this.saveBtn = makeMenuItem("💾 Save");
-    this.saveBtn.title = "Save game";
-    this.loadBtn = makeMenuItem("📂 Load");
-    this.loadBtn.title = "Load game";
-
-    const divider = document.createElement("div");
-    Object.assign(divider.style, {
-      height: "1px",
-      background: "rgba(201,162,39,0.3)",
-      margin: "4px 2px",
+    this.newBtn = makeMenuItem("+  New Game");
+    this.newBtn.addEventListener("click", () => {
+      closeDropdown();
+      if (this.busy) return;
+      if (this.opts.state.hasActiveGame()) {
+        if (!confirm("Start a new game? Current game will be lost.")) return;
+      }
+      openNewGameModal({ onNew: this.opts.callbacks.onNew });
     });
-    dropdown.appendChild(divider);
 
     const testBattleItem = makeMenuItem("⚔ Test Battle");
     testBattleItem.title = "Sandbox: player vs AI manual-fight arena (no effect on your real game)";
@@ -235,148 +431,32 @@ export class Toolbar {
       openHotkeysModal();
     });
 
-    const settingsItem = makeMenuItem("⚙ Settings");
-    settingsItem.addEventListener("click", () => {
+    makeMenuItem("⚙ Settings").addEventListener("click", () => {
       closeDropdown();
       openSettingsMenu({ parent: document.body, getMapInfo: this.opts.callbacks.getMapInfo });
     });
 
     attachHotkeysShortcut();
 
-    this.newBtn.addEventListener("click", () => {
-      closeDropdown();
-      if (this.busy) return;
-      if (this.opts.state.hasActiveGame()) {
-        if (!confirm("Start a new game? Current game will be lost.")) return;
+    document.addEventListener("keydown", (ev: KeyboardEvent) => {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) {
+        if (ev.key.toLowerCase() === "s") {
+          ev.preventDefault();
+          this.press(this.saveBtn);
+        }
+        return;
       }
-      openNewGameModal({ onNew: this.opts.callbacks.onNew });
+      if (ev.key.length !== 1) return;
+      const target = ev.target as HTMLElement | null;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      if (target?.isContentEditable) return;
+      // openCenteredModal marks its full-viewport wrapper, so an open dialog
+      // (settings, load, charter requirements, ...) swallows the keystroke
+      // instead of firing an action behind it.
+      if (document.querySelector("[data-modal]")) return;
+      const which = HOTKEY_BUTTONS[ev.key.toLowerCase()];
+      if (which) this.press(this[which]);
     });
-    this.saveBtn.addEventListener("click", () => {
-      closeDropdown();
-      if (this.busy) return;
-      void this.runAsync(async () => {
-        await this.opts.callbacks.onSave();
-      });
-    });
-    this.loadBtn.addEventListener("click", () => {
-      closeDropdown();
-      if (this.busy) return;
-      void openLoadGameModal({
-        backendOk: this.opts.state.backendOk,
-        onLoad: this.opts.callbacks.onLoad,
-        onForget: this.opts.callbacks.onForget,
-      });
-    });
-
-    const calendarWrap = document.createElement("div");
-    Object.assign(calendarWrap.style, { padding: "8px 16px 0" });
-
-    this.calendarEl = document.createElement("div");
-    Object.assign(this.calendarEl.style, {
-      display: "flex",
-      flexWrap: "wrap",
-      alignItems: "center",
-      gap: "6px 20px",
-      paddingBottom: "8px",
-      marginBottom: "8px",
-      borderBottom: "1px solid rgba(201,162,39,0.3)",
-      fontSize: "12px",
-    });
-
-    const dayChip = makeStatChip("Day");
-    dayChip.value.id = "toolbar-day-value";
-    this.calendarEl.appendChild(dayChip.chip);
-
-    const weekChip = makeStatChip("Week");
-    weekChip.value.id = "toolbar-week-value";
-    this.calendarEl.appendChild(weekChip.chip);
-
-    const monthChip = makeStatChip("Month");
-    monthChip.value.id = "toolbar-month-value";
-    this.calendarEl.appendChild(monthChip.chip);
-
-    this.calendarActiveEl = document.createElement("div");
-    Object.assign(this.calendarActiveEl.style, {
-      display: "inline-flex",
-      alignItems: "center",
-      gap: "6px",
-      fontSize: "12px",
-    });
-    const swatch = document.createElement("span");
-    swatch.id = "toolbar-active-swatch";
-    Object.assign(swatch.style, {
-      display: "inline-block",
-      width: "10px",
-      height: "10px",
-      borderRadius: "50%",
-      background: "#888",
-      border: "1px solid rgba(0,0,0,0.4)",
-    });
-    this.calendarActiveEl.appendChild(swatch);
-    const activeLabel = document.createElement("span");
-    activeLabel.id = "toolbar-active-label";
-    activeLabel.textContent = "—";
-    Object.assign(activeLabel.style, { fontWeight: "600" });
-    this.calendarActiveEl.appendChild(activeLabel);
-    this.calendarEl.appendChild(this.calendarActiveEl);
-
-    calendarWrap.appendChild(this.calendarEl);
-    this.root.appendChild(calendarWrap);
-
-    this.statusSlot = document.createElement("div");
-    this.root.appendChild(this.statusSlot);
-
-    const buttonsWrap = document.createElement("div");
-    Object.assign(buttonsWrap.style, { padding: "8px 16px 10px" });
-
-    const buttonsRow = document.createElement("div");
-    Object.assign(buttonsRow.style, {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: "8px",
-      alignItems: "center",
-    });
-
-    this.endTurnBtn = this.makeButton("▶  End Turn", true);
-    this.endTurnBtn.addEventListener("click", () => {
-      if (this.busy) return;
-      if (!this.opts.state.canEndTurnNow()) return;
-      void this.runAsync(async () => {
-        await this.opts.callbacks.onEndTurn();
-      });
-    });
-
-    this.heroesBtn = this.makeButton("⚔  Heroes", false);
-    this.heroesBtn.addEventListener("click", () => {
-      if (this.busy) return;
-      this.opts.callbacks.onHeroes?.();
-    });
-
-    this.settlementsBtn = this.makeButton("⌂  Settlements", false);
-    this.settlementsBtn.addEventListener("click", () => {
-      if (this.busy) return;
-      this.opts.callbacks.onSettlements?.();
-    });
-
-    this.logisticsBtn = this.makeButton("🚚  Logistics", false);
-    this.logisticsBtn.addEventListener("click", () => {
-      if (this.busy) return;
-      this.opts.callbacks.onOpenLogistics?.();
-    });
-
-    this.charterBtn = this.makeButton("⚒  Charter Settlement", true);
-    this.charterBtn.addEventListener("click", () => {
-      if (this.busy) return;
-      this.opts.callbacks.onStartCharter?.();
-    });
-
-    buttonsRow.appendChild(this.endTurnBtn);
-    buttonsRow.appendChild(this.heroesBtn);
-    buttonsRow.appendChild(this.settlementsBtn);
-    buttonsRow.appendChild(this.logisticsBtn);
-    buttonsRow.appendChild(this.charterBtn);
-    buttonsRow.appendChild(menuWrap);
-    buttonsWrap.appendChild(buttonsRow);
 
     this.root.appendChild(buttonsWrap);
     opts.parent.appendChild(this.root);
@@ -423,25 +503,19 @@ export class Toolbar {
 
   private refreshCalendar(): void {
     const cal = this.opts.state.getCalendar();
-    const dayEl = this.root.querySelector<HTMLElement>("#toolbar-day-value");
-    const weekEl = this.root.querySelector<HTMLElement>("#toolbar-week-value");
-    const monthEl = this.root.querySelector<HTMLElement>("#toolbar-month-value");
+    const dateEl = this.root.querySelector<HTMLElement>("#toolbar-date-value");
     const swatchEl = this.root.querySelector<HTMLElement>("#toolbar-active-swatch");
     const activeEl = this.root.querySelector<HTMLElement>("#toolbar-active-label");
-    if (!dayEl || !weekEl || !monthEl || !swatchEl || !activeEl) return;
+    if (!dateEl || !swatchEl || !activeEl) return;
     if (!cal) {
-      dayEl.textContent = "—";
-      weekEl.textContent = "—";
-      monthEl.textContent = "—";
+      dateEl.textContent = "—";
       swatchEl.style.background = "#888";
       activeEl.textContent = "—";
       return;
     }
-    dayEl.textContent = `Day ${cal.dayOfWeek} of 7`;
-    weekEl.textContent = `Week ${cal.week}`;
-    monthEl.textContent = `${cal.monthName} · day ${cal.dayOfMonth}`;
+    dateEl.textContent = `Week ${cal.week} · Day ${cal.dayOfWeek} of 7 · ${cal.monthName} ${cal.dayOfMonth}`;
     swatchEl.style.background = cal.activePlayerColor;
-    activeEl.textContent = `${cal.activePlayerName}'s turn`;
+    activeEl.textContent = cal.activePlayerIsYou ? "Your turn" : `${cal.activePlayerName}'s turn`;
   }
 
   applyGameState(_state: GameState): void {
@@ -453,17 +527,23 @@ export class Toolbar {
     this.refresh();
   }
 
-  private makeButton(label: string, primary: boolean): HTMLButtonElement {
+  private makeButton(label: string, variant: ButtonVariant): HTMLButtonElement {
     const b = document.createElement("button");
     b.textContent = label;
-    styleHeaderButton(b, primary);
+    styleHeaderButton(b, variant);
     return b;
+  }
+
+  private press(btn: HTMLButtonElement): void {
+    if (this.busy || btn.disabled) return;
+    btn.click();
   }
 
   private setEnabled(b: HTMLButtonElement, enabled: boolean): void {
     b.disabled = !enabled;
-    b.style.opacity = enabled ? "1" : "0.4";
-    b.style.cursor = enabled ? "pointer" : "default";
+    if (b === this.endTurnBtn) {
+      b.style.boxShadow = enabled ? PRIMARY_READY_SHADOW : SECONDARY_SHADOW;
+    }
   }
 
   private async runAsync(fn: () => Promise<void>): Promise<void> {

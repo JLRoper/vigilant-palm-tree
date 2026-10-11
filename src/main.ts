@@ -1,11 +1,13 @@
 import { GameEngine } from "./managers/GameEngine";
 import "./screens";
 import { createHomeView } from "@screens/home/homeView";
+import { attachToolbarTheme } from "./screens/shared/toolbarTheme";
 import type { Game } from "./io/api";
 
 const engine = new GameEngine();
 
 async function start(): Promise<void> {
+  attachToolbarTheme();
   await engine.init();
   await engine.initBackend();
 

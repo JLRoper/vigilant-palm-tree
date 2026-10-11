@@ -1,4 +1,5 @@
 import { HORSE_VARIANT_REGISTRY, type HorseVariantId, VALID_HORSE_VARIANTS } from "@heroes/engine";
+import { clampToolbarStyle, DEFAULT_TOOLBAR_STYLE, type ToolbarStyle } from "./toolbarThemes";
 
 export type HorseVariant = HorseVariantId;
 
@@ -30,6 +31,7 @@ export interface GameSettings {
   // Log Message Panel (plan/2026-09-28-sse-event-push.md, use case 1):
   // reveal + fill the game-log panel with every streamed game_events row.
   showLogPanel: boolean;
+  toolbarStyle: ToolbarStyle;
 }
 
 const STORAGE_KEY = "heroesJs.settings";
@@ -91,6 +93,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   parallaxEnabled: false,
   parallaxLayerCount: DEFAULT_PARALLAX_LAYERS,
   showLogPanel: false,
+  toolbarStyle: DEFAULT_TOOLBAR_STYLE,
 };
 
 let current: GameSettings = loadFromStorage();
@@ -185,6 +188,7 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
     showLogPanel: typeof patch.showLogPanel === "boolean"
       ? patch.showLogPanel
       : current.showLogPanel,
+    toolbarStyle: clampToolbarStyle(patch.toolbarStyle ?? current.toolbarStyle),
   };
   current = next;
   try {
@@ -249,6 +253,7 @@ function loadFromStorage(): GameSettings {
       showLogPanel: typeof parsed.showLogPanel === "boolean"
         ? parsed.showLogPanel
         : false,
+      toolbarStyle: clampToolbarStyle(parsed.toolbarStyle),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

@@ -1,13 +1,58 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_SETTINGS,
   arenaMoveMsPerHexBounds,
   clampArenaMoveMsPerHex,
   clampEnemyMoveDurationMs,
   enemyMoveDurationBounds,
   settings,
+  subscribeSettings,
   updateSettings,
 } from "../../src/state/settings";
+import {
+  clampToolbarStyle,
+  DEFAULT_TOOLBAR_STYLE,
+  type ToolbarStyle,
+} from "../../src/state/toolbarThemes";
+
+test("toolbar style defaults to modern and unknown values normalize to modern", () => {
+  assert.equal(DEFAULT_SETTINGS.toolbarStyle, "modern");
+  assert.equal(DEFAULT_TOOLBAR_STYLE, "modern");
+  assert.equal(clampToolbarStyle("future-theme"), "modern");
+  assert.equal(clampToolbarStyle(null), "modern");
+  assert.equal(clampToolbarStyle("classic-blue"), "classic-blue");
+});
+
+test("toolbar style updates notify subscribers and persist the normalized value", () => {
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const persisted = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => persisted.get(key) ?? null,
+      setItem: (key: string, value: string) => persisted.set(key, value),
+    },
+  });
+
+  const notified: ToolbarStyle[] = [];
+  const unsubscribe = subscribeSettings((next) => notified.push(next.toolbarStyle));
+  try {
+    updateSettings({ toolbarStyle: "classic-blue" });
+    assert.equal(settings().toolbarStyle, "classic-blue");
+    assert.equal(JSON.parse(persisted.get("heroesJs.settings") ?? "{}").toolbarStyle, "classic-blue");
+
+    updateSettings({ toolbarStyle: "future-theme" as ToolbarStyle });
+    assert.equal(settings().toolbarStyle, "modern");
+    assert.deepEqual(notified, ["classic-blue", "modern"]);
+    assert.equal(JSON.parse(persisted.get("heroesJs.settings") ?? "{}").toolbarStyle, "modern");
+  } finally {
+    unsubscribe();
+    updateSettings({ toolbarStyle: DEFAULT_TOOLBAR_STYLE });
+    if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
+});
 
 test("arenaMoveMsPerHexBounds exposes the battle-arena walk-pace range (0 = instant)", () => {
   assert.deepEqual(arenaMoveMsPerHexBounds(), { min: 0, max: 500, default: 90 });

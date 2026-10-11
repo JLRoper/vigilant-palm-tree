@@ -1,6 +1,8 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { openSettingsMenu } from "../../../src/screens/home/settingsMenu";
+import { settings, updateSettings } from "../../../src/state/settings";
+import { DEFAULT_TOOLBAR_STYLE, TOOLBAR_THEMES } from "../../../src/state/toolbarThemes";
 import {
   APP_VERSION,
   BUILD_COMMIT,
@@ -117,6 +119,15 @@ class MockElement {
   }
 }
 
+function findButton(root: MockElement, label: string): MockElement | null {
+  if (root.tagName === "BUTTON" && root.textContent === label) return root;
+  for (const child of root.children) {
+    const match = findButton(child, label);
+    if (match) return match;
+  }
+  return null;
+}
+
 const savedDocument = (globalThis as { document?: unknown }).document;
 const savedWindow = (globalThis as { window?: unknown }).window;
 
@@ -174,4 +185,39 @@ test("openSettingsMenu renders build info element with version, commit and build
   assert.ok(closeRow, "buildInfo must have a parent (closeRow)");
   assert.equal(closeRow.style.justifyContent, "space-between");
   assert.equal(closeRow.style.alignItems, "center");
+});
+
+test("Visual toolbar style selector updates immediately and Reset restores modern", () => {
+  const parent = new MockElement("div");
+  updateSettings({ toolbarStyle: "classic-blue" });
+
+  try {
+    openSettingsMenu({ parent });
+    const select = parent.querySelector('[data-testid="toolbar-style-select"]');
+    assert.ok(select);
+    assert.equal(select.value, "classic-blue");
+    assert.deepEqual(
+      select.children.map((option) => [option.value, option.textContent]),
+      [
+        ["modern", TOOLBAR_THEMES.modern.label],
+        ["classic-blue", TOOLBAR_THEMES["classic-blue"].label],
+      ],
+    );
+
+    select.value = "modern";
+    select.dispatchEvent("change");
+    assert.equal(settings().toolbarStyle, "modern");
+
+    select.value = "classic-blue";
+    select.dispatchEvent("change");
+    assert.equal(settings().toolbarStyle, "classic-blue");
+
+    const reset = findButton(parent, "Reset to default");
+    assert.ok(reset);
+    reset.dispatchEvent("click");
+    assert.equal(settings().toolbarStyle, DEFAULT_TOOLBAR_STYLE);
+    assert.equal(select.value, DEFAULT_TOOLBAR_STYLE);
+  } finally {
+    updateSettings({ toolbarStyle: DEFAULT_TOOLBAR_STYLE });
+  }
 });

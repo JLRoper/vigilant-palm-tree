@@ -480,6 +480,9 @@ export function openCenteredModal(
     zIndex: "300",
   });
   parent.appendChild(wrapper);
+  // Self-cleaning marker (the wrapper is removed wholesale on close): lets
+  // global shortcuts know a modal owns the keyboard. See Toolbar's hotkeys.
+  wrapper.dataset.modal = "true";
 
   // The wrapper is the full-viewport input interceptor, so the opt-in
   // backdrop/Escape listeners have to come down with the modal -- they are

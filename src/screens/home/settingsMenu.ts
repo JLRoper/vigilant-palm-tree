@@ -16,6 +16,12 @@ import {
   type GameSettings,
   type ResourceStyle,
 } from "../../state/settings";
+import {
+  clampToolbarStyle,
+  DEFAULT_TOOLBAR_STYLE,
+  TOOLBAR_THEMES,
+  toolbarStyleOptions,
+} from "../../state/toolbarThemes";
 import { openView, registerView } from "@screens/shared/viewLauncher";
 
 registerView("settingsMenu", (opts) => openSettingsMenu(opts as Parameters<typeof openSettingsMenu>[0]));
@@ -483,6 +489,50 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   {
     const children: HTMLElement[] = [];
 
+    const toolbarStyleRow = document.createElement("div");
+    toolbarStyleRow.style.display = "flex";
+    toolbarStyleRow.style.flexDirection = "column";
+    toolbarStyleRow.style.gap = "6px";
+
+    const toolbarStyleLabel = document.createElement("span");
+    toolbarStyleLabel.textContent = "Toolbar style";
+    toolbarStyleRow.appendChild(toolbarStyleLabel);
+
+    const toolbarStyleSelect = document.createElement("select");
+    toolbarStyleSelect.setAttribute("data-testid", "toolbar-style-select");
+    toolbarStyleSelect.style.width = "100%";
+    toolbarStyleSelect.style.padding = "8px";
+    toolbarStyleSelect.style.fontSize = "12px";
+    toolbarStyleSelect.style.border = "1px solid #444";
+    toolbarStyleSelect.style.borderRadius = "4px";
+    toolbarStyleSelect.style.backgroundColor = "#1a1a1a";
+    toolbarStyleSelect.style.color = "#eee";
+    toolbarStyleSelect.style.accentColor = "#f77f00";
+
+    for (const style of toolbarStyleOptions()) {
+      const opt = document.createElement("option");
+      opt.value = style;
+      opt.textContent = TOOLBAR_THEMES[style].label;
+      toolbarStyleSelect.appendChild(opt);
+    }
+    toolbarStyleSelect.value = current.toolbarStyle;
+    toolbarStyleRow.appendChild(toolbarStyleSelect);
+
+    const toolbarStyleHint = document.createElement("div");
+    toolbarStyleHint.style.fontSize = "10px";
+    toolbarStyleHint.style.opacity = "0.55";
+    toolbarStyleHint.textContent = "Changes the toolbar palette and typography immediately.";
+    toolbarStyleRow.appendChild(toolbarStyleHint);
+
+    toolbarStyleSelect.addEventListener("change", () => {
+      updateSettings({ toolbarStyle: clampToolbarStyle(toolbarStyleSelect.value) });
+    });
+    refreshList.push(() => {
+      toolbarStyleSelect.value = settings().toolbarStyle;
+    });
+
+    children.push(toolbarStyleRow);
+
     // Resource icon style
     const styleRow = document.createElement("div");
     styleRow.style.display = "flex";
@@ -792,6 +842,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
       moveDurationMs: bounds.default,
       enemyMoveDurationMs: enemyBounds.default,
       arenaMoveMsPerHex: arenaBounds.default,
+      toolbarStyle: DEFAULT_TOOLBAR_STYLE,
       resourceStyle: "rune-stone",
       territoryBorderWidth: borderBounds.default,
       populationGrowthRate: growthBounds.default,
