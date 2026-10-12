@@ -31,5 +31,4 @@ feature-plans/
 .recycled/
 
 # Dev-only html files (but keep index.html)
-pixel-art.html
 sprite-preview.html

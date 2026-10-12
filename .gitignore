@@ -17,6 +17,7 @@ test/.last-test-pids.json
 test/.baseline-snapshot.txt
 test/.test-timing.txt
 test/visual-baselines/*.diff.png
+test-results/
 jlr/
 
 # local art-generation workspace: heavy 1024px masters stay local;
