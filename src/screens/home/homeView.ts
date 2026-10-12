@@ -193,7 +193,13 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
 
   settingsBtn.addEventListener("click", () => {
     if (busy) return;
-    openSettingsMenu({ parent: document.body });
+    openSettingsMenu({
+      parent: document.body,
+      onSignedOut: () => {
+        authState = null;
+        refreshAuthUi();
+      },
+    });
   });
 
   authBtn.addEventListener("click", () => {

@@ -99,29 +99,37 @@ block):
   restricts account names to `^[A-Za-z0-9_ .-]{1,64}$`.
 - `user_stats` -- one row per user (`user_id` PK, `REFERENCES users(id) ON
   DELETE RESTRICT`), `games_started`, `last_played_at`. `games_completed`/
-  `games_won` are deliberately reserved until a win condition exists.
+  `games_won` are deliberately reserved until a win condition exists. The
+  RESTRICT also means account deletion is intentionally blocked while stats
+  exist.
 
 `server/persistence/repositories/userRepo.ts` is the access layer:
-`createUser` (normalizes lower + trim before inserting), `getUserByEmail`,
-`getUserByAccountName`, `getUser`, and `incrementGamesStarted` -- a single
-atomic `INSERT ... ON CONFLICT (user_id) DO UPDATE`.
+`createUser` (trims before inserting — case preserved; uniqueness is
+case-folded by the index), `getUserByEmail`, `getUserByAccountName`,
+`getUser`, and `incrementGamesStarted` -- a single atomic
+`INSERT ... ON CONFLICT (user_id) DO UPDATE`.
 
 Route surface (`server/auth.ts`):
 
 - `POST /auth/register` -- creates an unverified `users` row (account name +
   email) and deliberately returns **no token**; signing in still happens via
   the email login-code flow. Duplicate account name or email -> `409`.
-- `GET /auth/me` -- session required; returns the profile plus
-  `{ games_started, last_played_at }` (`404` if no `users` row exists yet for
-  the session email).
+- `GET /auth/me` -- session required; returns the profile as one FLAT object
+  -- `{ id, account_name, email, email_verified_at, games_started,
+  last_played_at }` at the top level, with no nested `stats` object and
+  `games_started` defaulting to `0`/`last_played_at` to `null` when no
+  `user_stats` row exists yet (`404` if no `users` row exists yet for the
+  session email).
 - `PATCH /auth/me` -- account name only; the email is identity and stays
-  locked. Duplicate name -> `409`.
+  locked. Returns the full flat profile shape (same keys as `GET /auth/me`)
+  and bumps `updated_at`. Duplicate name -> `409`.
 - `POST /auth/verify-code` -- creates the `users` row on the account's **first**
-  login (`ON CONFLICT (lower(email)) DO NOTHING`), so every signed-in email
-  always resolves to an account. It accepts an optional `account_name` in the
-  body (the login modal does not send one); the stored name is the supplied
-  value, or a default derived from the email local-part, and is never
-  overwritten by a later login. Duplicate account name -> `409`.
+  login and stamps `email_verified_at = now()` on both the insert and the
+  conflict path (`ON CONFLICT (lower(email)) DO UPDATE SET email_verified_at =
+  now()`), so every signed-in email always resolves to an account.
+  `account_name` is deliberately absent from the `DO UPDATE`, so the stored
+  name is the supplied value (or a default derived from the email local-part)
+  and is never overwritten by a later login. Duplicate account name -> `409`.
 
 Client side, `src/io/authTypes.ts` defines the `UserProfile` type and
 `src/io/userProfile.ts` keeps a server-authoritative in-memory cache
@@ -146,7 +154,7 @@ drive the real login flow end-to-end (`test/helpers/authFlow.ts`,
 instead of mocking auth. Most of the suite (`test/smoke.ts`, `test/
 multiplayer.smoke.ts`, `test/cityView.test.ts`, `test/visualRegression.test.ts`)
 deliberately runs anonymously, since that's the default experience now. The
-profile routes have their own suite, `test/server/authRoutes.test.ts` (8
+profile routes have their own suite, `test/server/authRoutes.test.ts` (10
 route tests against the shared test DB); it imports the router directly
 instead of booting `initSchema()`, so it applies migration `029` itself in
 `before()` and namespaces every fixture by email prefix so repeat runs don't

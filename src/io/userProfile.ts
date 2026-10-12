@@ -1,6 +1,3 @@
-// Server-authoritative profile cache. Read-only while anonymous, live while a
-// token exists. Reads server state only (no local store); anonymous callers get
-// a null/empty profile so the UI never overwrites identity data.
 import type { UserProfile } from "./authTypes";
 import { EMPTY_USER_PROFILE } from "./authTypes";
 

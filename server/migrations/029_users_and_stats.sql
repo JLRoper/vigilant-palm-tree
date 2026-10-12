@@ -30,3 +30,9 @@ CREATE TABLE IF NOT EXISTS user_stats (
   games_started   INTEGER NOT NULL DEFAULT 0,
   last_played_at  TIMESTAMPTZ
 );
+
+INSERT INTO users (account_name, email, email_verified_at)
+SELECT split_part(email, '@', 1), email, now()
+FROM user_sessions
+WHERE email ~ '^[A-Za-z0-9_. -]{1,64}@[^@]+$'
+ON CONFLICT (lower(email)) DO NOTHING;

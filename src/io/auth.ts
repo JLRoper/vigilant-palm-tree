@@ -80,10 +80,8 @@ export async function register(accountName: string, email: string): Promise<User
     email: data.email,
     email_verified_at: data.email_verified_at,
     games_started: 0,
-    games_won: 0,
     last_played_at: null,
   };
-  setSignedIn(true, profile);
   return profile;
 }
 
@@ -93,6 +91,7 @@ export async function getMe(token: string): Promise<UserProfile> {
   });
   if (res.status === 401) {
     clearProfile();
+    clearAuth();
     throw new Error("unauthorized");
   }
   if (!res.ok) {

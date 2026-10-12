@@ -8,6 +8,29 @@ const CODE_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const CODE_DIGITS = 6;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ACCOUNT_NAME_PATTERN = /^[A-Za-z0-9_ .-]{1,64}$/;
+
+export interface ProfileResponse {
+  id: number;
+  account_name: string;
+  email: string;
+  email_verified_at: Date | null;
+  games_started: number;
+  last_played_at: Date | null;
+}
+
+async function loadProfileByEmail(email: string): Promise<ProfileResponse | null> {
+  const r = await pool.query<ProfileResponse>(
+    `SELECT u.id, u.account_name, u.email, u.email_verified_at,
+            COALESCE(s.games_started, 0) AS games_started,
+            s.last_played_at
+       FROM users u
+       LEFT JOIN user_stats s ON s.user_id = u.id
+      WHERE u.email = $1`,
+    [email],
+  );
+  return r.rows[0] ?? null;
+}
 
 type RequestCodeBody = { email?: unknown };
 type VerifyCodeBody = { email?: unknown; code?: unknown; account_name?: unknown };
@@ -121,6 +144,11 @@ authRouter.post("/verify-code", async (req, res) => {
     res.status(400).json({ error: "invalid email" });
     return;
   }
+  const supplied = typeof body?.account_name === "string" ? body.account_name.trim() : "";
+  if (supplied && !ACCOUNT_NAME_PATTERN.test(supplied)) {
+    res.status(400).json({ error: "invalid account name" });
+    return;
+  }
   if (typeof body?.code !== "string" || body.code.length !== CODE_DIGITS) {
     res.status(400).json({ error: "invalid code" });
     return;
@@ -146,17 +174,13 @@ authRouter.post("/verify-code", async (req, res) => {
       res.status(401).json({ error: "code expired" });
       return;
     }
-    // Account upsert: the `users` row is created on the account's very first
-    // login. `account_name` uses the supplied value when present, otherwise a
-    // readable default derived from the email local-part (rename later via
-    // PATCH /auth/me -- a later login never overwrites the existing name).
-    const supplied = typeof body?.account_name === "string" ? body.account_name.trim() : "";
     const derived = (email.split("@")[0] ?? "").replace(/[^A-Za-z0-9_. -]/g, "").trim();
     const account_name = (supplied || derived || "player").slice(0, 64);
     await pool.query(
-      `INSERT INTO users (account_name, email)
-       VALUES ($1, $2)
-       ON CONFLICT (lower(email)) DO NOTHING`,
+      `INSERT INTO users (account_name, email, email_verified_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (lower(email)) DO UPDATE
+         SET email_verified_at = now()`,
       [account_name, email],
     );
     const token = generateToken();
@@ -206,7 +230,7 @@ authRouter.post("/register", async (req, res) => {
   const body = req.body as RegisterBody;
   const account_name = typeof body?.account_name === "string" ? body.account_name.trim() : "";
   const email = normalizeEmail(body?.email);
-  if (!account_name || account_name.length > 64) {
+  if (!ACCOUNT_NAME_PATTERN.test(account_name)) {
     res.status(400).json({ error: "invalid account name" });
     return;
   }
@@ -235,28 +259,12 @@ authRouter.get("/me", async (req, res) => {
   }
   const email = session.email;
   try {
-    const userResult = await pool.query<{ id: number; account_name: string; email: string; email_verified_at: Date | null }>(
-      `SELECT id, account_name, email, email_verified_at FROM users WHERE email = $1`,
-      [email],
-    );
-    if (userResult.rowCount === 0) {
+    const profile = await loadProfileByEmail(email);
+    if (!profile) {
       res.status(404).json({ error: "user not found" });
       return;
     }
-    const user = userResult.rows[0];
-    const statsResult = await pool.query<{ games_started: number; last_played_at: Date | null }>(
-      `SELECT games_started, last_played_at FROM user_stats WHERE user_id = $1`,
-      [user.id],
-    );
-    const stats = statsResult.rows[0] ?? { games_started: 0, last_played_at: null };
-    res.json({
-      ok: true,
-      id: user.id,
-      account_name: user.account_name,
-      email: user.email,
-      email_verified_at: user.email_verified_at,
-      stats: { games_started: stats.games_started, last_played_at: stats.last_played_at },
-    });
+    res.json({ ok: true, ...profile });
   } catch (err) {
     console.error("[auth] me failed:", err);
     res.status(500).json({ error: "internal" });
@@ -272,25 +280,25 @@ authRouter.patch("/me", async (req, res) => {
   }
   const body = req.body as UpdateAccountNameBody;
   const account_name = typeof body?.account_name === "string" ? body.account_name.trim() : "";
-  if (!account_name || account_name.length > 64) {
+  if (!ACCOUNT_NAME_PATTERN.test(account_name)) {
     res.status(400).json({ error: "invalid account name" });
     return;
   }
   try {
     const updateResult = await pool.query(
-      `UPDATE users SET account_name = $1 WHERE email = $2`,
+      `UPDATE users SET account_name = $1, updated_at = now() WHERE email = $2`,
       [account_name, session.email],
     );
     if (updateResult.rowCount === 0) {
       res.status(404).json({ error: "user not found" });
       return;
     }
-    const userResult = await pool.query<{ id: number; account_name: string; email: string; email_verified_at: Date | null }>(
-      `SELECT id, account_name, email, email_verified_at FROM users WHERE email = $1`,
-      [session.email],
-    );
-    const user = userResult.rows[0];
-    res.json({ ok: true, id: user.id, account_name: user.account_name, email: user.email, email_verified_at: user.email_verified_at });
+    const profile = await loadProfileByEmail(session.email);
+    if (!profile) {
+      res.status(404).json({ error: "user not found" });
+      return;
+    }
+    res.json({ ok: true, ...profile });
   } catch (err) {
     console.error("[auth] patch-me failed:", err);
     res.status(409).json({ error: "duplicate account name" });

@@ -1,8 +1,3 @@
-// Single Profile surface (user-profile scheme, .plans/20261012-0145):
-// one component reused by the home-screen "Profile" button and the settings
-// menu's "Profile" section. Server-authoritative: the panel fetches GET
-// /auth/me on open and PATCHes on save -- no local store, no second cache.
-// Escape = discard-and-close; Save is the only mutation path.
 import { openCenteredModal, styleButton, styleInput, menuTheme } from "@screens/shared/menu";
 import { getMe, logout, updateMe } from "../../io/auth";
 import type { UserProfile } from "../../io/authTypes";
@@ -45,10 +40,12 @@ export function openProfilePanel(opts: ProfilePanelOptions): void {
   // re-verification and are deliberately out of scope pre-alpha0).
   const nameLabel = document.createElement("label");
   nameLabel.textContent = "Account name";
+  nameLabel.htmlFor = "profile-account-name";
   nameLabel.style.opacity = "0.7";
   content.appendChild(nameLabel);
   const nameInput = document.createElement("input");
   nameInput.type = "text";
+  nameInput.id = "profile-account-name";
   nameInput.maxLength = 64;
   nameInput.placeholder = "Loading…";
   nameInput.disabled = true;
@@ -58,9 +55,11 @@ export function openProfilePanel(opts: ProfilePanelOptions): void {
   // Email: identity, read-only.
   const emailLabel = document.createElement("label");
   emailLabel.textContent = "Email (read-only)";
+  emailLabel.htmlFor = "profile-email";
   emailLabel.style.opacity = "0.7";
   content.appendChild(emailLabel);
   const emailRow = document.createElement("div");
+  emailRow.id = "profile-email";
   emailRow.textContent = opts.email;
   emailRow.style.opacity = "0.85";
   content.appendChild(emailRow);
@@ -157,6 +156,7 @@ export function openProfilePanel(opts: ProfilePanelOptions): void {
     status.textContent = "Saving…";
     try {
       const updated = await updateMe(opts.token, nextName);
+      setBusy(false);
       renderLoaded(updated);
       status.textContent = "Saved.";
     } catch (e) {
@@ -182,6 +182,9 @@ export function openProfilePanel(opts: ProfilePanelOptions): void {
     .then(renderLoaded)
     .catch((e) => {
       const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("unauthorized")) {
+        opts.onSignedOut();
+      }
       status.style.color = menuTheme.error.color;
       status.textContent = msg.includes("unauthorized")
         ? "Session expired. Sign in again."

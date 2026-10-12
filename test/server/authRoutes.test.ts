@@ -7,17 +7,6 @@ import express from "express";
 import { pool } from "../../server/persistence/db";
 import { authRouter } from "../../server/auth";
 
-// Auth + profile route tests (user-profile scheme, plan
-// .plans/20261012-0145_user-profile-scheme_31124.md). The tests import the
-// router directly (no initSchema boot), so they apply migration 029 first --
-// same idempotent SQL the server runs on startup.
-//
-// The suite runs against the SHARED dev database, so every fixture is namespaced:
-// emails are `test-auth-<tag>-<stamp>@example.com` and account names embed the
-// same per-run stamp. before() sweeps leftovers from earlier runs of this file
-// by the email prefix (user_stats first -- user_stats.user_id is ON DELETE
-// RESTRICT, so the stats rows must go before the users rows).
-
 let server: Server;
 let baseUrl: string;
 
@@ -36,13 +25,19 @@ function uname(tag: string): string {
 }
 
 async function deleteByEmailPrefix(pattern: string): Promise<void> {
-  await pool.query(`DELETE FROM user_sessions WHERE email LIKE $1`, [pattern]);
-  await pool.query(`DELETE FROM auth_codes WHERE email LIKE $1`, [pattern]);
+  await pool.query(
+    `DELETE FROM user_sessions WHERE email LIKE $1 AND last_seen_at < now() - interval '1 hour'`,
+    [pattern],
+  );
+  await pool.query(
+    `DELETE FROM auth_codes WHERE email LIKE $1 AND created_at < now() - interval '1 hour'`,
+    [pattern],
+  );
   await pool.query(
     `DELETE FROM user_stats WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)`,
     [pattern],
   );
-  await pool.query(`DELETE FROM users WHERE email LIKE $1`, [pattern]);
+  await pool.query(`DELETE FROM users WHERE email LIKE $1 AND created_at < now() - interval '1 hour'`, [pattern]);
 }
 
 before(async () => {
@@ -175,8 +170,8 @@ test("verify-code upserts the account with the supplied name and returns a token
     assert.equal(me.status, 200);
     assert.equal(me.body.account_name, name);
     assert.equal(me.body.email, email);
-    const stats = me.body.stats as { games_started: number };
-    assert.equal(stats.games_started, 0, "fresh account has no games");
+    assert.notEqual(me.body.email_verified_at, null, "verify-code must stamp email_verified_at");
+    assert.equal(me.body.games_started, 0, "fresh account has no games");
   } finally {
     await cleanup(tag);
   }
@@ -201,6 +196,7 @@ test("a second login never overwrites the account name", async () => {
 
     const me = await call("GET", "/me", undefined, second.body.token as string);
     assert.equal(me.body.account_name, original);
+    assert.notEqual(me.body.email_verified_at, null);
   } finally {
     await cleanup(tag);
   }
@@ -222,6 +218,8 @@ test("PATCH /me renames the account and enforces uniqueness", async () => {
     const renamed = await call("PATCH", "/me", { account_name: renamedTo }, token);
     assert.equal(renamed.status, 200);
     assert.equal(renamed.body.account_name, renamedTo);
+    assert.equal(typeof renamed.body.games_started, "number", "PATCH returns the full flat profile shape");
+    assert.ok("last_played_at" in renamed.body, "PATCH response carries last_played_at");
 
     const me = await call("GET", "/me", undefined, token);
     assert.equal(me.body.account_name, renamedTo);
@@ -289,9 +287,21 @@ test("verify-code rejects a bad code with 401", async () => {
   const tag = "bad-code";
   try {
     const email = testEmail(tag);
-    await requestCode(email);
-    const res = await call("POST", "/verify-code", { email, code: "000000", account_name: uname(tag) });
+    const code = await requestCode(email);
+    const bad = code === "000000" ? "111111" : "000000";
+    const res = await call("POST", "/verify-code", { email, code: bad, account_name: uname(tag) });
     assert.equal(res.status, 401);
+  } finally {
+    await cleanup(tag);
+  }
+});
+
+test("register rejects an account name outside the allowed charset with 400", async () => {
+  const tag = "bad-name";
+  try {
+    const res = await call("POST", "/register", { account_name: "bad/name", email: testEmail(tag) });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, "invalid account name");
   } finally {
     await cleanup(tag);
   }

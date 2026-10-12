@@ -14,7 +14,7 @@ function uniqueEmail(): string {
   return `test-user-repo-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
 }
 
-test("createUser stores trimmed lower-case values and returns the row", async () => {
+test("createUser stores trimmed case-preserved names and returns the row", async () => {
   await withRollback(async (client) => {
     const repo = createUserRepo(client);
     const email = uniqueEmail();
@@ -22,7 +22,7 @@ test("createUser stores trimmed lower-case values and returns the row", async ()
 
     const row = await repo.createUser(`  ${name} `, `  ${email.toUpperCase()} `);
 
-    assert.equal(row.account_name, name.toLowerCase());
+    assert.equal(row.account_name, name);
     assert.equal(row.email, email.toLowerCase());
     assert.equal(row.email_verified_at, null);
     assert.equal(typeof row.id, "number");

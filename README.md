@@ -43,7 +43,7 @@ npm run docs:check # check maintained documentation links and source paths
 
 ## Status
 
-App version is `0.3.4` (the root `package.json` is the source of truth). The game has procedural map generation, A* hero movement, settlements and capture, a six-resource economy, fog of war, construction, recruitment, upkeep, caravans, combat resolution, and new/load/save flows.
+App version is `0.6.1` (the root `package.json` is the source of truth). The game has procedural map generation, A* hero movement, settlements and capture, a six-resource economy, fog of war, construction, recruitment, upkeep, caravans, combat resolution, and new/load/save flows.
 
 The app now opens to a **home / landing page** (New Game / Load Game / Settings / Sign In) before the canvas is shown; Sign In is an email magic-link flow (short-term: the 6-digit code is also surfaced in dev for testing — real email delivery comes later). Sign-in is optional; once signed in, the button becomes **Profile** (with a separate Sign Out button) and opens a profile panel with the editable account name, read-only email, and per-user stats.
 

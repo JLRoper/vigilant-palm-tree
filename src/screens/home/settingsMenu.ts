@@ -72,6 +72,7 @@ export interface MapInfo {
 export interface SettingsMenuOptions {
   parent?: HTMLElement;
   getMapInfo?: () => MapInfo | null;
+  onSignedOut?: () => void;
 }
 
 function makeFoldableSection(
@@ -176,7 +177,10 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
         openProfilePanel({
           token: cachedAuth.token,
           email: cachedAuth.email,
-          onSignedOut: () => modal.close(),
+          onSignedOut: () => {
+            opts.onSignedOut?.();
+            modal.close();
+          },
         });
       });
       children.push(openBtn);

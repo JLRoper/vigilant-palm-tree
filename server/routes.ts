@@ -526,9 +526,8 @@ router.post("/games", attachAuth, async (req, res) => {
         ]
       );
       const row = r.rows[0];
-      // Signed-in players: count this as a game started.
       if (req.authEmail) {
-        const userResult = await pool.query<{ id: number }>(
+        const userResult = await client.query<{ id: number }>(
           "SELECT id FROM users WHERE email = $1",
           [req.authEmail],
         );

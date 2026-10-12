@@ -39,7 +39,7 @@ export function createUserRepo(db: Queryable): UserRepo {
 
   return {
     async createUser(accountName, email) {
-      const normalizedAccount = accountName.trim().toLowerCase();
+      const normalizedAccount = accountName.trim();
       const normalizedEmail = email.trim().toLowerCase();
       try {
         const r = await db.query<UserRow>(
