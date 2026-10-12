@@ -1,6 +1,6 @@
 # Operations Guide
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-12 -->
 
 This guide covers local development and deployment. See [`AGENTS.md`](../AGENTS.md) for the complete workspace/test safety rules.
 
@@ -9,7 +9,7 @@ This guide covers local development and deployment. See [`AGENTS.md`](../AGENTS.
 - Use Node.js 22+ and `npm install`; `npm run dev` starts the Vite client and API.
 - Ports are allocated per worktree by `scripts/allocate-ports.ts`; use `npm run dev:status` to discover the current local URLs. Set `LAN_HOST=1` before `npm run dev` to bind the API to `0.0.0.0` for LAN access.
 - Local PostgreSQL uses the shared `game_db` container on host port 5432. `npm run db:up` starts it. Do **not** run `npm run db:down` unless explicitly authorized; other worktrees share it.
-- The API applies `server/schema.sql` and the ordered migration set (`001` through `028`) during startup. Keep migrations idempotent because startup re-runs them.
+- The API applies `server/schema.sql` and the ordered migration set (`001` through `029`) during startup. Keep migrations idempotent because startup re-runs them.
 - `.env` may target a remote gameserver. DB-backed tests must load `.env.test` after `.env` to pin `PGHOST=127.0.0.1`. The smoke test deletes every game except its own fixtures, so never aim tests at the shared remote server. Run DB-destructive browser suites only with explicit coordination, preferably from the main worktree.
 
 ## Test Commands

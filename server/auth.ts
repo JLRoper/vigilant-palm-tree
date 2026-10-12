@@ -8,9 +8,34 @@ const CODE_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const CODE_DIGITS = 6;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ACCOUNT_NAME_PATTERN = /^[A-Za-z0-9_ .-]{1,64}$/;
+
+export interface ProfileResponse {
+  id: number;
+  account_name: string;
+  email: string;
+  email_verified_at: Date | null;
+  games_started: number;
+  last_played_at: Date | null;
+}
+
+async function loadProfileByEmail(email: string): Promise<ProfileResponse | null> {
+  const r = await pool.query<ProfileResponse>(
+    `SELECT u.id, u.account_name, u.email, u.email_verified_at,
+            COALESCE(s.games_started, 0) AS games_started,
+            s.last_played_at
+       FROM users u
+       LEFT JOIN user_stats s ON s.user_id = u.id
+      WHERE u.email = $1`,
+    [email],
+  );
+  return r.rows[0] ?? null;
+}
 
 type RequestCodeBody = { email?: unknown };
-type VerifyCodeBody = { email?: unknown; code?: unknown };
+type VerifyCodeBody = { email?: unknown; code?: unknown; account_name?: unknown };
+type RegisterBody = { account_name?: unknown; email?: unknown };
+type UpdateAccountNameBody = { account_name?: unknown };
 
 function normalizeEmail(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
@@ -119,6 +144,11 @@ authRouter.post("/verify-code", async (req, res) => {
     res.status(400).json({ error: "invalid email" });
     return;
   }
+  const supplied = typeof body?.account_name === "string" ? body.account_name.trim() : "";
+  if (supplied && !ACCOUNT_NAME_PATTERN.test(supplied)) {
+    res.status(400).json({ error: "invalid account name" });
+    return;
+  }
   if (typeof body?.code !== "string" || body.code.length !== CODE_DIGITS) {
     res.status(400).json({ error: "invalid code" });
     return;
@@ -144,6 +174,15 @@ authRouter.post("/verify-code", async (req, res) => {
       res.status(401).json({ error: "code expired" });
       return;
     }
+    const derived = (email.split("@")[0] ?? "").replace(/[^A-Za-z0-9_. -]/g, "").trim();
+    const account_name = (supplied || derived || "player").slice(0, 64);
+    await pool.query(
+      `INSERT INTO users (account_name, email, email_verified_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (lower(email)) DO UPDATE
+         SET email_verified_at = now()`,
+      [account_name, email],
+    );
     const token = generateToken();
     await pool.query(
       `UPDATE auth_codes SET consumed_at = now() WHERE id = $1`,
@@ -156,6 +195,10 @@ authRouter.post("/verify-code", async (req, res) => {
     );
     res.json({ ok: true, email, token, expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString() });
   } catch (err) {
+    if ((err as { code?: string }).code === "23505") {
+      res.status(409).json({ error: "duplicate account name or email" });
+      return;
+    }
     console.error("[auth] verify-code failed:", err);
     res.status(500).json({ error: "internal" });
   }
@@ -177,4 +220,87 @@ authRouter.post("/logout", async (req, res) => {
     await pool.query(`DELETE FROM user_sessions WHERE token = $1`, [token]).catch(() => {});
   }
   res.json({ ok: true });
+});
+
+// ---------------------------------------------------------
+// Registration + profile
+// ---------------------------------------------------------
+
+authRouter.post("/register", async (req, res) => {
+  const body = req.body as RegisterBody;
+  const account_name = typeof body?.account_name === "string" ? body.account_name.trim() : "";
+  const email = normalizeEmail(body?.email);
+  if (!ACCOUNT_NAME_PATTERN.test(account_name)) {
+    res.status(400).json({ error: "invalid account name" });
+    return;
+  }
+  if (!email) {
+    res.status(400).json({ error: "invalid email" });
+    return;
+  }
+  try {
+    const r = await pool.query<{ id: number }>(
+      `INSERT INTO users (account_name, email) VALUES ($1, $2) RETURNING id`,
+      [account_name, email],
+    );
+    res.json({ ok: true, id: r.rows[0].id, account_name, email, email_verified_at: null });
+  } catch (err) {
+    console.error("[auth] register failed:", err);
+    res.status(409).json({ error: "duplicate account name or email" });
+  }
+});
+
+authRouter.get("/me", async (req, res) => {
+  const token = readBearerToken(req);
+  const session = await loadSession(token);
+  if (!session) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  const email = session.email;
+  try {
+    const profile = await loadProfileByEmail(email);
+    if (!profile) {
+      res.status(404).json({ error: "user not found" });
+      return;
+    }
+    res.json({ ok: true, ...profile });
+  } catch (err) {
+    console.error("[auth] me failed:", err);
+    res.status(500).json({ error: "internal" });
+  }
+});
+
+authRouter.patch("/me", async (req, res) => {
+  const token = readBearerToken(req);
+  const session = await loadSession(token);
+  if (!session) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  const body = req.body as UpdateAccountNameBody;
+  const account_name = typeof body?.account_name === "string" ? body.account_name.trim() : "";
+  if (!ACCOUNT_NAME_PATTERN.test(account_name)) {
+    res.status(400).json({ error: "invalid account name" });
+    return;
+  }
+  try {
+    const updateResult = await pool.query(
+      `UPDATE users SET account_name = $1, updated_at = now() WHERE email = $2`,
+      [account_name, session.email],
+    );
+    if (updateResult.rowCount === 0) {
+      res.status(404).json({ error: "user not found" });
+      return;
+    }
+    const profile = await loadProfileByEmail(session.email);
+    if (!profile) {
+      res.status(404).json({ error: "user not found" });
+      return;
+    }
+    res.json({ ok: true, ...profile });
+  } catch (err) {
+    console.error("[auth] patch-me failed:", err);
+    res.status(409).json({ error: "duplicate account name" });
+  }
 });

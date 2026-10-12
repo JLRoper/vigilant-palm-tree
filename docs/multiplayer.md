@@ -1,6 +1,6 @@
 # Multiplayer — LAN Seats, Sync, and Session Policy
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-12 -->
 
 **Status:** Current mechanics, including SSE/poll sync, the disconnect drop policy, and server-driven AI. The AI section below retains earlier decision history; the 2026-10-11 correction supersedes its original host-client-only/no-chartering notes.
 
@@ -22,7 +22,7 @@ This is the design doc the multiplayer system never had (former open question #5
 | Host / Join | same | Host creates a game (default name `lan-YYYY-MM-DD-xxxx`); Join connects to an existing one by name |
 | Seat claim | `server/routes.ts` lobby claim/start (writes `games.lobby` jsonb) | Each seat is claimed by index; `claimed` records `handle`, optional `email`, `claimedAt` |
 | Handle | lobby UI | Purely cosmetic |
-| Email binding | `attachPlayerSeat.ts` + `server/auth.ts` | If the claimer was signed in, the seat is bound to their auth email (server-derived, never client-supplied). Sign-in is optional — anonymous claims leave the seat unbound. |
+| Email binding | `attachPlayerSeat.ts` + `server/auth.ts` | If the claimer was signed in, the seat is bound to their auth email (server-derived, never client-supplied). Sign-in is optional — anonymous claims leave the seat unbound. A signed-in caller now also has a persistent user account (account name + email + stats, migration `029`); the seat binding itself still keys on the email — see [auth-model.md](./auth-model.md). |
 | Start gate | `lobby.startedAt` | Game is playable once the host starts it |
 | Rejoin reclaim | `server/routes.ts` lobby claim | A STARTED game's seat whose `claimed.email` matches the caller's auth email can be reclaimed by that identity (handle/claimedAt refresh; the game stays started). Anonymous (handle-only) claims cannot rebind, and brand-new seats stay unclaimable after start. |
 | Local seat identity | `src/players/localPlayer.ts` | Seat id kept in `localStorage` (`heroes.mp.localPlayerId.<game>`) plus an in-memory map; `MultiplayerSync.resync()` falls back to seat 0 for legacy starter games nobody claimed |
@@ -105,5 +105,5 @@ Internet play, matchmaking, spectator seats, claimable AI lobby seats, simultane
 ## See also
 
 - [network-map.md](./network-map.md) — the dev overlay that visualises the polling topology this doc describes
-- [auth-model.md](./auth-model.md) — the optional email identity that seat binding reuses
+- [auth-model.md](./auth-model.md) — the optional account identity (email + account name + stats) that seat binding reuses
 - [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) — mechanical module map (lobby §, sync §)

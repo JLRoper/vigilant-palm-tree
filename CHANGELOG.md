@@ -10,6 +10,18 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.6.2] - 2026-10-12
+
+fix: address Copilot review round 2 — flat profile responses, email verification stamping, transaction-safe stats lookup, account-name validation, sign-out propagation, legacy-session backfill (0.6.1)
+
+## [0.6.1] - 2026-10-12
+
+fix: typed duplicate/missing-user errors in userRepo, strip migration comments, add userRepo persistence tests
+
+## [0.6.0] - 2026-10-12
+
+feat: user profile scheme - migration 029 (users + user_stats), auth register/me/patch-me routes, client profile panel with Profile/Sign Out
+
 ## [0.5.0] - 2026-10-11
 
 feat(heroes): add the lionheart mounted hero variant with banner, names and directional sprites

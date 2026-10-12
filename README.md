@@ -1,6 +1,6 @@
 # Heroes JS
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-12 -->
 
 A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. Move a hero across a procedurally generated hex map, claim resource tiles by building settlements on them, accumulate resources per turn, and defend them against enemy heroes.
 
@@ -43,9 +43,9 @@ npm run docs:check # check maintained documentation links and source paths
 
 ## Status
 
-App version is `0.3.4` (the root `package.json` is the source of truth). The game has procedural map generation, A* hero movement, settlements and capture, a six-resource economy, fog of war, construction, recruitment, upkeep, caravans, combat resolution, and new/load/save flows.
+App version is `0.6.1` (the root `package.json` is the source of truth). The game has procedural map generation, A* hero movement, settlements and capture, a six-resource economy, fog of war, construction, recruitment, upkeep, caravans, combat resolution, and new/load/save flows.
 
-The app now opens to a **home / landing page** (New Game / Load Game / Settings / Sign In) before the canvas is shown; Sign In is an email magic-link flow (short-term: the 6-digit code is also surfaced in dev for testing — real email delivery comes later).
+The app now opens to a **home / landing page** (New Game / Load Game / Settings / Sign In) before the canvas is shown; Sign In is an email magic-link flow (short-term: the 6-digit code is also surfaced in dev for testing — real email delivery comes later). Sign-in is optional; once signed in, the button becomes **Profile** (with a separate Sign Out button) and opens a profile panel with the editable account name, read-only email, and per-user stats.
 
 Tactical combat and quick resolution are both live. A human attacker can Fight, Quick Resolve, or Flee; a human defending an AI-offered battle can Fight or Quick Resolve, but cannot Flee because the AI's move is already committed. Garrison assaults offer Assault, Auto-resolve, or Cancel. Hero defeat, retreat, surrender, and settlement-garrison outcomes are applied by the shared engine/server paths. See [`docs/battle-view-architecture.md`](./docs/battle-view-architecture.md).
 

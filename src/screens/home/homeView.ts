@@ -10,6 +10,7 @@ import {
   type AuthState,
 } from "../../io/auth";
 import { openCenteredModal, styleButton, styleInput, menuTheme } from "@screens/shared/menu";
+import { openProfilePanel } from "@screens/shared/profilePanel";
 import { openSettingsMenu } from "./settingsMenu";
 import { createNewGameScreen } from "./newGameScreen";
 import type { FactionId } from "@heroes/contracts";
@@ -105,11 +106,14 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
   const mpBtn = makeBigButton("Multiplayer", false);
   const settingsBtn = makeBigButton("Settings", false);
   const authBtn = makeBigButton("Sign In", false);
+  const signOutBtn = makeBigButton("Sign Out", false);
+  signOutBtn.style.display = "none";
   buttonStack.appendChild(newBtn);
   buttonStack.appendChild(loadBtn);
   buttonStack.appendChild(mpBtn);
   buttonStack.appendChild(settingsBtn);
   buttonStack.appendChild(authBtn);
+  buttonStack.appendChild(signOutBtn);
 
   const footer = document.createElement("div");
   footer.style.marginTop = "8px";
@@ -127,10 +131,13 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
 
   function refreshAuthUi(): void {
     if (authState) {
-      authBtn.textContent = `Sign out (${authState.email})`;
+      authBtn.textContent = "Profile";
+      signOutBtn.style.display = "";
+      signOutBtn.textContent = `Sign out (${authState.email})`;
       footer.textContent = "Signed in. Your seat in multiplayer games is secured to your email.";
     } else {
       authBtn.textContent = "Sign In";
+      signOutBtn.style.display = "none";
       footer.textContent =
         "Sign-in is optional — you can play right now. Signing in secures your seat in multiplayer games and lets you pick up games from any device.";
     }
@@ -143,7 +150,8 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
     mpBtn.disabled = value;
     settingsBtn.disabled = value;
     authBtn.disabled = value;
-    for (const b of [newBtn, loadBtn, mpBtn, settingsBtn, authBtn]) {
+    signOutBtn.disabled = value;
+    for (const b of [newBtn, loadBtn, mpBtn, settingsBtn, authBtn, signOutBtn]) {
       b.style.opacity = value ? "0.6" : "1";
       b.style.cursor = value ? "default" : "pointer";
     }
@@ -185,16 +193,34 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
 
   settingsBtn.addEventListener("click", () => {
     if (busy) return;
-    openSettingsMenu({ parent: document.body });
+    openSettingsMenu({
+      parent: document.body,
+      onSignedOut: () => {
+        authState = null;
+        refreshAuthUi();
+      },
+    });
   });
 
   authBtn.addEventListener("click", () => {
     if (busy) return;
     if (authState) {
-      void handleLogout();
+      openProfilePanel({
+        token: authState.token,
+        email: authState.email,
+        onSignedOut: () => {
+          authState = null;
+          refreshAuthUi();
+        },
+      });
     } else {
       openLoginModal();
     }
+  });
+
+  signOutBtn.addEventListener("click", () => {
+    if (busy) return;
+    void handleLogout();
   });
 
   async function validateCachedSession(): Promise<void> {
