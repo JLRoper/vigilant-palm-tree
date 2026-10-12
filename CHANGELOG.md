@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.5.2] - 2026-10-12
+
+chore: enable default worktree-first workflow in heroes-js; align AGENTS.md, agents, commands, skills; Phase 05 concurrency+recovery drill merged
+
 ## [0.5.1] - 2026-10-12
 
 test: add tsconfig.test.json (ambient Vite types in scope) and a test:types script, gate unwired

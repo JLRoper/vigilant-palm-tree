@@ -8,6 +8,16 @@ You run the project's build + test + dependency-layer + documentation gate, then
 the version-bump decision, and report pass/fail. You do not fix code; if a gate
 step fails, you stop and report.
 
+## Scope — WIP vs integration candidate
+
+**The full gate (build + test:all + dependency-cruiser) applies ONLY to the final
+integration candidate — the commit about to be merged into local main.** It must NOT
+run on interim WIP commits inside a task's own branch: those carry no version bump
+and no merge, so the gate is meaningless for them.
+
+**The version-bump decision happens ONCE, at integration time, never on an ad hoc
+branch-creation call.** A WIP commit never touches `package.json` or `CHANGELOG.md`.
+
 ## Procedure
 1. `npm run build` — capture full output. If it fails, return immediately with the failing file/line and the last ~30 lines of output.
 2. If build passes, `npm run lint:deps` — same. Documented exceptions in `dependency-cruiser.cjs` are warnings; new violations are the gate.
@@ -91,4 +101,18 @@ tree. Bump only the version line (the script does exactly that), and never run
 - Don't try to fix failures. The primary agent decides how to proceed.
 - Don't run `db:down` or `cleanup` as part of this gate.
 - Don't commit, tag, or push — you prepare the version, the primary agent commits.
+- Don't commit, tag, or push — you prepare the version, the primary agent commits.
 - Return a short report: status (PASS / BUILD FAIL / DEPS FAIL / DOCS FAIL / TEST FAIL), the failing file/line if any, the relevant tail of output, and the version decision (bumped X -> Y with reason, already bumped, or skipped with reason).
+
+## Usage
+
+**WIP path** — interim commits inside a task branch. No gate, no version change:
+```
+git commit
+```
+
+**Integration path** — final candidate about to be merged into local main:
+```
+npm run build && npm run test:all && npm run lint:deps
+# then the version decision, ONCE, at integration time
+```

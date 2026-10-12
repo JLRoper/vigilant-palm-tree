@@ -75,3 +75,11 @@ The `/precommit` and `/pre-pr` slash commands are manual equivalents you can off
 - `/review-issue [branch|PR#] [issue#]` — review a branch against the issue it claims to close, plus a general pass against the project docs. Read-only.
 - `/precommit` — run the build + deps + docs + test gate on demand.
 - `/pre-pr` — same as `/precommit`, plus a quick doc sanity sweep.
+
+## Worktree-first default workflow
+
+Discovery → claim/create the task worktree (kwork start / kilo worktree create, flag file .kilo/worktree-workflow.enabled).
+- Implement there (uncommitted task state lives in the worktree only).
+- Validate there (test:all / build / lint:deps — use the task's isolated per-worktree PGDATABASE from Phase 04's setup script).
+- Serialized integrate: finish the task branch into local main only when green (with the pending-final-commit-of-this-phase as the explicit integration candidate); never merge two tasks' finals concurrently (see the `.agentboard/` lock + `.build.*.alock` convention).
+- Cleanup the task worktree + branch (keep the task record until cleanup).
