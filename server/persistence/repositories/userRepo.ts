@@ -1,7 +1,6 @@
 import type { PoolClient } from "pg";
 import type { Queryable } from "./gameRepo";
 
-// Canonical row shape for users; TIMESTAMPTZ columns arrive as Date.
 export interface UserRow {
   id: number;
   account_name: string;
@@ -25,32 +24,35 @@ export class DuplicateUserError extends Error {
   }
 }
 
-// One row per user for the profile scheme. `users` carries identity
-// (account_name + email); `user_stats` carries counters.
 export interface UserRepo {
   createUser(accountName: string, email: string): Promise<UserRow>;
   getUserByEmail(email: string): Promise<UserRow | null>;
   getUserByAccountName(accountName: string): Promise<UserRow | null>;
   getUser(userId: number): Promise<UserRow | null>;
-  // Atomic increment — single statement, race-free. Returns the new
-  // games_started count, or null if the user_stats row does not exist yet
-  // (pre-alpha0: caller ensures the users row exists first at verify-code).
-  incrementGamesStarted(client: PoolClient, userId: number): Promise<number | null>;
+  incrementGamesStarted(client: PoolClient, userId: number): Promise<number>;
 }
 
 export function createUserRepo(db: Queryable): UserRepo {
+  function isPgError(err: unknown, code: string): boolean {
+    return (err as { code?: string }).code === code;
+  }
+
   return {
     async createUser(accountName, email) {
       const normalizedAccount = accountName.trim().toLowerCase();
       const normalizedEmail = email.trim().toLowerCase();
-      const r = await db.query<UserRow>(
-        `INSERT INTO users (account_name, email)
-         VALUES ($1, $2)
-         RETURNING id, account_name, email, email_verified_at, created_at, updated_at`,
-        [normalizedAccount, normalizedEmail]
-      );
-      if (r.rowCount === 0) throw new DuplicateUserError();
-      return r.rows[0];
+      try {
+        const r = await db.query<UserRow>(
+          `INSERT INTO users (account_name, email)
+           VALUES ($1, $2)
+           RETURNING id, account_name, email, email_verified_at, created_at, updated_at`,
+          [normalizedAccount, normalizedEmail]
+        );
+        return r.rows[0];
+      } catch (err) {
+        if (isPgError(err, "23505")) throw new DuplicateUserError();
+        throw err;
+      }
     },
 
     async getUserByEmail(email: string) {
@@ -81,16 +83,21 @@ export function createUserRepo(db: Queryable): UserRepo {
     },
 
     async incrementGamesStarted(client: PoolClient, userId: number) {
-      const r = await client.query<{ games_started: number }>(
-        `INSERT INTO user_stats (user_id, games_started, last_played_at)
-         VALUES ($1, 1, now())
-         ON CONFLICT (user_id) DO UPDATE
-           SET games_started = user_stats.games_started + 1,
-               last_played_at = now()
-         RETURNING games_started`,
-        [userId]
-      );
-      return r.rows[0]?.games_started ?? null;
+      try {
+        const r = await client.query<{ games_started: number }>(
+          `INSERT INTO user_stats (user_id, games_started, last_played_at)
+           VALUES ($1, 1, now())
+           ON CONFLICT (user_id) DO UPDATE
+             SET games_started = user_stats.games_started + 1,
+                 last_played_at = now()
+           RETURNING games_started`,
+          [userId]
+        );
+        return r.rows[0].games_started;
+      } catch (err) {
+        if (isPgError(err, "23503")) throw new UserNotFoundError(userId);
+        throw err;
+      }
     },
   };
 }

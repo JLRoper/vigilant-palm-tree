@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.6.1] - 2026-10-12
+
+fix: typed duplicate/missing-user errors in userRepo, strip migration comments, add userRepo persistence tests
+
 ## [0.6.0] - 2026-10-12
 
 feat: user profile scheme - migration 029 (users + user_stats), auth register/me/patch-me routes, client profile panel with Profile/Sign Out
