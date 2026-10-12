@@ -686,3 +686,45 @@ test("settlement captured in mirror updates emitted CastleNode owner and color",
   assert.equal(castleNodes[0].ownerId, 0, "castle owner updated to capturing player");
   assert.equal(castleNodes[0].color, stubColorForOwner(0));
 });
+
+test("a hover that is not a map hex emits no hover highlight node", () => {
+  const map = makeGrassMap(1, 1);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [],
+    path: [],
+    hover: { qx: 9, qy: 9 },
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  assert.equal(nodesOfKind<HoverHighlightNode>(nodes, "hoverHighlight").length, 0, "the hover target is outside the map and owned by nobody");
+});
+
+test("an owned hero with an empty trail emits no hero trail node", () => {
+  const map = makeGrassMap(3, 1);
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0);
+  hero.trail = [];
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  assert.equal(nodesOfKind<HeroTrailNode>(nodes, "heroTrail").length, 0, "no trail points are available to emit");
+});
+
+test("fog covers every tile the view player cannot see; a 1x1 owned map is fully clear", () => {
+  const map = makeGrassMap(1, 1);
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  assert.equal(nodesOfKind<FogHexNode>(nodes, "fogHex").length, 0, "the only tile is owned, so nothing should be fogged");
+});
