@@ -160,7 +160,7 @@ Port allocation is OS-native and cross-platform (`scripts/allocate-ports.ts` use
 | `test:wrapper` | `node --no-deprecation tools/run-test.mjs` | Direct access to the test wrapper |
 | `lint:deps` | `depcruise src server packages --config dependency-cruiser.cjs` | Static check of cross-boundary imports (cycles + layering, incl. the workspace packages) |
 | `validate-assets` | `node tools/sprites/validate-assets.mjs` | Validate legacy manifest, generated building keys/anchors, and horse run-frame gates |
-| `docs:check` | `node tools/docs-check.mjs` | Check maintained Markdown links/source paths and `docs:verified` marker age (no DB) |
+| `docs:check` | `node tools/docs-check.mjs` | Check maintained Markdown links/source paths in every mode; `docs:verified` marker age in full mode, or scoped via `DOC_OWNERSHIP` globs in selective mode (`--changed <path>` / `--changed-from <git-spec>`) (no DB) |
 | `sprites:generate` | `node tools/sprites/pixel-gen.mjs` | Render pixel-art sprites into `src/resources/` |
 | `sprites:preview` | `node tools/sprites/generate-preview.mjs` | Build a sprite contact-sheet preview |
 | `assets:seed` | `tsx --env-file=.env scripts/seed-assets.ts` | Seed the `game_assets` table from `src/resources/` |
@@ -286,14 +286,14 @@ API conventions:
 
 ### CI (GitHub Actions)
 
-[`.github/workflows/validate-game.yml`](./.github/workflows/validate-game.yml:1) runs on every PR (`concurrency` group cancels superseded runs): Node 22.x on `ubuntu-latest` with a Postgres 16 service container. Steps: `npm install` → `npx playwright install chromium --with-deps` → boot check (`npm run dev` in the background; waits up to 60 s for `CLIENT_PORT`/`API_PORT` in `.env`, then polls `/api/health` + client) → dump boot log → `rm -f .env` (fresh allocation for the smoke run) → `npm run build` → `npm test` → upload `test/*.log` + `test/*.png` artifacts. The whole pipeline is Linux-native; `scripts/allocate-ports.ts` needs no OS-specific handling.
+[`.github/workflows/validate-game.yml`](./.github/workflows/validate-game.yml:1) runs on every PR (`concurrency` group cancels superseded runs): Node 22.x on `ubuntu-latest` with a Postgres 16 service container. Steps: `npm install` → `docs:check (freshness scoped to changed modules; BASE_REF vs PR base, full on dispatch)` → `npx playwright install chromium --with-deps` → boot check (`npm run dev` in the background; waits up to 60 s for `CLIENT_PORT`/`API_PORT` in `.env`, then polls `/api/health` + client) → dump boot log → `rm -f .env` (fresh allocation for the smoke run) → `npm run build` → `npm test` → upload `test/*.log` + `test/*.png` artifacts. The whole pipeline is Linux-native; `scripts/allocate-ports.ts` needs no OS-specific handling.
 
 ---
 
 ## 9. Tooling & asset pipeline
 
 ### Sprite generation (`tools/sprites/`)
-- [`tools/sprites/pixel-gen.mjs`](./tools/sprites/pixel-gen.mjs:1) (Playwright `chromium`) renders the pixel-art sprites from `pixel-art.html` (a `<canvas>` drawing page; a root-level copy of the harness also exists) into `src/resources/`.
+- [`tools/sprites/pixel-gen.mjs`](./tools/sprites/pixel-gen.mjs:1) (Playwright `chromium`) renders the pixel-art sprites from [`tools/sprites/pixel-art.html`](./tools/sprites/pixel-art.html) (a `<canvas>` drawing page) into `src/resources/`.
 - `tools/sprites/manifest.mjs` is the sprite-filename registry consumed by the generator scripts and `validate-assets.mjs`.
 - The `flux-*.mjs` family calls the DeepInfra API (`black-forest-labs/FLUX-2-klein-4b`, requires `DEEPINFRA_API_KEY`) and post-processes via Playwright canvases (downscale → alpha mask → 2px outline → white-to-alpha): `flux-gen.mjs` (illustrated/constellation/crest resource variants), `flux-piles.mjs` / `flux-pile-smol.mjs` / `flux-bubbly.mjs` (pile variants), `flux-buildings.mjs` + per-building follow-ups (classic style buildings), `flux-castles.mjs` (castle alt variants), `flux-hero-diagonals.mjs` (8-direction player hero), `flux-skybox.mjs` (1024×576 watercolor skyboxes, variants 2–4), plus regen/retry scripts.
 - `tools/sprites/generate-preview.mjs` builds a contact sheet; `screenshot-preview.mjs` supports screenshot-based previews; `outline-apply.mjs` applies outlines; `validate-assets.mjs` checks `src/resources/` against the manifest (`npm run validate-assets`).
@@ -307,8 +307,13 @@ API conventions:
 - `allocate-ports.ts` (ports, §10), `cleanup.ps1`, `dev-status.ps1` (process helpers), `seed-assets.ts` (`assets:seed`), `migrate-jsonb-to-tables.ts` (legacy jsonb → granular tables), plus image-processing helpers (`batch_remove_background.ps1`, `remove_background.py`, `capture-path.ts`).
 
 ### Editor / static checks
-- No formatter or pre-commit hook is configured (no `.prettierrc*`, no Husky).
-- Enforced checks: `npm run build` (`tsc`) and `npm run lint:deps` (dependency-cruiser layering rules, §11).
+- No formatter or Git hook is configured (no `.prettierrc*`, no Husky); the pre-commit gate runs agent-side via the `precommit-checker` subagent (see AGENTS.md) and in CI (`.github/workflows/validate-game.yml`).
+- Enforced checks: `npm run build` (`tsc`), `npm run lint:deps` (dependency-cruiser layering rules, §11), and `node tools/docs-check.mjs --changed-from origin/main` (documentation gate, below).
+
+### Documentation checks (`tools/docs-check.mjs`)
+- Scans the 20-file `MAINTAINED_DOCS` allowlist: every local link resolves, every mentioned `src|server|packages|test|tools|scripts` path exists (gitignored paths exempt), and each doc carries exactly one `<!-- docs:verified YYYY-MM-DD -->` marker at most `MAX_AGE_DAYS = 180` days old.
+- Full mode (no arguments) enforces marker age on all maintained docs. Selective mode (`--changed <path>`... or `--changed-from <git-spec>`, which unions committed-since-spec, staged/unstaged, and untracked files) enforces marker age only for docs whose `DOC_OWNERSHIP` globs match a changed file, plus any maintained doc itself present in the changeset — so a change only asks for fresh verification of the docs that cover it.
+- Gate wiring: the pre-commit gate runs it with `--changed-from origin/main`; the validate workflow runs it against the PR base (`origin/<base>...HEAD`) on pull requests and full otherwise; a dedicated workflow (`.github/workflows/docs-check.yml`) runs full mode on pushes to main and weekly, so marker expiry and link rot surface on main itself. Invalid `--changed-from` specs fail with exit 2 (fail closed).
 
 ---
 

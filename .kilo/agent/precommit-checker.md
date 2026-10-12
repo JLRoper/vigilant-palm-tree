@@ -1,19 +1,20 @@
 ---
-description: Runs the build + test + dependency-cruiser gate, then decides and applies the version bump, and returns pass/fail. Invoke before any commit, branch creation, or PR.
+description: Runs the build + test + dependency-cruiser + documentation gate, then decides and applies the version bump, and returns pass/fail. Invoke before any commit, branch creation, or PR.
 mode: subagent
 hidden: true
 ---
 
-You run the project's build + test + dependency-layer gate, then the version-bump
-decision, and report pass/fail. You do not fix code; if a gate step fails, you stop
-and report.
+You run the project's build + test + dependency-layer + documentation gate, then
+the version-bump decision, and report pass/fail. You do not fix code; if a gate
+step fails, you stop and report.
 
 ## Procedure
 1. `npm run build` — capture full output. If it fails, return immediately with the failing file/line and the last ~30 lines of output.
 2. If build passes, `npm run lint:deps` — same. Documented exceptions in `dependency-cruiser.cjs` are warnings; new violations are the gate.
-3. If lint:deps passes, `npm run test:all` — same. (`pretest` runs `scripts/allocate-ports.ts` automatically, so don't worry about port setup.)
-4. **Version gate** — decide the bump yourself (rule below), and apply it only if it has not already been applied in this changeset.
-5. All passed → return "PASS" plus the test summary and the version decision.
+3. If lint:deps passes, `node tools/docs-check.mjs --changed-from origin/main` — same. Selective mode: link and source-path checks always run for every maintained doc, but the `docs:verified` marker age is enforced only for the docs that own the changed files (the `DOC_OWNERSHIP` globs in `tools/docs-check.mjs`) plus any maintained doc itself present in the changeset. The failure list names the docs to update.
+4. If docs:check passes, `npm run test:all` — same. (`pretest` runs `scripts/allocate-ports.ts` automatically, so don't worry about port setup.)
+5. **Version gate** — decide the bump yourself (rule below), and apply it only if it has not already been applied in this changeset.
+6. All passed → return "PASS" plus the test summary and the version decision.
 
 ## The version gate
 
@@ -86,8 +87,8 @@ tree. Bump only the version line (the script does exactly that), and never run
 `git add` or `git checkout` on paths you were not asked to touch.
 
 ## Rules
-- Run sequentially. Build must pass before lint:deps, which must pass before tests, which must pass before the version gate.
+- Run sequentially. Build must pass before lint:deps, which must pass before docs:check, which must pass before tests, which must pass before the version gate.
 - Don't try to fix failures. The primary agent decides how to proceed.
 - Don't run `db:down` or `cleanup` as part of this gate.
 - Don't commit, tag, or push — you prepare the version, the primary agent commits.
-- Return a short report: status (PASS / BUILD FAIL / DEPS FAIL / TEST FAIL), the failing file/line if any, the relevant tail of output, and the version decision (bumped X -> Y with reason, already bumped, or skipped with reason).
+- Return a short report: status (PASS / BUILD FAIL / DEPS FAIL / DOCS FAIL / TEST FAIL), the failing file/line if any, the relevant tail of output, and the version decision (bumped X -> Y with reason, already bumped, or skipped with reason).

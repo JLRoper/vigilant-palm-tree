@@ -370,7 +370,7 @@ separately in `npm run test:unit`.
 | Asset drift gates | `npm run validate-assets` → `tools/sprites/validate-assets.mjs` | 31 legacy manifest files exist; generated building keys and anchors match disk; horse run-frame base/existence/alignment checks pass |
 | Building-kind sprite coverage | `test/engine/buildingSpriteCoverage.test.ts` in `npm run test:unit` | Exhaustive manual `Record<BuildingKind, levels 1–3>` declarations match generated keys; intentional absences require reasons |
 | Pixels | `npm run test:visual` → `tools/run-test.mjs visual` → `test/visualRegression.test.ts` | 9 fixed scenes diffed against `test/visual-baselines/` (`adventure-overview`, `charter-traveling`, `charter-constructing`, `city-view-parallax-on/-off`, plus the 4 battle-arena scenes added with the 2026-09-29 arena sprites); `--update-baselines` script for deliberate churn |
-| Pre-commit | `precommit-checker` agent (`.kilo/agent/precommit-checker.md`) | `npm run build` + `lint:deps` + `test:all` |
+| Pre-commit | `precommit-checker` agent (`.kilo/agent/precommit-checker.md`) | `npm run build` + `lint:deps` + `docs:check` (selective, scoped to changed modules) + `test:all` |
 | Alpha damage | `repair-alpha.mjs --check` | available as a gate but **not wired into any npm script or the precommit gate** |
 
 ---

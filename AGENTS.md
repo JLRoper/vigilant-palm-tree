@@ -9,7 +9,7 @@ This file is loaded into every agent's context. Treat the rules below as non-neg
 - Dev environment: `npm run dev` (vite client + tsx api, via concurrently). Ports are per-worktree and OS-assigned (random kernel-picked free ports) by `predev` via `scripts/allocate-ports.ts` — collision-free across concurrent runs.
 - Postgres dev DB: shared `game_db` container, fixed host port 5432. `npm run db:up` to start. Do NOT run `db:down` unless explicitly asked — other worktrees share it.
 - `.env` may point `PGHOST` at the shared **gameserver** instead of the local container (see `.env.example`). Tests must never follow it there: `test/smoke.ts` deletes every game in the database except its own fixtures. DB-backed test scripts load `.env.test` after `.env` to pin `PGHOST` to `127.0.0.1` — preserve that order and give any NEW script that reads `.env` the same second `--env-file=.env.test`.
-- Build: `npm run build` (tsc + vite build). Full suite: `npm run test:all` (browser/e2e suites through `tools/run-test.mjs all`, followed by `npm run test:unit`). `npm test` is the smoke test. Documentation: `npm run docs:check` (maintained Markdown links/source paths and freshness markers; no DB). Status: `npm run dev:status`.
+- Build: `npm run build` (tsc + vite build). Full suite: `npm run test:all` (browser/e2e suites through `tools/run-test.mjs all`, followed by `npm run test:unit`). `npm test` is the smoke test. Documentation: `npm run docs:check` (maintained Markdown links/source paths always; `docs:verified` marker freshness scoped to the docs owning the changed files via `DOC_OWNERSHIP` globs in `tools/docs-check.mjs`; no DB). Status: `npm run dev:status`.
 - LAN multiplayer: set `LAN_HOST=1` in `.env` (or process env) before `npm run dev` to bind the API to `0.0.0.0`. `npm run dev:status` will print LAN URLs when `LAN_HOST=1`. `scripts/allocate-ports.ts` reserves `WS_PORT` for a future realtime layer; leave it dormant.
 
 ## Coding constraints
@@ -39,7 +39,7 @@ Incident-driven rules. Full detail lives in the `multi-agent-workspace` skill's 
 
 ## Pre-commit / pre-PR gate (automatic)
 Before ANY `git commit`, `git switch -c`, `gh pr create`, or `gh repo create`:
-1. Invoke the `precommit-checker` subagent (it runs `npm run build` + `npm run test:all`).
+1. Invoke the `precommit-checker` subagent (it runs `npm run build` + `npm run lint:deps` + the `docs:check` documentation gate scoped to changed modules + `npm run test:all`).
 2. If it fails, do not commit/push/PR. Report the failure and ask the user how to proceed.
 The `/precommit` and `/pre-pr` slash commands are manual equivalents you can offer the user.
 
@@ -73,5 +73,5 @@ The `/precommit` and `/pre-pr` slash commands are manual equivalents you can off
 ## Skills available
 - `/dev start|stop|restart` — manage the local dev environment (db + api + client).
 - `/review-issue [branch|PR#] [issue#]` — review a branch against the issue it claims to close, plus a general pass against the project docs. Read-only.
-- `/precommit` — run the build + test gate on demand.
+- `/precommit` — run the build + deps + docs + test gate on demand.
 - `/pre-pr` — same as `/precommit`, plus a quick doc sanity sweep.

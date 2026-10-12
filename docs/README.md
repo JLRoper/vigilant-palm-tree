@@ -6,7 +6,7 @@ This index distinguishes current as-built references, design intent, and histori
 
 ## Screenshots
 
-Captured from the Docker deployment (`docker compose up` → http://localhost:5173) via `node tools/doc-screenshots.mjs`. One shot per screen/pane.
+Captured from the Docker deployment (`docker compose up` → http://localhost:5173). One shot per screen/pane.
 
 | Screenshot | What it shows |
 | --- | --- |

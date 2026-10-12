@@ -17,7 +17,7 @@ This guide covers local development and deployment. See [`AGENTS.md`](../AGENTS.
 - `npm test` runs the smoke test.
 - `npm run test:unit` runs serial Node `node:test` suites.
 - `npm run test:all` runs the browser/e2e suites through `tools/run-test.mjs all`, followed by unit tests.
-- `npm run docs:check` checks maintained Markdown links/source paths and freshness markers without connecting to the database.
+- `npm run docs:check` checks maintained Markdown links/source paths (always) and `docs:verified` freshness markers (full mode for all docs; `--changed <path>` / `--changed-from <git-spec>` scope freshness to the docs owning the changed files, per the `DOC_OWNERSHIP` globs in `tools/docs-check.mjs`) without connecting to the database.
 
 The browser suite includes smoke, multiplayer, city view, settlements, AI defender, AI charter, log panel, and visual regression. Avoid `npm run test:all` when another coordinated session is exercising the shared database.
 
@@ -31,6 +31,6 @@ Multiplayer state changes are pushed through SSE (`GET /api/games/:name/events/s
 
 - Build Docker images with `npm run docker:build`, not bare `docker compose build`. The wrapper resolves the Git commit on the host and passes it into the image; a bare compose build can stamp the fallback `dev` value.
 - The root `package.json` version is the app version. Use `npm run version:bump -- patch|minor|major|X.Y.Z`; it updates the package version and `CHANGELOG.md`. Release tags use `v<semver>`.
-- Run the pre-commit gate before committing; this documentation task does not commit or run the full build/test gate.
+- Run the pre-commit gate before committing; it now includes the `docs:check` documentation gate. This documentation task does not commit or run the full build/test gate.
 
 See [`multiplayer.md`](./multiplayer.md), [`plans-track-map.md`](./plans-track-map.md), and the root [technical specification](../TECHNICAL_SPECIFICATIONS.MD) for architecture details.
