@@ -1,4 +1,4 @@
-# Heroes JS Documentation
+﻿# Heroes JS Documentation
 
 <!-- docs:verified 2026-10-11 -->
 
@@ -6,15 +6,13 @@ This index distinguishes current as-built references, design intent, and histori
 
 ## Screenshots
 
-Captured from the Docker deployment (`docker compose up` → http://localhost:5173). One shot per screen/pane.
+Captured from the Docker deployment (`docker compose up` → http://localhost:5173` → ` http://localhost:5173`); shot set under \`./screenshots/\`, regenerable against pixel baselines with \`npm run test:visual:update-baselines\` (provenance: \`docs/asset-provenance.md\`, \`docs/sprite-pipelines.md\`).
 
 | Screenshot | What it shows |
 | --- | --- |
 | ![Home screen](./screenshots/home-screen.png) | Landing view: New Game / Load Game / Settings / Sign In |
 | ![Adventure map](./screenshots/adventure-map.png) | Hex world: selected hero, movement path, fog, HUD/toolbar |
 | ![Hero info panel](./screenshots/hero-info-panel.png) | Hero pane: stats, army, cargo |
-| ![City view](./screenshots/city-view.png) | Isometric settlement interior + warehouse pane |
-| ![Battle arena](./screenshots/battle-arena.png) | Manual battle arena (Test Battle sandbox) |
 
 ## Start Here
 
@@ -91,7 +89,7 @@ Captured from the Docker deployment (`docker compose up` → http://localhost:51
 - **Settlements:** charter founding, capture, building construction/upgrades, garrison recruitment, and resource production are live.
 - **Logistics:** wagons and physical caravans are shipped. New games do not use shared-storage teleports; legacy saves retain their recorded compatibility policy.
 - **Combat:** hero and settlement-garrison resolvers, the manual arena, and hero defeat/retreat/surrender outcomes are shipped. Human defenders may Fight or Quick Resolve an AI offer; Flee is hidden for defenders. Garrison assaults offer Assault, Auto-resolve, or Cancel.
-- **AI:** 0–3 AI enemies can be selected in New Game. Flagged games are server-driven; AI garrison recruitment, trade-route acceptance, chartering, watchdog/heartbeat, token ownership, and per-game advisory locking are live.
+- **AI:** 0â€“3 AI enemies can be selected in New Game. Flagged games are server-driven; AI garrison recruitment, trade-route acceptance, chartering, watchdog/heartbeat, token ownership, and per-game advisory locking are live.
 - **Factions:** the registry-driven human, Ashen, Ironmark, and Verdant rosters and recruit gates are live; neutral monsters are separate from playable rosters.
 - **Known open economy issue:** resource-gathering finding F2 remains OPEN: market `goldPerTurn` is included in a projection helper but is not credited by End Turn.
 
