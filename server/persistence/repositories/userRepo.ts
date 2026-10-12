@@ -11,12 +11,6 @@ export interface UserRow {
   updated_at: Date;
 }
 
-export interface UserStatsRow {
-  user_id: number;
-  games_started: number;
-  last_played_at: Date | null;
-}
-
 export class UserNotFoundError extends Error {
   constructor(userId: number) {
     super(`user not found: ${userId}`);
@@ -47,17 +41,19 @@ export interface UserRepo {
 export function createUserRepo(db: Queryable): UserRepo {
   return {
     async createUser(accountName, email) {
+      const normalizedAccount = accountName.trim().toLowerCase();
+      const normalizedEmail = email.trim().toLowerCase();
       const r = await db.query<UserRow>(
         `INSERT INTO users (account_name, email)
          VALUES ($1, $2)
          RETURNING id, account_name, email, email_verified_at, created_at, updated_at`,
-        [accountName, email]
+        [normalizedAccount, normalizedEmail]
       );
       if (r.rowCount === 0) throw new DuplicateUserError();
       return r.rows[0];
     },
 
-    async getUserByEmail(email) {
+    async getUserByEmail(email: string) {
       const r = await db.query<UserRow>(
         `SELECT id, account_name, email, email_verified_at, created_at, updated_at
          FROM users WHERE lower(email) = lower($1)`,
@@ -66,7 +62,7 @@ export function createUserRepo(db: Queryable): UserRepo {
       return r.rows[0] ?? null;
     },
 
-    async getUserByAccountName(accountName) {
+    async getUserByAccountName(accountName: string) {
       const r = await db.query<UserRow>(
         `SELECT id, account_name, email, email_verified_at, created_at, updated_at
          FROM users WHERE lower(trim(account_name)) = lower(trim($1))`,
@@ -75,7 +71,7 @@ export function createUserRepo(db: Queryable): UserRepo {
       return r.rows[0] ?? null;
     },
 
-    async getUser(userId) {
+    async getUser(userId: number) {
       const r = await db.query<UserRow>(
         `SELECT id, account_name, email, email_verified_at, created_at, updated_at
          FROM users WHERE id = $1`,
@@ -84,7 +80,7 @@ export function createUserRepo(db: Queryable): UserRepo {
       return r.rows[0] ?? null;
     },
 
-    async incrementGamesStarted(client, userId) {
+    async incrementGamesStarted(client: PoolClient, userId: number) {
       const r = await client.query<{ games_started: number }>(
         `INSERT INTO user_stats (user_id, games_started, last_played_at)
          VALUES ($1, 1, now())
