@@ -1,10 +1,14 @@
 # Player Guide
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-12 -->
 
 ## Start a Game
 
 New Game supports **1–4 human players** and **0–3 AI enemies**. Pick one of the playable registry factions: Human, Ashen, Ironmark, or Verdant. Neutral monsters are not a selectable player faction. AI seats are not lobby seats; games with AI enemies are driven by the server.
+
+## Sign In and Profile
+
+Sign-in is optional — you can play without an account. **Sign In** on the home screen starts an email login-code flow (no password). Once signed in, the home-screen button becomes **Profile** next to a separate **Sign Out** button, and the Settings menu gains a **Profile** section that opens the same panel. The panel shows your account name (editable, saved with **Save**), your email (read-only), and your stats: games started, last played, and games won — which reads "N/A (no win condition yet)" until a win condition exists.
 
 ## Move and Found Settlements
 

@@ -1,4 +1,6 @@
 import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
+import { openProfilePanel } from "@screens/shared/profilePanel";
+import { getCachedAuth } from "../../io/auth";
 import { APP_VERSION, BUILD_TIME, BUILD_COMMIT, formatBuildTime } from "../../core/version";
 import {
   settings,
@@ -155,6 +157,39 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   intro.style.opacity = "0.65";
   intro.style.fontSize = "11px";
   content.appendChild(intro);
+
+  // ─── Profile ───────────────────────────────────────────────────────────
+
+  {
+    const cachedAuth = getCachedAuth();
+    const children: HTMLElement[] = [];
+    if (cachedAuth) {
+      const note = document.createElement("div");
+      note.textContent = `Signed in as ${cachedAuth.email}.`;
+      note.style.fontSize = "11px";
+      note.style.opacity = "0.7";
+      children.push(note);
+      const openBtn = document.createElement("button");
+      openBtn.textContent = "Open profile";
+      styleButton(openBtn, true);
+      openBtn.addEventListener("click", () => {
+        openProfilePanel({
+          token: cachedAuth.token,
+          email: cachedAuth.email,
+          onSignedOut: () => modal.close(),
+        });
+      });
+      children.push(openBtn);
+    } else {
+      const note = document.createElement("div");
+      note.textContent =
+        "Not signed in. Sign-in is optional — use the Sign In button on the home screen. Signing in tracks your games played and stats.";
+      note.style.fontSize = "11px";
+      note.style.opacity = "0.7";
+      children.push(note);
+    }
+    makeFoldableSection(content, "Profile", children, true);
+  }
 
   // ─── Map Info ──────────────────────────────────────────────────────────
 

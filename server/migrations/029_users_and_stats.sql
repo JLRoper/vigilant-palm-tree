@@ -28,9 +28,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx
 
 -- Pre-alpha0 username character-set guard: keeps the unique index above
 -- meaningful (no ambiguity from newlines / unusual whitespace).
-ALTER TABLE users
-  ADD CONSTRAINT IF NOT EXISTS users_account_name_check
-  CHECK (account_name ~ '^[A-Za-z0-9_ .-]{1,64}$');
+-- initSchema() re-runs every migration on each boot and PostgreSQL has no
+-- ADD CONSTRAINT IF NOT EXISTS, so the existence check lives in a DO block.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'users_account_name_check'
+  ) THEN
+    ALTER TABLE users
+      ADD CONSTRAINT users_account_name_check
+      CHECK (account_name ~ '^[A-Za-z0-9_ .-]{1,64}$');
+  END IF;
+END
+$$;
 
 CREATE TABLE IF NOT EXISTS user_stats (
   user_id         INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT,

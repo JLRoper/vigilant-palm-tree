@@ -1,6 +1,6 @@
 # Heroes JS Documentation
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-12 -->
 
 This index distinguishes current as-built references, design intent, and historical plans. For current behavior, prefer code-linked as-built documents over older proposals.
 
@@ -21,7 +21,7 @@ Captured from the Docker deployment (`docker compose up` → http://localhost:51
 | Reference | Use it for |
 |---|---|
 | [Project README](../README.md) | Install, run, and current feature overview |
-| [Player guide](./player-guide.md) | New Game options, movement, chartering, combat, logistics, and hotkeys |
+| [Player guide](./player-guide.md) | New Game options, sign-in/profile, movement, chartering, combat, logistics, and hotkeys |
 | [Operations guide](./operations.md) | Local DB safety, ports, tests, migrations, LAN, AI driver, and deployment |
 | [Technical specification](../TECHNICAL_SPECIFICATIONS.MD) | Current system architecture and API/persistence model |
 | [Agent instructions](../AGENTS.md) | Workspace safety, verification gates, and release/versioning rules |
@@ -42,7 +42,7 @@ Captured from the Docker deployment (`docker compose up` → http://localhost:51
 | Document | Scope and status |
 |---|---|
 | [README.md](./README.md) | This catalog and index of the documentation set. |
-| [player-guide.md](./player-guide.md) | Player-facing New Game options, movement, chartering, combat, logistics, and hotkeys. |
+| [player-guide.md](./player-guide.md) | Player-facing New Game options, sign-in/profile, movement, chartering, combat, logistics, and hotkeys. |
 | [operations.md](./operations.md) | Local development, database/test safety, AI driver, LAN, deployment, and versioning. |
 | [asset-provenance.md](./asset-provenance.md) | Existing asset workflows and provenance gaps; metadata to capture for future art. |
 | [sprite-pipelines.md](./sprite-pipelines.md) | Current asset generators, generated building keys/anchors, validation gates, and open provenance gaps. |
@@ -55,7 +55,7 @@ Captured from the Docker deployment (`docker compose up` → http://localhost:51
 | [heroes.md](./heroes.md) | Hero movement, provisioning, charters, upkeep, and battle outcomes. |
 | [army.md](./army.md) | Live faction rosters, recruitment, weekly upkeep, battle rules, and arena art. |
 | [multiplayer.md](./multiplayer.md) | Lobby/seats, SSE sync, disconnect policy, server-driven AI, and AI chartering. |
-| [auth-model.md](./auth-model.md) | Magic-link authentication and per-game seat identity. |
+| [auth-model.md](./auth-model.md) | Optional email-code sign-in, user accounts/profiles, and per-game seat identity. |
 | [event-system.md](./event-system.md) | Typed client event bus and `GameEvent` catalog; listener migration status is documented there. |
 | [network-map.md](./network-map.md) | Developer network-topology overlay and what its measured/proxy metrics mean. |
 | [dev-console.md](./dev-console.md) | Live event log and developer console. |
@@ -93,6 +93,7 @@ Captured from the Docker deployment (`docker compose up` → http://localhost:51
 - **Combat:** hero and settlement-garrison resolvers, the manual arena, and hero defeat/retreat/surrender outcomes are shipped. Human defenders may Fight or Quick Resolve an AI offer; Flee is hidden for defenders. Garrison assaults offer Assault, Auto-resolve, or Cancel.
 - **AI:** 0–3 AI enemies can be selected in New Game. Flagged games are server-driven; AI garrison recruitment, trade-route acceptance, chartering, watchdog/heartbeat, token ownership, and per-game advisory locking are live.
 - **Factions:** the registry-driven human, Ashen, Ironmark, and Verdant rosters and recruit gates are live; neutral monsters are separate from playable rosters.
+- **Accounts:** sign-in is optional (email login code, no password). A signed-in player gets a Profile panel — editable account name, read-only email, and per-user stats; starting a game while signed in counts toward games started.
 - **Known open economy issue:** resource-gathering finding F2 remains OPEN: market `goldPerTurn` is included in a projection helper but is not credited by End Turn.
 
 ## Local Historical Collections

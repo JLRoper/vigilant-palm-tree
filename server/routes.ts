@@ -26,8 +26,10 @@ import type { PoolClient } from "pg";
 // the client hydrated tradeRoutes: [] on reload. Duplicate column lists
 // drift; this import is the fix and the prevention.
 import { GAME_COLUMNS } from "./persistence/repositories/gameRepo";
+import { createUserRepo } from "./persistence/repositories/userRepo";
 import { assetRouter } from "./assetRoutes";
 import { authRouter, attachAuth } from "./auth";
+const userRepo = createUserRepo(pool);
 import { invalidateMembershipCache } from "./middleware/attachPlayerSeat";
 import { commandsRouter, invalidateAiSeatCache } from "./http/routes/commands";
 import { aiDriverBootToken } from "./app/aiDriverToken";
@@ -382,7 +384,7 @@ router.post("/games/:name/lobby/start", async (req, res) => {
   }
 });
 
-router.post("/games", async (req, res) => {
+router.post("/games", attachAuth, async (req, res) => {
   try {
     const {
       name,
@@ -523,8 +525,18 @@ router.post("/games", async (req, res) => {
           JSON.stringify(lobbyState),
         ]
       );
-    const row = r.rows[0];
-    await generateAndInsertTiles(client, row.id, row.seed, "upsert", storedMapSize as MapSize);
+      const row = r.rows[0];
+      // Signed-in players: count this as a game started.
+      if (req.authEmail) {
+        const userResult = await pool.query<{ id: number }>(
+          "SELECT id FROM users WHERE email = $1",
+          [req.authEmail],
+        );
+        if (userResult.rowCount !== null && userResult.rowCount > 0) {
+          await userRepo.incrementGamesStarted(client, userResult.rows[0].id);
+        }
+      }
+      await generateAndInsertTiles(client, row.id, row.seed, "upsert", storedMapSize as MapSize);
     return row;
   });
   // The recreation (ON CONFLICT (name)) may have flipped the aiDriver flag;
