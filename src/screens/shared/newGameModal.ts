@@ -8,7 +8,7 @@ export type NewGameHandler = (opts: {
   seed: number;
   castleSeed?: number;
   castleCount?: number;
-  mapSize?: "small" | "medium" | "large";
+  mapSize?: "small" | "medium" | "large" | "huge" | "epic";
   enemyCount?: 0 | 1 | 2 | 3;
   factionId?: FactionId;
 }) => void | Promise<void>;
@@ -99,6 +99,8 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
     { value: "small", label: "Small (24x18)" },
     { value: "medium", label: "Medium (36x27)" },
     { value: "large", label: "Large (48x36)" },
+    { value: "huge", label: "Huge (72x54)" },
+    { value: "epic", label: "Epic (120x90)" },
   ];
   for (const s of sizes) {
     const opt = document.createElement("option");
@@ -271,7 +273,7 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
       return;
     }
     const castleCount = Math.max(2, Math.min(CASTLE_COUNT_MAX, Math.floor(castleCountRaw)));
-    const mapSize = (sizeSelect.value || "small") as "small" | "medium" | "large";
+    const mapSize = (sizeSelect.value || "small") as "small" | "medium" | "large" | "huge" | "epic";
     confirm.disabled = true;
     cancel.disabled = true;
     errorLine.textContent = "Creating…";

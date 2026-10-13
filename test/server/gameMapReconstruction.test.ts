@@ -51,7 +51,7 @@ test("new GameMap(seed, mapSize) deterministically reproduces the same map GameM
 });
 
 test("GameMap reconstruction from seed+mapSize is deterministic across every mapSize, not just small", () => {
-  for (const mapSize of ["small", "medium", "large"] as const) {
+  for (const mapSize of ["small", "medium", "large", "huge", "epic"] as const) {
     const a = new GameMap(777, mapSize);
     const b = new GameMap(777, mapSize);
     assert.deepEqual(a.tiles, b.tiles);

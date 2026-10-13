@@ -17,12 +17,14 @@ export type TileRow = {
   resource: string | null;
 };
 
-export type MapSize = "small" | "medium" | "large";
+export type MapSize = "small" | "medium" | "large" | "huge" | "epic";
 
 export const MAP_SIZES: Record<MapSize, { width: number; height: number; label: string }> = {
   small:  { width: 24, height: 18, label: "Small" },
   medium: { width: 36, height: 27, label: "Medium" },
   large:  { width: 48, height: 36, label: "Large" },
+  huge:   { width: 72, height: 54, label: "Huge" },
+  epic:   { width: 120, height: 90, label: "Epic" },
 };
 
 export class GameMap {

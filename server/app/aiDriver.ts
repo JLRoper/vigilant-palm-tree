@@ -258,7 +258,7 @@ async function defaultLoadCandidates(): Promise<AiDriverCandidate[]> {
 }
 
 function mapSizeFrom(value: string | null | undefined): MapSize | undefined {
-  return value === "small" || value === "medium" || value === "large" ? value : undefined;
+  return value === "small" || value === "medium" || value === "large" || value === "huge" || value === "epic" ? value : undefined;
 }
 
 async function defaultLoadGame(gameName: string): Promise<AiDriverGameSnapshot | null> {

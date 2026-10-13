@@ -28,7 +28,7 @@ import type { MapInfo } from "@screens/home/settingsMenu";
 import type { FactionId } from "@heroes/contracts";
 
 type ToolbarCallbacks = {
-  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; enemyCount?: number; factionId?: FactionId }) => void;
+  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" | "huge" | "epic"; enemyCount?: number; factionId?: FactionId }) => void;
   onLoad: (loaded: import("../io/api").Game, tiles: import("../io/api").TileRow[]) => void;
   onSave: () => void;
   onEndTurn: () => void;

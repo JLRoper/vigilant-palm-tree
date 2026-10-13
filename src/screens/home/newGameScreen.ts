@@ -15,7 +15,7 @@ import { seatFactionChoices } from "@screens/shared/factionChoices";
 export type NewGameFormValues = {
   name: string;
   seed: number;
-  mapSize: "small" | "medium" | "large";
+  mapSize: "small" | "medium" | "large" | "huge" | "epic";
   playerCount: 1 | 2 | 3 | 4;
   enemyCount: 0 | 1 | 2 | 3;
   factionId: FactionId;
@@ -286,6 +286,8 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
     { value: "small", label: "Small (24×18)" },
     { value: "medium", label: "Medium (36×27)" },
     { value: "large", label: "Large (48×36)" },
+    { value: "huge", label: "Huge (72×54)" },
+    { value: "epic", label: "Epic (120×90)" },
   ]) {
     const opt = document.createElement("option");
     opt.value = s.value;
@@ -398,7 +400,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
         return;
       }
     }
-    const mapSize = (sizeSelect.value || "small") as "small" | "medium" | "large";
+    const mapSize = (sizeSelect.value || "small") as "small" | "medium" | "large" | "huge" | "epic";
     await opts.onCreate({
       name,
       seed,

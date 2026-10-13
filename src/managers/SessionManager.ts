@@ -81,7 +81,7 @@ export class SessionManager {
     return { savedAt };
   }
 
-  async createGame(name: string, seed: number, heroQ: number, heroR: number, enemyPositions: { q: number; r: number }[], mapSize?: "small" | "medium" | "large", humanSeatCount?: number, enemySlots: number = 0, seatFactions?: FactionId[]): Promise<Game> {
+  async createGame(name: string, seed: number, heroQ: number, heroR: number, enemyPositions: { q: number; r: number }[], mapSize?: "small" | "medium" | "large" | "huge" | "epic", humanSeatCount?: number, enemySlots: number = 0, seatFactions?: FactionId[]): Promise<Game> {
     return await api.createGame(name, seed, heroQ, heroR, enemyPositions, mapSize, humanSeatCount, enemySlots, seatFactions);
   }
 

@@ -401,7 +401,7 @@ router.post("/games", async (req, res) => {
       res.status(400).json({ error: "name required" });
       return;
     }
-    const storedMapSize = ["small", "medium", "large"].includes(mapSize) ? mapSize : "small";
+    const storedMapSize = ["small", "medium", "large", "huge", "epic"].includes(mapSize) ? mapSize : "small";
     console.log(`[api] POST /games name=${name} hero=(${hero_q},${hero_r}) mapSize=${storedMapSize}`);
     const map = new GameMap(seed, storedMapSize as MapSize);
     const topHumanSlots = Number.isInteger(humanSlots) ? (humanSlots as number) : null;
@@ -629,7 +629,7 @@ router.get("/games/:name/tiles", async (req, res) => {
     [gameRow.id]
   );
   if (Number(count.rows[0].count) === 0) {
-    const fallbackSize: MapSize = ["small", "medium", "large"].includes(gameRow.map_size)
+    const fallbackSize: MapSize = ["small", "medium", "large", "huge", "epic"].includes(gameRow.map_size)
       ? (gameRow.map_size as MapSize)
       : "small";
     await withTransaction((client) =>
