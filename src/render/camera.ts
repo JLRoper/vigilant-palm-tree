@@ -34,6 +34,29 @@ export class Camera {
       dpr * this.y
     );
   }
+
+  getVisibleAxialBounds(
+    viewportW: number,
+    viewportH: number,
+    mapWidth: number,
+    mapHeight: number,
+    marginHexes = 2,
+  ): { qMin: number; qMax: number; rMin: number; rMax: number } {
+    const corners = getViewportAxialCorners(this, viewportW, viewportH);
+    let minQ = Infinity, maxQ = -Infinity, minR = Infinity, maxR = -Infinity;
+    for (const c of corners) {
+      if (c.q < minQ) minQ = c.q;
+      if (c.q > maxQ) maxQ = c.q;
+      if (c.r < minR) minR = c.r;
+      if (c.r > maxR) maxR = c.r;
+    }
+    return {
+      qMin: Math.max(0, Math.floor(minQ) - marginHexes),
+      qMax: Math.min(mapWidth - 1, Math.ceil(maxQ) + marginHexes),
+      rMin: Math.max(0, Math.floor(minR) - marginHexes),
+      rMax: Math.min(mapHeight - 1, Math.ceil(maxR) + marginHexes),
+    };
+  }
 }
 
 // The four screen corners of the camera's visible viewport, inverse-projected

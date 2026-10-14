@@ -1,8 +1,8 @@
 # Sprite Pipelines — Deep Dive (Usage + Creation)
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-14 -->
 
-**Status:** Maintained as-built deep dive, updated 2026-10-11. It maps sprite
+**Status:** Maintained as-built deep dive, updated 2026-10-14. It maps sprite
 assets from creation tools to rendered pixels and tracks findings F1–F13 with
 their current resolution status. Code and `npm run validate-assets` are the
 source of truth.

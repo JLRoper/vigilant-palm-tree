@@ -8,9 +8,10 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 
 ## Grid
 
-- **24 × 18 hex grid**, axial coordinates `(q, r)`.
+- **Configurable hex grid** (`MapSize`: `small` 24×18, `medium` 36×27, `large` 48×36, `huge` 72×54, `epic` 120×90; default `small` 24×18), axial coordinates `(q, r)`.
 - Hex size = 32 logical px.
 - Pointy-top orientation, flat-top stack.
+- `GameMap.placedResourceTiles` caches the sparse array of placed resource deposits alongside the indexed `resourceTiles` lookup array.
 
 ## Terrain types
 

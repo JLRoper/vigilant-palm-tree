@@ -32,6 +32,7 @@ export class GameMap {
   height = 18;
   tiles: Terrain[] = [];
   resourceTiles: (ResourceTile | undefined)[] = [];
+  placedResourceTiles: readonly ResourceTile[] = [];
 
   constructor(seed = 1, mapSize?: MapSize) {
     if (mapSize && MAP_SIZES[mapSize]) {
@@ -44,6 +45,7 @@ export class GameMap {
     }
     const resourceRng = mulberry32(((seed ^ 0x72657375) >>> 0));
     const placed = placeResourceTiles(this, resourceRng);
+    this.placedResourceTiles = placed;
     this.resourceTiles = new Array<ResourceTile | undefined>(this.width * this.height);
     for (const t of placed) {
       this.resourceTiles[this.index(t.q, t.r)] = t;
@@ -91,13 +93,17 @@ export class GameMap {
     map.height = height;
     map.tiles = new Array<Terrain>(width * height);
     map.resourceTiles = new Array<ResourceTile | undefined>(width * height);
+    const placed: ResourceTile[] = [];
     for (const row of rows) {
       const idx = map.index(row.q, row.r);
       map.tiles[idx] = row.terrain;
       if (row.resource) {
-        map.resourceTiles[idx] = { q: row.q, r: row.r, resource: row.resource as any };
+        const rt: ResourceTile = { q: row.q, r: row.r, resource: row.resource as any };
+        map.resourceTiles[idx] = rt;
+        placed.push(rt);
       }
     }
+    map.placedResourceTiles = placed;
     return map;
   }
 }

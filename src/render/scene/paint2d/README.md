@@ -1,6 +1,6 @@
 # `paint2d/` — Current Canvas2D Painter
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-14 -->
 
 `paintScene(ctx, nodes, deps, frame?)` consumes the `SceneNode[]` union produced by `src/render/scene/sceneBuilder/`. It is the single Canvas2D painter for the adventure map, city view, and battle arena. Per-kind city-building painting lives in `index.ts`; there are no separate style-leaf painters.
 

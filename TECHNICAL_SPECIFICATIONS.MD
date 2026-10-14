@@ -1,6 +1,6 @@
 # Technical Specifications — heroes-js
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-14 -->
 
 A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. This document captures the **tech stack** as it currently exists in the repository. Game design documentation lives under [`docs/`](./docs/README.md); the render module has its own authoritative spec at [`src/render/docs/technical-spec.md`](./src/render/docs/technical-spec.md).
 

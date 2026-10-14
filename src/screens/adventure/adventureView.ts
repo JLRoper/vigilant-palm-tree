@@ -370,7 +370,6 @@ export class AdventureView {
         this.hover = null;
         this.updatePath();
         this.opts.onHudUpdate();
-        this.opts.onRedraw();
       }
       return;
     }
@@ -407,7 +406,6 @@ export class AdventureView {
         this.hover = null;
         this.updatePath();
         this.opts.onHudUpdate();
-        this.opts.onRedraw();
       }
       return;
     }
@@ -434,7 +432,6 @@ export class AdventureView {
     this.hover = nextHover;
     this.updatePath();
     this.opts.onHudUpdate();
-    this.opts.onRedraw();
   }
 
   private updatePath(): void {
@@ -590,7 +587,6 @@ export class AdventureView {
               this.opts.setCharterMode?.(false);
               this.opts.onStateChanged?.();
               this.opts.onHudUpdate();
-              this.opts.onRedraw();
             } else {
               showToast("Charter failed — requirements not met", "error");
             }
@@ -628,7 +624,6 @@ export class AdventureView {
         : ""
       : "requestMove rejected";
     this.opts.onHudUpdate();
-    this.opts.onRedraw();
   }
 
   private onWheel(e: WheelEvent): void {

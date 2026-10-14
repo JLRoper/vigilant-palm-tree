@@ -1,6 +1,6 @@
 # Settlements
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-14 -->
 
 The player's claim on the world. Settlements come in two forms: **initial castles** (pre-placed at game start via `castlePlacement`) and **charter-founded settlements** (created by heroes via expedition).
 

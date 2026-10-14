@@ -1,6 +1,6 @@
 # Heroes
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-14 -->
 
 The actors on the map. Heroes move tile-to-tile, claim [settlements](./settlements.md), lead armies, and can found new settlements via charter expeditions.
 

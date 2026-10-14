@@ -2,7 +2,7 @@
 
 **Status:** Historical executed layout plan. The target tree and file moves below describe the 2026-07-19 plan, not the current `src/` map. For current modules use [`module-documentation-and-relationships.md`](./module-documentation-and-relationships.md); the render implementation is maintained in [`../src/render/docs/technical-spec.md`](../src/render/docs/technical-spec.md).
 
-**Current status update (2026-10-11):** Server-side AI Phase 3 watchdog/pool hardening and B3 AI chartering are implemented. The target tree below remains historical; current screens live under `src/screens/` and shared rules under `packages/engine/`. Original local plan archives are collected under the gitignored `.plans/` directory.
+**Current status update (2026-10-14):** Server-side AI Phase 3 watchdog/pool hardening, B3 AI chartering, `huge` (72×54) and `epic` (120×90) map sizes, and Tier 0 large-map rendering optimizations are implemented. The target tree below remains historical; current screens live under `src/screens/` and shared rules under `packages/engine/`. Original local plan archives are collected under the gitignored `.plans/` directory.
 
 ## Context
 
@@ -581,6 +581,17 @@ The Vite client build was code-split: one ~631 KiB entry became 18 JS chunks wit
 | `src/screens/shared/toolbar.ts` | Test Battle opens via `void openView("testBattleSetup")` instead of a static import |
 
 Behavior notes: the registry convention is unchanged on both paths — a lazy module still self-registers when its loader fires, and `openView` launches it through the same registry `registerView` populates (the call sites migrated from the former sync `launchView` to `openView`; the Test Battle gear item moved from a static import to `openView`). developerSettingsMenu/networkMap remain in production bundles — they are lazily loaded, not DEV-gated. No runtime behavior changed: every surface still opens on the same user action, one tick later.
+
+### Larger map sizes & Tier 0 large-map performance rescue (2026-10-14)
+
+`MapSize` (`packages/engine/src/map/gameMap.ts`) expanded with `huge` (`72×54`, 3,888 hexes) and `epic` (`120×90`, 10,800 hexes) alongside `small` (`24×18`), `medium` (`36×27`), and `large` (`48×36`), wired through the New Game / LAN lobby / Settings map-size selectors and server `POST /games` validation. To keep frame times within the 60 FPS budget on `huge` and `epic` maps, Tier 0 landed three rendering/scheduling optimizations:
+
+| Module | Purpose |
+|---|---|
+| `src/render/minimap.ts` | Offscreen static layer cache (`staticLayerCache`, keyed by map size, box geometry, DPR, `minimapCamera` zoom/pan/rotation, and order-independent `computeVisionHash(visible)`) so terrain, fog/mist, and sparse `map.placedResourceTiles` dots render once per vision/camera change and blit via `ctx.drawImage` on steady frames; `drawMistCell` adds `MIST_GRADIENT_MIN_CELL_PX = 4` LOD cutoff (deterministic single-rect fill on sub-4px cells, preserving the dual-gradient shader on `small`/`medium`/`large`) |
+| `packages/engine/src/map/gameMap.ts` | `GameMap.placedResourceTiles: readonly ResourceTile[]` populated in both `new GameMap()` and `GameMap.fromTiles()` so resource-icon and minimap loops iterate only placed deposits instead of scanning all $W \times H$ cells |
+| `src/render/camera.ts` + `src/render/renderer.ts` + `src/render/scene/sceneBuilder/adventureScene.ts` + `src/render/scene/paint2d/index.ts` | `Camera.getVisibleAxialBounds(..., marginHexes = 2)` passed as `AdventureSceneInput.viewportBounds` to frustum-cull `terrainHex`, `terrainDecoration`, `fogHex`, `resourceIcon`, and `validCharterHex` nodes to the visible camera window; `terrainDecoration` nodes are omitted for no-op `grass`/`dirt` tiles (`paintTerrainDecoration` also early-returns) |
+| `src/screens/adventure/adventureView.ts` + `src/managers/GameEngine.ts` | Removed 5 duplicate `onRedraw()` calls immediately following `onHudUpdate()`, added `drawnSinceLastLoop` coalescing in `GameEngine.fullFrame()` / `loop(now)`, and skipped the hidden adventure draw in `GameEngine.draw()` when `CityView` is open with `parallaxEnabled === false` |
 
 ## See also
 

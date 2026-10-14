@@ -15,6 +15,7 @@ export type { MinimapGeometry } from "./renderTypes";
 const MINIMAP_WIDTH = 180;
 const MINIMAP_PAD = 10;
 const HIT_PAD = 4;
+const MIST_GRADIENT_MIN_CELL_PX = 4;
 const VISION_EDGE_DIRS = [
   { q: 1, r: 0 },
   { q: 1, r: -1 },
@@ -23,6 +24,29 @@ const VISION_EDGE_DIRS = [
   { q: -1, r: 1 },
   { q: 0, r: 1 },
 ];
+
+interface MinimapLayerCache {
+  canvas: HTMLCanvasElement;
+  map: GameMap;
+  key: string;
+}
+
+let staticLayerCache: MinimapLayerCache | null = null;
+
+function computeVisionHash(visible: Set<string>): string {
+  let xor = 0;
+  let sum = 0;
+  for (const key of visible) {
+    let h = 2166136261;
+    for (let i = 0; i < key.length; i++) {
+      h ^= key.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    xor ^= h;
+    sum = (sum + (h >>> 0)) | 0;
+  }
+  return `${visible.size}:${xor >>> 0}:${sum >>> 0}`;
+}
 
 interface MinimapRenderOptions {
   viewPlayerId: number;
@@ -155,6 +179,15 @@ export function drawMistCell(
   r: number,
   opacity: number,
 ): void {
+  if (size < MIST_GRADIENT_MIN_CELL_PX) {
+    const seed = decorationSeed(q, r);
+    const phase = seed - Math.floor(seed);
+    const pulse = (Math.sin(phase * 2.2 + q * 0.9 + r * 1.3) + 1) * 0.5;
+    const alpha = Math.min(1, opacity * (0.42 + pulse * 0.14));
+    ctx.fillStyle = `rgba(128, 146, 162, ${alpha.toFixed(3)})`;
+    ctx.fillRect(x, y, size, size);
+    return;
+  }
   const seed = decorationSeed(q, r);
   const phase = seed - Math.floor(seed);
   const driftA = phase * 24;
@@ -193,37 +226,27 @@ export function drawMistCell(
   ctx.fillRect(x, y, size, size);
 }
 
-export function drawMinimap(
-  ctx: CanvasRenderingContext2D,
+function renderStaticMinimapLayer(
+  targetCtx: CanvasRenderingContext2D,
   map: GameMap,
-  camera: Camera,
   minimapCamera: MinimapCamera,
-  heroes: Hero[],
-  path: Axial[],
-  opts: MinimapRenderOptions,
+  geo: MinimapGeometry,
+  boxX: number,
+  boxY: number,
+  boxW: number,
+  boxH: number,
+  cellSize: number,
+  half: number,
   visible: Set<string>,
 ): void {
-  const geo = getMinimapGeometry(map);
-  const boxX = geo.x0 - 4;
-  const boxY = geo.y0 - 4;
-  const boxW = geo.w + 8;
-  const boxH = geo.h + 8;
+  targetCtx.fillStyle = "rgba(0,0,0,0.6)";
+  targetCtx.fillRect(boxX, boxY, boxW, boxH);
 
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(boxX, boxY, boxW, boxH);
-  ctx.clip();
+  targetCtx.save();
+  targetCtx.translate(geo.centerX, geo.centerY);
+  targetCtx.rotate(minimapCamera.rotation);
+  targetCtx.translate(-geo.centerX, -geo.centerY);
 
-  ctx.fillStyle = "rgba(0,0,0,0.6)";
-  ctx.fillRect(boxX, boxY, boxW, boxH);
-
-  ctx.save();
-  ctx.translate(geo.centerX, geo.centerY);
-  ctx.rotate(minimapCamera.rotation);
-  ctx.translate(-geo.centerX, -geo.centerY);
-
-  const cellSize = geo.baseScale * minimapCamera.zoom;
-  const half = cellSize / 2;
   const cullMargin = cellSize + 24;
 
   for (let r = 0; r < map.height; r++) {
@@ -244,29 +267,104 @@ export function drawMinimap(
       const canSee = isVisible(visible, q, r);
       const edgeOfVision = canSee && isVisionEdge(visible, q, r);
 
-      ctx.fillStyle = canSee ? TERRAIN_COLORS[t].fill : "rgba(12,18,24,0.92)";
-      ctx.fillRect(cellX, cellY, cellSize + 0.5, cellSize + 0.5);
+      targetCtx.fillStyle = canSee ? TERRAIN_COLORS[t].fill : "rgba(12,18,24,0.92)";
+      targetCtx.fillRect(cellX, cellY, cellSize + 0.5, cellSize + 0.5);
 
       if (!canSee) {
-        drawMistCell(ctx, cellX, cellY, cellSize + 0.5, q, r, 1.22);
+        drawMistCell(targetCtx, cellX, cellY, cellSize + 0.5, q, r, 1.22);
       } else if (edgeOfVision) {
-        drawMistCell(ctx, cellX, cellY, cellSize + 0.5, q, r, 0.14);
+        drawMistCell(targetCtx, cellX, cellY, cellSize + 0.5, q, r, 0.14);
       }
     }
   }
 
-  ctx.fillStyle = "#ffa500";
-  for (let r = 0; r < map.height; r++) {
-    for (let q = 0; q < map.width; q++) {
-      const t = map.resourceTileAt(q, r);
-      if (!t) continue;
-      if (!isVisible(visible, q, r)) continue;
-      const { x, y } = minimapCamera.worldToScreen(q + 0.28, r - 0.28, geo);
-      ctx.beginPath();
-      ctx.arc(x, y, cellSize * 0.22, 0, Math.PI * 2);
-      ctx.fill();
+  targetCtx.fillStyle = "#ffa500";
+  if (map.placedResourceTiles) {
+    for (const t of map.placedResourceTiles) {
+      if (!isVisible(visible, t.q, t.r)) continue;
+      const { x, y } = minimapCamera.worldToScreen(t.q + 0.28, t.r - 0.28, geo);
+      targetCtx.beginPath();
+      targetCtx.arc(x, y, cellSize * 0.22, 0, Math.PI * 2);
+      targetCtx.fill();
+    }
+  } else {
+    for (let r = 0; r < map.height; r++) {
+      for (let q = 0; q < map.width; q++) {
+        const t = map.resourceTileAt(q, r);
+        if (!t) continue;
+        if (!isVisible(visible, q, r)) continue;
+        const { x, y } = minimapCamera.worldToScreen(q + 0.28, r - 0.28, geo);
+        targetCtx.beginPath();
+        targetCtx.arc(x, y, cellSize * 0.22, 0, Math.PI * 2);
+        targetCtx.fill();
+      }
     }
   }
+
+  targetCtx.restore();
+}
+
+export function drawMinimap(
+  ctx: CanvasRenderingContext2D,
+  map: GameMap,
+  camera: Camera,
+  minimapCamera: MinimapCamera,
+  heroes: Hero[],
+  path: Axial[],
+  opts: MinimapRenderOptions,
+  visible: Set<string>,
+): void {
+  const geo = getMinimapGeometry(map);
+  const boxX = geo.x0 - 4;
+  const boxY = geo.y0 - 4;
+  const boxW = geo.w + 8;
+  const boxH = geo.h + 8;
+  const cellSize = geo.baseScale * minimapCamera.zoom;
+  const half = cellSize / 2;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(boxX, boxY, boxW, boxH);
+  ctx.clip();
+
+  const dpr = camera.dpr || 1;
+  const pixelW = Math.max(1, Math.ceil(boxW * dpr));
+  const pixelH = Math.max(1, Math.ceil(boxH * dpr));
+  let usedCache = false;
+
+  if (typeof document !== "undefined") {
+    const cacheKey = `${map.width}x${map.height}:${boxX},${boxY},${boxW}x${boxH}:${dpr}:${minimapCamera.zoom}:${minimapCamera.panQ}:${minimapCamera.panR}:${minimapCamera.rotation}:${computeVisionHash(visible)}`;
+    if (!staticLayerCache || staticLayerCache.map !== map || staticLayerCache.key !== cacheKey) {
+      const canvas = staticLayerCache?.canvas ?? document.createElement("canvas");
+      if (canvas.width !== pixelW || canvas.height !== pixelH) {
+        canvas.width = pixelW;
+        canvas.height = pixelH;
+      }
+      const offCtx = canvas.getContext("2d");
+      if (offCtx) {
+        offCtx.setTransform(1, 0, 0, 1, 0, 0);
+        offCtx.clearRect(0, 0, pixelW, pixelH);
+        offCtx.setTransform(dpr, 0, 0, dpr, -boxX * dpr, -boxY * dpr);
+        renderStaticMinimapLayer(offCtx, map, minimapCamera, geo, boxX, boxY, boxW, boxH, cellSize, half, visible);
+        staticLayerCache = { canvas, map, key: cacheKey };
+      } else {
+        staticLayerCache = null;
+      }
+    }
+    if (staticLayerCache) {
+      ctx.drawImage(staticLayerCache.canvas, 0, 0, pixelW, pixelH, boxX, boxY, boxW, boxH);
+      usedCache = true;
+    }
+  }
+
+  if (!usedCache) {
+    renderStaticMinimapLayer(ctx, map, minimapCamera, geo, boxX, boxY, boxW, boxH, cellSize, half, visible);
+  }
+
+  ctx.save();
+  ctx.translate(geo.centerX, geo.centerY);
+  ctx.rotate(minimapCamera.rotation);
+  ctx.translate(-geo.centerX, -geo.centerY);
 
   drawMinimapPath(ctx, path, minimapCamera, geo);
 

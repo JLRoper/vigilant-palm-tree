@@ -1,8 +1,8 @@
 # Current Module Map
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-14 -->
 
-This is the current code map, verified against the repository on 2026-10-11. The executed layout plan in [`architecture.md`](./architecture.md) is historical. Shared boundary types live in `packages/contracts/`, game rules/economy in `packages/engine/`, and browser UI in `src/screens/`.
+This is the current code map, verified against the repository on 2026-10-14. The executed layout plan in [`architecture.md`](./architecture.md) is historical. Shared boundary types live in `packages/contracts/`, game rules/economy in `packages/engine/`, and browser UI in `src/screens/`.
 
 ## Data Flow
 
@@ -53,9 +53,9 @@ The server does not depend on `src/screens/` or `src/render/`. Keep server behav
 | `src/state/` | Client-local state/controller facade: the persisted settings singleton (`settings.ts`, e.g. `toolbarStyle` — default `modern`, unknown values normalize to `modern`) and the toolbar theme token registry (`toolbarThemes.ts` — palette + shape tokens per theme). Reducers and authoritative game rules are imported from `@heroes/engine`. |
 | `src/screens/` | DOM UI and input: home, adventure, combat, settlement/city, logistics, multiplayer, shared menus/panels, and debug screens. The toolbar theme applier `src/screens/shared/toolbarTheme.ts` writes the `--tb-*` tokens onto the document root and reacts to settings changes; the Visual "Toolbar style" selector lives in `src/screens/home/settingsMenu.ts`. View registration is through `src/screens/shared/viewLauncher.ts`. |
 | `src/io/` | Typed REST/auth client, command sender, multiplayer SSE plus poll backstop, and local game index. |
-| `src/render/scene/sceneBuilder/` | Pure state-to-`SceneNode[]` builders for adventure, city, and battle views. |
+| `src/render/scene/sceneBuilder/` | Pure state-to-`SceneNode[]` builders for adventure, city, and battle views (`adventureScene.ts` supports `viewportBounds` frustum culling, omits no-op `grass`/`dirt` decoration nodes, and iterates sparse `GameMap.placedResourceTiles`). |
 | `src/render/scene/paint2d/` | Canvas2D scene painter. `index.ts` contains per-kind drawing; `deps.ts`, `colors.ts`, and `geometry.ts` define the painter seam and helpers. |
-| `src/render/paint2dDefaults.ts`, `src/render/skybox.ts` | Browser/Vite asset wiring, settings adapters, sprite resolvers, and skybox asset/cache ownership. These stay outside the pure painter package. |
+| `src/render/paint2dDefaults.ts`, `src/render/skybox.ts`, `src/render/minimap.ts`, `src/render/camera.ts` | Browser/Vite asset wiring, settings adapters, sprite resolvers, skybox asset/cache ownership, offscreen-cached minimap rendering (`staticLayerCache` + `computeVisionHash` + `MIST_GRADIENT_MIN_CELL_PX` LOD), and `Camera.getVisibleAxialBounds` frustum math. These stay outside the pure painter package. |
 | `src/render/cityRenderer.ts` | Thin city-view wrapper around `paintScene`; it is not the scene builder or a building-art library. |
 | `src/core/`, `src/entities/`, `src/map/`, `src/data/`, `src/players/`, `src/debug/` | Client math/events, visual entities, map adapters, cached catalogs/assets, seat identity, and developer diagnostics. |
 | `src/ai/`, `src/systems/`, `src/combat/` | `src/ai/aiBrain.ts` is a compatibility re-export of engine AI; `src/systems/movement.ts` is the client arrival hook; `src/combat/testArmies.ts` supports the developer battle sandbox. |

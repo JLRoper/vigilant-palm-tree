@@ -340,6 +340,10 @@ export function paintTerrainHex(ctx: CanvasRenderingContext2D, node: TerrainHexN
 }
 
 export function paintTerrainDecoration(ctx: CanvasRenderingContext2D, node: TerrainDecorationNode, deps: Paint2DDep): void {
+  if (node.terrain === "grass" || node.terrain === "dirt") {
+    void deps;
+    return;
+  }
   const { x: cx, y: cy } = node.world;
   const seed = decorationSeed(node.q, node.r) - Math.floor(decorationSeed(node.q, node.r));
   const ox = (seed - 0.5) * 14;
