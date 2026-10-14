@@ -52,8 +52,10 @@ export class GameSessionManager {
   private inferMapSize(map?: GameMap): MapSize {
     const width = map?.width ?? this.getGameMap().width;
     const height = map?.height ?? this.getGameMap().height;
-    if (width === MAP_SIZES.large.width && height === MAP_SIZES.large.height) return "large";
-    if (width === MAP_SIZES.medium.width && height === MAP_SIZES.medium.height) return "medium";
+    for (const size of Object.keys(MAP_SIZES) as MapSize[]) {
+      const dimensions = MAP_SIZES[size];
+      if (width === dimensions.width && height === dimensions.height) return size;
+    }
     return "small";
   }
 
