@@ -14,6 +14,7 @@ import { Castle } from "../../entities/settlement";
 export class EntityMirror {
   private heroes = new Map<string, Hero>();
   private castles = new Map<string, Castle>();
+  private liveReferencesBound = false;
 
   syncWith(
     heroes: readonly Hero[] | Record<string, Hero>,
@@ -21,6 +22,7 @@ export class EntityMirror {
   ): void {
     this.adopt(this.heroes, Object.values(heroes));
     this.adopt(this.castles, Object.values(castles));
+    this.liveReferencesBound = true;
   }
 
   private adopt<T extends { id: string }>(target: Map<string, T>, collection: T[]): void {
@@ -31,6 +33,7 @@ export class EntityMirror {
   }
 
   bootstrap(state: GameState): void {
+    if (this.liveReferencesBound) return;
     this.heroes = new Map(
       Object.entries(state.heroes).map(([id, h]) => [id, Hero.fromGameState(h)]),
     );

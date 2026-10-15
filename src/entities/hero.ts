@@ -198,6 +198,19 @@ export class Hero {
     this.heroSpell = s.heroSpell ?? null;
     if (this.moving) return;
     if (this.tile.q === s.q && this.tile.r === s.r) return;
+    if (
+      s.previousQ != null &&
+      s.previousR != null &&
+      this.tile.q === s.previousQ &&
+      this.tile.r === s.previousR &&
+      (s.q !== s.previousQ || s.r !== s.previousR)
+    ) {
+      this.startMoveToPath([
+        { q: s.previousQ, r: s.previousR },
+        { q: s.q, r: s.r },
+      ]);
+      return;
+    }
     const start: Axial = { ...this.tile };
     this.tile = { q: s.q, r: s.r };
     this.fromTile = { ...start };

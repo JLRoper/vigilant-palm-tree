@@ -2,6 +2,9 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import type { EngineEvent, HeroState, Player, SettlementState } from "@heroes/contracts";
 import { makeHero, makePlayer, makeSettlement } from "../charter/_helpers";
+import { axialToPixel } from "../../src/core/hex";
+import { Hero } from "../../src/entities/hero";
+import { Castle } from "../../src/entities/settlement";
 
 // multiplayerSync reaches for window.setInterval/clearInterval at start().
 // Stubbed to a no-op scheduler so the tests drive pollOnce() by hand instead
@@ -157,6 +160,57 @@ test("the first poll hydrates full state once and seeds the cursor from the same
   assert.equal(sync.getCursor(), 42);
   assert.equal(sync.getState()?.heroes.h0.q, 2);
   assert.equal(sync.getMirror().getHeroes().length, 2, "the mirror is bootstrapped from that hydrate");
+  sync.stop();
+});
+
+test("the unseeded initial resync preserves live entities through the first movement tick", async () => {
+  const name = "g-first-move";
+  const server: FakeServer = { game: makeGameRow(name, { lastEventId: 1 }), events: [], calls: [] };
+  installFetch(server);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const state = hydrateGameState(server.game);
+  const liveHeroes = Object.values(state.heroes).map((hero) => Hero.fromGameState(hero));
+  const liveSettlements = Object.values(state.settlements).map((settlement) => Castle.fromGameState(settlement));
+  const liveHero = liveHeroes.find((hero) => hero.id === "h0");
+  const liveCastle = liveSettlements.find((castle) => castle.id === "s0");
+  assert.ok(liveHero);
+  assert.ok(liveCastle);
+
+  const sync = new MultiplayerSync();
+  const initialResync = new Promise<void>((resolve) => {
+    bus.on("mp:resynced", (ev: { gameName: string; reason: string }) => {
+      if (ev.gameName === name && ev.reason === "initial") resolve();
+    });
+  });
+  sync.start(name, { state });
+  const mirror = sync.getMirror();
+  mirror.syncWith(liveHeroes, liveSettlements);
+
+  await initialResync;
+
+  assert.strictEqual(mirror.getHero("h0"), liveHero, "the full resync keeps the manager-owned Hero");
+  assert.strictEqual(mirror.getSettlement("s0"), liveCastle, "the full resync keeps the manager-owned Castle");
+
+  const from = { q: liveHero.tile.q, r: liveHero.tile.r };
+  const to = { q: from.q + 1, r: from.r };
+  const originWorld = axialToPixel(from.q, from.r);
+  const targetWorld = axialToPixel(to.q, to.r);
+  liveHero.startMoveToPath([from, to]);
+  liveHero.update(liveHero.moveDurationMs / 4);
+
+  const visibleHero = mirror.getHero("h0")!;
+  const base = axialToPixel(visibleHero.tile.q, visibleHero.tile.r);
+  const renderedWorld = {
+    x: base.x + visibleHero.pixelOffset.x,
+    y: base.y + visibleHero.pixelOffset.y,
+  };
+  assert.strictEqual(visibleHero, liveHero);
+  assert.equal(visibleHero.moving, true);
+  assert.deepEqual(visibleHero.tile, from, "the first tween tick remains anchored to its origin tile");
+  assert.ok(visibleHero.pixelOffset.x > 0, "the first tween tick advances the renderer offset");
+  assert.ok(renderedWorld.x > originWorld.x && renderedWorld.x < targetWorld.x);
+  assert.equal(renderedWorld.y, originWorld.y);
+  assert.equal(server.events.length, 0, "no End Turn event is needed for the first step to render");
   sync.stop();
 });
 
