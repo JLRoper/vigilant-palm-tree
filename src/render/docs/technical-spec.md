@@ -1,6 +1,6 @@
 # Render Module — Technical Specification
 
-<!-- docs:verified 2026-10-14 -->
+<!-- docs:verified 2026-10-15 -->
 
 ## Overview
 
@@ -448,11 +448,13 @@ In the live paint2d scene path (§7), hero sprite resolution carries an optional
 ```typescript
 const VISION_RANGE = 4;
 function computeVision(heroes, castles, viewPlayerId, range?): Set<string>
+function computeVisionFromState(state, viewPlayerId, range?): Set<string>
 function isVisible(visible, q, r): boolean
 ```
 
 - **Heroes** contribute a visibility ring of `VISION_RANGE` (4 hexes) around their position
 - **Castles** contribute a visibility ring based on `controlRange(level)` (which increases with settlement level)
+- `computeVisionFromState(state, viewPlayerId, range?)` computes the same `"q,r"` visibility set directly from `GameState.heroes` and `GameState.settlements` for input-path callers (`AdventureView.updatePath()` and `AdventureView.onClick()`) that filter `occupiedHexes` and enemy targets without needing visual `Hero`/`Castle` entity instances
 - Returns a `Set<string>` of `"q,r"` keys representing visible hexes
 
 In the renderer, non-visible hexes are covered with a semi-transparent fog overlay:

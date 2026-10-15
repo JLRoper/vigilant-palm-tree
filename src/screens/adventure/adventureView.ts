@@ -3,7 +3,8 @@ import { Camera } from "../../render/camera";
 import { GameMap } from "../../map/gameMap";
 import { MapRenderer } from "../../render/renderer";
 import { Hero } from "../../entities/hero";
-import { findPath } from "../../map/pathfinding";
+import { computePathCost, findPath, NEIGHBOR_DIRS } from "../../map/pathfinding";
+import { computeVisionFromState, isVisible } from "../../render/fog";
 import type { GameState } from "../../state/gameState";
 import type { PlayerId } from "@heroes/contracts";
 import type { TurnController } from "../../state/turnController";
@@ -458,11 +459,46 @@ export class AdventureView {
       return;
     }
 
+    const viewPlayerId = this.opts.getLocalSeat?.() ?? 0;
+    const visible = computeVisionFromState(this.state, viewPlayerId);
     const occupiedHexes = new Set<string>();
+    let hoveredHero: GameState["heroes"][string] | undefined;
     for (const [id, hero] of Object.entries(this.state.heroes)) {
-      if (id !== previewHeroId) {
-        occupiedHexes.add(`${hero.q},${hero.r}`);
+      if (id === previewHeroId) continue;
+      if (hero.ownerId !== viewPlayerId && !isVisible(visible, hero.q, hero.r)) continue;
+      occupiedHexes.add(`${hero.q},${hero.r}`);
+      if (hero.q === this.hover.q && hero.r === this.hover.r) {
+        hoveredHero = hero;
       }
+    }
+
+    if (hoveredHero) {
+      if (hoveredHero.ownerId === viewPlayerId) {
+        this.setPath([]);
+        return;
+      }
+      let bestPath: Axial[] | null = null;
+      let bestCost = Infinity;
+      for (const dir of NEIGHBOR_DIRS) {
+        const nq = hoveredHero.q + dir.q;
+        const nr = hoveredHero.r + dir.r;
+        if (!this.opts.map.isPassable(nq, nr)) continue;
+        if (occupiedHexes.has(`${nq},${nr}`)) continue;
+        if (nq === start.q && nr === start.r) {
+          bestPath = [];
+          bestCost = 0;
+          break;
+        }
+        const path = findPath(this.opts.map, start, { q: nq, r: nr }, occupiedHexes);
+        if (path.length === 0) continue;
+        const cost = computePathCost(this.opts.map, [start, ...path]);
+        if (cost < bestCost) {
+          bestCost = cost;
+          bestPath = path;
+        }
+      }
+      this.setPath(bestPath ?? []);
+      return;
     }
 
     this.setPath(findPath(this.opts.map, start, this.hover, occupiedHexes));
@@ -534,6 +570,7 @@ export class AdventureView {
     this.lastClickDebug.hover = t;
     if (t) this.setInspectedTile(t);
 
+    const localSeat = this.opts.getLocalSeat?.() ?? null;
     const intent = resolveAdventureClick({
       map: this.opts.map,
       heroes: this.opts.heroes(),
@@ -543,7 +580,8 @@ export class AdventureView {
       isPlayerTurn: this.isPlayerTurn(),
       charterMode: this.opts.getCharterMode?.() ?? false,
       validCharterHexes: this.opts.getValidCharterHexes?.() ?? null,
-      localSeat: this.opts.getLocalSeat?.() ?? null,
+      localSeat,
+      visibleHexes: computeVisionFromState(this.state, localSeat ?? 0),
     });
     this.applyClickIntent(intent);
   }

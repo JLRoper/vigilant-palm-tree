@@ -2,7 +2,7 @@
 
 **Status:** Historical executed layout plan. The target tree and file moves below describe the 2026-07-19 plan, not the current `src/` map. For current modules use [`module-documentation-and-relationships.md`](./module-documentation-and-relationships.md); the render implementation is maintained in [`../src/render/docs/technical-spec.md`](../src/render/docs/technical-spec.md).
 
-**Current status update (2026-10-14):** Server-side AI Phase 3 watchdog/pool hardening, B3 AI chartering, `huge` (72×54) and `epic` (120×90) map sizes, and Tier 0 large-map rendering optimizations are implemented. The target tree below remains historical; current screens live under `src/screens/` and shared rules under `packages/engine/`. Original local plan archives are collected under the gitignored `.plans/` directory.
+**Current status update (2026-10-15):** Server-side AI Phase 3 watchdog/pool hardening, B3 AI chartering, `huge` (72×54) and `epic` (120×90) map sizes, Tier 0 large-map rendering optimizations, and Tier 1 binary min-heap A* pathfinding + fog-filtered hover/click path planning are implemented. The target tree below remains historical; current screens live under `src/screens/` and shared rules under `packages/engine/`. Original local plan archives are collected under the gitignored `.plans/` directory.
 
 ## Context
 
@@ -582,9 +582,9 @@ The Vite client build was code-split: one ~631 KiB entry became 18 JS chunks wit
 
 Behavior notes: the registry convention is unchanged on both paths — a lazy module still self-registers when its loader fires, and `openView` launches it through the same registry `registerView` populates (the call sites migrated from the former sync `launchView` to `openView`; the Test Battle gear item moved from a static import to `openView`). developerSettingsMenu/networkMap remain in production bundles — they are lazily loaded, not DEV-gated. No runtime behavior changed: every surface still opens on the same user action, one tick later.
 
-### Larger map sizes & Tier 0 large-map performance rescue (2026-10-14)
+### Larger map sizes & Tier 0/1 large-map performance rescue (2026-10-14/15)
 
-`MapSize` (`packages/engine/src/map/gameMap.ts`) expanded with `huge` (`72×54`, 3,888 hexes) and `epic` (`120×90`, 10,800 hexes) alongside `small` (`24×18`), `medium` (`36×27`), and `large` (`48×36`), wired through the New Game / LAN lobby / Settings map-size selectors and server `POST /games` validation. To keep frame times within the 60 FPS budget on `huge` and `epic` maps, Tier 0 landed three rendering/scheduling optimizations:
+`MapSize` (`packages/engine/src/map/gameMap.ts`) expanded with `huge` (`72×54`, 3,888 hexes) and `epic` (`120×90`, 10,800 hexes) alongside `small` (`24×18`), `medium` (`36×27`), and `large` (`48×36`), wired through the New Game / LAN lobby / Settings map-size selectors and server `POST /games` validation. To keep frame times and hover/click pathfinding within budget on `huge` and `epic` maps, Tier 0 and Tier 1 landed rendering, scheduling, and pathfinding optimizations:
 
 | Module | Purpose |
 |---|---|
@@ -592,6 +592,8 @@ Behavior notes: the registry convention is unchanged on both paths — a lazy mo
 | `packages/engine/src/map/gameMap.ts` | `GameMap.placedResourceTiles: readonly ResourceTile[]` populated in both `new GameMap()` and `GameMap.fromTiles()` so resource-icon and minimap loops iterate only placed deposits instead of scanning all $W \times H$ cells |
 | `src/render/camera.ts` + `src/render/renderer.ts` + `src/render/scene/sceneBuilder/adventureScene.ts` + `src/render/scene/paint2d/index.ts` | `Camera.getVisibleAxialBounds(..., marginHexes = 2)` passed as `AdventureSceneInput.viewportBounds` to frustum-cull `terrainHex`, `terrainDecoration`, `fogHex`, `resourceIcon`, and `validCharterHex` nodes to the visible camera window; `terrainDecoration` nodes are omitted for no-op `grass`/`dirt` tiles (`paintTerrainDecoration` also early-returns) |
 | `src/screens/adventure/adventureView.ts` + `src/managers/GameEngine.ts` | Removed 5 duplicate `onRedraw()` calls immediately following `onHudUpdate()`, added `drawnSinceLastLoop` coalescing in `GameEngine.fullFrame()` / `loop(now)`, and skipped the hidden adventure draw in `GameEngine.draw()` when `CityView` is open with `parallaxEnabled === false` |
+| `packages/engine/src/map/pathfinding.ts` | Tier 1 binary min-heap A* (`findPath`) backed by module-scoped reusable generation-tagged TypedArray buffers (`gScoreBuf`, `fScoreBuf`, `cameFromBuf`, `seenGenBuf`, `closedGenBuf`, `blockedGenBuf`, `pushSeqBuf`, `heapNodesBuf`, `heapPosBuf`), FIFO tie-breaking (`pushSeqBuf`), early blocked-goal guard (`blockedHexes?.has(...)`), and `push`+`reverse` reconstruction (preserving an unbounded fallback for dimension-less test stubs) |
+| `src/render/fog.ts` + `src/screens/adventure/adventureView.ts` + `src/screens/adventure/clickIntent.ts` | `computeVisionFromState(state, viewPlayerId)` filters `occupiedHexes` and enemy targeting in `AdventureView.updatePath()` and `resolveAdventureClick` to fog-visible heroes only (closing the hidden-hero fog leak), and routes enemy-hero hover previews to the lowest-cost passable adjacent attack hex |
 
 ## See also
 

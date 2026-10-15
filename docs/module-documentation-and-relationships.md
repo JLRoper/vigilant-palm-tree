@@ -1,8 +1,8 @@
 # Current Module Map
 
-<!-- docs:verified 2026-10-14 -->
+<!-- docs:verified 2026-10-15 -->
 
-This is the current code map, verified against the repository on 2026-10-14. The executed layout plan in [`architecture.md`](./architecture.md) is historical. Shared boundary types live in `packages/contracts/`, game rules/economy in `packages/engine/`, and browser UI in `src/screens/`.
+This is the current code map, verified against the repository on 2026-10-15. The executed layout plan in [`architecture.md`](./architecture.md) is historical. Shared boundary types live in `packages/contracts/`, game rules/economy in `packages/engine/`, and browser UI in `src/screens/`.
 
 ## Data Flow
 
@@ -28,7 +28,7 @@ Browser client                                      Express API
 | Package | Responsibility |
 |---|---|
 | `packages/contracts/` (`@heroes/contracts`) | Leaf types shared across client/server: game state, ids, resources, buildings, factions, commands, engine events, and telemetry. It imports no engine, client, or server code. |
-| `packages/engine/` (`@heroes/engine`) | Pure game rules: initialization/hydration, movement, chartering, settlement/building/recruitment, resource production/upkeep, trade-route logistics, combat/outcomes, turn progression, event replay, registries, map algorithms, and AI strategy. Depends on contracts only. |
+| `packages/engine/` (`@heroes/engine`) | Pure game rules: initialization/hydration, movement, chartering, settlement/building/recruitment, resource production/upkeep, trade-route logistics, combat/outcomes, turn progression, event replay, registries, map algorithms (`pathfinding.ts` uses a binary min-heap + reusable generation-tagged TypedArray buffers with FIFO tie-breaking and blocked-goal early exit), and AI strategy. Depends on contracts only. |
 
 ## Server (`server/`)
 
@@ -51,7 +51,7 @@ The server does not depend on `src/screens/` or `src/render/`. Keep server behav
 | `src/main.ts` | Bootstrap `GameEngine`, register screens, show the home view, and start the animation loop. |
 | `src/managers/` | App orchestration: `GameEngine`, state/entity synchronization, sessions, view setup, UI, and high-level actions. |
 | `src/state/` | Client-local state/controller facade: the persisted settings singleton (`settings.ts`, e.g. `toolbarStyle` — default `modern`, unknown values normalize to `modern`) and the toolbar theme token registry (`toolbarThemes.ts` — palette + shape tokens per theme). Reducers and authoritative game rules are imported from `@heroes/engine`. |
-| `src/screens/` | DOM UI and input: home, adventure, combat, settlement/city, logistics, multiplayer, shared menus/panels, and debug screens. The toolbar theme applier `src/screens/shared/toolbarTheme.ts` writes the `--tb-*` tokens onto the document root and reacts to settings changes; the Visual "Toolbar style" selector lives in `src/screens/home/settingsMenu.ts`. View registration is through `src/screens/shared/viewLauncher.ts`. |
+| `src/screens/` | DOM UI and input: home, adventure (`adventureView.ts` + `clickIntent.ts` filter `occupiedHexes`/enemy targets by fog visibility via `computeVisionFromState` and preview adjacent attack paths on enemy hover), combat, settlement/city, logistics, multiplayer, shared menus/panels, and debug screens. The toolbar theme applier `src/screens/shared/toolbarTheme.ts` writes the `--tb-*` tokens onto the document root and reacts to settings changes; the Visual "Toolbar style" selector lives in `src/screens/home/settingsMenu.ts`. View registration is through `src/screens/shared/viewLauncher.ts`. |
 | `src/io/` | Typed REST/auth client, command sender, multiplayer SSE plus poll backstop, and local game index. |
 | `src/render/scene/sceneBuilder/` | Pure state-to-`SceneNode[]` builders for adventure, city, and battle views (`adventureScene.ts` supports `viewportBounds` frustum culling, omits no-op `grass`/`dirt` decoration nodes, and iterates sparse `GameMap.placedResourceTiles`). |
 | `src/render/scene/paint2d/` | Canvas2D scene painter. `index.ts` contains per-kind drawing; `deps.ts`, `colors.ts`, and `geometry.ts` define the painter seam and helpers. |

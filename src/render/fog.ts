@@ -1,5 +1,6 @@
 import type { Hero } from "../entities/hero";
 import type { Castle } from "../entities/settlement";
+import type { GameState } from "../state/gameState";
 import { hexDistance, type Axial } from "../core/hex";
 import { controlRange } from "@heroes/engine";
 
@@ -19,6 +20,23 @@ export function computeVision(
   for (const c of castles) {
     if (c.ownerId !== viewPlayerId) continue;
     addRing(visible, c.tile, controlRange(c.level, c.buildings));
+  }
+  return visible;
+}
+
+export function computeVisionFromState(
+  state: GameState,
+  viewPlayerId: number,
+  range: number = VISION_RANGE,
+): Set<string> {
+  const visible = new Set<string>();
+  for (const hero of Object.values(state.heroes)) {
+    if (hero.ownerId !== viewPlayerId) continue;
+    addRing(visible, { q: hero.q, r: hero.r }, range);
+  }
+  for (const s of Object.values(state.settlements)) {
+    if (s.ownerId !== viewPlayerId) continue;
+    addRing(visible, { q: s.q, r: s.r }, controlRange(s.level, s.buildings));
   }
   return visible;
 }
