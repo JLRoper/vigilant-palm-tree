@@ -1,10 +1,13 @@
 import { Axial, axialToPixel } from "../../core/hex";
-import { Camera } from "../../render/camera";
+import { Camera, computeMinZoomForHexWidth } from "../../render/camera";
 import { GameMap } from "../../map/gameMap";
 import { MapRenderer } from "../../render/renderer";
 import { Hero } from "../../entities/hero";
-import { findPath } from "../../map/pathfinding";
+import { computePathCost, findPath, NEIGHBOR_DIRS } from "../../map/pathfinding";
+import { computeVisionFromState, isVisible } from "../../render/fog";
 import type { GameState } from "../../state/gameState";
+import { settings, subscribeSettings } from "../../state/settings";
+import type { PlayerId } from "@heroes/contracts";
 import type { TurnController } from "../../state/turnController";
 import type { PathPreviewLock } from "../../managers/GameStateManager";
 import {
@@ -51,6 +54,7 @@ export interface AdventureViewOptions {
   getValidCharterHexes?: () => Set<string> | null;
   onTileInspect?: (tile: Axial | null) => void;
   isCityOpen?: () => boolean;
+  getLocalSeat?: () => PlayerId | null;
 }
 
 function hoverChanged(a: Axial | null, b: Axial | null): boolean {
@@ -128,6 +132,21 @@ export class AdventureView {
 
   constructor(private opts: AdventureViewOptions) {
     this.attach();
+    let lastMaxZoomOutHexesWide = settings().maxZoomOutHexesWide;
+    subscribeSettings((next) => {
+      if (next.maxZoomOutHexesWide === lastMaxZoomOutHexesWide) return;
+      lastMaxZoomOutHexesWide = next.maxZoomOutHexesWide;
+      const vw = this.opts.canvas.clientWidth || window.innerWidth || 1280;
+      const vh = this.opts.canvas.clientHeight || window.innerHeight || 800;
+      if (this.opts.camera.clampMinZoom(vw / 2, vh / 2, this.getMinCameraZoom())) {
+        this.opts.onRedraw();
+      }
+    });
+  }
+
+  private getMinCameraZoom(): number {
+    const vw = this.opts.canvas.clientWidth || window.innerWidth || 1280;
+    return computeMinZoomForHexWidth(vw, settings().maxZoomOutHexesWide);
   }
 
   private get state(): GameState {
@@ -135,7 +154,7 @@ export class AdventureView {
   }
 
   private isPlayerTurn(): boolean {
-    return this.state.phase.kind === "PLAYER_TURN" && this.state.activePlayerId === 0;
+    return this.state.phase.kind === "PLAYER_TURN" && this.state.activePlayerId === (this.opts.getLocalSeat?.() ?? 0);
   }
 
   setMap(map: GameMap): void {
@@ -368,7 +387,6 @@ export class AdventureView {
         this.hover = null;
         this.updatePath();
         this.opts.onHudUpdate();
-        this.opts.onRedraw();
       }
       return;
     }
@@ -405,7 +423,6 @@ export class AdventureView {
         this.hover = null;
         this.updatePath();
         this.opts.onHudUpdate();
-        this.opts.onRedraw();
       }
       return;
     }
@@ -432,7 +449,6 @@ export class AdventureView {
     this.hover = nextHover;
     this.updatePath();
     this.opts.onHudUpdate();
-    this.opts.onRedraw();
   }
 
   private updatePath(): void {
@@ -459,11 +475,46 @@ export class AdventureView {
       return;
     }
 
+    const viewPlayerId = this.opts.getLocalSeat?.() ?? 0;
+    const visible = computeVisionFromState(this.state, viewPlayerId);
     const occupiedHexes = new Set<string>();
+    let hoveredHero: GameState["heroes"][string] | undefined;
     for (const [id, hero] of Object.entries(this.state.heroes)) {
-      if (id !== previewHeroId) {
-        occupiedHexes.add(`${hero.q},${hero.r}`);
+      if (id === previewHeroId) continue;
+      if (hero.ownerId !== viewPlayerId && !isVisible(visible, hero.q, hero.r)) continue;
+      occupiedHexes.add(`${hero.q},${hero.r}`);
+      if (hero.q === this.hover.q && hero.r === this.hover.r) {
+        hoveredHero = hero;
       }
+    }
+
+    if (hoveredHero) {
+      if (hoveredHero.ownerId === viewPlayerId) {
+        this.setPath([]);
+        return;
+      }
+      let bestPath: Axial[] | null = null;
+      let bestCost = Infinity;
+      for (const dir of NEIGHBOR_DIRS) {
+        const nq = hoveredHero.q + dir.q;
+        const nr = hoveredHero.r + dir.r;
+        if (!this.opts.map.isPassable(nq, nr)) continue;
+        if (occupiedHexes.has(`${nq},${nr}`)) continue;
+        if (nq === start.q && nr === start.r) {
+          bestPath = [];
+          bestCost = 0;
+          break;
+        }
+        const path = findPath(this.opts.map, start, { q: nq, r: nr }, occupiedHexes);
+        if (path.length === 0) continue;
+        const cost = computePathCost(this.opts.map, [start, ...path]);
+        if (cost < bestCost) {
+          bestCost = cost;
+          bestPath = path;
+        }
+      }
+      this.setPath(bestPath ?? []);
+      return;
     }
 
     this.setPath(findPath(this.opts.map, start, this.hover, occupiedHexes));
@@ -535,6 +586,7 @@ export class AdventureView {
     this.lastClickDebug.hover = t;
     if (t) this.setInspectedTile(t);
 
+    const localSeat = this.opts.getLocalSeat?.() ?? null;
     const intent = resolveAdventureClick({
       map: this.opts.map,
       heroes: this.opts.heroes(),
@@ -544,6 +596,8 @@ export class AdventureView {
       isPlayerTurn: this.isPlayerTurn(),
       charterMode: this.opts.getCharterMode?.() ?? false,
       validCharterHexes: this.opts.getValidCharterHexes?.() ?? null,
+      localSeat,
+      visibleHexes: computeVisionFromState(this.state, localSeat ?? 0),
     });
     this.applyClickIntent(intent);
   }
@@ -587,7 +641,6 @@ export class AdventureView {
               this.opts.setCharterMode?.(false);
               this.opts.onStateChanged?.();
               this.opts.onHudUpdate();
-              this.opts.onRedraw();
             } else {
               showToast("Charter failed — requirements not met", "error");
             }
@@ -625,7 +678,6 @@ export class AdventureView {
         : ""
       : "requestMove rejected";
     this.opts.onHudUpdate();
-    this.opts.onRedraw();
   }
 
   private onWheel(e: WheelEvent): void {
@@ -638,7 +690,7 @@ export class AdventureView {
       this.opts.onRedraw();
       return;
     }
-    this.opts.camera.zoomAt(e.clientX, e.clientY, factor);
+    this.opts.camera.zoomAt(e.clientX, e.clientY, factor, this.getMinCameraZoom());
     this.opts.onRedraw();
   }
 

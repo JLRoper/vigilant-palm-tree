@@ -38,6 +38,7 @@ import type { HorseVariant } from "../state/settings";
 import { settings } from "../state/settings";
 import {
   buildingKey,
+  caravanKey,
   castleKey,
   heroDirectionKey,
   heroKey,
@@ -153,11 +154,10 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
       return narrowResolvedSprite(provider.resolve(key));
     },
     resolveSpriteForBuilding(
-      style: string,
       kind: BuildingKind,
       level: number,
     ): ResolvedSprite | undefined {
-      const key = buildingKey(style, kind, level) as SpriteKey;
+      const key = buildingKey("pixel", kind, level) as SpriteKey;
       return narrowResolvedSprite(provider.resolve(key));
     },
     resolveSpriteForCastle(
@@ -169,6 +169,10 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
     },
     resolveSpriteForUnit(unitTypeId: string, pose: UnitArenaPose): ResolvedSprite | undefined {
       return resolveUnit(unitTypeId, pose);
+    },
+    resolveSpriteForCaravan(payloadKind?: "resource" | "gold"): ResolvedSprite | undefined {
+      const key = caravanKey(payloadKind === "gold" ? "gold" : "resource") as SpriteKey;
+      return narrowResolvedSprite(provider.resolve(key));
     },
     resolveSprite(key: SpriteKey): ResolvedSprite | undefined {
       return narrowResolvedSprite(provider.resolve(key));

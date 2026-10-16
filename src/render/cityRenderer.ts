@@ -8,14 +8,9 @@
 // module-scope skybox/layer caches) moved to src/render/skybox.ts, the only
 // module in the painter project allowed to hold them.
 
-import { computeCityScale } from "../core/cityGrid";
 import { paintScene, type Paint2DFrame } from "./scene/paint2d";
 import type { Paint2DDep } from "./scene/paint2d/deps";
 import type { SceneNode } from "./scene/types";
-import type { BuildingDef, GenerationStyle } from "./cityBuildingDraw";
-
-export { computeCityScale };
-export { type BuildingDef, type GenerationStyle };
 
 export function drawCityView(
   ctx: CanvasRenderingContext2D,

@@ -32,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -41,6 +43,16 @@ jobs:
 
       - name: npm install
         run: npm install
+
+      - name: docs:check (freshness scoped to changed modules)
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            node tools/docs-check.mjs --changed-from "origin/$BASE_REF...HEAD"
+          else
+            node tools/docs-check.mjs
+          fi
 
       - name: Install Playwright browser (chromium)
         run: npx playwright install chromium --with-deps

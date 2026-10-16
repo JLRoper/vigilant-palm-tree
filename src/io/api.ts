@@ -2,12 +2,14 @@ import type { Terrain } from "../map/terrain";
 import type { ResourceType } from "../map/resourceTiles";
 import type {
   ClientTelemetryReport,
+  FactionId,
   HeroState,
   NetworkTopologySnapshot,
   Player,
   SettlementState,
 } from "@heroes/contracts";
 import { getCachedAuth } from "./authStorage";
+import { clearServerDriven } from "./serverDrivenGames";
 
 export type {
   GameState,
@@ -36,6 +38,16 @@ export type GameLobbyState = {
   // connected<->disconnected transitions. Seats with no entry have not
   // transitioned -- absence reads as "nothing to flag".
   presence?: Record<string, SeatPresence>;
+  // Server-side AI actor flag (plan/2026-09-30-server-side-ai-actor.md D1):
+  // "server" on any game created with enemySlots > 0 -- the API's aiDriver
+  // scanner owns those AI seats' turns end-to-end. Absent (= browser-driven)
+  // on legacy/starter/lobby games (D2). Mirrors server/routes.ts LobbyState.
+  aiDriver?: "server";
+  // Pending battle offer (defender-chosen flow, 2026-10-04): stamped by the
+  // EnterBattle command case, read via @heroes/engine's readPendingBattle,
+  // cleared when the battle resolves / the offer goes stale. Optional --
+  // every pre-offer row simply lacks the key. Mirrors server LobbyState.
+  pendingBattle?: { attackerId: string; defenderId: string; since: number } | null;
 };
 
 export type Game = {
@@ -52,7 +64,7 @@ export type Game = {
   round: number;
   day: number;
   active_player_id: number;
-  map_size?: "small" | "medium" | "large";
+  map_size?: "small" | "medium" | "large" | "huge" | "epic";
   players: Player[];
   heroes: Record<string, HeroState>;
   settlements: Record<string, SettlementState>;
@@ -67,9 +79,11 @@ export type Game = {
 
 // One row of GET /games/:name/events. Raw DB shape (snake_case, id and
 // actor_seat straight off the row) -- `payload` is the persisted EngineEvent
-// for the 13 EngineEvent kinds and a bespoke audit blob for the legacy
+// for the engine kinds and a bespoke audit blob for the legacy
 // turn_ended/round_ended/round_started/ai_turn_started kinds, so it stays
-// unknown here and is narrowed at the point of use.
+// unknown here and is narrowed at the point of use. Which kinds the client
+// admits as engine events is owned by ENGINE_EVENT_KINDS in
+// src/io/multiplayerSync.ts.
 export type GameEventRow = {
   id: string;
   kind: string;
@@ -161,6 +175,7 @@ export const api = {
       const text = await res.text().catch(() => "");
       throw new Error(`${res.status} ${res.statusText} ${text}`);
     }
+    clearServerDriven(name);
   },
   createGame: (
     name: string,
@@ -168,15 +183,16 @@ export const api = {
     hero_q: number,
     hero_r: number,
     enemy_positions: EnemyPos[] = [],
-    mapSize?: "small" | "medium" | "large",
+    mapSize?: "small" | "medium" | "large" | "huge" | "epic",
     humanSlots?: number,
     enemySlots: number = 0,
+    seatFactions?: FactionId[],
   ) => {
     console.log("[api] createGame mapSize:", mapSize);
     return fetchWithTimeout(`${BASE}/games`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize, humanSlots, enemySlots }),
+      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize, humanSlots, enemySlots, seatFactions }),
     }).then((r) => json<Game>(r));
   },
   claimLobbySeat: (name: string, seat: number, handle: string) =>
@@ -200,7 +216,7 @@ export const api = {
         body: JSON.stringify({ kind, payload }),
       },
       5_000
-    ).then((r) => json<{ id: number; kind: string }>(r)),
+    ).then((r) => json<{ id: string; kind: string; payload: unknown; created_at: string }>(r)),
   // ?after=<cursor> is the event-cursor poll (#146/#145). 0 means "the whole
   // log"; the server rejects a non-integer cursor with a 400 rather than
   // silently refetching everything.

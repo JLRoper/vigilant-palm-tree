@@ -4,6 +4,9 @@ import {
   battleToastMessage,
   battleVerdictCardLine,
   battleVerdictToastPhrase,
+  heroBattleDrawBanner,
+  settlementBattleCardBanner,
+  settlementBattleToastMessage,
   settlementNameAt,
 } from "../../src/screens/combat/battleResultText";
 import { makeSettlement } from "../charter/_helpers";
@@ -125,4 +128,136 @@ test("settlementNameAt resolves the settlement on a hero's relocation hex", () =
   assert.equal(settlementNameAt(settlements, 18, 4), "s1");
   assert.equal(settlementNameAt(settlements, 2, 2), "s0");
   assert.equal(settlementNameAt(settlements, 9, 9), undefined);
+});
+
+// B6/D6 (server-side AI actor plan Phase 2): event-derived card/toast
+// wording for the settlement-battle outcomes and the accurate draw banners.
+
+test("settlement battle card banner: capture, garrison-holds, stalemate, broken-garrison edge", () => {
+  assert.equal(
+    settlementBattleCardBanner({
+      outcome: "attackerWon",
+      captured: true,
+      attackerLabel: "AI 2's Warlord",
+      settlementName: "Haven",
+    }),
+    "AI 2's Warlord captured Haven!",
+  );
+  assert.equal(
+    settlementBattleCardBanner({
+      outcome: "defenderWon",
+      captured: false,
+      attackerLabel: "AI 2's Warlord",
+      settlementName: "Haven",
+    }),
+    "The garrison of Haven holds!",
+  );
+  assert.equal(
+    settlementBattleCardBanner({
+      outcome: "draw",
+      captured: false,
+      attackerLabel: "AI 2's Warlord",
+      settlementName: "Haven",
+    }),
+    "Stalemate at Haven.",
+  );
+  assert.equal(
+    settlementBattleCardBanner({
+      outcome: "attackerWon",
+      captured: false,
+      attackerLabel: "AI 2's Warlord",
+      settlementName: "Haven",
+    }),
+    "AI 2's Warlord broke the garrison at Haven!",
+  );
+  assert.equal(
+    settlementBattleCardBanner({ outcome: "defenderWon", captured: false, attackerLabel: "A" }),
+    "The garrison of the settlement holds!",
+    "an unknown settlement name degrades gracefully",
+  );
+});
+
+test("hero battle draw banner: mutual annihilation vs stalemate", () => {
+  assert.equal(heroBattleDrawBanner("defeated", "defeated"), "Draw — both sides fell.");
+  assert.equal(heroBattleDrawBanner("stood", "stood"), "Draw — both sides stand.");
+  assert.equal(heroBattleDrawBanner(undefined, undefined), "Draw — both sides stand.");
+  assert.equal(heroBattleDrawBanner("defeated", "stood"), "Draw — both sides stand.");
+});
+
+test("settlement battle toast: capture, repelled, stalemate draw, concession verdicts", () => {
+  assert.equal(
+    settlementBattleToastMessage({
+      attackerLabel: "AI 2's Warlord",
+      settlementName: "Haven",
+      outcome: "attackerWon",
+      captured: true,
+      attackerVerdict: "stood",
+      attackerOwnerName: "AI 2",
+    }),
+    "AI 2's Warlord captured Haven.",
+  );
+  assert.equal(
+    settlementBattleToastMessage({
+      attackerLabel: "AI 2's Warlord",
+      settlementName: "Haven",
+      outcome: "defenderWon",
+      captured: false,
+      attackerVerdict: "defeated",
+      attackerOwnerName: "AI 2",
+    }),
+    "The garrison of Haven repelled AI 2's Warlord — AI 2's hero slain.",
+  );
+  assert.equal(
+    settlementBattleToastMessage({
+      attackerLabel: "AI 2's Warlord",
+      settlementName: "Haven",
+      outcome: "draw",
+      captured: false,
+      attackerVerdict: "stood",
+      attackerOwnerName: "AI 2",
+    }),
+    "The assault on Haven stalled — the garrison holds.",
+  );
+  assert.equal(
+    settlementBattleToastMessage({
+      attackerLabel: "AI 2's Warlord",
+      settlementName: "Haven",
+      outcome: "defenderWon",
+      captured: false,
+      attackerVerdict: "retreated",
+      attackerOwnerName: "AI 2",
+    }),
+    "The garrison of Haven repelled AI 2's Warlord — AI 2's hero retreated.",
+  );
+  assert.equal(
+    settlementBattleToastMessage({
+      attackerLabel: "AI 2's Warlord",
+      settlementName: "Haven",
+      outcome: "defenderWon",
+      captured: false,
+      attackerVerdict: "surrendered",
+      attackerOwnerName: "AI 2",
+    }),
+    "The garrison of Haven repelled AI 2's Warlord — AI 2's hero surrendered.",
+  );
+});
+
+test("settlement battle toast: absent verdict (pre-B6) renders the outcome alone", () => {
+  assert.equal(
+    settlementBattleToastMessage({
+      attackerLabel: "AI 2's Warlord",
+      settlementName: "Haven",
+      outcome: "defenderWon",
+      captured: false,
+    }),
+    "The garrison of Haven repelled AI 2's Warlord.",
+  );
+  assert.equal(
+    settlementBattleToastMessage({
+      attackerLabel: "AI 2's Warlord",
+      outcome: "attackerWon",
+      captured: true,
+    }),
+    "AI 2's Warlord captured the settlement.",
+  );
 });

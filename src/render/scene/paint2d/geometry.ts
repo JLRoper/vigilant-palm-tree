@@ -4,7 +4,7 @@
 // walk a diamond. These helpers centralize the math so we don't re-derive
 // `Math.PI / 180 * (60 * i - 30)` in every painter file.
 
-import { HEX_SIZE } from "../../../core/hex";
+import { HEX_SIZE, UNIT_HEX_CORNERS } from "../../../core/hex";
 
 /**
  * Adds the six hex corners (centered on `cx, cy`) to a fresh ctx path: a
@@ -17,12 +17,9 @@ import { HEX_SIZE } from "../../../core/hex";
  */
 export function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number = HEX_SIZE): void {
   ctx.beginPath();
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 180) * (60 * i - 30);
-    const x = cx + size * Math.cos(angle);
-    const y = cy + size * Math.sin(angle);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+  ctx.moveTo(cx + size * UNIT_HEX_CORNERS[0].x, cy + size * UNIT_HEX_CORNERS[0].y);
+  for (let i = 1; i < 6; i++) {
+    ctx.lineTo(cx + size * UNIT_HEX_CORNERS[i].x, cy + size * UNIT_HEX_CORNERS[i].y);
   }
   ctx.closePath();
 }

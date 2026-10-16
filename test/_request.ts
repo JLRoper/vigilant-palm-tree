@@ -1,5 +1,6 @@
 import { spawn, execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 
@@ -8,9 +9,27 @@ const REQUEST_PATH = resolve(ROOT, "local", ".test-request.json");
 const PID_REGISTRY_PATH = resolve(ROOT, "test", ".last-test-pids.json");
 const IS_WINDOWS = process.platform === "win32";
 
+/**
+ * A request file is only trustworthy if the current process could be the one
+ * a wrapper just spawned: tools/run-test.mjs writes it BEFORE spawning the
+ * entry, so a wrapper-written file is always newer than the entry that reads
+ * it. A file older than this process start is leftover from a DEAD run -- a
+ * crashed or killed wrapper never unlinks it in its `finally`. Direct-run
+ * suites (test:cityview, test:settlements, test:aiDefender, dragDrop,
+ * proposedPath) then honour an orphan's ports over the fresh .env their npm
+ * script just allocated, and every spawned server binds/points at the wrong
+ * port (observed 2026-10-10: a 12:19 "settlements" orphan pinned cityview to
+ * API=51231/WEB=51232 while .env said 54232/54233, so the browser probed a
+ * port nothing listened on). The grace window absorbs clock skew and slow
+ * process startup between the wrapper's write and our read, and must exceed
+ * tools/run-test.mjs's own pre-spawn wait (waitForPortReleased, up to 20s) so
+ * a wrapper-driven entry never mistakes its own fresh request for an orphan.
+ */
+const REQUEST_MAX_AGE_MS = 30_000;
+
 export interface TestRequest {
   runId: string;
-  entry: "smoke" | "multiplayer" | "cityview" | "settlements" | "visual" | "logpanel";
+  entry: "smoke" | "multiplayer" | "cityview" | "settlements" | "aiDefender" | "aiCharter" | "visual" | "logpanel";
   apiPort: number;
   clientPort: number;
   autoClose: boolean;
@@ -21,7 +40,9 @@ export interface TestRequest {
 export function loadRequest(): TestRequest | null {
   if (!existsSync(REQUEST_PATH)) return null;
   try {
-    return JSON.parse(readFileSync(REQUEST_PATH, "utf8")) as TestRequest;
+    const req = JSON.parse(readFileSync(REQUEST_PATH, "utf8")) as TestRequest;
+    if (Date.now() - statSync(REQUEST_PATH).mtimeMs > REQUEST_MAX_AGE_MS) return null;
+    return req;
   } catch {
     return null;
   }
@@ -51,7 +72,7 @@ export function shouldUpdateBaselines(): boolean {
   return process.argv.includes("--update-baselines");
 }
 
-interface PidEntry { role: string; pid: number; spawnedAt: string; }
+interface PidEntry { role: string; pid: number; spawnedAt: string; runId?: string; }
 interface PidRegistry { runId: string; startedAt: string; pids: PidEntry[]; }
 
 function readRegistry(): PidRegistry {
@@ -85,7 +106,7 @@ export { treeKill };
 export function registerPid(role: string, pid: number): void {
   const reg = readRegistry();
   reg.pids = reg.pids.filter((p) => p.pid !== pid);
-  reg.pids.push({ role, pid, spawnedAt: new Date().toISOString() });
+  reg.pids.push({ role, pid, spawnedAt: new Date().toISOString(), runId: loadRequest()?.runId });
   writeRegistry(reg);
 }
 
@@ -95,10 +116,21 @@ export function clearRegisteredPids(): void {
   } catch {}
 }
 
+/**
+ * Kills pids registered by THIS wrapper run only (same boot-contract runId).
+ * The registry file is shared across sessions on this worktree: reaping
+ * every entry used to let a concurrently starting suite (or gate run)
+ * taskkill another live suite's api/web servers mid-run -- observed as both
+ * servers dying simultaneously ~9s after spawn with no in-process cause.
+ * Entries from other runs are left alone; with per-entry ephemeral ports
+ * (tools/run-test.mjs) their orphans hold a port nobody will reuse.
+ */
 export function reapPreviousRunPids(): void {
+  const currentRunId = loadRequest()?.runId;
   const prev = readRegistry();
   let reaped = 0;
   for (const e of prev.pids) {
+    if (currentRunId && e.runId !== currentRunId) continue;
     try { process.kill(e.pid, 0); treeKill(e.pid); reaped++; } catch {}
   }
   if (reaped > 0) console.log(`>> reaped ${reaped} leftover pid(s)`);
@@ -140,25 +172,76 @@ export async function waitForUrl(url: string, timeoutMs = 15000): Promise<void> 
 }
 
 /**
- * Polls /api/health until it answers HTTP 200 -- stricter than waitForUrl,
- * which accepts any status < 500. Call before a browser suite's first
- * page.goto: the page's own /api fetches used to race the last moments of
- * api/web boot and surface as benign "Failed to fetch" console warnings.
+ * Polls /api/health until it answers HTTP 200 on `requiredConsecutive`
+ * probes spaced intervalMs apart -- stricter than waitForUrl, which accepts
+ * any status < 500, and stricter than a single probe, which a force-killed
+ * predecessor server can still satisfy during a chained run's port handoff.
+ * Call before a browser suite's first page.goto: the page's own /api fetches
+ * used to race the last moments of api/web boot and surface as benign
+ * "Failed to fetch" console warnings.
  */
-export async function waitForApiHealth(apiUrl: string, timeoutMs = 10_000, intervalMs = 250): Promise<void> {
+export async function waitForApiHealth(
+  apiUrl: string,
+  timeoutMs = 30_000,
+  intervalMs = 200,
+  requiredConsecutive = 2
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let last = "never reached";
+  let streak = 0;
   while (Date.now() < deadline) {
     try {
       const res = await fetch(`${apiUrl}/api/health`);
-      if (res.status === 200) return;
+      if (res.status === 200) {
+        streak += 1;
+        if (streak >= requiredConsecutive) return;
+        last = `200 (streak ${streak}/${requiredConsecutive})`;
+        await wait(intervalMs);
+        continue;
+      }
+      streak = 0;
       last = `status ${res.status}`;
     } catch (e) {
+      streak = 0;
       last = String(e);
     }
     await wait(intervalMs);
   }
-  throw new Error(`api health at ${apiUrl}/api/health never returned 200 within ${timeoutMs}ms (${last})`);
+  throw new Error(
+    `api health at ${apiUrl}/api/health never returned ${requiredConsecutive} consecutive 200s within ${timeoutMs}ms (${last})`
+  );
+}
+
+/**
+ * Resolves once a TCP connect to 127.0.0.1:port is REFUSED -- i.e. nothing
+ * is listening. Browser suites run after the previous suite force-killed its
+ * api/web on the SAME ports (allocate-ports preserves .env values), and a
+ * still-dying predecessor can satisfy boot probes before its sockets are
+ * released. Suite entries call this before spawning their own servers so a
+ * probe can only ever be answered by the new process.
+ */
+export async function waitForPortReleased(port: number, timeoutMs = 20_000, intervalMs = 150): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let last = "listening";
+  while (Date.now() < deadline) {
+    const refused = await new Promise<boolean>((resolveProbe) => {
+      const sock = connect({ port, host: "127.0.0.1" });
+      const done = (free: boolean) => {
+        sock.destroy();
+        resolveProbe(free);
+      };
+      sock.setTimeout(500);
+      sock.once("connect", () => done(false));
+      sock.once("timeout", () => done(false));
+      sock.once("error", () => done(true));
+    });
+    if (refused) return;
+    last = "listening";
+    await wait(intervalMs);
+  }
+  throw new Error(
+    `port ${port} still in use after ${timeoutMs}ms (${last}) -- a previous run's process may be orphaned; run \`npm run cleanup\` and retry`
+  );
 }
 
 export const constants = { ROOT, REQUEST_PATH, PID_REGISTRY_PATH };

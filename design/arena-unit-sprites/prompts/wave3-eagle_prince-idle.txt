@@ -1,0 +1,5 @@
+Side-view pixel art game asset of a single fantasy battle unit in a dramatic tabletop-miniature style: chunky readable pixels, rich saturated colors with strong three-tone shading ramps and bright rim highlights, bold dark outlines, high contrast that stays readable at small size, fully transparent background, square 1:1 canvas.
+
+Subject: the Eagle Prince, eldest of the giant eagles: a larger pure bird of prey standing tall with a near-mythical bearing — absolutely no lion parts, no mammal body, no fur, no tail: every part is feathers. Storm-grey and white plumage, a pale old scar across the feathered side of its neck, a thin plain gold circlet between its eyes as subtle regalia, a massive hooked golden beak, broad wings half-raised behind its back, exactly two scaly yellow taloned legs.
+
+Single centered figure facing right, full body visible from head to feet, filling about 75% of the canvas height, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.

@@ -2,17 +2,19 @@ import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { ViewManager } from "./ViewManager";
 import { UIManager } from "./UIManager";
-import { GameMap, type MapSize, MAP_SIZES } from "../map/gameMap";
-import { hydrateGameState } from "@heroes/engine";
+import { GameMap, type MapSize, MAP_SIZES, getOrCreateGameMap, resolveMapSize } from "../map/gameMap";
 import { markSaved } from "../state/gameState";
 import { playerHeroId } from "../game/initState";
 import { CASTLE_COUNT_DEFAULT, defaultCastleSeedFromMapSeed, generateCastles } from "../map/castlePlacement";
 import { loadUnitCatalog } from "../data/unitCatalog";
 import { MAP_SEED } from "@screens/adventure/adventureView";
 import type { Game, TileRow } from "../io/api";
+import { hydrateClientGame } from "../io/hydrateClientGame";
+import type { FactionId } from "@heroes/contracts";
 import { notePersisted } from "../io/commands";
 import { setInMemoryLocalPlayerId } from "../players/localPlayer";
-import { getMultiplayerSync } from "../io/multiplayerSync";
+import { getMultiplayerSync, getEntityMirror } from "../io/multiplayerSync";
+import { clearServerDriven, syncServerDrivenFromGame } from "../io/serverDrivenGames";
 import { getCachedAuth } from "../io/authStorage";
 
 /**
@@ -50,20 +52,31 @@ export class GameSessionManager {
   private inferMapSize(map?: GameMap): MapSize {
     const width = map?.width ?? this.getGameMap().width;
     const height = map?.height ?? this.getGameMap().height;
-    if (width === MAP_SIZES.large.width && height === MAP_SIZES.large.height) return "large";
-    if (width === MAP_SIZES.medium.width && height === MAP_SIZES.medium.height) return "medium";
+    for (const size of Object.keys(MAP_SIZES) as MapSize[]) {
+      const dimensions = MAP_SIZES[size];
+      if (width === dimensions.width && height === dimensions.height) return size;
+    }
     return "small";
   }
 
-  async loadGame(loaded: Game, tiles: TileRow[]): Promise<void> {
+  async loadGame(loaded: Game, tiles?: TileRow[]): Promise<void> {
     this.session.adopt(loaded);
     notePersisted(loaded.updated_at);
-    const map = GameMap.fromTiles(tiles);
-    const inferredSize = this.inferMapSize(map);
+    const resolvedSize = resolveMapSize(loaded.map_size);
+    const map = tiles && tiles.length > 0 ? GameMap.fromTiles(tiles) : getOrCreateGameMap(loaded.seed, resolvedSize);
+    const inferredSize = tiles && tiles.length > 0 ? this.inferMapSize(map) : resolvedSize;
+    // Server-driven flag (plan/2026-09-30-server-side-ai-actor.md D8): every
+    // creation/load path funnels through here, so this is the registry's
+    // feed point for game-bearing responses; a switch to a different game
+    // drops the previous game's entry.
+    if (this.currentGameName !== null && this.currentGameName !== loaded.name) {
+      clearServerDriven(this.currentGameName);
+    }
+    syncServerDrivenFromGame(loaded);
     this.syncMetadata(loaded.name, loaded.seed, inferredSize);
     this.setGameMap(map);
     this.state.setGameMap(map);
-    const hydrated = hydrateGameState(loaded);
+    const hydrated = hydrateClientGame(loaded);
     this.state.resetAiTurnMemory();
     this.state.replaceState(hydrated);
     this.view.updateMap(map);
@@ -85,6 +98,7 @@ export class GameSessionManager {
     // and seed from that.
     const seededCursor = loaded.last_event_id === undefined ? undefined : Number(loaded.last_event_id);
     getMultiplayerSync().start(loaded.name, { cursor: seededCursor, state: hydrated });
+    getEntityMirror().syncWith(this.state.getHeroesMap(), this.state.getSettlementsMap());
   }
 
   async handleManualSave(): Promise<void> {
@@ -97,7 +111,7 @@ export class GameSessionManager {
     }
   }
 
-  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number; enemyCount?: number }): Promise<void> {
+  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" | "huge" | "epic"; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number; enemyCount?: number; factionId?: FactionId }): Promise<void> {
     const effectiveCastleSeed =
       typeof opts.castleSeed === "number" && Number.isFinite(opts.castleSeed)
         ? opts.castleSeed
@@ -106,8 +120,15 @@ export class GameSessionManager {
     const humanSeatCount = Math.max(1, Math.min(playerCount, opts.humanSeatCount ?? 1));
     const enemyCount = Math.max(0, Math.min(3, Math.floor(opts.enemyCount ?? 0)));
     const totalPlayers = humanSeatCount + enemyCount;
+    // Only the creator's seat (seat 0) takes the picked roster faction; every
+    // other seat — human or AI — stays "human" in v1. Passing no seatFactions
+    // at all (no pick, or the human default) keeps the legacy request shape.
+    const seatFactions: FactionId[] | undefined =
+      opts.factionId && opts.factionId !== "human"
+        ? [opts.factionId, ...Array.from({ length: Math.max(totalPlayers - 1, 0) }, () => "human" as FactionId)]
+        : undefined;
     const effectiveCastleCount = opts.castleCount ?? (2 * totalPlayers);
-    const castles = generateCastles(this.getGameMap(), {
+    const castles = generateCastles(getOrCreateGameMap(opts.seed, opts.mapSize ?? "small"), {
       castleSeed: effectiveCastleSeed,
       playerCount: totalPlayers,
       castleCount: Math.max(effectiveCastleCount, totalPlayers),
@@ -119,7 +140,7 @@ export class GameSessionManager {
     const enemyPositions = aiCastles.length
       ? aiCastles.map((c) => ({ q: c.tile.q, r: c.tile.r }))
       : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
-    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount, enemyCount);
+    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount, enemyCount, seatFactions);
     // Issue #179: same self-claim as createFreshStarter() below -- the "New
     // Game" toolbar flow loads straight into the game rather than routing
     // through the multiplayer lobby UI. Claiming is optional (sign-in is
@@ -130,8 +151,7 @@ export class GameSessionManager {
     const seat = 0;
     const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? `Player ${seat + 1}`;
     await this.session.claimLobbySeat(created.name, seat, handle);
-    const gameTiles = await this.session.getTiles(created.name);
-    await this.loadGame(created, gameTiles);
+    await this.loadGame(created);
     void this.session.logEvent(created.name, "new_game", {
       seed: opts.seed,
       castleSeed: effectiveCastleSeed,
@@ -144,7 +164,7 @@ export class GameSessionManager {
     try {
       this.syncMetadata("starter", MAP_SEED, "small");
       const castleSeed = defaultCastleSeedFromMapSeed(MAP_SEED);
-      const castles = generateCastles(this.getGameMap(), {
+      const castles = generateCastles(getOrCreateGameMap(MAP_SEED, "small"), {
         castleSeed,
         playerCount: 3,
         castleCount: CASTLE_COUNT_DEFAULT,
@@ -170,8 +190,7 @@ export class GameSessionManager {
       const seat = 0;
       const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? `Player ${seat + 1}`;
       await this.session.claimLobbySeat(created.name, seat, handle);
-      const tiles = await this.session.getTiles(created.name);
-      await this.loadGame(created, tiles);
+      await this.loadGame(created);
       void this.session.logEvent(created.name, "session_start", {
         seed: MAP_SEED,
         castleSeed,

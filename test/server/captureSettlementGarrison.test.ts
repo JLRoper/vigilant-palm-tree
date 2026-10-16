@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Command, HeroId, HeroState, Player, Platoon, SettlementId, SettlementState } from "@heroes/contracts";
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
-import { normalizePlatoons } from "@heroes/engine";
+import { normalizePlatoons, CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS, WAGON_GOLD_CAPACITY } from "@heroes/engine";
 import { handleCommand } from "../../server/app/commandHandler";
 import {
   createMockCharterRepo,
@@ -159,7 +159,15 @@ test("CaptureSettlement with an explicitly emptied garrison still captures as be
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, true);
   assert.equal(result.settlement?.ownerId, 0);
-  assert.equal(result.hero?.gold, 110, "10 purse + CAPTURE_GOLD_REWARD (100)");
+  // Phase 1 heroGoldCap enforcement: the reward is clamped to the capturing
+  // hero's treasury-cart purse headroom. This hero has the legacy soft
+  // default (DEFAULT_TREASURY_WAGONS x WAGON_GOLD_CAPACITY = 2,500g cap)
+  // with 10g in it, so the full 100g lands.
+  assert.equal(
+    result.hero?.gold,
+    10 + Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY - 10),
+    "10 purse + the headroom-clamped CAPTURE_GOLD_REWARD",
+  );
   assert.equal(eventRepo.events.map((e) => e.kind).join(","), "SettlementCaptured");
   assert.equal(gameRepo.rows["test-game"].settlements.s1.ownerId, 0);
   assert.ok(gameRepo.rows["test-game"].players.find((p) => p.id === 0)?.settlementIds.includes("s1"));
@@ -217,14 +225,21 @@ test("post-battle capture: a won hero battle on an empty-garrison enemy settleme
   assert.equal(result.ok, true);
 
   const saved = gameRepo.rows["test-game"];
-  assert.equal(saved.heroes.h0.gold, 450, "250 looted from the wiped defender + CAPTURE_GOLD_REWARD (100)");
+  // 100 purse + 250 looted = 350 before the capture; the reward clamps to
+  // the purse headroom under the 2,500g soft-default cap (Phase 1), so the
+  // full 100g lands here.
+  assert.equal(
+    saved.heroes.h0.gold,
+    350 + Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY - 350),
+    "250 looted from the wiped defender + the headroom-clamped CAPTURE_GOLD_REWARD",
+  );
   assert.equal(saved.heroes.h1, undefined, "the wiped defender is removed from the heroes record");
   assert.ok(!saved.players.find((p) => p.id === 1)?.heroIds.includes("h1"), "removed defender pruned from heroIds");
   assert.equal("h1" in heroRepo.calls[0].value, false, "granular upsert is a full sync -- h1 gone there too");
   assert.equal(saved.settlements.s1.ownerId, 0, "settlement captured in the same persist");
   assert.ok(saved.players.find((p) => p.id === 0)?.settlementIds.includes("s1"), "winner's seat gains the settlement");
   assert.ok(!saved.players.find((p) => p.id === 1)?.settlementIds.includes("s1"), "loser's seat loses it");
-  assert.equal(result.attackerHero?.gold, 450);
+  assert.equal(result.attackerHero?.gold, 350 + Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY - 350));
   assert.equal(result.defenderHero, undefined, "the removed defender is omitted from the result");
   assert.equal(result.defenderVerdict, "defeated");
   assert.equal(eventRepo.events.map((e) => e.kind).join(","), "BattleResolved", "capture rides the battle persist, no extra event");
@@ -310,7 +325,13 @@ test("post-battle capture parity: the client's walk-in CaptureSettlement POST re
 
   const saved = gameRepo.rows["test-game"];
   assert.equal(saved.settlements.s2.ownerId, 0, "final ownership matches the client's walk-in rule");
-  assert.equal(saved.heroes.h0.gold, 450, "350 loot + CAPTURE_GOLD_REWARD (100)");
+  // Same clamped-reward shape as the inline-capture test above: 350 held +
+  // min(100, headroom of the 2,500g soft-default cap) = 450 (Phase 1).
+  assert.equal(
+    saved.heroes.h0.gold,
+    350 + Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY - 350),
+    "350 loot + the headroom-clamped CAPTURE_GOLD_REWARD",
+  );
   assert.ok(saved.players.find((p) => p.id === 0)?.settlementIds.includes("s2"));
   assert.equal(eventRepo.events.map((e) => e.kind).join(","), "BattleResolved,SettlementCaptured");
 });
@@ -327,7 +348,13 @@ test("post-battle capture parity: a redundant CaptureSettlement after the server
 
   const saved = gameRepo.rows["test-game"];
   assert.equal(saved.settlements.s1.ownerId, 0, "the inline capture stands");
-  assert.equal(saved.heroes.h0.gold, 450, "exactly one CAPTURE_GOLD_REWARD -- the no-op must not double-pay or revert");
+  // Exactly one clamped reward (450 = 350 + min(100, headroom)); the
+  // no-op must neither double-pay nor revert it (Phase 1 clamp shape).
+  assert.equal(
+    saved.heroes.h0.gold,
+    350 + Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY - 350),
+    "exactly one headroom-clamped CAPTURE_GOLD_REWARD -- the no-op must not double-pay or revert",
+  );
   assert.equal(eventRepo.events.length, 1, "no second event for the no-op");
   assert.equal(heroRepo.calls.length, 1, "nothing re-persisted by the no-op");
   assert.equal(settlementRepo.calls.length, 1);

@@ -1,4 +1,12 @@
-import type { CharterState, HeroId, HeroState, Player, SettlementId, SettlementState } from "@heroes/contracts";
+import type {
+  CharterState,
+  HeroId,
+  HeroState,
+  Player,
+  SettlementId,
+  SettlementState,
+  TradeRouteState,
+} from "@heroes/contracts";
 import type { HydratableGameRow } from "@heroes/engine";
 import type { CharterRepo, EventRepo, GameRepo, HeroRepo, SettlementRepo } from "../../server/app/commandHandler";
 import type { SettlementSnapshotInput, ResourceTransactionInput } from "../../server/persistence/repositories/gameRepo";
@@ -15,8 +23,10 @@ import type { SettlementSnapshotInput, ResourceTransactionInput } from "../../se
 // repositories/gameRepo.ts) does carry it, though, and saveHeroesAndSettlements's
 // `extra.gold` needs somewhere to land here too, or the mock silently drops
 // it while the real repo persists it -- widen the stored row type by one
-// optional field rather than diverge from GameRepo's actual contract.
-type MockGameRow = HydratableGameRow & { gold?: number };
+// optional field rather than diverge from GameRepo's actual contract. Same
+// for `lobby`: the real column is an untyped jsonb bag the EnterBattle/battle
+// cases read-modify-write via saveLobby.
+type MockGameRow = HydratableGameRow & { gold?: number; lobby?: unknown };
 
 export function createMockGameRepo(
   seed: Record<string, HydratableGameRow>,
@@ -49,6 +59,7 @@ export function createMockGameRepo(
         active_player_id?: number;
         next_charter_id?: number;
         next_settlement_id?: number;
+        trade_routes?: TradeRouteState[];
       },
     ): Promise<void> {
       const row = rows[name];
@@ -64,7 +75,13 @@ export function createMockGameRepo(
         ...(extra?.gold !== undefined ? { gold: extra.gold } : {}),
         ...(extra?.next_charter_id !== undefined ? { next_charter_id: extra.next_charter_id } : {}),
         ...(extra?.next_settlement_id !== undefined ? { next_settlement_id: extra.next_settlement_id } : {}),
+        ...(extra?.trade_routes !== undefined ? { trade_routes: extra.trade_routes } : {}),
       };
+    },
+    async saveLobby(name: string, lobby: unknown): Promise<void> {
+      const row = rows[name];
+      if (!row) throw new Error(`mock game not found: ${name}`);
+      rows[name] = { ...row, lobby };
     },
     async insertSettlementSnapshots(
       gameName: string,

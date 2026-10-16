@@ -1,7 +1,6 @@
-import { cityLayout, screenToGridCell } from "../../../core/cityGrid";
+import { cityLayout, coversCell as reCoversCell, screenToGridCell } from "../../../core/cityGrid";
 import type { CityViewSize } from "@heroes/engine";
-import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
-import { coversCell as reCoversCell } from "../../../render/cityBuildingDraw";
+import type { BuildingDef, BuildingKind } from "@heroes/contracts";
 import { PopupMenu, styleButton, menuTheme } from "@screens/shared/menu";
 import { savePanelGeometry } from "@screens/shared/panelLayout";
 import { toolbarHeight } from "@screens/shared/panelRail";
@@ -10,9 +9,12 @@ import {
   buildingLabel,
   buildingBuildDays,
   buildingFootprintFromRegistry,
+  pickStyleForBuilding,
+  randomFarmFieldStyle,
 } from "@heroes/engine";
 import { buildListSections } from "./buildListSections";
-import { pickStyleForBuilding } from "../../../render/assetDescriptors";
+import { buildConfirmStatus, buildEntryStatus } from "./buildEntryStatus";
+import { footprintSuffix } from "./footprint";
 import type { ResourceType } from "../../../state/gameState";
 import resourceGoldPileSmol from "../../../resources/resource-gold-pile-smol.png?url";
 import resourceWoodPileSmol from "../../../resources/resource-wood-pile-smol.png?url";
@@ -62,7 +64,6 @@ export class BuildingPlacer {
   hoverCell: { gx: number; gy: number } | null = null;
   valid = false;
   buildings: BuildingDef[] = [];
-  style: string = "classic";
 
   private size: CityViewSize = 5;
   private center: { gx: number; gy: number } = { gx: 2, gy: 2 };
@@ -76,13 +77,12 @@ export class BuildingPlacer {
   /** Net cost already committed server-side since the view opened; canAfford gates only the uncommitted remainder. */
   private committedNet: Partial<Record<ResourceType, number>> = {};
 
-  init(size: CityViewSize, center: { gx: number; gy: number }, initialBuildings: BuildingDef[], style: string): void {
+  init(size: CityViewSize, center: { gx: number; gy: number }, initialBuildings: BuildingDef[]): void {
     this.size = size;
     this.center = center;
     this.buildings = [...initialBuildings];
     this.originalBuildings = [...initialBuildings];
     this.committedNet = {};
-    this.style = style;
     this.active = null;
     this.hoverCell = null;
     this.valid = false;
@@ -114,13 +114,14 @@ export class BuildingPlacer {
     // outright -- the server applies the same check and a rejected command
     // would leave a building on screen that was never paid for.
     if (!this.canAfford()) return false;
-    const style = pickStyleForBuilding(this.active, 1, this.style);
     const b: BuildingDef = {
       gx: this.hoverCell.gx,
       gy: this.hoverCell.gy,
       kind: this.active,
       level: 1,
-      style: style as BuildingDef["style"],
+      style: this.active === "farmField"
+        ? randomFarmFieldStyle()
+        : pickStyleForBuilding(this.active, 1, "pixel"),
       w: this.w,
       h: this.h,
       construction: { daysRemaining: buildingBuildDays(this.active) },
@@ -197,17 +198,6 @@ export class BuildingPlacer {
     this.committedNet = { ...this.computeNetCost() };
   }
 
-  canAffordSingle(kind: BuildingKind): boolean {
-    if (!this.affordability) return true;
-    const cost = buildingPlacementCost(kind);
-    if ((cost.gold ?? 0) > this.affordability.gold) return false;
-    if ((cost.wood ?? 0) > this.affordability.warehouse.wood) return false;
-    if ((cost.stone ?? 0) > this.affordability.warehouse.stone) return false;
-    if ((cost.iron ?? 0) > this.affordability.warehouse.iron) return false;
-    if ((cost.arcane ?? 0) > this.affordability.warehouse.arcane) return false;
-    return true;
-  }
-
   getNetCostSummary(): string {
     const net = this.computeNetCost();
     const parts: string[] = [];
@@ -235,6 +225,7 @@ export class BuildingPlacer {
       initialPosition: { x: anchorX, y: anchorY },
       minTop: toolbarHeight,
       zIndex: 75,
+      clickToFront: true,
       onClose: () => this.handlePaletteClose(),
       onMove: (pos) => savePanelGeometry("buildPalette", pos),
     });
@@ -303,7 +294,11 @@ export class BuildingPlacer {
     if (!this.canAfford()) {
       confirmBtn.style.opacity = "0.4";
       confirmBtn.style.cursor = "not-allowed";
-      confirmBtn.title = "Cannot afford the net cost of these changes";
+      confirmBtn.title = buildConfirmStatus({
+        net: this.getNetCost(),
+        charged: this.committedNet,
+        affordability: this.affordability,
+      }).title;
     }
     confirmBtn.addEventListener("click", () => {
       if (!this.canAfford()) return;
@@ -385,10 +380,10 @@ export class BuildingPlacer {
         const label = buildingLabel(kind);
         const cost = buildingPlacementCost(kind);
         const days = buildingBuildDays(kind);
-        const canAfford = this.canAffordSingle(kind);
         const hasTownHall = kind === "townHall" && this.buildings.some((b) => b.kind === "townHall");
         const isSelected = this.selectedKind === kind;
-        const disabled = !canAfford || hasTownHall;
+        const status = buildEntryStatus({ kind, affordability: this.affordability, hasTownHall });
+        const disabled = status.disabled;
 
         Object.assign(row.style, {
           width: "100%",
@@ -407,6 +402,7 @@ export class BuildingPlacer {
           alignItems: "center",
           gap: "4px",
         });
+        row.title = status.title;
 
         const costWrap = document.createElement("span");
         Object.assign(costWrap.style, {
@@ -452,7 +448,7 @@ export class BuildingPlacer {
         }
 
         const labelSpan = document.createElement("span");
-        labelSpan.textContent = hasTownHall ? `${label} (built)` : label;
+        labelSpan.textContent = `${hasTownHall ? `${label} (built)` : label}${footprintSuffix(kind)}`;
         Object.assign(labelSpan.style, { flex: "1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
 
         row.appendChild(costWrap);
@@ -514,7 +510,7 @@ export class BuildingPlacer {
       return;
     }
 
-    const layout = cityLayout(this.size, viewportW, viewportH);
+    const layout = cityLayout(this.size, viewportW, viewportH, toolbarHeight());
     const cell = screenToGridCell(layout, this.size, viewportW, canvasX, canvasY);
 
     if (!cell) {

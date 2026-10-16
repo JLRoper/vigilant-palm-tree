@@ -1,0 +1,5 @@
+Side-view pixel art game asset of a single fantasy battle unit in a dramatic tabletop-miniature style: chunky readable pixels, rich saturated colors with strong three-tone shading ramps and bright rim highlights, bold dark outlines, high contrast that stays readable at small size, fully transparent background, square 1:1 canvas.
+
+Subject: a forge lord of the mountain holds: a regal dwarven master of the deep anvil with a long braided beard bound by gold clasps, gilded crown-helm with a short hammer-shaped crest, masterwork gold-and-steel plate with rune engravings, standing tall with an ornate great hammer held upright at the side.
+
+Single centered figure facing right, full body visible from head to feet, filling about 75% of the canvas height, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.

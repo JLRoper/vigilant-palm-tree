@@ -74,8 +74,8 @@ export function makeBattleGrid(
 }
 
 // Deployment position for the platoon in ARMY_STACK_SLOTS slot `slotIndex`.
-// Each side occupies one outer column (attacker on the left, defender on
-// the right — see sideChoice); one platoon per row, spread evenly across
+// Each side occupies one outer column (whichever role sideChoice names on the
+// left, the other on the right — see below); one platoon per row, spread evenly across
 // however many rows the grid has via `slotIndex * (rows-1)/(SLOTS-1)`,
 // rounded to the nearest row. At the original 15-row grid this lands
 // exactly on rows 0, 2, 4, ..., 14 (spacing 2) — the gap so there's always
@@ -86,10 +86,12 @@ export function makeBattleGrid(
 // ever collide) but the spacing drops toward 1, so some adjacent platoons
 // lose that gap.
 //
-// Attacker is always on the left column (q=0) and defender always on
-// the right column (q=cols-1) for this arena — sideChoice just picks
-// which outer column the *attacker* starts on so the convention stays
-// attacker-left / defender-right regardless.
+// `sideChoice` names the role that takes the LEFT column (q=0); the other
+// role takes the right column (q=cols-1). Renderers whose sprite facing
+// assumes the fixed attacker-left / defender-right arrangement (defender
+// art mirrored to face left) pass sideChoice "attacker", the default —
+// passing the human's role instead deploys both armies on the wrong edges
+// and leaves them facing away from each other.
 export function deploymentPosition(
   side: BattleSide,
   slotIndex: number,

@@ -25,6 +25,7 @@ import {
   reapPreviousRunPids,
   clearRegisteredPids,
 } from "./_request";
+import type { GameDebugApi } from "../src/io/debugCommands";
 
 const API_PORT = getApiPort(4000);
 const WEB_PORT = getClientPort(5173);
@@ -155,16 +156,11 @@ async function loadGameFromHome(page: Page): Promise<void> {
   await page.locator("button:visible", { hasText: /^Open$/ }).first().click({ timeout: 10_000 });
 }
 
-interface DebugApi {
-  activeGameName: string | null;
-  settings: { update: (patch: Record<string, unknown>) => void };
-}
-
 // Returns just the name: page.evaluate results are structured-cloned, so a
 // DebugApi handle (with its function properties) can't cross the boundary.
 function activeGameName(page: Page): Promise<string> {
   return page.evaluate(() => {
-    const d = (window as unknown as { __gameDebug?: DebugApi }).__gameDebug;
+    const d = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug;
     if (!d || d.activeGameName == null) throw new Error("__gameDebug.activeGameName is null");
     return d.activeGameName;
   });
@@ -203,7 +199,7 @@ async function run() {
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: "load" });
     await page.waitForFunction(
-      () => (window as unknown as { __gameDebug?: DebugApi }).__gameDebug?.activeGameName != null,
+      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
       null,
       { timeout: 30_000 },
     );
@@ -213,7 +209,7 @@ async function run() {
     // Step 2: enable the panel via the debug settings API (routes through
     // updateSettings -> localStorage["heroesJs.settings"]).
     await page.evaluate(() => {
-      (window as unknown as { __gameDebug: DebugApi }).__gameDebug.settings.update({ showLogPanel: true });
+      (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ showLogPanel: true });
     });
     const s2 = await waitForPanel(page, (s) => s.inDom && s.visible, "become visible after settings.update");
     assert.ok(s2.visible, "panel root must be visible once showLogPanel is on");
@@ -235,7 +231,7 @@ async function run() {
     // from the persisted setting.
     await page.reload({ waitUntil: "load" });
     await page.waitForFunction(
-      () => (window as unknown as { __gameDebug?: DebugApi }).__gameDebug != null,
+      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug != null,
       null,
       { timeout: 30_000 },
     );
@@ -245,7 +241,7 @@ async function run() {
 
     await loadGameFromHome(page);
     await page.waitForFunction(
-      (expected) => (window as unknown as { __gameDebug?: DebugApi }).__gameDebug?.activeGameName === expected,
+      (expected) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === expected,
       gameName,
       { timeout: 30_000 },
     );

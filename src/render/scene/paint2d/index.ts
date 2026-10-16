@@ -17,14 +17,13 @@
 //
 // See src/render/scene/paint2d/README.md for the full boundary rationale.
 
-import type { Paint2DDep, ResolvedSpriteDescriptor } from "./deps";
+import type { Paint2DDep, ResolvedSprite, ResolvedSpriteDescriptor } from "./deps";
 import {
   hexPath,
 } from "./geometry";
 import { HEX_SIZE } from "../../../core/hex";
 import { decorationSeed } from "../../decorationSeed";
 import { TERRAIN_COLORS } from "../../../map/terrain";
-import { drawBuildingInto } from "./buildings";
 import { RESOURCE_PAL } from "../../palettes";
 import type {
   BattleAiActingRingNode,
@@ -248,7 +247,7 @@ export function paintScene(
         paintSelectedTileHighlight(ctx, node, deps);
         break;
       case "caravanMarker":
-        paintCaravanMarker(ctx, node);
+        paintCaravanMarker(ctx, node, deps);
         break;
       case "hero":
         paintHero(ctx, node, deps);
@@ -341,6 +340,10 @@ export function paintTerrainHex(ctx: CanvasRenderingContext2D, node: TerrainHexN
 }
 
 export function paintTerrainDecoration(ctx: CanvasRenderingContext2D, node: TerrainDecorationNode, deps: Paint2DDep): void {
+  if (node.terrain === "grass" || node.terrain === "dirt") {
+    void deps;
+    return;
+  }
   const { x: cx, y: cy } = node.world;
   const seed = decorationSeed(node.q, node.r) - Math.floor(decorationSeed(node.q, node.r));
   const ox = (seed - 0.5) * 14;
@@ -394,6 +397,33 @@ export function paintTerrainDecoration(ctx: CanvasRenderingContext2D, node: Terr
     ctx.lineTo(cx + ox - 4, cy + oy - 6);
     ctx.lineTo(cx + ox + 4, cy + oy - 6);
     ctx.closePath();
+    ctx.fill();
+  } else if (t === "swamp") {
+    ctx.fillStyle = "rgba(22, 34, 20, 0.7)";
+    ctx.beginPath();
+    ctx.arc(cx + ox, cy + oy + 3, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(108, 134, 66, 0.85)";
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.moveTo(cx + ox - 5, cy + oy + 2);
+    ctx.lineTo(cx + ox - 6, cy + oy - 6);
+    ctx.moveTo(cx + ox, cy + oy + 2);
+    ctx.lineTo(cx + ox + 1, cy + oy - 8);
+    ctx.moveTo(cx + ox + 5, cy + oy + 1);
+    ctx.lineTo(cx + ox + 6, cy + oy - 5);
+    ctx.stroke();
+  } else if (t === "snow") {
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.arc(cx + ox, cy + oy, 5, Math.PI * 1.1, Math.PI * 1.9);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.beginPath();
+    ctx.arc(cx + ox + 5, cy + oy + 3, 1.2, 0, Math.PI * 2);
+    ctx.arc(cx + ox - 6, cy + oy - 2, 1.2, 0, Math.PI * 2);
+    ctx.arc(cx + ox + 1, cy + oy + 6, 1.2, 0, Math.PI * 2);
     ctx.fill();
   }
   void deps;
@@ -581,6 +611,7 @@ export function paintHeroTrail(ctx: CanvasRenderingContext2D, node: HeroTrailNod
   if (node.points.length < 2) return;
   const color = node.color;
   const n = node.points.length;
+  const intensity = node.intensity ?? 1;
   ctx.save();
   ctx.fillStyle = color;
   ctx.strokeStyle = color;
@@ -593,11 +624,11 @@ export function paintHeroTrail(ctx: CanvasRenderingContext2D, node: HeroTrailNod
     const prev = node.points[i - 1];
     const p = node.points[i];
     const ramp = 0.35 + 0.65 * (i / (n - 1 || 1));
-    ctx.globalAlpha = 0.55 * ramp;
+    ctx.globalAlpha = 0.55 * ramp * intensity;
     ctx.beginPath();
     ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
     ctx.fill();
-    ctx.globalAlpha = 0.35 * ramp;
+    ctx.globalAlpha = 0.35 * ramp * intensity;
     ctx.beginPath();
     ctx.moveTo(prev.x, prev.y);
     ctx.lineTo(p.x, p.y);
@@ -615,32 +646,78 @@ export function paintHoverHighlight(ctx: CanvasRenderingContext2D, node: HoverHi
   void deps;
 }
 
-export function paintCaravanMarker(ctx: CanvasRenderingContext2D, node: CaravanMarkerNode): void {
+export function paintCaravanMarker(ctx: CanvasRenderingContext2D, node: CaravanMarkerNode, deps?: Paint2DDep): void {
   const { x, y } = node.world;
+  const marker = node.markerWorld ?? node.world;
+  const s = Math.min(1 + (node.wagons - 1) * 0.08, 1.4);
+  const sprite =
+    deps?.sprite.resolveSpriteForCaravan?.(node.payloadKind) ??
+    deps?.sprite.resolveSprite(node.payloadKind === "gold" ? "caravan.gold" : "caravan.resource");
+
+  if (sprite && sprite.ready) {
+    const flip =
+      node.facingDirection === "w" ||
+      node.facingDirection === "nw" ||
+      node.facingDirection === "sw";
+    ctx.save();
+    if (flip) {
+      ctx.translate(x, 0);
+      ctx.scale(-1, 1);
+      ctx.translate(-x, 0);
+    }
+    drawWithDescriptor(ctx, sprite.drawable, sprite.descriptor, x, y, HEX_SIZE * s);
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = node.color;
+    ctx.beginPath();
+    ctx.arc(marker.x, marker.y + OWNER_DOT_OFFSET_Y, OWNER_DOT_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    const badgeY = marker.y - HEX_SIZE * 0.72 * s;
+    const label = String(node.wagons);
+    ctx.font = `bold ${Math.round(10 * Math.min(s, 1.2))}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    ctx.strokeText(label, marker.x, badgeY);
+    ctx.fillStyle = node.payloadKind === "gold" ? "#ffd866" : "#ffffff";
+    ctx.fillText(label, marker.x, badgeY);
+    ctx.restore();
+    return;
+  }
+
+  const fallbackScale = Math.min(1 + (node.wagons - 1) * 0.12, 2);
+  const bodyW = 26 * fallbackScale;
+  const bodyH = 10 * fallbackScale;
+  const wheelR = 3.5 * fallbackScale;
+  const bodyTop = y - bodyH - wheelR;
   ctx.save();
-  // Wagon bed + canvas top.
-  ctx.fillStyle = "#8a5a2b";
+  ctx.fillStyle = node.payloadKind === "gold" ? "#b8860b" : "#8a5a2b";
   ctx.strokeStyle = "#3a2a14";
   ctx.lineWidth = 1.5;
-  ctx.fillRect(x - 9, y - 9, 18, 9);
-  ctx.strokeRect(x - 9, y - 9, 18, 9);
-  ctx.fillStyle = "#d9c9a3";
-  ctx.fillRect(x - 9, y - 12, 18, 4);
-  ctx.strokeRect(x - 9, y - 12, 18, 4);
-  // Wheels, tinted by the owning seat.
+  ctx.fillRect(x - bodyW / 2, bodyTop, bodyW, bodyH);
+  ctx.strokeRect(x - bodyW / 2, bodyTop, bodyW, bodyH);
+  ctx.beginPath();
+  ctx.arc(x, bodyTop, bodyW / 2, Math.PI, 0);
+  ctx.closePath();
   ctx.fillStyle = node.color;
-  ctx.strokeStyle = "#3a2a14";
-  for (const dx of [-5, 5]) {
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#3a2a14";
+  for (const dx of [-bodyW * 0.3, bodyW * 0.3]) {
     ctx.beginPath();
-    ctx.arc(x + dx, y + 3, 3.2, 0, Math.PI * 2);
+    ctx.arc(x + dx, y - wheelR, wheelR, 0, Math.PI * 2);
     ctx.fill();
-    ctx.stroke();
   }
-  // Wagon count flag.
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 9px sans-serif";
+  ctx.fillStyle = node.payloadKind === "gold" ? "#ffd866" : "#ffffff";
+  ctx.font = `bold ${Math.round(9 * fallbackScale)}px sans-serif`;
   ctx.textAlign = "center";
-  ctx.fillText(String(node.wagons), x, y - 15);
+  ctx.fillText(String(node.wagons), marker.x, bodyTop - bodyW / 2 - 3 * fallbackScale);
   ctx.restore();
 }
 
@@ -655,6 +732,12 @@ function paintSelectedTileHighlight(ctx: CanvasRenderingContext2D, node: Selecte
 }
 
 export function paintHero(ctx: CanvasRenderingContext2D, node: HeroNode, deps: Paint2DDep): void {
+  const alpha = node.alpha ?? 1;
+  const faded = alpha < 1;
+  if (faded) {
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+  }
   const variant = node.horseVariant;
   // The walk-cycle vertical squash applies to the on-foot hero sprite only --
   // drawHorseSprite() never took a scaleY. Mounted heroes bob but don't squash.
@@ -687,6 +770,7 @@ export function paintHero(ctx: CanvasRenderingContext2D, node: HeroNode, deps: P
     ctx.arc(node.markerWorld.x, node.markerWorld.y, SELECTED_HERO_RING_RADIUS, 0, Math.PI * 2);
     ctx.stroke();
   }
+  if (faded) ctx.restore();
 }
 
 export function paintCitySkybox(ctx: CanvasRenderingContext2D, node: CitySkyboxNode, deps: Paint2DDep, frame?: Paint2DFrame): void {
@@ -869,21 +953,60 @@ export function paintCityMine(ctx: CanvasRenderingContext2D, node: CityMineNode,
   ctx.restore();
 }
 
+// Sprite-only city-building draw, the survivor of paint2d/buildings.ts's
+// drawBuildingInto(): buildings render exclusively from `building.pixel.*`
+// sprites (the five procedural style leaves were deleted with the style
+// system), so a resolver miss draws nothing. The sizing quirk is carried over
+// verbatim: the `fitHeight` branch scales off `tw`, not `td`.
+function drawCitySpriteInto(
+  ctx: CanvasRenderingContext2D,
+  sprite: ResolvedSprite | undefined,
+  x: number,
+  y: number,
+  tw: number,
+  td: number,
+): void {
+  if (!sprite || !sprite.ready) return;
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  const drawable = sprite.drawable;
+  const dw = (drawable as HTMLImageElement).naturalWidth ?? (drawable as HTMLCanvasElement).width;
+  const dh = (drawable as HTMLImageElement).naturalHeight ?? (drawable as HTMLCanvasElement).height;
+  const desc = sprite.descriptor;
+  const aspect = dw / dh;
+  let sw: number;
+  let sh: number;
+  if (desc.sizing.kind === "fitWidth") {
+    sw = tw * desc.sizing.hexSizeMul;
+    sh = sw / aspect;
+  } else if (desc.sizing.kind === "fitHeight") {
+    sh = tw * desc.sizing.hexSizeMul;
+    sw = sh * aspect;
+  } else {
+    sw = tw * 0.85;
+    sh = (tw * 0.85) / aspect;
+  }
+  const dx = x - sw / 2;
+  const dy = desc.anchor === "center"
+    ? y - sh / 2 + (desc.anchorOffsetY ?? 0)
+    : y + td * 0.5 - sh + (desc.anchorOffsetY ?? 0);
+  ctx.drawImage(drawable, dx, dy, sw, sh);
+  ctx.restore();
+}
+
 export function paintCityBuilding(ctx: CanvasRenderingContext2D, node: CityBuildingNode, deps: Paint2DDep): void {
   const sprite = node.constructionStage
     ? deps.sprite.resolveSprite(`building.pixel.underConstruction.${node.constructionStage}`)
-    : deps.sprite.resolveSpriteForBuilding(node.style, node.buildingKind, node.level);
-  drawBuildingInto(
+    : node.farmStyle !== undefined
+      ? deps.sprite.resolveSprite(`building.${node.farmStyle}.${node.buildingKind}.${node.level}`)
+      : deps.sprite.resolveSpriteForBuilding(node.buildingKind, node.level);
+  drawCitySpriteInto(
     ctx,
     sprite,
     node.center.x,
     node.center.y,
     node.halfWidth * 2,
     node.halfHeight * 2,
-    node.buildingKind,
-    node.level,
-    node.ownerColor,
-    node.style,
   );
 }
 
@@ -917,17 +1040,13 @@ export function paintCityGhostBuilding(ctx: CanvasRenderingContext2D, node: City
   ctx.strokeStyle = node.valid ? CITY_GHOST_VALID_STROKE : CITY_GHOST_INVALID_STROKE;
   ctx.lineWidth = 3;
   ctx.strokeRect(node.center.x - node.halfWidth, node.center.y - node.halfHeight, node.halfWidth * 2, node.halfHeight * 2);
-  drawBuildingInto(
+  drawCitySpriteInto(
     ctx,
-    deps.sprite.resolveSpriteForBuilding(node.style, node.buildingKind, 1),
+    deps.sprite.resolveSpriteForBuilding(node.buildingKind, 1),
     node.center.x,
     node.center.y,
     node.halfWidth * 2,
     node.halfHeight * 2,
-    node.buildingKind,
-    1,
-    node.ownerColor,
-    node.style,
   );
   ctx.restore();
 }

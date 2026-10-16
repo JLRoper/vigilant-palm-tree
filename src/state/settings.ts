@@ -1,4 +1,5 @@
 import { HORSE_VARIANT_REGISTRY, type HorseVariantId, VALID_HORSE_VARIANTS } from "@heroes/engine";
+import { clampToolbarStyle, DEFAULT_TOOLBAR_STYLE, type ToolbarStyle } from "./toolbarThemes";
 
 export type HorseVariant = HorseVariantId;
 
@@ -14,10 +15,13 @@ export type ResourceStyle =
 
 export interface GameSettings {
   moveDurationMs: number;
+  enemyMoveDurationMs: number;
+  // Manual battle arena: per-hex walk-animation pace for BOTH sides' platoons
+  // (the AI's beats and the player's own glide share one dial). 0 = instant.
+  arenaMoveMsPerHex: number;
   resourceStyle: ResourceStyle;
   territoryBorderWidth: number;
   populationGrowthRate: number;
-  upgradePopulationGate: number;
   spriteVariant: number;
   cityBgOffsetX: number;
   cityBgOffsetY: number;
@@ -27,12 +31,22 @@ export interface GameSettings {
   // Log Message Panel (plan/2026-09-28-sse-event-push.md, use case 1):
   // reveal + fill the game-log panel with every streamed game_events row.
   showLogPanel: boolean;
+  toolbarStyle: ToolbarStyle;
+  maxZoomOutHexesWide: number;
 }
 
 const STORAGE_KEY = "heroesJs.settings";
 const MIN_MOVE_MS = 40;
 const MAX_MOVE_MS = 1000;
 const DEFAULT_MOVE_MS = 220;
+const MIN_ENEMY_MOVE_MS = 40;
+const MAX_ENEMY_MOVE_MS = 1000;
+const DEFAULT_ENEMY_MOVE_MS = 220;
+const MIN_ARENA_MOVE_MS_PER_HEX = 0;
+const MAX_ARENA_MOVE_MS_PER_HEX = 500;
+// Matches the arena AI's historical 90 ms/hex walk pace, so the default
+// behavior is byte-identical to before the setting existed.
+const DEFAULT_ARENA_MOVE_MS_PER_HEX = 90;
 const MIN_BORDER_WIDTH = 1.5;
 const MAX_BORDER_WIDTH = 6;
 const DEFAULT_BORDER_WIDTH = 1.5;
@@ -50,9 +64,6 @@ const DEFAULT_SPRITE_VARIANT = 1;
 const MIN_GROWTH_RATE = 0.01;
 const MAX_GROWTH_RATE = 0.50;
 const DEFAULT_GROWTH_RATE = 0.10;
-const MIN_UPGRADE_GATE = 0.25;
-const MAX_UPGRADE_GATE = 1.00;
-const DEFAULT_UPGRADE_GATE = 0.85;
 const MIN_BG_OFFSET = -500;
 const MAX_BG_OFFSET = 500;
 const DEFAULT_BG_OFFSET = 0;
@@ -60,6 +71,10 @@ const DEFAULT_BG_OFFSET = 0;
 const MIN_PARALLAX_LAYERS = 2;
 const MAX_PARALLAX_LAYERS = 4;
 const DEFAULT_PARALLAX_LAYERS = 4;
+
+const MIN_MAX_ZOOM_OUT_HEXES_WIDE = 20;
+const MAX_MAX_ZOOM_OUT_HEXES_WIDE = 34;
+const DEFAULT_MAX_ZOOM_OUT_HEXES_WIDE = 20;
 
 export const PARALLAX_SPEEDS: Record<number, number[]> = {
   2: [0.10, 1.00],
@@ -71,10 +86,11 @@ export { VALID_HORSE_VARIANTS, HORSE_VARIANT_REGISTRY };
 
 export const DEFAULT_SETTINGS: GameSettings = {
   moveDurationMs: DEFAULT_MOVE_MS,
+  enemyMoveDurationMs: DEFAULT_ENEMY_MOVE_MS,
+  arenaMoveMsPerHex: DEFAULT_ARENA_MOVE_MS_PER_HEX,
   resourceStyle: DEFAULT_RESOURCE_STYLE,
   territoryBorderWidth: DEFAULT_BORDER_WIDTH,
   populationGrowthRate: DEFAULT_GROWTH_RATE,
-  upgradePopulationGate: DEFAULT_UPGRADE_GATE,
   spriteVariant: DEFAULT_SPRITE_VARIANT,
   cityBgOffsetX: DEFAULT_BG_OFFSET,
   cityBgOffsetY: DEFAULT_BG_OFFSET,
@@ -82,6 +98,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   parallaxEnabled: false,
   parallaxLayerCount: DEFAULT_PARALLAX_LAYERS,
   showLogPanel: false,
+  toolbarStyle: DEFAULT_TOOLBAR_STYLE,
+  maxZoomOutHexesWide: DEFAULT_MAX_ZOOM_OUT_HEXES_WIDE,
 };
 
 let current: GameSettings = loadFromStorage();
@@ -95,6 +113,16 @@ export function settings(): GameSettings {
 export function clampMoveDurationMs(ms: number): number {
   if (!Number.isFinite(ms)) return DEFAULT_MOVE_MS;
   return Math.max(MIN_MOVE_MS, Math.min(MAX_MOVE_MS, Math.round(ms)));
+}
+
+export function clampEnemyMoveDurationMs(ms: number): number {
+  if (!Number.isFinite(ms)) return DEFAULT_ENEMY_MOVE_MS;
+  return Math.max(MIN_ENEMY_MOVE_MS, Math.min(MAX_ENEMY_MOVE_MS, Math.round(ms)));
+}
+
+export function clampArenaMoveMsPerHex(ms: number): number {
+  if (!Number.isFinite(ms)) return DEFAULT_ARENA_MOVE_MS_PER_HEX;
+  return Math.max(MIN_ARENA_MOVE_MS_PER_HEX, Math.min(MAX_ARENA_MOVE_MS_PER_HEX, Math.round(ms)));
 }
 
 export function clampBorderWidth(w: number): number {
@@ -111,12 +139,6 @@ export function clampResourceStyle(style: unknown): ResourceStyle {
 export function clampGrowthRate(r: number): number {
   if (!Number.isFinite(r)) return DEFAULT_GROWTH_RATE;
   const clamped = Math.max(MIN_GROWTH_RATE, Math.min(MAX_GROWTH_RATE, r));
-  return Math.round(clamped * 100) / 100;
-}
-
-export function clampUpgradeGate(g: number): number {
-  if (!Number.isFinite(g)) return DEFAULT_UPGRADE_GATE;
-  const clamped = Math.max(MIN_UPGRADE_GATE, Math.min(MAX_UPGRADE_GATE, g));
   return Math.round(clamped * 100) / 100;
 }
 
@@ -143,6 +165,24 @@ export function parallaxLayerCountBounds(): { min: number; max: number; default:
   return { min: MIN_PARALLAX_LAYERS, max: MAX_PARALLAX_LAYERS, default: DEFAULT_PARALLAX_LAYERS };
 }
 
+export function clampMaxZoomOutHexesWide(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return Math.max(
+      MIN_MAX_ZOOM_OUT_HEXES_WIDE,
+      Math.min(MAX_MAX_ZOOM_OUT_HEXES_WIDE, Math.round(v)),
+    );
+  }
+  return DEFAULT_MAX_ZOOM_OUT_HEXES_WIDE;
+}
+
+export function maxZoomOutHexesWideBounds(): { min: number; max: number; default: number } {
+  return {
+    min: MIN_MAX_ZOOM_OUT_HEXES_WIDE,
+    max: MAX_MAX_ZOOM_OUT_HEXES_WIDE,
+    default: DEFAULT_MAX_ZOOM_OUT_HEXES_WIDE,
+  };
+}
+
 export function bgOffsetBounds(): { min: number; max: number; default: number } {
   return { min: MIN_BG_OFFSET, max: MAX_BG_OFFSET, default: DEFAULT_BG_OFFSET };
 }
@@ -154,10 +194,11 @@ export function spriteVariantOptions(): readonly number[] {
 export function updateSettings(patch: Partial<GameSettings>): GameSettings {
   const next: GameSettings = {
     moveDurationMs: clampMoveDurationMs(patch.moveDurationMs ?? current.moveDurationMs),
+    enemyMoveDurationMs: clampEnemyMoveDurationMs(patch.enemyMoveDurationMs ?? current.enemyMoveDurationMs),
+    arenaMoveMsPerHex: clampArenaMoveMsPerHex(patch.arenaMoveMsPerHex ?? current.arenaMoveMsPerHex),
     resourceStyle: clampResourceStyle(patch.resourceStyle ?? current.resourceStyle),
     territoryBorderWidth: clampBorderWidth(patch.territoryBorderWidth ?? current.territoryBorderWidth),
     populationGrowthRate: clampGrowthRate(patch.populationGrowthRate ?? current.populationGrowthRate),
-    upgradePopulationGate: clampUpgradeGate(patch.upgradePopulationGate ?? current.upgradePopulationGate),
     spriteVariant: clampSpriteVariant(patch.spriteVariant ?? current.spriteVariant),
     cityBgOffsetX: clampBgOffset(patch.cityBgOffsetX ?? current.cityBgOffsetX),
     cityBgOffsetY: clampBgOffset(patch.cityBgOffsetY ?? current.cityBgOffsetY),
@@ -171,6 +212,8 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
     showLogPanel: typeof patch.showLogPanel === "boolean"
       ? patch.showLogPanel
       : current.showLogPanel,
+    toolbarStyle: clampToolbarStyle(patch.toolbarStyle ?? current.toolbarStyle),
+    maxZoomOutHexesWide: clampMaxZoomOutHexesWide(patch.maxZoomOutHexesWide ?? current.maxZoomOutHexesWide),
   };
   current = next;
   try {
@@ -189,6 +232,14 @@ export function settingsBounds(): { min: number; max: number; default: number } 
   return { min: MIN_MOVE_MS, max: MAX_MOVE_MS, default: DEFAULT_MOVE_MS };
 }
 
+export function enemyMoveDurationBounds(): { min: number; max: number; default: number } {
+  return { min: MIN_ENEMY_MOVE_MS, max: MAX_ENEMY_MOVE_MS, default: DEFAULT_ENEMY_MOVE_MS };
+}
+
+export function arenaMoveMsPerHexBounds(): { min: number; max: number; default: number } {
+  return { min: MIN_ARENA_MOVE_MS_PER_HEX, max: MAX_ARENA_MOVE_MS_PER_HEX, default: DEFAULT_ARENA_MOVE_MS_PER_HEX };
+}
+
 export function borderWidthBounds(): { min: number; max: number; default: number } {
   return { min: MIN_BORDER_WIDTH, max: MAX_BORDER_WIDTH, default: DEFAULT_BORDER_WIDTH };
 }
@@ -201,10 +252,6 @@ export function growthRateBounds(): { min: number; max: number; default: number 
   return { min: MIN_GROWTH_RATE, max: MAX_GROWTH_RATE, default: DEFAULT_GROWTH_RATE };
 }
 
-export function upgradeGateBounds(): { min: number; max: number; default: number } {
-  return { min: MIN_UPGRADE_GATE, max: MAX_UPGRADE_GATE, default: DEFAULT_UPGRADE_GATE };
-}
-
 function loadFromStorage(): GameSettings {
   if (typeof localStorage === "undefined") return { ...DEFAULT_SETTINGS };
   try {
@@ -213,10 +260,11 @@ function loadFromStorage(): GameSettings {
     const parsed = JSON.parse(raw) as Partial<GameSettings>;
     return {
       moveDurationMs: clampMoveDurationMs(parsed.moveDurationMs ?? DEFAULT_MOVE_MS),
+      enemyMoveDurationMs: clampEnemyMoveDurationMs(parsed.enemyMoveDurationMs ?? DEFAULT_ENEMY_MOVE_MS),
+      arenaMoveMsPerHex: clampArenaMoveMsPerHex(parsed.arenaMoveMsPerHex ?? DEFAULT_ARENA_MOVE_MS_PER_HEX),
       resourceStyle: clampResourceStyle(parsed.resourceStyle),
       territoryBorderWidth: clampBorderWidth(parsed.territoryBorderWidth ?? DEFAULT_BORDER_WIDTH),
       populationGrowthRate: clampGrowthRate(parsed.populationGrowthRate ?? DEFAULT_GROWTH_RATE),
-      upgradePopulationGate: clampUpgradeGate(parsed.upgradePopulationGate ?? DEFAULT_UPGRADE_GATE),
       spriteVariant: clampSpriteVariant(parsed.spriteVariant),
       cityBgOffsetX: clampBgOffset(parsed.cityBgOffsetX ?? DEFAULT_BG_OFFSET),
       cityBgOffsetY: clampBgOffset(parsed.cityBgOffsetY ?? DEFAULT_BG_OFFSET),
@@ -230,6 +278,8 @@ function loadFromStorage(): GameSettings {
       showLogPanel: typeof parsed.showLogPanel === "boolean"
         ? parsed.showLogPanel
         : false,
+      toolbarStyle: clampToolbarStyle(parsed.toolbarStyle),
+      maxZoomOutHexesWide: clampMaxZoomOutHexesWide(parsed.maxZoomOutHexesWide),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

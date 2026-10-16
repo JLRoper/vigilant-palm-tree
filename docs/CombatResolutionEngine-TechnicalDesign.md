@@ -1,12 +1,10 @@
-# Combat Resolution Engine — Technical Design (as built so far)
+# Combat Resolution Engine — Historical Technical Design
 
-**Status:** In progress, uncommitted on `feature/combat-resolution-engine`. Describes
-the code that exists in the working tree today, not the target/finished
-design — see [`../feature-plans/CombatResolutionEngine.md`](../feature-plans/CombatResolutionEngine.md) for the
-locked design decisions this implements. Update this doc as the
-implementation changes; it should always describe what's actually there.
+<!-- docs:verified 2026-10-11 -->
 
-**Framing:** the resolver at [`shared/combat/resolveBattle.ts`](../shared/combat/resolveBattle.ts) documented here is the **temporary default auto-resolver** that runs server-side via the `ResolveBattle` command on `POST /api/games/:name/commands` whenever heroes collide on the adventure map. It is auto in the sense that no player drives it; the eventual target is the **tactical (manual) resolver** at [`shared/combat/manualBattle.ts`](../shared/combat/manualBattle.ts) + the dev Test Battle arena at [`src/views/manualBattleArena.ts`](../src/views/manualBattleArena.ts), which is the work this engine feeds into. See [`./army.md`](./army.md) for the full status.
+**Status:** Historical design/specification. The auto-resolver, manual battle arena, settlement-garrison battles, and hero outcome handling are shipped. Current references are [`army.md`](./army.md), [`heroes.md`](./heroes.md), and [`battle-view-architecture.md`](./battle-view-architecture.md); current resolver code is `packages/engine/src/combat/resolveBattle.ts`, with the arena under `src/screens/combat/arena/`.
+
+**History note:** The algorithm and decisions below are retained from the earlier shared-combat layout. References to `shared/combat/` and `src/views/` describe that historical proposal, not current source paths.
 
 ## 1. Summary
 
@@ -226,7 +224,9 @@ today only from the Test Battle sandbox (`src/views/testBattleSetup.ts`).
   does *not* consume its action; attacking (or `endPlatoonTurn`) does.
   `getMovementPath()` returns the hex-by-hex route to a destination —
   informational only, for animating the walk; `movePlatoon()` still takes a
-  destination and re-derives the cost itself.
+  destination and re-derives the cost itself. Player moves are now rendered
+  as a walk along this route too (2026-10-04): the "so the UI can animate"
+  comment serves both sides, not just the AI's `executeAiPlan()` walk.
 - **Turn order is strict alternation**, enforced by the arena rather than the
   engine: one player platoon acts, then one AI platoon, back and forth. Every
   path by which a player platoon can finish — attacking, bumping into melee,

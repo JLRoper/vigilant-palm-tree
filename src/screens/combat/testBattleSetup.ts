@@ -9,7 +9,7 @@ import { catalogFailed, loadUnitCatalog } from "../../data/unitCatalog";
 import type { BattleSide } from "@heroes/engine";
 import type { Platoon, UnitType } from "@heroes/engine";
 import { menuTheme, openCenteredModal, styleButton } from "@screens/shared/menu";
-import { launchView, registerView } from "@screens/shared/viewLauncher";
+import { openView, registerView } from "@screens/shared/viewLauncher";
 
 registerView("testBattleSetup", () => openTestBattleSetup());
 
@@ -162,7 +162,7 @@ function buildSetup(modal: ReturnType<typeof openCenteredModal>, units: UnitType
   styleButton(startBtn, true);
   startBtn.addEventListener("click", () => {
     modal.close();
-    launchView("manualBattleArena", { playerPlatoons, aiPlatoons, unitTypes, humanSide });
+    void openView("manualBattleArena", { playerPlatoons, aiPlatoons, unitTypes, humanSide });
   });
   buttonRow.appendChild(startBtn);
 

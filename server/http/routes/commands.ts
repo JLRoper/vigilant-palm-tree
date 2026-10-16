@@ -1,8 +1,9 @@
 import { Router, type Request } from "express";
 import type { BuildingDef, BuildingKind, BuildingUpgradeRequest, Command, Platoon } from "@heroes/contracts";
-import { ARMY_STACK_SLOTS, VALID_HORSE_VARIANTS } from "@heroes/engine";
+import { ARMY_STACK_SLOTS, VALID_HORSE_VARIANTS, isTradeRouteEndpoint, isTradeRoutePayload } from "@heroes/engine";
 import { handleCommandTransactional, createLiveCommandDeps, type LiveCommandDeps } from "../../app/commandHandler";
 import { touchSeat } from "../../app/dropPolicy";
+import { pool } from "../../persistence/db";
 import { attachAuth } from "../../auth";
 import { attachPlayerSeat } from "../../middleware/attachPlayerSeat";
 
@@ -88,15 +89,9 @@ function isBuildingUpgradeRequest(v: unknown): boolean {
   );
 }
 
-// Matches the old /trade route's own VALID_RESOURCES list (server/routes.ts)
-// -- "food" is deliberately excluded, see
-// packages/contracts/src/commands/tradeResources.ts's header comment.
-const VALID_TRADE_RESOURCES = ["wood", "stone", "iron", "arcane"] as const;
-
 // SubmitBattleResult's outcome enum — mirrors
 // packages/contracts/src/commands/submitBattleResult.ts's
-// SubmittedBattleOutcome (type-only there, so a runtime list lives here;
-// same pattern as VALID_TRADE_RESOURCES above).
+// SubmittedBattleOutcome (type-only there, so a runtime list lives here).
 const VALID_SUBMITTED_OUTCOMES = [
   "attackerWon",
   "defenderWon",
@@ -135,6 +130,59 @@ function isSurvivorStacks(v: unknown): v is Platoon[] {
 
 function isNonNegativeInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= 0;
+}
+
+// BankGold's per-move gold ceiling (see its parseCommand branch). Generous
+// relative to the biggest legal move (a level-3 bank's 15,000g pot cap), tight
+// enough that a nonsense value is a clean 400 instead of a number the reducer
+// has to reject.
+const MAX_BANK_GOLD_MOVE = 1_000_000;
+
+// PendingOut entry ceiling, mirroring `construction`'s daysRemaining <= 30
+// bound: a maturesOnDay further out than this is not something a 7-day
+// countdown can produce, so the entry is malformed. Kept finite so a body
+// can't smuggle an unbounded array through this gate.
+const MAX_BANK_PENDING_ENTRIES = 64;
+const MAX_BANK_MATURES_ON_DAY = 100_000;
+
+// BuildingDef.bank shape gate. `undefined` is valid (a bank with no pot yet --
+// absent means no pot, mirroring `construction`). Present means a real pot:
+// non-negative integer gold plus an optional pendingOut array of matured-countdown
+// entries, each a non-negative integer gold and a maturesOnDay integer. Bound
+// like `construction`'s daysRemaining so a spoofed pot can't smuggle an
+// unbounded array or a negative/absurd balance into persisted state.
+function isBankPot(v: unknown): boolean {
+  if (v === undefined) return true;
+  if (!v || typeof v !== "object") return false;
+  const pot = v as { gold?: unknown; pendingOut?: unknown };
+  if (!isNonNegativeInt(pot.gold)) return false;
+  if (pot.pendingOut === undefined) return true;
+  if (!Array.isArray(pot.pendingOut) || pot.pendingOut.length > MAX_BANK_PENDING_ENTRIES) return false;
+  return pot.pendingOut.every((e) => {
+    if (!e || typeof e !== "object") return false;
+    const entry = e as { gold?: unknown; maturesOnDay?: unknown };
+    return isNonNegativeInt(entry.gold) && isNonNegativeInt(entry.maturesOnDay) &&
+      (entry.maturesOnDay as number) <= MAX_BANK_MATURES_ON_DAY;
+  });
+}
+
+/**
+ * PlaceBuildings' per-entry passthrough. The gate above validates every known
+ * field; this copies the entry and re-attaches the pot explicitly so `bank` can
+ * never be lost by a future projection of the BuildingDef (a bank pot is
+ * state, not construction metadata). Entries without a pot are returned
+ * untouched, so a pre-bank building never gains the key.
+ */
+function passthroughBuilding(v: unknown): BuildingDef {
+  const raw = v as BuildingDef;
+  if (raw.bank === undefined) return raw;
+  return {
+    ...raw,
+    bank: {
+      gold: raw.bank.gold,
+      pendingOut: raw.bank.pendingOut.map((e) => ({ gold: e.gold, maturesOnDay: e.maturesOnDay })),
+    },
+  };
 }
 
 // Real per-field validation, not just a `kind` check -- a malformed
@@ -186,6 +234,36 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     };
   }
 
+  if (b.kind === "BankGold") {
+    // amount is bounded at 1_000_000 gold: a level-3 bank's pot cap is 15,000
+    // and no legal deposit/withdrawal can exceed that, so anything above it is
+    // a malformed body rather than a request the reducer would have to
+    // round-reject. The treasury cap is far lower, which is a 409
+    // (not_enough_gold), not a 400.
+    if (
+      typeof b.settlementId !== "string" ||
+      b.settlementId.length === 0 ||
+      !isNonNegativeInt(b.gx) ||
+      !isNonNegativeInt(b.gy) ||
+      !isNonNegativeInt(b.amount) ||
+      b.amount <= 0 ||
+      b.amount > MAX_BANK_GOLD_MOVE ||
+      (b.direction !== "deposit" && b.direction !== "withdraw")
+    ) {
+      return null;
+    }
+    return {
+      kind: "BankGold",
+      gameName,
+      actor: b.actor,
+      settlementId: b.settlementId,
+      gx: b.gx,
+      gy: b.gy,
+      amount: b.amount,
+      direction: b.direction,
+    };
+  }
+
   if (b.kind === "EndTurn") {
     if (b.growthRate !== undefined && typeof b.growthRate !== "number") {
       return null;
@@ -198,35 +276,30 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     };
   }
 
-  if (b.kind === "TradeResources") {
-    if (
-      typeof b.fromSettlementId !== "string" ||
-      typeof b.toSettlementId !== "string" ||
-      typeof b.resource !== "string" ||
-      !VALID_TRADE_RESOURCES.includes(b.resource as (typeof VALID_TRADE_RESOURCES)[number]) ||
-      typeof b.amount !== "number" ||
-      !Number.isInteger(b.amount) ||
-      b.amount <= 0
-    ) {
-      return null;
-    }
-    return {
-      kind: "TradeResources",
-      gameName,
-      actor: b.actor,
-      fromSettlementId: b.fromSettlementId,
-      toSettlementId: b.toSettlementId,
-      resource: b.resource as (typeof VALID_TRADE_RESOURCES)[number],
-      amount: b.amount,
-    };
-  }
-
   if (b.kind === "ResolveBattle") {
     if (typeof b.attackerId !== "string" || typeof b.defenderId !== "string") {
       return null;
     }
     return {
       kind: "ResolveBattle",
+      gameName,
+      actor: b.actor,
+      attackerId: b.attackerId,
+      defenderId: b.defenderId,
+    };
+  }
+
+  if (b.kind === "EnterBattle") {
+    if (
+      typeof b.attackerId !== "string" ||
+      b.attackerId.length === 0 ||
+      typeof b.defenderId !== "string" ||
+      b.defenderId.length === 0
+    ) {
+      return null;
+    }
+    return {
+      kind: "EnterBattle",
       gameName,
       actor: b.actor,
       attackerId: b.attackerId,
@@ -334,12 +407,13 @@ function parseCommand(body: unknown, gameName: string): Command | null {
 
   if (b.kind === "PlaceBuildings") {
     // Per-building shape gate, mirroring isBuildingUpgradeRequest's
-    // permissiveness: `kind`/`style` are non-empty strings (the handler
-    // resolves semantics), coordinates are ints, levels are 1..3, and an
-    // optional construction object must carry a non-negative integer
-    // daysRemaining -- though applyPlaceBuildings() recomputes that for
-    // brand-new placements server-side anyway, so a spoofed 0-day value
-    // only affects edits to buildings the server already knows about.
+    // permissiveness: `kind` is a non-empty string and `style`, when present,
+    // is one too (the handler resolves semantics), coordinates are ints,
+    // levels are 1..3, and an optional construction object must carry a
+    // non-negative integer daysRemaining -- though applyPlaceBuildings()
+    // recomputes that for brand-new placements server-side anyway, so a
+    // spoofed 0-day value only affects edits to buildings the server already
+    // knows about.
     if (
       typeof b.settlementId !== "string" ||
       !Array.isArray(b.buildings) ||
@@ -347,7 +421,7 @@ function parseCommand(body: unknown, gameName: string): Command | null {
         if (!v || typeof v !== "object") return false;
         const d = v as {
           gx: unknown; gy: unknown; kind: unknown; level: unknown;
-          style: unknown; w?: unknown; h?: unknown; construction?: unknown;
+          style: unknown; w?: unknown; h?: unknown; construction?: unknown; bank?: unknown;
         };
         if (
           !Number.isInteger(d.gx) ||
@@ -355,7 +429,7 @@ function parseCommand(body: unknown, gameName: string): Command | null {
           typeof d.kind !== "string" || d.kind.length === 0 ||
           typeof d.level !== "number" || !Number.isInteger(d.level) ||
           d.level < 1 || d.level > 3 ||
-          typeof d.style !== "string" || d.style.length === 0
+          (d.style !== undefined && (typeof d.style !== "string" || d.style.length === 0))
         ) {
           return false;
         }
@@ -366,7 +440,7 @@ function parseCommand(body: unknown, gameName: string): Command | null {
           const days = (d.construction as { daysRemaining?: unknown }).daysRemaining;
           if (!isNonNegativeInt(days) || (days as number) > 30) return false;
         }
-        return true;
+        return isBankPot(d.bank);
       })
     ) {
       return null;
@@ -376,7 +450,7 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       gameName,
       actor: b.actor,
       settlementId: b.settlementId,
-      buildings: b.buildings as BuildingDef[],
+      buildings: b.buildings.map(passthroughBuilding),
       ...(b.initialLayout === true ? { initialLayout: true } : {}),
     };
   }
@@ -425,12 +499,18 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     ) {
       return null;
     }
+    // Phase 1 treasury-wagons split: optional slot discriminator.
+    const slot = b.slot;
+    if (slot !== undefined && slot !== "cargo" && slot !== "treasury") {
+      return null;
+    }
     return {
       kind: "AssignWagons",
       gameName,
       actor: b.actor,
       heroId: b.heroId,
       delta: b.delta,
+      ...(slot !== undefined ? { slot } : {}),
     };
   }
 
@@ -444,23 +524,36 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     ) {
       return null;
     }
+    // Phase 1 treasury-wagons split: optional pool slot discriminator.
+    // (Named `slot`, not `kind` -- `kind` is the body's command tag.)
+    const slot = b.slot;
+    if (slot !== undefined && slot !== "cargo" && slot !== "treasury") {
+      return null;
+    }
     return {
       kind: "BuyWagons",
       gameName,
       actor: b.actor,
       settlementId: b.settlementId,
       count: b.count,
+      ...(slot !== undefined ? { slot } : {}),
     };
   }
 
   const VALID_WAGON_RESOURCES = ["wood", "stone", "iron", "arcane", "food"] as const;
 
   if (b.kind === "CreateTradeRoute") {
+    // Endpoints and payload are validated with @heroes/engine's runtime
+    // guards (hydrate.ts's isTradeRouteEndpoint/isTradeRoutePayload) so the
+    // wire gate and the JSONB normalizer share one definition of the two
+    // discriminated shapes. Legacy bodies (flat fromSettlementId/
+    // toSettlementId/resource) are NOT accepted here -- persisted rows are
+    // normalized in hydrate, but the client ships in lockstep with this
+    // route, so an old body shape is malformed, not legacy.
     if (
-      typeof b.fromSettlementId !== "string" ||
-      typeof b.toSettlementId !== "string" ||
-      typeof b.resource !== "string" ||
-      !VALID_WAGON_RESOURCES.includes(b.resource as (typeof VALID_WAGON_RESOURCES)[number]) ||
+      !isTradeRouteEndpoint(b.from) ||
+      !isTradeRouteEndpoint(b.to) ||
+      !isTradeRoutePayload(b.payload) ||
       typeof b.wagons !== "number" ||
       !Number.isInteger(b.wagons) ||
       b.wagons <= 0 ||
@@ -472,9 +565,9 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       kind: "CreateTradeRoute",
       gameName,
       actor: b.actor,
-      fromSettlementId: b.fromSettlementId,
-      toSettlementId: b.toSettlementId,
-      resource: b.resource as (typeof VALID_WAGON_RESOURCES)[number],
+      from: b.from,
+      to: b.to,
+      payload: b.payload,
       wagons: b.wagons,
     };
   }
@@ -514,20 +607,11 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     // UpgradeSettlement case). A client that sends one is ignored, not
     // rejected, same as any other extra field on a command body.
     //
-    // upgradePopulationGate IS trusted from the client (see
-    // packages/contracts/src/commands/upgradeSettlement.ts's header for
-    // why that's a deliberate, temporary exception), but only within its
-    // actual domain: it's a fraction of the level's population cap
-    // (packages/engine/src/settlement/upgradeSettlement.ts multiplies it
-    // by POP_BY_LEVEL), so anything outside 0..1 is malformed, not just
-    // unfavorable. 0 is allowed -- it means "no population requirement".
-    if (
-      typeof b.settlementId !== "string" ||
-      typeof b.upgradePopulationGate !== "number" ||
-      !Number.isFinite(b.upgradePopulationGate) ||
-      b.upgradePopulationGate < 0 ||
-      b.upgradePopulationGate > 1
-    ) {
+    // Same for the former upgradePopulationGate field (issue #153): the
+    // population requirement is server-owned now (UPGRADE_POPULATION_GATE
+    // in packages/engine/src/settlement/upgradeSettlement.ts), so a stale
+    // client that still sends the field is ignored, not rejected.
+    if (typeof b.settlementId !== "string") {
       return null;
     }
     return {
@@ -535,7 +619,6 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       gameName,
       actor: b.actor,
       settlementId: b.settlementId,
-      upgradePopulationGate: b.upgradePopulationGate,
     };
   }
 
@@ -709,6 +792,52 @@ function parseCommand(body: unknown, gameName: string): Command | null {
   return null;
 }
 
+// D10 (plan/2026-09-30-server-side-ai-actor.md): client-origin commands
+// naming an AI seat of a server-driven game are rejected before any state
+// is touched -- the driver is the only legitimate actor for those seats,
+// and old-browser AI-seat commands (anonymous callers fully trust
+// command.actor) must not race it. Checked AFTER actor_mismatch (a
+// signed-in caller asserting a seat that isn't theirs is rejected first)
+// and BEFORE touchSeat, so AI seats never enter the presence map
+// (neutralizing the dropPolicy turn-skip hazard class by construction).
+// One cheap cached read per game (attachPlayerSeat's membership-cache
+// pattern: 5s TTL, in-memory map keyed by game name); the driver and
+// dropPolicy dispatch internally and never pass through this route.
+const AI_SEAT_CACHE_TTL_MS = 5_000;
+
+interface AiSeatInfo {
+  serverDriven: boolean;
+  aiSeats: ReadonlySet<number>;
+  loadedAt: number;
+}
+
+const aiSeatCache = new Map<string, AiSeatInfo>();
+
+async function loadAiSeatInfo(gameName: string): Promise<AiSeatInfo | null> {
+  const cached = aiSeatCache.get(gameName);
+  if (cached && Date.now() - cached.loadedAt < AI_SEAT_CACHE_TTL_MS) {
+    return cached;
+  }
+  const r = await pool.query<{ ai_driver: string | null; players: { id: number; faction: string }[] | null }>(
+    `SELECT (lobby->>'aiDriver') AS ai_driver, players FROM games WHERE name = $1`,
+    [gameName],
+  );
+  if (r.rowCount === 0) return null;
+  const players = r.rows[0].players ?? [];
+  const info: AiSeatInfo = {
+    serverDriven: r.rows[0].ai_driver === "server",
+    aiSeats: new Set(players.filter((p) => p.faction === "ai").map((p) => p.id)),
+    loadedAt: Date.now(),
+  };
+  aiSeatCache.set(gameName, info);
+  return info;
+}
+
+/** Test/cache hook: drop the cached ai-seat info for one game (POST /games recreations). */
+export function invalidateAiSeatCache(gameName: string): void {
+  aiSeatCache.delete(gameName);
+}
+
 // req.params is typed explicitly here because this router is mounted by
 // routes.ts on a path that carries :name ("/games/:name/commands") --
 // Express's own typings only see this router's own "/" pattern, not its
@@ -729,6 +858,11 @@ commandsRouter.post("/", async (req: Request<{ name: string }>, res) => {
   // back to trusting command.actor, same as the app worked before #179.
   if (req.playerSeat !== undefined && command.actor !== req.playerSeat) {
     res.status(403).json({ error: "actor_mismatch" });
+    return;
+  }
+  const aiSeatInfo = await loadAiSeatInfo(gameName);
+  if (aiSeatInfo?.serverDriven && aiSeatInfo.aiSeats.has(command.actor)) {
+    res.status(403).json({ error: "ai_seat_command_forbidden" });
     return;
   }
   // Drop-policy heartbeat (docs/multiplayer.md, shipped 2026-09-27): a
@@ -768,8 +902,6 @@ commandsRouter.post("/", async (req: Request<{ name: string }>, res) => {
       activePlayerId: result.activePlayerId,
       players: result.players,
       tradeRoutes: result.tradeRoutes,
-      fromSettlement: result.fromSettlement,
-      toSettlement: result.toSettlement,
       attackerHero: result.attackerHero,
       defenderHero: result.defenderHero,
       attackerVerdict: result.attackerVerdict,

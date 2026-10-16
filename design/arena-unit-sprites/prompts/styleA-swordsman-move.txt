@@ -1,0 +1,5 @@
+Side-view pixel art game asset of a single fantasy battle unit, matching the attached reference image exactly in style: same chunky pixel size, same thick dark outlines around every shape, same slightly desaturated color palette, same clean fully transparent background, square 1:1 canvas.
+
+Subject: the same mail-clad foot soldier running to the right: knees bent in a full stride, longsword held low behind him, shield raised forward, slight forward lean.
+
+Single centered figure facing right, full body visible from head to feet, filling about 75% of the canvas height, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.

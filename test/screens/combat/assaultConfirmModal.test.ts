@@ -61,6 +61,9 @@ class MockElement {
   style: Record<string, string> = {};
   textContent = "";
   title = "";
+  // openCenteredModal marks its wrapper with a data attribute so global
+  // shortcuts (the toolbar's accelerators) can tell a modal owns the keyboard.
+  dataset: Record<string, string> = {};
   private readonly listeners = new Map<string, Array<() => void>>();
 
   constructor(tagName: string) {

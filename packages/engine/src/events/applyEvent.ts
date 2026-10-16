@@ -1,26 +1,88 @@
-import type { EngineEvent, GameState, HeroState } from "@heroes/contracts";
+import type {
+  EngineEvent,
+  GameState,
+  HeroState,
+  PlayerSeat,
+  TradeRouteEndpoint,
+  TradeRouteId,
+  TradeRoutePayload,
+  TradeRouteState,
+} from "@heroes/contracts";
 import { transferGold } from "../economy/transfer";
-import { tradeResources } from "../economy/trade";
+import { depositIntoBank, requestBankWithdrawal } from "../economy/bank";
 import { setAutoTrade } from "../settlement/autoTrade";
 import { reorderStack } from "../hero/stacks";
 import { captureSettlement } from "../settlement/capture";
 import { startTownHallUpgrade } from "../settlement/upgradeTownHall";
 import { depositIntoGarrison } from "../settlement/recruitUnits";
 import { transferUnits } from "../settlement/transferUnits";
+import { startBattle } from "../turn/phases";
 import { settlementStacks } from "../units";
+import { isTradeRouteEndpoint, isTradeRoutePayload, legacyTradeRouteShape } from "../hydrate";
 
 // Phase 5.A (#146): the reducer the event-cursor client sync applies each
-// polled EngineEvent through. Six variants carry only the *fact* of a change
-// and not the derived state it produced (TurnEnded's production/upkeep/
-// movement reset, BattleResolved's troop losses, HeroRecruited's starting
-// stacks, the rng-derived rates behind SettlementUpgradeStarted) -- those
-// return "resync" so the caller refetches rather than guesses.
+// polled EngineEvent through. Thirteen variants carry only the *fact* of a
+// change and not the derived state it produced (TurnEnded's production/
+// upkeep/movement reset, BattleResolved's troop losses, HeroRecruited's
+// starting stacks, the rng-derived rates behind SettlementUpgradeStarted) --
+// those return "resync" so the caller refetches rather than guesses. The
+// trade/wagon/building kinds (TradeRouteUpdated/Removed, Wagons*,
+// BuildingsPlaced, ResourcesTransferred) carry intentionally minimal
+// payloads: their state effects are not payload-derivable either, so they
+// land in the same resync arm (and are classified "ignore" for the sync
+// layer in ENGINE_EVENT_SYNC_CLASS below). TradeRouteCreated is the one
+// exception: applyTradeRouteCreated below reconstructs its state by
+// targeted construction (the applyUnitsRecruited pattern) because the
+// server derives route ids from a counter a replay cannot re-derive from
+// the event alone, so a reducer re-run could not reproduce the event's
+// routeId -- the applier builds the route with the event's routeId
+// verbatim instead (normalizing both the current endpoint/payload event
+// shape and the legacy flat rows still in the events table).
 export type EngineEventOutcome = "applied" | "noop" | "resync";
 
 export interface ApplyEngineEventResult {
   state: GameState;
   outcome: EngineEventOutcome;
 }
+
+export type EngineEventSyncClass = "apply" | "resync" | "ignore";
+
+// Declarative classification of every EngineEvent variant for the client
+// sync layer (src/io/multiplayerSync.ts derives its admitted-kinds set from
+// this). The Record<EngineEvent["type"], ...> annotation makes adding a new
+// EngineEvent variant without classifying it here a compile error -- that is
+// the point. This registry is data only: applyEngineEvent's switch below is
+// NOT driven from it and keeps its own exhaustive default. "ignore" means
+// the server may append the kind, but its state effects are not
+// payload-derivable, so the client sync skips it and the effects arrive at
+// the TurnEnded/poll resync boundary.
+export const ENGINE_EVENT_SYNC_CLASS: Record<EngineEvent["type"], EngineEventSyncClass> = {
+  HeroMoved: "apply",
+  GoldTransferred: "apply",
+  BankGoldMoved: "apply",
+  TurnEnded: "resync",
+  BattleResolved: "resync",
+  BattleOffered: "apply",
+  HeroRecruited: "resync",
+  TownHallUpgradeStarted: "apply",
+  AutoTradeToggled: "apply",
+  StackReordered: "apply",
+  SettlementCaptured: "apply",
+  CharterStarted: "resync",
+  BuildingUpgradeStarted: "resync",
+  SettlementUpgradeStarted: "resync",
+  CharterTravelAdvanced: "apply",
+  BuildingsPlaced: "ignore",
+  ResourcesTransferred: "ignore",
+  WagonsAssigned: "ignore",
+  WagonsBought: "ignore",
+  TradeRouteCreated: "apply",
+  TradeRouteUpdated: "ignore",
+  TradeRouteRemoved: "ignore",
+  UnitsRecruited: "apply",
+  UnitsTransferred: "apply",
+  SettlementBattleResolved: "resync",
+};
 
 function resync(state: GameState): ApplyEngineEventResult {
   return { state, outcome: "resync" };
@@ -139,6 +201,147 @@ function applyUnitsTransferred(
   return { state: result.state, outcome: "applied" };
 }
 
+// TradeRouteCreated's payload is enough to rebuild the route record, but a
+// reducer re-run is not an option: createTradeRoute() derives the route id
+// from state.nextTradeRouteId, so the server's id is not reproducible from
+// hydrated state. The applier therefore builds the route with the event's
+// routeId verbatim (the applyUnitsRecruited targeted-construction
+// pattern), debits the actor's unassigned wagons exactly as the reducer
+// does, and bumps the counter monotonically past the event's id so a later
+// reducer-created id cannot collide with it. An exact-tuple duplicate (id,
+// endpoint pair, payload, wagons, no caravan yet) is what an
+// already-applied event looks like -- the full-tuple match, not the id
+// alone, is what makes the noop correct. Ownership is not re-checked: the
+// event is authoritative history. Endpoint EXISTENCE is: a dead hero
+// endpoint (either side) means this state has drifted or the route
+// outlived its endpoint -- a resync, never a noop (the same rule keeps a
+// missing settlement endpoint a resync).
+function sameEndpoint(a: TradeRouteEndpoint, b: TradeRouteEndpoint): boolean {
+  return a.kind === b.kind && a.id === b.id;
+}
+
+function samePayload(a: TradeRoutePayload, b: TradeRoutePayload): boolean {
+  if (a.kind === "gold" || b.kind === "gold") return a.kind === b.kind;
+  return a.resource === b.resource;
+}
+
+function applyTradeRouteCreated(
+  state: GameState,
+  actor: PlayerSeat,
+  routeId: TradeRouteId,
+  from: TradeRouteEndpoint,
+  to: TradeRouteEndpoint,
+  payload: TradeRoutePayload,
+  wagons: number,
+): ApplyEngineEventResult {
+  // Hero-existence check first (the dead-hero rule): a dead hero endpoint
+  // must resync, never noop -- even when a same-id route already exists.
+  if (from.kind === "hero" && !state.heroes[from.id]) return resync(state);
+  if (to.kind === "hero" && !state.heroes[to.id]) return resync(state);
+
+  const routes = state.tradeRoutes ?? [];
+  const existing = routes.find((r) => r.id === routeId);
+  if (
+    existing &&
+    sameEndpoint(existing.from, from) &&
+    sameEndpoint(existing.to, to) &&
+    samePayload(existing.payload, payload) &&
+    existing.wagons === wagons &&
+    existing.caravan === null
+  ) {
+    return { state, outcome: "noop" };
+  }
+  if (from.kind === "settlement" && !state.settlements[from.id]) return resync(state);
+  if (to.kind === "settlement" && !state.settlements[to.id]) return resync(state);
+  const player = state.players.find((p) => p.id === actor);
+  if (!player) return resync(state);
+  const unassigned = player.wagonsUnassigned ?? 0;
+  if (!existing && wagons > unassigned) return resync(state);
+  const route: TradeRouteState = {
+    id: routeId,
+    from,
+    to,
+    payload,
+    wagons,
+    caravan: null,
+    // The event's actor is the creating seat: the replay carries the same
+    // ownership stamp createTradeRoute writes, so remote seats derive the
+    // same route owner the acting client (and the server) hold.
+    ownerId: actor,
+  };
+  const suffix = Number.parseInt(routeId.replace(/^route/, ""), 10);
+  const derived = Number.isNaN(suffix) ? 0 : suffix + 1;
+  return {
+    state: {
+      ...state,
+      tradeRoutes: existing ? routes.map((r) => (r.id === routeId ? route : r)) : [...routes, route],
+      nextTradeRouteId: Math.max(state.nextTradeRouteId ?? 0, derived),
+      players: state.players.map((p) =>
+        p.id === actor ? { ...p, wagonsUnassigned: unassigned - wagons } : p,
+      ),
+      dirty: true,
+    },
+    outcome: "applied",
+  };
+}
+
+// BankGoldMoved carries everything the reducer needs (cell, amount,
+// direction), so the replay is a straight re-run -- the GoldTransferred shape,
+// with its same rejection handling: a move the treasury/pot can no longer
+// cover (not_enough_gold / not_enough_in_pot) is what already-applied looks
+// like from behind -> noop; every other rejection (no settlement, not a bank,
+// pot at its cap) means this client has drifted and the caller refetches.
+// Unlike GoldTransferred this is not UNAMBIGUOUS -- BankGold moves a partial
+// amount, so a state that still affords the move replays it a second time. The
+// drift is bounded and already the norm for the partial-payload kinds (see
+// applyUnitsTransferred's header): the client advances its cursor past its own
+// command's events (lastEventId), so its own row is never re-delivered, and
+// TurnEnded's resync re-derives authoritative state at every week boundary.
+function applyBankGoldMoved(
+  state: GameState,
+  settlementId: string,
+  gx: number,
+  gy: number,
+  amount: number,
+  direction: "deposit" | "withdraw",
+): ApplyEngineEventResult {
+  const result =
+    direction === "deposit"
+      ? depositIntoBank(state, settlementId, gx, gy, amount)
+      : requestBankWithdrawal(state, settlementId, gx, gy, amount);
+  if (!result.ok) {
+    const emptyPurse =
+      result.reason === "not_enough_gold" || result.reason === "not_enough_in_pot";
+    return emptyPurse ? { state, outcome: "noop" } : resync(state);
+  }
+  return { state: result.state, outcome: "applied" };
+}
+
+// BattleOffered carries only the fact that an attacker offered battle to a
+// defender, so the replay is a straight re-run through startBattle -- the
+// phase flip is fully derivable from the pair. A pair already in BATTLE is
+// what an already-applied offer looks like from behind -> noop; every other
+// shape (missing hero, a DIFFERENT pair already in BATTLE) means this
+// client's state has drifted and the caller refetches.
+function applyBattleOffered(
+  state: GameState,
+  attackerId: string,
+  defenderId: string,
+): ApplyEngineEventResult {
+  const attacker = state.heroes[attackerId];
+  const defender = state.heroes[defenderId];
+  if (!attacker || !defender) return resync(state);
+  if (state.phase.kind === "BATTLE") {
+    return state.phase.attackerId === attackerId && state.phase.defenderId === defenderId
+      ? { state, outcome: "noop" }
+      : resync(state);
+  }
+  return {
+    state: startBattle(state, attackerId, defenderId),
+    outcome: "applied",
+  };
+}
+
 export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEngineEventResult {
   switch (event.type) {
     case "HeroMoved":
@@ -156,18 +359,6 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
           ? { state, outcome: "noop" }
           : resync(state);
       }
-      return { state: result.state, outcome: "applied" };
-    }
-
-    case "ResourcesTraded": {
-      const result = tradeResources(
-        state,
-        event.fromSettlementId,
-        event.toSettlementId,
-        event.resource,
-        event.amount,
-      );
-      if (!result.ok) return resync(state);
       return { state: result.state, outcome: "applied" };
     }
 
@@ -201,6 +392,16 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
       return { state: result.state, outcome: "applied" };
     }
 
+    case "BankGoldMoved":
+      return applyBankGoldMoved(
+        state,
+        event.settlementId,
+        event.gx,
+        event.gy,
+        event.amount,
+        event.direction,
+      );
+
     case "UnitsRecruited":
       return applyUnitsRecruited(state, event.settlementId, event.unitTypeId, event.count);
 
@@ -214,6 +415,32 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
         event.count,
       );
 
+    case "TradeRouteCreated": {
+      // Rows persisted before the endpoint/payload model carry the legacy
+      // flat fromSettlementId/toSettlementId/resource fields; both event
+      // generations normalize to the endpoint shape before applying (the
+      // same mapping hydrate's normalizeTradeRoute uses for JSONB rows).
+      // A row of neither generation is drift: resync.
+      const raw = event as unknown as Record<string, unknown>;
+      const shape =
+        isTradeRouteEndpoint(raw.from) && isTradeRouteEndpoint(raw.to) && isTradeRoutePayload(raw.payload)
+          ? { from: raw.from, to: raw.to, payload: raw.payload }
+          : legacyTradeRouteShape(raw);
+      if (!shape) return resync(state);
+      return applyTradeRouteCreated(
+        state,
+        event.actor,
+        event.routeId,
+        shape.from,
+        shape.to,
+        shape.payload,
+        event.wagons,
+      );
+    }
+
+    case "BattleOffered":
+      return applyBattleOffered(state, event.attackerId, event.defenderId);
+
     // Listed per variant rather than swept into `default:` so a new
     // EngineEvent variant trips the exhaustiveness check below.
     case "TurnEnded":
@@ -226,7 +453,6 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
     case "ResourcesTransferred":
     case "WagonsAssigned":
     case "WagonsBought":
-    case "TradeRouteCreated":
     case "TradeRouteUpdated":
     case "TradeRouteRemoved":
     // SettlementBattleResolved carries only winner/captured -- the resulting

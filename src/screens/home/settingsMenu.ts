@@ -1,20 +1,30 @@
 import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
+import { APP_VERSION, BUILD_TIME, BUILD_COMMIT, formatBuildTime } from "../../core/version";
 import {
   settings,
   updateSettings,
   settingsBounds,
+  enemyMoveDurationBounds,
+  arenaMoveMsPerHexBounds,
   borderWidthBounds,
   resourceStyleOptions,
   growthRateBounds,
-  upgradeGateBounds,
   spriteVariantOptions,
   bgOffsetBounds,
   parallaxLayerCountBounds,
+  maxZoomOutHexesWideBounds,
+  clampMaxZoomOutHexesWide,
   PARALLAX_SPEEDS,
   type GameSettings,
   type ResourceStyle,
 } from "../../state/settings";
-import { launchView, registerView } from "@screens/shared/viewLauncher";
+import {
+  clampToolbarStyle,
+  DEFAULT_TOOLBAR_STYLE,
+  TOOLBAR_THEMES,
+  toolbarStyleOptions,
+} from "../../state/toolbarThemes";
+import { openView, registerView } from "@screens/shared/viewLauncher";
 
 registerView("settingsMenu", (opts) => openSettingsMenu(opts as Parameters<typeof openSettingsMenu>[0]));
 
@@ -47,7 +57,7 @@ function labelFor(ms: number): string {
 export interface MapInfo {
   name: string;
   seed: number;
-  mapSize: "small" | "medium" | "large";
+  mapSize: "small" | "medium" | "large" | "huge" | "epic";
   width: number;
   height: number;
   castleSeed: number;
@@ -124,9 +134,11 @@ function makeFoldableSection(
 export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   const parent = opts.parent ?? document.body;
   const bounds = settingsBounds();
+  const enemyBounds = enemyMoveDurationBounds();
+  const arenaBounds = arenaMoveMsPerHexBounds();
   const borderBounds = borderWidthBounds();
   const growthBounds = growthRateBounds();
-  const gateBounds = upgradeGateBounds();
+  const zoomOutBounds = maxZoomOutHexesWideBounds();
   const current = settings();
   const mapInfo = opts.getMapInfo?.() ?? null;
   const refreshList: Array<() => void> = [];
@@ -232,6 +244,98 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     children.push(heroRow);
 
+    const enemyRow = document.createElement("div");
+    enemyRow.style.display = "flex";
+    enemyRow.style.flexDirection = "column";
+    enemyRow.style.gap = "6px";
+
+    const enemyLabelRow = document.createElement("div");
+    enemyLabelRow.style.display = "flex";
+    enemyLabelRow.style.justifyContent = "space-between";
+    enemyLabelRow.style.alignItems = "baseline";
+
+    const enemyLabel = document.createElement("span");
+    enemyLabel.textContent = "Enemy movement speed";
+    enemyLabelRow.appendChild(enemyLabel);
+
+    const enemyValue = document.createElement("span");
+    enemyValue.style.fontVariantNumeric = "tabular-nums";
+    enemyLabelRow.appendChild(enemyValue);
+
+    const enemySlider = document.createElement("input");
+    enemySlider.type = "range";
+    enemySlider.min = String(enemyBounds.min);
+    enemySlider.max = String(enemyBounds.max);
+    enemySlider.step = "10";
+    enemySlider.style.width = "100%";
+    enemySlider.style.accentColor = "#f77f00";
+    enemyRow.appendChild(enemySlider);
+
+    const enemyHint = document.createElement("div");
+    enemyHint.style.fontSize = "10px";
+    enemyHint.style.opacity = "0.55";
+    enemyRow.appendChild(enemyHint);
+
+    function refreshEnemy(next: GameSettings): void {
+      enemySlider.value = String(next.enemyMoveDurationMs);
+      enemyValue.textContent = `${next.enemyMoveDurationMs}ms \u00b7 ${labelFor(next.enemyMoveDurationMs)}`;
+      enemyHint.textContent = `Heroes of other seats (AI enemies and remote players), animated in this browser. (Range ${enemyBounds.min}\u2013${enemyBounds.max}ms)`;
+    }
+    refreshEnemy(current);
+    enemySlider.addEventListener("input", () => {
+      updateSettings({ enemyMoveDurationMs: Number(enemySlider.value) });
+    });
+    refreshList.push(() => refreshEnemy(settings()));
+
+    children.push(enemyRow);
+
+    // Battle arena move animation speed (also covers the player's own
+    // platoons — they glide like the AI's now). 0 = instant.
+    const arenaRow = document.createElement("div");
+    arenaRow.style.display = "flex";
+    arenaRow.style.flexDirection = "column";
+    arenaRow.style.gap = "6px";
+
+    const arenaLabelRow = document.createElement("div");
+    arenaLabelRow.style.display = "flex";
+    arenaLabelRow.style.justifyContent = "space-between";
+    arenaLabelRow.style.alignItems = "baseline";
+
+    const arenaLabel = document.createElement("span");
+    arenaLabel.textContent = "Battle move animation speed";
+    arenaLabelRow.appendChild(arenaLabel);
+
+    const arenaValue = document.createElement("span");
+    arenaValue.style.fontVariantNumeric = "tabular-nums";
+    arenaLabelRow.appendChild(arenaValue);
+
+    const arenaSlider = document.createElement("input");
+    arenaSlider.type = "range";
+    arenaSlider.min = String(arenaBounds.min);
+    arenaSlider.max = String(arenaBounds.max);
+    arenaSlider.step = "10";
+    arenaSlider.style.width = "100%";
+    arenaSlider.style.accentColor = "#f77f00";
+    arenaRow.appendChild(arenaSlider);
+
+    const arenaHint = document.createElement("div");
+    arenaHint.style.fontSize = "10px";
+    arenaHint.style.opacity = "0.55";
+    arenaRow.appendChild(arenaHint);
+
+    function refreshArena(next: GameSettings): void {
+      arenaSlider.value = String(next.arenaMoveMsPerHex);
+      arenaValue.textContent = `${next.arenaMoveMsPerHex}ms/hex \u00b7 ${labelFor(next.arenaMoveMsPerHex)}`;
+      arenaHint.textContent = `Walk animations in the battle arena — yours and the AI's. 0 = instant. (Range ${arenaBounds.min}\u2013${arenaBounds.max}ms per hex)`;
+    }
+    refreshArena(current);
+    arenaSlider.addEventListener("input", () => {
+      updateSettings({ arenaMoveMsPerHex: Number(arenaSlider.value) });
+    });
+    refreshList.push(() => refreshArena(settings()));
+
+    children.push(arenaRow);
+
     // Border thickness
     const borderRow = document.createElement("div");
     borderRow.style.display = "flex";
@@ -332,52 +436,6 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     children.push(growthRow);
 
-    // Upgrade gate
-    const gateRow = document.createElement("div");
-    gateRow.style.display = "flex";
-    gateRow.style.flexDirection = "column";
-    gateRow.style.gap = "6px";
-
-    const gateLabelRow = document.createElement("div");
-    gateLabelRow.style.display = "flex";
-    gateLabelRow.style.justifyContent = "space-between";
-    gateLabelRow.style.alignItems = "baseline";
-
-    const gateLabel = document.createElement("span");
-    gateLabel.textContent = "Upgrade population gate";
-    gateLabelRow.appendChild(gateLabel);
-
-    const gateValue = document.createElement("span");
-    gateValue.style.fontVariantNumeric = "tabular-nums";
-    gateLabelRow.appendChild(gateValue);
-
-    const gateSlider = document.createElement("input");
-    gateSlider.type = "range";
-    gateSlider.min = String(gateBounds.min);
-    gateSlider.max = String(gateBounds.max);
-    gateSlider.step = "0.05";
-    gateSlider.style.width = "100%";
-    gateSlider.style.accentColor = "#f77f00";
-    gateRow.appendChild(gateSlider);
-
-    const gateHint = document.createElement("div");
-    gateHint.style.fontSize = "10px";
-    gateHint.style.opacity = "0.55";
-    gateRow.appendChild(gateHint);
-
-    function refreshGate(next: GameSettings): void {
-      gateSlider.value = String(next.upgradePopulationGate);
-      gateValue.textContent = `${Math.round(next.upgradePopulationGate * 100)}%`;
-      gateHint.textContent = `% of level cap needed before upgrading a settlement. (Range ${Math.round(gateBounds.min * 100)}\u2013${Math.round(gateBounds.max * 100)}%)`;
-    }
-    refreshGate(current);
-    gateSlider.addEventListener("input", () => {
-      updateSettings({ upgradePopulationGate: Number(gateSlider.value) });
-    });
-    refreshList.push(() => refreshGate(settings()));
-
-    children.push(gateRow);
-
     makeFoldableSection(content, "Population", children, true);
   }
 
@@ -433,6 +491,50 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
   {
     const children: HTMLElement[] = [];
+
+    const toolbarStyleRow = document.createElement("div");
+    toolbarStyleRow.style.display = "flex";
+    toolbarStyleRow.style.flexDirection = "column";
+    toolbarStyleRow.style.gap = "6px";
+
+    const toolbarStyleLabel = document.createElement("span");
+    toolbarStyleLabel.textContent = "Toolbar style";
+    toolbarStyleRow.appendChild(toolbarStyleLabel);
+
+    const toolbarStyleSelect = document.createElement("select");
+    toolbarStyleSelect.setAttribute("data-testid", "toolbar-style-select");
+    toolbarStyleSelect.style.width = "100%";
+    toolbarStyleSelect.style.padding = "8px";
+    toolbarStyleSelect.style.fontSize = "12px";
+    toolbarStyleSelect.style.border = "1px solid #444";
+    toolbarStyleSelect.style.borderRadius = "4px";
+    toolbarStyleSelect.style.backgroundColor = "#1a1a1a";
+    toolbarStyleSelect.style.color = "#eee";
+    toolbarStyleSelect.style.accentColor = "#f77f00";
+
+    for (const style of toolbarStyleOptions()) {
+      const opt = document.createElement("option");
+      opt.value = style;
+      opt.textContent = TOOLBAR_THEMES[style].label;
+      toolbarStyleSelect.appendChild(opt);
+    }
+    toolbarStyleSelect.value = current.toolbarStyle;
+    toolbarStyleRow.appendChild(toolbarStyleSelect);
+
+    const toolbarStyleHint = document.createElement("div");
+    toolbarStyleHint.style.fontSize = "10px";
+    toolbarStyleHint.style.opacity = "0.55";
+    toolbarStyleHint.textContent = "Changes the toolbar palette and typography immediately.";
+    toolbarStyleRow.appendChild(toolbarStyleHint);
+
+    toolbarStyleSelect.addEventListener("change", () => {
+      updateSettings({ toolbarStyle: clampToolbarStyle(toolbarStyleSelect.value) });
+    });
+    refreshList.push(() => {
+      toolbarStyleSelect.value = settings().toolbarStyle;
+    });
+
+    children.push(toolbarStyleRow);
 
     // Resource icon style
     const styleRow = document.createElement("div");
@@ -727,6 +829,57 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     children.push(logPanelToggleRow);
 
+    // Max zoom-out width (20–34 hexes wide)
+    const zoomOutRow = document.createElement("div");
+    zoomOutRow.style.display = "flex";
+    zoomOutRow.style.flexDirection = "column";
+    zoomOutRow.style.gap = "6px";
+
+    const zoomOutLabelRow = document.createElement("div");
+    zoomOutLabelRow.style.display = "flex";
+    zoomOutLabelRow.style.justifyContent = "space-between";
+    zoomOutLabelRow.style.alignItems = "baseline";
+
+    const zoomOutLabel = document.createElement("span");
+    zoomOutLabel.textContent = "Max zoom-out width";
+    zoomOutLabelRow.appendChild(zoomOutLabel);
+
+    const zoomOutValue = document.createElement("span");
+    zoomOutValue.setAttribute("data-testid", "max-zoom-out-hexes-value");
+    zoomOutValue.style.fontVariantNumeric = "tabular-nums";
+    zoomOutLabelRow.appendChild(zoomOutValue);
+    zoomOutRow.appendChild(zoomOutLabelRow);
+
+    const zoomOutSlider = document.createElement("input");
+    zoomOutSlider.type = "range";
+    zoomOutSlider.setAttribute("data-testid", "max-zoom-out-hexes-slider");
+    zoomOutSlider.min = String(zoomOutBounds.min);
+    zoomOutSlider.max = String(zoomOutBounds.max);
+    zoomOutSlider.step = "1";
+    zoomOutSlider.style.width = "100%";
+    zoomOutSlider.style.accentColor = "#f77f00";
+    zoomOutRow.appendChild(zoomOutSlider);
+
+    const zoomOutHint = document.createElement("div");
+    zoomOutHint.style.fontSize = "10px";
+    zoomOutHint.style.opacity = "0.55";
+    zoomOutHint.textContent =
+      "Caps how far out you can scroll on the adventure map (20 hexes wide default, up to 34 hexes wide) to keep rendering fast on large maps.";
+    zoomOutRow.appendChild(zoomOutHint);
+
+    function refreshZoomOut(next: GameSettings): void {
+      zoomOutSlider.value = String(next.maxZoomOutHexesWide);
+      zoomOutValue.textContent = `${next.maxZoomOutHexesWide} hexes wide`;
+    }
+    refreshZoomOut(current);
+    zoomOutSlider.addEventListener("input", () => {
+      const next = updateSettings({ maxZoomOutHexesWide: clampMaxZoomOutHexesWide(Number(zoomOutSlider.value)) });
+      refreshZoomOut(next);
+    });
+    refreshList.push(() => refreshZoomOut(settings()));
+
+    children.push(zoomOutRow);
+
     makeFoldableSection(content, "Visual", children, true);
   }
 
@@ -741,16 +894,19 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     const pBounds = parallaxLayerCountBounds();
     updateSettings({
       moveDurationMs: bounds.default,
+      enemyMoveDurationMs: enemyBounds.default,
+      arenaMoveMsPerHex: arenaBounds.default,
+      toolbarStyle: DEFAULT_TOOLBAR_STYLE,
       resourceStyle: "rune-stone",
       territoryBorderWidth: borderBounds.default,
       populationGrowthRate: growthBounds.default,
-      upgradePopulationGate: gateBounds.default,
       spriteVariant: 1,
       cityBgOffsetX: bgBounds.default,
       cityBgOffsetY: bgBounds.default,
       parallaxEnabled: false,
       parallaxLayerCount: pBounds.default,
       showLogPanel: false,
+      maxZoomOutHexesWide: zoomOutBounds.default,
     });
     for (const fn of refreshList) fn();
   });
@@ -762,13 +918,38 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   devBtn.style.alignSelf = "flex-end";
   devBtn.style.opacity = "0.6";
   devBtn.style.fontSize = "10px";
-  devBtn.addEventListener("click", () => launchView("developerSettingsMenu"));
+  devBtn.addEventListener("click", () => {
+    void openView("developerSettingsMenu");
+  });
   content.appendChild(devBtn);
 
   const closeRow = document.createElement("div");
   closeRow.style.display = "flex";
-  closeRow.style.justifyContent = "flex-end";
+  closeRow.style.justifyContent = "space-between";
+  closeRow.style.alignItems = "center";
   closeRow.style.marginTop = "6px";
+
+  const buildInfo = document.createElement("div");
+  buildInfo.setAttribute("data-testid", "settings-build-info");
+  Object.assign(buildInfo.style, {
+    fontSize: "11px",
+    opacity: "0.5",
+    fontVariantNumeric: "tabular-nums",
+    userSelect: "text",
+    lineHeight: "1.3",
+  });
+
+  const versionLine = document.createElement("div");
+  versionLine.textContent = `v${APP_VERSION} (${BUILD_COMMIT})`;
+  buildInfo.appendChild(versionLine);
+
+  const builtLine = document.createElement("div");
+  builtLine.textContent = `Built: ${formatBuildTime(BUILD_TIME)}`;
+  builtLine.title = `Built: ${BUILD_TIME}`;
+  buildInfo.appendChild(builtLine);
+
+  closeRow.appendChild(buildInfo);
+
   const closeBtn = document.createElement("button");
   closeBtn.textContent = "Close";
   styleButton(closeBtn, true);

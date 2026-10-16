@@ -1,0 +1,7 @@
+Side-view pixel art game asset of a single fantasy battle unit in a dramatic tabletop-miniature style: chunky readable pixels, rich saturated colors with strong three-tone shading ramps and bright rim highlights, bold dark outlines, high contrast that stays readable at small size, fully transparent background, square 1:1 canvas.
+
+Subject: a small floating spirit of pale blue-white flame with a faint ghostly face glowing inside, stretched into a darting forward motion with long trailing flame wisps streaming behind it.
+
+Single centered figure hovering with no legs, faint wisp trails below fading into transparency, filling about 60% of the canvas height, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.
+
+The attached reference image defines ONLY the pixel-art rendering style (pixel size, shading, outline weight) — NOT the subject. The output must be ONLY the hovering flame spirit described above: one single living creature, no buildings, no walls, no roofs, no doors, no towers, no fences, no ground plane, no isometric structure, no props of any kind. It hovers with no legs and no feet.

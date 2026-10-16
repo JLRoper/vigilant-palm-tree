@@ -1,20 +1,33 @@
 import type { GameState, PlayerId } from "../../state/gameState";
 import {
-  effectiveIncome,
-  foodRequired,
   buildingUpkeepRequired,
+  foodRequired,
   moraleDecay,
+  playerEffectiveSettlementIncome,
   playerIncome,
   playerWealth,
-  platoonTroopTotal,
 } from "@heroes/engine";
+import {
+  empireUpkeepTitleClause,
+  liveEmpireUpkeepCost,
+} from "./heroUpkeepCost";
+import { makeStatPill } from "./statPill";
 
 export { canEndTurn } from "@heroes/engine";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+// The HUD is now a row of labeled pills plus a trailing context segment, all
+// inside the toolbar's status row. The economy breakdown stays one tooltip on
+// the whole row, so no number is lost by dropping the run-on sentence.
 export interface HudHandles {
-  textSpan: HTMLSpanElement;
+  root: HTMLElement;
+  round: HTMLElement;
+  wealth: HTMLElement;
+  income: HTMLElement;
+  upkeep: HTMLElement;
+  morale: HTMLElement;
+  context: HTMLElement;
 }
 
 export interface PathCostReadout {
@@ -26,111 +39,171 @@ export interface PathCostReadout {
 export function buildHud(container: HTMLElement): HudHandles {
   const hudEl = document.createElement("div");
   hudEl.id = "hud";
-  const textSpan = document.createElement("span");
-  textSpan.id = "hud-text";
-  hudEl.appendChild(textSpan);
+  const round = makeStatPill("Round");
+  const wealth = makeStatPill("Wealth");
+  const income = makeStatPill("Income");
+  const upkeep = makeStatPill("Upkeep");
+  const morale = makeStatPill("Morale");
+  const context = document.createElement("span");
+  context.id = "hud-context";
+  Object.assign(context.style, {
+    marginLeft: "auto",
+    color: "var(--tb-text-dim, #b6c0d4)",
+    fontSize: "11.5px",
+    fontWeight: "500",
+    whiteSpace: "nowrap",
+    fontVariantNumeric: "tabular-nums",
+  });
+  hudEl.append(round.chip, wealth.chip, income.chip, upkeep.chip, morale.chip, context);
   container.appendChild(hudEl);
-  return { textSpan };
+  return {
+    root: hudEl,
+    round: round.value,
+    wealth: wealth.value,
+    income: income.value,
+    upkeep: upkeep.value,
+    morale: morale.value,
+    context,
+  };
+}
+
+interface EconomyHudSnapshot {
+  state: GameState;
+  ownerId: PlayerId;
+  round: number;
+  day: number;
+  roundText: string;
+  wealthText: string;
+  incomeText: string;
+  upkeepText: string;
+  moraleText: string;
+  breakdownTitle: string;
+}
+
+let lastEconSnapshot: EconomyHudSnapshot | null = null;
+let lastFormattedIso: string | null = null;
+let lastFormattedTime = "";
+
+function setText(el: HTMLElement, value: string): void {
+  if (el.textContent !== value) {
+    el.textContent = value;
+  }
+}
+
+function setTitle(el: HTMLElement, value: string): void {
+  if (el.title !== value) {
+    el.title = value;
+  }
 }
 
 export function updateHud(
-  _hud: HTMLElement,
   state: GameState,
   lastSavedAt: string | null,
   handles: HudHandles,
   localPlayerId: PlayerId | null,
   pathReadout: PathCostReadout | null = null,
 ): void {
-  const roundLine = `Round ${state.round}`;
-  const selected = state.selectedHeroId ? state.heroes[state.selectedHeroId] : null;
-  const movementLine = selected
-    ? ` · Movement: ${Math.round(Math.max(0, selected.movementRemaining))}/7${formatPathReadout(pathReadout)}`
-    : "";
-  const charterLine = selected?.isChartering ? (() => {
-    const ch = state.activeCharters.find((c) => c.id === selected.charterId);
-    if (!ch) return "";
-    if (ch.phase === "traveling") return ` · Chartering: traveling to ${ch.settlementName}`;
-    return ` · Chartering: ${ch.daysRemaining} days remaining`;
-  })() : "";
   const ownerId = localPlayerId ?? 0;
-  const wealthLine = `Empire Wealth: ${playerWealth(state, ownerId)}g`;
-  const moraleLine = playerMorale(state, ownerId);
-  const effectiveIncomeLine = playerEffectiveIncome(state, ownerId);
-  const upkeepLine = playerUpkeep(state, ownerId);
-  const status = `${roundLine} · ${wealthLine}${movementLine}${charterLine}`;
-  const savedInfo = lastSavedAt ? ` · Last saved ${formatTime(lastSavedAt)}` : "";
-  const econLine = `${effectiveIncomeLine} · ${upkeepLine} · ${moraleLine}`;
-  const text = `${status} · ${econLine}${savedInfo}`;
-  handles.textSpan.textContent = text;
-  handles.textSpan.title = economyBreakdown(state, ownerId);
+
+  const clauses: string[] = [];
+  const selected = state.selectedHeroId ? state.heroes[state.selectedHeroId] : null;
+  if (selected) {
+    if (selected.isChartering) {
+      const ch = state.activeCharters.find((c) => c.id === selected.charterId);
+      if (!ch) {
+        clauses.push("Chartering");
+      } else if (ch.phase === "traveling") {
+        clauses.push(`Chartering: traveling to ${ch.settlementName}`);
+      } else {
+        clauses.push(`Chartering: ${ch.daysRemaining} days remaining`);
+      }
+    } else {
+      clauses.push(`Movement ${Math.round(Math.max(0, selected.movementRemaining))}/7`);
+      const path = formatPathReadout(pathReadout);
+      if (path) clauses.push(path);
+    }
+  }
+  if (lastSavedAt) clauses.push(`Last saved ${formatTime(lastSavedAt)}`);
+  setText(handles.context, clauses.join(" · "));
+
+  const econ = getEconomyHudSnapshot(state, ownerId);
+  setText(handles.round, econ.roundText);
+  setText(handles.wealth, econ.wealthText);
+  setText(handles.income, econ.incomeText);
+  setText(handles.upkeep, econ.upkeepText);
+  setText(handles.morale, econ.moraleText);
+  setTitle(handles.root, econ.breakdownTitle);
 }
 
-function playerMorale(state: GameState, ownerId: PlayerId): string {
-  const owned = Object.values(state.settlements).filter((s) => s.ownerId === ownerId);
-  if (owned.length === 0) return "Empire Morale: n/a";
-  const sum = owned.reduce((acc, s) => acc + (s.morale ?? 100), 0);
-  const avg = Math.round(sum / owned.length);
-  return `Empire Morale: ${avg}%`;
+function getEconomyHudSnapshot(state: GameState, ownerId: PlayerId): EconomyHudSnapshot {
+  if (
+    lastEconSnapshot &&
+    lastEconSnapshot.state === state &&
+    lastEconSnapshot.ownerId === ownerId &&
+    lastEconSnapshot.round === state.round &&
+    lastEconSnapshot.day === state.day
+  ) {
+    return lastEconSnapshot;
+  }
+
+  const ownedHeroes = Object.values(state.heroes).filter((h) => h.ownerId === ownerId);
+  const upkeepBill = liveEmpireUpkeepCost(ownedHeroes);
+  const ownedSettlements = Object.values(state.settlements).filter((s) => s.ownerId === ownerId);
+  const eff = playerEffectiveSettlementIncome(state, ownerId);
+  const nextGold = playerIncome(state, ownerId);
+  const moraleAvg =
+    ownedSettlements.length === 0
+      ? null
+      : Math.round(ownedSettlements.reduce((acc, s) => acc + (s.morale ?? 100), 0) / ownedSettlements.length);
+
+  let breakdownTitle: string;
+  if (ownedSettlements.length === 0) {
+    breakdownTitle = "Empire Income: 0g — you own no settlements.";
+  } else {
+    const popTax = ownedSettlements.reduce((acc, s) => acc + (s.population ?? 0) * (s.goldTax ?? 0), 0);
+    const buildingGold = nextGold - popTax;
+    const foodHave = ownedSettlements.reduce((acc, s) => acc + (s.warehouse.food ?? 0), 0);
+    const foodNeed = ownedSettlements.reduce((acc, s) => acc + foodRequired(s), 0);
+    const upkeep = ownedSettlements.reduce(
+      (acc, s) => {
+        const u = buildingUpkeepRequired(s);
+        return { wood: acc.wood + u.wood, stone: acc.stone + u.stone };
+      },
+      { wood: 0, stone: 0 },
+    );
+    const decay = ownedSettlements.reduce((acc, s) => acc + moraleDecay(s), 0);
+    const moraleTrend = decay > 0 ? `morale −${fmtNum(decay)}/round` : "morale stable";
+    breakdownTitle = [
+      `Income: settlements ${fmtNum(popTax)}g pop-tax + ${fmtNum(buildingGold)}g buildings → morale ${moraleAvg}% on tax → ${fmtNum(eff)}g/round to treasuries`,
+      `${empireUpkeepTitleClause(upkeepBill)} · buildings ${fmtNum(upkeep.wood)} wood + ${fmtNum(upkeep.stone)} stone/wk · food ${fmtNum(foodHave)}/${fmtNum(foodNeed)} → ${moraleTrend}`,
+      `${fmtNum(buildingGold)}g building gold is morale-stable and counted in both Empire Income (${fmtNum(eff)}g) and next-turn gold (${fmtNum(nextGold)}g)`,
+    ].join("\n");
+  }
+
+  const snapshot: EconomyHudSnapshot = {
+    state,
+    ownerId,
+    round: state.round,
+    day: state.day,
+    roundText: String(state.round),
+    wealthText: `${playerWealth(state, ownerId)}g`,
+    incomeText: `${fmtNum(eff)}/${fmtNum(nextGold)}g`,
+    upkeepText: `${fmtNum(upkeepBill.gold)}g + ${fmtNum(upkeepBill.food)} food`,
+    moraleText: moraleAvg === null ? "n/a" : `${moraleAvg}%`,
+    breakdownTitle,
+  };
+  lastEconSnapshot = snapshot;
+  return snapshot;
 }
 
-function playerEffectiveIncome(state: GameState, ownerId: PlayerId): string {
-  const owned = Object.values(state.settlements).filter((s) => s.ownerId === ownerId);
-  if (owned.length === 0) return "Empire Income: 0g";
-  const total = owned.reduce((acc, s) => acc + effectiveIncome(s), 0);
-  const base = owned.reduce((acc, s) => acc + (s.population ?? 0) * (s.goldTax ?? 0), 0);
-  return `Empire Income: ${total}/${base}g`;
-}
-
-function playerUpkeep(state: GameState, ownerId: PlayerId): string {
-  const owned = Object.values(state.heroes).filter((h) => h.ownerId === ownerId);
-  const cost = owned.reduce((acc, h) => acc + platoonTroopTotal(h.stacks), 0);
-  return `Empire Upkeep: ${cost}g + ${cost} food/wk`;
-}
-
-// F10 (playtest fixes 2026-09-29): "· Path 4.6/7" while the previewed
-// destination is reachable this turn, "· Path 4.6 of 9.8" while the path is
+// F10 (playtest fixes 2026-09-29): "Path 4.6/7" while the previewed
+// destination is reachable this turn, "Path 4.6 of 9.8" while the path is
 // clamped by remaining movement. Empty string when no path is previewed.
 function formatPathReadout(readout: PathCostReadout | null): string {
   if (!readout) return "";
   return readout.destinationReachable
-    ? ` · Path ${readout.costToSplit.toFixed(1)}/7`
-    : ` · Path ${readout.costToSplit.toFixed(1)} of ${readout.totalCost.toFixed(1)}`;
-}
-
-// F11 (playtest fixes 2026-09-29): hover breakdown for the HUD economy row.
-// Presentation only -- every number comes from @heroes/engine's exported
-// formulas, mirroring what the round pipeline (applyEndOfTurn) actually does.
-// Set as the hud-text title attribute; newlines render as line breaks in the
-// native tooltip. States the x/y inconsistency: "Empire Income" is
-// morale-scaled population taxes only, while next-turn gold (playerIncome)
-// also includes building goldPerTurn.
-function economyBreakdown(state: GameState, ownerId: PlayerId): string {
-  const owned = Object.values(state.settlements).filter((s) => s.ownerId === ownerId);
-  if (owned.length === 0) return "Empire Income: 0g — you own no settlements.";
-  const popTax = owned.reduce((acc, s) => acc + (s.population ?? 0) * (s.goldTax ?? 0), 0);
-  const eff = owned.reduce((acc, s) => acc + effectiveIncome(s), 0);
-  const morale = Math.round(owned.reduce((acc, s) => acc + (s.morale ?? 100), 0) / owned.length);
-  const nextGold = playerIncome(state, ownerId);
-  const buildingGold = nextGold - popTax;
-  const foodHave = owned.reduce((acc, s) => acc + (s.warehouse.food ?? 0), 0);
-  const foodNeed = owned.reduce((acc, s) => acc + foodRequired(s), 0);
-  const upkeep = owned.reduce(
-    (acc, s) => {
-      const u = buildingUpkeepRequired(s);
-      return { wood: acc.wood + u.wood, stone: acc.stone + u.stone };
-    },
-    { wood: 0, stone: 0 },
-  );
-  const decay = owned.reduce((acc, s) => acc + moraleDecay(s), 0);
-  const troops = Object.values(state.heroes)
-    .filter((h) => h.ownerId === ownerId)
-    .reduce((acc, h) => acc + platoonTroopTotal(h.stacks), 0);
-  const moraleTrend = decay > 0 ? `morale −${fmtNum(decay)}/round` : "morale stable";
-  return [
-    `Income: settlements ${fmtNum(popTax)}g gross → morale ${morale}% → ${fmtNum(eff)}g/round to treasuries`,
-    `Upkeep: troops ${fmtNum(troops)}g + ${fmtNum(troops)} food/wk (hero purse & packs) · buildings ${fmtNum(upkeep.wood)} wood + ${fmtNum(upkeep.stone)} stone/wk · food ${fmtNum(foodHave)}/${fmtNum(foodNeed)} → ${moraleTrend}`,
-    `Building gold/turn +${fmtNum(buildingGold)}g counts toward next-turn gold (${fmtNum(nextGold)}g), not "Empire Income"`,
-  ].join("\n");
+    ? `Path ${readout.costToSplit.toFixed(1)}/7`
+    : `Path ${readout.costToSplit.toFixed(1)} of ${readout.totalCost.toFixed(1)}`;
 }
 
 function fmtNum(n: number): string {
@@ -139,10 +212,15 @@ function fmtNum(n: number): string {
 }
 
 function formatTime(iso: string): string {
+  if (iso === lastFormattedIso) {
+    return lastFormattedTime;
+  }
   try {
     const d = new Date(iso);
-    return d.toLocaleTimeString();
+    lastFormattedTime = d.toLocaleTimeString();
   } catch {
-    return iso;
+    lastFormattedTime = iso;
   }
+  lastFormattedIso = iso;
+  return lastFormattedTime;
 }

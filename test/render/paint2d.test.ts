@@ -192,6 +192,47 @@ test("paintTerrainDecoration: water emits a single arc stroke", () => {
   assert.ok(calls.some((c) => c.name === "stroke"), "water should stroke the arc");
 });
 
+test("paintTerrainDecoration: swamp emits a dark pool fill + a 3-stroke reed polyline", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintTerrainDecoration(ctx, { kind: "terrainDecoration", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "swamp" }, makeNoopPaint2DDep());
+  const fill = calls.find((c) => c.name === "set:fillStyle");
+  assert.equal(fill?.args[0], "rgba(22, 34, 20, 0.7)", "swamp pool uses the murky dark fill");
+  const stroke = calls.find((c) => c.name === "set:strokeStyle");
+  assert.equal(stroke?.args[0], "rgba(108, 134, 66, 0.85)", "reeds use the murky green stroke");
+  const lineWidth = calls.find((c) => c.name === "set:lineWidth");
+  assert.deepEqual(lineWidth?.args, [1.25], "reeds use a 1.25px stroke");
+  assert.ok(calls.some((c) => c.name === "arc"), "pool is an arc-filled disc");
+  assert.ok(calls.filter((c) => c.name === "fill").length >= 1, "pool should fill");
+  const moveTos = calls.filter((c) => c.name === "moveTo");
+  const lineTos = calls.filter((c) => c.name === "lineTo");
+  assert.ok(moveTos.length >= 3, "reeds are 3 vertical blades (3 moveTo)");
+  assert.ok(lineTos.length >= 3, "reeds are 3 vertical blades (3 lineTo)");
+  assert.ok(calls.some((c) => c.name === "stroke"), "reeds should stroke");
+});
+
+test("paintTerrainDecoration: snow emits a white drift arc + 3 white specks", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintTerrainDecoration(ctx, { kind: "terrainDecoration", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "snow" }, makeNoopPaint2DDep());
+  const stroke = calls.find((c) => c.name === "set:strokeStyle");
+  assert.equal(stroke?.args[0], "rgba(255, 255, 255, 0.85)", "drift uses the white stroke");
+  const fill = calls.find((c) => c.name === "set:fillStyle");
+  assert.equal(fill?.args[0], "rgba(255, 255, 255, 0.9)", "specks use the white fill");
+  assert.ok(calls.some((c) => c.name === "stroke"), "drift arc should stroke");
+  const speckArcs = calls.filter((c) => c.name === "arc" && c.args[2] === 1.2);
+  assert.equal(speckArcs.length, 3, "three 1.2-radius snow specks");
+  assert.ok(calls.filter((c) => c.name === "fill").length >= 1, "specks should fill");
+});
+
+test("paintTerrainDecoration: grass and dirt still emit zero canvas calls", () => {
+  const { ctx: ctxG, calls: callsG } = makeRecordingCtx();
+  paintTerrainDecoration(ctxG, { kind: "terrainDecoration", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "grass" }, makeNoopPaint2DDep());
+  assert.equal(callsG.length, 0, "grass has no decoration");
+
+  const { ctx: ctxD, calls: callsD } = makeRecordingCtx();
+  paintTerrainDecoration(ctxD, { kind: "terrainDecoration", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "dirt" }, makeNoopPaint2DDep());
+  assert.equal(callsD.length, 0, "dirt has no decoration");
+});
+
 test("paintFogHex: emits the live fog rgba fill + a stroke", () => {
   const { ctx, calls } = makeRecordingCtx();
   paintFogHex(ctx, { kind: "fogHex", q: 0, r: 0, world: { x: 0, y: 0 } }, makeNoopPaint2DDep());
@@ -491,10 +532,10 @@ test("paintCityMine: emits the diamond + the four inked wall polygons + the leve
   assert.equal(text?.args?.[0], "3", "mine should print the level");
 });
 
-test("paintCityBuilding: with no sprite ready, falls back to the procedural style leaf", () => {
+test("paintCityBuilding: with no sprite ready, draws nothing (the procedural style leaves are gone)", () => {
   const { ctx, calls } = makeRecordingCtx();
-  paintCityBuilding(ctx, { kind: "cityBuilding", gx: 0, gy: 0, buildingKind: "townHall", level: 1, center: { x: 0, y: 0 }, halfWidth: 20, halfHeight: 20, ownerColor: "#888888", style: "classic", selected: true }, makeNoopPaint2DDep());
-  assert.ok(calls.some((c) => c.name === "fill"), "drawClassic should fill the iso box");
+  paintCityBuilding(ctx, { kind: "cityBuilding", gx: 0, gy: 0, buildingKind: "townHall", level: 1, center: { x: 0, y: 0 }, halfWidth: 20, halfHeight: 20, ownerColor: "#888888", selected: true }, makeNoopPaint2DDep());
+  assert.ok(!calls.some((c) => c.name === "drawImage"), "a resolver miss draws nothing");
   assert.ok(
     !calls.some((c) => c.name === "set:strokeStyle" && c.args[0] === "#66ccff"),
     "the selection ring is a separate second pass",
@@ -503,7 +544,7 @@ test("paintCityBuilding: with no sprite ready, falls back to the procedural styl
 
 test("paintCityBuildingSelections: strokes a dashed cyan rect per selected building, in one save/restore", () => {
   const { ctx, calls } = makeRecordingCtx();
-  const base = { kind: "cityBuilding", gx: 0, gy: 0, buildingKind: "townHall", level: 1, halfWidth: 20, halfHeight: 20, ownerColor: "#888888", style: "classic" } as const;
+  const base = { kind: "cityBuilding", gx: 0, gy: 0, buildingKind: "townHall", level: 1, halfWidth: 20, halfHeight: 20, ownerColor: "#888888" } as const;
   paintCityBuildingSelections(
     ctx,
     [
@@ -522,7 +563,7 @@ test("paintCityBuildingSelections: strokes a dashed cyan rect per selected build
 
 test("paintScene: buildings all paint before any selection ring", () => {
   const { ctx, calls } = makeRecordingCtx();
-  const base = { kind: "cityBuilding", gx: 0, gy: 0, buildingKind: "townHall", level: 1, halfWidth: 20, halfHeight: 20, ownerColor: "#888888", style: "classic" } as const;
+  const base = { kind: "cityBuilding", gx: 0, gy: 0, buildingKind: "townHall", level: 1, halfWidth: 20, halfHeight: 20, ownerColor: "#888888" } as const;
   paintScene(
     ctx,
     [
@@ -540,12 +581,12 @@ test("paintScene: buildings all paint before any selection ring", () => {
 
 test("paintCityGhostBuilding: emits a 0.45-alpha strokeRect green/red depending on node.valid", () => {
   const { ctx: ctxG, calls: callsG } = makeRecordingCtx();
-  paintCityGhostBuilding(ctxG, { kind: "cityGhostBuilding", buildingKind: "townHall", center: { x: 0, y: 0 }, halfWidth: 20, halfHeight: 20, ownerColor: "#888", style: "classic", valid: true }, makeNoopPaint2DDep());
+  paintCityGhostBuilding(ctxG, { kind: "cityGhostBuilding", buildingKind: "townHall", center: { x: 0, y: 0 }, halfWidth: 20, halfHeight: 20, ownerColor: "#888", valid: true }, makeNoopPaint2DDep());
   const strokeG = callsG.find((c) => c.name === "set:strokeStyle");
   assert.equal(strokeG?.args[0], "#44ff44", "valid ghost should be green");
 
   const { ctx: ctxR, calls: callsR } = makeRecordingCtx();
-  paintCityGhostBuilding(ctxR, { kind: "cityGhostBuilding", buildingKind: "townHall", center: { x: 0, y: 0 }, halfWidth: 20, halfHeight: 20, ownerColor: "#888", style: "classic", valid: false }, makeNoopPaint2DDep());
+  paintCityGhostBuilding(ctxR, { kind: "cityGhostBuilding", buildingKind: "townHall", center: { x: 0, y: 0 }, halfWidth: 20, halfHeight: 20, ownerColor: "#888", valid: false }, makeNoopPaint2DDep());
   const strokeR = callsR.find((c) => c.name === "set:strokeStyle");
   assert.equal(strokeR?.args[0], "#ff4444", "invalid ghost should be red");
 });

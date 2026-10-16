@@ -11,7 +11,10 @@ export function controlRange(level: CastleLevel, buildings?: BuildingDef[]): num
 }
 
 export function settlementRateRadius(level: CastleLevel): number {
-  return level - 1;
+  // Cannot be `level - 1`: that would give an L1 settlement a radius of 0, i.e. a
+  // scan of its own tile alone -- and castles may not stand on a resource tile
+  // (see map/castlePlacement.ts), so L1 settlements would earn provably nothing.
+  return level;
 }
 
 export function controlledPositions(

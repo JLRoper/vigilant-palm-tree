@@ -1,16 +1,21 @@
-import type { GameState, HeroId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload } from "./gameState";
-import type { BuildingDef, BuildingKind, HeroBattleVerdict, Platoon } from "@heroes/contracts";
+import type { GameState, HeroId, PlayerId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload, TradeRouteEndpoint, TradeRoutePayload } from "./gameState";
+import type { BuildingDef, BuildingKind, HeroBattleVerdict, HeroState, Platoon, Player, SettlementState, TradeRouteState } from "@heroes/contracts";
 import { platoonsHaveTroops, platoonTroopTotal, settlementStacks, normalizePlatoons } from "./units";
 import type { GameMap } from "../map/gameMap";
 import {
+  applyEngineEvent,
   applySettlementBattleResult,
   computeSettlementRates,
+  deriveNextTradeRouteId,
+  depositIntoBank,
   generateCitySpots,
   cityViewSizeFor,
+  foodBiasForTerrain,
+  requestBankWithdrawal,
   resolveBattle,
   rollbackCaptureSettlement,
 } from "@heroes/engine";
-import { settings, type HorseVariant } from "./settings";
+import type { HorseVariant } from "./settings";
 import type { BattleResult, SettlementBattleOutcome, UnitType } from "@heroes/engine";
 import {
   selectHero as selectHeroReducer,
@@ -25,7 +30,6 @@ import {
   reorderStack as reorderStackReducer,
   detectAdjacentEnemy as detectAdjacentEnemyFn,
   transferGold as transferGoldReducer,
-  tradeResources as tradeResourcesReducer,
   setAutoTrade as setAutoTradeReducer,
   recruitHero as recruitHeroReducer,
   startCharter as startCharterReducer,
@@ -49,6 +53,8 @@ import { findPath } from "../map/pathfinding";
 import { hexDistance } from "../core/hex";
 import { bus } from "../core/eventBus";
 import { GARRISON_BACKOFF_ROUNDS, type GarrisonRecruitment } from "../ai/aiBrain";
+
+export type BankGoldDirection = "deposit" | "withdraw";
 
 export interface TurnControllerHooks {
   onHumanTurnEnd(state: GameState): Promise<GameState>;
@@ -85,13 +91,6 @@ export interface TurnControllerHooks {
   // next mergeFromEndTurn). Callers don't await the returned promise or
   // use its resolved value -- same "client trusts its own local
   // computation, eventual consistency via sync" philosophy as onAiMove.
-  onTradeResources(
-    actor: number,
-    fromSettlementId: SettlementId,
-    toSettlementId: SettlementId,
-    resource: WarehouseResource,
-    amount: number,
-  ): Promise<void>;
   onRecruitHero(
     actor: number,
     heroName: string,
@@ -129,7 +128,7 @@ export interface TurnControllerHooks {
   // plan/2026-08-17-issue-88-remaining-command-ports.md Tracks 1/2: same
   // fire-and-forget shape as the rest of this block.
   onUpgradeBuilding(actor: number, settlementId: SettlementId, requests: BuildingUpgradeRequest[]): Promise<void>;
-  onUpgradeSettlement(actor: number, settlementId: SettlementId, upgradePopulationGate: number): Promise<void>;
+  onUpgradeSettlement(actor: number, settlementId: SettlementId): Promise<void>;
   // F4 closer: fired on every city-view placement/destroy change with the
   // full working cart. Tracked like the rest so End Turn drains it first --
   // the server's EndTurn pipeline is what ticks BuildingDef.construction,
@@ -142,13 +141,13 @@ export interface TurnControllerHooks {
     direction: "load" | "unload",
     amounts: Partial<Record<WarehouseResource, number>>,
   ): Promise<void>;
-  onAssignWagons(actor: number, heroId: HeroId, delta: number): Promise<void>;
-  onBuyWagons(actor: number, settlementId: SettlementId, count: number): Promise<void>;
+  onAssignWagons(actor: number, heroId: HeroId, delta: number, slot?: "cargo" | "treasury"): Promise<void>;
+  onBuyWagons(actor: number, settlementId: SettlementId, count: number, slot?: "cargo" | "treasury"): Promise<void>;
   onCreateTradeRoute(
     actor: number,
-    fromSettlementId: SettlementId,
-    toSettlementId: SettlementId,
-    resource: WarehouseResource,
+    from: TradeRouteEndpoint,
+    to: TradeRouteEndpoint,
+    payload: TradeRoutePayload,
     wagons: number,
   ): Promise<void>;
   onUpdateTradeRoute(
@@ -176,6 +175,20 @@ export interface TurnControllerHooks {
     unitTypeId: string,
     count: number,
     toSlot?: number,
+  ): Promise<void>;
+  // A bank pot moved (treasury -> pot, or pot -> a 7-day pending withdrawal).
+  // Same fire-and-forget shape as the rest of this block: the local
+  // depositIntoBank/requestBankWithdrawal call has already applied, which is
+  // also load-bearing — multiplayerSync skips the client's OWN event id
+  // (noteSelfEventId from postCommand), so a POST-only path would leave the
+  // initiator's own pot stale until the next resync.
+  onBankGold(
+    actor: number,
+    settlementId: SettlementId,
+    gx: number,
+    gy: number,
+    amount: number,
+    direction: BankGoldDirection,
   ): Promise<void>;
   // Fire-and-forget POST of an auto-resolved settlement-garrison battle
   // result (AI-attacker path). The local engine reducer has already applied
@@ -220,6 +233,26 @@ export function createAiTurnMemory(): AiTurnMemory {
 export interface TurnControllerOptions {
   isPrimaryActor?: () => boolean;
   aiMemory?: AiTurnMemory;
+  // S3 (plan .plans/20261003-2359_logistics-interface-fixes §5.8): the local
+  // viewer's seat. When known, the five logistics methods (transferResources,
+  // assignWagons, buyWagons, createTradeRoute, updateTradeRoute) act only
+  // during the local seat's own PLAYER_TURN -- otherwise they would optimistically
+  // mutate the WRONG seat's pools during an AI/foreign turn before the server
+  // 403'd them. Absent/unknown (tests, headless embeds) keeps the old
+  // activePlayerId-actor behavior.
+  localSeat?: PlayerId | null;
+}
+
+// Structural shape of the four logistics command results the server now
+// returns (CreateTradeRoute/UpdateTradeRoute/BuyWagons/AssignWagons, plan
+// §5.7): the touched slices the acting client reconciles into its optimistic
+// state via mergeCommandResult. Defined locally so the controller needs no
+// import from io/.
+export interface LogisticsCommandMerge {
+  tradeRoutes?: TradeRouteState[];
+  players?: Player[];
+  hero?: HeroState;
+  settlement?: SettlementState;
 }
 
 export interface SettlementBattleResolution {
@@ -343,6 +376,62 @@ export class TurnController {
 
   clearSelection(): void {
     this.state = clearSelectionReducer(this.state);
+  }
+
+  // Quiet state replacement, never commit(): GameStateManager's identity diff tweens the hero, while state:committed would snap every hero.
+  applyRemoteHeroMove(event: { heroId: HeroId; to: { q: number; r: number } }): boolean {
+    const result = applyEngineEvent(this.state, {
+      type: "HeroMoved",
+      actor: this.state.heroes[event.heroId]?.ownerId ?? 0,
+      heroId: event.heroId,
+      to: event.to,
+    });
+    if (result.outcome !== "applied") return false;
+    this.state = result.state;
+    return true;
+  }
+
+  // S3: the five logistics methods only act during the local seat's own
+  // PLAYER_TURN. Unknown localSeat keeps the pre-gate behavior (the callers
+  // that construct without the option are tests/headless embeds).
+  private logisticsTurnGateBlocked(): boolean {
+    const seat = this.opts.localSeat;
+    if (seat == null) return false;
+    return this.state.phase.kind !== "PLAYER_TURN" || this.state.activePlayerId !== seat;
+  }
+
+  // Safe-phase predicate for merging a logistics command's server result
+  // (plan §5.8 S1/S2 -- the garrisonEventBridge pattern scoped to this merge):
+  // only the local seat's PLAYER_TURN. A result landing mid-battle or after
+  // the turn advanced would rewind newer local state, so it is skipped
+  // entirely -- the resync boundary reconciles instead.
+  private safeForLogisticsMerge(): boolean {
+    if (this.state.phase.kind !== "PLAYER_TURN") return false;
+    const seat = this.opts.localSeat;
+    return seat == null || this.state.activePlayerId === seat;
+  }
+
+  // Quiet reconciliation (no commit(): the optimistic reducer already applied
+  // and the acting client's own event id is skipped by the sync layer, so
+  // this result IS the server truth arriving -- nothing to log or re-broadcast).
+  // Assigns the touched slices and re-derives the route-id counter, closing
+  // the optimistic-id divergence when the server assigned a different id.
+  mergeCommandResult(result: LogisticsCommandMerge): void {
+    if (!this.safeForLogisticsMerge()) return;
+    let next = this.state;
+    if (result.tradeRoutes) {
+      next = {
+        ...next,
+        tradeRoutes: result.tradeRoutes,
+        nextTradeRouteId: deriveNextTradeRouteId(result.tradeRoutes),
+      };
+    }
+    if (result.players) next = { ...next, players: result.players };
+    if (result.hero) next = { ...next, heroes: { ...next.heroes, [result.hero.id]: result.hero } };
+    if (result.settlement) {
+      next = { ...next, settlements: { ...next.settlements, [result.settlement.id]: result.settlement } };
+    }
+    if (next !== this.state) this.state = next;
   }
 
   requestMove(
@@ -549,29 +638,6 @@ export class TurnController {
     return { ok: true, reason: "" };
   }
 
-  tradeResources(
-    fromId: SettlementId,
-    toId: SettlementId,
-    resource: WarehouseResource,
-    amount: number,
-  ): { ok: boolean; reason: string } {
-    const result = tradeResourcesReducer(this.state, fromId, toId, resource, amount);
-    if (!result.ok) return { ok: false, reason: result.reason };
-    this.commit(result.state, {
-      events: [
-        { type: "economy:warehouseChanged", settlementId: fromId, resource, amount: result.state.settlements[fromId]?.warehouse?.[resource] ?? 0 },
-        { type: "economy:warehouseChanged", settlementId: toId, resource, amount: result.state.settlements[toId]?.warehouse?.[resource] ?? 0 },
-      ],
-      log: {
-        type: "resources_traded",
-        payload: { fromId, toId, resource, amount },
-      },
-      hook: () => this.hooks.onTradeResources(result.state.activePlayerId, fromId, toId, resource, amount),
-      hookLabel: "onTradeResources",
-    });
-    return { ok: true, reason: "" };
-  }
-
   reorderStack(
     heroId: HeroId,
     fromIdx: number,
@@ -670,6 +736,36 @@ export class TurnController {
     return true;
   }
 
+  /**
+   * Moves gold between a settlement's treasury and one of its bank pots.
+   * Returns the reducer's own `reason` string so the caller can show why
+   * nothing happened instead of clicking a dead button; `ok: true` means the
+   * local state already moved and the POST is in flight.
+   */
+  bankGold(
+    settlementId: SettlementId,
+    gx: number,
+    gy: number,
+    amount: number,
+    direction: BankGoldDirection,
+  ): { ok: boolean; reason: string } {
+    const result =
+      direction === "deposit"
+        ? depositIntoBank(this.state, settlementId, gx, gy, amount)
+        : requestBankWithdrawal(this.state, settlementId, gx, gy, amount);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    const actor = result.state.activePlayerId;
+    this.commit(result.state, {
+      log: {
+        type: "bank_gold_moved",
+        payload: { settlementId, gx, gy, amount, direction },
+      },
+      hook: () => this.hooks.onBankGold(actor, settlementId, gx, gy, amount, direction),
+      hookLabel: "onBankGold",
+    });
+    return { ok: true, reason: "" };
+  }
+
   // =========================================================================
   // CHARTER SETTLEMENTS
   // =========================================================================
@@ -695,7 +791,10 @@ export class TurnController {
 
     const computed = computeSettlementRates(map, targetQ, targetR, 1);
     const size = cityViewSizeFor(1);
-    const { spots } = generateCitySpots(size, () => rng);
+    // Terrain biases the chartered city's food-spot roll (StartCharter).
+    const { spots } = generateCitySpots(size, () => rng, {
+      foodBias: foodBiasForTerrain(map.get(targetQ, targetR) ?? ""),
+    });
 
     const payload: StartCharterPayload = {
       heroId,
@@ -1177,6 +1276,7 @@ export class TurnController {
     direction: "load" | "unload",
     amounts: Partial<Record<WarehouseResource, number>>,
   ): { ok: boolean; reason: string } {
+    if (this.logisticsTurnGateBlocked()) return { ok: false, reason: "not_your_turn" };
     const result = transferResourcesReducer(this.state, this.state.activePlayerId, heroId, settlementId, direction, amounts);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
@@ -1190,60 +1290,56 @@ export class TurnController {
     return { ok: true, reason: "" };
   }
 
-  assignWagons(heroId: string, delta: number): { ok: boolean; reason: string } {
-    const result = assignWagonsReducer(this.state, this.state.activePlayerId, heroId, delta);
+  assignWagons(heroId: string, delta: number, slot: "cargo" | "treasury" = "cargo"): { ok: boolean; reason: string } {
+    if (this.logisticsTurnGateBlocked()) return { ok: false, reason: "not_your_turn" };
+    const result = assignWagonsReducer(this.state, this.state.activePlayerId, heroId, delta, slot);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
       log: {
         type: "wagons_assigned",
-        payload: { heroId, delta },
+        payload: { heroId, delta, slot },
       },
-      hook: () => this.hooks.onAssignWagons(result.state.activePlayerId, heroId, delta),
+      hook: () => this.hooks.onAssignWagons(result.state.activePlayerId, heroId, delta, slot),
       hookLabel: "onAssignWagons",
     });
     return { ok: true, reason: "" };
   }
 
-  buyWagons(settlementId: string, count: number): { ok: boolean; reason: string } {
-    const result = buyWagonsReducer(this.state, this.state.activePlayerId, settlementId, count);
+  buyWagons(settlementId: string, count: number, slot: "cargo" | "treasury" = "cargo"): { ok: boolean; reason: string } {
+    if (this.logisticsTurnGateBlocked()) return { ok: false, reason: "not_your_turn" };
+    const result = buyWagonsReducer(this.state, this.state.activePlayerId, settlementId, count, slot);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
       log: {
         type: "wagons_bought",
-        payload: { settlementId, count },
+        payload: { settlementId, count, slot },
       },
-      hook: () => this.hooks.onBuyWagons(result.state.activePlayerId, settlementId, count),
+      hook: () => this.hooks.onBuyWagons(result.state.activePlayerId, settlementId, count, slot),
       hookLabel: "onBuyWagons",
     });
     return { ok: true, reason: "" };
   }
 
   createTradeRoute(
-    fromSettlementId: string,
-    toSettlementId: string,
-    resource: WarehouseResource,
+    from: TradeRouteEndpoint,
+    to: TradeRouteEndpoint,
+    payload: TradeRoutePayload,
     wagons: number,
   ): { ok: boolean; reason: string } {
-    const result = createTradeRouteReducer(
-      this.state,
-      this.state.activePlayerId,
-      fromSettlementId,
-      toSettlementId,
-      resource,
-      wagons,
-    );
+    if (this.logisticsTurnGateBlocked()) return { ok: false, reason: "not_your_turn" };
+    const result = createTradeRouteReducer(this.state, this.state.activePlayerId, from, to, payload, wagons);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
       log: {
         type: "trade_route_created",
-        payload: { routeId: result.route?.id, fromSettlementId, toSettlementId, resource, wagons },
+        payload: { routeId: result.route?.id, from, to, payload, wagons },
       },
       hook: () =>
         this.hooks.onCreateTradeRoute(
           result.state.activePlayerId,
-          fromSettlementId,
-          toSettlementId,
-          resource,
+          from,
+          to,
+          payload,
           wagons,
         ),
       hookLabel: "onCreateTradeRoute",
@@ -1255,6 +1351,7 @@ export class TurnController {
     routeId: string,
     change: { resource?: WarehouseResource; wagonsDelta?: number; remove?: boolean },
   ): { ok: boolean; reason: string } {
+    if (this.logisticsTurnGateBlocked()) return { ok: false, reason: "not_your_turn" };
     const result = updateTradeRouteReducer(this.state, this.state.activePlayerId, routeId, change);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
@@ -1292,7 +1389,10 @@ export class TurnController {
     const computed = computeSettlementRates(map, s.q, s.r, targetLevel);
     const size = cityViewSizeFor(targetLevel);
     const rng = () => this.hooks.rng();
-    const { spots } = generateCitySpots(size, rng);
+    // Terrain biases the food-spot roll of the new ring of cells (upgrade).
+    const { spots } = generateCitySpots(size, rng, {
+      foodBias: foodBiasForTerrain(map.get(s.q, s.r) ?? ""),
+    });
     const newCitySpots = spots.filter(
       (spot) => !s.citySpots.some((cs) => cs.cell.x === spot.cell.x && cs.cell.y === spot.cell.y),
     );
@@ -1303,7 +1403,6 @@ export class TurnController {
       targetLevel,
       computed.rates,
       newCitySpots,
-      settings().upgradePopulationGate,
     );
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
@@ -1311,8 +1410,7 @@ export class TurnController {
         type: "settlement_upgrade_started",
         payload: { settlementId, targetLevel },
       },
-      hook: () =>
-        this.hooks.onUpgradeSettlement(result.state.activePlayerId, settlementId, settings().upgradePopulationGate),
+      hook: () => this.hooks.onUpgradeSettlement(result.state.activePlayerId, settlementId),
       hookLabel: "onUpgradeSettlement",
     });
     return { ok: true, reason: "" };

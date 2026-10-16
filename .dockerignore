@@ -9,8 +9,14 @@ dist/
 *.swp
 *.swo
 *~
+.env
 .env.local
 .DS_Store
+tmp/
+
+# Local art-generation workspace (gitignored, may hold secrets/probes)
+local/
+design/
 
 # Test and dev files
 test/
@@ -25,5 +31,4 @@ feature-plans/
 .recycled/
 
 # Dev-only html files (but keep index.html)
-pixel-art.html
 sprite-preview.html

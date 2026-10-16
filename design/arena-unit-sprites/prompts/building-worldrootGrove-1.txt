@@ -1,0 +1,7 @@
+Isometric pixel art game asset for a medieval city-builder, matching the attached reference image exactly in style: same chunky pixel size, same 2:1 dimetric isometric projection (standard 30° angle), same thick dark-brown outlines around every shape, but with a sylvan moss-green / bark-brown / golden palette instead of the reference's warm browns, same transparent background, square 1:1 canvas.
+
+Subject: a worldroot grove: a vast ancient tree-root hall, the tallest of buildings — a colossal living trunk rising behind, golden sap-glow knots in the bark, huge roots arching together into a vaulted doorway, moss and tiny pale bloom flowers on every root, a ring of standing stones at the entrance.
+
+Plot: a square 20x20 meter lot shown as a diamond, topped with light mossy-green ground with darker speckles and a few tiny grass tufts, and a thin darker soil slab visible along the front two edges. The grove hall covers about 55% of the footprint and rises well above the lot's far edge, a curved root-bench beside the door, firefly-like golden motes near the arch.
+
+Single centered asset, nothing outside the plot, clean pixel-art shading, no anti-aliasing halos, no text, no watermark.

@@ -1,0 +1,7 @@
+Isometric pixel art game asset for a fantasy city-builder, matching the attached reference image exactly in style and content: same chunky pixel size, same 2:1 dimetric isometric projection (standard 30 degree angle), same thick dark outlines around every shape, same dark soil lot with pale standing stones, grey-green grass mounds and pale stone-ring wall palette, same transparent background, square 1:1 canvas.
+
+Subject: a grand level-3 royal barrow complex — the largest barrow graveyard: one huge central royal mound with a pale stone-ring base and a tall stone portal entrance glowing warm orange from within, topped with thick grey-green grass and pale ghostly wisps, flanked by two medium mounds and two small mounds at the back corners, a tall carved standing stone with rune marks rising directly before the central portal, every mound rimmed with pale bone-white stone rings.
+
+Plot: a square 20x20 meter lot shown as a diamond, topped with dark brown grave soil with darker speckles and sparse tufts of grey-green grass, and a thin darker soil slab visible along the front two edges. A full ring of pale carved standing stones around the lot edges, scattered pale bones and small skull piles, cracked and leaning gravestones, and a cracked pale stone path leading to the central portal.
+
+Single centered asset, nothing outside the plot, clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.

@@ -1,10 +1,16 @@
 import type {
+  BuildingDef,
+  CastleVariant,
+  FactionId,
   GameState,
+  GenerationStyle,
   HeroId,
   HeroState,
   InitialStateOptions,
   PlacedCastle,
+  Platoon,
   Player,
+  PlayerId,
   SettlementId,
   SettlementState,
 } from "@heroes/contracts";
@@ -18,12 +24,14 @@ import {
   generateSettlementName,
   SETTLEMENT_GOLD_TAX,
 } from "./economy/settlementRates";
+import { foodRequiredForPopulation } from "./economy/consumption";
 import { DEFAULT_HERO_ARCANE, DEFAULT_HERO_INTELLIGENCE } from "./combatConfig";
 import { DEFAULT_HERO_SPELL, maxManaFor } from "./combat/spells";
-import { DEFAULT_HERO_WAGONS } from "./settlement/capacity";
-import { demoPlatoonsForPlayer, normalizePlatoons, platoonTroopTotal } from "./units";
+import { DEFAULT_HERO_WAGONS, DEFAULT_TREASURY_WAGONS } from "./settlement/capacity";
+import { demoPlatoonsForPlayer, normalizePlatoons, platoonTroopTotal, type UnitType } from "./units";
 import { MAX_PLAYERS, PLAYER_COLORS } from "./playerColors";
-import { cityViewSizeFor, generateCitySpots } from "./settlement/citySpots";
+import { cityViewSizeFor, foodBiasForTerrain, generateCitySpots } from "./settlement/citySpots";
+import { buildStarterLayout, heroFoodPerTurn, starterFarmsNeeded } from "./settlement/starterLayout";
 import { VALID_HORSE_VARIANTS } from "./horseVariants";
 
 const DEFAULT_PLAYER_COUNT = 3;
@@ -43,6 +51,22 @@ export interface BuildInitialOptions {
   playerCount?: number;
   humanSeatCount?: number;
   enemyCount?: number;
+  /**
+   * Unit catalog id -> UnitType, used ONLY to price the starting heroes' weekly
+   * food bill against the starter farmland (see seedStarterBuildings). Optional
+   * with the same contract `applyWeeklyUpkeep(state, growthRate, unitTypes)` has:
+   * omitted, units.ts's flat 1 gold / 1 food per troop applies, which
+   * under-reports the demo army as 24 food/week instead of the catalog's 40.
+   */
+  unitTypes?: Record<string, UnitType>;
+  /**
+   * Per-seat roster factions (faction-registry foundation): entry i is seat
+   * i's FactionId. Absent or short = every seat (covered or not) stays
+   * "human" — byte-identical to today's snapshot, which is why the Player
+   * field is only spread in when an entry exists. Entries beyond the seat
+   * count are never read, which is the clamp.
+   */
+  seatFactions?: FactionId[];
 }
 
 function clampPlayerCount(n: number | undefined): number {
@@ -74,8 +98,8 @@ function defaultHeroes(): Record<HeroId, HeroState> {
   const h0Stacks = normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 12 }] }, { entries: [{ unitTypeId: "archer", count: 8 }] }, { entries: [{ unitTypeId: "cavalry", count: 4 }] }]);
   const h1Stacks = normalizePlatoons([{ entries: [{ unitTypeId: "crossbowman", count: 10 }] }, { entries: [{ unitTypeId: "griffin", count: 3 }] }]);
   return {
-    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 300, troops: platoonTroopTotal(h0Stacks), stacks: h0Stacks, isChartering: false, charterId: null, horseVariant: "bubbly", arcane: DEFAULT_HERO_ARCANE, intelligence: DEFAULT_HERO_INTELLIGENCE, heroMana: MANA_POOL_V1, heroMaxMana: MANA_POOL_V1, heroSpell: DEFAULT_HERO_SPELL },
-    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 300, troops: platoonTroopTotal(h1Stacks), stacks: h1Stacks, isChartering: false, charterId: null, horseVariant: "shadow", arcane: DEFAULT_HERO_ARCANE, intelligence: DEFAULT_HERO_INTELLIGENCE, heroMana: MANA_POOL_V1, heroMaxMana: MANA_POOL_V1, heroSpell: DEFAULT_HERO_SPELL },
+    h0: { id: "h0", name: "Commander", ownerId: 0, q: 2, r: 2, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 2, r: 2 }], gold: 300, troops: platoonTroopTotal(h0Stacks), stacks: h0Stacks, isChartering: false, charterId: null, horseVariant: "bubbly", arcane: DEFAULT_HERO_ARCANE, intelligence: DEFAULT_HERO_INTELLIGENCE, heroMana: MANA_POOL_V1, heroMaxMana: MANA_POOL_V1, heroSpell: DEFAULT_HERO_SPELL, morale: 100, upkeepUnpaidSinceDay: null, upkeepUnpaidTroops: 0, upkeepUnpaidGold: 0 },
+    h1: { id: "h1", name: "Shadow Knight", ownerId: 1, q: 18, r: 4, movementRemaining: MOVEMENT_PER_TURN, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 18, r: 4 }], gold: 300, troops: platoonTroopTotal(h1Stacks), stacks: h1Stacks, isChartering: false, charterId: null, horseVariant: "shadow", arcane: DEFAULT_HERO_ARCANE, intelligence: DEFAULT_HERO_INTELLIGENCE, heroMana: MANA_POOL_V1, heroMaxMana: MANA_POOL_V1, heroSpell: DEFAULT_HERO_SPELL, morale: 100, upkeepUnpaidSinceDay: null, upkeepUnpaidTroops: 0, upkeepUnpaidGold: 0 },
   };
 }
 
@@ -97,7 +121,15 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       citySpots: [],
       cityMines: [],
       morale: 100,
-      autoTrade: true,
+      garrisonUnpaidSinceDay: null,
+      garrisonUnpaidTroops: 0,
+      garrisonUnpaidGold: 0,
+      // New games start with per-settlement auto-trade OFF (2026-10-02): the
+      // game-level legacy gate (lobby.legacyAutoTrade, written false by
+      // POST /games) already disables runAutoTrade for them, and the logistics
+      // recommender (economy/tradeNeeds.ts) replaces it. Existing saves keep
+      // whatever they have stored -- only this default changed.
+      autoTrade: false,
       castleVariant: 0,
       buildings: [],
     },
@@ -117,7 +149,10 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
       citySpots: [],
       cityMines: [],
       morale: 100,
-      autoTrade: true,
+      garrisonUnpaidSinceDay: null,
+      garrisonUnpaidTroops: 0,
+      garrisonUnpaidGold: 0,
+      autoTrade: false,
       castleVariant: 0,
       buildings: [],
     },
@@ -165,12 +200,14 @@ function makePlayers(
   settlementIds: Record<string, string[]>,
   playerCount: number,
   humanSeatCount: number,
+  seatFactions?: readonly FactionId[],
 ): Player[] {
   const out: Player[] = [];
   for (let i = 0; i < playerCount; i++) {
     const isHuman = i < humanSeatCount;
     const faction: Player["faction"] = isHuman ? "player" : "ai";
     const name = isHuman ? `Player ${i + 1}` : `AI ${i + 1 - humanSeatCount}`;
+    const factionId = seatFactions?.[i];
     out.push({
       id: i,
       faction,
@@ -182,7 +219,34 @@ function makePlayers(
       // 5 starting wagons are already assigned to the starting hero.
       wagonsOwned: 5,
       wagonsUnassigned: 0,
+      // Treasury-cart pool (Phase 1 treasury-wagons split): a second,
+      // independent 5-cart pool, likewise all pre-assigned to the starting
+      // hero so its purse cap stays at 2,500g (the charter pairing).
+      treasuryWagonsOwned: DEFAULT_TREASURY_WAGONS,
+      treasuryWagonsUnassigned: 0,
+      ...(factionId !== undefined ? { factionId } : {}),
     });  }
+  return out;
+}
+
+/**
+ * Owner id -> the starting army that owner's hero spawns with, for every seat
+ * that actually spawns a hero (i.e. that owns a castle).
+ *
+ * `makeHeroes` builds its stacks from THIS map, so the starter farmland and the
+ * weekly food bill can never be priced against two different armies. It is
+ * deliberately rng-free (`demoPlatoonsForPlayer` is a pure table keyed on the
+ * seat index, not a draw), which is what lets `seedStarterBuildings` read it
+ * BEFORE makeHeroes runs: reordering the two to create the heroes first would
+ * shift the rng stream makeHeroes/makeSettlements draw horse variants, castle
+ * names and city spots from, silently changing every already-seeded map.
+ */
+function starterHeroStacks(castles: readonly PlacedCastle[]): Map<PlayerId, Platoon[]> {
+  const out = new Map<PlayerId, Platoon[]>();
+  for (const c of castles) {
+    if (c.ownerId === null || out.has(c.ownerId)) continue;
+    out.set(c.ownerId, demoPlatoonsForPlayer(c.ownerId));
+  }
   return out;
 }
 
@@ -192,8 +256,11 @@ function makeHeroes(
   rng: () => number,
   humanSeatCount: number,
 ): HeroState[] {
+  const stacksByOwner = starterHeroStacks(castles);
   const heroes: HeroState[] = [];
   for (let i = 0; i < playerCount; i++) {
+    const stacks = stacksByOwner.get(i);
+    if (!stacks) continue;
     const castle = castles.find((c) => c.ownerId === i);
     if (!castle) continue;
     const variantIds = VALID_HORSE_VARIANTS;
@@ -211,8 +278,8 @@ function makeHeroes(
       previousMovementRemaining: null,
       trail: [{ q: castle.tile.q, r: castle.tile.r }],
       gold: STARTING_GOLD,
-      stacks: demoPlatoonsForPlayer(i),
-      troops: platoonTroopTotal(demoPlatoonsForPlayer(i)),
+      stacks,
+      troops: platoonTroopTotal(stacks),
       isChartering: false,
       charterId: null,
       horseVariant: variantIds[Math.floor(rng() * variantIds.length)],
@@ -223,9 +290,17 @@ function makeHeroes(
       heroMana: manaPool,
       heroMaxMana: manaPool,
       heroSpell: DEFAULT_HERO_SPELL,
+      // Upkeep shortfall (weekly upkeep pass): every hero starts paid up and
+      // content; the weekly pass is what first sets these.
+      morale: 100,
+      upkeepUnpaidSinceDay: null,
+      upkeepUnpaidTroops: 0,
+      upkeepUnpaidGold: 0,
       // Wagons & cargo (docs/wagons-stockpiles-trade-routes-plan.md §4.2):
-      // 5 wagons = 2,500g purse cap, exactly the charter cost.
+      // 5 cargo wagons = the 250-per-resource cap, and 5 treasury carts =
+      // a 2,500g purse cap, exactly the charter cost.
       wagons: DEFAULT_HERO_WAGONS,
+      treasuryWagons: DEFAULT_TREASURY_WAGONS,
       resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
     });
   }
@@ -237,11 +312,17 @@ function makeSettlements(
   rng: () => number,
   castles: PlacedCastle[],
   _playerCount: number,
+  unitTypes: Record<string, UnitType> = {},
 ): SettlementState[] {
-  return castles.map((c) => {
+  const settlements = castles.map((c) => {
     const computed = computeSettlementRates(map, c.tile.q, c.tile.r, c.level);
     const size = cityViewSizeFor(c.level);
-    const { spots, mines } = generateCitySpots(size, rng);
+    const population = defaultPopulation(c.level);
+    // Terrain biases the city's food-spot roll: plains-rich, barren-poor.
+    const { spots, mines } = generateCitySpots(size, rng, {
+      foodBias: foodBiasForTerrain(map.get(c.tile.q, c.tile.r) ?? ""),
+    });
+    const castleRoll = rng();
     return {
       id: c.id,
       name: generateSettlementName(rng, c.ownerId),
@@ -249,7 +330,7 @@ function makeSettlements(
       q: c.tile.q,
       r: c.tile.r,
       level: c.level,
-      population: defaultPopulation(c.level),
+      population,
       goldTax: SETTLEMENT_GOLD_TAX[c.level],
       resourceRates: computed.rates,
       foundedOnResource: computed.foundedOn,
@@ -258,9 +339,81 @@ function makeSettlements(
       citySpots: spots,
       cityMines: mines,
       morale: 100,
-      autoTrade: true,
-      castleVariant: rng() < 0.5 ? 1 : 0,
-      buildings: [],
+      // Garrison upkeep shortfall (weekly upkeep pass): starts paid up.
+      garrisonUnpaidSinceDay: null,
+      garrisonUnpaidTroops: 0,
+      garrisonUnpaidGold: 0,
+      autoTrade: false,
+      castleVariant: (Math.floor(castleRoll * 4) as CastleVariant),
+      // Filled in by seedStarterBuildings below, in a second pass so the rng
+      // draw order above stays exactly as it was.
+      buildings: [] as BuildingDef[],
+    };
+  });
+  return seedStarterBuildings(settlements, starterHeroStacks(castles), unitTypes);
+}
+
+/**
+ * Give every settlement the engine's starter set, and size its farmland
+ * against ITS OWN food bill: its population, plus the weekly bill of the
+ * starting hero that stands on it (starting heroes spawn on their owner's
+ * FIRST castle -- the level-1 keep for seat 0, the level-3 castle for each AI
+ * seat), because hero/upkeep.ts's applySuppliedHeroUpkeep draws that bill out
+ * of the warehouse of the settlement the hero is standing on -- and ONLY that
+ * one (2026-10-02: the owner-wide pool is gone with the instant auto-trade
+ * teleport it existed to feed).
+ *
+ * Why every settlement, not just the big ones: a settlement that already has
+ * buildings SKIPS the city view's free starter commit (starterCityOnOpen
+ * returns `free: false`), so a settlement created empty would never be handed
+ * one at all. Seeding the level-1 keep used to be safe only because
+ * `starterBuildingsFor` returned `[]` for it and the free commit caught it on
+ * first open -- which left the keep producing nothing for as long as the player
+ * never opened its city, and when they did, only one farm against its own
+ * 5 food/turn. Measured: `l1SeededWithBuildings` 0/60 seeds.
+ *
+ * Why per-settlement sizing survives now (it did not when the pool landed):
+ * with auto-trade OFF for new games, each settlement ACCUMULATES its own
+ * production surplus instead of being drained to exactly foodRequired every
+ * turn -- the keep holds stock at the weekly hero charge where the old regime
+ * left it at 0. Coverage is measured over 4000 seeds with the real
+ * cellMultiplier (docs/resource-gathering.md); the one class the formula
+ * cannot fully satisfy is the 5x5 keep, where farm fields are 2x2 and the
+ * grid physically holds at most 3 beside the town hall --
+ * `starterFarmsNeeded(5 + 40/7)` asks for 4 and gets 3.
+ *
+ * Neutral settlements (ownerId null) have no hero and no trade partner (turn/
+ * endTurn.ts's consumption loop is gated on `s.ownerId === playerId`), so
+ * their bill is their own population and nothing else.
+ */
+function seedStarterBuildings(
+  settlements: readonly SettlementState[],
+  heroStacks: ReadonlyMap<PlayerId, Platoon[]>,
+  unitTypes: Record<string, UnitType>,
+): SettlementState[] {
+  // The settlement each seat's starting hero stands on: that owner's FIRST
+  // castle in generation order -- the same pick makeHeroes makes via
+  // castles.find((c) => c.ownerId === i), so the sizing and the spawn can
+  // never disagree about where the hero eats.
+  const heroKeeps = new Set<SettlementId>();
+  const seenOwners = new Set<PlayerId>();
+  for (const s of settlements) {
+    if (s.ownerId === null || seenOwners.has(s.ownerId) || !heroStacks.has(s.ownerId)) continue;
+    seenOwners.add(s.ownerId);
+    heroKeeps.add(s.id);
+  }
+  return settlements.map((s) => {
+    const heroStacksForOwner = s.ownerId !== null && heroKeeps.has(s.id) ? heroStacks.get(s.ownerId) : undefined;
+    const bill =
+      foodRequiredForPopulation(s.population) +
+      (heroStacksForOwner ? heroFoodPerTurn(heroStacksForOwner, unitTypes) : 0);
+    return {
+      ...s,
+      buildings: buildStarterLayout({
+        size: cityViewSizeFor(s.level),
+        style: "pixel" as GenerationStyle,
+        farms: starterFarmsNeeded(bill),
+      }),
     };
   });
 }
@@ -292,10 +445,10 @@ export function buildInitialGameState(
     castleCount: Math.max(castleCount, playerCount),
   });
 
-  const settlements = makeSettlements(map, rng, castles, playerCount);
+  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes);
   const settlementIds = splitByOwner(settlements);
   return createInitialState({
-    seedPlayers: makePlayers(settlementIds, playerCount, humanSeatCount),
+    seedPlayers: makePlayers(settlementIds, playerCount, humanSeatCount, opts?.seatFactions),
     seedHeroes: makeHeroes(castles, playerCount, rng, humanSeatCount),
     seedSettlements: settlements,
     seedRound: 1,
@@ -330,9 +483,9 @@ export function makeInitialStatePayload(
     playerCount,
     castleCount: Math.max(castleCount, playerCount),
   });
-  const settlements = makeSettlements(map, rng, castles, playerCount);
+  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes);
   const settlementIds = splitByOwner(settlements);
-  const players = makePlayers(settlementIds, playerCount, humanSeatCount);
+  const players = makePlayers(settlementIds, playerCount, humanSeatCount, opts?.seatFactions);
   const heroes = makeHeroes(castles, playerCount, rng, humanSeatCount);
   return {
     round: 1,

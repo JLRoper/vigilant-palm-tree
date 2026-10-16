@@ -3,10 +3,15 @@ import assert from "node:assert/strict";
 import type { CharterState } from "@heroes/contracts";
 import { Hero } from "../../src/entities/hero";
 import { Castle } from "../../src/entities/settlement";
+import { GameMap, type TileRow } from "../../src/map/gameMap";
+import type { Terrain } from "../../src/map/terrain";
+import { EntityMirror } from "../../src/render/scene/entityMirror";
 import { axialToPixel, type Axial } from "../../src/core/hex";
 import { computeReachableSplit } from "../../src/render/overlays/pathOverlay";
 import { buildAdventureScene } from "../../src/render/scene/sceneBuilder/adventureScene";
+import { makeHero, makeSettlement, makeState } from "../charter/_helpers";
 import type {
+  CaravanMarkerNode,
   CastleNode,
   CharterOverlayNode,
   FogHexNode,
@@ -16,6 +21,7 @@ import type {
   PathSegmentNode,
   ResourceIconNode,
   SelectedTileHighlightNode,
+  TerrainDecorationNode,
   TerrainHexNode,
   TerritoryOutlineEdgeNode,
   ValidCharterHexNode,
@@ -39,7 +45,7 @@ test("terrain is always emitted; fog covers every tile the view player can't see
   });
 
   assert.equal(nodesOfKind<TerrainHexNode>(nodes, "terrainHex").length, 3);
-  assert.equal(nodesOfKind(nodes, "terrainDecoration").length, 3);
+  assert.equal(nodesOfKind(nodes, "terrainDecoration").length, 0, "grass tiles omit no-op terrainDecoration nodes");
   assert.equal(nodesOfKind<FogHexNode>(nodes, "fogHex").length, 3, "nothing is owned by viewPlayerId=0, so every tile should be fogged");
   assert.equal(nodesOfKind<HeroNode>(nodes, "hero").length, 0, "the enemy hero is hidden by fog of war");
 });
@@ -363,7 +369,15 @@ test("path/trail nodes render only for the viewer's OWN selected hero (fog-posit
     opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h1" }),
   });
   assert.equal(nodesOfKind(foreignSelected, "pathSegment").length, 0, "a foreign selected hero emits no path segments");
-  assert.equal(nodesOfKind(foreignSelected, "heroTrail").length, 0, "a foreign selected hero emits no trail");
+  const foreignTrails = nodesOfKind<HeroTrailNode>(foreignSelected, "heroTrail");
+  assert.ok(
+    foreignTrails.every((t) => t.heroId !== "h0"),
+    "a foreign selection must not unlock the viewer's own-hero trail",
+  );
+  assert.ok(
+    foreignTrails.every((t) => t.intensity === 0.45),
+    "the only trail allowed here is the dim enemy-reveal trail, never a full-alpha own-hero trail",
+  );
 
   const ownSelected = buildAdventureScene({
     map, heroes: [own, foreign], castles: [], path, hover: null,
@@ -373,8 +387,93 @@ test("path/trail nodes render only for the viewer's OWN selected hero (fog-posit
   assert.ok(segments.length >= 1, "own selection emits the path as before");
   assert.ok(segments.every((s) => s.points[0] !== axialToPixel(3, 0)), "no segment anchors at the foreign hero's tile");
   const trails = nodesOfKind<HeroTrailNode>(ownSelected, "heroTrail");
+  const ownTrail = trails.find((t) => t.heroId === "h0");
+  assert.ok(ownTrail, "the own selection still renders its own trail");
+  assert.equal(ownTrail.intensity, undefined, "the own trail is drawn at full intensity");
+});
+
+test("a fog-hidden foreign hero leaks nothing: no path, and no reveal trail", () => {
+  const map = makeGrassMap(12, 1);
+  const own = new Hero("h0", "Own", 0, 0, "player", 0, 10, [{ q: -1, r: 0 }, { q: 0, r: 0 }]);
+  const foreign = new Hero("h1", "Foe", 9, 0, "enemy", 1, 10, [
+    { q: 11, r: 0 }, { q: 10, r: 0 }, { q: 9, r: 0 },
+  ]);
+  const path = [{ q: 1, r: 0 }, { q: 2, r: 0 }];
+
+  const nodes = buildAdventureScene({
+    map, heroes: [own, foreign], castles: [], path, hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, selectedHeroId: "h1" }),
+  });
+
+  assert.equal(nodesOfKind<PathSegmentNode>(nodes, "pathSegment").length, 0);
+  assert.equal(
+    nodesOfKind<HeroTrailNode>(nodes, "heroTrail").filter((t) => t.heroId === "h1").length,
+    0,
+    "q=9 is outside VISION_RANGE=4, so its trail must not be drawn",
+  );
+});
+
+test("a visible enemy hero gets one dim reveal trail capped to the last 8 points", () => {
+  const map = makeGrassMap(4, 1);
+  const own = new Hero("h0", "Own", 0, 0, "player", 0, 10);
+  const enemyTrail: Axial[] = [];
+  for (let i = 9; i >= 0; i--) enemyTrail.push({ q: 2 - i, r: 0 });
+  const enemy = new Hero("h1", "Foe", 2, 0, "enemy", 1, 10, enemyTrail);
+
+  const nodes = buildAdventureScene({
+    map, heroes: [own, enemy], castles: [], path: [], hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const trails = nodesOfKind<HeroTrailNode>(nodes, "heroTrail");
   assert.equal(trails.length, 1);
-  assert.equal(trails[0].heroId, "h0");
+  const [trail] = trails;
+  assert.equal(trail.heroId, "h1");
+  assert.equal(trail.intensity, 0.45, "an enemy trail is dimmer than the viewer's own");
+  assert.equal(trail.color, stubColorForOwner(1));
+  assert.equal(trail.points.length, 8, "the reveal trail keeps a short recent history");
+  assert.deepEqual(trail.points[0], axialToPixel(-5, 0), "the oldest kept point is 8 back");
+  assert.deepEqual(trail.points[7], axialToPixel(2, 0), "the newest kept point is the hero's last trail entry");
+  assert.equal(enemy.trail.length, enemyTrail.length, "the hero's own trail history is untouched");
+});
+
+test("an enemy hero with no trail history emits no trail node", () => {
+  const map = makeGrassMap(4, 1);
+  const own = new Hero("h0", "Own", 0, 0, "player", 0, 10);
+  const enemy = new Hero("h1", "Foe", 2, 0, "enemy", 1, 10);
+  const nodes = buildAdventureScene({
+    map, heroes: [own, enemy], castles: [], path: [], hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  assert.equal(nodesOfKind<HeroTrailNode>(nodes, "heroTrail").length, 0);
+});
+
+test("opts.heroAlpha fades non-own heroes only, and is absent when there is no fade", () => {
+  const map = makeGrassMap(4, 1);
+  const own = new Hero("h0", "Own", 0, 0, "player", 0, 10);
+  const fading = new Hero("h1", "Foe", 1, 0, "enemy", 1, 10);
+  const steady = new Hero("h2", "Foe", 2, 0, "enemy", 2, 10);
+  const nodes = buildAdventureScene({
+    map, heroes: [own, fading, steady], castles: [], path: [], hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, heroAlpha: { h1: 0.5 } }),
+  });
+
+  const byId = new Map(nodesOfKind<HeroNode>(nodes, "hero").map((n) => [n.heroId, n]));
+  assert.equal(byId.get("h1")!.alpha, 0.5, "a hero with a pending fade carries the alpha");
+  assert.ok(!("alpha" in byId.get("h2")!), "an enemy absent from heroAlpha has NO alpha field");
+  assert.ok(!("alpha" in byId.get("h0")!), "an own hero never carries an alpha field");
+});
+
+test("a heroAlpha entry of 1 is dropped rather than written as a redundant 1", () => {
+  const map = makeGrassMap(4, 1);
+  const own = new Hero("h0", "Own", 0, 0, "player", 0, 10);
+  const enemy = new Hero("h1", "Foe", 1, 0, "enemy", 1, 10);
+  const nodes = buildAdventureScene({
+    map, heroes: [own, enemy], castles: [], path: [], hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, heroAlpha: { h1: 1 } }),
+  });
+  const hero = nodesOfKind<HeroNode>(nodes, "hero").find((n) => n.heroId === "h1");
+  assert.ok(!("alpha" in hero!), "no fade means the field stays absent so painters take their default path");
 });
 
 test("path segments are marked fogged when any tile they span lies under fog (F4)", () => {
@@ -454,4 +553,278 @@ test("hero trail points are capped to the last 25, render-side only (F14)", () =
   assert.deepEqual(trails[0].points[24], axialToPixel(0, 0), "the newest trail point (last entry) is kept");
   assert.deepEqual(trails[0].points[0], axialToPixel(-24, 0), "the oldest kept point is 25 back");
   assert.equal(hero.trail.length, 40, "the hero's own trail history is untouched");
+});
+
+test("caravan markers share the hero fog gate: hidden in fog, drawn in vision, own seat exempt", () => {
+  const map = makeGrassMap(10, 1);
+  const caravan = { q: 6, r: 0, ownerId: 1, wagons: 3 };
+  const enemyHero = new Hero("h-foe", "Foe", 6, 0, "enemy", 1);
+
+  const fogged = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, caravans: [caravan] }),
+  });
+  assert.equal(nodesOfKind(fogged, "caravanMarker").length, 0, "no vision at all -> the enemy caravan is invisible");
+  assert.equal(nodesOfKind<HeroNode>(fogged, "hero").length, 0, "same for the enemy hero on that tile");
+
+  const seen = buildAdventureScene({
+    map,
+    heroes: [new Hero("h0", "Hero", 2, 0, "player", 0), enemyHero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, caravans: [caravan] }),
+  });
+  assert.equal(nodesOfKind<CaravanMarkerNode>(seen, "caravanMarker").length, 1, "an own hero 4 tiles away brings the tile into vision");
+  assert.equal(nodesOfKind<HeroNode>(seen, "hero").length, 2, "hero and caravan gates agree on the same tile");
+
+  const own = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0, caravans: [{ q: 6, r: 0, ownerId: 0, wagons: 3 }] }),
+  });
+  assert.equal(nodesOfKind(own, "caravanMarker").length, 1, "own caravan bypasses the fog set exactly like own heroes and castles");
+});
+
+test("buildAdventureScene reads heroes and settlements from mirror when supplied", () => {
+  const map = makeGrassMap(5, 5);
+  const mirror = new EntityMirror();
+  mirror.bootstrap(
+    makeState({
+      heroes: [makeHero("h0", 0, 1, 1), makeHero("h1", 1, 3, 3)],
+      settlements: [makeSettlement("s0", 0, 2, 2)],
+    }),
+  );
+
+  const nodes = buildAdventureScene({
+    map,
+    mirror,
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const heroNodes = nodesOfKind<HeroNode>(nodes, "hero");
+  assert.equal(heroNodes.length, 2, "both heroes visible on grass map");
+  assert.ok(heroNodes.some((n) => n.heroId === "h0" && n.ownerId === 0));
+  assert.ok(heroNodes.some((n) => n.heroId === "h1" && n.ownerId === 1));
+
+  const castleNodes = nodesOfKind<CastleNode>(nodes, "castle");
+  assert.equal(castleNodes.length, 1);
+  assert.equal(castleNodes[0].settlementId, "s0");
+  assert.equal(castleNodes[0].ownerId, 0);
+});
+
+test("moving hero in mirror reflects in emitted HeroNode coordinates and animation flags", () => {
+  const map = makeGrassMap(5, 5);
+  const mirror = new EntityMirror();
+  mirror.bootstrap(
+    makeState({
+      heroes: [makeHero("h0", 0, 1, 1)],
+      settlements: [],
+    }),
+  );
+
+  mirror.applyEvent({
+    type: "HeroMoved",
+    actor: 0,
+    heroId: "h0",
+    to: { q: 2, r: 1 },
+  });
+
+  // Tick a quarter through the move duration (55ms of 220ms, moveProgress = 0.25)
+  mirror.update(55);
+
+  const nodes = buildAdventureScene({
+    map,
+    mirror,
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const heroNodes = nodesOfKind<HeroNode>(nodes, "hero");
+  assert.equal(heroNodes.length, 1);
+  const [node] = heroNodes;
+  assert.equal(node.heroId, "h0");
+  assert.notEqual(node.scaleY, 1.0, "moving hero has vertical squash/stretch");
+  assert.ok(node.world.x > axialToPixel(1, 1).x, "interpolated world x advanced toward target");
+});
+
+test("settlement captured in mirror updates emitted CastleNode owner and color", () => {
+  const map = makeGrassMap(5, 5);
+  const mirror = new EntityMirror();
+  mirror.bootstrap(
+    makeState({
+      heroes: [makeHero("h0", 0, 0, 0)],
+      settlements: [makeSettlement("s0", 1, 2, 2)],
+    }),
+  );
+
+  mirror.applyEvent({
+    type: "SettlementCaptured",
+    actor: 0,
+    heroId: "h0",
+    settlementId: "s0",
+    previousOwnerId: 1,
+  });
+
+  const nodes = buildAdventureScene({
+    map,
+    mirror,
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const castleNodes = nodesOfKind<CastleNode>(nodes, "castle");
+  assert.equal(castleNodes.length, 1);
+  assert.equal(castleNodes[0].ownerId, 0, "castle owner updated to capturing player");
+  assert.equal(castleNodes[0].color, stubColorForOwner(0));
+});
+
+test("a hover that is not a map hex emits no hover highlight node", () => {
+  const map = makeGrassMap(1, 1);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [],
+    path: [],
+    hover: { qx: 9, qy: 9 },
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  assert.equal(nodesOfKind<HoverHighlightNode>(nodes, "hoverHighlight").length, 0, "the hover target is outside the map and owned by nobody");
+});
+
+test("an owned hero with an empty trail emits no hero trail node", () => {
+  const map = makeGrassMap(3, 1);
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0);
+  hero.trail = [];
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  assert.equal(nodesOfKind<HeroTrailNode>(nodes, "heroTrail").length, 0, "no trail points are available to emit");
+});
+
+test("fog covers every tile the view player cannot see; a 1x1 owned map is fully clear", () => {
+  const map = makeGrassMap(1, 1);
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  assert.equal(nodesOfKind<FogHexNode>(nodes, "fogHex").length, 0, "the only tile is owned, so nothing should be fogged");
+});
+
+test("terrainDecoration is omitted for grass and dirt and emitted for forest, water, desert, mountain, swamp, snow", () => {
+  const terrains: Terrain[] = ["grass", "dirt", "forest", "water", "desert", "mountain", "swamp", "snow"];
+  const rows: TileRow[] = terrains.map((terrain, q) => ({ q, r: 0, terrain, resource: null }));
+  const map = GameMap.fromTiles(rows);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const decos = nodesOfKind<TerrainDecorationNode>(nodes, "terrainDecoration");
+  assert.deepEqual(
+    decos.map((d) => d.terrain),
+    ["forest", "water", "desert", "mountain", "swamp", "snow"],
+  );
+});
+
+test("viewportBounds culls terrainHex, fogHex, resourceIcon, and validCharterHex outside the bounds while preserving full-map emission when omitted", () => {
+  const map = makeGrassMap(5, 3, [
+    { q: 0, r: 0, resource: "gold" },
+    { q: 2, r: 1, resource: "wood" },
+    { q: 4, r: 2, resource: "stone" },
+  ]);
+  const hero = new Hero("h0", "Hero", 2, 1, "player", 0);
+  const opts = makeRenderOptions({
+    viewPlayerId: 0,
+    validCharterHexes: new Set(["0,0", "2,1", "4,2"]),
+  });
+
+  const fullNodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts,
+  });
+  assert.equal(nodesOfKind<TerrainHexNode>(fullNodes, "terrainHex").length, 15);
+  assert.equal(nodesOfKind<ResourceIconNode>(fullNodes, "resourceIcon").length, 3);
+  assert.equal(nodesOfKind<ValidCharterHexNode>(fullNodes, "validCharterHex").length, 3);
+
+  const culledNodes = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [],
+    path: [],
+    hover: null,
+    opts,
+    visible: new Set(["0,0", "2,1", "4,2"]),
+    viewportBounds: { qMin: 1, qMax: 3, rMin: 1, rMax: 2 },
+  });
+  const hexes = nodesOfKind<TerrainHexNode>(culledNodes, "terrainHex");
+  assert.equal(hexes.length, 6, "3 wide (q=1..3) by 2 tall (r=1..2)");
+  assert.ok(hexes.every((h) => h.q >= 1 && h.q <= 3 && h.r >= 1 && h.r <= 2));
+
+  const fogs = nodesOfKind<FogHexNode>(culledNodes, "fogHex");
+  assert.equal(fogs.length, 5, "all 6 in-bounds tiles except visible (2,1) are fogged");
+  assert.ok(fogs.every((f) => f.q >= 1 && f.q <= 3 && f.r >= 1 && f.r <= 2));
+
+  const icons = nodesOfKind<ResourceIconNode>(culledNodes, "resourceIcon");
+  assert.equal(icons.length, 1);
+  assert.equal(icons[0].q, 2);
+  assert.equal(icons[0].r, 1);
+
+  const validHexes = nodesOfKind<ValidCharterHexNode>(culledNodes, "validCharterHex");
+  assert.equal(validHexes.length, 1);
+  assert.equal(validHexes[0].q, 2);
+  assert.equal(validHexes[0].r, 1);
+});
+
+test("GameMap constructor and GameMap.fromTiles populate placedResourceTiles matching resourceTileAt", () => {
+  const generated = new GameMap(42, "medium");
+  const expectedGenerated = [];
+  for (let r = 0; r < generated.height; r++) {
+    for (let q = 0; q < generated.width; q++) {
+      const rt = generated.resourceTileAt(q, r);
+      if (rt) expectedGenerated.push(rt);
+    }
+  }
+  assert.equal(generated.placedResourceTiles.length, expectedGenerated.length);
+  for (const rt of generated.placedResourceTiles) {
+    assert.deepEqual(generated.resourceTileAt(rt.q, rt.r), rt);
+  }
+
+  const fromRows = makeGrassMap(4, 2, [
+    { q: 1, r: 0, resource: "gold" },
+    { q: 3, r: 1, resource: "iron" },
+  ]);
+  assert.deepEqual(fromRows.placedResourceTiles, [
+    { q: 1, r: 0, resource: "gold" },
+    { q: 3, r: 1, resource: "iron" },
+  ]);
 });

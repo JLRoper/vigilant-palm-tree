@@ -182,3 +182,103 @@ test("GET /games/:name returns last_event_id, the cursor a fresh client load see
     await cleanupGame(name);
   }
 });
+
+// POST /games/:name/events -- the audit-write half. Validation runs before
+// the game lookup, so a malformed body is 400 even for an unknown game
+// (same 400-before-404 ordering as the GET cursor check above).
+test("POST /games/:name/events returns 201 with the inserted row echoed back", async () => {
+  const name = uniqueName();
+  await seedGame(name);
+  try {
+    const res = await fetch(`${baseUrl}/games/${name}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "panel_test", payload: { hello: "world" } }),
+    });
+    assert.equal(res.status, 201);
+    const row = (await res.json()) as {
+      id: string;
+      kind: string;
+      payload: { hello: string };
+      created_at: string;
+    };
+    assert.equal(typeof row.id, "string", "BIGSERIAL id arrives as a string (int8 driver quirk)");
+    assert.equal(row.kind, "panel_test");
+    assert.deepEqual(row.payload, { hello: "world" });
+    assert.equal(typeof row.created_at, "string");
+    assert.ok(!Number.isNaN(Date.parse(row.created_at)), "created_at serializes to an ISO date");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games/:name/events rejects an empty kind with 400", async () => {
+  const name = uniqueName();
+  await seedGame(name);
+  try {
+    const res = await fetch(`${baseUrl}/games/${name}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "", payload: {} }),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games/:name/events rejects uppercase and spaced kinds with 400", async () => {
+  const name = uniqueName();
+  await seedGame(name);
+  try {
+    for (const kind of ["PanelTest", "panel test"]) {
+      const res = await fetch(`${baseUrl}/games/${name}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, payload: {} }),
+      });
+      assert.equal(res.status, 400, `kind "${kind}" should be rejected`);
+    }
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games/:name/events rejects a kind longer than 64 chars with 400", async () => {
+  const name = uniqueName();
+  await seedGame(name);
+  try {
+    const res = await fetch(`${baseUrl}/games/${name}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "a".repeat(65), payload: {} }),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games/:name/events rejects a payload whose JSON exceeds 8192 chars with 400", async () => {
+  const name = uniqueName();
+  await seedGame(name);
+  try {
+    const res = await fetch(`${baseUrl}/games/${name}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "panel_test", payload: { blob: "x".repeat(9000) } }),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("POST /games/:name/events answers 400, not 404, for an invalid kind on an unknown game", async () => {
+  const res = await fetch(`${baseUrl}/games/${uniqueName()}/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "Not A Valid Kind", payload: {} }),
+  });
+  assert.equal(res.status, 400);
+});

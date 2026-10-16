@@ -17,7 +17,7 @@ export function advanceSettlementUpgrades(state: GameState): GameState {
       const buildings = s.buildings.map((b) => {
         const newLevel = Math.max(b.level, upgrade.targetLevel) as 1 | 2 | 3;
         const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style);
-        return { ...b, level: newLevel, style: newStyle as BuildingDef["style"] };
+        return { ...b, level: newLevel, style: newStyle };
       });
       newSettlements[id] = { ...s, buildings, upgrade: undefined };
       changed = true;
@@ -27,7 +27,7 @@ export function advanceSettlementUpgrades(state: GameState): GameState {
         const ref = refs.find((r) => r.gx === b.gx && r.gy === b.gy && r.kind === b.kind);
         if (!ref || b.level >= 3) return b;
         const newLevel = (b.level + 1) as 2 | 3;
-        const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style) as BuildingDef["style"];
+        const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style);
         return { ...b, level: newLevel, style: newStyle };
       });
       newSettlements[id] = { ...s, buildings, upgrade: undefined };

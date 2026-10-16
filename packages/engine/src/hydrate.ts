@@ -1,13 +1,18 @@
 import type {
+  CaravanState,
   GameState,
   HeroId,
   HeroState,
   Player,
   SettlementState,
+  TradeRouteEndpoint,
+  TradeRoutePayload,
   TradeRouteState,
+  WarehouseResource,
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import { defaultPopulation, SETTLEMENT_GOLD_TAX } from "./economy/settlementRates";
+import { endpointOwner } from "./logistics";
 import { VALID_HORSE_VARIANTS } from "./horseVariants";
 import { normalizePlatoons } from "./units";
 import { withDefaultSpellStats } from "./combat/spells";
@@ -47,8 +52,51 @@ export interface HydratableGameRow {
   map_size?: string;
   next_charter_id?: number;
   next_settlement_id?: number;
-  /** games.trade_routes JSONB (docs/wagons-stockpiles-trade-routes-plan.md §5.2). */
-  trade_routes?: TradeRouteState[] | null;
+  /**
+   * games.trade_routes JSONB (docs/wagons-stockpiles-trade-routes-plan.md
+   * §5.2). Deliberately untyped: rows written before the endpoint/payload
+   * model carry the legacy flat shape (`fromSettlementId`/`toSettlementId`/
+   * `resource`), so normalizeTradeRoute below decides each record's
+   * generation at read time.
+   */
+  trade_routes?: readonly unknown[] | null;
+  /**
+   * games.lobby.pendingBattle (a server-offered battle awaiting its human
+   * defender, stamped by the server's EnterBattle handling). The BATTLE
+   * phase is re-derived from this at hydrate -- the phase itself is never
+   * persisted. Optional + structurally validated (readPendingBattle below):
+   * a malformed marker is ignored, falling back to the faction-derived
+   * phase rather than throwing.
+   */
+  pendingBattle?: PendingBattleMarker | null;
+}
+
+// A pending-battle marker as persisted in games.lobby.pendingBattle.
+export interface PendingBattleMarker {
+  attackerId: HeroId;
+  defenderId: HeroId;
+  since: number;
+}
+
+/**
+ * Structural validation of the pending-battle marker carried in an untyped
+ * jsonb bag (games.lobby on the server; the hydrate row's pendingBattle
+ * field on this side -- both are objects with a pendingBattle property, so
+ * readPendingBattle(row) validates the row's own field). Returns null
+ * unless the marker is a well-formed { attackerId, defenderId, since }:
+ * ids non-empty strings, since a finite number. A null result means "no
+ * battle offered" -- malformed data falls back to the faction-derived
+ * phase rather than throwing.
+ */
+export function readPendingBattle(lobby: unknown): PendingBattleMarker | null {
+  if (!lobby || typeof lobby !== "object") return null;
+  const raw = (lobby as { pendingBattle?: unknown }).pendingBattle;
+  if (!raw || typeof raw !== "object") return null;
+  const marker = raw as { attackerId?: unknown; defenderId?: unknown; since?: unknown };
+  if (typeof marker.attackerId !== "string" || marker.attackerId.length === 0) return null;
+  if (typeof marker.defenderId !== "string" || marker.defenderId.length === 0) return null;
+  if (typeof marker.since !== "number" || !Number.isFinite(marker.since)) return null;
+  return { attackerId: marker.attackerId, defenderId: marker.defenderId, since: marker.since };
 }
 
 function warnMissing(path: string, field: string): void {
@@ -79,6 +127,26 @@ function backfillHero(h: Partial<HeroState> & { id: HeroId; ownerId: number; q: 
     heroMana: h.heroMana,
     heroMaxMana: h.heroMaxMana,
     heroSpell: h.heroSpell,
+    // Upkeep shortfall (weekly upkeep pass): absent on every pre-migration
+    // row, so each field is defaulted defensively rather than warned about --
+    // they're brand new, not a legacy save losing real state.
+    morale: h.morale ?? 100,
+    upkeepUnpaidSinceDay: h.upkeepUnpaidSinceDay ?? null,
+    upkeepUnpaidTroops: h.upkeepUnpaidTroops ?? 0,
+    upkeepUnpaidGold: h.upkeepUnpaidGold ?? 0,
+    // Wagons & cargo (Phase 1 treasury-wagons split): backfillHero used to
+    // rebuild from an explicit field list that OMITTED wagons/resources, so
+    // a persisted `wagons: 3` silently re-defaulted to 5 and real cargo read
+    // as all-zero on BOTH read paths (legacy JSONB directly, and granular
+    // via server/persistence/hydrate.ts passing heroRepo-loaded heroes back
+    // through here) -- the data-loss bug the Phase 1a fixture pass found.
+    // Conditional spread keeps an absent optional field absent (the
+    // settlementRepo discipline): absence is meaningful (heroWagons/
+    // heroTreasuryWagons soft-default it, and heroRepo round-trips it as a
+    // NULL treasury_wagons), so it must not be materialized here.
+    ...(h.wagons !== undefined ? { wagons: h.wagons } : {}),
+    ...(h.treasuryWagons !== undefined ? { treasuryWagons: h.treasuryWagons } : {}),
+    ...(h.resources !== undefined ? { resources: h.resources } : {}),
     id: h.id,
     name: h.name ?? h.id,
     ownerId: h.ownerId,
@@ -127,6 +195,11 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     citySpots: s.citySpots ?? [],
     cityMines: s.cityMines ?? [],
     morale: s.morale ?? 100,
+    // Garrison upkeep shortfall, same defaulting rationale as the hero
+    // fields above.
+    garrisonUnpaidSinceDay: s.garrisonUnpaidSinceDay ?? null,
+    garrisonUnpaidTroops: s.garrisonUnpaidTroops ?? 0,
+    garrisonUnpaidGold: s.garrisonUnpaidGold ?? 0,
     autoTrade: s.autoTrade ?? true,
     q: s.q,
     r: s.r,
@@ -143,6 +216,156 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     ...(s.stacks !== undefined ? { stacks: normalizePlatoons(s.stacks) } : {}),
   };
 }
+
+// ---- Trade routes: two persisted generations, one normalizer ---------------
+
+/** Runtime endpoint-shape guard for the current (endpoint/payload) generation. Exported for applyEvent's event-row normalization, which validates the same discriminated shapes. */
+export function isTradeRouteEndpoint(v: unknown): v is TradeRouteEndpoint {
+  if (!v || typeof v !== "object") return false;
+  const e = v as { kind?: unknown; id?: unknown };
+  return (e.kind === "settlement" || e.kind === "hero") && typeof e.id === "string" && e.id.length > 0;
+}
+
+/** Runtime payload-shape guard (see isTradeRouteEndpoint). */
+export function isTradeRoutePayload(v: unknown): v is TradeRoutePayload {
+  if (!v || typeof v !== "object") return false;
+  const p = v as { kind?: unknown; resource?: unknown };
+  if (p.kind === "gold") return true;
+  return (
+    p.kind === "resource" &&
+    typeof p.resource === "string" &&
+    WAREHOUSE_RESOURCES.includes(p.resource as (typeof WAREHOUSE_RESOURCES)[number])
+  );
+}
+
+/**
+ * The legacy (pre-endpoint) trade-route shape, as persisted in BOTH the
+ * games.trade_routes JSONB and TradeRouteCreated event rows: flat
+ * fromSettlementId/toSettlementId/resource fields. Returns the
+ * endpoint/payload mapping shared by both legacy generations, or null when
+ * the value carries none of the legacy fields.
+ */
+export function legacyTradeRouteShape(raw: unknown): { from: TradeRouteEndpoint; to: TradeRouteEndpoint; payload: TradeRoutePayload } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as { fromSettlementId?: unknown; toSettlementId?: unknown; resource?: unknown };
+  if (typeof r.fromSettlementId !== "string" || typeof r.toSettlementId !== "string") return null;
+  const resource = r.resource;
+  if (typeof resource !== "string" || !WAREHOUSE_RESOURCES.includes(resource as (typeof WAREHOUSE_RESOURCES)[number])) {
+    return null;
+  }
+  return {
+    from: { kind: "settlement", id: r.fromSettlementId },
+    to: { kind: "settlement", id: r.toSettlementId },
+    payload: { kind: "resource", resource: resource as WarehouseResource },
+  };
+}
+
+function isCaravanState(v: unknown): v is CaravanState {
+  if (!v || typeof v !== "object") return false;
+  const c = v as { phase?: unknown; cargo?: unknown; path?: unknown; pathIndex?: unknown };
+  if (c.phase !== "toDestination" && c.phase !== "toHome") return false;
+  // A negative (or fractional) cargo would apply a NEGATIVE delivery delta
+  // on advance -- the corrupted row would STEAL from the destination -- so
+  // the guard demands a finite, non-negative amount.
+  if (typeof c.cargo !== "number" || !Number.isFinite(c.cargo) || c.cargo < 0) return false;
+  // A departed caravan always stands on a real tile: at least one path tile,
+  // each an integer axial coordinate, with the consumed index in range
+  // (0..length). Anything else could not advance safely.
+  if (!Array.isArray(c.path) || c.path.length < 1) return false;
+  if (!c.path.every((t) => {
+    if (!t || typeof t !== "object") return false;
+    const axial = t as { q?: unknown; r?: unknown };
+    return (
+      typeof axial.q === "number" &&
+      Number.isInteger(axial.q) &&
+      typeof axial.r === "number" &&
+      Number.isInteger(axial.r)
+    );
+  })) return false;
+  return (
+    typeof c.pathIndex === "number" &&
+    Number.isInteger(c.pathIndex) &&
+    c.pathIndex >= 0 &&
+    c.pathIndex <= c.path.length
+  );
+}
+
+/**
+ * Normalizes one persisted trade-route record of either generation into the
+ * current endpoint/payload shape. The legacy mapping is shape-only --
+ * advancing, loading and delivering behave identically post-normalization.
+ * A record recognizable as neither generation (or carrying a malformed
+ * caravan/wagon count) is dropped with a warning: it could not advance
+ * safely, and keeping it would crash the daily tick instead.
+ */
+export function normalizeTradeRoute(raw: unknown): TradeRouteState | null {
+  if (!raw || typeof raw !== "object") {
+    console.warn("[hydrateGameState] dropping unparseable trade route");
+    return null;
+  }
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== "string" || r.id.length === 0) {
+    console.warn("[hydrateGameState] dropping trade route without an id");
+    return null;
+  }
+  const parts = isTradeRouteEndpoint(r.from) && isTradeRouteEndpoint(r.to) && isTradeRoutePayload(r.payload)
+    ? { from: r.from, to: r.to, payload: r.payload }
+    : legacyTradeRouteShape(r);
+  if (!parts) {
+    console.warn(`[hydrateGameState] dropping trade route ${r.id}: neither endpoint nor legacy shape`);
+    return null;
+  }
+  if (typeof r.wagons !== "number" || !Number.isInteger(r.wagons) || r.wagons < 0) {
+    console.warn(`[hydrateGameState] dropping trade route ${r.id}: malformed wagon count`);
+    return null;
+  }
+  if (r.caravan !== null && r.caravan !== undefined && !isCaravanState(r.caravan)) {
+    console.warn(`[hydrateGameState] dropping trade route ${r.id}: malformed caravan`);
+    return null;
+  }
+  // The maintenance streak rides the same JSONB as the rest of the route:
+  // absent stays absent (pre-maintenance rows), null is paid-up, a finite
+  // number passes through, anything else is treated as absent rather than
+  // dropping an otherwise-valid route over one bookkeeping field.
+  const unpaidSinceDay =
+    typeof r.unpaidSinceDay === "number" && Number.isFinite(r.unpaidSinceDay)
+      ? r.unpaidSinceDay
+      : r.unpaidSinceDay === null
+        ? null
+        : undefined;
+  // Route ownership (when the raw row carries it) passes through verbatim;
+  // absent stays absent here -- endpoint-derived backfill needs the live
+  // settlement/hero records, which hydrateGameState owns, so it completes
+  // the chain there (raw -> FROM -> TO -> null).
+  const ownerId = typeof r.ownerId === "number" && Number.isInteger(r.ownerId) ? r.ownerId : undefined;
+  return {
+    id: r.id,
+    from: parts.from,
+    to: parts.to,
+    payload: parts.payload,
+    wagons: r.wagons,
+    caravan: r.caravan ? r.caravan : null,
+    ...(ownerId !== undefined ? { ownerId } : {}),
+    ...(unpaidSinceDay !== undefined ? { unpaidSinceDay } : {}),
+  };
+}
+
+// nextTradeRouteId is not a persisted column; it is derived here from the
+// hydrated route ids (the same suffix-parse applyTradeRouteCreated uses) so
+// a re-hydrated createTradeRoute command cannot re-derive an id that
+// collides with an existing route -- the latent collision bug
+// docs/event-system.md documented. Non-"route<n>" ids do not contribute
+// (NaN suffixes are skipped), matching the applier's own counter bump.
+// Exported for the client sync layer: merges that replace the route array
+// wholesale (EndTurn merges, command-result merges) must re-derive the
+// counter the same way hydration does.
+export function deriveNextTradeRouteId(routes: readonly TradeRouteState[]): number {
+  return routes.reduce((max, route) => {
+    const suffix = Number.parseInt(route.id.replace(/^route/, ""), 10);
+    return Number.isNaN(suffix) ? max : Math.max(max, suffix + 1);
+  }, 0);
+}
+
 
 export function hydrateGameState(
   row: HydratableGameRow,
@@ -164,6 +387,28 @@ export function hydrateGameState(
     });
   }
   const settlementCount = Object.keys(settlementsRecord).length;
+  // A valid pendingBattle marker overrides the faction-derived phase: the
+  // game is mid-battle-offer (the defender must choose), so the turn state
+  // the active player's faction would imply is not the truth. Malformed /
+  // absent -> the faction-derived behavior below, unchanged.
+  const pendingBattle = readPendingBattle(row);
+  // Trade routes normalize per record (either persisted generation), and
+  // the id counter derives from the normalized ids -- see
+  // normalizeTradeRoute/deriveNextTradeRouteId above. Route ownership is
+  // backfilled in the same pass: a row without a persisted ownerId derives
+  // it from the FROM endpoint's live owner, then the TO endpoint's
+  // (settlement endpoints always resolve), and ends at an explicit null
+  // only when both ends are dead heroes -- the updateTradeRoute gate falls
+  // back to the same chain, so null keeps the route removable by nobody
+  // until a resync, never misattributed.
+  const records = { settlements: settlementsRecord, heroes: heroesRecord };
+  const tradeRoutes = (row.trade_routes ?? []).flatMap((raw) => {
+    const normalized = normalizeTradeRoute(raw);
+    if (!normalized) return [];
+    if (normalized.ownerId !== undefined) return [normalized];
+    const derived = endpointOwner(normalized.from, records) ?? endpointOwner(normalized.to, records);
+    return [{ ...normalized, ownerId: derived }];
+  });
   return {
     round: row.round,
     day: row.day ?? row.round,
@@ -171,8 +416,9 @@ export function hydrateGameState(
     players: row.players,
     heroes: heroesRecord,
     settlements: settlementsRecord,
-    phase:
-      row.players.find((p) => p.id === row.active_player_id)?.faction === "ai"
+    phase: pendingBattle
+      ? { kind: "BATTLE", attackerId: pendingBattle.attackerId, defenderId: pendingBattle.defenderId }
+      : row.players.find((p) => p.id === row.active_player_id)?.faction === "ai"
         ? { kind: "AI_TURN", playerId: row.active_player_id }
         : { kind: "PLAYER_TURN", playerId: row.active_player_id },
     selectedHeroId: null,
@@ -180,9 +426,13 @@ export function hydrateGameState(
     dirty: false,
     castleSeed: opts?.castleSeed ?? defaultCastleSeedFromMapSeed(row.seed),
     castleCount: opts?.castleCount ?? CASTLE_COUNT_DEFAULT,
-    tradeRoutes: row.trade_routes ?? [],
+    tradeRoutes,
     activeCharters: (row as unknown as { activeCharters?: GameState["activeCharters"] }).activeCharters ?? [],
     nextCharterId: row.next_charter_id ?? 0,
+    // Derived, not persisted (see deriveNextTradeRouteId): hydrated past
+    // the highest existing "route<n>" id so a freshly created route can
+    // never collide with one already on the board.
+    nextTradeRouteId: deriveNextTradeRouteId(tradeRoutes),
     // Math.max, not a plain `??`: a row created before this counter was
     // wired (every row's next_settlement_id defaults to 0 via that
     // migration's ADD COLUMN) must not re-collide with settlements that

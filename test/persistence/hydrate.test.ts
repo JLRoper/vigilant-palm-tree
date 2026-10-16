@@ -1,7 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import type { PoolClient } from "pg";
-import { hydrateGameState } from "@heroes/engine";
+import { hydrateGameState, GameMap, makeInitialStatePayload, mulberry32 } from "@heroes/engine";
 import type { HeroId, HeroState, SettlementId, SettlementState } from "@heroes/contracts";
 import { withRollback } from "../helpers/pgTestTx";
 import { pool } from "../../server/persistence/db";
@@ -112,6 +112,58 @@ test("hydrateGame reads from the granular tables once populated, matching the JS
   });
 });
 
+test("backfillHero passes wagons/resources/treasuryWagons through BOTH hydration paths (Phase 1a data-loss regression)", async () => {
+  // The pre-Phase-1 bug: backfillHero rebuilt each hero from an explicit
+  // field list that OMITTED wagons and resources, so a persisted
+  // `wagons: 3` silently re-defaulted to 5 and real cargo read as
+  // all-zero on BOTH read paths (legacy JSONB directly; granular via
+  // server/persistence/hydrate.ts feeding heroRepo-loaded heroes back
+  // through hydrateGameState). Phase 1 adds treasuryWagons to the same
+  // passthrough, so a 2-cart hero (a 1,000g purse cap) must survive too.
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    const persisted = makeHero("h0", 0, 2, 2, {
+      gold: 15,
+      wagons: 3,
+      treasuryWagons: 2,
+      resources: { wood: 40, stone: 0, iron: 0, arcane: 7, food: 0 },
+    });
+    const legacy = makeHero("h1", 1, 8, 8);
+    delete legacy.wagons;
+    delete legacy.resources;
+    delete legacy.treasuryWagons;
+    const heroes: Record<HeroId, HeroState> = { h0: persisted, h1: legacy };
+    const settlements: Record<SettlementId, SettlementState> = { s0: makeSettlement("s0", 0, 2, 2) };
+    await seedLegacyGame(client, name, heroes, settlements);
+
+    // Path 1: legacy JSONB row -> hydrateGameState directly.
+    const row = await createGameRepo(client).load(name);
+    const fromJsonb = hydrateGameState(row);
+    assert.equal(fromJsonb.heroes.h0.wagons, 3, "JSONB path: persisted wagons survive backfillHero");
+    assert.equal(fromJsonb.heroes.h0.treasuryWagons, 2, "JSONB path: persisted treasury carts survive backfillHero");
+    assert.deepEqual(
+      fromJsonb.heroes.h0.resources,
+      { wood: 40, stone: 0, iron: 0, arcane: 7, food: 0 },
+      "JSONB path: real cargo survives backfillHero",
+    );
+    assert.equal("treasuryWagons" in fromJsonb.heroes.h1, false, "absent stays absent -- the soft default is applied by the accessors, never materialized here");
+
+    // Path 2: granular tables -> heroRepo -> hydrateFromRepos -> hydrateGameState.
+    await createHeroRepo(client).upsertMany(name, heroes);
+    await createSettlementRepo(client).upsertMany(name, settlements);
+    const granular = await hydrateGame(client, name);
+    assert.equal(granular.source, "granular");
+    assert.equal(granular.state.heroes.h0.wagons, 3, "granular path: persisted wagons survive backfillHero");
+    assert.equal(granular.state.heroes.h0.treasuryWagons, 2, "granular path: persisted treasury carts survive backfillHero");
+    assert.deepEqual(
+      granular.state.heroes.h0.resources,
+      { wood: 40, stone: 0, iron: 0, arcane: 7, food: 0 },
+      "granular path: real cargo survives backfillHero",
+    );
+    assert.deepEqual(granular.state.heroes.h0, fromJsonb.heroes.h0, "both hydration paths agree on the loaded hero byte-for-byte");
+  });
+});
+
 test("hydrateGame's granular path surfaces real charters, which the legacy JSONB path can never produce", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();
@@ -177,6 +229,78 @@ test("hydrateGame round-trips next_charter_id/next_settlement_id once they're pe
   });
 });
 
+// A row shaped just well enough for hydrateGameState's own reads (players is
+// indexed for the AI_TURN check); every other field is defaulted by the
+// function itself, which is exactly the point here.
+function hydrateRow(
+  heroes: Record<HeroId, Partial<HeroState>>,
+  settlements: Record<SettlementId, Partial<SettlementState>>,
+): Parameters<typeof hydrateGameState>[0] {
+  return {
+    round: 1,
+    day: 1,
+    active_player_id: 0,
+    players: [{ id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: [], settlementIds: [] }],
+    heroes,
+    settlements,
+  } as unknown as Parameters<typeof hydrateGameState>[0];
+}
+
+test("hydrateGameState defaults the weekly-upkeep shortfall fields for a legacy row that predates them", () => {
+  // A pre-migration row: the heroes/settlements JSONB carries no morale /
+  // unpaid-upkeep keys at all (021 added them), so hydrateGameState's
+  // defensive `?? ` defaults are what keeps such a game playable.
+  const legacyHero = makeHero("h0", 0, 2, 2);
+  delete (legacyHero as unknown as Record<string, unknown>).morale;
+  delete (legacyHero as unknown as Record<string, unknown>).upkeepUnpaidSinceDay;
+  delete (legacyHero as unknown as Record<string, unknown>).upkeepUnpaidTroops;
+  delete (legacyHero as unknown as Record<string, unknown>).upkeepUnpaidGold;
+  const legacySettlement = makeSettlement("s0", 0, 2, 2);
+  delete (legacySettlement as unknown as Record<string, unknown>).garrisonUnpaidSinceDay;
+  delete (legacySettlement as unknown as Record<string, unknown>).garrisonUnpaidTroops;
+  delete (legacySettlement as unknown as Record<string, unknown>).garrisonUnpaidGold;
+
+  const state = hydrateGameState(hydrateRow({ h0: legacyHero }, { s0: legacySettlement }));
+
+  assert.equal(state.heroes["h0"].morale, 100);
+  assert.equal(state.heroes["h0"].upkeepUnpaidSinceDay, null);
+  assert.equal(state.heroes["h0"].upkeepUnpaidTroops, 0);
+  assert.equal(state.heroes["h0"].upkeepUnpaidGold, 0);
+  assert.equal(state.settlements["s0"].garrisonUnpaidSinceDay, null);
+  assert.equal(state.settlements["s0"].garrisonUnpaidTroops, 0);
+  assert.equal(state.settlements["s0"].garrisonUnpaidGold, 0);
+});
+
+test("hydrateGameState preserves real upkeep-shortfall values when the row carries them", () => {
+  const state = hydrateGameState(
+    hydrateRow(
+      {
+        h0: makeHero("h0", 0, 2, 2, {
+          morale: 55,
+          upkeepUnpaidSinceDay: 19,
+          upkeepUnpaidTroops: 7,
+          upkeepUnpaidGold: 49,
+        }),
+      },
+      {
+        s0: makeSettlement("s0", 0, 2, 2, {
+          garrisonUnpaidSinceDay: 19,
+          garrisonUnpaidTroops: 11,
+          garrisonUnpaidGold: 88,
+        }),
+      },
+    ),
+  );
+
+  assert.equal(state.heroes["h0"].morale, 55);
+  assert.equal(state.heroes["h0"].upkeepUnpaidSinceDay, 19);
+  assert.equal(state.heroes["h0"].upkeepUnpaidTroops, 7);
+  assert.equal(state.heroes["h0"].upkeepUnpaidGold, 49);
+  assert.equal(state.settlements["s0"].garrisonUnpaidSinceDay, 19);
+  assert.equal(state.settlements["s0"].garrisonUnpaidTroops, 11);
+  assert.equal(state.settlements["s0"].garrisonUnpaidGold, 88);
+});
+
 test("hydrateGame floors next_settlement_id at the real settlement count for a game that predates the counter", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();
@@ -225,5 +349,65 @@ test("hydrateGame falls back to the JSONB path when only one granular table has 
     // (normalizePlatoons pads stacks to 8 slots either way).
     const row = await createGameRepo(client).load(name);
     assert.deepEqual(result.state, hydrateGameState(row));
+  });
+});
+
+test("a newly created game's seeded starter set reaches hydrated live state on BOTH read paths", async () => {
+  // The real creation payload (POST /games -> makeInitialStatePayload ->
+  // games.settlements JSONB), for the 1-player game whose level-2 town hosts
+  // the farm pool sized against the keep+town food bill (20/turn) and whose
+  // level-1 keep is seeded with the base set rather than left empty. Path 1 is a
+  // brand-new game, read from JSONB because the granular tables are still empty;
+  // path 2 is the same game after the first persist has written
+  // settlement_buildings. Both settlements' sets must survive both -- a seeded
+  // settlement skips the city view's free starter commit, so losing them here
+  // would leave it with no town hall forever.
+  const payload = makeInitialStatePayload(new GameMap(424242, "small"), mulberry32(424242), {
+    castleSeed: 424242,
+    enemyCount: 0,
+    humanSeatCount: 1,
+  });
+  const town = Object.values(payload.settlements).find((s) => s.level === 2);
+  const keep = Object.values(payload.settlements).find((s) => s.ownerId === 0 && s.level === 1);
+  assert.ok(town && keep, "the 1-player payload has a keep and a level-2 town");
+
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedLegacyGame(client, name, payload.heroes, payload.settlements);
+
+    const assertLiveState = (source: "jsonb" | "granular", settlements: Record<SettlementId, SettlementState>): void => {
+      const live = settlements[town.id];
+      assert.equal(live.buildings.filter((b) => b.kind === "townHall").length, 1, `${source}: the town keeps its town hall`);
+      assert.ok(
+        live.buildings.filter((b) => b.kind === "farmField").length >= 2,
+        `${source}: the town keeps its farmland (${live.buildings.filter((b) => b.kind === "farmField").length} fields)`,
+      );
+      assert.deepEqual(live.buildings, town.buildings, `${source}: buildings are byte-identical to the created payload`);
+      assert.deepEqual(
+        settlements[keep.id].buildings,
+        keep.buildings,
+        `${source}: the keep's starter set survives too (it is seeded, not free-committed)`,
+      );
+      assert.ok(
+        settlements[keep.id].buildings.length > 0,
+        `${source}: the keep is not empty -- the free city-view commit is not what gives it a city`,
+      );
+      assert.equal(
+        settlements[keep.id].buildings.filter((b) => b.kind === "townHall").length,
+        1,
+        `${source}: the keep keeps its town hall`,
+      );
+    };
+
+    const fresh = await hydrateGame(client, name);
+    assert.equal(fresh.source, "jsonb", "a brand-new game reads from the JSONB payload");
+    assertLiveState(fresh.source, fresh.state.settlements);
+
+    await createHeroRepo(client).upsertMany(name, payload.heroes);
+    await createSettlementRepo(client).upsertMany(name, payload.settlements);
+
+    const persisted = await hydrateGame(client, name);
+    assert.equal(persisted.source, "granular", "after the first persist the granular tables win");
+    assertLiveState(persisted.source, persisted.state.settlements);
   });
 });

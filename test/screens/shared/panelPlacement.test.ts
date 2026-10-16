@@ -85,3 +85,46 @@ test("every fallback candidate still lands inside the clamped viewport", () => {
   assert.ok(result.x >= 0 && result.x <= maxX, "returned x stays within the clamped range");
   assert.ok(result.y >= 20 && result.y <= 700 - 24 - 400, "returned y stays within the clamped range");
 });
+
+test("a grid rect in the collision set moves the palette to the right-aligned slot", () => {
+  const viewport = { width: 1280, height: 800 };
+  const desired: PanelRect = { x: 12, y: 296, w: 240, h: 480 };
+  const occupied: PanelRect[] = [
+    { x: 16, y: 130, w: 240, h: 645 },
+    { x: 316, y: 655, w: 80, h: 120 },
+    { x: 402, y: 238.8, w: 480, h: 240 },
+  ];
+  assert.deepEqual(
+    resolvePanelPlacement(desired, occupied, viewport, 20),
+    { x: 1016, y: 296 },
+    "every step candidate overlaps; the right-aligned slot is free",
+  );
+});
+
+test("the min-overlap fallback picks the smallest total overlap area", () => {
+  const viewport = { width: 1280, height: 800 };
+  const desired: PanelRect = { x: 12, y: 296, w: 240, h: 480 };
+  const occupied: PanelRect[] = [
+    { x: 0, y: 0, w: 300, h: 800 },
+    { x: 700, y: 0, w: 580, h: 800 },
+  ];
+  assert.deepEqual(
+    resolvePanelPlacement(desired, occupied, viewport, 20),
+    { x: 264, y: 296 },
+    "17,280 overlap beats 26,880 and 115,200",
+  );
+});
+
+test("an overlap-area tie keeps the earliest candidate (base)", () => {
+  const viewport = { width: 1280, height: 800 };
+  const desired: PanelRect = { x: 12, y: 296, w: 240, h: 480 };
+  const occupied: PanelRect[] = [{ x: 0, y: 0, w: 1280, h: 800 }];
+  assert.deepEqual(resolvePanelPlacement(desired, occupied, viewport, 20), { x: 12, y: 296 });
+});
+
+test("the right-aligned candidate does not preempt a free step candidate", () => {
+  const viewport = { width: 1280, height: 800 };
+  const desired: PanelRect = { x: 12, y: 296, w: 240, h: 480 };
+  const occupied: PanelRect[] = [{ x: 12, y: 296, w: 240, h: 480 }];
+  assert.deepEqual(resolvePanelPlacement(desired, occupied, viewport, 20), { x: 264, y: 296 });
+});

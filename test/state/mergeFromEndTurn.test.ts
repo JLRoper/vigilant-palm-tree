@@ -2,8 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mergeFromEndTurn } from "../../src/game/turnHooks";
 import type { EndTurnResult } from "../../src/io/commands";
-import { makeHero, makeSettlement, makeState } from "../charter/_helpers";
-import type { GameState, HeroId, SettlementId } from "@heroes/contracts";
+import { makeHero, makeSettlement, makeState, makeTradeRoute } from "../charter/_helpers";
+import type { GameState, HeroId, SettlementId, TradeRouteState } from "@heroes/contracts";
+
+const S0_TO_S1 = {
+  from: { kind: "settlement", id: "s0" } as const,
+  to: { kind: "settlement", id: "s1" } as const,
+  payload: { kind: "resource", resource: "wood" } as const,
+};
 
 function buildResult(state: GameState, overrides: Partial<EndTurnResult> = {}): EndTurnResult {
   return {
@@ -132,4 +138,37 @@ test("mergeFromEndTurn ownership follows the merged hero's owner, not the pre-wr
   const merged = mergeFromEndTurn(state, buildResult(state, { heroes }), 0);
 
   assert.equal(merged.selectedHeroId, null, "once the selected hero belongs to another seat it must be dropped for the local viewer");
+});
+
+test("S2: mergeFromEndTurn re-derives nextTradeRouteId after the wholesale routes replace", () => {
+  const state = makeState({ tradeRoutes: [], nextTradeRouteId: 0 });
+  const tradeRoutes: TradeRouteState[] = [
+    makeTradeRoute({ id: "route0", ...S0_TO_S1 }),
+    makeTradeRoute({ id: "route7", ...S0_TO_S1 }),
+  ];
+
+  const merged = mergeFromEndTurn(state, buildResult(state, { tradeRoutes }));
+
+  assert.equal(merged.tradeRoutes, tradeRoutes, "the merged routes are adopted verbatim");
+  assert.equal(merged.nextTradeRouteId, 8, "the counter follows the merged routes (one past the highest persisted id), not the stale local one");
+});
+
+test("S2: without result routes the counter re-derives from the state's own routes", () => {
+  const state = makeState({
+    tradeRoutes: [makeTradeRoute({ id: "route2", ...S0_TO_S1 })],
+    nextTradeRouteId: 0,
+  });
+
+  const merged = mergeFromEndTurn(state, buildResult(state));
+
+  assert.equal(merged.tradeRoutes?.length, 1, "the state's routes survive an EndTurn result without routes");
+  assert.equal(merged.nextTradeRouteId, 3, "a regressed counter is repaired even when the result carries no routes");
+});
+
+test("S2: no routes anywhere leaves the counter at zero", () => {
+  const state = makeState({ tradeRoutes: [], nextTradeRouteId: 0 });
+
+  const merged = mergeFromEndTurn(state, buildResult(state));
+
+  assert.equal(merged.nextTradeRouteId, 0);
 });

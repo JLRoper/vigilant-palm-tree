@@ -3,14 +3,12 @@ import { MapRenderer } from "../render/renderer";
 import type { RenderOptions } from "../render/renderTypes";
 import { MinimapCamera } from "../render/minimap";
 import { GameMap } from "../map/gameMap";
-import { Hero } from "../entities/hero";
-import { Castle } from "../entities/settlement";
 import { AdventureView, type AdventureViewOptions } from "@screens/adventure/adventureView";
 import { SpriteProvider } from "../render/assets";
 import type { Axial } from "../core/hex";
 import type { CityView } from "@screens/settlements/cityView/cityView";
 import type { CharterState } from "../state/gameState";
-import type { TradeRouteState } from "@heroes/contracts";
+import type { CaravanMarkerSpec } from "../render/renderTypes";
 import type { EntityMirror } from "../render/scene/entityMirror";
 
 export class ViewManager {
@@ -19,13 +17,11 @@ export class ViewManager {
   public mapRenderer!: MapRenderer;
   public view!: AdventureView;
   private ctx!: CanvasRenderingContext2D;
-  private mirror: EntityMirror | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private spriteProvider: SpriteProvider) {}
 
   initializeRenderer(map: GameMap, mirror: EntityMirror): void {
     this.ctx = this.canvas.getContext("2d")!;
-    this.mirror = mirror;
     if (this.minimapCamera) {
       this.minimapCamera.reset(map);
     } else {
@@ -34,12 +30,8 @@ export class ViewManager {
     this.mapRenderer = new MapRenderer(this.ctx, map, this.camera, this.spriteProvider, this.minimapCamera, mirror);
   }
 
-  getMirror(): EntityMirror | null {
-    return this.mirror;
-  }
-
   initializeAdventureView(
-    opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw" | "getPathPreviewLock" | "setPathPreviewLock" | "onStartCharter" | "getCharterMode" | "setCharterMode" | "getValidCharterHexes" | "onTileInspect" | "isCityOpen">,
+    opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw" | "getPathPreviewLock" | "setPathPreviewLock" | "onStartCharter" | "getCharterMode" | "setCharterMode" | "getValidCharterHexes" | "onTileInspect" | "isCityOpen" | "getLocalSeat">,
   ): void {
     if (this.view) {
       this.view.detach();
@@ -63,17 +55,15 @@ export class ViewManager {
 
   draw(
     hover: Axial | null,
-    heroes: Hero[],
     path: Axial[],
-    castles: Castle[],
     opts: RenderOptions,
     activeCharters?: readonly CharterState[],
     validCharterHexes?: Set<string> | null,
-    tradeRoutes?: readonly TradeRouteState[],
+    caravans?: readonly CaravanMarkerSpec[],
   ): void {
     if (!this.mapRenderer) return;
-    const fullOpts: RenderOptions = { ...opts, activeCharters, validCharterHexes, tradeRoutes };
-    this.mapRenderer.draw(hover, heroes, path, castles, fullOpts);
+    const fullOpts: RenderOptions = { ...opts, activeCharters, validCharterHexes, caravans };
+    this.mapRenderer.draw(hover, path, fullOpts);
   }
 
   drawCityOverlay(cityView: CityView | undefined): void {

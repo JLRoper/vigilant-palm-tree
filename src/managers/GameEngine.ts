@@ -6,8 +6,8 @@ import { MAP_SEED } from "@screens/adventure/adventureView";
 import { colorForOwner } from "../state/playerColors";
 import { buildInitialGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";
-import { cityViewSizeFor } from "@heroes/engine";
-import { hexDistance } from "../core/hex";
+import { cityViewSizeFor, validCharterHexes } from "@heroes/engine";
+import { cachedUnitTypes } from "../data/unitCatalog";
 
 import { SessionManager } from "./SessionManager";
 import { GameStateManager, type PathPreviewLock } from "./GameStateManager";
@@ -17,19 +17,26 @@ import { GameActions } from "./GameActions";
 import { GameSessionManager } from "./GameSessionManager";
 import { attachDebugApi } from "../io/debugCommands";
 import { bus } from "../core/eventBus";
-import { registerAllListeners } from "../core/eventRegistry";
 import { attachEventLog, type EventLog } from "../debug/eventLog";
 import { mountPersistentDevConsole, type DevConsoleHandle } from "../debug/devConsole";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
+import { setViewSeat } from "../state/viewSeat";
+import { settings, subscribeSettings } from "../state/settings";
+import { createFrameErrorLog } from "../core/frameErrors";
+import { shouldDriveAi } from "../io/serverDrivenGames";
 import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
+import { attachAiThinkingHint } from "@screens/shared/aiThinkingHint";
 import { attachFirstTurnHint } from "@screens/shared/firstTurnHint";
-import { createLogPanel } from "@screens/shared/logPanel";
 import { getEntityMirror } from "../io/multiplayerSync";
 import { attachGarrisonEventBridge } from "../game/garrisonEventBridge";
 import { applyNetToSettlement, invertNet } from "@screens/settlements/cityView/netCost";
 import { evaluateCharterRequirements } from "@screens/adventure/charterRequirements";
 import { openCharterRequirementsModal } from "@screens/adventure/charterModal";
+
+// One per process: a fault that persists across frames must not turn into a
+// console flood, while a NEW fault still has to surface immediately.
+const frameErrors = createFrameErrorLog();
 
 export class GameEngine {
   // Infrastructure
@@ -52,6 +59,8 @@ export class GameEngine {
   private validCharterHexes: Set<string> | null = null;
   public eventLog: EventLog | null = null;
   public consoleHandle: DevConsoleHandle | null = null;
+  private logPanelEnsured = false;
+  private drawnSinceLastLoop = false;
 
   constructor() {
     this.canvas = document.getElementById("game") as HTMLCanvasElement;
@@ -66,10 +75,17 @@ export class GameEngine {
     );
     // plan/2026-09-29-ai-enemies.md D3: seat 0's client drives the AI turn;
     // solo/no-server games have no in-memory seat and default to 0 (primary).
+    // Server-side AI actor (plan/2026-09-30-server-side-ai-actor.md Phase 1,
+    // Gate 1): a flagged game (lobby.aiDriver === "server") never drives
+    // locally -- the server's aiDriver owns those turns.
     this.state.setPrimaryActorSource(() => {
       const gameName = this.session.getActiveGameName();
-      return (getInMemoryLocalPlayerId(gameName ?? "") ?? 0) === 0;
+      return shouldDriveAi(gameName, getInMemoryLocalPlayerId(gameName ?? ""));
     });
+    // S3 (logistics-interface-fixes plan §5.8): the five logistics controller
+    // methods gate on the local seat's own PLAYER_TURN; the seat is re-read on
+    // every controller rebuild (each game load rebuilds it).
+    this.state.setLocalSeatSource(() => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""));
   }
 
   // =========================================================================
@@ -84,7 +100,6 @@ export class GameEngine {
     this.initInput();
     this.initDebug();
     this.initEventListeners();
-    registerAllListeners();
 
     const center = this.state.getHero("pa-hero")?.tile ?? { q: 6, r: 5 };
     this.view.centerOn(center.q, center.r);
@@ -116,16 +131,26 @@ export class GameEngine {
       gameMap: () => this.gameMap,
       rng,
       localSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
+      // S1 (logistics-interface-fixes plan §5.8): the logistics hooks merge
+      // their command results back into the live controller through this
+      // getter -- resolved lazily at result time, long after the controller
+      // exists.
+      getController: () => this.state.getTurnController(),
       onPlaceBuildingsRejected: (settlementId, appliedDelta) => {
         const next = applyNetToSettlement(this.state.getState(), settlementId, invertNet(appliedDelta));
         if (next) this.state.replaceState(next);
       },
     });
     this.state.setHooks(attached.wrapHooks(hooks));
-    const initialState = buildInitialGameState(this.gameMap, rng);
+    // The catalog prices the starting heroes' weekly food bill against the starter
+// farmland (engine init.ts's seedStarterBuildings). Empty when the catalog has
+// not loaded, which falls back to the flat 1g/1f per-unit default -- never
+// worse than today's population-only sizing.
+const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cachedUnitTypes() });
     this.state.setState(initialState);
     this.state.rebuildHeroesFromState();
     this.state.rebuildSettlementsFromState();
+    getEntityMirror().syncWith(this.state.getHeroesMap(), this.state.getSettlementsMap());
   }
 
   private initRendering(): void {
@@ -149,6 +174,7 @@ export class GameEngine {
         this.fullFrame();
       },
       isCityOpen: () => this.ui.getCityView()?.isOpen() ?? false,
+      getLocalSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
     });
   }
 
@@ -185,11 +211,11 @@ export class GameEngine {
     );
     this.ui.initSettlementInfo();
     this.ui.initTileInfo();
-    this.ui.initCityView(() => this.state, this.view);
+    this.ui.initCityView(() => this.state, this.view, () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""));
   }
 
   private initInput(): void {
-    this.canvas.addEventListener("dblclick", (e) => this.handleDblClick(e));
+    this.canvas.addEventListener("dblclick", (e) => void this.handleDblClick(e));
     this.canvas.addEventListener("mousemove", (e) => this.handleMouseMove(e));
     this.canvas.addEventListener("click", (e) => this.handleClick(e));
   }
@@ -219,7 +245,12 @@ export class GameEngine {
       this.state.rebuildHeroesFromState();
       this.state.rebuildSettlementsFromState();
       this.state.syncHeroVisualsToState();
+      getEntityMirror().syncWith(this.state.getHeroesMap(), this.state.getSettlementsMap());
       this.fullFrame();
+      // Battle offers arrive via the bridge's replaceState path, which bypasses
+      // the rAF loop's `changed` detection -- trigger the (phase-gated,
+      // battleInFlight-guarded) battle flow here so the defender's modal opens.
+      void this.actions.maybeAutoResolveBattle();
     });
     // #100: surfaces a toast whenever a fire-and-forget command hook
     // (src/game/turnHooks.ts) rejects, instead of the previous
@@ -229,6 +260,9 @@ export class GameEngine {
     // while a disconnected seat holds the active turn (mp:presenceUpdated
     // + mp:stateChanged off the bus).
     attachMpPresenceHint();
+    // "AI is thinking" turn indicator while an AI seat holds the turn
+    // (mp:stateChanged + mp:turnStarted off the bus); auto-hides on turn end.
+    attachAiThinkingHint();
     // F12a (playtest fixes 2026-09-29): one-time first-turn hint. Shows on
     // the first state:committed after a game becomes active (SessionManager
     // adopt() precedes loadGame's replaceState, so activeGameName is already
@@ -237,10 +271,16 @@ export class GameEngine {
     // only its button clickable, so it cannot intercept canvas input.
     attachFirstTurnHint({ hasActiveGame: () => this.session.getActiveGameName() != null });
     // Log Message Panel (plan 2026-09-28-sse-event-push.md, use case 1):
-    // attach is unconditional like the toasts above -- the panel itself
-    // gates visibility and buffering on settings().showLogPanel, so the
-    // settings toggle works mid-session without re-attaching.
-    createLogPanel();
+    // lazy-load-chunks Phase 3b -- the module is imported on demand and the
+    // panel is created only while settings().showLogPanel is on: once at
+    // boot if the flag is set, otherwise on the first OFF->ON toggle. The
+    // panel itself still gates visibility and buffering on settings() and
+    // subscribes to every later toggle, so mid-session behavior is
+    // unchanged and nothing is created while the flag stays off.
+    subscribeSettings((s) => {
+      if (s.showLogPanel) this.ensureLogPanel();
+    });
+    this.ensureLogPanel();
     // Multiplayer garrison sync (UnitsRecruited/UnitsTransferred deltas +
     // SettlementBattleResolved's full-refetch snapshot) into the live
     // TurnController. Same explicit-attach convention as the consumers
@@ -248,9 +288,42 @@ export class GameEngine {
     attachGarrisonEventBridge({
       getController: () => this.state.getTurnController(),
       replaceState: (next) => this.state.replaceState(next),
-      isPrimaryActor: () => (getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0) === 0,
+      // Server-side AI actor Gate 2: same policy as Gate 1 -- a flagged
+      // game's local client never mutates during AI turns, so the bridge's
+      // safe-phase gates open up there while unflagged behavior is
+      // byte-identical. localSeat stays the real seat (selection rules).
+      isPrimaryActor: () => {
+        const gameName = this.session.getActiveGameName();
+        return shouldDriveAi(gameName, getInMemoryLocalPlayerId(gameName ?? ""));
+      },
       localSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
     });
+    // D5 parity (server-side AI actor plan Phase 2): verdict result cards /
+    // info toasts derived from battle events on server-driven games, where
+    // the AI driver resolves battles server-side and no browser sees the
+    // command response. Unflagged games are ignored by the consumer, so the
+    // direct-response arena paths stay byte-identical.
+    // Lazy-load-chunks: the module (and everything only it would have pulled,
+    // battleResultText in particular) loads at attach time, so the entry chunk
+    // stays clear of the combat-feedback text machinery. Same explicit attach
+    // position, same arguments, the ensureLogPanel void-import pattern.
+    void import("@screens/combat/battleOutcomeFeedback").then(({ attachBattleOutcomeFeedback }) => {
+      attachBattleOutcomeFeedback({
+        getState: () => this.state.getState(),
+        getGameName: () => this.session.getActiveGameName(),
+        getLocalSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
+      });
+    });
+  }
+
+  // Lazy log panel (lazy-load-chunks plan Phase 3b): imports the module and
+  // creates the panel at most once, and only while showLogPanel is on. The
+  // settings subscription above drives the runtime OFF->ON transition.
+  private ensureLogPanel(): void {
+    if (this.logPanelEnsured) return;
+    if (!settings().showLogPanel) return;
+    this.logPanelEnsured = true;
+    void import("@screens/shared/logPanel").then(({ createLogPanel }) => createLogPanel());
   }
 
   // =========================================================================
@@ -327,39 +400,7 @@ export class GameEngine {
   }
 
   private computeValidCharterHexes(gs: import("../state/gameState").GameState): Set<string> {
-    const hexes = new Set<string>();
-    const settlementSet = new Set<string>();
-    for (const s of Object.values(gs.settlements)) {
-      settlementSet.add(`${s.q},${s.r}`);
-    }
-    const charterSet = new Set<string>();
-    for (const c of gs.activeCharters) {
-      charterSet.add(`${c.targetQ},${c.targetR}`);
-    }
-    const heroSet = new Set<string>();
-    for (const h of Object.values(gs.heroes)) {
-      heroSet.add(`${h.q},${h.r}`);
-    }
-
-    for (let r = 0; r < this.gameMap.height; r++) {
-      for (let q = 0; q < this.gameMap.width; q++) {
-        if (!this.gameMap.isPassable(q, r)) continue;
-        const key = `${q},${r}`;
-        if (settlementSet.has(key)) continue;
-        if (charterSet.has(key)) continue;
-        if (heroSet.has(key)) continue;
-        let tooClose = false;
-        for (const s of Object.values(gs.settlements)) {
-          if (hexDistance({ q, r }, { q: s.q, r: s.r }) < 4) {
-            tooClose = true;
-            break;
-          }
-        }
-        if (tooClose) continue;
-        hexes.add(key);
-      }
-    }
-    return hexes;
+    return validCharterHexes(gs, this.gameMap);
   }
 
   private handleStartCharter(targetQ: number, targetR: number, name: string): boolean {
@@ -385,6 +426,7 @@ export class GameEngine {
   // =========================================================================
 
   fullFrame(): void {
+    this.drawnSinceLastLoop = true;
     this.draw();
     this.refreshHud();
     this.ui.setMapDimensions(this.gameMap.width, this.gameMap.height);
@@ -396,15 +438,32 @@ export class GameEngine {
     this.fullFrame();
   }
 
+  // The frame must ALWAYS be rescheduled. requestAnimationFrame used to be
+  // the last statement, so any throw in state.update / maybeAutoResolveBattle
+  // / fullFrame killed the loop permanently -- the client froze with a stale
+  // toolbar and dead input, and the only evidence was one uncaught console
+  // error. try/finally keeps the loop alive; the body is idempotent (it
+  // recomputes from live state every frame), so a rethrow next frame is
+  // harmless and gets its own chance.
   loop(now: number): void {
-    const dt = now - this.lastTime;
-    this.lastTime = now;
-    const changed = this.state.update(dt);
-    if (changed) {
-      this.actions.maybeAutoResolveBattle();
+    try {
+      // Per frame: the active game and the local seat both change on load/adopt.
+      setViewSeat(getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""));
+      const dt = now - this.lastTime;
+      this.lastTime = now;
+      const changed = this.state.update(dt);
+      if (changed) {
+        this.actions.maybeAutoResolveBattle();
+        this.fullFrame();
+      } else if (!this.drawnSinceLastLoop) {
+        this.fullFrame();
+      }
+      this.drawnSinceLastLoop = false;
+    } catch (e) {
+      frameErrors.report(e);
+    } finally {
+      requestAnimationFrame((t) => this.loop(t));
     }
-    this.fullFrame();
-    requestAnimationFrame((t) => this.loop(t));
   }
 
   // =========================================================================
@@ -414,13 +473,16 @@ export class GameEngine {
   draw(): void {
     const gs = this.state.getState();
     if (!gs) return;
+    const cityView = this.ui.getCityView();
+    if (cityView?.isOpen() && !settings().parallaxEnabled) {
+      this.view.drawCityOverlay(cityView);
+      return;
+    }
     const selectedHero = gs.selectedHeroId ? gs.heroes[gs.selectedHeroId] : null;
     const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
     this.view.draw(
       this.view.getHover(),
-      this.state.getHeroes(),
       this.view.getPath(),
-      this.state.getSettlements(),
       {
         selectedHeroId: gs.selectedHeroId,
         selectedSettlementId: gs.selectedSettlementId,
@@ -433,7 +495,7 @@ export class GameEngine {
       },
       gs.activeCharters,
       this.validCharterHexes,
-      gs.tradeRoutes,
+      this.state.getCaravanMarkers(),
     );
     this.view.drawCityOverlay(this.ui.getCityView());
   }
@@ -449,14 +511,17 @@ export class GameEngine {
   }
 
   private getCalendar() {
-    return UIManager.buildCalendarSnapshot(this.state.getState());
+    return UIManager.buildCalendarSnapshot(
+      this.state.getState(),
+      getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
+    );
   }
 
   // =========================================================================
   // INPUT
   // =========================================================================
 
-  private handleDblClick(e: MouseEvent): void {
+  private async handleDblClick(e: MouseEvent): Promise<void> {
     if (this.ui.getCityView()?.isOpen()) return;
     const gs = this.state.getState();
     const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
@@ -465,19 +530,31 @@ export class GameEngine {
     if (!t) return;
     const castle = this.state.getSettlements().find((c) => c.tile.q === t.q && c.tile.r === t.r);
     if (!castle || castle.ownerId !== localId) return;
-    const isMineable = (r: import("../state/gameState").ResourceType): r is Exclude<import("../state/gameState").ResourceType, "food"> => r !== "food";
-    const spots = castle.citySpots.filter((s) => isMineable(s.resource));
-    const mines = castle.cityMines.filter((m) => isMineable(m.resource));
-    const cityView = this.ui.getCityView();
-    if (!cityView) return;
+    // Every spot is shown, food included: food spots exist (citySpots.ts's
+    // RESOURCE_POOL rolls them, terrain-biased) and a farm on one earns the
+    // ~3x spot multiplier, which is the whole placement decision. They also
+    // render fine -- RESOURCE_PAL has a food entry and `resource.food` has a
+    // descriptor, so paintCityResourceSpot draws art (procedural fallback
+    // otherwise). The old `isMineable` filter predates food spots entirely
+    // (citySpots.ts's pool was gold/wood/stone/iron/arcane only), so it
+    // filtered nothing and hid a real mechanic once food was added.
+    // Lazy city view (lazy-load-chunks plan Phase 2): the CityView module is
+    // imported and constructed here, on the first settlement double-click,
+    // and cached by UIManager afterwards.
+    const cityView = await this.ui.ensureCityView();
     cityView.open(
       castle.id, castle.name, cityViewSizeFor(castle.level),
       colorForOwner(castle.ownerId),
-      spots as unknown as Parameters<typeof cityView.open>[4],
-      mines as unknown as Parameters<typeof cityView.open>[5],
+      castle.citySpots,
+      castle.cityMines,
       castle.buildings,
       gs.castleSeed,
     );
+    if (cityView.isOpen() && gs.selectedSettlementId !== castle.id) {
+      const tc = this.state.getTurnController();
+      tc.selectSettlement(castle.id);
+      this.state.replaceState(tc.getState());
+    }
   }
 
   private handleMouseMove(e: MouseEvent): void {

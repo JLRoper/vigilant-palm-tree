@@ -6,6 +6,7 @@ export * from "./ids";
 export * from "./geometry";
 export * from "./castle";
 export * from "./buildings";
+export * from "./factions";
 export * from "./resources";
 export * from "./units";
 export * from "./settlement";

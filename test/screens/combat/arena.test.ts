@@ -12,7 +12,7 @@ import type { UnitType } from "../../../src/state/units";
 import { fitHexSize, gridExtent, type GridExtent } from "../../../src/screens/combat/arena/layout";
 import { buildPlatoonStrip } from "../../../src/screens/combat/arena/view";
 import { applyLeaveBehind, openLeaveBehindDialog } from "../../../src/screens/combat/arena/leaveBehind";
-import { buildArenaPaint2dDeps, paintSceneForArena, readUseSceneBuilder, PAINT_MODE_QUERY_KEY, PAINT_MODE_SCENEBUILDER } from "../../../src/screens/combat/arena/paint";
+import { buildArenaPaint2dDeps, paintSceneForArena, readUseSceneBuilder, PAINT_MODE_QUERY_KEY, PAINT_MODE_SCENEBUILDER, PAINT_MODE_LEGACY } from "../../../src/screens/combat/arena/paint";
 
 // ---- Hand-rolled minimal DOM mock -----------------------------------------
 // The arena modules touch document.createElement / Node.style / addEventListener
@@ -497,14 +497,22 @@ test("SURRENDER_COST_GOLD: surrender is reachable at starter scale (500g over th
 
 // ---- paint tests ----------------------------------------------------------
 
-test("readUseSceneBuilder: returns false for missing/empty/wrong-value query strings", () => {
-  assert.equal(readUseSceneBuilder(""), false);
-  assert.equal(readUseSceneBuilder("?foo=bar"), false);
-  assert.equal(readUseSceneBuilder(`?${PAINT_MODE_QUERY_KEY}=off`), false);
-  assert.equal(readUseSceneBuilder(`?${PAINT_MODE_QUERY_KEY}=`), false);
+// The scene path is the arena DEFAULT since plan decision #4 in
+// plan/2026-09-29-arena-unit-sprites.md (the unit-sprite look only exists on
+// the scene path, so a legacy default would let the flag flip the look).
+test("readUseSceneBuilder: defaults to true for missing/empty/wrong-value query strings", () => {
+  assert.equal(readUseSceneBuilder(""), true);
+  assert.equal(readUseSceneBuilder("?foo=bar"), true);
+  assert.equal(readUseSceneBuilder(`?${PAINT_MODE_QUERY_KEY}=off`), true);
+  assert.equal(readUseSceneBuilder(`?${PAINT_MODE_QUERY_KEY}=`), true);
 });
 
-test("readUseSceneBuilder: returns true only for ?paint=scenebuilder", () => {
+test("readUseSceneBuilder: ?paint=legacy forces the legacy path", () => {
+  assert.equal(readUseSceneBuilder(`?${PAINT_MODE_QUERY_KEY}=${PAINT_MODE_LEGACY}`), false);
+  assert.equal(readUseSceneBuilder(`?other=1&${PAINT_MODE_QUERY_KEY}=${PAINT_MODE_LEGACY}`), false);
+});
+
+test("readUseSceneBuilder: ?paint=scenebuilder is accepted (no-op against the default)", () => {
   assert.equal(readUseSceneBuilder(`?${PAINT_MODE_QUERY_KEY}=${PAINT_MODE_SCENEBUILDER}`), true);
   assert.equal(readUseSceneBuilder(`?other=1&${PAINT_MODE_QUERY_KEY}=${PAINT_MODE_SCENEBUILDER}`), true);
 });
@@ -534,6 +542,30 @@ test("buildArenaPaint2dDeps: returns a well-formed Paint2DDep", () => {
   assert.equal(charter.stroke, "transparent");
   assert.equal(charter.lineDash.length, 0);
   assert.equal(deps.validCharterStyle.fill, "transparent");
+});
+
+test("buildArenaPaint2dDeps: unit resolver is inert by default and pass-through when injected", () => {
+  const inert = buildArenaPaint2dDeps({
+    fontFamily: "system-ui",
+    attackerAccent: "#3070c0",
+    defenderAccent: "#c04040",
+  });
+  assert.equal(inert.sprite.resolveSpriteForUnit("swordsman", "idle"), undefined, "no injected resolver -> inert stub keeps the painter on its circle fallback");
+
+  const sentinel = { drawable: {} as HTMLImageElement, descriptor: { key: "unit.swordsman.idle", url: null, anchor: "bottom" as const, sizing: { kind: "fitHeight" as const, hexSizeMul: 1.3 } }, ready: true };
+  const calls: Array<[string, string]> = [];
+  const wired = buildArenaPaint2dDeps({
+    fontFamily: "system-ui",
+    attackerAccent: "#3070c0",
+    defenderAccent: "#c04040",
+    resolveSpriteForUnit: (unitTypeId, pose) => {
+      calls.push([unitTypeId, pose]);
+      return sentinel;
+    },
+  });
+  assert.equal(wired.sprite.resolveSpriteForUnit("swordsman", "attack"), sentinel);
+  assert.equal(wired.sprite.resolveSpriteForUnit("hydra", "idle"), sentinel);
+  assert.deepEqual(calls, [["swordsman", "attack"], ["hydra", "idle"]]);
 });
 
 test("paintSceneForArena: paints the battle scene itself, with no legacy fallback to double-paint over it", () => {
@@ -572,6 +604,7 @@ test("paintSceneForArena: paints the battle scene itself, with no legacy fallbac
     aiTargetHex: null,
     moveAnim: null,
     impact: null,
+    attacker: null,
     floats: [],
     hexSize: 28,
     offsetX: 100,
@@ -621,6 +654,7 @@ test("paintSceneForArena: handles an active moveAnim without throwing", () => {
       durationMs: 5000,
     },
     impact: null,
+    attacker: null,
     floats: [],
     hexSize: 28,
     offsetX: 50,

@@ -1,12 +1,13 @@
 import type {
   BuildingKind,
+  FactionId,
   GameState,
   SettlementId,
   SettlementState,
   Warehouse,
 } from "@heroes/contracts";
-import type { Platoon } from "../units";
-import { MAX_PLATOON_ENTRIES, normalizePlatoons, settlementStacks } from "../units";
+import type { Platoon, UnitType } from "../units";
+import { MAX_PLATOON_ENTRIES, normalizePlatoons, settlementStacks, unitFactionId } from "../units";
 import { getBuildingEffect, type RecruitEntry } from "../buildingRegistry";
 
 // The recruit-eligibility gate shared by the RecruitUnits command and the AI
@@ -21,12 +22,34 @@ export interface RecruitSource {
   entry: RecruitEntry;
 }
 
-export function eligibleRecruitSources(settlement: SettlementState): RecruitSource[] {
+// The faction gate's inputs (faction-registry foundation, D5). Both halves
+// must be present for the gate to act — when either is absent the filter
+// no-ops, which is what keeps every existing caller (AI planner, client
+// paths) byte-identical until factions exist.
+export interface RecruitFactionGate {
+  unitTypes?: Record<string, UnitType>;
+  seatFactionId?: FactionId;
+}
+
+// Whether one unit id may be recruited by a seat of `opts.seatFactionId`.
+// Unknown unit ids default to "human" (unitFactionId's D3 rule), so a
+// catalog-less comparison never blocks anything. Absent/incomplete opts =
+// allowed (the dormant gate).
+export function unitAllowedForSeatFaction(unitTypeId: string, opts?: RecruitFactionGate): boolean {
+  if (!opts?.unitTypes || !opts.seatFactionId) return true;
+  return unitFactionId(opts.unitTypes[unitTypeId]) === opts.seatFactionId;
+}
+
+export function eligibleRecruitSources(
+  settlement: SettlementState,
+  opts?: RecruitFactionGate,
+): RecruitSource[] {
   const out: RecruitSource[] = [];
   for (const building of settlement.buildings) {
     if (building.construction) continue;
     for (const entry of getBuildingEffect(building.kind).recruits) {
       if ((entry.minLevel ?? 1) > building.level) continue;
+      if (!unitAllowedForSeatFaction(entry.unitTypeId, opts)) continue;
       out.push({ buildingKind: building.kind, gx: building.gx, gy: building.gy, entry });
     }
   }

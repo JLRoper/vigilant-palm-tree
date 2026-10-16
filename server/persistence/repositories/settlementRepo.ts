@@ -9,7 +9,8 @@ import type {
   WarehouseResource,
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
-import { normalizePlatoons, settlementStacks } from "@heroes/engine";
+import { normalizePlatoons, resolvedPersistedStyle, settlementStacks } from "@heroes/engine";
+import { toNumericColumn } from "../integerColumns";
 import { resolveGameId } from "./gameRepo";
 import type { Queryable } from "./gameRepo";
 
@@ -40,6 +41,9 @@ interface SettlementRow {
   gold: number;
   gold_rate: string | null;
   morale: number;
+  garrison_unpaid_since_day: number | null;
+  garrison_unpaid_troops: number;
+  garrison_unpaid_gold: number;
   auto_trade: boolean;
   castle_variant: CastleVariant;
   city_spots: SettlementState["citySpots"];
@@ -64,6 +68,7 @@ interface BuildingRow {
   w: number | null;
   h: number | null;
   construction: { daysRemaining: number } | null;
+  bank: BuildingDef["bank"] | null;
 }
 
 interface PlatoonRow {
@@ -74,7 +79,7 @@ interface PlatoonRow {
 }
 
 const SETTLEMENT_COLUMNS =
-  "id, name, owner_id, q, r, level, population, gold_tax, founded_on_resource, gold, gold_rate, morale, auto_trade, castle_variant, city_spots, city_mines, upgrade";
+  "id, name, owner_id, q, r, level, population, gold_tax, founded_on_resource, gold, gold_rate, morale, garrison_unpaid_since_day, garrison_unpaid_troops, garrison_unpaid_gold, auto_trade, castle_variant, city_spots, city_mines, upgrade";
 
 function toSettlementState(
   row: SettlementRow,
@@ -99,6 +104,10 @@ function toSettlementState(
     ...(b.w !== null ? { w: b.w } : {}),
     ...(b.h !== null ? { h: b.h } : {}),
     ...(b.construction != null ? { construction: b.construction as BuildingDef["construction"] } : {}),
+    // Bank pots (migration 022) follow the `construction` rule verbatim: a
+    // NULL column means no pot, and the key must be absent rather than
+    // undefined for the same deepStrictEqual reason documented below.
+    ...(b.bank != null ? { bank: b.bank as BuildingDef["bank"] } : {}),
   }));
 
   return {
@@ -117,6 +126,11 @@ function toSettlementState(
     citySpots: row.city_spots,
     cityMines: row.city_mines,
     morale: row.morale,
+    // Garrison upkeep shortfall (weekly upkeep pass); `?? ` defends a granular
+    // row written by a pre-021 server, same spirit as above.
+    garrisonUnpaidSinceDay: row.garrison_unpaid_since_day ?? null,
+    garrisonUnpaidTroops: row.garrison_unpaid_troops ?? 0,
+    garrisonUnpaidGold: row.garrison_unpaid_gold ?? 0,
     autoTrade: row.auto_trade,
     castleVariant: row.castle_variant,
     buildings,
@@ -170,8 +184,18 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
           [gameId, settlementIds],
         ),
         db.query<BuildingRow>(
-          `SELECT settlement_id, gx, gy, kind, level, style, w, h, construction FROM settlement_buildings
-           WHERE game_id = $1 AND settlement_id = ANY($2::text[])`,
+          // ORDER BY id, not left to the planner: the UNIQUE
+          // (game_id, settlement_id, gx, gy) index is what this predicate
+          // actually scans, so without it Postgres returns buildings in (gx, gy)
+          // order while the JSONB read path returns them in the order they were
+          // persisted. Two read paths disagreeing on the same row is exactly
+          // what hydrate.test.ts's read-path parity case exists to catch, and a
+          // starter set's 6-10 buildings is enough to make the divergence
+          // visible. upsertMany re-inserts in array order, so the BIGSERIAL id
+          // IS the persisted order.
+          `SELECT settlement_id, gx, gy, kind, level, style, w, h, construction, bank FROM settlement_buildings
+             WHERE game_id = $1 AND settlement_id = ANY($2::text[])
+             ORDER BY settlement_id, id`,
           [gameId, settlementIds],
         ),
         db.query<PlatoonRow>(
@@ -221,9 +245,10 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
       for (const settlement of Object.values(settlements)) {
         await db.query(
           `INSERT INTO settlements (id, game_id, name, owner_id, q, r, level, population, gold_tax,
-                                     founded_on_resource, gold, gold_rate, morale, auto_trade,
-                                     castle_variant, city_spots, city_mines, upgrade)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,$18::jsonb)
+                                     founded_on_resource, gold, gold_rate, morale,
+                                     garrison_unpaid_since_day, garrison_unpaid_troops, garrison_unpaid_gold,
+                                     auto_trade, castle_variant, city_spots, city_mines, upgrade)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20::jsonb,$21::jsonb)
            ON CONFLICT (game_id, id) DO UPDATE SET
              name = EXCLUDED.name,
              owner_id = EXCLUDED.owner_id,
@@ -236,6 +261,9 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
              gold = EXCLUDED.gold,
              gold_rate = EXCLUDED.gold_rate,
              morale = EXCLUDED.morale,
+             garrison_unpaid_since_day = EXCLUDED.garrison_unpaid_since_day,
+             garrison_unpaid_troops = EXCLUDED.garrison_unpaid_troops,
+             garrison_unpaid_gold = EXCLUDED.garrison_unpaid_gold,
              auto_trade = EXCLUDED.auto_trade,
              castle_variant = EXCLUDED.castle_variant,
              city_spots = EXCLUDED.city_spots,
@@ -252,9 +280,16 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
             settlement.population,
             settlement.goldTax,
             settlement.foundedOnResource,
-            settlement.gold,
+            // settlements.gold and settlements.morale are NUMERIC (migration
+            // 027); both are 2-dp floats in the engine (round2'd gold
+            // production, and a continuous foodDeficitRatio driving morale)
+            // and persist at full precision now. See ../integerColumns.ts.
+            toNumericColumn(settlement.gold),
             settlement.resourceRates.gold ?? null,
-            settlement.morale,
+            toNumericColumn(settlement.morale),
+            settlement.garrisonUnpaidSinceDay,
+            settlement.garrisonUnpaidTroops,
+            settlement.garrisonUnpaidGold,
             settlement.autoTrade,
             settlement.castleVariant,
             JSON.stringify(settlement.citySpots),
@@ -275,7 +310,12 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
           await db.query(
             `INSERT INTO settlement_resources (game_id, settlement_id, resource, amount, rate)
              VALUES ($1, $2, $3, $4, $5)`,
-            [gameId, settlement.id, resource, settlement.warehouse[resource], rate ?? null],
+            // amount is NUMERIC (migration 027), and a food producer's
+            // per-turn output is a 2-dp float (producers.ts rounds to 100ths),
+            // so the warehouse total is fractional too -- it round-trips at
+            // full precision now. `rate` is NUMERIC and stays exact. See
+            // ../integerColumns.ts.
+            [gameId, settlement.id, resource, toNumericColumn(settlement.warehouse[resource]), rate ?? null],
           );
         }
 
@@ -285,8 +325,8 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
         ]);
         for (const building of settlement.buildings) {
           await db.query(
-            `INSERT INTO settlement_buildings (game_id, settlement_id, gx, gy, kind, level, style, w, h, construction)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            `INSERT INTO settlement_buildings (game_id, settlement_id, gx, gy, kind, level, style, w, h, construction, bank)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
             [
               gameId,
               settlement.id,
@@ -294,10 +334,16 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
               building.gy,
               building.kind,
               building.level,
-              building.style,
+              // style is NOT NULL and BuildingDef.style is optional, so an
+              // absent key is resolved through the engine here rather than
+              // written NULL. `??` only: a persisted value is never
+              // rewritten, or the round-trip parity pins would diverge.
+              building.style ?? resolvedPersistedStyle(settlement.name, building),
               building.w ?? null,
               building.h ?? null,
               building.construction ? JSON.stringify(building.construction) : null,
+              // Absent pot writes NULL, never the string "undefined".
+              building.bank ? JSON.stringify(building.bank) : null,
             ],
           );
         }

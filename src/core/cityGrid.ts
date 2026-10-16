@@ -1,4 +1,6 @@
+import type { BuildingDef } from "@heroes/contracts";
 import type { CityViewSize } from "@heroes/engine";
+import { buildingFootprintFromRegistry } from "@heroes/engine";
 
 export type CityCell = { gx: number; gy: number };
 
@@ -63,6 +65,8 @@ export function cellCorners(
   ];
 }
 
+export const CITY_VIEW_MARGIN = 12;
+
 // Pure -- lives here (not cityRenderer.ts) so it stays importable from
 // contexts without a bundler asset pipeline (e.g. plain node:test), since
 // cityRenderer.ts also pulls in Vite `?url` PNG imports at module scope.
@@ -70,12 +74,11 @@ export function computeCityScale(
   size: CityViewSize,
   viewportW: number,
   viewportH: number,
+  topInset = 0,
 ): number {
-  if (size <= 10) return 1.0;
-  const limitW = viewportW * 0.85;
-  const limitH = viewportH * 0.85;
-  const maxW = limitW / (size * TILE_W);
-  const maxH = limitH / (size * TILE_D);
+  const maxW = (viewportW * 0.85) / (size * TILE_W);
+  const safeH = Math.max(1, viewportH - topInset - CITY_VIEW_MARGIN * 2);
+  const maxH = safeH / (size * TILE_D);
   return Math.min(1, maxW, maxH);
 }
 
@@ -109,14 +112,20 @@ export function cityLayout(
   size: CityViewSize,
   viewportW: number,
   viewportH: number,
+  topInset = 0,
 ): CityLayout {
-  const tileScale = computeCityScale(size, viewportW, viewportH);
+  const tileScale = computeCityScale(size, viewportW, viewportH, topInset);
   const tw = TILE_W * tileScale;
   const td = TILE_D * tileScale;
   const gridOrigin = cellOrigin(size);
   const gridVCenter = (size - 1) * TILE_D / 2;
   const buildingPad = size * TILE_D * BUILDING_PAD_RATIO;
-  const screenOriginY = viewportH / 2 - (gridVCenter + buildingPad) * tileScale;
+  const legacyOriginY = viewportH / 2 - (gridVCenter + buildingPad) * tileScale;
+  // The diamond bbox apex is screenOrigin.y + (gridOrigin.y - TILE_D/2) * S;
+  // clamp so it never rises under the top overlay (toolbar) + visible margin.
+  const safeTop = topInset + CITY_VIEW_MARGIN;
+  const clampedOriginY = safeTop + (TILE_D / 2 - gridOrigin.y) * tileScale;
+  const screenOriginY = Math.max(legacyOriginY, clampedOriginY);
   return {
     tileScale,
     tw,
@@ -129,16 +138,49 @@ export function cityLayout(
 export function screenToGridCell(
   layout: CityLayout,
   size: CityViewSize,
-  viewportW: number,
+  _viewportW: number,
   canvasX: number,
   canvasY: number,
 ): CityCell | null {
-  const wdx = canvasX - viewportW / 2 - layout.gridOrigin.x * layout.tileScale;
+  const wdx = canvasX - layout.screenOrigin.x - layout.gridOrigin.x * layout.tileScale;
   const wdy = canvasY - layout.screenOrigin.y - layout.gridOrigin.y * layout.tileScale;
   const gxf = wdx / layout.tw + wdy / layout.td;
   const gyf = wdy / layout.td - wdx / layout.tw;
-  const gx = Math.floor(gxf);
-  const gy = Math.floor(gyf);
+  // Integer coords are the drawn diamonds' CENTERS, so each cell's pick region
+  // is the half-cell around it. Without the +0.5 shift the whole mapping is off
+  // by half a cell (24 px down at tileScale 1): only the bottom of a diamond
+  // selected its own cell and most of it selected a neighbour.
+  const gx = Math.floor(gxf + 0.5);
+  const gy = Math.floor(gyf + 0.5);
   if (gx < 0 || gx >= size || gy < 0 || gy >= size) return null;
   return { gx, gy };
+}
+
+export function coversCell(b: BuildingDef, gx: number, gy: number): boolean {
+  const fp = buildingFootprintFromRegistry(b.kind, b.level);
+  const w = b.w ?? fp.w;
+  const h = b.h ?? fp.h;
+  return gx >= b.gx && gx < b.gx + w && gy >= b.gy && gy < b.gy + h;
+}
+
+export function buildingFootprint(
+  gx: number,
+  gy: number,
+  gridOrigin: { x: number; y: number },
+  screenOrigin: { x: number; y: number },
+  tileScale: number,
+  w = 1,
+  h = 1,
+): { cx: number; cy: number; hw: number; hh: number } {
+  const c = cellToScreen(gx, gy, gridOrigin);
+  const rootCx = screenOrigin.x + c.x * tileScale;
+  const rootCy = screenOrigin.y + c.y * tileScale;
+  const cx = rootCx + (w - h) * (TILE_W / 4) * tileScale;
+  const cy = rootCy + (w + h - 2) * (TILE_D / 4) * tileScale;
+  return {
+    cx,
+    cy,
+    hw: (w + h) * (TILE_W / 4) * tileScale,
+    hh: (w + h) * (TILE_D / 4) * tileScale,
+  };
 }

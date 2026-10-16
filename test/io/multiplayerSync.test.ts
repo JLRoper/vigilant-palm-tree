@@ -2,6 +2,9 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import type { EngineEvent, HeroState, Player, SettlementState } from "@heroes/contracts";
 import { makeHero, makePlayer, makeSettlement } from "../charter/_helpers";
+import { axialToPixel } from "../../src/core/hex";
+import { Hero } from "../../src/entities/hero";
+import { Castle } from "../../src/entities/settlement";
 
 // multiplayerSync reaches for window.setInterval/clearInterval at start().
 // Stubbed to a no-op scheduler so the tests drive pollOnce() by hand instead
@@ -157,6 +160,57 @@ test("the first poll hydrates full state once and seeds the cursor from the same
   assert.equal(sync.getCursor(), 42);
   assert.equal(sync.getState()?.heroes.h0.q, 2);
   assert.equal(sync.getMirror().getHeroes().length, 2, "the mirror is bootstrapped from that hydrate");
+  sync.stop();
+});
+
+test("the unseeded initial resync preserves live entities through the first movement tick", async () => {
+  const name = "g-first-move";
+  const server: FakeServer = { game: makeGameRow(name, { lastEventId: 1 }), events: [], calls: [] };
+  installFetch(server);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const state = hydrateGameState(server.game);
+  const liveHeroes = Object.values(state.heroes).map((hero) => Hero.fromGameState(hero));
+  const liveSettlements = Object.values(state.settlements).map((settlement) => Castle.fromGameState(settlement));
+  const liveHero = liveHeroes.find((hero) => hero.id === "h0");
+  const liveCastle = liveSettlements.find((castle) => castle.id === "s0");
+  assert.ok(liveHero);
+  assert.ok(liveCastle);
+
+  const sync = new MultiplayerSync();
+  const initialResync = new Promise<void>((resolve) => {
+    bus.on("mp:resynced", (ev: { gameName: string; reason: string }) => {
+      if (ev.gameName === name && ev.reason === "initial") resolve();
+    });
+  });
+  sync.start(name, { state });
+  const mirror = sync.getMirror();
+  mirror.syncWith(liveHeroes, liveSettlements);
+
+  await initialResync;
+
+  assert.strictEqual(mirror.getHero("h0"), liveHero, "the full resync keeps the manager-owned Hero");
+  assert.strictEqual(mirror.getSettlement("s0"), liveCastle, "the full resync keeps the manager-owned Castle");
+
+  const from = { q: liveHero.tile.q, r: liveHero.tile.r };
+  const to = { q: from.q + 1, r: from.r };
+  const originWorld = axialToPixel(from.q, from.r);
+  const targetWorld = axialToPixel(to.q, to.r);
+  liveHero.startMoveToPath([from, to]);
+  liveHero.update(liveHero.moveDurationMs / 4);
+
+  const visibleHero = mirror.getHero("h0")!;
+  const base = axialToPixel(visibleHero.tile.q, visibleHero.tile.r);
+  const renderedWorld = {
+    x: base.x + visibleHero.pixelOffset.x,
+    y: base.y + visibleHero.pixelOffset.y,
+  };
+  assert.strictEqual(visibleHero, liveHero);
+  assert.equal(visibleHero.moving, true);
+  assert.deepEqual(visibleHero.tile, from, "the first tween tick remains anchored to its origin tile");
+  assert.ok(visibleHero.pixelOffset.x > 0, "the first tween tick advances the renderer offset");
+  assert.ok(renderedWorld.x > originWorld.x && renderedWorld.x < targetWorld.x);
+  assert.equal(renderedWorld.y, originWorld.y);
+  assert.equal(server.events.length, 0, "no End Turn event is needed for the first step to render");
   sync.stop();
 });
 
@@ -357,6 +411,90 @@ test("a failed delta poll leaves the cursor where it was instead of rewinding", 
   await sync.pollOnce();
 
   assert.equal(sync.getCursor(), 3);
+  sync.stop();
+});
+
+// Resync-fetch retry (the "End Turn stuck" fix): on a server-driven game the
+// API is busy driving AI seats and a non-SSE GET can stall past apiFetch's 10s
+// default, losing the turn-boundary snapshot. One bounded retry with a short
+// backoff recovers the transient case; a genuinely dead API still gives up
+// (one extra request, not an unbounded loop), and the cursor never rewinds.
+
+test("a resync fetch that times out once is retried and still lands", async () => {
+  const ended: EngineEvent = {
+    type: "TurnEnded",
+    actor: 0,
+    round: 1,
+    day: 2,
+    activePlayerId: 1,
+    wrapped: false,
+  };
+  const server: FakeServer = { game: makeGameRow("g12", { lastEventId: 5 }), events: [], calls: [] };
+  installFetch(server);
+  const sync = new MultiplayerSync();
+
+  sync.start("g12");
+  await sync.pollOnce();
+
+  // First game fetch stalls the way a busy AI drive does; the retry succeeds.
+  let stalls = 0;
+  const realFetch = (globalThis as unknown as { fetch: typeof fetch }).fetch;
+  (globalThis as unknown as { fetch: unknown }).fetch = async (url: string, init?: RequestInit) => {
+    if (String(url).endsWith("/games/g12")) {
+      stalls += 1;
+      if (stalls === 1) throw new Error("request timed out after 10000ms");
+      server.game = makeGameRow("g12", { lastEventId: 6, activePlayerId: 1 });
+    }
+    return realFetch(url, init);
+  };
+
+  const resynced: string[] = [];
+  bus.on("mp:resynced", (ev: { reason: string }) => resynced.push(ev.reason));
+  server.events.push(row(6, ended, 0));
+  await sync.pollOnce();
+
+  assert.equal(stalls, 2, "one failed attempt plus exactly one retry");
+  assert.deepEqual(resynced, ["event_not_derivable"], "the turn-boundary snapshot still lands");
+  assert.equal(sync.getState()?.activePlayerId, 1);
+  assert.equal(sync.getCursor(), 6);
+  sync.stop();
+});
+
+test("a resync fetch that keeps failing gives up after the single retry", async () => {
+  const ended: EngineEvent = {
+    type: "TurnEnded",
+    actor: 0,
+    round: 1,
+    day: 2,
+    activePlayerId: 1,
+    wrapped: false,
+  };
+  const server: FakeServer = { game: makeGameRow("g13", { lastEventId: 4 }), events: [], calls: [] };
+  installFetch(server);
+  const sync = new MultiplayerSync();
+
+  sync.start("g13");
+  await sync.pollOnce();
+
+  const cursorBefore = sync.getCursor();
+  const realFetch = (globalThis as unknown as { fetch: typeof fetch }).fetch;
+  let attempts = 0;
+  (globalThis as unknown as { fetch: unknown }).fetch = async (url: string, init?: RequestInit) => {
+    if (String(url).endsWith("/games/g13")) {
+      attempts += 1;
+      throw new Error("request timed out after 10000ms");
+    }
+    return realFetch(url, init);
+  };
+
+  const resynced: string[] = [];
+  bus.on("mp:resynced", (ev: { reason: string }) => resynced.push(ev.reason));
+  server.events.push(row(5, ended, 0));
+  await sync.pollOnce();
+
+  assert.equal(attempts, 2, "exactly one retry -- the poll cadence provides the next attempt");
+  assert.deepEqual(resynced, [], "a fetch that never succeeds reports nothing");
+  assert.equal(sync.getCursor(), cursorBefore, "a failed resync never rewinds the cursor");
   sync.stop();
 });
 
@@ -851,5 +989,331 @@ test("a remote human-seat row still applies on the primary client (only AI seats
 
   assert.deepEqual(batches.length, 1, "a human seat's event is never a driven-seat skip");
   assert.equal(stackTotal(sync.getState()?.settlements.s0.stacks), 9);
+  sync.stop();
+});
+
+// Trade routes (2026-09-30): TradeRouteCreated joined the applied deltas --
+// the sync reconstructs the route from the event's own routeId (the server
+// derives ids from a counter the client cannot re-derive from the event
+// alone, so the event payload is the only source of truth for the id).
+
+test("a TradeRouteCreated delta applies to the sync state and fans out", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("gm7", {
+      lastEventId: 10,
+      heroes: [makeHero("h1", 1, 8, 8)],
+      settlements: [makeSettlement("s0", 1, 8, 8), makeSettlement("s1", 1, 10, 10)],
+      players: [
+        makePlayer(0, "player", ["h0"], []),
+        { ...makePlayer(1, "player", ["h1"], ["s0", "s1"]), wagonsUnassigned: 4 },
+      ],
+    }),
+    events: [],
+    calls: [],
+  };
+  installFetch(server);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("gm7", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const logKinds: string[] = [];
+  bus.on("mp:logRow", (ev: { row: { kind: string } }) => logKinds.push(ev.row.kind));
+  const batches: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => batches.push(ev.events));
+
+  const created: EngineEvent = {
+    type: "TradeRouteCreated",
+    actor: 1,
+    routeId: "route0",
+    from: { kind: "settlement", id: "s0" },
+    to: { kind: "settlement", id: "s1" },
+    payload: { kind: "resource", resource: "wood" },
+    wagons: 2,
+  };
+  server.events.push(row(11, created, 1));
+  await sync.pollOnce();
+
+  assert.deepEqual(logKinds, ["TradeRouteCreated"], "the row fans out to the log");
+  assert.deepEqual(batches, [[created]]);
+  assert.equal(sync.getCursor(), 11);
+  const routes = sync.getState()?.tradeRoutes ?? [];
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0]?.id, "route0", "the route carries the event's routeId");
+  assert.equal(routes[0]?.caravan, null, "the caravan starts null, at origin");
+  assert.equal(
+    sync.getState()?.players.find((p) => p.id === 1)?.wagonsUnassigned,
+    2,
+    "the actor's unassigned wagons were debited",
+  );
+  sync.stop();
+});
+
+// Server-side AI actor (plan/2026-09-30-server-side-ai-actor.md Phase 1,
+// Gate 3): on a flagged game (lobby.aiDriver === "server") the seat-0
+// browser no longer drives the AI tick, so AI-seat rows must APPLY here --
+// skipping a TurnEnded row would take its load-bearing full-refetch resync
+// with it and freeze the spectator mid-AI-turn. Unflagged games keep the
+// 2026-09-29 skip (the gm4/gm5/gm6 pins above stay authoritative).
+
+const serverDrivenPolicy = await import("../../src/io/serverDrivenGames");
+
+function flaggedLobby(): { claimed: {}; aiDriver: "server" } {
+  return { claimed: {}, aiDriver: "server" };
+}
+
+test("a flagged game's AI-seat rows apply on the seat-0 client", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("sda1", {
+      lastEventId: 10,
+      heroes: [makeHero("h1", 1, 8, 8)],
+      settlements: [
+        {
+          ...makeSettlement("s0", 1, 8, 8),
+          stacks: [{ entries: [{ unitTypeId: "pikeman", count: 4 }] }],
+        },
+      ],
+      players: [makePlayer(0, "player", ["h0"], []), makePlayer(1, "ai", ["h1"], ["s0"])],
+    }),
+    events: [],
+    calls: [],
+  };
+  server.game.lobby = flaggedLobby();
+  installFetch(server);
+  serverDrivenPolicy.clearServerDriven("sda1");
+  serverDrivenPolicy.syncServerDrivenFromGame(server.game);
+  setInMemoryLocalPlayerId("sda1", 0);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("sda1", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const batches: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => batches.push(ev.events));
+
+  server.events.push(
+    row(11, { type: "UnitsRecruited", actor: 1, settlementId: "s0", unitTypeId: "pikeman", count: 5 }, 1),
+  );
+  await sync.pollOnce();
+
+  assert.deepEqual(batches.length, 1, "the driver's recruit is the spectator's state source");
+  assert.equal(stackTotal(sync.getState()?.settlements.s0.stacks), 9, "applied exactly once");
+  assert.equal(sync.getCursor(), 11);
+  sync.stop();
+  serverDrivenPolicy.clearServerDriven("sda1");
+});
+
+test("a flagged game's TurnEnded row still fires the full-refetch resync on seat 0", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("sda2", { lastEventId: 10, activePlayerId: 1 }),
+    events: [],
+    calls: [],
+  };
+  server.game.lobby = flaggedLobby();
+  installFetch(server);
+  serverDrivenPolicy.clearServerDriven("sda2");
+  serverDrivenPolicy.syncServerDrivenFromGame(server.game);
+  setInMemoryLocalPlayerId("sda2", 0);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("sda2", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const resyncs: string[] = [];
+  bus.on("mp:resynced", (ev: { reason: string }) => resyncs.push(ev.reason));
+  const batches: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => batches.push(ev.events));
+
+  server.game = makeGameRow("sda2", { lastEventId: 11, activePlayerId: 0 });
+  server.game.lobby = flaggedLobby();
+  server.events.push(
+    row(11, { type: "TurnEnded", actor: 1, round: 1, day: 2, activePlayerId: 0, wrapped: false }, 1),
+  );
+  await sync.pollOnce();
+
+  assert.deepEqual(resyncs, ["event_not_derivable"], "the AI turn's completion repairs the spectator");
+  assert.deepEqual(batches, [], "a resync-class row never lands in the applied batch");
+  assert.equal(sync.getCursor(), 11);
+  assert.equal(sync.getState()?.activePlayerId, 0, "the fetched state ended the AI turn");
+  sync.stop();
+  serverDrivenPolicy.clearServerDriven("sda2");
+});
+
+test("resync() reads the aiDriver flag off the fetched row, including a rollback flip", async () => {
+  const server: FakeServer = { game: makeGameRow("sda3", { lastEventId: 2 }), events: [], calls: [] };
+  server.game.lobby = flaggedLobby();
+  installFetch(server);
+  serverDrivenPolicy.clearServerDriven("sda3");
+  serverDrivenPolicy.clearServerDriven("sda4");
+  serverDrivenPolicy.registerServerDriven("sda4");
+  const sync = new MultiplayerSync();
+
+  sync.start("sda3");
+  await sync.pollOnce();
+  assert.equal(
+    serverDrivenPolicy.isServerDriven("sda3"),
+    true,
+    "the resync's full game object feeds the registry (D8 read-point)",
+  );
+
+  server.game.lobby = { claimed: {} };
+  sync.stop();
+  sync.start("sda3");
+  await sync.pollOnce();
+  assert.equal(
+    serverDrivenPolicy.isServerDriven("sda3"),
+    false,
+    "a refetch without the flag clears the registration (server-controlled rollback)",
+  );
+  assert.equal(
+    serverDrivenPolicy.isServerDriven("sda4"),
+    true,
+    "only the fetched game's registration is touched",
+  );
+  sync.stop();
+  serverDrivenPolicy.clearServerDriven("sda4");
+});
+
+// B6/D6 battle-outcome feedback (server-side AI actor plan Phase 2): both
+// battle kinds fan out `mp:battleOutcome` at the mp:logRow point --
+// unconditionally, before the self/seat skips and before the resync
+// early-return -- so every spectator receives every driver-resolved battle
+// exactly once per row.
+
+const HERO_BATTLE: EngineEvent = {
+  type: "BattleResolved",
+  actor: 1,
+  attackerId: "h1",
+  defenderId: "h0",
+  winner: "attacker",
+  attackerOutcome: "won",
+  defenderOutcome: "lost_all_troops",
+  attackerVerdict: "stood",
+  defenderVerdict: "defeated",
+  rewardGold: 50,
+  rounds: 3,
+  obstacleSeed: 1234,
+};
+
+const SETTLEMENT_BATTLE: EngineEvent = {
+  type: "SettlementBattleResolved",
+  actor: 1,
+  attackerId: "h1",
+  settlementId: "s0",
+  winner: "attacker",
+  captured: true,
+  outcome: "attackerWon",
+  attackerVerdict: "stood",
+};
+
+interface OutcomeEmission {
+  gameName: string;
+  id: string;
+  kind: string;
+  payload: EngineEvent;
+  actorSeat: number | null;
+}
+
+function collectOutcomes(): OutcomeEmission[] {
+  const emissions: OutcomeEmission[] = [];
+  bus.on(
+    "mp:battleOutcome",
+    (ev: { gameName: string; id: string; kind: string; payload: EngineEvent; actorSeat: number | null }) =>
+      emissions.push(ev),
+  );
+  return emissions;
+}
+
+test("both battle kinds fan out mp:battleOutcome exactly once; the poll backstop never re-delivers an SSE row", async () => {
+  const server: FakeServer = { game: makeGameRow("bo1", { lastEventId: 10 }), events: [], calls: [] };
+  installFetch(server);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("bo1", { cursor: 10, state: hydrateGameState(server.game) });
+  const es = FakeEventSource.latest();
+
+  const emissions = collectOutcomes();
+  const resyncs: string[] = [];
+  bus.on("mp:resynced", (ev: { reason: string }) => resyncs.push(ev.reason));
+
+  es.dispatchLog(row(11, HERO_BATTLE, 1), "11");
+  await tick();
+  server.game = makeGameRow("bo1", { lastEventId: 12 });
+  es.dispatchLog(row(12, SETTLEMENT_BATTLE, 1), "12");
+  await tick();
+
+  assert.equal(emissions.length, 2, "one emission per battle row");
+  assert.deepEqual(
+    emissions.map((e) => [e.id, e.kind, e.actorSeat]),
+    [
+      ["11", "heroBattle", 1],
+      ["12", "settlementBattle", 1],
+    ],
+  );
+  assert.equal((emissions[0].payload as Extract<EngineEvent, { type: "BattleResolved" }>).attackerVerdict, "stood");
+  assert.equal(
+    (emissions[1].payload as Extract<EngineEvent, { type: "SettlementBattleResolved" }>).outcome,
+    "attackerWon",
+    "the event payload rides through untouched",
+  );
+  assert.deepEqual(
+    resyncs,
+    ["event_not_derivable", "event_not_derivable"],
+    "both battle kinds are resync-answered; the fan-out happened before that early-return",
+  );
+
+  server.events.push(row(11, HERO_BATTLE, 1), row(12, SETTLEMENT_BATTLE, 1));
+  await sync.pollOnce();
+  assert.equal(emissions.length, 2, "the poll backstop never re-delivers a streamed row");
+  assert.equal(sync.getCursor(), 12);
+  sync.stop();
+});
+
+test("a flagged game's actor-1 settlement battle row emits for the seat-0 spectator", async () => {
+  const server: FakeServer = {
+    game: makeGameRow("bo2", { lastEventId: 10, activePlayerId: 1 }),
+    events: [],
+    calls: [],
+  };
+  server.game.lobby = flaggedLobby();
+  installFetch(server);
+  serverDrivenPolicy.clearServerDriven("bo2");
+  serverDrivenPolicy.syncServerDrivenFromGame(server.game);
+  setInMemoryLocalPlayerId("bo2", 0);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("bo2", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const emissions = collectOutcomes();
+  server.game = makeGameRow("bo2", { lastEventId: 11, activePlayerId: 1 });
+  server.game.lobby = flaggedLobby();
+  server.events.push(row(11, SETTLEMENT_BATTLE, 1));
+  await sync.pollOnce();
+
+  assert.equal(emissions.length, 1, "the flagged game's AI-attacker battle reaches the spectator");
+  assert.deepEqual(emissions[0], {
+    type: "mp:battleOutcome",
+    gameName: "bo2",
+    id: "11",
+    kind: "settlementBattle",
+    payload: SETTLEMENT_BATTLE,
+    actorSeat: 1,
+  });
+  assert.equal(sync.getCursor(), 11);
+  sync.stop();
+  serverDrivenPolicy.clearServerDriven("bo2");
+});
+
+test("own-seat battle rows still emit mp:battleOutcome (the direct-response copy; the consumer gates)", async () => {
+  const server: FakeServer = { game: makeGameRow("bo3", { lastEventId: 10 }), events: [], calls: [] };
+  installFetch(server);
+  setInMemoryLocalPlayerId("bo3", 0);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const sync = new MultiplayerSync();
+  sync.start("bo3", { cursor: 10, state: hydrateGameState(server.game) });
+
+  const emissions = collectOutcomes();
+  server.events.push(row(11, SETTLEMENT_BATTLE, 0));
+  await sync.pollOnce();
+
+  assert.equal(emissions.length, 1, "emission is unconditional; the consumer skips own-actor events");
+  assert.equal(emissions[0].actorSeat, 0);
   sync.stop();
 });

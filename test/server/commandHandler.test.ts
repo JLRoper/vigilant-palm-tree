@@ -12,7 +12,7 @@ import type {
   SettlementState,
 } from "@heroes/contracts";
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
-import { GameMap } from "@heroes/engine";
+import { CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS, GameMap, platoonTroopTotal, WAGON_GOLD_CAPACITY } from "@heroes/engine";
 import { hexDistance } from "@heroes/contracts";
 import { handleCommand, handleCommandTransactional } from "../../server/app/commandHandler";
 import {
@@ -83,8 +83,8 @@ const PLAYERS: Player[] = [
 function makeRow(
   heroes: HeroState[],
   settlements: SettlementState[],
-  overrides: Partial<HydratableGameRow> = {},
-): HydratableGameRow {
+  overrides: Partial<HydratableGameRow & { lobby?: { legacyAutoTrade?: boolean } }> = {},
+): HydratableGameRow & { lobby?: { legacyAutoTrade?: boolean } } {
   return {
     name: "test-game",
     seed: 1,
@@ -409,11 +409,14 @@ test("EndTurn wraps the round, advances settlement upgrades, and applies weekly 
   assert.equal(result.lastEventId, 4);
 });
 
-test("EndTurn writes one resource_transactions row per auto-trade transfer that actually fired", async () => {
+test("EndTurn writes one resource_transactions row per auto-trade transfer that actually fired (flag ABSENT -> ON)", async () => {
   // s0 has population but zero food in its warehouse (a real deficit);
   // s1, owned by the same player, has food to spare plus gold to pay for
   // it. runAutoTrade (packages/engine/src/economy/trade.ts) should move
   // exactly ceil(100/100) = 1 food from s1 -> s0, gold-for-gold.
+  // This row carries NO lobby at all -- the pre-2026-10-02 save shape -- and
+  // the absent flag resolves ON, so the legacy instant auto-trade still fires
+  // exactly as it always did.
   const players: Player[] = [
     { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0", "s1"] },
     { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: ["s2"] },
@@ -443,69 +446,51 @@ test("EndTurn writes one resource_transactions row per auto-trade transfer that 
   assert.equal(s0Snapshot?.warehouse.food, 0, "the 1 food that arrived was immediately consumed by this turn's upkeep");
 });
 
-// ---------------------------------------------------------------------------
-// Week 3+ ports (plan/2026-08-16-phase-3-parallel-dev-plan.md): TradeResources,
-// ResolveBattle, RecruitHero, UpgradeTownHall, SetAutoTrade, ReorderStack,
-// CaptureSettlement. Each pair below covers the happy path plus the specific
-// validation gap this port's own audit found for that command (see the PR
-// description for the full per-command gap list).
-// ---------------------------------------------------------------------------
-
-test("TradeResources moves resources between the actor's own settlements and recomputes legacy gold", async () => {
+test("EndTurn with lobby.legacyAutoTrade false moves NOTHING: no transfers, no rows, no resource events", async () => {
+  // The new-game shape, end to end through the command bus: POST /games wrote
+  // the flag false into the lobby jsonb, and the EndTurn case threads that
+  // resolved boolean down into runAutoTrade. The same deficit fixture that
+  // fires above must now sit untouched.
+  const players: Player[] = [
+    { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0", "s1"] },
+    { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: ["h1"], settlementIds: ["s2"] },
+  ];
   const row = makeRow(
     [makeHero("h0", 0, 2, 2)],
     [
-      makeSettlement("s0", 0, 2, 2, { warehouse: { wood: 50, stone: 0, iron: 0, arcane: 0, food: 0 }, gold: 100 }),
-      makeSettlement("s1", 0, 5, 5),
+      makeSettlement("s0", 0, 2, 2, { population: 100 }),
+      makeSettlement("s1", 0, 5, 5, { warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 50 }, gold: 50 }),
+      makeSettlement("s2", 1, 10, 10),
     ],
+    { players, lobby: { legacyAutoTrade: false } },
   );
   const { gameRepo, eventRepo, deps } = makeDeps(row);
-  const command: Command = {
-    kind: "TradeResources",
-    gameName: "test-game",
-    actor: 0,
-    fromSettlementId: "s0",
-    toSettlementId: "s1",
-    resource: "wood",
-    amount: 10,
-  };
+  const command: Command = { kind: "EndTurn", gameName: "test-game", actor: 0 };
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, true);
-  assert.equal(result.fromSettlement?.warehouse.wood, 40);
-  assert.equal(result.toSettlement?.warehouse.wood, 10);
-  // tradeResources() charges `amount` gold from the FROM settlement as the
-  // trade's cost (packages/engine/src/economy/trade.ts).
-  assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 90);
-  assert.equal(gameRepo.rows["test-game"].gold, 90);
-  assert.equal(eventRepo.events.map((e) => e.kind).join(","), "ResourcesTraded");
+  // The repo call still fires (with zero rows) -- it is the transfers list
+  // that is empty, not the persistence step that got skipped.
+  assert.equal(gameRepo.transactionCalls.length, 1);
+  assert.deepEqual(gameRepo.transactionCalls[0].value, []);
+  assert.equal(gameRepo.rows["test-game"].settlements.s1.warehouse.food, 50, "the donor keeps everything");
+  assert.equal(gameRepo.rows["test-game"].settlements.s1.gold, 50, "no gold changed hands");
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.warehouse.food, 0, "the deficit stays open");
+  assert.equal(
+    eventRepo.events.some((e) => e.kind === "ResourcesTraded"),
+    false,
+    "the event kind is deleted outright -- nothing may re-emit it",
+  );
 });
 
-test("TradeResources rejects trading between settlements the actor doesn't own, even when they share an owner", async () => {
-  // tradeResources() itself only requires from.ownerId === to.ownerId --
-  // both settlements below satisfy that (both owned by player 1), but
-  // neither is owned by the acting player (0). Closing this gap is this
-  // command's whole reason for its own explicit ownership check.
-  const row = makeRow(
-    [makeHero("h0", 0, 2, 2)],
-    [
-      makeSettlement("s0", 1, 2, 2, { warehouse: { wood: 50, stone: 0, iron: 0, arcane: 0, food: 0 }, gold: 100 }),
-      makeSettlement("s1", 1, 5, 5),
-    ],
-  );
-  const { deps } = makeDeps(row);
-  const command: Command = {
-    kind: "TradeResources",
-    gameName: "test-game",
-    actor: 0,
-    fromSettlementId: "s0",
-    toSettlementId: "s1",
-    resource: "wood",
-    amount: 10,
-  };
-  const result = await handleCommand(command, deps);
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "forbidden_not_your_settlement");
-});
+// ---------------------------------------------------------------------------
+// Week 3+ ports (plan/2026-08-16-phase-3-parallel-dev-plan.md): ResolveBattle,
+// RecruitHero, UpgradeTownHall, SetAutoTrade, ReorderStack,
+// CaptureSettlement. Each pair below covers the happy path plus the specific
+// validation gap this port's own audit found for that command (see the PR
+// description for the full per-command gap list). TradeResources was deleted
+// 2026-10-02 (dead code -- no UI caller; its jobs belong to the caravan
+// routes and the legacy-gated auto-trade).
+// ---------------------------------------------------------------------------
 
 // Same attack:100/defence:100/health:100 vs. attack:1/defence:1/health:5
 // profile as test/combat/resolveBattle.test.ts's own "overwhelming attacker"
@@ -694,8 +679,8 @@ test("ResolveBattle never touches charterRepo when the defender isn't chartering
 // validate / saveHeroesAndSettlements / eventRepo.append all share a single
 // PoolClient AND the games row is SELECT ... FOR UPDATE-locked for the
 // duration of the command (closing the concurrent-overwrite gap Copilot
-// flagged in PR #91 review: without the lock, two MoveHero/TradeResources
-// commands issued in the same millisecond each load the pre-state, each
+// flagged in PR #91 review: without the lock, two MoveHero commands issued
+// in the same millisecond each load the pre-state, each
 // mutate, and each save -- last write clobbers the first).
 //
 // mockRepos is in-memory and atomic-per-call, so testing the wrapper end
@@ -896,9 +881,17 @@ test("RecruitHero adds a new hero, deducts the recruit cost, and updates the pla
   const newHeroId = result.hero!.id;
   assert.ok(gameRepo.rows["test-game"].heroes[newHeroId], "new hero should be persisted");
   assert.ok(result.players?.find((p) => p.id === 0)?.heroIds.includes(newHeroId));
-  // HERO_RECRUIT_COST is 1 gold (packages/engine/src/hero/recruit.ts).
-  assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 49);
+  // HERO_RECRUIT_COST is 50 gold (packages/engine/src/hero/recruit.ts).
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 0);
   assert.equal(eventRepo.events.map((e) => e.kind).join(","), "HeroRecruited");
+  const persistedHero = gameRepo.rows["test-game"].heroes[newHeroId];
+  assert.ok(
+    persistedHero.stacks.some((p) => p.entries.length > 0),
+    "the recruited hero must persist its starter platoons",
+  );
+  const starterTotal = platoonTroopTotal(persistedHero.stacks);
+  assert.ok(starterTotal >= 4 && starterTotal <= 9, `starter army total ${starterTotal}`);
+  assert.equal(persistedHero.troops, starterTotal, "troops is the denormalized platoon total");
 });
 
 test("RecruitHero rejects recruiting at a settlement the actor doesn't own", async () => {
@@ -1031,8 +1024,13 @@ test("CaptureSettlement lets a hero standing on an enemy settlement capture it a
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, true);
   assert.equal(result.settlement?.ownerId, 0);
-  // CAPTURE_GOLD_REWARD is 100 (packages/engine/src/settlement/capture.ts).
-  assert.equal(result.hero?.gold, 110);
+  // CAPTURE_GOLD_REWARD is 100, clamped to the hero's treasury-cart purse
+  // headroom (Phase 1 heroGoldCap enforcement); 10g held under the 2,500g
+  // soft-default cap leaves the full headroom, so all 100g lands.
+  assert.equal(
+    result.hero?.gold,
+    10 + Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY - 10),
+  );
   assert.ok(result.players?.find((p) => p.id === 0)?.settlementIds.includes("s0"));
   assert.equal(gameRepo.rows["test-game"].settlements.s0.ownerId, 0);
   assert.equal(eventRepo.events.map((e) => e.kind).join(","), "SettlementCaptured");
@@ -1483,30 +1481,156 @@ test("TransferGold dual-writes both heroRepo and settlementRepo (both sides chan
   assert.equal(settlementRepo.calls[0].value.s0.gold, 60);
 });
 
-test("TradeResources dual-writes settlementRepo but never calls heroRepo (heroes unchanged)", async () => {
-  const row = makeRow(
-    [makeHero("h0", 0, 2, 2)],
-    [
-      makeSettlement("s0", 0, 2, 2, { warehouse: { wood: 50, stone: 0, iron: 0, arcane: 0, food: 0 }, gold: 100 }),
-      makeSettlement("s1", 0, 5, 5),
-    ],
-  );
-  const { deps, heroRepo, settlementRepo } = makeDeps(row);
+test("BankGold deposit moves treasury gold into the pot and emits BankGoldMoved", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [
+    makeSettlement("s0", 0, 2, 2, {
+      gold: 1000,
+      buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 0, pendingOut: [] } }],
+    }),
+  ]);
+  const { gameRepo, eventRepo, settlementRepo, deps } = makeDeps(row);
   const command: Command = {
-    kind: "TradeResources",
+    kind: "BankGold",
     gameName: "test-game",
     actor: 0,
-    fromSettlementId: "s0",
-    toSettlementId: "s1",
-    resource: "wood",
-    amount: 10,
+    settlementId: "s0",
+    gx: 1,
+    gy: 1,
+    amount: 400,
+    direction: "deposit",
   };
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, true);
-  assert.equal(heroRepo.calls.length, 0, "heroRepo.upsertMany should never fire for TradeResources");
+  const persisted = gameRepo.rows["test-game"].settlements.s0;
+  assert.equal(persisted.gold, 600);
+  assert.equal(persisted.buildings[0].bank?.gold, 400);
   assert.equal(settlementRepo.calls.length, 1);
-  assert.equal(settlementRepo.calls[0].value.s0.warehouse.wood, 40);
-  assert.equal(settlementRepo.calls[0].value.s1.warehouse.wood, 10);
+  assert.equal(eventRepo.events.length, 1);
+  assert.equal(eventRepo.events[0].kind, "BankGoldMoved");
+  assert.deepEqual(eventRepo.events[0].payload, {
+    type: "BankGoldMoved",
+    actor: 0,
+    settlementId: "s0",
+    gx: 1,
+    gy: 1,
+    amount: 400,
+    direction: "deposit",
+  });
+});
+
+test("BankGold withdraw starts the 7-day countdown out of the pot", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 0,
+        buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 1000, pendingOut: [] } }],
+      }),
+    ],
+    { day: 10 },
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const result = await handleCommand(
+    { kind: "BankGold", gameName: "test-game", actor: 0, settlementId: "s0", gx: 1, gy: 1, amount: 300, direction: "withdraw" },
+    deps,
+  );
+  assert.equal(result.ok, true);
+  const persisted = gameRepo.rows["test-game"].settlements.s0;
+  assert.equal(persisted.buildings[0].bank?.gold, 700);
+  assert.deepEqual(persisted.buildings[0].bank?.pendingOut, [{ gold: 300, maturesOnDay: 17 }]);
+  assert.equal(persisted.gold, 0, "not spendable yet");
+});
+
+test("BankGold rejects a settlement the actor doesn't own", async () => {
+  const foreign = makeRow([makeHero("h0", 0, 2, 2)], [
+    makeSettlement("s0", 1, 2, 2, {
+      gold: 1000,
+      buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 0, pendingOut: [] } }],
+    }),
+  ]);
+  const { deps: foreignDeps } = makeDeps(foreign);
+  const rejected = await handleCommand(
+    { kind: "BankGold", gameName: "test-game", actor: 0, settlementId: "s0", gx: 1, gy: 1, amount: 100, direction: "deposit" },
+    foreignDeps,
+  );
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.reason, "forbidden_not_your_settlement");
+});
+
+test("BankGold rejects a deposit the pot cap or the treasury cannot cover", async () => {
+  const capped = makeRow([makeHero("h0", 0, 2, 2)], [
+    makeSettlement("s0", 0, 2, 2, {
+      gold: 100000,
+      buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 4900, pendingOut: [] } }],
+    }),
+  ]);
+  const { deps } = makeDeps(capped);
+  const overCap = await handleCommand(
+    { kind: "BankGold", gameName: "test-game", actor: 0, settlementId: "s0", gx: 1, gy: 1, amount: 200, direction: "deposit" },
+    deps,
+  );
+  assert.equal(overCap.ok, false);
+  assert.equal(overCap.reason, "pot_full");
+
+  const broke = makeRow([makeHero("h0", 0, 2, 2)], [
+    makeSettlement("s0", 0, 2, 2, {
+      gold: 10,
+      buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 0, pendingOut: [] } }],
+    }),
+  ]);
+  const { deps: brokeDeps } = makeDeps(broke);
+  const overGold = await handleCommand(
+    { kind: "BankGold", gameName: "test-game", actor: 0, settlementId: "s0", gx: 1, gy: 1, amount: 100, direction: "deposit" },
+    brokeDeps,
+  );
+  assert.equal(overGold.ok, false);
+  assert.equal(overGold.reason, "not_enough_gold");
+});
+
+test("BankGold rejects a cell that isn't a bank", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [
+    makeSettlement("s0", 0, 2, 2, { gold: 1000, buildings: [{ gx: 1, gy: 1, kind: "house", level: 1, style: "classic" }] }),
+  ]);
+  const { deps } = makeDeps(row);
+  const result = await handleCommand(
+    { kind: "BankGold", gameName: "test-game", actor: 0, settlementId: "s0", gx: 1, gy: 1, amount: 100, direction: "deposit" },
+    deps,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "not_a_bank");
+});
+
+test("PlaceBuildings preserves a bank pot through an unrelated build commit", async () => {
+  const row = makeRow([makeHero("h0", 0, 2, 2)], [
+    makeSettlement("s0", 0, 2, 2, {
+      gold: 5000,
+      warehouse: { wood: 100, stone: 100, iron: 0, arcane: 0, food: 0 },
+      buildings: [
+        { gx: 1, gy: 1, kind: "bank", level: 2, style: "classic", bank: { gold: 4200, pendingOut: [{ gold: 250, maturesOnDay: 17 }] } },
+      ],
+    }),
+  ]);
+  const { gameRepo, deps } = makeDeps(row);
+  // Place a second bank alongside the existing one -- an unrelated edit that
+  // rewrites the whole cart. The pot must survive verbatim.
+  const result = await handleCommand(
+    {
+      kind: "PlaceBuildings",
+      gameName: "test-game",
+      actor: 0,
+      settlementId: "s0",
+      buildings: [
+        { gx: 1, gy: 1, kind: "bank", level: 2, style: "classic", bank: { gold: 4200, pendingOut: [{ gold: 250, maturesOnDay: 17 }] } },
+        { gx: 3, gy: 3, kind: "bank", level: 1, style: "classic" },
+      ],
+    },
+    deps,
+  );
+  assert.equal(result.ok, true);
+  const persisted = gameRepo.rows["test-game"].settlements.s0.buildings;
+  assert.equal(persisted.length, 2);
+  assert.deepEqual(persisted[0].bank, { gold: 4200, pendingOut: [{ gold: 250, maturesOnDay: 17 }] });
+  assert.equal(persisted[1].bank, undefined, "a pot-less bank never gains the key");
 });
 
 test("ResolveBattle dual-writes heroRepo but never calls settlementRepo (settlements unchanged)", async () => {
@@ -1833,7 +1957,6 @@ test("UpgradeSettlement starts an upgrade on a level-1 settlement with enough re
     gameName: "test-game",
     actor: 0,
     settlementId: "s0",
-    upgradePopulationGate: 0,
   };
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, true);
@@ -1851,7 +1974,6 @@ test("UpgradeSettlement rejects a missing settlement", async () => {
     gameName: "test-game",
     actor: 0,
     settlementId: "does-not-exist",
-    upgradePopulationGate: 0,
   };
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, false);
@@ -1877,18 +1999,16 @@ test("UpgradeSettlement rejects a settlement the actor doesn't own -- startSettl
     gameName: "test-game",
     actor: 0,
     settlementId: "s0",
-    upgradePopulationGate: 0,
   };
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "forbidden_not_your_settlement");
 });
 
-test("UpgradeSettlement rejects when population is below the client-supplied gate", async () => {
-  // upgradePopulationGate is trusted from the client (see
-  // packages/contracts/src/commands/upgradeSettlement.ts's header comment)
-  // -- this pins down that the server still enforces whatever gate value it
-  // was sent, not that it ignores the gate entirely.
+test("UpgradeSettlement enforces the server-owned population gate regardless of what the client sends", async () => {
+  // issue #153: the gate used to be client-trusted (0 == "no requirement").
+  // Now the engine constant UPGRADE_POPULATION_GATE applies, and a spoofed /
+  // stale upgradePopulationGate field on the body is ignored, not honored.
   const row = makeRow(
     [makeHero("h0", 0, 2, 2)],
     [
@@ -1902,13 +2022,13 @@ test("UpgradeSettlement rejects when population is below the client-supplied gat
     ],
   );
   const { deps } = makeDeps(row);
-  const command: Command = {
+  const command = {
     kind: "UpgradeSettlement",
     gameName: "test-game",
     actor: 0,
     settlementId: "s0",
-    upgradePopulationGate: 1,
-  };
+    upgradePopulationGate: 0,
+  } as unknown as Command;
   const result = await handleCommand(command, deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "population_too_low");
@@ -2126,7 +2246,6 @@ test("UpgradeSettlement survives an EndTurn round-trip -- the gap this port clos
     gameName: "test-game",
     actor: 0,
     settlementId: "s0",
-    upgradePopulationGate: 0,
   };
   assert.equal((await handleCommand(upgrade, deps)).ok, true);
 
@@ -2140,4 +2259,629 @@ test("UpgradeSettlement survives an EndTurn round-trip -- the gap this port clos
     "settlement",
     "settlement upgrade must survive EndTurn's hydrate-then-persist cycle",
   );
+});
+
+// Wagon-pool persistence regression: the games.players JSONB column is the
+// player's ONLY persistence home (players aren't dual-written anywhere), so
+// a command that mutates the pool but persists without extra.players lets
+// the pool resurrect on the very next command's rehydration.
+test("AssignWagons persists the pool and hero wagons across rehydration", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { wagons: 0 })],
+    [makeSettlement("s0", 0, 2, 2)],
+    {
+      players: [
+        { ...PLAYERS[0], wagonsOwned: 5, wagonsUnassigned: 2 },
+        PLAYERS[1],
+      ],
+    },
+  );
+  const { gameRepo, heroRepo, deps } = makeDeps(row);
+  const assign: Command = { kind: "AssignWagons", gameName: "test-game", actor: 0, heroId: "h0", delta: 2 };
+  const result = await handleCommand(assign, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.players?.find((p) => p.id === 0)?.wagonsUnassigned, 0, "§5.7: pool delta visible on the result");
+  assert.equal(
+    gameRepo.rows["test-game"].players[0].wagonsUnassigned,
+    0,
+    "pool decrement must reach the games.players JSONB",
+  );
+  assert.equal(
+    heroRepo.rows["test-game"].h0.wagons,
+    2,
+    "hero wagons must reach the granular dual-write",
+  );
+
+  const again = await handleCommand(assign, deps);
+  assert.equal(again.ok, false, "pre-fix the stale pool resurrected and this re-dispatch succeeded");
+  assert.equal(again.reason, "not_enough_wagons_unassigned");
+});
+
+test("BuyWagons persists the pool across rehydration", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 1000,
+        warehouse: { wood: 50, stone: 0, iron: 0, arcane: 0, food: 0 },
+      }),
+    ],
+    {
+      players: [
+        { ...PLAYERS[0], wagonsOwned: 0, wagonsUnassigned: 0 },
+        PLAYERS[1],
+      ],
+    },
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const buy: Command = { kind: "BuyWagons", gameName: "test-game", actor: 0, settlementId: "s0", count: 2 };
+  const result = await handleCommand(buy, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.players?.find((p) => p.id === 0)?.wagonsUnassigned, 2, "§5.7: pool delta visible on the result");
+  assert.equal(gameRepo.rows["test-game"].players[0].wagonsOwned, 2);
+  assert.equal(gameRepo.rows["test-game"].players[0].wagonsUnassigned, 2);
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 600);
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.warehouse.wood, 40);
+
+  const assign = await handleCommand(
+    { kind: "AssignWagons", gameName: "test-game", actor: 0, heroId: "h0", delta: 2 },
+    deps,
+  );
+  assert.equal(assign.ok, true, "pre-fix the unpersisted pool reverted to 0 and this assign failed");
+});
+
+test("AssignWagons persists the pool on the JSONB-fallback hydration path too", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { wagons: 0 })],
+    [makeSettlement("s0", 0, 2, 2)],
+    {
+      players: [
+        { ...PLAYERS[0], wagonsOwned: 5, wagonsUnassigned: 2 },
+        PLAYERS[1],
+      ],
+    },
+  );
+  const gameRepo = createMockGameRepo({ [row.name as string]: row });
+  const eventRepo = createMockEventRepo();
+  const heroRepo = createMockHeroRepo();
+  const settlementRepo = createMockSettlementRepo();
+  const charterRepo = createMockCharterRepo();
+  const deps = {
+    gameRepo,
+    eventRepo,
+    heroRepo,
+    settlementRepo,
+    charterRepo,
+    ctx: { rng: () => 0.5, catalog: { unitTypes: [] as UnitType[] } },
+  };
+
+  const assign: Command = { kind: "AssignWagons", gameName: "test-game", actor: 0, heroId: "h0", delta: 2 };
+  const result = await handleCommand(assign, deps);
+  assert.equal(result.ok, true);
+  assert.equal(
+    gameRepo.rows["test-game"].players[0].wagonsUnassigned,
+    0,
+    "pool decrement must reach the games.players JSONB even when hydration fell back to it",
+  );
+
+  const again = await handleCommand(assign, deps);
+  assert.equal(again.ok, false);
+  assert.equal(again.reason, "not_enough_wagons_unassigned");
+});
+
+test("AssignWagons with slot 'treasury' persists the cart pool and hero treasuryWagons across rehydration", async () => {
+  // Phase 1 treasury-wagons split: the cart pool lives in the same
+  // games.players JSONB and the hero's carts in the same granular
+  // dual-write -- both must survive the next command's rehydration,
+  // exactly like the cargo half above.
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { treasuryWagons: 0 })],
+    [makeSettlement("s0", 0, 2, 2)],
+    {
+      players: [
+        { ...PLAYERS[0], treasuryWagonsOwned: 6, treasuryWagonsUnassigned: 3 },
+        PLAYERS[1],
+      ],
+    },
+  );
+  const { gameRepo, heroRepo, deps } = makeDeps(row);
+  const assign: Command = {
+    kind: "AssignWagons",
+    gameName: "test-game",
+    actor: 0,
+    heroId: "h0",
+    delta: 2,
+    slot: "treasury",
+  };
+  const result = await handleCommand(assign, deps);
+  assert.equal(result.ok, true);
+  assert.equal(
+    result.players?.find((p) => p.id === 0)?.treasuryWagonsUnassigned,
+    1,
+    "§5.7: the cart pool delta is visible on the result too",
+  );
+  assert.equal(
+    gameRepo.rows["test-game"].players[0].treasuryWagonsUnassigned,
+    1,
+    "treasury pool decrement must reach the games.players JSONB",
+  );
+  assert.equal(
+    heroRepo.rows["test-game"].h0.treasuryWagons,
+    2,
+    "hero treasury carts must reach the granular dual-write",
+  );
+  assert.equal(
+    gameRepo.rows["test-game"].players[0].wagonsUnassigned,
+    undefined,
+    "the treasury assign never touches the cargo pool",
+  );
+
+  // The retry must not re-pay against the STALE pre-command pool (3): only
+  // the persisted pool (1 cart) may be drawn from, and a +2 against it
+  // clamps to a 1-cart move -- the reducer clamps partial moves, it never
+  // rejects them (the cargo counterpart's pool drains exactly, so its
+  // retry rejects; this fixture deliberately leaves 1 to pin the clamp).
+  const again = await handleCommand(assign, deps);
+  assert.equal(again.ok, true, "a +2 against the 1 remaining cart clamps to a 1-cart move");
+  assert.equal(
+    gameRepo.rows["test-game"].players[0].treasuryWagonsUnassigned,
+    0,
+    "only the real remaining cart was paid out",
+  );
+  assert.equal(
+    heroRepo.rows["test-game"].h0.treasuryWagons,
+    3,
+    "not 4 -- the stale pool did not resurrect and re-pay",
+  );
+
+  const third = await handleCommand(assign, deps);
+  assert.equal(third.ok, false, "the now-drained pool must not resurrect and re-pay");
+  assert.equal(third.reason, "not_enough_wagons_unassigned");
+});
+
+test("BuyWagons with slot 'treasury' persists the cart pool across rehydration, and an assign drains it", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 1000,
+        warehouse: { wood: 50, stone: 0, iron: 0, arcane: 0, food: 0 },
+      }),
+    ],
+    {
+      players: [
+        { ...PLAYERS[0], treasuryWagonsOwned: 0, treasuryWagonsUnassigned: 0 },
+        PLAYERS[1],
+      ],
+    },
+  );
+  const { gameRepo, deps } = makeDeps(row);
+  const buy: Command = {
+    kind: "BuyWagons",
+    gameName: "test-game",
+    actor: 0,
+    settlementId: "s0",
+    count: 2,
+    slot: "treasury",
+  };
+  const result = await handleCommand(buy, deps);
+  assert.equal(result.ok, true);
+  assert.equal(gameRepo.rows["test-game"].players[0].treasuryWagonsOwned, 2);
+  assert.equal(result.players?.find((p) => p.id === 0)?.treasuryWagonsUnassigned, 2, "§5.7: cart pool delta visible on the result");
+  assert.equal(gameRepo.rows["test-game"].players[0].treasuryWagonsUnassigned, 2);
+  assert.equal(gameRepo.rows["test-game"].players[0].wagonsOwned, undefined, "the treasury buy never touches the cargo pool");
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 600, "same 200g cost as a cargo wagon");
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.warehouse.wood, 40, "same 5 wood cost");
+
+  const assign = await handleCommand(
+    { kind: "AssignWagons", gameName: "test-game", actor: 0, heroId: "h0", delta: 2, slot: "treasury" },
+    deps,
+  );
+  assert.equal(assign.ok, true, "the persisted cart pool must be assignable without a refetch");
+});
+
+// Trade routes (the 2026-10-02 caravan-types/hero-endpoints work): the
+// create case must persist the endpoint/payload shape through the
+// trade_routes JSONB dual-write, emit the event carrying it, and -- with
+// the nextTradeRouteId hydration fix (hydrate derives it from the
+// persisted route ids) -- never re-derive a colliding id across the
+// per-command rehydrate.
+test("CreateTradeRoute persists the endpoint shape, emits the event, and never collides ids across rehydration", async () => {
+  const row = makeRow(
+    // Off the settlement tiles: a hero standing ON s0 would now be a
+    // same-tile pair, rejected at create (the L1 stall guard).
+    [makeHero("h0", 0, 4, 2)],
+    [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 0, 8, 2)],
+    {
+      players: [
+        { ...PLAYERS[0], wagonsOwned: 4, wagonsUnassigned: 4 },
+        PLAYERS[1],
+      ],
+    },
+  );
+  const { gameRepo, eventRepo, deps } = makeDeps(row);
+
+  const create: Command = {
+    kind: "CreateTradeRoute",
+    gameName: "test-game",
+    actor: 0,
+    from: { kind: "settlement", id: "s0" },
+    to: { kind: "settlement", id: "s1" },
+    payload: { kind: "resource", resource: "wood" },
+    wagons: 2,
+  };
+  const created = await handleCommand(create, deps);
+  assert.equal(created.ok, true);
+  // §5.7: the acting client reconciles the pool delta from the response.
+  assert.equal(created.players?.find((p) => p.id === 0)?.wagonsUnassigned, 2, "4 unassigned - 2 committed");
+  assert.equal(created.tradeRoutes?.length, 1);
+  assert.equal(created.tradeRoutes?.[0].ownerId, 0, "the created route carries the persisted owner stamp");
+
+  const persisted = gameRepo.rows["test-game"].trade_routes as Array<{
+    id: string;
+    from: { kind: string; id: string };
+    to: { kind: string; id: string };
+    payload: { kind: string; resource?: string };
+    wagons: number;
+  }>;
+  assert.equal(persisted.length, 1, "the route reaches the trade_routes JSONB dual-write");
+  assert.deepEqual(persisted[0].from, { kind: "settlement", id: "s0" });
+  assert.deepEqual(persisted[0].to, { kind: "settlement", id: "s1" });
+  assert.deepEqual(persisted[0].payload, { kind: "resource", resource: "wood" });
+
+  const appended = eventRepo.events.at(-1);
+  assert.equal(appended?.kind, "TradeRouteCreated");
+  assert.deepEqual(appended?.payload, {
+    type: "TradeRouteCreated",
+    actor: 0,
+    routeId: "route0",
+    from: { kind: "settlement", id: "s0" },
+    to: { kind: "settlement", id: "s1" },
+    payload: { kind: "resource", resource: "wood" },
+    wagons: 2,
+  }, "the event carries the endpoint/payload shape verbatim");
+
+  // The second create re-hydrates from the persisted row first: pre-fix the
+  // counter reset to 0 every hydration and this derived "route0" again (a
+  // duplicate id); with the fix it derives past the persisted route.
+  const second = await handleCommand(
+    {
+      kind: "CreateTradeRoute",
+      gameName: "test-game",
+      actor: 0,
+      from: { kind: "settlement", id: "s0" },
+      to: { kind: "hero", id: "h0" },
+      payload: { kind: "gold" },
+      wagons: 1,
+    },
+    deps,
+  );
+  assert.equal(second.ok, true, "the hero endpoint + gold payload pass the handler");
+  const routes = gameRepo.rows["test-game"].trade_routes as Array<{ id: string; to: { kind: string; id: string }; ownerId?: number }>;
+  assert.equal(routes.length, 2);
+  assert.equal(routes[1].id, "route1", "nextTradeRouteId hydrates from the persisted ids -- no more route0 collisions");
+  assert.deepEqual(routes[1].to, { kind: "hero", id: "h0" });
+  assert.equal(routes[0].ownerId, 0, "the first route's owner stamp survived the JSONB rehydrate for the second command");
+});
+
+test("UpdateTradeRoute reallocates wagons and a remove persists through the JSONB", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 0, 8, 2)],
+    {
+      players: [
+        { ...PLAYERS[0], wagonsOwned: 4, wagonsUnassigned: 4 },
+        PLAYERS[1],
+      ],
+    },
+  );
+  const { gameRepo, deps } = makeDeps(row);
+
+  const created = await handleCommand(
+    {
+      kind: "CreateTradeRoute",
+      gameName: "test-game",
+      actor: 0,
+      from: { kind: "settlement", id: "s0" },
+      to: { kind: "settlement", id: "s1" },
+      payload: { kind: "resource", resource: "wood" },
+      wagons: 3,
+    },
+    deps,
+  );
+  assert.equal(created.ok, true);
+
+  const shrunk = await handleCommand(
+    {
+      kind: "UpdateTradeRoute",
+      gameName: "test-game",
+      actor: 0,
+      routeId: "route0",
+      wagonsDelta: -1,
+    },
+    deps,
+  );
+  assert.equal(shrunk.ok, true);
+  assert.equal(shrunk.players?.find((p) => p.id === 0)?.wagonsUnassigned, 2, "§5.7: pool delta visible on the result");
+  assert.equal(gameRepo.rows["test-game"].players[0].wagonsUnassigned, 2, "1 wagon returned to the pool");
+  const persisted = gameRepo.rows["test-game"].trade_routes as Array<{ wagons: number }>;
+  assert.equal(persisted[0].wagons, 2, "the realloc persists through the JSONB");
+
+  const removed = await handleCommand(
+    {
+      kind: "UpdateTradeRoute",
+      gameName: "test-game",
+      actor: 0,
+      routeId: "route0",
+      remove: true,
+    },
+    deps,
+  );
+  assert.equal(removed.ok, true);
+  assert.equal(removed.players?.find((p) => p.id === 0)?.wagonsUnassigned, 4, "§5.7: the released pool is on the result");
+  assert.equal(removed.tradeRoutes?.length, 0, "§5.7: the post-change routes array rides the result too");
+  assert.equal((gameRepo.rows["test-game"].trade_routes as unknown[]).length, 0, "the removal persists");
+  assert.equal(gameRepo.rows["test-game"].players[0].wagonsUnassigned, 4, "all wagons released back to the pool");
+});
+
+test("UpdateTradeRoute with remove:true emits TradeRouteRemoved -- the manual half of the never-emitted kind", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 0, 8, 2)],
+    {
+      players: [
+        { ...PLAYERS[0], wagonsOwned: 4, wagonsUnassigned: 4 },
+        PLAYERS[1],
+      ],
+    },
+  );
+  const { eventRepo, deps } = makeDeps(row);
+
+  await handleCommand(
+    {
+      kind: "CreateTradeRoute",
+      gameName: "test-game",
+      actor: 0,
+      from: { kind: "settlement", id: "s0" },
+      to: { kind: "settlement", id: "s1" },
+      payload: { kind: "gold" },
+      wagons: 2,
+    },
+    deps,
+  );
+  await handleCommand(
+    {
+      kind: "UpdateTradeRoute",
+      gameName: "test-game",
+      actor: 0,
+      routeId: "route0",
+      remove: true,
+    },
+    deps,
+  );
+
+  const appended = eventRepo.events.at(-1);
+  assert.equal(appended?.kind, "TradeRouteRemoved", "a remove is a removal, not an update");
+  assert.deepEqual(appended?.payload, {
+    type: "TradeRouteRemoved",
+    actor: 0,
+    routeId: "route0",
+  });
+  assert.equal(appended?.actorSeat, 0);
+  // A non-remove update still emits the update kind.
+  const kinds = eventRepo.events.map((e) => e.kind);
+  assert.ok(kinds.includes("TradeRouteCreated"));
+  assert.ok(!kinds.slice(0, -1).includes("TradeRouteUpdated"), "no update row was emitted for the remove");
+});
+
+test("EndTurn weekly caravan desertion auto-removes the route and appends TradeRouteRemoved before TurnEnded", async () => {
+  // Solo-player game so one EndTurn wraps the round (day 6 -> 7) and the
+  // weekly upkeep runs. The route has been unpaid since day -7, so the day-7
+  // charge is its third unpaid week: the grace gate (2 weeks) is open, the
+  // single wagon deserts, and the route auto-removes.
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { troops: 1 })],
+    [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 0, 8, 2)],
+    {
+      players: SOLO_PLAYER,
+      day: 6,
+      trade_routes: [
+        {
+          id: "route0",
+          from: { kind: "settlement", id: "s0" },
+          to: { kind: "settlement", id: "s1" },
+          payload: { kind: "resource", resource: "wood" },
+          wagons: 1,
+          caravan: null,
+          unpaidSinceDay: -7,
+        },
+      ],
+    },
+  );
+  const { gameRepo, eventRepo, deps } = makeDeps(row);
+  const command: Command = { kind: "EndTurn", gameName: "test-game", actor: 0 };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.day, 7);
+
+  assert.equal((gameRepo.rows["test-game"].trade_routes as unknown[]).length, 0, "the last wagon deserted -> the route is gone from the JSONB");
+  assert.equal(eventRepo.events[0].kind, "TradeRouteRemoved", "the removal row is appended BEFORE the TurnEnded row");
+  assert.deepEqual(eventRepo.events[0].payload, {
+    type: "TradeRouteRemoved",
+    actor: 0,
+    routeId: "route0",
+  }, "the route's origin owner is the actor");
+  assert.equal(eventRepo.events[0].actorSeat, 0);
+  assert.equal(eventRepo.events[1].kind, "TurnEnded");
+  assert.deepEqual(
+    eventRepo.events.map((e) => e.kind).join(","),
+    "TradeRouteRemoved,TurnEnded,turn_ended,round_ended,round_started",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Deferred §5.1 bullet (logistics interface fixes): the EndTurn removal
+// event's actor is the route's TRUE owner -- routeOwnerId (persisted stamp,
+// else the FROM endpoint's live owner) -- never the acting turn player.
+// Post-dormancy (§5.2/§5.3) a stamped captured-origin route never deserts,
+// so the three shapes below pin what IS reachable: dormancy itself, the
+// owner-vs-acting-seat attribution, and the legacy ownerless fallback.
+// ---------------------------------------------------------------------------
+
+test("EndTurn leaves a captured-origin route dormant: no TradeRouteRemoved event, nothing misattributed", async () => {
+  // The route's stamp (owner 0) outlives the origin: s0 was captured by
+  // seat 1. Maintenance treats the route as dormant -- no bill, no
+  // desertion, no removal -- so no removal event exists to misattribute,
+  // and the route survives the wrap for its true owner to disband.
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { troops: 1 })],
+    [makeSettlement("s0", 1, 2, 2), makeSettlement("s1", 0, 8, 2)],
+    {
+      players: SOLO_PLAYER,
+      day: 6,
+      trade_routes: [
+        {
+          id: "route0",
+          from: { kind: "settlement", id: "s0" },
+          to: { kind: "settlement", id: "s1" },
+          payload: { kind: "resource", resource: "wood" },
+          wagons: 1,
+          caravan: null,
+          unpaidSinceDay: -7,
+          ownerId: 0,
+        },
+      ],
+    },
+  );
+  const { gameRepo, eventRepo, deps } = makeDeps(row);
+  const result = await handleCommand({ kind: "EndTurn", gameName: "test-game", actor: 0 }, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.day, 7);
+  const persisted = gameRepo.rows["test-game"].trade_routes as Array<{ id: string; wagons: number }>;
+  assert.equal(persisted.length, 1, "the dormant route survives the wrap");
+  assert.equal(persisted[0].wagons, 1, "no wagons deserted while dormant");
+  assert.equal(
+    eventRepo.events.filter((e) => e.kind === "TradeRouteRemoved").length,
+    0,
+    "no removal row -- nothing to attribute",
+  );
+  assert.equal(eventRepo.events[0].kind, "TurnEnded");
+});
+
+test("EndTurn removal event is attributed to the route's stamped owner, not the acting turn player", async () => {
+  // Player 1 ends the turn and wraps the round; the weekly upkeep that runs
+  // inside that wrap bills EVERY seat's routes, and player 0's unpaid route
+  // deserts. The removal row must name the route's owner (0, the stamp),
+  // not the seat whose EndTurn happened to trigger the ladder (1).
+  const players: Player[] = [
+    { id: 0, faction: "player", name: "Player 1", color: "#000000", heroIds: ["h0"], settlementIds: ["s0"] },
+    { id: 1, faction: "ai", name: "AI", color: "#111111", heroIds: [], settlementIds: ["s1"] },
+  ];
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { troops: 1 })],
+    [makeSettlement("s0", 0, 2, 2), makeSettlement("s1", 1, 8, 2)],
+    {
+      players,
+      active_player_id: 1,
+      day: 6,
+      trade_routes: [
+        {
+          id: "route0",
+          from: { kind: "settlement", id: "s0" },
+          to: { kind: "settlement", id: "s1" },
+          payload: { kind: "resource", resource: "wood" },
+          wagons: 1,
+          caravan: null,
+          unpaidSinceDay: -7,
+          ownerId: 0,
+        },
+      ],
+    },
+  );
+  const { eventRepo, deps } = makeDeps(row);
+  const result = await handleCommand({ kind: "EndTurn", gameName: "test-game", actor: 1 }, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.day, 7);
+  assert.equal(eventRepo.events[0].kind, "TradeRouteRemoved");
+  assert.deepEqual(eventRepo.events[0].payload, {
+    type: "TradeRouteRemoved",
+    actor: 0,
+    routeId: "route0",
+  }, "the route's stamped owner, not the acting seat (1)");
+  assert.equal(eventRepo.events[0].actorSeat, 0);
+  assert.equal(eventRepo.events[1].kind, "TurnEnded");
+});
+
+test("a legacy ownerless removal falls back to the live FROM-endpoint owner (the pre-stamp attribution)", async () => {
+  // Pre-stamp JSONB row: no ownerId on the route. Hydration backfills it
+  // from the FROM endpoint's live owner (s0's capturer, seat 1), so the
+  // removal is attributed to 1 -- exactly the old endpointOwner behavior --
+  // and never to the acting seat (0) nor derived from the TO endpoint.
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { troops: 1 })],
+    [makeSettlement("s0", 1, 2, 2), makeSettlement("s1", 0, 8, 2)],
+    {
+      players: SOLO_PLAYER,
+      day: 6,
+      trade_routes: [
+        {
+          id: "route0",
+          from: { kind: "settlement", id: "s0" },
+          to: { kind: "settlement", id: "s1" },
+          payload: { kind: "resource", resource: "wood" },
+          wagons: 1,
+          caravan: null,
+          unpaidSinceDay: -7,
+        },
+      ],
+    },
+  );
+  const { eventRepo, deps } = makeDeps(row);
+  const result = await handleCommand({ kind: "EndTurn", gameName: "test-game", actor: 0 }, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.day, 7);
+  assert.equal(eventRepo.events[0].kind, "TradeRouteRemoved");
+  assert.deepEqual(eventRepo.events[0].payload, {
+    type: "TradeRouteRemoved",
+    actor: 1,
+    routeId: "route0",
+  }, "the live FROM-endpoint owner (the capturer), matching the pre-stamp fallback");
+  assert.equal(eventRepo.events[0].actorSeat, 1);
+});
+
+test("EndTurn without any removal appends no TradeRouteRemoved rows (a fully-paid route survives the weekly charge)", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2, { troops: 1 })],
+    [
+      makeSettlement("s0", 0, 2, 2, { gold: 100, warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 100 } }),
+      makeSettlement("s1", 0, 8, 2),
+    ],
+    {
+      players: SOLO_PLAYER,
+      day: 6,
+      trade_routes: [
+        {
+          id: "route0",
+          from: { kind: "settlement", id: "s0" },
+          to: { kind: "settlement", id: "s1" },
+          payload: { kind: "resource", resource: "wood" },
+          wagons: 1,
+          caravan: null,
+          unpaidSinceDay: -7,
+        },
+      ],
+    },
+  );
+  const { gameRepo, eventRepo, deps } = makeDeps(row);
+  const result = await handleCommand({ kind: "EndTurn", gameName: "test-game", actor: 0 }, deps);
+  assert.equal(result.ok, true);
+  const persisted = gameRepo.rows["test-game"].trade_routes as Array<{ wagons: number; unpaidSinceDay: number | null }>;
+  assert.equal(persisted.length, 1, "the funded route survives");
+  assert.equal(persisted[0].unpaidSinceDay, null, "a full payment clears the streak");
+  assert.equal(
+    eventRepo.events.filter((e) => e.kind === "TradeRouteRemoved").length,
+    0,
+    "no removal rows",
+  );
+  assert.equal(eventRepo.events[0].kind, "TurnEnded");
 });

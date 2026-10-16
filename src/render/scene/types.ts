@@ -2,7 +2,7 @@ import type { Terrain } from "../../map/terrain";
 import type { ResourceType } from "../../map/resourceTiles";
 import type { Faction, HeroDirection } from "../../entities/hero";
 import type { HorseVariant } from "../../state/settings";
-import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase, GenerationStyle } from "@heroes/contracts";
+import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase } from "@heroes/contracts";
 import type { BattleSide } from "@heroes/engine";
 
 /** World-space pixel coordinates (pre-Camera-transform), same space axialToPixel() returns. */
@@ -80,8 +80,11 @@ export interface CaravanMarkerNode {
   q: number;
   r: number;
   world: WorldPoint;
+  markerWorld?: WorldPoint;
   color: string;
   wagons: number;
+  payloadKind?: "resource" | "gold";
+  facingDirection?: HeroDirection;
 }
 
 export interface CharterOverlayNode {
@@ -134,6 +137,8 @@ export interface HeroTrailNode {
   heroId: string;
   color: string;
   points: WorldPoint[];
+  /** Alpha multiplier for the whole trail; absent = 1. Enemy heroes' trails carry a dimmer value than the viewer's own. */
+  intensity?: number;
 }
 
 export interface HoverHighlightNode {
@@ -168,6 +173,8 @@ export interface HeroNode {
   runFrame?: 0 | 1;
   color: string;
   selected: boolean;
+  /** Fade-in alpha for a non-own hero newly revealed from fog; absent = 1. */
+  alpha?: number;
 }
 
 // City-view node kinds. `screen`/`center` coordinates below are the same
@@ -229,7 +236,8 @@ export interface CityBuildingNode {
   halfWidth: number;
   halfHeight: number;
   ownerColor: string;
-  style: GenerationStyle;
+  /** Farm plots only: the deterministic pixel vs pixel-alt art pick (farmFieldStyleAt at scene-build time). Absent for every other kind. */
+  farmStyle?: "pixel" | "pixel-alt";
   selected: boolean;
   /** Set while the building's upgrade is in flight; the painter swaps the real sprite for a shared construction-stage sprite. */
   constructionStage?: 1 | 2 | 3;
@@ -242,7 +250,6 @@ export interface CityGhostBuildingNode {
   halfWidth: number;
   halfHeight: number;
   ownerColor: string;
-  style: GenerationStyle;
   valid: boolean;
 }
 

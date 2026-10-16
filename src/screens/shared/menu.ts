@@ -1,3 +1,5 @@
+import { raisePanel, removePanel, type StackablePanel } from "./panelStack";
+
 const MENU_FONT = "system-ui, sans-serif";
 const MENU_FONT_SIZE = "13px";
 
@@ -71,6 +73,63 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+// Opt-in dismissal for openCenteredModal's full-viewport wrapper. Today's
+// callers get neither (a modal that owns a decision -- trade, new game,
+// charter -- must be answered with its own buttons), so both default off.
+export interface CenteredModalDismissOptions {
+  /** Close when the backdrop itself is clicked (clicks inside the panel do not). */
+  backdropClick?: boolean;
+  /** Close on the Escape key. */
+  escape?: boolean;
+}
+
+export interface ModalDismissListeners {
+  /** Remove every listener this call registered. Idempotent. */
+  detach(): void;
+}
+
+/**
+ * Builds the dismissal listeners for openCenteredModal. Split out of the
+ * modal itself so the wiring is unit-testable without a DOM (see
+ * test/screens/shared/menuDismiss.test.ts): it only touches two
+ * addEventListener surfaces -- the wrapper and the window.
+ */
+export function createModalDismissListeners(opts: {
+  close: () => void;
+  wrapper: HTMLElement;
+  keyTarget: Window;
+  backdropClick?: boolean;
+  escape?: boolean;
+}): ModalDismissListeners {
+  const detachers: Array<() => void> = [];
+
+  if (opts.backdropClick) {
+    const onBackdropClick = (ev: Event): void => {
+      // The click bubbles up from whatever was hit; only a landing on the
+      // wrapper itself is a backdrop click.
+      if (ev.target !== opts.wrapper) return;
+      opts.close();
+    };
+    opts.wrapper.addEventListener("click", onBackdropClick);
+    detachers.push(() => opts.wrapper.removeEventListener("click", onBackdropClick));
+  }
+
+  if (opts.escape) {
+    const onKeyDown = (ev: Event): void => {
+      if ((ev as KeyboardEvent).key !== "Escape") return;
+      opts.close();
+    };
+    opts.keyTarget.addEventListener("keydown", onKeyDown);
+    detachers.push(() => opts.keyTarget.removeEventListener("keydown", onKeyDown));
+  }
+
+  return {
+    detach: () => {
+      while (detachers.length > 0) detachers.pop()?.();
+    },
+  };
+}
+
 export interface PopupMenuOptions {
   parent?: HTMLElement;
   title: string;
@@ -82,9 +141,10 @@ export interface PopupMenuOptions {
   onClose?: () => void;
   onMove?: (pos: { x: number; y: number }) => void;
   minTop?: () => number;
+  clickToFront?: boolean;
 }
 
-export class PopupMenu {
+export class PopupMenu implements StackablePanel {
   readonly root: HTMLDivElement;
   readonly header: HTMLDivElement;
   readonly titleEl: HTMLDivElement;
@@ -198,6 +258,16 @@ export class PopupMenu {
 
     if (this.draggable) this.attachDrag();
 
+    if (this.opts.clickToFront) {
+      this.root.addEventListener(
+        "mousedown",
+        () => {
+          if (this.layout === "floating") raisePanel(this);
+        },
+        true,
+      );
+    }
+
     const parent = opts.parent ?? document.body;
     parent.appendChild(this.root);
   }
@@ -304,11 +374,16 @@ export class PopupMenu {
     this.header.style.cursor = value ? "move" : "default";
   }
 
+  setPanelZ(z: number): void {
+    this.root.style.zIndex = String(z);
+  }
+
   close(): void {
     // onClose runs while root is still attached: callbacks may remove the
     // wrapper (or otherwise reason about root's placement) and rely on the
     // pre-close DOM. root.remove() afterwards is idempotent for callbacks
     // that already detached it.
+    if (this.opts.clickToFront) removePanel(this);
     this.onClose?.();
     this.root.remove();
   }
@@ -389,6 +464,7 @@ export function openCenteredModal(
   draggable = false,
   closeable = true,
   onClose?: () => void,
+  dismiss?: CenteredModalDismissOptions,
 ): PopupMenu {
   const wrapper = document.createElement("div");
   Object.assign(wrapper.style, {
@@ -404,7 +480,15 @@ export function openCenteredModal(
     zIndex: "300",
   });
   parent.appendChild(wrapper);
+  // Self-cleaning marker (the wrapper is removed wholesale on close): lets
+  // global shortcuts know a modal owns the keyboard. See Toolbar's hotkeys.
+  wrapper.dataset.modal = "true";
 
+  // The wrapper is the full-viewport input interceptor, so the opt-in
+  // backdrop/Escape listeners have to come down with the modal -- they are
+  // detached by the same onClose path that removes the resize listener (and
+  // re-detached by the setOnClose re-wrap below, which replaces it).
+  let detachDismiss: (() => void) | null = null;
   const menu = new PopupMenu({
     parent: wrapper,
     title,
@@ -413,10 +497,19 @@ export function openCenteredModal(
     closeable,
     onClose: () => {
       onClose?.();
+      detachDismiss?.();
       window.removeEventListener("resize", clampIntoView);
       wrapper.remove();
     },
   });
+
+  detachDismiss = createModalDismissListeners({
+    close: () => menu.close(),
+    wrapper,
+    keyTarget: window,
+    ...(dismiss?.backdropClick ? { backdropClick: true } : {}),
+    ...(dismiss?.escape ? { escape: true } : {}),
+  }).detach;
 
   // Centring is left to the wrapper's flexbox rather than computed here. A
   // measured position would go stale the moment content grew, and once the
@@ -446,6 +539,7 @@ export function openCenteredModal(
   menu.setOnClose = (fn: () => void): void => {
     baseSetOnClose(() => {
       fn();
+      detachDismiss?.();
       window.removeEventListener("resize", clampIntoView);
       wrapper.remove();
     });

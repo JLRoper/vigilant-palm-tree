@@ -8,19 +8,17 @@ import {
 
 export interface CityDesignBoxCallbacks {
   onBuild: () => void;
-  onGenerate: () => void;
   onBack: () => void;
 }
 
 /**
  * Bottom-left "City Design" panel shown while a city is open: houses the
- * Build, Generate, and Back controls for the settlement build view.
+ * Build and Back controls for the settlement build view.
  */
 export class CityDesignBoxManager {
   private box: HTMLDivElement | null = null;
   private body: HTMLDivElement | null = null;
   private buildBtn: HTMLButtonElement | null = null;
-  private generateBtn: HTMLButtonElement | null = null;
   private backBtn: HTMLButtonElement | null = null;
 
   show(callbacks: CityDesignBoxCallbacks, panelRects?: FloatingPanelRectProvider): void {
@@ -77,22 +75,6 @@ export class CityDesignBoxManager {
     this.buildBtn.addEventListener("click", () => callbacks.onBuild());
     this.body.appendChild(this.buildBtn);
 
-    this.generateBtn = document.createElement("button");
-    this.generateBtn.textContent = "Generate";
-    Object.assign(this.generateBtn.style, {
-      padding: "2px 10px",
-      border: "1px solid rgba(255,255,255,0.1)",
-      background: "rgba(0,0,0,0.4)",
-      color: "#999",
-      fontSize: "10px",
-      cursor: "pointer",
-      borderRadius: "3px",
-      fontFamily: "system-ui, sans-serif",
-      opacity: "0.6",
-    });
-    this.generateBtn.addEventListener("click", () => callbacks.onGenerate());
-    this.body.appendChild(this.generateBtn);
-
     this.backBtn = document.createElement("button");
     this.backBtn.textContent = "← Back";
     Object.assign(this.backBtn.style, {
@@ -139,7 +121,6 @@ export class CityDesignBoxManager {
     this.box = null;
     this.body = null;
     this.buildBtn = null;
-    this.generateBtn = null;
     this.backBtn = null;
   }
 

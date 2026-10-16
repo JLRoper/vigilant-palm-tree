@@ -3,16 +3,19 @@ import { MAX_HEROES_PER_PLAYER, HERO_RECRUIT_COST, SETTLEMENT_UPGRADE_COSTS } fr
 import { settlementStacks, type Platoon } from "../../state/units";
 import { catalogReady, catalogFailed, getCachedUnit, loadUnitCatalog } from "../../data/unitCatalog";
 import { getUnitImageUrl } from "../../data/unitImages";
-import { PopupMenu, menuTheme, openCenteredModal, styleButton } from "@screens/shared/menu";
+import { PopupMenu, menuTheme, openCenteredModal, styleButton, styleInput } from "@screens/shared/menu";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import { DockedPanel } from "@screens/shared/dockedPanel";
 import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayout";
 import type { PanelRect } from "@screens/shared/panelPlacement";
 import { AccordionSection, makeRow } from "@screens/shared/panelWidgets";
+import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
+import { liveSettlementUpkeepUnfed } from "@screens/shared/heroUpkeepCost";
 import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../../render/assetDescriptors";
-import { settings } from "../../state/settings";
+import { bankRejectionMessage, bankRowModel, treasuryRowModel, type BankGoldDirection, type BankRowModel } from "./bankRows";
+import { TREASURY_CAP_AMBER, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
 import type { HorseVariant } from "../../state/settings";
-import { POP_BY_LEVEL } from "@heroes/engine";
+import { POP_BY_LEVEL, UPGRADE_POPULATION_GATE, effectiveSettlementIncome } from "@heroes/engine";
 import { pickHeroName } from "../../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 
@@ -23,6 +26,13 @@ export interface SettlementInfoMenuOptions {
   onUpgradeSettlement?: () => void;
   getHeroesAtSettlement?: (settlementId: string) => HeroState[];
   onTransferUnits?: (heroId: string, settlementId: string, direction: "toHero" | "toGarrison", unitTypeId: string, count: number) => boolean;
+  onBankGold?: (
+    settlementId: string,
+    gx: number,
+    gy: number,
+    amount: number,
+    direction: BankGoldDirection,
+  ) => { ok: boolean; reason: string };
 }
 
 const WAREHOUSE_RESOURCE_ORDER = ["wood", "stone", "iron", "arcane", "food"] as const;
@@ -40,6 +50,8 @@ export class SettlementInfoMenu {
   private incomeEl: HTMLSpanElement;
   private treasuryEl: HTMLSpanElement;
   private moraleEl: HTMLSpanElement;
+  private upkeepRow: HTMLDivElement;
+  private upkeepEl: HTMLSpanElement;
   private foodEl: HTMLSpanElement;
   private bannerEl: HTMLImageElement;
   private warehouseEls: Record<string, HTMLSpanElement>;
@@ -53,9 +65,25 @@ export class SettlementInfoMenu {
   private upgradeInfo: HTMLSpanElement;
   private getHeroesAtSettlement?: (settlementId: string) => HeroState[];
   private onTransferUnits?: (heroId: string, settlementId: string, direction: "toHero" | "toGarrison", unitTypeId: string, count: number) => boolean;
+  private warehouseAccordion: AccordionSection;
   private garrisonAccordion: AccordionSection;
   private garrisonBody: HTMLDivElement;
   private garrisonSignature: string | null = null;
+  private treasuryCapRow: HTMLDivElement;
+  private treasuryCapEl: HTMLSpanElement;
+  private bankAccordion: AccordionSection;
+  private bankBody: HTMLDivElement;
+  private bankSignature: string | null = null;
+  private bankRows: BankRowRefs[] = [];
+  private lastSettlement: SettlementState | null = null;
+  private lastDay = 0;
+  private onBankGold?: (
+    settlementId: string,
+    gx: number,
+    gy: number,
+    amount: number,
+    direction: BankGoldDirection,
+  ) => { ok: boolean; reason: string };
 
   constructor(opts: SettlementInfoMenuOptions) {
     this.onCloseCallback = opts.onClose;
@@ -63,6 +91,7 @@ export class SettlementInfoMenu {
     this.onUpgradeSettlement = opts.onUpgradeSettlement;
     this.getHeroesAtSettlement = opts.getHeroesAtSettlement;
     this.onTransferUnits = opts.onTransferUnits;
+    this.onBankGold = opts.onBankGold;
     this.menu = new PopupMenu({
       parent: opts.parent,
       title: "Settlement",
@@ -74,6 +103,7 @@ export class SettlementInfoMenu {
       draggable: true,
       zIndex: 60,
       minTop: toolbarHeight,
+      clickToFront: true,
       onMove: (pos) => {
         this.docked.markUserMoved();
         savePanelGeometry("settlementInfo", pos);
@@ -133,9 +163,25 @@ export class SettlementInfoMenu {
     this.treasuryEl = treasuryVal;
     body.appendChild(treasuryRow);
 
+    // How much gold the treasury can hold at all. Hidden unless a `treasury`
+    // building is present: a base-cap readout on every settlement would be a
+    // row that says nothing, which trains the player to skip it.
+    const { row: treasuryCapRow, value: treasuryCapVal } = makeRow("Treasury capacity");
+    this.treasuryCapRow = treasuryCapRow;
+    this.treasuryCapEl = treasuryCapVal;
+    treasuryCapRow.style.display = "none";
+    body.appendChild(treasuryCapRow);
+
     const { row: moraleRow, value: moraleVal } = makeRow("Morale");
     this.moraleEl = moraleVal;
     body.appendChild(moraleRow);
+
+    // Unpaid-upkeep badge. Hidden entirely while the settlement pays its way;
+    // a row that reads "—" forever would train the player to ignore it.
+    const { row: upkeepRow, value: upkeepVal } = makeRow("Upkeep");
+    this.upkeepRow = upkeepRow;
+    this.upkeepEl = upkeepVal;
+    body.appendChild(upkeepRow);
 
     const { row: foodRow, value: foodVal } = makeRow("Food");
     this.foodEl = foodVal;
@@ -148,8 +194,8 @@ export class SettlementInfoMenu {
     });
     body.appendChild(divider);
 
-    const warehouse = new AccordionSection({ label: "Warehouse", onToggle: () => this.reposition() });
-    body.appendChild(warehouse.element);
+    this.warehouseAccordion = new AccordionSection({ label: "Warehouse", onToggle: () => this.reposition() });
+    body.appendChild(this.warehouseAccordion.element);
 
     const grid = document.createElement("div");
     Object.assign(grid.style, {
@@ -161,7 +207,7 @@ export class SettlementInfoMenu {
       marginBottom: "4px",
       justifyItems: "center",
     });
-    warehouse.body.appendChild(grid);
+    this.warehouseAccordion.body.appendChild(grid);
 
     this.warehouseEls = {};
     for (const r of WAREHOUSE_RESOURCE_ORDER) {
@@ -207,6 +253,11 @@ export class SettlementInfoMenu {
       this.warehouseEls[r] = value;
       grid.appendChild(cell);
     }
+
+    this.bankAccordion = new AccordionSection({ label: "Banking", onToggle: () => this.reposition() });
+    body.appendChild(this.bankAccordion.element);
+    this.bankBody = document.createElement("div");
+    this.bankAccordion.body.appendChild(this.bankBody);
 
     this.recruitContainer = document.createElement("div");
     body.appendChild(this.recruitContainer);
@@ -287,6 +338,11 @@ export class SettlementInfoMenu {
   show(settlement: SettlementState, state: GameState): void {
     this.currentSettlementId = settlement.id;
     this.update(settlement, state);
+    // Entering a settlement / switching the displayed settlement re-expands
+    // every section so resources are readable; per-frame update() deliberately
+    // does not, so a collapse sticks while the menu stays on one settlement.
+    this.warehouseAccordion.setExpanded(true);
+    this.garrisonAccordion.setExpanded(true);
     if (!this.visible) {
       if (!this.menu.root.parentNode) {
         document.body.appendChild(this.menu.root);
@@ -329,18 +385,24 @@ export class SettlementInfoMenu {
   }
 
   update(settlement: SettlementState, state: GameState): void {
+    this.lastSettlement = settlement;
+    this.lastDay = state.day;
     const ownerText = settlement.ownerId !== null ? ` — Player ${settlement.ownerId + 1}` : " — Neutral";
     this.menu.setTitle(`Settlement${ownerText}`);
     this.bannerEl.src = SETTLEMENT_BANNERS[settlement.level] ?? SETTLEMENT_BANNERS[1];
     this.nameEl.childNodes[0].textContent = settlement.name;
     this.levelBadge.textContent = `L${settlement.level}`;
     this.populationEl.textContent = settlement.population.toLocaleString();
-    this.incomeEl.textContent = `${(settlement.population * settlement.goldTax).toLocaleString()}g`;
+    this.incomeEl.textContent = `${effectiveSettlementIncome(settlement).toLocaleString()}g`;
     this.treasuryEl.textContent = `${settlement.gold}g`;
+    this.updateTreasuryRow(settlement, state);
     this.moraleEl.textContent = `${Math.round(settlement.morale ?? 100)}%${settlement.autoTrade ? " · auto" : ""}`;
+    this.updateTreasuryCap(settlement);
     
     const foodReq = Math.ceil((settlement.population ?? 0) / 100);
     this.foodEl.textContent = `${settlement.warehouse.food ?? 0} / ${foodReq} req`;
+
+    this.updateUpkeep(settlement, state.day);
 
     this.warehouseEls["wood"].textContent = String(settlement.warehouse.wood ?? 0);
     this.warehouseEls["stone"].textContent = String(settlement.warehouse.stone ?? 0);
@@ -376,7 +438,7 @@ export class SettlementInfoMenu {
       } else {
         this.upgradeInfo.style.display = "";
         const cost = SETTLEMENT_UPGRADE_COSTS[settlement.level];
-        const gatePct = settings().upgradePopulationGate;
+        const gatePct = UPGRADE_POPULATION_GATE;
         const levelMax = POP_BY_LEVEL[settlement.level] ?? 500;
         const popReq = Math.ceil(gatePct * levelMax);
         const townHall = settlement.buildings.find((b) => b.kind === "townHall");
@@ -415,6 +477,194 @@ export class SettlementInfoMenu {
     }
 
     this.updateGarrison(settlement, state);
+    this.updateBank(settlement, state);
+  }
+
+  /**
+   * The gold row doubles as the treasury-cap indicator. applyEffectiveIncome
+   * pays `Math.min(income, headroom)`, so a full treasury silently discards the
+   * whole gold income — the panel would otherwise keep advertising an income
+   * rate next to a purse that never moves. Own settlements only: an opponent's
+   * full treasury is not this player's problem (same exclusion as
+   * evaluateUpkeepWarnings).
+   *
+   * Recomputed every frame like every other row here rather than memoised --
+   * `settlementTreasuryCap` is one pass over the settlement's buildings, and
+   * updateTreasuryCap() already pays exactly that per frame on the same call.
+   * Both branches write the colour unconditionally so the row clears again the
+   * moment the settlement un-caps (a capture can drop the gold; a bank or
+   * treasury can raise the cap).
+   */
+  private updateTreasuryRow(settlement: SettlementState, state: GameState): void {
+    const owned = settlement.ownerId !== null && settlement.ownerId === state.activePlayerId;
+    const capped = owned && treasuryCapped(settlement);
+    this.treasuryEl.style.color = capped ? TREASURY_CAP_AMBER : "";
+    this.treasuryEl.title = capped ? treasuryCapMessage(settlement) : "";
+  }
+
+  private updateTreasuryCap(settlement: SettlementState): void {
+    const model = treasuryRowModel(settlement);
+    if (!model) {
+      this.treasuryCapRow.style.display = "none";
+      return;
+    }
+    this.treasuryCapRow.style.display = "";
+    this.treasuryCapEl.textContent = `${model.cap.toLocaleString()}g (+${model.treasuryBuildingBonus.toLocaleString()})`;
+    this.treasuryCapEl.title =
+      `This settlement can hold ${model.cap.toLocaleString()}g. ` +
+      `Its treasury buildings add ${model.treasuryBuildingBonus.toLocaleString()}g; every cap-building adds ` +
+      `${model.totalBonus.toLocaleString()}g in total.` +
+      (model.overCap ? " The treasury is over its cap — income is frozen until it drops back under." : "");
+  }
+
+  /**
+   * Bank pots. The per-bank rows (and their Deposit/Withdraw buttons) are only
+   * rebuilt when the SET of banks changes -- signature compare, the same
+   * pattern updateGarrison() uses -- so a pot whose gold moved every frame does
+   * not tear the rows down under the pointer. Everything else is a text write.
+   */
+  private updateBank(settlement: SettlementState, state: GameState): void {
+    const model = bankRowModel(settlement, state.day);
+    this.bankAccordion.element.style.display = model.banks.length > 0 ? "" : "none";
+    if (model.banks.length === 0) {
+      this.bankSignature = null;
+      this.bankRows = [];
+      this.bankBody.replaceChildren();
+      return;
+    }
+    this.bankAccordion.rightEl.textContent = `${model.totalStored.toLocaleString()}g stored`;
+
+    const signature = JSON.stringify(model.banks.map((b) => [b.gx, b.gy, b.level]));
+    if (signature !== this.bankSignature) {
+      this.bankSignature = signature;
+      this.rebuildBankRows(model.banks, model.weeklyInterestPct, model.withdrawalDays);
+    }
+
+    const owned = settlement.ownerId !== null && settlement.ownerId === state.activePlayerId;
+    for (let i = 0; i < model.banks.length; i++) {
+      this.paintBankRow(this.bankRows[i], model.banks[i], owned);
+    }
+  }
+
+  private rebuildBankRows(banks: BankRowModel[], interestPct: number, withdrawalDays: number): void {
+    this.bankBody.replaceChildren();
+    this.bankRows = [];
+
+    const terms = document.createElement("div");
+    terms.textContent = `+${interestPct}% interest every week. Withdrawals take ${withdrawalDays} days to mature into the treasury.`;
+    Object.assign(terms.style, { fontSize: "10px", opacity: "0.6", lineHeight: "1.4", marginBottom: "4px" });
+    this.bankBody.appendChild(terms);
+
+    for (const bank of banks) {
+      const wrap = document.createElement("div");
+      Object.assign(wrap.style, { marginBottom: "6px" });
+
+      const { row, value } = makeRow(`Bank L${bank.level}`);
+      wrap.appendChild(row);
+
+      const pending = document.createElement("div");
+      Object.assign(pending.style, { fontSize: "10px", opacity: "0.7", marginTop: "2px" });
+      wrap.appendChild(pending);
+
+      const buttons = document.createElement("div");
+      Object.assign(buttons.style, { display: "flex", gap: "4px", marginTop: "3px" });
+      const depositBtn = document.createElement("button");
+      depositBtn.textContent = "Deposit";
+      styleButton(depositBtn, true);
+      depositBtn.style.padding = "2px 8px";
+      depositBtn.style.fontSize = "11px";
+      const withdrawBtn = document.createElement("button");
+      withdrawBtn.textContent = "Withdraw";
+      styleButton(withdrawBtn);
+      withdrawBtn.style.padding = "2px 8px";
+      withdrawBtn.style.fontSize = "11px";
+      buttons.appendChild(depositBtn);
+      buttons.appendChild(withdrawBtn);
+      wrap.appendChild(buttons);
+      depositBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.promptBankAmount("deposit", bank.gx, bank.gy, bank.level);
+      });
+      withdrawBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.promptBankAmount("withdraw", bank.gx, bank.gy, bank.level);
+      });
+
+      this.bankBody.appendChild(wrap);
+      this.bankRows.push({ value, pending, depositBtn, withdrawBtn });
+    }
+  }
+
+  private paintBankRow(refs: BankRowRefs, bank: BankRowModel, owned: boolean): void {
+    refs.value.textContent = `${bank.gold.toLocaleString()}g / ${bank.cap.toLocaleString()}g (${bank.capPct}%)`;
+    refs.value.title =
+      `Stored ${bank.gold.toLocaleString()}g of a ${bank.cap.toLocaleString()}g pot — ` +
+      `${bank.headroom.toLocaleString()}g of room left, earning +${bank.weeklyInterest.toLocaleString()}g a week.`;
+
+    refs.pending.textContent = pendingSummary(bank);
+    refs.pending.style.display = bank.pending.length > 0 ? "" : "none";
+
+    const blocked = owned ? "" : "This settlement is not yours.";
+    refs.depositBtn.disabled = !owned || !bank.canDeposit;
+    refs.depositBtn.title = owned
+      ? bank.canDeposit
+        ? `Move up to ${bank.headroom.toLocaleString()}g from the treasury into this pot.`
+        : "This pot is full."
+      : blocked;
+    refs.withdrawBtn.disabled = !owned || !bank.canWithdraw;
+    refs.withdrawBtn.title = owned
+      ? bank.canWithdraw
+        ? "Takes the gold out of the pot now; it becomes spendable once it matures."
+        : "This pot is empty."
+      : blocked;
+  }
+
+  private promptBankAmount(
+    direction: BankGoldDirection,
+    gx: number,
+    gy: number,
+    level: number,
+  ): void {
+    const settlementId = this.currentSettlementId;
+    if (!settlementId || !this.onBankGold) return;
+    const settlement = this.lastSettlement;
+    if (!settlement) return;
+    const bank = bankRowModel(settlement, this.lastDay).banks.find((b) => b.gx === gx && b.gy === gy);
+    if (!bank) return;
+    const max = direction === "deposit" ? Math.max(0, Math.min(bank.headroom, settlement.gold)) : bank.gold;
+    openBankAmountModal({
+      parent: document.body,
+      direction,
+      level,
+      settlementName: settlement.name,
+      available: max,
+      max,
+      onConfirm: (amount) => this.onBankGold!(settlementId, gx, gy, amount, direction),
+    });
+  }
+
+  // Upkeep badge: days short, how many garrison troops are going unfed, and
+  // the morale that shortfall is dragging down. Runs inside the per-frame
+  // update() like every other row here — one display flip plus two text writes
+  // on the common path, nothing when the settlement is paid up.
+  private updateUpkeep(settlement: SettlementState, day: number): void {
+    const sinceDay = settlement.garrisonUnpaidSinceDay;
+    // Same gate as the hero panel: a weekly streak only means a CURRENT
+    // shortfall while the treasury and warehouse still cannot cover the bill,
+    // so a restocked warehouse hides the row until the next day-% 7 charge.
+    if (sinceDay === null || !liveSettlementUpkeepUnfed(settlement)) {
+      this.upkeepRow.style.display = "none";
+      return;
+    }
+    const daysUnpaid = Math.max(0, day - sinceDay);
+    const weeksUnpaid = Math.floor(daysUnpaid / 7);
+    const unfed = settlement.garrisonUnpaidTroops;
+    this.upkeepRow.style.display = "";
+    this.upkeepEl.textContent = `${daysUnpaid}d · ${unfed} troops · morale ${Math.round(settlement.morale)}%`;
+    this.upkeepEl.title =
+      weeksUnpaid >= DESERTION_AFTER_WEEKS
+        ? `Garrison upkeep unpaid for ${daysUnpaid} days — ${unfed} troops unfed (${settlement.garrisonUnpaidGold}g/wk short). Troops are deserting.`
+        : `Garrison upkeep unpaid for ${daysUnpaid} days — ${unfed} troops unfed (${settlement.garrisonUnpaidGold}g/wk short). Troops desert after ${DESERTION_AFTER_WEEKS - weeksUnpaid} more week(s).`;
   }
 
   // Garrison + transfer section. Rebuilt only when the stack content or the
@@ -553,6 +803,113 @@ function makeDimRow(text: string): HTMLDivElement {
   el.textContent = text;
   Object.assign(el.style, { fontSize: "11px", opacity: "0.5" });
   return el;
+}
+
+interface BankRowRefs {
+  value: HTMLSpanElement;
+  pending: HTMLDivElement;
+  depositBtn: HTMLButtonElement;
+  withdrawBtn: HTMLButtonElement;
+}
+
+/** One line naming each pending withdrawal and when it turns spendable. */
+function pendingSummary(bank: BankRowModel): string {
+  return bank.pending
+    .map((e) =>
+      e.daysRemaining > 0
+        ? `${e.gold.toLocaleString()}g in ${e.daysRemaining}d`
+        : `${e.gold.toLocaleString()}g awaiting a treasury with room`,
+    )
+    .join(" · ");
+}
+
+export interface BankAmountModalOptions {
+  parent: HTMLElement;
+  direction: BankGoldDirection;
+  level: number;
+  settlementName: string;
+  available: number;
+  max: number;
+  onConfirm: (amount: number) => { ok: boolean; reason: string };
+}
+
+// Amount prompt for one bank pot: a number input clamped to what this move can
+// actually carry, an inline context line, and the reducer's own reason rendered
+// inline rather than swallowed -- a silent failure here is the "the button did
+// nothing" bug the panel must not repeat.
+export function openBankAmountModal(opts: BankAmountModalOptions): void {
+  const verb = opts.direction === "deposit" ? "Deposit" : "Withdraw";
+  const modal = openCenteredModal(opts.parent, `${verb} — Bank L${opts.level}`, 320);
+
+  const content = document.createElement("div");
+  content.style.fontFamily = menuTheme.font;
+  content.style.fontSize = menuTheme.fontSize;
+  content.style.color = menuTheme.panel.color;
+  content.style.display = "flex";
+  content.style.flexDirection = "column";
+  content.style.gap = "8px";
+
+  const contextLine = document.createElement("div");
+  contextLine.style.fontSize = "11px";
+  contextLine.style.opacity = "0.75";
+  contextLine.textContent =
+    opts.direction === "deposit"
+      ? `${opts.available.toLocaleString()}g of ${opts.settlementName}'s treasury can go into this pot.`
+      : `${opts.available.toLocaleString()}g is in this pot. It leaves now and becomes spendable when it matures.`;
+  content.appendChild(contextLine);
+
+  const amtLabel = document.createElement("label");
+  amtLabel.textContent = "Amount";
+  amtLabel.style.opacity = "0.7";
+  content.appendChild(amtLabel);
+
+  const amtInput = document.createElement("input");
+  amtInput.type = "number";
+  amtInput.min = "1";
+  amtInput.step = "1";
+  amtInput.max = String(opts.max);
+  styleInput(amtInput);
+  amtInput.value = String(opts.max);
+  content.appendChild(amtInput);
+
+  const errorLine = document.createElement("div");
+  Object.assign(errorLine.style, { ...menuTheme.error, minHeight: "14px", marginTop: "4px" });
+  content.appendChild(errorLine);
+
+  const row = document.createElement("div");
+  row.style.display = "flex";
+  row.style.justifyContent = "flex-end";
+  row.style.gap = "8px";
+  row.style.marginTop = "10px";
+
+  const cancel = document.createElement("button");
+  cancel.textContent = "Cancel";
+  styleButton(cancel);
+  cancel.addEventListener("click", () => modal.close());
+  row.appendChild(cancel);
+
+  const confirm = document.createElement("button");
+  confirm.textContent = verb;
+  styleButton(confirm, true);
+  confirm.addEventListener("click", () => {
+    const amount = Math.floor(Number(amtInput.value) || 0);
+    if (amount <= 0) {
+      errorLine.textContent = "Amount must be positive.";
+      return;
+    }
+    const result = opts.onConfirm(amount);
+    if (!result.ok) {
+      errorLine.textContent = bankRejectionMessage(opts.direction, result.reason);
+      return;
+    }
+    modal.close();
+  });
+  row.appendChild(confirm);
+
+  content.appendChild(row);
+  modal.setContent(content);
+  amtInput.focus();
+  amtInput.select();
 }
 
 // One aggregated row per distinct unit type across a platoon set — the

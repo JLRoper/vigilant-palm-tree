@@ -15,7 +15,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { BuildingDef } from "../../../src/render/cityBuildingDraw";
+import type { BuildingDef } from "@heroes/contracts";
 import {
   hasConstructingEntry,
   type SelectedBuildingEntry,

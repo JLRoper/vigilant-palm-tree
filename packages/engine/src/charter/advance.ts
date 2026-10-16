@@ -49,6 +49,11 @@ function completeCharter(state: GameState, charter: CharterState): GameState {
     citySpots: charter.citySpots.slice(),
     cityMines: [],
     morale: 50,
+    // Garrison upkeep shortfall (weekly upkeep pass): a freshly founded
+    // charter town starts paid up.
+    garrisonUnpaidSinceDay: null,
+    garrisonUnpaidTroops: 0,
+    garrisonUnpaidGold: 0,
     autoTrade: false,
     castleVariant: 0,
     buildings: [],

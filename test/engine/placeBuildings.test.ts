@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   applyPlaceBuildings,
+  buildStarterLayout,
   cityBuildNetCost,
   type BuildingDef,
 } from "@heroes/engine";
@@ -83,34 +84,33 @@ test("applyPlaceBuildings rejects wrong-owner and unaffordable commits", () => {
   assert.equal(broke.state.settlements.s0.buildings.length, 0, "rejected commit leaves buildings untouched");
 });
 
-test("applyPlaceBuildings: the initial starter layout of an empty settlement commits free", () => {
+test("applyPlaceBuildings: the starter set of an empty settlement commits free", () => {
   const settlement = makeSettlement("s0", 0, 2, 2, {
     gold: 300,
-    warehouse: { wood: 20, stone: 10, iron: 0, arcane: 0, food: 0 },
+    warehouse: { wood: 300, stone: 300, iron: 0, arcane: 0, food: 0 },
     buildings: [],
   });
   const state = makeState({ settlements: [settlement] });
-  // A full generated-style layout would cost far more than the settlement
-  // holds; with initialLayout the whole commit is free.
-  const layout: BuildingDef[] = [
-    { gx: 2, gy: 2, kind: "townHall", level: 1, style: "classic" },
-    { gx: 0, gy: 0, kind: "house", level: 1, style: "classic" },
-    { gx: 1, gy: 3, kind: "market", level: 1, style: "classic" },
-  ];
+  // The real starter set (engine buildStarterLayout) is free; the shape of the
+  // set itself is pinned in starterLayout.test.ts — this case is about the
+  // command's free/already-constructed handling of it.
+  const layout: BuildingDef[] = buildStarterLayout({ size: 5, style: "classic" });
   const result = applyPlaceBuildings(state, "s0", 0, layout, true);
   assert.equal(result.ok, true);
-  assert.equal(result.state.settlements.s0.gold, 300, "starter layout is free");
-  assert.equal(result.state.settlements.s0.warehouse.wood, 20);
-  assert.equal(result.state.settlements.s0.buildings.length, 3);
-  assert.equal(
-    "construction" in result.state.settlements.s0.buildings[1],
-    false,
-    "starter-layout buildings are already constructed — no rebuild timers",
-  );
-  assert.equal(
-    "construction" in result.state.settlements.s0.buildings[0],
-    false,
-  );
+  assert.equal(result.state.settlements.s0.gold, 300, "starter set is free");
+  assert.equal(result.state.settlements.s0.warehouse.wood, 300);
+  // 6 now, not 4: the starter set grew a wood and a stone producer alongside the
+  // town hall, farm and two houses. The set's shape is pinned in
+  // starterLayout.test.ts; what matters here is that ALL of it is free.
+  assert.equal(result.state.settlements.s0.buildings.length, layout.length);
+  assert.deepEqual(result.state.settlements.s0.buildings, layout, "the whole set lands, uncharged");
+  for (const b of result.state.settlements.s0.buildings) {
+    assert.equal(
+      "construction" in b,
+      false,
+      `${b.kind}: starter-set buildings are already constructed — no rebuild timers`,
+    );
+  }
 });
 
 test("applyPlaceBuildings: initialLayout is ignored for a settlement that already has buildings", () => {

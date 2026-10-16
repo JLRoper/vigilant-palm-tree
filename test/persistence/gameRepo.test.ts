@@ -4,7 +4,7 @@ import type { PoolClient } from "pg";
 import { withRollback } from "../helpers/pgTestTx";
 import { pool } from "../../server/persistence/db";
 import { createGameRepo, GameNotFoundError } from "../../server/persistence/repositories/gameRepo";
-import { emptyWarehouse, makeHero, makePlayer, makeSettlement } from "../charter/_helpers";
+import { emptyWarehouse, makeHero, makePlayer, makeSettlement, makeTradeRoute } from "../charter/_helpers";
 
 // withRollback pulls in the shared pg pool; close it once this file's tests
 // are done so node:test's process can exit promptly instead of waiting out
@@ -61,6 +61,40 @@ test("gameRepo.saveHeroesAndSettlements persists heroes and settlements", async 
   });
 });
 
+test("gameRepo.saveHeroesAndSettlements round-trips trade-route ownerId through the trade_routes JSONB", async () => {
+  // Logistics interface fixes §5.1/§5.7: routes are persisted whole (this
+  // extra field), so a stamped ownerId must come back verbatim -- both the
+  // present-number shape createTradeRoute writes and the explicit null a
+  // dead-both-ends hydration backfills. The engine-side hydrate pins live
+  // in test/engine/logistics.test.ts; this is the storage half of the
+  // round trip.
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createGameRepo(client);
+    const stamped = makeTradeRoute({
+      id: "route0",
+      from: { kind: "settlement", id: "s0" },
+      to: { kind: "settlement", id: "s1" },
+      payload: { kind: "resource", resource: "wood" },
+      ownerId: 0,
+    });
+    const ownerless = makeTradeRoute({
+      id: "route1",
+      from: { kind: "settlement", id: "s0" },
+      to: { kind: "hero", id: "h0" },
+      payload: { kind: "gold" },
+      wagons: 1,
+      ownerId: null,
+    });
+
+    await repo.saveHeroesAndSettlements(name, {}, {}, { trade_routes: [stamped, ownerless] });
+    const row = await repo.load(name);
+
+    assert.deepEqual(row.trade_routes, [stamped, ownerless], "ownerId survives the JSONB round trip verbatim");
+  });
+});
+
 test("gameRepo.saveHeroesAndSettlements optionally updates players and gold", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();
@@ -73,6 +107,23 @@ test("gameRepo.saveHeroesAndSettlements optionally updates players and gold", as
 
     assert.deepEqual(row.players, players);
     assert.equal(row.gold, 42);
+  });
+});
+
+test("gameRepo.saveHeroesAndSettlements round-trips a fractional gold total at full precision", async () => {
+  // Migration 027 made games.gold NUMERIC, so the sumPlayerGold total keeps
+  // its fraction end to end -- the old INTEGER column rejected 4171.6
+  // outright, and its interim Math.round fix persisted 4172 instead.
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createGameRepo(client);
+    const players = [makePlayer(0, "player", ["h0"], ["s0"])];
+
+    await repo.saveHeroesAndSettlements(name, {}, {}, { players, gold: 4171.6 });
+    const row = await repo.load(name);
+
+    assert.equal(row.gold, 4171.6);
   });
 });
 
@@ -173,6 +224,32 @@ test("gameRepo.insertSettlementSnapshots throws GameNotFoundError for a missing 
   });
 });
 
+test("gameRepo.insertSettlementSnapshots round-trips fractional gold/morale/effective_income at full precision", async () => {
+  // Migration 027 made all three snapshot columns NUMERIC: a fractional
+  // snapshot (what auto-trade + a hundredths-rounded producer output leave
+  // behind) comes back exactly instead of losing up to half a coin per
+  // quantity per save.
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    const gameId = await seedGame(client, name);
+    const repo = createGameRepo(client);
+
+    await repo.insertSettlementSnapshots(name, [
+      { settlementId: "s0", day: 3, gold: 120.5, warehouse: emptyWarehouse({ food: 6.45 }), morale: 80.25, effectiveIncome: 40.75 },
+    ]);
+
+    const r = await client.query(
+      `SELECT gold, warehouse, morale, effective_income
+       FROM settlement_snapshots WHERE game_id = $1 AND settlement_id = 's0' AND day = 3`,
+      [gameId],
+    );
+    assert.equal(r.rowCount, 1);
+    assert.equal(r.rows[0].gold, 120.5);
+    assert.equal(r.rows[0].morale, 80.25);
+    assert.equal(r.rows[0].effective_income, 40.75);
+  });
+});
+
 test("gameRepo.insertResourceTransactions writes one row per transfer", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();
@@ -195,6 +272,28 @@ test("gameRepo.insertResourceTransactions writes one row per transfer", async ()
     assert.equal(r.rows[0].amount, 10);
     assert.equal(r.rows[0].gold_paid, 5);
     assert.equal(r.rows[0].reason, "auto_trade");
+  });
+});
+
+test("gameRepo.insertResourceTransactions round-trips fractional amount/gold_paid at full precision", async () => {
+  // Migration 027: runAutoTrade pays a fractional food amount out of a
+  // fractional treasury, and both sides of the row keep the fraction now.
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    const gameId = await seedGame(client, name);
+    const repo = createGameRepo(client);
+
+    await repo.insertResourceTransactions(name, [
+      { fromSettlementId: "s0", toSettlementId: "s1", resource: "food", amount: 1.45, goldPaid: 0.55 },
+    ]);
+
+    const r = await client.query(
+      `SELECT amount, gold_paid FROM resource_transactions WHERE game_id = $1`,
+      [gameId],
+    );
+    assert.equal(r.rowCount, 1);
+    assert.equal(r.rows[0].amount, 1.45);
+    assert.equal(r.rows[0].gold_paid, 0.55);
   });
 });
 

@@ -1,5 +1,6 @@
 import { buildHud, updateHud, canEndTurn, type HudHandles, type PathCostReadout } from "@screens/shared/hud";
 import type { PlayerId } from "../state/gameState";
+import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { Toolbar, type CalendarSnapshot } from "@screens/shared/toolbar";
 import { HeroInfoMenu } from "@screens/heroes/heroInfoMenu";
 import { HeroRosterMenu } from "@screens/heroes/heroRosterMenu";
@@ -10,7 +11,7 @@ import { TileInfoPanel } from "@screens/adventure/tileInfoPanel";
 import { describeTile } from "@screens/adventure/tileInfo";
 import { setMinimapReserve } from "@screens/shared/panelRail";
 import { getMinimapReserveHeight } from "../render/minimap";
-import { CityView, type CitySelectionSnapshot } from "@screens/settlements/cityView/cityView";
+import type { CityView, CitySelectionSnapshot } from "@screens/settlements/cityView/cityView";
 import { settleNet } from "@screens/settlements/cityView/netCost";
 import { recordBuildCommit } from "../game/buildCommitLedger";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
@@ -18,15 +19,17 @@ import type { HeroId, SettlementState } from "../state/gameState";
 import type { Axial } from "../core/hex";
 import { Hero } from "../entities/hero";
 import { SpriteProvider } from "../render/assets";
-import { playerIncome, playerWealth } from "@heroes/engine";
+import { cachedUnitTypes } from "../data/unitCatalog";
+import { playerFactionId, playerIncome, playerWealth, playerEffectiveSettlementIncome, unitAllowedForSeatFaction } from "@heroes/engine";
 import { SessionManager } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
 import type { MapInfo } from "@screens/home/settingsMenu";
+import type { FactionId } from "@heroes/contracts";
 
 type ToolbarCallbacks = {
-  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; enemyCount?: number }) => void;
-  onLoad: (loaded: import("../io/api").Game, tiles: import("../io/api").TileRow[]) => void;
+  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" | "huge" | "epic"; enemyCount?: number; factionId?: FactionId }) => void;
+  onLoad: (loaded: import("../io/api").Game, tiles?: import("../io/api").TileRow[]) => void;
   onSave: () => void;
   onEndTurn: () => void;
   onForget: (id: number) => void;
@@ -34,6 +37,18 @@ type ToolbarCallbacks = {
   onStartCharter?: () => void;
   canStartCharter?: () => boolean;
 };
+
+const stateIdentityIds = new WeakMap<GameState, number>();
+let nextStateIdentityId = 1;
+
+function getStateIdentityId(state: GameState): number {
+  let id = stateIdentityIds.get(state);
+  if (id === undefined) {
+    id = nextStateIdentityId++;
+    stateIdentityIds.set(state, id);
+  }
+  return id;
+}
 
 export class UIManager {
   private hudHandles?: HudHandles;
@@ -44,9 +59,17 @@ export class UIManager {
   private settlementInfoMenu?: SettlementInfoMenu;
   private tileInfoPanel?: TileInfoPanel;
   private inspectedTile: Axial | null = null;
-  private cityView?: CityView;
+  private cityView: CityView | null = null;
+  private cityViewPromise: Promise<CityView> | null = null;
+  private cityViewState?: () => GameStateManager;
+  private cityViewLocalSeat?: () => PlayerId | null;
   private gameStateManager?: GameStateManager;
   private viewManager?: ViewManager;
+  private lastMapWidth = -1;
+  private lastMapHeight = -1;
+  private lastHudKey = "";
+  private lastMenusKey = "";
+  private lastTileInfoKey = "";
 
   constructor(
     private toolbarEl: HTMLElement,
@@ -71,6 +94,15 @@ export class UIManager {
         backendOk: () => session.isBackendOk(),
         hasActiveGame: () => session.getActiveGameId() !== null,
         canEndTurnNow: () => canEndTurn(state.getState()),
+        // S3 (logistics-interface-fixes plan §5.8): mirrors the controller's
+        // turn gate. Unknown local seat keeps the button enabled (today's
+        // behavior) -- the controller rejects only a known mismatched seat.
+        canOpenLogistics: () => {
+          const gs = state.getState();
+          if (!gs) return false;
+          const seat = getInMemoryLocalPlayerId(session.getActiveGameName() ?? "");
+          return seat == null || (gs.phase.kind === "PLAYER_TURN" && gs.activePlayerId === seat);
+        },
         getCalendar,
         getSaveStatus: () => session.getSaveStatus(),
         getLastSavedAt: () => session.getLastSavedAt(),
@@ -154,6 +186,14 @@ export class UIManager {
         this.gameStateManager.replaceState(tc.getState());
         return true;
       },
+      onBankGold: (settlementId, gx, gy, amount, direction) => {
+        if (!this.gameStateManager) return { ok: false, reason: "no_settlement" };
+        const tc = this.gameStateManager.getTurnController();
+        const result = tc.bankGold(settlementId, gx, gy, amount, direction);
+        if (!result.ok) return result;
+        this.gameStateManager.replaceState(tc.getState());
+        return result;
+      },
     });
   }
 
@@ -174,11 +214,52 @@ export class UIManager {
   initCityView(
     state: () => GameStateManager,
     viewManager: ViewManager,
+    getLocalSeat?: () => PlayerId | null,
   ): void {
+    // Lazy: CityView (and its skybox/sprite/asset chain) is imported and
+    // constructed on the first open() -- a settlement double-click -- not at
+    // boot. Everything it needs is stashed here for constructCityView().
     this.viewManager = viewManager;
+    this.cityViewState = state;
+    this.cityViewLocalSeat = getLocalSeat;
+  }
+
+  // Single construction point, reached only from the open path. The promise
+  // (not just the instance) is cached, so two fast double-clicks can never
+  // build two views; every sync path keeps using getCityView(). A failed
+  // construction clears the cache so the next open retries.
+  async ensureCityView(): Promise<CityView> {
+    if (!this.cityViewPromise) {
+      this.cityViewPromise = this.constructCityView().catch((err) => {
+        this.cityViewPromise = null;
+        throw err;
+      });
+    }
+    return this.cityViewPromise;
+  }
+
+  private async constructCityView(): Promise<CityView> {
+    const state = this.cityViewState;
+    const viewManager = this.viewManager;
+    if (!state || !viewManager) {
+      throw new Error("[ui] initCityView() must run before the city view can open");
+    }
+    const { CityView } = await import("@screens/settlements/cityView/cityView");
     const getStateMgr = () => state();
-    this.cityView = new CityView({
+    const getLocalSeat = this.cityViewLocalSeat;
+    const view = new CityView({
       provider: this.spriteProvider,
+      isUnitRecruitable: getLocalSeat
+        ? (unitTypeId) => {
+            const gs = getStateMgr().getState();
+            const seat = getLocalSeat();
+            const player = seat !== null ? gs.players.find((p) => p.id === seat) : undefined;
+            return unitAllowedForSeatFaction(unitTypeId, {
+              unitTypes: cachedUnitTypes(),
+              seatFactionId: playerFactionId(player),
+            });
+          }
+        : undefined,
       onUpgradeTownHall: () => {
         const openId = this.cityView?.getOpenSettlementId();
         if (!openId) return;
@@ -302,16 +383,21 @@ export class UIManager {
         return result.ok;
       },
     });
+    this.cityView = view;
+    return view;
   }
 
   getToolbar(): Toolbar | undefined { return this.toolbar; }
-  getCityView(): CityView | undefined { return this.cityView; }
+  getCityView(): CityView | undefined { return this.cityView ?? undefined; }
 
   // Breathing room between the panel rail's hard stop and the minimap's own
   // drawn box, so the rail doesn't sit flush against it.
   private static readonly MINIMAP_RAIL_GAP = 16;
 
   setMapDimensions(width: number, height: number): void {
+    if (width === this.lastMapWidth && height === this.lastMapHeight) return;
+    this.lastMapWidth = width;
+    this.lastMapHeight = height;
     setMinimapReserve(getMinimapReserveHeight(width, height) + UIManager.MINIMAP_RAIL_GAP);
   }
 
@@ -322,19 +408,52 @@ export class UIManager {
     localPlayerId: PlayerId | null,
   ): void {
     if (!this.hudHandles) return;
-    updateHud(
-      this.toolbarEl,
-      gameState,
-      lastSavedAt,
-      this.hudHandles,
-      localPlayerId,
-      this.hudPathReadout(),
-    );
-    this.refreshHeroInfoMenu(gameState, heroes);
-    this.refreshSettlementInfoMenu(gameState);
-    this.refreshTileInfoPanel(gameState, heroes, localPlayerId);
-    this.refreshRosterMenus(gameState);
-    this.toolbar?.refresh();
+    const stateId = getStateIdentityId(gameState);
+    const stateKey = `${stateId}:${gameState.round}:${gameState.day}:${gameState.activePlayerId}:${gameState.phase.kind}:${gameState.selectedHeroId ?? ""}:${gameState.selectedSettlementId ?? ""}:${localPlayerId ?? ""}`;
+    const readout = this.hudPathReadout();
+    const readoutKey = readout
+      ? `${readout.costToSplit}:${readout.totalCost}:${readout.destinationReachable ? 1 : 0}`
+      : "";
+    const hudKey = `${stateKey}|${lastSavedAt ?? ""}|${readoutKey}`;
+    if (hudKey !== this.lastHudKey) {
+      this.lastHudKey = hudKey;
+      updateHud(
+        gameState,
+        lastSavedAt,
+        this.hudHandles,
+        localPlayerId,
+        readout,
+      );
+    }
+
+    const selHero = gameState.selectedHeroId ? heroes[gameState.selectedHeroId] : undefined;
+    const selectedHeroVisualKey = selHero
+      ? `${selHero.tile.q},${selHero.tile.r}:${selHero.moving ? 1 : 0}:${selHero.movementRemaining}`
+      : "";
+    const menusKey = `${stateKey}|${selectedHeroVisualKey}|${this.heroInfoMenu?.getCurrentHeroId() ?? ""}|${this.settlementInfoMenu?.getCurrentSettlementId() ?? ""}|${this.heroRosterMenu?.isVisible() ? 1 : 0}:${this.settlementRosterMenu?.isVisible() ? 1 : 0}`;
+    if (menusKey !== this.lastMenusKey) {
+      this.lastMenusKey = menusKey;
+      this.refreshHeroInfoMenu(gameState, heroes);
+      this.refreshSettlementInfoMenu(gameState);
+      this.refreshRosterMenus(gameState);
+      this.toolbar?.refresh();
+    }
+
+    if (!this.inspectedTile && !this.tileInfoPanel?.isVisible()) {
+      this.lastTileInfoKey = "hidden";
+      return;
+    }
+
+    let heroPosSig = "";
+    for (const id of Object.keys(heroes)) {
+      const h = heroes[id];
+      heroPosSig += `${id}@${h.tile.q},${h.tile.r}:${h.movementRemaining};`;
+    }
+    const tileInfoKey = `${stateKey}|${this.inspectedTile ? `${this.inspectedTile.q},${this.inspectedTile.r}` : "none"}|${this.cityView?.isOpen() ? 1 : 0}|${this.tileInfoPanel?.isVisible() ? 1 : 0}|${heroPosSig}`;
+    if (tileInfoKey !== this.lastTileInfoKey) {
+      this.lastTileInfoKey = tileInfoKey;
+      this.refreshTileInfoPanel(gameState, heroes, localPlayerId);
+    }
   }
 
   // F10 (playtest fixes 2026-09-29): the AdventureView owns the hovered
@@ -457,18 +576,18 @@ export class UIManager {
           if (result.ok) stateManager.replaceState(tc().getState());
           return result;
         },
-        assignWagons: (heroId, delta) => {
-          const result = tc().assignWagons(heroId, delta);
+        assignWagons: (heroId, delta, slot) => {
+          const result = tc().assignWagons(heroId, delta, slot);
           if (result.ok) stateManager.replaceState(tc().getState());
           return result;
         },
-        buyWagons: (settlementId, count) => {
-          const result = tc().buyWagons(settlementId, count);
+        buyWagons: (settlementId, count, slot) => {
+          const result = tc().buyWagons(settlementId, count, slot);
           if (result.ok) stateManager.replaceState(tc().getState());
           return result;
         },
-        createTradeRoute: (fromId, toId, resource, wagons) => {
-          const result = tc().createTradeRoute(fromId, toId, resource, wagons);
+        createTradeRoute: (from, to, payload, wagons) => {
+          const result = tc().createTradeRoute(from, to, payload, wagons);
           if (result.ok) stateManager.replaceState(tc().getState());
           return result;
         },
@@ -563,7 +682,7 @@ export class UIManager {
     }
   }
 
-  static buildCalendarSnapshot(state: GameState): CalendarSnapshot | null {
+  static buildCalendarSnapshot(state: GameState, localPlayerId: PlayerId | null): CalendarSnapshot | null {
     if (!state.players.length) return null;
     const cal = calendarFromDay(state.day);
     const activePlayer =
@@ -580,10 +699,7 @@ export class UIManager {
         : null;
     const effectiveIncome =
       ownedSettlements.length > 0
-        ? ownedSettlements.reduce((acc, s) => {
-            const m = Math.max(0, Math.min(100, s.morale ?? 100));
-            return acc + Math.round(((s.population ?? 0) * (s.goldTax ?? 0) * m) / 100);
-          }, 0)
+        ? playerEffectiveSettlementIncome(state, activePlayer.id)
         : null;
     return {
       day: state.day,
@@ -594,6 +710,7 @@ export class UIManager {
       monthName: monthName(cal.month),
       activePlayerName: activePlayer.name,
       activePlayerColor: activePlayer.color,
+      activePlayerIsYou: localPlayerId != null && activePlayer.id === localPlayerId,
       nextTurnGold: playerIncome(state, activePlayer.id),
       wealth: playerWealth(state, activePlayer.id),
       morale,

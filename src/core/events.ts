@@ -23,9 +23,9 @@ export type GameEvent =
   | { type: "calc:visionRange"; settlementId: SettlementId; level: number; range: number }
   | { type: "calc:heroSpeed"; heroId: HeroId; baseSpeed: number; speed: number }
   // #100: emitted by src/game/turnHooks.ts when a fire-and-forget command
-  // (onTradeResources/onHumanMove/etc. -- see src/state/turnController.ts's
+  // (onRecruitHero/onHumanMove/etc. -- see src/state/turnController.ts's
   // TurnControllerHooks) rejects. `action` is a short human label for what
-  // was attempted ("Move hero", "Trade resources", ...); `reason` is the
+  // was attempted ("Move hero", "Recruit hero", ...); `reason` is the
   // server's own error code/message where available (see src/io/commands.ts's
   // CommandError), otherwise the raw failure text. Consumed by
   // src/screens/shared/toast.ts to give the player a visible notification
@@ -37,7 +37,8 @@ export type GameEvent =
   | MpEventsAppliedEvent
   | MpResyncedEvent
   | MpPresenceUpdatedEvent
-  | MpLogRowEvent;
+  | MpLogRowEvent
+  | MpBattleOutcomeEvent;
 
 export type ResyncReason = "initial" | "event_not_derivable" | "cursor_gap";
 
@@ -127,4 +128,37 @@ export type MpLogRowEvent = {
   type: "mp:logRow";
   gameName: string;
   row: MpLogRow;
+};
+
+/**
+ * Which battle family a `mp:battleOutcome` payload belongs to -- the two
+ * server producers of battle verdicts (server/app/commandHandler.ts's
+ * ResolveBattle and SubmitSettlementBattleResult cases, driven directly by
+ * the AI driver on flagged games).
+ */
+export type BattleOutcomeKind = "heroBattle" | "settlementBattle";
+
+/** The persisted EngineEvent payloads carried by a `mp:battleOutcome`. */
+export type BattleOutcomeEventPayload =
+  | Extract<EngineEvent, { type: "BattleResolved" }>
+  | Extract<EngineEvent, { type: "SettlementBattleResolved" }>;
+
+/**
+ * One resolved battle, fanned out by MultiplayerSync.applyRows at the same
+ * exactly-once-per-row point as `mp:logRow` -- before the self/seat skips,
+ * so every seat (including the driver-resolved battles no client ever saw a
+ * direct response for) receives it; the consumer gates. This is the D5
+ * parity path (server-side AI actor plan Phase 2): on a server-driven game
+ * the battle verdict reaches every browser as an event, and the event-
+ * derived card/toast layer words it.
+ */
+export type MpBattleOutcomeEvent = {
+  type: "mp:battleOutcome";
+  gameName: string;
+  /** The game_events row id -- the cross-transport dedupe key. */
+  id: string;
+  kind: BattleOutcomeKind;
+  payload: BattleOutcomeEventPayload;
+  /** The acting (attacking) seat, or null when the row carried none. */
+  actorSeat: number | null;
 };

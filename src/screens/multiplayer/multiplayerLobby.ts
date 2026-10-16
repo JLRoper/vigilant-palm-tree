@@ -249,10 +249,11 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
       const handle = handleInput.value.trim() || "Host";
       create.disabled = true;
       try {
-        const map = new (await import("../../map/gameMap")).GameMap(Math.floor(Math.random() * 0x7fffffff));
+        const seed = Math.floor(Math.random() * 0x7fffffff);
+        const map = (await import("../../map/gameMap")).getOrCreateGameMap(seed, "huge");
         const heroQ = map.width >> 1;
         const heroR = map.height >> 1;
-        const created = await api.createGame(gameName, Math.floor(Math.random() * 0x7fffffff), heroQ, heroR, [], "small", humanSlots);
+        const created = await api.createGame(gameName, seed, heroQ, heroR, [], "huge", humanSlots);
         const updated = await api.claimLobbySeat(created.name, 0, handle);
         activeGameName = updated.name;
         activeLocalPlayerId = 0;

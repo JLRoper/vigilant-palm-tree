@@ -1,11 +1,9 @@
 import type { CityViewSize } from "@heroes/engine";
-import { buildingConstructionProgress, buildingFootprintFromRegistry, constructionStageFor, pickStyleForBuilding, upgradeProgress, upgradeRefs } from "@heroes/engine";
-import type { BuildingDef, BuildingKind, GenerationStyle, UpgradeState } from "@heroes/contracts";
-import { cellOrigin, cellsInDrawOrder, cellToScreen, computeCityScale, TILE_D, TILE_W } from "../../../core/cityGrid";
+import { buildingConstructionProgress, buildingFootprintFromRegistry, constructionStageFor, farmFieldStyleAt, upgradeProgress, upgradeRefs } from "@heroes/engine";
+import type { BuildingDef, BuildingKind, UpgradeState } from "@heroes/contracts";
+import { buildingFootprint, cellsInDrawOrder, cellToScreen, cityLayout } from "../../../core/cityGrid";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { GameSettings } from "../../../state/settings";
-import { BUILDING_STYLE_REGISTRY } from "../../buildingStyles";
-import { buildingFootprint } from "../../cityBuildingDraw/primitives";
 import type { SceneNode } from "../types";
 
 // Faithful decomposition of cityRenderer.ts's drawCityView()'s per-frame
@@ -20,10 +18,6 @@ const TIER_LABELS: Record<CityViewSize, string> = {
   15: "15\u00d715 Castle",
 };
 
-const STYLE_LABELS: Record<string, string> = Object.fromEntries(
-  BUILDING_STYLE_REGISTRY.map((s) => [s.id, s.label]),
-);
-
 export interface CitySceneInput {
   viewportW: number;
   viewportH: number;
@@ -34,10 +28,10 @@ export interface CitySceneInput {
   citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
   cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>;
   buildings: BuildingDef[];
-  style: GenerationStyle;
-  pattern: string;
   ghost?: { gx: number; gy: number; kind: BuildingKind; w: number; h: number; valid: boolean } | null;
   selectedKeys?: ReadonlySet<string>;
+  /** CSS px top overlay inset (fixed toolbar height); the grid fits below `topInset + CITY_VIEW_MARGIN`. */
+  topInset?: number;
   /** CSS px to shift the two corner labels down by (the fixed toolbar overlays the canvas top; render must not measure it itself). */
   labelOffsetY?: number;
   /** Cells (keys `"gx,gy"`) the active build placer can accept a building on; flagged on the matching cityCell nodes for the tint paint. */
@@ -54,8 +48,8 @@ export interface CitySceneInput {
 export function buildCityScene(input: CitySceneInput): SceneNode[] {
   const {
     viewportW, viewportH, settlementName, size, hover,
-    citySpots, cityMines, buildings, style, pattern, ghost, selectedKeys, citySettings,
-    upgrades, labelOffsetY, buildableCells,
+    citySpots, cityMines, buildings, ghost, selectedKeys, citySettings,
+    upgrades, labelOffsetY, buildableCells, topInset,
   } = input;
   const ownerColor = input.ownerColor ?? "#888888";
   const labelY = labelOffsetY ?? 0;
@@ -72,16 +66,7 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
     offsetY: citySettings.cityBgOffsetY,
   });
 
-  const tileScale = computeCityScale(size, viewportW, viewportH);
-  const tw = TILE_W * tileScale;
-  const td = TILE_D * tileScale;
-  const gridVCenter = ((size - 1) * TILE_D) / 2;
-  const buildingPad = size * TILE_D * 0.18;
-  const screenOrigin = {
-    x: viewportW / 2,
-    y: viewportH / 2 - (gridVCenter + buildingPad) * tileScale,
-  };
-  const gridOrigin = cellOrigin(size);
+  const { tileScale, tw, td, gridOrigin, screenOrigin } = cityLayout(size, viewportW, viewportH, topInset ?? 0);
   const cellScreen = (gx: number, gy: number) => {
     const c = cellToScreen(gx, gy, gridOrigin);
     return { x: screenOrigin.x + c.x * tileScale, y: screenOrigin.y + c.y * tileScale };
@@ -158,7 +143,9 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
       halfWidth: fp.hw,
       halfHeight: fp.hh,
       ownerColor,
-      style: b.style,
+      ...(b.kind === "farmField"
+        ? { farmStyle: farmFieldStyleAt(settlementName, b.gx, b.gy) as "pixel" | "pixel-alt" }
+        : {}),
       selected: selectedKeys?.has(`${b.gx},${b.gy},${b.kind}`) ?? false,
       constructionStage: b.construction
         ? constructionStageFor(buildingConstructionProgress(b))
@@ -168,7 +155,6 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
 
   if (ghost) {
     const fp = buildingFootprint(ghost.gx, ghost.gy, gridOrigin, screenOrigin, tileScale, ghost.w, ghost.h);
-    const ghostStyle = pickStyleForBuilding(ghost.kind, 1, style);
     nodes.push({
       kind: "cityGhostBuilding",
       buildingKind: ghost.kind,
@@ -176,7 +162,6 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
       halfWidth: fp.hw,
       halfHeight: fp.hh,
       ownerColor,
-      style: ghostStyle as GenerationStyle,
       valid: ghost.valid,
     });
   }
@@ -184,7 +169,7 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
   nodes.push({ kind: "cityLabel", text: settlementName, x: 12, y: 12 + labelY, fontPx: 14, alpha: 1 });
   nodes.push({
     kind: "cityLabel",
-    text: `${TIER_LABELS[size]}  \u2014  ${STYLE_LABELS[style]}  \u2014  ${pattern}`,
+    text: TIER_LABELS[size],
     x: 12,
     y: 30 + labelY,
     fontPx: 11,

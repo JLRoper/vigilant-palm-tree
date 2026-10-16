@@ -1,5 +1,7 @@
 # Settlements
 
+<!-- docs:verified 2026-10-14 -->
+
 The player's claim on the world. Settlements come in two forms: **initial castles** (pre-placed at game start via `castlePlacement`) and **charter-founded settlements** (created by heroes via expedition).
 
 ## Initial castles
@@ -24,7 +26,7 @@ If the hero is defeated during travel or construction, all costs are forfeited.
 1. **Provision** (instant): costs deducted. Hero enters `"traveling"` phase.
 2. **Travel** (1+ turns): hero auto-paths one hex-step per owner-turn toward target. Vulnerable to attack.
 3. **Construction** (10 days): hero is stationary at target. `daysRemaining` decrements each `advanceRound`. Vulnerable to attack.
-4. **Complete**: settlement appears as Level 1 with population 50, empty warehouse, 0 gold, morale 50, `autoTrade: false`, generated city spots.
+4. **Complete**: settlement appears as Level 1 with population 50, empty warehouse, 0 gold, morale 50, `autoTrade: false` (now the default for *every* settlement — initial castles included, since the 2026-10-02 rework; see [economy.md](./economy.md) → Trade routes & caravans), generated city spots (which may now include **food** spots, terrain-biased — see [resource-gathering.md](./resource-gathering.md) §8).
 
 ### Placement rules
 
@@ -37,7 +39,7 @@ If the hero is defeated during travel or construction, all costs are forfeited.
 
 - **No cap** on number of settlements per player
 - Voluntary cancellation not allowed
-- AI does not charter in this phase
+- **AI chartering is live:** the server-side AI driver can start and advance charter expeditions using the same cost, distance, travel, and construction rules as human players (B3; see [multiplayer.md](./multiplayer.md)).
 
 ### Hero state during charter
 
@@ -58,7 +60,7 @@ If the hero is defeated during travel or construction, all costs are forfeited.
 
 Charter-founded settlements always start at Level 1 with population 50 (not 500).
 
-Resource yield scales linearly with level: `level × base_yield`. Source: [`src/economy/settlementRates.ts`](../src/economy/settlementRates.ts), [`src/entities/settlement.ts`](../src/entities/settlement.ts).
+Resource rates scale with settlement level and nearby map resource tiles. Source: [`packages/engine/src/economy/settlementRates.ts`](../packages/engine/src/economy/settlementRates.ts) and the engine settlement reducers; client visual settlement entities remain under `src/entities/`.
 
 ## Population growth (✅ implemented)
 
@@ -70,14 +72,13 @@ Settlements grow naturally each week, provided they have enough food to sustain 
 - **Cap:** Level's maximum population (500 / 1,500 / 5,000)
 - **No growth penalty:** When food is short, population simply doesn't grow (morale decay handles the penalty separately)
 
-The growth rate and upgrade population gate are configurable in Settings:
+The growth rate is configurable in Settings; the upgrade population gate is **not** player-configurable — it is the engine-owned constant `UPGRADE_POPULATION_GATE` (85%, `packages/engine/src/settlement/upgradeSettlement.ts`, issue #153):
 
 | Setting | Default | Range | Step |
 |---------|---------|-------|------|
 | Population Growth Rate | 10% | 1%–50% | 1% |
-| Upgrade Population Gate | 85% | 25%–100% | 5% |
 
-Source: [`src/state/settings.ts`](../src/state/settings.ts), growth logic in [`src/state/gameState.ts`](../src/state/gameState.ts) `applyWeeklyUpkeep`.
+Source: [`src/state/settings.ts`](../src/state/settings.ts) for the client setting and `packages/engine` turn/upkeep reducers for authoritative weekly growth.
 
 ## Settlement upgrades (✅ implemented)
 
@@ -107,7 +108,7 @@ Settlements can be upgraded to the next tier through an active construction proc
 
 ### Process
 
-1. **Pre-requisite check:** Population must meet the gate threshold (default 85% of level cap), and Town Hall must be at or above the target level.
+1. **Pre-requisite check:** Population must meet the gate threshold (85% of level cap — the engine constant `UPGRADE_POPULATION_GATE`, not player-configurable), and Town Hall must be at or above the target level.
 2. **Initiation:** Player clicks the upgrade button in the settlement info panel. Costs are deducted immediately from the settlement treasury and warehouse.
 3. **Construction:** `daysRemaining` counts down each `advanceRound`. Settlement operates normally during construction (production, income, growth continue).
 4. **Completion:** When `daysRemaining` reaches 0:
@@ -131,7 +132,7 @@ Settlements can be upgraded to the next tier through an active construction proc
 
 Starting a town-hall upgrade (`UpgradeTownHall`), a building upgrade (`UpgradeBuilding`), or a settlement upgrade (`UpgradeSettlement`) is now a server-authoritative command (`server/app/commandHandler.ts`) — the client's local `@heroes/engine` reducer call applies immediately for responsiveness, then a matching command round-trip (`src/io/commands.ts`, fired from `src/state/turnController.ts` via `src/game/turnHooks.ts`) persists it server-side, the same pattern `StartCharter` uses (see Persistence below). `advanceSettlementUpgrades` (completion, on round wrap) has been server-authoritative since `EndTurn`'s pipeline was ported (`server/app/turnService.ts`).
 
-Source: [`src/state/gameState.ts`](../src/state/gameState.ts) (`startTownHallUpgrade`, `startBuildingUpgrade`, `startSettlementUpgrade`, `advanceSettlementUpgrades`), [`server/app/commandHandler.ts`](../server/app/commandHandler.ts) (`UpgradeTownHall`/`UpgradeBuilding`/`UpgradeSettlement` cases), [`src/views/settlementInfoMenu.ts`](../src/views/settlementInfoMenu.ts), [`src/views/buildingMenu.ts`](../src/views/buildingMenu.ts).
+Source: `packages/engine/src/settlement/` upgrade reducers, [`server/app/commandHandler.ts`](../server/app/commandHandler.ts), and the current panels under `src/screens/settlements/`.
 
 ## Capture
 
@@ -154,22 +155,42 @@ Every settlement can hold troops: `SettlementState.stacks?: Platoon[]` — the s
 
 - **In:** `RecruitUnits` lands newly recruited units here (garrison-first — see [army.md](./army.md)); `TransferUnits` with `direction: "toGarrison"` pulls troops off a hero standing on the tile.
 - **Out:** `TransferUnits` with `"toHero"` loads the hero's platoons — the hero **must stand on the settlement**.
-- **Upkeep:** weekly (inside `applyWeeklyUpkeep`) via `applyGarrisonUpkeep` — 1 gold/troop from the settlement treasury + 1 food/troop from its warehouse; shortfalls trim stacks from the end.
+- **Upkeep:** weekly (inside `applyWeeklyUpkeep`) via `applyGarrisonUpkeep` (`packages/engine/src/settlement/garrisonUpkeep.ts`) — the same `resolveTroopUpkeep` rule heroes run (per-unit catalog gold/food bill, gold from the treasury and food from the warehouse, shortfall taken as a morale bleed then weighted desertion after a 2-week grace). Full rule: [army.md](./army.md) → Upkeep.
 - **Defense:** a non-empty garrison must be defeated before capture succeeds — in the manual arena for a local-human attacker (behind the assault-confirm modal), auto-resolved otherwise (see Capture above); since the 2026-09-29 capture/garrison wave the losing attacker suffers the hero-battle outcomes (defeat removes the hero, retreat/surrender relocate).
 - **AI-held garrisons (2026-09-29 follow-ups, B1):** AI seats spend their own treasuries on garrison troops during their turns — threat-sized (`pickGarrisonRecruitment`: target power = 1.0 × nearby enemy-hero power within reach 8, floor 4, gold reserve 100), bought through the same `RecruitUnits` path and building gates as a player's recruits. An AI town left alone grows a garrison instead of falling to the first walk-in.
 
-Buildings gate what a settlement can recruit; the newest is **stables** (placement 350g + 10 wood + 5 stone; recruits cavalry for 400g + 2 iron; `defenseBonus: 1`). The full building→unit table lives in [army.md](./army.md).
+Buildings gate what a settlement can recruit; the newest are **huntingLodge** (placement 250g + 8 wood; recruits warhound for 180g; `defenseBonus: 1`) and **eyrie** (placement 500g + 12 wood + 8 stone; recruits giant_eagle 1400g + 2 arcane at L1, eagle_prince 2400g + 4 arcane at L2). The full building→unit table lives in [army.md](./army.md).
+
+## Building roster — the newest and the storage roles
+
+**`treasury` (new 2026-10-01).** 1×1, 400g + 6 wood + 8 stone, 5 days, upkeep 1 wood / 1 stone, `settlementEffects: { treasuryBonus: 2000 }`. It raises the treasury cap and does nothing else. No capacity code changed: `settlementTreasuryCap` already summed `treasuryBonus` over every building, so a new cap-building contributes on sight.
+
+**`warehouse` is now 2×2** (four tiles) with `placementCost: { gold: 500, wood: 16, stone: 12 }` — the cost doubled because four tiles is ~19% of a level-1 town's usable space (5% at 1×1). `storageBonus` is unchanged at +600 × level on all five resources. The registry's legacy 1.5×1.5 L2/L3 visual override deliberately **excludes** it: `coversCell` uses `gx < b.gx + w`, so a 1.5 footprint covers only 2 cells — including `warehouse` would *release* two cells on upgrade and break cell exclusivity (the same reason `apartment`, `farmField`, and `townHall` stay out).
+
+**`bank` reworked.** Its dead `goldPerTurn: 60` was removed — it was never applied, since only `goldMine`'s gold actually accrues — and its description now states what it does. It keeps `treasuryBonus: 2000` and gains **its own gold pot** (deposit / 7-day withdrawal delay / 5% flat weekly interest, capacity `5000 × level`). Persistence, the `BankGold` command, the `BankGoldMoved` event, and the client path are documented in [architecture.md](./architecture.md) → Bank pots.
+
+**The three storage roles are not interchangeable:**
+
+| Building | Raises | Also |
+|---|---|---|
+| `granary` | **food** storage +600 × level | A food **producer** too (+3/turn) — genuinely both |
+| `warehouse` | **materials** storage +600 × level, all five (2×2 footprint) | +500 treasury |
+| `treasury` | **gold** capacity only, +2000 × level | — |
+| `bank` | **gold** capacity +2000 × level | Its own gold pot (interest + withdrawal delay) |
+
+Caps are derived (`settlement/capacity.ts`) and **soft**: an addition is clamped to headroom, and stock above cap is never destroyed. `granary` and `farmField` moved from the palette's Civilian section to **Production** (both are producers); `farmhouse` stays in Troop Buildings because the palette's `recruits` check runs first.
 
 ## Building persistence (✅ implemented)
 
 Buildings placed in the city view are persisted to `SettlementState.buildings` (a `BuildingDef[]` array). Previously ephemeral (only existed while city view was open), buildings now survive close/reopen cycles.
 
-- **First open:** If `buildings` is empty (migration of old saves), buildings are auto-generated and persisted.
+- **First open:** a settlement with no buildings is handed the **free starter set** and it is committed for the player — `townHall L1 + farmField L1 + 2× house L1 + 2× woodcutterHut L1 + stoneMine L1 + farmhouse L1` (`buildStarterLayout`, `packages/engine/src/settlement/starterLayout.ts`), costing **10 wood + 2 stone** per turn (the farmhouse's 1 wood + 0 stone included; the second hut is the 2026-10-02 balance fix: one hut left the set net wood-negative, median −5 wood/turn; two land it at median −4). The farmhouse is the tier-1 peasant's recruiting building (25g, `minLevel 1`), so every settlement — player and AI alike — can raise garrison troops from the moment it exists (the AI garrison planner shops the same `eligibleRecruitSources` gate). This replaced a hand-off of `cityBuildingGen`'s denseUrban layout (~14 buildings, level-2 town hall, **no producer at all**, ~24 wood + 14 stone per turn) which bankrupted a player by roughly turn 12. Farm count is sized against the settlement's **own** food bill (its population plus the weekly bill of any starting hero standing on it — `starterFarmsNeeded(foodBill)`): the L1 keep asks 4 and places 3 (a 5×5 grid physically holds 3 beside the town hall; the accumulated surplus covers the rest), the L2 town (pop 1,500) gets 4 on 10×10, an AI seat's L3 castle 12, and a neutral L3 castle (pop 5,000) 11 on 15×15 (a 1-player game creates 4 settlements, not 2 — `castleCount` is floored at `CASTLE_COUNT_MIN = 4`, so two neutral L3s are seeded the same way).
+- **Never twice:** `starterCityOnOpen({ existing })` returns an already-populated settlement's own array with `free: false`, so no `PlaceBuildings` is sent and the town hall is never dropped.
 - **Close:** The full buildings array is written back to settlement state.
 - **Generate button:** A small "Generate" button in the top-right of the city view replaces the entire buildings array with fresh generation. Useful for testing.
 - **Town Hall at center:** The center cell is always reserved for a Town Hall building.
 
-Source: [`src/views/cityView.ts`](../src/views/cityView.ts), [`src/views/buildingPlacer.ts`](../src/views/buildingPlacer.ts).
+Source: [`src/screens/settlements/cityView/cityView.ts`](../src/screens/settlements/cityView/cityView.ts), [`src/screens/settlements/cityView/buildingPlacer.ts`](../src/screens/settlements/cityView/buildingPlacer.ts), and the layout/guard pair in `packages/engine/src/settlement/starterLayout.ts`. The city view's re-sync of its working cart against live state goes through the pure `syncCartBuildings` (`src/screens/settlements/cityView/syncedBuildings.ts`) — it refreshes `level`/`style`/`construction` **and** `bank`, so a pot that changed while the city view was open is not written back stale (unit-tested, because city view imports cannot be loaded under bare `node:test`).
 
 ## Map visualisation
 
@@ -188,7 +209,7 @@ State types defined in [`src/state/gameState.ts`](../src/state/gameState.ts):
 - `HeroState.isChartering` / `HeroState.charterId`
 - `GameState.activeCharters`, `nextCharterId`, `nextSettlementId`
 - `UpgradeState` — `{ kind: "townHall"|"settlement", targetLevel: 2|3, daysRemaining, newResourceRates?, newCitySpots? }`
-- `SettlementState.buildings` — `BuildingDef[]` (persisted building array)
+- `SettlementState.buildings` — `BuildingDef[]` (persisted building array; a bank's pot rides on its own `BuildingDef.bank?: BankPot`, stored in the nullable JSONB column `settlement_buildings.bank` — migration `022_bank_pot.sql`)
 - `SettlementState.upgrade` — `UpgradeState?` (active upgrade, if any)
 - `SettlementState.stacks` — `Platoon[]?` (settlement garrison; persisted via the `settlement_platoons` table, migration `016_settlement_platoons.sql`, dual-written by `settlementRepo` and reassembled by the granular hydrate path)
 
@@ -204,6 +225,7 @@ Recruitment/garrison event kinds (`@heroes/contracts` `EngineEvent`s):
 - `UnitsRecruited`
 - `UnitsTransferred`
 - `SettlementBattleResolved`
+- `BankGoldMoved` (2026-10-01 — one pot deposit or withdrawal-request; classified `"apply"` with a replay reducer)
 
 ## Cross-references
 

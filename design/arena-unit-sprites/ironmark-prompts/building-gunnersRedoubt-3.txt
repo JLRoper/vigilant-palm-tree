@@ -1,0 +1,7 @@
+Isometric pixel art game asset for a medieval city-builder, matching the attached reference image exactly in style: same chunky pixel size, same 2:1 dimetric isometric projection (standard 30° angle), same thick dark-brown outlines around every shape, same mountain-hold palette of cool steel-blue and iron-gray stone with warm gold trim and ember-orange forge light, transparent background, square 1:1 canvas.
+
+Subject: the dwarven gunners' redoubt at its final level 3: a tall three-tier stone gun bastion of iron-gray masonry with splayed artillery terraces, black cannon muzzles poking from two decks of gun ports, a steel-plated conical roof with a gold finial atop the upper tower, a warning brazier glowing ember-orange on the highest gallery, a gold hammer sigil painted on the wall.
+
+Plot: a square 20x20 meter lot shown as a diamond, topped with light sandy ground with darker speckles and a few tiny grass tufts, and a thin darker soil slab visible along the front two edges. The bastion covers about 45% of the footprint, set slightly back of center; in the yard sit two stacked black powder kegs with gold-stamped bands, a coil of match cord, and a few loose iron cannonballs.
+
+Single centered asset, nothing outside the plot, clean pixel-art shading, no anti-aliasing halos, no text, no watermark.

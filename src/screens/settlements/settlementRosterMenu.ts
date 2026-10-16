@@ -32,6 +32,7 @@ export class SettlementRosterMenu {
       draggable: true,
       zIndex: 60,
       minTop: toolbarHeight,
+      clickToFront: true,
       onMove: (pos) => savePanelPosition("settlements", pos),
       onClose: () => {
         this.visible = false;
@@ -155,7 +156,7 @@ export class SettlementRosterMenu {
     row.appendChild(nameEl);
 
     const metaEl = document.createElement("div");
-    metaEl.textContent = `(${settlement.q}, ${settlement.r}) · L${settlement.level} · ${settlement.population} pop · ${settlement.gold}g · Morale ${settlement.morale ?? 100}%`;
+    metaEl.textContent = `(${settlement.q}, ${settlement.r}) · L${settlement.level} · ${settlement.population} pop · ${settlement.gold}g · Morale ${Math.round(settlement.morale ?? 100)}%`;
     Object.assign(metaEl.style, {
       fontSize: "11px",
       opacity: "0.85",

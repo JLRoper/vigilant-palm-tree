@@ -1,0 +1,35 @@
+-- Idempotent migration: the hero treasury-cart slot (Phase 1 of the
+-- no-shared-storage / anti-teleport plan,
+-- .plans/20261002-0043_no-shared-storage-caravans-routes_UNCLAIMED.md).
+--
+-- HeroState.treasuryWagons ("treasury carts") is the gold-purse slot,
+-- deliberately SEPARATE from the army wagons that govern resource cargo:
+-- "the hero can carry more gold if they have treasury carts on their
+-- person (they get their own slot, not shared with army slots)".
+-- heroGoldCap = heroTreasuryWagons * 500; heroResourceCap = heroWagons * 50
+-- (packages/engine/src/settlement/capacity.ts).
+--
+-- NULL = the field is ABSENT from HeroState, i.e. a pre-023 hero. The ENGINE
+-- soft-defaults absent -> DEFAULT_TREASURY_WAGONS (5) via heroTreasuryWagons
+-- -- mirroring heroWagons' soft default -- so every legacy hero keeps its
+-- 2,500g purse cap (the deliberate 5-cart <-> CHARTER_GOLD_COST pairing)
+-- with zero churn. No backfill UPDATE: writing a value here would either
+-- zero every live hero's purse (0) or erase the absent/0 distinction that
+-- the engine's soft default depends on.
+--
+-- Why NULLABLE rather than wagons' `INTEGER NOT NULL DEFAULT 5` shape from
+-- 014: 014 materialized the default because the engine then lacked a
+-- soft-default for wagons, so the column had to carry the 5 itself. This
+-- field ships WITH a soft default, so absence is meaningful and must
+-- round-trip: heroRepo writes `hero.treasuryWagons ?? null` and reads a
+-- NULL back as an absent key (the settlementRepo conditional-spread
+-- discipline), the same shape 021's nullable `upkeep_unpaid_since_day`
+-- uses for "absent means the default". An explicit 0 is REAL and common
+-- (a hero recruited from an empty pool, or stripped of its carts) and
+-- round-trips as 0 -> a 0g purse cap.
+--
+-- ADD COLUMN IF NOT EXISTS makes this re-runnable at every boot, same as
+-- 021/022.
+
+ALTER TABLE heroes
+  ADD COLUMN IF NOT EXISTS treasury_wagons INTEGER;

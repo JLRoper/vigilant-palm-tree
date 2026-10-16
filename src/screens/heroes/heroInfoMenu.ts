@@ -1,4 +1,4 @@
-import type { GameState, Player, SettlementState } from "../../state/gameState";
+import type { GameState, HeroState, Player, SettlementId, SettlementState } from "../../state/gameState";
 import type { Hero } from "../../entities/hero";
 import { PopupMenu, menuTheme } from "@screens/shared/menu";
 import { toolbarHeight } from "@screens/shared/panelRail";
@@ -6,9 +6,17 @@ import { DockedPanel } from "@screens/shared/dockedPanel";
 import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayout";
 import type { PanelRect } from "@screens/shared/panelPlacement";
 import { AccordionSection, makeRow } from "@screens/shared/panelWidgets";
+import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
+import {
+  heroLarderTitle,
+  heroUpkeepLabel,
+  heroUpkeepTitle,
+  liveHeroUpkeepCost,
+  liveHeroUpkeepUnfed,
+} from "@screens/shared/heroUpkeepCost";
 import { ArmySection, type ReorderHandler } from "./armySection";
 import { HERO_BANNERS, RESOURCE_PILE_BUBBLY_SPRITES } from "../../render/assetDescriptors";
-import { HERO_BASE_ATTACK, HERO_BASE_DEFENCE, heroCargo, heroGoldCap, heroResourceCap, heroWagons, platoonTroopTotal } from "@heroes/engine";
+import { HERO_BASE_ATTACK, HERO_BASE_DEFENCE, heroCargo, heroGoldCap, heroResourceCap, heroTreasuryWagons, heroWagons } from "@heroes/engine";
 import type { WarehouseResource } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 
@@ -39,6 +47,7 @@ interface HeroPanelDom {
   bannerEl: HTMLImageElement;
   nameEl: HTMLElement;
   goldEl: HTMLElement;
+  foodWrap: HTMLDivElement;
   foodEl: HTMLElement;
   transferRow: HTMLDivElement;
   withdrawBtn: HTMLButtonElement;
@@ -46,6 +55,9 @@ interface HeroPanelDom {
   movementFill: HTMLElement;
   movementLabel: HTMLElement;
   troopsEl: HTMLElement;
+  moraleEl: HTMLSpanElement;
+  upkeepRow: HTMLDivElement;
+  upkeepEl: HTMLSpanElement;
   cargoWagonsEl: HTMLElement;
   cargoEls: Record<string, HTMLSpanElement>;
   statValues: Record<string, HTMLSpanElement>;
@@ -200,6 +212,16 @@ function buildHeroPanelDom(
 
   body.appendChild(movementSection);
 
+  // Always-visible upkeep block. Morale sits outside the Stats & Army
+  // accordion on purpose: it falls for reasons other than unpaid upkeep, and
+  // the accordions are collapsed by default.
+  const { row: moraleRow, value: moraleVal } = makeRow("Morale");
+  body.appendChild(moraleRow);
+
+  // Hidden while this hero pays its way — see SettlementInfoMenu's twin row.
+  const { row: upkeepRow, value: upkeepVal } = makeRow("Upkeep");
+  body.appendChild(upkeepRow);
+
   const cargo = new AccordionSection({ label: "Cargo", onToggle: onSectionToggle });
   cargo.rightEl.textContent = "0 wagons";
   const cargoWagonsEl = cargo.rightEl;
@@ -283,6 +305,7 @@ function buildHeroPanelDom(
     bannerEl,
     nameEl,
     goldEl,
+    foodWrap,
     foodEl,
     transferRow,
     withdrawBtn,
@@ -290,6 +313,9 @@ function buildHeroPanelDom(
     movementFill,
     movementLabel,
     troopsEl,
+    moraleEl: moraleVal,
+    upkeepRow,
+    upkeepEl: upkeepVal,
     cargoWagonsEl,
     cargoEls,
     statValues,
@@ -322,6 +348,7 @@ export class HeroInfoMenu {
       draggable: true,
       zIndex: 60,
       minTop: toolbarHeight,
+      clickToFront: true,
       onMove: (pos) => {
         this.docked.markUserMoved();
         savePanelGeometry("heroInfo", pos);
@@ -418,9 +445,15 @@ export class HeroInfoMenu {
     this.dom.movementFill.style.background =
       remaining <= 0 ? MOVEMENT_BAR_RED : fraction <= 0.25 ? MOVEMENT_BAR_AMBER : MOVEMENT_BAR_GREEN;
     this.dom.movementLabel.textContent = `${shown} / ${MOVEMENT_PER_TURN}`;
-    const troopTotal = platoonTroopTotal(hero.stacks);
-    this.dom.troopsEl.textContent = `${troopTotal} \u00B7 Upkeep: ${troopTotal}g + ${troopTotal} food/wk`;
-    this.dom.troopsEl.title = `Weekly upkeep: ${troopTotal}g from the purse + ${troopTotal} food from cargo; unpaid gold makes troops desert`;
+    const upkeep = liveHeroUpkeepCost(hero.stacks);
+    this.dom.troopsEl.textContent = heroUpkeepLabel(upkeep);
+    this.dom.troopsEl.title = heroUpkeepTitle(upkeep);
+    // The food row is where the "my larder never empties" confusion starts:
+    // the tooltip names the weekly cadence the bill is charged on and how many
+    // weeks the current stock covers.
+    this.dom.foodWrap.title = heroLarderTitle(upkeep, cargoFood, state.day);
+
+    this.updateUpkeep(heroState, state.settlements, state.day);
 
     this.renderCargo(hero, state);
 
@@ -455,6 +488,40 @@ export class HeroInfoMenu {
     this.renderStats(hero);
   }
 
+  // Morale is always on screen; the upkeep row appears only while this hero is
+  // short. Cheap by construction — no allocation, no rebuild, just text writes
+  // on an update() that already runs every frame.
+  private updateUpkeep(
+    heroState: HeroState | undefined,
+    settlements: Record<SettlementId, SettlementState>,
+    day: number,
+  ): void {
+    if (!heroState) {
+      this.dom.moraleEl.textContent = "—";
+      this.dom.upkeepRow.style.display = "none";
+      return;
+    }
+    this.dom.moraleEl.textContent = `${Math.round(heroState.morale)}%`;
+    const sinceDay = heroState.upkeepUnpaidSinceDay;
+    // A weekly streak is only a CURRENT shortfall while the hero still cannot
+    // cover its bill: between the charge that stamped the streak and the next
+    // day-% 7 charge, a restocked larder means the army is fed and this row
+    // would be a stale alarm.
+    if (sinceDay === null || !liveHeroUpkeepUnfed(heroState, settlements)) {
+      this.dom.upkeepRow.style.display = "none";
+      return;
+    }
+    const daysUnpaid = Math.max(0, day - sinceDay);
+    const weeksUnpaid = Math.floor(daysUnpaid / 7);
+    const unfed = heroState.upkeepUnpaidTroops;
+    this.dom.upkeepRow.style.display = "";
+    this.dom.upkeepEl.textContent = `${daysUnpaid}d · ${unfed} troops · ${heroState.upkeepUnpaidGold}g/wk`;
+    this.dom.upkeepEl.title =
+      weeksUnpaid >= DESERTION_AFTER_WEEKS
+        ? `Upkeep unpaid for ${daysUnpaid} days — ${unfed} troops unfed. Troops are deserting.`
+        : `Upkeep unpaid for ${daysUnpaid} days — ${unfed} troops unfed. Troops desert after ${DESERTION_AFTER_WEEKS - weeksUnpaid} more week(s).`;
+  }
+
   // Cargo shows the hero's wagon stockpile: every warehouse resource the hero
   // carries plus the assigned wagon count. Values come from the synced
   // HeroState (helpers backfill legacy saves' missing fields); tooltips carry
@@ -471,8 +538,11 @@ export class HeroInfoMenu {
       el.title = `${r}: ${cargo[r] ?? 0} / ${caps[r]} cap`;
     }
     const wagons = heroWagons(heroState);
-    this.dom.cargoWagonsEl.textContent = `${wagons} wagons`;
-    this.dom.cargoWagonsEl.title = `Gold purse capacity: ${heroGoldCap(heroState)}g`;
+    this.dom.cargoWagonsEl.textContent = `${wagons} cargo wagons`;
+    // Phase 1 treasury-wagons split: the purse cap rides the SEPARATE
+    // treasury-cart slot, so the tooltip names it -- "Gold purse capacity:
+    // 2,500g (5 treasury carts x 500)" reads honestly post-split.
+    this.dom.cargoWagonsEl.title = `Resource capacity: ${caps.wood} per resource via ${wagons} cargo wagons. Gold purse capacity: ${heroGoldCap(heroState)}g via ${heroTreasuryWagons(heroState)} treasury carts.`;
   }
 
   // Wires the four stat rows to real values (spellcasting v1's side effect —

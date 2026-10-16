@@ -28,6 +28,31 @@ if (errors > 0) {
 
 console.log(`  All ${SPRITE_FILES.length} registered sprites present.\n`);
 
+// Building sprite keys are generated from the PNGs on disk; drift means the
+// committed list and the art folder disagree (a blank tile or dead art).
+console.log("Validating generated building sprite keys...\n");
+{
+  const genTool = fileURLToPath(new URL("./gen-building-sprite-keys.mjs", import.meta.url));
+  const res = spawnSync(process.execPath, [genTool, "--check"], { stdio: "inherit" });
+  if (res.error || res.status !== 0) {
+    errors++;
+  }
+  console.log("");
+}
+
+// The anchor overrides are measured from the same PNGs. Drift here means a
+// sprite has been added or regenerated without re-measuring its bottom pad, so
+// it would sit off its cell's south vertex.
+console.log("Validating generated building anchor overrides...\n");
+{
+  const genTool = fileURLToPath(new URL("./gen-building-anchors.mjs", import.meta.url));
+  const res = spawnSync(process.execPath, [genTool, "--check"], { stdio: "inherit" });
+  if (res.error || res.status !== 0) {
+    errors++;
+  }
+  console.log("");
+}
+
 const horseRoot = join(process.cwd(), "src", "resources", "units", "horse");
 const tuneTool = fileURLToPath(new URL("./tune-run-frames.mjs", import.meta.url));
 const pairs = [];

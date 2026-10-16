@@ -16,7 +16,6 @@ import {
   advanceRound,
   markSaved,
   transferGold,
-  tradeResources,
   setAutoTrade,
   runAutoTrade,
   reorderStack,
@@ -29,14 +28,48 @@ import {
   type HeroId,
   type GamePhase,
 } from "../../src/state/gameState";
+import { foodRequired, MORALE_RECOVERY_PER_SUPPLIED_TURN } from "@heroes/engine";
 import { normalizePlatoons } from "../../src/state/units";
+import {
+  DESERT_COST_SHARE,
+  DESERT_GRACE_WEEKS,
+  MORALE_UNPAID_LOSS_MAX,
+  desertionGateOpen,
+  evaluateTroopUpkeep,
+  platoonTroopTotal,
+  unpaidMoraleLoss,
+  weeksUnpaid,
+  type UnitType,
+} from "@heroes/engine";
+import { makeHero as makeFixtureHero } from "../charter/_helpers";
+import type { Platoon } from "@heroes/contracts";
+
+function upkeepUnit(id: string, upkeepGold: number, upkeepFood: number): UnitType {
+  return {
+    id,
+    name: id,
+    attack: 1,
+    defence: 1,
+    health: 1,
+    speed: 1,
+    description: "",
+    advantageType: "infantry",
+    specialty: "",
+    specialtyPriority: 0,
+    upkeepGold,
+    upkeepFood,
+  };
+}
 
 function makePlayer(id: PlayerId, faction: Player["faction"], name: string, heroIds: HeroId[], settlementIds: string[]): Player {
   return { id, faction, name, heroIds, settlementIds };
 }
 
 function makeHero(id: HeroId, ownerId: PlayerId, q: number, r: number, movementRemaining = MOVEMENT_PER_TURN, gold = 0, troops = 1): HeroState {
-  return { id, name: id, ownerId, q, r, movementRemaining, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q, r }], gold, troops, stacks: troops > 0 ? normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: troops }] }]) : [], isChartering: false, charterId: null };
+  // The upkeep-shortfall trio defaults to paid up (morale 100, no streak), which
+  // is what every hero the engine creates actually looks like -- a fixture that
+  // omitted them would run upkeep against `morale: undefined`.
+  return { id, name: id, ownerId, q, r, movementRemaining, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q, r }], gold, troops, stacks: troops > 0 ? normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: troops }] }]) : [], isChartering: false, charterId: null, morale: 100, upkeepUnpaidSinceDay: null, upkeepUnpaidTroops: 0, upkeepUnpaidGold: 0 };
 }
 
 function emptyWarehouse() {
@@ -50,6 +83,9 @@ function makeSettlement(
   r: number,
   opts: Partial<Pick<SettlementState, "population" | "goldTax" | "gold" | "resourceRates" | "morale" | "autoTrade" | "warehouse">> = {},
 ): SettlementState {
+  // The garrison-unpaid trio defaults to paid up, matching every settlement the
+  // engine creates; a fixture that omitted them would run garrison upkeep with
+  // `garrisonUnpaidSinceDay: undefined`.
   return {
     id,
     ownerId,
@@ -63,6 +99,9 @@ function makeSettlement(
     gold: opts.gold ?? 0,
     warehouse: opts.warehouse ?? emptyWarehouse(),
     morale: opts.morale ?? 100,
+    garrisonUnpaidSinceDay: null,
+    garrisonUnpaidTroops: 0,
+    garrisonUnpaidGold: 0,
     autoTrade: opts.autoTrade ?? true,
     buildings: [],
   };
@@ -533,6 +572,49 @@ test("transferGold withdraw moves all settlement treasury to hero purse", () => 
   }
 });
 
+test("transferGold withdraw clamps to the treasury-cart purse headroom; the excess STAYS in the treasury", () => {
+  // Phase 1 heroGoldCap enforcement: this was one of the two uncapped gold
+  // sites. The hero holds 2,400g of a 2,500g purse cap (the 5-cart soft
+  // default), so an 800g treasury can only hand over 100g.
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 2400), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2, { gold: 800 }), makeSettlement("s1", 1, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s0", "withdraw");
+  assert.equal(next.ok, true);
+  if (next.ok) {
+    assert.equal(next.state.heroes.h0.gold, 2500, "credited exactly to the purse cap, never above it");
+    assert.equal(next.state.settlements.s0.gold, 700, "the clamped excess stays in the settlement treasury -- not destroyed");
+  }
+});
+
+test("transferGold withdraw rejects purse_full when the hero is at its cap", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, 7, 2500), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2, { gold: 800 }), makeSettlement("s1", 1, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s0", "withdraw");
+  assert.equal(next.ok, false);
+  if (!next.ok) {
+    assert.equal(next.reason, "purse_full");
+    assert.equal(next.state.settlements.s0.gold, 800, "nothing moved");
+    assert.equal(next.state.heroes.h0.gold, 2500);
+  }
+});
+
+test("transferGold withdraw against a 0-cart hero (explicit treasuryWagons: 0 = a 0g purse cap) is purse_full", () => {
+  const s = makeState({
+    heroes: [{ ...makeHero("h0", 0, 2, 2, 7, 0), treasuryWagons: 0 }, makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2, { gold: 800 }), makeSettlement("s1", 1, 18, 4)],
+  });
+  const next = transferGold(s, "h0", "s0", "withdraw");
+  assert.equal(next.ok, false);
+  if (!next.ok) {
+    assert.equal(next.reason, "purse_full", "an explicit 0 carts is a real 0g cap, not the absent-field soft default");
+    assert.equal(next.state.settlements.s0.gold, 800);
+  }
+});
+
 test("transferGold rejects when hero is not at settlement tile", () => {
   const s = makeState({
     heroes: [makeHero("h0", 0, 5, 5, 7, 50), makeHero("h1", 1, 18, 4)],
@@ -614,24 +696,184 @@ test("applyEndOfTurn does not award gold to non-active-player settlements", () =
   assert.equal(next.settlements.s1.gold, 50);
 });
 
-test("applyWeeklyUpkeep deducts cost when hero can pay", () => {
-  const s = makeState({
-    heroes: [makeHero("h0", 0, 2, 2, 7, 100, 10), makeHero("h1", 1, 18, 4, 7, 5, 3)],
-  });
-  const next = applyWeeklyUpkeep(s, 0.1);
-  assert.equal(next.heroes.h0.gold, 90);
+// ── Weekly troop upkeep (morale / shortfall / desertion) ───────────────────
+// `applyWeeklyUpkeep` is a thin state-level wrapper: it threads day/round/
+// castleSeed into the shared rule in
+// packages/engine/src/economy/troopUpkeep.ts and runs it over BOTH heroes and
+// garrisons. These tests pin the wrapper, so every expectation is derived from
+// the engine's own exported helpers (evaluateTroopUpkeep / weeksUnpaid /
+// desertionGateOpen / unpaidMoraleLoss and the DESERT_* / MORALE_* constants)
+// rather than re-implementing the math here — a second copy of the formula in
+// the test is exactly how the old "100% of the shortfall deserts troops" pin
+// survived the rule change unnoticed.
+
+const UPKEEP_UNIT_TYPES: Record<string, UnitType> = {
+  peasant: upkeepUnit("peasant", 1, 1),
+  swordsman: upkeepUnit("swordsman", 2, 1),
+  eagle_prince: upkeepUnit("eagle_prince", 10, 3),
+};
+
+interface UpkeepHeroOpts {
+  stacks: Platoon[];
+  gold?: number;
+  food?: number;
+  morale?: number;
+  unpaidSinceDay?: number | null;
+  unpaidTroops?: number;
+  unpaidGold?: number;
+}
+
+function upkeepHero(opts: UpkeepHeroOpts, id = "h0"): HeroState {
+  return {
+    ...makeFixtureHero(id, 0, 2, 2, {
+      stacks: opts.stacks,
+      troops: platoonTroopTotal(opts.stacks),
+      gold: opts.gold ?? 0,
+      morale: opts.morale ?? 100,
+      upkeepUnpaidSinceDay: opts.unpaidSinceDay ?? null,
+      upkeepUnpaidTroops: opts.unpaidTroops ?? 0,
+      upkeepUnpaidGold: opts.unpaidGold ?? 0,
+    }),
+    resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: opts.food ?? 0 },
+  };
+}
+
+// One weekly charge at `day`, threading the previous charge's result forward
+// the way the engine's round tick does.
+function chargeUpkeep(state: GameState, day: number): GameState {
+  return applyWeeklyUpkeep({ ...state, day }, 0.1, UPKEEP_UNIT_TYPES);
+}
+
+function weeklyBill(stacks: readonly Platoon[]): { costGold: number; costFood: number } {
+  const evaluated = evaluateTroopUpkeep(stacks, UPKEEP_UNIT_TYPES, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+  return { costGold: evaluated.costGold, costFood: evaluated.costFood };
+}
+
+function stacksCostGold(stacks: readonly Platoon[]): number {
+  return weeklyBill(stacks).costGold;
+}
+
+test("applyWeeklyUpkeep charges a funded hero's weekly gold and food bill and clears the shortfall", () => {
+  const stacks: Platoon[] = [{ entries: [{ unitTypeId: "swordsman", count: 10 }] }];
+  const hero = upkeepHero({ stacks, gold: 100, food: 100, morale: 71, unpaidSinceDay: 3, unpaidTroops: 4, unpaidGold: 8 });
+  const bill = weeklyBill(stacks);
+  assert.deepEqual(bill, { costGold: 20, costFood: 10 }, "10 tier-2 swordsmen: 2 gold + 1 food each");
+
+  const next = chargeUpkeep(makeState({ heroes: [hero] }), 7);
+  assert.equal(next.heroes.h0.gold, 100 - bill.costGold);
+  assert.equal(next.heroes.h0.resources?.food, 100 - bill.costFood);
   assert.equal(next.heroes.h0.troops, 10);
-  assert.equal(next.heroes.h1.gold, 2);
-  assert.equal(next.heroes.h1.troops, 3);
+  assert.equal(platoonTroopTotal(next.heroes.h0.stacks), 10);
+  assert.equal(next.heroes.h0.morale, 71, "a paid charge neither costs nor restores morale");
+  assert.equal(next.heroes.h0.upkeepUnpaidSinceDay, null, "paying up clears the streak");
+  assert.equal(next.heroes.h0.upkeepUnpaidTroops, 0);
+  assert.equal(next.heroes.h0.upkeepUnpaidGold, 0);
 });
 
-test("applyWeeklyUpkeep sets gold to 0 and troops to previous gold when hero cannot pay", () => {
-  const s = makeState({
-    heroes: [makeHero("h0", 0, 2, 2, 7, 3, 10)],
-  });
-  const next = applyWeeklyUpkeep(s, 0.1);
-  assert.equal(next.heroes.h0.gold, 0);
-  assert.equal(next.heroes.h0.troops, 3);
+test("applyWeeklyUpkeep leaves a second, funded hero untouched when it can also pay", () => {
+  const stacks: Platoon[] = [{ entries: [{ unitTypeId: "peasant", count: 3 }] }];
+  const hero = upkeepHero({ stacks, gold: 5, food: 10 }, "h1");
+  const bill = weeklyBill(stacks);
+  const next = chargeUpkeep(makeState({ heroes: [hero] }), 7);
+  assert.equal(next.heroes.h1.gold, 5 - bill.costGold);
+  assert.equal(next.heroes.h1.troops, 3);
+  assert.equal(next.heroes.h1.morale, 100);
+  assert.equal(next.heroes.h1.upkeepUnpaidSinceDay, null);
+});
+
+test("an unpaid weekly charge spends what is there, stamps the streak, and costs morale without losing troops", () => {
+  // 10 swordsmen owe 20 gold / 10 food; the purse holds 3 and the wagon holds 0.
+  const stacks: Platoon[] = [{ entries: [{ unitTypeId: "swordsman", count: 10 }] }];
+  const hero = upkeepHero({ stacks, gold: 3, food: 0 });
+  const before = evaluateTroopUpkeep(stacks, UPKEEP_UNIT_TYPES, hero.gold, 0);
+  assert.equal(before.costGold, 20);
+  assert.equal(before.unfed, 10, "the empty larder starves the whole army, not just what 3 gold covers");
+  assert.equal(before.unfedCostGold, 20);
+
+  const next = chargeUpkeep(makeState({ heroes: [hero] }), 7);
+  assert.equal(next.heroes.h0.gold, 0, "no debt is carried across charges; the purse just runs dry");
+  assert.equal(next.heroes.h0.resources?.food, 0);
+  assert.equal(next.heroes.h0.troops, 10, "week 1 of a streak never loses a soldier");
+  assert.equal(
+    next.heroes.h0.morale,
+    100 - unpaidMoraleLoss(before.unfedCostGold, before.costGold),
+    "the morale bleed scales with the value that went unpaid",
+  );
+  assert.equal(next.heroes.h0.morale, 100 - MORALE_UNPAID_LOSS_MAX, "a fully unfed army bleeds the ceiling");
+  assert.equal(next.heroes.h0.upkeepUnpaidSinceDay, 7, "the streak is stamped with the FIRST unpaid charge");
+  assert.equal(next.heroes.h0.upkeepUnpaidTroops, before.unfed);
+  assert.equal(next.heroes.h0.upkeepUnpaidGold, before.unfedCostGold);
+  assert.equal(weeksUnpaid(7, next.heroes.h0.upkeepUnpaidSinceDay), 0);
+  assert.equal(desertionGateOpen(7, next.heroes.h0.upkeepUnpaidSinceDay), false);
+});
+
+test("the second unpaid weekly charge is still grace: morale bleeds, troops stay", () => {
+  const stacks: Platoon[] = [{ entries: [{ unitTypeId: "swordsman", count: 10 }] }];
+  const first = chargeUpkeep(makeState({ heroes: [upkeepHero({ stacks, gold: 3, food: 0 })] }), 7);
+  assert.equal(weeksUnpaid(14, first.heroes.h0.upkeepUnpaidSinceDay), 1);
+  assert.equal(desertionGateOpen(14, first.heroes.h0.upkeepUnpaidSinceDay), false);
+
+  const second = chargeUpkeep(first, 14);
+  assert.equal(second.heroes.h0.troops, 10, "week 2 is the last grace week");
+  assert.equal(platoonTroopTotal(second.heroes.h0.stacks), 10);
+  assert.equal(second.heroes.h0.morale, 100 - 2 * MORALE_UNPAID_LOSS_MAX);
+  assert.equal(second.heroes.h0.upkeepUnpaidSinceDay, 7, "the streak start is never moved forward");
+  assert.equal(second.heroes.h0.upkeepUnpaidGold, 20);
+  assert.equal(weeksUnpaid(21, second.heroes.h0.upkeepUnpaidSinceDay), DESERT_GRACE_WEEKS);
+});
+
+test("the third unpaid weekly charge is the first to desert, and only by the cost-based share", () => {
+  const stacks: Platoon[] = [{ entries: [{ unitTypeId: "swordsman", count: 10 }] }];
+  const third = chargeUpkeep(
+    chargeUpkeep(chargeUpkeep(makeState({ heroes: [upkeepHero({ stacks, gold: 3, food: 0 })] }), 7), 14),
+    21,
+  );
+  const hero = third.heroes.h0;
+  assert.equal(hero.upkeepUnpaidSinceDay, 7, "the streak start survives the desertion");
+  assert.equal(weeksUnpaid(21, hero.upkeepUnpaidSinceDay), DESERT_GRACE_WEEKS);
+  assert.equal(desertionGateOpen(21, hero.upkeepUnpaidSinceDay), true);
+
+  const bill = weeklyBill(stacks).costGold;
+  const removedCost = bill - stacksCostGold(hero.stacks);
+  const target = Math.ceil(DESERT_COST_SHARE * hero.upkeepUnpaidGold);
+  assert.equal(hero.upkeepUnpaidGold, 20, "the whole army is still unfed on the third charge");
+  assert.equal(target, 4, "20% of a 20-gold deficit");
+  assert.ok(removedCost >= target, `removed cost ${removedCost} reached the ${target} target`);
+  // The draw may stop on the first unit that covers the target, so the only
+  // bound available is the cost of one unit (2 gold per swordsman here).
+  assert.ok(removedCost <= target + 2, `removed cost ${removedCost} overshot by more than one swordsman`);
+  assert.ok(hero.troops < 10, "somebody walked");
+  assert.equal(platoonTroopTotal(hero.stacks), hero.troops, "the troops scalar stays consistent with the stacks");
+  for (const platoon of hero.stacks) {
+    for (const entry of platoon.entries) assert.equal(Number.isInteger(entry.count), true, "no fractional troop count");
+  }
+  assert.equal(hero.morale, 100 - 3 * MORALE_UNPAID_LOSS_MAX);
+  assert.equal(hero.gold, 0);
+});
+
+test("an expensive unpaid unit costs more desertion than a cheap one for the same deficit", () => {
+  // 1 Eagle Prince (10 gold) + 20 peasants (1 gold) = 30 gold owed. A purse of
+  // 20 buys every peasant and no Eagle Prince, so ONE troop is unfed and the
+  // deficit is the Eagle Prince's 10 gold — 20% of that is 2, which one
+  // Eagle Prince already covers, whereas 20% of the 1-gold shortfall would
+  // have cost two peasants.
+  const stacks: Platoon[] = [
+    { entries: [{ unitTypeId: "peasant", count: 20 }] },
+    { entries: [{ unitTypeId: "eagle_prince", count: 1 }] },
+  ];
+  const hero = upkeepHero({ stacks, gold: 20, food: 100, unpaidSinceDay: 7 });
+  const evaluated = evaluateTroopUpkeep(stacks, UPKEEP_UNIT_TYPES, hero.gold, hero.resources?.food ?? 0);
+  assert.equal(evaluated.costGold, 30);
+  assert.equal(evaluated.unfed, 1);
+  assert.equal(evaluated.unfedCostGold, 10, "the purse runs out at the top of the bill");
+
+  const after = chargeUpkeep(makeState({ heroes: [hero] }), 21);
+  const removedCost = weeklyBill(stacks).costGold - stacksCostGold(after.heroes.h0.stacks);
+  assert.equal(Math.ceil(DESERT_COST_SHARE * 10), 2);
+  assert.ok(removedCost >= 2, `removed cost ${removedCost} reached the cost-based target`);
+  assert.ok(removedCost <= 12, `removed cost ${removedCost} overshot by more than one Eagle Prince`);
+  assert.ok(after.heroes.h0.troops >= 15, `the army is bled, not wiped: ${after.heroes.h0.troops}`);
+  assert.equal(platoonTroopTotal(after.heroes.h0.stacks), after.heroes.h0.troops);
 });
 
 test("applyWeeklyUpkeep is no-op when hero has 0 troops and 0 gold", () => {
@@ -669,83 +911,49 @@ test("advanceRound does not fire applyWeeklyUpkeep on non-week days", () => {
   assert.equal(next.heroes.h0.troops, 10);
 });
 
-test("tradeResources moves resources between same-owner settlements and charges gold", () => {
-  const s = makeState({
+// Bank pots: interest accrues on the weekly branch and a 7-day withdrawal
+// matures on its own day (the daily tick), both wired in turn/round.ts.
+function bankState(day: number, pot: { gold: number; pendingOut: { gold: number; maturesOnDay: number }[] }) {
+  const base = makeState({
+    round: day,
+    day,
+    phase: { kind: "ROUND_END", nextRound: day + 1 },
     settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
-      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
+      { ...makeSettlement("s0", 0, 2, 2), buildings: [{ gx: 1, gy: 1, kind: "bank" as const, level: 1, style: "classic" as const, bank: pot }] },
       makeSettlement("s1", 1, 18, 4),
     ],
   });
-  const next = tradeResources(s, "s0", "s0b", "wood", 3);
-  assert.equal(next.ok, true);
-  if (next.ok) {
-    assert.equal(next.state.settlements.s0.warehouse.wood, 7);
-    assert.equal(next.state.settlements.s0.gold, 97);
-    assert.equal(next.state.settlements.s0b.warehouse.wood, 3);
-    assert.equal(next.state.dirty, true);
-  }
+  return base;
+}
+
+test("advanceRound accrues bank interest exactly on the day-7 boundary", () => {
+  const before = advanceRound(bankState(5, { gold: 1000, pendingOut: [] }), 0.1);
+  assert.equal(before.day, 6);
+  assert.equal(before.settlements.s0.buildings[0].bank?.gold, 1000, "no interest off the weekly branch");
+  const onDay7 = advanceRound(before, 0.1);
+  assert.equal(onDay7.day, 7);
+  assert.equal(onDay7.settlements.s0.buildings[0].bank?.gold, 1050, "5% of the pot on day 7");
+  const day8 = advanceRound(onDay7, 0.1);
+  assert.equal(day8.day, 8);
+  assert.equal(day8.settlements.s0.buildings[0].bank?.gold, 1050, "and not again the next day");
 });
 
-test("tradeResources rejects when settlements have different owners", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
-      { ...makeSettlement("s1", 1, 18, 4, { gold: 100 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
-    ],
-  });
-  const next = tradeResources(s, "s0", "s1", "wood", 2);
-  assert.equal(next.ok, false);
-  if (!next.ok) assert.equal(next.reason, "different_owners");
+test("advanceRound matures a bank withdrawal on day + 7 and not before", () => {
+  const requested = bankState(10, { gold: 1000, pendingOut: [{ gold: 400, maturesOnDay: 17 }] });
+  const day11 = advanceRound(requested, 0.1);
+  assert.equal(day11.settlements.s0.gold, 0, "not spendable while pending");
+  assert.equal(day11.settlements.s0.buildings[0].bank?.pendingOut.length, 1);
+  // Days 12..17: advance six more times, still pending until the 7th day.
+  let s = day11;
+  for (let i = 0; i < 5; i++) s = advanceRound(s, 0.1);
+  assert.equal(s.day, 16);
+  assert.equal(s.settlements.s0.gold, 0);
+  const matured = advanceRound(s, 0.1);
+  assert.equal(matured.day, 17);
+  assert.equal(matured.settlements.s0.gold, 400, "lands in the treasury on its maturity day");
+  assert.deepEqual(matured.settlements.s0.buildings[0].bank?.pendingOut, []);
 });
 
-test("tradeResources rejects when from settlement has insufficient resource", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 1, stone: 0, iron: 0, arcane: 0 } },
-      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
-    ],
-  });
-  const next = tradeResources(s, "s0", "s0b", "wood", 5);
-  assert.equal(next.ok, false);
-  if (!next.ok) assert.equal(next.reason, "insufficient_resource");
-});
-
-test("tradeResources rejects when from settlement has insufficient gold", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { gold: 1 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
-      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
-    ],
-  });
-  const next = tradeResources(s, "s0", "s0b", "wood", 5);
-  assert.equal(next.ok, false);
-  if (!next.ok) assert.equal(next.reason, "insufficient_gold");
-});
-
-test("tradeResources rejects when either settlement is unowned (neutral)", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
-      { ...makeSettlement("sN", null, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
-    ],
-  });
-  const next = tradeResources(s, "s0", "sN", "wood", 1);
-  assert.equal(next.ok, false);
-  if (!next.ok) assert.equal(next.reason, "unowned_settlement");
-});
-
-test("tradeResources rejects non-positive or non-integer amount", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { gold: 100 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0 } },
-      { ...makeSettlement("s0b", 0, 3, 3, { gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0 } },
-    ],
-  });
-  assert.equal(tradeResources(s, "s0", "s0b", "wood", 0).ok, false);
-  assert.equal(tradeResources(s, "s0", "s0b", "wood", -3).ok, false);
-  assert.equal(tradeResources(s, "s0", "s0b", "wood", 1.5).ok, false);
-});
 test("applyEndOfTurn consumes food from the warehouse for the active player", () => {
   const s = makeState({
     settlements: [
@@ -771,6 +979,22 @@ test("applyEndOfTurn decays morale when food missing", () => {
   assert.ok((next.settlements.s0.morale ?? 100) >= 0);
 });
 
+test("applyEndOfTurn does not charge food morale decay to a settlement holding exactly its food requirement", () => {
+  // The exact-food case the pre-consumption morale fix exists for: population 500
+  // needs 5 food and the larder holds exactly 5. Reading morale off the
+  // POST-consumption settlement (food now 0) charged a full -10 for being fed.
+  const s = makeState({
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 5 } },
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  assert.equal(foodRequired(s.settlements.s0), 5, "the fixture is exactly fed, not over- or under-fed");
+  const next = applyEndOfTurn(s);
+  assert.equal(next.settlements.s0.warehouse.food, 0, "the exact requirement is still consumed");
+  assert.equal(next.settlements.s0.morale, 100, "being exactly fed costs no morale");
+});
+
 test("applyEndOfTurn awards effective income scaled by morale", () => {
   const s = makeState({
     settlements: [
@@ -779,7 +1003,10 @@ test("applyEndOfTurn awards effective income scaled by morale", () => {
     ],
   });
   const next = applyEndOfTurn(s);
-  assert.equal(next.settlements.s0.gold, 250);
+  // Fully supplied, so morale recovers 50 -> 54 BEFORE income is scaled, and the
+  // income reads that post-recovery morale: 500 * 1 * 54/100 = 270, not a flat 250.
+  assert.equal(next.settlements.s0.morale, 50 + MORALE_RECOVERY_PER_SUPPLIED_TURN);
+  assert.equal(next.settlements.s0.gold, 270);
 });
 
 test("applyEndOfTurnDetailed returns transfers array alongside state", () => {
@@ -796,16 +1023,29 @@ test("applyEndOfTurnDetailed returns transfers array alongside state", () => {
   assert.equal(detail.state.settlements.s0b.warehouse.wood, 0);
 });
 
-test("runAutoTrade returns no transfers when all warehouses are stocked", () => {
-  const s = makeState({
-    settlements: [
-      { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 10 }), warehouse: { wood: 10, stone: 0, iron: 0, arcane: 0, food: 5 }, morale: 100, autoTrade: true },
-      { ...makeSettlement("s0b", 0, 3, 3, { population: 500, goldTax: 1, gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 5 }, morale: 100, autoTrade: true },
-      makeSettlement("s1", 1, 18, 4),
-    ],
-  });
-  const result = runAutoTrade(s.settlements, 0);
-  assert.equal(result.transfers.length, 0);
+test("runAutoTrade honours the legacy gate: absent flag ON, explicit false moves nothing", () => {
+  // The donor/deficit fixture that fires below the gate: a hungry sibling, a
+  // gold-holding source with exportable surplus.
+  const settlements = () =>
+    makeState({
+      settlements: [
+        { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 100 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 20 }, morale: 100, autoTrade: true },
+        { ...makeSettlement("s0b", 0, 3, 3, { population: 500, goldTax: 1, gold: 0 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 }, morale: 100, autoTrade: true },
+        makeSettlement("s1", 1, 18, 4),
+      ],
+    });
+  // Existing-save shape: the flag is absent on pre-2026-10-02 rows and runAutoTrade's
+  // optional third parameter resolves it true -- instant auto-trade fires.
+  const legacy = runAutoTrade(settlements().settlements, 0);
+  assert.equal(legacy.transfers.length, 1);
+  assert.equal(legacy.transfers[0].amount, 5);
+  // New-game shape: POST /games writes lobby.legacyAutoTrade = false and the
+  // EndTurn command case threads that boolean down -- nothing moves.
+  const gated = runAutoTrade(settlements().settlements, 0, false);
+  assert.equal(gated.transfers.length, 0);
+  assert.equal(gated.settlements.s0.warehouse.food, 20, "the donor keeps its surplus");
+  assert.equal(gated.settlements.s0.gold, 100);
+  assert.equal(gated.settlements.s0b.warehouse.food, 0, "the deficit goes unfilled by the gate");
 });
 
 test("setAutoTrade toggles a settlement's autoTrade flag", () => {

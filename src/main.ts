@@ -1,11 +1,13 @@
 import { GameEngine } from "./managers/GameEngine";
 import "./screens";
 import { createHomeView } from "@screens/home/homeView";
+import { attachToolbarTheme } from "./screens/shared/toolbarTheme";
 import type { Game } from "./io/api";
 
 const engine = new GameEngine();
 
 async function start(): Promise<void> {
+  attachToolbarTheme();
   await engine.init();
   await engine.initBackend();
 
@@ -16,8 +18,7 @@ async function start(): Promise<void> {
       void engine.fullFrame();
     },
     onLoadGame: async (loaded: Game) => {
-      const tiles = await engine.sessions.getTilesForGame(loaded);
-      await engine.sessions.loadGame(loaded, tiles);
+      await engine.sessions.loadGame(loaded);
       engine.refreshToolbarAndFrame();
     },
     onEnterGame: () => {

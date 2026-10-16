@@ -1,0 +1,7 @@
+Isometric pixel art game asset for a medieval city-builder, matching the attached reference image exactly in style: same chunky pixel size, same 2:1 dimetric isometric projection (standard 30° angle), same thick dark-brown outlines around every shape, same mountain-hold palette of cool steel-blue and iron-gray stone with warm gold trim and ember-orange forge light, transparent background, square 1:1 canvas.
+
+Subject: the dwarven clan forge hall at its final level 3: a mighty fortress-forge of iron-gray masonry rising three stories, a crenellated corner turret fused with a colossal square stone chimney breathing ember sparks, a great arched forge mouth glowing ember-orange behind gold-iron strapped doors, steep steel-blue slate roofs, a tall gold hammer sigil banner on a pole by the door.
+
+Plot: a square 20x20 meter lot shown as a diamond, topped with light sandy ground with darker speckles and a few tiny grass tufts, and a thin darker soil slab visible along the front two edges. The fortress-forge covers about 50% of the footprint, set slightly back of center; in the yard sit a gold-trimmed anvil on a stump, two neat stacks of steel ingots, and a small coal pile.
+
+Single centered asset, nothing outside the plot, clean pixel-art shading, no anti-aliasing halos, no text, no watermark.

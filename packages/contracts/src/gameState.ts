@@ -1,4 +1,5 @@
 import type { BuildingKind } from "./buildings";
+import type { FactionId } from "./factions";
 import type { CharterId, Faction, HeroId, HorseVariantId, PlayerId, SettlementId } from "./ids";
 import type { ResourceType, Warehouse, WarehouseResource } from "./resources";
 import type { CharterState, SettlementState } from "./settlement";
@@ -20,11 +21,22 @@ export interface Player {
   color: string;
   heroIds: HeroId[];
   settlementIds: SettlementId[];
+  // ── Roster faction (faction-registry foundation) ──
+  // The seat's playable faction — deliberately NOT the `faction` above,
+  // which is the player|ai turn machinery. Optional so legacy JSONB rows
+  // stay valid; absent reads as "human" (engine playerFactionId).
+  factionId?: FactionId;
   // ── Wagon pool (docs/wagons-stockpiles-trade-routes-plan.md §5.1) ──
   // Optional + helper-accessed so legacy saves and old JSONB rows stay
   // valid; new wagons default via DEFAULT_HERO_WAGONS/player helpers.
   wagonsOwned?: number;
   wagonsUnassigned?: number;
+  // Treasury-cart pool (Phase 1 treasury-wagons split): the gold-carrying
+  // slot's own pool, mirroring the cargo pool above field-for-field.
+  // Optional + helper-accessed (playerTreasuryWagonsOwned/Unassigned) so
+  // legacy saves stay valid; starting players carry 5/0.
+  treasuryWagonsOwned?: number;
+  treasuryWagonsUnassigned?: number;
 }
 
 export interface HeroState {
@@ -59,19 +71,45 @@ export interface HeroState {
   // The one spell this hero knows (null = spellcaster-less hero; v1 seeds
   // every hero with "magic_arrow").
   heroSpell: SpellId | null;
+  // ── Upkeep shortfall (weekly upkeep pass) ──
+  /** 0..100, the hero-side morale analogue of SettlementState.morale. 100 = content. */
+  morale: number;
+  /**
+   * Calendar day of the FIRST weekly upkeep charge this hero could not pay.
+   * null means paid up; it is never reset downward while a shortfall runs, so
+   * a long-unfed hero accumulates a visible streak.
+   */
+  upkeepUnpaidSinceDay: number | null;
+  /** How many troops are currently unfed (unpaid gold, or no food). */
+  upkeepUnpaidTroops: number;
+  /** The weekly gold cost attributable to those unfed troops (the deficit magnitude). */
+  upkeepUnpaidGold: number;
   // ── Wagons & cargo (docs/wagons-stockpiles-trade-routes-plan.md §4.2/§5.1) ──
   // Optional + helper-accessed (heroWagons/heroCargo) so legacy saves stay
-  // valid; DEFAULT_HERO_WAGONS applies when absent.
+  // valid; DEFAULT_HERO_WAGONS applies when absent. `wagons` governs the
+  // RESOURCE cargo cap only (heroResourceCap).
   wagons?: number;
+  // Treasury carts (Phase 1 treasury-wagons split): the gold-purse slot,
+  // deliberately NOT shared with army wagons ("the hero can carry more gold
+  // if they have treasury carts on their person (they get their own slot,
+  // not shared with army slots)"). Optional + helper-accessed
+  // (heroTreasuryWagons) so legacy saves stay valid; DEFAULT_TREASURY_WAGONS
+  // (5) applies when absent, preserving the 5-cart <-> 2,500g-charter
+  // pairing for every pre-split hero.
+  treasuryWagons?: number;
   resources?: Warehouse;
 }
 
 export type GamePhase =
   | { kind: "PLAYER_TURN"; playerId: PlayerId }
   | { kind: "AI_TURN"; playerId: PlayerId }
+  // Never persisted as a phase, but re-derived at hydrate from
+  // games.lobby.pendingBattle when a server-offered battle awaits its
+  // defender (BattleOffered).
   | { kind: "BATTLE"; attackerId: HeroId; defenderId: HeroId }
-  // Client-only (like BATTLE): a manual settlement-garrison battle in
-  // flight; the server never persists this phase.
+  // Client-only (never persisted as a phase, like BATTLE): a manual
+  // settlement-garrison battle in flight; the server never persists this
+  // phase.
   | { kind: "SETTLEMENT_BATTLE"; attackerId: HeroId; settlementId: SettlementId }
   | { kind: "ROUND_END"; nextRound: number };
 
@@ -87,15 +125,56 @@ export interface CaravanState {
 
 export type TradeRouteId = string;
 
-/** One trade route: a same-owner settlement pair, one resource, a wagon count, and its physical caravan. */
+/**
+ * One end of a trade route: a settlement or a hero. Settlement ids and hero
+ * ids are disjoint namespaces (`s{n}` / `h{n}`), so `kind` is the only
+ * discriminator a route ever needs. Heroes move and can die; the endpoint is
+ * an id, never a position -- resolvers (engine `endpointTile`/`endpointOwner`)
+ * read the live position/owner per use.
+ */
+export type TradeRouteEndpoint =
+  | { kind: "settlement"; id: SettlementId }
+  | { kind: "hero"; id: HeroId };
+
+/**
+ * What a route's caravan carries. "resource" is a cargo caravan hauling one
+ * non-gold warehouse resource; "gold" is a treasure caravan hauling gold.
+ * `CaravanState.cargo` holds units-of-resource for the former and gold for
+ * the latter -- one number field, two units, discriminated here.
+ */
+export type TradeRoutePayload =
+  | { kind: "resource"; resource: WarehouseResource }
+  | { kind: "gold" };
+
+/**
+ * One trade route: a same-owner endpoint pair (settlement or hero, any
+ * direction), one payload (a warehouse resource for a cargo caravan, gold
+ * for a treasure caravan), a wagon count drawn from the player's unassigned
+ * pool, and its physical caravan.
+ */
 export interface TradeRouteState {
   id: TradeRouteId;
-  fromSettlementId: SettlementId;
-  toSettlementId: SettlementId;
-  resource: WarehouseResource;
+  from: TradeRouteEndpoint;
+  to: TradeRouteEndpoint;
+  payload: TradeRoutePayload;
   wagons: number;
   /** null while the caravan is at the origin, loading. */
   caravan: CaravanState | null;
+  /**
+   * The seat that created and owns the route (stamped at creation, replayed
+   * from TradeRouteCreated's actor, backfilled at hydration from the raw row
+   * then the FROM then the TO endpoint's owner). Optional so legacy JSONB
+   * rows stay valid; absent reads as the FROM endpoint's live owner. Removal
+   * and the daily advance gate on this field first so a route stays its true
+   * owner's property — and removable by them — even when the origin endpoint
+   * dies or is captured.
+   */
+  ownerId?: PlayerId | null;
+  /**
+   * Day of the first unpaid weekly maintenance charge (caravanUpkeep);
+   * null/absent = paid up. Optional so legacy JSONB rows stay valid.
+   */
+  unpaidSinceDay?: number | null;
 }
 
 export interface GameState {
@@ -168,12 +247,6 @@ export interface ApplyEndOfTurnResult {
 export type TransferDirection = "deposit" | "withdraw";
 
 export interface TransferResult {
-  state: GameState;
-  ok: boolean;
-  reason: string;
-}
-
-export interface TradeResult {
   state: GameState;
   ok: boolean;
   reason: string;

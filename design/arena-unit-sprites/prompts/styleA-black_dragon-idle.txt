@@ -1,0 +1,5 @@
+Side-view pixel art game asset of a single fantasy battle unit, matching the attached reference image exactly in style: same chunky pixel size, same thick dark outlines around every shape, same slightly desaturated color palette, same clean fully transparent background, square 1:1 canvas.
+
+Subject: a huge black dragon rearing slightly with wings spread wide, acid-green eyes, long spiked tail curled forward, glossy midnight-black scales with subtle violet sheen.
+
+Single centered figure facing right, full body visible from head to feet, filling about 75% of the canvas height, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.

@@ -1,0 +1,7 @@
+Isometric pixel art game asset for a medieval city-builder, matching the attached reference image exactly in style: same chunky pixel size (large visible pixels — avoid fine-grained pixel noise), same 2:1 dimetric isometric projection (standard 30° angle), same thick dark-brown outlines around every shape, same warm brown/tan color palette, same transparent background, square 1:1 canvas.
+
+Subject: a wooden stable with a sloped straw roof, an open stall with a hay trough, a horseshoe mounted over the door.
+
+Plot: a square 20x20 meter lot shown as a diamond, topped with light sandy ground with darker speckles and a few tiny grass tufts, and a thin darker soil slab visible along the front two edges. The building covers roughly half of the footprint; one or two small yard props sit to the sides and simple stepping stones lead from the door. This is the level-1 (modest) version of the building.
+
+Single centered asset, nothing outside the plot, clean pixel-art shading, no anti-aliasing halos, no text, no watermark.

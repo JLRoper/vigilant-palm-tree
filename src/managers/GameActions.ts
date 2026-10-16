@@ -1,38 +1,48 @@
 import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
-import { showBattleModal } from "@screens/combat/battleModal";
-import { showBattleResultCard } from "@screens/combat/battleResultCard";
-import { shouldShowResultCard } from "@screens/combat/resultCardPolicy";
 import { showToast } from "@screens/shared/toast";
-import { openManualBattleArena, type ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
+import type { ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
 import type { BattleActionPhase } from "@screens/combat/arena/state";
 import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, settlementStacks, spellLoadoutForHero, type BattleResult } from "@heroes/engine";
 import type { GameState, HeroBattleVerdict, HeroState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
-import { catalogFailed, loadUnitCatalog } from "../data/unitCatalog";
+import { catalogFailed, cachedUnitTypes, loadUnitCatalog } from "../data/unitCatalog";
 import type { UnitType } from "../state/units";
 import { submitBattleResult, submitSettlementBattleResult, type SubmitBattleResultResult, type SubmitSettlementBattleResultResult } from "../io/commands";
+import { isServerDriven } from "../io/serverDrivenGames";
 import { consumeResolveBattleVerdicts, mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../game/turnHooks";
-import { battleToastMessage, settlementNameAt } from "@screens/combat/battleResultText";
 import {
-  formatStacksLabel,
-  openAssaultConfirmModal,
-  type AssaultConfirmChoice,
-} from "@screens/combat/assaultConfirmModal";
+  evaluateUpkeepWarnings,
+  upkeepSummaryToastMessage,
+  upkeepToastMessage,
+  UPKEEP_SUMMARY_OFFENDER_LIMIT,
+} from "@screens/shared/upkeepWarnings";
+import {
+  applyTreasuryCapSessionDedupe,
+  newlyCappedSettlements,
+  treasuryCapSummaryToastMessage,
+  treasuryCapToastMessage,
+  TREASURY_CAP_SUMMARY_OFFENDER_LIMIT,
+} from "@screens/settlements/treasuryCap";
+import { evaluateTradeReminder } from "@screens/shared/tradeNeedsReminder";
+import type { AssaultConfirmChoice } from "@screens/combat/assaultConfirmModal";
 import { api } from "../io/api";
 
 // Settlement name for a relocated hero's verdict line ("retreated to <name>").
 // Only retreat/surrender relocate (hero present post-merge); defeat leaves no
-// hero to look up and "stood" renders no line.
-function verdictSettlementName(
+// hero to look up and "stood" renders no line. Async because battleResultText
+// is a lazy combat module; every caller is already inside an async flow.
+async function verdictSettlementName(
   state: GameState,
   heroId: string,
   verdict: HeroBattleVerdict | undefined,
-): string | undefined {
+): Promise<string | undefined> {
   if (!verdict || verdict === "stood" || verdict === "defeated") return undefined;
   const hero = state.heroes[heroId];
-  return hero ? settlementNameAt(state.settlements, hero.q, hero.r) : undefined;
+  if (!hero) return undefined;
+  const { settlementNameAt } = await import("@screens/combat/battleResultText");
+  return settlementNameAt(state.settlements, hero.q, hero.r);
 }
 
 /**
@@ -104,20 +114,27 @@ export class GameActions {
       const localIsAttacker = attacker.ownerId === localSeat;
       const localIsDefender = defender.ownerId === localSeat;
 
-      // Hero-vs-hero collisions between two human players stay on the
-      // auto-resolver (plan decision 1): a client only ever plays its OWN
-      // hero's army in the arena, so a fight between two remote human seats
-      // has no local side to hand the mouse to. Quick-resolve it silently —
-      // the modal's Fight button would be a lie for both players.
-      const defenderOwnerIsHuman =
-        gs.players.find((p) => p.id === defender.ownerId)?.faction === "player";
-      const pvp = !localIsAttacker && !localIsDefender ? true : !localIsAttacker && defenderOwnerIsHuman;
+      // Who resolves this battle? battleChoicePolicy replaces the old
+      // `pvp` predicate: the local defender now gets the modal too (minus
+      // Flee), a server-driven spectator never resolves (the server driver
+      // or the defender owns it -- the outcome surfaces later via
+      // battleOutcomeFeedback), and the driving client auto-resolves
+      // AI-vs-AI / remote-human pairs exactly as before.
+      const { resolveBattleChoice } = await import("@screens/combat/battleChoicePolicy");
+      const plan = resolveBattleChoice({
+        localIsAttacker,
+        localIsDefender,
+        serverDriven: isServerDriven(gameName ?? ""),
+      });
+      if (plan.kind === "spectate") return;
 
       let choice: "fight" | "quickResolve" | "cancel" = "quickResolve";
-      if (!pvp) {
+      if (plan.kind === "modal") {
+        const { showBattleModal } = await import("@screens/combat/battleModal");
         choice = await showBattleModal({
           attackerName: `Hero ${attackerName}`,
           defenderName: `Hero ${defenderName}`,
+          hideFlee: plan.hideFlee,
         });
       }
 
@@ -128,6 +145,7 @@ export class GameActions {
         if (fought.kind === "applied") {
           this.state.replaceState(fought.state);
           this.captureAfterBattleIfNeeded(attackerId);
+          const { showBattleResultCard } = await import("@screens/combat/battleResultCard");
           showBattleResultCard({
             result: fought.result,
             attackerLabel: `Hero ${attackerName}`,
@@ -168,7 +186,9 @@ export class GameActions {
         // AI-vs-AI (and remote-human-vs-remote-human) auto-resolves are
         // silent -- one info toast, max. Stacked un-clicked cards were the
         // symptom; suppression is the policy-level fix.
+        const { shouldShowResultCard } = await import("@screens/combat/resultCardPolicy");
         if (shouldShowResultCard(localSeat, attacker.ownerId, defender.ownerId)) {
+          const { showBattleResultCard } = await import("@screens/combat/battleResultCard");
           showBattleResultCard({
             result: battle,
             attackerLabel: `Hero ${attackerName}`,
@@ -176,10 +196,11 @@ export class GameActions {
             onCarryOn: () => {},
             attackerVerdict: verdicts.attackerVerdict,
             defenderVerdict: verdicts.defenderVerdict,
-            attackerSettlementName: verdictSettlementName(after, attackerId, verdicts.attackerVerdict),
-            defenderSettlementName: verdictSettlementName(after, defenderId, verdicts.defenderVerdict),
+            attackerSettlementName: await verdictSettlementName(after, attackerId, verdicts.attackerVerdict),
+            defenderSettlementName: await verdictSettlementName(after, defenderId, verdicts.defenderVerdict),
           });
         } else {
+          const { battleToastMessage } = await import("@screens/combat/battleResultText");
           const attackerPlayer = gs.players.find((p) => p.id === attacker.ownerId);
           const defenderPlayer = gs.players.find((p) => p.id === defender.ownerId);
           const attackerSide = `${attackerPlayer?.name ?? "AI"}'s ${attacker.name}`;
@@ -192,12 +213,12 @@ export class GameActions {
               attacker: {
                 verdict: verdicts.attackerVerdict,
                 ownerName: attackerPlayer?.name,
-                settlementName: verdictSettlementName(after, attackerId, verdicts.attackerVerdict),
+                settlementName: await verdictSettlementName(after, attackerId, verdicts.attackerVerdict),
               },
               defender: {
                 verdict: verdicts.defenderVerdict,
                 ownerName: defenderPlayer?.name,
-                settlementName: verdictSettlementName(after, defenderId, verdicts.defenderVerdict),
+                settlementName: await verdictSettlementName(after, defenderId, verdicts.defenderVerdict),
               },
             }),
             "info",
@@ -262,6 +283,7 @@ export class GameActions {
         }
       : undefined;
 
+    const { openManualBattleArena } = await import("@screens/combat/arena/openManualBattleArena");
     let closeArena: () => void = () => {};
     const outcome: ManualBattleOutcome = await new Promise<ManualBattleOutcome>((resolve) => {
       const handle = openManualBattleArena(
@@ -323,6 +345,15 @@ export class GameActions {
       next = cleanupDefeatedHeroCharters(next, defenderId);
     }
     next = endBattlePhase(next);
+    // Mirror resolveCurrentBattle()'s AI_TURN re-map: a defender-fought
+    // battle can now run during the AI's turn, and endBattlePhase()
+    // unconditionally reopens PLAYER_TURN.
+    if (next.phase.kind === "PLAYER_TURN") {
+      const active = next.players.find((p) => p.id === next.activePlayerId);
+      if (active?.faction === "ai") {
+        next = { ...next, phase: { kind: "AI_TURN", playerId: next.activePlayerId } };
+      }
+    }
     const attackerAfter = next.heroes[attackerId];
     bus.emit({
       type: "battle:resolved",
@@ -337,8 +368,8 @@ export class GameActions {
       closeArena,
       attackerVerdict: server.attackerVerdict,
       defenderVerdict: server.defenderVerdict,
-      attackerSettlementName: verdictSettlementName(next, attackerId, server.attackerVerdict),
-      defenderSettlementName: verdictSettlementName(next, defenderId, server.defenderVerdict),
+      attackerSettlementName: await verdictSettlementName(next, attackerId, server.attackerVerdict),
+      defenderSettlementName: await verdictSettlementName(next, defenderId, server.defenderVerdict),
     };
   }
 
@@ -371,16 +402,19 @@ export class GameActions {
       const after = this.state.getState();
       // A neutral settlement has no owner seat, so it can never involve the
       // local human: -1 matches no seat in the display policy.
+      const { shouldShowResultCard } = await import("@screens/combat/resultCardPolicy");
       if (shouldShowResultCard(localSeat, attackerBefore.ownerId, settlementBefore.ownerId ?? -1)) {
+        const { showBattleResultCard } = await import("@screens/combat/battleResultCard");
         showBattleResultCard({
           result: outcome.battle,
           attackerLabel: `Hero ${attackerBefore.name}`,
           defenderLabel,
           onCarryOn: () => {},
           attackerVerdict: outcome.attackerVerdict,
-          attackerSettlementName: verdictSettlementName(after, attackerId, outcome.attackerVerdict),
+          attackerSettlementName: await verdictSettlementName(after, attackerId, outcome.attackerVerdict),
         });
       } else {
+        const { battleToastMessage } = await import("@screens/combat/battleResultText");
         showToast(
           battleToastMessage({
             attackerLabel: `${attackerPlayer?.name ?? "AI"}'s ${attackerBefore.name}`,
@@ -389,7 +423,7 @@ export class GameActions {
             attacker: {
               verdict: outcome.attackerVerdict,
               ownerName: attackerPlayer?.name,
-              settlementName: verdictSettlementName(after, attackerId, outcome.attackerVerdict),
+              settlementName: await verdictSettlementName(after, attackerId, outcome.attackerVerdict),
             },
           }),
           "info",
@@ -449,6 +483,7 @@ export class GameActions {
       // flow.
       const unitNames: Record<string, string> = {};
       for (const u of catalog) unitNames[u.id] = u.name;
+      const { openAssaultConfirmModal, formatStacksLabel } = await import("@screens/combat/assaultConfirmModal");
       const choice = await new Promise<AssaultConfirmChoice>((resolve) => {
         openAssaultConfirmModal({
           settlementName: settlement.name,
@@ -483,6 +518,7 @@ export class GameActions {
           }
         : undefined;
 
+      const { openManualBattleArena } = await import("@screens/combat/arena/openManualBattleArena");
       let closeArena: () => void = () => {};
       const outcome: ManualBattleOutcome = await new Promise<ManualBattleOutcome>((resolve) => {
         const handle = openManualBattleArena(
@@ -550,13 +586,14 @@ export class GameActions {
         defenderId: settlementId,
         attackerSurvived: platoonsHaveTroops(server.attackerHero?.stacks ?? []),
       });
+      const { showBattleResultCard } = await import("@screens/combat/battleResultCard");
       showBattleResultCard({
         result: outcome.result,
         attackerLabel: `Hero ${attacker.name}`,
         defenderLabel,
         onCarryOn: closeArena,
         attackerVerdict: server.attackerVerdict,
-        attackerSettlementName: verdictSettlementName(next, attackerId, server.attackerVerdict),
+        attackerSettlementName: await verdictSettlementName(next, attackerId, server.attackerVerdict),
       });
     } finally {
       this.battleInFlight = false;
@@ -586,7 +623,81 @@ export class GameActions {
     const tc = this.state.getTurnController();
     await tc.endHumanTurn();
     this.state.replaceState(tc.getState());
+    this.reportUnpaidUpkeep();
+    this.reportTreasuryCaps(gs);
+    this.remindTradeRoutes();
     this.session.setSaveStatus("saved");
     this.maybeAutoResolveBattle();
+  }
+
+  // A full treasury throws away the settlement's entire gold income with
+  // nothing on screen saying why, so the player watches an income rate pay
+  // nothing. Fires on the TRANSITION into the cap, not on every turn spent
+  // there, which is the whole reason the pre-EndTurn state is threaded through
+  // as `previous`: it is the record of what was already capped, recomputed from
+  // the game on every turn. On top of that sits the per-session dedupe
+  // (E1a): a capped treasury that oscillates below cap and back (weekly route
+  // upkeep, a bank deposit) would re-cross the transition every cycle, so
+  // each settlement toasts once per session while it stays capped and only
+  // re-arms once it is observed below cap. Both layers are in-memory only, so
+  // there is no "already warned" state to reset on game load -- a reload's
+  // fresh page re-toasts once, which is the honest reading after a reload.
+  // `previous` is stale-by-construction
+  // safe: the reducers replace the state object (see endCurrentTurn's own
+  // stateBeforeEnd reference check), so it still reads the pre-turn values.
+  private reportTreasuryCaps(previous: GameState): void {
+    const merged = this.state.getState();
+    const gameName = this.session.getActiveGameName();
+    const seat = getInMemoryLocalPlayerId(gameName ?? "") ?? 0;
+    const rows = applyTreasuryCapSessionDedupe(
+      gameName,
+      merged,
+      seat,
+      newlyCappedSettlements(previous, merged, seat),
+    );
+    if (rows.length === 0) return;
+    if (rows.length > TREASURY_CAP_SUMMARY_OFFENDER_LIMIT) {
+      showToast(treasuryCapSummaryToastMessage(rows), "info");
+      return;
+    }
+    for (const row of rows) {
+      showToast(treasuryCapToastMessage(row), "info");
+    }
+  }
+
+  // Phase 5 trade-route reminder: recommendations exist and the player has
+  // ZERO configured routes -> one summary toast. TOAST ONLY (see the
+  // module's header for why a blocking surface is categorically off the
+  // table), deduped once per session per distinct recommendation inside the
+  // pure module. Reads the post-EndTurn merged state, like
+  // reportUnpaidUpkeep.
+  private remindTradeRoutes(): void {
+    const merged = this.state.getState();
+    const gameName = this.session.getActiveGameName();
+    const seat = getInMemoryLocalPlayerId(gameName ?? "");
+    const message = evaluateTradeReminder(merged, seat, cachedUnitTypes());
+    if (message) showToast(message, "info");
+  }
+
+  // Unpaid upkeep is otherwise invisible: consumption clamps at zero, morale
+  // decays, and troops desert with nothing on screen saying why. Runs on the
+  // post-EndTurn merged state (the weekly upkeep pass has already applied, so
+  // days/weeks-unpaid are current) and stays inside the toast surface — a modal
+  // was rejected for this because it can wedge the turn UI. The catalog is
+  // passed through so the module's affordability gate prices each entity's
+  // bill the way the charge does instead of the catalog-less 1g/1f default.
+  private reportUnpaidUpkeep(): void {
+    const merged = this.state.getState();
+    const gameName = this.session.getActiveGameName();
+    const seat = getInMemoryLocalPlayerId(gameName ?? "") ?? 0;
+    const rows = evaluateUpkeepWarnings(merged, seat, cachedUnitTypes());
+    if (rows.length === 0) return;
+    if (rows.length > UPKEEP_SUMMARY_OFFENDER_LIMIT) {
+      showToast(upkeepSummaryToastMessage(rows), "error");
+      return;
+    }
+    for (const row of rows) {
+      showToast(upkeepToastMessage(row), "error");
+    }
   }
 }

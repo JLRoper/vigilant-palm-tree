@@ -6,12 +6,31 @@
     <title>heroes-js</title>
     <style>
       :root {
-        --header-blue: #1c2f57;
-        --header-blue-dark: #142145;
-        --header-gold: #c9a227;
-        --header-gold-light: #e9cf7d;
-        --header-cream: #f1e4c3;
-        --header-font: Georgia, "Cambria", "Times New Roman", serif;
+        --tb-bg-top: #1b2334;
+        --tb-bg-bottom: #121826;
+        --tb-strip: #10151f;
+        --tb-surface: rgba(255, 255, 255, 0.045);
+        --tb-surface-hover: rgba(255, 255, 255, 0.1);
+        --tb-border: rgba(148, 163, 184, 0.22);
+        --tb-border-hover: rgba(148, 163, 184, 0.4);
+        --tb-text: #e9eef8;
+        --tb-text-muted: #9aa7bd;
+        --tb-text-dim: #b6c0d4;
+        --tb-accent: #f2b93c;
+        --tb-accent-light: #ffd479;
+        --tb-accent-ink: #241a05;
+        --tb-menu-bg: rgba(20, 26, 40, 0.98);
+        --tb-divider: rgba(148, 163, 184, 0.18);
+        --tb-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+          Arial, sans-serif;
+        --tb-radius-control: 8px;
+        --tb-radius-chip: 999px;
+        --tb-radius-kbd: 4px;
+        --tb-radius-menu: 12px;
+        --tb-radius-menu-item: 7px;
+        --tb-shadow-control: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        --tb-shadow-ready: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 0 3px rgba(242, 185, 60, 0.16);
+        --tb-shadow-header: 0 10px 28px rgba(0, 0, 0, 0.45);
       }
       html,
       body {
@@ -81,18 +100,38 @@
       #toolbar > * {
         pointer-events: auto;
       }
+      #toolbar button {
+        cursor: pointer;
+      }
+      #toolbar button:disabled {
+        cursor: default;
+        opacity: 0.45;
+      }
+      #toolbar button:not(:disabled):hover {
+        filter: brightness(1.16);
+      }
+      #toolbar button:not(:disabled):active {
+        transform: translateY(1px);
+        filter: brightness(1.04);
+      }
+      #toolbar button:focus-visible {
+        outline: 2px solid var(--tb-accent-light, #ffd479);
+        outline-offset: 2px;
+      }
       #hud {
-        background: var(--header-blue-dark);
-        color: var(--header-cream);
-        font-family: var(--header-font);
-        font-size: 12.5px;
-        font-weight: 500;
-        line-height: 1.6;
-        padding: 6px 16px;
-        text-align: left;
-        border-top: 1px solid rgba(201, 162, 39, 0.2);
-        border-bottom: 1px solid rgba(201, 162, 39, 0.35);
-        letter-spacing: 0.3px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1 1 auto;
+        min-width: 0;
+        font-family: var(--tb-font, system-ui, sans-serif);
+        font-size: 11.5px;
+        color: var(--tb-text, #e9eef8);
+      }
+      #hud-context {
+        color: var(--tb-text-dim, #b6c0d4);
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
       }
     </style>
   </head>

@@ -10,9 +10,14 @@ import { buildingSettlementEffects } from "../buildingRegistry";
 export const BASE_STORAGE: Record<1 | 2 | 3, number> = { 1: 500, 2: 1500, 3: 4000 };
 export const BASE_TREASURY: Record<1 | 2 | 3, number> = { 1: 1500, 2: 4000, 3: 10000 };
 
-// §4.2 — hero caps scale with assigned wagons. Gold's per-wagon capacity is
-// 10× resources' so a fresh 5-wagon hero can still afford the 2,500g charter.
+// §4.2 + the Phase 1 treasury-wagons split — hero caps scale with the
+// matching wagon slot. Army `wagons` govern the RESOURCE cargo cap ONLY
+// (×50 each); `treasuryWagons` (treasury carts) govern the gold purse cap
+// ONLY (×500 each) — the designer's "they get their own slot, not shared
+// with army slots". Gold's per-cart capacity is 10× resources' so a
+// legacy hero soft-defaulting to 5 carts still affords the 2,500g charter.
 export const DEFAULT_HERO_WAGONS = 5;
+export const DEFAULT_TREASURY_WAGONS = 5;
 export const WAGON_RESOURCE_CAPACITY = 50;
 export const WAGON_GOLD_CAPACITY = 500;
 export const WAGON_COST = { gold: 200, wood: 5 } as const;
@@ -21,8 +26,17 @@ export function heroWagons(hero: HeroState): number {
   return hero.wagons ?? DEFAULT_HERO_WAGONS;
 }
 
+// Soft-default 5 mirrors heroWagons: absent means a pre-split hero, and
+// zero churn for legacy saves/fixtures means keeping the 2,500g purse cap
+// (the deliberate 5-cart <-> CHARTER_GOLD_COST pairing). An EXPLICIT 0 is
+// real (a hero stripped of its carts, or recruited from an empty pool) and
+// yields a 0g purse cap.
+export function heroTreasuryWagons(hero: HeroState): number {
+  return hero.treasuryWagons ?? DEFAULT_TREASURY_WAGONS;
+}
+
 export function heroGoldCap(hero: HeroState): number {
-  return heroWagons(hero) * WAGON_GOLD_CAPACITY;
+  return heroTreasuryWagons(hero) * WAGON_GOLD_CAPACITY;
 }
 
 export function heroResourceCap(hero: HeroState): Record<WarehouseResource, number> {
@@ -46,6 +60,16 @@ export function playerWagonsOwned(p: Player): number {
 
 export function playerWagonsUnassigned(p: Player): number {
   return p.wagonsUnassigned ?? 0;
+}
+
+// Treasury-cart pool accessors, mirroring playerWagonsOwned/Unassigned
+// field-for-field (Phase 1 treasury-wagons split).
+export function playerTreasuryWagonsOwned(p: Player): number {
+  return p.treasuryWagonsOwned ?? 0;
+}
+
+export function playerTreasuryWagonsUnassigned(p: Player): number {
+  return p.treasuryWagonsUnassigned ?? 0;
 }
 
 export function settlementResourceCap(s: SettlementState): Record<WarehouseResource, number> {

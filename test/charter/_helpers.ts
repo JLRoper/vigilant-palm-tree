@@ -8,6 +8,7 @@ import type {
   PlayerId,
   SettlementId,
   SettlementState,
+  TradeRouteState,
   Warehouse,
 } from "@heroes/contracts";
 import { MOVEMENT_PER_TURN } from "@heroes/contracts";
@@ -22,8 +23,23 @@ export function makePlayer(
   faction: Player["faction"],
   heroIds: HeroId[],
   settlementIds: SettlementId[],
+  opts: Partial<Pick<Player, "wagonsOwned" | "wagonsUnassigned" | "treasuryWagonsOwned" | "treasuryWagonsUnassigned">> = {},
 ): Player {
-  return { id, faction, name: faction === "player" ? `Player ${id + 1}` : "AI", color: "#000000", heroIds, settlementIds };
+  return {
+    id,
+    faction,
+    name: faction === "player" ? `Player ${id + 1}` : "AI",
+    color: "#000000",
+    heroIds,
+    settlementIds,
+    wagonsOwned: opts.wagonsOwned ?? 0,
+    wagonsUnassigned: opts.wagonsUnassigned ?? 0,
+    // Treasury-cart pool defaults match init's starting players (5/0) so
+    // fixtures stay value-neutral against the engine's real games
+    // (Phase 1 treasury-wagons split).
+    treasuryWagonsOwned: opts.treasuryWagonsOwned ?? 5,
+    treasuryWagonsUnassigned: opts.treasuryWagonsUnassigned ?? 0,
+  };
 }
 
 export function makeHero(
@@ -32,7 +48,28 @@ export function makeHero(
   q: number,
   r: number,
   opts: Partial<
-    Pick<HeroState, "movementRemaining" | "gold" | "troops" | "isChartering" | "charterId" | "stacks" | "horseVariant" | "arcane" | "intelligence" | "heroMana" | "heroMaxMana" | "heroSpell">
+    Pick<
+      HeroState,
+      | "movementRemaining"
+      | "gold"
+      | "troops"
+      | "isChartering"
+      | "charterId"
+      | "stacks"
+      | "horseVariant"
+      | "arcane"
+      | "intelligence"
+      | "heroMana"
+      | "heroMaxMana"
+      | "heroSpell"
+      | "morale"
+      | "upkeepUnpaidSinceDay"
+      | "upkeepUnpaidTroops"
+      | "upkeepUnpaidGold"
+      | "wagons"
+      | "treasuryWagons"
+      | "resources"
+    >
   > = {},
 ): HeroState {
   // withDefaultSpellStats backfills the spellcasting v1 stat block (fixed
@@ -60,6 +97,16 @@ export function makeHero(
     heroMana: opts.heroMana,
     heroMaxMana: opts.heroMaxMana,
     heroSpell: opts.heroSpell,
+    morale: opts.morale ?? 100,
+    upkeepUnpaidSinceDay: opts.upkeepUnpaidSinceDay ?? null,
+    upkeepUnpaidTroops: opts.upkeepUnpaidTroops ?? 0,
+    upkeepUnpaidGold: opts.upkeepUnpaidGold ?? 0,
+    wagons: opts.wagons ?? 5,
+    // Treasury carts default to the engine's soft default (5, the
+    // 2,500g-charter pairing) so fixture heroes stay value-neutral with
+    // init's starting heroes (Phase 1 treasury-wagons split).
+    treasuryWagons: opts.treasuryWagons ?? 5,
+    resources: opts.resources ?? { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
   });
 }
 
@@ -69,7 +116,22 @@ export function makeSettlement(
   q: number,
   r: number,
   opts: Partial<
-    Pick<SettlementState, "population" | "goldTax" | "gold" | "resourceRates" | "morale" | "autoTrade" | "warehouse" | "level" | "buildings" | "citySpots">
+    Pick<
+      SettlementState,
+      | "population"
+      | "goldTax"
+      | "gold"
+      | "resourceRates"
+      | "morale"
+      | "garrisonUnpaidSinceDay"
+      | "garrisonUnpaidTroops"
+      | "garrisonUnpaidGold"
+      | "autoTrade"
+      | "warehouse"
+      | "level"
+      | "buildings"
+      | "citySpots"
+    >
   > = {},
 ): SettlementState {
   return {
@@ -88,6 +150,9 @@ export function makeSettlement(
     citySpots: opts.citySpots ?? [],
     cityMines: [],
     morale: opts.morale ?? 100,
+    garrisonUnpaidSinceDay: opts.garrisonUnpaidSinceDay ?? null,
+    garrisonUnpaidTroops: opts.garrisonUnpaidTroops ?? 0,
+    garrisonUnpaidGold: opts.garrisonUnpaidGold ?? 0,
     autoTrade: opts.autoTrade ?? true,
     castleVariant: 0,
     buildings: opts.buildings ?? [],
@@ -109,6 +174,13 @@ export function makeCharter(overrides: Partial<CharterState> & Pick<CharterState
   };
 }
 
+/** A trade route in the endpoint/payload shape (settlement endpoints, wood cargo, 2 wagons, loading at origin). */
+export function makeTradeRoute(
+  overrides: Partial<TradeRouteState> & Pick<TradeRouteState, "id" | "from" | "to" | "payload">,
+): TradeRouteState {
+  return { wagons: 2, caravan: null, ...overrides };
+}
+
 export interface StateOverrides {
   players?: Player[];
   heroes?: HeroState[];
@@ -121,6 +193,8 @@ export interface StateOverrides {
   selectedHeroId?: HeroId | null;
   nextCharterId?: number;
   nextSettlementId?: number;
+  tradeRoutes?: TradeRouteState[];
+  nextTradeRouteId?: number;
 }
 
 export function makeState(overrides: StateOverrides = {}): GameState {
@@ -151,5 +225,7 @@ export function makeState(overrides: StateOverrides = {}): GameState {
     activeCharters: overrides.activeCharters ?? [],
     nextCharterId: overrides.nextCharterId ?? 0,
     nextSettlementId: overrides.nextSettlementId ?? 100,
+    tradeRoutes: overrides.tradeRoutes ?? [],
+    nextTradeRouteId: overrides.nextTradeRouteId ?? 0,
   };
 }

@@ -1,0 +1,7 @@
+Isometric pixel art game asset for a fantasy city-builder, matching the attached reference image exactly in style and content: same chunky pixel size, same 2:1 dimetric isometric projection (standard 30 degree angle), same thick dark outlines around every shape, same dark soil lot with pale standing stones, grey-green grass mounds and pale stone-ring wall palette, same transparent background, square 1:1 canvas.
+
+Subject: a larger level-2 barrow graveyard — the same burial mounds from the reference grown bigger and more numerous: a larger central mound with a stone-ringed base and a dark open stone doorway glowing warm orange from within, flanked by two medium mounds and joined by a fourth smaller mound at the back, every mound topped with thick grey-green grass and pale bone-white stone rim rings, pale ghostly wisps curling up from the grass tops, a broken archway of pale stones before the central door.
+
+Plot: a square 20x20 meter lot shown as a diamond, topped with dark brown grave soil with darker speckles and sparse tufts of grey-green grass, and a thin darker soil slab visible along the front two edges. A ring of pale carved standing stones with faint rune marks around the edges, scattered pale bones, one leaning and one fallen gravestone, and a cracked pale stone path leading to the central doorway.
+
+Single centered asset, nothing outside the plot, clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.

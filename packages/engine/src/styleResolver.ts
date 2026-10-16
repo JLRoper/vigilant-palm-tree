@@ -1,74 +1,64 @@
 import type { BuildingKind, GenerationStyle } from "@heroes/contracts";
+import { BUILDING_SPRITE_KEYS } from "./generated/buildingSpriteKeys";
 
-export const BUILDING_SPRITE_KEYS: readonly string[] = [
-  "classic.apartment.1",
-  "classic.archeryRange.1",
-  "classic.barracks.1",
-  "classic.farmField.1",
-  "classic.farmField.1_variant2",
-  "classic.farmhouse.1",
-  "classic.house.1",
-  "classic.house.2",
-  "classic.mageGuild.1",
-  "classic.market.1",
-  "classic.market.1_variant2",
-  "classic.market.1_variant3",
-  "classic.market.1_variant4",
-  "classic.market.1_variant5",
-  "classic.market.2",
-  "classic.mine.1",
-  "classic.smithy.1",
-  "classic.smithy.2",
-  "classic.tower.1",
-  "classic.tower.2",
-  "classic.townHall.1",
-  "classic.townHall.2",
-  "blocky.archeryRange.1",
-  "blocky.house.2",
-  "pixel.granary.1",
-  "pixel.granary.2",
-  "pixel.granary.3",
-  "pixel.bank.1",
-  "pixel.bank.2",
-  "pixel.bank.3",
-  "pixel.goldMine.1",
-  "pixel.goldMine.2",
-  "pixel.goldMine.3",
-  "pixel.stoneMine.1",
-  "pixel.stoneMine.2",
-  "pixel.stoneMine.3",
-  "pixel.ironMine.1",
-  "pixel.ironMine.2",
-  "pixel.ironMine.3",
-  "pixel.underConstruction.1",
-  "pixel.underConstruction.2",
-  "pixel.underConstruction.3",
-  "pixel.woodcutterHut.1",
-  "pixel.woodcutterHut.2",
-  "pixel.woodcutterHut.3",
-  "pixel.smithy.2",
-] as const;
+// Generated from the building-pixel-*.png files on disk (see
+// tools/sprites/gen-building-sprite-keys.mjs); re-exported so @heroes/engine
+// keeps exposing the name it always has.
+export { BUILDING_SPRITE_KEYS };
 
 const BUILDING_SPRITE_KEY_SET = new Set<string>(BUILDING_SPRITE_KEYS);
-
-export function hasBuildingSpriteKey(key: string): boolean {
-  return BUILDING_SPRITE_KEY_SET.has(key);
-}
 
 export function pickStyleForBuilding(
   kind: BuildingKind | string,
   level: number,
-  preferred: GenerationStyle | string,
+  preferred: GenerationStyle | string | undefined,
 ): GenerationStyle {
-  const preferredKey = `${preferred}.${kind}.${level}`;
-  if (BUILDING_SPRITE_KEY_SET.has(preferredKey)) return preferred as GenerationStyle;
+  const preferredKey = `${preferred ?? "pixel"}.${kind}.${level}`;
+  if (BUILDING_SPRITE_KEY_SET.has(preferredKey)) return (preferred ?? "pixel") as GenerationStyle;
 
+  // Fall-through: the style that actually has art for this kind+level.
+  // Deliberately order-independent — `pixel-alt` (the farm-plot alternate) is
+  // reachable only through an explicit style carrier, never through this
+  // fall-through, so the generated/sorted key list can never promote it to a
+  // preferred style. Same conclusion the old first-match-wins scan reached only
+  // because pixel.* happened to precede pixel-alt.* in the hand-written array.
   const suffix = `.${kind}.${level}`;
+  let altStyle: GenerationStyle | null = null;
   for (const key of BUILDING_SPRITE_KEYS) {
-    if (key.endsWith(suffix)) {
-      const middle = key.slice(0, key.length - suffix.length);
-      if (middle && !middle.includes(".")) return middle as GenerationStyle;
-    }
+    if (!key.endsWith(suffix)) continue;
+    const middle = key.slice(0, key.length - suffix.length);
+    if (!middle || middle.includes(".")) continue;
+    if (middle !== "pixel-alt") return middle as GenerationStyle;
+    altStyle ??= middle as GenerationStyle;
   }
-  return preferred as GenerationStyle;
+  return altStyle ?? ((preferred ?? "pixel") as GenerationStyle);
+}
+
+export function randomFarmFieldStyle(): GenerationStyle {
+  return (Math.random() < 0.5 ? "pixel" : "pixel-alt") as GenerationStyle;
+}
+
+export function farmFieldStyleAt(seed: string, gx: number, gy: number): GenerationStyle {
+  let h = 2166136261;
+  const s = `${seed}:${gx},${gy}`;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 2 === 0 ? "pixel" : "pixel-alt") as GenerationStyle;
+}
+
+/**
+ * The style a building is persisted with when none was sent: the server's
+ * settlement_buildings.style column is NOT NULL until the deferred column
+ * drop, so an absent style is resolved here rather than written NULL. Only
+ * fires for an absent key -- a persisted value is never rewritten, because
+ * several round-trip pins watch those bytes.
+ */
+export function resolvedPersistedStyle(
+  settlementName: string,
+  b: { kind: BuildingKind | string; level: number; style?: GenerationStyle; gx: number; gy: number },
+): GenerationStyle {
+  if (b.kind === "farmField") return farmFieldStyleAt(settlementName, b.gx, b.gy);
+  return pickStyleForBuilding(b.kind, b.level, b.style);
 }

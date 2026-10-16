@@ -4,6 +4,8 @@ import castleL3 from "../resources/castle-l3.png?url";
 import castleAltL1 from "../resources/castle-l1-alt.png?url";
 import castleAltL2 from "../resources/castle-l2-alt.png?url";
 import castleAltL3 from "../resources/castle-l3-alt.png?url";
+import castleAlt2L1 from "../resources/castle-l1-alt2.png?url";
+import castleAlt3L1 from "../resources/castle-l1-alt3.png?url";
 import settlementBanner from "../resources/settlement-banner.png?url";
 import cityBanner from "../resources/city-banner.png?url";
 import castleBanner from "../resources/castle-banner.png?url";
@@ -16,6 +18,7 @@ import heroBannerArcane from "../resources/hero-banner-arcane.png?url";
 import heroBannerUnicorn from "../resources/hero-banner-unicorn.png?url";
 import heroBannerSamurai from "../resources/hero-banner-samurai.png?url";
 import heroBannerDrake from "../resources/hero-banner-drake.png?url";
+import heroBannerLionheart from "../resources/hero-banner-lionheart.png?url";
 import resourceGold from "../resources/resource-gold.png?url";
 import resourceWood from "../resources/resource-wood.png?url";
 import resourceStone from "../resources/resource-stone.png?url";
@@ -57,59 +60,21 @@ import resourceStonePileBubbly from "../resources/resource-stone-pile-bubbly.png
 import resourceIronPileBubbly from "../resources/resource-iron-pile-bubbly.png?url";
 import resourceArcanePileBubbly from "../resources/resource-arcane-pile-bubbly.png?url";
 import resourceFoodPileBubbly from "../resources/resource-food-pile-bubbly.png?url";
-import buildingClassicApartment1 from "../resources/buildings/building-classic-apartment-1.png?url";
-import buildingClassicArcheryRange1 from "../resources/buildings/building-classic-archeryRange-1.png?url";
-import buildingClassicBarracks1 from "../resources/buildings/building-classic-barracks-1.png?url";
-import buildingClassicFarmField1 from "../resources/buildings/building-classic-farmField-1.png?url";
-import buildingClassicFarmField1Variant2 from "../resources/buildings/building-classic-farmField-1-variant2.png?url";
-import buildingClassicFarmhouse1 from "../resources/buildings/building-classic-farmhouse-1.png?url";
-import buildingClassicHouse1 from "../resources/buildings/building-classic-house-1.png?url";
-import buildingClassicHouse2 from "../resources/buildings/building-classic-house-2.png?url";
-import buildingClassicMageGuild1 from "../resources/buildings/building-classic-mageGuild-1.png?url";
-import buildingClassicMarket1 from "../resources/buildings/building-classic-market-1.png?url";
-import buildingClassicMarket1Variant2 from "../resources/buildings/building-classic-market-1-variant2.png?url";
-import buildingClassicMarket1Variant3 from "../resources/buildings/building-classic-market-1-variant3.png?url";
-import buildingClassicMarket1Variant4 from "../resources/buildings/building-classic-market-1-variant4.png?url";
-import buildingClassicMarket1Variant5 from "../resources/buildings/building-classic-market-1-variant5.png?url";
-import buildingClassicMarket2 from "../resources/buildings/building-classic-market-2.png?url";
-import buildingClassicMine1 from "../resources/buildings/building-classic-mine-1.png?url";
-import buildingClassicSmithy1 from "../resources/buildings/building-classic-smithy-1.png?url";
-import buildingClassicSmithy2 from "../resources/buildings/building-classic-smithy-2.png?url";
-import buildingClassicTower1 from "../resources/buildings/building-classic-tower-1.png?url";
-import buildingClassicTower2 from "../resources/buildings/building-classic-tower-2.png?url";
-import buildingClassicTownHall1 from "../resources/buildings/building-classic-townHall-1.png?url";
-import buildingClassicTownHall2 from "../resources/buildings/building-classic-townHall-2.png?url";
-import buildingBlockyArcheryRange1 from "../resources/buildings/building-blocky-archeryRange-1.png?url";
-import buildingBlockyHouse2 from "../resources/buildings/building-blocky-house-2.png?url";
-import buildingPixelGranary1 from "../resources/buildings/building-pixel-granary-1.png?url";
-import buildingPixelGranary2 from "../resources/buildings/building-pixel-granary-2.png?url";
-import buildingPixelGranary3 from "../resources/buildings/building-pixel-granary-3.png?url";
-import buildingPixelBank1 from "../resources/buildings/building-pixel-bank-1.png?url";
-import buildingPixelGoldMine1 from "../resources/buildings/building-pixel-goldMine-1.png?url";
-import buildingPixelGoldMine2 from "../resources/buildings/building-pixel-goldMine-2.png?url";
-import buildingPixelGoldMine3 from "../resources/buildings/building-pixel-goldMine-3.png?url";
-import buildingPixelWoodcutterHut1 from "../resources/buildings/building-pixel-woodcutterHut-1.png?url";
-import buildingPixelWoodcutterHut2 from "../resources/buildings/building-pixel-woodcutterHut-2.png?url";
-import buildingPixelSmithy2 from "../resources/buildings/building-pixel-smithy-2.png?url";
-import buildingPixelStoneMine1 from "../resources/buildings/building-pixel-stoneMine-1.png?url";
-import buildingPixelStoneMine2 from "../resources/buildings/building-pixel-stoneMine-2.png?url";
-import buildingPixelStoneMine3 from "../resources/buildings/building-pixel-stoneMine-3.png?url";
-import buildingPixelIronMine1 from "../resources/buildings/building-pixel-ironMine-1.png?url";
-import buildingPixelIronMine2 from "../resources/buildings/building-pixel-ironMine-2.png?url";
-import buildingPixelIronMine3 from "../resources/buildings/building-pixel-ironMine-3.png?url";
-import buildingPixelUnderConstruction1 from "../resources/buildings/building-pixel-underConstruction-1.png?url";
-import buildingPixelUnderConstruction2 from "../resources/buildings/building-pixel-underConstruction-2.png?url";
-import buildingPixelUnderConstruction3 from "../resources/buildings/building-pixel-underConstruction-3.png?url";
+import caravanSupply from "../resources/caravan-supply.png?url";
+import caravanTreasury from "../resources/caravan-treasury.png?url";
 import { Faction, Direction } from "../entities/hero";
-import type { CastleLevel, CastleVariant, ResourceType } from "@heroes/contracts";
+import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
 import type { ResourceStyle } from "../state/settings";
-import { HORSE_VARIANT_REGISTRY, type HorseVariantId } from "@heroes/engine";
-import { pickStyleForBuilding } from "@heroes/engine";
+import { HORSE_VARIANT_REGISTRY, BUILDING_SPRITE_FILES, BUILDING_SPRITE_ALIASES, type HorseVariantId } from "@heroes/engine";
+
+export type CaravanSpriteKind = "resource" | "gold";
 
 export type SpriteKey =
   | `castle.${CastleLevel}`
   | `castle-alt.${CastleLevel}`
+  | `castle-alt2.${CastleLevel}`
+  | `castle-alt3.${CastleLevel}`
   | `resource.${ResourceType}`
   | `resource-cart.${ResourceType}`
   | `resource-illust.${ResourceType}`
@@ -123,7 +88,9 @@ export type SpriteKey =
   | `horse.${string}.${Direction}`
   | `horse.${string}.${Direction}.${number}`
   | `building.${string}.${string}.${number}`
-  | `unit.${string}.${UnitArenaPose}`;
+  | `unit.${string}.${UnitArenaPose}`
+  | `faction-banner.${FactionId}`
+  | `caravan.${CaravanSpriteKind}`;
 
 export type UnitArenaPose = "idle" | "attack" | "move";
 
@@ -155,6 +122,21 @@ export const CASTLE_ALT_SPRITES: Record<CastleLevel, string> = {
   3: castleAltL3,
 };
 
+// alt2/alt3 ship tier-1 art only; a variant-2/3 settlement that upgrades to
+// level 2/3 aliases the variant-1 sprite so the key still resolves (a resolver
+// miss would draw nothing).
+export const CASTLE_ALT2_SPRITES: Record<CastleLevel, string> = {
+  1: castleAlt2L1,
+  2: CASTLE_ALT_SPRITES[2],
+  3: CASTLE_ALT_SPRITES[3],
+};
+
+export const CASTLE_ALT3_SPRITES: Record<CastleLevel, string> = {
+  1: castleAlt3L1,
+  2: CASTLE_ALT_SPRITES[2],
+  3: CASTLE_ALT_SPRITES[3],
+};
+
 export const SETTLEMENT_BANNERS: Record<CastleLevel, string> = {
   1: settlementBanner,
   2: cityBanner,
@@ -171,6 +153,7 @@ export const HERO_BANNERS: Record<HorseVariantId, string> = {
   unicorn: heroBannerUnicorn,
   samurai: heroBannerSamurai,
   drake: heroBannerDrake,
+  lionheart: heroBannerLionheart,
 };
 
 export const RESOURCE_SPRITES: Record<ResourceType, string> = {
@@ -245,54 +228,45 @@ export const RESOURCE_PILE_BUBBLY_SPRITES: Record<ResourceType, string> = {
   food: resourceFoodPileBubbly,
 };
 
-export const BUILDING_SPRITES: Record<string, string> = {
-  "classic.apartment.1": buildingClassicApartment1,
-  "classic.archeryRange.1": buildingClassicArcheryRange1,
-  "classic.barracks.1": buildingClassicBarracks1,
-  "classic.farmField.1": buildingClassicFarmField1,
-  "classic.farmField.1_variant2": buildingClassicFarmField1Variant2,
-  "classic.farmhouse.1": buildingClassicFarmhouse1,
-  "classic.house.1": buildingClassicHouse1,
-  "classic.house.2": buildingClassicHouse2,
-  "classic.mageGuild.1": buildingClassicMageGuild1,
-  "classic.market.1": buildingClassicMarket1,
-  "classic.market.1_variant2": buildingClassicMarket1Variant2,
-  "classic.market.1_variant3": buildingClassicMarket1Variant3,
-  "classic.market.1_variant4": buildingClassicMarket1Variant4,
-  "classic.market.1_variant5": buildingClassicMarket1Variant5,
-  "classic.market.2": buildingClassicMarket2,
-  "classic.mine.1": buildingClassicMine1,
-  "classic.smithy.1": buildingClassicSmithy1,
-  "classic.smithy.2": buildingClassicSmithy2,
-  "classic.tower.1": buildingClassicTower1,
-  "classic.tower.2": buildingClassicTower2,
-  "classic.townHall.1": buildingClassicTownHall1,
-  "classic.townHall.2": buildingClassicTownHall2,
-  "blocky.archeryRange.1": buildingBlockyArcheryRange1,
-  "blocky.house.2": buildingBlockyHouse2,
-  "pixel.granary.1": buildingPixelGranary1,
-  "pixel.granary.2": buildingPixelGranary2,
-  "pixel.granary.3": buildingPixelGranary3,
-  "pixel.bank.1": buildingPixelBank1,
-  "pixel.bank.2": buildingPixelBank1,
-  "pixel.bank.3": buildingPixelBank1,
-  "pixel.goldMine.1": buildingPixelGoldMine1,
-  "pixel.goldMine.2": buildingPixelGoldMine2,
-  "pixel.goldMine.3": buildingPixelGoldMine3,
-  "pixel.woodcutterHut.1": buildingPixelWoodcutterHut1,
-  "pixel.woodcutterHut.2": buildingPixelWoodcutterHut2,
-  "pixel.woodcutterHut.3": buildingPixelWoodcutterHut2,
-  "pixel.stoneMine.1": buildingPixelStoneMine1,
-  "pixel.stoneMine.2": buildingPixelStoneMine2,
-  "pixel.stoneMine.3": buildingPixelStoneMine3,
-  "pixel.ironMine.1": buildingPixelIronMine1,
-  "pixel.ironMine.2": buildingPixelIronMine2,
-  "pixel.ironMine.3": buildingPixelIronMine3,
-  "pixel.underConstruction.1": buildingPixelUnderConstruction1,
-  "pixel.underConstruction.2": buildingPixelUnderConstruction2,
-  "pixel.underConstruction.3": buildingPixelUnderConstruction3,
-  "pixel.smithy.2": buildingPixelSmithy2,
-};
+// Building sprites are registry-driven, not hand-wired: the key list and its
+// key -> filename map are generated from the building-pixel-*.png files on disk
+// (tools/sprites/gen-building-sprite-keys.mjs -> packages/engine/src/generated/
+// buildingSpriteKeys.ts), and the URLs come from one Vite glob below. Adding a
+// sprite is therefore: drop the PNG into src/resources/buildings/ and run
+// `npm run gen:sprite-keys` -- no edit to this file. The legacy
+// building-classic-*/building-blocky-* files in that folder stay out of the
+// glob because the pattern only matches building-pixel-*.
+const BUILDING_SPRITE_GLOB = import.meta.glob("../resources/buildings/building-pixel-*.png", {
+  eager: true,
+}) as Record<string, { default: string }>;
+
+const buildingUrlByFile = new Map<string, string>();
+for (const [filePath, mod] of Object.entries(BUILDING_SPRITE_GLOB)) {
+  buildingUrlByFile.set(filePath.slice(filePath.lastIndexOf("/") + 1), mod.default);
+}
+
+const warnedBuildingKeys = new Set<string>();
+
+export const BUILDING_SPRITES: Record<string, string> = {};
+for (const key of Object.keys(BUILDING_SPRITE_FILES)) {
+  const fileName = BUILDING_SPRITE_FILES[key];
+  const url = buildingUrlByFile.get(fileName);
+  if (!url) {
+    if (!warnedBuildingKeys.has(key)) {
+      warnedBuildingKeys.add(key);
+      console.warn(`assetDescriptors: no PNG on disk for building sprite key "${key}" (expected "${fileName}" in src/resources/buildings/)`);
+    }
+    continue;
+  }
+  BUILDING_SPRITES[key] = url;
+}
+
+// Keys with no file of their own (legacy `mine` kind, farm-plot L2/L3, and
+// woodcutterHut-3) resolve to the same URL as their target key.
+for (const [aliasKey, targetKey] of Object.entries(BUILDING_SPRITE_ALIASES)) {
+  const url = BUILDING_SPRITES[targetKey];
+  if (url) BUILDING_SPRITES[aliasKey] = url;
+}
 
 export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescriptor> = {
   "castle.1": {
@@ -334,6 +308,52 @@ export const CASTLE_ALT_DESCRIPTORS: Record<`castle-alt.${CastleLevel}`, SpriteD
   "castle-alt.3": {
     key: "castle-alt.3",
     url: CASTLE_ALT_SPRITES[3],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 3.0 },
+    anchorOffsetY: 16,
+  },
+};
+
+export const CASTLE_ALT2_DESCRIPTORS: Record<`castle-alt2.${CastleLevel}`, SpriteDescriptor> = {
+  "castle-alt2.1": {
+    key: "castle-alt2.1",
+    url: CASTLE_ALT2_SPRITES[1],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.5 },
+  },
+  "castle-alt2.2": {
+    key: "castle-alt2.2",
+    url: CASTLE_ALT2_SPRITES[2],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 2.2 },
+    anchorOffsetY: 8,
+  },
+  "castle-alt2.3": {
+    key: "castle-alt2.3",
+    url: CASTLE_ALT2_SPRITES[3],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 3.0 },
+    anchorOffsetY: 16,
+  },
+};
+
+export const CASTLE_ALT3_DESCRIPTORS: Record<`castle-alt3.${CastleLevel}`, SpriteDescriptor> = {
+  "castle-alt3.1": {
+    key: "castle-alt3.1",
+    url: CASTLE_ALT3_SPRITES[1],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.5 },
+  },
+  "castle-alt3.2": {
+    key: "castle-alt3.2",
+    url: CASTLE_ALT3_SPRITES[2],
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 2.2 },
+    anchorOffsetY: 8,
+  },
+  "castle-alt3.3": {
+    key: "castle-alt3.3",
+    url: CASTLE_ALT3_SPRITES[3],
     anchor: "bottom",
     sizing: { kind: "fitHeight", hexSizeMul: 3.0 },
     anchorOffsetY: 16,
@@ -511,6 +531,28 @@ for (const [path, mod] of Object.entries(UNIT_ARENA_GLOB)) {
   };
 }
 
+// Faction banners: registry-driven like the arena unit sprites — drop a
+// `faction-banner-<id>.png` into resources/factions/ and it resolves with
+// zero descriptor code. A missing banner is an absent map entry, never a
+// broken ?url import, so foundation can ship human-only and each faction
+// plan lands its PNG in the same change; the parity test
+// (test/data/unitCatalogParity.test.ts) asserts every non-neutral faction
+// has its file. Consumers land with the faction-picker UI.
+const FACTION_BANNER_GLOB = import.meta.glob(
+  "../resources/factions/faction-banner-*.png",
+  { eager: true }
+) as Record<string, { default: string }>;
+
+const FACTION_BANNER_FILE_PATTERN = /faction-banner-([a-z]+)\.png$/;
+
+export const FACTION_BANNERS: Partial<Record<FactionId, string>> = {};
+
+for (const [path, mod] of Object.entries(FACTION_BANNER_GLOB)) {
+  const match = path.match(FACTION_BANNER_FILE_PATTERN);
+  if (!match || !mod.default) continue;
+  FACTION_BANNERS[match[1] as FactionId] = mod.default;
+}
+
 // Horse variant key functions auto-generated from registry
 export function horseVariantKey(
   variant: HorseVariantId,
@@ -637,60 +679,43 @@ export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> =
 // base lands slightly above the south vertex (visible ~4-7px above).
 // Per-sprite overrides so each building's visible base sits at the cell's
 // south vertex. The universal -12 default below pulls every sprite up by
-// (12 + bottomPad*sh/128)px above the vertex. The overrides below cancel that
+// (12 + bottomPad * sh / dh)px above the vertex, where sh is the drawn sprite
+// height and dh the PNG's own canvas height. The overrides below cancel that
 // overshoot using each PNG's measured transparent bottom padding.
-//   formula: visibleBase = y + td*0.5 + anchorOffsetY - bottomPad*(sh/128)
+//   formula: visibleBase = y + td*0.5 + anchorOffsetY - bottomPad*(sh/dh)
 //   target:  visibleBase = y + td*0.5
-//   => anchorOffsetY = bottomPad * (sh/128), with sh = tw * 0.9 = 86.4
-const BUILDING_ANCHOR_OVERRIDES: Record<string, number> = {
-  "building.classic.apartment.1": 3,
-  "building.classic.archeryRange.1": 8,
-  "building.classic.barracks.1": 11,
-  "building.classic.farmField.1": 14,
-  "building.classic.farmField.1_variant2": 5,
-  "building.classic.farmhouse.1": 11,
-  "building.classic.house.1": 4,
-  "building.classic.house.2": 6,
-  "building.classic.mageGuild.1": 5,
-  "building.classic.market.1": 6,
-  "building.classic.market.1_variant2": 3,
-  "building.classic.market.1_variant3": 12,
-  "building.classic.market.1_variant4": 2,
-  "building.classic.market.1_variant5": 0,
-  "building.classic.market.2": 0,
-  "building.classic.mine.1": 0,
-  "building.classic.smithy.1": 4,
-  "building.classic.smithy.2": 4,
-  "building.classic.tower.1": 5,
-  "building.classic.tower.2": 2,
-  "building.classic.townHall.1": 4,
-  "building.classic.townHall.2": 2,
-  "building.blocky.archeryRange.1": 7,
-  "building.blocky.house.2": 7,
-  "building.pixel.granary.1": 11,
-  "building.pixel.granary.2": 25,
-  "building.pixel.granary.3": 19,
-  "building.pixel.bank.1": 7,
-  "building.pixel.bank.2": 7,
-  "building.pixel.bank.3": 7,
-  "building.pixel.goldMine.1": 13,
-  "building.pixel.goldMine.2": 9,
-  "building.pixel.goldMine.3": 1,
-  "building.pixel.stoneMine.1": 12,
-  "building.pixel.stoneMine.2": 5,
-  "building.pixel.stoneMine.3": 13,
-  "building.pixel.ironMine.1": 10,
-  "building.pixel.ironMine.2": 10,
-  "building.pixel.ironMine.3": 10,
-  "building.pixel.underConstruction.1": 13,
-  "building.pixel.underConstruction.2": 11,
-  "building.pixel.underConstruction.3": 8,
-  "building.pixel.woodcutterHut.1": 4,
-  "building.pixel.woodcutterHut.2": 8,
-  "building.pixel.woodcutterHut.3": 8,
-  "building.pixel.smithy.2": 4,
-};
-for (const [key, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {
+//   => anchorOffsetY = bottomPad * (sh/dh)
+// The divisor must be the PNG's ACTUAL canvas height, not a nominal 128: nearly
+// every building-pixel-* asset is authored on a 1024 canvas, so sh/dh is ~8x
+// smaller than sh/128 would suggest (a 79-row pad on warehouse-1 is 7px, not
+// 53). The one exception is building-pixel-smithy-2.png, which is 128x128 --
+// the generator divides by the real measured height, so it needs no special
+// case, but do not hard-code 1024 for this family.
+//   => anchorOffsetY = bottomPad * (sh/dh)
+//
+// The table itself is no longer hand-maintained. It is generated from the PNGs
+// by tools/sprites/gen-building-anchors.mjs, which measures each sprite's
+// transparent bottom-pad rows (maxY = lowest row with alpha > 10,
+// padRows = height - 1 - maxY) and computes
+//   offsetY = round(padRows * divisor / height)
+// where divisor is the sprite's draw height, declared per key in the generator:
+// 86.4 (the 1x1 width, tw*0.9) for every key except the 2x2 farmField ground
+// plots, which use 172.8 (the real 2x2 draw height) so the plot's slab corner
+// lands on the footprint's south vertex -- under the 86.4 convention they float
+// ~10px high. Other 2x2 buildings (e.g. townHall) deliberately keep 86.4.
+//
+// Divisor 86.4 is a de-facto convention rather than a strict geometric solve:
+// it reproduces the previous hand-measured values for 106 of 114 keys. The 8
+// where it differs are corrections the measurement exposed -- five are +-1
+// rounding noise in the old table, and granary.2/granary.3 were sunk 8-10px
+// below their cell vertex by values that described art that no longer existed.
+//
+// Regenerate after adding or regenerating a sprite:
+//   npm run gen:building-anchors          (drift gate: npm run gen:building-anchors:check)
+import { BUILDING_ANCHOR_OVERRIDES } from "./generated/buildingAnchorOverrides";
+
+for (const [spriteKey, offsetY] of Object.entries(BUILDING_ANCHOR_OVERRIDES)) {
+  const key = `building.${spriteKey}` as SpriteKey;
   const desc = BUILDING_DESCRIPTORS[key];
   if (desc) BUILDING_DESCRIPTORS[key] = { ...desc, anchorOffsetY: offsetY };
 }
@@ -700,9 +725,35 @@ for (const entry of HORSE_VARIANT_REGISTRY) {
   ALL_HORSE_DESCRIPTORS.push(...Object.values(HORSE_VARIANT_DESCRIPTORS[entry.id]));
 }
 
+export const CARAVAN_SPRITES: Record<CaravanSpriteKind, string> = {
+  resource: caravanSupply,
+  gold: caravanTreasury,
+};
+
+export const CARAVAN_DESCRIPTORS: Record<`caravan.${CaravanSpriteKind}`, SpriteDescriptor> = {
+  "caravan.resource": {
+    key: "caravan.resource",
+    url: CARAVAN_SPRITES.resource,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.45 },
+    naturalSize: 256,
+    anchorOffsetY: 2,
+  },
+  "caravan.gold": {
+    key: "caravan.gold",
+    url: CARAVAN_SPRITES.gold,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.45 },
+    naturalSize: 256,
+    anchorOffsetY: 2,
+  },
+};
+
 export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(CASTLE_DESCRIPTORS),
   ...Object.values(CASTLE_ALT_DESCRIPTORS),
+  ...Object.values(CASTLE_ALT2_DESCRIPTORS),
+  ...Object.values(CASTLE_ALT3_DESCRIPTORS),
   ...Object.values(RESOURCE_DESCRIPTORS),
   ...Object.values(RESOURCE_CART_DESCRIPTORS),
   ...Object.values(RESOURCE_ILLUST_DESCRIPTORS),
@@ -716,9 +767,15 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...ALL_HORSE_DESCRIPTORS,
   ...Object.values(BUILDING_DESCRIPTORS),
   ...Object.values(UNIT_ARENA_DESCRIPTORS),
+  ...Object.values(CARAVAN_DESCRIPTORS),
 ];
 
-export function castleKey(level: CastleLevel, variant?: CastleVariant): `castle.${CastleLevel}` | `castle-alt.${CastleLevel}` {
+export function castleKey(
+  level: CastleLevel,
+  variant?: CastleVariant,
+): `castle.${CastleLevel}` | `castle-alt.${CastleLevel}` | `castle-alt2.${CastleLevel}` | `castle-alt3.${CastleLevel}` {
+  if (variant === 2) return `castle-alt2.${level}`;
+  if (variant === 3) return `castle-alt3.${level}`;
   return variant ? `castle-alt.${level}` : `castle.${level}`;
 }
 
@@ -760,4 +817,10 @@ export function unitArenaKey(unitTypeId: string, pose: UnitArenaPose): `unit.${s
   return `unit.${unitTypeId}.${pose}`;
 }
 
-export { pickStyleForBuilding };
+export function factionBannerKey(id: FactionId): `faction-banner.${FactionId}` {
+  return `faction-banner.${id}`;
+}
+
+export function caravanKey(kind: CaravanSpriteKind = "resource"): `caravan.${CaravanSpriteKind}` {
+  return `caravan.${kind}`;
+}

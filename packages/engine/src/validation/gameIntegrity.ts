@@ -1,5 +1,6 @@
-import type { HeroState, Player, SettlementState } from "@heroes/contracts";
+import type { FactionId, HeroState, Player, SettlementState } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+import type { UnitType } from "../units";
 
 export type IntegritySeverity = "error" | "warning";
 
@@ -20,6 +21,11 @@ export interface GameRowLike {
 
 const VALID_FACTIONS = new Set(["player", "ai"]);
 const VALID_LEVELS = new Set([1, 2, 3]);
+// Roster factions (faction-registry foundation, D7): the parallel of
+// VALID_FACTIONS for the new optional Player.factionId and for catalog
+// units' factionId. VALID_FACTIONS above stays untouched — it guards the
+// seat faction that drives AI_TURN.
+const VALID_FACTION_IDS = new Set<FactionId>(["human", "ashen", "ironmark", "verdant", "neutral"]);
 
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
@@ -63,6 +69,13 @@ export function validateGameRow(row: GameRowLike): IntegrityIssue[] {
     }
     if (!VALID_FACTIONS.has(p.faction)) {
       push("error", `${path}.faction`, `faction must be "player" or "ai", got ${JSON.stringify(p.faction)}`);
+    }
+    if (p.factionId !== undefined && !VALID_FACTION_IDS.has(p.factionId)) {
+      push(
+        "error",
+        `${path}.factionId`,
+        `factionId must be a roster faction id ("human" | "ashen" | "ironmark" | "verdant" | "neutral"), got ${JSON.stringify(p.factionId)}`,
+      );
     }
     if (typeof p.name !== "string" || !p.name) {
       push("warning", `${path}.name`, "name is missing or empty");
@@ -182,4 +195,25 @@ export function validateGameRow(row: GameRowLike): IntegrityIssue[] {
 
 export function isHealthy(issues: IntegrityIssue[]): boolean {
   return !issues.some((i) => i.severity === "error");
+}
+
+/**
+ * D7's catalog half: validateGameRow never sees the unit catalog (units are
+ * not part of a game row), so every catalog unit's factionId is validated
+ * through this separate entry point. The parity test calls it over the
+ * unit_types rows; the DB CHECK constraint (migration 023) is the same rule
+ * enforced at write time.
+ */
+export function validateUnitCatalogFactions(unitTypes: readonly UnitType[]): IntegrityIssue[] {
+  const issues: IntegrityIssue[] = [];
+  for (const unit of unitTypes) {
+    if (unit.factionId !== undefined && !VALID_FACTION_IDS.has(unit.factionId)) {
+      issues.push({
+        severity: "error",
+        path: `unit_types.${unit.id}.faction_id`,
+        message: `factionId must be a roster faction id, got ${JSON.stringify(unit.factionId)}`,
+      });
+    }
+  }
+  return issues;
 }

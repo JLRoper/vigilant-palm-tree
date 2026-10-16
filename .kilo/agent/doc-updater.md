@@ -33,3 +33,5 @@ For each doc that needs an update:
 - Don't edit `AGENTS.md`, `.kilo/**`, or anything in `sessionTracking/` — those are agent config.
 - If you're unsure whether a doc needs an update, leave it alone and mention it in your final report.
 - Final return: "Updated N doc files: <list>. Skipped: <list with reason>." (or "No docs needed updating." if nothing changed).
+
+> Execution note (Phase 06): the doc updater runs inside the owning task's worktree, not whatever directory happens to be current.

@@ -1,4 +1,5 @@
 import type { CaptureResult, GameState, HeroId, HeroState, PlayerId, SettlementId, SettlementState } from "@heroes/contracts";
+import { heroGoldCap } from "./capacity";
 
 export const CAPTURE_GOLD_REWARD = 100;
 
@@ -31,7 +32,12 @@ export function captureSettlement(
   });
   const newHeroes: Record<HeroId, HeroState> = {
     ...state.heroes,
-    [heroId]: { ...hero, gold: hero.gold + CAPTURE_GOLD_REWARD },
+    // Phase 1 heroGoldCap enforcement: the capture reward is clamped to the
+    // capturing hero's treasury-cart purse headroom, excess lost -- the Q4
+    // soft-cap doctrine (caps gate additions only; stock is never reduced,
+    // but neither is gold invented above the cap). This was one of the two
+    // uncapped credit sites (transferCargoLoot already clamped).
+    [heroId]: { ...hero, gold: hero.gold + Math.min(CAPTURE_GOLD_REWARD, Math.max(0, heroGoldCap(hero) - hero.gold)) },
   };
   return {
     state: { ...state, settlements: newSettlements, players: newPlayers, heroes: newHeroes, dirty: true },

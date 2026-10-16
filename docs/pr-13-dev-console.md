@@ -100,7 +100,7 @@ when at least one visible button matches.
 | Change | File |
 | --- | --- |
 | New | `src/debug/eventLog.ts`, `src/debug/devConsole.ts` |
-| Updated | `src/managers/GameEngine.ts`, `src/io/debugCommands.ts`, `src/views/developerSettingsMenu.ts`, `src/views/homeView.ts`, `src/views/manualBattleArena.ts`, `src/io/api.ts`, `docs/dev-console.md`, `docs/event-system.md`, `docs/module-documentation-and-relationships.md`, `docs/README.md` |
+| Updated | `src/managers/GameEngine.ts`, `src/io/debugCommands.ts`, `src/screens/home/developerSettingsMenu.ts`, `src/views/homeView.ts`, `src/views/manualBattleArena.ts`, `src/io/api.ts`, `docs/dev-console.md`, `docs/event-system.md`, `docs/module-documentation-and-relationships.md`, `docs/README.md` |
 | Test fix | `test/cityView.test.ts` |
 | Tracking | `sessionTracking/2026-08-02.md`, `sessionTracking/2026-08-03.md` |
 

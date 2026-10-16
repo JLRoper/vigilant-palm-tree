@@ -1,0 +1,9 @@
+Side-view pixel art game asset of a single fantasy battle unit in a dramatic tabletop-miniature style: chunky readable pixels, rich saturated colors with strong three-tone shading ramps and bright rim highlights, bold dark outlines, high contrast that stays readable at small size, fully transparent background, square 1:1 canvas.
+
+Match the attached reference image exactly: it shows this exact unit at rest — same character, same colors, same outfit and proportions, same facing-right side view. Only the pose changes, as described below.
+
+Subject: a den-raised dire bear warbeast charging forward at a full run on all fours: mid-stride with heavy claws digging in, moss-dark brown fur, bark-plated hide over the shoulders, golden bloom wreath around the thick neck, small fierce amber eyes fixed ahead.
+
+Single centered figure facing right, full body visible from head to feet, filling about 75% of the canvas height, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.
+
+This is a beast figure, not a building — no walls, roofs, doors, fences, or architecture.

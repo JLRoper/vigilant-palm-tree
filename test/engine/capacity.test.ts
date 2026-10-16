@@ -5,6 +5,7 @@ import {
   BASE_TREASURY,
   applyEffectiveIncome,
   addStockClamped,
+  buildingSettlementEffects,
   produceSettlementResources,
   settlementResourceCap,
   settlementTreasuryCap,
@@ -23,20 +24,65 @@ test("settlementResourceCap: base scales by level, no buildings", () => {
   assert.equal(settlementTreasuryCap(s3), BASE_TREASURY[3]);
 });
 
-test("warehouse adds all-resource capacity, granary food-only, bank treasury", () => {
+test("warehouse adds all-resource capacity, granary food-only, bank + treasury gold", () => {
   const s = makeSettlement("s0", 0, 0, 0, {
     level: 1 as 1 | 2 | 3,
     buildings: [
       { gx: 1, gy: 0, kind: "warehouse", level: 2, style: "classic" },
       { gx: 2, gy: 0, kind: "granary", level: 1, style: "classic" },
       { gx: 3, gy: 0, kind: "bank", level: 1, style: "classic" },
+      { gx: 4, gy: 0, kind: "treasury", level: 1, style: "classic" },
     ],
   });
   const cap = settlementResourceCap(s);
   assert.equal(cap.wood, BASE_STORAGE[1] + 600 * 2, "warehouse 600/level × 2");
   assert.equal(cap.food, BASE_STORAGE[1] + 600 * 2 + 600, "warehouse + granary food bonus");
   assert.equal(cap.iron, BASE_STORAGE[1] + 600 * 2);
-  assert.equal(settlementTreasuryCap(s), BASE_TREASURY[1] + 500 * 2 + 2000, "warehouse 500/level × 2 + bank 2000");
+  assert.equal(
+    settlementTreasuryCap(s),
+    BASE_TREASURY[1] + 500 * 2 + 2000 + 2000,
+    "warehouse 500/level × 2 + bank 2000 + treasury 2000",
+  );
+});
+
+// The treasury kind was added to the registry without touching capacity.ts:
+// settlementTreasuryCap sums `treasuryBonus` over every building, so a new
+// cap-building is picked up from the registry alone. This is the pin that says
+// so -- if a future refactor switches to a per-kind switch, it fails here.
+test("a treasury contributes treasuryBonus with no capacity-code change", () => {
+  const bare = makeSettlement("s0", 0, 0, 0, { level: 1 as 1 | 2 | 3 });
+  const withTreasury = makeSettlement("s0", 0, 0, 0, {
+    level: 1 as 1 | 2 | 3,
+    buildings: [{ gx: 1, gy: 1, kind: "treasury", level: 1, style: "classic" }],
+  });
+
+  assert.equal(settlementTreasuryCap(withTreasury), BASE_TREASURY[1] + 2000);
+  assert.equal(
+    settlementTreasuryCap(withTreasury) - settlementTreasuryCap(bare),
+    buildingSettlementEffects("treasury", 1).treasuryBonus,
+  );
+  assert.equal(
+    buildingSettlementEffects("treasury", 1).treasuryBonus,
+    buildingSettlementEffects("bank", 1).treasuryBonus,
+    "treasury matches bank's treasury cap; the bank keeps a pot instead",
+  );
+});
+
+test("treasury scales per level like every other building effect", () => {
+  const s = makeSettlement("s0", 0, 0, 0, {
+    level: 1 as 1 | 2 | 3,
+    buildings: [{ gx: 1, gy: 1, kind: "treasury", level: 3, style: "classic" }],
+  });
+  assert.equal(settlementTreasuryCap(s), BASE_TREASURY[1] + 6000, "2000/level × 3");
+});
+
+// bank and treasury are cap-only: neither accrues gold per turn. The economy
+// only ever credited goldMine's gold, so a bank carrying a goldPerTurn entry
+// would advertise an effect the engine never applied.
+test("bank and treasury add no goldPerTurn; only goldMine does", () => {
+  assert.equal(buildingSettlementEffects("bank", 1).goldPerTurn, 0);
+  assert.equal(buildingSettlementEffects("treasury", 1).goldPerTurn, 0);
+  assert.equal(buildingSettlementEffects("goldMine", 1).goldPerTurn, 40);
 });
 
 test("addStockClamped: adds under cap, stops at cap, preserves legacy surplus", () => {

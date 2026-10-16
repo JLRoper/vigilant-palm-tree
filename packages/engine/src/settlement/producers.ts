@@ -8,8 +8,11 @@ export type ProducerKind =
   | "stoneMine"
   | "ironMine"
   | "mine"
-  | "arcaneFont";
-export type ProducerResource = Extract<ResourceType, "gold" | "wood" | "stone" | "iron" | "arcane">;
+  | "arcaneFont"
+  | "farmField"
+  | "farmhouse"
+  | "granary";
+export type ProducerResource = Extract<ResourceType, "gold" | "wood" | "stone" | "iron" | "arcane" | "food">;
 
 const PRODUCER_KINDS: readonly string[] = [
   "goldMine",
@@ -18,6 +21,9 @@ const PRODUCER_KINDS: readonly string[] = [
   "ironMine",
   "mine",
   "arcaneFont",
+  "farmField",
+  "farmhouse",
+  "granary",
 ];
 
 export function isProducerKind(kind: BuildingKind): kind is ProducerKind {
@@ -30,6 +36,9 @@ const FIXED_PRODUCER_RESOURCE: Record<Exclude<ProducerKind, "mine">, ProducerRes
   stoneMine: "stone",
   ironMine: "iron",
   arcaneFont: "arcane",
+  farmField: "food",
+  farmhouse: "food",
+  granary: "food",
 };
 
 export function producerResource(
@@ -55,6 +64,7 @@ export function producerBasePerTurn(
 ): number {
   const effects = buildingSettlementEffects(kind, level);
   if (kind === "goldMine") return effects.goldPerTurn;
+  if (resource === "food") return effects.foodPerTurn;
   if (resource === "gold") return 0;
   return effects.resourceYieldBonus?.[resource] ?? 0;
 }

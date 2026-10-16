@@ -4,7 +4,6 @@ import {
   spendMovement,
   resolveBattle,
   transferGold,
-  tradeResources,
   recruitHero,
   upgradeTownHall,
   setAutoTrade,
@@ -23,6 +22,7 @@ import {
   advanceCharterTravel,
   recruitUnits as recruitUnitsCommand,
   transferUnits as transferUnitsCommand,
+  bankGold as bankGoldCommand,
   submitSettlementBattleResult,
 } from "../io/commands";
 import type { EndTurnResult } from "../io/commands";
@@ -36,11 +36,14 @@ import type {
   HeroState,
   PlayerId,
   SettlementId,
+  TradeRouteEndpoint,
+  TradeRoutePayload,
   TransferDirection,
   WarehouseResource,
 } from "@heroes/contracts";
-import type { TurnControllerHooks } from "../state/turnController";
+import type { TurnController, TurnControllerHooks } from "../state/turnController";
 import type { BattleResult } from "@heroes/engine";
+import { deriveNextTradeRouteId } from "@heroes/engine";
 import { pickAiMove as pickAiMoveBrain, pickGarrisonRecruitment } from "../ai/aiBrain";
 import { cachedUnitTypes } from "../data/unitCatalog";
 import type { GameMap } from "../map/gameMap";
@@ -48,6 +51,7 @@ import type { Axial } from "../core/hex";
 import { getMultiplayerSync } from "../io/multiplayerSync";
 import { settings, type HorseVariant } from "../state/settings";
 import { bus } from "../core/eventBus";
+import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { takeLastAppliedBuildDelta } from "./buildCommitLedger";
 import type { NetCost } from "../screens/settlements/cityView/netCost";
 
@@ -67,6 +71,14 @@ function reportCommandFailure(action: string, e: unknown): void {
   bus.emit({ type: "command:rejected", action, reason });
 }
 
+// Server's EndTurn command path (server/app/commandHandler.ts) appends the authoritative copies of these audit kinds itself; the client posts were byte-identical duplicates (actor_seat NULL on top).
+const SERVER_APPENDED_AUDIT_KINDS: ReadonlySet<string> = new Set([
+  "turn_ended",
+  "round_ended",
+  "round_started",
+  "ai_turn_started",
+]);
+
 export interface BuildTurnHooksOptions {
   gameName: () => string | null;
   gameMap: () => GameMap;
@@ -77,6 +89,12 @@ export interface BuildTurnHooksOptions {
   // only when it belongs to this browser. Null/unknown seat falls back to the
   // legacy existence-only preservation.
   localSeat?: () => PlayerId | null;
+  // S1 (logistics-interface-fixes plan §5.8): the four logistics hooks hand
+  // their command results to the live controller's mergeCommandResult through
+  // this getter, so the optimistic route id / wagon pools reconcile with the
+  // server's instead of diverging until a resync. Resolved lazily at result
+  // time (the controller does not exist when hooks are built).
+  getController?: () => TurnController | null;
 }
 
 let lastBattle: { attackerId: HeroId; defenderId: HeroId } | null = null;
@@ -116,7 +134,13 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         sync.start(name);
         return merged;
       } catch (e) {
-        console.warn("[turnHooks] endTurn failed:", e);
+        // The state comes back unchanged, so without this the click is
+        // invisible: the EndTurn POST failed (403 forbidden_not_your_turn /
+        // actor_mismatch / ai_seat_command_forbidden, a 5xx, or the 10s
+        // TimeoutError) and the player is left with a toolbar that looks live
+        // but does nothing. Every other hook here reports its failure, so this
+        // one must too.
+        reportCommandFailure("End turn", e);
         sync.start(name);
         return state;
       }
@@ -165,13 +189,33 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     onBattleResolved: async (
       state: GameState,
     ): Promise<{ state: GameState; battle: BattleResult | null }> => {
-      const cached = lastBattle;
+      // The pair normally comes from enterBattle()'s battle_started log (the
+      // loop/tick detection path). A battle OFFERED by the server's AI driver
+      // reaches this client through the garrison bridge's BattleOffered delta,
+      // which flips the phase without going through enterBattle() -- for that
+      // path the live BATTLE phase itself names the pair; without this
+      // fallback Quick Resolve would no-op locally (no ResolveBattle POST, no
+      // BattleResolved event, server marker stranded until the 300s
+      // force-resolve).
+      const cached =
+        lastBattle ??
+        (state.phase.kind === "BATTLE"
+          ? { attackerId: state.phase.attackerId, defenderId: state.phase.defenderId }
+          : null);
       lastBattle = null;
       lastResolveVerdicts = null;
       const name = opts.gameName();
       if (!name || !cached) return { state, battle: null };
       const attackerHeroBefore = state.heroes[cached.attackerId];
       if (!attackerHeroBefore) return { state, battle: null };
+      // On server-driven games the attacker's owner is often an AI seat and
+      // the command route rejects AI-seat actors (ai_seat_command_forbidden):
+      // act as the local seat whenever it owns either combatant.
+      const local = getInMemoryLocalPlayerId(name) ?? 0;
+      const ownsAttacker = attackerHeroBefore.ownerId === local;
+      const defenderHeroBefore = state.heroes[cached.defenderId];
+      const ownsDefender = defenderHeroBefore?.ownerId === local;
+      const actor = ownsAttacker || ownsDefender ? local : attackerHeroBefore.ownerId;
       try {
         // No longer sends the client's GameState at all (Phase 3 Track A
         // Week 3+) -- the server loads its own row and its own unit_types
@@ -179,7 +223,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         // so this only needs to carry who's attacking whom and on whose
         // behalf.
         const result = await resolveBattle(name, {
-          actor: attackerHeroBefore.ownerId,
+          actor,
           attackerId: cached.attackerId,
           defenderId: cached.defenderId,
         });
@@ -194,21 +238,6 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       } catch (e) {
         console.warn("[turnHooks] resolveBattle failed:", e);
         return { state, battle: null };
-      }
-    },
-    onTradeResources: async (
-      actor: number,
-      fromSettlementId: SettlementId,
-      toSettlementId: SettlementId,
-      resource: WarehouseResource,
-      amount: number,
-    ): Promise<void> => {
-      const name = opts.gameName();
-      if (!name || resource === "food") return;
-      try {
-        await tradeResources(name, { actor, fromSettlementId, toSettlementId, resource, amount });
-      } catch (e) {
-        reportCommandFailure("Trade resources", e);
       }
     },
     onRecruitHero: async (
@@ -363,35 +392,38 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       reportCommandFailure("Transfer resources", e);
     }
   },
-  onAssignWagons: async (actor: number, heroId: HeroId, delta: number): Promise<void> => {
+  onAssignWagons: async (actor: number, heroId: HeroId, delta: number, slot?: "cargo" | "treasury"): Promise<void> => {
     const name = opts.gameName();
     if (!name) return;
     try {
-      await assignWagonsCommand(name, { actor, heroId, delta });
+      const result = await assignWagonsCommand(name, { actor, heroId, delta, slot });
+      opts.getController?.()?.mergeCommandResult(result);
     } catch (e) {
       reportCommandFailure("Assign wagons", e);
     }
   },
-  onBuyWagons: async (actor: number, settlementId: SettlementId, count: number): Promise<void> => {
+  onBuyWagons: async (actor: number, settlementId: SettlementId, count: number, slot?: "cargo" | "treasury"): Promise<void> => {
     const name = opts.gameName();
     if (!name) return;
     try {
-      await buyWagonsCommand(name, { actor, settlementId, count });
+      const result = await buyWagonsCommand(name, { actor, settlementId, count, slot });
+      opts.getController?.()?.mergeCommandResult(result);
     } catch (e) {
       reportCommandFailure("Buy wagons", e);
     }
   },
   onCreateTradeRoute: async (
     actor: number,
-    fromSettlementId: SettlementId,
-    toSettlementId: SettlementId,
-    resource: WarehouseResource,
+    from: TradeRouteEndpoint,
+    to: TradeRouteEndpoint,
+    payload: TradeRoutePayload,
     wagons: number,
   ): Promise<void> => {
     const name = opts.gameName();
     if (!name) return;
     try {
-      await createTradeRouteCommand(name, { actor, fromSettlementId, toSettlementId, resource, wagons });
+      const result = await createTradeRouteCommand(name, { actor, from, to, payload, wagons });
+      opts.getController?.()?.mergeCommandResult(result);
     } catch (e) {
       reportCommandFailure("Create trade route", e);
     }
@@ -404,7 +436,8 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     const name = opts.gameName();
     if (!name) return;
     try {
-      await updateTradeRouteCommand(name, { actor, routeId, ...change });
+      const result = await updateTradeRouteCommand(name, { actor, routeId, ...change });
+      opts.getController?.()?.mergeCommandResult(result);
     } catch (e) {
       reportCommandFailure("Update trade route", e);
     }
@@ -412,12 +445,11 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     onUpgradeSettlement: async (
       actor: number,
       settlementId: SettlementId,
-      upgradePopulationGate: number,
     ): Promise<void> => {
       const name = opts.gameName();
       if (!name) return;
       try {
-        await upgradeSettlement(name, { actor, settlementId, upgradePopulationGate });
+        await upgradeSettlement(name, { actor, settlementId });
       } catch (e) {
         reportCommandFailure("Upgrade settlement", e);
       }
@@ -454,6 +486,22 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await transferUnitsCommand(name, { actor, heroId, settlementId, direction, unitTypeId, count, toSlot });
       } catch (e) {
         reportCommandFailure("Transfer units", e);
+      }
+    },
+    onBankGold: async (
+      actor: number,
+      settlementId: SettlementId,
+      gx: number,
+      gy: number,
+      amount: number,
+      direction: "deposit" | "withdraw",
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await bankGoldCommand(name, { actor, settlementId, gx, gy, amount, direction });
+      } catch (e) {
+        reportCommandFailure(direction === "deposit" ? "Bank deposit" : "Bank withdrawal", e);
       }
     },
     onSettlementBattleSubmitted: async (payload): Promise<void> => {
@@ -499,6 +547,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         }
       }
       if (!name) return;
+      if (SERVER_APPENDED_AUDIT_KINDS.has(event.type)) return;
       void api.logEvent(name, event.type, event.payload).catch(() => {});
     },
     getMap: () => opts.gameMap(),
@@ -582,7 +631,12 @@ export function mergeFromEndTurn(state: GameState, result: EndTurnResult, localS
     selectedHero && (localSeat == null || selectedHero.ownerId === localSeat) ? state.selectedHeroId : null;
   const selectedSettlement = state.selectedSettlementId != null ? result.settlements[state.selectedSettlementId] : undefined;
   const selectedSettlementId = selectedSettlement ? state.selectedSettlementId : null;
-  return {
+  // S2 (logistics-interface-fixes plan §5.8): the routes replace wholesale, so
+  // the id counter must re-derive the same way hydration does -- otherwise it
+  // can regress below the max persisted id after a missed/self-skipped
+  // TradeRouteCreated event and the next create collides.
+  const tradeRoutes = result.tradeRoutes ?? state.tradeRoutes;
+  const merged: GameState = {
     ...state,
     round: result.round,
     day: result.day,
@@ -592,10 +646,12 @@ export function mergeFromEndTurn(state: GameState, result: EndTurnResult, localS
     settlements: result.settlements,
     // Caravans moved server-side this wrap -- the merged routes replace the
     // client's wholesale, same as heroes/settlements.
-    tradeRoutes: result.tradeRoutes ?? state.tradeRoutes,
+    tradeRoutes,
     phase,
     selectedHeroId,
     selectedSettlementId,
     dirty: true,
   };
+  if (tradeRoutes) merged.nextTradeRouteId = deriveNextTradeRouteId(tradeRoutes);
+  return merged;
 }

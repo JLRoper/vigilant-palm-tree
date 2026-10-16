@@ -1,0 +1,5 @@
+Side-view pixel art game asset of a single fantasy battle unit in a dramatic tabletop-miniature style: chunky readable pixels, rich saturated colors with strong three-tone shading ramps and bright rim highlights, bold dark outlines, high contrast that stays readable at small size, fully transparent background, square 1:1 canvas.
+
+Subject: a shield bearer of the mountain holds: a broad dwarf in flat-topped steel great-helm and heavy plate standing behind a massive rectangular tower shield planted on the ground beside them, the shield face iron-gray with a riveted steel rim and a golden boss at the center.
+
+Single centered figure facing right, full body visible from head to feet, filling about 75% of the canvas height, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.

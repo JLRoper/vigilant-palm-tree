@@ -104,8 +104,9 @@ export class AccordionSection {
     return this.expanded;
   }
 
-  toggle(): void {
-    this.expanded = !this.expanded;
+  setExpanded(expanded: boolean): void {
+    if (expanded === this.expanded) return;
+    this.expanded = expanded;
     this.chevron.style.transform = this.expanded ? "rotate(90deg)" : "";
     this.body.style.display = this.expanded ? "" : "none";
     // Toggling changes the panel's measured height; the panel re-anchors so
@@ -113,5 +114,9 @@ export class AccordionSection {
     // ResizeObserver -- see plan/2026-08-09-modal-viewport-overflow.md, an
     // observer on the root stops firing once max-height is reached.
     this.onToggle?.();
+  }
+
+  toggle(): void {
+    this.setExpanded(!this.isExpanded);
   }
 }

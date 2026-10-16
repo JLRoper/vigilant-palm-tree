@@ -1,0 +1,7 @@
+Side-view pixel art game asset of a single fantasy battle unit in a dramatic tabletop-miniature style: chunky readable pixels, rich saturated colors with strong three-tone shading ramps and bright rim highlights, bold dark outlines, high contrast that stays readable at small size, fully transparent background, square 1:1 canvas.
+
+Subject: a runesmith of the mountain holds striding briskly to the right: a dwarven artificer with a grey beard and forging goggles pushed up on the forehead carrying his short rune-etched smith hammer resting on one shoulder, the hammer head glowing gold with faint ember sparks, heavy leather apron over steel-blue robes, robes and beard swinging with the stride, knees bent in a full stride.
+
+Single centered figure facing right, full body visible from head to feet, filling about 75% of the canvas height, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.
+
+This is a warrior portrait-free full-body figure, not a building — no walls, roofs, doors, or architecture.

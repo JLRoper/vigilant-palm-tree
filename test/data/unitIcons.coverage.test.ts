@@ -11,21 +11,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { UNIT_CATALOG_IDS } from "../helpers/unitIds";
 
-const UNIT_ICON_IDS = [
-  "peasant",
-  "archer",
-  "crossbowman",
-  "swordsman",
-  "pikeman",
-  "cavalry",
-  "monk",
-  "crusader",
-  "griffin",
-  "hydra",
-  "wisp",
-  "black_dragon",
-] as const;
+// No deliberate gaps: every unit-catalog id must ship its dedicated icon bust.
+const EXPECTED_ICON_GAPS: readonly string[] = [];
+
+const UNIT_ICON_IDS = UNIT_CATALOG_IDS.filter(
+  (id) => !EXPECTED_ICON_GAPS.includes(id),
+);
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 

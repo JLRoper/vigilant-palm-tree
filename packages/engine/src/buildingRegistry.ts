@@ -228,6 +228,33 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
+  huntingLodge: {
+    kind: "huntingLodge",
+    label: "Hunting Lodge",
+    description: "Kennels and hunting grounds; raises fierce warhounds for the crown.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 3,
+    placementCost: { gold: 250, wood: 8 },
+    upkeepPerLevel: { wood: 2, stone: 1 },
+    recruits: [{ unitTypeId: "warhound", goldCost: 180, minLevel: 1 }],
+    settlementEffects: { defenseBonus: 1 },
+    playerEffects: {},
+  },
+  eyrie: {
+    kind: "eyrie",
+    label: "Eagle Eyrie",
+    description: "Cliffside aeries where the realm's giant eagles nest; a bonded prince leads the eyerie.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 6,
+    placementCost: { gold: 500, wood: 12, stone: 8 },
+    upkeepPerLevel: { wood: 2, stone: 1 },
+    recruits: [
+      { unitTypeId: "giant_eagle", goldCost: 1400, resourceCost: { arcane: 2 }, minLevel: 1 },
+      { unitTypeId: "eagle_prince", goldCost: 2400, resourceCost: { arcane: 4 }, minLevel: 2 },
+    ],
+    settlementEffects: {},
+    playerEffects: {},
+  },
   granary: {
     kind: "granary",
     label: "Granary",
@@ -244,9 +271,12 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     kind: "warehouse",
     label: "Warehouse",
     description: "Walled storehouses with cellars and lofts, raising the settlement's stockpile capacity for every resource.",
-    footprint: { w: 1, h: 1 },
+    // 2x2 (not 1x1) so a warehouse is a real space commitment. That is also
+    // why the placement cost doubled: four tiles is 19% of a level-1 town's
+    // usable space, versus one tile at 5% before.
+    footprint: { w: 2, h: 2 },
     buildDays: 3,
-    placementCost: { gold: 250, wood: 8, stone: 6 },
+    placementCost: { gold: 500, wood: 16, stone: 12 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
     settlementEffects: {
@@ -258,13 +288,32 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   bank: {
     kind: "bank",
     label: "Bank",
-    description: "Secure vaults and ledger houses that store and compound the settlement's gold each turn.",
+    description:
+      "A vaulted strongroom that holds a bank pot of its own, and widens the settlement's treasury so more gold can be held at all. The treasury-cap role is shared with the treasury; the pot is the bank's own.",
     footprint: { w: 1, h: 1 },
     buildDays: 5,
     placementCost: { gold: 400, wood: 6, stone: 8 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
-    settlementEffects: { goldPerTurn: 60, treasuryBonus: 2000 },
+    // No goldPerTurn: only goldMine's gold actually accrues per turn, so the
+    // 60g this used to advertise was never applied by the economy and the
+    // description promised an effect the game did not have.
+    settlementEffects: { treasuryBonus: 2000 },
+    playerEffects: {},
+  },
+  treasury: {
+    kind: "treasury",
+    label: "Treasury",
+    description:
+      "A great counting-house that raises the settlement's treasury capacity, letting it hold more gold. It does nothing else.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 5,
+    placementCost: { gold: 400, wood: 6, stone: 8 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [],
+    // settlementTreasuryCap sums treasuryBonus over every building, so a new
+    // cap-building needs no capacity.ts change -- it contributes on sight.
+    settlementEffects: { treasuryBonus: 2000 },
     playerEffects: {},
   },
   goldMine: {
@@ -303,6 +352,177 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     settlementEffects: { resourceYieldBonus: { arcane: 3 } },
     playerEffects: {},
   },
+  crypt: {
+    kind: "crypt",
+    label: "Crypt",
+    description: "Bone-cellared vaults where the Court's levies sleep standing up; raises ghouls for the barrow levy.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 2,
+    placementCost: { gold: 150, wood: 4 },
+    upkeepPerLevel: { wood: 1, stone: 0 },
+    recruits: [{ unitTypeId: "ghoul", goldCost: 40, minLevel: 1 }],
+    settlementEffects: { defenseBonus: 1 },
+    playerEffects: {},
+  },
+  ossuary: {
+    kind: "ossuary",
+    label: "Ossuary",
+    description: "Sorted bone-houses where revenant ranks are wired and drilled; bowmen above, pikemen below.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 4,
+    placementCost: { gold: 300, wood: 10, stone: 6 },
+    upkeepPerLevel: { wood: 2, stone: 1 },
+    recruits: [
+      { unitTypeId: "bone_archer", goldCost: 260, resourceCost: { wood: 2 }, minLevel: 1 },
+      { unitTypeId: "bone_pikeman", goldCost: 260, resourceCost: { iron: 3 }, minLevel: 2 },
+    ],
+    settlementEffects: { defenseBonus: 1 },
+    playerEffects: {},
+  },
+  wraithBarrows: {
+    kind: "wraithBarrows",
+    label: "Wraith Barrows",
+    description: "Grave-mounds where grief pools and hardens into form; wraiths drift from the barrows and dread knights stable beneath them.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 5,
+    placementCost: { gold: 350, wood: 8, stone: 6, arcane: 1 },
+    upkeepPerLevel: { wood: 2, stone: 1 },
+    recruits: [
+      { unitTypeId: "wraith", goldCost: 380, resourceCost: { arcane: 2 }, minLevel: 1 },
+      { unitTypeId: "blood_knight", goldCost: 480, resourceCost: { iron: 2 }, minLevel: 2 },
+    ],
+    settlementEffects: { defenseBonus: 2 },
+    playerEffects: {},
+  },
+  spireOfAsh: {
+    kind: "spireOfAsh",
+    label: "Spire of Ash",
+    description: "The Court's cold crown: a cinder-black spire whose halls seat the long night's aristocracy and its magisters.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 6,
+    placementCost: { gold: 500, wood: 12, stone: 8, arcane: 2 },
+    upkeepPerLevel: { wood: 2, stone: 1 },
+    recruits: [
+      { unitTypeId: "vampire_lord", goldCost: 850, resourceCost: { arcane: 4 }, minLevel: 1 },
+      { unitTypeId: "lich", goldCost: 1900, resourceCost: { arcane: 5 }, minLevel: 2 },
+    ],
+    settlementEffects: { defenseBonus: 1 },
+    playerEffects: {},
+  },
+  forgeHall: {
+    kind: "forgeHall",
+    label: "Forge Hall",
+    description: "The hold's ringing heart, where clan axemen are mustered and shield bearers are fitted for the wall.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 5,
+    placementCost: { gold: 300, wood: 10, stone: 6 },
+    upkeepPerLevel: { wood: 2, stone: 1 },
+    recruits: [
+      { unitTypeId: "dwarf_axeman", goldCost: 220, minLevel: 1 },
+      { unitTypeId: "shield_bearer", goldCost: 280, resourceCost: { iron: 2 }, minLevel: 2 },
+    ],
+    settlementEffects: { defenseBonus: 2 },
+    playerEffects: {},
+  },
+  gunnersRedoubt: {
+    kind: "gunnersRedoubt",
+    label: "Gunners' Redoubt",
+    description: "A powder-scarred bastion where the Holds' hand gunners drill thunder into the mountain's echo.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 4,
+    placementCost: { gold: 350, wood: 8, stone: 6 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [{ unitTypeId: "hand_gunner", goldCost: 380, resourceCost: { iron: 2 }, minLevel: 1 }],
+    settlementEffects: { defenseBonus: 1 },
+    playerEffects: {},
+  },
+  golemFoundry: {
+    kind: "golemFoundry",
+    label: "Golem Foundry",
+    description: "A rune-etched casting pit that arms the ironsworn and raises obedient golems from the hold's best ore.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 6,
+    placementCost: { gold: 500, wood: 12, stone: 8 },
+    upkeepPerLevel: { wood: 2, stone: 1 },
+    recruits: [
+      { unitTypeId: "ironsworn", goldCost: 550, resourceCost: { iron: 4 }, minLevel: 1 },
+      { unitTypeId: "iron_golem", goldCost: 1200, resourceCost: { stone: 4, iron: 4 }, minLevel: 2 },
+    ],
+    settlementEffects: { defenseBonus: 2 },
+    playerEffects: {},
+  },
+  deepAnvil: {
+    kind: "deepAnvil",
+    label: "Deep Anvil",
+    description: "The oldest forge under the peaks, where runesmiths sing to hot metal and forge lords are crowned.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 6,
+    placementCost: { gold: 500, wood: 10, stone: 8, arcane: 2 },
+    upkeepPerLevel: { wood: 2, stone: 1 },
+    recruits: [
+      { unitTypeId: "runesmith", goldCost: 550, resourceCost: { arcane: 3 }, minLevel: 1 },
+      { unitTypeId: "forge_lord", goldCost: 2200, resourceCost: { iron: 6, arcane: 2 }, minLevel: 2 },
+    ],
+    settlementEffects: { defenseBonus: 1 },
+    playerEffects: {},
+  },
+  groveSanctum: {
+    kind: "groveSanctum",
+    label: "Grove Sanctum",
+    description: "A living-wood shrine where the Wild's scouts and thorn archers learn to read the canopy.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 4,
+    placementCost: { gold: 300, wood: 8, stone: 5 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [
+      { unitTypeId: "forest_scout", goldCost: 180, resourceCost: { wood: 1 }, minLevel: 1 },
+      { unitTypeId: "thorn_archer", goldCost: 280, resourceCost: { wood: 2 }, minLevel: 2 },
+    ],
+    settlementEffects: { defenseBonus: 1 },
+    playerEffects: {},
+  },
+  warrenLodge: {
+    kind: "warrenLodge",
+    label: "Warren Lodge",
+    description: "A den-mound hall of the beastkin lodges; wardens stand watch and the warbeasts den below.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 3,
+    placementCost: { gold: 250, wood: 8 },
+    upkeepPerLevel: { wood: 2, stone: 1 },
+    recruits: [
+      { unitTypeId: "briar_warden", goldCost: 260, resourceCost: { wood: 2 }, minLevel: 1 },
+      { unitTypeId: "warbeast", goldCost: 300, minLevel: 2 },
+    ],
+    settlementEffects: { defenseBonus: 1 },
+    playerEffects: {},
+  },
+  sylvanStables: {
+    kind: "sylvanStables",
+    label: "Sylvan Stables",
+    description: "Living-wood paddocks where the great elk are saddled; the forest's cavalry musters here.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 4,
+    placementCost: { gold: 350, wood: 10, stone: 5 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [
+      { unitTypeId: "elk_rider", goldCost: 450, resourceCost: { wood: 2 }, minLevel: 1 },
+      { unitTypeId: "stag_knight", goldCost: 2000, resourceCost: { arcane: 3 }, minLevel: 2 },
+    ],
+    settlementEffects: { defenseBonus: 1 },
+    playerEffects: {},
+  },
+  worldrootGrove: {
+    kind: "worldrootGrove",
+    label: "Worldroot Grove",
+    description: "A vaulted hall grown through the world's oldest roots; the elder treants answer from it.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 6,
+    placementCost: { gold: 500, wood: 12, stone: 8 },
+    upkeepPerLevel: { wood: 2, stone: 1 },
+    recruits: [{ unitTypeId: "treant_elder", goldCost: 900, resourceCost: { wood: 3 }, minLevel: 1 }],
+    settlementEffects: { defenseBonus: 1 },
+    playerEffects: {},
+  },
 };
 
 export function getBuildingEffect(kind: BuildingKind): BuildingEffect {
@@ -330,8 +550,15 @@ export function buildingSettlementEffects(kind: BuildingKind, level: number) {
   return {
     goldPerTurn: (e.settlementEffects.goldPerTurn ?? 0) * level,
     foodPerTurn: (e.settlementEffects.foodPerTurn ?? 0) * level,
+    // ×level, like goldPerTurn/foodPerTurn above and the convention
+    // docs/resource-gathering.md pins for producers. It used to be a flat
+    // copy: a woodcutter hut produced the SAME 3 wood at L3 as at L1 while
+    // upkeepPerLevel charged 3× the wood, so every upgrade was strictly
+    // negative ROI. producerBasePerTurn reads exactly this map.
     resourceYieldBonus: e.settlementEffects.resourceYieldBonus
-      ? { ...e.settlementEffects.resourceYieldBonus }
+      ? Object.fromEntries(
+          Object.entries(e.settlementEffects.resourceYieldBonus).map(([r, v]) => [r, (v ?? 0) * level]),
+        )
       : undefined,
     populationBonus: (e.settlementEffects.populationBonus ?? 0) * level,
     defenseBonus: (e.settlementEffects.defenseBonus ?? 0) * level,
@@ -359,6 +586,11 @@ export function buildingFootprintFromRegistry(kind: BuildingKind, level?: number
   // Level-specific overrides: 2x2 grid footprint with 1.5x1.5 visual rendering.
   // (coversCell rounds the fractional footprint down to integer cells, so the
   // sprite visually occupies 1.5x1.5 but blocks 4 grid cells for placement.)
+  //
+  // Deliberately 1x1 kinds only. Adding a 2x2 kind here (warehouse became 2x2)
+  // would make it SMALLER on upgrade: 1.5x1.5 covers only 2 cells, so coversCell
+  // would free the other two and two buildings could claim the same cells. The
+  // other 2x2 kinds (apartment, farmField) stay out for the same reason.
   if (kind === "townHall" && level === 2) {
     return { w: 1.5, h: 1.5 };
   }

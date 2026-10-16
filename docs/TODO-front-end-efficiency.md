@@ -1,15 +1,17 @@
 # Front-End Efficiency TODO
 
-Tracking items related to runtime rendering cost in the city view and adventure map. None of these are blockers — the current immediate-mode Canvas 2D draws are cheap at the current entity counts. Revisit after playtesting or when perf profiles show a measurable impact.
+<!-- docs:verified 2026-10-15 -->
+
+**Status:** Historical performance backlog, not a current work queue. The drawing model below predates the scene-graph and pixel-building sprite cutovers, as well as the 2026-10-14..16 large-map performance rescue (Tiers 0, 1, and 3 — see [`docs/large-map-performance-report.md`](./large-map-performance-report.md)). Current paths are [`src/render/scene/sceneBuilder/cityScene.ts`](../src/render/scene/sceneBuilder/cityScene.ts), [`src/render/scene/paint2d/index.ts`](../src/render/scene/paint2d/index.ts), and [`src/render/docs/technical-spec.md`](../src/render/docs/technical-spec.md). Profile the current implementation before acting on any item.
 
 ## Rendering model tradeoff summary
 
 | Approach              | What it stores                         | Per-frame cost            | Blocked by runtime params? |
 |-----------------------|----------------------------------------|---------------------------|----------------------------|
 | **Bake-once-blit** (existing sprite system) | One offscreen `<canvas>` per sprite key in RAM | One `ctx.drawImage()`    | Yes — `ownerColor` is free-form hex; requires one cache entry per `(kind, style, level, ownerColor)` combo |
-| **Redraw-every-frame** (city buildings)  | Nothing                               | `ctx.fill()`/`ctx.lineTo()` / `ctx.stroke()` triangle calls | No — color is a fill argument |
+| **Redraw-every-frame** (historical city painter) | Nothing | `ctx.fill()` / `ctx.lineTo()` / `ctx.stroke()` triangle calls | No — color is a fill argument |
 
-The buildings currently use redraw-every-frame because the combinatorial space (`kind × style × level × ownerColor × w×h`) makes the bake-once-blit approach impractical for an unbounded `ownerColor`.
+The old procedural building painter used redraw-every-frame because the combinatorial space (`kind × style × level × ownerColor × w×h`) made bake-once-blit impractical for unbounded `ownerColor`. That painter is no longer the current rendering path; city buildings now flow through the scene painter and sprite resolvers.
 
 ## Future optimization
 

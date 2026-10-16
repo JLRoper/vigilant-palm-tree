@@ -2,7 +2,8 @@
 // renderer.ts nor minimap.ts owns them and dependent files (like
 // overlays/pathOverlay.ts) can pull them in without creating a cycle.
 
-import type { Axial, TradeRouteState } from "@heroes/contracts";
+import type { Axial } from "@heroes/contracts";
+import type { HeroDirection } from "../entities/hero";
 import type { CharterState } from "../state/gameState";
 
 export interface MinimapGeometry {
@@ -32,6 +33,21 @@ export interface RenderOptions {
   validCharterHexes?: Set<string> | null;
   /** The clicked/inspected tile driving the tile info panel, if any. Drawn as a persistent selection ring, even through fog. */
   inspectedTile?: Axial;
-  /** Trade routes whose caravans render as map markers (docs/wagons-stockpiles-trade-routes-plan.md §5.2). */
-  tradeRoutes?: readonly TradeRouteState[];
+  /** Departed trade-route caravans resolved to their current tile for marker rendering (docs/wagons-stockpiles-trade-routes-plan.md §5.2). The caller resolves positions via caravanTile so the scene builder stays pure. */
+  caravans?: readonly CaravanMarkerSpec[];
+  /** Per non-own-hero fade alpha from the spotted tracker; an absent entry = 1. */
+  heroAlpha?: Readonly<Record<string, number>>;
+}
+
+/** One trade-route caravan pre-resolved to its current map tile, owning seat, and wagon count. A route whose caravan is still loading (null) never becomes a spec. */
+export interface CaravanMarkerSpec {
+  q: number;
+  r: number;
+  ownerId: number;
+  wagons: number;
+  payloadKind?: "resource" | "gold";
+  pixelOffset?: { x: number; y: number };
+  moving?: boolean;
+  moveProgress?: number;
+  facingDirection?: HeroDirection;
 }

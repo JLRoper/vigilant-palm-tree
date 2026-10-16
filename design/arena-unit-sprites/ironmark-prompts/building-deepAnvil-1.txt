@@ -1,0 +1,7 @@
+Isometric pixel art game asset for a medieval city-builder, matching the attached reference image exactly in style: same chunky pixel size, same 2:1 dimetric isometric projection (standard 30° angle), same thick dark-brown outlines around every shape, transparent background, square 1:1 canvas — but with the palette shifted to the mountain-hold faction: cool steel-blue and iron-gray stone, warm gold trim, and ember-orange forge light.
+
+Subject: the deep anvil: a monument of the mountain holds — a monumental black anvil mounted on a carved stone dais, sheltered under a heavy stone arch carved into the face of dark iron-gray rock, glowing gold runes inscribed across the arch and down the anvil's face, ember light from a low forge mouth at the dais base.
+
+Plot: a square 20x20 meter lot shown as a diamond, topped with light sandy ground with darker speckles and a few tiny grass tufts, and a thin darker soil slab visible along the front two edges. The monument covers about 40% of the footprint, set slightly back of center; before the dais lie a small offering of gold ingots and a pair of dwarf-sized stone steps.
+
+Single centered asset, nothing outside the plot, clean pixel-art shading, no anti-aliasing halos, no text, no watermark.

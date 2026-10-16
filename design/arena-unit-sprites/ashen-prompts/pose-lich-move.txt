@@ -1,0 +1,7 @@
+Side-view pixel art game asset of a single fantasy battle unit in a dramatic tabletop-miniature style, matching the attached reference image exactly: the very same character — same crowned skeletal lich in ornate dark robes with gold trim and raised collar, same tall staff topped by a glowing orange orb, same bony skull face, same proportions and palette — only in a new pose. Chunky readable pixels, rich saturated colors with strong three-tone shading ramps and bright rim highlights, bold dark outlines, high contrast that stays readable at small size, fully transparent background, square 1:1 canvas.
+
+Subject: the lich advancing to the right: skeletal stride mid-step, ornate robes flowing and trailing, staff held forward like a walking sceptre with the orange orb glowing ahead, crown glinting.
+
+Single centered figure facing right, full body visible from crown to robe hem, filling about 75% of the canvas height, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.
+
+This is a warrior portrait-free full-body figure, not a building — no walls, roofs, doors, or architecture.

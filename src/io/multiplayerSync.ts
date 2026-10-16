@@ -1,8 +1,14 @@
 import { api, eventStreamUrl, type Game, type GameEventRow } from "./api";
-import { applyEngineEvent, hydrateGameState } from "@heroes/engine";
+import { hydrateClientGame } from "./hydrateClientGame";
+import { isServerDriven, syncServerDrivenFromGame } from "./serverDrivenGames";
+import { applyEngineEvent, ENGINE_EVENT_SYNC_CLASS } from "@heroes/engine";
 import type { EngineEvent, GameState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
-import type { ResyncReason } from "../core/events";
+import type {
+  BattleOutcomeEventPayload,
+  BattleOutcomeKind,
+  ResyncReason,
+} from "../core/events";
 import { EntityMirror } from "../render/scene/entityMirror";
 import {
   getInMemoryLocalPlayerId,
@@ -27,35 +33,32 @@ function readClaims(game: Game): LobbyClaims {
   return game.lobby?.claimed ?? {};
 }
 
-// The 17 variants packages/contracts/src/events/engineEvent.ts actually
-// declares. game_events also carries four legacy audit kinds
+// The 18 admitted of the 24 EngineEvent variants declared in
+// packages/contracts/src/events/engineEvent.ts, derived from
+// ENGINE_EVENT_SYNC_CLASS (packages/engine/src/events/applyEvent.ts): the 11
+// "apply" kinds replay through the reducer below, and the 7 "resync" kinds
+// are admitted knowing applyEngineEvent answers them with "resync" (a full
+// refetch) rather than a guess. The 6 "ignore" boundary kinds
+// (BuildingsPlaced, ResourcesTransferred, WagonsAssigned, WagonsBought,
+// TradeRouteUpdated, TradeRouteRemoved) are skipped here: their state
+// effects are not payload-derivable, so they arrive via the TurnEnded/poll
+// resync boundary instead. TradeRouteCreated is not one of them:
+// applyTradeRouteCreated reconstructs the route from the event (the route id
+// rides the event verbatim), so it replays as an applied delta.
+// game_events also carries four legacy audit kinds
 // (turn_ended/round_ended/round_started/ai_turn_started, appended alongside
 // TurnEnded by server/app/commandHandler.ts) whose payloads are not
-// EngineEvents -- this set is what separates the two. StructureBuilt is
-// deliberately absent: it is plan-doc prose, not a declared variant.
-// SettlementBattleResolved is admitted knowing applyEngineEvent answers it
-// with "resync": its payload (winner/captured only) cannot re-derive the
-// resulting stacks/gold/hero outcomes, so it flows through the full-refetch
-// path below instead of being dropped as an unknown kind.
-const ENGINE_EVENT_KINDS = new Set<EngineEvent["type"]>([
-  "HeroMoved",
-  "GoldTransferred",
-  "TurnEnded",
-  "ResourcesTraded",
-  "BattleResolved",
-  "HeroRecruited",
-  "TownHallUpgradeStarted",
-  "AutoTradeToggled",
-  "StackReordered",
-  "SettlementCaptured",
-  "CharterStarted",
-  "BuildingUpgradeStarted",
-  "SettlementUpgradeStarted",
-  "CharterTravelAdvanced",
-  "UnitsRecruited",
-  "UnitsTransferred",
-  "SettlementBattleResolved",
-]);
+// EngineEvents -- the payload.type===kind check in isEngineEventRow is what
+// separates the two. StructureBuilt is plan-doc prose, not a declared
+// variant. SettlementBattleResolved is admitted knowing applyEngineEvent
+// answers it with "resync": its payload (winner/captured only) cannot
+// re-derive the resulting stacks/gold/hero outcomes, so it flows through the
+// full-refetch path below instead of being dropped as an unknown kind.
+const ENGINE_EVENT_KINDS: ReadonlySet<EngineEvent["type"]> = new Set(
+  Object.entries(ENGINE_EVENT_SYNC_CLASS)
+    .filter(([, cls]) => cls !== "ignore")
+    .map(([kind]) => kind as EngineEvent["type"]),
+);
 
 export function isEngineEventRow(row: GameEventRow): boolean {
   return (
@@ -67,6 +70,16 @@ export function isEngineEventRow(row: GameEventRow): boolean {
 }
 
 const NO_SEATS: ReadonlySet<number> = new Set();
+
+// B6/D6 battle-outcome feedback (server-side AI actor plan Phase 2): the two
+// battle kinds whose verdicts ride the event log. Emitted (unconditionally)
+// from applyRows at the same exactly-once-per-row point as the mp:logRow
+// fan-out, so a spectator on a flagged game receives every driver-resolved
+// battle even though no client ever saw the command response.
+const BATTLE_OUTCOME_ROW_KINDS: ReadonlyMap<string, BattleOutcomeKind> = new Map([
+  ["BattleResolved", "heroBattle"],
+  ["SettlementBattleResolved", "settlementBattle"],
+]);
 
 // Driven AI seats (2026-09-29 garrison-divergence defect): the primary
 // client (seat 0) runs the AI tick, so its command merges already applied
@@ -84,6 +97,11 @@ function aiSeatsOf(state: GameState | null): ReadonlySet<number> {
   }
   return seats;
 }
+
+// Backoff before the single resync-fetch retry. Short enough to stay inside
+// one 2s poll interval, long enough to let a busy server finish the AI drive
+// that stalled the GET.
+const RESYNC_RETRY_BACKOFF_MS = 750;
 
 export class MultiplayerSync {
   private timer: number | null = null;
@@ -210,10 +228,9 @@ export class MultiplayerSync {
   }
 
   /**
-   * The live Hero/Castle tween cache this poller feeds: bootstrapped on every
-   * full resync, advanced per delta event in between. Wired here because this
-   * is the only place the event stream exists; the renderer cutover that
-   * reads from it is #148.
+   * The Hero/Castle view consumed by rendering: standalone mirrors bootstrap
+   * on full resync, while production mirrors preserve manager-owned references
+   * once syncWith() binds them. Event deltas are applied between full resyncs.
    */
   getMirror(): EntityMirror {
     return this.mirror;
@@ -261,7 +278,15 @@ export class MultiplayerSync {
 
   private async applyRows(gameName: string, rows: GameEventRow[]): Promise<void> {
     const localSeat = getInMemoryLocalPlayerId(gameName);
-    const drivenAiSeats = localSeat === 0 ? aiSeatsOf(this.lastSeen) : NO_SEATS;
+    // Server-side AI actor Gate 3 (plan/2026-09-30-server-side-ai-actor.md):
+    // on a flagged game the local seat-0 client no longer drives the AI
+    // tick, so AI-seat rows must APPLY here (a skipped TurnEnded row would
+    // take its load-bearing full-refetch resync with it and freeze the
+    // spectator mid-AI-turn). The explicit localSeat === 0 (not
+    // shouldDriveAi) keeps the unknown-seat semantics: a null seat keeps
+    // applying, which is the non-primary client's only source of AI state.
+    const drivenAiSeats =
+      localSeat === 0 && !isServerDriven(gameName) ? aiSeatsOf(this.lastSeen) : NO_SEATS;
     const prev = this.lastSeen;
     let state = this.lastSeen;
     const applied: EngineEvent[] = [];
@@ -274,6 +299,25 @@ export class MultiplayerSync {
       // SSE-delivered rows advance the cursor, so the poll's after=cursor
       // query never re-delivers them: exactly-once per row.
       bus.emit({ type: "mp:logRow", gameName, row });
+      // Battle-outcome feedback fan-out, same point, same exactly-once-per-
+      // row guarantee: both battle kinds are resync-answered, and the
+      // fan-out below runs before that early-return (and before the
+      // self/seat skips) so spectators see battles their own seat fought
+      // through the direct-response path too -- the consumer gates. A
+      // settlement battle on a flagged game is the D5 window this closes:
+      // the driving client is gone, so this event is the only verdict
+      // signal any browser gets.
+      const outcomeKind = BATTLE_OUTCOME_ROW_KINDS.get(row.kind);
+      if (outcomeKind !== undefined && isEngineEventRow(row)) {
+        bus.emit({
+          type: "mp:battleOutcome",
+          gameName,
+          id: row.id,
+          kind: outcomeKind,
+          payload: row.payload as BattleOutcomeEventPayload,
+          actorSeat: row.actor_seat,
+        });
+      }
       const id = Number(row.id);
       if (Number.isFinite(id) && id > cursor) cursor = id;
       if (this.selfEventIds.delete(id)) continue;
@@ -304,11 +348,30 @@ export class MultiplayerSync {
     this.emitStateChanged(gameName, prev, state);
   }
 
+  // A resync is the turn-boundary snapshot, and on a server-driven game the
+  // API is busy driving AI seats: a non-SSE GET can stall past apiFetch's 10s
+  // default and throw. One bounded retry with a short backoff recovers a
+  // transient stall without touching the shared timeout or the poll cadence.
+  private async fetchGameWithRetry(gameName: string): Promise<Game> {
+    try {
+      return await api.getGame(gameName);
+    } catch (firstError) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, RESYNC_RETRY_BACKOFF_MS);
+      });
+      // A game switch/stop during the backoff makes a retry pointless (and
+      // would re-fetch a game nobody is watching), so surface the first error.
+      if (this.gameName !== gameName) throw firstError;
+      console.warn("[mp] resync fetch retrying after:", firstError);
+      return api.getGame(gameName);
+    }
+  }
+
   private async resync(gameName: string, reason: ResyncReason): Promise<void> {
     const startedAt = performance.now();
     let game: Game;
     try {
-      game = await api.getGame(gameName);
+      game = await this.fetchGameWithRetry(gameName);
     } catch (e) {
       console.warn("[mp] resync failed:", e);
       this.reportTelemetry(gameName, performance.now() - startedAt, 0, false);
@@ -317,6 +380,10 @@ export class MultiplayerSync {
     const rttMs = performance.now() - startedAt;
     if (this.gameName !== gameName) return;
     this.claims = readClaims(game);
+    // D8 read-point: the resync holds the full game object, so it both
+    // discovers a late flag and propagates a server-side rollback (flag
+    // flipped off) on the next full fetch.
+    syncServerDrivenFromGame(game);
     if (getInMemoryLocalPlayerId(gameName) === null && this.claims[String(0)] && game.players[0]) {
       setInMemoryLocalPlayerId(gameName, 0);
     }
@@ -328,7 +395,7 @@ export class MultiplayerSync {
       bus.emit({ type: "mp:presenceUpdated", gameName, presence: lobbyPresence });
     }
 
-    const hydrated = hydrateGameState(game);
+    const hydrated = hydrateClientGame(game);
     const seeded = Number(game.last_event_id ?? 0);
     this.cursor = Number.isFinite(seeded) && seeded >= 0 ? seeded : 0;
     this.selfEventIds.clear();

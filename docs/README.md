@@ -1,101 +1,100 @@
-# Heroes JS — Docs
+﻿# Heroes JS Documentation
 
-Game design and architecture documentation for the Heroes of Might & Magic-inspired hex adventure game. This is the index. Every doc lives in this folder and links back here.
+<!-- docs:verified 2026-10-11 -->
 
-## Status legend
+This index distinguishes current as-built references, design intent, and historical plans. For current behavior, prefer code-linked as-built documents over older proposals.
 
-- ✅ **Locked** — decision made, won't revisit
-- 🟡 **Open question** — needs an answer before implementation
-- 📋 **Planned (not started)** — scope agreed, implementation pending
-- ⏸️ **Deferred** — explicitly postponed to a later milestone
+## Screenshots
 
-## Game vision (one paragraph)
+Captured from the Docker deployment (`docker compose up` → http://localhost:5173` → ` http://localhost:5173`); shot set under \`./screenshots/\`, regenerable against pixel baselines with \`npm run test:visual:update-baselines\` (provenance: \`docs/asset-provenance.md\`, \`docs/sprite-pipelines.md\`).
 
-A turn-based hex adventure map where the player moves a hero, claims resource tiles by building settlements on them, and defends them against enemy heroes that wander the map. Resources accumulate per turn and fund growth. New settlements are founded via charter expeditions (hero travels to target and constructs for 10 days). Deeper systems (full army roster, tactical battlefield, hero battle outcomes) are layered on later milestones without re-architecting the base.
+| Screenshot | What it shows |
+| --- | --- |
+| ![Home screen](./screenshots/home-screen.png) | Landing view: New Game / Load Game / Settings / Sign In |
+| ![Adventure map](./screenshots/adventure-map.png) | Hex world: selected hero, movement path, fog, HUD/toolbar |
+| ![Hero info panel](./screenshots/hero-info-panel.png) | Hero pane: stats, army, cargo |
 
-## The design docs
+## Start Here
 
-| Doc | Covers | Status |
-|-----|--------|--------|
-| [resources.md](./resources.md) | 5 resource types, tile distribution, yields | ✅ Locked |
-| [settlements.md](./settlements.md) | Build cost, charter expeditions, settlement limits, capture, levels | ✅ Locked |
-| [city-view-impl-plan.md](./city-view-impl-plan.md) | Tiered (5×5/10×10/15×15) isometric settlement interior, mines, per-resource yield | ✅ Shipped (buildings + mines live; mine upgrades above Level 1 not in UI) |
-| [heroes.md](./heroes.md) | Hero movement, chartering, battle outcomes (defeat removes; retreat/surrender relocate) | ✅ Locked (movement) / 🟡 Charter implemented / ✅ Battle outcomes shipped (2026-09-29) |
-| [army.md](./army.md) | Unit roster, recruitment, food/upkeep, tactical combat | ⏸️ Deferred |
-| [economy.md](./economy.md) | Per-turn economy flow tying resources + settlements | ✅ Locked |
-| [resource-gathering.md](./resource-gathering.md) | As-built resource collection & building economy: pools, rate computation, per-turn pipeline, all sinks, wired-vs-dormant building effects, findings F1–F10; plus the shipped producer-mine & deterministic cell-multiplier design | ✅ Current |
-| [wagons-stockpiles-trade-routes-plan.md](./wagons-stockpiles-trade-routes-plan.md) | Design: stockpile caps (settlements by warehouse buildings, heroes by wagons), hero cargo, player wagon pool, distance-throttled trade routes; formulas, open questions, phased implementation | 📝 Proposed |
-| [map.md](./map.md) | Map generation, terrain, camera, fog of war (shipped) | ✅ Locked |
-| [map-gen.md](./map-gen.md) | Procedural terrain generation: current blob-growth algorithm (`gameMap.ts`) + ranked alternatives | ✅ Current |
-| [art-style.md](./art-style.md) | Sprite art direction: alchemical rune-stone resource icons, procedural castles/heroes; composition + palette rules | ✅ Current |
-| [ui-top-panel-plan.md](./ui-top-panel-plan.md) | Global top bar (turn/wealth/economy summary) + selection-driven contextual detail panels | 📋 Planned |
-| [morale-fatigue-plan.md](./morale-fatigue-plan.md) | Real morale/fatigue combat stats on the manual battle engine (`Combatant.morale`/`fatigue`, `morale_change` log entries) | ✅ Shipped (2026-09-27; tunables flagged for owner tuning) |
-| [spellcasting-plan.md](./spellcasting-plan.md) | Real hero spellcasting behind the arena's disabled Cast Spell stub, same `CombatEffect` seams | ✅ Shipped (2026-09-27; persistent HeroState mana, Int = pool / Arcane = power, AI casting v1.1, mana-only limiter — see the as-built section) |
-| [terrain-plan.md](./terrain-plan.md) | Battle-grid terrain: per-hex combat bonus / movement cost (greenfield — no terrain concept in code today) | 📋 Planned |
+| Reference | Use it for |
+|---|---|
+| [Project README](../README.md) | Install, run, and current feature overview |
+| [Player guide](./player-guide.md) | New Game options, movement, chartering, combat, logistics, and hotkeys |
+| [Operations guide](./operations.md) | Local DB safety, ports, tests, migrations, LAN, AI driver, and deployment |
+| [Technical specification](../TECHNICAL_SPECIFICATIONS.MD) | Current system architecture and API/persistence model |
+| [Agent instructions](../AGENTS.md) | Workspace safety, verification gates, and release/versioning rules |
+| [Current module map](./module-documentation-and-relationships.md) | Current packages and module boundaries |
+| [Render technical spec](../src/render/docs/technical-spec.md) | Live renderer and asset architecture |
+| [Paint2D boundary](../src/render/scene/paint2d/README.md) | Current scene painter seam |
+| [Sprite pipelines](./sprite-pipelines.md) | Asset generation, generated keys/anchors, validation, and provenance gaps |
+| [Building sprite generation skill](../.kilo/skills/building-sprite-gen/SKILL.md) | Current Gemini/OpenRouter sprite workflow |
 
-## Code & architecture
+## Reading Model
 
-| Doc | Covers | Status |
-|-----|--------|--------|
-| [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) | Module-by-module dependency map for `src/`, `server/`, `shared/`, `test/`, `tools/`, `scripts/` | 📋 Planned |
-| [architecture.md](./architecture.md) | Executed layout plan that established the current `src/` structure | ✅ Locked |
-| [auth-model.md](./auth-model.md) | Magic-link auth (`server/auth.ts`) + per-game seat middleware (`attachPlayerSeat`); sign-in optional everywhere | ✅ Current |
-| [battle-view-architecture.md](./battle-view-architecture.md) | Battle view surface: trigger → state → UI → server resolver; auto-resolve vs. Test-Battle paths, arena UI, invariants | ✅ Current |
-| [CombatResolutionEngine-TechnicalDesign.md](./CombatResolutionEngine-TechnicalDesign.md) | As-built auto-resolver behind the `ResolveBattle` command: 8-slot platoons, type advantages, counterattacks, retreat policies | 🟡 In progress |
-| [dev-console.md](./dev-console.md) | `src/debug/` event log + modal/footer console for inspecting bus + hook events in real time | ✅ Current |
-| [pr-13-dev-console.md](./pr-13-dev-console.md) | PR record (merged) for the dev console: ring-buffer event log + pin/persist; float follow-up reverted pre-merge | ✅ Current |
-| [network-map.md](./network-map.md) | Dev overlay showing live client↔API routing topology (RTT, poll-failure rate, throughput); what each metric really measures and why three of four are proxies | ✅ Current |
-| [event-system.md](./event-system.md) | Planned `core/eventBus` refactor and event catalog (Phases 1–6) | 🟡 Partially shipped — typed bus + full `GameEvent` catalog live (2026-09-27); Phase-2+ listener migration still planned |
-| [multiplayer.md](./multiplayer.md) | LAN multiplayer design: lobby/seat identity, event-cursor sync (SSE push + 2s poll backstop, 2026-09-28), and session policy — no turn timer in v1, shipped drop policy (60s disconnect detection, grace-then-skip with server auto-EndTurn), email rejoin reclaim, AI enemy seats as non-lobby combatants (2026-09-29; LAN lobby humans-only in v1) | ✅ Current |
-| [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) | **Multiplayer (LAN):** lobby seat claim + `lobby` jsonb column (§3), SSE push + 2s poll backstop sync (§5.9), lobby UI (§5.12), local seat identity (§5.16) | 🟡 Built, no design doc |
-| [../.kilo/plan/](../.kilo/plan/) | Architecture plans: walkthrough + Tailscale, bloat/scalability review, module expansion plan, modal viewport overflow, fight-screen redesign, combat reveal / fog of war | 📋 Planned |
+- **Current/as-built references** describe behavior verified in code. For numeric resource income, use [`resource-gathering.md`](./resource-gathering.md); [`economy.md`](./economy.md) is design intent and points out where implementation differs.
+- **Design references** record intended rules or visual direction. They are not proof that a behavior is implemented.
+- **Historical plans and PR records** preserve earlier decisions and scope. Their status is called out in the document; do not treat them as current TODO lists without checking the code.
 
+## Current References
 
-## How to read these
+| Document | Scope and status |
+|---|---|
+| [README.md](./README.md) | This catalog and index of the documentation set. |
+| [player-guide.md](./player-guide.md) | Player-facing New Game options, movement, chartering, combat, logistics, and hotkeys. |
+| [operations.md](./operations.md) | Local development, database/test safety, AI driver, LAN, deployment, and versioning. |
+| [asset-provenance.md](./asset-provenance.md) | Existing asset workflows and provenance gaps; metadata to capture for future art. |
+| [sprite-pipelines.md](./sprite-pipelines.md) | Current asset generators, generated building keys/anchors, validation gates, and open provenance gaps. |
+| [resources.md](./resources.md) | Six game resources; food is not a world-map resource. Current tile rates and food spots. |
+| [resource-gathering.md](./resource-gathering.md) | As-built terrain densities, settlement rates, producers, costs, sinks, and open market-income finding F2. |
+| [economy.md](./economy.md) | High-level economy design intent; defer to resource-gathering for actual End Turn behavior. |
+| [map.md](./map.md) | World map, terrain, visibility, and movement design/current behavior. |
+| [map-gen.md](./map-gen.md) | Current procedural terrain generation and alternative approaches. |
+| [settlements.md](./settlements.md) | Settlement founding, buildings, capture, upgrades, recruitment, and charter rules. |
+| [heroes.md](./heroes.md) | Hero movement, provisioning, charters, upkeep, and battle outcomes. |
+| [army.md](./army.md) | Live faction rosters, recruitment, weekly upkeep, battle rules, and arena art. |
+| [multiplayer.md](./multiplayer.md) | Lobby/seats, SSE sync, disconnect policy, server-driven AI, and AI chartering. |
+| [auth-model.md](./auth-model.md) | Magic-link authentication and per-game seat identity. |
+| [event-system.md](./event-system.md) | Typed client event bus and `GameEvent` catalog; listener migration status is documented there. |
+| [network-map.md](./network-map.md) | Developer network-topology overlay and what its measured/proxy metrics mean. |
+| [dev-console.md](./dev-console.md) | Live event log and developer console. |
+| [battle-view-architecture.md](./battle-view-architecture.md) | Current battle flow, manual arena, quick resolve, and server command boundaries. |
+| [art-style.md](./art-style.md) | Art direction; use asset-provenance and sprite-pipeline references for actual files and tools. |
+| [isometric-building-prompts.md](./isometric-building-prompts.md) | Historical prompt examples; not a complete per-asset provenance record. |
 
-Read top-to-bottom if you're new. The dependency order is:
+## Architecture and Plans
 
-```
-map.md → resources.md → settlements.md → city-view.md
-                            ↓                  ↓
-                        economy.md ←-----------┘
-                            ↓
-                       heroes.md → army.md
-```
+| Document | Scope and status |
+|---|---|
+| [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) | Maintained current map for contracts, engine, server, client screens/rendering, tests, and tools. |
+| [architecture.md](./architecture.md) | Historical executed `src/` layout plan with later status corrections; not the current module map. |
+| [plans-track-map.md](./plans-track-map.md) | Track snapshot dated 2026-10-10 plus a dated current-status update. |
+| [pr-13-dev-console.md](./pr-13-dev-console.md) | Historical merged-PR record for the developer console. |
 
-`map.md` defines the world. `resources.md` defines what's in it. `settlements.md` defines how the player claims them (both initial castles and charter-founded settlements). `city-view.md` defines what happens inside them. `economy.md` defines the per-turn loop. `heroes.md` and `army.md` cover the actors.
+## Historical Plans and Designs
 
-## Open questions across all docs
+| Document | Current status |
+|---|---|
+| [CombatResolutionEngine-TechnicalDesign.md](./CombatResolutionEngine-TechnicalDesign.md) | Historical proposal. The engine resolver and manual battle paths are shipped. |
+| [city-view-impl-plan.md](./city-view-impl-plan.md) | Historical implementation plan; current city behavior is in settlements and render references. |
+| [wagons-stockpiles-trade-routes-plan.md](./wagons-stockpiles-trade-routes-plan.md) | Shipped/superseded plan; as-built logistics are in resources, resource-gathering, heroes, and multiplayer. |
+| [terrain-plan.md](./terrain-plan.md) | Historical proposal for battle-grid terrain; distinct from live world-map terrain. |
+| [spellcasting-plan.md](./spellcasting-plan.md) | Shipped feature plan retained as design history. |
+| [morale-fatigue-plan.md](./morale-fatigue-plan.md) | Shipped feature plan retained as design history. |
+| [TODO-front-end-efficiency.md](./TODO-front-end-efficiency.md) | Historical performance backlog; profile the current scene path before acting on items. |
+| [ui-top-panel-plan.md](./ui-top-panel-plan.md) | Historical/proposal snapshot, not the current toolbar specification. |
 
-All major questions resolved. Remaining minor ones:
+## Current Status Quick Reference
 
-1. ~~**Ransom amount** — TBD when [army system](./army.md) ships.~~ Superseded 2026-09-29: capture-for-ransom was replaced by the shipped hero battle outcomes (defeat removes the hero; retreat/surrender relocate — see [heroes.md](./heroes.md) → Combat).
-2. **City view mine upgrades** — schema supports Level 1–3, UI ships Level 1 only.
-3. **Map fog of war** — resolved, shipped: heroes reveal a 4-hex vision ring and castles reveal by control range (`src/render/fog.ts`); unexplored tiles render under fog, and resource tiles appear only inside a vision ring.
-4. **AI chartering** — deferred; only human player can charter settlements currently.
-5. **Multiplayer design doc** — ~~never written down~~ now exists and matches the build: [multiplayer.md](./multiplayer.md) records the mechanics plus the 2026-09-27 policy decisions (no turn timer in v1; dropped seats get ~60s disconnect detection + ~2min active-turn grace, then the server auto-EndTurns — shipped 2026-09-27) and the 2026-09-29 AI-enemy combatant seats (non-lobby; LAN lobby humans-only in v1).
-6. **~~`src/factions/` is staged but unwired~~** — resolved 2026-09-27: the directory was **deleted** (zero imports, overlapped the DB `unit_types` seed — the repo's "unwired parallel implementation" lesson). The live unit data remains the server catalog (`data/unitCatalog.ts`) and `state/units.ts`. If multi-faction rosters ship later, the concept should be resurrected in `packages/engine` + DB seed, not as client-side staged data.
-7. **Combat reveal / fog of war in battle** — the Spy action and its `scoutedBy`/`markContacted` fog were removed as half-baked; the parked idea is written up in [../.kilo/plan/2026-08-15-combat-reveal-fog-of-war.md](../.kilo/plan/2026-08-15-combat-reveal-fog-of-war.md).
+- **Resources:** gold, wood, stone, iron, arcane, and food are game resources. Food is not generated on map tiles; food city spots/buildings, stockpiles, consumption, and weekly upkeep are live.
+- **Settlements:** charter founding, capture, building construction/upgrades, garrison recruitment, and resource production are live.
+- **Logistics:** wagons and physical caravans are shipped. New games do not use shared-storage teleports; legacy saves retain their recorded compatibility policy.
+- **Combat:** hero and settlement-garrison resolvers, the manual arena, and hero defeat/retreat/surrender outcomes are shipped. Human defenders may Fight or Quick Resolve an AI offer; Flee is hidden for defenders. Garrison assaults offer Assault, Auto-resolve, or Cancel.
+- **AI:** 0â€“3 AI enemies can be selected in New Game. Flagged games are server-driven; AI garrison recruitment, trade-route acceptance, chartering, watchdog/heartbeat, token ownership, and per-game advisory locking are live.
+- **Factions:** the registry-driven human, Ashen, Ironmark, and Verdant rosters and recruit gates are live; neutral monsters are separate from playable rosters.
+- **Known open economy issue:** resource-gathering finding F2 remains OPEN: market `goldPerTurn` is included in a projection helper but is not credited by End Turn.
 
-## Locked decisions (quick reference)
+## Local Historical Collections
 
-Full details in the individual docs, but the big ones:
-
-- **5 resources:** Gold, Wood, Stone, Iron Ore, Arcane Dust
-- **Settlements:** initial castles at game start + charter-founded settlements via hero expeditions
-- **Charter cost:** 2500g (hero purse) + 20 wood + 15 stone (from provisioning settlement warehouse)
-- **Charter process:** hero auto-paths to target hex, then constructs for 10 days; defeat at any point forfeits all costs
-- **Charter limits:** no cap on number of settlements; min 4 hexes from any existing settlement; any passable terrain
-- **Initial castles:** pre-placed at game start (2–5, depending on config)
-- **Settlement capture:** enemy walking on settlement flips ownership (no destruction in v1)
-- **Settlement destruction:** none in v1 — only capture changes ownership
-- **Resources revealed by vision** — fog of war is live; resource tiles show once a hero/castle vision ring covers their hex
-- **Yield timing:** resources tick per round (all players act, then advanceRound)
-- **Schema anticipates 3 levels** but only Level 1 ships in v1 for player-founded settlements
-- **City view:** double-click settlement → city grid → build mines on resource spots
-- **Combat (current):** hero collisions on the adventure map open the Fight / Quick Resolve / Flee modal (2026-09-27 wiring): **Fight** plays the manual arena (`Fight` → `SubmitBattleResult`), Quick Resolve runs the server auto-resolver (`ResolveBattle`) — both through the same shared post-battle helpers on `POST /api/games/:name/commands`. **Hero outcomes (2026-09-29):** a side wiped to zero troops is **defeated** and removed from the map (record + `heroIds` + platoon rows); arena **retreat** respawns at the nearest owned settlement with all troops lost; **surrender** teleports there keeping troops (surrender gold deduction unchanged); no owned settlement → the hero stays at its cancelled position; stalemates leave both standing. The auto-resolver never concedes, so AI-involved losses are always removals. See [`docs/heroes.md`](./heroes.md) → Combat. **AI-involved collisions auto-resolve** (2026-09-29): any battle whose attacker is not the local human — AI-vs-AI or an AI attacking you — quick-resolves silently through the same predicate (the result card still shows); a human attacker keeps the Fight/Quick-Resolve/Flee modal. See [`docs/battle-view-architecture.md`](./battle-view-architecture.md).
-- **Recruitment (future):** instant at friendly settlement
-- **Hero death:** defeat removes the hero from the map (2026-09-29) — the old capture-for-ransom plan is superseded; arena retreat/surrender relocate the hero to the nearest owned settlement (troops lost / kept respectively)
-- **Unit cap (future):** base 10 + 1 per owned settlement
-- **No food in v1** — returns with army system, where every human unit costs 1 food/day
-- **Multiplayer (LAN) policy:** no turn timer in v1; a dropped seat gets ~60s disconnect detection + ~2min active-turn grace, then the server auto-EndTurns (shipped 2026-09-27, `server/app/dropPolicy.ts`); AI enemy seats (0–3 per new game, 2026-09-29) are non-lobby combatants driven by the primary client — lobby seats stay humans-only, unclaimed seats stay empty; if seat 0 is absent in a LAN game, AI turns stall. See [multiplayer.md](./multiplayer.md).
+- [Session plans](../.plans/) are local, gitignored recovery/history records, not source-controlled documentation.
+- [Session logs](../sessionTracking/) are a separate historical collection.
+- Timestamped plans and session logs are excluded from the maintained-doc freshness checks; the dated status in [`plans-track-map.md`](./plans-track-map.md) is the published project-facing summary.

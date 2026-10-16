@@ -72,9 +72,53 @@ test("applySettlementBattleResult: attackerWon captures a NEUTRAL settlement (pr
   assert.equal(result.captured, true);
   assert.equal(result.state.settlements["s2"]?.ownerId, 0, "neutral settlement flipped to the attacker");
   assert.deepEqual(result.state.settlements["s2"]?.stacks, normalizePlatoons([]));
-  assert.equal(result.state.heroes["h0"]?.gold, 50 + CAPTURE_GOLD_REWARD);
+  // Phase 1 heroGoldCap enforcement: the capture reward is clamped to the
+  // hero's treasury-cart purse headroom (min(100, cap - purse)); this hero
+  // has a 2,500g default cap with 50g in it, so the full reward lands.
+  assert.equal(result.state.heroes["h0"]?.gold, 50 + Math.min(CAPTURE_GOLD_REWARD, 2500 - 50));
   assert.deepEqual(result.state.players[0]?.settlementIds, ["s0", "s2"], "roster gains the neutral settlement");
   assert.equal(result.state.phase.kind, "PLAYER_TURN", "the battle phase closed");
+});
+
+test("applySettlementBattleResult: a capture reward beyond the purse headroom is CLAMPED, excess lost (Q4 soft-cap doctrine)", () => {
+  // A hero with 0 treasury carts has a 0g purse cap: the capture still
+  // succeeds, but no gold can be credited (heroGoldCap enforcement closed
+  // this previously-uncapped credit site in Phase 1).
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 5, 5, { stacks: stack("swordsman", 5), gold: 50, treasuryWagons: 0 })],
+    settlements: [makeSettlement("s0", 0, 0, 0), garrisonedNeutralSettlement()],
+  });
+
+  const result = applySettlementBattleResult(state, {
+    attackerId: "h0",
+    settlementId: "s2",
+    outcome: "attackerWon",
+    attackerStacks: stack("swordsman", 4),
+    defenderStacks: [],
+  });
+
+  assert.equal(result.captured, true, "the clamp costs the capture nothing");
+  assert.equal(result.state.heroes["h0"]?.gold, 50, "the full reward is lost above a 0g purse cap");
+});
+
+test("applySettlementBattleResult: a capture reward partly above the purse headroom is clamped to the headroom", () => {
+  // 2 carts = a 1,000g cap; 950g in the purse leaves 50g of headroom, so a
+  // 100g reward lands 50g of itself and loses the rest.
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 5, 5, { stacks: stack("swordsman", 5), gold: 950, treasuryWagons: 2 })],
+    settlements: [makeSettlement("s0", 0, 0, 0), garrisonedNeutralSettlement()],
+  });
+
+  const result = applySettlementBattleResult(state, {
+    attackerId: "h0",
+    settlementId: "s2",
+    outcome: "attackerWon",
+    attackerStacks: stack("swordsman", 4),
+    defenderStacks: [],
+  });
+
+  assert.equal(result.captured, true);
+  assert.equal(result.state.heroes["h0"]?.gold, 1000, "credited exactly to the purse cap, never above it");
 });
 
 test("applySettlementBattleResult: defenderWon over a neutral garrison keeps the settlement neutral and REMOVES the wiped attacker", () => {

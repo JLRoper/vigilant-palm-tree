@@ -1,5 +1,7 @@
 # Heroes
 
+<!-- docs:verified 2026-10-14 -->
+
 The actors on the map. Heroes move tile-to-tile, claim [settlements](./settlements.md), lead armies, and can found new settlements via charter expeditions.
 
 ## What a hero is (v1)
@@ -44,23 +46,30 @@ The game operates on a **round-based** cycle:
 - Human player clicks to select hero, clicks map to move (A* pathfinding + terrain costs).
 - Selected hero's gold/resources are shown in the hero info panel.
 - Chartering heroes auto-move at turn start (no manual input).
-- AI heroes move automatically during their `AI_TURN` phase via `pickAiMove` (`src/ai/aiBrain.ts`) — see [Enemy heroes](#enemy-heroes).
-- After all players act, `advanceRound` runs: day increments, all heroes reset movement, settlements produce resources, morale decays, charters advance — and every 7th day the weekly upkeep applies: 1g/troop from each hero's purse plus the **garrison upkeep** (1g/troop from each settlement's treasury + 1 food/troop from its warehouse, trimming stacks from the end when short).
+- AI heroes move automatically during `AI_TURN` via the engine brain. New games with AI enemies are server-driven; only unflagged legacy games use the primary client's tick — see [Enemy heroes](#enemy-heroes).
+- After all players act, `advanceRound` runs: day increments, all heroes reset movement, settlements produce resources, morale decays, charters advance — and every 7th day the weekly upkeep applies: **caravan maintenance first** (`wagons × (1g + 1 food)` per trade route, `economy/caravanUpkeep.ts`), then the per-unit catalog bill for heroes (gold from the purse, food from the larder + the settlement physically under the hero — see [army.md](./army.md) → Upkeep) and garrisons (treasury + warehouse).
 
 ## Hero gold & economy
 
-Each hero carries their own gold purse (`hero.gold`):
-- Earned from combat (defeating enemies loots their gold).
-- Spent on chartering (2500g cost from hero purse).
-- Deposited to / withdrawn from settlement treasuries (hero must stand on matching settlement).
+Each hero carries their own gold purse (`hero.gold`), capped by **treasury carts**: `heroGoldCap = treasuryWagons × 500` (`packages/engine/src/settlement/capacity.ts`; soft default 5 carts, migration `023_treasury_wagons.sql`). The carts are a separate slot from the army `wagons` that cap cargo at ×50 per resource — `BuyWagons`/`AssignWagons` take `slot: "cargo" | "treasury"`, and `recruitHero` allocates 5 + 5 from the player's two pools. The cap clamps all three gold landing sites (loot, capture reward, treasury withdrawal — excess stays put, nothing destroyed).
 
-Settlements track gold separately in their treasury (`settlement.gold`).
+The designer's three ways gold reaches a purse:
+
+- **Pick up at a city** — deposit/withdraw against a settlement treasury (`transferGold`, same-hex only).
+- **Battle or find on the map** — defeating a hero loots their purse (wagon-capped, cargo included); capturing a settlement pays a reward, clamped to `heroGoldCap`.
+- **Treasure caravans** — a trade route with payload `{ kind: "gold" }` (`wagons × 500` per load, headroom-clamped) delivers into the destination purse or treasury; see [economy.md](./economy.md) → Trade routes & caravans.
+
+Purse gold is spent on chartering (2500g cost from hero purse). Settlements track gold separately in their treasury (`settlement.gold`).
+
+### Feeding the army (larder & the weekly bill)
+
+The hero info panel's food row is the hero's larder (food in its wagon cargo) and its tooltip states the cadence in the player's terms — the weekly bill, in-game days until the next charge, and weeks of larder coverage (`heroLarderTitle`, [`src/screens/shared/heroUpkeepCost.ts`](../src/screens/shared/heroUpkeepCost.ts)). The bill is charged weekly only (`day % 7 === 0`), so a larder refilled between charge days is never charged. The panel's upkeep badge — like the End Turn "unfed troops" toast — reads the persisted unpaid-streak fields and is now suppressed while the hero is currently affordable (purse + larder, plus the settlement physically under the hero); a streak stamped on an earlier charge day stops warning once the larder is restocked. The streak itself, the morale bleed and the desertion ladder are unchanged (see [army.md](./army.md) → Upkeep).
 
 ## Combat
 
 When a hero moves adjacent to an enemy hero, battle triggers:
 - The Fight / Quick Resolve / Flee modal opens (see [army.md](./army.md)); garrison battles run through the same arena via the `SETTLEMENT_BATTLE` phase.
-- **AI-involved battles auto-resolve** (2026-09-29): any battle whose attacker is not the local human — AI-vs-AI, or an AI attacking you — quick-resolves silently through the existing `maybeAutoResolveBattle` predicate; the result card still shows. A human attacker keeps the modal even against an AI.
+- **Who gets the modal** (2026-10-04, `resolveBattleChoice` in `src/screens/combat/battleChoicePolicy.ts`): the local **attacker or defender** — a defending seat's modal hides **Flee** (fleeing cancels the attacker's move). A server-driven non-participant spectates; the driving client auto-resolves AI-vs-AI and remote-human PvP silently (the result card still shows). An **AI attacking you no longer auto-resolves** (amending the 2026-09-29 rule): the server's driver dispatches `EnterBattle`, the server stamps `games.lobby.pendingBattle` + appends `BattleOffered`, and you resolve from your own seat during the AI's turn (`ResolveBattle`/`SubmitBattleResult`; the turn-ownership guard exempts the battle pair). The AI driver waits ≤ 300 s (`AI_DEFENDER_WAIT_TIMEOUT_MS`), then force-resolves and audits `ai_defender_wait_expired`. The offer's `BattleOffered` delta flips your client into `BATTLE`, and the `state:committed` listener's `maybeAutoResolveBattle()` call is what opens the modal (the bridge's `replaceState` bypasses the rAF loop's change detection); the modal is deliberately non-dismissible while the choice is pending. A reload or resync mid-offer re-derives the phase from the nested `lobby.pendingBattle` marker (`src/io/hydrateClientGame.ts`), so the modal re-opens.
 - **Per-hero outcome** (2026-09-29): every battle ends in a verdict per side — `defeated` / `retreated` / `surrendered` / `stood`:
 
   | Verdict | How it happens | Hero on the map | Troops | Purse |
@@ -78,16 +87,16 @@ When a hero moves adjacent to an enemy hero, battle triggers:
 
 ## Enemy heroes
 
-Enemy heroes exist when the game was created with AI enemies — the New Game screens (home + toolbar) have an "AI enemies" chip row (0–3, default 0); `playerCount = humans + enemies` (clamped ≤ 10). AI seats spawn castles and **"Warlord"** heroes at game start. Their turns (`AI_TURN`) are driven by the primary client's tick (`turnController.tick`, local seat 0; non-primary browsers watch via sync):
+Enemy heroes exist when the game was created with AI enemies — New Game supports 0–3; `playerCount = humans + enemies` (clamped to the player limit). AI seats spawn castles and **"Warlord"** heroes. New games with `enemySlots > 0` are flagged `lobby.aiDriver: "server"`; the server scanner owns their turns and the browser is a spectator. Only unflagged legacy games retain the primary-client tick:
 
-- AI picks a move target via `pickAiMove` (`src/ai/aiBrain.ts`): enemy heroes within reach 7 (priority `1000 − dist·10`), then settlements within reach 8 — garrisoned ones it can beat (`GARRISON_ATTACK_RATIO = 1.5` on army **power** — per-unit attack + defence weights from the unit catalog, not raw troop counts; priority `700 − dist·5`), empty enemy-owned (`650 − dist·5`), neutral (`600 − dist·5`) — then unclaimed resources (reach 8), else wanders.
+- AI picks a move target via `pickAiMove` (`packages/engine/src/ai/aiBrain.ts`; `src/ai/aiBrain.ts` is a compatibility re-export): reachable enemies, beatable garrisons, empty settlements, and resources are prioritized before wandering.
 - **AI garrisons its own settlements** (2026-09-29 follow-ups, B1): at the start of each AI turn the tick submits a threat-sized garrison shopping list (`pickGarrisonRecruitment` — target power = 1.0 × nearby enemy-hero power, floor 4, gold reserve 100) through the existing `RecruitUnits` command path, so an unattended AI town holds troops instead of falling to the first walk-in.
 - **Lost assaults back off** (2026-09-29 follow-ups, I1): after a non-win settlement assault the hero leaves that settlement alone for `GARRISON_BACKOFF_ROUNDS = 2` rounds (in-memory on the primary client, surviving controller rebuilds via `AiTurnMemory`).
 - Walking onto an empty enemy/neutral settlement captures it (existing rule); since the 2026-09-29 capture/garrison wave, walking onto a garrisoned settlement it can beat ends the path there and starts a settlement battle (auto-resolved), while an unfavorable garrison is still refused as a step. AI walk-in captures serialize behind the move persist like the human path's.
-- Post-move adjacency starts a battle — AI-involved battles auto-resolve (see [Combat](#combat)); a walk-in settlement battle resolves the same silent way via `TurnController.resolveSettlementBattle`, with the result card/toast instead of the arena.
-- AI does not charter settlements in v1.
-- AI heroes with `isChartering: true` are skipped in the tick loop (future-proofing).
-- Known limitation: the AI actor is host-client only — if seat 0 is absent in a LAN game, AI turns stall.
+- Post-move adjacency starts a battle — AI-vs-AI auto-resolves; a battle against **you** is now *offered* to you instead (`EnterBattle` → `BattleOffered`, see [Combat](#combat)); a walk-in settlement battle still resolves the same silent way via `TurnController.resolveSettlementBattle`, with the result card/toast instead of the arena. While an offer is pending the driver's pass sits in `waiting_for_defender` (no `EndTurn`), force-resolving after the 300 s wait deadline.
+- **AI chartering is live (B3).** The server brain uses `pickCharterAction` to start charters with the ordinary purse/warehouse requirements and advances charter travel through the same engine commands; construction completes on the normal round/day boundary. A chartering AI hero is not treated as a manual move target.
+- At the start of eligible turns the driver also recruits threatened AI garrisons and accepts up to three recommended trade routes per round/seat. Phase 3 heartbeat/watchdog and pool hardening, per-boot token ownership, and per-game advisory locks are live; see [multiplayer.md](./multiplayer.md).
+- Known stall limitation applies only to unflagged legacy games still using the browser-driven AI tick. Newly created games with AI enemies are server-driven; client-origin AI-seat commands are rejected by the server.
 
 ## Hero death (capture-for-ransom plan superseded)
 

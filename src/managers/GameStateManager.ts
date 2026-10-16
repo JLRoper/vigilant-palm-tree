@@ -1,4 +1,4 @@
-import type { GameState, HeroId } from "../state/gameState";
+import type { GameState, HeroId, PlayerId } from "../state/gameState";
 import { Hero } from "../entities/hero";
 import { Castle } from "../entities/settlement";
 import { findPath } from "../map/pathfinding";
@@ -7,6 +7,8 @@ import { TurnController, createAiTurnMemory, type AiTurnMemory, type TurnControl
 import type { TurnControllerHooks } from "../state/turnController";
 import type { Axial } from "../core/hex";
 import { bus } from "../core/eventBus";
+import { CaravanVisualTracker } from "../render/caravanMarkers";
+import type { CaravanMarkerSpec } from "../render/renderTypes";
 
 export interface PathPreviewLock {
   heroId: HeroId;
@@ -22,6 +24,10 @@ export class GameStateManager {
   private gameMap!: GameMap;
   private hooks: TurnControllerHooks | null = null;
   private primaryActorSource: (() => boolean) | null = null;
+  // S3 (logistics-interface-fixes plan §5.8): the local viewer's seat, read
+  // lazily at construction time -- the active game (and its seat) changes on
+  // adopt/load, same lifecycle as primaryActorSource.
+  private localSeatSource: (() => PlayerId | null) | null = null;
   private pathPreviewLock: PathPreviewLock | null = null;
   // Owner of the AI-turn state (I1 garrison backoff, B1 recruit guard) that
   // must survive a controller rebuild: every makeTurnController() call hands
@@ -30,6 +36,7 @@ export class GameStateManager {
   // the state across instead of wiping it. resetAiTurnMemory() drops it only
   // when a different game session is loaded.
   private aiMemory: AiTurnMemory = createAiTurnMemory();
+  private caravanTracker = new CaravanVisualTracker();
 
   setHooks(hooks: TurnControllerHooks): void {
     this.hooks = hooks;
@@ -42,9 +49,14 @@ export class GameStateManager {
     this.primaryActorSource = source;
   }
 
+  setLocalSeatSource(source: (() => PlayerId | null) | null): void {
+    this.localSeatSource = source;
+  }
+
   private makeTurnController(state: GameState): TurnController {
     const opts: TurnControllerOptions = { aiMemory: this.aiMemory };
     if (this.primaryActorSource) opts.isPrimaryActor = this.primaryActorSource;
+    if (this.localSeatSource) opts.localSeat = this.localSeatSource();
     return new TurnController(state, this.hooks ?? ({} as TurnControllerHooks), opts);
   }
 
@@ -53,6 +65,7 @@ export class GameStateManager {
   // that produced them and must not leak into the next game's ids.
   resetAiTurnMemory(): void {
     this.aiMemory = createAiTurnMemory();
+    this.caravanTracker.reset();
   }
 
   setGameMap(map: GameMap): void {
@@ -92,11 +105,14 @@ export class GameStateManager {
   setState(state: GameState): void {
     this.gameState = state;
     this.turnController = this.makeTurnController(state);
+    this.caravanTracker.reset();
+    this.caravanTracker.syncFromState(state, this.gameMap);
   }
 
   replaceState(state: GameState): void {
     this.gameState = state;
     this.turnController = this.makeTurnController(state);
+    this.caravanTracker.syncFromState(state, this.gameMap);
     bus.emit({ type: "state:committed" });
   }
 
@@ -106,11 +122,15 @@ export class GameStateManager {
       const existing = this.heroes[id];
       if (existing) {
         existing.syncFromState(h);
-        existing.tile = { q: h.q, r: h.r };
+        // A hero mid-tween keeps its tween; syncFromState's own moving guard
+        // skips the position, so the four snap lines below must be skipped too.
+        if (!existing.moving) {
+          existing.tile = { q: h.q, r: h.r };
         existing.fromTile = { q: h.q, r: h.r };
-        existing.toTile = { q: h.q, r: h.r };
-        existing.moving = false;
-        existing.pixelOffset = { x: 0, y: 0 };
+          existing.toTile = { q: h.q, r: h.r };
+          existing.moving = false;
+          existing.pixelOffset = { x: 0, y: 0 };
+        }
         next[id] = existing;
       } else {
         next[id] = Hero.fromGameState(h);
@@ -153,19 +173,30 @@ export class GameStateManager {
 
   update(dtMs: number): boolean {
     let changed = false;
+    let heroFinishedMove = false;
     for (const hero of Object.values(this.heroes)) {
+      const wasMoving = hero.moving;
       hero.update(dtMs);
+      if (wasMoving && !hero.moving) heroFinishedMove = true;
+    }
+    if (this.caravanTracker.update(dtMs)) {
+      changed = true;
     }
     if (this.turnController) {
       this.turnController.tick(dtMs);
       const nextState = this.turnController.getState();
-      if (nextState !== this.gameState) {
+      if (nextState !== this.gameState || heroFinishedMove) {
         this.gameState = nextState;
         this.syncHeroVisualsToState();
+        this.caravanTracker.syncFromState(nextState, this.gameMap);
         changed = true;
       }
     }
     return changed;
+  }
+
+  getCaravanMarkers(): CaravanMarkerSpec[] {
+    return this.caravanTracker.getMarkerSpecs();
   }
 
   getState(): GameState { return this.gameState; }

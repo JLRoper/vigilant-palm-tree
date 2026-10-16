@@ -3,6 +3,7 @@ import { openCenteredModal, styleButton } from "@screens/shared/menu";
 export interface BattleModalOptions {
   attackerName: string;
   defenderName: string;
+  hideFlee?: boolean;
 }
 
 // Three paths since the manual arena was wired in as the default collision
@@ -14,7 +15,10 @@ export type BattleModalResult = "fight" | "quickResolve" | "cancel";
 
 export function showBattleModal(opts: BattleModalOptions): Promise<BattleModalResult> {
   return new Promise<BattleModalResult>((resolve) => {
-    const modal = openCenteredModal(document.body, "Battle!", 320);
+    // Deliberately non-dismissible (no × button): a battle choice is blocking,
+    // and dismissing without choosing would leave battleInFlight stuck forever
+    // (the AI turn would stall until the server's 300 s force-resolve).
+    const modal = openCenteredModal(document.body, "Battle!", 320, false, false);
 
     const intro = document.createElement("div");
     intro.textContent = `${opts.attackerName} vs ${opts.defenderName}`;
@@ -25,8 +29,9 @@ export function showBattleModal(opts: BattleModalOptions): Promise<BattleModalRe
     modal.appendContent(intro);
 
     const note = document.createElement("div");
-    note.textContent =
-      "Fight to command your armies on the tactical battlegrid yourself, or Quick Resolve to settle it immediately by unit strength and type matchups. Fleeing cancels your move.";
+    note.textContent = opts.hideFlee
+      ? "Fight to command your armies on the tactical battlegrid yourself, or Quick Resolve to settle it immediately by unit strength and type matchups."
+      : "Fight to command your armies on the tactical battlegrid yourself, or Quick Resolve to settle it immediately by unit strength and type matchups. Fleeing cancels your move.";
     note.style.fontSize = "11px";
     note.style.opacity = "0.7";
     note.style.textAlign = "center";
@@ -38,14 +43,16 @@ export function showBattleModal(opts: BattleModalOptions): Promise<BattleModalRe
     row.style.justifyContent = "flex-end";
     row.style.gap = "8px";
 
-    const flee = document.createElement("button");
-    flee.textContent = "Flee";
-    styleButton(flee);
-    flee.addEventListener("click", () => {
-      modal.close();
-      resolve("cancel");
-    });
-    row.appendChild(flee);
+    if (!opts.hideFlee) {
+      const flee = document.createElement("button");
+      flee.textContent = "Flee";
+      styleButton(flee);
+      flee.addEventListener("click", () => {
+        modal.close();
+        resolve("cancel");
+      });
+      row.appendChild(flee);
+    }
 
     // The old "Resolve" button, relabeled to make room for Fight as the
     // primary — same server auto-resolver behind it as before.

@@ -4,7 +4,14 @@ import { TurnController, createAiTurnMemory, type AiTurnMemory, type TurnControl
 import { GameStateManager } from "../../src/managers/GameStateManager";
 import { mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../../src/game/turnHooks";
 import { emptyWarehouse, makeCharter, makeHero, makeSettlement, makeState } from "../charter/_helpers";
-import { cleanupDefeatedHeroCharters, normalizePlatoons, relocateHeroToSettlement } from "@heroes/engine";
+import {
+  CAPTURE_GOLD_REWARD,
+  DEFAULT_TREASURY_WAGONS,
+  WAGON_GOLD_CAPACITY,
+  cleanupDefeatedHeroCharters,
+  normalizePlatoons,
+  relocateHeroToSettlement,
+} from "@heroes/engine";
 import { MOVEMENT_PER_TURN, type GameState, type HeroId, type SettlementId } from "@heroes/contracts";
 import type { UnitType } from "../../src/state/units";
 import { bus } from "../../src/core/eventBus";
@@ -82,7 +89,6 @@ function buildHooks(initial: GameState): TurnControllerHooks {
       throw new Error("getMap not used in these tests");
     },
     rng: () => 0,
-    onTradeResources: noop,
     onRecruitHero: noop,
     onUpgradeTownHall: noop,
     onSetAutoTrade: noop,
@@ -95,6 +101,7 @@ function buildHooks(initial: GameState): TurnControllerHooks {
     onAdvanceCharterTravel: noop,
     onRecruitUnits: noop,
     onTransferUnits: noop,
+    onBankGold: noop,
     onSettlementBattleSubmitted: noop,
   };
   (hooks as unknown as TestHooks).onHumanTurnEndSpy = onHumanTurnEndSpy;
@@ -371,7 +378,6 @@ test("coverage guard: every this.hooks.on*( call inside a TurnController mutatio
     "requestMove",
     "captureSettlement",
     "transferGold",
-    "tradeResources",
     "setAutoTrade",
     "reorderStack",
     "recruitHero",
@@ -543,6 +549,93 @@ test("recruitUnits returns false without committing when the engine rejects the 
   const controller = new TurnController(initial, buildHooks(initial));
   assert.equal(controller.recruitUnits("s0", "archeryRange", 0, 0, "archer", 1), false, "no archeryRange at s0");
   assert.equal(controller.getState(), initial, "state must be untouched on a rejected recruit");
+});
+
+test("bankGold deposit moves treasury -> pot locally and blocks End Turn on the in-flight command", async () => {
+  const initial = makeState({
+    day: 11,
+    settlements: [
+      makeSettlement("s0", 0, 2, 2, { gold: 1000, buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic" }] }),
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const hooks = buildHooks(initial);
+  const endTurnSpy = getEndTurnSpy(hooks);
+  const seen: unknown[][] = [];
+  const command = deferred<void>();
+  hooks.onBankGold = ((...args: unknown[]) => {
+    seen.push(args);
+    return command.promise;
+  }) as TurnControllerHooks["onBankGold"];
+
+  const controller = new TurnController(initial, hooks);
+  const result = controller.bankGold("s0", 1, 1, 400, "deposit");
+  assert.deepEqual(result, { ok: true, reason: "" });
+
+  const s0 = controller.getState().settlements["s0"];
+  assert.equal(s0?.gold, 600, "the deposit leaves the treasury immediately");
+  assert.deepEqual(s0?.buildings[0].bank, { gold: 400, pendingOut: [] }, "the pot carries the gold locally");
+
+  // The local apply is load-bearing: multiplayerSync skips the client's OWN
+  // event id, so a POST-only path would leave this pot stale until a resync.
+  assert.deepEqual(seen, [[0, "s0", 1, 1, 400, "deposit"]]);
+
+  const endTurnPromise = controller.endHumanTurn();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(endTurnSpy.mock.callCount(), 0, "End Turn must not race past the in-flight onBankGold command");
+  command.resolve();
+  await endTurnPromise;
+  assert.equal(endTurnSpy.mock.callCount(), 1);
+});
+
+test("bankGold withdrawal starts the 7-day countdown out of the pot, not into the treasury", () => {
+  const initial = makeState({
+    day: 11,
+    settlements: [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 100,
+        buildings: [{ gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 900, pendingOut: [] } }],
+      }),
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const controller = new TurnController(initial, buildHooks(initial));
+  assert.deepEqual(controller.bankGold("s0", 1, 1, 300, "withdraw"), { ok: true, reason: "" });
+
+  const s0 = controller.getState().settlements["s0"];
+  assert.equal(s0?.gold, 100, "the treasury does not receive the gold until it matures");
+  assert.deepEqual(s0?.buildings[0].bank, { gold: 600, pendingOut: [{ gold: 300, maturesOnDay: 18 }] });
+});
+
+test("bankGold returns the reducer's reason and dispatches nothing when it rejects", () => {
+  const initial = makeState({
+    settlements: [
+      makeSettlement("s0", 0, 2, 2, {
+        gold: 100,
+        buildings: [
+          { gx: 1, gy: 1, kind: "bank", level: 1, style: "classic", bank: { gold: 100, pendingOut: [] } },
+          { gx: 0, gy: 0, kind: "house", level: 1, style: "classic" },
+        ],
+      }),
+      makeSettlement("s1", 1, 18, 4),
+    ],
+  });
+  const hooks = buildHooks(initial);
+  let called = 0;
+  hooks.onBankGold = (() => {
+    called++;
+    return Promise.resolve();
+  }) as TurnControllerHooks["onBankGold"];
+  const controller = new TurnController(initial, hooks);
+
+  assert.deepEqual(controller.bankGold("s0", 1, 1, 500, "deposit"), { ok: false, reason: "not_enough_gold" });
+  assert.deepEqual(controller.bankGold("s0", 0, 0, 10, "deposit"), { ok: false, reason: "not_a_bank" });
+  assert.deepEqual(controller.bankGold("s0", 1, 1, 600, "withdraw"), { ok: false, reason: "not_enough_in_pot" });
+  assert.deepEqual(controller.bankGold("nope", 1, 1, 10, "deposit"), { ok: false, reason: "no_settlement" });
+  assert.deepEqual(controller.bankGold("s0", 1, 1, 0, "deposit"), { ok: false, reason: "nothing_to_deposit" });
+  assert.equal(called, 0, "a rejected move must not POST");
+  assert.equal(controller.getState(), initial, "state must be untouched on a rejected move");
 });
 
 test("transferUnits moves garrison troops onto a hero standing on the settlement tile and tracks the hook", async () => {
@@ -1153,7 +1246,11 @@ test("AI walking onto a neutral settlement captures it via tryCaptureAt", async 
   controller.tick(16);
 
   assert.equal(controller.getState().settlements["s2"]?.ownerId, 1, "the neutral settlement flips to the AI seat");
-  assert.equal(controller.getState().heroes["h1"]?.gold, 100, "CAPTURE_GOLD_REWARD lands on the mover");
+  assert.equal(
+    controller.getState().heroes["h1"]?.gold,
+    Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY),
+    "the headroom-clamped CAPTURE_GOLD_REWARD lands on the mover (full 100g: empty purse, 2,500g soft-default cap)",
+  );
   await settlePersist();
   assert.deepEqual(captureCalls[0], [1, "h1", "s2"], "onCaptureSettlement fires with the AI seat as actor (after the move persist settles)");
   assert.ok(controller.getState().players[1]?.settlementIds.includes("s2"));
@@ -1188,7 +1285,11 @@ test("walk-in capture (human path): the CaptureSettlement POST dispatches only a
   assert.equal(controller.requestMove("h0", { q: 5, r: 2 }, 1), true);
 
   assert.equal(controller.getState().settlements["s1"]?.ownerId, 0, "the optimistic capture applies immediately");
-  assert.equal(controller.getState().heroes["h0"]?.gold, 100, "CAPTURE_GOLD_REWARD lands optimistically");
+  assert.equal(
+    controller.getState().heroes["h0"]?.gold,
+    Math.min(CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS * WAGON_GOLD_CAPACITY),
+    "the headroom-clamped CAPTURE_GOLD_REWARD lands optimistically (Phase 1 purse-cap clamp)",
+  );
   assert.deepEqual(order, ["onHumanMove"], "only the move persist may have fired at move time");
 
   await settlePersist();
@@ -2177,4 +2278,78 @@ test("GameStateManager threads one AiTurnMemory across setState/replaceState; re
   manager.replaceState(makeState());
   const third = peek(manager.getTurnController());
   assert.notEqual(third, first, "a game-session reset installs a fresh memory");
+});
+
+// Server-driven AI (plan 2026-09-30-server-side-ai-actor.md): the browser
+// never drives an AI turn on a flagged game, so each server-side HeroMoved is
+// replayed onto the live controller through applyRemoteHeroMove. It must move
+// the hero and nothing else -- no phase turn, no selection churn, no state
+// replacement when the hero is unknown.
+test("applyRemoteHeroMove moves the hero, records previousQ/R and appends the trail", () => {
+  const initial = makeState();
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  const applied = controller.applyRemoteHeroMove({ heroId: "h1", to: { q: 17, r: 5 } });
+
+  assert.equal(applied, true, "a known AI hero's move applies");
+  const hero = controller.getState().heroes.h1;
+  assert.equal(hero?.q, 17, "the hero stands on the event's tile");
+  assert.equal(hero?.r, 5);
+  assert.equal(hero?.previousQ, 18, "the old tile is kept for the visual tween");
+  assert.equal(hero?.previousR, 4);
+  assert.deepEqual(
+    hero?.trail,
+    [{ q: 18, r: 4 }, { q: 17, r: 5 }],
+    "the trail gains the arrival tile (the fixture seeds it with its own tile)",
+  );
+  assert.deepEqual(
+    controller.getState().heroes.h0,
+    initial.heroes.h0,
+    "an unrelated hero is untouched",
+  );
+});
+
+test("applyRemoteHeroMove returns false for an unknown hero and leaves the state identity alone", () => {
+  const initial = makeState();
+  const controller = new TurnController(initial, buildHooks(initial));
+  const before = controller.getState();
+
+  const applied = controller.applyRemoteHeroMove({ heroId: "ghost", to: { q: 3, r: 3 } });
+
+  assert.equal(applied, false, "a move for a hero this client does not know is rejected");
+  assert.equal(controller.getState(), before, "a rejected move must not even replace the state object");
+});
+
+test("applyRemoteHeroMove leaves the phase, active seat and both selections untouched", () => {
+  const base = makeState({
+    activePlayerId: 0,
+    phase: { kind: "PLAYER_TURN", playerId: 0 },
+  });
+  const initial: GameState = { ...base, selectedHeroId: "h0", selectedSettlementId: "s0" };
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  assert.equal(controller.applyRemoteHeroMove({ heroId: "h1", to: { q: 17, r: 5 } }), true);
+
+  const after = controller.getState();
+  assert.deepEqual(after.phase, initial.phase, "a remote move never opens or closes a phase");
+  assert.equal(after.activePlayerId, 0, "the active seat is untouched");
+  assert.equal(after.selectedHeroId, "h0", "the viewer's hero selection survives");
+  assert.equal(after.selectedSettlementId, "s0", "the viewer's settlement selection survives");
+});
+
+test("applyRemoteHeroMove works mid-AI_TURN (the phase the server driver is playing)", () => {
+  const initial = makeState({
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const controller = new TurnController(initial, buildHooks(initial), { isPrimaryActor: () => false });
+
+  assert.equal(controller.applyRemoteHeroMove({ heroId: "h1", to: { q: 17, r: 5 } }), true);
+
+  const after = controller.getState();
+  assert.equal(after.heroes.h1?.q, 17, "the parked AI-turn controller takes the step");
+  assert.equal(after.heroes.h1?.r, 5);
+  assert.equal(after.phase.kind, "AI_TURN", "the controller stays parked in the AI turn");
+  assert.equal(after.phase.kind === "AI_TURN" ? after.phase.playerId : null, 1);
+  assert.equal(after.activePlayerId, 1);
 });

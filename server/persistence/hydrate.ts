@@ -1,4 +1,4 @@
-import { hydrateGameState } from "@heroes/engine";
+import { hydrateGameState, readPendingBattle } from "@heroes/engine";
 import type { HydratableGameRow } from "@heroes/engine";
 import type { CharterState, GameState, HeroState, SettlementState } from "@heroes/contracts";
 import { createGameRepo } from "./repositories/gameRepo";
@@ -65,9 +65,12 @@ function logHydrateFallback(gameName: string): void {
 // Core algorithm, decoupled from any specific repo implementation (see
 // HydrateRepos above) so both server/app/commandHandler.ts's per-request
 // CommandDeps and this file's own hydrateGame() convenience wrapper can
-// share it without either depending on the other.
+// share it without either depending on the other. The lobby intersection
+// carries the games row's jsonb bag: the pendingBattle marker inside it
+// must reach hydrateGameState on EVERY path (reload-safety -- the BATTLE
+// phase is re-derived from it, never persisted).
 export async function hydrateFromRepos(
-  row: HydratableGameRow,
+  row: HydratableGameRow & { lobby?: unknown },
   repos: HydrateRepos,
   gameName: string,
 ): Promise<HydrateResult> {
@@ -82,7 +85,10 @@ export async function hydrateFromRepos(
   // the plan doc for why that split shouldn't be reachable today anyway.
   if (heroes.length === 0 || settlements.length === 0) {
     logHydrateFallback(gameName);
-    return { state: hydrateGameState(row), source: "jsonb" };
+    return {
+      state: hydrateGameState({ ...row, pendingBattle: readPendingBattle(row.lobby) }),
+      source: "jsonb",
+    };
   }
 
   const charters = await repos.charterRepo.loadAllForGame(gameName);
@@ -90,6 +96,7 @@ export async function hydrateFromRepos(
     ...row,
     heroes: byId(heroes),
     settlements: byId(settlements),
+    pendingBattle: readPendingBattle(row.lobby),
   });
   return { state: { ...state, activeCharters: charters }, source: "granular" };
 }

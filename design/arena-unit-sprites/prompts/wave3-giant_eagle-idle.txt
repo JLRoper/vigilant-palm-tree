@@ -1,0 +1,5 @@
+Side-view pixel art game asset of a single fantasy battle unit in a dramatic tabletop-miniature style: chunky readable pixels, rich saturated colors with strong three-tone shading ramps and bright rim highlights, bold dark outlines, high contrast that stays readable at small size, fully transparent background, square 1:1 canvas.
+
+Subject: a giant eagle: a large pure bird of prey standing tall on exactly two scaly yellow taloned legs — absolutely no lion parts, no mammal body, no fur, no tail: every part is feathers. White-to-tawny feathered head and chest, broad brown wings raised and folded up behind its back, a fierce amber eye, a large hooked golden beak.
+
+Single centered figure facing right, full body visible from head to feet, filling about 75% of the canvas height, clear readable silhouette, no ground shadow, no base plate, no scenery, no background elements. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.

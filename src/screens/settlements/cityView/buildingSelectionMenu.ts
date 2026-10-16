@@ -1,5 +1,5 @@
 import { PopupMenu, styleButton } from "@screens/shared/menu";
-import type { BuildingDef, BuildingKind } from "../../../render/cityBuildingDraw";
+import type { BuildingDef, BuildingKind } from "@heroes/contracts";
 import type { SettlementState } from "../../../state/gameState";
 import {
   buildingLabel,
@@ -125,6 +125,7 @@ export class BuildingSelectionMenu {
       initialPosition: { x, y },
       width,
       zIndex: 75,
+      clickToFront: true,
       onClose: () => { this.menu = null; },
     });
 

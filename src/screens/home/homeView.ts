@@ -12,7 +12,7 @@ import {
 import { openCenteredModal, styleButton, styleInput, menuTheme } from "@screens/shared/menu";
 import { openSettingsMenu } from "./settingsMenu";
 import { createNewGameScreen } from "./newGameScreen";
-import { createMultiplayerLobby } from "@screens/multiplayer/multiplayerLobby";
+import type { FactionId } from "@heroes/contracts";
 
 export interface HomeViewOptions {
   onEnterGame: () => void;
@@ -21,10 +21,11 @@ export interface HomeViewOptions {
     seed: number;
     castleSeed?: number;
     castleCount?: number;
-    mapSize?: "small" | "medium" | "large";
+    mapSize?: "small" | "medium" | "large" | "huge" | "epic";
     playerCount?: 1 | 2 | 3 | 4;
     humanSeatCount?: number;
     enemyCount?: number;
+    factionId?: FactionId;
   }) => Promise<void>;
   onLoadGame: (game: Game) => Promise<void>;
   isBackendOk: () => boolean;
@@ -158,12 +159,13 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
     void openLoadModal();
   });
 
-  mpBtn.addEventListener("click", () => {
+  mpBtn.addEventListener("click", async () => {
     if (busy) return;
     if (!opts.isBackendOk()) {
       alert("Backend offline. Multiplayer requires the API.");
       return;
     }
+    const { createMultiplayerLobby } = await import("@screens/multiplayer/multiplayerLobby");
     createMultiplayerLobby({
       isBackendOk: opts.isBackendOk,
       onEnterGame: () => {
@@ -235,6 +237,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
             playerCount: values.playerCount,
             humanSeatCount: values.playerCount,
             enemyCount: values.enemyCount,
+            factionId: values.factionId,
           });
           rememberGameEntry(values.name);
           screen.destroy();

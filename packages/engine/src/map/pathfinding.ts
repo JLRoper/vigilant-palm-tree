@@ -16,14 +16,217 @@ export const NEIGHBOR_DIRS: Axial[] = [
   { q: 0, r: 1 },
 ];
 
+const DQ = [1, 1, 0, -1, -1, 0];
+const DR = [0, -1, -1, 0, 1, 1];
+
+let poolCap = 0;
+let gScoreBuf = new Float64Array(0);
+let fScoreBuf = new Float64Array(0);
+let cameFromBuf = new Int32Array(0);
+let seenGenBuf = new Uint32Array(0);
+let closedGenBuf = new Uint32Array(0);
+let blockedGenBuf = new Uint32Array(0);
+let pushSeqBuf = new Uint32Array(0);
+let heapNodesBuf = new Int32Array(0);
+let heapPosBuf = new Int32Array(0);
+let searchGen = 0;
+
+function ensureBuffers(size: number): void {
+  if (size <= poolCap) return;
+  poolCap = size;
+  gScoreBuf = new Float64Array(size);
+  fScoreBuf = new Float64Array(size);
+  cameFromBuf = new Int32Array(size);
+  seenGenBuf = new Uint32Array(size);
+  closedGenBuf = new Uint32Array(size);
+  blockedGenBuf = new Uint32Array(size);
+  pushSeqBuf = new Uint32Array(size);
+  heapNodesBuf = new Int32Array(size);
+  heapPosBuf = new Int32Array(size);
+  heapPosBuf.fill(-1);
+}
+
 export function hexDistance(a: Axial, b: Axial): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) + Math.abs(a.q + a.r - b.q - b.r)) / 2;
 }
 
 export function findPath(map: GameMap, start: Axial, goal: Axial, blockedHexes?: Set<string>): Axial[] {
-  if (!map.isPassable(goal.q, goal.r)) return [];
   if (start.q === goal.q && start.r === goal.r) return [];
+  if (!map.isPassable(goal.q, goal.r)) return [];
+  if (blockedHexes?.has(`${goal.q},${goal.r}`)) return [];
 
+  const width = map.width;
+  const height = map.height;
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    return findPathUnbounded(map, start, goal, blockedHexes);
+  }
+  if (
+    start.q < 0 ||
+    start.q >= width ||
+    start.r < 0 ||
+    start.r >= height ||
+    goal.q < 0 ||
+    goal.q >= width ||
+    goal.r < 0 ||
+    goal.r >= height
+  ) {
+    return [];
+  }
+
+  ensureBuffers(width * height);
+  searchGen = (searchGen + 1) >>> 0;
+  if (searchGen === 0) {
+    seenGenBuf.fill(0);
+    closedGenBuf.fill(0);
+    blockedGenBuf.fill(0);
+    searchGen = 1;
+  }
+  const gen = searchGen;
+
+  const startIdx = start.r * width + start.q;
+  const goalIdx = goal.r * width + goal.q;
+
+  if (blockedHexes && blockedHexes.size > 0) {
+    for (const key of blockedHexes) {
+      const comma = key.indexOf(",");
+      if (comma <= 0) continue;
+      const bq = Number(key.slice(0, comma));
+      const br = Number(key.slice(comma + 1));
+      if (bq >= 0 && bq < width && br >= 0 && br < height) {
+        const bIdx = br * width + bq;
+        if (bIdx !== startIdx) blockedGenBuf[bIdx] = gen;
+      }
+    }
+  }
+
+  let heapSize = 0;
+  let seq = 0;
+
+  const heapLess = (a: number, b: number): boolean => {
+    const fa = fScoreBuf[a];
+    const fb = fScoreBuf[b];
+    return fa < fb || (fa === fb && pushSeqBuf[a] < pushSeqBuf[b]);
+  };
+
+  const heapBubbleUp = (pos: number): void => {
+    const node = heapNodesBuf[pos];
+    while (pos > 0) {
+      const parentPos = (pos - 1) >> 1;
+      const parentNode = heapNodesBuf[parentPos];
+      if (!heapLess(node, parentNode)) break;
+      heapNodesBuf[pos] = parentNode;
+      heapPosBuf[parentNode] = pos;
+      pos = parentPos;
+    }
+    heapNodesBuf[pos] = node;
+    heapPosBuf[node] = pos;
+  };
+
+  const heapSinkDown = (pos: number): void => {
+    const node = heapNodesBuf[pos];
+    const half = heapSize >> 1;
+    while (pos < half) {
+      let left = (pos << 1) + 1;
+      let bestChild = heapNodesBuf[left];
+      const right = left + 1;
+      if (right < heapSize) {
+        const rightChild = heapNodesBuf[right];
+        if (heapLess(rightChild, bestChild)) {
+          left = right;
+          bestChild = rightChild;
+        }
+      }
+      if (!heapLess(bestChild, node)) break;
+      heapNodesBuf[pos] = bestChild;
+      heapPosBuf[bestChild] = pos;
+      pos = left;
+    }
+    heapNodesBuf[pos] = node;
+    heapPosBuf[node] = pos;
+  };
+
+  const heapPush = (node: number): void => {
+    const pos = heapSize++;
+    heapNodesBuf[pos] = node;
+    heapPosBuf[node] = pos;
+    heapBubbleUp(pos);
+  };
+
+  const heapPop = (): number => {
+    const top = heapNodesBuf[0];
+    heapPosBuf[top] = -1;
+    heapSize--;
+    if (heapSize > 0) {
+      const last = heapNodesBuf[heapSize];
+      heapNodesBuf[0] = last;
+      heapPosBuf[last] = 0;
+      heapSinkDown(0);
+    }
+    return top;
+  };
+
+  seenGenBuf[startIdx] = gen;
+  cameFromBuf[startIdx] = -1;
+  gScoreBuf[startIdx] = 0;
+  fScoreBuf[startIdx] = hexDistance(start, goal);
+  pushSeqBuf[startIdx] = seq++;
+  heapPush(startIdx);
+
+  while (heapSize > 0) {
+    const currentIdx = heapPop();
+    if (currentIdx === goalIdx) {
+      const path: Axial[] = [];
+      let cur = goalIdx;
+      while (cur !== startIdx) {
+        path.push({ q: cur % width, r: (cur / width) | 0 });
+        cur = cameFromBuf[cur];
+        if (cur < 0) return [];
+      }
+      path.reverse();
+      return path;
+    }
+
+    closedGenBuf[currentIdx] = gen;
+    const cq = currentIdx % width;
+    const cr = (currentIdx / width) | 0;
+    const cg = gScoreBuf[currentIdx];
+
+    for (let d = 0; d < 6; d++) {
+      const nq = cq + DQ[d];
+      const nr = cr + DR[d];
+      if (nq < 0 || nq >= width || nr < 0 || nr >= height) continue;
+      const nIdx = nr * width + nq;
+      if (closedGenBuf[nIdx] === gen) continue;
+      if (blockedGenBuf[nIdx] === gen) continue;
+      if (!map.isPassable(nq, nr)) continue;
+
+      const tentative = cg + map.cost(nq, nr);
+      const isSeen = seenGenBuf[nIdx] === gen;
+      if (!isSeen || tentative < gScoreBuf[nIdx]) {
+        cameFromBuf[nIdx] = currentIdx;
+        gScoreBuf[nIdx] = tentative;
+        const dq = nq - goal.q;
+        const dr = nr - goal.r;
+        const h = (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) * 0.5;
+        fScoreBuf[nIdx] = tentative + h;
+        if (!isSeen) {
+          seenGenBuf[nIdx] = gen;
+          pushSeqBuf[nIdx] = seq++;
+          heapPush(nIdx);
+        } else if (heapPosBuf[nIdx] >= 0) {
+          heapBubbleUp(heapPosBuf[nIdx]);
+        } else {
+          pushSeqBuf[nIdx] = seq++;
+          heapPush(nIdx);
+        }
+      }
+    }
+  }
+
+  return [];
+}
+
+function findPathUnbounded(map: GameMap, start: Axial, goal: Axial, blockedHexes?: Set<string>): Axial[] {
   const key = (a: Axial) => `${a.q},${a.r}`;
   const open: Axial[] = [start];
   const cameFrom = new Map<string, string>();

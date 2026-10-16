@@ -49,11 +49,52 @@ test("startCharter succeeds when hero is at a friendly, well-stocked settlement"
   assert.equal(result.state.dirty, true);
 });
 
-test("startCharter rejects when phase is not PLAYER_TURN", () => {
+// Phase parity with startMove (hero/move.ts:18-23, pinned at
+// test/state/gameState.test.ts:265-289): an AI seat's turn hydrates to
+// AI_TURN, so the gate admits the active seat's own hero there. The
+// PLAYER_TURN behavior above and below is unchanged.
+test("startCharter admits the active AI seat's own hero during AI_TURN", () => {
   const s = makeState({
     heroes: [makeHero("h0", 0, 2, 2, { gold: CHARTER_GOLD_COST })],
     settlements: [makeSettlement("s0", 0, 2, 2, { warehouse: { wood: 20, stone: 15, iron: 0, arcane: 0, food: 0 } })],
+    activePlayerId: 0,
     phase: { kind: "AI_TURN", playerId: 0 },
+  });
+  const result = startCharter(s, makePayload());
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.state.heroes.h0.gold, 0);
+  assert.equal(result.state.heroes.h0.isChartering, true);
+  assert.equal(result.state.heroes.h0.charterId, "c0");
+  assert.equal(result.state.settlements.s0.warehouse.wood, 0);
+  assert.equal(result.state.settlements.s0.warehouse.stone, 0);
+  assert.equal(result.state.activeCharters.length, 1);
+  assert.equal(result.state.activeCharters[0].ownerId, 0);
+  assert.equal(result.state.nextCharterId, 1);
+  assert.equal(result.state.nextSettlementId, 101);
+  assert.equal(result.state.dirty, true);
+});
+
+test("startCharter rejects a hero owned by another seat during AI_TURN", () => {
+  // The AI_TURN admission is seat-scoped, so a foreign hero fails the phase
+  // gate itself (not_player_turn, exactly as startMove rejects it) and never
+  // reaches the ownership check below.
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, { gold: CHARTER_GOLD_COST }), makeHero("h1", 1, 18, 4)],
+    settlements: [makeSettlement("s0", 0, 2, 2, { warehouse: { wood: 20, stone: 15, iron: 0, arcane: 0, food: 0 } })],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const result = startCharter(s, makePayload({ heroId: "h0" }));
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "not_player_turn");
+});
+
+test("startCharter rejects when phase is not a turn phase", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, { gold: CHARTER_GOLD_COST })],
+    settlements: [makeSettlement("s0", 0, 2, 2, { warehouse: { wood: 20, stone: 15, iron: 0, arcane: 0, food: 0 } })],
+    phase: { kind: "ROUND_END", nextRound: 2 },
   });
   const result = startCharter(s, makePayload());
   assert.equal(result.ok, false);

@@ -1,7 +1,7 @@
 import type { Axial } from "../../core/hex";
 import type { GameMap } from "../../map/gameMap";
 import type { Hero } from "../../entities/hero";
-import type { GameState, HeroId } from "../../state/gameState";
+import type { GameState, HeroId, PlayerId } from "../../state/gameState";
 import { computePathCost, findPath, NEIGHBOR_DIRS } from "../../map/pathfinding";
 import { computeReachableSplitDetailed } from "../../render/overlays/pathOverlay";
 import type { ToastKind } from "../shared/toast";
@@ -65,10 +65,15 @@ export interface ClickIntentInput {
   isPlayerTurn: boolean;
   charterMode: boolean;
   validCharterHexes: Set<string> | null;
+  localSeat: PlayerId | null;
+  visibleHexes?: Set<string> | null;
 }
 
 export function resolveAdventureClick(input: ClickIntentInput): ClickIntent {
   const { map, heroes, state, hover: t } = input;
+  const seat = input.localSeat ?? 0;
+  const isHeroVisible = (q: number, r: number, ownerId: number): boolean =>
+    ownerId === seat || !input.visibleHexes || input.visibleHexes.has(`${q},${r}`);
 
   if (input.charterMode && input.validCharterHexes) {
     if (t) {
@@ -90,7 +95,7 @@ export function resolveAdventureClick(input: ClickIntentInput): ClickIntent {
   const clickedHero = Object.values(heroes).find(
     (h) => h.tile.q === t.q && h.tile.r === t.r
   );
-  if (clickedHero && clickedHero.ownerId === 0) {
+  if (clickedHero && clickedHero.ownerId === seat) {
     return { kind: "select-hero", heroId: clickedHero.id as HeroId };
   }
 
@@ -99,13 +104,13 @@ export function resolveAdventureClick(input: ClickIntentInput): ClickIntent {
 
   const occupiedHexes = new Set<string>();
   for (const [id, hero] of Object.entries(state.heroes)) {
-    if (id !== selectedId) {
+    if (id !== selectedId && isHeroVisible(hero.q, hero.r, hero.ownerId)) {
       occupiedHexes.add(`${hero.q},${hero.r}`);
     }
   }
 
   const clickedEnemy = Object.values(heroes).find(
-    (h) => h.tile.q === t.q && h.tile.r === t.r && h.ownerId !== 0
+    (h) => h.tile.q === t.q && h.tile.r === t.r && h.ownerId !== seat && isHeroVisible(h.tile.q, h.tile.r, h.ownerId)
   );
   if (clickedEnemy && selectedId && startTile) {
     const adjacentTiles: Axial[] = [];
