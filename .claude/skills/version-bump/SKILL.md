@@ -66,10 +66,13 @@ With `--check`, report the decision and stop.
 
 The changelog line is `-m` if given, else the PR title with ` (#<N>)`, else a one-line summary of the branch's work in conventional-commit form.
 
+The changelog line can come from a PR title, which anyone who opens a PR controls. Never splice it into a command line. Write it, as one line, to `<scratch>/bump-note.txt` with the Write tool, not through `echo` or a heredoc. Then pass it only as a quoted `"$NOTE"` variable or as a file (`git commit -F`), as the commands below do.
+
 ## 5a. Apply on the current branch
 
 ```bash
-node scripts/bump-version.mjs <patch|minor|major> -m "<changelog line>"
+NOTE="$(cat <scratch>/bump-note.txt)"
+node scripts/bump-version.mjs <patch|minor|major> -m "$NOTE"
 ```
 
 Don't commit. The bump rides along in the caller's commit, which goes through the pre-commit gate as usual.
@@ -84,19 +87,26 @@ Checks first. Stop and report if any of these fail:
 - `gh api repos/{owner}/{repo} --jq .permissions.push` is true.
 - The fetched `pr<N>` still matches `headRefOid`.
 
-Then make the commit in a throwaway worktree under the session scratchpad, so the current checkout isn't touched:
+Then make the commit in a throwaway worktree under the session scratchpad, so the current checkout isn't touched. Run every command from the current checkout, using `git -C`.
+
+Don't run the PR's own `scripts/bump-version.mjs`. A PR can change that file, and running it would execute the PR author's code on your machine. The script works out which `package.json` to edit from its own location. So copy the trusted version from the base branch over the PR's copy in the worktree, run it, and put the PR's copy back afterwards.
+
+Write the commit message to `<scratch>/bump-commit.txt` with the Write tool. The first line is `chore(release): v<new version>`, then a blank line, the changelog line and the attribution trailer.
 
 ```bash
-git worktree add --detach <scratch>/pr<N>-bump pr<N>
-cd <scratch>/pr<N>-bump
-node scripts/bump-version.mjs <patch|minor|major> -m "<changelog line>"
-git add package.json CHANGELOG.md
-git commit -m "chore(release): v<new version>" -m "<changelog line>"
-git push origin HEAD:<headRefName>
-cd - && git worktree remove <scratch>/pr<N>-bump
+WT=<scratch>/pr<N>-bump
+git worktree add --detach "$WT" pr<N>
+git show origin/<base>:scripts/bump-version.mjs > "$WT/scripts/bump-version.mjs"
+NOTE="$(cat <scratch>/bump-note.txt)"
+(cd "$WT" && node scripts/bump-version.mjs <patch|minor|major> -m "$NOTE")
+git -C "$WT" checkout HEAD -- scripts/bump-version.mjs
+git -C "$WT" add package.json CHANGELOG.md
+git -C "$WT" commit -F <scratch>/bump-commit.txt
+git -C "$WT" push origin HEAD:<headRefName>
+git worktree remove "$WT"
 ```
 
-End the commit message with the session's attribution trailer. The script only uses Node built-ins, so the worktree needs no `npm install`.
+The script only uses Node built-ins, so the worktree needs no `npm install`.
 
 The commit changes only `package.json`'s version line and `CHANGELOG.md`. The PR's CI re-runs on the push and has to go green before merge, and that run stands in for the local pre-commit gate. If the push is rejected, don't force it. Report the error.
 
