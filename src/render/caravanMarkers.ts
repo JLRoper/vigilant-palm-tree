@@ -309,7 +309,7 @@ export class CaravanVisualTracker {
           origin.ownerId,
           route.wagons,
           route.payload.kind,
-          nextCaravan.pathIndex > 0 ? originTile : end,
+          end,
           facing,
           nextCaravan,
         );

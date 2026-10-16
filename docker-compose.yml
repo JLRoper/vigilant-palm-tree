@@ -65,33 +65,18 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    # Redeploy with `npm run docker:deploy` or `docker compose up -d --remove-orphans api web`
+    # so any legacy `game_gateway` container is removed before `game_web` binds host port 5173.
+    ports:
+      - "5173:80"
     networks:
       - heroes-network
-    environment:
-      # `vite preview` reads this and proxies /api/* to the api service
-      API_HOST: api
-      API_PORT: "3001"
-      CLIENT_PORT: "5173"
     healthcheck:
-      test: ["CMD-SHELL", "wget -O /dev/null http://127.0.0.1:5173 || exit 1"]
+      test: ["CMD-SHELL", "wget -O /dev/null http://127.0.0.1:80 || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 5s
       retries: 3
-
-  gateway:
-    image: nginx:1.27-alpine
-    container_name: game_gateway
-    restart: unless-stopped
-    depends_on:
-      web:
-        condition: service_healthy
-    ports:
-      - "5173:80"
-    volumes:
-      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    networks:
-      - heroes-network
 
   adminer:
     image: adminer:latest

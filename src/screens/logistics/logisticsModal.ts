@@ -677,9 +677,17 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
   bus.on("round:changed", render);
   bus.on("mp:resynced", render);
   bus.on("mp:eventsApplied", onRemoteRouteEvent);
+  // The caravan advances at every turn end, while round:changed only fires
+  // when a round WRAPS -- without these two the journey panel's wagon marker
+  // sits stale mid-round. turn:ended covers the local human/AI end-turn
+  // merge; mp:stateChanged covers polled/remote state on other seats.
+  bus.on("turn:ended", render);
+  bus.on("mp:stateChanged", render);
   detachRouteRefresh = () => {
     bus.off("round:changed", render);
     bus.off("mp:resynced", render);
     bus.off("mp:eventsApplied", onRemoteRouteEvent);
+    bus.off("turn:ended", render);
+    bus.off("mp:stateChanged", render);
   };
 }

@@ -320,7 +320,14 @@ test("CaravanVisualTracker tweens a caravan step-by-step along its walked path a
   assert.ok(visual);
   assert.equal(visual.moving, true);
   assert.equal(visual.animationPath.length, 5, "origin + 4 walked steps");
-  assert.deepEqual(visual.tile, { q: 0, r: 0 }, "starts tweening from previous tile (0,0)");
+  assert.deepEqual(visual.animationPath, [
+    { q: 0, r: 0 },
+    { q: 1, r: 0 },
+    { q: 2, r: 0 },
+    { q: 3, r: 0 },
+    { q: 4, r: 0 },
+  ]);
+  assert.deepEqual(visual.tile, { q: 0, r: 0 }, "the tween starts at the walk path's first tile (the origin)");
   assert.deepEqual(visual.toTile, { q: 1, r: 0 });
   assert.equal(visual.facingDirection, "e");
 
@@ -342,7 +349,7 @@ test("CaravanVisualTracker tweens a caravan step-by-step along its walked path a
     }),
   });
   const [markerNode] = nodesOfKind<CaravanMarkerNode>(sceneNodes, "caravanMarker");
-  assert.ok(markerNode.world.x > axialToPixel(0, 0).x && markerNode.world.x < axialToPixel(1, 0).x);
+  assert.ok(markerNode.world.x > axialToPixel(0, 0).x && markerNode.world.x < axialToPixel(1, 0).x, "interpolating eastward toward (1,0)");
   assert.ok(markerNode.markerWorld, "moving caravan emits steady markerWorld for owner dot and count badge");
 
   // Advance through all 4 segments to completion

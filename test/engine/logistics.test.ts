@@ -506,6 +506,66 @@ test("catch-up: a hero endpoint that moves off the caravan's path is re-pathed t
   assert.equal(current.heroes.h0.gold, 500, "full delivery, no cargo lost en route");
 });
 
+// A passable tile at least minDist hexes from `from` with an A* path to it
+// and distinct from `avoid` -- the fixture for a hero that teleports
+// somewhere the caravan's current path does not already end.
+function farReachableTile(
+  map: GameMap,
+  from: { q: number; r: number },
+  avoid: { q: number; r: number },
+  minDist = 5,
+): { q: number; r: number } {
+  for (let r = 0; r < map.height; r++) {
+    for (let q = 0; q < map.width; q++) {
+      if (!map.isPassable(q, r)) continue;
+      if (q === avoid.q && r === avoid.r) continue;
+      if (hexDistance({ q, r }, from) < minDist) continue;
+      if (findPath(map, from, { q, r }).length === 0) continue;
+      return { q, r };
+    }
+  }
+  throw new Error(`no reachable passable tile at distance >= ${minDist} from the caravan on this map`);
+}
+
+test("a hero destination that moves off the path's end is re-targeted before the stale path finishes", () => {
+  const map = new GameMap(61, "small");
+  const [a, b] = reachableDistantPair(map, 8);
+  const mover = { ...makeHero("h0", 0, b.q, b.r), resources: emptyWarehouse() };
+  const origin = makeSettlement("s0", 0, a.q, a.r, { gold: 2500 });
+  const state = grantWagons(makeState({ heroes: [mover], settlements: [origin], activePlayerId: 0 }), 1);
+  const created = createTradeRoute(state, 0, settlementEndpoint("s0"), heroEndpoint("h0"), GOLD, 1);
+  assert.equal(created.ok, true, created.reason);
+
+  // Wrap 1 loads at the origin; wrap 2 walks 4 tiles along the path, which
+  // still ends at the hero's tile at load.
+  let current = advanceTradeRoutes(created.state, map);
+  current = advanceTradeRoutes(current, map);
+  const departed = current.tradeRoutes![0].caravan!;
+  assert.equal(departed.phase, "toDestination");
+  assert.ok(departed.pathIndex > 0, "precondition: the cart has walked off the origin");
+  assert.equal(
+    `${departed.path[departed.path.length - 1].q},${departed.path[departed.path.length - 1].r}`,
+    `${b.q},${b.r}`,
+    "precondition: the stale path ends at the hero's old tile",
+  );
+
+  // The hero teleports to a far passable tile the current path does not end at.
+  const cartTile = departed.path[departed.pathIndex - 1];
+  const c = farReachableTile(map, cartTile, b);
+  current = { ...current, heroes: { ...current.heroes, h0: { ...current.heroes.h0, q: c.q, r: c.r } } };
+
+  // One daily advance: the cart re-targets toward the hero's CURRENT tile
+  // before finishing the stale path to b -- the new path ends at c.
+  current = advanceTradeRoutes(current, map);
+  const retargeted = current.tradeRoutes![0].caravan!;
+  assert.equal(
+    `${retargeted.path[retargeted.path.length - 1].q},${retargeted.path[retargeted.path.length - 1].r}`,
+    `${c.q},${c.r}`,
+    "the remaining path now ends at the hero's CURRENT tile, not the stale one",
+  );
+  assert.ok(retargeted.pathIndex > 1, "the cart kept walking today's budget on the re-targeted path");
+});
+
 test("an exhausted chase waits for the next daily tick with cargo intact when it cannot re-path", () => {
   assert.equal(CARAVAN_CATCHUP_REPATHS_PER_DAY, 3, "the re-path cap is a named constant (suggest 3, per the brief)");
   const map = new GameMap(7, "small");
