@@ -61,7 +61,7 @@ export function createDefaultProvider(
     }
     if (proceduralKeys.has(d.key)) continue;
 
-    if (d.key.startsWith("castle.")) {
+    if (d.key.startsWith("castle.") || d.key.startsWith("caravan.")) {
       eagerUrls[d.key] = d.url;
     } else {
       onDemandUrls[d.key] = d.url;

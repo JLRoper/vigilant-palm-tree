@@ -1,8 +1,8 @@
 # Front-End Efficiency TODO
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-15 -->
 
-**Status:** Historical performance backlog, not a current work queue. The drawing model below predates the scene-graph and pixel-building sprite cutovers. Current paths are [`src/render/scene/sceneBuilder/cityScene.ts`](../src/render/scene/sceneBuilder/cityScene.ts), [`src/render/scene/paint2d/index.ts`](../src/render/scene/paint2d/index.ts), and [`src/render/docs/technical-spec.md`](../src/render/docs/technical-spec.md). Profile the current implementation before acting on any item.
+**Status:** Historical performance backlog, not a current work queue. The drawing model below predates the scene-graph and pixel-building sprite cutovers, as well as the 2026-10-14..16 large-map performance rescue (Tiers 0, 1, and 3 — see [`docs/large-map-performance-report.md`](./large-map-performance-report.md)). Current paths are [`src/render/scene/sceneBuilder/cityScene.ts`](../src/render/scene/sceneBuilder/cityScene.ts), [`src/render/scene/paint2d/index.ts`](../src/render/scene/paint2d/index.ts), and [`src/render/docs/technical-spec.md`](../src/render/docs/technical-spec.md). Profile the current implementation before acting on any item.
 
 ## Rendering model tradeoff summary
 

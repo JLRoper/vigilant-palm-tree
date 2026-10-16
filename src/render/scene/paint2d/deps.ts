@@ -79,6 +79,7 @@ export interface Paint2DSpriteResolver {
   resolveSpriteForBuilding(kind: BuildingKind, level: number): ResolvedSprite | undefined;
   resolveSpriteForCastle(level: CastleLevel, variant: CastleVariant): ResolvedSprite | undefined;
   resolveSpriteForUnit(unitTypeId: string, pose: UnitArenaPose): ResolvedSprite | undefined;
+  resolveSpriteForCaravan?(payloadKind?: "resource" | "gold"): ResolvedSprite | undefined;
   // Escape hatch for tests/fixtures that already have a key in hand. Production
   // painters should prefer the five per-kind helpers above.
   resolveSprite(key: SpriteKey): ResolvedSprite | undefined;

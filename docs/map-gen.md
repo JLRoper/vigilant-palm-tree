@@ -18,7 +18,7 @@
 **Properties:**
 - ~30 lines, zero dependencies.
 - Deterministic per seed (mulberry32).
-- O(terrain_count × max_steps) — fine for 24×18, acceptable up to ~50×40.
+- Supports `small` (24×18), `medium` (36×27), `large` (48×36), `huge` (72×54), and `epic` (120×90) map sizes; `GameMap.placedResourceTiles` records the sparse list of placed resource deposits.
 - Coarse: no smooth coastlines, no elevation gradients. Forests are blobs, not density fields.
 
 ## Alternatives, ranked by complexity

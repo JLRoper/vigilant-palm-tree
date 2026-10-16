@@ -1,6 +1,6 @@
 # Resources
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-14 -->
 
 Six resource types are defined by [`packages/contracts/src/resources.ts`](../packages/contracts/src/resources.ts): gold, wood, stone, iron, arcane, and food. Five have world-map resource-tile density data; food is a settlement/city resource and never spawns on the world map.
 

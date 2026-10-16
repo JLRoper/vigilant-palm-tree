@@ -17,12 +17,14 @@ export type TileRow = {
   resource: string | null;
 };
 
-export type MapSize = "small" | "medium" | "large";
+export type MapSize = "small" | "medium" | "large" | "huge" | "epic";
 
 export const MAP_SIZES: Record<MapSize, { width: number; height: number; label: string }> = {
   small:  { width: 24, height: 18, label: "Small" },
   medium: { width: 36, height: 27, label: "Medium" },
   large:  { width: 48, height: 36, label: "Large" },
+  huge:   { width: 72, height: 54, label: "Huge" },
+  epic:   { width: 120, height: 90, label: "Epic" },
 };
 
 export class GameMap {
@@ -30,6 +32,7 @@ export class GameMap {
   height = 18;
   tiles: Terrain[] = [];
   resourceTiles: (ResourceTile | undefined)[] = [];
+  placedResourceTiles: readonly ResourceTile[] = [];
 
   constructor(seed = 1, mapSize?: MapSize) {
     if (mapSize && MAP_SIZES[mapSize]) {
@@ -42,6 +45,7 @@ export class GameMap {
     }
     const resourceRng = mulberry32(((seed ^ 0x72657375) >>> 0));
     const placed = placeResourceTiles(this, resourceRng);
+    this.placedResourceTiles = placed;
     this.resourceTiles = new Array<ResourceTile | undefined>(this.width * this.height);
     for (const t of placed) {
       this.resourceTiles[this.index(t.q, t.r)] = t;
@@ -89,20 +93,59 @@ export class GameMap {
     map.height = height;
     map.tiles = new Array<Terrain>(width * height);
     map.resourceTiles = new Array<ResourceTile | undefined>(width * height);
+    const placed: ResourceTile[] = [];
     for (const row of rows) {
       const idx = map.index(row.q, row.r);
       map.tiles[idx] = row.terrain;
       if (row.resource) {
-        map.resourceTiles[idx] = { q: row.q, r: row.r, resource: row.resource as any };
+        const rt: ResourceTile = { q: row.q, r: row.r, resource: row.resource as any };
+        map.resourceTiles[idx] = rt;
+        placed.push(rt);
       }
     }
+    map.placedResourceTiles = placed;
     return map;
   }
+}
+
+export const GAME_MAP_CACHE_CAPACITY = 32;
+const gameMapCache = new Map<string, GameMap>();
+
+export function resolveMapSize(mapSize?: string | null): MapSize {
+  return mapSize && (mapSize as MapSize) in MAP_SIZES ? (mapSize as MapSize) : "small";
+}
+
+export function getOrCreateGameMap(seed = 1, mapSize?: MapSize | string | null): GameMap {
+  const resolvedSize = resolveMapSize(mapSize);
+  const resolvedSeed = Number.isFinite(seed) ? Number(seed) : 1;
+  const key = `${resolvedSeed}:${resolvedSize}`;
+  const hit = gameMapCache.get(key);
+  if (hit) {
+    gameMapCache.delete(key);
+    gameMapCache.set(key, hit);
+    return hit;
+  }
+  const created = new GameMap(resolvedSeed, resolvedSize);
+  if (gameMapCache.size >= GAME_MAP_CACHE_CAPACITY) {
+    const oldestKey = gameMapCache.keys().next().value;
+    if (oldestKey !== undefined) gameMapCache.delete(oldestKey);
+  }
+  gameMapCache.set(key, created);
+  return created;
+}
+
+export function clearGameMapCache(): void {
+  gameMapCache.clear();
+}
+
+export function getGameMapCacheSize(): number {
+  return gameMapCache.size;
 }
 
 function generateTerrain(rng: () => number, width: number, height: number): Terrain[] {
   const total = width * height;
   const tiles = new Array<Terrain>(total).fill("grass");
+  const inFrontier = new Uint8Array(total);
 
   const targets: Array<{ terrain: Terrain; fraction: number; blobs: number }> = [
     { terrain: "mountain", fraction: 0.03, blobs: 2 },
@@ -116,31 +159,42 @@ function generateTerrain(rng: () => number, width: number, height: number): Terr
 
   for (const { terrain, fraction, blobs } of targets) {
     const targetCount = Math.floor(total * fraction);
-    const frontier: Axial[] = [];
+    const frontier: number[] = [];
+    inFrontier.fill(0);
     for (let i = 0; i < blobs; i++) {
       const q = Math.floor(rng() * width);
       const r = Math.floor(rng() * height);
-      frontier.push({ q, r });
+      const cellIdx = r * width + q;
+      if (!inFrontier[cellIdx]) {
+        inFrontier[cellIdx] = 1;
+        frontier.push(cellIdx);
+      }
     }
     let placed = 0;
     let guard = 0;
     const maxSteps = targetCount * 20;
     while (placed < targetCount && frontier.length > 0 && guard++ < maxSteps) {
       const idx = Math.floor(rng() * frontier.length);
-      const cur = frontier[idx];
-      const i = cur.r * width + cur.q;
-      if (tiles[i] === "grass") {
-        tiles[i] = terrain;
+      const cellIdx = frontier[idx];
+      const last = frontier.pop()!;
+      if (idx < frontier.length) frontier[idx] = last;
+      if (tiles[cellIdx] === "grass") {
+        tiles[cellIdx] = terrain;
         placed++;
+        const cq = cellIdx % width;
+        const cr = (cellIdx / width) | 0;
         for (const d of NEIGHBOR_DIRS) {
-          const nq = cur.q + d.q;
-          const nr = cur.r + d.r;
+          const nq = cq + d.q;
+          const nr = cr + d.r;
           if (nq >= 0 && nq < width && nr >= 0 && nr < height) {
-            frontier.push({ q: nq, r: nr });
+            const nIdx = nr * width + nq;
+            if (tiles[nIdx] === "grass" && !inFrontier[nIdx]) {
+              inFrontier[nIdx] = 1;
+              frontier.push(nIdx);
+            }
           }
         }
       }
-      if (frontier.length > targetCount * 3) frontier.splice(idx, 1);
     }
   }
 

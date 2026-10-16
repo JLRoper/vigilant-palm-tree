@@ -24,7 +24,6 @@ import { setViewSeat } from "../state/viewSeat";
 import { settings, subscribeSettings } from "../state/settings";
 import { createFrameErrorLog } from "../core/frameErrors";
 import { shouldDriveAi } from "../io/serverDrivenGames";
-import { resolveCaravanMarkers } from "../render/caravanMarkers";
 import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
 import { attachAiThinkingHint } from "@screens/shared/aiThinkingHint";
@@ -61,6 +60,7 @@ export class GameEngine {
   public eventLog: EventLog | null = null;
   public consoleHandle: DevConsoleHandle | null = null;
   private logPanelEnsured = false;
+  private drawnSinceLastLoop = false;
 
   constructor() {
     this.canvas = document.getElementById("game") as HTMLCanvasElement;
@@ -426,6 +426,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
   // =========================================================================
 
   fullFrame(): void {
+    this.drawnSinceLastLoop = true;
     this.draw();
     this.refreshHud();
     this.ui.setMapDimensions(this.gameMap.width, this.gameMap.height);
@@ -453,8 +454,11 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       const changed = this.state.update(dt);
       if (changed) {
         this.actions.maybeAutoResolveBattle();
+        this.fullFrame();
+      } else if (!this.drawnSinceLastLoop) {
+        this.fullFrame();
       }
-      this.fullFrame();
+      this.drawnSinceLastLoop = false;
     } catch (e) {
       frameErrors.report(e);
     } finally {
@@ -469,6 +473,11 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
   draw(): void {
     const gs = this.state.getState();
     if (!gs) return;
+    const cityView = this.ui.getCityView();
+    if (cityView?.isOpen() && !settings().parallaxEnabled) {
+      this.view.drawCityOverlay(cityView);
+      return;
+    }
     const selectedHero = gs.selectedHeroId ? gs.heroes[gs.selectedHeroId] : null;
     const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
     this.view.draw(
@@ -486,7 +495,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       },
       gs.activeCharters,
       this.validCharterHexes,
-      resolveCaravanMarkers(gs.tradeRoutes, gs.settlements, gs.heroes),
+      this.state.getCaravanMarkers(),
     );
     this.view.drawCityOverlay(this.ui.getCityView());
   }

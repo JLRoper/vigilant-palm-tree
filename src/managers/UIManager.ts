@@ -28,8 +28,8 @@ import type { MapInfo } from "@screens/home/settingsMenu";
 import type { FactionId } from "@heroes/contracts";
 
 type ToolbarCallbacks = {
-  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; enemyCount?: number; factionId?: FactionId }) => void;
-  onLoad: (loaded: import("../io/api").Game, tiles: import("../io/api").TileRow[]) => void;
+  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" | "huge" | "epic"; enemyCount?: number; factionId?: FactionId }) => void;
+  onLoad: (loaded: import("../io/api").Game, tiles?: import("../io/api").TileRow[]) => void;
   onSave: () => void;
   onEndTurn: () => void;
   onForget: (id: number) => void;
@@ -37,6 +37,18 @@ type ToolbarCallbacks = {
   onStartCharter?: () => void;
   canStartCharter?: () => boolean;
 };
+
+const stateIdentityIds = new WeakMap<GameState, number>();
+let nextStateIdentityId = 1;
+
+function getStateIdentityId(state: GameState): number {
+  let id = stateIdentityIds.get(state);
+  if (id === undefined) {
+    id = nextStateIdentityId++;
+    stateIdentityIds.set(state, id);
+  }
+  return id;
+}
 
 export class UIManager {
   private hudHandles?: HudHandles;
@@ -53,6 +65,11 @@ export class UIManager {
   private cityViewLocalSeat?: () => PlayerId | null;
   private gameStateManager?: GameStateManager;
   private viewManager?: ViewManager;
+  private lastMapWidth = -1;
+  private lastMapHeight = -1;
+  private lastHudKey = "";
+  private lastMenusKey = "";
+  private lastTileInfoKey = "";
 
   constructor(
     private toolbarEl: HTMLElement,
@@ -378,6 +395,9 @@ export class UIManager {
   private static readonly MINIMAP_RAIL_GAP = 16;
 
   setMapDimensions(width: number, height: number): void {
+    if (width === this.lastMapWidth && height === this.lastMapHeight) return;
+    this.lastMapWidth = width;
+    this.lastMapHeight = height;
     setMinimapReserve(getMinimapReserveHeight(width, height) + UIManager.MINIMAP_RAIL_GAP);
   }
 
@@ -388,18 +408,52 @@ export class UIManager {
     localPlayerId: PlayerId | null,
   ): void {
     if (!this.hudHandles) return;
-    updateHud(
-      gameState,
-      lastSavedAt,
-      this.hudHandles,
-      localPlayerId,
-      this.hudPathReadout(),
-    );
-    this.refreshHeroInfoMenu(gameState, heroes);
-    this.refreshSettlementInfoMenu(gameState);
-    this.refreshTileInfoPanel(gameState, heroes, localPlayerId);
-    this.refreshRosterMenus(gameState);
-    this.toolbar?.refresh();
+    const stateId = getStateIdentityId(gameState);
+    const stateKey = `${stateId}:${gameState.round}:${gameState.day}:${gameState.activePlayerId}:${gameState.phase.kind}:${gameState.selectedHeroId ?? ""}:${gameState.selectedSettlementId ?? ""}:${localPlayerId ?? ""}`;
+    const readout = this.hudPathReadout();
+    const readoutKey = readout
+      ? `${readout.costToSplit}:${readout.totalCost}:${readout.destinationReachable ? 1 : 0}`
+      : "";
+    const hudKey = `${stateKey}|${lastSavedAt ?? ""}|${readoutKey}`;
+    if (hudKey !== this.lastHudKey) {
+      this.lastHudKey = hudKey;
+      updateHud(
+        gameState,
+        lastSavedAt,
+        this.hudHandles,
+        localPlayerId,
+        readout,
+      );
+    }
+
+    const selHero = gameState.selectedHeroId ? heroes[gameState.selectedHeroId] : undefined;
+    const selectedHeroVisualKey = selHero
+      ? `${selHero.tile.q},${selHero.tile.r}:${selHero.moving ? 1 : 0}:${selHero.movementRemaining}`
+      : "";
+    const menusKey = `${stateKey}|${selectedHeroVisualKey}|${this.heroInfoMenu?.getCurrentHeroId() ?? ""}|${this.settlementInfoMenu?.getCurrentSettlementId() ?? ""}|${this.heroRosterMenu?.isVisible() ? 1 : 0}:${this.settlementRosterMenu?.isVisible() ? 1 : 0}`;
+    if (menusKey !== this.lastMenusKey) {
+      this.lastMenusKey = menusKey;
+      this.refreshHeroInfoMenu(gameState, heroes);
+      this.refreshSettlementInfoMenu(gameState);
+      this.refreshRosterMenus(gameState);
+      this.toolbar?.refresh();
+    }
+
+    if (!this.inspectedTile && !this.tileInfoPanel?.isVisible()) {
+      this.lastTileInfoKey = "hidden";
+      return;
+    }
+
+    let heroPosSig = "";
+    for (const id of Object.keys(heroes)) {
+      const h = heroes[id];
+      heroPosSig += `${id}@${h.tile.q},${h.tile.r}:${h.movementRemaining};`;
+    }
+    const tileInfoKey = `${stateKey}|${this.inspectedTile ? `${this.inspectedTile.q},${this.inspectedTile.r}` : "none"}|${this.cityView?.isOpen() ? 1 : 0}|${this.tileInfoPanel?.isVisible() ? 1 : 0}|${heroPosSig}`;
+    if (tileInfoKey !== this.lastTileInfoKey) {
+      this.lastTileInfoKey = tileInfoKey;
+      this.refreshTileInfoPanel(gameState, heroes, localPlayerId);
+    }
   }
 
   // F10 (playtest fixes 2026-09-29): the AdventureView owns the hovered

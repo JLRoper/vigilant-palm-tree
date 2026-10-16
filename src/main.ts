@@ -18,8 +18,7 @@ async function start(): Promise<void> {
       void engine.fullFrame();
     },
     onLoadGame: async (loaded: Game) => {
-      const tiles = await engine.sessions.getTilesForGame(loaded);
-      await engine.sessions.loadGame(loaded, tiles);
+      await engine.sessions.loadGame(loaded);
       engine.refreshToolbarAndFrame();
     },
     onEnterGame: () => {

@@ -2,7 +2,7 @@ import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { ViewManager } from "./ViewManager";
 import { UIManager } from "./UIManager";
-import { GameMap, type MapSize, MAP_SIZES } from "../map/gameMap";
+import { GameMap, type MapSize, MAP_SIZES, getOrCreateGameMap, resolveMapSize } from "../map/gameMap";
 import { markSaved } from "../state/gameState";
 import { playerHeroId } from "../game/initState";
 import { CASTLE_COUNT_DEFAULT, defaultCastleSeedFromMapSeed, generateCastles } from "../map/castlePlacement";
@@ -52,16 +52,19 @@ export class GameSessionManager {
   private inferMapSize(map?: GameMap): MapSize {
     const width = map?.width ?? this.getGameMap().width;
     const height = map?.height ?? this.getGameMap().height;
-    if (width === MAP_SIZES.large.width && height === MAP_SIZES.large.height) return "large";
-    if (width === MAP_SIZES.medium.width && height === MAP_SIZES.medium.height) return "medium";
+    for (const size of Object.keys(MAP_SIZES) as MapSize[]) {
+      const dimensions = MAP_SIZES[size];
+      if (width === dimensions.width && height === dimensions.height) return size;
+    }
     return "small";
   }
 
-  async loadGame(loaded: Game, tiles: TileRow[]): Promise<void> {
+  async loadGame(loaded: Game, tiles?: TileRow[]): Promise<void> {
     this.session.adopt(loaded);
     notePersisted(loaded.updated_at);
-    const map = GameMap.fromTiles(tiles);
-    const inferredSize = this.inferMapSize(map);
+    const resolvedSize = resolveMapSize(loaded.map_size);
+    const map = tiles && tiles.length > 0 ? GameMap.fromTiles(tiles) : getOrCreateGameMap(loaded.seed, resolvedSize);
+    const inferredSize = tiles && tiles.length > 0 ? this.inferMapSize(map) : resolvedSize;
     // Server-driven flag (plan/2026-09-30-server-side-ai-actor.md D8): every
     // creation/load path funnels through here, so this is the registry's
     // feed point for game-bearing responses; a switch to a different game
@@ -108,7 +111,7 @@ export class GameSessionManager {
     }
   }
 
-  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large"; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number; enemyCount?: number; factionId?: FactionId }): Promise<void> {
+  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" | "huge" | "epic"; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number; enemyCount?: number; factionId?: FactionId }): Promise<void> {
     const effectiveCastleSeed =
       typeof opts.castleSeed === "number" && Number.isFinite(opts.castleSeed)
         ? opts.castleSeed
@@ -125,7 +128,7 @@ export class GameSessionManager {
         ? [opts.factionId, ...Array.from({ length: Math.max(totalPlayers - 1, 0) }, () => "human" as FactionId)]
         : undefined;
     const effectiveCastleCount = opts.castleCount ?? (2 * totalPlayers);
-    const castles = generateCastles(this.getGameMap(), {
+    const castles = generateCastles(getOrCreateGameMap(opts.seed, opts.mapSize ?? "small"), {
       castleSeed: effectiveCastleSeed,
       playerCount: totalPlayers,
       castleCount: Math.max(effectiveCastleCount, totalPlayers),
@@ -148,8 +151,7 @@ export class GameSessionManager {
     const seat = 0;
     const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? `Player ${seat + 1}`;
     await this.session.claimLobbySeat(created.name, seat, handle);
-    const gameTiles = await this.session.getTiles(created.name);
-    await this.loadGame(created, gameTiles);
+    await this.loadGame(created);
     void this.session.logEvent(created.name, "new_game", {
       seed: opts.seed,
       castleSeed: effectiveCastleSeed,
@@ -162,7 +164,7 @@ export class GameSessionManager {
     try {
       this.syncMetadata("starter", MAP_SEED, "small");
       const castleSeed = defaultCastleSeedFromMapSeed(MAP_SEED);
-      const castles = generateCastles(this.getGameMap(), {
+      const castles = generateCastles(getOrCreateGameMap(MAP_SEED, "small"), {
         castleSeed,
         playerCount: 3,
         castleCount: CASTLE_COUNT_DEFAULT,
@@ -188,8 +190,7 @@ export class GameSessionManager {
       const seat = 0;
       const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? `Player ${seat + 1}`;
       await this.session.claimLobbySeat(created.name, seat, handle);
-      const tiles = await this.session.getTiles(created.name);
-      await this.loadGame(created, tiles);
+      await this.loadGame(created);
       void this.session.logEvent(created.name, "session_start", {
         seed: MAP_SEED,
         castleSeed,

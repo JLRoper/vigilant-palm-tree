@@ -1,8 +1,8 @@
 # Current Module Map
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-15 -->
 
-This is the current code map, verified against the repository on 2026-10-11. The executed layout plan in [`architecture.md`](./architecture.md) is historical. Shared boundary types live in `packages/contracts/`, game rules/economy in `packages/engine/`, and browser UI in `src/screens/`.
+This is the current code map, verified against the repository on 2026-10-15. The executed layout plan in [`architecture.md`](./architecture.md) is historical. Shared boundary types live in `packages/contracts/`, game rules/economy in `packages/engine/`, and browser UI in `src/screens/`.
 
 ## Data Flow
 
@@ -28,13 +28,13 @@ Browser client                                      Express API
 | Package | Responsibility |
 |---|---|
 | `packages/contracts/` (`@heroes/contracts`) | Leaf types shared across client/server: game state, ids, resources, buildings, factions, commands, engine events, and telemetry. It imports no engine, client, or server code. |
-| `packages/engine/` (`@heroes/engine`) | Pure game rules: initialization/hydration, movement, chartering, settlement/building/recruitment, resource production/upkeep, trade-route logistics, combat/outcomes, turn progression, event replay, registries, map algorithms, and AI strategy. Depends on contracts only. |
+| `packages/engine/` (`@heroes/engine`) | Pure game rules: initialization/hydration, movement, chartering, settlement/building/recruitment, resource production/upkeep, trade-route logistics, combat/outcomes, turn progression, event replay, registries, map algorithms (`packages/engine/src/map/gameMap.ts` provides a process-wide `getOrCreateGameMap` LRU cache + `Uint8Array` bitset frontier deduplication and O(1) swap-and-pop in `generateTerrain`; `pathfinding.ts` uses a binary min-heap + reusable generation-tagged TypedArray buffers with FIFO tie-breaking and blocked-goal early exit), and AI strategy (`packages/engine/src/ai/aiBrain.ts` bounds `pickWanderStep` to a local radius ring with early exit, returns early when `movementRemaining < 1`, and scopes resource/charter scans to a local radius). Depends on contracts only. |
 
 ## Server (`server/`)
 
 | Area | Responsibility |
 |---|---|
-| `server/index.ts`, `server/routes.ts` | Express bootstrap, `/api` router composition, schema/migration initialization, and service start. `LAN_HOST=1` controls API binding. |
+| `server/index.ts`, `server/routes.ts` | Express bootstrap, `/api` router composition, schema/migration initialization, bulk 5-parameter `UNNEST` tile insertion in `generateAndInsertTiles` + `getOrCreateGameMap` reuse, and service start. `LAN_HOST=1` controls API binding. |
 | `server/http/routes/` | HTTP boundary: command validation, games/lobbies, SSE event stream, telemetry, auth, and assets. Client AI-seat commands for server-driven games are rejected at the command route. |
 | `server/app/commandHandler.ts` | Transactional command dispatch: load state, validate authority, call engine reducers, persist affected rows, and append events. |
 | `server/app/aiDriver.ts`, `aiDriverToken.ts` | Drives flagged AI seats, including garrisons, trade routes, charters, battles, and turn completion. Per-process tokens, heartbeat watchdog/adoption, and PostgreSQL per-game advisory locks prevent stale or duplicate drivers. |
@@ -49,15 +49,15 @@ The server does not depend on `src/screens/` or `src/render/`. Keep server behav
 | Area | Responsibility |
 |---|---|
 | `src/main.ts` | Bootstrap `GameEngine`, register screens, show the home view, and start the animation loop. |
-| `src/managers/` | App orchestration: `GameEngine`, state/entity synchronization, sessions, view setup, UI, and high-level actions. |
+| `src/managers/` | App orchestration: `GameEngine`, state/entity synchronization, sessions (`GameSessionManager` reconstructs `GameMap` client-side via `getOrCreateGameMap` in `loadGame`/`handleNewGame`/`createFreshStarter` without fetching `/tiles`), view setup, UI (`UIManager` with dirty-keyed `refreshHud`/`setMapDimensions`), and high-level actions. |
 | `src/state/` | Client-local state/controller facade: the persisted settings singleton (`settings.ts`, e.g. `toolbarStyle` — default `modern`, unknown values normalize to `modern`) and the toolbar theme token registry (`toolbarThemes.ts` — palette + shape tokens per theme). Reducers and authoritative game rules are imported from `@heroes/engine`. |
-| `src/screens/` | DOM UI and input: home, adventure, combat, settlement/city, logistics, multiplayer, shared menus/panels, and debug screens. The toolbar theme applier `src/screens/shared/toolbarTheme.ts` writes the `--tb-*` tokens onto the document root and reacts to settings changes; the Visual "Toolbar style" selector lives in `src/screens/home/settingsMenu.ts`. View registration is through `src/screens/shared/viewLauncher.ts`. |
+| `src/screens/` | DOM UI and input: home, adventure (`adventureView.ts` + `clickIntent.ts` filter `occupiedHexes`/enemy targets by fog visibility via `computeVisionFromState` and preview adjacent attack paths on enemy hover; `tileInfo.ts` checks territory via `hexDistance <= controlRange`), combat, settlement/city, logistics, multiplayer, shared menus/panels (`hud.ts` memoizes economy snapshots + `formatTime`, `toolbar.ts` caches status-row elements), and debug screens. The toolbar theme applier `src/screens/shared/toolbarTheme.ts` writes the `--tb-*` tokens onto the document root and reacts to settings changes; the Visual "Toolbar style" selector lives in `src/screens/home/settingsMenu.ts`. View registration is through `src/screens/shared/viewLauncher.ts`. |
 | `src/io/` | Typed REST/auth client, command sender, multiplayer SSE plus poll backstop, and local game index. |
-| `src/render/scene/sceneBuilder/` | Pure state-to-`SceneNode[]` builders for adventure, city, and battle views. |
-| `src/render/scene/paint2d/` | Canvas2D scene painter. `index.ts` contains per-kind drawing; `deps.ts`, `colors.ts`, and `geometry.ts` define the painter seam and helpers. |
-| `src/render/paint2dDefaults.ts`, `src/render/skybox.ts` | Browser/Vite asset wiring, settings adapters, sprite resolvers, and skybox asset/cache ownership. These stay outside the pure painter package. |
+| `src/render/scene/sceneBuilder/` | Pure state-to-`SceneNode[]` builders for adventure, city, and battle views (`adventureScene.ts` supports `viewportBounds` frustum culling, omits no-op `grass`/`dirt` decoration nodes, iterates sparse `GameMap.placedResourceTiles`, and memoizes `buildTerritoryOutlineEdges`). |
+| `src/render/scene/paint2d/` | Canvas2D scene painter. `index.ts` contains per-kind drawing; `deps.ts`, `colors.ts`, and `geometry.ts` (`hexPath` via `UNIT_HEX_CORNERS`) define the painter seam and helpers. |
+| `src/render/paint2dDefaults.ts`, `src/render/skybox.ts`, `src/render/minimap.ts`, `src/render/camera.ts`, `src/render/fog.ts` | Browser/Vite asset wiring, settings adapters, sprite resolvers, skybox asset/cache ownership, offscreen-cached minimap rendering (`staticLayerCache` + `computeVisionHash` + `MIST_GRADIENT_MIN_CELL_PX` LOD), `Camera.getVisibleAxialBounds` frustum math, and `VisionSet` (`Uint8Array(256 * 256)` flat grid + memoized `computeVision`/`computeVisionFromState`). These stay outside the pure painter package. |
 | `src/render/cityRenderer.ts` | Thin city-view wrapper around `paintScene`; it is not the scene builder or a building-art library. |
-| `src/core/`, `src/entities/`, `src/map/`, `src/data/`, `src/players/`, `src/debug/` | Client math/events, visual entities, map adapters, cached catalogs/assets, seat identity, and developer diagnostics. |
+| `src/core/`, `src/entities/`, `src/map/`, `src/data/`, `src/players/`, `src/debug/` | Client math/events (`src/core/hex.ts` precomputes `UNIT_HEX_CORNERS`), visual entities, map adapters, cached catalogs/assets, seat identity, and developer diagnostics. |
 | `src/ai/`, `src/systems/`, `src/combat/` | `src/ai/aiBrain.ts` is a compatibility re-export of engine AI; `src/systems/movement.ts` is the client arrival hook; `src/combat/testArmies.ts` supports the developer battle sandbox. |
 
 The current city scene builder is `src/render/scene/sceneBuilder/cityScene.ts`; the painter is `src/render/scene/paint2d/index.ts`. The former procedural city-building draw/generation helpers and style-leaf folder have been retired; do not use those historical module names as current paths.

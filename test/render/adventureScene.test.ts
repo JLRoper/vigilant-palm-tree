@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import type { CharterState } from "@heroes/contracts";
 import { Hero } from "../../src/entities/hero";
 import { Castle } from "../../src/entities/settlement";
+import { GameMap, type TileRow } from "../../src/map/gameMap";
+import type { Terrain } from "../../src/map/terrain";
 import { EntityMirror } from "../../src/render/scene/entityMirror";
 import { axialToPixel, type Axial } from "../../src/core/hex";
 import { computeReachableSplit } from "../../src/render/overlays/pathOverlay";
@@ -19,6 +21,7 @@ import type {
   PathSegmentNode,
   ResourceIconNode,
   SelectedTileHighlightNode,
+  TerrainDecorationNode,
   TerrainHexNode,
   TerritoryOutlineEdgeNode,
   ValidCharterHexNode,
@@ -42,7 +45,7 @@ test("terrain is always emitted; fog covers every tile the view player can't see
   });
 
   assert.equal(nodesOfKind<TerrainHexNode>(nodes, "terrainHex").length, 3);
-  assert.equal(nodesOfKind(nodes, "terrainDecoration").length, 3);
+  assert.equal(nodesOfKind(nodes, "terrainDecoration").length, 0, "grass tiles omit no-op terrainDecoration nodes");
   assert.equal(nodesOfKind<FogHexNode>(nodes, "fogHex").length, 3, "nothing is owned by viewPlayerId=0, so every tile should be fogged");
   assert.equal(nodesOfKind<HeroNode>(nodes, "hero").length, 0, "the enemy hero is hidden by fog of war");
 });
@@ -727,4 +730,101 @@ test("fog covers every tile the view player cannot see; a 1x1 owned map is fully
     opts: makeRenderOptions({ viewPlayerId: 0 }),
   });
   assert.equal(nodesOfKind<FogHexNode>(nodes, "fogHex").length, 0, "the only tile is owned, so nothing should be fogged");
+});
+
+test("terrainDecoration is omitted for grass and dirt and emitted for forest, water, desert, mountain, swamp, snow", () => {
+  const terrains: Terrain[] = ["grass", "dirt", "forest", "water", "desert", "mountain", "swamp", "snow"];
+  const rows: TileRow[] = terrains.map((terrain, q) => ({ q, r: 0, terrain, resource: null }));
+  const map = GameMap.fromTiles(rows);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const decos = nodesOfKind<TerrainDecorationNode>(nodes, "terrainDecoration");
+  assert.deepEqual(
+    decos.map((d) => d.terrain),
+    ["forest", "water", "desert", "mountain", "swamp", "snow"],
+  );
+});
+
+test("viewportBounds culls terrainHex, fogHex, resourceIcon, and validCharterHex outside the bounds while preserving full-map emission when omitted", () => {
+  const map = makeGrassMap(5, 3, [
+    { q: 0, r: 0, resource: "gold" },
+    { q: 2, r: 1, resource: "wood" },
+    { q: 4, r: 2, resource: "stone" },
+  ]);
+  const hero = new Hero("h0", "Hero", 2, 1, "player", 0);
+  const opts = makeRenderOptions({
+    viewPlayerId: 0,
+    validCharterHexes: new Set(["0,0", "2,1", "4,2"]),
+  });
+
+  const fullNodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts,
+  });
+  assert.equal(nodesOfKind<TerrainHexNode>(fullNodes, "terrainHex").length, 15);
+  assert.equal(nodesOfKind<ResourceIconNode>(fullNodes, "resourceIcon").length, 3);
+  assert.equal(nodesOfKind<ValidCharterHexNode>(fullNodes, "validCharterHex").length, 3);
+
+  const culledNodes = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [],
+    path: [],
+    hover: null,
+    opts,
+    visible: new Set(["0,0", "2,1", "4,2"]),
+    viewportBounds: { qMin: 1, qMax: 3, rMin: 1, rMax: 2 },
+  });
+  const hexes = nodesOfKind<TerrainHexNode>(culledNodes, "terrainHex");
+  assert.equal(hexes.length, 6, "3 wide (q=1..3) by 2 tall (r=1..2)");
+  assert.ok(hexes.every((h) => h.q >= 1 && h.q <= 3 && h.r >= 1 && h.r <= 2));
+
+  const fogs = nodesOfKind<FogHexNode>(culledNodes, "fogHex");
+  assert.equal(fogs.length, 5, "all 6 in-bounds tiles except visible (2,1) are fogged");
+  assert.ok(fogs.every((f) => f.q >= 1 && f.q <= 3 && f.r >= 1 && f.r <= 2));
+
+  const icons = nodesOfKind<ResourceIconNode>(culledNodes, "resourceIcon");
+  assert.equal(icons.length, 1);
+  assert.equal(icons[0].q, 2);
+  assert.equal(icons[0].r, 1);
+
+  const validHexes = nodesOfKind<ValidCharterHexNode>(culledNodes, "validCharterHex");
+  assert.equal(validHexes.length, 1);
+  assert.equal(validHexes[0].q, 2);
+  assert.equal(validHexes[0].r, 1);
+});
+
+test("GameMap constructor and GameMap.fromTiles populate placedResourceTiles matching resourceTileAt", () => {
+  const generated = new GameMap(42, "medium");
+  const expectedGenerated = [];
+  for (let r = 0; r < generated.height; r++) {
+    for (let q = 0; q < generated.width; q++) {
+      const rt = generated.resourceTileAt(q, r);
+      if (rt) expectedGenerated.push(rt);
+    }
+  }
+  assert.equal(generated.placedResourceTiles.length, expectedGenerated.length);
+  for (const rt of generated.placedResourceTiles) {
+    assert.deepEqual(generated.resourceTileAt(rt.q, rt.r), rt);
+  }
+
+  const fromRows = makeGrassMap(4, 2, [
+    { q: 1, r: 0, resource: "gold" },
+    { q: 3, r: 1, resource: "iron" },
+  ]);
+  assert.deepEqual(fromRows.placedResourceTiles, [
+    { q: 1, r: 0, resource: "gold" },
+    { q: 3, r: 1, resource: "iron" },
+  ]);
 });

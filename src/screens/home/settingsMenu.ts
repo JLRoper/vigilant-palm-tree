@@ -55,7 +55,7 @@ function labelFor(ms: number): string {
 export interface MapInfo {
   name: string;
   seed: number;
-  mapSize: "small" | "medium" | "large";
+  mapSize: "small" | "medium" | "large" | "huge" | "epic";
   width: number;
   height: number;
   castleSeed: number;

@@ -1,6 +1,6 @@
 # Event System
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-14 -->
 
 **Status:** Describes the current implemented event system: Postgres-backed event log, LISTEN/NOTIFY → SSE, client ingestion, event bus, and consumers. Companion to [module documentation](./module-documentation-and-relationships.md) and the [render spec](../src/render/docs/technical-spec.md).
 

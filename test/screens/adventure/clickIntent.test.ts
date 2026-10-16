@@ -335,3 +335,60 @@ test("a null localSeat pins to seat 0 for attacks", () => {
   assert.equal(intent.heroId, "h0");
   assert.deepEqual(intent.dest, { q: 1, r: 0 });
 });
+
+test("when visibleHexes is provided, a fog-hidden enemy hero does not block movement or leak an attack intent", () => {
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 0, 0), makeHero("h-hidden", 1, 2, 0)],
+    selectedHeroId: "h0",
+  });
+  const heroes = {
+    h0: stubHero("h0", 0, 0, 0),
+    "h-hidden": stubHero("h-hidden", 1, 2, 0),
+  };
+  const visibleHexes = new Set(["0,0", "1,0"]);
+
+  // Clicking directly on the fogged tile (2,0) plans a normal move rather than an attack
+  const clickOnHidden = resolve({
+    state,
+    heroes,
+    hover: { q: 2, r: 0 },
+    visibleHexes,
+  });
+  assert.equal(clickOnHidden.kind, "move");
+  if (clickOnHidden.kind === "move") {
+    assert.deepEqual(clickOnHidden.dest, { q: 2, r: 0 });
+  }
+
+  // Clicking beyond (2,0) paths straight through (2,0) instead of detouring around the unseen enemy
+  const clickPastHidden = resolve({
+    state,
+    heroes,
+    hover: { q: 3, r: 0 },
+    visibleHexes,
+  });
+  assert.equal(clickPastHidden.kind, "move");
+  if (clickPastHidden.kind === "move") {
+    assert.deepEqual(clickPastHidden.debugPath, [
+      { q: 1, r: 0 },
+      { q: 2, r: 0 },
+      { q: 3, r: 0 },
+    ]);
+  }
+});
+
+test("when visibleHexes includes the enemy hero's hex, clicking it resolves to an attack intent", () => {
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 0, 0), makeHero("h1", 1, 2, 0)],
+    selectedHeroId: "h0",
+  });
+  const intent = resolve({
+    state,
+    heroes: { h0: stubHero("h0", 0, 0, 0), h1: stubHero("h1", 1, 2, 0) },
+    hover: { q: 2, r: 0 },
+    visibleHexes: new Set(["0,0", "1,0", "2,0"]),
+  });
+  assert.equal(intent.kind, "attack");
+  if (intent.kind !== "attack") return;
+  assert.equal(intent.heroId, "h0");
+  assert.deepEqual(intent.dest, { q: 1, r: 0 });
+});

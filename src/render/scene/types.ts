@@ -80,10 +80,11 @@ export interface CaravanMarkerNode {
   q: number;
   r: number;
   world: WorldPoint;
+  markerWorld?: WorldPoint;
   color: string;
   wagons: number;
-  /** Additive: threaded from CaravanMarkerSpec for a future gold-tinted treasure marker; no painter reads it yet. */
   payloadKind?: "resource" | "gold";
+  facingDirection?: HeroDirection;
 }
 
 export interface CharterOverlayNode {

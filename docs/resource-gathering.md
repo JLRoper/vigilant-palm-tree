@@ -1,8 +1,8 @@
 # Resource Gathering & the Settlement Economy (as-built)
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-14 -->
 
-**Status:** Current as-built reference, re-verified against source on 2026-10-11. Design intent lives in [resources.md](./resources.md) and [economy.md](./economy.md); this page documents the actual rates, turn order, producers, sinks, and logistics. The resource definitions, terrain densities, and income code may differ from older design text; F2 remains open below.
+**Status:** Current as-built reference, re-verified against source on 2026-10-14. Design intent lives in [resources.md](./resources.md) and [economy.md](./economy.md); this page documents the actual rates, turn order, producers, sinks, and logistics. The resource definitions, terrain densities, and income code may differ from older design text; F2 remains open below.
 
 Source-of-truth paths cited below are in [`packages/engine/`](../packages/engine/src) and [`packages/contracts/`](../packages/contracts/src). The client under `src/` mirrors the same reducers (`src/state/turnController.ts` orchestrates locally; `server/app/turnService.ts` re-runs the same engine functions server-authoritatively).
 

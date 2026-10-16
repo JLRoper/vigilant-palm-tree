@@ -1,6 +1,6 @@
 # Operations Guide
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-14 -->
 
 This guide covers local development and deployment. See [`AGENTS.md`](../AGENTS.md) for the complete workspace/test safety rules.
 

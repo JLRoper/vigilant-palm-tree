@@ -1,6 +1,6 @@
 # Project Agent Instructions (heroes-js)
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-14 -->
 
 This file is loaded into every agent's context. Treat the rules below as non-negotiable unless the user overrides them in the current message.
 

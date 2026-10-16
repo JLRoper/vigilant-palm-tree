@@ -155,6 +155,9 @@ export class Toolbar {
   private logisticsBtn: HTMLButtonElement;
   private charterBtn: HTMLButtonElement;
   private calendarActiveEl: HTMLElement;
+  private dateEl: HTMLElement;
+  private swatchEl: HTMLElement;
+  private activeEl: HTMLElement;
   private busy = false;
 
   constructor(private opts: ToolbarOptions) {
@@ -188,6 +191,7 @@ export class Toolbar {
 
     const datePill = makeStatPill();
     datePill.value.id = "toolbar-date-value";
+    this.dateEl = datePill.value;
     statusRow.appendChild(datePill.chip);
 
     this.statusSlot = document.createElement("div");
@@ -223,11 +227,13 @@ export class Toolbar {
       border: "1px solid rgba(0,0,0,0.4)",
       boxShadow: "0 0 0 2px rgba(255,255,255,0.08)",
     });
+    this.swatchEl = swatch;
     this.calendarActiveEl.appendChild(swatch);
     const activeLabel = document.createElement("span");
     activeLabel.id = "toolbar-active-label";
     activeLabel.textContent = "—";
     Object.assign(activeLabel.style, { fontWeight: "600", color: headerTheme.text });
+    this.activeEl = activeLabel;
     this.calendarActiveEl.appendChild(activeLabel);
     statusRow.appendChild(this.calendarActiveEl);
 
@@ -468,7 +474,8 @@ export class Toolbar {
     const ok = this.opts.state.backendOk();
     const active = this.opts.state.hasActiveGame();
     const endTurnOk = this.opts.state.canEndTurnNow();
-    const hasGameState = this.opts.state.getCalendar() !== null;
+    const cal = this.opts.state.getCalendar();
+    const hasGameState = cal !== null;
     this.setEnabled(this.newBtn, ok && !this.busy);
     this.setEnabled(this.loadBtn, ok && !this.busy);
     this.setEnabled(this.saveBtn, ok && active && !this.busy);
@@ -498,24 +505,25 @@ export class Toolbar {
     this.heroesBtn.title = hasGameState ? "View and manage heroes" : "No active game";
     this.settlementsBtn.title = hasGameState ? "View and manage settlements" : "No active game";
 
-    this.refreshCalendar();
+    this.refreshCalendar(cal);
   }
 
-  private refreshCalendar(): void {
-    const cal = this.opts.state.getCalendar();
-    const dateEl = this.root.querySelector<HTMLElement>("#toolbar-date-value");
-    const swatchEl = this.root.querySelector<HTMLElement>("#toolbar-active-swatch");
-    const activeEl = this.root.querySelector<HTMLElement>("#toolbar-active-label");
+  private refreshCalendar(cal: CalendarSnapshot | null = this.opts.state.getCalendar()): void {
+    const dateEl = this.dateEl;
+    const swatchEl = this.swatchEl;
+    const activeEl = this.activeEl;
     if (!dateEl || !swatchEl || !activeEl) return;
     if (!cal) {
-      dateEl.textContent = "—";
-      swatchEl.style.background = "#888";
-      activeEl.textContent = "—";
+      if (dateEl.textContent !== "—") dateEl.textContent = "—";
+      if (swatchEl.style.background !== "#888") swatchEl.style.background = "#888";
+      if (activeEl.textContent !== "—") activeEl.textContent = "—";
       return;
     }
-    dateEl.textContent = `Week ${cal.week} · Day ${cal.dayOfWeek} of 7 · ${cal.monthName} ${cal.dayOfMonth}`;
-    swatchEl.style.background = cal.activePlayerColor;
-    activeEl.textContent = cal.activePlayerIsYou ? "Your turn" : `${cal.activePlayerName}'s turn`;
+    const dateText = `Week ${cal.week} · Day ${cal.dayOfWeek} of 7 · ${cal.monthName} ${cal.dayOfMonth}`;
+    if (dateEl.textContent !== dateText) dateEl.textContent = dateText;
+    if (swatchEl.style.background !== cal.activePlayerColor) swatchEl.style.background = cal.activePlayerColor;
+    const activeText = cal.activePlayerIsYou ? "Your turn" : `${cal.activePlayerName}'s turn`;
+    if (activeEl.textContent !== activeText) activeEl.textContent = activeText;
   }
 
   applyGameState(_state: GameState): void {

@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EntityMirror } from "../../src/render/scene/entityMirror";
+import { axialToPixel } from "../../src/core/hex";
+import { Hero } from "../../src/entities/hero";
+import { Castle } from "../../src/entities/settlement";
 import { makeHero, makeSettlement, makeState } from "../charter/_helpers";
 
 test("bootstrap populates heroes and settlements from GameState", () => {
@@ -136,4 +139,92 @@ test("syncWith adopts live Hero and Castle instances directly", () => {
   mirror.syncWith([], [castle]);
   assert.equal(mirror.getHeroes().length, 0);
   assert.equal(mirror.getSettlements().length, 1);
+});
+
+test("bootstrap preserves live-bound entities and events still mutate those references", () => {
+  const mirror = new EntityMirror();
+  const hero = Hero.fromGameState(makeHero("h0", 0, 2, 2));
+  const castle = Castle.fromGameState(makeSettlement("s0", 0, 3, 3));
+  mirror.syncWith([hero], [castle]);
+
+  mirror.bootstrap(makeState({
+    heroes: [makeHero("replacement", 1, 9, 9)],
+    settlements: [makeSettlement("replacement-settlement", 1, 9, 9)],
+  }));
+
+  assert.strictEqual(mirror.getHero("h0"), hero);
+  assert.strictEqual(mirror.getSettlement("s0"), castle);
+  assert.equal(mirror.getHero("replacement"), undefined);
+  assert.equal(mirror.getSettlement("replacement-settlement"), undefined);
+  assert.equal(mirror.applyEvent({ type: "HeroMoved", actor: 0, heroId: "h0", to: { q: 3, r: 2 } }), true);
+  assert.equal(hero.moving, true);
+  assert.strictEqual(mirror.getHero("h0"), hero);
+  assert.equal(
+    mirror.applyEvent({
+      type: "SettlementCaptured",
+      actor: 1,
+      heroId: "h1",
+      settlementId: "s0",
+      previousOwnerId: 0,
+    }),
+    true,
+  );
+  assert.equal(castle.ownerId, 1);
+});
+
+test("syncFromState tweens from a matching acknowledged origin using the renderer tile invariant", () => {
+  const hero = Hero.fromGameState(makeHero("h0", 0, 2, 2));
+  const from = { q: 2, r: 2 };
+  const to = { q: 3, r: 2 };
+  hero.syncFromState({ ...makeHero("h0", 0, to.q, to.r), previousQ: from.q, previousR: from.r });
+
+  assert.equal(hero.moving, true);
+  assert.deepEqual(hero.tile, from);
+  assert.deepEqual(hero.fromTile, from);
+  assert.deepEqual(hero.toTile, to);
+  assert.deepEqual(hero.animationPath, [from, to]);
+  assert.equal(hero.moveProgress, 0);
+  assert.deepEqual(hero.pixelOffset, { x: 0, y: 0 });
+
+  const originWorld = axialToPixel(from.q, from.r);
+  const targetWorld = axialToPixel(to.q, to.r);
+  hero.update(hero.moveDurationMs / 4);
+  const base = axialToPixel(hero.tile.q, hero.tile.r);
+  const renderedWorld = { x: base.x + hero.pixelOffset.x, y: base.y + hero.pixelOffset.y };
+  assert.ok(renderedWorld.x > originWorld.x && renderedWorld.x < targetWorld.x);
+  assert.equal(renderedWorld.y, originWorld.y);
+});
+
+test("syncFromState snaps when previous coordinates do not match the visual tile", () => {
+  const hero = Hero.fromGameState(makeHero("h0", 0, 9, 9));
+  hero.syncFromState({
+    ...makeHero("h0", 0, 3, 2),
+    previousQ: 2,
+    previousR: 2,
+  });
+
+  assert.equal(hero.moving, false);
+  assert.deepEqual(hero.tile, { q: 3, r: 2 });
+  assert.deepEqual(hero.fromTile, { q: 9, r: 9 });
+  assert.deepEqual(hero.toTile, { q: 3, r: 2 });
+});
+
+test("syncFromState leaves an already-moving hero's tween intact", () => {
+  const hero = Hero.fromGameState(makeHero("h0", 0, 2, 2));
+  hero.startMoveToPath([{ q: 2, r: 2 }, { q: 3, r: 2 }]);
+  hero.update(hero.moveDurationMs / 4);
+  const progress = hero.moveProgress;
+  const offset = { ...hero.pixelOffset };
+
+  hero.syncFromState({
+    ...makeHero("h0", 0, 3, 2),
+    previousQ: 2,
+    previousR: 2,
+  });
+
+  assert.equal(hero.moving, true);
+  assert.equal(hero.moveProgress, progress);
+  assert.deepEqual(hero.pixelOffset, offset);
+  assert.deepEqual(hero.fromTile, { q: 2, r: 2 });
+  assert.deepEqual(hero.toTile, { q: 3, r: 2 });
 });

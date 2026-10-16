@@ -1,6 +1,6 @@
 # Multiplayer — LAN Seats, Sync, and Session Policy
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-14 -->
 
 **Status:** Current mechanics, including SSE/poll sync, the disconnect drop policy, and server-driven AI. The AI section below retains earlier decision history; the 2026-10-11 correction supersedes its original host-client-only/no-chartering notes.
 
@@ -19,7 +19,7 @@ This is the design doc the multiplayer system never had (former open question #5
 | Mechanic | Where | Behaviour |
 |---|---|---|
 | Seat counts | `multiplayerLobby.ts` (`SEAT_COUNTS`) | 2, 3, or 4 seats per game |
-| Host / Join | same | Host creates a game (default name `lan-YYYY-MM-DD-xxxx`); Join connects to an existing one by name |
+| Host / Join | same | Host creates a game (default name `lan-YYYY-MM-DD-xxxx`, map size `small`/`medium`/`large`/`huge`/`epic`); Join connects to an existing one by name |
 | Seat claim | `server/routes.ts` lobby claim/start (writes `games.lobby` jsonb) | Each seat is claimed by index; `claimed` records `handle`, optional `email`, `claimedAt` |
 | Handle | lobby UI | Purely cosmetic |
 | Email binding | `attachPlayerSeat.ts` + `server/auth.ts` | If the claimer was signed in, the seat is bound to their auth email (server-derived, never client-supplied). Sign-in is optional — anonymous claims leave the seat unbound. |

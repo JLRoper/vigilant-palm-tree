@@ -100,8 +100,9 @@ export function evaluateCharterRequirements(state: GameState, heroId: HeroId | n
 
 export function validCharterHexes(state: GameState, map: GameMap): Set<string> {
   const hexes = new Set<string>();
+  const settlements = Object.values(state.settlements);
   const settlementSet = new Set<string>();
-  for (const s of Object.values(state.settlements)) {
+  for (const s of settlements) {
     settlementSet.add(`${s.q},${s.r}`);
   }
   const charterSet = new Set<string>();
@@ -121,7 +122,7 @@ export function validCharterHexes(state: GameState, map: GameMap): Set<string> {
       if (charterSet.has(key)) continue;
       if (heroSet.has(key)) continue;
       let tooClose = false;
-      for (const s of Object.values(state.settlements)) {
+      for (const s of settlements) {
         if (hexDistance({ q, r }, { q: s.q, r: s.r }) < CHARTER_MIN_SETTLEMENT_DISTANCE) {
           tooClose = true;
           break;

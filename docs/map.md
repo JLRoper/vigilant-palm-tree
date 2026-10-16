@@ -8,9 +8,10 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 
 ## Grid
 
-- **24 × 18 hex grid**, axial coordinates `(q, r)`.
+- **Configurable hex grid** (`MapSize`: `small` 24×18, `medium` 36×27, `large` 48×36, `huge` 72×54, `epic` 120×90; default `small` 24×18), axial coordinates `(q, r)`.
 - Hex size = 32 logical px.
 - Pointy-top orientation, flat-top stack.
+- `GameMap.placedResourceTiles` caches the sparse array of placed resource deposits alongside the indexed `resourceTiles` lookup array, and `getOrCreateGameMap(seed, size)` (`packages/engine/src/map/gameMap.ts`) maintains a process-wide LRU cache (`max = 8`) of generated `GameMap` instances keyed by `(seed, size)`.
 
 ## Terrain types
 
@@ -25,7 +26,7 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 | Mountain| grey rock   | impassable| Peaks and ridges. Stone + iron-bearing biome. Lakes / rivers. |
 | Water   | blue        | impassable| Lakes / rivers. Never carries resources. |
 
-Generated via a deterministic pseudo-noise function on the map seed. Same seed → same map. Implementation: [`packages/engine/src/map/gameMap.ts`](../packages/engine/src/map/gameMap.ts), [`packages/engine/src/map/terrain.ts`](../packages/engine/src/map/terrain.ts). See [map-gen.md](./map-gen.md) for the algorithm.
+Generated via a deterministic biome-blob growth pass (`generateTerrain`, using a deduplicated `Uint8Array(w * h)` frontier bitset and O(1) swap-and-pop removal) on the map seed. Same seed → same map. Implementation: [`packages/engine/src/map/gameMap.ts`](../packages/engine/src/map/gameMap.ts), [`packages/engine/src/map/terrain.ts`](../packages/engine/src/map/terrain.ts). See [map-gen.md](./map-gen.md) for the algorithm.
 
 ## Resource tile placement
 
@@ -71,8 +72,8 @@ CREATE INDEX IF NOT EXISTS tiles_game_idx ON tiles (game_id);
 ```
 
 - `terrain` is non-null; `resource` is null for tiles without a deposit.
-- `POST /api/games` generates the tile grid using the seed and inserts the rows. `GET /api/games/:name/tiles` returns them.
-- Client-side `GameMap` hydrates from the tiles endpoint instead of re-deriving from seed.
+- `POST /api/games` generates the tile grid using `getOrCreateGameMap(seed, mapSize)` and bulk-inserts the rows via a single 5-parameter `UNNEST` query (`generateAndInsertTiles` in `server/routes.ts`). `GET /api/games/:name/tiles` returns them.
+- Client-side `GameSessionManager.loadGame` reconstructs `GameMap` deterministically from `(seed, map_size)` via `getOrCreateGameMap` (eliminating the `/tiles` HTTP payload on game load while keeping `GameMap.fromTiles` and the `/tiles` endpoint available).
 
 ## Future: randomized per-game tiles
 
@@ -110,7 +111,7 @@ Because the client only reads the table, all of these are server-only changes. N
 
 Non-visible hexes are covered with a semi-transparent fog overlay on the map and render black on the minimap. Resource deposits are hidden under fog too — the old "resource tiles stay always visible" v1 decision is superseded. Moving into fog is **allowed by design** (HoMM-style); path segments crossing fogged tiles draw brighter over a dark under-stroke so a planned move stays legible.
 
-**Unexplored tiles reveal no terrain info until seen** (locked decision, 2026-09-29 playtest fixes): the tile popup on a fogged tile shows coordinates + "Unexplored" only — `TileInfo.terrain` is null and the terrain/move-cost/deposit/settlement/heroes/charter/territory lines are all suppressed (`src/screens/adventure/tileInfo.ts`; the existing exception — tiles you own stay visible — is kept). The server-side `tiles` table still holds the full grid; the gate is a client presentation rule, not an information-model change.
+**Unexplored tiles reveal no terrain info until seen** (locked decision, 2026-09-29 playtest fixes): the tile popup on a fogged tile shows coordinates + "Unexplored" only — `TileInfo.terrain` is null and the terrain/move-cost/deposit/settlement/heroes/charter/territory lines are all suppressed (`src/screens/adventure/tileInfo.ts`; the existing exception — tiles you own stay visible — is kept). Similarly, hover path previews (`AdventureView.updatePath()`) and click path/attack resolution (`resolveAdventureClick`) filter `occupiedHexes` and enemy targets through `computeVisionFromState` (`src/render/fog.ts`), so unseen fogged heroes never block path previews or leak an attack intent. The server-side `tiles` table still holds the full grid; the gate is a client presentation rule, not an information-model change.
 
 ## Cross-references
 

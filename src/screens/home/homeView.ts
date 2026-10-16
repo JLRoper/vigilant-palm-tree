@@ -21,7 +21,7 @@ export interface HomeViewOptions {
     seed: number;
     castleSeed?: number;
     castleCount?: number;
-    mapSize?: "small" | "medium" | "large";
+    mapSize?: "small" | "medium" | "large" | "huge" | "epic";
     playerCount?: 1 | 2 | 3 | 4;
     humanSeatCount?: number;
     enemyCount?: number;

@@ -67,7 +67,24 @@ export class MapRenderer {
       const a = heroFadeAlpha(id, nowMs);
       if (a < 1) heroAlpha[id] = a;
     }
-    const nodes = buildAdventureScene({ map: this.map, mirror: this.mirror, heroes, castles, path, hover, opts: { ...opts, heroAlpha }, visible });
+    const viewportBounds = this.camera.getVisibleAxialBounds(
+      window.innerWidth,
+      window.innerHeight,
+      this.map.width,
+      this.map.height,
+      2,
+    );
+    const nodes = buildAdventureScene({
+      map: this.map,
+      mirror: this.mirror,
+      heroes,
+      castles,
+      path,
+      hover,
+      opts: { ...opts, heroAlpha },
+      visible,
+      viewportBounds,
+    });
 
     ctx.save();
     this.camera.apply(ctx);

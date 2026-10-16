@@ -64,7 +64,7 @@ export type Game = {
   round: number;
   day: number;
   active_player_id: number;
-  map_size?: "small" | "medium" | "large";
+  map_size?: "small" | "medium" | "large" | "huge" | "epic";
   players: Player[];
   heroes: Record<string, HeroState>;
   settlements: Record<string, SettlementState>;
@@ -183,7 +183,7 @@ export const api = {
     hero_q: number,
     hero_r: number,
     enemy_positions: EnemyPos[] = [],
-    mapSize?: "small" | "medium" | "large",
+    mapSize?: "small" | "medium" | "large" | "huge" | "epic",
     humanSlots?: number,
     enemySlots: number = 0,
     seatFactions?: FactionId[],

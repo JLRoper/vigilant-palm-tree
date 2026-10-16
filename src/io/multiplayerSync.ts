@@ -228,10 +228,9 @@ export class MultiplayerSync {
   }
 
   /**
-   * The live Hero/Castle tween cache this poller feeds: bootstrapped on every
-   * full resync, advanced per delta event in between. Wired here because this
-   * is the only place the event stream exists; the renderer cutover that
-   * reads from it is #148.
+   * The Hero/Castle view consumed by rendering: standalone mirrors bootstrap
+   * on full resync, while production mirrors preserve manager-owned references
+   * once syncWith() binds them. Event deltas are applied between full resyncs.
    */
   getMirror(): EntityMirror {
     return this.mirror;
