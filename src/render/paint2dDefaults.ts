@@ -48,7 +48,7 @@ import {
   type SpriteKey,
   type UnitArenaPose,
 } from "./assetDescriptors";
-import { ImageSpriteSource } from "./assetSource";
+import { ImageSpriteSource, resolveHeroSpriteWithRunFrame } from "./assetSource";
 import { SpriteProvider } from "./assets";
 import type { ResolvedSprite as LiveResolvedSprite } from "./assets";
 
@@ -147,13 +147,16 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
             ? (heroDirectionKey("player", direction) as SpriteKey)
             : (heroKey(faction) as SpriteKey);
       // Run-cycle frame 1 is the optional frame-2 sprite; the on-foot variant
-      // has no run frames. A missing frame-2 descriptor falls back to the base
-      // sprite, so the code is safe with zero frame files on disk.
+      // has no run frames. A missing or not-yet-loaded frame-2 sprite falls
+      // back to the base sprite so movement never hides the hero while lazy
+      // run frames warm.
       if (frame === 1 && variant !== "hero") {
         const frameSprite = provider.resolve(horseVariantKey(variant, direction, 1) as SpriteKey);
-        if (frameSprite) return narrowResolvedSprite(frameSprite);
+        if (frameSprite && frameSprite.ready) return narrowResolvedSprite(frameSprite);
       }
-      return narrowResolvedSprite(provider.resolve(key));
+      return narrowResolvedSprite(
+        resolveHeroSpriteWithRunFrame((k) => provider.resolve(k as SpriteKey), key),
+      );
     },
     resolveSpriteForBuilding(
       kind: BuildingKind,

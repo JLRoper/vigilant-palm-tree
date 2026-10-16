@@ -13,7 +13,9 @@ import {
   validCharterHexes,
   type TileRow,
 } from "@heroes/engine";
-import { OnDemandSpriteSource } from "../../src/render/assetSource";
+import { OnDemandSpriteSource, resolveHeroSpriteWithRunFrame } from "../../src/render/assetSource";
+import fs from "node:fs";
+import path from "node:path";
 import { createSettlementRepo } from "../../server/persistence/repositories/settlementRepo";
 import { createHeroRepo } from "../../server/persistence/repositories/heroRepo";
 import type { Queryable } from "../../server/persistence/repositories/gameRepo";
@@ -98,6 +100,53 @@ test("Item 2: OnDemandSpriteSource tracks ready=false while loading, ready=true 
     const retryResolve = source.resolve("building.pixel.bank.1");
     assert.ok(retryResolve);
     assert.equal(instances.length, 3, "evicted failed image is re-requested on next resolve");
+
+    // Mounted hero run-frame fallback: while horse.drake.e.2 is still loading
+    // (ready=false), resolveHeroSpriteWithRunFrame falls back to the ready
+    // base sprite horse.drake.e; once onload fires on horse.drake.e.2, it
+    // returns the run-frame sprite.
+    const heroSource = new OnDemandSpriteSource({
+      "horse.drake.e": "/assets/drake-e.png",
+      "horse.drake.e.2": "/assets/drake-e-2.png",
+    });
+    const baseInit = heroSource.resolve("horse.drake.e");
+    assert.ok(baseInit);
+    instances[instances.length - 1].onload?.();
+
+    const whileRunFrameLoading = resolveHeroSpriteWithRunFrame(
+      (k) => heroSource.resolve(k),
+      "horse.drake.e",
+      "horse.drake.e.2",
+    );
+    assert.ok(whileRunFrameLoading);
+    assert.equal(whileRunFrameLoading.ready, true, "falls back to ready base sprite while run frame is loading");
+    assert.equal(
+      (whileRunFrameLoading.drawable as unknown as { src: string }).src,
+      "/assets/drake-e.png",
+    );
+
+    instances[instances.length - 1].onload?.();
+    const afterRunFrameReady = resolveHeroSpriteWithRunFrame(
+      (k) => heroSource.resolve(k),
+      "horse.drake.e",
+      "horse.drake.e.2",
+    );
+    assert.ok(afterRunFrameReady);
+    assert.equal(afterRunFrameReady.ready, true);
+    assert.equal(
+      (afterRunFrameReady.drawable as unknown as { src: string }).src,
+      "/assets/drake-e-2.png",
+    );
+
+    const paint2dDefaultsSrc = fs.readFileSync(
+      path.resolve(process.cwd(), "src/render/paint2dDefaults.ts"),
+      "utf8",
+    );
+    assert.match(
+      paint2dDefaultsSrc,
+      /if\s*\(\s*frameSprite\s*&&\s*frameSprite\.ready\s*\)/,
+      "paint2dDefaults.ts must gate frame-1 selection on frameSprite.ready",
+    );
   } finally {
     (globalThis as unknown as { Image: typeof origImage }).Image = origImage;
   }

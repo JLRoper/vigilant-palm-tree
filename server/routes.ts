@@ -7,8 +7,11 @@ import {
   isHealthy,
   makeInitialStatePayload,
   mulberry32,
+  resolveMapSize,
+  resolveSavedMapGenVersion,
   validateGameRow,
   MAX_PLAYERS,
+  type MapGenVersion,
   type MapSize,
   type UnitType,
 } from "@heroes/engine";
@@ -125,8 +128,9 @@ export async function generateAndInsertTiles(
   onConflict: "upsert" | "skip",
   mapSize?: MapSize,
   existingMap?: GameMap,
+  version?: MapGenVersion,
 ): Promise<void> {
-  const map = existingMap ?? getOrCreateGameMap(seed, mapSize);
+  const map = existingMap ?? getOrCreateGameMap(seed, mapSize, version);
   const total = map.width * map.height;
   const qs = new Array<number>(total);
   const rs = new Array<number>(total);
@@ -623,8 +627,8 @@ router.get("/games/:name/events", async (req, res) => {
 });
 
 router.get("/games/:name/tiles", async (req, res) => {
-  const game = await pool.query<{ id: number; seed: number; map_size: string }>(
-    "SELECT id, seed, map_size FROM games WHERE name = $1",
+  const game = await pool.query<{ id: number; seed: number; map_size: string; lobby: LobbyState | null }>(
+    "SELECT id, seed, map_size, lobby FROM games WHERE name = $1",
     [req.params.name]
   );
   if (game.rowCount === 0) {
@@ -637,11 +641,11 @@ router.get("/games/:name/tiles", async (req, res) => {
     [gameRow.id]
   );
   if (Number(count.rows[0].count) === 0) {
-    const fallbackSize: MapSize = ["small", "medium", "large", "huge", "epic"].includes(gameRow.map_size)
-      ? (gameRow.map_size as MapSize)
-      : "small";
+    const fallbackSize = resolveMapSize(gameRow.map_size);
+    const savedVersion = resolveSavedMapGenVersion(gameRow.lobby?.mapGenVersion);
+    const map = getOrCreateGameMap(gameRow.seed, fallbackSize, savedVersion);
     await withTransaction((client) =>
-      generateAndInsertTiles(client, gameRow.id, gameRow.seed, "skip", fallbackSize)
+      generateAndInsertTiles(client, gameRow.id, gameRow.seed, "skip", fallbackSize, map, savedVersion)
     );
   }
   const tiles = await pool.query<TileRow>(

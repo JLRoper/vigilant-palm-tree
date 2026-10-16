@@ -166,3 +166,15 @@ export class ApiSpriteSource implements SpriteSource {
     this.loading.clear();
   }
 }
+
+export function resolveHeroSpriteWithRunFrame<T extends { ready: boolean }>(
+  resolve: (key: string) => T | undefined,
+  baseKey: string,
+  runFrameKey?: string | null,
+): T | undefined {
+  if (runFrameKey) {
+    const frameSprite = resolve(runFrameKey);
+    if (frameSprite && frameSprite.ready) return frameSprite;
+  }
+  return resolve(baseKey);
+}

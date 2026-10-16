@@ -175,3 +175,21 @@ test("resolveSavedMapGenVersion and getOrCreateGameMap unify missing/explicit ma
   assert.equal(commandMissing, aiMissing);
   assert.deepEqual(clientMissing.tiles, new GameMap(99, "huge", 1).tiles);
 });
+
+test("generateAndInsertTiles preserves saved v2 terrain when backfilling a v2 save on a large map", async () => {
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const client = {
+    query: async (sql: string, params: unknown[]) => {
+      queries.push({ sql, params });
+      return { rows: [], rowCount: 48 * 36 };
+    },
+  } as unknown as Parameters<typeof generateAndInsertTiles>[0];
+
+  const savedVersion = resolveSavedMapGenVersion(2);
+  await generateAndInsertTiles(client, 9, 42, "skip", "large", undefined, savedVersion);
+
+  assert.equal(queries.length, 1);
+  const terrains = queries[0].params[3] as string[];
+  assert.deepEqual(terrains, new GameMap(42, "large", 2).tiles);
+  assert.notDeepEqual(terrains, new GameMap(42, "large", 3).tiles);
+});
