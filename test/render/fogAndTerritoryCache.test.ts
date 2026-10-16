@@ -4,9 +4,19 @@ import { Hero } from "../../src/entities/hero";
 import { Castle } from "../../src/entities/settlement";
 import { computeVision, computeVisionFromState, isVisible, VisionSet } from "../../src/render/fog";
 import { HEX_SIZE, UNIT_HEX_CORNERS, hexCorners } from "../../src/core/hex";
+import {
+  Camera,
+  HEX_COLUMN_WIDTH,
+  computeMinZoomForHexWidth,
+  getRowQBounds,
+} from "../../src/render/camera";
+import {
+  clampMaxZoomOutHexesWide,
+  maxZoomOutHexesWideBounds,
+} from "../../src/state/settings";
 import { hexPath } from "../../src/render/scene/paint2d/geometry";
 import { buildAdventureScene } from "../../src/render/scene/sceneBuilder/adventureScene";
-import type { TerritoryOutlineEdgeNode } from "../../src/render/scene/types";
+import type { TerrainHexNode, TerritoryOutlineEdgeNode } from "../../src/render/scene/types";
 import { makeHero, makeSettlement, makeState } from "../charter/_helpers";
 import { makeGrassMap, makeRenderOptions } from "./_helpers";
 
@@ -145,5 +155,75 @@ test("UNIT_HEX_CORNERS, hexCorners, and hexPath match exact trig corner position
   for (let i = 0; i < 6; i++) {
     assert.equal(pts[i].x, corners[i].x);
     assert.equal(pts[i].y, corners[i].y);
+  }
+});
+
+test("clampMaxZoomOutHexesWide clamps to [20, 34] and defaults to 20", () => {
+  const b = maxZoomOutHexesWideBounds();
+  assert.deepEqual(b, { min: 20, max: 34, default: 20 });
+  assert.equal(clampMaxZoomOutHexesWide(undefined), 20);
+  assert.equal(clampMaxZoomOutHexesWide(NaN), 20);
+  assert.equal(clampMaxZoomOutHexesWide(10), 20);
+  assert.equal(clampMaxZoomOutHexesWide(20), 20);
+  assert.equal(clampMaxZoomOutHexesWide(27.4), 27);
+  assert.equal(clampMaxZoomOutHexesWide(34), 34);
+  assert.equal(clampMaxZoomOutHexesWide(50), 34);
+});
+
+test("computeMinZoomForHexWidth, Camera.zoomAt, and Camera.clampMinZoom enforce the 20-34 hex width floor", () => {
+  const vw = 1920;
+  const minZoom20 = computeMinZoomForHexWidth(vw, 20);
+  const minZoom34 = computeMinZoomForHexWidth(vw, 34);
+
+  // Visible hex columns across viewport = vw / (zoom * HEX_COLUMN_WIDTH)
+  assert.ok(Math.abs(vw / (minZoom20 * HEX_COLUMN_WIDTH) - 20) < 1e-9);
+  assert.ok(Math.abs(vw / (minZoom34 * HEX_COLUMN_WIDTH) - 34) < 1e-9);
+
+  const cam = new Camera();
+  cam.zoom = 2.0;
+  // Scroll out repeatedly with minZoom34 floor
+  for (let i = 0; i < 30; i++) {
+    cam.zoomAt(960, 540, 1 / 1.1, minZoom34);
+  }
+  assert.equal(cam.zoom, minZoom34);
+
+  // Tightening the cap from 34 -> 20 hexes wide clamps zoom up to minZoom20
+  const clamped = cam.clampMinZoom(960, 540, minZoom20);
+  assert.equal(clamped, true);
+  assert.equal(cam.zoom, minZoom20);
+  assert.equal(cam.clampMinZoom(960, 540, minZoom20), false);
+});
+
+test("row-clipped frustum culling trims sheared parallelogram corners while keeping all on-screen hexes", () => {
+  const map = makeGrassMap(120, 90);
+  const cam = new Camera();
+  cam.zoom = computeMinZoomForHexWidth(1920, 34);
+  cam.x = -1200;
+  cam.y = -800;
+
+  const bounds = cam.getVisibleAxialBounds(1920, 1080, map.width, map.height, 2);
+  const unclippedBoxCount =
+    (bounds.qMax - bounds.qMin + 1) * (bounds.rMax - bounds.rMin + 1);
+
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+    viewportBounds: bounds,
+  });
+  const hexNodes = nodes.filter((n): n is TerrainHexNode => n.kind === "terrainHex");
+
+  assert.ok(
+    hexNodes.length < unclippedBoxCount * 0.8,
+    `expected row-clipped hex count (${hexNodes.length}) < 80% of unclipped box (${unclippedBoxCount})`,
+  );
+
+  // Every emitted hex satisfies getRowQBounds for its row r
+  for (const h of hexNodes) {
+    const rb = getRowQBounds(bounds, h.r);
+    assert.ok(h.q >= rb.qMin && h.q <= rb.qMax);
   }
 });

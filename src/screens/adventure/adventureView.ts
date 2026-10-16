@@ -1,11 +1,12 @@
 import { Axial, axialToPixel } from "../../core/hex";
-import { Camera } from "../../render/camera";
+import { Camera, computeMinZoomForHexWidth } from "../../render/camera";
 import { GameMap } from "../../map/gameMap";
 import { MapRenderer } from "../../render/renderer";
 import { Hero } from "../../entities/hero";
 import { computePathCost, findPath, NEIGHBOR_DIRS } from "../../map/pathfinding";
 import { computeVisionFromState, isVisible } from "../../render/fog";
 import type { GameState } from "../../state/gameState";
+import { settings, subscribeSettings } from "../../state/settings";
 import type { PlayerId } from "@heroes/contracts";
 import type { TurnController } from "../../state/turnController";
 import type { PathPreviewLock } from "../../managers/GameStateManager";
@@ -131,6 +132,21 @@ export class AdventureView {
 
   constructor(private opts: AdventureViewOptions) {
     this.attach();
+    let lastMaxZoomOutHexesWide = settings().maxZoomOutHexesWide;
+    subscribeSettings((next) => {
+      if (next.maxZoomOutHexesWide === lastMaxZoomOutHexesWide) return;
+      lastMaxZoomOutHexesWide = next.maxZoomOutHexesWide;
+      const vw = this.opts.canvas.clientWidth || window.innerWidth || 1280;
+      const vh = this.opts.canvas.clientHeight || window.innerHeight || 800;
+      if (this.opts.camera.clampMinZoom(vw / 2, vh / 2, this.getMinCameraZoom())) {
+        this.opts.onRedraw();
+      }
+    });
+  }
+
+  private getMinCameraZoom(): number {
+    const vw = this.opts.canvas.clientWidth || window.innerWidth || 1280;
+    return computeMinZoomForHexWidth(vw, settings().maxZoomOutHexesWide);
   }
 
   private get state(): GameState {
@@ -674,7 +690,7 @@ export class AdventureView {
       this.opts.onRedraw();
       return;
     }
-    this.opts.camera.zoomAt(e.clientX, e.clientY, factor);
+    this.opts.camera.zoomAt(e.clientX, e.clientY, factor, this.getMinCameraZoom());
     this.opts.onRedraw();
   }
 
