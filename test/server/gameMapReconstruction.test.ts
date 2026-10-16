@@ -129,3 +129,18 @@ test("generateAndInsertTiles on an epic map issues a single UNNEST query with 5 
     assert.equal(col.length, 10_800);
   }
 });
+
+test("getOrCreateGameMap supports legacy mapGenVersion 1 alongside default version 2 without cache collision", () => {
+  clearGameMapCache();
+  const v1a = getOrCreateGameMap(42, "small", 1);
+  const v1b = getOrCreateGameMap(42, "small", 1);
+  const v2 = getOrCreateGameMap(42, "small", 2);
+  const vDefault = getOrCreateGameMap(42, "small");
+
+  assert.equal(v1a, v1b, "v1 maps are cached by versioned key");
+  assert.equal(v2, vDefault, "omitted version resolves to v2");
+  assert.notEqual(v1a, v2, "v1 and v2 do not collide in the LRU cache");
+  assert.deepEqual(v1a.tiles, new GameMap(42, "small", 1).tiles);
+  assert.deepEqual(v2.tiles, new GameMap(42, "small", 2).tiles);
+  assert.notDeepEqual(v1a.tiles, v2.tiles, "legacy v1 frontier and v2 bitset frontier produce distinct layouts");
+});

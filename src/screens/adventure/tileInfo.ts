@@ -135,7 +135,6 @@ function describeCharter(
 function describeTerritory(
   state: GameState,
   castles: readonly Castle[],
-  _map: GameMap,
   q: number,
   r: number,
   fogged: boolean,
@@ -180,6 +179,6 @@ export function describeTile(input: {
     settlement: describeSettlement(state, tile.q, tile.r, fogged, viewPlayerId),
     heroes: describeHeroes(state, heroes, tile.q, tile.r, fogged, viewPlayerId),
     charter: describeCharter(state, tile.q, tile.r, fogged),
-    territory: describeTerritory(state, castles, map, tile.q, tile.r, fogged),
+    territory: describeTerritory(state, castles, tile.q, tile.r, fogged),
   };
 }

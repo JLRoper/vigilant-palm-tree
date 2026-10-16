@@ -2,13 +2,13 @@ import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { ViewManager } from "./ViewManager";
 import { UIManager } from "./UIManager";
-import { GameMap, type MapSize, MAP_SIZES, getOrCreateGameMap, resolveMapSize } from "../map/gameMap";
+import { GameMap, type MapSize, getOrCreateGameMap, resolveMapSize } from "../map/gameMap";
 import { markSaved } from "../state/gameState";
 import { playerHeroId } from "../game/initState";
 import { CASTLE_COUNT_DEFAULT, defaultCastleSeedFromMapSeed, generateCastles } from "../map/castlePlacement";
 import { loadUnitCatalog } from "../data/unitCatalog";
 import { MAP_SEED } from "@screens/adventure/adventureView";
-import type { Game, TileRow } from "../io/api";
+import type { Game } from "../io/api";
 import { hydrateClientGame } from "../io/hydrateClientGame";
 import type { FactionId } from "@heroes/contracts";
 import { notePersisted } from "../io/commands";
@@ -27,7 +27,6 @@ export class GameSessionManager {
     private state: GameStateManager,
     private view: ViewManager,
     private ui: UIManager,
-    private getGameMap: () => GameMap,
     private setGameMap: (m: GameMap) => void,
   ) {}
 
@@ -39,32 +38,17 @@ export class GameSessionManager {
   getGameSeed(): number { return this.currentGameSeed; }
   getMapSize(): MapSize { return this.currentMapSize; }
 
-  async getTilesForGame(loaded: Game): Promise<TileRow[]> {
-    return await this.session.getTiles(loaded.name);
-  }
-
   private syncMetadata(name: string, seed: number, mapSize: MapSize): void {
     this.currentGameName = name;
     this.currentGameSeed = seed;
     this.currentMapSize = mapSize;
   }
 
-  private inferMapSize(map?: GameMap): MapSize {
-    const width = map?.width ?? this.getGameMap().width;
-    const height = map?.height ?? this.getGameMap().height;
-    for (const size of Object.keys(MAP_SIZES) as MapSize[]) {
-      const dimensions = MAP_SIZES[size];
-      if (width === dimensions.width && height === dimensions.height) return size;
-    }
-    return "small";
-  }
-
-  async loadGame(loaded: Game, tiles?: TileRow[]): Promise<void> {
+  async loadGame(loaded: Game): Promise<void> {
     this.session.adopt(loaded);
     notePersisted(loaded.updated_at);
     const resolvedSize = resolveMapSize(loaded.map_size);
-    const map = tiles && tiles.length > 0 ? GameMap.fromTiles(tiles) : getOrCreateGameMap(loaded.seed, resolvedSize);
-    const inferredSize = tiles && tiles.length > 0 ? this.inferMapSize(map) : resolvedSize;
+    const map = getOrCreateGameMap(loaded.seed, resolvedSize, loaded.lobby?.mapGenVersion);
     // Server-driven flag (plan/2026-09-30-server-side-ai-actor.md D8): every
     // creation/load path funnels through here, so this is the registry's
     // feed point for game-bearing responses; a switch to a different game
@@ -73,7 +57,7 @@ export class GameSessionManager {
       clearServerDriven(this.currentGameName);
     }
     syncServerDrivenFromGame(loaded);
-    this.syncMetadata(loaded.name, loaded.seed, inferredSize);
+    this.syncMetadata(loaded.name, loaded.seed, resolvedSize);
     this.setGameMap(map);
     this.state.setGameMap(map);
     const hydrated = hydrateClientGame(loaded);

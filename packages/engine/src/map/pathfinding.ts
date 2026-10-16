@@ -213,11 +213,8 @@ export function findPath(map: GameMap, start: Axial, goal: Axial, blockedHexes?:
           seenGenBuf[nIdx] = gen;
           pushSeqBuf[nIdx] = seq++;
           heapPush(nIdx);
-        } else if (heapPosBuf[nIdx] >= 0) {
-          heapBubbleUp(heapPosBuf[nIdx]);
         } else {
-          pushSeqBuf[nIdx] = seq++;
-          heapPush(nIdx);
+          heapBubbleUp(heapPosBuf[nIdx]);
         }
       }
     }

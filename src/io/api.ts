@@ -48,6 +48,7 @@ export type GameLobbyState = {
   // cleared when the battle resolves / the offer goes stale. Optional --
   // every pre-offer row simply lacks the key. Mirrors server LobbyState.
   pendingBattle?: { attackerId: string; defenderId: string; since: number } | null;
+  mapGenVersion?: 1 | 2;
 };
 
 export type Game = {
