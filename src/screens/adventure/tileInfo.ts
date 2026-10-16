@@ -9,7 +9,7 @@ import type { Hero } from "../../entities/hero";
 import type { Castle } from "../../entities/settlement";
 import type { GameState, PlayerId } from "../../state/gameState";
 import type { CharterPhase } from "@heroes/contracts";
-import { settlementRateRadius, controlledPositions, platoonTroopTotal } from "@heroes/engine";
+import { controlRange, settlementRateRadius, platoonTroopTotal } from "@heroes/engine";
 import { colorForOwner } from "../../state/playerColors";
 import { isTileVisibleTo } from "../../render/fog";
 
@@ -135,7 +135,7 @@ function describeCharter(
 function describeTerritory(
   state: GameState,
   castles: readonly Castle[],
-  map: GameMap,
+  _map: GameMap,
   q: number,
   r: number,
   fogged: boolean,
@@ -145,9 +145,8 @@ function describeTerritory(
   for (const c of castles) {
     if (c.ownerId === null) continue;
     const ownerId = c.ownerId;
-    const positions = controlledPositions(c.tile, c.level, map.width, map.height);
-    if (!positions.has(`${q},${r}`)) continue;
     const dist = hexDistance(c.tile, { q, r });
+    if (dist > controlRange(c.level, c.buildings)) continue;
     if (!best || dist < best.dist || (dist === best.dist && ownerId < best.ownerId)) {
       best = { castle: c, ownerId, dist };
     }

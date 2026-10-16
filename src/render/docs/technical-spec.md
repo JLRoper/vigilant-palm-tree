@@ -447,15 +447,20 @@ In the live paint2d scene path (§7), hero sprite resolution carries an optional
 
 ```typescript
 const VISION_RANGE = 4;
-function computeVision(heroes, castles, viewPlayerId, range?): Set<string>
-function computeVisionFromState(state, viewPlayerId, range?): Set<string>
+class VisionSet extends Set<string> {
+  readonly signature: string;
+  hasCoords(q: number, r: number): boolean;
+  addCoords(q: number, r: number): void;
+}
+function computeVision(heroes, castles, viewPlayerId, range?): VisionSet
+function computeVisionFromState(state, viewPlayerId, range?): VisionSet
 function isVisible(visible, q, r): boolean
 ```
 
 - **Heroes** contribute a visibility ring of `VISION_RANGE` (4 hexes) around their position
-- **Castles** contribute a visibility ring based on `controlRange(level)` (which increases with settlement level)
-- `computeVisionFromState(state, viewPlayerId, range?)` computes the same `"q,r"` visibility set directly from `GameState.heroes` and `GameState.settlements` for input-path callers (`AdventureView.updatePath()` and `AdventureView.onClick()`) that filter `occupiedHexes` and enemy targets without needing visual `Hero`/`Castle` entity instances
-- Returns a `Set<string>` of `"q,r"` keys representing visible hexes
+- **Castles** contribute a visibility ring based on `controlRange(level, buildings)` (which increases with settlement level and watchtowers)
+- `VisionSet` extends `Set<string>` and carries a flat `Uint8Array(256 * 256)` grid (`OFFSET = 32`, `STRIDE = 256`) plus a `signature: string`. Both `computeVision` and `computeVisionFromState` memoize their returned `VisionSet` until own-hero `(q, r)` or own-settlement `(q, r, controlRange)` inputs change, and `isVisible(visible, q, r)` dispatches to `visible.hasCoords(q, r)` for $O(1)$ zero-string-allocation lookups
+- `computeVisionFromState(state, viewPlayerId, range?)` computes the same visibility set directly from `GameState.heroes` and `GameState.settlements` for input-path callers (`AdventureView.updatePath()` and `AdventureView.onClick()`) that filter `occupiedHexes` and enemy targets without needing visual `Hero`/`Castle` entity instances
 
 In the renderer, non-visible hexes are covered with a semi-transparent fog overlay:
 - Fill: `rgba(8, 10, 16, 0.78)`
@@ -487,7 +492,7 @@ Colors:
 
 #### 2.5.3 Territory Outlines
 
-`overlays/territoryOutline.ts` is **deleted**. The partitioning math — group owned castles by `ownerId`, expand each to its `controlledPositions()`, split contested hexes by nearest-castle `hexDistance()`, then perimeter via `territoryBoundaryEdges()` — lives in `adventureScene.ts`'s `buildTerritoryOutlineEdges()` and emits one `territoryOutlineEdge` node per boundary segment.
+`overlays/territoryOutline.ts` is **deleted**. The partitioning math — group owned castles by `ownerId`, expand each to its `controlledPositions()`, split contested hexes by nearest-castle `hexDistance()`, then perimeter via `territoryBoundaryEdges()` — lives in `adventureScene.ts`'s `buildTerritoryOutlineEdges()` and emits one `territoryOutlineEdge` node per boundary segment. `buildTerritoryOutlineEdges()` uses a two-level cache: Level 1 (`territoryPartitionCache`, keyed on `settlementSig`) caches the per-owner partitioned controlled hex coordinates across frames until a settlement is captured, upgraded, or founded; Level 2 (`territoryEdgesCache`, keyed on `(settlementSig, colorSig, visHash, visCount)` using `isVisible(visible, c.q, c.r)`) caches the resulting `TerritoryOutlineEdgeNode[]` across steady-state frames.
 
 `paintScene()` strokes a **consecutive same-owner run of those nodes as a single path**, which is load-bearing rather than an optimisation: the stroke runs at `globalAlpha: 0.45` with round caps, so stroking edge-by-edge blends twice at every shared endpoint and beads the border.
 

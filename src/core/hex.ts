@@ -66,13 +66,21 @@ export function axialRound(qf: number, rf: number): Axial {
   return { q, r };
 }
 
+export const UNIT_HEX_CORNERS: ReadonlyArray<{ readonly x: number; readonly y: number }> =
+  Array.from({ length: 6 }, (_, i) => {
+    const angle = (Math.PI / 180) * (60 * i - 30);
+    return { x: Math.cos(angle), y: Math.sin(angle) };
+  });
+
 export function hexCorners(cx: number, cy: number, size = HEX_SIZE): { x: number; y: number }[] {
-  const corners: { x: number; y: number }[] = [];
-  for (let i = 0; i < 6; i++) {
-    const angle = Math.PI / 180 * (60 * i - 30);
-    corners.push({ x: cx + size * Math.cos(angle), y: cy + size * Math.sin(angle) });
-  }
-  return corners;
+  return [
+    { x: cx + size * UNIT_HEX_CORNERS[0].x, y: cy + size * UNIT_HEX_CORNERS[0].y },
+    { x: cx + size * UNIT_HEX_CORNERS[1].x, y: cy + size * UNIT_HEX_CORNERS[1].y },
+    { x: cx + size * UNIT_HEX_CORNERS[2].x, y: cy + size * UNIT_HEX_CORNERS[2].y },
+    { x: cx + size * UNIT_HEX_CORNERS[3].x, y: cy + size * UNIT_HEX_CORNERS[3].y },
+    { x: cx + size * UNIT_HEX_CORNERS[4].x, y: cy + size * UNIT_HEX_CORNERS[4].y },
+    { x: cx + size * UNIT_HEX_CORNERS[5].x, y: cy + size * UNIT_HEX_CORNERS[5].y },
+  ];
 }
 
 export function hexDistance(a: Axial, b: Axial): number {

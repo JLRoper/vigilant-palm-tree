@@ -67,6 +67,35 @@ export function buildHud(container: HTMLElement): HudHandles {
   };
 }
 
+interface EconomyHudSnapshot {
+  state: GameState;
+  ownerId: PlayerId;
+  round: number;
+  day: number;
+  roundText: string;
+  wealthText: string;
+  incomeText: string;
+  upkeepText: string;
+  moraleText: string;
+  breakdownTitle: string;
+}
+
+let lastEconSnapshot: EconomyHudSnapshot | null = null;
+let lastFormattedIso: string | null = null;
+let lastFormattedTime = "";
+
+function setText(el: HTMLElement, value: string): void {
+  if (el.textContent !== value) {
+    el.textContent = value;
+  }
+}
+
+function setTitle(el: HTMLElement, value: string): void {
+  if (el.title !== value) {
+    el.title = value;
+  }
+}
+
 export function updateHud(
   state: GameState,
   lastSavedAt: string | null,
@@ -95,24 +124,76 @@ export function updateHud(
     }
   }
   if (lastSavedAt) clauses.push(`Last saved ${formatTime(lastSavedAt)}`);
-  handles.context.textContent = clauses.join(" · ");
+  setText(handles.context, clauses.join(" · "));
+
+  const econ = getEconomyHudSnapshot(state, ownerId);
+  setText(handles.round, econ.roundText);
+  setText(handles.wealth, econ.wealthText);
+  setText(handles.income, econ.incomeText);
+  setText(handles.upkeep, econ.upkeepText);
+  setText(handles.morale, econ.moraleText);
+  setTitle(handles.root, econ.breakdownTitle);
+}
+
+function getEconomyHudSnapshot(state: GameState, ownerId: PlayerId): EconomyHudSnapshot {
+  if (
+    lastEconSnapshot &&
+    lastEconSnapshot.state === state &&
+    lastEconSnapshot.ownerId === ownerId &&
+    lastEconSnapshot.round === state.round &&
+    lastEconSnapshot.day === state.day
+  ) {
+    return lastEconSnapshot;
+  }
 
   const ownedHeroes = Object.values(state.heroes).filter((h) => h.ownerId === ownerId);
   const upkeepBill = liveEmpireUpkeepCost(ownedHeroes);
+  const ownedSettlements = Object.values(state.settlements).filter((s) => s.ownerId === ownerId);
+  const eff = playerEffectiveSettlementIncome(state, ownerId);
+  const nextGold = playerIncome(state, ownerId);
+  const moraleAvg =
+    ownedSettlements.length === 0
+      ? null
+      : Math.round(ownedSettlements.reduce((acc, s) => acc + (s.morale ?? 100), 0) / ownedSettlements.length);
 
-  handles.round.textContent = String(state.round);
-  handles.wealth.textContent = `${playerWealth(state, ownerId)}g`;
-  handles.income.textContent = `${fmtNum(playerEffectiveSettlementIncome(state, ownerId))}/${fmtNum(playerIncome(state, ownerId))}g`;
-  handles.upkeep.textContent = `${fmtNum(upkeepBill.gold)}g + ${fmtNum(upkeepBill.food)} food`;
-  handles.morale.textContent = playerMoraleValue(state, ownerId);
-  handles.root.title = economyBreakdown(state, ownerId);
-}
+  let breakdownTitle: string;
+  if (ownedSettlements.length === 0) {
+    breakdownTitle = "Empire Income: 0g — you own no settlements.";
+  } else {
+    const popTax = ownedSettlements.reduce((acc, s) => acc + (s.population ?? 0) * (s.goldTax ?? 0), 0);
+    const buildingGold = nextGold - popTax;
+    const foodHave = ownedSettlements.reduce((acc, s) => acc + (s.warehouse.food ?? 0), 0);
+    const foodNeed = ownedSettlements.reduce((acc, s) => acc + foodRequired(s), 0);
+    const upkeep = ownedSettlements.reduce(
+      (acc, s) => {
+        const u = buildingUpkeepRequired(s);
+        return { wood: acc.wood + u.wood, stone: acc.stone + u.stone };
+      },
+      { wood: 0, stone: 0 },
+    );
+    const decay = ownedSettlements.reduce((acc, s) => acc + moraleDecay(s), 0);
+    const moraleTrend = decay > 0 ? `morale −${fmtNum(decay)}/round` : "morale stable";
+    breakdownTitle = [
+      `Income: settlements ${fmtNum(popTax)}g pop-tax + ${fmtNum(buildingGold)}g buildings → morale ${moraleAvg}% on tax → ${fmtNum(eff)}g/round to treasuries`,
+      `${empireUpkeepTitleClause(upkeepBill)} · buildings ${fmtNum(upkeep.wood)} wood + ${fmtNum(upkeep.stone)} stone/wk · food ${fmtNum(foodHave)}/${fmtNum(foodNeed)} → ${moraleTrend}`,
+      `${fmtNum(buildingGold)}g building gold is morale-stable and counted in both Empire Income (${fmtNum(eff)}g) and next-turn gold (${fmtNum(nextGold)}g)`,
+    ].join("\n");
+  }
 
-function playerMoraleValue(state: GameState, ownerId: PlayerId): string {
-  const owned = Object.values(state.settlements).filter((s) => s.ownerId === ownerId);
-  if (owned.length === 0) return "n/a";
-  const sum = owned.reduce((acc, s) => acc + (s.morale ?? 100), 0);
-  return `${Math.round(sum / owned.length)}%`;
+  const snapshot: EconomyHudSnapshot = {
+    state,
+    ownerId,
+    round: state.round,
+    day: state.day,
+    roundText: String(state.round),
+    wealthText: `${playerWealth(state, ownerId)}g`,
+    incomeText: `${fmtNum(eff)}/${fmtNum(nextGold)}g`,
+    upkeepText: `${fmtNum(upkeepBill.gold)}g + ${fmtNum(upkeepBill.food)} food`,
+    moraleText: moraleAvg === null ? "n/a" : `${moraleAvg}%`,
+    breakdownTitle,
+  };
+  lastEconSnapshot = snapshot;
+  return snapshot;
 }
 
 // F10 (playtest fixes 2026-09-29): "Path 4.6/7" while the previewed
@@ -125,52 +206,21 @@ function formatPathReadout(readout: PathCostReadout | null): string {
     : `Path ${readout.costToSplit.toFixed(1)} of ${readout.totalCost.toFixed(1)}`;
 }
 
-// F11 (playtest fixes 2026-09-29): hover breakdown for the HUD economy pills.
-// Presentation only -- every number comes from @heroes/engine's exported
-// formulas, mirroring what the round pipeline (applyEndOfTurn) actually does.
-// Newlines render as line breaks in the native tooltip. "Empire Income"
-// (playerEffectiveSettlementIncome) is the morale-scaled population tax plus
-// building goldPerTurn — matching what applyEndOfTurn pays
-// (produceSettlementResources pays building gold; applyEffectiveIncome pays
-// the morale-scaled tax). next-turn gold (playerIncome) is the same figure
-// without morale scaling on the tax half.
-function economyBreakdown(state: GameState, ownerId: PlayerId): string {
-  const owned = Object.values(state.settlements).filter((s) => s.ownerId === ownerId);
-  if (owned.length === 0) return "Empire Income: 0g — you own no settlements.";
-  const popTax = owned.reduce((acc, s) => acc + (s.population ?? 0) * (s.goldTax ?? 0), 0);
-  const eff = playerEffectiveSettlementIncome(state, ownerId);
-  const morale = Math.round(owned.reduce((acc, s) => acc + (s.morale ?? 100), 0) / owned.length);
-  const nextGold = playerIncome(state, ownerId);
-  const buildingGold = nextGold - popTax;
-  const foodHave = owned.reduce((acc, s) => acc + (s.warehouse.food ?? 0), 0);
-  const foodNeed = owned.reduce((acc, s) => acc + foodRequired(s), 0);
-  const upkeep = owned.reduce(
-    (acc, s) => {
-      const u = buildingUpkeepRequired(s);
-      return { wood: acc.wood + u.wood, stone: acc.stone + u.stone };
-    },
-    { wood: 0, stone: 0 },
-  );
-  const decay = owned.reduce((acc, s) => acc + moraleDecay(s), 0);
-  const troopBill = liveEmpireUpkeepCost(Object.values(state.heroes).filter((h) => h.ownerId === ownerId));
-  const moraleTrend = decay > 0 ? `morale −${fmtNum(decay)}/round` : "morale stable";
-  return [
-    `Income: settlements ${fmtNum(popTax)}g pop-tax + ${fmtNum(buildingGold)}g buildings → morale ${morale}% on tax → ${fmtNum(eff)}g/round to treasuries`,
-    `${empireUpkeepTitleClause(troopBill)} · buildings ${fmtNum(upkeep.wood)} wood + ${fmtNum(upkeep.stone)} stone/wk · food ${fmtNum(foodHave)}/${fmtNum(foodNeed)} → ${moraleTrend}`,
-    `${fmtNum(buildingGold)}g building gold is morale-stable and counted in both Empire Income (${fmtNum(eff)}g) and next-turn gold (${fmtNum(nextGold)}g)`,
-  ].join("\n");
-}
-
 function fmtNum(n: number): string {
   const r = Math.round(n * 10) / 10;
   return Number.isInteger(r) ? String(r) : r.toFixed(1);
 }
 
 function formatTime(iso: string): string {
+  if (iso === lastFormattedIso) {
+    return lastFormattedTime;
+  }
   try {
     const d = new Date(iso);
-    return d.toLocaleTimeString();
+    lastFormattedTime = d.toLocaleTimeString();
   } catch {
-    return iso;
+    lastFormattedTime = iso;
   }
+  lastFormattedIso = iso;
+  return lastFormattedTime;
 }

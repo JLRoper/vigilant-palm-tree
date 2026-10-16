@@ -34,6 +34,10 @@ interface MinimapLayerCache {
 let staticLayerCache: MinimapLayerCache | null = null;
 
 function computeVisionHash(visible: Set<string>): string {
+  const sig = (visible as { signature?: string }).signature;
+  if (typeof sig === "string") {
+    return `${visible.size}:${sig}`;
+  }
   let xor = 0;
   let sum = 0;
   for (const key of visible) {
