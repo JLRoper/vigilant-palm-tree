@@ -73,6 +73,7 @@ The `/precommit` and `/pre-pr` slash commands are manual equivalents you can off
 ## Skills available
 - `/dev start|stop|restart` — manage the local dev environment (db + api + client).
 - `/review-issue [branch|PR#] [issue#]` — review a branch against the issue it claims to close, plus a general pass against the project docs. Read-only.
+- `/pr-copilot-triage <PR#> [--no-merge] [--no-issues]` — verify a PR's Copilot comments against its head, write `reviews/pr<N>-review.md`, file a tracker issue (review as body) plus one issue per valid finding, then approve and merge once CI is green.
 - `/precommit` — run the build + deps + docs + test gate on demand.
 - `/pre-pr` — same as `/precommit`, plus a quick doc sanity sweep.
 

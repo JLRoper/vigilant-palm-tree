@@ -70,7 +70,6 @@ export class GameEngine {
     this.actions = new GameActions(this.state, this.session);
     this.sessions = new GameSessionManager(
       this.session, this.state, this.view, this.ui,
-      () => this.gameMap,
       (m) => { this.gameMap = m; },
     );
     // plan/2026-09-29-ai-enemies.md D3: seat 0's client drives the AI turn;
@@ -181,7 +180,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
   private initUI(): void {
     this.ui.initToolbar(this.session, this.state, () => this.getCalendar(), {
       onNew: (opts) => void this.sessions.handleNewGame(opts).then(() => this.fullFrame()),
-      onLoad: (loaded, tiles) => void this.sessions.loadGame(loaded, tiles).then(() => {
+      onLoad: (loaded) => void this.sessions.loadGame(loaded).then(() => {
         this.actions.maybeAutoResolveBattle();
         this.fullFrame();
       }),

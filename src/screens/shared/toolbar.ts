@@ -508,7 +508,7 @@ export class Toolbar {
     this.refreshCalendar(cal);
   }
 
-  private refreshCalendar(cal: CalendarSnapshot | null = this.opts.state.getCalendar()): void {
+  private refreshCalendar(cal: CalendarSnapshot | null): void {
     const dateEl = this.dateEl;
     const swatchEl = this.swatchEl;
     const activeEl = this.activeEl;
