@@ -2,7 +2,7 @@ import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { ViewManager } from "./ViewManager";
 import { UIManager } from "./UIManager";
-import { GameMap, type MapSize, getOrCreateGameMap, resolveMapSize } from "../map/gameMap";
+import { GameMap, type MapSize, getOrCreateGameMap, resolveMapSize, resolveSavedMapGenVersion } from "../map/gameMap";
 import { markSaved } from "../state/gameState";
 import { playerHeroId } from "../game/initState";
 import { CASTLE_COUNT_DEFAULT, defaultCastleSeedFromMapSeed, generateCastles } from "../map/castlePlacement";
@@ -48,7 +48,7 @@ export class GameSessionManager {
     this.session.adopt(loaded);
     notePersisted(loaded.updated_at);
     const resolvedSize = resolveMapSize(loaded.map_size);
-    const map = getOrCreateGameMap(loaded.seed, resolvedSize, loaded.lobby?.mapGenVersion);
+    const map = getOrCreateGameMap(loaded.seed, resolvedSize, resolveSavedMapGenVersion(loaded.lobby?.mapGenVersion));
     // Server-driven flag (plan/2026-09-30-server-side-ai-actor.md D8): every
     // creation/load path funnels through here, so this is the registry's
     // feed point for game-bearing responses; a switch to a different game

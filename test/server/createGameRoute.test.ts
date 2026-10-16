@@ -7,6 +7,7 @@ import { pool } from "../../server/persistence/db";
 import { router } from "../../server/routes";
 import { errorHandler } from "../../server/errorHandler";
 import { aiDriverBootToken } from "../../server/app/aiDriverToken";
+import { GameMap, type TileRow } from "@heroes/engine";
 
 let server: Server;
 let baseUrl: string;
@@ -337,6 +338,27 @@ test("POST /games seatFactions ['verdant'] stamps a verdant seat (the 026 conten
     const { row } = await createGame({ name, humanSlots: 1, seatFactions: ["verdant"] });
     assert.equal(row.players[0].factionId, "verdant");
     assert.equal(row.players[0].faction, "player", "the roster faction never disturbs the seat's player/ai faction");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("GET /games/:name/tiles backfills a v2 save on a large map with v2 terrain when tile rows are absent", async () => {
+  const name = uniqueName();
+  try {
+    await createGame({ name, seed: 42, mapSize: "large", humanSlots: 1 });
+    await pool.query(
+      `UPDATE games SET lobby = jsonb_set(COALESCE(lobby, '{}'::jsonb), '{mapGenVersion}', '2'::jsonb) WHERE name = $1`,
+      [name],
+    );
+    await pool.query(`DELETE FROM tiles WHERE game_id = (SELECT id FROM games WHERE name = $1)`, [name]);
+
+    const tilesRes = await fetch(`${baseUrl}/games/${name}/tiles`);
+    assert.equal(tilesRes.status, 200);
+    const rows = (await tilesRes.json()) as TileRow[];
+    const backfilled = GameMap.fromTiles(rows);
+    assert.deepEqual(backfilled.tiles, new GameMap(42, "large", 2).tiles);
+    assert.notDeepEqual(backfilled.tiles, new GameMap(42, "large", 3).tiles);
   } finally {
     await cleanupGame(name);
   }

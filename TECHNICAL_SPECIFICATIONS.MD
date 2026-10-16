@@ -1,6 +1,6 @@
 # Technical Specifications — heroes-js
 
-<!-- docs:verified 2026-10-14 -->
+<!-- docs:verified 2026-10-16 -->
 
 A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. This document captures the **tech stack** as it currently exists in the repository. Game design documentation lives under [`docs/`](./docs/README.md); the render module has its own authoritative spec at [`src/render/docs/technical-spec.md`](./src/render/docs/technical-spec.md).
 
@@ -326,7 +326,7 @@ API conventions:
 | Dynamic | WebSocket | `WS_PORT` in `.env`, allocated by `scripts/allocate-ports.ts` (**reserved/dormant** — no listener yet) |
 | `5432` | Postgres | `npm run db:up` (docker compose, fixed shared port) |
 | `8080` | Adminer (DB UI) | `npm run db:up` |
-| `3001` / `5173` | API container / `gateway` container | Fixed mappings when running the full `docker compose` stack (the gateway publishes `5173:80`; `web` is internal-only) |
+| `3001` / `5173` | API container / `web` container (`nginx`) | Fixed mappings when running the full `docker compose` stack (`game_web` publishes `5173:80` directly and proxies `/api/*` to `api:3001`; redeploy via `npm run docker:build && docker compose up -d --remove-orphans api web`) |
 
 `scripts/allocate-ports.ts` allocates free ports at dev/test startup (via npm `predev`/`pretest` hooks) and writes `API_PORT`, `CLIENT_PORT`, `WS_PORT` to `.env`. It uses Node's `net.Server.listen(0)` to ask the kernel for a free port — the same mechanism on Windows, Linux, and macOS — so allocations are collision-free across concurrent worktrees. It never allocates the DB port (`server/persistence/db.ts` reads only `PG*` vars).
 

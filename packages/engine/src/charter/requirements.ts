@@ -1,4 +1,4 @@
-import type { GameState, HeroId } from "@heroes/contracts";
+import type { Axial, GameState, HeroId } from "@heroes/contracts";
 import type { GameMap } from "../map/gameMap";
 import { hexDistance } from "../map/pathfinding";
 import { CHARTER_GOLD_COST, CHARTER_WAREHOUSE_COST } from "./start";
@@ -98,9 +98,68 @@ export function evaluateCharterRequirements(state: GameState, heroId: HeroId | n
   return { canStart: missing.length === 0, missing, hints, rows };
 }
 
-export function validCharterHexes(state: GameState, map: GameMap): Set<string> {
+export interface ValidCharterHexesOptions {
+  center?: Axial;
+  maxDistance?: number;
+}
+
+export function validCharterHexes(
+  state: GameState,
+  map: GameMap,
+  opts?: ValidCharterHexesOptions,
+): Set<string> {
   const hexes = new Set<string>();
+  const width = map.width;
+  const height = map.height;
   const settlements = Object.values(state.settlements);
+
+  const center = opts?.center;
+  const maxDist = opts?.maxDistance;
+  const hasRadiusBound = center != null && typeof maxDist === "number" && Number.isFinite(maxDist);
+  const rMin = hasRadiusBound ? Math.max(0, Math.ceil(center.r - maxDist)) : 0;
+  const rMax = hasRadiusBound ? Math.min(height - 1, Math.floor(center.r + maxDist)) : height - 1;
+  const qMin = hasRadiusBound ? Math.max(0, Math.ceil(center.q - maxDist)) : 0;
+  const qMax = hasRadiusBound ? Math.min(width - 1, Math.floor(center.q + maxDist)) : width - 1;
+
+  if (Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0) {
+    const forbidden = new Uint8Array(width * height);
+    const radius = CHARTER_MIN_SETTLEMENT_DISTANCE - 1;
+    for (const s of settlements) {
+      for (let dr = -radius; dr <= radius; dr++) {
+        const nr = s.r + dr;
+        if (nr < 0 || nr >= height) continue;
+        const rowOffset = nr * width;
+        for (let dq = -radius; dq <= radius; dq++) {
+          if (Math.abs(dq + dr) > radius) continue;
+          const nq = s.q + dq;
+          if (nq < 0 || nq >= width) continue;
+          forbidden[rowOffset + nq] = 1;
+        }
+      }
+    }
+    for (const c of state.activeCharters) {
+      if (c.targetQ >= 0 && c.targetQ < width && c.targetR >= 0 && c.targetR < height) {
+        forbidden[c.targetR * width + c.targetQ] = 1;
+      }
+    }
+    for (const h of Object.values(state.heroes)) {
+      if (h.q >= 0 && h.q < width && h.r >= 0 && h.r < height) {
+        forbidden[h.r * width + h.q] = 1;
+      }
+    }
+
+    for (let r = rMin; r <= rMax; r++) {
+      const rowOffset = r * width;
+      for (let q = qMin; q <= qMax; q++) {
+        if (forbidden[rowOffset + q]) continue;
+        if (hasRadiusBound && hexDistance(center, { q, r }) > maxDist) continue;
+        if (!map.isPassable(q, r)) continue;
+        hexes.add(`${q},${r}`);
+      }
+    }
+    return hexes;
+  }
+
   const settlementSet = new Set<string>();
   for (const s of settlements) {
     settlementSet.add(`${s.q},${s.r}`);
@@ -114,8 +173,9 @@ export function validCharterHexes(state: GameState, map: GameMap): Set<string> {
     heroSet.add(`${h.q},${h.r}`);
   }
 
-  for (let r = 0; r < map.height; r++) {
-    for (let q = 0; q < map.width; q++) {
+  for (let r = rMin; r <= rMax; r++) {
+    for (let q = qMin; q <= qMax; q++) {
+      if (hasRadiusBound && hexDistance(center, { q, r }) > maxDist) continue;
       if (!map.isPassable(q, r)) continue;
       const key = `${q},${r}`;
       if (settlementSet.has(key)) continue;

@@ -23,6 +23,7 @@ transferGold,
   effectiveIncome,
   clampMorale,
   getOrCreateGameMap,
+  resolveSavedMapGenVersion,
   computeSettlementRates,
   cityViewSizeFor,
   foodBiasForTerrain,
@@ -99,7 +100,7 @@ export interface GameLobbyFlags {
   // by the battle cases below and cleared when the battle resolves or the
   // offer goes stale. Optional -- every pre-offer row simply lacks the key.
   pendingBattle?: PendingBattleMarker | null;
-  mapGenVersion?: 1 | 2;
+  mapGenVersion?: 1 | 2 | 3;
 }
 
 export interface GameRepo {
@@ -138,11 +139,19 @@ export interface EventRepo {
 // side hydrate.ts never needs but the dual-write step below does.
 export interface HeroRepo {
   loadAllForGame(gameName: string): Promise<HeroState[]>;
-  upsertMany(gameName: string, heroes: Record<HeroId, HeroState>): Promise<void>;
+  upsertMany(
+    gameName: string,
+    heroes: Record<HeroId, HeroState>,
+    previous?: Record<HeroId, HeroState>,
+  ): Promise<void>;
 }
 export interface SettlementRepo {
   loadAllForGame(gameName: string): Promise<SettlementState[]>;
-  upsertMany(gameName: string, settlements: Record<SettlementId, SettlementState>): Promise<void>;
+  upsertMany(
+    gameName: string,
+    settlements: Record<SettlementId, SettlementState>,
+    previous?: Record<SettlementId, SettlementState>,
+  ): Promise<void>;
 }
 export interface CharterRepo {
   loadAllForGame(gameName: string): Promise<CharterState[]>;
@@ -247,18 +256,33 @@ function sumPlayerGold(
 // so we use reference-equality against pre-command state to decide which
 // repo(s) actually need syncing, rather than risk a filtered subset that
 // would silently delete untouched rows.
+const granularHydratedStates = new WeakSet<object>();
+
 async function dualWriteEntities(
   deps: CommandDeps,
   gameName: string,
   before: { heroes: Record<HeroId, HeroState>; settlements: Record<SettlementId, SettlementState> },
   after: { heroes: Record<HeroId, HeroState>; settlements: Record<SettlementId, SettlementState> },
 ): Promise<void> {
+  const canIncremental = granularHydratedStates.has(before);
   const writes: Promise<void>[] = [];
   if (after.heroes !== before.heroes) {
-    writes.push(deps.heroRepo.upsertMany(gameName, after.heroes));
+    writes.push(
+      deps.heroRepo.upsertMany(
+        gameName,
+        after.heroes,
+        canIncremental ? before.heroes : undefined,
+      ),
+    );
   }
   if (after.settlements !== before.settlements) {
-    writes.push(deps.settlementRepo.upsertMany(gameName, after.settlements));
+    writes.push(
+      deps.settlementRepo.upsertMany(
+        gameName,
+        after.settlements,
+        canIncremental ? before.settlements : undefined,
+      ),
+    );
   }
   await Promise.all(writes);
 }
@@ -594,6 +618,9 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
   // `state` to keep this cutover's diff to hydration + dual-write only,
   // not a rewrite of Phase 3's pre-existing per-command validation.
   const { state, source } = await hydrateFromRepos(row, deps, command.gameName);
+  if (source === "granular") {
+    granularHydratedStates.add(state);
+  }
 
   switch (command.kind) {
     case "MoveHero": {
@@ -708,7 +735,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // Caravans path with A* on the deterministic rebuilt map -- only pay
       // the generation cost when routes actually exist (plan §5.2).
       const map = (state.tradeRoutes?.length ?? 0) > 0
-        ? getOrCreateGameMap(Number(row.seed) || 1, row.map_size as MapSize, row.lobby?.mapGenVersion)
+        ? getOrCreateGameMap(Number(row.seed) || 1, row.map_size as MapSize, resolveSavedMapGenVersion(row.lobby?.mapGenVersion))
         : null;
       // The catalog is already loaded on deps.ctx (createLiveCommandDeps), and
       // the weekly upkeep charge inside advanceRound needs it for per-unit
@@ -1255,7 +1282,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // (new GameMap(seed, mapSize) there too), so this reconstructs a
       // byte-identical map deterministically -- pinned down by
       // test/server/gameMapReconstruction.test.ts.
-      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, row.lobby?.mapGenVersion);
+      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, resolveSavedMapGenVersion(row.lobby?.mapGenVersion));
       if (!map.isPassable(command.targetQ, command.targetR)) {
         return { ok: false, reason: "impassable_terrain", events: [] };
       }
@@ -1358,7 +1385,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // target-hex check uses above (and the same GameMap reconstruction,
       // pinned equivalent to the client's own by
       // test/server/gameMapReconstruction.test.ts).
-      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, row.lobby?.mapGenVersion);
+      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, resolveSavedMapGenVersion(row.lobby?.mapGenVersion));
       if (!map.isPassable(command.toTile.q, command.toTile.r)) {
         return { ok: false, reason: "impassable", events: [] };
       }
@@ -1841,7 +1868,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // Same GameMap reconstruction StartCharter uses above (row.seed/
       // row.map_size reproduce the persisted map byte-identically; pinned
       // by test/server/gameMapReconstruction.test.ts).
-      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, row.lobby?.mapGenVersion);
+      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, resolveSavedMapGenVersion(row.lobby?.mapGenVersion));
       const computed = computeSettlementRates(map, settlement.q, settlement.r, targetLevel);
       // Terrain biases the food-spot roll of the new ring of cells (upgrade).
       const { spots } = generateCitySpots(cityViewSizeFor(targetLevel), deps.ctx.rng, {

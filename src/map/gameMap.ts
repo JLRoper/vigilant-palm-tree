@@ -4,6 +4,7 @@ export {
   GAME_MAP_CACHE_CAPACITY,
   resolveMapSize,
   resolveMapGenVersion,
+  resolveSavedMapGenVersion,
   getOrCreateGameMap,
   clearGameMapCache,
   getGameMapCacheSize,

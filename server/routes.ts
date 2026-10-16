@@ -7,8 +7,11 @@ import {
   isHealthy,
   makeInitialStatePayload,
   mulberry32,
+  resolveMapSize,
+  resolveSavedMapGenVersion,
   validateGameRow,
   MAX_PLAYERS,
+  type MapGenVersion,
   type MapSize,
   type UnitType,
 } from "@heroes/engine";
@@ -115,7 +118,7 @@ export interface LobbyState {
   // opt-IN for the legacy behaviour), so their food logistics go through the
   // caravan recommender (economy/tradeNeeds.ts) instead of the teleport.
   legacyAutoTrade?: boolean;
-  mapGenVersion?: 1 | 2;
+  mapGenVersion?: 1 | 2 | 3;
 }
 
 export async function generateAndInsertTiles(
@@ -125,8 +128,9 @@ export async function generateAndInsertTiles(
   onConflict: "upsert" | "skip",
   mapSize?: MapSize,
   existingMap?: GameMap,
+  version?: MapGenVersion,
 ): Promise<void> {
-  const map = existingMap ?? getOrCreateGameMap(seed, mapSize);
+  const map = existingMap ?? getOrCreateGameMap(seed, mapSize, resolveSavedMapGenVersion(version));
   const total = map.width * map.height;
   const qs = new Array<number>(total);
   const rs = new Array<number>(total);
@@ -410,7 +414,7 @@ router.post("/games", async (req, res) => {
     }
     const storedMapSize = ["small", "medium", "large", "huge", "epic"].includes(mapSize) ? mapSize : "small";
     console.log(`[api] POST /games name=${name} hero=(${hero_q},${hero_r}) mapSize=${storedMapSize}`);
-    const map = getOrCreateGameMap(seed, storedMapSize as MapSize);
+    const map = getOrCreateGameMap(seed, storedMapSize as MapSize, 3);
     const topHumanSlots = Number.isInteger(humanSlots) ? (humanSlots as number) : null;
     const lobbyObj = lobby && typeof lobby === "object" ? lobby : null;
     const lobbyHumanSlots =
@@ -467,13 +471,13 @@ router.post("/games", async (req, res) => {
       // body of `legacyAutoTrade: true` opts a new game back into the legacy
       // behaviour. Non-boolean junk reads as the default (false).
       legacyAutoTrade: legacyAutoTradeOptIn === true,
-      mapGenVersion: 2,
+      mapGenVersion: 3,
     };
     const explicitSeats =
       lobbyObj && Number.isInteger(lobbyObj.seats) ? (lobbyObj.seats as number) : null;
     const seats = explicitSeats ?? (humanCount !== null ? humanCount : null);
     if (seats !== null && seats >= 1 && humanCount !== null && humanCount >= 1 && humanCount <= seats) {
-      lobbyState = { seats, humanSlots: humanCount, claimed: {}, mapGenVersion: 2 };
+      lobbyState = { seats, humanSlots: humanCount, claimed: {}, mapGenVersion: 3 };
     }
     if (lobbyState.humanSlots !== undefined && lobbyState.humanSlots < 1) {
       res.status(400).json({ error: "humanSlots must be >= 1" });
@@ -532,7 +536,7 @@ router.post("/games", async (req, res) => {
         ]
       );
     const row = r.rows[0];
-    await generateAndInsertTiles(client, row.id, row.seed, "upsert", storedMapSize as MapSize, map);
+    await generateAndInsertTiles(client, row.id, row.seed, "upsert", storedMapSize as MapSize, map, 3);
     return row;
   });
   // The recreation (ON CONFLICT (name)) may have flipped the aiDriver flag;
@@ -623,8 +627,8 @@ router.get("/games/:name/events", async (req, res) => {
 });
 
 router.get("/games/:name/tiles", async (req, res) => {
-  const game = await pool.query<{ id: number; seed: number; map_size: string }>(
-    "SELECT id, seed, map_size FROM games WHERE name = $1",
+  const game = await pool.query<{ id: number; seed: number; map_size: string; lobby: LobbyState | null }>(
+    "SELECT id, seed, map_size, lobby FROM games WHERE name = $1",
     [req.params.name]
   );
   if (game.rowCount === 0) {
@@ -637,11 +641,11 @@ router.get("/games/:name/tiles", async (req, res) => {
     [gameRow.id]
   );
   if (Number(count.rows[0].count) === 0) {
-    const fallbackSize: MapSize = ["small", "medium", "large", "huge", "epic"].includes(gameRow.map_size)
-      ? (gameRow.map_size as MapSize)
-      : "small";
+    const fallbackSize = resolveMapSize(gameRow.map_size);
+    const savedVersion = resolveSavedMapGenVersion(gameRow.lobby?.mapGenVersion);
+    const map = getOrCreateGameMap(gameRow.seed, fallbackSize, savedVersion);
     await withTransaction((client) =>
-      generateAndInsertTiles(client, gameRow.id, gameRow.seed, "skip", fallbackSize)
+      generateAndInsertTiles(client, gameRow.id, gameRow.seed, "skip", fallbackSize, map, savedVersion)
     );
   }
   const tiles = await pool.query<TileRow>(

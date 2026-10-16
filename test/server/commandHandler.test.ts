@@ -12,7 +12,7 @@ import type {
   SettlementState,
 } from "@heroes/contracts";
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
-import { CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS, GameMap, platoonTroopTotal, WAGON_GOLD_CAPACITY } from "@heroes/engine";
+import { CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS, GameMap, platoonTroopTotal, resolveSavedMapGenVersion, WAGON_GOLD_CAPACITY } from "@heroes/engine";
 import { hexDistance } from "@heroes/contracts";
 import { handleCommand, handleCommandTransactional } from "../../server/app/commandHandler";
 import {
@@ -1070,7 +1070,7 @@ test("StartCharter founds a new charter, deducts hero gold and settlement wareho
     [makeSettlement("s0", 0, 2, 2, { warehouse: CHARTER_WAREHOUSE })],
   );
   const { gameRepo, eventRepo, heroRepo, settlementRepo, charterRepo, deps } = makeDeps(row);
-  const map = new GameMap(row.seed, undefined);
+  const map = new GameMap(row.seed, undefined, resolveSavedMapGenVersion());
   const target = findChartersTarget(map, [{ q: 2, r: 2 }]);
   const command: Command = {
     kind: "StartCharter",
@@ -1112,7 +1112,7 @@ test("StartCharter rejects a target hex too close to an existing settlement -- a
     [makeSettlement("s0", 0, 2, 2, { warehouse: CHARTER_WAREHOUSE })],
   );
   const { deps } = makeDeps(row);
-  const map = new GameMap(row.seed, undefined);
+  const map = new GameMap(row.seed, undefined, resolveSavedMapGenVersion());
   const target = findTooCloseButPassableTarget(map, { q: 2, r: 2 });
   const command: Command = {
     kind: "StartCharter",
@@ -1134,7 +1134,7 @@ test("StartCharter allocates a distinct charterId/settlementId for a second char
     [makeSettlement("s0", 0, 2, 2, { warehouse: CHARTER_WAREHOUSE })],
   );
   const { gameRepo, charterRepo, deps } = makeDeps(row);
-  const map = new GameMap(row.seed, undefined);
+  const map = new GameMap(row.seed, undefined, resolveSavedMapGenVersion());
   const target1 = findChartersTarget(map, [{ q: 2, r: 2 }]);
   const target2 = findChartersTarget(map, [{ q: 2, r: 2 }, target1]);
 
@@ -1224,7 +1224,7 @@ test("AdvanceCharterTravel steps a chartering hero one hex, persists the new pos
     [makeSettlement("s0", 0, 2, 2)],
   );
   const { gameRepo, eventRepo, charterRepo, deps } = makeDeps(row);
-  const map = new GameMap(row.seed, undefined);
+  const map = new GameMap(row.seed, undefined, resolveSavedMapGenVersion());
   const target = findChartersTarget(map, [{ q: 2, r: 2 }]);
   const step = findAdjacentPassableHex(map, { q: 2, r: 2 });
   charterRepo.rows["test-game"] = [
@@ -1256,7 +1256,7 @@ test("AdvanceCharterTravel flips the charter to constructing when the hero reach
     [makeSettlement("s0", 0, 2, 2)],
   );
   const { gameRepo, charterRepo, deps } = makeDeps(row);
-  const map = new GameMap(row.seed, undefined);
+  const map = new GameMap(row.seed, undefined, resolveSavedMapGenVersion());
   const step = findAdjacentPassableHex(map, { q: 2, r: 2 });
   charterRepo.rows["test-game"] = [
     makeCharterRow({ id: "c0", heroId: "h0", ownerId: 0, targetQ: step.q, targetR: step.r }),
@@ -1282,7 +1282,7 @@ test("AdvanceCharterTravel ignores the client-supplied cost and recomputes it fr
     [makeSettlement("s0", 0, 2, 2)],
   );
   const { gameRepo, charterRepo, deps } = makeDeps(row);
-  const map = new GameMap(row.seed, undefined);
+  const map = new GameMap(row.seed, undefined, resolveSavedMapGenVersion());
   const target = findChartersTarget(map, [{ q: 2, r: 2 }]);
   const step = findAdjacentPassableHex(map, { q: 2, r: 2 });
   charterRepo.rows["test-game"] = [
@@ -1337,7 +1337,7 @@ test("AdvanceCharterTravel rejects a stale fromTile that doesn't match the hero'
     [makeSettlement("s0", 0, 2, 2)],
   );
   const { deps, charterRepo } = makeDeps(row);
-  const map = new GameMap(row.seed, undefined);
+  const map = new GameMap(row.seed, undefined, resolveSavedMapGenVersion());
   const step = findAdjacentPassableHex(map, { q: 5, r: 5 });
   charterRepo.rows["test-game"] = [
     makeCharterRow({ id: "c0", heroId: "h0", ownerId: 0, targetQ: 10, targetR: 10 }),
@@ -1387,7 +1387,7 @@ test("AdvanceCharterTravel rejects outright when hydration fell back to JSONB --
   const { deps, heroRepo, settlementRepo, charterRepo, eventRepo } = makeDeps(row);
   delete heroRepo.rows["test-game"];
   delete settlementRepo.rows["test-game"];
-  const map = new GameMap(row.seed, undefined);
+  const map = new GameMap(row.seed, undefined, resolveSavedMapGenVersion());
   const step = findAdjacentPassableHex(map, { q: 2, r: 2 });
   const command: Command = {
     kind: "AdvanceCharterTravel",
@@ -1411,7 +1411,7 @@ test("AdvanceCharterTravel dual-writes the touched hero into heroRepo but never 
     [makeSettlement("s0", 0, 2, 2)],
   );
   const { heroRepo, settlementRepo, charterRepo, deps } = makeDeps(row);
-  const map = new GameMap(row.seed, undefined);
+  const map = new GameMap(row.seed, undefined, resolveSavedMapGenVersion());
   const target = findChartersTarget(map, [{ q: 2, r: 2 }]);
   const step = findAdjacentPassableHex(map, { q: 2, r: 2 });
   charterRepo.rows["test-game"] = [
