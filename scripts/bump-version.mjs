@@ -191,4 +191,4 @@ if (flags.has("--push")) {
   console.log(`pushed to ${REMOTE}`);
 }
 
-console.log(`\nNext: npm run docker:build && docker compose up -d api web`);
+console.log(`\nNext: npm run docker:build && docker compose up -d --remove-orphans api web`);

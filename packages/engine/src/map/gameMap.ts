@@ -18,7 +18,7 @@ export type TileRow = {
 };
 
 export type MapSize = "small" | "medium" | "large" | "huge" | "epic";
-export type MapGenVersion = 1 | 2;
+export type MapGenVersion = 1 | 2 | 3;
 
 export const MAP_SIZES: Record<MapSize, { width: number; height: number; label: string }> = {
   small:  { width: 24, height: 18, label: "Small" },
@@ -35,7 +35,7 @@ export class GameMap {
   resourceTiles: (ResourceTile | undefined)[] = [];
   placedResourceTiles: readonly ResourceTile[] = [];
 
-  constructor(seed = 1, mapSize?: MapSize, version: MapGenVersion = 2) {
+  constructor(seed = 1, mapSize?: MapSize, version: MapGenVersion = 3) {
     if (mapSize && MAP_SIZES[mapSize]) {
       this.width = MAP_SIZES[mapSize].width;
       this.height = MAP_SIZES[mapSize].height;
@@ -43,7 +43,7 @@ export class GameMap {
     this.tiles =
       version === 1
         ? generateTerrainLegacy(mulberry32(seed), this.width, this.height)
-        : generateTerrain(mulberry32(seed), this.width, this.height);
+        : generateTerrain(mulberry32(seed), this.width, this.height, version >= 3);
     if (!this.isPassable(HERO_SPAWN.q, HERO_SPAWN.r)) {
       this.tiles[this.index(HERO_SPAWN.q, HERO_SPAWN.r)] = "grass";
     }
@@ -120,7 +120,9 @@ export function resolveMapSize(mapSize?: string | null): MapSize {
 }
 
 export function resolveMapGenVersion(version?: number | null): MapGenVersion {
-  return version === 1 ? 1 : 2;
+  if (version === 1) return 1;
+  if (version === 2) return 2;
+  return 3;
 }
 
 export function getOrCreateGameMap(
@@ -131,7 +133,7 @@ export function getOrCreateGameMap(
   const resolvedSize = resolveMapSize(mapSize);
   const resolvedSeed = Number.isFinite(seed) ? Number(seed) : 1;
   const resolvedVersion = resolveMapGenVersion(version);
-  const key = resolvedVersion === 1 ? `${resolvedSeed}:${resolvedSize}:v1` : `${resolvedSeed}:${resolvedSize}`;
+  const key = `${resolvedSeed}:${resolvedSize}:v${resolvedVersion}`;
   const hit = gameMapCache.get(key);
   if (hit) {
     gameMapCache.delete(key);
@@ -161,7 +163,7 @@ export function scaledTerrainBlobs(baseBlobs: number, width: number, height: num
   return Math.max(baseBlobs, Math.round(baseBlobs * Math.sqrt(total / (24 * 18))));
 }
 
-function generateTerrain(rng: () => number, width: number, height: number): Terrain[] {
+function generateTerrain(rng: () => number, width: number, height: number, scaleBlobs = true): Terrain[] {
   const total = width * height;
   const tiles = new Array<Terrain>(total).fill("grass");
   const inFrontier = new Uint8Array(total);
@@ -178,7 +180,7 @@ function generateTerrain(rng: () => number, width: number, height: number): Terr
 
   for (const { terrain, fraction, blobs } of targets) {
     const targetCount = Math.floor(total * fraction);
-    const blobCount = scaledTerrainBlobs(blobs, width, height);
+    const blobCount = scaleBlobs ? scaledTerrainBlobs(blobs, width, height) : blobs;
     const frontier: number[] = [];
     inFrontier.fill(0);
     for (let i = 0; i < blobCount; i++) {

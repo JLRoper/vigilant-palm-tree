@@ -130,17 +130,26 @@ test("generateAndInsertTiles on an epic map issues a single UNNEST query with 5 
   }
 });
 
-test("getOrCreateGameMap supports legacy mapGenVersion 1 alongside default version 2 without cache collision", () => {
+test("getOrCreateGameMap supports mapGenVersion 1, 2, and default version 3 without cache collision", () => {
   clearGameMapCache();
-  const v1a = getOrCreateGameMap(42, "small", 1);
-  const v1b = getOrCreateGameMap(42, "small", 1);
-  const v2 = getOrCreateGameMap(42, "small", 2);
-  const vDefault = getOrCreateGameMap(42, "small");
+  const v1a = getOrCreateGameMap(42, "large", 1);
+  const v1b = getOrCreateGameMap(42, "large", 1);
+  const v2a = getOrCreateGameMap(42, "large", 2);
+  const v2b = getOrCreateGameMap(42, "large", 2);
+  const v3 = getOrCreateGameMap(42, "large", 3);
+  const vDefault = getOrCreateGameMap(42, "large");
 
   assert.equal(v1a, v1b, "v1 maps are cached by versioned key");
-  assert.equal(v2, vDefault, "omitted version resolves to v2");
-  assert.notEqual(v1a, v2, "v1 and v2 do not collide in the LRU cache");
-  assert.deepEqual(v1a.tiles, new GameMap(42, "small", 1).tiles);
-  assert.deepEqual(v2.tiles, new GameMap(42, "small", 2).tiles);
-  assert.notDeepEqual(v1a.tiles, v2.tiles, "legacy v1 frontier and v2 bitset frontier produce distinct layouts");
+  assert.equal(v2a, v2b, "v2 maps are cached by versioned key");
+  assert.equal(v3, vDefault, "omitted version resolves to v3");
+  assert.notEqual(v1a, v2a, "v1 and v2 do not collide in the LRU cache");
+  assert.notEqual(v2a, v3, "v2 and v3 do not collide in the LRU cache");
+  assert.deepEqual(v1a.tiles, new GameMap(42, "large", 1).tiles);
+  assert.deepEqual(v2a.tiles, new GameMap(42, "large", 2).tiles);
+  assert.deepEqual(v3.tiles, new GameMap(42, "large", 3).tiles);
+  assert.notDeepEqual(
+    v2a.tiles,
+    v3.tiles,
+    "v2 preserves unscaled blobs for existing v2 saves on maps > small while v3 uses scaledTerrainBlobs",
+  );
 });

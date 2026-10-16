@@ -115,7 +115,7 @@ export interface LobbyState {
   // opt-IN for the legacy behaviour), so their food logistics go through the
   // caravan recommender (economy/tradeNeeds.ts) instead of the teleport.
   legacyAutoTrade?: boolean;
-  mapGenVersion?: 1 | 2;
+  mapGenVersion?: 1 | 2 | 3;
 }
 
 export async function generateAndInsertTiles(
@@ -467,13 +467,13 @@ router.post("/games", async (req, res) => {
       // body of `legacyAutoTrade: true` opts a new game back into the legacy
       // behaviour. Non-boolean junk reads as the default (false).
       legacyAutoTrade: legacyAutoTradeOptIn === true,
-      mapGenVersion: 2,
+      mapGenVersion: 3,
     };
     const explicitSeats =
       lobbyObj && Number.isInteger(lobbyObj.seats) ? (lobbyObj.seats as number) : null;
     const seats = explicitSeats ?? (humanCount !== null ? humanCount : null);
     if (seats !== null && seats >= 1 && humanCount !== null && humanCount >= 1 && humanCount <= seats) {
-      lobbyState = { seats, humanSlots: humanCount, claimed: {}, mapGenVersion: 2 };
+      lobbyState = { seats, humanSlots: humanCount, claimed: {}, mapGenVersion: 3 };
     }
     if (lobbyState.humanSlots !== undefined && lobbyState.humanSlots < 1) {
       res.status(400).json({ error: "humanSlots must be >= 1" });

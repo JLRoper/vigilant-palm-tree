@@ -139,6 +139,30 @@ test("Item 4: scaledTerrainBlobs, maxCastleCountForMap, defaultCastleCountForMap
     const path = findPath(map, castles[0].tile, castles[i].tile);
     assert.ok(path.length > 0, `castle ${castles[i].id} must be reachable from ${castles[0].id}`);
   }
+
+  // Disconnected halves regression (full-height impassable wall at q=12):
+  // cands.right (q >= 18) has 0 tiles reachable from cands.left (q < 6), so
+  // generateCastles must relax the side preference to cands.any while keeping
+  // reachableMask mandatory.
+  const splitRows: TileRow[] = [];
+  for (let r = 0; r < 18; r++) {
+    for (let q = 0; q < 24; q++) {
+      splitRows.push({
+        q,
+        r,
+        terrain: q === 12 ? "mountain" : "grass",
+        resource: null,
+      });
+    }
+  }
+  const splitMap = GameMap.fromTiles(splitRows);
+  const splitCastles = generateCastles(splitMap, { castleSeed: 7, playerCount: 2, castleCount: 6 });
+  assert.equal(splitCastles.length, 6);
+  for (let i = 1; i < splitCastles.length; i++) {
+    assert.ok(splitCastles[i].tile.q < 12, `castle ${splitCastles[i].id} stays in the connected left half`);
+    const path = findPath(splitMap, splitCastles[0].tile, splitCastles[i].tile);
+    assert.ok(path.length > 0, `castle ${splitCastles[i].id} must be reachable from ${splitCastles[0].id} across split map`);
+  }
 });
 
 test("Item 5: aiTargetReachForMap scales AI settlement & enemy reach on huge/epic maps", () => {

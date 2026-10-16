@@ -99,7 +99,7 @@ export interface GameLobbyFlags {
   // by the battle cases below and cleared when the battle resolves or the
   // offer goes stale. Optional -- every pre-offer row simply lacks the key.
   pendingBattle?: PendingBattleMarker | null;
-  mapGenVersion?: 1 | 2;
+  mapGenVersion?: 1 | 2 | 3;
 }
 
 export interface GameRepo {

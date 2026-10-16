@@ -29,7 +29,7 @@ Multiplayer state changes are pushed through SSE (`GET /api/games/:name/events/s
 
 ## Deployment and Versioning
 
-- Build Docker images with `npm run docker:build`, not bare `docker compose build`. The wrapper resolves the Git commit on the host and passes it into the image; a bare compose build can stamp the fallback `dev` value. `game_web` (`nginx:1.27-alpine`, `docker/Dockerfile` `web-runtime` stage + `docker/nginx.conf`) serves `/usr/share/nginx/html` (`/app/dist` symlinked) directly from disk on ports `80` and `5173` with `Cache-Control: public, max-age=31536000, immutable` on `/assets/` and proxies `/api/` directly to `api:3001`.
+- Build Docker images with `npm run docker:build`, not bare `docker compose build`. The wrapper resolves the Git commit on the host and passes it into the image; a bare compose build can stamp the fallback `dev` value. Redeploy with `docker compose up -d --remove-orphans api web` so any legacy `game_gateway` container is removed before `game_web` (`nginx:1.27-alpine`, `docker/Dockerfile` `web-runtime` stage + `docker/nginx.conf`) binds host port `5173`. `game_web` serves `/usr/share/nginx/html` (`/app/dist` symlinked) directly from disk on ports `80` and `5173` with `Cache-Control: public, max-age=31536000, immutable` on `/assets/` and proxies `/api/` directly to `api:3001` via Docker's runtime DNS resolver (`127.0.0.11`).
 - The root `package.json` version is the app version. Use `npm run version:bump -- patch|minor|major|X.Y.Z`; it updates the package version and `CHANGELOG.md`. Release tags use `v<semver>`.
 - Run the pre-commit gate before committing; it now includes the `docs:check` documentation gate. This documentation task does not commit or run the full build/test gate.
 

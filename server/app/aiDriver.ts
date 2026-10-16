@@ -142,6 +142,7 @@ export interface AiDriverGameSnapshot {
   gameId: number;
   seed: number;
   mapSize: MapSize | undefined;
+  mapGenVersion?: 1 | 2 | 3;
   /**
    * games.lobby.pendingBattle: a battle the driver offered a HUMAN defender
    * (EnterBattle) that has not been resolved yet. Null = nothing pending.
@@ -261,14 +262,22 @@ function mapSizeFrom(value: string | null | undefined): MapSize | undefined {
   return value === "small" || value === "medium" || value === "large" || value === "huge" || value === "epic" ? value : undefined;
 }
 
+function mapGenVersionFrom(value: unknown): 1 | 2 | 3 {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (n === 3) return 3;
+  if (n === 2) return 2;
+  return 1;
+}
+
 async function defaultLoadGame(gameName: string): Promise<AiDriverGameSnapshot | null> {
   const meta = await pool.query<{
     id: number;
     seed: number;
     map_size: string | null;
     pending_battle: unknown;
+    map_gen_version: unknown;
   }>(
-    `SELECT id, seed, map_size, lobby->'pendingBattle' AS pending_battle FROM games WHERE name = $1`,
+    `SELECT id, seed, map_size, lobby->'pendingBattle' AS pending_battle, lobby->'mapGenVersion' AS map_gen_version FROM games WHERE name = $1`,
     [gameName],
   );
   if (meta.rowCount === 0) return null;
@@ -278,6 +287,7 @@ async function defaultLoadGame(gameName: string): Promise<AiDriverGameSnapshot |
     gameId: row.id,
     seed: row.seed,
     mapSize: mapSizeFrom(row.map_size),
+    mapGenVersion: mapGenVersionFrom(row.map_gen_version),
     pendingBattle: readPendingBattle({ pendingBattle: row.pending_battle }),
     state,
   };
@@ -885,7 +895,7 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
     // scan's syncMemory resets all memory for the game.
     return "turn_lost";
   }
-  const charterMap = getOrCreateGameMap(charterSnap.seed, charterSnap.mapSize);
+  const charterMap = getOrCreateGameMap(charterSnap.seed, charterSnap.mapSize, charterSnap.mapGenVersion);
   for (const heroId of heroIds) {
     const charterKey = `${charterSnap.state.round}:${seat}:${heroId}`;
     if (mem.charterTurns.has(charterKey)) continue;
@@ -939,7 +949,7 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
         }
         const hero = snap.state.heroes[heroId];
         if (!hero) break;
-        const map = getOrCreateGameMap(snap.seed, snap.mapSize);
+        const map = getOrCreateGameMap(snap.seed, snap.mapSize, snap.mapGenVersion);
         // B3b: a chartering hero travels its charter's route instead of
         // taking a pickAiMove move -- startMove rejects is_chartering, so the
         // two branches are mutually exclusive per hero and a chartering hero
