@@ -221,11 +221,15 @@ export function pickCharterAction(
 
   const valid = validCharterHexes(state, map);
   const candidates: Array<{ q: number; r: number; rateSum: number; dist: number }> = [];
-  for (let r = 0; r < map.height; r++) {
-    for (let q = 0; q < map.width; q++) {
-      if (!valid.has(`${q},${r}`)) continue;
+  const rMin = Math.max(0, hero.r - CHARTER_TARGET_REACH);
+  const rMax = Math.min(map.height - 1, hero.r + CHARTER_TARGET_REACH);
+  const qMin = Math.max(0, hero.q - CHARTER_TARGET_REACH);
+  const qMax = Math.min(map.width - 1, hero.q + CHARTER_TARGET_REACH);
+  for (let r = rMin; r <= rMax; r++) {
+    for (let q = qMin; q <= qMax; q++) {
       const dist = hexDistance(hero, { q, r });
       if (dist > CHARTER_TARGET_REACH) continue;
+      if (!valid.has(`${q},${r}`)) continue;
       const rates = computeSettlementRates(map, q, r, 1).rates;
       let rateSum = 0;
       for (const resource of RESOURCES) rateSum += rates[resource] ?? 0;
@@ -254,7 +258,7 @@ export function pickAiMove(
 ): AiMove | null {
   const hero = state.heroes[heroId];
   if (!hero) return null;
-  if (hero.movementRemaining <= 0) return null;
+  if (hero.movementRemaining < 1) return null;
 
   const blocked = new Set<string>();
   const attackerPower = platoonPower(hero.stacks, unitTypes);
@@ -308,11 +312,18 @@ export function pickAiMove(
     }
   }
 
-  for (let r = 0; r < map.height; r++) {
-    for (let q = 0; q < map.width; q++) {
+  const settlements = Object.values(state.settlements);
+  const rMin = Math.max(0, hero.r - RESOURCE_REACH);
+  const rMax = Math.min(map.height - 1, hero.r + RESOURCE_REACH);
+  const qMin = Math.max(0, hero.q - RESOURCE_REACH);
+  const qMax = Math.min(map.width - 1, hero.q + RESOURCE_REACH);
+  for (let r = rMin; r <= rMax; r++) {
+    for (let q = qMin; q <= qMax; q++) {
       if (!map.resourceTileAt(q, r)) continue;
+      const dist = hexDistance(hero, { q, r });
+      if (dist > RESOURCE_REACH) continue;
       let nearOwnedSettlement = false;
-      for (const s of Object.values(state.settlements)) {
+      for (const s of settlements) {
         if (s.ownerId === null) continue;
         if (hexDistance(s, { q, r }) <= SETTLEMENT_RESOURCE_BUFFER) {
           nearOwnedSettlement = true;
@@ -320,8 +331,6 @@ export function pickAiMove(
         }
       }
       if (nearOwnedSettlement) continue;
-      const dist = hexDistance(hero, { q, r });
-      if (dist > RESOURCE_REACH) continue;
       targets.push({ kind: "resource", tile: { q, r }, priority: 300 - dist * 3 });
     }
   }
@@ -384,26 +393,27 @@ function stepTowardEnemy(hero: HeroState, dest: Axial, map: GameMap, blocked: Se
   return firstStepCost(hero, map, firstStep);
 }
 
+const WANDER_RADIUS = 12;
+
 function pickWanderStep(
   hero: HeroState,
   map: GameMap,
   rng: () => number,
   blocked: Set<string>,
 ): AiMove | null {
-  let bestStep: AiMove | null = null;
-  let bestDist = -1;
+  const qMin = Math.max(0, hero.q - WANDER_RADIUS);
+  const qMax = Math.min(map.width - 1, hero.q + WANDER_RADIUS);
+  const rMin = Math.max(0, hero.r - WANDER_RADIUS);
+  const rMax = Math.min(map.height - 1, hero.r + WANDER_RADIUS);
+  const spanQ = qMax - qMin + 1;
+  const spanR = rMax - rMin + 1;
   for (let tries = 0; tries < 20; tries++) {
-    const q = Math.floor(rng() * map.width);
-    const r = Math.floor(rng() * map.height);
+    const q = qMin + Math.floor(rng() * spanQ);
+    const r = rMin + Math.floor(rng() * spanR);
     if (!map.isPassable(q, r)) continue;
     if (q === hero.q && r === hero.r) continue;
     const step = stepToward(hero, { q, r }, map, blocked);
-    if (!step) continue;
-    const d = hexDistance(step.toTile, hero);
-    if (d > bestDist) {
-      bestDist = d;
-      bestStep = step;
-    }
+    if (step) return step;
   }
-  return bestStep;
+  return null;
 }

@@ -938,22 +938,18 @@ function d4World(seed: number): AiDriverGameSnapshot | null {
   return { gameId: 1, seed, mapSize: MAP_SIZE, state };
 }
 
-const D4_WANDER_DRAWS_PER_CALL = 40;
 const D4 = (() => {
   for (let seed = 1; seed < 500; seed++) {
     const world = d4World(seed);
     if (!world) continue;
     const map = new GameMap(seed, MAP_SIZE);
-    const planAt = (offset: number): Axial | undefined => {
-      const stream = mulberry32((seed ^ 1 ^ 1) >>> 0);
-      for (let i = 0; i < offset; i++) stream();
-      return pickAiMove(world.state, "h1", map, stream, CATALOG, new Set<string>())?.toTile;
-    };
-    const first = planAt(0);
-    const second = planAt(D4_WANDER_DRAWS_PER_CALL);
-    if (!first || !second) continue;
+    const stream = mulberry32((seed ^ 1 ^ 1) >>> 0);
+    const first = pickAiMove(world.state, "h1", map, stream, CATALOG, new Set<string>())?.toTile;
+    const second = pickAiMove(world.state, "h1", map, stream, CATALOG, new Set<string>())?.toTile;
+    const third = pickAiMove(world.state, "h1", map, stream, CATALOG, new Set<string>())?.toTile;
+    if (!first || !second || !third) continue;
     if (first.q === second.q && first.r === second.r) continue;
-    return { seed, world, planAt };
+    return { seed, world, expected: [first, second, third] };
   }
   throw new Error("no seed under 500 separates a fresh wander plan from its continuation");
 })();
@@ -984,8 +980,10 @@ test("D4 stream continuation: identical state with a progressed stream re-plans 
   await scanOnce();
   await scanOnce();
 
-  assert.deepEqual(moves, [D4.planAt(0), D4.planAt(D4_WANDER_DRAWS_PER_CALL), D4.planAt(D4_WANDER_DRAWS_PER_CALL * 2)],
-    "scan k planned with the stream continued to draw offset 40*(k-1) -- a per-scan reset would replay scan 1's plan",
+  assert.deepEqual(
+    moves,
+    D4.expected,
+    "scan k planned with the continued stream -- a per-scan reset would replay scan 1's plan",
   );
   assert.notDeepEqual(moves[0], moves[1], "the retried wander step differs (continued stream -> no livelock)");
 });
@@ -1720,61 +1718,6 @@ function charterPairWorld(): AiDriverGameSnapshot {
   );
 }
 
-// Travel fixtures: a hero pre-seeded with a charter (its founding happened in
-// an earlier pass) and two targets at known path distances. ARRIVE sits
-// comfortably inside a full turn of movement (the charter flips to
-// "constructing" on the last step); EXHAUST sits outside it (the final step
-// is dispatched, the handler refuses it for insufficient_movement, and the
-// hero is dropped for the pass).
-const TRAVEL = (() => {
-  const map = new GameMap(SEED, MAP_SIZE);
-  const hero = passableTiles(SEED)[5];
-  // The only other hero on the map (seat 0's, movement spent) blocks tiles
-  // exactly the way the driver's occupiedHexes set does.
-  const occupied = new Set<string>(["22,16"]);
-  const tiles = passableTiles(SEED);
-  const arrive = (() => {
-    for (const target of tiles) {
-      const path = findPath(map, hero, target, occupied);
-      if (path.length !== 3) continue;
-      const cost = path.reduce((sum, p) => sum + map.cost(p.q, p.r), 0);
-      // One full hex of headroom, so float slop can never turn the final step
-      // into a refused one.
-      if (cost > MOVEMENT_PER_TURN - 1) continue;
-      return { target, path, cost };
-    }
-    return null;
-  })();
-  assert.ok(arrive, "the fixture seed must offer a 3-step charter target a full turn can reach");
-  const exhaust = (() => {
-    for (const target of tiles) {
-      const path = findPath(map, hero, target, occupied);
-      if (path.length < 4) continue;
-      const cost = path.reduce((sum, p) => sum + map.cost(p.q, p.r), 0);
-      if (cost <= MOVEMENT_PER_TURN) continue;
-      return { target, path, cost };
-    }
-    return null;
-  })();
-  assert.ok(exhaust, "the fixture seed must offer a charter target a full turn cannot reach");
-  return { map, hero, occupied, arrive, exhaust };
-})();
-
-function charterTravelWorld(target: Axial, movementRemaining: number): AiDriverGameSnapshot {
-  const charter = makeCharter({
-    id: "ch-pre",
-    heroId: "h1",
-    ownerId: 1,
-    targetQ: target.q,
-    targetR: target.r,
-    settlementName: "Old Town",
-  });
-  return aiTurnWorld(
-    [makeHero("h1", 1, TRAVEL.hero.q, TRAVEL.hero.r, { movementRemaining, isChartering: true, charterId: charter.id })],
-    { activeCharters: [charter] },
-  );
-}
-
 // Mirrors the driver's B3b travel loop (server/app/aiDriver.ts): one findPath
 // step per iteration while movement remains, the charter flipping to
 // "constructing" (and the movement zeroing) on arrival, and a final step the
@@ -1814,6 +1757,63 @@ function expectedCharterSteps(
     }
   }
   return { steps, remaining: left, arrived, refusedTail };
+}
+
+// Travel fixtures: a hero pre-seeded with a charter (its founding happened in
+// an earlier pass) and two targets at known path distances. ARRIVE sits
+// comfortably inside a full turn of movement (the charter flips to
+// "constructing" on the last step); EXHAUST sits outside it (the final step
+// is dispatched, the handler refuses it for insufficient_movement, and the
+// hero is dropped for the pass).
+const TRAVEL = (() => {
+  const map = new GameMap(SEED, MAP_SIZE);
+  const hero = passableTiles(SEED)[5];
+  // The only other hero on the map (seat 0's, movement spent) blocks tiles
+  // exactly the way the driver's occupiedHexes set does.
+  const occupied = new Set<string>(["22,16"]);
+  const tiles = passableTiles(SEED);
+  const arrive = (() => {
+    for (const target of tiles) {
+      const path = findPath(map, hero, target, occupied);
+      if (path.length !== 3) continue;
+      const cost = path.reduce((sum, p) => sum + map.cost(p.q, p.r), 0);
+      // One full hex of headroom, so float slop can never turn the final step
+      // into a refused one.
+      if (cost > MOVEMENT_PER_TURN - 1) continue;
+      return { target, path, cost };
+    }
+    return null;
+  })();
+  assert.ok(arrive, "the fixture seed must offer a 3-step charter target a full turn can reach");
+  const exhaust = (() => {
+    for (const target of tiles) {
+      const path = findPath(map, hero, target, occupied);
+      if (path.length < 4) continue;
+      const cost = path.reduce((sum, p) => sum + map.cost(p.q, p.r), 0);
+      if (cost <= MOVEMENT_PER_TURN) continue;
+      const sim = expectedCharterSteps(map, hero, target, occupied, MOVEMENT_PER_TURN);
+      if (!sim.refusedTail || sim.steps.length < 3) continue;
+      return { target, path, cost };
+    }
+    return null;
+  })();
+  assert.ok(exhaust, "the fixture seed must offer a charter target a full turn cannot reach");
+  return { map, hero, occupied, arrive, exhaust };
+})();
+
+function charterTravelWorld(target: Axial, movementRemaining: number): AiDriverGameSnapshot {
+  const charter = makeCharter({
+    id: "ch-pre",
+    heroId: "h1",
+    ownerId: 1,
+    targetQ: target.q,
+    targetR: target.r,
+    settlementName: "Old Town",
+  });
+  return aiTurnWorld(
+    [makeHero("h1", 1, TRAVEL.hero.q, TRAVEL.hero.r, { movementRemaining, isChartering: true, charterId: charter.id })],
+    { activeCharters: [charter] },
+  );
 }
 
 // The driver logs tolerated rejections via console.info (the recruit-loop

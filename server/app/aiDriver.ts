@@ -1,10 +1,10 @@
 import type { Command, GameState, HeroBattleVerdict, HeroId, Platoon, Player, SettlementId } from "@heroes/contracts";
 import {
   GARRISON_BACKOFF_ROUNDS,
-  GameMap,
   detectAdjacentEnemy,
   evaluateTradeNeeds,
   findPath,
+  getOrCreateGameMap,
   mulberry32,
   normalizePlatoons,
   pickAiMove,
@@ -885,7 +885,7 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
     // scan's syncMemory resets all memory for the game.
     return "turn_lost";
   }
-  const charterMap = new GameMap(charterSnap.seed, charterSnap.mapSize);
+  const charterMap = getOrCreateGameMap(charterSnap.seed, charterSnap.mapSize);
   for (const heroId of heroIds) {
     const charterKey = `${charterSnap.state.round}:${seat}:${heroId}`;
     if (mem.charterTurns.has(charterKey)) continue;
@@ -939,7 +939,7 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
         }
         const hero = snap.state.heroes[heroId];
         if (!hero) break;
-        const map = new GameMap(snap.seed, snap.mapSize);
+        const map = getOrCreateGameMap(snap.seed, snap.mapSize);
         // B3b: a chartering hero travels its charter's route instead of
         // taking a pickAiMove move -- startMove rejects is_chartering, so the
         // two branches are mutually exclusive per hero and a chartering hero
@@ -955,7 +955,7 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
         if (hero.isChartering) {
           const charter = snap.state.activeCharters.find((c) => c.id === hero.charterId);
           if (!charter || charter.phase !== "traveling") break;
-          if (hero.movementRemaining <= 0) break;
+          if (hero.movementRemaining < 1) break;
           const occupiedHexes = new Set<string>();
           for (const [otherId, other] of Object.entries(snap.state.heroes)) {
             if (otherId !== heroId) occupiedHexes.add(`${other.q},${other.r}`);

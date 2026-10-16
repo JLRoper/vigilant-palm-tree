@@ -3,6 +3,7 @@ import { pool, withTransaction } from "./db";
 import {
   FACTION_REGISTRY,
   GameMap,
+  getOrCreateGameMap,
   isHealthy,
   makeInitialStatePayload,
   mulberry32,
@@ -116,24 +117,29 @@ export interface LobbyState {
   legacyAutoTrade?: boolean;
 }
 
-async function generateAndInsertTiles(
+export async function generateAndInsertTiles(
   client: PoolClient,
   gameId: number,
   seed: number,
   onConflict: "upsert" | "skip",
   mapSize?: MapSize,
+  existingMap?: GameMap,
 ): Promise<void> {
-  const map = new GameMap(seed, mapSize);
-  const values: string[] = [];
-  const params: unknown[] = [];
+  const map = existingMap ?? getOrCreateGameMap(seed, mapSize);
+  const total = map.width * map.height;
+  const qs = new Array<number>(total);
+  const rs = new Array<number>(total);
+  const terrains = new Array<string>(total);
+  const resources = new Array<string | null>(total);
   let i = 0;
   for (let r = 0; r < map.height; r++) {
     for (let q = 0; q < map.width; q++) {
       const t = map.get(q, r);
       const res = map.resourceTileAt(q, r);
-      const base = i * 5;
-      values.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`);
-      params.push(gameId, q, r, t ?? "grass", res?.resource ?? null);
+      qs[i] = q;
+      rs[i] = r;
+      terrains[i] = t ?? "grass";
+      resources[i] = res?.resource ?? null;
       i++;
     }
   }
@@ -142,8 +148,8 @@ async function generateAndInsertTiles(
       ? `ON CONFLICT (game_id, q, r) DO UPDATE SET terrain = EXCLUDED.terrain, resource = EXCLUDED.resource`
       : `ON CONFLICT (game_id, q, r) DO NOTHING`;
   await client.query(
-    `INSERT INTO tiles (game_id, q, r, terrain, resource) VALUES ${values.join(", ")} ${suffix}`,
-    params
+    `INSERT INTO tiles (game_id, q, r, terrain, resource) SELECT $1, u.q, u.r, u.terrain, u.resource FROM UNNEST($2::int[], $3::int[], $4::text[], $5::text[]) AS u(q, r, terrain, resource) ${suffix}`,
+    [gameId, qs, rs, terrains, resources]
   );
 }
 
@@ -403,7 +409,7 @@ router.post("/games", async (req, res) => {
     }
     const storedMapSize = ["small", "medium", "large", "huge", "epic"].includes(mapSize) ? mapSize : "small";
     console.log(`[api] POST /games name=${name} hero=(${hero_q},${hero_r}) mapSize=${storedMapSize}`);
-    const map = new GameMap(seed, storedMapSize as MapSize);
+    const map = getOrCreateGameMap(seed, storedMapSize as MapSize);
     const topHumanSlots = Number.isInteger(humanSlots) ? (humanSlots as number) : null;
     const lobbyObj = lobby && typeof lobby === "object" ? lobby : null;
     const lobbyHumanSlots =
@@ -524,7 +530,7 @@ router.post("/games", async (req, res) => {
         ]
       );
     const row = r.rows[0];
-    await generateAndInsertTiles(client, row.id, row.seed, "upsert", storedMapSize as MapSize);
+    await generateAndInsertTiles(client, row.id, row.seed, "upsert", storedMapSize as MapSize, map);
     return row;
   });
   // The recreation (ON CONFLICT (name)) may have flipped the aiDriver flag;

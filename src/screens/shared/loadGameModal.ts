@@ -5,7 +5,7 @@ import { menuTheme, openCenteredModal, styleButton } from "./menu";
 
 export type LoadGameHandler = (
   game: Game,
-  tiles: Awaited<ReturnType<typeof api.getTiles>>,
+  tiles?: Awaited<ReturnType<typeof api.getTiles>>,
 ) => void | Promise<void>;
 
 export interface LoadGameModalOptions {
@@ -95,8 +95,7 @@ function makeLoadRow(entry: UserGameEntry & { server?: Game }, opts: LoadGameMod
       open.textContent = "Loading…";
       try {
         const game = await api.getGame(entry.name);
-        const tiles = await api.getTiles(entry.name);
-        await opts.onLoad(game, tiles);
+        await opts.onLoad(game);
         closeAllModals();
       } catch (err) {
         open.disabled = false;

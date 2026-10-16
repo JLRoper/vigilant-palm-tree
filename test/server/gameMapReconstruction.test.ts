@@ -1,7 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { GameMap } from "@heroes/engine";
+import {
+  GAME_MAP_CACHE_CAPACITY,
+  GameMap,
+  clearGameMapCache,
+  getGameMapCacheSize,
+  getOrCreateGameMap,
+} from "@heroes/engine";
 import type { TileRow } from "@heroes/engine";
+import { generateAndInsertTiles } from "../../server/routes";
 
 // Verifies a load-bearing assumption behind server/app/commandHandler.ts's
 // StartCharter case (plan/2026-08-17-consolidated-phase-1-5-track-map.md
@@ -63,4 +70,62 @@ test("GameMap reconstruction is seed-sensitive (different seeds must not acciden
   const a = new GameMap(1, "small");
   const b = new GameMap(2, "small");
   assert.notDeepEqual(a.tiles, b.tiles);
+});
+
+test("getOrCreateGameMap caches instances and evicts least-recently-used entries at capacity", () => {
+  clearGameMapCache();
+  assert.equal(GAME_MAP_CACHE_CAPACITY, 32);
+  assert.equal(getGameMapCacheSize(), 0);
+
+  const first = getOrCreateGameMap(1, "small");
+  const hit = getOrCreateGameMap(1, "small");
+  assert.equal(hit, first);
+  assert.equal(getGameMapCacheSize(), 1);
+
+  const second = getOrCreateGameMap(2, "small");
+  for (let seed = 3; seed <= GAME_MAP_CACHE_CAPACITY; seed++) {
+    getOrCreateGameMap(seed, "small");
+  }
+  assert.equal(getGameMapCacheSize(), GAME_MAP_CACHE_CAPACITY);
+
+  assert.equal(getOrCreateGameMap(1, "small"), first);
+
+  getOrCreateGameMap(GAME_MAP_CACHE_CAPACITY + 1, "small");
+  assert.equal(getGameMapCacheSize(), GAME_MAP_CACHE_CAPACITY);
+  assert.equal(getOrCreateGameMap(1, "small"), first);
+  assert.notEqual(getOrCreateGameMap(2, "small"), second);
+});
+
+test("new GameMap(42, 'epic') generates 10,800 tiles in under 20 ms with bitset frontier", () => {
+  new GameMap(41, "epic");
+  const t0 = performance.now();
+  const map = new GameMap(42, "epic");
+  const elapsedMs = performance.now() - t0;
+
+  assert.equal(map.width, 120);
+  assert.equal(map.height, 90);
+  assert.equal(map.tiles.length, 10_800);
+  assert.ok(elapsedMs < 20, `expected epic map generation < 20ms, took ${elapsedMs.toFixed(2)}ms`);
+});
+
+test("generateAndInsertTiles on an epic map issues a single UNNEST query with 5 params of length 10,800", async () => {
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const client = {
+    query: async (sql: string, params: unknown[]) => {
+      queries.push({ sql, params });
+      return { rows: [], rowCount: 10_800 };
+    },
+  } as unknown as Parameters<typeof generateAndInsertTiles>[0];
+
+  await generateAndInsertTiles(client, 7, 42, "upsert", "epic");
+
+  assert.equal(queries.length, 1);
+  assert.match(queries[0].sql, /UNNEST/);
+  assert.equal(queries[0].params.length, 5);
+  assert.equal(queries[0].params[0], 7);
+  for (let idx = 1; idx <= 4; idx++) {
+    const col = queries[0].params[idx];
+    assert.ok(Array.isArray(col));
+    assert.equal(col.length, 10_800);
+  }
 });

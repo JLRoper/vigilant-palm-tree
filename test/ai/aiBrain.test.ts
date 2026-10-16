@@ -783,3 +783,33 @@ test("pickCharterAction draws a deterministic name per rng seed and exactly two 
   assert.equal(second.draws(), 2);
   assert.match(a!.settlementName, /^[A-Z][a-z]+ [a-z]+$/, "the name comes from the player wordlists");
 });
+
+test("a hero with residual movement < 1 returns null and consumes 0 RNG draws", () => {
+  const map = grassMap(12, 12);
+  const state = aiTurnState([
+    makeHero("h0", 0, 11, 11),
+    makeHero("h1", 1, 2, 2, { movementRemaining: 0.4 }),
+  ]);
+  const rng = seededRng(7);
+
+  const move = pickAiMove(state, "h1", map, rng.rng);
+
+  assert.equal(move, null);
+  assert.equal(rng.draws(), 0);
+});
+
+test("on an epic (120x90) grass map with no targets in reach, pickAiMove returns a 1-hex wander step in 2 RNG draws", () => {
+  const map = grassMap(120, 90);
+  const state = aiTurnState([
+    makeHero("h0", 0, 119, 89),
+    makeHero("h1", 1, 60, 45),
+  ]);
+  const rng = seededRng(19);
+
+  const move = pickAiMove(state, "h1", map, rng.rng);
+
+  assert.ok(move);
+  assert.equal(hexDistance(move!.toTile, { q: 60, r: 45 }), 1);
+  assert.equal(move!.cost, 1);
+  assert.equal(rng.draws(), 2);
+});

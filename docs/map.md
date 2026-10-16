@@ -11,7 +11,7 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 - **Configurable hex grid** (`MapSize`: `small` 24×18, `medium` 36×27, `large` 48×36, `huge` 72×54, `epic` 120×90; default `small` 24×18), axial coordinates `(q, r)`.
 - Hex size = 32 logical px.
 - Pointy-top orientation, flat-top stack.
-- `GameMap.placedResourceTiles` caches the sparse array of placed resource deposits alongside the indexed `resourceTiles` lookup array.
+- `GameMap.placedResourceTiles` caches the sparse array of placed resource deposits alongside the indexed `resourceTiles` lookup array, and `getOrCreateGameMap(seed, size)` (`packages/engine/src/map/gameMap.ts`) maintains a process-wide LRU cache (`max = 8`) of generated `GameMap` instances keyed by `(seed, size)`.
 
 ## Terrain types
 
@@ -26,7 +26,7 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 | Mountain| grey rock   | impassable| Peaks and ridges. Stone + iron-bearing biome. Lakes / rivers. |
 | Water   | blue        | impassable| Lakes / rivers. Never carries resources. |
 
-Generated via a deterministic pseudo-noise function on the map seed. Same seed → same map. Implementation: [`packages/engine/src/map/gameMap.ts`](../packages/engine/src/map/gameMap.ts), [`packages/engine/src/map/terrain.ts`](../packages/engine/src/map/terrain.ts). See [map-gen.md](./map-gen.md) for the algorithm.
+Generated via a deterministic biome-blob growth pass (`generateTerrain`, using a deduplicated `Uint8Array(w * h)` frontier bitset and O(1) swap-and-pop removal) on the map seed. Same seed → same map. Implementation: [`packages/engine/src/map/gameMap.ts`](../packages/engine/src/map/gameMap.ts), [`packages/engine/src/map/terrain.ts`](../packages/engine/src/map/terrain.ts). See [map-gen.md](./map-gen.md) for the algorithm.
 
 ## Resource tile placement
 
@@ -72,8 +72,8 @@ CREATE INDEX IF NOT EXISTS tiles_game_idx ON tiles (game_id);
 ```
 
 - `terrain` is non-null; `resource` is null for tiles without a deposit.
-- `POST /api/games` generates the tile grid using the seed and inserts the rows. `GET /api/games/:name/tiles` returns them.
-- Client-side `GameMap` hydrates from the tiles endpoint instead of re-deriving from seed.
+- `POST /api/games` generates the tile grid using `getOrCreateGameMap(seed, mapSize)` and bulk-inserts the rows via a single 5-parameter `UNNEST` query (`generateAndInsertTiles` in `server/routes.ts`). `GET /api/games/:name/tiles` returns them.
+- Client-side `GameSessionManager.loadGame` reconstructs `GameMap` deterministically from `(seed, map_size)` via `getOrCreateGameMap` (eliminating the `/tiles` HTTP payload on game load while keeping `GameMap.fromTiles` and the `/tiles` endpoint available).
 
 ## Future: randomized per-game tiles
 

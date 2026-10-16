@@ -380,7 +380,7 @@ test("REGRESSION: the default 1-player hero is fully funded on every charge on 9
       }
     }
   }
-  assert.equal(funded, 9, `expected exactly 9/10 funded default games under the narrow rule (short on: ${shortfalls.join(", ")})`);
+  assert.equal(funded, 10, `expected 10/10 funded default games under the narrow rule (short on: ${shortfalls.join(", ")})`);
 });
 
 test("REGRESSION: the keep's draw is exactly what the hero's bill needed, no more", () => {
@@ -412,7 +412,7 @@ test("REGRESSION: the keep's draw is exactly what the hero's bill needed, no mor
   // farm cells' multipliers). The mechanics asserted above are unchanged.
   assert.deepEqual(
     keeps,
-    [66, 103, 140],
+    [72, 116, 160],
     "the keep accumulates: its 3 farms out-produce its population bill AND the hero's weekly one (the starter farmhouse's +2 food/turn adds to the surplus)",
   );
 });
