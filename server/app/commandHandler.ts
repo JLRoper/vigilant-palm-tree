@@ -137,11 +137,19 @@ export interface EventRepo {
 // side hydrate.ts never needs but the dual-write step below does.
 export interface HeroRepo {
   loadAllForGame(gameName: string): Promise<HeroState[]>;
-  upsertMany(gameName: string, heroes: Record<HeroId, HeroState>): Promise<void>;
+  upsertMany(
+    gameName: string,
+    heroes: Record<HeroId, HeroState>,
+    previous?: Record<HeroId, HeroState>,
+  ): Promise<void>;
 }
 export interface SettlementRepo {
   loadAllForGame(gameName: string): Promise<SettlementState[]>;
-  upsertMany(gameName: string, settlements: Record<SettlementId, SettlementState>): Promise<void>;
+  upsertMany(
+    gameName: string,
+    settlements: Record<SettlementId, SettlementState>,
+    previous?: Record<SettlementId, SettlementState>,
+  ): Promise<void>;
 }
 export interface CharterRepo {
   loadAllForGame(gameName: string): Promise<CharterState[]>;
@@ -246,18 +254,33 @@ function sumPlayerGold(
 // so we use reference-equality against pre-command state to decide which
 // repo(s) actually need syncing, rather than risk a filtered subset that
 // would silently delete untouched rows.
+const granularHydratedStates = new WeakSet<object>();
+
 async function dualWriteEntities(
   deps: CommandDeps,
   gameName: string,
   before: { heroes: Record<HeroId, HeroState>; settlements: Record<SettlementId, SettlementState> },
   after: { heroes: Record<HeroId, HeroState>; settlements: Record<SettlementId, SettlementState> },
 ): Promise<void> {
+  const canIncremental = granularHydratedStates.has(before);
   const writes: Promise<void>[] = [];
   if (after.heroes !== before.heroes) {
-    writes.push(deps.heroRepo.upsertMany(gameName, after.heroes));
+    writes.push(
+      deps.heroRepo.upsertMany(
+        gameName,
+        after.heroes,
+        canIncremental ? before.heroes : undefined,
+      ),
+    );
   }
   if (after.settlements !== before.settlements) {
-    writes.push(deps.settlementRepo.upsertMany(gameName, after.settlements));
+    writes.push(
+      deps.settlementRepo.upsertMany(
+        gameName,
+        after.settlements,
+        canIncremental ? before.settlements : undefined,
+      ),
+    );
   }
   await Promise.all(writes);
 }
@@ -593,6 +616,9 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
   // `state` to keep this cutover's diff to hydration + dual-write only,
   // not a rewrite of Phase 3's pre-existing per-command validation.
   const { state, source } = await hydrateFromRepos(row, deps, command.gameName);
+  if (source === "granular") {
+    granularHydratedStates.add(state);
+  }
 
   switch (command.kind) {
     case "MoveHero": {

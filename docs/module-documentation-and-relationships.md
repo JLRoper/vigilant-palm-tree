@@ -1,8 +1,8 @@
 # Current Module Map
 
-<!-- docs:verified 2026-10-15 -->
+<!-- docs:verified 2026-10-16 -->
 
-This is the current code map, verified against the repository on 2026-10-15. The executed layout plan in [`architecture.md`](./architecture.md) is historical. Shared boundary types live in `packages/contracts/`, game rules/economy in `packages/engine/`, and browser UI in `src/screens/`.
+This is the current code map, verified against the repository on 2026-10-16. The executed layout plan in [`architecture.md`](./architecture.md) is historical. Shared boundary types live in `packages/contracts/`, game rules/economy in `packages/engine/`, and browser UI in `src/screens/`.
 
 ## Data Flow
 
@@ -28,7 +28,7 @@ Browser client                                      Express API
 | Package | Responsibility |
 |---|---|
 | `packages/contracts/` (`@heroes/contracts`) | Leaf types shared across client/server: game state, ids, resources, buildings, factions, commands, engine events, and telemetry. It imports no engine, client, or server code. |
-| `packages/engine/` (`@heroes/engine`) | Pure game rules: initialization/hydration, movement, chartering, settlement/building/recruitment, resource production/upkeep, trade-route logistics, combat/outcomes, turn progression, event replay, registries, map algorithms (`packages/engine/src/map/gameMap.ts` provides a process-wide `getOrCreateGameMap` LRU cache + `Uint8Array` bitset frontier deduplication and O(1) swap-and-pop in `generateTerrain`; `pathfinding.ts` uses a binary min-heap + reusable generation-tagged TypedArray buffers with FIFO tie-breaking and blocked-goal early exit), and AI strategy (`packages/engine/src/ai/aiBrain.ts` bounds `pickWanderStep` to a local radius ring with early exit, returns early when `movementRemaining < 1`, and scopes resource/charter scans to a local radius). Depends on contracts only. |
+| `packages/engine/` (`@heroes/engine`) | Pure game rules: initialization/hydration (`init.ts` + `castlePlacement.ts` scale default/max settlement counts by $\sqrt{N/432}$ via `defaultCastleCountForMap`/`maxCastleCountForMap` and enforce passable BFS connectivity via `buildReachableMask`), movement, chartering (`charter/requirements.ts` uses a flat `Uint8Array` forbidden mask + optional `{ center, maxDistance }` bounds in `validCharterHexes`), settlement/building/recruitment, resource production/upkeep, trade-route logistics, combat/outcomes, turn progression, event replay, registries, map algorithms (`packages/engine/src/map/gameMap.ts` provides a process-wide `getOrCreateGameMap` LRU cache + `Uint8Array` bitset frontier deduplication, O(1) swap-and-pop, and `scaledTerrainBlobs` in `generateTerrain`; `pathfinding.ts` uses a binary min-heap + reusable generation-tagged TypedArray buffers with FIFO tie-breaking and blocked-goal early exit), and AI strategy (`packages/engine/src/ai/aiBrain.ts` bounds `pickWanderStep` to a local radius ring with early exit, returns early when `movementRemaining < 1`, scopes resource/charter scans to a local radius, and scales enemy/settlement target reach on large maps via `aiTargetReachForMap`). Depends on contracts only. |
 
 ## Server (`server/`)
 
@@ -36,7 +36,7 @@ Browser client                                      Express API
 |---|---|
 | `server/index.ts`, `server/routes.ts` | Express bootstrap, `/api` router composition, schema/migration initialization, bulk 5-parameter `UNNEST` tile insertion in `generateAndInsertTiles` + `getOrCreateGameMap` reuse, and service start. `LAN_HOST=1` controls API binding. |
 | `server/http/routes/` | HTTP boundary: command validation, games/lobbies, SSE event stream, telemetry, auth, and assets. Client AI-seat commands for server-driven games are rejected at the command route. |
-| `server/app/commandHandler.ts` | Transactional command dispatch: load state, validate authority, call engine reducers, persist affected rows, and append events. |
+| `server/app/commandHandler.ts` | Transactional command dispatch: load state, validate authority, call engine reducers, persist affected rows (`dualWriteEntities` passes `before.heroes`/`before.settlements` into `upsertMany` so unchanged entity references skip SQL queries), and append events. |
 | `server/app/aiDriver.ts`, `aiDriverToken.ts` | Drives flagged AI seats, including garrisons, trade routes, charters, battles, and turn completion. Per-process tokens, heartbeat watchdog/adoption, and PostgreSQL per-game advisory locks prevent stale or duplicate drivers. |
 | `server/app/dropPolicy.ts` | Heartbeat-based disconnect detection, grace period, and server End Turn for disconnected seats. |
 | `server/persistence/` | PostgreSQL pool, transactions, event notification, repositories, hydration, and numeric mappings. |

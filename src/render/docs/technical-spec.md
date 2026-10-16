@@ -159,6 +159,8 @@ interface SpriteSource {
 
 **`ImageSpriteSource`** — Loads PNGs from URLs. Maps sprite keys to `<img>` elements. Tracks load status via `onload`/`onerror` events.
 
+**`OnDemandSpriteSource`** — Lazily loads PNGs on first `resolve(key)` (used for non-castle, non-caravan sprites such as city buildings, resource icons, and horse variants). Tracks in-flight loads via `this.loading` so `resolve(key)` returns `ready: false` until `onload` fires (`ready: !this.loading.has(key)`), and evicts failed entries from `this.cache` on `onerror`.
+
 **`ProceduralSpriteSource`** — Generates sprites on the fly using `ProceduralDrawer` functions (signature: `(ctx, size) => void`). Renders at 4× scale onto an offscreen canvas for crisp downscaling.
 
 **`CompositeSpriteSource`** — Chains multiple sources. Attempts resolution in order; returns the first match. This allows PNG images to take priority over procedural fallbacks.

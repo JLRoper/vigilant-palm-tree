@@ -69,25 +69,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Start the server (uses tsx import for runtime compilation)
 CMD ["node", "--import", "tsx/esm", "server/index.ts"]
 
-# Web runtime stage (uses built Vite assets + vite preview for /api proxy)
-FROM node:22-alpine AS web-runtime
+# Web runtime stage (nginx serving built Vite assets from disk + /api/ proxy)
+FROM nginx:1.27-alpine AS web-runtime
 
-WORKDIR /app
+COPY --from=builder /app/dist /usr/share/nginx/html
+RUN mkdir -p /app && ln -s /usr/share/nginx/html /app/dist
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 
-# vite preview reads vite.config.ts and honors the preview.proxy block,
-# which routes /api/* to the api container (host via API_HOST env).
-COPY --from=builder /app/package.json /app/package-lock.json ./
-COPY --from=builder /app/packages ./packages
-# vite is in `dependencies`; installed from the lockfile
-RUN npm ci --omit=dev --save=false
-
-# Copy built Vite assets + the files `vite preview` needs at runtime
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/vite.config.ts ./vite.config.ts
-COPY --from=builder /app/index.html ./index.html
-COPY --from=builder /app/tsconfig.json ./tsconfig.json
-
-# Expose web port
-EXPOSE 5173
-
-CMD ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "5173"]
+EXPOSE 80 5173

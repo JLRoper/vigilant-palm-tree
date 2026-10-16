@@ -31,7 +31,6 @@ import type {
   SkyboxProvider,
 } from "./scene/paint2d/deps";
 import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase } from "@heroes/contracts";
-import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 import type { ResourceType } from "../map/resourceTiles";
 import type { Direction, Faction, HeroDirection } from "../entities/hero";
 import type { HorseVariant } from "../state/settings";
@@ -107,23 +106,22 @@ function narrowResolvedSprite(resolved: LiveResolvedSprite | undefined): Resolve
   };
 }
 
-// Run-cycle frame sprites are on-demand-loaded (only castle.* is eager), so a
-// first-ever frame-2 resolve would draw one blank frame. Resolving every
-// mounted variant's frame-2 key once at dep-build time warms the cache; keys
-// whose descriptor doesn't exist resolve to undefined here and cost nothing.
+// Run-cycle frame sprites are on-demand-loaded (only castle.* and caravan.*
+// are eager), so warming a mounted variant's frame-2 keys lazily when that
+// variant is first rendered avoids pre-fetching all 9 variants (34 PNGs) on
+// startup while ensuring the variant's run-frame sprites are warm before it
+// moves.
 const HORSE_RUN_FRAME_DIRECTIONS: Direction[] = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
 
-function warmHorseRunFrameCache(provider: SpriteProvider): void {
-  for (const entry of HORSE_VARIANT_REGISTRY) {
-    if (entry.id === "hero") continue;
-    for (const direction of HORSE_RUN_FRAME_DIRECTIONS) {
-      provider.resolve(horseVariantKey(entry.id, direction, 1) as SpriteKey);
-    }
+function warmHorseVariantRunFrames(provider: SpriteProvider, variant: HorseVariant): void {
+  if (variant === "hero") return;
+  for (const direction of HORSE_RUN_FRAME_DIRECTIONS) {
+    provider.resolve(horseVariantKey(variant, direction, 1) as SpriteKey);
   }
 }
 
 function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
-  warmHorseRunFrameCache(provider);
+  const warmedVariants = new Set<HorseVariant>();
   const resolveUnit = createUnitSpriteResolver();
   return {
     resolveSpriteForResource(resource: ResourceType): ResolvedSprite | undefined {
@@ -136,6 +134,10 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
       variant: HorseVariant,
       frame?: 0 | 1,
     ): ResolvedSprite | undefined {
+      if (variant !== "hero" && !warmedVariants.has(variant)) {
+        warmedVariants.add(variant);
+        warmHorseVariantRunFrames(provider, variant);
+      }
       // Mirrors drawHeroSprite()/drawHorseSprite() in sprites.ts exactly: the
       // player hero has per-direction sprites, the enemy hero does not.
       const key =

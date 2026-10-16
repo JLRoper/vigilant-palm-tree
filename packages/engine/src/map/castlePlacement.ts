@@ -43,16 +43,67 @@ function listCandidates(map: GameMap): { left: CandidateTile[]; right: Candidate
   return { left, right, any };
 }
 
+const CASTLE_BFS_DIRS = [
+  { q: 1, r: 0 },
+  { q: 1, r: -1 },
+  { q: 0, r: -1 },
+  { q: -1, r: 0 },
+  { q: -1, r: 1 },
+  { q: 0, r: 1 },
+];
+
+function buildReachableMask(map: GameMap, origin: CandidateTile): Uint8Array | null {
+  const width = map.width;
+  const height = map.height;
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  const total = width * height;
+  const visited = new Uint8Array(total);
+  const queue = new Int32Array(total);
+  const startIdx = origin.r * width + origin.q;
+  visited[startIdx] = 1;
+  queue[0] = startIdx;
+  let head = 0;
+  let tail = 1;
+  while (head < tail) {
+    const cur = queue[head++];
+    const cq = cur % width;
+    const cr = (cur / width) | 0;
+    for (let d = 0; d < 6; d++) {
+      const nq = cq + CASTLE_BFS_DIRS[d].q;
+      const nr = cr + CASTLE_BFS_DIRS[d].r;
+      if (nq < 0 || nq >= width || nr < 0 || nr >= height) continue;
+      const nIdx = nr * width + nq;
+      if (visited[nIdx]) continue;
+      const t = map.get(nq, nr);
+      if (!t || !isPassable(t)) continue;
+      visited[nIdx] = 1;
+      queue[tail++] = nIdx;
+    }
+  }
+  return visited;
+}
+
 function pickFromCandidates(
   rng: () => number,
   pool: CandidateTile[],
   placed: CandidateTile[],
   minSpacing: number,
+  reachableMask: Uint8Array | null,
+  mapWidth: number,
 ): CandidateTile | null {
+  const enforceMask =
+    reachableMask && pool.some((c) => reachableMask[c.r * mapWidth + c.q] === 1)
+      ? reachableMask
+      : null;
   for (let attempt = 0; attempt < 64; attempt++) {
     if (pool.length === 0) return null;
     const idx = Math.floor(rng() * pool.length);
     const cand = pool[idx];
+    if (enforceMask && !enforceMask[cand.r * mapWidth + cand.q]) {
+      continue;
+    }
     let ok = true;
     for (const p of placed) {
       const dq = Math.abs(p.q - cand.q);
@@ -84,11 +135,29 @@ function ownerForIndex(idx: number, playerCount: number): number | null {
   return null;
 }
 
-export function clampCastleCount(n: number): number {
+export function maxCastleCountForMap(width: number, height: number): number {
+  const total = width * height;
+  if (!(total > 24 * 18)) return CASTLE_COUNT_MAX;
+  return Math.max(CASTLE_COUNT_MAX, Math.round(CASTLE_COUNT_MAX * Math.sqrt(total / (24 * 18))));
+}
+
+export function defaultCastleCountForMap(
+  playerCount: number,
+  width: number,
+  height: number,
+): number {
+  const base = Math.max(CASTLE_COUNT_MIN, 2 * playerCount);
+  const total = width * height;
+  if (!(total > 24 * 18)) return base;
+  const scaled = Math.round(CASTLE_COUNT_DEFAULT * Math.sqrt(total / (24 * 18)));
+  return Math.min(maxCastleCountForMap(width, height), Math.max(base, scaled));
+}
+
+export function clampCastleCount(n: number, maxCount = CASTLE_COUNT_MAX): number {
   if (!Number.isFinite(n)) return CASTLE_COUNT_DEFAULT;
   const i = Math.floor(n);
   if (i < CASTLE_COUNT_MIN) return CASTLE_COUNT_MIN;
-  if (i > CASTLE_COUNT_MAX) return CASTLE_COUNT_MAX;
+  if (i > maxCount) return maxCount;
   return i;
 }
 
@@ -96,7 +165,7 @@ export function generateCastles(
   map: GameMap,
   opts: CastlePlacementOptions,
 ): PlacedCastle[] {
-  const count = clampCastleCount(opts.castleCount);
+  const count = clampCastleCount(opts.castleCount, maxCastleCountForMap(map.width, map.height));
   const seed = opts.castleSeed >>> 0;
   const rng = mulberry32(seed || 1);
 
@@ -105,13 +174,17 @@ export function generateCastles(
   for (let spacing = MIN_CASTLE_SPACING; spacing >= 0; spacing--) {
     const placed: CandidateTile[] = [];
     const order: ("left" | "right" | "any")[] = ["left", "right", "any", "any", "any"];
+    let reachableMask: Uint8Array | null = null;
 
     for (let i = 0; i < count; i++) {
       const which = order[i] ?? "any";
       const pool = which === "left" ? cands.left : which === "right" ? cands.right : cands.any;
-      const picked = pickFromCandidates(rng, pool, placed, spacing);
+      const picked = pickFromCandidates(rng, pool, placed, spacing, reachableMask, map.width);
       if (!picked) break;
       placed.push(picked);
+      if (placed.length === 1) {
+        reachableMask = buildReachableMask(map, picked);
+      }
     }
 
     if (placed.length === count) {

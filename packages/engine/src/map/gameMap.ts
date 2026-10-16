@@ -142,6 +142,12 @@ export function getGameMapCacheSize(): number {
   return gameMapCache.size;
 }
 
+export function scaledTerrainBlobs(baseBlobs: number, width: number, height: number): number {
+  const total = width * height;
+  if (!(total > 24 * 18)) return baseBlobs;
+  return Math.max(baseBlobs, Math.round(baseBlobs * Math.sqrt(total / (24 * 18))));
+}
+
 function generateTerrain(rng: () => number, width: number, height: number): Terrain[] {
   const total = width * height;
   const tiles = new Array<Terrain>(total).fill("grass");
@@ -159,9 +165,10 @@ function generateTerrain(rng: () => number, width: number, height: number): Terr
 
   for (const { terrain, fraction, blobs } of targets) {
     const targetCount = Math.floor(total * fraction);
+    const blobCount = scaledTerrainBlobs(blobs, width, height);
     const frontier: number[] = [];
     inFrontier.fill(0);
-    for (let i = 0; i < blobs; i++) {
+    for (let i = 0; i < blobCount; i++) {
       const q = Math.floor(rng() * width);
       const r = Math.floor(rng() * height);
       const cellIdx = r * width + q;

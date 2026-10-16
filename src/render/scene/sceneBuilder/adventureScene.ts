@@ -97,15 +97,14 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
     });
   }
 
-  if (opts.validCharterHexes) {
-    for (const key of opts.validCharterHexes) {
-      const [qs, rs] = key.split(",");
-      const q = Number(qs);
-      const r = Number(rs);
-      if (Number.isNaN(q) || Number.isNaN(r)) continue;
-      if (!isTileInViewportBounds(bounds, q, r)) continue;
-      if (!isVisible(visible, q, r)) continue;
-      nodes.push({ kind: "validCharterHex", q, r, world: axialToPixel(q, r) });
+  if (opts.validCharterHexes && opts.validCharterHexes.size > 0) {
+    for (let r = bounds.rMin; r <= bounds.rMax; r++) {
+      const { qMin: rowQMin, qMax: rowQMax } = getRowQBounds(bounds, r);
+      for (let q = rowQMin; q <= rowQMax; q++) {
+        if (!isVisible(visible, q, r)) continue;
+        if (!opts.validCharterHexes.has(`${q},${r}`)) continue;
+        nodes.push({ kind: "validCharterHex", q, r, world: axialToPixel(q, r) });
+      }
     }
   }
 

@@ -37,6 +37,17 @@ const SETTLEMENT_REACH = 8;
 const RESOURCE_REACH = 8;
 const SETTLEMENT_RESOURCE_BUFFER = 2;
 
+export function aiTargetReachForMap(
+  baseReach: number,
+  map: { width?: number; height?: number },
+): number {
+  const w = map.width ?? 24;
+  const h = map.height ?? 18;
+  const total = w * h;
+  if (!(total > 24 * 18)) return baseReach;
+  return Math.round(baseReach * Math.sqrt(total / (24 * 18)));
+}
+
 // Target priority bands (higher wins; ties break by distance decay). Enemy
 // heroes stay the top band; the settlement bands sit between heroes and
 // resources so the AI prefers fights it can win over empty expansion, and
@@ -219,7 +230,10 @@ export function pickCharterAction(
   const hero = state.heroes[heroId];
   if (!hero) return null;
 
-  const valid = validCharterHexes(state, map);
+  const valid = validCharterHexes(state, map, {
+    center: hero,
+    maxDistance: CHARTER_TARGET_REACH,
+  });
   const candidates: Array<{ q: number; r: number; rateSum: number; dist: number }> = [];
   const rMin = Math.max(0, hero.r - CHARTER_TARGET_REACH);
   const rMax = Math.min(map.height - 1, hero.r + CHARTER_TARGET_REACH);
@@ -286,29 +300,47 @@ export function pickAiMove(
   }
 
   const targets: Target[] = [];
+  const enemyReach = aiTargetReachForMap(ENEMY_REACH, map);
+  const settlementReach = aiTargetReachForMap(SETTLEMENT_REACH, map);
 
   for (const [otherId, otherHero] of Object.entries(state.heroes)) {
     if (otherId === heroId) continue;
     if (otherHero.ownerId === hero.ownerId) continue;
     if (platoonTroopTotal(otherHero.stacks) === 0) continue;
     const dist = hexDistance(hero, otherHero);
-    if (dist > ENEMY_REACH) continue;
-    targets.push({ kind: "enemy", tile: { q: otherHero.q, r: otherHero.r }, priority: 1000 - dist * 10 });
+    if (dist > enemyReach) continue;
+    targets.push({
+      kind: "enemy",
+      tile: { q: otherHero.q, r: otherHero.r },
+      priority: Math.max(710, 1000 - dist * 10),
+    });
   }
 
   for (const [sid, s] of Object.entries(state.settlements)) {
     if (s.ownerId === hero.ownerId) continue;
     if (excludedSettlementIds.has(sid)) continue;
     const dist = hexDistance(hero, s);
-    if (dist > SETTLEMENT_REACH) continue;
+    if (dist > settlementReach) continue;
     const tile = { q: s.q, r: s.r };
     if (platoonTroopTotal(settlementStacks(s)) > 0) {
       if (!attackerBeatsGarrison(attackerPower, s, unitTypes)) continue;
-      targets.push({ kind: "garrisoned_settlement", tile, priority: GARRISONED_SETTLEMENT_PRIORITY - dist * SETTLEMENT_PRIORITY_DECAY });
+      targets.push({
+        kind: "garrisoned_settlement",
+        tile,
+        priority: Math.max(360, GARRISONED_SETTLEMENT_PRIORITY - dist * SETTLEMENT_PRIORITY_DECAY),
+      });
     } else if (s.ownerId !== null) {
-      targets.push({ kind: "enemy_settlement", tile, priority: ENEMY_SETTLEMENT_PRIORITY - dist * SETTLEMENT_PRIORITY_DECAY });
+      targets.push({
+        kind: "enemy_settlement",
+        tile,
+        priority: Math.max(340, ENEMY_SETTLEMENT_PRIORITY - dist * SETTLEMENT_PRIORITY_DECAY),
+      });
     } else {
-      targets.push({ kind: "neutral_settlement", tile, priority: NEUTRAL_SETTLEMENT_PRIORITY - dist * SETTLEMENT_PRIORITY_DECAY });
+      targets.push({
+        kind: "neutral_settlement",
+        tile,
+        priority: Math.max(320, NEUTRAL_SETTLEMENT_PRIORITY - dist * SETTLEMENT_PRIORITY_DECAY),
+      });
     }
   }
 
