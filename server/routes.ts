@@ -130,7 +130,7 @@ export async function generateAndInsertTiles(
   existingMap?: GameMap,
   version?: MapGenVersion,
 ): Promise<void> {
-  const map = existingMap ?? getOrCreateGameMap(seed, mapSize, version);
+  const map = existingMap ?? getOrCreateGameMap(seed, mapSize, resolveSavedMapGenVersion(version));
   const total = map.width * map.height;
   const qs = new Array<number>(total);
   const rs = new Array<number>(total);
@@ -414,7 +414,7 @@ router.post("/games", async (req, res) => {
     }
     const storedMapSize = ["small", "medium", "large", "huge", "epic"].includes(mapSize) ? mapSize : "small";
     console.log(`[api] POST /games name=${name} hero=(${hero_q},${hero_r}) mapSize=${storedMapSize}`);
-    const map = getOrCreateGameMap(seed, storedMapSize as MapSize);
+    const map = getOrCreateGameMap(seed, storedMapSize as MapSize, 3);
     const topHumanSlots = Number.isInteger(humanSlots) ? (humanSlots as number) : null;
     const lobbyObj = lobby && typeof lobby === "object" ? lobby : null;
     const lobbyHumanSlots =
@@ -536,7 +536,7 @@ router.post("/games", async (req, res) => {
         ]
       );
     const row = r.rows[0];
-    await generateAndInsertTiles(client, row.id, row.seed, "upsert", storedMapSize as MapSize, map);
+    await generateAndInsertTiles(client, row.id, row.seed, "upsert", storedMapSize as MapSize, map, 3);
     return row;
   });
   // The recreation (ON CONFLICT (name)) may have flipped the aiDriver flag;

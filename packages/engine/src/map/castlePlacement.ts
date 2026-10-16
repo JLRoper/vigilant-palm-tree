@@ -85,7 +85,11 @@ function buildReachableMask(map: GameMap, origin: CandidateTile): Uint8Array | n
   return visited;
 }
 
-function findLargestComponentMask(map: GameMap, candidates: readonly CandidateTile[]): Uint8Array | null {
+function findLargestComponentMask(
+  map: GameMap,
+  candidates: readonly CandidateTile[],
+  minRequired = 1,
+): Uint8Array | null {
   const width = map.width;
   const height = map.height;
   if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
@@ -113,7 +117,7 @@ function findLargestComponentMask(map: GameMap, candidates: readonly CandidateTi
       bestMask = mask;
     }
   }
-  return bestMask;
+  return bestCandCount >= minRequired ? bestMask : null;
 }
 
 function findLargestPassableComponentTiles(map: GameMap): CandidateTile[] {
@@ -144,6 +148,7 @@ function pickFromCandidates(
   if (reachableMask && !pool.some((c) => reachableMask[c.r * mapWidth + c.q] === 1)) {
     return null;
   }
+  const effectiveMinSpacing = Math.max(1, minSpacing);
   for (let attempt = 0; attempt < 64; attempt++) {
     const idx = Math.floor(rng() * pool.length);
     const cand = pool[idx];
@@ -156,7 +161,7 @@ function pickFromCandidates(
       const dr = Math.abs(p.r - cand.r);
       const ds = Math.abs(p.q + p.r - cand.q - cand.r);
       const dist = (dq + dr + ds) / 2;
-      if (dist < minSpacing) {
+      if ((p.q === cand.q && p.r === cand.r) || dist < effectiveMinSpacing) {
         ok = false;
         break;
       }
@@ -173,7 +178,7 @@ function pickFromCandidates(
       const dr = Math.abs(p.r - cand.r);
       const ds = Math.abs(p.q + p.r - cand.q - cand.r);
       const dist = (dq + dr + ds) / 2;
-      if (dist < minSpacing) {
+      if ((p.q === cand.q && p.r === cand.r) || dist < effectiveMinSpacing) {
         ok = false;
         break;
       }
@@ -259,16 +264,15 @@ export function generateCastles(
             if (reachableMask[c.r * map.width + c.q]) reachableCands++;
           }
           if (reachableCands < count) {
-            const largestMask = findLargestComponentMask(map, cands.any);
-            if (largestMask) {
-              reachableMask = largestMask;
-              if (!reachableMask[picked.r * map.width + picked.q]) {
-                const repicked =
-                  pickFromCandidates(rng, preferredPool, [], spacing, reachableMask, map.width) ??
-                  pickFromCandidates(rng, cands.any, [], spacing, reachableMask, map.width);
-                if (!repicked) break;
-                placed[0] = repicked;
-              }
+            const largestMask = findLargestComponentMask(map, cands.any, count);
+            if (!largestMask) break;
+            reachableMask = largestMask;
+            if (!reachableMask[picked.r * map.width + picked.q]) {
+              const repicked =
+                pickFromCandidates(rng, preferredPool, [], spacing, reachableMask, map.width) ??
+                pickFromCandidates(rng, cands.any, [], spacing, reachableMask, map.width);
+              if (!repicked) break;
+              placed[0] = repicked;
             }
           }
         }
@@ -289,14 +293,16 @@ export function generateCastles(
   }
 
   const connectedTiles = findLargestPassableComponentTiles(map);
+  if (connectedTiles.length < count) {
+    throw new Error(
+      `Insufficient connected passable tiles (${connectedTiles.length}) to place ${count} castles`,
+    );
+  }
   const fallback: PlacedCastle[] = [];
   for (let i = 0; i < count; i++) {
     const level = levelForIndex(i);
     const ownerId = ownerForIndex(i, opts.playerCount);
-    const tile =
-      i < connectedTiles.length
-        ? connectedTiles[i]
-        : { q: i % map.width, r: Math.floor(i / map.width) };
+    const tile = connectedTiles[i];
     const id = `castle-${level}-${tile.q}-${tile.r}`;
     fallback.push({ id, tile: { q: tile.q, r: tile.r }, level, ownerId });
   }

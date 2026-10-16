@@ -116,10 +116,10 @@ export function validCharterHexes(
   const center = opts?.center;
   const maxDist = opts?.maxDistance;
   const hasRadiusBound = center != null && typeof maxDist === "number" && Number.isFinite(maxDist);
-  const rMin = hasRadiusBound ? Math.max(0, center.r - maxDist) : 0;
-  const rMax = hasRadiusBound ? Math.min(height - 1, center.r + maxDist) : height - 1;
-  const qMin = hasRadiusBound ? Math.max(0, center.q - maxDist) : 0;
-  const qMax = hasRadiusBound ? Math.min(width - 1, center.q + maxDist) : width - 1;
+  const rMin = hasRadiusBound ? Math.max(0, Math.ceil(center.r - maxDist)) : 0;
+  const rMax = hasRadiusBound ? Math.min(height - 1, Math.floor(center.r + maxDist)) : height - 1;
+  const qMin = hasRadiusBound ? Math.max(0, Math.ceil(center.q - maxDist)) : 0;
+  const qMax = hasRadiusBound ? Math.min(width - 1, Math.floor(center.q + maxDist)) : width - 1;
 
   if (Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0) {
     const forbidden = new Uint8Array(width * height);

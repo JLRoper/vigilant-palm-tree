@@ -54,6 +54,16 @@ test("Item 1: validCharterHexes bitset implementation and radius-bounded option 
     assert.equal(full.has(key), true, `bounded key ${key} must be in full validCharterHexes`);
   }
   assert.ok(bounded.size > 0 && bounded.size < full.size);
+
+  const fractionalBounded = validCharterHexes(state, map, {
+    center: { q: 10, r: 10 },
+    maxDistance: 6.5,
+  });
+  assert.deepEqual(
+    fractionalBounded,
+    bounded,
+    "fractional maxDistance rounds loop bounds to integer coordinates while preserving distance <= maxDistance",
+  );
 });
 
 test("Item 2: OnDemandSpriteSource tracks ready=false while loading, ready=true after onload, and evicts on onerror", () => {
@@ -212,6 +222,27 @@ test("Item 4: scaledTerrainBlobs, maxCastleCountForMap, defaultCastleCountForMap
     const path = findPath(splitMap, splitCastles[0].tile, splitCastles[i].tile);
     assert.ok(path.length > 0, `castle ${splitCastles[i].id} must be reachable from ${splitCastles[0].id} across split map`);
   }
+
+  // Disconnected two-tile islands regression: when every connected passable
+  // component has only 2 tiles and castleCount is 6, generateCastles must throw
+  // rather than placing duplicate castle IDs or disconnected castles.
+  const islandRows: TileRow[] = [];
+  const islandTiles = new Set(["3,3", "4,3", "10,3", "11,3", "18,3", "19,3"]);
+  for (let r = 0; r < 18; r++) {
+    for (let q = 0; q < 24; q++) {
+      islandRows.push({
+        q,
+        r,
+        terrain: islandTiles.has(`${q},${r}`) ? "grass" : "mountain",
+        resource: null,
+      });
+    }
+  }
+  const islandMap = GameMap.fromTiles(islandRows);
+  assert.throws(
+    () => generateCastles(islandMap, { castleSeed: 7, playerCount: 2, castleCount: 6 }),
+    /Insufficient connected passable tiles \(2\) to place 6 castles/,
+  );
 });
 
 test("Item 5: aiTargetReachForMap scales AI settlement & enemy reach on huge/epic maps", () => {
