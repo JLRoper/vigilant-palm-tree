@@ -125,6 +125,12 @@ export function resolveMapGenVersion(version?: number | null): MapGenVersion {
   return 3;
 }
 
+export function resolveSavedMapGenVersion(version?: number | null): MapGenVersion {
+  if (version === 2) return 2;
+  if (version === 3) return 3;
+  return 1;
+}
+
 export function getOrCreateGameMap(
   seed = 1,
   mapSize?: MapSize | string | null,

@@ -14,7 +14,9 @@ import {
   platoonTroopTotal,
   readPendingBattle,
   resolveBattle,
+  resolveSavedMapGenVersion,
   settlementStacks,
+  type MapGenVersion,
   type MapSize,
   type PendingBattleMarker,
   type SettlementBattleOutcome,
@@ -262,11 +264,9 @@ function mapSizeFrom(value: string | null | undefined): MapSize | undefined {
   return value === "small" || value === "medium" || value === "large" || value === "huge" || value === "epic" ? value : undefined;
 }
 
-function mapGenVersionFrom(value: unknown): 1 | 2 | 3 {
-  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-  if (n === 3) return 3;
-  if (n === 2) return 2;
-  return 1;
+function mapGenVersionFrom(value: unknown): MapGenVersion {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : undefined;
+  return resolveSavedMapGenVersion(n);
 }
 
 async function defaultLoadGame(gameName: string): Promise<AiDriverGameSnapshot | null> {

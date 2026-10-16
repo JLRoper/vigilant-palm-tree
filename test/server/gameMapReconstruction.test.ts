@@ -6,6 +6,8 @@ import {
   clearGameMapCache,
   getGameMapCacheSize,
   getOrCreateGameMap,
+  resolveMapGenVersion,
+  resolveSavedMapGenVersion,
 } from "@heroes/engine";
 import type { TileRow } from "@heroes/engine";
 import { generateAndInsertTiles } from "../../server/routes";
@@ -152,4 +154,24 @@ test("getOrCreateGameMap supports mapGenVersion 1, 2, and default version 3 with
     v3.tiles,
     "v2 preserves unscaled blobs for existing v2 saves on maps > small while v3 uses scaledTerrainBlobs",
   );
+});
+
+test("resolveSavedMapGenVersion and getOrCreateGameMap unify missing/explicit mapGenVersion across AI, client, and command reconstruction", () => {
+  clearGameMapCache();
+  // Missing metadata on saved games (undefined / null) resolves to v1 across all saved-game callers,
+  // while new-game creation (resolveMapGenVersion) defaults to v3.
+  assert.equal(resolveMapGenVersion(undefined), 3);
+  assert.equal(resolveMapGenVersion(null), 3);
+  assert.equal(resolveSavedMapGenVersion(undefined), 1);
+  assert.equal(resolveSavedMapGenVersion(null), 1);
+  assert.equal(resolveSavedMapGenVersion(1), 1);
+  assert.equal(resolveSavedMapGenVersion(2), 2);
+  assert.equal(resolveSavedMapGenVersion(3), 3);
+
+  const clientMissing = getOrCreateGameMap(99, "huge", resolveSavedMapGenVersion(undefined));
+  const commandMissing = getOrCreateGameMap(99, "huge", resolveSavedMapGenVersion(undefined));
+  const aiMissing = getOrCreateGameMap(99, "huge", resolveSavedMapGenVersion(undefined));
+  assert.equal(clientMissing, commandMissing);
+  assert.equal(commandMissing, aiMissing);
+  assert.deepEqual(clientMissing.tiles, new GameMap(99, "huge", 1).tiles);
 });

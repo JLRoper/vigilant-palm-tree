@@ -50,4 +50,10 @@ if (r.error) {
   process.exit(1);
 }
 
+if (r.status === 0 && (services.length === 0 || services.includes("web"))) {
+  // Remove any legacy `game_gateway` container before `docker compose up -d api web`
+  // binds host port 5173 directly to `game_web`.
+  spawnSync("docker", ["rm", "-f", "game_gateway"], { cwd: ROOT, stdio: "ignore" });
+}
+
 process.exit(r.status ?? 1);

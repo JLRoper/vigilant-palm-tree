@@ -23,6 +23,7 @@ transferGold,
   effectiveIncome,
   clampMorale,
   getOrCreateGameMap,
+  resolveSavedMapGenVersion,
   computeSettlementRates,
   cityViewSizeFor,
   foodBiasForTerrain,
@@ -734,7 +735,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // Caravans path with A* on the deterministic rebuilt map -- only pay
       // the generation cost when routes actually exist (plan §5.2).
       const map = (state.tradeRoutes?.length ?? 0) > 0
-        ? getOrCreateGameMap(Number(row.seed) || 1, row.map_size as MapSize, row.lobby?.mapGenVersion)
+        ? getOrCreateGameMap(Number(row.seed) || 1, row.map_size as MapSize, resolveSavedMapGenVersion(row.lobby?.mapGenVersion))
         : null;
       // The catalog is already loaded on deps.ctx (createLiveCommandDeps), and
       // the weekly upkeep charge inside advanceRound needs it for per-unit
@@ -1281,7 +1282,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // (new GameMap(seed, mapSize) there too), so this reconstructs a
       // byte-identical map deterministically -- pinned down by
       // test/server/gameMapReconstruction.test.ts.
-      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, row.lobby?.mapGenVersion);
+      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, resolveSavedMapGenVersion(row.lobby?.mapGenVersion));
       if (!map.isPassable(command.targetQ, command.targetR)) {
         return { ok: false, reason: "impassable_terrain", events: [] };
       }
@@ -1384,7 +1385,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // target-hex check uses above (and the same GameMap reconstruction,
       // pinned equivalent to the client's own by
       // test/server/gameMapReconstruction.test.ts).
-      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, row.lobby?.mapGenVersion);
+      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, resolveSavedMapGenVersion(row.lobby?.mapGenVersion));
       if (!map.isPassable(command.toTile.q, command.toTile.r)) {
         return { ok: false, reason: "impassable", events: [] };
       }
@@ -1867,7 +1868,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // Same GameMap reconstruction StartCharter uses above (row.seed/
       // row.map_size reproduce the persisted map byte-identically; pinned
       // by test/server/gameMapReconstruction.test.ts).
-      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, row.lobby?.mapGenVersion);
+      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, resolveSavedMapGenVersion(row.lobby?.mapGenVersion));
       const computed = computeSettlementRates(map, settlement.q, settlement.r, targetLevel);
       // Terrain biases the food-spot roll of the new ring of cells (upgrade).
       const { spots } = generateCitySpots(cityViewSizeFor(targetLevel), deps.ctx.rng, {
