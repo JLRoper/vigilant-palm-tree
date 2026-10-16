@@ -211,11 +211,32 @@ export function getRouteProgress(
     const progress = clampUnit(pathLength > 0 ? pathIndex / pathLength : pathIndex > 0 ? 1 : 0);
     const endpointPositionPercent = routePositionFromEndpoints(route, state);
     const positionPercentage = endpointPositionPercent ?? progress * 100;
+    // "Waiting for destination space" only applies when the exhausted path
+    // actually ends on the live destination tile: a caravan trailing a moved
+    // hero can sit at the end of a stale path (re-path budget spent or no
+    // path found) while the hero is elsewhere with free capacity. When the
+    // endpoint position is unavailable, the legacy predicate stands.
+    let endsAtLiveDestination: boolean | null = null;
+    if (state) {
+      const toPos =
+        route.to.kind === "hero"
+          ? state.heroes[route.to.id]
+          : state.settlements[route.to.id];
+      if (toPos) {
+        const last = pathLength > 0 ? caravan.path[pathLength - 1] : null;
+        endsAtLiveDestination = last ? last.q === toPos.q && last.r === toPos.r : null;
+      }
+    }
+    const waitingAtDestination =
+      pathLength > 0 &&
+      pathIndex >= pathLength &&
+      caravan.cargo > 0 &&
+      endsAtLiveDestination !== false;
     return {
       direction: "outbound",
       legPercentage: positionPercentage,
       positionPercentage,
-      waitingAtDestination: pathLength > 0 && pathIndex >= pathLength && caravan.cargo > 0,
+      waitingAtDestination,
     };
   }
 

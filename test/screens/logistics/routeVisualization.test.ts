@@ -192,3 +192,52 @@ test("hero endpoints keep the marker positioned after a moving-target repath", (
   });
   assert.equal(getRouteProgress(returning, state).positionPercentage, 50);
 });
+
+test("waitingAtDestination requires the exhausted path to end on the live destination", () => {
+  const state = stateFixture();
+  // Exhausted path whose end is the hero's live tile (6,0) -> waiting.
+  assert.equal(
+    getRouteProgress(
+      route({
+        caravan: {
+          phase: "toDestination",
+          cargo: 5,
+          path: [{ q: 5, r: 0 }, { q: 6, r: 0 }],
+          pathIndex: 2,
+        },
+      }),
+      state,
+    ).waitingAtDestination,
+    true,
+  );
+  // Exhausted path whose end trails the moved hero (ends at 5,0) -> not
+  // waiting: the hero is elsewhere and may have capacity.
+  assert.equal(
+    getRouteProgress(
+      route({
+        caravan: {
+          phase: "toDestination",
+          cargo: 5,
+          path: [{ q: 4, r: 0 }, { q: 5, r: 0 }],
+          pathIndex: 2,
+        },
+      }),
+      state,
+    ).waitingAtDestination,
+    false,
+  );
+  // Without endpoint state the legacy predicate stands (exhausted + cargo).
+  assert.equal(
+    getRouteProgress(
+      route({
+        caravan: {
+          phase: "toDestination",
+          cargo: 5,
+          path: [{ q: 4, r: 0 }, { q: 5, r: 0 }],
+          pathIndex: 2,
+        },
+      }),
+    ).waitingAtDestination,
+    true,
+  );
+});

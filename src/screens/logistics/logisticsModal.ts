@@ -1,5 +1,4 @@
 import type { GameState, TradeRouteEndpoint, TradeRoutePayload, TradeRouteState, WarehouseResource } from "@heroes/contracts";
-import type { MpEventsAppliedEvent } from "../../core/events";
 import {
   evaluateTradeNeeds,
   heroCargo,
@@ -105,7 +104,7 @@ function routeEndpointArtwork(state: GameState, endpoint: TradeRouteEndpoint): {
     const image =
       variant === "hero"
         ? HERO_PLAYER_DESCRIPTORS["hero.player.s"].url
-        : HORSE_VARIANT_DESCRIPTORS[variant]?.s?.url;
+        : HORSE_VARIANT_DESCRIPTORS[variant]?.[`horse.${variant}.s`]?.url;
     return {
       name: hero?.name ?? "Missing hero",
       kind: "Hero",
@@ -183,7 +182,8 @@ function routeJourneyPanel(state: GameState, route: TradeRouteState): HTMLDivEle
         : "Returning home";
 
   const track = document.createElement("div");
-  track.style.cssText = "position:relative;height:4px;margin:12px 11px;border-radius:999px;background:#263347;";
+  track.style.cssText =
+    "flex:1;min-width:0;position:relative;height:4px;margin:12px 11px;border-radius:999px;background:#263347;";
   track.setAttribute("role", "progressbar");
   track.setAttribute("aria-valuemin", "0");
   track.setAttribute("aria-valuemax", "100");
@@ -253,8 +253,23 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
   modal.root.style.width = "min(660px, calc(100vw - 48px))";
   modal.root.style.maxWidth = "calc(100vw - 48px)";
 
+  // Persistent create-form controls, held across renders so an automatic
+  // refresh (state:committed / turn:ended / resync) can preserve the user's
+  // in-progress draft and keyboard focus instead of resetting the selectors.
+  let fromSel: HTMLSelectElement | null = null;
+  let toSel: HTMLSelectElement | null = null;
+  let payloadSel: HTMLSelectElement | null = null;
+  let wagonInput: HTMLInputElement | null = null;
+
   const render = (): void => {
     const state = opts.getState();
+    const draft = {
+      from: fromSel?.value ?? "",
+      to: toSel?.value ?? "",
+      payload: payloadSel?.value ?? "",
+      wagons: wagonInput?.value ?? "",
+      focusedField: (document.activeElement as HTMLElement | null)?.dataset?.field ?? null,
+    };
     modal.body.replaceChildren();
 
     const owned = Object.values(state.settlements).filter((s) => s.ownerId === state.activePlayerId);
@@ -557,6 +572,27 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         routeEndpointPanel(state, route.to, route.payload, "destination"),
       );
       row.append(header, routeVisual);
+      // A native title never opens on keyboard focus; give the details a
+      // visible tooltip on hover AND focus, linked via aria-describedby.
+      const detailsTip = document.createElement("div");
+      detailsTip.id = `route-tip-${route.id}`;
+      detailsTip.textContent = routeDetails;
+      detailsTip.style.cssText =
+        "display:none;margin-top:4px;padding:6px 8px;border-radius:6px;background:rgba(10,16,26,0.95);border:1px solid rgba(255,255,255,0.18);font-size:10px;line-height:1.5;white-space:pre-line;max-width:520px;";
+      row.setAttribute("aria-describedby", detailsTip.id);
+      row.addEventListener("mouseenter", () => {
+        detailsTip.style.display = "block";
+      });
+      row.addEventListener("mouseleave", () => {
+        detailsTip.style.display = "none";
+      });
+      row.addEventListener("focus", () => {
+        detailsTip.style.display = "block";
+      });
+      row.addEventListener("blur", () => {
+        detailsTip.style.display = "none";
+      });
+      row.appendChild(detailsTip);
       modal.body.appendChild(row);
     }
 
@@ -569,12 +605,14 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
     if (owned.length + ownedHeroes.length >= 2) {
       const createRow = document.createElement("div");
       createRow.style.cssText = "display:flex;gap:6px;margin-top:4px;align-items:center;";
-      const fromSel = document.createElement("select") as HTMLSelectElement;
+      fromSel = document.createElement("select") as HTMLSelectElement;
       styleInput(fromSel as unknown as HTMLInputElement);
       fromSel.style.flex = "1.2";
-      const toSel = document.createElement("select") as HTMLSelectElement;
+      fromSel.dataset.field = "from";
+      toSel = document.createElement("select") as HTMLSelectElement;
       styleInput(toSel as unknown as HTMLInputElement);
       toSel.style.flex = "1.2";
+      toSel.dataset.field = "to";
       // Option values carry the endpoint kind ("s:<id>" / "h:<id>") so the
       // two id namespaces cannot collide in the select.
       for (const sel of [fromSel, toSel]) {
@@ -592,9 +630,10 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         }
       }
       // Payload: "gold" is a treasure caravan; each resource is a cargo caravan.
-      const payloadSel = document.createElement("select") as HTMLSelectElement;
+      payloadSel = document.createElement("select") as HTMLSelectElement;
       styleInput(payloadSel as unknown as HTMLInputElement);
       payloadSel.style.flex = "0.9";
+      payloadSel.dataset.field = "payload";
       for (const [value, text] of [
         ["wood", "wood"],
         ["stone", "stone"],
@@ -608,23 +647,32 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         opt.textContent = text;
         payloadSel.appendChild(opt);
       }
-      const wagonInput = document.createElement("input");
+      wagonInput = document.createElement("input");
       styleInput(wagonInput);
       wagonInput.type = "number";
       wagonInput.min = "1";
       wagonInput.value = "1";
       wagonInput.style.width = "52px";
+      wagonInput.dataset.field = "wagons";
+      // Local non-null aliases: the event closures below capture these
+      // consts, so strict null-checking narrows them even though the
+      // closure-scoped variables (held across renders for draft
+      // preservation) stay mutable and nullable.
+      const fromSelect = fromSel;
+      const toSelect = toSel;
+      const payloadSelect = payloadSel;
+      const wagonsInput = wagonInput;
       const createBtn = document.createElement("button");
       createBtn.textContent = "Create";
       styleButton(createBtn);
       // U4: the engine rejects an over-pool create (not_enough_wagons_unassigned)
       // rather than clamping, so the button pre-disables to match and says why.
       const updateCreateAvailability = (): void => {
-        const isGold = payloadSel.value === "gold";
+        const isGold = payloadSelect.value === "gold";
         const pool = isGold
           ? (player?.treasuryWagonsUnassigned ?? 0)
           : (player?.wagonsUnassigned ?? 0);
-        const wanted = Math.max(1, Math.floor(Number(wagonInput.value) || 1));
+        const wanted = Math.max(1, Math.floor(Number(wagonsInput.value) || 1));
         if (wanted > pool) {
           setUnavailable(
             createBtn,
@@ -645,21 +693,31 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
           if (value.startsWith("h:")) return { kind: "hero", id: value.slice(2) };
           return null;
         };
-        const from = parseEndpoint(fromSel.value);
-        const to = parseEndpoint(toSel.value);
+        const from = parseEndpoint(fromSelect.value);
+        const to = parseEndpoint(toSelect.value);
         if (!from || !to) return;
         if (from.kind === to.kind && from.id === to.id) return;
         const payload: TradeRoutePayload =
-          payloadSel.value === "gold"
+          payloadSelect.value === "gold"
             ? { kind: "gold" }
-            : { kind: "resource", resource: payloadSel.value as WarehouseResource };
-        const wagons = Math.max(1, Math.floor(Number(wagonInput.value) || 1));
+            : { kind: "resource", resource: payloadSelect.value as WarehouseResource };
+        const wagons = Math.max(1, Math.floor(Number(wagonsInput.value) || 1));
         const result = opts.actions.createTradeRoute(from, to, payload, wagons);
         if (!result.ok) rejectionToast("route creation", result.reason);
         setTimeout(render, 30);
       });
       createRow.append(fromSel, toSel, payloadSel, wagonInput, createBtn);
+      // Restore the user's in-progress draft across automatic refreshes, then
+      // re-derive button availability from the restored values.
+      if (draft.from) fromSel.value = draft.from;
+      if (draft.to) toSel.value = draft.to;
+      if (draft.payload) payloadSel.value = draft.payload;
+      if (draft.wagons) wagonInput.value = draft.wagons;
       updateCreateAvailability();
+      if (draft.focusedField) {
+        const el = modal.body.querySelector<HTMLElement>(`[data-field="${draft.focusedField}"]`);
+        if (el) el.focus();
+      }
       modal.body.appendChild(createRow);
     }
 
@@ -671,23 +729,21 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
   };
 
   render();
-  const onRemoteRouteEvent = (event: MpEventsAppliedEvent): void => {
-    if (event.events.some((engineEvent) => engineEvent.type.startsWith("TradeRoute"))) render();
-  };
   bus.on("round:changed", render);
   bus.on("mp:resynced", render);
-  bus.on("mp:eventsApplied", onRemoteRouteEvent);
   // The caravan advances at every turn end, while round:changed only fires
-  // when a round WRAPS -- without these two the journey panel's wagon marker
-  // sits stale mid-round. turn:ended covers the local human/AI end-turn
-  // merge; mp:stateChanged covers polled/remote state on other seats.
+  // when a round WRAPS -- turn:ended covers the local human/AI end-turn merge.
+  // state:committed covers local command commits AND the garrisonEventBridge's
+  // state adoption (GameStateManager.replaceState emits it after the fresh
+  // state is installed), so remote route changes re-render from the live
+  // state instead of the pre-adoption snapshot the transport notifications
+  // would expose. mp:resynced stays as the boundary safety net.
   bus.on("turn:ended", render);
-  bus.on("mp:stateChanged", render);
+  bus.on("state:committed", render);
   detachRouteRefresh = () => {
     bus.off("round:changed", render);
     bus.off("mp:resynced", render);
-    bus.off("mp:eventsApplied", onRemoteRouteEvent);
     bus.off("turn:ended", render);
-    bus.off("mp:stateChanged", render);
+    bus.off("state:committed", render);
   };
 }
