@@ -73,7 +73,8 @@ The `/precommit` and `/pre-pr` slash commands are manual equivalents you can off
 ## Skills available
 - `/dev start|stop|restart` — manage the local dev environment (db + api + client).
 - `/review-issue [branch|PR#] [issue#]` — review a branch against the issue it claims to close, plus a general pass against the project docs. Read-only.
-- `/pr-copilot-triage <PR#> [--no-merge] [--no-issues]` — verify a PR's Copilot comments against its head, write `reviews/pr<N>-review.md`, file a tracker issue (review as body) plus one issue per valid finding, then approve and merge once CI is green.
+- `/pr-copilot-triage <PR#> [--no-merge] [--no-issues]` — verify a PR's Copilot comments against its head, write `reviews/pr<N>-review.md`, file a tracker issue (review as body) plus one issue per valid finding, add a version bump if the PR changes game code and lacks one (via `version-bump`), then approve and merge once CI is green.
+- `/version-bump [patch|minor|major] [--pr <N>] [--check]` — only for changes to game code (`src/`, `packages/`, `server/`, `index.html`, excluding tests and `.md`; agents, skills, docs and tooling never bump): check whether the current branch or a PR already bumps the version against its base; if not, decide patch vs minor and apply it with `scripts/bump-version.mjs` (on a PR, as a pushed `chore(release)` commit).
 - `/precommit` — run the build + deps + docs + test gate on demand.
 - `/pre-pr` — same as `/precommit`, plus a quick doc sanity sweep.
 

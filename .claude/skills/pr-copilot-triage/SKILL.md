@@ -1,6 +1,6 @@
 ---
 name: pr-copilot-triage
-description: Review a GitHub PR and its Copilot review comments, verify each comment against the PR's current head, write a high-level .md review, file follow-up issues for the valid findings (with the review attached via a tracker issue), then approve and merge the PR. Use when asked to "review PR #N and its Copilot comments", "triage Copilot comments", "create issues for the valid comments", or "review, file issues, approve and merge PR #N".
+description: Review a GitHub PR and its Copilot review comments, verify each comment against the PR's current head, write a high-level .md review, file follow-up issues for the valid findings (with the review attached via a tracker issue), add a version bump to the PR if it lacks one, then approve and merge the PR. Use when asked to "review PR #N and its Copilot comments", "triage Copilot comments", "create issues for the valid comments", or "review, file issues, approve and merge PR #N".
 argument-hint: <PR#> [--no-merge] [--no-issues]
 ---
 
@@ -84,11 +84,13 @@ Checks first. Stop and report if any of these fail:
 - `gh api repos/{owner}/{repo} --jq .permissions.push` is true. Origin push access has changed before, so check it every time.
 - The PR isn't a draft and `mergeable` is `MERGEABLE`.
 - CI is green. If the failure was a confirmed infra flake, run `gh run rerun <run-id> --failed` and wait for it to finish. If code is broken, stop and ask.
+- The PR bumps the version. Invoke the `version-bump` skill with `--pr <N> --check`. If it reports the version already bumped, or no game code changed (agents, skills, docs and tooling don't get bumps), carry on without one. If it reports a bump is needed, note the planned bump (`X -> Y`, patch or minor, and why). If it stops because the branch is behind the base, stop and report.
 
 Then:
 
-1. Stop and ask for explicit human confirmation to approve and merge this PR (for example: "Type `confirm approve+merge` to continue"). If confirmation is not explicit, stop here.
-2. After explicit confirmation, run:
+1. Stop and ask for explicit human confirmation to approve and merge this PR (for example: "Type `confirm approve+merge` to continue"). If a bump is needed, say in the same prompt that it will first push a `chore(release): vY` commit to the PR branch. If confirmation is not explicit, stop here.
+2. If a bump is needed, invoke `version-bump` with `--pr <N>` to apply and push it. Wait for the PR's CI to finish on the new head, and re-check `mergeable`. If CI fails, stop and ask.
+3. After explicit confirmation (and the bump, if one was needed), run:
 
 ```bash
 gh pr review <N> --approve --body "<1–3 sentences: verdict, link to tracker #T and issues, any stale-title note>"
@@ -104,5 +106,6 @@ gh pr merge <N> --merge
 Include:
 - The review file path.
 - The tracker issue and a table of the issues filed.
+- The version result: already bumped, no bump because no game code changed, or bumped `X -> Y` with the bump commit. With `--no-merge`, say whether the PR still needs a bump.
 - The approval and merge result, with the merge SHA.
 - Anything you left undone: the stale title, unresolved threads, the branch not deleted.
