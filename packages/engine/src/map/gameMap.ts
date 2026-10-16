@@ -18,6 +18,7 @@ export type TileRow = {
 };
 
 export type MapSize = "small" | "medium" | "large" | "huge" | "epic";
+export type MapGenVersion = 1 | 2;
 
 export const MAP_SIZES: Record<MapSize, { width: number; height: number; label: string }> = {
   small:  { width: 24, height: 18, label: "Small" },
@@ -34,12 +35,15 @@ export class GameMap {
   resourceTiles: (ResourceTile | undefined)[] = [];
   placedResourceTiles: readonly ResourceTile[] = [];
 
-  constructor(seed = 1, mapSize?: MapSize) {
+  constructor(seed = 1, mapSize?: MapSize, version: MapGenVersion = 2) {
     if (mapSize && MAP_SIZES[mapSize]) {
       this.width = MAP_SIZES[mapSize].width;
       this.height = MAP_SIZES[mapSize].height;
     }
-    this.tiles = generateTerrain(mulberry32(seed), this.width, this.height);
+    this.tiles =
+      version === 1
+        ? generateTerrainLegacy(mulberry32(seed), this.width, this.height)
+        : generateTerrain(mulberry32(seed), this.width, this.height);
     if (!this.isPassable(HERO_SPAWN.q, HERO_SPAWN.r)) {
       this.tiles[this.index(HERO_SPAWN.q, HERO_SPAWN.r)] = "grass";
     }
@@ -115,17 +119,26 @@ export function resolveMapSize(mapSize?: string | null): MapSize {
   return mapSize && (mapSize as MapSize) in MAP_SIZES ? (mapSize as MapSize) : "small";
 }
 
-export function getOrCreateGameMap(seed = 1, mapSize?: MapSize | string | null): GameMap {
+export function resolveMapGenVersion(version?: number | null): MapGenVersion {
+  return version === 1 ? 1 : 2;
+}
+
+export function getOrCreateGameMap(
+  seed = 1,
+  mapSize?: MapSize | string | null,
+  version?: MapGenVersion | number | null,
+): GameMap {
   const resolvedSize = resolveMapSize(mapSize);
   const resolvedSeed = Number.isFinite(seed) ? Number(seed) : 1;
-  const key = `${resolvedSeed}:${resolvedSize}`;
+  const resolvedVersion = resolveMapGenVersion(version);
+  const key = resolvedVersion === 1 ? `${resolvedSeed}:${resolvedSize}:v1` : `${resolvedSeed}:${resolvedSize}`;
   const hit = gameMapCache.get(key);
   if (hit) {
     gameMapCache.delete(key);
     gameMapCache.set(key, hit);
     return hit;
   }
-  const created = new GameMap(resolvedSeed, resolvedSize);
+  const created = new GameMap(resolvedSeed, resolvedSize, resolvedVersion);
   if (gameMapCache.size >= GAME_MAP_CACHE_CAPACITY) {
     const oldestKey = gameMapCache.keys().next().value;
     if (oldestKey !== undefined) gameMapCache.delete(oldestKey);
@@ -195,6 +208,54 @@ function generateTerrain(rng: () => number, width: number, height: number): Terr
           }
         }
       }
+    }
+  }
+
+  return tiles;
+}
+
+function generateTerrainLegacy(rng: () => number, width: number, height: number): Terrain[] {
+  const total = width * height;
+  const tiles = new Array<Terrain>(total).fill("grass");
+
+  const targets: Array<{ terrain: Terrain; fraction: number; blobs: number }> = [
+    { terrain: "mountain", fraction: 0.03, blobs: 2 },
+    { terrain: "desert", fraction: 0.05, blobs: 2 },
+    { terrain: "swamp", fraction: 0.06, blobs: 3 },
+    { terrain: "snow", fraction: 0.06, blobs: 3 },
+    { terrain: "water", fraction: 0.10, blobs: 3 },
+    { terrain: "forest", fraction: 0.15, blobs: 4 },
+    { terrain: "dirt", fraction: 0.18, blobs: 5 },
+  ];
+
+  for (const { terrain, fraction, blobs } of targets) {
+    const targetCount = Math.floor(total * fraction);
+    const frontier: number[] = [];
+    for (let i = 0; i < blobs; i++) {
+      const q = Math.floor(rng() * width);
+      const r = Math.floor(rng() * height);
+      frontier.push(r * width + q);
+    }
+    let placed = 0;
+    let guard = 0;
+    const maxSteps = targetCount * 20;
+    while (placed < targetCount && frontier.length > 0 && guard++ < maxSteps) {
+      const idx = Math.floor(rng() * frontier.length);
+      const cellIdx = frontier[idx];
+      if (tiles[cellIdx] === "grass") {
+        tiles[cellIdx] = terrain;
+        placed++;
+        const cq = cellIdx % width;
+        const cr = (cellIdx / width) | 0;
+        for (const d of NEIGHBOR_DIRS) {
+          const nq = cq + d.q;
+          const nr = cr + d.r;
+          if (nq >= 0 && nq < width && nr >= 0 && nr < height) {
+            frontier.push(nr * width + nq);
+          }
+        }
+      }
+      if (frontier.length > targetCount * 3) frontier.splice(idx, 1);
     }
   }
 
