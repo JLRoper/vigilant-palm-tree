@@ -32,6 +32,7 @@ export interface GameSettings {
   // reveal + fill the game-log panel with every streamed game_events row.
   showLogPanel: boolean;
   toolbarStyle: ToolbarStyle;
+  maxZoomOutHexesWide: number;
 }
 
 const STORAGE_KEY = "heroesJs.settings";
@@ -71,6 +72,10 @@ const MIN_PARALLAX_LAYERS = 2;
 const MAX_PARALLAX_LAYERS = 4;
 const DEFAULT_PARALLAX_LAYERS = 4;
 
+const MIN_MAX_ZOOM_OUT_HEXES_WIDE = 20;
+const MAX_MAX_ZOOM_OUT_HEXES_WIDE = 34;
+const DEFAULT_MAX_ZOOM_OUT_HEXES_WIDE = 20;
+
 export const PARALLAX_SPEEDS: Record<number, number[]> = {
   2: [0.10, 1.00],
   3: [0.10, 0.40, 1.00],
@@ -94,6 +99,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   parallaxLayerCount: DEFAULT_PARALLAX_LAYERS,
   showLogPanel: false,
   toolbarStyle: DEFAULT_TOOLBAR_STYLE,
+  maxZoomOutHexesWide: DEFAULT_MAX_ZOOM_OUT_HEXES_WIDE,
 };
 
 let current: GameSettings = loadFromStorage();
@@ -159,6 +165,24 @@ export function parallaxLayerCountBounds(): { min: number; max: number; default:
   return { min: MIN_PARALLAX_LAYERS, max: MAX_PARALLAX_LAYERS, default: DEFAULT_PARALLAX_LAYERS };
 }
 
+export function clampMaxZoomOutHexesWide(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return Math.max(
+      MIN_MAX_ZOOM_OUT_HEXES_WIDE,
+      Math.min(MAX_MAX_ZOOM_OUT_HEXES_WIDE, Math.round(v)),
+    );
+  }
+  return DEFAULT_MAX_ZOOM_OUT_HEXES_WIDE;
+}
+
+export function maxZoomOutHexesWideBounds(): { min: number; max: number; default: number } {
+  return {
+    min: MIN_MAX_ZOOM_OUT_HEXES_WIDE,
+    max: MAX_MAX_ZOOM_OUT_HEXES_WIDE,
+    default: DEFAULT_MAX_ZOOM_OUT_HEXES_WIDE,
+  };
+}
+
 export function bgOffsetBounds(): { min: number; max: number; default: number } {
   return { min: MIN_BG_OFFSET, max: MAX_BG_OFFSET, default: DEFAULT_BG_OFFSET };
 }
@@ -189,6 +213,7 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
       ? patch.showLogPanel
       : current.showLogPanel,
     toolbarStyle: clampToolbarStyle(patch.toolbarStyle ?? current.toolbarStyle),
+    maxZoomOutHexesWide: clampMaxZoomOutHexesWide(patch.maxZoomOutHexesWide ?? current.maxZoomOutHexesWide),
   };
   current = next;
   try {
@@ -254,6 +279,7 @@ function loadFromStorage(): GameSettings {
         ? parsed.showLogPanel
         : false,
       toolbarStyle: clampToolbarStyle(parsed.toolbarStyle),
+      maxZoomOutHexesWide: clampMaxZoomOutHexesWide(parsed.maxZoomOutHexesWide),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

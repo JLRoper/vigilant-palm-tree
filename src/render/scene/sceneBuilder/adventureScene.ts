@@ -1,4 +1,5 @@
 import { axialToPixel, hexCorners, hexDistance, HEX_SIZE, type Axial } from "../../../core/hex";
+import { getRowQBounds, isTileInViewportBounds, type ViewportAxialBounds } from "../../camera";
 import type { GameMap } from "../../../map/gameMap";
 import type { Hero } from "../../../entities/hero";
 import type { Castle } from "../../../entities/settlement";
@@ -35,7 +36,7 @@ export interface AdventureSceneInput {
    * the minimap from the same set) pass it in so it isn't derived twice per
    * frame; omitted, it is computed here. */
   visible?: Set<string>;
-  viewportBounds?: { qMin: number; qMax: number; rMin: number; rMax: number };
+  viewportBounds?: ViewportAxialBounds;
 }
 
 export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
@@ -44,7 +45,7 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
   const castles = input.castles ?? input.mirror?.getSettlements() ?? [];
   const nodes: SceneNode[] = [];
   const visible = input.visible ?? computeVision(heroes, castles, opts.viewPlayerId);
-  const bounds = input.viewportBounds ?? {
+  const bounds: ViewportAxialBounds = input.viewportBounds ?? {
     qMin: 0,
     qMax: map.width - 1,
     rMin: 0,
@@ -52,7 +53,8 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
   };
 
   for (let r = bounds.rMin; r <= bounds.rMax; r++) {
-    for (let q = bounds.qMin; q <= bounds.qMax; q++) {
+    const { qMin: rowQMin, qMax: rowQMax } = getRowQBounds(bounds, r);
+    for (let q = rowQMin; q <= rowQMax; q++) {
       const terrain = map.get(q, r);
       if (!terrain) continue;
       const world = axialToPixel(q, r);
@@ -68,13 +70,14 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
 
   if (map.placedResourceTiles) {
     for (const tile of map.placedResourceTiles) {
-      if (tile.q < bounds.qMin || tile.q > bounds.qMax || tile.r < bounds.rMin || tile.r > bounds.rMax) continue;
+      if (!isTileInViewportBounds(bounds, tile.q, tile.r)) continue;
       if (!isVisible(visible, tile.q, tile.r)) continue;
       nodes.push({ kind: "resourceIcon", q: tile.q, r: tile.r, world: axialToPixel(tile.q, tile.r), resource: tile.resource });
     }
   } else {
     for (let r = bounds.rMin; r <= bounds.rMax; r++) {
-      for (let q = bounds.qMin; q <= bounds.qMax; q++) {
+      const { qMin: rowQMin, qMax: rowQMax } = getRowQBounds(bounds, r);
+      for (let q = rowQMin; q <= rowQMax; q++) {
         const tile = map.resourceTileAt(q, r);
         if (!tile) continue;
         if (!isVisible(visible, q, r)) continue;
@@ -100,7 +103,7 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       const q = Number(qs);
       const r = Number(rs);
       if (Number.isNaN(q) || Number.isNaN(r)) continue;
-      if (q < bounds.qMin || q > bounds.qMax || r < bounds.rMin || r > bounds.rMax) continue;
+      if (!isTileInViewportBounds(bounds, q, r)) continue;
       if (!isVisible(visible, q, r)) continue;
       nodes.push({ kind: "validCharterHex", q, r, world: axialToPixel(q, r) });
     }

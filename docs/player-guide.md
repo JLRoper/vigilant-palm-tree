@@ -1,6 +1,6 @@
 # Player Guide
 
-<!-- docs:verified 2026-10-14 -->
+<!-- docs:verified 2026-10-15 -->
 
 ## Start a Game
 
@@ -34,6 +34,6 @@ Wagons carry physical caravan cargo between compatible routes. New games do not 
 | `B` | Toggle the city build palette |
 | `Delete` / `Backspace` | Remove the building under the cursor in city view |
 | Click / double-click | Select, move, attack, or enter a settlement |
-| Drag / wheel | Pan / zoom the map |
+| Drag / wheel | Pan / zoom the map (maximum zoom-out width is configurable from **20 to 34 hexes wide**, default **20**, under Settings → Visual) |
 
 For detailed rules see [heroes](./heroes.md), [settlements](./settlements.md), [army and combat](./army.md), [resources](./resources.md), and [multiplayer](./multiplayer.md).

@@ -393,7 +393,8 @@ class Camera {
   dpr: number;  // device pixel ratio
 
   pan(dx, dy): void
-  zoomAt(screenX, screenY, factor): void
+  zoomAt(screenX, screenY, factor, minZoom?): void
+  clampMinZoom(screenX, screenY, minZoom): boolean
   apply(ctx): void  // applies transform to canvas context
 }
 ```
@@ -405,7 +406,9 @@ ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, dpr * x, dpr * y)
 
 `hoverFromScreen(sx, sy)` does the inverse: converts a screen coordinate to an axial hex coordinate by dividing out the camera transform and calling `pixelToAxial()`.
 
-`getVisibleAxialBounds(viewportW, viewportH, mapWidth, mapHeight, marginHexes = 2)` projects the four viewport corners through `getViewportAxialCorners`, takes their min/max axial span, expands by `marginHexes` (default 2 hexes so large castle/hero sprites near the viewport edge never pop), and clamps to `[0..mapWidth-1, 0..mapHeight-1]`. `MapRenderer.draw()` passes these bounds into `buildAdventureScene()` as `viewportBounds` for camera frustum culling.
+`computeMinZoomForHexWidth(viewportWidth, maxHexesWide)` computes the minimum camera zoom so at most `maxHexesWide` hex columns (`GameSettings.maxZoomOutHexesWide`, configurable `20..34`, default `20`) span the viewport width (`HEX_COLUMN_WIDTH = HEX_SIZE * Math.sqrt(3)`), enforced by `AdventureView.onWheel()` and `Camera.clampMinZoom()`.
+
+`getVisibleAxialBounds(viewportW, viewportH, mapWidth, mapHeight, marginHexes = 2)` projects the four viewport corners through `getViewportAxialCorners`, takes their min/max axial span, expands by `marginHexes` (default 2 hexes so large castle/hero sprites near the viewport edge never pop), clamps to `[0..mapWidth-1, 0..mapHeight-1]`, and attaches `wxMin`/`wxMax` world-X bounds so `getRowQBounds(bounds, r)` and `isTileInViewportBounds(bounds, q, r)` clip each row `r`'s `q` span to the actual screen rectangle (trimming the sheared axial parallelogram corners). `MapRenderer.draw()` passes these bounds into `buildAdventureScene()` as `viewportBounds` for row-clipped camera frustum culling.
 
 ### 2.3 Sprite Drawing Functions
 

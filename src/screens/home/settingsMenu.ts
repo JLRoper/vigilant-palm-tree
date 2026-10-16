@@ -12,6 +12,8 @@ import {
   spriteVariantOptions,
   bgOffsetBounds,
   parallaxLayerCountBounds,
+  maxZoomOutHexesWideBounds,
+  clampMaxZoomOutHexesWide,
   PARALLAX_SPEEDS,
   type GameSettings,
   type ResourceStyle,
@@ -136,6 +138,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   const arenaBounds = arenaMoveMsPerHexBounds();
   const borderBounds = borderWidthBounds();
   const growthBounds = growthRateBounds();
+  const zoomOutBounds = maxZoomOutHexesWideBounds();
   const current = settings();
   const mapInfo = opts.getMapInfo?.() ?? null;
   const refreshList: Array<() => void> = [];
@@ -826,6 +829,57 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     children.push(logPanelToggleRow);
 
+    // Max zoom-out width (20–34 hexes wide)
+    const zoomOutRow = document.createElement("div");
+    zoomOutRow.style.display = "flex";
+    zoomOutRow.style.flexDirection = "column";
+    zoomOutRow.style.gap = "6px";
+
+    const zoomOutLabelRow = document.createElement("div");
+    zoomOutLabelRow.style.display = "flex";
+    zoomOutLabelRow.style.justifyContent = "space-between";
+    zoomOutLabelRow.style.alignItems = "baseline";
+
+    const zoomOutLabel = document.createElement("span");
+    zoomOutLabel.textContent = "Max zoom-out width";
+    zoomOutLabelRow.appendChild(zoomOutLabel);
+
+    const zoomOutValue = document.createElement("span");
+    zoomOutValue.setAttribute("data-testid", "max-zoom-out-hexes-value");
+    zoomOutValue.style.fontVariantNumeric = "tabular-nums";
+    zoomOutLabelRow.appendChild(zoomOutValue);
+    zoomOutRow.appendChild(zoomOutLabelRow);
+
+    const zoomOutSlider = document.createElement("input");
+    zoomOutSlider.type = "range";
+    zoomOutSlider.setAttribute("data-testid", "max-zoom-out-hexes-slider");
+    zoomOutSlider.min = String(zoomOutBounds.min);
+    zoomOutSlider.max = String(zoomOutBounds.max);
+    zoomOutSlider.step = "1";
+    zoomOutSlider.style.width = "100%";
+    zoomOutSlider.style.accentColor = "#f77f00";
+    zoomOutRow.appendChild(zoomOutSlider);
+
+    const zoomOutHint = document.createElement("div");
+    zoomOutHint.style.fontSize = "10px";
+    zoomOutHint.style.opacity = "0.55";
+    zoomOutHint.textContent =
+      "Caps how far out you can scroll on the adventure map (20 hexes wide default, up to 34 hexes wide) to keep rendering fast on large maps.";
+    zoomOutRow.appendChild(zoomOutHint);
+
+    function refreshZoomOut(next: GameSettings): void {
+      zoomOutSlider.value = String(next.maxZoomOutHexesWide);
+      zoomOutValue.textContent = `${next.maxZoomOutHexesWide} hexes wide`;
+    }
+    refreshZoomOut(current);
+    zoomOutSlider.addEventListener("input", () => {
+      const next = updateSettings({ maxZoomOutHexesWide: clampMaxZoomOutHexesWide(Number(zoomOutSlider.value)) });
+      refreshZoomOut(next);
+    });
+    refreshList.push(() => refreshZoomOut(settings()));
+
+    children.push(zoomOutRow);
+
     makeFoldableSection(content, "Visual", children, true);
   }
 
@@ -852,6 +906,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
       parallaxEnabled: false,
       parallaxLayerCount: pBounds.default,
       showLogPanel: false,
+      maxZoomOutHexesWide: zoomOutBounds.default,
     });
     for (const fn of refreshList) fn();
   });
