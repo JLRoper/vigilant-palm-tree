@@ -1,4 +1,5 @@
-import type { GameState, TradeRouteEndpoint, TradeRoutePayload, WarehouseResource } from "@heroes/contracts";
+import type { GameState, TradeRouteEndpoint, TradeRoutePayload, TradeRouteState, WarehouseResource } from "@heroes/contracts";
+import type { MpEventsAppliedEvent } from "../../core/events";
 import {
   evaluateTradeNeeds,
   heroCargo,
@@ -15,11 +16,39 @@ import {
   settlementResourceCap,
   settlementTreasuryCap,
 } from "@heroes/engine";
+import { bus } from "../../core/eventBus";
 import { cachedUnitTypes } from "../../data/unitCatalog";
+import {
+  CARAVAN_SPRITES,
+  CASTLE_ALT2_DESCRIPTORS,
+  CASTLE_ALT3_DESCRIPTORS,
+  CASTLE_ALT_DESCRIPTORS,
+  CASTLE_DESCRIPTORS,
+  HERO_PLAYER_DESCRIPTORS,
+  HORSE_VARIANT_DESCRIPTORS,
+  castleKey,
+} from "../../render/assetDescriptors";
 import { showToast } from "../shared/toast";
 import { openCenteredModal, styleButton, styleInput } from "@screens/shared/menu";
+import { STORAGE_GAUGE_SHEET } from "./storageGaugeAssets";
+import {
+  formatStorageAmount,
+  formatStoragePercentage,
+  getEndpointStorage,
+  getRouteProgress,
+  getRouteTooltipText,
+  getStorageMeterState,
+  STORAGE_GAUGE_FRAME_COUNT,
+  STORAGE_GAUGE_HEIGHT,
+} from "./routeVisualization";
 
 const RES: WarehouseResource[] = ["wood", "stone", "iron", "arcane", "food"];
+const CASTLE_MAP_DESCRIPTORS = {
+  ...CASTLE_DESCRIPTORS,
+  ...CASTLE_ALT_DESCRIPTORS,
+  ...CASTLE_ALT2_DESCRIPTORS,
+  ...CASTLE_ALT3_DESCRIPTORS,
+};
 
 // U2 (logistics-interface-fixes plan §5.8): local {ok, reason} rejections used
 // to vanish — with the standard 0-wagon starting pool, Accept and wagon "+1"
@@ -65,6 +94,125 @@ function endpointLabel(state: GameState, endpoint: TradeRouteEndpoint): string {
   return `Hero: ${state.heroes[endpoint.id]?.name ?? "?"}`;
 }
 
+function routeEndpointArtwork(state: GameState, endpoint: TradeRouteEndpoint): {
+  name: string;
+  kind: string;
+  image: string;
+} {
+  if (endpoint.kind === "hero") {
+    const hero = state.heroes[endpoint.id];
+    const variant = hero?.horseVariant ?? "hero";
+    const image =
+      variant === "hero"
+        ? HERO_PLAYER_DESCRIPTORS["hero.player.s"].url
+        : HORSE_VARIANT_DESCRIPTORS[variant]?.s?.url;
+    return {
+      name: hero?.name ?? "Missing hero",
+      kind: "Hero",
+      image: image ?? HERO_PLAYER_DESCRIPTORS["hero.player.s"].url!,
+    };
+  }
+  const settlement = state.settlements[endpoint.id];
+  const level = settlement?.level ?? 1;
+  const image = CASTLE_MAP_DESCRIPTORS[
+    castleKey(level, settlement?.castleVariant ?? 0)
+  ]?.url;
+  return {
+    name: settlement?.name ?? "Missing settlement",
+    kind: "Settlement",
+    image: image ?? CASTLE_DESCRIPTORS[`castle.${level}`].url!,
+  };
+}
+
+function routeEndpointPanel(
+  state: GameState,
+  endpoint: TradeRouteEndpoint,
+  payload: TradeRoutePayload,
+  side: "source" | "destination",
+): HTMLDivElement {
+  const panel = document.createElement("div");
+  panel.style.cssText = "display:flex;min-width:0;flex-direction:column;align-items:center;";
+
+  const artwork = routeEndpointArtwork(state, endpoint);
+  const image = document.createElement("img");
+  image.src = artwork.image;
+  image.alt = `${artwork.kind}: ${artwork.name}`;
+  image.loading = "lazy";
+  image.style.cssText =
+    "width:34px;height:34px;flex:none;object-fit:contain;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.55));";
+
+  const storage = getEndpointStorage(state, endpoint, payload);
+  const imageAndMeter = document.createElement("div");
+  imageAndMeter.style.cssText = `display:flex;width:100%;height:${STORAGE_GAUGE_HEIGHT}px;align-items:center;justify-content:center;gap:3px;`;
+  if (storage) {
+    const meterState = getStorageMeterState(storage.amount, storage.capacity);
+    const meter = document.createElement("div");
+    meter.style.cssText =
+      `width:18px;height:${STORAGE_GAUGE_HEIGHT}px;flex:none;background-image:url("${STORAGE_GAUGE_SHEET}");` +
+      `background-size:${STORAGE_GAUGE_FRAME_COUNT * 100}% 100%;background-position:${(meterState.frameIndex / (STORAGE_GAUGE_FRAME_COUNT - 1)) * 100}% 0;background-repeat:no-repeat;`;
+    const percentText = formatStoragePercentage(meterState.percentage);
+    meter.setAttribute("role", "meter");
+    meter.setAttribute("aria-valuemin", "0");
+    meter.setAttribute("aria-valuemax", "100");
+    meter.setAttribute("aria-valuenow", String(Math.round(meterState.fillPercentage)));
+    meter.setAttribute(
+      "aria-valuetext",
+      `${meterState.percentage === null ? "No capacity" : `${percentText} full`}; ${formatStorageAmount(storage.amount)} of ${formatStorageAmount(storage.capacity)} ${storage.resourceName} in ${storage.storeName}`,
+    );
+    meter.setAttribute("aria-label", `${storage.storeName} ${storage.resourceName}`);
+
+    if (side === "source") imageAndMeter.append(image, meter);
+    else imageAndMeter.append(meter, image);
+  } else {
+    imageAndMeter.appendChild(image);
+  }
+  panel.appendChild(imageAndMeter);
+  return panel;
+}
+
+function routeJourneyPanel(state: GameState, route: TradeRouteState): HTMLDivElement {
+  const panel = document.createElement("div");
+  panel.style.cssText = "min-width:0;display:flex;align-items:center;";
+  const progress = getRouteProgress(route, state);
+  const label = progress.waitingAtDestination
+    ? "Waiting for destination space"
+    : progress.direction === "loading"
+      ? "Loading at source"
+      : progress.direction === "outbound"
+        ? "To destination"
+        : "Returning home";
+
+  const track = document.createElement("div");
+  track.style.cssText = "position:relative;height:4px;margin:12px 11px;border-radius:999px;background:#263347;";
+  track.setAttribute("role", "progressbar");
+  track.setAttribute("aria-valuemin", "0");
+  track.setAttribute("aria-valuemax", "100");
+  track.setAttribute("aria-valuenow", String(Math.round(progress.legPercentage)));
+  track.setAttribute("aria-label", `${label} progress`);
+  track.setAttribute("aria-valuetext", `${label}: ${formatStoragePercentage(progress.legPercentage)}`);
+
+  const fill = document.createElement("div");
+  fill.style.cssText = "position:absolute;top:0;height:100%;border-radius:999px;background:linear-gradient(90deg,#6acb91,#85d9ce);";
+  if (progress.direction === "returning") {
+    fill.style.left = `${progress.positionPercentage}%`;
+    fill.style.width = `${100 - progress.positionPercentage}%`;
+  } else {
+    fill.style.left = "0";
+    fill.style.width = `${progress.positionPercentage}%`;
+  }
+  track.appendChild(fill);
+
+  const marker = document.createElement("img");
+  marker.src = CARAVAN_SPRITES[route.payload.kind];
+  marker.alt = "";
+  marker.setAttribute("aria-hidden", "true");
+  marker.style.cssText =
+    `position:absolute;left:${progress.positionPercentage}%;top:50%;width:22px;height:22px;max-width:none;object-fit:contain;transform:translate(-50%,-50%);`;
+  track.appendChild(marker);
+  panel.appendChild(track);
+  return panel;
+}
+
 export interface LogisticsModalOptions {
   parent: HTMLElement;
   getState: () => GameState;
@@ -100,7 +248,10 @@ export interface LogisticsModalOptions {
 
 /** One-stop logistics modal: selected hero cargo/wagons, settlement stockpile caps, wagon purchases, trade routes. */
 export function openLogisticsModal(opts: LogisticsModalOptions): void {
-  const modal = openCenteredModal(opts.parent, "Logistics", 460, true, true);
+  let detachRouteRefresh = (): void => {};
+  const modal = openCenteredModal(opts.parent, "Logistics", 660, true, true, () => detachRouteRefresh());
+  modal.root.style.width = "min(660px, calc(100vw - 48px))";
+  modal.root.style.maxWidth = "calc(100vw - 48px)";
 
   const render = (): void => {
     const state = opts.getState();
@@ -350,19 +501,23 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       modal.body.appendChild(empty);
     }
     for (const route of playerRoutes) {
+      const routeDetails = getRouteTooltipText(state, route);
       const row = document.createElement("div");
       row.style.cssText =
-        "display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;font-variant-numeric:tabular-nums;";
+        "margin-bottom:6px;padding:6px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:linear-gradient(115deg,rgba(28,39,55,0.72),rgba(15,22,33,0.7));font-variant-numeric:tabular-nums;cursor:help;";
+      row.title = routeDetails;
+      row.tabIndex = 0;
+      row.setAttribute("role", "group");
+      row.setAttribute("aria-label", routeDetails);
+      const header = document.createElement("div");
+      header.style.cssText = "display:flex;align-items:center;gap:6px;min-width:0;min-height:18px;";
       const label = document.createElement("span");
-      label.style.flex = "1";
-      const caravanInfo = route.caravan
-        ? route.caravan.phase === "toDestination"
-          ? "outbound"
-          : "returning"
-        : "loading";
+      label.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;";
       const payloadText = route.payload.kind === "gold" ? "gold" : route.payload.resource;
-      label.textContent = `${route.wagons}\u{1F69F} ${payloadText}: ${endpointLabel(state, route.from)} \u2192 ${endpointLabel(state, route.to)} (${caravanInfo})`;
-      row.appendChild(label);
+      label.textContent = `${route.wagons}x ${payloadText}`;
+      header.appendChild(label);
+      const controls = document.createElement("div");
+      controls.style.cssText = "display:flex;flex:none;align-items:center;gap:4px;";
       for (const [delta, text] of [
         [-1, "−1"],
         [1, "+1"],
@@ -377,7 +532,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
           if (!result.ok) rejectionToast("route update", result.reason);
           setTimeout(render, 30);
         });
-        row.appendChild(btn);
+        controls.appendChild(btn);
       }
       const removeBtn = document.createElement("button");
       removeBtn.textContent = "\u2715";
@@ -390,7 +545,18 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         if (!result.ok) rejectionToast("route removal", result.reason);
         setTimeout(render, 30);
       });
-      row.appendChild(removeBtn);
+      controls.appendChild(removeBtn);
+      header.appendChild(controls);
+
+      const routeVisual = document.createElement("div");
+      routeVisual.style.cssText =
+        "display:grid;grid-template-columns:minmax(56px,0.8fr) minmax(72px,1.4fr) minmax(56px,0.8fr);align-items:center;gap:4px;margin-top:4px;";
+      routeVisual.append(
+        routeEndpointPanel(state, route.from, route.payload, "source"),
+        routeJourneyPanel(state, route),
+        routeEndpointPanel(state, route.to, route.payload, "destination"),
+      );
+      row.append(header, routeVisual);
       modal.body.appendChild(row);
     }
 
@@ -505,4 +671,15 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
   };
 
   render();
+  const onRemoteRouteEvent = (event: MpEventsAppliedEvent): void => {
+    if (event.events.some((engineEvent) => engineEvent.type.startsWith("TradeRoute"))) render();
+  };
+  bus.on("round:changed", render);
+  bus.on("mp:resynced", render);
+  bus.on("mp:eventsApplied", onRemoteRouteEvent);
+  detachRouteRefresh = () => {
+    bus.off("round:changed", render);
+    bus.off("mp:resynced", render);
+    bus.off("mp:eventsApplied", onRemoteRouteEvent);
+  };
 }
