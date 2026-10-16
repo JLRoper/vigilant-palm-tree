@@ -1,6 +1,6 @@
 # Render Module — Technical Specification
 
-<!-- docs:verified 2026-10-15 -->
+<!-- docs:verified 2026-10-16 -->
 
 ## Overview
 
@@ -237,6 +237,7 @@ sequenceDiagram
 | `HORSE_VARIANT_DESCRIPTORS` | `horse.{variant}.{dir}` — one sub-record per `HORSE_VARIANT_REGISTRY` entry | 10 variants × 4–8 directions each | 46 |
 | `BUILDING_DESCRIPTORS` | `building.{style}.{kind}.{level}` — one per `BUILDING_SPRITES` key | 114 |
 | `UNIT_ARENA_DESCRIPTORS` | `unit.{unitTypeId}.{idle,attack,move}` | 108 (36 ids × 3 poses — every catalog id except mage) |
+| `CARAVAN_DESCRIPTORS` | `caravan.{resource,gold}` (`caravan-supply.png`, `caravan-treasury.png`) | 2 |
 | `FACTION_BANNERS` (URL map, not descriptors) | `faction-banner.{human,ashen,ironmark,verdant}` — `Partial<Record<FactionId, string>>` of `?url`s, consumer-addressed via `factionBannerKey(id)` | 4 of 4 (human, ashen, ironmark, verdant) |
 
 Pixel building keys are generated from `src/resources/buildings/` into `packages/engine/src/generated/buildingSpriteKeys.ts`; descriptor URLs are resolved from a single building-asset glob. Anchor offsets are generated separately into `src/render/generated/buildingAnchorOverrides.ts`. Per-kind/per-level expected keys and explicit absences remain manually declared in the exhaustive `packages/engine/src/buildingSpriteCoverage.ts` record and are checked by its unit test.
@@ -971,6 +972,7 @@ classDiagram
 | `scene/paint2d/{deps,colors,geometry}.ts` | Painter dependency contract, colors, and geometry helpers |
 | `paint2dDefaults.ts`, `skybox.ts` | Browser/Vite asset and settings adapters; skybox URL/cache owner |
 | `core/cityGrid.ts` | City grid geometry/order and safe-area layout |
+| `caravanMarkers.ts` | `CaravanVisual` + `CaravanVisualTracker` (step-by-step path tweening at turn end, like heroes) and `resolveCaravanMarkers` |
 | `generated/buildingAnchorOverrides.ts` | Generated 114-key pixel-building anchor offsets |
 | `packages/engine/src/generated/buildingSpriteKeys.ts` | Generated pixel-building file map, aliases, and key union |
 | `packages/engine/src/buildingSpriteCoverage.ts` | Exhaustive manual per-kind/level coverage declaration, guarded by a unit test |

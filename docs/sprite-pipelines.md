@@ -1,6 +1,6 @@
 # Sprite Pipelines — Deep Dive (Usage + Creation)
 
-<!-- docs:verified 2026-10-14 -->
+<!-- docs:verified 2026-10-16 -->
 
 **Status:** Maintained as-built deep dive, updated 2026-10-14. It maps sprite
 assets from creation tools to rendered pixels and tracks findings F1–F13 with
@@ -94,6 +94,7 @@ Descriptor maps and how they are populated:
 | `HORSE_VARIANT_DESCRIPTORS` | **glob** `units/horse/commander-*/*.png`, filtered per `HORSE_VARIANT_REGISTRY` | 10 variants × 4–8 dirs | diagonal→cardinal fallbacks per variant; optional `-2` run frames; bubbly `naturalSize` 64 |
 | `BUILDING_DESCRIPTORS` | generated building keys + glob-resolved files | 114 | bottom-anchored pixel assets; offsets come from the generated anchor map |
 | `UNIT_ARENA_DESCRIPTORS` | **glob** `units/arena/*.png` | 36 ids × 3 poses (mage gap) | `bottom`, `fitHeight 1.3`, `naturalSize 128` |
+| `CARAVAN_DESCRIPTORS` | hand-written (`caravan-supply.png`, `caravan-treasury.png`) | 2 | `bottom`, `fitHeight 1.45`, `naturalSize 256`; preloaded eagerly alongside `castle.*` |
 | `FACTION_BANNERS` | **glob** `factions/faction-banner-*.png` | 4 | a URL map, not descriptors |
 
 Key helpers: `castleKey(level, variant)` (variant 2/3 supported),

@@ -247,7 +247,7 @@ export function paintScene(
         paintSelectedTileHighlight(ctx, node, deps);
         break;
       case "caravanMarker":
-        paintCaravanMarker(ctx, node);
+        paintCaravanMarker(ctx, node, deps);
         break;
       case "hero":
         paintHero(ctx, node, deps);
@@ -646,42 +646,78 @@ export function paintHoverHighlight(ctx: CanvasRenderingContext2D, node: HoverHi
   void deps;
 }
 
-export function paintCaravanMarker(ctx: CanvasRenderingContext2D, node: CaravanMarkerNode): void {
+export function paintCaravanMarker(ctx: CanvasRenderingContext2D, node: CaravanMarkerNode, deps?: Paint2DDep): void {
   const { x, y } = node.world;
-  // Visual size cue: a longer string of wagons draws a proportionally bigger
-  // cart, capped so an extreme route cannot swallow the map. Base size is
-  // ~0.4 of a hex (2x HEX_SIZE wide); the cap lands at ~0.8.
-  const s = Math.min(1 + (node.wagons - 1) * 0.12, 2);
-  const bodyW = 26 * s;
-  const bodyH = 10 * s;
-  const wheelR = 3.5 * s;
+  const marker = node.markerWorld ?? node.world;
+  const s = Math.min(1 + (node.wagons - 1) * 0.08, 1.4);
+  const sprite =
+    deps?.sprite.resolveSpriteForCaravan?.(node.payloadKind) ??
+    deps?.sprite.resolveSprite(node.payloadKind === "gold" ? "caravan.gold" : "caravan.resource");
+
+  if (sprite && sprite.ready) {
+    const flip =
+      node.facingDirection === "w" ||
+      node.facingDirection === "nw" ||
+      node.facingDirection === "sw";
+    ctx.save();
+    if (flip) {
+      ctx.translate(x, 0);
+      ctx.scale(-1, 1);
+      ctx.translate(-x, 0);
+    }
+    drawWithDescriptor(ctx, sprite.drawable, sprite.descriptor, x, y, HEX_SIZE * s);
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = node.color;
+    ctx.beginPath();
+    ctx.arc(marker.x, marker.y + OWNER_DOT_OFFSET_Y, OWNER_DOT_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    const badgeY = marker.y - HEX_SIZE * 0.72 * s;
+    const label = String(node.wagons);
+    ctx.font = `bold ${Math.round(10 * Math.min(s, 1.2))}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    ctx.strokeText(label, marker.x, badgeY);
+    ctx.fillStyle = node.payloadKind === "gold" ? "#ffd866" : "#ffffff";
+    ctx.fillText(label, marker.x, badgeY);
+    ctx.restore();
+    return;
+  }
+
+  const fallbackScale = Math.min(1 + (node.wagons - 1) * 0.12, 2);
+  const bodyW = 26 * fallbackScale;
+  const bodyH = 10 * fallbackScale;
+  const wheelR = 3.5 * fallbackScale;
   const bodyTop = y - bodyH - wheelR;
   ctx.save();
-  // Wagon bed, anchored bottom-centre on the tile centre like other entities.
-  ctx.fillStyle = "#8a5a2b";
+  ctx.fillStyle = node.payloadKind === "gold" ? "#b8860b" : "#8a5a2b";
   ctx.strokeStyle = "#3a2a14";
   ctx.lineWidth = 1.5;
   ctx.fillRect(x - bodyW / 2, bodyTop, bodyW, bodyH);
   ctx.strokeRect(x - bodyW / 2, bodyTop, bodyW, bodyH);
-  // Owner-coloured canvas top arcing over the bed.
   ctx.beginPath();
   ctx.arc(x, bodyTop, bodyW / 2, Math.PI, 0);
   ctx.closePath();
   ctx.fillStyle = node.color;
   ctx.fill();
   ctx.stroke();
-  // Wheels peeking below the bed, resting on the anchor line.
   ctx.fillStyle = "#3a2a14";
   for (const dx of [-bodyW * 0.3, bodyW * 0.3]) {
     ctx.beginPath();
     ctx.arc(x + dx, y - wheelR, wheelR, 0, Math.PI * 2);
     ctx.fill();
   }
-  // Wagon count flag.
-  ctx.fillStyle = "#ffffff";
-  ctx.font = `bold ${Math.round(9 * s)}px sans-serif`;
+  ctx.fillStyle = node.payloadKind === "gold" ? "#ffd866" : "#ffffff";
+  ctx.font = `bold ${Math.round(9 * fallbackScale)}px sans-serif`;
   ctx.textAlign = "center";
-  ctx.fillText(String(node.wagons), x, bodyTop - bodyW / 2 - 3 * s);
+  ctx.fillText(String(node.wagons), marker.x, bodyTop - bodyW / 2 - 3 * fallbackScale);
   ctx.restore();
 }
 

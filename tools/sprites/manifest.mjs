@@ -57,6 +57,11 @@ export const RESOURCE_CREST_SPRITES = {
   arcane: "resource-arcane-crest.png",
 };
 
+export const CARAVAN_SPRITES = {
+  resource: "caravan-supply.png",
+  gold: "caravan-treasury.png",
+};
+
 export const SPRITE_FILES = [
   ...Object.values(CASTLE_SPRITES),
   ...Object.values(CASTLE_ALT_SPRITES),
@@ -65,4 +70,5 @@ export const SPRITE_FILES = [
   ...Object.values(RESOURCE_ILLUST_SPRITES),
   ...Object.values(RESOURCE_CONSTELLATION_SPRITES),
   ...Object.values(RESOURCE_CREST_SPRITES),
+  ...Object.values(CARAVAN_SPRITES),
 ];

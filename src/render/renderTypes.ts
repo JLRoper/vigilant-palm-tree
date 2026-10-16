@@ -3,6 +3,7 @@
 // overlays/pathOverlay.ts) can pull them in without creating a cycle.
 
 import type { Axial } from "@heroes/contracts";
+import type { HeroDirection } from "../entities/hero";
 import type { CharterState } from "../state/gameState";
 
 export interface MinimapGeometry {
@@ -44,6 +45,9 @@ export interface CaravanMarkerSpec {
   r: number;
   ownerId: number;
   wagons: number;
-  /** Additive (docs plan §5.2): a future gold-tinted treasure marker keys off this; nothing reads it yet. */
   payloadKind?: "resource" | "gold";
+  pixelOffset?: { x: number; y: number };
+  moving?: boolean;
+  moveProgress?: number;
+  facingDirection?: HeroDirection;
 }
