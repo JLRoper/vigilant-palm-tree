@@ -152,14 +152,23 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
   for (const caravan of opts.caravans ?? []) {
     const canSee = caravan.ownerId === opts.viewPlayerId || isVisible(visible, caravan.q, caravan.r);
     if (!canSee) continue;
+    const base = axialToPixel(caravan.q, caravan.r);
+    const ox = caravan.pixelOffset?.x ?? 0;
+    const oy = caravan.pixelOffset?.y ?? 0;
+    const moveProgress = caravan.moveProgress ?? 1;
+    const bobAmplitude = 3;
+    const swingPhase = moveProgress * Math.PI * 2;
+    const bobY = caravan.moving ? -Math.sin(swingPhase) * bobAmplitude : 0;
     nodes.push({
       kind: "caravanMarker",
       q: caravan.q,
       r: caravan.r,
-      world: axialToPixel(caravan.q, caravan.r),
+      world: { x: base.x + ox, y: base.y + oy + bobY },
+      ...(caravan.moving || ox !== 0 || oy !== 0 ? { markerWorld: { x: base.x + ox, y: base.y + oy } } : {}),
       color: opts.colorForOwner(caravan.ownerId),
       wagons: caravan.wagons,
       ...(caravan.payloadKind !== undefined ? { payloadKind: caravan.payloadKind } : {}),
+      ...(caravan.facingDirection !== undefined ? { facingDirection: caravan.facingDirection } : {}),
     });
   }
 

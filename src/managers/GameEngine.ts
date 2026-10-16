@@ -24,7 +24,6 @@ import { setViewSeat } from "../state/viewSeat";
 import { settings, subscribeSettings } from "../state/settings";
 import { createFrameErrorLog } from "../core/frameErrors";
 import { shouldDriveAi } from "../io/serverDrivenGames";
-import { resolveCaravanMarkers } from "../render/caravanMarkers";
 import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
 import { attachAiThinkingHint } from "@screens/shared/aiThinkingHint";
@@ -496,7 +495,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       },
       gs.activeCharters,
       this.validCharterHexes,
-      resolveCaravanMarkers(gs.tradeRoutes, gs.settlements, gs.heroes),
+      this.state.getCaravanMarkers(),
     );
     this.view.drawCityOverlay(this.ui.getCityView());
   }

@@ -60,11 +60,15 @@ import resourceStonePileBubbly from "../resources/resource-stone-pile-bubbly.png
 import resourceIronPileBubbly from "../resources/resource-iron-pile-bubbly.png?url";
 import resourceArcanePileBubbly from "../resources/resource-arcane-pile-bubbly.png?url";
 import resourceFoodPileBubbly from "../resources/resource-food-pile-bubbly.png?url";
+import caravanSupply from "../resources/caravan-supply.png?url";
+import caravanTreasury from "../resources/caravan-treasury.png?url";
 import { Faction, Direction } from "../entities/hero";
 import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
 import type { ResourceStyle } from "../state/settings";
 import { HORSE_VARIANT_REGISTRY, BUILDING_SPRITE_FILES, BUILDING_SPRITE_ALIASES, type HorseVariantId } from "@heroes/engine";
+
+export type CaravanSpriteKind = "resource" | "gold";
 
 export type SpriteKey =
   | `castle.${CastleLevel}`
@@ -85,7 +89,8 @@ export type SpriteKey =
   | `horse.${string}.${Direction}.${number}`
   | `building.${string}.${string}.${number}`
   | `unit.${string}.${UnitArenaPose}`
-  | `faction-banner.${FactionId}`;
+  | `faction-banner.${FactionId}`
+  | `caravan.${CaravanSpriteKind}`;
 
 export type UnitArenaPose = "idle" | "attack" | "move";
 
@@ -720,6 +725,30 @@ for (const entry of HORSE_VARIANT_REGISTRY) {
   ALL_HORSE_DESCRIPTORS.push(...Object.values(HORSE_VARIANT_DESCRIPTORS[entry.id]));
 }
 
+export const CARAVAN_SPRITES: Record<CaravanSpriteKind, string> = {
+  resource: caravanSupply,
+  gold: caravanTreasury,
+};
+
+export const CARAVAN_DESCRIPTORS: Record<`caravan.${CaravanSpriteKind}`, SpriteDescriptor> = {
+  "caravan.resource": {
+    key: "caravan.resource",
+    url: CARAVAN_SPRITES.resource,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.45 },
+    naturalSize: 256,
+    anchorOffsetY: 2,
+  },
+  "caravan.gold": {
+    key: "caravan.gold",
+    url: CARAVAN_SPRITES.gold,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.45 },
+    naturalSize: 256,
+    anchorOffsetY: 2,
+  },
+};
+
 export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(CASTLE_DESCRIPTORS),
   ...Object.values(CASTLE_ALT_DESCRIPTORS),
@@ -738,6 +767,7 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...ALL_HORSE_DESCRIPTORS,
   ...Object.values(BUILDING_DESCRIPTORS),
   ...Object.values(UNIT_ARENA_DESCRIPTORS),
+  ...Object.values(CARAVAN_DESCRIPTORS),
 ];
 
 export function castleKey(
@@ -789,4 +819,8 @@ export function unitArenaKey(unitTypeId: string, pose: UnitArenaPose): `unit.${s
 
 export function factionBannerKey(id: FactionId): `faction-banner.${FactionId}` {
   return `faction-banner.${id}`;
+}
+
+export function caravanKey(kind: CaravanSpriteKind = "resource"): `caravan.${CaravanSpriteKind}` {
+  return `caravan.${kind}`;
 }

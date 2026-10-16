@@ -7,6 +7,8 @@ import { TurnController, createAiTurnMemory, type AiTurnMemory, type TurnControl
 import type { TurnControllerHooks } from "../state/turnController";
 import type { Axial } from "../core/hex";
 import { bus } from "../core/eventBus";
+import { CaravanVisualTracker } from "../render/caravanMarkers";
+import type { CaravanMarkerSpec } from "../render/renderTypes";
 
 export interface PathPreviewLock {
   heroId: HeroId;
@@ -34,6 +36,7 @@ export class GameStateManager {
   // the state across instead of wiping it. resetAiTurnMemory() drops it only
   // when a different game session is loaded.
   private aiMemory: AiTurnMemory = createAiTurnMemory();
+  private caravanTracker = new CaravanVisualTracker();
 
   setHooks(hooks: TurnControllerHooks): void {
     this.hooks = hooks;
@@ -62,6 +65,7 @@ export class GameStateManager {
   // that produced them and must not leak into the next game's ids.
   resetAiTurnMemory(): void {
     this.aiMemory = createAiTurnMemory();
+    this.caravanTracker.reset();
   }
 
   setGameMap(map: GameMap): void {
@@ -101,11 +105,14 @@ export class GameStateManager {
   setState(state: GameState): void {
     this.gameState = state;
     this.turnController = this.makeTurnController(state);
+    this.caravanTracker.reset();
+    this.caravanTracker.syncFromState(state, this.gameMap);
   }
 
   replaceState(state: GameState): void {
     this.gameState = state;
     this.turnController = this.makeTurnController(state);
+    this.caravanTracker.syncFromState(state, this.gameMap);
     bus.emit({ type: "state:committed" });
   }
 
@@ -172,16 +179,24 @@ export class GameStateManager {
       hero.update(dtMs);
       if (wasMoving && !hero.moving) heroFinishedMove = true;
     }
+    if (this.caravanTracker.update(dtMs)) {
+      changed = true;
+    }
     if (this.turnController) {
       this.turnController.tick(dtMs);
       const nextState = this.turnController.getState();
       if (nextState !== this.gameState || heroFinishedMove) {
         this.gameState = nextState;
         this.syncHeroVisualsToState();
+        this.caravanTracker.syncFromState(nextState, this.gameMap);
         changed = true;
       }
     }
     return changed;
+  }
+
+  getCaravanMarkers(): CaravanMarkerSpec[] {
+    return this.caravanTracker.getMarkerSpecs();
   }
 
   getState(): GameState { return this.gameState; }
