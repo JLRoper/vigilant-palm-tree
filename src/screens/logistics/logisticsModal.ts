@@ -268,7 +268,10 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       to: toSel?.value ?? "",
       payload: payloadSel?.value ?? "",
       wagons: wagonInput?.value ?? "",
-      focusedField: (document.activeElement as HTMLElement | null)?.dataset?.field ?? null,
+      focusedField:
+        (document.activeElement as HTMLElement | null)?.dataset?.field ??
+        (document.activeElement as HTMLElement | null)?.dataset?.focus ??
+        null,
     };
     modal.body.replaceChildren();
 
@@ -524,6 +527,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       row.tabIndex = 0;
       row.setAttribute("role", "group");
       row.setAttribute("aria-label", routeDetails);
+      row.dataset.focus = `route-${route.id}`;
       const header = document.createElement("div");
       header.style.cssText = "display:flex;align-items:center;gap:6px;min-width:0;min-height:18px;";
       const label = document.createElement("span");
@@ -542,6 +546,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         styleButton(btn);
         btn.style.fontSize = "10px";
         btn.style.padding = "1px 5px";
+        btn.dataset.focus = `route-${route.id}-${delta > 0 ? "plus" : "minus"}`;
         btn.addEventListener("click", () => {
           const result = opts.actions.updateTradeRoute(route.id, { wagonsDelta: delta });
           if (!result.ok) rejectionToast("route update", result.reason);
@@ -554,6 +559,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       styleButton(removeBtn);
       removeBtn.style.fontSize = "10px";
       removeBtn.style.padding = "1px 6px";
+      removeBtn.dataset.focus = `route-${route.id}-remove`;
       removeBtn.title = "Disband this route (wagons return to the pool; cargo aboard is lost)";
       removeBtn.addEventListener("click", () => {
         const result = opts.actions.updateTradeRoute(route.id, { remove: true });
@@ -729,10 +735,6 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       // Attach the freshly built row to the live modal body BEFORE the focus
       // lookup, or querySelector cannot find the replacement controls.
       modal.body.appendChild(createRow);
-      if (draft.focusedField) {
-        const el = modal.body.querySelector<HTMLElement>(`[data-field="${draft.focusedField}"]`);
-        if (el) el.focus();
-      }
     }
 
     const hint = document.createElement("div");
@@ -740,6 +742,17 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       "Cargo caravans carry one resource (wagons\u00d750); treasure caravans carry gold (wagons\u00d7500). They walk 7 tiles/day, re-path daily to reach a moving hero endpoint, and wait (never lose cargo) when the destination is full. A route whose origin is lost or captured goes dormant: it bills nothing and never deserts, and resumes if you retake it. When a route's last wagon deserts, the route disbands and returns what fits at the origin — the rest is lost. Removing a route manually also loses its aboard cargo.";
     hint.style.cssText = "font-size:10px;opacity:0.55;margin-top:10px;line-height:1.4;";
     modal.body.appendChild(hint);
+
+    // Restore keyboard focus across the automatic refresh: route rows and
+    // their controls carry stable data-focus ids, the create form carries
+    // data-field. If the focused element no longer exists (route removed),
+    // focus simply falls back to the modal -- a graceful no-op.
+    if (draft.focusedField) {
+      const el =
+        modal.body.querySelector<HTMLElement>(`[data-field="${draft.focusedField}"]`) ??
+        modal.body.querySelector<HTMLElement>(`[data-focus="${draft.focusedField}"]`);
+      if (el) el.focus();
+    }
   };
 
   render();

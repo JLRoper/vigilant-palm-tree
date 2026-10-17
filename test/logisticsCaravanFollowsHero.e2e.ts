@@ -341,8 +341,25 @@ async function main(): Promise<void> {
       }
       assert.equal(after!.heroes[heroId].q, c.q, "server hero must be at the moved tile");
 
-      // The client adopted the same merged state.
-      const cc = await clientCaravan(page);
+      // The browser merges the end-turn response asynchronously; wait until
+      // the CLIENT state matches the server truth before asserting it, so a
+      // delayed response cannot fail an otherwise-correct run.
+      const clientDeadline = Date.now() + 15000;
+      let cc = await clientCaravan(page);
+      const clientMatches = (): boolean => {
+        if (cc.heroQ !== c.q || cc.heroR !== c.r) return false;
+        if (!cc.caravan || cc.caravan.path.length === 0) return false;
+        const cStart = cc.caravan.path[0];
+        const cEnd = cc.caravan.path[cc.caravan.path.length - 1];
+        if (cc.caravan.phase === "toDestination") {
+          return cEnd.q === c.q && cEnd.r === c.r;
+        }
+        return cStart.q === c.q && cStart.r === c.r;
+      };
+      while (Date.now() < clientDeadline && !clientMatches()) {
+        await wait(300);
+        cc = await clientCaravan(page);
+      }
       assert.equal(`${cc.heroQ},${cc.heroR}`, `${c.q},${c.r}`, "client hero position");
       assert(cc.caravan && cc.caravan.path.length > 0, "client caravan present");
       if (cc.caravan.phase === "toDestination") {

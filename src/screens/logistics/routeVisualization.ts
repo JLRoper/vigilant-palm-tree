@@ -232,9 +232,13 @@ export function getRouteProgress(
       pathIndex >= pathLength &&
       caravan.cargo > 0 &&
       endsAtLiveDestination !== false;
+    // Leg completion is PATH-based (distance traveled along the stored
+    // path); the marker position stays endpoint-relative. Mixing the two
+    // (as a straight-line ratio) misreports terrain detours and lets a moved
+    // hero change the reported progress without the caravan moving.
     return {
       direction: "outbound",
-      legPercentage: positionPercentage,
+      legPercentage: progress * 100,
       positionPercentage,
       waitingAtDestination,
     };
@@ -246,10 +250,9 @@ export function getRouteProgress(
   );
   const endpointPositionPercent = routePositionFromEndpoints(route, state);
   const positionPercentage = endpointPositionPercent ?? (1 - returnProgress) * 100;
-  const legPercentage = 100 - positionPercentage;
   return {
     direction: "returning",
-    legPercentage,
+    legPercentage: returnProgress * 100,
     positionPercentage,
     waitingAtDestination: false,
   };

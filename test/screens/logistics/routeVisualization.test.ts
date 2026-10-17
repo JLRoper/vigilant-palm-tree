@@ -121,8 +121,58 @@ test("route hover details include endpoint stock, journey status, progress, and 
   assert.match(details, /To: Hero: Courier/);
   assert.match(details, /Destination storage: Cargo wood: 20 \/ 150 \(13\.3% full\)/);
   assert.match(details, /Status: To destination/);
-  assert.match(details, /Leg progress: 0%/);
+  // Leg completion is path-based: the caravan has walked 1 of its 2 stored
+  // tiles, so the leg reads 50% even though the cart still sits on the
+  // origin's tile (marker position stays 0% from the source).
+  assert.match(details, /Leg progress: 50%/);
   assert.match(details, /Cargo: 21\.5 wood aboard/);
+});
+
+test("leg completion is path-based while the marker stays endpoint-relative for a moved hero", () => {
+  const state = stateFixture();
+  // The hero endpoint has moved far away: (6,0) -> (12,0).
+  const moved = {
+    ...state,
+    heroes: { h1: { ...state.heroes.h1, q: 12, r: 0 } },
+  };
+
+  // Outbound: 1 of 3 stored tiles walked -> 33.3% leg completion; the
+  // endpoint-relative marker sits at 50% (midpoint between (0,0) and (12,0)).
+  const outbound = getRouteProgress(
+    route({
+      caravan: {
+        phase: "toDestination",
+        cargo: 50,
+        path: [{ q: 6, r: 0 }, { q: 7, r: 0 }, { q: 8, r: 0 }],
+        pathIndex: 1,
+      },
+    }),
+    moved,
+  );
+  assert.ok(
+    Math.abs(outbound.legPercentage - 100 / 3) < 1e-9,
+    `legPercentage ${outbound.legPercentage} should be ~33.3 (path-based: 1 of 3 tiles walked)`,
+  );
+  assert.equal(outbound.positionPercentage, 50);
+
+  // Returning: pathIndex 1 means zero leg completion, regardless of where
+  // the live hero stands; the marker again sits at 50%.
+  const returning = getRouteProgress(
+    route({
+      caravan: {
+        phase: "toHome",
+        cargo: 0,
+        path: [
+          { q: 6, r: 0 }, { q: 5, r: 0 }, { q: 4, r: 0 }, { q: 3, r: 0 },
+          { q: 2, r: 0 }, { q: 1, r: 0 }, { q: 0, r: 0 },
+        ],
+        pathIndex: 1,
+      },
+    }),
+    moved,
+  );
+  assert.equal(returning.legPercentage, 0);
+  assert.equal(returning.positionPercentage, 50);
 });
 
 test("route travel percentage follows the caravan along outbound and return legs", () => {
