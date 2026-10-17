@@ -16,6 +16,7 @@ import {
   settlementTreasuryCap,
 } from "@heroes/engine";
 import { bus } from "../../core/eventBus";
+import { viewSeat } from "../../state/viewSeat";
 import { cachedUnitTypes } from "../../data/unitCatalog";
 import {
   CARAVAN_SPRITES,
@@ -263,6 +264,10 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
 
   const render = (): void => {
     const state = opts.getState();
+    // The panel is tied to the VIEWING seat, not the active player: a
+    // spectator (or any seat whose turn it isn't) still sees and manages
+    // their own routes, pools, and recommendations.
+    const localSeat = viewSeat();
     const draft = {
       from: fromSel?.value ?? "",
       to: toSel?.value ?? "",
@@ -275,11 +280,11 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
     };
     modal.body.replaceChildren();
 
-    const owned = Object.values(state.settlements).filter((s) => s.ownerId === state.activePlayerId);
+    const owned = Object.values(state.settlements).filter((s) => s.ownerId === localSeat);
     const hero =
       (state.selectedHeroId ? state.heroes[state.selectedHeroId] : undefined) ??
-      Object.values(state.heroes).find((h) => h.ownerId === state.activePlayerId);
-    const player = state.players.find((p) => p.id === state.activePlayerId);
+      Object.values(state.heroes).find((h) => h.ownerId === localSeat);
+    const player = state.players.find((p) => p.id === localSeat);
 
     const section = (title: string): HTMLDivElement => {
       const el = document.createElement("div");
@@ -343,6 +348,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
           styleButton(btn);
           btn.style.fontSize = "10px";
           btn.style.padding = "1px 6px";
+          btn.dataset.focus = `hero-wagon-${slot}-${delta > 0 ? "plus" : "minus"}`;
           if (delta > 0 && poolUnassigned <= 0) {
             setUnavailable(btn, "no unassigned wagons — buy one below");
           }
@@ -413,6 +419,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         const buyBtn = document.createElement("button");
         buyBtn.textContent = label;
         buyBtn.title = title;
+        buyBtn.dataset.focus = `buy-wagon-${s.id}-${slot}`;
         styleButton(buyBtn);
         buyBtn.style.fontSize = "10px";
         buyBtn.style.padding = "1px 6px";
@@ -433,14 +440,14 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
     // refreshes the list against the post-create state); each row accepts
     // in one click through the same createTradeRoute path as the manual
     // form, allocating exactly the suggested wagons.
-    const recommendations = evaluateTradeNeeds(state, state.activePlayerId, cachedUnitTypes());
+    const recommendations = evaluateTradeNeeds(state, localSeat, cachedUnitTypes());
     if (recommendations.length > 0) {
       section("Recommended routes");
       const poolFor = (payload: TradeRoutePayload): number =>
         payload.kind === "gold"
           ? (player?.treasuryWagonsUnassigned ?? 0)
           : (player?.wagonsUnassigned ?? 0);
-      for (const rec of recommendations) {
+      for (const [i, rec] of recommendations.entries()) {
         const row = document.createElement("div");
         row.style.cssText =
           "display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;font-variant-numeric:tabular-nums;";
@@ -453,6 +460,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         row.appendChild(label);
         const acceptBtn = document.createElement("button");
         acceptBtn.textContent = "Accept";
+        acceptBtn.dataset.focus = `rec-accept-${i}`;
         styleButton(acceptBtn);
         acceptBtn.style.fontSize = "10px";
         acceptBtn.style.padding = "1px 8px";
@@ -469,6 +477,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       }
       const acceptAll = document.createElement("button");
       acceptAll.textContent = `Accept all (${recommendations.length})`;
+      acceptAll.dataset.focus = "rec-accept-all";
       styleButton(acceptAll);
       acceptAll.style.fontSize = "10px";
       acceptAll.style.padding = "1px 8px";
@@ -511,7 +520,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
     // misfiled a captured origin under the capturer and made a route vanish
     // entirely once its origin hero died. Absent stamp falls back to the
     // FROM endpoint's live owner (legacy rows).
-    const playerRoutes = routes.filter((r) => routeOwnerId(r, state) === state.activePlayerId);
+    const playerRoutes = routes.filter((r) => routeOwnerId(r, state) === localSeat);
     if (playerRoutes.length === 0) {
       const empty = document.createElement("div");
       empty.textContent = "No routes yet.";
@@ -619,7 +628,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
     // heroes ("treasure wagons trade route between him and a city"), so the
     // row appears as soon as two endpoint candidates exist at all -- a lone
     // settlement plus a lone hero is a legal route.
-    const ownedHeroes = Object.values(state.heroes).filter((h) => h.ownerId === state.activePlayerId);
+    const ownedHeroes = Object.values(state.heroes).filter((h) => h.ownerId === localSeat);
     if (owned.length + ownedHeroes.length >= 2) {
       const createRow = document.createElement("div");
       createRow.style.cssText = "display:flex;gap:6px;margin-top:4px;align-items:center;";
@@ -682,6 +691,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       const wagonsInput = wagonInput;
       const createBtn = document.createElement("button");
       createBtn.textContent = "Create";
+      createBtn.dataset.focus = "create-submit";
       styleButton(createBtn);
       // U4: the engine rejects an over-pool create (not_enough_wagons_unassigned)
       // rather than clamping, so the button pre-disables to match and says why.
