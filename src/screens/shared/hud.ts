@@ -5,17 +5,23 @@ import {
   moraleDecay,
   playerEffectiveSettlementIncome,
   playerIncome,
+  playerPopulation,
   playerWealth,
 } from "@heroes/engine";
 import {
   empireUpkeepTitleClause,
   liveEmpireUpkeepCost,
 } from "./heroUpkeepCost";
-import { makeStatPill } from "./statPill";
+import { makePillDivider, makePillLabel, makePillValueSpan, makeStatPill } from "./statPill";
 
 export { canEndTurn } from "@heroes/engine";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
+
+export interface HudIconUrls {
+  gold: string;
+  food: string;
+}
 
 // The HUD is now a row of labeled pills plus a trailing context segment, all
 // inside the toolbar's status row. The economy breakdown stays one tooltip on
@@ -25,7 +31,9 @@ export interface HudHandles {
   round: HTMLElement;
   wealth: HTMLElement;
   income: HTMLElement;
-  upkeep: HTMLElement;
+  population: HTMLElement;
+  upkeepGold: HTMLElement;
+  upkeepFood: HTMLElement;
   morale: HTMLElement;
   context: HTMLElement;
 }
@@ -36,13 +44,34 @@ export interface PathCostReadout {
   destinationReachable: boolean;
 }
 
-export function buildHud(container: HTMLElement): HudHandles {
+function makeResourceIcon(url: string, label: string): HTMLImageElement {
+  const icon = document.createElement("img");
+  icon.alt = label;
+  icon.src = url;
+  Object.assign(icon.style, {
+    width: "14px",
+    height: "14px",
+    imageRendering: "pixelated",
+    objectFit: "contain",
+    alignSelf: "center",
+  });
+  return icon;
+}
+
+export function buildHud(container: HTMLElement, icons: HudIconUrls): HudHandles {
   const hudEl = document.createElement("div");
   hudEl.id = "hud";
   const round = makeStatPill("Round");
   const wealth = makeStatPill("Wealth");
+  wealth.chip.insertBefore(makeResourceIcon(icons.gold, "gold"), wealth.value);
   const income = makeStatPill("Income");
+  income.chip.insertBefore(makeResourceIcon(icons.gold, "gold"), income.value);
+  const populationValue = makePillValueSpan();
+  income.chip.append(makePillDivider(), makePillLabel("Pop"), populationValue);
   const upkeep = makeStatPill("Upkeep");
+  upkeep.chip.insertBefore(makeResourceIcon(icons.gold, "gold"), upkeep.value);
+  const upkeepFoodValue = makePillValueSpan();
+  upkeep.chip.append(document.createTextNode(" + "), makeResourceIcon(icons.food, "food"), upkeepFoodValue);
   const morale = makeStatPill("Morale");
   const context = document.createElement("span");
   context.id = "hud-context";
@@ -61,7 +90,9 @@ export function buildHud(container: HTMLElement): HudHandles {
     round: round.value,
     wealth: wealth.value,
     income: income.value,
-    upkeep: upkeep.value,
+    population: populationValue,
+    upkeepGold: upkeep.value,
+    upkeepFood: upkeepFoodValue,
     morale: morale.value,
     context,
   };
@@ -75,7 +106,9 @@ interface EconomyHudSnapshot {
   roundText: string;
   wealthText: string;
   incomeText: string;
-  upkeepText: string;
+  populationText: string;
+  upkeepGoldText: string;
+  upkeepFoodText: string;
   moraleText: string;
   breakdownTitle: string;
 }
@@ -130,7 +163,9 @@ export function updateHud(
   setText(handles.round, econ.roundText);
   setText(handles.wealth, econ.wealthText);
   setText(handles.income, econ.incomeText);
-  setText(handles.upkeep, econ.upkeepText);
+  setText(handles.population, econ.populationText);
+  setText(handles.upkeepGold, econ.upkeepGoldText);
+  setText(handles.upkeepFood, econ.upkeepFoodText);
   setText(handles.morale, econ.moraleText);
   setTitle(handles.root, econ.breakdownTitle);
 }
@@ -151,6 +186,9 @@ function getEconomyHudSnapshot(state: GameState, ownerId: PlayerId): EconomyHudS
   const ownedSettlements = Object.values(state.settlements).filter((s) => s.ownerId === ownerId);
   const eff = playerEffectiveSettlementIncome(state, ownerId);
   const nextGold = playerIncome(state, ownerId);
+  const heroGold = ownedHeroes.reduce((acc, h) => acc + h.gold, 0);
+  const cityGold = ownedSettlements.reduce((acc, s) => acc + s.gold, 0);
+  const wealthLine = `Wealth: ${fmtNum(playerWealth(state, ownerId))}g — ${fmtNum(heroGold)}g on heroes + ${fmtNum(cityGold)}g in settlement treasuries`;
   const moraleAvg =
     ownedSettlements.length === 0
       ? null
@@ -158,7 +196,11 @@ function getEconomyHudSnapshot(state: GameState, ownerId: PlayerId): EconomyHudS
 
   let breakdownTitle: string;
   if (ownedSettlements.length === 0) {
-    breakdownTitle = "Empire Income: 0g — you own no settlements.";
+    breakdownTitle = [
+      "Empire Income: 0g — you own no settlements.",
+      empireUpkeepTitleClause(upkeepBill),
+      wealthLine,
+    ].join("\n");
   } else {
     const popTax = ownedSettlements.reduce((acc, s) => acc + (s.population ?? 0) * (s.goldTax ?? 0), 0);
     const buildingGold = nextGold - popTax;
@@ -177,6 +219,7 @@ function getEconomyHudSnapshot(state: GameState, ownerId: PlayerId): EconomyHudS
       `Income: settlements ${fmtNum(popTax)}g pop-tax + ${fmtNum(buildingGold)}g buildings → morale ${moraleAvg}% on tax → ${fmtNum(eff)}g/round to treasuries`,
       `${empireUpkeepTitleClause(upkeepBill)} · buildings ${fmtNum(upkeep.wood)} wood + ${fmtNum(upkeep.stone)} stone/wk · food ${fmtNum(foodHave)}/${fmtNum(foodNeed)} → ${moraleTrend}`,
       `${fmtNum(buildingGold)}g building gold is morale-stable and counted in both Empire Income (${fmtNum(eff)}g) and next-turn gold (${fmtNum(nextGold)}g)`,
+      wealthLine,
     ].join("\n");
   }
 
@@ -186,9 +229,11 @@ function getEconomyHudSnapshot(state: GameState, ownerId: PlayerId): EconomyHudS
     round: state.round,
     day: state.day,
     roundText: String(state.round),
-    wealthText: `${playerWealth(state, ownerId)}g`,
-    incomeText: `${fmtNum(eff)}/${fmtNum(nextGold)}g`,
-    upkeepText: `${fmtNum(upkeepBill.gold)}g + ${fmtNum(upkeepBill.food)} food`,
+    wealthText: `${fmtNum(playerWealth(state, ownerId))}`,
+    incomeText: `${fmtNum(eff)}`,
+    populationText: `${fmtNum(playerPopulation(state, ownerId))}`,
+    upkeepGoldText: `${fmtNum(upkeepBill.gold)}`,
+    upkeepFoodText: `${fmtNum(upkeepBill.food)}`,
     moraleText: moraleAvg === null ? "n/a" : `${moraleAvg}%`,
     breakdownTitle,
   };
