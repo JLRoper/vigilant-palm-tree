@@ -82,6 +82,10 @@ function sanitize(
   const merged: BuildingDef = { ...incoming };
   if (prev) {
     merged.level = prev.level;
+    if (prev.w !== undefined) merged.w = prev.w;
+    else delete merged.w;
+    if (prev.h !== undefined) merged.h = prev.h;
+    else delete merged.h;
     if (prev.bank) {
       merged.bank = { ...prev.bank, pendingOut: prev.bank.pendingOut.map((p) => ({ ...p })) };
     } else {
@@ -89,6 +93,8 @@ function sanitize(
     }
   } else {
     merged.level = 1;
+    delete merged.w;
+    delete merged.h;
     delete merged.bank;
   }
   if (construction) merged.construction = construction;
@@ -120,8 +126,8 @@ export function applyPlaceBuildings(
     const occupied = new Set<string>();
     for (const b of sanitized) {
       const fp = buildingFootprintFromRegistry(b.kind, b.level);
-      const w = Math.max(1, Math.ceil(fp.w));
-      const h = Math.max(1, Math.ceil(fp.h));
+      const w = Math.max(1, Math.ceil(b.w ?? fp.w));
+      const h = Math.max(1, Math.ceil(b.h ?? fp.h));
       if (
         !Number.isInteger(b.gx) ||
         !Number.isInteger(b.gy) ||

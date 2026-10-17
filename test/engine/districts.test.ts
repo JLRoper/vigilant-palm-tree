@@ -1261,6 +1261,8 @@ test("applyPlaceBuildings: strips forged level > 1 and bank on new placements, p
         gy: 2,
         kind: "bank",
         level: 3,
+        w: 5,
+        h: 5,
         style: "pixel",
         bank: { gold: 50000, pendingOut: [{ gold: 10000, maturesOnDay: 1 }] },
       },
@@ -1279,10 +1281,11 @@ test("applyPlaceBuildings: strips forged level > 1 and bank on new placements, p
     pendingOut: [{ gold: 200, maturesOnDay: 14 }],
   });
 
-  const newBank = distBuildings.find((b) => b.gx === 2 && b.gy === 2)!;
-  assert.equal(newBank.level, 1, "new placement forces level = 1");
-  assert.equal(newBank.bank, undefined, "new placement strips forged bank state");
-  assert.equal("bank" in newBank, false);
+  const placed = distBuildings.find((b) => b.gx === 2 && b.gy === 2)!;
+  assert.equal(placed.level, 1, "new placement forces level = 1");
+  assert.equal("w" in placed === false && "h" in placed === false, true, "new placement strips forged w/h");
+  assert.equal(placed.bank, undefined, "new placement strips forged bank state");
+  assert.equal("bank" in placed, false);
 
   // Existing L2 bank at (0, 0) has 1.5x1.5 registry footprint -> reserves 2x2 cells (0..1, 0..1),
   // so placing a 1x1 house at (1, 1) must be rejected as overlapping!

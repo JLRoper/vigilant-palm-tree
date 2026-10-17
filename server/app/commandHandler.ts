@@ -1706,11 +1706,14 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         if (terrain === "water" || terrain === "mountain") {
           return { ok: false, reason: "impassable_district_terrain", events: [] };
         }
-        const controlling = resolveControllingSettlement(state.settlements, q, r, map.width, map.height);
-        if (!controlling || controlling.id !== settlement.id) {
-          return { ok: false, reason: "not_in_settlement_territory", events: [] };
+        const existingDistrict = settlement.districts?.[districtKey(q, r)];
+        if (!(command.buildings.length === 0 && existingDistrict)) {
+          const controlling = resolveControllingSettlement(state.settlements, q, r, map.width, map.height);
+          if (!controlling || controlling.id !== settlement.id) {
+            return { ok: false, reason: "not_in_settlement_territory", events: [] };
+          }
         }
-        const existingSpots = settlement.districts?.[districtKey(q, r)]?.citySpots;
+        const existingSpots = existingDistrict?.citySpots;
         const mapRes = map.resourceTileAt(q, r)?.resource ?? null;
         const citySpots =
           existingSpots && existingSpots.length > 0
