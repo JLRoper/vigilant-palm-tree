@@ -669,15 +669,23 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
         : route.from.kind === "hero"
           ? nextHeroes[route.from.id]
           : undefined;
-    if (heroTarget && heroTarget.ownerId === routeOwnerId(route, records) && map) {
+    if (heroTarget && heroTarget.ownerId === routeOwnerId(route, records)) {
       const fromTile = caravan.pathIndex > 0 ? caravan.path[caravan.pathIndex - 1] : originTile;
       const pathEnd = caravan.path[caravan.path.length - 1];
-      if (fromTile && pathEnd && !isSameTile(heroTarget, pathEnd) && !isSameTile(heroTarget, fromTile)) {
-        const leg = findPath(map, fromTile, { q: heroTarget.q, r: heroTarget.r });
-        if (leg.length > 0) {
-          caravan = { ...caravan, path: [fromTile, ...leg], pathIndex: 1, anchored: true };
-          repathsUsed += 1;
+      if (fromTile && pathEnd && !isSameTile(heroTarget, pathEnd)) {
+        if (isSameTile(heroTarget, fromTile)) {
+          // The hero has stepped ONTO the caravan's tile mid-path: collapse
+          // the walk to this tile so the arrival handling below delivers
+          // this wrap instead of walking away along the stale path.
+          caravan = { ...caravan, path: [fromTile], pathIndex: 1, anchored: true };
           changed = true;
+        } else if (map) {
+          const leg = findPath(map, fromTile, { q: heroTarget.q, r: heroTarget.r });
+          if (leg.length > 0) {
+            caravan = { ...caravan, path: [fromTile, ...leg], pathIndex: 1, anchored: true };
+            repathsUsed += 1;
+            changed = true;
+          }
         }
       }
     }

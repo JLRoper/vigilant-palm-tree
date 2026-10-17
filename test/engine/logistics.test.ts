@@ -568,6 +568,33 @@ test("a hero destination that moves off the path's end is re-targeted before the
   assert.ok(retargeted.pathIndex > 1, "the cart kept walking today's budget on the re-targeted path");
 });
 
+test("a hero that steps onto the caravan's tile mid-path is delivered that same wrap", () => {
+  const map = new GameMap(89, "small");
+  const [a, b] = reachableDistantPair(map, 8);
+  const hero = { ...makeHero("h0", 0, b.q, b.r), resources: emptyWarehouse() };
+  const origin = makeSettlement("s0", 0, a.q, a.r, { gold: 2500 });
+  const state = grantWagons(makeState({ heroes: [hero], settlements: [origin], activePlayerId: 0 }), 1);
+  const created = createTradeRoute(state, 0, settlementEndpoint("s0"), heroEndpoint("h0"), GOLD, 1);
+  assert.equal(created.ok, true, created.reason);
+
+  let current = advanceTradeRoutes(created.state, map); // wrap 1: loads at the origin
+  current = advanceTradeRoutes(current, map); // wrap 2: walks 7 (hero seeded >= 8 out -> mid-path)
+  const mid = current.tradeRoutes![0].caravan!;
+  assert.ok(mid.pathIndex < mid.path.length, "precondition: mid-path");
+  const cartTile = mid.path[mid.pathIndex - 1];
+
+  // The hero teleports ONTO the cart's tile instead of away from it.
+  current = {
+    ...current,
+    heroes: { ...current.heroes, h0: { ...current.heroes.h0, q: cartTile.q, r: cartTile.r } },
+  };
+
+  current = advanceTradeRoutes(current, map);
+  const after = current.tradeRoutes![0].caravan!;
+  assert.equal(after.phase, "toHome", "the caravan flipped homeward the SAME wrap (no walk away along the stale path)");
+  assert.equal(current.heroes.h0.gold, 500, "the 500 gold landed on the hero that same wrap");
+});
+
 test("an exhausted chase waits for the next daily tick with cargo intact when it cannot re-path", () => {
   assert.equal(CARAVAN_CATCHUP_REPATHS_PER_DAY, 3, "the re-path cap is a named constant (suggest 3, per the brief)");
   const map = new GameMap(7, "small");
