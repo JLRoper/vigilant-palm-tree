@@ -27,6 +27,8 @@ import {
   HERO_PLAYER_DESCRIPTORS,
   HORSE_VARIANT_DESCRIPTORS,
   castleKey,
+  type SpriteDescriptor,
+  type SpriteKey,
 } from "../../render/assetDescriptors";
 import { showToast } from "../shared/toast";
 import { openCenteredModal, styleButton, styleInput } from "@screens/shared/menu";
@@ -43,7 +45,10 @@ import {
 } from "./routeVisualization";
 
 const RES: WarehouseResource[] = ["wood", "stone", "iron", "arcane", "food"];
-const CASTLE_MAP_DESCRIPTORS = {
+// Typed over the full SpriteKey union so the castleKey index stays legal even
+// after main widened castleKey's return type (fullness variants): absent keys
+// fall through to the CASTLE_DESCRIPTORS fallback below.
+const CASTLE_MAP_DESCRIPTORS: Partial<Record<SpriteKey, SpriteDescriptor>> = {
   ...CASTLE_DESCRIPTORS,
   ...CASTLE_ALT_DESCRIPTORS,
   ...CASTLE_ALT2_DESCRIPTORS,
