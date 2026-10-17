@@ -14,7 +14,9 @@ function render(state: ReturnType<typeof makeState>, readout: PathCostReadout | 
     round: fakeEl(),
     wealth: fakeEl(),
     income: fakeEl(),
-    upkeep: fakeEl(),
+    population: fakeEl(),
+    upkeepGold: fakeEl(),
+    upkeepFood: fakeEl(),
     morale: fakeEl(),
     context: fakeEl(),
   };
@@ -40,12 +42,14 @@ function economyState() {
   });
 }
 
-test("hud: economy pills carry round, wealth, income, upkeep and morale", () => {
+test("hud: economy pills carry round, wealth, income, population, upkeep and morale", () => {
   const h = render(economyState());
   assert.equal(h.round.textContent, "1");
-  assert.equal(h.wealth.textContent, "0g");
-  assert.equal(h.income.textContent, "940/1040g");
-  assert.equal(h.upkeep.textContent, "0g + 0 food");
+  assert.equal(h.wealth.textContent, "0");
+  assert.equal(h.income.textContent, "940");
+  assert.equal(h.population.textContent, "1000");
+  assert.equal(h.upkeepGold.textContent, "0");
+  assert.equal(h.upkeepFood.textContent, "0");
   assert.equal(h.morale.textContent, "90%");
 });
 
@@ -73,13 +77,24 @@ test("hud: last saved rides the context segment (the smoke suite reads #hud for 
 test("hud: economy breakdown title explains income scaling, upkeep, and the next-turn gold inconsistency", () => {
   const { title } = render(economyState()).root;
   const lines = title.split("\n");
-  assert.equal(lines.length, 3);
+  assert.equal(lines.length, 4);
   assert.match(lines[0], /Income: settlements 1000g pop-tax \+ 40g buildings → morale 90% on tax → 940g\/round to treasuries/);
   assert.match(
     lines[1],
     /Upkeep: troops 0g \+ 0 food\/wk \(hero purse; larder first, then your own settlements' food while standing on one\) · buildings 1 wood \+ 1 stone\/wk · food 4\/10 → morale −6\/round/,
   );
   assert.match(lines[2], /40g building gold is morale-stable and counted in both Empire Income \(940g\) and next-turn gold \(1040g\)/);
+  assert.match(lines[3], /^Wealth: 0g — 0g on heroes \+ 0g in settlement treasuries$/);
+});
+
+test("hud: the wealth tooltip line splits the hero purse from the settlement treasuries", () => {
+  const state = makeState({
+    settlements: [makeSettlement("s0", 0, 2, 2, { population: 1000, goldTax: 1, gold: 300 })],
+    heroes: [makeHero("h0", 0, 2, 2, { gold: 120 })],
+  });
+  const h = render(state);
+  assert.equal(h.wealth.textContent, "420");
+  assert.match(h.root.title, /Wealth: 420g — 120g on heroes \+ 300g in settlement treasuries/);
 });
 
 test("hud: stable morale reads as stable instead of a negative decay", () => {
@@ -93,7 +108,13 @@ test("hud: stable morale reads as stable instead of a negative decay", () => {
 test("hud: no owned settlements degrades to a plain explanation", () => {
   const state = makeState({ settlements: [makeSettlement("s1", 1, 18, 4)] });
   const h = render(state);
-  assert.equal(h.income.textContent, "0/0g");
+  assert.equal(h.income.textContent, "0");
+  assert.equal(h.population.textContent, "0");
   assert.equal(h.morale.textContent, "n/a");
-  assert.equal(h.root.title, "Empire Income: 0g — you own no settlements.");
+  assert.equal(
+    h.root.title,
+    "Empire Income: 0g — you own no settlements.\n" +
+      "Upkeep: troops 0g + 0 food/wk (hero purse; larder first, then your own settlements' food while standing on one)\n" +
+      "Wealth: 0g — 0g on heroes + 0g in settlement treasuries",
+  );
 });

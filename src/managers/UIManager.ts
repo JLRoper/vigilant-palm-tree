@@ -11,6 +11,7 @@ import { TileInfoPanel } from "@screens/adventure/tileInfoPanel";
 import { describeTile } from "@screens/adventure/tileInfo";
 import { setMinimapReserve } from "@screens/shared/panelRail";
 import { getMinimapReserveHeight } from "../render/minimap";
+import { RESOURCE_PILE_SMOL_SPRITES } from "../render/assetDescriptors";
 import type { CityView, CitySelectionSnapshot } from "@screens/settlements/cityView/cityView";
 import { settleNet } from "@screens/settlements/cityView/netCost";
 import { recordBuildCommit } from "../game/buildCommitLedger";
@@ -77,7 +78,10 @@ export class UIManager {
   ) {}
 
   private initHud(): void {
-    this.hudHandles = buildHud(this.toolbar?.statusSlot ?? this.toolbarEl);
+    this.hudHandles = buildHud(this.toolbar?.statusSlot ?? this.toolbarEl, {
+      gold: RESOURCE_PILE_SMOL_SPRITES.gold,
+      food: RESOURCE_PILE_SMOL_SPRITES.food,
+    });
   }
 
   initToolbar(

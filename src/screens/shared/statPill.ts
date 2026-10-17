@@ -3,6 +3,43 @@ export interface StatPill {
   value: HTMLSpanElement;
 }
 
+export function makePillLabel(text: string): HTMLSpanElement {
+  const labelEl = document.createElement("span");
+  labelEl.textContent = text;
+  Object.assign(labelEl.style, {
+    color: "var(--tb-text-muted, #9aa7bd)",
+    fontSize: "9px",
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: "0.8px",
+  });
+  return labelEl;
+}
+
+export function makePillValueSpan(): HTMLSpanElement {
+  const value = document.createElement("span");
+  Object.assign(value.style, {
+    fontSize: "11.5px",
+    fontWeight: "600",
+    color: "var(--tb-text, #e9eef8)",
+    fontVariantNumeric: "tabular-nums",
+  });
+  return value;
+}
+
+export function makePillDivider(): HTMLSpanElement {
+  const divider = document.createElement("span");
+  Object.assign(divider.style, {
+    width: "1px",
+    height: "14px",
+    alignSelf: "center",
+    flexShrink: "0",
+    background: "var(--tb-divider, rgba(148,163,184,0.22))",
+    borderRadius: "1px",
+  });
+  return divider;
+}
+
 /**
  * The header's stat pill: a rounded surface with an optional uppercase
  * micro-label and a tabular-nums value. Shared by the toolbar's date pill and
@@ -21,24 +58,9 @@ export function makeStatPill(label?: string): StatPill {
     whiteSpace: "nowrap",
   });
   if (label) {
-    const labelEl = document.createElement("span");
-    labelEl.textContent = label;
-    Object.assign(labelEl.style, {
-      color: "var(--tb-text-muted, #9aa7bd)",
-      fontSize: "9px",
-      fontWeight: "700",
-      textTransform: "uppercase",
-      letterSpacing: "0.8px",
-    });
-    chip.appendChild(labelEl);
+    chip.appendChild(makePillLabel(label));
   }
-  const value = document.createElement("span");
-  Object.assign(value.style, {
-    fontSize: "11.5px",
-    fontWeight: "600",
-    color: "var(--tb-text, #e9eef8)",
-    fontVariantNumeric: "tabular-nums",
-  });
+  const value = makePillValueSpan();
   chip.appendChild(value);
   return { chip, value };
 }

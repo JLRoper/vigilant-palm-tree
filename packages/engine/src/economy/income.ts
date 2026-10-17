@@ -29,6 +29,14 @@ export function playerIncome(state: GameState, playerId: PlayerId): number {
   return total;
 }
 
+export function playerPopulation(state: GameState, playerId: PlayerId): number {
+  let total = 0;
+  for (const s of Object.values(state.settlements)) {
+    if (s.ownerId === playerId) total += s.population;
+  }
+  return total;
+}
+
 /**
  * The total gold a settlement actually receives per turn: the morale-scaled
  * population tax (via `effectiveIncome`) PLUS building goldPerTurn. This mirrors
