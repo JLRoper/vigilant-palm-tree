@@ -29,7 +29,7 @@ branch-creation call.** A WIP commit never touches `package.json` or `CHANGELOG.
 ## The version gate
 
 The app version is the root `package.json` `version` — the single source of truth
-that `vite.config.ts` stamps into the client and the settings panel displays.
+that `vite.config.ts` stamps into the client and the toolbar gear (⚙) dropdown menu displays.
 
 **First, work out whether the version has already been advanced past the last
 release.** The anchor is the newest `v*` tag, because that is the only durable
