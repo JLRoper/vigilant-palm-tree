@@ -83,7 +83,7 @@ export function clampMorale(value: number): number {
 
 export function clampWarehouseNonNegative(value: number): number {
   if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.floor(value));
+  return Math.max(0, Math.round(value));
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -115,5 +115,5 @@ export function applyMoraleDecay(s: SettlementState): SettlementState {
 export function applyEffectiveIncome(s: SettlementState): SettlementState {
   const inc = effectiveIncome(s);
   const headroom = treasuryHeadroom(s.gold, settlementTreasuryCap(s));
-  return { ...s, gold: s.gold + Math.min(inc, headroom) };
+  return { ...s, gold: Math.round(s.gold + Math.min(inc, headroom)) };
 }

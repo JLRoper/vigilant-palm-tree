@@ -268,7 +268,9 @@ test("produceSettlementResources banks the farm output as food in the warehouse"
   const [after] = Object.values(produceSettlementResources({ s0: settlement }, seed));
   const onSpot = cellMultiplier({ seed, q: 2, r: 2, gx: 1, gy: 1, resource: "food", spots: [FOOD_SPOT] });
   const offSpot = cellMultiplier({ seed, q: 2, r: 2, gx: 4, gy: 4, resource: "food", spots: [FOOD_SPOT] });
-  const expected = Math.round(5 * onSpot * 100) / 100 + Math.round(2 * offSpot * 100) / 100;
+  const farmFieldAmount = Math.round(5 * onSpot * 100) / 100;
+  const farmhouseAmount = Math.round(2 * offSpot * 100) / 100;
+  const expected = Math.round(Math.round(farmFieldAmount) + farmhouseAmount);
   assert.ok(expected > 12 && expected < 22, `expected a farm-sized surplus (got ${expected})`);
   assert.equal(after.warehouse.food, expected);
   assert.equal(after.gold, 0, "food never leaks into the treasury");

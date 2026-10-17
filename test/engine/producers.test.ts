@@ -192,8 +192,8 @@ test("produceSettlementResources adds producer outputs to warehouse and treasury
     ],
   });
   const [after] = Object.values(produceSettlementResources({ s0: settlement }, 7));
-  assert.equal(after.gold, 100 + Math.round(40 * before * 100) / 100);
-  assert.equal(after.warehouse.wood, Math.round(3 * woodMult * 100) / 100);
+  assert.equal(after.gold, Math.round(100 + Math.round(40 * before * 100) / 100));
+  assert.equal(after.warehouse.wood, Math.round(Math.round(3 * woodMult * 100) / 100));
   assert.equal(after.warehouse.food, 0);
 });
 
@@ -215,7 +215,7 @@ test("EndTurn pays producer gold into the treasury (server tick parity via the s
   });
   const state = makeState({ settlements: [settlement], activePlayerId: 0 });
   const next = applyEndOfTurn(state);
-  const expectedGold = Math.round(40 * cellMultiplier({
+  const expectedGold = Math.round(Math.round(40 * cellMultiplier({
     seed: 0,
     q: 2,
     r: 2,
@@ -223,6 +223,6 @@ test("EndTurn pays producer gold into the treasury (server tick parity via the s
     gy: 2,
     resource: "gold",
     spots: [GOLD_SPOT],
-  }) * 100) / 100;
+  }) * 100) / 100);
   assert.equal(next.settlements.s0.gold, expectedGold);
 });
