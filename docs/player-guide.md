@@ -1,6 +1,6 @@
 # Player Guide
 
-<!-- docs:verified 2026-10-15 -->
+<!-- docs:verified 2026-10-17 -->
 
 ## Start a Game
 
