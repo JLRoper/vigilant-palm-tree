@@ -18,6 +18,7 @@ This guide covers local development and deployment. See [`AGENTS.md`](../AGENTS.
 - `npm run test:unit` runs serial Node `node:test` suites.
 - `npm run test:all` runs the browser/e2e suites through `tools/run-test.mjs all`, followed by unit tests.
 - `npm run docs:check` checks maintained Markdown links/source paths (always) and `docs:verified` freshness markers (full mode for all docs; `--changed <path>` / `--changed-from <git-spec>` scope freshness to the docs owning the changed files, per the `DOC_OWNERSHIP` globs in `tools/docs-check.mjs`) without connecting to the database.
+- `npm run test:scope -- --changed-from <git-spec>` (`tools/test-scope.mjs`) reports whether a changeset needs the test suites. Documentation and agent-tooling paths (`*.md`, `docs/`, `.kilo/`, `.claude/`, `.github/agents|hooks|prompts|skills/`, `sessionTracking/`, `reviews/`, `analysis/`, `feature-plans/`, `local/`, `scripts/hooks/`, and a version-only `package.json` bump) print `TESTS SKIPPED`; anything else prints `TESTS REQUIRED`. The pre-commit gate and the PR workflow both use it to skip tests for docs/agent-only changes.
 
 The browser suite includes smoke, multiplayer, city view, settlements, AI defender, AI charter, log panel, and visual regression. Avoid `npm run test:all` when another coordinated session is exercising the shared database.
 
