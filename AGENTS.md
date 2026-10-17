@@ -47,10 +47,10 @@ The `/precommit` and `/pre-pr` slash commands are manual equivalents you can off
 
 - **The root `package.json` `version` is the app version** — the single source
   of truth. `vite.config.ts` stamps it into the client as `__APP_VERSION__`,
-  and the settings panel's build-info footer (bottom of the panel, next to
-  Close) shows `v<version> (<commit>)` plus `Built: <time>` via
-  `src/core/version.ts`. The workspace packages (`packages/*`, `0.0.1`) are
-  private internals and are deliberately not the app version.
+  and the in-game toolbar gear (⚙) dropdown menu shows `v<version> (<commit>)`
+  plus `Built: <time>` via `src/core/version.ts`. The workspace packages
+  (`packages/*`, `0.0.1`) are private internals and are deliberately not the
+  app version.
 - **Bump with `npm run version:bump -- patch|minor|major|X.Y.Z`**. It rewrites
   the version, prepends a `CHANGELOG.md` entry (commit-log summary by default,
   or `-m "..."`), and prints the deploy command. It edits nothing else unless
@@ -67,7 +67,7 @@ The `/precommit` and `/pre-pr` slash commands are manual equivalents you can off
   PNG art history), so the container cannot resolve a commit hash on its own —
   the wrapper resolves it on the host and passes it as a build arg. A bare
   `docker compose build` stamps the literal fallback `"dev"` and the deployed
-  settings panel will read `v<version> (dev)`.
+  gear dropdown will read `v<version> (dev)`.
 - Run the pre-commit gate before committing a release (see above).
 
 ## Skills available
