@@ -32,6 +32,13 @@ export function buildingUpkeepRequired(s: SettlementState): { wood: number; ston
     wood += u.wood;
     stone += u.stone;
   }
+  for (const d of Object.values(s.districts ?? {})) {
+    for (const b of d.buildings) {
+      const u = buildingUpkeep(b.kind, b.level);
+      wood += u.wood;
+      stone += u.stone;
+    }
+  }
   return { wood, stone };
 }
 

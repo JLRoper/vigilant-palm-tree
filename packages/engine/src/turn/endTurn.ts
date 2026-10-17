@@ -23,7 +23,11 @@ export function applyEndOfTurnDetailed(state: GameState, opts?: ApplyEndOfTurnOp
   const playerId = state.activePlayerId;
   const newHeroes: Record<HeroId, HeroState> = resetHeroMovement(state.heroes, playerId);
   // 1. Produce resources for ALL settlements (tile rates + producer mines)
-  let newSettlements: Record<SettlementId, SettlementState> = produceSettlementResources(state.settlements, state.castleSeed);
+  let newSettlements: Record<SettlementId, SettlementState> = produceSettlementResources(
+    state.settlements,
+    state.castleSeed,
+    state.heroes,
+  );
   // 2. Auto-trade for active player's settlements (legacy gate: absent → on)
   const autoTrade = runAutoTrade(newSettlements, playerId, opts?.legacyAutoTrade ?? true);
   newSettlements = autoTrade.settlements;

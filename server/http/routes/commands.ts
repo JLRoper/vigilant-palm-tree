@@ -71,6 +71,17 @@ function isAxial(v: unknown): v is { q: number; r: number } {
   );
 }
 
+function parseOptionalDistrict(
+  v: unknown,
+): { ok: true; district?: { q: number; r: number } } | { ok: false } {
+  if (v === undefined) return { ok: true };
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return { ok: false };
+  const d = v as Record<string, unknown>;
+  if (typeof d.q !== "number" || !Number.isInteger(d.q)) return { ok: false };
+  if (typeof d.r !== "number" || !Number.isInteger(d.r)) return { ok: false };
+  return { ok: true, district: { q: d.q, r: d.r } };
+}
+
 // UpgradeBuilding's per-entry shape check. `kind` is only checked for
 // being a non-empty string, not against a list of BuildingKind values:
 // BuildingKind is a type-only union in @heroes/contracts (no runtime
@@ -80,7 +91,8 @@ function isAxial(v: unknown): v is { q: number; r: number } {
 // there as a "building_not_found" 409, not a crash.
 function isBuildingUpgradeRequest(v: unknown): boolean {
   if (!v || typeof v !== "object") return false;
-  const r = v as { gx: unknown; gy: unknown; kind: unknown };
+  const r = v as { gx: unknown; gy: unknown; kind: unknown; district?: unknown };
+  if (!parseOptionalDistrict(r.district).ok) return false;
   return (
     Number.isInteger(r.gx) &&
     Number.isInteger(r.gy) &&
@@ -189,7 +201,7 @@ function passthroughBuilding(v: unknown): BuildingDef {
 // MoveHero/TransferGold body (missing/mistyped field) is rejected as a
 // clean 400 here instead of reaching handleCommand and failing with an
 // unrelated runtime TypeError.
-function parseCommand(body: unknown, gameName: string): Command | null {
+export function parseCommand(body: unknown, gameName: string): Command | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
   if (typeof b.actor !== "number") return null;
@@ -240,7 +252,9 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     // a malformed body rather than a request the reducer would have to
     // round-reject. The treasury cap is far lower, which is a 409
     // (not_enough_gold), not a 400.
+    const d = parseOptionalDistrict(b.district);
     if (
+      !d.ok ||
       typeof b.settlementId !== "string" ||
       b.settlementId.length === 0 ||
       !isNonNegativeInt(b.gx) ||
@@ -261,6 +275,7 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       gy: b.gy,
       amount: b.amount,
       direction: b.direction,
+      ...(d.district ? { district: d.district } : {}),
     };
   }
 
@@ -389,7 +404,9 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     // well-formed command that @heroes/engine's startBuildingUpgrade()
     // already turns down with "no_buildings", which this route surfaces
     // as a 409. Only malformed entries are a 400.
+    const d = parseOptionalDistrict(b.district);
     if (
+      !d.ok ||
       typeof b.settlementId !== "string" ||
       !Array.isArray(b.requests) ||
       !b.requests.every(isBuildingUpgradeRequest)
@@ -401,7 +418,16 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       gameName,
       actor: b.actor,
       settlementId: b.settlementId,
-      requests: b.requests as BuildingUpgradeRequest[],
+      requests: (b.requests as BuildingUpgradeRequest[]).map((r) => {
+        const rd = parseOptionalDistrict(r.district);
+        return {
+          gx: r.gx,
+          gy: r.gy,
+          kind: r.kind,
+          ...(rd.ok && rd.district ? { district: rd.district } : {}),
+        };
+      }),
+      ...(d.district ? { district: d.district } : {}),
     };
   }
 
@@ -414,7 +440,9 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     // recomputes that for brand-new placements server-side anyway, so a
     // spoofed 0-day value only affects edits to buildings the server already
     // knows about.
+    const dist = parseOptionalDistrict(b.district);
     if (
+      !dist.ok ||
       typeof b.settlementId !== "string" ||
       !Array.isArray(b.buildings) ||
       !b.buildings.every((v: unknown) => {
@@ -452,6 +480,7 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       settlementId: b.settlementId,
       buildings: b.buildings.map(passthroughBuilding),
       ...(b.initialLayout === true ? { initialLayout: true } : {}),
+      ...(dist.district ? { district: dist.district } : {}),
     };
   }
 
@@ -701,7 +730,9 @@ function parseCommand(body: unknown, gameName: string): Command | null {
     // the union is type-only (no runtime list), and the handler resolves it
     // against the settlement's own buildings + the recruit registry -- an
     // unknown kind falls out there as "no_building"/"not_recruitable" 409s.
+    const d = parseOptionalDistrict(b.district);
     if (
+      !d.ok ||
       typeof b.settlementId !== "string" ||
       typeof b.buildingKind !== "string" ||
       b.buildingKind.length === 0 ||
@@ -725,6 +756,7 @@ function parseCommand(body: unknown, gameName: string): Command | null {
       gy: b.gy as number,
       unitTypeId: b.unitTypeId,
       count: b.count,
+      ...(d.district ? { district: d.district } : {}),
     };
   }
 

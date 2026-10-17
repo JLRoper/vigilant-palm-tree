@@ -1,4 +1,4 @@
-import { axialToPixel, hexCorners, hexDistance, HEX_SIZE, type Axial } from "../../../core/hex";
+import { axialToPixel, hexCorners, HEX_SIZE, type Axial } from "../../../core/hex";
 import { getRowQBounds, isTileInViewportBounds, type ViewportAxialBounds } from "../../camera";
 import type { GameMap } from "../../../map/gameMap";
 import type { Hero } from "../../../entities/hero";
@@ -6,7 +6,8 @@ import type { Castle } from "../../../entities/settlement";
 import type { RenderOptions } from "../../renderTypes";
 import { computeVision, isVisible } from "../../fog";
 import { computeReachableSplit } from "../../overlays/pathOverlay";
-import { controlledPositions, territoryBoundaryEdges } from "@heroes/engine";
+import type { BuildingDef } from "@heroes/contracts";
+import { controlledPositions, isDistrictBlockedByHero, resolveControllingSettlement, territoryBoundaryEdges } from "@heroes/engine";
 import type { EntityMirror } from "../entityMirror";
 import type {
   SceneNode,
@@ -37,6 +38,24 @@ export interface AdventureSceneInput {
    * frame; omitted, it is computed here. */
   visible?: Set<string>;
   viewportBounds?: ViewportAxialBounds;
+}
+
+export function districtVariantForBuildings(buildings: readonly BuildingDef[]): "standard" | "farm" {
+  return buildings.some((b) => b.kind === "farmField" || b.kind === "farmhouse") ? "farm" : "standard";
+}
+
+export function districtTierForCount(count: number): 1 | 2 | 3 {
+  if (count >= 9) return 3;
+  if (count >= 4) return 2;
+  return 1;
+}
+
+export function settlementFullnessForCount(count: number): 1 | 2 | 3 | 4 | 5 {
+  if (count >= 13) return 5;
+  if (count >= 10) return 4;
+  if (count >= 7) return 3;
+  if (count >= 4) return 2;
+  return 1;
 }
 
 export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
@@ -117,11 +136,34 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       world: axialToPixel(c.tile.q, c.tile.r),
       level: c.level,
       variant: c.castleVariant,
+      ...(c.level === 1 && c.buildings.length > 0 ? { fullness: settlementFullnessForCount(c.buildings.length) } : {}),
       ownerId: c.ownerId,
       selected: opts.selectedSettlementId === c.id,
       color: c.ownerId === null ? "rgba(255,255,255,0.18)" : opts.colorForOwner(c.ownerId),
       dashedBorder: c.ownerId === null,
     });
+  }
+
+  const heroCoords = heroes.map((h) => ({ ownerId: h.ownerId, q: h.tile.q, r: h.tile.r }));
+  for (const c of castles) {
+    for (const d of Object.values(c.districts ?? {})) {
+      if (!d.buildings || d.buildings.length === 0) continue;
+      const canSee = c.ownerId === opts.viewPlayerId || isVisible(visible, d.q, d.r);
+      if (!canSee) continue;
+      const blocked = isDistrictBlockedByHero(c.ownerId, d.q, d.r, heroCoords);
+      nodes.push({
+        kind: "district",
+        settlementId: c.id,
+        ownerId: c.ownerId,
+        q: d.q,
+        r: d.r,
+        world: axialToPixel(d.q, d.r),
+        tier: districtTierForCount(d.buildings.length),
+        variant: districtVariantForBuildings(d.buildings),
+        color: c.ownerId === null ? "rgba(255,255,255,0.18)" : opts.colorForOwner(c.ownerId),
+        ...(blocked ? { blocked: true } : {}),
+      });
+    }
   }
 
   for (const edge of buildTerritoryOutlineEdges(castles, opts.colorForOwner, map.width, map.height, visible)) {
@@ -239,7 +281,8 @@ function buildTerritoryOutlineEdges(
 
   let settlementSig = `${mapWidth}x${mapHeight}`;
   for (const c of owned) {
-    settlementSig += `|${c.id}@${c.ownerId}:${c.tile.q},${c.tile.r}:${c.level}`;
+    const dKeys = Object.keys(c.districts ?? {}).sort().join(";");
+    settlementSig += `|${c.id}@${c.ownerId}:${c.tile.q},${c.tile.r}:${c.level}[${dKeys}]`;
   }
 
   if (!territoryPartitionCache || territoryPartitionCache.settlementSig !== settlementSig) {
@@ -278,25 +321,14 @@ function buildTerritoryOutlineEdges(
       for (const hexes of ownerHexes.values()) {
         for (const h of hexes) allHexes.add(h);
       }
-      const castleAxial: Array<{ ownerId: number; q: number; r: number }> = owned.map((c) => ({
-        ownerId: c.ownerId,
-        q: c.tile.q,
-        r: c.tile.r,
-      }));
       for (const key of allHexes) {
         const comma = key.indexOf(",");
         const q = parseInt(key.slice(0, comma), 10);
         const r = parseInt(key.slice(comma + 1), 10);
-        let bestOwner = 0;
-        let bestDist = Infinity;
-        for (const { ownerId: oid, q: cq, r: cr } of castleAxial) {
-          const dist = hexDistance({ q, r }, { q: cq, r: cr });
-          if (dist < bestDist || (dist === bestDist && oid < bestOwner)) {
-            bestDist = dist;
-            bestOwner = oid;
-          }
+        const winner = resolveControllingSettlement(owned, q, r, mapWidth, mapHeight);
+        if (winner && winner.ownerId !== null) {
+          partitionedCoords.get(winner.ownerId)?.push({ q, r, key });
         }
-        partitionedCoords.get(bestOwner)!.push({ q, r, key });
       }
     }
 

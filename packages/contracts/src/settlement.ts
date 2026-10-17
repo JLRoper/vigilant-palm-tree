@@ -6,12 +6,25 @@ import type { Platoon } from "./units";
 
 export type CharterPhase = "traveling" | "constructing";
 
+export interface DistrictCoord {
+  q: number;
+  r: number;
+}
+
+export interface DistrictState {
+  q: number;
+  r: number;
+  citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
+  buildings: BuildingDef[];
+}
+
 export interface UpgradeState {
   kind: "townHall" | "settlement" | "building" | "buildings";
   targetLevel: 2 | 3;
   daysRemaining: number;
   buildingRef?: BuildingRef;
   buildingRefs?: BuildingRef[];
+  district?: DistrictCoord;
   newResourceRates?: Partial<Record<ResourceType, number>>;
   newCitySpots?: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
 }
@@ -57,6 +70,7 @@ export interface SettlementState {
   autoTrade: boolean;
   castleVariant: CastleVariant;
   buildings: BuildingDef[];
+  districts?: Record<string, DistrictState>;
   upgrade?: UpgradeState;
   // Garrison platoons defending this settlement. Optional + helper-accessed
   // so legacy saves and old JSONB rows stay valid (HeroState.stacks precedent).

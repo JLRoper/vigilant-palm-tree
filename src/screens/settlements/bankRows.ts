@@ -1,4 +1,4 @@
-import type { SettlementState } from "@heroes/contracts";
+import type { BuildingDef, SettlementState } from "@heroes/contracts";
 import {
   BANK_WEEKLY_INTEREST_RATE,
   BANK_WITHDRAWAL_DAYS,
@@ -43,6 +43,7 @@ export interface BankRowModel {
   pendingTotal: number;
   canDeposit: boolean;
   canWithdraw: boolean;
+  district?: { q: number; r: number };
 }
 
 export interface BankRowsModel {
@@ -71,8 +72,8 @@ export interface TreasuryRowModel {
 
 export function bankRowModel(settlement: SettlementState, nowDay: number): BankRowsModel {
   const banks: BankRowModel[] = [];
-  for (const b of settlement.buildings) {
-    if (b.kind !== "bank") continue;
+  const pushBank = (b: BuildingDef, district?: { q: number; r: number }): void => {
+    if (b.kind !== "bank") return;
     const cap = bankGoldCap(b);
     const gold = bankGoldOf(b);
     const pending = bankPendingOut(b).map((e) => {
@@ -92,7 +93,16 @@ export function bankRowModel(settlement: SettlementState, nowDay: number): BankR
       pendingTotal: pending.reduce((sum, e) => sum + e.gold, 0),
       canDeposit: gold < cap,
       canWithdraw: gold > 0,
+      ...(district ? { district } : {}),
     });
+  };
+  for (const b of settlement.buildings) {
+    pushBank(b);
+  }
+  for (const d of Object.values(settlement.districts ?? {})) {
+    for (const b of d.buildings) {
+      pushBank(b, { q: d.q, r: d.r });
+    }
   }
   return {
     banks,
@@ -108,11 +118,19 @@ export function bankRowModel(settlement: SettlementState, nowDay: number): BankR
 export function treasuryRowModel(settlement: SettlementState): TreasuryRowModel | null {
   let treasuryBuildingBonus = 0;
   let totalBonus = 0;
-  for (const b of settlement.buildings) {
+  const accumulate = (b: BuildingDef): void => {
     const bonus = buildingSettlementEffects(b.kind, b.level).treasuryBonus;
-    if (bonus <= 0) continue;
+    if (bonus <= 0) return;
     totalBonus += bonus;
     if (b.kind === "treasury") treasuryBuildingBonus += bonus;
+  };
+  for (const b of settlement.buildings) {
+    accumulate(b);
+  }
+  for (const d of Object.values(settlement.districts ?? {})) {
+    for (const b of d.buildings) {
+      accumulate(b);
+    }
   }
   if (treasuryBuildingBonus <= 0) return null;
   const cap = settlementTreasuryCap(settlement);

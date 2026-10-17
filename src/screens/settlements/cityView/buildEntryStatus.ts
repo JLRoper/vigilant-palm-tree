@@ -33,6 +33,7 @@ export interface BuildEntryStatusOptions {
   kind: BuildingKind;
   affordability: BuildEntryAffordability | null;
   hasTownHall?: boolean;
+  isDistrict?: boolean;
 }
 
 export interface BuildConfirmStatusOptions {
@@ -52,6 +53,9 @@ export function buildEntryStatus(opts: BuildEntryStatusOptions): BuildEntryStatu
     }
   }
   if (opts.hasTownHall) blocking.push("A town hall already exists in this settlement");
+  if (opts.isDistrict && opts.kind === "townHall") {
+    blocking.push("Town Hall can only be built in the main settlement");
+  }
   const reasons = [...blocking];
   const size = footprintLine(opts.kind);
   if (size) reasons.push(size);

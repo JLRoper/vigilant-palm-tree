@@ -1,5 +1,6 @@
 import type {
   CaravanState,
+  DistrictState,
   GameState,
   HeroId,
   HeroState,
@@ -183,6 +184,19 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     arcane: warehouse.arcane ?? 0,
     food: warehouse.food ?? 0,
   };
+  const districts: Record<string, DistrictState> = {};
+  if (s.districts && typeof s.districts === "object") {
+    for (const [k, d] of Object.entries(s.districts)) {
+      if (!d || typeof d !== "object") continue;
+      if (typeof d.q !== "number" || typeof d.r !== "number") continue;
+      districts[k] = {
+        q: d.q,
+        r: d.r,
+        citySpots: Array.isArray(d.citySpots) ? d.citySpots : [],
+        buildings: Array.isArray(d.buildings) ? d.buildings : [],
+      };
+    }
+  }
   return {
     name: s.name ?? s.id,
     ownerId: s.ownerId ?? null,
@@ -207,6 +221,7 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     id: s.id,
     castleVariant: s.castleVariant ?? 0,
     buildings: s.buildings ?? [],
+    ...(Object.keys(districts).length > 0 ? { districts } : {}),
     upgrade: s.upgrade ?? undefined,
     // Garrison passthrough (unit-recruitment/garrison plan task 7): rows
     // written after garrisons existed carry stacks directly in the JSONB;

@@ -1,6 +1,7 @@
 import type {
   BuildingDef,
   CastleVariant,
+  DistrictState,
   Platoon,
   ResourceType,
   SettlementId,
@@ -54,6 +55,7 @@ interface SettlementRow {
   city_spots: SettlementState["citySpots"];
   city_mines: SettlementState["cityMines"];
   upgrade: UpgradeState | null;
+  districts: Record<string, DistrictState> | null;
 }
 
 interface ResourceRow {
@@ -84,7 +86,7 @@ interface PlatoonRow {
 }
 
 const SETTLEMENT_COLUMNS =
-  "id, name, owner_id, q, r, level, population, gold_tax, founded_on_resource, gold, gold_rate, morale, garrison_unpaid_since_day, garrison_unpaid_troops, garrison_unpaid_gold, auto_trade, castle_variant, city_spots, city_mines, upgrade";
+  "id, name, owner_id, q, r, level, population, gold_tax, founded_on_resource, gold, gold_rate, morale, garrison_unpaid_since_day, garrison_unpaid_troops, garrison_unpaid_gold, auto_trade, castle_variant, city_spots, city_mines, upgrade, districts";
 
 function toSettlementState(
   row: SettlementRow,
@@ -153,6 +155,12 @@ function toSettlementState(
     // platoons); one with rows gets the normalized 8-slot Platoon[] back.
     ...(platoonRows.length > 0
       ? { stacks: normalizePlatoons(assemblePlatoons(platoonRows)) }
+      : {}),
+    ...(row.districts !== null &&
+    row.districts !== undefined &&
+    typeof row.districts === "object" &&
+    Object.keys(row.districts).length > 0
+      ? { districts: row.districts }
       : {}),
   };
 }
@@ -257,8 +265,8 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
           `INSERT INTO settlements (id, game_id, name, owner_id, q, r, level, population, gold_tax,
                                      founded_on_resource, gold, gold_rate, morale,
                                      garrison_unpaid_since_day, garrison_unpaid_troops, garrison_unpaid_gold,
-                                     auto_trade, castle_variant, city_spots, city_mines, upgrade)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20::jsonb,$21::jsonb)
+                                     auto_trade, castle_variant, city_spots, city_mines, upgrade, districts)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20::jsonb,$21::jsonb,$22::jsonb)
            ON CONFLICT (game_id, id) DO UPDATE SET
              name = EXCLUDED.name,
              owner_id = EXCLUDED.owner_id,
@@ -278,7 +286,8 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
              castle_variant = EXCLUDED.castle_variant,
              city_spots = EXCLUDED.city_spots,
              city_mines = EXCLUDED.city_mines,
-             upgrade = EXCLUDED.upgrade`,
+             upgrade = EXCLUDED.upgrade,
+             districts = EXCLUDED.districts`,
           [
             settlement.id,
             gameId,
@@ -305,6 +314,9 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
             JSON.stringify(settlement.citySpots),
             JSON.stringify(settlement.cityMines),
             settlement.upgrade ? JSON.stringify(settlement.upgrade) : null,
+            settlement.districts && Object.keys(settlement.districts).length > 0
+              ? JSON.stringify(settlement.districts)
+              : null,
           ],
         );
 

@@ -292,4 +292,5 @@ export interface BuildingUpgradeRequest {
   gx: number;
   gy: number;
   kind: BuildingKind;
+  district?: { q: number; r: number };
 }
