@@ -113,6 +113,8 @@ test("hud: no owned settlements degrades to a plain explanation", () => {
   assert.equal(h.morale.textContent, "n/a");
   assert.equal(
     h.root.title,
-    "Empire Income: 0g — you own no settlements.\nWealth: 0g — 0g on heroes + 0g in settlement treasuries",
+    "Empire Income: 0g — you own no settlements.\n" +
+      "Upkeep: troops 0g + 0 food/wk (hero purse; larder first, then your own settlements' food while standing on one)\n" +
+      "Wealth: 0g — 0g on heroes + 0g in settlement treasuries",
   );
 });

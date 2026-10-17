@@ -44,9 +44,9 @@ export interface PathCostReadout {
   destinationReachable: boolean;
 }
 
-function makeResourceIcon(url: string): HTMLImageElement {
+function makeResourceIcon(url: string, label: string): HTMLImageElement {
   const icon = document.createElement("img");
-  icon.alt = "";
+  icon.alt = label;
   icon.src = url;
   Object.assign(icon.style, {
     width: "14px",
@@ -63,15 +63,15 @@ export function buildHud(container: HTMLElement, icons: HudIconUrls): HudHandles
   hudEl.id = "hud";
   const round = makeStatPill("Round");
   const wealth = makeStatPill("Wealth");
-  wealth.chip.insertBefore(makeResourceIcon(icons.gold), wealth.value);
+  wealth.chip.insertBefore(makeResourceIcon(icons.gold, "gold"), wealth.value);
   const income = makeStatPill("Income");
-  income.chip.insertBefore(makeResourceIcon(icons.gold), income.value);
+  income.chip.insertBefore(makeResourceIcon(icons.gold, "gold"), income.value);
   const populationValue = makePillValueSpan();
   income.chip.append(makePillDivider(), makePillLabel("Pop"), populationValue);
   const upkeep = makeStatPill("Upkeep");
-  upkeep.chip.insertBefore(makeResourceIcon(icons.gold), upkeep.value);
+  upkeep.chip.insertBefore(makeResourceIcon(icons.gold, "gold"), upkeep.value);
   const upkeepFoodValue = makePillValueSpan();
-  upkeep.chip.append(document.createTextNode(" + "), makeResourceIcon(icons.food), upkeepFoodValue);
+  upkeep.chip.append(document.createTextNode(" + "), makeResourceIcon(icons.food, "food"), upkeepFoodValue);
   const morale = makeStatPill("Morale");
   const context = document.createElement("span");
   context.id = "hud-context";
@@ -196,7 +196,11 @@ function getEconomyHudSnapshot(state: GameState, ownerId: PlayerId): EconomyHudS
 
   let breakdownTitle: string;
   if (ownedSettlements.length === 0) {
-    breakdownTitle = ["Empire Income: 0g — you own no settlements.", wealthLine].join("\n");
+    breakdownTitle = [
+      "Empire Income: 0g — you own no settlements.",
+      empireUpkeepTitleClause(upkeepBill),
+      wealthLine,
+    ].join("\n");
   } else {
     const popTax = ownedSettlements.reduce((acc, s) => acc + (s.population ?? 0) * (s.goldTax ?? 0), 0);
     const buildingGold = nextGold - popTax;
