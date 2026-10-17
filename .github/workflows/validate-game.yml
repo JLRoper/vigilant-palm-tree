@@ -54,10 +54,23 @@ jobs:
             node tools/docs-check.mjs
           fi
 
+      - name: Test scope (skip tests for docs/agent-only changes)
+        id: scope
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            node tools/test-scope.mjs --changed-from "origin/$BASE_REF...HEAD"
+          else
+            node tools/test-scope.mjs
+          fi
+
       - name: Install Playwright browser (chromium)
+        if: steps.scope.outputs.run_tests == 'true'
         run: npx playwright install chromium --with-deps
 
       - name: Validate "npm run dev" boots client + API
+        if: steps.scope.outputs.run_tests == 'true'
         run: |
           npm run dev > dev-run.log 2>&1 &
           DEV_PID=$!
@@ -99,11 +112,12 @@ jobs:
           echo "npm run dev booted successfully (client=$CLIENT_PORT api=$API_PORT)"
 
       - name: Dump "npm run dev" boot log
-        if: always()
+        if: always() && steps.scope.outputs.run_tests == 'true'
         run: |
           if [ -f dev-run.log ]; then cat dev-run.log; fi
 
       - name: Reset local dev state before smoke test
+        if: steps.scope.outputs.run_tests == 'true'
         run: |
           rm -f .env dev-run.log
 
@@ -111,10 +125,11 @@ jobs:
         run: npm run build
 
       - name: npm test (smoke test)
+        if: steps.scope.outputs.run_tests == 'true'
         run: npm test
 
       - name: Upload smoke test artifacts
-        if: always()
+        if: always() && steps.scope.outputs.run_tests == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: smoke-test-output

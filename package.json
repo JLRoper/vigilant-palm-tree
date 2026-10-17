@@ -37,6 +37,7 @@
     "lint:deps": "depcruise src server packages --config dependency-cruiser.cjs",
     "validate-assets": "node tools/sprites/validate-assets.mjs",
     "docs:check": "node tools/docs-check.mjs",
+    "test:scope": "node tools/test-scope.mjs",
     "docker:build": "tsx scripts/docker-build.ts",
     "docker:deploy": "npm run docker:build && docker compose up -d --remove-orphans api web",
     "version:bump": "node scripts/bump-version.mjs",
