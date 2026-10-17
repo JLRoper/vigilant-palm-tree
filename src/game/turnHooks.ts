@@ -169,6 +169,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       heroId: HeroId,
       toTile: Axial,
       cost: number,
+      trailExtension?: Axial[],
     ): Promise<void> => {
       const name = opts.gameName();
       if (!name) return;
@@ -181,6 +182,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
           fromTile: { q: hero.previousQ ?? hero.q, r: hero.previousR ?? hero.r },
           toTile,
           cost,
+          ...(trailExtension && trailExtension.length > 0 ? { trail: trailExtension } : {}),
         });
       } catch (e) {
         reportCommandFailure("Move", e);

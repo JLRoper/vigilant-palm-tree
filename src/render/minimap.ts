@@ -52,6 +52,22 @@ function computeVisionHash(visible: Set<string>): string {
   return `${visible.size}:${xor >>> 0}:${sum >>> 0}`;
 }
 
+// Order-independent fold of each key's q*37+r plus the set size. Addition is
+// commutative, so insertion order can't change the signature; the size term
+// keeps distinct reveal sets from colliding on a matching fold.
+function revealSignature(revealed: ReadonlySet<string> | null): string {
+  if (revealed === null) return "-";
+  let sum = 0;
+  for (const key of revealed) {
+    const comma = key.indexOf(",");
+    if (comma <= 0) continue;
+    const q = parseInt(key.slice(0, comma), 10);
+    const r = parseInt(key.slice(comma + 1), 10);
+    sum = (sum + Math.imul(q | 0, 37) + (r | 0)) | 0;
+  }
+  return `${revealed.size}:${sum >>> 0}`;
+}
+
 interface MinimapRenderOptions {
   viewPlayerId: number;
   colorForOwner: (ownerId: number | null) => string;
@@ -242,6 +258,7 @@ function renderStaticMinimapLayer(
   cellSize: number,
   half: number,
   visible: Set<string>,
+  revealed: ReadonlySet<string> | null,
 ): void {
   targetCtx.fillStyle = "rgba(0,0,0,0.6)";
   targetCtx.fillRect(boxX, boxY, boxW, boxH);
@@ -269,13 +286,18 @@ function renderStaticMinimapLayer(
       const cellX = x - half;
       const cellY = y - half;
       const canSee = isVisible(visible, q, r);
+      const uncharted = !canSee && revealed !== null && !revealed.has(`${q},${r}`);
       const edgeOfVision = canSee && isVisionEdge(visible, q, r);
 
-      targetCtx.fillStyle = canSee ? TERRAIN_COLORS[t].fill : "rgba(12,18,24,0.92)";
+      targetCtx.fillStyle = canSee
+        ? TERRAIN_COLORS[t].fill
+        : uncharted
+          ? "rgba(0,0,0,1)"
+          : "rgba(12,18,24,0.92)";
       targetCtx.fillRect(cellX, cellY, cellSize + 0.5, cellSize + 0.5);
 
       if (!canSee) {
-        drawMistCell(targetCtx, cellX, cellY, cellSize + 0.5, q, r, 1.22);
+        if (!uncharted) drawMistCell(targetCtx, cellX, cellY, cellSize + 0.5, q, r, 1.22);
       } else if (edgeOfVision) {
         drawMistCell(targetCtx, cellX, cellY, cellSize + 0.5, q, r, 0.14);
       }
@@ -317,6 +339,7 @@ export function drawMinimap(
   path: Axial[],
   opts: MinimapRenderOptions,
   visible: Set<string>,
+  revealed: ReadonlySet<string> | null = null,
 ): void {
   const geo = getMinimapGeometry(map);
   const boxX = geo.x0 - 4;
@@ -337,7 +360,7 @@ export function drawMinimap(
   let usedCache = false;
 
   if (typeof document !== "undefined") {
-    const cacheKey = `${map.width}x${map.height}:${boxX},${boxY},${boxW}x${boxH}:${dpr}:${minimapCamera.zoom}:${minimapCamera.panQ}:${minimapCamera.panR}:${minimapCamera.rotation}:${computeVisionHash(visible)}`;
+    const cacheKey = `${map.width}x${map.height}:${boxX},${boxY},${boxW}x${boxH}:${dpr}:${minimapCamera.zoom}:${minimapCamera.panQ}:${minimapCamera.panR}:${minimapCamera.rotation}:${computeVisionHash(visible)}:${revealSignature(revealed)}`;
     if (!staticLayerCache || staticLayerCache.map !== map || staticLayerCache.key !== cacheKey) {
       const canvas = staticLayerCache?.canvas ?? document.createElement("canvas");
       if (canvas.width !== pixelW || canvas.height !== pixelH) {
@@ -349,7 +372,7 @@ export function drawMinimap(
         offCtx.setTransform(1, 0, 0, 1, 0, 0);
         offCtx.clearRect(0, 0, pixelW, pixelH);
         offCtx.setTransform(dpr, 0, 0, dpr, -boxX * dpr, -boxY * dpr);
-        renderStaticMinimapLayer(offCtx, map, minimapCamera, geo, boxX, boxY, boxW, boxH, cellSize, half, visible);
+        renderStaticMinimapLayer(offCtx, map, minimapCamera, geo, boxX, boxY, boxW, boxH, cellSize, half, visible, revealed);
         staticLayerCache = { canvas, map, key: cacheKey };
       } else {
         staticLayerCache = null;
@@ -362,7 +385,7 @@ export function drawMinimap(
   }
 
   if (!usedCache) {
-    renderStaticMinimapLayer(ctx, map, minimapCamera, geo, boxX, boxY, boxW, boxH, cellSize, half, visible);
+    renderStaticMinimapLayer(ctx, map, minimapCamera, geo, boxX, boxY, boxW, boxH, cellSize, half, visible, revealed);
   }
 
   ctx.save();

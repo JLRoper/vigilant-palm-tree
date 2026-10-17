@@ -45,6 +45,9 @@ transferGold,
   nearestOwnedSettlement,
   relocateHeroToSettlement,
   readPendingBattle,
+  visionKeysForPlayer,
+  visionKeysAroundPoints,
+  mergePlayerReveal,
 } from "@heroes/engine";
 import type { EngineCtx, HydratableGameRow, UnitType, BattleResult, MapSize, PendingBattleMarker } from "@heroes/engine";
 import { hexDistance } from "@heroes/contracts";
@@ -101,6 +104,9 @@ export interface GameLobbyFlags {
   // offer goes stale. Optional -- every pre-offer row simply lacks the key.
   pendingBattle?: PendingBattleMarker | null;
   mapGenVersion?: 1 | 2 | 3;
+  // Uncharted mode (fog from the start): written by POST /games, read once
+  // near the top of handleCommand to gate the per-command reveal merges.
+  uncharted?: boolean;
 }
 
 export interface GameRepo {
@@ -249,6 +255,27 @@ function sumPlayerGold(
     if (s.ownerId !== null && playerIds.has(s.ownerId) && Number.isFinite(s.gold)) total += s.gold;
   }
   return total;
+}
+
+// Uncharted-mode reveal helpers (fog-from-the-start). The caller gates them
+// on `row.lobby?.uncharted === true`; reveal is only maintained for HUMAN
+// seats (faction "player") -- AI reveal is never rendered. extraPoints lets
+// MoveHero/AdvanceCharterTravel union the walked corridor's rings (not just
+// the endpoints), so a multi-hex move reveals the tiles it crossed.
+function isHuman(state: GameState, playerId: number): boolean {
+  return state.players.find((p) => p.id === playerId)?.faction === "player";
+}
+
+function revealForPlayer(
+  state: GameState,
+  playerId: number,
+  extraPoints?: readonly { q: number; r: number }[],
+): GameState {
+  const keys = visionKeysForPlayer(state, playerId);
+  if (extraPoints) {
+    for (const key of visionKeysAroundPoints(extraPoints)) keys.add(key);
+  }
+  return mergePlayerReveal(state, playerId, keys);
 }
 
 // Phase 4 Track A dual-write (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md):
@@ -567,6 +594,11 @@ async function clearPendingBattle(
 export async function handleCommand(command: Command, deps: CommandDeps): Promise<CommandResult> {
   const row = await deps.gameRepo.load(command.gameName);
 
+  // Uncharted mode gate: only games created with lobby.uncharted === true
+  // maintain per-player reveal. Absent (pre-flag rows) reads as false, so
+  // every reveal merge below is a no-op by construction on legacy games.
+  const uncharted = row.lobby?.uncharted === true;
+
   // Generic turn-ownership guard, enforced once here for every command
   // rather than duplicated per engine function. This matters for
   // TransferGold specifically: transferGold() has no actor/turn check of
@@ -648,12 +680,24 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       if (!result.ok) {
         return { ok: false, reason: result.reason, events: [] };
       }
+      // Uncharted reveal: reveal the moving hero's walk corridor (the trail
+      // the client sent, or at least the from/to endpoints) for its owner.
+      let next = result.state;
+      const ownerId = result.state.heroes[command.heroId].ownerId;
+      if (uncharted && isHuman(next, ownerId)) {
+        const trailPoints =
+          command.trail && command.trail.length > 0
+            ? command.trail
+            : [command.fromTile, command.toTile];
+        next = revealForPlayer(next, ownerId, trailPoints);
+      }
       await deps.gameRepo.saveHeroesAndSettlements(
         command.gameName,
-        result.state.heroes,
-        result.state.settlements,
+        next.heroes,
+        next.settlements,
+        { players: next.players },
       );
-      await dualWriteEntities(deps, command.gameName, state, result.state);
+      await dualWriteEntities(deps, command.gameName, state, next);
       const event: EngineEvent = {
         type: "HeroMoved",
         actor: command.actor,
@@ -661,7 +705,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         to: command.toTile,
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], lastEventId, hero: result.state.heroes[command.heroId] };
+      return { ok: true, events: [event], lastEventId, hero: next.heroes[command.heroId] };
     }
     case "TransferGold": {
       const result = transferGold(state, command.heroId, command.settlementId, command.direction);
@@ -756,18 +800,29 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         upkeepUnitTypes,
         legacyAutoTrade,
       );
-      const legacyGold = sumPlayerGold(finalState.players, finalState.heroes, finalState.settlements);
+      // Uncharted reveal reconciliation: EndTurn is the boundary that catches
+      // founding/recruit/capture for every seat at once, so every HUMAN
+      // player's reveal is re-merged against their post-turn vision before
+      // persist. revealForPlayer only touches players[].revealedTiles (never
+      // gold), so the legacyGold sum is order-independent here.
+      let final = finalState;
+      if (uncharted) {
+        for (const p of final.players) {
+          if (p.faction === "player") final = revealForPlayer(final, p.id);
+        }
+      }
+      const legacyGold = sumPlayerGold(final.players, final.heroes, final.settlements);
       await deps.gameRepo.saveHeroesAndSettlements(
         command.gameName,
-        finalState.heroes,
-        finalState.settlements,
+        final.heroes,
+        final.settlements,
         {
-          players: finalState.players,
-          round: finalState.round,
-          day: finalState.day,
-          active_player_id: finalState.activePlayerId,
+          players: final.players,
+          round: final.round,
+          day: final.day,
+          active_player_id: final.activePlayerId,
           gold: legacyGold,
-          trade_routes: finalState.tradeRoutes,
+          trade_routes: final.tradeRoutes,
         },
       );
       // Stale-offer safety: a pendingBattle marker is an offer to the
@@ -905,7 +960,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         round: finalState.round,
         day: finalState.day,
         activePlayerId: finalState.activePlayerId,
-        players: finalState.players,
+        players: final.players,
         tradeRoutes: finalState.tradeRoutes,
       };
     }
@@ -1237,13 +1292,20 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       if (!result.captured) {
         return { ok: false, reason: "already_owned", events: [] };
       }
+      // Uncharted reveal: the captured settlement now belongs to the capturer
+      // (command.actor), so its controlRange ring must become revealed. No
+      // extra path points -- visionKeysForPlayer already includes the flip.
+      let next = result.state;
+      if (uncharted && isHuman(next, command.actor)) {
+        next = revealForPlayer(next, command.actor);
+      }
       await deps.gameRepo.saveHeroesAndSettlements(
         command.gameName,
-        result.state.heroes,
-        result.state.settlements,
-        { players: result.state.players },
+        next.heroes,
+        next.settlements,
+        { players: next.players },
       );
-      await dualWriteEntities(deps, command.gameName, state, result.state);
+      await dualWriteEntities(deps, command.gameName, state, next);
       const event: EngineEvent = {
         type: "SettlementCaptured",
         actor: command.actor,
@@ -1256,9 +1318,9 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         ok: true,
         events: [event],
         lastEventId,
-        hero: result.state.heroes[command.heroId],
-        settlement: result.state.settlements[command.settlementId],
-        players: result.state.players,
+        hero: next.heroes[command.heroId],
+        settlement: next.settlements[command.settlementId],
+        players: next.players,
       };
     }
     case "StartCharter": {
@@ -1394,12 +1456,20 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       if (!result.ok) {
         return { ok: false, reason: result.reason, events: [] };
       }
+      // Uncharted reveal: chartered travel steps one hex at a time, so the
+      // from/to endpoints are the whole corridor -- reveal them for the hero's
+      // owner (command.actor, already ownership-checked above).
+      let next = result.state;
+      if (uncharted && isHuman(next, command.actor)) {
+        next = revealForPlayer(next, command.actor, [command.fromTile, command.toTile]);
+      }
       await deps.gameRepo.saveHeroesAndSettlements(
         command.gameName,
-        result.state.heroes,
-        result.state.settlements,
+        next.heroes,
+        next.settlements,
+        { players: next.players },
       );
-      await dualWriteEntities(deps, command.gameName, state, result.state);
+      await dualWriteEntities(deps, command.gameName, state, next);
       // Only reached on the granular path (gated above), same as
       // StartCharter's own unconditional call -- safe here too since
       // result.state.activeCharters is always this game's real, complete
@@ -1416,7 +1486,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         to: command.toTile,
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
-      return { ok: true, events: [event], lastEventId, hero: result.state.heroes[command.heroId] };
+      return { ok: true, events: [event], lastEventId, hero: next.heroes[command.heroId] };
     }
     case "SubmitBattleResult": {
       // Manual-arena result submission (plan/2026-09-27-manual-battle-wiring.md,

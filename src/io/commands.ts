@@ -208,6 +208,7 @@ export async function spendMovement(
     fromTile: Axial;
     toTile: Axial;
     cost: number;
+    trail?: Axial[];
   }
 ): Promise<HeroState> {
   const result = await postCommand<{ hero: HeroState }>(name, { kind: "MoveHero", ...payload });

@@ -24,6 +24,7 @@ import type {
   TerrainDecorationNode,
   TerrainHexNode,
   TerritoryOutlineEdgeNode,
+  UnchartedHexNode,
   ValidCharterHexNode,
 } from "../../src/render/scene/types";
 import { makeGrassMap, makeRenderOptions, stubColorForOwner } from "./_helpers";
@@ -31,6 +32,56 @@ import { makeGrassMap, makeRenderOptions, stubColorForOwner } from "./_helpers";
 function nodesOfKind<K extends { kind: string }>(nodes: unknown[], kind: K["kind"]): K[] {
   return (nodes as { kind: string }[]).filter((n) => n.kind === kind) as K[];
 }
+
+test("uncharted mode: unrevealed tiles emit unchartedHex, revealed-but-hidden tiles emit fogHex, visible tiles emit neither", () => {
+  const map = makeGrassMap(7, 1);
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0);
+  const opts = makeRenderOptions({ viewPlayerId: 0 });
+
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts,
+    revealed: new Set(["5,0"]),
+  });
+
+  const uncharted = nodesOfKind<UnchartedHexNode>(nodes, "unchartedHex");
+  assert.equal(uncharted.length, 1, "only q=6 (beyond vision and never revealed) is uncharted");
+  assert.equal(uncharted[0].q, 6);
+  assert.equal(uncharted[0].r, 0);
+  assert.deepEqual(uncharted[0].world, axialToPixel(6, 0));
+
+  const fogged = nodesOfKind<FogHexNode>(nodes, "fogHex");
+  assert.equal(fogged.length, 1, "q=5 is revealed but not visible, so it degrades to plain fog");
+  assert.equal(fogged[0].q, 5);
+
+  assert.equal(
+    uncharted.filter((n) => n.q <= 4).length + fogged.filter((n) => n.q <= 4).length,
+    0,
+    "visible tiles (q<=4 within VISION_RANGE=4) emit neither fog nor uncharted",
+  );
+});
+
+test("uncharted mode: revealed null (or absent) keeps the two-state fog behavior", () => {
+  const map = makeGrassMap(7, 1);
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0);
+  const opts = makeRenderOptions({ viewPlayerId: 0 });
+
+  const withNull = buildAdventureScene({
+    map, heroes: [hero], castles: [], path: [], hover: null, opts, revealed: null,
+  });
+  assert.equal(nodesOfKind<UnchartedHexNode>(withNull, "unchartedHex").length, 0);
+  assert.equal(nodesOfKind<FogHexNode>(withNull, "fogHex").length, 2, "q=5 and q=6 are both plain fog when reveal is off");
+
+  const absent = buildAdventureScene({
+    map, heroes: [hero], castles: [], path: [], hover: null, opts,
+  });
+  assert.equal(nodesOfKind<UnchartedHexNode>(absent, "unchartedHex").length, 0);
+  assert.equal(nodesOfKind<FogHexNode>(absent, "fogHex").length, 2);
+});
 
 test("terrain is always emitted; fog covers every tile the view player can't see", () => {
   const map = makeGrassMap(3, 1);

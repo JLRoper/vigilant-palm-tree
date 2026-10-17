@@ -26,6 +26,7 @@ export interface HomeViewOptions {
     humanSeatCount?: number;
     enemyCount?: number;
     factionId?: FactionId;
+    uncharted?: boolean;
   }) => Promise<void>;
   onLoadGame: (game: Game) => Promise<void>;
   isBackendOk: () => boolean;
@@ -238,6 +239,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
             humanSeatCount: values.playerCount,
             enemyCount: values.enemyCount,
             factionId: values.factionId,
+            uncharted: values.uncharted,
           });
           rememberGameEntry(values.name);
           screen.destroy();

@@ -1,6 +1,7 @@
 import { api, eventStreamUrl, type Game, type GameEventRow } from "./api";
 import { hydrateClientGame } from "./hydrateClientGame";
 import { isServerDriven, syncServerDrivenFromGame } from "./serverDrivenGames";
+import { setUncharted } from "./unchartedGames";
 import { applyEngineEvent, ENGINE_EVENT_SYNC_CLASS } from "@heroes/engine";
 import type { EngineEvent, GameState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
@@ -384,6 +385,7 @@ export class MultiplayerSync {
     // discovers a late flag and propagates a server-side rollback (flag
     // flipped off) on the next full fetch.
     syncServerDrivenFromGame(game);
+    setUncharted(game.name, game.lobby?.uncharted === true);
     if (getInMemoryLocalPlayerId(gameName) === null && this.claims[String(0)] && game.players[0]) {
       setInMemoryLocalPlayerId(gameName, 0);
     }

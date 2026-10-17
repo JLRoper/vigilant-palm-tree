@@ -26,6 +26,11 @@ export interface Player {
   // which is the player|ai turn machinery. Optional so legacy JSONB rows
   // stay valid; absent reads as "human" (engine playerFactionId).
   factionId?: FactionId;
+  // Persistent per-player reveal ("uncharted mode"): the sorted union of every
+  // tile this seat has ever seen (hero ring radius 4 + owned settlement
+  // controlRange). Optional so legacy saves stay valid; absent = empty = the
+  // normal all-revealed (fog-only) mode.
+  revealedTiles?: readonly string[];
   // ── Wagon pool (docs/wagons-stockpiles-trade-routes-plan.md §5.1) ──
   // Optional + helper-accessed so legacy saves and old JSONB rows stay
   // valid; new wagons default via DEFAULT_HERO_WAGONS/player helpers.

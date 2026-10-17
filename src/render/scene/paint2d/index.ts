@@ -55,6 +55,7 @@ import type {
   TerrainDecorationNode,
   TerrainHexNode,
   TerritoryOutlineEdgeNode,
+  UnchartedHexNode,
   ValidCharterHexNode,
   CaravanMarkerNode,
   WorldPoint,
@@ -205,6 +206,9 @@ export function paintScene(
         break;
       case "fogHex":
         paintFogHex(ctx, node, deps);
+        break;
+      case "unchartedHex":
+        paintUnchartedHex(ctx, node, deps);
         break;
       case "resourceIcon":
         paintResourceIcon(ctx, node, deps);
@@ -434,6 +438,16 @@ export function paintFogHex(ctx: CanvasRenderingContext2D, node: FogHexNode, dep
   ctx.fillStyle = FOG_FILL;
   ctx.fill();
   ctx.strokeStyle = FOG_EDGE;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  void deps;
+}
+
+export function paintUnchartedHex(ctx: CanvasRenderingContext2D, node: UnchartedHexNode, deps: Paint2DDep): void {
+  hexPath(ctx, node.world.x, node.world.y);
+  ctx.fillStyle = "#000000";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(28, 32, 40, 0.9)";
   ctx.lineWidth = 1;
   ctx.stroke();
   void deps;

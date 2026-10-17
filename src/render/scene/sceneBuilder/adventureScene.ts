@@ -36,11 +36,16 @@ export interface AdventureSceneInput {
    * the minimap from the same set) pass it in so it isn't derived twice per
    * frame; omitted, it is computed here. */
   visible?: Set<string>;
+  /** Uncharted-mode per-player reveal. When non-null, invisible tiles that have
+   * never been revealed emit `unchartedHex` (opaque black) instead of `fogHex`;
+   * null/absent keeps the two-state fog behavior. */
+  revealed?: ReadonlySet<string> | null;
   viewportBounds?: ViewportAxialBounds;
 }
 
 export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
   const { map, path, hover, opts } = input;
+  const revealed = input.revealed ?? null;
   const heroes = input.heroes ?? input.mirror?.getHeroes() ?? [];
   const castles = input.castles ?? input.mirror?.getSettlements() ?? [];
   const nodes: SceneNode[] = [];
@@ -63,7 +68,11 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
         nodes.push({ kind: "terrainDecoration", q, r, world, terrain });
       }
       if (!isVisible(visible, q, r)) {
-        nodes.push({ kind: "fogHex", q, r, world });
+        if (revealed && !revealed.has(`${q},${r}`)) {
+          nodes.push({ kind: "unchartedHex", q, r, world });
+        } else {
+          nodes.push({ kind: "fogHex", q, r, world });
+        }
       }
     }
   }

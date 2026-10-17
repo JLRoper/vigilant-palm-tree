@@ -19,6 +19,7 @@ export type NewGameFormValues = {
   playerCount: 1 | 2 | 3 | 4;
   enemyCount: 0 | 1 | 2 | 3;
   factionId: FactionId;
+  uncharted?: boolean;
 };
 
 export interface NewGameScreenOptions {
@@ -270,6 +271,30 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
     },
   );
 
+  const unchartedField = makeFieldRow("Uncharted mode");
+  let selectedUncharted = false;
+  const unchartedWrap = document.createElement("label");
+  Object.assign(unchartedWrap.style, {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    cursor: "pointer",
+  });
+  const unchartedCheck = document.createElement("input");
+  unchartedCheck.type = "checkbox";
+  unchartedCheck.addEventListener("change", () => {
+    selectedUncharted = unchartedCheck.checked;
+  });
+  unchartedWrap.appendChild(unchartedCheck);
+  const unchartedHint = document.createElement("span");
+  unchartedHint.textContent = "Map starts hidden; explored tiles stay revealed";
+  Object.assign(unchartedHint.style, {
+    fontSize: "11px",
+    opacity: "0.65",
+  });
+  unchartedWrap.appendChild(unchartedHint);
+  unchartedField.control.appendChild(unchartedWrap);
+
   const sizeField = makeFieldRow("Map size");
   const sizeSelect = document.createElement("select");
   Object.assign(sizeSelect.style, {
@@ -408,6 +433,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
       playerCount: selectedPlayers,
       enemyCount: selectedEnemies,
       factionId: selectedFaction,
+      uncharted: selectedUncharted,
     });
   });
 
@@ -428,6 +454,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
     playersRow.setDisabled(value);
     enemiesRow.setDisabled(value);
     factionRow.setDisabled(value);
+    unchartedCheck.disabled = value;
     createBtn.style.opacity = value ? "0.6" : "1";
     createBtn.textContent = value ? "Creating…" : "Create Game";
   }

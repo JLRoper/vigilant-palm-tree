@@ -32,6 +32,10 @@ export interface LobbyState {
   // command case in server/app/commandHandler.ts. ABSENT (pre-flag rows read
   // here) means ON -- existing saves keep working.
   legacyAutoTrade?: boolean;
+  // Uncharted mode (fog from the start): written by POST /games, read by the
+  // command cases in server/app/commandHandler.ts to gate per-command reveal
+  // merging. Optional -- legacy/pre-flag rows lack the key (reads as false).
+  uncharted?: boolean;
   // Pending battle offer (defender-chosen flow, 2026-10-04): stamped by the
   // EnterBattle command case, read via @heroes/engine's readPendingBattle,
   // cleared when the battle resolves / the offer goes stale. Optional --

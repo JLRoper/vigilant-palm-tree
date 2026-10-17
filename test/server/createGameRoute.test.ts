@@ -37,7 +37,7 @@ async function cleanupGame(name: string): Promise<void> {
 }
 
 type CreatedRow = {
-  players: { id: number; faction: string; name: string; factionId?: string }[];
+  players: { id: number; faction: string; name: string; factionId?: string; revealedTiles?: string[] }[];
   heroes: Record<string, { id: string; ownerId: number; name: string }>;
   lobby: {
     seats?: number;
@@ -45,6 +45,8 @@ type CreatedRow = {
     claimed?: Record<string, unknown>;
     aiDriver?: string;
     aiDriverToken?: string;
+    legacyAutoTrade?: boolean;
+    uncharted?: boolean;
   };
 };
 
@@ -262,6 +264,69 @@ test("every new game carries lobby.legacyAutoTrade = false unless the body opts 
   } finally {
     await cleanupGame(plain);
     await cleanupGame(optedIn);
+    await cleanupGame(junk);
+  }
+});
+
+// Uncharted mode (fog from the start): the same lobby-only flag pattern as
+// legacyAutoTrade. Every new game is written with an explicit boolean; only a
+// `uncharted: true` body both stamps the flag AND seeds the human seats'
+// reveal at creation (the engine seeds humanSeatCount reveal only when
+// opts.uncharted === true).
+function isSortedByQR(keys: string[]): boolean {
+  for (let i = 1; i < keys.length; i++) {
+    const [aq, ar] = keys[i - 1].split(",").map(Number);
+    const [bq, br] = keys[i].split(",").map(Number);
+    if (!(aq < bq || (aq === bq && ar < br))) return false;
+  }
+  return true;
+}
+
+test("every new game carries lobby.uncharted = false unless the body opts in, and only uncharted games seed revealedTiles", async () => {
+  const plain = uniqueName();
+  const unchartedName = uniqueName();
+  const junk = uniqueName();
+  try {
+    const plainRow = await createGame({ name: plain });
+    assert.equal(
+      plainRow.row.lobby.uncharted,
+      false,
+      "the flag is written explicitly (not just absent) so absent stays reserved for pre-flag saves",
+    );
+    for (const p of plainRow.row.players) {
+      assert.equal("revealedTiles" in p, false, "absent uncharted must not seed reveal on any player");
+    }
+
+    const unchartedRes = await fetch(`${baseUrl}/games`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: unchartedName, uncharted: true }),
+    });
+    assert.equal(unchartedRes.status, 201);
+    const unchartedRow = (await unchartedRes.json()) as CreatedRow;
+    assert.equal(unchartedRow.lobby.uncharted, true, "the body param attaches the flag to the lobby");
+    const human = unchartedRow.players.find((p) => p.faction === "player");
+    assert.ok(human, "a human seat exists");
+    assert.ok(
+      Array.isArray(human!.revealedTiles) && human!.revealedTiles.length > 0,
+      "the human seat's reveal is seeded from its spawn",
+    );
+    assert.ok(isSortedByQR(human!.revealedTiles), "the seeded reveal is sorted (q, then r)");
+    const aiSeats = unchartedRow.players.filter((p) => p.faction === "ai");
+    for (const p of aiSeats) {
+      assert.equal("revealedTiles" in p, false, "AI seats are never reveal-stamped");
+    }
+
+    const junkRes = await fetch(`${baseUrl}/games`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: junk, uncharted: "yes" }),
+    });
+    assert.equal(junkRes.status, 201);
+    assert.equal(((await junkRes.json()) as CreatedRow).lobby.uncharted, false, "non-boolean junk reads as the default");
+  } finally {
+    await cleanupGame(plain);
+    await cleanupGame(unchartedName);
     await cleanupGame(junk);
   }
 });
