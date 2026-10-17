@@ -26,10 +26,13 @@
 // guard — Postgres would reject NaN/Infinity just as loudly as it rejected the
 // old floats, so non-finite input collapses to 0 rather than propagating, the
 // same defensive convention consumption.ts's clampWarehouseNonNegative
-// (NaN -> 0) and clamp (non-finite -> min) already run. No rounding: the
-// engine's quantities are 2-dp by construction, and identity is what keeps the
-// granular mirrors byte-identical to their JSONB sources (hydrate.test.ts's
-// read-path parity pins that).
+// (NaN -> 0) and clamp (non-finite -> min) already run. No rounding HERE:
+// since 2026-10-17 the engine rounds stored settlement gold/warehouse
+// quantities to whole integers (half-up Math.round) at its write points before
+// they reach this guard, so whole integers are what pass through this
+// boundary. The guard itself is untouched in behavior: identity on finite
+// input (which keeps the granular mirrors byte-identical to their JSONB
+// sources — hydrate.test.ts's read-path parity pins that), non-finite -> 0.
 export function toNumericColumn(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return value;

@@ -8,27 +8,34 @@ import { withRollback } from "../helpers/pgTestTx";
 import { handleCommandTransactional, createLiveCommandDeps } from "../../server/app/commandHandler";
 import { makeHero, makeSettlement } from "../charter/_helpers";
 
-// End-to-end proof that EndTurn round-trips a game whose gold is fractional at
-// FULL PRECISION.
+// End-to-end proof that EndTurn stores WHOLE-INTEGER gold and warehouse
+// amounts, and that games.gold still equals the recomputed sum exactly.
 //
 // History: `games.gold` (and every other numeric game column) used to be
-// INTEGER, while gold in the engine is deliberately a 2-decimal float. One
-// food-producing settlement was enough -- producerTurnOutput rounds a
-// farmField's yield to hundredths, runAutoTrade pays that fractional food
-// amount out of a treasury, and the legacy games.gold total becomes
-// fractional. Postgres rejected the whole statement ("invalid input syntax
-// for type integer"), the command's transaction rolled back, and EVERY EndTurn
-// returned HTTP 500. The interim fix rounded at the persistence boundary
-// (toIntColumn's Math.round), which unblocked EndTurn but left the granular
-// tables a rounded shadow of the JSONB -- and hydrateFromRepos PREFERS the
-// granular tables, so every granular-read game shed up to half a coin per
-// quantity per command.
+// INTEGER, while gold in the engine was a 2-decimal float. One food-producing
+// settlement was enough -- producerTurnOutput rounds a farmField's yield to
+// hundredths -- to make the legacy games.gold total fractional, which
+// Postgres rejected outright ("invalid input syntax for type integer") and
+// turned every EndTurn into an HTTP 500. Migration 027_numeric_columns.sql
+// widened every numeric game column to NUMERIC (with the OID-1700 parser in
+// server/persistence/pgTypes.ts) so the storage layer round-trips any value
+// at full precision.
 //
-// Migration 027_numeric_columns.sql widened every numeric game column to
-// NUMERIC (with the OID-1700 parser in server/persistence/pgTypes.ts), so the
-// shadow is dead: what this suite now proves is that fractional values
-// written by EndTurn come back EXACTLY on every previously-INTEGER column,
-// granular mirrors and JSONB source alike.
+// The engine economy layer now rounds everything it WRITES BACK to state --
+// settlement treasuries (applyEffectiveIncome, produceSettlementResources)
+// and warehouse stock (produceSettlementResources, applySettlementConsumption)
+// -- to whole numbers via Math.round (exact half-up for this economy's
+// non-negative values) BEFORE it reaches persistence. Producer yields, cell
+// multipliers, and per-turn display rates stay 2-decimal floats internally;
+// only the accumulated stock/purse/treasury is rounded at the write point.
+// The NUMERIC columns remain full-precision/identity (server/persistence is
+// untouched) -- the rounding is the ENGINE's, not the persistence boundary's.
+//
+// What this suite now proves: a fractional seed or a fractional producer
+// yield never persists fractional. After EndTurn every settlement gold and
+// warehouse amount is a whole integer (granular mirrors and JSONB source
+// alike), and games.gold equals the same-order recomputed sum with STRICT
+// equality.
 //
 // These tests drive the real command against a real row (not the repo mocks
 // every other commandHandler test uses) because the old failure lived in the
@@ -73,40 +80,41 @@ function warehouse(o: Partial<SettlementState["warehouse"]>): SettlementState["w
   return { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0, ...o };
 }
 
-// A game whose numeric state is fractional in EVERY column shape EndTurn writes,
-// deterministically (seeded from literal values rather than from a producer's
-// randomised cellMultiplier, so the fixture cannot silently stop exercising the
-// fractional path when the multiplier hash changes):
+// A game whose numeric state is fractional in the SEED so EndTurn exercises the
+// rounding path, deterministically (seeded from literal values rather than from
+// a producer's randomised cellMultiplier, so the fixture cannot silently stop
+// exercising the rounding when the multiplier hash changes):
 //
-//   gold    500.55 -- a purse that already carries a fraction, which is exactly
-//            what auto-trade leaves behind when it pays out a fractional food
-//            amount, and what produceResources' round2 gold leaves behind after
-//            a mine's hundredths-rounded yield.
-//   food     6.45 with population 500, so the reservation leaves 1.45 of
-//            tradeable surplus for the hungry neighbour. Auto-trade drains the
-//            WHOLE surplus -- it moves min(stock, gold, headroom), so s0's food
-//            ends the turn at exactly 0 and the fraction survives only in the
-//            resource_transactions row (amount 1.4500000000000002: the float-sum
-//            artifact preserved bit-for-bit by NUMERIC + the OID-1700 parser).
-//   iron     3.5 -- the fractional warehouse sentinel. Consumption clamps only
-//            food/wood/stone (applySettlementConsumption's
-//            clampWarehouseNonNegative floors those three every turn), iron and
-//            arcane are not clamped, and auto-trade moves food only -- so the
-//            iron fraction is still sitting in settlement_resources.amount
-//            after EndTurn, exactly equal to its JSONB source.
+//   gold    500.55 -- a fractional treasury seed. produceSettlementResources
+//            writes the treasury as Math.round(purse + producer yield), so the
+//            half coin is rounded away at the engine write and the purse
+//            persists as a whole integer.
+//   food     6.45 with population 500: foodRequired is 5, so the pre-
+//            consumption surplus is 1.45. The unchanged auto-trade layer moves
+//            that fractional surplus (resource_transactions.amount carries the
+//            float artifact -- trade.ts is out of the rounding scope), but the
+//            warehouse food the engine next WRITES is rounded: consumption's
+//            clampWarehouseNonNegative half-up rounds every remaining food to a
+//            whole integer.
+//   iron     3 -- the warehouse values the engine writes are whole integers.
+//            Iron/arcane are never written by produceSettlementResources or
+//            applySettlementConsumption (consumption clamps only food/wood/
+//            stone), so unlike the old suite this fixture seeds iron WHOLE:
+//            a fractional iron seed would survive untouched and contradict the
+//            whole-integer contract this suite now pins.
 //   morale   fractional: goldMine + two houses cost 3 wood, and s0 holds 1, so
 //            suppliesDeficitRatio is (3-1)/3 and the decay is 6.67, not a whole
 //            number -- applyMoraleDecay rounds that to 7, so morale lands at 93.
 //
 // s1 is a 5000-population town with an empty larder: a 50-unit deficit that no
-// surplus can cover, so s0 exports everything it is allowed to.
+// surplus can cover, so auto-trade drains s0's fractional food surplus.
 function fractionalGoldPair(): Record<string, SettlementState> {
   return {
     s0: makeSettlement("s0", 0, 2, 2, {
       population: 500,
       goldTax: 1,
       gold: 500.55,
-      warehouse: warehouse({ wood: 1, stone: 2, iron: 3.5, food: 6.45 }),
+      warehouse: warehouse({ wood: 1, stone: 2, iron: 3, food: 6.45 }),
       buildings: [
         GOLD_MINE as SettlementState["buildings"][number],
         HOUSE_A as SettlementState["buildings"][number],
@@ -170,7 +178,7 @@ test("saveHeroesAndSettlements leaves an integral gold total untouched", async (
   });
 });
 
-test("EndTurn no longer aborts when a settlement's purse is fractional", async () => {
+test("EndTurn rounds a fractional settlement purse to a whole integer", async () => {
   const name = uniqueName();
   await seedGame(pool, name, fractionalGoldPair());
   try {
@@ -179,11 +187,12 @@ test("EndTurn no longer aborts when a settlement's purse is fractional", async (
     const first = await handleCommandTransactional({ kind: "EndTurn", gameName: name, actor: 0 }, deps);
     assert.equal(first.ok, true, `turn 1 rejected: ${first.reason}`);
 
-    // The scenario must genuinely be fractional after turn 1, or this test
-    // silently stops covering the fractional path. games.settlements JSONB
-    // keeps full precision, so this is where the fraction is visible.
-    // (Checked after ONE turn deliberately: the treasury cap pins a full
-    // purse to exactly 1500 by turn 3, which is an integer.)
+    // The scenario must genuinely have STARTED fractional, or this test
+    // silently stops exercising the rounding path. A purse seeded at 500.55
+    // is read back whole only because produceSettlementResources rounds the
+    // treasury write -- so the assertion the old suite made ("fractional
+    // gold reached persistence") is now inverted: NO gold may reach
+    // persistence fractional.
     const row = await pool.query<{
       gold: number;
       settlements: Record<string, SettlementState>;
@@ -194,9 +203,10 @@ test("EndTurn no longer aborts when a settlement's purse is fractional", async (
       ...Object.values(row.rows[0].settlements).map((s) => s.gold),
       ...Object.values(row.rows[0].heroes).map((h) => h.gold),
     ].filter((g) => Number.isFinite(g) && !Number.isInteger(g));
-    assert.ok(
-      fractionalGold.length > 0,
-      "no fractional gold reached persistence -- the fixture stopped exercising the fractional path",
+    assert.deepEqual(
+      fractionalGold,
+      [],
+      "fractional gold reached persistence -- the engine must round every settlement purse to a whole integer before EndTurn writes it",
     );
     const fractionalMorale = Object.values(row.rows[0].settlements)
       .map((s) => s.morale)
@@ -206,9 +216,8 @@ test("EndTurn no longer aborts when a settlement's purse is fractional", async (
       [],
       "morale is rounded at the engine write (applyMoraleDecay), so it never reaches persistence fractional",
     );
-    // The migrated column keeps the EXACT engine sum -- no rounding shadow on
-    // the legacy total either. Strict equality against the same-order
-    // recomputation is the point; a tolerance would hide a rounding step.
+    // The engine-rounded total still equals the same-order recomputed sum --
+    // strict equality, not a tolerance, keeps a hidden rounding shadow honest.
     assert.equal(row.rows[0].gold, recomputeLegacyGold(row.rows[0]));
 
     // Repeated turns must keep working -- the original failure aborted every one.
@@ -225,15 +234,13 @@ test("EndTurn no longer aborts when a settlement's purse is fractional", async (
   }
 });
 
-test("EndTurn round-trips every previously-INTEGER game column at full precision", async () => {
-  // The inverted premise of the old "leaves every INTEGER column holding an
-  // integer" pin: the granular mirrors (settlements, settlement_resources,
-  // heroes) must now equal their JSONB sources EXACTLY -- the rounding shadow
-  // that let them diverge is what died. The two #89 tables (snapshots,
-  // resource_transactions) have no JSONB counterpart, so for them this pins
-  // that their fractional-capable columns arrive as real numbers (the
-  // OID-1700 parser working) and that fractional values genuinely reached the
-  // tables when the source data was fractional.
+test("EndTurn writes whole-integer gold and warehouse amounts, mirrored exactly by every granular table", async () => {
+  // The inverted premise of the old "round-trips fractional at full
+  // precision" pin: the engine now rounds every stored value to a whole
+  // integer at the write point, and that rounded value is what must equal
+  // both the JSONB source and every granular mirror EXACTLY -- the identity
+  // persistence layer (NUMERIC + the OID-1700 parser) is unchanged, so no
+  // rounding shadow may reappear between the engine write and the columns.
   const name = uniqueName();
   await seedGame(pool, name, fractionalGoldPair());
   try {
@@ -255,21 +262,21 @@ test("EndTurn round-trips every previously-INTEGER game column at full precision
       [id],
     );
     assert.ok(settlements.rows.length > 0, "granular mirror empty -- the dual-write never ran");
-    let sawFractionalSettlementGold = false;
     for (const s of settlements.rows) {
       const source = blob.settlements[s.id];
       assert.ok(source, `granular settlement ${s.id} missing from the JSONB source`);
       assert.equal(s.gold, source.gold, `settlements.gold for ${s.id} must equal the JSONB source exactly`);
       assert.equal(s.morale, source.morale, `settlements.morale for ${s.id} must equal the JSONB source exactly`);
-      if (!Number.isInteger(s.gold)) sawFractionalSettlementGold = true;
+      assert.ok(
+        Number.isInteger(s.gold),
+        `settlements.gold for ${s.id} must be a whole integer after the engine rounds the treasury write`,
+      );
     }
-    assert.ok(sawFractionalSettlementGold, "fixture stopped exercising the fractional path -- no fractional settlement gold persisted");
 
     const resources = await pool.query<{ settlement_id: string; resource: string; amount: number }>(
       `SELECT settlement_id, resource, amount FROM settlement_resources WHERE game_id = $1`,
       [id],
     );
-    let sawFractionalAmount = false;
     for (const r of resources.rows) {
       const source = blob.settlements[r.settlement_id]?.warehouse[
         r.resource as keyof SettlementState["warehouse"]
@@ -279,9 +286,11 @@ test("EndTurn round-trips every previously-INTEGER game column at full precision
         source,
         `settlement_resources.amount ${r.settlement_id}.${r.resource} must equal the JSONB warehouse exactly`,
       );
-      if (!Number.isInteger(r.amount)) sawFractionalAmount = true;
+      assert.ok(
+        Number.isInteger(r.amount),
+        `settlement_resources.amount ${r.settlement_id}.${r.resource} must be a whole integer after the engine rounds the warehouse write`,
+      );
     }
-    assert.ok(sawFractionalAmount, "fixture stopped exercising the fractional path -- no fractional resource amount persisted");
 
     const heroRows = await pool.query<{ id: string; gold: number; morale: number }>(
       `SELECT id, gold, morale FROM heroes WHERE game_id = $1`,
@@ -311,32 +320,29 @@ test("EndTurn round-trips every previously-INTEGER game column at full precision
       [id],
     );
     assert.ok(txns.rows.length > 0, "no auto-trade transfer rows -- the insert never ran");
-    let sawFractionalTxnColumn = false;
     for (const t of txns.rows) {
       for (const v of [t.amount, t.gold_paid]) {
         assert.equal(typeof v, "number", `transaction column must parse back as a number, got ${typeof v}`);
         assert.ok(Number.isFinite(v), `transaction column must be finite, got ${v}`);
-        if (!Number.isInteger(v)) sawFractionalTxnColumn = true;
       }
     }
-    // Auto-trade drains s0's entire fractional food surplus, so the fraction
-    // lands HERE rather than in a warehouse amount -- and the previously-INTEGER
-    // amount/gold_paid pair must carry it at full precision.
-    assert.ok(
-      sawFractionalTxnColumn,
-      "fixture stopped exercising the fractional path -- no fractional transaction amount/gold_paid persisted",
-    );
+    // Auto-trade (trade.ts) is deliberately OUT of the engine-rounding scope
+    // and runs on the PRE-consumption surplus, so it may still move s0's
+    // fractional food seed (6.45 - 5 = 1.45) into resource_transactions. That
+    // is an audit row, not a stored stock value -- the whole-integer contract
+    // pins gold and warehouse amounts, which the assertions above check.
   } finally {
     await pool.query(`DELETE FROM games WHERE name = $1`, [name]);
   }
 });
-test("EndTurn with lobby.legacyAutoTrade false writes zero resource_transactions and still round-trips the fractional purse", async () => {
+test("EndTurn with lobby.legacyAutoTrade false writes zero resource_transactions and still rounds the purse to a whole integer", async () => {
   // The gate variant: the same fractional fixture, but the game row carries the
   // new-game flag (lobby '{"legacyAutoTrade": false}'), so runAutoTrade moves
-  // nothing and resource_transactions stays empty. The fractional-gold column
-  // coverage is NOT lost with it: the gold mine's hundredths-rounded yield
-  // still lands fractional gold in both the settlements JSONB and the granular
-  // NUMERIC mirror, and every EndTurn must still commit.
+  // nothing and resource_transactions stays empty. The rounding coverage is
+  // NOT lost with it: the gold mine's hundredths-rounded yield still feeds a
+  // fractional treasury sum that the engine rounds to a whole integer in both
+  // the settlements JSONB and the granular NUMERIC mirror, and every EndTurn
+  // must still commit.
   const name = uniqueName();
   await seedGame(pool, name, fractionalGoldPair(), { legacyAutoTrade: false });
   try {
@@ -370,6 +376,10 @@ test("EndTurn with lobby.legacyAutoTrade false writes zero resource_transactions
       assert.ok(source, `granular settlement ${s.id} missing from the JSONB source`);
       assert.equal(s.gold, source.gold, `settlements.gold for ${s.id} must equal the JSONB source exactly`);
       assert.equal(s.morale, source.morale, `settlements.morale for ${s.id} must equal the JSONB source exactly`);
+      assert.ok(
+        Number.isInteger(s.gold),
+        `settlements.gold for ${s.id} must be a whole integer after the engine rounds`,
+      );
     }
 
     const legacyGold = (

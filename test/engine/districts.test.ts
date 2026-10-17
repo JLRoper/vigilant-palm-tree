@@ -323,9 +323,9 @@ test("district economy: producers, market income, enemy vs friendly hero occupat
   assert.equal(unblockedRates.goldPerTurn, Math.round((expectedGoldProd + 40) * 100) / 100);
 
   const producedUnblocked = produceSettlementResources({ s0: baseSettlement }, seed, []).s0;
-  assert.equal(producedUnblocked.warehouse.wood, Math.round((20 + expectedWood) * 100) / 100);
-  assert.equal(producedUnblocked.warehouse.food, Math.round((20 + expectedFood) * 100) / 100);
-  assert.equal(producedUnblocked.gold, Math.round((100 + expectedGoldProd + 40) * 100) / 100);
+  assert.equal(producedUnblocked.warehouse.wood, Math.round(20 + expectedWood));
+  assert.equal(producedUnblocked.warehouse.food, Math.round(20 + expectedFood));
+  assert.equal(producedUnblocked.gold, Math.round(100 + expectedGoldProd + 40));
 
   // Unblocked market (goldPerTurn: 75 at L1) adds to settlementIncome and effectiveSettlementIncome
   const baseOnlySettlement: SettlementState = { ...baseSettlement, districts: undefined };
