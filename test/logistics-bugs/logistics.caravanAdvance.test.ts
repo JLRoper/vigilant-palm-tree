@@ -133,7 +133,7 @@ test("after a destination-side chase the return leg is a real path from the deli
   assert.equal(
     wraps,
     Math.ceil(legHome.length / CARAVAN_TILES_PER_DAY),
-    "it walked one wrap per 4 tiles of the real leg home",
+    "it walked one wrap per CARAVAN_TILES_PER_DAY tiles of the real leg home",
   );
 
   // And the cycle resumes normally: the next wrap reloads at the origin --

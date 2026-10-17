@@ -29,6 +29,7 @@ function cloneCaravan(c: CaravanState | null): CaravanState | null {
     cargo: c.cargo,
     pathIndex: c.pathIndex,
     path: c.path.map((p) => ({ q: p.q, r: p.r })),
+    ...(c.anchored ? { anchored: true } : {}),
   };
 }
 
@@ -309,7 +310,7 @@ export class CaravanVisualTracker {
           origin.ownerId,
           route.wagons,
           route.payload.kind,
-          nextCaravan.pathIndex > 0 ? originTile : end,
+          end,
           facing,
           nextCaravan,
         );

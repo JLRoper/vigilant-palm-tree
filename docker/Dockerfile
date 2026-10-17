@@ -76,4 +76,5 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 RUN mkdir -p /app && ln -s /usr/share/nginx/html /app/dist
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 
+# Expose web port
 EXPOSE 80 5173

@@ -65,8 +65,10 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    # Redeploy with `npm run docker:deploy` or `docker compose up -d --remove-orphans api web`
-    # so any legacy `game_gateway` container is removed before `game_web` binds host port 5173.
+    # Redeploy with `npm run docker:build` (rebuilds BOTH api and web -- the
+    # engine lives server-side, so the api image must ship with the client)
+    # then `docker compose up -d --remove-orphans api web` so any legacy
+    # `game_gateway` container is removed before `game_web` binds host port 5173.
     ports:
       - "5173:80"
     networks:

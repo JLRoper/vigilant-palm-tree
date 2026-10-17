@@ -1,4 +1,4 @@
-import type { GameState, TradeRouteEndpoint, TradeRoutePayload, WarehouseResource } from "@heroes/contracts";
+import type { GameState, TradeRouteEndpoint, TradeRoutePayload, TradeRouteState, WarehouseResource } from "@heroes/contracts";
 import {
   evaluateTradeNeeds,
   heroCargo,
@@ -15,11 +15,45 @@ import {
   settlementResourceCap,
   settlementTreasuryCap,
 } from "@heroes/engine";
+import { bus } from "../../core/eventBus";
+import { viewSeat } from "../../state/viewSeat";
 import { cachedUnitTypes } from "../../data/unitCatalog";
+import {
+  CARAVAN_SPRITES,
+  CASTLE_ALT2_DESCRIPTORS,
+  CASTLE_ALT3_DESCRIPTORS,
+  CASTLE_ALT_DESCRIPTORS,
+  CASTLE_DESCRIPTORS,
+  HERO_PLAYER_DESCRIPTORS,
+  HORSE_VARIANT_DESCRIPTORS,
+  castleKey,
+  type SpriteDescriptor,
+  type SpriteKey,
+} from "../../render/assetDescriptors";
 import { showToast } from "../shared/toast";
 import { openCenteredModal, styleButton, styleInput } from "@screens/shared/menu";
+import { STORAGE_GAUGE_SHEET } from "./storageGaugeAssets";
+import {
+  formatStorageAmount,
+  formatStoragePercentage,
+  getEndpointStorage,
+  getRouteProgress,
+  getRouteTooltipText,
+  getStorageMeterState,
+  STORAGE_GAUGE_FRAME_COUNT,
+  STORAGE_GAUGE_HEIGHT,
+} from "./routeVisualization";
 
 const RES: WarehouseResource[] = ["wood", "stone", "iron", "arcane", "food"];
+// Typed over the full SpriteKey union so the castleKey index stays legal even
+// after main widened castleKey's return type (fullness variants): absent keys
+// fall through to the CASTLE_DESCRIPTORS fallback below.
+const CASTLE_MAP_DESCRIPTORS: Partial<Record<SpriteKey, SpriteDescriptor>> = {
+  ...CASTLE_DESCRIPTORS,
+  ...CASTLE_ALT_DESCRIPTORS,
+  ...CASTLE_ALT2_DESCRIPTORS,
+  ...CASTLE_ALT3_DESCRIPTORS,
+};
 
 // U2 (logistics-interface-fixes plan §5.8): local {ok, reason} rejections used
 // to vanish — with the standard 0-wagon starting pool, Accept and wagon "+1"
@@ -65,6 +99,126 @@ function endpointLabel(state: GameState, endpoint: TradeRouteEndpoint): string {
   return `Hero: ${state.heroes[endpoint.id]?.name ?? "?"}`;
 }
 
+function routeEndpointArtwork(state: GameState, endpoint: TradeRouteEndpoint): {
+  name: string;
+  kind: string;
+  image: string;
+} {
+  if (endpoint.kind === "hero") {
+    const hero = state.heroes[endpoint.id];
+    const variant = hero?.horseVariant ?? "hero";
+    const image =
+      variant === "hero"
+        ? HERO_PLAYER_DESCRIPTORS["hero.player.s"].url
+        : HORSE_VARIANT_DESCRIPTORS[variant]?.[`horse.${variant}.s`]?.url;
+    return {
+      name: hero?.name ?? "Missing hero",
+      kind: "Hero",
+      image: image ?? HERO_PLAYER_DESCRIPTORS["hero.player.s"].url!,
+    };
+  }
+  const settlement = state.settlements[endpoint.id];
+  const level = settlement?.level ?? 1;
+  const image = CASTLE_MAP_DESCRIPTORS[
+    castleKey(level, settlement?.castleVariant ?? 0)
+  ]?.url;
+  return {
+    name: settlement?.name ?? "Missing settlement",
+    kind: "Settlement",
+    image: image ?? CASTLE_DESCRIPTORS[`castle.${level}`].url!,
+  };
+}
+
+function routeEndpointPanel(
+  state: GameState,
+  endpoint: TradeRouteEndpoint,
+  payload: TradeRoutePayload,
+  side: "source" | "destination",
+): HTMLDivElement {
+  const panel = document.createElement("div");
+  panel.style.cssText = "display:flex;min-width:0;flex-direction:column;align-items:center;";
+
+  const artwork = routeEndpointArtwork(state, endpoint);
+  const image = document.createElement("img");
+  image.src = artwork.image;
+  image.alt = `${artwork.kind}: ${artwork.name}`;
+  image.loading = "lazy";
+  image.style.cssText =
+    "width:34px;height:34px;flex:none;object-fit:contain;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.55));";
+
+  const storage = getEndpointStorage(state, endpoint, payload);
+  const imageAndMeter = document.createElement("div");
+  imageAndMeter.style.cssText = `display:flex;width:100%;height:${STORAGE_GAUGE_HEIGHT}px;align-items:center;justify-content:center;gap:3px;`;
+  if (storage) {
+    const meterState = getStorageMeterState(storage.amount, storage.capacity);
+    const meter = document.createElement("div");
+    meter.style.cssText =
+      `width:18px;height:${STORAGE_GAUGE_HEIGHT}px;flex:none;background-image:url("${STORAGE_GAUGE_SHEET}");` +
+      `background-size:${STORAGE_GAUGE_FRAME_COUNT * 100}% 100%;background-position:${(meterState.frameIndex / (STORAGE_GAUGE_FRAME_COUNT - 1)) * 100}% 0;background-repeat:no-repeat;`;
+    const percentText = formatStoragePercentage(meterState.percentage);
+    meter.setAttribute("role", "meter");
+    meter.setAttribute("aria-valuemin", "0");
+    meter.setAttribute("aria-valuemax", "100");
+    meter.setAttribute("aria-valuenow", String(Math.round(meterState.fillPercentage)));
+    meter.setAttribute(
+      "aria-valuetext",
+      `${meterState.percentage === null ? "No capacity" : `${percentText} full`}; ${formatStorageAmount(storage.amount)} of ${formatStorageAmount(storage.capacity)} ${storage.resourceName} in ${storage.storeName}`,
+    );
+    meter.setAttribute("aria-label", `${storage.storeName} ${storage.resourceName}`);
+
+    if (side === "source") imageAndMeter.append(image, meter);
+    else imageAndMeter.append(meter, image);
+  } else {
+    imageAndMeter.appendChild(image);
+  }
+  panel.appendChild(imageAndMeter);
+  return panel;
+}
+
+function routeJourneyPanel(state: GameState, route: TradeRouteState): HTMLDivElement {
+  const panel = document.createElement("div");
+  panel.style.cssText = "min-width:0;display:flex;align-items:center;";
+  const progress = getRouteProgress(route, state);
+  const label = progress.waitingAtDestination
+    ? "Waiting for destination space"
+    : progress.direction === "loading"
+      ? "Loading at source"
+      : progress.direction === "outbound"
+        ? "To destination"
+        : "Returning home";
+
+  const track = document.createElement("div");
+  track.style.cssText =
+    "flex:1;min-width:0;position:relative;height:4px;margin:12px 11px;border-radius:999px;background:#263347;";
+  track.setAttribute("role", "progressbar");
+  track.setAttribute("aria-valuemin", "0");
+  track.setAttribute("aria-valuemax", "100");
+  track.setAttribute("aria-valuenow", String(Math.round(progress.legPercentage)));
+  track.setAttribute("aria-label", `${label} progress`);
+  track.setAttribute("aria-valuetext", `${label}: ${formatStoragePercentage(progress.legPercentage)}`);
+
+  const fill = document.createElement("div");
+  fill.style.cssText = "position:absolute;top:0;height:100%;border-radius:999px;background:linear-gradient(90deg,#6acb91,#85d9ce);";
+  if (progress.direction === "returning") {
+    fill.style.left = `${progress.positionPercentage}%`;
+    fill.style.width = `${100 - progress.positionPercentage}%`;
+  } else {
+    fill.style.left = "0";
+    fill.style.width = `${progress.positionPercentage}%`;
+  }
+  track.appendChild(fill);
+
+  const marker = document.createElement("img");
+  marker.src = CARAVAN_SPRITES[route.payload.kind];
+  marker.alt = "";
+  marker.setAttribute("aria-hidden", "true");
+  marker.style.cssText =
+    `position:absolute;left:${progress.positionPercentage}%;top:50%;width:22px;height:22px;max-width:none;object-fit:contain;transform:translate(-50%,-50%);`;
+  track.appendChild(marker);
+  panel.appendChild(track);
+  return panel;
+}
+
 export interface LogisticsModalOptions {
   parent: HTMLElement;
   getState: () => GameState;
@@ -100,17 +254,42 @@ export interface LogisticsModalOptions {
 
 /** One-stop logistics modal: selected hero cargo/wagons, settlement stockpile caps, wagon purchases, trade routes. */
 export function openLogisticsModal(opts: LogisticsModalOptions): void {
-  const modal = openCenteredModal(opts.parent, "Logistics", 460, true, true);
+  let detachRouteRefresh = (): void => {};
+  const modal = openCenteredModal(opts.parent, "Logistics", 660, true, true, () => detachRouteRefresh());
+  modal.root.style.width = "min(660px, calc(100vw - 48px))";
+  modal.root.style.maxWidth = "calc(100vw - 48px)";
+
+  // Persistent create-form controls, held across renders so an automatic
+  // refresh (state:committed / turn:ended / resync) can preserve the user's
+  // in-progress draft and keyboard focus instead of resetting the selectors.
+  let fromSel: HTMLSelectElement | null = null;
+  let toSel: HTMLSelectElement | null = null;
+  let payloadSel: HTMLSelectElement | null = null;
+  let wagonInput: HTMLInputElement | null = null;
 
   const render = (): void => {
     const state = opts.getState();
+    // The panel is tied to the VIEWING seat, not the active player: a
+    // spectator (or any seat whose turn it isn't) still sees and manages
+    // their own routes, pools, and recommendations.
+    const localSeat = viewSeat();
+    const draft = {
+      from: fromSel?.value ?? "",
+      to: toSel?.value ?? "",
+      payload: payloadSel?.value ?? "",
+      wagons: wagonInput?.value ?? "",
+      focusedField:
+        (document.activeElement as HTMLElement | null)?.dataset?.field ??
+        (document.activeElement as HTMLElement | null)?.dataset?.focus ??
+        null,
+    };
     modal.body.replaceChildren();
 
-    const owned = Object.values(state.settlements).filter((s) => s.ownerId === state.activePlayerId);
+    const owned = Object.values(state.settlements).filter((s) => s.ownerId === localSeat);
     const hero =
       (state.selectedHeroId ? state.heroes[state.selectedHeroId] : undefined) ??
-      Object.values(state.heroes).find((h) => h.ownerId === state.activePlayerId);
-    const player = state.players.find((p) => p.id === state.activePlayerId);
+      Object.values(state.heroes).find((h) => h.ownerId === localSeat);
+    const player = state.players.find((p) => p.id === localSeat);
 
     const section = (title: string): HTMLDivElement => {
       const el = document.createElement("div");
@@ -174,6 +353,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
           styleButton(btn);
           btn.style.fontSize = "10px";
           btn.style.padding = "1px 6px";
+          btn.dataset.focus = `hero-wagon-${slot}-${delta > 0 ? "plus" : "minus"}`;
           if (delta > 0 && poolUnassigned <= 0) {
             setUnavailable(btn, "no unassigned wagons — buy one below");
           }
@@ -244,6 +424,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         const buyBtn = document.createElement("button");
         buyBtn.textContent = label;
         buyBtn.title = title;
+        buyBtn.dataset.focus = `buy-wagon-${s.id}-${slot}`;
         styleButton(buyBtn);
         buyBtn.style.fontSize = "10px";
         buyBtn.style.padding = "1px 6px";
@@ -264,14 +445,14 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
     // refreshes the list against the post-create state); each row accepts
     // in one click through the same createTradeRoute path as the manual
     // form, allocating exactly the suggested wagons.
-    const recommendations = evaluateTradeNeeds(state, state.activePlayerId, cachedUnitTypes());
+    const recommendations = evaluateTradeNeeds(state, localSeat, cachedUnitTypes());
     if (recommendations.length > 0) {
       section("Recommended routes");
       const poolFor = (payload: TradeRoutePayload): number =>
         payload.kind === "gold"
           ? (player?.treasuryWagonsUnassigned ?? 0)
           : (player?.wagonsUnassigned ?? 0);
-      for (const rec of recommendations) {
+      for (const [i, rec] of recommendations.entries()) {
         const row = document.createElement("div");
         row.style.cssText =
           "display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;font-variant-numeric:tabular-nums;";
@@ -284,6 +465,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         row.appendChild(label);
         const acceptBtn = document.createElement("button");
         acceptBtn.textContent = "Accept";
+        acceptBtn.dataset.focus = `rec-accept-${i}`;
         styleButton(acceptBtn);
         acceptBtn.style.fontSize = "10px";
         acceptBtn.style.padding = "1px 8px";
@@ -300,6 +482,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       }
       const acceptAll = document.createElement("button");
       acceptAll.textContent = `Accept all (${recommendations.length})`;
+      acceptAll.dataset.focus = "rec-accept-all";
       styleButton(acceptAll);
       acceptAll.style.fontSize = "10px";
       acceptAll.style.padding = "1px 8px";
@@ -342,7 +525,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
     // misfiled a captured origin under the capturer and made a route vanish
     // entirely once its origin hero died. Absent stamp falls back to the
     // FROM endpoint's live owner (legacy rows).
-    const playerRoutes = routes.filter((r) => routeOwnerId(r, state) === state.activePlayerId);
+    const playerRoutes = routes.filter((r) => routeOwnerId(r, state) === localSeat);
     if (playerRoutes.length === 0) {
       const empty = document.createElement("div");
       empty.textContent = "No routes yet.";
@@ -350,19 +533,24 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       modal.body.appendChild(empty);
     }
     for (const route of playerRoutes) {
+      const routeDetails = getRouteTooltipText(state, route);
       const row = document.createElement("div");
       row.style.cssText =
-        "display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;font-variant-numeric:tabular-nums;";
+        "margin-bottom:6px;padding:6px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:linear-gradient(115deg,rgba(28,39,55,0.72),rgba(15,22,33,0.7));font-variant-numeric:tabular-nums;cursor:help;";
+      row.title = routeDetails;
+      row.tabIndex = 0;
+      row.setAttribute("role", "group");
+      row.setAttribute("aria-label", routeDetails);
+      row.dataset.focus = `route-${route.id}`;
+      const header = document.createElement("div");
+      header.style.cssText = "display:flex;align-items:center;gap:6px;min-width:0;min-height:18px;";
       const label = document.createElement("span");
-      label.style.flex = "1";
-      const caravanInfo = route.caravan
-        ? route.caravan.phase === "toDestination"
-          ? "outbound"
-          : "returning"
-        : "loading";
+      label.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;";
       const payloadText = route.payload.kind === "gold" ? "gold" : route.payload.resource;
-      label.textContent = `${route.wagons}\u{1F69F} ${payloadText}: ${endpointLabel(state, route.from)} \u2192 ${endpointLabel(state, route.to)} (${caravanInfo})`;
-      row.appendChild(label);
+      label.textContent = `${route.wagons}x ${payloadText}`;
+      header.appendChild(label);
+      const controls = document.createElement("div");
+      controls.style.cssText = "display:flex;flex:none;align-items:center;gap:4px;";
       for (const [delta, text] of [
         [-1, "−1"],
         [1, "+1"],
@@ -372,25 +560,71 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         styleButton(btn);
         btn.style.fontSize = "10px";
         btn.style.padding = "1px 5px";
+        btn.dataset.focus = `route-${route.id}-${delta > 0 ? "plus" : "minus"}`;
         btn.addEventListener("click", () => {
           const result = opts.actions.updateTradeRoute(route.id, { wagonsDelta: delta });
           if (!result.ok) rejectionToast("route update", result.reason);
           setTimeout(render, 30);
         });
-        row.appendChild(btn);
+        controls.appendChild(btn);
       }
       const removeBtn = document.createElement("button");
       removeBtn.textContent = "\u2715";
       styleButton(removeBtn);
       removeBtn.style.fontSize = "10px";
       removeBtn.style.padding = "1px 6px";
+      removeBtn.dataset.focus = `route-${route.id}-remove`;
       removeBtn.title = "Disband this route (wagons return to the pool; cargo aboard is lost)";
       removeBtn.addEventListener("click", () => {
         const result = opts.actions.updateTradeRoute(route.id, { remove: true });
         if (!result.ok) rejectionToast("route removal", result.reason);
         setTimeout(render, 30);
       });
-      row.appendChild(removeBtn);
+      controls.appendChild(removeBtn);
+      header.appendChild(controls);
+
+      const routeVisual = document.createElement("div");
+      routeVisual.style.cssText =
+        "display:grid;grid-template-columns:minmax(56px,0.8fr) minmax(72px,1.4fr) minmax(56px,0.8fr);align-items:center;gap:4px;margin-top:4px;";
+      routeVisual.append(
+        routeEndpointPanel(state, route.from, route.payload, "source"),
+        routeJourneyPanel(state, route),
+        routeEndpointPanel(state, route.to, route.payload, "destination"),
+      );
+      row.append(header, routeVisual);
+      // A native title never opens on keyboard focus; give the details a
+      // visible tooltip on hover AND focus, linked via aria-describedby.
+      const detailsTip = document.createElement("div");
+      detailsTip.id = `route-tip-${route.id}`;
+      detailsTip.textContent = routeDetails;
+      detailsTip.style.cssText =
+        "display:none;margin-top:4px;padding:6px 8px;border-radius:6px;background:rgba(10,16,26,0.95);border:1px solid rgba(255,255,255,0.18);font-size:10px;line-height:1.5;white-space:pre-line;max-width:520px;";
+      row.setAttribute("aria-describedby", detailsTip.id);
+      // Show while EITHER trigger is active: leaving the pointer must not
+      // hide the tip the keyboard still owns, and blur must not hide it
+      // while the pointer still hovers.
+      let tipHovering = false;
+      let tipFocused = false;
+      const refreshTip = (): void => {
+        detailsTip.style.display = tipHovering || tipFocused ? "block" : "none";
+      };
+      row.addEventListener("mouseenter", () => {
+        tipHovering = true;
+        refreshTip();
+      });
+      row.addEventListener("mouseleave", () => {
+        tipHovering = false;
+        refreshTip();
+      });
+      row.addEventListener("focus", () => {
+        tipFocused = true;
+        refreshTip();
+      });
+      row.addEventListener("blur", () => {
+        tipFocused = false;
+        refreshTip();
+      });
+      row.appendChild(detailsTip);
       modal.body.appendChild(row);
     }
 
@@ -399,16 +633,18 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
     // heroes ("treasure wagons trade route between him and a city"), so the
     // row appears as soon as two endpoint candidates exist at all -- a lone
     // settlement plus a lone hero is a legal route.
-    const ownedHeroes = Object.values(state.heroes).filter((h) => h.ownerId === state.activePlayerId);
+    const ownedHeroes = Object.values(state.heroes).filter((h) => h.ownerId === localSeat);
     if (owned.length + ownedHeroes.length >= 2) {
       const createRow = document.createElement("div");
       createRow.style.cssText = "display:flex;gap:6px;margin-top:4px;align-items:center;";
-      const fromSel = document.createElement("select") as HTMLSelectElement;
+      fromSel = document.createElement("select") as HTMLSelectElement;
       styleInput(fromSel as unknown as HTMLInputElement);
       fromSel.style.flex = "1.2";
-      const toSel = document.createElement("select") as HTMLSelectElement;
+      fromSel.dataset.field = "from";
+      toSel = document.createElement("select") as HTMLSelectElement;
       styleInput(toSel as unknown as HTMLInputElement);
       toSel.style.flex = "1.2";
+      toSel.dataset.field = "to";
       // Option values carry the endpoint kind ("s:<id>" / "h:<id>") so the
       // two id namespaces cannot collide in the select.
       for (const sel of [fromSel, toSel]) {
@@ -426,9 +662,10 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         }
       }
       // Payload: "gold" is a treasure caravan; each resource is a cargo caravan.
-      const payloadSel = document.createElement("select") as HTMLSelectElement;
+      payloadSel = document.createElement("select") as HTMLSelectElement;
       styleInput(payloadSel as unknown as HTMLInputElement);
       payloadSel.style.flex = "0.9";
+      payloadSel.dataset.field = "payload";
       for (const [value, text] of [
         ["wood", "wood"],
         ["stone", "stone"],
@@ -442,23 +679,33 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         opt.textContent = text;
         payloadSel.appendChild(opt);
       }
-      const wagonInput = document.createElement("input");
+      wagonInput = document.createElement("input");
       styleInput(wagonInput);
       wagonInput.type = "number";
       wagonInput.min = "1";
       wagonInput.value = "1";
       wagonInput.style.width = "52px";
+      wagonInput.dataset.field = "wagons";
+      // Local non-null aliases: the event closures below capture these
+      // consts, so strict null-checking narrows them even though the
+      // closure-scoped variables (held across renders for draft
+      // preservation) stay mutable and nullable.
+      const fromSelect = fromSel;
+      const toSelect = toSel;
+      const payloadSelect = payloadSel;
+      const wagonsInput = wagonInput;
       const createBtn = document.createElement("button");
       createBtn.textContent = "Create";
+      createBtn.dataset.focus = "create-submit";
       styleButton(createBtn);
       // U4: the engine rejects an over-pool create (not_enough_wagons_unassigned)
       // rather than clamping, so the button pre-disables to match and says why.
       const updateCreateAvailability = (): void => {
-        const isGold = payloadSel.value === "gold";
+        const isGold = payloadSelect.value === "gold";
         const pool = isGold
           ? (player?.treasuryWagonsUnassigned ?? 0)
           : (player?.wagonsUnassigned ?? 0);
-        const wanted = Math.max(1, Math.floor(Number(wagonInput.value) || 1));
+        const wanted = Math.max(1, Math.floor(Number(wagonsInput.value) || 1));
         if (wanted > pool) {
           setUnavailable(
             createBtn,
@@ -479,30 +726,66 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
           if (value.startsWith("h:")) return { kind: "hero", id: value.slice(2) };
           return null;
         };
-        const from = parseEndpoint(fromSel.value);
-        const to = parseEndpoint(toSel.value);
+        const from = parseEndpoint(fromSelect.value);
+        const to = parseEndpoint(toSelect.value);
         if (!from || !to) return;
         if (from.kind === to.kind && from.id === to.id) return;
         const payload: TradeRoutePayload =
-          payloadSel.value === "gold"
+          payloadSelect.value === "gold"
             ? { kind: "gold" }
-            : { kind: "resource", resource: payloadSel.value as WarehouseResource };
-        const wagons = Math.max(1, Math.floor(Number(wagonInput.value) || 1));
+            : { kind: "resource", resource: payloadSelect.value as WarehouseResource };
+        const wagons = Math.max(1, Math.floor(Number(wagonsInput.value) || 1));
         const result = opts.actions.createTradeRoute(from, to, payload, wagons);
         if (!result.ok) rejectionToast("route creation", result.reason);
         setTimeout(render, 30);
       });
       createRow.append(fromSel, toSel, payloadSel, wagonInput, createBtn);
+      // Restore the user's in-progress draft across automatic refreshes, then
+      // re-derive button availability from the restored values.
+      if (draft.from) fromSel.value = draft.from;
+      if (draft.to) toSel.value = draft.to;
+      if (draft.payload) payloadSel.value = draft.payload;
+      if (draft.wagons) wagonInput.value = draft.wagons;
       updateCreateAvailability();
+      // Attach the freshly built row to the live modal body BEFORE the focus
+      // lookup, or querySelector cannot find the replacement controls.
       modal.body.appendChild(createRow);
     }
 
     const hint = document.createElement("div");
     hint.textContent =
-      "Cargo caravans carry one resource (wagons\u00d750); treasure caravans carry gold (wagons\u00d7500). They walk 4 tiles/day, re-path daily to reach a moving hero endpoint, and wait (never lose cargo) when the destination is full. A route whose origin is lost or captured goes dormant: it bills nothing and never deserts, and resumes if you retake it. When a route's last wagon deserts, the route disbands and returns what fits at the origin — the rest is lost. Removing a route manually also loses its aboard cargo.";
+      "Cargo caravans carry one resource (wagons\u00d750); treasure caravans carry gold (wagons\u00d7500). They walk 7 tiles/day, re-path daily to reach a moving hero endpoint, and wait (never lose cargo) when the destination is full. A route whose origin is lost or captured goes dormant: it bills nothing and never deserts, and resumes if you retake it. When a route's last wagon deserts, the route disbands and returns what fits at the origin — the rest is lost. Removing a route manually also loses its aboard cargo.";
     hint.style.cssText = "font-size:10px;opacity:0.55;margin-top:10px;line-height:1.4;";
     modal.body.appendChild(hint);
+
+    // Restore keyboard focus across the automatic refresh: route rows and
+    // their controls carry stable data-focus ids, the create form carries
+    // data-field. If the focused element no longer exists (route removed),
+    // focus simply falls back to the modal -- a graceful no-op.
+    if (draft.focusedField) {
+      const el =
+        modal.body.querySelector<HTMLElement>(`[data-field="${draft.focusedField}"]`) ??
+        modal.body.querySelector<HTMLElement>(`[data-focus="${draft.focusedField}"]`);
+      if (el) el.focus();
+    }
   };
 
   render();
+  bus.on("round:changed", render);
+  bus.on("mp:resynced", render);
+  // The caravan advances at every turn end, while round:changed only fires
+  // when a round WRAPS -- turn:ended covers the local human/AI end-turn merge.
+  // state:committed covers local command commits AND the garrisonEventBridge's
+  // state adoption (GameStateManager.replaceState emits it after the fresh
+  // state is installed), so remote route changes re-render from the live
+  // state instead of the pre-adoption snapshot the transport notifications
+  // would expose. mp:resynced stays as the boundary safety net.
+  bus.on("turn:ended", render);
+  bus.on("state:committed", render);
+  detachRouteRefresh = () => {
+    bus.off("round:changed", render);
+    bus.off("mp:resynced", render);
+    bus.off("turn:ended", render);
+    bus.off("state:committed", render);
+  };
 }
