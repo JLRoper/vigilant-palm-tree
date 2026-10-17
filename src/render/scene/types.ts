@@ -19,6 +19,7 @@ export type SceneNode =
   | CharterOverlayNode
   | ValidCharterHexNode
   | CastleNode
+  | DistrictNode
   | TerritoryOutlineEdgeNode
   | PathSegmentNode
   | HeroTrailNode
@@ -112,6 +113,19 @@ export interface CastleNode {
   selected: boolean;
   color: string;
   dashedBorder: boolean;
+}
+
+export interface DistrictNode {
+  kind: "district";
+  settlementId: string;
+  ownerId: number | null;
+  q: number;
+  r: number;
+  world: WorldPoint;
+  tier: 1 | 2 | 3;
+  variant: "standard" | "farm";
+  color: string;
+  blocked?: boolean;
 }
 
 export interface TerritoryOutlineEdgeNode {

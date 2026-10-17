@@ -20,12 +20,12 @@ import type { Axial } from "../core/hex";
 import { Hero } from "../entities/hero";
 import { SpriteProvider } from "../render/assets";
 import { cachedUnitTypes } from "../data/unitCatalog";
-import { playerFactionId, playerIncome, playerWealth, playerEffectiveSettlementIncome, unitAllowedForSeatFaction } from "@heroes/engine";
+import { districtKey, generateDistrictSpots, playerFactionId, playerIncome, playerWealth, playerEffectiveSettlementIncome, unitAllowedForSeatFaction, type CitySpot } from "@heroes/engine";
 import { SessionManager } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
 import type { MapInfo } from "@screens/home/settingsMenu";
-import type { FactionId } from "@heroes/contracts";
+import type { DistrictState, FactionId } from "@heroes/contracts";
 
 type ToolbarCallbacks = {
   onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" | "huge" | "epic"; enemyCount?: number; factionId?: FactionId }) => void;
@@ -186,10 +186,10 @@ export class UIManager {
         this.gameStateManager.replaceState(tc.getState());
         return true;
       },
-      onBankGold: (settlementId, gx, gy, amount, direction) => {
+      onBankGold: (settlementId, gx, gy, amount, direction, district) => {
         if (!this.gameStateManager) return { ok: false, reason: "no_settlement" };
         const tc = this.gameStateManager.getTurnController();
-        const result = tc.bankGold(settlementId, gx, gy, amount, direction);
+        const result = tc.bankGold(settlementId, gx, gy, amount, direction, district);
         if (!result.ok) return result;
         this.gameStateManager.replaceState(tc.getState());
         return result;
@@ -278,13 +278,13 @@ export class UIManager {
         const openId = this.cityView?.getOpenSettlementId();
         if (!openId) return;
         const tc = state().getTurnController();
-        if (tc.recruitUnits(openId, building.kind, building.gx, building.gy, unitTypeId, count)) {
+        if (tc.recruitUnits(openId, building.kind, building.gx, building.gy, unitTypeId, count, this.cityView?.getOpenDistrict() ?? undefined)) {
           state().replaceState(tc.getState());
         }
       },
-      onUpgradeBuildings: (settlementId, requests) => {
+      onUpgradeBuildings: (settlementId, requests, district) => {
         const tc = state().getTurnController();
-        const result = tc.startBuildingUpgrade(settlementId, requests);
+        const result = tc.startBuildingUpgrade(settlementId, requests, district ?? this.cityView?.getOpenDistrict() ?? undefined);
         if (result.ok) {
           state().replaceState(tc.getState());
         }
@@ -303,7 +303,7 @@ export class UIManager {
         this.heroInfoMenu?.floatingRect() ?? null,
         this.settlementInfoMenu?.floatingRect() ?? null,
       ],
-      onClose: (closedId, buildings, netCost, final, preCitySelection) => {
+      onClose: (closedId, buildings, netCost, final, preCitySelection, district) => {
         const gs = state().getState();
         const s = gs.settlements[closedId];
         let written = true;
@@ -320,19 +320,57 @@ export class UIManager {
           );
           if (settled.ok) {
             recordBuildCommit(closedId, netCost);
-            const updatedSettlement: SettlementState = {
-              ...s,
-              buildings,
-              gold: settled.gold,
-              warehouse: {
-                ...s.warehouse,
-                wood: settled.wood,
-                stone: settled.stone,
-                iron: settled.iron,
-                arcane: settled.arcane,
-                food: s.warehouse.food ?? 0,
-              },
-            };
+            let updatedSettlement: SettlementState;
+            if (district) {
+              const key = districtKey(district.q, district.r);
+              const nextDistricts: Record<string, DistrictState> = { ...(s.districts ?? {}) };
+              if (buildings.length > 0) {
+                const map = state().getGameMap();
+                const terrain = map.get(district.q, district.r);
+                const mapRes = map.resourceTileAt(district.q, district.r)?.resource ?? null;
+                const prevSpots = nextDistricts[key]?.citySpots;
+                const citySpots =
+                  prevSpots && prevSpots.length > 0
+                    ? prevSpots
+                    : generateDistrictSpots(district.q, district.r, gs.castleSeed, terrain, mapRes);
+                nextDistricts[key] = {
+                  q: district.q,
+                  r: district.r,
+                  citySpots,
+                  buildings,
+                };
+              } else {
+                delete nextDistricts[key];
+              }
+              const { districts: _prevDistricts, ...sWithoutDistricts } = s;
+              updatedSettlement = {
+                ...sWithoutDistricts,
+                ...(Object.keys(nextDistricts).length > 0 ? { districts: nextDistricts } : {}),
+                gold: settled.gold,
+                warehouse: {
+                  ...s.warehouse,
+                  wood: settled.wood,
+                  stone: settled.stone,
+                  iron: settled.iron,
+                  arcane: settled.arcane,
+                  food: s.warehouse.food ?? 0,
+                },
+              };
+            } else {
+              updatedSettlement = {
+                ...s,
+                buildings,
+                gold: settled.gold,
+                warehouse: {
+                  ...s.warehouse,
+                  wood: settled.wood,
+                  stone: settled.stone,
+                  iron: settled.iron,
+                  arcane: settled.arcane,
+                  food: s.warehouse.food ?? 0,
+                },
+              };
+            }
             const updated = {
               ...gs,
               settlements: {
@@ -374,9 +412,24 @@ export class UIManager {
         }
         return written;
       },
-      onPlaceBuildings: (settlementId, buildings, initialLayout) => {
+      onPlaceBuildings: (settlementId, buildings, initialLayout, district) => {
         const tc = state().getTurnController();
-        const result = tc.placeBuildings(settlementId, buildings, initialLayout === true);
+        let districtTarget: { q: number; r: number; citySpots?: CitySpot[] } | undefined;
+        if (district) {
+          const gs = state().getState();
+          const s = gs.settlements[settlementId];
+          const key = districtKey(district.q, district.r);
+          const prevSpots = s?.districts?.[key]?.citySpots;
+          const map = state().getGameMap();
+          const terrain = map.get(district.q, district.r);
+          const mapRes = map.resourceTileAt(district.q, district.r)?.resource ?? null;
+          const citySpots =
+            prevSpots && prevSpots.length > 0
+              ? prevSpots
+              : generateDistrictSpots(district.q, district.r, gs.castleSeed, terrain, mapRes);
+          districtTarget = { q: district.q, r: district.r, citySpots };
+        }
+        const result = tc.placeBuildings(settlementId, buildings, initialLayout === true, districtTarget);
         if (result.ok) {
           state().replaceState(tc.getState());
         }

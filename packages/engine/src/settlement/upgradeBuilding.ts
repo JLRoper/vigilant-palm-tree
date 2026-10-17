@@ -1,6 +1,8 @@
 import type {
+  BuildingDef,
   BuildingRef,
   BuildingUpgradeRequest,
+  DistrictState,
   GameState,
   SettlementId,
   SettlementState,
@@ -8,12 +10,14 @@ import type {
   UpgradeState,
 } from "@heroes/contracts";
 import { buildingUpgradeCost } from "../buildingRegistry";
+import { districtKey } from "../control";
 import { pickStyleForBuilding } from "../styleResolver";
 
 export function startBuildingUpgrade(
   state: GameState,
   settlementId: SettlementId,
   requests: BuildingUpgradeRequest[],
+  district?: { q: number; r: number },
 ): StartUpgradeResult {
   const s = state.settlements[settlementId];
   if (!s) return { state, ok: false, reason: "no_settlement" };
@@ -26,7 +30,11 @@ export function startBuildingUpgrade(
   let maxDays = 0;
 
   for (const req of requests) {
-    const b = s.buildings.find((x) => x.gx === req.gx && x.gy === req.gy && x.kind === req.kind);
+    const dCoord = req.district ?? district;
+    const list = dCoord
+      ? (s.districts?.[districtKey(dCoord.q, dCoord.r)]?.buildings ?? [])
+      : s.buildings;
+    const b = list.find((x) => x.gx === req.gx && x.gy === req.gy && x.kind === req.kind);
     if (!b) return { state, ok: false, reason: "building_not_found" };
     if (b.level >= 3) return { state, ok: false, reason: "max_level" };
     const cost = buildingUpgradeCost(req.kind, b.level);
@@ -45,7 +53,16 @@ export function startBuildingUpgrade(
     kind: "buildings",
     targetLevel: 3,
     daysRemaining: maxDays,
-    buildingRefs: requests.map((r) => ({ gx: r.gx, gy: r.gy, kind: r.kind })),
+    buildingRefs: requests.map((r) => {
+      const dCoord = r.district ?? district;
+      return {
+        gx: r.gx,
+        gy: r.gy,
+        kind: r.kind,
+        ...(dCoord ? { district: { q: dCoord.q, r: dCoord.r } } : {}),
+      };
+    }),
+    ...(district ? { district: { q: district.q, r: district.r } } : {}),
   };
 
   const updated: SettlementState = {
@@ -69,19 +86,44 @@ export function applyBuildingUpgrade(
   state: GameState,
   settlementId: SettlementId,
   refs: BuildingRef[],
+  district?: { q: number; r: number },
 ): GameState {
   const s = state.settlements[settlementId];
   if (!s) return state;
-  const buildings = s.buildings.map((b) => {
-    const ref = refs.find((r) => r.gx === b.gx && r.gy === b.gy && r.kind === b.kind);
-    if (!ref || b.level >= 3) return b;
-    const newLevel = (b.level + 1) as 2 | 3;
-    const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style);
-    return { ...b, level: newLevel, style: newStyle };
-  });
+  const mainRefs = refs.filter((r) => !(r.district ?? district));
+  const buildings =
+    mainRefs.length > 0
+      ? s.buildings.map((b) => {
+          const ref = mainRefs.find((r) => r.gx === b.gx && r.gy === b.gy && r.kind === b.kind);
+          if (!ref || b.level >= 3) return b;
+          const newLevel = (b.level + 1) as 2 | 3;
+          const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style);
+          return { ...b, level: newLevel, style: newStyle };
+        })
+      : s.buildings;
+  let districts: Record<string, DistrictState> | undefined = s.districts;
+  if (districts) {
+    for (const r of refs) {
+      const dCoord = r.district ?? district;
+      if (!dCoord) continue;
+      const key = districtKey(dCoord.q, dCoord.r);
+      const d: DistrictState | undefined = districts[key];
+      if (!d) continue;
+      const dBuildings: BuildingDef[] = d.buildings.map((b: BuildingDef) => {
+        if (b.gx !== r.gx || b.gy !== r.gy || b.kind !== r.kind || b.level >= 3) return b;
+        const newLevel = (b.level + 1) as 2 | 3;
+        const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style);
+        return { ...b, level: newLevel, style: newStyle };
+      });
+      districts = { ...districts, [key]: { ...d, buildings: dBuildings } };
+    }
+  }
   return {
     ...state,
-    settlements: { ...state.settlements, [settlementId]: { ...s, buildings } },
+    settlements: {
+      ...state.settlements,
+      [settlementId]: { ...s, buildings, ...(districts ? { districts } : {}) },
+    },
     dirty: true,
   };
 }

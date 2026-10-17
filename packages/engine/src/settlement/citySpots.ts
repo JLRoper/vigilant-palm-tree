@@ -1,4 +1,5 @@
 import type { ResourceType } from "@heroes/contracts";
+import { hashString, mulberry32 } from "../rng";
 
 export type CityViewSize = 5 | 10 | 15;
 
@@ -109,4 +110,51 @@ export function generateCitySpots(
   }
 
   return { spots, mines };
+}
+
+export function generateDistrictSpots(
+  q: number,
+  r: number,
+  mapSeed: number,
+  terrain?: string,
+  mapResource?: ResourceType | null,
+): CitySpot[] {
+  const rng = mulberry32(hashString(`district:${mapSeed}:${q}:${r}`));
+  const size = 5;
+  const maxSpots = 3;
+  const foodBias = clampFoodBias(foodBiasForTerrain(terrain ?? "grass"));
+  const used = new Set<string>();
+  const spots: CitySpot[] = [];
+
+  for (let i = 0; i < maxSpots; i++) {
+    let gx: number;
+    let gy: number;
+    let attempts = 0;
+    do {
+      gx = Math.floor(rng() * size);
+      gy = Math.floor(rng() * size);
+      attempts++;
+    } while (used.has(`${gx},${gy}`) && attempts < 100);
+
+    if (used.has(`${gx},${gy}`)) {
+      for (let y = 0; y < size && used.has(`${gx},${gy}`); y++) {
+        for (let x = 0; x < size; x++) {
+          if (!used.has(`${x},${y}`)) {
+            gx = x;
+            gy = y;
+            break;
+          }
+        }
+      }
+    }
+    used.add(`${gx},${gy}`);
+
+    const resource =
+      i === 0 && mapResource !== undefined && mapResource !== null
+        ? mapResource
+        : pickSpotResource(rng(), foodBias);
+    spots.push({ cell: { x: gx, y: gy }, resource, vein: "rich" });
+  }
+
+  return spots;
 }

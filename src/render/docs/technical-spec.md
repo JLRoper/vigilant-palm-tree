@@ -1,6 +1,6 @@
 # Render Module — Technical Specification
 
-<!-- docs:verified 2026-10-16 -->
+<!-- docs:verified 2026-10-17 -->
 
 ## Overview
 
@@ -116,11 +116,13 @@ export type SpriteKey =
   | `horse.${string}.${Direction}.${number}` // horse run-frame sprites ("horse.drake.e.2")
   | `building.${string}.${string}.${number}` // "building.classic.house.2"
   | `unit.${string}.${UnitArenaPose}` // "unit.swordsman.idle"
+  | `district.${"standard" | "farm"}.${1 | 2 | 3}` // "district.standard.1" | "district.farm.2"
   | `faction-banner.${FactionId}`; // "faction-banner.human" (2026-10-02 faction foundation)
 ```
 
 Key helper functions generate the correct keys:
 - `castleKey(level, variant?)` — returns `castle.${level}` or `castle-alt.${level}` based on optional variant
+- `districtKey(variant, tier)` — returns `district.${variant}.${tier}` (`standard` or `farm`, tier `1 | 2 | 3`)
 - `resourceKey(type)` / `resourceCartKey(type)` / `resourceStyleKey(type, style)` — resource naming
 - `heroKey(faction)` / `heroDirectionKey("player", dir)` — hero sprite lookup
 - `horseVariantKey(variant, dir, frame?)` — generic per-variant directional lookup for any registry variant; `frame: 1` appends a `.2` suffix for that variant's optional run-frame sprite (legacy `horseBubblyKey(dir)` through `horseSamuraiKey(dir)` remain as sugar wrappers)
@@ -240,6 +242,7 @@ sequenceDiagram
 | `BUILDING_DESCRIPTORS` | `building.{style}.{kind}.{level}` — one per `BUILDING_SPRITES` key | 114 |
 | `UNIT_ARENA_DESCRIPTORS` | `unit.{unitTypeId}.{idle,attack,move}` | 108 (36 ids × 3 poses — every catalog id except mage) |
 | `CARAVAN_DESCRIPTORS` | `caravan.{resource,gold}` (`caravan-supply.png`, `caravan-treasury.png`) | 2 |
+| `DISTRICT_DESCRIPTORS` | `district.{standard,farm}.{1,2,3}` (`district-{standard,farm}-l{1,2,3}.png`) | 6 |
 | `FACTION_BANNERS` (URL map, not descriptors) | `faction-banner.{human,ashen,ironmark,verdant}` — `Partial<Record<FactionId, string>>` of `?url`s, consumer-addressed via `factionBannerKey(id)` | 4 of 4 (human, ashen, ironmark, verdant) |
 
 Pixel building keys are generated from `src/resources/buildings/` into `packages/engine/src/generated/buildingSpriteKeys.ts`; descriptor URLs are resolved from a single building-asset glob. Anchor offsets are generated separately into `src/render/generated/buildingAnchorOverrides.ts`. Per-kind/per-level expected keys and explicit absences remain manually declared in the exhaustive `packages/engine/src/buildingSpriteCoverage.ts` record and are checked by its unit test.

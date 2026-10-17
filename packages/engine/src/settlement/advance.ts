@@ -1,4 +1,5 @@
-import type { BuildingDef, GameState, SettlementId, SettlementState } from "@heroes/contracts";
+import type { BuildingDef, DistrictState, GameState, SettlementId, SettlementState } from "@heroes/contracts";
+import { districtKey } from "../control";
 import { pickStyleForBuilding } from "../styleResolver";
 
 export function advanceSettlementUpgrades(state: GameState): GameState {
@@ -23,14 +24,35 @@ export function advanceSettlementUpgrades(state: GameState): GameState {
       changed = true;
     } else if (upgrade.kind === "buildings" && upgrade.buildingRefs) {
       const refs = upgrade.buildingRefs;
-      const buildings = s.buildings.map((b) => {
-        const ref = refs.find((r) => r.gx === b.gx && r.gy === b.gy && r.kind === b.kind);
-        if (!ref || b.level >= 3) return b;
-        const newLevel = (b.level + 1) as 2 | 3;
-        const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style);
-        return { ...b, level: newLevel, style: newStyle };
-      });
-      newSettlements[id] = { ...s, buildings, upgrade: undefined };
+      const mainRefs = refs.filter((r) => !(r.district ?? upgrade.district));
+      const buildings =
+        mainRefs.length > 0
+          ? s.buildings.map((b) => {
+              const ref = mainRefs.find((r) => r.gx === b.gx && r.gy === b.gy && r.kind === b.kind);
+              if (!ref || b.level >= 3) return b;
+              const newLevel = (b.level + 1) as 2 | 3;
+              const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style);
+              return { ...b, level: newLevel, style: newStyle };
+            })
+          : s.buildings;
+      let districts: Record<string, DistrictState> | undefined = s.districts;
+      if (districts) {
+        for (const r of refs) {
+          const dCoord = r.district ?? upgrade.district;
+          if (!dCoord) continue;
+          const key = districtKey(dCoord.q, dCoord.r);
+          const d: DistrictState | undefined = districts[key];
+          if (!d) continue;
+          const dBuildings: BuildingDef[] = d.buildings.map((b: BuildingDef) => {
+            if (b.gx !== r.gx || b.gy !== r.gy || b.kind !== r.kind || b.level >= 3) return b;
+            const newLevel = (b.level + 1) as 2 | 3;
+            const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style);
+            return { ...b, level: newLevel, style: newStyle };
+          });
+          districts = { ...districts, [key]: { ...d, buildings: dBuildings } };
+        }
+      }
+      newSettlements[id] = { ...s, buildings, ...(districts ? { districts } : {}), upgrade: undefined };
       changed = true;
     } else if (upgrade.kind === "settlement") {
       const targetLevel = upgrade.targetLevel;
@@ -61,17 +83,31 @@ export function advanceSettlementUpgrades(state: GameState): GameState {
 export function advanceBuildingConstructions(state: GameState): GameState {
   let changed = false;
   const newSettlements: Record<SettlementId, SettlementState> = { ...state.settlements };
+  const stepBuilding = (b: BuildingDef): BuildingDef => {
+    if (!b.construction) return b;
+    const daysRemaining = b.construction.daysRemaining - 1;
+    changed = true;
+    if (daysRemaining > 0) return { ...b, construction: { daysRemaining } };
+    const { construction: _completed, ...finished } = b;
+    return finished as BuildingDef;
+  };
   for (const [id, s] of Object.entries(newSettlements)) {
-    if (!s.buildings.some((b) => b.construction)) continue;
-    const buildings = s.buildings.map((b) => {
-      if (!b.construction) return b;
-      const daysRemaining = b.construction.daysRemaining - 1;
-      changed = true;
-      if (daysRemaining > 0) return { ...b, construction: { daysRemaining } };
-      const { construction: _completed, ...finished } = b;
-      return finished as BuildingDef;
-    });
-    newSettlements[id] = { ...s, buildings };
+    const hasMainConstruction = s.buildings.some((b) => b.construction);
+    const hasDistrictConstruction = Object.values(s.districts ?? {}).some((d) =>
+      d.buildings.some((b) => b.construction),
+    );
+    if (!hasMainConstruction && !hasDistrictConstruction) continue;
+    const buildings = hasMainConstruction ? s.buildings.map(stepBuilding) : s.buildings;
+    let districts = s.districts;
+    if (hasDistrictConstruction && s.districts) {
+      const nextDistricts: Record<string, DistrictState> = { ...s.districts };
+      for (const [dKey, d] of Object.entries(s.districts)) {
+        if (!d.buildings.some((b) => b.construction)) continue;
+        nextDistricts[dKey] = { ...d, buildings: d.buildings.map(stepBuilding) };
+      }
+      districts = nextDistricts;
+    }
+    newSettlements[id] = { ...s, buildings, ...(districts ? { districts } : {}) };
   }
   if (!changed) return state;
   return { ...state, settlements: newSettlements, dirty: true };

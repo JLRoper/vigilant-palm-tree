@@ -3,6 +3,7 @@ import type {
   BuildingDef,
   CastleLevel,
   CastleVariant,
+  DistrictState,
   PlayerId,
   ResourceType,
   SettlementState,
@@ -33,6 +34,7 @@ export class Castle {
   castleVariant: CastleVariant;
   buildings: BuildingDef[];
   upgrade?: UpgradeState;
+  districts?: Record<string, DistrictState>;
 
   constructor(
     id: string,
@@ -53,6 +55,7 @@ export class Castle {
     castleVariant: CastleVariant = 0,
     buildings: BuildingDef[] = [],
     upgrade?: UpgradeState,
+    districts?: Record<string, DistrictState>,
   ) {
     this.id = id;
     this.tile = tile;
@@ -72,6 +75,7 @@ export class Castle {
     this.castleVariant = castleVariant;
     this.buildings = buildings;
     this.upgrade = upgrade;
+    this.districts = districts;
   }
 
   toGameState(): SettlementState {
@@ -100,6 +104,7 @@ export class Castle {
       castleVariant: this.castleVariant,
       buildings: this.buildings,
       upgrade: this.upgrade,
+      ...(this.districts && Object.keys(this.districts).length > 0 ? { districts: this.districts } : {}),
     };
   }
 
@@ -123,6 +128,7 @@ export class Castle {
       s.castleVariant ?? 0,
       s.buildings ?? [],
       s.upgrade ?? undefined,
+      s.districts && Object.keys(s.districts).length > 0 ? s.districts : undefined,
     );
   }
 }

@@ -1,4 +1,5 @@
-import type { BuildingDef, GameState, SettlementId, SettlementState } from "@heroes/contracts";
+import type { BuildingDef, DistrictState, GameState, SettlementId, SettlementState } from "@heroes/contracts";
+import { districtKey } from "../control";
 import { settlementTreasuryCap, treasuryHeadroom } from "../settlement/capacity";
 
 // A bank's OWN gold pot (designer's spec: own pot, 7-day withdrawal delay,
@@ -51,12 +52,40 @@ export interface BankGoldResult {
   reason: string;
 }
 
-function withBuilding(
+function withBankUpdated(
   state: GameState,
   settlementId: SettlementId,
   settlement: SettlementState,
-  buildings: BuildingDef[],
+  gx: number,
+  gy: number,
+  bank: NonNullable<BuildingDef["bank"]>,
+  district?: { q: number; r: number },
 ): GameState {
+  if (district) {
+    const key = districtKey(district.q, district.r);
+    const prevDistrict = settlement.districts?.[key];
+    if (!prevDistrict) return state;
+    const buildings = prevDistrict.buildings.map((b) =>
+      b.gx === gx && b.gy === gy ? { ...b, bank } : b,
+    );
+    return {
+      ...state,
+      settlements: {
+        ...state.settlements,
+        [settlementId]: {
+          ...settlement,
+          districts: {
+            ...settlement.districts,
+            [key]: { ...prevDistrict, buildings },
+          },
+        },
+      },
+      dirty: true,
+    };
+  }
+  const buildings = settlement.buildings.map((b) =>
+    b.gx === gx && b.gy === gy ? { ...b, bank } : b,
+  );
   return {
     ...state,
     settlements: {
@@ -67,27 +96,20 @@ function withBuilding(
   };
 }
 
-function replaceBuilding(
-  settlement: SettlementState,
-  gx: number,
-  gy: number,
-  bank: NonNullable<BuildingDef["bank"]>,
-): BuildingDef[] {
-  return settlement.buildings.map((b) =>
-    b.gx === gx && b.gy === gy ? { ...b, bank } : b,
-  );
-}
-
 /** Resolves the target bank building, or the reason it isn't one. */
 function findBank(
   state: GameState,
   settlementId: SettlementId,
   gx: number,
   gy: number,
+  district?: { q: number; r: number },
 ): { settlement: SettlementState; building: BuildingDef } | { reason: string } {
   const settlement = state.settlements[settlementId];
   if (!settlement) return { reason: "no_settlement" };
-  const building = settlement.buildings.find((b) => b.gx === gx && b.gy === gy);
+  const list = district
+    ? (settlement.districts?.[districtKey(district.q, district.r)]?.buildings ?? [])
+    : settlement.buildings;
+  const building = list.find((b) => b.gx === gx && b.gy === gy);
   if (!building || building.kind !== "bank") return { reason: "not_a_bank" };
   return { settlement, building };
 }
@@ -99,8 +121,9 @@ export function depositIntoBank(
   gx: number,
   gy: number,
   amount: number,
+  district?: { q: number; r: number },
 ): BankGoldResult {
-  const found = findBank(state, settlementId, gx, gy);
+  const found = findBank(state, settlementId, gx, gy, district);
   if ("reason" in found) return { ok: false, state, reason: found.reason };
   const { settlement, building } = found;
   if (!Number.isInteger(amount) || amount <= 0) return { ok: false, state, reason: "nothing_to_deposit" };
@@ -116,11 +139,14 @@ export function depositIntoBank(
   };
   return {
     ok: true,
-    state: withBuilding(
+    state: withBankUpdated(
       state,
       settlementId,
       { ...settlement, gold: settlement.gold - amount },
-      replaceBuilding(settlement, gx, gy, bank),
+      gx,
+      gy,
+      bank,
+      district,
     ),
     reason: "",
   };
@@ -139,8 +165,9 @@ export function requestBankWithdrawal(
   gx: number,
   gy: number,
   amount: number,
+  district?: { q: number; r: number },
 ): BankGoldResult {
-  const found = findBank(state, settlementId, gx, gy);
+  const found = findBank(state, settlementId, gx, gy, district);
   if ("reason" in found) return { ok: false, state, reason: found.reason };
   const { settlement, building } = found;
   if (!Number.isInteger(amount) || amount <= 0) return { ok: false, state, reason: "nothing_to_withdraw" };
@@ -156,11 +183,14 @@ export function requestBankWithdrawal(
   };
   return {
     ok: true,
-    state: withBuilding(
+    state: withBankUpdated(
       state,
       settlementId,
       settlement,
-      replaceBuilding(settlement, gx, gy, bank),
+      gx,
+      gy,
+      bank,
+      district,
     ),
     reason: "",
   };
@@ -180,11 +210,15 @@ export function matureBankWithdrawals(state: GameState): GameState {
   const next: Record<SettlementId, SettlementState> = { ...state.settlements };
   let changed = false;
   for (const [id, s] of Object.entries(next)) {
-    if (!s.buildings.some((b) => b.bank && b.bank.pendingOut.length > 0)) continue;
+    const hasMainPending = s.buildings.some((b) => b.bank && b.bank.pendingOut.length > 0);
+    const hasDistrictPending = Object.values(s.districts ?? {}).some((d) =>
+      d.buildings.some((b) => b.bank && b.bank.pendingOut.length > 0),
+    );
+    if (!hasMainPending && !hasDistrictPending) continue;
     let gold = s.gold;
     let headroom = treasuryHeadroom(gold, settlementTreasuryCap(s));
     let maturedAny = false;
-    const buildings = s.buildings.map((b) => {
+    const matureBuilding = (b: BuildingDef): BuildingDef => {
       if (!b.bank || b.bank.pendingOut.length === 0) return b;
       let matured = 0;
       const stillPending: { gold: number; maturesOnDay: number }[] = [];
@@ -203,10 +237,28 @@ export function matureBankWithdrawals(state: GameState): GameState {
       const unpaid = matured - paid;
       if (unpaid > 0) stillPending.push({ gold: unpaid, maturesOnDay: state.day });
       return { ...b, bank: { gold: b.bank.gold, pendingOut: stillPending } };
-    });
+    };
+    const buildings = hasMainPending ? s.buildings.map(matureBuilding) : s.buildings;
+    let districts = s.districts;
+    if (hasDistrictPending && s.districts) {
+      const nextDistricts: Record<string, DistrictState> = { ...s.districts };
+      let anyDistrictMatured = false;
+      for (const [dKey, d] of Object.entries(s.districts)) {
+        if (!d.buildings.some((b) => b.bank && b.bank.pendingOut.length > 0)) continue;
+        const prevMatured: boolean = maturedAny;
+        maturedAny = false;
+        const dBuildings = d.buildings.map(matureBuilding);
+        if (maturedAny) {
+          anyDistrictMatured = true;
+          nextDistricts[dKey] = { ...d, buildings: dBuildings };
+        }
+        maturedAny = prevMatured || maturedAny;
+      }
+      if (anyDistrictMatured) districts = nextDistricts;
+    }
     if (!maturedAny) continue;
     changed = true;
-    next[id] = { ...s, gold, buildings };
+    next[id] = { ...s, gold, buildings, ...(districts ? { districts } : {}) };
   }
   if (!changed) return state;
   return { ...state, settlements: next, dirty: true };
@@ -221,19 +273,41 @@ export function accrueBankInterest(state: GameState): GameState {
   const next: Record<SettlementId, SettlementState> = { ...state.settlements };
   let changed = false;
   for (const [id, s] of Object.entries(next)) {
-    if (!s.buildings.some((b) => b.bank && b.bank.gold > 0)) continue;
+    const hasMainGold = s.buildings.some((b) => b.bank && b.bank.gold > 0);
+    const hasDistrictGold = Object.values(s.districts ?? {}).some((d) =>
+      d.buildings.some((b) => b.bank && b.bank.gold > 0),
+    );
+    if (!hasMainGold && !hasDistrictGold) continue;
     let touched = false;
-    const buildings = s.buildings.map((b) => {
+    const accrueBuilding = (b: BuildingDef): BuildingDef => {
       if (!b.bank || b.bank.gold <= 0) return b;
       const cap = bankGoldCap(b);
       const grown = Math.min(cap, b.bank.gold + Math.round(b.bank.gold * BANK_WEEKLY_INTEREST_RATE));
       if (grown === b.bank.gold) return b;
       touched = true;
       return { ...b, bank: { gold: grown, pendingOut: [...b.bank.pendingOut] } };
-    });
+    };
+    const buildings = hasMainGold ? s.buildings.map(accrueBuilding) : s.buildings;
+    let districts = s.districts;
+    if (hasDistrictGold && s.districts) {
+      const nextDistricts: Record<string, DistrictState> = { ...s.districts };
+      let anyDistrictTouched = false;
+      for (const [dKey, d] of Object.entries(s.districts)) {
+        if (!d.buildings.some((b) => b.bank && b.bank.gold > 0)) continue;
+        const prevTouched: boolean = touched;
+        touched = false;
+        const dBuildings = d.buildings.map(accrueBuilding);
+        if (touched) {
+          anyDistrictTouched = true;
+          nextDistricts[dKey] = { ...d, buildings: dBuildings };
+        }
+        touched = prevTouched || touched;
+      }
+      if (anyDistrictTouched) districts = nextDistricts;
+    }
     if (touched) {
       changed = true;
-      next[id] = { ...s, buildings };
+      next[id] = { ...s, buildings, ...(districts ? { districts } : {}) };
     }
   }
   if (!changed) return state;

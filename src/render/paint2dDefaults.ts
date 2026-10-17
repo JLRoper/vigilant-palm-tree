@@ -39,12 +39,15 @@ import {
   buildingKey,
   caravanKey,
   castleKey,
+  districtSpriteKey,
   heroDirectionKey,
   heroKey,
   horseVariantKey,
   resourceStyleKey,
   UNIT_ARENA_DESCRIPTORS,
   unitArenaKey,
+  type DistrictTier,
+  type DistrictVariant,
   type SpriteKey,
   type UnitArenaPose,
 } from "./assetDescriptors";
@@ -177,6 +180,10 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
     },
     resolveSpriteForCaravan(payloadKind?: "resource" | "gold"): ResolvedSprite | undefined {
       const key = caravanKey(payloadKind === "gold" ? "gold" : "resource") as SpriteKey;
+      return narrowResolvedSprite(provider.resolve(key));
+    },
+    resolveSpriteForDistrict(variant: DistrictVariant, tier: DistrictTier): ResolvedSprite | undefined {
+      const key = districtSpriteKey(variant, tier);
       return narrowResolvedSprite(provider.resolve(key));
     },
     resolveSprite(key: SpriteKey): ResolvedSprite | undefined {

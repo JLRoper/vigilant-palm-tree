@@ -62,6 +62,12 @@ import resourceArcanePileBubbly from "../resources/resource-arcane-pile-bubbly.p
 import resourceFoodPileBubbly from "../resources/resource-food-pile-bubbly.png?url";
 import caravanSupply from "../resources/caravan-supply.png?url";
 import caravanTreasury from "../resources/caravan-treasury.png?url";
+import districtStandard1 from "../resources/districts/district-standard-1.png?url";
+import districtStandard2 from "../resources/districts/district-standard-2.png?url";
+import districtStandard3 from "../resources/districts/district-standard-3.png?url";
+import districtFarm1 from "../resources/districts/district-farm-1.png?url";
+import districtFarm2 from "../resources/districts/district-farm-2.png?url";
+import districtFarm3 from "../resources/districts/district-farm-3.png?url";
 import { Faction, Direction } from "../entities/hero";
 import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
@@ -69,6 +75,8 @@ import type { ResourceStyle } from "../state/settings";
 import { HORSE_VARIANT_REGISTRY, BUILDING_SPRITE_FILES, BUILDING_SPRITE_ALIASES, type HorseVariantId } from "@heroes/engine";
 
 export type CaravanSpriteKind = "resource" | "gold";
+export type DistrictVariant = "standard" | "farm";
+export type DistrictTier = 1 | 2 | 3;
 
 export type SpriteKey =
   | `castle.${CastleLevel}`
@@ -90,7 +98,8 @@ export type SpriteKey =
   | `building.${string}.${string}.${number}`
   | `unit.${string}.${UnitArenaPose}`
   | `faction-banner.${FactionId}`
-  | `caravan.${CaravanSpriteKind}`;
+  | `caravan.${CaravanSpriteKind}`
+  | `district.${DistrictVariant}.${DistrictTier}`;
 
 export type UnitArenaPose = "idle" | "attack" | "move";
 
@@ -749,6 +758,49 @@ export const CARAVAN_DESCRIPTORS: Record<`caravan.${CaravanSpriteKind}`, SpriteD
   },
 };
 
+export const DISTRICT_DESCRIPTORS: readonly SpriteDescriptor[] = [
+  {
+    key: "district.standard.1",
+    url: districtStandard1,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.25 },
+  },
+  {
+    key: "district.standard.2",
+    url: districtStandard2,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.45 },
+    anchorOffsetY: 4,
+  },
+  {
+    key: "district.standard.3",
+    url: districtStandard3,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.65 },
+    anchorOffsetY: 8,
+  },
+  {
+    key: "district.farm.1",
+    url: districtFarm1,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.25 },
+  },
+  {
+    key: "district.farm.2",
+    url: districtFarm2,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.45 },
+    anchorOffsetY: 4,
+  },
+  {
+    key: "district.farm.3",
+    url: districtFarm3,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.65 },
+    anchorOffsetY: 8,
+  },
+];
+
 export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(CASTLE_DESCRIPTORS),
   ...Object.values(CASTLE_ALT_DESCRIPTORS),
@@ -768,6 +820,7 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(BUILDING_DESCRIPTORS),
   ...Object.values(UNIT_ARENA_DESCRIPTORS),
   ...Object.values(CARAVAN_DESCRIPTORS),
+  ...DISTRICT_DESCRIPTORS,
 ];
 
 export function castleKey(
@@ -823,4 +876,12 @@ export function factionBannerKey(id: FactionId): `faction-banner.${FactionId}` {
 
 export function caravanKey(kind: CaravanSpriteKind = "resource"): `caravan.${CaravanSpriteKind}` {
   return `caravan.${kind}`;
+}
+
+export function districtSpriteKey(variant: DistrictVariant, tier: DistrictTier): SpriteKey {
+  return `district.${variant}.${tier}`;
+}
+
+export function districtKey(variant: DistrictVariant, tier: DistrictTier): SpriteKey {
+  return `district.${variant}.${tier}`;
 }

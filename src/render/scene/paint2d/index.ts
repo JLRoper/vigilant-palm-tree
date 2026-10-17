@@ -44,6 +44,7 @@ import type {
   CityMineNode,
   CityResourceSpotNode,
   CitySkyboxNode,
+  DistrictNode,
   FogHexNode,
   HeroNode,
   HeroTrailNode,
@@ -217,6 +218,9 @@ export function paintScene(
         break;
       case "castle":
         paintCastle(ctx, node, deps);
+        break;
+      case "district":
+        paintDistrict(ctx, node, deps);
         break;
       case "territoryOutlineEdge": {
         // drawTerritoryOutlines() stroked one owner's whole boundary as a
@@ -485,6 +489,42 @@ export function paintCastle(ctx: CanvasRenderingContext2D, node: CastleNode, dep
     ctx.save();
     ctx.globalAlpha = 0.45;
     ctx.stroke();
+    ctx.restore();
+  }
+  void deps;
+}
+
+export function paintDistrict(ctx: CanvasRenderingContext2D, node: DistrictNode, deps: Paint2DDep): void {
+  const r = deps.sprite.resolveSpriteForDistrict?.(node.variant, node.tier);
+  if (r && r.ready !== false) {
+    drawWithDescriptor(ctx, r.drawable, r.descriptor, node.world.x, node.world.y, HEX_SIZE);
+  }
+  const { x: cx, y: cy } = node.world;
+  const ringY = cy + HEX_SIZE * 0.45;
+  ctx.beginPath();
+  ctx.arc(cx, ringY, HEX_SIZE * 0.72, 0, Math.PI * 2);
+  ctx.lineWidth = 1.5;
+  if (node.ownerId === null) {
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.setLineDash([4, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  } else {
+    ctx.strokeStyle = node.color;
+    ctx.save();
+    ctx.globalAlpha = 0.38;
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (node.blocked) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, ringY, HEX_SIZE * 0.85, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255, 92, 64, 0.9)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
     ctx.restore();
   }
   void deps;

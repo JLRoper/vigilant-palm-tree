@@ -66,7 +66,8 @@ export class BuildingPlacer {
   buildings: BuildingDef[] = [];
 
   private size: CityViewSize = 5;
-  private center: { gx: number; gy: number } = { gx: 2, gy: 2 };
+  private center: { gx: number; gy: number } | null = { gx: 2, gy: 2 };
+  private isDistrict = false;
   private palette: PopupMenu | null = null;
   private paletteMode: PaletteMode = "build";
   private onPlaced: (() => void) | null = null;
@@ -77,9 +78,10 @@ export class BuildingPlacer {
   /** Net cost already committed server-side since the view opened; canAfford gates only the uncommitted remainder. */
   private committedNet: Partial<Record<ResourceType, number>> = {};
 
-  init(size: CityViewSize, center: { gx: number; gy: number }, initialBuildings: BuildingDef[]): void {
+  init(size: CityViewSize, center: { gx: number; gy: number } | null, initialBuildings: BuildingDef[], isDistrict = false): void {
     this.size = size;
     this.center = center;
+    this.isDistrict = isDistrict;
     this.buildings = [...initialBuildings];
     this.originalBuildings = [...initialBuildings];
     this.committedNet = {};
@@ -382,7 +384,7 @@ export class BuildingPlacer {
         const days = buildingBuildDays(kind);
         const hasTownHall = kind === "townHall" && this.buildings.some((b) => b.kind === "townHall");
         const isSelected = this.selectedKind === kind;
-        const status = buildEntryStatus({ kind, affordability: this.affordability, hasTownHall });
+        const status = buildEntryStatus({ kind, affordability: this.affordability, hasTownHall, isDistrict: this.isDistrict });
         const disabled = status.disabled;
 
         Object.assign(row.style, {
@@ -525,12 +527,13 @@ export class BuildingPlacer {
 
   canPlaceAt(gx: number, gy: number): boolean {
     if (gx < 0 || gy < 0 || gx + this.w > this.size || gy + this.h > this.size) return false;
+    if (this.isDistrict && this.active === "townHall") return false;
     if (this.active === "townHall" && this.buildings.some((b) => b.kind === "townHall")) return false;
     for (let dx = 0; dx < this.w; dx++) {
       for (let dy = 0; dy < this.h; dy++) {
         const cx = gx + dx;
         const cy = gy + dy;
-        if (cx === this.center.gx && cy === this.center.gy) return false;
+        if (!this.isDistrict && this.center && cx === this.center.gx && cy === this.center.gy) return false;
         if (this.buildings.some((b) => reCoversCell(b, cx, cy))) return false;
       }
     }
@@ -548,13 +551,14 @@ export class BuildingPlacer {
     const idx = this.buildings.findIndex((b) => reCoversCell(b, gx, gy));
     if (idx < 0) return null;
     const b = this.buildings[idx];
-    if (b.kind === "townHall" && this.isCenterCell(b)) return null;
+    if (!this.isDistrict && this.center && b.kind === "townHall" && this.isCenterCell(b)) return null;
     this.buildings.splice(idx, 1);
     this.onPlaced?.();
     return b;
   }
 
   private isCenterCell(b: BuildingDef): boolean {
+    if (!this.center) return false;
     const w = b.w ?? 1;
     const h = b.h ?? 1;
     return (

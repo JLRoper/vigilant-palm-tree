@@ -1,6 +1,6 @@
 # `paint2d/` — Current Canvas2D Painter
 
-<!-- docs:verified 2026-10-14 -->
+<!-- docs:verified 2026-10-17 -->
 
 `paintScene(ctx, nodes, deps, frame?)` consumes the `SceneNode[]` union produced by `src/render/scene/sceneBuilder/`. It is the single Canvas2D painter for the adventure map, city view, and battle arena. Per-kind city-building painting lives in `index.ts`; there are no separate style-leaf painters.
 
@@ -14,7 +14,7 @@
 
 ## Boundary
 
-The painter takes its external dependencies as `Paint2DDep` props from `deps.ts`: per-kind sprite resolvers for resources, heroes, buildings, castles, and units; color/style getters; owner colors; and a `SkyboxProvider`. It does not import `assetDescriptors.ts`, `assets.ts`, `sprites.ts`, `cityRenderer.ts`, or game settings as runtime values. `paint2dDefaults.ts` is the adapter to those browser/Vite modules.
+The painter takes its external dependencies as `Paint2DDep` props from `deps.ts`: per-kind sprite resolvers for resources, heroes, buildings, castles, districts, and units; color/style getters; owner colors; and a `SkyboxProvider`. It does not import `assetDescriptors.ts`, `assets.ts`, `sprites.ts`, `cityRenderer.ts`, or game settings as runtime values. `paint2dDefaults.ts` is the adapter to those browser/Vite modules.
 
 Pure painter helpers are kept in `colors.ts` and `geometry.ts`. `index.ts` owns per-kind rendering, including city cells, resource spots, mines, pixel buildings, selection rings, and ghosts. Draw order is the builder's responsibility. Territory-edge runs and city-building bodies/rings are batched to preserve the established stroke order.
 

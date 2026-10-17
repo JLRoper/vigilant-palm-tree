@@ -17,4 +17,5 @@ export interface BankGoldCommand {
   gy: number;
   amount: number;
   direction: "deposit" | "withdraw";
+  district?: { q: number; r: number };
 }

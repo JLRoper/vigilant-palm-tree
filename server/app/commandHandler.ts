@@ -28,6 +28,9 @@ transferGold,
   cityViewSizeFor,
   foodBiasForTerrain,
   generateCitySpots,
+  generateDistrictSpots,
+  districtKey,
+  resolveControllingSettlement,
   startCharter,
   stepTravelCharter,
   cleanupDefeatedHeroCharters,
@@ -705,8 +708,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       }
       const result =
         command.direction === "deposit"
-          ? depositIntoBank(state, command.settlementId, command.gx, command.gy, command.amount)
-          : requestBankWithdrawal(state, command.settlementId, command.gx, command.gy, command.amount);
+          ? depositIntoBank(state, command.settlementId, command.gx, command.gy, command.amount, command.district)
+          : requestBankWithdrawal(state, command.settlementId, command.gx, command.gy, command.amount, command.district);
       if (!result.ok) {
         return { ok: false, reason: result.reason, events: [] };
       }
@@ -724,6 +727,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         gy: command.gy,
         amount: command.amount,
         direction: command.direction,
+        ...(command.district ? { district: command.district } : {}),
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
@@ -1652,7 +1656,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       if (settlement.ownerId !== command.actor) {
         return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
       }
-      const result = startBuildingUpgrade(state, command.settlementId, command.requests);
+      const result = startBuildingUpgrade(state, command.settlementId, command.requests, command.district);
       if (!result.ok) {
         return { ok: false, reason: result.reason, events: [] };
       }
@@ -1666,6 +1670,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         type: "BuildingUpgradeStarted",
         actor: command.actor,
         settlementId: command.settlementId,
+        ...(command.district ? { district: command.district } : {}),
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
@@ -1676,7 +1681,59 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // (placement costs minus the 50% destroy refund), revalidates
       // affordability, and recomputes construction timers for brand-new
       // placements -- a modified client can't ship a free or 0-day build.
-      const result = applyPlaceBuildings(state, command.settlementId, command.actor, command.buildings, command.initialLayout === true);
+      let districtTarget: { q: number; r: number; citySpots: SettlementState["citySpots"] } | undefined;
+      if (command.district) {
+        const settlement = state.settlements[command.settlementId];
+        if (!settlement) {
+          return { ok: false, reason: "no_settlement", events: [] };
+        }
+        if (settlement.ownerId !== command.actor) {
+          return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
+        }
+        const map = getOrCreateGameMap(
+          Number(row.seed) || 1,
+          row.map_size as MapSize,
+          resolveSavedMapGenVersion(row.lobby?.mapGenVersion),
+        );
+        const { q, r } = command.district;
+        if (q < 0 || r < 0 || q >= map.width || r >= map.height) {
+          return { ok: false, reason: "invalid_district_hex", events: [] };
+        }
+        if (Object.values(state.settlements).some((s) => s.q === q && s.r === r)) {
+          return { ok: false, reason: "district_on_settlement_center", events: [] };
+        }
+        const terrain = map.get(q, r);
+        if (terrain === "water" || terrain === "mountain") {
+          return { ok: false, reason: "impassable_district_terrain", events: [] };
+        }
+        const controlling = resolveControllingSettlement(state.settlements, q, r, map.width, map.height);
+        if (!controlling || controlling.id !== settlement.id) {
+          return { ok: false, reason: "not_in_settlement_territory", events: [] };
+        }
+        const existingSpots = settlement.districts?.[districtKey(q, r)]?.citySpots;
+        const mapRes = map.resourceTileAt(q, r)?.resource ?? null;
+        const citySpots =
+          existingSpots && existingSpots.length > 0
+            ? existingSpots
+            : generateDistrictSpots(q, r, state.castleSeed, terrain, mapRes);
+        districtTarget = { q, r, citySpots };
+      }
+      const result = districtTarget
+        ? applyPlaceBuildings(
+            state,
+            command.settlementId,
+            command.actor,
+            command.buildings,
+            command.initialLayout === true,
+            districtTarget,
+          )
+        : applyPlaceBuildings(
+            state,
+            command.settlementId,
+            command.actor,
+            command.buildings,
+            command.initialLayout === true,
+          );
       if (!result.ok) {
         return { ok: false, reason: result.reason, events: [] };
       }
@@ -1690,6 +1747,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         type: "BuildingsPlaced",
         actor: command.actor,
         settlementId: command.settlementId,
+        ...(command.district ? { district: command.district } : {}),
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
@@ -1940,6 +1998,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         gy: command.gy,
         unitTypeId: command.unitTypeId,
         count: command.count,
+        ...(command.district ? { district: command.district } : {}),
       });
       if (!result.ok) {
         return { ok: false, reason: result.reason, events: [] };
@@ -1956,6 +2015,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         settlementId: command.settlementId,
         unitTypeId: command.unitTypeId,
         count: command.count,
+        ...(command.district ? { district: command.district } : {}),
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };

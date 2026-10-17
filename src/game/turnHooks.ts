@@ -368,11 +368,12 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     actor: number,
     settlementId: SettlementId,
     requests: BuildingUpgradeRequest[],
+    district?: { q: number; r: number },
   ): Promise<void> => {
     const name = opts.gameName();
     if (!name) return;
     try {
-      await upgradeBuilding(name, { actor, settlementId, requests });
+      await upgradeBuilding(name, { actor, settlementId, requests, ...(district ? { district } : {}) });
     } catch (e) {
       reportCommandFailure("Upgrade building", e);
     }
@@ -462,11 +463,21 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       gy: number,
       unitTypeId: string,
       count: number,
+      district?: { q: number; r: number },
     ): Promise<void> => {
       const name = opts.gameName();
       if (!name) return;
       try {
-        await recruitUnitsCommand(name, { actor, settlementId, buildingKind, gx, gy, unitTypeId, count });
+        await recruitUnitsCommand(name, {
+          actor,
+          settlementId,
+          buildingKind,
+          gx,
+          gy,
+          unitTypeId,
+          count,
+          ...(district ? { district } : {}),
+        });
       } catch (e) {
         reportCommandFailure("Recruit units", e);
       }
@@ -495,11 +506,20 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       gy: number,
       amount: number,
       direction: "deposit" | "withdraw",
+      district?: { q: number; r: number },
     ): Promise<void> => {
       const name = opts.gameName();
       if (!name) return;
       try {
-        await bankGoldCommand(name, { actor, settlementId, gx, gy, amount, direction });
+        await bankGoldCommand(name, {
+          actor,
+          settlementId,
+          gx,
+          gy,
+          amount,
+          direction,
+          ...(district ? { district } : {}),
+        });
       } catch (e) {
         reportCommandFailure(direction === "deposit" ? "Bank deposit" : "Bank withdrawal", e);
       }
@@ -518,11 +538,18 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       settlementId: SettlementId,
       buildings: BuildingDef[],
       initialLayout?: boolean,
+      district?: { q: number; r: number },
     ): Promise<void> => {
       const name = opts.gameName();
       if (!name) return;
       try {
-        await placeBuildingsCommand(name, { actor, settlementId, buildings, initialLayout });
+        await placeBuildingsCommand(name, {
+          actor,
+          settlementId,
+          buildings,
+          initialLayout,
+          ...(district ? { district } : {}),
+        });
       } catch (e) {
         const applied = takeLastAppliedBuildDelta(settlementId);
         if (applied) opts.onPlaceBuildingsRejected?.(settlementId, applied);

@@ -9,7 +9,7 @@ import type { ResourceType } from "../../../map/resourceTiles";
 import type { SpriteProvider } from "../../../render/assets";
 import type { BuildingDef, GenerationStyle } from "@heroes/contracts";
 import { buildingFootprint, coversCell } from "../../../core/cityGrid";
-import { starterCityOnOpen } from "@heroes/engine";
+import { districtKey, starterCityOnOpen } from "@heroes/engine";
 import { advanceChargedOnCommit, netDelta } from "./netCost";
 import { syncCartBuildings } from "./syncedBuildings";
 import { BuildingMenu, type BuildingMenuOptions } from "./buildingMenu";
@@ -39,6 +39,7 @@ const PALETTE_H = 480;
 export class CityView {
   private designBox = new CityDesignBoxManager();
   private openSettlementId: string | null = null;
+  private openDistrict: { q: number; r: number } | null = null;
   private settlementName = "";
   private size: CityViewSize = 5;
   private ownerColor = "#888888";
@@ -58,18 +59,18 @@ export class CityView {
   private selectionMenu: BuildingSelectionMenu;
   private selectedKeys: Set<string> = new Set();
   private selectionAnchor: { x: number; y: number } | null = null;
-  private onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null) => boolean;
-  private onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean) => boolean;
+  private onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null, district?: { q: number; r: number }) => boolean;
+  private onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean, district?: { q: number; r: number }) => boolean;
   /** Net cost already charged via incremental onPlaceBuildings commits since the view opened. */
   private chargedNet: Partial<Record<ResourceType, number>> = {};
   private getSettlement: () => SettlementState | undefined;
-  private onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string };
+  private onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[], district?: { q: number; r: number }) => { ok: boolean; reason: string };
   private getSelection?: () => CitySelectionSnapshot;
   private getFloatingPanelRects?: () => Array<PanelRect | null>;
   private preCitySelection: CitySelectionSnapshot | null = null;
   private onKeyDown: (e: KeyboardEvent) => void;
 
-  constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null) => boolean; onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean) => boolean; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[]) => { ok: boolean; reason: string }; getSelection?: () => CitySelectionSnapshot; getFloatingPanelRects?: () => Array<PanelRect | null> }) {
+  constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null, district?: { q: number; r: number }) => boolean; onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean, district?: { q: number; r: number }) => boolean; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[], district?: { q: number; r: number }) => { ok: boolean; reason: string }; getSelection?: () => CitySelectionSnapshot; getFloatingPanelRects?: () => Array<PanelRect | null> }) {
     this.paint2d = createPaint2DDep({
       spriteProvider: opts.provider,
       skybox: createSkyboxProvider(),
@@ -82,9 +83,19 @@ export class CityView {
       onUpgradeBuilding: (building) => {
         const settlement = this.getSettlement();
         if (!settlement) return;
-        this.onUpgradeBuildings(settlement.id, [
-          { gx: building.gx, gy: building.gy, kind: building.kind },
-        ]);
+        const dist = this.openDistrict ? { q: this.openDistrict.q, r: this.openDistrict.r } : undefined;
+        this.onUpgradeBuildings(
+          settlement.id,
+          [
+            {
+              gx: building.gx,
+              gy: building.gy,
+              kind: building.kind,
+              ...(dist ? { district: dist } : {}),
+            },
+          ],
+          dist,
+        );
       },
     });
     this.placer = new BuildingPlacer();
@@ -149,10 +160,12 @@ export class CityView {
     mines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>,
     buildings?: BuildingDef[],
     mapSeed?: number,
+    district?: { q: number; r: number },
   ): void {
     this.openSettlementId = settlementId;
-    this.settlementName = name;
-    this.size = size;
+    this.openDistrict = district ? { q: district.q, r: district.r } : null;
+    this.settlementName = district ? `${name} — District (${district.q}, ${district.r})` : name;
+    this.size = district ? 5 : size;
     this.ownerColor = ownerColor;
     this.citySpots = spots;
     this.cityMines = mines;
@@ -162,25 +175,18 @@ export class CityView {
     this.selectionAnchor = null;
     this.preCitySelection = this.getSelection?.() ?? null;
 
-    const starter = starterCityOnOpen({ size: this.size, style: "pixel" as GenerationStyle, existing: buildings });
-    const initialBuildings = starter.buildings;
-    // A settlement with no persisted buildings gets the explicit starter set
-    // committed FREE (townHall L1 + farm field + 2 houses + two woodcutter's
-    // huts, a stone mine and the farmhouse troop producer, engine
-    // buildStarterLayout) -- not a procedurally
-    // generated city. The old dense-procedural free layout charged ~24 wood +
-    // 14 stone per turn against a 300/300 start and had no producer; see
-    // packages/engine/src/settlement/starterLayout.ts. Everything added on top
-    // is charged.
-    //
-    // In practice this is now a RARE path: init.ts seeds EVERY settlement at
-    // game creation (a seeded settlement skips this free commit, so an empty
-    // one would never be handed a city at all). It still fires for a settlement
-    // created later -- by a charter, or as a test fixture -- which is exactly
-    // what it is for.
-    this.freeInitialLayout = starter.free;
-    this.committedInitialLayout = false;
-    this.placer.init(size, { gx: Math.floor(size / 2), gy: Math.floor(size / 2) }, initialBuildings);
+    if (district) {
+      const initialBuildings = buildings ? [...buildings] : [];
+      this.freeInitialLayout = false;
+      this.committedInitialLayout = false;
+      this.placer.init(5, null, initialBuildings, true);
+    } else {
+      const starter = starterCityOnOpen({ size: this.size, style: "pixel" as GenerationStyle, existing: buildings });
+      const initialBuildings = starter.buildings;
+      this.freeInitialLayout = starter.free;
+      this.committedInitialLayout = false;
+      this.placer.init(size, { gx: Math.floor(size / 2), gy: Math.floor(size / 2) }, initialBuildings, false);
+    }
     this.refreshAffordability();
     this.placer.setOnConfirm(() => this.persistBuildings());
     this.placer.setOnPlaced(() => this.persistBuildings());
@@ -220,6 +226,10 @@ export class CityView {
 
   getOpenSettlementId(): string | null {
     return this.openSettlementId;
+  }
+
+  getOpenDistrict(): { q: number; r: number } | null {
+    return this.openDistrict;
   }
 
   draw(ctx: CanvasRenderingContext2D, viewportW: number, viewportH: number): void {
@@ -355,7 +365,10 @@ export class CityView {
   private cellOutputFor(building: BuildingDef): ProducerOutput | null {
     const settlement = this.getSettlement();
     if (!settlement || this.mapSeed === null) return null;
-    return producerTurnOutput(building, settlement, this.mapSeed);
+    const target = this.openDistrict
+      ? { q: this.openDistrict.q, r: this.openDistrict.r, citySpots: this.citySpots }
+      : settlement;
+    return producerTurnOutput(building, target, this.mapSeed);
   }
 
   private clearSelection(): void {
@@ -386,10 +399,16 @@ export class CityView {
   private commitUpgrade(combined: BuildingUpgradeCost): void {
     const settlement = this.getSettlement();
     if (!settlement) return;
+    const dist = this.openDistrict ? { q: this.openDistrict.q, r: this.openDistrict.r } : undefined;
     const requests: BuildingUpgradeRequest[] = [];
     for (const key of this.selectedKeys) {
       const [gxs, gys, kind] = key.split(",");
-      requests.push({ gx: parseInt(gxs), gy: parseInt(gys), kind: kind as BuildingDef["kind"] });
+      requests.push({
+        gx: parseInt(gxs),
+        gy: parseInt(gys),
+        kind: kind as BuildingDef["kind"],
+        ...(dist ? { district: dist } : {}),
+      });
     }
     if (requests.length === 0) return;
 
@@ -397,7 +416,7 @@ export class CityView {
     const summary = `Upgrade ${requests.length} building${requests.length === 1 ? "" : "s"} for ${costText}?`;
 
     const perform = () => {
-      const result = this.onUpgradeBuildings(settlement.id, requests);
+      const result = this.onUpgradeBuildings(settlement.id, requests, dist);
       if (!result.ok) {
         openConfirmDialog({
           title: "Upgrade failed",
@@ -459,9 +478,10 @@ export class CityView {
     // in-progress again).
     const delta = this.pendingNetDelta();
     const synced = this.syncedBuildings();
-    const accepted = this.onClose(this.openSettlementId, synced, delta, false, null);
+    const dist = this.openDistrict ?? undefined;
+    const accepted = this.onClose(this.openSettlementId, synced, delta, false, null, dist);
     const initialLayout = this.freeInitialLayout && !this.committedInitialLayout;
-    const result = accepted ? this.onPlaceBuildings(this.openSettlementId, synced, initialLayout) : false;
+    const result = accepted ? this.onPlaceBuildings(this.openSettlementId, synced, initialLayout, dist) : false;
     this.chargedNet = advanceChargedOnCommit(result, this.placer.getNetCost(), this.chargedNet);
     if (result) {
       this.placer.markSynced();
@@ -475,7 +495,10 @@ export class CityView {
   private syncedBuildings(): BuildingDef[] {
     const live = this.getSettlement();
     if (!live) return this.placer.buildings;
-    return syncCartBuildings(this.placer.buildings, live.buildings);
+    const liveBuildings = this.openDistrict
+      ? (live.districts?.[districtKey(this.openDistrict.q, this.openDistrict.r)]?.buildings ?? [])
+      : live.buildings;
+    return syncCartBuildings(this.placer.buildings, liveBuildings);
   }
 
   private pendingNetDelta(): Partial<Record<ResourceType, number>> {
@@ -516,6 +539,7 @@ export class CityView {
 
     this.closing = true;
     const id = this.openSettlementId!;
+    const dist = this.openDistrict ?? undefined;
     this.lastClosedId = id;
     // Synced cart, not the raw snapshot — see persistBuildings(): the raw
     // cart's stale construction timers would re-arm finished builds.
@@ -530,8 +554,9 @@ export class CityView {
       this.selectedKeys.clear();
       this.selectionAnchor = null;
       this.openSettlementId = null;
+      this.openDistrict = null;
       this.hover = null;
-      this.onClose(id, finalBuildings, this.pendingNetDelta(), true, this.preCitySelection);
+      this.onClose(id, finalBuildings, this.pendingNetDelta(), true, this.preCitySelection, dist);
       return id;
     } finally {
       this.closing = false;

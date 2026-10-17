@@ -6,7 +6,8 @@ import type { Castle } from "../../../entities/settlement";
 import type { RenderOptions } from "../../renderTypes";
 import { computeVision, isVisible } from "../../fog";
 import { computeReachableSplit } from "../../overlays/pathOverlay";
-import { controlledPositions, territoryBoundaryEdges } from "@heroes/engine";
+import type { BuildingDef } from "@heroes/contracts";
+import { controlledPositions, isDistrictBlockedByHero, territoryBoundaryEdges } from "@heroes/engine";
 import type { EntityMirror } from "../entityMirror";
 import type {
   SceneNode,
@@ -37,6 +38,16 @@ export interface AdventureSceneInput {
    * frame; omitted, it is computed here. */
   visible?: Set<string>;
   viewportBounds?: ViewportAxialBounds;
+}
+
+export function districtVariantForBuildings(buildings: readonly BuildingDef[]): "standard" | "farm" {
+  return buildings.some((b) => b.kind === "farmField" || b.kind === "farmhouse") ? "farm" : "standard";
+}
+
+export function districtTierForCount(count: number): 1 | 2 | 3 {
+  if (count >= 9) return 3;
+  if (count >= 4) return 2;
+  return 1;
 }
 
 export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
@@ -122,6 +133,28 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       color: c.ownerId === null ? "rgba(255,255,255,0.18)" : opts.colorForOwner(c.ownerId),
       dashedBorder: c.ownerId === null,
     });
+  }
+
+  const heroCoords = heroes.map((h) => ({ ownerId: h.ownerId, q: h.tile.q, r: h.tile.r }));
+  for (const c of castles) {
+    for (const d of Object.values(c.districts ?? {})) {
+      if (!d.buildings || d.buildings.length === 0) continue;
+      const canSee = c.ownerId === opts.viewPlayerId || isVisible(visible, d.q, d.r);
+      if (!canSee) continue;
+      const blocked = isDistrictBlockedByHero(c.ownerId, d.q, d.r, heroCoords);
+      nodes.push({
+        kind: "district",
+        settlementId: c.id,
+        ownerId: c.ownerId,
+        q: d.q,
+        r: d.r,
+        world: axialToPixel(d.q, d.r),
+        tier: districtTierForCount(d.buildings.length),
+        variant: districtVariantForBuildings(d.buildings),
+        color: c.ownerId === null ? "rgba(255,255,255,0.18)" : opts.colorForOwner(c.ownerId),
+        ...(blocked ? { blocked: true } : {}),
+      });
+    }
   }
 
   for (const edge of buildTerritoryOutlineEdges(castles, opts.colorForOwner, map.width, map.height, visible)) {

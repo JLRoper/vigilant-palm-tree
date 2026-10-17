@@ -304,11 +304,12 @@ function applyBankGoldMoved(
   gy: number,
   amount: number,
   direction: "deposit" | "withdraw",
+  district?: { q: number; r: number },
 ): ApplyEngineEventResult {
   const result =
     direction === "deposit"
-      ? depositIntoBank(state, settlementId, gx, gy, amount)
-      : requestBankWithdrawal(state, settlementId, gx, gy, amount);
+      ? depositIntoBank(state, settlementId, gx, gy, amount, district)
+      : requestBankWithdrawal(state, settlementId, gx, gy, amount, district);
   if (!result.ok) {
     const emptyPurse =
       result.reason === "not_enough_gold" || result.reason === "not_enough_in_pot";
@@ -400,6 +401,7 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
         event.gy,
         event.amount,
         event.direction,
+        event.district,
       );
 
     case "UnitsRecruited":

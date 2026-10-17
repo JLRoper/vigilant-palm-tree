@@ -32,6 +32,7 @@ export interface SettlementInfoMenuOptions {
     gy: number,
     amount: number,
     direction: BankGoldDirection,
+    district?: { q: number; r: number },
   ) => { ok: boolean; reason: string };
 }
 
@@ -83,6 +84,7 @@ export class SettlementInfoMenu {
     gy: number,
     amount: number,
     direction: BankGoldDirection,
+    district?: { q: number; r: number },
   ) => { ok: boolean; reason: string };
 
   constructor(opts: SettlementInfoMenuOptions) {
@@ -534,7 +536,9 @@ export class SettlementInfoMenu {
     }
     this.bankAccordion.rightEl.textContent = `${model.totalStored.toLocaleString()}g stored`;
 
-    const signature = JSON.stringify(model.banks.map((b) => [b.gx, b.gy, b.level]));
+    const signature = JSON.stringify(
+      model.banks.map((b) => [b.gx, b.gy, b.level, b.district?.q ?? null, b.district?.r ?? null]),
+    );
     if (signature !== this.bankSignature) {
       this.bankSignature = signature;
       this.rebuildBankRows(model.banks, model.weeklyInterestPct, model.withdrawalDays);
@@ -583,11 +587,11 @@ export class SettlementInfoMenu {
       wrap.appendChild(buttons);
       depositBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        this.promptBankAmount("deposit", bank.gx, bank.gy, bank.level);
+        this.promptBankAmount("deposit", bank.gx, bank.gy, bank.level, bank.district);
       });
       withdrawBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        this.promptBankAmount("withdraw", bank.gx, bank.gy, bank.level);
+        this.promptBankAmount("withdraw", bank.gx, bank.gy, bank.level, bank.district);
       });
 
       this.bankBody.appendChild(wrap);
@@ -624,12 +628,19 @@ export class SettlementInfoMenu {
     gx: number,
     gy: number,
     level: number,
+    district?: { q: number; r: number },
   ): void {
     const settlementId = this.currentSettlementId;
     if (!settlementId || !this.onBankGold) return;
     const settlement = this.lastSettlement;
     if (!settlement) return;
-    const bank = bankRowModel(settlement, this.lastDay).banks.find((b) => b.gx === gx && b.gy === gy);
+    const bank = bankRowModel(settlement, this.lastDay).banks.find(
+      (b) =>
+        b.gx === gx &&
+        b.gy === gy &&
+        b.district?.q === district?.q &&
+        b.district?.r === district?.r,
+    );
     if (!bank) return;
     const max = direction === "deposit" ? Math.max(0, Math.min(bank.headroom, settlement.gold)) : bank.gold;
     openBankAmountModal({
@@ -639,7 +650,7 @@ export class SettlementInfoMenu {
       settlementName: settlement.name,
       available: max,
       max,
-      onConfirm: (amount) => this.onBankGold!(settlementId, gx, gy, amount, direction),
+      onConfirm: (amount) => this.onBankGold!(settlementId, gx, gy, amount, direction, district),
     });
   }
 

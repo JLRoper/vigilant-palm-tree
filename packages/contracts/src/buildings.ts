@@ -68,4 +68,5 @@ export interface BuildingRef {
   gx: number;
   gy: number;
   kind: BuildingKind;
+  district?: { q: number; r: number };
 }
