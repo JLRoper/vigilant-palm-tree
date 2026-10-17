@@ -52,20 +52,27 @@ function computeVisionHash(visible: Set<string>): string {
   return `${visible.size}:${xor >>> 0}:${sum >>> 0}`;
 }
 
-// Order-independent fold of each key's q*37+r plus the set size. Addition is
-// commutative, so insertion order can't change the signature; the size term
-// keeps distinct reveal sets from colliding on a matching fold.
+// Order-independent digest of the reveal set for the static-layer cache key:
+// each key's FNV-1a hash is folded into three 32-bit words using only
+// commutative operators (XOR and add), so Set insertion order can't change the
+// signature. Three words drop the collision probability far below a single
+// additive fold; null stays distinct ("-") from a real empty set ("0:0:0:0").
 function revealSignature(revealed: ReadonlySet<string> | null): string {
   if (revealed === null) return "-";
-  let sum = 0;
+  let a = 0x9e3779b9;
+  let b = 0x85ebca6b;
+  let c = 0xc2b2ae35;
   for (const key of revealed) {
-    const comma = key.indexOf(",");
-    if (comma <= 0) continue;
-    const q = parseInt(key.slice(0, comma), 10);
-    const r = parseInt(key.slice(comma + 1), 10);
-    sum = (sum + Math.imul(q | 0, 37) + (r | 0)) | 0;
+    let h = 0x811c9dc5;
+    for (let i = 0; i < key.length; i++) {
+      h ^= key.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    a ^= h;
+    b = (b + h) | 0;
+    c ^= (h << 13) | (h >>> 19);
   }
-  return `${revealed.size}:${sum >>> 0}`;
+  return `${revealed.size}:${(a >>> 0).toString(16)}:${(b >>> 0).toString(16)}:${(c >>> 0).toString(16)}`;
 }
 
 interface MinimapRenderOptions {

@@ -12,8 +12,7 @@ export function revealTilesFor(name: string, seed: readonly string[], visible: R
   return cached;
 }
 
-export function resetReveal(name?: string): void {
+export function resetReveal(): void {
   cachedName = "";
   cached = new Set<string>();
-  void name;
 }

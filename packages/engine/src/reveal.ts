@@ -34,7 +34,7 @@ export function visionKeysForPlayer(state: GameState, playerId: number): Set<str
   return keys;
 }
 
-function sortedRevealKeys(keys: Iterable<string>): string[] {
+export function sortedRevealKeys(keys: Iterable<string>): string[] {
   const arr = Array.from(keys);
   arr.sort((a, b) => {
     const [aq, ar] = a.split(",");

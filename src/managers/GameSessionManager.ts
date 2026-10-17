@@ -17,6 +17,7 @@ import { getMultiplayerSync, getEntityMirror } from "../io/multiplayerSync";
 import { clearServerDriven, syncServerDrivenFromGame } from "../io/serverDrivenGames";
 import { setUncharted } from "../io/unchartedGames";
 import { getCachedAuth } from "../io/authStorage";
+import { resetReveal } from "../render/reveal";
 
 /**
  * Handles game session lifecycle: loading, creating, and saving games.
@@ -48,6 +49,7 @@ export class GameSessionManager {
   async loadGame(loaded: Game): Promise<void> {
     this.session.adopt(loaded);
     notePersisted(loaded.updated_at);
+    resetReveal();
     const resolvedSize = resolveMapSize(loaded.map_size);
     const map = getOrCreateGameMap(loaded.seed, resolvedSize, resolveSavedMapGenVersion(loaded.lobby?.mapGenVersion));
     // Server-driven flag (plan/2026-09-30-server-side-ai-actor.md D8): every

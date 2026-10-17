@@ -33,7 +33,7 @@ import { MAX_PLAYERS, PLAYER_COLORS } from "./playerColors";
 import { cityViewSizeFor, foodBiasForTerrain, generateCitySpots } from "./settlement/citySpots";
 import { buildStarterLayout, heroFoodPerTurn, starterFarmsNeeded } from "./settlement/starterLayout";
 import { VALID_HORSE_VARIANTS } from "./horseVariants";
-import { HERO_VISION_RANGE, visionKeysAroundPoints } from "./reveal";
+import { HERO_VISION_RANGE, sortedRevealKeys, visionKeysAroundPoints } from "./reveal";
 import { controlRange } from "./control";
 
 const DEFAULT_PLAYER_COUNT = 3;
@@ -238,18 +238,6 @@ function makePlayers(
   return out;
 }
 
-function sortRevealKeys(keys: Iterable<string>): string[] {
-  const arr = Array.from(keys);
-  arr.sort((a, b) => {
-    const [aq, ar] = a.split(",");
-    const [bq, br] = b.split(",");
-    const qd = parseInt(aq, 10) - parseInt(bq, 10);
-    if (qd !== 0) return qd;
-    return parseInt(ar, 10) - parseInt(br, 10);
-  });
-  return arr;
-}
-
 /**
  * "Uncharted mode" creation-time reveal: for every HUMAN seat (i <
  * humanSeatCount, matching makePlayers), stamp the sorted union of that seat's
@@ -282,7 +270,7 @@ function seedInitialReveal(
         keys.add(key);
       }
     }
-    return { ...player, revealedTiles: sortRevealKeys(keys) };
+    return { ...player, revealedTiles: sortedRevealKeys(keys) };
   });
 }
 

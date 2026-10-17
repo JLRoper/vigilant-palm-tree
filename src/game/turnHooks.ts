@@ -49,6 +49,7 @@ import { cachedUnitTypes } from "../data/unitCatalog";
 import type { GameMap } from "../map/gameMap";
 import type { Axial } from "../core/hex";
 import { getMultiplayerSync } from "../io/multiplayerSync";
+import { isUnchartedGame } from "../io/unchartedGames";
 import { settings, type HorseVariant } from "../state/settings";
 import { bus } from "../core/eventBus";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
@@ -182,7 +183,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
           fromTile: { q: hero.previousQ ?? hero.q, r: hero.previousR ?? hero.r },
           toTile,
           cost,
-          ...(trailExtension && trailExtension.length > 0 ? { trail: trailExtension } : {}),
+          ...(trailExtension && trailExtension.length > 0 && isUnchartedGame(name) ? { trail: trailExtension } : {}),
         });
       } catch (e) {
         reportCommandFailure("Move", e);

@@ -62,6 +62,7 @@ const db = new Pool({
   database: process.env.PGDATABASE ?? "game_poc",
 });
 
+// raw JSON, shape unknown here; narrowed at each assert site (same as settlements.e2e.ts)
 async function api(method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
   const res = await fetch(`${API_URL}${path}`, {
     method, headers: body ? { "content-type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined,

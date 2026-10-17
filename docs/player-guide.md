@@ -1,10 +1,10 @@
 # Player Guide
 
-<!-- docs:verified 2026-10-15 -->
+<!-- docs:verified 2026-10-17 -->
 
 ## Start a Game
 
-New Game supports **1–4 human players**, **0–3 AI enemies**, and five map sizes (**Small** 24×18, **Medium** 36×27, **Large** 48×36, **Huge** 72×54, **Epic** 120×90). Pick one of the playable registry factions: Human, Ashen, Ironmark, or Verdant. Neutral monsters are not a selectable player faction. AI seats are not lobby seats; games with AI enemies are driven by the server.
+New Game supports **1–4 human players**, **0–3 AI enemies**, and five map sizes (**Small** 24×18, **Medium** 36×27, **Large** 48×36, **Huge** 72×54, **Epic** 120×90). Pick one of the playable registry factions: Human, Ashen, Ironmark, or Verdant. Neutral monsters are not a selectable player faction. AI seats are not lobby seats; games with AI enemies are driven by the server. The optional **Uncharted mode** toggle starts the map hidden: never-explored tiles render fully dark, and explored tiles stay revealed for your seat as you move.
 
 ## Move and Found Settlements
 

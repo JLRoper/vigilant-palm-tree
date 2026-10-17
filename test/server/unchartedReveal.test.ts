@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
+import { controlRange } from "@heroes/engine";
+import type { BuildingDef } from "@heroes/contracts";
 import { pool } from "../../server/persistence/db";
 import { router } from "../../server/routes";
 import { errorHandler } from "../../server/errorHandler";
@@ -43,6 +45,7 @@ async function cleanupGame(name: string): Promise<void> {
 type GameRow = {
   players: { id: number; faction: string; revealedTiles?: string[] }[];
   heroes: Record<string, { id: string; ownerId: number; q: number; r: number; movementRemaining: number }>;
+  settlements: Record<string, { id: string; ownerId: number | null; level: number; q: number; r: number; buildings: BuildingDef[] }>;
   lobby: { uncharted?: boolean };
 };
 
@@ -69,6 +72,24 @@ async function postCommand(name: string, body: Record<string, unknown>): Promise
     body: JSON.stringify(body),
   });
   return (await res.json()) as Record<string, unknown>;
+}
+
+// Fixture shortcut for the capture test: relocate a hero in the games JSONB
+// row without going through the MoveHero command, whose reveal merge would
+// already reveal the destination's hero-vision ring (HERO_VISION_RANGE >=
+// controlRange of the seeded settlements). Placing the hero directly makes the
+// subsequent CaptureSettlement command the SOLE reveal delta, so the growth
+// assertion below proves the capture path itself. Mirrors the e2e suite's
+// seedHeroMovement-style direct write (test/unchartedMode.e2e.ts).
+async function placeHeroAt(name: string, heroId: string, q: number, r: number): Promise<void> {
+  const row = await getGame(name);
+  const heroes = { ...row.heroes };
+  assert.ok(heroes[heroId], `hero ${heroId} missing in ${name}`);
+  heroes[heroId] = { ...heroes[heroId], q, r };
+  await pool.query(
+    `UPDATE games SET heroes = $1::jsonb, updated_at = now() WHERE name = $2`,
+    [JSON.stringify(heroes), name],
+  );
 }
 
 // The engine's reveal sorts keys numerically by (q, then r), which
@@ -165,6 +186,106 @@ test("MoveHero in a non-uncharted game leaves no revealedTiles key on any player
         "a non-uncharted MoveHero must not stamp reveal even though players now ride the persist",
       );
     }
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("EndTurn in an uncharted game reconciles reveal for human seats only", async () => {
+  const name = uniqueName();
+  try {
+    await createGame({ name, uncharted: true, humanSlots: 1, enemySlots: 1 });
+    const before = await getGame(name);
+    assert.equal(before.lobby.uncharted, true, "the game is created uncharted");
+    assert.ok(
+      before.players.some((p) => p.faction === "player"),
+      "at least one human seat exists",
+    );
+    assert.ok(
+      before.players.some((p) => p.faction === "ai"),
+      "at least one AI seat exists",
+    );
+
+    const res = await postCommand(name, { kind: "EndTurn", actor: 0 });
+    assert.equal(res.error, undefined, `EndTurn should succeed: ${JSON.stringify(res)}`);
+
+    const after = await getGame(name);
+    for (const p of after.players) {
+      if (p.faction === "player") {
+        assert.ok(
+          Array.isArray(p.revealedTiles) && p.revealedTiles.length > 0,
+          `human seat ${p.id} should carry a non-empty revealedTiles after EndTurn`,
+        );
+      } else {
+        assert.equal(
+          "revealedTiles" in p,
+          false,
+          `AI seat ${p.id} must not carry a revealedTiles key (EndTurn's reconcile is human-only)`,
+        );
+      }
+    }
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("CaptureSettlement reveals the captured settlement's controlRange ring", async () => {
+  const name = uniqueName();
+  try {
+    await createGame({ name, uncharted: true, humanSlots: 1, enemySlots: 1 });
+    const before = await getGame(name);
+    assert.equal(before.lobby.uncharted, true, "the game is created uncharted");
+    const hero = Object.values(before.heroes).find((h) => h.ownerId === 0);
+    assert.ok(hero, "the human hero exists");
+    const neutral = Object.values(before.settlements).find((s) => s.ownerId === null);
+    assert.ok(neutral, "the seeded small map contains a neutral settlement");
+
+    const actorBefore = before.players.find((p) => p.id === 0);
+    assert.ok(
+      Array.isArray(actorBefore?.revealedTiles) && actorBefore!.revealedTiles!.length > 0,
+      "the seed reveal exists before the capture",
+    );
+    const range = controlRange(neutral!.level as 1 | 2 | 3, neutral!.buildings);
+    assert.ok(
+      !actorBefore!.revealedTiles!.includes(`${neutral!.q},${neutral!.r}`),
+      "the neutral settlement key is unrevealed before the capture",
+    );
+
+    await placeHeroAt(name, hero!.id, neutral!.q, neutral!.r);
+    const res = await postCommand(name, {
+      kind: "CaptureSettlement",
+      actor: 0,
+      heroId: hero!.id,
+      settlementId: neutral!.id,
+    });
+    assert.equal(res.error, undefined, `CaptureSettlement should succeed: ${JSON.stringify(res)}`);
+
+    const after = await getGame(name);
+    const actorAfter = after.players.find((p) => p.id === 0);
+    const beforeSet = new Set(actorBefore!.revealedTiles!);
+    const afterSet = new Set(actorAfter?.revealedTiles ?? []);
+    assert.ok(
+      afterSet.has(`${neutral!.q},${neutral!.r}`),
+      "the captured settlement key is revealed",
+    );
+    // The capture exposes the settlement's whole controlRange ring: at least
+    // one of its six axial edge keys must be freshly revealed (the seeded
+    // player vision can already cover some directions, so scan all six).
+    const { q, r } = neutral!;
+    const ringKeys = [
+      `${q + range},${r}`,
+      `${q},${r + range}`,
+      `${q - range},${r}`,
+      `${q},${r - range}`,
+      `${q + range},${r - range}`,
+      `${q - range},${r + range}`,
+    ];
+    const newlyRevealed = ringKeys.find((k) => !beforeSet.has(k) && afterSet.has(k));
+    assert.ok(newlyRevealed, `a controlRange(${range}) ring key should be newly revealed by the capture`);
+    assert.ok(
+      afterSet.size > beforeSet.size,
+      "the capture grew the actor's reveal",
+    );
   } finally {
     await cleanupGame(name);
   }

@@ -695,7 +695,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         command.gameName,
         next.heroes,
         next.settlements,
-        { players: next.players },
+        { ...(next !== result.state ? { players: next.players } : {}) },
       );
       await dualWriteEntities(deps, command.gameName, state, next);
       const event: EngineEvent = {
@@ -1467,7 +1467,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         command.gameName,
         next.heroes,
         next.settlements,
-        { players: next.players },
+        { ...(next !== result.state ? { players: next.players } : {}) },
       );
       await dualWriteEntities(deps, command.gameName, state, next);
       // Only reached on the granular path (gated above), same as
