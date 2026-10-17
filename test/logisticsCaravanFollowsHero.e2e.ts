@@ -217,15 +217,19 @@ async function openGame(page: Page, name: string, gameId: string): Promise<void>
   await wait(300);
 }
 
-async function endTurnAndWaitRound(page: Page, name: string, expectedRound: number): Promise<void> {
+// End the turn that runs during round `endingRound` and wait until the server
+// has actually ADVANCED past it (round > endingRound). New games start at
+// round 1, so a `>=` check would already be satisfied before the end-turn is
+// processed and could return the previous caravan state spuriously.
+async function endTurnAndWaitRound(page: Page, name: string, endingRound: number): Promise<void> {
   await page.evaluate(() => { void (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.endTurn(); });
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
     await wait(400);
     const row = await serverRow(name);
-    if (row.round >= expectedRound) return;
+    if (row.round > endingRound) return;
   }
-  assert.fail(`round never reached ${expectedRound}`);
+  assert.fail(`round never advanced past ${endingRound}`);
 }
 
 // Read server + client truth together after a turn.

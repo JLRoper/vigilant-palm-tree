@@ -580,17 +580,29 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       detailsTip.style.cssText =
         "display:none;margin-top:4px;padding:6px 8px;border-radius:6px;background:rgba(10,16,26,0.95);border:1px solid rgba(255,255,255,0.18);font-size:10px;line-height:1.5;white-space:pre-line;max-width:520px;";
       row.setAttribute("aria-describedby", detailsTip.id);
+      // Show while EITHER trigger is active: leaving the pointer must not
+      // hide the tip the keyboard still owns, and blur must not hide it
+      // while the pointer still hovers.
+      let tipHovering = false;
+      let tipFocused = false;
+      const refreshTip = (): void => {
+        detailsTip.style.display = tipHovering || tipFocused ? "block" : "none";
+      };
       row.addEventListener("mouseenter", () => {
-        detailsTip.style.display = "block";
+        tipHovering = true;
+        refreshTip();
       });
       row.addEventListener("mouseleave", () => {
-        detailsTip.style.display = "none";
+        tipHovering = false;
+        refreshTip();
       });
       row.addEventListener("focus", () => {
-        detailsTip.style.display = "block";
+        tipFocused = true;
+        refreshTip();
       });
       row.addEventListener("blur", () => {
-        detailsTip.style.display = "none";
+        tipFocused = false;
+        refreshTip();
       });
       row.appendChild(detailsTip);
       modal.body.appendChild(row);
@@ -714,11 +726,13 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       if (draft.payload) payloadSel.value = draft.payload;
       if (draft.wagons) wagonInput.value = draft.wagons;
       updateCreateAvailability();
+      // Attach the freshly built row to the live modal body BEFORE the focus
+      // lookup, or querySelector cannot find the replacement controls.
+      modal.body.appendChild(createRow);
       if (draft.focusedField) {
         const el = modal.body.querySelector<HTMLElement>(`[data-field="${draft.focusedField}"]`);
         if (el) el.focus();
       }
-      modal.body.appendChild(createRow);
     }
 
     const hint = document.createElement("div");
