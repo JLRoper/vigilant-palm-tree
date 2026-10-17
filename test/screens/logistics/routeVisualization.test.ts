@@ -243,6 +243,45 @@ test("hero endpoints keep the marker positioned after a moving-target repath", (
   assert.equal(getRouteProgress(returning, state).positionPercentage, 50);
 });
 
+test("anchored outbound paths do not count the anchor tile as progress", () => {
+  const state = stateFixture();
+  // Repathed outbound shape: [anchor, ...leg] with pathIndex 1 right after
+  // the rebuild -- zero tiles of the new leg walked, so completion is 0,
+  // even though pathIndex/pathLength would naively read 1/2 = 50%.
+  assert.equal(
+    getRouteProgress(
+      route({
+        caravan: {
+          phase: "toDestination",
+          cargo: 50,
+          path: [{ q: 6, r: 0 }, { q: 7, r: 0 }],
+          pathIndex: 1,
+          anchored: true,
+        },
+      }),
+      state,
+    ).legPercentage,
+    0,
+  );
+
+  // One tile of the anchored leg walked -> 1/1 = 100% completion.
+  assert.equal(
+    getRouteProgress(
+      route({
+        caravan: {
+          phase: "toDestination",
+          cargo: 50,
+          path: [{ q: 6, r: 0 }, { q: 7, r: 0 }],
+          pathIndex: 2,
+          anchored: true,
+        },
+      }),
+      state,
+    ).legPercentage,
+    100,
+  );
+});
+
 test("waitingAtDestination requires the exhausted path to end on the live destination", () => {
   const state = stateFixture();
   // Exhausted path whose end is the hero's live tile (6,0) -> waiting.

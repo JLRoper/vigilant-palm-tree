@@ -1,4 +1,4 @@
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Page } from "playwright";
 import { ChildProcess } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import assert from "node:assert/strict";
@@ -201,7 +201,7 @@ async function openGame(page: Page, name: string, gameId: string): Promise<void>
       const rows = Array.from(document.body.querySelectorAll("button")).filter((b) => b.textContent?.trim() === "Open")
         .map((b) => {
           let row = b.parentElement;
-          for (let i = 0; i < 3 && row && row.textContent.length < 40; i++) row = row.parentElement;
+          for (let i = 0; i < 3 && row && (row.textContent ?? "").length < 40; i++) row = row.parentElement;
           return { btn: b, text: row?.textContent ?? "" };
         });
       const hit = rows.find((r) => r.text.includes(n));

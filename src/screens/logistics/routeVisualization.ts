@@ -208,7 +208,12 @@ export function getRouteProgress(
   const pathLength = caravan.path.length;
   const pathIndex = Number.isFinite(caravan.pathIndex) ? caravan.pathIndex : 0;
   if (caravan.phase === "toDestination") {
-    const progress = clampUnit(pathLength > 0 ? pathIndex / pathLength : pathIndex > 0 ? 1 : 0);
+    // Leg completion is PATH-based: anchored (repathed) paths prepend the
+    // caravan's own tile as an anchor, which is not a movement step, so it
+    // must not count as progress.
+    const completedSteps = caravan.anchored ? Math.max(0, pathIndex - 1) : pathIndex;
+    const legTiles = caravan.anchored ? Math.max(1, pathLength - 1) : pathLength;
+    const progress = clampUnit(legTiles > 0 ? completedSteps / legTiles : pathIndex > 0 ? 1 : 0);
     const endpointPositionPercent = routePositionFromEndpoints(route, state);
     const positionPercentage = endpointPositionPercent ?? progress * 100;
     // "Waiting for destination space" only applies when the exhausted path

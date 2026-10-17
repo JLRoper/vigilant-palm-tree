@@ -547,11 +547,11 @@ function returnLegCaravan(
   previousPath: { q: number; r: number }[],
 ): CaravanState {
   if (originTile && isSameTile(realTile, originTile)) {
-    return { phase: "toHome" as const, cargo, path: [realTile], pathIndex: 1 };
+    return { phase: "toHome" as const, cargo, path: [realTile], pathIndex: 1, anchored: true };
   }
   const leg = map && originTile ? findPath(map, realTile, originTile) : [];
   if (leg.length > 0) {
-    return { phase: "toHome" as const, cargo, path: [realTile, ...leg], pathIndex: 1 };
+    return { phase: "toHome" as const, cargo, path: [realTile, ...leg], pathIndex: 1, anchored: true };
   }
   return { phase: "toHome" as const, cargo, path: [...previousPath].reverse(), pathIndex: 0 };
 }
@@ -675,7 +675,7 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
       if (fromTile && pathEnd && !isSameTile(heroTarget, pathEnd) && !isSameTile(heroTarget, fromTile)) {
         const leg = findPath(map, fromTile, { q: heroTarget.q, r: heroTarget.r });
         if (leg.length > 0) {
-          caravan = { ...caravan, path: [fromTile, ...leg], pathIndex: 1 };
+          caravan = { ...caravan, path: [fromTile, ...leg], pathIndex: 1, anchored: true };
           repathsUsed += 1;
           changed = true;
         }
@@ -753,7 +753,7 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
           repathsUsed += 1;
           // Prepend the current tile so pathIndex 1 keeps caravanTile at
           // `here` (findPath excludes the start tile).
-          caravan = { ...caravan, path: [caravanTile(caravan, here), ...leg], pathIndex: 1 };
+          caravan = { ...caravan, path: [caravanTile(caravan, here), ...leg], pathIndex: 1, anchored: true };
           while (steps > 0 && caravan.pathIndex < caravan.path.length) {
             caravan = { ...caravan, pathIndex: caravan.pathIndex + 1 };
             steps -= 1;
@@ -827,7 +827,7 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
         const leg = findPath(map, caravanTile(caravan, here), { q: homeHero.q, r: homeHero.r });
         if (leg.length === 0) break;
         repathsUsed += 1;
-        caravan = { ...caravan, path: [caravanTile(caravan, here), ...leg], pathIndex: 1 };
+        caravan = { ...caravan, path: [caravanTile(caravan, here), ...leg], pathIndex: 1, anchored: true };
         while (steps > 0 && caravan.pathIndex < caravan.path.length) {
           caravan = { ...caravan, pathIndex: caravan.pathIndex + 1 };
           steps -= 1;

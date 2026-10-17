@@ -29,6 +29,7 @@ function cloneCaravan(c: CaravanState | null): CaravanState | null {
     cargo: c.cargo,
     pathIndex: c.pathIndex,
     path: c.path.map((p) => ({ q: p.q, r: p.r })),
+    ...(c.anchored ? { anchored: true } : {}),
   };
 }
 
