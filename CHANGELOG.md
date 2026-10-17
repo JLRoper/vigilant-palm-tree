@@ -10,9 +10,17 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.7.0] - 2026-10-17
+## [0.9.0] - 2026-10-17
 
 feat: uncharted fog-of-war mode
+
+## [0.8.0] - 2026-10-17
+
+feat(districts): add city districts on controlled territory hexes (5x5 district grids, adventure map district sprites, economy/storage pooling, and enemy hero occupation blocking) and 20 new Tier 1 settlement sprites (`4 variants × 5 building-count fullness stages`)
+
+## [0.7.0] - 2026-10-17
+
+feat(hud): isometric resource icons and a population capsule in the header bar
 
 ## [0.6.0] - 2026-10-16
 

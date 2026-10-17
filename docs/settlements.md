@@ -1,6 +1,6 @@
 # Settlements
 
-<!-- docs:verified 2026-10-16 -->
+<!-- docs:verified 2026-10-17 -->
 
 The player's claim on the world. Settlements come in two forms: **initial castles** (pre-placed at game start via `castlePlacement`) and **charter-founded settlements** (created by heroes via expedition).
 
@@ -192,10 +192,19 @@ Buildings placed in the city view are persisted to `SettlementState.buildings` (
 
 Source: [`src/screens/settlements/cityView/cityView.ts`](../src/screens/settlements/cityView/cityView.ts), [`src/screens/settlements/cityView/buildingPlacer.ts`](../src/screens/settlements/cityView/buildingPlacer.ts), and the layout/guard pair in `packages/engine/src/settlement/starterLayout.ts`. The city view's re-sync of its working cart against live state goes through the pure `syncCartBuildings` (`src/screens/settlements/cityView/syncedBuildings.ts`) — it refreshes `level`/`style`/`construction` **and** `bank`, so a pot that changed while the city view was open is not written back stale (unit-tested, because city view imports cannot be loaded under bare `node:test`).
 
+## City districts (✅ implemented)
+
+Owned settlements can expand onto passable, non-settlement hexes within their territory (`controlRange(level)` in `packages/engine/src/control.ts`, resolved via `resolveControllingSettlement` and keyed by `districtKey(q, r)` as `"q,r"`).
+
+- **Grid & spots:** Each district opens in `CityView` (`district?: { q, r }`) as a 5×5 satellite grid where all 25 cells (including center `(2, 2)`) are buildable (`Town Hall` is forbidden: `town_hall_forbidden_in_district`). `generateDistrictSpots` (`packages/engine/src/settlement/citySpots.ts`) generates 3 deterministic `"rich"` spots in `0..4 × 0..4`; when the map hex carries a resource deposit, `spots[0]` is guaranteed to match that resource.
+- **Economy & pooling:** District placements always pay full net cost (never `freeInitialLayout`). Completed district buildings pool into the parent settlement's resource production (`settlementProductionRates`, `produceSettlementResources`), gold income (`settlementIncome`, `effectiveSettlementIncome`), storage and treasury caps (`settlementResourceCap`, `settlementTreasuryCap`), construction/upgrade ticks (`advanceBuildingConstructions`, `startBuildingUpgrade`, `advanceSettlementUpgrades`), banking (`depositIntoBank`, `requestBankWithdrawal`, `matureBankWithdrawals`, `accrueBankInterest`), and garrison recruitment (`eligibleRecruitSources`, `recruitUnits`).
+- **Enemy occupation blocking:** When an enemy hero (`ownerId !== settlement.ownerId`) stands on `(district.q, district.r)` (`isDistrictBlockedByHero` in `packages/engine/src/settlement/producers.ts`), that district's resource production and building gold income are zeroed until the hex is cleared, while building upkeep (`buildingUpkeepRequired`) still applies.
+- **Cleanup & persistence:** Removing all buildings from a district deletes `districts["q,r"]` and omits `SettlementState.districts` when empty. Persisted in `settlements.districts` JSONB (`server/migrations/029_settlement_districts.sql`) and round-tripped by `settlementRepo` and `hydrateGameState`.
+
 ## Map visualisation
 
 - **Unclaimed resource tile:** small icon overlay (coin, log, brick, ore, vial) on top of the terrain.
-- **Claimed settlement:** small town sprite (procedural: walls + flag in the owner's colour) drawn **on top of** the resource icon.
+- **Claimed settlement:** town/castle sprite drawn **on top of** the resource icon, with an ownership ring in the owner's colour. Tier 1 settlements with buildings resolve 20 variant-by-fullness sprites in `src/resources/settlements/` (`settlement-l1-v{0..3}-f{1..5}.png`, keys `castle.1.v${variant}.f${fullness}` via `castleKey(level, variant, fullness)` in `src/render/assetDescriptors.ts`): `castleVariant: 0 | 1 | 2 | 3` selects one of 4 architectural variants, and `settlementFullnessForCount(count)` (`src/render/scene/sceneBuilder/adventureScene.ts`) maps `buildings.length` to 5 fullness stages (Fullness 1: 0–3 buildings, Fullness 2: 4–6, Fullness 3: 7–9, Fullness 4: 10–12, Fullness 5: 13+).
 - **Charter target:** hex with scaffolding overlay — dashed outline in `"traveling"` phase, solid outline with construction icon in `"constructing"` phase.
 - **Charter placement mode:** valid hexes highlighted with green dashed outline.
 - **Minimap:** resource tiles shown as an amber dot in the corner of the tile cell.
@@ -210,6 +219,7 @@ State types defined in [`src/state/gameState.ts`](../src/state/gameState.ts):
 - `GameState.activeCharters`, `nextCharterId`, `nextSettlementId`
 - `UpgradeState` — `{ kind: "townHall"|"settlement", targetLevel: 2|3, daysRemaining, newResourceRates?, newCitySpots? }`
 - `SettlementState.buildings` — `BuildingDef[]` (persisted building array; a bank's pot rides on its own `BuildingDef.bank?: BankPot`, stored in the nullable JSONB column `settlement_buildings.bank` — migration `022_bank_pot.sql`)
+- `SettlementState.districts` — `Record<string, DistrictState>?` (optional map of `"q,r"` → `{ q, r, citySpots, buildings }`, persisted in `settlements.districts` JSONB — migration `029_settlement_districts.sql`)
 - `SettlementState.upgrade` — `UpgradeState?` (active upgrade, if any)
 - `SettlementState.stacks` — `Platoon[]?` (settlement garrison; persisted via the `settlement_platoons` table, migration `016_settlement_platoons.sql`, dual-written by `settlementRepo` and reassembled by the granular hydrate path)
 

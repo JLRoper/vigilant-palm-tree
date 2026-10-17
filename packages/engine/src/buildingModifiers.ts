@@ -23,7 +23,9 @@ export function computeSettlementBonuses(buildings: BuildingDef[]): PlayerBonuse
   return { visionRangeBonus, controlRangeBonus, heroSpeedBonus, heroAttackBonus };
 }
 
-export function computePlayerBonuses(allSettlements: { buildings: BuildingDef[] }[]): PlayerBonuses {
+export function computePlayerBonuses(
+  allSettlements: { buildings: BuildingDef[]; districts?: Record<string, { buildings: BuildingDef[] }> }[],
+): PlayerBonuses {
   let visionRangeBonus = 0;
   let controlRangeBonus = 0;
   let heroSpeedBonus = 0;
@@ -34,6 +36,13 @@ export function computePlayerBonuses(allSettlements: { buildings: BuildingDef[] 
     controlRangeBonus += b.controlRangeBonus;
     heroSpeedBonus += b.heroSpeedBonus;
     heroAttackBonus += b.heroAttackBonus;
+    for (const d of Object.values(s.districts ?? {})) {
+      const db = computeSettlementBonuses(d.buildings);
+      visionRangeBonus += db.visionRangeBonus;
+      controlRangeBonus += db.controlRangeBonus;
+      heroSpeedBonus += db.heroSpeedBonus;
+      heroAttackBonus += db.heroAttackBonus;
+    }
   }
   return { visionRangeBonus, controlRangeBonus, heroSpeedBonus, heroAttackBonus };
 }

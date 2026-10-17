@@ -126,6 +126,12 @@ export interface CaravanState {
   path: { q: number; r: number }[];
   /** Tiles of `path` already consumed this leg; the caravan occupies path[pathIndex - 1] (or the origin settlement at 0). */
   pathIndex: number;
+  /**
+   * True when path[0] is an ANCHOR tile (the caravan's own tile at repath
+   * time) rather than the first unconsumed step, so progress math can skip it.
+   * Absent (legacy/initial outbound paths) means path[0] is the first step.
+   */
+  anchored?: boolean;
 }
 
 export type TradeRouteId = string;
@@ -291,4 +297,5 @@ export interface BuildingUpgradeRequest {
   gx: number;
   gy: number;
   kind: BuildingKind;
+  district?: { q: number; r: number };
 }

@@ -87,6 +87,15 @@ export function settlementResourceCap(s: SettlementState): Record<WarehouseResou
       cap[r] += bonus[r] ?? 0;
     }
   }
+  for (const d of Object.values(s.districts ?? {})) {
+    for (const b of d.buildings) {
+      const bonus = buildingSettlementEffects(b.kind, b.level).storageBonus;
+      if (!bonus) continue;
+      for (const r of WAREHOUSE_RESOURCES) {
+        cap[r] += bonus[r] ?? 0;
+      }
+    }
+  }
   return cap;
 }
 
@@ -94,6 +103,11 @@ export function settlementTreasuryCap(s: SettlementState): number {
   let cap = BASE_TREASURY[s.level];
   for (const b of s.buildings) {
     cap += buildingSettlementEffects(b.kind, b.level).treasuryBonus;
+  }
+  for (const d of Object.values(s.districts ?? {})) {
+    for (const b of d.buildings) {
+      cap += buildingSettlementEffects(b.kind, b.level).treasuryBonus;
+    }
   }
   return cap;
 }

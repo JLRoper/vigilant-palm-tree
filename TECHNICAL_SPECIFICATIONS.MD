@@ -1,6 +1,6 @@
 # Technical Specifications — heroes-js
 
-<!-- docs:verified 2026-10-16 -->
+<!-- docs:verified 2026-10-17 -->
 
 A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. This document captures the **tech stack** as it currently exists in the repository. Game design documentation lives under [`docs/`](./docs/README.md); the render module has its own authoritative spec at [`src/render/docs/technical-spec.md`](./src/render/docs/technical-spec.md).
 
@@ -38,7 +38,7 @@ Top-level directories:
 - `docs/` — game design documents (Markdown)
 - `docker/` — `Dockerfile` (multi-stage `api-runtime` / `web-runtime` targets) + `nginx.conf` (the `gateway` reverse proxy)
 - `dist/` — Vite build output
-- `src/resources/` — baked-in sprite PNGs/SVGs (castles, resources, units — arena battle sprites + hero-panel icons, horses, buildings, skybox parallax layers)
+- `src/resources/` — baked-in sprite PNGs/SVGs (castles, Tier 1 settlement fullness sprites in `src/resources/settlements/` (`settlement-l1-v{0..3}-f{1..5}.png`), districts, resources, units — arena battle sprites + hero-panel icons, horses, buildings, skybox parallax layers)
 - `docker-compose.yml` — Postgres + API + web + gateway (nginx reverse proxy) + Adminer
 
 The former top-level `shared/` directory **no longer exists** — its contents were moved into `packages/engine` / `packages/contracts`; no source file imports a `shared/` path anymore.
@@ -71,7 +71,7 @@ The former top-level `shared/` directory **no longer exists** — its contents w
 
 ### SQL
 - [`server/schema.sql`](./server/schema.sql) — baseline schema.
-- [`server/migrations/`](./server/migrations) — 28 ordered migrations, `001` through `028`; `006_faction_rosters` is present. Recent additions include SSE notifications (`017`), bank/wagon storage (`022`–`023`), faction content (`024`–`026`), numeric precision (`027`), and treasury-wagon backfill (`028`).
+- [`server/migrations/`](./server/migrations) — 29 ordered migrations, `001` through `029`; `006_faction_rosters` is present. Recent additions include SSE notifications (`017`), bank/wagon storage (`022`–`023`), faction content (`024`–`026`), numeric precision (`027`), treasury-wagon backfill (`028`), and settlement districts (`029`).
 - Applied at startup by `initSchema()` in [`server/db.ts`](./server/db.ts:1).
 
 ---
@@ -188,7 +188,7 @@ Entry point: [`src/main.ts`](./src/main.ts:1) is a thin bootstrap — it constru
 | `src/map/` | Map generation and traversal: `gameMap.ts`, `terrain.ts`, `pathfinding.ts` (A\* over axial hex grid), `castlePlacement.ts`, `resourceTiles.ts` |
 | `src/players/` | `localPlayer.ts` — per-game local player id (localStorage + in-memory fallback) used by mp sync/telemetry |
 | `src/render/` | Canvas rendering — see below and [`src/render/docs/technical-spec.md`](./src/render/docs/technical-spec.md) (authoritative; do not duplicate here) |
-| `src/resources/` | Static assets: castles (+ alt/FLUX variants), resource icon styles, unit/horse sprites (`units/horse/commander-1..10/`), arena unit battle sprites (`units/arena/<unitId>-<pose>.png`), hero-panel unit icons (`units/icons/<unitId>.png`), building style sprites, skybox parallax layers, banners |
+| `src/resources/` | Static assets: castles (+ alt/FLUX variants and 20 Tier 1 settlement fullness sprites in `src/resources/settlements/` (`settlement-l1-v{0..3}-f{1..5}.png`)), districts (`src/resources/districts/`), resource icon styles, unit/horse sprites (`units/horse/commander-1..10/`), arena unit battle sprites (`units/arena/<unitId>-<pose>.png`), hero-panel unit icons (`units/icons/<unitId>.png`), building style sprites, skybox parallax layers, banners |
 | `src/screens/` | All DOM UI, see table below |
 | `src/state/` | Game state: `gameState.ts` (typed store + pure reducers incl. charter logic; re-exports shared types from `@heroes/contracts`), `turnController.ts` (turn lifecycle, auto-travel, AI tick, battle trigger, recruitment/garrison transfers, the `tryCaptureAt` capture gate incl. `SETTLEMENT_BATTLE` vs a non-empty garrison), `units.ts` (Platoon/UnitType client model), `playerColors.ts`, `settings.ts` (persisted settings singleton incl. horse variant, resource style, borders, toolbar style) |
 | `src/systems/` | Client behavioral system: `movement.ts` (hero arrival hook `onHeroArrived`) |
@@ -220,7 +220,7 @@ The scene-graph pipeline is **live** — it draws every frame on all three views
 - Battle arena: `src/screens/combat/arena/paint.ts` runs `buildBattleScene()` + `paintScene()` — the scenebuilder path is the arena default since the 2026-09-29 arena unit sprites; `?paint=legacy` opts back to the legacy in-class draw path.
 - `scene/entityMirror.ts` (`EntityMirror`) is the Hero/Castle tween cache fed by the multiplayer event stream (`getEntityMirror()` from `src/io/multiplayerSync.ts` → `GameEngine` → `ViewManager.initializeRenderer()` → `MapRenderer`).
 - **Fog of war is live**: `src/render/fog.ts` `computeVision()` unions hero vision rings (`VISION_RANGE = 4`) with owned-castle rings (`controlRange(level, buildings)` from `@heroes/engine`); consumed by the renderer, the minimap, and single-tile tile inspection (`isTileVisibleTo()` in `screens/adventure/tileInfo.ts`).
-- `Paint2DDep` (`scene/paint2d/deps.ts`) is the painter's whole external surface — five per-kind sprite resolvers (`resolveSpriteForResource/Hero/Building/Castle/Unit`, the latter serving the battle arena's `unit.<id>.<pose>` art); `src/render/paint2dDefaults.ts` is the **only** file allowed to touch `assetDescriptors.ts`/`assets.ts`/`sprites.ts` (the Vite-`?url`-coupled modules) and to value-import `state/settings.ts` — enforced by dependency-cruiser rules plus a runtime seam test. `src/render/skybox.ts` is the only holder of the `?url` skybox PNG imports + layer caches.
+- `Paint2DDep` (`scene/paint2d/deps.ts`) is the painter's whole external surface — per-kind sprite resolvers (`resolveSpriteForResource/Hero/Building/Castle/Unit` plus optional `resolveSpriteForCaravan` and `resolveSpriteForDistrict`; `resolveSpriteForCastle(level, variant, fullness?)` resolves `castle.1.v${variant}.f${fullness ?? 1}` for level-1 settlements using `settlementFullnessForCount(count)` in `src/render/scene/sceneBuilder/adventureScene.ts`: Fullness 1: 0–3 buildings, Fullness 2: 4–6, Fullness 3: 7–9, Fullness 4: 10–12, Fullness 5: 13+; `resolveSpriteForUnit` serves the battle arena's `unit.<id>.<pose>` art); `src/render/paint2dDefaults.ts` is the **only** file allowed to touch `assetDescriptors.ts`/`assets.ts`/`sprites.ts` (the Vite-`?url`-coupled modules) and to value-import `state/settings.ts` — enforced by dependency-cruiser rules plus a runtime seam test. `src/render/skybox.ts` is the only holder of the `?url` skybox PNG imports + layer caches.
 - Hero/castle sprites load via a `SpriteProvider` (`createDefaultProvider(HERO_PROCEDURAL_DRAWERS)`); PNGs in `src/resources/` take priority, procedural canvases are the fallback.
 
 ### State / persistence
@@ -248,7 +248,7 @@ The scene-graph pipeline is **live** — it draws every frame on all three views
 | `server/app/aiDriverToken.ts` | Per-process AI-driver boot token used to distinguish current ownership from stale server instances. |
 | `server/persistence/db.ts` | `pg.Pool` + `withTransaction()` configured from `PG*` env vars; the single pool instance (re-exported by `server/db.ts`) |
 | `server/db.ts` | `initSchema()` — runs `schema.sql` then any pending `server/migrations/*.sql` in filename order; re-exports the pool |
-| `server/persistence/repositories/` | Granular Postgres repos: `gameRepo.ts` (load/save incl. snapshot + transaction inserts), `eventRepo.ts` (`game_events` append with `actor_seat`), `heroRepo.ts`, `settlementRepo.ts` (dual-writes `settlement_platoons` alongside the settlement row), `charterRepo.ts`, `tileRepo.ts` |
+| `server/persistence/repositories/` | Granular Postgres repos: `gameRepo.ts` (load/save incl. snapshot + transaction inserts), `eventRepo.ts` (`game_events` append with `actor_seat`), `heroRepo.ts`, `settlementRepo.ts` (dual-writes `settlement_platoons` alongside the settlement row and persists `settlements.districts` JSONB), `charterRepo.ts`, `tileRepo.ts` |
 | `server/persistence/hydrate.ts` | `hydrateFromRepos()` — reassembles a full `HydratableGameRow` from the granular tables for the command bus, incl. hero platoons (`hero_platoons`) and settlement garrisons (`settlement_platoons`) |
 | `server/assetRoutes.ts` | `/assets` router: custom player-uploaded assets stored in `game_assets` (metadata + bytes), served with MIME types |
 | `server/http/routes/telemetry.ts` | `POST`/`GET /games/:name/telemetry` — the dev Network Map data plane (#51) plus the drop-policy heartbeat: `POST` records the sample in `presenceRegistry` **and** `touchSeat`s the enforcement-grade presence (`server/app/dropPolicy.ts`); it answers `200` with `{ presence }` (the per-seat connected/disconnected view) so the client's per-poll call doubles as the presence read — was `204` before 2026-09-27 |
@@ -256,7 +256,7 @@ The scene-graph pipeline is **live** — it draws every frame on all three views
 | `server/app/dropPolicy.ts` | Drop policy (shipped 2026-09-27, spec in `docs/multiplayer.md`): per-seat last-seen heartbeat map (telemetry POSTs + valid commands), `DISCONNECT_AFTER_MS = 60_000` disconnect detection flushed transition-only into `games.lobby.presence`, and the skip lifecycle — `SKIP_GRACE_MS = 120_000` grace timer for a disconnected seat holding `active_player_id`, canceled by any heartbeat; on expiry re-validates against the live row, holds (5s re-checks) while `phase.kind === "BATTLE"`, then runs `runServerEndTurnForSeat`. 5s in-process scanner started from `server/index.ts`; everything is in-process (an API restart restarts a grace clock — accepted). Timings/seams injectable via `configureDropPolicy()` for tests |
 | `server/errorHandler.ts` | Global Express error middleware (#98), registered last — normalizes anything that escapes a route to `{ error: "internal", message }` JSON |
 | `server/schema.sql` | Base schema |
-| `server/migrations/` | 28 ordered migrations (`001`–`028`); see §2 for the current sequence and notable schema steps. |
+| `server/migrations/` | 29 ordered migrations (`001`–`029`); see §2 for the current sequence and notable schema steps. |
 
 Lobby state lives in the `games.lobby` jsonb column: `{ seats, humanSlots, claimed: { "<seat>": { handle, email?, claimedAt } }, startedAt, presence?: { "<seat>": { lastSeenAt, connected } } }`. Seat claims are bound to the **server-derived** auth email when the caller was signed in at claim time; anonymous claims remain valid (issue #179 follow-up) — the email only enables the commands route's optional actor-vs-seat binding. Since the 2026-09-27 drop policy, a STARTED game's email-bound seat can also be **reclaimed** by the same identity via the claim route (handle-only seats cannot rebind; new seats stay unclaimable after start), and `presence` carries the per-seat connected/disconnected signal written transition-only by `server/app/dropPolicy.ts` (never per 2s heartbeat).
 

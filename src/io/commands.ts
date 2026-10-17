@@ -302,6 +302,7 @@ export async function bankGold(
     gy: number;
     amount: number;
     direction: "deposit" | "withdraw";
+    district?: { q: number; r: number };
   }
 ): Promise<BankGoldResult> {
   return postCommand<BankGoldResult>(name, { kind: "BankGold", ...payload });
@@ -370,7 +371,12 @@ export async function startCharter(
 // round-trip at all.
 export async function upgradeBuilding(
   name: string,
-  payload: { actor: number; settlementId: string; requests: BuildingUpgradeRequest[] }
+  payload: {
+    actor: number;
+    settlementId: string;
+    requests: BuildingUpgradeRequest[];
+    district?: { q: number; r: number };
+  }
 ): Promise<void> {
   await postCommand(name, { kind: "UpgradeBuilding", ...payload });
 }
@@ -381,7 +387,13 @@ export async function upgradeBuilding(
 // applied the same change optimistically via applyPlaceBuildings().
 export async function placeBuildings(
   name: string,
-  payload: { actor: number; settlementId: string; buildings: BuildingDef[]; initialLayout?: boolean }
+  payload: {
+    actor: number;
+    settlementId: string;
+    buildings: BuildingDef[];
+    initialLayout?: boolean;
+    district?: { q: number; r: number };
+  }
 ): Promise<void> {
   await postCommand(name, { kind: "PlaceBuildings", ...payload });
 }
@@ -495,6 +507,7 @@ export async function recruitUnits(
     gy: number;
     unitTypeId: string;
     count: number;
+    district?: { q: number; r: number };
   }
 ): Promise<void> {
   await postCommand(name, { kind: "RecruitUnits", ...payload });

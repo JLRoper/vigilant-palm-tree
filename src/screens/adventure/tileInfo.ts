@@ -9,9 +9,10 @@ import type { Hero } from "../../entities/hero";
 import type { Castle } from "../../entities/settlement";
 import type { GameState, PlayerId } from "../../state/gameState";
 import type { CharterPhase } from "@heroes/contracts";
-import { controlRange, settlementRateRadius, platoonTroopTotal } from "@heroes/engine";
+import { districtKey, isDistrictBlockedByHero, resolveControllingSettlement, settlementRateRadius, platoonTroopTotal } from "@heroes/engine";
 import { colorForOwner } from "../../state/playerColors";
 import { isTileVisibleTo } from "../../render/fog";
+import { districtVariantForBuildings } from "../../render/scene/sceneBuilder/adventureScene";
 
 export interface TileInfo {
   q: number;
@@ -30,6 +31,13 @@ export interface TileInfo {
     level: 1 | 2 | 3;
     population: number;
     owned: boolean;
+  } | null;
+  district?: {
+    settlementName: string;
+    ownerName: string;
+    buildingCount: number;
+    variant: "standard" | "farm";
+    blocked: boolean;
   } | null;
   heroes: Array<{
     name: string;
@@ -132,26 +140,50 @@ function describeCharter(
   return { name: charter.settlementName, phase: charter.phase, daysRemaining: charter.daysRemaining };
 }
 
+function describeDistrict(
+  state: GameState,
+  castles: readonly Castle[],
+  heroes: readonly Hero[],
+  q: number,
+  r: number,
+  fogged: boolean,
+  viewPlayerId: PlayerId,
+): NonNullable<TileInfo["district"]> | null {
+  const key = districtKey(q, r);
+  for (const c of castles) {
+    const d = c.districts?.[key];
+    if (!d || d.buildings.length === 0) continue;
+    if (!visibleOrOwned(fogged, c.ownerId, viewPlayerId)) continue;
+    return {
+      settlementName: c.name,
+      ownerName: playerName(state, c.ownerId),
+      buildingCount: d.buildings.length,
+      variant: districtVariantForBuildings(d.buildings),
+      blocked: isDistrictBlockedByHero(
+        c.ownerId,
+        q,
+        r,
+        heroes.map((h) => ({ ownerId: h.ownerId, q: h.tile.q, r: h.tile.r })),
+      ),
+    };
+  }
+  return null;
+}
+
 function describeTerritory(
   state: GameState,
   castles: readonly Castle[],
   q: number,
   r: number,
   fogged: boolean,
+  mapWidth: number,
+  mapHeight: number,
 ): TileInfo["territory"] {
-  if (fogged) return null;
-  let best: { castle: Castle; ownerId: PlayerId; dist: number } | null = null;
-  for (const c of castles) {
-    if (c.ownerId === null) continue;
-    const ownerId = c.ownerId;
-    const dist = hexDistance(c.tile, { q, r });
-    if (dist > controlRange(c.level, c.buildings)) continue;
-    if (!best || dist < best.dist || (dist === best.dist && ownerId < best.ownerId)) {
-      best = { castle: c, ownerId, dist };
-    }
+  const winner = resolveControllingSettlement(castles, q, r, mapWidth, mapHeight);
+  if (!winner || winner.ownerId === null || !visibleOrOwned(fogged, winner.ownerId, state.activePlayerId)) {
+    return null;
   }
-  if (!best) return null;
-  return { settlementName: best.castle.name, ownerName: playerName(state, best.ownerId) };
+  return { settlementName: winner.name, ownerName: playerName(state, winner.ownerId) };
 }
 
 export function describeTile(input: {
@@ -177,8 +209,9 @@ export function describeTile(input: {
       : { kind, label: terrainLabel(kind), cost: TERRAIN_COST[kind], passable: isPassable(kind) },
     deposit: fogged ? null : describeDeposit(map, castles, tile.q, tile.r),
     settlement: describeSettlement(state, tile.q, tile.r, fogged, viewPlayerId),
+    district: describeDistrict(state, castles, heroes, tile.q, tile.r, fogged, viewPlayerId),
     heroes: describeHeroes(state, heroes, tile.q, tile.r, fogged, viewPlayerId),
     charter: describeCharter(state, tile.q, tile.r, fogged),
-    territory: describeTerritory(state, castles, tile.q, tile.r, fogged),
+    territory: describeTerritory(state, castles, tile.q, tile.r, fogged, map.width, map.height),
   };
 }

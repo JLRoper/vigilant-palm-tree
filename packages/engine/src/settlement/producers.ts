@@ -1,6 +1,24 @@
-import type { BuildingDef, BuildingKind, ResourceType, SettlementState } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, PlayerId, ResourceType, SettlementState } from "@heroes/contracts";
 import { buildingSettlementEffects } from "../buildingRegistry";
 import { cellMultiplier, spotResourceAt } from "./cityMultipliers";
+
+export function isDistrictBlockedByHero(
+  settlementOwnerId: PlayerId | null,
+  dq: number,
+  dr: number,
+  heroes?: Iterable<{ ownerId: PlayerId; q: number; r: number }> | Record<string, { ownerId: PlayerId; q: number; r: number }>,
+): boolean {
+  if (!heroes) return false;
+  const list = Symbol.iterator in Object(heroes)
+    ? (heroes as Iterable<{ ownerId: PlayerId; q: number; r: number }>)
+    : Object.values(heroes);
+  for (const h of list) {
+    if (h.q === dq && h.r === dr && h.ownerId !== settlementOwnerId) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export type ProducerKind =
   | "goldMine"

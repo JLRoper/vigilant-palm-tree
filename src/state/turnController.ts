@@ -16,7 +16,7 @@ import {
   rollbackCaptureSettlement,
 } from "@heroes/engine";
 import type { HorseVariant } from "./settings";
-import type { BattleResult, SettlementBattleOutcome, UnitType } from "@heroes/engine";
+import type { BattleResult, CitySpot, SettlementBattleOutcome, UnitType } from "@heroes/engine";
 import {
   selectHero as selectHeroReducer,
   selectSettlement as selectSettlementReducer,
@@ -128,13 +128,13 @@ export interface TurnControllerHooks {
   ): Promise<void>;
   // plan/2026-08-17-issue-88-remaining-command-ports.md Tracks 1/2: same
   // fire-and-forget shape as the rest of this block.
-  onUpgradeBuilding(actor: number, settlementId: SettlementId, requests: BuildingUpgradeRequest[]): Promise<void>;
+  onUpgradeBuilding(actor: number, settlementId: SettlementId, requests: BuildingUpgradeRequest[], district?: { q: number; r: number }): Promise<void>;
   onUpgradeSettlement(actor: number, settlementId: SettlementId): Promise<void>;
   // F4 closer: fired on every city-view placement/destroy change with the
   // full working cart. Tracked like the rest so End Turn drains it first --
   // the server's EndTurn pipeline is what ticks BuildingDef.construction,
   // so a raced PlaceBuildings means frozen construction stages.
-  onPlaceBuildings(actor: number, settlementId: SettlementId, buildings: BuildingDef[], initialLayout?: boolean): Promise<void>;
+  onPlaceBuildings(actor: number, settlementId: SettlementId, buildings: BuildingDef[], initialLayout?: boolean, district?: { q: number; r: number }): Promise<void>;
   onTransferResources(
     actor: number,
     heroId: HeroId,
@@ -167,6 +167,7 @@ export interface TurnControllerHooks {
     gy: number,
     unitTypeId: string,
     count: number,
+    district?: { q: number; r: number },
   ): Promise<void>;
   onTransferUnits(
     actor: number,
@@ -190,6 +191,7 @@ export interface TurnControllerHooks {
     gy: number,
     amount: number,
     direction: BankGoldDirection,
+    district?: { q: number; r: number },
   ): Promise<void>;
   // Fire-and-forget POST of an auto-resolved settlement-garrison battle
   // result (AI-attacker path). The local engine reducer has already applied
@@ -698,16 +700,27 @@ export class TurnController {
     gy: number,
     unitTypeId: string,
     count: number,
+    district?: { q: number; r: number },
   ): boolean {
-    const result = recruitUnitsReducer(this.state, { settlementId, buildingKind, gx, gy, unitTypeId, count });
+    const result = recruitUnitsReducer(this.state, {
+      settlementId,
+      buildingKind,
+      gx,
+      gy,
+      unitTypeId,
+      count,
+      ...(district ? { district } : {}),
+    });
     if (!result.ok) return false;
     this.commit(result.state, {
       log: {
         type: "units_recruited",
-        payload: { settlementId, unitTypeId, count },
+        payload: { settlementId, unitTypeId, count, ...(district ? { district } : {}) },
       },
       hook: () =>
-        this.hooks.onRecruitUnits(result.state.activePlayerId, settlementId, buildingKind, gx, gy, unitTypeId, count),
+        district
+          ? this.hooks.onRecruitUnits(result.state.activePlayerId, settlementId, buildingKind, gx, gy, unitTypeId, count, district)
+          : this.hooks.onRecruitUnits(result.state.activePlayerId, settlementId, buildingKind, gx, gy, unitTypeId, count),
       hookLabel: "onRecruitUnits",
     });
     return true;
@@ -749,19 +762,23 @@ export class TurnController {
     gy: number,
     amount: number,
     direction: BankGoldDirection,
+    district?: { q: number; r: number },
   ): { ok: boolean; reason: string } {
     const result =
       direction === "deposit"
-        ? depositIntoBank(this.state, settlementId, gx, gy, amount)
-        : requestBankWithdrawal(this.state, settlementId, gx, gy, amount);
+        ? depositIntoBank(this.state, settlementId, gx, gy, amount, district)
+        : requestBankWithdrawal(this.state, settlementId, gx, gy, amount, district);
     if (!result.ok) return { ok: false, reason: result.reason };
     const actor = result.state.activePlayerId;
     this.commit(result.state, {
       log: {
         type: "bank_gold_moved",
-        payload: { settlementId, gx, gy, amount, direction },
+        payload: { settlementId, gx, gy, amount, direction, ...(district ? { district } : {}) },
       },
-      hook: () => this.hooks.onBankGold(actor, settlementId, gx, gy, amount, direction),
+      hook: () =>
+        district
+          ? this.hooks.onBankGold(actor, settlementId, gx, gy, amount, direction, district)
+          : this.hooks.onBankGold(actor, settlementId, gx, gy, amount, direction),
       hookLabel: "onBankGold",
     });
     return { ok: true, reason: "" };
@@ -1132,6 +1149,7 @@ export class TurnController {
         item.gy,
         item.unitTypeId,
         item.count,
+        item.district,
       );
       if (!ok) {
         this.hooks.logEvent({
@@ -1257,15 +1275,18 @@ export class TurnController {
     return { ok: true, reason: "" };
   }
 
-  placeBuildings(settlementId: string, buildings: BuildingDef[], initialLayout = false): { ok: boolean; reason: string } {
-    const result = applyPlaceBuildingsReducer(this.state, settlementId, this.state.activePlayerId, buildings, initialLayout);
+  placeBuildings(settlementId: string, buildings: BuildingDef[], initialLayout = false, district?: { q: number; r: number; citySpots?: CitySpot[] }): { ok: boolean; reason: string } {
+    const result = applyPlaceBuildingsReducer(this.state, settlementId, this.state.activePlayerId, buildings, initialLayout, district);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
       log: {
         type: "buildings_placed",
-        payload: { settlementId },
+        payload: { settlementId, ...(district ? { district: { q: district.q, r: district.r } } : {}) },
       },
-      hook: () => this.hooks.onPlaceBuildings(result.state.activePlayerId, settlementId, buildings, initialLayout),
+      hook: () =>
+        district
+          ? this.hooks.onPlaceBuildings(result.state.activePlayerId, settlementId, buildings, initialLayout, { q: district.q, r: district.r })
+          : this.hooks.onPlaceBuildings(result.state.activePlayerId, settlementId, buildings, initialLayout),
       hookLabel: "onPlaceBuildings",
     });
     return { ok: true, reason: "" };
@@ -1366,15 +1387,18 @@ export class TurnController {
     return { ok: true, reason: "" };
   }
 
-  startBuildingUpgrade(settlementId: string, requests: BuildingUpgradeRequest[]): { ok: boolean; reason: string } {
-    const result = startBuildingUpgradeReducer(this.state, settlementId, requests);
+  startBuildingUpgrade(settlementId: string, requests: BuildingUpgradeRequest[], district?: { q: number; r: number }): { ok: boolean; reason: string } {
+    const result = startBuildingUpgradeReducer(this.state, settlementId, requests, district);
     if (!result.ok) return { ok: false, reason: result.reason };
     this.commit(result.state, {
       log: {
         type: "building_upgrade_started",
-        payload: { settlementId, requests },
+        payload: { settlementId, requests, ...(district ? { district } : {}) },
       },
-      hook: () => this.hooks.onUpgradeBuilding(result.state.activePlayerId, settlementId, requests),
+      hook: () =>
+        district
+          ? this.hooks.onUpgradeBuilding(result.state.activePlayerId, settlementId, requests, district)
+          : this.hooks.onUpgradeBuilding(result.state.activePlayerId, settlementId, requests),
       hookLabel: "onUpgradeBuilding",
     });
     return { ok: true, reason: "" };

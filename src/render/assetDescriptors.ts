@@ -62,6 +62,32 @@ import resourceArcanePileBubbly from "../resources/resource-arcane-pile-bubbly.p
 import resourceFoodPileBubbly from "../resources/resource-food-pile-bubbly.png?url";
 import caravanSupply from "../resources/caravan-supply.png?url";
 import caravanTreasury from "../resources/caravan-treasury.png?url";
+import districtStandard1 from "../resources/districts/district-standard-1.png?url";
+import districtStandard2 from "../resources/districts/district-standard-2.png?url";
+import districtStandard3 from "../resources/districts/district-standard-3.png?url";
+import districtFarm1 from "../resources/districts/district-farm-1.png?url";
+import districtFarm2 from "../resources/districts/district-farm-2.png?url";
+import districtFarm3 from "../resources/districts/district-farm-3.png?url";
+import settlementL1V0F1 from "../resources/settlements/settlement-l1-v0-f1.png?url";
+import settlementL1V0F2 from "../resources/settlements/settlement-l1-v0-f2.png?url";
+import settlementL1V0F3 from "../resources/settlements/settlement-l1-v0-f3.png?url";
+import settlementL1V0F4 from "../resources/settlements/settlement-l1-v0-f4.png?url";
+import settlementL1V0F5 from "../resources/settlements/settlement-l1-v0-f5.png?url";
+import settlementL1V1F1 from "../resources/settlements/settlement-l1-v1-f1.png?url";
+import settlementL1V1F2 from "../resources/settlements/settlement-l1-v1-f2.png?url";
+import settlementL1V1F3 from "../resources/settlements/settlement-l1-v1-f3.png?url";
+import settlementL1V1F4 from "../resources/settlements/settlement-l1-v1-f4.png?url";
+import settlementL1V1F5 from "../resources/settlements/settlement-l1-v1-f5.png?url";
+import settlementL1V2F1 from "../resources/settlements/settlement-l1-v2-f1.png?url";
+import settlementL1V2F2 from "../resources/settlements/settlement-l1-v2-f2.png?url";
+import settlementL1V2F3 from "../resources/settlements/settlement-l1-v2-f3.png?url";
+import settlementL1V2F4 from "../resources/settlements/settlement-l1-v2-f4.png?url";
+import settlementL1V2F5 from "../resources/settlements/settlement-l1-v2-f5.png?url";
+import settlementL1V3F1 from "../resources/settlements/settlement-l1-v3-f1.png?url";
+import settlementL1V3F2 from "../resources/settlements/settlement-l1-v3-f2.png?url";
+import settlementL1V3F3 from "../resources/settlements/settlement-l1-v3-f3.png?url";
+import settlementL1V3F4 from "../resources/settlements/settlement-l1-v3-f4.png?url";
+import settlementL1V3F5 from "../resources/settlements/settlement-l1-v3-f5.png?url";
 import { Faction, Direction } from "../entities/hero";
 import type { CastleLevel, CastleVariant, FactionId, ResourceType } from "@heroes/contracts";
 import { RESOURCES } from "../map/resourceTiles";
@@ -69,12 +95,16 @@ import type { ResourceStyle } from "../state/settings";
 import { HORSE_VARIANT_REGISTRY, BUILDING_SPRITE_FILES, BUILDING_SPRITE_ALIASES, type HorseVariantId } from "@heroes/engine";
 
 export type CaravanSpriteKind = "resource" | "gold";
+export type DistrictVariant = "standard" | "farm";
+export type DistrictTier = 1 | 2 | 3;
+export type SettlementFullness = 1 | 2 | 3 | 4 | 5;
 
 export type SpriteKey =
   | `castle.${CastleLevel}`
   | `castle-alt.${CastleLevel}`
   | `castle-alt2.${CastleLevel}`
   | `castle-alt3.${CastleLevel}`
+  | `castle.1.v${CastleVariant}.f${SettlementFullness}`
   | `resource.${ResourceType}`
   | `resource-cart.${ResourceType}`
   | `resource-illust.${ResourceType}`
@@ -90,7 +120,8 @@ export type SpriteKey =
   | `building.${string}.${string}.${number}`
   | `unit.${string}.${UnitArenaPose}`
   | `faction-banner.${FactionId}`
-  | `caravan.${CaravanSpriteKind}`;
+  | `caravan.${CaravanSpriteKind}`
+  | `district.${DistrictVariant}.${DistrictTier}`;
 
 export type UnitArenaPose = "idle" | "attack" | "move";
 
@@ -274,6 +305,7 @@ export const CASTLE_DESCRIPTORS: Record<`castle.${CastleLevel}`, SpriteDescripto
     url: CASTLE_SPRITES[1],
     anchor: "bottom",
     sizing: { kind: "fitHeight", hexSizeMul: 1.5 },
+    anchorOffsetY: 8,
   },
   "castle.2": {
     key: "castle.2",
@@ -297,6 +329,7 @@ export const CASTLE_ALT_DESCRIPTORS: Record<`castle-alt.${CastleLevel}`, SpriteD
     url: CASTLE_ALT_SPRITES[1],
     anchor: "bottom",
     sizing: { kind: "fitHeight", hexSizeMul: 1.5 },
+    anchorOffsetY: 8,
   },
   "castle-alt.2": {
     key: "castle-alt.2",
@@ -320,6 +353,7 @@ export const CASTLE_ALT2_DESCRIPTORS: Record<`castle-alt2.${CastleLevel}`, Sprit
     url: CASTLE_ALT2_SPRITES[1],
     anchor: "bottom",
     sizing: { kind: "fitHeight", hexSizeMul: 1.5 },
+    anchorOffsetY: 8,
   },
   "castle-alt2.2": {
     key: "castle-alt2.2",
@@ -343,6 +377,7 @@ export const CASTLE_ALT3_DESCRIPTORS: Record<`castle-alt3.${CastleLevel}`, Sprit
     url: CASTLE_ALT3_SPRITES[1],
     anchor: "bottom",
     sizing: { kind: "fitHeight", hexSizeMul: 1.5 },
+    anchorOffsetY: 8,
   },
   "castle-alt3.2": {
     key: "castle-alt3.2",
@@ -749,11 +784,78 @@ export const CARAVAN_DESCRIPTORS: Record<`caravan.${CaravanSpriteKind}`, SpriteD
   },
 };
 
+export const DISTRICT_DESCRIPTORS: readonly SpriteDescriptor[] = [
+  {
+    key: "district.standard.1",
+    url: districtStandard1,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.25 },
+  },
+  {
+    key: "district.standard.2",
+    url: districtStandard2,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.45 },
+    anchorOffsetY: 4,
+  },
+  {
+    key: "district.standard.3",
+    url: districtStandard3,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.65 },
+    anchorOffsetY: 8,
+  },
+  {
+    key: "district.farm.1",
+    url: districtFarm1,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.25 },
+  },
+  {
+    key: "district.farm.2",
+    url: districtFarm2,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.45 },
+    anchorOffsetY: 4,
+  },
+  {
+    key: "district.farm.3",
+    url: districtFarm3,
+    anchor: "bottom",
+    sizing: { kind: "fitHeight", hexSizeMul: 1.65 },
+    anchorOffsetY: 8,
+  },
+];
+
+export const SETTLEMENT_L1_FULLNESS_DESCRIPTORS: readonly SpriteDescriptor[] = [
+  { key: "castle.1.v0.f1", url: settlementL1V0F1, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.35 }, anchorOffsetY: 4 },
+  { key: "castle.1.v0.f2", url: settlementL1V0F2, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.45 }, anchorOffsetY: 6 },
+  { key: "castle.1.v0.f3", url: settlementL1V0F3, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.55 }, anchorOffsetY: 8 },
+  { key: "castle.1.v0.f4", url: settlementL1V0F4, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.65 }, anchorOffsetY: 10 },
+  { key: "castle.1.v0.f5", url: settlementL1V0F5, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.75 }, anchorOffsetY: 12 },
+  { key: "castle.1.v1.f1", url: settlementL1V1F1, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.35 }, anchorOffsetY: 4 },
+  { key: "castle.1.v1.f2", url: settlementL1V1F2, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.45 }, anchorOffsetY: 6 },
+  { key: "castle.1.v1.f3", url: settlementL1V1F3, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.55 }, anchorOffsetY: 8 },
+  { key: "castle.1.v1.f4", url: settlementL1V1F4, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.65 }, anchorOffsetY: 10 },
+  { key: "castle.1.v1.f5", url: settlementL1V1F5, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.75 }, anchorOffsetY: 12 },
+  { key: "castle.1.v2.f1", url: settlementL1V2F1, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.35 }, anchorOffsetY: 4 },
+  { key: "castle.1.v2.f2", url: settlementL1V2F2, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.45 }, anchorOffsetY: 6 },
+  { key: "castle.1.v2.f3", url: settlementL1V2F3, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.55 }, anchorOffsetY: 8 },
+  { key: "castle.1.v2.f4", url: settlementL1V2F4, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.65 }, anchorOffsetY: 10 },
+  { key: "castle.1.v2.f5", url: settlementL1V2F5, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.75 }, anchorOffsetY: 12 },
+  { key: "castle.1.v3.f1", url: settlementL1V3F1, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.35 }, anchorOffsetY: 4 },
+  { key: "castle.1.v3.f2", url: settlementL1V3F2, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.45 }, anchorOffsetY: 6 },
+  { key: "castle.1.v3.f3", url: settlementL1V3F3, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.55 }, anchorOffsetY: 8 },
+  { key: "castle.1.v3.f4", url: settlementL1V3F4, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.65 }, anchorOffsetY: 10 },
+  { key: "castle.1.v3.f5", url: settlementL1V3F5, anchor: "bottom", sizing: { kind: "fitHeight", hexSizeMul: 1.75 }, anchorOffsetY: 12 },
+];
+
 export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(CASTLE_DESCRIPTORS),
   ...Object.values(CASTLE_ALT_DESCRIPTORS),
   ...Object.values(CASTLE_ALT2_DESCRIPTORS),
   ...Object.values(CASTLE_ALT3_DESCRIPTORS),
+  ...SETTLEMENT_L1_FULLNESS_DESCRIPTORS,
   ...Object.values(RESOURCE_DESCRIPTORS),
   ...Object.values(RESOURCE_CART_DESCRIPTORS),
   ...Object.values(RESOURCE_ILLUST_DESCRIPTORS),
@@ -768,15 +870,21 @@ export const ALL_DESCRIPTORS: readonly SpriteDescriptor[] = [
   ...Object.values(BUILDING_DESCRIPTORS),
   ...Object.values(UNIT_ARENA_DESCRIPTORS),
   ...Object.values(CARAVAN_DESCRIPTORS),
+  ...DISTRICT_DESCRIPTORS,
 ];
 
 export function castleKey(
   level: CastleLevel,
   variant?: CastleVariant,
-): `castle.${CastleLevel}` | `castle-alt.${CastleLevel}` | `castle-alt2.${CastleLevel}` | `castle-alt3.${CastleLevel}` {
+  fullness?: SettlementFullness,
+): SpriteKey {
+  if (level === 1 && fullness !== undefined) {
+    return `castle.1.v${variant ?? 0}.f${fullness}`;
+  }
+  if (variant === 1) return `castle-alt.${level}`;
   if (variant === 2) return `castle-alt2.${level}`;
   if (variant === 3) return `castle-alt3.${level}`;
-  return variant ? `castle-alt.${level}` : `castle.${level}`;
+  return `castle.${level}`;
 }
 
 export function resourceKey(type: ResourceType): `resource.${ResourceType}` {
@@ -823,4 +931,8 @@ export function factionBannerKey(id: FactionId): `faction-banner.${FactionId}` {
 
 export function caravanKey(kind: CaravanSpriteKind = "resource"): `caravan.${CaravanSpriteKind}` {
   return `caravan.${kind}`;
+}
+
+export function districtSpriteKey(variant: DistrictVariant, tier: DistrictTier): SpriteKey {
+  return `district.${variant}.${tier}`;
 }

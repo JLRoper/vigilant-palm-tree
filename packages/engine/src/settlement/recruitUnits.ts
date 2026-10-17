@@ -1,4 +1,5 @@
 import type {
+  BuildingDef,
   BuildingKind,
   FactionId,
   GameState,
@@ -9,6 +10,7 @@ import type {
 import type { Platoon, UnitType } from "../units";
 import { MAX_PLATOON_ENTRIES, normalizePlatoons, settlementStacks, unitFactionId } from "../units";
 import { getBuildingEffect, type RecruitEntry } from "../buildingRegistry";
+import { districtKey } from "../control";
 
 // The recruit-eligibility gate shared by the RecruitUnits command and the AI
 // garrison planner: a building offers a unit only when construction finished
@@ -20,6 +22,7 @@ export interface RecruitSource {
   gx: number;
   gy: number;
   entry: RecruitEntry;
+  district?: { q: number; r: number };
 }
 
 // The faction gate's inputs (faction-registry foundation, D5). Both halves
@@ -53,6 +56,22 @@ export function eligibleRecruitSources(
       out.push({ buildingKind: building.kind, gx: building.gx, gy: building.gy, entry });
     }
   }
+  for (const d of Object.values(settlement.districts ?? {})) {
+    for (const building of d.buildings) {
+      if (building.construction) continue;
+      for (const entry of getBuildingEffect(building.kind).recruits) {
+        if ((entry.minLevel ?? 1) > building.level) continue;
+        if (!unitAllowedForSeatFaction(entry.unitTypeId, opts)) continue;
+        out.push({
+          buildingKind: building.kind,
+          gx: building.gx,
+          gy: building.gy,
+          entry,
+          district: { q: d.q, r: d.r },
+        });
+      }
+    }
+  }
   return out;
 }
 
@@ -84,14 +103,33 @@ export function recruitUnits(
     gy: number;
     unitTypeId: string;
     count: number;
+    district?: { q: number; r: number };
   },
 ): { state: GameState; ok: boolean; reason: string } {
   const settlement = state.settlements[opts.settlementId];
   if (!settlement) return { state, ok: false, reason: "no_settlement" };
   if (settlement.ownerId == null) return { state, ok: false, reason: "unowned_settlement" };
-  const building = settlement.buildings.find(
-    (b) => b.kind === opts.buildingKind && b.gx === opts.gx && b.gy === opts.gy,
-  );
+  let building: BuildingDef | undefined;
+  if (opts.district) {
+    const key = districtKey(opts.district.q, opts.district.r);
+    building = settlement.districts?.[key]?.buildings.find(
+      (b) => b.kind === opts.buildingKind && b.gx === opts.gx && b.gy === opts.gy,
+    );
+  } else {
+    building = settlement.buildings.find(
+      (b) => b.kind === opts.buildingKind && b.gx === opts.gx && b.gy === opts.gy,
+    );
+    if (!building) {
+      const matches: BuildingDef[] = [];
+      for (const d of Object.values(settlement.districts ?? {})) {
+        const found = d.buildings.find(
+          (b) => b.kind === opts.buildingKind && b.gx === opts.gx && b.gy === opts.gy,
+        );
+        if (found) matches.push(found);
+      }
+      if (matches.length === 1) building = matches[0];
+    }
+  }
   if (!building) return { state, ok: false, reason: "no_building" };
   if (building.construction) return { state, ok: false, reason: "building_under_construction" };
   const recruitEntry = getBuildingEffect(opts.buildingKind).recruits.find(

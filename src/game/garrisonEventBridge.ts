@@ -26,7 +26,8 @@ function isBridgedDelta(event: EngineEvent): boolean {
     event.type === "UnitsRecruited" ||
     event.type === "UnitsTransferred" ||
     event.type === "TradeRouteCreated" ||
-    event.type === "BattleOffered"
+    event.type === "BattleOffered" ||
+    event.type === "BankGoldMoved"
   );
 }
 

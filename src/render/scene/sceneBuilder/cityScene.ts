@@ -43,6 +43,7 @@ export interface CitySceneInput {
 
   /** The settlement's single in-flight upgrade, if any; targeted buildings render construction-stage sprites. */
   upgrades?: UpgradeState;
+  district?: { q: number; r: number } | null;
 }
 
 export function buildCityScene(input: CitySceneInput): SceneNode[] {
@@ -122,11 +123,21 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
     const stage = constructionStageFor(upgradeProgress(upgrades));
     const map = new Map<string, 1 | 2 | 3>();
     if (upgrades.kind === "townHall") {
-      for (const b of orderedBuildings) {
-        if (b.kind === "townHall") map.set(`${b.gx},${b.gy},${b.kind}`, stage);
+      if (!input.district) {
+        for (const b of orderedBuildings) {
+          if (b.kind === "townHall") map.set(`${b.gx},${b.gy},${b.kind}`, stage);
+        }
       }
     } else {
-      for (const ref of upgradeRefs(upgrades)) map.set(`${ref.gx},${ref.gy},${ref.kind}`, stage);
+      for (const ref of upgradeRefs(upgrades)) {
+        const refDist = ref.district ?? upgrades.district;
+        const matchesContext = input.district
+          ? Boolean(refDist && refDist.q === input.district.q && refDist.r === input.district.r)
+          : !refDist;
+        if (matchesContext) {
+          map.set(`${ref.gx},${ref.gy},${ref.kind}`, stage);
+        }
+      }
     }
     return map;
   })();

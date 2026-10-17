@@ -785,6 +785,7 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
         gy: item.gy,
         unitTypeId: item.unitTypeId,
         count: item.count,
+        ...(item.district ? { district: item.district } : {}),
       });
       if ("stop" in recruited) {
         if (recruited.stop === "turn_lost") return "turn_lost";

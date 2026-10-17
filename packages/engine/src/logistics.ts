@@ -252,7 +252,7 @@ export function transferCargoLoot(
 
 // -- Trade routes (docs/wagons-stockpiles-trade-routes-plan.md §5.2) --------
 
-export const CARAVAN_TILES_PER_DAY = 4;
+export const CARAVAN_TILES_PER_DAY = 7;
 // Hero endpoints are moving targets: when a caravan's path is exhausted the
 // hero may have moved off that tile, and the caravan re-paths toward the
 // hero's current position. This cap bounds re-path attempts per daily
@@ -547,11 +547,11 @@ function returnLegCaravan(
   previousPath: { q: number; r: number }[],
 ): CaravanState {
   if (originTile && isSameTile(realTile, originTile)) {
-    return { phase: "toHome" as const, cargo, path: [realTile], pathIndex: 1 };
+    return { phase: "toHome" as const, cargo, path: [realTile], pathIndex: 1, anchored: true };
   }
   const leg = map && originTile ? findPath(map, realTile, originTile) : [];
   if (leg.length > 0) {
-    return { phase: "toHome" as const, cargo, path: [realTile, ...leg], pathIndex: 1 };
+    return { phase: "toHome" as const, cargo, path: [realTile, ...leg], pathIndex: 1, anchored: true };
   }
   return { phase: "toHome" as const, cargo, path: [...previousPath].reverse(), pathIndex: 0 };
 }
@@ -580,11 +580,12 @@ function returnLegCaravan(
 // - Delivery caps at the destination: warehouseHeadroom/treasuryHeadroom for
 //   a settlement, heroResourceCap/heroGoldCap for a hero. Leftover stays on
 //   the caravan and delivers as headroom appears (never-lose-cargo).
-// - A hero endpoint is a moving target: when the path is exhausted and the
-//   hero is not on the caravan's tile, the caravan re-paths (A* to the
-//   hero's current position) and continues, cargo intact, up to
-//   CARAVAN_CATCHUP_REPATHS_PER_DAY re-paths per daily call; past the cap
-//   (or on an unreachable target) it waits for the next daily tick.
+// - A hero endpoint is a moving target: when the hero has left the path's
+//   end tile, the remaining path is re-targeted toward the hero's CURRENT
+//   tile BEFORE today's walk budget is spent, and an exhausted path whose
+//   hero is not on the caravan's tile re-paths the same way -- cargo intact,
+//   up to CARAVAN_CATCHUP_REPATHS_PER_DAY re-paths per daily call; past the
+//   cap (or on an unreachable target) it waits for the next daily tick.
 // - A dead hero destination flips the caravan toHome with the return leg
 //   built above; a dead hero origin leaves a returning caravan
 //   holding its cargo at the path's end -- the route's fate is decided by
@@ -654,6 +655,41 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
 
     let caravan: CaravanState = { ...route.caravan, path: [...route.caravan.path] };
 
+    // A hero endpoint is a moving target: when the hero has left the path's
+    // end tile, re-target the remaining path toward the hero's CURRENT tile
+    // before walking today's budget, so the cart always heads for where the
+    // hero stands now instead of finishing a stale path first. Counts against
+    // the same per-day re-path cap as the arrival catch-up loops below.
+    let repathsUsed = 0;
+    const heroTarget =
+      caravan.phase === "toDestination"
+        ? route.to.kind === "hero"
+          ? nextHeroes[route.to.id]
+          : undefined
+        : route.from.kind === "hero"
+          ? nextHeroes[route.from.id]
+          : undefined;
+    if (heroTarget && heroTarget.ownerId === routeOwnerId(route, records)) {
+      const fromTile = caravan.pathIndex > 0 ? caravan.path[caravan.pathIndex - 1] : originTile;
+      const pathEnd = caravan.path[caravan.path.length - 1];
+      if (fromTile && pathEnd && !isSameTile(heroTarget, pathEnd)) {
+        if (isSameTile(heroTarget, fromTile)) {
+          // The hero has stepped ONTO the caravan's tile mid-path: collapse
+          // the walk to this tile so the arrival handling below delivers
+          // this wrap instead of walking away along the stale path.
+          caravan = { ...caravan, path: [fromTile], pathIndex: 1, anchored: true };
+          changed = true;
+        } else if (map) {
+          const leg = findPath(map, fromTile, { q: heroTarget.q, r: heroTarget.r });
+          if (leg.length > 0) {
+            caravan = { ...caravan, path: [fromTile, ...leg], pathIndex: 1, anchored: true };
+            repathsUsed += 1;
+            changed = true;
+          }
+        }
+      }
+    }
+
     // Movement: up to CARAVAN_TILES_PER_DAY tiles per wrap.
     let steps = CARAVAN_TILES_PER_DAY;
     while (steps > 0 && caravan.pathIndex < caravan.path.length) {
@@ -718,15 +754,14 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
         // Catch-up: while the hero is not on the caravan's tile, re-path
         // toward the hero's current position and keep walking today's
         // remaining budget -- bounded by the per-day re-path cap.
-        let repaths = 0;
         while (!isSameTile(hero, caravanTile(caravan, here))) {
-          if (!map || steps <= 0 || repaths >= CARAVAN_CATCHUP_REPATHS_PER_DAY) break;
+          if (!map || steps <= 0 || repathsUsed >= CARAVAN_CATCHUP_REPATHS_PER_DAY) break;
           const leg = findPath(map, caravanTile(caravan, here), { q: hero.q, r: hero.r });
           if (leg.length === 0) break;
-          repaths += 1;
+          repathsUsed += 1;
           // Prepend the current tile so pathIndex 1 keeps caravanTile at
           // `here` (findPath excludes the start tile).
-          caravan = { ...caravan, path: [caravanTile(caravan, here), ...leg], pathIndex: 1 };
+          caravan = { ...caravan, path: [caravanTile(caravan, here), ...leg], pathIndex: 1, anchored: true };
           while (steps > 0 && caravan.pathIndex < caravan.path.length) {
             caravan = { ...caravan, pathIndex: caravan.pathIndex + 1 };
             steps -= 1;
@@ -738,7 +773,7 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
           // persist -- discarding them would re-walk the same tiles every
           // day and never reach the wait state. A wrap with neither is the
           // pure wait: an identity no-op.
-          const progressed = repaths > 0 || caravan.pathIndex > route.caravan.pathIndex;
+          const progressed = repathsUsed > 0 || caravan.pathIndex > route.caravan.pathIndex;
           if (!progressed) return route;
           changed = true;
           return { ...route, caravan };
@@ -795,13 +830,12 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
       if (!homeHero) return route;
       // Moving target on the return leg too: re-path toward the hero's
       // current position, same cap and never-lose-cargo wait.
-      let repaths = 0;
       while (!isSameTile(homeHero, caravanTile(caravan, here))) {
-        if (!map || steps <= 0 || repaths >= CARAVAN_CATCHUP_REPATHS_PER_DAY) break;
+        if (!map || steps <= 0 || repathsUsed >= CARAVAN_CATCHUP_REPATHS_PER_DAY) break;
         const leg = findPath(map, caravanTile(caravan, here), { q: homeHero.q, r: homeHero.r });
         if (leg.length === 0) break;
-        repaths += 1;
-        caravan = { ...caravan, path: [caravanTile(caravan, here), ...leg], pathIndex: 1 };
+        repathsUsed += 1;
+        caravan = { ...caravan, path: [caravanTile(caravan, here), ...leg], pathIndex: 1, anchored: true };
         while (steps > 0 && caravan.pathIndex < caravan.path.length) {
           caravan = { ...caravan, pathIndex: caravan.pathIndex + 1 };
           steps -= 1;
@@ -810,7 +844,7 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
       if (!isSameTile(homeHero, caravanTile(caravan, here))) {
         // Same wait rule as the outbound leg: persist walked steps and
         // adopted re-paths, identity no-op only when neither happened.
-        const progressed = repaths > 0 || caravan.pathIndex > route.caravan.pathIndex;
+        const progressed = repathsUsed > 0 || caravan.pathIndex > route.caravan.pathIndex;
         if (!progressed) return route;
         changed = true;
         return { ...route, caravan };

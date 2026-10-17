@@ -6,7 +6,7 @@ import { MAP_SEED } from "@screens/adventure/adventureView";
 import { colorForOwner } from "../state/playerColors";
 import { buildInitialGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";
-import { cityViewSizeFor, validCharterHexes } from "@heroes/engine";
+import { cityViewSizeFor, districtKey, generateDistrictSpots, resolveControllingSettlement, validCharterHexes } from "@heroes/engine";
 import { cachedUnitTypes } from "../data/unitCatalog";
 
 import { SessionManager } from "./SessionManager";
@@ -533,30 +533,69 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     const t = this.view.hoverFromScreen(e.clientX, e.clientY);
     if (!t) return;
     const castle = this.state.getSettlements().find((c) => c.tile.q === t.q && c.tile.r === t.r);
-    if (!castle || castle.ownerId !== localId) return;
-    // Every spot is shown, food included: food spots exist (citySpots.ts's
-    // RESOURCE_POOL rolls them, terrain-biased) and a farm on one earns the
-    // ~3x spot multiplier, which is the whole placement decision. They also
-    // render fine -- RESOURCE_PAL has a food entry and `resource.food` has a
-    // descriptor, so paintCityResourceSpot draws art (procedural fallback
-    // otherwise). The old `isMineable` filter predates food spots entirely
-    // (citySpots.ts's pool was gold/wood/stone/iron/arcane only), so it
-    // filtered nothing and hid a real mechanic once food was added.
-    // Lazy city view (lazy-load-chunks plan Phase 2): the CityView module is
-    // imported and constructed here, on the first settlement double-click,
-    // and cached by UIManager afterwards.
+    if (castle) {
+      if (castle.ownerId !== localId) return;
+      // Every spot is shown, food included: food spots exist (citySpots.ts's
+      // RESOURCE_POOL rolls them, terrain-biased) and a farm on one earns the
+      // ~3x spot multiplier, which is the whole placement decision. They also
+      // render fine -- RESOURCE_PAL has a food entry and `resource.food` has a
+      // descriptor, so paintCityResourceSpot draws art (procedural fallback
+      // otherwise). The old `isMineable` filter predates food spots entirely
+      // (citySpots.ts's pool was gold/wood/stone/iron/arcane only), so it
+      // filtered nothing and hid a real mechanic once food was added.
+      // Lazy city view (lazy-load-chunks plan Phase 2): the CityView module is
+      // imported and constructed here, on the first settlement double-click,
+      // and cached by UIManager afterwards.
+      const cityView = await this.ui.ensureCityView();
+      cityView.open(
+        castle.id, castle.name, cityViewSizeFor(castle.level),
+        colorForOwner(castle.ownerId),
+        castle.citySpots,
+        castle.cityMines,
+        castle.buildings,
+        gs.castleSeed,
+      );
+      if (cityView.isOpen() && gs.selectedSettlementId !== castle.id) {
+        const tc = this.state.getTurnController();
+        tc.selectSettlement(castle.id);
+        this.state.replaceState(tc.getState());
+      }
+      return;
+    }
+
+    const map = this.state.getGameMap();
+    if (!map) return;
+    const terrain = map.get(t.q, t.r);
+    if (!terrain || terrain === "water" || terrain === "mountain") return;
+    const controlling = resolveControllingSettlement(
+      this.state.getSettlements(),
+      t.q,
+      t.r,
+      map.width,
+      map.height,
+    );
+    if (!controlling || controlling.ownerId !== localId) return;
+    const existing = controlling.districts?.[districtKey(t.q, t.r)];
+    const mapRes = map.resourceTileAt(t.q, t.r)?.resource ?? null;
+    const spots =
+      existing?.citySpots && existing.citySpots.length > 0
+        ? existing.citySpots
+        : generateDistrictSpots(t.q, t.r, gs.castleSeed, terrain, mapRes);
     const cityView = await this.ui.ensureCityView();
     cityView.open(
-      castle.id, castle.name, cityViewSizeFor(castle.level),
-      colorForOwner(castle.ownerId),
-      castle.citySpots,
-      castle.cityMines,
-      castle.buildings,
+      controlling.id,
+      controlling.name,
+      5,
+      colorForOwner(controlling.ownerId),
+      spots,
+      [],
+      existing?.buildings ?? [],
       gs.castleSeed,
+      { q: t.q, r: t.r },
     );
-    if (cityView.isOpen() && gs.selectedSettlementId !== castle.id) {
+    if (cityView.isOpen() && gs.selectedSettlementId !== controlling.id) {
       const tc = this.state.getTurnController();
-      tc.selectSettlement(castle.id);
+      tc.selectSettlement(controlling.id);
       this.state.replaceState(tc.getState());
     }
   }

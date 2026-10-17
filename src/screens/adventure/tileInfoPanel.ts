@@ -43,6 +43,10 @@ function settlementLine(settlement: NonNullable<TileInfo["settlement"]>): string
   return `${settlement.name} — ${settlement.ownerName}, level ${settlement.level}, pop ${settlement.population}`;
 }
 
+function districtLine(district: NonNullable<TileInfo["district"]>): string {
+  return `${district.settlementName} district (${district.variant}, ${district.buildingCount} building${district.buildingCount === 1 ? "" : "s"})${district.blocked ? " — BLOCKED by enemy hero" : ""}`;
+}
+
 function heroLine(hero: TileInfo["heroes"][number]): string {
   const move = hero.movementRemaining !== null ? `, ${Math.round(hero.movementRemaining)} move` : "";
   return `${hero.name} (${hero.ownerName}) — ${hero.troops} troops${move}`;
@@ -67,6 +71,7 @@ function renderLines(info: TileInfo): HTMLElement[] {
   if (info.fogged) lines.push(makeLine("Unexplored", { dim: true }));
   if (info.deposit) lines.push(makeLine(depositLine(info.deposit)));
   if (info.settlement) lines.push(makeLine(settlementLine(info.settlement), { bold: info.settlement.owned }));
+  if (info.district) lines.push(makeLine(districtLine(info.district)));
   for (const hero of info.heroes) lines.push(makeLine(heroLine(hero), { bold: hero.owned }));
   if (info.charter) lines.push(makeLine(charterLine(info.charter)));
   if (info.territory) lines.push(makeLine(territoryLine(info.territory), { dim: true }));

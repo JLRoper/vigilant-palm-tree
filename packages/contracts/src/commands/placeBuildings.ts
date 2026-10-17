@@ -28,4 +28,5 @@ export interface PlaceBuildingsCommand {
    * a way to re-obtain a free city: the empty-array check is what stops it.
    */
   initialLayout?: boolean;
+  district?: { q: number; r: number };
 }
