@@ -251,6 +251,7 @@ export class CityView {
       citySpots: this.citySpots,
       cityMines: this.cityMines,
       upgrades: this.getSettlement()?.upgrade,
+      district: this.openDistrict,
       buildings: this.syncedBuildings(),
       ghost,
       selectedKeys: this.selectedKeys,

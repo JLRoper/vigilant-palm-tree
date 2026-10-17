@@ -8,8 +8,9 @@ import type {
   WarehouseResource,
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+import { buildingSettlementEffects } from "../buildingRegistry";
 import { addStockClamped, settlementResourceCap, settlementTreasuryCap, treasuryHeadroom } from "./capacity";
-import { isDistrictBlockedByHero, producerTurnOutput } from "./producers";
+import { isDistrictBlockedByHero, isProducerKind, producerTurnOutput } from "./producers";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -74,7 +75,13 @@ export function settlementProductionRates(
   let gold = 0;
   for (const b of settlement.buildings) {
     const output = producerTurnOutput(b, settlement, seed);
-    if (!output) continue;
+    if (!output) {
+      if (!b.construction && !isProducerKind(b.kind)) {
+        const flatGold = buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+        if (flatGold > 0) gold += flatGold;
+      }
+      continue;
+    }
     if (output.resource === "gold") {
       gold += output.amount;
     } else {
@@ -85,7 +92,13 @@ export function settlementProductionRates(
     if (isDistrictBlockedByHero(settlement.ownerId ?? null, d.q, d.r, heroes)) continue;
     for (const b of d.buildings) {
       const output = producerTurnOutput(b, { q: d.q, r: d.r, citySpots: d.citySpots }, seed);
-      if (!output) continue;
+      if (!output) {
+        if (!b.construction && !isProducerKind(b.kind)) {
+          const flatGold = buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+          if (flatGold > 0) gold += flatGold;
+        }
+        continue;
+      }
       if (output.resource === "gold") {
         gold += output.amount;
       } else {
@@ -117,7 +130,13 @@ export function produceSettlementResources(
     let gold = 0;
     for (const b of s.buildings) {
       const output = producerTurnOutput(b, s, seed);
-      if (!output) continue;
+      if (!output) {
+        if (!b.construction && !isProducerKind(b.kind)) {
+          const flatGold = buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+          if (flatGold > 0) gold += flatGold;
+        }
+        continue;
+      }
       if (output.resource === "gold") {
         gold += output.amount;
       } else {
@@ -132,7 +151,13 @@ export function produceSettlementResources(
       if (isDistrictBlockedByHero(s.ownerId, d.q, d.r, heroes)) continue;
       for (const b of d.buildings) {
         const output = producerTurnOutput(b, { q: d.q, r: d.r, citySpots: d.citySpots }, seed);
-        if (!output) continue;
+        if (!output) {
+          if (!b.construction && !isProducerKind(b.kind)) {
+            const flatGold = buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+            if (flatGold > 0) gold += flatGold;
+          }
+          continue;
+        }
         if (output.resource === "gold") {
           gold += output.amount;
         } else {

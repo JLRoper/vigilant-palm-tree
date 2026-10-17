@@ -936,7 +936,3 @@ export function caravanKey(kind: CaravanSpriteKind = "resource"): `caravan.${Car
 export function districtSpriteKey(variant: DistrictVariant, tier: DistrictTier): SpriteKey {
   return `district.${variant}.${tier}`;
 }
-
-export function districtKey(variant: DistrictVariant, tier: DistrictTier): SpriteKey {
-  return `district.${variant}.${tier}`;
-}

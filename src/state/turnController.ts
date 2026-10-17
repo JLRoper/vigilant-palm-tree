@@ -1148,6 +1148,7 @@ export class TurnController {
         item.gy,
         item.unitTypeId,
         item.count,
+        item.district,
       );
       if (!ok) {
         this.hooks.logEvent({

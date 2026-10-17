@@ -227,7 +227,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       // contribute nothing). Gold goes to the treasury, not the warehouse, so
       // it is shown as its own segment; the tile rate map's gold entry is
       // never paid and is deliberately absent.
-      const production = settlementProductionRates(s, state.castleSeed);
+      const production = settlementProductionRates(s, state.castleSeed, state.heroes);
       const productionParts = production.rates.map((r) => `${r.perTurn} ${r.resource}`);
       if (production.goldPerTurn > 0) productionParts.push(`${production.goldPerTurn} gold (treasury)`);
       const ratesRow = document.createElement("div");

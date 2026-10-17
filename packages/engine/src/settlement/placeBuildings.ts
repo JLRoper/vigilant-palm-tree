@@ -80,6 +80,17 @@ function sanitize(
       ? { daysRemaining: buildingBuildDays(incoming.kind) }
       : undefined;
   const merged: BuildingDef = { ...incoming };
+  if (prev) {
+    merged.level = prev.level;
+    if (prev.bank) {
+      merged.bank = { ...prev.bank, pendingOut: prev.bank.pendingOut.map((p) => ({ ...p })) };
+    } else {
+      delete merged.bank;
+    }
+  } else {
+    merged.level = 1;
+    delete merged.bank;
+  }
   if (construction) merged.construction = construction;
   else delete merged.construction;
   return merged;
@@ -101,11 +112,16 @@ export function applyPlaceBuildings(
     if (buildings.some((b) => b.kind === "townHall")) {
       return { ok: false, state, reason: "town_hall_forbidden_in_district" };
     }
+    const key = districtKey(district.q, district.r);
+    const prevDistrict = s.districts?.[key];
+    const prevBuildings = prevDistrict?.buildings ?? [];
+    const sanitized = buildings.map((b) => sanitize(prevBuildings, b, true));
+
     const occupied = new Set<string>();
-    for (const b of buildings) {
+    for (const b of sanitized) {
       const fp = buildingFootprintFromRegistry(b.kind, b.level);
-      const w = Math.max(1, Math.floor(fp.w));
-      const h = Math.max(1, Math.floor(fp.h));
+      const w = Math.max(1, Math.ceil(fp.w));
+      const h = Math.max(1, Math.ceil(fp.h));
       if (
         !Number.isInteger(b.gx) ||
         !Number.isInteger(b.gy) ||
@@ -127,17 +143,13 @@ export function applyPlaceBuildings(
       }
     }
 
-    const key = districtKey(district.q, district.r);
-    const prevDistrict = s.districts?.[key];
-    const prevBuildings = prevDistrict?.buildings ?? [];
-    const net: CityBuildNetCost = cityBuildNetCost(prevBuildings, buildings);
+    const net: CityBuildNetCost = cityBuildNetCost(prevBuildings, sanitized);
 
     if ((net.gold ?? 0) > s.gold) return { ok: false, state, reason: "not_enough_gold" };
     for (const r of ["wood", "stone", "iron", "arcane"] as const) {
       if ((net[r] ?? 0) > (s.warehouse[r] ?? 0)) return { ok: false, state, reason: `not_enough_${r}` };
     }
 
-    const sanitized = buildings.map((b) => sanitize(prevBuildings, b, true));
     const nextDistricts: Record<string, DistrictState> = { ...(s.districts ?? {}) };
     if (sanitized.length > 0) {
       nextDistricts[key] = {

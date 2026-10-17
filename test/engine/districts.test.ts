@@ -7,21 +7,26 @@ import {
   accrueBankInterest,
   advanceBuildingConstructions,
   advanceSettlementUpgrades,
+  applyBuildingUpgrade,
   applyEngineEvent,
   applyPlaceBuildings,
+  applyPopulationGrowth,
   applySettlementConsumption,
   bankGoldOf,
   bankPendingOut,
   buildingUpkeepRequired,
+  computePlayerBonuses,
   controlRange,
   depositIntoBank,
   districtKey,
+  districtPopulationBonus,
   effectiveSettlementIncome,
   eligibleRecruitSources,
   generateDistrictSpots,
   getOrCreateGameMap,
   hydrateGameState,
   matureBankWithdrawals,
+  pickGarrisonRecruitment,
   produceSettlementResources,
   producerTurnOutput,
   recruitUnits,
@@ -43,7 +48,8 @@ import {
   buildAdventureScene,
   settlementFullnessForCount,
 } from "../../src/render/scene/sceneBuilder/adventureScene";
-import type { CastleNode, DistrictNode } from "../../src/render/scene/types";
+import { buildCityScene } from "../../src/render/scene/sceneBuilder/cityScene";
+import type { CastleNode, CityBuildingNode, DistrictNode } from "../../src/render/scene/types";
 import { describeTile } from "../../src/screens/adventure/tileInfo";
 import {
   buildEntryStatus,
@@ -95,9 +101,20 @@ test("districtKey and resolveControllingSettlement: bounds, controlRange(level) 
   assert.equal(resolveControllingSettlement([sWithTownHall], 6, 5, 12, 12)?.id, "s0");
   assert.equal(resolveControllingSettlement([sWithTownHall], 7, 5, 12, 12), undefined);
 
-  // Neutral settlements (ownerId === null) never control territory
+  // Neutral settlements (ownerId === null) never control territory, and their center hex cannot be claimed by an adjacent owned settlement
   const neutral = makeSettlement("sNeutral", null, 5, 5, { level: 3 });
   assert.equal(resolveControllingSettlement([neutral], 5, 5, 12, 12), undefined);
+  const ownedAdjacent = makeSettlement("sOwnedAdj", 0, 6, 5, { level: 3 });
+  assert.equal(
+    resolveControllingSettlement([neutral, ownedAdjacent], 5, 5, 12, 12),
+    undefined,
+    "adjacent owned settlement cannot claim a neutral settlement's center hex",
+  );
+  assert.equal(
+    resolveControllingSettlement([neutral, ownedAdjacent], 6, 5, 12, 12)?.id,
+    "sOwnedAdj",
+    "owned settlement center hex is always controlled by that settlement",
+  );
 
   // Prefers a settlement that already has districts["q,r"] within its range even if farther
   const sNear = makeSettlement("sNear", 0, 4, 4, { level: 1 }); // dist 1 to (5, 4)
@@ -120,13 +137,19 @@ test("districtKey and resolveControllingSettlement: bounds, controlRange(level) 
     "sNear",
   );
 
-  // Equal hexDistance breaks ties by settlement ID (localeCompare)
+  // Equal hexDistance breaks ties by ownerId first, then settlement ID (localeCompare)
   const sB = makeSettlement("sB", 0, 4, 4, { level: 2 }); // dist 1 to (5, 4)
   const sA = makeSettlement("sA", 1, 6, 4, { level: 2 }); // dist 1 to (5, 4)
   assert.equal(
-    resolveControllingSettlement([sB, sA], 5, 4, 12, 12)?.id,
+    resolveControllingSettlement([sA, sB], 5, 4, 12, 12)?.id,
+    "sB",
+    "tie at equal hexDistance across different owners breaks by ownerId first",
+  );
+  const sA0 = makeSettlement("sA", 0, 6, 4, { level: 2 });
+  assert.equal(
+    resolveControllingSettlement([sB, sA0], 5, 4, 12, 12)?.id,
     "sA",
-    "tie at equal hexDistance breaks by settlement ID",
+    "tie at equal hexDistance for same owner breaks by settlement ID",
   );
 });
 
@@ -291,18 +314,18 @@ test("district economy: producers, market income, enemy vs friendly hero occupat
   const expectedGoldProd = producerTurnOutput(goldMine, dCtx, seed)?.amount ?? 0;
   assert.ok(expectedWood > 0 && expectedFood > 0 && expectedGoldProd > 0);
 
-  // Unblocked: district producers contribute to settlementProductionRates and produceSettlementResources
+  // Unblocked: district producers + market (40g/turn at L1) contribute to settlementProductionRates and produceSettlementResources
   const unblockedRates = settlementProductionRates(baseSettlement, seed, []);
   assert.deepEqual(unblockedRates.rates, [
     { resource: "wood", perTurn: expectedWood },
     { resource: "food", perTurn: expectedFood },
   ]);
-  assert.equal(unblockedRates.goldPerTurn, expectedGoldProd);
+  assert.equal(unblockedRates.goldPerTurn, Math.round((expectedGoldProd + 40) * 100) / 100);
 
   const producedUnblocked = produceSettlementResources({ s0: baseSettlement }, seed, []).s0;
   assert.equal(producedUnblocked.warehouse.wood, Math.round((20 + expectedWood) * 100) / 100);
   assert.equal(producedUnblocked.warehouse.food, Math.round((20 + expectedFood) * 100) / 100);
-  assert.equal(producedUnblocked.gold, Math.round((100 + expectedGoldProd) * 100) / 100);
+  assert.equal(producedUnblocked.gold, Math.round((100 + expectedGoldProd + 40) * 100) / 100);
 
   // Unblocked market (goldPerTurn: 75 at L1) adds to settlementIncome and effectiveSettlementIncome
   const baseOnlySettlement: SettlementState = { ...baseSettlement, districts: undefined };
@@ -1189,4 +1212,344 @@ test("settlementFullnessForCount, castleKey fullness variants, and buildAdventur
   const l2Node = byId.get("sL2");
   assert.ok(l2Node);
   assert.equal("fullness" in l2Node, false, "L2 settlement omits fullness");
+});
+
+// ── 7. PR #218 Copilot & branch review regression coverage ──────────────────
+
+test("applyPlaceBuildings: strips forged level > 1 and bank on new placements, preserves prev.level and prev.bank, and enforces 2x2 footprint for 1.5x1.5 L2 buildings", () => {
+  const existingBank: BuildingDef = {
+    gx: 0,
+    gy: 0,
+    kind: "bank",
+    level: 2,
+    style: "pixel",
+    bank: { gold: 750, pendingOut: [{ gold: 200, maturesOnDay: 14 }] },
+  };
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      gold: 5000,
+      warehouse: emptyWarehouse({ wood: 200, stone: 200, iron: 100, arcane: 100 }),
+      buildings: [],
+    }),
+    districts: {
+      "3,2": {
+        q: 3,
+        r: 2,
+        citySpots: [],
+        buildings: [existingBank],
+      },
+    },
+  };
+  const state = makeState({ settlements: [settlement] });
+
+  // Forged new placement with level 3 and pre-funded bank pot + tampered existing bank level/pot
+  const res = applyPlaceBuildings(
+    state,
+    "s0",
+    0,
+    [
+      {
+        gx: 0,
+        gy: 0,
+        kind: "bank",
+        level: 3,
+        style: "pixel",
+        bank: { gold: 999999, pendingOut: [] },
+      },
+      {
+        gx: 2,
+        gy: 2,
+        kind: "bank",
+        level: 3,
+        style: "pixel",
+        bank: { gold: 50000, pendingOut: [{ gold: 10000, maturesOnDay: 1 }] },
+      },
+    ],
+    false,
+    { q: 3, r: 2 },
+  );
+  assert.equal(res.ok, true);
+  const distBuildings = res.state.settlements.s0.districts?.["3,2"].buildings ?? [];
+  assert.equal(distBuildings.length, 2);
+
+  const preserved = distBuildings.find((b) => b.gx === 0 && b.gy === 0)!;
+  assert.equal(preserved.level, 2, "existing building preserves server prev.level");
+  assert.deepEqual(preserved.bank, {
+    gold: 750,
+    pendingOut: [{ gold: 200, maturesOnDay: 14 }],
+  });
+
+  const newBank = distBuildings.find((b) => b.gx === 2 && b.gy === 2)!;
+  assert.equal(newBank.level, 1, "new placement forces level = 1");
+  assert.equal(newBank.bank, undefined, "new placement strips forged bank state");
+  assert.equal("bank" in newBank, false);
+
+  // Existing L2 bank at (0, 0) has 1.5x1.5 registry footprint -> reserves 2x2 cells (0..1, 0..1),
+  // so placing a 1x1 house at (1, 1) must be rejected as overlapping!
+  const overlapL2 = applyPlaceBuildings(
+    state,
+    "s0",
+    0,
+    [existingBank, makeBuilding("house", 1, 1, 1)],
+    false,
+    { q: 3, r: 2 },
+  );
+  assert.equal(overlapL2.ok, false);
+  assert.equal(overlapL2.reason, "invalid_district_placement");
+});
+
+test("applyPopulationGrowth and computePlayerBonuses: include completed district housing and district player bonuses", () => {
+  const sWithHousing: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      level: 1,
+      population: 500, // At base POP_BY_LEVEL[1] = 500
+      warehouse: emptyWarehouse({ food: 500 }),
+    }),
+    districts: {
+      "3,2": {
+        q: 3,
+        r: 2,
+        citySpots: [],
+        buildings: [
+          makeBuilding("house", 0, 0, 1), // +50
+          makeBuilding("apartment", 1, 0, 1), // +100
+          makeBuilding("farmhouse", 3, 0, 2), // +40 (20 * 2)
+          makeBuilding("apartment", 0, 2, 3, { construction: { daysRemaining: 2 } }), // in-construction: ignored
+          makeBuilding("tower", 4, 0, 2), // visionRangeBonus: 4
+          makeBuilding("archeryRange", 4, 1, 1), // heroAttackBonus: 1
+        ],
+      },
+    },
+  };
+
+  const bonus = districtPopulationBonus(sWithHousing);
+  assert.equal(bonus, 50 + 100 + 40, "completed district housing adds 190 populationBonus");
+
+  const grown = applyPopulationGrowth({ s0: sWithHousing }, 0.1).s0;
+  // levelMax = 500 + 190 = 690; growth = ceil((500 + 190) * 0.1) = 69 -> 569
+  assert.equal(grown.population, 569);
+
+  // Clamps to levelMax (690)
+  const nearCap: SettlementState = { ...sWithHousing, population: 680 };
+  const clamped = applyPopulationGrowth({ s0: nearCap }, 0.1).s0;
+  assert.equal(clamped.population, 690);
+
+  const playerBonuses = computePlayerBonuses([sWithHousing]);
+  assert.equal(playerBonuses.visionRangeBonus, 4);
+  assert.equal(playerBonuses.heroAttackBonus, 1);
+});
+
+test("startBuildingUpgrade rejects duplicate_building_ref and applyBuildingUpgrade / advanceSettlementUpgrades never double-increment", () => {
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      gold: 5000,
+      warehouse: emptyWarehouse({ wood: 200, stone: 200 }),
+      buildings: [makeBuilding("house", 0, 0, 1)],
+    }),
+    districts: {
+      "3,2": {
+        q: 3,
+        r: 2,
+        citySpots: [],
+        buildings: [makeBuilding("house", 1, 1, 1)],
+      },
+    },
+  };
+  const state = makeState({ settlements: [settlement] });
+
+  const dupMain = startBuildingUpgrade(state, "s0", [
+    { gx: 0, gy: 0, kind: "house" },
+    { gx: 0, gy: 0, kind: "house" },
+  ]);
+  assert.equal(dupMain.ok, false);
+  if (!dupMain.ok) assert.equal(dupMain.reason, "duplicate_building_ref");
+
+  const dupDist = startBuildingUpgrade(
+    state,
+    "s0",
+    [
+      { gx: 1, gy: 1, kind: "house" },
+      { gx: 1, gy: 1, kind: "house", district: { q: 3, r: 2 } },
+    ],
+    { q: 3, r: 2 },
+  );
+  assert.equal(dupDist.ok, false);
+  if (!dupDist.ok) assert.equal(dupDist.reason, "duplicate_building_ref");
+
+  // Even if duplicate refs reach applyBuildingUpgrade or advanceSettlementUpgrades, level increments by at most 1
+  const appliedOnce = applyBuildingUpgrade(
+    state,
+    "s0",
+    [
+      { gx: 1, gy: 1, kind: "house", district: { q: 3, r: 2 } },
+      { gx: 1, gy: 1, kind: "house", district: { q: 3, r: 2 } },
+    ],
+  );
+  assert.equal(
+    appliedOnce.settlements.s0.districts?.["3,2"].buildings[0].level,
+    2,
+    "applyBuildingUpgrade increments district building only once",
+  );
+
+  const stateWithDupUpgrade: GameState = {
+    ...state,
+    settlements: {
+      s0: {
+        ...settlement,
+        upgrade: {
+          kind: "buildings",
+          targetLevel: 3,
+          daysRemaining: 1,
+          buildingRefs: [
+            { gx: 1, gy: 1, kind: "house", district: { q: 3, r: 2 } },
+            { gx: 1, gy: 1, kind: "house", district: { q: 3, r: 2 } },
+          ],
+          district: { q: 3, r: 2 },
+        },
+      },
+    },
+  };
+  const advanced = advanceSettlementUpgrades(stateWithDupUpgrade);
+  assert.equal(
+    advanced.settlements.s0.districts?.["3,2"].buildings[0].level,
+    2,
+    "advanceSettlementUpgrades increments district building only once",
+  );
+});
+
+test("produceSettlementResources and settlementProductionRates credit completed, unblocked market goldPerTurn (+40 * level)", () => {
+  const sMarket: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      gold: 100,
+      buildings: [
+        makeBuilding("market", 0, 0, 2), // +80 gold/turn
+        makeBuilding("market", 1, 0, 1, { construction: { daysRemaining: 1 } }), // in construction -> 0
+      ],
+    }),
+    districts: {
+      "3,2": {
+        q: 3,
+        r: 2,
+        citySpots: [],
+        buildings: [
+          makeBuilding("market", 0, 0, 3), // +120 gold/turn when unblocked
+          makeBuilding("market", 1, 0, 2, { construction: { daysRemaining: 2 } }), // in construction -> 0
+        ],
+      },
+    },
+  };
+
+  const unblockedRates = settlementProductionRates(sMarket, 1, []);
+  assert.equal(unblockedRates.goldPerTurn, 80 + 120);
+  const unblockedProduced = produceSettlementResources({ s0: sMarket }, 1, []).s0;
+  assert.equal(unblockedProduced.gold, 100 + 80 + 120);
+
+  const enemyHero = makeHero("hEnemy", 1, 3, 2);
+  const blockedRates = settlementProductionRates(sMarket, 1, [enemyHero]);
+  assert.equal(blockedRates.goldPerTurn, 80, "enemy hero on district hex blocks district market goldPerTurn");
+  const blockedProduced = produceSettlementResources({ s0: sMarket }, 1, [enemyHero]).s0;
+  assert.equal(blockedProduced.gold, 100 + 80);
+});
+
+test("pickGarrisonRecruitment preserves district on GarrisonRecruitment sources from districts", () => {
+  const sDistrictBarracks: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      gold: 1000,
+      buildings: [], // no recruit buildings in main settlement
+    }),
+    districts: {
+      "3,2": {
+        q: 3,
+        r: 2,
+        citySpots: [],
+        buildings: [makeBuilding("barracks", 1, 2, 1)],
+      },
+    },
+  };
+  const state = makeState({ heroes: [], settlements: [sDistrictBarracks] });
+  const items = pickGarrisonRecruitment(state, 0);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].settlementId, "s0");
+  assert.equal(items[0].buildingKind, "barracks");
+  assert.equal(items[0].gx, 1);
+  assert.equal(items[0].gy, 2);
+  assert.deepEqual(items[0].district, { q: 3, r: 2 });
+});
+
+test("buildCityScene scopes upgrade scaffolding constructionStages to the active district or main city", () => {
+  const citySettings = {
+    spriteVariant: "pixel" as const,
+    parallaxEnabled: false,
+    parallaxLayerCount: 3 as const,
+    cityBgOffsetX: 0,
+    cityBgOffsetY: 0,
+  };
+  const sharedBuildings = [makeBuilding("house", 0, 0, 1), makeBuilding("townHall", 2, 2, 1)];
+  const distUpgrade: GameState["settlements"][string]["upgrade"] = {
+    kind: "buildings",
+    targetLevel: 2,
+    daysRemaining: 2,
+    buildingRefs: [{ gx: 0, gy: 0, kind: "house", district: { q: 3, r: 2 } }],
+    district: { q: 3, r: 2 },
+  };
+
+  // Main city view (district: null) does NOT show constructionStage for a district upgrade at (0, 0)
+  const mainNodes = buildCityScene({
+    viewportW: 800,
+    viewportH: 600,
+    settlementName: "Oakkeep",
+    size: 5,
+    hover: null,
+    citySpots: [],
+    cityMines: [],
+    buildings: sharedBuildings,
+    upgrades: distUpgrade,
+    district: null,
+    citySettings,
+  });
+  const mainHouse = mainNodes.find(
+    (n): n is CityBuildingNode => n.kind === "cityBuilding" && n.buildingKind === "house",
+  );
+  assert.ok(mainHouse);
+  assert.equal(mainHouse.constructionStage, undefined, "district upgrade does not bleed onto main city building");
+
+  // Matching district (3, 2) DOES show constructionStage
+  const distNodes = buildCityScene({
+    viewportW: 800,
+    viewportH: 600,
+    settlementName: "Oakkeep — District (3, 2)",
+    size: 5,
+    hover: null,
+    citySpots: [],
+    cityMines: [],
+    buildings: [makeBuilding("house", 0, 0, 1)],
+    upgrades: distUpgrade,
+    district: { q: 3, r: 2 },
+    citySettings,
+  });
+  const distHouse = distNodes.find(
+    (n): n is CityBuildingNode => n.kind === "cityBuilding" && n.buildingKind === "house",
+  );
+  assert.ok(distHouse);
+  assert.ok(distHouse.constructionStage !== undefined, "matching district shows upgrade constructionStage");
+
+  // Different district (4, 2) does NOT show constructionStage
+  const otherDistNodes = buildCityScene({
+    viewportW: 800,
+    viewportH: 600,
+    settlementName: "Oakkeep — District (4, 2)",
+    size: 5,
+    hover: null,
+    citySpots: [],
+    cityMines: [],
+    buildings: [makeBuilding("house", 0, 0, 1)],
+    upgrades: distUpgrade,
+    district: { q: 4, r: 2 },
+    citySettings,
+  });
+  const otherDistHouse = otherDistNodes.find(
+    (n): n is CityBuildingNode => n.kind === "cityBuilding" && n.buildingKind === "house",
+  );
+  assert.ok(otherDistHouse);
+  assert.equal(otherDistHouse.constructionStage, undefined, "other district does not show upgrade constructionStage");
 });

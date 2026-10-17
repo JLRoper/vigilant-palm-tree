@@ -1,4 +1,4 @@
-import { axialToPixel, hexCorners, hexDistance, HEX_SIZE, type Axial } from "../../../core/hex";
+import { axialToPixel, hexCorners, HEX_SIZE, type Axial } from "../../../core/hex";
 import { getRowQBounds, isTileInViewportBounds, type ViewportAxialBounds } from "../../camera";
 import type { GameMap } from "../../../map/gameMap";
 import type { Hero } from "../../../entities/hero";
@@ -7,7 +7,7 @@ import type { RenderOptions } from "../../renderTypes";
 import { computeVision, isVisible } from "../../fog";
 import { computeReachableSplit } from "../../overlays/pathOverlay";
 import type { BuildingDef } from "@heroes/contracts";
-import { controlledPositions, isDistrictBlockedByHero, territoryBoundaryEdges } from "@heroes/engine";
+import { controlledPositions, isDistrictBlockedByHero, resolveControllingSettlement, territoryBoundaryEdges } from "@heroes/engine";
 import type { EntityMirror } from "../entityMirror";
 import type {
   SceneNode,
@@ -281,7 +281,8 @@ function buildTerritoryOutlineEdges(
 
   let settlementSig = `${mapWidth}x${mapHeight}`;
   for (const c of owned) {
-    settlementSig += `|${c.id}@${c.ownerId}:${c.tile.q},${c.tile.r}:${c.level}`;
+    const dKeys = Object.keys(c.districts ?? {}).sort().join(";");
+    settlementSig += `|${c.id}@${c.ownerId}:${c.tile.q},${c.tile.r}:${c.level}[${dKeys}]`;
   }
 
   if (!territoryPartitionCache || territoryPartitionCache.settlementSig !== settlementSig) {
@@ -320,25 +321,14 @@ function buildTerritoryOutlineEdges(
       for (const hexes of ownerHexes.values()) {
         for (const h of hexes) allHexes.add(h);
       }
-      const castleAxial: Array<{ ownerId: number; q: number; r: number }> = owned.map((c) => ({
-        ownerId: c.ownerId,
-        q: c.tile.q,
-        r: c.tile.r,
-      }));
       for (const key of allHexes) {
         const comma = key.indexOf(",");
         const q = parseInt(key.slice(0, comma), 10);
         const r = parseInt(key.slice(comma + 1), 10);
-        let bestOwner = 0;
-        let bestDist = Infinity;
-        for (const { ownerId: oid, q: cq, r: cr } of castleAxial) {
-          const dist = hexDistance({ q, r }, { q: cq, r: cr });
-          if (dist < bestDist || (dist === bestDist && oid < bestOwner)) {
-            bestDist = dist;
-            bestOwner = oid;
-          }
+        const winner = resolveControllingSettlement(owned, q, r, mapWidth, mapHeight);
+        if (winner && winner.ownerId !== null) {
+          partitionedCoords.get(winner.ownerId)?.push({ q, r, key });
         }
-        partitionedCoords.get(bestOwner)!.push({ q, r, key });
       }
     }
 

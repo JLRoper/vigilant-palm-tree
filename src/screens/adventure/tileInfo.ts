@@ -9,7 +9,7 @@ import type { Hero } from "../../entities/hero";
 import type { Castle } from "../../entities/settlement";
 import type { GameState, PlayerId } from "../../state/gameState";
 import type { CharterPhase } from "@heroes/contracts";
-import { controlRange, districtKey, isDistrictBlockedByHero, settlementRateRadius, platoonTroopTotal } from "@heroes/engine";
+import { districtKey, isDistrictBlockedByHero, resolveControllingSettlement, settlementRateRadius, platoonTroopTotal } from "@heroes/engine";
 import { colorForOwner } from "../../state/playerColors";
 import { isTileVisibleTo } from "../../render/fog";
 import { districtVariantForBuildings } from "../../render/scene/sceneBuilder/adventureScene";
@@ -176,20 +176,14 @@ function describeTerritory(
   q: number,
   r: number,
   fogged: boolean,
+  mapWidth: number,
+  mapHeight: number,
 ): TileInfo["territory"] {
-  if (fogged) return null;
-  let best: { castle: Castle; ownerId: PlayerId; dist: number } | null = null;
-  for (const c of castles) {
-    if (c.ownerId === null) continue;
-    const ownerId = c.ownerId;
-    const dist = hexDistance(c.tile, { q, r });
-    if (dist > controlRange(c.level)) continue;
-    if (!best || dist < best.dist || (dist === best.dist && ownerId < best.ownerId)) {
-      best = { castle: c, ownerId, dist };
-    }
+  const winner = resolveControllingSettlement(castles, q, r, mapWidth, mapHeight);
+  if (!winner || winner.ownerId === null || !visibleOrOwned(fogged, winner.ownerId, state.activePlayerId)) {
+    return null;
   }
-  if (!best) return null;
-  return { settlementName: best.castle.name, ownerName: playerName(state, best.ownerId) };
+  return { settlementName: winner.name, ownerName: playerName(state, winner.ownerId) };
 }
 
 export function describeTile(input: {
@@ -218,6 +212,6 @@ export function describeTile(input: {
     district: describeDistrict(state, castles, heroes, tile.q, tile.r, fogged, viewPlayerId),
     heroes: describeHeroes(state, heroes, tile.q, tile.r, fogged, viewPlayerId),
     charter: describeCharter(state, tile.q, tile.r, fogged),
-    territory: describeTerritory(state, castles, tile.q, tile.r, fogged),
+    territory: describeTerritory(state, castles, tile.q, tile.r, fogged, map.width, map.height),
   };
 }

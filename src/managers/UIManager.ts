@@ -407,7 +407,9 @@ export class UIManager {
         }
         state().replaceState(tc.getState());
         const castle = state().getSettlement(closedId);
-        if (castle) {
+        if (district) {
+          viewManager.centerOn(district.q, district.r);
+        } else if (castle) {
           viewManager.centerOn(castle.tile.q, castle.tile.r);
         }
         return written;

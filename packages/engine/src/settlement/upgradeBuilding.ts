@@ -28,9 +28,15 @@ export function startBuildingUpgrade(
   let totalWood = 0;
   let totalStone = 0;
   let maxDays = 0;
+  const seenKeys = new Set<string>();
 
   for (const req of requests) {
     const dCoord = req.district ?? district;
+    const refKey = `${dCoord ? `${dCoord.q},${dCoord.r}:` : "main:"}${req.gx},${req.gy},${req.kind}`;
+    if (seenKeys.has(refKey)) {
+      return { state, ok: false, reason: "duplicate_building_ref" };
+    }
+    seenKeys.add(refKey);
     const list = dCoord
       ? (s.districts?.[districtKey(dCoord.q, dCoord.r)]?.buildings ?? [])
       : s.buildings;
@@ -103,14 +109,21 @@ export function applyBuildingUpgrade(
       : s.buildings;
   let districts: Record<string, DistrictState> | undefined = s.districts;
   if (districts) {
+    const byDistrict = new Map<string, BuildingRef[]>();
     for (const r of refs) {
       const dCoord = r.district ?? district;
       if (!dCoord) continue;
       const key = districtKey(dCoord.q, dCoord.r);
+      const bucket = byDistrict.get(key);
+      if (bucket) bucket.push(r);
+      else byDistrict.set(key, [r]);
+    }
+    for (const [key, dRefs] of byDistrict) {
       const d: DistrictState | undefined = districts[key];
       if (!d) continue;
       const dBuildings: BuildingDef[] = d.buildings.map((b: BuildingDef) => {
-        if (b.gx !== r.gx || b.gy !== r.gy || b.kind !== r.kind || b.level >= 3) return b;
+        const match = dRefs.some((r) => r.gx === b.gx && r.gy === b.gy && r.kind === b.kind);
+        if (!match || b.level >= 3) return b;
         const newLevel = (b.level + 1) as 2 | 3;
         const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style);
         return { ...b, level: newLevel, style: newStyle };

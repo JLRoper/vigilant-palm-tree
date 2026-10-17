@@ -395,7 +395,7 @@ export class SettlementInfoMenu {
     this.nameEl.childNodes[0].textContent = settlement.name;
     this.levelBadge.textContent = `L${settlement.level}`;
     this.populationEl.textContent = settlement.population.toLocaleString();
-    this.incomeEl.textContent = `${effectiveSettlementIncome(settlement).toLocaleString()}g`;
+    this.incomeEl.textContent = `${effectiveSettlementIncome(settlement, state.heroes).toLocaleString()}g`;
     this.treasuryEl.textContent = `${settlement.gold}g`;
     this.updateTreasuryRow(settlement, state);
     this.moraleEl.textContent = `${Math.round(settlement.morale ?? 100)}%${settlement.autoTrade ? " · auto" : ""}`;
@@ -563,7 +563,9 @@ export class SettlementInfoMenu {
       const wrap = document.createElement("div");
       Object.assign(wrap.style, { marginBottom: "6px" });
 
-      const { row, value } = makeRow(`Bank L${bank.level}`);
+      const { row, value } = makeRow(
+        bank.district ? `Bank L${bank.level} (${bank.district.q}, ${bank.district.r})` : `Bank L${bank.level}`,
+      );
       wrap.appendChild(row);
 
       const pending = document.createElement("div");

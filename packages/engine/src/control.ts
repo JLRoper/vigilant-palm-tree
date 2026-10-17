@@ -35,6 +35,13 @@ export function resolveControllingSettlement<T extends ControllableSettlementLik
 ): T | undefined {
   if (q < 0 || r < 0 || q >= mapWidth || r >= mapHeight) return undefined;
   const list: T[] = isIterable(settlements) ? Array.from(settlements) : Object.values(settlements);
+  for (const s of list) {
+    const c = settlementCenter(s);
+    if (c && c.q === q && c.r === r) {
+      if (s.ownerId === null || s.ownerId === undefined) return undefined;
+      return s;
+    }
+  }
   const target: Axial = { q, r };
   const key = districtKey(q, r);
   const matching: Array<{ settlement: T; dist: number; hasDistrict: boolean }> = [];
@@ -60,9 +67,9 @@ export function resolveControllingSettlement<T extends ControllableSettlementLik
 
   pool.sort((a, b) => {
     if (a.dist !== b.dist) return a.dist - b.dist;
-    const idCmp = a.settlement.id.localeCompare(b.settlement.id);
-    if (idCmp !== 0) return idCmp;
-    return (a.settlement.ownerId ?? 0) - (b.settlement.ownerId ?? 0);
+    const ownerDiff = (a.settlement.ownerId ?? 0) - (b.settlement.ownerId ?? 0);
+    if (ownerDiff !== 0) return ownerDiff;
+    return a.settlement.id.localeCompare(b.settlement.id);
   });
 
   return pool[0].settlement;

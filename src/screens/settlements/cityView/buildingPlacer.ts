@@ -112,10 +112,6 @@ export class BuildingPlacer {
 
   confirmPlacement(): boolean {
     if (!this.active || !this.hoverCell || !this.valid) return false;
-    // A placement that would push the cart past affordability is rejected
-    // outright -- the server applies the same check and a rejected command
-    // would leave a building on screen that was never paid for.
-    if (!this.canAfford()) return false;
     const b: BuildingDef = {
       gx: this.hoverCell.gx,
       gy: this.hoverCell.gy,
@@ -129,7 +125,15 @@ export class BuildingPlacer {
       construction: { daysRemaining: buildingBuildDays(this.active) },
     };
     this.buildings.push(b);
+    // A placement that would push the cart past affordability is rejected
+    // outright -- the server applies the same check and a rejected command
+    // would leave a building on screen that was never paid for.
+    if (!this.canAfford()) {
+      this.buildings.pop();
+      return false;
+    }
     this.onPlaced?.();
+    this.renderPaletteBody();
     return true;
   }
 
