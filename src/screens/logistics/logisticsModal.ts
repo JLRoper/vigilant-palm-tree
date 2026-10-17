@@ -723,7 +723,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
 
     const hint = document.createElement("div");
     hint.textContent =
-      "Cargo caravans carry one resource (wagons\u00d750); treasure caravans carry gold (wagons\u00d7500). They walk 4 tiles/day, re-path daily to reach a moving hero endpoint, and wait (never lose cargo) when the destination is full. A route whose origin is lost or captured goes dormant: it bills nothing and never deserts, and resumes if you retake it. When a route's last wagon deserts, the route disbands and returns what fits at the origin — the rest is lost. Removing a route manually also loses its aboard cargo.";
+      "Cargo caravans carry one resource (wagons\u00d750); treasure caravans carry gold (wagons\u00d7500). They walk 7 tiles/day, re-path daily to reach a moving hero endpoint, and wait (never lose cargo) when the destination is full. A route whose origin is lost or captured goes dormant: it bills nothing and never deserts, and resumes if you retake it. When a route's last wagon deserts, the route disbands and returns what fits at the origin — the rest is lost. Removing a route manually also loses its aboard cargo.";
     hint.style.cssText = "font-size:10px;opacity:0.55;margin-top:10px;line-height:1.4;";
     modal.body.appendChild(hint);
   };

@@ -252,7 +252,7 @@ export function transferCargoLoot(
 
 // -- Trade routes (docs/wagons-stockpiles-trade-routes-plan.md §5.2) --------
 
-export const CARAVAN_TILES_PER_DAY = 4;
+export const CARAVAN_TILES_PER_DAY = 7;
 // Hero endpoints are moving targets: when a caravan's path is exhausted the
 // hero may have moved off that tile, and the caravan re-paths toward the
 // hero's current position. This cap bounds re-path attempts per daily

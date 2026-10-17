@@ -58,7 +58,7 @@ function firstPassablePair(map: GameMap): Array<{ q: number; r: number }> {
 }
 
 // A passable pair far enough apart (>= minDist) that a caravan departing the
-// origin is still mid-path after its first 4-tile daily wrap -- the fixture
+// origin cannot load and deliver within a single advance call -- the fixture
 // shape every catch-up/hero-death test needs, since an adjacent pair loads,
 // walks, and delivers within a single advance call.
 function reachableDistantPair(map: GameMap, minDist = 5): Array<{ q: number; r: number }> {
@@ -536,8 +536,8 @@ test("a hero destination that moves off the path's end is re-targeted before the
   const created = createTradeRoute(state, 0, settlementEndpoint("s0"), heroEndpoint("h0"), GOLD, 1);
   assert.equal(created.ok, true, created.reason);
 
-  // Wrap 1 loads at the origin; wrap 2 walks 4 tiles along the path, which
-  // still ends at the hero's tile at load.
+  // Wrap 1 loads at the origin; wrap 2 walks up to 7 tiles along the path,
+  // which still ends at the hero's tile at load (minDist 8 keeps it mid-path).
   let current = advanceTradeRoutes(created.state, map);
   current = advanceTradeRoutes(current, map);
   const departed = current.tradeRoutes![0].caravan!;
@@ -549,9 +549,11 @@ test("a hero destination that moves off the path's end is re-targeted before the
     "precondition: the stale path ends at the hero's old tile",
   );
 
-  // The hero teleports to a far passable tile the current path does not end at.
+  // The hero teleports to a far passable tile the current path does not end at,
+  // >= 8 hexes from the cart so the 7-tile daily budget cannot arrive (and
+  // flip the caravan homeward) this wrap.
   const cartTile = departed.path[departed.pathIndex - 1];
-  const c = farReachableTile(map, cartTile, b);
+  const c = farReachableTile(map, cartTile, b, 8);
   current = { ...current, heroes: { ...current.heroes, h0: { ...current.heroes.h0, q: c.q, r: c.r } } };
 
   // One daily advance: the cart re-targets toward the hero's CURRENT tile

@@ -141,7 +141,9 @@ async function seedScenario(name: string): Promise<{
   const settlementId = row.players.find((p) => p.id === 0)!.settlementIds[0];
   const origin = { q: row.settlements[settlementId].q, r: row.settlements[settlementId].r };
   const avoid = new Set(Object.values(row.settlements).map((s) => `${s.q},${s.r}`));
-  const heroStart = farPassable(await tilesOf(name), [origin], avoid, 6);
+  // >= 8 hexes out so the first 7-tile walk wrap cannot reach the hero: the
+  // caravan must be mid-path when the hero moves.
+  const heroStart = farPassable(await tilesOf(name), [origin], avoid, 8);
 
   const heroes = JSON.parse(JSON.stringify(row.heroes));
   Object.assign(heroes[heroId], {
@@ -169,8 +171,8 @@ async function seedScenario(name: string): Promise<{
 }
 
 // A passable, unoccupied tile the hero can actually reach this turn (within 7
-// hexes of its last persisted tile) but that the caravan cannot reach this
-// wrap (>= 5 hexes from the caravan's current tile), off every settlement.
+// hexes of its last persisted tile) but off every settlement and far enough
+// from the caravan that the re-targeted leg is at least one wrap long.
 function pickNewHeroTile(tiles: Tile[], heroTile: Axial, cartTile: Axial, occupied: Set<string>): Axial {
   const cands = tiles
     .filter((t) => !IMPASSABLE.has(t.terrain) && !occupied.has(`${t.q},${t.r}`))
@@ -271,8 +273,9 @@ async function main(): Promise<void> {
       assert.equal(row.trade_routes[0].caravan!.phase, "toDestination");
       assert.equal(row.trade_routes[0].caravan!.pathIndex, 0);
 
-      // Turn 2: the caravan walks up to 4 tiles toward the hero's OLD tile
-      // (the hero has not moved yet), landing mid-path.
+      // Turn 2: the caravan walks up to 7 tiles toward the hero's OLD tile
+      // (the hero has not moved yet), landing mid-path (the hero was seeded
+      // >= 8 hexes out, so the 7-tile budget cannot reach it).
       await endTurnAndWaitRound(page, name, 2);
       row = await serverRow(name);
       const mid = row.trade_routes[0].caravan!;
@@ -300,8 +303,11 @@ async function main(): Promise<void> {
       }
       assert(moved, "the hero move did not persist server-side");
 
-      // Turn 3: the caravan must re-target toward the hero's CURRENT tile
-      // (C), not finish the stale path to the tile the hero started the turn on.
+      // Turn 3: the caravan must head toward the hero's CURRENT tile (C),
+      // not finish the stale path to the tile the hero started the turn on.
+      // Two acceptable outcomes: still outbound with the path ending at C
+      // (the retargeted leg is longer than the daily budget), or it reached C
+      // and delivered there -- the toHome return leg then STARTS at C.
       await endTurnAndWaitRound(page, name, 3);
       const deadline = Date.now() + 20000;
       let after: GameRow | null = null;
@@ -311,25 +317,40 @@ async function main(): Promise<void> {
         const cv = r.trade_routes[0]?.caravan;
         if (cv && cv.path.length > 0) {
           const last = cv.path[cv.path.length - 1];
-          if (last.q === c.q && last.r === c.r) { after = r; break; }
+          const first = cv.path[0];
+          const endsAtC = last.q === c.q && last.r === c.r;
+          const startsAtC = first.q === c.q && first.r === c.r;
+          if ((cv.phase === "toDestination" && endsAtC) || (cv.phase === "toHome" && startsAtC)) {
+            after = r;
+            break;
+          }
         }
       }
-      assert(after, "the caravan path never re-targeted to the hero's current tile");
-      assert.equal(after!.trade_routes[0].caravan!.phase, "toDestination", "re-targeted path still outbound (no premature arrival)");
-      const pathEnd = after!.trade_routes[0].caravan!.path[after!.trade_routes[0].caravan!.path.length - 1];
-      assert.equal(`${pathEnd.q},${pathEnd.r}`, `${c.q},${c.r}`, "path end must be the hero's CURRENT tile");
-      assert.notEqual(`${pathEnd.q},${pathEnd.r}`, `${heroTile.q},${heroTile.r}`, "path end must not be the stale tile");
+      assert(after, "the caravan never headed toward the hero's current tile");
+      const cv = after!.trade_routes[0].caravan!;
+      if (cv.phase === "toDestination") {
+        const pathEnd = cv.path[cv.path.length - 1];
+        assert.equal(`${pathEnd.q},${pathEnd.r}`, `${c.q},${c.r}`, "outbound path end must be the hero's CURRENT tile");
+        assert.notEqual(`${pathEnd.q},${pathEnd.r}`, `${heroTile.q},${heroTile.r}`, "path end must not be the stale tile");
+      } else {
+        assert.equal(`${cv.path[0].q},${cv.path[0].r}`, `${c.q},${c.r}`, "the return leg starts at the hero's CURRENT tile (delivered there)");
+      }
       assert.equal(after!.heroes[heroId].q, c.q, "server hero must be at the moved tile");
 
       // The client adopted the same merged state.
       const cc = await clientCaravan(page);
       assert.equal(`${cc.heroQ},${cc.heroR}`, `${c.q},${c.r}`, "client hero position");
       assert(cc.caravan && cc.caravan.path.length > 0, "client caravan present");
-      const cEnd = cc.caravan.path[cc.caravan.path.length - 1];
-      assert.equal(`${cEnd.q},${cEnd.r}`, `${c.q},${c.r}`, "client path end must be the hero's current tile");
+      if (cc.caravan.phase === "toDestination") {
+        const cEnd = cc.caravan.path[cc.caravan.path.length - 1];
+        assert.equal(`${cEnd.q},${cEnd.r}`, `${c.q},${c.r}`, "client path end must be the hero's current tile");
+      } else {
+        const cStart = cc.caravan.path[0];
+        assert.equal(`${cStart.q},${cStart.r}`, `${c.q},${c.r}`, "client return leg starts at the hero's current tile");
+      }
 
-      assert.ok(hexDist(heroStart, origin) >= 6, "fixture sanity: hero started far enough for a mid-path caravan");
-      console.log(`>> caravan re-targeted to the hero's current tile (${c.q},${c.r}); delivered on path end=${pathEnd.q},${pathEnd.r}`);
+      assert.ok(hexDist(heroStart, origin) >= 8, "fixture sanity: hero started far enough for a mid-path caravan");
+      console.log(`>> caravan re-targeted to the hero's current tile (${c.q},${c.r})`);
       await page.close();
     } finally {
       await browser.close().catch(() => {});

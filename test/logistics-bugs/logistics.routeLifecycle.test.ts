@@ -62,8 +62,9 @@ function firstPassablePair(map: GameMap): Array<{ q: number; r: number }> {
   return out;
 }
 
-// A passable pair far enough apart (>= minDist) that a departing caravan is still mid-path
-// after its first 4-tile daily wrap (fixture shape copied from test/engine/logistics.test.ts).
+// A passable pair far enough apart (>= minDist) that a departing caravan cannot
+// load and deliver within a single advance call (fixture shape copied from
+// test/engine/logistics.test.ts).
 function reachableDistantPair(map: GameMap, minDist = 5): Array<{ q: number; r: number }> {
   const passable: Array<{ q: number; r: number }> = [];
   for (let r = 0; r < map.height; r++) {
