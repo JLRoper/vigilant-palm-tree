@@ -37,6 +37,12 @@ export interface RenderOptions {
   caravans?: readonly CaravanMarkerSpec[];
   /** Per non-own-hero fade alpha from the spotted tracker; an absent entry = 1. */
   heroAlpha?: Readonly<Record<string, number>>;
+  /** Uncharted fog mode: never-revealed tiles render fully opaque black instead of fog (absent = off). */
+  uncharted?: boolean;
+  /** Persisted per-player reveal ("q,r" keys) seeding the session reveal accumulator in uncharted mode. */
+  revealedTiles?: readonly string[];
+  /** Session-accumulator key for the per-game reveal set (the current game's name). */
+  gameName?: string;
 }
 
 /** One trade-route caravan pre-resolved to its current map tile, owning seat, and wagon count. A route whose caravan is still loading (null) never becomes a spec. */

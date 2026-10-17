@@ -11,6 +11,7 @@ export type NewGameHandler = (opts: {
   mapSize?: "small" | "medium" | "large" | "huge" | "epic";
   enemyCount?: 0 | 1 | 2 | 3;
   factionId?: FactionId;
+  uncharted?: boolean;
 }) => void | Promise<void>;
 
 export interface NewGameModalOptions {
@@ -222,6 +223,30 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
   content.appendChild(factionWrap);
   refreshFactions();
 
+  const unchartedLabel = document.createElement("label");
+  unchartedLabel.textContent = "Uncharted mode";
+  unchartedLabel.style.opacity = "0.7";
+  content.appendChild(unchartedLabel);
+
+  const unchartedWrap = document.createElement("label");
+  unchartedWrap.style.display = "flex";
+  unchartedWrap.style.alignItems = "center";
+  unchartedWrap.style.gap = "8px";
+  unchartedWrap.style.cursor = "pointer";
+  let uncharted = false;
+  const unchartedInput = document.createElement("input");
+  unchartedInput.type = "checkbox";
+  unchartedInput.addEventListener("change", () => {
+    uncharted = unchartedInput.checked;
+  });
+  unchartedWrap.appendChild(unchartedInput);
+  const unchartedHint = document.createElement("span");
+  unchartedHint.textContent = "Map starts hidden; explored tiles stay revealed";
+  unchartedHint.style.fontSize = "11px";
+  unchartedHint.style.opacity = "0.65";
+  unchartedWrap.appendChild(unchartedHint);
+  content.appendChild(unchartedWrap);
+
   const errorLine = document.createElement("div");
   Object.assign(errorLine.style, { ...menuTheme.error, minHeight: "14px", marginTop: "4px" });
   content.appendChild(errorLine);
@@ -278,7 +303,7 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
     cancel.disabled = true;
     errorLine.textContent = "Creating…";
     try {
-      await opts.onNew({ name, seed, castleSeed, castleCount, mapSize, enemyCount, factionId });
+      await opts.onNew({ name, seed, castleSeed, castleCount, mapSize, enemyCount, factionId, uncharted });
       modal.close();
     } catch (e) {
       confirm.disabled = false;

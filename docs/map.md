@@ -1,5 +1,7 @@
 # Map
 
+<!-- docs:verified 2026-10-17 -->
+
 The world the heroes move through. Hex grid, isometric rendering, procedurally generated.
 
 ## Status
@@ -110,6 +112,8 @@ Because the client only reads the table, all of these are server-only changes. N
 - **Settlement vision rings** — radius `controlRange(level)` around every castle (grows with settlement level).
 
 Non-visible hexes are covered with a semi-transparent fog overlay on the map and render black on the minimap. Resource deposits are hidden under fog too — the old "resource tiles stay always visible" v1 decision is superseded. Moving into fog is **allowed by design** (HoMM-style); path segments crossing fogged tiles draw brighter over a dark under-stroke so a planned move stays legible.
+
+**Uncharted mode (2026-10-17).** Games created with the New Game "Uncharted mode" toggle (`lobby.uncharted`) replace the two-state fog with **three visibility tiers**, maintained per player: **visible** (current hero/settlement vision rings), **revealed** (explored earlier, now shaded under the translucent fog overlay), and **uncharted** (never explored by that seat — painted fully opaque black, so the map reads as a hole rather than fog). Each player's reveal is the persisted `Player.revealedTiles` list (`"q,r"` keys, seeded at game creation from the seat's starting vision and merged server-side on moves, charter travel, captures, and end of turn), accumulated client-side per session by `src/render/reveal.ts` and rendered as the `unchartedHex` scene node; without the option, games keep the original two-state fog.
 
 **Unexplored tiles reveal no terrain info until seen** (locked decision, 2026-09-29 playtest fixes): the tile popup on a fogged tile shows coordinates + "Unexplored" only — `TileInfo.terrain` is null and the terrain/move-cost/deposit/settlement/heroes/charter/territory lines are all suppressed (`src/screens/adventure/tileInfo.ts`; the existing exception — tiles you own stay visible — is kept). Similarly, hover path previews (`AdventureView.updatePath()`) and click path/attack resolution (`resolveAdventureClick`) filter `occupiedHexes` and enemy targets through `computeVisionFromState` (`src/render/fog.ts`), so unseen fogged heroes never block path previews or leak an attack intent. The server-side `tiles` table still holds the full grid; the gate is a client presentation rule, not an information-model change.
 

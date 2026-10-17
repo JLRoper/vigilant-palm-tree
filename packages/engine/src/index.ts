@@ -25,6 +25,7 @@ export * from "./validation/gameIntegrity";
 export * from "./buildingRegistry";
 export * from "./buildingModifiers";
 export * from "./control";
+export * from "./reveal";
 export * from "./economy/income";
 export * from "./economy/consumption";
 export * from "./economy/troopUpkeep";

@@ -219,6 +219,54 @@ test("makeInitialStatePayload threads seatFactions the same way (the POST /games
   assert.equal(payload.players[1].factionId, "human");
 });
 
+test("uncharted mode seeds revealedTiles on human seats only, covering their spawn", () => {
+  const state = build({ enemyCount: 1, humanSeatCount: 2, uncharted: true });
+  assert.equal(state.players.length, 3);
+  for (let i = 0; i < 2; i++) {
+    const reveal = state.players[i].revealedTiles;
+    assert.ok(Array.isArray(reveal), `human seat ${i} has revealedTiles`);
+    assert.ok(reveal.length > 0, `human seat ${i} has a non-empty reveal`);
+    const hero = state.heroes[state.players[i].heroIds[0]];
+    assert.ok(reveal.includes(`${hero.q},${hero.r}`), "the starting hero's own tile is revealed");
+  }
+  assert.ok(!("revealedTiles" in state.players[2]), "AI seat keeps no key");
+});
+
+test("uncharted reveal is sorted numerically by q then r", () => {
+  const state = build({ enemyCount: 0, humanSeatCount: 1, uncharted: true });
+  const tiles = state.players[0].revealedTiles as string[];
+  const sorted = [...tiles].sort((a, b) => {
+    const [aq, ar] = a.split(",").map((s) => parseInt(s, 10));
+    const [bq, br] = b.split(",").map((s) => parseInt(s, 10));
+    return aq - bq || ar - br;
+  });
+  assert.deepEqual(tiles, sorted);
+  assert.equal(new Set(tiles).size, tiles.length, "no duplicate keys");
+});
+
+test("absent uncharted option keeps players byte-identical: no revealedTiles key anywhere", () => {
+  const legacy = build();
+  const withEmptyOpts = build({});
+  assert.deepEqual(withEmptyOpts, legacy);
+  for (const player of legacy.players) {
+    assert.ok(!("revealedTiles" in player), "legacy path must not add the key (deepStrictEqual rule)");
+  }
+});
+
+test("makeInitialStatePayload with uncharted seeds the same reveal as buildInitialGameState", () => {
+  const payload = makeInitialStatePayload(new GameMap(7, "small"), mulberry32(42), {
+    enemyCount: 2,
+    humanSeatCount: 1,
+    uncharted: true,
+  });
+  assert.ok(Array.isArray(payload.players[0].revealedTiles));
+  assert.ok(payload.players[0].revealedTiles.length > 0);
+  assert.ok(!("revealedTiles" in payload.players[1]), "AI seat in the POST /games payload keeps no key");
+  assert.ok(!("revealedTiles" in payload.players[2]));
+  const hero = payload.heroes["p0-hero"];
+  assert.ok(payload.players[0].revealedTiles.includes(`${hero.q},${hero.r}`));
+});
+
 test("every spawned hero across 1 human + 3 AI seats has a non-empty starter army", () => {
   const state = build({ enemyCount: 3, humanSeatCount: 1 });
   assert.equal(state.players.length, 4);

@@ -49,6 +49,8 @@ export type GameLobbyState = {
   // every pre-offer row simply lacks the key. Mirrors server LobbyState.
   pendingBattle?: { attackerId: string; defenderId: string; since: number } | null;
   mapGenVersion?: 1 | 2 | 3;
+  // Uncharted mode flag written at creation; absent on legacy games.
+  uncharted?: boolean;
 };
 
 export type Game = {
@@ -188,12 +190,13 @@ export const api = {
     humanSlots?: number,
     enemySlots: number = 0,
     seatFactions?: FactionId[],
+    uncharted?: boolean,
   ) => {
     console.log("[api] createGame mapSize:", mapSize);
     return fetchWithTimeout(`${BASE}/games`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize, humanSlots, enemySlots, seatFactions }),
+      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize, humanSlots, enemySlots, seatFactions, uncharted }),
     }).then((r) => json<Game>(r));
   },
   claimLobbySeat: (name: string, seat: number, handle: string) =>

@@ -15,7 +15,9 @@ import { notePersisted } from "../io/commands";
 import { setInMemoryLocalPlayerId } from "../players/localPlayer";
 import { getMultiplayerSync, getEntityMirror } from "../io/multiplayerSync";
 import { clearServerDriven, syncServerDrivenFromGame } from "../io/serverDrivenGames";
+import { setUncharted } from "../io/unchartedGames";
 import { getCachedAuth } from "../io/authStorage";
+import { resetReveal } from "../render/reveal";
 
 /**
  * Handles game session lifecycle: loading, creating, and saving games.
@@ -47,6 +49,7 @@ export class GameSessionManager {
   async loadGame(loaded: Game): Promise<void> {
     this.session.adopt(loaded);
     notePersisted(loaded.updated_at);
+    resetReveal();
     const resolvedSize = resolveMapSize(loaded.map_size);
     const map = getOrCreateGameMap(loaded.seed, resolvedSize, resolveSavedMapGenVersion(loaded.lobby?.mapGenVersion));
     // Server-driven flag (plan/2026-09-30-server-side-ai-actor.md D8): every
@@ -57,6 +60,7 @@ export class GameSessionManager {
       clearServerDriven(this.currentGameName);
     }
     syncServerDrivenFromGame(loaded);
+    setUncharted(loaded.name, loaded.lobby?.uncharted === true);
     this.syncMetadata(loaded.name, loaded.seed, resolvedSize);
     this.setGameMap(map);
     this.state.setGameMap(map);
@@ -95,7 +99,8 @@ export class GameSessionManager {
     }
   }
 
-  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" | "huge" | "epic"; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number; enemyCount?: number; factionId?: FactionId }): Promise<void> {
+  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" | "huge" | "epic"; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number; enemyCount?: number; factionId?: FactionId; uncharted?: boolean }): Promise<void> {
+    const uncharted = opts.uncharted === true;
     const effectiveCastleSeed =
       typeof opts.castleSeed === "number" && Number.isFinite(opts.castleSeed)
         ? opts.castleSeed
@@ -124,7 +129,7 @@ export class GameSessionManager {
     const enemyPositions = aiCastles.length
       ? aiCastles.map((c) => ({ q: c.tile.q, r: c.tile.r }))
       : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
-    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount, enemyCount, seatFactions);
+    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount, enemyCount, seatFactions, uncharted);
     // Issue #179: same self-claim as createFreshStarter() below -- the "New
     // Game" toolbar flow loads straight into the game rather than routing
     // through the multiplayer lobby UI. Claiming is optional (sign-in is

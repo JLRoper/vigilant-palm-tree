@@ -33,6 +33,8 @@ import { MAX_PLAYERS, PLAYER_COLORS } from "./playerColors";
 import { cityViewSizeFor, foodBiasForTerrain, generateCitySpots } from "./settlement/citySpots";
 import { buildStarterLayout, heroFoodPerTurn, starterFarmsNeeded } from "./settlement/starterLayout";
 import { VALID_HORSE_VARIANTS } from "./horseVariants";
+import { HERO_VISION_RANGE, sortedRevealKeys, visionKeysAroundPoints } from "./reveal";
+import { controlRange } from "./control";
 
 const DEFAULT_PLAYER_COUNT = 3;
 const MAX_PLAYER_COUNT = MAX_PLAYERS;
@@ -67,6 +69,13 @@ export interface BuildInitialOptions {
    * count are never read, which is the clamp.
    */
   seatFactions?: FactionId[];
+  /**
+   * "Uncharted mode": when true, stamp each HUMAN seat's starting reveal
+   * (`revealedTiles`) at creation from that seat's own heroes (radius
+   * HERO_VISION_RANGE) and owned settlements (radius controlRange). Absent or
+   * false keeps the legacy path byte-identical (no key anywhere).
+   */
+  uncharted?: boolean;
 }
 
 function clampPlayerCount(n: number | undefined): number {
@@ -227,6 +236,42 @@ function makePlayers(
       ...(factionId !== undefined ? { factionId } : {}),
     });  }
   return out;
+}
+
+/**
+ * "Uncharted mode" creation-time reveal: for every HUMAN seat (i <
+ * humanSeatCount, matching makePlayers), stamp the sorted union of that seat's
+ * own vision -- hero rings (HERO_VISION_RANGE) plus owned settlement rings
+ * (controlRange). AI seats keep no key (their reveal is never rendered or
+ * maintained). Deliberately rng-free so it can run after makeHeroes/
+ * makeSettlements without shifting the draw stream.
+ */
+function seedInitialReveal(
+  players: Player[],
+  heroes: HeroState[],
+  settlements: SettlementState[],
+  humanSeatCount: number,
+): Player[] {
+  return players.map((player, i) => {
+    if (i >= humanSeatCount) return player;
+    const keys = new Set<string>();
+    for (const hero of heroes) {
+      if (hero.ownerId !== player.id) continue;
+      for (const key of visionKeysAroundPoints([{ q: hero.q, r: hero.r }], HERO_VISION_RANGE)) {
+        keys.add(key);
+      }
+    }
+    for (const settlement of settlements) {
+      if (settlement.ownerId !== player.id) continue;
+      for (const key of visionKeysAroundPoints(
+        [{ q: settlement.q, r: settlement.r }],
+        controlRange(settlement.level, settlement.buildings),
+      )) {
+        keys.add(key);
+      }
+    }
+    return { ...player, revealedTiles: sortedRevealKeys(keys) };
+  });
 }
 
 /**
@@ -447,9 +492,11 @@ export function buildInitialGameState(
 
   const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes);
   const settlementIds = splitByOwner(settlements);
+  const players = makePlayers(settlementIds, playerCount, humanSeatCount, opts?.seatFactions);
+  const heroes = makeHeroes(castles, playerCount, rng, humanSeatCount);
   return createInitialState({
-    seedPlayers: makePlayers(settlementIds, playerCount, humanSeatCount, opts?.seatFactions),
-    seedHeroes: makeHeroes(castles, playerCount, rng, humanSeatCount),
+    seedPlayers: opts?.uncharted === true ? seedInitialReveal(players, heroes, settlements, humanSeatCount) : players,
+    seedHeroes: heroes,
     seedSettlements: settlements,
     seedRound: 1,
     seedActivePlayerId: 0,
@@ -487,11 +534,13 @@ export function makeInitialStatePayload(
   const settlementIds = splitByOwner(settlements);
   const players = makePlayers(settlementIds, playerCount, humanSeatCount, opts?.seatFactions);
   const heroes = makeHeroes(castles, playerCount, rng, humanSeatCount);
+  const seededPlayers =
+    opts?.uncharted === true ? seedInitialReveal(players, heroes, settlements, humanSeatCount) : players;
   return {
     round: 1,
     day: 1,
     active_player_id: 0,
-    players,
+    players: seededPlayers,
     heroes: Object.fromEntries(heroes.map((h) => [h.id, h])),
     settlements: Object.fromEntries(settlements.map((s) => [s.id, s])),
   };

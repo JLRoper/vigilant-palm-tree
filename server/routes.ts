@@ -118,6 +118,10 @@ export interface LobbyState {
   // opt-IN for the legacy behaviour), so their food logistics go through the
   // caravan recommender (economy/tradeNeeds.ts) instead of the teleport.
   legacyAutoTrade?: boolean;
+  // Uncharted mode (fog from the start): same lobby-only flag pattern as
+  // legacyAutoTrade. Written on every new game (explicit boolean), read by
+  // server/app/commandHandler.ts to gate per-command reveal merging.
+  uncharted?: boolean;
   mapGenVersion?: 1 | 2 | 3;
 }
 
@@ -406,6 +410,7 @@ router.post("/games", async (req, res) => {
       humanSlots,
       enemySlots,
       legacyAutoTrade: legacyAutoTradeOptIn,
+      uncharted,
       seatFactions,
     } = req.body ?? {};
     if (typeof name !== "string" || !name) {
@@ -461,6 +466,7 @@ router.post("/games", async (req, res) => {
     const initOpts = {
       ...initOptsBase,
       unitTypes: initUnitTypes,
+      uncharted: uncharted === true,
       ...(seatFactionsSafe ? { seatFactions: seatFactionsSafe } : {}),
     };
     const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179), initOpts);
@@ -472,12 +478,16 @@ router.post("/games", async (req, res) => {
       // behaviour. Non-boolean junk reads as the default (false).
       legacyAutoTrade: legacyAutoTradeOptIn === true,
       mapGenVersion: 3,
+      uncharted: uncharted === true,
     };
     const explicitSeats =
       lobbyObj && Number.isInteger(lobbyObj.seats) ? (lobbyObj.seats as number) : null;
     const seats = explicitSeats ?? (humanCount !== null ? humanCount : null);
     if (seats !== null && seats >= 1 && humanCount !== null && humanCount >= 1 && humanCount <= seats) {
-      lobbyState = { seats, humanSlots: humanCount, claimed: {}, mapGenVersion: 3 };
+      // The uncharted flag rides the same lobby jsonb as legacyAutoTrade; this
+      // rebuild (humanSlots path) must carry it or a humanSlots game's flag
+      // would be silently dropped on the way to the insert.
+      lobbyState = { seats, humanSlots: humanCount, claimed: {}, mapGenVersion: 3, uncharted: uncharted === true };
     }
     if (lobbyState.humanSlots !== undefined && lobbyState.humanSlots < 1) {
       res.status(400).json({ error: "humanSlots must be >= 1" });

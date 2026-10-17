@@ -15,6 +15,7 @@ export type SceneNode =
   | TerrainHexNode
   | TerrainDecorationNode
   | FogHexNode
+  | UnchartedHexNode
   | ResourceIconNode
   | CharterOverlayNode
   | ValidCharterHexNode
@@ -62,6 +63,13 @@ export interface TerrainDecorationNode {
 
 export interface FogHexNode {
   kind: "fogHex";
+  q: number;
+  r: number;
+  world: WorldPoint;
+}
+
+export interface UnchartedHexNode {
+  kind: "unchartedHex";
   q: number;
   r: number;
   world: WorldPoint;

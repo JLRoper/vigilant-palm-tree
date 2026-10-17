@@ -3,6 +3,7 @@ import { Camera } from "./camera";
 import { GameMap } from "../map/gameMap";
 import { SpriteProvider } from "./assets";
 import { computeVision, isVisible } from "./fog";
+import { revealTilesFor } from "./reveal";
 import { heroFadeAlpha, observeHeroSightings, pruneHeroSightings } from "./heroSpotted";
 import { MinimapCamera } from "./minimapCamera";
 import { drawMinimap } from "./minimap";
@@ -55,6 +56,9 @@ export class MapRenderer {
     const heroes = this.mirror.getHeroes();
     const castles = this.mirror.getSettlements();
     const visible = computeVision(heroes, castles, opts.viewPlayerId);
+    const revealed: ReadonlySet<string> | null = opts.uncharted
+      ? revealTilesFor(opts.gameName ?? "", opts.revealedTiles ?? [], visible)
+      : null;
     const nowMs = performance.now();
     const sighted: string[] = [];
     for (const h of heroes) {
@@ -83,6 +87,7 @@ export class MapRenderer {
       hover,
       opts: { ...opts, heroAlpha },
       visible,
+      revealed,
       viewportBounds,
     });
 
@@ -94,7 +99,7 @@ export class MapRenderer {
     // The minimap is a self-contained secondary view drawn outside the camera
     // transform; the scene graph models no minimap node kinds, so it stays a
     // direct call. See plan/2026-08-19-phase5-final-renderer-rewrite.md §7.
-    drawMinimap(ctx, this.map, this.camera, this.minimapCamera, heroes, path, opts, visible);
+    drawMinimap(ctx, this.map, this.camera, this.minimapCamera, heroes, path, opts, visible, revealed);
   }
 
   hoverFromScreen(sx: number, sy: number): Axial | null {

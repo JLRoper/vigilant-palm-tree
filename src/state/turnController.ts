@@ -64,6 +64,7 @@ export interface TurnControllerHooks {
     heroId: HeroId,
     toTile: { q: number; r: number },
     cost: number,
+    trailExtension?: { q: number; r: number }[],
   ): Promise<void>;
   onBattleResolved(state: GameState): Promise<{ state: GameState; battle: BattleResult | null }>;
   pickAiMove(
@@ -456,7 +457,7 @@ export class TurnController {
     // CaptureSettlement precondition (hero standing on the settlement) only
     // holds server-side once this MoveHero/SpendMovement has landed.
     this.lastMovePersist = this.trackCommand(
-      this.hooks.onHumanMove(this.state, heroId, toTile, cost),
+      this.hooks.onHumanMove(this.state, heroId, toTile, cost, trailExtension),
       "onHumanMove",
     );
     this.tryCaptureAt(heroId, toTile.q, toTile.r);

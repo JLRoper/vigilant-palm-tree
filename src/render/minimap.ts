@@ -52,6 +52,29 @@ function computeVisionHash(visible: Set<string>): string {
   return `${visible.size}:${xor >>> 0}:${sum >>> 0}`;
 }
 
+// Order-independent digest of the reveal set for the static-layer cache key:
+// each key's FNV-1a hash is folded into three 32-bit words using only
+// commutative operators (XOR and add), so Set insertion order can't change the
+// signature. Three words drop the collision probability far below a single
+// additive fold; null stays distinct ("-") from a real empty set ("0:0:0:0").
+function revealSignature(revealed: ReadonlySet<string> | null): string {
+  if (revealed === null) return "-";
+  let a = 0x9e3779b9;
+  let b = 0x85ebca6b;
+  let c = 0xc2b2ae35;
+  for (const key of revealed) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < key.length; i++) {
+      h ^= key.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    a ^= h;
+    b = (b + h) | 0;
+    c ^= (h << 13) | (h >>> 19);
+  }
+  return `${revealed.size}:${(a >>> 0).toString(16)}:${(b >>> 0).toString(16)}:${(c >>> 0).toString(16)}`;
+}
+
 interface MinimapRenderOptions {
   viewPlayerId: number;
   colorForOwner: (ownerId: number | null) => string;
@@ -242,6 +265,7 @@ function renderStaticMinimapLayer(
   cellSize: number,
   half: number,
   visible: Set<string>,
+  revealed: ReadonlySet<string> | null,
 ): void {
   targetCtx.fillStyle = "rgba(0,0,0,0.6)";
   targetCtx.fillRect(boxX, boxY, boxW, boxH);
@@ -269,13 +293,18 @@ function renderStaticMinimapLayer(
       const cellX = x - half;
       const cellY = y - half;
       const canSee = isVisible(visible, q, r);
+      const uncharted = !canSee && revealed !== null && !revealed.has(`${q},${r}`);
       const edgeOfVision = canSee && isVisionEdge(visible, q, r);
 
-      targetCtx.fillStyle = canSee ? TERRAIN_COLORS[t].fill : "rgba(12,18,24,0.92)";
+      targetCtx.fillStyle = canSee
+        ? TERRAIN_COLORS[t].fill
+        : uncharted
+          ? "rgba(0,0,0,1)"
+          : "rgba(12,18,24,0.92)";
       targetCtx.fillRect(cellX, cellY, cellSize + 0.5, cellSize + 0.5);
 
       if (!canSee) {
-        drawMistCell(targetCtx, cellX, cellY, cellSize + 0.5, q, r, 1.22);
+        if (!uncharted) drawMistCell(targetCtx, cellX, cellY, cellSize + 0.5, q, r, 1.22);
       } else if (edgeOfVision) {
         drawMistCell(targetCtx, cellX, cellY, cellSize + 0.5, q, r, 0.14);
       }
@@ -317,6 +346,7 @@ export function drawMinimap(
   path: Axial[],
   opts: MinimapRenderOptions,
   visible: Set<string>,
+  revealed: ReadonlySet<string> | null = null,
 ): void {
   const geo = getMinimapGeometry(map);
   const boxX = geo.x0 - 4;
@@ -337,7 +367,7 @@ export function drawMinimap(
   let usedCache = false;
 
   if (typeof document !== "undefined") {
-    const cacheKey = `${map.width}x${map.height}:${boxX},${boxY},${boxW}x${boxH}:${dpr}:${minimapCamera.zoom}:${minimapCamera.panQ}:${minimapCamera.panR}:${minimapCamera.rotation}:${computeVisionHash(visible)}`;
+    const cacheKey = `${map.width}x${map.height}:${boxX},${boxY},${boxW}x${boxH}:${dpr}:${minimapCamera.zoom}:${minimapCamera.panQ}:${minimapCamera.panR}:${minimapCamera.rotation}:${computeVisionHash(visible)}:${revealSignature(revealed)}`;
     if (!staticLayerCache || staticLayerCache.map !== map || staticLayerCache.key !== cacheKey) {
       const canvas = staticLayerCache?.canvas ?? document.createElement("canvas");
       if (canvas.width !== pixelW || canvas.height !== pixelH) {
@@ -349,7 +379,7 @@ export function drawMinimap(
         offCtx.setTransform(1, 0, 0, 1, 0, 0);
         offCtx.clearRect(0, 0, pixelW, pixelH);
         offCtx.setTransform(dpr, 0, 0, dpr, -boxX * dpr, -boxY * dpr);
-        renderStaticMinimapLayer(offCtx, map, minimapCamera, geo, boxX, boxY, boxW, boxH, cellSize, half, visible);
+        renderStaticMinimapLayer(offCtx, map, minimapCamera, geo, boxX, boxY, boxW, boxH, cellSize, half, visible, revealed);
         staticLayerCache = { canvas, map, key: cacheKey };
       } else {
         staticLayerCache = null;
@@ -362,7 +392,7 @@ export function drawMinimap(
   }
 
   if (!usedCache) {
-    renderStaticMinimapLayer(ctx, map, minimapCamera, geo, boxX, boxY, boxW, boxH, cellSize, half, visible);
+    renderStaticMinimapLayer(ctx, map, minimapCamera, geo, boxX, boxY, boxW, boxH, cellSize, half, visible, revealed);
   }
 
   ctx.save();

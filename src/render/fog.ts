@@ -2,9 +2,9 @@ import type { Hero } from "../entities/hero";
 import type { Castle } from "../entities/settlement";
 import type { GameState } from "../state/gameState";
 import { hexDistance, type Axial } from "../core/hex";
-import { controlRange } from "@heroes/engine";
+import { controlRange, HERO_VISION_RANGE } from "@heroes/engine";
 
-export const VISION_RANGE = 4;
+export const VISION_RANGE = HERO_VISION_RANGE;
 
 const VISION_GRID_OFFSET = 32;
 const VISION_GRID_STRIDE = 256;

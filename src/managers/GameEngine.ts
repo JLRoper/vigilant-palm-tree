@@ -24,6 +24,7 @@ import { setViewSeat } from "../state/viewSeat";
 import { settings, subscribeSettings } from "../state/settings";
 import { createFrameErrorLog } from "../core/frameErrors";
 import { shouldDriveAi } from "../io/serverDrivenGames";
+import { isUnchartedGame } from "../io/unchartedGames";
 import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
 import { attachAiThinkingHint } from "@screens/shared/aiThinkingHint";
@@ -479,6 +480,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     }
     const selectedHero = gs.selectedHeroId ? gs.heroes[gs.selectedHeroId] : null;
     const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
+    const gameName = this.session.getActiveGameName() ?? "";
     this.view.draw(
       this.view.getHover(),
       this.view.getPath(),
@@ -491,6 +493,9 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
         pathOrigin: this.state.getPathOrigin() ?? undefined,
         selectedHeroTile: selectedHero ? { q: selectedHero.q, r: selectedHero.r } : undefined,
         inspectedTile: this.view.getInspectedTile() ?? undefined,
+        gameName,
+        uncharted: isUnchartedGame(gameName),
+        revealedTiles: gs.players[localId]?.revealedTiles ?? [],
       },
       gs.activeCharters,
       this.validCharterHexes,

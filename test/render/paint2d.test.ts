@@ -13,6 +13,7 @@ import {
   paintTerrainHex,
   paintTerrainDecoration,
   paintFogHex,
+  paintUnchartedHex,
   paintHoverHighlight,
   paintResourceIcon,
   paintCastle,
@@ -61,6 +62,7 @@ test("paintScene: every node kind emits canvas calls (stubs are gone)", () => {
     { kind: "terrainHex", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "grass" },
     { kind: "terrainDecoration", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "forest" },
     { kind: "fogHex", q: 0, r: 0, world: { x: 0, y: 0 } },
+    { kind: "unchartedHex", q: 0, r: 0, world: { x: 0, y: 0 } },
     { kind: "hoverHighlight", q: 0, r: 0, world: { x: 0, y: 0 } },
     { kind: "resourceIcon", q: 0, r: 0, world: { x: 0, y: 0 }, resource: "gold" },
     { kind: "charterOverlay", q: 0, r: 0, world: { x: 0, y: 0 }, phase: "traveling" },
@@ -242,6 +244,19 @@ test("paintFogHex: emits the live fog rgba fill + a stroke", () => {
   assert.equal(stroke?.args[0], "rgba(8, 10, 16, 0.55)", "fog edge must match the live rgba(8,10,16,0.55)");
   assert.ok(calls.some((c) => c.name === "fill"), "fog should fill");
   assert.ok(calls.some((c) => c.name === "stroke"), "fog should stroke");
+});
+
+test("paintUnchartedHex: emits the opaque black fill (never dims through terrain) + a legibility stroke", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintUnchartedHex(ctx, { kind: "unchartedHex", q: 0, r: 0, world: { x: 0, y: 0 } }, makeNoopPaint2DDep());
+  const fill = calls.find((c) => c.name === "set:fillStyle");
+  assert.equal(fill?.args[0], "#000000", "uncharted tiles are fully opaque black, unlike fog's dim rgba");
+  const stroke = calls.find((c) => c.name === "set:strokeStyle");
+  assert.equal(stroke?.args[0], "rgba(28, 32, 40, 0.9)", "unlit hex edges stay legible on the #0a0a0a background");
+  const lineWidth = calls.find((c) => c.name === "set:lineWidth");
+  assert.deepEqual(lineWidth?.args, [1], "1px stroke like the fog hex");
+  assert.ok(calls.some((c) => c.name === "fill"), "uncharted should fill");
+  assert.ok(calls.some((c) => c.name === "stroke"), "uncharted should stroke");
 });
 
 test("paintHoverHighlight: emits hexPath + 2px stroke in the live #ffcc00 (de-emphasized from 3px, F7c)", () => {

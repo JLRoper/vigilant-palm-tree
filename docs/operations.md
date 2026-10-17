@@ -19,7 +19,7 @@ This guide covers local development and deployment. See [`AGENTS.md`](../AGENTS.
 - `npm run test:all` runs the browser/e2e suites through `tools/run-test.mjs all`, followed by unit tests.
 - `npm run docs:check` checks maintained Markdown links/source paths (always) and `docs:verified` freshness markers (full mode for all docs; `--changed <path>` / `--changed-from <git-spec>` scope freshness to the docs owning the changed files, per the `DOC_OWNERSHIP` globs in `tools/docs-check.mjs`) without connecting to the database.
 
-The browser suite includes smoke, multiplayer, city view, settlements, AI defender, AI charter, log panel, and visual regression. Avoid `npm run test:all` when another coordinated session is exercising the shared database.
+The browser suite includes smoke, multiplayer, city view, settlements, AI defender, AI charter, log panel, uncharted mode, and visual regression. Avoid `npm run test:all` when another coordinated session is exercising the shared database.
 
 ## AI Driver and Multiplayer
 
