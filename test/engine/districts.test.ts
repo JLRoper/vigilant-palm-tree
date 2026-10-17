@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { BuildingDef, DistrictState, GameState, SettlementState } from "@heroes/contracts";
+import { registerHooks } from "node:module";
+import type { BuildingDef, CastleVariant, DistrictState, GameState, SettlementState } from "@heroes/contracts";
 import {
   BANK_WITHDRAWAL_DAYS,
   accrueBankInterest,
@@ -38,8 +39,11 @@ import { parseCommand } from "../../server/http/routes/commands";
 import { Hero } from "../../src/entities/hero";
 import { Castle } from "../../src/entities/settlement";
 import { GameMap, type TileRow } from "../../src/map/gameMap";
-import { buildAdventureScene } from "../../src/render/scene/sceneBuilder/adventureScene";
-import type { DistrictNode } from "../../src/render/scene/types";
+import {
+  buildAdventureScene,
+  settlementFullnessForCount,
+} from "../../src/render/scene/sceneBuilder/adventureScene";
+import type { CastleNode, DistrictNode } from "../../src/render/scene/types";
 import { describeTile } from "../../src/screens/adventure/tileInfo";
 import {
   buildEntryStatus,
@@ -1078,4 +1082,111 @@ test("describeTile: territory aligns to controlRange(c.level) and reports info.d
   assert.ok(dist2Info);
   assert.equal(dist2Info.fogged, false);
   assert.equal(dist2Info.territory, null, "describeTile territory aligns to controlRange(c.level)");
+});
+
+test("settlementFullnessForCount, castleKey fullness variants, and buildAdventureScene CastleNode fullness", async () => {
+  for (const count of [0, 1, 2, 3]) {
+    assert.equal(settlementFullnessForCount(count), 1, `count=${count} -> fullness 1`);
+  }
+  for (const count of [4, 5, 6]) {
+    assert.equal(settlementFullnessForCount(count), 2, `count=${count} -> fullness 2`);
+  }
+  for (const count of [7, 8, 9]) {
+    assert.equal(settlementFullnessForCount(count), 3, `count=${count} -> fullness 3`);
+  }
+  for (const count of [10, 11, 12]) {
+    assert.equal(settlementFullnessForCount(count), 4, `count=${count} -> fullness 4`);
+  }
+  for (const count of [13, 14, 20, 25]) {
+    assert.equal(settlementFullnessForCount(count), 5, `count=${count} -> fullness 5`);
+  }
+
+  const hooks = registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (specifier.endsWith(".png?url")) {
+        return {
+          url: `data:text/javascript,export default ${JSON.stringify(specifier)};`,
+          shortCircuit: true,
+        };
+      }
+      return nextResolve(specifier, context);
+    },
+    load(url, context, nextLoad) {
+      const res = nextLoad(url, context);
+      if (url.endsWith("/src/render/assetDescriptors.ts") && typeof res.source === "string") {
+        const globStub =
+          'import.meta.glob ??= (p) => p.includes("building-pixel-") ? Object.fromEntries(Object.values(BUILDING_SPRITE_FILES).map((f) => ["../resources/buildings/" + f, { default: f }])) : {};\n';
+        return { ...res, source: globStub + res.source };
+      }
+      return res;
+    },
+  });
+
+  try {
+    const { castleKey, SETTLEMENT_L1_FULLNESS_DESCRIPTORS, type: _t } = await import(
+      "../../src/render/assetDescriptors"
+    ) as typeof import("../../src/render/assetDescriptors") & { type?: never };
+    void _t;
+
+    const variants: readonly CastleVariant[] = [0, 1, 2, 3];
+    const fullnesses = [1, 2, 3, 4, 5] as const;
+    for (const v of variants) {
+      for (const f of fullnesses) {
+        assert.equal(castleKey(1, v, f), `castle.1.v${v}.f${f}`);
+      }
+    }
+    assert.equal(castleKey(1, undefined, 3), "castle.1.v0.f3");
+    assert.equal(castleKey(1, 0), "castle.1");
+    assert.equal(castleKey(1, 1), "castle-alt.1");
+    assert.equal(castleKey(1, 2), "castle-alt2.1");
+    assert.equal(castleKey(1, 3), "castle-alt3.1");
+    assert.equal(castleKey(2, 0, 4), "castle.2");
+    assert.equal(castleKey(3, 1, 5), "castle-alt.3");
+    assert.equal(SETTLEMENT_L1_FULLNESS_DESCRIPTORS.length, 20);
+  } finally {
+    hooks.deregister();
+  }
+
+  const map = makeGrassMap(6, 6);
+  const cEmpty = Castle.fromGameState(
+    makeSettlement("sEmpty", 0, 1, 1, { level: 1, buildings: [] }),
+  );
+  const cL1Populated = Castle.fromGameState({
+    ...makeSettlement("sL1", 0, 2, 2, {
+      level: 1,
+      buildings: Array.from({ length: 7 }, (_, i) => makeBuilding("house", i % 5, Math.floor(i / 5))),
+    }),
+    castleVariant: 2,
+  });
+  const cL2Populated = Castle.fromGameState(
+    makeSettlement("sL2", 0, 4, 4, {
+      level: 2,
+      buildings: Array.from({ length: 10 }, (_, i) => makeBuilding("house", i % 5, Math.floor(i / 5))),
+    }),
+  );
+
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [cEmpty, cL1Populated, cL2Populated],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const castleNodes = nodes.filter((n): n is CastleNode => n.kind === "castle");
+  const byId = new Map(castleNodes.map((n) => [n.settlementId, n]));
+
+  const emptyNode = byId.get("sEmpty");
+  assert.ok(emptyNode);
+  assert.equal("fullness" in emptyNode, false, "empty L1 settlement omits fullness");
+
+  const l1Node = byId.get("sL1");
+  assert.ok(l1Node);
+  assert.equal(l1Node.variant, 2);
+  assert.equal(l1Node.fullness, 3, "L1 settlement with 7 buildings emits fullness 3");
+
+  const l2Node = byId.get("sL2");
+  assert.ok(l2Node);
+  assert.equal("fullness" in l2Node, false, "L2 settlement omits fullness");
 });

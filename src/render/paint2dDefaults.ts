@@ -48,6 +48,7 @@ import {
   unitArenaKey,
   type DistrictTier,
   type DistrictVariant,
+  type SettlementFullness,
   type SpriteKey,
   type UnitArenaPose,
 } from "./assetDescriptors";
@@ -171,8 +172,9 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
     resolveSpriteForCastle(
       level: CastleLevel,
       variant: CastleVariant,
+      fullness?: SettlementFullness,
     ): ResolvedSprite | undefined {
-      const key = castleKey(level, variant) as SpriteKey;
+      const key = castleKey(level, variant, level === 1 ? (fullness ?? 1) : undefined) as SpriteKey;
       return narrowResolvedSprite(provider.resolve(key));
     },
     resolveSpriteForUnit(unitTypeId: string, pose: UnitArenaPose): ResolvedSprite | undefined {

@@ -451,7 +451,7 @@ export function paintResourceIcon(ctx: CanvasRenderingContext2D, node: ResourceI
 }
 
 export function paintCastle(ctx: CanvasRenderingContext2D, node: CastleNode, deps: Paint2DDep): void {
-  const r = deps.sprite.resolveSpriteForCastle(node.level, node.variant);
+  const r = deps.sprite.resolveSpriteForCastle(node.level, node.variant, node.fullness);
   if (r && r.ready) {
     drawWithDescriptor(ctx, r.drawable, r.descriptor, node.world.x, node.world.y, HEX_SIZE);
   }

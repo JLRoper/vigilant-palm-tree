@@ -14,7 +14,7 @@
 
 ## Boundary
 
-The painter takes its external dependencies as `Paint2DDep` props from `deps.ts`: per-kind sprite resolvers for resources, heroes, buildings, castles, districts, and units; color/style getters; owner colors; and a `SkyboxProvider`. It does not import `assetDescriptors.ts`, `assets.ts`, `sprites.ts`, `cityRenderer.ts`, or game settings as runtime values. `paint2dDefaults.ts` is the adapter to those browser/Vite modules.
+The painter takes its external dependencies as `Paint2DDep` props from `deps.ts`: per-kind sprite resolvers for resources, heroes, buildings, castles, districts, and units; color/style getters; owner colors; and a `SkyboxProvider`. It does not import `assetDescriptors.ts`, `assets.ts`, `sprites.ts`, `cityRenderer.ts`, or game settings as runtime values. `paint2dDefaults.ts` is the adapter to those browser/Vite modules. For level-1 castles, `resolveSpriteForCastle(level, variant, fullness?)` resolves `castle.1.v${variant}.f${fullness ?? 1}` against the 20 Tier 1 settlement sprites in `src/resources/settlements/` (`settlement-l1-v{0..3}-f{1..5}.png`), where `CastleNode.fullness` is derived in `src/render/scene/sceneBuilder/adventureScene.ts` via `settlementFullnessForCount(count)` (Fullness 1: 0–3 buildings, Fullness 2: 4–6, Fullness 3: 7–9, Fullness 4: 10–12, Fullness 5: 13+).
 
 Pure painter helpers are kept in `colors.ts` and `geometry.ts`. `index.ts` owns per-kind rendering, including city cells, resource spots, mines, pixel buildings, selection rings, and ghosts. Draw order is the builder's responsibility. Territory-edge runs and city-building bodies/rings are batched to preserve the established stroke order.
 

@@ -204,7 +204,7 @@ Owned settlements can expand onto passable, non-settlement hexes within their te
 ## Map visualisation
 
 - **Unclaimed resource tile:** small icon overlay (coin, log, brick, ore, vial) on top of the terrain.
-- **Claimed settlement:** small town sprite (procedural: walls + flag in the owner's colour) drawn **on top of** the resource icon.
+- **Claimed settlement:** town/castle sprite drawn **on top of** the resource icon, with an ownership ring in the owner's colour. Tier 1 settlements with buildings resolve 20 variant-by-fullness sprites in `src/resources/settlements/` (`settlement-l1-v{0..3}-f{1..5}.png`, keys `castle.1.v${variant}.f${fullness}` via `castleKey(level, variant, fullness)` in `src/render/assetDescriptors.ts`): `castleVariant: 0 | 1 | 2 | 3` selects one of 4 architectural variants, and `settlementFullnessForCount(count)` (`src/render/scene/sceneBuilder/adventureScene.ts`) maps `buildings.length` to 5 fullness stages (Fullness 1: 0–3 buildings, Fullness 2: 4–6, Fullness 3: 7–9, Fullness 4: 10–12, Fullness 5: 13+).
 - **Charter target:** hex with scaffolding overlay — dashed outline in `"traveling"` phase, solid outline with construction icon in `"constructing"` phase.
 - **Charter placement mode:** valid hexes highlighted with green dashed outline.
 - **Minimap:** resource tiles shown as an amber dot in the corner of the tile cell.

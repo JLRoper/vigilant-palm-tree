@@ -102,6 +102,9 @@ graph TD
 export type SpriteKey =
   | `castle.${CastleLevel}`           // "castle.1" | "castle.2" | "castle.3"
   | `castle-alt.${CastleLevel}`       // "castle-alt.1" | ... FLUX alternate
+  | `castle-alt2.${CastleLevel}`      // tier-1 variant 2 (L2/L3 alias variant 1)
+  | `castle-alt3.${CastleLevel}`      // tier-1 variant 3 (L2/L3 alias variant 1)
+  | `castle.1.v${CastleVariant}.f${SettlementFullness}` // 20 Tier 1 variant×fullness sprites
   | `resource.${ResourceType}`        // "resource.gold" etc.
   | `resource-cart.${ResourceType}`   // cartography pin variant
   | `resource-illust.${ResourceType}` // FLUX illustrated variant
@@ -121,7 +124,7 @@ export type SpriteKey =
 ```
 
 Key helper functions generate the correct keys:
-- `castleKey(level, variant?)` — returns `castle.${level}` or `castle-alt.${level}` based on optional variant
+- `castleKey(level, variant?, fullness?)` — returns `castle.1.v${variant ?? 0}.f${fullness}` when `level === 1 && fullness !== undefined`, otherwise `castle.${level}`, `castle-alt.${level}`, `castle-alt2.${level}`, or `castle-alt3.${level}` based on `variant` (`0..3`)
 - `districtKey(variant, tier)` — returns `district.${variant}.${tier}` (`standard` or `farm`, tier `1 | 2 | 3`)
 - `resourceKey(type)` / `resourceCartKey(type)` / `resourceStyleKey(type, style)` — resource naming
 - `heroKey(faction)` / `heroDirectionKey("player", dir)` — hero sprite lookup
@@ -228,6 +231,9 @@ sequenceDiagram
 |--------|-----------|-------|
 | `CASTLE_DESCRIPTORS` | `castle.1`, `.2`, `.3` | 3 |
 | `CASTLE_ALT_DESCRIPTORS` | `castle-alt.1`, `.2`, `.3` | 3 |
+| `CASTLE_ALT2_DESCRIPTORS` | `castle-alt2.1`, `.2`, `.3` (L2/L3 alias `CASTLE_ALT_SPRITES`) | 3 |
+| `CASTLE_ALT3_DESCRIPTORS` | `castle-alt3.1`, `.2`, `.3` (L2/L3 alias `CASTLE_ALT_SPRITES`) | 3 |
+| `SETTLEMENT_L1_FULLNESS_DESCRIPTORS` | `castle.1.v{0..3}.f{1..5}` (`settlement-l1-v{0..3}-f{1..5}.png` in `src/resources/settlements/`) | 20 |
 | `RESOURCE_DESCRIPTORS` | `resource.{gold,wood,stone,iron,arcane}` | 5 |
 | `RESOURCE_CART_DESCRIPTORS` | `resource-cart.{...}` | 5 |
 | `RESOURCE_ILLUST_DESCRIPTORS` | `resource-illust.{...}` | 5 |
@@ -259,11 +265,20 @@ The unit-arena descriptors are registry-driven the same way: `assetDescriptors.t
 
 | Level | Key | File | Size | hexSizeMul | anchorOffsetY |
 |-------|-----|------|------|------------|---------------|
-| 1 | `castle.1` | `castle-l1.png` | 96×80 | 1.5 | - |
+| 1 | `castle.1` | `castle-l1.png` | 1024×1024 | 1.5 | 8 |
 | 2 | `castle.2` | `castle-l2.png` | 112×112 | 2.2 | 8 |
 | 3 | `castle.3` | `castle-l3.png` | 128×160 | 3.0 | 16 |
 
-Alternate (FLUX-generated) variants use the same sizing with `castle-alt.1/2/3` keys.
+Alternate variants use the same base sizing with `castle-alt.1/2/3`, `castle-alt2.1/2/3`, and `castle-alt3.1/2/3` keys (variants 2 and 3 ship tier-1 base files `castle-l1-alt2.png` and `castle-l1-alt3.png` and alias `castle-alt.2/3` at levels 2–3).
+
+Tier 1 settlements also resolve 20 fullness-stage sprites from `src/resources/settlements/` (`settlement-l1-v{0..3}-f{1..5}.png`, registered in `SETTLEMENT_L1_FULLNESS_DESCRIPTORS` under keys `castle.1.v${variant}.f${fullness}` via `castleKey(level, variant, fullness)`). `settlementFullnessForCount(count)` in `src/render/scene/sceneBuilder/adventureScene.ts` maps `buildings.length` to 5 fullness stages:
+- Fullness 1 (`f1`, `hexSizeMul: 1.35`, `anchorOffsetY: 4`): 0–3 buildings
+- Fullness 2 (`f2`, `hexSizeMul: 1.45`, `anchorOffsetY: 6`): 4–6 buildings
+- Fullness 3 (`f3`, `hexSizeMul: 1.55`, `anchorOffsetY: 8`): 7–9 buildings
+- Fullness 4 (`f4`, `hexSizeMul: 1.65`, `anchorOffsetY: 10`): 10–12 buildings
+- Fullness 5 (`f5`, `hexSizeMul: 1.75`, `anchorOffsetY: 12`): 13+ buildings
+
+When `level === 1`, `buildAdventureScene()` emits `CastleNode.fullness` (`settlementFullnessForCount(c.buildings.length)` when `c.buildings.length > 0`), and `Paint2DSpriteResolver.resolveSpriteForCastle(level, variant, fullness)` resolves `castle.1.v${variant}.f${fullness ?? 1}`.
 
 #### Horse Variant Sprites
 
@@ -1002,7 +1017,7 @@ The former `painter/*` classes and separate resource/territory overlay painters 
 
 1. **Sprite fallback chain**: PNG images are preferred; procedural canvas rendering is the fallback. The `CompositeSpriteSource` checks images first, then procedural. This means FLUX-generated sprites take priority over the hand-coded procedural ones.
 
-2. **Per-entity variant system**: Castles have `castleVariant: 0 | 1` and heroes have `horseVariant: HorseVariant` (10 values). These are stored on the game-state entities, not as global settings. The renderer reads each entity's variant to determine which sprite to draw. Buildings have no separate variant field — their art choice rides the persisted `BuildingDef.style` (`buildingKey(style, kind, level)`); the 2026-10-02 farm swap made new `farmField` defs carry `"pixel"`/`"pixel-alt"` there, while legacy `"classic"` farm defs are re-styled deterministically at scene emission (`farmFieldStyleAt`).
+2. **Per-entity variant system**: Castles have `castleVariant: 0 | 1 | 2 | 3` (`CastleVariant` in `@heroes/contracts`, with Tier 1 settlements resolving 20 variant-by-fullness sprites `castle.1.v${variant}.f${fullness}` via `settlementFullnessForCount(count)`) and heroes have `horseVariant: HorseVariant` (10 values). These are stored on the game-state entities, not as global settings. The renderer reads each entity's variant to determine which sprite to draw. Buildings have no separate variant field — their art choice rides the persisted `BuildingDef.style` (`buildingKey(style, kind, level)`); the 2026-10-02 farm swap made new `farmField` defs carry `"pixel"`/`"pixel-alt"` there, while legacy `"classic"` farm defs are re-styled deterministically at scene emission (`farmFieldStyleAt`).
 
 3. **Historical city-style system**: the former 5-style × 6-pattern procedural city-building painter and generator are not current source modules. Pixel building sprites are the live render path; see §3.2 and the historical notes in §3.3–3.4.
 

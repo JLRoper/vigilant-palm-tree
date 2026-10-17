@@ -12,7 +12,7 @@ the version has not already been bumped in that changeset.
 
 ## [0.7.0] - 2026-10-17
 
-feat(districts): add city districts on controlled territory hexes (5x5 district grids, adventure map district sprites, economy/storage pooling, and enemy hero occupation blocking)
+feat(districts): add city districts on controlled territory hexes (5x5 district grids, adventure map district sprites, economy/storage pooling, and enemy hero occupation blocking) and 20 new Tier 1 settlement sprites (`4 variants × 5 building-count fullness stages`)
 
 ## [0.6.0] - 2026-10-16
 

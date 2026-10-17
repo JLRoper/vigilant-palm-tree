@@ -50,6 +50,14 @@ export function districtTierForCount(count: number): 1 | 2 | 3 {
   return 1;
 }
 
+export function settlementFullnessForCount(count: number): 1 | 2 | 3 | 4 | 5 {
+  if (count >= 13) return 5;
+  if (count >= 10) return 4;
+  if (count >= 7) return 3;
+  if (count >= 4) return 2;
+  return 1;
+}
+
 export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
   const { map, path, hover, opts } = input;
   const heroes = input.heroes ?? input.mirror?.getHeroes() ?? [];
@@ -128,6 +136,7 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       world: axialToPixel(c.tile.q, c.tile.r),
       level: c.level,
       variant: c.castleVariant,
+      ...(c.level === 1 && c.buildings.length > 0 ? { fullness: settlementFullnessForCount(c.buildings.length) } : {}),
       ownerId: c.ownerId,
       selected: opts.selectedSettlementId === c.id,
       color: c.ownerId === null ? "rgba(255,255,255,0.18)" : opts.colorForOwner(c.ownerId),

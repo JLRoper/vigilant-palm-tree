@@ -109,6 +109,7 @@ export interface CastleNode {
   world: WorldPoint;
   level: CastleLevel;
   variant: CastleVariant;
+  fullness?: 1 | 2 | 3 | 4 | 5;
   ownerId: number | null;
   selected: boolean;
   color: string;
