@@ -85,6 +85,7 @@ export interface GarrisonRecruitment {
   gy: number;
   unitTypeId: string;
   count: number;
+  district?: { q: number; r: number };
 }
 
 // Enemy heroes within this straight-line reach of a settlement count toward
@@ -187,6 +188,7 @@ function garrisonPurchases(
       gy: source.gy,
       unitTypeId: source.entry.unitTypeId,
       count,
+      ...(source.district ? { district: { q: source.district.q, r: source.district.r } } : {}),
     });
     gold -= source.entry.goldCost * count;
     for (const [res, perUnit] of Object.entries(source.entry.resourceCost ?? {})) {

@@ -13,4 +13,5 @@ export interface RecruitUnitsCommand {
   gy: number;
   unitTypeId: string;
   count: number;
+  district?: { q: number; r: number };
 }

@@ -115,6 +115,7 @@ export type EngineEvent =
       type: "BuildingUpgradeStarted";
       actor: PlayerSeat;
       settlementId: SettlementId;
+      district?: { q: number; r: number };
     }
   | {
       type: "SettlementUpgradeStarted";
@@ -143,6 +144,7 @@ export type EngineEvent =
         type: "BuildingsPlaced";
         actor: PlayerSeat;
         settlementId: SettlementId;
+        district?: { q: number; r: number };
       }
     | {
         // Hero cargo load/unload at a same-hex owned settlement. Amounts
@@ -203,6 +205,7 @@ export type EngineEvent =
         settlementId: SettlementId;
         unitTypeId: string;
         count: number;
+        district?: { q: number; r: number };
       }
     | {
         type: "UnitsTransferred";
@@ -246,4 +249,5 @@ export type EngineEvent =
         gy: number;
         amount: number;
         direction: "deposit" | "withdraw";
+        district?: { q: number; r: number };
       };

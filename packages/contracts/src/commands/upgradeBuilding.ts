@@ -15,4 +15,5 @@ export interface UpgradeBuildingCommand {
   actor: PlayerSeat;
   settlementId: SettlementId;
   requests: BuildingUpgradeRequest[];
+  district?: { q: number; r: number };
 }

@@ -1,6 +1,79 @@
-import { HEX_DIRECTIONS } from "@heroes/contracts";
+import { HEX_DIRECTIONS, hexDistance } from "@heroes/contracts";
 import type { Axial, CastleLevel, BuildingDef } from "@heroes/contracts";
 import { computeSettlementBonuses } from "./buildingModifiers";
+
+export function districtKey(q: number, r: number): string {
+  return `${q},${r}`;
+}
+
+export type ControllableSettlementLike = {
+  id: string;
+  ownerId: number | null;
+  level: CastleLevel;
+  q?: number;
+  r?: number;
+  tile?: Axial;
+  districts?: Record<string, { q: number; r: number; buildings?: BuildingDef[] }>;
+};
+
+function isIterable<T>(value: Iterable<T> | Record<string, T>): value is Iterable<T> {
+  return typeof (value as Iterable<T>)[Symbol.iterator] === "function";
+}
+
+function settlementCenter(s: ControllableSettlementLike): Axial | undefined {
+  if (s.tile) return { q: s.tile.q, r: s.tile.r };
+  if (typeof s.q === "number" && typeof s.r === "number") return { q: s.q, r: s.r };
+  return undefined;
+}
+
+export function resolveControllingSettlement<T extends ControllableSettlementLike>(
+  settlements: Iterable<T> | Record<string, T>,
+  q: number,
+  r: number,
+  mapWidth: number,
+  mapHeight: number,
+): T | undefined {
+  if (q < 0 || r < 0 || q >= mapWidth || r >= mapHeight) return undefined;
+  const list: T[] = isIterable(settlements) ? Array.from(settlements) : Object.values(settlements);
+  for (const s of list) {
+    const c = settlementCenter(s);
+    if (c && c.q === q && c.r === r) {
+      if (s.ownerId === null || s.ownerId === undefined) return undefined;
+      return s;
+    }
+  }
+  const target: Axial = { q, r };
+  const key = districtKey(q, r);
+  const matching: Array<{ settlement: T; dist: number; hasDistrict: boolean }> = [];
+
+  for (const s of list) {
+    if (s.ownerId === null || s.ownerId === undefined) continue;
+    const center = settlementCenter(s);
+    if (!center) continue;
+    const dist = hexDistance(center, target);
+    if (dist <= controlRange(s.level)) {
+      matching.push({
+        settlement: s,
+        dist,
+        hasDistrict: Boolean(s.districts?.[key]),
+      });
+    }
+  }
+
+  if (matching.length === 0) return undefined;
+
+  const anyHasDistrict = matching.some((m) => m.hasDistrict);
+  const pool = anyHasDistrict ? matching.filter((m) => m.hasDistrict) : matching;
+
+  pool.sort((a, b) => {
+    if (a.dist !== b.dist) return a.dist - b.dist;
+    const ownerDiff = (a.settlement.ownerId ?? 0) - (b.settlement.ownerId ?? 0);
+    if (ownerDiff !== 0) return ownerDiff;
+    return a.settlement.id.localeCompare(b.settlement.id);
+  });
+
+  return pool[0].settlement;
+}
 
 export function controlRange(level: CastleLevel, buildings?: BuildingDef[]): number {
   let range = level;

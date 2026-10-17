@@ -1,7 +1,16 @@
-import type { ResourceType, SettlementId, SettlementState, Warehouse, WarehouseResource } from "@heroes/contracts";
+import type {
+  DistrictState,
+  PlayerId,
+  ResourceType,
+  SettlementId,
+  SettlementState,
+  Warehouse,
+  WarehouseResource,
+} from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+import { buildingSettlementEffects } from "../buildingRegistry";
 import { addStockClamped, settlementResourceCap, settlementTreasuryCap, treasuryHeadroom } from "./capacity";
-import { producerTurnOutput } from "./producers";
+import { isDistrictBlockedByHero, isProducerKind, producerTurnOutput } from "./producers";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -52,8 +61,12 @@ export interface SettlementProductionRates {
  * numbers paid.
  */
 export function settlementProductionRates(
-  settlement: Pick<SettlementState, "resourceRates" | "buildings" | "q" | "r" | "citySpots">,
+  settlement: Pick<SettlementState, "resourceRates" | "buildings" | "q" | "r" | "citySpots"> & {
+    ownerId?: PlayerId | null;
+    districts?: Record<string, DistrictState>;
+  },
   seed: number,
+  heroes?: Iterable<{ ownerId: PlayerId; q: number; r: number }> | Record<string, { ownerId: PlayerId; q: number; r: number }>,
 ): SettlementProductionRates {
   const totals = new Map<WarehouseResource, number>();
   for (const { resource, perTurn } of warehouseRates(settlement.resourceRates)) {
@@ -62,11 +75,35 @@ export function settlementProductionRates(
   let gold = 0;
   for (const b of settlement.buildings) {
     const output = producerTurnOutput(b, settlement, seed);
-    if (!output) continue;
+    if (!output) {
+      if (!b.construction && !isProducerKind(b.kind)) {
+        const flatGold = buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+        if (flatGold > 0) gold += flatGold;
+      }
+      continue;
+    }
     if (output.resource === "gold") {
       gold += output.amount;
     } else {
       totals.set(output.resource, (totals.get(output.resource) ?? 0) + output.amount);
+    }
+  }
+  for (const d of Object.values(settlement.districts ?? {})) {
+    if (isDistrictBlockedByHero(settlement.ownerId ?? null, d.q, d.r, heroes)) continue;
+    for (const b of d.buildings) {
+      const output = producerTurnOutput(b, { q: d.q, r: d.r, citySpots: d.citySpots }, seed);
+      if (!output) {
+        if (!b.construction && !isProducerKind(b.kind)) {
+          const flatGold = buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+          if (flatGold > 0) gold += flatGold;
+        }
+        continue;
+      }
+      if (output.resource === "gold") {
+        gold += output.amount;
+      } else {
+        totals.set(output.resource, (totals.get(output.resource) ?? 0) + output.amount);
+      }
     }
   }
   const rates: WarehouseRate[] = [];
@@ -80,6 +117,7 @@ export function settlementProductionRates(
 export function produceSettlementResources(
   settlements: Record<SettlementId, SettlementState>,
   seed: number,
+  heroes?: Iterable<{ ownerId: PlayerId; q: number; r: number }> | Record<string, { ownerId: PlayerId; q: number; r: number }>,
 ): Record<SettlementId, SettlementState> {
   const newSettlements: Record<SettlementId, SettlementState> = { ...settlements };
   for (const s of Object.values(newSettlements)) {
@@ -92,7 +130,13 @@ export function produceSettlementResources(
     let gold = 0;
     for (const b of s.buildings) {
       const output = producerTurnOutput(b, s, seed);
-      if (!output) continue;
+      if (!output) {
+        if (!b.construction && !isProducerKind(b.kind)) {
+          const flatGold = buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+          if (flatGold > 0) gold += flatGold;
+        }
+        continue;
+      }
       if (output.resource === "gold") {
         gold += output.amount;
       } else {
@@ -101,6 +145,28 @@ export function produceSettlementResources(
           output.amount,
           caps[output.resource],
         );
+      }
+    }
+    for (const d of Object.values(s.districts ?? {})) {
+      if (isDistrictBlockedByHero(s.ownerId, d.q, d.r, heroes)) continue;
+      for (const b of d.buildings) {
+        const output = producerTurnOutput(b, { q: d.q, r: d.r, citySpots: d.citySpots }, seed);
+        if (!output) {
+          if (!b.construction && !isProducerKind(b.kind)) {
+            const flatGold = buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+            if (flatGold > 0) gold += flatGold;
+          }
+          continue;
+        }
+        if (output.resource === "gold") {
+          gold += output.amount;
+        } else {
+          newWarehouse[output.resource] = addStockClamped(
+            newWarehouse[output.resource] ?? 0,
+            output.amount,
+            caps[output.resource],
+          );
+        }
       }
     }
     if (gold > 0) {

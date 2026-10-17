@@ -289,7 +289,8 @@ export class BuildingMenu {
         const canAfford = settlement && settlement.gold >= cost.gold
           && (settlement.warehouse.wood ?? 0) >= cost.wood
           && (settlement.warehouse.stone ?? 0) >= cost.stone
-          && !settlement.upgrade;
+          && !settlement.upgrade
+          && !building.construction;
 
         const upgradeBtn = document.createElement("button");
         upgradeBtn.textContent = "Upgrade";
