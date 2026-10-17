@@ -26,7 +26,7 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 | Mountain| grey rock   | impassable| Peaks and ridges. Stone + iron-bearing biome. Lakes / rivers. |
 | Water   | blue        | impassable| Lakes / rivers. Never carries resources. |
 
-Generated via a deterministic biome-blob growth pass (`generateTerrain`, using a deduplicated `Uint8Array(w * h)` frontier bitset and O(1) swap-and-pop removal) on the map seed. Same seed → same map. Implementation: [`packages/engine/src/map/gameMap.ts`](../packages/engine/src/map/gameMap.ts), [`packages/engine/src/map/terrain.ts`](../packages/engine/src/map/terrain.ts). See [map-gen.md](./map-gen.md) for the algorithm.
+Generated via a deterministic biome-blob growth pass (`generateTerrain`, using a deduplicated `Uint8Array(w * h)` frontier bitset, O(1) swap-and-pop removal, and `scaledTerrainBlobs` scaling biome blob counts by $\sqrt{N/432}$ for maps larger than `24×18`) on the map seed. Same seed → same map. Implementation: [`packages/engine/src/map/gameMap.ts`](../packages/engine/src/map/gameMap.ts), [`packages/engine/src/map/terrain.ts`](../packages/engine/src/map/terrain.ts). See [map-gen.md](./map-gen.md) for the algorithm.
 
 ## Resource tile placement
 

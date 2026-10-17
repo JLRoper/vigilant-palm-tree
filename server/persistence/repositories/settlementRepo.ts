@@ -24,8 +24,13 @@ export interface SettlementRepo {
   // passes the *entire* settlements record, so this deletes any row for the
   // game not present in `settlements`, then upserts everything that is,
   // replacing each settlement's resources/buildings/platoons rowset
-  // alongside it.
-  upsertMany(gameName: string, settlements: Record<SettlementId, SettlementState>): Promise<void>;
+  // alongside it. When `previous` is supplied, settlements whose object
+  // reference is unchanged (`previous[id] === settlement`) skip SQL writes.
+  upsertMany(
+    gameName: string,
+    settlements: Record<SettlementId, SettlementState>,
+    previous?: Record<SettlementId, SettlementState>,
+  ): Promise<void>;
 }
 
 interface SettlementRow {
@@ -234,15 +239,20 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
       );
     },
 
-    async upsertMany(gameName, settlements) {
+    async upsertMany(gameName, settlements, previous) {
       const gameId = await resolveGameId(db, gameName);
-      const ids = Object.values(settlements).map((s) => s.id);
-      await db.query(`DELETE FROM settlements WHERE game_id = $1 AND NOT (id = ANY($2::text[]))`, [
-        gameId,
-        ids,
-      ]);
+      const shouldDeleteMissing =
+        !previous || Object.keys(previous).some((id) => !(id in settlements));
+      if (shouldDeleteMissing) {
+        const ids = Object.values(settlements).map((s) => s.id);
+        await db.query(`DELETE FROM settlements WHERE game_id = $1 AND NOT (id = ANY($2::text[]))`, [
+          gameId,
+          ids,
+        ]);
+      }
 
       for (const settlement of Object.values(settlements)) {
+        if (previous && previous[settlement.id] === settlement) continue;
         await db.query(
           `INSERT INTO settlements (id, game_id, name, owner_id, q, r, level, population, gold_tax,
                                      founded_on_resource, gold, gold_rate, morale,

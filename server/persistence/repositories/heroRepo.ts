@@ -17,8 +17,14 @@ export interface HeroRepo {
   // upsertMany mirrors that by deleting any row for this game whose id isn't
   // in `heroes`, then upserting everything that is. This is what makes hero
   // death (or any other removal) fall out for free, with no separate delete
-  // method to keep in sync with the JSONB write.
-  upsertMany(gameName: string, heroes: Record<HeroId, HeroState>): Promise<void>;
+  // method to keep in sync with the JSONB write. When `previous` is supplied,
+  // heroes whose object reference is unchanged (`previous[id] === hero`) skip
+  // SQL writes.
+  upsertMany(
+    gameName: string,
+    heroes: Record<HeroId, HeroState>,
+    previous?: Record<HeroId, HeroState>,
+  ): Promise<void>;
 }
 
 interface HeroRow {
@@ -142,24 +148,29 @@ export function createHeroRepo(db: Queryable): HeroRepo {
       );
     },
 
-    async upsertMany(gameName, heroes) {
+    async upsertMany(gameName, heroes, previous) {
       const gameId = await resolveGameId(db, gameName);
-      const ids = Object.values(heroes).map((h) => h.id);
-      await db.query(`DELETE FROM heroes WHERE game_id = $1 AND NOT (id = ANY($2::text[]))`, [
-        gameId,
-        ids,
-      ]);
-      // Same full-sync sweep for the platoon rows (hero-outcomes plan W2a):
-      // a hero removed from the record never reaches the per-hero loop below,
-      // so its hero_platoons rows would otherwise orphan -- defeat now
-      // deletes heroes outright, and the per-hero delete at the bottom of the
-      // loop only covers heroes still present.
-      await db.query(`DELETE FROM hero_platoons WHERE game_id = $1 AND NOT (hero_id = ANY($2::text[]))`, [
-        gameId,
-        ids,
-      ]);
+      const shouldDeleteMissing =
+        !previous || Object.keys(previous).some((id) => !(id in heroes));
+      if (shouldDeleteMissing) {
+        const ids = Object.values(heroes).map((h) => h.id);
+        await db.query(`DELETE FROM heroes WHERE game_id = $1 AND NOT (id = ANY($2::text[]))`, [
+          gameId,
+          ids,
+        ]);
+        // Same full-sync sweep for the platoon rows (hero-outcomes plan W2a):
+        // a hero removed from the record never reaches the per-hero loop below,
+        // so its hero_platoons rows would otherwise orphan -- defeat now
+        // deletes heroes outright, and the per-hero delete at the bottom of the
+        // loop only covers heroes still present.
+        await db.query(`DELETE FROM hero_platoons WHERE game_id = $1 AND NOT (hero_id = ANY($2::text[]))`, [
+          gameId,
+          ids,
+        ]);
+      }
 
       for (const hero of Object.values(heroes)) {
+        if (previous && previous[hero.id] === hero) continue;
 await db.query(
           `INSERT INTO heroes (id, game_id, name, owner_id, q, r, movement_remaining, previous_q,
                                 previous_r, previous_movement_remaining, trail, gold, troops,

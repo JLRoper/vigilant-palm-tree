@@ -39,17 +39,22 @@ export class OnDemandSpriteSource implements SpriteSource {
   preload(): void {}
 
   resolve(key: string): { drawable: HTMLImageElement; ready: boolean } | undefined {
-    if (this.cache.has(key)) return { drawable: this.cache.get(key)!, ready: true };
+    if (this.cache.has(key)) {
+      return { drawable: this.cache.get(key)!, ready: !this.loading.has(key) };
+    }
     const url = this.urlMap[key];
     if (!url) return undefined;
-    if (this.loading.has(key)) return undefined;
     const img = new Image();
-    img.src = url;
     this.cache.set(key, img);
     this.loading.add(key);
     img.onload = () => {
       this.loading.delete(key);
     };
+    img.onerror = () => {
+      this.loading.delete(key);
+      this.cache.delete(key);
+    };
+    img.src = url;
     return { drawable: img, ready: false };
   }
 }
@@ -160,4 +165,16 @@ export class ApiSpriteSource implements SpriteSource {
     this.cache.clear();
     this.loading.clear();
   }
+}
+
+export function resolveHeroSpriteWithRunFrame<T extends { ready: boolean }>(
+  resolve: (key: string) => T | undefined,
+  baseKey: string,
+  runFrameKey?: string | null,
+): T | undefined {
+  if (runFrameKey) {
+    const frameSprite = resolve(runFrameKey);
+    if (frameSprite && frameSprite.ready) return frameSprite;
+  }
+  return resolve(baseKey);
 }

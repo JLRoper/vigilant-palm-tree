@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.6.0] - 2026-10-16
+
+Tier 4 large-map scaling (v3 mapGenVersion, proportional blobs/settlements, mandatory castle connectivity, AI reach scaling), charter/sprite optimizations, dirty-entity persistence, and nginx web-runtime
+
 ## [0.5.2] - 2026-10-12
 
 chore: enable default worktree-first workflow in heroes-js; align AGENTS.md, agents, commands, skills; Phase 05 concurrency+recovery drill merged

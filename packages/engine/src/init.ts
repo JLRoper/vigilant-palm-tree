@@ -17,7 +17,7 @@ import type {
 import { MOVEMENT_PER_TURN } from "@heroes/contracts";
 import type { GameMap } from "./map/gameMap";
 import { defaultCastleSeedFromMapSeed } from "./hydrate";
-import { generateCastles } from "./map/castlePlacement";
+import { generateCastles, defaultCastleCountForMap } from "./map/castlePlacement";
 import {
   computeSettlementRates,
   defaultPopulation,
@@ -437,7 +437,7 @@ export function buildInitialGameState(
   const castleSeed = opts?.castleSeed ?? defaultCastleSeedFromMapSeed(mapSeed);
   const playerCount = enemyDerivedPlayerCount(opts) ?? clampPlayerCount(opts?.playerCount);
   const humanSeatCount = clampHumanSeatCount(opts?.humanSeatCount, playerCount);
-  const castleCount = opts?.castleCount ?? (2 * playerCount);
+  const castleCount = opts?.castleCount ?? defaultCastleCountForMap(playerCount, map.width, map.height);
 
   const castles = generateCastles(map, {
     castleSeed,
@@ -476,7 +476,7 @@ export function makeInitialStatePayload(
   const castleSeed = opts?.castleSeed ?? defaultCastleSeedFromMapSeed(mapSeed);
   const playerCount = enemyDerivedPlayerCount(opts) ?? (opts?.playerCount ?? 3);
   const humanSeatCount = clampHumanSeatCount(opts?.humanSeatCount, playerCount);
-  const castleCount = opts?.castleCount ?? (2 * playerCount);
+  const castleCount = opts?.castleCount ?? defaultCastleCountForMap(playerCount, map.width, map.height);
 
   const castles = generateCastles(map, {
     castleSeed,
