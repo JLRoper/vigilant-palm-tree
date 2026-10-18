@@ -13,6 +13,7 @@ the version has not already been bumped in that changeset.
 ## [0.9.1] - 2026-10-17
 
 Move game version/build info from the settings panel footer into the toolbar gear dropdown
+fix(economy): round stored settlement gold and warehouse quantities half-up to whole integers at the write points
 
 ## [0.9.0] - 2026-10-17
 

@@ -271,10 +271,12 @@ test("clampMorale clamps to [0, 100]", () => {
   assert.equal(clampMorale(NaN), 0);
 });
 
-test("clampWarehouseNonNegative floors negatives and rejects NaN", () => {
+test("clampWarehouseNonNegative half-up rounds and rejects NaN", () => {
   assert.equal(clampWarehouseNonNegative(-3), 0);
   assert.equal(clampWarehouseNonNegative(0), 0);
   assert.equal(clampWarehouseNonNegative(7), 7);
-  assert.equal(clampWarehouseNonNegative(7.9), 7);
+  assert.equal(clampWarehouseNonNegative(7.9), 8);
+  assert.equal(clampWarehouseNonNegative(7.5), 8);
+  assert.equal(clampWarehouseNonNegative(7.4), 7);
   assert.equal(clampWarehouseNonNegative(NaN), 0);
 });

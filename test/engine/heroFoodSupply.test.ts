@@ -409,10 +409,14 @@ test("REGRESSION: the keep's draw is exactly what the hero's bill needed, no mor
   }
   // Re-measured 2026-10-05: the swamp/snow biomes changed generation RNG
   // consumption, which moved this seed's castle placement (and with it the
-  // farm cells' multipliers). The mechanics asserted above are unchanged.
+  // farm cells' multipliers). The accumulated values below re-measured again
+  // 2026-10-17 after the economy began half-up rounding every stored warehouse
+  // amount (a farm's per-turn yield now rounds up half the time, so the keep
+  // banks a little more week over week). The mechanics asserted above are
+  // unchanged.
   assert.deepEqual(
     keeps,
-    [72, 116, 160],
+    [78, 129, 180],
     "the keep accumulates: its 3 farms out-produce its population bill AND the hero's weekly one (the starter farmhouse's +2 food/turn adds to the surplus)",
   );
 });
