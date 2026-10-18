@@ -505,32 +505,36 @@ test("paintCitySkybox: without skybox provider, falls back to the CITY_BG fillRe
   assert.equal(fill?.args[0], "#1a1620", "fallback must match the live CITY_BG");
 });
 
-test("paintCityCell: hovered uses 3px gold stroke, unhovered uses 1px #3a3450", () => {
+test("paintCityCell: the hovered cell gets a dark under-stroke and a gold ring", () => {
   const { ctx: ctxH, calls: callsH } = makeRecordingCtx();
-  paintCityCell(ctxH, { kind: "cityCell", gx: 0, gy: 0, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: true }, makeNoopPaint2DDep());
-  const lwH = callsH.find((c) => c.name === "set:lineWidth");
-  assert.deepEqual(lwH?.args, [3], "hovered cell uses 3px stroke");
+  paintCityCell(ctxH, { kind: "cityCell", gx: 0, gy: 0, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: true, gridLines: true }, makeNoopPaint2DDep());
+  const strokesH = callsH.filter((c) => c.name === "set:strokeStyle").map((c) => c.args[0]);
+  assert.deepEqual(strokesH, ["rgba(18,16,22,0.65)", "#ffcc00"], "dark halo first so gold reads on pale plates");
+  const widthsH = callsH.filter((c) => c.name === "set:lineWidth").map((c) => c.args[0]);
+  assert.deepEqual(widthsH, [5, 2.5]);
+  assert.equal(callsH.filter((c) => c.name === "stroke").length, 2, "both rings stroke the same path");
 
   const { ctx: ctxU, calls: callsU } = makeRecordingCtx();
-  paintCityCell(ctxU, { kind: "cityCell", gx: 0, gy: 0, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: false }, makeNoopPaint2DDep());
+  paintCityCell(ctxU, { kind: "cityCell", gx: 0, gy: 0, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: false, gridLines: true }, makeNoopPaint2DDep());
   const lwU = callsU.find((c) => c.name === "set:lineWidth");
   assert.deepEqual(lwU?.args, [1], "unhovered cell uses 1px stroke");
+  assert.equal(callsU.find((c) => c.name === "set:strokeStyle")?.args[0], "#3a3450");
 });
 
-test("paintCityCell: a buildable cell gets the subtle white tint fill + brighter stroke (F16b)", () => {
+test("paintCityCell: a buildable cell gets a dark tint fill + warm outline (F16b)", () => {
   const { ctx, calls } = makeRecordingCtx();
-  paintCityCell(ctx, { kind: "cityCell", gx: 1, gy: 1, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: false, buildable: true }, makeNoopPaint2DDep());
+  paintCityCell(ctx, { kind: "cityCell", gx: 1, gy: 1, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: false, buildable: true, gridLines: true }, makeNoopPaint2DDep());
   const fills = calls.filter((c) => c.name === "set:fillStyle").map((c) => c.args[0]);
-  assert.deepEqual(fills, ["rgba(255,255,255,0.09)"], "the buildable tint is the only fill; the cell floor stays transparent");
+  assert.deepEqual(fills, ["rgba(18,16,22,0.18)"], "the buildable tint is the only fill; the cell floor stays transparent");
   const stroke = calls.find((c) => c.name === "set:strokeStyle");
-  assert.equal(stroke?.args[0], "rgba(255,255,255,0.32)", "unhovered buildable cell strokes brighter than #3a3450");
+  assert.equal(stroke?.args[0], "rgba(255,230,160,0.85)", "buildable cells carry a warm outline that reads on any biome");
   const lw = calls.find((c) => c.name === "set:lineWidth");
-  assert.deepEqual(lw?.args, [1], "buildable keeps the 1px stroke");
+  assert.deepEqual(lw?.args, [1.5], "buildable outline is slightly heavier than a grid line");
 });
 
 test("paintCityCell: a plain cell paints no floor at all, so the backdrop shows through", () => {
   const { ctx, calls } = makeRecordingCtx();
-  paintCityCell(ctx, { kind: "cityCell", gx: 2, gy: 2, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: false }, makeNoopPaint2DDep());
+  paintCityCell(ctx, { kind: "cityCell", gx: 2, gy: 2, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: false, gridLines: true }, makeNoopPaint2DDep());
   assert.equal(calls.filter((c) => c.name === "set:fillStyle").length, 0, "no fillStyle: the previous dark plum floor must not come back");
   assert.equal(calls.filter((c) => c.name === "fill").length, 0, "no fill path");
 });
@@ -539,15 +543,16 @@ test("paintCityCell: gridLines:false skips the outline but keeps hover and build
   const { ctx, calls } = makeRecordingCtx();
   paintCityCell(ctx, { kind: "cityCell", gx: 0, gy: 0, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: false, gridLines: false }, makeNoopPaint2DDep());
   assert.equal(calls.filter((c) => c.name === "stroke").length, 0, "no outline when grid lines are off");
+  assert.equal(calls.filter((c) => c.name === "beginPath").length, 0, "the early return skips path construction entirely");
 
   const { ctx: ctxH, calls: callsH } = makeRecordingCtx();
   paintCityCell(ctxH, { kind: "cityCell", gx: 0, gy: 0, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: true, gridLines: false }, makeNoopPaint2DDep());
-  assert.equal(callsH.find((c) => c.name === "set:strokeStyle")?.args[0], "#ffcc00", "hover still highlights with lines off");
-  assert.equal(callsH.filter((c) => c.name === "stroke").length, 1);
+  assert.equal(callsH.find((c) => c.name === "set:strokeStyle")?.args[0], "rgba(18,16,22,0.65)", "hover still highlights with lines off");
+  assert.equal(callsH.filter((c) => c.name === "stroke").length, 2);
 
   const { ctx: ctxB, calls: callsB } = makeRecordingCtx();
   paintCityCell(ctxB, { kind: "cityCell", gx: 1, gy: 1, screen: { x: 0, y: 0 }, halfWidth: 10, halfHeight: 10, hovered: false, buildable: true, gridLines: false }, makeNoopPaint2DDep());
-  assert.equal(callsB.find((c) => c.name === "set:strokeStyle")?.args[0], "rgba(255,255,255,0.32)", "buildable still gets its tint outline");
+  assert.equal(callsB.find((c) => c.name === "set:strokeStyle")?.args[0], "rgba(255,230,160,0.85)", "buildable still gets its outline");
 });
 
 test("paintCityResourceSpot: without a sprite, falls back to the diamond shape with RESOURCE_PAL colors", () => {

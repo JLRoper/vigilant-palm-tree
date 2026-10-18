@@ -84,9 +84,10 @@ const SELECTED_HERO_RING_RADIUS = 14;
 
 const CITY_BG = "#1a1620";
 const CITY_CELL_STROKE = "#3a3450";
+const CITY_HOVER_UNDER = "rgba(18,16,22,0.65)";
 const CITY_HOVER_STROKE = "#ffcc00";
-const CITY_BUILDABLE_FILL = "rgba(255,255,255,0.09)";
-const CITY_BUILDABLE_STROKE = "rgba(255,255,255,0.32)";
+const CITY_BUILDABLE_FILL = "rgba(18,16,22,0.18)";
+const CITY_BUILDABLE_STROKE = "rgba(255,230,160,0.85)";
 const CITY_TEXT = "#ffffff";
 const CITY_SELECTION_STROKE = "#66ccff";
 const CITY_GHOST_VALID_STROKE = "#44ff44";
@@ -831,7 +832,7 @@ export function paintCitySkybox(ctx: CanvasRenderingContext2D, node: CitySkyboxN
   if (!frame) return;
   const { viewportW, viewportH, spriteVariant, parallaxEnabled, parallaxLayerCount, offsetX, offsetY } = node;
   if (node.backdropMode === "diorama" && node.backdrop) {
-    paintCityDiorama(ctx, viewportW, viewportH, node.backdrop, node.citySize);
+    paintCityDiorama(ctx, viewportW, viewportH, node.backdrop, node.citySize, node.gridFootprint);
     return;
   }
   const skybox = deps.skybox;
@@ -892,6 +893,10 @@ export function paintCitySkybox(ctx: CanvasRenderingContext2D, node: CitySkyboxN
 }
 
 export function paintCityCell(ctx: CanvasRenderingContext2D, node: CityCellNode, deps: Paint2DDep): void {
+  if (!node.hovered && !node.buildable && !node.gridLines) {
+    void deps;
+    return;
+  }
   const { x, y } = node.screen;
   const hw = node.halfWidth;
   const hh = node.halfHeight;
@@ -906,19 +911,21 @@ export function paintCityCell(ctx: CanvasRenderingContext2D, node: CityCellNode,
     ctx.fill();
   }
   if (node.hovered) {
+    ctx.strokeStyle = CITY_HOVER_UNDER;
+    ctx.lineWidth = 5;
+    ctx.stroke();
     ctx.strokeStyle = CITY_HOVER_STROKE;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
   } else if (node.buildable) {
     ctx.strokeStyle = CITY_BUILDABLE_STROKE;
-    ctx.lineWidth = 1;
-  } else if (node.gridLines !== false) {
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  } else {
     ctx.strokeStyle = CITY_CELL_STROKE;
     ctx.lineWidth = 1;
-  } else {
-    void deps;
-    return;
+    ctx.stroke();
   }
-  ctx.stroke();
   void deps;
 }
 

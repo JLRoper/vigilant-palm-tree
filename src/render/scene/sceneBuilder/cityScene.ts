@@ -3,7 +3,7 @@ import { buildingConstructionProgress, buildingFootprintFromRegistry, constructi
 import type { BuildingDef, BuildingKind, UpgradeState } from "@heroes/contracts";
 import { buildingFootprint, cellsInDrawOrder, cellToScreen, cityLayout } from "../../../core/cityGrid";
 import type { ResourceType } from "../../../map/resourceTiles";
-import type { CityBackdropMode, GameSettings } from "../../../state/settings";
+import type { GameSettings } from "../../../state/settings";
 import type { CitySkyboxNode, SceneNode } from "../types";
 
 // Faithful decomposition of cityRenderer.ts's drawCityView()'s per-frame
@@ -38,8 +38,14 @@ export interface CitySceneInput {
   buildableCells?: ReadonlySet<string>;
   citySettings: Pick<
     GameSettings,
-    "spriteVariant" | "parallaxEnabled" | "parallaxLayerCount" | "cityBgOffsetX" | "cityBgOffsetY"
-  > & { cityBackdrop?: CityBackdropMode; cityGridLines?: boolean };
+    | "spriteVariant"
+    | "parallaxEnabled"
+    | "parallaxLayerCount"
+    | "cityBgOffsetX"
+    | "cityBgOffsetY"
+    | "cityBackdrop"
+    | "cityGridLines"
+  >;
 
   /** The settlement's terrain signature for the biome diorama backdrop; absent = legacy skybox path. */
   backdrop?: CityBackdropSignature | null;
@@ -72,7 +78,7 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
   };
   if (input.backdrop) {
     skybox.backdrop = input.backdrop;
-    skybox.backdropMode = citySettings.cityBackdrop ?? "diorama";
+    skybox.backdropMode = citySettings.cityBackdrop;
   }
   nodes.push(skybox);
 
@@ -80,6 +86,13 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
   const cellScreen = (gx: number, gy: number) => {
     const c = cellToScreen(gx, gy, gridOrigin);
     return { x: screenOrigin.x + c.x * tileScale, y: screenOrigin.y + c.y * tileScale };
+  };
+  const gridCenter = cellScreen((size - 1) / 2, (size - 1) / 2);
+  skybox.gridFootprint = {
+    halfWidth: (size * tw) / 2,
+    halfHeight: (size * td) / 2,
+    centerX: gridCenter.x,
+    centerY: gridCenter.y,
   };
 
   for (const cell of cellsInDrawOrder(size)) {
@@ -92,7 +105,7 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
       halfHeight: td / 2,
       hovered: hover !== null && hover.gx === cell.gx && hover.gy === cell.gy,
       buildable: buildableCells?.has(`${cell.gx},${cell.gy}`) ?? false,
-      gridLines: citySettings.cityGridLines ?? true,
+      gridLines: citySettings.cityGridLines,
     });
   }
 

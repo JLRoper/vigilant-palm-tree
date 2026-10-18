@@ -35,6 +35,8 @@ function baseInput(overrides: Partial<CitySceneInput> = {}): CitySceneInput {
       parallaxLayerCount: 3,
       cityBgOffsetX: 10,
       cityBgOffsetY: -5,
+      cityBackdrop: "diorama",
+      cityGridLines: true,
     },
     ...overrides,
   };
@@ -54,6 +56,7 @@ test("citySkybox node carries the resolved settings decision, not the settings o
     offsetX: 10,
     offsetY: -5,
     citySize: 5,
+    gridFootprint: { halfWidth: 240, halfHeight: 120, centerX: 402, centerY: 258.8 },
   });
 });
 
@@ -73,6 +76,7 @@ test("citySkybox node carries the backdrop signature and diorama mode when suppl
         cityBgOffsetX: 10,
         cityBgOffsetY: -5,
         cityBackdrop: "diorama",
+        cityGridLines: true,
       },
     }),
   );

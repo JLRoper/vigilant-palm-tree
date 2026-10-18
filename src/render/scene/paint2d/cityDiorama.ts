@@ -1,8 +1,26 @@
-import { TERRAIN_COLORS, type CityBackdropSignature, type CityViewSize, type Terrain } from "@heroes/engine";
+import { TERRAIN_COLORS, hashString, mulberry32, type CityBackdropSignature, type CityViewSize, type Terrain } from "@heroes/engine";
+import type { CityGridFootprint } from "../types";
 
 const TAU = Math.PI * 2;
 const MIST = "#ece6d8";
-const CACHE_CAP = 12;
+const PLATE_BASE_RX = 550;
+const PLATE_BASE_RY = 310;
+
+interface TierProfile {
+  plateScale: number;
+  wider: boolean;
+  maskSolid: number;
+}
+
+const TIER_PROFILES: Record<CityViewSize, TierProfile> = {
+  5: { plateScale: 1, wider: false, maskSolid: 0.78 },
+  10: { plateScale: 1.08, wider: true, maskSolid: 0.86 },
+  15: { plateScale: 1.16, wider: true, maskSolid: 0.9 },
+};
+
+function tierProfile(size?: CityViewSize): TierProfile {
+  return TIER_PROFILES[size ?? 5];
+}
 const TERRAINS: readonly Terrain[] = ["grass", "dirt", "water", "forest", "desert", "mountain", "swamp", "snow"];
 
 function clamp(v: number, min: number, max: number): number {
@@ -91,26 +109,6 @@ const PALETTES: Record<Terrain, BiomePalette> = {
   swamp: derive("swamp"),
   snow: derive("snow"),
 };
-
-function hashString(str: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-}
-
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return function () {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 interface Rng {
   next(): number;
@@ -384,7 +382,13 @@ function blocked(env: DioramaEnv, x: number, y: number, margin = 18): boolean {
   return false;
 }
 
-function buildEnv(signature: CityBackdropSignature, w: number, h: number, size?: CityViewSize): DioramaEnv {
+function buildEnv(
+  signature: CityBackdropSignature,
+  w: number,
+  h: number,
+  size?: CityViewSize,
+  footprint?: CityGridFootprint,
+): DioramaEnv {
   const info = weightedBiomes(signature);
   const centerPalette = PALETTES[signature.center];
   const dominantPalette = PALETTES[info.dominant];
@@ -403,10 +407,21 @@ function buildEnv(signature: CityBackdropSignature, w: number, h: number, size?:
   );
   const baseFar = mix(blendBiomeColor(signature, "far", 0.2), PALETTES.grass.far, 0.14);
 
-  const tier = size === 15 ? 1.16 : size === 10 ? 1.08 : 1;
-  const plateRx = Math.min(Math.min(w * 0.43, 550) * tier, w * 0.487);
-  const plateRy = Math.min(Math.min(h * 0.3875, 310) * tier, h * 0.455);
-  const wider = size === 15 || size === 10;
+  const profile = tierProfile(size);
+  const gridHalfW = footprint?.halfWidth ?? 0;
+  const gridHalfH = footprint?.halfHeight ?? 0;
+  const plateRx = Math.min(
+    Math.max(Math.min(w * 0.43, PLATE_BASE_RX) * profile.plateScale, gridHalfW * 1.14),
+    w * 0.49,
+  );
+  const plateRy = Math.min(
+    Math.max(Math.min(h * 0.3875, PLATE_BASE_RY) * profile.plateScale, gridHalfH * 1.16),
+    h * 0.47,
+  );
+  const plateCx = footprint?.centerX ?? w / 2;
+  const plateCy = footprint?.centerY ?? h * (profile.wider ? 0.4925 : 0.5375);
+  const zoneRx = Math.max(w * (profile.wider ? 0.38 : 0.3), gridHalfW * 1.12);
+  const zoneRy = Math.max(h * (profile.wider ? 0.28 : 0.22), gridHalfH * 1.12);
 
   return {
     sky,
@@ -416,16 +431,16 @@ function buildEnv(signature: CityBackdropSignature, w: number, h: number, size?:
     baseNear,
     baseFar,
     plate: {
-      cx: w / 2,
-      cy: h * (wider ? 0.4925 : 0.5375),
+      cx: plateCx,
+      cy: plateCy,
       rx: plateRx,
       ry: plateRy,
     },
     cityZone: {
-      x: w / 2,
-      y: h * 0.4975,
-      rx: w * (wider ? 0.38 : 0.3),
-      ry: h * (wider ? 0.28 : 0.22),
+      x: plateCx,
+      y: plateCy,
+      rx: zoneRx,
+      ry: zoneRy,
     },
     paths: [],
   };
@@ -630,7 +645,6 @@ function drawCalmCenter(ctx: CanvasRenderingContext2D, env: DioramaEnv, rng: Rng
 }
 
 interface PathSpec {
-  angle: number;
   pts: RibbonPoint[];
 }
 
@@ -663,7 +677,7 @@ function buildPaths(
   const chosen = shuffled.slice(0, count).sort((a, b) => a.pref - b.pref);
 
   const p = env.plate;
-  const scale = Math.max(0.6, Math.min(p.rx / 550, p.ry / 310));
+  const scale = Math.max(0.6, Math.min(p.rx / PLATE_BASE_RX, p.ry / PLATE_BASE_RY));
   const zoneT = Math.max(env.cityZone.rx / p.rx, env.cityZone.ry / p.ry) * 1.02;
 
   const out: PathSpec[] = [];
@@ -686,7 +700,7 @@ function buildPaths(
         w: lerp(w0, w1, smoothstep(0, 1, u)) * rng.range(0.85, 1.15),
       });
     }
-    out.push({ angle, pts });
+    out.push({ pts });
   }
   return out;
 }
@@ -740,7 +754,7 @@ const BLOB_SIZE: Record<Terrain, readonly [number, number]> = {
 
 function buildBlobs(env: DioramaEnv, wedges: readonly Wedge[], rng: Rng): Blob[] {
   const p = env.plate;
-  const scale = Math.max(0.6, Math.min(p.rx / 550, p.ry / 310));
+  const scale = Math.max(0.6, Math.min(p.rx / PLATE_BASE_RX, p.ry / PLATE_BASE_RY));
   const blobs: Blob[] = [];
   for (const wedge of wedges) {
     const count = rng.int(2, 3);
@@ -1421,17 +1435,21 @@ function drawDirtProps(ctx: CanvasRenderingContext2D, blob: Blob, env: DioramaEn
   ctx.restore();
 }
 
+type PropPainter = (ctx: CanvasRenderingContext2D, blob: Blob, env: DioramaEnv, rng: Rng) => void;
+
+const PROP_PAINTERS: Record<Terrain, PropPainter> = {
+  water: drawWaterProps,
+  forest: drawForestProps,
+  mountain: drawMountainProps,
+  desert: drawDesertProps,
+  swamp: drawSwampProps,
+  snow: drawSnowProps,
+  dirt: drawDirtProps,
+  grass: drawGrassProps,
+};
+
 function drawBlobProps(ctx: CanvasRenderingContext2D, blob: Blob, env: DioramaEnv, rng: Rng): void {
-  switch (blob.biomeKey) {
-    case "water": drawWaterProps(ctx, blob, env, rng); break;
-    case "forest": drawForestProps(ctx, blob, env, rng); break;
-    case "mountain": drawMountainProps(ctx, blob, env, rng); break;
-    case "desert": drawDesertProps(ctx, blob, env, rng); break;
-    case "swamp": drawSwampProps(ctx, blob, env, rng); break;
-    case "snow": drawSnowProps(ctx, blob, env, rng); break;
-    case "dirt": drawDirtProps(ctx, blob, env, rng); break;
-    default: drawGrassProps(ctx, blob, env, rng); break;
-  }
+  PROP_PAINTERS[blob.biomeKey](ctx, blob, env, rng);
 }
 
 function drawBaseTexture(
@@ -1557,18 +1575,26 @@ function drawBottomHaze(ctx: CanvasRenderingContext2D, w: number, h: number, env
   }
 }
 
-function renderDiorama(w: number, h: number, signature: CityBackdropSignature, size?: CityViewSize): HTMLCanvasElement {
+function renderDiorama(
+  w: number,
+  h: number,
+  signature: CityBackdropSignature,
+  size?: CityViewSize,
+  footprint?: CityGridFootprint,
+  dpr = 1,
+): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(w));
-  canvas.height = Math.max(1, Math.round(h));
+  canvas.width = Math.max(1, Math.round(w * dpr));
+  canvas.height = Math.max(1, Math.round(h * dpr));
   const ctx = canvas.getContext("2d");
   if (!ctx) return canvas;
+  ctx.scale(dpr, dpr);
 
   const rng = makeRng(signature.seed);
-  const env = buildEnv(signature, canvas.width, canvas.height, size);
+  const env = buildEnv(signature, w, h, size, footprint);
   const p = env.plate;
 
-  drawBackground(ctx, canvas.width, canvas.height, env, rng);
+  drawBackground(ctx, w, h, env, rng);
 
   const outline = makeOutline(p.cx, p.cy, p.rx, p.ry, rng, signature.seed);
   const neighborBase = rng.range(0, TAU);
@@ -1585,6 +1611,7 @@ function renderDiorama(w: number, h: number, signature: CityBackdropSignature, s
   plate.height = canvas.height;
   const pctx = plate.getContext("2d");
   if (!pctx) return canvas;
+  pctx.scale(dpr, dpr);
 
   drawPlateUnderside(pctx, outline, env, rng);
   drawPlateTop(pctx, outline, env, rng);
@@ -1606,10 +1633,11 @@ function renderDiorama(w: number, h: number, signature: CityBackdropSignature, s
   mask.height = canvas.height;
   const mctx = mask.getContext("2d");
   if (!mctx) return canvas;
+  mctx.scale(dpr, dpr);
   mctx.save();
   mctx.translate(p.cx, p.cy + 4);
   mctx.scale(p.rx * 1.06, p.ry * 1.06);
-  const solid = size === 15 ? 0.9 : size === 10 ? 0.86 : 0.78;
+  const solid = tierProfile(size).maskSolid;
   const mg = mctx.createRadialGradient(0, 0, 0.55, 0, 0, 1);
   mg.addColorStop(0, "rgba(255, 255, 255, 1)");
   mg.addColorStop(solid, "rgba(255, 255, 255, 1)");
@@ -1624,22 +1652,30 @@ function renderDiorama(w: number, h: number, signature: CityBackdropSignature, s
 
   pctx.save();
   pctx.globalCompositeOperation = "destination-in";
-  pctx.drawImage(mask, 0, 0);
+  pctx.drawImage(mask, 0, 0, w, h);
   pctx.restore();
 
-  ctx.drawImage(plate, 0, 0);
+  ctx.drawImage(plate, 0, 0, w, h);
   ringEllipse(ctx, p.cx, p.cy + 6, p.rx * 1.08, p.ry * 1.06, env.mist, 0.3);
   drawEdgeWisps(ctx, env, rng);
-  drawFloatingRocks(ctx, canvas.width, env, rng);
-  drawBottomHaze(ctx, canvas.width, canvas.height, env, rng);
+  drawFloatingRocks(ctx, w, env, rng);
+  drawBottomHaze(ctx, w, h, env, rng);
 
   return canvas;
 }
 
-const cache = new Map<string, HTMLCanvasElement>();
+interface CachedPlate {
+  canvas: HTMLCanvasElement;
+  pixels: number;
+}
 
-export function clearCityDioramaCache(): void {
-  cache.clear();
+const cache = new Map<string, CachedPlate>();
+const CACHE_PIXEL_BUDGET = 24_000_000;
+
+function deviceScale(ctx: CanvasRenderingContext2D): number {
+  const scale = ctx.getTransform().a;
+  if (!Number.isFinite(scale) || scale <= 0) return 1;
+  return clamp(Math.round(scale * 2) / 2, 1, 2);
 }
 
 export function paintCityDiorama(
@@ -1648,18 +1684,39 @@ export function paintCityDiorama(
   h: number,
   signature: CityBackdropSignature,
   size?: CityViewSize,
+  footprint?: CityGridFootprint,
 ): void {
   const width = Math.max(1, Math.round(w));
   const height = Math.max(1, Math.round(h));
-  const key = `${signature.center}|${signature.neighbors.join(",")}|${signature.seed}|${width}x${height}|s${size ?? 5}`;
-  let canvas = cache.get(key);
-  if (!canvas) {
-    canvas = renderDiorama(width, height, signature, size);
-    if (cache.size >= CACHE_CAP) {
-      const oldest = cache.keys().next().value;
-      if (oldest !== undefined) cache.delete(oldest);
+  const dpr = deviceScale(ctx);
+  const foot = footprint
+    ? `${Math.round(footprint.centerX)},${Math.round(footprint.centerY)},${Math.round(footprint.halfWidth)},${Math.round(footprint.halfHeight)}`
+    : "-";
+  const key = `${signature.center}|${signature.neighbors.join(",")}|${signature.seed}|${width}x${height}|s${size ?? 5}|d${dpr}|g${foot}`;
+
+  const hit = cache.get(key);
+  if (hit) {
+    cache.delete(key);
+    cache.set(key, hit);
+  } else {
+    const canvas = renderDiorama(width, height, signature, size, footprint, dpr);
+    const entry: CachedPlate = { canvas, pixels: canvas.width * canvas.height };
+    let total = entry.pixels;
+    for (const existing of cache.values()) total += existing.pixels;
+    while (cache.size > 0 && total > CACHE_PIXEL_BUDGET) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey === undefined) break;
+      const evicted = cache.get(oldestKey);
+      if (evicted) total -= evicted.pixels;
+      cache.delete(oldestKey);
     }
-    cache.set(key, canvas);
+    cache.set(key, entry);
   }
-  ctx.drawImage(canvas, 0, 0);
+
+  const entry = cache.get(key);
+  if (!entry) return;
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(entry.canvas, 0, 0, width, height);
+  ctx.restore();
 }

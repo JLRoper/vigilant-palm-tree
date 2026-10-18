@@ -2,13 +2,11 @@ import { Terrain, TERRAIN_COST } from "./terrain";
 import { placeResourceTiles, ResourceTile } from "./resourceTiles";
 import type { Axial } from "@heroes/contracts";
 import { mulberry32 } from "../rng";
+import { NEIGHBOR_DIRS } from "./directions";
+
+export { NEIGHBOR_DIRS };
 
 const HERO_SPAWN: Axial = { q: 2, r: 2 };
-
-export const NEIGHBOR_DIRS: Axial[] = [
-  { q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 },
-  { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 },
-];
 
 export interface CityBackdropSignature {
   center: Terrain;

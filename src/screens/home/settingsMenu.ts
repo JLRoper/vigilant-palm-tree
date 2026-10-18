@@ -11,12 +11,13 @@ import {
   growthRateBounds,
   spriteVariantOptions,
   cityBackdropOptions,
+  clampCityBackdrop,
+  DEFAULT_CITY_BACKDROP,
   bgOffsetBounds,
   parallaxLayerCountBounds,
   maxZoomOutHexesWideBounds,
   clampMaxZoomOutHexesWide,
   PARALLAX_SPEEDS,
-  type CityBackdropMode,
   type GameSettings,
   type ResourceStyle,
 } from "../../state/settings";
@@ -634,9 +635,12 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     const backdropLabel = document.createElement("span");
     backdropLabel.textContent = "City view backdrop";
+    backdropLabel.id = "city-backdrop-label";
     backdropRow.appendChild(backdropLabel);
 
     const backdropSelect = document.createElement("select");
+    backdropSelect.id = "city-backdrop-mode";
+    backdropSelect.setAttribute("aria-labelledby", "city-backdrop-label");
     backdropSelect.style.width = "100%";
     backdropSelect.style.padding = "8px";
     backdropSelect.style.fontSize = "12px";
@@ -656,13 +660,16 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     backdropRow.appendChild(backdropSelect);
 
     const backdropHint = document.createElement("div");
+    backdropHint.id = "city-backdrop-hint";
     backdropHint.style.fontSize = "10px";
     backdropHint.style.opacity = "0.55";
-    backdropHint.textContent = "Diorama derives its terrain palette from the settlement tile and its six neighbors. Watercolor skybox uses the static variants above.";
+    backdropHint.textContent = "Diorama derives its terrain palette from the settlement tile and its six neighbors. Watercolor skybox uses the Sprite variant above.";
     backdropRow.appendChild(backdropHint);
+    backdropSelect.setAttribute("aria-describedby", "city-backdrop-hint");
 
     backdropSelect.addEventListener("change", () => {
-      updateSettings({ cityBackdrop: backdropSelect.value as CityBackdropMode });
+      updateSettings({ cityBackdrop: clampCityBackdrop(backdropSelect.value) });
+      refreshSkyboxOnlyRows();
     });
     refreshList.push(() => {
       backdropSelect.value = settings().cityBackdrop;
@@ -670,7 +677,8 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     children.push(backdropRow);
 
-    const gridLinesRow = document.createElement("div");
+    const gridLinesRow = document.createElement("label");
+    gridLinesRow.htmlFor = "city-grid-lines";
     gridLinesRow.style.display = "flex";
     gridLinesRow.style.alignItems = "center";
     gridLinesRow.style.justifyContent = "space-between";
@@ -682,6 +690,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     gridLinesLabelWrap.appendChild(gridLinesLabel);
 
     const gridLinesHint = document.createElement("div");
+    gridLinesHint.id = "city-grid-lines-hint";
     gridLinesHint.textContent = "Outline the isometric cells in city view. The grid floor is transparent either way.";
     gridLinesHint.style.fontSize = "10px";
     gridLinesHint.style.opacity = "0.55";
@@ -689,7 +698,9 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     gridLinesRow.appendChild(gridLinesLabelWrap);
 
     const gridLinesToggle = document.createElement("input");
+    gridLinesToggle.id = "city-grid-lines";
     gridLinesToggle.type = "checkbox";
+    gridLinesToggle.setAttribute("aria-describedby", "city-grid-lines-hint");
     gridLinesToggle.checked = current.cityGridLines;
     gridLinesToggle.style.accentColor = "#f77f00";
     gridLinesToggle.style.transform = "scale(1.2)";
@@ -871,6 +882,20 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
       refreshParallaxLayerLabel(s);
     });
 
+    function refreshSkyboxOnlyRows(): void {
+      const diorama = settings().cityBackdrop === "diorama";
+      for (const row of [bgXRow, bgYRow, parallaxToggleRow]) {
+        row.style.opacity = diorama ? "0.45" : "1";
+        row.style.pointerEvents = diorama ? "none" : "auto";
+      }
+      bgXSlider.disabled = diorama;
+      bgYSlider.disabled = diorama;
+      parallaxCheck.disabled = diorama;
+      parallaxLayerSlider.disabled = diorama;
+    }
+    refreshList.push(refreshSkyboxOnlyRows);
+    refreshSkyboxOnlyRows();
+
     children.push(parallaxToggleRow);
 
     const logPanelToggleRow = document.createElement("div");
@@ -982,6 +1007,8 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
       territoryBorderWidth: borderBounds.default,
       populationGrowthRate: growthBounds.default,
       spriteVariant: 1,
+      cityBackdrop: DEFAULT_CITY_BACKDROP,
+      cityGridLines: true,
       cityBgOffsetX: bgBounds.default,
       cityBgOffsetY: bgBounds.default,
       parallaxEnabled: false,

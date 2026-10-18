@@ -570,7 +570,7 @@ The city grid floor is transparent: `paintCityCell` draws only the diamond outli
 **Render order** (back-to-front for correct z-ordering):
 
 1. Background fill (`#1a1620`)
-2. Grid cells: diamond tiles in draw order (`cellsInDrawOrder()`), fill `#2a2438`, stroke `#3a3450`, hovered cell gets gold stroke; while the build placer is active, cells it accepts (`CitySceneInput.buildableCells` → `cityCell.buildable`, 2026-09-29) get a subtle buildable tint + lighter stroke so free cells are scannable
+2. Grid cells: diamond outlines only in draw order (`cellsInDrawOrder()`) — no floor fill, so the diorama/skybox shows through; stroke `#3a3450`, hovered cell gets a dark under-stroke plus a gold ring, and `cityCell.gridLines` (the `cityGridLines` setting, default on) suppresses the plain outline while keeping hover/buildable; while the build placer is active, cells it accepts (`CitySceneInput.buildableCells` → `cityCell.buildable`, 2026-09-29) get a dark buildable tint + warm outline so free cells are scannable
 3. Resource spots: colored diamonds with rune icon (attempts sprite first, falls back to `RESOURCE_PAL` procedural shape). **A spot may be `food`** since 2026-10-01 — a city spot is the only tile a farm building can exploit for the 3.0 multiplier, and the vestigial `isMineable` filter that hid them was removed from `GameEngine.handleDblClick`
 4. Mines: isometric boxes (walls + roof) with resource palette, level number label, and resource spot icon behind
 5. Buildings: sorted by `gx + gy` (painter's algorithm), each drawn via `drawBuilding()`

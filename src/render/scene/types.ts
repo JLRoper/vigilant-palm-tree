@@ -205,6 +205,13 @@ export interface HeroNode {
 // math (city view has no Camera -- it's drawn straight into the canvas --
 // but they reuse WorldPoint since it's the same plain {x,y} shape).
 
+export interface CityGridFootprint {
+  halfWidth: number;
+  halfHeight: number;
+  centerX: number;
+  centerY: number;
+}
+
 export interface CitySkyboxNode {
   kind: "citySkybox";
   viewportW: number;
@@ -218,6 +225,8 @@ export interface CitySkyboxNode {
   backdropMode?: "diorama" | "skybox";
   /** City tier (5/10/15); the diorama plate grows with the grid so large tiers keep a visible border. */
   citySize?: CityViewSize;
+  /** Screen-space extent of the isometric grid; the diorama plate and its calm centre are sized from it. */
+  gridFootprint?: CityGridFootprint;
 }
 
 export interface CityCellNode {
@@ -230,8 +239,8 @@ export interface CityCellNode {
   hovered: boolean;
   /** Set while the build placer is active and the pending building can be placed here; the painter adds a subtle tint so free cells are scannable. */
   buildable?: boolean;
-  /** Draw this cell's diamond outline. The floor is always transparent; absent means true. */
-  gridLines?: boolean;
+  /** Draw this cell's diamond outline. The floor is always transparent. */
+  gridLines: boolean;
 }
 
 export interface CityResourceSpotNode {

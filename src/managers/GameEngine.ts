@@ -566,20 +566,18 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       return;
     }
 
-    const map = cityMap;
-    if (!map) return;
-    const terrain = map.get(t.q, t.r);
+    const terrain = cityMap.get(t.q, t.r);
     if (!terrain || terrain === "water" || terrain === "mountain") return;
     const controlling = resolveControllingSettlement(
       this.state.getSettlements(),
       t.q,
       t.r,
-      map.width,
-      map.height,
+      cityMap.width,
+      cityMap.height,
     );
     if (!controlling || controlling.ownerId !== localId) return;
     const existing = controlling.districts?.[districtKey(t.q, t.r)];
-    const mapRes = map.resourceTileAt(t.q, t.r)?.resource ?? null;
+    const mapRes = cityMap.resourceTileAt(t.q, t.r)?.resource ?? null;
     const spots =
       existing?.citySpots && existing.citySpots.length > 0
         ? existing.citySpots
@@ -595,7 +593,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       existing?.buildings ?? [],
       gs.castleSeed,
       { q: t.q, r: t.r },
-      sampleCityBackdrop(map, t.q, t.r, gs.castleSeed),
+      sampleCityBackdrop(cityMap, t.q, t.r, gs.castleSeed),
     );
     if (cityView.isOpen() && gs.selectedSettlementId !== controlling.id) {
       const tc = this.state.getTurnController();

@@ -1,20 +1,14 @@
 import type { Axial } from "@heroes/contracts";
 import type { GameMap } from "./gameMap";
 import { TERRAIN_COST } from "./terrain";
+import { NEIGHBOR_DIRS } from "./directions";
+
+export { NEIGHBOR_DIRS };
 
 // Moved from src/map/pathfinding.ts (which now re-exports this module) so
 // server-side trade-route caravans (docs/wagons-stockpiles-trade-routes-plan.md
 // §5.2) can A* on the deterministic rebuilt GameMap -- the engine package
 // cannot import from the client tree.
-
-export const NEIGHBOR_DIRS: Axial[] = [
-  { q: 1, r: 0 },
-  { q: 1, r: -1 },
-  { q: 0, r: -1 },
-  { q: -1, r: 0 },
-  { q: -1, r: 1 },
-  { q: 0, r: 1 },
-];
 
 const DQ = [1, 1, 0, -1, -1, 0];
 const DR = [0, -1, -1, 0, 1, 1];
