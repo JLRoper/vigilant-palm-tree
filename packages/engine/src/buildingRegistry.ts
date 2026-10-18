@@ -17,6 +17,12 @@ export interface BuildingEffect {
   placementCost: Partial<Record<ResourceType, number>>;
   upkeepPerLevel: { wood: number; stone: number };
   recruits: RecruitEntry[];
+  /** Workforce slot capacity (assigned workers clamp to this). */
+  maxWorkers?: number;
+  /** Draft pool capacity per unit entry (default 3 when absent). */
+  draftMax?: number;
+  /** Base draft recharge in entries per day (default 0.25 when absent). */
+  draftPerDay?: number;
   settlementEffects: {
     goldPerTurn?: number;
     foodPerTurn?: number;
@@ -47,6 +53,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: {},
     upkeepPerLevel: { wood: 3, stone: 2 },
     recruits: [],
+    maxWorkers: 3,
     settlementEffects: {},
     playerEffects: { controlRangeBonus: 1 },
   },
@@ -59,6 +66,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 100, wood: 5 },
     upkeepPerLevel: { wood: 1, stone: 0 },
     recruits: [],
+    maxWorkers: 1,
     settlementEffects: { populationBonus: 50 },
     playerEffects: {},
   },
@@ -71,6 +79,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 300, wood: 8, stone: 5 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
+    maxWorkers: 2,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: { visionRangeBonus: 2 },
   },
@@ -86,6 +95,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "monk", goldCost: 300, resourceCost: { arcane: 1 }, minLevel: 1 },
       { unitTypeId: "mage", goldCost: 500, resourceCost: { arcane: 2 }, minLevel: 2 },
     ],
+    maxWorkers: 3,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { resourceYieldBonus: { arcane: 3 } },
     playerEffects: {},
   },
@@ -98,6 +110,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 250, wood: 6, stone: 4 },
     upkeepPerLevel: { wood: 2, stone: 0 },
     recruits: [],
+    maxWorkers: 3,
     settlementEffects: { resourceYieldBonus: { wood: 3, stone: 3, iron: 3 } },
     playerEffects: {},
   },
@@ -110,6 +123,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 250, wood: 6, stone: 4 },
     upkeepPerLevel: { wood: 2, stone: 0 },
     recruits: [],
+    maxWorkers: 3,
     settlementEffects: { resourceYieldBonus: { stone: 3 } },
     playerEffects: {},
   },
@@ -122,6 +136,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 250, wood: 6, stone: 4 },
     upkeepPerLevel: { wood: 2, stone: 0 },
     recruits: [],
+    maxWorkers: 3,
     settlementEffects: { resourceYieldBonus: { iron: 3 } },
     playerEffects: {},
   },
@@ -134,6 +149,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 200, wood: 8, stone: 5 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
+    maxWorkers: 3,
     settlementEffects: { goldPerTurn: 40 },
     playerEffects: {},
   },
@@ -150,6 +166,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "pikeman", goldCost: 250, resourceCost: { iron: 3 }, minLevel: 2 },
       { unitTypeId: "crusader", goldCost: 500, resourceCost: { iron: 5 }, minLevel: 3 },
     ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 2 },
     playerEffects: {},
   },
@@ -162,6 +181,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 250, wood: 5, stone: 6 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
+    maxWorkers: 2,
     settlementEffects: { unitCostReductionPct: 10 },
     playerEffects: {},
   },
@@ -174,6 +194,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 300, wood: 12, stone: 6 },
     upkeepPerLevel: { wood: 2, stone: 0 },
     recruits: [],
+    maxWorkers: 2,
     settlementEffects: { populationBonus: 100 },
     playerEffects: {},
   },
@@ -186,6 +207,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 120, wood: 3 },
     upkeepPerLevel: { wood: 0, stone: 0 },
     recruits: [],
+    maxWorkers: 2,
     settlementEffects: { foodPerTurn: 5 },
     playerEffects: {},
   },
@@ -198,6 +220,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 80, wood: 4 },
     upkeepPerLevel: { wood: 1, stone: 0 },
     recruits: [{ unitTypeId: "peasant", goldCost: 25, minLevel: 1 }],
+    maxWorkers: 2,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { foodPerTurn: 2, populationBonus: 20 },
     playerEffects: {},
   },
@@ -213,6 +238,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "archer", goldCost: 250, resourceCost: { wood: 2 }, minLevel: 1 },
       { unitTypeId: "crossbowman", goldCost: 350, resourceCost: { iron: 2 }, minLevel: 2 },
     ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: { heroAttackBonus: 1 },
   },
@@ -225,6 +253,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 350, wood: 10, stone: 5 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [{ unitTypeId: "cavalry", goldCost: 400, resourceCost: { iron: 2 }, minLevel: 1 }],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
@@ -237,6 +268,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 250, wood: 8 },
     upkeepPerLevel: { wood: 2, stone: 1 },
     recruits: [{ unitTypeId: "warhound", goldCost: 180, minLevel: 1 }],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
@@ -252,6 +286,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "giant_eagle", goldCost: 1400, resourceCost: { arcane: 2 }, minLevel: 1 },
       { unitTypeId: "eagle_prince", goldCost: 2400, resourceCost: { arcane: 4 }, minLevel: 2 },
     ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: {},
     playerEffects: {},
   },
@@ -264,6 +301,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 150, wood: 8, stone: 4 },
     upkeepPerLevel: { wood: 1, stone: 0 },
     recruits: [],
+    maxWorkers: 2,
     settlementEffects: { foodPerTurn: 3, storageBonus: { food: 600 } },
     playerEffects: {},
   },
@@ -279,6 +317,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 500, wood: 16, stone: 12 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
+    maxWorkers: 2,
     settlementEffects: {
       storageBonus: { wood: 600, stone: 600, iron: 600, arcane: 600, food: 600 },
       treasuryBonus: 500,
@@ -295,6 +334,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 400, wood: 6, stone: 8 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
+    maxWorkers: 2,
     // No goldPerTurn of its own: this building widens the treasury cap and
     // holds a bank pot; it is not an income source. The 60g this used to
     // advertise was never applied by the economy and the description promised
@@ -313,6 +353,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 400, wood: 6, stone: 8 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
+    maxWorkers: 2,
     // settlementTreasuryCap sums treasuryBonus over every building, so a new
     // cap-building needs no capacity.ts change -- it contributes on sight.
     settlementEffects: { treasuryBonus: 2000 },
@@ -327,6 +368,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 300, wood: 6, stone: 4 },
     upkeepPerLevel: { wood: 2, stone: 0 },
     recruits: [],
+    maxWorkers: 3,
     settlementEffects: { goldPerTurn: 40 },
     playerEffects: {},
   },
@@ -339,6 +381,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 150, wood: 5 },
     upkeepPerLevel: { wood: 1, stone: 0 },
     recruits: [],
+    maxWorkers: 3,
     settlementEffects: { resourceYieldBonus: { wood: 3 } },
     playerEffects: {},
   },
@@ -351,6 +394,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 350, wood: 5, stone: 6 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
+    maxWorkers: 3,
     settlementEffects: { resourceYieldBonus: { arcane: 3 } },
     playerEffects: {},
   },
@@ -363,6 +407,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 150, wood: 4 },
     upkeepPerLevel: { wood: 1, stone: 0 },
     recruits: [{ unitTypeId: "ghoul", goldCost: 40, minLevel: 1 }],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
@@ -378,6 +425,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "bone_archer", goldCost: 260, resourceCost: { wood: 2 }, minLevel: 1 },
       { unitTypeId: "bone_pikeman", goldCost: 260, resourceCost: { iron: 3 }, minLevel: 2 },
     ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
@@ -393,6 +443,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "wraith", goldCost: 380, resourceCost: { arcane: 2 }, minLevel: 1 },
       { unitTypeId: "blood_knight", goldCost: 480, resourceCost: { iron: 2 }, minLevel: 2 },
     ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 2 },
     playerEffects: {},
   },
@@ -408,6 +461,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "vampire_lord", goldCost: 850, resourceCost: { arcane: 4 }, minLevel: 1 },
       { unitTypeId: "lich", goldCost: 1900, resourceCost: { arcane: 5 }, minLevel: 2 },
     ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
@@ -423,6 +479,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "dwarf_axeman", goldCost: 220, minLevel: 1 },
       { unitTypeId: "shield_bearer", goldCost: 280, resourceCost: { iron: 2 }, minLevel: 2 },
     ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 2 },
     playerEffects: {},
   },
@@ -435,6 +494,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 350, wood: 8, stone: 6 },
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [{ unitTypeId: "hand_gunner", goldCost: 380, resourceCost: { iron: 2 }, minLevel: 1 }],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
@@ -450,6 +512,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "ironsworn", goldCost: 550, resourceCost: { iron: 4 }, minLevel: 1 },
       { unitTypeId: "iron_golem", goldCost: 1200, resourceCost: { stone: 4, iron: 4 }, minLevel: 2 },
     ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 2 },
     playerEffects: {},
   },
@@ -465,6 +530,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "runesmith", goldCost: 550, resourceCost: { arcane: 3 }, minLevel: 1 },
       { unitTypeId: "forge_lord", goldCost: 2200, resourceCost: { iron: 6, arcane: 2 }, minLevel: 2 },
     ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
@@ -480,6 +548,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "forest_scout", goldCost: 180, resourceCost: { wood: 1 }, minLevel: 1 },
       { unitTypeId: "thorn_archer", goldCost: 280, resourceCost: { wood: 2 }, minLevel: 2 },
     ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
@@ -495,6 +566,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "briar_warden", goldCost: 260, resourceCost: { wood: 2 }, minLevel: 1 },
       { unitTypeId: "warbeast", goldCost: 300, minLevel: 2 },
     ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
@@ -510,6 +584,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "elk_rider", goldCost: 450, resourceCost: { wood: 2 }, minLevel: 1 },
       { unitTypeId: "stag_knight", goldCost: 2000, resourceCost: { arcane: 3 }, minLevel: 2 },
     ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
@@ -522,6 +599,9 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 500, wood: 12, stone: 8 },
     upkeepPerLevel: { wood: 2, stone: 1 },
     recruits: [{ unitTypeId: "treant_elder", goldCost: 900, resourceCost: { wood: 3 }, minLevel: 1 }],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
@@ -657,4 +737,23 @@ export function combineUpgradeCosts(costs: BuildingUpgradeCost[]): BuildingUpgra
     }),
     { gold: 0, wood: 0, stone: 0, days: 0 },
   );
+}
+
+export const WORKFORCE_UPGRADE_ACCEL_KINDS: readonly BuildingKind[] = ["townHall", "mageGuild"];
+
+export function buildingMaxWorkers(kind: BuildingKind): number {
+  const value = REGISTRY[kind].maxWorkers ?? 2;
+  return value < 1 ? 1 : value;
+}
+
+export function buildingDraftMax(kind: BuildingKind): number {
+  return REGISTRY[kind].draftMax ?? 3;
+}
+
+export function buildingDraftPerDay(kind: BuildingKind): number {
+  return REGISTRY[kind].draftPerDay ?? 0.25;
+}
+
+export function isRecruitBuilding(kind: BuildingKind): boolean {
+  return REGISTRY[kind].recruits.length > 0;
 }

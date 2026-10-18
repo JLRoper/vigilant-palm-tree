@@ -2,6 +2,10 @@ import type { BuildingDef, DistrictState, GameState, SettlementId, SettlementSta
 import { districtKey } from "../control";
 import { pickStyleForBuilding } from "../styleResolver";
 
+export interface AdvanceUpgradesOptions {
+  accel?: (s: SettlementState) => number;
+}
+
 /** Applies `fn` to every building inside every district, preserving the record shape. */
 function mapDistrictBuildings(
   districts: Record<string, DistrictState> | undefined,
@@ -15,12 +19,13 @@ function mapDistrictBuildings(
   return out;
 }
 
-export function advanceSettlementUpgrades(state: GameState): GameState {
+export function advanceSettlementUpgrades(state: GameState, opts: AdvanceUpgradesOptions = {}): GameState {
+  const accel = opts.accel ?? (() => 0);
   let changed = false;
   const newSettlements: Record<SettlementId, SettlementState> = { ...state.settlements };
   for (const [id, s] of Object.entries(newSettlements)) {
     if (!s.upgrade) continue;
-    const daysRemaining = s.upgrade.daysRemaining - 1;
+    const daysRemaining = s.upgrade.daysRemaining - (1 + accel(s));
     if (daysRemaining > 0) {
       newSettlements[id] = { ...s, upgrade: { ...s.upgrade, daysRemaining } };
       changed = true;

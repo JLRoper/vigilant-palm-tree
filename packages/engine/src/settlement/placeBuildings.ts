@@ -13,6 +13,7 @@ import {
 } from "../buildingRegistry";
 import { districtKey } from "../control";
 import { type CitySpot } from "./citySpots";
+import { hasExplicitStaffing } from "./workforce";
 
 // The server-side (and optimistic client-side) commit of the city view's
 // working cart -- the F4 gap closer. Mirrors the client's own net-cost model
@@ -66,6 +67,7 @@ function sanitize(
   previous: BuildingDef[],
   incoming: BuildingDef,
   stampTimers: boolean,
+  newPlacementWorkers: number | undefined,
 ): BuildingDef {
   // New placements get their construction timer recomputed server-side (a
   // modified client can't ship a 0-day build); existing buildings keep the
@@ -91,11 +93,21 @@ function sanitize(
     } else {
       delete merged.bank;
     }
+    // workers/draft are server-owned staffing state (assignWorkers/recruit
+    // commands own them); a modified client can't rewrite them through the
+    // placeBuildings round-trip.
+    if (prev.workers !== undefined) merged.workers = prev.workers;
+    else delete merged.workers;
+    if (prev.draft) merged.draft = { ...prev.draft };
+    else delete merged.draft;
   } else {
     merged.level = 1;
     delete merged.w;
     delete merged.h;
     delete merged.bank;
+    if (newPlacementWorkers === undefined) delete merged.workers;
+    else merged.workers = newPlacementWorkers;
+    delete merged.draft;
   }
   if (construction) merged.construction = construction;
   else delete merged.construction;
@@ -114,6 +126,8 @@ export function applyPlaceBuildings(
   if (!s) return { ok: false, state, reason: "no_settlement" };
   if (s.ownerId !== actor) return { ok: false, state, reason: "forbidden_not_your_settlement" };
 
+  const newPlacementWorkers = hasExplicitStaffing(s) ? 0 : undefined;
+
   if (district) {
     if (buildings.some((b) => b.kind === "townHall")) {
       return { ok: false, state, reason: "town_hall_forbidden_in_district" };
@@ -121,7 +135,7 @@ export function applyPlaceBuildings(
     const key = districtKey(district.q, district.r);
     const prevDistrict = s.districts?.[key];
     const prevBuildings = prevDistrict?.buildings ?? [];
-    const sanitized = buildings.map((b) => sanitize(prevBuildings, b, true));
+    const sanitized = buildings.map((b) => sanitize(prevBuildings, b, true, newPlacementWorkers));
 
     const occupied = new Set<string>();
     for (const b of sanitized) {
@@ -214,7 +228,7 @@ export function applyPlaceBuildings(
     if ((net[r] ?? 0) > (s.warehouse[r] ?? 0)) return { ok: false, state, reason: `not_enough_${r}` };
   }
 
-  const sanitized = buildings.map((b) => sanitize(s.buildings, b, !freeInitialLayout));
+  const sanitized = buildings.map((b) => sanitize(s.buildings, b, !freeInitialLayout, newPlacementWorkers));
   const newSettlements: Record<SettlementId, SettlementState> = {
     ...state.settlements,
     [settlementId]: {

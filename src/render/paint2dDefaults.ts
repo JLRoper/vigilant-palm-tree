@@ -188,6 +188,10 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
       const key = districtSpriteKey(variant, tier);
       return narrowResolvedSprite(provider.resolve(key));
     },
+    resolveSpriteForCityPerson(): ResolvedSprite | undefined {
+      const key = unitArenaKey("peasant", "idle") as SpriteKey;
+      return narrowResolvedSprite(provider.resolve(key));
+    },
     resolveSprite(key: SpriteKey): ResolvedSprite | undefined {
       return narrowResolvedSprite(provider.resolve(key));
     },

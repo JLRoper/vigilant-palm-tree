@@ -8,7 +8,7 @@ Six resource types are defined by [`packages/contracts/src/resources.ts`](../pac
 
 | Resource | Map tile yield | Main use |
 |---|---:|---|
-| Gold | 20 (tile-rate value; the treasury credit is the separate building `goldPerTurn`, paid by End Turn since 2026-10-18 — see F2) | Recruitment, construction, trade, charter purse |
+| Gold | 20 (tile-rate value; the treasury credit is the separate building `goldPerTurn`, paid by End Turn since 2026-10-18 and scaled by staffing — see F2) | Recruitment, construction, trade, charter purse |
 | Wood | 15 | Building costs and upkeep |
 | Stone | 12 | Building costs and upkeep |
 | Iron | 8 | Faction building/recruit costs and settlement upgrades |
@@ -40,7 +40,7 @@ Food is live, but it is not a map resource. City food spots supply the local mul
 
 ## Economy caveat — RESOLVED 2026-10-18
 
-`effectiveSettlementIncome()` is a projection helper, and End Turn now pays everything it projects: morale-scaled tax, `producerTurnOutput` (including a `goldMine`), **and** every completed non-producer building's `goldPerTurn` (a `market` pays 40/level). Under-construction buildings are excluded from both sides. The former divergence — `market.goldPerTurn` shown in the HUD but never credited — was finding F2 in [`resource-gathering.md`](./resource-gathering.md), now **closed**.
+`effectiveSettlementIncome()` is a projection helper, and End Turn now pays everything it projects: morale-scaled tax, `producerTurnOutput` (including a `goldMine`), **and** every completed non-producer building's `goldPerTurn` **× staffing effort** (a `market` pays 40/level at full staffing), in the main city and districts. Under-construction buildings are excluded from both sides. The former divergence — `market.goldPerTurn` shown in the HUD but never credited — was finding F2 in [`resource-gathering.md`](./resource-gathering.md), now **closed**.
 
 `resourceRates.gold` remains a phantom (a persisted tile-rate value `produceSettlementResources` never consumes, because gold is not a warehouse resource); the per-turn display reads combined production instead.
 

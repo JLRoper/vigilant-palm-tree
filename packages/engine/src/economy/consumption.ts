@@ -100,6 +100,19 @@ export function applySettlementConsumption(s: SettlementState): SettlementState 
   return { ...s, warehouse };
 }
 
+export const WAGE_POPULATION_PER_GOLD = 100;
+
+export function settlementDailyWage(s: SettlementState): number {
+  const pop = Number.isFinite(s.population) ? s.population : 0;
+  return Math.floor(pop / WAGE_POPULATION_PER_GOLD);
+}
+
+export function applySettlementWages(s: SettlementState): SettlementState {
+  const wage = settlementDailyWage(s);
+  if (wage <= 0) return s;
+  return { ...s, gold: Math.max(0, s.gold - wage) };
+}
+
 export function applyMoraleDecay(s: SettlementState): SettlementState {
   const decay = moraleDecay(s);
   // Recovery exists so falling behind is recoverable, not permanent: a fully

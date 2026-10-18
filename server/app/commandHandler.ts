@@ -14,6 +14,7 @@ transferGold,
   reorderStack,
   captureSettlement,
   recruitUnits,
+  assignWorkers,
   transferUnits,
   unitAllowedForSeatFaction,
   playerFactionId,
@@ -2145,6 +2146,46 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         hero: result.state.heroes[command.heroId],
         settlement: result.state.settlements[command.settlementId],
       };
+    }
+    case "AssignWorkers": {
+      // Same ladder RecruitUnits uses: settlement existence, then
+      // ownership, then the engine reducer's own staffability/range checks
+      // (assignWorkers has no actor notion, same as recruitUnits).
+      const settlement = row.settlements[command.settlementId];
+      if (!settlement) {
+        return { ok: false, reason: "no_settlement", events: [] };
+      }
+      if (settlement.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
+      }
+      const result = assignWorkers(state, {
+        settlementId: command.settlementId,
+        gx: command.gx,
+        gy: command.gy,
+        workers: command.workers,
+        ...(command.source ? { source: command.source } : {}),
+        ...(command.district ? { district: command.district } : {}),
+      });
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "WorkersAssigned",
+        actor: command.actor,
+        settlementId: command.settlementId,
+        gx: command.gx,
+        gy: command.gy,
+        workers: command.workers,
+        ...(command.district ? { district: command.district } : {}),
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
     }
     case "SubmitSettlementBattleResult": {
       // Manual-arena result submission for a settlement-garrison battle,

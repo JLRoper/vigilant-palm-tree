@@ -6,6 +6,8 @@ import { applyPopulationGrowth } from "../settlement/populationGrowth";
 import { applyGarrisonUpkeep } from "../settlement/garrisonUpkeep";
 import { advanceCharters } from "../charter/advance";
 import { advanceSettlementUpgrades, advanceBuildingConstructions } from "../settlement/advance";
+import { applyDraftRecharge } from "../settlement/draftRecharge";
+import { upgradeAccelEffort } from "../settlement/workforce";
 import { advanceTradeRoutes } from "../logistics";
 import { applyCaravanUpkeep } from "../economy/caravanUpkeep";
 import { accrueBankInterest, matureBankWithdrawals } from "../economy/bank";
@@ -83,8 +85,12 @@ export function advanceRound(
     selectedSettlementId: null,
   };
   withDay = advanceCharters(withDay);
-  withDay = advanceSettlementUpgrades(withDay);
+  withDay = advanceSettlementUpgrades(withDay, { accel: upgradeAccelEffort });
   withDay = advanceBuildingConstructions(withDay);
+  const rechargedSettlements = applyDraftRecharge(withDay.settlements, unitTypes);
+  if (rechargedSettlements !== withDay.settlements) {
+    withDay = { ...withDay, settlements: rechargedSettlements, dirty: true };
+  }
   // Caravans need the (deterministically rebuilt) map for A*; without one
   // they simply wait at their current stop (docs plan §5.2).
   withDay = advanceTradeRoutes(withDay, map);

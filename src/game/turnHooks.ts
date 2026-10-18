@@ -21,6 +21,7 @@ import {
   updateTradeRoute as updateTradeRouteCommand,
   advanceCharterTravel,
   recruitUnits as recruitUnitsCommand,
+  assignWorkers as assignWorkersCommand,
   transferUnits as transferUnitsCommand,
   bankGold as bankGoldCommand,
   submitSettlementBattleResult,
@@ -483,6 +484,31 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         });
       } catch (e) {
         reportCommandFailure("Recruit units", e);
+      }
+    },
+    onAssignWorkers: async (
+      actor: number,
+      settlementId: SettlementId,
+      gx: number,
+      gy: number,
+      workers: number,
+      district?: { q: number; r: number },
+      source?: { gx: number; gy: number },
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await assignWorkersCommand(name, {
+          actor,
+          settlementId,
+          gx,
+          gy,
+          workers,
+          ...(source ? { source } : {}),
+          ...(district ? { district } : {}),
+        });
+      } catch (e) {
+        reportCommandFailure("Assign workers", e);
       }
     },
     onTransferUnits: async (

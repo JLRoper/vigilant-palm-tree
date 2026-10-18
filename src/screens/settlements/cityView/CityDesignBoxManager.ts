@@ -8,6 +8,7 @@ import {
 
 export interface CityDesignBoxCallbacks {
   onBuild: () => void;
+  onWorkforce: () => void;
   onBack: () => void;
 }
 
@@ -74,6 +75,22 @@ export class CityDesignBoxManager {
     });
     this.buildBtn.addEventListener("click", () => callbacks.onBuild());
     this.body.appendChild(this.buildBtn);
+
+    const workforceBtn = document.createElement("button");
+    workforceBtn.textContent = "♟ Workforce";
+    workforceBtn.title = "Open the worker assignment panel (w)";
+    Object.assign(workforceBtn.style, {
+      padding: "4px 12px",
+      border: "1px solid rgba(255,255,255,0.2)",
+      background: "rgba(0,0,0,0.7)",
+      color: "#fff",
+      fontSize: "12px",
+      cursor: "pointer",
+      borderRadius: "3px",
+      fontFamily: "system-ui, sans-serif",
+    });
+    workforceBtn.addEventListener("click", () => callbacks.onWorkforce());
+    this.body.appendChild(workforceBtn);
 
     this.backBtn = document.createElement("button");
     this.backBtn.textContent = "← Back";

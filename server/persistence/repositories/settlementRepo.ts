@@ -76,6 +76,8 @@ interface BuildingRow {
   h: number | null;
   construction: { daysRemaining: number } | null;
   bank: BuildingDef["bank"] | null;
+  workers: number | null;
+  draft: BuildingDef["draft"] | null;
 }
 
 interface PlatoonRow {
@@ -115,6 +117,11 @@ function toSettlementState(
     // NULL column means no pot, and the key must be absent rather than
     // undefined for the same deepStrictEqual reason documented below.
     ...(b.bank != null ? { bank: b.bank as BuildingDef["bank"] } : {}),
+    // Workforce columns (migration 030) follow the same rule: NULL means
+    // the key is absent (legacy auto-staffing / full pool), never an
+    // explicit undefined.
+    ...(b.workers != null ? { workers: b.workers } : {}),
+    ...(b.draft != null ? { draft: b.draft } : {}),
   }));
 
   // Shape-guarded through the same helper the JSONB fallback uses: a partial
@@ -206,7 +213,7 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
           // starter set's 6-10 buildings is enough to make the divergence
           // visible. upsertMany re-inserts in array order, so the BIGSERIAL id
           // IS the persisted order.
-          `SELECT settlement_id, gx, gy, kind, level, style, w, h, construction, bank FROM settlement_buildings
+          `SELECT settlement_id, gx, gy, kind, level, style, w, h, construction, bank, workers, draft FROM settlement_buildings
              WHERE game_id = $1 AND settlement_id = ANY($2::text[])
              ORDER BY settlement_id, id`,
           [gameId, settlementIds],
@@ -347,8 +354,8 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
         ]);
         for (const building of settlement.buildings) {
           await db.query(
-            `INSERT INTO settlement_buildings (game_id, settlement_id, gx, gy, kind, level, style, w, h, construction, bank)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            `INSERT INTO settlement_buildings (game_id, settlement_id, gx, gy, kind, level, style, w, h, construction, bank, workers, draft)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
             [
               gameId,
               settlement.id,
@@ -366,6 +373,10 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
               building.construction ? JSON.stringify(building.construction) : null,
               // Absent pot writes NULL, never the string "undefined".
               building.bank ? JSON.stringify(building.bank) : null,
+              // Workforce columns (migration 030), same conditional style:
+              // absent state writes NULL (undefined -> NULL, 0 preserved).
+              building.workers ?? null,
+              building.draft ? JSON.stringify(building.draft) : null,
             ],
           );
         }

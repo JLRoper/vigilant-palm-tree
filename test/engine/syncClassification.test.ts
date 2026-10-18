@@ -9,13 +9,13 @@ test("every declared EngineEvent variant is classified exactly once", () => {
   // variant smaller. 24 -> 25 (2026-10-04): BattleOffered added -- an
   // AI-initiated battle offer waits for its human defender instead of
   // auto-resolving.
-  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 25);
+  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 26);
 });
 
-test("classification counts: 12 apply, 7 resync, 6 ignore", () => {
+test("classification counts: 12 apply, 7 resync, 7 ignore", () => {
   const counts = { apply: 0, resync: 0, ignore: 0 };
   for (const cls of Object.values(ENGINE_EVENT_SYNC_CLASS)) counts[cls] += 1;
-  assert.deepEqual(counts, { apply: 12, resync: 7, ignore: 6 });
+  assert.deepEqual(counts, { apply: 12, resync: 7, ignore: 7 });
 });
 
 test("class agrees with the reducer: BankGoldMoved is an apply kind that replays the reducer", () => {

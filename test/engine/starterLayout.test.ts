@@ -545,7 +545,7 @@ test("the starter city can recruit garrison troops from turn 0", () => {
     gx,
     gy,
     unitTypeId: "peasant",
-    count: 5,
+    count: 3,
   });
   assert.equal(recruited.ok, true, "a fresh settlement recruits peasants from its farmhouse");
   const after = recruited.state.settlements.s0;
@@ -553,8 +553,8 @@ test("the starter city can recruit garrison troops from turn 0", () => {
     (total, platoon) => total + platoon.entries.filter((e) => e.unitTypeId === "peasant").reduce((n, e) => n + e.count, 0),
     0,
   );
-  assert.equal(peasantCount, 5, "the garrison holds the 5 recruited peasants");
-  assert.equal(after.gold, 175, "5 peasants at 25g each debits 300 -> 175");
+  assert.equal(peasantCount, 3, "the garrison holds the 3 recruited peasants (draftMax 3 caps the draft)");
+  assert.equal(after.gold, 225, "3 peasants at 25g each debits 300 -> 225");
 
   // The AI garrison planner shops from the same gate: a settlement with no
   // hero on it gets a purchase through the farmhouse. No hero anywhere (the
