@@ -78,7 +78,45 @@ The `/precommit` and `/pre-pr` slash commands are manual equivalents you can off
 - `/precommit` — run the build + deps + docs + test gate on demand.
 - `/pre-pr` — same as `/precommit`, plus a quick doc sanity sweep.
 
-## Worktree-first default workflow
+## Standard workflow (shape reminder)
+
+**Trigger:** when the user asks "what's the standard workflow here?", "what's the workflow?", "what's the agent workspace flow?", or how to structure multi-agent work in this repo — present the shape below verbatim (or point at `/workflow`), and note kwork is legacy-only.
+
+Three tiers. Start at Tier 1; escalate only when the trigger says so:
+
+```
+TIER 1 — single task, one session (default)
+  alock plan <name> → implement in the primary checkout → /precommit → commit
+
+TIER 2 — bigger task: CLI orchestrator + Task-tool subagents, ONE tree, no worktrees
+  orchestrator: alock plan + alock register + alock build-start  (owns ALL protocol I/O)
+  ├── Task(worker, scope: packages/engine/...)    ← disjoint file scopes
+  ├── Task(worker, scope: src/screens/logistics/) ← subagents alock lock/unlock own files
+  └── collect results → orchestrator runs full builds/tests → alock sweep
+
+TIER 3 — subtasks each need their OWN full build/test cycle, or a track may be
+         abandoned/resumed across days (isolation escalation — manual worktrees)
+  git worktree add .worktrees/<name> -b <branch-name> main   (from the primary checkout)
+  → open a Kilo session IN that directory → alock plan <name> → implement on <branch-name>
+  → integrate to main yourself: serialized, /precommit gate first
+```
+
+kwork is LEGACY: `kwork status/resume/finish/abandon` still operate on existing `.plans/tasks/<id>` records and `.kilo/worktrees/<task>` worktrees, but do not start new tasks with it (stale records and dead worktrees are `kilo-deep-clean` candidates). Agent Manager sessions are for non-task work only (reviews, questions, exploration) — never a second task registry, and never the same task in both systems (duplicate worktree + branch; stale duplicates from exactly that mistake already exist).
+
+### Orchestrator mode rules (Tier 2 detail)
+
+**The orchestrator owns all protocol I/O; subagents do pure work.** All subagents share the session's host PID — a subagent writing protocol state clobbers the orchestrator's or a sibling's.
+
+| Concern | Rule | Owner |
+|---|---|---|
+| File edits | Narrow, disjoint scopes per subtask; `alock lock`/`unlock` files when scopes might touch (lock names are file-keyed — safe for subagents) | Subagent |
+| Full builds / `test:all` / shared-DB suites | Only after collecting subagent results; `.build.{PID}.alock` held for the whole modification window | Orchestrator |
+| `.agentboard/`, `alock sweep`/`janitor`, session-plan updates | Never by subagents | Orchestrator |
+| Dispatch | Parallel OK with disjoint scopes; sequential or file-locked when scopes touch; never two agents in one directory | Orchestrator |
+
+Launch subagents via the `worker` agent (`.kilo/agent/worker.md`) — its system prompt carries this discipline. Staleness note: a subagent's forgotten lock reads LIVE until the whole session dies (shared PID); the 5-minute idle rule is the only backstop, so unlock immediately after the last write. The orchestrator maintains the single session plan (subagents share it).
+
+### Legacy kwork path (records from earlier phases)
 
 Discovery → claim/create the task worktree (kwork start / kilo worktree create, flag file .kilo/worktree-workflow.enabled).
 - Implement there (uncommitted task state lives in the worktree only).
