@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>City View Backdrop — Style Options</title>
+<style>
+  :root {
+    --ink: #0a0f17;
+    --paper: #d9d2c2;
+    --gold: #c9a45c;
+    --gold-dim: #8e7440;
+    --line: rgba(201, 164, 92, 0.24);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 60% -10%, #17202e 0%, #0a0f17 60%);
+    color: var(--paper);
+    font-family: Georgia, "Times New Roman", serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #page-head {
+    max-width: 1324px;
+    margin: 0 auto;
+    padding: 30px 22px 10px;
+  }
+  .head-row {
+    display: flex;
+    gap: 30px;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+  .title-block { min-width: 420px; flex: 1 1 540px; }
+  .eyebrow {
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    font-size: 10px;
+    color: var(--gold);
+    margin-bottom: 10px;
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 38px;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+    color: #ece4d2;
+  }
+  .subtitle {
+    margin: 0;
+    max-width: 670px;
+    color: #a9a292;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .reference {
+    flex: 0 0 360px;
+    max-width: 360px;
+  }
+  .reference img {
+    display: block;
+    width: 100%;
+    border-radius: 5px;
+    border: 1px solid var(--line);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  }
+  .reference figcaption {
+    margin-top: 7px;
+    font-size: 11px;
+    color: #8c887c;
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  .controls {
+    margin: 26px 0 6px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: rgba(21, 29, 43, 0.6);
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  .controls label {
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: #b9b1a0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .controls select, .controls input {
+    background: #0d131d;
+    color: #e7dfcd;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 7px 9px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .controls select { min-width: 190px; }
+  .controls input { width: 92px; }
+  .controls button {
+    background: linear-gradient(#2a3852, #1b2537);
+    color: #e7d5a5;
+    border: 1px solid var(--gold-dim);
+    border-radius: 4px;
+    padding: 8px 16px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .controls button:hover { border-color: var(--gold); color: #f4e6bf; }
+  .controls .hint {
+    margin-left: auto;
+    color: #837d6f;
+    font-size: 11px;
+    max-width: 420px;
+    line-height: 1.4;
+  }
+  #gallery {
+    max-width: 1324px;
+    margin: 0 auto;
+    padding: 22px 22px 80px;
+  }
+  .option-section {
+    margin: 0 0 42px;
+    padding-top: 18px;
+    border-top: 1px solid rgba(201, 164, 92, 0.14);
+  }
+  .option-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  .option-index {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--gold);
+  }
+  .option-section h2 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 400;
+    color: #e8dfcc;
+  }
+  .option-desc {
+    margin: 0;
+    color: #9c9586;
+    font-size: 13px;
+    line-height: 1.5;
+    max-width: 900px;
+  }
+  .canvas-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 640px);
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .canvas-grid canvas {
+    display: block;
+    width: 640px;
+    height: 400px;
+    border-radius: 5px;
+    border: 1px solid rgba(201, 164, 92, 0.18);
+    background: #0c1119;
+  }
+  .canvas-note {
+    grid-column: 1 / -1;
+    color: #7f7a6d;
+    font-size: 11px;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    letter-spacing: 0.04em;
+  }
+  #stage { margin: 0; padding: 0; }
+  body.capture { background: #05080c; overflow: hidden; }
+  body.capture #page-head, body.capture #gallery { display: none; }
+  body.capture #stage { display: block; }
+  .stage-hero { width: 1280px; height: 800px; }
+  .stage-hero canvas {
+    display: block;
+    width: 1280px;
+    height: 800px;
+    border: 0;
+    border-radius: 0;
+  }
+  .stage-option {
+    width: 1280px;
+    height: 800px;
+    display: grid;
+    grid-template-columns: 640px 640px;
+    grid-template-rows: 400px 400px;
+    gap: 0;
+  }
+  .stage-option canvas {
+    display: block;
+    width: 640px;
+    height: 400px;
+    border: 0;
+    border-radius: 0;
+  }
+  .stage-all {
+    width: 1600px;
+    height: 1000px;
+    display: grid;
+    grid-template-columns: 320px repeat(4, 320px);
+    grid-template-rows: repeat(5, 200px);
+    background: #0a0f17;
+  }
+  .stage-all canvas {
+    display: block;
+    width: 320px;
+    height: 200px;
+    border: 0;
+    border-radius: 0;
+  }
+  .all-label {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 18px;
+    border-right: 1px solid rgba(201, 164, 92, 0.2);
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  .all-label b {
+    font-family: Georgia, "Times New Roman", serif;
+    font-weight: 400;
+    font-size: 16px;
+    color: #e6d9b8;
+    line-height: 1.2;
+  }
+  .all-label span {
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #8b7c58;
+  }
+</style>
+</head>
+<body>
+  <header id="page-head">
+    <div class="head-row">
+      <div class="title-block">
+        <div class="eyebrow">heroes-js · city view study</div>
+        <h1>Backdrop Style Options</h1>
+        <p class="subtitle">
+          Five procedural directions for a per-settlement city backdrop, generated from the
+          settlement tile, its six neighbours and a seed. Each canvas is 1280×800 with the same
+          opaque isometric grid and UI chrome so only the landscape changes.
+        </p>
+      </div>
+      <figure class="reference">
+        <img src="../../docs/screenshots/city-view.png" alt="Current city view with the watercolor backdrop" />
+        <figcaption>Current city view — the four static watercolor variants this study replaces.</figcaption>
+      </figure>
+    </div>
+    <div class="controls">
+      <label>Scenario
+        <select id="scenario-select"></select>
+      </label>
+      <label>Seed
+        <input id="seed-input" type="number" min="0" max="9999" step="1" value="7" />
+      </label>
+      <button id="shuffle" type="button">Shuffle</button>
+      <div class="hint">Four seed variations per option, all at the selected scenario. Open a hero at
+        <code>?capture=hero&amp;option=biome-horizon&amp;scenario=river-capital&amp;seed=7</code>.</div>
+    </div>
+  </header>
+  <main id="gallery"></main>
+  <div id="stage"></div>
+  <script src="render-core.js"></script>
+  <script src="options/biome-horizon.js"></script>
+  <script src="options/map-true-panorama.js"></script>
+  <script src="options/settlement-diorama.js"></script>
+  <script src="options/painted-motif-kit.js"></script>
+  <script src="options/cartographers-table.js"></script>
+  <script src="render.js"></script>
+</body>
+</html>
