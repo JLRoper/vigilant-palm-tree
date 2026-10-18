@@ -15,6 +15,8 @@ import {
   LOW_MORALE_EXTRA_DECAY,
   MORALE_RECOVERY_PER_SUPPLIED_TURN,
   MORALE_TAX_INCOME_DIVISOR,
+  settlementIncome,
+  effectiveSettlementIncome,
 } from "@heroes/engine";
 import type { SettlementState } from "../../src/state/gameState";
 
@@ -277,4 +279,30 @@ test("clampWarehouseNonNegative floors negatives and rejects NaN", () => {
   assert.equal(clampWarehouseNonNegative(7), 7);
   assert.equal(clampWarehouseNonNegative(7.9), 7);
   assert.equal(clampWarehouseNonNegative(NaN), 0);
+});
+
+const MARKET_L1 = { gx: 0, gy: 0, kind: "market", level: 1, style: "classic" } as const;
+
+test("settlementIncome: a staffed market scales its goldPerTurn by effort", () => {
+  const legacy = makeSettlement({ population: 500, goldTax: 1, buildings: [{ ...MARKET_L1 }] });
+  assert.equal(settlementIncome(legacy), 540, "legacy undefined staff keeps the full 40");
+  const third = makeSettlement({ population: 500, goldTax: 1, buildings: [{ ...MARKET_L1, workers: 1 }] });
+  assert.equal(settlementIncome(third), 500 + 13.33, "1 of 3 workers scales 40 → 13.33 (rounded to the credited 2dp)");
+  const idle = makeSettlement({ population: 500, goldTax: 1, buildings: [{ ...MARKET_L1, workers: 0 }] });
+  assert.equal(settlementIncome(idle), 500, "zero staff shuts the market down");
+});
+
+test("effectiveSettlementIncome: market gold follows staffing while morale scales only the tax", () => {
+  const third = makeSettlement({ population: 500, goldTax: 1, morale: 100, buildings: [{ ...MARKET_L1, workers: 1 }] });
+  assert.equal(effectiveSettlementIncome(third), 500 + 13.33, "full morale: 500 tax + 13.33 market");
+  const halfMorale = { ...third, morale: 50 };
+  assert.equal(effectiveSettlementIncome(halfMorale), 250 + 13.33, "half morale halves the tax, not the effort-scaled market gold");
+});
+
+test("settlementIncome: a staffed non-market building contributes no gold, staffed or not", () => {
+  const barracks = { gx: 0, gy: 0, kind: "barracks", level: 1, style: "classic" } as const;
+  const staffed = makeSettlement({ population: 500, goldTax: 1, buildings: [{ ...barracks, workers: 2 }] });
+  assert.equal(settlementIncome(staffed), 500);
+  const legacy = makeSettlement({ population: 500, goldTax: 1, buildings: [barracks] });
+  assert.equal(settlementIncome(legacy), 500);
 });

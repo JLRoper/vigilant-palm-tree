@@ -130,3 +130,58 @@ test("applyPlaceBuildings: initialLayout is ignored for a settlement that alread
   );
   assert.equal(result.state.settlements.s0.buildings.length, 1);
 });
+
+test("applyPlaceBuildings: strips forged workers/draft on new placements", () => {
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    gold: 1000,
+    warehouse: { wood: 20, stone: 10, iron: 5, arcane: 2, food: 0 },
+    buildings: [],
+  });
+  const state = makeState({ settlements: [settlement] });
+  const result = applyPlaceBuildings(state, "s0", 0, [
+    { gx: 0, gy: 0, kind: "house", level: 1, style: "classic", workers: -5, draft: { peasant: 999 } },
+  ]);
+  assert.equal(result.ok, true);
+  const placed = result.state.settlements.s0.buildings[0];
+  assert.equal("workers" in placed, false, "new placements start with no assigned workers");
+  assert.equal("draft" in placed, false, "new placements start with no recruit pool");
+});
+
+test("applyPlaceBuildings: round-trip keeps server-owned workers/draft for existing buildings", () => {
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    gold: 1000,
+    buildings: [
+      { gx: 1, gy: 1, kind: "barracks", level: 1, style: "classic", workers: 0, draft: { peasant: 1 } },
+    ],
+  });
+  const state = makeState({ settlements: [settlement] });
+  const result = applyPlaceBuildings(state, "s0", 0, [
+    { gx: 1, gy: 1, kind: "barracks", level: 1, style: "classic", workers: 9, draft: { peasant: 999 } },
+  ]);
+  assert.equal(result.ok, true);
+  const after = result.state.settlements.s0.buildings[0];
+  assert.equal(after.workers, 0, "a spoofed client workers value must not override the server's");
+  assert.deepEqual(after.draft, { peasant: 1 });
+});
+
+test("applyPlaceBuildings district mode: strips forged workers/draft on new placements", () => {
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    gold: 1000,
+    warehouse: { wood: 20, stone: 10, iron: 5, arcane: 2, food: 0 },
+    buildings: [],
+  });
+  const state = makeState({ settlements: [settlement] });
+  const result = applyPlaceBuildings(
+    state,
+    "s0",
+    0,
+    [{ gx: 2, gy: 2, kind: "house", level: 1, style: "classic", workers: 7, draft: { knight: 50 } }],
+    false,
+    { q: 3, r: 2 },
+  );
+  assert.equal(result.ok, true);
+  const placed = result.state.settlements.s0.districts?.["3,2"].buildings[0];
+  assert.ok(placed, "district building committed");
+  assert.equal("workers" in placed, false);
+  assert.equal("draft" in placed, false);
+});

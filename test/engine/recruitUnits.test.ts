@@ -141,14 +141,16 @@ test("recruitUnits: a full garrison (8 platoons x 3 distinct types) refuses a 25
 });
 
 test("recruitUnits: recruiting the same type twice merges into one growing entry", () => {
+  // Pre-workforce this drafted 2+3; the workforce draft pool caps a barracks
+  // swordsman draft at buildingDraftMax = 3 total, so the split is now 2+1.
   const first = recruit(recruitState({ gold: 1200 }), "swordsman", 2);
   assert.equal(first.ok, true);
-  const second = recruit(first.state, "swordsman", 3);
+  const second = recruit(first.state, "swordsman", 1);
   assert.equal(second.ok, true);
   const after = second.state.settlements.s0;
-  assert.equal(after.gold, 1200 - 400 - 600);
+  assert.equal(after.gold, 1200 - 400 - 200);
   const entries = settlementStacks(after).flatMap((p) => p.entries);
-  assert.deepEqual(entries, [{ unitTypeId: "swordsman", count: 5 }], "one merged entry, no second platoon");
+  assert.deepEqual(entries, [{ unitTypeId: "swordsman", count: 3 }], "one merged entry, no second platoon");
 });
 
 test("recruitUnits: a recruit entry without resourceCost (farmhouse peasant) works", () => {

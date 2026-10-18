@@ -91,11 +91,20 @@ function sanitize(
     } else {
       delete merged.bank;
     }
+    // workers/draft are server-owned staffing state (assignWorkers/recruit
+    // commands own them); a modified client can't rewrite them through the
+    // placeBuildings round-trip.
+    if (prev.workers !== undefined) merged.workers = prev.workers;
+    else delete merged.workers;
+    if (prev.draft) merged.draft = { ...prev.draft };
+    else delete merged.draft;
   } else {
     merged.level = 1;
     delete merged.w;
     delete merged.h;
     delete merged.bank;
+    delete merged.workers;
+    delete merged.draft;
   }
   if (construction) merged.construction = construction;
   else delete merged.construction;

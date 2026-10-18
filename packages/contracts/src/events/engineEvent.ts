@@ -250,4 +250,16 @@ export type EngineEvent =
         amount: number;
         direction: "deposit" | "withdraw";
         district?: { q: number; r: number };
+      }
+    | {
+        // One building's explicit workforce size (0 = shut down). Minimal
+        // payload like BuildingsPlaced: the staffing totals ride the
+        // TurnEnded/poll resync boundary for remote seats.
+        type: "WorkersAssigned";
+        actor: PlayerSeat;
+        settlementId: SettlementId;
+        gx: number;
+        gy: number;
+        workers: number;
+        district?: { q: number; r: number };
       };

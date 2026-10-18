@@ -110,7 +110,7 @@ Settlements can be upgraded to the next tier through an active construction proc
 
 1. **Pre-requisite check:** Population must meet the gate threshold (85% of level cap — the engine constant `UPGRADE_POPULATION_GATE`, not player-configurable), and Town Hall must be at or above the target level.
 2. **Initiation:** Player clicks the upgrade button in the settlement info panel. Costs are deducted immediately from the settlement treasury and warehouse.
-3. **Construction:** `daysRemaining` counts down each `advanceRound`. Settlement operates normally during construction (production, income, growth continue).
+3. **Construction:** `daysRemaining` counts down each `advanceRound` — by **`1 + upgradeAccelEffort` days** (2026-10-17) when the settlement's `townHall` or `mageGuild` is **explicitly staffed** (max effort across the two kinds, so up to 2× with a full crew; unassigned/legacy buildings earn no acceleration). Settlement operates normally during construction (production, income, growth continue).
 4. **Completion:** When `daysRemaining` reaches 0:
    - Level increments to target
    - Gold tax updates (2 for L2, 3 for L3)
@@ -180,6 +180,18 @@ Buildings gate what a settlement can recruit; the newest are **huntingLodge** (p
 
 Caps are derived (`settlement/capacity.ts`) and **soft**: an addition is clamped to headroom, and stock above cap is never destroyed. `granary` and `farmField` moved from the palette's Civilian section to **Production** (both are producers); `farmhouse` stays in Troop Buildings because the palette's `recruits` check runs first.
 
+### Workforce staffing (2026-10-17)
+
+Each settlement derives a worker pool of **`floor(population / 100)`** (`workforcePool` in `packages/engine/src/settlement/workforce.ts`), shared across main-city and district buildings. Workers are assigned per building via the `AssignWorkers` command (`packages/contracts/src/commands/assignWorkers.ts` — reducer in `packages/engine/src/settlement/staffWorkers.ts`, rejection reasons `no_settlement` / `unowned_settlement` / `no_building` / `not_staffable` / `invalid_workers` / `pool_exhausted`), emitting a `WorkersAssigned` EngineEvent. `BuildingDef.workers` **undefined = legacy auto-staffed** (effort 1, old saves unchanged); an explicit number scales the building's effort `min(workers / maxWorkers, 1)` and `0` shuts it down. Roles per kind:
+
+- **Producers** (goldMine, woodcutterHut, stoneMine, ironMine, arcaneFont, farmField, farmhouse, granary): output scales `round(base × cellMultiplier × effort)`.
+- **`market`**: flat `goldPerTurn` × effort lands in the treasury (F2 resolved).
+- **Recruit kinds (19):** each recruits from a per-unitTypeId **draft pool** (`draftMax` 3; `draftPerDay` 0.25 × `(1 + effort)` reclaimed daily on the round wrap, `applyDraftRecharge`). Recruiting consumes the pool (rejection `draft_pool_empty` when the count exceeds `floor` of the pool) and still costs gold/resources; `draft` undefined = full pool (legacy).
+- **`townHall` + `mageGuild`:** staffing accelerates the settlement's active upgrade timer — see the Upgrade process below.
+- Every other kind holds workers **inert** (parked). Per-kind caps (`buildingMaxWorkers`): producers 3 (farmField/farmhouse/granary 2), recruit kinds 4, market/townHall/mageGuild 3, house 1, apartment 2, all others 2.
+
+Client: per-building worker stepper and draft-pool readouts in the city-view building menu, a floating workforce panel (`w` opens it; drag workers onto buildings; geometry key `workforcePanel`), a Workforce row in the settlement info menu, and city-view peasant sprites (cap 4 per building).
+
 ## Building persistence (✅ implemented)
 
 Buildings placed in the city view are persisted to `SettlementState.buildings` (a `BuildingDef[]` array). Previously ephemeral (only existed while city view was open), buildings now survive close/reopen cycles.
@@ -217,8 +229,8 @@ State types defined in [`src/state/gameState.ts`](../src/state/gameState.ts):
 - `CharterState` — `{ id, heroId, ownerId, targetQ, targetR, settlementName, phase, daysRemaining, settlementId, resourceRates, foundedOnResource, citySpots }`
 - `HeroState.isChartering` / `HeroState.charterId`
 - `GameState.activeCharters`, `nextCharterId`, `nextSettlementId`
-- `UpgradeState` — `{ kind: "townHall"|"settlement", targetLevel: 2|3, daysRemaining, newResourceRates?, newCitySpots? }`
-- `SettlementState.buildings` — `BuildingDef[]` (persisted building array; a bank's pot rides on its own `BuildingDef.bank?: BankPot`, stored in the nullable JSONB column `settlement_buildings.bank` — migration `022_bank_pot.sql`)
+- `UpgradeState` — `{ kind: "townHall"|"settlement", targetLevel: 2|3, daysRemaining, newResourceRates?, newCitySpots? }` (the timer ticks `1 + upgradeAccelEffort` days per round wrap when a `townHall`/`mageGuild` is explicitly staffed — see the Upgrade process above)
+- `SettlementState.buildings` — `BuildingDef[]` (persisted building array; a bank's pot rides on its own `BuildingDef.bank?: BankPot`, stored in the nullable JSONB column `settlement_buildings.bank` — migration `022_bank_pot.sql`. Building workforce rides the same row: `BuildingDef.workers?` / `BuildingDef.draft?`, persisted in the nullable `settlement_buildings.workers INTEGER` / `settlement_buildings.draft JSONB` columns — migration `030_workforce.sql`, following the 013 `construction` / 022 `bank` precedent exactly. `NULL` = legacy auto-staffed / full pool.)
 - `SettlementState.districts` — `Record<string, DistrictState>?` (optional map of `"q,r"` → `{ q, r, citySpots, buildings }`, persisted in `settlements.districts` JSONB — migration `029_settlement_districts.sql`)
 - `SettlementState.upgrade` — `UpgradeState?` (active upgrade, if any)
 - `SettlementState.stacks` — `Platoon[]?` (settlement garrison; persisted via the `settlement_platoons` table, migration `016_settlement_platoons.sql`, dual-written by `settlementRepo` and reassembled by the granular hydrate path)

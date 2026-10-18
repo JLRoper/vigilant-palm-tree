@@ -1,8 +1,8 @@
 # Resource Gathering & the Settlement Economy (as-built)
 
-<!-- docs:verified 2026-10-16 -->
+<!-- docs:verified 2026-10-17 -->
 
-**Status:** Current as-built reference, re-verified against source on 2026-10-16. Design intent lives in [resources.md](./resources.md) and [economy.md](./economy.md); this page documents the actual rates, turn order, producers, sinks, and logistics. The resource definitions, terrain densities, and income code may differ from older design text; F2 remains open below.
+**Status:** Current as-built reference, re-verified against source on 2026-10-17 (workforce staffing wave). Design intent lives in [resources.md](./resources.md) and [economy.md](./economy.md); this page documents the actual rates, turn order, producers, sinks, and logistics. The resource definitions, terrain densities, and income code may differ from older design text; F2 (market income) is now resolved — see §6.2.
 
 Source-of-truth paths cited below are in [`packages/engine/`](../packages/engine/src) and [`packages/contracts/`](../packages/contracts/src). The client under `src/` mirrors the same reducers (`src/state/turnController.ts` orchestrates locally; `server/app/turnService.ts` re-runs the same engine functions server-authoritatively).
 
@@ -119,7 +119,7 @@ The city view's free commit is now guarded by `starterCityOnOpen({ existing })`:
 Per player's **EndTurn** — [`applyEndOfTurnDetailed()`](../packages/engine/src/turn/endTurn.ts), mirrored server-side by `runEndTurn()` in [`server/app/turnService.ts`](../server/app/turnService.ts) (the same three engine reducers, run against the authoritative DB row):
 
 1. Hero movement reset for the active player's heroes.
-2. **Production** — `produceSettlementResources()` (`packages/engine/src/settlement/produceResources.ts`): for **every settlement regardless of owner**, `warehouse[r] += resourceRates[r]`, plus the producer-building loop (§9). Additions are clamped to the settlement's stockpile / treasury caps (§1).
+2. **Production** — `produceSettlementResources()` (`packages/engine/src/settlement/produceResources.ts`): for **every settlement regardless of owner**, `warehouse[r] += resourceRates[r]`, plus the producer-building loop (§9), whose per-building output now carries a **staffing effort factor** (2026-10-17): `round(base × cellMultiplier × effort)` where `effort = min(workers / maxWorkers, 1)` with **undefined `workers` = legacy auto-staffed at effort 1**. Non-producer, non-construction buildings carrying `goldPerTurn` — the `market`, the only kind left with one — pay flat gold **× effort** into the treasury here. Additions are clamped to the settlement's stockpile / treasury caps (§1).
 3. **Auto-trade** for the active player's settlements — **legacy only** now (see §6.6): the game-level `lobby.legacyAutoTrade` gate is `false` on every new game, so this step moves nothing there; resources travel by caravan instead (§6.6).
 4. **Consumption → morale decay → effective income**, in that order, for the **active player's settlements only** (`packages/engine/src/economy/consumption.ts`).
 
@@ -128,7 +128,7 @@ On the **round wrap** (last player ends) — [`advanceRound()`](../packages/engi
 5. Day +1, turn order resets to player 0, all heroes' movement reset.
 6. `matureBankWithdrawals()` — **daily**, every matured bank withdrawal pays into the treasury (clamped by headroom; the unpaid remainder is pushed back to `pendingOut`, never destroyed).
 7. `advanceCharters()` — constructing charters tick down; completed ones found their settlement.
-8. `advanceSettlementUpgrades()` — town hall / settlement / building upgrade timers tick down; completed ones apply.
+8. `advanceSettlementUpgrades()` — town hall / settlement / building upgrade timers tick down; completed ones apply. A settlement with an **explicitly staffed** `townHall` or `mageGuild` (a `workers` number written, not legacy auto-staffing) ticks **`1 + upgradeAccelEffort` days per round wrap** instead of 1 — the max effort across both kinds, up to 2× (2026-10-17). Recruit buildings' draft pools also recharge daily inside the round wrap (`applyDraftRecharge`, `packages/engine/src/settlement/draftRecharge.ts`): each entry regains `draftPerDay (0.25) × (1 + effort)` capped at `draftMax` (3) — see §7.
 9. **Weekly upkeep** when `day % 7 === 0` (`applyWeeklyUpkeep`): **caravan maintenance FIRST** (§6.6 — `economy/caravanUpkeep.ts`, billed before hero upkeep so caravans are "paid first and desert last") + hero upkeep (§6.7) + population growth (§6.1) + `accrueBankInterest()` on every bank pot (§6.8).
 
 ## 6. Resource sinks
@@ -145,18 +145,19 @@ On the **round wrap** (last player ends) — [`advanceRound()`](../packages/engi
 - Morale is evaluated on **pre-consumption** state (`packages/engine/src/turn/endTurn.ts`), so a settlement holding exactly `foodRequired(population)` is not charged decay.
 - **Effective gold income** per turn: `round(population × goldTax × morale / 100)` added to the treasury, clamped to treasury headroom. This is the **only** thing that adds treasury gold during the turn loop (plus bank interest and matured withdrawals, §6.8).
 - **Population growth** (weekly): only if `warehouse.food >= foodRequired`; growth `= max(1, ceil(pop × growthRate))` (setting, default 10%, range 1–50%), capped at the level's population max. No food → no growth; the morale system handles the penalty.
+- **Workers (2026-10-17):** each settlement derives a worker pool **`floor(population / 100)`** (`workforcePool`, `packages/engine/src/settlement/workforce.ts`; `WORKFORCE_PER_POPULATION = 100`), recomputed on demand from current population. `BuildingDef.workers` **undefined means legacy auto-staffed** (effort 1 — old saves and tests behave unchanged until the player assigns); an explicit number scales the building's effort to `min(workers / maxWorkers, 1)` and `0` shuts it down. Staffing effects: producer output (§9), market flat gold (§6.2), recruit-building draft recharge (step 8), and upgrade-timer acceleration (step 8). Per-kind caps (`buildingMaxWorkers`, `packages/engine/src/buildingRegistry.ts`): producers 3 (farmField/farmhouse/granary 2), recruit kinds 4, market/townHall/mageGuild 3, house 1, apartment 2, every other kind 2.
 
 ### 6.2 Gold income vs. the HUD number
 
-There are three "income" surfaces and they **disagree** (see [finding F2](#F2)):
+There are three "income" surfaces, and building gold **now agrees across them** ([finding F2](#F2), resolved 2026-10-17):
 
-- `effectiveSettlementIncome()` (`packages/engine/src/economy/income.ts`) is a projection helper. It includes building `goldPerTurn` for display/forecasting but is not applied by End Turn.
-- End Turn pays `producerTurnOutput` plus `effectiveIncome()` (morale-scaled population tax); a `goldMine` producer is paid, but `market.goldPerTurn` is not credited.
-- `resourceRates.gold` (computed by `computeSettlementRates`, persisted, and previously rendered as a "40/turn" line) is a **phantom** — `produceSettlementResources` never consumed it, because gold is not a `WAREHOUSE_RESOURCE`. The per-turn rates display now renders **combined production** via `settlementProductionRates()` from `produceResources.ts` — `warehouseRates()`'s tile rates plus the per-building producers (§9) — (today in the logistics panel, `src/screens/logistics/logisticsModal.ts`, after the old settlement panel was deleted as an unwired second implementation): the *same loop body production uses*, so display and production cannot drift, and the panel's empty line reads **"no production"**. The persisted map is untouched.
+- `effectiveSettlementIncome()` (`packages/engine/src/economy/income.ts`) is a projection helper. It includes building `goldPerTurn` for display/forecasting.
+- End Turn pays `producerTurnOutput` plus `effectiveIncome()` (morale-scaled population tax) — and, since 2026-10-17, the **market's flat `goldPerTurn` × staffing effort**, credited by the same production loop (§5 step 2): every non-producer, non-construction building with `goldPerTurn > 0` pays it, staffed-scaled for `market` (the only kind left carrying `goldPerTurn`).
+- `resourceRates.gold` (computed by `computeSettlementRates`, persisted, and previously rendered as a "40/turn" line) is a **phantom** — `produceSettlementResources` never consumed it, because gold is not a `WAREHOUSE_RESOURCE`. The per-turn rates display now renders **combined production** via `settlementProductionRates()` from `produceResources.ts` — `warehouseRates()`'s tile rates plus the per-building producers and staffed market gold (§9) — (today in the logistics panel, `src/screens/logistics/logisticsModal.ts`, after the old settlement panel was deleted as an unwired second implementation): the *same loop body production uses*, so display and production cannot drift, and the panel's empty line reads **"no production"**. The persisted map is untouched.
 
-Building `goldPerTurn` therefore *appears* in the HUD but never lands in the treasury — the only gold that actually accrues from buildings is a `goldMine` producer's output (§9).
+Building `goldPerTurn` therefore lands in the treasury exactly as the HUD projects it — a `market`'s 40×level is paid **scaled by staffing effort**, and a `goldMine` producer's output (§9) is the other building gold source, equally staffed.
 
-*(2026-09-29: the HUD economy row now carries a hover tooltip — `economyBreakdown()` in `src/screens/shared/hud.ts` — that spells the discrepancy out line by line: gross taxes → morale scaling → upkeep/food → the `goldPerTurn` HUD-vs-accrual difference. Presentation only; the underlying inconsistency itself remains open as [F2](#F2).)*
+*(2026-09-29: the HUD economy row carries a hover tooltip — `economyBreakdown()` in `src/screens/shared/hud.ts` — that spells the economy out line by line: gross taxes → morale scaling → upkeep/food → building gold. Presentation only; the HUD-vs-accrual discrepancy it once explained is closed — see [F2](#F2).)*
 
 ### 6.3 Building placement
 
@@ -277,7 +278,7 @@ The registry is [`packages/engine/src/buildingRegistry.ts`](../packages/engine/s
 | `storageBonus`, `treasuryBonus` | ✅ **Wired** — derived caps in `settlement/capacity.ts`; they gate additions only |
 | `foodPerTurn` (farmField/farmhouse/granary) | ✅ **Wired as producers** — all three are `ProducerKind`s (2026-10-01), output × cell multiplier (§9). The flat per-turn value is *not* also applied on top |
 | `resourceYieldBonus` | ⚠️ **Producer-only** — dormant as a generic bonus, but its magnitude is the base output for producer mines, which *are* applied (§9) |
-| `goldPerTurn` (market/goldMine) | ⚠️ **Split** — HUD-only for `market`; `goldMine`'s 40/turn is real, as a producer (§9). `bank`'s dead `goldPerTurn: 60` was **removed** 2026-10-01 — it was never applied by the economy — and its description now states what it actually does ([F2](#F2)) |
+| `goldPerTurn` (market/goldMine) | ✅ **Wired (2026-10-17)** — the `market`'s flat 40×level is paid into the treasury **× staffing effort** by the production loop; `goldMine`'s 40/turn is real as a producer (§9), also staffed. `bank`'s dead `goldPerTurn: 60` was **removed** 2026-10-01 — it was never applied by the economy — and its description now states what it actually does ([F2](#F2)) |
 | `populationBonus` | ❌ **Dormant** — displayed in building menus, never applied ([F3](#F3)) |
 | `defenseBonus`, `unitCostReductionPct`, vision/speed/attack bonuses | ❌ **Display-only** — no combat or fog wiring reads them |
 
@@ -315,9 +316,9 @@ Legacy `mine` (pre-split saves) still produces — iron on an iron spot, stone o
 - **Placement:** producers are placeable on **any empty buildable cell** — not only on matching spots. A spot's value is that its own resource peaks at **3.0×** there (§10); off-spot placement is legal but usually mediocre. A farm on a cell holding a **food** spot therefore earns the existing `SPOT_MULTIPLIER_PEAK = 3.0`. Existing overlap rules apply (footprint per cell, center reserved).
 - **Output numbers** reuse existing registry constants (`goldMine.goldPerTurn = 40`; the shared `+3` magnitude; `foodPerTurn` for the three farm kinds). Level scaling follows the registry's ×level convention; producers upgrade via the existing L2/L3 path (cost ×1.5 / ×3).
 - **Arcane Font stats** (as shipped in `buildingRegistry.ts`): placement `{gold 350, wood 5, stone 6}` — deliberately no arcane input, since it *is* the arcane source; upkeep `{wood 1, stone 1}`; `buildDays 4`.
-- **Tick integration (shipped):** `produceSettlementResources(settlements, seed)` (`packages/engine/src/settlement/produceResources.ts`) sums `base × cellMultiplier(cell, producer resource)` over all producer buildings per settlement — gold to the treasury (rounded to 2 decimals), the rest to the warehouse. `applyEndOfTurnDetailed` passes `state.castleSeed`. Base amounts are read from the registry (`goldMine.goldPerTurn` = 40; `resourceYieldBonus` magnitudes = the shared `+3`; `foodPerTurn` for farms), so there is one source of truth. `ProducerResource` in `packages/engine/src/settlement/producers.ts` now includes `food`. This supersedes the dormant `resourceYieldBonus` semantics for producers ([F3](#F3) covers the remaining unwired effects).
+- **Tick integration (shipped):** `produceSettlementResources(settlements, seed)` (`packages/engine/src/settlement/produceResources.ts`) sums `round(base × cellMultiplier(cell, producer resource) × effort × 100) / 100` over all producer buildings per settlement — the **staffing effort factor** is the 2026-10-17 workforce addition (`producerTurnOutput` now returns `{ resource, multiplier, basePerTurn, effort, amount }`; `null` while the building is under construction or its base ≤ 0) — gold to the treasury (rounded to 2 decimals), the rest to the warehouse; flat `goldPerTurn` from the market rides the same loop, × effort (§6.2). `applyEndOfTurnDetailed` passes `state.castleSeed`. Base amounts are read from the registry (`goldMine.goldPerTurn` = 40; `resourceYieldBonus` magnitudes = the shared `+3`; `foodPerTurn` for farms), so there is one source of truth. `ProducerResource` in `packages/engine/src/settlement/producers.ts` now includes `food`. This supersedes the dormant `resourceYieldBonus` semantics for producers ([F3](#F3) covers the remaining unwired effects).
 - **Server authority:** placement is now a server command — `PlaceBuildings` re-derives the net cost and re-derives these outputs server-side (see §6.3; [F4](#F4) is resolved).
-- **UI:** clicking a producer building in the city view shows a multiplier line — `Cell ×1.23 → +49.20 gold/turn` — computed from the same engine functions (`producerTurnOutput` via `CityView.cellOutputFor`, seeded with `GameState.castleSeed` passed into `CityView.open`).
+- **UI:** clicking a producer building in the city view shows a multiplier line — `Cell ×1.23 → +49.20 gold/turn` — computed from the same engine functions (`producerTurnOutput` via `CityView.cellOutputFor`, seeded with `GameState.castleSeed` passed into `CityView.open`); the shown amount includes the 2026-10-17 staffing effort. The workforce itself is steered from the city view's building menu (per-building worker stepper) and the floating workforce panel (drag workers onto buildings, or press `w`).
 
 ## 10. Deterministic cell multipliers (**Shipped 2026-09-27**)
 
@@ -337,7 +338,7 @@ m  = peak + 0.25 · z                          # σ = 0.25, UNCLAMPED
 peak = 3.0  if (gx,gy) is a spot cell and res == spot.resource
       = 1.0  otherwise
 
-display: round(m, 2);  producer output = base × m
+display: round(m, 2);  producer output = round2(base × m × effort)   # effort = staffing (§9); 1 when unassigned (legacy auto-staffed)
 ```
 
 Locked properties:
@@ -366,7 +367,7 @@ Each finding: behavior, evidence, suggestion. All are documentation-only observa
 **F1 — ~~Food is a dead-end resource~~ RESOLVED (2026-10-01).** Food now has three production sources: `farmField` / `farmhouse` / `granary` are `ProducerKind`s feeding the normal production tick (§9), every new settlement is seeded with farmland sized against **its own** food bill (§4), and morale can **recover** (§6.1) instead of being subtract-only. Before this, food had **zero** sources — tile density is 0 by design (§2) and `foodPerTurn` was never applied — so every settlement ran a permanent 100% food-deficit penalty and the economy was unwinnable. The zero tile density itself remains deliberate: food comes from farm buildings, not from tiles.
 
 <a id="F2"></a>
-**F2 — OPEN: market income projection is not paid by End Turn.** `effectiveSettlementIncome()` is a projection helper; it is not the End Turn credit path. End Turn pays `producerTurnOutput` plus morale-scaled population tax. `goldMine` output is paid as a producer; `market.goldPerTurn` is not credited to the treasury. The projected/HUD amount can therefore exceed actual income. Keep this finding open until the End Turn path or projection is deliberately changed.
+**F2 — ~~market income projection is not paid by End Turn~~ RESOLVED (2026-10-17).** The End Turn path was deliberately changed by the workforce staffing wave: `produceSettlementResources` now credits every non-producer, non-construction building's `goldPerTurn` into the treasury — staffed-scaled for the `market`, the only kind left carrying one — so the projection and the accrual agree (§6.2). *(Was: `effectiveSettlementIncome()` projected `market.goldPerTurn` but the End Turn credit path paid only `producerTurnOutput` plus morale-scaled tax, so the HUD could exceed actual income.)*
 
 <a id="F3"></a>
 **F3 — ~~Defined-but-unwired building effects~~ PARTLY RESOLVED (2026-10-01).** `foodPerTurn` (farmField/farmhouse/granary) is now a **producer** input (§9), and `resourceYieldBonus` (mine/woodcutterHut/stoneMine/ironMine/arcaneFont) feeds producer bases at ×level (§7). Still unwired: `populationBonus` (house/apartment/farmhouse), `defenseBonus`, `unitCostReductionPct`, and the vision/speed/attack player effects — the only wired player effect is `controlRangeBonus`. *Suggest:* a population-formula hook and combat/fog wiring for the player effects — or delete the dead fields (the repo's own lesson: an unwired parallel implementation is not a safe intermediate state).

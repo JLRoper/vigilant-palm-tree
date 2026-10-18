@@ -14,6 +14,7 @@ import {
   requestBankWithdrawal,
   resolveBattle,
   rollbackCaptureSettlement,
+  assignWorkers as assignWorkersReducer,
 } from "@heroes/engine";
 import type { HorseVariant } from "./settings";
 import type { BattleResult, CitySpot, SettlementBattleOutcome, UnitType } from "@heroes/engine";
@@ -167,6 +168,16 @@ export interface TurnControllerHooks {
     gy: number,
     unitTypeId: string,
     count: number,
+    district?: { q: number; r: number },
+  ): Promise<void>;
+  // Workforce staffing (AssignWorkers): same fire-and-forget shape as the
+  // rest of this block.
+  onAssignWorkers(
+    actor: number,
+    settlementId: SettlementId,
+    gx: number,
+    gy: number,
+    workers: number,
     district?: { q: number; r: number },
   ): Promise<void>;
   onTransferUnits(
@@ -724,6 +735,39 @@ export class TurnController {
       hookLabel: "onRecruitUnits",
     });
     return true;
+  }
+
+  // Workforce staffing (AssignWorkers): same shape as recruitUnits above --
+  // the engine reducer applies locally and the fire-and-forget hook persists
+  // it server-side. The reason string rides back to the caller so a dead
+  // stepper click can explain itself (pool_exhausted, not_staffable, ...).
+  assignWorkers(
+    settlementId: SettlementId,
+    gx: number,
+    gy: number,
+    workers: number,
+    district?: { q: number; r: number },
+  ): { ok: boolean; reason: string } {
+    const result = assignWorkersReducer(this.state, {
+      settlementId,
+      gx,
+      gy,
+      workers,
+      ...(district ? { district } : {}),
+    });
+    if (!result.ok) return { ok: false, reason: result.reason ?? "" };
+    this.commit(result.state, {
+      log: {
+        type: "workers_assigned",
+        payload: { settlementId, gx, gy, workers, ...(district ? { district } : {}) },
+      },
+      hook: () =>
+        district
+          ? this.hooks.onAssignWorkers(result.state.activePlayerId, settlementId, gx, gy, workers, district)
+          : this.hooks.onAssignWorkers(result.state.activePlayerId, settlementId, gx, gy, workers),
+      hookLabel: "onAssignWorkers",
+    });
+    return { ok: true, reason: "" };
   }
 
   transferUnits(

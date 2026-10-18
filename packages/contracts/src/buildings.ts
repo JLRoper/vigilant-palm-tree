@@ -55,6 +55,17 @@ export interface BuildingDef {
    * before banks had pots round-trips without ever gaining the key.
    */
   bank?: BankPot;
+  /**
+   * Explicitly assigned workers for this building's workforce slot.
+   * Absent means legacy auto-staffing (fully staffed, effort 1); an
+   * explicit number written from the first assignment onward (0 = shut down).
+   */
+  workers?: number;
+  /**
+   * Per-unitTypeId recruit pool on this building (fractional allowed).
+   * Absent means the full pool -- written explicitly from the first recruit.
+   */
+  draft?: Partial<Record<string, number>>;
 }
 
 export interface BankPot {

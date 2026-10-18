@@ -15,7 +15,7 @@ import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../../render/a
 import { bankRejectionMessage, bankRowModel, treasuryRowModel, type BankGoldDirection, type BankRowModel } from "./bankRows";
 import { TREASURY_CAP_AMBER, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
 import type { HorseVariant } from "../../state/settings";
-import { POP_BY_LEVEL, UPGRADE_POPULATION_GATE, effectiveSettlementIncome } from "@heroes/engine";
+import { POP_BY_LEVEL, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, workforcePool, assignedWorkersExplicit } from "@heroes/engine";
 import { pickHeroName } from "../../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 
@@ -48,6 +48,7 @@ export class SettlementInfoMenu {
   private nameEl: HTMLElement;
   private levelBadge: HTMLElement;
   private populationEl: HTMLSpanElement;
+  private workforceEl: HTMLSpanElement;
   private incomeEl: HTMLSpanElement;
   private treasuryEl: HTMLSpanElement;
   private moraleEl: HTMLSpanElement;
@@ -156,6 +157,10 @@ export class SettlementInfoMenu {
     const { row: popRow, value: popVal } = makeRow("Population");
     this.populationEl = popVal;
     body.appendChild(popRow);
+
+    const { row: workforceRow, value: workforceVal } = makeRow("Workforce");
+    this.workforceEl = workforceVal;
+    body.appendChild(workforceRow);
 
     const { row: incRow, value: incVal } = makeRow("Income/turn");
     this.incomeEl = incVal;
@@ -395,6 +400,9 @@ export class SettlementInfoMenu {
     this.nameEl.childNodes[0].textContent = settlement.name;
     this.levelBadge.textContent = `L${settlement.level}`;
     this.populationEl.textContent = settlement.population.toLocaleString();
+    const pool = workforcePool(settlement);
+    const assigned = assignedWorkersExplicit(settlement);
+    this.workforceEl.textContent = `${assigned}/${pool} assigned · ${pool - assigned} idle`;
     this.incomeEl.textContent = `${effectiveSettlementIncome(settlement, state.heroes).toLocaleString()}g`;
     this.treasuryEl.textContent = `${settlement.gold}g`;
     this.updateTreasuryRow(settlement, state);

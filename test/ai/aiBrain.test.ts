@@ -400,11 +400,10 @@ test("pickGarrisonRecruitment sizes the garrison against nearby enemy power and 
 
   const plan = pickGarrisonRecruitment(state, 1, RECRUIT_UNITS);
 
-  assert.equal(plan.length, 1, "40 threat power is closed by one candidate's purchase");
   assert.deepEqual(
-    plan[0],
-    { settlementId: "s1", buildingKind: "farmhouse", gx: 2, gy: 2, unitTypeId: "peasant", count: 20 },
-    "threat = 5 x (4+4) = 40 -> ceil(40 / 2-power peasants) = 20; peasant's 0.08 power/gold beats swordsman's 0.04",
+    plan.map((p) => [p.unitTypeId, p.count]),
+    [["peasant", 3], ["swordsman", 3]],
+    "threat = 5 x (4+4) = 40: peasant (0.08 power/gold) buys first, then swordsman (0.04) — each order capped at the 3-unit draft pool",
   );
 });
 
@@ -481,8 +480,60 @@ test("pickGarrisonRecruitment respects the engine's garrison_full deposit cap", 
 
   assert.deepEqual(
     plan.map((p) => [p.unitTypeId, p.count]),
-    [["peasant", 25]],
-    "the one free platoon slot takes the best power-per-gold candidate: 96 threat - 46 staged = 50 deficit = 25 peasants",
+    [["peasant", 3]],
+    "the one free platoon slot takes the best power-per-gold candidate: 96 threat - 46 staged = 50 deficit, draft-capped to 3 peasants; the slot is then full for every other unit",
+  );
+});
+
+test("pickGarrisonRecruitment clamps each order to the building's default draft pool", () => {
+  const invader = makeHero("h0", 0, 5, 4);
+  invader.stacks = normalizePlatoons([{ entries: [{ unitTypeId: "peasant", count: 5 }] }]);
+  const town = makeSettlement("s1", 1, 10, 4, {
+    gold: 1000,
+    buildings: [building("farmhouse")],
+  });
+
+  const plan = pickGarrisonRecruitment(garrisonState([town], [invader]), 1, RECRUIT_UNITS);
+
+  assert.deepEqual(
+    plan.map((p) => [p.unitTypeId, p.count]),
+    [["peasant", 3]],
+    "a 5-peasant threat (10 power) and 900g would buy 5 peasants, but the default draft pool is 3",
+  );
+});
+
+test("pickGarrisonRecruitment respects an explicit per-unit draft pool", () => {
+  const invader = makeHero("h0", 0, 5, 4);
+  invader.stacks = normalizePlatoons([{ entries: [{ unitTypeId: "peasant", count: 5 }] }]);
+  const town = makeSettlement("s1", 1, 10, 4, {
+    gold: 1000,
+    buildings: [{ ...building("farmhouse"), draft: { peasant: 1 } }],
+  });
+
+  const plan = pickGarrisonRecruitment(garrisonState([town], [invader]), 1, RECRUIT_UNITS);
+
+  assert.deepEqual(
+    plan.map((p) => [p.unitTypeId, p.count]),
+    [["peasant", 1]],
+    "a written pool of 1 caps the order below the default 3",
+  );
+});
+
+test("pickGarrisonRecruitment skips a drained draft pool and keeps buying from other buildings", () => {
+  const town = makeSettlement("s1", 1, 10, 4, {
+    gold: 2000,
+    buildings: [
+      { ...building("farmhouse"), draft: { peasant: 0 } },
+      building("barracks", 4, 4),
+    ],
+  });
+
+  const plan = pickGarrisonRecruitment(garrisonState([town], [raiderAt(5, 4, 5)]), 1, RECRUIT_UNITS);
+
+  assert.deepEqual(
+    plan.map((p) => [p.unitTypeId, p.count]),
+    [["swordsman", 3]],
+    "the drained peasant pool yields no peasant order, and the barracks still sells its 3",
   );
 });
 

@@ -82,6 +82,7 @@ export class EntityMirror {
       case "UnitsTransferred":
       case "SettlementBattleResolved":
       case "BattleOffered":
+      case "WorkersAssigned":
         return false;
       default: {
         const exhaustive: never = event;

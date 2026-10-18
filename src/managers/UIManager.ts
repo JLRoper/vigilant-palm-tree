@@ -13,6 +13,7 @@ import { setMinimapReserve } from "@screens/shared/panelRail";
 import { getMinimapReserveHeight } from "../render/minimap";
 import { RESOURCE_PILE_SMOL_SPRITES } from "../render/assetDescriptors";
 import type { CityView, CitySelectionSnapshot } from "@screens/settlements/cityView/cityView";
+import type { WorkforcePanel } from "@screens/settlements/cityView/workforcePanel";
 import { settleNet } from "@screens/settlements/cityView/netCost";
 import { recordBuildCommit } from "../game/buildCommitLedger";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
@@ -64,6 +65,8 @@ export class UIManager {
   private cityViewPromise: Promise<CityView> | null = null;
   private cityViewState?: () => GameStateManager;
   private cityViewLocalSeat?: () => PlayerId | null;
+  private workforcePanel?: WorkforcePanel;
+  private workforcePanelPromise: Promise<WorkforcePanel> | null = null;
   private gameStateManager?: GameStateManager;
   private viewManager?: ViewManager;
   private lastMapWidth = -1;
@@ -443,7 +446,49 @@ export class UIManager {
       },
     });
     this.cityView = view;
+    // Workforce wiring: onAssignWorkers commits one building's staff count as
+    // a server-side command with the TARGET building's own district (undefined
+    // = main settlement); openWorkforcePanel toggles the panel ('w' key).
+    view.onAssignWorkers = (gx, gy, workers, district) => {
+      const openId = this.cityView?.getOpenSettlementId();
+      if (!openId) return;
+      const tc = state().getTurnController();
+      if (tc.assignWorkers(openId, gx, gy, workers, district).ok) {
+        state().replaceState(tc.getState());
+      }
+    };
+    view.openWorkforcePanel = () => this.toggleWorkforcePanel();
     return view;
+  }
+
+  private toggleWorkforcePanel(): void {
+    if (this.workforcePanel?.isOpen()) {
+      this.workforcePanel.close();
+      return;
+    }
+    void this.ensureWorkforcePanel().then((panel) => panel.open());
+  }
+
+  // Same lazy single-construction pattern as ensureCityView(): the panel
+  // (and its menu import) is only built on the first toggle.
+  private async ensureWorkforcePanel(): Promise<WorkforcePanel> {
+    if (!this.workforcePanelPromise) {
+      this.workforcePanelPromise = (async () => {
+        const view = await this.ensureCityView();
+        const { WorkforcePanel } = await import("@screens/settlements/cityView/workforcePanel");
+        const panel = new WorkforcePanel({
+          parent: document.body,
+          cityView: view,
+          onAssignWorkers: (gx, gy, workers, district) => view.onAssignWorkers?.(gx, gy, workers, district),
+        });
+        this.workforcePanel = panel;
+        return panel;
+      })().catch((err) => {
+        this.workforcePanelPromise = null;
+        throw err;
+      });
+    }
+    return this.workforcePanelPromise;
   }
 
   getToolbar(): Toolbar | undefined { return this.toolbar; }

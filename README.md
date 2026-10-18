@@ -1,6 +1,6 @@
 # Heroes JS
 
-<!-- docs:verified 2026-10-14 -->
+<!-- docs:verified 2026-10-17 -->
 
 A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. Move a hero across a procedurally generated hex map, claim resource tiles by building settlements on them, accumulate resources per turn, and defend them against enemy heroes.
 
@@ -43,7 +43,7 @@ npm run docs:check # check maintained documentation links and source paths
 
 ## Status
 
-App version is `0.3.4` (the root `package.json` is the source of truth). The game has procedural map generation, A* hero movement, settlements and capture, a six-resource economy, fog of war, construction, recruitment, upkeep, caravans, combat resolution, and new/load/save flows.
+App version is `0.3.4` (the root `package.json` is the source of truth). The game has procedural map generation, A* hero movement, settlements and capture, a six-resource economy, fog of war, construction, recruitment, workforce staffing, upkeep, caravans, combat resolution, and new/load/save flows.
 
 The app now opens to a **home / landing page** (New Game / Load Game / Settings / Sign In) before the canvas is shown; Sign In is an email magic-link flow (short-term: the 6-digit code is also surfaced in dev for testing — real email delivery comes later).
 
@@ -51,4 +51,4 @@ Tactical combat and quick resolution are both live. A human attacker can Fight, 
 
 Food is a game resource but is not generated on world-map tiles; food spots, production, consumption, and weekly upkeep are implemented. Recruitment, wagons, physical trade-route caravans, and the human/ashen/ironmark/verdant faction rosters are live. New games support 1–4 human players and 0–3 AI enemies. AI enemies on server-flagged games are server-driven, including garrison recruitment, trade routes, and charter founding; the registry-driven faction picker and server recruit gate are live.
 
-Known economy caveat: market `goldPerTurn` is currently a projection-only value and is not credited to the treasury by End Turn. This remains open as finding F2 in [`docs/resource-gathering.md`](./docs/resource-gathering.md).
+Known economy caveat: the gold tile-rate projection (`resourceRates.gold`) is still not credited by End Turn (gold is not a warehouse resource); market `goldPerTurn` was resolved by the 2026-10-17 workforce wave — it is now paid × staffing effort (finding F2 in [`docs/resource-gathering.md`](./docs/resource-gathering.md)).

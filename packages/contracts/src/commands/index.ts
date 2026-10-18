@@ -21,6 +21,7 @@ import type { BuyWagonsCommand } from "./buyWagons";
 import type { CreateTradeRouteCommand } from "./createTradeRoute";
 import type { UpdateTradeRouteCommand } from "./updateTradeRoute";
 import type { RecruitUnitsCommand } from "./recruitUnits";
+import type { AssignWorkersCommand } from "./assignWorkers";
 import type { TransferUnitsCommand } from "./transferUnits";
 import type { SubmitSettlementBattleResultCommand } from "./submitSettlementBattleResult";
 
@@ -47,6 +48,7 @@ export * from "./buyWagons";
 export * from "./createTradeRoute";
 export * from "./updateTradeRoute";
 export * from "./recruitUnits";
+export * from "./assignWorkers";
 export * from "./transferUnits";
 export * from "./submitSettlementBattleResult";
 
@@ -99,6 +101,7 @@ export type Command =
   | CreateTradeRouteCommand
   | UpdateTradeRouteCommand
   | RecruitUnitsCommand
+  | AssignWorkersCommand
   | TransferUnitsCommand
   | SubmitSettlementBattleResultCommand
   | EnterBattleCommand;

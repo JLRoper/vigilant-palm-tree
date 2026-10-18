@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.10.0] - 2026-10-18
+
+Workforce staffing system: per-100-pop worker pool, assignable staffing scaling production/draft recharge/upgrade speed
+
 ## [0.9.0] - 2026-10-17
 
 feat: uncharted fog-of-war mode

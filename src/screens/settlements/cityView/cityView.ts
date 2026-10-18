@@ -7,12 +7,21 @@ import { createSkyboxProvider } from "../../../render/skybox";
 import type { Paint2DDep } from "../../../render/scene/paint2d/deps";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { SpriteProvider } from "../../../render/assets";
-import type { BuildingDef, GenerationStyle } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, GenerationStyle } from "@heroes/contracts";
 import { buildingFootprint, coversCell } from "../../../core/cityGrid";
 import { districtKey, starterCityOnOpen } from "@heroes/engine";
+import {
+  assignedWorkersExplicit,
+  buildingMaxWorkers,
+  canAssignWorkers,
+  isProducerKind,
+  isRecruitBuilding,
+  WORKFORCE_UPGRADE_ACCEL_KINDS,
+  workforcePool,
+} from "@heroes/engine";
 import { advanceChargedOnCommit, netDelta } from "./netCost";
 import { syncCartBuildings } from "./syncedBuildings";
-import { BuildingMenu, type BuildingMenuOptions } from "./buildingMenu";
+import { BuildingMenu, type BuildingMenuOptions, type BuildingMenuWorkforce } from "./buildingMenu";
 import { BuildingPlacer } from "./buildingPlacer";
 import { BuildingSelectionMenu, type SelectedBuildingEntry } from "./buildingSelectionMenu";
 import { openConfirmDialog } from "@screens/shared/confirmDialog";
@@ -31,6 +40,27 @@ import { CITY_GRID_PAD, cityGridRect, collectPanelRects, elementRect } from "./p
 export interface CitySelectionSnapshot {
   heroId: string | null;
   settlementId: string | null;
+}
+
+/** Workforce role of a building, resolved in the order listed: a recruiter that
+ * also accelerates upgrades (mageGuild) reports "recruiter". */
+export type WorkforceBuildingRole = "producer" | "market" | "recruiter" | "upgrade-accel" | "idle";
+
+/** Live staffing snapshot for the workforce panel (district-true: each entry
+ * carries its OWN building's district coords, null for main-settlement ones). */
+export interface WorkforceSnapshot {
+  pool: number;
+  assigned: number;
+  buildings: Array<{
+    gx: number;
+    gy: number;
+    kind: string;
+    district: { q: number; r: number } | null;
+    staffable: boolean;
+    max: number;
+    workers: number | undefined;
+    role: WorkforceBuildingRole;
+  }>;
 }
 
 const PALETTE_W = 240;
@@ -69,6 +99,17 @@ export class CityView {
   private getFloatingPanelRects?: () => Array<PanelRect | null>;
   private preCitySelection: CitySelectionSnapshot | null = null;
   private onKeyDown: (e: KeyboardEvent) => void;
+  /** W4 workforce panel wiring: UIManager assigns both. onAssignWorkers commits
+   * one building's staff count (server-side command) with the TARGET building's
+   * own district (undefined = main settlement); openWorkforcePanel toggles
+   * the panel ('w' key). */
+  onAssignWorkers?: (gx: number, gy: number, workers: number, district?: { q: number; r: number }) => void;
+  openWorkforcePanel?: () => void;
+  private workforceListeners = new Set<() => void>();
+  /** In-flight worker drag (see beginWorkerDrag/onCanvasMouseDown/onCanvasMouseUp).
+   * Only the direction survives between events: the grab cell is re-validated
+   * at canvas mousedown and the drop target is resolved at mouseup. */
+  private workerDrag: { delta: 1 | -1 } | null = null;
 
   constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null, district?: { q: number; r: number }) => boolean; onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean, district?: { q: number; r: number }) => boolean; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[], district?: { q: number; r: number }) => { ok: boolean; reason: string }; getSelection?: () => CitySelectionSnapshot; getFloatingPanelRects?: () => Array<PanelRect | null> }) {
     this.paint2d = createPaint2DDep({
@@ -135,6 +176,10 @@ export class CityView {
         this.handleClose();
         return;
       }
+      if (e.key === "w" || e.key === "W") {
+        this.openWorkforcePanel?.();
+        return;
+      }
       if (e.key === "b" || e.key === "B") {
         if (this.placer.isPaletteOpen()) {
           this.placer.hidePalette();
@@ -171,6 +216,7 @@ export class CityView {
     this.cityMines = mines;
     this.mapSeed = mapSeed ?? null;
     this.hover = null;
+    this.workerDrag = null;
     this.selectedKeys.clear();
     this.selectionAnchor = null;
     this.preCitySelection = this.getSelection?.() ?? null;
@@ -252,7 +298,7 @@ export class CityView {
       cityMines: this.cityMines,
       upgrades: this.getSettlement()?.upgrade,
       district: this.openDistrict,
-      buildings: this.syncedBuildings(),
+      buildings: this.buildingsWithWorkers(),
       ghost,
       selectedKeys: this.selectedKeys,
       topInset: toolbarHeight(),
@@ -353,13 +399,27 @@ export class CityView {
     const h = building.h ?? 1;
     const fp = buildingFootprint(building.gx, building.gy, layout.gridOrigin, layout.screenOrigin, layout.tileScale, w, h);
 
+    // The synced cart copy carries no staffing fields; merge the live ones so
+    // the menu's Workers stepper and draft-pool readout reflect server state.
+    const liveBuilding = this.liveBuildings().find(
+      (m) => m.gx === building.gx && m.gy === building.gy && m.kind === building.kind,
+    );
+    const menuBuilding: BuildingDef = liveBuilding
+      ? {
+          ...building,
+          ...(liveBuilding.workers !== undefined ? { workers: liveBuilding.workers } : {}),
+          ...(liveBuilding.draft !== undefined ? { draft: liveBuilding.draft } : {}),
+        }
+      : building;
+
     this.buildingMenu.show(
-      building,
+      menuBuilding,
       fp.cx,
       fp.cy - fp.hh * 0.6,
       this.getSettlement(),
-      this.cellOutputFor(building),
-      building.construction?.daysRemaining,
+      this.cellOutputFor(menuBuilding),
+      menuBuilding.construction?.daysRemaining,
+      this.workforceMenuOptions(menuBuilding),
     );
   }
 
@@ -370,6 +430,195 @@ export class CityView {
       ? { q: this.openDistrict.q, r: this.openDistrict.r, citySpots: this.citySpots }
       : settlement;
     return producerTurnOutput(building, target, this.mapSeed);
+  }
+
+  // ---- Workforce (population-worker distribution, W4 contract) --------------
+
+  /** Live building list for the current context (main settlement, or the open district) -- the same live-side access path syncedBuildings() uses. */
+  private liveBuildings(): BuildingDef[] {
+    const live = this.getSettlement();
+    if (!live) return [];
+    return this.openDistrict
+      ? (live.districts?.[districtKey(this.openDistrict.q, this.openDistrict.r)]?.buildings ?? [])
+      : live.buildings;
+  }
+
+  /** Cart buildings for the scene with live `workers` merged in: syncCartBuildings does not copy staffing fields, and the person clusters must read live counts. */
+  private buildingsWithWorkers(): BuildingDef[] {
+    const live = this.getSettlement();
+    const list = this.syncedBuildings();
+    if (!live) return list;
+    const liveList = this.liveBuildings();
+    return list.map((b) => {
+      const liveB = liveList.find((m) => m.gx === b.gx && m.gy === b.gy && m.kind === b.kind);
+      return liveB && liveB.workers !== undefined ? { ...b, workers: liveB.workers } : b;
+    });
+  }
+
+  private workforceTotals(): { pool: number; assigned: number } {
+    const live = this.getSettlement();
+    if (!live) return { pool: 0, assigned: 0 };
+    return { pool: workforcePool(live), assigned: assignedWorkersExplicit(live) };
+  }
+
+  /** Building covering a cell -- the main settlement list first, then the
+   * open district's (the workforce drop-target resolution order). The result
+   * carries which list the building came from so assignments are district-true. */
+  private workforceBuildingAt(gx: number, gy: number): { building: BuildingDef; district: { q: number; r: number } | null } | null {
+    const live = this.getSettlement();
+    if (!live) return null;
+    const main = live.buildings.find((b) => coversCell(b, gx, gy));
+    if (main) return { building: main, district: null };
+    if (this.openDistrict) {
+      const district = { q: this.openDistrict.q, r: this.openDistrict.r };
+      const d = live.districts?.[districtKey(district.q, district.r)];
+      const districtB = d?.buildings.find((b) => coversCell(b, gx, gy));
+      if (districtB) return { building: districtB, district };
+    }
+    return null;
+  }
+
+  private roleFor(kind: BuildingKind): WorkforceBuildingRole {
+    if (WORKFORCE_UPGRADE_ACCEL_KINDS.includes(kind)) return "upgrade-accel";
+    if (isProducerKind(kind)) return "producer";
+    if (kind === "market") return "market";
+    if (isRecruitBuilding(kind)) return "recruiter";
+    return "idle";
+  }
+
+  private snapshotEntry(b: BuildingDef, district: { q: number; r: number } | null): WorkforceSnapshot["buildings"][number] {
+    const max = buildingMaxWorkers(b.kind);
+    return {
+      gx: b.gx,
+      gy: b.gy,
+      kind: b.kind,
+      district,
+      staffable: max >= 1,
+      max,
+      workers: b.workers,
+      role: this.roleFor(b.kind),
+    };
+  }
+
+  /** Live staffing snapshot: main-settlement buildings plus the currently open
+   * district's when one is open -- every entry carries its OWN building's
+   * district coords (null for main-settlement buildings). */
+  workforceSnapshot(): WorkforceSnapshot {
+    const live = this.getSettlement();
+    const totals = this.workforceTotals();
+    const buildings: WorkforceSnapshot["buildings"] = [];
+    if (live) {
+      const district = this.openDistrict
+        ? { q: this.openDistrict.q, r: this.openDistrict.r }
+        : null;
+      for (const b of live.buildings) buildings.push(this.snapshotEntry(b, null));
+      if (district) {
+        const d = live.districts?.[districtKey(district.q, district.r)];
+        for (const b of d?.buildings ?? []) buildings.push(this.snapshotEntry(b, district));
+      }
+    }
+    return {
+      pool: totals.pool,
+      assigned: totals.assigned,
+      buildings,
+    };
+  }
+
+  /** fn runs after every successful assignment commit made by this view. */
+  setWorkforceListener(fn: () => void): void {
+    this.workforceListeners.add(fn);
+  }
+
+  private notifyWorkforceListeners(): void {
+    for (const fn of this.workforceListeners) fn();
+  }
+
+  /** W4's panel starts a worker drag (delta +1 = assign from pool, -1 = unassign). Armed immediately so panel-chip drags (which never press on the canvas) still commit on release; a canvas mousedown re-validates the grab cell and disarms invalid ones. */
+  beginWorkerDrag(delta: 1 | -1): void {
+    this.workerDrag = { delta };
+  }
+
+  /** Disarms a pending worker drag (the workforce panel clears armed chip
+   * drags that never reach the canvas). */
+  cancelWorkerDrag(): void {
+    this.workerDrag = null;
+  }
+
+  /** Canvas mousedown while a worker drag is pending: the pressed cell becomes
+   * the grab building; validate (workers ?? max) + delta with the shared
+   * predicate (range AND pool) and disarm the drag when invalid. */
+  onCanvasMouseDown(x: number, y: number): void {
+    const drag = this.workerDrag;
+    if (!drag) return;
+    const live = this.getSettlement();
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    const layout = cityLayout(this.size, viewportW, viewportH, toolbarHeight());
+    const cell = screenToGridCell(layout, this.size, viewportW, x, y);
+    if (!live || !cell) {
+      this.workerDrag = null;
+      return;
+    }
+    const hit = this.workforceBuildingAt(cell.gx, cell.gy);
+    const max = hit ? buildingMaxWorkers(hit.building.kind) : 0;
+    const { pool, assigned } = this.workforceTotals();
+    if (!canAssignWorkers(hit?.building.workers, max, drag.delta, pool, assigned)) {
+      this.workerDrag = null;
+    }
+  }
+
+  /** Canvas mouseup commits the drag on the hovered cell's building: the target
+   * is validated with the shared predicate (range + pool for +1) and the commit
+   * carries the TARGET building's own district (undefined = main settlement).
+   * The drag state clears either way. */
+  onCanvasMouseUp(x: number, y: number): void {
+    const drag = this.workerDrag;
+    if (!drag) return;
+    const live = this.getSettlement();
+    this.workerDrag = null;
+    if (!live) return;
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    const layout = cityLayout(this.size, viewportW, viewportH, toolbarHeight());
+    const cell = screenToGridCell(layout, this.size, viewportW, x, y);
+    if (!cell) return;
+    const hit = this.workforceBuildingAt(cell.gx, cell.gy);
+    if (!hit) return;
+    const max = buildingMaxWorkers(hit.building.kind);
+    const totals = this.workforceTotals();
+    if (!canAssignWorkers(hit.building.workers, max, drag.delta, totals.pool, totals.assigned)) return;
+    const next = (hit.building.workers ?? max) + drag.delta;
+    this.onAssignWorkers?.(hit.building.gx, hit.building.gy, next, hit.district ?? undefined);
+    this.notifyWorkforceListeners();
+  }
+
+  /** Trailing options object for buildingMenu.show: the district field names
+   * the list the building came from (null = main settlement), so the menu's
+   * stepper commits are district-true. */
+  private workforceMenuOptions(building: BuildingDef): BuildingMenuWorkforce | undefined {
+    const live = this.getSettlement();
+    if (!live) return undefined;
+    const totals = this.workforceTotals();
+    const inMain = live.buildings.some(
+      (b) => b.gx === building.gx && b.gy === building.gy && b.kind === building.kind,
+    );
+    let district: { q: number; r: number } | null = null;
+    if (!inMain && this.openDistrict) {
+      const d = live.districts?.[districtKey(this.openDistrict.q, this.openDistrict.r)];
+      if (
+        d?.buildings.some((b) => b.gx === building.gx && b.gy === building.gy && b.kind === building.kind)
+      ) {
+        district = { q: this.openDistrict.q, r: this.openDistrict.r };
+      }
+    }
+    return {
+      pool: totals.pool,
+      assigned: totals.assigned,
+      district,
+      onChange: () => this.notifyWorkforceListeners(),
+      onAssignWorkers: (gx, gy, workers, d) => this.onAssignWorkers?.(gx, gy, workers, d),
+      getSettlement: () => this.getSettlement(),
+    };
   }
 
   private clearSelection(): void {
@@ -557,6 +806,7 @@ export class CityView {
       this.openSettlementId = null;
       this.openDistrict = null;
       this.hover = null;
+      this.workerDrag = null;
       this.onClose(id, finalBuildings, this.pendingNetDelta(), true, this.preCitySelection, dist);
       return id;
     } finally {

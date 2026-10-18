@@ -14,7 +14,7 @@ To charter a settlement, use a selected hero on your turn and meet the visible r
 
 ## Settlements and Logistics
 
-Build from the city palette, recruit from eligible completed troop buildings, and manage the garrison from the settlement panel. Six resource types exist: gold, wood, stone, iron, arcane, and food. Food is not generated on world-map tiles; food spots/buildings, stockpiles, consumption, and weekly troop upkeep are live.
+Build from the city palette, recruit from eligible completed troop buildings, and manage the garrison from the settlement panel. Each settlement has a **worker pool** of `floor(population / 100)` you can assign per building — staff workers to scale production, market gold, recruitment draft recharge, and town-hall upgrade speed (press `w` in the city view for the workforce panel; assigning `0` shuts a building down). Six resource types exist: gold, wood, stone, iron, arcane, and food. Food is not generated on world-map tiles; food spots/buildings, stockpiles, consumption, and weekly troop upkeep are live.
 
 Wagons carry physical caravan cargo between compatible routes. New games do not teleport resources through shared storage; deliveries wait for destination capacity. Hero and garrison upkeep is charged weekly, so check food stocks and income before the charge.
 

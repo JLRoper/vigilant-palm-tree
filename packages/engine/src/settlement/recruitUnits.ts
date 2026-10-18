@@ -1,6 +1,7 @@
 import type {
   BuildingDef,
   BuildingKind,
+  DistrictState,
   FactionId,
   GameState,
   SettlementId,
@@ -9,7 +10,7 @@ import type {
 } from "@heroes/contracts";
 import type { Platoon, UnitType } from "../units";
 import { MAX_PLATOON_ENTRIES, normalizePlatoons, settlementStacks, unitFactionId } from "../units";
-import { getBuildingEffect, type RecruitEntry } from "../buildingRegistry";
+import { buildingDraftMax, getBuildingEffect, type RecruitEntry } from "../buildingRegistry";
 import { districtKey } from "../control";
 
 // The recruit-eligibility gate shared by the RecruitUnits command and the AI
@@ -94,6 +95,64 @@ export function depositIntoGarrison(
   return { stacks: out, ok: true };
 }
 
+type LocatedRecruitBuilding =
+  | { where: "main"; building: BuildingDef; index: number; list: BuildingDef[] }
+  | {
+      where: "district";
+      building: BuildingDef;
+      index: number;
+      list: BuildingDef[];
+      district: DistrictState;
+      districtKey: string;
+    };
+
+function locateRecruitBuilding(
+  settlement: SettlementState,
+  buildingKind: BuildingKind,
+  gx: number,
+  gy: number,
+  district?: { q: number; r: number },
+): LocatedRecruitBuilding | null {
+  if (district) {
+    const key = districtKey(district.q, district.r);
+    const d = settlement.districts?.[key];
+    const index =
+      d?.buildings.findIndex((b) => b.kind === buildingKind && b.gx === gx && b.gy === gy) ?? -1;
+    if (d && index >= 0) {
+      return { where: "district", building: d.buildings[index], index, list: d.buildings, district: d, districtKey: key };
+    }
+    return null;
+  }
+  const mainIndex = settlement.buildings.findIndex(
+    (b) => b.kind === buildingKind && b.gx === gx && b.gy === gy,
+  );
+  if (mainIndex >= 0) {
+    return {
+      where: "main",
+      building: settlement.buildings[mainIndex],
+      index: mainIndex,
+      list: settlement.buildings,
+    };
+  }
+  const matches: Array<Omit<Extract<LocatedRecruitBuilding, { where: "district" }>, "where">> = [];
+  for (const d of Object.values(settlement.districts ?? {})) {
+    const index = d.buildings.findIndex(
+      (b) => b.kind === buildingKind && b.gx === gx && b.gy === gy,
+    );
+    if (index >= 0) {
+      matches.push({
+        building: d.buildings[index],
+        index,
+        list: d.buildings,
+        district: d,
+        districtKey: districtKey(d.q, d.r),
+      });
+    }
+  }
+  if (matches.length === 1) return { where: "district", ...matches[0] };
+  return null;
+}
+
 export function recruitUnits(
   state: GameState,
   opts: {
@@ -105,32 +164,13 @@ export function recruitUnits(
     count: number;
     district?: { q: number; r: number };
   },
-): { state: GameState; ok: boolean; reason: string } {
+): { state: GameState; ok: boolean; reason: string; available?: number } {
   const settlement = state.settlements[opts.settlementId];
   if (!settlement) return { state, ok: false, reason: "no_settlement" };
   if (settlement.ownerId == null) return { state, ok: false, reason: "unowned_settlement" };
-  let building: BuildingDef | undefined;
-  if (opts.district) {
-    const key = districtKey(opts.district.q, opts.district.r);
-    building = settlement.districts?.[key]?.buildings.find(
-      (b) => b.kind === opts.buildingKind && b.gx === opts.gx && b.gy === opts.gy,
-    );
-  } else {
-    building = settlement.buildings.find(
-      (b) => b.kind === opts.buildingKind && b.gx === opts.gx && b.gy === opts.gy,
-    );
-    if (!building) {
-      const matches: BuildingDef[] = [];
-      for (const d of Object.values(settlement.districts ?? {})) {
-        const found = d.buildings.find(
-          (b) => b.kind === opts.buildingKind && b.gx === opts.gx && b.gy === opts.gy,
-        );
-        if (found) matches.push(found);
-      }
-      if (matches.length === 1) building = matches[0];
-    }
-  }
-  if (!building) return { state, ok: false, reason: "no_building" };
+  const located = locateRecruitBuilding(settlement, opts.buildingKind, opts.gx, opts.gy, opts.district);
+  if (!located) return { state, ok: false, reason: "no_building" };
+  const building = located.building;
   if (building.construction) return { state, ok: false, reason: "building_under_construction" };
   const recruitEntry = getBuildingEffect(opts.buildingKind).recruits.find(
     (r) => r.unitTypeId === opts.unitTypeId,
@@ -153,15 +193,40 @@ export function recruitUnits(
       return { state, ok: false, reason: `not_enough_${res}` };
     }
   }
+  const draftMax = buildingDraftMax(building.kind);
+  const draftPool = building.draft?.[opts.unitTypeId] ?? draftMax;
+  if (opts.count > Math.floor(draftPool)) {
+    return { state, ok: false, reason: "draft_pool_empty", available: Math.floor(draftPool) };
+  }
   const deposit = depositIntoGarrison(settlementStacks(settlement), opts.unitTypeId, opts.count);
   if (!deposit.ok) return { state, ok: false, reason: "garrison_full" };
   const warehouse: Warehouse = { ...settlement.warehouse };
   for (const [res, amount] of owedResources) warehouse[res] -= amount;
+  const nextDraft = {
+    ...(building.draft ?? {}),
+    [opts.unitTypeId]: draftPool - opts.count,
+  };
+  const nextBuilding: BuildingDef = { ...building, draft: nextDraft };
+  const buildings =
+    located.where === "main"
+      ? located.list.map((b, i) => (i === located.index ? nextBuilding : b))
+      : settlement.buildings;
   const updated: SettlementState = {
     ...settlement,
     gold: settlement.gold - goldOwed,
     warehouse,
     stacks: deposit.stacks,
+    ...(located.where === "main"
+      ? { buildings }
+      : {
+          districts: {
+            ...(settlement.districts ?? {}),
+            [located.districtKey]: {
+              ...located.district,
+              buildings: located.list.map((b, i) => (i === located.index ? nextBuilding : b)),
+            },
+          },
+        }),
   };
   return {
     state: {
