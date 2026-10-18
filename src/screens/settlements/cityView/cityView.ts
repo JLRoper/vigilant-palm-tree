@@ -265,6 +265,7 @@ export class CityView {
       citySettings: {
         spriteVariant: s.spriteVariant,
         cityBackdrop: s.cityBackdrop,
+        cityGridLines: s.cityGridLines,
         parallaxEnabled: s.parallaxEnabled,
         parallaxLayerCount: s.parallaxLayerCount,
         cityBgOffsetX: s.cityBgOffsetX,

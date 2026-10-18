@@ -26,6 +26,7 @@ export interface GameSettings {
   populationGrowthRate: number;
   spriteVariant: number;
   cityBackdrop: CityBackdropMode;
+  cityGridLines: boolean;
   cityBgOffsetX: number;
   cityBgOffsetY: number;
   buildingUpgradeConfirm: boolean;
@@ -98,6 +99,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   populationGrowthRate: DEFAULT_GROWTH_RATE,
   spriteVariant: DEFAULT_SPRITE_VARIANT,
   cityBackdrop: DEFAULT_CITY_BACKDROP,
+  cityGridLines: true,
   cityBgOffsetX: DEFAULT_BG_OFFSET,
   cityBgOffsetY: DEFAULT_BG_OFFSET,
   buildingUpgradeConfirm: true,
@@ -218,6 +220,7 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
     populationGrowthRate: clampGrowthRate(patch.populationGrowthRate ?? current.populationGrowthRate),
     spriteVariant: clampSpriteVariant(patch.spriteVariant ?? current.spriteVariant),
     cityBackdrop: clampCityBackdrop(patch.cityBackdrop ?? current.cityBackdrop),
+    cityGridLines: typeof patch.cityGridLines === "boolean" ? patch.cityGridLines : current.cityGridLines,
     cityBgOffsetX: clampBgOffset(patch.cityBgOffsetX ?? current.cityBgOffsetX),
     cityBgOffsetY: clampBgOffset(patch.cityBgOffsetY ?? current.cityBgOffsetY),
     buildingUpgradeConfirm: typeof patch.buildingUpgradeConfirm === "boolean"
@@ -285,6 +288,7 @@ function loadFromStorage(): GameSettings {
       populationGrowthRate: clampGrowthRate(parsed.populationGrowthRate ?? DEFAULT_GROWTH_RATE),
       spriteVariant: clampSpriteVariant(parsed.spriteVariant),
       cityBackdrop: clampCityBackdrop(parsed.cityBackdrop),
+      cityGridLines: typeof parsed.cityGridLines === "boolean" ? parsed.cityGridLines : true,
       cityBgOffsetX: clampBgOffset(parsed.cityBgOffsetX ?? DEFAULT_BG_OFFSET),
       cityBgOffsetY: clampBgOffset(parsed.cityBgOffsetY ?? DEFAULT_BG_OFFSET),
       buildingUpgradeConfirm: typeof parsed.buildingUpgradeConfirm === "boolean"

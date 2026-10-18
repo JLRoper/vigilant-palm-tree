@@ -3,7 +3,7 @@ import type { ResourceType } from "../../map/resourceTiles";
 import type { Faction, HeroDirection } from "../../entities/hero";
 import type { HorseVariant } from "../../state/settings";
 import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase } from "@heroes/contracts";
-import type { BattleSide, CityBackdropSignature } from "@heroes/engine";
+import type { BattleSide, CityBackdropSignature, CityViewSize } from "@heroes/engine";
 
 /** World-space pixel coordinates (pre-Camera-transform), same space axialToPixel() returns. */
 export interface WorldPoint {
@@ -216,6 +216,8 @@ export interface CitySkyboxNode {
   offsetY: number;
   backdrop?: CityBackdropSignature | null;
   backdropMode?: "diorama" | "skybox";
+  /** City tier (5/10/15); the diorama plate grows with the grid so large tiers keep a visible border. */
+  citySize?: CityViewSize;
 }
 
 export interface CityCellNode {
@@ -228,6 +230,8 @@ export interface CityCellNode {
   hovered: boolean;
   /** Set while the build placer is active and the pending building can be placed here; the painter adds a subtle tint so free cells are scannable. */
   buildable?: boolean;
+  /** Draw this cell's diamond outline. The floor is always transparent; absent means true. */
+  gridLines?: boolean;
 }
 
 export interface CityResourceSpotNode {

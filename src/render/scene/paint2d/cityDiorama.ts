@@ -1,4 +1,4 @@
-import { TERRAIN_COLORS, type CityBackdropSignature, type Terrain } from "@heroes/engine";
+import { TERRAIN_COLORS, type CityBackdropSignature, type CityViewSize, type Terrain } from "@heroes/engine";
 
 const TAU = Math.PI * 2;
 const MIST = "#ece6d8";
@@ -384,7 +384,7 @@ function blocked(env: DioramaEnv, x: number, y: number, margin = 18): boolean {
   return false;
 }
 
-function buildEnv(signature: CityBackdropSignature, w: number, h: number): DioramaEnv {
+function buildEnv(signature: CityBackdropSignature, w: number, h: number, size?: CityViewSize): DioramaEnv {
   const info = weightedBiomes(signature);
   const centerPalette = PALETTES[signature.center];
   const dominantPalette = PALETTES[info.dominant];
@@ -403,6 +403,11 @@ function buildEnv(signature: CityBackdropSignature, w: number, h: number): Diora
   );
   const baseFar = mix(blendBiomeColor(signature, "far", 0.2), PALETTES.grass.far, 0.14);
 
+  const tier = size === 15 ? 1.16 : size === 10 ? 1.08 : 1;
+  const plateRx = Math.min(Math.min(w * 0.43, 550) * tier, w * 0.487);
+  const plateRy = Math.min(Math.min(h * 0.3875, 310) * tier, h * 0.455);
+  const wider = size === 15 || size === 10;
+
   return {
     sky,
     mist,
@@ -412,15 +417,15 @@ function buildEnv(signature: CityBackdropSignature, w: number, h: number): Diora
     baseFar,
     plate: {
       cx: w / 2,
-      cy: h * 0.5375,
-      rx: Math.min(w * 0.43, 550),
-      ry: Math.min(h * 0.3875, 310),
+      cy: h * (wider ? 0.4925 : 0.5375),
+      rx: plateRx,
+      ry: plateRy,
     },
     cityZone: {
       x: w / 2,
       y: h * 0.4975,
-      rx: w * 0.3,
-      ry: h * 0.22,
+      rx: w * (wider ? 0.38 : 0.3),
+      ry: h * (wider ? 0.28 : 0.22),
     },
     paths: [],
   };
@@ -602,8 +607,8 @@ function drawSectors(ctx: CanvasRenderingContext2D, env: DioramaEnv, wedges: rea
 
 function drawCalmCenter(ctx: CanvasRenderingContext2D, env: DioramaEnv, rng: Rng): void {
   const z = env.cityZone;
-  softEllipse(ctx, z.x, z.y - 10, z.rx * 0.92, z.ry * 0.94, env.baseNear, 0.3, 0.32);
-  softEllipse(ctx, z.x - 20, z.y - 30, z.rx * 0.52, z.ry * 0.54, lighten(env.base, 0.16), 0.2, 0.2);
+  softEllipse(ctx, z.x, z.y - 10, z.rx * 0.92, z.ry * 0.94, env.baseNear, 0.14, 0.32);
+  softEllipse(ctx, z.x - 20, z.y - 30, z.rx * 0.52, z.ry * 0.54, lighten(env.base, 0.16), 0.08, 0.2);
   ctx.save();
   ctx.globalAlpha = 0.16;
   ctx.strokeStyle = darken(env.base, 0.18);
@@ -1552,7 +1557,7 @@ function drawBottomHaze(ctx: CanvasRenderingContext2D, w: number, h: number, env
   }
 }
 
-function renderDiorama(w: number, h: number, signature: CityBackdropSignature): HTMLCanvasElement {
+function renderDiorama(w: number, h: number, signature: CityBackdropSignature, size?: CityViewSize): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(w));
   canvas.height = Math.max(1, Math.round(h));
@@ -1560,7 +1565,7 @@ function renderDiorama(w: number, h: number, signature: CityBackdropSignature): 
   if (!ctx) return canvas;
 
   const rng = makeRng(signature.seed);
-  const env = buildEnv(signature, canvas.width, canvas.height);
+  const env = buildEnv(signature, canvas.width, canvas.height, size);
   const p = env.plate;
 
   drawBackground(ctx, canvas.width, canvas.height, env, rng);
@@ -1603,11 +1608,13 @@ function renderDiorama(w: number, h: number, signature: CityBackdropSignature): 
   if (!mctx) return canvas;
   mctx.save();
   mctx.translate(p.cx, p.cy + 4);
-  mctx.scale(p.rx * 1.03, p.ry * 1.03);
+  mctx.scale(p.rx * 1.06, p.ry * 1.06);
+  const solid = size === 15 ? 0.9 : size === 10 ? 0.86 : 0.78;
   const mg = mctx.createRadialGradient(0, 0, 0.55, 0, 0, 1);
   mg.addColorStop(0, "rgba(255, 255, 255, 1)");
-  mg.addColorStop(0.78, "rgba(255, 255, 255, 1)");
-  mg.addColorStop(0.92, "rgba(255, 255, 255, 0.55)");
+  mg.addColorStop(solid, "rgba(255, 255, 255, 1)");
+  mg.addColorStop(solid + (1 - solid) * 0.5, "rgba(255, 255, 255, 0.72)");
+  mg.addColorStop(0.99, "rgba(255, 255, 255, 0.12)");
   mg.addColorStop(1, "rgba(255, 255, 255, 0)");
   mctx.fillStyle = mg;
   mctx.beginPath();
@@ -1640,13 +1647,14 @@ export function paintCityDiorama(
   w: number,
   h: number,
   signature: CityBackdropSignature,
+  size?: CityViewSize,
 ): void {
   const width = Math.max(1, Math.round(w));
   const height = Math.max(1, Math.round(h));
-  const key = `${signature.center}|${signature.neighbors.join(",")}|${signature.seed}|${width}x${height}`;
+  const key = `${signature.center}|${signature.neighbors.join(",")}|${signature.seed}|${width}x${height}|s${size ?? 5}`;
   let canvas = cache.get(key);
   if (!canvas) {
-    canvas = renderDiorama(width, height, signature);
+    canvas = renderDiorama(width, height, signature, size);
     if (cache.size >= CACHE_CAP) {
       const oldest = cache.keys().next().value;
       if (oldest !== undefined) cache.delete(oldest);

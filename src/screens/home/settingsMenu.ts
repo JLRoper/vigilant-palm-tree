@@ -670,6 +670,41 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     children.push(backdropRow);
 
+    const gridLinesRow = document.createElement("div");
+    gridLinesRow.style.display = "flex";
+    gridLinesRow.style.alignItems = "center";
+    gridLinesRow.style.justifyContent = "space-between";
+    gridLinesRow.style.gap = "8px";
+
+    const gridLinesLabelWrap = document.createElement("div");
+    const gridLinesLabel = document.createElement("span");
+    gridLinesLabel.textContent = "City grid lines";
+    gridLinesLabelWrap.appendChild(gridLinesLabel);
+
+    const gridLinesHint = document.createElement("div");
+    gridLinesHint.textContent = "Outline the isometric cells in city view. The grid floor is transparent either way.";
+    gridLinesHint.style.fontSize = "10px";
+    gridLinesHint.style.opacity = "0.55";
+    gridLinesLabelWrap.appendChild(gridLinesHint);
+    gridLinesRow.appendChild(gridLinesLabelWrap);
+
+    const gridLinesToggle = document.createElement("input");
+    gridLinesToggle.type = "checkbox";
+    gridLinesToggle.checked = current.cityGridLines;
+    gridLinesToggle.style.accentColor = "#f77f00";
+    gridLinesToggle.style.transform = "scale(1.2)";
+    gridLinesToggle.style.cursor = "pointer";
+    gridLinesRow.appendChild(gridLinesToggle);
+
+    gridLinesToggle.addEventListener("change", () => {
+      updateSettings({ cityGridLines: gridLinesToggle.checked });
+    });
+    refreshList.push(() => {
+      gridLinesToggle.checked = settings().cityGridLines;
+    });
+
+    children.push(gridLinesRow);
+
     const bgBounds = bgOffsetBounds();
 
     // City background X offset

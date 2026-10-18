@@ -124,7 +124,11 @@ Water is a special case (`mix(fill, #d7eaf0, 0.32)`). The plate base blends the 
 
 ### Renderer and cache
 
-`paintCityDiorama` (`src/render/scene/paint2d/cityDiorama.ts`) is a deterministic mulberry32 renderer: ragged plate outline, cliff underside and drop shadow, radial mist mask, six neighbor sector blobs, biome paths, and per-biome props (broadleaf/conifer, boulders, peaks, mesas and cacti, reeds and pools, tufts and flowers). It draws into an offscreen canvas cached by `center|neighbors|seed|WxH`, capped at 12 entries, then blits. `paintCitySkybox` in `paint2d/index.ts` early-returns to it when the node's `backdropMode` is `diorama`.
+`paintCityDiorama` (`src/render/scene/paint2d/cityDiorama.ts`) is a deterministic mulberry32 renderer: ragged plate outline, cliff underside and drop shadow, radial mist mask, six neighbor sector blobs, biome paths, and per-biome props (broadleaf/conifer, boulders, peaks, mesas and cacti, reeds and pools, tufts and flowers). It draws into an offscreen canvas cached by `center|neighbors|seed|WxH|tier`, capped at 12 entries, then blits. `paintCitySkybox` in `paint2d/index.ts` early-returns to it when the node's `backdropMode` is `diorama`.
+
+The plate grows with the city tier (`CitySkyboxNode.citySize`): 10×10 scales it 8%, 15×15 16%, capped inside the viewport. The mask's fully-opaque radius moves out with the tier (0.78 / 0.86 / 0.90 of the plate radius) so a large grid never sits in the faded edge.
+
+The city grid has **no floor**: `paintCityCell` paints only the cell outline, so the diorama ground shows through under the buildings. `cityGridLines` (Settings → City grid lines, default on) turns the outline off; hover and buildable affordances still paint.
 
 ### Constraints
 

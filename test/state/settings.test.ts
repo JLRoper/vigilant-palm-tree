@@ -83,6 +83,20 @@ test("updateSettings round-trips the city backdrop and normalizes unknown values
   }
 });
 
+test("city grid lines default on and only a boolean patch turns them off", () => {
+  assert.equal(DEFAULT_SETTINGS.cityGridLines, true);
+  try {
+    updateSettings({ cityGridLines: false });
+    assert.equal(settings().cityGridLines, false);
+    updateSettings({ cityGridLines: "no" as never });
+    assert.equal(settings().cityGridLines, false, "a non-boolean patch leaves the current value alone");
+    updateSettings({ cityGridLines: true });
+    assert.equal(settings().cityGridLines, true);
+  } finally {
+    updateSettings({ cityGridLines: true });
+  }
+});
+
 test("clampArenaMoveMsPerHex clamps, rounds, and falls back on non-finite input", () => {
   assert.equal(clampArenaMoveMsPerHex(-5), 0);
   assert.equal(clampArenaMoveMsPerHex(0), 0);

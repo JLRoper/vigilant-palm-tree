@@ -39,7 +39,7 @@ export interface CitySceneInput {
   citySettings: Pick<
     GameSettings,
     "spriteVariant" | "parallaxEnabled" | "parallaxLayerCount" | "cityBgOffsetX" | "cityBgOffsetY"
-  > & { cityBackdrop?: CityBackdropMode };
+  > & { cityBackdrop?: CityBackdropMode; cityGridLines?: boolean };
 
   /** The settlement's terrain signature for the biome diorama backdrop; absent = legacy skybox path. */
   backdrop?: CityBackdropSignature | null;
@@ -68,6 +68,7 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
     parallaxLayerCount: citySettings.parallaxLayerCount,
     offsetX: citySettings.cityBgOffsetX,
     offsetY: citySettings.cityBgOffsetY,
+    citySize: size,
   };
   if (input.backdrop) {
     skybox.backdrop = input.backdrop;
@@ -91,6 +92,7 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
       halfHeight: td / 2,
       hovered: hover !== null && hover.gx === cell.gx && hover.gy === cell.gy,
       buildable: buildableCells?.has(`${cell.gx},${cell.gy}`) ?? false,
+      gridLines: citySettings.cityGridLines ?? true,
     });
   }
 

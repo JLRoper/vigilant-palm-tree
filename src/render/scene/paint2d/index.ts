@@ -83,7 +83,6 @@ const OWNER_DOT_RADIUS = 3.5;
 const SELECTED_HERO_RING_RADIUS = 14;
 
 const CITY_BG = "#1a1620";
-const CITY_CELL_FILL = "#2a2438";
 const CITY_CELL_STROKE = "#3a3450";
 const CITY_HOVER_STROKE = "#ffcc00";
 const CITY_BUILDABLE_FILL = "rgba(255,255,255,0.09)";
@@ -832,7 +831,7 @@ export function paintCitySkybox(ctx: CanvasRenderingContext2D, node: CitySkyboxN
   if (!frame) return;
   const { viewportW, viewportH, spriteVariant, parallaxEnabled, parallaxLayerCount, offsetX, offsetY } = node;
   if (node.backdropMode === "diorama" && node.backdrop) {
-    paintCityDiorama(ctx, viewportW, viewportH, node.backdrop);
+    paintCityDiorama(ctx, viewportW, viewportH, node.backdrop, node.citySize);
     return;
   }
   const skybox = deps.skybox;
@@ -902,8 +901,6 @@ export function paintCityCell(ctx: CanvasRenderingContext2D, node: CityCellNode,
   ctx.lineTo(x, y + hh);
   ctx.lineTo(x - hw, y);
   ctx.closePath();
-  ctx.fillStyle = CITY_CELL_FILL;
-  ctx.fill();
   if (node.buildable) {
     ctx.fillStyle = CITY_BUILDABLE_FILL;
     ctx.fill();
@@ -914,9 +911,12 @@ export function paintCityCell(ctx: CanvasRenderingContext2D, node: CityCellNode,
   } else if (node.buildable) {
     ctx.strokeStyle = CITY_BUILDABLE_STROKE;
     ctx.lineWidth = 1;
-  } else {
+  } else if (node.gridLines !== false) {
     ctx.strokeStyle = CITY_CELL_STROKE;
     ctx.lineWidth = 1;
+  } else {
+    void deps;
+    return;
   }
   ctx.stroke();
   void deps;
