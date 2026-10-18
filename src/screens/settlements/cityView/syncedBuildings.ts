@@ -12,6 +12,11 @@ import type { BuildingDef } from "@heroes/contracts";
 //   - bank: a pot that changed while the city view was open (multiplayer, or a
 //     weekly-interest / 7-day-maturity boundary) would otherwise be written back
 //     stale and the change lost on the next commit.
+//   - workers / draft: server-owned staffing state (AssignWorkers / Recruit).
+//     The cart is a placement-time snapshot; without this merge, closing the
+//     city view -- or any placement/destroy commit -- wrote the open-time
+//     counts back into client state, so freshly assigned workers vanished as
+//     soon as the player left the city (server kept them; the views diverged).
 //
 // The `else delete` is load-bearing, not defensive tidiness: settlementRepo's
 // conditional spread (server/persistence/repositories/settlementRepo.ts) treats
@@ -24,6 +29,10 @@ export function syncCartBuilding(cartB: BuildingDef, liveB: BuildingDef): Buildi
   else delete (merged as { construction?: unknown }).construction;
   if (liveB.bank) merged.bank = { ...liveB.bank, pendingOut: liveB.bank.pendingOut.map((e) => ({ ...e })) };
   else delete (merged as { bank?: unknown }).bank;
+  if (liveB.workers !== undefined) merged.workers = liveB.workers;
+  else delete (merged as { workers?: unknown }).workers;
+  if (liveB.draft) merged.draft = { ...liveB.draft };
+  else delete (merged as { draft?: unknown }).draft;
   return merged;
 }
 

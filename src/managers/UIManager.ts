@@ -13,6 +13,7 @@ import { setMinimapReserve } from "@screens/shared/panelRail";
 import { getMinimapReserveHeight } from "../render/minimap";
 import { RESOURCE_PILE_SMOL_SPRITES } from "../render/assetDescriptors";
 import type { CityView, CitySelectionSnapshot } from "@screens/settlements/cityView/cityView";
+import type { WorkforcePanel } from "@screens/settlements/cityView/workforcePanel";
 import { settleNet } from "@screens/settlements/cityView/netCost";
 import { recordBuildCommit } from "../game/buildCommitLedger";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
@@ -64,6 +65,8 @@ export class UIManager {
   private cityViewPromise: Promise<CityView> | null = null;
   private cityViewState?: () => GameStateManager;
   private cityViewLocalSeat?: () => PlayerId | null;
+  private workforcePanel?: WorkforcePanel;
+  private workforcePanelPromise: Promise<WorkforcePanel> | null = null;
   private gameStateManager?: GameStateManager;
   private viewManager?: ViewManager;
   private lastMapWidth = -1;
@@ -392,6 +395,10 @@ export class UIManager {
         // open) skip the camera/select tail -- it would yank the viewport on
         // every grid click. Only a real close re-selects and re-centers.
         if (!final) return written;
+        // The workforce panel is a city-view surface: it must not outlive the
+        // view it edits (otherwise it floats over the world map, its steppers
+        // silently no-op, and 'w' can no longer reach it).
+        this.workforcePanel?.close();
         // Restore the selection captured at open() instead of force-selecting
         // the closed settlement: leaving the city must hand each floating
         // panel back exactly the open/closed state it had on entry.
@@ -443,7 +450,53 @@ export class UIManager {
       },
     });
     this.cityView = view;
+    // Workforce wiring: onAssignWorkers commits one building's staff count as
+    // a server-side command with the TARGET building's own district (undefined
+    // = main settlement); openWorkforcePanel toggles the panel ('w' key).
+    view.onAssignWorkers = (gx, gy, workers, district, source): boolean => {
+      const openId = this.cityView?.getOpenSettlementId();
+      if (!openId) return false;
+      const tc = state().getTurnController();
+      const ok = tc.assignWorkers(openId, gx, gy, workers, district, source).ok;
+      if (ok) {
+        state().replaceState(tc.getState());
+      }
+      return ok;
+    };
+    view.openWorkforcePanel = () => this.toggleWorkforcePanel();
+    view.isWorkforcePanelOpen = () => this.workforcePanel?.isOpen() ?? false;
+    view.closeWorkforcePanel = () => this.workforcePanel?.close();
     return view;
+  }
+
+  private toggleWorkforcePanel(): void {
+    if (this.workforcePanel?.isOpen()) {
+      this.workforcePanel.close();
+      return;
+    }
+    void this.ensureWorkforcePanel().then((panel) => panel.open());
+  }
+
+  // Same lazy single-construction pattern as ensureCityView(): the panel
+  // (and its menu import) is only built on the first toggle.
+  private async ensureWorkforcePanel(): Promise<WorkforcePanel> {
+    if (!this.workforcePanelPromise) {
+      this.workforcePanelPromise = (async () => {
+        const view = await this.ensureCityView();
+        const { WorkforcePanel } = await import("@screens/settlements/cityView/workforcePanel");
+        const panel = new WorkforcePanel({
+          parent: document.body,
+          cityView: view,
+          onAssignWorkers: (gx, gy, workers, district) => view.onAssignWorkers?.(gx, gy, workers, district) ?? false,
+        });
+        this.workforcePanel = panel;
+        return panel;
+      })().catch((err) => {
+        this.workforcePanelPromise = null;
+        throw err;
+      });
+    }
+    return this.workforcePanelPromise;
   }
 
   getToolbar(): Toolbar | undefined { return this.toolbar; }

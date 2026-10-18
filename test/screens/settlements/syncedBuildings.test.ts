@@ -62,6 +62,28 @@ test("a live building with NO pot DELETES the cart's key rather than setting it 
   assert.deepEqual(merged, cart());
 });
 
+test("workers assigned while the city view was open are re-synced, not written back stale", () => {
+  const merged = syncCartBuilding(cart({ workers: 0 }), cart({ workers: 3 }));
+  assert.equal(merged.workers, 3);
+});
+
+test("a live building with NO workers DELETES the cart's key rather than setting it undefined", () => {
+  const merged = syncCartBuilding(cart({ workers: 2 }), cart());
+  assert.equal("workers" in merged, false);
+});
+
+test("draft pools are re-synced and copied, not shared with live state", () => {
+  const live = cart({ draft: { swordsman: 2 } });
+  const merged = syncCartBuilding(cart({ draft: { swordsman: 0 } }), live);
+  assert.deepEqual(merged.draft, { swordsman: 2 });
+  assert.notEqual(merged.draft, live.draft);
+});
+
+test("a live building with NO draft pool DELETES the cart's key rather than setting it undefined", () => {
+  const merged = syncCartBuilding(cart({ draft: { swordsman: 1 } }), cart());
+  assert.equal("draft" in merged, false);
+});
+
 test("the construction branch's delete behavior is preserved verbatim", () => {
   const withConstruction = syncCartBuilding(
     cart({ construction: { daysRemaining: 3 } }),

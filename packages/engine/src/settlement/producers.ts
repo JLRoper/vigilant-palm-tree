@@ -1,6 +1,7 @@
 import type { BuildingDef, BuildingKind, PlayerId, ResourceType, SettlementState } from "@heroes/contracts";
 import { buildingSettlementEffects } from "../buildingRegistry";
 import { cellMultiplier, spotResourceAt } from "./cityMultipliers";
+import { effortFraction } from "./workforce";
 
 export function isDistrictBlockedByHero(
   settlementOwnerId: PlayerId | null,
@@ -91,6 +92,7 @@ export interface ProducerOutput {
   resource: ProducerResource;
   multiplier: number;
   basePerTurn: number;
+  effort: number;
   amount: number;
 }
 
@@ -114,10 +116,20 @@ export function producerTurnOutput(
     resource,
     spots: settlement.citySpots,
   });
+  const effort = effortFraction(building);
   return {
     resource,
     multiplier,
     basePerTurn,
-    amount: Math.round(basePerTurn * multiplier * 100) / 100,
+    effort,
+    amount: Math.round(basePerTurn * multiplier * effort * 100) / 100,
   };
+}
+
+export function buildingFallbackGold(b: BuildingDef): number {
+  if (b.construction) return 0;
+  if (isProducerKind(b.kind)) return 0;
+  const flat = buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+  if (!(flat > 0)) return 0;
+  return Math.round(flat * effortFraction(b) * 100) / 100;
 }

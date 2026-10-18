@@ -1,6 +1,7 @@
 import type { GameState, PlayerId, SettlementState } from "@heroes/contracts";
 import { buildingSettlementEffects } from "../buildingRegistry";
 import { isDistrictBlockedByHero } from "../settlement/producers";
+import { effortFraction } from "../settlement/workforce";
 import { effectiveIncome } from "./consumption";
 
 export function settlementIncome(
@@ -9,13 +10,17 @@ export function settlementIncome(
 ): number {
   let total = s.population * s.goldTax;
   for (const b of s.buildings) {
-    total += buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+    // Same rule as the district loop below and as produceSettlementResources:
+    // a building that is still under construction pays nothing yet, so the HUD
+    // projection must not advertise gold the End Turn will not credit.
+    if (b.construction) continue;
+    total += Math.round(buildingSettlementEffects(b.kind, b.level).goldPerTurn * effortFraction(b) * 100) / 100;
   }
   for (const d of Object.values(s.districts ?? {})) {
     if (isDistrictBlockedByHero(s.ownerId, d.q, d.r, heroes)) continue;
     for (const b of d.buildings) {
       if (b.construction) continue;
-      total += buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+      total += Math.round(buildingSettlementEffects(b.kind, b.level).goldPerTurn * effortFraction(b) * 100) / 100;
     }
   }
   return total;
@@ -39,11 +44,12 @@ export function playerPopulation(state: GameState, playerId: PlayerId): number {
 
 /**
  * The total gold a settlement actually receives per turn: the morale-scaled
- * population tax (via `effectiveIncome`) PLUS building goldPerTurn. This mirrors
- * what `applyEndOfTurn` pays — `produceSettlementResources` credits building
- * goldPerTurn unconditionally, while `applyEffectiveIncome` credits the
- * morale-scaled tax. Unlike `settlementIncome` (gross, no morale), this
- * function applies morale scaling to the population-tax half only.
+ * population tax (via `effectiveIncome`) PLUS building goldPerTurn scaled by
+ * each building's staffing effort. This mirrors what `applyEndOfTurn` pays —
+ * `produceSettlementResources` credits building goldPerTurn scaled by effort
+ * the same way, while `applyEffectiveIncome` credits the morale-scaled tax.
+ * Unlike `settlementIncome` (gross, no morale), this function applies morale
+ * scaling to the population-tax half only.
  */
 export function effectiveSettlementIncome(
   s: SettlementState,
@@ -51,13 +57,14 @@ export function effectiveSettlementIncome(
 ): number {
   let total = effectiveIncome(s);
   for (const b of s.buildings) {
-    total += buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+    if (b.construction) continue;
+    total += Math.round(buildingSettlementEffects(b.kind, b.level).goldPerTurn * effortFraction(b) * 100) / 100;
   }
   for (const d of Object.values(s.districts ?? {})) {
     if (isDistrictBlockedByHero(s.ownerId, d.q, d.r, heroes)) continue;
     for (const b of d.buildings) {
       if (b.construction) continue;
-      total += buildingSettlementEffects(b.kind, b.level).goldPerTurn;
+      total += Math.round(buildingSettlementEffects(b.kind, b.level).goldPerTurn * effortFraction(b) * 100) / 100;
     }
   }
   return total;

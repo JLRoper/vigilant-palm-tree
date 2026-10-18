@@ -2,20 +2,29 @@
 
 All notable changes to this project are documented here. The app version is the
 root `package.json` `version` field; release tags are `v<semver>`. Bump it with
-`npm run version:bump -- patch|minor|major`. The settings panel's build-info
-footer shows the version, commit hash and build time.
+`npm run version:bump -- patch|minor|major`. The in-game toolbar gear (⚙)
+dropdown menu's build-info footer shows the version, commit hash and build time.
 
 **minor** marks a real game addition — new content or capability. **patch** marks
 a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.12.0] - 2026-10-18
+
+City view: per-settlement biome settlement diorama backdrop (default, with a watercolor-skybox fallback), a see-through outline-only grid with a City grid lines toggle, and a diorama plate sized from the measured grid footprint for 10x10/15x15 cities.
+
+## [0.11.0] - 2026-10-18
+
+Logistics panel: icon stockpiles with floating tooltips, inline wagon/cart purchases with price tooltips, and one-row compact route visualization
+
 ## [0.10.0] - 2026-10-18
 
-feat(cityview): biome settlement diorama backdrop
+Workforce staffing system: per-100-pop worker pool, assignable staffing scaling production/draft recharge/upgrade speed. The first assignment auto-crews the remaining pool (jobs first by kind, then houses), workers/draft survive the city-view round-trip, and drag/panel lifecycle fixes land with it (drops over UI cancel, the panel closes with the city, Escape closes it first).
 
 ## [0.9.1] - 2026-10-17
 
+Move game version/build info from the settings panel footer into the toolbar gear dropdown
 fix(economy): round stored settlement gold and warehouse quantities half-up to whole integers at the write points
 
 ## [0.9.0] - 2026-10-17

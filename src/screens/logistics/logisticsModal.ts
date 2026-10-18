@@ -26,6 +26,7 @@ import {
   CASTLE_DESCRIPTORS,
   HERO_PLAYER_DESCRIPTORS,
   HORSE_VARIANT_DESCRIPTORS,
+  RESOURCE_PILE_BUBBLY_SPRITES,
   castleKey,
   type SpriteDescriptor,
   type SpriteKey,
@@ -45,6 +46,7 @@ import {
 } from "./routeVisualization";
 
 const RES: WarehouseResource[] = ["wood", "stone", "iron", "arcane", "food"];
+let routeTooltipId = 0;
 // Typed over the full SpriteKey union so the castleKey index stays legal even
 // after main widened castleKey's return type (fullness variants): absent keys
 // fall through to the CASTLE_DESCRIPTORS fallback below.
@@ -255,7 +257,15 @@ export interface LogisticsModalOptions {
 /** One-stop logistics modal: selected hero cargo/wagons, settlement stockpile caps, wagon purchases, trade routes. */
 export function openLogisticsModal(opts: LogisticsModalOptions): void {
   let detachRouteRefresh = (): void => {};
-  const modal = openCenteredModal(opts.parent, "Logistics", 660, true, true, () => detachRouteRefresh());
+  let clearRouteTooltip = (): void => {};
+  let clearStockpileTooltip = (): void => {};
+  let closed = false;
+  const modal = openCenteredModal(opts.parent, "Logistics", 660, true, true, () => {
+    closed = true;
+    clearRouteTooltip();
+    clearStockpileTooltip();
+    detachRouteRefresh();
+  });
   modal.root.style.width = "min(660px, calc(100vw - 48px))";
   modal.root.style.maxWidth = "calc(100vw - 48px)";
 
@@ -268,6 +278,9 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
   let wagonInput: HTMLInputElement | null = null;
 
   const render = (): void => {
+    if (closed) return;
+    clearRouteTooltip();
+    clearStockpileTooltip();
     const state = opts.getState();
     // The panel is tied to the VIEWING seat, not the active player: a
     // spectator (or any seat whose turn it isn't) still sees and manages
@@ -385,45 +398,138 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
 
     // ── Settlements ──
     section("Settlement stockpiles");
+    let hideHeaderTooltip = (): void => {};
+    const headerTooltip = (kind: string) => {
+      const tip = document.createElement("div");
+      tip.id = `logistics-${kind}-tip-${++routeTooltipId}`;
+      tip.setAttribute("role", "tooltip");
+      tip.style.cssText =
+        "display:none;position:fixed;pointer-events:none;z-index:10000;box-sizing:border-box;padding:8px 10px;border-radius:6px;background:rgba(10,16,26,0.98);color:#eee;border:1px solid rgba(255,255,255,0.18);font:12px/1.5 system-ui,sans-serif;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);overflow:hidden;";
+      if (owned.length) document.body.appendChild(tip);
+      let trigger: HTMLElement | null = null;
+      let pointer: { x: number; y: number } | null = null;
+      const position = (): void => {
+        if (!trigger) return;
+        const anchor = trigger.getBoundingClientRect();
+        const x = pointer?.x ?? anchor.left;
+        const y = pointer?.y ?? anchor.bottom;
+        const { width, height } = tip.getBoundingClientRect();
+        tip.style.left = `${Math.max(8, Math.min(x, window.innerWidth - width - 8))}px`;
+        tip.style.top = `${Math.max(8, Math.min(y, window.innerHeight - height - 8))}px`;
+      };
+      const hide = (): void => {
+        trigger?.removeAttribute("aria-describedby");
+        trigger = null;
+        pointer = null;
+        tip.style.display = "none";
+      };
+      const dismiss = (event: KeyboardEvent): void => {
+        if (event.key === "Escape") hide();
+      };
+      const pointerContext = (event: MouseEvent): void => {
+        if (trigger && event.target instanceof Node && !trigger.contains(event.target)) hide();
+      };
+      window.addEventListener("resize", position);
+      window.addEventListener("scroll", position, true);
+      window.addEventListener("keydown", dismiss);
+      window.addEventListener("mousemove", pointerContext);
+      return {
+        bind: (element: HTMLElement, content: HTMLElement): void => {
+          const show = (event?: MouseEvent): void => {
+            hideHeaderTooltip();
+            hideHeaderTooltip = hide;
+            trigger = element;
+            pointer = event ? { x: event.clientX, y: event.clientY } : null;
+            tip.replaceChildren(content);
+            element.setAttribute("aria-describedby", tip.id);
+            tip.style.display = "block";
+            position();
+          };
+          element.addEventListener("mouseenter", show);
+          element.addEventListener("mousemove", (event) => {
+            if (trigger !== element) return;
+            pointer = { x: event.clientX, y: event.clientY };
+            position();
+          });
+          element.addEventListener("mouseleave", () => {
+            if (trigger === element) hide();
+          });
+          element.addEventListener("focus", () => show());
+          element.addEventListener("blur", () => {
+            if (trigger === element && !pointer) hide();
+          });
+        },
+        clear: (): void => {
+          hide();
+          tip.remove();
+          window.removeEventListener("resize", position);
+          window.removeEventListener("scroll", position, true);
+          window.removeEventListener("keydown", dismiss);
+          window.removeEventListener("mousemove", pointerContext);
+        },
+      };
+    };
+    const stockpileTooltip = headerTooltip("stockpile");
+    const priceTooltip = headerTooltip("price");
+    clearStockpileTooltip = () => {
+      stockpileTooltip.clear();
+      priceTooltip.clear();
+    };
     for (const s of owned) {
       const caps = settlementResourceCap(s);
       const row = document.createElement("div");
       row.style.cssText =
         "font-size:12px;margin-bottom:4px;font-variant-numeric:tabular-nums;line-height:1.5;";
-      const name = document.createElement("div");
-      name.textContent = `${s.name} (L${s.level}) — treasury ${s.gold}/${settlementTreasuryCap(s)}g`;
-      name.style.fontWeight = "600";
-      row.appendChild(name);
-      const stock = document.createElement("div");
-      stock.textContent = RES.map(
-        (r) => `${r}: ${Math.floor(s.warehouse[r] ?? 0)}/${caps[r]}`,
-      ).join(" · ");
-      stock.style.opacity = "0.8";
-      row.appendChild(stock);
-      // Per-turn production rates — BOTH halves of the production loop,
-      // combined by settlementProductionRates: the warehouseRates() tile
-      // rates plus the per-building producers (farmField/farmhouse/granary
-      // food, woodcutterHut wood, goldMine gold; in-construction buildings
-      // contribute nothing). Gold goes to the treasury, not the warehouse, so
-      // it is shown as its own segment; the tile rate map's gold entry is
-      // never paid and is deliberately absent.
+      const heading = document.createElement("div");
+      heading.style.cssText = "display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;";
+      const name = document.createElement("span");
+      name.tabIndex = 0;
+      name.dataset.focus = `stockpile-${s.id}`;
+      name.textContent = `${s.name} (L${s.level})`;
+      name.style.cssText = "font-weight:600;min-width:0;overflow-wrap:anywhere;";
+      heading.appendChild(name);
+      row.appendChild(heading);
       const production = settlementProductionRates(s, state.castleSeed, state.heroes);
-      const productionParts = production.rates.map((r) => `${r.perTurn} ${r.resource}`);
-      if (production.goldPerTurn > 0) productionParts.push(`${production.goldPerTurn} gold (treasury)`);
-      const ratesRow = document.createElement("div");
-      ratesRow.textContent =
-        productionParts.length > 0 ? `+${productionParts.join(", +")}/turn` : "no production";
-      ratesRow.style.cssText = "font-size:11px;opacity:0.65;";
-      row.appendChild(ratesRow);
-      const buyRow = document.createElement("div");
-      buyRow.style.cssText = "display:flex;gap:6px;margin-top:3px;align-items:center;";
-      for (const [slot, label, title] of [
-        ["cargo", "Buy wagon (200g 5w)", "Buys a cargo wagon into the player's unassigned pool"],
-        ["treasury", "Buy cart (200g 5w)", "Buys a treasury cart into the player's unassigned cart pool (gold capacity)"],
+      const stock = document.createElement("div");
+      stock.className = "logistics-stockpile";
+      stock.style.cssText =
+        "display:grid;grid-template-columns:24px max-content max-content;align-items:center;column-gap:10px;row-gap:1px;width:max-content;max-width:100%;opacity:0.85;font-variant-numeric:tabular-nums;";
+      for (const resource of ["gold", ...RES] as const) {
+        const image = document.createElement("img");
+        image.src = RESOURCE_PILE_BUBBLY_SPRITES[resource];
+        image.alt = image.title = resource;
+        image.style.cssText = "width:24px;height:24px;object-fit:contain;image-rendering:pixelated;";
+        const stored = resource === "gold" ? s.gold : Math.floor(s.warehouse[resource] ?? 0);
+        const cap = resource === "gold" ? settlementTreasuryCap(s) : caps[resource];
+        const amount = document.createElement("span");
+        amount.textContent = `${stored}/${cap}`;
+        amount.style.textAlign = "right";
+        amount.setAttribute("aria-label", `${resource}: ${stored} of ${cap} capacity`);
+        const perTurn = resource === "gold"
+          ? production.goldPerTurn
+          : production.rates.find((rate) => rate.resource === resource)?.perTurn ?? 0;
+        const rate = document.createElement("span");
+        rate.textContent = `${perTurn >= 0 ? "+" : ""}${perTurn}/turn`;
+        rate.style.cssText = "text-align:right;font-size:11px;opacity:0.75;";
+        rate.title = "production per turn";
+        rate.setAttribute("aria-label", `${resource}: ${perTurn} production per turn`);
+        stock.append(image, amount, rate);
+      }
+      stockpileTooltip.bind(name, stock);
+      for (const [slot, label, title, countLabel, count] of [
+        ["cargo", "Buy wagon", "Buy a cargo wagon into the player's unassigned pool", "Supply wagons", player ? playerWagonsUnassigned(player) : 0],
+        ["treasury", "Buy cart", "Buy a treasury cart into the player's unassigned cart pool (gold capacity)", "Treasure carts", player ? playerTreasuryWagonsUnassigned(player) : 0],
       ] as const) {
+        const group = document.createElement("span");
+        group.style.cssText = "display:inline-flex;align-items:center;gap:6px;max-width:100%;";
+        const counts = document.createElement("span");
+        counts.style.fontWeight = "400";
+        counts.textContent = `${countLabel}: ${count}`;
+        counts.title = "Available unassigned wagons and carts in the owner's player-wide shared pool, not this settlement's inventory";
+        counts.setAttribute("aria-label", `${counts.textContent}; ${counts.title}`);
         const buyBtn = document.createElement("button");
         buyBtn.textContent = label;
-        buyBtn.title = title;
+        buyBtn.setAttribute("aria-label", title);
         buyBtn.dataset.focus = `buy-wagon-${s.id}-${slot}`;
         styleButton(buyBtn);
         buyBtn.style.fontSize = "10px";
@@ -433,9 +539,23 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
           if (!result.ok) rejectionToast("wagon purchase", result.reason);
           setTimeout(render, 30);
         });
-        buyRow.appendChild(buyBtn);
+        const price = document.createElement("div");
+        price.style.cssText = "display:flex;align-items:center;gap:10px;";
+        price.setAttribute("aria-label", "Purchase cost");
+        for (const [resource, amount] of [["gold", 200], ["wood", 5]] as const) {
+          const item = document.createElement("span");
+          item.style.cssText = "display:inline-flex;align-items:center;gap:4px;";
+          const image = document.createElement("img");
+          image.src = RESOURCE_PILE_BUBBLY_SPRITES[resource];
+          image.alt = resource;
+          image.style.cssText = "width:24px;height:24px;object-fit:contain;image-rendering:pixelated;";
+          item.append(image, document.createTextNode(String(amount)));
+          price.appendChild(item);
+        }
+        priceTooltip.bind(buyBtn, price);
+        group.append(counts, buyBtn);
+        heading.appendChild(group);
       }
-      row.appendChild(buyRow);
       modal.body.appendChild(row);
     }
 
@@ -532,23 +652,93 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       empty.style.cssText = "font-size:12px;opacity:0.6;";
       modal.body.appendChild(empty);
     }
+    const routeStyles = document.createElement("style");
+    routeStyles.textContent = `
+      .logistics-routes { container-type: inline-size; }
+      .logistics-route { display:grid;grid-template-columns:48px minmax(170px,1fr) auto;align-items:center;gap:6px; }
+      @container (max-width: 360px) {
+        .logistics-route { grid-template-columns:minmax(0,1fr) auto; }
+        .logistics-route-visual { grid-column:1 / -1;grid-row:2; }
+      }
+    `;
+    const routeList = document.createElement("div");
+    routeList.className = "logistics-routes";
+    modal.body.append(routeStyles, routeList);
+    const detailsTip = document.createElement("div");
+    detailsTip.id = `logistics-route-tip-${++routeTooltipId}`;
+    detailsTip.setAttribute("role", "tooltip");
+    detailsTip.style.cssText =
+      "display:none;position:fixed;z-index:10000;box-sizing:border-box;padding:8px 10px;border-radius:6px;background:rgba(10,16,26,0.98);color:#eee;border:1px solid rgba(255,255,255,0.18);font:11px/1.5 system-ui,sans-serif;white-space:pre-line;overflow-wrap:anywhere;max-width:min(520px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;";
+    document.body.appendChild(detailsTip);
+    let hoveredRow: HTMLElement | null = null;
+    let focusedRow: HTMLElement | null = null;
+    let tooltipRow: HTMLElement | null = null;
+    let tooltipHovered = false;
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const positionTooltip = (): void => {
+      if (!tooltipRow) return;
+      const rect = tooltipRow.getBoundingClientRect();
+      const width = detailsTip.offsetWidth;
+      const height = detailsTip.offsetHeight;
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+      const below = rect.bottom + 6;
+      const top = below + height <= window.innerHeight - 8 ? below : rect.top - height - 6;
+      detailsTip.style.left = `${left}px`;
+      detailsTip.style.top = `${Math.max(8, Math.min(top, window.innerHeight - height - 8))}px`;
+    };
+    const refreshTooltip = (): void => {
+      clearTimeout(hideTimer);
+      const nextRow = hoveredRow ?? focusedRow ?? (tooltipHovered ? tooltipRow : null);
+      if (tooltipRow !== nextRow) tooltipRow?.removeAttribute("aria-describedby");
+      tooltipRow = nextRow;
+      if (!tooltipRow) {
+        detailsTip.style.display = "none";
+        return;
+      }
+      detailsTip.textContent = tooltipRow.getAttribute("aria-label");
+      tooltipRow.setAttribute("aria-describedby", detailsTip.id);
+      detailsTip.style.display = "block";
+      positionTooltip();
+    };
+    detailsTip.addEventListener("mouseenter", () => {
+      tooltipHovered = true;
+      refreshTooltip();
+    });
+    detailsTip.addEventListener("mouseleave", () => {
+      tooltipHovered = false;
+      refreshTooltip();
+    });
+    const dismissTooltip = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      hoveredRow = focusedRow = null;
+      tooltipHovered = false;
+      refreshTooltip();
+    };
+    window.addEventListener("resize", positionTooltip);
+    window.addEventListener("scroll", positionTooltip, true);
+    window.addEventListener("keydown", dismissTooltip);
+    clearRouteTooltip = () => {
+      clearTimeout(hideTimer);
+      tooltipRow?.removeAttribute("aria-describedby");
+      detailsTip.remove();
+      window.removeEventListener("resize", positionTooltip);
+      window.removeEventListener("scroll", positionTooltip, true);
+      window.removeEventListener("keydown", dismissTooltip);
+    };
     for (const route of playerRoutes) {
       const routeDetails = getRouteTooltipText(state, route);
       const row = document.createElement("div");
+      row.className = "logistics-route";
       row.style.cssText =
-        "margin-bottom:6px;padding:6px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:linear-gradient(115deg,rgba(28,39,55,0.72),rgba(15,22,33,0.7));font-variant-numeric:tabular-nums;cursor:help;";
-      row.title = routeDetails;
+        "margin-bottom:4px;padding:3px 6px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:linear-gradient(115deg,rgba(28,39,55,0.72),rgba(15,22,33,0.7));font-variant-numeric:tabular-nums;cursor:help;";
       row.tabIndex = 0;
       row.setAttribute("role", "group");
       row.setAttribute("aria-label", routeDetails);
       row.dataset.focus = `route-${route.id}`;
-      const header = document.createElement("div");
-      header.style.cssText = "display:flex;align-items:center;gap:6px;min-width:0;min-height:18px;";
       const label = document.createElement("span");
       label.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;";
       const payloadText = route.payload.kind === "gold" ? "gold" : route.payload.resource;
       label.textContent = `${route.wagons}x ${payloadText}`;
-      header.appendChild(label);
       const controls = document.createElement("div");
       controls.style.cssText = "display:flex;flex:none;align-items:center;gap:4px;";
       for (const [delta, text] of [
@@ -581,51 +771,35 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         setTimeout(render, 30);
       });
       controls.appendChild(removeBtn);
-      header.appendChild(controls);
 
       const routeVisual = document.createElement("div");
+      routeVisual.className = "logistics-route-visual";
       routeVisual.style.cssText =
-        "display:grid;grid-template-columns:minmax(56px,0.8fr) minmax(72px,1.4fr) minmax(56px,0.8fr);align-items:center;gap:4px;margin-top:4px;";
+        "display:grid;min-width:0;grid-template-columns:56px minmax(40px,1fr) 56px;align-items:center;gap:4px;";
       routeVisual.append(
         routeEndpointPanel(state, route.from, route.payload, "source"),
         routeJourneyPanel(state, route),
         routeEndpointPanel(state, route.to, route.payload, "destination"),
       );
-      row.append(header, routeVisual);
-      // A native title never opens on keyboard focus; give the details a
-      // visible tooltip on hover AND focus, linked via aria-describedby.
-      const detailsTip = document.createElement("div");
-      detailsTip.id = `route-tip-${route.id}`;
-      detailsTip.textContent = routeDetails;
-      detailsTip.style.cssText =
-        "display:none;margin-top:4px;padding:6px 8px;border-radius:6px;background:rgba(10,16,26,0.95);border:1px solid rgba(255,255,255,0.18);font-size:10px;line-height:1.5;white-space:pre-line;max-width:520px;";
-      row.setAttribute("aria-describedby", detailsTip.id);
-      // Show while EITHER trigger is active: leaving the pointer must not
-      // hide the tip the keyboard still owns, and blur must not hide it
-      // while the pointer still hovers.
-      let tipHovering = false;
-      let tipFocused = false;
-      const refreshTip = (): void => {
-        detailsTip.style.display = tipHovering || tipFocused ? "block" : "none";
-      };
+      row.append(label, routeVisual, controls);
       row.addEventListener("mouseenter", () => {
-        tipHovering = true;
-        refreshTip();
+        hoveredRow = row;
+        refreshTooltip();
       });
       row.addEventListener("mouseleave", () => {
-        tipHovering = false;
-        refreshTip();
+        if (hoveredRow === row) hoveredRow = null;
+        hideTimer = setTimeout(refreshTooltip, 100);
       });
-      row.addEventListener("focus", () => {
-        tipFocused = true;
-        refreshTip();
+      row.addEventListener("focusin", () => {
+        focusedRow = row;
+        refreshTooltip();
       });
-      row.addEventListener("blur", () => {
-        tipFocused = false;
-        refreshTip();
+      row.addEventListener("focusout", (event) => {
+        if (event.relatedTarget instanceof Node && row.contains(event.relatedTarget)) return;
+        if (focusedRow === row) focusedRow = null;
+        refreshTooltip();
       });
-      row.appendChild(detailsTip);
-      modal.body.appendChild(row);
+      routeList.appendChild(row);
     }
 
     // ── Create route ──

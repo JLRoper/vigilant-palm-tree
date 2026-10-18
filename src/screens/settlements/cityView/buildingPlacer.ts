@@ -484,10 +484,16 @@ export class BuildingPlacer {
     if (!this.palette) return;
 
     const refundPct = Math.round(DESTROY_REFUND_PCT * 100);
+    // A district has no town hall and its centre cell IS demolishable
+    // (canPlaceAt/removeAt skip the centre guard when isDistrict), so the
+    // main-settlement centre note would state a rule that does not apply here.
+    const centreNote = this.isDistrict
+      ? "Every cell, including the center, can be cleared."
+      : "The town hall on the center cell cannot be removed.";
     const msg = document.createElement("div");
     msg.innerHTML = `
       <div style="font-size:12px;margin-bottom:6px;">Click any building on the grid to remove it. (${refundPct}% refund)</div>
-      <div style="font-size:10px;opacity:0.5;">The town hall on the center cell cannot be removed.</div>
+      <div style="font-size:10px;opacity:0.5;">${centreNote}</div>
     `;
     this.palette.appendContent(msg);
   }

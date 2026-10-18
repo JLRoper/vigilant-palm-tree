@@ -1,5 +1,5 @@
 import type { CityBackdropSignature, CityViewSize } from "@heroes/engine";
-import { buildingConstructionProgress, buildingFootprintFromRegistry, constructionStageFor, farmFieldStyleAt, upgradeProgress, upgradeRefs } from "@heroes/engine";
+import { buildingConstructionProgress, buildingFootprintFromRegistry, buildingMaxWorkers, constructionStageFor, farmFieldStyleAt, upgradeProgress, upgradeRefs } from "@heroes/engine";
 import type { BuildingDef, BuildingKind, UpgradeState } from "@heroes/contracts";
 import { buildingFootprint, cellsInDrawOrder, cellToScreen, cityLayout } from "../../../core/cityGrid";
 import type { ResourceType } from "../../../map/resourceTiles";
@@ -187,6 +187,26 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
     });
   }
 
+  // Worker person clusters (population-workforce wave): one node per staffed,
+  // not-under-construction building. Legacy buildings (workers undefined) read
+  // as fully staffed so existing saves keep their look; a visible cap of 4
+  // keeps clusters readable. Emitted after the building run so persons paint
+  // above building bodies and below labels.
+  for (const b of orderedBuildings) {
+    if (b.construction) continue;
+    const count = Math.min(b.workers ?? buildingMaxWorkers(b.kind), 4);
+    if (count <= 0) continue;
+    const fpSize = buildingFootprintFromRegistry(b.kind, b.level);
+    const fp = buildingFootprint(b.gx, b.gy, gridOrigin, screenOrigin, tileScale, fpSize.w, fpSize.h);
+    nodes.push({
+      kind: "cityPerson",
+      gx: b.gx,
+      gy: b.gy,
+      center: { x: fp.cx, y: fp.cy + fp.hh * 0.55 },
+      count,
+    });
+  }
+
   if (ghost) {
     const fp = buildingFootprint(ghost.gx, ghost.gy, gridOrigin, screenOrigin, tileScale, ghost.w, ghost.h);
     nodes.push({
@@ -203,7 +223,9 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
   nodes.push({ kind: "cityLabel", text: settlementName, x: 12, y: 12 + labelY, fontPx: 14, alpha: 1 });
   nodes.push({
     kind: "cityLabel",
-    text: TIER_LABELS[size],
+    // A district is a 5x5 satellite grid, not the settlement's own tier -- the
+    // TIER_LABELS entry for size 5 would present it as a "5x5 Settlement".
+    text: input.district ? "District (5×5 grid)" : TIER_LABELS[size],
     x: 12,
     y: 30 + labelY,
     fontPx: 11,

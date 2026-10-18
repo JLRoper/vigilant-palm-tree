@@ -513,6 +513,25 @@ export async function recruitUnits(
   await postCommand(name, { kind: "RecruitUnits", ...payload });
 }
 
+// Explicit workforce staffing of one building (AssignWorkers): same
+// fire-and-forget shape as recruitUnits above -- called from
+// src/game/turnHooks.ts right after the local engine reducer already
+// applied, so the response body is unused here too.
+export async function assignWorkers(
+  name: string,
+  payload: {
+    actor: number;
+    settlementId: string;
+    gx: number;
+    gy: number;
+    workers: number;
+    source?: { gx: number; gy: number };
+    district?: { q: number; r: number };
+  }
+): Promise<void> {
+  await postCommand(name, { kind: "AssignWorkers", ...payload });
+}
+
 export async function transferUnits(
   name: string,
   payload: {

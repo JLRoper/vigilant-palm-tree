@@ -218,6 +218,8 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     this.canvas.addEventListener("dblclick", (e) => void this.handleDblClick(e));
     this.canvas.addEventListener("mousemove", (e) => this.handleMouseMove(e));
     this.canvas.addEventListener("click", (e) => this.handleClick(e));
+    this.canvas.addEventListener("mousedown", (e) => this.handleMouseDown(e));
+    this.canvas.addEventListener("mouseup", (e) => this.handleMouseUp(e));
   }
 
   private initDebug(): void {
@@ -612,6 +614,16 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       metaKey: e.metaKey,
       shiftKey: e.shiftKey,
     });
+  }
+
+  private handleMouseDown(e: MouseEvent): void {
+    const cityView = this.ui.getCityView();
+    if (cityView?.isOpen()) cityView.onCanvasMouseDown?.(e.clientX, e.clientY);
+  }
+
+  private handleMouseUp(e: MouseEvent): void {
+    const cityView = this.ui.getCityView();
+    if (cityView?.isOpen()) cityView.onCanvasMouseUp?.(e.clientX, e.clientY);
   }
 
   private handleResize(): void {

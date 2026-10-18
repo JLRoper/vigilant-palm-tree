@@ -34,6 +34,7 @@ export type SceneNode =
   | CityMineNode
   | CityBuildingNode
   | CityGhostBuildingNode
+  | CityPersonNode
   | CityLabelNode
   | BattleHexNode
   | BattleAttackTargetRingNode
@@ -289,6 +290,17 @@ export interface CityGhostBuildingNode {
   halfHeight: number;
   ownerColor: string;
   valid: boolean;
+}
+
+/** Staffed-building person cluster. `center` is the front-bottom anchor of the
+ * building footprint (center.y + halfHeight*0.55); the painter draws `count`
+ * persons bottom-anchored on it. */
+export interface CityPersonNode {
+  kind: "cityPerson";
+  gx: number;
+  gy: number;
+  center: WorldPoint;
+  count: number;
 }
 
 export interface CityLabelNode {

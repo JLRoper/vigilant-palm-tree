@@ -760,6 +760,36 @@ export function parseCommand(body: unknown, gameName: string): Command | null {
     };
   }
 
+  if (b.kind === "AssignWorkers") {
+    // workers is a non-negative integer (0 = shut down); the settlement-wide
+    // pool and per-kind maxWorkers caps are the reducer's 409s, not wire
+    // shape. gx/gy integer-checked like PlaceBuildings' entries.
+    const d = parseOptionalDistrict(b.district);
+    const source = b.source as { gx?: unknown; gy?: unknown } | undefined;
+    if (source !== undefined && (!source || !Number.isInteger(source.gx) || !Number.isInteger(source.gy))) return null;
+    if (
+      !d.ok ||
+      typeof b.settlementId !== "string" ||
+      b.settlementId.length === 0 ||
+      !Number.isInteger(b.gx) ||
+      !Number.isInteger(b.gy) ||
+      !isNonNegativeInt(b.workers)
+    ) {
+      return null;
+    }
+    return {
+      kind: "AssignWorkers",
+      gameName,
+      actor: b.actor,
+      settlementId: b.settlementId,
+      gx: b.gx as number,
+      gy: b.gy as number,
+      workers: b.workers as number,
+      ...(source ? { source: { gx: source.gx as number, gy: source.gy as number } } : {}),
+      ...(d.district ? { district: d.district } : {}),
+    };
+  }
+
   if (b.kind === "TransferUnits") {
     const toSlot = b.toSlot;
     const hasSlot = typeof toSlot === "number";

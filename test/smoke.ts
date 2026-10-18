@@ -178,6 +178,38 @@ async function runTilesEndpointChecks(
   console.log(`>> tiles endpoint: ${tiles.length} rows, all enum values valid, full coverage`);
 }
 
+async function runBuildInfoChecks(page: Page) {
+  console.log(">> gear dropdown build info checks");
+  const pkgVersion = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
+  const menuBtn = page.locator("#toolbar button[title='Menu']");
+  await menuBtn.click();
+  const buildInfo = page.locator("#toolbar [data-testid='toolbar-build-info']");
+  await buildInfo.waitFor({ timeout: 5_000 });
+  const text = (await buildInfo.textContent()) ?? "";
+  if (!text.includes(`v${pkgVersion}`)) {
+    throw new Error(`gear dropdown missing version text: ${text}`);
+  }
+  if (!/Built: /.test(text)) {
+    throw new Error(`gear dropdown missing built line: ${text}`);
+  }
+  const lines = buildInfo.locator("div");
+  if ((await lines.count()) !== 2) {
+    throw new Error(`expected 2 build-info lines, got ${await lines.count()}`);
+  }
+  console.log(`>> gear dropdown build info: ${text.replace(/\s+/g, " ").trim()}`);
+
+  const settingsItem = page.locator("#toolbar button", { hasText: "Settings" });
+  await settingsItem.click();
+  await page.waitForSelector("[data-modal]", { timeout: 5_000 });
+  const legacyBuildInfo = page.locator('[data-testid="settings-build-info"]');
+  if ((await legacyBuildInfo.count()) !== 0) {
+    throw new Error("settings panel still renders build info after the move");
+  }
+  const closeBtn = page.locator("[data-modal] button", { hasText: "Close" });
+  await closeBtn.click();
+  console.log(">> settings panel no longer renders build info (gear dropdown owns it)");
+}
+
 // NOTE: as of 2026-08-23 this function is defined but never called from
 // run() below -- see #175 for why the New/Load/Save/tiles/movement/battle
 // flows here don't currently execute. Kept correct (not deleted) for
@@ -602,6 +634,8 @@ async function run() {
       throw new Error("expected human PLAYER_TURN at boot");
     }
     console.log(">> human turn at boot");
+
+    await runBuildInfoChecks(page);
 
     const dbRow = await queryDbRow(activeName);
     assert(dbRow.round >= 1, `expected round >= 1, got ${dbRow.round}`);

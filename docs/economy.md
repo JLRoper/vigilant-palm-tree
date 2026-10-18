@@ -1,26 +1,27 @@
 # Economy
 
-<!-- docs:verified 2026-10-17 -->
+<!-- docs:verified 2026-10-18 -->
 
 The per-turn loop that ties [resources](./resources.md), [settlements](./settlements.md), and [heroes](./heroes.md) together.
 
 ## Status
 
-Implemented systems described here include per-turn resource production, decay and recovery, storage/treasury caps, bank pots, charter costs, trade-route caravans, and weekly maintenance. This remains the design-side overview; [`resource-gathering.md`](./resource-gathering.md) is the as-built reference for exact numbers and known differences. In particular, market income finding F2 remains open.
+Implemented systems described here include per-turn resource production, decay and recovery, storage/treasury caps, bank pots, charter costs, trade-route caravans, weekly maintenance, and (2026-10-17) **workforce staffing** — producers, the market, recruit-building draft pools, and upgrade timers all scale with assigned workers. This remains the design-side overview; [`resource-gathering.md`](./resource-gathering.md) is the as-built reference for exact numbers and known differences. Market income finding F2 was **closed on 2026-10-18** — End Turn now credits building `goldPerTurn` (scaled by staffing effort, main city and districts, under-construction buildings excluded) — see [F2](#F2).
 
 ## The loop
 
 Per **round** (all players act, then `advanceRound`):
 
 1. **Hero movement** — each player's turn: heroes move (manual for human, AI for enemies). Chartering heroes auto-travel at turn start.
-2. **Resource production** — all settlements produce resources based on `resourceRates` (computed from nearby resource tiles × level) **plus their producer buildings** (mines, woodcutters, arcane fonts, and farms — a farm's output is its rate × a per-cell multiplier that peaks at 3× on a matching city spot).
+2. **Resource production** — all settlements produce resources based on `resourceRates` (computed from nearby resource tiles × level) **plus their producer buildings** (mines, woodcutters, arcane fonts, and farms — a farm's output is its rate × a per-cell multiplier that peaks at 3× on a matching city spot). Since 2026-10-17, building output is **staffed**: each producer pays `round(base × cellMultiplier × effort)` and the market pays its flat `goldPerTurn × effort`, where `effort = min(workers / maxWorkers, 1)`. Buildings never assigned workers (`workers` undefined) are legacy **auto-staffed** at effort 1, so an untouched pre-workforce save is unchanged; an explicit `0` shuts a building down.
 3. **Auto-trade** — legacy only (`lobby.legacyAutoTrade`; `false` on every new game, so this step moves nothing there — resources travel by caravan, see [Trade routes & caravans](#trade-routes--caravans-2026-10-02)).
 4. **Consumption** — active player's settlements consume food and building upkeep from warehouses.
 5. **Morale** — decays on a food/supplies shortfall, and **recovers +4 per turn** when fully supplied.
-6. **Effective income** — `population × goldTax × (morale / 100)` is added to each settlement's treasury.
-7. **Advance round** — day increments, all heroes get movement reset, matured bank withdrawals pay out, and the weekly upkeep runs on every 7th day in a fixed order: **caravan maintenance first** (`wagons × (1 gold + 1 food)` per route, `economy/caravanUpkeep.ts` — paid first so caravans desert last), then hero weekly upkeep (`applyWeeklyUpkeep`), **garrison weekly upkeep** (catalog-scaled gold/food from each settlement's treasury + warehouse, with morale bleed, a 2-week grace, then weighted desertion — `applyGarrisonUpkeep`), bank interest on every pot, settlement population growth (weekly), upgrade timer advancement. The unfed-troops warnings this loop produces are read-side: they read the persisted streak fields and are suppressed while the entity is currently affordable — see [army.md](./army.md) → Upkeep.
-8. **Charter advancement** — constructing charters decrement `daysRemaining`; completed charters spawn new settlements.
-9. **Upgrade advancement** — active settlement and town hall upgrades decrement `daysRemaining`; completed upgrades apply level-up (rates, spots, TH level).
+6. **Daily wages (2026-10-18)** — every active player's settlement pays `floor(population / 100)` gold (1g per 100 population; `WAGE_POPULATION_PER_GOLD = 100`, `settlementDailyWage` / `applySettlementWages` in `packages/engine/src/economy/consumption.ts`), deducted after consumption and before income. The deduction floors at 0 (no debt, no morale penalty) and is not yet shown in the settlement panel UI.
+7. **Effective income** — `population × goldTax × (morale / 100)` is added to each settlement's treasury.
+8. **Advance round** — day increments, all heroes get movement reset, matured bank withdrawals pay out, and the weekly upkeep runs on every 7th day in a fixed order: **caravan maintenance first** (`wagons × (1 gold + 1 food)` per route, `economy/caravanUpkeep.ts` — paid first so caravans desert last), then hero weekly upkeep (`applyWeeklyUpkeep`), **garrison weekly upkeep** (catalog-scaled gold/food from each settlement's treasury + warehouse, with morale bleed, a 2-week grace, then weighted desertion — `applyGarrisonUpkeep`), bank interest on every pot, settlement population growth (weekly), upgrade timer advancement. The unfed-troops warnings this loop produces are read-side: they read the persisted streak fields and are suppressed while the entity is currently affordable — see [army.md](./army.md) → Upkeep.
+9. **Charter advancement** — constructing charters decrement `daysRemaining`; completed charters spawn new settlements.
+10. **Upgrade advancement** — active settlement and town hall upgrades decrement `daysRemaining` (**by `1 + upgradeAccelEffort` days when the `townHall` or `mageGuild` is explicitly staffed**, 2026-10-17 — up to 2×); completed upgrades apply level-up (rates, spots, TH level). Recruit-building draft pools recharge daily on the round wrap: each draft entry regains `draftPerDay (0.25) × (1 + effort) × tier multiplier` capped at `draftMax` (3) — tier-scaled since 2026-10-18 (tiers 1–7 → ×1 / ×0.8 / ×0.65 / ×0.5 / ×0.4 / ×0.3 / ×0.2, `TIER_DRAFT_RECHARGE_MULTIPLIER` in `packages/engine/src/units.ts`; catalog-less callers → ×1), so higher-tier units refill slower.
 
 Implementation: the canonical reducers live in [`packages/engine/src/`](../packages/engine/src), re-exported to the client by [`src/state/gameState.ts`](../src/state/gameState.ts) and orchestrated by [`src/state/turnController.ts`](../src/state/turnController.ts). The per-turn pipeline itself is **server-authoritative**: `server/app/turnService.ts` re-runs the same engine functions against the DB row. Full as-built reference: [resource-gathering.md](./resource-gathering.md).
 
@@ -28,7 +29,7 @@ Implementation: the canonical reducers live in [`packages/engine/src/`](../packa
 
 Gold is held in two separate pools:
 - **Hero purse** (`hero.gold`) — moves with the hero; **capped by treasury carts** (`heroGoldCap = treasuryWagons × 500`, a slot separate from the army wagons — migration 023); spent on chartering (2500g); looted by the winner **on defeat** (wiped in battle — the hero is then removed from the map, 2026-09-29 outcomes). A retreat keeps the purse (loses its troops instead); a surrender pays its gold cost and keeps the rest
-- **Settlement treasury** (`settlement.gold`) — funds recruitment, building, and caravan loading; grows from morale-scaled tax and `goldMine` producer output. `market.goldPerTurn` is not credited by End Turn (F2).
+- **Settlement treasury** (`settlement.gold`) — funds recruitment, building, and caravan loading; grows from morale-scaled tax and building gold — a `goldMine` producer's output and the `market`'s flat `goldPerTurn`, both **scaled by staffing effort** (F2 resolved; building income credited by End Turn since 2026-10-18).
 
 > **Vocabulary (canonical, per the designer).** The **treasury** is the *gold store* — a settlement's `gold`, or a hero's purse — raised by `treasury`/`bank` buildings (and treasury carts on a hero). The **larder** is the *food store* — a settlement's `warehouse.food`, or the food in a hero's wagon cargo — raised by the `granary`. Hero upkeep and caravan bills are quoted in exactly these terms: gold from the treasury/purse, food from the larder/warehouse. Both bills are weekly, not per-turn: the charge runs only on `day % 7 === 0`, so a larder refilled between charge days is never charged at all, which is why the hero panel's food row now states its cadence (next charge in N days, weeks of coverage) instead of leaving it to be inferred.
 
@@ -37,7 +38,7 @@ Warehouse resources held per-settlement:
 - Spent on charter provisioning (20 wood + 15 stone from settlement warehouse)
 - Shipped between owned endpoints by **trade-route caravans** (see below)
 - Consumed by building upkeep
-- `food` — **produced by farm buildings** (`farmField` 5/turn, `farmhouse` 2, `granary` 3, each × building level × its city-cell multiplier), consumed by the population growth check, the per-turn `ceil(pop/100)` settlement consumption, and the weekly **garrison upkeep**. Food has **no map-tile source** by design — a city's *food spot* is the only tile a farm can exploit for the 3× peak. Every settlement is seeded with a starter city whose farmland is sized against **its own** bill (population plus any starting hero standing on it): the L1 keep places 3 fields (asks 4; a 5×5 grid holds 3), the L2 town 4, an AI seat's L3 castle 12, a neutral L3 castle 11.
+- `food` — **produced by farm buildings** (`farmField` 5/turn, `farmhouse` 2, `granary` 3, each × building level × its city-cell multiplier × **staffing effort**, 2026-10-17), consumed by the population growth check, the per-turn `ceil(pop/100)` settlement consumption, and the weekly **garrison upkeep**. Food has **no map-tile source** by design — a city's *food spot* is the only tile a farm can exploit for the 3× peak. Every settlement is seeded with a starter city whose farmland is sized against **its own** bill (population plus any starting hero standing on it): the L1 keep places 3 fields (asks 4; a 5×5 grid holds 3), the L2 town 4, an AI seat's L3 castle 12, a neutral L3 castle 11.
 
 Stockpiles and the treasury are **soft-capped** (derived per level + building `storageBonus`/`treasuryBonus`; a cap gates additions and never destroys stock above it). A `bank` holds a gold pot of its own — capacity `5000 × level`, a 7-day withdrawal delay, and a flat 5% weekly interest that stays in the pot.
 
@@ -77,14 +78,14 @@ All costs are deducted immediately at initiation. If the settlement is captured 
 ## Settlement income
 
 Each settlement produces:
-- **Gold:** morale-scaled population tax per turn, plus a `goldMine` producer's output; bank interest and matured withdrawals are separate round-wrap credits. A market's `goldPerTurn` is currently only a projection and is not credited by End Turn (F2).
-- **Resources:** `resourceRates[r]` per round per resource type, where `resourceRates` is computed at settlement creation time from nearby resource tiles within `settlementRateRadius(level) = level` × level, **plus** every producer building's `base × cell multiplier` (a farm on a matching city spot peaks at 3×)
+- **Gold:** morale-scaled population tax per turn, plus building gold — a `goldMine` producer's output and the `market`'s flat `goldPerTurn`, both **scaled by staffing effort** (`min(workers / maxWorkers, 1)`, 2026-10-17); bank interest and matured withdrawals are separate round-wrap credits. The market is paid by End Turn now (F2 closed 2026-10-18), in the main city and districts, with under-construction buildings excluded; `effectiveSettlementIncome()` matches.
+- **Resources:** `resourceRates[r]` per round per resource type, where `resourceRates` is computed at settlement creation time from nearby resource tiles within `settlementRateRadius(level) = level` × level, **plus** every producer building's `round(base × cell multiplier × effort)` (a farm on a matching city spot peaks at 3×)
 
 Initial castles start with population 500, gold tax 1, morale 100, and a seeded starter city (town hall, farm field, 2 houses, 2 woodcutter huts, stone mine, farmhouse — 10 wood + 2 stone/turn). Charter-founded settlements start with population 50, gold tax 1, morale 50, `autoTrade: false`, and a free starter set committed when the city view first opens.
 
 ### Design Intent vs. As-Built Income
 
-The design's market-income effect remains represented by `market.goldPerTurn` and by the `effectiveSettlementIncome()` projection helper. The current End Turn path instead credits `producerTurnOutput` plus morale-scaled tax; it does not pay the market effect. This is finding F2 in [`resource-gathering.md`](./resource-gathering.md) and is intentionally left open.
+The design's market-income effect is represented by `market.goldPerTurn` and by the `effectiveSettlementIncome()` projection helper; since 2026-10-18 the End Turn path **pays it** — `produceSettlementResources` credits the market's flat `goldPerTurn` **× staffing effort** for every completed non-producer building, in the main city and in [districts](./settlements.md#city-districts), and `effectiveSettlementIncome()` skips under-construction buildings on both halves — so projection and accrual agree. Finding F2 in [`resource-gathering.md`](./resource-gathering.md) is **closed**.
 
 ## Population growth (✅ implemented)
 
@@ -96,6 +97,8 @@ Settlements gain population weekly during `applyWeeklyUpkeep` (day % 7 === 0), p
 - **No food penalty:** Population simply doesn't grow; existing morale decay still applies
 
 Growth rate is player-configurable in Settings. The upgrade population gate is not — it is the engine-owned constant `UPGRADE_POPULATION_GATE` (85% of level cap, `packages/engine/src/settlement/upgradeSettlement.ts`, issue #153).
+
+**Workers (2026-10-17; first-touch normalization 2026-10-18).** Each settlement derives a worker pool from its population: `floor(population / 100)` (`workforcePool` in `packages/engine/src/settlement/workforce.ts` — `WORKFORCE_PER_POPULATION = 100`). Workers are assigned per building through the `AssignWorkers` command (server-validated against the pool); unassigned buildings (`workers` undefined) count as **auto-staffed at full effort** so an untouched pre-workforce save behaves exactly as before — but the **first assignment converts the whole settlement to explicit crews**: the touched building gets the chosen count and the remaining pool is auto-employed (jobs first, round-robin across job kinds in priority order: food producers, other producers, market, recruiters, town hall; then houses/apartments), with only true surplus left idle. Construction sites, inert kinds, and pre-existing explicit counts are skipped. New buildings in a normalized settlement start at `0`, while new buildings in an untouched legacy settlement keep legacy auto-staffing. An explicit `0` shuts a building down. Staffing scales producer output, market gold, recruit-building draft recharge (tier-scaled since 2026-10-18 — higher-tier units refill slower), and upgrade-timer acceleration — see [settlements.md](./settlements.md) → Workforce staffing.
 
 ## Morale
 
@@ -142,17 +145,18 @@ Player owns one L1 settlement on wood, with two forest tiles in radius (3 wood t
 | Settlement produces | `warehouse.wood += 45` (tiles) + the farm field's `5 × cellMultiplier` food; `treasury += 500g` |
 | Auto-trade (legacy games only) | Transfers resources to cover deficits, leaving each source's own food reserve intact — on a new game (`lobby.legacyAutoTrade: false`) this row is a no-op and surplus accumulates at the producing settlement |
 | Consumption | Food (`ceil(500/100) = 5`) + building upkeep deducted |
+| Wages (2026-10-18) | `floor(500 / 100) = 5g` deducted from the treasury |
 | Morale | −decay on a shortfall, or **+4** when fully supplied |
 | Population growth | Weekly: if food met, `pop += max(1, ceil(500 × 0.10)) = +50` |
 | Charter construction | `daysRemaining--` for constructing charters |
 | Upgrade advancement | `daysRemaining--` for active settlement/TH upgrades |
-| End of round totals | `+45 wood, +5 food, +500g` (for player 0) |
+| End of round totals | `+45 wood, +5 food, +495g` (for player 0) |
 
 ## DB persistence
 
 All economy state is stored in the `games` table JSONB columns:
 - `heroes` — per-hero `gold`
-- `settlements` — per-settlement `gold`, `warehouse`, `morale`, `resourceRates`, `autoTrade`, `population`, `buildings` (including a bank's own `bank` pot), `upgrade`
+- `settlements` — per-settlement `gold`, `warehouse`, `morale`, `resourceRates`, `autoTrade`, `population`, `buildings` (including a bank's own `bank` pot; per-building `workers` and `draft` ride on the granular `settlement_buildings` row too — nullable `workers INTEGER` / `draft JSONB` columns from migration `030_workforce.sql`, `NULL` = legacy auto-staffed / full pool), `upgrade`
 
 `activeCharters` round-trips server-side via its own `charters` table, not JSONB (see [settlements.md](./settlements.md#persistence)) — `StartCharter` writes it, `EndTurn`'s round-wrap pipeline advances/founds it via `advanceCharters()`. Settlement upgrades persist via `UpgradeState` in the settlement JSONB, and (as of Phase 3 Track A Week 2) actually advance/complete server-side via `server/app/turnService.ts`'s `advanceSettlementUpgrades()` call on round wrap, not just client-side.
 

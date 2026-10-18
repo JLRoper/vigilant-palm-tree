@@ -111,7 +111,7 @@ cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level
 buildings: Array<{ cell: { x: number; y: number }; kind: BuildingKind; level: 1|2|3 }>;
 ```
 
-Building kinds (v1, deferred beyond mines per the original city-view design note): `townHall`, `mageGuild`, `market` — declared but unused until UI ships.
+Building kinds (v1, deferred beyond mines per the original city-view design note): `townHall`, `mageGuild`, `market` — declared but unused at plan time. All three effects later shipped with the 2026-10-17 workforce wave: a staffed `townHall`/`mageGuild` accelerates the settlement's upgrade timers, a staffed `market` pays its `goldPerTurn × effort` into the treasury, and building staffing is steered from the city view (per-building worker stepper in the building menu, a floating workforce panel opened with `w`, and drag-to-assign on the grid).
 
 DB: add three JSONB columns to the settlements JSONB blob, defaulting to `[]`. Migration is small.
 

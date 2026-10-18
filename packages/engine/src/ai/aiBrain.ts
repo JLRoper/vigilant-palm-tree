@@ -1,7 +1,7 @@
 import { Axial } from "@heroes/contracts";
 import { findPath, NEIGHBOR_DIRS, hexDistance } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
-import type { BuildingKind, GameState, HeroState, SettlementState } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, GameState, HeroState, SettlementState } from "@heroes/contracts";
 import {
   platoonPower,
   platoonTroopTotal,
@@ -14,6 +14,7 @@ import {
   eligibleRecruitSources,
   type RecruitSource,
 } from "../settlement/recruitUnits";
+import { buildingDraftMax } from "../buildingRegistry";
 import { TERRAIN_COST } from "../map/terrain";
 import { RESOURCES } from "../map/resourceTiles";
 import { computeSettlementRates, generateSettlementName } from "../economy/settlementRates";
@@ -172,10 +173,18 @@ function garrisonPurchases(
   for (const source of candidates) {
     if (remaining <= 0) break;
     if (gold < source.entry.goldCost) continue;
+    // recruitUnits rejects any order above the source building's draft pool
+    // (draft_pool_empty); a plan ignoring it would be re-planned identically
+    // every round, so cap the order here against the same pool.
+    const building = recruitSourceBuilding(settlement, source);
+    const avail = building
+      ? Math.floor(building.draft?.[source.entry.unitTypeId] ?? buildingDraftMax(building.kind))
+      : 0;
+    if (avail <= 0) continue;
     const deposit = depositIntoGarrison(workingStacks, source.entry.unitTypeId, 1);
     if (!deposit.ok) continue;
     const power = unitPower(unitTypes[source.entry.unitTypeId]);
-    let count = Math.min(Math.floor(gold / source.entry.goldCost), Math.ceil(remaining / power));
+    let count = Math.min(Math.floor(gold / source.entry.goldCost), Math.ceil(remaining / power), avail);
     for (const [res, perUnit] of Object.entries(source.entry.resourceCost ?? {})) {
       const available = warehouse[res as keyof typeof warehouse] ?? 0;
       count = Math.min(count, perUnit > 0 ? Math.floor(available / perUnit) : count);
@@ -199,6 +208,28 @@ function garrisonPurchases(
     remaining -= power * count;
   }
   return out;
+}
+
+// RecruitSource carries the building's kind/coords, not the building itself,
+// so resolve it back for the draft pool on the real BuildingDef (a district
+// source resolves inside its own district first).
+function recruitSourceBuilding(
+  settlement: SettlementState,
+  source: RecruitSource,
+): BuildingDef | undefined {
+  const district = source.district;
+  if (district) {
+    const d = Object.values(settlement.districts ?? {}).find(
+      (dd) => dd.q === district.q && dd.r === district.r,
+    );
+    const match = d?.buildings.find(
+      (b) => b.kind === source.buildingKind && b.gx === source.gx && b.gy === source.gy,
+    );
+    if (match) return match;
+  }
+  return settlement.buildings.find(
+    (b) => b.kind === source.buildingKind && b.gx === source.gx && b.gy === source.gy,
+  );
 }
 
 function powerPerGold(source: RecruitSource, unitTypes: Record<string, UnitType>): number {

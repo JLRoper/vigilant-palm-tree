@@ -33,6 +33,14 @@ export function unitTier(t: UnitType | undefined): 1 | 2 | 3 | 4 | 5 | 6 | 7 {
   return t?.tier ?? 1;
 }
 
+export const TIER_DRAFT_RECHARGE_MULTIPLIER: Record<1 | 2 | 3 | 4 | 5 | 6 | 7, number> = {
+  1: 1, 2: 0.8, 3: 0.65, 4: 0.5, 5: 0.4, 6: 0.3, 7: 0.2,
+};
+
+export function tierDraftRechargeMultiplier(t: UnitType | undefined): number {
+  return TIER_DRAFT_RECHARGE_MULTIPLIER[unitTier(t)] ?? 1;
+}
+
 export function unitFactionId(t: UnitType | undefined): FactionId {
   return t?.factionId ?? "human";
 }

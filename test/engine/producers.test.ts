@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   applyEndOfTurn,
+  buildingFallbackGold,
   buildingSettlementEffects,
   buildingUpkeep,
   CELL_MULTIPLIER_PEAK,
@@ -11,6 +12,7 @@ import {
   producerBasePerTurn,
   producerResource,
   producerTurnOutput,
+  settlementProductionRates,
   SPOT_MULTIPLIER_PEAK,
 } from "@heroes/engine";
 import { emptyWarehouse, makeSettlement, makeState } from "../charter/_helpers";
@@ -225,4 +227,84 @@ test("EndTurn pays producer gold into the treasury (server tick parity via the s
     spots: [GOLD_SPOT],
   }) * 100) / 100);
   assert.equal(next.settlements.s0.gold, expectedGold);
+});
+
+test("staffing: legacy undefined and explicit full staff both produce the pre-feature amount", () => {
+  const settlement = { q: 5, r: 5, citySpots: [GOLD_SPOT] };
+  const legacy = producerTurnOutput({ gx: 2, gy: 2, kind: "goldMine", level: 1 }, settlement, 42);
+  const full = producerTurnOutput({ gx: 2, gy: 2, kind: "goldMine", level: 1, workers: 3 }, settlement, 42);
+  assert.ok(legacy && full);
+  assert.equal(full.effort, 1);
+  assert.equal(full.amount, legacy.amount, "undefined workers and workers = max both carry effort 1");
+});
+
+test("staffing: workers = max/2 halves a producer's amount with the existing rounding", () => {
+  const settlement = { q: 5, r: 5, citySpots: [] };
+  const m = cellMultiplier({ seed: 42, q: 5, r: 5, gx: 1, gy: 1, resource: "food", spots: [] });
+  const half = producerTurnOutput({ gx: 1, gy: 1, kind: "farmField", level: 1, workers: 1 }, settlement, 42);
+  assert.ok(half);
+  assert.equal(half.effort, 0.5, "farmField maxWorkers is 2, so 1 worker is half staff");
+  assert.equal(half.amount, Math.round(5 * m * 0.5 * 100) / 100);
+});
+
+test("staffing: zero workers produce a valid zero output and bank nothing", () => {
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    warehouse: emptyWarehouse(),
+    citySpots: [],
+    buildings: [{ gx: 1, gy: 1, kind: "farmField", level: 1, workers: 0 }],
+  });
+  const out = producerTurnOutput(settlement.buildings[0], settlement, 7);
+  assert.ok(out, "still a valid producer output, not null");
+  assert.equal(out.amount, 0);
+  const [after] = Object.values(produceSettlementResources({ s0: settlement }, 7));
+  assert.deepEqual(after.warehouse, emptyWarehouse(), "zero staff banks zero food");
+});
+
+test("staffing: the production loop pays the effort-scaled amount", () => {
+  const m = cellMultiplier({ seed: 7, q: 2, r: 2, gx: 1, gy: 1, resource: "food", spots: [] });
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    warehouse: emptyWarehouse(),
+    citySpots: [],
+    buildings: [{ gx: 1, gy: 1, kind: "farmField", level: 1, workers: 1 }],
+  });
+  const [after] = Object.values(produceSettlementResources({ s0: settlement }, 7));
+  // The production loop writes warehouse quantities half-up to whole integers.
+  assert.equal(after.warehouse.food, Math.round(Math.round(5 * m * 0.5 * 100) / 100));
+});
+
+test("market fallback gold scales with explicit staffing and only for the market kind", () => {
+  const market = (workers?: number) =>
+    makeSettlement("s0", 0, 2, 2, {
+      gold: 100,
+      warehouse: emptyWarehouse(),
+      buildings: [{ gx: 1, gy: 1, kind: "market", level: 1, ...(workers === undefined ? {} : { workers }) }],
+    });
+  const [legacy] = Object.values(produceSettlementResources({ s0: market() }, 7));
+  assert.equal(legacy.gold, 140, "legacy undefined staff keeps the full 40/turn");
+  const [third] = Object.values(produceSettlementResources({ s0: market(1) }, 7));
+  assert.equal(third.gold, 113, "1 of 3 workers scales 40 → 13.33, and the treasury write rounds 113.33 → 113");
+  const [idle] = Object.values(produceSettlementResources({ s0: market(0) }, 7));
+  assert.equal(idle.gold, 100, "zero staff shuts the market down");
+  assert.equal(settlementProductionRates(market(1), 7).goldPerTurn, 13.33);
+  const staffedHouse = settlementProductionRates(
+    makeSettlement("s0", 0, 2, 2, { buildings: [{ gx: 0, gy: 0, kind: "house", level: 1, workers: 1 }] }),
+    7,
+  );
+  assert.equal(staffedHouse.goldPerTurn, 0, "a staffed non-market building gains no gold from staffing");
+});
+
+test("buildingFallbackGold: flat gold × effort only for built non-producer buildings", () => {
+  const market = { gx: 0, gy: 0, kind: "market" as const, level: 1 };
+  assert.equal(buildingFallbackGold(market), 40, "legacy undefined staff keeps the full flat gold");
+  const third = buildingFallbackGold({ ...market, workers: 1 });
+  assert.equal(third, 13.33, "1 of 3 workers scales 40 → 13.33 (rounded to the credited 2dp)");
+  assert.equal(buildingFallbackGold({ ...market, workers: 3 }), 40, "full staff keeps the flat gold");
+  assert.equal(buildingFallbackGold({ ...market, workers: 0 }), 0, "zero staff shuts the fallback down");
+  assert.equal(
+    buildingFallbackGold({ ...market, construction: { daysRemaining: 1 } }),
+    0,
+    "a building under construction earns no fallback gold",
+  );
+  assert.equal(buildingFallbackGold({ gx: 0, gy: 0, kind: "goldMine", level: 1 }), 0, "producers are not fallback gold");
+  assert.equal(buildingFallbackGold({ gx: 0, gy: 0, kind: "house", level: 1 }), 0, "no goldPerTurn, no fallback");
 });

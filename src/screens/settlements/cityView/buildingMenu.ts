@@ -12,19 +12,33 @@ import {
   buildingUpkeep,
   buildingUpgradeCost,
   getBuildingEffect,
+  buildingMaxWorkers,
+  buildingDraftMax,
+  canAssignWorkers,
+  districtKey,
+  effortFraction,
+  workforcePool,
+  assignedWorkersExplicit,
+  hasLegacyStaffing,
+  staffingBase,
   type RecruitEntry,
 } from "@heroes/engine";
 import type { Warehouse } from "@heroes/contracts";
 import { footprintLine } from "./footprint";
 
-function formatEffectLine(kind: BuildingKind, level: number): string[] {
+function formatEffectLine(kind: BuildingKind, level: number, effort = 1): string[] {
   const lines: string[] = [];
   const se = buildingSettlementEffects(kind, level);
   const pe = buildingPlayerEffects(kind, level);
   const upkeep = buildingUpkeep(kind, level);
+  const scaled = (value: number): string => {
+    const n = Math.round(value * effort * 100) / 100;
+    return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  };
+  const staffNote = effort < 0.999 ? ` (${Math.round(effort * 100)}% staffed)` : "";
 
-  if (se.goldPerTurn) lines.push(`+${se.goldPerTurn} gold/turn`);
-  if (se.foodPerTurn) lines.push(`+${se.foodPerTurn} food/turn`);
+  if (se.goldPerTurn) lines.push(`+${scaled(se.goldPerTurn)} gold/turn${staffNote}`);
+  if (se.foodPerTurn) lines.push(`+${scaled(se.foodPerTurn)} food/turn${staffNote}`);
   if (se.populationBonus) lines.push(`+${se.populationBonus} population`);
   if (se.defenseBonus) lines.push(`+${se.defenseBonus} defense`);
   if (se.unitCostReductionPct) lines.push(`-${se.unitCostReductionPct}% unit cost`);
@@ -85,6 +99,25 @@ export interface BuildingMenuOptions {
   isUnitRecruitable?: (unitTypeId: string) => boolean;
 }
 
+/**
+ * Workforce context passed by the city view (wave 2a): pool/assigned are the
+ * settlement's explicit workforce totals, district names which list the
+ * building came from (null = main settlement, the stepper passes it back on
+ * every commit so assignments are district-true), onAssignWorkers assigns
+ * a single building's explicit count, and getSettlement re-reads the LIVE
+ * settlement so the stepper can re-resolve the building after each commit
+ * (the engine replaces state objects immutably, so a captured snapshot goes
+ * stale). Absent keeps the pre-workforce menu unchanged.
+ */
+export interface BuildingMenuWorkforce {
+  pool: number;
+  assigned: number;
+  district: { q: number; r: number } | null;
+  onChange: () => void;
+  onAssignWorkers: (gx: number, gy: number, workers: number, district?: { q: number; r: number }) => boolean;
+  getSettlement: () => SettlementState | undefined;
+}
+
 const TOWN_HALL_UPGRADE_COSTS: Record<number, { gold: number; wood: number; stone: number; days: number }> = {
   1: { gold: 1500, wood: 15, stone: 10, days: 7 },
   2: { gold: 5000, wood: 40, stone: 25, days: 12 },
@@ -97,6 +130,7 @@ interface ShowArgs {
   settlement?: SettlementState;
   producerCell?: ProducerCellInfo | null;
   constructionDaysRemaining?: number;
+  workforce?: BuildingMenuWorkforce;
 }
 
 export class BuildingMenu {
@@ -121,9 +155,10 @@ export class BuildingMenu {
     settlement?: SettlementState,
     producerCell?: ProducerCellInfo | null,
     constructionDaysRemaining?: number,
+    workforce?: BuildingMenuWorkforce,
   ): void {
-    this.lastShow = { building, screenX, screenY, settlement, producerCell, constructionDaysRemaining };
-    this.showMenu(building, screenX, screenY, settlement, producerCell, constructionDaysRemaining);
+    this.lastShow = { building, screenX, screenY, settlement, producerCell, constructionDaysRemaining, workforce };
+    this.showMenu(building, screenX, screenY, settlement, producerCell, constructionDaysRemaining, workforce);
   }
 
   private showMenu(
@@ -133,6 +168,7 @@ export class BuildingMenu {
     settlement?: SettlementState,
     producerCell?: ProducerCellInfo | null,
     constructionDaysRemaining?: number,
+    workforce?: BuildingMenuWorkforce,
   ): void {
     this.hide();
 
@@ -159,20 +195,41 @@ export class BuildingMenu {
     });
     this.menu.appendContent(desc);
 
+    // Live re-resolution for the workforce stepper + recruit readouts: the
+    // engine replaces the settlement object on every assignment, so the row
+    // must re-read state through the context's accessor after each commit.
+    const resolveLive = workforce
+      ? (): BuildingDef | undefined => {
+          const live = workforce.getSettlement();
+          if (!live) return undefined;
+          const list = workforce.district
+            ? live.districts?.[districtKey(workforce.district.q, workforce.district.r)]?.buildings
+            : live.buildings;
+          return list?.find((b) => b.gx === building.gx && b.gy === building.gy && b.kind === building.kind);
+        }
+      : undefined;
+    const recruitRefreshers: Array<() => void> = [];
+
     const effects = formatEffectLine(building.kind, building.level);
     if (effects.length > 0) {
       const effDiv = document.createElement("div");
       effDiv.style.marginBottom = "4px";
-      for (const line of effects) {
-        const el = document.createElement("div");
-        el.textContent = line;
-        Object.assign(el.style, {
-          fontSize: "11px",
-          color: "#8f8",
-          lineHeight: "1.5",
-        });
-        effDiv.appendChild(el);
-      }
+      const currentEffort = (): number => effortFraction(resolveLive?.() ?? building);
+      const renderEffects = (): void => {
+        effDiv.replaceChildren();
+        for (const line of formatEffectLine(building.kind, building.level, currentEffort())) {
+          const el = document.createElement("div");
+          el.textContent = line;
+          Object.assign(el.style, {
+            fontSize: "11px",
+            color: "#8f8",
+            lineHeight: "1.5",
+          });
+          effDiv.appendChild(el);
+        }
+      };
+      renderEffects();
+      recruitRefreshers.push(renderEffects);
       this.menu.appendContent(effDiv);
     }
 
@@ -189,6 +246,10 @@ export class BuildingMenu {
         marginBottom: "4px",
       });
       this.menu.appendContent(prodEl);
+    }
+
+    if (workforce && buildingMaxWorkers(building.kind) >= 1) {
+      this.menu.appendContent(this.buildWorkforceRow(building, workforce, resolveLive, recruitRefreshers));
     }
 
     if (constructionDaysRemaining !== undefined) {
@@ -324,17 +385,130 @@ export class BuildingMenu {
       if (!catalogReady() && !catalogFailed()) {
         void loadUnitCatalog().then(() => {
           if (this.menu && this.lastShow && this.lastShow.building === building) {
-            this.show(this.lastShow.building, this.lastShow.screenX, this.lastShow.screenY, this.lastShow.settlement, this.lastShow.producerCell, this.lastShow.constructionDaysRemaining);
+            this.show(this.lastShow.building, this.lastShow.screenX, this.lastShow.screenY, this.lastShow.settlement, this.lastShow.producerCell, this.lastShow.constructionDaysRemaining, this.lastShow.workforce);
           }
         });
       }
       for (const entry of entries) {
-        this.menu.appendContent(this.buildRecruitRow(building, entry, settlement));
+        this.menu.appendContent(this.buildRecruitRow(building, entry, settlement, resolveLive, recruitRefreshers));
       }
     }
   }
 
-  private buildRecruitRow(building: BuildingDef, entry: RecruitEntry, settlement?: SettlementState): HTMLDivElement {
+  private buildWorkforceRow(
+    building: BuildingDef,
+    workforce: BuildingMenuWorkforce,
+    resolveLive: (() => BuildingDef | undefined) | undefined,
+    recruitRefreshers: Array<() => void>,
+  ): HTMLDivElement {
+    const max = buildingMaxWorkers(building.kind);
+    const row = document.createElement("div");
+    Object.assign(row.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginTop: "4px",
+      marginBottom: "4px",
+    });
+
+    const label = document.createElement("span");
+    label.textContent = "Workers";
+    Object.assign(label.style, {
+      fontSize: "11px",
+      opacity: "0.85",
+    });
+    row.appendChild(label);
+
+    const controls = document.createElement("div");
+    Object.assign(controls.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+    });
+
+    const minus = document.createElement("button");
+    minus.textContent = "−";
+    styleButton(minus);
+    Object.assign(minus.style, {
+      padding: "0px 7px",
+      fontSize: "12px",
+    });
+
+    const value = document.createElement("span");
+    Object.assign(value.style, {
+      fontSize: "11px",
+      fontVariantNumeric: "tabular-nums",
+      minWidth: "56px",
+      textAlign: "center",
+    });
+
+    const plus = document.createElement("button");
+    plus.textContent = "+";
+    styleButton(plus);
+    Object.assign(plus.style, {
+      padding: "0px 7px",
+      fontSize: "12px",
+    });
+
+    // Re-derived from the live settlement on every read: a commit normalizes
+    // the whole city (undefined -> 0), so the menu-open snapshot goes stale.
+    const legacyNow = (): boolean => {
+      const liveSettlement = workforce.getSettlement();
+      return liveSettlement ? hasLegacyStaffing(liveSettlement) : false;
+    };
+
+    const refresh = (): void => {
+      const live = resolveLive?.();
+      if (!live) return;
+      const legacy = legacyNow();
+      const base = staffingBase(live.workers, max, legacy);
+      value.textContent = live.workers === undefined ? "Auto (max)" : `${live.workers} / ${max}`;
+      const liveSettlement = workforce.getSettlement();
+      const pool = liveSettlement ? workforcePool(liveSettlement) : workforce.pool;
+      const assigned = liveSettlement ? assignedWorkersExplicit(liveSettlement) : workforce.assigned;
+      const plusDisabled = !canAssignWorkers(staffingBase(live.workers, max, legacy), max, 1, pool, assigned);
+      plus.disabled = plusDisabled;
+      plus.style.opacity = plusDisabled ? "0.4" : "1";
+      plus.style.cursor = plusDisabled ? "not-allowed" : "pointer";
+      const minusDisabled = base <= 0;
+      minus.disabled = minusDisabled;
+      minus.style.opacity = minusDisabled ? "0.4" : "1";
+      minus.style.cursor = minusDisabled ? "not-allowed" : "pointer";
+      for (const fn of recruitRefreshers) fn();
+    };
+
+    minus.addEventListener("click", () => {
+      const live = resolveLive?.();
+      if (!live) return;
+      const base = staffingBase(live.workers, max, legacyNow());
+      workforce.onAssignWorkers(building.gx, building.gy, Math.max(0, base - 1), workforce.district ?? undefined);
+      workforce.onChange();
+      refresh();
+    });
+    plus.addEventListener("click", () => {
+      const live = resolveLive?.();
+      if (!live) return;
+      const base = staffingBase(live.workers, max, legacyNow());
+      workforce.onAssignWorkers(building.gx, building.gy, Math.min(base + 1, max), workforce.district ?? undefined);
+      workforce.onChange();
+      refresh();
+    });
+
+    controls.appendChild(minus);
+    controls.appendChild(value);
+    controls.appendChild(plus);
+    row.appendChild(controls);
+    refresh();
+    return row;
+  }
+
+  private buildRecruitRow(
+    building: BuildingDef,
+    entry: RecruitEntry,
+    settlement?: SettlementState,
+    resolveLive?: (() => BuildingDef | undefined),
+    recruitRefreshers?: Array<() => void>,
+  ): HTMLDivElement {
     const wrap = document.createElement("div");
     Object.assign(wrap.style, {
       marginTop: "4px",
@@ -370,7 +544,10 @@ export class BuildingMenu {
     const countInput = document.createElement("input");
     countInput.type = "number";
     countInput.min = "1";
-    countInput.max = "99";
+    const draftMax = buildingDraftMax(building.kind);
+    const availOf = (b: BuildingDef): number => Math.floor(b.draft?.[entry.unitTypeId] ?? draftMax);
+    const avail = availOf(building);
+    countInput.max = String(Math.max(1, avail));
     countInput.value = "1";
     Object.assign(countInput.style, {
       width: "46px",
@@ -384,6 +561,24 @@ export class BuildingMenu {
       boxSizing: "border-box",
     });
     row.appendChild(countInput);
+
+    const ready = document.createElement("span");
+    ready.textContent = `ready ${avail}/${draftMax}`;
+    Object.assign(ready.style, {
+      fontSize: "10px",
+      opacity: "0.75",
+      fontVariantNumeric: "tabular-nums",
+      flexShrink: "0",
+    });
+    row.appendChild(ready);
+
+    if (resolveLive && recruitRefreshers) {
+      recruitRefreshers.push(() => {
+        const live = resolveLive();
+        if (!live) return;
+        ready.textContent = `ready ${availOf(live)}/${draftMax}`;
+      });
+    }
 
     const totalRow = document.createElement("div");
     Object.assign(totalRow.style, {
@@ -409,7 +604,7 @@ export class BuildingMenu {
     const clampCount = (): number => {
       const parsed = parseInt(countInput.value, 10);
       if (!Number.isInteger(parsed) || parsed < 1) return 1;
-      return Math.min(99, parsed);
+      return Math.min(Math.max(1, avail), parsed);
     };
     const canAfford = (n: number): boolean => {
       if (!settlement) return false;
@@ -425,9 +620,13 @@ export class BuildingMenu {
       const n = clampCount();
       total.textContent = formatRecruitCost(entry, n);
       const afford = canAfford(n);
-      recruitBtn.disabled = !afford;
-      recruitBtn.style.opacity = afford ? "1" : "0.4";
-      recruitBtn.style.cursor = afford ? "pointer" : "not-allowed";
+      const poolEmpty = avail < 1;
+      recruitBtn.disabled = !afford || poolEmpty;
+      recruitBtn.style.opacity = afford && !poolEmpty ? "1" : "0.4";
+      recruitBtn.style.cursor = afford && !poolEmpty ? "pointer" : "not-allowed";
+      recruitBtn.title = poolEmpty
+        ? "None ready — recharges (base × staffing × unit tier) per day"
+        : "";
     };
 
     countInput.addEventListener("input", refresh);
@@ -456,5 +655,20 @@ export class BuildingMenu {
 
   isOpen(): boolean {
     return this.menu !== null;
+  }
+
+  /** Re-renders an open menu from its last show args (no-op when closed). */
+  refreshIfOpen(): void {
+    if (this.menu && this.lastShow) {
+      this.show(
+        this.lastShow.building,
+        this.lastShow.screenX,
+        this.lastShow.screenY,
+        this.lastShow.settlement,
+        this.lastShow.producerCell,
+        this.lastShow.constructionDaysRemaining,
+        this.lastShow.workforce,
+      );
+    }
   }
 }

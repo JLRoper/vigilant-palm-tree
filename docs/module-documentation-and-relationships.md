@@ -21,7 +21,7 @@ Browser client                                      Express API
   paint2d/index.ts
 ```
 
-`@heroes/contracts` is the wire contract: 25 command kinds and 25 `EngineEvent` variants (12 apply, 7 resync, 6 ignore). `@heroes/engine` owns the pure reducers used by both the client and server. The server persists accepted commands transactionally; flagged games run AI turns through the same internal command handler. Client SSE applies event rows and the poller remains a recovery/backstop path.
+`@heroes/contracts` is the wire contract: 26 command kinds (2026-10-17: `AssignWorkers` added for workforce staffing) and 26 `EngineEvent` variants (12 apply, 7 resync, 7 ignore). `@heroes/engine` owns the pure reducers used by both the client and server. The server persists accepted commands transactionally; flagged games run AI turns through the same internal command handler. Client SSE applies event rows and the poller remains a recovery/backstop path.
 
 ## Workspace Packages
 

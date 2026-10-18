@@ -24,6 +24,7 @@ import {
 import { paintCityDiorama } from "./cityDiorama";
 import { HEX_SIZE } from "../../../core/hex";
 import { decorationSeed } from "../../decorationSeed";
+import { prefersReducedMotion } from "../../reducedMotion";
 import { TERRAIN_COLORS } from "../../../map/terrain";
 import { RESOURCE_PAL } from "../../palettes";
 import type {
@@ -43,6 +44,7 @@ import type {
   CityGhostBuildingNode,
   CityLabelNode,
   CityMineNode,
+  CityPersonNode,
   CityResourceSpotNode,
   CitySkyboxNode,
   DistrictNode,
@@ -92,6 +94,14 @@ const CITY_TEXT = "#ffffff";
 const CITY_SELECTION_STROKE = "#66ccff";
 const CITY_GHOST_VALID_STROKE = "#44ff44";
 const CITY_GHOST_INVALID_STROKE = "#ff4444";
+// Worker-person fallback circle (sprite not yet loaded); battle-fallback style
+// (filled circle + white stroke) with a neutral peasant tan.
+const PERSON_PLACEHOLDER_FILL = "#c8b290";
+const PERSON_BREATH_PERIOD_MS = 750;
+const PERSON_STAGGER_BUCKETS = 7;
+const PERSON_STAGGER_GX = 31;
+const PERSON_STAGGER_GY = 17;
+const PERSON_STAGGER_INDEX = 13;
 
 const BATTLE_HEX_FILL = "#20242c";
 const BATTLE_HEX_IMPASSABLE = "#3a2a2a";
@@ -288,6 +298,9 @@ export function paintScene(
       }
       case "cityGhostBuilding":
         paintCityGhostBuilding(ctx, node, deps);
+        break;
+      case "cityPerson":
+        paintCityPerson(ctx, node, deps);
         break;
       case "cityLabel":
         paintCityLabel(ctx, node, deps);
@@ -1115,6 +1128,45 @@ export function paintCityGhostBuilding(ctx: CanvasRenderingContext2D, node: City
     node.halfHeight * 2,
   );
   ctx.restore();
+}
+
+export function paintCityPerson(ctx: CanvasRenderingContext2D, node: CityPersonNode, deps: Paint2DDep): void {
+  const sprite =
+    deps.sprite.resolveSpriteForCityPerson?.() ??
+    deps.sprite.resolveSpriteForUnit("peasant", "idle");
+  const personH = 16;
+  const spacing = 14;
+  const reduced = prefersReducedMotion();
+  const now = reduced ? 0 : performance.now();
+  for (let i = 0; i < node.count; i++) {
+    // Centered row: count=1 sits dead on the node center, larger clusters fan
+    // out symmetrically so the group never spills past the footprint edges.
+    const x = node.center.x + (i - (node.count - 1) / 2) * spacing;
+    const y = node.center.y;
+    const staggerMs =
+      (((node.gx * PERSON_STAGGER_GX + node.gy * PERSON_STAGGER_GY + i * PERSON_STAGGER_INDEX) % PERSON_STAGGER_BUCKETS) *
+        PERSON_BREATH_PERIOD_MS) /
+      PERSON_STAGGER_BUCKETS;
+    const bob = reduced ? 0 : Math.floor((now + staggerMs) / PERSON_BREATH_PERIOD_MS) % 2;
+    if (sprite && sprite.ready && sprite.drawable) {
+      const drawable = sprite.drawable;
+      const naturalW = (drawable as HTMLImageElement).naturalWidth ?? (drawable as HTMLCanvasElement).width;
+      const naturalH = (drawable as HTMLImageElement).naturalHeight ?? (drawable as HTMLCanvasElement).height;
+      const w = naturalW && naturalH ? (personH / naturalH) * naturalW : personH;
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(drawable, x - w / 2, y - personH - bob, w, personH);
+      ctx.restore();
+    } else {
+      ctx.beginPath();
+      ctx.arc(x, y - 5 - bob, 5, 0, Math.PI * 2);
+      ctx.fillStyle = PERSON_PLACEHOLDER_FILL;
+      ctx.fill();
+      ctx.strokeStyle = BATTLE_COMBATANT_STROKE;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
 }
 
 export function paintCityLabel(ctx: CanvasRenderingContext2D, node: CityLabelNode, deps: Paint2DDep): void {
