@@ -1,8 +1,8 @@
 # Resource Gathering & the Settlement Economy (as-built)
 
-<!-- docs:verified 2026-10-16 -->
+<!-- docs:verified 2026-10-18 -->
 
-**Status:** Current as-built reference, re-verified against source on 2026-10-16. Design intent lives in [resources.md](./resources.md) and [economy.md](./economy.md); this page documents the actual rates, turn order, producers, sinks, and logistics. The resource definitions, terrain densities, and income code may differ from older design text; F2 remains open below.
+**Status:** Current as-built reference, re-verified against source on 2026-10-18. Design intent lives in [resources.md](./resources.md) and [economy.md](./economy.md); this page documents the actual rates, turn order, producers, sinks, and logistics. The resource definitions, terrain densities, and income code may differ from older design text; F2 was closed on 2026-10-18 (see below).
 
 Source-of-truth paths cited below are in [`packages/engine/`](../packages/engine/src) and [`packages/contracts/`](../packages/contracts/src). The client under `src/` mirrors the same reducers (`src/state/turnController.ts` orchestrates locally; `server/app/turnService.ts` re-runs the same engine functions server-authoritatively).
 
@@ -148,15 +148,15 @@ On the **round wrap** (last player ends) — [`advanceRound()`](../packages/engi
 
 ### 6.2 Gold income vs. the HUD number
 
-There are three "income" surfaces and they **disagree** (see [finding F2](#F2)):
+There are three "income" surfaces, and since 2026-10-18 they **agree** (finding [F2](#F2) is closed):
 
-- `effectiveSettlementIncome()` (`packages/engine/src/economy/income.ts`) is a projection helper. It includes building `goldPerTurn` for display/forecasting but is not applied by End Turn.
-- End Turn pays `producerTurnOutput` plus `effectiveIncome()` (morale-scaled population tax); a `goldMine` producer is paid, but `market.goldPerTurn` is not credited.
+- `effectiveSettlementIncome()` (`packages/engine/src/economy/income.ts`) is a projection helper, and it now mirrors the payment exactly.
+- End Turn pays `producerTurnOutput` plus `effectiveIncome()` (morale-scaled population tax) **plus** `buildingSettlementEffects(kind, level).goldPerTurn` for every completed non-producer building — `market.goldPerTurn` (40/level) is credited, as is any other building declaring `goldPerTurn`. A building still under construction contributes nothing, and neither projection counts it.
 - `resourceRates.gold` (computed by `computeSettlementRates`, persisted, and previously rendered as a "40/turn" line) is a **phantom** — `produceSettlementResources` never consumed it, because gold is not a `WAREHOUSE_RESOURCE`. The per-turn rates display now renders **combined production** via `settlementProductionRates()` from `produceResources.ts` — `warehouseRates()`'s tile rates plus the per-building producers (§9) — (today in the logistics panel, `src/screens/logistics/logisticsModal.ts`, after the old settlement panel was deleted as an unwired second implementation): the *same loop body production uses*, so display and production cannot drift, and the panel's empty line reads **"no production"**. The persisted map is untouched.
 
-Building `goldPerTurn` therefore *appears* in the HUD but never lands in the treasury — the only gold that actually accrues from buildings is a `goldMine` producer's output (§9).
+Building `goldPerTurn` therefore lands in the treasury: the HUD amount and the End Turn accrual agree ([F2](#F2), closed 2026-10-18).
 
-*(2026-09-29: the HUD economy row now carries a hover tooltip — `economyBreakdown()` in `src/screens/shared/hud.ts` — that spells the discrepancy out line by line: gross taxes → morale scaling → upkeep/food → the `goldPerTurn` HUD-vs-accrual difference. Presentation only; the underlying inconsistency itself remains open as [F2](#F2).)*
+*(2026-09-29: the HUD economy row carries a hover tooltip — `economyBreakdown()` in `src/screens/shared/hud.ts` — that spells the arithmetic out line by line: gross taxes → morale scaling → upkeep/food → building `goldPerTurn`. It originally documented a `goldPerTurn` HUD-vs-accrual *difference*; that difference is gone as of 2026-10-18, when the End Turn path began crediting the building half.)*
 
 ### 6.3 Building placement
 
@@ -277,7 +277,7 @@ The registry is [`packages/engine/src/buildingRegistry.ts`](../packages/engine/s
 | `storageBonus`, `treasuryBonus` | ✅ **Wired** — derived caps in `settlement/capacity.ts`; they gate additions only |
 | `foodPerTurn` (farmField/farmhouse/granary) | ✅ **Wired as producers** — all three are `ProducerKind`s (2026-10-01), output × cell multiplier (§9). The flat per-turn value is *not* also applied on top |
 | `resourceYieldBonus` | ⚠️ **Producer-only** — dormant as a generic bonus, but its magnitude is the base output for producer mines, which *are* applied (§9) |
-| `goldPerTurn` (market/goldMine) | ⚠️ **Split** — HUD-only for `market`; `goldMine`'s 40/turn is real, as a producer (§9). `bank`'s dead `goldPerTurn: 60` was **removed** 2026-10-01 — it was never applied by the economy — and its description now states what it actually does ([F2](#F2)) |
+| `goldPerTurn` (market/goldMine) | ✅ **Both paid** — `goldMine`'s 40/turn accrues as a producer (§9), and as of 2026-10-18 End Turn also credits `market`'s 40/level (and any other completed non-producer declaring `goldPerTurn`) ([F2](#F2)). `bank`'s dead `goldPerTurn: 60` was **removed** 2026-10-01 — it was never applied by the economy — and its description now states what it actually does |
 | `populationBonus` | ❌ **Dormant** — displayed in building menus, never applied ([F3](#F3)) |
 | `defenseBonus`, `unitCostReductionPct`, vision/speed/attack bonuses | ❌ **Display-only** — no combat or fog wiring reads them |
 
@@ -366,7 +366,7 @@ Each finding: behavior, evidence, suggestion. All are documentation-only observa
 **F1 — ~~Food is a dead-end resource~~ RESOLVED (2026-10-01).** Food now has three production sources: `farmField` / `farmhouse` / `granary` are `ProducerKind`s feeding the normal production tick (§9), every new settlement is seeded with farmland sized against **its own** food bill (§4), and morale can **recover** (§6.1) instead of being subtract-only. Before this, food had **zero** sources — tile density is 0 by design (§2) and `foodPerTurn` was never applied — so every settlement ran a permanent 100% food-deficit penalty and the economy was unwinnable. The zero tile density itself remains deliberate: food comes from farm buildings, not from tiles.
 
 <a id="F2"></a>
-**F2 — OPEN: market income projection is not paid by End Turn.** `effectiveSettlementIncome()` is a projection helper; it is not the End Turn credit path. End Turn pays `producerTurnOutput` plus morale-scaled population tax. `goldMine` output is paid as a producer; `market.goldPerTurn` is not credited to the treasury. The projected/HUD amount can therefore exceed actual income. Keep this finding open until the End Turn path or projection is deliberately changed.
+**F2 — ~~Market income projection is not paid by End Turn~~ CLOSED (2026-10-18).** End Turn now credits `buildingSettlementEffects(kind, level).goldPerTurn` for every **completed non-producer** building, in addition to `producerTurnOutput` and morale-scaled population tax — so `market.goldPerTurn` (40/level) reaches the treasury, and any other building declaring `goldPerTurn` does too. The same credit was added to the district half of the production loop, so a district market pools into its parent settlement ([settlements.md](./settlements.md#city-districts)). Under-construction buildings are excluded from both the payment and `effectiveSettlementIncome()`, so the HUD projection and the accrual agree. The change originated in the [city districts](./settlements.md#city-districts) work (2026-10-17), which added the building-gold branch to `produceSettlementResources` for both halves of the loop.
 
 <a id="F3"></a>
 **F3 — ~~Defined-but-unwired building effects~~ PARTLY RESOLVED (2026-10-01).** `foodPerTurn` (farmField/farmhouse/granary) is now a **producer** input (§9), and `resourceYieldBonus` (mine/woodcutterHut/stoneMine/ironMine/arcaneFont) feeds producer bases at ×level (§7). Still unwired: `populationBonus` (house/apartment/farmhouse), `defenseBonus`, `unitCostReductionPct`, and the vision/speed/attack player effects — the only wired player effect is `controlRangeBonus`. *Suggest:* a population-formula hook and combat/fog wiring for the player effects — or delete the dead fields (the repo's own lesson: an unwired parallel implementation is not a safe intermediate state).

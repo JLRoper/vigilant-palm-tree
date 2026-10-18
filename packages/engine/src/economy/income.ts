@@ -9,6 +9,10 @@ export function settlementIncome(
 ): number {
   let total = s.population * s.goldTax;
   for (const b of s.buildings) {
+    // Same rule as the district loop below and as produceSettlementResources:
+    // a building that is still under construction pays nothing yet, so the HUD
+    // projection must not advertise gold the End Turn will not credit.
+    if (b.construction) continue;
     total += buildingSettlementEffects(b.kind, b.level).goldPerTurn;
   }
   for (const d of Object.values(s.districts ?? {})) {
@@ -51,6 +55,7 @@ export function effectiveSettlementIncome(
 ): number {
   let total = effectiveIncome(s);
   for (const b of s.buildings) {
+    if (b.construction) continue;
     total += buildingSettlementEffects(b.kind, b.level).goldPerTurn;
   }
   for (const d of Object.values(s.districts ?? {})) {

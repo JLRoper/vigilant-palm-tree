@@ -12,7 +12,7 @@ import {
   buildingPlacementCost,
 } from "../buildingRegistry";
 import { districtKey } from "../control";
-import { type CitySpot, generateDistrictSpots } from "./citySpots";
+import { type CitySpot } from "./citySpots";
 
 // The server-side (and optimistic client-side) commit of the city view's
 // working cart -- the F4 gap closer. Mirrors the client's own net-cost model
@@ -158,13 +158,17 @@ export function applyPlaceBuildings(
 
     const nextDistricts: Record<string, DistrictState> = { ...(s.districts ?? {}) };
     if (sanitized.length > 0) {
+      // The authoritative spot set is map-derived (terrain + the hex's resource
+      // deposit), so it is computed by the callers that hold the GameMap
+      // (server/app/commandHandler.ts, src/managers/UIManager.ts) and passed in.
+      // Fabricating one here would use the grass default bias and a random
+      // first spot, silently breaking the deposit guarantee of D2.
+      const citySpots = district.citySpots ?? prevDistrict?.citySpots;
+      if (!citySpots) return { ok: false, state, reason: "district_spots_required" };
       nextDistricts[key] = {
         q: district.q,
         r: district.r,
-        citySpots:
-          district.citySpots ??
-          prevDistrict?.citySpots ??
-          generateDistrictSpots(district.q, district.r, state.castleSeed),
+        citySpots,
         buildings: sanitized,
       };
     } else {

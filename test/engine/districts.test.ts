@@ -200,7 +200,16 @@ test("applyPlaceBuildings in district mode: allows (2,2), forbids townHall, vali
     buildings: [],
   });
   const state = makeState({ settlements: [settlement] });
-  const target = { q: 3, r: 2 };
+  // citySpots are REQUIRED for a new district: only the callers holding the
+  // GameMap can derive the map-deposit guarantee (D2), so the reducer refuses to
+  // invent them. An existing district reuses its own persisted set.
+  const districtSpots = generateDistrictSpots(3, 2, 4242, "grass", null);
+  const target = { q: 3, r: 2, citySpots: districtSpots };
+
+  // A NEW district with no citySpots is refused rather than given fabricated spots
+  const noSpots = applyPlaceBuildings(state, "s0", 0, [makeBuilding("house", 2, 2, 1)], false, { q: 3, r: 2 });
+  assert.equal(noSpots.ok, false);
+  assert.equal(noSpots.reason, "district_spots_required");
 
   // Allows placing a building at (2, 2) and charges full cost even when initialLayout = true
   const placeCenter = applyPlaceBuildings(
@@ -1555,4 +1564,106 @@ test("buildCityScene scopes upgrade scaffolding constructionStages to the active
   );
   assert.ok(otherDistHouse);
   assert.equal(otherDistHouse.constructionStage, undefined, "other district does not show upgrade constructionStage");
+});
+
+// ── Regression guards for the post-merge review findings ─────────────────────
+
+test("advanceSettlementUpgrades: a townHall upgrade levels DISTRICT buildings with the main city's", () => {
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, { level: 1, population: 500, goldTax: 1 }),
+    buildings: [makeBuilding("townHall", 2, 2, 1), makeBuilding("house", 4, 0, 1)],
+    districts: {
+      "3,2": {
+        q: 3,
+        r: 2,
+        citySpots: [],
+        buildings: [makeBuilding("woodcutterHut", 0, 0, 1), makeBuilding("house", 1, 1, 2)],
+      },
+    },
+    upgrade: { kind: "townHall", targetLevel: 3, daysRemaining: 1 },
+  };
+
+  const next = advanceSettlementUpgrades(makeState({ settlements: [settlement] }));
+  const s = next.settlements.s0;
+  assert.equal(s.upgrade, undefined, "townHall upgrade clears on completion");
+  assert.equal(s.buildings.find((b) => b.kind === "townHall")!.level, 3);
+  assert.equal(s.buildings.find((b) => b.kind === "house")!.level, 3);
+
+  const district = s.districts?.["3,2"];
+  assert.ok(district, "district survives the town hall upgrade");
+  assert.equal(
+    district.buildings.find((b) => b.kind === "woodcutterHut")!.level,
+    3,
+    "district building levels up with the town hall (finding: it used to stay at L1)",
+  );
+  assert.equal(district.buildings.find((b) => b.kind === "house")!.level, 3);
+  assert.deepEqual(
+    district.citySpots,
+    [],
+    "levelling district buildings must not disturb the district's own spot set",
+  );
+});
+
+test("settlementIncome / effectiveSettlementIncome skip under-construction buildings, matching the End Turn payment", () => {
+  const bare = makeSettlement("s0", 0, 2, 2, { population: 0, goldTax: 0 });
+  const completedMarket: SettlementState = { ...bare, buildings: [makeBuilding("market", 1, 1, 1)] };
+  const buildingMarket: SettlementState = {
+    ...bare,
+    buildings: [makeBuilding("market", 1, 1, 1, { construction: { daysRemaining: 2 } })],
+  };
+
+  assert.equal(settlementIncome(completedMarket), 40, "completed market projects 40g");
+  assert.equal(
+    settlementIncome(buildingMarket),
+    0,
+    "an under-construction market must not be advertised in the HUD projection",
+  );
+  assert.equal(effectiveSettlementIncome(completedMarket), 40);
+  assert.equal(effectiveSettlementIncome(buildingMarket), 0);
+
+  // ...and the projection is exactly what End Turn pays.
+  const paidCompleted = produceSettlementResources({ s0: completedMarket }, 777).s0.gold - completedMarket.gold;
+  const paidBuilding = produceSettlementResources({ s0: buildingMarket }, 777).s0.gold - buildingMarket.gold;
+  assert.equal(paidCompleted, 40, "projection and payment agree for a completed market");
+  assert.equal(paidBuilding, 0, "projection and payment agree for a building market");
+});
+
+test("buildAdventureScene: a fog-hidden enemy hero does not flip a district's blocked flag", () => {
+  const map = makeGrassMap(6, 6);
+  const castle = Castle.fromGameState({
+    ...makeSettlement("s0", 0, 2, 2, { level: 2, population: 500, goldTax: 1 }),
+    districts: {
+      "3,2": { q: 3, r: 2, citySpots: [], buildings: [makeBuilding("house", 0, 0)] },
+    },
+  });
+  const enemyHero = new Hero("hEnemy", "Enemy", 3, 2, "enemy", 1);
+
+  // The hex is NOT in the visibility set, but the district still renders because
+  // the view owns the castle -- an enemy standing there is invisible and must
+  // not be revealed through the marker.
+  const hidden = buildAdventureScene({
+    map,
+    heroes: [enemyHero],
+    castles: [castle],
+    path: [],
+    hover: null,
+    visible: new Set<string>(),
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  const hiddenDistrict = hidden.find((n): n is DistrictNode => n.kind === "district");
+  assert.ok(hiddenDistrict, "an own-castle district renders even when its hex is not in the visibility set");
+  assert.equal(hiddenDistrict.blocked, undefined, "a fog-hidden enemy must not flip the blocked flag");
+
+  // Once the hex is genuinely visible, the same hero DOES report the block.
+  const seen = buildAdventureScene({
+    map,
+    heroes: [enemyHero],
+    castles: [castle],
+    path: [],
+    hover: null,
+    visible: new Set(["3,2"]),
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  const seenDistrict = seen.find((n): n is DistrictNode => n.kind === "district");
+  assert.equal(seenDistrict?.blocked, true, "a visible enemy on the district hex reports blocked");
 });
