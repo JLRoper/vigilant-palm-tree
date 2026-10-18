@@ -265,6 +265,7 @@ The registry is [`packages/engine/src/buildingRegistry.ts`](../packages/engine/s
 | goldMine | 300g 6w 4s | 4 | 2 / 0 | gold +40/turn | — | — |
 | woodcutterHut | 150g 5w | 3 | 1 / 0 | wood yield +3 | — | — |
 | arcaneFont | 350g 5w 6s | 4 | 1 / 1 | arcane yield +3 | — | — |
+| shipyard **(water only)** | 400g 8w 6s | 5 | 1 / 1 | gold +12/turn | — | — |
 | stables | 350g 10w 5s | 4 | 1 / 1 | — | — | — |
 | huntingLodge | 250g 8w | 3 | 2 / 1 | defense +1 | — | warhound 180g |
 | eyrie | 500g 12w 8s | 6 | 2 / 1 | — | — | giant_eagle 1400g + 2a (L1); eagle_prince 2400g + 4a (L2) |

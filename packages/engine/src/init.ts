@@ -31,10 +31,11 @@ import { DEFAULT_HERO_WAGONS, DEFAULT_TREASURY_WAGONS } from "./settlement/capac
 import { demoPlatoonsForPlayer, normalizePlatoons, platoonTroopTotal, type UnitType } from "./units";
 import { MAX_PLAYERS, PLAYER_COLORS } from "./playerColors";
 import { cityViewSizeFor, foodBiasForTerrain, generateCitySpots } from "./settlement/citySpots";
+import { seedStartupDistricts } from "./settlement/districtSeed";
 import { buildStarterLayout, heroFoodPerTurn, starterFarmsNeeded } from "./settlement/starterLayout";
 import { VALID_HORSE_VARIANTS } from "./horseVariants";
 import { HERO_VISION_RANGE, sortedRevealKeys, visionKeysAroundPoints } from "./reveal";
-import { controlRange } from "./control";
+import { controlRange, districtKey } from "./control";
 
 const DEFAULT_PLAYER_COUNT = 3;
 const MAX_PLAYER_COUNT = MAX_PLAYERS;
@@ -358,6 +359,7 @@ function makeSettlements(
   castles: PlacedCastle[],
   _playerCount: number,
   unitTypes: Record<string, UnitType> = {},
+  castleSeed = 0,
 ): SettlementState[] {
   const settlements = castles.map((c) => {
     const computed = computeSettlementRates(map, c.tile.q, c.tile.r, c.level);
@@ -395,7 +397,36 @@ function makeSettlements(
       buildings: [] as BuildingDef[],
     };
   });
-  return seedStarterBuildings(settlements, starterHeroStacks(castles), unitTypes);
+  return seedStartupDistrictPass(map, seedStarterBuildings(settlements, starterHeroStacks(castles), unitTypes), castleSeed);
+}
+
+/**
+ * Give every tier-2 / tier-3 settlement the districts it starts with (see
+ * settlement/districtSeed.ts): one for a town, two for a castle, none for a
+ * level-1 settlement. Runs as its own pass AFTER the starter buildings so it
+ * can see every settlement hex on the map -- a seeded district never lands on
+ * another settlement's own tile -- and it draws from its own per-settlement RNG
+ * stream, so the map's seeded generation (names, horse variants, city spots)
+ * is untouched.
+ *
+ * Neutral settlements get theirs too: they are the same tier-2 / tier-3 castles
+ * with nobody sitting in them, and a captured town should already look grown.
+ */
+function seedStartupDistrictPass(
+  map: GameMap,
+  settlements: SettlementState[],
+  castleSeed: number,
+): SettlementState[] {
+  const occupiedCenters = new Set(settlements.map((s) => districtKey(s.q, s.r)));
+  return settlements.map((s) => {
+    const districts = seedStartupDistricts(
+      map,
+      { id: s.id, q: s.q, r: s.r, level: s.level },
+      { castleSeed, occupiedCenters },
+    );
+    if (!districts) return s;
+    return { ...s, districts };
+  });
 }
 
 /**
@@ -490,7 +521,7 @@ export function buildInitialGameState(
     castleCount: Math.max(castleCount, playerCount),
   });
 
-  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes);
+  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes, castleSeed);
   const settlementIds = splitByOwner(settlements);
   const players = makePlayers(settlementIds, playerCount, humanSeatCount, opts?.seatFactions);
   const heroes = makeHeroes(castles, playerCount, rng, humanSeatCount);
@@ -530,7 +561,7 @@ export function makeInitialStatePayload(
     playerCount,
     castleCount: Math.max(castleCount, playerCount),
   });
-  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes);
+  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes, castleSeed);
   const settlementIds = splitByOwner(settlements);
   const players = makePlayers(settlementIds, playerCount, humanSeatCount, opts?.seatFactions);
   const heroes = makeHeroes(castles, playerCount, rng, humanSeatCount);

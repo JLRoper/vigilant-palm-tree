@@ -249,6 +249,7 @@ export class CityView {
     mapSeed?: number,
     district?: { q: number; r: number },
     backdrop?: CityBackdropSignature,
+    districtTerrain?: string | null,
   ): void {
     this.openSettlementId = settlementId;
     this.openDistrict = district ? { q: district.q, r: district.r } : null;
@@ -270,7 +271,7 @@ export class CityView {
       const initialBuildings = buildings ? [...buildings] : [];
       this.freeInitialLayout = false;
       this.committedInitialLayout = false;
-      this.placer.init(5, null, initialBuildings, true);
+      this.placer.init(5, null, initialBuildings, true, districtTerrain ?? null);
     } else {
       const starter = starterCityOnOpen({ size: this.size, style: "pixel" as GenerationStyle, existing: buildings });
       const initialBuildings = starter.buildings;

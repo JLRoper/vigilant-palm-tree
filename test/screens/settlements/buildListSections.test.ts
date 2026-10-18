@@ -69,7 +69,7 @@ test("exact section membership in BUILDABLE_KINDS order", () => {
   assert.deepEqual(sections[0]?.kinds, ["archeryRange", "barracks", "mageGuild", "farmhouse", "stables", "huntingLodge", "eyrie", "crypt", "ossuary", "wraithBarrows", "spireOfAsh", "forgeHall", "gunnersRedoubt", "golemFoundry", "deepAnvil", "groveSanctum", "warrenLodge", "sylvanStables", "worldrootGrove"]);
   assert.deepEqual(sections[1]?.kinds, ["goldMine", "woodcutterHut", "stoneMine", "ironMine", "arcaneFont", "farmField", "granary"]);
   assert.deepEqual(sections[2]?.kinds, [
-    "townHall", "house", "tower", "smithy", "market", "apartment", "warehouse", "bank", "treasury",
+    "townHall", "house", "tower", "smithy", "market", "apartment", "warehouse", "bank", "treasury", "shipyard",
   ]);
 });
 

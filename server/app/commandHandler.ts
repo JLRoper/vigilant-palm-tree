@@ -31,6 +31,8 @@ transferGold,
   generateCitySpots,
   generateDistrictSpots,
   districtKey,
+  districtConnectionReason,
+  districtTerrainProblem,
   resolveControllingSettlement,
   startCharter,
   stepTravelCharter,
@@ -1774,14 +1776,31 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
           return { ok: false, reason: "district_on_settlement_center", events: [] };
         }
         const terrain = map.get(q, r);
-        if (terrain === "water" || terrain === "mountain") {
-          return { ok: false, reason: "impassable_district_terrain", events: [] };
+        // Terrain rules (settlement/districtConnectivity.ts): a mountain hex is
+        // never a district; a water hex is a district ONLY as a water district
+        // holding a shipyard (the harbour that bridges districts across water);
+        // and a shipyard may only stand on water. Before this, water and
+        // mountain were both simply impassable.
+        const terrainProblem = districtTerrainProblem(terrain, command.buildings);
+        if (terrainProblem) {
+          return { ok: false, reason: terrainProblem, events: [] };
         }
         const existingDistrict = settlement.districts?.[districtKey(q, r)];
         if (!(command.buildings.length === 0 && existingDistrict)) {
           const controlling = resolveControllingSettlement(state.settlements, q, r, map.width, map.height);
           if (!controlling || controlling.id !== settlement.id) {
             return { ok: false, reason: "not_in_settlement_territory", events: [] };
+          }
+        }
+        // No floating districts: a district must touch the settlement's own hex
+        // or another of its districts. Checked here for the precise reason; the
+        // reducer re-checks the whole resulting cluster, which is what also
+        // catches a commit that would STRAND a district (e.g. clearing the last
+        // building out of the water district that was the only bridge).
+        if (command.buildings.length > 0) {
+          const connectionProblem = districtConnectionReason(settlement, q, r);
+          if (connectionProblem) {
+            return { ok: false, reason: connectionProblem, events: [] };
           }
         }
         const existingSpots = existingDistrict?.citySpots;

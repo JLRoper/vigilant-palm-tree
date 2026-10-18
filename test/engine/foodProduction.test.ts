@@ -345,12 +345,22 @@ test("one farm would not have fixed it: the same 40 games run a permanent full d
   // The counterfactual behind the farm count: a single farm's ~5 food/turn
   // against 15 required is the reported collapse, so "start with a farm" alone
   // is not a fix.
+  //
+  // Scoped to the MAIN city's own farmland (`districts: undefined`): a tier-2 /
+  // tier-3 settlement is born with seeded districts (settlement/districtSeed.ts)
+  // whose buildings pool into the settlement's production like any other, so
+  // leaving them in would measure "one farm + the district's own fields" and
+  // silently retire this counterfactual instead of testing it.
   const games = seededTownGames(40);
   let fed = 0;
   for (const state of games) {
     const town = Object.values(state.settlements).find((s) => s.level === 2);
     assert.ok(town);
-    const oneFarm = { ...town, buildings: town.buildings.filter((b) => b.kind === "farmField").slice(0, 1) };
+    const oneFarm = {
+      ...town,
+      districts: undefined,
+      buildings: town.buildings.filter((b) => b.kind === "farmField").slice(0, 1),
+    };
     const produced = foodProduced(oneFarm, state.castleSeed);
     if (produced >= foodRequired(town)) fed++;
     assert.ok(produced < foodRequired(town), "a single farm is short of the requirement");

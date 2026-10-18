@@ -18,7 +18,7 @@
 // Keys with no file of their own inherit their target's offset via the alias
 // table in packages/engine/src/generated/buildingSpriteKeys.ts.
 
-/** key -> anchorOffsetY, one entry per building sprite key (114). */
+/** key -> anchorOffsetY, one entry per building sprite key (117). */
 export const BUILDING_ANCHOR_OVERRIDES: Readonly<Record<string, number>> = {
   "pixel-alt.farmField.1": 23,
   "pixel-alt.farmField.2": 23,
@@ -92,6 +92,9 @@ export const BUILDING_ANCHOR_OVERRIDES: Readonly<Record<string, number>> = {
   "pixel.ossuary.1": 11,
   "pixel.ossuary.2": 11,
   "pixel.ossuary.3": 8,
+  "pixel.shipyard.1": 3,
+  "pixel.shipyard.2": 3,
+  "pixel.shipyard.3": 3,
   "pixel.smithy.1": 12,
   "pixel.smithy.2": 3,
   "pixel.smithy.3": 7,
