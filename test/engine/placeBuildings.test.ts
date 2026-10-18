@@ -178,7 +178,7 @@ test("applyPlaceBuildings district mode: strips forged workers/draft on new plac
     0,
     [{ gx: 2, gy: 2, kind: "house", level: 1, style: "classic", workers: 7, draft: { knight: 50 } }],
     false,
-    { q: 3, r: 2 },
+    { q: 3, r: 2, citySpots: [] },
   );
   assert.equal(result.ok, true);
   const placed = result.state.settlements.s0.districts?.["3,2"].buildings[0];
@@ -261,7 +261,7 @@ test("applyPlaceBuildings district mode: new placements in a normalized settleme
     0,
     [{ gx: 2, gy: 2, kind: "house", level: 1, style: "classic", workers: 7 }],
     false,
-    { q: 3, r: 2 },
+    { q: 3, r: 2, citySpots: [] },
   );
   assert.equal(result.ok, true);
   const placed = result.state.settlements.s0.districts?.["3,2"].buildings[0];

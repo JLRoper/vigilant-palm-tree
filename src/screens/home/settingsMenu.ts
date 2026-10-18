@@ -1,5 +1,4 @@
 import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
-import { APP_VERSION, BUILD_TIME, BUILD_COMMIT, formatBuildTime } from "../../core/version";
 import {
   settings,
   updateSettings,
@@ -925,30 +924,9 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
   const closeRow = document.createElement("div");
   closeRow.style.display = "flex";
-  closeRow.style.justifyContent = "space-between";
+  closeRow.style.justifyContent = "flex-end";
   closeRow.style.alignItems = "center";
   closeRow.style.marginTop = "6px";
-
-  const buildInfo = document.createElement("div");
-  buildInfo.setAttribute("data-testid", "settings-build-info");
-  Object.assign(buildInfo.style, {
-    fontSize: "11px",
-    opacity: "0.5",
-    fontVariantNumeric: "tabular-nums",
-    userSelect: "text",
-    lineHeight: "1.3",
-  });
-
-  const versionLine = document.createElement("div");
-  versionLine.textContent = `v${APP_VERSION} (${BUILD_COMMIT})`;
-  buildInfo.appendChild(versionLine);
-
-  const builtLine = document.createElement("div");
-  builtLine.textContent = `Built: ${formatBuildTime(BUILD_TIME)}`;
-  builtLine.title = `Built: ${BUILD_TIME}`;
-  buildInfo.appendChild(builtLine);
-
-  closeRow.appendChild(buildInfo);
 
   const closeBtn = document.createElement("button");
   closeBtn.textContent = "Close";

@@ -6,6 +6,7 @@ import { openNewGameModal, type NewGameHandler } from "./newGameModal";
 import { openLoadGameModal, type LoadGameHandler } from "./loadGameModal";
 import { openHotkeysModal, attachHotkeysShortcut } from "./hotkeysModal";
 import { makeStatPill } from "./statPill";
+import { APP_VERSION, BUILD_TIME, BUILD_COMMIT, formatBuildTime } from "../../core/version";
 
 const headerTheme = {
   bgTop: "var(--tb-bg-top, #1b2334)",
@@ -441,6 +442,31 @@ export class Toolbar {
       closeDropdown();
       openSettingsMenu({ parent: document.body, getMapInfo: this.opts.callbacks.getMapInfo });
     });
+
+    const buildInfo = document.createElement("div");
+    buildInfo.setAttribute("data-testid", "toolbar-build-info");
+    Object.assign(buildInfo.style, {
+      fontSize: "10.5px",
+      color: headerTheme.textMuted,
+      fontVariantNumeric: "tabular-nums",
+      lineHeight: "1.35",
+      padding: "5px 10px 3px 10px",
+      marginTop: "4px",
+      borderTop: `1px solid ${headerTheme.divider}`,
+      userSelect: "text",
+      cursor: "default",
+    });
+
+    const versionLine = document.createElement("div");
+    versionLine.textContent = `v${APP_VERSION} (${BUILD_COMMIT})`;
+    buildInfo.appendChild(versionLine);
+
+    const builtLine = document.createElement("div");
+    builtLine.textContent = `Built: ${formatBuildTime(BUILD_TIME)}`;
+    builtLine.title = `Built: ${BUILD_TIME}`;
+    buildInfo.appendChild(builtLine);
+
+    dropdown.appendChild(buildInfo);
 
     attachHotkeysShortcut();
 

@@ -191,8 +191,8 @@ test("the death spiral is gone end to end: a surplus producer is scored as fully
   assert.equal(detail.state.settlements.s0.warehouse.food, 0, "it kept 5 to eat, then consumed them");
   assert.equal(detail.transfers.length, 1);
   assert.equal(detail.transfers[0].amount, 1.25);
-  // 100 - 1.25 surplus handling - 5 daily wages for the 500 people.
-  assert.equal(detail.state.settlements.s0.gold, 93.75, "the surplus cost 1.25 and the people cost 5 more in daily wages");
+  // 100 - 1.25 surplus handling - 5 daily wages = 93.75; the treasury write rounds half-up to 94.
+  assert.equal(detail.state.settlements.s0.gold, 94, "the surplus cost 1.25, the people cost 5, and the write rounds 93.75 up");
 });
 
 test("a settlement that genuinely cannot feed itself still decays (legacy save shape)", () => {

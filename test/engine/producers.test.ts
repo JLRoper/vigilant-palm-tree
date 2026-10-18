@@ -194,8 +194,8 @@ test("produceSettlementResources adds producer outputs to warehouse and treasury
     ],
   });
   const [after] = Object.values(produceSettlementResources({ s0: settlement }, 7));
-  assert.equal(after.gold, 100 + Math.round(40 * before * 100) / 100);
-  assert.equal(after.warehouse.wood, Math.round(3 * woodMult * 100) / 100);
+  assert.equal(after.gold, Math.round(100 + Math.round(40 * before * 100) / 100));
+  assert.equal(after.warehouse.wood, Math.round(Math.round(3 * woodMult * 100) / 100));
   assert.equal(after.warehouse.food, 0);
 });
 
@@ -217,7 +217,7 @@ test("EndTurn pays producer gold into the treasury (server tick parity via the s
   });
   const state = makeState({ settlements: [settlement], activePlayerId: 0 });
   const next = applyEndOfTurn(state);
-  const expectedGold = Math.round(40 * cellMultiplier({
+  const expectedGold = Math.round(Math.round(40 * cellMultiplier({
     seed: 0,
     q: 2,
     r: 2,
@@ -225,7 +225,7 @@ test("EndTurn pays producer gold into the treasury (server tick parity via the s
     gy: 2,
     resource: "gold",
     spots: [GOLD_SPOT],
-  }) * 100) / 100;
+  }) * 100) / 100);
   assert.equal(next.settlements.s0.gold, expectedGold);
 });
 
@@ -268,7 +268,8 @@ test("staffing: the production loop pays the effort-scaled amount", () => {
     buildings: [{ gx: 1, gy: 1, kind: "farmField", level: 1, workers: 1 }],
   });
   const [after] = Object.values(produceSettlementResources({ s0: settlement }, 7));
-  assert.equal(after.warehouse.food, Math.round(5 * m * 0.5 * 100) / 100);
+  // The production loop writes warehouse quantities half-up to whole integers.
+  assert.equal(after.warehouse.food, Math.round(Math.round(5 * m * 0.5 * 100) / 100));
 });
 
 test("market fallback gold scales with explicit staffing and only for the market kind", () => {
@@ -281,7 +282,7 @@ test("market fallback gold scales with explicit staffing and only for the market
   const [legacy] = Object.values(produceSettlementResources({ s0: market() }, 7));
   assert.equal(legacy.gold, 140, "legacy undefined staff keeps the full 40/turn");
   const [third] = Object.values(produceSettlementResources({ s0: market(1) }, 7));
-  assert.equal(third.gold, 113.33, "1 of 3 workers scales 40 → 13.33");
+  assert.equal(third.gold, 113, "1 of 3 workers scales 40 → 13.33, and the treasury write rounds 113.33 → 113");
   const [idle] = Object.values(produceSettlementResources({ s0: market(0) }, 7));
   assert.equal(idle.gold, 100, "zero staff shuts the market down");
   assert.equal(settlementProductionRates(market(1), 7).goldPerTurn, 13.33);

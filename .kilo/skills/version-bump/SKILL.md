@@ -1,7 +1,7 @@
 ---
 name: version-bump
 description: Check whether a branch or PR that changes game code (src/, packages/, server/, index.html) already bumps the app version against its base, and if it doesn't, decide patch vs minor and apply the bump with scripts/bump-version.mjs. Use when asked to "bump the version", "check the version bump", or before a branch or PR is merged into main without one. pr-copilot-triage calls it with --pr before merging.
-argument-hint: [patch|minor|major] [--pr <N>] [--check] [-m "summary"]
+argument-hint: '[patch|minor|major] [--pr <N>] [--check] [-m "summary"]'
 ---
 
 # Version bump

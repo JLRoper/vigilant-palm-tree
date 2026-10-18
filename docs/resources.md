@@ -1,6 +1,6 @@
 # Resources
 
-<!-- docs:verified 2026-10-17 -->
+<!-- docs:verified 2026-10-18 -->
 
 Six resource types are defined by [`packages/contracts/src/resources.ts`](../packages/contracts/src/resources.ts): gold, wood, stone, iron, arcane, and food. Five have world-map resource-tile density data; food is a settlement/city resource and never spawns on the world map.
 
@@ -8,7 +8,7 @@ Six resource types are defined by [`packages/contracts/src/resources.ts`](../pac
 
 | Resource | Map tile yield | Main use |
 |---|---:|---|
-| Gold | 20 (tile-rate value itself is not credited — see the caveat below) | Recruitment, construction, trade, charter purse |
+| Gold | 20 (tile-rate value; the treasury credit is the separate building `goldPerTurn`, paid by End Turn since 2026-10-18 and scaled by staffing — see F2) | Recruitment, construction, trade, charter purse |
 | Wood | 15 | Building costs and upkeep |
 | Stone | 12 | Building costs and upkeep |
 | Iron | 8 | Faction building/recruit costs and settlement upgrades |
@@ -38,9 +38,11 @@ For each passable tile adjacent to a mountain, the placer multiplies that tile's
 
 Food is live, but it is not a map resource. City food spots supply the local multiplier used by farm producers; farms, farmhouses, and granaries produce food. Settlement consumption and population growth run per turn/round, while hero and garrison food upkeep is charged weekly. Food can also move in physical trade-route caravans. See [`army.md`](./army.md), [`settlements.md`](./settlements.md), and [`resource-gathering.md`](./resource-gathering.md).
 
-## Known Economy Caveat (updated 2026-10-17)
+## Economy caveat — RESOLVED 2026-10-18
 
-The gold **tile-rate projection** (`resourceRates.gold`) is still not credited by End Turn — gold is not a warehouse resource, so nothing ever pays that map-derived figure. `market.goldPerTurn` sat in the same state until the 2026-10-17 workforce wave: the production loop now credits the market's flat gold **× staffing effort** into the treasury, so building income and `effectiveSettlementIncome()`'s projection agree. Finding F2 in [`resource-gathering.md`](./resource-gathering.md) is therefore resolved; the gold tile-rate phantom itself remains documented there (§6.2).
+`effectiveSettlementIncome()` is a projection helper, and End Turn now pays everything it projects: morale-scaled tax, `producerTurnOutput` (including a `goldMine`), **and** every completed non-producer building's `goldPerTurn` **× staffing effort** (a `market` pays 40/level at full staffing), in the main city and districts. Under-construction buildings are excluded from both sides. The former divergence — `market.goldPerTurn` shown in the HUD but never credited — was finding F2 in [`resource-gathering.md`](./resource-gathering.md), now **closed**.
+
+`resourceRates.gold` remains a phantom (a persisted tile-rate value `produceSettlementResources` never consumes, because gold is not a warehouse resource); the per-turn display reads combined production instead.
 
 ## Cross-References
 

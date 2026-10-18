@@ -1,6 +1,6 @@
 # Technical Specifications — heroes-js
 
-<!-- docs:verified 2026-10-17 -->
+<!-- docs:verified 2026-10-18 -->
 
 A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. This document captures the **tech stack** as it currently exists in the repository. Game design documentation lives under [`docs/`](./docs/README.md); the render module has its own authoritative spec at [`src/render/docs/technical-spec.md`](./src/render/docs/technical-spec.md).
 
@@ -63,7 +63,7 @@ The former top-level `shared/` directory **no longer exists** — its contents w
 - Dev server **and** preview server: host `0.0.0.0`, port from `CLIENT_PORT` in `.env` (default `5173`); both proxy `/api/*` → `http://<API_HOST>:<API_PORT>` (defaults `127.0.0.1:3001`).
 - Entry HTML: [`index.html`](./index.html), loads `src/main.ts` as an ES module.
 - HTML mounts a full-viewport `<canvas id="game">` inside `#app` and a `#toolbar` slot. The `#hud` element is **not** in the HTML — it is created dynamically by `buildHud()` (`src/screens/shared/hud.ts`) into the toolbar's status slot; `index.html` only carries its CSS.
-- Build version stamping: `vite.config.ts` injects three compile-time `define`s — `__APP_VERSION__` (the `package.json` version), `__BUILD_TIME__` (ISO build timestamp), and `__BUILD_COMMIT__` (the `VITE_COMMIT_HASH` env var, else the short git hash; `"dev"` as fallback). [`src/core/version.ts`](./src/core/version.ts) consumes them (with node/test fallbacks) via `APP_VERSION` / `BUILD_TIME` / `BUILD_COMMIT` + `formatBuildTime` / `getBuildInfo`, and the settings menu shows `v<version> (<commit>)` and `Built: <formatted time>` in its bottom row (full ISO timestamp in the tooltip).
+- Build version stamping: `vite.config.ts` injects three compile-time `define`s — `__APP_VERSION__` (the `package.json` version), `__BUILD_TIME__` (ISO build timestamp), and `__BUILD_COMMIT__` (the `VITE_COMMIT_HASH` env var, else the short git hash; `"dev"` as fallback). [`src/core/version.ts`](./src/core/version.ts) consumes them (with node/test fallbacks) via `APP_VERSION` / `BUILD_TIME` / `BUILD_COMMIT` + `formatBuildTime` / `getBuildInfo`, and the in-game toolbar gear (⚙) dropdown menu shows `v<version> (<commit>)` and `Built: <formatted time>` (full ISO timestamp in the tooltip); the settings panel no longer renders build info.
 
 ### JavaScript (Node ESM, `.mjs`)
 - Used for tooling scripts in `tools/` and `tools/sprites/` (sprite generation, test wrapper `tools/run-test.mjs`).
@@ -356,7 +356,7 @@ Vite auto-loads `.env`; `tsx` processes use `--env-file=.env`. Both Vite servers
 
 ### Current Caveats
 
-- Market `goldPerTurn` is declared and included in `effectiveSettlementIncome()` projections, but End Turn currently credits `producerTurnOutput` plus morale-scaled tax; market income is not paid to the treasury. This remains open as finding F2 in [`docs/resource-gathering.md`](./docs/resource-gathering.md).
+- Market `goldPerTurn` is declared, included in `effectiveSettlementIncome()` projections, and (since 2026-10-18, along with any other completed non-producer's `goldPerTurn`) credited to the treasury by End Turn in both the main city and districts; `effectiveSettlementIncome()` skips under-construction buildings to match. This closed finding F2 in [`docs/resource-gathering.md`](./docs/resource-gathering.md).
 - Real email delivery for sign-in codes is not configured; development exposes the code for testing.
 - `WS_PORT` is allocated but no realtime layer listens on it; multiplayer updates use SSE with polling as a backstop.
 - Spellcasting, morale/fatigue, recruitment, weekly upkeep, and hero/garrison battle outcomes are implemented; their plan documents are historical status records, not proof of remaining work.

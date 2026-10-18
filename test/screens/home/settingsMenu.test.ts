@@ -3,12 +3,6 @@ import assert from "node:assert/strict";
 import { openSettingsMenu } from "../../../src/screens/home/settingsMenu";
 import { settings, updateSettings } from "../../../src/state/settings";
 import { DEFAULT_TOOLBAR_STYLE, TOOLBAR_THEMES } from "../../../src/state/toolbarThemes";
-import {
-  APP_VERSION,
-  BUILD_COMMIT,
-  BUILD_TIME,
-  formatBuildTime,
-} from "../../../src/core/version";
 
 // Minimal DOM mock to exercise settingsMenu in a headless node:test environment.
 function makeMockStyle(): Record<string, string> {
@@ -163,28 +157,14 @@ afterEach(() => {
   restoreDom();
 });
 
-test("openSettingsMenu renders build info element with version, commit and build time", () => {
+test("settings panel no longer renders build info (moved to the in-game gear menu)", () => {
   const parent = new MockElement("div");
   openSettingsMenu({ parent });
-
-  const buildInfo = parent.querySelector('[data-testid="settings-build-info"]');
-  assert.ok(buildInfo, "settings-build-info container must exist");
-  assert.equal(buildInfo.style.fontSize, "11px");
-  assert.equal(buildInfo.style.opacity, "0.5");
-  assert.equal(buildInfo.style.fontVariantNumeric, "tabular-nums");
-
-  assert.equal(buildInfo.children.length, 2, "buildInfo should have versionLine and builtLine");
-  const [versionLine, builtLine] = buildInfo.children;
-
-  assert.equal(versionLine.textContent, `v${APP_VERSION} (${BUILD_COMMIT})`);
-  assert.equal(builtLine.textContent, `Built: ${formatBuildTime(BUILD_TIME)}`);
-  assert.equal(builtLine.title, `Built: ${BUILD_TIME}`);
-
-  // Verify closeRow flex alignment
-  const closeRow = buildInfo.parent;
-  assert.ok(closeRow, "buildInfo must have a parent (closeRow)");
-  assert.equal(closeRow.style.justifyContent, "space-between");
-  assert.equal(closeRow.style.alignItems, "center");
+  assert.equal(
+    parent.querySelector('[data-testid="settings-build-info"]'),
+    null,
+    "build info moved out of the settings panel to the toolbar gear menu",
+  );
 });
 
 test("Visual toolbar style selector updates immediately and Reset restores modern", () => {

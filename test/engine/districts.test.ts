@@ -49,7 +49,7 @@ import {
   settlementFullnessForCount,
 } from "../../src/render/scene/sceneBuilder/adventureScene";
 import { buildCityScene } from "../../src/render/scene/sceneBuilder/cityScene";
-import type { CastleNode, CityBuildingNode, DistrictNode } from "../../src/render/scene/types";
+import type { CastleNode, CityBuildingNode, CityLabelNode, DistrictNode } from "../../src/render/scene/types";
 import { describeTile } from "../../src/screens/adventure/tileInfo";
 import {
   buildEntryStatus,
@@ -200,7 +200,16 @@ test("applyPlaceBuildings in district mode: allows (2,2), forbids townHall, vali
     buildings: [],
   });
   const state = makeState({ settlements: [settlement] });
-  const target = { q: 3, r: 2 };
+  // citySpots are REQUIRED for a new district: only the callers holding the
+  // GameMap can derive the map-deposit guarantee (D2), so the reducer refuses to
+  // invent them. An existing district reuses its own persisted set.
+  const districtSpots = generateDistrictSpots(3, 2, 4242, "grass", null);
+  const target = { q: 3, r: 2, citySpots: districtSpots };
+
+  // A NEW district with no citySpots is refused rather than given fabricated spots
+  const noSpots = applyPlaceBuildings(state, "s0", 0, [makeBuilding("house", 2, 2, 1)], false, { q: 3, r: 2 });
+  assert.equal(noSpots.ok, false);
+  assert.equal(noSpots.reason, "district_spots_required");
 
   // Allows placing a building at (2, 2) and charges full cost even when initialLayout = true
   const placeCenter = applyPlaceBuildings(
@@ -323,9 +332,9 @@ test("district economy: producers, market income, enemy vs friendly hero occupat
   assert.equal(unblockedRates.goldPerTurn, Math.round((expectedGoldProd + 40) * 100) / 100);
 
   const producedUnblocked = produceSettlementResources({ s0: baseSettlement }, seed, []).s0;
-  assert.equal(producedUnblocked.warehouse.wood, Math.round((20 + expectedWood) * 100) / 100);
-  assert.equal(producedUnblocked.warehouse.food, Math.round((20 + expectedFood) * 100) / 100);
-  assert.equal(producedUnblocked.gold, Math.round((100 + expectedGoldProd + 40) * 100) / 100);
+  assert.equal(producedUnblocked.warehouse.wood, Math.round(20 + expectedWood));
+  assert.equal(producedUnblocked.warehouse.food, Math.round(20 + expectedFood));
+  assert.equal(producedUnblocked.gold, Math.round(100 + expectedGoldProd + 40));
 
   // Unblocked market (goldPerTurn: 75 at L1) adds to settlementIncome and effectiveSettlementIncome
   const baseOnlySettlement: SettlementState = { ...baseSettlement, districts: undefined };
@@ -1555,4 +1564,174 @@ test("buildCityScene scopes upgrade scaffolding constructionStages to the active
   );
   assert.ok(otherDistHouse);
   assert.equal(otherDistHouse.constructionStage, undefined, "other district does not show upgrade constructionStage");
+});
+
+// ── Regression guards for the post-merge review findings ─────────────────────
+
+test("advanceSettlementUpgrades: a townHall upgrade levels DISTRICT buildings with the main city's", () => {
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, { level: 1, population: 500, goldTax: 1 }),
+    buildings: [makeBuilding("townHall", 2, 2, 1), makeBuilding("house", 4, 0, 1)],
+    districts: {
+      "3,2": {
+        q: 3,
+        r: 2,
+        citySpots: [],
+        buildings: [makeBuilding("woodcutterHut", 0, 0, 1), makeBuilding("house", 1, 1, 2)],
+      },
+    },
+    upgrade: { kind: "townHall", targetLevel: 3, daysRemaining: 1 },
+  };
+
+  const next = advanceSettlementUpgrades(makeState({ settlements: [settlement] }));
+  const s = next.settlements.s0;
+  assert.equal(s.upgrade, undefined, "townHall upgrade clears on completion");
+  assert.equal(s.buildings.find((b) => b.kind === "townHall")!.level, 3);
+  assert.equal(s.buildings.find((b) => b.kind === "house")!.level, 3);
+
+  const district = s.districts?.["3,2"];
+  assert.ok(district, "district survives the town hall upgrade");
+  assert.equal(
+    district.buildings.find((b) => b.kind === "woodcutterHut")!.level,
+    3,
+    "district building levels up with the town hall (finding: it used to stay at L1)",
+  );
+  assert.equal(district.buildings.find((b) => b.kind === "house")!.level, 3);
+  assert.deepEqual(
+    district.citySpots,
+    [],
+    "levelling district buildings must not disturb the district's own spot set",
+  );
+});
+
+test("settlementIncome / effectiveSettlementIncome skip under-construction buildings, matching the End Turn payment", () => {
+  const bare = makeSettlement("s0", 0, 2, 2, { population: 0, goldTax: 0 });
+  const completedMarket: SettlementState = { ...bare, buildings: [makeBuilding("market", 1, 1, 1)] };
+  const buildingMarket: SettlementState = {
+    ...bare,
+    buildings: [makeBuilding("market", 1, 1, 1, { construction: { daysRemaining: 2 } })],
+  };
+
+  assert.equal(settlementIncome(completedMarket), 40, "completed market projects 40g");
+  assert.equal(
+    settlementIncome(buildingMarket),
+    0,
+    "an under-construction market must not be advertised in the HUD projection",
+  );
+  assert.equal(effectiveSettlementIncome(completedMarket), 40);
+  assert.equal(effectiveSettlementIncome(buildingMarket), 0);
+
+  // ...and the projection is exactly what End Turn pays.
+  const paidCompleted = produceSettlementResources({ s0: completedMarket }, 777).s0.gold - completedMarket.gold;
+  const paidBuilding = produceSettlementResources({ s0: buildingMarket }, 777).s0.gold - buildingMarket.gold;
+  assert.equal(paidCompleted, 40, "projection and payment agree for a completed market");
+  assert.equal(paidBuilding, 0, "projection and payment agree for a building market");
+});
+
+test("buildAdventureScene: a fog-hidden enemy hero does not flip a district's blocked flag", () => {
+  const map = makeGrassMap(6, 6);
+  const castle = Castle.fromGameState({
+    ...makeSettlement("s0", 0, 2, 2, { level: 2, population: 500, goldTax: 1 }),
+    districts: {
+      "3,2": { q: 3, r: 2, citySpots: [], buildings: [makeBuilding("house", 0, 0)] },
+    },
+  });
+  const enemyHero = new Hero("hEnemy", "Enemy", 3, 2, "enemy", 1);
+
+  // The hex is NOT in the visibility set, but the district still renders because
+  // the view owns the castle -- an enemy standing there is invisible and must
+  // not be revealed through the marker.
+  const hidden = buildAdventureScene({
+    map,
+    heroes: [enemyHero],
+    castles: [castle],
+    path: [],
+    hover: null,
+    visible: new Set<string>(),
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  const hiddenDistrict = hidden.find((n): n is DistrictNode => n.kind === "district");
+  assert.ok(hiddenDistrict, "an own-castle district renders even when its hex is not in the visibility set");
+  assert.equal(hiddenDistrict.blocked, undefined, "a fog-hidden enemy must not flip the blocked flag");
+
+  // Once the hex is genuinely visible, the same hero DOES report the block.
+  const seen = buildAdventureScene({
+    map,
+    heroes: [enemyHero],
+    castles: [castle],
+    path: [],
+    hover: null,
+    visible: new Set(["3,2"]),
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  const seenDistrict = seen.find((n): n is DistrictNode => n.kind === "district");
+  assert.equal(seenDistrict?.blocked, true, "a visible enemy on the district hex reports blocked");
+});
+
+test("describeTile: territory is gated on the VIEWER's seat, not state.activePlayerId", () => {
+  const rows: TileRow[] = [];
+  for (let r = 0; r < 6; r++) {
+    for (let q = 0; q < 6; q++) rows.push({ q, r, terrain: "grass", resource: null });
+  }
+  const map = GameMap.fromTiles(rows);
+
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, { level: 1, population: 500, goldTax: 1 }),
+    name: "Oakkeep",
+  };
+  const castle = Castle.fromGameState(settlement);
+  // Seat 0 holds the turn; the viewer is seat 1. No heroes, so the only
+  // visibility in play is the owned-castle ring.
+  const state = makeState({ settlements: [settlement], heroes: [], activePlayerId: 0 });
+
+  const opponentView = describeTile({
+    map, state, heroes: [], castles: [castle], viewPlayerId: 1, tile: { q: 3, r: 2 },
+  });
+  assert.ok(opponentView);
+  assert.equal(opponentView.fogged, true, "seat 1 cannot see seat 0's territory");
+  assert.equal(
+    opponentView.territory,
+    null,
+    "a fogged hex owned by the ACTIVE player must not be labelled to a different viewer",
+  );
+
+  // The owner sees the same hex (castle vision ring) and DOES get the label.
+  const ownerView = describeTile({
+    map, state, heroes: [], castles: [castle], viewPlayerId: 0, tile: { q: 3, r: 2 },
+  });
+  assert.ok(ownerView);
+  assert.equal(ownerView.fogged, false);
+  assert.deepEqual(ownerView.territory, { settlementName: "Oakkeep", ownerName: "Player 1" });
+});
+
+test("buildCityScene: a district city view is labelled as a district, not a settlement tier", () => {
+  const citySettings = {
+    spriteVariant: "pixel" as const,
+    parallaxEnabled: false,
+    parallaxLayerCount: 3 as const,
+    cityBgOffsetX: 0,
+    cityBgOffsetY: 0,
+  };
+  const labelFor = (district: { q: number; r: number } | null): string | undefined => {
+    const nodes = buildCityScene({
+      viewportW: 800,
+      viewportH: 600,
+      settlementName: district ? "Oakkeep — District (3, 2)" : "Oakkeep",
+      size: 5,
+      hover: null,
+      citySpots: [],
+      cityMines: [],
+      buildings: [makeBuilding("house", 0, 0, 1)],
+      district,
+      citySettings,
+    });
+    return nodes.find((n): n is CityLabelNode => n.kind === "cityLabel" && n.fontPx === 11)?.text;
+  };
+
+  assert.equal(labelFor(null), "5×5 Settlement", "the main settlement keeps its tier label");
+  assert.equal(
+    labelFor({ q: 3, r: 2 }),
+    "District (5×5 grid)",
+    "a district must not be presented as a settlement tier",
+  );
 });

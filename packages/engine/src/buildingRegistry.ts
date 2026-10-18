@@ -335,9 +335,11 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [],
     maxWorkers: 2,
-    // No goldPerTurn: only goldMine's gold actually accrues per turn, so the
-    // 60g this used to advertise was never applied by the economy and the
-    // description promised an effect the game did not have.
+    // No goldPerTurn of its own: this building widens the treasury cap and
+    // holds a bank pot; it is not an income source. The 60g this used to
+    // advertise was never applied by the economy and the description promised
+    // an effect the game did not have. (Buildings that DO declare goldPerTurn
+    // -- market -- have it credited by End Turn since 2026-10-18.)
     settlementEffects: { treasuryBonus: 2000 },
     playerEffects: {},
   },

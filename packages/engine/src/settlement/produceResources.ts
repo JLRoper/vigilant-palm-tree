@@ -120,7 +120,7 @@ export function produceSettlementResources(
     const treasuryCap = settlementTreasuryCap(s);
     const newWarehouse: Warehouse = { ...s.warehouse };
     for (const { resource, perTurn } of warehouseRates(s.resourceRates)) {
-      newWarehouse[resource] = addStockClamped(newWarehouse[resource] ?? 0, perTurn, caps[resource]);
+      newWarehouse[resource] = Math.round(addStockClamped(newWarehouse[resource] ?? 0, perTurn, caps[resource]));
     }
     let gold = 0;
     for (const b of s.buildings) {
@@ -133,10 +133,12 @@ export function produceSettlementResources(
       if (output.resource === "gold") {
         gold += output.amount;
       } else {
-        newWarehouse[output.resource] = addStockClamped(
-          newWarehouse[output.resource] ?? 0,
-          output.amount,
-          caps[output.resource],
+        newWarehouse[output.resource] = Math.round(
+          addStockClamped(
+            newWarehouse[output.resource] ?? 0,
+            output.amount,
+            caps[output.resource],
+          ),
         );
       }
     }
@@ -152,20 +154,21 @@ export function produceSettlementResources(
         if (output.resource === "gold") {
           gold += output.amount;
         } else {
-          newWarehouse[output.resource] = addStockClamped(
-            newWarehouse[output.resource] ?? 0,
-            output.amount,
-            caps[output.resource],
+          newWarehouse[output.resource] = Math.round(
+            addStockClamped(
+              newWarehouse[output.resource] ?? 0,
+              output.amount,
+              caps[output.resource],
+            ),
           );
         }
       }
     }
     if (gold > 0) {
-      const addGold = Math.min(round2(gold), treasuryHeadroom(s.gold, treasuryCap));
       newSettlements[s.id] = {
         ...newSettlements[s.id],
         warehouse: newWarehouse,
-        gold: round2(s.gold + addGold),
+        gold: Math.round(s.gold + Math.min(gold, treasuryHeadroom(s.gold, treasuryCap))),
       };
     } else {
       newSettlements[s.id] = { ...newSettlements[s.id], warehouse: newWarehouse };

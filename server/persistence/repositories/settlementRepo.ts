@@ -10,7 +10,7 @@ import type {
   WarehouseResource,
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
-import { normalizePlatoons, resolvedPersistedStyle, settlementStacks } from "@heroes/engine";
+import { normalizeDistricts, normalizePlatoons, resolvedPersistedStyle, settlementStacks } from "@heroes/engine";
 import { toNumericColumn } from "../integerColumns";
 import { resolveGameId } from "./gameRepo";
 import type { Queryable } from "./gameRepo";
@@ -124,6 +124,11 @@ function toSettlementState(
     ...(b.draft != null ? { draft: b.draft } : {}),
   }));
 
+  // Shape-guarded through the same helper the JSONB fallback uses: a partial
+  // districts row (missing `buildings`) must not reach the End Turn loop, which
+  // iterates district.buildings unconditionally and would 500 every turn.
+  const districts = normalizeDistricts(row.districts);
+
   return {
     id: row.id,
     name: row.name,
@@ -163,12 +168,7 @@ function toSettlementState(
     ...(platoonRows.length > 0
       ? { stacks: normalizePlatoons(assemblePlatoons(platoonRows)) }
       : {}),
-    ...(row.districts !== null &&
-    row.districts !== undefined &&
-    typeof row.districts === "object" &&
-    Object.keys(row.districts).length > 0
-      ? { districts: row.districts }
-      : {}),
+    ...(districts ? { districts } : {}),
   };
 }
 
