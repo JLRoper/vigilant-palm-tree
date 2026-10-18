@@ -34,6 +34,12 @@ export interface BuildEntryStatusOptions {
   affordability: BuildEntryAffordability | null;
   hasTownHall?: boolean;
   isDistrict?: boolean;
+  /**
+   * Terrain of the open district's hex (undefined for the main settlement, or
+   * when the caller has no map). Drives the water rules: a water district may
+   * only hold a shipyard, and a shipyard may only stand on water.
+   */
+  districtTerrain?: string | null;
 }
 
 export interface BuildConfirmStatusOptions {
@@ -56,6 +62,8 @@ export function buildEntryStatus(opts: BuildEntryStatusOptions): BuildEntryStatu
   if (opts.isDistrict && opts.kind === "townHall") {
     blocking.push("Town Hall can only be built in the main settlement");
   }
+  const terrainNote = districtTerrainBlock(opts.districtTerrain, opts.kind);
+  if (terrainNote) blocking.push(terrainNote);
   const reasons = [...blocking];
   const size = footprintLine(opts.kind);
   if (size) reasons.push(size);
@@ -78,6 +86,19 @@ export function buildConfirmStatus(opts: BuildConfirmStatusOptions): BuildConfir
 
 function availableOf(affordability: BuildEntryAffordability, r: CostResource): number {
   return r === "gold" ? affordability.gold : affordability.warehouse[r];
+}
+
+/**
+ * The water rules a district's own terrain imposes, or null. Kept here (rather
+ * than in the palette) so the entry list, the ghost and the confirm button all
+ * read the same sentence, and so it is unit-testable without a DOM.
+ */
+export function districtTerrainBlock(terrain: string | null | undefined, kind: BuildingKind): string | null {
+  if (terrain === null || terrain === undefined) return null;
+  if (terrain === "water") {
+    return kind === "shipyard" ? null : "Only a shipyard can be built on water";
+  }
+  return kind === "shipyard" ? "Shipyard must be built on water" : null;
 }
 
 function upkeepLine(kind: BuildingKind): string {

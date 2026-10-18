@@ -12,6 +12,7 @@ import {
   buildingPlacementCost,
 } from "../buildingRegistry";
 import { districtKey } from "../control";
+import { disconnectedDistrictKeys } from "./districtConnectivity";
 import { type CitySpot } from "./citySpots";
 import { hasExplicitStaffing } from "./workforce";
 
@@ -187,6 +188,16 @@ export function applyPlaceBuildings(
       };
     } else {
       delete nextDistricts[key];
+    }
+
+    // No floating districts. This runs on the RESULT, not just on the new hex,
+    // so it also catches the other direction: clearing the buildings out of a
+    // water district that was the only bridge to a district across the water
+    // strands that far district, and the commit is refused rather than leaving
+    // the settlement with an unreachable district. Map-free by design -- the
+    // chain is centre -> district -> district, all of it hex arithmetic.
+    if (disconnectedDistrictKeys(s, nextDistricts).length > 0) {
+      return { ok: false, state, reason: "district_not_connected" };
     }
 
     const { districts: _prevDistricts, ...sWithoutDistricts } = s;

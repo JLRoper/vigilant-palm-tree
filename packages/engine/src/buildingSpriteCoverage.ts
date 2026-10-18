@@ -68,6 +68,7 @@ export const BUILDING_SPRITE_COVERAGE: Readonly<Record<BuildingKind, BuildingSpr
   goldMine: full("goldMine"),
   woodcutterHut: full("woodcutterHut"),
   arcaneFont: full("arcaneFont"),
+  shipyard: full("shipyard"),
   stables: full("stables"),
   huntingLodge: full("huntingLodge"),
   eyrie: full("eyrie"),

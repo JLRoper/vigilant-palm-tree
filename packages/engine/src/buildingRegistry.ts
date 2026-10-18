@@ -398,6 +398,20 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     settlementEffects: { resourceYieldBonus: { arcane: 3 } },
     playerEffects: {},
   },
+  shipyard: {
+    kind: "shipyard",
+    label: "Shipyard",
+    description:
+      "A waterfront yard of slips, cranes and timber for hulls under construction. Water-only: it can be built on nothing but a water hex, and it is what lets a district across the water stay part of the settlement.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 5,
+    placementCost: { gold: 400, wood: 8, stone: 6 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [],
+    maxWorkers: 3,
+    settlementEffects: { goldPerTurn: 12 },
+    playerEffects: {},
+  },
   crypt: {
     kind: "crypt",
     label: "Crypt",

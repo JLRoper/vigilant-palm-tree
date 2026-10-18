@@ -6,7 +6,7 @@ import { MAP_SEED } from "@screens/adventure/adventureView";
 import { colorForOwner } from "../state/playerColors";
 import { buildInitialGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";
-import { cityViewSizeFor, districtKey, generateDistrictSpots, resolveControllingSettlement, sampleCityBackdrop, validCharterHexes } from "@heroes/engine";
+import { cityViewSizeFor, districtConnectionReason, districtKey, generateDistrictSpots, resolveControllingSettlement, sampleCityBackdrop, validCharterHexes } from "@heroes/engine";
 import { cachedUnitTypes } from "../data/unitCatalog";
 
 import { SessionManager } from "./SessionManager";
@@ -569,7 +569,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     }
 
     const terrain = cityMap.get(t.q, t.r);
-    if (!terrain || terrain === "water" || terrain === "mountain") return;
+    if (!terrain || terrain === "mountain") return;
     const controlling = resolveControllingSettlement(
       this.state.getSettlements(),
       t.q,
@@ -579,6 +579,12 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     );
     if (!controlling || controlling.ownerId !== localId) return;
     const existing = controlling.districts?.[districtKey(t.q, t.r)];
+    // No floating districts: a hex with no district yet opens only when it
+    // touches the settlement's own hex or one of its districts (a water hex
+    // qualifies the same way, and is where a shipyard gets built -- water is
+    // buildable ONLY as a water district holding one). Opening an unbuildable
+    // grid would just walk the player into a server-side refusal.
+    if (!existing && districtConnectionReason(controlling, t.q, t.r) !== null) return;
     const mapRes = cityMap.resourceTileAt(t.q, t.r)?.resource ?? null;
     const spots =
       existing?.citySpots && existing.citySpots.length > 0
@@ -596,6 +602,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       gs.castleSeed,
       { q: t.q, r: t.r },
       sampleCityBackdrop(cityMap, t.q, t.r, gs.castleSeed),
+      terrain,
     );
     if (cityView.isOpen() && gs.selectedSettlementId !== controlling.id) {
       const tc = this.state.getTurnController();

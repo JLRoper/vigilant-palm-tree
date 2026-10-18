@@ -557,7 +557,11 @@ test("REGRESSION: every NEW settlement is born autoTrade:false (the recommender 
 test("wood and stone: the starter set drains only ~4 wood/turn at the median cell -- 30 turns of guaranteed runway", () => {
   const state = onePlayerGame();
   for (const s of Object.values(state.settlements)) {
-    const upkeep = buildingUpkeepRequired(s);
+    // The MAIN city's set only. buildingUpkeepRequired pools the settlement's
+    // district buildings too, and a tier-2 / tier-3 settlement is now born with
+    // seeded districts (settlement/districtSeed.ts) whose buildings carry their
+    // own upkeep -- a separate pool, measured on its own.
+    const upkeep = buildingUpkeepRequired({ ...s, districts: undefined });
     assert.deepEqual(upkeep, { wood: 10, stone: 2 }, `${s.id}: townHall 3+2, 2 houses 1+0, 2 huts 1+0 each, mine 2, farms 0, farmhouse 1+0`);
     assert.equal(Math.floor(300 / upkeep.wood), 30, `${s.id}: 30 turns of wood runway from the starting stock`);
     assert.equal(Math.floor(300 / upkeep.stone), 150, `${s.id}: 150 turns of stone runway`);
@@ -606,7 +610,10 @@ test("re-committing a seeded city's cart is a zero-cost no-op, not a charge and 
   // that anti-spoof guard).
   assert.equal(committed.state.settlements[town.id].gold, 300, "no charge");
   assert.deepEqual(committed.state.settlements[town.id].warehouse, town.warehouse, "no refund, no charge");
-  assert.deepEqual(buildingUpkeepRequired(committed.state.settlements[town.id]), { wood: 10, stone: 2 });
+  assert.deepEqual(
+    buildingUpkeepRequired({ ...committed.state.settlements[town.id], districts: undefined }),
+    { wood: 10, stone: 2 },
+  );
 });
 
 test("makeInitialStatePayload -- the POST /games path -- carries the same seeded pair", () => {

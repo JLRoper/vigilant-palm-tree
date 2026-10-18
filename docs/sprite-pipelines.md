@@ -216,6 +216,17 @@ pace → run-frame flip rate).
 6-step "adding a new resource" recipe that touches `palettes.ts`, `pixel-art.html`
 (twice) and `pixel-gen.mjs`. Output: `castle-l*.png`, `resource-*.png`.
 
+`tools/sprites/gen-shipyard-sprite.mjs` is the same idea applied to a
+**building**: it rasterises `building-pixel-shipyard-{1,2,3}.png` (64×64 logical
+pixels, 16× nearest-neighbour upscale, dark-outline/mid/highlight ramps) with
+its own pure-Node PNG encoder and no browser, no API. It exists because every
+other `building-pixel-*` sprite came from an illustrated pipeline whose output
+cannot be reproduced from source, and the shipyard needs the registry's normal
+treatment: `npm run gen:sprite-keys` (key map) + `npm run gen:building-anchors`
+(measured bottom pad) pick it up like any other sprite. Verify on disk with
+`node tools/sprites/gen-shipyard-sprite.mjs --check`; the output is byte-stable,
+so a re-run is a no-op.
+
 ### 4.2 Pipeline B — FLUX via DeepInfra (`tools/sprites/flux-*.mjs`, 25 scripts)
 
 One-off scripts (`flux-gen`, `flux-regen`, `flux-regen3`, `flux-piles`,

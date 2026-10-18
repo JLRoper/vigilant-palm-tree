@@ -22,6 +22,7 @@ export type BuildingKind =
   | "goldMine"
   | "woodcutterHut"
   | "arcaneFont"
+  | "shipyard"
   | "stables"
   | "huntingLodge"
   | "eyrie"

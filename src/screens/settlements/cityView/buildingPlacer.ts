@@ -13,7 +13,7 @@ import {
   randomFarmFieldStyle,
 } from "@heroes/engine";
 import { buildListSections } from "./buildListSections";
-import { buildConfirmStatus, buildEntryStatus } from "./buildEntryStatus";
+import { buildConfirmStatus, buildEntryStatus, districtTerrainBlock } from "./buildEntryStatus";
 import { footprintSuffix } from "./footprint";
 import type { ResourceType } from "../../../state/gameState";
 import resourceGoldPileSmol from "../../../resources/resource-gold-pile-smol.png?url";
@@ -68,6 +68,8 @@ export class BuildingPlacer {
   private size: CityViewSize = 5;
   private center: { gx: number; gy: number } | null = { gx: 2, gy: 2 };
   private isDistrict = false;
+  /** Terrain of the open district's hex (null for the main settlement / no map). */
+  private districtTerrain: string | null = null;
   private palette: PopupMenu | null = null;
   private paletteMode: PaletteMode = "build";
   private onPlaced: (() => void) | null = null;
@@ -78,10 +80,11 @@ export class BuildingPlacer {
   /** Net cost already committed server-side since the view opened; canAfford gates only the uncommitted remainder. */
   private committedNet: Partial<Record<ResourceType, number>> = {};
 
-  init(size: CityViewSize, center: { gx: number; gy: number } | null, initialBuildings: BuildingDef[], isDistrict = false): void {
+  init(size: CityViewSize, center: { gx: number; gy: number } | null, initialBuildings: BuildingDef[], isDistrict = false, districtTerrain: string | null = null): void {
     this.size = size;
     this.center = center;
     this.isDistrict = isDistrict;
+    this.districtTerrain = isDistrict ? districtTerrain : null;
     this.buildings = [...initialBuildings];
     this.originalBuildings = [...initialBuildings];
     this.committedNet = {};
@@ -388,7 +391,7 @@ export class BuildingPlacer {
         const days = buildingBuildDays(kind);
         const hasTownHall = kind === "townHall" && this.buildings.some((b) => b.kind === "townHall");
         const isSelected = this.selectedKind === kind;
-        const status = buildEntryStatus({ kind, affordability: this.affordability, hasTownHall, isDistrict: this.isDistrict });
+        const status = buildEntryStatus({ kind, affordability: this.affordability, hasTownHall, isDistrict: this.isDistrict, districtTerrain: this.districtTerrain });
         const disabled = status.disabled;
 
         Object.assign(row.style, {
@@ -538,6 +541,7 @@ export class BuildingPlacer {
   canPlaceAt(gx: number, gy: number): boolean {
     if (gx < 0 || gy < 0 || gx + this.w > this.size || gy + this.h > this.size) return false;
     if (this.isDistrict && this.active === "townHall") return false;
+    if (this.isDistrict && this.active && districtTerrainBlock(this.districtTerrain, this.active) !== null) return false;
     if (this.active === "townHall" && this.buildings.some((b) => b.kind === "townHall")) return false;
     for (let dx = 0; dx < this.w; dx++) {
       for (let dy = 0; dy < this.h; dy++) {
