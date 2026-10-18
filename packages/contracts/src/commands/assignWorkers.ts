@@ -11,5 +11,6 @@ export interface AssignWorkersCommand {
   gx: number;
   gy: number;
   workers: number;
+  source?: { gx: number; gy: number };
   district?: { q: number; r: number };
 }

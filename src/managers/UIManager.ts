@@ -449,13 +449,15 @@ export class UIManager {
     // Workforce wiring: onAssignWorkers commits one building's staff count as
     // a server-side command with the TARGET building's own district (undefined
     // = main settlement); openWorkforcePanel toggles the panel ('w' key).
-    view.onAssignWorkers = (gx, gy, workers, district) => {
+    view.onAssignWorkers = (gx, gy, workers, district, source): boolean => {
       const openId = this.cityView?.getOpenSettlementId();
-      if (!openId) return;
+      if (!openId) return false;
       const tc = state().getTurnController();
-      if (tc.assignWorkers(openId, gx, gy, workers, district).ok) {
+      const ok = tc.assignWorkers(openId, gx, gy, workers, district, source).ok;
+      if (ok) {
         state().replaceState(tc.getState());
       }
+      return ok;
     };
     view.openWorkforcePanel = () => this.toggleWorkforcePanel();
     return view;
@@ -479,7 +481,7 @@ export class UIManager {
         const panel = new WorkforcePanel({
           parent: document.body,
           cityView: view,
-          onAssignWorkers: (gx, gy, workers, district) => view.onAssignWorkers?.(gx, gy, workers, district),
+          onAssignWorkers: (gx, gy, workers, district) => view.onAssignWorkers?.(gx, gy, workers, district) ?? false,
         });
         this.workforcePanel = panel;
         return panel;

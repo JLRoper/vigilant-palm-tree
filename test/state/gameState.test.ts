@@ -990,6 +990,26 @@ test("applyEndOfTurn charges daily wages (1 gold per 100 people) before income l
   assert.equal(next.settlements.s1.gold, 100, "a non-active-player settlement pays no wages on another player's turn");
 });
 
+test("applyEndOfTurn floors daily wages at 0 before income lands: a 3-gold town of 500 ends at 500, not 498", () => {
+  // The floor-at-zero twin of the wage test above: the 5-gold bill is settled
+  // against the 3-gold treasury first and simply clamps to 0 (no wage debt), so
+  // the 500 income that lands after is untaxed by it. Crediting income first
+  // would leave 3 + 500 - 5 = 498.
+  const s = makeState({
+    players: [
+      makePlayer(0, "player", "Player 1", ["h0"], ["s0"]),
+      makePlayer(1, "ai", "AI", ["h1"], ["s1"]),
+    ],
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 1, gold: 3, morale: 100 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 100 } },
+      { ...makeSettlement("s1", 1, 18, 4, { population: 500, goldTax: 1, gold: 3, morale: 100 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 100 } },
+    ],
+  });
+  const next = applyEndOfTurn(s);
+  assert.equal(next.settlements.s0.gold, 500, "3 - 5 clamps to 0 before the +500 income is credited");
+  assert.equal(next.settlements.s1.gold, 3, "a non-active-player town pays no wages and earns no income on this turn");
+});
+
 test("applyEndOfTurn decays morale when food missing", () => {
   const s = makeState({
     settlements: [

@@ -179,6 +179,7 @@ export interface TurnControllerHooks {
     gy: number,
     workers: number,
     district?: { q: number; r: number },
+    source?: { gx: number; gy: number },
   ): Promise<void>;
   onTransferUnits(
     actor: number,
@@ -747,6 +748,7 @@ export class TurnController {
     gy: number,
     workers: number,
     district?: { q: number; r: number },
+    source?: { gx: number; gy: number },
   ): { ok: boolean; reason: string } {
     const result = assignWorkersReducer(this.state, {
       settlementId,
@@ -754,6 +756,7 @@ export class TurnController {
       gy,
       workers,
       ...(district ? { district } : {}),
+      ...(source ? { source } : {}),
     });
     if (!result.ok) return { ok: false, reason: result.reason ?? "" };
     this.commit(result.state, {
@@ -763,8 +766,8 @@ export class TurnController {
       },
       hook: () =>
         district
-          ? this.hooks.onAssignWorkers(result.state.activePlayerId, settlementId, gx, gy, workers, district)
-          : this.hooks.onAssignWorkers(result.state.activePlayerId, settlementId, gx, gy, workers),
+          ? this.hooks.onAssignWorkers(result.state.activePlayerId, settlementId, gx, gy, workers, district, source)
+          : this.hooks.onAssignWorkers(result.state.activePlayerId, settlementId, gx, gy, workers, undefined, source),
       hookLabel: "onAssignWorkers",
     });
     return { ok: true, reason: "" };

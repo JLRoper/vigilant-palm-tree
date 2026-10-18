@@ -13,6 +13,7 @@ import {
 } from "../buildingRegistry";
 import { districtKey } from "../control";
 import { type CitySpot, generateDistrictSpots } from "./citySpots";
+import { hasExplicitStaffing } from "./workforce";
 
 // The server-side (and optimistic client-side) commit of the city view's
 // working cart -- the F4 gap closer. Mirrors the client's own net-cost model
@@ -60,14 +61,6 @@ export function cityBuildNetCost(previous: BuildingDef[], next: BuildingDef[]): 
     }
   }
   return net;
-}
-
-function hasExplicitWorkers(settlement: SettlementState): boolean {
-  if (settlement.buildings.some((b) => b.workers !== undefined)) return true;
-  for (const d of Object.values(settlement.districts ?? {})) {
-    if (d.buildings.some((b) => b.workers !== undefined)) return true;
-  }
-  return false;
 }
 
 function sanitize(
@@ -133,7 +126,7 @@ export function applyPlaceBuildings(
   if (!s) return { ok: false, state, reason: "no_settlement" };
   if (s.ownerId !== actor) return { ok: false, state, reason: "forbidden_not_your_settlement" };
 
-  const newPlacementWorkers = hasExplicitWorkers(s) ? 0 : undefined;
+  const newPlacementWorkers = hasExplicitStaffing(s) ? 0 : undefined;
 
   if (district) {
     if (buildings.some((b) => b.kind === "townHall")) {

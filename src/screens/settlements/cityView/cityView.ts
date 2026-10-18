@@ -9,16 +9,18 @@ import type { ResourceType } from "../../../map/resourceTiles";
 import type { SpriteProvider } from "../../../render/assets";
 import type { BuildingDef, BuildingKind, GenerationStyle } from "@heroes/contracts";
 import { buildingFootprint, coversCell } from "../../../core/cityGrid";
-import { districtKey, starterCityOnOpen } from "@heroes/engine";
+import { districtKey, hasLegacyStaffing, starterCityOnOpen } from "@heroes/engine";
 import {
   assignedWorkersExplicit,
   buildingMaxWorkers,
   canAssignWorkers,
   isProducerKind,
   isRecruitBuilding,
+  staffingBase,
   WORKFORCE_UPGRADE_ACCEL_KINDS,
   workforcePool,
 } from "@heroes/engine";
+import { getUnitImageUrl } from "../../../data/unitImages";
 import { advanceChargedOnCommit, netDelta } from "./netCost";
 import { syncCartBuildings } from "./syncedBuildings";
 import { BuildingMenu, type BuildingMenuOptions, type BuildingMenuWorkforce } from "./buildingMenu";
@@ -108,13 +110,24 @@ export class CityView {
    * one building's staff count (server-side command) with the TARGET building's
    * own district (undefined = main settlement); openWorkforcePanel toggles
    * the panel ('w' key). */
-  onAssignWorkers?: (gx: number, gy: number, workers: number, district?: { q: number; r: number }) => void;
+  /** CityView-level assignment callback: district-true target commit; the
+   * optional `source` turns the single AssignWorkers command into an atomic
+   * transfer (source loses one, target gains it) handled inside the reducer. */
+  onAssignWorkers?: (gx: number, gy: number, workers: number, district?: { q: number; r: number }, source?: { gx: number; gy: number }) => boolean;
   openWorkforcePanel?: () => void;
   private workforceListeners = new Set<() => void>();
-  /** In-flight worker drag (see beginWorkerDrag/onCanvasMouseDown/onCanvasMouseUp).
-   * Only the direction survives between events: the grab cell is re-validated
-   * at canvas mousedown and the drop target is resolved at mouseup. */
-  private workerDrag: { delta: 1 | -1 } | null = null;
+  /** In-flight worker drag: the grab building (source of a transfer or the
+   * pool for panel-chip drags), the pressed screen point, and whether motion
+   * crossed the click/drag threshold (a ghost only shows after it). */
+  private workerDrag: {
+    source: { gx: number; gy: number; kind: string; district: { q: number; r: number } | null } | null;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null = null;
+  private workerGhost: HTMLImageElement | null = null;
+  private workerDragListeners: Array<() => void> = [];
+  private suppressNextCanvasClick = false;
 
   constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null, district?: { q: number; r: number }) => boolean; onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean, district?: { q: number; r: number }) => boolean; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[], district?: { q: number; r: number }) => { ok: boolean; reason: string }; getSelection?: () => CitySelectionSnapshot; getFloatingPanelRects?: () => Array<PanelRect | null> }) {
     this.paint2d = createPaint2DDep({
@@ -156,6 +169,10 @@ export class CityView {
     this.getFloatingPanelRects = opts.getFloatingPanelRects;
     this.onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (this.workerDrag) {
+          this.cancelWorkerDrag();
+          return;
+        }
         if (this.selectionMenu.isOpen()) {
           this.selectionMenu.hide();
           return;
@@ -292,6 +309,13 @@ export class CityView {
 
     const ghost = this.placer.ghostSnapshot();
     const s = settings();
+    // While a worker drag is armed, the grab building rings like a selection
+    // (same dashed ring pass, same transform) so the pickup is visible before
+    // the pointer crosses onto a drop target.
+    const dragSelected = this.workerDrag?.source;
+    const sceneSelected = dragSelected
+      ? new Set([...this.selectedKeys, `${dragSelected.gx},${dragSelected.gy},${dragSelected.kind}`])
+      : this.selectedKeys;
     const nodes = buildCityScene({
       viewportW,
       viewportH,
@@ -305,7 +329,7 @@ export class CityView {
       district: this.openDistrict,
       buildings: this.buildingsWithWorkers(),
       ghost,
-      selectedKeys: this.selectedKeys,
+      selectedKeys: sceneSelected,
       topInset: toolbarHeight(),
       labelOffsetY: toolbarHeight(),
       buildableCells: this.buildableCells(),
@@ -346,6 +370,10 @@ export class CityView {
   }
 
   handleBuildingClick(canvasX: number, canvasY: number, modifier?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): void {
+    if (this.suppressNextCanvasClick) {
+      this.suppressNextCanvasClick = false;
+      return;
+    }
     if (!this.isOpen()) return;
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
@@ -466,34 +494,17 @@ export class CityView {
     return { pool: workforcePool(live), assigned: assignedWorkersExplicit(live) };
   }
 
-  /** Building covering a cell -- the main settlement list first, then the
-   * open district's (the workforce drop-target resolution order). The result
-   * carries which list the building came from so assignments are district-true. */
+  /** Building covering a cell -- ONLY the currently displayed city's list (the
+   * open district when one is open, else the main settlement), so a district
+   * grid that shares coordinates with main buildings never fall through to a
+   * hidden building. The result carries which list the building came from so
+   * assignments are district-true. */
   private workforceBuildingAt(gx: number, gy: number): { building: BuildingDef; district: { q: number; r: number } | null } | null {
     const live = this.getSettlement();
     if (!live) return null;
-    const main = live.buildings.find((b) => coversCell(b, gx, gy));
-    if (main) return { building: main, district: null };
-    if (this.openDistrict) {
-      const district = { q: this.openDistrict.q, r: this.openDistrict.r };
-      const d = live.districts?.[districtKey(district.q, district.r)];
-      const districtB = d?.buildings.find((b) => coversCell(b, gx, gy));
-      if (districtB) return { building: districtB, district };
-    }
-    return null;
-  }
-
-  /** True while the whole live settlement (main + all districts) still has any
-   * building without an explicit workers count -- the UI-side trigger for the
-   * first-touch normalization the assignWorkers reducer performs. */
-  private isLegacyWorkforce(s: SettlementState): boolean {
-    const anyUnassigned = (buildings: BuildingDef[]): boolean =>
-      buildings.some((b) => b.workers === undefined);
-    if (anyUnassigned(s.buildings)) return true;
-    for (const d of Object.values(s.districts ?? {})) {
-      if (anyUnassigned(d.buildings)) return true;
-    }
-    return false;
+    const building = this.liveBuildings().find((b) => coversCell(b, gx, gy));
+    if (!building) return null;
+    return { building, district: this.openDistrict ? { q: this.openDistrict.q, r: this.openDistrict.r } : null };
   }
 
   private rolesFor(kind: BuildingKind): WorkforceBuildingRole[] {
@@ -539,7 +550,7 @@ export class CityView {
     return {
       pool: totals.pool,
       assigned: totals.assigned,
-      legacy: live ? this.isLegacyWorkforce(live) : false,
+      legacy: live ? hasLegacyStaffing(live) : false,
       buildings,
     };
   }
@@ -549,55 +560,93 @@ export class CityView {
     this.workforceListeners.add(fn);
   }
 
+  /** Every successful assignment surface (panel steppers, chip drags, canvas
+   * drags) calls this once per commit: listeners re-render and the open
+   * building menu refreshes from live state via refreshIfOpen (no recursion —
+   * the menu's own stepper commits do NOT route through here; they refresh
+   * through their own onChange). */
+  notifyWorkforceCommit(): void {
+    for (const fn of this.workforceListeners) fn();
+    this.buildingMenu.refreshIfOpen();
+  }
+
   private notifyWorkforceListeners(): void {
     for (const fn of this.workforceListeners) fn();
   }
 
-  /** W4's panel starts a worker drag (delta +1 = assign from pool, -1 = unassign). Armed immediately so panel-chip drags (which never press on the canvas) still commit on release; a canvas mousedown re-validates the grab cell and disarms invalid ones. */
-  beginWorkerDrag(delta: 1 | -1): void {
-    this.workerDrag = { delta };
+  /** W4's panel starts a worker drag from the pool (assign on drop): no grab
+   * building, ghost follows the pointer, release over a canvas cell commits. */
+  beginWorkerDrag(): void {
+    this.endWorkerDrag();
+    this.workerDrag = { source: null, startX: -1, startY: -1, moved: true };
+    this.showWorkerGhost();
+    const move = (e: MouseEvent): void => {
+      this.moveWorkerGhost(e.clientX, e.clientY);
+    };
+    const up = (e: MouseEvent): void => {
+      this.finishWorkerDrag(e.clientX, e.clientY);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up, { once: true });
+    this.workerDragListeners.push(() => window.removeEventListener("mousemove", move));
+    this.workerDragListeners.push(() => window.removeEventListener("mouseup", up));
   }
 
-  /** Disarms a pending worker drag (the workforce panel clears armed chip
-   * drags that never reach the canvas). */
+  /** Disarms a pending worker drag and removes ghost + listeners. An Escape
+   * cancellation suppresses the trailing click so the press does not open a
+   * building menu (same 350ms window as a real drop). */
   cancelWorkerDrag(): void {
-    this.workerDrag = null;
+    const hadDrag = this.workerDrag !== null;
+    this.endWorkerDrag();
+    if (hadDrag) {
+      this.suppressNextCanvasClick = true;
+      window.setTimeout(() => { this.suppressNextCanvasClick = false; }, 350);
+    }
   }
 
-  /** Canvas mousedown while a worker drag is pending: the pressed cell becomes
-   * the grab building; validate the legacy-aware base (0 while the settlement
-   * is still legacy, else workers ?? max) + delta with the shared predicate
-   * (range AND pool) and disarm the drag when invalid. */
+  private showWorkerGhost(): void {
+    if (this.workerGhost) return;
+    const img = document.createElement("img");
+    img.src = getUnitImageUrl("peasant");
+    img.alt = "worker";
+    img.draggable = false;
+    img.dataset.testid = "worker-drag-ghost";
+    Object.assign(img.style, {
+      position: "fixed",
+      width: "28px",
+      height: "28px",
+      pointerEvents: "none",
+      zIndex: "200",
+      imageRendering: "pixelated",
+      opacity: "0.9",
+      display: "none",
+    } satisfies Partial<CSSStyleDeclaration>);
+    document.body.appendChild(img);
+    this.workerGhost = img;
+  }
+
+  private moveWorkerGhost(x: number, y: number): void {
+    if (!this.workerGhost) return;
+    this.workerGhost.style.display = "block";
+    this.workerGhost.style.left = `${x - 14}px`;
+    this.workerGhost.style.top = `${y - 14}px`;
+  }
+
+  private endWorkerDrag(): void {
+    this.workerDrag = null;
+    if (this.workerGhost) {
+      this.workerGhost.remove();
+      this.workerGhost = null;
+    }
+    for (const off of this.workerDragListeners) off();
+    this.workerDragListeners = [];
+  }
+
+  /** Canvas mousedown on a staffable building with staff to give starts a
+   * candidate pickup: a ghost appears only after the pointer moves past the
+   * click/drag threshold, so plain clicks still open the building menu. */
   onCanvasMouseDown(x: number, y: number): void {
-    const drag = this.workerDrag;
-    if (!drag) return;
     const live = this.getSettlement();
-    const viewportW = window.innerWidth;
-    const viewportH = window.innerHeight;
-    const layout = cityLayout(this.size, viewportW, viewportH, toolbarHeight());
-    const cell = screenToGridCell(layout, this.size, viewportW, x, y);
-    if (!live || !cell) {
-      this.workerDrag = null;
-      return;
-    }
-    const hit = this.workforceBuildingAt(cell.gx, cell.gy);
-    const max = hit ? buildingMaxWorkers(hit.building.kind) : 0;
-    const { pool, assigned } = this.workforceTotals();
-    const current = this.isLegacyWorkforce(live) ? 0 : hit?.building.workers;
-    if (!canAssignWorkers(current, max, drag.delta, pool, assigned)) {
-      this.workerDrag = null;
-    }
-  }
-
-  /** Canvas mouseup commits the drag on the hovered cell's building: the target
-   * is computed from the legacy-aware base and validated with the shared
-   * predicate (range + pool for +1); the commit carries the TARGET building's
-   * own district (undefined = main settlement). The drag state clears either way. */
-  onCanvasMouseUp(x: number, y: number): void {
-    const drag = this.workerDrag;
-    if (!drag) return;
-    const live = this.getSettlement();
-    this.workerDrag = null;
     if (!live) return;
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
@@ -605,15 +654,86 @@ export class CityView {
     const cell = screenToGridCell(layout, this.size, viewportW, x, y);
     if (!cell) return;
     const hit = this.workforceBuildingAt(cell.gx, cell.gy);
-    if (!hit) return;
+    if (!hit || buildingMaxWorkers(hit.building.kind) < 1) return;
     const max = buildingMaxWorkers(hit.building.kind);
-    const totals = this.workforceTotals();
-    const legacy = this.isLegacyWorkforce(live);
-    if (!canAssignWorkers(legacy ? 0 : hit.building.workers, max, drag.delta, totals.pool, totals.assigned)) return;
-    const base = legacy ? 0 : (hit.building.workers ?? max);
-    const next = base + drag.delta;
-    this.onAssignWorkers?.(hit.building.gx, hit.building.gy, next, hit.district ?? undefined);
-    this.notifyWorkforceListeners();
+    const { pool, assigned } = this.workforceTotals();
+    const workers = hit.building.workers ?? max;
+    if (workers < 1) return;
+    if (!canAssignWorkers(workers, max, -1, pool, assigned)) return;
+    this.workerDrag = { source: { gx: hit.building.gx, gy: hit.building.gy, kind: hit.building.kind, district: hit.district }, startX: x, startY: y, moved: false };
+    this.showWorkerGhost();
+    this.moveWorkerGhost(x, y);
+    const move = (e: MouseEvent): void => {
+      const drag = this.workerDrag;
+      if (!drag) return;
+      if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 6) return;
+      drag.moved = true;
+      this.moveWorkerGhost(e.clientX, e.clientY);
+      this.hover = this.hoverCellAt(e.clientX, e.clientY);
+    };
+    const up = (e: MouseEvent): void => {
+      this.finishWorkerDrag(e.clientX, e.clientY);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up, { once: true });
+    this.workerDragListeners.push(() => window.removeEventListener("mousemove", move));
+    this.workerDragListeners.push(() => window.removeEventListener("mouseup", up));
+  }
+
+  private hoverCellAt(x: number, y: number): { gx: number; gy: number } | null {
+    const layout = cityLayout(this.size, window.innerWidth, window.innerHeight, toolbarHeight());
+    return screenToGridCell(layout, this.size, window.innerWidth, x, y);
+  }
+
+  /** Commit path for a held drag: resolves the drop cell (document-level, so
+   * off-canvas release still cleans up), validates the transfer atomically via
+   * the AssignWorkers source form, and always tears the ghost down. A held
+   * drag that actually moved suppresses the trailing click so no menu opens;
+   * an un-moved press cancels silently (menu opens via the normal click). */
+  private finishWorkerDrag(x: number, y: number): void {
+    const drag = this.workerDrag;
+    this.endWorkerDrag();
+    if (!drag || !drag.moved) return;
+    this.suppressNextCanvasClick = true;
+    window.setTimeout(() => { this.suppressNextCanvasClick = false; }, 350);
+    const live = this.getSettlement();
+    if (!live) return;
+    const cell = this.hoverCellAt(x, y);
+    if (!cell) return;
+    const target = this.workforceBuildingAt(cell.gx, cell.gy);
+    if (!target) return;
+    const legacy = hasLegacyStaffing(live);
+    const targetMax = buildingMaxWorkers(target.building.kind);
+    const nextTarget = staffingBase(target.building.workers, targetMax, legacy) + 1;
+    if (nextTarget > targetMax) return;
+    let ok = false;
+    if (drag.source) {
+      const list = drag.source.district
+        ? live.districts?.[districtKey(drag.source.district.q, drag.source.district.r)]?.buildings
+        : live.buildings;
+      const source = list?.find((b) => b.gx === drag.source!.gx && b.gy === drag.source!.gy && b.kind === drag.source!.kind);
+      if (!source) return;
+      if (source.gx === target.building.gx && source.gy === target.building.gy && source.kind === target.building.kind) return;
+      const sourceMax = buildingMaxWorkers(source.kind);
+      if ((source.workers ?? sourceMax) < 1) return;
+      ok = this.onAssignWorkers?.(
+        target.building.gx,
+        target.building.gy,
+        nextTarget,
+        target.district ?? undefined,
+        { gx: source.gx, gy: source.gy },
+      ) ?? false;
+    } else {
+      ok = this.onAssignWorkers?.(target.building.gx, target.building.gy, nextTarget, target.district ?? undefined) ?? false;
+    }
+    if (ok) this.notifyWorkforceCommit();
+  }
+
+  /** Canvas mouseup without a drag armed is a no-op (the click handler owns
+   * menu opening); drags commit through finishWorkerDrag via window mouseup. */
+  onCanvasMouseUp(x: number, y: number): void {
+    void x;
+    void y;
   }
 
   /** Trailing options object for buildingMenu.show: the district field names
@@ -638,10 +758,9 @@ export class CityView {
     return {
       pool: totals.pool,
       assigned: totals.assigned,
-      legacy: this.isLegacyWorkforce(live),
       district,
       onChange: () => this.notifyWorkforceListeners(),
-      onAssignWorkers: (gx, gy, workers, d) => this.onAssignWorkers?.(gx, gy, workers, d),
+      onAssignWorkers: (gx, gy, workers, d) => this.onAssignWorkers?.(gx, gy, workers, d) ?? false,
       getSettlement: () => this.getSettlement(),
     };
   }
@@ -824,6 +943,7 @@ export class CityView {
       this.placer.hidePalette();
       this.designBox.hide();
       window.removeEventListener("keydown", this.onKeyDown);
+      this.endWorkerDrag();
       this.buildingMenu.hide();
       this.selectionMenu.hide();
       this.selectedKeys.clear();

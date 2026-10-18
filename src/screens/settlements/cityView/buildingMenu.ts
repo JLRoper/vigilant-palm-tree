@@ -18,6 +18,8 @@ import {
   districtKey,
   workforcePool,
   assignedWorkersExplicit,
+  hasLegacyStaffing,
+  staffingBase,
   type RecruitEntry,
 } from "@heroes/engine";
 import type { Warehouse } from "@heroes/contracts";
@@ -99,33 +101,15 @@ export interface BuildingMenuOptions {
  * a single building's explicit count, and getSettlement re-reads the LIVE
  * settlement so the stepper can re-resolve the building after each commit
  * (the engine replaces state objects immutably, so a captured snapshot goes
- * stale). legacy marks a settlement whose buildings still carry no explicit
- * workers count: the stepper then computes targets against the
- * post-normalization base 0 instead of (workers ?? max). Absent keeps the
- * pre-workforce menu unchanged.
+ * stale). Absent keeps the pre-workforce menu unchanged.
  */
 export interface BuildingMenuWorkforce {
   pool: number;
   assigned: number;
-  legacy: boolean;
   district: { q: number; r: number } | null;
   onChange: () => void;
-  onAssignWorkers: (gx: number, gy: number, workers: number, district?: { q: number; r: number }) => void;
+  onAssignWorkers: (gx: number, gy: number, workers: number, district?: { q: number; r: number }) => boolean;
   getSettlement: () => SettlementState | undefined;
-}
-
-/** The live settlement still has any building without an explicit workers
- * count -- the reducer normalizes the whole city (undefined -> 0) on the next
- * assignment, so targets must compute from base 0 until then. Mirrors
- * cityView's snapshot rule; read live because a commit changes the answer. */
-function settlementIsLegacy(s: SettlementState): boolean {
-  const anyUnassigned = (buildings: BuildingDef[]): boolean =>
-    buildings.some((b) => b.workers === undefined);
-  if (anyUnassigned(s.buildings)) return true;
-  for (const d of Object.values(s.districts ?? {})) {
-    if (anyUnassigned(d.buildings)) return true;
-  }
-  return false;
 }
 
 const TOWN_HALL_UPGRADE_COSTS: Record<number, { gold: number; wood: number; stone: number; days: number }> = {
@@ -458,19 +442,19 @@ export class BuildingMenu {
     // the whole city (undefined -> 0), so the menu-open snapshot goes stale.
     const legacyNow = (): boolean => {
       const liveSettlement = workforce.getSettlement();
-      return liveSettlement ? settlementIsLegacy(liveSettlement) : workforce.legacy;
+      return liveSettlement ? hasLegacyStaffing(liveSettlement) : false;
     };
 
     const refresh = (): void => {
       const live = resolveLive?.();
       if (!live) return;
       const legacy = legacyNow();
-      const base = legacy ? 0 : (live.workers ?? max);
+      const base = staffingBase(live.workers, max, legacy);
       value.textContent = live.workers === undefined ? "Auto (max)" : `${live.workers} / ${max}`;
       const liveSettlement = workforce.getSettlement();
       const pool = liveSettlement ? workforcePool(liveSettlement) : workforce.pool;
       const assigned = liveSettlement ? assignedWorkersExplicit(liveSettlement) : workforce.assigned;
-      const plusDisabled = !canAssignWorkers(legacy ? 0 : live.workers, max, 1, pool, assigned);
+      const plusDisabled = !canAssignWorkers(staffingBase(live.workers, max, legacy), max, 1, pool, assigned);
       plus.disabled = plusDisabled;
       plus.style.opacity = plusDisabled ? "0.4" : "1";
       plus.style.cursor = plusDisabled ? "not-allowed" : "pointer";
@@ -484,7 +468,7 @@ export class BuildingMenu {
     minus.addEventListener("click", () => {
       const live = resolveLive?.();
       if (!live) return;
-      const base = legacyNow() ? 0 : (live.workers ?? max);
+      const base = staffingBase(live.workers, max, legacyNow());
       workforce.onAssignWorkers(building.gx, building.gy, Math.max(0, base - 1), workforce.district ?? undefined);
       workforce.onChange();
       refresh();
@@ -492,7 +476,7 @@ export class BuildingMenu {
     plus.addEventListener("click", () => {
       const live = resolveLive?.();
       if (!live) return;
-      const base = legacyNow() ? 0 : (live.workers ?? max);
+      const base = staffingBase(live.workers, max, legacyNow());
       workforce.onAssignWorkers(building.gx, building.gy, Math.min(base + 1, max), workforce.district ?? undefined);
       workforce.onChange();
       refresh();
@@ -659,5 +643,20 @@ export class BuildingMenu {
 
   isOpen(): boolean {
     return this.menu !== null;
+  }
+
+  /** Re-renders an open menu from its last show args (no-op when closed). */
+  refreshIfOpen(): void {
+    if (this.menu && this.lastShow) {
+      this.show(
+        this.lastShow.building,
+        this.lastShow.screenX,
+        this.lastShow.screenY,
+        this.lastShow.settlement,
+        this.lastShow.producerCell,
+        this.lastShow.constructionDaysRemaining,
+        this.lastShow.workforce,
+      );
+    }
   }
 }

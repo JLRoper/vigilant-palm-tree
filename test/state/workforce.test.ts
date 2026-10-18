@@ -6,6 +6,9 @@ import {
   assignWorkers,
   canAssignWorkers,
   effortFraction,
+  hasExplicitStaffing,
+  hasLegacyStaffing,
+  staffingBase,
   upgradeAccelEffort,
   workforcePool,
 } from "@heroes/engine";
@@ -56,6 +59,70 @@ test("assignedWorkersExplicit counts explicit main + district workers and only t
     },
   };
   assert.equal(assignedWorkersExplicit(settlement), 4, "1 + 1 main plus 2 district; undefined staff not counted");
+});
+
+test("hasLegacyStaffing: any undefined staffable building in main or districts makes the settlement legacy", () => {
+  const main = (buildings: BuildingDef[]): SettlementState => makeSettlement("s0", 0, 2, 2, { buildings });
+  assert.equal(hasLegacyStaffing(main([building("farmField", 0, 0), building("house", 1, 0)])), true, "all-undefined is legacy");
+  assert.equal(
+    hasLegacyStaffing(main([building("farmField", 0, 0, { workers: 0 }), building("house", 1, 0, { workers: 1 })])),
+    false,
+    "fully explicit is not legacy",
+  );
+  assert.equal(hasLegacyStaffing(main([building("farmField", 0, 0, { workers: 0 })])), false, "explicit 0 counts as explicit, not legacy");
+  assert.equal(
+    hasLegacyStaffing(main([building("farmField", 0, 0, { workers: 0 }), building("house", 1, 0)])),
+    true,
+    "one undefined building keeps the settlement legacy",
+  );
+  const districtLegacy: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, { buildings: [building("farmField", 0, 0, { workers: 0 })] }),
+    districts: {
+      "3,2": { q: 3, r: 2, citySpots: [], buildings: [building("farmField", 0, 0)] },
+    },
+  };
+  assert.equal(hasLegacyStaffing(districtLegacy), true, "an undefined building in a district suffices");
+  const districtExplicit: SettlementState = {
+    ...districtLegacy,
+    districts: {
+      "3,2": { q: 3, r: 2, citySpots: [], buildings: [building("farmField", 0, 0, { workers: 0 })] },
+    },
+  };
+  assert.equal(hasLegacyStaffing(districtExplicit), false, "explicit districts keep it non-legacy");
+  assert.equal(hasLegacyStaffing(makeSettlement("s0", 0, 2, 2)), false, "no buildings at all is not legacy");
+});
+
+test("hasExplicitStaffing: any explicit staffable building in main or districts makes the settlement explicit", () => {
+  const main = (buildings: BuildingDef[]): SettlementState => makeSettlement("s0", 0, 2, 2, { buildings });
+  assert.equal(
+    hasExplicitStaffing(main([building("farmField", 0, 0, { workers: 0 }), building("house", 1, 0, { workers: 1 })])),
+    true,
+    "fully explicit is explicit",
+  );
+  assert.equal(hasExplicitStaffing(main([building("farmField", 0, 0), building("house", 1, 0)])), false, "all-undefined is not explicit");
+  assert.equal(hasExplicitStaffing(main([building("farmField", 0, 0, { workers: 0 })])), true, "an explicit 0 counts as explicit");
+  assert.equal(
+    hasExplicitStaffing(main([building("farmField", 0, 0), building("house", 1, 0, { workers: 1 })])),
+    true,
+    "one explicit building suffices",
+  );
+  const districtExplicit: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2),
+    districts: {
+      "3,2": { q: 3, r: 2, citySpots: [], buildings: [building("farmField", 0, 0, { workers: 2 })] },
+    },
+  };
+  assert.equal(hasExplicitStaffing(districtExplicit), true, "an explicit district building suffices");
+  assert.equal(hasExplicitStaffing(makeSettlement("s0", 0, 2, 2)), false, "no buildings at all is not explicit");
+});
+
+test("staffingBase: legacy reads 0, non-legacy resolves undefined to max, explicit passes through unclamped", () => {
+  assert.equal(staffingBase(2, 2, true), 0, "legacy ignores the stored workers");
+  assert.equal(staffingBase(undefined, 2, true), 0, "legacy undefined still reads 0");
+  assert.equal(staffingBase(undefined, 3, false), 3, "non-legacy undefined means auto: max");
+  assert.equal(staffingBase(1, 3, false), 1, "explicit value passes through");
+  assert.equal(staffingBase(0, 3, false), 0, "explicit 0 passes through");
+  assert.equal(staffingBase(5, 2, false), 5, "over-max is not clamped here (callers gate ranges)");
 });
 
 test("upgradeAccelEffort: 0 on legacy staff and other kinds; max over staffed townHall/mageGuild", () => {
@@ -251,6 +318,125 @@ test("assignWorkers: district assignment round-trips and leaves the original sta
   assert.equal(r.state.settlements.s0.districts?.["3,2"].buildings[0].workers, 1);
   assert.equal(r.state.settlements.s0.buildings.length, 0, "the main settlement list gains nothing");
   assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 1);
+});
+
+test("assignWorkers source transfer: explicit source loses one, destination gains one, one command", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
+    buildings: [
+      { ...building("market", 0, 0), w: 2, h: 1, workers: 2 },
+      building("market", 3, 0, { workers: 0 }),
+    ],
+  });
+  const original = structuredClone(state);
+  const r = assignWorkers(state, {
+    settlementId: "s0",
+    gx: 3,
+    gy: 0,
+    workers: 1,
+    source: { gx: 0, gy: 0 },
+  });
+  assert.equal(r.ok, true);
+  assert.deepEqual(state, original, "the input state is unchanged");
+  const after = r.state.settlements.s0;
+  assert.deepEqual(
+    after.buildings.map((b) => b.workers),
+    [1, 1],
+    "source 2->1 and destination 0->1 in one atomic write",
+  );
+  assert.equal(assignedWorkersExplicit(after), 2, "total assigned is conserved");
+});
+
+test("assignWorkers source transfer: net-zero succeeds with a fully assigned pool", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 200 }),
+    buildings: [
+      { ...building("market", 0, 0), w: 2, h: 1, workers: 2 },
+      building("market", 3, 0, { workers: 0 }),
+    ],
+  });
+  const r = assignWorkers(state, {
+    settlementId: "s0",
+    gx: 3,
+    gy: 0,
+    workers: 1,
+    source: { gx: 0, gy: 0 },
+  });
+  assert.equal(r.ok, true, "a conserved transfer needs no free pool");
+  assert.deepEqual(r.state.settlements.s0.buildings.map((b) => b.workers), [1, 1]);
+});
+
+test("assignWorkers source transfer: refusals are atomic and named", () => {
+  const buildings = (): BuildingDef[] => [
+    { ...building("market", 0, 0), w: 2, h: 1, workers: 0 },
+    building("market", 3, 0, { workers: 0 }),
+  ];
+  const emptySource = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
+    buildings: buildings(),
+  });
+  const noStaff = assignWorkers(emptySource, {
+    settlementId: "s0",
+    gx: 3,
+    gy: 0,
+    workers: 1,
+    source: { gx: 0, gy: 0 },
+  });
+  assert.equal(noStaff.ok, false);
+  assert.equal(noStaff.reason, "invalid_workers");
+  assert.equal(noStaff.state, emptySource, "a refused transfer returns the original state");
+  assert.deepEqual(emptySource.settlements.s0.buildings.map((b) => b.workers), [0, 0]);
+
+  const sameBuilding = assignWorkers(emptySource, {
+    settlementId: "s0",
+    gx: 0,
+    gy: 0,
+    workers: 0,
+    source: { gx: 0, gy: 0 },
+  });
+  assert.equal(sameBuilding.ok, false);
+  assert.equal(sameBuilding.reason, "invalid_source", "source == destination is refused");
+});
+
+test("assignWorkers source transfer: legacy source normalizes and honors approved first-touch targets", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
+    buildings: [
+      { ...building("market", 0, 0), w: 2, h: 1 },
+      building("market", 3, 0),
+    ],
+  });
+  const r = assignWorkers(state, {
+    settlementId: "s0",
+    gx: 3,
+    gy: 0,
+    workers: 1,
+    source: { gx: 0, gy: 0 },
+  });
+  assert.equal(r.ok, true, "legacy pickup: source (max 3) gives one, target lands at 1");
+  const after = r.state.settlements.s0;
+  assert.deepEqual(after.buildings.map((b) => b.workers), [2, 1]);
+  assert.equal(assignedWorkersExplicit(after), 3);
+});
+
+test("assignWorkers source transfer: full destination is refused", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
+    buildings: [
+      { ...building("market", 0, 0), w: 2, h: 1, workers: 2 },
+      building("farmhouse", 3, 0, { workers: 2 }),
+    ],
+  });
+  const r = assignWorkers(state, {
+    settlementId: "s0",
+    gx: 3,
+    gy: 0,
+    workers: 3,
+    source: { gx: 0, gy: 0 },
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "invalid_workers", "farmhouse max is 2; 2+1 does not fit");
+  assert.equal(r.state, state, "refusal is atomic");
 });
 
 test("canAssignWorkers: increments are pool-gated, decreases allowed, range enforced", () => {

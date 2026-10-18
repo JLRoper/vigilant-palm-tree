@@ -7,13 +7,14 @@ import type {
 } from "@heroes/contracts";
 import { districtKey } from "../control";
 import { buildingMaxWorkers } from "../buildingRegistry";
-import { assignedWorkersExplicit, workforcePool } from "./workforce";
+import { assignedWorkersExplicit, hasLegacyStaffing, workforcePool } from "./workforce";
 
 export interface AssignWorkersOptions {
   settlementId: SettlementId;
   gx: number;
   gy: number;
   workers: number;
+  source?: { gx: number; gy: number };
   district?: { q: number; r: number };
 }
 
@@ -89,14 +90,6 @@ function writeWorkers(settlement: SettlementState, located: LocatedBuilding, wor
   };
 }
 
-function hasLegacyStaffing(settlement: SettlementState): boolean {
-  if (settlement.buildings.some((b) => b.workers === undefined)) return true;
-  for (const d of Object.values(settlement.districts ?? {})) {
-    if (d.buildings.some((b) => b.workers === undefined)) return true;
-  }
-  return false;
-}
-
 function normalizeStaffing(settlement: SettlementState): SettlementState {
   const normalizeList = (buildings: BuildingDef[]): BuildingDef[] =>
     buildings.map((b) => (b.workers === undefined ? { ...b, workers: 0 } : b));
@@ -121,6 +114,25 @@ export function assignWorkers(state: GameState, opts: AssignWorkersOptions): Ass
   if (maxWorkers < 1) return { state, ok: false, reason: "not_staffable" };
   if (!Number.isInteger(opts.workers) || opts.workers < 0 || opts.workers > maxWorkers) {
     return { state, ok: false, reason: "invalid_workers" };
+  }
+  if (opts.source) {
+    const source = locateBuilding(settlement, opts.source.gx, opts.source.gy, opts.district);
+    if (!source || source.building === building) return { state, ok: false, reason: "invalid_source" };
+    const sourceMax = buildingMaxWorkers(source.building.kind);
+    const sourceWorkers = (source.building.workers ?? sourceMax) - 1;
+    const destinationWorkers = hasLegacyStaffing(settlement) ? 1 : (building.workers ?? maxWorkers) + 1;
+    if (sourceMax < 1 || sourceWorkers < 0 || sourceWorkers > sourceMax || destinationWorkers > maxWorkers || opts.workers !== destinationWorkers) {
+      return { state, ok: false, reason: "invalid_workers" };
+    }
+    const normalized = hasLegacyStaffing(settlement) ? normalizeStaffing(settlement) : settlement;
+    const normalizedSource = locateBuilding(normalized, opts.source.gx, opts.source.gy, opts.district)!;
+    const afterSource = writeWorkers(normalized, normalizedSource, sourceWorkers);
+    const destination = locateBuilding(afterSource, opts.gx, opts.gy, opts.district)!;
+    const updatedSettlement = writeWorkers(afterSource, destination, destinationWorkers);
+    if (assignedWorkersExplicit(updatedSettlement) > workforcePool(updatedSettlement)) {
+      return { state, ok: false, reason: "pool_exhausted" };
+    }
+    return { state: { ...state, settlements: { ...state.settlements, [opts.settlementId]: updatedSettlement }, dirty: true }, ok: true };
   }
   const normalized = hasLegacyStaffing(settlement) ? normalizeStaffing(settlement) : settlement;
   const target = normalized === settlement ? located : locateBuilding(normalized, opts.gx, opts.gy, opts.district);

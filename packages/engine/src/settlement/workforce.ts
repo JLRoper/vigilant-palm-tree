@@ -28,6 +28,26 @@ export function assignedWorkersExplicit(s: SettlementState): number {
   return total;
 }
 
+export function hasLegacyStaffing(s: SettlementState): boolean {
+  if (s.buildings.some((b) => b.workers === undefined)) return true;
+  for (const d of Object.values(s.districts ?? {})) {
+    if (d.buildings.some((b) => b.workers === undefined)) return true;
+  }
+  return false;
+}
+
+export function hasExplicitStaffing(s: SettlementState): boolean {
+  if (s.buildings.some((b) => b.workers !== undefined)) return true;
+  for (const d of Object.values(s.districts ?? {})) {
+    if (d.buildings.some((b) => b.workers !== undefined)) return true;
+  }
+  return false;
+}
+
+export function staffingBase(workers: number | undefined, max: number, legacy: boolean): number {
+  return legacy ? 0 : (workers ?? max);
+}
+
 function accelEffortOf(b: BuildingDef): number {
   if (b.workers === undefined) return 0;
   return Math.min(b.workers / buildingMaxWorkers(b.kind), 1);

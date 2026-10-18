@@ -1,14 +1,14 @@
 import { PopupMenu, styleButton } from "@screens/shared/menu";
 import { loadPanelGeometry, savePanelGeometry, type PanelGeometryKey } from "@screens/shared/panelLayout";
 import { toolbarHeight } from "@screens/shared/panelRail";
-import { buildingLabel, canAssignWorkers } from "@heroes/engine";
+import { buildingLabel, canAssignWorkers, staffingBase } from "@heroes/engine";
 import type { BuildingKind } from "@heroes/contracts";
 import type { CityView, WorkforceBuildingRole, WorkforceSnapshot } from "./cityView";
 
 export interface WorkforcePanelOptions {
   parent: HTMLElement;
   cityView: CityView;
-  onAssignWorkers: (gx: number, gy: number, workers: number, district?: { q: number; r: number }) => void;
+  onAssignWorkers: (gx: number, gy: number, workers: number, district?: { q: number; r: number }) => boolean;
 }
 
 const ROLE_LABELS: Record<WorkforceBuildingRole, string> = {
@@ -25,9 +25,7 @@ export class WorkforcePanel {
   private menu: PopupMenu | null = null;
   private readonly parent: HTMLElement;
   private readonly cityView: CityView;
-  private readonly onAssignWorkers: (gx: number, gy: number, workers: number, district?: { q: number; r: number }) => void;
-  /** One-shot window mouseup that disarms a chip drag that never reached the canvas. */
-  private pendingChipCleanup: (() => void) | null = null;
+  private readonly onAssignWorkers: (gx: number, gy: number, workers: number, district?: { q: number; r: number }) => boolean;
 
   constructor(opts: WorkforcePanelOptions) {
     this.parent = opts.parent;
@@ -61,11 +59,7 @@ export class WorkforcePanel {
   }
 
   close(): void {
-    if (this.pendingChipCleanup) {
-      window.removeEventListener("mouseup", this.pendingChipCleanup);
-      this.pendingChipCleanup = null;
-      this.cityView.cancelWorkerDrag();
-    }
+    this.cityView.cancelWorkerDrag();
     if (this.menu) {
       this.menu.close();
       this.menu = null;
@@ -156,21 +150,7 @@ export class WorkforcePanel {
       whiteSpace: "nowrap",
     });
     chip.addEventListener("mousedown", () => {
-      this.cityView.beginWorkerDrag(1);
-      // One-shot cleanup on the next mouseup: a plain chip click releases over
-      // the panel (no canvas commit), so without this the drag stays armed and
-      // the next canvas click would assign a worker by accident. Bubble phase,
-      // so a real drag's canvas mouseup commits FIRST and this becomes a no-op.
-      const cleanup = (): void => {
-        this.cityView.cancelWorkerDrag();
-        window.removeEventListener("mouseup", cleanup);
-        if (this.pendingChipCleanup === cleanup) this.pendingChipCleanup = null;
-      };
-      if (this.pendingChipCleanup) {
-        window.removeEventListener("mouseup", this.pendingChipCleanup);
-      }
-      this.pendingChipCleanup = cleanup;
-      window.addEventListener("mouseup", cleanup);
+      this.cityView.beginWorkerDrag();
     });
     row.appendChild(chip);
 
@@ -212,12 +192,12 @@ export class WorkforcePanel {
     plus.style.padding = "0px 7px";
     plus.style.fontSize = "12px";
 
-    const base = snapshot.legacy ? 0 : (b.workers ?? max);
+    const base = staffingBase(b.workers, max, snapshot.legacy);
 
     const refresh = (): void => {
       value.textContent = b.workers === undefined ? "Auto" : String(b.workers);
       value.title = b.workers === undefined ? `Auto-staffed (max ${max})` : `Of ${max} worker slots`;
-      const plusDisabled = !canAssignWorkers(snapshot.legacy ? 0 : b.workers, max, 1, snapshot.pool, snapshot.assigned);
+      const plusDisabled = !canAssignWorkers(staffingBase(b.workers, max, snapshot.legacy), max, 1, snapshot.pool, snapshot.assigned);
       plus.disabled = plusDisabled;
       plus.style.opacity = plusDisabled ? "0.4" : "1";
       plus.style.cursor = plusDisabled ? "not-allowed" : "pointer";
@@ -228,11 +208,13 @@ export class WorkforcePanel {
     };
 
     minus.addEventListener("click", () => {
-      this.onAssignWorkers(b.gx, b.gy, Math.max(0, base - 1), b.district ?? undefined);
+      const ok = this.onAssignWorkers(b.gx, b.gy, Math.max(0, base - 1), b.district ?? undefined);
+      if (ok) this.cityView.notifyWorkforceCommit();
       this.update();
     });
     plus.addEventListener("click", () => {
-      this.onAssignWorkers(b.gx, b.gy, Math.min(base + 1, max), b.district ?? undefined);
+      const ok = this.onAssignWorkers(b.gx, b.gy, Math.min(base + 1, max), b.district ?? undefined);
+      if (ok) this.cityView.notifyWorkforceCommit();
       this.update();
     });
 

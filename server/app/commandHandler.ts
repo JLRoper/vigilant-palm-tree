@@ -2163,6 +2163,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         gx: command.gx,
         gy: command.gy,
         workers: command.workers,
+        ...(command.source ? { source: command.source } : {}),
         ...(command.district ? { district: command.district } : {}),
       });
       if (!result.ok) {

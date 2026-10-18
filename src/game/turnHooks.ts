@@ -493,6 +493,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       gy: number,
       workers: number,
       district?: { q: number; r: number },
+      source?: { gx: number; gy: number },
     ): Promise<void> => {
       const name = opts.gameName();
       if (!name) return;
@@ -503,6 +504,7 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
           gx,
           gy,
           workers,
+          ...(source ? { source } : {}),
           ...(district ? { district } : {}),
         });
       } catch (e) {

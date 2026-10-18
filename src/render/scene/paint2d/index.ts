@@ -97,6 +97,10 @@ const CITY_GHOST_INVALID_STROKE = "#ff4444";
 // (filled circle + white stroke) with a neutral peasant tan.
 const PERSON_PLACEHOLDER_FILL = "#c8b290";
 const PERSON_BREATH_PERIOD_MS = 750;
+const PERSON_STAGGER_BUCKETS = 7;
+const PERSON_STAGGER_GX = 31;
+const PERSON_STAGGER_GY = 17;
+const PERSON_STAGGER_INDEX = 13;
 
 const BATTLE_HEX_FILL = "#20242c";
 const BATTLE_HEX_IMPASSABLE = "#3a2a2a";
@@ -1127,7 +1131,10 @@ export function paintCityPerson(ctx: CanvasRenderingContext2D, node: CityPersonN
     // out symmetrically so the group never spills past the footprint edges.
     const x = node.center.x + (i - (node.count - 1) / 2) * spacing;
     const y = node.center.y;
-    const staggerMs = (((node.gx * 31 + node.gy * 17 + i * 13) % 7) * PERSON_BREATH_PERIOD_MS) / 7;
+    const staggerMs =
+      (((node.gx * PERSON_STAGGER_GX + node.gy * PERSON_STAGGER_GY + i * PERSON_STAGGER_INDEX) % PERSON_STAGGER_BUCKETS) *
+        PERSON_BREATH_PERIOD_MS) /
+      PERSON_STAGGER_BUCKETS;
     const bob = reduced ? 0 : Math.floor((now + staggerMs) / PERSON_BREATH_PERIOD_MS) % 2;
     if (sprite && sprite.ready && sprite.drawable) {
       const drawable = sprite.drawable;
@@ -1140,7 +1147,7 @@ export function paintCityPerson(ctx: CanvasRenderingContext2D, node: CityPersonN
       ctx.restore();
     } else {
       ctx.beginPath();
-      ctx.arc(x, y - 5, 5, 0, Math.PI * 2);
+      ctx.arc(x, y - 5 - bob, 5, 0, Math.PI * 2);
       ctx.fillStyle = PERSON_PLACEHOLDER_FILL;
       ctx.fill();
       ctx.strokeStyle = BATTLE_COMBATANT_STROKE;
