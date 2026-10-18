@@ -16,6 +16,7 @@ import {
   buildingDraftMax,
   canAssignWorkers,
   districtKey,
+  effortFraction,
   workforcePool,
   assignedWorkersExplicit,
   hasLegacyStaffing,
@@ -25,14 +26,19 @@ import {
 import type { Warehouse } from "@heroes/contracts";
 import { footprintLine } from "./footprint";
 
-function formatEffectLine(kind: BuildingKind, level: number): string[] {
+function formatEffectLine(kind: BuildingKind, level: number, effort = 1): string[] {
   const lines: string[] = [];
   const se = buildingSettlementEffects(kind, level);
   const pe = buildingPlayerEffects(kind, level);
   const upkeep = buildingUpkeep(kind, level);
+  const scaled = (value: number): string => {
+    const n = Math.round(value * effort * 100) / 100;
+    return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  };
+  const staffNote = effort < 0.999 ? ` (${Math.round(effort * 100)}% staffed)` : "";
 
-  if (se.goldPerTurn) lines.push(`+${se.goldPerTurn} gold/turn`);
-  if (se.foodPerTurn) lines.push(`+${se.foodPerTurn} food/turn`);
+  if (se.goldPerTurn) lines.push(`+${scaled(se.goldPerTurn)} gold/turn${staffNote}`);
+  if (se.foodPerTurn) lines.push(`+${scaled(se.foodPerTurn)} food/turn${staffNote}`);
   if (se.populationBonus) lines.push(`+${se.populationBonus} population`);
   if (se.defenseBonus) lines.push(`+${se.defenseBonus} defense`);
   if (se.unitCostReductionPct) lines.push(`-${se.unitCostReductionPct}% unit cost`);
@@ -208,16 +214,22 @@ export class BuildingMenu {
     if (effects.length > 0) {
       const effDiv = document.createElement("div");
       effDiv.style.marginBottom = "4px";
-      for (const line of effects) {
-        const el = document.createElement("div");
-        el.textContent = line;
-        Object.assign(el.style, {
-          fontSize: "11px",
-          color: "#8f8",
-          lineHeight: "1.5",
-        });
-        effDiv.appendChild(el);
-      }
+      const currentEffort = (): number => effortFraction(resolveLive?.() ?? building);
+      const renderEffects = (): void => {
+        effDiv.replaceChildren();
+        for (const line of formatEffectLine(building.kind, building.level, currentEffort())) {
+          const el = document.createElement("div");
+          el.textContent = line;
+          Object.assign(el.style, {
+            fontSize: "11px",
+            color: "#8f8",
+            lineHeight: "1.5",
+          });
+          effDiv.appendChild(el);
+        }
+      };
+      renderEffects();
+      recruitRefreshers.push(renderEffects);
       this.menu.appendContent(effDiv);
     }
 

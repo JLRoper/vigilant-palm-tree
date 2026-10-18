@@ -181,7 +181,7 @@ test("assignWorkers: pool_exhausted only when incrementing past the pool", () =>
   assert.equal(assignedWorkersExplicit(b1.state.settlements.s0), 2);
 });
 
-test("assignWorkers: first assign normalizes every legacy building in the settlement", () => {
+test("assignWorkers: first assign normalizes every legacy building and auto-crews the remainder", () => {
   const state = stateWithSettlement({
     ...makeSettlement("s0", 0, 2, 2, { population: 200 }),
     buildings: [building("farmField", 0, 0), building("farmField", 1, 0), building("house", 2, 0)],
@@ -191,7 +191,7 @@ test("assignWorkers: first assign normalizes every legacy building in the settle
   assert.deepEqual(
     r.state.settlements.s0.buildings.map((b) => b.workers),
     [2, 0, 0],
-    "the target gets the assignment; every other legacy building is pinned to explicit 0",
+    "the target spends the whole pool, so the auto-crew has nothing left to place",
   );
   assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 2);
   assert.deepEqual(
@@ -268,7 +268,7 @@ test("assignWorkers: decrements stay allowed while explicit staffing oversubscri
   assert.equal(upAgain.state, down.state, "a refused increment returns the state untouched");
 });
 
-test("assignWorkers: a district first assign normalizes main and every district", () => {
+test("assignWorkers: a district first assign normalizes and auto-crews main and every district", () => {
   const settlement: SettlementState = {
     ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
     buildings: [building("farmField", 0, 0)],
@@ -286,11 +286,88 @@ test("assignWorkers: a district first assign normalizes main and every district"
   });
   assert.equal(r.ok, true);
   const after = r.state.settlements.s0;
-  assert.equal(after.buildings[0].workers, 0, "main buildings normalize");
+  assert.equal(after.buildings[0].workers, 1, "main job buildings take the remaining pool");
   assert.equal(after.districts?.["3,2"].buildings[0].workers, 1, "the district target gets the assignment");
-  assert.equal(after.districts?.["3,2"].buildings[1].workers, 0, "sibling district buildings normalize");
-  assert.equal(after.districts?.["4,2"].buildings[0].workers, 0, "other districts normalize too");
-  assert.equal(assignedWorkersExplicit(after), 1);
+  assert.equal(after.districts?.["3,2"].buildings[1].workers, 0, "housing stays empty while job slots remain");
+  assert.equal(after.districts?.["4,2"].buildings[0].workers, 1, "other districts auto-crew too");
+  assert.equal(assignedWorkersExplicit(after), 3);
+});
+
+test("assignWorkers: first touch fills every other job slot before housing", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 500 }),
+    buildings: [
+      building("farmField", 0, 0),
+      building("farmField", 1, 0),
+      building("house", 2, 0),
+      building("apartment", 3, 0),
+    ],
+  });
+  const r = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
+  assert.equal(r.ok, true);
+  assert.deepEqual(
+    r.state.settlements.s0.buildings.map((b) => b.workers),
+    [1, 2, 1, 1],
+    "pool 5: the touched farm keeps exactly 1, the other farm fills to its max of 2, then housing takes the surplus",
+  );
+  assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 5);
+});
+
+test("assignWorkers: surplus workers sit in houses/apartments once every job slot is full", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 400 }),
+    buildings: [
+      building("farmField", 0, 0),
+      building("farmField", 1, 0),
+      building("house", 2, 0),
+      building("apartment", 3, 0),
+    ],
+  });
+  const r = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
+  assert.equal(r.ok, true);
+  assert.deepEqual(
+    r.state.settlements.s0.buildings.map((b) => b.workers),
+    [1, 2, 1, 0],
+    "4 workers: the touched farm keeps 1, the other fills to 2, then the house takes the last slot",
+  );
+  assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 4);
+});
+
+test("assignWorkers: auto-crew skips construction sites and leaves true surplus idle", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 400 }),
+    buildings: [
+      building("farmField", 0, 0),
+      building("farmField", 1, 0, { construction: { daysRemaining: 2 } }),
+      building("house", 2, 0),
+    ],
+  });
+  const r = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
+  assert.equal(r.ok, true);
+  assert.deepEqual(
+    r.state.settlements.s0.buildings.map((b) => b.workers),
+    [1, 0, 1],
+    "the unfinished farm takes none; the house takes one; two workers stay idle (pool 4, assigned 2)",
+  );
+  assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 2);
+});
+
+test("assignWorkers: auto-crew never overwrites explicit counts in a mixed settlement", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 400 }),
+    buildings: [
+      building("farmField", 0, 0, { workers: 1 }),
+      building("farmField", 1, 0),
+      building("house", 2, 0),
+    ],
+  });
+  const r = assignWorkers(state, { settlementId: "s0", gx: 1, gy: 0, workers: 1 });
+  assert.equal(r.ok, true);
+  assert.deepEqual(
+    r.state.settlements.s0.buildings.map((b) => b.workers),
+    [1, 1, 1],
+    "the pre-existing explicit count is preserved; the remaining auto buildings take the pool",
+  );
 });
 
 test("assignWorkers: an explicit 0 is kept and shuts output down", () => {
@@ -417,6 +494,31 @@ test("assignWorkers source transfer: legacy source normalizes and honors approve
   const after = r.state.settlements.s0;
   assert.deepEqual(after.buildings.map((b) => b.workers), [2, 1]);
   assert.equal(assignedWorkersExplicit(after), 3);
+});
+
+test("assignWorkers source transfer: first-touch auto-crews the untouched remainder", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 500 }),
+    buildings: [
+      { ...building("market", 0, 0), w: 2, h: 1 },
+      building("market", 3, 0),
+      building("farmField", 5, 0),
+    ],
+  });
+  const r = assignWorkers(state, {
+    settlementId: "s0",
+    gx: 3,
+    gy: 0,
+    workers: 1,
+    source: { gx: 0, gy: 0 },
+  });
+  assert.equal(r.ok, true);
+  assert.deepEqual(
+    r.state.settlements.s0.buildings.map((b) => b.workers),
+    [2, 1, 2],
+    "source keeps max-1 (2), dest 1, and the untouched farm is auto-crewed with the remaining 2 (pool 5)",
+  );
+  assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 5);
 });
 
 test("assignWorkers source transfer: full destination is refused", () => {

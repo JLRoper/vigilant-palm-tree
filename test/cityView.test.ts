@@ -648,6 +648,27 @@ function staffingOf(settlement: { buildings: Array<{ gx: number; gy: number; kin
   return settlement.buildings.find((b) => b.gx === gx && b.gy === gy)?.workers;
 }
 
+// Server commands are fire-and-forget from the client (the commit hook is
+// unawaited), so a persisted read can land before the POST finishes. Poll
+// instead of racing the network.
+async function waitForServerStaffing(
+  page: Page,
+  name: string,
+  settlementId: string,
+  expected: Array<{ gx: number; workers: number | undefined }>,
+): Promise<void> {
+  const deadline = Date.now() + 5000;
+  let last: { buildings: Array<{ gx: number; gy: number; kind: string; workers?: number }> } | null = null;
+  while (Date.now() < deadline) {
+    last = await serverSettlement(page, name, settlementId);
+    if (expected.every((e) => staffingOf(last!, e.gx, 0) === e.workers)) return;
+    await wait(150);
+  }
+  assert.fail(
+    `server staffing never matched ${JSON.stringify(expected)}; last=${JSON.stringify(last?.buildings.map((b) => ({ gx: b.gx, workers: b.workers })))}`,
+  );
+}
+
 async function dragWorker(page: Page, settlementId: string, from: { gx: number; gy: number }, to: { gx: number; gy: number }, opts: { escape?: boolean; shot?: string } = {}): Promise<void> {
   const meta = await page.evaluate((sid: string) => {
     const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
@@ -690,6 +711,36 @@ async function dragWorker(page: Page, settlementId: string, from: { gx: number; 
   if (opts.shot) await pageScreenshot(page, `${opts.shot}-after`);
 }
 
+async function cellPoint(page: Page, settlementId: string, gx: number, gy: number): Promise<{ x: number; y: number }> {
+  const meta = await page.evaluate((sid: string) => {
+    const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
+    const s = dbg.getGameState().settlements[sid];
+    const inset = document.getElementById("toolbar")?.getBoundingClientRect().height ?? 125;
+    return { size: (s.level === 1 ? 5 : s.level === 2 ? 10 : 15) as 5 | 10 | 15, inset };
+  }, settlementId);
+  const viewport = page.viewportSize()!;
+  const layout = cityLayout(meta.size, viewport.width, viewport.height, meta.inset);
+  const c = cellToScreen(gx, gy, layout.gridOrigin);
+  return { x: layout.screenOrigin.x + c.x * layout.tileScale, y: layout.screenOrigin.y + c.y * layout.tileScale };
+}
+
+async function clientStaffing(page: Page, settlementId: string, gx: number): Promise<number | undefined> {
+  return page.evaluate(({ sid, x }: { sid: string; x: number }) => {
+    const s = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getGameState().settlements[sid];
+    return s.buildings.find((b: { gx: number }) => b.gx === x)?.workers;
+  }, { sid: settlementId, x: gx });
+}
+
+function workforcePanelOpen(page: Page): Promise<boolean> {
+  return page.evaluate(() => Array.from(document.body.children).some(
+    (el) => (el.textContent ?? "").startsWith("Workforce"),
+  ));
+}
+
+function cityViewOpen(page: Page): Promise<boolean> {
+  return page.evaluate(() => document.body.innerText.includes("City Design"));
+}
+
 async function testWorkerDragTransfer(page: Page, settlementId: string): Promise<void> {
   console.log(">> Test: worker drag transfer (real mouse input, client+server counts)");
   await seedWorkforceFixture(page, [
@@ -719,10 +770,10 @@ async function testWorkerDragTransfer(page: Page, settlementId: string): Promise
   assert.equal(afterClient.source, 1, "client source must drop to 1");
   assert.equal(afterClient.dest, 1, "client destination must rise to 1");
 
-  const after = await serverSettlement(page, name, settlementId);
-  assert.equal(staffingOf(after, 0, 0), 1, "persisted source must drop to 1");
-  assert.equal(staffingOf(after, 3, 0), 1, "persisted destination must rise to 1");
-
+  await waitForServerStaffing(page, name, settlementId, [
+    { gx: 0, workers: 1 },
+    { gx: 3, workers: 1 },
+  ]);
   const menuOpen = await page.evaluate(() => Array.from(document.body.children).some(
     (el) => (el.textContent ?? "").includes("Trade goods and gold"),
   ));
@@ -870,6 +921,39 @@ async function testPlainClickStillOpensMenu(page: Page, settlementId: string): P
   console.log(">> plain click opens the menu, mutates nothing ✓");
 }
 
+// City shortcuts must not fire while a menu field has focus: pressing 'w'
+// inside the recruit count input used to open the workforce panel on top of
+// the menu mid-edit.
+async function testShortcutsIgnoredWhileTyping(page: Page, settlementId: string): Promise<void> {
+  console.log(">> Test: city shortcuts ignored while typing in a menu field");
+  await seedWorkforceFixture(page, [
+    { kind: "barracks", level: 1, style: "classic", gx: 0, gy: 0, workers: 0 },
+  ]);
+  await reloadToGame(page, await gameName(page));
+  await openCityView(page, settlementId);
+  const pt = await cellPoint(page, settlementId, 0, 0);
+  await page.mouse.click(pt.x, pt.y);
+  await wait(500);
+  const input = await page.evaluate(() => {
+    const el = document.querySelector("input[type=number]") as HTMLInputElement | null;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  assert(input, "recruit count input should exist in the barracks menu");
+  await page.mouse.click(input.x, input.y);
+  await wait(150);
+  await page.keyboard.press("w");
+  await wait(400);
+  assert.equal(await workforcePanelOpen(page), false, "'w' while typing must not open the workforce panel");
+  await page.keyboard.press("Escape");
+  await wait(250);
+  assert.equal(await cityViewOpen(page), true, "Escape from the input should close the menu, not the city view");
+  await page.keyboard.press("Escape");
+  await wait(300);
+  console.log(">> shortcuts ignored while typing ✓");
+}
+
 // Panel chip drag: press a chip, carry it onto a canvas building, release —
 // the same ghost lifecycle assigns one worker from the pool.
 async function testPanelChipDrag(page: Page, settlementId: string): Promise<void> {
@@ -917,12 +1001,209 @@ async function testPanelChipDrag(page: Page, settlementId: string): Promise<void
     return s.buildings.find((b: { gx: number }) => b.gx === 3)?.workers;
   }, settlementId);
   assert.equal(afterClient, 1, "chip drop must assign one pool worker to the destination");
-  const after = await serverSettlement(page, name, settlementId);
-  assert.equal(staffingOf(after, 3, 0), 1, "chip drop must persist destination=1");
+  await waitForServerStaffing(page, name, settlementId, [{ gx: 3, workers: 1 }]);
   assert(!(await page.locator('[data-testid="worker-drag-ghost"]').isVisible()), "ghost must be gone after chip drop");
   await page.keyboard.press("w");
   await wait(200);
   console.log(">> panel chip drag assigns from the pool and persists ✓");
+}
+
+// First assignment in a legacy city must EMPLOY the rest of the pool, not pin
+// everything to 0: jobs first (balanced across kinds), houses only after all
+// job slots are full.
+async function testFirstTouchAutoCrew(page: Page, settlementId: string): Promise<void> {
+  console.log(">> Test: first assignment auto-crews the remaining pool");
+  await seedWorkforceFixture(page, [
+    { kind: "townHall", level: 1, style: "classic", gx: 0, gy: 0 },
+    { kind: "farmField", level: 1, style: "classic", gx: 1, gy: 0 },
+    { kind: "farmField", level: 1, style: "classic", gx: 2, gy: 0 },
+    { kind: "woodcutterHut", level: 1, style: "classic", gx: 3, gy: 0 },
+    { kind: "house", level: 1, style: "classic", gx: 4, gy: 0 },
+  ]);
+  await reloadToGame(page, await gameName(page));
+  await openCityView(page, settlementId);
+  const name = await gameName(page);
+
+  await page.keyboard.press("w");
+  await wait(400);
+  const clicked = await page.evaluate(() => {
+    const panel = Array.from(document.body.children).find((el) => (el.textContent ?? "").startsWith("Workforce"));
+    if (!panel) return false;
+    const rows = Array.from(panel.querySelectorAll("div")).filter((d) => d.querySelectorAll("button").length === 2);
+    const plus = rows[0]?.querySelectorAll("button")[1] as HTMLButtonElement | undefined;
+    if (!plus || plus.disabled) return false;
+    plus.click();
+    return true;
+  });
+  assert(clicked, "the panel's first + must start the legacy-to-crew conversion");
+  await wait(900);
+
+  const counts = await page.evaluate((sid: string) => {
+    const s = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getGameState().settlements[sid];
+    return s.buildings.slice(0, 5).map((b: { workers?: number }) => b.workers);
+  }, settlementId);
+  assert.deepEqual(
+    counts,
+    [1, 1, 1, 2, 0],
+    "pool 5: touched town hall 1, each farm 1, the hut fills to 2, the house stays empty while job slots remain",
+  );
+  await waitForServerStaffing(page, name, settlementId, [
+    { gx: 0, workers: 1 },
+    { gx: 1, workers: 1 },
+    { gx: 2, workers: 1 },
+    { gx: 3, workers: 2 },
+    { gx: 4, workers: 0 },
+  ]);
+  await page.keyboard.press("w");
+  await wait(200);
+  console.log(">> first touch auto-crews the pool, client and server agree ✓");
+}
+
+// Assignment durability + panel lifecycle: a commit made in the city view must
+// survive leaving and re-entering the city (the cart write-back used to replace
+// live staffing with the open-time snapshot), Escape must close the panel
+// before the city, and the panel must close with the view.
+async function testWorkforceSurvivesCityClose(page: Page, settlementId: string): Promise<void> {
+  console.log(">> Test: assignments survive city close/reopen; panel lifecycle");
+  await seedWorkforceFixture(page, [
+    { kind: "market", level: 1, style: "classic", gx: 0, gy: 0, w: 2, h: 1, workers: 2 },
+    { kind: "market", level: 1, style: "classic", gx: 3, gy: 0, workers: 0 },
+  ]);
+  await reloadToGame(page, await gameName(page));
+  await openCityView(page, settlementId);
+  const name = await gameName(page);
+
+  await page.keyboard.press("w");
+  await wait(400);
+  const clicked = await page.evaluate(() => {
+    const panel = Array.from(document.body.children).find((el) => (el.textContent ?? "").startsWith("Workforce"));
+    if (!panel) return false;
+    const rows = Array.from(panel.querySelectorAll("div")).filter((d) => d.querySelectorAll("button").length === 2);
+    const plus = rows[1]?.querySelectorAll("button")[1] as HTMLButtonElement | undefined;
+    if (!plus || plus.disabled) return false;
+    plus.click();
+    return true;
+  });
+  assert(clicked, "second panel row's + must assign a worker to market B");
+  await wait(700);
+  assert.equal(await clientStaffing(page, settlementId, 3), 1, "panel + must set market B to 1");
+
+  // Escape closes the panel first; the city must still be open.
+  await page.keyboard.press("Escape");
+  await wait(300);
+  assert.equal(await workforcePanelOpen(page), false, "Escape must close the workforce panel first");
+  assert.equal(await cityViewOpen(page), true, "the first Escape must not close the city view");
+  // Second Escape closes the city.
+  await page.keyboard.press("Escape");
+  await wait(500);
+  assert.equal(await cityViewOpen(page), false, "the second Escape must close the city view");
+
+  // Re-open: the assignment must still be there, client AND server.
+  await openCityView(page, settlementId);
+  assert.equal(
+    await clientStaffing(page, settlementId, 3),
+    1,
+    "assignment must survive the city-view round-trip (stale cart write-back regression)",
+  );
+  await waitForServerStaffing(page, name, settlementId, [{ gx: 3, workers: 1 }]);
+  // The panel must not outlive the view when closed via Back.
+  await page.keyboard.press("w");
+  await wait(400);
+  assert.equal(await workforcePanelOpen(page), true, "panel should reopen with 'w'");
+  await page.evaluate(() => {
+    const back = Array.from(document.querySelectorAll("button")).find((b) => (b.textContent ?? "").trim() === "← Back");
+    (back as HTMLButtonElement | undefined)?.click();
+  });
+  await wait(600);
+  assert.equal(await workforcePanelOpen(page), false, "leaving the city must close the workforce panel");
+  assert.equal(await cityViewOpen(page), false, "Back must close the city view");
+  await openCityView(page, settlementId);
+  assert.equal(
+    await clientStaffing(page, settlementId, 3),
+    1,
+    "Back close must not revert staffing (cart write-back regression)",
+  );
+  await page.keyboard.press("Escape");
+  await wait(300);
+  console.log(">> assignments survive close/reopen; panel lifecycle correct ✓");
+}
+
+// A release over floating UI must cancel: the point belongs to the panel, not
+// to the grid cell hidden underneath it. Same for a plain chip click.
+async function testPanelUICancelsDrop(page: Page, settlementId: string): Promise<void> {
+  console.log(">> Test: drops/clicks over the workforce panel never hit hidden buildings");
+  await seedWorkforceFixture(page, [
+    { kind: "market", level: 1, style: "classic", gx: 0, gy: 0, w: 2, h: 1, workers: 2 },
+    { kind: "market", level: 1, style: "classic", gx: 3, gy: 0, workers: 0 },
+  ]);
+  await reloadToGame(page, await gameName(page));
+  await openCityView(page, settlementId);
+  const name = await gameName(page);
+  await page.keyboard.press("w");
+  await wait(400);
+
+  // Move the panel so its first chip sits over market B (same-row geometry the
+  // panel uses: label column starts at +14px, first chip center at ~+78/+111).
+  const bPt = await cellPoint(page, settlementId, 3, 0);
+  const panelRect = await page.evaluate(() => {
+    const panel = Array.from(document.body.children).find((el) => (el.textContent ?? "").startsWith("Workforce")) as HTMLElement | undefined;
+    if (!panel) return null;
+    const r = panel.getBoundingClientRect();
+    return { x: r.x, y: r.y, w: r.width, h: r.height };
+  });
+  assert(panelRect, "workforce panel must be open");
+  const grab = { x: panelRect.x + 120, y: panelRect.y + 14 };
+  const targetTopLeft = { x: bPt.x - 78, y: bPt.y - 111 };
+  await page.mouse.move(grab.x, grab.y);
+  await page.mouse.down();
+  await page.mouse.move(targetTopLeft.x + 120, targetTopLeft.y + 14, { steps: 10 });
+  await page.mouse.up();
+  await wait(400);
+  const movedRect = await page.evaluate(() => {
+    const panel = Array.from(document.body.children).find((el) => (el.textContent ?? "").startsWith("Workforce")) as HTMLElement;
+    const r = panel.getBoundingClientRect();
+    return { x: r.x, y: r.y, w: r.width, h: r.height };
+  });
+  assert(
+    bPt.x >= movedRect.x && bPt.x <= movedRect.x + movedRect.w && bPt.y >= movedRect.y && bPt.y <= movedRect.y + movedRect.h,
+    "panel should now cover market B for the UI-drop probe",
+  );
+
+  // Plain click on the panel's first chip: no assignment anywhere.
+  const chip = await page.evaluate(() => {
+    const panel = Array.from(document.body.children).find((el) => (el.textContent ?? "").startsWith("Workforce")) as HTMLElement;
+    const span = Array.from(panel.querySelectorAll("span")).find((el) => (el.textContent ?? "") === "Market") as HTMLElement;
+    const r = span.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await page.mouse.move(chip.x, chip.y);
+  await page.mouse.down();
+  await wait(150);
+  await page.mouse.up();
+  await wait(600);
+  assert.equal(await clientStaffing(page, settlementId, 3), 0, "plain chip click over a building must not assign");
+  let server = await serverSettlement(page, name, settlementId);
+  assert.equal(staffingOf(server, 3, 0), 0, "plain chip click must not persist an assignment");
+
+  // Canvas drag released over the panel: cancelled, no transfer.
+  const fromA = await cellPoint(page, settlementId, 1, 0);
+  await page.mouse.move(fromA.x, fromA.y);
+  await page.mouse.down();
+  await wait(100);
+  await page.mouse.move((fromA.x + bPt.x) / 2, (fromA.y + bPt.y) / 2, { steps: 10 });
+  await page.mouse.move(bPt.x, bPt.y, { steps: 10 });
+  await wait(100);
+  await page.mouse.up();
+  await wait(700);
+  assert.equal(await clientStaffing(page, settlementId, 0), 2, "drop over the panel must not take a worker from the source");
+  assert.equal(await clientStaffing(page, settlementId, 3), 0, "drop over the panel must not assign to the hidden building");
+  assert(!(await page.locator('[data-testid="worker-drag-ghost"]').isVisible()), "ghost must be gone after the cancelled drop");
+  server = await serverSettlement(page, name, settlementId);
+  assert.equal(staffingOf(server, 0, 0), 2, "server source must be untouched");
+  assert.equal(staffingOf(server, 3, 0), 0, "server destination must be untouched");
+  await page.keyboard.press("w");
+  await wait(200);
+  console.log(">> UI drops/plain chip clicks cancel ✓");
 }
 
 // District coordinate overlap: with a district open, the SAME grid cells map
@@ -1198,7 +1479,11 @@ async function run() {
     await testWorkerDragCancel(page, settlementId);
     await testMenuRefreshAfterPanelCommit(page, settlementId);
     await testPlainClickStillOpensMenu(page, settlementId);
+    await testShortcutsIgnoredWhileTyping(page, settlementId);
     await testPanelChipDrag(page, settlementId);
+    await testFirstTouchAutoCrew(page, settlementId);
+    await testWorkforceSurvivesCityClose(page, settlementId);
+    await testPanelUICancelsDrop(page, settlementId);
     await testDistrictCoordinateOverlap(page, settlementId);
     await testPaletteAvoidsGrid(page, settlementId);
     await testCityViewCanvas(page);

@@ -59,6 +59,7 @@ export class WorkforcePanel {
   }
 
   close(): void {
+    this.cityView.clearWorkforcePreview();
     this.cityView.cancelWorkerDrag();
     if (this.menu) {
       this.menu.close();
@@ -76,9 +77,11 @@ export class WorkforcePanel {
     this.menu.clearContent();
 
     const header = document.createElement("div");
+    const idle = Math.max(0, snapshot.pool - snapshot.assigned);
+    const overPool = snapshot.assigned > snapshot.pool ? " · over pool" : "";
     header.textContent = snapshot.legacy
-      ? `Workers: ${snapshot.assigned} assigned · ${snapshot.pool - snapshot.assigned} idle · auto-staffed — first assignment normalizes the city`
-      : `Workers: ${snapshot.assigned} assigned · ${snapshot.pool - snapshot.assigned} idle`;
+      ? `Workers: auto-staffed (pool ${snapshot.pool}) — first assignment crews the rest automatically (jobs, then houses)`
+      : `Workers: ${snapshot.assigned} assigned · ${idle} idle${overPool}`;
     Object.assign(header.style, {
       fontSize: "11px",
       lineHeight: "1.5",
@@ -129,6 +132,7 @@ export class WorkforcePanel {
 
   private buildRow(b: WorkforceSnapshot["buildings"][number], snapshot: WorkforceSnapshot): HTMLDivElement {
     const max = Math.max(1, b.max);
+    const idle = snapshot.pool - snapshot.assigned;
     const row = document.createElement("div");
     Object.assign(row.style, {
       display: "flex",
@@ -136,29 +140,41 @@ export class WorkforcePanel {
       gap: "6px",
       marginBottom: "4px",
     });
+    row.addEventListener("mouseenter", () => this.cityView.previewWorkforceBuilding(b.gx, b.gy, b.district));
+    row.addEventListener("mouseleave", () => this.cityView.clearWorkforcePreview());
+
+    const labelCol = document.createElement("div");
+    Object.assign(labelCol.style, {
+      display: "flex",
+      flexDirection: "column",
+      flex: "1",
+      minWidth: "0",
+    });
 
     const chip = document.createElement("span");
     chip.textContent = buildingLabel(b.kind as BuildingKind);
-    chip.title = "Drag onto a city-view building to move a worker";
+    chip.title = idle > 0
+      ? `Add a worker from the idle pool · cell (${b.gx}, ${b.gy})`
+      : "No idle workers in the pool";
     Object.assign(chip.style, {
-      flex: "1",
       fontSize: "11px",
       opacity: "0.85",
-      cursor: "grab",
+      cursor: idle > 0 ? "grab" : "not-allowed",
       overflow: "hidden",
       textOverflow: "ellipsis",
       whiteSpace: "nowrap",
     });
-    chip.addEventListener("mousedown", () => {
-      this.cityView.beginWorkerDrag();
+    chip.addEventListener("mousedown", (e) => {
+      if (idle <= 0) return;
+      this.cityView.beginWorkerDrag(e.clientX, e.clientY);
     });
-    row.appendChild(chip);
+    labelCol.appendChild(chip);
 
     const roles = document.createElement("span");
     Object.assign(roles.style, {
       display: "flex",
       gap: "4px",
-      flexShrink: "0",
+      marginTop: "1px",
     });
     for (const role of b.roles) {
       const tag = document.createElement("span");
@@ -172,7 +188,8 @@ export class WorkforcePanel {
       });
       roles.appendChild(tag);
     }
-    row.appendChild(roles);
+    labelCol.appendChild(roles);
+    row.appendChild(labelCol);
 
     const minus = document.createElement("button");
     minus.textContent = "−";
@@ -183,7 +200,7 @@ export class WorkforcePanel {
     const value = document.createElement("span");
     value.style.fontSize = "11px";
     value.style.fontVariantNumeric = "tabular-nums";
-    value.style.minWidth = "34px";
+    value.style.minWidth = "40px";
     value.style.textAlign = "center";
 
     const plus = document.createElement("button");
@@ -195,7 +212,7 @@ export class WorkforcePanel {
     const base = staffingBase(b.workers, max, snapshot.legacy);
 
     const refresh = (): void => {
-      value.textContent = b.workers === undefined ? "Auto" : String(b.workers);
+      value.textContent = b.workers === undefined ? "Auto" : `${b.workers}/${max}`;
       value.title = b.workers === undefined ? `Auto-staffed (max ${max})` : `Of ${max} worker slots`;
       const plusDisabled = !canAssignWorkers(staffingBase(b.workers, max, snapshot.legacy), max, 1, snapshot.pool, snapshot.assigned);
       plus.disabled = plusDisabled;

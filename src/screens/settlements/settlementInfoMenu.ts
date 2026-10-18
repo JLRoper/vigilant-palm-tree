@@ -15,7 +15,7 @@ import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../../render/a
 import { bankRejectionMessage, bankRowModel, treasuryRowModel, type BankGoldDirection, type BankRowModel } from "./bankRows";
 import { TREASURY_CAP_AMBER, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
 import type { HorseVariant } from "../../state/settings";
-import { POP_BY_LEVEL, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, workforcePool, assignedWorkersExplicit } from "@heroes/engine";
+import { POP_BY_LEVEL, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, workforcePool, assignedWorkersExplicit, hasLegacyStaffing } from "@heroes/engine";
 import { pickHeroName } from "../../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 
@@ -402,7 +402,9 @@ export class SettlementInfoMenu {
     this.populationEl.textContent = settlement.population.toLocaleString();
     const pool = workforcePool(settlement);
     const assigned = assignedWorkersExplicit(settlement);
-    this.workforceEl.textContent = `${assigned}/${pool} assigned · ${pool - assigned} idle`;
+    this.workforceEl.textContent = hasLegacyStaffing(settlement)
+      ? `auto · pool ${pool}`
+      : `${assigned}/${pool} assigned · ${Math.max(0, pool - assigned)} idle${assigned > pool ? " · over pool" : ""}`;
     this.incomeEl.textContent = `${effectiveSettlementIncome(settlement, state.heroes).toLocaleString()}g`;
     this.treasuryEl.textContent = `${settlement.gold}g`;
     this.updateTreasuryRow(settlement, state);

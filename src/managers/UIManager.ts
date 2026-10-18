@@ -395,6 +395,10 @@ export class UIManager {
         // open) skip the camera/select tail -- it would yank the viewport on
         // every grid click. Only a real close re-selects and re-centers.
         if (!final) return written;
+        // The workforce panel is a city-view surface: it must not outlive the
+        // view it edits (otherwise it floats over the world map, its steppers
+        // silently no-op, and 'w' can no longer reach it).
+        this.workforcePanel?.close();
         // Restore the selection captured at open() instead of force-selecting
         // the closed settlement: leaving the city must hand each floating
         // panel back exactly the open/closed state it had on entry.
@@ -460,6 +464,8 @@ export class UIManager {
       return ok;
     };
     view.openWorkforcePanel = () => this.toggleWorkforcePanel();
+    view.isWorkforcePanelOpen = () => this.workforcePanel?.isOpen() ?? false;
+    view.closeWorkforcePanel = () => this.workforcePanel?.close();
     return view;
   }
 
