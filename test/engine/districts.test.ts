@@ -49,7 +49,7 @@ import {
   settlementFullnessForCount,
 } from "../../src/render/scene/sceneBuilder/adventureScene";
 import { buildCityScene } from "../../src/render/scene/sceneBuilder/cityScene";
-import type { CastleNode, CityBuildingNode, DistrictNode } from "../../src/render/scene/types";
+import type { CastleNode, CityBuildingNode, CityLabelNode, DistrictNode } from "../../src/render/scene/types";
 import { describeTile } from "../../src/screens/adventure/tileInfo";
 import {
   buildEntryStatus,
@@ -1666,4 +1666,72 @@ test("buildAdventureScene: a fog-hidden enemy hero does not flip a district's bl
   });
   const seenDistrict = seen.find((n): n is DistrictNode => n.kind === "district");
   assert.equal(seenDistrict?.blocked, true, "a visible enemy on the district hex reports blocked");
+});
+
+test("describeTile: territory is gated on the VIEWER's seat, not state.activePlayerId", () => {
+  const rows: TileRow[] = [];
+  for (let r = 0; r < 6; r++) {
+    for (let q = 0; q < 6; q++) rows.push({ q, r, terrain: "grass", resource: null });
+  }
+  const map = GameMap.fromTiles(rows);
+
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, { level: 1, population: 500, goldTax: 1 }),
+    name: "Oakkeep",
+  };
+  const castle = Castle.fromGameState(settlement);
+  // Seat 0 holds the turn; the viewer is seat 1. No heroes, so the only
+  // visibility in play is the owned-castle ring.
+  const state = makeState({ settlements: [settlement], heroes: [], activePlayerId: 0 });
+
+  const opponentView = describeTile({
+    map, state, heroes: [], castles: [castle], viewPlayerId: 1, tile: { q: 3, r: 2 },
+  });
+  assert.ok(opponentView);
+  assert.equal(opponentView.fogged, true, "seat 1 cannot see seat 0's territory");
+  assert.equal(
+    opponentView.territory,
+    null,
+    "a fogged hex owned by the ACTIVE player must not be labelled to a different viewer",
+  );
+
+  // The owner sees the same hex (castle vision ring) and DOES get the label.
+  const ownerView = describeTile({
+    map, state, heroes: [], castles: [castle], viewPlayerId: 0, tile: { q: 3, r: 2 },
+  });
+  assert.ok(ownerView);
+  assert.equal(ownerView.fogged, false);
+  assert.deepEqual(ownerView.territory, { settlementName: "Oakkeep", ownerName: "Player 1" });
+});
+
+test("buildCityScene: a district city view is labelled as a district, not a settlement tier", () => {
+  const citySettings = {
+    spriteVariant: "pixel" as const,
+    parallaxEnabled: false,
+    parallaxLayerCount: 3 as const,
+    cityBgOffsetX: 0,
+    cityBgOffsetY: 0,
+  };
+  const labelFor = (district: { q: number; r: number } | null): string | undefined => {
+    const nodes = buildCityScene({
+      viewportW: 800,
+      viewportH: 600,
+      settlementName: district ? "Oakkeep — District (3, 2)" : "Oakkeep",
+      size: 5,
+      hover: null,
+      citySpots: [],
+      cityMines: [],
+      buildings: [makeBuilding("house", 0, 0, 1)],
+      district,
+      citySettings,
+    });
+    return nodes.find((n): n is CityLabelNode => n.kind === "cityLabel" && n.fontPx === 11)?.text;
+  };
+
+  assert.equal(labelFor(null), "5×5 Settlement", "the main settlement keeps its tier label");
+  assert.equal(
+    labelFor({ q: 3, r: 2 }),
+    "District (5×5 grid)",
+    "a district must not be presented as a settlement tier",
+  );
 });

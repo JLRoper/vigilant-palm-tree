@@ -176,11 +176,16 @@ function describeTerritory(
   q: number,
   r: number,
   fogged: boolean,
+  viewPlayerId: PlayerId,
   mapWidth: number,
   mapHeight: number,
 ): TileInfo["territory"] {
   const winner = resolveControllingSettlement(castles, q, r, mapWidth, mapHeight);
-  if (!winner || winner.ownerId === null || !visibleOrOwned(fogged, winner.ownerId, state.activePlayerId)) {
+  // The VIEWER's seat, not state.activePlayerId: gating on whoever holds the
+  // turn leaks an opponent's territory label through fog to a watching player,
+  // and disagrees with describeSettlement/describeHeroes/describeDistrict right
+  // beside it in the same panel.
+  if (!winner || winner.ownerId === null || !visibleOrOwned(fogged, winner.ownerId, viewPlayerId)) {
     return null;
   }
   return { settlementName: winner.name, ownerName: playerName(state, winner.ownerId) };
@@ -212,6 +217,6 @@ export function describeTile(input: {
     district: describeDistrict(state, castles, heroes, tile.q, tile.r, fogged, viewPlayerId),
     heroes: describeHeroes(state, heroes, tile.q, tile.r, fogged, viewPlayerId),
     charter: describeCharter(state, tile.q, tile.r, fogged),
-    territory: describeTerritory(state, castles, tile.q, tile.r, fogged, map.width, map.height),
+    territory: describeTerritory(state, castles, tile.q, tile.r, fogged, viewPlayerId, map.width, map.height),
   };
 }

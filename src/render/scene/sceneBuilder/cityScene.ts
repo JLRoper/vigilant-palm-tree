@@ -180,7 +180,9 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
   nodes.push({ kind: "cityLabel", text: settlementName, x: 12, y: 12 + labelY, fontPx: 14, alpha: 1 });
   nodes.push({
     kind: "cityLabel",
-    text: TIER_LABELS[size],
+    // A district is a 5x5 satellite grid, not the settlement's own tier -- the
+    // TIER_LABELS entry for size 5 would present it as a "5x5 Settlement".
+    text: input.district ? "District (5×5 grid)" : TIER_LABELS[size],
     x: 12,
     y: 30 + labelY,
     fontPx: 11,
