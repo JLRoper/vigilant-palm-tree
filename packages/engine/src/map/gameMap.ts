@@ -5,10 +5,24 @@ import { mulberry32 } from "../rng";
 
 const HERO_SPAWN: Axial = { q: 2, r: 2 };
 
-const NEIGHBOR_DIRS: Axial[] = [
+export const NEIGHBOR_DIRS: Axial[] = [
   { q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 },
   { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 },
 ];
+
+export interface CityBackdropSignature {
+  center: Terrain;
+  /** Six neighbors in NEIGHBOR_DIRS order (E, NE, NW, W, SW, SE). */
+  neighbors: Terrain[];
+  seed: number;
+}
+
+export function sampleCityBackdrop(map: GameMap, q: number, r: number, seed: number): CityBackdropSignature {
+  const center = map.get(q, r) ?? "grass";
+  const neighbors = NEIGHBOR_DIRS.map((d) => map.get(q + d.q, r + d.r) ?? center);
+  const mixed = (Math.imul(q + 1, 0x9e3779b1) ^ Math.imul(r + 1, 0x85ebca6b) ^ (seed >>> 0)) >>> 0;
+  return { center, neighbors, seed: mixed };
+}
 
 export type TileRow = {
   q: number;

@@ -56,6 +56,9 @@ export * from "./settlement/starterLayout";
 export * from "./settlement/capacity";
 export * from "./logistics";
 export * from "./map/pathfinding";
+// pathfinding also exports a NEIGHBOR_DIRS with the same six axial directions;
+// name the gameMap one explicitly so the barrel export is unambiguous.
+export { NEIGHBOR_DIRS } from "./map/gameMap";
 export * from "./settlement/upgradeTownHall";
 export * from "./settlement/upgradeSettlement";
 export * from "./settlement/advance";

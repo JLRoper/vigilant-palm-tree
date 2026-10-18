@@ -21,6 +21,7 @@ import type { Paint2DDep, ResolvedSprite, ResolvedSpriteDescriptor } from "./dep
 import {
   hexPath,
 } from "./geometry";
+import { paintCityDiorama } from "./cityDiorama";
 import { HEX_SIZE } from "../../../core/hex";
 import { decorationSeed } from "../../decorationSeed";
 import { TERRAIN_COLORS } from "../../../map/terrain";
@@ -830,6 +831,10 @@ export function paintHero(ctx: CanvasRenderingContext2D, node: HeroNode, deps: P
 export function paintCitySkybox(ctx: CanvasRenderingContext2D, node: CitySkyboxNode, deps: Paint2DDep, frame?: Paint2DFrame): void {
   if (!frame) return;
   const { viewportW, viewportH, spriteVariant, parallaxEnabled, parallaxLayerCount, offsetX, offsetY } = node;
+  if (node.backdropMode === "diorama" && node.backdrop) {
+    paintCityDiorama(ctx, viewportW, viewportH, node.backdrop);
+    return;
+  }
   const skybox = deps.skybox;
   if (skybox) {
     skybox.ensureLoaded(spriteVariant);

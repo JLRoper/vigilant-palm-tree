@@ -355,6 +355,7 @@ async function run(): Promise<void> {
       await selectHeroAndHover(page);
       await openCityAtHomeSettlement(page);
       await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ parallaxEnabled: true }));
+      await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ cityBackdrop: "skybox" }));
       await wait(300);
       await captureAndCompare("city-view-parallax-on", page);
     });
@@ -364,8 +365,21 @@ async function run(): Promise<void> {
       await selectHeroAndHover(page);
       await openCityAtHomeSettlement(page);
       await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ parallaxEnabled: false }));
+      await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ cityBackdrop: "skybox" }));
       await wait(300);
       await captureAndCompare("city-view-parallax-off", page);
+    });
+
+    // The default backdrop: the biome diorama derived from the settlement tile
+    // and its six neighbors (no skybox, no parallax layers). A separate scene
+    // from the two skybox captures so both modes stay pinned.
+    await withPageRetry(context, "city-view-diorama", async (page) => {
+      await dismissHomeAndCreateGame(page, GAME_NAME, SEED);
+      await selectHeroAndHover(page);
+      await openCityAtHomeSettlement(page);
+      await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ cityBackdrop: "diorama" }));
+      await wait(300);
+      await captureAndCompare("city-view-diorama", page);
     });
 
     await runBattleArenaScene(context, "battle-arena-legacy", "/?paint=legacy");

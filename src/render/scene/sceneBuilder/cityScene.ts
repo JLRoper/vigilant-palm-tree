@@ -1,10 +1,10 @@
-import type { CityViewSize } from "@heroes/engine";
+import type { CityBackdropSignature, CityViewSize } from "@heroes/engine";
 import { buildingConstructionProgress, buildingFootprintFromRegistry, constructionStageFor, farmFieldStyleAt, upgradeProgress, upgradeRefs } from "@heroes/engine";
 import type { BuildingDef, BuildingKind, UpgradeState } from "@heroes/contracts";
 import { buildingFootprint, cellsInDrawOrder, cellToScreen, cityLayout } from "../../../core/cityGrid";
 import type { ResourceType } from "../../../map/resourceTiles";
-import type { GameSettings } from "../../../state/settings";
-import type { SceneNode } from "../types";
+import type { CityBackdropMode, GameSettings } from "../../../state/settings";
+import type { CitySkyboxNode, SceneNode } from "../types";
 
 // Faithful decomposition of cityRenderer.ts's drawCityView()'s per-frame
 // "what to draw" decisions. The skybox's actual image loading/caching/layer
@@ -39,7 +39,10 @@ export interface CitySceneInput {
   citySettings: Pick<
     GameSettings,
     "spriteVariant" | "parallaxEnabled" | "parallaxLayerCount" | "cityBgOffsetX" | "cityBgOffsetY"
-  >;
+  > & { cityBackdrop?: CityBackdropMode };
+
+  /** The settlement's terrain signature for the biome diorama backdrop; absent = legacy skybox path. */
+  backdrop?: CityBackdropSignature | null;
 
   /** The settlement's single in-flight upgrade, if any; targeted buildings render construction-stage sprites. */
   upgrades?: UpgradeState;
@@ -56,7 +59,7 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
   const labelY = labelOffsetY ?? 0;
   const nodes: SceneNode[] = [];
 
-  nodes.push({
+  const skybox: CitySkyboxNode = {
     kind: "citySkybox",
     viewportW,
     viewportH,
@@ -65,7 +68,12 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
     parallaxLayerCount: citySettings.parallaxLayerCount,
     offsetX: citySettings.cityBgOffsetX,
     offsetY: citySettings.cityBgOffsetY,
-  });
+  };
+  if (input.backdrop) {
+    skybox.backdrop = input.backdrop;
+    skybox.backdropMode = citySettings.cityBackdrop ?? "diorama";
+  }
+  nodes.push(skybox);
 
   const { tileScale, tw, td, gridOrigin, screenOrigin } = cityLayout(size, viewportW, viewportH, topInset ?? 0);
   const cellScreen = (gx: number, gy: number) => {

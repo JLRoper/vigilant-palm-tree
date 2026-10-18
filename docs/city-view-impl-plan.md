@@ -1,10 +1,20 @@
 # City View — Implementation Plan
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-18 -->
 
 **Status:** Historical implementation plan; the city view shipped, and this proposal is not a current TODO list. Current settlement rules are in [`settlements.md`](./settlements.md); the current render path is documented in [`../src/render/docs/technical-spec.md`](../src/render/docs/technical-spec.md). The old high-level city-view brief referenced in the original planning round is not present; current settlement rules are in `settlements.md`.
 
 Locked design for the in-settlement city screen. This plan replaced the implicit "10×10 default" with tiered sizing and recorded the isometric projection proposal.
+
+## Backdrop (current — supersedes the skybox-only rows below)
+
+The city view backdrop is no longer only the static watercolor skybox. The default is a per-settlement **settlement diorama** derived from the center tile and its six neighbors; Settings → **City view backdrop** switches back to the skybox.
+
+- Signature: `sampleCityBackdrop(map, q, r, seed)` in `packages/engine/src/map/gameMap.ts`.
+- Plumbing: `src/managers/GameEngine.ts` → `CityView.open` → `buildCityScene` (`CitySceneInput.backdrop`) → `CitySkyboxNode.backdrop`/`backdropMode` → `paintCitySkybox`.
+- Renderer: `src/render/scene/paint2d/cityDiorama.ts` (deterministic, offscreen-cached).
+- Palette rule, props, cache limits, and constraints: [`art-style.md`](./art-style.md#settlement-diorama-city-view-backdrop-default).
+- Baselines: `city-view-diorama` pins the diorama; `city-view-parallax-on`/`-off` pin `cityBackdrop: "skybox"`.
 
 ## Locked decisions (from planning round)
 

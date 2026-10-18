@@ -682,6 +682,13 @@ async function run() {
     await testPersistence(page, settlementId);
 
     await openCityView(page, settlementId);
+
+    // These three exercise the watercolor skybox path (variants, parallax
+    // layers, background offsets). The default backdrop is the biome diorama,
+    // which deliberately ignores all three settings.
+    await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ cityBackdrop: "skybox" }));
+    await wait(400);
+
     await testSkyboxVariantSwitch(page);
     await testParallaxMode(page);
     await testBgOffset(page);

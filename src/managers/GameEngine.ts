@@ -6,7 +6,7 @@ import { MAP_SEED } from "@screens/adventure/adventureView";
 import { colorForOwner } from "../state/playerColors";
 import { buildInitialGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";
-import { cityViewSizeFor, districtKey, generateDistrictSpots, resolveControllingSettlement, validCharterHexes } from "@heroes/engine";
+import { cityViewSizeFor, districtKey, generateDistrictSpots, resolveControllingSettlement, sampleCityBackdrop, validCharterHexes } from "@heroes/engine";
 import { cachedUnitTypes } from "../data/unitCatalog";
 
 import { SessionManager } from "./SessionManager";
@@ -532,6 +532,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     if (!gs || gs.phase.kind !== "PLAYER_TURN" || gs.activePlayerId !== localId) return;
     const t = this.view.hoverFromScreen(e.clientX, e.clientY);
     if (!t) return;
+    const cityMap = this.state.getGameMap();
     const castle = this.state.getSettlements().find((c) => c.tile.q === t.q && c.tile.r === t.r);
     if (castle) {
       if (castle.ownerId !== localId) return;
@@ -554,6 +555,8 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
         castle.cityMines,
         castle.buildings,
         gs.castleSeed,
+        undefined,
+        sampleCityBackdrop(cityMap, castle.tile.q, castle.tile.r, gs.castleSeed),
       );
       if (cityView.isOpen() && gs.selectedSettlementId !== castle.id) {
         const tc = this.state.getTurnController();
@@ -563,7 +566,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       return;
     }
 
-    const map = this.state.getGameMap();
+    const map = cityMap;
     if (!map) return;
     const terrain = map.get(t.q, t.r);
     if (!terrain || terrain === "water" || terrain === "mountain") return;
@@ -592,6 +595,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       existing?.buildings ?? [],
       gs.castleSeed,
       { q: t.q, r: t.r },
+      sampleCityBackdrop(map, t.q, t.r, gs.castleSeed),
     );
     if (cityView.isOpen() && gs.selectedSettlementId !== controlling.id) {
       const tc = this.state.getTurnController();

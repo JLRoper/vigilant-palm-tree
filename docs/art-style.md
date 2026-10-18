@@ -84,7 +84,7 @@ The city-view overlay renders a multi-layer parallax skybox behind the isometric
 | 3       | Plains      | Rolling green hills, golden fields, afternoon  |
 | 4       | Riverlands  | Winding rivers, teal/sage wetlands, lush       |
 
-Variants 2–4 are generated via `tools/sprites/flux-skybox.mjs` and split into parallax layers (2/3/4-layer breakdowns) by `scripts/split-skybox-layers.ts`. The city view renderer selects a variant per settlement, keyed by settlement ID.
+Variants 2–4 are generated via `tools/sprites/flux-skybox.mjs` and split into parallax layers (2/3/4-layer breakdowns) by `scripts/split-skybox-layers.ts`. The city view renderer draws the variant named by the global `spriteVariant` setting (`src/state/settings.ts`); it does not select a variant per settlement.
 
 ### Pipeline
 
@@ -98,7 +98,40 @@ Each variant produces 2-layer, 3-layer, and 4-layer breakdowns, all with 18% fea
 
 1. Add a new entry to the `VARIANTS` map in `tools/sprites/flux-skybox.mjs` with a `variant` number, `prompt`, and `seed`.
 2. Run generation and layer splitting as above.
-3. Register the new variant in the city view renderer's variant selection logic.
+3. Extend `spriteVariantOptions()` and the sprite-variant clamp in `src/state/settings.ts` so the new variant is selectable.
+
+## Settlement diorama (City View backdrop, default)
+
+The default city-view backdrop is a procedural **settlement diorama**: a floating organic terrain plate around the settlement with no skyline. It replaces the static watercolor skybox as the default; Settings → **City view backdrop** switches back to `Watercolor skybox (static variants)`.
+
+### Per-settlement signature
+
+`sampleCityBackdrop(map, q, r, seed)` (`packages/engine/src/map/gameMap.ts`) samples the settlement tile and its six neighbors in `NEIGHBOR_DIRS` order (E, NE, NW, W, SW, SE) and mixes a deterministic seed from `q`, `r`, and the game's `castleSeed`. `GameEngine` samples it when a city view opens and passes it through `CityView.open` → `buildCityScene` → the `citySkybox` node's `backdrop`, so the same settlement always renders the same plate.
+
+### Biome-matched palette
+
+This is the load-bearing art rule: **the plate palette comes from the settlement's biome and its neighbors**, never from a fixed palette. Each of the eight terrain palettes is derived from `TERRAIN_COLORS[terrain]` by mixing toward `MIST` (`#ece6d8`):
+
+| Slot     | Derivation                          | Used by                          |
+|----------|-------------------------------------|----------------------------------|
+| `sky`    | `mix(fill, MIST, 0.84)`             | background gradient, upper wash  |
+| `far`    | `mix(fill, MIST, 0.58)`             | distant plate tone               |
+| `mid`    | `mix(fill, MIST, 0.26)`             | sector patches                   |
+| `near`   | `mix(fill, MIST, 0.08)`             | plate edge, calm center, props   |
+| `accent` | `mix(lighten(fill, 0.35), MIST, 0.18)` | highlights                   |
+
+Water is a special case (`mix(fill, #d7eaf0, 0.32)`). The plate base blends the center biome at 2× and each neighbor at 1×, then mixes only 16% toward a grass/dirt calm blend (18% at the near edge, 14% at the far band) — enough to keep the area under the city calm without neutralizing the biome. Biome patch grounds use `near` mixed 18% toward the plate base. Keep the mist mixes above 0.2 out of `near`/`mid`: at 0.34/0.12 the swamp and dirt plates converged to within ~4% per channel and read as the same settlement.
+
+### Renderer and cache
+
+`paintCityDiorama` (`src/render/scene/paint2d/cityDiorama.ts`) is a deterministic mulberry32 renderer: ragged plate outline, cliff underside and drop shadow, radial mist mask, six neighbor sector blobs, biome paths, and per-biome props (broadleaf/conifer, boulders, peaks, mesas and cacti, reeds and pools, tufts and flowers). It draws into an offscreen canvas cached by `center|neighbors|seed|WxH`, capped at 12 entries, then blits. `paintCitySkybox` in `paint2d/index.ts` early-returns to it when the node's `backdropMode` is `diorama`.
+
+### Constraints
+
+- Deterministic: identical signature + viewport always yields identical pixels (the visual-regression baseline depends on it).
+- No authored assets and no per-frame cost after the first draw.
+- Palette changes are a visual-baseline change: justify them in the PR, per `npm run test:visual`'s header.
+- The two `city-view-parallax-*` baselines pin `cityBackdrop: "skybox"`; `city-view-diorama` pins the diorama.
 
 ## Future directions (parked)
 

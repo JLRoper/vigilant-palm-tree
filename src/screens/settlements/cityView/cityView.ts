@@ -1,4 +1,4 @@
-import type { CityViewSize } from "@heroes/engine";
+import type { CityBackdropSignature, CityViewSize } from "@heroes/engine";
 import { cellsInDrawOrder, cityLayout, screenToGridCell } from "../../../core/cityGrid";
 import { drawCityView } from "../../../render/cityRenderer";
 import { buildCityScene } from "../../../render/scene/sceneBuilder/cityScene";
@@ -40,6 +40,7 @@ export class CityView {
   private designBox = new CityDesignBoxManager();
   private openSettlementId: string | null = null;
   private openDistrict: { q: number; r: number } | null = null;
+  private backdrop: CityBackdropSignature | null = null;
   private settlementName = "";
   private size: CityViewSize = 5;
   private ownerColor = "#888888";
@@ -161,9 +162,11 @@ export class CityView {
     buildings?: BuildingDef[],
     mapSeed?: number,
     district?: { q: number; r: number },
+    backdrop?: CityBackdropSignature,
   ): void {
     this.openSettlementId = settlementId;
     this.openDistrict = district ? { q: district.q, r: district.r } : null;
+    this.backdrop = backdrop ?? null;
     this.settlementName = district ? `${name} — District (${district.q}, ${district.r})` : name;
     this.size = district ? 5 : size;
     this.ownerColor = ownerColor;
@@ -252,6 +255,7 @@ export class CityView {
       cityMines: this.cityMines,
       upgrades: this.getSettlement()?.upgrade,
       district: this.openDistrict,
+      backdrop: this.backdrop,
       buildings: this.syncedBuildings(),
       ghost,
       selectedKeys: this.selectedKeys,
@@ -260,6 +264,7 @@ export class CityView {
       buildableCells: this.buildableCells(),
       citySettings: {
         spriteVariant: s.spriteVariant,
+        cityBackdrop: s.cityBackdrop,
         parallaxEnabled: s.parallaxEnabled,
         parallaxLayerCount: s.parallaxLayerCount,
         cityBgOffsetX: s.cityBgOffsetX,

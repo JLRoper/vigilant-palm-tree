@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.10.0] - 2026-10-18
+
+feat(cityview): biome settlement diorama backdrop
+
 ## [0.9.1] - 2026-10-17
 
 fix(economy): round stored settlement gold and warehouse quantities half-up to whole integers at the write points

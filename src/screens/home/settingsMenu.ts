@@ -10,11 +10,13 @@ import {
   resourceStyleOptions,
   growthRateBounds,
   spriteVariantOptions,
+  cityBackdropOptions,
   bgOffsetBounds,
   parallaxLayerCountBounds,
   maxZoomOutHexesWideBounds,
   clampMaxZoomOutHexesWide,
   PARALLAX_SPEEDS,
+  type CityBackdropMode,
   type GameSettings,
   type ResourceStyle,
 } from "../../state/settings";
@@ -623,6 +625,50 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     });
 
     children.push(variantRow);
+
+    // City view backdrop
+    const backdropRow = document.createElement("div");
+    backdropRow.style.display = "flex";
+    backdropRow.style.flexDirection = "column";
+    backdropRow.style.gap = "6px";
+
+    const backdropLabel = document.createElement("span");
+    backdropLabel.textContent = "City view backdrop";
+    backdropRow.appendChild(backdropLabel);
+
+    const backdropSelect = document.createElement("select");
+    backdropSelect.style.width = "100%";
+    backdropSelect.style.padding = "8px";
+    backdropSelect.style.fontSize = "12px";
+    backdropSelect.style.border = "1px solid #444";
+    backdropSelect.style.borderRadius = "4px";
+    backdropSelect.style.backgroundColor = "#1a1a1a";
+    backdropSelect.style.color = "#eee";
+    backdropSelect.style.accentColor = "#f77f00";
+
+    for (const option of cityBackdropOptions()) {
+      const opt = document.createElement("option");
+      opt.value = option.value;
+      opt.textContent = option.label;
+      backdropSelect.appendChild(opt);
+    }
+    backdropSelect.value = current.cityBackdrop;
+    backdropRow.appendChild(backdropSelect);
+
+    const backdropHint = document.createElement("div");
+    backdropHint.style.fontSize = "10px";
+    backdropHint.style.opacity = "0.55";
+    backdropHint.textContent = "Diorama derives its terrain palette from the settlement tile and its six neighbors. Watercolor skybox uses the static variants above.";
+    backdropRow.appendChild(backdropHint);
+
+    backdropSelect.addEventListener("change", () => {
+      updateSettings({ cityBackdrop: backdropSelect.value as CityBackdropMode });
+    });
+    refreshList.push(() => {
+      backdropSelect.value = settings().cityBackdrop;
+    });
+
+    children.push(backdropRow);
 
     const bgBounds = bgOffsetBounds();
 

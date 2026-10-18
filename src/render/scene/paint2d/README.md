@@ -1,6 +1,6 @@
 # `paint2d/` — Current Canvas2D Painter
 
-<!-- docs:verified 2026-10-17 -->
+<!-- docs:verified 2026-10-18 -->
 
 `paintScene(ctx, nodes, deps, frame?)` consumes the `SceneNode[]` union produced by `src/render/scene/sceneBuilder/`. It is the single Canvas2D painter for the adventure map, city view, and battle arena. Per-kind city-building painting lives in `index.ts`; there are no separate style-leaf painters.
 
@@ -11,6 +11,7 @@
 - `src/render/renderer.ts` paints the adventure scene; `src/render/cityRenderer.ts` remains a thin `paintScene` wrapper; `src/screens/combat/arena/paint.ts` adapts the arena.
 - `src/render/paint2dDefaults.ts` supplies sprite resolvers, settings, colors, and dependencies outside the pure painter.
 - `src/render/skybox.ts` owns the skybox `?url` imports and image/parallax caches.
+- `src/render/scene/paint2d/cityDiorama.ts` owns the biome-diorama city backdrop and its offscreen canvas cache; `paintCitySkybox` dispatches to it when the node's `backdropMode` is `diorama`.
 
 ## Boundary
 

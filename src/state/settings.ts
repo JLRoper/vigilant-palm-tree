@@ -13,6 +13,8 @@ export type ResourceStyle =
   | "iso-pile-smol"
   | "iso-bubbly";
 
+export type CityBackdropMode = "diorama" | "skybox";
+
 export interface GameSettings {
   moveDurationMs: number;
   enemyMoveDurationMs: number;
@@ -23,6 +25,7 @@ export interface GameSettings {
   territoryBorderWidth: number;
   populationGrowthRate: number;
   spriteVariant: number;
+  cityBackdrop: CityBackdropMode;
   cityBgOffsetX: number;
   cityBgOffsetY: number;
   buildingUpgradeConfirm: boolean;
@@ -61,6 +64,8 @@ const MIN_SPRITE_VARIANT = 1;
 const MAX_SPRITE_VARIANT = 5;
 const DEFAULT_SPRITE_VARIANT = 1;
 
+export const DEFAULT_CITY_BACKDROP: CityBackdropMode = "diorama";
+
 const MIN_GROWTH_RATE = 0.01;
 const MAX_GROWTH_RATE = 0.50;
 const DEFAULT_GROWTH_RATE = 0.10;
@@ -92,6 +97,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   territoryBorderWidth: DEFAULT_BORDER_WIDTH,
   populationGrowthRate: DEFAULT_GROWTH_RATE,
   spriteVariant: DEFAULT_SPRITE_VARIANT,
+  cityBackdrop: DEFAULT_CITY_BACKDROP,
   cityBgOffsetX: DEFAULT_BG_OFFSET,
   cityBgOffsetY: DEFAULT_BG_OFFSET,
   buildingUpgradeConfirm: true,
@@ -149,6 +155,10 @@ export function clampSpriteVariant(v: unknown): number {
   return DEFAULT_SPRITE_VARIANT;
 }
 
+export function clampCityBackdrop(v: unknown): CityBackdropMode {
+  return v === "skybox" ? "skybox" : "diorama";
+}
+
 export function clampBgOffset(v: number): number {
   if (!Number.isFinite(v)) return DEFAULT_BG_OFFSET;
   return Math.max(MIN_BG_OFFSET, Math.min(MAX_BG_OFFSET, Math.round(v)));
@@ -191,6 +201,13 @@ export function spriteVariantOptions(): readonly number[] {
   return [1, 2, 3, 4, 5];
 }
 
+export function cityBackdropOptions(): readonly { value: CityBackdropMode; label: string }[] {
+  return [
+    { value: "diorama", label: "Settlement diorama (biome)" },
+    { value: "skybox", label: "Watercolor skybox (static variants)" },
+  ];
+}
+
 export function updateSettings(patch: Partial<GameSettings>): GameSettings {
   const next: GameSettings = {
     moveDurationMs: clampMoveDurationMs(patch.moveDurationMs ?? current.moveDurationMs),
@@ -200,6 +217,7 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
     territoryBorderWidth: clampBorderWidth(patch.territoryBorderWidth ?? current.territoryBorderWidth),
     populationGrowthRate: clampGrowthRate(patch.populationGrowthRate ?? current.populationGrowthRate),
     spriteVariant: clampSpriteVariant(patch.spriteVariant ?? current.spriteVariant),
+    cityBackdrop: clampCityBackdrop(patch.cityBackdrop ?? current.cityBackdrop),
     cityBgOffsetX: clampBgOffset(patch.cityBgOffsetX ?? current.cityBgOffsetX),
     cityBgOffsetY: clampBgOffset(patch.cityBgOffsetY ?? current.cityBgOffsetY),
     buildingUpgradeConfirm: typeof patch.buildingUpgradeConfirm === "boolean"
@@ -266,6 +284,7 @@ function loadFromStorage(): GameSettings {
       territoryBorderWidth: clampBorderWidth(parsed.territoryBorderWidth ?? DEFAULT_BORDER_WIDTH),
       populationGrowthRate: clampGrowthRate(parsed.populationGrowthRate ?? DEFAULT_GROWTH_RATE),
       spriteVariant: clampSpriteVariant(parsed.spriteVariant),
+      cityBackdrop: clampCityBackdrop(parsed.cityBackdrop),
       cityBgOffsetX: clampBgOffset(parsed.cityBgOffsetX ?? DEFAULT_BG_OFFSET),
       cityBgOffsetY: clampBgOffset(parsed.cityBgOffsetY ?? DEFAULT_BG_OFFSET),
       buildingUpgradeConfirm: typeof parsed.buildingUpgradeConfirm === "boolean"

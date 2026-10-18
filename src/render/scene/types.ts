@@ -3,7 +3,7 @@ import type { ResourceType } from "../../map/resourceTiles";
 import type { Faction, HeroDirection } from "../../entities/hero";
 import type { HorseVariant } from "../../state/settings";
 import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase } from "@heroes/contracts";
-import type { BattleSide } from "@heroes/engine";
+import type { BattleSide, CityBackdropSignature } from "@heroes/engine";
 
 /** World-space pixel coordinates (pre-Camera-transform), same space axialToPixel() returns. */
 export interface WorldPoint {
@@ -214,6 +214,8 @@ export interface CitySkyboxNode {
   parallaxLayerCount: number;
   offsetX: number;
   offsetY: number;
+  backdrop?: CityBackdropSignature | null;
+  backdropMode?: "diorama" | "skybox";
 }
 
 export interface CityCellNode {
