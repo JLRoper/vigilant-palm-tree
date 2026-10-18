@@ -82,7 +82,9 @@ export class WorkforcePanel {
     this.menu.clearContent();
 
     const header = document.createElement("div");
-    header.textContent = `Workers: ${snapshot.assigned} assigned · ${snapshot.pool - snapshot.assigned} idle`;
+    header.textContent = snapshot.legacy
+      ? `Workers: ${snapshot.assigned} assigned · ${snapshot.pool - snapshot.assigned} idle · auto-staffed — first assignment normalizes the city`
+      : `Workers: ${snapshot.assigned} assigned · ${snapshot.pool - snapshot.assigned} idle`;
     Object.assign(header.style, {
       fontSize: "11px",
       lineHeight: "1.5",
@@ -172,16 +174,25 @@ export class WorkforcePanel {
     });
     row.appendChild(chip);
 
-    const role = document.createElement("span");
-    role.textContent = ROLE_LABELS[b.role];
-    Object.assign(role.style, {
-      fontSize: "9px",
-      opacity: "0.6",
-      textTransform: "uppercase",
-      letterSpacing: "0.04em",
+    const roles = document.createElement("span");
+    Object.assign(roles.style, {
+      display: "flex",
+      gap: "4px",
       flexShrink: "0",
     });
-    row.appendChild(role);
+    for (const role of b.roles) {
+      const tag = document.createElement("span");
+      tag.textContent = ROLE_LABELS[role];
+      Object.assign(tag.style, {
+        fontSize: "9px",
+        opacity: "0.6",
+        textTransform: "uppercase",
+        letterSpacing: "0.04em",
+        whiteSpace: "nowrap",
+      });
+      roles.appendChild(tag);
+    }
+    row.appendChild(roles);
 
     const minus = document.createElement("button");
     minus.textContent = "−";
@@ -201,23 +212,27 @@ export class WorkforcePanel {
     plus.style.padding = "0px 7px";
     plus.style.fontSize = "12px";
 
+    const base = snapshot.legacy ? 0 : (b.workers ?? max);
+
     const refresh = (): void => {
       value.textContent = b.workers === undefined ? "Auto" : String(b.workers);
       value.title = b.workers === undefined ? `Auto-staffed (max ${max})` : `Of ${max} worker slots`;
-      const plusDisabled = !canAssignWorkers(b.workers, max, 1, snapshot.pool, snapshot.assigned);
+      const plusDisabled = !canAssignWorkers(snapshot.legacy ? 0 : b.workers, max, 1, snapshot.pool, snapshot.assigned);
       plus.disabled = plusDisabled;
       plus.style.opacity = plusDisabled ? "0.4" : "1";
       plus.style.cursor = plusDisabled ? "not-allowed" : "pointer";
+      const minusDisabled = base <= 0;
+      minus.disabled = minusDisabled;
+      minus.style.opacity = minusDisabled ? "0.4" : "1";
+      minus.style.cursor = minusDisabled ? "not-allowed" : "pointer";
     };
 
     minus.addEventListener("click", () => {
-      const current = b.workers ?? max;
-      this.onAssignWorkers(b.gx, b.gy, Math.max(0, current - 1), b.district ?? undefined);
+      this.onAssignWorkers(b.gx, b.gy, Math.max(0, base - 1), b.district ?? undefined);
       this.update();
     });
     plus.addEventListener("click", () => {
-      const current = b.workers ?? max;
-      this.onAssignWorkers(b.gx, b.gy, Math.min(current + 1, max), b.district ?? undefined);
+      this.onAssignWorkers(b.gx, b.gy, Math.min(base + 1, max), b.district ?? undefined);
       this.update();
     });
 

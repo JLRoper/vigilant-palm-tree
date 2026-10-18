@@ -11,6 +11,9 @@ import {
   clampMorale,
   clampWarehouseNonNegative,
   FOOD_PER_POPULATION,
+  WAGE_POPULATION_PER_GOLD,
+  settlementDailyWage,
+  applySettlementWages,
   MORALE_DECAY_PER_DEFICIT_RATIO,
   LOW_MORALE_EXTRA_DECAY,
   MORALE_RECOVERY_PER_SUPPLIED_TURN,
@@ -51,6 +54,43 @@ test("foodRequired returns ceil(population / FOOD_PER_POPULATION)", () => {
 
 test("FOOD_PER_POPULATION defaults to 100", () => {
   assert.equal(FOOD_PER_POPULATION, 100);
+});
+
+test("WAGE_POPULATION_PER_GOLD defaults to 100", () => {
+  assert.equal(WAGE_POPULATION_PER_GOLD, 100);
+});
+
+test("settlementDailyWage floors population / 100 (wages are whole gold)", () => {
+  assert.equal(settlementDailyWage(makeSettlement({ population: 0 })), 0);
+  assert.equal(settlementDailyWage(makeSettlement({ population: 99 })), 0, "under 100 people owe no whole gold");
+  assert.equal(settlementDailyWage(makeSettlement({ population: 100 })), 1);
+  assert.equal(settlementDailyWage(makeSettlement({ population: 101 })), 1);
+  assert.equal(settlementDailyWage(makeSettlement({ population: 999 })), 9);
+});
+
+test("settlementDailyWage treats a non-finite population as zero", () => {
+  assert.equal(settlementDailyWage(makeSettlement({ population: Number.NaN })), 0);
+});
+
+test("applySettlementWages clamps the treasury at zero, never negative", () => {
+  const poor = applySettlementWages(makeSettlement({ population: 500, gold: 3 }));
+  assert.equal(poor.gold, 0, "a 5-gold wage against a 3-gold purse leaves 0");
+  const empty = applySettlementWages(makeSettlement({ population: 500, gold: 0 }));
+  assert.equal(empty.gold, 0);
+});
+
+test("applySettlementWages preserves fractional gold exactly (no rounding step)", () => {
+  const s = applySettlementWages(makeSettlement({ population: 500, gold: 500.55 }));
+  assert.equal(s.gold, 495.55);
+  assert.equal(s.gold, 500.55 - 5, "the subtraction is exact, not rounded back to a whole coin");
+});
+
+test("applySettlementWages is a no-op (same reference) when no wage is owed", () => {
+  const noPop = makeSettlement({ population: Number.NaN, gold: 42 });
+  assert.equal(applySettlementWages(noPop), noPop, "a non-finite population owes nothing and keeps the exact reference");
+  assert.equal(noPop.gold, 42);
+  const small = makeSettlement({ population: 99, gold: 42 });
+  assert.equal(applySettlementWages(small), small, "below 100 population the daily wage is zero");
 });
 
 test("buildingUpkeepRequired sums per-building registry upkeep (0 with no buildings)", () => {

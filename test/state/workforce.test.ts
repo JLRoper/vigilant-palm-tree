@@ -114,22 +114,116 @@ test("assignWorkers: pool_exhausted only when incrementing past the pool", () =>
   assert.equal(assignedWorkersExplicit(b1.state.settlements.s0), 2);
 });
 
-test("assignWorkers: decrease and legacy→explicit-max conversion are allowed while oversubscribed", () => {
+test("assignWorkers: first assign normalizes every legacy building in the settlement", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 100 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 200 }),
+    buildings: [building("farmField", 0, 0), building("farmField", 1, 0), building("house", 2, 0)],
+  });
+  const r = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 2 });
+  assert.equal(r.ok, true);
+  assert.deepEqual(
+    r.state.settlements.s0.buildings.map((b) => b.workers),
+    [2, 0, 0],
+    "the target gets the assignment; every other legacy building is pinned to explicit 0",
+  );
+  assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 2);
+  assert.deepEqual(
+    state.settlements.s0.buildings.map((b) => b.workers),
+    [undefined, undefined, undefined],
+    "the input state stays legacy",
+  );
+});
+
+test("assignWorkers: first assign with an empty pool is refused atomically and persists no normalization", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 99 }),
     buildings: [building("farmField", 0, 0), building("farmField", 1, 0)],
   });
-  const aToMax = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 2 });
-  assert.equal(aToMax.ok, true, "legacy undefined → explicit max is not an increment");
-  const bToMax = assignWorkers(aToMax.state, { settlementId: "s0", gx: 1, gy: 0, workers: 2 });
-  assert.equal(bToMax.ok, true);
-  assert.equal(assignedWorkersExplicit(bToMax.state.settlements.s0), 4, "oversubscribed by 3 over the pool of 1");
-  const down = assignWorkers(bToMax.state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
-  assert.equal(down.ok, true, "decreases are always allowed");
+  const r = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "pool_exhausted");
+  assert.equal(r.state, state, "a refused assignment returns the original state");
+  assert.deepEqual(
+    r.state.settlements.s0.buildings.map((b) => b.workers),
+    [undefined, undefined],
+    "the settlement is still legacy after the refusal",
+  );
+});
+
+test("assignWorkers: a legacy first assign is billed against the whole target", () => {
+  const legacyTownHall = (): SettlementState => ({
+    ...makeSettlement("s0", 0, 2, 2, { population: 200 }),
+    buildings: [building("townHall", 0, 0)],
+  });
+  const ok = assignWorkers(stateWithSettlement(legacyTownHall()), { settlementId: "s0", gx: 0, gy: 0, workers: 2 });
+  assert.equal(ok.ok, true, "2 workers fit the pool of 2");
+  assert.equal(ok.state.settlements.s0.buildings[0].workers, 2);
+
+  const rejected = assignWorkers(stateWithSettlement(legacyTownHall()), { settlementId: "s0", gx: 0, gy: 0, workers: 3 });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.reason, "pool_exhausted");
+  assert.equal(rejected.state.settlements.s0.buildings[0].workers, undefined, "the refusal keeps the settlement legacy");
+});
+
+test("assignWorkers: after the first touch increments are gated while decrements stay free", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 200 }),
+    buildings: [building("farmField", 0, 0), building("farmField", 1, 0)],
+  });
+  const first = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 2 });
+  assert.equal(first.ok, true);
+  const blocked = assignWorkers(first.state, { settlementId: "s0", gx: 1, gy: 0, workers: 1 });
+  assert.equal(blocked.ok, false, "a second assign reads explicit 0 and cannot refill the spent pool");
+  assert.equal(blocked.reason, "pool_exhausted");
+  assert.equal(blocked.state, first.state, "nothing persisted");
+  const down = assignWorkers(first.state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
+  assert.equal(down.ok, true, "decrements are always allowed");
+  assert.equal(assignedWorkersExplicit(down.state.settlements.s0), 1);
+  const refill = assignWorkers(down.state, { settlementId: "s0", gx: 0, gy: 0, workers: 2 });
+  assert.equal(refill.ok, true, "refilling back to the pool ceiling fits");
+  assert.equal(assignedWorkersExplicit(refill.state.settlements.s0), 2);
+  const reblocked = assignWorkers(refill.state, { settlementId: "s0", gx: 1, gy: 0, workers: 1 });
+  assert.equal(reblocked.ok, false, "increments stay gated against the full final total");
+  assert.equal(reblocked.reason, "pool_exhausted");
+});
+
+test("assignWorkers: decrements stay allowed while explicit staffing oversubscribes the pool", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 100 }),
+    buildings: [building("farmField", 0, 0, { workers: 2 }), building("farmField", 1, 0, { workers: 2 })],
+  });
+  const down = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
+  assert.equal(down.ok, true, "4 explicit workers over a pool of 1 still shrink");
   assert.equal(assignedWorkersExplicit(down.state.settlements.s0), 3);
   const upAgain = assignWorkers(down.state, { settlementId: "s0", gx: 0, gy: 0, workers: 2 });
   assert.equal(upAgain.ok, false);
   assert.equal(upAgain.reason, "pool_exhausted", "re-incrementing while oversubscribed stays refused");
+  assert.equal(upAgain.state, down.state, "a refused increment returns the state untouched");
+});
+
+test("assignWorkers: a district first assign normalizes main and every district", () => {
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
+    buildings: [building("farmField", 0, 0)],
+    districts: {
+      "3,2": { q: 3, r: 2, citySpots: [], buildings: [building("farmField", 0, 0), building("house", 1, 0)] },
+      "4,2": { q: 4, r: 2, citySpots: [], buildings: [building("farmField", 0, 0)] },
+    },
+  };
+  const r = assignWorkers(stateWithSettlement(settlement), {
+    settlementId: "s0",
+    gx: 0,
+    gy: 0,
+    workers: 1,
+    district: { q: 3, r: 2 },
+  });
+  assert.equal(r.ok, true);
+  const after = r.state.settlements.s0;
+  assert.equal(after.buildings[0].workers, 0, "main buildings normalize");
+  assert.equal(after.districts?.["3,2"].buildings[0].workers, 1, "the district target gets the assignment");
+  assert.equal(after.districts?.["3,2"].buildings[1].workers, 0, "sibling district buildings normalize");
+  assert.equal(after.districts?.["4,2"].buildings[0].workers, 0, "other districts normalize too");
+  assert.equal(assignedWorkersExplicit(after), 1);
 });
 
 test("assignWorkers: an explicit 0 is kept and shuts output down", () => {

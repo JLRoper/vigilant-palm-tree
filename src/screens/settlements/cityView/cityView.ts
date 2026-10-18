@@ -42,15 +42,20 @@ export interface CitySelectionSnapshot {
   settlementId: string | null;
 }
 
-/** Workforce role of a building, resolved in the order listed: a recruiter that
- * also accelerates upgrades (mageGuild) reports "recruiter". */
+/** Workforce tags of a building, in display order: producer, market, recruiter,
+ * upgrade-accel. A building can carry several (farmhouse → producer+recruiter,
+ * mageGuild → recruiter+upgrade-accel); a building with none reports ["idle"]. */
 export type WorkforceBuildingRole = "producer" | "market" | "recruiter" | "upgrade-accel" | "idle";
 
 /** Live staffing snapshot for the workforce panel (district-true: each entry
- * carries its OWN building's district coords, null for main-settlement ones). */
+ * carries its OWN building's district coords, null for main-settlement ones).
+ * legacy = the whole live settlement (main + ALL districts) still has buildings
+ * without an explicit workers count: the first assignment normalizes them, so
+ * stepper/drag targets compute against the post-normalization base 0. */
 export interface WorkforceSnapshot {
   pool: number;
   assigned: number;
+  legacy: boolean;
   buildings: Array<{
     gx: number;
     gy: number;
@@ -59,7 +64,7 @@ export interface WorkforceSnapshot {
     staffable: boolean;
     max: number;
     workers: number | undefined;
-    role: WorkforceBuildingRole;
+    roles: WorkforceBuildingRole[];
   }>;
 }
 
@@ -478,12 +483,26 @@ export class CityView {
     return null;
   }
 
-  private roleFor(kind: BuildingKind): WorkforceBuildingRole {
-    if (WORKFORCE_UPGRADE_ACCEL_KINDS.includes(kind)) return "upgrade-accel";
-    if (isProducerKind(kind)) return "producer";
-    if (kind === "market") return "market";
-    if (isRecruitBuilding(kind)) return "recruiter";
-    return "idle";
+  /** True while the whole live settlement (main + all districts) still has any
+   * building without an explicit workers count -- the UI-side trigger for the
+   * first-touch normalization the assignWorkers reducer performs. */
+  private isLegacyWorkforce(s: SettlementState): boolean {
+    const anyUnassigned = (buildings: BuildingDef[]): boolean =>
+      buildings.some((b) => b.workers === undefined);
+    if (anyUnassigned(s.buildings)) return true;
+    for (const d of Object.values(s.districts ?? {})) {
+      if (anyUnassigned(d.buildings)) return true;
+    }
+    return false;
+  }
+
+  private rolesFor(kind: BuildingKind): WorkforceBuildingRole[] {
+    const roles: WorkforceBuildingRole[] = [];
+    if (isProducerKind(kind)) roles.push("producer");
+    if (kind === "market") roles.push("market");
+    if (isRecruitBuilding(kind)) roles.push("recruiter");
+    if (WORKFORCE_UPGRADE_ACCEL_KINDS.includes(kind)) roles.push("upgrade-accel");
+    return roles.length > 0 ? roles : ["idle"];
   }
 
   private snapshotEntry(b: BuildingDef, district: { q: number; r: number } | null): WorkforceSnapshot["buildings"][number] {
@@ -496,7 +515,7 @@ export class CityView {
       staffable: max >= 1,
       max,
       workers: b.workers,
-      role: this.roleFor(b.kind),
+      roles: this.rolesFor(b.kind),
     };
   }
 
@@ -520,6 +539,7 @@ export class CityView {
     return {
       pool: totals.pool,
       assigned: totals.assigned,
+      legacy: live ? this.isLegacyWorkforce(live) : false,
       buildings,
     };
   }
@@ -545,8 +565,9 @@ export class CityView {
   }
 
   /** Canvas mousedown while a worker drag is pending: the pressed cell becomes
-   * the grab building; validate (workers ?? max) + delta with the shared
-   * predicate (range AND pool) and disarm the drag when invalid. */
+   * the grab building; validate the legacy-aware base (0 while the settlement
+   * is still legacy, else workers ?? max) + delta with the shared predicate
+   * (range AND pool) and disarm the drag when invalid. */
   onCanvasMouseDown(x: number, y: number): void {
     const drag = this.workerDrag;
     if (!drag) return;
@@ -562,15 +583,16 @@ export class CityView {
     const hit = this.workforceBuildingAt(cell.gx, cell.gy);
     const max = hit ? buildingMaxWorkers(hit.building.kind) : 0;
     const { pool, assigned } = this.workforceTotals();
-    if (!canAssignWorkers(hit?.building.workers, max, drag.delta, pool, assigned)) {
+    const current = this.isLegacyWorkforce(live) ? 0 : hit?.building.workers;
+    if (!canAssignWorkers(current, max, drag.delta, pool, assigned)) {
       this.workerDrag = null;
     }
   }
 
   /** Canvas mouseup commits the drag on the hovered cell's building: the target
-   * is validated with the shared predicate (range + pool for +1) and the commit
-   * carries the TARGET building's own district (undefined = main settlement).
-   * The drag state clears either way. */
+   * is computed from the legacy-aware base and validated with the shared
+   * predicate (range + pool for +1); the commit carries the TARGET building's
+   * own district (undefined = main settlement). The drag state clears either way. */
   onCanvasMouseUp(x: number, y: number): void {
     const drag = this.workerDrag;
     if (!drag) return;
@@ -586,8 +608,10 @@ export class CityView {
     if (!hit) return;
     const max = buildingMaxWorkers(hit.building.kind);
     const totals = this.workforceTotals();
-    if (!canAssignWorkers(hit.building.workers, max, drag.delta, totals.pool, totals.assigned)) return;
-    const next = (hit.building.workers ?? max) + drag.delta;
+    const legacy = this.isLegacyWorkforce(live);
+    if (!canAssignWorkers(legacy ? 0 : hit.building.workers, max, drag.delta, totals.pool, totals.assigned)) return;
+    const base = legacy ? 0 : (hit.building.workers ?? max);
+    const next = base + drag.delta;
     this.onAssignWorkers?.(hit.building.gx, hit.building.gy, next, hit.district ?? undefined);
     this.notifyWorkforceListeners();
   }
@@ -614,6 +638,7 @@ export class CityView {
     return {
       pool: totals.pool,
       assigned: totals.assigned,
+      legacy: this.isLegacyWorkforce(live),
       district,
       onChange: () => this.notifyWorkforceListeners(),
       onAssignWorkers: (gx, gy, workers, d) => this.onAssignWorkers?.(gx, gy, workers, d),

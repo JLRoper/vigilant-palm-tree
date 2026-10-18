@@ -2,7 +2,7 @@ import type { ApplyEndOfTurnResult, GameState, HeroId, HeroState, SettlementId, 
 import { resetHeroMovement } from "../hero/move";
 import { produceSettlementResources } from "../settlement/produceResources";
 import { runAutoTrade } from "../economy/trade";
-import { applySettlementConsumption, applyMoraleDecay, applyEffectiveIncome } from "../economy/consumption";
+import { applySettlementConsumption, applySettlementWages, applyMoraleDecay, applyEffectiveIncome } from "../economy/consumption";
 
 /**
  * End-of-turn options. `legacyAutoTrade` is the game-level instant auto-trade
@@ -31,7 +31,7 @@ export function applyEndOfTurnDetailed(state: GameState, opts?: ApplyEndOfTurnOp
   // 2. Auto-trade for active player's settlements (legacy gate: absent → on)
   const autoTrade = runAutoTrade(newSettlements, playerId, opts?.legacyAutoTrade ?? true);
   newSettlements = autoTrade.settlements;
-  // 3. Morale decay + consumption + effective income for active player's settlements
+  // 3. Morale decay + consumption + daily wages + effective income for active player's settlements
   for (const s of Object.values(newSettlements)) {
     if (s.ownerId !== playerId) continue;
     // Morale is evaluated on the PRE-consumption settlement: a settlement holding
@@ -39,7 +39,8 @@ export function applyEndOfTurnDetailed(state: GameState, opts?: ApplyEndOfTurnOp
     // post-consumption (now zero) warehouse charged it a full -10 for being fed.
     const moraleAfter = applyMoraleDecay(s);
     const consumed = applySettlementConsumption(moraleAfter);
-    newSettlements[s.id] = applyEffectiveIncome(consumed);
+    const paid = applySettlementWages(consumed);
+    newSettlements[s.id] = applyEffectiveIncome(paid);
   }
   return {
     state: { ...state, heroes: newHeroes, settlements: newSettlements, dirty: true },

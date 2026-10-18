@@ -1,6 +1,6 @@
 # Player Guide
 
-<!-- docs:verified 2026-10-17 -->
+<!-- docs:verified 2026-10-18 -->
 
 ## Start a Game
 
@@ -14,7 +14,7 @@ To charter a settlement, use a selected hero on your turn and meet the visible r
 
 ## Settlements and Logistics
 
-Build from the city palette, recruit from eligible completed troop buildings, and manage the garrison from the settlement panel. Each settlement has a **worker pool** of `floor(population / 100)` you can assign per building — staff workers to scale production, market gold, recruitment draft recharge, and town-hall upgrade speed (press `w` in the city view for the workforce panel; assigning `0` shuts a building down). Six resource types exist: gold, wood, stone, iron, arcane, and food. Food is not generated on world-map tiles; food spots/buildings, stockpiles, consumption, and weekly troop upkeep are live.
+Build from the city palette, recruit from eligible completed troop buildings, and manage the garrison from the settlement panel. Each settlement has a **worker pool** of `floor(population / 100)` you can assign per building — staff workers to scale production, market gold, recruitment draft recharge (higher-tier units refill more slowly), and town-hall upgrade speed (press `w` in the city view for the workforce panel; assigning `0` shuts a building down). The first assignment in a settlement normalizes it: every building you hadn't staffed drops to `0` until you crew it — settlements you never touch keep their legacy auto-staffing. Each settlement also owes a daily wage of `1 gold per 100 population`; it simply stops when the treasury is empty (no debt, no morale penalty). Six resource types exist: gold, wood, stone, iron, arcane, and food. Food is not generated on world-map tiles; food spots/buildings, stockpiles, consumption, and weekly troop upkeep are live.
 
 Wagons carry physical caravan cargo between compatible routes. New games do not teleport resources through shared storage; deliveries wait for destination capacity. Hero and garrison upkeep is charged weekly, so check food stocks and income before the charge.
 

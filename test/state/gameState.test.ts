@@ -482,7 +482,8 @@ test("applyEndOfTurn awards population*goldTax into each owned settlement's trea
     ],
   });
   const next = applyEndOfTurn(s);
-  assert.equal(next.settlements.s0.gold, 600);
+  // 100 held + 500 income - 5 gold of daily wages for the 500 people.
+  assert.equal(next.settlements.s0.gold, 595);
   assert.equal(next.settlements.s0b.gold, 500);
   assert.equal(next.settlements.s1.gold, 50);
   assert.equal(next.dirty, true);
@@ -692,7 +693,8 @@ test("applyEndOfTurn does not award gold to non-active-player settlements", () =
     ],
   });
   const next = applyEndOfTurn(s);
-  assert.equal(next.settlements.s0.gold, 600);
+  // The active player's 500 people pay 5 gold of daily wages before income: 100 + 500 - 5.
+  assert.equal(next.settlements.s0.gold, 595);
   assert.equal(next.settlements.s1.gold, 50);
 });
 
@@ -965,6 +967,27 @@ test("applyEndOfTurn consumes food from the warehouse for the active player", ()
   const next = applyEndOfTurn(s);
   assert.equal(next.settlements.s0.warehouse.food, 5);
   assert.equal(next.settlements.s0.morale, 100);
+});
+
+test("applyEndOfTurn charges daily wages (1 gold per 100 people) before income lands", () => {
+  // The wage twin of the food-consumption test above: the active player's
+  // settlements pay floor(population / 100) gold at end of turn, while a
+  // non-active-player settlement pays nothing during this turn.
+  const s = makeState({
+    players: [
+      makePlayer(0, "player", "Player 1", ["h0"], ["s0", "s0b"]),
+      makePlayer(1, "ai", "AI", ["h1"], ["s1"]),
+    ],
+    settlements: [
+      { ...makeSettlement("s0", 0, 2, 2, { population: 500, goldTax: 0, gold: 100 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 100 } },
+      { ...makeSettlement("s0b", 0, 3, 3, { population: 500, goldTax: 1, gold: 100 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 100 } },
+      { ...makeSettlement("s1", 1, 18, 4, { population: 500, goldTax: 1, gold: 100 }), warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 100 } },
+    ],
+  });
+  const next = applyEndOfTurn(s);
+  assert.equal(next.settlements.s0.gold, 95, "500 people cost 5 gold of wages");
+  assert.equal(next.settlements.s0b.gold, 595, "the wage is taken before income lands: 100 - 5 + 500");
+  assert.equal(next.settlements.s1.gold, 100, "a non-active-player settlement pays no wages on another player's turn");
 });
 
 test("applyEndOfTurn decays morale when food missing", () => {

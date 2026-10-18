@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applyDraftRecharge, recruitUnits, settlementStacks } from "@heroes/engine";
+import type { UnitType } from "@heroes/engine";
 import type { BuildingDef, SettlementState } from "@heroes/contracts";
 import { makeSettlement, makeState } from "../charter/_helpers";
 
@@ -11,6 +12,28 @@ function building(kind: BuildingDef["kind"], gx: number, gy: number, overrides: 
 function settle(buildings: BuildingDef[], districts?: SettlementState["districts"]): SettlementState {
   return { ...makeSettlement("s0", 0, 2, 2, { buildings }), ...(districts ? { districts } : {}) };
 }
+
+function tierUnit(id: string, tier: NonNullable<UnitType["tier"]>): UnitType {
+  return {
+    id,
+    name: id,
+    attack: 1,
+    defence: 1,
+    health: 1,
+    speed: 1,
+    description: "",
+    advantageType: "infantry",
+    specialty: "",
+    specialtyPriority: 0,
+    tier,
+  };
+}
+
+const TIERED_CATALOG: Record<string, UnitType> = {
+  peasant: tierUnit("peasant", 1),
+  swordsman: tierUnit("swordsman", 2),
+  mage: tierUnit("mage", 6),
+};
 
 test("applyDraftRecharge skips legacy buildings that carry no draft record", () => {
   const settlements: Record<string, SettlementState> = { s0: settle([building("barracks", 2, 3)]) };
@@ -69,6 +92,81 @@ test("applyDraftRecharge is deterministic", () => {
   });
   const a = applyDraftRecharge(input());
   const b = applyDraftRecharge(input());
+  assert.deepEqual(a, b);
+});
+
+test("applyDraftRecharge scales the daily rate by the unit's tier", () => {
+  const out = applyDraftRecharge(
+    {
+      s0: settle([
+        building("barracks", 2, 3, { workers: 0, draft: { swordsman: 0 } }),
+        building("farmhouse", 4, 3, { workers: 0, draft: { peasant: 0 } }),
+        building("mageGuild", 6, 3, { workers: 0, draft: { mage: 0 } }),
+      ]),
+    },
+    TIERED_CATALOG,
+  );
+  assert.equal(out.s0.buildings[0].draft?.swordsman, 0.2, "tier 2 → 0.25 × 0.8");
+  assert.equal(out.s0.buildings[1].draft?.peasant, 0.25, "tier 1 keeps the 0.25 base");
+  assert.equal(out.s0.buildings[2].draft?.mage, 0.075, "tier 6 → 0.25 × 0.3");
+});
+
+test("applyDraftRecharge keeps the effort multiplier on top of the tier multiplier", () => {
+  const out = applyDraftRecharge(
+    { s0: settle([building("barracks", 2, 3, { workers: 4, draft: { swordsman: 0 } })]) },
+    TIERED_CATALOG,
+  );
+  assert.equal(out.s0.buildings[0].draft?.swordsman, 0.4, "full staff tier 2 → 0.2 × 2");
+});
+
+test("applyDraftRecharge still caps tier-scaled entries at draftMax", () => {
+  const out = applyDraftRecharge(
+    { s0: settle([building("barracks", 2, 3, { workers: 4, draft: { swordsman: 2.75 } })]) },
+    TIERED_CATALOG,
+  );
+  assert.equal(out.s0.buildings[0].draft?.swordsman, 3, "2.75 + 0.4 is clamped to 3");
+});
+
+test("applyDraftRecharge falls back to the base rate for units missing from the catalog", () => {
+  const input = (): Record<string, SettlementState> => ({
+    s0: settle([building("barracks", 2, 3, { workers: 0, draft: { swordsman: 0 } })]),
+  });
+  const empty = applyDraftRecharge(input(), {});
+  assert.equal(empty.s0.buildings[0].draft?.swordsman, 0.25, "empty catalog → multiplier 1");
+  const partial = applyDraftRecharge(input(), { mage: tierUnit("mage", 6) });
+  assert.equal(partial.s0.buildings[0].draft?.swordsman, 0.25, "missing entry → multiplier 1");
+});
+
+test("applyDraftRecharge drains a tier-7 pool at 0.05/day", () => {
+  const out = applyDraftRecharge(
+    { s0: settle([building("barracks", 2, 3, { workers: 0, draft: { swordsman: 0 } })]) },
+    { swordsman: tierUnit("swordsman", 7) },
+  );
+  assert.equal(out.s0.buildings[0].draft?.swordsman, 0.05, "tier 7 → 0.25 × 0.2");
+});
+
+test("applyDraftRecharge applies tier multipliers to district buildings", () => {
+  const districts: SettlementState["districts"] = {
+    "3,2": {
+      q: 3,
+      r: 2,
+      citySpots: [],
+      buildings: [building("barracks", 1, 2, { workers: 0, draft: { swordsman: 0 } })],
+    },
+  };
+  const out = applyDraftRecharge({ s0: settle([], districts) }, TIERED_CATALOG);
+  assert.equal(out.s0.districts?.["3,2"].buildings[0].draft?.swordsman, 0.2);
+});
+
+test("tier-scaled applyDraftRecharge is deterministic", () => {
+  const input = (): Record<string, SettlementState> => ({
+    s0: settle([
+      building("barracks", 2, 3, { workers: 4, draft: { swordsman: 1.1 } }),
+      building("mageGuild", 6, 3, { workers: 0, draft: { mage: 0.4 } }),
+    ]),
+  });
+  const a = applyDraftRecharge(input(), TIERED_CATALOG);
+  const b = applyDraftRecharge(input(), TIERED_CATALOG);
   assert.deepEqual(a, b);
 });
 

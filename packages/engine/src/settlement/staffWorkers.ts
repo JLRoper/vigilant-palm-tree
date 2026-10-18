@@ -89,6 +89,27 @@ function writeWorkers(settlement: SettlementState, located: LocatedBuilding, wor
   };
 }
 
+function hasLegacyStaffing(settlement: SettlementState): boolean {
+  if (settlement.buildings.some((b) => b.workers === undefined)) return true;
+  for (const d of Object.values(settlement.districts ?? {})) {
+    if (d.buildings.some((b) => b.workers === undefined)) return true;
+  }
+  return false;
+}
+
+function normalizeStaffing(settlement: SettlementState): SettlementState {
+  const normalizeList = (buildings: BuildingDef[]): BuildingDef[] =>
+    buildings.map((b) => (b.workers === undefined ? { ...b, workers: 0 } : b));
+  const buildings = normalizeList(settlement.buildings);
+  const districts = settlement.districts;
+  if (!districts) return { ...settlement, buildings };
+  const nextDistricts: Record<string, DistrictState> = {};
+  for (const [key, d] of Object.entries(districts)) {
+    nextDistricts[key] = { ...d, buildings: normalizeList(d.buildings) };
+  }
+  return { ...settlement, buildings, districts: nextDistricts };
+}
+
 export function assignWorkers(state: GameState, opts: AssignWorkersOptions): AssignWorkersResult {
   const settlement = state.settlements[opts.settlementId];
   if (!settlement) return { state, ok: false, reason: "no_settlement" };
@@ -101,8 +122,11 @@ export function assignWorkers(state: GameState, opts: AssignWorkersOptions): Ass
   if (!Number.isInteger(opts.workers) || opts.workers < 0 || opts.workers > maxWorkers) {
     return { state, ok: false, reason: "invalid_workers" };
   }
-  const updatedSettlement = writeWorkers(settlement, located, opts.workers);
-  if (opts.workers > (building.workers ?? maxWorkers)) {
+  const normalized = hasLegacyStaffing(settlement) ? normalizeStaffing(settlement) : settlement;
+  const target = normalized === settlement ? located : locateBuilding(normalized, opts.gx, opts.gy, opts.district);
+  if (!target) return { state, ok: false, reason: "no_building" };
+  const updatedSettlement = writeWorkers(normalized, target, opts.workers);
+  if (opts.workers > (building.workers ?? 0)) {
     if (assignedWorkersExplicit(updatedSettlement) > workforcePool(updatedSettlement)) {
       return { state, ok: false, reason: "pool_exhausted" };
     }

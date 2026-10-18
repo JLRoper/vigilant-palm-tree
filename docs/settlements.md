@@ -1,6 +1,6 @@
 # Settlements
 
-<!-- docs:verified 2026-10-17 -->
+<!-- docs:verified 2026-10-18 -->
 
 The player's claim on the world. Settlements come in two forms: **initial castles** (pre-placed at game start via `castlePlacement`) and **charter-founded settlements** (created by heroes via expedition).
 
@@ -182,15 +182,17 @@ Caps are derived (`settlement/capacity.ts`) and **soft**: an addition is clamped
 
 ### Workforce staffing (2026-10-17)
 
-Each settlement derives a worker pool of **`floor(population / 100)`** (`workforcePool` in `packages/engine/src/settlement/workforce.ts`), shared across main-city and district buildings. Workers are assigned per building via the `AssignWorkers` command (`packages/contracts/src/commands/assignWorkers.ts` — reducer in `packages/engine/src/settlement/staffWorkers.ts`, rejection reasons `no_settlement` / `unowned_settlement` / `no_building` / `not_staffable` / `invalid_workers` / `pool_exhausted`), emitting a `WorkersAssigned` EngineEvent. `BuildingDef.workers` **undefined = legacy auto-staffed** (effort 1, old saves unchanged); an explicit number scales the building's effort `min(workers / maxWorkers, 1)` and `0` shuts it down. Roles per kind:
+Each settlement derives a worker pool of **`floor(population / 100)`** (`workforcePool` in `packages/engine/src/settlement/workforce.ts`), shared across main-city and district buildings. Workers are assigned per building via the `AssignWorkers` command (`packages/contracts/src/commands/assignWorkers.ts` — reducer in `packages/engine/src/settlement/staffWorkers.ts`, rejection reasons `no_settlement` / `unowned_settlement` / `no_building` / `not_staffable` / `invalid_workers` / `pool_exhausted`), emitting a `WorkersAssigned` EngineEvent. `BuildingDef.workers` **undefined = legacy auto-staffed** (effort 1) — an untouched legacy settlement behaves exactly as before, but the **first assignment normalizes the whole settlement** (2026-10-18): every building without an explicit count — main city and every district — becomes explicit `workers: 0` (idle until staffed), then the assigned building receives the chosen count. New buildings placed into an already-normalized settlement start at `workers: 0`; new buildings in an untouched legacy settlement keep legacy auto-staffing. An explicit number scales the building's effort `min(workers / maxWorkers, 1)` and `0` shuts it down. Role tags per kind — not exclusive, the panel shows all of them (`farmhouse` = producer+recruiter, `mageGuild` = recruiter+upgrade-accel):
 
 - **Producers** (goldMine, woodcutterHut, stoneMine, ironMine, arcaneFont, farmField, farmhouse, granary): output scales `round(base × cellMultiplier × effort)`.
 - **`market`**: flat `goldPerTurn` × effort lands in the treasury (F2 resolved).
-- **Recruit kinds (19):** each recruits from a per-unitTypeId **draft pool** (`draftMax` 3; `draftPerDay` 0.25 × `(1 + effort)` reclaimed daily on the round wrap, `applyDraftRecharge`). Recruiting consumes the pool (rejection `draft_pool_empty` when the count exceeds `floor` of the pool) and still costs gold/resources; `draft` undefined = full pool (legacy).
+- **Recruit kinds (19):** each recruits from a per-unitTypeId **draft pool** (`draftMax` 3; `draftPerDay` 0.25 × `(1 + effort)` × tier multiplier reclaimed daily on the round wrap, `applyDraftRecharge` — tier-scaled since 2026-10-18, tiers 1–7 → ×1 / ×0.8 / ×0.65 / ×0.5 / ×0.4 / ×0.3 / ×0.2 per `TIER_DRAFT_RECHARGE_MULTIPLIER` in `packages/engine/src/units.ts`, so higher-tier units refill slower; catalog-less callers → ×1). Recruiting consumes the pool (rejection `draft_pool_empty` when the count exceeds `floor` of the pool) and still costs gold/resources; `draft` undefined = full pool (legacy).
 - **`townHall` + `mageGuild`:** staffing accelerates the settlement's active upgrade timer — see the Upgrade process below.
 - Every other kind holds workers **inert** (parked). Per-kind caps (`buildingMaxWorkers`): producers 3 (farmField/farmhouse/granary 2), recruit kinds 4, market/townHall/mageGuild 3, house 1, apartment 2, all others 2.
 
-Client: per-building worker stepper and draft-pool readouts in the city-view building menu, a floating workforce panel (`w` opens it; drag workers onto buildings; geometry key `workforcePanel`), a Workforce row in the settlement info menu, and city-view peasant sprites (cap 4 per building).
+**Daily wages (2026-10-18).** Population also accrues a wage bill: every active player's settlement pays `floor(population / 100)` gold per day (1g per 100 population, `WAGE_POPULATION_PER_GOLD = 100`; `settlementDailyWage` / `applySettlementWages` in `packages/engine/src/economy/consumption.ts`) at end of turn, after food consumption and before income. The deduction floors at 0 (no debt) and carries no morale penalty; it is not yet shown in the settlement panel UI.
+
+Client: per-building worker stepper and draft-pool readouts in the city-view building menu, a floating workforce panel (`w` opens it; drag workers onto buildings; geometry key `workforcePanel`; each row renders every role tag, and while the settlement is still legacy the header carries an **auto-staffed — first assignment normalizes the city** hint), a Workforce row in the settlement info menu, and city-view peasant sprites (cap 4 per building) that alternate a 1px bob between two states staggered per worker (2026-10-18; the renderer honors `prefers-reduced-motion` with a static frame, and the visual-regression suite pins reduced motion).
 
 ## Building persistence (✅ implemented)
 

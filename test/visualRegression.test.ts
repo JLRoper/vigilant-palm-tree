@@ -328,7 +328,7 @@ async function run(): Promise<void> {
     console.log(">> api + web up");
 
     browser = await chromium.launch();
-    const context = await browser.newContext({ viewport: VIEWPORT });
+    const context = await browser.newContext({ viewport: VIEWPORT, reducedMotion: "reduce" });
 
     await withPageRetry(context, "adventure-overview", async (page) => {
       await dismissHomeAndCreateGame(page, GAME_NAME, SEED);

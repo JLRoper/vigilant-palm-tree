@@ -87,7 +87,7 @@ export function advanceRound(
   withDay = advanceCharters(withDay);
   withDay = advanceSettlementUpgrades(withDay, { accel: upgradeAccelEffort });
   withDay = advanceBuildingConstructions(withDay);
-  const rechargedSettlements = applyDraftRecharge(withDay.settlements);
+  const rechargedSettlements = applyDraftRecharge(withDay.settlements, unitTypes);
   if (rechargedSettlements !== withDay.settlements) {
     withDay = { ...withDay, settlements: rechargedSettlements, dirty: true };
   }

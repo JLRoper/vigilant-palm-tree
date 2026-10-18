@@ -23,6 +23,7 @@ import {
 } from "./geometry";
 import { HEX_SIZE } from "../../../core/hex";
 import { decorationSeed } from "../../decorationSeed";
+import { prefersReducedMotion } from "../../reducedMotion";
 import { TERRAIN_COLORS } from "../../../map/terrain";
 import { RESOURCE_PAL } from "../../palettes";
 import type {
@@ -95,6 +96,7 @@ const CITY_GHOST_INVALID_STROKE = "#ff4444";
 // Worker-person fallback circle (sprite not yet loaded); battle-fallback style
 // (filled circle + white stroke) with a neutral peasant tan.
 const PERSON_PLACEHOLDER_FILL = "#c8b290";
+const PERSON_BREATH_PERIOD_MS = 750;
 
 const BATTLE_HEX_FILL = "#20242c";
 const BATTLE_HEX_IMPASSABLE = "#3a2a2a";
@@ -1118,11 +1120,15 @@ export function paintCityPerson(ctx: CanvasRenderingContext2D, node: CityPersonN
     deps.sprite.resolveSpriteForUnit("peasant", "idle");
   const personH = 16;
   const spacing = 14;
+  const reduced = prefersReducedMotion();
+  const now = reduced ? 0 : performance.now();
   for (let i = 0; i < node.count; i++) {
     // Centered row: count=1 sits dead on the node center, larger clusters fan
     // out symmetrically so the group never spills past the footprint edges.
     const x = node.center.x + (i - (node.count - 1) / 2) * spacing;
     const y = node.center.y;
+    const staggerMs = (((node.gx * 31 + node.gy * 17 + i * 13) % 7) * PERSON_BREATH_PERIOD_MS) / 7;
+    const bob = reduced ? 0 : Math.floor((now + staggerMs) / PERSON_BREATH_PERIOD_MS) % 2;
     if (sprite && sprite.ready && sprite.drawable) {
       const drawable = sprite.drawable;
       const naturalW = (drawable as HTMLImageElement).naturalWidth ?? (drawable as HTMLCanvasElement).width;
@@ -1130,7 +1136,7 @@ export function paintCityPerson(ctx: CanvasRenderingContext2D, node: CityPersonN
       const w = naturalW && naturalH ? (personH / naturalH) * naturalW : personH;
       ctx.save();
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(drawable, x - w / 2, y - personH, w, personH);
+      ctx.drawImage(drawable, x - w / 2, y - personH - bob, w, personH);
       ctx.restore();
     } else {
       ctx.beginPath();
