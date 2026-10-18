@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_SETTINGS,
   arenaMoveMsPerHexBounds,
+  cityBackdropOptions,
   clampArenaMoveMsPerHex,
+  clampCityBackdrop,
   clampEnemyMoveDurationMs,
   enemyMoveDurationBounds,
   settings,
@@ -56,6 +58,43 @@ test("toolbar style updates notify subscribers and persist the normalized value"
 
 test("arenaMoveMsPerHexBounds exposes the battle-arena walk-pace range (0 = instant)", () => {
   assert.deepEqual(arenaMoveMsPerHexBounds(), { min: 0, max: 500, default: 90 });
+});
+
+test("city backdrop defaults to the diorama and only an explicit skybox selects the skybox", () => {
+  assert.equal(DEFAULT_SETTINGS.cityBackdrop, "diorama");
+  assert.equal(clampCityBackdrop("skybox"), "skybox");
+  assert.equal(clampCityBackdrop("diorama"), "diorama");
+  assert.equal(clampCityBackdrop("watercolour"), "diorama");
+  assert.equal(clampCityBackdrop(null), "diorama");
+  assert.deepEqual(cityBackdropOptions(), [
+    { value: "diorama", label: "Settlement diorama (biome)" },
+    { value: "skybox", label: "Watercolor skybox (static variants)" },
+  ]);
+});
+
+test("updateSettings round-trips the city backdrop and normalizes unknown values", () => {
+  try {
+    updateSettings({ cityBackdrop: "skybox" });
+    assert.equal(settings().cityBackdrop, "skybox");
+    updateSettings({ cityBackdrop: "unknown" as never });
+    assert.equal(settings().cityBackdrop, "diorama");
+  } finally {
+    updateSettings({ cityBackdrop: "diorama" });
+  }
+});
+
+test("city grid lines default on and only a boolean patch turns them off", () => {
+  assert.equal(DEFAULT_SETTINGS.cityGridLines, true);
+  try {
+    updateSettings({ cityGridLines: false });
+    assert.equal(settings().cityGridLines, false);
+    updateSettings({ cityGridLines: "no" as never });
+    assert.equal(settings().cityGridLines, false, "a non-boolean patch leaves the current value alone");
+    updateSettings({ cityGridLines: true });
+    assert.equal(settings().cityGridLines, true);
+  } finally {
+    updateSettings({ cityGridLines: true });
+  }
 });
 
 test("clampArenaMoveMsPerHex clamps, rounds, and falls back on non-finite input", () => {

@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.12.0] - 2026-10-18
+
+City view: per-settlement biome settlement diorama backdrop (default, with a watercolor-skybox fallback), a see-through outline-only grid with a City grid lines toggle, and a diorama plate sized from the measured grid footprint for 10x10/15x15 cities.
+
 ## [0.11.0] - 2026-10-18
 
 Logistics panel: icon stockpiles with floating tooltips, inline wagon/cart purchases with price tooltips, and one-row compact route visualization

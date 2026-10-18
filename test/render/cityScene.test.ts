@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildingFootprintFromRegistry, farmFieldStyleAt } from "@heroes/engine";
+import type { CityBackdropSignature } from "@heroes/engine";
 import type { BuildingDef } from "@heroes/contracts";
 import { buildingFootprint, cellOrigin, cellToScreen, cityLayout, computeCityScale, coversCell, TILE_D, TILE_W } from "../../src/core/cityGrid";
 import { buildCityScene, type CitySceneInput } from "../../src/render/scene/sceneBuilder/cityScene";
@@ -34,6 +35,8 @@ function baseInput(overrides: Partial<CitySceneInput> = {}): CitySceneInput {
       parallaxLayerCount: 3,
       cityBgOffsetX: 10,
       cityBgOffsetY: -5,
+      cityBackdrop: "diorama",
+      cityGridLines: true,
     },
     ...overrides,
   };
@@ -52,7 +55,49 @@ test("citySkybox node carries the resolved settings decision, not the settings o
     parallaxLayerCount: 3,
     offsetX: 10,
     offsetY: -5,
+    citySize: 5,
+    gridFootprint: { halfWidth: 240, halfHeight: 120, centerX: 402, centerY: 258.8 },
   });
+});
+
+test("citySkybox node carries the backdrop signature and diorama mode when supplied", () => {
+  const backdrop: CityBackdropSignature = {
+    center: "forest",
+    neighbors: ["water", "grass", "mountain", "dirt", "swamp", "snow"],
+    seed: 987654321,
+  };
+  const nodes = buildCityScene(
+    baseInput({
+      backdrop,
+      citySettings: {
+        spriteVariant: 2,
+        parallaxEnabled: true,
+        parallaxLayerCount: 3,
+        cityBgOffsetX: 10,
+        cityBgOffsetY: -5,
+        cityBackdrop: "diorama",
+        cityGridLines: true,
+      },
+    }),
+  );
+  const [skybox] = nodesOfKind<CitySkyboxNode>(nodes, "citySkybox");
+  assert.deepEqual(skybox.backdrop, backdrop);
+  assert.equal(skybox.backdropMode, "diorama");
+});
+
+test("cityGridLines:false reaches every cityCell node", () => {
+  const base = baseInput();
+  const nodes = buildCityScene(baseInput({ citySettings: { ...base.citySettings, cityGridLines: false } }));
+  const cells = nodesOfKind<CityCellNode>(nodes, "cityCell");
+  assert.equal(cells.length, 25);
+  assert.ok(cells.every((c) => c.gridLines === false));
+});
+
+test("the skybox node carries the city tier so the diorama plate can grow with the grid", () => {
+  for (const size of [5, 10, 15] as const) {
+    const [skybox] = nodesOfKind<CitySkyboxNode>(buildCityScene(baseInput({ size })), "citySkybox");
+    assert.equal(skybox.citySize, size);
+  }
 });
 
 test("one cityCell node per grid cell, hovered flag set only for the hovered cell", () => {
@@ -60,6 +105,7 @@ test("one cityCell node per grid cell, hovered flag set only for the hovered cel
   const cellsNoHover = nodesOfKind<CityCellNode>(nodesNoHover, "cityCell");
   assert.equal(cellsNoHover.length, 25);
   assert.ok(cellsNoHover.every((c) => c.hovered === false));
+  assert.ok(cellsNoHover.every((c) => c.gridLines === true), "grid lines default on when the setting is absent");
 
   const nodes = buildCityScene(baseInput({ size: 5, hover: { gx: 2, gy: 2 } }));
   const cells = nodesOfKind<CityCellNode>(nodes, "cityCell");

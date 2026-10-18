@@ -3,7 +3,7 @@ import type { ResourceType } from "../../map/resourceTiles";
 import type { Faction, HeroDirection } from "../../entities/hero";
 import type { HorseVariant } from "../../state/settings";
 import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase } from "@heroes/contracts";
-import type { BattleSide } from "@heroes/engine";
+import type { BattleSide, CityBackdropSignature, CityViewSize } from "@heroes/engine";
 
 /** World-space pixel coordinates (pre-Camera-transform), same space axialToPixel() returns. */
 export interface WorldPoint {
@@ -206,6 +206,13 @@ export interface HeroNode {
 // math (city view has no Camera -- it's drawn straight into the canvas --
 // but they reuse WorldPoint since it's the same plain {x,y} shape).
 
+export interface CityGridFootprint {
+  halfWidth: number;
+  halfHeight: number;
+  centerX: number;
+  centerY: number;
+}
+
 export interface CitySkyboxNode {
   kind: "citySkybox";
   viewportW: number;
@@ -215,6 +222,12 @@ export interface CitySkyboxNode {
   parallaxLayerCount: number;
   offsetX: number;
   offsetY: number;
+  backdrop?: CityBackdropSignature | null;
+  backdropMode?: "diorama" | "skybox";
+  /** City tier (5/10/15); the diorama plate grows with the grid so large tiers keep a visible border. */
+  citySize?: CityViewSize;
+  /** Screen-space extent of the isometric grid; the diorama plate and its calm centre are sized from it. */
+  gridFootprint?: CityGridFootprint;
 }
 
 export interface CityCellNode {
@@ -227,6 +240,8 @@ export interface CityCellNode {
   hovered: boolean;
   /** Set while the build placer is active and the pending building can be placed here; the painter adds a subtle tint so free cells are scannable. */
   buildable?: boolean;
+  /** Draw this cell's diamond outline. The floor is always transparent. */
+  gridLines: boolean;
 }
 
 export interface CityResourceSpotNode {
