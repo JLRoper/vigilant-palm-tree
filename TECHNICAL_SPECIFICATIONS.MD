@@ -1,6 +1,6 @@
 # Technical Specifications — heroes-js
 
-<!-- docs:verified 2026-10-17 -->
+<!-- docs:verified 2026-10-18 -->
 
 A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. This document captures the **tech stack** as it currently exists in the repository. Game design documentation lives under [`docs/`](./docs/README.md); the render module has its own authoritative spec at [`src/render/docs/technical-spec.md`](./src/render/docs/technical-spec.md).
 
@@ -356,7 +356,7 @@ Vite auto-loads `.env`; `tsx` processes use `--env-file=.env`. Both Vite servers
 
 ### Current Caveats
 
-- Market `goldPerTurn` is declared and included in `effectiveSettlementIncome()` projections, but End Turn currently credits `producerTurnOutput` plus morale-scaled tax; market income is not paid to the treasury. This remains open as finding F2 in [`docs/resource-gathering.md`](./docs/resource-gathering.md).
+- Market `goldPerTurn` is declared, included in `effectiveSettlementIncome()` projections, and (since 2026-10-18, along with any other completed non-producer's `goldPerTurn`) credited to the treasury by End Turn in both the main city and districts; `effectiveSettlementIncome()` skips under-construction buildings to match. This closed finding F2 in [`docs/resource-gathering.md`](./docs/resource-gathering.md).
 - Real email delivery for sign-in codes is not configured; development exposes the code for testing.
 - `WS_PORT` is allocated but no realtime layer listens on it; multiplayer updates use SSE with polling as a backstop.
 - Spellcasting, morale/fatigue, recruitment, weekly upkeep, and hero/garrison battle outcomes are implemented; their plan documents are historical status records, not proof of remaining work.

@@ -22,6 +22,35 @@ export const CASTLE_COUNT_MIN = 4;
 export const CASTLE_COUNT_MAX = 15;
 export const CASTLE_COUNT_DEFAULT = 6;
 
+/**
+ * Shape-guards a persisted `settlements.districts` value into a
+ * `Record<"q,r", DistrictState>`, dropping malformed entries.
+ *
+ * BOTH settlement read paths go through this -- the granular `settlementRepo`
+ * and the JSONB fallback in `hydrateGameState`. Downstream code iterates
+ * `district.buildings` unconditionally (`produceSettlementResources`, `bank`,
+ * `recruitUnits`), so a partial row reaching the turn loop throws and 500s
+ * every End Turn. Absent or fully-malformed input returns `undefined` so
+ * callers can spread it conditionally and keep the absent-vs-empty
+ * distinction that `deepStrictEqual` snapshot checks rely on.
+ */
+export function normalizeDistricts(raw: unknown): Record<string, DistrictState> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<string, DistrictState> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const d = value as Partial<DistrictState> | null | undefined;
+    if (!d || typeof d !== "object") continue;
+    if (typeof d.q !== "number" || typeof d.r !== "number") continue;
+    out[key] = {
+      q: d.q,
+      r: d.r,
+      citySpots: Array.isArray(d.citySpots) ? d.citySpots : [],
+      buildings: Array.isArray(d.buildings) ? d.buildings : [],
+    };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function defaultCastleSeedFromMapSeed(mapSeed: number): number {
   return ((mapSeed ^ 0x63617374) >>> 0) || 1;
 }
@@ -184,19 +213,7 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     arcane: warehouse.arcane ?? 0,
     food: warehouse.food ?? 0,
   };
-  const districts: Record<string, DistrictState> = {};
-  if (s.districts && typeof s.districts === "object") {
-    for (const [k, d] of Object.entries(s.districts)) {
-      if (!d || typeof d !== "object") continue;
-      if (typeof d.q !== "number" || typeof d.r !== "number") continue;
-      districts[k] = {
-        q: d.q,
-        r: d.r,
-        citySpots: Array.isArray(d.citySpots) ? d.citySpots : [],
-        buildings: Array.isArray(d.buildings) ? d.buildings : [],
-      };
-    }
-  }
+  const districts = normalizeDistricts(s.districts);
   return {
     name: s.name ?? s.id,
     ownerId: s.ownerId ?? null,
@@ -221,7 +238,7 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     id: s.id,
     castleVariant: s.castleVariant ?? 0,
     buildings: s.buildings ?? [],
-    ...(Object.keys(districts).length > 0 ? { districts } : {}),
+    ...(districts ? { districts } : {}),
     upgrade: s.upgrade ?? undefined,
     // Garrison passthrough (unit-recruitment/garrison plan task 7): rows
     // written after garrisons existed carry stacks directly in the JSONB;

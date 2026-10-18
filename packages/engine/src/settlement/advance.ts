@@ -2,6 +2,19 @@ import type { BuildingDef, DistrictState, GameState, SettlementId, SettlementSta
 import { districtKey } from "../control";
 import { pickStyleForBuilding } from "../styleResolver";
 
+/** Applies `fn` to every building inside every district, preserving the record shape. */
+function mapDistrictBuildings(
+  districts: Record<string, DistrictState> | undefined,
+  fn: (b: BuildingDef) => BuildingDef,
+): Record<string, DistrictState> | undefined {
+  if (!districts) return undefined;
+  const out: Record<string, DistrictState> = {};
+  for (const [key, d] of Object.entries(districts)) {
+    out[key] = { ...d, buildings: d.buildings.map(fn) };
+  }
+  return out;
+}
+
 export function advanceSettlementUpgrades(state: GameState): GameState {
   let changed = false;
   const newSettlements: Record<SettlementId, SettlementState> = { ...state.settlements };
@@ -15,12 +28,18 @@ export function advanceSettlementUpgrades(state: GameState): GameState {
     }
     const upgrade = s.upgrade;
     if (upgrade.kind === "townHall") {
-      const buildings = s.buildings.map((b) => {
+      // The town-hall upgrade is the settlement-wide "bring every building to
+      // the town hall's level" action, so district buildings level up with the
+      // main city's. Skipping them left an identical district building at L1
+      // while the main-city copy went to L3 (docs/settlements.md D3).
+      const levelUp = (b: BuildingDef): BuildingDef => {
         const newLevel = Math.max(b.level, upgrade.targetLevel) as 1 | 2 | 3;
         const newStyle = pickStyleForBuilding(b.kind, newLevel, b.style);
         return { ...b, level: newLevel, style: newStyle };
-      });
-      newSettlements[id] = { ...s, buildings, upgrade: undefined };
+      };
+      const buildings = s.buildings.map(levelUp);
+      const districts = mapDistrictBuildings(s.districts, levelUp);
+      newSettlements[id] = { ...s, buildings, ...(districts ? { districts } : {}), upgrade: undefined };
       changed = true;
     } else if (upgrade.kind === "buildings" && upgrade.buildingRefs) {
       const refs = upgrade.buildingRefs;

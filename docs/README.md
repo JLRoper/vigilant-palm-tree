@@ -1,6 +1,6 @@
 ﻿# Heroes JS Documentation
 
-<!-- docs:verified 2026-10-11 -->
+<!-- docs:verified 2026-10-18 -->
 
 This index distinguishes current as-built references, design intent, and historical plans. For current behavior, prefer code-linked as-built documents over older proposals.
 
@@ -45,7 +45,7 @@ Captured from the Docker deployment (`docker compose up` → http://localhost:51
 | [asset-provenance.md](./asset-provenance.md) | Existing asset workflows and provenance gaps; metadata to capture for future art. |
 | [sprite-pipelines.md](./sprite-pipelines.md) | Current asset generators, generated building keys/anchors, validation gates, and open provenance gaps. |
 | [resources.md](./resources.md) | Six game resources; food is not a world-map resource. Current tile rates and food spots. |
-| [resource-gathering.md](./resource-gathering.md) | As-built terrain densities, settlement rates, producers, costs, sinks, and open market-income finding F2. |
+| [resource-gathering.md](./resource-gathering.md) | As-built terrain densities, settlement rates, producers, costs, sinks, and the market-income finding F2 (closed 2026-10-18). |
 | [economy.md](./economy.md) | High-level economy design intent; defer to resource-gathering for actual End Turn behavior. |
 | [map.md](./map.md) | World map, terrain, visibility, and movement design/current behavior. |
 | [map-gen.md](./map-gen.md) | Current procedural terrain generation and alternative approaches. |
@@ -91,7 +91,7 @@ Captured from the Docker deployment (`docker compose up` → http://localhost:51
 - **Combat:** hero and settlement-garrison resolvers, the manual arena, and hero defeat/retreat/surrender outcomes are shipped. Human defenders may Fight or Quick Resolve an AI offer; Flee is hidden for defenders. Garrison assaults offer Assault, Auto-resolve, or Cancel.
 - **AI:** 0â€“3 AI enemies can be selected in New Game. Flagged games are server-driven; AI garrison recruitment, trade-route acceptance, chartering, watchdog/heartbeat, token ownership, and per-game advisory locking are live.
 - **Factions:** the registry-driven human, Ashen, Ironmark, and Verdant rosters and recruit gates are live; neutral monsters are separate from playable rosters.
-- **Known open economy issue:** resource-gathering finding F2 remains OPEN: market `goldPerTurn` is included in a projection helper but is not credited by End Turn.
+- **Economy (updated 2026-10-18):** resource-gathering finding F2 is CLOSED — End Turn credits building `goldPerTurn` (a `market` now pays its 40/level into the treasury) in both the main city and districts, and `effectiveSettlementIncome()` matches.
 
 ## Local Historical Collections
 

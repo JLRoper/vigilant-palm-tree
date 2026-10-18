@@ -153,7 +153,12 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
     });
   }
 
-  const heroCoords = heroes.map((h) => ({ ownerId: h.ownerId, q: h.tile.q, r: h.tile.r }));
+  // Only heroes this view can actually SEE may flip a district's `blocked`
+  // flag: the DistrictNode itself is fog-gated, so counting hidden enemy heroes
+  // here would leak an invisible enemy's position through the marker.
+  const heroCoords = heroes
+    .filter((h) => h.ownerId === opts.viewPlayerId || isVisible(visible, h.tile.q, h.tile.r))
+    .map((h) => ({ ownerId: h.ownerId, q: h.tile.q, r: h.tile.r }));
   for (const c of castles) {
     for (const d of Object.values(c.districts ?? {})) {
       if (!d.buildings || d.buildings.length === 0) continue;
