@@ -31,7 +31,7 @@ export class ViewManager {
   }
 
   initializeAdventureView(
-    opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw" | "getPathPreviewLock" | "setPathPreviewLock" | "onStartCharter" | "getCharterMode" | "setCharterMode" | "getValidCharterHexes" | "onTileInspect" | "isCityOpen" | "getLocalSeat">,
+    opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw" | "getPathPreviewLock" | "setPathPreviewLock" | "onStartCharter" | "getCharterMode" | "setCharterMode" | "getValidCharterHexes" | "onTileInspect" | "isCityOpen" | "getLocalSeat" | "getCaravans">,
   ): void {
     if (this.view) {
       this.view.detach();
@@ -88,6 +88,10 @@ export class ViewManager {
 
   getPath(): Axial[] {
     return this.view?.getPath() ?? [];
+  }
+
+  getHoveredCaravanId(): string | null {
+    return this.view?.getHoveredCaravanId() ?? null;
   }
 
   getLastClickDebug(): unknown {

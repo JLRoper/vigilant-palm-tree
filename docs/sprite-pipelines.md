@@ -94,13 +94,14 @@ Descriptor maps and how they are populated:
 | `HORSE_VARIANT_DESCRIPTORS` | **glob** `units/horse/commander-*/*.png`, filtered per `HORSE_VARIANT_REGISTRY` | 14 variants × 4–8 dirs | diagonal→cardinal fallbacks per variant; optional `-2` run frames; bubbly `naturalSize` 64 |
 | `BUILDING_DESCRIPTORS` | generated building keys + glob-resolved files | 114 | bottom-anchored pixel assets; offsets come from the generated anchor map |
 | `UNIT_ARENA_DESCRIPTORS` | **glob** `units/arena/*.png` | 36 ids × 3 poses (mage gap) | `bottom`, `fitHeight 1.3`, `naturalSize 128` |
-| `CARAVAN_DESCRIPTORS` | hand-written (`caravan-supply.png`, `caravan-treasury.png`) | 2 | `bottom`, `fitHeight 1.45`, `naturalSize 256`; preloaded eagerly alongside `castle.*` |
+| `CARAVAN_DESCRIPTORS` | hand-written legacy pair (`caravan-supply.png`, `caravan-treasury.png`) + **glob** `caravans/{supply,treasury}-<dir>.png` | 2 legacy + 16 directional | `bottom`, `fitHeight 1.45`, `naturalSize 256`; legacy pair stays eager (logistics modal `<img>`), directional sprites load on demand like horse variants |
 | `FACTION_BANNERS` | **glob** `factions/faction-banner-*.png` | 4 | a URL map, not descriptors |
 
 Key helpers: `castleKey(level, variant)` (variant 2/3 supported),
 `resourceStyleKey(type, style)` (8 styles), `heroDirectionKey`,
 `horseVariantKey(variant, dir, frame?)` (`frame === 1` appends `.2`),
-`buildingKey(style, kind, level)`, `unitArenaKey`, `factionBannerKey`.
+`buildingKey(style, kind, level)`, `unitArenaKey`, `factionBannerKey`,
+`caravanKey(kind, dir?)` (omitting `dir` returns the legacy pair's key).
 
 **Generated anchor map:** `tools/sprites/gen-building-anchors.mjs` reads each PNG's alpha bounds and emits 114 offsets to `src/render/generated/buildingAnchorOverrides.ts`. It uses the actual canvas height (1024) and a separate 2×2 footprint scale for `farmField`. Run `npm run gen:building-anchors:check` to detect drift; do not hand-edit the generated map.
 
@@ -240,6 +241,19 @@ Requires `DEEPINFRA_API_KEY`. `outline-apply.mjs` is a standalone outline previe
 tool. Skybox: `flux-skybox.mjs` (1024×576) → `npm run skybox:split`
 (`scripts/split-skybox-layers.ts`) → `src/resources/skybox/`.
 
+`tools/sprites/gen-caravan-sprites.mjs` is the image-in variant of the same
+pipeline: it sends the existing caravan PNG as a reference and asks FLUX-2-klein
+to redraw it from six camera headings (e, s, sw, w, nw, n), so the wagon, horse,
+cargo and palette stay recognisably the same sprite across views. `se` and `ne`
+are then written as exact horizontal mirrors of `sw`/`nw` — mirroring the
+isometric image is geometrically the opposite diagonal, and FLUX produced the
+rear-quarter views cleanly but would not reliably rotate a connected horse+cart
+further. Masters land in `design/caravan-directions/masters/` (generated
+headings only); one Playwright pass trims, removes the flat gray
+background/ground shadow with a border flood-fill, downscales the six by one
+shared factor, and writes the two mirrored files. Re-run the post-pass without
+API calls with `--process-only`.
+
 ### 4.3 Pipeline C — Gemini via OpenRouter (the kilo skill)
 
 `.kilo/skills/building-sprite-gen/SKILL.md` + four scripts:
@@ -300,6 +314,7 @@ only `src/render/skybox.ts` may import them (`?url`).
 | `building.pixel.*` | **Generated + glob**: filename grammar → `packages/engine/src/generated/buildingSpriteKeys.ts`; alpha bounds → `src/render/generated/buildingAnchorOverrides.ts`. Key/anchor drift is checked by `npm run validate-assets`; per-kind/per-level expected coverage remains manual and unit-tested. |
 | `unit.<id>.<pose>` | **Automatic** (glob). Pose art for a new catalog id just drops in |
 | `horse.<variant>.<dir>` | **Automatic** (glob) for files; a *new variant* needs a `HORSE_VARIANT_REGISTRY` entry (engine), the contracts `HorseVariantId` literal, a `commander-<N>/` folder, and a `hero-banner-<id>.png` with its `HERO_BANNERS` import + entry; optional `-2` run frames |
+| `caravan.<kind>.<dir>` | **Automatic** (glob) over `caravans/supply-<dir>.png` / `caravans/treasury-<dir>.png`; regenerate art with `tools/sprites/gen-caravan-sprites.mjs`. Missing directions fall back to the nearest diagonal |
 | `faction-banner.<id>` | **Automatic** (glob); parity test asserts the file exists once a roster ships |
 | unit icons | **Manual**: `src/data/unitImages.ts` `KNOWN` map (37 imports), guarded by `test/data/unitIcons.coverage.test.ts` |
 

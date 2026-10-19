@@ -2,7 +2,7 @@
 // renderer.ts nor minimap.ts owns them and dependent files (like
 // overlays/pathOverlay.ts) can pull them in without creating a cycle.
 
-import type { Axial } from "@heroes/contracts";
+import type { Axial, TradeRouteId } from "@heroes/contracts";
 import type { HeroDirection } from "../entities/hero";
 import type { CharterState } from "../state/gameState";
 
@@ -33,6 +33,8 @@ export interface RenderOptions {
   validCharterHexes?: Set<string> | null;
   /** The clicked/inspected tile driving the tile info panel, if any. Drawn as a persistent selection ring, even through fog. */
   inspectedTile?: Axial;
+  /** Trade-route id of the caravan currently under the pointer (if any); drives the map hover ring and the own-seat route preview. */
+  hoveredCaravanId?: string | null;
   /** Departed trade-route caravans resolved to their current tile for marker rendering (docs/wagons-stockpiles-trade-routes-plan.md §5.2). The caller resolves positions via caravanTile so the scene builder stays pure. */
   caravans?: readonly CaravanMarkerSpec[];
   /** Per non-own-hero fade alpha from the spotted tracker; an absent entry = 1. */
@@ -47,6 +49,7 @@ export interface RenderOptions {
 
 /** One trade-route caravan pre-resolved to its current map tile, owning seat, and wagon count. A route whose caravan is still loading (null) never becomes a spec. */
 export interface CaravanMarkerSpec {
+  routeId: TradeRouteId;
   q: number;
   r: number;
   ownerId: number;
@@ -56,4 +59,6 @@ export interface CaravanMarkerSpec {
   moving?: boolean;
   moveProgress?: number;
   facingDirection?: HeroDirection;
+  /** Tiles still to walk on the current leg, starting with the next tile after the cart. Empty while waiting at the destination. Used by the hover route preview. */
+  remainingPath?: Axial[];
 }

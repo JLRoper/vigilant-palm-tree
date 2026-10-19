@@ -12,13 +12,12 @@ the version has not already been bumped in that changeset.
 
 ## [0.17.0] - 2026-10-19
 
-- Three new mounted hero variants, each a full repaint of an existing one and all shipping **eight** directions (no diagonal→cardinal fallback), base frames only, plus a 320x100 roster banner:
-  - **Frost Warden** (`frostwarden`, commander-12, from `paladin`): ice-white roan horse, silver-white mane, silver plate with a white fur collar, pale-cyan cape, frosted helm.
-  - **Grave Warden** (`gravewarden`, commander-13, from `shadow`): near-black horse with a violet sheen, blackened iron-and-bone plate, tattered dark-green cloak, horned helm with a necrotic green visor glow.
-  - **Storm Rider** (`stormrider`, commander-14, from `ranger`): dappled blue-grey horse, blue-grey leather over bronze-studded mail, storm-ochre cloak with a lightning hem, navy hood, lightning-etched yew bow.
-- Art generated with `google/gemini-3.1-flash-image` via OpenRouter (`google-vertex/global`) through `tools/sprites/gemini-hero-sprite.mjs`; prompts, override prompts, reference hashes and per-file alpha bounds are committed under `design/hero-variants/{frostwarden,gravewarden,stormrider}/` (1024² masters gitignored). Three `ne`/`nw` sprites were regenerated after the first pass came out mirrored, and the manifests record the exact override used.
-- `test/heroVariants.e2e.ts` is now table-driven (`VARIANTS`): for each generated variant it seeds the variant into a real game, asserts the client holds it, resolves all eight `horse.<variant>.*` descriptors plus its banner as real PNGs, asserts the recruit-picker entry and the paladin's unchanged 16-key descriptor set, and A/B diffs the same map tile against the variant it was repainted from — requiring the palette shift the art was made for (reddened capes, darkened/greened undead horse, cooled frost/storm palettes).
-- The three adventure visual baselines were regenerated for the usual reason: a new registry entry shifts the seeded starter-hero variant draw, so several heroes and one hero-panel banner change. City-view and battle-arena baselines are byte-identical.
+- Caravans are now eight-directional: supply wagons and treasury carts each have their own sprite for every compass heading and turn to face the way they are walking, like heroes, instead of one side view with a horizontal flip.
+- The diagonal and rear headings are genuinely distinct, not repeated side views: `n` shows the cart from behind with the horse's hindquarters beyond it, and the generated `nw`/`sw` rear-quarter sprites are mirrored into `ne`/`se` so both diagonal pairs read correctly at map scale.
+- Treasure carts now read as a distinct vehicle: a two-wheeled, red-bannered cart with a pale horse and gold cargo, visibly different from the brown four-wheel supply wagon.
+- Own caravans reveal a 2-tile vision ring (a hero sees 4), so a wagon on the road lifts the fog around itself.
+- Hovering a caravan rings it and, for your own caravan, draws its remaining route to the destination as a dashed line with a destination ring. Enemy caravans ring only, so their destination is not revealed.
+- New art pipeline `tools/sprites/gen-caravan-sprites.mjs` redraws the existing wagon/cart from six camera headings via FLUX-2-klein image editing, then derives the opposite diagonals by mirroring and downscales all eight by one shared scale.
 
 ## [0.16.0] - 2026-10-19
 

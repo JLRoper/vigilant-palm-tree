@@ -27,6 +27,7 @@ export type SceneNode =
   | HoverHighlightNode
   | SelectedTileHighlightNode
   | CaravanMarkerNode
+  | CaravanRouteNode
   | HeroNode
   | CitySkyboxNode
   | CityCellNode
@@ -95,6 +96,17 @@ export interface CaravanMarkerNode {
   wagons: number;
   payloadKind?: "resource" | "gold";
   facingDirection?: HeroDirection;
+  /** Set while the tile is under the pointer, so the painter can ring the cart. */
+  hovered?: boolean;
+}
+
+/** The hovered own-seat caravan's remaining current-leg route, drawn under the marker layer. */
+export interface CaravanRouteNode {
+  kind: "caravanRoute";
+  routeId: string;
+  color: string;
+  payloadKind?: "resource" | "gold";
+  points: WorldPoint[];
 }
 
 export interface CharterOverlayNode {
