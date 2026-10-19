@@ -12,13 +12,14 @@ the version has not already been bumped in that changeset.
 
 ## [0.18.0] - 2026-10-19
 
-- Three new mounted hero variants, each a full repaint of an existing one and all shipping **eight** directions (no diagonal→cardinal fallback), base frames only, plus a 320x100 roster banner:
-  - **Frost Warden** (`frostwarden`, commander-12, from `paladin`): ice-white roan horse, silver-white mane, silver plate with a white fur collar, pale-cyan cape, frosted helm.
-  - **Grave Warden** (`gravewarden`, commander-13, from `shadow`): near-black horse with a violet sheen, blackened iron-and-bone plate, tattered dark-green cloak, horned helm with a necrotic green visor glow.
-  - **Storm Rider** (`stormrider`, commander-14, from `ranger`): dappled blue-grey horse, blue-grey leather over bronze-studded mail, storm-ochre cloak with a lightning hem, navy hood, lightning-etched yew bow.
-- Art generated with `google/gemini-3.1-flash-image` via OpenRouter (`google-vertex/global`) through `tools/sprites/gemini-hero-sprite.mjs`; prompts, override prompts, reference hashes and per-file alpha bounds are committed under `design/hero-variants/{frostwarden,gravewarden,stormrider}/` (1024² masters gitignored). Three `ne`/`nw` sprites were regenerated after the first pass came out mirrored, and the manifests record the exact override used.
-- `test/heroVariants.e2e.ts` is now table-driven (`VARIANTS`): for each generated variant it seeds the variant into a real game, asserts the client holds it, resolves all eight `horse.<variant>.*` descriptors plus its banner as real PNGs, asserts the recruit-picker entry and the paladin's unchanged 16-key descriptor set, and A/B diffs the same map tile against the variant it was repainted from — requiring the palette shift the art was made for (reddened capes, darkened/greened undead horse, cooled frost/storm palettes).
-- The three adventure visual baselines were regenerated for the usual reason: a new registry entry shifts the seeded starter-hero variant draw, so several heroes and one hero-panel banner change. City-view and battle-arena baselines are byte-identical.
+feat(recruitment): consolidated recruitment panel with a shared drag-and-drop garrison grid
+
+The city view gains a **recruitment panel** (⚔ Recruit in the City Design box, or `r`): every recruit source in a settlement and its districts collapses into one block per building kind, with ready/capacity totals, live `+N/wk` refill recomputed from actual staffing, resource-pile cost icons, per-building worker steppers (peasant sprite, `n/max`/`Auto`, `−`/`+` committing `AssignWorkers` district-true), a per-kind **Buy all** that takes from the most-stocked building first and then round-robins, `+` for one and shift-click for the affordable maximum, and hover tooltips instead of prose. Each commit rides the existing `RecruitUnits` with the source building's own coords + district, so a district barracks works without that district being open. Its building list scrolls inside the panel and the panel is resizeable (corner grip, size remembered) — the resize grip is a shared `panelResize.ts` any panel can adopt with one option.
+
+Armies and garrisons become one drag-and-drop representation: `src/screens/shared/squadGrid.ts` (4×2 square tiles, unit PNG + count badge) backs the hero panel's Army section and both garrison surfaces, so the settlement panel and the recruitment panel mount one `GarrisonView` and a drag on either re-renders both. Within a grid a drag swaps two slots (new `ReorderGarrison` command); between the garrison grid and the hero's army grid it moves troops through `TransferUnits` into the dropped slot.
+
+Clicking a building's row in the recruitment panel — the kind's heading, a per-building line, or a unit's own row (the unit art), anywhere but on a button — opens that building's own menu: the same one an iso-grid click opens, placed at the building and ringing it until the menu closes. A unit row opens the building it recruits from (its fullest source, the one `+` draws on); a row in another district switches the city view there first through the engine's own district door.
+
 
 ## [0.17.0] - 2026-10-19
 
@@ -28,7 +29,6 @@ the version has not already been bumped in that changeset.
 - Own caravans reveal a 2-tile vision ring (a hero sees 4), so a wagon on the road lifts the fog around itself.
 - Hovering a caravan rings it and, for your own caravan, draws its remaining route to the destination as a dashed line with a destination ring. Enemy caravans ring only, so their destination is not revealed.
 - New art pipeline `tools/sprites/gen-caravan-sprites.mjs` redraws the existing wagon/cart from six camera headings via FLUX-2-klein image editing, then derives the opposite diagonals by mirroring and downscales all eight by one shared scale.
-
 ## [0.16.0] - 2026-10-19
 
 - New mounted hero variant **Paladin 2** (`paladin2`, commander-11, label "Paladin 2"): a darker gilded "Paladin of the Ember Oath" repaint of the existing paladin — charcoal dappled warhorse with a silver-white mane, blackened-steel plate with gold filigree, crimson tabard and cape. All **eight** directions ship (no diagonal→cardinal fallback), base frames only, plus its 320×100 roster banner.

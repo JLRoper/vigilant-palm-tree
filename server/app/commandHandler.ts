@@ -12,6 +12,7 @@ transferGold,
   startTownHallUpgrade,
   setAutoTrade,
   reorderStack,
+  reorderGarrisonStacks,
   captureSettlement,
   recruitUnits,
   assignWorkers,
@@ -1271,6 +1272,35 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, hero: result.state.heroes[command.heroId] };
+    }
+    case "ReorderGarrison": {
+      const settlement = row.settlements[command.settlementId];
+      if (!settlement) {
+        return { ok: false, reason: "no_settlement", events: [] };
+      }
+      // reorderGarrisonStacks() is likewise ownership-free; the gate lives here.
+      if (settlement.ownerId === null || settlement.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
+      }
+      const result = reorderGarrisonStacks(state, command.settlementId, command.fromIdx, command.toIdx);
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "GarrisonReordered",
+        actor: command.actor,
+        settlementId: command.settlementId,
+        fromIdx: command.fromIdx,
+        toIdx: command.toIdx,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
     }
     case "CaptureSettlement": {
       const hero = row.heroes[command.heroId];

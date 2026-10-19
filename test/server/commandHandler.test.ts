@@ -1014,6 +1014,43 @@ test("ReorderStack rejects reordering a hero the actor doesn't own -- no existin
   assert.equal(result.reason, "forbidden_not_your_hero");
 });
 
+test("ReorderGarrison swaps two of the actor's own settlement's garrison slots", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      {
+        ...makeSettlement("s0", 0, 2, 2),
+        stacks: [makeSingleEntryPlatoon("a", 1), makeSingleEntryPlatoon("b", 2)],
+      },
+    ],
+  );
+  const { gameRepo, eventRepo, deps } = makeDeps(row);
+  const command: Command = { kind: "ReorderGarrison", gameName: "test-game", actor: 0, settlementId: "s0", fromIdx: 0, toIdx: 1 };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.settlement?.stacks?.[0].entries[0].unitTypeId, "b");
+  assert.equal(result.settlement?.stacks?.[1].entries[0].unitTypeId, "a");
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.stacks[0].entries[0].unitTypeId, "b");
+  assert.equal(eventRepo.events.map((e) => e.kind).join(","), "GarrisonReordered");
+});
+
+test("ReorderGarrison rejects a settlement the actor doesn't own -- the reducer is ownership-free", async () => {
+  const row = makeRow(
+    [makeHero("h0", 0, 2, 2)],
+    [
+      {
+        ...makeSettlement("s0", 1, 2, 2),
+        stacks: [makeSingleEntryPlatoon("a", 1), makeSingleEntryPlatoon("b", 2)],
+      },
+    ],
+  );
+  const { deps } = makeDeps(row);
+  const command: Command = { kind: "ReorderGarrison", gameName: "test-game", actor: 0, settlementId: "s0", fromIdx: 0, toIdx: 1 };
+  const result = await handleCommand(command, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "forbidden_not_your_settlement");
+});
+
 test("CaptureSettlement lets a hero standing on an enemy settlement capture it and awards gold", async () => {
   const row = makeRow(
     [makeHero("h0", 0, 5, 5, { gold: 10 })],

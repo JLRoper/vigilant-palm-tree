@@ -68,6 +68,7 @@ export class EntityMirror {
       case "TownHallUpgradeStarted":
       case "AutoTradeToggled":
       case "StackReordered":
+      case "GarrisonReordered":
       case "CharterStarted":
       case "BuildingUpgradeStarted":
       case "SettlementUpgradeStarted":

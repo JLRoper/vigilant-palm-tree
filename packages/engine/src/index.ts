@@ -49,6 +49,7 @@ export * from "./settlement/draftRecharge";
 export * from "./settlement/capture";
 export * from "./settlement/recruitUnits";
 export * from "./settlement/transferUnits";
+export * from "./settlement/reorderGarrison";
 export * from "./settlement/garrisonUpkeep";
 export * from "./settlement/battle";
 export * from "./settlement/autoTrade";

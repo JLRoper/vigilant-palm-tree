@@ -345,6 +345,13 @@ export async function reorderStack(
   await postCommand(name, { kind: "ReorderStack", ...payload });
 }
 
+export async function reorderGarrison(
+  name: string,
+  payload: { actor: number; settlementId: string; fromIdx: number; toIdx: number }
+): Promise<void> {
+  await postCommand(name, { kind: "ReorderGarrison", ...payload });
+}
+
 export async function captureSettlement(
   name: string,
   payload: { actor: number; heroId: string; settlementId: string }

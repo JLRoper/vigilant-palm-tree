@@ -8,6 +8,7 @@ import type { RecruitHeroCommand } from "./recruitHero";
 import type { UpgradeTownHallCommand } from "./upgradeTownHall";
 import type { SetAutoTradeCommand } from "./setAutoTrade";
 import type { ReorderStackCommand } from "./reorderStack";
+import type { ReorderGarrisonCommand } from "./reorderGarrison";
 import type { CaptureSettlementCommand } from "./captureSettlement";
 import type { StartCharterCommand } from "./startCharter";
 import type { UpgradeBuildingCommand } from "./upgradeBuilding";
@@ -35,6 +36,7 @@ export * from "./recruitHero";
 export * from "./upgradeTownHall";
 export * from "./setAutoTrade";
 export * from "./reorderStack";
+export * from "./reorderGarrison";
 export * from "./captureSettlement";
 export * from "./startCharter";
 export * from "./upgradeBuilding";
@@ -88,6 +90,7 @@ export type Command =
   | UpgradeTownHallCommand
   | SetAutoTradeCommand
   | ReorderStackCommand
+  | ReorderGarrisonCommand
   | CaptureSettlementCommand
   | StartCharterCommand
   | UpgradeBuildingCommand
