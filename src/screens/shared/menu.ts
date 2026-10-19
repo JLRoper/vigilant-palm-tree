@@ -1,4 +1,6 @@
 import { raisePanel, removePanel, type StackablePanel } from "./panelStack";
+import { attachPanelResize } from "./panelResize";
+import type { PanelGeometryKey } from "./panelLayout";
 
 const MENU_FONT = "system-ui, sans-serif";
 const MENU_FONT_SIZE = "13px";
@@ -142,6 +144,10 @@ export interface PopupMenuOptions {
   onMove?: (pos: { x: number; y: number }) => void;
   minTop?: () => number;
   clickToFront?: boolean;
+  /** Adds the shared corner resize grip (see shared/panelResize.ts). */
+  resizeable?: boolean;
+  /** Remembers the dragged size under this key (panel geometry store). */
+  resizeKey?: PanelGeometryKey;
 }
 
 export class PopupMenu implements StackablePanel {
@@ -270,6 +276,10 @@ export class PopupMenu implements StackablePanel {
 
     const parent = opts.parent ?? document.body;
     parent.appendChild(this.root);
+
+    if (opts.resizeable) {
+      attachPanelResize({ key: opts.resizeKey }, this);
+    }
   }
 
   setTitle(text: string): void {
@@ -359,6 +369,32 @@ export class PopupMenu implements StackablePanel {
     this.pos = { x, y };
     this.root.style.left = `${x}px`;
     this.root.style.top = `${y}px`;
+    this.fitToViewport();
+  }
+
+  /**
+   * Caps the panel's height to the space it actually has below its own top edge,
+   * so a long list scrolls inside the panel instead of running off the bottom of
+   * the screen (where its scrollbar is unreachable).
+   */
+  fitToViewport(): void {
+    if (this.layout !== "floating") return;
+    const top = this.pos.y;
+    const available = window.innerHeight - top - VIEWPORT_MARGIN;
+    this.root.style.maxHeight = `${Math.max(120, Math.round(available))}px`;
+  }
+
+  /** Explicit panel size (the resize grip); the body scrolls inside it. */
+  setSize(width: number, height: number): void {
+    this.root.style.width = `${Math.round(width)}px`;
+    this.root.style.height = `${Math.round(height)}px`;
+    this.fitToViewport();
+    this.body.style.overflowY = "auto";
+  }
+
+  getSize(): { w: number; h: number } {
+    const rect = this.root.getBoundingClientRect();
+    return { w: Math.round(rect.width), h: Math.round(rect.height) };
   }
 
   setOnClose(fn: () => void): void {

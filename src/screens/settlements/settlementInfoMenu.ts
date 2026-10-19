@@ -1,8 +1,6 @@
 import type { GameState, HeroState, SettlementState } from "../../state/gameState";
 import { MAX_HEROES_PER_PLAYER, HERO_RECRUIT_COST, SETTLEMENT_UPGRADE_COSTS } from "../../state/gameState";
-import { settlementStacks, type Platoon } from "../../state/units";
-import { catalogReady, catalogFailed, getCachedUnit, loadUnitCatalog } from "../../data/unitCatalog";
-import { getUnitImageUrl } from "../../data/unitImages";
+import { GarrisonView } from "./garrisonView";
 import { PopupMenu, menuTheme, openCenteredModal, styleButton, styleInput } from "@screens/shared/menu";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import { DockedPanel } from "@screens/shared/dockedPanel";
@@ -27,7 +25,11 @@ export interface SettlementInfoMenuOptions {
   onRecruitHero?: (name: string, variant: HorseVariant) => void;
   onUpgradeSettlement?: () => void;
   getHeroesAtSettlement?: (settlementId: string) => HeroState[];
-  onTransferUnits?: (heroId: string, settlementId: string, direction: "toHero" | "toGarrison", unitTypeId: string, count: number) => boolean;
+  onTransferUnits?: (heroId: string, settlementId: string, direction: "toHero" | "toGarrison", unitTypeId: string, count: number, toSlot?: number) => boolean;
+  /** Garrison grid drag: swap two of the settlement's stack slots. */
+  onReorderGarrison?: (settlementId: string, fromIdx: number, toIdx: number) => boolean;
+  /** Hero grid drag inside the Garrison section: swap two hero-army slots. */
+  onReorderHero?: (heroId: string, fromIdx: number, toIdx: number) => boolean;
   onBankGold?: (
     settlementId: string,
     gx: number,
@@ -77,11 +79,12 @@ export class SettlementInfoMenu {
   private upgradeBtn: HTMLButtonElement;
   private upgradeInfo: HTMLSpanElement;
   private getHeroesAtSettlement?: (settlementId: string) => HeroState[];
-  private onTransferUnits?: (heroId: string, settlementId: string, direction: "toHero" | "toGarrison", unitTypeId: string, count: number) => boolean;
+  private onTransferUnits?: (heroId: string, settlementId: string, direction: "toHero" | "toGarrison", unitTypeId: string, count: number, toSlot?: number) => boolean;
+  private onReorderGarrison?: (settlementId: string, fromIdx: number, toIdx: number) => boolean;
+  private onReorderHero?: (heroId: string, fromIdx: number, toIdx: number) => boolean;
   private warehouseAccordion: AccordionSection;
   private garrisonAccordion: AccordionSection;
-  private garrisonBody: HTMLDivElement;
-  private garrisonSignature: string | null = null;
+  private garrisonView: GarrisonView;
   private bankAccordion: AccordionSection;
   private bankBody: HTMLDivElement;
   private bankSignature: string | null = null;
@@ -105,6 +108,8 @@ export class SettlementInfoMenu {
     this.onUpgradeSettlement = opts.onUpgradeSettlement;
     this.getHeroesAtSettlement = opts.getHeroesAtSettlement;
     this.onTransferUnits = opts.onTransferUnits;
+    this.onReorderGarrison = opts.onReorderGarrison;
+    this.onReorderHero = opts.onReorderHero;
     this.onBankGold = opts.onBankGold;
     this.onEnterCityView = opts.onEnterCityView;
     this.canEnterCityView = opts.canEnterCityView;
@@ -314,8 +319,15 @@ export class SettlementInfoMenu {
     this.garrisonAccordion = new AccordionSection({ label: "Garrison", onToggle: () => this.reposition() });
     body.insertBefore(this.garrisonAccordion.element, this.recruitContainer);
 
-    this.garrisonBody = document.createElement("div");
-    this.garrisonAccordion.body.appendChild(this.garrisonBody);
+    this.garrisonView = new GarrisonView({
+      getHeroesAtSettlement: (settlementId) => this.getHeroesAtSettlement?.(settlementId) ?? [],
+      onTransfer: (req) =>
+        this.postTransfer(req.heroId, req.settlementId, req.direction, req.unitTypeId, req.count, req.toSlot),
+      onReorderGarrison: (settlementId, fromIdx, toIdx) =>
+        this.onReorderGarrison?.(settlementId, fromIdx, toIdx) ?? false,
+      onReorderHero: (heroId, fromIdx, toIdx) => this.onReorderHero?.(heroId, fromIdx, toIdx) ?? false,
+    });
+    this.garrisonAccordion.body.appendChild(this.garrisonView.root);
 
     this.recruitBtn = document.createElement("button");
     Object.assign(this.recruitBtn.style, {
@@ -747,136 +759,19 @@ export class SettlementInfoMenu {
   // tick. A successful transfer replaceState()s, and the resulting
   // state:committed → update() cycle rebuilds with the new counts.
   private updateGarrison(settlement: SettlementState, state: GameState): void {
-    const owned = settlement.ownerId !== null && settlement.ownerId === state.activePlayerId;
+    // Delegated to the shared GarrisonView so the recruitment panel shows the
+    // exact same garrison rows (see src/screens/settlements/garrisonView.ts).
+    this.garrisonView.update(state, settlement);
+    const owned = this.garrisonView.isOwned();
     this.garrisonAccordion.element.style.display = owned ? "" : "none";
-    if (!owned) {
-      this.garrisonSignature = null;
-      return;
-    }
-
-    const garrison = stackTotals(settlementStacks(settlement));
-    const candidate = this.getHeroesAtSettlement?.(settlement.id)[0] ?? null;
-    const heroHere = candidate && candidate.ownerId === settlement.ownerId ? candidate : null;
-    const heroArmy = heroHere ? stackTotals(heroHere.stacks) : [];
-
-    const signature = JSON.stringify({
-      id: settlement.id,
-      garrison,
-      heroId: heroHere?.id ?? null,
-      heroArmy,
-      // In the signature so rows rebuild with real names once the catalog
-      // fetch resolves (until then names fall back to raw unit ids).
-      catalog: catalogReady(),
-    });
-    const totalUnits = garrison.reduce((sum, e) => sum + e.count, 0);
+    if (!owned) return;
+    const totalUnits = this.garrisonView.totalUnits();
     this.garrisonAccordion.rightEl.textContent = totalUnits > 0 ? `${totalUnits} units` : "";
-    if (signature === this.garrisonSignature) return;
-    this.garrisonSignature = signature;
-
-    if (!catalogReady() && !catalogFailed()) {
-      void loadUnitCatalog();
-    }
-
-    this.garrisonBody.replaceChildren();
-
-    if (garrison.length === 0) {
-      this.garrisonBody.appendChild(makeDimRow("No units garrisoned"));
-    }
-    for (const entry of garrison) {
-      this.garrisonBody.appendChild(this.makeTransferRow(
-        entry.unitTypeId,
-        entry.count,
-        heroHere ? "→ Hero" : null,
-        heroHere ? () => this.postTransfer(heroHere.id, settlement.id, "toHero", entry.unitTypeId, entry.count) : null,
-      ));
-    }
-
-    if (heroHere) {
-      const heroHeader = document.createElement("div");
-      heroHeader.textContent = `${heroHere.name}'s Army`;
-      Object.assign(heroHeader.style, {
-        fontSize: "10px",
-        letterSpacing: "0.06em",
-        textTransform: "uppercase",
-        opacity: "0.55",
-        marginTop: "6px",
-      });
-      this.garrisonBody.appendChild(heroHeader);
-      if (heroArmy.length === 0) {
-        this.garrisonBody.appendChild(makeDimRow("No units"));
-      }
-      for (const entry of heroArmy) {
-        this.garrisonBody.appendChild(this.makeTransferRow(
-          entry.unitTypeId,
-          entry.count,
-          "→ Garrison",
-          () => this.postTransfer(heroHere.id, settlement.id, "toGarrison", entry.unitTypeId, entry.count),
-        ));
-      }
-    }
   }
 
-  private makeTransferRow(unitTypeId: string, count: number, transferLabel: string | null, onTransfer: (() => void) | null): HTMLDivElement {
-    const row = document.createElement("div");
-    Object.assign(row.style, {
-      display: "flex",
-      alignItems: "center",
-      gap: "6px",
-      marginBottom: "3px",
-    });
-
-    const icon = document.createElement("img");
-    icon.src = getUnitImageUrl(unitTypeId);
-    Object.assign(icon.style, {
-      width: "20px",
-      height: "20px",
-      imageRendering: "pixelated",
-      objectFit: "contain",
-      flexShrink: "0",
-    });
-    icon.alt = unitTypeId;
-    row.appendChild(icon);
-
-    const name = document.createElement("span");
-    name.textContent = getCachedUnit(unitTypeId)?.name ?? unitTypeId;
-    name.style.flex = "1";
-    name.style.fontSize = "11px";
-    name.style.opacity = "0.85";
-    row.appendChild(name);
-
-    const countEl = document.createElement("span");
-    countEl.textContent = `×${count}`;
-    countEl.style.fontSize = "11px";
-    countEl.style.fontVariantNumeric = "tabular-nums";
-    countEl.style.opacity = "0.7";
-    row.appendChild(countEl);
-
-    if (transferLabel && onTransfer) {
-      const btn = document.createElement("button");
-      btn.textContent = transferLabel;
-      styleButton(btn);
-      btn.style.padding = "1px 6px";
-      btn.style.fontSize = "10px";
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        onTransfer();
-      });
-      row.appendChild(btn);
-    }
-
-    return row;
+  private postTransfer(heroId: string, settlementId: string, direction: "toHero" | "toGarrison", unitTypeId: string, count: number, toSlot?: number): boolean {
+    return this.onTransferUnits?.(heroId, settlementId, direction, unitTypeId, count, toSlot) ?? false;
   }
-
-  private postTransfer(heroId: string, settlementId: string, direction: "toHero" | "toGarrison", unitTypeId: string, count: number): void {
-    this.onTransferUnits?.(heroId, settlementId, direction, unitTypeId, count);
-  }
-}
-
-function makeDimRow(text: string): HTMLDivElement {
-  const el = document.createElement("div");
-  el.textContent = text;
-  Object.assign(el.style, { fontSize: "11px", opacity: "0.5" });
-  return el;
 }
 
 interface BankRowRefs {
@@ -984,23 +879,6 @@ export function openBankAmountModal(opts: BankAmountModalOptions): void {
   modal.setContent(content);
   amtInput.focus();
   amtInput.select();
-}
-
-// One aggregated row per distinct unit type across a platoon set — the
-// transfer engine addresses both sides as a type-keyed pool, so per-type
-// totals are the transferable "whole entry".
-function stackTotals(stacks: Platoon[]): Array<{ unitTypeId: string; count: number }> {
-  const order: string[] = [];
-  const totals = new Map<string, number>();
-  for (const p of stacks) {
-    for (const e of p.entries) {
-      if (e.count <= 0) continue;
-      const prev = totals.get(e.unitTypeId) ?? 0;
-      if (prev === 0) order.push(e.unitTypeId);
-      totals.set(e.unitTypeId, prev + e.count);
-    }
-  }
-  return order.map((unitTypeId) => ({ unitTypeId, count: totals.get(unitTypeId) ?? 0 }));
 }
 
 function openRecruitHeroModal(onRecruit: (name: string, variant: HorseVariant) => void): void {

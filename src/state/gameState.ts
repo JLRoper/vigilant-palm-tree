@@ -32,6 +32,7 @@ export {
 export {
   recruitUnits,
   transferUnits,
+  reorderGarrisonStacks,
   startSettlementBattle,
 } from "@heroes/engine";
 

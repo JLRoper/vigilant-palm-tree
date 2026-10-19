@@ -35,6 +35,8 @@ function buildHooks(): TurnControllerHooks {
     onUpdateTradeRoute: noop,
     onRecruitUnits: noop,
     onTransferUnits: noop,
+    onAssignWorkers: noop,
+    onReorderGarrison: noop,
     onBankGold: noop,
     onSettlementBattleSubmitted: noop,
   };

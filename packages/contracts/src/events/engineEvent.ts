@@ -96,6 +96,13 @@ export type EngineEvent =
       toIdx: number;
     }
   | {
+      type: "GarrisonReordered";
+      actor: PlayerSeat;
+      settlementId: SettlementId;
+      fromIdx: number;
+      toIdx: number;
+    }
+  | {
       type: "SettlementCaptured";
       actor: PlayerSeat;
       heroId: HeroId;

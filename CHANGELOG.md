@@ -10,6 +10,16 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.18.0] - 2026-10-19
+
+feat(recruitment): consolidated recruitment panel with a shared drag-and-drop garrison grid
+
+The city view gains a **recruitment panel** (⚔ Recruit in the City Design box, or `r`): every recruit source in a settlement and its districts collapses into one block per building kind, with ready/capacity totals, live `+N/wk` refill recomputed from actual staffing, resource-pile cost icons, per-building worker steppers (peasant sprite, `n/max`/`Auto`, `−`/`+` committing `AssignWorkers` district-true), a per-kind **Buy all** that takes from the most-stocked building first and then round-robins, `+` for one and shift-click for the affordable maximum, and hover tooltips instead of prose. Each commit rides the existing `RecruitUnits` with the source building's own coords + district, so a district barracks works without that district being open. Its building list scrolls inside the panel and the panel is resizeable (corner grip, size remembered) — the resize grip is a shared `panelResize.ts` any panel can adopt with one option.
+
+Armies and garrisons become one drag-and-drop representation: `src/screens/shared/squadGrid.ts` (4×2 square tiles, unit PNG + count badge) backs the hero panel's Army section and both garrison surfaces, so the settlement panel and the recruitment panel mount one `GarrisonView` and a drag on either re-renders both. Within a grid a drag swaps two slots (new `ReorderGarrison` command); between the garrison grid and the hero's army grid it moves troops through `TransferUnits` into the dropped slot.
+
+Clicking a building's row in the recruitment panel — the kind's heading, a per-building line, or a unit's own row (the unit art), anywhere but on a button — opens that building's own menu: the same one an iso-grid click opens, placed at the building and ringing it until the menu closes. A unit row opens the building it recruits from (its fullest source, the one `+` draws on); a row in another district switches the city view there first through the engine's own district door.
+
 ## [0.17.0] - 2026-10-19
 
 - Caravans are now eight-directional: supply wagons and treasury carts each have their own sprite for every compass heading and turn to face the way they are walking, like heroes, instead of one side view with a horizontal flip.
@@ -18,7 +28,6 @@ the version has not already been bumped in that changeset.
 - Own caravans reveal a 2-tile vision ring (a hero sees 4), so a wagon on the road lifts the fog around itself.
 - Hovering a caravan rings it and, for your own caravan, draws its remaining route to the destination as a dashed line with a destination ring. Enemy caravans ring only, so their destination is not revealed.
 - New art pipeline `tools/sprites/gen-caravan-sprites.mjs` redraws the existing wagon/cart from six camera headings via FLUX-2-klein image editing, then derives the opposite diagonals by mirroring and downscales all eight by one shared scale.
-
 ## [0.16.0] - 2026-10-19
 
 - New mounted hero variant **Paladin 2** (`paladin2`, commander-11, label "Paladin 2"): a darker gilded "Paladin of the Ember Oath" repaint of the existing paladin — charcoal dappled warhorse with a silver-white mane, blackened-steel plate with gold filigree, crimson tabard and cape. All **eight** directions ship (no diagonal→cardinal fallback), base frames only, plus its 320×100 roster banner.

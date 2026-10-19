@@ -386,6 +386,24 @@ export function parseCommand(body: unknown, gameName: string): Command | null {
     };
   }
 
+  if (b.kind === "ReorderGarrison") {
+    if (
+      typeof b.settlementId !== "string" ||
+      typeof b.fromIdx !== "number" ||
+      typeof b.toIdx !== "number"
+    ) {
+      return null;
+    }
+    return {
+      kind: "ReorderGarrison",
+      gameName,
+      actor: b.actor,
+      settlementId: b.settlementId,
+      fromIdx: b.fromIdx,
+      toIdx: b.toIdx,
+    };
+  }
+
   if (b.kind === "CaptureSettlement") {
     if (typeof b.heroId !== "string" || typeof b.settlementId !== "string") {
       return null;

@@ -213,6 +213,10 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     this.ui.initSettlementInfo({
       onEnterCityView: (settlementId) => void this.enterSettlementCityView(settlementId),
       canEnterCityView: (settlementId) => this.canEnterSettlementCityView(settlementId),
+      onEnterCityContext: (settlementId, district) =>
+        district
+          ? this.enterDistrictCityView(settlementId, district.q, district.r)
+          : this.enterSettlementCityView(settlementId),
     });
     this.ui.initTileInfo();
     this.ui.initCityView(() => this.state, this.view, () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""));
@@ -556,18 +560,37 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       cityMap.height,
     );
     if (!controlling || controlling.ownerId !== localId) return;
-    const existing = controlling.districts?.[districtKey(t.q, t.r)];
+    await this.enterDistrictCityView(controlling.id, t.q, t.r);
+  }
+
+  /**
+   * Opens the city view on one of a settlement's districts -- the same door the
+   * adventure map's double-click uses for a non-castle tile, reused by the
+   * recruitment panel when a building it lists lives in a district the view is
+   * not currently showing. Resolves false when the gate refuses (not the local
+   * seat's turn, not its settlement, unbuildable or unconnected hex).
+   */
+  private async enterDistrictCityView(settlementId: string, q: number, r: number): Promise<boolean> {
+    const gs = this.state.getState();
+    const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
+    if (!gs || gs.phase.kind !== "PLAYER_TURN" || gs.activePlayerId !== localId) return false;
+    const controlling = this.state.getSettlements().find((s) => s.id === settlementId);
+    if (!controlling || controlling.ownerId !== localId) return false;
+    const cityMap = this.state.getGameMap();
+    const terrain = cityMap.get(q, r);
+    if (!terrain || terrain === "mountain") return false;
+    const existing = controlling.districts?.[districtKey(q, r)];
     // No floating districts: a hex with no district yet opens only when it
     // touches the settlement's own hex or one of its districts (a water hex
     // qualifies the same way, and is where a shipyard gets built -- water is
     // buildable ONLY as a water district holding one). Opening an unbuildable
     // grid would just walk the player into a server-side refusal.
-    if (!existing && districtConnectionReason(controlling, t.q, t.r) !== null) return;
-    const mapRes = cityMap.resourceTileAt(t.q, t.r)?.resource ?? null;
+    if (!existing && districtConnectionReason(controlling, q, r) !== null) return false;
+    const mapRes = cityMap.resourceTileAt(q, r)?.resource ?? null;
     const spots =
       existing?.citySpots && existing.citySpots.length > 0
         ? existing.citySpots
-        : generateDistrictSpots(t.q, t.r, gs.castleSeed, terrain, mapRes);
+        : generateDistrictSpots(q, r, gs.castleSeed, terrain, mapRes);
     const cityView = await this.ui.ensureCityView();
     cityView.open(
       controlling.id,
@@ -578,8 +601,8 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       [],
       existing?.buildings ?? [],
       gs.castleSeed,
-      { q: t.q, r: t.r },
-      sampleCityBackdrop(cityMap, t.q, t.r, gs.castleSeed),
+      { q, r },
+      sampleCityBackdrop(cityMap, q, r, gs.castleSeed),
       terrain,
     );
     if (cityView.isOpen() && gs.selectedSettlementId !== controlling.id) {
@@ -587,6 +610,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       tc.selectSettlement(controlling.id);
       this.state.replaceState(tc.getState());
     }
+    return cityView.isOpen();
   }
 
   /**

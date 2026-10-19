@@ -32,6 +32,8 @@ const SECTIONS: HotkeySection[] = [
     entries: [
       { keys: "Esc", description: "Close menus / cancel placement / leave the city" },
       { keys: "B", description: "Toggle the build palette" },
+      { keys: "W", description: "Toggle the workforce panel" },
+      { keys: "R", description: "Toggle the recruitment panel" },
       { keys: "Del / Backspace", description: "Remove the building under the cursor" },
     ],
   },

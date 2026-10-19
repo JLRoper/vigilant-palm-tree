@@ -97,6 +97,9 @@ export interface BuildingMenuOptions {
   onUpgradeBuilding?: (building: BuildingDef) => void;
   /** Faction gate for the recruit list: false hides the row. Absent = no gate (today's behavior). */
   isUnitRecruitable?: (unitTypeId: string) => boolean;
+  /** Fired whenever the open menu goes away (×, Esc, or a replacement menu).
+   *  Named `onMenuClosed` because `onClose` is the CityView-level callback. */
+  onMenuClosed?: () => void;
 }
 
 /**
@@ -139,6 +142,7 @@ export class BuildingMenu {
   private onUpgradeTownHall: (() => void) | undefined;
   private onUpgradeBuilding: ((building: BuildingDef) => void) | undefined;
   private isUnitRecruitable: ((unitTypeId: string) => boolean) | undefined;
+  private onMenuClosed: (() => void) | undefined;
   private lastShow: ShowArgs | null = null;
 
   constructor(opts: BuildingMenuOptions = {}) {
@@ -146,6 +150,7 @@ export class BuildingMenu {
     this.onUpgradeTownHall = opts.onUpgradeTownHall;
     this.onUpgradeBuilding = opts.onUpgradeBuilding;
     this.isUnitRecruitable = opts.isUnitRecruitable;
+    this.onMenuClosed = opts.onMenuClosed;
   }
 
   show(
@@ -182,7 +187,10 @@ export class BuildingMenu {
       width: 240,
       zIndex: 75,
       clickToFront: true,
-      onClose: () => { this.menu = null; },
+      onClose: () => {
+        this.menu = null;
+        this.onMenuClosed?.();
+      },
     });
 
     const desc = document.createElement("div");

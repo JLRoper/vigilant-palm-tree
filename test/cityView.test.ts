@@ -921,6 +921,127 @@ async function testPlainClickStillOpensMenu(page: Page, settlementId: string): P
   console.log(">> plain click opens the menu, mutates nothing ✓");
 }
 
+// A recruitment-panel building row is a second door onto that building's own
+// menu (user request, 2026-10-19): clicking a row -- anywhere except a button --
+// opens the same menu an iso-grid click opens, placed at the building, and
+// recruits nothing.
+async function testRecruitmentRowOpensBuildingMenu(page: Page, settlementId: string): Promise<void> {
+  console.log(">> Test: recruitment panel row opens that building's own menu");
+  await seedWorkforceFixture(page, [
+    { kind: "farmhouse", level: 1, style: "classic", gx: 1, gy: 1, workers: 2 },
+  ]);
+  await reloadToGame(page, await gameName(page));
+  await openCityView(page, settlementId);
+  const name = await gameName(page);
+
+  await page.keyboard.press("r");
+  await wait(400);
+
+  const row = await page.evaluate(() => {
+    const panel = Array.from(document.body.children).find((el) => (el.textContent ?? "").includes("Recruitment"));
+    if (!panel) return null;
+    const clickable = Array.from(panel.querySelectorAll<HTMLElement>("div")).filter(
+      (d) => d.style.cursor === "pointer",
+    );
+    const target = clickable.find((d) => (d.textContent ?? "").includes("Farmhouse"));
+    if (!target) return null;
+    const label = target.querySelector("span") ?? target;
+    const r = label.getBoundingClientRect();
+    return {
+      x: Math.round(r.x + 4),
+      y: Math.round(r.y + r.height / 2),
+      cursor: target.style.cursor,
+    };
+  });
+  assert(row, "the farmhouse row must be a click target in the recruitment panel");
+  assert.equal(row.cursor, "pointer", "a row that opens a menu must say so with a pointer cursor");
+
+  await page.mouse.click(row.x, row.y);
+  await wait(400);
+
+  const menu = await page.evaluate(() => {
+    const el = Array.from(document.body.children).find((n) => {
+      const t = n.textContent ?? "";
+      return t.startsWith("Farmhouse") && t.includes("A small rural home.");
+    });
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.x), y: Math.round(r.y) };
+  });
+  assert(menu, "clicking the farmhouse row must open that building's menu");
+
+  // "Open the menu near the building": the menu's top-left lands on the
+  // footprint's on-screen centre, not in the clamped (10, 10) corner.
+  const meta = await page.evaluate((sid: string) => {
+    const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
+    const s = dbg.getGameState().settlements[sid];
+    const inset = document.getElementById("toolbar")?.getBoundingClientRect().height ?? 125;
+    return { size: (s.level === 1 ? 5 : s.level === 2 ? 10 : 15) as 5 | 10 | 15, inset };
+  }, settlementId);
+  const viewport = page.viewportSize()!;
+  const rowLayout = cityLayout(meta.size, viewport.width, viewport.height, meta.inset);
+  const cell = cellToScreen(1, 1, rowLayout.gridOrigin);
+  const buildingPt = {
+    x: rowLayout.screenOrigin.x + cell.x * rowLayout.tileScale,
+    y: rowLayout.screenOrigin.y + cell.y * rowLayout.tileScale,
+  };
+  const distance = Math.hypot(menu.x - buildingPt.x, menu.y - buildingPt.y);
+  assert(
+    distance < 100,
+    `the menu must open at the building: menu ${JSON.stringify(menu)} vs cell ${JSON.stringify(buildingPt)}`,
+  );
+
+  // The unit row is the other door on the same building (the user clicked
+  // exactly this): the unit art must open the menu of the building the row
+  // recruits from, not just the kind's heading.
+  await page.keyboard.press("Escape");
+  await wait(250);
+  const unitIcon = await page.evaluate(() => {
+    const panel = Array.from(document.body.children).find((el) => (el.textContent ?? "").includes("Recruitment"));
+    if (!panel) return null;
+    const row = Array.from(panel.querySelectorAll<HTMLElement>("div")).find((d) =>
+      (d.title ?? "").includes("supplies this unit"),
+    );
+    const img = row?.querySelector("img");
+    if (!img) return null;
+    const r = img.getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  });
+  assert(unitIcon, "the unit row must be a click target as well");
+  await page.mouse.click(unitIcon.x, unitIcon.y);
+  await wait(400);
+  assert(
+    await page.evaluate(() => {
+      const el = Array.from(document.body.children).find((n) => {
+        const t = n.textContent ?? "";
+        return t.startsWith("Farmhouse") && t.includes("A small rural home.");
+      });
+      return !!el;
+    }),
+    "clicking the unit art must open that building's menu",
+  );
+
+  const after = (await serverSettlement(page, name, settlementId)) as unknown as {
+    stacks?: Array<{ entries: Array<{ count: number }> }>;
+  };
+  const troops = (after.stacks ?? []).reduce(
+    (sum, platoon) => sum + platoon.entries.reduce((s, e) => s + e.count, 0),
+    0,
+  );
+  assert.equal(troops, 0, "a row click opens a menu -- it must not recruit");
+
+  await page.keyboard.press("Escape");
+  await wait(250);
+  const panelStillOpen = await page.evaluate(() =>
+    Array.from(document.body.children).some((el) => (el.textContent ?? "").includes("Recruitment")),
+  );
+  if (panelStillOpen) {
+    await page.keyboard.press("r");
+    await wait(250);
+  }
+  console.log(">> recruitment row opens the building menu at the building, recruits nothing ✓");
+}
+
 // City shortcuts must not fire while a menu field has focus: pressing 'w'
 // inside the recruit count input used to open the workforce panel on top of
 // the menu mid-edit.
@@ -1479,6 +1600,7 @@ async function run() {
     await testWorkerDragCancel(page, settlementId);
     await testMenuRefreshAfterPanelCommit(page, settlementId);
     await testPlainClickStillOpensMenu(page, settlementId);
+    await testRecruitmentRowOpensBuildingMenu(page, settlementId);
     await testShortcutsIgnoredWhileTyping(page, settlementId);
     await testPanelChipDrag(page, settlementId);
     await testFirstTouchAutoCrew(page, settlementId);
