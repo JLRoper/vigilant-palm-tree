@@ -10,6 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.16.0] - 2026-10-19
+
+- New mounted hero variant **Paladin 2** (`paladin2`, commander-11, label "Paladin 2"): a darker gilded "Paladin of the Ember Oath" repaint of the existing paladin — charcoal dappled warhorse with a silver-white mane, blackened-steel plate with gold filigree, crimson tabard and cape. All **eight** directions ship (no diagonal→cardinal fallback), base frames only, plus its 320×100 roster banner.
+- The original `paladin` is untouched: same registry entry, same four cardinal sprites, same 16 descriptor keys (8 directions incl. fallbacks × base/frame-2). A Playwright assertion pins that set.
+- Added `tools/sprites/gemini-hero-sprite.mjs`: an OpenRouter Gemini image-in → image-out generator for hero variants that keys the model's flat grey background with a border flood fill, then frames the result to the reference sprite's alpha bounding box (same content height, bottom edge and centre) so generated art lands in `commander-<N>/` at the original's scale.
+- Art generated with `google/gemini-3.1-flash-image` pinned to `google-vertex/global`; prompts, reference hashes and per-file alpha bounds are committed under `design/hero-variants/paladin-2/` (1024² masters gitignored).
+- New `test/heroVariants.e2e.ts` (`npm run test:heroVariants`, part of `test:all`): recruits the variant into a real game, asserts the persisted `horseVariant` reaches the client, resolves all eight `horse.paladin2.*` descriptors and the banner as real PNGs, and A/B diffs the same map tile against the original paladin to prove the new sprite actually paints (726 changed px, 114 reddened by the cape, 395 darkened by the charcoal horse).
+
 ## [0.15.0] - 2026-10-19
 
 - Settlement panel: the settlement's own name is now the panel's first text (the header), with its owner beside it; the line under the banner labels the holding and its tier (`SETTLEMENT L1`) instead of repeating the name.

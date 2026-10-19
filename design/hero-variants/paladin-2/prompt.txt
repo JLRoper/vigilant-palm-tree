@@ -1,0 +1,16 @@
+Repaint the attached game-hero sprite as a NEW colour variation of the same character. The attached image is the authoritative reference for ART STYLE, POSE, SILHOUETTE, FRAMING and SCALE — keep all of those identical.
+
+{{POSE}}
+
+ART STYLE (copy the reference exactly): softly hand-painted fantasy game sprite, hand-painted brush texture with soft airbrush shading, gentle warm highlights, a thin dark painted contour along the silhouette, the same level of detail and the same figure scale within the canvas. Not pixel art, not cel-shaded, not a 3D render, not a photograph.
+
+KEEP FROM THE REFERENCE, unchanged: the horse's body build and head carriage, its leg positions and gait, the shape and flow of its tail, the saddle, saddle blanket, stirrups and reins, and the rider's upright posture, hand position on the reins, and the longsword hanging at the rider's hip.
+
+NEW COLOUR SCHEME — "Paladin of the Ember Oath", a darker gilded variant of the same holy knight:
+- Horse: a dark dappled charcoal-grey warhorse with an almost black head, a silver-white mane and tail, dark hooves; keep the same dappling texture style as the reference coat, just in charcoal grey.
+- Rider: blackened-steel plate armour with warm gold filigree edging on the pauldrons, breastplate and greaves, a deep crimson tabard with a gold border, and a long flowing crimson cape with a gold hem.
+- Helmet: a gold-chased great helm with a tall crimson plume, visor raised to show a hint of the face exactly as in the reference.
+- Saddle blanket: deep crimson with gold trim; polished silver stirrups and bit.
+- Keep the reference's light direction (light from the upper left) and the same shading depth, so the new palette sits in the existing art set.
+
+BACKGROUND: one flat uniform light-grey colour (#c9c7c4) filling the entire canvas — absolutely no checkerboard pattern anywhere, no gradient, no ground, no cast shadow, no horizon line, no text, no border, no watermark. A single isolated figure, centred, occupying the canvas vertically like the reference.
