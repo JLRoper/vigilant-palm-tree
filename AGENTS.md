@@ -78,7 +78,8 @@ The `/precommit` and `/pre-pr` slash commands are manual equivalents you can off
 - `/precommit` — run the build + deps + docs + test gate on demand.
 - `/pre-pr` — same as `/precommit`, plus a quick doc sanity sweep.
 
-## Claude Code agents (`.claude/agents/`)
+## Claude Code agents (local, `.claude/agents/`)
+`.claude/` is gitignored, so these definitions live only on the machine that has them; a checkout without the file has no such agent.
 - `playtester` — plays the game through the browser against this worktree's local dev env, cross-checks `window.__gameDebug` state and the event log, and writes a findings report to `reviews/playtests/<date>-<focus>.md`. Give it a focus and optional turn budget. It refuses to run when `.env` points `PGHOST` at the gameserver, never deletes games, and never edits code.
 
 ## Standard workflow (shape reminder)
