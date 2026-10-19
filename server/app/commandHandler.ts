@@ -31,6 +31,7 @@ transferGold,
   foodBiasForTerrain,
   generateCitySpots,
   generateDistrictSpots,
+  touchesTerrain,
   districtKey,
   districtConnectionReason,
   districtTerrainProblem,
@@ -110,7 +111,7 @@ export interface GameLobbyFlags {
   // by the battle cases below and cleared when the battle resolves or the
   // offer goes stale. Optional -- every pre-offer row simply lacks the key.
   pendingBattle?: PendingBattleMarker | null;
-  mapGenVersion?: 1 | 2 | 3;
+  mapGenVersion?: 1 | 2 | 3 | 4;
   // Uncharted mode (fog from the start): written by POST /games, read once
   // near the top of handleCommand to gate the per-command reveal merges.
   uncharted?: boolean;
@@ -1838,7 +1839,9 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         const citySpots =
           existingSpots && existingSpots.length > 0
             ? existingSpots
-            : generateDistrictSpots(q, r, state.castleSeed, terrain, mapRes);
+            : generateDistrictSpots(q, r, state.castleSeed, terrain, mapRes, {
+                touchesDenseForest: touchesTerrain(map, q, r, "denseForest"),
+              });
         districtTarget = { q, r, citySpots };
       }
       const result = districtTarget

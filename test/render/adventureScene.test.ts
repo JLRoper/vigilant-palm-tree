@@ -783,8 +783,8 @@ test("fog covers every tile the view player cannot see; a 1x1 owned map is fully
   assert.equal(nodesOfKind<FogHexNode>(nodes, "fogHex").length, 0, "the only tile is owned, so nothing should be fogged");
 });
 
-test("terrainDecoration is omitted for grass and dirt and emitted for forest, water, desert, mountain, swamp, snow", () => {
-  const terrains: Terrain[] = ["grass", "dirt", "forest", "water", "desert", "mountain", "swamp", "snow"];
+test("terrainDecoration is omitted for grass and dirt and emitted for forest, denseForest, water, desert, mountain, swamp, snow", () => {
+  const terrains: Terrain[] = ["grass", "dirt", "forest", "denseForest", "water", "desert", "mountain", "swamp", "snow"];
   const rows: TileRow[] = terrains.map((terrain, q) => ({ q, r: 0, terrain, resource: null }));
   const map = GameMap.fromTiles(rows);
   const nodes = buildAdventureScene({
@@ -799,7 +799,7 @@ test("terrainDecoration is omitted for grass and dirt and emitted for forest, wa
   const decos = nodesOfKind<TerrainDecorationNode>(nodes, "terrainDecoration");
   assert.deepEqual(
     decos.map((d) => d.terrain),
-    ["forest", "water", "desert", "mountain", "swamp", "snow"],
+    ["forest", "denseForest", "water", "desert", "mountain", "swamp", "snow"],
   );
 });
 

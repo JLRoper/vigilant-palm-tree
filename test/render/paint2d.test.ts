@@ -225,6 +225,18 @@ test("paintTerrainDecoration: snow emits a white drift arc + 3 white specks", ()
   assert.ok(calls.filter((c) => c.name === "fill").length >= 1, "specks should fill");
 });
 
+test("paintTerrainDecoration: dense forest emits a dark thicket of three crowns", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintTerrainDecoration(ctx, { kind: "terrainDecoration", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "denseForest" }, makeNoopPaint2DDep());
+  const fills = calls.filter((c) => c.name === "set:fillStyle").map((c) => c.args[0]);
+  assert.deepEqual(fills, ["#06170c", "#0e2413", "#03100a"], "thicket floor, then crowns, then the trunk");
+  assert.ok(calls.some((c) => c.name === "arc" && c.args[2] === 11), "the thicket floor is an 11-radius disc");
+  assert.equal(calls.filter((c) => c.name === "moveTo").length, 3, "three crowns");
+  assert.equal(calls.filter((c) => c.name === "lineTo").length, 6, "each crown is a closed triangle");
+  const trunk = calls.find((c) => c.name === "fillRect");
+  assert.deepEqual([trunk?.args[2], trunk?.args[3]], [4, 5], "the trunk is a 4x5 filled rect");
+});
+
 test("paintTerrainDecoration: grass and dirt still emit zero canvas calls", () => {
   const { ctx: ctxG, calls: callsG } = makeRecordingCtx();
   paintTerrainDecoration(ctxG, { kind: "terrainDecoration", q: 0, r: 0, world: { x: 0, y: 0 }, terrain: "grass" }, makeNoopPaint2DDep());

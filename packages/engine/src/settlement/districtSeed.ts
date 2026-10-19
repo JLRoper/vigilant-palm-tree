@@ -8,7 +8,7 @@ import type {
 import { hexDistance } from "@heroes/contracts";
 import { buildingFootprintFromRegistry } from "../buildingRegistry";
 import { districtKey } from "../control";
-import { isPassable, type Terrain } from "../map/terrain";
+import { isPassable, touchesTerrain, type Terrain } from "../map/terrain";
 import { hashString, mulberry32 } from "../rng";
 import { pickStyleForBuilding } from "../styleResolver";
 import { generateDistrictSpots, type CitySpot } from "./citySpots";
@@ -117,7 +117,9 @@ export function seedStartupDistricts(
   for (const hex of hexes) {
     const terrain = map.get(hex.q, hex.r) ?? "grass";
     const mapRes = map.resourceTileAt(hex.q, hex.r)?.resource ?? null;
-    const spots: CitySpot[] = generateDistrictSpots(hex.q, hex.r, opts.castleSeed, terrain, mapRes);
+    const spots: CitySpot[] = generateDistrictSpots(hex.q, hex.r, opts.castleSeed, terrain, mapRes, {
+      touchesDenseForest: touchesTerrain(map, hex.q, hex.r, "denseForest"),
+    });
     const buildings = buildDistrictBuildings(
       mapRes,
       hashString(`district-buildings:${opts.castleSeed}:${hex.q}:${hex.r}`),

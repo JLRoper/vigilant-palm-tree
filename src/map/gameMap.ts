@@ -1,4 +1,5 @@
 export {
+  CURRENT_MAP_GEN_VERSION,
   GameMap,
   MAP_SIZES,
   MAP_SIZE_ORDER,

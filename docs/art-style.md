@@ -110,7 +110,7 @@ The default city-view backdrop is a procedural **settlement diorama**: a floatin
 
 ### Biome-matched palette
 
-This is the load-bearing art rule: **the plate palette comes from the settlement's biome and its neighbors**, never from a fixed palette. Each of the eight terrain palettes is derived from `TERRAIN_COLORS[terrain]` by mixing toward `MIST` (`#ece6d8`):
+This is the load-bearing art rule: **the plate palette comes from the settlement's biome and its neighbors**, never from a fixed palette. Each of the nine terrain palettes — grass, dirt, water, forest, dense forest, desert, mountain, swamp, snow — is derived from `TERRAIN_COLORS[terrain]` by mixing toward `MIST` (`#ece6d8`):
 
 | Slot     | Derivation                          | Used by                          |
 |----------|-------------------------------------|----------------------------------|

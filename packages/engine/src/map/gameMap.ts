@@ -44,7 +44,26 @@ export const MAP_SIZE_ORDER = [
 ] as const;
 
 export type MapSize = (typeof MAP_SIZE_ORDER)[number];
-export type MapGenVersion = 1 | 2 | 3;
+export type MapGenVersion = 1 | 2 | 3 | 4;
+
+/**
+ * The map-gen version every NEW game is created at. Both the generated grid and
+ * `lobby.mapGenVersion` must come from this one constant, or a fresh game would
+ * be built on one map and re-generated on another when the client reloads.
+ * Saved games keep the version they were created with (v1-v3 render unchanged).
+ */
+export const CURRENT_MAP_GEN_VERSION: MapGenVersion = 4;
+
+// Dense forest (v4): a rarer, impassable second forest biome. It is grown OUT
+// of the normal forest's edge -- seeded on a non-forest neighbour of a forest
+// tile and preferring to expand from tiles that still touch forest -- so it
+// usually borders the forest it grew from, while its own outer rim still meets
+// whatever biome surrounds the forest. 0.06 against forest's 0.15 keeps it
+// clearly the rarer of the two.
+export const DENSE_FOREST_FRACTION = 0.06;
+export const DENSE_FOREST_BLOBS = 3;
+/** Share of growth steps that insist on a tile touching normal forest. */
+export const DENSE_FOREST_FOREST_BIAS = 0.75;
 
 export const MAP_SIZES: Record<MapSize, { width: number; height: number; label: string }> = {
   small:    { width: 24,  height: 18,  label: "Small" },
@@ -82,7 +101,7 @@ export class GameMap {
     this.tiles =
       version === 1
         ? generateTerrainLegacy(mulberry32(seed), this.width, this.height)
-        : generateTerrain(mulberry32(seed), this.width, this.height, version >= 3);
+        : generateTerrain(mulberry32(seed), this.width, this.height, version >= 3, version >= 4);
     if (!this.isPassable(HERO_SPAWN.q, HERO_SPAWN.r)) {
       this.tiles[this.index(HERO_SPAWN.q, HERO_SPAWN.r)] = "grass";
     }
@@ -161,12 +180,14 @@ export function resolveMapSize(mapSize?: string | null): MapSize {
 export function resolveMapGenVersion(version?: number | null): MapGenVersion {
   if (version === 1) return 1;
   if (version === 2) return 2;
+  if (version === 4) return 4;
   return 3;
 }
 
 export function resolveSavedMapGenVersion(version?: number | null): MapGenVersion {
   if (version === 2) return 2;
   if (version === 3) return 3;
+  if (version === 4) return 4;
   return 1;
 }
 
@@ -208,7 +229,13 @@ export function scaledTerrainBlobs(baseBlobs: number, width: number, height: num
   return Math.max(baseBlobs, Math.round(baseBlobs * Math.sqrt(total / (24 * 18))));
 }
 
-function generateTerrain(rng: () => number, width: number, height: number, scaleBlobs = true): Terrain[] {
+function generateTerrain(
+  rng: () => number,
+  width: number,
+  height: number,
+  scaleBlobs = true,
+  denseForest = true,
+): Terrain[] {
   const total = width * height;
   const tiles = new Array<Terrain>(total).fill("grass");
   const inFrontier = new Uint8Array(total);
@@ -265,7 +292,113 @@ function generateTerrain(rng: () => number, width: number, height: number, scale
     }
   }
 
+  if (denseForest) placeDenseForest(rng, tiles, width, height, scaleBlobs);
+
   return tiles;
+}
+
+/** Terrain a dense-forest blob never grows into or over. */
+const DENSE_FOREST_BLOCKED: ReadonlySet<Terrain> = new Set<Terrain>([
+  "water",
+  "mountain",
+  "forest",
+  "denseForest",
+]);
+
+/**
+ * Grows the dense-forest biome out of the normal forest's edge. Runs after
+ * every other terrain pass and never overwrites forest, so the two forests
+ * coexist and the "normal forest touching a dense forest" rule has something to
+ * match. It draws from the same rng stream but only after the existing passes,
+ * so everything generated before it is byte-identical to the pre-dense-forest
+ * map for the same seed.
+ */
+function placeDenseForest(
+  rng: () => number,
+  tiles: Terrain[],
+  width: number,
+  height: number,
+  scaleBlobs: boolean,
+): void {
+  const total = width * height;
+  const targetCount = Math.floor(total * DENSE_FOREST_FRACTION);
+  if (targetCount <= 0) return;
+
+  const forestCells: number[] = [];
+  for (let i = 0; i < total; i++) {
+    if (tiles[i] === "forest") forestCells.push(i);
+  }
+  if (forestCells.length === 0) return;
+
+  const blobCount = scaleBlobs ? scaledTerrainBlobs(DENSE_FOREST_BLOBS, width, height) : DENSE_FOREST_BLOBS;
+  const inFrontier = new Uint8Array(total);
+  const frontier: number[] = [];
+  const push = (idx: number): void => {
+    if (inFrontier[idx] || DENSE_FOREST_BLOCKED.has(tiles[idx])) return;
+    inFrontier[idx] = 1;
+    frontier.push(idx);
+  };
+
+  // Seed every blob on a non-forest neighbour of a forest tile: dense forest
+  // grows out of the forest edge rather than appearing anywhere on the map.
+  for (let i = 0; i < blobCount; i++) {
+    for (let attempt = 0; attempt < 32; attempt++) {
+      const host = forestCells[Math.floor(rng() * forestCells.length)];
+      const hq = host % width;
+      const hr = (host / width) | 0;
+      const dir = NEIGHBOR_DIRS[Math.floor(rng() * NEIGHBOR_DIRS.length)];
+      const nq = hq + dir.q;
+      const nr = hr + dir.r;
+      if (nq < 0 || nq >= width || nr < 0 || nr >= height) continue;
+      const idx = nr * width + nq;
+      if (DENSE_FOREST_BLOCKED.has(tiles[idx])) continue;
+      push(idx);
+      break;
+    }
+  }
+  if (frontier.length === 0) return;
+
+  const touchesForest = (idx: number): boolean => {
+    const q = idx % width;
+    const r = (idx / width) | 0;
+    for (const d of NEIGHBOR_DIRS) {
+      const nq = q + d.q;
+      const nr = r + d.r;
+      if (nq < 0 || nq >= width || nr < 0 || nr >= height) continue;
+      if (tiles[nr * width + nq] === "forest") return true;
+    }
+    return false;
+  };
+
+  let placed = 0;
+  let guard = 0;
+  const maxSteps = targetCount * 20;
+  while (placed < targetCount && frontier.length > 0 && guard++ < maxSteps) {
+    let pick = Math.floor(rng() * frontier.length);
+    if (rng() < DENSE_FOREST_FOREST_BIAS) {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const candidate = Math.floor(rng() * frontier.length);
+        if (touchesForest(frontier[candidate])) {
+          pick = candidate;
+          break;
+        }
+      }
+    }
+    const cellIdx = frontier[pick];
+    const last = frontier.pop()!;
+    if (pick < frontier.length) frontier[pick] = last;
+    if (DENSE_FOREST_BLOCKED.has(tiles[cellIdx])) continue;
+    tiles[cellIdx] = "denseForest";
+    placed++;
+    const cq = cellIdx % width;
+    const cr = (cellIdx / width) | 0;
+    for (const d of NEIGHBOR_DIRS) {
+      const nq = cq + d.q;
+      const nr = cr + d.r;
+      if (nq < 0 || nq >= width || nr < 0 || nr >= height) continue;
+      push(nr * width + nq);
+    }
+  }
 }
 
 function generateTerrainLegacy(rng: () => number, width: number, height: number): Terrain[] {

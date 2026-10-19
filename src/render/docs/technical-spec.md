@@ -402,6 +402,7 @@ sequenceDiagram
 
 **Terrain decorations**: `drawDecoration(q, r, cx, cy, t)` renders per-tile decorations:
 - **Forest**: Dark green triangle tree + brown trunk
+- **Dense forest**: Near-black thicket floor + three close-set dark crowns + trunk (deliberately denser than a forest tile, since the biome is impassable)
 - **Water**: Curved white reflection arcs
 - **Desert**: Sand grain strokes + scattered dots
 - **Mountain**: Gray triangle + white snow cap

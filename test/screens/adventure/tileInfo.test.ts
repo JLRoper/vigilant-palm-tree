@@ -108,6 +108,29 @@ test("water and mountain terrain report passable: false", () => {
   assert.equal(mountain!.terrain.passable, false);
 });
 
+test("dense forest reports an impassable tile with a spaced, capitalised label", () => {
+  const rows: TileRow[] = [
+    { q: 0, r: 0, terrain: "denseForest", resource: null },
+    { q: 1, r: 0, terrain: "forest", resource: null },
+  ];
+  const map = GameMap.fromTiles(rows);
+  const hero = new Hero("h0", "Hero", 2, 0, "player", 0);
+
+  const dense = describeTile({ map, state: makeState(), heroes: [hero], castles: [], viewPlayerId: 0, tile: { q: 0, r: 0 } });
+  assert.ok(dense);
+  assert.equal(dense!.terrain.passable, false);
+  assert.equal(dense!.terrain.cost, Infinity);
+  assert.equal(dense!.terrain.label, "Dense forest");
+
+  const forest = describeTile({ map, state: makeState(), heroes: [hero], castles: [], viewPlayerId: 0, tile: { q: 1, r: 0 } });
+  assert.ok(forest);
+  assert.deepEqual(
+    { label: forest!.terrain.label, passable: forest!.terrain.passable },
+    { label: "Forest", passable: true },
+    "normal forest keeps its single-word label and stays passable",
+  );
+});
+
 test("swamp and snow tiles report cost 2, passable: true, with capitalised labels", () => {
   const rows: TileRow[] = [
     { q: 0, r: 0, terrain: "swamp", resource: null },

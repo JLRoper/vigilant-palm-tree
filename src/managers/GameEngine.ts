@@ -6,7 +6,7 @@ import { MAP_SEED } from "@screens/adventure/adventureView";
 import { colorForOwner } from "../state/playerColors";
 import { buildInitialGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";
-import { cityViewSizeFor, districtConnectionReason, districtKey, generateDistrictSpots, resolveControllingSettlement, sampleCityBackdrop, validCharterHexes } from "@heroes/engine";
+import { cityViewSizeFor, districtConnectionReason, districtKey, generateDistrictSpots, isForbiddenDistrictTerrain, resolveControllingSettlement, sampleCityBackdrop, touchesTerrain, validCharterHexes } from "@heroes/engine";
 import { cachedUnitTypes } from "../data/unitCatalog";
 
 import { SessionManager } from "./SessionManager";
@@ -578,7 +578,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     if (!controlling || controlling.ownerId !== localId) return false;
     const cityMap = this.state.getGameMap();
     const terrain = cityMap.get(q, r);
-    if (!terrain || terrain === "mountain") return false;
+    if (!terrain || isForbiddenDistrictTerrain(terrain)) return false;
     const existing = controlling.districts?.[districtKey(q, r)];
     // No floating districts: a hex with no district yet opens only when it
     // touches the settlement's own hex or one of its districts (a water hex
@@ -590,7 +590,9 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     const spots =
       existing?.citySpots && existing.citySpots.length > 0
         ? existing.citySpots
-        : generateDistrictSpots(q, r, gs.castleSeed, terrain, mapRes);
+        : generateDistrictSpots(q, r, gs.castleSeed, terrain, mapRes, {
+            touchesDenseForest: touchesTerrain(cityMap, q, r, "denseForest"),
+          });
     const cityView = await this.ui.ensureCityView();
     cityView.open(
       controlling.id,

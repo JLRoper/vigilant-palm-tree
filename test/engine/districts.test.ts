@@ -17,6 +17,7 @@ import {
   buildingUpkeepRequired,
   computePlayerBonuses,
   controlRange,
+  DENSE_FOREST_BONUS_SPOT,
   depositIntoBank,
   districtKey,
   districtPopulationBonus,
@@ -189,6 +190,42 @@ test("generateDistrictSpots: 3 deterministic spots in 0..4x0..4, (2,2) eligible,
   const goldSpots = generateDistrictSpots(4, 1, 99, "desert", "gold");
   assert.equal(goldSpots[0].resource, "gold");
   assert.equal(goldSpots[0].vein, "rich");
+});
+
+test("generateDistrictSpots: a normal forest hex touching a dense forest gets one extra wood spot", () => {
+  const plain = generateDistrictSpots(3, 4, 42, "forest");
+  assert.equal(plain.length, 3, "a forest hex with no dense-forest neighbour keeps its 3 spots");
+  assert.deepEqual(
+    generateDistrictSpots(3, 4, 42, "forest", null, { touchesDenseForest: false }),
+    plain,
+    "an explicit false is the same as omitting the option",
+  );
+
+  const boosted = generateDistrictSpots(3, 4, 42, "forest", null, { touchesDenseForest: true });
+  assert.equal(boosted.length, 4, "the dense-forest neighbour adds exactly one spot");
+  assert.deepEqual(boosted.slice(0, 3), plain, "the hex keeps every spot it already had");
+  assert.equal(boosted[3].resource, DENSE_FOREST_BONUS_SPOT);
+  assert.equal(boosted[3].resource, "wood", "the extra resource is a woodcutting spot");
+  assert.equal(boosted[3].vein, "dense");
+  assert.equal(
+    new Set(boosted.map((s) => `${s.cell.x},${s.cell.y}`)).size,
+    4,
+    "the bonus spot takes a free cell",
+  );
+  assert.deepEqual(
+    generateDistrictSpots(3, 4, 42, "forest", null, { touchesDenseForest: true }),
+    boosted,
+    "the bonus spot is deterministic",
+  );
+
+  // It is a FOREST rule: a dense-forest neighbour grants nothing to other biomes.
+  for (const terrain of ["grass", "dirt", "swamp", "snow", "desert"]) {
+    assert.equal(
+      generateDistrictSpots(3, 4, 42, terrain, null, { touchesDenseForest: true }).length,
+      3,
+      `${terrain} gains no bonus spot`,
+    );
+  }
 });
 
 // ── 3. applyPlaceBuildings in district mode ──────────────────────────────────

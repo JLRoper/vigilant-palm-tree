@@ -6,7 +6,7 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 
 ## Status
 
-✅ **Implemented.** Procedural map generation, 8 terrain types, biome-aware resource placement, server-side tile persistence, isometric rendering, camera (pan/zoom, DPR-aware), fog of war, and minimap all ship in v1.
+✅ **Implemented.** Procedural map generation, 9 terrain types, biome-aware resource placement, server-side tile persistence, isometric rendering, camera (pan/zoom, DPR-aware), fog of war, and minimap all ship in v1.
 
 ## Grid
 
@@ -22,17 +22,18 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 | Grass   | green       | 1         | Default. Plains — most common terrain. |
 | Dirt    | brown       | 1         | Roads / paths. Exposed, barren ground — proxy for arid land in v1. |
 | Forest  | dark green  | 1.2       | Slow, decorative trees. Wood-bearing biome. |
+| Dense forest | near-black green | impassable | Rarer thicket that grows against the forest edge. Never walkable, never carries a deposit. Its neighbours are rewarded — see below. |
 | Desert  | sand yellow | 1.4       | Passable but harsh. Arcane-bearing biome (ancient ruins). |
 | Swamp   | murky olive | 2         | Waterlogged bog. Slow going (2× a normal tile). |
 | Snow    | pale blue-white | 2     | Frozen ground. Slow going (2× a normal tile). |
 | Mountain| grey rock   | impassable| Peaks and ridges. Stone + iron-bearing biome. Lakes / rivers. |
 | Water   | blue        | impassable| Lakes / rivers. Never carries resources. |
 
-Generated via a deterministic biome-blob growth pass (`generateTerrain`, using a deduplicated `Uint8Array(w * h)` frontier bitset, O(1) swap-and-pop removal, and `scaledTerrainBlobs` scaling biome blob counts by $\sqrt{N/432}$ for maps larger than `24×18`) on the map seed. Same seed → same map. Implementation: [`packages/engine/src/map/gameMap.ts`](../packages/engine/src/map/gameMap.ts), [`packages/engine/src/map/terrain.ts`](../packages/engine/src/map/terrain.ts). See [map-gen.md](./map-gen.md) for the algorithm.
+Generated via a deterministic biome-blob growth pass (`generateTerrain`, using a deduplicated `Uint8Array(w * h)` frontier bitset, O(1) swap-and-pop removal, and `scaledTerrainBlobs` scaling biome blob counts by $\sqrt{N/432}$ for maps larger than `24×18`) on the map seed. Same seed → same map. **Dense forest is a map-gen v4 feature** (`DENSE_FOREST_FRACTION = 0.06` against forest's `0.15`): it is grown last, seeded on a non-forest neighbour of a forest tile and biased to expand from tiles that still touch forest, so it usually borders the forest it grew out of while its own rim still meets the surrounding biome. v1–v3 maps are unchanged — v4 only *adds* dense forest, never overwrites forest, so a saved v3 game keeps its exact terrain. Implementation: [`packages/engine/src/map/gameMap.ts`](../packages/engine/src/map/gameMap.ts), [`packages/engine/src/map/terrain.ts`](../packages/engine/src/map/terrain.ts). See [map-gen.md](./map-gen.md) for the algorithm.
 
 ## Resource tile placement
 
-✅ **Implemented.** Resources are placed by per-terrain density — see [resources.md](./resources.md#biome-aware-density-matrix) for the full matrix. Water and impassable mountain are never assigned a resource; mountain-edge tiles get a spillover boost for stone/iron.
+✅ **Implemented.** Resources are placed by per-terrain density — see [resources.md](./resources.md#biome-aware-density-matrix) for the full matrix. Water, impassable mountain and impassable dense forest are never assigned a resource; mountain-edge tiles get a spillover boost for stone/iron.
 
 Implementation: [`src/map/resourceTiles.ts`](../src/map/resourceTiles.ts) (`placeResourceTiles`).
 
@@ -41,7 +42,7 @@ Implementation: [`src/map/resourceTiles.ts`](../src/map/resourceTiles.ts) (`plac
 | Resource   | Preferred biomes                          | Avoids        |
 |------------|-------------------------------------------|---------------|
 | Gold       | Grass, dirt (anywhere with foot traffic)  | Mountain, water |
-| Wood       | **Forest** (high), grass (low)            | Desert, mountain, water |
+| Wood       | **Forest** (high), grass (low)            | Desert, mountain, water, dense forest |
 | Stone      | **Mountain** (high), dirt (low)           | Forest, water |
 | Iron Ore   | **Mountain** (medium-high), dirt (low)    | Forest, water |
 | Arcane Dust| **Desert** (high), dirt (low)             | Forest, mountain, water |

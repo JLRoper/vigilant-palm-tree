@@ -10,6 +10,13 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.22.0] - 2026-10-19
+
+- **Dense forest biome** (new `denseForest` terrain, map-gen **v4**): a rarer, **impassable** second forest — `TERRAIN_COST` is `Infinity`, so heroes path around it exactly like mountains and water. It is generated last, seeded on a non-forest neighbour of a forest tile and grown with a 0.75 bias toward frontier tiles that still touch normal forest, so it usually borders the forest it grew out of while its outer rim still meets the surrounding biomes. `DENSE_FOREST_FRACTION` is 0.06 against forest's 0.15; it never overwrites forest, water or mountain and never carries a resource deposit.
+- **Map-gen v4 keeps v1–v3 maps intact** — `MapGenVersion` gained `4` and `CURRENT_MAP_GEN_VERSION` is the single source for "new game", so a fresh game is built on the grid a reload regenerates while saved v3 games keep their exact terrain. v4 only *adds* dense forest on top of the identical v3 grid.
+- **Forest-edge wood bonus in the district city view:** a `forest` hex that touches a `denseForest` hex gains one extra `wood` spot (`DENSE_FOREST_BONUS_SPOT`, `vein: "dense"`) on its 5×5 district grid — 4 spots instead of 3, alongside the spots it already had. Wired through the client `GameEngine`/`UIManager`, the server `PlaceBuildings` handler and startup districts, so optimistic and authoritative grids agree.
+- Dense forest gets its own map art (a three-crown thicket over a near-black floor, denser than a forest tile), its own `TERRAIN_COLORS` entry, and a city-backdrop palette so settlements beside one render correctly. Districts cannot be placed on it (`isForbiddenDistrictTerrain`, shared by the city view's open gate and the reducer).
+
 ## [0.21.0] - 2026-10-19
 
 Recruitment panel: unit rows accordion their buildings and bulk buy/staff

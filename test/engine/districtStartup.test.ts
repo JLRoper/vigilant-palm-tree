@@ -11,6 +11,7 @@ import {
   disconnectedDistrictKeys,
   districtConnectionReason,
   districtTerrainProblem,
+  isForbiddenDistrictTerrain,
   districtKey,
   getOrCreateGameMap,
   isWaterDistrict,
@@ -278,7 +279,7 @@ test("connectedDistrictKeys / disconnectedDistrictKeys: chains count, and a wate
 
 // ── 4. Terrain rules: water districts and the shipyard ──────────────────────
 
-test("districtTerrainProblem: mountains are never a district; water only as a shipyard district; a shipyard only on water", () => {
+test("districtTerrainProblem: mountains and dense forest are never a district; water only as a shipyard district; a shipyard only on water", () => {
   const house = [makeBuilding("house", 0, 0)];
   const shipyard = [makeBuilding("shipyard", 0, 0)];
   const both = [...house, ...shipyard];
@@ -286,6 +287,18 @@ test("districtTerrainProblem: mountains are never a district; water only as a sh
   assert.equal(districtTerrainProblem("grass", house), null);
   assert.equal(districtTerrainProblem("mountain", house), "impassable_district_terrain");
   assert.equal(districtTerrainProblem("mountain", shipyard), "impassable_district_terrain");
+  assert.equal(districtTerrainProblem("denseForest", house), "impassable_district_terrain");
+  assert.equal(districtTerrainProblem("denseForest", shipyard), "impassable_district_terrain");
+  assert.equal(districtTerrainProblem("denseForest", []), "impassable_district_terrain");
+  assert.equal(districtTerrainProblem("forest", house), null, "a normal forest hex stays buildable");
+
+  // The city view's open gate uses this predicate, so it must agree with the
+  // reducer's own verdict above.
+  assert.equal(isForbiddenDistrictTerrain("denseForest"), true);
+  assert.equal(isForbiddenDistrictTerrain("mountain"), true);
+  assert.equal(isForbiddenDistrictTerrain("water"), false, "water is a district once it holds a shipyard");
+  assert.equal(isForbiddenDistrictTerrain("forest"), false);
+  assert.equal(isForbiddenDistrictTerrain(undefined), false);
   assert.equal(districtTerrainProblem("water", house), "impassable_district_terrain");
   assert.equal(districtTerrainProblem("water", []), "impassable_district_terrain");
   assert.equal(districtTerrainProblem("water", shipyard), null);

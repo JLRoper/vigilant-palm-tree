@@ -52,7 +52,8 @@ export interface TileInfo {
 }
 
 function terrainLabel(kind: Terrain): string {
-  return kind.charAt(0).toUpperCase() + kind.slice(1);
+  const spaced = kind.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 function playerName(state: GameState, ownerId: PlayerId | null): string {

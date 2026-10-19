@@ -2,7 +2,7 @@ import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { ViewManager } from "./ViewManager";
 import { UIManager } from "./UIManager";
-import { GameMap, type MapSize, getOrCreateGameMap, resolveMapSize, resolveSavedMapGenVersion } from "../map/gameMap";
+import { CURRENT_MAP_GEN_VERSION, GameMap, type MapSize, getOrCreateGameMap, resolveMapSize, resolveSavedMapGenVersion } from "../map/gameMap";
 import { markSaved } from "../state/gameState";
 import { playerHeroId } from "../game/initState";
 import { CASTLE_COUNT_DEFAULT, defaultCastleSeedFromMapSeed, generateCastles } from "../map/castlePlacement";
@@ -117,7 +117,7 @@ export class GameSessionManager {
         ? [opts.factionId, ...Array.from({ length: Math.max(totalPlayers - 1, 0) }, () => "human" as FactionId)]
         : undefined;
     const effectiveCastleCount = opts.castleCount ?? (2 * totalPlayers);
-    const castles = generateCastles(getOrCreateGameMap(opts.seed, opts.mapSize ?? "small"), {
+    const castles = generateCastles(getOrCreateGameMap(opts.seed, opts.mapSize ?? "small", CURRENT_MAP_GEN_VERSION), {
       castleSeed: effectiveCastleSeed,
       playerCount: totalPlayers,
       castleCount: Math.max(effectiveCastleCount, totalPlayers),
@@ -153,7 +153,7 @@ export class GameSessionManager {
     try {
       this.syncMetadata("starter", MAP_SEED, "small");
       const castleSeed = defaultCastleSeedFromMapSeed(MAP_SEED);
-      const castles = generateCastles(getOrCreateGameMap(MAP_SEED, "small"), {
+      const castles = generateCastles(getOrCreateGameMap(MAP_SEED, "small", CURRENT_MAP_GEN_VERSION), {
         castleSeed,
         playerCount: 3,
         castleCount: CASTLE_COUNT_DEFAULT,

@@ -19,7 +19,7 @@ Resource-tile placement and yields are in [`packages/engine/src/map/resourceTile
 
 ## Map-Tile Density
 
-Each passable tile rolls once against the density table below. Mountain and water tiles have zero resource density and do not hold resource tiles.
+Each passable tile rolls once against the density table below. Mountain and water tiles have zero resource density and do not hold resource tiles; **dense forest** is skipped before the lookup for the same reason (it is impassable), so it has no column.
 
 | Resource ↓ / Terrain → | Grass | Dirt | Forest | Desert | Swamp | Snow | Mountain | Water |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -29,6 +29,8 @@ Each passable tile rolls once against the density table below. Mountain and wate
 | Iron | 0.5% | 3% | 0% | 0% | 0% | 1% | 0% | 0% |
 | Arcane | 0% | 2% | 0% | 8% | 3% | 0% | 0% | 0% |
 | Food | 0% | 0% | 0% | 0% | 0% | 0% | 0% | 0% |
+
+A normal forest tile that **touches** a dense forest still earns extra wood — one bonus woodcutting spot on that hex's district city grid, on top of its rolled deposit ([settlements.md](./settlements.md#city-districts)).
 
 ### Mountain Edges
 

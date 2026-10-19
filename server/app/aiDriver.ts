@@ -145,7 +145,7 @@ export interface AiDriverGameSnapshot {
   gameId: number;
   seed: number;
   mapSize: MapSize | undefined;
-  mapGenVersion?: 1 | 2 | 3;
+  mapGenVersion?: 1 | 2 | 3 | 4;
   /**
    * games.lobby.pendingBattle: a battle the driver offered a HUMAN defender
    * (EnterBattle) that has not been resolved yet. Null = nothing pending.

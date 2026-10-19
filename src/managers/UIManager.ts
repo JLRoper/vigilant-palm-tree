@@ -24,7 +24,7 @@ import type { Axial } from "../core/hex";
 import { Hero } from "../entities/hero";
 import { SpriteProvider } from "../render/assets";
 import { cachedUnitTypes } from "../data/unitCatalog";
-import { districtKey, generateDistrictSpots, playerFactionId, playerIncome, playerWealth, playerEffectiveSettlementIncome, unitAllowedForSeatFaction, type CitySpot } from "@heroes/engine";
+import { districtKey, generateDistrictSpots, playerFactionId, playerIncome, playerWealth, playerEffectiveSettlementIncome, touchesTerrain, unitAllowedForSeatFaction, type CitySpot } from "@heroes/engine";
 import { SessionManager } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
@@ -367,7 +367,9 @@ export class UIManager {
                 const citySpots =
                   prevSpots && prevSpots.length > 0
                     ? prevSpots
-                    : generateDistrictSpots(district.q, district.r, gs.castleSeed, terrain, mapRes);
+                    : generateDistrictSpots(district.q, district.r, gs.castleSeed, terrain, mapRes, {
+                        touchesDenseForest: touchesTerrain(map, district.q, district.r, "denseForest"),
+                      });
                 nextDistricts[key] = {
                   q: district.q,
                   r: district.r,
@@ -468,7 +470,9 @@ export class UIManager {
           const citySpots =
             prevSpots && prevSpots.length > 0
               ? prevSpots
-              : generateDistrictSpots(district.q, district.r, gs.castleSeed, terrain, mapRes);
+              : generateDistrictSpots(district.q, district.r, gs.castleSeed, terrain, mapRes, {
+                  touchesDenseForest: touchesTerrain(map, district.q, district.r, "denseForest"),
+                });
           districtTarget = { q: district.q, r: district.r, citySpots };
         }
         const result = tc.placeBuildings(settlementId, buildings, initialLayout === true, districtTarget);

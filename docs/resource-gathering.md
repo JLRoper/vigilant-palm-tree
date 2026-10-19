@@ -27,7 +27,7 @@ Stockpiles are **capped, softly** (`packages/engine/src/settlement/capacity.ts`)
 
 [`packages/engine/src/map/resourceTiles.ts`](../packages/engine/src/map/resourceTiles.ts):
 
-- Each passable tile rolls once against a **per-terrain density table** (`RESOURCE_DENSITY`). Water and mountain are excluded entirely.
+- Each passable tile rolls once against a **per-terrain density table** (`RESOURCE_DENSITY`). Water, mountain and dense forest are excluded entirely — an impassable tile never carries a deposit.
 - **Mountain spillover:** a passable tile adjacent to a mountain gets its stone and iron density boosted ×1.5 (caps 0.2 / 0.15) — mountains themselves can't hold tiles, so ore "spills" onto their borders.
 - Per-tile yields (`RESOURCE_YIELD`): **gold 20, wood 15, stone 12, iron 8, arcane 5, food 10**.
 - **Food's world-map density is 0 on every terrain**, so food resource tiles never spawn. Food is nevertheless live: city food spots drive farm-building cell multipliers, and farms, farmhouses, and granaries produce it (§8–10). `RESOURCE_YIELD.food = 10` is not a world-map food source.
@@ -43,7 +43,9 @@ Density matrix as implemented:
 | Arcane | 0% | 2% | 0% | **8%** | 3% | 0% | 0% | 0% |
 | Food | 0% | 0% | 0% | 0% | 0% | 0% | 0% | 0% |
 
-Mountain spillover applies to every adjacent **passable** terrain tile: stone and iron densities are multiplied by 1.5 and capped at 0.20 and 0.15. Mountain and water remain zero and never carry a resource tile.
+Mountain spillover applies to every adjacent **passable** terrain tile: stone and iron densities are multiplied by 1.5 and capped at 0.20 and 0.15. Mountain, water and dense forest remain zero and never carry a resource tile.
+
+Dense forest has no row above because `placeResourceTiles` skips it before any density lookup: the biome is impassable, so a deposit on it could never be worked. It still pays out indirectly — a normal forest hex **touching** a dense forest gains one extra wood spot on that hex's district city grid ([settlements.md](./settlements.md#city-districts)).
 
 ## 3. Settlement resource rates (collection)
 
