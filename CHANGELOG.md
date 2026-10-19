@@ -10,11 +10,28 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.15.0] - 2026-10-19
+## [0.17.0] - 2026-10-19
 
 feat(recruitment): consolidated recruitment panel with a shared drag-and-drop garrison grid
 
+The city view gains a **recruitment panel** (⚔ Recruit in the City Design box, or `r`): every recruit source in a settlement and its districts collapses into one block per building kind, with ready/capacity totals, live `+N/wk` refill recomputed from actual staffing, resource-pile cost icons, per-building worker steppers (peasant sprite, `n/max`/`Auto`, `−`/`+` committing `AssignWorkers` district-true), a per-kind **Buy all** that takes from the most-stocked building first and then round-robins, `+` for one and shift-click for the affordable maximum, and hover tooltips instead of prose. Each commit rides the existing `RecruitUnits` with the source building's own coords + district, so a district barracks works without that district being open. Its building list scrolls inside the panel and the panel is resizeable (corner grip, size remembered) — the resize grip is a shared `panelResize.ts` any panel can adopt with one option.
+
+Armies and garrisons become one drag-and-drop representation: `src/screens/shared/squadGrid.ts` (4×2 square tiles, unit PNG + count badge) backs the hero panel's Army section and both garrison surfaces, so the settlement panel and the recruitment panel mount one `GarrisonView` and a drag on either re-renders both. Within a grid a drag swaps two slots (new `ReorderGarrison` command); between the garrison grid and the hero's army grid it moves troops through `TransferUnits` into the dropped slot.
+
 Clicking a building's row in the recruitment panel — the kind's heading, a per-building line, or a unit's own row (the unit art), anywhere but on a button — opens that building's own menu: the same one an iso-grid click opens, placed at the building and ringing it until the menu closes. A unit row opens the building it recruits from (its fullest source, the one `+` draws on); a row in another district switches the city view there first through the engine's own district door.
+
+## [0.16.0] - 2026-10-19
+
+- New mounted hero variant **Paladin 2** (`paladin2`, commander-11, label "Paladin 2"): a darker gilded "Paladin of the Ember Oath" repaint of the existing paladin — charcoal dappled warhorse with a silver-white mane, blackened-steel plate with gold filigree, crimson tabard and cape. All **eight** directions ship (no diagonal→cardinal fallback), base frames only, plus its 320×100 roster banner.
+- The original `paladin` is untouched: same registry entry, same four cardinal sprites, same 16 descriptor keys (8 directions incl. fallbacks × base/frame-2). A Playwright assertion pins that set.
+- Added `tools/sprites/gemini-hero-sprite.mjs`: an OpenRouter Gemini image-in → image-out generator for hero variants that keys the model's flat grey background with a border flood fill, then frames the result to the reference sprite's alpha bounding box (same content height, bottom edge and centre) so generated art lands in `commander-<N>/` at the original's scale.
+- Art generated with `google/gemini-3.1-flash-image` pinned to `google-vertex/global`; prompts, reference hashes and per-file alpha bounds are committed under `design/hero-variants/paladin-2/` (1024² masters gitignored).
+- New `test/heroVariants.e2e.ts` (`npm run test:heroVariants`, part of `test:all`): recruits the variant into a real game, asserts the persisted `horseVariant` reaches the client, resolves all eight `horse.paladin2.*` descriptors and the banner as real PNGs, and A/B diffs the same map tile against the original paladin to prove the new sprite actually paints (726 changed px, 114 reddened by the cape, 395 darkened by the charcoal horse).
+
+## [0.15.0] - 2026-10-19
+
+- Settlement panel: the settlement's own name is now the panel's first text (the header), with its owner beside it; the line under the banner labels the holding and its tier (`SETTLEMENT L1`) instead of repeating the name.
+- The **⌂ Settlements** roster rows take the same double-click as the panel banner: the map centres on that settlement and its city view opens, through the same own-settlement/own-turn gate.
 
 ## [0.14.0] - 2026-10-19
 

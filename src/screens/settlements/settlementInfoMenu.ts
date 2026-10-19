@@ -46,13 +46,18 @@ export interface SettlementInfoMenuOptions {
 
 const PANEL_X = 16;
 
+// What kind of holding the panel is describing. Every tier is a settlement in
+// the engine (POP_BY_LEVEL, upgradeSettlement), so the word is constant and the
+// level badge beside it carries the tier.
+const SETTLEMENT_TYPE_LABEL = "Settlement";
+
 export class SettlementInfoMenu {
   private menu: PopupMenu;
   private visible = false;
   private currentSettlementId: string | null = null;
   private docked: DockedPanel;
-  private nameEl: HTMLElement;
-  private nameTextEl: HTMLSpanElement;
+  private typeEl: HTMLElement;
+  private typeTextEl: HTMLSpanElement;
   private levelBadge: HTMLElement;
   private populationEl: HTMLSpanElement;
   private workforceEl: HTMLSpanElement;
@@ -157,18 +162,24 @@ export class SettlementInfoMenu {
     });
     body.appendChild(this.bannerEl);
 
-    this.nameEl = document.createElement("div");
-    Object.assign(this.nameEl.style, {
-      fontSize: "15px",
-      fontWeight: "600",
-      color: menuTheme.panel.color,
+    // The settlement's own name goes in the panel header (the first text in
+    // the panel); this line carries what the holding IS and its tier. The name
+    // used to live here, with the type word in the header -- swapped so the
+    // panel leads with the settlement's name.
+    this.typeEl = document.createElement("div");
+    Object.assign(this.typeEl.style, {
+      display: "flex",
+      alignItems: "center",
+      fontSize: "11px",
+      letterSpacing: "0.06em",
+      textTransform: "uppercase",
+      opacity: "0.55",
+      marginBottom: "2px",
     });
-    // The name is its own node: the badge below is appended to the same div, so
-    // a text write through `childNodes[0]` would land on the badge and be
-    // overwritten by the level on the next line.
-    this.nameTextEl = document.createElement("span");
-    this.nameEl.appendChild(this.nameTextEl);
-    body.appendChild(this.nameEl);
+    this.typeTextEl = document.createElement("span");
+    this.typeTextEl.textContent = SETTLEMENT_TYPE_LABEL;
+    this.typeEl.appendChild(this.typeTextEl);
+    body.appendChild(this.typeEl);
 
     this.levelBadge = document.createElement("span");
     Object.assign(this.levelBadge.style, {
@@ -180,7 +191,7 @@ export class SettlementInfoMenu {
       marginLeft: "6px",
       verticalAlign: "middle",
     });
-    this.nameEl.appendChild(this.levelBadge);
+    this.typeEl.appendChild(this.levelBadge);
 
     const { row: popRow, value: popVal } = makeRow("Population");
     this.populationEl = popVal;
@@ -438,14 +449,13 @@ export class SettlementInfoMenu {
     this.lastSettlement = settlement;
     this.lastDay = state.day;
     const ownerText = settlement.ownerId !== null ? ` — Player ${settlement.ownerId + 1}` : " — Neutral";
-    this.menu.setTitle(`Settlement${ownerText}`);
+    this.menu.setTitle(`${settlement.name}${ownerText}`);
     this.bannerEl.src = settlementBannerUrl(settlement.level);
     // Only promise the city view where it will actually open (own settlement,
     // own turn) — the same gate the adventure map's double-click uses.
     const canEnterCityView = this.canEnterCityView?.(settlement.id) ?? false;
     this.bannerEl.style.cursor = canEnterCityView ? "zoom-in" : "default";
     this.bannerEl.title = canEnterCityView ? "Double-click to enter the city view" : "";
-    this.nameTextEl.textContent = settlement.name;
     this.levelBadge.textContent = `L${settlement.level}`;
     this.populationEl.textContent = settlement.population.toLocaleString();
     const pool = workforcePool(settlement);

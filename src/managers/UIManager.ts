@@ -85,6 +85,7 @@ export class UIManager {
   private heroRosterMenu?: HeroRosterMenu;
   private settlementRosterMenu?: SettlementRosterMenu;
   private settlementInfoMenu?: SettlementInfoMenu;
+  private settlementCityView: SettlementInfoCallbacks = {};
   private tileInfoPanel?: TileInfoPanel;
   private inspectedTile: Axial | null = null;
   private cityView: CityView | null = null;
@@ -95,7 +96,6 @@ export class UIManager {
   private workforcePanelPromise: Promise<WorkforcePanel> | null = null;
   private recruitmentPanel?: RecruitmentPanel;
   private recruitmentPanelPromise: Promise<RecruitmentPanel> | null = null;
-  private settlementInfoCallbacks: SettlementInfoCallbacks = {};
   private gameStateManager?: GameStateManager;
   private viewManager?: ViewManager;
   private lastMapWidth = -1;
@@ -171,6 +171,9 @@ export class UIManager {
     this.settlementRosterMenu = new SettlementRosterMenu({
       onSelectSettlement: (settlementId) => this.handleRosterSettlementSelect(settlementId),
       onCenterSettlement: (settlementId) => this.handleRosterSettlementCenter(settlementId),
+      // Lazy: initSettlementInfo() supplies these after this menu is built.
+      onEnterCityView: (settlementId) => this.settlementCityView.onEnterCityView?.(settlementId),
+      canEnterCityView: (settlementId) => this.settlementCityView.canEnterCityView?.(settlementId) ?? false,
     });
 
     document.addEventListener("keydown", (e) => this.handleKeyDown(e));
@@ -195,7 +198,9 @@ export class UIManager {
   }
 
   initSettlementInfo(callbacks: SettlementInfoCallbacks = {}): void {
-    this.settlementInfoCallbacks = callbacks;
+    // Kept on the manager, not just handed to the info panel: the settlements
+    // roster's rows open the same city view through the same gate.
+    this.settlementCityView = callbacks;
     this.settlementInfoMenu = new SettlementInfoMenu({
       parent: document.body,
       onClose: () => {
@@ -611,7 +616,7 @@ export class UIManager {
     const openId = view?.getOpenSettlementId();
     if (!view || !openId) return false;
     if (!sameCityContext(view.getOpenDistrict(), req.district)) {
-      const enter = this.settlementInfoCallbacks.onEnterCityContext;
+      const enter = this.settlementCityView.onEnterCityContext;
       if (!enter) return false;
       const entered = await enter(openId, req.district);
       if (!entered) return false;
