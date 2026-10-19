@@ -349,6 +349,176 @@ test("hovering an enemy caravan rings it but never draws its route", () => {
   assert.equal(marker.hovered, true, "the visible enemy cart still rings under the pointer");
 });
 
+// ---- hover: the route line follows a moving hero endpoint -------------------
+
+// A hero-destination cart must not freeze its preview on the tile the hero
+// stood on at the last daily advance: while the pointer rests on the cart the
+// line is re-projected onto the hero's CURRENT tile (the same A* the engine's
+// pre-walk re-target runs at turn end).
+function hoverScene(heroTile: { q: number; r: number }, stored: { q: number; r: number }[], heroId = "h1") {
+  const map = makeGrassMap(12, 6);
+  const hero = new Hero(heroId, "Moving", heroTile.q, heroTile.r, "player", 0);
+  return buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({
+      viewPlayerId: 0,
+      hoveredCaravanId: "r0",
+      caravans: [
+        {
+          routeId: "r0",
+          q: 2,
+          r: 0,
+          ownerId: 0,
+          wagons: 2,
+          payloadKind: "gold",
+          goalHeroId: heroId,
+          remainingPath: stored,
+        },
+      ],
+    }),
+  });
+}
+
+test("a hovered route to a hero re-projects its line onto the hero's CURRENT tile", () => {
+  // The snapshot ends at (4,0) -- where the hero stood at the last advance.
+  const nodes = hoverScene({ q: 8, r: 0 }, [{ q: 3, r: 0 }, { q: 4, r: 0 }]);
+  const routes = nodesOfKind<CaravanRouteNode>(nodes, "caravanRoute");
+  assert.equal(routes.length, 1);
+  const points = routes[0].points;
+  assert.deepEqual(points[0], axialToPixel(2, 0), "the line still starts at the cart");
+  assert.deepEqual(
+    points[points.length - 1],
+    axialToPixel(8, 0),
+    "the line now ends on the hero's live tile, not the stale snapshot end",
+  );
+  assert.deepEqual(
+    points,
+    [axialToPixel(2, 0), axialToPixel(3, 0), axialToPixel(4, 0), axialToPixel(5, 0), axialToPixel(6, 0), axialToPixel(7, 0), axialToPixel(8, 0)],
+    "the projection is a real A* route across the live tile gap",
+  );
+});
+
+test("a hovered route whose hero has NOT moved keeps the stored remaining path untouched", () => {
+  // Non-straight stored path: a re-projection (A* shortest) would differ, so an
+  // untouched point list proves the snapshot is reused while the hero holds still.
+  const stored = [{ q: 3, r: 0 }, { q: 4, r: 0 }, { q: 4, r: 1 }];
+  const nodes = hoverScene({ q: 4, r: 1 }, stored);
+  const routes = nodesOfKind<CaravanRouteNode>(nodes, "caravanRoute");
+  assert.deepEqual(
+    routes[0].points,
+    [axialToPixel(2, 0), ...stored.map((t) => axialToPixel(t.q, t.r))],
+    "the hero is still on the snapshot's last tile -> no repath",
+  );
+});
+
+test("a hovered route whose hero stands on the cart's tile draws no line (the meeting is instant)", () => {
+  const nodes = hoverScene({ q: 2, r: 0 }, [{ q: 3, r: 0 }, { q: 4, r: 0 }]);
+  assert.equal(
+    nodesOfKind<CaravanRouteNode>(nodes, "caravanRoute").length,
+    0,
+    "no route line at all -- the cart delivers the moment it is hovered beside the hero",
+  );
+  const [marker] = nodesOfKind<CaravanMarkerNode>(nodes, "caravanMarker");
+  assert.equal(marker.hovered, true, "the marker itself still rings under the pointer");
+});
+
+test("a goal hero owned by another seat leaves the stored line alone (no fog leak)", () => {
+  const map = makeGrassMap(12, 6);
+  const enemyHero = new Hero("h1", "Spotted", 8, 0, "enemy", 1);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [enemyHero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({
+      viewPlayerId: 0,
+      hoveredCaravanId: "r0",
+      caravans: [
+        {
+          routeId: "r0",
+          q: 2,
+          r: 0,
+          ownerId: 0,
+          wagons: 2,
+          goalHeroId: "h1",
+          remainingPath: [{ q: 3, r: 0 }, { q: 4, r: 0 }],
+        },
+      ],
+    }),
+  });
+  const routes = nodesOfKind<CaravanRouteNode>(nodes, "caravanRoute");
+  assert.deepEqual(
+    routes[0].points,
+    [axialToPixel(2, 0), axialToPixel(3, 0), axialToPixel(4, 0)],
+    "a foreign goal hero never moves the own-seat line",
+  );
+});
+
+test("CaravanVisualTracker marks a hero-destination leg with its goal hero, and clears it on the way home to a settlement", () => {
+  const map = makeGrassMap(10, 4);
+  const settlements = { "s-a": makeSettlement("s-a", 0, 0, 0) };
+  const hero = { h0: makeHero("h0", 0, 6, 0) };
+  const tracker = new CaravanVisualTracker();
+  tracker.syncFromState(
+    {
+      tradeRoutes: [
+        makeRoute("r0", "s-a", "s-b", 2, { phase: "toDestination", cargo: 0, path: [{ q: 5, r: 0 }], pathIndex: 1 }, {
+          to: { kind: "hero", id: "h0" },
+        }),
+      ],
+      settlements,
+      heroes: hero,
+    },
+    map,
+  );
+  assert.equal(
+    tracker.getMarkerSpecs()[0].goalHeroId,
+    "h0",
+    "the outbound leg's goal is the TO hero",
+  );
+
+  // Same visual, leg flipped home to the settlement origin: no hero goal.
+  tracker.syncFromState(
+    {
+      tradeRoutes: [
+        makeRoute("r0", "s-a", "s-b", 2, { phase: "toHome", cargo: 0, path: [{ q: 5, r: 0 }, { q: 4, r: 0 }], pathIndex: 1 }, {
+          to: { kind: "hero", id: "h0" },
+        }),
+      ],
+      settlements,
+      heroes: hero,
+    },
+    map,
+  );
+  assert.equal(
+    tracker.getMarkerSpecs()[0].goalHeroId,
+    undefined,
+    "heading home to a settlement: nothing to follow",
+  );
+});
+
+test("resolveCaravanMarkers carries the goal hero for a hero origin on the return leg too", () => {
+  const settlements = { "s-b": makeSettlement("s-b", 1, 6, 0) };
+  const hero: HeroState = makeHero("h-0", 1, 3, 2);
+  const caravan: CaravanState = {
+    phase: "toHome",
+    cargo: 0,
+    path: [{ q: 4, r: 0 }, { q: 3, r: 1 }, { q: 3, r: 2 }],
+    pathIndex: 1,
+  };
+  const specs = resolveCaravanMarkers(
+    [makeRoute("r0", "s-a", "s-b", 3, caravan, { from: { kind: "hero", id: "h-0" } })],
+    settlements,
+    { "h-0": hero },
+  );
+  assert.equal(specs[0].goalHeroId, "h-0", "the return leg chases the hero origin");
+});
+
 // ---- painter seam ----------------------------------------------------------
 
 test("paintCaravanMarker resolves the per-direction sprite and rings a hovered cart", () => {

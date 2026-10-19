@@ -10,6 +10,13 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.23.0] - 2026-10-19
+
+Trade-route carts that meet a hero no longer idle out the rest of the day, and a hovered cart's route preview follows a moving hero.
+
+- **Meeting a hero now costs nothing** — a hero destination delivers the wrap the cart lands on the hero's tile and the flip spends whatever movement is left walking the fresh return leg in that SAME wrap, so a cart that catches its hero mid-wrap turns around and heads back immediately instead of parking until the next daily tick. When the origin is within that leftover walk it arrives and unloads the same wrap (the dead-hero and foreign-owner flips turn around the same way). Settlement destinations keep their existing arrival cadence.
+- **The hovered cart's route line updates as the hero moves** — the preview's tiles came from a snapshot taken at the last daily advance, so it froze on the tile the hero stood on then. A leg whose goal is a hero (`CaravanMarkerSpec.goalHeroId`) now re-projects the line onto the hero's CURRENT tile every frame while the pointer rests on the cart, using the same A* the engine's pre-walk re-target runs at turn end. Settlement legs keep the stored path, a foreign goal hero never moves an own-seat line, and a hero standing on the cart's tile draws no line at all (that meeting is instant).
+
 ## [0.22.0] - 2026-10-19
 
 - **Dense forest biome** (new `denseForest` terrain, map-gen **v4**): a rarer, **impassable** second forest — `TERRAIN_COST` is `Infinity`, so heroes path around it exactly like mountains and water. It is generated last, seeded on a non-forest neighbour of a forest tile and grown with a 0.75 bias toward frontier tiles that still touch normal forest, so it usually borders the forest it grew out of while its outer rim still meets the surrounding biomes. `DENSE_FOREST_FRACTION` is 0.06 against forest's 0.15; it never overwrites forest, water or mountain and never carries a resource deposit.

@@ -556,7 +556,33 @@ function returnLegCaravan(
   return { phase: "toHome" as const, cargo, path: [...previousPath].reverse(), pathIndex: 0 };
 }
 
-// Advance notes (docs plan §5.2 + the endpoints/catch-up rules):
+/**
+ * Turns a caravan around where it stands: builds the fresh return leg from the
+ * tile it physically occupies (returnLegCaravan) and spends whatever of today's
+ * movement budget is left walking it. A cart that reaches its hero mid-wrap
+ * therefore heads home in the SAME wrap instead of idling until the next one;
+ * `cargo` rides home (0 after a delivery, the undelivered load on a dead or
+ * foreign-owned hero destination). The origin-ward chase for a MOVING hero
+ * origin stays the toHome arrival handling's job -- this only spends the walk.
+ */
+function turnaroundToHome(
+  cargo: number,
+  caravan: CaravanState,
+  here: Axial,
+  originTile: Axial | null,
+  map: GameMap | null,
+  steps: number,
+): { caravan: CaravanState; steps: number } {
+  let walked = returnLegCaravan(cargo, caravanTile(caravan, here), originTile, map, caravan.path);
+  let left = steps;
+  while (left > 0 && walked.pathIndex < walked.path.length) {
+    walked = { ...walked, pathIndex: walked.pathIndex + 1 };
+    left -= 1;
+  }
+  return { caravan: walked, steps: left };
+}
+
+// Advance notes (docs plan ï¿½5.2 + the endpoints/catch-up rules):
 // - Ownership: a route belongs to the seat stamped on it (ownerId, else the
 //   FROM endpoint's live owner for legacy rows). A route whose ORIGIN
 //   endpoint no longer belongs to that seat is DORMANT: the loading branch
@@ -575,6 +601,12 @@ function returnLegCaravan(
 //   origin still belongs to the route owner; a lost origin reroutes the
 //   cargo to the owner's nearest owned settlement, and an owner with no
 //   settlement left holds the cargo aboard (never destroyed).
+// - A hero destination is met, not merely approached: when the caravan lands
+//   on the hero's tile it delivers that same wrap and -- with movement still
+//   in hand -- turns around and walks the fresh return leg in the same wrap
+//   (turnaroundToHome), so a cart that catches its hero mid-wrap never idles
+//   out the rest of the day. Reaching the origin within that leftover walk
+//   deposits the same wrap too.
 // - Loading happens at the origin endpoint's tile, per payload kind, out of
 //   the origin's stock (settlement warehouse/treasury or hero cargo/purse).
 // - Delivery caps at the destination: warehouseHeadroom/treasuryHeadroom for
@@ -697,8 +729,14 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
       steps -= 1;
     }
 
-    // Arrival handling.
-    if (caravan.pathIndex >= caravan.path.length) {
+    // Arrival handling. A hero-destination turnaround walks the return leg
+    // inside this same wrap (turnaroundToHome below), so this runs as a loop:
+    // one outbound pass, then at most one toHome pass once that fresh leg is
+    // exhausted. `handedOff` marks the turnaround, which makes the toHome
+    // pass's "did anything move" guard trivially true (the flip itself is a
+    // state change even when no step was walked).
+    let handedOff = false;
+    while (caravan.pathIndex >= caravan.path.length) {
       // The tile the caravan physically occupies at path end. The
       // caravanTile fallback needs a non-null origin only at pathIndex 0,
       // which an exhausted path never is.
@@ -737,19 +775,23 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
         const hero = nextHeroes[route.to.id];
         if (!hero) {
           changed = true;
-          return {
-            ...route,
-            caravan: returnLegCaravan(caravan.cargo, caravanTile(caravan, here), originTile, map, caravan.path),
-          };
+          const turned = turnaroundToHome(caravan.cargo, caravan, here, originTile, map, steps);
+          caravan = turned.caravan;
+          steps = turned.steps;
+          handedOff = true;
+          if (caravan.pathIndex < caravan.path.length) return { ...route, caravan };
+          continue;
         }
         if (hero.ownerId !== routeOwnerId(route, records)) {
           // A destination owned by another seat receives nothing (heroes
           // cannot normally change owner -- defense in depth).
           changed = true;
-          return {
-            ...route,
-            caravan: returnLegCaravan(caravan.cargo, caravanTile(caravan, here), originTile, map, caravan.path),
-          };
+          const turned = turnaroundToHome(caravan.cargo, caravan, here, originTile, map, steps);
+          caravan = turned.caravan;
+          steps = turned.steps;
+          handedOff = true;
+          if (caravan.pathIndex < caravan.path.length) return { ...route, caravan };
+          continue;
         }
         // Catch-up: while the hero is not on the caravan's tile, re-path
         // toward the hero's current position and keep walking today's
@@ -784,10 +826,16 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
         changed = true;
         touchHero(route.to.id, heroApplyDelivery(hero, route.payload, delivered));
         if (cargoLeft <= 0) {
-          return {
-            ...route,
-            caravan: returnLegCaravan(0, caravanTile(caravan, here), originTile, map, caravan.path),
-          };
+          // Delivered. Any movement left of today's budget is spent heading
+          // back (the cart turns around where it stands); an exhausted return
+          // leg hands off to the toHome arrival handling below, which deposits
+          // the same wrap when the origin is within reach.
+          const turned = turnaroundToHome(0, caravan, here, originTile, map, steps);
+          caravan = turned.caravan;
+          steps = turned.steps;
+          handedOff = true;
+          if (caravan.pathIndex < caravan.path.length) return { ...route, caravan };
+          continue;
         }
         return { ...route, caravan: { ...caravan, cargo: cargoLeft } };
       }
@@ -843,9 +891,10 @@ export function advanceTradeRoutes(state: GameState, map: GameMap | null): GameS
       }
       if (!isSameTile(homeHero, caravanTile(caravan, here))) {
         // Same wait rule as the outbound leg: persist walked steps and
-        // adopted re-paths, identity no-op only when neither happened.
+        // adopted re-paths, identity no-op only when neither happened -- but
+        // never after an in-wrap turnaround, whose flip is itself the change.
         const progressed = repathsUsed > 0 || caravan.pathIndex > route.caravan.pathIndex;
-        if (!progressed) return route;
+        if (!progressed && !handedOff) return route;
         changed = true;
         return { ...route, caravan };
       }
