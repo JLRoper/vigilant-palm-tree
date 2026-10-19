@@ -40,6 +40,15 @@ type ToolbarCallbacks = {
   canStartCharter?: () => boolean;
 };
 
+// The settlement panel's outward hooks the engine supplies: entering a
+// settlement's city view from the panel's banner is the same door the
+// adventure map's double-click uses, so the engine owns the gate and the
+// panel only asks.
+export type SettlementInfoCallbacks = {
+  onEnterCityView?: (settlementId: string) => void;
+  canEnterCityView?: (settlementId: string) => boolean;
+};
+
 const stateIdentityIds = new WeakMap<GameState, number>();
 let nextStateIdentityId = 1;
 
@@ -165,7 +174,7 @@ export class UIManager {
     });
   }
 
-  initSettlementInfo(): void {
+  initSettlementInfo(callbacks: SettlementInfoCallbacks = {}): void {
     this.settlementInfoMenu = new SettlementInfoMenu({
       parent: document.body,
       onClose: () => {
@@ -177,6 +186,8 @@ export class UIManager {
       },
       onRecruitHero: (name, variant) => this.handleRecruitHero(name, variant),
       onUpgradeSettlement: () => this.handleUpgradeSettlement(),
+      onEnterCityView: callbacks.onEnterCityView,
+      canEnterCityView: callbacks.canEnterCityView,
       getHeroesAtSettlement: (settlementId) => {
         if (!this.gameStateManager) return [];
         const gs = this.gameStateManager.getState();
