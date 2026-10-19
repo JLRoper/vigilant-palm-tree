@@ -11,11 +11,13 @@ import type { PanelRect } from "@screens/shared/panelPlacement";
 import { AccordionSection, makeRow } from "@screens/shared/panelWidgets";
 import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
 import { liveSettlementUpkeepUnfed } from "@screens/shared/heroUpkeepCost";
-import { RESOURCE_PILE_BUBBLY_SPRITES, SETTLEMENT_BANNERS } from "../../render/assetDescriptors";
+import { RESOURCE_PILE_BUBBLY_SPRITES, settlementBannerUrl } from "../../render/assetDescriptors";
 import { bankRejectionMessage, bankRowModel, treasuryRowModel, type BankGoldDirection, type BankRowModel } from "./bankRows";
 import { TREASURY_CAP_AMBER, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
+import { dailyRateTitle, foodBalanceTitle, formatDailyRate, resourceLabel, settlementDailyRates } from "./panelRates";
 import type { HorseVariant } from "../../state/settings";
-import { POP_BY_LEVEL, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, workforcePool, assignedWorkersExplicit, hasLegacyStaffing } from "@heroes/engine";
+import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+import { POP_BY_LEVEL, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, settlementTreasuryCap, workforcePool, assignedWorkersExplicit, hasLegacyStaffing } from "@heroes/engine";
 import { pickHeroName } from "../../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 
@@ -34,9 +36,11 @@ export interface SettlementInfoMenuOptions {
     direction: BankGoldDirection,
     district?: { q: number; r: number },
   ) => { ok: boolean; reason: string };
+  /** Double-clicking the banner asks for the settlement's city view. */
+  onEnterCityView?: (settlementId: string) => void;
+  /** Whether double-clicking the banner would do anything, so the cursor only promises what it delivers. */
+  canEnterCityView?: (settlementId: string) => boolean;
 }
-
-const WAREHOUSE_RESOURCE_ORDER = ["wood", "stone", "iron", "arcane", "food"] as const;
 
 const PANEL_X = 16;
 
@@ -46,6 +50,7 @@ export class SettlementInfoMenu {
   private currentSettlementId: string | null = null;
   private docked: DockedPanel;
   private nameEl: HTMLElement;
+  private nameTextEl: HTMLSpanElement;
   private levelBadge: HTMLElement;
   private populationEl: HTMLSpanElement;
   private workforceEl: HTMLSpanElement;
@@ -57,6 +62,7 @@ export class SettlementInfoMenu {
   private foodEl: HTMLSpanElement;
   private bannerEl: HTMLImageElement;
   private warehouseEls: Record<string, HTMLSpanElement>;
+  private warehouseRateEls: Record<string, HTMLSpanElement>;
   private onCloseCallback?: () => void;
   private onRecruitHero?: (name: string, variant: HorseVariant) => void;
   private recruitContainer: HTMLDivElement;
@@ -71,14 +77,14 @@ export class SettlementInfoMenu {
   private garrisonAccordion: AccordionSection;
   private garrisonBody: HTMLDivElement;
   private garrisonSignature: string | null = null;
-  private treasuryCapRow: HTMLDivElement;
-  private treasuryCapEl: HTMLSpanElement;
   private bankAccordion: AccordionSection;
   private bankBody: HTMLDivElement;
   private bankSignature: string | null = null;
   private bankRows: BankRowRefs[] = [];
   private lastSettlement: SettlementState | null = null;
   private lastDay = 0;
+  private onEnterCityView?: (settlementId: string) => void;
+  private canEnterCityView?: (settlementId: string) => boolean;
   private onBankGold?: (
     settlementId: string,
     gx: number,
@@ -95,6 +101,8 @@ export class SettlementInfoMenu {
     this.getHeroesAtSettlement = opts.getHeroesAtSettlement;
     this.onTransferUnits = opts.onTransferUnits;
     this.onBankGold = opts.onBankGold;
+    this.onEnterCityView = opts.onEnterCityView;
+    this.canEnterCityView = opts.canEnterCityView;
     this.menu = new PopupMenu({
       parent: opts.parent,
       title: "Settlement",
@@ -132,6 +140,16 @@ export class SettlementInfoMenu {
       marginBottom: "6px",
       display: "block",
     });
+    // The banner doubles as the door into the settlement's city view, the same
+    // gesture the adventure map uses for a settlement tile. `draggable` off so
+    // a double-click cannot start a native image drag instead.
+    this.bannerEl.draggable = false;
+    this.bannerEl.alt = "";
+    this.bannerEl.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      const settlementId = this.currentSettlementId;
+      if (settlementId) this.onEnterCityView?.(settlementId);
+    });
     body.appendChild(this.bannerEl);
 
     this.nameEl = document.createElement("div");
@@ -140,6 +158,11 @@ export class SettlementInfoMenu {
       fontWeight: "600",
       color: menuTheme.panel.color,
     });
+    // The name is its own node: the badge below is appended to the same div, so
+    // a text write through `childNodes[0]` would land on the badge and be
+    // overwritten by the level on the next line.
+    this.nameTextEl = document.createElement("span");
+    this.nameEl.appendChild(this.nameTextEl);
     body.appendChild(this.nameEl);
 
     this.levelBadge = document.createElement("span");
@@ -170,15 +193,6 @@ export class SettlementInfoMenu {
     this.treasuryEl = treasuryVal;
     body.appendChild(treasuryRow);
 
-    // How much gold the treasury can hold at all. Hidden unless a `treasury`
-    // building is present: a base-cap readout on every settlement would be a
-    // row that says nothing, which trains the player to skip it.
-    const { row: treasuryCapRow, value: treasuryCapVal } = makeRow("Treasury capacity");
-    this.treasuryCapRow = treasuryCapRow;
-    this.treasuryCapEl = treasuryCapVal;
-    treasuryCapRow.style.display = "none";
-    body.appendChild(treasuryCapRow);
-
     const { row: moraleRow, value: moraleVal } = makeRow("Morale");
     this.moraleEl = moraleVal;
     body.appendChild(moraleRow);
@@ -204,61 +218,78 @@ export class SettlementInfoMenu {
     this.warehouseAccordion = new AccordionSection({ label: "Warehouse", onToggle: () => this.reposition() });
     body.appendChild(this.warehouseAccordion.element);
 
-    const grid = document.createElement("div");
-    Object.assign(grid.style, {
-      display: "grid",
-      gridAutoFlow: "row",
-      gridTemplateColumns: "repeat(4, 1fr)",
-      columnGap: "2px",
-      rowGap: "4px",
+    // One resource per row, top to bottom: a four-across grid squeezed each
+    // pile into a quarter of the panel and left no room for the per-day rate.
+    const list = document.createElement("div");
+    Object.assign(list.style, {
+      display: "flex",
+      flexDirection: "column",
+      gap: "3px",
       marginBottom: "4px",
-      justifyItems: "center",
     });
-    this.warehouseAccordion.body.appendChild(grid);
+    this.warehouseAccordion.body.appendChild(list);
 
     this.warehouseEls = {};
-    for (const r of WAREHOUSE_RESOURCE_ORDER) {
-      const cell = document.createElement("div");
-      Object.assign(cell.style, {
+    this.warehouseRateEls = {};
+    for (const r of WAREHOUSE_RESOURCES) {
+      const row = document.createElement("div");
+      Object.assign(row.style, {
         display: "flex",
-        flexDirection: "column",
         alignItems: "center",
-        gap: "2px",
+        gap: "6px",
       });
 
       const img = document.createElement("img");
-      img.src = RESOURCE_PILE_BUBBLY_SPRITES[r as keyof typeof RESOURCE_PILE_BUBBLY_SPRITES];
+      img.src = RESOURCE_PILE_BUBBLY_SPRITES[r];
+      // Barely bigger than the amount text beside it: the sprite labels the
+      // row, the number is what the row is for.
       Object.assign(img.style, {
-        width: "28px",
-        height: "28px",
+        width: "16px",
+        height: "16px",
         imageRendering: "pixelated",
         objectFit: "contain",
+        flexShrink: "0",
       });
-      cell.appendChild(img);
+      img.alt = "";
+      row.appendChild(img);
 
-      // Label under each pile so the food sprite (golden grain) isn't
+      // Label beside each pile so the food sprite (golden grain) isn't
       // mistaken for a gold stockpile — gold lives in the treasury above.
       const name = document.createElement("span");
-      name.textContent = r.charAt(0).toUpperCase() + r.slice(1);
+      name.textContent = resourceLabel(r);
       Object.assign(name.style, {
-        fontSize: "9px",
-        opacity: "0.6",
-        lineHeight: "1",
+        fontSize: "11px",
+        opacity: "0.7",
+        flex: "1",
       });
-      cell.appendChild(name);
+      row.appendChild(name);
 
       const value = document.createElement("span");
       value.textContent = "0";
       Object.assign(value.style, {
-        fontSize: "11px",
+        fontSize: "12px",
         fontVariantNumeric: "tabular-nums",
-        opacity: "0.85",
-        lineHeight: "1",
+        opacity: "0.9",
+        textAlign: "right",
       });
-      cell.appendChild(value);
+      row.appendChild(value);
+
+      // Daily acquisition rate, right of the amount: which way this stock is
+      // moving is the thing a bare number cannot say.
+      const rate = document.createElement("span");
+      Object.assign(rate.style, {
+        fontSize: "10px",
+        fontVariantNumeric: "tabular-nums",
+        opacity: "0.6",
+        textAlign: "right",
+        width: "54px",
+        flexShrink: "0",
+      });
+      row.appendChild(rate);
 
       this.warehouseEls[r] = value;
-      grid.appendChild(cell);
+      this.warehouseRateEls[r] = rate;
+      list.appendChild(row);
     }
 
     this.bankAccordion = new AccordionSection({ label: "Banking", onToggle: () => this.reposition() });
@@ -396,8 +427,13 @@ export class SettlementInfoMenu {
     this.lastDay = state.day;
     const ownerText = settlement.ownerId !== null ? ` — Player ${settlement.ownerId + 1}` : " — Neutral";
     this.menu.setTitle(`Settlement${ownerText}`);
-    this.bannerEl.src = SETTLEMENT_BANNERS[settlement.level] ?? SETTLEMENT_BANNERS[1];
-    this.nameEl.childNodes[0].textContent = settlement.name;
+    this.bannerEl.src = settlementBannerUrl(settlement.level);
+    // Only promise the city view where it will actually open (own settlement,
+    // own turn) — the same gate the adventure map's double-click uses.
+    const canEnterCityView = this.canEnterCityView?.(settlement.id) ?? false;
+    this.bannerEl.style.cursor = canEnterCityView ? "zoom-in" : "default";
+    this.bannerEl.title = canEnterCityView ? "Double-click to enter the city view" : "";
+    this.nameTextEl.textContent = settlement.name;
     this.levelBadge.textContent = `L${settlement.level}`;
     this.populationEl.textContent = settlement.population.toLocaleString();
     const pool = workforcePool(settlement);
@@ -406,21 +442,26 @@ export class SettlementInfoMenu {
       ? `auto · pool ${pool}`
       : `${assigned}/${pool} assigned · ${Math.max(0, pool - assigned)} idle${assigned > pool ? " · over pool" : ""}`;
     this.incomeEl.textContent = `${effectiveSettlementIncome(settlement, state.heroes).toLocaleString()}g`;
-    this.treasuryEl.textContent = `${settlement.gold}g`;
     this.updateTreasuryRow(settlement, state);
     this.moraleEl.textContent = `${Math.round(settlement.morale ?? 100)}%${settlement.autoTrade ? " · auto" : ""}`;
-    this.updateTreasuryCap(settlement);
-    
-    const foodReq = Math.ceil((settlement.population ?? 0) / 100);
-    this.foodEl.textContent = `${settlement.warehouse.food ?? 0} / ${foodReq} req`;
+
+    // One pass over the settlement's production and upkeep feeds the top food
+    // row and every warehouse row, so the two surfaces cannot disagree.
+    const daily = settlementDailyRates(settlement, state.castleSeed, state.heroes);
+    const food = daily.food;
+    this.foodEl.textContent = `${food.stock.toLocaleString()} ${formatDailyRate(food.net)}`;
+    this.foodEl.style.color = food.net < 0 ? TREASURY_CAP_AMBER : "";
+    this.foodEl.title = foodBalanceTitle(food, settlement.population);
 
     this.updateUpkeep(settlement, state.day);
 
-    this.warehouseEls["wood"].textContent = String(settlement.warehouse.wood ?? 0);
-    this.warehouseEls["stone"].textContent = String(settlement.warehouse.stone ?? 0);
-    this.warehouseEls["iron"].textContent = String(settlement.warehouse.iron ?? 0);
-    this.warehouseEls["arcane"].textContent = String(settlement.warehouse.arcane ?? 0);
-    this.warehouseEls["food"].textContent = String(settlement.warehouse.food ?? 0);
+    for (const row of daily.rows) {
+      this.warehouseEls[row.resource].textContent = row.stock.toLocaleString();
+      const rateEl = this.warehouseRateEls[row.resource];
+      rateEl.textContent = formatDailyRate(row.net);
+      rateEl.style.color = row.net < 0 ? TREASURY_CAP_AMBER : "";
+      rateEl.title = dailyRateTitle(row);
+    }
 
     let showRecruit = false;
     if (this.onRecruitHero && settlement.ownerId !== null) {
@@ -493,40 +534,40 @@ export class SettlementInfoMenu {
   }
 
   /**
-   * The gold row doubles as the treasury-cap indicator. applyEffectiveIncome
-   * pays `Math.min(income, headroom)`, so a full treasury silently discards the
-   * whole gold income — the panel would otherwise keep advertising an income
-   * rate next to a purse that never moves. Own settlements only: an opponent's
-   * full treasury is not this player's problem (same exclusion as
-   * evaluateUpkeepWarnings).
+   * The gold row: the purse against the cap it is filling, plus the cap
+   * indicator. applyEffectiveIncome pays `Math.min(income, headroom)`, so a full
+   * treasury silently discards the whole gold income — the panel would otherwise
+   * keep advertising an income rate next to a purse that never moves. Own
+   * settlements only: an opponent's full treasury is not this player's problem
+   * (same exclusion as evaluateUpkeepWarnings).
    *
-   * Recomputed every frame like every other row here rather than memoised --
-   * `settlementTreasuryCap` is one pass over the settlement's buildings, and
-   * updateTreasuryCap() already pays exactly that per frame on the same call.
-   * Both branches write the colour unconditionally so the row clears again the
-   * moment the settlement un-caps (a capture can drop the gold; a bank or
-   * treasury can raise the cap).
+   * The cap sits on the row itself rather than in a second "Treasury capacity"
+   * row: the number only means something beside the gold filling it, and the
+   * breakdown it used to carry (base + building bonuses) belongs in the
+   * tooltip. Colour and text are written unconditionally so the row clears
+   * again the moment the settlement un-caps (a capture can drop the gold; a
+   * bank or treasury can raise the cap).
    */
   private updateTreasuryRow(settlement: SettlementState, state: GameState): void {
+    const cap = settlementTreasuryCap(settlement);
     const owned = settlement.ownerId !== null && settlement.ownerId === state.activePlayerId;
     const capped = owned && treasuryCapped(settlement);
+    this.treasuryEl.textContent = `${settlement.gold.toLocaleString()} / ${cap.toLocaleString()}g`;
     this.treasuryEl.style.color = capped ? TREASURY_CAP_AMBER : "";
-    this.treasuryEl.title = capped ? treasuryCapMessage(settlement) : "";
-  }
 
-  private updateTreasuryCap(settlement: SettlementState): void {
+    const lines = [`Treasury holds ${settlement.gold.toLocaleString()}g of its ${cap.toLocaleString()}g cap.`];
     const model = treasuryRowModel(settlement);
-    if (!model) {
-      this.treasuryCapRow.style.display = "none";
-      return;
+    if (model) {
+      lines.push(
+        `Its treasury buildings add ${model.treasuryBuildingBonus.toLocaleString()}g; every cap-building ` +
+          `(bank, treasury, warehouse) adds ${model.totalBonus.toLocaleString()}g in total.`,
+      );
     }
-    this.treasuryCapRow.style.display = "";
-    this.treasuryCapEl.textContent = `${model.cap.toLocaleString()}g (+${model.treasuryBuildingBonus.toLocaleString()})`;
-    this.treasuryCapEl.title =
-      `This settlement can hold ${model.cap.toLocaleString()}g. ` +
-      `Its treasury buildings add ${model.treasuryBuildingBonus.toLocaleString()}g; every cap-building adds ` +
-      `${model.totalBonus.toLocaleString()}g in total.` +
-      (model.overCap ? " The treasury is over its cap — income is frozen until it drops back under." : "");
+    if (capped) lines.push(treasuryCapMessage(settlement));
+    else if (settlement.gold > cap) {
+      lines.push("The treasury is over its cap — income is frozen until it drops back under.");
+    }
+    this.treasuryEl.title = lines.join(" ");
   }
 
   /**

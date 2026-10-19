@@ -174,6 +174,21 @@ export const SETTLEMENT_BANNERS: Record<CastleLevel, string> = {
   3: castleBanner,
 };
 
+/**
+ * The banner art for a settlement tier.
+ *
+ * `SettlementState.level` is typed `1 | 2 | 3`, but a settlement row arrives
+ * from Postgres JSONB, so the value is only as trustworthy as the data. A bare
+ * `SETTLEMENT_BANNERS[level]` therefore hands `undefined` to an `<img>.src`
+ * (a broken-image hole in the settlement panel) and to a `url()` inside a
+ * `background` shorthand (which invalidates the WHOLE declaration, so the
+ * roster row loses its gradient too). Every settlement-banner read goes
+ * through here so an out-of-range tier degrades to the tier-1 art instead.
+ */
+export function settlementBannerUrl(level: number): string {
+  return SETTLEMENT_BANNERS[level as CastleLevel] ?? SETTLEMENT_BANNERS[1];
+}
+
 export const HERO_BANNERS: Record<HorseVariantId, string> = {
   hero: heroBannerHero,
   bubbly: heroBannerBubbly,

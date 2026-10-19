@@ -10,6 +10,15 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.14.0] - 2026-10-19
+
+- Settlement panel: the settlement's own name and tier now render at the top (the name was written into the level badge and immediately overwritten, so it never appeared).
+- Double-clicking the panel banner enters that settlement's city view, through the same own-settlement/own-turn gate the map's double-click uses.
+- Warehouse section is a vertical list: 16px icons, stock, and a signed per-day rate per resource (production minus building upkeep / population food), amber while a stock drains, with the produced/spent split in each row's tooltip.
+- Food row reads `stock +/-net/day` with a made-vs-eaten tooltip instead of `stock / required`.
+- Treasury row shows `gold / cap`; the separate "Treasury capacity" row is gone.
+- Settlement banners resolve through `settlementBannerUrl()` with a tier-1 fallback, so an out-of-range level cannot blank the panel or drop the roster row's background.
+
 ## [0.13.0] - 2026-10-18
 
 Startup districts: tier-2 settlements are born with 1 district and tier-3 with 2 (a couple of level-1 buildings each), every district must join the settlement's cluster (no floating districts, bridged across water only by a water district holding a shipyard), and the new water-only shipyard building + art.

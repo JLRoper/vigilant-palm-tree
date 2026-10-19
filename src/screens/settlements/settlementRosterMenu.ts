@@ -7,7 +7,7 @@ import {
   toolbarHeight,
 } from "@screens/shared/panelRail";
 import type { GameState, SettlementId, SettlementState } from "../../state/gameState";
-import { SETTLEMENT_BANNERS } from "../../render/assetDescriptors";
+import { settlementBannerUrl } from "../../render/assetDescriptors";
 
 export interface SettlementRosterMenuOptions {
   onSelectSettlement?: (settlementId: SettlementId) => void;
@@ -120,7 +120,7 @@ export class SettlementRosterMenu {
   }
 
   private buildSettlementRow(settlement: SettlementState): HTMLDivElement {
-    const bannerUrl = SETTLEMENT_BANNERS[settlement.level as 1 | 2 | 3];
+    const bannerUrl = settlementBannerUrl(settlement.level);
 
     const row = document.createElement("div");
     Object.assign(row.style, {

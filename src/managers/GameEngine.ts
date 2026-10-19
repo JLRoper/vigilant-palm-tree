@@ -209,7 +209,10 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
         this.state.replaceState(this.state.getTurnController().getState());
       },
     );
-    this.ui.initSettlementInfo();
+    this.ui.initSettlementInfo({
+      onEnterCityView: (settlementId) => void this.enterSettlementCityView(settlementId),
+      canEnterCityView: (settlementId) => this.canEnterSettlementCityView(settlementId),
+    });
     this.ui.initTileInfo();
     this.ui.initCityView(() => this.state, this.view, () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""));
   }
@@ -537,34 +540,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     const cityMap = this.state.getGameMap();
     const castle = this.state.getSettlements().find((c) => c.tile.q === t.q && c.tile.r === t.r);
     if (castle) {
-      if (castle.ownerId !== localId) return;
-      // Every spot is shown, food included: food spots exist (citySpots.ts's
-      // RESOURCE_POOL rolls them, terrain-biased) and a farm on one earns the
-      // ~3x spot multiplier, which is the whole placement decision. They also
-      // render fine -- RESOURCE_PAL has a food entry and `resource.food` has a
-      // descriptor, so paintCityResourceSpot draws art (procedural fallback
-      // otherwise). The old `isMineable` filter predates food spots entirely
-      // (citySpots.ts's pool was gold/wood/stone/iron/arcane only), so it
-      // filtered nothing and hid a real mechanic once food was added.
-      // Lazy city view (lazy-load-chunks plan Phase 2): the CityView module is
-      // imported and constructed here, on the first settlement double-click,
-      // and cached by UIManager afterwards.
-      const cityView = await this.ui.ensureCityView();
-      cityView.open(
-        castle.id, castle.name, cityViewSizeFor(castle.level),
-        colorForOwner(castle.ownerId),
-        castle.citySpots,
-        castle.cityMines,
-        castle.buildings,
-        gs.castleSeed,
-        undefined,
-        sampleCityBackdrop(cityMap, castle.tile.q, castle.tile.r, gs.castleSeed),
-      );
-      if (cityView.isOpen() && gs.selectedSettlementId !== castle.id) {
-        const tc = this.state.getTurnController();
-        tc.selectSettlement(castle.id);
-        this.state.replaceState(tc.getState());
-      }
+      await this.enterSettlementCityView(castle.id);
       return;
     }
 
@@ -609,6 +585,62 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       tc.selectSettlement(controlling.id);
       this.state.replaceState(tc.getState());
     }
+  }
+
+  /**
+   * Whether a settlement's city view can be opened right now: one of the local
+   * seat's own settlements, on the local seat's own turn. Shared by the
+   * adventure map's double-click and the settlement panel's banner so the two
+   * doors into the city view cannot disagree about the gate.
+   */
+  private canEnterSettlementCityView(settlementId: string): boolean {
+    const gs = this.state.getState();
+    if (!gs || gs.phase.kind !== "PLAYER_TURN") return false;
+    const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
+    if (gs.activePlayerId !== localId) return false;
+    const castle = this.state.getSettlements().find((c) => c.id === settlementId);
+    return !!castle && castle.ownerId === localId;
+  }
+
+  /**
+   * Opens one settlement's city view; false when the gate above refused, so a
+   * caller can tell "opened" from "nothing happened".
+   *
+   * Every spot is shown, food included: food spots exist (citySpots.ts's
+   * RESOURCE_POOL rolls them, terrain-biased) and a farm on one earns the ~3x
+   * spot multiplier, which is the whole placement decision. They also render
+   * fine -- RESOURCE_PAL has a food entry and `resource.food` has a descriptor,
+   * so paintCityResourceSpot draws art (procedural fallback otherwise). The old
+   * `isMineable` filter predates food spots entirely (citySpots.ts's pool was
+   * gold/wood/stone/iron/arcane only), so it filtered nothing and hid a real
+   * mechanic once food was added.
+   *
+   * Lazy city view (lazy-load-chunks plan Phase 2): the CityView module is
+   * imported and constructed here, on the first open, and cached by UIManager
+   * afterwards.
+   */
+  private async enterSettlementCityView(settlementId: string): Promise<boolean> {
+    if (!this.canEnterSettlementCityView(settlementId)) return false;
+    const gs = this.state.getState();
+    const castle = this.state.getSettlements().find((c) => c.id === settlementId);
+    if (!castle) return false;
+    const cityView = await this.ui.ensureCityView();
+    cityView.open(
+      castle.id, castle.name, cityViewSizeFor(castle.level),
+      colorForOwner(castle.ownerId),
+      castle.citySpots,
+      castle.cityMines,
+      castle.buildings,
+      gs.castleSeed,
+      undefined,
+      sampleCityBackdrop(this.state.getGameMap(), castle.tile.q, castle.tile.r, gs.castleSeed),
+    );
+    if (cityView.isOpen() && gs.selectedSettlementId !== castle.id) {
+      const tc = this.state.getTurnController();
+      tc.selectSettlement(castle.id);
+      this.state.replaceState(tc.getState());
+    }
+    return cityView.isOpen();
   }
 
   private handleMouseMove(e: MouseEvent): void {

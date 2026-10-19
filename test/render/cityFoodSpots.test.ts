@@ -49,16 +49,21 @@ function baseInput(overrides: Partial<CitySceneInput> = {}): CitySceneInput {
   };
 }
 
-test("GameEngine no longer filters food spots out of the cityView.open() call", () => {
+test("GameEngine no longer filters food spots out of the settlement cityView.open() call", () => {
   const code = readFileSync("src/managers/GameEngine.ts", "utf8");
-  const open = code.slice(code.indexOf("cityView.open("), code.indexOf("cityView.open(") + 400);
-  assert.ok(open.length > 0, "cityView.open( must still exist in GameEngine");
+  // The settlement's own open() moved into enterSettlementCityView() when the
+  // settlement panel's banner became a second door into the city view, so the
+  // scan anchors on the argument rather than on the first `cityView.open(` in
+  // the file (the district branch has its own, which passes generated spots).
+  const spotsAt = code.indexOf("castle.citySpots");
+  assert.ok(spotsAt > 0, "the settlement's own spots must still reach cityView.open()");
+  const open = code.slice(Math.max(0, spotsAt - 500), spotsAt + 200);
+  assert.ok(open.includes("cityView.open("), "castle.citySpots must be an argument of cityView.open(");
   assert.ok(!/citySpots\.filter/.test(open), "citySpots must be passed through unfiltered");
   assert.ok(
     !/const isMineable\s*=/.test(code),
     "the food-dropping isMineable type guard must be gone",
   );
-  assert.ok(open.includes("castle.citySpots"), "open() receives the settlement's spots as-is");
 });
 
 test("buildCityScene emits a cityResourceSpot node for a food spot", () => {
