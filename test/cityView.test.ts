@@ -991,6 +991,36 @@ async function testRecruitmentRowOpensBuildingMenu(page: Page, settlementId: str
     `the menu must open at the building: menu ${JSON.stringify(menu)} vs cell ${JSON.stringify(buildingPt)}`,
   );
 
+  // The unit row is the other door on the same building (the user clicked
+  // exactly this): the unit art must open the menu of the building the row
+  // recruits from, not just the kind's heading.
+  await page.keyboard.press("Escape");
+  await wait(250);
+  const unitIcon = await page.evaluate(() => {
+    const panel = Array.from(document.body.children).find((el) => (el.textContent ?? "").includes("Recruitment"));
+    if (!panel) return null;
+    const row = Array.from(panel.querySelectorAll<HTMLElement>("div")).find((d) =>
+      (d.title ?? "").includes("supplies this unit"),
+    );
+    const img = row?.querySelector("img");
+    if (!img) return null;
+    const r = img.getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  });
+  assert(unitIcon, "the unit row must be a click target as well");
+  await page.mouse.click(unitIcon.x, unitIcon.y);
+  await wait(400);
+  assert(
+    await page.evaluate(() => {
+      const el = Array.from(document.body.children).find((n) => {
+        const t = n.textContent ?? "";
+        return t.startsWith("Farmhouse") && t.includes("A small rural home.");
+      });
+      return !!el;
+    }),
+    "clicking the unit art must open that building's menu",
+  );
+
   const after = (await serverSettlement(page, name, settlementId)) as unknown as {
     stacks?: Array<{ entries: Array<{ count: number }> }>;
   };

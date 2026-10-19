@@ -392,24 +392,27 @@ export class RecruitmentPanel {
    * the menu is up. Clicks that land on a button (steppers, Buy all, +) keep
    * their own meaning, and hovering the row rings the building on the grid.
    */
-  private makeBuildingTarget(el: HTMLElement, building: RecruitmentBuildingRow, kind: BuildingKind): void {
+  private makeOpenBuildingTarget(el: HTMLElement, target: RecruitmentBuildingOpenRequest, hint: string): void {
     el.style.cursor = "pointer";
-    const hint = `Open this ${kind} (its own menu: workers, draft pool, upgrades)`;
     el.title = el.title ? `${el.title} — ${hint}` : hint;
     el.addEventListener("mouseenter", () =>
-      this.cityView.previewWorkforceBuilding(building.gx, building.gy, building.district),
+      this.cityView.previewWorkforceBuilding(target.gx, target.gy, target.district),
     );
     el.addEventListener("mouseleave", () => this.cityView.clearWorkforcePreview());
     el.addEventListener("click", (e) => {
       if (!this.onOpenBuilding) return;
       if ((e.target as HTMLElement | null)?.closest("button")) return;
-      this.onOpenBuilding({
-        buildingKind: kind,
-        gx: building.gx,
-        gy: building.gy,
-        district: building.district,
-      });
+      this.onOpenBuilding(target);
     });
+  }
+
+  /** The per-building line (and the kind's heading when it has one building). */
+  private makeBuildingTarget(el: HTMLElement, building: RecruitmentBuildingRow, kind: BuildingKind): void {
+    this.makeOpenBuildingTarget(
+      el,
+      { buildingKind: kind, gx: building.gx, gy: building.gy, district: building.district },
+      `Open this ${kind} (its own menu: workers, draft pool, upgrades)`,
+    );
   }
 
   /**
@@ -655,6 +658,26 @@ export class RecruitmentPanel {
     row.appendChild(side);
 
     row.title = this.unitTooltip(unit, name, max);
+    // The unit row is the other half of "that building's row": clicking the unit
+    // art (or anywhere on the row but the buttons) opens the menu of the
+    // building this row recruits from -- `sources[0]`, the fullest one, which is
+    // exactly the building `+` draws on.
+    const source = unit.sources[0];
+    if (source) {
+      const where = source.district
+        ? `district (${source.district.q}, ${source.district.r})`
+        : "main city";
+      this.makeOpenBuildingTarget(
+        row,
+        {
+          buildingKind: unit.buildingKind,
+          gx: source.gx,
+          gy: source.gy,
+          district: source.district,
+        },
+        `Open the ${unit.buildingKind} that supplies this unit — ${where} (${source.gx}, ${source.gy})`,
+      );
+    }
     return row;
   }
 
