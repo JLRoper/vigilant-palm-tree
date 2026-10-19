@@ -1,0 +1,11 @@
+Repaint the attached hero roster banner as the banner for a NEW colour variation of the same hero, keeping the reference's composition, architecture, framing and painted style.
+
+ART STYLE: softly painted fantasy illustration, hand-painted texture, atmospheric fog, same level of detail and same wide cinematic framing as the reference. Not pixel art, not cel-shaded, not a 3D render, not a photograph.
+
+COMPOSITION (keep from the reference): the same misty ruined stone cloister, the same receding arches and pillars, the same low viewpoint down the aisle, the same hero-and-horse placed centre, the same long horizontal banner framing.
+
+CHANGE: the scene is now a frozen winter morning and the mounted hero is the "Frost Warden" — a pale winter paladin of the same silhouette. He rides a pale ice-white roan horse with a silver-white mane and tail. The rider wears polished silver plate with pale blue-steel edging and a white fur collar, a long pale-cyan cape with a silver hem, and a silver great helm with a white plume. Keep his upright, commanding posture and his position within the hall.
+
+LIGHT: cold pale blue-white light through the arches, frost on the stone, low blue mist along the ground; snow dust in the air. No warm gold.
+
+No text, no lettering, no watermark, no border, no checkerboard pattern anywhere.

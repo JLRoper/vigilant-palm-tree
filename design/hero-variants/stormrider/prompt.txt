@@ -1,0 +1,16 @@
+Repaint the attached game-hero sprite as a NEW colour variation of the same character. The attached image is the authoritative reference for ART STYLE, POSE, SILHOUETTE, FRAMING and SCALE — keep all of those identical.
+
+{{POSE}}
+
+ART STYLE (copy the reference exactly): softly hand-painted fantasy game sprite, hand-painted brush texture with soft airbrush shading, gentle highlights, a thin dark painted contour along the silhouette, the same level of detail and the same figure scale within the canvas. Not pixel art, not cel-shaded, not a 3D render, not a photograph.
+
+KEEP FROM THE REFERENCE, unchanged: the horse's body build and head carriage, its leg positions and gait, the shape and flow of its tail and mane, the saddle, saddle blanket, stirrups and reins, the rider's upright posture and hand position on the reins, the hood's shape, the cloak's cut and drape, and the bow exactly as the rider is carrying it.
+
+NEW COLOUR SCHEME — "Storm Rider", a tempest-touched outrider of the same silhouette:
+- Horse: a dappled blue-grey horse with a dark slate mane and tail and wet-looking highlights on the coat.
+- Rider: blue-grey leather over a bronze-studded mail shirt, a storm-yellow ochre cloak with a darker lightning-bolt motif along the hem, a deep navy hood, and bronze bracers.
+- Bow: a yew longbow with silver lightning-etched limbs, same shape and carry as the reference.
+- Saddle blanket: navy with ochre trim; bronze buckles and stirrups.
+- Lighting: keep the reference's light direction but make it the light before a storm — cool grey ambience with a warm ochre rim along the cloak's edge.
+
+BACKGROUND: one flat uniform light-grey colour (#c9c7c4) filling the entire canvas — absolutely no checkerboard pattern anywhere, no gradient, no ground, no cast shadow, no horizon line, no text, no border, no watermark. A single isolated figure, centred, occupying the canvas vertically like the reference.

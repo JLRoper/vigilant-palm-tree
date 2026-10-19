@@ -11,18 +11,19 @@ import {
 } from "./_request";
 import type { GameDebugApi } from "../src/io/debugCommands";
 
-// Mounted-hero variant e2e (Playwright + real API + real DB): the `paladin2`
-// registry entry must be wired end to end, not just typecheck.
+// Mounted-hero variant e2e (Playwright + real API + real DB): every generated
+// variant in VARIANTS must be wired end to end, not just typecheck.
 //
 //  (A) the persisted `horseVariant` reaches the client for a game row seeded
-//      with `paladin2` and the existing `paladin` still resolves its own set;
-//  (B) every `horse.paladin2.<dir>` descriptor and the `HERO_BANNERS.paladin2`
-//      banner resolve to real, servable PNGs — all eight directions, no
-//      diagonal→cardinal fallback;
-//  (C) the sprite actually paints: the same tile is sampled twice, once with
-//      the original paladin and once with paladin2, and the crops must differ
-//      while the paladin2 crop carries the new crimson cape/charcoal horse
-//      pixels the original does not have.
+//      with that variant, and the variant it was repainted from (its "base")
+//      still resolves its own descriptor set;
+//  (B) every `horse.<variant>.<dir>` descriptor and its `HERO_BANNERS` banner
+//      resolve to real, servable PNGs — all eight directions, no fallback;
+//  (C) the sprite actually paints and is visually distinct from its base: the
+//      same tile is sampled twice, once with the base variant and once with the
+//      new one, and the A/B diff must show the palette shift the art was
+//      generated for (reddened capes, darkened undead horses, cooled frost
+//      palettes) and nothing terrain-driven.
 //
 // The game is created and deleted by exact name (never a table sweep).
 
@@ -32,8 +33,35 @@ const API_URL = `http://127.0.0.1:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 const GAME_NAME = "hero-variant-e2e";
 const GAME_SEED = 424242;
-const VARIANT = "paladin2";
 const DIRECTIONS = ["n", "ne", "e", "se", "s", "sw", "w", "nw"] as const;
+
+/** How a variant's generated palette must differ from its base sprite set. */
+type PaletteSignal = "reddened" | "corrupted" | "cooled";
+
+interface VariantSpec {
+  id: string;
+  label: string;
+  base: string;
+  signal: PaletteSignal;
+}
+
+const VARIANTS: VariantSpec[] = [
+  { id: "paladin2", label: "Paladin 2", base: "paladin", signal: "reddened" },
+  { id: "frostwarden", label: "Frost Warden", base: "paladin", signal: "cooled" },
+  { id: "gravewarden", label: "Grave Warden", base: "shadow", signal: "corrupted" },
+  { id: "stormrider", label: "Storm Rider", base: "ranger", signal: "cooled" },
+];
+
+// The paladin predates the generated waves; its descriptor set is the control
+// that a new variant never perturbs an existing one (4 directions x base + -2,
+// with the diagonal→cardinal fallbacks).
+const PALADIN_KEYS = [
+  "horse.paladin.e", "horse.paladin.e.2",
+  "horse.paladin.n", "horse.paladin.n.2", "horse.paladin.ne", "horse.paladin.ne.2",
+  "horse.paladin.nw", "horse.paladin.nw.2", "horse.paladin.s", "horse.paladin.s.2",
+  "horse.paladin.se", "horse.paladin.se.2", "horse.paladin.sw", "horse.paladin.sw.2",
+  "horse.paladin.w", "horse.paladin.w.2",
+];
 
 const children: ChildProcess[] = [];
 let cleaned = false;
@@ -62,6 +90,7 @@ interface GameRow {
 }
 
 interface Axial { q: number; r: number; }
+interface Crop { width: number; height: number; data: number[]; }
 
 async function api(method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
   const res = await fetch(`${API_URL}${path}`, {
@@ -148,7 +177,7 @@ function clientHero(page: Page, heroId: string): Promise<{ horseVariant: string;
 }
 
 /** Samples the game canvas around a hero's tile as raw RGBA (A/B diffing). */
-function sampleHeroTile(page: Page, tile: Axial): Promise<{ width: number; height: number; data: number[] }> {
+function sampleHeroTile(page: Page, tile: Axial): Promise<Crop> {
   return page.evaluate((t) => {
     const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
     const c = document.getElementById("game") as HTMLCanvasElement;
@@ -172,15 +201,18 @@ interface CropDiff {
   changed: number;
   reddened: number;
   darkened: number;
+  cooled: number;
+  greened: number;
 }
 
 // Same tile, same camera, only the hero's variant differs between the two
 // loads, so every changed pixel IS the sprite. That keeps terrain out of the
-// assertion (a raw crimson count on a forest/dirt tile is mostly terrain).
-function diffCrops(before: { width: number; height: number; data: number[] }, after: typeof before): CropDiff {
+// assertion (a raw colour count on a forest/dirt tile is mostly terrain), and
+// lets each variant declare the palette shift its art was generated for.
+function diffCrops(before: Crop, after: Crop): CropDiff {
   assert.equal(after.width, before.width, "crop width changed between loads");
   assert.equal(after.height, before.height, "crop height changed between loads");
-  let changed = 0, reddened = 0, darkened = 0;
+  let changed = 0, reddened = 0, darkened = 0, cooled = 0, greened = 0;
   for (let i = 0; i < before.data.length; i += 4) {
     const r1 = before.data[i], g1 = before.data[i + 1], b1 = before.data[i + 2];
     const r2 = after.data[i], g2 = after.data[i + 1], b2 = after.data[i + 2];
@@ -189,20 +221,24 @@ function diffCrops(before: { width: number; height: number; data: number[] }, af
     changed++;
     if (r2 - r1 > 40 && g2 - g1 < 20 && b2 - b1 < 20) reddened++;
     if ((r1 + g1 + b1) - (r2 + g2 + b2) > 90) darkened++;
+    if (b2 - b1 > 25 && b2 > r2 + 8) cooled++;
+    if (g2 - g1 > 20 && g2 > r2 + 10 && g2 > b2 + 10) greened++;
   }
-  return { pixels: before.data.length / 4, changed, reddened, darkened };
+  return { pixels: before.data.length / 4, changed, reddened, darkened, cooled, greened };
 }
 
-async function descriptorReport(page: Page): Promise<{
-  paladin2Urls: Record<string, string>;
-  paladinKeys: string[];
-  paladin2Keys: string[];
+interface VariantReport {
+  urls: Record<string, string>;
+  keys: string[];
   bannerUrl: string | null;
   bannerLoaded: { ok: boolean; bytes: number };
   images: Array<{ dir: string; ok: boolean; bytes: number }>;
   registry: string[];
-}> {
-  return page.evaluate(async (dirs) => {
+  paladinKeys: string[];
+}
+
+async function descriptorReport(page: Page, variant: string): Promise<VariantReport> {
+  return page.evaluate(async (args) => {
     const spec = "/src/render/assetDescriptors.ts";
     const mod = await import(/* @vite-ignore */ spec);
     // The recruit picker (settlementInfoMenu) iterates this same registry
@@ -213,14 +249,13 @@ async function descriptorReport(page: Page): Promise<{
       .map((v) => `${v.id}:${v.label}`);
     const variants = mod.HORSE_VARIANT_DESCRIPTORS as Record<string, Record<string, { url: string }>>;
     const banners = mod.HERO_BANNERS as Record<string, string>;
-    const paladin2 = variants.paladin2 ?? {};
+    const set = variants[args.variant] ?? {};
     const urls: Record<string, string> = {};
-    for (const dir of dirs) {
-      const key = `horse.paladin2.${dir}`;
-      urls[dir] = paladin2[key]?.url ?? "";
+    for (const dir of args.dirs) {
+      urls[dir] = set[`horse.${args.variant}.${dir}`]?.url ?? "";
     }
     const images: Array<{ dir: string; ok: boolean; bytes: number }> = [];
-    for (const dir of dirs) {
+    for (const dir of args.dirs) {
       const url = urls[dir];
       if (!url) { images.push({ dir, ok: false, bytes: 0 }); continue; }
       const res = await fetch(url);
@@ -228,7 +263,7 @@ async function descriptorReport(page: Page): Promise<{
       const png = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
       images.push({ dir, ok: res.ok && png && buf.length > 10_000, bytes: buf.length });
     }
-    const bannerUrl = banners.paladin2 ?? null;
+    const bannerUrl = banners[args.variant] ?? null;
     let bannerLoaded = { ok: false, bytes: 0 };
     if (bannerUrl) {
       const res = await fetch(bannerUrl);
@@ -237,15 +272,15 @@ async function descriptorReport(page: Page): Promise<{
       bannerLoaded = { ok: res.ok && png && buf.length > 5_000, bytes: buf.length };
     }
     return {
-      paladin2Urls: urls,
-      paladinKeys: Object.keys(variants.paladin ?? {}).sort(),
-      paladin2Keys: Object.keys(paladin2).sort(),
+      urls,
+      keys: Object.keys(set).sort(),
       bannerUrl,
       bannerLoaded,
       images,
       registry,
+      paladinKeys: Object.keys(variants.paladin ?? {}).sort(),
     };
-  }, [...DIRECTIONS]);
+  }, { variant, dirs: [...DIRECTIONS] });
 }
 
 async function screenshotTile(page: Page, tile: Axial, file: string): Promise<void> {
@@ -266,80 +301,99 @@ async function screenshotTile(page: Page, tile: Axial, file: string): Promise<vo
   });
 }
 
-async function variantIsWired(browser: Browser): Promise<void> {
-  console.log(">> [A] paladin2 reaches the client, paladin keeps its own descriptor set");
+function assertSignal(variant: VariantSpec, diff: CropDiff): void {
+  assert(diff.changed > 250, `${variant.id} barely changed the tile (${diff.changed} px) — new sprite is not on screen`);
+  if (variant.signal === "reddened") {
+    assert(
+      diff.reddened > diff.changed * 0.08,
+      `${variant.id}: expected crimson cape/tabard pixels (${diff.reddened}/${diff.changed} reddened)`,
+    );
+  } else if (variant.signal === "corrupted") {
+    // The Grave Warden is a repaint of an already-dark base, so "darker" alone
+    // is a weak signal; the necrotic palette shows up as darker AND greener.
+    assert(
+      diff.darkened + diff.greened > diff.changed * 0.3,
+      `${variant.id}: expected a darker, green-tinged undead horse ` +
+      `(${diff.darkened} darkened + ${diff.greened} greened of ${diff.changed})`,
+    );
+  } else {
+    assert(
+      diff.cooled > diff.changed * 0.12,
+      `${variant.id}: expected a cooler palette (${diff.cooled}/${diff.changed} cooled)`,
+    );
+  }
+}
+
+async function variantsAreWired(browser: Browser): Promise<void> {
+  console.log(`>> [A] ${VARIANTS.length} generated variants reach the client over their base sprite sets`);
   const game = await freshGame(GAME_NAME);
   const heroes = await serverHeroes(GAME_NAME);
   const heroId = Object.keys(heroes).find((id) => heroes[id].ownerId === 0);
   assert(heroId, "no human hero in the fresh game");
 
-  await setHorseVariant(GAME_NAME, heroId!, "paladin");
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-  await openGame(page, GAME_NAME, game.id);
-  const asPaladin = await clientHero(page, heroId!);
-  assert.equal(asPaladin?.horseVariant, "paladin", "seeded paladin variant did not reach the client");
-  const tile = { q: asPaladin!.q, r: asPaladin!.r };
-  const paladinCrop = await sampleHeroTile(page, tile);
-  await screenshotTile(page, tile, "local/hero-variant-e2e/paladin-tile.png");
-  assert(
-    paladinCrop.width > 60 && paladinCrop.height > 80,
-    `hero tile sample too small (${paladinCrop.width}x${paladinCrop.height})`,
-  );
+  const baseCrops = new Map<string, Crop>();
+  const tileByBase = new Map<string, Axial>();
+  let paladinKeysChecked = false;
 
-  await setHorseVariant(GAME_NAME, heroId!, VARIANT);
-  await openGame(page, GAME_NAME, game.id);
-  const asPaladin2 = await clientHero(page, heroId!);
-  assert.equal(asPaladin2?.horseVariant, VARIANT, `${VARIANT} did not reach the client`);
-  const paladin2Crop = await sampleHeroTile(page, tile);
+  for (const variant of VARIANTS) {
+    if (!baseCrops.has(variant.base)) {
+      await setHorseVariant(GAME_NAME, heroId!, variant.base);
+      await openGame(page, GAME_NAME, game.id);
+      const hero = await clientHero(page, heroId!);
+      assert.equal(hero?.horseVariant, variant.base, `seeded base variant ${variant.base} did not reach the client`);
+      const tile: Axial = { q: hero!.q, r: hero!.r };
+      const crop = await sampleHeroTile(page, tile);
+      assert(crop.width > 60 && crop.height > 80, `hero tile sample too small (${crop.width}x${crop.height})`);
+      baseCrops.set(variant.base, crop);
+      tileByBase.set(variant.base, tile);
+      await screenshotTile(page, tile, `local/hero-variant-e2e/${variant.base}-tile.png`);
+    }
 
-  const diff = diffCrops(paladinCrop, paladin2Crop);
-  console.log(
-    `>> [A] same-tile diff: ${diff.changed}/${diff.pixels} px changed, ` +
-    `${diff.reddened} reddened, ${diff.darkened} darkened`,
-  );
-  assert(diff.changed > 250, `paladin2 barely changed the tile (${diff.changed} px) — new sprite is not on screen`);
-  assert(
-    diff.reddened > diff.changed * 0.1,
-    `expected the crimson cape/tabard to replace non-red pixels (${diff.reddened}/${diff.changed} reddened)`,
-  );
-  assert(
-    diff.darkened > diff.changed * 0.35,
-    `expected the charcoal horse to darken the tile (${diff.darkened}/${diff.changed} darkened)`,
-  );
+    const tile = tileByBase.get(variant.base)!;
+    await setHorseVariant(GAME_NAME, heroId!, variant.id);
+    await openGame(page, GAME_NAME, game.id);
+    const hero = await clientHero(page, heroId!);
+    assert.equal(hero?.horseVariant, variant.id, `${variant.id} did not reach the client`);
 
-  console.log(">> [B] all eight horse.paladin2.* descriptors and the banner resolve to real PNGs");
-  const report = await descriptorReport(page);
-  assert.equal(report.paladin2Keys.length, DIRECTIONS.length, `paladin2 descriptor keys: ${report.paladin2Keys.join(",")}`);
-  for (const img of report.images) {
-    assert(img.ok, `horse.paladin2.${img.dir} -> ${img.bytes} bytes (url ${report.paladin2Urls[img.dir] || "missing"})`);
+    const crop = await sampleHeroTile(page, tile);
+    const diff = diffCrops(baseCrops.get(variant.base)!, crop);
+    console.log(
+      `>> [A] ${variant.id} vs ${variant.base}: ${diff.changed}/${diff.pixels} px changed, ` +
+      `${diff.reddened} reddened, ${diff.darkened} darkened, ${diff.cooled} cooled, ${diff.greened} greened`,
+    );
+    assertSignal(variant, diff);
+
+    console.log(`>> [B] ${variant.id}: eight descriptors + banner + recruit-picker entry`);
+    const report = await descriptorReport(page, variant.id);
+    assert.equal(report.keys.length, DIRECTIONS.length, `${variant.id} descriptor keys: ${report.keys.join(",")}`);
+    for (const img of report.images) {
+      assert(img.ok, `horse.${variant.id}.${img.dir} -> ${img.bytes} bytes (url ${report.urls[img.dir] || "missing"})`);
+    }
+    assert(report.bannerUrl, `HERO_BANNERS.${variant.id} is missing`);
+    assert(report.bannerLoaded.ok, `hero-banner-${variant.id}.png -> ${report.bannerLoaded.bytes} bytes`);
+    assert(
+      report.registry.includes(`${variant.id}:${variant.label}`),
+      `the recruit picker's registry is missing ${variant.id}: ${report.registry.join(", ")}`,
+    );
+    if (!paladinKeysChecked) {
+      assert.deepEqual(
+        report.paladinKeys,
+        PALADIN_KEYS,
+        `the original paladin's descriptor set changed: ${report.paladinKeys.join(",")}`,
+      );
+      assert(
+        report.registry.includes("paladin:Paladin"),
+        `the original paladin left the recruit picker's registry: ${report.registry.join(", ")}`,
+      );
+      paladinKeysChecked = true;
+    }
+
+    await screenshotTile(page, tile, `local/hero-variant-e2e/${variant.id}-tile.png`);
+    writeFileSync(`local/hero-variant-e2e/${variant.id}-descriptors.json`, JSON.stringify(report, null, 2));
   }
-  assert(report.bannerUrl, "HERO_BANNERS.paladin2 is missing");
-  assert(report.bannerLoaded.ok, `hero-banner-paladin2.png -> ${report.bannerLoaded.bytes} bytes`);
-  assert(
-    report.registry.includes("paladin2:Paladin 2"),
-    `the recruit picker's registry is missing paladin2: ${report.registry.join(", ")}`,
-  );
-  assert(
-    report.registry.includes("paladin:Paladin"),
-    `the original paladin left the recruit picker's registry: ${report.registry.join(", ")}`,
-  );
-  assert.deepEqual(
-    report.paladinKeys,
-    [
-      "horse.paladin.e", "horse.paladin.e.2",
-      "horse.paladin.n", "horse.paladin.n.2", "horse.paladin.ne", "horse.paladin.ne.2",
-      "horse.paladin.nw", "horse.paladin.nw.2", "horse.paladin.s", "horse.paladin.s.2",
-      "horse.paladin.se", "horse.paladin.se.2", "horse.paladin.sw", "horse.paladin.sw.2",
-      "horse.paladin.w", "horse.paladin.w.2",
-    ],
-    `the original paladin's descriptor set changed: ${report.paladinKeys.join(",")}`,
-  );
 
-  const shotDir = "local/hero-variant-e2e";
-  await screenshotTile(page, tile, `${shotDir}/paladin2-tile.png`);
-  writeFileSync(`${shotDir}/paladin2-descriptors.json`, JSON.stringify(report, null, 2));
-  console.log(`>> [B] screenshots + descriptor dump in ${shotDir}/`);
-
+  console.log(">> screenshots + descriptor dumps in local/hero-variant-e2e/");
   await page.close();
 }
 
@@ -354,7 +408,7 @@ async function main(): Promise<void> {
 
     const browser = await chromium.launch({ headless: true });
     try {
-      await variantIsWired(browser);
+      await variantsAreWired(browser);
     } finally {
       await browser.close().catch(() => {});
     }

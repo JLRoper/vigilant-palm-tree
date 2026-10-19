@@ -1,0 +1,16 @@
+Repaint the attached game-hero sprite as a NEW colour variation of the same character. The attached image is the authoritative reference for ART STYLE, POSE, SILHOUETTE, FRAMING and SCALE — keep all of those identical.
+
+{{POSE}}
+
+ART STYLE (copy the reference exactly): softly hand-painted fantasy game sprite, hand-painted brush texture with soft airbrush shading, gentle highlights, a thin dark painted contour along the silhouette, the same level of detail and the same figure scale within the canvas. Not pixel art, not cel-shaded, not a 3D render, not a photograph.
+
+KEEP FROM THE REFERENCE, unchanged: the horse's body build and head carriage, its leg positions and gait, the shape and flow of its tail and mane, the saddle, saddle blanket, stirrups and reins, the rider's upright posture and hand position on the reins, the helmet shape, and the longsword hanging at the rider's hip.
+
+NEW COLOUR SCHEME — "Frost Warden", a winter paladin of the same order:
+- Horse: a pale ice-white roan horse with faint blue-grey dappling, a silver-white mane and tail, frosted pale hooves.
+- Rider: polished silver plate armour with pale blue-steel edging and a thick white fur collar; a long pale-cyan cape with a silver embroidered hem and a faint frost crystal pattern.
+- Helmet: a silver great helm with a tall white plume and frost-rimmed cheek guards, visor raised to show a hint of the face exactly as in the reference.
+- Saddle blanket: pale ice blue with silver trim; polished silver stirrups and bit.
+- Lighting: keep the reference's light direction, but let the highlights read cold — pale blue-white rim light, no warm gold anywhere.
+
+BACKGROUND: one flat uniform light-grey colour (#c9c7c4) filling the entire canvas — absolutely no checkerboard pattern anywhere, no gradient, no ground, no cast shadow, no horizon line, no text, no border, no watermark. A single isolated figure, centred, occupying the canvas vertically like the reference.

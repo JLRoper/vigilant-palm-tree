@@ -1,0 +1,11 @@
+Repaint the attached hero roster banner as the banner for a NEW colour variation of the same hero, keeping the reference's composition, architecture, framing and painted style.
+
+ART STYLE: softly painted fantasy illustration, hand-painted texture, atmospheric depth, same level of detail and same wide cinematic framing as the reference. Not pixel art, not cel-shaded, not a 3D render, not a photograph.
+
+COMPOSITION (keep from the reference): the same tall gothic stone hall with receding pointed arches and pillars, the same low viewpoint looking down the aisle, the same hero-and-horse placed centre, the same long horizontal banner framing.
+
+CHANGE: the hall is now a desecrated crypt and the mounted hero is the "Grave Warden" — an undead knight of the same silhouette. He rides a near-black horse with a ragged dark mane and tail. The rider wears blackened iron-and-bone plate with tarnished silver ribbing, a violet-black tabard and a long tattered dark-green cloak; a horned dark helm with a sickly green glow inside the visor. Keep his upright posture and his position within the hall.
+
+LIGHT: cold, sourceless and dim — a faint green glow from the floor and the visor, deep black shadows, dust and cobwebs on the arches. No warm daylight.
+
+No text, no lettering, no watermark, no border, no checkerboard pattern anywhere.

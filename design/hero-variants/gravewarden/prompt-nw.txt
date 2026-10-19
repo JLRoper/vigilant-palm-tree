@@ -1,0 +1,18 @@
+Repaint the attached game-hero sprite as a NEW colour variation of the same character. The attached image is the authoritative reference for ART STYLE, POSE, SILHOUETTE, FRAMING and SCALE — keep all of those identical.
+
+{{POSE}}
+
+ART STYLE (copy the reference exactly): softly hand-painted fantasy game sprite, hand-painted brush texture with soft airbrush shading, gentle highlights, a thin dark painted contour along the silhouette, the same level of detail and the same figure scale within the canvas. Not pixel art, not cel-shaded, not a 3D render, not a photograph.
+
+KEEP FROM THE REFERENCE, unchanged: the horse's body build and head carriage, its leg positions and gait, the shape and flow of its tail and mane, the saddle, saddle blanket, stirrups and reins, the rider's upright posture and hand position on the reins, the helmet shape, the long cloak's cut and drape, and the longsword at the rider's hip.
+
+NEW COLOUR SCHEME — "Grave Warden", an undead knight of the same silhouette:
+- Horse: a near-black horse with a faint violet sheen in the highlights, a ragged dark mane and tail, dull iron hooves.
+- Rider: blackened iron-and-bone plate with tarnished silver ribbing, a violet-black tabard, and a long tattered dark-green cloak with a frayed hem.
+- Helmet: a dark horned helm with a sickly green glow inside the visor instead of a face, no plume.
+- Saddle blanket: dark violet with bone-white trim; blackened iron stirrups.
+- Lighting: keep the reference's light direction, but sourceless and cold — a faint green under-light on the horse's belly and along the rider's cloak edge, deep black shadows.
+
+BACKGROUND: one flat uniform light-grey colour (#c9c7c4) filling the entire canvas — absolutely no checkerboard pattern anywhere, no gradient, no ground, no cast shadow, no horizon line, no text, no border, no watermark. A single isolated figure, centred, occupying the canvas vertically like the reference.
+
+CRITICAL COMPOSITION RULE: the horse is heading toward the TOP-LEFT corner. The horse's head, neck and muzzle MUST be on the LEFT side of the image, above the rider's shoulder height; the tail and hindquarters MUST be on the opposite side. Do not mirror this.
