@@ -28,4 +28,7 @@ export type HorseVariantId =
   | "drake"
   | "lionheart"
   | "paladin2"
+  | "frostwarden"
+  | "gravewarden"
+  | "stormrider"
   | "hero";

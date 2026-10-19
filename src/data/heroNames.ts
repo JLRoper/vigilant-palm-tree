@@ -70,6 +70,15 @@ const HERO_NAMES: readonly string[] = [
   "Seraphine Emberoath",
   "Aldric Ashsteel",
   "Elowen Cinderbrand",
+  "Wren Frostmantle",
+  "Halvar Rimewatch",
+  "Isolde Winterhearth",
+  "Corvin Graveward",
+  "Morrigan Ossuary",
+  "Sable Thornegrave",
+  "Taran Stormhale",
+  "Nimue Galeborne",
+  "Brennan Thunderhoof",
 ];
 
 let usedNames: Set<string> | null = null;
