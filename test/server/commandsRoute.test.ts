@@ -146,6 +146,86 @@ test("POST /games/:name/commands accepts UpgradeBuilding over HTTP (was a 400 --
   }
 });
 
+// Two occupied garrison slots, so a ReorderGarrison swap is observable.
+function garrisonSettlement(name: string): SettlementState {
+  return {
+    ...makeSettlement(ids(name).settlementId, 0, 2, 2),
+    stacks: normalizePlatoons([
+      { entries: [{ unitTypeId: "peasant", count: 3 }] },
+      { entries: [{ unitTypeId: "swordsman", count: 5 }] },
+    ]),
+  };
+}
+
+test("POST /games/:name/commands accepts ReorderGarrison over HTTP (was a 400 -- parseCommand had no branch for it)", async () => {
+  const name = uniqueName();
+  const { settlementId } = ids(name);
+  const token = await seedGame(name, garrisonSettlement(name));
+  try {
+    const res = await postCommand(name, {
+      kind: "ReorderGarrison",
+      actor: 0,
+      settlementId,
+      fromIdx: 0,
+      toIdx: 1,
+    }, token);
+    assert.equal(res.status, 200, await res.clone().text());
+    const body = (await res.json()) as { settlement?: SettlementState };
+    assert.equal(body.settlement?.stacks?.[0].entries[0].unitTypeId, "swordsman");
+    assert.equal(body.settlement?.stacks?.[1].entries[0].unitTypeId, "peasant");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("ReorderGarrison with a malformed payload, an unknown settlement or a rival's garrison is refused, not a handler crash", async () => {
+  const name = uniqueName();
+  const { heroId, settlementId } = ids(name);
+  const rivalId = `${name}-s1`;
+  const rival: SettlementState = {
+    ...makeSettlement(rivalId, 1, 4, 4),
+    stacks: normalizePlatoons([
+      { entries: [{ unitTypeId: "peasant", count: 3 }] },
+      { entries: [{ unitTypeId: "swordsman", count: 5 }] },
+    ]),
+  };
+  const token = await seedGame(name, garrisonSettlement(name), {
+    extraSettlements: [rival],
+    players: [
+      makePlayer(0, "player", [heroId], [settlementId]),
+      makePlayer(1, "rival", [], [rivalId]),
+    ],
+  });
+  try {
+    const missingIdx = await postCommand(name, { kind: "ReorderGarrison", actor: 0, settlementId }, token);
+    assert.equal(missingIdx.status, 400, await missingIdx.clone().text());
+
+    const unknown = await postCommand(name, {
+      kind: "ReorderGarrison",
+      actor: 0,
+      settlementId: "does-not-exist",
+      fromIdx: 0,
+      toIdx: 1,
+    }, token);
+    assert.equal(unknown.status, 409, await unknown.clone().text());
+    assert.equal(((await unknown.json()) as { error?: string }).error, "no_settlement");
+
+    // The ownership gate: every handler rejection except a turn mismatch is a
+    // 409 on this route, so the reason string is the assertion that matters.
+    const foreign = await postCommand(name, {
+      kind: "ReorderGarrison",
+      actor: 0,
+      settlementId: rivalId,
+      fromIdx: 0,
+      toIdx: 1,
+    }, token);
+    assert.equal(foreign.status, 409, await foreign.clone().text());
+    assert.equal(((await foreign.json()) as { error?: string }).error, "forbidden_not_your_settlement");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
 test("POST /games/:name/commands accepts UpgradeSettlement over HTTP (was a 400 -- parseCommand had no branch for it)", async () => {
   const name = uniqueName();
   const { settlementId } = ids(name);

@@ -8,14 +8,50 @@ test("every declared EngineEvent variant is classified exactly once", () => {
   // no producer after the manual trade command's removal), so the union was one
   // variant smaller. 24 -> 25 (2026-10-04): BattleOffered added -- an
   // AI-initiated battle offer waits for its human defender instead of
-  // auto-resolving.
-  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 26);
+  // auto-resolving. 26 -> 27 (2026-10-18): GarrisonReordered added -- the
+  // garrison grid's drag-and-drop swaps two of a settlement's stack slots.
+  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 27);
 });
 
-test("classification counts: 12 apply, 7 resync, 7 ignore", () => {
+test("classification counts: 13 apply, 7 resync, 7 ignore", () => {
   const counts = { apply: 0, resync: 0, ignore: 0 };
   for (const cls of Object.values(ENGINE_EVENT_SYNC_CLASS)) counts[cls] += 1;
-  assert.deepEqual(counts, { apply: 12, resync: 7, ignore: 7 });
+  assert.deepEqual(counts, { apply: 13, resync: 7, ignore: 7 });
+});
+
+test("class agrees with the reducer: GarrisonReordered swaps two garrison slots", () => {
+  assert.equal(ENGINE_EVENT_SYNC_CLASS.GarrisonReordered, "apply");
+  const state = makeState({
+    settlements: [
+      {
+        ...makeSettlement("s0", 0, 2, 2),
+        stacks: [
+          { entries: [{ unitTypeId: "peasant", count: 4 }] },
+          { entries: [] },
+        ],
+      },
+    ],
+  });
+  const applied = applyEngineEvent(state, {
+    type: "GarrisonReordered",
+    actor: 0,
+    settlementId: "s0",
+    fromIdx: 0,
+    toIdx: 1,
+  });
+  assert.equal(applied.outcome, "applied");
+  const stacks = applied.state.settlements.s0.stacks ?? [];
+  assert.deepEqual(stacks[0].entries, []);
+  assert.deepEqual(stacks[1].entries, [{ unitTypeId: "peasant", count: 4 }]);
+  // An unknown settlement is real drift -> refetch.
+  const drifted = applyEngineEvent(state, {
+    type: "GarrisonReordered",
+    actor: 0,
+    settlementId: "nope",
+    fromIdx: 0,
+    toIdx: 1,
+  });
+  assert.equal(drifted.outcome, "resync");
 });
 
 test("class agrees with the reducer: BankGoldMoved is an apply kind that replays the reducer", () => {

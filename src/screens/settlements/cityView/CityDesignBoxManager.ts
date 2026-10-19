@@ -9,6 +9,7 @@ import {
 export interface CityDesignBoxCallbacks {
   onBuild: () => void;
   onWorkforce: () => void;
+  onRecruit: () => void;
   onBack: () => void;
 }
 
@@ -91,6 +92,22 @@ export class CityDesignBoxManager {
     });
     workforceBtn.addEventListener("click", () => callbacks.onWorkforce());
     this.body.appendChild(workforceBtn);
+
+    const recruitBtn = document.createElement("button");
+    recruitBtn.textContent = "⚔ Recruit";
+    recruitBtn.title = "Open the recruitment panel (r)";
+    Object.assign(recruitBtn.style, {
+      padding: "4px 12px",
+      border: "1px solid rgba(255,255,255,0.2)",
+      background: "rgba(0,0,0,0.7)",
+      color: "#fff",
+      fontSize: "12px",
+      cursor: "pointer",
+      borderRadius: "3px",
+      fontFamily: "system-ui, sans-serif",
+    });
+    recruitBtn.addEventListener("click", () => callbacks.onRecruit());
+    this.body.appendChild(recruitBtn);
 
     this.backBtn = document.createElement("button");
     this.backBtn.textContent = "← Back";

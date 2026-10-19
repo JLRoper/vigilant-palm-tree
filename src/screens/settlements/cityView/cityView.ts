@@ -21,6 +21,7 @@ import {
   workforcePool,
 } from "@heroes/engine";
 import { getUnitImageUrl } from "../../../data/unitImages";
+import { cachedUnitTypes } from "../../../data/unitCatalog";
 import { advanceChargedOnCommit, netDelta } from "./netCost";
 import { syncCartBuildings } from "./syncedBuildings";
 import { BuildingMenu, type BuildingMenuOptions, type BuildingMenuWorkforce } from "./buildingMenu";
@@ -36,6 +37,7 @@ import type { BuildingUpgradeRequest } from "../../../state/gameState";
 import type { BuildingUpgradeCost, ProducerOutput } from "@heroes/engine";
 import { producerTurnOutput } from "@heroes/engine";
 import { CityDesignBoxManager } from "./CityDesignBoxManager";
+import { recruitmentSnapshot, type RecruitmentSnapshotModel } from "../recruitmentPanelModel";
 import { CITY_GRID_PAD, cityGridRect, collectPanelRects, elementRect } from "./panelRects";
 
 /** Pre-city selection, captured at open() so close can restore the exact panel state the player left behind. */
@@ -121,6 +123,24 @@ export class CityView {
   isWorkforcePanelOpen?: () => boolean;
   closeWorkforcePanel?: () => void;
   private workforceListeners = new Set<() => void>();
+  /** Recruitment panel wiring: UIManager assigns the four hooks; the panel
+   * reads every offering through recruitmentSnapshot() and commits through
+   * onRecruitFromPanel (which is district-true per row, unlike the
+   * current-view recruit path in the building menu). */
+  openRecruitmentPanel?: () => void;
+  isRecruitmentPanelOpen?: () => boolean;
+  closeRecruitmentPanel?: () => void;
+  onRecruitFromPanel?: (req: {
+    buildingKind: BuildingKind;
+    gx: number;
+    gy: number;
+    district: { q: number; r: number } | null;
+    unitTypeId: string;
+    count: number;
+  }) => boolean;
+  private recruitmentListeners = new Set<() => void>();
+  /** Faction gate for recruit visibility, shared with the building menu. */
+  private readonly isUnitRecruitable?: (unitTypeId: string) => boolean;
   /** In-flight worker drag: the grab building (source of a transfer or the
    * pool for panel-chip drags), the pressed screen point, and whether motion
    * crossed the click/drag threshold (a ghost only shows after it). */
@@ -175,6 +195,7 @@ export class CityView {
     this.onUpgradeBuildings = opts.onUpgradeBuildings;
     this.getSelection = opts.getSelection;
     this.getFloatingPanelRects = opts.getFloatingPanelRects;
+    this.isUnitRecruitable = opts.isUnitRecruitable;
     this.onKeyDown = (e: KeyboardEvent) => {
       // Typing in a menu field must not trigger city shortcuts ('w' opens the
       // workforce panel, 'b' the palette); Escape still falls through to close.
@@ -201,6 +222,10 @@ export class CityView {
           this.closeWorkforcePanel?.();
           return;
         }
+        if (this.isRecruitmentPanelOpen?.()) {
+          this.closeRecruitmentPanel?.();
+          return;
+        }
         if (this.placer.isActive()) {
           this.placer.cancelPlacement();
           this.updateBuildButton();
@@ -220,6 +245,10 @@ export class CityView {
       }
       if (e.key === "w" || e.key === "W") {
         this.openWorkforcePanel?.();
+        return;
+      }
+      if (e.key === "r" || e.key === "R") {
+        this.openRecruitmentPanel?.();
         return;
       }
       if (e.key === "b" || e.key === "B") {
@@ -307,6 +336,7 @@ export class CityView {
         this.updateBuildButton();
       },
       onWorkforce: () => this.openWorkforcePanel?.(),
+      onRecruit: () => this.openRecruitmentPanel?.(),
       onBack: () => this.handleClose(),
     }, this.getFloatingPanelRects);
 
@@ -616,6 +646,47 @@ export class CityView {
 
   private notifyWorkforceListeners(): void {
     for (const fn of this.workforceListeners) fn();
+  }
+
+  // ---- Recruitment (consolidated recruit panel) -----------------------------
+
+  /** Live settlement behind the open city view (undefined when closed) — the
+   * recruitment panel's read path, distinct from the workforce panel's
+   * current-view-only snapshots because recruitment lists EVERY district. */
+  getSettlementState(): SettlementState | undefined {
+    return this.getSettlement();
+  }
+
+  /** Every offering the settlement can train right now, faction-filtered the
+   * same way the building menu's recruit rows are. */
+  recruitmentSnapshot(): RecruitmentSnapshotModel {
+    return recruitmentSnapshot(this.getSettlement(), {
+      isUnitRecruitable: this.isUnitRecruitable,
+      unitTypes: cachedUnitTypes(),
+    });
+  }
+
+  /** Nudges a floating panel's desired geometry clear of the other floating
+   * panels, the city design box and the city grid -- the same collision solve
+   * openBuildPalette runs, exposed for panels that live outside this file. */
+  resolveFloatingPlacement(desired: PanelRect): { x: number; y: number } {
+    const occupied = this.collectOccupiedRects();
+    occupied.push(cityGridRect(this.size, window.innerWidth, window.innerHeight, CITY_GRID_PAD, toolbarHeight()));
+    return resolvePanelPlacement(
+      desired,
+      occupied,
+      { width: window.innerWidth, height: window.innerHeight },
+      toolbarHeight(),
+    );
+  }
+
+  /** fn runs after every successful commit made through the recruit panel. */
+  setRecruitmentListener(fn: () => void): void {
+    this.recruitmentListeners.add(fn);
+  }
+
+  notifyRecruitmentCommit(): void {
+    for (const fn of this.recruitmentListeners) fn();
   }
 
   /** W4's panel starts a worker drag from the pool (assign on drop): no grab
@@ -1001,6 +1072,7 @@ export class CityView {
     try {
       this.placer.cancelPlacement();
       this.placer.hidePalette();
+      this.closeRecruitmentPanel?.();
       this.designBox.hide();
       window.removeEventListener("keydown", this.onKeyDown);
       this.endWorkerDrag();

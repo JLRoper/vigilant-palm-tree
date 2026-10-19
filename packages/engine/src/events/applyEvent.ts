@@ -12,6 +12,7 @@ import { transferGold } from "../economy/transfer";
 import { depositIntoBank, requestBankWithdrawal } from "../economy/bank";
 import { setAutoTrade } from "../settlement/autoTrade";
 import { reorderStack } from "../hero/stacks";
+import { reorderGarrisonStacks } from "../settlement/reorderGarrison";
 import { captureSettlement } from "../settlement/capture";
 import { startTownHallUpgrade } from "../settlement/upgradeTownHall";
 import { depositIntoGarrison } from "../settlement/recruitUnits";
@@ -67,6 +68,7 @@ export const ENGINE_EVENT_SYNC_CLASS: Record<EngineEvent["type"], EngineEventSyn
   TownHallUpgradeStarted: "apply",
   AutoTradeToggled: "apply",
   StackReordered: "apply",
+  GarrisonReordered: "apply",
   SettlementCaptured: "apply",
   CharterStarted: "resync",
   BuildingUpgradeStarted: "resync",
@@ -372,6 +374,12 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
 
     case "StackReordered": {
       const result = reorderStack(state, event.heroId, event.fromIdx, event.toIdx);
+      if (!result.ok) return resync(state);
+      return { state: result.state, outcome: "applied" };
+    }
+
+    case "GarrisonReordered": {
+      const result = reorderGarrisonStacks(state, event.settlementId, event.fromIdx, event.toIdx);
       if (!result.ok) return resync(state);
       return { state: result.state, outcome: "applied" };
     }

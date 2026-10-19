@@ -29,6 +29,7 @@ import {
   startBattle as startBattleReducer,
   endBattlePhase as endBattlePhaseReducer,
   reorderStack as reorderStackReducer,
+  reorderGarrisonStacks as reorderGarrisonStacksReducer,
   detectAdjacentEnemy as detectAdjacentEnemyFn,
   transferGold as transferGoldReducer,
   setAutoTrade as setAutoTradeReducer,
@@ -102,6 +103,7 @@ export interface TurnControllerHooks {
   onUpgradeTownHall(actor: number, settlementId: SettlementId, targetLevel: 2 | 3): Promise<void>;
   onSetAutoTrade(actor: number, settlementId: SettlementId, autoTrade: boolean): Promise<void>;
   onReorderStack(actor: number, heroId: HeroId, fromIdx: number, toIdx: number): Promise<void>;
+  onReorderGarrison(actor: number, settlementId: SettlementId, fromIdx: number, toIdx: number): Promise<void>;
   onCaptureSettlement(actor: number, heroId: HeroId, settlementId: SettlementId): Promise<void>;
   onTransferGold(
     actor: number,
@@ -670,6 +672,33 @@ export class TurnController {
         return this.hooks.onReorderStack(actor, heroId, fromIdx, toIdx);
       },
       hookLabel: "onReorderStack",
+    });
+    return { ok: true, reason: "" };
+  }
+
+  /** Swaps two of a settlement garrison's stack slots (the garrison grid's
+   * drag-and-drop). Same shape as reorderStack above: reducer applies locally,
+   * the fire-and-forget hook persists it. */
+  reorderGarrison(
+    settlementId: SettlementId,
+    fromIdx: number,
+    toIdx: number,
+  ): { ok: boolean; reason: string } {
+    const result = reorderGarrisonStacksReducer(this.state, settlementId, fromIdx, toIdx);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.commit(result.state, {
+      log: {
+        type: "garrison_reordered",
+        payload: { settlementId, fromIdx, toIdx },
+      },
+      hook: () =>
+        this.hooks.onReorderGarrison(
+          result.state.settlements[settlementId]?.ownerId ?? result.state.activePlayerId,
+          settlementId,
+          fromIdx,
+          toIdx,
+        ),
+      hookLabel: "onReorderGarrison",
     });
     return { ok: true, reason: "" };
   }

@@ -14,10 +14,11 @@ import { getMinimapReserveHeight } from "../render/minimap";
 import { RESOURCE_PILE_SMOL_SPRITES } from "../render/assetDescriptors";
 import type { CityView, CitySelectionSnapshot } from "@screens/settlements/cityView/cityView";
 import type { WorkforcePanel } from "@screens/settlements/cityView/workforcePanel";
+import type { RecruitmentPanel } from "@screens/settlements/cityView/recruitmentPanel";
 import { settleNet } from "@screens/settlements/cityView/netCost";
 import { recordBuildCommit } from "../game/buildCommitLedger";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
-import type { HeroId, SettlementState } from "../state/gameState";
+import type { HeroId, HeroState, SettlementState } from "../state/gameState";
 import type { Axial } from "../core/hex";
 import { Hero } from "../entities/hero";
 import { SpriteProvider } from "../render/assets";
@@ -76,6 +77,8 @@ export class UIManager {
   private cityViewLocalSeat?: () => PlayerId | null;
   private workforcePanel?: WorkforcePanel;
   private workforcePanelPromise: Promise<WorkforcePanel> | null = null;
+  private recruitmentPanel?: RecruitmentPanel;
+  private recruitmentPanelPromise: Promise<RecruitmentPanel> | null = null;
   private gameStateManager?: GameStateManager;
   private viewManager?: ViewManager;
   private lastMapWidth = -1;
@@ -188,22 +191,12 @@ export class UIManager {
       onUpgradeSettlement: () => this.handleUpgradeSettlement(),
       onEnterCityView: callbacks.onEnterCityView,
       canEnterCityView: callbacks.canEnterCityView,
-      getHeroesAtSettlement: (settlementId) => {
-        if (!this.gameStateManager) return [];
-        const gs = this.gameStateManager.getState();
-        const s = gs.settlements[settlementId];
-        if (!s) return [];
-        return Object.values(gs.heroes).filter(
-          (h) => h.q === s.q && h.r === s.r && h.ownerId === s.ownerId,
-        );
-      },
-      onTransferUnits: (heroId, settlementId, direction, unitTypeId, count) => {
-        if (!this.gameStateManager) return false;
-        const tc = this.gameStateManager.getTurnController();
-        if (!tc.transferUnits(heroId, settlementId, direction, unitTypeId, count)) return false;
-        this.gameStateManager.replaceState(tc.getState());
-        return true;
-      },
+      getHeroesAtSettlement: (settlementId) => this.heroesAtSettlement(settlementId),
+      onTransferUnits: (heroId, settlementId, direction, unitTypeId, count, toSlot) =>
+        this.transferUnitsFor(heroId, settlementId, direction, unitTypeId, count, toSlot),
+      onReorderGarrison: (settlementId, fromIdx, toIdx) =>
+        this.reorderGarrisonFor(settlementId, fromIdx, toIdx),
+      onReorderHero: (heroId, fromIdx, toIdx) => this.reorderHeroStackFor(heroId, fromIdx, toIdx),
       onBankGold: (settlementId, gx, gy, amount, direction, district) => {
         if (!this.gameStateManager) return { ok: false, reason: "no_settlement" };
         const tc = this.gameStateManager.getTurnController();
@@ -410,6 +403,7 @@ export class UIManager {
         // view it edits (otherwise it floats over the world map, its steppers
         // silently no-op, and 'w' can no longer reach it).
         this.workforcePanel?.close();
+        this.recruitmentPanel?.close();
         // Restore the selection captured at open() instead of force-selecting
         // the closed settlement: leaving the city must hand each floating
         // panel back exactly the open/closed state it had on entry.
@@ -477,6 +471,31 @@ export class UIManager {
     view.openWorkforcePanel = () => this.toggleWorkforcePanel();
     view.isWorkforcePanelOpen = () => this.workforcePanel?.isOpen() ?? false;
     view.closeWorkforcePanel = () => this.workforcePanel?.close();
+    // Recruitment panel wiring: onRecruitFromPanel commits against the row's
+    // OWN building and district (the panel lists every district), so a
+    // district barracks recruits without the city view being opened on it.
+    view.onRecruitFromPanel = (req): boolean => {
+      const openId = this.cityView?.getOpenSettlementId();
+      if (!openId) return false;
+      const tc = state().getTurnController();
+      const ok = tc.recruitUnits(
+        openId,
+        req.buildingKind,
+        req.gx,
+        req.gy,
+        req.unitTypeId,
+        req.count,
+        req.district ?? undefined,
+      );
+      if (ok) {
+        state().replaceState(tc.getState());
+        view.notifyRecruitmentCommit();
+      }
+      return ok;
+    };
+    view.openRecruitmentPanel = () => this.toggleRecruitmentPanel();
+    view.isRecruitmentPanelOpen = () => this.recruitmentPanel?.isOpen() ?? false;
+    view.closeRecruitmentPanel = () => this.recruitmentPanel?.close();
     return view;
   }
 
@@ -508,6 +527,94 @@ export class UIManager {
       });
     }
     return this.workforcePanelPromise;
+  }
+
+  private toggleRecruitmentPanel(): void {
+    if (this.recruitmentPanel?.isOpen()) {
+      this.recruitmentPanel.close();
+      return;
+    }
+    void this.ensureRecruitmentPanel().then((panel) => panel.open());
+  }
+
+  private async ensureRecruitmentPanel(): Promise<RecruitmentPanel> {
+    if (!this.recruitmentPanelPromise) {
+      this.recruitmentPanelPromise = (async () => {
+        const view = await this.ensureCityView();
+        const state = this.cityViewState;
+        const { RecruitmentPanel } = await import("@screens/settlements/cityView/recruitmentPanel");
+        const panel = new RecruitmentPanel({
+          parent: document.body,
+          cityView: view,
+          onRecruit: (req) => view.onRecruitFromPanel?.(req) ?? false,
+          getGameState: () => state?.().getState(),
+          getHeroesAtSettlement: (settlementId) => this.heroesAtSettlement(settlementId),
+          onTransfer: (req) =>
+            this.transferUnitsFor(
+              req.heroId,
+              req.settlementId,
+              req.direction,
+              req.unitTypeId,
+              req.count,
+              req.toSlot,
+            ),
+          onReorderGarrison: (settlementId, fromIdx, toIdx) =>
+            this.reorderGarrisonFor(settlementId, fromIdx, toIdx),
+          onReorderHero: (heroId, fromIdx, toIdx) => this.reorderHeroStackFor(heroId, fromIdx, toIdx),
+        });
+        this.recruitmentPanel = panel;
+        return panel;
+      })().catch((err) => {
+        this.recruitmentPanelPromise = null;
+        throw err;
+      });
+    }
+    return this.recruitmentPanelPromise;
+  }
+
+  /** The hero standing on a settlement's tile (the shared garrison view's input). */
+  private heroesAtSettlement(settlementId: string): HeroState[] {
+    if (!this.gameStateManager) return [];
+    const gs = this.gameStateManager.getState();
+    const s = gs.settlements[settlementId];
+    if (!s) return [];
+    return Object.values(gs.heroes).filter(
+      (h) => h.q === s.q && h.r === s.r && h.ownerId === s.ownerId,
+    );
+  }
+
+  /** One garrison transfer, shared by the settlement panel and the recruitment panel. */
+  private transferUnitsFor(
+    heroId: string,
+    settlementId: string,
+    direction: "toHero" | "toGarrison",
+    unitTypeId: string,
+    count: number,
+    toSlot?: number,
+  ): boolean {
+    if (!this.gameStateManager) return false;
+    const tc = this.gameStateManager.getTurnController();
+    if (!tc.transferUnits(heroId, settlementId, direction, unitTypeId, count, toSlot)) return false;
+    this.gameStateManager.replaceState(tc.getState());
+    return true;
+  }
+
+  /** Swap two garrison slots (the garrison grid's drag-and-drop). */
+  private reorderGarrisonFor(settlementId: string, fromIdx: number, toIdx: number): boolean {
+    if (!this.gameStateManager) return false;
+    const tc = this.gameStateManager.getTurnController();
+    if (!tc.reorderGarrison(settlementId, fromIdx, toIdx).ok) return false;
+    this.gameStateManager.replaceState(tc.getState());
+    return true;
+  }
+
+  /** Swap two of a hero's army slots (the same grid drag, hero side). */
+  private reorderHeroStackFor(heroId: string, fromIdx: number, toIdx: number): boolean {
+    if (!this.gameStateManager) return false;
+    const tc = this.gameStateManager.getTurnController();
+    if (!tc.reorderStack(heroId, fromIdx, toIdx).ok) return false;
+    this.gameStateManager.replaceState(tc.getState());
+    return true;
   }
 
   getToolbar(): Toolbar | undefined { return this.toolbar; }
@@ -559,6 +666,10 @@ export class UIManager {
       this.refreshHeroInfoMenu(gameState, heroes);
       this.refreshSettlementInfoMenu(gameState);
       this.refreshRosterMenus(gameState);
+      // The recruitment panel mounts the same GarrisonView as the settlement
+      // panel, so it refreshes from the same dirty-keyed pass -- a transfer
+      // made on either surface shows on both immediately.
+      if (this.recruitmentPanel?.isOpen()) this.recruitmentPanel.refreshGarrison(gameState);
       this.toolbar?.refresh();
     }
 

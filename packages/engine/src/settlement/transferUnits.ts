@@ -107,8 +107,29 @@ export function transferUnits(
     if (opts.count > totalOfType(heroStacks, opts.unitTypeId)) {
       return { state, ok: false, reason: "not_enough_units" };
     }
-    const deposit = depositIntoGarrison(settlementStacks(settlement), opts.unitTypeId, opts.count);
-    if (!deposit.ok) return { state, ok: false, reason: "garrison_full" };
+    const garrison = settlementStacks(settlement);
+    let updatedGarrison: Platoon[];
+    if (opts.toSlot !== undefined) {
+      // Slot-targeted deposit (the garrison grid's drag-and-drop): same rule as
+      // the hero side above -- grow an entry of the same type, else take a free
+      // entry slot, else the platoon is full.
+      if (!Number.isInteger(opts.toSlot) || opts.toSlot < 0 || opts.toSlot >= ARMY_STACK_SLOTS) {
+        return { state, ok: false, reason: "invalid_slot" };
+      }
+      updatedGarrison = garrison.map((p) => ({ entries: p.entries.map((e) => ({ ...e })) }));
+      const platoon = updatedGarrison[opts.toSlot];
+      const entry = platoon.entries.find((e) => e.unitTypeId === opts.unitTypeId);
+      if (entry) entry.count += opts.count;
+      else if (platoon.entries.length < MAX_PLATOON_ENTRIES) {
+        platoon.entries.push({ unitTypeId: opts.unitTypeId, count: opts.count });
+      } else {
+        return { state, ok: false, reason: "platoon_full" };
+      }
+    } else {
+      const deposit = depositIntoGarrison(garrison, opts.unitTypeId, opts.count);
+      if (!deposit.ok) return { state, ok: false, reason: "garrison_full" };
+      updatedGarrison = deposit.stacks;
+    }
     return {
       state: {
         ...state,
@@ -116,7 +137,7 @@ export function transferUnits(
           ...state.heroes,
           [hero.id]: { ...hero, stacks: removeByType(heroStacks, opts.unitTypeId, opts.count) },
         },
-        settlements: { ...state.settlements, [settlement.id]: { ...settlement, stacks: deposit.stacks } },
+        settlements: { ...state.settlements, [settlement.id]: { ...settlement, stacks: updatedGarrison } },
         dirty: true,
       },
       ok: true,

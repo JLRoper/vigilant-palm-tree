@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.15.0] - 2026-10-19
+
+feat(recruitment): consolidated recruitment panel with a shared drag-and-drop garrison grid
+
 ## [0.14.0] - 2026-10-19
 
 - Settlement panel: the settlement's own name and tier now render at the top (the name was written into the level badge and immediately overwritten, so it never appeared).

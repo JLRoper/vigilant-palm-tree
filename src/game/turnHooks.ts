@@ -8,6 +8,7 @@ import {
   upgradeTownHall,
   setAutoTrade,
   reorderStack,
+  reorderGarrison,
   captureSettlement,
   CommandError,
   startCharter,
@@ -296,6 +297,20 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await reorderStack(name, { actor, heroId, fromIdx, toIdx });
       } catch (e) {
         reportCommandFailure("Reorder stack", e);
+      }
+    },
+    onReorderGarrison: async (
+      actor: number,
+      settlementId: SettlementId,
+      fromIdx: number,
+      toIdx: number,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await reorderGarrison(name, { actor, settlementId, fromIdx, toIdx });
+      } catch (e) {
+        reportCommandFailure("Reorder garrison", e);
       }
     },
     onCaptureSettlement: async (
