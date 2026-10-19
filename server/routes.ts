@@ -5,6 +5,7 @@ import {
   GameMap,
   getOrCreateGameMap,
   isHealthy,
+  isMapSize,
   makeInitialStatePayload,
   mulberry32,
   resolveMapSize,
@@ -417,7 +418,7 @@ router.post("/games", async (req, res) => {
       res.status(400).json({ error: "name required" });
       return;
     }
-    const storedMapSize = ["small", "medium", "large", "huge", "epic"].includes(mapSize) ? mapSize : "small";
+    const storedMapSize = isMapSize(mapSize) ? mapSize : "small";
     console.log(`[api] POST /games name=${name} hero=(${hero_q},${hero_r}) mapSize=${storedMapSize}`);
     const map = getOrCreateGameMap(seed, storedMapSize as MapSize, 3);
     const topHumanSlots = Number.isInteger(humanSlots) ? (humanSlots as number) : null;

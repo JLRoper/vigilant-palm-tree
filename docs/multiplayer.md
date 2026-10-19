@@ -19,7 +19,7 @@ This is the design doc the multiplayer system never had (former open question #5
 | Mechanic | Where | Behaviour |
 |---|---|---|
 | Seat counts | `multiplayerLobby.ts` (`SEAT_COUNTS`) | 2, 3, or 4 seats per game |
-| Host / Join | same | Host creates a game (default name `lan-YYYY-MM-DD-xxxx`, map size `small`/`medium`/`large`/`huge`/`epic`); Join connects to an existing one by name |
+| Host / Join | same | Host creates a game (default name `lan-YYYY-MM-DD-xxxx`, any of the eight map sizes `small` → `gigantic`); Join connects to an existing one by name |
 | Seat claim | `server/routes.ts` lobby claim/start (writes `games.lobby` jsonb) | Each seat is claimed by index; `claimed` records `handle`, optional `email`, `claimedAt` |
 | Handle | lobby UI | Purely cosmetic |
 | Email binding | `attachPlayerSeat.ts` + `server/auth.ts` | If the claimer was signed in, the seat is bound to their auth email (server-derived, never client-supplied). Sign-in is optional — anonymous claims leave the seat unbound. |

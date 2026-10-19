@@ -10,10 +10,10 @@ The world the heroes move through. Hex grid, isometric rendering, procedurally g
 
 ## Grid
 
-- **Configurable hex grid** (`MapSize`: `small` 24×18, `medium` 36×27, `large` 48×36, `huge` 72×54, `epic` 120×90; default `small` 24×18), axial coordinates `(q, r)`.
+- **Configurable hex grid** (`MapSize`: `small` 24×18, `medium` 36×27, `large` 48×36, `huge` 72×54, `epic` 120×90, `colossal` 180×135, `titanic` 240×180, `gigantic` 300×225; default `small` 24×18), axial coordinates `(q, r)`. The ladder lives in `MAP_SIZE_ORDER`/`MAP_SIZES` (`packages/engine/src/map/gameMap.ts`) and every size selector iterates it, so a new tier is one registry entry.
 - Hex size = 32 logical px.
 - Pointy-top orientation, flat-top stack.
-- `GameMap.placedResourceTiles` caches the sparse array of placed resource deposits alongside the indexed `resourceTiles` lookup array, and `getOrCreateGameMap(seed, size)` (`packages/engine/src/map/gameMap.ts`) maintains a process-wide LRU cache (`max = 8`) of generated `GameMap` instances keyed by `(seed, size)`.
+- `GameMap.placedResourceTiles` caches the sparse array of placed resource deposits alongside the indexed `resourceTiles` lookup array, and `getOrCreateGameMap(seed, size)` (`packages/engine/src/map/gameMap.ts`) maintains a process-wide LRU cache (`GAME_MAP_CACHE_CAPACITY = 32`) of generated `GameMap` instances keyed by `(seed, size, mapGenVersion)`.
 
 ## Terrain types
 

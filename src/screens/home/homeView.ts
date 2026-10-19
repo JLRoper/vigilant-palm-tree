@@ -10,6 +10,7 @@ import {
   type AuthState,
 } from "../../io/auth";
 import { openCenteredModal, styleButton, styleInput, menuTheme } from "@screens/shared/menu";
+import type { MapSize } from "../../map/gameMap";
 import { openSettingsMenu } from "./settingsMenu";
 import { createNewGameScreen } from "./newGameScreen";
 import type { FactionId } from "@heroes/contracts";
@@ -21,7 +22,7 @@ export interface HomeViewOptions {
     seed: number;
     castleSeed?: number;
     castleCount?: number;
-    mapSize?: "small" | "medium" | "large" | "huge" | "epic";
+    mapSize?: MapSize;
     playerCount?: 1 | 2 | 3 | 4;
     humanSeatCount?: number;
     enemyCount?: number;

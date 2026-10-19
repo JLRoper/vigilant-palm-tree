@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   GAME_MAP_CACHE_CAPACITY,
   GameMap,
+  MAP_SIZE_ORDER,
+  MAP_SIZES,
   clearGameMapCache,
   getGameMapCacheSize,
   getOrCreateGameMap,
@@ -60,9 +62,11 @@ test("new GameMap(seed, mapSize) deterministically reproduces the same map GameM
 });
 
 test("GameMap reconstruction from seed+mapSize is deterministic across every mapSize, not just small", () => {
-  for (const mapSize of ["small", "medium", "large", "huge", "epic"] as const) {
+  for (const mapSize of MAP_SIZE_ORDER) {
     const a = new GameMap(777, mapSize);
     const b = new GameMap(777, mapSize);
+    assert.equal(a.width, MAP_SIZES[mapSize].width);
+    assert.equal(a.height, MAP_SIZES[mapSize].height);
     assert.deepEqual(a.tiles, b.tiles);
     assert.deepEqual(a.resourceTiles, b.resourceTiles);
   }

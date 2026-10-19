@@ -10,13 +10,23 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.20.0] - 2026-10-19
+## [0.21.0] - 2026-10-19
 
 Recruitment panel: unit rows accordion their buildings and bulk buy/staff
 
-- The unit row (its image) is now the panel's parent: clicking it accordions down one row per building that trains that unit, collapsed by default.
-- The parent row buys across every one of those buildings (shift-click takes the pooled maximum) and its worker stepper staffs them all at once (`−`/`+` = one worker per building).
-- The parent never opens an individual building's menu; only the nested building rows do.
+- The unit row (its image) is now the panel's parent: clicking it accordions down one row per building that trains that unit, collapsed by default. The parent never opens an individual building's menu; only the nested building rows do, exactly as an iso-grid click does.
+- The parent row buys across every one of those buildings (shift-click takes the pooled maximum) and its worker stepper staffs them all at once (`−`/`+` = one worker per building, emptiest-first for add / fullest-first for remove, capped by the idle pool; a legacy auto-staffed settlement stays a single explicit step so the engine's auto-crew is not double-spent). Its `−`/`+` sit right-aligned, directly above the nested rows' steppers.
+- `RecruitmentSource` now carries its own `workers`/`maxWorkers`, so the same stepper helpers serve a source and a building row; `test/cityView.test.ts`'s `testRecruitmentPanelAccordion` drives the real panel (collapsed default, expand without a menu or recruit, nested row opens the building menu at the building, parent staffs both farmhouses server-verified, shift-click drains both draft pools for 6 peasants).
+
+## [0.20.0] - 2026-10-19
+
+- Three new map tiers above `epic`: **Colossal** (180×135, 24,300 hexes), **Titanic** (240×180, 43,200 hexes) and **Gigantic** (300×225, 67,500 hexes), keeping the 4:3 aspect ratio every renderer, minimap and camera path assumes.
+- The ladder is now one ordered array: `MAP_SIZE_ORDER` in `packages/engine/src/map/gameMap.ts`, with `MapSize` derived from it and `MAP_SIZES` keyed by the same type, so a further tier is one array entry plus its size row.
+- Every size selector reads the registry (`MAP_SIZE_ORDER` + `mapSizeLabel`): the full-screen New Game form and the shared New Game modal both list all eight tiers in ladder order, so a new tier needs no selector edit. Both surfaces now print the same `×` separator (the modal previously used `x`).
+- `isMapSize()` is the single size predicate — `POST /games`'s `storedMapSize` and the AI driver's persisted-size read use it instead of their own literal name lists — and every client/server signature that spelled out the five-name union now uses `MapSize`.
+- Existing names (`small` … `epic`) are unchanged so saved games keep their `map_size`; no scaling rule needed per-tier branching because terrain blob counts, castle counts/spacing, AI target reach and the minimap mist LOD all derive from `width × height`.
+- `test/engine/mapSizeLadder.test.ts` pins the ladder (ordering, 4:3, generated dimensions and tile counts, `isMapSize` rejecting prototype keys, label formatting), and the map-reconstruction test now iterates `MAP_SIZE_ORDER` instead of a hard-coded list.
+- Verified end-to-end on a worktree dev instance with Playwright: each new tier created through the New Game form, `map_size` persisted, the `/tiles` grid matching `width × height` (24,300 / 43,200 / 67,500 rows), and the client rendering the map. Full unit suite: 2,118 passing.
 
 ## [0.19.0] - 2026-10-19
 
