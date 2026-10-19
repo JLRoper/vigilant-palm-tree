@@ -5,6 +5,7 @@ import {
   evaluateTradeNeeds,
   findPath,
   getOrCreateGameMap,
+  isMapSize,
   mulberry32,
   normalizePlatoons,
   pickAiMove,
@@ -261,7 +262,7 @@ async function defaultLoadCandidates(): Promise<AiDriverCandidate[]> {
 }
 
 function mapSizeFrom(value: string | null | undefined): MapSize | undefined {
-  return value === "small" || value === "medium" || value === "large" || value === "huge" || value === "epic" ? value : undefined;
+  return isMapSize(value) ? value : undefined;
 }
 
 function mapGenVersionFrom(value: unknown): MapGenVersion {

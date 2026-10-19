@@ -1,5 +1,6 @@
 import type { Terrain } from "../map/terrain";
 import type { ResourceType } from "../map/resourceTiles";
+import type { MapSize } from "../map/gameMap";
 import type {
   ClientTelemetryReport,
   FactionId,
@@ -67,7 +68,7 @@ export type Game = {
   round: number;
   day: number;
   active_player_id: number;
-  map_size?: "small" | "medium" | "large" | "huge" | "epic";
+  map_size?: MapSize;
   players: Player[];
   heroes: Record<string, HeroState>;
   settlements: Record<string, SettlementState>;
@@ -186,7 +187,7 @@ export const api = {
     hero_q: number,
     hero_r: number,
     enemy_positions: EnemyPos[] = [],
-    mapSize?: "small" | "medium" | "large" | "huge" | "epic",
+    mapSize?: MapSize,
     humanSlots?: number,
     enemySlots: number = 0,
     seatFactions?: FactionId[],

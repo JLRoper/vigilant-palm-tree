@@ -29,7 +29,21 @@ export type TileRow = {
   resource: string | null;
 };
 
-export type MapSize = "small" | "medium" | "large" | "huge" | "epic";
+// The map-size ladder, smallest first. The type is derived from this array so
+// a new tier is one entry here plus one MAP_SIZES row, and the client
+// selectors (which iterate MAP_SIZE_ORDER) pick it up without a second edit.
+export const MAP_SIZE_ORDER = [
+  "small",
+  "medium",
+  "large",
+  "huge",
+  "epic",
+  "colossal",
+  "titanic",
+  "gigantic",
+] as const;
+
+export type MapSize = (typeof MAP_SIZE_ORDER)[number];
 export type MapGenVersion = 1 | 2 | 3 | 4;
 
 /**
@@ -52,12 +66,25 @@ export const DENSE_FOREST_BLOBS = 3;
 export const DENSE_FOREST_FOREST_BIAS = 0.75;
 
 export const MAP_SIZES: Record<MapSize, { width: number; height: number; label: string }> = {
-  small:  { width: 24, height: 18, label: "Small" },
-  medium: { width: 36, height: 27, label: "Medium" },
-  large:  { width: 48, height: 36, label: "Large" },
-  huge:   { width: 72, height: 54, label: "Huge" },
-  epic:   { width: 120, height: 90, label: "Epic" },
+  small:    { width: 24,  height: 18,  label: "Small" },
+  medium:   { width: 36,  height: 27,  label: "Medium" },
+  large:    { width: 48,  height: 36,  label: "Large" },
+  huge:     { width: 72,  height: 54,  label: "Huge" },
+  epic:     { width: 120, height: 90,  label: "Epic" },
+  colossal: { width: 180, height: 135, label: "Colossal" },
+  titanic:  { width: 240, height: 180, label: "Titanic" },
+  gigantic: { width: 300, height: 225, label: "Gigantic" },
 };
+
+export function isMapSize(value: unknown): value is MapSize {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(MAP_SIZES, value);
+}
+
+/** Dropdown label for a size, e.g. `Epic (120×90)`. */
+export function mapSizeLabel(mapSize: MapSize): string {
+  const { width, height, label } = MAP_SIZES[mapSize];
+  return `${label} (${width}×${height})`;
+}
 
 export class GameMap {
   width = 24;
@@ -147,7 +174,7 @@ export const GAME_MAP_CACHE_CAPACITY = 32;
 const gameMapCache = new Map<string, GameMap>();
 
 export function resolveMapSize(mapSize?: string | null): MapSize {
-  return mapSize && (mapSize as MapSize) in MAP_SIZES ? (mapSize as MapSize) : "small";
+  return isMapSize(mapSize) ? mapSize : "small";
 }
 
 export function resolveMapGenVersion(version?: number | null): MapGenVersion {

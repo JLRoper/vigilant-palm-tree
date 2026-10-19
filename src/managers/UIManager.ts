@@ -1,5 +1,6 @@
 import { buildHud, updateHud, canEndTurn, type HudHandles, type PathCostReadout } from "@screens/shared/hud";
 import type { PlayerId } from "../state/gameState";
+import type { MapSize } from "../map/gameMap";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { Toolbar, type CalendarSnapshot } from "@screens/shared/toolbar";
 import { HeroInfoMenu } from "@screens/heroes/heroInfoMenu";
@@ -31,7 +32,7 @@ import type { MapInfo } from "@screens/home/settingsMenu";
 import type { DistrictState, FactionId, BuildingKind } from "@heroes/contracts";
 
 type ToolbarCallbacks = {
-  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" | "huge" | "epic"; enemyCount?: number; factionId?: FactionId }) => void;
+  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: MapSize; enemyCount?: number; factionId?: FactionId }) => void;
   onLoad: (loaded: import("../io/api").Game, tiles?: import("../io/api").TileRow[]) => void;
   onSave: () => void;
   onEndTurn: () => void;

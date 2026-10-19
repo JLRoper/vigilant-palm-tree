@@ -4,12 +4,16 @@ import type { BuildingDef, DistrictState, SettlementState } from "@heroes/contra
 import { districtKey, type UnitType } from "@heroes/engine";
 import {
   allocateRecruitCounts,
+  allocateWorkerSteps,
   recruitmentAffordable,
   recruitmentCanAddWorker,
   recruitmentCanRemoveWorker,
+  recruitmentCanStaffAny,
+  recruitmentCanUnstaffAny,
   recruitmentIdleWorkers,
   recruitmentMaxCount,
   recruitmentSnapshot,
+  recruitmentStaffing,
   recruitmentTreasury,
   recruitmentWorkerBase,
   recruitmentWorkerTarget,
@@ -381,4 +385,140 @@ test("max count aggregates the pools and stops at what the treasury affords", ()
   ]);
 });
 
+// ---- the unit row as parent: bulk staffing across its buildings ------------
+
+test("a unit row carries its sources' own staffing and the parent summary adds it up", () => {
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    gold: 5000,
+    population: 800,
+    buildings: [
+      { ...building("barracks", 1, 1), workers: 1 },
+      { ...building("barracks", 3, 3), workers: 3 },
+    ],
+  });
+  const model = recruitmentSnapshot(settlement);
+  const row = model.groups[0].units[0];
+  assert.deepEqual(
+    row.sources.map((s) => [s.gx, s.workers, s.maxWorkers]),
+    [[1, 1, 4], [3, 3, 4]],
+  );
+  const summary = recruitmentStaffing(row.sources, model);
+  assert.equal(summary.auto, false);
+  assert.equal(summary.workers, 4);
+  assert.equal(summary.maxWorkers, 8);
+  assert.equal(summary.idle, 4);
+});
+
+test("a legacy settlement's parent row reads Auto and offers one explicit step", () => {
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    gold: 5000,
+    population: 800,
+    buildings: [building("barracks", 1, 1), building("barracks", 3, 3)],
+  });
+  const model = recruitmentSnapshot(settlement);
+  const row = model.groups[0].units[0];
+  const summary = recruitmentStaffing(row.sources, model);
+  assert.equal(summary.auto, true);
+  assert.equal(summary.workers, 0);
+  assert.equal(summary.maxWorkers, 8);
+  assert.equal(recruitmentCanStaffAny(row.sources, model), true);
+  assert.equal(recruitmentCanUnstaffAny(row.sources, model), false);
+  // ONE step, not one per building: the first explicit count normalizes the
+  // settlement and the engine auto-crews the rest from the remaining pool, so a
+  // batch of absolute counts would double-spend that auto-crew.
+  assert.deepEqual(allocateWorkerSteps(row.sources, model, 1), [
+    { gx: 1, gy: 1, district: null, workers: 1 },
+  ]);
+  assert.deepEqual(allocateWorkerSteps(row.sources, model, -1), []);
+});
+
+test("the parent + puts one worker on every building that trains the unit, emptiest first", () => {
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    gold: 5000,
+    population: 1000,
+    buildings: [
+      { ...building("barracks", 1, 1), workers: 3 },
+      { ...building("barracks", 3, 3), workers: 0 },
+    ],
+  });
+  const model = recruitmentSnapshot(settlement);
+  const row = model.groups[0].units[0];
+  // 10 in the pool, 3 assigned -> 7 idle, both buildings have room.
+  assert.deepEqual(allocateWorkerSteps(row.sources, model, 1), [
+    { gx: 3, gy: 3, district: null, workers: 1 },
+    { gx: 1, gy: 1, district: null, workers: 4 },
+  ]);
+});
+
+test("the parent + stops at the idle pool and skips full buildings", () => {
+  const tight = recruitmentSnapshot(
+    makeSettlement("s0", 0, 2, 2, {
+      gold: 5000,
+      population: 400,
+      buildings: [
+        { ...building("barracks", 1, 1), workers: 3 },
+        { ...building("barracks", 3, 3), workers: 0 },
+      ],
+    }),
+  );
+  // pool 4, assigned 3 -> one idle worker: only the emptiest building gets it.
+  assert.deepEqual(allocateWorkerSteps(tight.groups[0].units[0].sources, tight, 1), [
+    { gx: 3, gy: 3, district: null, workers: 1 },
+  ]);
+
+  const full = recruitmentSnapshot(
+    makeSettlement("s0", 0, 2, 2, {
+      gold: 5000,
+      population: 2000,
+      buildings: [
+        { ...building("barracks", 1, 1), workers: 4 },
+        { ...building("barracks", 3, 3), workers: 1 },
+      ],
+    }),
+  );
+  const row = full.groups[0].units[0];
+  assert.equal(recruitmentCanStaffAny(row.sources, full), true);
+  assert.deepEqual(allocateWorkerSteps(row.sources, full, 1), [
+    { gx: 3, gy: 3, district: null, workers: 2 },
+  ]);
+});
+
+test("the parent − takes one worker off every staffed building, fullest first", () => {
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    gold: 5000,
+    population: 1000,
+    buildings: [
+      { ...building("barracks", 1, 1), workers: 1 },
+      { ...building("barracks", 3, 3), workers: 4 },
+    ],
+  });
+  const model = recruitmentSnapshot(settlement);
+  const row = model.groups[0].units[0];
+  assert.deepEqual(allocateWorkerSteps(row.sources, model, -1), [
+    { gx: 3, gy: 3, district: null, workers: 3 },
+    { gx: 1, gy: 1, district: null, workers: 0 },
+  ]);
+  // Nothing left to take off once every building is empty.
+  assert.deepEqual(
+    allocateWorkerSteps(row.sources.map((s) => ({ ...s, workers: 0 })), model, -1),
+    [],
+  );
+});
+
+test("the parent stepper detects a row with no room and no workers", () => {
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    gold: 5000,
+    population: 200,
+    buildings: [
+      { ...building("barracks", 1, 1), workers: 2 },
+      { ...building("barracks", 3, 3), workers: 2 },
+    ],
+  });
+  const model = recruitmentSnapshot(settlement);
+  const row = model.groups[0].units[0];
+  // pool 2 and both slots full: nothing to add, but workers to take off.
+  assert.equal(recruitmentCanStaffAny(row.sources, model), false);
+  assert.equal(recruitmentCanUnstaffAny(row.sources, model), true);
+  assert.equal(recruitmentStaffing(row.sources, model).idle, 0);
+});
 

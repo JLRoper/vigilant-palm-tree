@@ -18,7 +18,7 @@
 **Properties:**
 - ~30 lines, zero dependencies.
 - Deterministic per seed (mulberry32).
-- Supports `small` (24×18), `medium` (36×27), `large` (48×36), `huge` (72×54), and `epic` (120×90) map sizes; `scaledTerrainBlobs(baseBlobs, width, height)` scales biome seed blob counts by $\sqrt{N/432}$ on maps larger than `24×18` (leaving `small` `24×18` unchanged), and `GameMap.placedResourceTiles` records the sparse list of placed resource deposits.
+- Supports `small` (24×18), `medium` (36×27), `large` (48×36), `huge` (72×54), `epic` (120×90), `colossal` (180×135), `titanic` (240×180), and `gigantic` (300×225) map sizes; `scaledTerrainBlobs(baseBlobs, width, height)` scales biome seed blob counts by $\sqrt{N/432}$ on maps larger than `24×18` (leaving `small` `24×18` unchanged), and `GameMap.placedResourceTiles` records the sparse list of placed resource deposits.
 - Coarse: no smooth coastlines, no elevation gradients. Forests are blobs, not density fields.
 
 ## Dense forest pass (map-gen v4)

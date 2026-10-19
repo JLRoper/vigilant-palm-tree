@@ -27,11 +27,18 @@ export interface RecruitmentCostRow {
   amount: number;
 }
 
-/** One building of a kind: its own pool of every unit the kind offers. */
-export interface RecruitmentSource {
+/** Anything the worker stepper can act on: a unit source or a building row. */
+export interface RecruitmentStaffable {
   gx: number;
   gy: number;
   district: { q: number; r: number } | null;
+  /** Explicit workers; undefined = legacy auto-staffing (effort 1). */
+  workers: number | undefined;
+  maxWorkers: number;
+}
+
+/** One building of a kind: its own pool of every unit the kind offers. */
+export interface RecruitmentSource extends RecruitmentStaffable {
   buildingLevel: number;
   /** floor(draft[id] ?? draftMax), clamped at 0. */
   ready: number;
@@ -62,15 +69,9 @@ export interface RecruitmentUnitRow {
   sources: RecruitmentSource[];
 }
 
-export interface RecruitmentBuildingRow {
+export interface RecruitmentBuildingRow extends RecruitmentStaffable {
   key: string;
-  gx: number;
-  gy: number;
-  district: { q: number; r: number } | null;
   level: number;
-  /** Explicit workers; undefined = legacy auto-staffing (effort 1). */
-  workers: number | undefined;
-  maxWorkers: number;
   /** This building's own ready total across the units it offers. */
   ready: number;
 }
@@ -194,6 +195,8 @@ export function recruitmentSnapshot(
         gy: building.gy,
         district,
         buildingLevel: building.level,
+        workers: building.workers,
+        maxWorkers: buildingMaxWorkers(building.kind),
         ready,
         draftMax,
         perDay,
@@ -293,7 +296,7 @@ export function recruitmentIdleWorkers(snapshot: RecruitmentSnapshotModel): numb
  * auto-crews the rest of the settlement) -- the workforce panel's rule.
  */
 export function recruitmentWorkerBase(
-  building: RecruitmentBuildingRow,
+  building: RecruitmentStaffable,
   snapshot: RecruitmentSnapshotModel,
 ): number {
   return snapshot.legacy ? 0 : (building.workers ?? building.maxWorkers);
@@ -301,7 +304,7 @@ export function recruitmentWorkerBase(
 
 /** Whether one more worker can be added from the idle pool. */
 export function recruitmentCanAddWorker(
-  building: RecruitmentBuildingRow,
+  building: RecruitmentStaffable,
   snapshot: RecruitmentSnapshotModel,
 ): boolean {
   return canAssignWorkers(
@@ -315,7 +318,7 @@ export function recruitmentCanAddWorker(
 
 /** Whether one worker can be taken off this building. */
 export function recruitmentCanRemoveWorker(
-  building: RecruitmentBuildingRow,
+  building: RecruitmentStaffable,
   snapshot: RecruitmentSnapshotModel,
 ): boolean {
   return recruitmentWorkerBase(building, snapshot) > 0;
@@ -323,12 +326,100 @@ export function recruitmentCanRemoveWorker(
 
 /** The count a stepper click commits (clamped to the building's own slots). */
 export function recruitmentWorkerTarget(
-  building: RecruitmentBuildingRow,
+  building: RecruitmentStaffable,
   snapshot: RecruitmentSnapshotModel,
   delta: 1 | -1,
 ): number {
   const base = recruitmentWorkerBase(building, snapshot);
   return delta > 0 ? Math.min(base + 1, building.maxWorkers) : Math.max(0, base - 1);
+}
+
+/** Aggregate staffing a unit row shows for every building that offers it. */
+export interface RecruitmentStaffingSummary {
+  /** Legacy auto-staffing: the row reads "Auto" until the first explicit count. */
+  auto: boolean;
+  /** Explicit workers summed across the sources (legacy reads as 0). */
+  workers: number;
+  /** Worker slots summed across the sources. */
+  maxWorkers: number;
+  /** Idle pool the bulk step may spend. */
+  idle: number;
+}
+
+/** The parent (unit) row's staffing readout: all sources at once. */
+export function recruitmentStaffing(
+  sources: RecruitmentStaffable[],
+  snapshot: RecruitmentSnapshotModel,
+): RecruitmentStaffingSummary {
+  return {
+    auto: snapshot.legacy,
+    workers: sources.reduce((sum, source) => sum + recruitmentWorkerBase(source, snapshot), 0),
+    maxWorkers: sources.reduce((sum, source) => sum + source.maxWorkers, 0),
+    idle: recruitmentIdleWorkers(snapshot),
+  };
+}
+
+/** Whether the parent row's `+` has anywhere to put a worker. */
+export function recruitmentCanStaffAny(
+  sources: RecruitmentStaffable[],
+  snapshot: RecruitmentSnapshotModel,
+): boolean {
+  return sources.some((source) => recruitmentCanAddWorker(source, snapshot));
+}
+
+/** Whether the parent row's `−` has a worker to take off. */
+export function recruitmentCanUnstaffAny(
+  sources: RecruitmentStaffable[],
+  snapshot: RecruitmentSnapshotModel,
+): boolean {
+  return sources.some((source) => recruitmentCanRemoveWorker(source, snapshot));
+}
+
+/** One commit a bulk worker step makes: a building and its new absolute count. */
+export interface RecruitmentWorkerStep {
+  gx: number;
+  gy: number;
+  district: { q: number; r: number } | null;
+  workers: number;
+}
+
+/**
+ * One bulk staffing click across every building a unit row draws from: `+1`
+ * assigns one worker to each source with a free slot, `-1` takes one off each
+ * staffed source. Emptiest first for `+`, fullest first for `-`, ties keeping
+ * the row's own (deterministic) source order; `+` stops when the idle pool runs
+ * out and `-` never goes below zero.
+ *
+ * A legacy-staffed settlement returns exactly ONE step: the first explicit
+ * count normalizes every building to an explicit crew, and the engine's own
+ * auto-crew then fills the settlement from the remaining pool -- so batching
+ * absolute counts from this snapshot would double-spend that auto-crew.
+ */
+export function allocateWorkerSteps(
+  sources: RecruitmentStaffable[],
+  snapshot: RecruitmentSnapshotModel,
+  delta: 1 | -1,
+): RecruitmentWorkerStep[] {
+  const order = sources
+    .map((source, index) => ({ source, index, base: recruitmentWorkerBase(source, snapshot) }))
+    .sort((a, b) => (delta > 0 ? a.base - b.base : b.base - a.base) || a.index - b.index);
+
+  const steps: RecruitmentWorkerStep[] = [];
+  let idle = recruitmentIdleWorkers(snapshot);
+  for (const { source, base } of order) {
+    if (delta > 0) {
+      if (idle <= 0) break;
+      if (base >= source.maxWorkers) continue;
+      const workers = snapshot.legacy ? 1 : base + 1;
+      steps.push({ gx: source.gx, gy: source.gy, district: source.district, workers });
+      if (snapshot.legacy) break;
+      idle -= 1;
+    } else {
+      if (base <= 0) continue;
+      steps.push({ gx: source.gx, gy: source.gy, district: source.district, workers: base - 1 });
+    }
+  }
+  return steps;
 }
 
 /** True when `count` of one row could be paid out of the treasury. */

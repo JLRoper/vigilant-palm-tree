@@ -6,16 +6,17 @@
 // Map seed defaults to a fresh random 31-bit int; the user can edit it.
 // "Your faction", "Number of human players", and "Number of AI enemies" are
 // small chip selectors (registry-driven / 1/2/3/4 / 0/1/2/3).
-// Map size stays a dropdown because we ship three named presets.
+// Map size stays a dropdown, driven by the engine's MAP_SIZE_ORDER ladder.
 
 import { styleButton } from "@screens/shared/menu";
 import type { FactionId } from "@heroes/contracts";
 import { seatFactionChoices } from "@screens/shared/factionChoices";
+import { MAP_SIZE_ORDER, mapSizeLabel, resolveMapSize, type MapSize } from "../../map/gameMap";
 
 export type NewGameFormValues = {
   name: string;
   seed: number;
-  mapSize: "small" | "medium" | "large" | "huge" | "epic";
+  mapSize: MapSize;
   playerCount: 1 | 2 | 3 | 4;
   enemyCount: 0 | 1 | 2 | 3;
   factionId: FactionId;
@@ -307,16 +308,10 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
     border: "1px solid rgba(201,162,39,0.45)",
     borderRadius: "3px",
   });
-  for (const s of [
-    { value: "small", label: "Small (24×18)" },
-    { value: "medium", label: "Medium (36×27)" },
-    { value: "large", label: "Large (48×36)" },
-    { value: "huge", label: "Huge (72×54)" },
-    { value: "epic", label: "Epic (120×90)" },
-  ]) {
+  for (const size of MAP_SIZE_ORDER) {
     const opt = document.createElement("option");
-    opt.value = s.value;
-    opt.textContent = s.label;
+    opt.value = size;
+    opt.textContent = mapSizeLabel(size);
     sizeSelect.appendChild(opt);
   }
   sizeSelect.value = "small";
@@ -425,7 +420,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
         return;
       }
     }
-    const mapSize = (sizeSelect.value || "small") as "small" | "medium" | "large" | "huge" | "epic";
+    const mapSize = resolveMapSize(sizeSelect.value);
     await opts.onCreate({
       name,
       seed,
