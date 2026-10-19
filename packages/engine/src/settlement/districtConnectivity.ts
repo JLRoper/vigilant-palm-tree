@@ -30,7 +30,16 @@ export const DISTRICT_GRID_SIZE = 5;
 export const SHIPYARD_KIND: BuildingKind = "shipyard";
 
 /** Terrain a district may not be placed on at all. */
-const FORBIDDEN_DISTRICT_TERRAIN = new Set(["mountain"]);
+const FORBIDDEN_DISTRICT_TERRAIN = new Set(["mountain", "denseForest"]);
+
+/**
+ * True for terrain a district may never occupy (mountain, dense forest). The
+ * city view's open gate and `districtTerrainProblem` share this one set, so the
+ * map's double-click and the server's refusal cannot disagree.
+ */
+export function isForbiddenDistrictTerrain(terrain: string | undefined): boolean {
+  return terrain !== undefined && FORBIDDEN_DISTRICT_TERRAIN.has(terrain);
+}
 
 export interface DistrictLike {
   q: number;
@@ -161,7 +170,7 @@ export function districtTerrainProblem(
   buildings: readonly BuildingDef[],
 ): string | null {
   if (terrain === undefined) return null;
-  if (FORBIDDEN_DISTRICT_TERRAIN.has(terrain)) return "impassable_district_terrain";
+  if (isForbiddenDistrictTerrain(terrain)) return "impassable_district_terrain";
   const hasShipyard = buildings.some((b) => b.kind === SHIPYARD_KIND);
   if (terrain === "water") return hasShipyard ? null : "impassable_district_terrain";
   return hasShipyard ? "shipyard_requires_water" : null;

@@ -386,6 +386,24 @@ export function paintTerrainDecoration(ctx: CanvasRenderingContext2D, node: Terr
     ctx.fill();
     ctx.fillStyle = "#5a3a1a";
     ctx.fillRect(cx + ox - 1.5, cy + oy + 5, 3, 4);
+  } else if (t === "denseForest") {
+    // Thicket: three close-set crowns over a near-black floor, so the
+    // impassable biome reads visibly denser than a plain forest tile.
+    ctx.fillStyle = "#06170c";
+    ctx.beginPath();
+    ctx.arc(cx + ox, cy + oy + 1, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#0e2413";
+    for (const [dx, dy, h] of [[-6, 1, 6], [5, -2, 7], [0, 6, 5]] as const) {
+      ctx.beginPath();
+      ctx.moveTo(cx + ox + dx, cy + oy + dy - h - 4);
+      ctx.lineTo(cx + ox + dx - h, cy + oy + dy + h);
+      ctx.lineTo(cx + ox + dx + h, cy + oy + dy + h);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = "#03100a";
+    ctx.fillRect(cx + ox - 2, cy + oy + 8, 4, 5);
   } else if (t === "water") {
     ctx.strokeStyle = "rgba(255,255,255,0.25)";
     ctx.lineWidth = 1.5;

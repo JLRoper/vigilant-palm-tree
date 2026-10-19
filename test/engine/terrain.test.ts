@@ -2,11 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   GameMap,
+  NEIGHBOR_DIRS,
   RESOURCE_DENSITY,
   TERRAIN_COLORS,
   TERRAIN_COST,
   foodBiasForTerrain,
   isPassable,
+  touchesTerrain,
 } from "@heroes/engine";
 
 const BASE_COSTS: Record<string, number> = {
@@ -59,4 +61,88 @@ test("RESOURCE_DENSITY pins the new biomes' exact values", () => {
 test("city food bias pins for the new biomes", () => {
   assert.equal(foodBiasForTerrain("swamp"), 0.15);
   assert.equal(foodBiasForTerrain("snow"), 0.02);
+});
+
+test("dense forest is an impassable, distinctly coloured biome", () => {
+  assert.equal(TERRAIN_COST.denseForest, Infinity, "dense forest cannot be walked through");
+  assert.equal(isPassable("denseForest"), false);
+  assert.equal(isPassable("forest"), true, "normal forest stays walkable");
+  assert.ok(TERRAIN_COLORS.denseForest.fill.length > 0, "dense forest fill is set");
+  assert.ok(TERRAIN_COLORS.denseForest.stroke.length > 0, "dense forest stroke is set");
+  assert.notEqual(
+    TERRAIN_COLORS.denseForest.fill,
+    TERRAIN_COLORS.forest.fill,
+    "dense forest must not paint as normal forest",
+  );
+});
+
+test("dense forest only appears from map-gen v4, and v4 only ADDS it", () => {
+  for (let seed = 1; seed <= 8; seed++) {
+    for (const version of [2, 3] as const) {
+      const tiles = new GameMap(seed, "small", version).tiles;
+      assert.equal(tiles.includes("denseForest"), false, `v${version} seed ${seed} carries no dense forest`);
+    }
+    const v3 = new GameMap(seed, "small", 3);
+    const v4 = new GameMap(seed, "small", 4);
+    assert.equal(v4.tiles.includes("denseForest"), true, `v4 seed ${seed} generated no dense forest`);
+    for (let i = 0; i < v3.tiles.length; i++) {
+      if (v3.tiles[i] === v4.tiles[i]) continue;
+      assert.equal(v4.tiles[i], "denseForest", "v4 differs from v3 only by adding dense forest");
+      assert.notEqual(v3.tiles[i], "forest", "the dense-forest pass never consumes normal forest");
+    }
+  }
+});
+
+test("dense forest is rarer than forest and clusters against the forest edge", () => {
+  let forest = 0;
+  let dense = 0;
+  let denseTouchingForest = 0;
+  let passable = 0;
+  let passableTouchingForest = 0;
+  const nonForestNeighbours = new Set<string>();
+
+  for (let seed = 1; seed <= 12; seed++) {
+    const map = new GameMap(seed, "large", 4);
+    for (let r = 0; r < map.height; r++) {
+      for (let q = 0; q < map.width; q++) {
+        const terrain = map.get(q, r)!;
+        const touchesForest = touchesTerrain(map, q, r, "forest");
+        if (terrain === "forest") {
+          forest++;
+        } else if (isPassable(terrain)) {
+          passable++;
+          if (touchesForest) passableTouchingForest++;
+        }
+        if (terrain !== "denseForest") continue;
+        dense++;
+        if (touchesForest) denseTouchingForest++;
+        for (const d of NEIGHBOR_DIRS) {
+          const neighbour = map.get(q + d.q, r + d.r);
+          if (neighbour && neighbour !== "forest" && neighbour !== "denseForest") {
+            nonForestNeighbours.add(neighbour);
+          }
+        }
+      }
+    }
+  }
+
+  assert.ok(dense > 0, "dense forest never generated across seeds 1..12");
+  assert.ok(dense < forest, `dense forest (${dense}) must stay rarer than forest (${forest})`);
+  const denseShare = denseTouchingForest / dense;
+  const baseShare = passableTouchingForest / passable;
+  assert.ok(denseShare > 0.5, `dense forest should mostly border forest, got ${denseShare.toFixed(3)}`);
+  assert.ok(
+    denseShare > baseShare * 1.5,
+    `dense forest must hug forest far more than a plain passable tile does (${denseShare.toFixed(3)} vs ${baseShare.toFixed(3)})`,
+  );
+  assert.ok(nonForestNeighbours.size >= 3, "dense forest still borders other biomes, not only forest");
+});
+
+test("dense forest never carries a resource tile", () => {
+  for (let seed = 1; seed <= 5; seed++) {
+    const map = new GameMap(seed, "large", 4);
+    for (const tile of map.placedResourceTiles) {
+      assert.notEqual(map.get(tile.q, tile.r), "denseForest", "an impassable tile cannot hold a deposit");
+    }
+  }
 });

@@ -21,6 +21,31 @@
 - Supports `small` (24×18), `medium` (36×27), `large` (48×36), `huge` (72×54), and `epic` (120×90) map sizes; `scaledTerrainBlobs(baseBlobs, width, height)` scales biome seed blob counts by $\sqrt{N/432}$ on maps larger than `24×18` (leaving `small` `24×18` unchanged), and `GameMap.placedResourceTiles` records the sparse list of placed resource deposits.
 - Coarse: no smooth coastlines, no elevation gradients. Forests are blobs, not density fields.
 
+## Dense forest pass (map-gen v4)
+
+`placeDenseForest` runs **after** every other terrain target, so the terrains
+generated before it are byte-identical to a v1–v3 map of the same seed; v4 only
+*adds* the new biome.
+
+- **Rarity:** `DENSE_FOREST_FRACTION = 0.06` of the map against forest's `0.15`.
+- **Placement:** every blob (`DENSE_FOREST_BLOBS = 3`, scaled by
+  `scaledTerrainBlobs`) is seeded on a non-forest neighbour of a randomly chosen
+  forest tile, so dense forest grows out of the forest edge instead of appearing
+  anywhere.
+- **Growth:** each step picks a random frontier tile, but with
+  `DENSE_FOREST_FOREST_BIAS = 0.75` it first tries up to 8 picks for one that
+  still touches normal forest. The remaining quarter grows freely, which is what
+  keeps the biome a blob rather than a one-tile ring.
+- **Never consumes forest, water or mountain** (`DENSE_FOREST_BLOCKED`), so the
+  two forests coexist — that adjacency is what the district city grid's bonus
+  wood spot keys off ([settlements.md](./settlements.md#city-districts)).
+- Measured over seeds 1–20: on a large map dense forest is ~40% as common as
+  forest and ~66% of its tiles touch forest (against ~26% for a plain passable
+  tile); on a small map ~36% as common and ~80% touch forest. Its outer rim still
+  borders 5+ other biomes.
+- Impassable (`TERRAIN_COST.denseForest = Infinity`) and excluded from resource
+  placement like water and mountain.
+
 ## Alternatives, ranked by complexity
 
 ### 1. Biome regions (simplest upgrade)

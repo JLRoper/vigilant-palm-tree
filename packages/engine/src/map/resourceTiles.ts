@@ -47,7 +47,7 @@ export function placeResourceTiles(
   for (let r = 0; r < map.height; r++) {
     for (let q = 0; q < map.width; q++) {
       const terrain = map.get(q, r);
-      if (!terrain || terrain === "water" || terrain === "mountain") continue;
+      if (!terrain || terrain === "water" || terrain === "mountain" || terrain === "denseForest") continue;
       const densities: Record<ResourceType, number> = { ...(RESOURCE_DENSITY[terrain] ?? { gold: 0, wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 }) };
       if (isAdjacentToMountain(map, q, r)) {
         densities.stone = Math.min(STONE_BORDER_CAP, densities.stone * (1 + MOUNTAIN_BORDER_BOOST));

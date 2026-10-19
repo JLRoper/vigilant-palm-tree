@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { pool, withTransaction } from "./db";
 import {
+  CURRENT_MAP_GEN_VERSION,
   FACTION_REGISTRY,
   GameMap,
   getOrCreateGameMap,
@@ -23,6 +24,11 @@ import type {
   TradeRouteState,
 } from "@heroes/contracts";
 import type { PoolClient } from "pg";
+
+// The map generation version every NEW game is created with -- one constant,
+// shared with the client so the map a game is built on is the map a reload
+// regenerates.
+const NEW_GAME_MAP_GEN_VERSION: MapGenVersion = CURRENT_MAP_GEN_VERSION;
 // Canonical games column list, imported from gameRepo (the single source).
 // The local copy that used to live here omitted trade_routes,
 // next_charter_id and next_settlement_id once the repo's list grew them --
@@ -122,7 +128,7 @@ export interface LobbyState {
   // legacyAutoTrade. Written on every new game (explicit boolean), read by
   // server/app/commandHandler.ts to gate per-command reveal merging.
   uncharted?: boolean;
-  mapGenVersion?: 1 | 2 | 3;
+  mapGenVersion?: 1 | 2 | 3 | 4;
 }
 
 export async function generateAndInsertTiles(
@@ -419,7 +425,7 @@ router.post("/games", async (req, res) => {
     }
     const storedMapSize = ["small", "medium", "large", "huge", "epic"].includes(mapSize) ? mapSize : "small";
     console.log(`[api] POST /games name=${name} hero=(${hero_q},${hero_r}) mapSize=${storedMapSize}`);
-    const map = getOrCreateGameMap(seed, storedMapSize as MapSize, 3);
+    const map = getOrCreateGameMap(seed, storedMapSize as MapSize, NEW_GAME_MAP_GEN_VERSION);
     const topHumanSlots = Number.isInteger(humanSlots) ? (humanSlots as number) : null;
     const lobbyObj = lobby && typeof lobby === "object" ? lobby : null;
     const lobbyHumanSlots =
@@ -477,7 +483,7 @@ router.post("/games", async (req, res) => {
       // body of `legacyAutoTrade: true` opts a new game back into the legacy
       // behaviour. Non-boolean junk reads as the default (false).
       legacyAutoTrade: legacyAutoTradeOptIn === true,
-      mapGenVersion: 3,
+      mapGenVersion: NEW_GAME_MAP_GEN_VERSION,
       uncharted: uncharted === true,
     };
     const explicitSeats =
@@ -487,7 +493,13 @@ router.post("/games", async (req, res) => {
       // The uncharted flag rides the same lobby jsonb as legacyAutoTrade; this
       // rebuild (humanSlots path) must carry it or a humanSlots game's flag
       // would be silently dropped on the way to the insert.
-      lobbyState = { seats, humanSlots: humanCount, claimed: {}, mapGenVersion: 3, uncharted: uncharted === true };
+      lobbyState = {
+        seats,
+        humanSlots: humanCount,
+        claimed: {},
+        mapGenVersion: NEW_GAME_MAP_GEN_VERSION,
+        uncharted: uncharted === true,
+      };
     }
     if (lobbyState.humanSlots !== undefined && lobbyState.humanSlots < 1) {
       res.status(400).json({ error: "humanSlots must be >= 1" });
@@ -546,7 +558,15 @@ router.post("/games", async (req, res) => {
         ]
       );
     const row = r.rows[0];
-    await generateAndInsertTiles(client, row.id, row.seed, "upsert", storedMapSize as MapSize, map, 3);
+    await generateAndInsertTiles(
+      client,
+      row.id,
+      row.seed,
+      "upsert",
+      storedMapSize as MapSize,
+      map,
+      NEW_GAME_MAP_GEN_VERSION,
+    );
     return row;
   });
   // The recreation (ON CONFLICT (name)) may have flipped the aiDriver flag;

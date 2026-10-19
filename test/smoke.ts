@@ -24,7 +24,7 @@ import {
   clearRegisteredPids,
 } from "./_request";
 
-const TERRAINS = new Set(["grass", "dirt", "forest", "desert", "mountain", "water", "swamp", "snow"]);
+const TERRAINS = new Set(["grass", "dirt", "forest", "denseForest", "desert", "mountain", "water", "swamp", "snow"]);
 const RESOURCE_SET = new Set(["gold", "wood", "stone", "iron", "arcane"]);
 
 const WEB_PORT = getClientPort(4173);

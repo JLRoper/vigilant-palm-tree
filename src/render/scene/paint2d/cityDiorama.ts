@@ -21,7 +21,7 @@ const TIER_PROFILES: Record<CityViewSize, TierProfile> = {
 function tierProfile(size?: CityViewSize): TierProfile {
   return TIER_PROFILES[size ?? 5];
 }
-const TERRAINS: readonly Terrain[] = ["grass", "dirt", "water", "forest", "desert", "mountain", "swamp", "snow"];
+const TERRAINS: readonly Terrain[] = ["grass", "dirt", "water", "forest", "denseForest", "desert", "mountain", "swamp", "snow"];
 
 function clamp(v: number, min: number, max: number): number {
   return v < min ? min : v > max ? max : v;
@@ -104,6 +104,7 @@ const PALETTES: Record<Terrain, BiomePalette> = {
   dirt: derive("dirt"),
   water: derive("water"),
   forest: derive("forest"),
+  denseForest: derive("denseForest"),
   desert: derive("desert"),
   mountain: derive("mountain"),
   swamp: derive("swamp"),
@@ -744,6 +745,7 @@ function drawPath(ctx: CanvasRenderingContext2D, path: PathSpec, env: DioramaEnv
 const BLOB_SIZE: Record<Terrain, readonly [number, number]> = {
   water: [58, 96],
   forest: [96, 150],
+  denseForest: [104, 158],
   mountain: [82, 122],
   desert: [92, 142],
   swamp: [86, 126],
@@ -1440,6 +1442,7 @@ type PropPainter = (ctx: CanvasRenderingContext2D, blob: Blob, env: DioramaEnv, 
 const PROP_PAINTERS: Record<Terrain, PropPainter> = {
   water: drawWaterProps,
   forest: drawForestProps,
+  denseForest: drawForestProps,
   mountain: drawMountainProps,
   desert: drawDesertProps,
   swamp: drawSwampProps,

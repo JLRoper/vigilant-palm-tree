@@ -112,12 +112,25 @@ export function generateCitySpots(
   return { spots, mines };
 }
 
+/**
+ * The extra spot a normal forest hex gains when it touches a dense forest: one
+ * more woodcutting resource on top of the spots that hex already rolls, so the
+ * hex's city grid carries 4 spots instead of 3.
+ */
+export const DENSE_FOREST_BONUS_SPOT: ResourceType = "wood";
+
+export interface GenerateDistrictSpotsOptions {
+  /** True when a `forest` hex touches a `denseForest` hex (see touchesTerrain). */
+  touchesDenseForest?: boolean;
+}
+
 export function generateDistrictSpots(
   q: number,
   r: number,
   mapSeed: number,
   terrain?: string,
   mapResource?: ResourceType | null,
+  opts?: GenerateDistrictSpotsOptions,
 ): CitySpot[] {
   const rng = mulberry32(hashString(`district:${mapSeed}:${q}:${r}`));
   const size = 5;
@@ -154,6 +167,30 @@ export function generateDistrictSpots(
         ? mapResource
         : pickSpotResource(rng(), foodBias);
     spots.push({ cell: { x: gx, y: gy }, resource, vein: "rich" });
+  }
+
+  if (terrain === "forest" && opts?.touchesDenseForest === true) {
+    let gx = Math.floor(rng() * size);
+    let gy = Math.floor(rng() * size);
+    let attempts = 0;
+    while (used.has(`${gx},${gy}`) && attempts < 100) {
+      gx = Math.floor(rng() * size);
+      gy = Math.floor(rng() * size);
+      attempts++;
+    }
+    if (used.has(`${gx},${gy}`)) {
+      for (let y = 0; y < size && used.has(`${gx},${gy}`); y++) {
+        for (let x = 0; x < size; x++) {
+          if (!used.has(`${x},${y}`)) {
+            gx = x;
+            gy = y;
+            break;
+          }
+        }
+      }
+    }
+    used.add(`${gx},${gy}`);
+    spots.push({ cell: { x: gx, y: gy }, resource: DENSE_FOREST_BONUS_SPOT, vein: "dense" });
   }
 
   return spots;
