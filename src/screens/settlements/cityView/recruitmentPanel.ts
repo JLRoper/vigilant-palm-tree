@@ -35,6 +35,14 @@ export interface RecruitmentRequest {
   count: number;
 }
 
+/** A row click: open this building's own menu (the iso-grid click's menu). */
+export interface RecruitmentBuildingOpenRequest {
+  buildingKind: BuildingKind;
+  gx: number;
+  gy: number;
+  district: { q: number; r: number } | null;
+}
+
 export interface RecruitmentPanelOptions {
   parent: HTMLElement;
   cityView: CityView;
@@ -46,6 +54,8 @@ export interface RecruitmentPanelOptions {
   onTransfer?: (req: GarrisonTransferRequest) => boolean;
   onReorderGarrison?: (settlementId: string, fromIdx: number, toIdx: number) => boolean;
   onReorderHero?: (heroId: string, fromIdx: number, toIdx: number) => boolean;
+  /** A building row was clicked: open that building's own menu. */
+  onOpenBuilding?: (req: RecruitmentBuildingOpenRequest) => boolean;
 }
 
 const PANEL_GEOMETRY_KEY: PanelGeometryKey = "recruitmentPanel";
@@ -98,6 +108,7 @@ export class RecruitmentPanel {
   private readonly parent: HTMLElement;
   private readonly cityView: CityView;
   private readonly onRecruit: (req: RecruitmentRequest) => boolean;
+  private readonly onOpenBuilding?: (req: RecruitmentBuildingOpenRequest) => boolean;
   private readonly getGameState?: () => GameState | undefined;
   private readonly garrisonView: GarrisonView;
   private readonly garrisonAccordion: AccordionSection;
@@ -106,6 +117,7 @@ export class RecruitmentPanel {
     this.parent = opts.parent;
     this.cityView = opts.cityView;
     this.onRecruit = opts.onRecruit;
+    this.onOpenBuilding = opts.onOpenBuilding;
     this.getGameState = opts.getGameState;
 
     this.garrisonView = new GarrisonView({
@@ -309,6 +321,12 @@ export class RecruitmentPanel {
     if (group.buildings.length === 1) {
       for (const node of this.workerStepper(group.buildings[0], group.label, model)) header.appendChild(node);
     }
+    // One building of this kind: the header IS that building's row, so it opens
+    // its menu. Several: each gets its own line below (labelled by location, so
+    // the kind name is never repeated) and the header stays a pure heading.
+    if (group.buildings.length === 1) {
+      this.makeBuildingTarget(header, group.buildings[0], group.kind);
+    }
     block.appendChild(header);
 
     for (const unit of group.units) {
@@ -317,7 +335,7 @@ export class RecruitmentPanel {
 
     if (group.buildings.length > 1) {
       for (const building of group.buildings) {
-        block.appendChild(this.buildingLine(building, model));
+        block.appendChild(this.buildingLine(building, model, group.kind));
       }
     }
     return block;
@@ -334,7 +352,7 @@ export class RecruitmentPanel {
   }
 
   /** One building's own line: where it is, then its worker stepper. */
-  private buildingLine(building: RecruitmentBuildingRow, model: RecruitmentSnapshotModel): HTMLDivElement {
+  private buildingLine(building: RecruitmentBuildingRow, model: RecruitmentSnapshotModel, kind: BuildingKind): HTMLDivElement {
     const line = document.createElement("div");
     Object.assign(line.style, {
       display: "flex",
@@ -360,15 +378,38 @@ export class RecruitmentPanel {
       textOverflow: "ellipsis",
     });
     line.appendChild(where);
-    where.addEventListener("mouseenter", () =>
-      this.cityView.previewWorkforceBuilding(building.gx, building.gy, building.district),
-    );
-    where.addEventListener("mouseleave", () => this.cityView.clearWorkforcePreview());
 
     for (const node of this.workerStepper(building, building.district ? "district building" : "main-city building", model)) {
       line.appendChild(node);
     }
+    this.makeBuildingTarget(line, building, kind);
     return line;
+  }
+
+  /**
+   * A row that opens one building's own menu -- the very menu an iso-grid click
+   * on that cell opens, placed at the building, with the building ringed while
+   * the menu is up. Clicks that land on a button (steppers, Buy all, +) keep
+   * their own meaning, and hovering the row rings the building on the grid.
+   */
+  private makeBuildingTarget(el: HTMLElement, building: RecruitmentBuildingRow, kind: BuildingKind): void {
+    el.style.cursor = "pointer";
+    const hint = `Open this ${kind} (its own menu: workers, draft pool, upgrades)`;
+    el.title = el.title ? `${el.title} — ${hint}` : hint;
+    el.addEventListener("mouseenter", () =>
+      this.cityView.previewWorkforceBuilding(building.gx, building.gy, building.district),
+    );
+    el.addEventListener("mouseleave", () => this.cityView.clearWorkforcePreview());
+    el.addEventListener("click", (e) => {
+      if (!this.onOpenBuilding) return;
+      if ((e.target as HTMLElement | null)?.closest("button")) return;
+      this.onOpenBuilding({
+        buildingKind: kind,
+        gx: building.gx,
+        gy: building.gy,
+        district: building.district,
+      });
+    });
   }
 
   /**

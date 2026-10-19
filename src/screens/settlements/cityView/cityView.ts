@@ -156,6 +156,9 @@ export class CityView {
   /** Panel-row hover highlight. Kept separate from `hover`: `hover` is the real
    * canvas pointer cell (Delete acts on it), while this is a pure preview. */
   private previewHover: { gx: number; gy: number } | null = null;
+  /** The building a panel row click just opened the menu for: ringed until that
+   * menu closes, so "which one did I just click" is answerable at a glance. */
+  private menuHighlight: { gx: number; gy: number } | null = null;
 
   constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null, district?: { q: number; r: number }) => boolean; onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean, district?: { q: number; r: number }) => boolean; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[], district?: { q: number; r: number }) => { ok: boolean; reason: string }; getSelection?: () => CitySelectionSnapshot; getFloatingPanelRects?: () => Array<PanelRect | null> }) {
     this.paint2d = createPaint2DDep({
@@ -166,6 +169,7 @@ export class CityView {
     this.buildingMenu = new BuildingMenu({
       onRecruitUnits: opts.onRecruitUnits,
       isUnitRecruitable: opts.isUnitRecruitable,
+      onMenuClosed: () => { this.menuHighlight = null; },
       onUpgradeTownHall: opts.onUpgradeTownHall,
       onUpgradeBuilding: (building) => {
         const settlement = this.getSettlement();
@@ -291,6 +295,7 @@ export class CityView {
     this.mapSeed = mapSeed ?? null;
     this.hover = null;
     this.previewHover = null;
+    this.menuHighlight = null;
     this.workerDrag = null;
     this.selectedKeys.clear();
     this.selectionAnchor = null;
@@ -364,20 +369,22 @@ export class CityView {
 
     const ghost = this.placer.ghostSnapshot();
     const s = settings();
-    // A panel-row hover rings its building (the cell stroke alone sits under
-    // the sprite). The drag source itself is intentionally NOT ringed: the
-    // ghost under the pointer is the pickup feedback.
-    const previewBuilding = this.previewHover
-      ? this.liveBuildings().find((b) => coversCell(b, this.previewHover!.gx, this.previewHover!.gy))
+    // A panel-row hover rings its building, and so does the building a row
+    // click opened the menu for (the cell stroke alone sits under the sprite).
+    // The drag source itself is intentionally NOT ringed: the ghost under the
+    // pointer is the pickup feedback.
+    const ringed = this.previewHover ?? this.menuHighlight;
+    const ringedBuilding = ringed
+      ? this.liveBuildings().find((b) => coversCell(b, ringed.gx, ringed.gy))
       : null;
     const sceneSelected = new Set(this.selectedKeys);
-    if (previewBuilding) sceneSelected.add(`${previewBuilding.gx},${previewBuilding.gy},${previewBuilding.kind}`);
+    if (ringedBuilding) sceneSelected.add(`${ringedBuilding.gx},${ringedBuilding.gy},${ringedBuilding.kind}`);
     const nodes = buildCityScene({
       viewportW,
       viewportH,
       settlementName: this.settlementName,
       size: this.size,
-      hover: this.previewHover ?? this.hover,
+      hover: this.previewHover ?? this.menuHighlight ?? this.hover,
       ownerColor: this.ownerColor,
       citySpots: this.citySpots,
       cityMines: this.cityMines,
@@ -489,6 +496,19 @@ export class CityView {
     if (this.selectedKeys.size > 0) {
       this.clearSelection();
     }
+    // A grid click owns the ring: drop whatever a panel row left behind.
+    this.menuHighlight = null;
+    this.showBuildingMenuFor(building);
+  }
+
+  /**
+   * The building's own menu, positioned at its footprint on the grid currently
+   * displayed. Shared by the iso-grid click and by a recruitment-panel row
+   * click, so the two doors cannot disagree about content, staffing merge or
+   * placement.
+   */
+  private showBuildingMenuFor(building: BuildingDef): void {
+    const layout = cityLayout(this.size, window.innerWidth, window.innerHeight, toolbarHeight());
     const w = building.w ?? 1;
     const h = building.h ?? 1;
     const fp = buildingFootprint(building.gx, building.gy, layout.gridOrigin, layout.screenOrigin, layout.tileScale, w, h);
@@ -515,6 +535,22 @@ export class CityView {
       menuBuilding.construction?.daysRemaining,
       this.workforceMenuOptions(menuBuilding),
     );
+  }
+
+  /**
+   * Opens one building's own menu exactly as if its cell had been clicked on
+   * the grid, and rings that building until the menu closes. The building must
+   * be part of the grid this view is showing -- switch context first
+   * (`onEnterCityContext` in UIManager) when the caller's row lives in another
+   * district. Returns false when it is not on screen.
+   */
+  openBuildingMenu(kind: BuildingKind, gx: number, gy: number): boolean {
+    if (!this.isOpen()) return false;
+    const building = this.liveBuildings().find((b) => b.kind === kind && coversCell(b, gx, gy));
+    if (!building) return false;
+    this.showBuildingMenuFor(building);
+    this.menuHighlight = { gx: building.gx, gy: building.gy };
+    return true;
   }
 
   private cellOutputFor(building: BuildingDef): ProducerOutput | null {
@@ -1084,6 +1120,7 @@ export class CityView {
       this.openDistrict = null;
       this.hover = null;
       this.previewHover = null;
+      this.menuHighlight = null;
       this.workerDrag = null;
       this.onClose(id, finalBuildings, this.pendingNetDelta(), true, this.preCitySelection, dist);
       return id;

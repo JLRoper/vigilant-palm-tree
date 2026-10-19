@@ -28,7 +28,7 @@ import { SessionManager } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
 import type { MapInfo } from "@screens/home/settingsMenu";
-import type { DistrictState, FactionId } from "@heroes/contracts";
+import type { DistrictState, FactionId, BuildingKind } from "@heroes/contracts";
 
 type ToolbarCallbacks = {
   onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: "small" | "medium" | "large" | "huge" | "epic"; enemyCount?: number; factionId?: FactionId }) => void;
@@ -48,10 +48,26 @@ type ToolbarCallbacks = {
 export type SettlementInfoCallbacks = {
   onEnterCityView?: (settlementId: string) => void;
   canEnterCityView?: (settlementId: string) => boolean;
+  /** The engine's city/district doors as one entry: resolves true when that grid
+   * is the one now displayed. `district: null` means the settlement's own city. */
+  onEnterCityContext?: (
+    settlementId: string,
+    district: { q: number; r: number } | null,
+  ) => Promise<boolean> | boolean;
 };
 
 const stateIdentityIds = new WeakMap<GameState, number>();
 let nextStateIdentityId = 1;
+
+/** District identity for "is this the grid the city view is showing" checks:
+ *  both sides null (the settlement's own city), or the same hex. */
+function sameCityContext(
+  a: { q: number; r: number } | null | undefined,
+  b: { q: number; r: number } | null,
+): boolean {
+  if (!a || !b) return !a && !b;
+  return a.q === b.q && a.r === b.r;
+}
 
 function getStateIdentityId(state: GameState): number {
   let id = stateIdentityIds.get(state);
@@ -79,6 +95,7 @@ export class UIManager {
   private workforcePanelPromise: Promise<WorkforcePanel> | null = null;
   private recruitmentPanel?: RecruitmentPanel;
   private recruitmentPanelPromise: Promise<RecruitmentPanel> | null = null;
+  private settlementInfoCallbacks: SettlementInfoCallbacks = {};
   private gameStateManager?: GameStateManager;
   private viewManager?: ViewManager;
   private lastMapWidth = -1;
@@ -178,6 +195,7 @@ export class UIManager {
   }
 
   initSettlementInfo(callbacks: SettlementInfoCallbacks = {}): void {
+    this.settlementInfoCallbacks = callbacks;
     this.settlementInfoMenu = new SettlementInfoMenu({
       parent: document.body,
       onClose: () => {
@@ -561,6 +579,10 @@ export class UIManager {
           onReorderGarrison: (settlementId, fromIdx, toIdx) =>
             this.reorderGarrisonFor(settlementId, fromIdx, toIdx),
           onReorderHero: (heroId, fromIdx, toIdx) => this.reorderHeroStackFor(heroId, fromIdx, toIdx),
+          onOpenBuilding: (req) => {
+            void this.revealRecruitBuilding(req);
+            return true;
+          },
         });
         this.recruitmentPanel = panel;
         return panel;
@@ -570,6 +592,31 @@ export class UIManager {
       });
     }
     return this.recruitmentPanelPromise;
+  }
+
+  /**
+   * Recruitment panel building row -> that building's own menu, exactly as if
+   * its cell had been clicked on the city grid (same menu, same placement at
+   * the building, plus a ring on it until the menu closes). A row whose building
+   * lives in a district the view is not showing switches context first, through
+   * the engine's own district door, so the two doors cannot diverge.
+   */
+  private async revealRecruitBuilding(req: {
+    buildingKind: BuildingKind;
+    gx: number;
+    gy: number;
+    district: { q: number; r: number } | null;
+  }): Promise<boolean> {
+    const view = this.cityView;
+    const openId = view?.getOpenSettlementId();
+    if (!view || !openId) return false;
+    if (!sameCityContext(view.getOpenDistrict(), req.district)) {
+      const enter = this.settlementInfoCallbacks.onEnterCityContext;
+      if (!enter) return false;
+      const entered = await enter(openId, req.district);
+      if (!entered) return false;
+    }
+    return this.cityView?.openBuildingMenu(req.buildingKind, req.gx, req.gy) ?? false;
   }
 
   /** The hero standing on a settlement's tile (the shared garrison view's input). */

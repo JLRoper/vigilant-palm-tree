@@ -14,6 +14,8 @@ the version has not already been bumped in that changeset.
 
 feat(recruitment): consolidated recruitment panel with a shared drag-and-drop garrison grid
 
+Clicking a building's row in the recruitment panel (anywhere but its buttons) opens that building's own menu — the same one an iso-grid click opens, placed at the building and ringing it until the menu closes; a row in another district switches the city view there first through the engine's own district door.
+
 ## [0.14.0] - 2026-10-19
 
 - Settlement panel: the settlement's own name and tier now render at the top (the name was written into the level badge and immediately overwritten, so it never appeared).
