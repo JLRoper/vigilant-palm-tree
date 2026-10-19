@@ -78,6 +78,9 @@ The `/precommit` and `/pre-pr` slash commands are manual equivalents you can off
 - `/precommit` — run the build + deps + docs + test gate on demand.
 - `/pre-pr` — same as `/precommit`, plus a quick doc sanity sweep.
 
+## Claude Code agents (`.claude/agents/`)
+- `playtester` — plays the game through the browser against this worktree's local dev env, cross-checks `window.__gameDebug` state and the event log, and writes a findings report to `reviews/playtests/<date>-<focus>.md`. Give it a focus and optional turn budget. It refuses to run when `.env` points `PGHOST` at the gameserver, never deletes games, and never edits code.
+
 ## Standard workflow (shape reminder)
 
 **Trigger:** when the user asks "what's the standard workflow here?", "what's the workflow?", "what's the agent workspace flow?", or how to structure multi-agent work in this repo — present the shape below verbatim (or point at `/workflow`), and note kwork is legacy-only.

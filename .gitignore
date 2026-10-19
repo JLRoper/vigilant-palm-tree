@@ -10,7 +10,8 @@ kilo.json
 tmp/
 local/
 sessionTracking/
-.claude/
+.claude/*
+!.claude/agents/
 .kilo/worktrees/
 .kilo/plans/
 .plans/
