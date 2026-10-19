@@ -1,4 +1,5 @@
 import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
+import type { MapSize } from "../../map/gameMap";
 import {
   settings,
   updateSettings,
@@ -59,7 +60,7 @@ function labelFor(ms: number): string {
 export interface MapInfo {
   name: string;
   seed: number;
-  mapSize: "small" | "medium" | "large" | "huge" | "epic";
+  mapSize: MapSize;
   width: number;
   height: number;
   castleSeed: number;

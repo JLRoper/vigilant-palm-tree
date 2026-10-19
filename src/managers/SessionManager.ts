@@ -2,6 +2,7 @@ import { api, type Game, type TileRow } from "../io/api";
 import { rememberGame, listUserGames } from "../io/userGames";
 import { getLastPersistedAt } from "../io/commands";
 import type { TurnController } from "../state/turnController";
+import type { MapSize } from "../map/gameMap";
 import type { FactionId } from "@heroes/contracts";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -81,7 +82,7 @@ export class SessionManager {
     return { savedAt };
   }
 
-  async createGame(name: string, seed: number, heroQ: number, heroR: number, enemyPositions: { q: number; r: number }[], mapSize?: "small" | "medium" | "large" | "huge" | "epic", humanSeatCount?: number, enemySlots: number = 0, seatFactions?: FactionId[], uncharted?: boolean): Promise<Game> {
+  async createGame(name: string, seed: number, heroQ: number, heroR: number, enemyPositions: { q: number; r: number }[], mapSize?: MapSize, humanSeatCount?: number, enemySlots: number = 0, seatFactions?: FactionId[], uncharted?: boolean): Promise<Game> {
     return await api.createGame(name, seed, heroQ, heroR, enemyPositions, mapSize, humanSeatCount, enemySlots, seatFactions, uncharted);
   }
 

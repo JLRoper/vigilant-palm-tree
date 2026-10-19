@@ -2,13 +2,14 @@ import { CASTLE_COUNT_MAX } from "../../map/castlePlacement";
 import { menuTheme, openCenteredModal, styleButton, styleInput } from "./menu";
 import type { FactionId } from "@heroes/contracts";
 import { seatFactionChoices } from "./factionChoices";
+import { MAP_SIZE_ORDER, mapSizeLabel, resolveMapSize, type MapSize } from "../../map/gameMap";
 
 export type NewGameHandler = (opts: {
   name: string;
   seed: number;
   castleSeed?: number;
   castleCount?: number;
-  mapSize?: "small" | "medium" | "large" | "huge" | "epic";
+  mapSize?: MapSize;
   enemyCount?: 0 | 1 | 2 | 3;
   factionId?: FactionId;
   uncharted?: boolean;
@@ -96,17 +97,10 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
   sizeSelect.style.borderRadius = "4px";
   sizeSelect.style.backgroundColor = "#1a1a1a";
   sizeSelect.style.color = "#eee";
-  const sizes: Array<{ value: string; label: string }> = [
-    { value: "small", label: "Small (24x18)" },
-    { value: "medium", label: "Medium (36x27)" },
-    { value: "large", label: "Large (48x36)" },
-    { value: "huge", label: "Huge (72x54)" },
-    { value: "epic", label: "Epic (120x90)" },
-  ];
-  for (const s of sizes) {
+  for (const size of MAP_SIZE_ORDER) {
     const opt = document.createElement("option");
-    opt.value = s.value;
-    opt.textContent = s.label;
+    opt.value = size;
+    opt.textContent = mapSizeLabel(size);
     sizeSelect.appendChild(opt);
   }
   sizeSelect.value = "small";
@@ -298,7 +292,7 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
       return;
     }
     const castleCount = Math.max(2, Math.min(CASTLE_COUNT_MAX, Math.floor(castleCountRaw)));
-    const mapSize = (sizeSelect.value || "small") as "small" | "medium" | "large" | "huge" | "epic";
+    const mapSize = resolveMapSize(sizeSelect.value);
     confirm.disabled = true;
     cancel.disabled = true;
     errorLine.textContent = "Creating…";
