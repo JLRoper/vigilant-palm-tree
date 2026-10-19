@@ -57,6 +57,46 @@ test("computeVision and computeVisionFromState memoize VisionSet until hero/cast
   assert.notEqual(sv3, sv1, "moved hero in state invalidates computeVisionFromState cache");
 });
 
+test("caravans contribute a 2-tile vision ring for their owner only", () => {
+  const caravan = { q: 10, r: 10, ownerId: 0 };
+
+  const own = computeVision([], [], 0, 4, [caravan]);
+  assert.equal(isVisible(own, 10, 12), true, "2 tiles away is inside the wagon's ring");
+  assert.equal(isVisible(own, 12, 10), true, "the other axis is symmetric");
+  assert.equal(isVisible(own, 10, 13), false, "3 tiles away is outside the wagon's ring");
+
+  const enemySeat = computeVision([], [], 0, 4, [{ ...caravan, ownerId: 1 }]);
+  assert.equal(isVisible(enemySeat, 10, 11), false, "another seat's wagon reveals nothing to this one");
+
+  const moved = computeVision([], [], 0, 4, [{ ...caravan, q: 14, r: 10 }]);
+  assert.equal(isVisible(moved, 10, 10), false, "a moved wagon invalidates the memoized set");
+  assert.equal(isVisible(moved, 14, 11), true);
+});
+
+test("computeVisionFromState resolves caravan rings from live trade routes", () => {
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 0, 0), makeHero("ai-h", 1, 30, 30)],
+    settlements: [makeSettlement("s0", 0, 10, 10, { level: 1 }), makeSettlement("s1", 1, 30, 30)],
+    tradeRoutes: [{
+      id: "r0",
+      from: { kind: "settlement", id: "s0" },
+      to: { kind: "settlement", id: "s1" },
+      payload: { kind: "resource", resource: "wood" },
+      wagons: 2,
+      caravan: {
+        phase: "toDestination",
+        cargo: 50,
+        path: [{ q: 12, r: 10 }, { q: 13, r: 10 }, { q: 14, r: 10 }, { q: 15, r: 10 }],
+        pathIndex: 4,
+      },
+    }],
+  });
+
+  const visible = computeVisionFromState(state, 0);
+  assert.equal(isVisible(visible, 15, 12), true, "the wagon at (15,10) sees two tiles out");
+  assert.equal(isVisible(visible, 15, 13), false, "its ring is smaller than a hero's four");
+});
+
 test("VisionSet.hasCoords and isVisible agree with Set.has across positive, negative, and out-of-grid coordinates", () => {
   const heroAtOrigin = new Hero("h0", "Hero", 0, 0, "player", 0);
   const vis = computeVision([heroAtOrigin], [], 0, 4);

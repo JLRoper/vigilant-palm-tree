@@ -23,6 +23,9 @@ import { openCharterModal } from "./charterModal";
 import { showToast } from "../shared/toast";
 import type { PathCostReadout } from "../shared/hud";
 import { computeReachableSplitDetailed } from "../../render/overlays/pathOverlay";
+import { caravanAtWorldPoint } from "../../render/caravanMarkers";
+import type { CaravanMarkerSpec } from "../../render/renderTypes";
+import type { TradeRouteId } from "@heroes/contracts";
 
 export const MAP_SEED = 42;
 
@@ -55,6 +58,8 @@ export interface AdventureViewOptions {
   onTileInspect?: (tile: Axial | null) => void;
   isCityOpen?: () => boolean;
   getLocalSeat?: () => PlayerId | null;
+  /** Live caravan marker specs (visual-tracker positions) for pointer hit-testing. */
+  getCaravans?: () => readonly CaravanMarkerSpec[];
 }
 
 function hoverChanged(a: Axial | null, b: Axial | null): boolean {
@@ -111,6 +116,7 @@ export class AdventureView {
   pathCostReadout: PathCostReadout | null = null;
 
   private inspectedTile: Axial | null = null;
+  private hoveredCaravanId: TradeRouteId | null = null;
 
   private drag = new DragTracker();
   private minimapDrag = new DragTracker();
@@ -383,6 +389,7 @@ export class AdventureView {
 
   private onMouseMove(e: MouseEvent): void {
     if (this.opts.isCityOpen?.()) {
+      this.clearCaravanHover();
       if (this.hover) {
         this.hover = null;
         this.updatePath();
@@ -419,6 +426,7 @@ export class AdventureView {
 
     if (isPointInMinimap(e.clientX, e.clientY, getMinimapGeometry(this.opts.map))) {
       this.pendingPointer = null;
+      this.clearCaravanHover();
       if (this.hover) {
         this.hover = null;
         this.updatePath();
@@ -441,6 +449,17 @@ export class AdventureView {
     const { x, y } = this.pendingPointer;
     this.pendingPointer = null;
 
+    // Caravan hover is pixel-based (the sprite is taller than its hex and can
+    // be mid-tween), so it is resolved before the tile-level early return.
+    const camera = this.opts.camera;
+    const world = { x: (x - camera.x) / camera.zoom, y: (y - camera.y) / camera.zoom };
+    const caravans = this.opts.getCaravans?.() ?? [];
+    const nextCaravan = caravanAtWorldPoint(caravans, world);
+    if (nextCaravan !== this.hoveredCaravanId) {
+      this.hoveredCaravanId = nextCaravan;
+      this.opts.onRedraw();
+    }
+
     const nextHover = this.opts.renderer.hoverFromScreen(x, y);
     if (!hoverChanged(this.hover, nextHover)) {
       return;
@@ -449,6 +468,16 @@ export class AdventureView {
     this.hover = nextHover;
     this.updatePath();
     this.opts.onHudUpdate();
+  }
+
+  getHoveredCaravanId(): TradeRouteId | null {
+    return this.hoveredCaravanId;
+  }
+
+  private clearCaravanHover(): void {
+    if (this.hoveredCaravanId === null) return;
+    this.hoveredCaravanId = null;
+    this.opts.onRedraw();
   }
 
   private updatePath(): void {

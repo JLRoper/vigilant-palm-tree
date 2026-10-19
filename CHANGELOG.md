@@ -10,6 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.16.0] - 2026-10-19
+
+- Caravans are now eight-directional: supply wagons and treasury carts each have their own sprite for every compass heading and turn to face the way they are walking, like heroes, instead of one side view with a horizontal flip.
+- Treasure carts now read as a distinct vehicle: a two-wheeled, red-bannered cart with a pale horse and gold cargo, visibly different from the brown four-wheel supply wagon.
+- Own caravans reveal a 2-tile vision ring (a hero sees 4), so a wagon on the road lifts the fog around itself.
+- Hovering a caravan rings it and, for your own caravan, draws its remaining route to the destination as a dashed line with a destination ring. Enemy caravans ring only, so their destination is not revealed.
+- New art pipeline `tools/sprites/gen-caravan-sprites.mjs` redraws the existing wagon/cart from eight headings via FLUX-2-klein image editing, then trims, alpha-cleans and downscales all eight by one shared scale.
+
 ## [0.15.0] - 2026-10-19
 
 - Settlement panel: the settlement's own name is now the panel's first text (the header), with its owner beside it; the line under the banner labels the holding and its tier (`SETTLEMENT L1`) instead of repeating the name.

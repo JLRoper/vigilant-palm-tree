@@ -26,3 +26,6 @@ jlr/
 design/arena-unit-sprites/*-1024/
 design/arena-unit-sprites/pose-test/
 design/arena-unit-sprites/style*-*.png
+
+# Generated 1024px caravan turnarounds (tools/sprites/gen-caravan-sprites.mjs)
+design/caravan-directions/masters/
