@@ -12,6 +12,10 @@ import { settlementBannerUrl } from "../../render/assetDescriptors";
 export interface SettlementRosterMenuOptions {
   onSelectSettlement?: (settlementId: SettlementId) => void;
   onCenterSettlement?: (settlementId: SettlementId) => void;
+  /** Double-clicking a row (its banner) asks for that settlement's city view. */
+  onEnterCityView?: (settlementId: SettlementId) => void;
+  /** Whether that double-click would do anything, so the row's hint only promises what it delivers. */
+  canEnterCityView?: (settlementId: SettlementId) => boolean;
 }
 
 export class SettlementRosterMenu {
@@ -132,16 +136,24 @@ export class SettlementRosterMenu {
       background: `linear-gradient(rgba(26, 26, 26, 0.3), rgba(26, 26, 26, 0.3)), url(${bannerUrl}) center / cover no-repeat`,
     });
 
-    if (this.opts.onSelectSettlement || this.opts.onCenterSettlement) {
+    const canEnter = this.opts.canEnterCityView?.(settlement.id) ?? false;
+    if (this.opts.onSelectSettlement || this.opts.onCenterSettlement || this.opts.onEnterCityView) {
       row.style.cursor = "pointer";
       row.addEventListener("click", (e) => {
         e.stopPropagation();
         this.opts.onSelectSettlement?.(settlement.id);
       });
+      // The whole row IS the banner (its background is the tier art), so a
+      // double-click here is the same gesture the settlement panel's banner
+      // takes: go to the settlement and open it. The map is centred first so
+      // the settlement is under the city view on the way out, and a row whose
+      // city view will not open (a seat you are not playing) still centres.
       row.addEventListener("dblclick", (e) => {
         e.stopPropagation();
         this.opts.onCenterSettlement?.(settlement.id);
+        if (canEnter) this.opts.onEnterCityView?.(settlement.id);
       });
+      if (canEnter) row.title = "Double-click to enter the city view";
     }
 
     const nameEl = document.createElement("div");

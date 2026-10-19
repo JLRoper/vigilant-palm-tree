@@ -68,6 +68,7 @@ export class UIManager {
   private heroRosterMenu?: HeroRosterMenu;
   private settlementRosterMenu?: SettlementRosterMenu;
   private settlementInfoMenu?: SettlementInfoMenu;
+  private settlementCityView: SettlementInfoCallbacks = {};
   private tileInfoPanel?: TileInfoPanel;
   private inspectedTile: Axial | null = null;
   private cityView: CityView | null = null;
@@ -151,6 +152,9 @@ export class UIManager {
     this.settlementRosterMenu = new SettlementRosterMenu({
       onSelectSettlement: (settlementId) => this.handleRosterSettlementSelect(settlementId),
       onCenterSettlement: (settlementId) => this.handleRosterSettlementCenter(settlementId),
+      // Lazy: initSettlementInfo() supplies these after this menu is built.
+      onEnterCityView: (settlementId) => this.settlementCityView.onEnterCityView?.(settlementId),
+      canEnterCityView: (settlementId) => this.settlementCityView.canEnterCityView?.(settlementId) ?? false,
     });
 
     document.addEventListener("keydown", (e) => this.handleKeyDown(e));
@@ -175,6 +179,9 @@ export class UIManager {
   }
 
   initSettlementInfo(callbacks: SettlementInfoCallbacks = {}): void {
+    // Kept on the manager, not just handed to the info panel: the settlements
+    // roster's rows open the same city view through the same gate.
+    this.settlementCityView = callbacks;
     this.settlementInfoMenu = new SettlementInfoMenu({
       parent: document.body,
       onClose: () => {
