@@ -636,12 +636,31 @@ async function seedWorkforceFixture(page: Page, buildings: Array<Record<string, 
   assert(false, "workforce fixture seed never stuck against in-flight persists");
 }
 
-async function serverSettlement(page: Page, name: string, sid: string): Promise<{ buildings: Array<{ gx: number; gy: number; kind: string; workers?: number }> }> {
+async function serverSettlement(page: Page, name: string, sid: string): Promise<{
+  buildings: Array<{ gx: number; gy: number; kind: string; workers?: number }>;
+  stacks?: Array<{ entries: Array<{ count: number }> }>;
+}> {
   return page.evaluate(async ({ name, sid }) => {
     const res = await fetch(`/api/games/${encodeURIComponent(name)}`);
     const row = await res.json();
     return row.settlements[sid];
   }, { name, sid });
+}
+
+function recruitedTotal(settlement: { stacks?: Array<{ entries: Array<{ count: number }> }> }): number {
+  return (settlement.stacks ?? []).reduce(
+    (sum, platoon) => sum + platoon.entries.reduce((s, e) => s + e.count, 0),
+    0,
+  );
+}
+
+async function serverDraft(page: Page, name: string, sid: string, gx: number): Promise<number | undefined> {
+  return page.evaluate(async ({ name, sid, gx }) => {
+    const res = await fetch(`/api/games/${encodeURIComponent(name)}`);
+    const row = await res.json() as { settlements: Record<string, { buildings?: Array<{ gx: number; draft?: Record<string, number> }> }> };
+    const buildings = row.settlements[sid]?.buildings ?? [];
+    return buildings.find((b) => b.gx === gx)?.draft?.peasant;
+  }, { name, sid, gx });
 }
 
 function staffingOf(settlement: { buildings: Array<{ gx: number; gy: number; kind: string; workers?: number }> }, gx: number, gy: number): number | undefined {
@@ -921,14 +940,15 @@ async function testPlainClickStillOpensMenu(page: Page, settlementId: string): P
   console.log(">> plain click opens the menu, mutates nothing ✓");
 }
 
-// A recruitment-panel building row is a second door onto that building's own
-// menu (user request, 2026-10-19): clicking a row -- anywhere except a button --
-// opens the same menu an iso-grid click opens, placed at the building, and
-// recruits nothing.
-async function testRecruitmentRowOpensBuildingMenu(page: Page, settlementId: string): Promise<void> {
-  console.log(">> Test: recruitment panel row opens that building's own menu");
+// The unit image row is the recruitment panel's PARENT (user request,
+// 2026-10-19): clicking it accordions down the buildings that train that unit,
+// and the parent buys and staffs every one of them at once. The parent never
+// opens an individual building's menu -- only the nested building rows do.
+async function testRecruitmentPanelAccordion(page: Page, settlementId: string): Promise<void> {
+  console.log(">> Test: recruitment unit row accordions its buildings (bulk buy + staff)");
   await seedWorkforceFixture(page, [
-    { kind: "farmhouse", level: 1, style: "classic", gx: 1, gy: 1, workers: 2 },
+    { kind: "farmhouse", level: 1, style: "classic", gx: 1, gy: 0, workers: 1 },
+    { kind: "farmhouse", level: 1, style: "classic", gx: 3, gy: 0, workers: 1 },
   ]);
   await reloadToGame(page, await gameName(page));
   await openCityView(page, settlementId);
@@ -937,28 +957,41 @@ async function testRecruitmentRowOpensBuildingMenu(page: Page, settlementId: str
   await page.keyboard.press("r");
   await wait(400);
 
-  const row = await page.evaluate(() => {
-    const panel = Array.from(document.body.children).find((el) => (el.textContent ?? "").includes("Recruitment"));
-    if (!panel) return null;
-    const clickable = Array.from(panel.querySelectorAll<HTMLElement>("div")).filter(
-      (d) => d.style.cursor === "pointer",
-    );
-    const target = clickable.find((d) => (d.textContent ?? "").includes("Farmhouse"));
-    if (!target) return null;
-    const label = target.querySelector("span") ?? target;
-    const r = label.getBoundingClientRect();
-    return {
-      x: Math.round(r.x + 4),
-      y: Math.round(r.y + r.height / 2),
-      cursor: target.style.cursor,
-    };
-  });
-  assert(row, "the farmhouse row must be a click target in the recruitment panel");
-  assert.equal(row.cursor, "pointer", "a row that opens a menu must say so with a pointer cursor");
+  const parent = page.locator('[data-recruit-parent="farmhouse:peasant"]');
+  assert.equal(await parent.count(), 1, "the unit image row is the parent");
+  assert.equal(await parent.getAttribute("data-expanded"), "false", "the building dropdown is collapsed by default");
+  assert.equal(
+    await page.locator('[data-recruit-children="farmhouse:peasant"]').isVisible(),
+    false,
+    "no building rows before the parent is clicked",
+  );
+  assert.equal(await page.locator("[data-recruit-child]").count(), 0, "a collapsed parent builds no child rows");
 
-  await page.mouse.click(row.x, row.y);
+  const baseline = recruitedTotal(await serverSettlement(page, name, settlementId));
+
+  // Clicking the parent's image accordions its buildings; it must NOT open an
+  // individual building's menu and must NOT recruit.
+  await parent.locator("img").first().click();
+  await wait(300);
+  assert.equal(
+    await page.locator('[data-recruit-parent="farmhouse:peasant"]').getAttribute("data-expanded"),
+    "true",
+    "the parent expands on click",
+  );
+  assert.equal(await page.locator('[data-recruit-children="farmhouse:peasant"]').isVisible(), true, "the building rows are shown");
+  assert.equal(await page.locator("[data-recruit-child]").count(), 2, "one row per farmhouse that trains peasants");
+  await pageScreenshot(page, "recruitment-accordion-expanded");
+  assert.equal(
+    await page.evaluate(() => Array.from(document.body.children).some((el) => (el.textContent ?? "").includes("A small rural home."))),
+    false,
+    "the parent row must not open an individual building's menu",
+  );
+  assert.equal(recruitedTotal(await serverSettlement(page, name, settlementId)), baseline, "expanding the parent recruits nothing");
+
+  // A specific building's row is the only door onto its own menu -- the same
+  // menu an iso-grid click opens, placed at that building.
+  await page.locator('[data-recruit-child="farmhouse:1,0"] span').first().click();
   await wait(400);
-
   const menu = await page.evaluate(() => {
     const el = Array.from(document.body.children).find((n) => {
       const t = n.textContent ?? "";
@@ -968,10 +1001,7 @@ async function testRecruitmentRowOpensBuildingMenu(page: Page, settlementId: str
     const r = el.getBoundingClientRect();
     return { x: Math.round(r.x), y: Math.round(r.y) };
   });
-  assert(menu, "clicking the farmhouse row must open that building's menu");
-
-  // "Open the menu near the building": the menu's top-left lands on the
-  // footprint's on-screen centre, not in the clamped (10, 10) corner.
+  assert(menu, "clicking a building row must open that building's own menu");
   const meta = await page.evaluate((sid: string) => {
     const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
     const s = dbg.getGameState().settlements[sid];
@@ -980,66 +1010,72 @@ async function testRecruitmentRowOpensBuildingMenu(page: Page, settlementId: str
   }, settlementId);
   const viewport = page.viewportSize()!;
   const rowLayout = cityLayout(meta.size, viewport.width, viewport.height, meta.inset);
-  const cell = cellToScreen(1, 1, rowLayout.gridOrigin);
+  const cell = cellToScreen(1, 0, rowLayout.gridOrigin);
   const buildingPt = {
     x: rowLayout.screenOrigin.x + cell.x * rowLayout.tileScale,
     y: rowLayout.screenOrigin.y + cell.y * rowLayout.tileScale,
   };
-  const distance = Math.hypot(menu.x - buildingPt.x, menu.y - buildingPt.y);
   assert(
-    distance < 100,
-    `the menu must open at the building: menu ${JSON.stringify(menu)} vs cell ${JSON.stringify(buildingPt)}`,
+    Math.hypot(menu.x - buildingPt.x, menu.y - buildingPt.y) < 100,
+    `the building menu must open at the building: menu ${JSON.stringify(menu)} vs cell ${JSON.stringify(buildingPt)}`,
   );
-
-  // The unit row is the other door on the same building (the user clicked
-  // exactly this): the unit art must open the menu of the building the row
-  // recruits from, not just the kind's heading.
+  assert.equal(recruitedTotal(await serverSettlement(page, name, settlementId)), baseline, "opening a building menu recruits nothing");
   await page.keyboard.press("Escape");
   await wait(250);
-  const unitIcon = await page.evaluate(() => {
-    const panel = Array.from(document.body.children).find((el) => (el.textContent ?? "").includes("Recruitment"));
-    if (!panel) return null;
-    const row = Array.from(panel.querySelectorAll<HTMLElement>("div")).find((d) =>
-      (d.title ?? "").includes("supplies this unit"),
-    );
-    const img = row?.querySelector("img");
-    if (!img) return null;
-    const r = img.getBoundingClientRect();
-    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
-  });
-  assert(unitIcon, "the unit row must be a click target as well");
-  await page.mouse.click(unitIcon.x, unitIcon.y);
-  await wait(400);
-  assert(
-    await page.evaluate(() => {
-      const el = Array.from(document.body.children).find((n) => {
-        const t = n.textContent ?? "";
-        return t.startsWith("Farmhouse") && t.includes("A small rural home.");
-      });
-      return !!el;
-    }),
-    "clicking the unit art must open that building's menu",
+
+  // Collapse again, then staff every building from the parent alone: one click
+  // moves one worker onto each farmhouse.
+  await page.locator('[data-recruit-parent="farmhouse:peasant"] img').first().click();
+  await wait(250);
+  assert.equal(await page.locator("[data-recruit-child]").count(), 0, "a second click collapses the dropdown");
+
+  await page.locator('[data-recruit-parent="farmhouse:peasant"] [data-recruit-staff="add"]').click();
+  await wait(300);
+  await waitForServerStaffing(page, name, settlementId, [
+    { gx: 1, workers: 2 },
+    { gx: 3, workers: 2 },
+  ]);
+  assert.match(
+    (await page.locator('[data-recruit-parent="farmhouse:peasant"]').textContent()) ?? "",
+    /4\/4/,
+    "the parent shows the aggregate staffing it just committed",
   );
 
-  const after = (await serverSettlement(page, name, settlementId)) as unknown as {
-    stacks?: Array<{ entries: Array<{ count: number }> }>;
-  };
-  const troops = (after.stacks ?? []).reduce(
-    (sum, platoon) => sum + platoon.entries.reduce((s, e) => s + e.count, 0),
-    0,
+  await page.locator('[data-recruit-parent="farmhouse:peasant"] [data-recruit-staff="remove"]').click();
+  await wait(300);
+  await waitForServerStaffing(page, name, settlementId, [
+    { gx: 1, workers: 1 },
+    { gx: 3, workers: 1 },
+  ]);
+
+  // Buying from the parent spans every building it lists: shift-click takes the
+  // affordable maximum out of BOTH farmhouses' draft pools.
+  await page.keyboard.down("Shift");
+  await page.locator('[data-recruit-parent="farmhouse:peasant"] [data-recruit-buy="peasant"]').click();
+  await page.keyboard.up("Shift");
+  await wait(700);
+  assert.equal(await serverDraft(page, name, settlementId, 1), 0, "the first farmhouse's draft pool is drained");
+  assert.equal(await serverDraft(page, name, settlementId, 3), 0, "the second farmhouse's draft pool is drained");
+  assert.equal(
+    recruitedTotal(await serverSettlement(page, name, settlementId)),
+    baseline + 6,
+    "one buy drew 3 peasants from each of the two farmhouses",
   );
-  assert.equal(troops, 0, "a row click opens a menu -- it must not recruit");
+
+  // Expanding again still lists both buildings with their own per-building
+  // counts, so the parent's aggregate and the child rows agree.
+  await page.locator('[data-recruit-parent="farmhouse:peasant"] img').first().click();
+  await wait(300);
+  assert.equal(await page.locator("[data-recruit-child]").count(), 2, "the dropdown still lists both buildings");
+  assert.match(
+    (await page.locator('[data-recruit-child="farmhouse:1,0"]').textContent()) ?? "",
+    /1\/2/,
+    "each nested row keeps its own worker count",
+  );
 
   await page.keyboard.press("Escape");
   await wait(250);
-  const panelStillOpen = await page.evaluate(() =>
-    Array.from(document.body.children).some((el) => (el.textContent ?? "").includes("Recruitment")),
-  );
-  if (panelStillOpen) {
-    await page.keyboard.press("r");
-    await wait(250);
-  }
-  console.log(">> recruitment row opens the building menu at the building, recruits nothing ✓");
+  console.log(">> recruitment unit row accordions its buildings, buys and staffs all at once ✓");
 }
 
 // City shortcuts must not fire while a menu field has focus: pressing 'w'
@@ -1600,7 +1636,7 @@ async function run() {
     await testWorkerDragCancel(page, settlementId);
     await testMenuRefreshAfterPanelCommit(page, settlementId);
     await testPlainClickStillOpensMenu(page, settlementId);
-    await testRecruitmentRowOpensBuildingMenu(page, settlementId);
+    await testRecruitmentPanelAccordion(page, settlementId);
     await testShortcutsIgnoredWhileTyping(page, settlementId);
     await testPanelChipDrag(page, settlementId);
     await testFirstTouchAutoCrew(page, settlementId);

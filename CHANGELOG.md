@@ -10,6 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.20.0] - 2026-10-19
+
+Recruitment panel: unit rows accordion their buildings and bulk buy/staff
+
+- The unit row (its image) is now the panel's parent: clicking it accordions down one row per building that trains that unit, collapsed by default.
+- The parent row buys across every one of those buildings (shift-click takes the pooled maximum) and its worker stepper staffs them all at once (`−`/`+` = one worker per building).
+- The parent never opens an individual building's menu; only the nested building rows do.
+
 ## [0.19.0] - 2026-10-19
 
 - Three new mounted hero variants, each a full repaint of an existing one and all shipping **eight** directions (no diagonal→cardinal fallback), base frames only, plus a 320x100 roster banner:
