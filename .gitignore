@@ -29,3 +29,4 @@ design/arena-unit-sprites/style*-*.png
 
 # Generated 1024px caravan turnarounds (tools/sprites/gen-caravan-sprites.mjs)
 design/caravan-directions/masters/
+design/hero-variants/*/masters/
