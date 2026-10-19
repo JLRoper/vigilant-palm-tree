@@ -1,7 +1,12 @@
 // Directional caravan art pipeline: FLUX-2-klein (image-in -> image-out) via
-// DeepInfra redraws the existing supply wagon / treasury cart from eight compass
-// headings, then one browser pass trims, alpha-cleans and downscales all eight
-// masters by a SINGLE shared scale so the sprite never pops size when it turns.
+// DeepInfra redraws the existing supply wagon / treasury cart from six camera
+// headings. NE and SE are then produced as exact horizontal mirrors of the
+// generated NW / SW views (mirroring the isometric image is geometrically the
+// opposite diagonal, and FLUX reliably produces the rear-quarter views while
+// refusing to rotate a connected horse+cart past them). One browser pass trims,
+// alpha-cleans and downscales the six generated masters by a SINGLE shared
+// scale, then writes the two mirrored files at that same scale, so the sprite
+// never pops size when it turns.
 //
 // Output: src/resources/caravans/<kind>-<direction>.png (256px, bottom-anchored)
 // Masters: design/caravan-directions/masters/<kind>-<direction>.png (1024px)
@@ -11,7 +16,7 @@
 //
 // Flags:
 //   --kind supply|treasury|both   which family to work on (default: both)
-//   --faces e,se,...              subset of directions (default: all eight)
+//   --faces e,nw,...              subset of GENERATED directions (default: the six below)
 //   --masters-only                generate masters, skip downscaling
 //   --process-only                re-process saved masters, no API calls
 //   --dry-run                     print the plan, no API call
@@ -32,16 +37,24 @@ const MASTER = 1024;
 const OUT = 256;
 
 const DIRECTIONS = ["e", "se", "s", "sw", "w", "nw", "n", "ne"];
+// Derived, not generated: the opposite diagonal is the horizontal mirror of a
+// generated one. Keep this map in sync with the file set on disk.
+const MIRRORED_FACES = { se: "sw", ne: "nw" };
+const GENERATED_FACES = DIRECTIONS.filter((f) => !(f in MIRRORED_FACES));
 
+// Short, singular camera descriptions. Long style paragraphs ("same 3/4
+// isometric perspective, redraw the reference") anchor FLUX to the reference's
+// side view; a one-clause "now seen from..." camera change is what actually
+// rotates the vehicle (the first rear-view probe worked exactly this way).
 const FACING = {
-  e: "facing EAST, moving toward the right edge of the image, full side view with the horse to the right of the cart",
-  se: "facing SOUTH-EAST, moving toward the bottom-right corner, front three-quarter view with the horse ahead of the cart",
-  s: "facing SOUTH, moving toward the viewer, front view showing the horse's head and chest with the cart behind it",
-  sw: "facing SOUTH-WEST, moving toward the bottom-left corner, front three-quarter view with the horse ahead of the cart",
-  w: "facing WEST, moving toward the left edge of the image, full side view with the horse to the left of the cart",
-  nw: "facing NORTH-WEST, moving toward the top-left corner, rear three-quarter view with the horse ahead of the cart, walking away from the viewer",
-  n: "facing NORTH, moving away from the viewer, rear view showing the back of the cart with the horse's tail beyond it",
-  ne: "facing NORTH-EAST, moving toward the top-right corner, rear three-quarter view with the horse ahead of the cart, walking away from the viewer",
+  e: "seen from the side, travelling to the right: the horse on the right, the cart on the left",
+  se: "seen from the front-left quarter, travelling toward the lower-right: the horse ahead and to the right, the cart following behind at the upper-left",
+  s: "seen from the front, travelling toward the viewer: the horse at the bottom centre facing us, the cart directly behind it",
+  sw: "seen from the front-right quarter, travelling toward the lower-left: the horse ahead and to the left, the cart following behind at the upper-right",
+  w: "seen from the side, travelling to the left: the horse on the left, the cart on the right",
+  nw: "seen from behind and slightly to the right, travelling away toward the upper-left: the back of the cart nearest the viewer, the horse walking away up-left beyond it",
+  n: "seen from directly behind, travelling away from the viewer: the flat rear panel of the cart facing us, both rear wheels level, only the horse's tail and hindquarters visible beyond the cart",
+  ne: "seen from behind and slightly to the left, travelling away toward the upper-right: the back of the cart nearest the viewer, the horse walking away up-right beyond it",
 };
 
 const KINDS = {
@@ -62,16 +75,15 @@ const KINDS = {
 function promptFor(kind, direction) {
   const k = KINDS[kind];
   return [
-    `Redraw the exact same ${k.subject} from the attached reference image, in the same chunky hand-pixeled fantasy game art style, the same warm palette, the same thick dark-brown outlines, the same cargo and the same proportions.`,
-    `The vehicle and its horse are ${FACING[direction]}.`,
-    "Keep it a single centred sprite in the same 3/4 top-down isometric game perspective, the horse harnessed in front of the cart, all cargo still aboard.",
-    "Background: one plain uniform solid light gray (#e8e8e8) everywhere, absolutely no checkerboard, no ground shadow, no floor, no scenery.",
-    "Square pixels, no anti-aliasing, no soft gradients, no text, no watermark, nothing cropped at the canvas edges.",
-  ].join("\n");
+    `Same exact ${k.subject}, same chunky pixel-art style, same warm palette, same cargo and proportions.`,
+    `Now ${FACING[direction]}.`,
+    "The horse and cart stay physically connected by the harness as one vehicle, all cargo still aboard.",
+    "Single centred sprite, plain uniform solid light-gray background, no ground shadow, no text, no watermark, nothing cropped at the canvas edges.",
+  ].join(" ");
 }
 
 function parseArgs(argv) {
-  const flags = { kind: "both", faces: DIRECTIONS, mastersOnly: false, processOnly: false, dryRun: false };
+  const flags = { kind: "both", faces: GENERATED_FACES, mastersOnly: false, processOnly: false, dryRun: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--help" || a === "-h") flags.help = true;
@@ -85,6 +97,7 @@ function parseArgs(argv) {
   if (!["supply", "treasury", "both"].includes(flags.kind)) throw new Error("--kind must be supply, treasury or both");
   for (const f of flags.faces) {
     if (!DIRECTIONS.includes(f)) throw new Error(`unknown direction ${f}`);
+    if (MIRRORED_FACES[f]) throw new Error(`${f} is derived by mirroring ${MIRRORED_FACES[f]}; pass ${MIRRORED_FACES[f]} instead`);
   }
   return flags;
 }
@@ -206,7 +219,33 @@ async function processMasters(kind, faces) {
       const file = path.join(outDir, `${kind}-${faces[idx]}.png`);
       writeFileSync(file, Buffer.from(result.dataUrl.split("base64,")[1], "base64"));
     });
-    return { scale: payload.scale, bboxes: payload.results.map((r) => r.bbox) };
+
+    // Derive the opposite diagonals by mirroring their generated source. The
+    // shared scale is already baked into these files, so a flip keeps the size
+    // identical across all eight headings.
+    const mirrored = [];
+    for (const [target, source] of Object.entries(MIRRORED_FACES)) {
+      if (!faces.includes(source)) continue;
+      const sourceB64 = readFileSync(path.join(outDir, `${kind}-${source}.png`)).toString("base64");
+      const flipped = await page.evaluate((b64) => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement("canvas");
+          c.width = img.width;
+          c.height = img.height;
+          const ctx = c.getContext("2d");
+          ctx.translate(c.width, 0);
+          ctx.scale(-1, 1);
+          ctx.drawImage(img, 0, 0);
+          resolve(c.toDataURL("image/png").split("base64,")[1]);
+        };
+        img.onerror = () => reject(new Error("mirror source failed to load"));
+        img.src = "data:image/png;base64," + b64;
+      }), sourceB64);
+      writeFileSync(path.join(outDir, `${kind}-${target}.png`), Buffer.from(flipped, "base64"));
+      mirrored.push(target);
+    }
+    return { scale: payload.scale, bboxes: payload.results.map((r) => r.bbox), mirrored };
   } finally {
     await browser.close();
   }
@@ -215,7 +254,7 @@ async function processMasters(kind, faces) {
 async function main() {
   const flags = parseArgs(process.argv.slice(2));
   if (flags.help) {
-    console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(0, 23).join("\n"));
+    console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(0, 24).join("\n"));
     return;
   }
   const kinds = flags.kind === "both" ? ["supply", "treasury"] : [flags.kind];
@@ -240,7 +279,8 @@ async function main() {
       const missing = flags.faces.filter((f) => !existsSync(path.join(designDir, `${kind}-${f}.png`)));
       if (missing.length > 0) throw new Error(`missing masters for ${kind}: ${missing.join(", ")}`);
       const processed = await processMasters(kind, flags.faces);
-      console.log(`  processed ${flags.faces.length} ${kind} sprites at shared scale ${processed.scale.toFixed(3)}`);
+      const mirroredNote = processed.mirrored.length > 0 ? ` + mirrored ${processed.mirrored.join(",")}` : "";
+      console.log(`  processed ${flags.faces.length} ${kind} sprites at shared scale ${processed.scale.toFixed(3)}${mirroredNote}`);
     }
   }
 }

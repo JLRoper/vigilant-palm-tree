@@ -243,12 +243,16 @@ tool. Skybox: `flux-skybox.mjs` (1024×576) → `npm run skybox:split`
 
 `tools/sprites/gen-caravan-sprites.mjs` is the image-in variant of the same
 pipeline: it sends the existing caravan PNG as a reference and asks FLUX-2-klein
-to redraw it from each compass heading, so the wagon, horse, cargo and palette
-stay recognisably the same sprite across all eight views. Masters land in
-`design/caravan-directions/masters/`; one Playwright pass then trims, removes
-the flat gray background/ground shadow with a border flood-fill, and downscales
-all eight by one shared factor into `src/resources/caravans/`. Re-run the
-post-pass without API calls with `--process-only`.
+to redraw it from six camera headings (e, s, sw, w, nw, n), so the wagon, horse,
+cargo and palette stay recognisably the same sprite across views. `se` and `ne`
+are then written as exact horizontal mirrors of `sw`/`nw` — mirroring the
+isometric image is geometrically the opposite diagonal, and FLUX produced the
+rear-quarter views cleanly but would not reliably rotate a connected horse+cart
+further. Masters land in `design/caravan-directions/masters/` (generated
+headings only); one Playwright pass trims, removes the flat gray
+background/ground shadow with a border flood-fill, downscales the six by one
+shared factor, and writes the two mirrored files. Re-run the post-pass without
+API calls with `--process-only`.
 
 ### 4.3 Pipeline C — Gemini via OpenRouter (the kilo skill)
 
