@@ -61,7 +61,11 @@ export function createDefaultProvider(
     }
     if (proceduralKeys.has(d.key)) continue;
 
-    if (d.key.startsWith("castle.") || d.key.startsWith("caravan.") || d.key.startsWith("district.")) {
+    // Only the two legacy caravan sprites (used by the logistics modal's
+    // static <img>) are eager. The 16 directional caravan sprites resolve on
+    // demand like horse variants, so boot does not fetch a turnaround set.
+    const eagerCaravan = d.key === "caravan.resource" || d.key === "caravan.gold";
+    if (d.key.startsWith("castle.") || eagerCaravan || d.key.startsWith("district.")) {
       eagerUrls[d.key] = d.url;
     } else {
       onDemandUrls[d.key] = d.url;

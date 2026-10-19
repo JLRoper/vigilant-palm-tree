@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { CaravanState, HeroState, SettlementState, TradeRouteState } from "@heroes/contracts";
+import type { CaravanState, HeroState, SettlementState, TradeRouteId, TradeRouteState } from "@heroes/contracts";
 import { Hero } from "../../src/entities/hero";
 import { axialToPixel } from "../../src/core/hex";
-import { CaravanVisualTracker, resolveCaravanMarkers } from "../../src/render/caravanMarkers";
+import { CaravanVisualTracker, caravanAtWorldPoint, resolveCaravanMarkers } from "../../src/render/caravanMarkers";
 import { buildAdventureScene } from "../../src/render/scene/sceneBuilder/adventureScene";
 import { paintCaravanMarker } from "../../src/render/scene/paint2d/index";
 import type { Paint2DDep, ResolvedSprite } from "../../src/render/scene/paint2d/deps";
-import type { CaravanMarkerNode } from "../../src/render/scene/types";
+import type { CaravanMarkerNode, CaravanRouteNode } from "../../src/render/scene/types";
 import { makeHero } from "../charter/_helpers";
 import { makeGrassMap, makeRenderOptions, stubColorForOwner } from "./_helpers";
 
@@ -79,7 +79,15 @@ test("a departed caravan with pathIndex 0 resolves to the origin settlement tile
   const caravan: CaravanState = { phase: "toDestination", cargo: 200, path: [{ q: 3, r: 3 }, { q: 3, r: 4 }], pathIndex: 0 };
   const specs = resolveCaravanMarkers([makeRoute("r0", "s-a", "s-b", 4, caravan)], settlements);
   assert.equal(specs.length, 1);
-  assert.deepEqual(specs[0], { q: 3, r: 2, ownerId: 1, wagons: 4, payloadKind: "resource" }, "pathIndex 0 -> the from-settlement tile, from's owner, route wagons");
+  assert.deepEqual(specs[0], {
+    routeId: "r0",
+    q: 3,
+    r: 2,
+    ownerId: 1,
+    wagons: 4,
+    payloadKind: "resource",
+    remainingPath: [{ q: 3, r: 3 }, { q: 3, r: 4 }],
+  }, "pathIndex 0 -> the from-settlement tile, from's owner, route wagons, whole leg remaining");
 });
 
 test("a walking caravan occupies the last consumed path tile (path[pathIndex - 1])", () => {
@@ -90,7 +98,15 @@ test("a walking caravan occupies the last consumed path tile (path[pathIndex - 1
   const path = [{ q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 }, { q: 4, r: 0 }, { q: 5, r: 0 }];
   const caravan: CaravanState = { phase: "toHome", cargo: 0, path, pathIndex: 3 };
   const specs = resolveCaravanMarkers([makeRoute("r0", "s-a", "s-b", 7, caravan)], settlements);
-  assert.deepEqual(specs[0], { q: 3, r: 0, ownerId: 2, wagons: 7, payloadKind: "resource" }, "pathIndex 3 -> path[2] = (3,0)");
+  assert.deepEqual(specs[0], {
+    routeId: "r0",
+    q: 3,
+    r: 0,
+    ownerId: 2,
+    wagons: 7,
+    payloadKind: "resource",
+    remainingPath: [{ q: 4, r: 0 }, { q: 5, r: 0 }],
+  }, "pathIndex 3 -> path[2] = (3,0), remaining = the two tiles after it");
 });
 
 test("a returning caravan (toHome, pathIndex >= 1) resolves to its real path tile, never the origin-tile fallback", () => {
@@ -111,7 +127,15 @@ test("a returning caravan (toHome, pathIndex >= 1) resolves to its real path til
   const specs = resolveCaravanMarkers([makeRoute("r0", "s-a", "s-b", 4, caravan)], settlements);
   assert.deepEqual(
     specs,
-    [{ q: 3, r: 7, ownerId: 1, wagons: 4, payloadKind: "resource" }],
+    [{
+      routeId: "r0",
+      q: 3,
+      r: 7,
+      ownerId: 1,
+      wagons: 4,
+      payloadKind: "resource",
+      remainingPath: [{ q: 3, r: 6 }, { q: 3, r: 5 }, { q: 3, r: 4 }, { q: 3, r: 3 }],
+    }],
     "pathIndex 1 -> path[0] = (3,7), the real departure tile (the origin at (3,2) is never reported for a walked toHome caravan)",
   );
 });
@@ -125,7 +149,7 @@ test("a hero-origin route resolves tile and owner from the heroes record", () =>
     settlements,
     { "h-0": hero },
   );
-  assert.deepEqual(specs, [{ q: 3, r: 3, ownerId: 1, wagons: 3, payloadKind: "resource" }], "tile from the path, owner from the hero, wagons from the route");
+  assert.deepEqual(specs, [{ routeId: "r0", q: 3, r: 3, ownerId: 1, wagons: 3, payloadKind: "resource" }], "tile from the path, owner from the hero, wagons from the route");
 });
 
 test("a hero-origin route with a missing hero produces no spec; a gold route carries payloadKind gold", () => {
@@ -142,7 +166,7 @@ test("a hero-origin route with a missing hero produces no spec; a gold route car
     settlements,
     {},
   );
-  assert.deepEqual(treasure, [{ q: 4, r: 0, ownerId: 1, wagons: 2, payloadKind: "gold" }], "the additive payload kind rides along for a future gold-tinted marker");
+  assert.deepEqual(treasure, [{ routeId: "r-gold", q: 4, r: 0, ownerId: 1, wagons: 2, payloadKind: "gold" }], "the additive payload kind rides along for a gold-tinted marker");
 });
 
 test("routes whose origin settlement is missing or unowned produce no marker spec", () => {
@@ -179,7 +203,7 @@ test("the builder emits one caravanMarker node per visible caravan with position
     hover: null,
     opts: makeRenderOptions({
       viewPlayerId: 0,
-      caravans: [{ q: 2, r: 0, ownerId: 0, wagons: 5, payloadKind: "gold" }],
+      caravans: [{ routeId: "r0", q: 2, r: 0, ownerId: 0, wagons: 5, payloadKind: "gold" }],
     }),
   });
 
@@ -200,8 +224,8 @@ test("an enemy caravan hidden in fog of war is invisible; in vision it draws", (
   const opts = makeRenderOptions({
     viewPlayerId: 0,
     caravans: [
-      { q: 2, r: 0, ownerId: 1, wagons: 3 },
-      { q: 8, r: 0, ownerId: 1, wagons: 3 },
+      { routeId: "r-hidden", q: 2, r: 0, ownerId: 1, wagons: 3 },
+      { routeId: "r-far", q: 8, r: 0, ownerId: 1, wagons: 3 },
     ],
   });
 
@@ -223,7 +247,7 @@ test("an own caravan renders even outside the visible set, mirroring the hero an
     hover: null,
     opts: makeRenderOptions({
       viewPlayerId: 0,
-      caravans: [{ q: 8, r: 0, ownerId: 0, wagons: 2 }],
+      caravans: [{ routeId: "r0", q: 8, r: 0, ownerId: 0, wagons: 2 }],
     }),
   });
 
@@ -243,7 +267,7 @@ test("caravan markers paint after path segments and before heroes (entity layer)
     opts: makeRenderOptions({
       viewPlayerId: 0,
       selectedHeroId: "h0",
-      caravans: [{ q: 2, r: 0, ownerId: 0, wagons: 4 }],
+      caravans: [{ routeId: "r0", q: 2, r: 0, ownerId: 0, wagons: 4 }],
     }),
   });
 
@@ -259,7 +283,157 @@ test("caravan markers paint after path segments and before heroes (entity layer)
   assert.ok(caravans[0] < heroes[0], "caravan paints before the hero so a hero on the same tile draws above it");
 });
 
-// ---- CaravanVisualTracker (end-of-turn path tweening like heroes) -----------
+// ---- hover: ring any visible cart, preview only own routes ------------------
+
+test("hovering an own caravan rings the marker and emits its remaining route", () => {
+  const map = makeGrassMap(10, 1);
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({
+      viewPlayerId: 0,
+      hoveredCaravanId: "r0",
+      caravans: [{
+        routeId: "r0",
+        q: 2,
+        r: 0,
+        ownerId: 0,
+        wagons: 3,
+        payloadKind: "resource",
+        remainingPath: [{ q: 3, r: 0 }, { q: 4, r: 0 }],
+      }],
+    }),
+  });
+
+  const routes = nodesOfKind<CaravanRouteNode>(nodes, "caravanRoute");
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0].routeId, "r0");
+  assert.deepEqual(routes[0].points, [
+    axialToPixel(2, 0),
+    axialToPixel(3, 0),
+    axialToPixel(4, 0),
+  ], "route starts at the cart and follows the remaining leg");
+  const [marker] = nodesOfKind<CaravanMarkerNode>(nodes, "caravanMarker");
+  assert.equal(marker.hovered, true);
+});
+
+test("hovering an enemy caravan rings it but never draws its route", () => {
+  const map = makeGrassMap(10, 1);
+  const hero = new Hero("h0", "Hero", 0, 0, "player", 0);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [hero],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({
+      viewPlayerId: 0,
+      hoveredCaravanId: "r-enemy",
+      caravans: [{
+        routeId: "r-enemy",
+        q: 2,
+        r: 0,
+        ownerId: 1,
+        wagons: 2,
+        remainingPath: [{ q: 3, r: 0 }],
+      }],
+    }),
+  });
+
+  assert.equal(nodesOfKind<CaravanRouteNode>(nodes, "caravanRoute").length, 0, "enemy destination stays hidden");
+  const [marker] = nodesOfKind<CaravanMarkerNode>(nodes, "caravanMarker");
+  assert.equal(marker.hovered, true, "the visible enemy cart still rings under the pointer");
+});
+
+// ---- painter seam ----------------------------------------------------------
+
+test("paintCaravanMarker resolves the per-direction sprite and rings a hovered cart", () => {
+  const requested: Array<[string | undefined, string | undefined]> = [];
+  const ellipses: number[][] = [];
+  const drawnImages: unknown[] = [];
+  const fakeImg = { naturalWidth: 256, naturalHeight: 256 } as unknown as HTMLImageElement;
+
+  const deps = {
+    sprite: {
+      resolveSpriteForCaravan: (payloadKind?: "resource" | "gold", direction?: string) => {
+        requested.push([payloadKind, direction]);
+        return {
+          drawable: fakeImg,
+          ready: true,
+          descriptor: {
+            key: `caravan.${payloadKind === "gold" ? "gold" : "resource"}.${direction}`,
+            url: "x.png",
+            anchor: "bottom",
+            sizing: { kind: "fitHeight", hexSizeMul: 1.45 },
+            naturalSize: 256,
+            anchorOffsetY: 2,
+          },
+        } satisfies ResolvedSprite;
+      },
+      resolveSprite: () => undefined,
+    },
+  } as unknown as Paint2DDep;
+
+  const ctx = {
+    imageSmoothingEnabled: true,
+    fillStyle: "",
+    strokeStyle: "",
+    lineWidth: 1,
+    globalAlpha: 1,
+    font: "",
+    textAlign: "left",
+    textBaseline: "alphabetic",
+    save() {},
+    restore() {},
+    translate() {},
+    scale() {},
+    drawImage(img: unknown) { drawnImages.push(img); },
+    beginPath() {},
+    arc() {},
+    ellipse(x: number, y: number, rx: number, ry: number) { ellipses.push([x, y, rx, ry]); },
+    fill() {},
+    stroke() {},
+    strokeText() {},
+    fillText() {},
+  } as unknown as CanvasRenderingContext2D;
+
+  paintCaravanMarker(
+    ctx,
+    {
+      kind: "caravanMarker",
+      q: 1,
+      r: 0,
+      world: { x: 100, y: 100 },
+      color: "#3388ff",
+      wagons: 3,
+      payloadKind: "gold",
+      facingDirection: "sw",
+      hovered: true,
+    },
+    deps,
+  );
+
+  assert.deepEqual(requested, [["gold", "sw"]], "the painter asks for the gold cart facing south-west");
+  assert.deepEqual(drawnImages, [fakeImg]);
+  assert.equal(ellipses.length, 2, "hover draws the bright inner ellipse and the owner-tinted halo");
+  assert.deepEqual(ellipses[0], [100, 100, 32 * 0.72, 32 * 0.4]);
+});
+
+test("caravanAtWorldPoint picks the cart under the pointer and ignores empty ground", () => {
+  const caravans = [
+    { routeId: "r0" as TradeRouteId, q: 2, r: 0, ownerId: 0, wagons: 3 },
+    { routeId: "r1" as TradeRouteId, q: 6, r: 0, ownerId: 0, wagons: 2, pixelOffset: { x: 12, y: 0 } },
+  ];
+  const cart = axialToPixel(2, 0);
+  assert.equal(caravanAtWorldPoint(caravans, { x: cart.x, y: cart.y - 8 }), "r0", "torso of the sprite hits");
+  assert.equal(caravanAtWorldPoint(caravans, { x: cart.x + 30, y: cart.y - 8 }), null, "empty ground beside it misses");
+  const moving = axialToPixel(6, 0);
+  assert.equal(caravanAtWorldPoint(caravans, { x: moving.x + 12, y: moving.y - 8 }), "r1", "mid-tween offset is honoured");
+});
 
 test("CaravanVisualTracker tweens a caravan step-by-step along its walked path at turn end", () => {
   const map = makeGrassMap(10, 4);
@@ -412,97 +586,4 @@ test("CaravanVisualTracker animates a returning toHome caravan into the origin s
   }
   assert.equal(tracker.getVisual("r0"), undefined, "visual retires once it arrives at origin");
   assert.equal(tracker.getMarkerSpecs().length, 0);
-});
-
-test("paintCaravanMarker resolves distinct supply (resource) and treasury (gold) sprites and flips when facing west", () => {
-  const requestedPayloads: Array<"resource" | "gold" | undefined> = [];
-  const drawnImages: unknown[] = [];
-  const scales: Array<[number, number]> = [];
-
-  const fakeSupplyImg = { naturalWidth: 256, naturalHeight: 256, tag: "supply" } as unknown as HTMLImageElement;
-  const fakeTreasuryImg = { naturalWidth: 256, naturalHeight: 256, tag: "treasury" } as unknown as HTMLImageElement;
-
-  const makeResolved = (drawable: HTMLImageElement, key: string): ResolvedSprite => ({
-    drawable,
-    ready: true,
-    descriptor: {
-      key,
-      url: `${key}.png`,
-      anchor: "bottom",
-      sizing: { kind: "fitHeight", hexSizeMul: 1.45 },
-      naturalSize: 256,
-      anchorOffsetY: 2,
-    },
-  });
-
-  const deps = {
-    sprite: {
-      resolveSpriteForCaravan: (payloadKind?: "resource" | "gold") => {
-        requestedPayloads.push(payloadKind);
-        return payloadKind === "gold"
-          ? makeResolved(fakeTreasuryImg, "caravan.gold")
-          : makeResolved(fakeSupplyImg, "caravan.resource");
-      },
-      resolveSprite: () => undefined,
-    },
-  } as unknown as Paint2DDep;
-
-  const ctx = {
-    imageSmoothingEnabled: true,
-    fillStyle: "",
-    strokeStyle: "",
-    lineWidth: 1,
-    font: "",
-    textAlign: "left",
-    textBaseline: "alphabetic",
-    save() {},
-    restore() {},
-    translate() {},
-    scale(sx: number, sy: number) {
-      scales.push([sx, sy]);
-    },
-    drawImage(img: unknown) {
-      drawnImages.push(img);
-    },
-    beginPath() {},
-    arc() {},
-    fill() {},
-    stroke() {},
-    strokeText() {},
-    fillText() {},
-  } as unknown as CanvasRenderingContext2D;
-
-  paintCaravanMarker(
-    ctx,
-    {
-      kind: "caravanMarker",
-      q: 1,
-      r: 0,
-      world: { x: 100, y: 100 },
-      color: "#3388ff",
-      wagons: 3,
-      payloadKind: "resource",
-      facingDirection: "e",
-    },
-    deps,
-  );
-
-  paintCaravanMarker(
-    ctx,
-    {
-      kind: "caravanMarker",
-      q: 2,
-      r: 0,
-      world: { x: 150, y: 100 },
-      color: "#3388ff",
-      wagons: 5,
-      payloadKind: "gold",
-      facingDirection: "w",
-    },
-    deps,
-  );
-
-  assert.deepEqual(requestedPayloads, ["resource", "gold"]);
-  assert.deepEqual(drawnImages, [fakeSupplyImg, fakeTreasuryImg]);
-  assert.deepEqual(scales, [[-1, 1]], "west-facing caravan flips horizontally");
 });

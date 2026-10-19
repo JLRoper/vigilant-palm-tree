@@ -180,9 +180,13 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
     resolveSpriteForUnit(unitTypeId: string, pose: UnitArenaPose): ResolvedSprite | undefined {
       return resolveUnit(unitTypeId, pose);
     },
-    resolveSpriteForCaravan(payloadKind?: "resource" | "gold"): ResolvedSprite | undefined {
-      const key = caravanKey(payloadKind === "gold" ? "gold" : "resource") as SpriteKey;
-      return narrowResolvedSprite(provider.resolve(key));
+    resolveSpriteForCaravan(payloadKind?: "resource" | "gold", direction?: Direction): ResolvedSprite | undefined {
+      const kind = payloadKind === "gold" ? "gold" : "resource";
+      if (direction) {
+        const directional = narrowResolvedSprite(provider.resolve(caravanKey(kind, direction) as SpriteKey));
+        if (directional) return directional;
+      }
+      return narrowResolvedSprite(provider.resolve(caravanKey(kind) as SpriteKey));
     },
     resolveSpriteForDistrict(variant: DistrictVariant, tier: DistrictTier): ResolvedSprite | undefined {
       const key = districtSpriteKey(variant, tier);

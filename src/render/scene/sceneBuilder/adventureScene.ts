@@ -68,7 +68,7 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
   const heroes = input.heroes ?? input.mirror?.getHeroes() ?? [];
   const castles = input.castles ?? input.mirror?.getSettlements() ?? [];
   const nodes: SceneNode[] = [];
-  const visible = input.visible ?? computeVision(heroes, castles, opts.viewPlayerId);
+  const visible = input.visible ?? computeVision(heroes, castles, opts.viewPlayerId, undefined, opts.caravans ?? []);
   const bounds: ViewportAxialBounds = input.viewportBounds ?? {
     qMin: 0,
     qMax: map.width - 1,
@@ -207,6 +207,34 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
   // hidden in enemy fog is invisible. Emitted after the path/overlay layers
   // and before heroes so the marker paints with the entity layer, with a
   // hero drawing above a caravan sharing its tile.
+  //
+  // Hover: any visible caravan gets a footprint ring, but only an OWN caravan
+  // draws its remaining route -- an enemy route line would leak its
+  // destination through the fog.
+  const hoveredCaravan = opts.hoveredCaravanId
+    ? (opts.caravans ?? []).find((c) => c.routeId === opts.hoveredCaravanId)
+    : undefined;
+  if (
+    hoveredCaravan &&
+    hoveredCaravan.ownerId === opts.viewPlayerId &&
+    hoveredCaravan.remainingPath &&
+    hoveredCaravan.remainingPath.length > 0
+  ) {
+    const startBase = axialToPixel(hoveredCaravan.q, hoveredCaravan.r);
+    const startOx = hoveredCaravan.pixelOffset?.x ?? 0;
+    const startOy = hoveredCaravan.pixelOffset?.y ?? 0;
+    const points = [
+      { x: startBase.x + startOx, y: startBase.y + startOy },
+      ...hoveredCaravan.remainingPath.map((t) => axialToPixel(t.q, t.r)),
+    ];
+    nodes.push({
+      kind: "caravanRoute",
+      routeId: hoveredCaravan.routeId,
+      color: opts.colorForOwner(hoveredCaravan.ownerId),
+      ...(hoveredCaravan.payloadKind !== undefined ? { payloadKind: hoveredCaravan.payloadKind } : {}),
+      points,
+    });
+  }
   for (const caravan of opts.caravans ?? []) {
     const canSee = caravan.ownerId === opts.viewPlayerId || isVisible(visible, caravan.q, caravan.r);
     if (!canSee) continue;
@@ -227,6 +255,7 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       wagons: caravan.wagons,
       ...(caravan.payloadKind !== undefined ? { payloadKind: caravan.payloadKind } : {}),
       ...(caravan.facingDirection !== undefined ? { facingDirection: caravan.facingDirection } : {}),
+      ...(caravan.routeId === opts.hoveredCaravanId ? { hovered: true } : {}),
     });
   }
 

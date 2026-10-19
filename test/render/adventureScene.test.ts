@@ -608,7 +608,7 @@ test("hero trail points are capped to the last 25, render-side only (F14)", () =
 
 test("caravan markers share the hero fog gate: hidden in fog, drawn in vision, own seat exempt", () => {
   const map = makeGrassMap(10, 1);
-  const caravan = { q: 6, r: 0, ownerId: 1, wagons: 3 };
+  const caravan = { routeId: "r-enemy", q: 6, r: 0, ownerId: 1, wagons: 3 };
   const enemyHero = new Hero("h-foe", "Foe", 6, 0, "enemy", 1);
 
   const fogged = buildAdventureScene({
@@ -639,7 +639,7 @@ test("caravan markers share the hero fog gate: hidden in fog, drawn in vision, o
     castles: [],
     path: [],
     hover: null,
-    opts: makeRenderOptions({ viewPlayerId: 0, caravans: [{ q: 6, r: 0, ownerId: 0, wagons: 3 }] }),
+    opts: makeRenderOptions({ viewPlayerId: 0, caravans: [{ routeId: "r-own", q: 6, r: 0, ownerId: 0, wagons: 3 }] }),
   });
   assert.equal(nodesOfKind(own, "caravanMarker").length, 1, "own caravan bypasses the fog set exactly like own heroes and castles");
 });

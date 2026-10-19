@@ -62,6 +62,7 @@ import type {
   UnchartedHexNode,
   ValidCharterHexNode,
   CaravanMarkerNode,
+  CaravanRouteNode,
   WorldPoint,
 } from "../types";
 
@@ -267,6 +268,9 @@ export function paintScene(
         break;
       case "caravanMarker":
         paintCaravanMarker(ctx, node, deps);
+        break;
+      case "caravanRoute":
+        paintCaravanRoute(ctx, node);
         break;
       case "hero":
         paintHero(ctx, node, deps);
@@ -719,22 +723,32 @@ export function paintCaravanMarker(ctx: CanvasRenderingContext2D, node: CaravanM
   const marker = node.markerWorld ?? node.world;
   const s = Math.min(1 + (node.wagons - 1) * 0.08, 1.4);
   const sprite =
-    deps?.sprite.resolveSpriteForCaravan?.(node.payloadKind) ??
+    deps?.sprite.resolveSpriteForCaravan?.(node.payloadKind, node.facingDirection) ??
     deps?.sprite.resolveSprite(node.payloadKind === "gold" ? "caravan.gold" : "caravan.resource");
 
-  if (sprite && sprite.ready) {
-    const flip =
-      node.facingDirection === "w" ||
-      node.facingDirection === "nw" ||
-      node.facingDirection === "sw";
+  if (node.hovered) {
+    // Footprint ring under the cart: a bright inner ellipse plus a soft
+    // owner-tinted halo, so a hovered wagon reads at any zoom without
+    // obscuring the sprite itself.
     ctx.save();
-    if (flip) {
-      ctx.translate(x, 0);
-      ctx.scale(-1, 1);
-      ctx.translate(-x, 0);
-    }
-    drawWithDescriptor(ctx, sprite.drawable, sprite.descriptor, x, y, HEX_SIZE * s);
+    ctx.strokeStyle = "rgba(255, 236, 160, 0.95)";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.ellipse(marker.x, marker.y, HEX_SIZE * 0.72, HEX_SIZE * 0.4, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = node.color;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.ellipse(marker.x, marker.y, HEX_SIZE * 0.82, HEX_SIZE * 0.46, 0, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.restore();
+  }
+
+  if (sprite && sprite.ready) {
+    // Directional art is authored per compass heading, so the painter draws it
+    // as-is: the old horizontal-flip trick only ever had two poses.
+    drawWithDescriptor(ctx, sprite.drawable, sprite.descriptor, x, y, HEX_SIZE * s);
 
     ctx.save();
     ctx.fillStyle = node.color;
@@ -786,6 +800,39 @@ export function paintCaravanMarker(ctx: CanvasRenderingContext2D, node: CaravanM
   ctx.font = `bold ${Math.round(9 * fallbackScale)}px sans-serif`;
   ctx.textAlign = "center";
   ctx.fillText(String(node.wagons), marker.x, bodyTop - bodyW / 2 - 3 * fallbackScale);
+  ctx.restore();
+}
+
+export function paintCaravanRoute(ctx: CanvasRenderingContext2D, node: CaravanRouteNode): void {
+  if (node.points.length < 2) return;
+  const gold = node.payloadKind === "gold";
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  // Dark under-stroke keeps the dashed route legible over bright terrain.
+  ctx.strokeStyle = "rgba(0,0,0,0.55)";
+  ctx.lineWidth = 5;
+  tracePoints(ctx, node.points);
+  ctx.stroke();
+  ctx.strokeStyle = gold ? "rgba(255, 214, 102, 0.95)" : "rgba(255, 240, 200, 0.95)";
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([7, 5]);
+  tracePoints(ctx, node.points);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = gold ? "rgba(255, 214, 102, 0.9)" : "rgba(255, 240, 200, 0.9)";
+  for (let i = 1; i < node.points.length; i++) {
+    const p = node.points[i];
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const last = node.points[node.points.length - 1];
+  ctx.strokeStyle = node.color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(last.x, last.y, 7, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.restore();
 }
 

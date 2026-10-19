@@ -10,7 +10,7 @@ import type {
   TradeRouteState,
 } from "@heroes/contracts";
 import { caravanTile, findPath, hexDistance } from "@heroes/engine";
-import { axialToPixel } from "../core/hex";
+import { HEX_SIZE, axialToPixel } from "../core/hex";
 import { directionFromDelta, type HeroDirection } from "../entities/hero";
 import { settings } from "../state/settings";
 import { viewSeat } from "../state/viewSeat";
@@ -66,6 +66,50 @@ function initialFacingForCaravan(caravan: CaravanState, currentTile: Axial): Her
     }
   }
   return "e";
+}
+
+/**
+ * The tiles still to walk on the caravan's current leg, from the tile after
+ * `currentTile` to the leg's final tile. The visual tracker can lag the state
+ * by a whole turn's animation, so the tile is located in the stored path
+ * instead of trusting `pathIndex`; a tile that is not on the path (the origin
+ * settlement while loading) yields the whole leg.
+ */
+function remainingPathFrom(caravan: CaravanState | null, currentTile: Axial): Axial[] {
+  if (!caravan || caravan.path.length === 0) return [];
+  const idx = caravan.path.findIndex((p) => p.q === currentTile.q && p.r === currentTile.r);
+  if (idx >= 0) return caravan.path.slice(idx + 1).map((p) => ({ q: p.q, r: p.r }));
+  return caravan.path.map((p) => ({ q: p.q, r: p.r }));
+}
+
+/**
+ * Which caravan the pointer is over, in world pixels. Uses the sprite's
+ * bottom-anchored footprint box (~1.4 hex tall, ~1.4 hex wide) instead of the
+ * hex under the cursor, so a cart mid-tween between two tiles still answers
+ * under the art. Returns null when nothing is close enough.
+ */
+export function caravanAtWorldPoint(
+  caravans: readonly CaravanMarkerSpec[],
+  point: { x: number; y: number },
+  hexSize: number = HEX_SIZE,
+): TradeRouteId | null {
+  let bestId: TradeRouteId | null = null;
+  let bestDist = Infinity;
+  for (const caravan of caravans) {
+    const base = axialToPixel(caravan.q, caravan.r);
+    const cx = base.x + (caravan.pixelOffset?.x ?? 0);
+    const cy = base.y + (caravan.pixelOffset?.y ?? 0);
+    const dx = Math.abs(point.x - cx);
+    const dy = point.y - cy;
+    if (dx > hexSize * 0.78) continue;
+    if (dy < -hexSize * 1.2 || dy > hexSize * 0.55) continue;
+    const dist = dx * dx + dy * dy;
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestId = caravan.routeId;
+    }
+  }
+  return bestId;
 }
 
 export function computeCaravanWalkPath(
@@ -224,7 +268,9 @@ export class CaravanVisual {
   }
 
   toMarkerSpec(): CaravanMarkerSpec {
+    const remainingPath = remainingPathFrom(this.lastCaravan, this.tile);
     return {
+      routeId: this.routeId,
       q: this.tile.q,
       r: this.tile.r,
       ownerId: this.ownerId,
@@ -238,6 +284,7 @@ export class CaravanVisual {
           }
         : {}),
       facingDirection: this.facingDirection,
+      ...(remainingPath.length > 0 ? { remainingPath } : {}),
     };
   }
 }
@@ -448,12 +495,15 @@ export function resolveCaravanMarkers(
     const origin = resolveOrigin(route, settlements, heroes);
     if (!origin) continue;
     const tile = caravanTile(caravan, { q: origin.q, r: origin.r });
+    const remaining = caravan.path.slice(caravan.pathIndex).map((p) => ({ q: p.q, r: p.r }));
     specs.push({
+      routeId: route.id,
       q: tile.q,
       r: tile.r,
       ownerId: origin.ownerId,
       wagons: route.wagons,
       payloadKind: route.payload.kind,
+      ...(remaining.length > 0 ? { remainingPath: remaining } : {}),
     });
   }
   return specs;

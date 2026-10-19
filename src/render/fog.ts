@@ -2,9 +2,13 @@ import type { Hero } from "../entities/hero";
 import type { Castle } from "../entities/settlement";
 import type { GameState } from "../state/gameState";
 import { hexDistance, type Axial } from "../core/hex";
-import { controlRange, HERO_VISION_RANGE } from "@heroes/engine";
+import { caravanTile, controlRange, HERO_VISION_RANGE } from "@heroes/engine";
 
 export const VISION_RANGE = HERO_VISION_RANGE;
+/** Caravans are scouts-lite: a 2-tile ring around every own wagon, smaller than a hero's 4. */
+export const CARAVAN_VISION_RANGE = 2;
+
+type CaravanVisionSource = { q: number; r: number; ownerId: number };
 
 const VISION_GRID_OFFSET = 32;
 const VISION_GRID_STRIDE = 256;
@@ -84,6 +88,7 @@ export function computeVision(
   castles: readonly Castle[],
   viewPlayerId: number,
   range: number = VISION_RANGE,
+  caravans: readonly CaravanVisionSource[] = [],
 ): VisionSet {
   let sig = `${viewPlayerId}:${range}|H`;
   for (const hero of heroes) {
@@ -94,6 +99,11 @@ export function computeVision(
   for (const c of castles) {
     if (c.ownerId !== viewPlayerId) continue;
     sig += `;${c.tile.q},${c.tile.r},${controlRange(c.level, c.buildings)}`;
+  }
+  sig += "|V";
+  for (const c of caravans) {
+    if (c.ownerId !== viewPlayerId) continue;
+    sig += `;${c.q},${c.r}`;
   }
   if (lastVisionCache && lastVisionCache.signature === sig) {
     return lastVisionCache;
@@ -108,8 +118,27 @@ export function computeVision(
     if (c.ownerId !== viewPlayerId) continue;
     addRingCoords(visible, c.tile, controlRange(c.level, c.buildings));
   }
+  for (const c of caravans) {
+    if (c.ownerId !== viewPlayerId) continue;
+    addRingCoords(visible, { q: c.q, r: c.r }, CARAVAN_VISION_RANGE);
+  }
   lastVisionCache = visible;
   return visible;
+}
+
+/** Own-seat caravan tiles, resolved from live trade routes (the loading ones have no marker and no vision). */
+function caravanVisionSourcesFromState(state: GameState): CaravanVisionSource[] {
+  const sources: CaravanVisionSource[] = [];
+  for (const route of state.tradeRoutes ?? []) {
+    const caravan = route.caravan;
+    if (!caravan) continue;
+    const origin =
+      route.from.kind === "settlement" ? state.settlements[route.from.id] : state.heroes[route.from.id];
+    if (!origin || origin.ownerId === null) continue;
+    const tile = caravanTile(caravan, { q: origin.q, r: origin.r });
+    sources.push({ q: tile.q, r: tile.r, ownerId: origin.ownerId });
+  }
+  return sources;
 }
 
 export function computeVisionFromState(
@@ -117,6 +146,7 @@ export function computeVisionFromState(
   viewPlayerId: number,
   range: number = VISION_RANGE,
 ): VisionSet {
+  const caravanSources = caravanVisionSourcesFromState(state);
   let sig = `${viewPlayerId}:${range}|H`;
   for (const hero of Object.values(state.heroes)) {
     if (hero.ownerId !== viewPlayerId) continue;
@@ -126,6 +156,11 @@ export function computeVisionFromState(
   for (const s of Object.values(state.settlements)) {
     if (s.ownerId !== viewPlayerId) continue;
     sig += `;${s.q},${s.r},${controlRange(s.level, s.buildings)}`;
+  }
+  sig += "|V";
+  for (const c of caravanSources) {
+    if (c.ownerId !== viewPlayerId) continue;
+    sig += `;${c.q},${c.r}`;
   }
   if (lastStateVisionCache && lastStateVisionCache.signature === sig) {
     return lastStateVisionCache;
@@ -139,6 +174,10 @@ export function computeVisionFromState(
   for (const s of Object.values(state.settlements)) {
     if (s.ownerId !== viewPlayerId) continue;
     addRingCoords(visible, { q: s.q, r: s.r }, controlRange(s.level, s.buildings));
+  }
+  for (const c of caravanSources) {
+    if (c.ownerId !== viewPlayerId) continue;
+    addRingCoords(visible, { q: c.q, r: c.r }, CARAVAN_VISION_RANGE);
   }
   lastStateVisionCache = visible;
   return visible;

@@ -175,6 +175,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       },
       isCityOpen: () => this.ui.getCityView()?.isOpen() ?? false,
       getLocalSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
+      getCaravans: () => this.state.getCaravanMarkers(),
     });
   }
 
@@ -498,6 +499,7 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
         pathOrigin: this.state.getPathOrigin() ?? undefined,
         selectedHeroTile: selectedHero ? { q: selectedHero.q, r: selectedHero.r } : undefined,
         inspectedTile: this.view.getInspectedTile() ?? undefined,
+        hoveredCaravanId: this.view.getHoveredCaravanId(),
         gameName,
         uncharted: isUnchartedGame(gameName),
         revealedTiles: gs.players[localId]?.revealedTiles ?? [],

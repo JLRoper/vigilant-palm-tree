@@ -2,7 +2,7 @@ import { Axial, pixelToAxial } from "../core/hex";
 import { Camera } from "./camera";
 import { GameMap } from "../map/gameMap";
 import { SpriteProvider } from "./assets";
-import { computeVision, isVisible } from "./fog";
+import { computeVision, isVisible, VISION_RANGE } from "./fog";
 import { revealTilesFor } from "./reveal";
 import { heroFadeAlpha, observeHeroSightings, pruneHeroSightings } from "./heroSpotted";
 import { MinimapCamera } from "./minimapCamera";
@@ -55,7 +55,7 @@ export class MapRenderer {
 
     const heroes = this.mirror.getHeroes();
     const castles = this.mirror.getSettlements();
-    const visible = computeVision(heroes, castles, opts.viewPlayerId);
+    const visible = computeVision(heroes, castles, opts.viewPlayerId, VISION_RANGE, opts.caravans ?? []);
     const revealed: ReadonlySet<string> | null = opts.uncharted
       ? revealTilesFor(opts.gameName ?? "", opts.revealedTiles ?? [], visible)
       : null;
