@@ -10,6 +10,11 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.15.0] - 2026-10-19
+
+- Settlement panel: the settlement's own name is now the panel's first text (the header), with its owner beside it; the line under the banner labels the holding and its tier (`SETTLEMENT L1`) instead of repeating the name.
+- The **⌂ Settlements** roster rows take the same double-click as the panel banner: the map centres on that settlement and its city view opens, through the same own-settlement/own-turn gate.
+
 ## [0.14.0] - 2026-10-19
 
 - Settlement panel: the settlement's own name and tier now render at the top (the name was written into the level badge and immediately overwritten, so it never appeared).
