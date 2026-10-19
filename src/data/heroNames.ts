@@ -67,6 +67,9 @@ const HERO_NAMES: readonly string[] = [
   "Leon Lionheart",
   "Aurelia the Lionheart",
   "Bastian Goldmane",
+  "Seraphine Emberoath",
+  "Aldric Ashsteel",
+  "Elowen Cinderbrand",
 ];
 
 let usedNames: Set<string> | null = null;

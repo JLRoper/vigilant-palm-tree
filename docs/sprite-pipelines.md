@@ -55,7 +55,7 @@ Files live under `src/resources/` (`tools/sprites/manifest.mjs:1` names the root
 | `resources/` (root) | `castle-l{1,2,3}.png`, `castle-l{1,2,3}-alt{,2,3}.png`, `{settlement,city,castle}-banner.png`, `hero-banner-<id>.png`, `resource-*.png` (rune-stone + 7 style variants) |
 | `resources/buildings/` | `building-pixel-<camelCaseKind>-<level>.png` (+ `-1-alt` plot variant) — the Gemini wave output |
 | `resources/units/arena/` | `<unitTypeId>-{idle,attack,move}.png` — glob-registered |
-| `resources/units/horse/commander-{1..10}/` | `<variant>-<dir>[-2].png` — glob-registered, 10 variants |
+| `resources/units/horse/commander-{1..11}/` | `<variant>-<dir>[-2].png` — glob-registered, 11 variants |
 | `resources/units/icons/` | `<unitTypeId>.png` busts — hand-wired in `src/data/unitImages.ts` |
 | `resources/factions/` | `faction-banner-<id>.png` — glob-registered |
 | `resources/skybox/` | `cityView-background-variant<n>-layer<m>.png` |
@@ -91,7 +91,7 @@ Descriptor maps and how they are populated:
 | `CASTLE_DESCRIPTORS`, `CASTLE_ALT{,2,3}_DESCRIPTORS` | hand-written | 12 | `fitHeight` 1.5/2.2/3.0, `anchorOffsetY` 8/16 |
 | `RESOURCE_*_DESCRIPTORS` (8 styles) | generated from `RESOURCES` | 48 | per-style `hexSizeMul` varies: 0.9 (default/cart/illust/constellation/crest), 0.95 (pile), 0.475 (smol), 0.71 (bubbly); all `anchor: "center"` |
 | `HERO_PLAYER_DESCRIPTORS` | **glob** `units/horse/commander-1/*.png` | 8 dirs (+ frame-2) | `fitHeight` 1.8, `naturalSize` 512 |
-| `HORSE_VARIANT_DESCRIPTORS` | **glob** `units/horse/commander-*/*.png`, filtered per `HORSE_VARIANT_REGISTRY` | 10 variants × 4–8 dirs | diagonal→cardinal fallbacks per variant; optional `-2` run frames; bubbly `naturalSize` 64 |
+| `HORSE_VARIANT_DESCRIPTORS` | **glob** `units/horse/commander-*/*.png`, filtered per `HORSE_VARIANT_REGISTRY` | 11 variants × 4–8 dirs | diagonal→cardinal fallbacks per variant; optional `-2` run frames; bubbly `naturalSize` 64 |
 | `BUILDING_DESCRIPTORS` | generated building keys + glob-resolved files | 114 | bottom-anchored pixel assets; offsets come from the generated anchor map |
 | `UNIT_ARENA_DESCRIPTORS` | **glob** `units/arena/*.png` | 36 ids × 3 poses (mage gap) | `bottom`, `fitHeight 1.3`, `naturalSize 128` |
 | `CARAVAN_DESCRIPTORS` | hand-written (`caravan-supply.png`, `caravan-treasury.png`) | 2 | `bottom`, `fitHeight 1.45`, `naturalSize 256`; preloaded eagerly alongside `castle.*` |
@@ -258,6 +258,19 @@ prompt knowledge — replace the "transparent background" clause with "plain
 uniform solid light-gray background with absolutely no checkerboard pattern
 anywhere", and append "no checkerboard pattern anywhere on the canvas" — plus the
 full **wiring recipe** (§4.6).
+
+`tools/sprites/gemini-hero-sprite.mjs` (2026-10-18, first used for `paladin2`) is
+the mounted-hero counterpart: image-in → image-out with the existing variant's
+per-direction sprite as the pose/style reference, then a border-connected flood
+fill of the model's flat grey background (only background connected to the canvas
+edge is cleared, so a silver-white mane or steel armour survives), a soft 2px
+boundary matte, and a trim/resize that copies the **reference sprite's** alpha
+bounding box — same content height, same bottom edge, same centre x on the 512²
+canvas — so a generated variant slots into `commander-<N>/` with the original's
+framing instead of the model's. `--kind banner` cover-crops to the 320×100 roster
+banner. Prompts, reference hashes and per-file bounds live with the wave
+(`design/hero-variants/<id>/`), which is what `docs/asset-provenance.md` asks a
+new art wave to commit.
 
 ### 4.4 Pipeline D — unit arena art waves (`design/arena-unit-sprites/`)
 
@@ -503,7 +516,8 @@ F4/F5 retain 2026-10-10 inventory counts as historical snapshots; the status bel
 | `packages/engine/src/styleResolver.ts` | consumes the generated list; `pickStyleForBuilding` (order-independent fall-through), `farmFieldStyleAt` |
 | `packages/engine/src/buildingSpriteCoverage.ts` | exhaustive manual per-kind/level key declaration; separate unit-test coverage gate |
 | `.kilo/skills/building-sprite-gen/` | skill + 4 Gemini/alpha scripts (auto-regenerates keys) |
-| `tools/sprites/` | procedural/FLUX helpers, building key and anchor generators, validation, run-frame tuning |
+| `tools/sprites/` | procedural/FLUX helpers, the Gemini hero-variant generator (`gemini-hero-sprite.mjs`), building key and anchor generators, validation, run-frame tuning |
+| `design/hero-variants/<id>/` | committed prompt files, reference hashes and per-file alpha bounds for a generated hero variant (1024² masters gitignored) |
 | `design/arena-unit-sprites/`, `design/building-pixel-wave/` | wave masters/prompts/helpers, wiring recipe |
 | `local/` (gitignored) | historical measurement/probe tools, prompt caches, and logs; not required by current anchor codegen |
 | `dependency-cruiser.cjs`, `test/render/paint2d.*.test.ts` | structural constraints |
