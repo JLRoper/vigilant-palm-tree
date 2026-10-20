@@ -166,7 +166,7 @@ the seam test). It:
 | Builder | Sprite-relevant decisions |
 |---|---|
 | `adventureScene.ts` | hero `runFrame` from `hero.moving && floor(moveProgress*2)%2` (:156); bob/scaleY from `moveProgress` (:152–155); per-hero fade `alpha` for non-own sightings (:157, fed by `renderer.ts`'s `heroSpotted` tracker); `caravanMarker` nodes from pre-resolved `opts.caravans` (:134–145), fog-gated like heroes; trail/path own-seat gating |
-| `cityScene.ts` | per-building `farmStyle` from engine `farmFieldStyleAt(settlementName, gx, gy)` (:146–148); `constructionStage` from `constructionStageFor(buildingConstructionProgress(b))` (:150–152); painter's-algorithm `gx+gy` sort |
+| `cityScene.ts` | per-building `farmStyle` from engine `farmFieldStyleAt(settlementName, gx, gy)`, plus the exact `farmSpriteKey` from `farmPlotVariantAt(...)` (or a forced `farmSpriteStyle`); `constructionStage` from `constructionStageFor(buildingConstructionProgress(b))`; painter's-algorithm `gx+gy` sort |
 | `battleScene.ts` | `dominantUnitTypeId(entries)` — highest count, first stored wins ties (:91–99); `pose = move \| attack \| idle` from the mover/attacker window (:253); `mirror` for defenders (art authored facing right once, :255); `hexSize` per node |
 
 ### 3.5 Painters — `src/render/scene/paint2d/index.ts` (1189 lines, single file + `colors.ts`/`geometry.ts`/`deps.ts`)
@@ -227,6 +227,17 @@ treatment: `npm run gen:sprite-keys` (key map) + `npm run gen:building-anchors`
 (measured bottom pad) pick it up like any other sprite. Verify on disk with
 `node tools/sprites/gen-shipyard-sprite.mjs --check`; the output is byte-stable,
 so a re-run is a no-op.
+
+`tools/sprites/gen-farm-sprites.mjs` extends the same idea to the farm-plot family
+(`building-pixel-farm{Wheat,Veg,Orchard,Paddock,Vines}-1.png`). Its contract is the
+grid, not a reference image: a 128x64 logical ground diamond (true 2:1, south vertex
+on the bottom canvas row), 8x nearest-neighbour upscale to 1024, drawn at
+`hexSizeMul 1.0` so the diamond lands exactly on the 2x2 footprint. There is no side
+plinth (1px outline + 2-3px verge) and `clipToPlot()` trims every prop to the plot's
+own diamond, so a field never bleeds into a neighbouring cell. Each style is a
+separate `building-pixel-<style>-1.png`, which is why `farmPlotVariantAt` can mix
+them per cell with no persistence. Verify with `node tools/sprites/gen-farm-sprites.mjs
+--check`.
 
 ### 4.2 Pipeline B — FLUX via DeepInfra (`tools/sprites/flux-*.mjs`, 25 scripts)
 

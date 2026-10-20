@@ -40,6 +40,17 @@ import { CityDesignBoxManager } from "./CityDesignBoxManager";
 import { recruitmentSnapshot, type RecruitmentSnapshotModel } from "../recruitmentPanelModel";
 import { CITY_GRID_PAD, cityGridRect, collectPanelRects, elementRect } from "./panelRects";
 
+/**
+ * `?farm=<style>` swaps every farm field's art for the `building-pixel-<style>-1`
+ * sprite, so a plot variant can be judged inside the real city grid without a
+ * rebuild. Absent (the normal case) keeps the deterministic pixel/pixel-alt pick.
+ */
+function farmSpriteStyleOverride(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const style = new URLSearchParams(window.location.search).get("farm");
+  return style && /^[A-Za-z][A-Za-z0-9]*$/.test(style) ? style : undefined;
+}
+
 /** Pre-city selection, captured at open() so close can restore the exact panel state the player left behind. */
 export interface CitySelectionSnapshot {
   heroId: string | null;
@@ -391,6 +402,7 @@ export class CityView {
       upgrades: this.getSettlement()?.upgrade,
       district: this.openDistrict,
       backdrop: this.backdrop,
+      farmSpriteStyle: farmSpriteStyleOverride(),
       buildings: this.buildingsWithWorkers(),
       ghost,
       selectedKeys: sceneSelected,
