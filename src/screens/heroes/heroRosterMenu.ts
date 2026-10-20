@@ -35,6 +35,8 @@ export class HeroRosterMenu {
       zIndex: 60,
       minTop: toolbarHeight,
       clickToFront: true,
+      resizeable: true,
+      resizeKey: "heroRoster",
       onMove: (pos) => savePanelPosition("heroes", pos),
       onClose: () => {
         this.visible = false;

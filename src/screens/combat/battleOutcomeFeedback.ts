@@ -349,6 +349,7 @@ export function showVerdictCard(model: BattleOutcomeCardModel, autoDismissMs = V
     backdropClick: true,
     escape: true,
   });
+  modal.enableResize("battleOutcome");
   const wrapper = modal.root.parentElement;
   const autoDismiss = createVerdictCardAutoDismiss(() => modal.close(), undefined, autoDismissMs);
   modal.setOnClose(() => {

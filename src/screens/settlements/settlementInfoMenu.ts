@@ -125,6 +125,8 @@ export class SettlementInfoMenu {
       zIndex: 60,
       minTop: toolbarHeight,
       clickToFront: true,
+      resizeable: true,
+      resizeKey: "settlementInfo",
       onMove: (pos) => {
         this.docked.markUserMoved();
         savePanelGeometry("settlementInfo", pos);

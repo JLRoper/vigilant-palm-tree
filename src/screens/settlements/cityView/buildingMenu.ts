@@ -187,6 +187,8 @@ export class BuildingMenu {
       width: 240,
       zIndex: 75,
       clickToFront: true,
+      resizeable: true,
+      resizeKey: "buildingMenu",
       onClose: () => {
         this.menu = null;
         this.onMenuClosed?.();

@@ -40,6 +40,7 @@ function rosterList(title: string, platoons: Platoon[], unitTypes: Record<string
 
 export function openTestBattleSetup(): void {
   const modal = openCenteredModal(document.body, "Test Battle Setup", 480);
+  modal.enableResize("testBattle");
 
   const status = document.createElement("div");
   status.textContent = "Loading unit catalog...";

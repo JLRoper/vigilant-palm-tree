@@ -96,6 +96,8 @@ export class TileInfoPanel {
       draggable: false,
       zIndex: PANEL_Z_INDEX,
       clickToFront: true,
+      resizeable: true,
+      resizeKey: "tileInfo",
       onClose: () => {
         this.visible = false;
         this.lastSignature = null;

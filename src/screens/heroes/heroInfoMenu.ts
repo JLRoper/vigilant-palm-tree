@@ -349,6 +349,8 @@ export class HeroInfoMenu {
       zIndex: 60,
       minTop: toolbarHeight,
       clickToFront: true,
+      resizeable: true,
+      resizeKey: "heroInfo",
       onMove: (pos) => {
         this.docked.markUserMoved();
         savePanelGeometry("heroInfo", pos);

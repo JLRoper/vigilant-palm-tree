@@ -10,6 +10,15 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.24.0] - 2026-10-20
+
+The City Design panel is a normal floating menu, and every floating panel/menu can now be resized.
+
+- **City Design is a movable floating panel** — the city view's Build / Workforce / Recruit / Back box was a hand-styled fixed div at a hardcoded z-index; it is now a `PopupMenu` like the workforce and recruitment panels: drag it by its title bar and it stays where you put it (position remembered between sessions under the `cityDesign` key), it joins the panel click-to-front stack, it carries the shared corner resize grip, and its first open still runs the collision solve so it cannot bury another panel. It has no close button on purpose — the city view owns its lifetime and nothing else reopens it, so an × would strand the player without Build or Back.
+- **Every floating panel and menu is resizeable** — the recruitment panel's corner grip is now the shared default: hero and settlement panels, the Heroes/Settlements rail rosters (the grip hides while a roster is docked in the rail and the remembered size returns when you pop it out), City Design, Workforce, Recruitment, the build palette, building and selection menus, the adventure map's tile info, the game log, and the Keyboard & Mouse, Logistics, Battle Results and Test Battle Setup windows. Each panel remembers its own size (`heroesJs.panelSize.v1`), separate from its position. Confirm prompts and small forms (New Game, Load Game, Sign In, Settings, Multiplayer Lobby, Assault confirm) keep their fixed layout.
+- Resizing now measures and applies the bordered box, so reopening a resized panel no longer creeps it 2px wider each time.
+
+
 ## [0.23.0] - 2026-10-19
 
 Trade-route carts that meet a hero no longer idle out the rest of the day, and a hovered cart's route preview follows a moving hero.

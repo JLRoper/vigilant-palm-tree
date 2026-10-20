@@ -50,6 +50,8 @@ export class WorkforcePanel {
       closeable: true,
       draggable: true,
       clickToFront: true,
+      resizeable: true,
+      resizeKey: "workforcePanel",
       onClose: () => {
         this.menu = null;
       },

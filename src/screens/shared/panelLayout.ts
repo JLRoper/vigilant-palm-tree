@@ -1,4 +1,21 @@
-export type PanelGeometryKey = "heroInfo" | "settlementInfo" | "buildPalette" | "workforcePanel" | "recruitmentPanel";
+export type PanelGeometryKey =
+  | "heroInfo"
+  | "settlementInfo"
+  | "heroRoster"
+  | "settlementRoster"
+  | "buildPalette"
+  | "workforcePanel"
+  | "recruitmentPanel"
+  | "cityDesign"
+  | "buildingMenu"
+  | "buildingSelection"
+  | "tileInfo"
+  | "logPanel"
+  | "hotkeys"
+  | "logistics"
+  | "battleResult"
+  | "battleOutcome"
+  | "testBattle";
 
 export interface PanelGeometry {
   x: number;
@@ -9,7 +26,25 @@ type StoredGeometry = Partial<Record<PanelGeometryKey, PanelGeometry>>;
 
 const STORAGE_KEY = "heroesJs.panelGeometry.v1";
 
-const ALLOWED: ReadonlySet<string> = new Set(["heroInfo", "settlementInfo", "buildPalette", "workforcePanel", "recruitmentPanel"]);
+const ALLOWED: ReadonlySet<string> = new Set<PanelGeometryKey>([
+  "heroInfo",
+  "settlementInfo",
+  "heroRoster",
+  "settlementRoster",
+  "buildPalette",
+  "workforcePanel",
+  "recruitmentPanel",
+  "cityDesign",
+  "buildingMenu",
+  "buildingSelection",
+  "tileInfo",
+  "logPanel",
+  "hotkeys",
+  "logistics",
+  "battleResult",
+  "battleOutcome",
+  "testBattle",
+]);
 
 let cachedRaw: string | null = null;
 let cachedStore: StoredGeometry = {};

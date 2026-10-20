@@ -13,6 +13,12 @@ const GRIP_PX = 14;
 export interface PanelResizeOptions {
   /** Remembers the last size under this key (same store as panel geometry). */
   key?: PanelGeometryKey;
+  /**
+   * Apply the remembered size to the target the moment the grip is attached
+   * (default true). False for a surface that starts docked -- the rail owns its
+   * size there, and the panel re-applies the stored size when it floats.
+   */
+  applyStored?: boolean;
   minWidth?: number;
   minHeight?: number;
 }
@@ -29,7 +35,7 @@ export function attachPanelResizeTo(target: ResizeTarget, opts: PanelResizeOptio
   const minW = opts.minWidth ?? MIN_WIDTH;
   const minH = opts.minHeight ?? MIN_HEIGHT;
 
-  if (key) {
+  if (key && opts.applyStored !== false) {
     const stored = loadPanelSize(key);
     if (stored) target.apply(stored.w, stored.h);
   }

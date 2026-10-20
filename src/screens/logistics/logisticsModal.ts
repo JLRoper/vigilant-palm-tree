@@ -268,6 +268,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
   });
   modal.root.style.width = "min(660px, calc(100vw - 48px))";
   modal.root.style.maxWidth = "calc(100vw - 48px)";
+  modal.enableResize("logistics");
 
   // Persistent create-form controls, held across renders so an automatic
   // refresh (state:committed / turn:ended / resync) can preserve the user's

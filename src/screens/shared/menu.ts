@@ -1,6 +1,6 @@
 import { raisePanel, removePanel, type StackablePanel } from "./panelStack";
 import { attachPanelResize } from "./panelResize";
-import type { PanelGeometryKey } from "./panelLayout";
+import { loadPanelSize, type PanelGeometryKey } from "./panelLayout";
 
 const MENU_FONT = "system-ui, sans-serif";
 const MENU_FONT_SIZE = "13px";
@@ -163,6 +163,8 @@ export class PopupMenu implements StackablePanel {
   private dragOffset: { dx: number; dy: number } | null = null;
   private pos: { x: number; y: number };
   private onClose?: () => void;
+  private resizeGrip: HTMLDivElement | null = null;
+  private resizeKey?: PanelGeometryKey;
 
   constructor(private opts: PopupMenuOptions) {
     this.draggable = opts.draggable ?? true;
@@ -277,9 +279,7 @@ export class PopupMenu implements StackablePanel {
     const parent = opts.parent ?? document.body;
     parent.appendChild(this.root);
 
-    if (opts.resizeable) {
-      attachPanelResize({ key: opts.resizeKey }, this);
-    }
+    if (opts.resizeable) this.enableResize(opts.resizeKey);
   }
 
   setTitle(text: string): void {
@@ -342,8 +342,12 @@ export class PopupMenu implements StackablePanel {
         maxHeight: "calc(50% - 4px)",
         flex: "0 1 auto",
         minHeight: "0",
+        // A grip drag sets an explicit height; the rail sizes this panel, so
+        // drop it here and let applyStoredSize() put it back on pop-out.
+        height: "",
       });
       this.setDraggable(false);
+      this.syncResizeGrip();
       return;
     }
     Object.assign(this.root.style, {
@@ -359,6 +363,8 @@ export class PopupMenu implements StackablePanel {
     });
     this.setPosition(this.pos.x, this.pos.y);
     this.setDraggable(this.opts.draggable ?? true);
+    this.applyStoredSize();
+    this.syncResizeGrip();
   }
 
   getLayout(): MenuLayout {
@@ -386,6 +392,10 @@ export class PopupMenu implements StackablePanel {
 
   /** Explicit panel size (the resize grip); the body scrolls inside it. */
   setSize(width: number, height: number): void {
+    // The grip measures the bordered box (getBoundingClientRect) and hands that
+    // back as the size, so size the border box here too -- otherwise every
+    // reopen re-applied a content-box width and the panel crept 2px wider.
+    this.root.style.boxSizing = "border-box";
     this.root.style.width = `${Math.round(width)}px`;
     this.root.style.height = `${Math.round(height)}px`;
     this.fitToViewport();
@@ -395,6 +405,37 @@ export class PopupMenu implements StackablePanel {
   getSize(): { w: number; h: number } {
     const rect = this.root.getBoundingClientRect();
     return { w: Math.round(rect.width), h: Math.round(rect.height) };
+  }
+
+  /**
+   * Adds the shared corner resize grip (idempotent). The constructor's
+   * `resizeable` option routes through here, and surfaces built by a helper
+   * (openCenteredModal's modals, say) opt in by calling it after construction.
+   */
+  enableResize(key?: PanelGeometryKey): void {
+    if (this.resizeGrip) return;
+    this.resizeKey = key;
+    this.resizeGrip = attachPanelResize(
+      { key, applyStored: this.layout === "floating" },
+      this,
+    );
+    this.syncResizeGrip();
+  }
+
+  /**
+   * The grip belongs to a floating panel only: a docked one is sized by the
+   * rail (width 100%, height capped), and a grip drag would fight that layout.
+   */
+  private syncResizeGrip(): void {
+    if (!this.resizeGrip) return;
+    this.resizeGrip.style.display = this.layout === "docked" ? "none" : "";
+  }
+
+  /** Re-applies the remembered size after a dock -> float round trip. */
+  private applyStoredSize(): void {
+    if (!this.resizeKey) return;
+    const stored = loadPanelSize(this.resizeKey);
+    if (stored) this.setSize(stored.w, stored.h);
   }
 
   setOnClose(fn: () => void): void {

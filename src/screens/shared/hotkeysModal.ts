@@ -51,6 +51,7 @@ export function openHotkeysModal(): void {
   });
   document.addEventListener("keydown", onKeyDown);
   modal.root.dataset.hotkeysModal = "true";
+  modal.enableResize("hotkeys");
 
   for (const section of SECTIONS) {
     const heading = document.createElement("div");

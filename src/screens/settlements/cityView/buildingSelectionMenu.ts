@@ -126,6 +126,8 @@ export class BuildingSelectionMenu {
       width,
       zIndex: 75,
       clickToFront: true,
+      resizeable: true,
+      resizeKey: "buildingSelection",
       onClose: () => { this.menu = null; },
     });
 
