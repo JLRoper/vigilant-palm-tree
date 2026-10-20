@@ -10,6 +10,13 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.24.0] - 2026-10-20
+
+- **Two new mounted hero variants: Black Dragon Rider and Red Dragon Rider.** Both are repaints of the existing Drake Rider's chunky pixel-art dragon and rider — an obsidian-black dragon with indigo-violet sheen and a black/silver rider, and a crimson-scarlet dragon with ember-orange membranes and a black/brass rider. They appear in the recruit picker with no UI change and have their own 320×100 roster banners (stormy twilight and volcanic sunset).
+- Both variants ship all eight headings. The `se`/`sw` diagonals were regenerated from the front view after the side-profile versions measured too close to `e`/`w` at map size; they now read as genuine three-quarter views, head-right and head-left respectively. Base frames only (no `-2` gallop files), so both run frames render the base sprite.
+- `gemini-hero-sprite.mjs` gained `--subject <noun>` (dragon-facing wording instead of "horse and rider") and a `{{HEAD_SIDE}}` prompt placeholder for the explicit three-quarter composition rule. `test/render/dragonRiderArt.test.ts` pins both 8-way 512px file sets, and `test/heroVariants.e2e.ts` now A/B diffs both riders against the drake (`darkened` / `reddened` signals).
+- The starter-variant draw now ranges over 16 variants, so the three adventure visual baselines were regenerated; the churn is the hero sprite and panel banner only.
+
 ## [0.23.0] - 2026-10-20
 
 Farm fields: five grid-exact plot styles, mixed per cell
