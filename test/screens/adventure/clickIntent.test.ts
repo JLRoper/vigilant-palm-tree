@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { GameMap } from "../../../src/map/gameMap";
 import type { Hero } from "../../../src/entities/hero";
-import { makeHero, makePlayer, makeState } from "../../charter/_helpers";
+import { makeHero, makePlayer, makeSettlement, makeState } from "../../charter/_helpers";
 import { clickRejectionToast, resolveAdventureClick } from "../../../src/screens/adventure/clickIntent";
 
 function stubHero(id: string, ownerId: number, q: number, r: number, movementRemaining = 10): Hero {
@@ -65,7 +65,9 @@ test("charter mode without valid hexes falls through to the normal click pipelin
     charterMode: true,
     validCharterHexes: null,
   });
-  assert.deepEqual(intent, { kind: "select-hero", heroId: "h0" });
+  // Falls through to the hero branch -- and that hero is the selected one, so
+  // the click is a deselect (the toggle).
+  assert.deepEqual(intent, { kind: "deselect-hero", heroId: "h0" });
 });
 
 test("a drag that crossed the move threshold swallows the click", () => {
@@ -391,4 +393,65 @@ test("when visibleHexes includes the enemy hero's hex, clicking it resolves to a
   if (intent.kind !== "attack") return;
   assert.equal(intent.heroId, "h0");
   assert.deepEqual(intent.dest, { q: 1, r: 0 });
+});
+
+// Click-to-deselect: a click is a toggle. Select the hero, move it, click it
+// again to put it down; same for a settlement. The second click of a
+// double-click must never toggle, because double-clicking a settlement is the
+// way into its city view.
+test("clicking the already-selected hero deselects it", () => {
+  const state = makeState({ heroes: [makeHero("h0", 0, 2, 2)], selectedHeroId: "h0" });
+  const intent = resolve({ state, heroes: { h0: stubHero("h0", 0, 2, 2) }, hover: { q: 2, r: 2 } });
+  assert.deepEqual(intent, { kind: "deselect-hero", heroId: "h0" });
+});
+
+test("clicking another of your own heroes switches selection instead of deselecting", () => {
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 2, 2), makeHero("h2", 0, 4, 4)],
+    selectedHeroId: "h0",
+  });
+  const intent = resolve({
+    state,
+    heroes: { h0: stubHero("h0", 0, 2, 2), h2: stubHero("h2", 0, 4, 4) },
+    hover: { q: 4, r: 4 },
+  });
+  assert.deepEqual(intent, { kind: "select-hero", heroId: "h2" });
+});
+
+test("the second click of a double-click never deselects a hero", () => {
+  const state = makeState({ heroes: [makeHero("h0", 0, 2, 2)], selectedHeroId: "h0" });
+  const intent = resolve({
+    state,
+    heroes: { h0: stubHero("h0", 0, 2, 2) },
+    hover: { q: 2, r: 2 },
+    clickCount: 2,
+  });
+  assert.deepEqual(intent, { kind: "select-hero", heroId: "h0" });
+});
+
+test("clicking the already-selected settlement deselects it", () => {
+  const state = makeState({ selectedSettlementId: "s0" });
+  const intent = resolve({ state, hover: { q: 2, r: 2 } });
+  assert.deepEqual(intent, { kind: "deselect-settlement", settlementId: "s0" });
+});
+
+test("clicking a different settlement while one is selected selects the new one", () => {
+  const state = makeState({
+    settlements: [makeSettlement("s0", 0, 2, 2), makeSettlement("s2", 0, 5, 5)],
+    selectedSettlementId: "s0",
+  });
+  const intent = resolve({ state, hover: { q: 5, r: 5 } });
+  assert.deepEqual(intent, { kind: "select-settlement", settlementId: "s2" });
+});
+
+test("the second click of a double-click never deselects a settlement", () => {
+  const state = makeState({ selectedSettlementId: "s0" });
+  const intent = resolve({ state, hover: { q: 2, r: 2 }, clickCount: 2 });
+  assert.deepEqual(intent, { kind: "select-settlement", settlementId: "s0" });
+});
+
+test("empty ground with only a settlement selected puts it down instead of asking for a hero", () => {
+  const state = makeState({ selectedSettlementId: "s0" });
+  const intent = resolve({ state, hover: { q: 9, r: 9 } });
+  assert.deepEqual(intent, { kind: "deselect-settlement", settlementId: "s0" });
 });

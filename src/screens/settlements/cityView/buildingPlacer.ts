@@ -1,8 +1,7 @@
 import { cityLayout, coversCell as reCoversCell, screenToGridCell } from "../../../core/cityGrid";
 import type { CityViewSize } from "@heroes/engine";
 import type { BuildingDef, BuildingKind } from "@heroes/contracts";
-import { PopupMenu, styleButton, menuTheme } from "@screens/shared/menu";
-import { savePanelGeometry } from "@screens/shared/panelLayout";
+import { FloatingPanel, styleButton, panelTheme, createPanel } from "@screens/shared/panel";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import {
   buildingPlacementCost,
@@ -70,9 +69,10 @@ export class BuildingPlacer {
   private isDistrict = false;
   /** Terrain of the open district's hex (null for the main settlement / no map). */
   private districtTerrain: string | null = null;
-  private palette: PopupMenu | null = null;
+  private palette: FloatingPanel | null = null;
   private paletteMode: PaletteMode = "build";
   private onPlaced: (() => void) | null = null;
+  private onPaletteStateChange: (() => void) | null = null;
   private selectedKind: BuildingKind | null = null;
   private onConfirm: (() => void) | null = null;
   private originalBuildings: BuildingDef[] = [];
@@ -227,18 +227,20 @@ export class BuildingPlacer {
     this.paletteMode = "build";
     this.selectedKind = null;
 
-    this.palette = new PopupMenu({
+    const palette = createPanel({
       parent,
       title: "Building Palette",
+      key: "buildPalette",
+      // Anchored beside the Build button on open; only the size is remembered.
+      persistPosition: false,
+      defaultPosition: { x: anchorX, y: anchorY },
       width: 240,
-      initialPosition: { x: anchorX, y: anchorY },
       minTop: toolbarHeight,
       zIndex: 75,
-      clickToFront: true,
       onClose: () => this.handlePaletteClose(),
-      onMove: (pos) => savePanelGeometry("buildPalette", pos),
     });
-    this.palette.setDraggable(true);
+    palette.setDraggable(true);
+    this.palette = palette;
 
     this.renderPaletteBody();
   }
@@ -246,6 +248,13 @@ export class BuildingPlacer {
   private handlePaletteClose(): void {
     this.cancelPlacement();
     this.palette = null;
+    // The city's Build button mirrors "is the palette open"; a close that did
+    // not come from cityView (its ×, Escape) must flip it back too.
+    this.onPaletteStateChange?.();
+  }
+
+  setOnPaletteStateChange(cb: (() => void) | null): void {
+    this.onPaletteStateChange = cb;
   }
 
   private refreshPaletteSelection(): void {
@@ -342,7 +351,7 @@ export class BuildingPlacer {
       borderRadius: "4px",
       fontSize: "11px",
       cursor: "pointer",
-      fontFamily: menuTheme.button.fontFamily,
+      fontFamily: panelTheme.button.fontFamily,
     });
     btn.addEventListener("click", () => {
       if (this.paletteMode === mode) return;
@@ -405,7 +414,7 @@ export class BuildingPlacer {
           borderRadius: "2px",
           fontSize: "11px",
           cursor: disabled ? "not-allowed" : "pointer",
-          fontFamily: menuTheme.button.fontFamily,
+          fontFamily: panelTheme.button.fontFamily,
           opacity: disabled ? "0.5" : "1",
           display: "flex",
           alignItems: "center",

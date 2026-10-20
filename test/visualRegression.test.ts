@@ -143,6 +143,14 @@ async function dismissHomeAndCreateGame(page: Page, name: string, seed: number):
   await nameInput.fill(name);
   const seedInput = page.locator("input[type=number]").first();
   await seedInput.fill(String(seed));
+  // Pin the fixture's own choices instead of inheriting whatever the form's
+  // defaults are today: these screenshots need a fully visible small map with
+  // no AI turn interleaved, so a change to the player-facing defaults (map
+  // size, enemies, hidden map) must not silently rewrite every baseline.
+  await page.locator("select").first().selectOption("small");
+  await page.locator('button:text-is("0")').first().click();
+  const unchartedBox = page.locator('input[type="checkbox"]').first();
+  if ((await unchartedBox.count()) > 0 && (await unchartedBox.isChecked())) await unchartedBox.uncheck();
   await page.locator("button", { hasText: "Create Game" }).click();
   await wait(1000);
 

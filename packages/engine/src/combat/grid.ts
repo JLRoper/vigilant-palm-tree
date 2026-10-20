@@ -63,10 +63,142 @@ export function makeBattleGrid(
   const candidates = hexes.filter((h) => columnOf(h) > 0 && columnOf(h) < cols - 1);
   const chosen = new Set<string>();
   const maxObstacles = Math.min(obstacleCount, candidates.length);
-  while (chosen.size < maxObstacles) {
-    const idx = Math.floor(rng() * candidates.length);
-    chosen.add(`${candidates[idx].q},${candidates[idx].r}`);
+
+  // Obstacle pattern types for varied, interesting layouts
+  type ObstaclePattern = "single" | "pair" | "line" | "cluster" | "wall";
+
+  // Hex neighbors in axial coordinates (pointy-top)
+  const NEIGHBORS: Axial[] = [
+    { q: 1, r: 0 }, { q: 0, r: 1 }, { q: -1, r: 1 },
+    { q: -1, r: 0 }, { q: 0, r: -1 }, { q: 1, r: -1 }
+  ];
+
+  // Get all valid neighbors of a hex that are also in candidates
+  function getValidNeighbors(hex: Axial): Axial[] {
+    return NEIGHBORS.map(d => ({ q: hex.q + d.q, r: hex.r + d.r }))
+      .filter(n => candidates.some(c => c.q === n.q && c.r === n.r && !chosen.has(`${n.q},${n.r}`)));
   }
+
+  // Try to place a pattern starting from a seed hex
+  function tryPlacePattern(startHex: Axial, pattern: ObstaclePattern): Axial[] | null {
+    const placed: Axial[] = [startHex];
+    chosen.add(`${startHex.q},${startHex.r}`);
+
+    switch (pattern) {
+      case "single":
+        return placed;
+
+      case "pair": {
+        const neighbors = getValidNeighbors(startHex);
+        if (neighbors.length === 0) return null;
+        const partner = neighbors[Math.floor(rng() * neighbors.length)];
+        placed.push(partner);
+        chosen.add(`${partner.q},${partner.r}`);
+        return placed;
+      }
+
+      case "line": {
+        // Pick a direction and extend 2-4 more hexes
+        const dirIdx = Math.floor(rng() * 6);
+        const dir = NEIGHBORS[dirIdx];
+        const lineLength = 3 + Math.floor(rng() * 3); // 3-5 tiles
+        let current = startHex;
+        for (let i = 1; i < lineLength; i++) {
+          const next = { q: current.q + dir.q, r: current.r + dir.r };
+          if (!candidates.some(c => c.q === next.q && c.r === next.r && !chosen.has(`${next.q},${next.r}`))) {
+            break;
+          }
+          placed.push(next);
+          chosen.add(`${next.q},${next.r}`);
+          current = next;
+        }
+        return placed.length >= 2 ? placed : null;
+      }
+
+      case "cluster": {
+        // Grow a blob around the seed (3-6 tiles)
+        const clusterSize = 3 + Math.floor(rng() * 4);
+        const frontier = [...getValidNeighbors(startHex)];
+        while (placed.length < clusterSize && frontier.length > 0) {
+          const idx = Math.floor(rng() * frontier.length);
+          const next = frontier[idx];
+          frontier.splice(idx, 1);
+          if (chosen.has(`${next.q},${next.r}`)) continue;
+          placed.push(next);
+          chosen.add(`${next.q},${next.r}`);
+          frontier.push(...getValidNeighbors(next));
+        }
+        return placed.length >= 2 ? placed : null;
+      }
+
+      case "wall": {
+        // A short wall: 4-6 tiles in a line, perpendicular to center
+        const cx = 0; // center column
+        const isLeft = startHex.q < cx;
+        // Wall runs roughly vertical (along r axis)
+        const dir = isLeft ? { q: 0, r: 1 } : { q: 0, r: 1 };
+        const wallLength = 4 + Math.floor(rng() * 3); // 4-6 tiles
+        let current = startHex;
+        for (let i = 1; i < wallLength; i++) {
+          const next = { q: current.q + dir.q, r: current.r + dir.r };
+          if (!candidates.some(c => c.q === next.q && c.r === next.r && !chosen.has(`${next.q},${next.r}`))) {
+            break;
+          }
+          placed.push(next);
+          chosen.add(`${next.q},${next.r}`);
+          current = next;
+        }
+        return placed.length >= 3 ? placed : null;
+      }
+    }
+    return null;
+  }
+
+  // Pattern weights - can be adjusted per biome later
+  const patternWeights: { pattern: ObstaclePattern; weight: number }[] = [
+    { pattern: "single", weight: 30 },
+    { pattern: "pair", weight: 20 },
+    { pattern: "line", weight: 20 },
+    { pattern: "cluster", weight: 20 },
+    { pattern: "wall", weight: 10 },
+  ];
+  const totalWeight = patternWeights.reduce((sum, p) => sum + p.weight, 0);
+
+  // Place obstacles using patterns until we run out of budget or candidates
+  const candidateList = [...candidates];
+  let obstaclesPlaced = 0;
+  while (obstaclesPlaced < maxObstacles && candidateList.length > 0) {
+    // Pick a random unused candidate as seed
+    const seedIdx = Math.floor(rng() * candidateList.length);
+    const seedHex = candidateList[seedIdx];
+    if (chosen.has(`${seedHex.q},${seedHex.r}`)) {
+      candidateList.splice(seedIdx, 1);
+      continue;
+    }
+
+    // Pick a pattern weighted
+    let roll = rng() * totalWeight;
+    let selectedPattern: ObstaclePattern = "single";
+    for (const pw of patternWeights) {
+      roll -= pw.weight;
+      if (roll <= 0) {
+        selectedPattern = pw.pattern;
+        break;
+      }
+    }
+
+    // Try to place it
+    const placed = tryPlacePattern(seedHex, selectedPattern);
+    if (placed) {
+      obstaclesPlaced += placed.length;
+    } else {
+      // Fallback to single
+      chosen.add(`${seedHex.q},${seedHex.r}`);
+      obstaclesPlaced += 1;
+    }
+    candidateList.splice(seedIdx, 1);
+  }
+
   for (const h of hexes) {
     if (chosen.has(`${h.q},${h.r}`)) h.impassable = true;
   }

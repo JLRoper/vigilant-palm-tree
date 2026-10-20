@@ -8,7 +8,8 @@ import { fixedTestPlayerPlatoons, randomAiPlatoons } from "../../combat/testArmi
 import { catalogFailed, loadUnitCatalog } from "../../data/unitCatalog";
 import type { BattleSide } from "@heroes/engine";
 import type { Platoon, UnitType } from "@heroes/engine";
-import { menuTheme, openCenteredModal, styleButton } from "@screens/shared/menu";
+import { panelTheme, styleButton } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import { openView, registerView } from "@screens/shared/viewLauncher";
 
 registerView("testBattleSetup", () => openTestBattleSetup());
@@ -39,7 +40,8 @@ function rosterList(title: string, platoons: Platoon[], unitTypes: Record<string
 }
 
 export function openTestBattleSetup(): void {
-  const modal = openCenteredModal(document.body, "Test Battle Setup", 480);
+  const modal = openDialog(document.body, "Test Battle Setup", 480);
+  modal.enableResize("testBattle");
 
   const status = document.createElement("div");
   status.textContent = "Loading unit catalog...";
@@ -63,7 +65,7 @@ export function openTestBattleSetup(): void {
     });
 }
 
-function buildSetup(modal: ReturnType<typeof openCenteredModal>, units: UnitType[]): void {
+function buildSetup(modal: ReturnType<typeof openDialog>, units: UnitType[]): void {
   const unitTypes: Record<string, UnitType> = Object.fromEntries(units.map((u) => [u.id, u]));
   const playerPlatoons = fixedTestPlayerPlatoons();
   let aiPlatoons = randomAiPlatoons(unitTypes);
@@ -104,11 +106,11 @@ function buildSetup(modal: ReturnType<typeof openCenteredModal>, units: UnitType
     blueBtn.style.borderColor = humanSide === "attacker" ? BLUE_ACCENT : "rgba(255,255,255,0.2)";
     blueBtn.style.background = humanSide === "attacker"
       ? "rgba(48, 112, 192, 0.35)"
-      : menuTheme.button.background;
+      : panelTheme.button.background;
     redBtn.style.borderColor = humanSide === "defender" ? RED_ACCENT : "rgba(255,255,255,0.2)";
     redBtn.style.background = humanSide === "defender"
       ? "rgba(192, 64, 64, 0.35)"
-      : menuTheme.button.background;
+      : panelTheme.button.background;
     blueBtn.style.color = "#fff";
     redBtn.style.color = "#fff";
   }
@@ -128,7 +130,7 @@ function buildSetup(modal: ReturnType<typeof openCenteredModal>, units: UnitType
   const columns = document.createElement("div");
   columns.style.display = "flex";
   columns.style.gap = "14px";
-  columns.style.fontFamily = menuTheme.font;
+  columns.style.fontFamily = panelTheme.font;
   modal.appendContent(columns);
 
   const playerCol = rosterList("Player (fixed)", playerPlatoons, unitTypes);

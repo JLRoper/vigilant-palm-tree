@@ -46,7 +46,8 @@ export type SceneNode =
   | BattleImpactRingNode
   | BattleAiActingRingNode
   | BattleCombatantNode
-  | BattleFloatingTextNode;
+  | BattleFloatingTextNode
+  | BattleBiomeBackgroundNode;
 
 export interface TerrainHexNode {
   kind: "terrainHex";
@@ -308,6 +309,12 @@ export interface CityBuildingNode {
   ownerColor: string;
   /** Farm plots only: the deterministic pixel vs pixel-alt art pick (farmFieldStyleAt at scene-build time). Absent for every other kind. */
   farmStyle?: "pixel" | "pixel-alt";
+  /**
+   * Farm plots only: the exact sprite key the plot draws — one of the committed
+   * farm-plot variants (farmPlotVariantAt), or the `?farm=` style when a reviewer
+   * forces one. Overrides the legacy `farmStyle` pick.
+   */
+  farmSpriteKey?: string;
   selected: boolean;
   /** Set while the building's upgrade is in flight; the painter swaps the real sprite for a shared construction-stage sprite. */
   constructionStage?: 1 | 2 | 3;
@@ -437,4 +444,14 @@ export interface BattleFloatingTextNode {
   text: string;
   world: WorldPoint;
   alpha: number;
+}
+
+export interface BattleBiomeBackgroundNode {
+  kind: "battleBiomeBackground";
+  biome: Terrain;
+  world: WorldPoint;
+  hexRadius: number;
+  seed: number;
+  variant: number;
+  impassable: boolean;
 }

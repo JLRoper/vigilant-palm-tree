@@ -177,7 +177,6 @@ export class UIManager {
       canEnterCityView: (settlementId) => this.settlementCityView.canEnterCityView?.(settlementId) ?? false,
     });
 
-    document.addEventListener("keydown", (e) => this.handleKeyDown(e));
   }
 
   initHeroMenu(
@@ -939,24 +938,6 @@ export class UIManager {
     }
   }
 
-  private handleKeyDown(e: KeyboardEvent): void {
-    if (e.key !== "Escape") return;
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-
-    if (this.heroInfoMenu?.isVisible()) {
-      if (this.gameStateManager) {
-        const tc = this.gameStateManager.getTurnController();
-        tc.clearSelection();
-        this.gameStateManager.replaceState(tc.getState());
-      }
-    } else if (this.settlementInfoMenu?.isVisible()) {
-      if (this.gameStateManager) {
-        const tc = this.gameStateManager.getTurnController();
-        tc.clearSettlementSelection();
-        this.gameStateManager.replaceState(tc.getState());
-      }
-    }
-  }
 
   private handleRosterSettlementSelect(settlementId: string): void {
     if (!this.gameStateManager) return;

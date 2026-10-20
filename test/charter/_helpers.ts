@@ -191,6 +191,7 @@ export interface StateOverrides {
   activePlayerId?: PlayerId;
   phase?: GamePhase;
   selectedHeroId?: HeroId | null;
+  selectedSettlementId?: SettlementId | null;
   nextCharterId?: number;
   nextSettlementId?: number;
   tradeRoutes?: TradeRouteState[];
@@ -218,7 +219,7 @@ export function makeState(overrides: StateOverrides = {}): GameState {
     settlements,
     phase: overrides.phase ?? { kind: "PLAYER_TURN", playerId: activePlayerId },
     selectedHeroId: overrides.selectedHeroId ?? null,
-    selectedSettlementId: null,
+    selectedSettlementId: overrides.selectedSettlementId ?? null,
     dirty: false,
     castleSeed: 0,
     castleCount: 3,

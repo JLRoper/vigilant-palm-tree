@@ -59,7 +59,7 @@ const RESOURCE_STYLES: readonly ResourceStyle[] = [
   "rune-stone", "cartography-pin", "illustrated-pin", "constellation",
   "heraldic-crest", "isometric-pile", "iso-pile-smol", "iso-bubbly",
 ];
-const DEFAULT_RESOURCE_STYLE: ResourceStyle = "rune-stone";
+export const DEFAULT_RESOURCE_STYLE: ResourceStyle = "isometric-pile";
 
 const MIN_SPRITE_VARIANT = 1;
 const MAX_SPRITE_VARIANT = 5;
@@ -238,7 +238,7 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
   };
   current = next;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...next, schemaVersion: SETTINGS_SCHEMA_VERSION }));
   } catch { /* ignore */ }
   for (const fn of listeners) fn(next);
   return next;
@@ -273,17 +273,28 @@ export function growthRateBounds(): { min: number; max: number; default: number 
   return { min: MIN_GROWTH_RATE, max: MAX_GROWTH_RATE, default: DEFAULT_GROWTH_RATE };
 }
 
+/**
+ * Bumped when a stored setting's meaning changes. v2 moved the default map
+ * resource sprite from the rune stone to the iso pile, so a store written by v1
+ * still holds the old default (not a deliberate choice) and follows along once.
+ */
+const SETTINGS_SCHEMA_VERSION = 2;
+
 function loadFromStorage(): GameSettings {
   if (typeof localStorage === "undefined") return { ...DEFAULT_SETTINGS };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
-    const parsed = JSON.parse(raw) as Partial<GameSettings>;
+    const parsed = JSON.parse(raw) as Partial<GameSettings> & { schemaVersion?: number };
+    const schemaVersion = typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : 1;
+    const storedStyle = clampResourceStyle(parsed.resourceStyle);
+    const resourceStyle =
+      schemaVersion < 2 && storedStyle === "rune-stone" ? DEFAULT_RESOURCE_STYLE : storedStyle;
     return {
       moveDurationMs: clampMoveDurationMs(parsed.moveDurationMs ?? DEFAULT_MOVE_MS),
       enemyMoveDurationMs: clampEnemyMoveDurationMs(parsed.enemyMoveDurationMs ?? DEFAULT_ENEMY_MOVE_MS),
       arenaMoveMsPerHex: clampArenaMoveMsPerHex(parsed.arenaMoveMsPerHex ?? DEFAULT_ARENA_MOVE_MS_PER_HEX),
-      resourceStyle: clampResourceStyle(parsed.resourceStyle),
+      resourceStyle,
       territoryBorderWidth: clampBorderWidth(parsed.territoryBorderWidth ?? DEFAULT_BORDER_WIDTH),
       populationGrowthRate: clampGrowthRate(parsed.populationGrowthRate ?? DEFAULT_GROWTH_RATE),
       spriteVariant: clampSpriteVariant(parsed.spriteVariant),

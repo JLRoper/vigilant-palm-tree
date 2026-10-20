@@ -1,5 +1,6 @@
 import { api, type Game } from "../../io/api";
-import { openCenteredModal, styleButton, styleInput, menuTheme } from "@screens/shared/menu";
+import { styleButton, styleInput, panelTheme } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import { PLAYER_COLORS } from "../../state/playerColors";
 import {
   setInMemoryLocalPlayerId,
@@ -57,11 +58,11 @@ function snapshotFromGame(game: Game, localPlayerId: number | null): LobbySnapsh
 }
 
 export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): void {
-  const modal = openCenteredModal(document.body, "Multiplayer Lobby", 460);
+  const modal = openDialog(document.body, "Multiplayer Lobby", 460);
   const content = document.createElement("div");
-  content.style.fontFamily = menuTheme.font;
-  content.style.fontSize = menuTheme.fontSize;
-  content.style.color = menuTheme.panel.color;
+  content.style.fontFamily = panelTheme.font;
+  content.style.fontSize = panelTheme.fontSize;
+  content.style.color = panelTheme.panel.color;
   content.style.display = "flex";
   content.style.flexDirection = "column";
   content.style.gap = "10px";

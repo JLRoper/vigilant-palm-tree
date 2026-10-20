@@ -65,6 +65,7 @@ import type {
   CaravanMarkerNode,
   CaravanRouteNode,
   WorldPoint,
+  BattleBiomeBackgroundNode,
 } from "../types";
 
 // Live colour constants, transcribed byte-for-byte from the per-kind painter
@@ -105,7 +106,6 @@ const PERSON_STAGGER_GX = 31;
 const PERSON_STAGGER_GY = 17;
 const PERSON_STAGGER_INDEX = 13;
 
-const BATTLE_HEX_FILL = "#20242c";
 const BATTLE_HEX_IMPASSABLE = "#3a2a2a";
 const BATTLE_HEX_IN_RANGE = "rgba(210,210,215,0.35)";
 const BATTLE_HEX_STROKE = "rgba(255,255,255,0.08)";
@@ -129,6 +129,30 @@ const BATTLE_COMBATANT_TEXT_SHADOW_WIDTH = 3;
 // Adventure-map-style owner dot at a sprite-mode combatant's base (plan
 // decision #6) — the side accent, so teams read even with both figures upright.
 const BATTLE_COMBATANT_OWNER_DOT_RADIUS = 3;
+
+
+// Biome background color palettes (Concept 1: Living Terrain)
+// Each biome has a base fill, stroke, and 3 accent colors for variation.
+const BIOME_PALETTES: Record<string, { fill: string; stroke: string; accents: string[] }> = {
+  grass: { fill: "#3a6b3a", stroke: "#2a4a2a", accents: ["#4a7b4a", "#2a5a2a", "#5a8b5a"] },
+  dirt: { fill: "#8a6b3a", stroke: "#5a4a2a", accents: ["#9a7b4a", "#7a5a3a", "#aa8b5a"] },
+  water: { fill: "#2a5a8a", stroke: "#1a3a5a", accents: ["#3a6a9a", "#1a4a6a", "#4a7aaa"] },
+  forest: { fill: "#1f4a2a", stroke: "#0f2a1a", accents: ["#2f5a3a", "#0f3a1a", "#3f6a4a"] },
+  denseForest: { fill: "#10301a", stroke: "#06140b", accents: ["#20402a", "#06240b", "#30503a"] },
+  desert: { fill: "#d4b56e", stroke: "#a08850", accents: ["#e4c57e", "#c4a55e", "#f4d58e"] },
+  mountain: { fill: "#6e6e7a", stroke: "#3a3a44", accents: ["#7e7e8a", "#5e5e64", "#8e8e9a"] },
+  swamp: { fill: "#4a5540", stroke: "#2a3320", accents: ["#5a6550", "#3a4330", "#6a7560"] },
+  snow: { fill: "#c9d6e4", stroke: "#8fa6bd", accents: ["#d9e6f4", "#9fb6cd", "#e9f6ff"] },
+};
+
+// Seeded random for per-hex variation
+function biomeRandom(seed: number, variant: number): () => number {
+  let s = (seed * 1664525 + variant * 1013904223 + 12345) >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 0x100000000;
+  };
+}
 
 type Drawable = HTMLImageElement | HTMLCanvasElement;
 
@@ -312,6 +336,9 @@ export function paintScene(
         break;
       case "cityLabel":
         paintCityLabel(ctx, node, deps);
+        break;
+      case "battleBiomeBackground":
+        paintBattleBiomeBackground(ctx, node, deps);
         break;
       case "battleHex":
         paintBattleHex(ctx, node, deps);
@@ -1283,10 +1310,12 @@ function drawCitySpriteInto(
 
 export function paintCityBuilding(ctx: CanvasRenderingContext2D, node: CityBuildingNode, deps: Paint2DDep): void {
   const sprite = node.constructionStage
-    ? deps.sprite.resolveSprite(`building.pixel.underConstruction.${node.constructionStage}`)
-    : node.farmStyle !== undefined
-      ? deps.sprite.resolveSprite(`building.${node.farmStyle}.${node.buildingKind}.${node.level}`)
-      : deps.sprite.resolveSpriteForBuilding(node.buildingKind, node.level);
+      ? deps.sprite.resolveSprite(`building.pixel.underConstruction.${node.constructionStage}`)
+      : node.farmSpriteKey !== undefined
+        ? deps.sprite.resolveSprite(node.farmSpriteKey)
+        : node.farmStyle !== undefined
+          ? deps.sprite.resolveSprite(`building.${node.farmStyle}.${node.buildingKind}.${node.level}`)
+          : deps.sprite.resolveSpriteForBuilding(node.buildingKind, node.level);
   drawCitySpriteInto(
     ctx,
     sprite,
@@ -1391,17 +1420,407 @@ export function paintCityLabel(ctx: CanvasRenderingContext2D, node: CityLabelNod
 
 export function paintBattleHex(ctx: CanvasRenderingContext2D, node: BattleHexNode, deps: Paint2DDep): void {
   hexPath(ctx, node.world.x, node.world.y, node.hexRadius);
-  ctx.fillStyle = node.impassable
-    ? BATTLE_HEX_IMPASSABLE
-    : node.inMoveRange
-      ? BATTLE_HEX_IN_RANGE
-      : BATTLE_HEX_FILL;
-  ctx.fill();
+  // Base fill is now provided by biome background; only draw overlay highlights
+  if (node.inMoveRange) {
+    ctx.fillStyle = BATTLE_HEX_IN_RANGE;
+    ctx.fill();
+  } else if (node.impassable) {
+    // Impassable hexes get a subtle overlay so they read on top of biome background
+    ctx.fillStyle = BATTLE_HEX_IMPASSABLE + "80";
+    ctx.fill();
+  }
   ctx.strokeStyle = node.available ? BATTLE_HEX_AVAILABLE_STROKE : BATTLE_HEX_STROKE;
   ctx.lineWidth = node.available ? 2 : 1;
   ctx.stroke();
   void deps;
 }
+
+export function paintBattleBiomeBackground(ctx: CanvasRenderingContext2D, node: BattleBiomeBackgroundNode, deps: Paint2DDep): void {
+  const palette = BIOME_PALETTES[node.biome] ?? BIOME_PALETTES.grass;
+  const rng = biomeRandom(node.seed, node.variant);
+
+  // Base fill with slight variation
+  const variation = rng();
+  const fillIdx = Math.floor(variation * palette.accents.length);
+  ctx.fillStyle = variation < 0.7 ? palette.fill : palette.accents[fillIdx];
+
+  hexPath(ctx, node.world.x, node.world.y, node.hexRadius);
+  ctx.fill();
+
+  // Optional: add subtle texture detail based on biome (for non-impassable hexes)
+  const isImpassable = node.impassable === true;
+  if (!isImpassable) {
+    if (node.biome === "forest" || node.biome === "denseForest") {
+      // Tiny pine needle clusters
+      const detailRng = biomeRandom(node.seed + 1000, node.variant);
+      for (let i = 0; i < 2; i++) {
+        const angle = detailRng() * Math.PI * 2;
+        const dist = node.hexRadius * 0.3 * detailRng();
+        const dx = Math.cos(angle) * dist;
+        const dy = Math.sin(angle) * dist;
+        ctx.fillStyle = palette.accents[Math.floor(detailRng() * palette.accents.length)];
+        ctx.beginPath();
+        ctx.arc(node.world.x + dx, node.world.y + dy, Math.max(1, node.hexRadius * 0.08), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (node.biome === "desert") {
+      // Sand ripple lines
+      const detailRng = biomeRandom(node.seed + 1000, node.variant);
+      ctx.strokeStyle = palette.accents[0] + "40";
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i < 2; i++) {
+        const y = node.world.y - node.hexRadius * 0.4 + detailRng() * node.hexRadius * 0.8;
+        ctx.beginPath();
+        ctx.moveTo(node.world.x - node.hexRadius * 0.5, y);
+        ctx.lineTo(node.world.x + node.hexRadius * 0.5, y);
+        ctx.stroke();
+      }
+    } else if (node.biome === "swamp") {
+      // Bubbles
+      const detailRng = biomeRandom(node.seed + 1000, node.variant);
+      for (let i = 0; i < 3; i++) {
+        const angle = detailRng() * Math.PI * 2;
+        const dist = node.hexRadius * 0.4 * detailRng();
+        const dx = Math.cos(angle) * dist;
+        const dy = Math.sin(angle) * dist;
+        ctx.fillStyle = "#4aa5a5" + Math.floor(detailRng() * 128 + 64).toString(16).padStart(2, "0");
+        ctx.beginPath();
+        ctx.arc(node.world.x + dx, node.world.y + dy, Math.max(1, node.hexRadius * 0.06), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (node.biome === "snow") {
+      // Snow drift highlights
+      const detailRng = biomeRandom(node.seed + 1000, node.variant);
+      ctx.fillStyle = "#ffffff60";
+      for (let i = 0; i < 2; i++) {
+        const angle = detailRng() * Math.PI * 2;
+        const dist = node.hexRadius * 0.35 * detailRng();
+        const dx = Math.cos(angle) * dist;
+        const dy = Math.sin(angle) * dist;
+        ctx.beginPath();
+        ctx.arc(node.world.x + dx, node.world.y + dy, Math.max(1, node.hexRadius * 0.1), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // Subtle stroke
+  ctx.strokeStyle = palette.stroke;
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+
+  // IMPASSABLE OBSTACLE IMAGERY - biome-specific visuals explaining WHY it's blocked
+  if (isImpassable) {
+    const cx = node.world.x;
+    const cy = node.world.y;
+    const r = node.hexRadius;
+    const obsRng = biomeRandom(node.seed + 5000, node.variant);
+
+    switch (node.biome) {
+      case "grass":
+      case "dirt": {
+        // Large boulders / standing stones
+        const numRocks = 1 + Math.floor(obsRng() * 2);
+        for (let i = 0; i < numRocks; i++) {
+          const angle = obsRng() * Math.PI * 2;
+          const dist = r * 0.25 * obsRng();
+          const dx = Math.cos(angle) * dist;
+          const dy = Math.sin(angle) * dist;
+          const rockR = r * (0.18 + obsRng() * 0.12);
+          // Rock base
+          ctx.fillStyle = "#4a4a3a";
+          ctx.beginPath();
+          ctx.ellipse(cx + dx, cy + dy + rockR * 0.3, rockR, rockR * 0.7, 0, 0, Math.PI * 2);
+          ctx.fill();
+          // Rock top highlight
+          ctx.fillStyle = "#6a6a5a";
+          ctx.beginPath();
+          ctx.ellipse(cx + dx - rockR * 0.2, cy + dy - rockR * 0.2, rockR * 0.6, rockR * 0.4, 0, 0, Math.PI * 2);
+          ctx.fill();
+          // Shadow
+          ctx.fillStyle = "rgba(0,0,0,0.3)";
+          ctx.beginPath();
+          ctx.ellipse(cx + dx, cy + dy + rockR * 0.5, rockR * 0.8, rockR * 0.2, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        break;
+      }
+      case "forest": {
+        // Fallen logs
+        const numLogs = 1 + Math.floor(obsRng() * 2);
+        for (let i = 0; i < numLogs; i++) {
+          const angle = obsRng() * Math.PI;
+          const length = r * (0.5 + obsRng() * 0.4);
+          const cx_log = cx + Math.cos(angle) * r * 0.15;
+          const cy_log = cy + Math.sin(angle) * r * 0.15;
+          const logAngle = angle + (obsRng() - 0.5) * 0.5;
+          ctx.fillStyle = "#3a2a1a";
+          ctx.save();
+          ctx.translate(cx_log, cy_log);
+          ctx.rotate(logAngle);
+          ctx.beginPath();
+          ctx.roundRect(-length / 2, -r * 0.08, length, r * 0.16, r * 0.05);
+          ctx.fill();
+          // Bark lines
+          ctx.strokeStyle = "#2a1a0a";
+          ctx.lineWidth = 1;
+          for (let b = 0; b < 3; b++) {
+            const bx = -length / 2 + length * (b + 1) / 4;
+            ctx.beginPath();
+            ctx.moveTo(bx, -r * 0.08);
+            ctx.lineTo(bx, r * 0.08);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+        break;
+      }
+      case "denseForest": {
+        // Massive tree trunks (wider, darker)
+        const numTrunks = 1 + Math.floor(obsRng() * 2);
+        for (let i = 0; i < numTrunks; i++) {
+          const angle = obsRng() * Math.PI * 2;
+          const dist = r * 0.2 * obsRng();
+          const dx = Math.cos(angle) * dist;
+          const dy = Math.sin(angle) * dist;
+          const trunkR = r * (0.25 + obsRng() * 0.15);
+          // Trunk base
+          ctx.fillStyle = "#1a1008";
+          ctx.beginPath();
+          ctx.arc(cx + dx, cy + dy, trunkR, 0, Math.PI * 2);
+          ctx.fill();
+          // Bark texture
+          ctx.strokeStyle = "#0a0603";
+          ctx.lineWidth = 2;
+          for (let b = 0; b < 4; b++) {
+            const ba = (b / 4) * Math.PI * 2;
+            const br = trunkR * (0.3 + obsRng() * 0.4);
+            ctx.beginPath();
+            ctx.moveTo(cx + dx + Math.cos(ba) * br, cy + dy + Math.sin(ba) * br);
+            ctx.lineTo(cx + dx + Math.cos(ba) * trunkR, cy + dy + Math.sin(ba) * trunkR);
+            ctx.stroke();
+          }
+          // Root flare
+          ctx.fillStyle = "#0a0603";
+          ctx.beginPath();
+          ctx.ellipse(cx + dx, cy + dy + trunkR * 0.6, trunkR * 1.2, trunkR * 0.3, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        break;
+      }
+      case "desert": {
+        // Rock outcrops / cacti
+        if (obsRng() < 0.6) {
+          // Rock outcrop
+          const angle = obsRng() * Math.PI * 2;
+          const dist = r * 0.2 * obsRng();
+          const dx = Math.cos(angle) * dist;
+          const dy = Math.sin(angle) * dist;
+          const w = r * (0.6 + obsRng() * 0.4);
+          const h = r * (0.5 + obsRng() * 0.3);
+          ctx.fillStyle = "#b8965a";
+          ctx.beginPath();
+          ctx.moveTo(cx + dx - w / 2, cy + dy + h / 2);
+          ctx.lineTo(cx + dx - w * 0.3, cy + dy - h / 2);
+          ctx.lineTo(cx + dx + w * 0.3, cy + dy - h / 2);
+          ctx.lineTo(cx + dx + w / 2, cy + dy + h / 2);
+          ctx.closePath();
+          ctx.fill();
+          // Highlight
+          ctx.fillStyle = "#d4b56e";
+          ctx.beginPath();
+          ctx.moveTo(cx + dx - w * 0.2, cy + dy + h / 2);
+          ctx.lineTo(cx + dx, cy + dy - h * 0.3);
+          ctx.lineTo(cx + dx + w * 0.2, cy + dy + h / 2);
+          ctx.fill();
+        } else {
+          // Cactus cluster
+          const numCacti = 2 + Math.floor(obsRng() * 2);
+          for (let i = 0; i < numCacti; i++) {
+            const angle = obsRng() * Math.PI * 2;
+            const dist = r * 0.3 * obsRng();
+            const dx = Math.cos(angle) * dist;
+            const dy = Math.sin(angle) * dist;
+            const ch = r * (0.4 + obsRng() * 0.3);
+            const cw = r * 0.12;
+            // Main stem
+            ctx.fillStyle = "#2a5a2a";
+            ctx.beginPath();
+            ctx.roundRect(cx + dx - cw / 2, cy + dy - ch, cw, ch, cw / 2);
+            ctx.fill();
+            // Arms
+            if (obsRng() > 0.5) {
+              const armY = cy + dy - ch * (0.3 + obsRng() * 0.4);
+              const armDir = obsRng() > 0.5 ? 1 : -1;
+              ctx.beginPath();
+              ctx.moveTo(cx + dx, armY);
+              ctx.lineTo(cx + dx + armDir * cw * 3, armY - cw * 2);
+              ctx.lineTo(cx + dx + armDir * cw * 4, armY);
+              ctx.lineTo(cx + dx, armY + cw);
+              ctx.closePath();
+              ctx.fill();
+            }
+          }
+        }
+        break;
+      }
+      case "mountain": {
+        // Cliff face / scree
+        const cliffX = cx - r * 0.4 + obsRng() * r * 0.8;
+        const cliffTop = cy - r * 0.5;
+        const cliffBottom = cy + r * 0.5;
+        // Cliff wall
+        ctx.fillStyle = "#5a5a64";
+        ctx.beginPath();
+        ctx.moveTo(cliffX - r * 0.3, cliffBottom);
+        ctx.lineTo(cliffX - r * 0.1, cliffTop);
+        ctx.lineTo(cliffX + r * 0.1, cliffTop);
+        ctx.lineTo(cliffX + r * 0.3, cliffBottom);
+        ctx.closePath();
+        ctx.fill();
+        // Strata lines
+        ctx.strokeStyle = "#4a4a54";
+        ctx.lineWidth = 1;
+        for (let s = 0; s < 4; s++) {
+          const sy = cliffBottom - (cliffBottom - cliffTop) * (s + 1) / 5;
+          ctx.beginPath();
+          ctx.moveTo(cliffX - r * 0.25, sy);
+          ctx.lineTo(cliffX + r * 0.25, sy);
+          ctx.stroke();
+        }
+        // Scree at base
+        ctx.fillStyle = "#6a6a74";
+        for (let i = 0; i < 6; i++) {
+          const sx = cliffX - r * 0.4 + obsRng() * r * 0.8;
+          const sy = cliffBottom - obsRng() * r * 0.3;
+          const sr = r * (0.04 + obsRng() * 0.04);
+          ctx.beginPath();
+          ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        break;
+      }
+      case "swamp": {
+        // Deep water pool with mangrove roots
+        const poolR = r * 0.5;
+        // Water
+        const waterGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, poolR);
+        waterGrad.addColorStop(0, "#2a4a6a");
+        waterGrad.addColorStop(0.5, "#1a3a5a");
+        waterGrad.addColorStop(1, "#0a2a4a");
+        ctx.fillStyle = waterGrad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, poolR, 0, Math.PI * 2);
+        ctx.fill();
+        // Water reflection highlight
+        ctx.fillStyle = "rgba(255,255,255,0.1)";
+        ctx.beginPath();
+        ctx.arc(cx - poolR * 0.3, cy - poolR * 0.3, poolR * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        // Mangrove roots
+        ctx.strokeStyle = "#1a2a1a";
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 5; i++) {
+          const angle = (i / 5) * Math.PI * 2 + obsRng() * 0.3;
+          const rootLen = poolR * (0.8 + obsRng() * 0.4);
+          ctx.beginPath();
+          ctx.moveTo(cx + Math.cos(angle) * poolR * 0.9, cy + Math.sin(angle) * poolR * 0.9);
+          ctx.quadraticCurveTo(
+            cx + Math.cos(angle) * poolR * 0.5,
+            cy + Math.sin(angle) * poolR * 0.5,
+            cx + Math.cos(angle) * rootLen,
+            cy + Math.sin(angle) * rootLen
+          );
+          ctx.stroke();
+        }
+        break;
+      }
+      case "snow": {
+        // Ice floe / crevasse
+        if (obsRng() < 0.5) {
+          // Ice floe
+          const angle = obsRng() * Math.PI * 2;
+          const dist = r * 0.15 * obsRng();
+          const dx = Math.cos(angle) * dist;
+          const dy = Math.sin(angle) * dist;
+          const floeR = r * (0.25 + obsRng() * 0.2);
+          // Ice base
+          ctx.fillStyle = "#d0e0f0";
+          ctx.beginPath();
+          ctx.arc(cx + dx, cy + dy, floeR, 0, Math.PI * 2);
+          ctx.fill();
+          // Ice texture
+          ctx.strokeStyle = "#a0c0e0";
+          ctx.lineWidth = 1;
+          for (let c = 0; c < 3; c++) {
+            const ca = obsRng() * Math.PI * 2;
+            const cr = floeR * (0.2 + obsRng() * 0.5);
+            ctx.beginPath();
+            ctx.arc(cx + dx + Math.cos(ca) * cr, cy + dy + Math.sin(ca) * cr, floeR * 0.15, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          // Edge highlight
+          ctx.strokeStyle = "rgba(255,255,255,0.6)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(cx + dx, cy + dy, floeR, -Math.PI / 2, Math.PI / 4);
+          ctx.stroke();
+        } else {
+          // Crevasse
+          const crevX = cx - r * 0.2 + obsRng() * r * 0.4;
+          const crevTop = cy - r * 0.5;
+          const crevBottom = cy + r * 0.5;
+          // Dark crack
+          ctx.fillStyle = "#1a2a4a";
+          ctx.beginPath();
+          ctx.moveTo(crevX - r * 0.05, crevTop);
+          ctx.lineTo(crevX + r * 0.05, crevTop);
+          ctx.lineTo(crevX + r * 0.1, crevBottom);
+          ctx.lineTo(crevX - r * 0.1, crevBottom);
+          ctx.closePath();
+          ctx.fill();
+          // Ice edges
+          ctx.strokeStyle = "#80a0d0";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(crevX - r * 0.05, crevTop);
+          ctx.lineTo(crevX - r * 0.05, crevBottom);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(crevX + r * 0.05, crevTop);
+          ctx.lineTo(crevX + r * 0.05, crevBottom);
+          ctx.stroke();
+        }
+        break;
+      }
+      case "water": {
+        // Deep water
+        const waterGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        waterGrad.addColorStop(0, "#3a6a9a");
+        waterGrad.addColorStop(0.5, "#2a5a8a");
+        waterGrad.addColorStop(1, "#1a3a5a");
+        ctx.fillStyle = waterGrad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 0.9, 0, Math.PI * 2);
+        ctx.fill();
+        // Wave lines
+        ctx.strokeStyle = "rgba(255,255,255,0.15)";
+        ctx.lineWidth = 1;
+        for (let w = 0; w < 4; w++) {
+          const wy = cy - r * 0.7 + w * r * 0.45 + obsRng() * r * 0.1;
+          ctx.beginPath();
+          ctx.moveTo(cx - r * 0.7, wy);
+          ctx.quadraticCurveTo(cx, wy - r * 0.1, cx + r * 0.7, wy);
+          ctx.stroke();
+        }
+        break;
+      }
+    }
+  }
+
+  void deps;
+}
+
 
 export function paintBattleAttackTargetRing(ctx: CanvasRenderingContext2D, node: BattleAttackTargetRingNode, deps: Paint2DDep): void {
   ctx.beginPath();

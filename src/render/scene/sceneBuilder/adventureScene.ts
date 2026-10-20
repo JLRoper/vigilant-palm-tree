@@ -3,11 +3,11 @@ import { getRowQBounds, isTileInViewportBounds, type ViewportAxialBounds } from 
 import type { GameMap } from "../../../map/gameMap";
 import type { Hero } from "../../../entities/hero";
 import type { Castle } from "../../../entities/settlement";
-import type { RenderOptions } from "../../renderTypes";
+import type { RenderOptions, CaravanMarkerSpec } from "../../renderTypes";
 import { computeVision, isVisible } from "../../fog";
 import { computeReachableSplit } from "../../overlays/pathOverlay";
 import type { BuildingDef } from "@heroes/contracts";
-import { controlledPositions, isDistrictBlockedByHero, resolveControllingSettlement, territoryBoundaryEdges, NEIGHBOR_DIRS } from "@heroes/engine";
+import { controlledPositions, findPath, isDistrictBlockedByHero, resolveControllingSettlement, territoryBoundaryEdges, NEIGHBOR_DIRS } from "@heroes/engine";
 import type { EntityMirror } from "../entityMirror";
 import type {
   SceneNode,
@@ -310,20 +310,23 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
     hoveredCaravan.remainingPath &&
     hoveredCaravan.remainingPath.length > 0
   ) {
-    const startBase = axialToPixel(hoveredCaravan.q, hoveredCaravan.r);
-    const startOx = hoveredCaravan.pixelOffset?.x ?? 0;
-    const startOy = hoveredCaravan.pixelOffset?.y ?? 0;
-    const points = [
-      { x: startBase.x + startOx, y: startBase.y + startOy },
-      ...hoveredCaravan.remainingPath.map((t) => axialToPixel(t.q, t.r)),
-    ];
-    nodes.push({
-      kind: "caravanRoute",
-      routeId: hoveredCaravan.routeId,
-      color: opts.colorForOwner(hoveredCaravan.ownerId),
-      ...(hoveredCaravan.payloadKind !== undefined ? { payloadKind: hoveredCaravan.payloadKind } : {}),
-      points,
-    });
+    const routePath = projectedCaravanRoute(hoveredCaravan, heroes, map, opts.viewPlayerId);
+    if (routePath.length > 0) {
+      const startBase = axialToPixel(hoveredCaravan.q, hoveredCaravan.r);
+      const startOx = hoveredCaravan.pixelOffset?.x ?? 0;
+      const startOy = hoveredCaravan.pixelOffset?.y ?? 0;
+      const points = [
+        { x: startBase.x + startOx, y: startBase.y + startOy },
+        ...routePath.map((t) => axialToPixel(t.q, t.r)),
+      ];
+      nodes.push({
+        kind: "caravanRoute",
+        routeId: hoveredCaravan.routeId,
+        color: opts.colorForOwner(hoveredCaravan.ownerId),
+        ...(hoveredCaravan.payloadKind !== undefined ? { payloadKind: hoveredCaravan.payloadKind } : {}),
+        points,
+      });
+    }
   }
   for (const caravan of opts.caravans ?? []) {
     const canSee = caravan.ownerId === opts.viewPlayerId || isVisible(visible, caravan.q, caravan.r);
@@ -378,6 +381,38 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
   }
 
   return nodes;
+}
+
+/**
+ * The tiles the hovered cart's route line should visit. The stored remaining
+ * path is a snapshot taken at the last daily advance, so a line drawn straight
+ * from it freezes on the tile its endpoint stood on then -- while the pointer
+ * rests on a cart, moving the hero would leave the preview stranded. A leg
+ * whose goal is a hero (CaravanMarkerSpec.goalHeroId) therefore re-projects the
+ * line onto that hero's CURRENT tile with the same A* the engine's pre-walk
+ * re-target runs at turn end, so the line follows the hero as it moves. Every
+ * other leg -- and one whose hero still stands on the snapshot's last tile --
+ * keeps the stored path; an unreachable hero keeps it too, and a hero standing
+ * on the cart's own tile yields no line (the meeting is instant). Only the
+ * view seat's OWN hero may move the line -- a foreign goal hero (which a route
+ * can only hold by a stale persisted row) keeps the stored path, so no enemy
+ * position leaks through fog.
+ */
+function projectedCaravanRoute(
+  caravan: CaravanMarkerSpec,
+  heroes: readonly Hero[],
+  map: GameMap,
+  viewPlayerId: number,
+): Axial[] {
+  const stored = caravan.remainingPath ?? [];
+  if (!caravan.goalHeroId) return stored;
+  const goal = heroes.find((h) => h.id === caravan.goalHeroId);
+  if (!goal || goal.ownerId !== viewPlayerId) return stored;
+  const end = stored.length > 0 ? stored[stored.length - 1] : null;
+  if (end && end.q === goal.tile.q && end.r === goal.tile.r) return stored;
+  if (caravan.q === goal.tile.q && caravan.r === goal.tile.r) return [];
+  const leg = findPath(map, { q: caravan.q, r: caravan.r }, { q: goal.tile.q, r: goal.tile.r });
+  return leg.length > 0 ? leg.map((p) => ({ q: p.q, r: p.r })) : stored;
 }
 
 interface TerritoryCoord {

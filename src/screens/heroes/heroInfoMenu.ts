@@ -1,6 +1,6 @@
 import type { GameState, HeroState, Player, SettlementId, SettlementState } from "../../state/gameState";
 import type { Hero } from "../../entities/hero";
-import { PopupMenu, menuTheme } from "@screens/shared/menu";
+import { FloatingPanel, panelTheme } from "@screens/shared/panel";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import { DockedPanel } from "@screens/shared/dockedPanel";
 import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayout";
@@ -84,7 +84,7 @@ function buildHeroPanelDom(
   Object.assign(nameEl.style, {
     fontSize: "15px",
     fontWeight: "600",
-    color: menuTheme.panel.color,
+    color: panelTheme.panel.color,
   });
   body.appendChild(nameEl);
 
@@ -323,7 +323,7 @@ function buildHeroPanelDom(
 }
 
 export class HeroInfoMenu {
-  private menu: PopupMenu;
+  private menu: FloatingPanel;
   private visible = false;
   private currentHeroId: string | null = null;
   private docked: DockedPanel;
@@ -337,7 +337,7 @@ export class HeroInfoMenu {
   constructor(opts: HeroInfoMenuOptions) {
     this.onTransfer = opts.onTransfer;
 
-    this.menu = new PopupMenu({
+    this.menu = new FloatingPanel({
       parent: opts.parent,
       title: "Hero",
       // Placeholder only. The real position is derived from the panel's
@@ -349,6 +349,11 @@ export class HeroInfoMenu {
       zIndex: 60,
       minTop: toolbarHeight,
       clickToFront: true,
+      resizeable: true,
+      resizeKey: "heroInfo",
+      // Long-lived: show()/hide() reuse the same DOM, so Escape (and ×) hide
+      // it instead of destroying the panel the game keeps re-showing.
+      hideOnDismiss: true,
       onMove: (pos) => {
         this.docked.markUserMoved();
         savePanelGeometry("heroInfo", pos);

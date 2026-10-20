@@ -9,7 +9,7 @@ import { bus } from "../../core/eventBus";
 const CONTAINER_ID = "toast-container";
 const DEFAULT_DURATION_MS = 6000;
 
-// Above every other overlay in src/screens (openCenteredModal's wrapper is
+// Above every other overlay in src/screens (openDialog's wrapper is
 // the highest at 300, see menu.ts) -- a command-rejection toast should stay
 // visible even if a modal (e.g. the trade modal that triggered the command)
 // is still open on top of it.

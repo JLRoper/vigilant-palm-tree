@@ -10,13 +10,110 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.24.0] - 2026-10-20
+## [0.29.0] - 2026-10-20
 
 - **Rivers on the adventure map** (map-gen **v5**) — procedural rivers run between two bodies of water (lakes or swamps), drawn as water over the biome underneath, not as a terrain value. Two kinds: **small** (crossable, costs a full day — all 7 movement points) and **wide** (impassable except at baked bridges, cost 1), with ~one bridge every 8 cells. The A*-guided meander walk descends a distance-to-sink field with a momentum term (no U-turns, soft turns cheap) plus a slight biome-boundary bias, and never self-touches, merges, or forms more than a 3-way junction.
 - **Everywhere a hero moves respects rivers** — pathfinding, AI, charters, the path preview's reachable split, the tile popup's effective cost, and castle placement reachability; resources and castle candidates skip river cells.
-- **Water is baked once, tinted by the biome** — nine overlay tiles (end/straight/curveC/curveCC for small and wide, plus a wide bridge) rasterised deterministically by tools/sprites/gen-river-tiles.mjs (byte-stable, no API) with alpha banks that pick up grass/sand/snow underneath; the painter auto-tiles them from the six-bit neighbour mask. The minimap draws the river line with a bridge tick.
+- **Water is baked once, tinted by the biome** — overlay tiles (end/straight/curveC/curveCC/curve120C/curve120CC for small and wide, plus a wide bridge) rasterised deterministically by tools/sprites/gen-river-tiles.mjs (byte-stable, no API) with anti-aliased alpha banks that pick up grass/sand/snow underneath; the painter auto-tiles them from the six-bit neighbour mask, pours each end into its body of water through a mouth wedge, and hides the water under uncharted black while letting it dim through released fog. The minimap draws the river line with a bridge tick.
 - **Map-gen v5 keeps v1–v4 maps intact** — rivers append after every terrain pass, so a saved v4 game keeps its exact terrain while fresh games rebuild with rivers; MapGenVersion gained 5 and the stored-version unions now reuse the shared type.
 
+## [0.28.0] - 2026-10-20
+
+Farm plots: two model-refined styles join the per-cell rotation
+
+- **`farmWheatAI` and `farmOrchardAI`** (`building-pixel-farm{Wheat,Orchard}AI-1.png`) are edits of the procedural wheat and orchard plots made with an OpenRouter image model (`google/gemini-2.5-flash-image`). The input carries a magenta guide line over the exact 2:1 footprint, which the model treats as a measuring guide and drops; the output is checkerboard-stripped and then edge-fitted to the grid. They are committed PNGs — no runtime model call.
+- **The rotation is now seven styles.** `FARM_PLOT_VARIANTS` gained the two variants, so `farmPlotVariantAt` mixes them per cell with the five procedural plots. Still render-time only: nothing is persisted and no save migration is needed, though a settlement's fields can pick a different style than before because the hash length changed.
+- **Why the fit step exists:** without the guide the model redraws the tile at 30-32 deg (a true isometric camera) against the city grid's 26.57 deg, so the ground diamond's lower edges were measured and scaled to exactly 0.5 slope — 0.2% correction for the orchard, 16% for the wheat, which is why the wheat variant reads flatter than its procedural counterpart. Pipeline and angle table: `docs/sprite-pipelines.md` §4.1, provenance in `docs/asset-provenance.md`.
+
+## [0.27.0] - 2026-10-20
+
+### Logistics hero block, iso-pile resource default, new-game defaults
+
+**Logistics hero section, condensed.** The hero's five cargo resources were five full-width label rows plus a totals line (~318px). They are now one wrapping strip of icon chips
+(the panel's iso-pile sprites, `icon + stored/cap`) with the purse, wagon and cart totals moved onto the section header, matching the settlement block. The section is ~128px and
+the whole window nearly fits without scrolling. The two wagon-slot rows keep their -1/+1 buttons.
+
+**Iso piles by default on the map.** `DEFAULT_RESOURCE_STYLE` is now `isometric-pile` (the iso resource piles) instead of `rune-stone`. Settings persist as one object, so a store
+written before this change would have kept the old default forever: `loadFromStorage` now honours a `schemaVersion` (absent = v1), converts a v1 `rune-stone` to the new default
+once, and every write stamps v2. The Settings "Reset to default" button uses the exported constant rather than a second hardcoded copy.
+
+**New Game defaults.** Home's form and the toolbar dialog now open with 1 human player, 1 AI enemy, a Medium map, and Uncharted mode checked (previously 1 / 0 / Small / off).
+The visual-regression fixture pins its own settings (small, 0 AI, revealed) so a future default change cannot rewrite the baselines.
+
+Verified: test:unit, the browser suites, and visual baselines regenerated for the iso-pile sprites.
+
+## [0.26.0] - 2026-10-20
+
+### Click a hero or settlement again to put it down
+
+A map click is a toggle. Clicking your hero selects it (the hero panel opens); clicking that same hero again clears the selection and closes the panel -- including after moving it, which is the
+gesture the playtest asked for: select, move, click it once more. Same for a settlement: click to select, click again to deselect. Clicking a different hero or settlement switches selection, and
+with only a settlement selected, a click on empty ground puts it down instead of toasting "Select a hero first".
+
+The deselect goes through `TurnController.clearSelection()` / `clearSettlementSelection()` -- the same reducers the panels' own `onClose` runs -- so a click and a close cannot leave different state behind.
+The resolver takes `clickCount` (`MouseEvent.detail`) and only toggles on the first click: the second click of a double-click must not deselect, because double-clicking a settlement is the city-entry gesture.
+
+Tests: six cases in `test/screens/adventure/clickIntent.test.ts` (toggle, switch, double-click guard for both surfaces, empty-ground deselect); `makeState` gained a `selectedSettlementId` override.
+
+## [0.25.0] - 2026-10-20
+
+### Escape closes every panel, from one place
+
+Every floating surface in the game is now a **panel** (`FloatingPanel`, `src/screens/shared/panel.ts`) and every centred
+modal a **dialog** (`openDialog`, `src/screens/shared/dialog.ts`); "menu" now means an actual command list only. The old
+`src/screens/shared/menu.ts` and `panelStack.ts` are gone, replaced by those two modules plus `src/screens/shared/panelManager.ts`.
+
+`panelManager` holds the single window `keydown` listener (capture phase) and closes the topmost open panel on Escape, so a
+surface is Escape-closable by existing. That covers Settings, New Game, Load Game, Logistics, Keyboard & Mouse, Battle
+Results, Test Battle Setup, the hero and settlement panels and both rosters, tile info, the game log, and every city-view
+panel (City Design, Workforce, Recruitment, build palette, building and selection menus). Previously Settings, Load Game
+and Logistics had no Escape at all, and six modules each wired their own listener.
+
+One Escape does one thing, in a fixed order: an in-flight worker drag or pending build placement cancels first, then the
+topmost panel closes (a tooltip inside the Logistics window takes the first Escape, the window the next), then the city's
+tile selection clears, then the view closes. The City Design box opts out (`escapeClosable: false`) because the city view
+owns it and closing it would strand the player without Build/Back. Hidden long-lived panels are never targets, so a closed
+panel cannot swallow the key.
+
+Also fixed while consolidating: a long-lived panel's × destroyed DOM the game keeps re-showing (hero/settlement panels,
+rosters, tile info now hide and stay reusable), and closing the build palette from its own × left the City Design button
+reading *Close* until an unrelated refresh.
+
+Deleted as duplicates: the per-modal Escape listeners in `charterModal` and `assaultConfirmModal` (now `setOnEscape`
+hooks) and `hotkeysModal`, the `escape` option on the dialog dismiss options, `UIManager`'s global Escape handler, the city
+view's Escape branches naming each panel, and the hand-built modal backdrop in `confirmDialog`/`leaveBehind` (both now use
+`openDialog`). Creation boilerplate collapsed into `createPanel({ key, defaultPosition, ... })`.
+
+The toolbar's gear dropdown closes on Escape as well; it is a menu rather than a panel, so it keeps its own listener.
+
+## [0.24.0] - 2026-10-20
+
+The City Design panel is a normal floating menu, and every floating panel/menu can now be resized.
+
+- **City Design is a movable floating panel** — the city view's Build / Workforce / Recruit / Back box was a hand-styled fixed div at a hardcoded z-index; it is now a `PopupMenu` like the workforce and recruitment panels: drag it by its title bar and it stays where you put it (position remembered between sessions under the `cityDesign` key), it joins the panel click-to-front stack, it carries the shared corner resize grip, and its first open still runs the collision solve so it cannot bury another panel. It has no close button on purpose — the city view owns its lifetime and nothing else reopens it, so an × would strand the player without Build or Back.
+- **Every floating panel and menu is resizeable** — the recruitment panel's corner grip is now the shared default: hero and settlement panels, the Heroes/Settlements rail rosters (the grip hides while a roster is docked in the rail and the remembered size returns when you pop it out), City Design, Workforce, Recruitment, the build palette, building and selection menus, the adventure map's tile info, the game log, and the Keyboard & Mouse, Logistics, Battle Results and Test Battle Setup windows. Each panel remembers its own size (`heroesJs.panelSize.v1`), separate from its position. Confirm prompts and small forms (New Game, Load Game, Sign In, Settings, Multiplayer Lobby, Assault confirm) keep their fixed layout.
+- Resizing now measures and applies the bordered box, so reopening a resized panel no longer creeps it 2px wider each time.
+- **Two new mounted hero variants: Black Dragon Rider and Red Dragon Rider.** Both are repaints of the existing Drake Rider's chunky pixel-art dragon and rider — an obsidian-black dragon with indigo-violet sheen and a black/silver rider, and a crimson-scarlet dragon with ember-orange membranes and a black/brass rider. They appear in the recruit picker with no UI change and have their own 320×100 roster banners (stormy twilight and volcanic sunset).
+- Both variants ship all eight headings. The `se`/`sw` diagonals were regenerated from the front view after the side-profile versions measured too close to `e`/`w` at map size; they now read as genuine three-quarter views, head-right and head-left respectively. Base frames only (no `-2` gallop files), so both run frames render the base sprite.
+- `gemini-hero-sprite.mjs` gained `--subject <noun>` (dragon-facing wording instead of "horse and rider") and a `{{HEAD_SIDE}}` prompt placeholder for the explicit three-quarter composition rule. `test/render/dragonRiderArt.test.ts` pins both 8-way 512px file sets, and `test/heroVariants.e2e.ts` now A/B diffs both riders against the drake (`darkened` / `reddened` signals).
+- The starter-variant draw now ranges over 16 variants, so the three adventure visual baselines were regenerated; the churn is the hero sprite and panel banner only.
+
+## [0.23.0] - 2026-10-20
+
+Trade-route carts that meet a hero no longer idle out the rest of the day, and a hovered cart's route preview follows a moving hero.
+
+- **Meeting a hero now costs nothing** — a hero destination delivers the wrap the cart lands on the hero's tile and the flip spends whatever movement is left walking the fresh return leg in that SAME wrap, so a cart that catches its hero mid-wrap turns around and heads back immediately instead of parking until the next daily tick. When the origin is within that leftover walk it arrives and unloads the same wrap (the dead-hero and foreign-owner flips turn around the same way). Settlement destinations keep their existing arrival cadence.
+- **The hovered cart's route line updates as the hero moves** — the preview's tiles came from a snapshot taken at the last daily advance, so it froze on the tile the hero stood on then. A leg whose goal is a hero (`CaravanMarkerSpec.goalHeroId`) now re-projects the line onto the hero's CURRENT tile every frame while the pointer rests on the cart, using the same A* the engine's pre-walk re-target runs at turn end. Settlement legs keep the stored path, a foreign goal hero never moves an own-seat line, and a hero standing on the cart's tile draws no line at all (that meeting is instant).
+Farm fields: five grid-exact plot styles, mixed per cell
+- **New farm-field art family** (`building-pixel-farm{Wheat,Veg,Orchard,Paddock,Vines}-1.png`) drawn by the deterministic `tools/sprites/gen-farm-sprites.mjs`: a 128x64 logical ground diamond (true 2:1, south vertex on the bottom canvas row) upscaled 8x to the 1024 family size. It carries no side plinth — a 1px outline plus a 2-3px verge — and every prop is trimmed to its own diamond (`clipToPlot`), so a plot sits flush in its 2x2 cells and adjacent fields meet edge-to-edge instead of being sliced by a neighbour's ground.
+- **Exact-fit descriptor for the new family:** `hexSizeMul 1.0` (the universal building inset is 0.9) and a generated `anchorOffsetY 0`, so the ground diamond lands on the footprint's cell corners. The legacy `farmField` art keeps the 0.9 convention and stays on disk for comparison.
+- **Per-cell variety:** `farmPlotVariantAt(settlement, gx, gy)` (FNV-1a over the cell) picks one of `FARM_PLOT_VARIANTS` at render time, so a settlement's fields mix styles and a reload never reshuffles them. Nothing is persisted, so no save migration; each variant is already its own keyed sprite, which is what a later split into player-chosen, goods-producing farm kinds will build on. `?farm=<variant>` (or `farmField` for the legacy art) still forces one style for review.
+
+## [0.22.1] - 2026-10-20
+
+- **Light unicorn rework:** the old 64px `bubbly` slot is now the dark unicorn's radiant counterpart — a 512px pearl-white unicorn with a gold horn, a silver-gold mane and a dawn roster banner — and its recruit label reads **Light Unicorn**. Six adventure-map headings plus gallop frames.
+- **Dark unicorn completes its turnaround:** `ne/nw/se/sw` were generated from the east/west profiles instead of re-posed from the rear/front views (which produced a mirrored `nw` and two straight-on duplicates), so both unicorns now face every map heading rather than falling back to a cardinal.
+- `gemini-hero-sprite.mjs` gained `--riderless` (mount-only facing wording), `--pose-ref` (the reference's actual heading for a diagonal repaint) and `--suffix` (run-frame output names); `test/render/unicornArt.test.ts` pins the two unicorns' 512px base/run-frame file sets on disk.
 
 ## [0.22.0] - 2026-10-19
 
@@ -63,7 +160,6 @@ Armies and garrisons become one drag-and-drop representation: `src/screens/share
 
 Clicking a building's row in the recruitment panel — the kind's heading, a per-building line, or a unit's own row (the unit art), anywhere but on a button — opens that building's own menu: the same one an iso-grid click opens, placed at the building and ringing it until the menu closes. A unit row opens the building it recruits from (its fullest source, the one `+` draws on); a row in another district switches the city view there first through the engine's own district door.
 
-
 ## [0.17.0] - 2026-10-19
 
 - Caravans are now eight-directional: supply wagons and treasury carts each have their own sprite for every compass heading and turn to face the way they are walking, like heroes, instead of one side view with a horizontal flip.
@@ -72,6 +168,7 @@ Clicking a building's row in the recruitment panel — the kind's heading, a per
 - Own caravans reveal a 2-tile vision ring (a hero sees 4), so a wagon on the road lifts the fog around itself.
 - Hovering a caravan rings it and, for your own caravan, draws its remaining route to the destination as a dashed line with a destination ring. Enemy caravans ring only, so their destination is not revealed.
 - New art pipeline `tools/sprites/gen-caravan-sprites.mjs` redraws the existing wagon/cart from six camera headings via FLUX-2-klein image editing, then derives the opposite diagonals by mirroring and downscales all eight by one shared scale.
+
 ## [0.16.0] - 2026-10-19
 
 - New mounted hero variant **Paladin 2** (`paladin2`, commander-11, label "Paladin 2"): a darker gilded "Paladin of the Ember Oath" repaint of the existing paladin — charcoal dappled warhorse with a silver-white mane, blackened-steel plate with gold filigree, crimson tabard and cape. All **eight** directions ship (no diagonal→cardinal fallback), base frames only, plus its 320×100 roster banner.

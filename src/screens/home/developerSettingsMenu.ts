@@ -1,4 +1,5 @@
-import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
+import { panelTheme, styleButton } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import { bus } from "../../core/eventBus";
 import { openAssetManager } from "./assetManager";
 import { openView, registerView } from "@screens/shared/viewLauncher";
@@ -9,12 +10,12 @@ registerView("developerSettingsMenu", openDeveloperSettingsMenu);
 
 export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
   const root = parent ?? document.body;
-  const modal = openCenteredModal(root, "Developer Settings", 480, true);
+  const modal = openDialog(root, "Developer Settings", 480, true);
 
   const content = document.createElement("div");
-  content.style.fontFamily = menuTheme.font;
-  content.style.fontSize = menuTheme.fontSize;
-  content.style.color = menuTheme.panel.color;
+  content.style.fontFamily = panelTheme.font;
+  content.style.fontSize = panelTheme.fontSize;
+  content.style.color = panelTheme.panel.color;
   content.style.display = "flex";
   content.style.flexDirection = "column";
   content.style.gap = "10px";

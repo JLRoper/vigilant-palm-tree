@@ -1,5 +1,5 @@
 import type { CityBackdropSignature, CityViewSize } from "@heroes/engine";
-import { buildingConstructionProgress, buildingFootprintFromRegistry, buildingMaxWorkers, constructionStageFor, farmFieldStyleAt, upgradeProgress, upgradeRefs } from "@heroes/engine";
+import { buildingConstructionProgress, buildingFootprintFromRegistry, buildingMaxWorkers, constructionStageFor, farmFieldStyleAt, farmPlotVariantAt, upgradeProgress, upgradeRefs } from "@heroes/engine";
 import type { BuildingDef, BuildingKind, UpgradeState } from "@heroes/contracts";
 import { buildingFootprint, cellsInDrawOrder, cellToScreen, cityLayout } from "../../../core/cityGrid";
 import type { ResourceType } from "../../../map/resourceTiles";
@@ -53,6 +53,12 @@ export interface CitySceneInput {
   /** The settlement's single in-flight upgrade, if any; targeted buildings render construction-stage sprites. */
   upgrades?: UpgradeState;
   district?: { q: number; r: number } | null;
+  /**
+   * Farm-plot art A/B hook: a `building-pixel-<style>-1.png` style segment. When
+   * set, every farm field renders that style instead of its deterministic
+   * pixel/pixel-alt pick. Used by the city view's `?farm=` query param.
+   */
+  farmSpriteStyle?: string;
 }
 
 export function buildCityScene(input: CitySceneInput): SceneNode[] {
@@ -178,7 +184,10 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
       halfHeight: fp.hh,
       ownerColor,
       ...(b.kind === "farmField"
-        ? { farmStyle: farmFieldStyleAt(settlementName, b.gx, b.gy) as "pixel" | "pixel-alt" }
+        ? {
+            farmStyle: farmFieldStyleAt(settlementName, b.gx, b.gy) as "pixel" | "pixel-alt",
+            farmSpriteKey: `building.pixel.${input.farmSpriteStyle ?? farmPlotVariantAt(settlementName, b.gx, b.gy)}.1`,
+          }
         : {}),
       selected: selectedKeys?.has(`${b.gx},${b.gy},${b.kind}`) ?? false,
       constructionStage: b.construction

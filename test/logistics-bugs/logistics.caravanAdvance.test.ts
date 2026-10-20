@@ -7,8 +7,12 @@
 //   a fresh path from the caravan's REAL tile to the origin endpoint's CURRENT tile
 //   (logistics.ts returnLegCaravan), so the caravan physically walks home and deposits
 //   where it stands. This test now PINS THE FIXED BEHAVIOR.
-// Evidence refs: packages/engine/src/logistics.ts returnLegCaravan + the three flip sites
-//   in advanceTradeRoutes; docs/wagons-stockpiles-trade-routes-plan.md §5.2.
+// UPGRADE (2026-10-19): meeting the hero no longer wastes the rest of the day's movement --
+//   the flip spends the leftover budget walking the fresh return leg in the SAME wrap
+//   (logistics.ts turnaroundToHome), so pathIndex is >= 1 (not exactly 1) at the flip and
+//   the walk home can take a wrap fewer than ceil(leg / CARAVAN_TILES_PER_DAY).
+// Evidence refs: packages/engine/src/logistics.ts returnLegCaravan + turnaroundToHome + the
+//   three flip sites in advanceTradeRoutes; docs/wagons-stockpiles-trade-routes-plan.md §5.2.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -52,6 +56,107 @@ function reachableDistantPair(map: GameMap, minDist = 5): Array<{ q: number; r: 
   }
   throw new Error(`no reachable passable pair at distance >= ${minDist} on this map`);
 }
+
+// A passable pair the caravan reaches in fewer than CARAVAN_TILES_PER_DAY
+// steps (so the delivery has movement to spare) whose way home is longer than
+// that leftover walk (so the cart is still on the road after it).
+function pairWithLeftoverAfterMeeting(map: GameMap): {
+  a: { q: number; r: number };
+  b: { q: number; r: number };
+  outbound: number;
+  home: number;
+  leftover: number;
+} {
+  const passable: Array<{ q: number; r: number }> = [];
+  for (let r = 0; r < map.height; r++) {
+    for (let q = 0; q < map.width; q++) {
+      if (map.isPassable(q, r)) passable.push({ q, r });
+    }
+  }
+  for (const a of passable) {
+    for (const b of passable) {
+      if (a.q === b.q && a.r === b.r) continue;
+      const outbound = findPath(map, a, b).length;
+      if (outbound === 0 || outbound > CARAVAN_TILES_PER_DAY - 1) continue;
+      const home = findPath(map, b, a).length;
+      const leftover = CARAVAN_TILES_PER_DAY - outbound;
+      if (home <= leftover || leftover < 1) continue;
+      return { a, b, outbound, home, leftover };
+    }
+  }
+  throw new Error("no fixture pair that meets the hero with movement to spare");
+}
+
+test("a cart that meets its hero with movement to spare turns around and heads home the SAME wrap", () => {
+  const map = new GameMap(151, "small");
+  const { a, b, outbound, home, leftover } = pairWithLeftoverAfterMeeting(map);
+  const hero = { ...makeHero("h0", 0, b.q, b.r), resources: emptyWarehouse() };
+  const origin = makeSettlement("s0", 0, a.q, a.r, { gold: 2500 });
+  const state = grantWagons(
+    makeState({ heroes: [hero], settlements: [origin], activePlayerId: 0 }),
+    1,
+  );
+  const created = createTradeRoute(state, 0, settlementEndpoint("s0"), heroEndpoint("h0"), GOLD, 1);
+  assert.equal(created.ok, true, created.reason);
+
+  // Wrap 1 loads at the origin and wrap 2 walks the whole way -- the hero sits
+  // inside one day's movement, so the delivery happens with movement to spare.
+  const departed = advanceTradeRoutes(created.state, map);
+  const after = advanceTradeRoutes(departed, map);
+
+  assert.equal(after.heroes.h0.gold, 500, "the whole load landed on the hero that wrap");
+  const caravan = after.tradeRoutes[0].caravan!;
+  assert.equal(caravan.phase, "toHome", "the meeting flipped the caravan homeward");
+  assert.equal(caravan.cargo, 0, "nothing left aboard after a full delivery");
+  assert.equal(
+    `${caravan.path[0].q},${caravan.path[0].r}`,
+    `${b.q},${b.r}`,
+    "the return leg starts where the cart met the hero",
+  );
+  const back = [{ q: b.q, r: b.r }, ...findPath(map, b, a)];
+  assert.equal(caravan.path.length, 1 + home, "the return leg is a real path home");
+  assert.deepEqual(
+    caravan.path[caravan.path.length - 1],
+    { q: a.q, r: a.r },
+    "and it ends at the origin tile",
+  );
+
+  // THE UPGRADE: the spare movement is spent in the same wrap instead of being
+  // discarded until the next one -- the cart is already `leftover` tiles along
+  // the way home, not parked on the hero's tile.
+  assert.equal(caravan.pathIndex, 1 + leftover, "the leftover walk happened inside the delivery wrap");
+  assert.deepEqual(
+    { q: caravan.path[caravan.pathIndex - 1].q, r: caravan.path[caravan.pathIndex - 1].r },
+    { q: back[leftover].q, r: back[leftover].r },
+    "it stands `leftover` tiles along the leg home",
+  );
+  assert.notEqual(
+    `${caravan.path[caravan.pathIndex - 1].q},${caravan.path[caravan.pathIndex - 1].r}`,
+    `${b.q},${b.r}`,
+    "it did not idle on the hero's tile",
+  );
+  assert.ok(caravan.pathIndex < caravan.path.length, "fixture: it is still on the road home");
+
+  // And the rest of the walk home is one wrap per remaining CARAVAN_TILES_PER_DAY:
+  // the delivery wrap did not buy a second advance.
+  let current = after;
+  let wraps = 0;
+  while (current.tradeRoutes[0].caravan !== null && wraps < 30) {
+    current = advanceTradeRoutes(current, map);
+    wraps += 1;
+  }
+  assert.equal(current.tradeRoutes[0].caravan, null, "the caravan arrives home and reloads next wrap");
+  assert.equal(
+    wraps,
+    Math.ceil((home - leftover) / CARAVAN_TILES_PER_DAY),
+    "one wrap per CARAVAN_TILES_PER_DAY tiles left after the turnaround",
+  );
+
+  // The cycle then resumes at full cadence: the reload carries the full 500.
+  current = advanceTradeRoutes(current, map);
+  assert.equal(current.tradeRoutes[0].caravan?.cargo, 500, "the reload carries the full 500 gold again");
+  assert.ok(outbound >= 1, "fixture sanity: the outbound leg is a real path");
+});
 
 test("after a destination-side chase the return leg is a real path from the delivery tile back to the origin's current tile", () => {
   const map = new GameMap(73, "small");
@@ -102,10 +207,10 @@ test("after a destination-side chase the return leg is a real path from the deli
     `${neighbor!.q},${neighbor!.r}`,
     "the return leg starts at the delivery tile the caravan physically occupies",
   );
-  assert.equal(
-    returnCaravan.pathIndex,
-    1,
-    "pathIndex is 1 from the flip onward, so caravanTile reports the real departure tile (no origin-ward marker jump)",
+  const walkedHome = returnCaravan.pathIndex - 1;
+  assert.ok(
+    returnCaravan.pathIndex >= 1,
+    "pathIndex starts at 1 at the flip (caravanTile reports the real departure tile, no origin-ward marker jump) and only grows from the leftover walk",
   );
   const returnEnd = returnCaravan.path[returnCaravan.path.length - 1];
   assert.equal(
@@ -121,19 +226,23 @@ test("after a destination-side chase the return leg is a real path from the deli
     "the return path is the walked route home, not the truncated chase leg",
   );
 
-  // The caravan walks the whole leg home before it may reload: exactly
-  // ceil(leg / 4) wraps, vanishing only at the end -- the instant vanish and
-  // the teleport reload are gone.
+  // The caravan walks the rest of the leg home before it may reload: one wrap
+  // per CARAVAN_TILES_PER_DAY tiles REMAINING after the flip's leftover walk
+  // (the delivery wrap already spent its spare movement heading back), and it
+  // vanishes only at the end -- the instant vanish and the teleport reload are
+  // gone.
   let wraps = 0;
   while (current.tradeRoutes[0].caravan !== null && wraps < 30) {
     current = advanceTradeRoutes(current, map);
     wraps += 1;
   }
   assert.equal(current.tradeRoutes[0].caravan, null, "the caravan eventually arrives home");
+  const tilesLeftAfterFlip = legHome.length - walkedHome;
+  assert.ok(tilesLeftAfterFlip > 0, "fixture: the leftover walk did not cover the whole leg home");
   assert.equal(
     wraps,
-    Math.ceil(legHome.length / CARAVAN_TILES_PER_DAY),
-    "it walked one wrap per CARAVAN_TILES_PER_DAY tiles of the real leg home",
+    Math.ceil(tilesLeftAfterFlip / CARAVAN_TILES_PER_DAY),
+    "it walked one wrap per CARAVAN_TILES_PER_DAY tiles of the leg home left after the turnaround",
   );
 
   // And the cycle resumes normally: the next wrap reloads at the origin --

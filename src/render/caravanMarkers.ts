@@ -83,6 +83,17 @@ function remainingPathFrom(caravan: CaravanState | null, currentTile: Axial): Ax
 }
 
 /**
+ * The hero a caravan's CURRENT leg is heading for, or null: the TO endpoint
+ * outbound, the FROM endpoint on the way home. A leg with a hero goal is a
+ * moving target -- its live tile is where the line the hover preview draws
+ * really ends.
+ */
+function legGoalHeroId(route: TradeRouteState, phase: CaravanState["phase"]): string | null {
+  const endpoint = phase === "toDestination" ? route.to : route.from;
+  return endpoint.kind === "hero" ? endpoint.id : null;
+}
+
+/**
  * Which caravan the pointer is over, in world pixels. Uses the sprite's
  * bottom-anchored footprint box (~1.4 hex tall, ~1.4 hex wide) instead of the
  * hex under the cursor, so a cart mid-tween between two tiles still answers
@@ -190,6 +201,8 @@ export class CaravanVisual {
   facingDirection: HeroDirection = "e";
   retiringAfterMove = false;
   lastCaravan: CaravanState | null = null;
+  /** The hero this leg heads for (null for settlement endpoints); see CaravanMarkerSpec.goalHeroId. */
+  goalHeroId: string | null = null;
 
   constructor(
     routeId: TradeRouteId,
@@ -199,6 +212,7 @@ export class CaravanVisual {
     tile: Axial,
     facingDirection: HeroDirection,
     lastCaravan: CaravanState | null,
+    goalHeroId: string | null = null,
   ) {
     this.routeId = routeId;
     this.ownerId = ownerId;
@@ -209,6 +223,7 @@ export class CaravanVisual {
     this.toTile = { ...tile };
     this.facingDirection = facingDirection;
     this.lastCaravan = cloneCaravan(lastCaravan);
+    this.goalHeroId = goalHeroId;
   }
 
   startMoveToPath(path: Axial[]): void {
@@ -285,6 +300,7 @@ export class CaravanVisual {
         : {}),
       facingDirection: this.facingDirection,
       ...(remainingPath.length > 0 ? { remainingPath } : {}),
+      ...(this.goalHeroId ? { goalHeroId: this.goalHeroId } : {}),
     };
   }
 }
@@ -328,6 +344,7 @@ export class CaravanVisualTracker {
             tile,
             facing,
             route.caravan,
+            legGoalHeroId(route, route.caravan.phase),
           ),
         );
       }
@@ -360,6 +377,7 @@ export class CaravanVisualTracker {
           end,
           facing,
           nextCaravan,
+          legGoalHeroId(route, nextCaravan.phase),
         );
         if (nextCaravan.pathIndex > 0 && (originTile.q !== end.q || originTile.r !== end.r)) {
           const walkPath = computeCaravanWalkPath(null, originTile, nextCaravan, end, map);
@@ -378,6 +396,7 @@ export class CaravanVisualTracker {
       existing.ownerId = origin.ownerId;
       existing.wagons = route.wagons;
       existing.payloadKind = route.payload.kind;
+      existing.goalHeroId = nextCaravan ? legGoalHeroId(route, nextCaravan.phase) : existing.goalHeroId;
 
       if (nextCaravan) {
         const end = caravanTile(nextCaravan, originTile);
@@ -496,6 +515,7 @@ export function resolveCaravanMarkers(
     if (!origin) continue;
     const tile = caravanTile(caravan, { q: origin.q, r: origin.r });
     const remaining = caravan.path.slice(caravan.pathIndex).map((p) => ({ q: p.q, r: p.r }));
+    const goalHeroId = legGoalHeroId(route, caravan.phase);
     specs.push({
       routeId: route.id,
       q: tile.q,
@@ -504,6 +524,7 @@ export function resolveCaravanMarkers(
       wagons: route.wagons,
       payloadKind: route.payload.kind,
       ...(remaining.length > 0 ? { remainingPath: remaining } : {}),
+      ...(goalHeroId ? { goalHeroId } : {}),
     });
   }
   return specs;

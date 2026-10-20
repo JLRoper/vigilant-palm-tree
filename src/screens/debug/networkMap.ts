@@ -1,4 +1,5 @@
-import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
+import { panelTheme, styleButton } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import { registerView } from "@screens/shared/viewLauncher";
 import { bus } from "../../core/eventBus";
 import {
@@ -48,15 +49,15 @@ function formatRtt(rttMs: number | null): string {
 }
 
 export function openNetworkMap(parent?: HTMLElement): NetworkMapHandle {
-  const modal = openCenteredModal(parent ?? document.body, "Network Map", CANVAS_W + 40, true);
+  const modal = openDialog(parent ?? document.body, "Network Map", CANVAS_W + 40, true);
 
   let snapshot: NetworkTopologySnapshot | null = null;
   const history: NetworkTopologySnapshot[] = [];
 
   const content = document.createElement("div");
-  content.style.fontFamily = menuTheme.font;
-  content.style.fontSize = menuTheme.fontSize;
-  content.style.color = menuTheme.panel.color;
+  content.style.fontFamily = panelTheme.font;
+  content.style.fontSize = panelTheme.fontSize;
+  content.style.color = panelTheme.panel.color;
   content.style.display = "flex";
   content.style.flexDirection = "column";
   content.style.gap = "8px";

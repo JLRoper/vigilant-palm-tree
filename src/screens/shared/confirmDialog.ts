@@ -1,4 +1,5 @@
-import { PopupMenu, menuTheme, styleButton } from "./menu";
+import { FloatingPanel, styleButton } from "./panel";
+import { openDialog } from "./dialog";
 
 export interface ConfirmDialogOptions {
   title: string;
@@ -9,33 +10,12 @@ export interface ConfirmDialogOptions {
   onConfirm: () => void;
 }
 
-export function openConfirmDialog(opts: ConfirmDialogOptions): PopupMenu {
-  const parent = document.body;
-  const wrapper = document.createElement("div");
-  Object.assign(wrapper.style, {
-    position: "fixed",
-    inset: "0",
-    background: "rgba(0,0,0,0.6)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: "120",
-  });
-  parent.appendChild(wrapper);
-
-  const menu = new PopupMenu({
-    parent: wrapper,
-    title: opts.title,
-    width: 360,
-    draggable: false,
-    closeable: true,
-    zIndex: 121,
-    onClose: () => wrapper.remove(),
-  });
-
-  const initialLeft = (window.innerWidth - 360) / 2;
-  const initialTop = Math.max(24, (window.innerHeight - 240) / 2);
-  menu.setPosition(initialLeft, initialTop);
+export function openConfirmDialog(opts: ConfirmDialogOptions): FloatingPanel {
+  // A dialog, not a bespoke overlay: openDialog owns the backdrop, the
+  // centring, the teardown and (via panelManager) Escape, so this file is only
+  // the message and the two buttons. zIndex 120 keeps the prompt under the
+  // home overlay (200) and the regular dialogs (300), as before.
+  const menu = openDialog(document.body, opts.title, 360, false, true, undefined, { zIndex: 120 });
 
   const msg = document.createElement("div");
   msg.textContent = opts.message;
@@ -74,7 +54,5 @@ export function openConfirmDialog(opts: ConfirmDialogOptions): PopupMenu {
   row.appendChild(confirm);
 
   menu.appendContent(row);
-
-  void menuTheme;
   return menu;
 }

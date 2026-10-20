@@ -1,4 +1,4 @@
-import { PopupMenu, anchorMenuToBottom, clampMenuIntoView } from "./menu";
+import { FloatingPanel, anchorPanelToBottom, clampPanelIntoView } from "./panel";
 import { toolbarHeight } from "./panelRail";
 import type { PanelGeometry } from "./panelLayout";
 
@@ -9,7 +9,7 @@ import type { PanelGeometry } from "./panelLayout";
 export class DockedPanel {
   private userMoved = false;
 
-  constructor(private menu: PopupMenu, private panelX: number, restore?: PanelGeometry | null) {
+  constructor(private menu: FloatingPanel, private panelX: number, restore?: PanelGeometry | null) {
     if (restore) {
       this.userMoved = true;
       this.menu.setPosition(restore.x, restore.y);
@@ -23,7 +23,7 @@ export class DockedPanel {
   reposition(visible: boolean): void {
     if (!visible) return;
     const minTop = toolbarHeight();
-    if (this.userMoved) clampMenuIntoView(this.menu, minTop);
-    else anchorMenuToBottom(this.menu, this.panelX, minTop);
+    if (this.userMoved) clampPanelIntoView(this.menu, minTop);
+    else anchorPanelToBottom(this.menu, this.panelX, minTop);
   }
 }
