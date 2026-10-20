@@ -4,8 +4,9 @@ import { GameMap } from "@heroes/engine";
 import type { TileRow } from "@heroes/engine";
 import { NEIGHBOR_DIRS } from "@heroes/engine";
 import { buildAdventureScene, riverMaskAt } from "../../src/render/scene/sceneBuilder/adventureScene";
-import { riverMaskInfo } from "../../src/render/scene/paint2d/index";
+import { riverMaskInfo, paintRiverHex } from "../../src/render/scene/paint2d/index";
 import type { RiverHexNode } from "../../src/render/scene/types";
+import { makeRecordingCtx, makeNoopPaint2DDep } from "./_helpers";
 
 test("riverMaskInfo maps the six bit masks to the baked templates", () => {
   // single dir -> end
@@ -95,4 +96,26 @@ test("riverMaskAt ignores non-river neighbours", () => {
   for (const d of NEIGHBOR_DIRS) {
     assert.equal(map.riverAt(1 + d.q, 1 + d.r), undefined);
   }
+});
+
+test("paintRiverHex draws the resolved sprite rotated by the exit direction", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  const deps = makeNoopPaint2DDep();
+  deps.sprite.resolveRiverSprite = () => ({
+    drawable: { ok: true } as unknown as HTMLCanvasElement,
+    descriptor: { key: "river.small.straight", url: null, anchor: "center", sizing: { kind: "abs", size: 64 } },
+    ready: true,
+  });
+  paintRiverHex(ctx, { kind: "riverHex", q: 1, r: 1, world: { x: 10, y: 10 }, size: "small", mask: (1 << 0) | (1 << 3) }, deps);
+  assert.equal(calls.filter((c) => c.name === "drawImage").length, 1, "one drawImage");
+  const rotate = calls.find((c) => c.name === "rotate");
+  assert.ok(rotate, "sprite is rotated into place");
+  assert.equal(rotate.args[0], 0, "east-west straight river needs no rotation");
+});
+
+test("paintRiverHex falls back to a procedural band when sprites are unavailable", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintRiverHex(ctx, { kind: "riverHex", q: 1, r: 1, world: { x: 10, y: 10 }, size: "small", mask: (1 << 0) | (1 << 3) }, makeNoopPaint2DDep());
+  assert.equal(calls.filter((c) => c.name === "drawImage").length, 0, "no sprite");
+  assert.ok(calls.some((c) => c.name === "stroke"), "procedural band strokes in the fallback");
 });
