@@ -71,7 +71,7 @@ import type {
 // classes that used to live under `src/render/painter/` (PR #122). Those
 // classes were deleted in issue #148 once MapRenderer switched to paintScene,
 // so these literals are now the only copy.
-const FOG_FILL = "rgba(8, 10, 16, 0.78)";
+const FOG_FILL = "rgba(8, 10, 16, 0.96)";
 const FOG_EDGE = "rgba(8, 10, 16, 0.55)";
 const HOVER_STROKE = "#ffcc00";
 const SELECTED_TILE_STROKE = "#ffffff";

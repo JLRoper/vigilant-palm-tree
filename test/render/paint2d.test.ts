@@ -251,7 +251,7 @@ test("paintFogHex: emits the live fog rgba fill + a stroke", () => {
   const { ctx, calls } = makeRecordingCtx();
   paintFogHex(ctx, { kind: "fogHex", q: 0, r: 0, world: { x: 0, y: 0 } }, makeNoopPaint2DDep());
   const fill = calls.find((c) => c.name === "set:fillStyle");
-  assert.equal(fill?.args[0], "rgba(8, 10, 16, 0.78)", "fog fill must match the live rgba(8,10,16,0.78)");
+  assert.equal(fill?.args[0], "rgba(8, 10, 16, 0.96)", "fog fill must match the live rgba(8,10,16,0.96)");
   const stroke = calls.find((c) => c.name === "set:strokeStyle");
   assert.equal(stroke?.args[0], "rgba(8, 10, 16, 0.55)", "fog edge must match the live rgba(8,10,16,0.55)");
   assert.ok(calls.some((c) => c.name === "fill"), "fog should fill");

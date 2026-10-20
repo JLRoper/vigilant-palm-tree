@@ -54,12 +54,37 @@ export function districtTierForCount(count: number): 1 | 2 | 3 {
   return 1;
 }
 
-/** The six-direction bitmask of river neighbours (NEIGHBOR_DIRS order). */
+// Screen angles of the six edge midpoints, NEIGHBOR_DIRS (E, NE, NW, W, SW,
+// SE) order. Mirrors the rotation table in the painter.
+const RIVER_MASK_ANGLE_DEG = [0, 300, 240, 180, 120, 60];
+
+/** The six-direction bitmask of river neighbours (NEIGHBOR_DIRS order),
+ * plus one water-facing exit at endpoints: exactly-one-neighbour end cells
+ * extend their channel through the hex toward an adjacent water/swamp body,
+ * so the river visually pours into its sink instead of stubbing out one
+ * tile short of it. The exit keeps to the baked art shapes (opposite =
+ * straight, 60 degrees = curve). */
 export function riverMaskAt(map: GameMap, q: number, r: number): number {
   let mask = 0;
+  let bits = 0;
   for (let d = 0; d < 6; d++) {
-    if (map.riverAt(q + NEIGHBOR_DIRS[d].q, r + NEIGHBOR_DIRS[d].r)) mask |= 1 << d;
+    if (map.riverAt(q + NEIGHBOR_DIRS[d].q, r + NEIGHBOR_DIRS[d].r)) {
+      mask |= 1 << d;
+      bits++;
+    }
   }
+  if (bits !== 1) return mask;
+  const riverDir = 0 | Math.log2(mask);
+  let curve = -1;
+  for (let d = 0; d < 6; d++) {
+    const t = map.get(q + NEIGHBOR_DIRS[d].q, r + NEIGHBOR_DIRS[d].r);
+    if (t !== "water" && t !== "swamp") continue;
+    let da = Math.abs(RIVER_MASK_ANGLE_DEG[d] - RIVER_MASK_ANGLE_DEG[riverDir]) % 360;
+    da = Math.min(da, 360 - da);
+    if (da === 180) return mask | (1 << d);
+    if (da === 60 && curve < 0) curve = d;
+  }
+  if (curve >= 0) return mask | (1 << curve);
   return mask;
 }
 
