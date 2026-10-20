@@ -4,15 +4,22 @@
 //   src/resources/rivers/river-wide-bridge.png
 //
 // Rivers are an OVERLAY: the biome underneath stays painted, and these tiles
-// composite blue water on top. The water core is near-opaque but every bank
-// and the soft shoreline edge fade to alpha, so grass/sand/snow underneath
-// tints the banks -- "the water picks up the biome's colour" without baking
-// per-biome variants. Each tile is authored with its exit edge at 0 degrees
-// (east); the painter rotates it by the direction index at draw time.
+// composite blue water on top. The water core is near-opaque but the banks
+// fade to alpha, so grass/sand/snow underneath tints them. Each tile is
+// authored with its exit edge at 0 degrees (east); the painter rotates it by
+// the direction index at draw time.
 //
-// Pure-Node deterministic rasteriser, same idiom as gen-shipyard-sprite.mjs:
-// a logical grid, circle stamps along a polyline, then a nearest-neighbour
-// upscale into a PNG (filter 0, zlib) that is byte-stable across runs.
+// Rendering notes (three review-driven fixes, all deterministic):
+//   - MAX-alpha blending: a pixel keeps the most opaque covering stamp, so
+//     the band resolves to a smooth distance-to-polyline profile. Source-over
+//     composite stacked neighbouring stamps into dark blotches and a speckled
+//     shoreline that read as per-hex outlines and noise at game scale.
+//   - The water profile is supersampled at S=3 subpixels and box-filtered
+//     down before the nearest-neighbour upscale, so the shoreline is
+//     anti-aliased instead of a staircase of discrete dots.
+//   - One continuous faint highlight along the centreline instead of dash
+//     dots (dashes read as noise). Plus a thin uniform bank line just inside
+//     the shore, which max-blending cannot stack into a harsh outline.
 //
 // Usage:
 //   node tools/sprites/gen-river-tiles.mjs           # write the PNGs
@@ -29,9 +36,11 @@ const OUT_DIR = path.join(ROOT, "src", "resources", "rivers");
 mkdirSync(OUT_DIR, { recursive: true });
 
 // Logical canvas 88x88: hex radius 32 centred on (44,44) leaves room for the
-// widest band (radius 11) plus its 2px soft edge to spill past the hex rim.
+// widest band plus its soft spill to pass the hex rim. The alpha profile is
+// drawn S=3 subpixels per logical pixel, then box-filtered back down.
 const LOGICAL = 88;
-const SCALE = 16;
+const S = 3; // supersample factor for the water alpha profile
+const SCALE = 16; // final nearest-neighbour upscale to the family PNG size
 const CENTER = LOGICAL / 2;
 // Distance from the hex centre to an edge midpoint (radius * cos30).
 const EDGE = (32 * Math.sqrt(3)) / 2;
@@ -43,61 +52,67 @@ const WOOD = [138, 98, 52]; // #8a6234
 const WOOD_DK = [90, 63, 32]; // #5a3f20
 const WOOD_HI = [185, 141, 80]; // #b98d50
 
+// Buffer at subpixel resolution (LOGICAL*S per side).
 function makeBuf(w, h) {
   return { w, h, px: new Uint8Array(w * h * 4) };
 }
 
-// Blend `rgb` over whatever is already at (x,y) using `alpha`.
-function blend(buf, x, y, rgb, alpha) {
+// MAX-alpha single-pixel write (subpixel coordinates).
+function blendAt(buf, x, y, rgb, alpha) {
   if (x < 0 || y < 0 || x >= buf.w || y >= buf.h) return;
   const i = (y * buf.w + x) * 4;
-  const a = alpha / 255;
-  const outA = a + (buf.px[i + 3] / 255) * (1 - a);
-  if (outA <= 0) return;
-  buf.px[i] = Math.round((rgb[0] * a + buf.px[i] * (1 - a)) / outA);
-  buf.px[i + 1] = Math.round((rgb[1] * a + buf.px[i + 1] * (1 - a)) / outA);
-  buf.px[i + 2] = Math.round((rgb[2] * a + buf.px[i + 2] * (1 - a)) / outA);
-  buf.px[i + 3] = Math.round(outA * 255);
+  if (alpha <= buf.px[i + 3]) return;
+  buf.px[i] = rgb[0];
+  buf.px[i + 1] = rgb[1];
+  buf.px[i + 2] = rgb[2];
+  buf.px[i + 3] = alpha;
 }
 
-/** Stamp one circle: opaque core fading to translucent banks, then a thin
- * translucent dark edge and a soft spill. The outer water is only partway
- * opaque, so the biome underneath tints the banks instead of reading as a
- * hard hex-edge tray. */
+// MAX-alpha block write in LOGICAL coordinates (for the bridge planks).
+function blend(buf, x, y, rgb, alpha) {
+  for (let dy = 0; dy < S; dy++) {
+    for (let dx = 0; dx < S; dx++) blendAt(buf, x * S + dx, y * S + dy, rgb, alpha);
+  }
+}
+
+// One stamp with subpixel coverage: distances are evaluated at each
+// subpixel's centre against the circle in LOGICAL units.
 function stamp(buf, cx, cy, r) {
-  const rMin = Math.floor(cx - r - 4);
-  const rMax = Math.ceil(cx + r + 4);
-  const cMin = Math.floor(cy - r - 4);
-  const cMax = Math.ceil(cy + r + 4);
+  const cx0 = cx * S;
+  const cy0 = cy * S;
+  const rMin = Math.floor(cx0 - (r + 3) * S);
+  const rMax = Math.ceil(cx0 + (r + 3) * S);
+  const cMin = Math.floor(cy0 - (r + 3) * S);
+  const cMax = Math.ceil(cy0 + (r + 3) * S);
   for (let y = cMin; y <= cMax; y++) {
     for (let x = rMin; x <= rMax; x++) {
-      const d = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+      const d = Math.sqrt((x + 0.5 - cx0) ** 2 + (y + 0.5 - cy0) ** 2) / S;
       let alpha = 0;
       let rgb = WATER;
       if (d < r * 0.55) {
-        alpha = 235;
-      } else if (d < r * 0.9) {
-        const t = (r * 0.9 - d) / (r * 0.35); // 1 -> 0
-        alpha = Math.round(235 - 140 * (1 - t));
+        alpha = 238;
+      } else if (d < r * 0.88) {
+        const t = (r * 0.88 - d) / (r * 0.33); // 1 -> 0
+        alpha = Math.round(238 - 150 * (1 - t));
       } else if (d < r) {
-        const t = (r - d) / (r * 0.1); // 1 -> 0
+        // Thin uniform bank line just inside the shore (max-blending keeps it
+        // from stacking into a harsh outline).
+        alpha = 120;
         rgb = WATER_DK;
-        alpha = Math.round(110 * t);
-      } else if (d < r + 3) {
-        const t = (r + 3 - d) / 3; // 1 -> 0
-        alpha = Math.round(80 * t);
+      } else if (d < r + 2) {
+        const t = (r + 2 - d) / 2; // 1 -> 0
+        alpha = Math.round(55 * t);
       }
-      if (alpha > 0) blend(buf, x, y, rgb, alpha);
+      if (alpha > 0) blendAt(buf, x, y, rgb, alpha);
     }
   }
 }
 
-/** Stamp the river polyline: circle stamps stepped along each segment. */
 function ribbon(buf, pts, r) {
   for (let s = 0; s < pts.length - 1; s++) {
     const [x0, y0] = pts[s];
     const [x1, y1] = pts[s + 1];
-    const seg = Math.sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+    const seg = Math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2);
     const steps = Math.max(1, Math.round(seg / 1.2));
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
@@ -106,35 +121,37 @@ function ribbon(buf, pts, r) {
   }
 }
 
-/** Light ripple dashes along the centreline, deterministic offsets. */
-function ripples(buf, pts, phase, len = 3, gap = 7) {
-  let acc = phase;
+// One continuous, faint highlight line along the centreline.
+function ripples(buf, pts) {
   for (let s = 0; s < pts.length - 1; s++) {
     const [x0, y0] = pts[s];
     const [x1, y1] = pts[s + 1];
-    const seg = Math.sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
-    const steps = Math.max(1, Math.round(seg));
+    const seg = Math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2);
+    const steps = Math.max(1, Math.round(seg / 1.2));
     for (let i = 0; i <= steps; i++) {
-      if (Math.floor(acc) % (len + gap) < len) {
-        const t = i / steps;
-        const x = Math.round(x0 + (x1 - x0) * t);
-        const y = Math.round(y0 + (y1 - y0) * t);
-        blend(buf, x, y, WATER_HI, 120);
-        blend(buf, x - 1, y, WATER_HI, 90);
-      }
-      acc += 1;
+      const t = i / steps;
+      stampSmall(buf, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+    }
+  }
+}
+
+function stampSmall(buf, cx, cy) {
+  const cx0 = cx * S;
+  const cy0 = cy * S;
+  for (let y = Math.floor(cy0 - 3); y <= Math.ceil(cy0 + 3); y++) {
+    for (let x = Math.floor(cx0 - 3); x <= Math.ceil(cx0 + 3); x++) {
+      const d = Math.sqrt((x + 0.5 - cx0) ** 2 + (y + 0.5 - cy0) ** 2) / S;
+      if (d < 1.6) blendAt(buf, x, y, WATER_HI, 60);
     }
   }
 }
 
 const EDGE_E = [CENTER + EDGE, CENTER];
 const EDGE_W = [CENTER - EDGE, CENTER];
-// Edge midpoints at 60 and 300 degrees (screen-y down): NE and SE of the hex.
 const EDGE_CW = [CENTER + EDGE * 0.5, CENTER + EDGE * Math.sin(Math.PI / 3)];
 const EDGE_CCW = [CENTER + EDGE * 0.5, CENTER - EDGE * Math.sin(Math.PI / 3)];
 
 function meander(a, b, wiggle) {
-  // Five points from a to b, the three interior ones nudged perpendicular.
   const dx = b[0] - a[0];
   const dy = b[1] - a[1];
   const nx = -dy / Math.max(1, Math.sqrt(dx * dx + dy * dy));
@@ -143,10 +160,7 @@ function meander(a, b, wiggle) {
   for (let i = 1; i <= 3; i++) {
     const t = i / 4;
     const w = wiggle[i - 1];
-    out.push([
-      Math.round(a[0] + dx * t + nx * w),
-      Math.round(a[1] + dy * t + ny * w),
-    ]);
+    out.push([Math.round(a[0] + dx * t + nx * w), Math.round(a[1] + dy * t + ny * w)]);
   }
   out.push(b);
   return out;
@@ -158,27 +172,23 @@ function template(name, size) {
     name === "straight"
       ? meander(EDGE_W, EDGE_E, [-2.5, 3, -2])
       : name === "curveC"
-        ? [[Math.round(CENTER + EDGE), CENTER], [CENTER + 14, CENTER + 4], [EDGE_CW[0] | 0, EDGE_CW[1] | 0]]
+        ? [[Math.round(CENTER + EDGE), CENTER], [CENTER + 14, CENTER + 4], [Math.floor(EDGE_CW[0]), Math.floor(EDGE_CW[1])]]
         : name === "curveCC"
-          ? [[Math.round(CENTER + EDGE), CENTER], [CENTER + 14, CENTER - 4], [EDGE_CCW[0] | 0, EDGE_CCW[1] | 0]]
-          : // end: a rounded source blob with a short tail to the east edge
-            [[CENTER + 16, CENTER], [CENTER + 9, CENTER], [Math.round(CENTER + EDGE), CENTER]];
-  const buf = makeBuf(LOGICAL, LOGICAL);
+          ? [[Math.round(CENTER + EDGE), CENTER], [CENTER + 14, CENTER - 4], [Math.floor(EDGE_CCW[0]), Math.floor(EDGE_CCW[1])]]
+          : [[CENTER + 16, CENTER], [CENTER + 9, CENTER], [Math.round(CENTER + EDGE), CENTER]];
+  const buf = makeBuf(LOGICAL * S, LOGICAL * S);
   ribbon(buf, pts, r);
-  // The end template's western blob: a second heavier stamp for the pool.
   if (name === "end") {
     stamp(buf, CENTER + 8, CENTER, r + 1);
     stamp(buf, CENTER + 3, CENTER + 1, r - 1);
   }
-  ripples(buf, pts, size === "wide" ? 2 : 0);
-  return { buf, pts, r };
+  ripples(buf, pts);
+  return buf;
 }
 
 function bridgeOverStraight() {
-  // Wide water band, then a wooden bridge crossing it vertically near centre.
-  const { buf, pts, r } = template("straight", "wide");
-  // Silhouette the crossing with an outline-free plank span: vertical strip
-  // across the band, planks running horizontally (perpendicular to the river).
+  const buf = template("straight", "wide");
+  const r = 9;
   const x0 = CENTER - 5;
   const x1 = CENTER + 5;
   for (let y = CENTER - 2 * r - 2; y <= CENTER + 2 * r + 2; y++) {
@@ -195,7 +205,6 @@ function bridgeOverStraight() {
   }
   blend(buf, CENTER, CENTER - 2 * r - 3, WOOD_HI, 255);
   blend(buf, CENTER, CENTER + 2 * r + 3, WOOD_HI, 255);
-  void pts;
   return buf;
 }
 
@@ -236,9 +245,40 @@ function chunk(type, data) {
   return out;
 }
 
+/**
+ * Box-filter the supersampled buffer to LOGICAL pixels (premultiplied-aware
+ * average), then nearest-neighbour upscale to the output PNG size.
+ */
 function encode(buf) {
-  const w = buf.w * SCALE;
-  const h = buf.h * SCALE;
+  const logical = LOGICAL;
+  const mid = new Uint8Array(logical * logical * 4);
+  for (let y = 0; y < logical; y++) {
+    for (let x = 0; x < logical; x++) {
+      const acc = [0, 0, 0, 0];
+      for (let dy = 0; dy < S; dy++) {
+        for (let dx = 0; dx < S; dx++) {
+          const i = ((y * S + dy) * logical * S + (x * S + dx)) * 4;
+          const a = buf.px[i + 3] / 255;
+          acc[0] += buf.px[i] * a;
+          acc[1] += buf.px[i + 1] * a;
+          acc[2] += buf.px[i + 2] * a;
+          acc[3] += a;
+        }
+      }
+      const n = S * S;
+      const mi = (y * logical + x) * 4;
+      const a = acc[3] / n;
+      if (a > 0) {
+        mid[mi] = Math.round(acc[0] / acc[3]);
+        mid[mi + 1] = Math.round(acc[1] / acc[3]);
+        mid[mi + 2] = Math.round(acc[2] / acc[3]);
+        mid[mi + 3] = Math.round(a * 255);
+      }
+    }
+  }
+
+  const w = logical * SCALE;
+  const h = logical * SCALE;
   const stride = w * 4;
   const raw = new Uint8Array((stride + 1) * h);
   for (let y = 0; y < h; y++) {
@@ -246,12 +286,12 @@ function encode(buf) {
     raw[y * (stride + 1)] = 0;
     for (let x = 0; x < w; x++) {
       const srcX = Math.floor(x / SCALE);
-      const s = (srcY * buf.w + srcX) * 4;
+      const s = (srcY * logical + srcX) * 4;
       const d = y * (stride + 1) + 1 + x * 4;
-      raw[d] = buf.px[s];
-      raw[d + 1] = buf.px[s + 1];
-      raw[d + 2] = buf.px[s + 2];
-      raw[d + 3] = buf.px[s + 3];
+      raw[d] = mid[s];
+      raw[d + 1] = mid[s + 1];
+      raw[d + 2] = mid[s + 2];
+      raw[d + 3] = mid[s + 3];
     }
   }
   const sig = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -306,7 +346,7 @@ function emit(name, buf) {
 
 for (const size of ["small", "wide"]) {
   for (const mask of MASKS) {
-    emit(`river-${size}-${mask}`, template(mask, size).buf);
+    emit(`river-${size}-${mask}`, template(mask, size));
   }
 }
 emit("river-wide-bridge", bridgeOverStraight());
