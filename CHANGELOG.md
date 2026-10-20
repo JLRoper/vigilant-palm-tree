@@ -10,6 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.24.0] - 2026-10-20
+
+- **Rivers on the adventure map** (map-gen **v5**) — procedural rivers run between two bodies of water (lakes or swamps), drawn as water over the biome underneath, not as a terrain value. Two kinds: **small** (crossable, costs a full day — all 7 movement points) and **wide** (impassable except at baked bridges, cost 1), with ~one bridge every 8 cells. The A*-guided meander walk descends a distance-to-sink field with a momentum term (no U-turns, soft turns cheap) plus a slight biome-boundary bias, and never self-touches, merges, or forms more than a 3-way junction.
+- **Everywhere a hero moves respects rivers** — pathfinding, AI, charters, the path preview's reachable split, the tile popup's effective cost, and castle placement reachability; resources and castle candidates skip river cells.
+- **Water is baked once, tinted by the biome** — nine overlay tiles (end/straight/curveC/curveCC for small and wide, plus a wide bridge) rasterised deterministically by tools/sprites/gen-river-tiles.mjs (byte-stable, no API) with alpha banks that pick up grass/sand/snow underneath; the painter auto-tiles them from the six-bit neighbour mask. The minimap draws the river line with a bridge tick.
+- **Map-gen v5 keeps v1–v4 maps intact** — rivers append after every terrain pass, so a saved v4 game keeps its exact terrain while fresh games rebuild with rivers; MapGenVersion gained 5 and the stored-version unions now reuse the shared type.
+
+
 ## [0.22.0] - 2026-10-19
 
 - **Dense forest biome** (new `denseForest` terrain, map-gen **v4**): a rarer, **impassable** second forest — `TERRAIN_COST` is `Infinity`, so heroes path around it exactly like mountains and water. It is generated last, seeded on a non-forest neighbour of a forest tile and grown with a 0.75 bias toward frontier tiles that still touch normal forest, so it usually borders the forest it grew out of while its outer rim still meets the surrounding biomes. `DENSE_FOREST_FRACTION` is 0.06 against forest's 0.15; it never overwrites forest, water or mountain and never carries a resource deposit.
