@@ -27,6 +27,8 @@
 //   --keep-facing           the reference is already at the target heading: keep it
 //                           verbatim instead of re-posing from the nearest cardinal
 //   --riderless             the subject has no rider; use mount-only facing wording
+//   --subject <noun>        mount noun used by the facing clauses (default: horse),
+//                           e.g. --subject dragon for a dragon rider
 //   --pose-ref <dir>        heading of the reference image when it is not the
 //                           default nearest cardinal (n for diagonals, s for front)
 //   --ref <path>            reference PNG (single-direction run, or the banner ref)
@@ -74,6 +76,7 @@ const flags = {
   suffix: "",
   keepFacing: false,
   riderless: false,
+  subject: "horse",
   poseRef: null,
   ref: null,
   refDir: null,
@@ -100,6 +103,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === "--suffix") flags.suffix = argv[++i];
   else if (a === "--keep-facing") flags.keepFacing = true;
   else if (a === "--riderless") flags.riderless = true;
+  else if (a === "--subject") flags.subject = argv[++i];
   else if (a === "--pose-ref") flags.poseRef = argv[++i];
   else if (a === "--ref") flags.ref = argv[++i];
   else if (a === "--ref-dir") flags.refDir = argv[++i];
@@ -182,7 +186,11 @@ const RIDERLESS_FACING = {
 };
 
 function facingFor(dir) {
-  return flags.riderless ? RIDERLESS_FACING[dir] : FACING[dir];
+  if (flags.riderless) return RIDERLESS_FACING[dir];
+  const subject = flags.subject;
+  return FACING[dir]
+    .replaceAll("the horse and rider", `the ${subject} and rider`)
+    .replaceAll("the horse's", `the ${subject}'s`);
 }
 
 // Diagonal directions repaint the nearest cardinal (a rear view cannot be
@@ -196,11 +204,12 @@ function dirPrompt(dir) {
   const poseFacing = facingFor(poseRef);
   const turning = flags.keepFacing || poseRef === dir
     ? `Keep the figure facing exactly as in the reference: ${facing}.`
-    : `The reference is a ${poseFacing} view. Repose this same figure as ${facing}, the same character and horse turned to that angle as an isometric game sprite would be — keep the body proportions, gait phase and silhouette of the reference.`;
+    : `The reference is a ${poseFacing} view. Repose this same figure as ${facing}, the same character and ${flags.subject} turned to that angle as an isometric game sprite would be — keep the body proportions, gait phase and silhouette of the reference.`;
   return promptTemplate
     .replaceAll("{{DIR}}", dir)
     .replaceAll("{{FACING}}", facing)
-    .replaceAll("{{POSE}}", turning);
+    .replaceAll("{{POSE}}", turning)
+    .replaceAll("{{HEAD_SIDE}}", dir === "e" || dir === "ne" || dir === "se" ? "RIGHT" : dir === "w" || dir === "nw" || dir === "sw" ? "LEFT" : "CENTRE");
 }
 
 function dataUrl(file) {
