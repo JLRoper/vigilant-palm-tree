@@ -306,13 +306,13 @@ async function visualDarknessProbe(browser: Browser): Promise<void> {
   await wait(1200);
   const blackControl = await countBlackPixels(ctrlPage);
   assert(blackControl >= 0, "getImageData unavailable on #game canvas (control)");
-  // Fog rgba(8,10,16,0.96) and the #0a0a0a background are never pure black, but
+  // Fog rgba(8,10,16,1) and the #0a0a0a background are never pure black, but
   // the scaled-down hero/castle pixel art leaves a handful of exact-#000
   // outline pixels (measured: 3 on a 1280x800 canvas). A broken pipeline
   // leaking uncharted-black into a normal game would add hundreds of
   // thousands, so a tiny ceiling plus the margin-vs-uncharted check below
   // keeps the control strict without flaking on sprite scaling.
-  assert(blackControl < 100, `control (non-uncharted) game shows ${blackControl} opaque pure-black pixels, expected near 0 (fog rgba(8,10,16,0.96)/background #0a0a0a are never pure black)`);
+  assert(blackControl < 100, `control (non-uncharted) game shows ${blackControl} opaque pure-black pixels, expected near 0 (fog rgba(8,10,16,1)/background #0a0a0a are never pure black)`);
   assert(blackUncharted > Math.max(1000, 100 * blackControl), `uncharted black ${blackUncharted} not convincingly above control ${blackControl}`);
   console.log(`>> [C] control game: ${blackControl} pure-black pixels (fog/background never pure black)`);
   await ctrlPage.close();

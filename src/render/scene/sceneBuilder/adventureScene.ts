@@ -58,6 +58,37 @@ export function districtTierForCount(count: number): 1 | 2 | 3 {
 // SE) order. Mirrors the rotation table in the painter.
 const RIVER_MASK_ANGLE_DEG = [0, 300, 240, 180, 120, 60];
 
+/** For an endpoint cell (exactly one river neighbour): the water/swamp
+ * neighbour direction the pass-through exit was chosen toward, or -1.
+ * Priority mirrors riverMaskAt (straight out, then the 60-degree bend,
+ * then the 120-degree sharp bend). */
+export function riverMouthAt(map: GameMap, q: number, r: number): number {
+  let mask = 0;
+  let bits = 0;
+  for (let d = 0; d < 6; d++) {
+    if (map.riverAt(q + NEIGHBOR_DIRS[d].q, r + NEIGHBOR_DIRS[d].r)) {
+      mask |= 1 << d;
+      bits++;
+    }
+  }
+  if (bits !== 1) return -1;
+  const riverDir = 0 | Math.log2(mask);
+  let curve = -1;
+  let sharp = -1;
+  for (let d = 0; d < 6; d++) {
+    const t = map.get(q + NEIGHBOR_DIRS[d].q, r + NEIGHBOR_DIRS[d].r);
+    if (t !== "water" && t !== "swamp") continue;
+    let da = Math.abs(RIVER_MASK_ANGLE_DEG[d] - RIVER_MASK_ANGLE_DEG[riverDir]) % 360;
+    da = Math.min(da, 360 - da);
+    if (da === 180) return d;
+    if (da === 60 && curve < 0) curve = d;
+    if (da === 120 && sharp < 0) sharp = d;
+  }
+  if (curve >= 0) return curve;
+  if (sharp >= 0) return sharp;
+  return -1;
+}
+
 /** The six-direction bitmask of river neighbours (NEIGHBOR_DIRS order),
  * plus one water-facing exit at endpoints: exactly-one-neighbour end cells
  * extend their channel through the hex toward an adjacent water/swamp body,
@@ -126,6 +157,7 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
         // cell (no trees/ripples poking through the water). Emitted here, in
         // tile order, so it paints after this tile's fill but before the fog
         // nodes -- an unseen river stays hidden exactly like the terrain.
+        const mouthDir = riverMouthAt(map, q, r);
         nodes.push({
           kind: "riverHex",
           q,
@@ -134,6 +166,7 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
           size: river.kind,
           mask: riverMaskAt(map, q, r),
           ...(river.bridge ? { bridge: true } : {}),
+          ...(mouthDir >= 0 ? { mouthDir } : {}),
         });
       } else if (terrain !== "grass" && terrain !== "dirt") {
         nodes.push({ kind: "terrainDecoration", q, r, world, terrain });

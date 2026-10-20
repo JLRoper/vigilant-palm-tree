@@ -117,6 +117,15 @@ test("paintRiverHex draws the resolved sprite rotated by the exit direction", ()
   assert.equal(rotate.args[0], 0, "east-west straight river needs no rotation");
 });
 
+test("paintRiverHex draws a mouth wedge only when mouthDir is set", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  const wedgeFills = () => calls.filter((c) => c.name === "set:fillStyle" && String(c.args[0]).startsWith("rgba(42, 90, 138"));
+  paintRiverHex(ctx, { kind: "riverHex", q: 1, r: 1, world: { x: 10, y: 10 }, size: "wide", mask: (1 << 0) | (1 << 3) }, makeNoopPaint2DDep());
+  assert.equal(wedgeFills().length, 0, "no mouth without mouthDir");
+  paintRiverHex(ctx, { kind: "riverHex", q: 1, r: 1, world: { x: 10, y: 10 }, size: "wide", mask: (1 << 0) | (1 << 3), mouthDir: 3 }, makeNoopPaint2DDep());
+  assert.equal(wedgeFills().length, 2, "mouth wedge draws its two fade quads");
+});
+
 test("paintRiverHex falls back to a procedural band when sprites are unavailable", () => {
   const { ctx, calls } = makeRecordingCtx();
   paintRiverHex(ctx, { kind: "riverHex", q: 1, r: 1, world: { x: 10, y: 10 }, size: "small", mask: (1 << 0) | (1 << 3) }, makeNoopPaint2DDep());

@@ -73,6 +73,13 @@ export interface RiverHexNode {
   /** Bitmask of the six neighbour directions that are also river cells. */
   mask: number;
   bridge?: boolean;
+  /**
+   * Endpoint pass-throughs only: the direction of the water-facing exit the
+   * end cell pours into. The painter draws a short mouth wedge there so the
+   * band melts into a body of water instead of stopping at the rim with a
+   * hard bank line.
+   */
+  mouthDir?: number;
 }
 
 export interface FogHexNode {

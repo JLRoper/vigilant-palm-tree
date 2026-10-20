@@ -71,7 +71,10 @@ import type {
 // classes that used to live under `src/render/painter/` (PR #122). Those
 // classes were deleted in issue #148 once MapRenderer switched to paintScene,
 // so these literals are now the only copy.
-const FOG_FILL = "rgba(8, 10, 16, 0.96)";
+// Fully opaque: any transparency let bright water (lakes, rivers) bleed
+// through tile-by-tile along the coastline and read as "ghost river" hexes
+// in the fog, no matter how faint. The fog must reveal nothing.
+const FOG_FILL = "rgba(8, 10, 16, 1)";
 const FOG_EDGE = "rgba(8, 10, 16, 0.55)";
 const HOVER_STROKE = "#ffcc00";
 const SELECTED_TILE_STROKE = "#ffffff";
@@ -446,6 +449,41 @@ function paintRiverBandFallback(
   ctx.restore();
 }
 
+/**
+ * Endpoint pass-throughs: a short wedge on the water-facing exit, painted in
+ * the exact body colour (TERRAIN_COLORS.water.fill). Opaque at the shared
+ * edge, fading inward, it flares the band to the full hex edge: the band's
+ * abrupt bank-line cut, the angular gap and the shade patch between band
+ * blues all disappear under it, and the river visibly pours into the water.
+ */
+function paintMouthWedge(ctx: CanvasRenderingContext2D, node: RiverHexNode): void {
+  if (node.mouthDir === undefined) return;
+  const theta = (RIVER_DIR_ANGLE_DEG[node.mouthDir] * Math.PI) / 180;
+  const nx = Math.cos(theta);
+  const ny = Math.sin(theta);
+  const ex = Math.sin(theta);
+  const ey = -Math.cos(theta);
+  const midX = node.world.x + RIVER_EDGE_DIST * nx;
+  const midY = node.world.y + RIVER_EDGE_DIST * ny;
+  const depth = 22;
+  const half = (node.size === "wide" ? 11 : 9) * (HEX_SIZE / RIVER_ART_SIZE) + 1;
+  const edgeHalf = HEX_SIZE * 0.5;
+  const quad = (d1: number, s1: number, d2: number, s2: number, alpha: number): void => {
+    ctx.beginPath();
+    ctx.moveTo(midX - nx * d1 + ex * s1, midY - ny * d1 + ey * s1);
+    ctx.lineTo(midX - nx * d1 - ex * s1, midY - ny * d1 - ey * s1);
+    ctx.lineTo(midX - nx * d2 - ex * s2, midY - ny * d2 - ey * s2);
+    ctx.lineTo(midX - nx * d2 + ex * s2, midY - ny * d2 + ey * s2);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(42, 90, 138, ${alpha})`;
+    ctx.fill();
+  };
+  quad(depth, half, depth * 0.55, (half + edgeHalf) / 2, 0.85);
+  // The opaque stage overhangs a hair past the rim so it also covers the
+  // shared-edge hex stroke of both tiles; the lake water sits flush.
+  quad(depth * 0.55, (half + edgeHalf) / 2, -3, edgeHalf, 1);
+}
+
 export function paintRiverHex(ctx: CanvasRenderingContext2D, node: RiverHexNode, deps: Paint2DDep): void {
   const info = riverMaskInfo(node.mask);
   const mask = node.bridge && node.size === "wide" ? "bridge" : info.template;
@@ -464,9 +502,11 @@ export function paintRiverHex(ctx: CanvasRenderingContext2D, node: RiverHexNode,
       RIVER_ART_SIZE,
     );
     ctx.restore();
+    paintMouthWedge(ctx, node);
     return;
   }
   paintRiverBandFallback(ctx, node, info);
+  paintMouthWedge(ctx, node);
 }
 
 export function paintTerrainDecoration(ctx: CanvasRenderingContext2D, node: TerrainDecorationNode, deps: Paint2DDep): void {
