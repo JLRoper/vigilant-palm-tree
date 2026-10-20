@@ -1270,6 +1270,8 @@ const FLOAT_MS = 800;
         canvasCssW,
         canvasCssH,
         paint2d: arenaPaint2dDeps,
+        biome: "grass",
+        biomeSeed: state.obstacleSeed,
       });
     } else {
       drawLegacy();
