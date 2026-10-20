@@ -1,4 +1,4 @@
-import { PopupMenu } from "@screens/shared/menu";
+import { FloatingPanel, createPanel } from "@screens/shared/panel";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import type { TileInfo } from "./tileInfo";
 
@@ -79,7 +79,7 @@ function renderLines(info: TileInfo): HTMLElement[] {
 }
 
 export class TileInfoPanel {
-  private menu: PopupMenu;
+  private menu: FloatingPanel;
   private bodyEl: HTMLDivElement;
   private visible = false;
   private lastSignature: string | null = null;
@@ -87,17 +87,19 @@ export class TileInfoPanel {
 
   constructor(opts: TileInfoPanelOptions) {
     this.onCloseCallback = opts.onClose;
-    this.menu = new PopupMenu({
+    this.menu = createPanel({
       parent: opts.parent,
       title: "Tile",
-      initialPosition: { x: PANEL_X, y: panelY() },
+      key: "tileInfo",
+      // Pinned beside the cursor: the position is never dragged or remembered,
+      // only the size is.
+      persistPosition: false,
+      defaultPosition: { x: PANEL_X, y: panelY() },
       width: PANEL_WIDTH,
       closeable: true,
       draggable: false,
       zIndex: PANEL_Z_INDEX,
-      clickToFront: true,
-      resizeable: true,
-      resizeKey: "tileInfo",
+      hideOnDismiss: true,
       onClose: () => {
         this.visible = false;
         this.lastSignature = null;

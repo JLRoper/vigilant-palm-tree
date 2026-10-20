@@ -8,7 +8,7 @@
 // small chip selectors (registry-driven / 1/2/3/4 / 0/1/2/3).
 // Map size stays a dropdown, driven by the engine's MAP_SIZE_ORDER ladder.
 
-import { styleButton } from "@screens/shared/menu";
+import { styleButton } from "@screens/shared/panel";
 import type { FactionId } from "@heroes/contracts";
 import { seatFactionChoices } from "@screens/shared/factionChoices";
 import { MAP_SIZE_ORDER, mapSizeLabel, resolveMapSize, type MapSize } from "../../map/gameMap";

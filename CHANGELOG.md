@@ -10,6 +10,35 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.25.0] - 2026-10-20
+
+### Escape closes every panel, from one place
+
+Every floating surface in the game is now a **panel** (`FloatingPanel`, `src/screens/shared/panel.ts`) and every centred
+modal a **dialog** (`openDialog`, `src/screens/shared/dialog.ts`); "menu" now means an actual command list only. The old
+`src/screens/shared/menu.ts` and `panelStack.ts` are gone, replaced by those two modules plus `src/screens/shared/panelManager.ts`.
+
+`panelManager` holds the single window `keydown` listener (capture phase) and closes the topmost open panel on Escape, so a
+surface is Escape-closable by existing. That covers Settings, New Game, Load Game, Logistics, Keyboard & Mouse, Battle
+Results, Test Battle Setup, the hero and settlement panels and both rosters, tile info, the game log, and every city-view
+panel (City Design, Workforce, Recruitment, build palette, building and selection menus). Previously Settings, Load Game
+and Logistics had no Escape at all, and six modules each wired their own listener.
+
+One Escape does one thing, in a fixed order: an in-flight worker drag or pending build placement cancels first, then the
+topmost panel closes (a tooltip inside the Logistics window takes the first Escape, the window the next), then the city's
+tile selection clears, then the view closes. The City Design box opts out (`escapeClosable: false`) because the city view
+owns it and closing it would strand the player without Build/Back. Hidden long-lived panels are never targets, so a closed
+panel cannot swallow the key.
+
+Also fixed while consolidating: a long-lived panel's × destroyed DOM the game keeps re-showing (hero/settlement panels,
+rosters, tile info now hide and stay reusable), and closing the build palette from its own × left the City Design button
+reading *Close* until an unrelated refresh.
+
+Deleted as duplicates: the per-modal Escape listeners in `charterModal` and `assaultConfirmModal` (now `setOnEscape`
+hooks) and `hotkeysModal`, the `escape` option on the dialog dismiss options, `UIManager`'s global Escape handler, the city
+view's Escape branches naming each panel, and the hand-built modal backdrop in `confirmDialog`/`leaveBehind` (both now use
+`openDialog`). Creation boilerplate collapsed into `createPanel({ key, defaultPosition, ... })`.
+
 ## [0.24.0] - 2026-10-20
 
 The City Design panel is a normal floating menu, and every floating panel/menu can now be resized.

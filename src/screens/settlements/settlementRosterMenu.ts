@@ -1,4 +1,4 @@
-import { PopupMenu, menuTheme } from "@screens/shared/menu";
+import { FloatingPanel, panelTheme, createPanel } from "@screens/shared/panel";
 import {
   attachDockControl,
   getPanelRail,
@@ -19,7 +19,7 @@ export interface SettlementRosterMenuOptions {
 }
 
 export class SettlementRosterMenu {
-  private menu: PopupMenu;
+  private menu: FloatingPanel;
   private visible = false;
   private opts: SettlementRosterMenuOptions;
   private content: HTMLDivElement;
@@ -28,17 +28,20 @@ export class SettlementRosterMenu {
   constructor(opts: SettlementRosterMenuOptions) {
     this.opts = opts;
 
-    this.menu = new PopupMenu({
+    this.menu = createPanel({
       parent: getPanelRail(),
       title: "Settlements",
+      key: "settlementRoster",
       width: 280,
+      // Same split as the heroes roster: the rail owns position, the panel
+      // store owns size.
+      persistPosition: false,
+      defaultPosition: { x: 0, y: 0 },
       closeable: true,
       draggable: true,
       zIndex: 60,
       minTop: toolbarHeight,
-      clickToFront: true,
-      resizeable: true,
-      resizeKey: "settlementRoster",
+      hideOnDismiss: true,
       onMove: (pos) => savePanelPosition("settlements", pos),
       onClose: () => {
         this.visible = false;
@@ -47,9 +50,9 @@ export class SettlementRosterMenu {
 
     this.content = document.createElement("div");
     Object.assign(this.content.style, {
-      fontFamily: menuTheme.font,
-      fontSize: menuTheme.fontSize,
-      color: menuTheme.panel.color,
+      fontFamily: panelTheme.font,
+      fontSize: panelTheme.fontSize,
+      color: panelTheme.panel.color,
       display: "flex",
       flexDirection: "column",
       gap: "6px",

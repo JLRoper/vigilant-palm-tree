@@ -1,4 +1,4 @@
-import { clampMenuIntoView, type PopupMenu } from "./menu";
+import { clampPanelIntoView, type FloatingPanel } from "./panel";
 import { getCachedAuth } from "../../io/auth";
 
 export type PanelKey = "heroes" | "settlements";
@@ -34,7 +34,7 @@ let toolbarObserved = false;
 let toolbarResizeObserver: ResizeObserver | null = null;
 let store: StoredLayout | null = null;
 let resizeBound = false;
-const attached = new Map<PanelKey, PopupMenu>();
+const attached = new Map<PanelKey, FloatingPanel>();
 let lastMinimapReserve = -1;
 let persistFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let persistFlushBound = false;
@@ -215,20 +215,20 @@ function bindResize(): void {
   window.addEventListener("resize", () => {
     for (const [key, menu] of attached) {
       if (layoutFor(key).mode !== "floating") continue;
-      clampMenuIntoView(menu, toolbarHeight());
+      clampPanelIntoView(menu, toolbarHeight());
       saveLayout(key, menu.getPosition());
     }
   });
 }
 
-export function mountPanel(menu: PopupMenu, key: PanelKey): void {
+export function mountPanel(menu: FloatingPanel, key: PanelKey): void {
   measureToolbar();
   if (layoutFor(key).mode === "floating") {
     menu.setLayout("floating");
     const pos = floatPosition(key);
     menu.setPosition(pos.x, pos.y);
     if (menu.root.parentNode !== document.body) document.body.appendChild(menu.root);
-    clampMenuIntoView(menu, toolbarHeight());
+    clampPanelIntoView(menu, toolbarHeight());
     saveLayout(key, menu.getPosition());
     return;
   }
@@ -238,7 +238,7 @@ export function mountPanel(menu: PopupMenu, key: PanelKey): void {
   if (menu.root.parentNode !== rail) rail.appendChild(menu.root);
 }
 
-export function attachDockControl(menu: PopupMenu, key: PanelKey): void {
+export function attachDockControl(menu: FloatingPanel, key: PanelKey): void {
   attached.set(key, menu);
   bindResize();
 

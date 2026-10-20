@@ -1,6 +1,6 @@
 import { loadPanelSize, savePanelSize, type PanelGeometryKey } from "./panelLayout";
 
-// A reusable resize grip for floating panels. `PopupMenu` wires it from a single
+// A reusable resize grip for floating panels. `FloatingPanel` wires it from a single
 // option (`resizeable: true`, plus `resizeKey` to remember the size), and any
 // other surface can call `attachPanelResize(el, ...)` directly -- so making a
 // panel/menu resizeable is one flag, not a bespoke implementation per screen.
@@ -23,10 +23,10 @@ export interface PanelResizeOptions {
   minHeight?: number;
 }
 
-/** What the grip was attached to: a PopupMenu (its root gets the size) or a bare element. */
+/** What the grip was attached to: a FloatingPanel (its root gets the size) or a bare element. */
 export interface ResizeTarget {
   element: HTMLElement;
-  /** Applies width/height (a PopupMenu mirrors them onto its own state). */
+  /** Applies width/height (a FloatingPanel mirrors them onto its own state). */
   apply: (width: number, height: number) => void;
 }
 
@@ -94,7 +94,7 @@ export function attachPanelResizeTo(target: ResizeTarget, opts: PanelResizeOptio
   return grip;
 }
 
-/** Convenience wrapper for the common case: a PopupMenu's own root. */
+/** Convenience wrapper for the common case: a FloatingPanel's own root. */
 export function attachPanelResize(
   opts: PanelResizeOptions,
   menu: { root: HTMLElement; setSize: (w: number, h: number) => void },

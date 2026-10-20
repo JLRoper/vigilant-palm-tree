@@ -17,7 +17,6 @@ import "@screens/home/assetManager";
 import "@screens/heroes/heroInfoMenu";
 import "@screens/heroes/heroRosterMenu";
 import "@screens/shared/hud";
-import "@screens/shared/menu";
 import "@screens/home/newGameScreen";
 import "@screens/settlements/settlementInfoMenu";
 import "@screens/settlements/settlementRosterMenu";

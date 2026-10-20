@@ -1,4 +1,5 @@
-import { openCenteredModal, styleButton } from "./menu";
+import { styleButton } from "./panel";
+import { openDialog } from "./dialog";
 
 interface HotkeyEntry {
   keys: string;
@@ -42,14 +43,8 @@ const SECTIONS: HotkeySection[] = [
 export function openHotkeysModal(): void {
   if (document.querySelector("[data-hotkeys-modal]")) return;
 
-  const onKeyDown = (e: KeyboardEvent): void => {
-    if (e.key !== "Escape") return;
-    modal.close();
-  };
-  const modal = openCenteredModal(document.body, "Keyboard & Mouse", 420, false, true, () => {
-    document.removeEventListener("keydown", onKeyDown);
-  });
-  document.addEventListener("keydown", onKeyDown);
+  // Escape is the panel manager's job for every panel; nothing to wire here.
+  const modal = openDialog(document.body, "Keyboard & Mouse", 420, false, true);
   modal.root.dataset.hotkeysModal = "true";
   modal.enableResize("hotkeys");
 

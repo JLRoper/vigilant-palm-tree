@@ -32,7 +32,8 @@ import {
   type SpriteKey,
 } from "../../render/assetDescriptors";
 import { showToast } from "../shared/toast";
-import { openCenteredModal, styleButton, styleInput } from "@screens/shared/menu";
+import { styleButton, styleInput } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import { STORAGE_GAUGE_SHEET } from "./storageGaugeAssets";
 import {
   formatStorageAmount,
@@ -259,8 +260,19 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
   let detachRouteRefresh = (): void => {};
   let clearRouteTooltip = (): void => {};
   let clearStockpileTooltip = (): void => {};
+  // Escape reaches this dialog through panelManager (one keydown listener for
+  // every panel). Inside the dialog a transient tooltip is the closest thing to
+  // "what Escape closes", so it gets first refusal: a claiming hook consumes the
+  // key and the dialog itself closes only when no tooltip is up.
+  const escapeHooks = new Set<() => boolean>();
+  const claimEscape = (hook: () => boolean): (() => void) => {
+    escapeHooks.add(hook);
+    return () => {
+      escapeHooks.delete(hook);
+    };
+  };
   let closed = false;
-  const modal = openCenteredModal(opts.parent, "Logistics", 660, true, true, () => {
+  const modal = openDialog(opts.parent, "Logistics", 660, true, true, () => {
     closed = true;
     clearRouteTooltip();
     clearStockpileTooltip();
@@ -269,6 +281,12 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
   modal.root.style.width = "min(660px, calc(100vw - 48px))";
   modal.root.style.maxWidth = "calc(100vw - 48px)";
   modal.enableResize("logistics");
+  modal.setOnEscape(() => {
+    for (const hook of [...escapeHooks]) {
+      if (hook()) return true;
+    }
+    return false;
+  });
 
   // Persistent create-form controls, held across renders so an automatic
   // refresh (state:committed / turn:ended / resync) can preserve the user's
@@ -424,15 +442,17 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         pointer = null;
         tip.style.display = "none";
       };
-      const dismiss = (event: KeyboardEvent): void => {
-        if (event.key === "Escape") hide();
+      const dismiss = (): boolean => {
+        if (!trigger) return false;
+        hide();
+        return true;
       };
       const pointerContext = (event: MouseEvent): void => {
         if (trigger && event.target instanceof Node && !trigger.contains(event.target)) hide();
       };
+      const releaseEscape = claimEscape(dismiss);
       window.addEventListener("resize", position);
       window.addEventListener("scroll", position, true);
-      window.addEventListener("keydown", dismiss);
       window.addEventListener("mousemove", pointerContext);
       return {
         bind: (element: HTMLElement, content: HTMLElement): void => {
@@ -465,7 +485,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
           tip.remove();
           window.removeEventListener("resize", position);
           window.removeEventListener("scroll", position, true);
-          window.removeEventListener("keydown", dismiss);
+          releaseEscape();
           window.removeEventListener("mousemove", pointerContext);
         },
       };
@@ -709,22 +729,23 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       tooltipHovered = false;
       refreshTooltip();
     });
-    const dismissTooltip = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
+    const dismissTooltip = (): boolean => {
+      if (!tooltipRow) return false;
       hoveredRow = focusedRow = null;
       tooltipHovered = false;
       refreshTooltip();
+      return true;
     };
+    const releaseTooltipEscape = claimEscape(dismissTooltip);
     window.addEventListener("resize", positionTooltip);
     window.addEventListener("scroll", positionTooltip, true);
-    window.addEventListener("keydown", dismissTooltip);
     clearRouteTooltip = () => {
       clearTimeout(hideTimer);
       tooltipRow?.removeAttribute("aria-describedby");
       detailsTip.remove();
       window.removeEventListener("resize", positionTooltip);
       window.removeEventListener("scroll", positionTooltip, true);
-      window.removeEventListener("keydown", dismissTooltip);
+      releaseTooltipEscape();
     };
     for (const route of playerRoutes) {
       const routeDetails = getRouteTooltipText(state, route);

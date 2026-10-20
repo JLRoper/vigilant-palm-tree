@@ -1,4 +1,5 @@
-import { openCenteredModal, menuTheme, styleButton, styleInput } from "@screens/shared/menu";
+import { panelTheme, styleButton, styleInput } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import { EventLog, type LogEntry, type LogSource } from "./eventLog";
 
 export interface DevConsoleOptions {
@@ -67,7 +68,7 @@ export function openDevConsole(log: EventLog, options: DevConsoleOptions = {}): 
   const persistKey = options.persistKey === null ? null : (options.persistKey ?? DEFAULT_PERSIST_KEY);
   const initial = loadPersisted(persistKey);
 
-  const modal = openCenteredModal(options.parent ?? document.body, title, width, true);
+  const modal = openDialog(options.parent ?? document.body, title, width, true);
 
   let paused = initial.paused ?? false;
   let typeFilter = initial.typeFilter ?? "";
@@ -79,9 +80,9 @@ export function openDevConsole(log: EventLog, options: DevConsoleOptions = {}): 
   const state = { current: log.getEntries({ limit: pageSize }) };
 
   const content = document.createElement("div");
-  content.style.fontFamily = menuTheme.font;
-  content.style.fontSize = menuTheme.fontSize;
-  content.style.color = menuTheme.panel.color;
+  content.style.fontFamily = panelTheme.font;
+  content.style.fontSize = panelTheme.fontSize;
+  content.style.color = panelTheme.panel.color;
   content.style.display = "flex";
   content.style.flexDirection = "column";
   content.style.gap = "8px";
@@ -121,12 +122,12 @@ export function openDevConsole(log: EventLog, options: DevConsoleOptions = {}): 
     rerender();
   });
   Object.assign(sourceSelect.style, {
-    background: menuTheme.input.background,
-    color: menuTheme.input.color,
-    border: menuTheme.input.border,
-    borderRadius: menuTheme.input.borderRadius,
-    padding: menuTheme.input.padding,
-    fontFamily: menuTheme.input.fontFamily,
+    background: panelTheme.input.background,
+    color: panelTheme.input.color,
+    border: panelTheme.input.border,
+    borderRadius: panelTheme.input.borderRadius,
+    padding: panelTheme.input.padding,
+    fontFamily: panelTheme.input.fontFamily,
   });
   controlsRow.appendChild(sourceSelect);
 

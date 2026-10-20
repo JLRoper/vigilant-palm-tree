@@ -1,4 +1,5 @@
-import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
+import { panelTheme, styleButton } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import type { MapSize } from "../../map/gameMap";
 import {
   settings,
@@ -106,8 +107,8 @@ function makeFoldableSection(
     gap: "6px",
     padding: "8px 10px",
     fontSize: "12px",
-    fontFamily: menuTheme.font,
-    color: menuTheme.panel.color,
+    fontFamily: panelTheme.font,
+    color: panelTheme.panel.color,
     userSelect: "none",
   });
   frame.appendChild(header);
@@ -146,12 +147,12 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   const mapInfo = opts.getMapInfo?.() ?? null;
   const refreshList: Array<() => void> = [];
 
-  const modal = openCenteredModal(parent, "Settings", 420, true);
+  const modal = openDialog(parent, "Settings", 420, true);
 
   const content = document.createElement("div");
-  content.style.fontFamily = menuTheme.font;
-  content.style.fontSize = menuTheme.fontSize;
-  content.style.color = menuTheme.panel.color;
+  content.style.fontFamily = panelTheme.font;
+  content.style.fontSize = panelTheme.fontSize;
+  content.style.color = panelTheme.panel.color;
   content.style.display = "flex";
   content.style.flexDirection = "column";
   content.style.gap = "10px";

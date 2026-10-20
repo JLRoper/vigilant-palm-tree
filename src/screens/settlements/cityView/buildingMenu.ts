@@ -1,4 +1,4 @@
-import { PopupMenu, styleButton } from "@screens/shared/menu";
+import { FloatingPanel, styleButton } from "@screens/shared/panel";
 import type { BuildingDef, BuildingKind } from "@heroes/contracts";
 import type { SettlementState } from "../../../state/gameState";
 import { catalogFailed, catalogReady, getCachedUnit, loadUnitCatalog } from "../../../data/unitCatalog";
@@ -137,7 +137,7 @@ interface ShowArgs {
 }
 
 export class BuildingMenu {
-  private menu: PopupMenu | null = null;
+  private menu: FloatingPanel | null = null;
   private onRecruitUnits: ((building: BuildingDef, unitTypeId: string, count: number) => void) | undefined;
   private onUpgradeTownHall: (() => void) | undefined;
   private onUpgradeBuilding: ((building: BuildingDef) => void) | undefined;
@@ -180,7 +180,7 @@ export class BuildingMenu {
     const x = Math.max(10, Math.min(screenX, window.innerWidth - 240));
     const y = Math.max(10, Math.min(screenY, window.innerHeight - 180));
 
-    this.menu = new PopupMenu({
+    this.menu = new FloatingPanel({
       parent: document.body,
       title: buildingLabel(building.kind) + (building.level > 1 ? ` (Lv ${building.level})` : ""),
       initialPosition: { x, y },

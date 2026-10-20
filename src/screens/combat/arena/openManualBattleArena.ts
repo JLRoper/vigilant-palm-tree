@@ -48,7 +48,7 @@ import type { BattleLogEntry, BattleSide, Combatant } from "@heroes/engine";
 import type { Platoon, UnitType } from "../../../state/units";
 import { showBattleResultCard } from "../battleResultCard";
 import { openConfirmDialog } from "@screens/shared/confirmDialog";
-import { menuTheme, styleButton } from "@screens/shared/menu";
+import { panelTheme, styleButton } from "@screens/shared/panel";
 import { createPlatoonInfoPopup } from "../platoonInfoPopup";
 import { openView } from "@screens/shared/viewLauncher";
 import { CANVAS_MARGIN, DEBUG_LOG, HEX_SIZE_MAX, LOG_PREFIX, RAIL_WIDTH, debugLog } from "./constants";
@@ -321,7 +321,7 @@ export function openManualBattleArena(
   // this path renders standalone -- draw() no longer falls back to drawLegacy().
   const useSceneBuilder = readUseSceneBuilder(window.location.search);
   const arenaPaint2dDeps = buildArenaPaint2dDeps({
-    fontFamily: menuTheme.font,
+    fontFamily: panelTheme.font,
     attackerAccent: ATTACKER_ACCENT,
     defenderAccent: DEFENDER_ACCENT,
     resolveSpriteForUnit: createUnitSpriteResolver(),
@@ -337,13 +337,13 @@ export function openManualBattleArena(
   Object.assign(overlay.style, {
     position: "fixed",
     inset: "0",
-    background: menuTheme.panel.background,
-    color: menuTheme.panel.color,
+    background: panelTheme.panel.background,
+    color: panelTheme.panel.color,
     display: "flex",
     flexDirection: "column",
     zIndex: "100",
-    fontFamily: menuTheme.font,
-    fontSize: menuTheme.fontSize,
+    fontFamily: panelTheme.font,
+    fontSize: panelTheme.fontSize,
   });
   document.body.appendChild(overlay);
 
@@ -359,8 +359,8 @@ export function openManualBattleArena(
     padding: "0 14px",
     height: "40px",
     flexShrink: "0",
-    background: menuTheme.panel.headerBackground,
-    color: menuTheme.panel.headerColor,
+    background: panelTheme.panel.headerBackground,
+    color: panelTheme.panel.headerColor,
     borderBottom: "1px solid rgba(255,255,255,0.1)",
     fontSize: "12px",
   });
@@ -595,8 +595,8 @@ const FLOAT_MS = 800;
     flexShrink: "0",
     display: "flex",
     flexDirection: "column",
-    background: menuTheme.panel.headerBackground,
-    color: menuTheme.panel.headerColor,
+    background: panelTheme.panel.headerBackground,
+    color: panelTheme.panel.headerColor,
     borderTop: "1px solid rgba(255,255,255,0.1)",
   });
   overlay.appendChild(bottomBar);
@@ -916,7 +916,7 @@ const FLOAT_MS = 800;
       alignItems: "center",
       gap: "8px",
       flexShrink: "0",
-      fontFamily: menuTheme.font,
+      fontFamily: panelTheme.font,
       fontSize: "11px",
     });
 
@@ -983,7 +983,7 @@ const FLOAT_MS = 800;
       flexDirection: "column",
       gap: "8px",
       minHeight: "0",
-      fontFamily: menuTheme.font,
+      fontFamily: panelTheme.font,
     });
 
     const hero = buildHeroPanel(heroLabel, accent);
@@ -1430,7 +1430,7 @@ const FLOAT_MS = 800;
 
         const count = c.entries.reduce((sum, e) => sum + e.count, 0);
         ctx.fillStyle = "#fff";
-        ctx.font = `${Math.round(hexSize * 0.4)}px ${menuTheme.font}`;
+        ctx.font = `${Math.round(hexSize * 0.4)}px ${panelTheme.font}`;
         ctx.textAlign = "center";
         ctx.fillText(String(count), x, y + hexSize * 0.14);
 
@@ -1452,7 +1452,7 @@ const FLOAT_MS = 800;
       const t = clamp01((performance.now() - f.startedAt) / FLOAT_MS);
       const { x, y } = toCanvas(f.hex.q, f.hex.r);
       const alpha = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
-      ctx.font = `700 ${Math.round(hexSize * 0.5)}px ${menuTheme.font}`;
+      ctx.font = `700 ${Math.round(hexSize * 0.5)}px ${panelTheme.font}`;
       ctx.textAlign = "center";
       ctx.lineWidth = 3;
       ctx.strokeStyle = `rgba(0,0,0,${alpha * 0.85})`;

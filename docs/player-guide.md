@@ -32,12 +32,17 @@ Wagons carry physical caravan cargo between compatible routes. New games do not 
 | Input | Action |
 |---|---|
 | `?` | Open keyboard and mouse help |
-| `Esc` | Clear the selected hero/settlement panel; in city view, close menus, cancel placement, or leave the city |
+| `Esc` | Close the panel you last opened or clicked (any panel or window, including Settings, Load Game and Logistics); with no panel open, clear the selected hero/settlement panel; in city view, cancel a placement, clear the tile selection, or leave the city |
 | `B` | Toggle the city build palette |
 | `W` | Toggle the workforce panel (city view) |
 | `R` | Toggle the recruitment panel (city view) |
 | `Delete` / `Backspace` | Remove the building under the cursor in city view |
 | Click / double-click | Select, move, attack, or enter a settlement |
 | Drag / wheel | Pan / zoom the map (maximum zoom-out width is configurable from **20 to 34 hexes wide**, default **20**, under Settings → Visual) |
+
+Every floating panel and window is closed by `Esc`, wherever it came from: the hero and settlement panels and their rosters, tile info, the city view's design box, workforce and recruitment panels and build palette,
+building and selection menus, the game log, Settings, New Game, Load Game, Logistics, Keyboard & Mouse, Battle Results and Test Battle Setup. One `Esc` closes one panel - the one on top, i.e. the one you opened or clicked last -
+and only when nothing is open does it fall back to clearing the selected hero or settlement (and, in the city, to cancelling a placement and then leaving the city). A tooltip inside a window takes the first `Esc`; the
+window itself takes the next one. The City Design box is the deliberate exception: the city view owns it, so `Esc` there leaves the city rather than stranding you without Build or Back.
 
 For detailed rules see [heroes](./heroes.md), [settlements](./settlements.md), [army and combat](./army.md), [resources](./resources.md), and [multiplayer](./multiplayer.md).

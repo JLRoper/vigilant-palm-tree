@@ -28,7 +28,8 @@ import type {
   MpBattleOutcomeEvent,
 } from "../../core/events";
 import { isServerDriven } from "../../io/serverDrivenGames";
-import { openCenteredModal, styleButton } from "@screens/shared/menu";
+import { styleButton } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import { showToast } from "@screens/shared/toast";
 import {
   battleToastMessage,
@@ -95,7 +96,7 @@ interface TrackedOutcome {
 // was still up when the player reached for End Turn, the click landed on the
 // overlay, and the toolbar went dead with no error and no network request. The
 // card is a notification, not a decision, so it also takes a backdrop click
-// and Escape (opt-in on openCenteredModal), plus this bounded timer so it
+// and Escape (opt-in on openDialog), plus this bounded timer so it
 // cannot outlive its usefulness even when none of those are used.
 export const VERDICT_CARD_AUTO_DISMISS_MS = 8_000;
 
@@ -345,9 +346,8 @@ export function buildToastText(pending: PendingBattleOutcome, state: GameState |
 }
 
 export function showVerdictCard(model: BattleOutcomeCardModel, autoDismissMs = VERDICT_CARD_AUTO_DISMISS_MS): void {
-  const modal = openCenteredModal(document.body, "Battle Results", 420, false, false, undefined, {
+  const modal = openDialog(document.body, "Battle Results", 420, false, false, undefined, {
     backdropClick: true,
-    escape: true,
   });
   modal.enableResize("battleOutcome");
   const wrapper = modal.root.parentElement;

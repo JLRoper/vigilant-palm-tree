@@ -28,6 +28,7 @@ import { BuildingMenu, type BuildingMenuOptions, type BuildingMenuWorkforce } fr
 import { BuildingPlacer } from "./buildingPlacer";
 import { BuildingSelectionMenu, type SelectedBuildingEntry } from "./buildingSelectionMenu";
 import { openConfirmDialog } from "@screens/shared/confirmDialog";
+import { claimEscapeBeforePanels } from "@screens/shared/panelManager";
 import { loadPanelGeometry } from "@screens/shared/panelLayout";
 import { resolvePanelPlacement, type PanelRect } from "@screens/shared/panelPlacement";
 import { toolbarHeight } from "@screens/shared/panelRail";
@@ -209,44 +210,9 @@ export class CityView {
         target.tagName === "SELECT" || target.isContentEditable
       );
       if (typing && e.key !== "Escape") return;
-      if (e.key === "Escape") {
-        if (this.workerDrag) {
-          this.cancelWorkerDrag();
-          return;
-        }
-        if (this.selectionMenu.isOpen()) {
-          this.selectionMenu.hide();
-          return;
-        }
-        if (this.buildingMenu.isOpen()) {
-          this.buildingMenu.hide();
-          return;
-        }
-        if (this.isWorkforcePanelOpen?.()) {
-          this.closeWorkforcePanel?.();
-          return;
-        }
-        if (this.isRecruitmentPanelOpen?.()) {
-          this.closeRecruitmentPanel?.();
-          return;
-        }
-        if (this.placer.isActive()) {
-          this.placer.cancelPlacement();
-          this.updateBuildButton();
-          return;
-        }
-        if (this.placer.isPaletteOpen()) {
-          this.placer.hidePalette();
-          this.updateBuildButton();
-          return;
-        }
-        if (this.selectedKeys.size > 0) {
-          this.clearSelection();
-          return;
-        }
-        this.handleClose();
-        return;
-      }
+      // Escape never reaches here: the claim registered in the constructor
+      // handles it ahead of every panel (see panelManager). Only the city's
+      // letter shortcuts and Delete live in this handler.
       if (e.key === "w" || e.key === "W") {
         this.openWorkforcePanel?.();
         return;
@@ -315,6 +281,9 @@ export class CityView {
     }
     this.refreshAffordability();
     this.placer.setOnConfirm(() => this.persistBuildings());
+    // The palette can close without cityView asking (its ×, Escape): keep the
+    // City Design box's Build/Close label in step with it.
+    this.placer.setOnPaletteStateChange(() => this.updateBuildButton());
     this.placer.setOnPlaced(() => this.persistBuildings());
     this.chargedNet = {};
 
@@ -346,6 +315,43 @@ export class CityView {
     }, this.getFloatingPanelRects);
 
     window.addEventListener("keydown", this.onKeyDown);
+
+    // The city owns Escape ordering while it is open, because the settlement
+    // info panel deliberately stays visible over the city (user request,
+    // 2026-09-27) and must not eat a keystroke meant for the city. Order:
+    //   1. a worker drag or pending placement cancels (panels untouched),
+    //   2. a city panel (menu, workforce, recruitment, palette) closes,
+    //   3. the hex selection clears,
+    //   4. the city itself closes.
+    this.releaseEscapeClaim = claimEscapeBeforePanels(() => {
+      if (this.workerDrag) {
+        this.cancelWorkerDrag();
+        return true;
+      }
+      if (this.placer.isActive()) {
+        this.placer.cancelPlacement();
+        this.updateBuildButton();
+        return true;
+      }
+      if (this.hasOwnPanelOpen()) return false;
+      if (this.selectedKeys.size > 0) {
+        this.clearSelection();
+        return true;
+      }
+      this.handleClose();
+      return true;
+    });
+  }
+
+  /** A panel this view owns and that Escape should close before the city. */
+  private hasOwnPanelOpen(): boolean {
+    return (
+      this.placer.isPaletteOpen() ||
+      this.buildingMenu.isOpen() ||
+      this.selectionMenu.isOpen() ||
+      this.isWorkforcePanelOpen?.() === true ||
+      this.isRecruitmentPanelOpen?.() === true
+    );
   }
 
   isOpen(): boolean {
@@ -1087,6 +1093,8 @@ export class CityView {
   }
 
   private closing = false;
+  /** Escape claim held while the city is open (see panelManager). */
+  private releaseEscapeClaim: (() => void) | null = null;
   private lastClosedId: string | null = null;
 
   close(): string | null {
@@ -1111,6 +1119,8 @@ export class CityView {
       this.closeRecruitmentPanel?.();
       this.designBox.hide();
       window.removeEventListener("keydown", this.onKeyDown);
+      this.releaseEscapeClaim?.();
+      this.releaseEscapeClaim = null;
       this.endWorkerDrag();
       this.buildingMenu.hide();
       this.selectionMenu.hide();

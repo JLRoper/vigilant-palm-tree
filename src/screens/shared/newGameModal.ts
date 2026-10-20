@@ -1,5 +1,6 @@
 import { CASTLE_COUNT_MAX } from "../../map/castlePlacement";
-import { menuTheme, openCenteredModal, styleButton, styleInput } from "./menu";
+import { panelTheme, styleButton, styleInput } from "./panel";
+import { openDialog } from "./dialog";
 import type { FactionId } from "@heroes/contracts";
 import { seatFactionChoices } from "./factionChoices";
 import { MAP_SIZE_ORDER, mapSizeLabel, resolveMapSize, type MapSize } from "../../map/gameMap";
@@ -31,9 +32,9 @@ function defaultName(): string {
 
 export function openNewGameModal(opts: NewGameModalOptions): void {
   const content = document.createElement("div");
-  content.style.fontFamily = menuTheme.font;
-  content.style.fontSize = menuTheme.fontSize;
-  content.style.color = menuTheme.panel.color;
+  content.style.fontFamily = panelTheme.font;
+  content.style.fontSize = panelTheme.fontSize;
+  content.style.color = panelTheme.panel.color;
   content.style.display = "flex";
   content.style.flexDirection = "column";
   content.style.gap = "6px";
@@ -242,7 +243,7 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
   content.appendChild(unchartedWrap);
 
   const errorLine = document.createElement("div");
-  Object.assign(errorLine.style, { ...menuTheme.error, minHeight: "14px", marginTop: "4px" });
+  Object.assign(errorLine.style, { ...panelTheme.error, minHeight: "14px", marginTop: "4px" });
   content.appendChild(errorLine);
 
   const row = document.createElement("div");
@@ -251,7 +252,7 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
   row.style.gap = "8px";
   row.style.marginTop = "10px";
 
-  const modal = openCenteredModal(document.body, "New Game", 400);
+  const modal = openDialog(document.body, "New Game", 400);
   const cancel = document.createElement("button");
   cancel.textContent = "Cancel";
   styleButton(cancel);

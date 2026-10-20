@@ -1,5 +1,5 @@
-import { PopupMenu, styleButton } from "@screens/shared/menu";
-import { loadPanelGeometry, savePanelGeometry, type PanelGeometryKey } from "@screens/shared/panelLayout";
+import { FloatingPanel, styleButton, createPanel } from "@screens/shared/panel";
+import type { PanelGeometryKey } from "@screens/shared/panelLayout";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import { buildingLabel, canAssignWorkers, staffingBase } from "@heroes/engine";
 import type { BuildingKind } from "@heroes/contracts";
@@ -22,7 +22,7 @@ const ROLE_LABELS: Record<WorkforceBuildingRole, string> = {
 const PANEL_GEOMETRY_KEY: PanelGeometryKey = "workforcePanel";
 
 export class WorkforcePanel {
-  private menu: PopupMenu | null = null;
+  private menu: FloatingPanel | null = null;
   private readonly parent: HTMLElement;
   private readonly cityView: CityView;
   private readonly onAssignWorkers: (gx: number, gy: number, workers: number, district?: { q: number; r: number }) => boolean;
@@ -40,22 +40,19 @@ export class WorkforcePanel {
 
   open(): void {
     if (this.menu) return;
-    this.menu = new PopupMenu({
+    this.menu = createPanel({
       parent: this.parent,
       title: "Workforce",
+      key: PANEL_GEOMETRY_KEY,
       width: 260,
-      initialPosition: loadPanelGeometry(PANEL_GEOMETRY_KEY) ?? { x: 48, y: 160 },
+      defaultPosition: { x: 48, y: 160 },
       minTop: toolbarHeight,
       zIndex: 76,
       closeable: true,
       draggable: true,
-      clickToFront: true,
-      resizeable: true,
-      resizeKey: "workforcePanel",
       onClose: () => {
         this.menu = null;
       },
-      onMove: (pos) => savePanelGeometry(PANEL_GEOMETRY_KEY, pos),
     });
     this.update();
   }

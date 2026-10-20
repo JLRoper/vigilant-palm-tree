@@ -454,11 +454,11 @@ test("pure builders: pending capture and render-time wording", () => {
 
 // ---- the wedged-UI fix -------------------------------------------------------
 // A battle card rendered on a server-driven game was only dismissible with its
-// own "Carry On" button. Sitting on openCenteredModal's full-viewport z-300
+// own "Carry On" button. Sitting on openDialog's full-viewport z-300
 // wrapper, it swallowed the player's End Turn click: no error, no request, a
 // dead toolbar. The card is a notification, so it now also takes a backdrop
-// click and Escape (wired through openCenteredModal's opt-in dismiss options,
-// covered in test/screens/shared/menuDismiss.test.ts) AND carries this bounded
+// click and Escape (wired through openDialog's opt-in dismiss options,
+// covered in test/screens/shared/dialogDismiss.test.ts) AND carries this bounded
 // auto-dismiss as a third, self-clearing route.
 
 function timerHarness() {

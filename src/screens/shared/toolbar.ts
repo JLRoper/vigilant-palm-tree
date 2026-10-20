@@ -482,7 +482,7 @@ export class Toolbar {
       const target = ev.target as HTMLElement | null;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
       if (target?.isContentEditable) return;
-      // openCenteredModal marks its full-viewport wrapper, so an open dialog
+      // openDialog marks its full-viewport wrapper, so an open dialog
       // (settings, load, charter requirements, ...) swallows the keystroke
       // instead of firing an action behind it.
       if (document.querySelector("[data-modal]")) return;

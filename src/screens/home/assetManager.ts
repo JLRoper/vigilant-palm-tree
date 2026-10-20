@@ -1,4 +1,5 @@
-import { openCenteredModal, menuTheme, styleButton } from "@screens/shared/menu";
+import { panelTheme, styleButton } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import {
   fetchAssetList,
   uploadAsset,
@@ -8,13 +9,13 @@ import {
 } from "../../io/assetApi";
 
 export function openAssetManager(): void {
-  const modal = openCenteredModal(document.body, "Asset Manager", 720, false);
+  const modal = openDialog(document.body, "Asset Manager", 720, false);
   const content = document.createElement("div");
   content.style.display = "flex";
   content.style.flexDirection = "column";
   content.style.gap = "10px";
-  content.style.fontFamily = menuTheme.font;
-  content.style.fontSize = menuTheme.fontSize;
+  content.style.fontFamily = panelTheme.font;
+  content.style.fontSize = panelTheme.fontSize;
 
   const toolbar = document.createElement("div");
   toolbar.style.display = "flex";

@@ -1,4 +1,4 @@
-import { PopupMenu, styleButton } from "@screens/shared/menu";
+import { FloatingPanel, styleButton } from "@screens/shared/panel";
 import type { BuildingDef, BuildingKind } from "@heroes/contracts";
 import type { SettlementState } from "../../../state/gameState";
 import {
@@ -10,7 +10,7 @@ import {
   combineUpgradeCosts,
   type BuildingUpgradeCost,
 } from "@heroes/engine";
-import { menuTheme } from "@screens/shared/menu";
+import { panelTheme } from "@screens/shared/panel";
 
 export interface BuildingSelectionMenuOptions {
   onUpgrade: (combined: BuildingUpgradeCost) => void;
@@ -86,7 +86,7 @@ function aggregateEffects(entries: SelectedBuildingEntry[]): {
 }
 
 export class BuildingSelectionMenu {
-  private menu: PopupMenu | null = null;
+  private menu: FloatingPanel | null = null;
   private entries: SelectedBuildingEntry[] = [];
   private settlement: SettlementState | null = null;
   private onUpgrade: (combined: BuildingUpgradeCost) => void;
@@ -119,7 +119,7 @@ export class BuildingSelectionMenu {
     const x = Math.max(10, Math.min(screenX, window.innerWidth - width - 10));
     const y = Math.max(10, Math.min(screenY, window.innerHeight - 260));
 
-    this.menu = new PopupMenu({
+    this.menu = new FloatingPanel({
       parent: document.body,
       title,
       initialPosition: { x, y },
@@ -248,7 +248,7 @@ export class BuildingSelectionMenu {
     row.appendChild(upgradeBtn);
 
     this.menu.appendContent(row);
-    void menuTheme;
+    void panelTheme;
   }
 
   hide(): void {

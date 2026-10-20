@@ -1,5 +1,6 @@
 import type { Platoon } from "@heroes/contracts";
-import { openCenteredModal, styleButton } from "@screens/shared/menu";
+import { styleButton } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 
 export type AssaultConfirmChoice = "assault" | "autoResolve" | "cancel";
 
@@ -37,7 +38,7 @@ export interface AssaultConfirmModalOptions {
 }
 
 export function openAssaultConfirmModal(options: AssaultConfirmModalOptions): void {
-  const modal = openCenteredModal(document.body, `Assault on ${options.settlementName}`, 340, false, false);
+  const modal = openDialog(document.body, `Assault on ${options.settlementName}`, 340, false, false);
 
   const summary = document.createElement("div");
   Object.assign(summary.style, {
@@ -65,18 +66,16 @@ export function openAssaultConfirmModal(options: AssaultConfirmModalOptions): vo
   const finish = (choice: AssaultConfirmChoice) => {
     if (closed) return;
     closed = true;
-    window.removeEventListener("keydown", onKey);
     modal.close();
     if (choice === "assault") options.onAssault();
     else if (choice === "autoResolve") options.onAutoResolve();
     else options.onCancel();
   };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key !== "Escape") return;
-    e.preventDefault();
+  // Escape cancels the assault prompt; the panel manager owns the keystroke.
+  modal.setOnEscape(() => {
     finish("cancel");
-  };
-  window.addEventListener("keydown", onKey);
+    return true;
+  });
 
   const cancelBtn = document.createElement("button");
   cancelBtn.textContent = "Cancel";
