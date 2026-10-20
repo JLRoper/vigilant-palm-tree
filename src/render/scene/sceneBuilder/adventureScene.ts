@@ -150,13 +150,16 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       const terrain = map.get(q, r);
       if (!terrain) continue;
       const world = axialToPixel(q, r);
+      const seen = isVisible(visible, q, r);
       nodes.push({ kind: "terrainHex", q, r, world, terrain });
       const river = map.riverAt(q, r);
-      if (river) {
+      if (river && seen) {
         // The water overlay replaces the biome's own decoration on a river
         // cell (no trees/ripples poking through the water). Emitted here, in
         // tile order, so it paints after this tile's fill but before the fog
-        // nodes -- an unseen river stays hidden exactly like the terrain.
+        // nodes. An unseen river emits no overlay at all: through the
+        // translucent fog the biome shows like any other hidden tile, so the
+        // bright water band cannot glow or ghost one hex at a time.
         const mouthDir = riverMouthAt(map, q, r);
         nodes.push({
           kind: "riverHex",
@@ -171,7 +174,7 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       } else if (terrain !== "grass" && terrain !== "dirt") {
         nodes.push({ kind: "terrainDecoration", q, r, world, terrain });
       }
-      if (!isVisible(visible, q, r)) {
+      if (!seen) {
         if (revealed && !revealed.has(`${q},${r}`)) {
           nodes.push({ kind: "unchartedHex", q, r, world });
         } else {

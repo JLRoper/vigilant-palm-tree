@@ -6,7 +6,23 @@ import { NEIGHBOR_DIRS } from "@heroes/engine";
 import { buildAdventureScene, riverMaskAt } from "../../src/render/scene/sceneBuilder/adventureScene";
 import { riverMaskInfo, paintRiverHex } from "../../src/render/scene/paint2d/index";
 import type { RiverHexNode } from "../../src/render/scene/types";
-import { makeRecordingCtx, makeNoopPaint2DDep } from "./_helpers";
+import { makeRecordingCtx, makeNoopPaint2DDep, makeRenderOptions } from "./_helpers";
+import { Hero } from "../../src/entities/hero";
+
+test("unseen river cells emit no river overlay through the fog", () => {
+  const map = new GameMap(993025331, "small", 5);
+  const heroes = [new Hero("h0", "Hero", 0, 0, "player", 0)];
+  const nodes = buildAdventureScene({
+    map,
+    heroes,
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+    revealed: null,
+  });
+  assert.equal(nodes.filter((n) => n.kind === "riverHex").length, 0, "no river overlay while every river cell is beyond vision");
+});
 
 test("riverMaskInfo maps the six bit masks to the baked templates", () => {
   // single dir -> end

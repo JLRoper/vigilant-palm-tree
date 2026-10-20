@@ -71,10 +71,7 @@ import type {
 // classes that used to live under `src/render/painter/` (PR #122). Those
 // classes were deleted in issue #148 once MapRenderer switched to paintScene,
 // so these literals are now the only copy.
-// Fully opaque: any transparency let bright water (lakes, rivers) bleed
-// through tile-by-tile along the coastline and read as "ghost river" hexes
-// in the fog, no matter how faint. The fog must reveal nothing.
-const FOG_FILL = "rgba(8, 10, 16, 1)";
+const FOG_FILL = "rgba(8, 10, 16, 0.78)";
 const FOG_EDGE = "rgba(8, 10, 16, 0.55)";
 const HOVER_STROKE = "#ffcc00";
 const SELECTED_TILE_STROKE = "#ffffff";
