@@ -45,7 +45,8 @@ export type SceneNode =
   | BattleImpactRingNode
   | BattleAiActingRingNode
   | BattleCombatantNode
-  | BattleFloatingTextNode;
+  | BattleFloatingTextNode
+  | BattleBiomeBackgroundNode;
 
 export interface TerrainHexNode {
   kind: "terrainHex";
@@ -418,4 +419,14 @@ export interface BattleFloatingTextNode {
   text: string;
   world: WorldPoint;
   alpha: number;
+}
+
+export interface BattleBiomeBackgroundNode {
+  kind: "battleBiomeBackground";
+  biome: Terrain;
+  world: WorldPoint;
+  hexRadius: number;
+  seed: number;
+  variant: number;
+  impassable: boolean;
 }

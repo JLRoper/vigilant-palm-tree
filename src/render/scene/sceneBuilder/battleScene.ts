@@ -8,6 +8,7 @@ import {
   type ManualBattleState,
   type PlatoonEntry,
 } from "@heroes/engine";
+import type { Terrain } from "../../../map/terrain";
 import type { SceneNode, WorldPoint } from "../types";
 
 // Faithful decomposition of manualBattleArena.ts's draw()/renderPixelFor()
@@ -69,6 +70,8 @@ export interface BattleSceneInput {
   hexSize: number;
   offsetX: number;
   offsetY: number;
+  biome: Terrain;
+  biomeSeed: number;
   nowMs: number;
 }
 
@@ -126,6 +129,27 @@ function resolvePosition(input: BattleSceneInput, activeMoveAnim: ActiveMoveAnim
 
 export function buildBattleScene(input: BattleSceneInput): SceneNode[] {
   const nodes: SceneNode[] = [];
+
+
+  // Biome background nodes (rendered first, behind battleHex)
+  const biomeRng = (() => {
+    let s = (input.biomeSeed * 1664525 + 12345) >>> 0;
+    return () => {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return s / 0x100000000;
+    };
+  })();
+  for (const hex of input.state.grid.hexes) {
+    nodes.push({
+      kind: "battleBiomeBackground",
+      biome: input.biome,
+      world: toWorld(input, hex.q, hex.r),
+      hexRadius: input.hexSize - 1,
+      seed: input.biomeSeed,
+      variant: Math.floor(biomeRng() * 1000),
+      impassable: hex.impassable,
+    });
+  }
 
   // pruneExpiredEffects() mutates these away in manualBattleArena.ts before
   // draw() reads them; this builder is pure, so an expired entry is simply

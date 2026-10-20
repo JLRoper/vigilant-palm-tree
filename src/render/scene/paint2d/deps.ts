@@ -19,6 +19,7 @@ import type { BuildingKind, CastleLevel, CastleVariant, CharterPhase } from "@he
 import type { BattleSide } from "@heroes/engine";
 import type { Faction, HeroDirection } from "../../../entities/hero";
 import type { HorseVariant, ResourceStyle } from "../../../state/settings";
+import type { Terrain } from "../../../map/terrain";
 
 // String-branded alias for the upstream SpriteKey template-literal type
 // (declared in src/render/assetDescriptors.ts). We can't import the upstream
@@ -28,6 +29,18 @@ import type { HorseVariant, ResourceStyle } from "../../../state/settings";
 // via the default-deps builder). The lint seam is real: the painter never
 // names a key string in source.
 export type SpriteKey = string;
+
+// Biome background provider for battle arena. A function that draws a single
+// biome-styled hex at the given center point with the given radius.
+// The seed and variant allow for per-hex variation within the same biome.
+export type BiomeBackgroundProvider = (
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  seed: number,
+  variant: number
+) => void;
 
 // Structural mirror of assetDescriptors.ts's SpriteDescriptor. Mirrored
 // rather than imported for the same ?url reason as SpriteKey above; the
@@ -127,6 +140,11 @@ export interface Paint2DDep {
   // read side accents (revision note 5) -- the seam is exposed for a future
   // battle redesign that might.
   readonly battleAccent: (side: BattleSide, role: "ring" | "select") => string;
+
+  // Biome background provider for battle arena. Returns a canvas pattern or
+  // drawing function for the given biome. Optional -- if absent, falls back
+  // to the legacy flat background.
+  readonly getBiomeBackground?: (biome: Terrain) => BiomeBackgroundProvider | null;
 
   // Font family used for city labels. Rendered as `ctx.font` strings. Hard-coded
   // to "system-ui, sans-serif" in the live code; injected so a future test can
