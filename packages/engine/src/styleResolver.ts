@@ -61,7 +61,15 @@ export function farmFieldStyleAt(seed: string, gx: number, gy: number): Generati
  * registry change on top of this list, not a re-art: each variant already has
  * its own keyed sprite (`building-pixel-<variant>-1.png`).
  */
-export const FARM_PLOT_VARIANTS = ["farmWheat", "farmVeg", "farmOrchard", "farmPaddock", "farmVines"] as const;
+export const FARM_PLOT_VARIANTS = [
+  "farmWheat",
+  "farmVeg",
+  "farmOrchard",
+  "farmPaddock",
+  "farmVines",
+  "farmWheatAI",
+  "farmOrchardAI",
+] as const;
 
 export type FarmPlotVariant = (typeof FARM_PLOT_VARIANTS)[number];
 

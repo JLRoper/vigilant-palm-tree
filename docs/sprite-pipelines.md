@@ -239,6 +239,18 @@ separate `building-pixel-<style>-1.png`, which is why `farmPlotVariantAt` can mi
 them per cell with no persistence. Verify with `node tools/sprites/gen-farm-sprites.mjs
 --check`.
 
+Two of the seven rotation styles are **model-refined** rather than procedural:
+`building-pixel-farmWheatAI-1.png` and `building-pixel-farmOrchardAI-1.png`. They are
+edits of the procedural sprites made with an OpenRouter image model
+(`google/gemini-2.5-flash-image`, the `openrouter-sprite-generation` skill), and the
+recipe matters: the input carries a magenta `#ff00ff` line over the exact 2:1
+footprint, which the model treats as a guide and drops; the output is then
+checkerboard-stripped and finally edge-fitted to the grid by measuring the two lower
+edges of the ground diamond and scaling them to exactly 0.5 slope (26.57 deg). Without
+the guide the model redraws the tile at 30-32 deg — a true isometric camera — and the
+fit has to squash it by 15-25%, which visibly flattens crops. They are committed PNGs
+like every other sprite; there is no runtime model call.
+
 ### 4.2 Pipeline B — FLUX via DeepInfra (`tools/sprites/flux-*.mjs`, 25 scripts)
 
 One-off scripts (`flux-gen`, `flux-regen`, `flux-regen3`, `flux-piles`,

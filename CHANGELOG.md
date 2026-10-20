@@ -10,6 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.28.0] - 2026-10-20
+
+Farm plots: two model-refined styles join the per-cell rotation
+
+- **`farmWheatAI` and `farmOrchardAI`** (`building-pixel-farm{Wheat,Orchard}AI-1.png`) are edits of the procedural wheat and orchard plots made with an OpenRouter image model (`google/gemini-2.5-flash-image`). The input carries a magenta guide line over the exact 2:1 footprint, which the model treats as a measuring guide and drops; the output is checkerboard-stripped and then edge-fitted to the grid. They are committed PNGs — no runtime model call.
+- **The rotation is now seven styles.** `FARM_PLOT_VARIANTS` gained the two variants, so `farmPlotVariantAt` mixes them per cell with the five procedural plots. Still render-time only: nothing is persisted and no save migration is needed, though a settlement's fields can pick a different style than before because the hash length changed.
+- **Why the fit step exists:** without the guide the model redraws the tile at 30-32 deg (a true isometric camera) against the city grid's 26.57 deg, so the ground diamond's lower edges were measured and scaled to exactly 0.5 slope — 0.2% correction for the orchard, 16% for the wheat, which is why the wheat variant reads flatter than its procedural counterpart. Pipeline and angle table: `docs/sprite-pipelines.md` §4.1, provenance in `docs/asset-provenance.md`.
+
 ## [0.27.0] - 2026-10-20
 
 ### Logistics hero block, iso-pile resource default, new-game defaults

@@ -733,7 +733,15 @@ export const HERO_DESCRIPTORS: Record<`hero.${Faction}`, SpriteDescriptor> = {
 // tools/sprites/gen-farm-sprites.mjs). At hexSizeMul 1 the drawn diamond lands
 // exactly on the 2x2 footprint, which is the whole point of that family; the
 // model-authored farmField art keeps the universal 0.9 building inset.
-const GRID_EXACT_FARM_STYLES = new Set(["farmWheat", "farmVeg", "farmOrchard", "farmPaddock", "farmVines"]);
+const GRID_EXACT_FARM_STYLES = new Set([
+  "farmWheat",
+  "farmVeg",
+  "farmOrchard",
+  "farmPaddock",
+  "farmVines",
+  "farmWheatAI",
+  "farmOrchardAI",
+]);
 
 function buildingHexSizeMul(spriteKey: string): number {
   const [style, kind] = spriteKey.split(".");
