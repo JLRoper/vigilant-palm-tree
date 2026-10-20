@@ -1,3 +1,5 @@
+import { FloatingPanel, styleButton, createPanel } from "@screens/shared/panel";
+import { loadPanelGeometry } from "@screens/shared/panelLayout";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import {
   DESIGN_BOX_INSET,
@@ -5,6 +7,9 @@ import {
   resolveDesignBoxPlacement,
   type FloatingPanelRectProvider,
 } from "./panelRects";
+
+const PANEL_GEOMETRY_KEY = "cityDesign";
+const PANEL_WIDTH = 150;
 
 export interface CityDesignBoxCallbacks {
   onBuild: () => void;
@@ -14,156 +19,98 @@ export interface CityDesignBoxCallbacks {
 }
 
 /**
- * Bottom-left "City Design" panel shown while a city is open: houses the
- * Build and Back controls for the settlement build view.
+ * The city view's "City Design" panel: Build / Workforce / Recruit / Back.
+ *
+ * It is a normal floating menu (`FloatingPanel`) like the workforce and recruitment
+ * panels -- draggable, click-to-front, resizeable, and its position is
+ * remembered per panel. It has no close button on purpose: the city view owns
+ * its lifetime, and closing it would leave the player without the Build or Back
+ * controls (there is no toolbar entry that reopens it).
  */
 export class CityDesignBoxManager {
-  private box: HTMLDivElement | null = null;
-  private body: HTMLDivElement | null = null;
+  private menu: FloatingPanel | null = null;
   private buildBtn: HTMLButtonElement | null = null;
-  private backBtn: HTMLButtonElement | null = null;
 
   show(callbacks: CityDesignBoxCallbacks, panelRects?: FloatingPanelRectProvider): void {
     this.hide();
 
-    this.box = document.createElement("div");
-    Object.assign(this.box.style, {
-      position: "fixed",
-      left: "0px",
-      top: "0px",
-      visibility: "hidden",
-      zIndex: "100",
-      display: "flex",
-      flexDirection: "column",
-      gap: "6px",
-      padding: "8px 10px",
-      border: "1px solid rgba(255,255,255,0.2)",
-      background: "rgba(0,0,0,0.6)",
-      borderRadius: "4px",
-      fontFamily: "system-ui, sans-serif",
+    const stored = loadPanelGeometry(PANEL_GEOMETRY_KEY);
+    const menu = createPanel({
+      parent: document.body,
+      title: "City Design",
+      key: PANEL_GEOMETRY_KEY,
+      width: PANEL_WIDTH,
+      defaultPosition: { x: DESIGN_BOX_INSET, y: toolbarHeight() + 16 },
+      minTop: toolbarHeight,
+      zIndex: 76,
+      closeable: false,
+      draggable: true,
+      // The city view owns this panel's lifetime and nothing else reopens it:
+      // closing it on Escape would strand the player without Build/Back, so
+      // Escape falls through to the city view (which closes the whole city,
+      // box included).
+      escapeClosable: false,
     });
+    this.menu = menu;
 
-    const title = document.createElement("div");
-    title.textContent = "City Design";
-    Object.assign(title.style, {
-      color: "#fff",
-      fontSize: "11px",
-      fontWeight: "600",
-      letterSpacing: "0.02em",
-      marginBottom: "2px",
-    });
-    this.box.appendChild(title);
+    this.buildBtn = this.addButton(menu, "⚒ Build", "Open the building palette (b)", callbacks.onBuild);
+    this.addButton(menu, "♟ Workforce", "Open the worker assignment panel (w)", callbacks.onWorkforce);
+    this.addButton(menu, "⚔ Recruit", "Open the recruitment panel (r)", callbacks.onRecruit);
+    this.addButton(menu, "← Back", "Leave the city view", callbacks.onBack);
 
-    this.body = document.createElement("div");
-    Object.assign(this.body.style, {
-      display: "flex",
-      flexDirection: "column",
-      gap: "6px",
-    });
-    this.box.appendChild(this.body);
+    // First open lands bottom-left, clear of whatever floating panels are up
+    // (the City Design box is the one panel that exists on every city open, so
+    // its default must never bury the others). A remembered position wins.
+    if (!stored) this.placeFirstOpen(menu, panelRects);
+  }
 
-    this.buildBtn = document.createElement("button");
-    this.buildBtn.textContent = "⚒ Build";
-    Object.assign(this.buildBtn.style, {
-      padding: "4px 12px",
-      border: "1px solid rgba(255,255,255,0.2)",
-      background: "rgba(0,0,0,0.7)",
-      color: "#fff",
-      fontSize: "12px",
-      cursor: "pointer",
-      borderRadius: "3px",
-      fontFamily: "system-ui, sans-serif",
-    });
-    this.buildBtn.addEventListener("click", () => callbacks.onBuild());
-    this.body.appendChild(this.buildBtn);
+  private addButton(
+    menu: FloatingPanel,
+    label: string,
+    title: string,
+    onClick: () => void,
+  ): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    btn.title = title;
+    styleButton(btn);
+    btn.style.width = "100%";
+    btn.addEventListener("click", () => onClick());
+    menu.appendContent(btn);
+    return btn;
+  }
 
-    const workforceBtn = document.createElement("button");
-    workforceBtn.textContent = "♟ Workforce";
-    workforceBtn.title = "Open the worker assignment panel (w)";
-    Object.assign(workforceBtn.style, {
-      padding: "4px 12px",
-      border: "1px solid rgba(255,255,255,0.2)",
-      background: "rgba(0,0,0,0.7)",
-      color: "#fff",
-      fontSize: "12px",
-      cursor: "pointer",
-      borderRadius: "3px",
-      fontFamily: "system-ui, sans-serif",
-    });
-    workforceBtn.addEventListener("click", () => callbacks.onWorkforce());
-    this.body.appendChild(workforceBtn);
-
-    const recruitBtn = document.createElement("button");
-    recruitBtn.textContent = "⚔ Recruit";
-    recruitBtn.title = "Open the recruitment panel (r)";
-    Object.assign(recruitBtn.style, {
-      padding: "4px 12px",
-      border: "1px solid rgba(255,255,255,0.2)",
-      background: "rgba(0,0,0,0.7)",
-      color: "#fff",
-      fontSize: "12px",
-      cursor: "pointer",
-      borderRadius: "3px",
-      fontFamily: "system-ui, sans-serif",
-    });
-    recruitBtn.addEventListener("click", () => callbacks.onRecruit());
-    this.body.appendChild(recruitBtn);
-
-    this.backBtn = document.createElement("button");
-    this.backBtn.textContent = "← Back";
-    Object.assign(this.backBtn.style, {
-      padding: "4px 12px",
-      border: "1px solid rgba(255,255,255,0.2)",
-      background: "rgba(0,0,0,0.7)",
-      color: "#fff",
-      fontSize: "12px",
-      cursor: "pointer",
-      borderRadius: "3px",
-      fontFamily: "system-ui, sans-serif",
-    });
-    this.backBtn.addEventListener("click", () => callbacks.onBack());
-    this.body.appendChild(this.backBtn);
-
-    document.body.appendChild(this.box);
-
-    const measured = this.box.getBoundingClientRect();
-    const viewport = { width: window.innerWidth, height: window.innerHeight };
-    const resolved = measured.width > 0 && measured.height > 0
-      ? resolveDesignBoxPlacement(
-          measured.width,
-          measured.height,
-          collectPanelRects(panelRects),
-          viewport,
-          toolbarHeight(),
-        )
-      : { x: DESIGN_BOX_INSET, y: viewport.height - DESIGN_BOX_INSET - measured.height };
-    Object.assign(this.box.style, {
-      left: `${resolved.x}px`,
-      top: `${resolved.y}px`,
-      visibility: "visible",
-    });
+  private placeFirstOpen(menu: FloatingPanel, panelRects?: FloatingPanelRectProvider): void {
+    const measured = menu.root.getBoundingClientRect();
+    if (measured.width <= 0 || measured.height <= 0) return;
+    const resolved = resolveDesignBoxPlacement(
+      measured.width,
+      measured.height,
+      collectPanelRects(panelRects),
+      { width: window.innerWidth, height: window.innerHeight },
+      toolbarHeight(),
+    );
+    menu.setPosition(resolved.x, resolved.y);
   }
 
   setBuildPaletteOpen(isOpen: boolean): void {
     if (!this.buildBtn) return;
     this.buildBtn.textContent = isOpen ? "✖ Close" : "⚒ Build";
-    this.buildBtn.style.background = isOpen ? "rgba(120,40,40,0.7)" : "rgba(0,0,0,0.7)";
+    this.buildBtn.style.background = isOpen ? "rgba(120,40,40,0.7)" : "rgba(0,0,0,0.6)";
   }
 
   hide(): void {
-    if (this.box) this.box.remove();
-    this.box = null;
-    this.body = null;
+    this.menu?.close();
+    this.menu = null;
     this.buildBtn = null;
-    this.backBtn = null;
   }
 
   isOpen(): boolean {
-    return this.box !== null;
+    return this.menu !== null;
   }
 
-  /** The box element, for collision-aware placement of other floating panels; null while hidden. */
+  /** The panel element, for collision-aware placement of other floating panels; null while hidden. */
   getElement(): HTMLDivElement | null {
-    return this.box;
+    return this.menu?.root ?? null;
   }
 }

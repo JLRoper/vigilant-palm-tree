@@ -8,7 +8,8 @@
 import type { HeroBattleVerdict } from "@heroes/contracts";
 import type { BattleResult, CombatantResult } from "@heroes/engine";
 import { getCachedUnit } from "../../data/unitCatalog";
-import { menuTheme, openCenteredModal, styleButton } from "@screens/shared/menu";
+import { panelTheme, styleButton } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import { battleVerdictCardLine } from "./battleResultText";
 
 export interface BattleResultCardOptions {
@@ -81,7 +82,8 @@ function renderSideResults(title: string, results: CombatantResult[]): HTMLEleme
 }
 
 export function showBattleResultCard(opts: BattleResultCardOptions): void {
-  const modal = openCenteredModal(document.body, "Battle Results", 480, false, false);
+  const modal = openDialog(document.body, "Battle Results", 480, false, false);
+  modal.enableResize("battleResult");
   // Capture the fullscreen wrapper by reference NOW: dereferencing
   // root.parentElement inside onClose breaks if root was already detached
   // (close()-ordering changes), and a missed removal strands an
@@ -135,7 +137,7 @@ export function showBattleResultCard(opts: BattleResultCardOptions): void {
   const columns = document.createElement("div");
   columns.style.display = "flex";
   columns.style.gap = "14px";
-  columns.style.fontFamily = menuTheme.font;
+  columns.style.fontFamily = panelTheme.font;
   columns.appendChild(renderSideResults(opts.attackerLabel, opts.result.attackerResults));
   columns.appendChild(renderSideResults(opts.defenderLabel, opts.result.defenderResults));
   modal.appendContent(columns);

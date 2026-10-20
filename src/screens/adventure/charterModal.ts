@@ -1,5 +1,6 @@
 import { CHARTER_GOLD_COST, CHARTER_WAREHOUSE_COST } from "@heroes/engine";
-import { openCenteredModal, styleButton, styleInput } from "@screens/shared/menu";
+import { styleButton, styleInput } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import type { CharterRequirements } from "./charterRequirements";
 
 const CHARTER_NAME_PREFIXES = [
@@ -27,7 +28,7 @@ export interface CharterModalHandlers {
 
 export function openCharterModal(targetQ: number, targetR: number, handlers: CharterModalHandlers): void {
   let currentName = generateCharterName();
-  const modal = openCenteredModal(document.body, "Charter Settlement", 320);
+  const modal = openDialog(document.body, "Charter Settlement", 320);
 
   const info = document.createElement("div");
   info.style.fontSize = "14px";
@@ -118,7 +119,7 @@ export function openCharterRequirementsModal(
   requirements: CharterRequirements,
   handlers: CharterRequirementsModalHandlers,
 ): void {
-  const modal = openCenteredModal(document.body, "Charter a New Settlement", 340);
+  const modal = openDialog(document.body, "Charter a New Settlement", 340);
 
   const intro = document.createElement("div");
   intro.style.fontSize = "11px";
@@ -191,16 +192,15 @@ export function openCharterRequirementsModal(
   const finish = (cancel: boolean) => {
     if (closed) return;
     closed = true;
-    window.removeEventListener("keydown", onKey);
     modal.close();
     if (cancel) handlers.onCancel?.();
   };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key !== "Escape") return;
-    e.preventDefault();
+  // Escape cancels, exactly as before -- the panel manager routes the key,
+  // this panel just owns what cancelling means.
+  modal.setOnEscape(() => {
     finish(true);
-  };
-  window.addEventListener("keydown", onKey);
+    return true;
+  });
 
   const cancelBtn = document.createElement("button");
   cancelBtn.textContent = "Cancel";

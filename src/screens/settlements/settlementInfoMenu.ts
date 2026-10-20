@@ -1,7 +1,8 @@
 import type { GameState, HeroState, SettlementState } from "../../state/gameState";
 import { MAX_HEROES_PER_PLAYER, HERO_RECRUIT_COST, SETTLEMENT_UPGRADE_COSTS } from "../../state/gameState";
 import { GarrisonView } from "./garrisonView";
-import { PopupMenu, menuTheme, openCenteredModal, styleButton, styleInput } from "@screens/shared/menu";
+import { FloatingPanel, panelTheme, styleButton, styleInput } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import { DockedPanel } from "@screens/shared/dockedPanel";
 import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayout";
@@ -52,7 +53,7 @@ const PANEL_X = 16;
 const SETTLEMENT_TYPE_LABEL = "Settlement";
 
 export class SettlementInfoMenu {
-  private menu: PopupMenu;
+  private menu: FloatingPanel;
   private visible = false;
   private currentSettlementId: string | null = null;
   private docked: DockedPanel;
@@ -113,7 +114,7 @@ export class SettlementInfoMenu {
     this.onBankGold = opts.onBankGold;
     this.onEnterCityView = opts.onEnterCityView;
     this.canEnterCityView = opts.canEnterCityView;
-    this.menu = new PopupMenu({
+    this.menu = new FloatingPanel({
       parent: opts.parent,
       title: "Settlement",
       // Placeholder only. The real position is derived from the panel's
@@ -125,6 +126,11 @@ export class SettlementInfoMenu {
       zIndex: 60,
       minTop: toolbarHeight,
       clickToFront: true,
+      resizeable: true,
+      resizeKey: "settlementInfo",
+      // Long-lived: show()/hide() reuse the same DOM, so Escape (and ×) hide
+      // it instead of destroying the panel the game keeps re-showing.
+      hideOnDismiss: true,
       onMove: (pos) => {
         this.docked.markUserMoved();
         savePanelGeometry("settlementInfo", pos);
@@ -335,10 +341,10 @@ export class SettlementInfoMenu {
       fontSize: "12px",
       cursor: "pointer",
       background: "rgba(40,90,40,0.7)",
-      color: menuTheme.button.color,
-      border: menuTheme.button.border,
-      borderRadius: menuTheme.button.borderRadius,
-      fontFamily: menuTheme.font,
+      color: panelTheme.button.color,
+      border: panelTheme.button.border,
+      borderRadius: panelTheme.button.borderRadius,
+      fontFamily: panelTheme.font,
       width: "100%",
       marginTop: "8px",
     });
@@ -359,10 +365,10 @@ export class SettlementInfoMenu {
       fontSize: "12px",
       cursor: "pointer",
       background: "rgba(90,60,20,0.7)",
-      color: menuTheme.button.color,
-      border: menuTheme.button.border,
-      borderRadius: menuTheme.button.borderRadius,
-      fontFamily: menuTheme.font,
+      color: panelTheme.button.color,
+      border: panelTheme.button.border,
+      borderRadius: panelTheme.button.borderRadius,
+      fontFamily: panelTheme.font,
       width: "100%",
       marginTop: "4px",
     });
@@ -808,12 +814,12 @@ export interface BankAmountModalOptions {
 // nothing" bug the panel must not repeat.
 export function openBankAmountModal(opts: BankAmountModalOptions): void {
   const verb = opts.direction === "deposit" ? "Deposit" : "Withdraw";
-  const modal = openCenteredModal(opts.parent, `${verb} — Bank L${opts.level}`, 320);
+  const modal = openDialog(opts.parent, `${verb} — Bank L${opts.level}`, 320);
 
   const content = document.createElement("div");
-  content.style.fontFamily = menuTheme.font;
-  content.style.fontSize = menuTheme.fontSize;
-  content.style.color = menuTheme.panel.color;
+  content.style.fontFamily = panelTheme.font;
+  content.style.fontSize = panelTheme.fontSize;
+  content.style.color = panelTheme.panel.color;
   content.style.display = "flex";
   content.style.flexDirection = "column";
   content.style.gap = "8px";
@@ -842,7 +848,7 @@ export function openBankAmountModal(opts: BankAmountModalOptions): void {
   content.appendChild(amtInput);
 
   const errorLine = document.createElement("div");
-  Object.assign(errorLine.style, { ...menuTheme.error, minHeight: "14px", marginTop: "4px" });
+  Object.assign(errorLine.style, { ...panelTheme.error, minHeight: "14px", marginTop: "4px" });
   content.appendChild(errorLine);
 
   const row = document.createElement("div");
@@ -883,9 +889,9 @@ export function openBankAmountModal(opts: BankAmountModalOptions): void {
 
 function openRecruitHeroModal(onRecruit: (name: string, variant: HorseVariant) => void): void {
   const content = document.createElement("div");
-  content.style.fontFamily = menuTheme.font;
-  content.style.fontSize = menuTheme.fontSize;
-  content.style.color = menuTheme.panel.color;
+  content.style.fontFamily = panelTheme.font;
+  content.style.fontSize = panelTheme.fontSize;
+  content.style.color = panelTheme.panel.color;
   content.style.display = "flex";
   content.style.flexDirection = "column";
   content.style.gap = "10px";
@@ -905,7 +911,7 @@ function openRecruitHeroModal(onRecruit: (name: string, variant: HorseVariant) =
     border: "1px solid rgba(255,255,255,0.2)",
     background: "#0e0e0e",
     color: "#eee",
-    fontFamily: menuTheme.font,
+    fontFamily: panelTheme.font,
     outline: "none",
     width: "100%",
     boxSizing: "border-box",
@@ -940,8 +946,8 @@ function openRecruitHeroModal(onRecruit: (name: string, variant: HorseVariant) =
     btn.addEventListener("click", () => {
       selectedVariant = v.id;
       for (const b of buttons) {
-        b.style.border = menuTheme.button.border;
-        b.style.background = menuTheme.button.background;
+        b.style.border = panelTheme.button.border;
+        b.style.background = panelTheme.button.background;
       }
       btn.style.border = "1px solid rgba(100,200,100,0.6)";
       btn.style.background = "rgba(40,90,40,0.5)";
@@ -966,7 +972,7 @@ function openRecruitHeroModal(onRecruit: (name: string, variant: HorseVariant) =
     marginTop: "4px",
   });
 
-  const modal = openCenteredModal(document.body, "Recruit Hero", 340);
+  const modal = openDialog(document.body, "Recruit Hero", 340);
 
   const cancelBtn = document.createElement("button");
   cancelBtn.textContent = "Cancel";

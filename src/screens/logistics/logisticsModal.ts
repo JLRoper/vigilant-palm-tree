@@ -32,7 +32,8 @@ import {
   type SpriteKey,
 } from "../../render/assetDescriptors";
 import { showToast } from "../shared/toast";
-import { openCenteredModal, styleButton, styleInput } from "@screens/shared/menu";
+import { styleButton, styleInput } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import { STORAGE_GAUGE_SHEET } from "./storageGaugeAssets";
 import {
   formatStorageAmount,
@@ -259,8 +260,19 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
   let detachRouteRefresh = (): void => {};
   let clearRouteTooltip = (): void => {};
   let clearStockpileTooltip = (): void => {};
+  // Escape reaches this dialog through panelManager (one keydown listener for
+  // every panel). Inside the dialog a transient tooltip is the closest thing to
+  // "what Escape closes", so it gets first refusal: a claiming hook consumes the
+  // key and the dialog itself closes only when no tooltip is up.
+  const escapeHooks = new Set<() => boolean>();
+  const claimEscape = (hook: () => boolean): (() => void) => {
+    escapeHooks.add(hook);
+    return () => {
+      escapeHooks.delete(hook);
+    };
+  };
   let closed = false;
-  const modal = openCenteredModal(opts.parent, "Logistics", 660, true, true, () => {
+  const modal = openDialog(opts.parent, "Logistics", 660, true, true, () => {
     closed = true;
     clearRouteTooltip();
     clearStockpileTooltip();
@@ -268,6 +280,13 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
   });
   modal.root.style.width = "min(660px, calc(100vw - 48px))";
   modal.root.style.maxWidth = "calc(100vw - 48px)";
+  modal.enableResize("logistics");
+  modal.setOnEscape(() => {
+    for (const hook of [...escapeHooks]) {
+      if (hook()) return true;
+    }
+    return false;
+  });
 
   // Persistent create-form controls, held across renders so an automatic
   // refresh (state:committed / turn:ended / resync) can preserve the user's
@@ -322,23 +341,44 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
 
     // ── Hero ──
     if (hero) {
-      section(`Hero — ${hero.name}`);
       const cargo = heroCargo(hero);
       const caps = heroResourceCap(hero);
-      const info = document.createElement("div");
-      info.style.cssText = "font-size:12px;opacity:0.85;margin-bottom:4px;font-variant-numeric:tabular-nums;";
-      info.textContent = `Purse ${hero.gold}/${heroGoldCap(hero)}g · Cargo wagons ${heroWagons(hero)} · Treasury carts ${heroTreasuryWagons(hero)}`;
-      modal.body.appendChild(info);
+      // Same shape as the settlement block: the headline carries the totals,
+      // and the stored amounts are one strip of icon chips instead of five
+      // full-width label rows (the tall block the playtest flagged).
+      const heroHeader = section(`Hero — ${hero.name}`);
+      Object.assign(heroHeader.style, { display: "flex", alignItems: "baseline", gap: "10px" });
+      const heroTotals = document.createElement("span");
+      heroTotals.textContent =
+        `${hero.gold}/${heroGoldCap(hero)}g · ${heroWagons(hero)} wagons · ${heroTreasuryWagons(hero)} carts`;
+      Object.assign(heroTotals.style, {
+        marginLeft: "auto",
+        textTransform: "none",
+        letterSpacing: "0",
+        fontSize: "11px",
+        opacity: "0.75",
+        fontVariantNumeric: "tabular-nums",
+        whiteSpace: "nowrap",
+      });
+      heroHeader.appendChild(heroTotals);
+
+      const cargoStrip = document.createElement("div");
+      cargoStrip.style.cssText =
+        "display:flex;flex-wrap:wrap;align-items:center;gap:2px 14px;font-size:12px;margin-bottom:4px;font-variant-numeric:tabular-nums;";
       for (const r of RES) {
-        const row = document.createElement("div");
-        row.style.cssText =
-          "display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:3px;font-variant-numeric:tabular-nums;";
-        const label = document.createElement("span");
-        label.style.flex = "1";
-        label.textContent = `${r}: ${cargo[r] ?? 0}/${caps[r]}`;
-        row.appendChild(label);
-        modal.body.appendChild(row);
+        const chip = document.createElement("span");
+        chip.style.cssText = "display:inline-flex;align-items:center;gap:5px;";
+        const image = document.createElement("img");
+        image.src = RESOURCE_PILE_BUBBLY_SPRITES[r];
+        image.alt = r;
+        image.style.cssText = "width:18px;height:18px;object-fit:contain;image-rendering:pixelated;";
+        const amount = document.createElement("span");
+        amount.textContent = `${cargo[r] ?? 0}/${caps[r]}`;
+        amount.title = `${r}: ${cargo[r] ?? 0} of ${caps[r]} cargo capacity`;
+        chip.append(image, amount);
+        cargoStrip.appendChild(chip);
       }
+      modal.body.appendChild(cargoStrip);
       // The two wagon slots (Phase 1 treasury-wagons split): army cargo
       // wagons and treasury carts are independent, each with its own ±1
       // against the matching pool. (These ±1s used to sit on every
@@ -423,15 +463,17 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         pointer = null;
         tip.style.display = "none";
       };
-      const dismiss = (event: KeyboardEvent): void => {
-        if (event.key === "Escape") hide();
+      const dismiss = (): boolean => {
+        if (!trigger) return false;
+        hide();
+        return true;
       };
       const pointerContext = (event: MouseEvent): void => {
         if (trigger && event.target instanceof Node && !trigger.contains(event.target)) hide();
       };
+      const releaseEscape = claimEscape(dismiss);
       window.addEventListener("resize", position);
       window.addEventListener("scroll", position, true);
-      window.addEventListener("keydown", dismiss);
       window.addEventListener("mousemove", pointerContext);
       return {
         bind: (element: HTMLElement, content: HTMLElement): void => {
@@ -464,7 +506,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
           tip.remove();
           window.removeEventListener("resize", position);
           window.removeEventListener("scroll", position, true);
-          window.removeEventListener("keydown", dismiss);
+          releaseEscape();
           window.removeEventListener("mousemove", pointerContext);
         },
       };
@@ -708,22 +750,23 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       tooltipHovered = false;
       refreshTooltip();
     });
-    const dismissTooltip = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
+    const dismissTooltip = (): boolean => {
+      if (!tooltipRow) return false;
       hoveredRow = focusedRow = null;
       tooltipHovered = false;
       refreshTooltip();
+      return true;
     };
+    const releaseTooltipEscape = claimEscape(dismissTooltip);
     window.addEventListener("resize", positionTooltip);
     window.addEventListener("scroll", positionTooltip, true);
-    window.addEventListener("keydown", dismissTooltip);
     clearRouteTooltip = () => {
       clearTimeout(hideTimer);
       tooltipRow?.removeAttribute("aria-describedby");
       detailsTip.remove();
       window.removeEventListener("resize", positionTooltip);
       window.removeEventListener("scroll", positionTooltip, true);
-      window.removeEventListener("keydown", dismissTooltip);
+      releaseTooltipEscape();
     };
     for (const route of playerRoutes) {
       const routeDetails = getRouteTooltipText(state, route);

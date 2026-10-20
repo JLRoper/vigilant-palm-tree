@@ -12,7 +12,7 @@
 import { estimateWinChance, totalHealth } from "@heroes/engine";
 import type { Combatant } from "@heroes/engine";
 import type { UnitType } from "../../state/units";
-import { menuTheme } from "@screens/shared/menu";
+import { panelTheme } from "@screens/shared/panel";
 
 export interface PlatoonInfoPopupWinChance {
   entries: Combatant["entries"];
@@ -79,12 +79,12 @@ export function createPlatoonInfoPopup(container: HTMLElement): PlatoonInfoPopup
   Object.assign(el.style, {
     position: "absolute",
     width: "220px",
-    background: menuTheme.panel.background,
-    color: menuTheme.panel.color,
-    border: menuTheme.panel.border,
-    borderRadius: menuTheme.panel.borderRadius,
-    boxShadow: menuTheme.panel.shadow,
-    fontFamily: menuTheme.font,
+    background: panelTheme.panel.background,
+    color: panelTheme.panel.color,
+    border: panelTheme.panel.border,
+    borderRadius: panelTheme.panel.borderRadius,
+    boxShadow: panelTheme.panel.shadow,
+    fontFamily: panelTheme.font,
     fontSize: "12px",
     zIndex: "6",
     display: "none",
@@ -97,8 +97,8 @@ export function createPlatoonInfoPopup(container: HTMLElement): PlatoonInfoPopup
     position: "absolute",
     width: "10px",
     height: "10px",
-    background: menuTheme.panel.background,
-    border: menuTheme.panel.border,
+    background: panelTheme.panel.background,
+    border: panelTheme.panel.border,
     transform: "rotate(45deg)",
   });
   el.appendChild(tail);
@@ -109,8 +109,8 @@ export function createPlatoonInfoPopup(container: HTMLElement): PlatoonInfoPopup
     alignItems: "center",
     gap: "7px",
     padding: "8px 10px",
-    background: menuTheme.panel.headerBackground,
-    color: menuTheme.panel.headerColor,
+    background: panelTheme.panel.headerBackground,
+    color: panelTheme.panel.headerColor,
     borderBottom: "1px solid rgba(255,255,255,0.08)",
     borderRadius: "6px 6px 0 0",
   });
@@ -253,15 +253,15 @@ export function createPlatoonInfoPopup(container: HTMLElement): PlatoonInfoPopup
       tail.style.right = "";
       tail.style.borderRight = "none";
       tail.style.borderTop = "none";
-      tail.style.borderBottom = menuTheme.panel.border;
-      tail.style.borderLeft = menuTheme.panel.border;
+      tail.style.borderBottom = panelTheme.panel.border;
+      tail.style.borderLeft = panelTheme.panel.border;
     } else {
       tail.style.right = "-6px";
       tail.style.left = "";
       tail.style.borderLeft = "none";
       tail.style.borderBottom = "none";
-      tail.style.borderTop = menuTheme.panel.border;
-      tail.style.borderRight = menuTheme.panel.border;
+      tail.style.borderTop = panelTheme.panel.border;
+      tail.style.borderRight = panelTheme.panel.border;
     }
   }
 

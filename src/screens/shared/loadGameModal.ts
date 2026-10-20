@@ -1,7 +1,8 @@
 import type { Game } from "../../io/api";
 import { api } from "../../io/api";
 import { forgetGame, listUserGames, type UserGameEntry } from "../../io/userGames";
-import { menuTheme, openCenteredModal, styleButton } from "./menu";
+import { panelTheme, styleButton } from "./panel";
+import { openDialog } from "./dialog";
 
 export type LoadGameHandler = (
   game: Game,
@@ -130,9 +131,9 @@ export async function openLoadGameModal(opts: LoadGameModalOptions): Promise<voi
   }
 
   const content = document.createElement("div");
-  content.style.fontFamily = menuTheme.font;
-  content.style.fontSize = menuTheme.fontSize;
-  content.style.color = menuTheme.panel.color;
+  content.style.fontFamily = panelTheme.font;
+  content.style.fontSize = panelTheme.fontSize;
+  content.style.color = panelTheme.panel.color;
   content.style.display = "flex";
   content.style.flexDirection = "column";
   content.style.gap = "10px";
@@ -165,7 +166,7 @@ export async function openLoadGameModal(opts: LoadGameModalOptions): Promise<voi
   const close = document.createElement("button");
   close.textContent = "Close";
   styleButton(close);
-  const modal = openCenteredModal(document.body, "Load Game", 420);
+  const modal = openDialog(document.body, "Load Game", 420);
   close.addEventListener("click", () => modal.close());
   closeRow.appendChild(close);
   content.appendChild(closeRow);

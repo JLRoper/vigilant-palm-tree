@@ -1,6 +1,6 @@
-import { PopupMenu, styleButton } from "@screens/shared/menu";
+import { FloatingPanel, styleButton, createPanel } from "@screens/shared/panel";
 import { AccordionSection } from "@screens/shared/panelWidgets";
-import { loadPanelGeometry, savePanelGeometry, type PanelGeometryKey } from "@screens/shared/panelLayout";
+import { loadPanelGeometry, type PanelGeometryKey } from "@screens/shared/panelLayout";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import type { BuildingKind } from "@heroes/contracts";
 import type { GameState, HeroState } from "../../../state/gameState";
@@ -122,7 +122,7 @@ interface StepperOptions {
  * settlement panel's own GarrisonView mounted here.
  */
 export class RecruitmentPanel {
-  private menu: PopupMenu | null = null;
+  private menu: FloatingPanel | null = null;
   private readonly parent: HTMLElement;
   private readonly cityView: CityView;
   private readonly onRecruit: (req: RecruitmentRequest) => boolean;
@@ -164,24 +164,20 @@ export class RecruitmentPanel {
     const stored = loadPanelGeometry(PANEL_GEOMETRY_KEY);
     const pos = stored ?? { x: 48, y: 200 };
     this.expandedRows.clear();
-    this.menu = new PopupMenu({
+    this.menu = createPanel({
       parent: this.parent,
       title: "Recruitment",
+      key: PANEL_GEOMETRY_KEY,
       width: PANEL_WIDTH,
-      initialPosition: pos,
+      defaultPosition: pos,
       minTop: toolbarHeight,
       zIndex: 76,
       closeable: true,
       draggable: true,
-      clickToFront: true,
-      // Same shared resize grip any other panel can take with one flag.
-      resizeable: true,
-      resizeKey: PANEL_GEOMETRY_KEY,
       onClose: () => {
         this.cityView.clearWorkforcePreview();
         this.menu = null;
       },
-      onMove: (p) => savePanelGeometry(PANEL_GEOMETRY_KEY, p),
     });
     if (!catalogReady() && !catalogFailed()) {
       void loadUnitCatalog().then(() => this.update());

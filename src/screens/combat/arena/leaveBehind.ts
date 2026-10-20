@@ -1,6 +1,7 @@
 import type { BattleSide, ManualBattleState } from "@heroes/engine";
 import type { UnitType } from "../../../state/units";
-import { PopupMenu, styleButton } from "@screens/shared/menu";
+import { styleButton } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 
 type LeaveBehindKey = string;
 
@@ -40,28 +41,10 @@ function openLeaveBehindDialog(opts: {
   const combatants = side === "attacker" ? state.attacker : state.defender;
   const requiredUnits = Math.ceil(shortfall / unitValue);
 
-  const wrapper = document.createElement("div");
-  Object.assign(wrapper.style, {
-    position: "fixed",
-    inset: "0",
-    background: "rgba(0,0,0,0.6)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: "120",
-  });
-  document.body.appendChild(wrapper);
-
-  const menu = new PopupMenu({
-    parent: wrapper,
-    title: "Leave Behind",
-    width: 420,
-    draggable: false,
-    closeable: true,
-    zIndex: 121,
-    onClose: () => wrapper.remove(),
-  });
-  menu.setPosition(Math.max(24, (window.innerWidth - 420) / 2), Math.max(24, (window.innerHeight - 360) / 2));
+  // The shared dialog owns the backdrop, centring and teardown; Escape reaches
+  // it through panelManager like every other panel. zIndex 120 keeps it under
+  // the home overlay and the regular dialogs, where this prompt lived before.
+  const menu = openDialog(document.body, "Leave Behind", 420, false, true, undefined, { zIndex: 120 });
 
   const selected = new Map<LeaveBehindKey, number>();
 

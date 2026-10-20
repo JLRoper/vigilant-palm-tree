@@ -445,7 +445,15 @@ test("a cargo caravan delivering to a hero pays into the hero's wagon cargo, cap
   }
   assert.equal(current.heroes.h0.resources?.wood, 100, "delivered into the hero's wagon cargo (cap 2x50=100)");
   assert.equal(current.settlements.s0.warehouse.wood, 200, "no double-counting at the origin");
-  assert.equal(current.tradeRoutes![0].caravan!.phase, "toHome", "a full delivery flips the caravan homeward");
+  // Turnaround (2026-10-19): the delivery leaves most of the day's movement in
+  // hand (a, b are adjacent here), so the cart spends it walking the return leg
+  // in the SAME wrap, reaches the origin, and unloads -- caravan null, reload
+  // next wrap, instead of idling at the hero until then.
+  assert.equal(
+    current.tradeRoutes![0].caravan,
+    null,
+    "a full delivery with movement to spare turns around and is home unloaded the same wrap",
+  );
 });
 
 test("a hero origin loads gold from its purse and a settlement destination takes it into its treasury", () => {
@@ -590,9 +598,22 @@ test("a hero that steps onto the caravan's tile mid-path is delivered that same 
   };
 
   current = advanceTradeRoutes(current, map);
-  const after = current.tradeRoutes![0].caravan!;
-  assert.equal(after.phase, "toHome", "the caravan flipped homeward the SAME wrap (no walk away along the stale path)");
+  const after = current.tradeRoutes![0].caravan;
   assert.equal(current.heroes.h0.gold, 500, "the 500 gold landed on the hero that same wrap");
+  // Turned around, not walked on along the stale path: the flip parks it on the
+  // hero's tile (path[0]) and the leftover movement carries it homeward -- and,
+  // when the origin is within that leftover walk, home and unloaded (null).
+  assert.ok(
+    after === null || after.phase === "toHome",
+    "the caravan flipped homeward the SAME wrap (no walk away along the stale path)",
+  );
+  if (after) {
+    assert.equal(
+      `${after.path[0].q},${after.path[0].r}`,
+      `${cartTile.q},${cartTile.r}`,
+      "the return leg starts on the tile the caravan physically occupies (the hero's tile)",
+    );
+  }
 });
 
 test("an exhausted chase waits for the next daily tick with cargo intact when it cannot re-path", () => {

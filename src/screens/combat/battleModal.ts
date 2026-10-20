@@ -1,4 +1,5 @@
-import { openCenteredModal, styleButton } from "@screens/shared/menu";
+import { styleButton } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 
 export interface BattleModalOptions {
   attackerName: string;
@@ -18,7 +19,10 @@ export function showBattleModal(opts: BattleModalOptions): Promise<BattleModalRe
     // Deliberately non-dismissible (no × button): a battle choice is blocking,
     // and dismissing without choosing would leave battleInFlight stuck forever
     // (the AI turn would stall until the server's 300 s force-resolve).
-    const modal = openCenteredModal(document.body, "Battle!", 320, false, false);
+    // Escape is the same choice, so opt out of it explicitly -- panelManager
+    // would otherwise close this like any other panel.
+    const modal = openDialog(document.body, "Battle!", 320, false, false);
+    modal.setEscapeClosable(false);
 
     const intro = document.createElement("div");
     intro.textContent = `${opts.attackerName} vs ${opts.defenderName}`;

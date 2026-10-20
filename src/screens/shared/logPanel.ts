@@ -2,6 +2,7 @@ import { bus } from "../../core/eventBus";
 import type { MpLogRow, MpLogRowEvent } from "../../core/events";
 import { api } from "../../io/api";
 import { settings, subscribeSettings } from "../../state/settings";
+import { attachPanelResizeTo } from "./panelResize";
 
 // Log Message Panel (plan/2026-09-28-sse-event-push.md, use case 1): a
 // user-facing audit view of every game_events row for the current game --
@@ -273,6 +274,19 @@ export function createLogPanel(): LogPanelHandle {
   el.appendChild(header);
   el.appendChild(list);
   document.body.appendChild(el);
+
+  // Same corner grip every floating panel uses, with the dock's own size
+  // remembered across sessions (width x height, root-relative).
+  attachPanelResizeTo(
+    {
+      element: el,
+      apply: (w, h) => {
+        el.style.width = `${Math.round(w)}px`;
+        el.style.height = `${Math.round(h)}px`;
+      },
+    },
+    { key: "logPanel", minWidth: 260, minHeight: 120 },
+  );
 
   const render = (): void => {
     const keepScroll = list.scrollTop;

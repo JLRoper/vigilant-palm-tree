@@ -2,7 +2,7 @@
 // renderer.ts nor minimap.ts owns them and dependent files (like
 // overlays/pathOverlay.ts) can pull them in without creating a cycle.
 
-import type { Axial, TradeRouteId } from "@heroes/contracts";
+import type { Axial, HeroId, TradeRouteId } from "@heroes/contracts";
 import type { HeroDirection } from "../entities/hero";
 import type { CharterState } from "../state/gameState";
 
@@ -61,4 +61,11 @@ export interface CaravanMarkerSpec {
   facingDirection?: HeroDirection;
   /** Tiles still to walk on the current leg, starting with the next tile after the cart. Empty while waiting at the destination. Used by the hover route preview. */
   remainingPath?: Axial[];
+  /**
+   * The hero this leg is heading for, when the leg's endpoint is a hero
+   * (destination outbound, origin on the way home). `remainingPath` is a
+   * snapshot of the last daily advance, so the hover preview re-projects the
+   * line onto this hero's CURRENT tile while the pointer rests on the cart.
+   */
+  goalHeroId?: HeroId;
 }

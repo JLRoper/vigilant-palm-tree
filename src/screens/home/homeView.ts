@@ -9,7 +9,8 @@ import {
   verifyLoginCode,
   type AuthState,
 } from "../../io/auth";
-import { openCenteredModal, styleButton, styleInput, menuTheme } from "@screens/shared/menu";
+import { styleButton, styleInput, panelTheme } from "@screens/shared/panel";
+import { openDialog } from "@screens/shared/dialog";
 import type { MapSize } from "../../map/gameMap";
 import { openSettingsMenu } from "./settingsMenu";
 import { createNewGameScreen } from "./newGameScreen";
@@ -290,12 +291,12 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
       console.error("[home] listGames failed:", e);
     }
     const userGames = readLoadEntries(serverGames);
-    const modal = openCenteredModal(document.body, "Load Game", 420);
+    const modal = openDialog(document.body, "Load Game", 420);
 
     const content = document.createElement("div");
-    content.style.fontFamily = menuTheme.font;
-    content.style.fontSize = menuTheme.fontSize;
-    content.style.color = menuTheme.panel.color;
+    content.style.fontFamily = panelTheme.font;
+    content.style.fontSize = panelTheme.fontSize;
+    content.style.color = panelTheme.panel.color;
     content.style.display = "flex";
     content.style.flexDirection = "column";
     content.style.gap = "10px";
@@ -444,11 +445,11 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
   }
 
   function openLoginModal(): void {
-    const modal = openCenteredModal(document.body, "Sign In", 380);
+    const modal = openDialog(document.body, "Sign In", 380);
     const content = document.createElement("div");
-    content.style.fontFamily = menuTheme.font;
-    content.style.fontSize = menuTheme.fontSize;
-    content.style.color = menuTheme.panel.color;
+    content.style.fontFamily = panelTheme.font;
+    content.style.fontSize = panelTheme.fontSize;
+    content.style.color = panelTheme.panel.color;
     content.style.display = "flex";
     content.style.flexDirection = "column";
     content.style.gap = "8px";
@@ -483,7 +484,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
     content.appendChild(codeInput);
 
     const status = document.createElement("div");
-    Object.assign(status.style, { ...menuTheme.error, minHeight: "16px", marginTop: "2px" });
+    Object.assign(status.style, { ...panelTheme.error, minHeight: "16px", marginTop: "2px" });
     content.appendChild(status);
 
     const row = document.createElement("div");
@@ -509,7 +510,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
         return;
       }
       sendBtn.disabled = true;
-      status.style.color = menuTheme.error.color;
+      status.style.color = panelTheme.error.color;
       status.textContent = "Sending…";
       try {
         const { devCode } = await requestLoginCode(email);
@@ -536,7 +537,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
       const email = emailInput.value.trim();
       const code = codeInput.value.trim();
       if (!email || code.length !== 6) {
-        status.style.color = menuTheme.error.color;
+        status.style.color = panelTheme.error.color;
         status.textContent = "Enter the 6-digit code.";
         return;
       }
@@ -550,7 +551,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
         modal.close();
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        status.style.color = menuTheme.error.color;
+        status.style.color = panelTheme.error.color;
         status.textContent = `Failed: ${msg}`;
         verifyBtn.disabled = false;
         sendBtn.disabled = false;

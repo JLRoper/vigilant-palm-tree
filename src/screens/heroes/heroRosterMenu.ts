@@ -1,4 +1,4 @@
-import { PopupMenu, menuTheme } from "@screens/shared/menu";
+import { FloatingPanel, panelTheme, createPanel } from "@screens/shared/panel";
 import {
   attachDockControl,
   getPanelRail,
@@ -17,7 +17,7 @@ export interface HeroRosterMenuOptions {
 }
 
 export class HeroRosterMenu {
-  private menu: PopupMenu;
+  private menu: FloatingPanel;
   private visible = false;
   private opts: HeroRosterMenuOptions;
   private content: HTMLDivElement;
@@ -26,15 +26,20 @@ export class HeroRosterMenu {
   constructor(opts: HeroRosterMenuOptions) {
     this.opts = opts;
 
-    this.menu = new PopupMenu({
+    this.menu = createPanel({
       parent: getPanelRail(),
       title: "Heroes",
+      key: "heroRoster",
       width: 280,
+      // The rail owns this panel's position (heroesJs.railPanels.v1), so the
+      // shared panel-geometry store is left alone -- only the size is joint.
+      persistPosition: false,
+      defaultPosition: { x: 0, y: 0 },
       closeable: true,
       draggable: true,
       zIndex: 60,
       minTop: toolbarHeight,
-      clickToFront: true,
+      hideOnDismiss: true,
       onMove: (pos) => savePanelPosition("heroes", pos),
       onClose: () => {
         this.visible = false;
@@ -43,9 +48,9 @@ export class HeroRosterMenu {
 
     this.content = document.createElement("div");
     Object.assign(this.content.style, {
-      fontFamily: menuTheme.font,
-      fontSize: menuTheme.fontSize,
-      color: menuTheme.panel.color,
+      fontFamily: panelTheme.font,
+      fontSize: panelTheme.fontSize,
+      color: panelTheme.panel.color,
       display: "flex",
       flexDirection: "column",
       gap: "6px",

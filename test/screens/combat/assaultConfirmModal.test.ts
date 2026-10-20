@@ -6,6 +6,7 @@ import {
   openAssaultConfirmModal,
   pluralizeUnitName,
 } from "../../../src/screens/combat/assaultConfirmModal";
+import { closeTopPanelOnEscape } from "../../../src/screens/shared/panelManager";
 
 test("formatStacksLabel: per-unit counts across platoons in first-seen order", () => {
   const stacks = normalizePlatoons([
@@ -61,7 +62,7 @@ class MockElement {
   style: Record<string, string> = {};
   textContent = "";
   title = "";
-  // openCenteredModal marks its wrapper with a data attribute so global
+  // openDialog marks its wrapper with a data attribute so global
   // shortcuts (the toolbar's accelerators) can tell a modal owns the keyboard.
   dataset: Record<string, string> = {};
   private readonly listeners = new Map<string, Array<() => void>>();
@@ -116,7 +117,10 @@ class MockWindow {
   }
 
   dispatchKey(key: string): void {
-    const event = { key, preventDefault: () => {} };
+    // A real keydown carries both: the panel manager consumes the Escape it acts
+    // on (preventDefault + stopImmediatePropagation) so the view below it does
+    // not also close something.
+    const event = { key, preventDefault: () => {}, stopImmediatePropagation: () => {} };
     for (const handler of this.listeners.get("keydown") ?? []) handler(event);
   }
 
@@ -181,6 +185,10 @@ test("openAssaultConfirmModal builds title, summary lines, and the three buttons
     assert.equal(findElements(docBody(), "BUTTON", "Auto-resolve").length, 1, "Auto-resolve button");
     assert.equal(findElements(docBody(), "BUTTON", "Cancel").length, 1, "Cancel button");
   } finally {
+    // Leave the registry empty: panelManager keeps its one capture-phase
+    // Escape listener alive only while some panel is open, and the next
+    // case asserts on that listener count.
+    closeTopPanelOnEscape();
     restoreDom();
   }
 });

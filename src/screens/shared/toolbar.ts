@@ -390,6 +390,13 @@ export class Toolbar {
     document.addEventListener("click", (e) => {
       if (!menuWrap.contains(e.target as Node)) closeDropdown();
     });
+    // A dropdown is a menu, not a panel: it has no title bar and no manager
+    // entry, so it closes itself. panelManager runs first in the capture phase,
+    // so an open panel still takes the keystroke; this only sees Escape when
+    // nothing above did.
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeDropdown();
+    });
 
     const makeMenuItem = (label: string): HTMLButtonElement => {
       const item = document.createElement("button");
@@ -482,7 +489,7 @@ export class Toolbar {
       const target = ev.target as HTMLElement | null;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
       if (target?.isContentEditable) return;
-      // openCenteredModal marks its full-viewport wrapper, so an open dialog
+      // openDialog marks its full-viewport wrapper, so an open dialog
       // (settings, load, charter requirements, ...) swallows the keystroke
       // instead of firing an action behind it.
       if (document.querySelector("[data-modal]")) return;
