@@ -10,6 +10,23 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.27.0] - 2026-10-20
+
+### Logistics hero block, iso-pile resource default, new-game defaults
+
+**Logistics hero section, condensed.** The hero's five cargo resources were five full-width label rows plus a totals line (~318px). They are now one wrapping strip of icon chips
+(the panel's iso-pile sprites, `icon + stored/cap`) with the purse, wagon and cart totals moved onto the section header, matching the settlement block. The section is ~128px and
+the whole window nearly fits without scrolling. The two wagon-slot rows keep their -1/+1 buttons.
+
+**Iso piles by default on the map.** `DEFAULT_RESOURCE_STYLE` is now `isometric-pile` (the iso resource piles) instead of `rune-stone`. Settings persist as one object, so a store
+written before this change would have kept the old default forever: `loadFromStorage` now honours a `schemaVersion` (absent = v1), converts a v1 `rune-stone` to the new default
+once, and every write stamps v2. The Settings "Reset to default" button uses the exported constant rather than a second hardcoded copy.
+
+**New Game defaults.** Home's form and the toolbar dialog now open with 1 human player, 1 AI enemy, a Medium map, and Uncharted mode checked (previously 1 / 0 / Small / off).
+The visual-regression fixture pins its own settings (small, 0 AI, revealed) so a future default change cannot rewrite the baselines.
+
+Verified: test:unit, the browser suites, and visual baselines regenerated for the iso-pile sprites.
+
 ## [0.26.0] - 2026-10-20
 
 ### Click a hero or settlement again to put it down

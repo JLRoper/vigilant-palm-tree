@@ -104,7 +104,7 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
     opt.textContent = mapSizeLabel(size);
     sizeSelect.appendChild(opt);
   }
-  sizeSelect.value = "small";
+  sizeSelect.value = "medium";
   content.appendChild(sizeSelect);
 
   const enemyLabel = document.createElement("label");
@@ -115,7 +115,7 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
   const enemyWrap = document.createElement("div");
   enemyWrap.style.display = "flex";
   enemyWrap.style.gap = "8px";
-  let enemyCount: 0 | 1 | 2 | 3 = 0;
+  let enemyCount: 0 | 1 | 2 | 3 = 1;
   const enemyButtons: Array<{ value: 0 | 1 | 2 | 3; btn: HTMLButtonElement }> = [];
   function refreshEnemies(): void {
     for (const { value, btn } of enemyButtons) {
@@ -228,9 +228,11 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
   unchartedWrap.style.alignItems = "center";
   unchartedWrap.style.gap = "8px";
   unchartedWrap.style.cursor = "pointer";
-  let uncharted = false;
+  // Default on: a fresh game starts hidden and reveals as you explore.
+  let uncharted = true;
   const unchartedInput = document.createElement("input");
   unchartedInput.type = "checkbox";
+  unchartedInput.checked = true;
   unchartedInput.addEventListener("change", () => {
     uncharted = unchartedInput.checked;
   });

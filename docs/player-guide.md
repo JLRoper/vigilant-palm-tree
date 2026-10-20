@@ -4,7 +4,7 @@
 
 ## Start a Game
 
-New Game supports **1–4 human players**, **0–3 AI enemies**, and eight map sizes (**Small** 24×18, **Medium** 36×27, **Large** 48×36, **Huge** 72×54, **Epic** 120×90, **Colossal** 180×135, **Titanic** 240×180, **Gigantic** 300×225). Pick one of the playable registry factions: Human, Ashen, Ironmark, or Verdant. Neutral monsters are not a selectable player faction. AI seats are not lobby seats; games with AI enemies are driven by the server. The optional **Uncharted mode** toggle starts the map hidden: never-explored tiles render fully dark, and explored tiles stay revealed for your seat as you move.
+New Game supports **1–4 human players**, **0–3 AI enemies**, and eight map sizes (**Small** 24×18, **Medium** 36×27, **Large** 48×36, **Huge** 72×54, **Epic** 120×90, **Colossal** 180×135, **Titanic** 240×180, **Gigantic** 300×225). Pick one of the playable registry factions: Human, Ashen, Ironmark, or Verdant. Neutral monsters are not a selectable player faction. AI seats are not lobby seats; games with AI enemies are driven by the server. The optional **Uncharted mode** toggle starts the map hidden: never-explored tiles render fully dark, and explored tiles stay revealed for your seat as you move. A new game now defaults to **one human seat, one AI enemy, a Medium map, and Uncharted mode on** -- every field stays editable before you create it.
 
 ## Move and Found Settlements
 

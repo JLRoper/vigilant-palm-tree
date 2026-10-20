@@ -657,6 +657,19 @@ Every floating menu/panel now carries the shared corner resize grip, not just th
 
 `FloatingPanel.enableResize(key)` is the one entry point (the constructor's `resizeable`/`resizeKey` options route through it), so a surface built by a helper can opt in without a second implementation. `setLayout` hides the grip when a rail panel docks and drops the explicit height there; popping back out re-applies the remembered size (`applyStoredSize`). Confirm prompts and small forms (New Game, Load Game, Sign In, Settings, Multiplayer Lobby, Assault confirm) deliberately keep their fixed layout — a stretched two-button prompt buys nothing.
 
+### Logistics hero block, iso-pile resource default, new-game defaults (2026-10-20)
+
+Three playtest tweaks, all in the surfaces the player opens first:
+
+- **Logistics hero block.** `logisticsModal.ts` rendered the hero's five cargo resources as five full-width label rows plus a separate totals line (~318px of a 484px body). It now mirrors the settlement block: the totals move onto the section header
+  (`300/2500g · 5 wagons · 5 carts`) and the resources become one wrapping strip of `RESOURCE_PILE_BUBBLY_SPRITES` chips (`icon + stored/cap`, 18px icons, names in `title`), so the section is ~128px and the whole window nearly fits without scrolling.
+  The two wagon-slot rows keep their `−1`/`+1` buttons; only the redundant per-resource rows went away.
+- **Default map resource sprite.** `DEFAULT_RESOURCE_STYLE` moved from `rune-stone` to `isometric-pile` (`resourceStyleKey` -> `resource-pile.<type>`, the iso piles the panels already use). Settings are persisted as a whole object, so a store written
+  before this change would have kept the old default forever; `loadFromStorage` now reads a `schemaVersion` (absent = v1), treats a v1 `rune-stone` as "never chosen deliberately" and maps it to the new default once, and `updateSettings` stamps v2 on every write.
+  `settingsMenu.ts`'s "Reset to default" button references the exported constant instead of a hardcoded literal, so the two cannot drift.
+- **New-game defaults.** Both creation surfaces (`newGameScreen.ts` on home, `newGameModal.ts` from the toolbar) now open with **1 human player, 1 AI enemy, `medium` map, Uncharted mode checked** (previously 1 / 0 / `small` / unchecked). The uncharted checkbox is
+  pre-ticked, not just the `selected` flag, so the form's state and the submitted value agree. `test/visualRegression.test.ts` pins its own fixture settings (small map, 0 AI, revealed) so a future default change cannot silently rewrite every baseline.
+
 ### Click a hero or settlement again to deselect (2026-10-20)
 
 A map click is a toggle in `resolveAdventureClick`: `deselect-hero` / `deselect-settlement` join the `ClickIntent` union, and `AdventureView.applyClickIntent` routes them to `TurnController.clearSelection()` /

@@ -273,7 +273,8 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
   );
 
   const unchartedField = makeFieldRow("Uncharted mode");
-  let selectedUncharted = false;
+  // Default on: a fresh game starts hidden and reveals as you explore.
+  let selectedUncharted = true;
   const unchartedWrap = document.createElement("label");
   Object.assign(unchartedWrap.style, {
     display: "flex",
@@ -283,6 +284,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
   });
   const unchartedCheck = document.createElement("input");
   unchartedCheck.type = "checkbox";
+  unchartedCheck.checked = true;
   unchartedCheck.addEventListener("change", () => {
     selectedUncharted = unchartedCheck.checked;
   });
@@ -314,7 +316,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
     opt.textContent = mapSizeLabel(size);
     sizeSelect.appendChild(opt);
   }
-  sizeSelect.value = "small";
+  sizeSelect.value = "medium";
   sizeField.control.appendChild(sizeSelect);
 
   let selectedPlayers: 1 | 2 | 3 | 4 = 1;
@@ -327,7 +329,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
     },
   );
 
-  let selectedEnemies: 0 | 1 | 2 | 3 = 0;
+  let selectedEnemies: 0 | 1 | 2 | 3 = 1;
   const enemiesRow = makeChipRow(
     "Number of AI enemies",
     ENEMY_CHOICES,

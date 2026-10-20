@@ -1,27 +1,7 @@
 import { panelTheme, styleButton } from "@screens/shared/panel";
 import { openDialog } from "@screens/shared/dialog";
 import type { MapSize } from "../../map/gameMap";
-import {
-  settings,
-  updateSettings,
-  settingsBounds,
-  enemyMoveDurationBounds,
-  arenaMoveMsPerHexBounds,
-  borderWidthBounds,
-  resourceStyleOptions,
-  growthRateBounds,
-  spriteVariantOptions,
-  cityBackdropOptions,
-  clampCityBackdrop,
-  DEFAULT_CITY_BACKDROP,
-  bgOffsetBounds,
-  parallaxLayerCountBounds,
-  maxZoomOutHexesWideBounds,
-  clampMaxZoomOutHexesWide,
-  PARALLAX_SPEEDS,
-  type GameSettings,
-  type ResourceStyle,
-} from "../../state/settings";
+import { settings, updateSettings, settingsBounds, enemyMoveDurationBounds, arenaMoveMsPerHexBounds, borderWidthBounds, resourceStyleOptions, growthRateBounds, spriteVariantOptions, cityBackdropOptions, clampCityBackdrop, DEFAULT_CITY_BACKDROP, bgOffsetBounds, parallaxLayerCountBounds, maxZoomOutHexesWideBounds, clampMaxZoomOutHexesWide, PARALLAX_SPEEDS, type GameSettings, type ResourceStyle, DEFAULT_RESOURCE_STYLE } from "../../state/settings";
 import {
   clampToolbarStyle,
   DEFAULT_TOOLBAR_STYLE,
@@ -1004,7 +984,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
       enemyMoveDurationMs: enemyBounds.default,
       arenaMoveMsPerHex: arenaBounds.default,
       toolbarStyle: DEFAULT_TOOLBAR_STYLE,
-      resourceStyle: "rune-stone",
+      resourceStyle: DEFAULT_RESOURCE_STYLE,
       territoryBorderWidth: borderBounds.default,
       populationGrowthRate: growthBounds.default,
       spriteVariant: 1,
