@@ -18,6 +18,7 @@ import {
   paintResourceIcon,
   paintCastle,
   paintCharterOverlay,
+  paintSettlementRoad,
   paintValidCharterHex,
   paintPathSegment,
   paintHeroTrail,
@@ -42,6 +43,7 @@ import {
   paintBattleFloatingText,
 } from "../../src/render/scene/paint2d";
 import type { SceneNode } from "../../src/render/scene/types";
+import type { SettlementRoadNode } from "../../src/render/scene/types";
 import type { Paint2DSpriteResolver } from "../../src/render/scene/paint2d/deps";
 import { HEX_SIZE } from "../../src/core/hex";
 import { makeNoopPaint2DDep, makeRecordingCtx } from "./_helpers";
@@ -786,4 +788,76 @@ test("paintBattleFloatingText: emits a strokeText + fillText pair with the alpha
   assert.ok(calls.some((c) => c.name === "fillText"), "float should fill the text");
   const fill = calls.find((c) => c.name === "set:fillStyle");
   assert.equal(fill?.args[0], "rgba(255,214,102,0.8)", "float fill should match the live gold-tinted alpha");
+});
+
+// District roads: one thin track per strand, laid parallel to the edge and
+// centred on the line between the two tile centres. The tracks sit on the
+// ground under every entity layer, so the painter stays low-contrast (no
+// outline, no highlight) and only its geometry is worth pinning.
+
+function roadNode(segments: SettlementRoadNode["segments"]): SettlementRoadNode {
+  return { kind: "settlementRoad", settlementId: "s0", segments };
+}
+
+test("paintSettlementRoad: one track per strand, spread across the road and centred on it", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintSettlementRoad(
+    ctx,
+    roadNode([{ strands: 3, from: { x: 0, y: 0 }, to: { x: 20, y: 0 } }]),
+    makeNoopPaint2DDep(),
+  );
+
+  const moves = calls.filter((c) => c.name === "moveTo");
+  const lines = calls.filter((c) => c.name === "lineTo");
+  assert.equal(moves.length, 3, "3 strands is 3 tracks");
+  assert.equal(lines.length, 3);
+  // A horizontal edge's normal is vertical, so the tracks differ in y only and
+  // straddle the centre line: -1.7, 0, +1.7.
+  assert.deepEqual(moves.map((c) => c.args[1]), [-1.7, 0, 1.7]);
+  assert.deepEqual(lines.map((c) => c.args[1]), [-1.7, 0, 1.7]);
+  assert.deepEqual(moves.map((c) => c.args[0]), [0, 0, 0]);
+  assert.deepEqual(lines.map((c) => c.args[0]), [20, 20, 20]);
+  assert.equal(calls.filter((c) => c.name === "stroke").length, 3, "each track is its own stroke");
+});
+
+test("paintSettlementRoad: a single track rides the centre line", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintSettlementRoad(
+    ctx,
+    roadNode([{ strands: 1, from: { x: 0, y: 0 }, to: { x: 0, y: 20 } }]),
+    makeNoopPaint2DDep(),
+  );
+  const moves = calls.filter((c) => c.name === "moveTo");
+  assert.equal(moves.length, 1);
+  // A vertical edge offsets in x; one track is not offset at all.
+  assert.deepEqual(moves[0].args, [0, 0]);
+});
+
+test("paintSettlementRoad: a fully staffed district's band saturates instead of scaling with the count", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintSettlementRoad(
+    ctx,
+    roadNode([{ strands: 20, from: { x: 0, y: 0 }, to: { x: 20, y: 0 } }]),
+    makeNoopPaint2DDep(),
+  );
+  const offsets = calls.filter((c) => c.name === "moveTo").map((c) => c.args[1] as number);
+  assert.equal(offsets.length, 20, "20 strands is 20 tracks");
+  assert.ok(Math.max(...offsets) <= 8.5 && Math.min(...offsets) >= -8.5, "the band stays capped at 17px wide");
+  assert.ok(new Set(offsets).size === 20, "no two tracks collapse onto each other");
+});
+
+test("paintSettlementRoad: an empty network emits nothing", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintSettlementRoad(ctx, roadNode([]), makeNoopPaint2DDep());
+  assert.equal(calls.length, 0);
+});
+
+test("paintSettlementRoad: a zero-length segment is skipped rather than stroked as a dot", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintSettlementRoad(
+    ctx,
+    roadNode([{ strands: 4, from: { x: 5, y: 5 }, to: { x: 5, y: 5 } }]),
+    makeNoopPaint2DDep(),
+  );
+  assert.equal(calls.filter((c) => c.name === "stroke").length, 0);
 });

@@ -8,13 +8,14 @@ import { computeVision, isVisible } from "../../fog";
 import { computeReachableSplit } from "../../overlays/pathOverlay";
 import type { BuildingDef } from "@heroes/contracts";
 import { isCoveredWagonId } from "@heroes/contracts";
-import { controlledPositions, findPath, isDistrictBlockedByHero, resolveControllingSettlement, territoryBoundaryEdges, NEIGHBOR_DIRS } from "@heroes/engine";
+import { controlledPositions, findPath, isDistrictBlockedByHero, resolveControllingSettlement, settlementRoadNetwork, territoryBoundaryEdges, NEIGHBOR_DIRS, type RoadNetwork } from "@heroes/engine";
 import type { EntityMirror } from "../entityMirror";
 import type {
   SceneNode,
   HeroNode,
   HeroTrailNode,
   PathSegmentNode,
+  SettlementRoadNode,
   TerritoryOutlineEdgeNode,
   WorldPoint,
 } from "../types";
@@ -185,6 +186,15 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
         }
       }
     }
+  }
+
+  // District roads go down first, straight onto the ground: emitted before
+  // every overlay and entity layer so the castle, the district and any hero
+  // always paint over the road that leads to them. Purely decorative -- roads
+  // carry no movement cost.
+  for (const c of castles) {
+    const road = buildSettlementRoadNode(c, map, visible, opts.viewPlayerId);
+    if (road) nodes.push(road);
   }
 
   if (map.placedResourceTiles) {
@@ -419,6 +429,74 @@ function projectedCaravanRoute(
   if (caravan.q === goal.tile.q && caravan.r === goal.tile.r) return [];
   const leg = findPath(map, { q: caravan.q, r: caravan.r }, { q: goal.tile.q, r: goal.tile.r });
   return leg.length > 0 ? leg.map((p) => ({ q: p.q, r: p.r })) : stored;
+}
+
+/**
+ * The settlement's road network, cached across frames.
+ *
+ * The layout is an A* per district over the real terrain, so it cannot be
+ * recomputed every frame: the cache is keyed on everything the layout reads --
+ * the tile chain and every building's staff count -- and on the map OBJECT,
+ * because the terrain decides where a road may go and a new game gets a new
+ * map (getOrCreateGameMap hands the same object back for the same
+ * seed/size/version, which is exactly the case where the answer cannot change).
+ */
+const roadNetworkCache = new Map<string, { signature: string; network: RoadNetwork }>();
+let roadNetworkCacheMap: GameMap | null = null;
+
+function roadSignature(castle: Castle): string {
+  let signature = `${castle.tile.q},${castle.tile.r}`;
+  const districts = castle.districts ?? {};
+  // District keys are JSONB object keys, so their order is a storage detail:
+  // sorting keeps the signature stable across a save/load round trip.
+  for (const key of Object.keys(districts).sort()) {
+    const d = districts[key];
+    signature += `|${key}:${d.q},${d.r}`;
+    for (const b of d.buildings) signature += `:${b.kind},${b.workers ?? -1}`;
+  }
+  return signature;
+}
+
+function roadNetworkFor(castle: Castle, map: GameMap): RoadNetwork {
+  if (roadNetworkCacheMap !== map) {
+    roadNetworkCache.clear();
+    roadNetworkCacheMap = map;
+  }
+  const signature = roadSignature(castle);
+  const cached = roadNetworkCache.get(castle.id);
+  if (cached && cached.signature === signature) return cached.network;
+  const network = settlementRoadNetwork(castle, map);
+  roadNetworkCache.set(castle.id, { signature, network });
+  return network;
+}
+
+/**
+ * The visible slice of a settlement's road network, or null when it has none.
+ * Fog gating mirrors the district nodes: a settlement this view owns shows all
+ * of its roads, anyone else's shows only the edges whose BOTH ends are in
+ * vision -- half a road appearing out of the fog would leak where it leads.
+ */
+function buildSettlementRoadNode(
+  castle: Castle,
+  map: GameMap,
+  visible: Set<string>,
+  viewPlayerId: number,
+): SettlementRoadNode | null {
+  if (!castle.districts || Object.keys(castle.districts).length === 0) return null;
+  const own = castle.ownerId === viewPlayerId;
+  const segments: SettlementRoadNode["segments"] = [];
+  for (const segment of roadNetworkFor(castle, map).segments) {
+    if (!own && (!isVisible(visible, segment.from.q, segment.from.r) || !isVisible(visible, segment.to.q, segment.to.r))) {
+      continue;
+    }
+    segments.push({
+      strands: segment.strands,
+      from: axialToPixel(segment.from.q, segment.from.r),
+      to: axialToPixel(segment.to.q, segment.to.r),
+    });
+  }
+  if (segments.length === 0) return null;
+  return { kind: "settlementRoad", settlementId: castle.id, segments };
 }
 
 interface TerritoryCoord {
