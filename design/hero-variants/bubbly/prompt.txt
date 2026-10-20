@@ -1,0 +1,17 @@
+Repaint the attached game-hero sprite as the LIGHT UNICORN, the radiant counterpart of this dark unicorn. The attached image is the authoritative reference for ART STYLE, POSE, SILHOUETTE, FRAMING and SCALE — keep all of those identical.
+
+{{POSE}}
+
+ART STYLE (copy the reference exactly): softly hand-painted fantasy game sprite, hand-painted brush texture with soft airbrush shading, gentle highlights, a thin dark painted contour along the silhouette, the same level of detail and the same figure scale within the canvas. Not pixel art, not cel-shaded, not a 3D render, not a photograph.
+
+KEEP FROM THE REFERENCE, unchanged: the unicorn's riderless body build and head carriage, its leg positions and gait, the shape and flow of its long mane and tail, the mane strands falling over the neck and chest, the bare back (no rider, no saddle, no bridle, no armour), and the exact same silhouette and framing.
+
+NEW COLOUR SCHEME — "Light Unicorn", the exact opposite of the dark unicorn:
+- Coat: luminous pearl-white with soft silver-grey shading, so the body reads bright even against dark forest terrain.
+- Mane and tail: flowing silver-white with warm pale-gold tips; the same strands and curls as the reference, now lit from within.
+- Horn: the reference's forehead horn, now a slender spiralled horn of polished gold, clearly visible, with a soft warm-gold glow at its base.
+- Eyes: pale luminous blue.
+- Hooves: pale silver with a faint gold sheen.
+- Accents: a gentle warm-white rim light along the back, mane and tail, and a few soft motes of golden light around the mane. No dark purple, no black, no shadowy body.
+
+BACKGROUND: one flat uniform light-grey colour (#c9c7c4) filling the entire canvas — absolutely no checkerboard pattern anywhere, no gradient, no ground, no cast shadow, no horizon line, no text, no border, no watermark. A single isolated figure, centred, occupying the canvas vertically like the reference.

@@ -1,0 +1,11 @@
+Repaint the attached game-hero sprite as the SAME LIGHT UNICORN one frame later in its gallop cycle. The attached image is the authoritative reference for ART STYLE, CHARACTER DESIGN, PALETTE, CAMERA ANGLE, FRAMING and SCALE — keep all of those identical.
+
+{{POSE}}
+
+CHANGE ONLY THE GAIT: show the next phase of the same gallop — the near front leg reaching further forward and the near hind leg pushing further back, the body level, the mane and tail lifted a little by the stride, the head carriage and horn unchanged. It must read as the second frame of a two-frame run cycle for this exact sprite, not a different pose.
+
+ART STYLE (copy the reference exactly): softly hand-painted fantasy game sprite, hand-painted brush texture with soft airbrush shading, gentle highlights, a thin dark painted contour along the silhouette, the same level of detail and the same figure scale within the canvas. Not pixel art, not cel-shaded, not a 3D render, not a photograph.
+
+KEEP FROM THE REFERENCE, unchanged: the luminous pearl-white coat, the silver-white mane and tail with warm pale-gold tips, the slender gold horn, the pale-blue eyes, the pale silver hooves, the riderless bare back (no rider, no saddle, no bridle, no armour), and the exact same silhouette proportions.
+
+BACKGROUND: one flat uniform light-grey colour (#c9c7c4) filling the entire canvas — absolutely no checkerboard pattern anywhere, no gradient, no ground, no cast shadow, no horizon line, no text, no border, no watermark. A single isolated figure, centred, occupying the canvas vertically like the reference.

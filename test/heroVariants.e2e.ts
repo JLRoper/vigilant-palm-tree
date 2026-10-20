@@ -36,7 +36,7 @@ const GAME_SEED = 424242;
 const DIRECTIONS = ["n", "ne", "e", "se", "s", "sw", "w", "nw"] as const;
 
 /** How a variant's generated palette must differ from its base sprite set. */
-type PaletteSignal = "reddened" | "corrupted" | "cooled";
+type PaletteSignal = "reddened" | "corrupted" | "cooled" | "darkened";
 
 interface VariantSpec {
   id: string;
@@ -50,6 +50,8 @@ const VARIANTS: VariantSpec[] = [
   { id: "frostwarden", label: "Frost Warden", base: "paladin", signal: "cooled" },
   { id: "gravewarden", label: "Grave Warden", base: "shadow", signal: "corrupted" },
   { id: "stormrider", label: "Storm Rider", base: "ranger", signal: "cooled" },
+  { id: "blackdragon", label: "Black Dragon Rider", base: "drake", signal: "darkened" },
+  { id: "reddragon", label: "Red Dragon Rider", base: "drake", signal: "reddened" },
 ];
 
 // The paladin predates the generated waves; its descriptor set is the control
@@ -315,6 +317,14 @@ function assertSignal(variant: VariantSpec, diff: CropDiff): void {
       diff.darkened + diff.greened > diff.changed * 0.3,
       `${variant.id}: expected a darker, green-tinged undead horse ` +
       `(${diff.darkened} darkened + ${diff.greened} greened of ${diff.changed})`,
+    );
+  } else if (variant.signal === "darkened") {
+    // The Black Dragon Rider is obsidian with an indigo sheen, so the palette
+    // shift lands in BOTH the darkened and cooled buckets.
+    assert(
+      diff.darkened + diff.cooled > diff.changed * 0.35,
+      `${variant.id}: expected the green drake's scales to go black/indigo ` +
+      `(${diff.darkened} darkened + ${diff.cooled} cooled of ${diff.changed})`,
     );
   } else {
     assert(

@@ -1,0 +1,9 @@
+Repaint the attached game-hero sprite as the SAME DARK UNICORN seen from a different camera angle. The attached image is the authoritative reference for ART STYLE, COLOUR, SILHOUETTE, FRAMING and SCALE — keep all of those identical.
+
+{{POSE}}
+
+ART STYLE (copy the reference exactly): softly hand-painted fantasy game sprite, hand-painted brush texture with soft airbrush shading, gentle highlights, a thin dark painted contour along the silhouette, the same level of detail and the same figure scale within the canvas. Not pixel art, not cel-shaded, not a 3D render, not a photograph.
+
+KEEP FROM THE REFERENCE, unchanged: the near-black indigo and amethyst coat, the deep violet shading, the flowing dark-violet mane and tail with their pale-lilac edge highlights, the riderless bare back (no rider, no saddle, no bridle, no armour), the head carriage, the leg positions and gait, the forehead horn, and the same body proportions and silhouette.
+
+BACKGROUND: one flat uniform light-grey colour (#c9c7c4) filling the entire canvas — absolutely no checkerboard pattern anywhere, no gradient, no ground, no cast shadow, no horizon line, no text, no border, no watermark. A single isolated figure, centred, occupying the canvas vertically like the reference.
