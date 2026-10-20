@@ -728,11 +728,23 @@ export const HERO_DESCRIPTORS: Record<`hero.${Faction}`, SpriteDescriptor> = {
   },
 };
 
+// The grid-exact farm plots are authored on a 128-wide canvas whose ground
+// diamond spans the full width and whose south vertex is the bottom row (see
+// tools/sprites/gen-farm-sprites.mjs). At hexSizeMul 1 the drawn diamond lands
+// exactly on the 2x2 footprint, which is the whole point of that family; the
+// model-authored farmField art keeps the universal 0.9 building inset.
+const GRID_EXACT_FARM_STYLES = new Set(["farmWheat", "farmVeg", "farmOrchard", "farmPaddock", "farmVines"]);
+
+function buildingHexSizeMul(spriteKey: string): number {
+  const [style, kind] = spriteKey.split(".");
+  return style === "pixel" && GRID_EXACT_FARM_STYLES.has(kind) ? 1 : 0.9;
+}
+
 export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> =
   Object.fromEntries(
     Object.keys(BUILDING_SPRITES).map((k) => [
       `building.${k}`,
-      { key: `building.${k}`, url: BUILDING_SPRITES[k], anchor: "bottom", anchorOffsetY: -12, sizing: { kind: "fitWidth", hexSizeMul: 0.9 } } as SpriteDescriptor,
+      { key: `building.${k}`, url: BUILDING_SPRITES[k], anchor: "bottom", anchorOffsetY: -12, sizing: { kind: "fitWidth", hexSizeMul: buildingHexSizeMul(k) } } as SpriteDescriptor,
     ])
   );
 

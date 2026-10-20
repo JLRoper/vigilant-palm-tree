@@ -12,10 +12,11 @@ the version has not already been bumped in that changeset.
 
 ## [0.23.0] - 2026-10-20
 
-- **Two new mounted hero variants: Black Dragon Rider and Red Dragon Rider.** Both are repaints of the existing Drake Rider's chunky pixel-art dragon and rider — an obsidian-black dragon with indigo-violet sheen and a black/silver rider, and a crimson-scarlet dragon with ember-orange membranes and a black/brass rider. They appear in the recruit picker with no UI change and have their own 320×100 roster banners (stormy twilight and volcanic sunset).
-- Both variants ship all eight headings. The `se`/`sw` diagonals were regenerated from the front view after the side-profile versions measured too close to `e`/`w` at map size; they now read as genuine three-quarter views, head-right and head-left respectively. Base frames only (no `-2` gallop files), so both run frames render the base sprite.
-- `gemini-hero-sprite.mjs` gained `--subject <noun>` (dragon-facing wording instead of "horse and rider") and a `{{HEAD_SIDE}}` prompt placeholder for the explicit three-quarter composition rule. `test/render/dragonRiderArt.test.ts` pins both 8-way 512px file sets, and `test/heroVariants.e2e.ts` now A/B diffs both riders against the drake (`darkened` / `reddened` signals).
-- The starter-variant draw now ranges over 16 variants, so the three adventure visual baselines were regenerated; the churn is the hero sprite and panel banner only.
+Farm fields: five grid-exact plot styles, mixed per cell
+
+- **New farm-field art family** (`building-pixel-farm{Wheat,Veg,Orchard,Paddock,Vines}-1.png`) drawn by the deterministic `tools/sprites/gen-farm-sprites.mjs`: a 128x64 logical ground diamond (true 2:1, south vertex on the bottom canvas row) upscaled 8x to the 1024 family size. It carries no side plinth — a 1px outline plus a 2-3px verge — and every prop is trimmed to its own diamond (`clipToPlot`), so a plot sits flush in its 2x2 cells and adjacent fields meet edge-to-edge instead of being sliced by a neighbour's ground.
+- **Exact-fit descriptor for the new family:** `hexSizeMul 1.0` (the universal building inset is 0.9) and a generated `anchorOffsetY 0`, so the ground diamond lands on the footprint's cell corners. The legacy `farmField` art keeps the 0.9 convention and stays on disk for comparison.
+- **Per-cell variety:** `farmPlotVariantAt(settlement, gx, gy)` (FNV-1a over the cell) picks one of `FARM_PLOT_VARIANTS` at render time, so a settlement's fields mix styles and a reload never reshuffles them. Nothing is persisted, so no save migration; each variant is already its own keyed sprite, which is what a later split into player-chosen, goods-producing farm kinds will build on. `?farm=<variant>` (or `farmField` for the legacy art) still forces one style for review.
 
 ## [0.22.1] - 2026-10-20
 

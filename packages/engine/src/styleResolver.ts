@@ -38,14 +38,36 @@ export function randomFarmFieldStyle(): GenerationStyle {
   return (Math.random() < 0.5 ? "pixel" : "pixel-alt") as GenerationStyle;
 }
 
-export function farmFieldStyleAt(seed: string, gx: number, gy: number): GenerationStyle {
+/** FNV-1a over one settlement cell; shared by the persisted style and the plot-variant pick. */
+function farmCellHash(seed: string, gx: number, gy: number): number {
   let h = 2166136261;
   const s = `${seed}:${gx},${gy}`;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
-  return ((h >>> 0) % 2 === 0 ? "pixel" : "pixel-alt") as GenerationStyle;
+  return h >>> 0;
+}
+
+export function farmFieldStyleAt(seed: string, gx: number, gy: number): GenerationStyle {
+  return (farmCellHash(seed, gx, gy) % 2 === 0 ? "pixel" : "pixel-alt") as GenerationStyle;
+}
+
+/**
+ * The five committed farm-plot art styles. Every farm field draws one of them,
+ * picked per cell so a settlement's fields vary; the art is chosen at render
+ * time (nothing is persisted), so adding or reordering this list never touches a
+ * save. Splitting these into player-chosen, goods-producing building kinds is a
+ * registry change on top of this list, not a re-art: each variant already has
+ * its own keyed sprite (`building-pixel-<variant>-1.png`).
+ */
+export const FARM_PLOT_VARIANTS = ["farmWheat", "farmVeg", "farmOrchard", "farmPaddock", "farmVines"] as const;
+
+export type FarmPlotVariant = (typeof FARM_PLOT_VARIANTS)[number];
+
+/** Deterministic per settlement+cell, stable across reloads and independent of build order. */
+export function farmPlotVariantAt(seed: string, gx: number, gy: number): FarmPlotVariant {
+  return FARM_PLOT_VARIANTS[farmCellHash(seed, gx, gy) % FARM_PLOT_VARIANTS.length];
 }
 
 /**
