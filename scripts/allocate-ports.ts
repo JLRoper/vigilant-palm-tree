@@ -77,14 +77,19 @@ async function main(): Promise<void> {
     allocated[key] = port;
   }
 
-  writeFileSync(
-    ENV_FILE,
+  const content =
     Object.entries(merged)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => `${k}=${v}`)
-      .join("\n") + "\n",
-    "utf8"
-  );
+      .join("\n") + "\n";
+
+  // Only touch the file when the values actually changed. Vite watches .env
+  // and restarts the dev server on every write; a test suite's pre-step used
+  // to rewrite identical ports and bounce a live dev server each time.
+  const current = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : null;
+  if (current !== content) {
+    writeFileSync(ENV_FILE, content, "utf8");
+  }
 
   const branch = (() => {
     try {

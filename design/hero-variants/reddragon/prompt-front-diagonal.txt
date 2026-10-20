@@ -1,0 +1,16 @@
+Repaint the attached game-hero sprite as a NEW mounted hero: the RED DRAGON RIDER. The attached image is the authoritative reference for ART STYLE, POSE, SILHOUETTE, FRAMING and SCALE — keep all of those identical.
+
+{{POSE}}
+
+ART STYLE (copy the reference exactly): chunky hand-drawn pixel art, crisp hard-edged square pixels, a limited palette, a thin dark pixel outline around the silhouette, the same pixel scale, the same level of detail, and the same dithering and highlight habits as the reference. Not a smooth painted illustration, not airbrushed, not a 3D render, not a photograph.
+
+KEEP FROM THE REFERENCE, unchanged: the dragon's body build, long neck, head shape and jaw, the two horns, the wing shape and span, the long tail, the leg positions and gait, the saddle and harness, the rider's upright posture and hand position on the reins, the rider's winged helmet and pauldrons, and the exact same silhouette and framing.
+
+NEW COLOUR SCHEME — "Red Dragon Rider":
+- Dragon: crimson-scarlet scales with ember-orange highlights along the scale edges, dark maroon belly plates, blood-red wing membranes with glowing orange veins, dark red horns and claws, and glowing orange-yellow eyes.
+- Rider: blackened iron plate armour with brass-gold trim and rivets, a charred black cape with a red hem, a dark iron great helm with a brass crest, and a dark leather saddle with brass buckles.
+- Highlights read warm ember-orange; no green and no cold blue anywhere on the dragon.
+
+BACKGROUND: one flat uniform light-grey colour (#c9c7c4) filling the entire canvas — absolutely no checkerboard pattern anywhere, no gradient, no ground, no cast shadow, no horizon line, no text, no border, no watermark. A single isolated figure, centred, occupying the canvas vertically like the reference.
+
+COMPOSITION RULE for this diagonal: this must read as a THREE-QUARTER view, not a side profile. The dragon's head MUST be on the {{HEAD_SIDE}} side of the image, its chest angled toward the viewer, and its near foreleg planted toward the lower-{{HEAD_SIDE}}. Show both the chest and the flank. If the result looks like a pure side view, turn the body further toward the camera.

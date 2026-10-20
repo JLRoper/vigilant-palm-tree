@@ -91,7 +91,7 @@ Descriptor maps and how they are populated:
 | `CASTLE_DESCRIPTORS`, `CASTLE_ALT{,2,3}_DESCRIPTORS` | hand-written | 12 | `fitHeight` 1.5/2.2/3.0, `anchorOffsetY` 8/16 |
 | `RESOURCE_*_DESCRIPTORS` (8 styles) | generated from `RESOURCES` | 48 | per-style `hexSizeMul` varies: 0.9 (default/cart/illust/constellation/crest), 0.95 (pile), 0.475 (smol), 0.71 (bubbly); all `anchor: "center"` |
 | `HERO_PLAYER_DESCRIPTORS` | **glob** `units/horse/commander-1/*.png` | 8 dirs (+ frame-2) | `fitHeight` 1.8, `naturalSize` 512 |
-| `HORSE_VARIANT_DESCRIPTORS` | **glob** `units/horse/commander-*/*.png`, filtered per `HORSE_VARIANT_REGISTRY` | 14 variants × 4–8 dirs | diagonal→cardinal fallbacks per variant; optional `-2` run frames; bubbly `naturalSize` 64 |
+| `HORSE_VARIANT_DESCRIPTORS` | **glob** `units/horse/commander-*/*.png`, filtered per `HORSE_VARIANT_REGISTRY` | 16 variants × 4–8 dirs | diagonal→cardinal fallbacks per variant; optional `-2` run frames; all 512px — the light unicorn (id `bubbly`) and dark unicorn (`unicorn`) cover every adventure-map heading |
 | `BUILDING_DESCRIPTORS` | generated building keys + glob-resolved files | 114 | bottom-anchored pixel assets; offsets come from the generated anchor map |
 | `UNIT_ARENA_DESCRIPTORS` | **glob** `units/arena/*.png` | 36 ids × 3 poses (mage gap) | `bottom`, `fitHeight 1.3`, `naturalSize 128` |
 | `CARAVAN_DESCRIPTORS` | hand-written legacy pair (`caravan-supply.png`, `caravan-treasury.png`) + **glob** `caravans/{supply,treasury}-<dir>.png` | 2 legacy + 16 directional | `bottom`, `fitHeight 1.45`, `naturalSize 256`; legacy pair stays eager (logistics modal `<img>`), directional sprites load on demand like horse variants |
@@ -166,7 +166,7 @@ the seam test). It:
 | Builder | Sprite-relevant decisions |
 |---|---|
 | `adventureScene.ts` | hero `runFrame` from `hero.moving && floor(moveProgress*2)%2` (:156); bob/scaleY from `moveProgress` (:152–155); per-hero fade `alpha` for non-own sightings (:157, fed by `renderer.ts`'s `heroSpotted` tracker); `caravanMarker` nodes from pre-resolved `opts.caravans` (:134–145), fog-gated like heroes; trail/path own-seat gating |
-| `cityScene.ts` | per-building `farmStyle` from engine `farmFieldStyleAt(settlementName, gx, gy)` (:146–148); `constructionStage` from `constructionStageFor(buildingConstructionProgress(b))` (:150–152); painter's-algorithm `gx+gy` sort |
+| `cityScene.ts` | per-building `farmStyle` from engine `farmFieldStyleAt(settlementName, gx, gy)`, plus the exact `farmSpriteKey` from `farmPlotVariantAt(...)` (or a forced `farmSpriteStyle`); `constructionStage` from `constructionStageFor(buildingConstructionProgress(b))`; painter's-algorithm `gx+gy` sort |
 | `battleScene.ts` | `dominantUnitTypeId(entries)` — highest count, first stored wins ties (:91–99); `pose = move \| attack \| idle` from the mover/attacker window (:253); `mirror` for defenders (art authored facing right once, :255); `hexSize` per node |
 
 ### 3.5 Painters — `src/render/scene/paint2d/index.ts` (1189 lines, single file + `colors.ts`/`geometry.ts`/`deps.ts`)
@@ -227,6 +227,17 @@ treatment: `npm run gen:sprite-keys` (key map) + `npm run gen:building-anchors`
 (measured bottom pad) pick it up like any other sprite. Verify on disk with
 `node tools/sprites/gen-shipyard-sprite.mjs --check`; the output is byte-stable,
 so a re-run is a no-op.
+
+`tools/sprites/gen-farm-sprites.mjs` extends the same idea to the farm-plot family
+(`building-pixel-farm{Wheat,Veg,Orchard,Paddock,Vines}-1.png`). Its contract is the
+grid, not a reference image: a 128x64 logical ground diamond (true 2:1, south vertex
+on the bottom canvas row), 8x nearest-neighbour upscale to 1024, drawn at
+`hexSizeMul 1.0` so the diamond lands exactly on the 2x2 footprint. There is no side
+plinth (1px outline + 2-3px verge) and `clipToPlot()` trims every prop to the plot's
+own diamond, so a field never bleeds into a neighbouring cell. Each style is a
+separate `building-pixel-<style>-1.png`, which is why `farmPlotVariantAt` can mix
+them per cell with no persistence. Verify with `node tools/sprites/gen-farm-sprites.mjs
+--check`.
 
 ### 4.2 Pipeline B — FLUX via DeepInfra (`tools/sprites/flux-*.mjs`, 25 scripts)
 

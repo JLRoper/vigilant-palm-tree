@@ -79,6 +79,12 @@ const HERO_NAMES: readonly string[] = [
   "Taran Stormhale",
   "Nimue Galeborne",
   "Brennan Thunderhoof",
+  "Vaelor Nightwing",
+  "Ashra Emberclaw",
+  "Drakon Stormscale",
+  "Sable Cinderwing",
+  "Pyra Ashenclaw",
+  "Vex Shadowmaw",
 ];
 
 let usedNames: Set<string> | null = null;

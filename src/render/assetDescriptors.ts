@@ -23,6 +23,8 @@ import heroBannerPaladin2 from "../resources/hero-banner-paladin2.png?url";
 import heroBannerFrostwarden from "../resources/hero-banner-frostwarden.png?url";
 import heroBannerGravewarden from "../resources/hero-banner-gravewarden.png?url";
 import heroBannerStormrider from "../resources/hero-banner-stormrider.png?url";
+import heroBannerBlackdragon from "../resources/hero-banner-blackdragon.png?url";
+import heroBannerReddragon from "../resources/hero-banner-reddragon.png?url";
 import resourceGold from "../resources/resource-gold.png?url";
 import resourceWood from "../resources/resource-wood.png?url";
 import resourceStone from "../resources/resource-stone.png?url";
@@ -209,6 +211,8 @@ export const HERO_BANNERS: Record<HorseVariantId, string> = {
   frostwarden: heroBannerFrostwarden,
   gravewarden: heroBannerGravewarden,
   stormrider: heroBannerStormrider,
+  blackdragon: heroBannerBlackdragon,
+  reddragon: heroBannerReddragon,
 };
 
 export const RESOURCE_SPRITES: Record<ResourceType, string> = {
@@ -560,7 +564,7 @@ for (const entry of HORSE_VARIANT_REGISTRY) {
     HORSE_VARIANT_IMAGES[entry.id],
     "bottom",
     { kind: "fitHeight", hexSizeMul: 1.8 },
-    entry.id === "bubbly" ? 64 : 512
+    512
   );
 }
 
@@ -724,11 +728,23 @@ export const HERO_DESCRIPTORS: Record<`hero.${Faction}`, SpriteDescriptor> = {
   },
 };
 
+// The grid-exact farm plots are authored on a 128-wide canvas whose ground
+// diamond spans the full width and whose south vertex is the bottom row (see
+// tools/sprites/gen-farm-sprites.mjs). At hexSizeMul 1 the drawn diamond lands
+// exactly on the 2x2 footprint, which is the whole point of that family; the
+// model-authored farmField art keeps the universal 0.9 building inset.
+const GRID_EXACT_FARM_STYLES = new Set(["farmWheat", "farmVeg", "farmOrchard", "farmPaddock", "farmVines"]);
+
+function buildingHexSizeMul(spriteKey: string): number {
+  const [style, kind] = spriteKey.split(".");
+  return style === "pixel" && GRID_EXACT_FARM_STYLES.has(kind) ? 1 : 0.9;
+}
+
 export const BUILDING_DESCRIPTORS: Record<string, SpriteDescriptor> =
   Object.fromEntries(
     Object.keys(BUILDING_SPRITES).map((k) => [
       `building.${k}`,
-      { key: `building.${k}`, url: BUILDING_SPRITES[k], anchor: "bottom", anchorOffsetY: -12, sizing: { kind: "fitWidth", hexSizeMul: 0.9 } } as SpriteDescriptor,
+      { key: `building.${k}`, url: BUILDING_SPRITES[k], anchor: "bottom", anchorOffsetY: -12, sizing: { kind: "fitWidth", hexSizeMul: buildingHexSizeMul(k) } } as SpriteDescriptor,
     ])
   );
 
