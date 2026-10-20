@@ -9,19 +9,20 @@ import type { RiverHexNode } from "../../src/render/scene/types";
 import { makeRecordingCtx, makeNoopPaint2DDep, makeRenderOptions } from "./_helpers";
 import { Hero } from "../../src/entities/hero";
 
-test("unseen river cells emit no river overlay through the fog", () => {
+test("river overlay follows visibility: shown through fog, hidden under uncharted", () => {
   const map = new GameMap(993025331, "small", 5);
   const heroes = [new Hero("h0", "Hero", 0, 0, "player", 0)];
-  const nodes = buildAdventureScene({
-    map,
-    heroes,
-    castles: [],
-    path: [],
-    hover: null,
-    opts: makeRenderOptions({ viewPlayerId: 0 }),
-    revealed: null,
-  });
-  assert.equal(nodes.filter((n) => n.kind === "riverHex").length, 0, "no river overlay while every river cell is beyond vision");
+  const riverCount = map.placedRivers.length;
+  const base = { map, heroes, castles: [], path: [], hover: null, opts: makeRenderOptions({ viewPlayerId: 0 }) };
+
+  const fogOnly = buildAdventureScene({ ...base, revealed: null });
+  assert.equal(fogOnly.filter((n) => n.kind === "riverHex").length, riverCount, "starts-visible mode: rivers emit under the translucent fog");
+
+  const allUncharted = buildAdventureScene({ ...base, revealed: new Set() });
+  assert.equal(allUncharted.filter((n) => n.kind === "riverHex").length, 0, "never revealed: no river under uncharted black");
+
+  const seenOnce = buildAdventureScene({ ...base, revealed: new Set(["8,5"]) });
+  assert.equal(seenOnce.filter((n) => n.kind === "riverHex").length, 1, "revealed-but-unseen rivers show through the veil");
 });
 
 test("riverMaskInfo maps the six bit masks to the baked templates", () => {
