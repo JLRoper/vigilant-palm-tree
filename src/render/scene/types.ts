@@ -14,6 +14,7 @@ export interface WorldPoint {
 export type SceneNode =
   | TerrainHexNode
   | TerrainDecorationNode
+  | RiverHexNode
   | FogHexNode
   | UnchartedHexNode
   | ResourceIconNode
@@ -61,6 +62,17 @@ export interface TerrainDecorationNode {
   r: number;
   world: WorldPoint;
   terrain: Terrain;
+}
+
+export interface RiverHexNode {
+  kind: "riverHex";
+  q: number;
+  r: number;
+  world: WorldPoint;
+  size: "small" | "wide";
+  /** Bitmask of the six neighbour directions that are also river cells. */
+  mask: number;
+  bridge?: boolean;
 }
 
 export interface FogHexNode {

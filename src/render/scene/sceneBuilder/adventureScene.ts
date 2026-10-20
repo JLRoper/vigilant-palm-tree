@@ -7,7 +7,7 @@ import type { RenderOptions } from "../../renderTypes";
 import { computeVision, isVisible } from "../../fog";
 import { computeReachableSplit } from "../../overlays/pathOverlay";
 import type { BuildingDef } from "@heroes/contracts";
-import { controlledPositions, isDistrictBlockedByHero, resolveControllingSettlement, territoryBoundaryEdges } from "@heroes/engine";
+import { controlledPositions, isDistrictBlockedByHero, resolveControllingSettlement, territoryBoundaryEdges, NEIGHBOR_DIRS } from "@heroes/engine";
 import type { EntityMirror } from "../entityMirror";
 import type {
   SceneNode,
@@ -54,6 +54,15 @@ export function districtTierForCount(count: number): 1 | 2 | 3 {
   return 1;
 }
 
+/** The six-direction bitmask of river neighbours (NEIGHBOR_DIRS order). */
+export function riverMaskAt(map: GameMap, q: number, r: number): number {
+  let mask = 0;
+  for (let d = 0; d < 6; d++) {
+    if (map.riverAt(q + NEIGHBOR_DIRS[d].q, r + NEIGHBOR_DIRS[d].r)) mask |= 1 << d;
+  }
+  return mask;
+}
+
 export function settlementFullnessForCount(count: number): 1 | 2 | 3 | 4 | 5 {
   if (count >= 13) return 5;
   if (count >= 10) return 4;
@@ -83,7 +92,22 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       if (!terrain) continue;
       const world = axialToPixel(q, r);
       nodes.push({ kind: "terrainHex", q, r, world, terrain });
-      if (terrain !== "grass" && terrain !== "dirt") {
+      const river = map.riverAt(q, r);
+      if (river) {
+        // The water overlay replaces the biome's own decoration on a river
+        // cell (no trees/ripples poking through the water). Emitted here, in
+        // tile order, so it paints after this tile's fill but before the fog
+        // nodes -- an unseen river stays hidden exactly like the terrain.
+        nodes.push({
+          kind: "riverHex",
+          q,
+          r,
+          world,
+          size: river.kind,
+          mask: riverMaskAt(map, q, r),
+          ...(river.bridge ? { bridge: true } : {}),
+        });
+      } else if (terrain !== "grass" && terrain !== "dirt") {
         nodes.push({ kind: "terrainDecoration", q, r, world, terrain });
       }
       if (!isVisible(visible, q, r)) {

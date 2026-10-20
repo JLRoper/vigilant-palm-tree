@@ -42,6 +42,7 @@ import {
   districtSpriteKey,
   heroDirectionKey,
   heroKey,
+  riverKey,
   horseVariantKey,
   resourceStyleKey,
   UNIT_ARENA_DESCRIPTORS,
@@ -191,6 +192,9 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
     resolveSpriteForDistrict(variant: DistrictVariant, tier: DistrictTier): ResolvedSprite | undefined {
       const key = districtSpriteKey(variant, tier);
       return narrowResolvedSprite(provider.resolve(key));
+    },
+    resolveRiverSprite(size: "small" | "wide", mask: "end" | "straight" | "curveC" | "curveCC" | "bridge"): ResolvedSprite | undefined {
+      return narrowResolvedSprite(provider.resolve(riverKey(size, mask)));
     },
     resolveSpriteForCityPerson(): ResolvedSprite | undefined {
       const key = unitArenaKey("peasant", "idle") as SpriteKey;

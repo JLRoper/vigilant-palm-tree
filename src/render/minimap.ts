@@ -334,6 +334,37 @@ function renderStaticMinimapLayer(
     }
   }
 
+  // Rivers: a blue line along each system (wider for wide rivers) with a
+  // brown tick on bridges. Drawn over the terrain fill, under nothing else.
+  if (map.placedRivers && map.placedRivers.length > 0) {
+    const rivers = map.placedRivers;
+    targetCtx.lineCap = "round";
+    for (let i = 0; i < rivers.length; i++) {
+      const t = rivers[i];
+      if (!isVisible(visible, t.q, t.r)) continue;
+      const a = minimapCamera.worldToScreen(t.q, t.r, geo);
+      const color = t.kind === "wide" ? "#2a6aaf" : "#3c7fb4";
+      if (t.bridge) {
+        targetCtx.fillStyle = "#a07540";
+        targetCtx.fillRect(a.x - cellSize * 0.18, a.y - cellSize * 0.18, cellSize * 0.36, cellSize * 0.36);
+        continue;
+      }
+      const prev = i > 0 ? rivers[i - 1] : undefined;
+      if (prev && prev.kind === t.kind && isVisible(visible, prev.q, prev.r)) {
+        const b = minimapCamera.worldToScreen(prev.q, prev.r, geo);
+        targetCtx.strokeStyle = color;
+        targetCtx.lineWidth = t.kind === "wide" ? cellSize * 0.5 : cellSize * 0.3;
+        targetCtx.beginPath();
+        targetCtx.moveTo(a.x, a.y);
+        targetCtx.lineTo(b.x, b.y);
+        targetCtx.stroke();
+      } else {
+        targetCtx.fillStyle = color;
+        targetCtx.fillRect(a.x - cellSize * 0.2, a.y - cellSize * 0.2, cellSize * 0.4, cellSize * 0.4);
+      }
+    }
+  }
+
   targetCtx.restore();
 }
 

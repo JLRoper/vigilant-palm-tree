@@ -62,6 +62,19 @@ export const CARAVAN_SPRITES = {
   gold: "caravan-treasury.png",
 };
 
+// River overlay tiles (map-gen v5), baked by tools/sprites/gen-river-tiles.mjs.
+export const RIVER_SPRITES = {
+  "small-end": "rivers/river-small-end.png",
+  "small-straight": "rivers/river-small-straight.png",
+  "small-curveC": "rivers/river-small-curveC.png",
+  "small-curveCC": "rivers/river-small-curveCC.png",
+  "wide-end": "rivers/river-wide-end.png",
+  "wide-straight": "rivers/river-wide-straight.png",
+  "wide-curveC": "rivers/river-wide-curveC.png",
+  "wide-curveCC": "rivers/river-wide-curveCC.png",
+  "wide-bridge": "rivers/river-wide-bridge.png",
+};
+
 export const SPRITE_FILES = [
   ...Object.values(CASTLE_SPRITES),
   ...Object.values(CASTLE_ALT_SPRITES),
@@ -71,4 +84,5 @@ export const SPRITE_FILES = [
   ...Object.values(RESOURCE_CONSTELLATION_SPRITES),
   ...Object.values(RESOURCE_CREST_SPRITES),
   ...Object.values(CARAVAN_SPRITES),
+  ...Object.values(RIVER_SPRITES),
 ];
