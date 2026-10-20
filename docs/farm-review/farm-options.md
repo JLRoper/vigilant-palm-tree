@@ -56,7 +56,10 @@ Geometry contract:
 
 ## 3. The five styles
 
-All five ship together. The one a farm draws is picked per cell from
+Five procedural styles plus two model-refined variants (`farmWheatAI`, `farmOrchardAI`,
+edited from the wheat and orchard sprites through OpenRouter with a 2:1 guide and an
+edge-fit — see `docs/sprite-pipelines.md` §4.1) ship together. The one a farm draws is
+picked per cell from
 `farmPlotVariantAt(settlementName, gx, gy)` (FNV-1a hash over the cell → one of five), so a
 settlement gets a stable mix and a reload never reshuffles it.
 

@@ -9,7 +9,7 @@
 // building-classic-*/building-blocky-*/*-raw/*-variant* files in that folder
 // are deliberately not registered.
 
-/** Sprite key -> on-disk filename, one entry per building-pixel-*.png (114 files). */
+/** Sprite key -> on-disk filename, one entry per building-pixel-*.png (116 files). */
 export const BUILDING_SPRITE_FILES: Readonly<Record<string, string>> = {
   "pixel-alt.farmField.1": "building-pixel-farmField-1-alt.png",
   "pixel.apartment.1": "building-pixel-apartment-1.png",
@@ -38,10 +38,12 @@ export const BUILDING_SPRITE_FILES: Readonly<Record<string, string>> = {
   "pixel.eyrie.3": "building-pixel-eyrie-3.png",
   "pixel.farmField.1": "building-pixel-farmField-1.png",
   "pixel.farmOrchard.1": "building-pixel-farmOrchard-1.png",
+  "pixel.farmOrchardAI.1": "building-pixel-farmOrchardAI-1.png",
   "pixel.farmPaddock.1": "building-pixel-farmPaddock-1.png",
   "pixel.farmVeg.1": "building-pixel-farmVeg-1.png",
   "pixel.farmVines.1": "building-pixel-farmVines-1.png",
   "pixel.farmWheat.1": "building-pixel-farmWheat-1.png",
+  "pixel.farmWheatAI.1": "building-pixel-farmWheatAI-1.png",
   "pixel.farmhouse.1": "building-pixel-farmhouse-1.png",
   "pixel.farmhouse.2": "building-pixel-farmhouse-2.png",
   "pixel.farmhouse.3": "building-pixel-farmhouse-3.png",
