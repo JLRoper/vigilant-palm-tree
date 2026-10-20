@@ -1140,10 +1140,12 @@ function drawCitySpriteInto(
 
 export function paintCityBuilding(ctx: CanvasRenderingContext2D, node: CityBuildingNode, deps: Paint2DDep): void {
   const sprite = node.constructionStage
-    ? deps.sprite.resolveSprite(`building.pixel.underConstruction.${node.constructionStage}`)
-    : node.farmStyle !== undefined
-      ? deps.sprite.resolveSprite(`building.${node.farmStyle}.${node.buildingKind}.${node.level}`)
-      : deps.sprite.resolveSpriteForBuilding(node.buildingKind, node.level);
+      ? deps.sprite.resolveSprite(`building.pixel.underConstruction.${node.constructionStage}`)
+      : node.farmSpriteKey !== undefined
+        ? deps.sprite.resolveSprite(node.farmSpriteKey)
+        : node.farmStyle !== undefined
+          ? deps.sprite.resolveSprite(`building.${node.farmStyle}.${node.buildingKind}.${node.level}`)
+          : deps.sprite.resolveSpriteForBuilding(node.buildingKind, node.level);
   drawCitySpriteInto(
     ctx,
     sprite,

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { farmFieldStyleAt, pickStyleForBuilding, randomFarmFieldStyle } from "@heroes/engine";
+import { FARM_PLOT_VARIANTS, farmFieldStyleAt, farmPlotVariantAt, pickStyleForBuilding, randomFarmFieldStyle } from "@heroes/engine";
 
 function isFarmStyle(style: unknown): style is "pixel" | "pixel-alt" {
   return style === "pixel" || style === "pixel-alt";
@@ -44,3 +44,18 @@ test("randomFarmFieldStyle only returns the two farm styles", () => {
   }
   assert.ok(seen.size === 2, "both styles appear over 100 rolls");
 });
+
+test("farmPlotVariantAt is deterministic, returns a committed variant, and spreads across all five", () => {
+  const allowed = new Set<string>(FARM_PLOT_VARIANTS);
+  for (const [seed, gx, gy] of [["Home", 0, 2], ["Home", 3, 0], ["Keep-1", 1, 3]] as const) {
+    const variant = farmPlotVariantAt(seed, gx, gy);
+    assert.ok(allowed.has(variant), `${variant} is a committed farm plot style`);
+    assert.equal(farmPlotVariantAt(seed, gx, gy), variant, "stable across calls");
+  }
+  const seen = new Set<string>();
+  for (let gx = 0; gx < 10; gx++) {
+    for (let gy = 0; gy < 10; gy++) seen.add(farmPlotVariantAt("Keep-1", gx, gy));
+  }
+  assert.equal(seen.size, FARM_PLOT_VARIANTS.length, "every variant appears over a 10x10 spread");
+});
+
