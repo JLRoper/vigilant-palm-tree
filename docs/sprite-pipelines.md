@@ -58,6 +58,7 @@ Files live under `src/resources/` (`tools/sprites/manifest.mjs:1` names the root
 | `resources/units/horse/commander-{1..14}/` | `<variant>-<dir>[-2].png` — glob-registered, 14 variants |
 | `resources/units/icons/` | `<unitTypeId>.png` busts — hand-wired in `src/data/unitImages.ts` |
 | `resources/factions/` | `faction-banner-<id>.png` — glob-registered |
+| `resources/rivers/` | `river-{small,wide}-{end,straight,curveC,curveCC}.png` + `river-wide-bridge.png` — the map-gen v5 river overlay tiles, baked by `tools/sprites/gen-river-tiles.mjs` and registered via `riverKey()`/`RIVER_DESCRIPTORS` |
 | `resources/skybox/` | `cityView-background-variant<n>-layer<m>.png` |
 
 `SpriteKey` (`src/render/assetDescriptors.ts:~150`) is the union of ten template
