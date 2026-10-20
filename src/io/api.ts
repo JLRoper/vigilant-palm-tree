@@ -1,6 +1,6 @@
 import type { Terrain } from "../map/terrain";
 import type { ResourceType } from "../map/resourceTiles";
-import type { MapSize } from "../map/gameMap";
+import type { MapSize, MapGenVersion } from "../map/gameMap";
 import type {
   ClientTelemetryReport,
   FactionId,
@@ -49,7 +49,7 @@ export type GameLobbyState = {
   // cleared when the battle resolves / the offer goes stale. Optional --
   // every pre-offer row simply lacks the key. Mirrors server LobbyState.
   pendingBattle?: { attackerId: string; defenderId: string; since: number } | null;
-  mapGenVersion?: 1 | 2 | 3 | 4;
+  mapGenVersion?: MapGenVersion;
   // Uncharted mode flag written at creation; absent on legacy games.
   uncharted?: boolean;
 };

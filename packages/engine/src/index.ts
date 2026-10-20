@@ -9,6 +9,7 @@ export * from "./horseVariants";
 export * from "./buildingSpriteCoverage";
 export * from "./map/gameMap";
 export * from "./map/terrain";
+export * from "./map/rivers";
 export * from "./map/resourceTiles";
 export * from "./map/castlePlacement";
 export * from "./playerColors";

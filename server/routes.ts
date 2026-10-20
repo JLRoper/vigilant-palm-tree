@@ -129,7 +129,7 @@ export interface LobbyState {
   // legacyAutoTrade. Written on every new game (explicit boolean), read by
   // server/app/commandHandler.ts to gate per-command reveal merging.
   uncharted?: boolean;
-  mapGenVersion?: 1 | 2 | 3 | 4;
+  mapGenVersion?: MapGenVersion;
 }
 
 export async function generateAndInsertTiles(

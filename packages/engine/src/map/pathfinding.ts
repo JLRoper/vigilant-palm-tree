@@ -1,6 +1,5 @@
 import type { Axial } from "@heroes/contracts";
 import type { GameMap } from "./gameMap";
-import { TERRAIN_COST } from "./terrain";
 import { NEIGHBOR_DIRS } from "./directions";
 
 export { NEIGHBOR_DIRS };
@@ -266,9 +265,8 @@ function findPathUnbounded(map: GameMap, start: Axial, goal: Axial, blockedHexes
 export function computePathCost(map: GameMap, path: readonly Axial[]): number {
   let cost = 0;
   for (let i = 1; i < path.length; i++) {
-    const t = map.get(path[i].q, path[i].r);
-    if (t) cost += TERRAIN_COST[t];
-    else cost += Infinity;
+    const c = map.cost(path[i].q, path[i].r);
+    cost += Number.isFinite(c) ? c : Infinity;
   }
   return Number.isFinite(cost) ? cost : 0;
 }

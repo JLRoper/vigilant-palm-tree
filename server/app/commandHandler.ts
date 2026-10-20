@@ -57,7 +57,7 @@ transferGold,
   visionKeysAroundPoints,
   mergePlayerReveal,
 } from "@heroes/engine";
-import type { EngineCtx, HydratableGameRow, UnitType, BattleResult, MapSize, PendingBattleMarker } from "@heroes/engine";
+import type { EngineCtx, HydratableGameRow, UnitType, BattleResult, MapSize, MapGenVersion, PendingBattleMarker } from "@heroes/engine";
 import { hexDistance } from "@heroes/contracts";
 import type {
   CharterState,
@@ -111,7 +111,7 @@ export interface GameLobbyFlags {
   // by the battle cases below and cleared when the battle resolves or the
   // offer goes stale. Optional -- every pre-offer row simply lacks the key.
   pendingBattle?: PendingBattleMarker | null;
-  mapGenVersion?: 1 | 2 | 3 | 4;
+  mapGenVersion?: MapGenVersion;
   // Uncharted mode (fog from the start): written by POST /games, read once
   // near the top of handleCommand to gate the per-command reveal merges.
   uncharted?: boolean;

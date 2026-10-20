@@ -21,12 +21,13 @@ The actors on the map. Heroes move tile-to-tile, claim [settlements](./settlemen
 - Click a tile to plan a path. [A* pathfinding](../src/map/pathfinding.ts) computes the route.
 - Path renders as a yellow line with dots on each step.
 - Hero tweens between tiles at a configurable duration.
-- Movement points: **7 per round**, consumed by terrain costs.
+- Movement points: **7 per round**, consumed by terrain costs. `startMove` validates the cost against `movementRemaining`; the cost of entering a tile comes from `GameMap.cost`, which folds in the river overlay layer (see [map.md](./map.md#rivers-map-gen-v5-overlay-layer)): a small river costs a full day (7 — the entire round budget), and a wide river is impassable except at a baked bridge (cost 1).
 - Tile costs (see [map.md](./map.md)):
   - Grass = 1
   - Dirt = 1.2
   - Forest = 1.6
   - Water = impassable
+  - Small river = 7 (full day), wide river = impassable (bridges = 1)
 
 ## Chartering (✅ implemented)
 
