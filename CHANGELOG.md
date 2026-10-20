@@ -39,6 +39,8 @@ hooks) and `hotkeysModal`, the `escape` option on the dialog dismiss options, `U
 view's Escape branches naming each panel, and the hand-built modal backdrop in `confirmDialog`/`leaveBehind` (both now use
 `openDialog`). Creation boilerplate collapsed into `createPanel({ key, defaultPosition, ... })`.
 
+The toolbar's gear dropdown closes on Escape as well; it is a menu rather than a panel, so it keeps its own listener.
+
 ## [0.24.0] - 2026-10-20
 
 The City Design panel is a normal floating menu, and every floating panel/menu can now be resized.

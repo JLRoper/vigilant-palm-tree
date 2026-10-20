@@ -390,6 +390,13 @@ export class Toolbar {
     document.addEventListener("click", (e) => {
       if (!menuWrap.contains(e.target as Node)) closeDropdown();
     });
+    // A dropdown is a menu, not a panel: it has no title bar and no manager
+    // entry, so it closes itself. panelManager runs first in the capture phase,
+    // so an open panel still takes the keystroke; this only sees Escape when
+    // nothing above did.
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeDropdown();
+    });
 
     const makeMenuItem = (label: string): HTMLButtonElement => {
       const item = document.createElement("button");
