@@ -193,7 +193,7 @@ function buildSpriteResolver(provider: SpriteProvider): Paint2DSpriteResolver {
       const key = districtSpriteKey(variant, tier);
       return narrowResolvedSprite(provider.resolve(key));
     },
-    resolveRiverSprite(size: "small" | "wide", mask: "end" | "straight" | "curveC" | "curveCC" | "bridge"): ResolvedSprite | undefined {
+    resolveRiverSprite(size: "small" | "wide", mask: "end" | "straight" | "curveC" | "curveCC" | "curve120C" | "curve120CC" | "bridge"): ResolvedSprite | undefined {
       return narrowResolvedSprite(provider.resolve(riverKey(size, mask)));
     },
     resolveSpriteForCityPerson(): ResolvedSprite | undefined {

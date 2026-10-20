@@ -14,10 +14,14 @@ import riverSmallEnd from "../resources/rivers/river-small-end.png?url";
 import riverSmallStraight from "../resources/rivers/river-small-straight.png?url";
 import riverSmallCurveC from "../resources/rivers/river-small-curveC.png?url";
 import riverSmallCurveCC from "../resources/rivers/river-small-curveCC.png?url";
+import riverSmallCurve120C from "../resources/rivers/river-small-curve120C.png?url";
+import riverSmallCurve120CC from "../resources/rivers/river-small-curve120CC.png?url";
 import riverWideEnd from "../resources/rivers/river-wide-end.png?url";
 import riverWideStraight from "../resources/rivers/river-wide-straight.png?url";
 import riverWideCurveC from "../resources/rivers/river-wide-curveC.png?url";
 import riverWideCurveCC from "../resources/rivers/river-wide-curveCC.png?url";
+import riverWideCurve120C from "../resources/rivers/river-wide-curve120C.png?url";
+import riverWideCurve120CC from "../resources/rivers/river-wide-curve120CC.png?url";
 import riverWideBridge from "../resources/rivers/river-wide-bridge.png?url";
 import heroBannerBubbly from "../resources/hero-banner-bubbly.png?url";
 import heroBannerShadow from "../resources/hero-banner-shadow.png?url";
@@ -112,7 +116,7 @@ export type DistrictVariant = "standard" | "farm";
 export type DistrictTier = 1 | 2 | 3;
 export type SettlementFullness = 1 | 2 | 3 | 4 | 5;
 export type RiverSize = "small" | "wide";
-export type RiverMask = "end" | "straight" | "curveC" | "curveCC" | "bridge";
+export type RiverMask = "end" | "straight" | "curveC" | "curveCC" | "curve120C" | "curve120CC" | "bridge";
 
 export type SpriteKey =
   | `castle.${CastleLevel}`
@@ -877,18 +881,24 @@ export function riverKey(size: RiverSize, mask: RiverMask): SpriteKey {
 
 // Rivers are an overlay: the water core is near-opaque, the banks fade to
 // alpha so the biome underneath tints them. Baked once per shape (end /
-// straight / curveC / curveCC, with a bridge for wide rivers) and rotated at
-// draw time -- see tools/sprites/gen-river-tiles.mjs.
+// straight / curveC / curveCC / curve120C / curve120CC, with a bridge for
+// wide rivers) and rotated at draw time -- see tools/sprites/gen-river-tiles.mjs.
+// The 120-degree bends cover the third pair separation the generator can
+// produce; every two-neighbour cell resolves to exactly one of the six.
 export const RIVER_DESCRIPTORS: Record<`river.${RiverSize}.${RiverMask}`, SpriteDescriptor> = {
   "river.small.end": { key: "river.small.end", url: riverSmallEnd, anchor: "center", sizing: { kind: "abs", size: 64 } },
   "river.small.straight": { key: "river.small.straight", url: riverSmallStraight, anchor: "center", sizing: { kind: "abs", size: 64 } },
   "river.small.curveC": { key: "river.small.curveC", url: riverSmallCurveC, anchor: "center", sizing: { kind: "abs", size: 64 } },
   "river.small.curveCC": { key: "river.small.curveCC", url: riverSmallCurveCC, anchor: "center", sizing: { kind: "abs", size: 64 } },
+  "river.small.curve120C": { key: "river.small.curve120C", url: riverSmallCurve120C, anchor: "center", sizing: { kind: "abs", size: 64 } },
+  "river.small.curve120CC": { key: "river.small.curve120CC", url: riverSmallCurve120CC, anchor: "center", sizing: { kind: "abs", size: 64 } },
   "river.small.bridge": { key: "river.small.bridge", url: riverSmallStraight, anchor: "center", sizing: { kind: "abs", size: 64 } },
   "river.wide.end": { key: "river.wide.end", url: riverWideEnd, anchor: "center", sizing: { kind: "abs", size: 64 } },
   "river.wide.straight": { key: "river.wide.straight", url: riverWideStraight, anchor: "center", sizing: { kind: "abs", size: 64 } },
   "river.wide.curveC": { key: "river.wide.curveC", url: riverWideCurveC, anchor: "center", sizing: { kind: "abs", size: 64 } },
   "river.wide.curveCC": { key: "river.wide.curveCC", url: riverWideCurveCC, anchor: "center", sizing: { kind: "abs", size: 64 } },
+  "river.wide.curve120C": { key: "river.wide.curve120C", url: riverWideCurve120C, anchor: "center", sizing: { kind: "abs", size: 64 } },
+  "river.wide.curve120CC": { key: "river.wide.curve120CC", url: riverWideCurve120CC, anchor: "center", sizing: { kind: "abs", size: 64 } },
   "river.wide.bridge": { key: "river.wide.bridge", url: riverWideBridge, anchor: "center", sizing: { kind: "abs", size: 64 } },
 };
 

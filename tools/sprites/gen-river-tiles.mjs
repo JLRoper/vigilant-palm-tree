@@ -150,6 +150,8 @@ const EDGE_E = [CENTER + EDGE, CENTER];
 const EDGE_W = [CENTER - EDGE, CENTER];
 const EDGE_CW = [CENTER + EDGE * 0.5, CENTER + EDGE * Math.sin(Math.PI / 3)];
 const EDGE_CCW = [CENTER + EDGE * 0.5, CENTER - EDGE * Math.sin(Math.PI / 3)];
+const EDGE_SW = [CENTER - EDGE * 0.5, CENTER + EDGE * Math.sin(Math.PI / 3)];
+const EDGE_NW = [CENTER - EDGE * 0.5, CENTER - EDGE * Math.sin(Math.PI / 3)];
 
 function meander(a, b, wiggle) {
   const dx = b[0] - a[0];
@@ -175,7 +177,11 @@ function template(name, size) {
         ? [[Math.round(CENTER + EDGE), CENTER], [CENTER + 14, CENTER + 4], [Math.floor(EDGE_CW[0]), Math.floor(EDGE_CW[1])]]
         : name === "curveCC"
           ? [[Math.round(CENTER + EDGE), CENTER], [CENTER + 14, CENTER - 4], [Math.floor(EDGE_CCW[0]), Math.floor(EDGE_CCW[1])]]
-          : [[CENTER + 16, CENTER], [CENTER + 9, CENTER], [Math.round(CENTER + EDGE), CENTER]];
+          : name === "curve120C"
+            ? [[Math.round(CENTER + EDGE), CENTER], [51, 56], [Math.floor(EDGE_SW[0]), Math.floor(EDGE_SW[1])]]
+            : name === "curve120CC"
+              ? [[Math.round(CENTER + EDGE), CENTER], [51, 32], [Math.floor(EDGE_NW[0]), Math.floor(EDGE_NW[1])]]
+              : [[CENTER + 16, CENTER], [CENTER + 9, CENTER], [Math.round(CENTER + EDGE), CENTER]];
   const buf = makeBuf(LOGICAL * S, LOGICAL * S);
   ribbon(buf, pts, r);
   if (name === "end") {
@@ -320,7 +326,7 @@ function encode(buf) {
 
 // ---------- run ----------
 
-const MASKS = ["end", "straight", "curveC", "curveCC"];
+const MASKS = ["end", "straight", "curveC", "curveCC", "curve120C", "curve120CC"];
 const checkOnly = process.argv.slice(2).includes("--check");
 let drift = 0;
 

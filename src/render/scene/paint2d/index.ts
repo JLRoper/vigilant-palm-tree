@@ -378,11 +378,14 @@ const RIVER_EDGE_DIST = HEX_SIZE * (Math.sqrt(3) / 2);
 const RIVER_ART_SIZE = 88;
 
 export interface RiverMaskInfo {
-  template: "end" | "straight" | "curveC" | "curveCC";
+  template: "end" | "straight" | "curveC" | "curveCC" | "curve120C" | "curve120CC";
   rotationDeg: number;
 }
 
-/** Map a six-bit neighbour mask to the baked tile shape + its rotation. */
+/** Map a six-bit neighbour mask to the baked tile shape + its rotation.
+ * Two-exit masks resolve by their directed separation: opposite = straight,
+ * 60 degrees = curveC (down-wind) / curveCC (up-wind), and 120 degrees =
+ * curve120C / curve120CC. Every pair is covered. */
 export function riverMaskInfo(mask: number): RiverMaskInfo {
   const dirs: number[] = [];
   for (let d = 0; d < 6; d++) if (mask & (1 << d)) dirs.push(d);
@@ -391,9 +394,13 @@ export function riverMaskInfo(mask: number): RiverMaskInfo {
   if (dirs.length === 1) return { template: "end", rotationDeg: RIVER_DIR_ANGLE_DEG[a] };
   const b = dirs[1];
   const diff = (RIVER_DIR_ANGLE_DEG[b] - RIVER_DIR_ANGLE_DEG[a] + 360) % 360;
-  if (diff === 180) return { template: "straight", rotationDeg: RIVER_DIR_ANGLE_DEG[a] };
-  if (diff === 60) return { template: "curveC", rotationDeg: RIVER_DIR_ANGLE_DEG[a] };
-  return { template: "curveCC", rotationDeg: RIVER_DIR_ANGLE_DEG[a] };
+  const template =
+    diff === 180 ? ("straight" as const)
+      : diff === 60 ? ("curveC" as const)
+        : diff === 300 ? ("curveCC" as const)
+          : diff === 120 ? ("curve120C" as const)
+            : ("curve120CC" as const);
+  return { template, rotationDeg: RIVER_DIR_ANGLE_DEG[a] };
 }
 
 function paintRiverBandFallback(
@@ -442,7 +449,7 @@ function paintRiverBandFallback(
 export function paintRiverHex(ctx: CanvasRenderingContext2D, node: RiverHexNode, deps: Paint2DDep): void {
   const info = riverMaskInfo(node.mask);
   const mask = node.bridge && node.size === "wide" ? "bridge" : info.template;
-  const r = deps.sprite.resolveRiverSprite?.(node.size, mask as "end" | "straight" | "curveC" | "curveCC" | "bridge");
+  const r = deps.sprite.resolveRiverSprite?.(node.size, mask as "end" | "straight" | "curveC" | "curveCC" | "curve120C" | "curve120CC" | "bridge");
   if (r && r.ready) {
     ctx.save();
     ctx.imageSmoothingEnabled = false;

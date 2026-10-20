@@ -63,7 +63,7 @@ const RIVER_MASK_ANGLE_DEG = [0, 300, 240, 180, 120, 60];
  * extend their channel through the hex toward an adjacent water/swamp body,
  * so the river visually pours into its sink instead of stubbing out one
  * tile short of it. The exit keeps to the baked art shapes (opposite =
- * straight, 60 degrees = curve). */
+ * straight, 60 degrees = curve, 120 degrees = the sharp bend). */
 export function riverMaskAt(map: GameMap, q: number, r: number): number {
   let mask = 0;
   let bits = 0;
@@ -76,6 +76,7 @@ export function riverMaskAt(map: GameMap, q: number, r: number): number {
   if (bits !== 1) return mask;
   const riverDir = 0 | Math.log2(mask);
   let curve = -1;
+  let sharp = -1;
   for (let d = 0; d < 6; d++) {
     const t = map.get(q + NEIGHBOR_DIRS[d].q, r + NEIGHBOR_DIRS[d].r);
     if (t !== "water" && t !== "swamp") continue;
@@ -83,8 +84,10 @@ export function riverMaskAt(map: GameMap, q: number, r: number): number {
     da = Math.min(da, 360 - da);
     if (da === 180) return mask | (1 << d);
     if (da === 60 && curve < 0) curve = d;
+    if (da === 120 && sharp < 0) sharp = d;
   }
   if (curve >= 0) return mask | (1 << curve);
+  if (sharp >= 0) return mask | (1 << sharp);
   return mask;
 }
 

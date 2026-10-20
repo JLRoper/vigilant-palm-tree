@@ -18,6 +18,10 @@ test("riverMaskInfo maps the six bit masks to the baked templates", () => {
   // E+SE bend (diff 60) -> curveC, E+NE bend (diff 300) -> curveCC
   assert.equal(riverMaskInfo((1 << 0) | (1 << 5)).template, "curveC");
   assert.equal(riverMaskInfo((1 << 0) | (1 << 1)).template, "curveCC");
+  // 120-degree pair (diff 120/240) -> the sharp bend templates
+  assert.equal(riverMaskInfo((1 << 0) | (1 << 4)).template, "curve120C");
+  assert.equal(riverMaskInfo((1 << 0) | (1 << 2)).template, "curve120CC");
+  assert.deepEqual(riverMaskInfo((1 << 1) | (1 << 3)), { template: "curve120CC", rotationDeg: 300 });
   assert.equal(riverMaskInfo(0).template, "end");
 });
 

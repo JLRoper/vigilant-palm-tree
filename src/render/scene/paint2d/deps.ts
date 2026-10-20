@@ -82,7 +82,7 @@ export interface Paint2DSpriteResolver {
   resolveSpriteForCaravan?(payloadKind?: "resource" | "gold", direction?: HeroDirection): ResolvedSprite | undefined;
   resolveSpriteForDistrict?(variant: "standard" | "farm", tier: 1 | 2 | 3): ResolvedSprite | undefined;
   /** River overlay tiles (map-gen v5): the water band for a given size and mask shape, rotated at draw time. Optional so test fixtures keep compiling; the painter falls back to a procedural band. */
-  resolveRiverSprite?(size: "small" | "wide", mask: "end" | "straight" | "curveC" | "curveCC" | "bridge"): ResolvedSprite | undefined;
+  resolveRiverSprite?(size: "small" | "wide", mask: "end" | "straight" | "curveC" | "curveCC" | "curve120C" | "curve120CC" | "bridge"): ResolvedSprite | undefined;
   /** City-view worker person: the peasant idle unit sprite, loaded on demand from the main provider (not the arena-only one). Optional so test fixtures without the wiring keep compiling; painters fall back to resolveSpriteForUnit. */
   resolveSpriteForCityPerson?(): ResolvedSprite | undefined;
   // Escape hatch for tests/fixtures that already have a key in hand. Production
