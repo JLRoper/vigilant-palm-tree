@@ -23,6 +23,12 @@
 //   --kind <sprite|banner>  what to generate (default: sprite)
 //   --id <id>               variant id used in output file names (required)
 //   --dirs <list>           comma list of directions, default n,ne,e,se,s,sw,w,nw
+//   --suffix <text>         appended to each output name (e.g. -2 for a run frame)
+//   --keep-facing           the reference is already at the target heading: keep it
+//                           verbatim instead of re-posing from the nearest cardinal
+//   --riderless             the subject has no rider; use mount-only facing wording
+//   --pose-ref <dir>        heading of the reference image when it is not the
+//                           default nearest cardinal (n for diagonals, s for front)
 //   --ref <path>            reference PNG (single-direction run, or the banner ref)
 //   --ref-dir <dir>         directory holding <ref-prefix>-<dir>.png per direction
 //   --ref-prefix <prefix>   file prefix inside --ref-dir (default: the variant id)
@@ -65,6 +71,10 @@ const flags = {
   kind: "sprite",
   id: null,
   dirs: ALL_DIRS,
+  suffix: "",
+  keepFacing: false,
+  riderless: false,
+  poseRef: null,
   ref: null,
   refDir: null,
   refPrefix: null,
@@ -87,6 +97,10 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === "--kind") flags.kind = argv[++i];
   else if (a === "--id") flags.id = argv[++i];
   else if (a === "--dirs") flags.dirs = argv[++i].split(",").map((d) => d.trim()).filter(Boolean);
+  else if (a === "--suffix") flags.suffix = argv[++i];
+  else if (a === "--keep-facing") flags.keepFacing = true;
+  else if (a === "--riderless") flags.riderless = true;
+  else if (a === "--pose-ref") flags.poseRef = argv[++i];
   else if (a === "--ref") flags.ref = argv[++i];
   else if (a === "--ref-dir") flags.refDir = argv[++i];
   else if (a === "--ref-prefix") flags.refPrefix = argv[++i];
@@ -123,6 +137,10 @@ if (flags.dirs.some((d) => !ALL_DIRS.includes(d))) {
   console.error(`--dirs accepts: ${ALL_DIRS.join(",")}`);
   process.exit(1);
 }
+if (flags.poseRef && !ALL_DIRS.includes(flags.poseRef)) {
+  console.error(`--pose-ref accepts: ${ALL_DIRS.join(",")}`);
+  process.exit(1);
+}
 
 const masterDir = flags.masterDir
   ? path.resolve(flags.masterDir)
@@ -150,19 +168,38 @@ const FACING = {
   nw: "a three-quarter rear-left view, the horse and rider heading toward the top-left corner of the image (northwest), showing the horse's right flank and the rider's back and right shoulder",
 };
 
+// Riderless mounts (the two unicorns) get their own wording: the shared
+// facing text above says "horse and rider", which would invite a rider.
+const RIDERLESS_FACING = {
+  n: "seen from directly behind, the unicorn heading away from the viewer toward the top of the image (north)",
+  ne: "a three-quarter rear-right view, the unicorn heading toward the top-right corner of the image (northeast), showing its left flank and hindquarters",
+  e: "a full right-side profile, the unicorn heading to the right edge of the image (east)",
+  se: "a three-quarter front-right view, the unicorn heading toward the bottom-right corner of the image (southeast), showing its chest and left flank",
+  s: "seen from the front, the unicorn heading toward the viewer at the bottom of the image (south)",
+  sw: "a three-quarter front-left view, the unicorn heading toward the bottom-left corner of the image (southwest), showing its chest and right flank",
+  w: "a full left-side profile, the unicorn heading to the left edge of the image (west)",
+  nw: "a three-quarter rear-left view, the unicorn heading toward the top-left corner of the image (northwest), showing its right flank and hindquarters",
+};
+
+function facingFor(dir) {
+  return flags.riderless ? RIDERLESS_FACING[dir] : FACING[dir];
+}
+
 // Diagonal directions repaint the nearest cardinal (a rear view cannot be
 // turned into a front view by prompt alone), cardinal directions repaint
 // themselves.
 const POSE_REFERENCE = { n: "n", ne: "n", e: "e", se: "s", s: "s", sw: "s", w: "w", nw: "n" };
 
 function dirPrompt(dir) {
-  const poseRef = POSE_REFERENCE[dir];
-  const turning = poseRef === dir
-    ? `Keep the figure facing exactly as in the reference: ${FACING[dir]}.`
-    : `The reference is a ${FACING[poseRef]} view. Repose this same figure as ${FACING[dir]}, the same character and horse turned to that angle as an isometric game sprite would be — keep the body proportions, gait phase and silhouette of the reference.`;
+  const poseRef = flags.poseRef ?? POSE_REFERENCE[dir];
+  const facing = facingFor(dir);
+  const poseFacing = facingFor(poseRef);
+  const turning = flags.keepFacing || poseRef === dir
+    ? `Keep the figure facing exactly as in the reference: ${facing}.`
+    : `The reference is a ${poseFacing} view. Repose this same figure as ${facing}, the same character and horse turned to that angle as an isometric game sprite would be — keep the body proportions, gait phase and silhouette of the reference.`;
   return promptTemplate
     .replaceAll("{{DIR}}", dir)
-    .replaceAll("{{FACING}}", FACING[dir])
+    .replaceAll("{{FACING}}", facing)
     .replaceAll("{{POSE}}", turning);
 }
 
@@ -349,7 +386,7 @@ function planSprites() {
     const refFile = flags.ref
       ? path.resolve(flags.ref)
       : path.join(path.resolve(flags.refDir), `${flags.refPrefix ?? flags.id}-${POSE_REFERENCE[dir]}.png`);
-    const outFile = path.join(outDir, `${flags.id}-${dir}.png`);
+    const outFile = path.join(outDir, `${flags.id}-${dir}${flags.suffix}.png`);
     plan.push({ dir, refFile, outFile });
   }
   return plan;
@@ -404,7 +441,7 @@ for (const job of planSprites()) {
   process.stdout.write(`[${job.dir}] generating ... `);
   try {
     const raw = await generate(dirPrompt(job.dir), job.refFile);
-    const masterFile = path.join(masterDir, `${flags.id}-${job.dir}-master.png`);
+    const masterFile = path.join(masterDir, `${flags.id}-${job.dir}${flags.suffix}-master.png`);
     writeFileSync(masterFile, raw);
     const decoded = PNG.sync.read(raw);
     const keyed = keyBackground(pngFromRaw(decoded.data, decoded.width, decoded.height), flags.tolerance);

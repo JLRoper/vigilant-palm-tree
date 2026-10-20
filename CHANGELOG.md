@@ -10,6 +10,12 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.22.1] - 2026-10-20
+
+- **Light unicorn rework:** the old 64px `bubbly` slot is now the dark unicorn's radiant counterpart — a 512px pearl-white unicorn with a gold horn, a silver-gold mane and a dawn roster banner — and its recruit label reads **Light Unicorn**. Six adventure-map headings plus gallop frames.
+- **Dark unicorn completes its turnaround:** `ne/nw/se/sw` were generated from the east/west profiles instead of re-posed from the rear/front views (which produced a mirrored `nw` and two straight-on duplicates), so both unicorns now face every map heading rather than falling back to a cardinal.
+- `gemini-hero-sprite.mjs` gained `--riderless` (mount-only facing wording), `--pose-ref` (the reference's actual heading for a diagonal repaint) and `--suffix` (run-frame output names); `test/render/unicornArt.test.ts` pins the two unicorns' 512px base/run-frame file sets on disk.
+
 ## [0.22.0] - 2026-10-19
 
 - **Dense forest biome** (new `denseForest` terrain, map-gen **v4**): a rarer, **impassable** second forest — `TERRAIN_COST` is `Infinity`, so heroes path around it exactly like mountains and water. It is generated last, seeded on a non-forest neighbour of a forest tile and grown with a 0.75 bias toward frontier tiles that still touch normal forest, so it usually borders the forest it grew out of while its outer rim still meets the surrounding biomes. `DENSE_FOREST_FRACTION` is 0.06 against forest's 0.15; it never overwrites forest, water or mountain and never carries a resource deposit.

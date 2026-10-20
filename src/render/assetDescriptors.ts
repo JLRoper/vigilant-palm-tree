@@ -560,7 +560,7 @@ for (const entry of HORSE_VARIANT_REGISTRY) {
     HORSE_VARIANT_IMAGES[entry.id],
     "bottom",
     { kind: "fitHeight", hexSizeMul: 1.8 },
-    entry.id === "bubbly" ? 64 : 512
+    512
   );
 }
 

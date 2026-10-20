@@ -1,5 +1,5 @@
 export const HORSE_VARIANT_REGISTRY = [
-  { id: "bubbly", label: "Bubbly", commanderDir: 2 },
+  { id: "bubbly", label: "Light Unicorn", commanderDir: 2 },
   { id: "shadow", label: "Shadow Knight", commanderDir: 3 },
   { id: "paladin", label: "Paladin", commanderDir: 4 },
   { id: "ranger", label: "Ranger", commanderDir: 5 },
