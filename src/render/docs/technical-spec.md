@@ -541,6 +541,16 @@ Colors:
 
 Line width is controlled by `settings().territoryBorderWidth` (clamped 1.5–6), reached through `Paint2DDep.getTerritoryBorderWidth()`.
 
+#### 2.5.4 District Roads
+
+`settlementRoad` (`SettlementRoadNode`) is a purely decorative ground layer — no movement cost, nothing persisted. `buildAdventureScene()` emits one node per settlement whose districts have at least one visible edge, and emits it **before** the resource-icon, charter, territory, fog and entity layers, so the castle, the district sprite and any hero always paint over the road that leads to them.
+
+The layout itself is engine work, not scene work: `settlementRoadNetwork(settlement, map)` in `packages/engine/src/settlement/roadNetwork.ts` grows the network outward from the settlement's own tile in distance order (nearest district first — the order districts had to be founded in, since a district may only be founded touching the centre or an existing district), and gives each district the cheapest route to a node already in the network, the centre or a district that joined earlier. A district therefore links to the neighbour it grew out from and re-uses its trunk, so the network is a tree rooted at the settlement tile and an abandoned district's chain re-routes to whatever is now nearest. Routes are A* over the live map (`findPath`, rivers and impassability included), and the node carries `segments: Array<{ strands, from, to }>` — one entry per edge between two adjacent tiles, `strands` being the track count. The workforce mapping and the reason 0 staffed means no road at all: [`docs/settlements.md`](../../../../docs/settlements.md) § "Map visualisation".
+
+Because the layout is an A* per district over the real terrain, the builder caches it per settlement (`roadNetworkCache`) keyed on the tile chain, every building's staff count, and the map **object** — `getOrCreateGameMap` hands the same object back for the same seed/size/version, which is exactly the case where the answer cannot change. Fog gating mirrors the district nodes: the view's own settlement shows all of its roads, another seat's shows only edges whose BOTH ends are in vision, since half a road appearing out of the fog would leak where it leads.
+
+`paintSettlementRoad()` strokes `strands` thin parallel tracks per edge, offset along the edge's perpendicular and centred on the line between the two tile centres, in `ROAD_TRACK` `rgba(74, 62, 48, 0.42)` at 1px. The band tightens as the count grows (`ROAD_TRACK_GAP` 1.7px, capped at `ROAD_BAND_MAX` 17px) so a fully staffed district reads as a broad trodden lane rather than a stripe leaving the hex grid; a zero-length edge is skipped instead of stroked as a dot. Deliberately no outline and no highlight — a road that announced itself would fight the art it leads to. The committed `test/visual` scenes contain no districts, so this layer changes no baseline.
+
 ### 2.6 Minimap
 
 Drawn in the bottom-right corner of the screen after all world elements:

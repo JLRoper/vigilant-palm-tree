@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { CharterState } from "@heroes/contracts";
+import type { CharterState, DistrictState } from "@heroes/contracts";
 import { Hero } from "../../src/entities/hero";
 import { Castle } from "../../src/entities/settlement";
 import { GameMap, type TileRow } from "../../src/map/gameMap";
@@ -15,6 +15,7 @@ import type {
   CaravanMarkerNode,
   CastleNode,
   CharterOverlayNode,
+  DistrictNode,
   FogHexNode,
   HeroNode,
   HeroTrailNode,
@@ -22,6 +23,7 @@ import type {
   PathSegmentNode,
   ResourceIconNode,
   SelectedTileHighlightNode,
+  SettlementRoadNode,
   TerrainDecorationNode,
   TerrainHexNode,
   TerritoryOutlineEdgeNode,
@@ -921,4 +923,131 @@ test("GameMap constructor and GameMap.fromTiles populate placedResourceTiles mat
     { q: 1, r: 0, resource: "gold", amount: resourceAmountFor(1, 1, 0, "gold") },
     { q: 3, r: 1, resource: "iron", amount: resourceAmountFor(1, 3, 1, "iron") },
   ]);
+});
+
+// District roads in the adventure scene: one `settlementRoad` node per visible
+// settlement, carrying the visible slice of its network, emitted on the ground
+// before every overlay and entity layer.
+
+function barracksDistrict(q: number, r: number, crews: number[]): DistrictState {
+  return {
+    q,
+    r,
+    citySpots: [],
+    buildings: crews.map((workers, gx) => ({
+      gx,
+      gy: 0,
+      kind: "barracks" as const,
+      level: 1,
+      workers,
+    })),
+  };
+}
+
+function castleWithRoads(
+  ownerId: number | null,
+  q: number,
+  r: number,
+  districts: Record<string, DistrictState>,
+): Castle {
+  const castle = new Castle("s-roads", { q, r }, 1, ownerId, "Roads", 0, 0, {}, null);
+  castle.districts = districts;
+  return castle;
+}
+
+test("district roads: a staffed district emits one road node, on the ground below the castle", () => {
+  const map = makeGrassMap(9, 9);
+  const castle = castleWithRoads(0, 4, 4, { "5,4": barracksDistrict(5, 4, [1, 0]) });
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [castle],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  const roads = nodesOfKind<SettlementRoadNode>(nodes, "settlementRoad");
+  assert.equal(roads.length, 1);
+  assert.equal(roads[0].settlementId, castle.id);
+  assert.equal(roads[0].segments.length, 1, "one edge joins the district to the settlement");
+  assert.deepEqual(roads[0].segments[0].from, axialToPixel(4, 4));
+  assert.deepEqual(roads[0].segments[0].to, axialToPixel(5, 4));
+  assert.equal(roads[0].segments[0].strands, 3, "2 of 8 job slots staffed is 12.5% workforce, rounded to 3 roads");
+
+  assert.ok(
+    nodes.findIndex((n) => n.kind === "settlementRoad") < nodes.findIndex((n) => n.kind === "castle"),
+    "the road is laid before the castle that covers its end",
+  );
+});
+
+test("district roads: an unstaffed district lays no road at all", () => {
+  const map = makeGrassMap(9, 9);
+  const castle = castleWithRoads(0, 4, 4, { "5,4": barracksDistrict(5, 4, [0, 0]) });
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [castle],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+
+  assert.equal(nodesOfKind<SettlementRoadNode>(nodes, "settlementRoad").length, 0, "0 workforce is 0 roads");
+  assert.equal(nodesOfKind<DistrictNode>(nodes, "district").length, 1, "the district itself is still drawn");
+});
+
+test("district roads: a settlement with no districts emits no road node", () => {
+  const map = makeGrassMap(9, 9);
+  const castle = new Castle("s-roads", { q: 4, r: 4 }, 1, 0, "Roads", 0, 0, {}, null);
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [castle],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  assert.equal(nodesOfKind<SettlementRoadNode>(nodes, "settlementRoad").length, 0);
+});
+
+test("district roads: another seat's road stays hidden behind the fog", () => {
+  const map = makeGrassMap(9, 9);
+  const foreign = castleWithRoads(1, 4, 4, { "5,4": barracksDistrict(5, 4, [1, 0]) });
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [],
+    castles: [foreign],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  assert.equal(
+    nodesOfKind<SettlementRoadNode>(nodes, "settlementRoad").length,
+    0,
+    "half a road out of the fog would leak where it leads",
+  );
+});
+
+test("district roads: the cached layout follows the workforce, not the settlement id", () => {
+  const map = makeGrassMap(9, 9);
+  const districts = { "5,4": barracksDistrict(5, 4, [1, 0]) };
+  const castle = castleWithRoads(0, 4, 4, districts);
+  const build = (): SettlementRoadNode[] =>
+    nodesOfKind<SettlementRoadNode>(
+      buildAdventureScene({
+        map,
+        heroes: [],
+        castles: [castle],
+        path: [],
+        hover: null,
+        opts: makeRenderOptions({ viewPlayerId: 0 }),
+      }),
+      "settlementRoad",
+    );
+
+  assert.equal(build()[0].segments[0].strands, 3, "same map, same settlement id: the cached layout answers");
+
+  castle.districts = { "5,4": barracksDistrict(5, 4, [4, 4]) };
+  assert.equal(build()[0].segments[0].strands, 20, "a fully staffed district re-computes instead of serving the stale network");
 });

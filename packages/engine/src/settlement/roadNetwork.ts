@@ -1,0 +1,180 @@
+import type { Axial } from "@heroes/contracts";
+import { hexDistance } from "@heroes/contracts";
+import { buildingMaxWorkers } from "../buildingRegistry";
+import type { GameMap } from "../map/gameMap";
+import { computePathCost, findPath } from "../map/pathfinding";
+import {
+  districtHasBuildings,
+  settlementCenterOf,
+  type DistrictLike,
+  type SettlementDistrictLike,
+} from "./districtConnectivity";
+
+// District roads -- the adventure map's district road network, as pure data.
+//
+// The network GROWS outward from the settlement's own tile. Districts are
+// walked nearest-first, and each one joins the cheapest node already in the
+// network (the centre, or a district that joined earlier). Distance order is
+// the build order the map can still see: a district may only be built touching
+// the centre or an existing district of the same settlement, so districts are
+// inherently founded outward from the castle. Every district therefore ends up
+// with a route back to the settlement, later districts re-use the trunks their
+// neighbours already laid, and abandoning a district re-routes everything that
+// hung off it -- the "roads through it die off when a shorter path exists"
+// rule falls out of the recompute instead of needing its own pass.
+//
+// Road COUNT is the visualization: one track per WORKFORCE_PER_ROAD points of
+// the district's own workforce, so 0 staffed is no road at all, 15 is three
+// tracks and a fully staffed district is a wide band. Staffing reads off the
+// map as how worn the road is.
+//
+// Roads follow real terrain (A* over the same passability the game uses), so a
+// route bends off mountains, dense forest and water. A district whose tile is
+// unreachable on foot -- a water district holding a shipyard, say -- gets no
+// road rather than a road across the sea.
+
+/** Workforce points per road track: 0 -> 0, 15 -> 3, 100 -> 20. */
+export const WORKFORCE_PER_ROAD = 5;
+
+/** Hard ceiling on a single route's track count; also the full-workforce count. */
+export const MAX_ROADS_PER_ROUTE = 20;
+
+/** The district's staffing share on a 0..100 scale, from its own job slots. */
+export function districtWorkforcePercent(district: DistrictLike | undefined): number {
+  let assigned = 0;
+  let capacity = 0;
+  for (const b of district?.buildings ?? []) {
+    const max = buildingMaxWorkers(b.kind);
+    capacity += max;
+    // An absent count is the pre-workforce "auto (max)" crew (effortFraction
+    // reads it the same way), so it counts as fully staffed.
+    const workers = b.workers === undefined ? max : Math.min(Math.max(b.workers, 0), max);
+    assigned += workers;
+  }
+  if (capacity <= 0) return 0;
+  return (assigned / capacity) * 100;
+}
+
+/** Tracks drawn for a workforce figure, rounded to the nearest whole road. */
+export function roadsForWorkforce(workforce: number): number {
+  if (!Number.isFinite(workforce) || workforce <= 0) return 0;
+  return Math.min(MAX_ROADS_PER_ROUTE, Math.round(workforce / WORKFORCE_PER_ROAD));
+}
+
+export interface RoadRoute {
+  /** The district this route serves ("q,r"). */
+  districtKey: string;
+  /** The network node the route leaves from: the settlement centre, or another district. */
+  from: Axial;
+  /** The tiles walked after `from`, ending on the district (findPath's shape). */
+  path: Axial[];
+  /** `from` plus `path`: the full tile chain, which is what gets drawn. */
+  tiles: Axial[];
+  /** Tracks to draw along the whole route. */
+  roads: number;
+  /** The district's staffing share, 0..100. */
+  workforce: number;
+}
+
+export interface RoadSegment {
+  /** Direction-independent edge key over the two adjacent tiles. */
+  key: string;
+  /** The tile nearer the settlement; the segment is drawn outward from here. */
+  from: Axial;
+  /** The tile further out. */
+  to: Axial;
+  /** Tracks on this edge: the busiest route using it, so trunks run wide. */
+  strands: number;
+}
+
+export interface RoadNetwork {
+  /** The settlement's own tile, where every route ultimately leads. */
+  center: Axial;
+  /** One entry per district that has a route, in network-growth order. */
+  routes: RoadRoute[];
+  /** Every drawn edge, deduplicated, in first-laid order. */
+  segments: RoadSegment[];
+}
+
+function edgeKey(a: Axial, b: Axial): string {
+  const aFirst = a.q < b.q || (a.q === b.q && a.r <= b.r);
+  const first = aFirst ? a : b;
+  const second = aFirst ? b : a;
+  return `${first.q},${first.r}|${second.q},${second.r}`;
+}
+
+/**
+ * The road network of one settlement over `map`.
+ *
+ * Empty (no routes, no segments) when the settlement has no centre or no
+ * district holds a building -- a district that holds nothing is not a district,
+ * so it neither draws a road nor anchors one.
+ */
+export function settlementRoadNetwork(
+  settlement: SettlementDistrictLike,
+  map: GameMap,
+): RoadNetwork {
+  const center = settlementCenterOf(settlement);
+  if (!center) return { center: { q: 0, r: 0 }, routes: [], segments: [] };
+
+  const entries = Object.entries(settlement.districts ?? {})
+    .filter(([, d]) => districtHasBuildings(d))
+    .map(([key, d]) => ({ key, q: d.q, r: d.r, workforce: districtWorkforcePercent(d) }))
+    .sort(
+      (a, b) =>
+        hexDistance(center, a) - hexDistance(center, b) || a.q - b.q || a.r - b.r,
+    );
+
+  const nodes: Axial[] = [{ q: center.q, r: center.r }];
+  const routes: RoadRoute[] = [];
+
+  for (const entry of entries) {
+    const goal: Axial = { q: entry.q, r: entry.r };
+    let best: { from: Axial; path: Axial[]; cost: number } | null = null;
+    for (const node of nodes) {
+      const path = findPath(map, node, goal);
+      // findPath returns [] for an unreachable or impassable goal -- a water
+      // district, or one walled off by mountains. It simply gets no road.
+      if (path.length === 0) continue;
+      const cost = computePathCost(map, path);
+      const better =
+        best === null ||
+        path.length < best.path.length ||
+        (path.length === best.path.length && cost < best.cost);
+      if (better) best = { from: { q: node.q, r: node.r }, path, cost };
+    }
+    // The district joins the network even when nothing can reach it, so a
+    // farther district in its direction is not silently orphaned.
+    nodes.push(goal);
+    if (!best) continue;
+    routes.push({
+      districtKey: entry.key,
+      from: best.from,
+      path: best.path,
+      tiles: [best.from, ...best.path],
+      roads: roadsForWorkforce(entry.workforce),
+      workforce: entry.workforce,
+    });
+  }
+
+  const byKey = new Map<string, RoadSegment>();
+  const segments: RoadSegment[] = [];
+  for (const route of routes) {
+    if (route.roads <= 0) continue;
+    for (let i = 1; i < route.tiles.length; i++) {
+      const from = route.tiles[i - 1];
+      const to = route.tiles[i];
+      const key = edgeKey(from, to);
+      const existing = byKey.get(key);
+      if (existing) {
+        if (route.roads > existing.strands) existing.strands = route.roads;
+        continue;
+      }
+      const segment: RoadSegment = { key, from, to, strands: route.roads };
+      byKey.set(key, segment);
+      segments.push(segment);
+    }
+  }
+
+  return { center, routes, segments };
+}

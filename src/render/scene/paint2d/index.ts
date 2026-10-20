@@ -57,6 +57,7 @@ import type {
   RiverHexNode,
   SceneNode,
   SelectedTileHighlightNode,
+  SettlementRoadNode,
   TerrainDecorationNode,
   TerrainHexNode,
   TerritoryOutlineEdgeNode,
@@ -76,6 +77,15 @@ const FOG_FILL = "rgba(8, 10, 16, 0.78)";
 const FOG_EDGE = "rgba(8, 10, 16, 0.55)";
 const HOVER_STROKE = "#ffcc00";
 const SELECTED_TILE_STROKE = "#ffffff";
+
+// District road tracks: a worn-earth rut, deliberately low contrast so a road
+// reads as ground rather than as an overlay. The band widens with the track
+// count but saturates, so a fully staffed district reads as a broad trodden
+// lane instead of a marker.
+const ROAD_TRACK = "rgba(74, 62, 48, 0.42)";
+const ROAD_TRACK_WIDTH = 1;
+const ROAD_TRACK_GAP = 1.7;
+const ROAD_BAND_MAX = 17;
 
 const PARALLAX_SPEEDS: Record<number, number[]> = {
   2: [0.1, 1.0],
@@ -265,6 +275,9 @@ export function paintScene(
         break;
       case "district":
         paintDistrict(ctx, node, deps);
+        break;
+      case "settlementRoad":
+        paintSettlementRoad(ctx, node, deps);
         break;
       case "territoryOutlineEdge": {
         // drawTerritoryOutlines() stroked one owner's whole boundary as a
@@ -747,6 +760,46 @@ export function paintDistrict(ctx: CanvasRenderingContext2D, node: DistrictNode,
     ctx.setLineDash([]);
     ctx.restore();
   }
+  void deps;
+}
+
+/**
+ * District roads: one worn track per WORKFORCE_PER_ROAD points of the
+ * district's workforce, running parallel to the edge, centred on the line
+ * between the two tile centres. The tracks tighten together as the count
+ * grows (band capped at ROAD_BAND_MAX) so a fully staffed district reads as a
+ * broad trodden lane rather than a stripe leaving the hex grid.
+ *
+ * Roads sit on the ground under every entity layer, so nothing here strokes an
+ * outline or a highlight -- a road that announced itself would fight the
+ * castle, district and hero art it leads to.
+ */
+export function paintSettlementRoad(ctx: CanvasRenderingContext2D, node: SettlementRoadNode, deps: Paint2DDep): void {
+  if (node.segments.length === 0) return;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = ROAD_TRACK;
+  ctx.lineWidth = ROAD_TRACK_WIDTH;
+  for (const segment of node.segments) {
+    const dx = segment.to.x - segment.from.x;
+    const dy = segment.to.y - segment.from.y;
+    const length = Math.hypot(dx, dy);
+    if (length <= 0) continue;
+    const nx = -dy / length;
+    const ny = dx / length;
+    const strands = Math.max(1, Math.floor(segment.strands));
+    const band = Math.min(ROAD_BAND_MAX, (strands - 1) * ROAD_TRACK_GAP);
+    const step = strands > 1 ? band / (strands - 1) : 0;
+    for (let i = 0; i < strands; i++) {
+      const offset = (i - (strands - 1) / 2) * step;
+      ctx.beginPath();
+      ctx.moveTo(segment.from.x + nx * offset, segment.from.y + ny * offset);
+      ctx.lineTo(segment.to.x + nx * offset, segment.to.y + ny * offset);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
   void deps;
 }
 

@@ -22,6 +22,7 @@ export type SceneNode =
   | ValidCharterHexNode
   | CastleNode
   | DistrictNode
+  | SettlementRoadNode
   | TerritoryOutlineEdgeNode
   | PathSegmentNode
   | HeroTrailNode
@@ -168,6 +169,20 @@ export interface DistrictNode {
   variant: "standard" | "farm";
   color: string;
   blocked?: boolean;
+}
+
+/**
+ * One settlement's district road network, drawn under every entity layer.
+ * Purely decorative -- a road carries no movement cost; it shows how the
+ * settlement's districts reach the settlement's own tile, one track per 5
+ * points of a district's workforce. Each entry is a single edge between two
+ * adjacent hexes, so a route re-using an existing trunk merges into it rather
+ * than double-drawing the same ground.
+ */
+export interface SettlementRoadNode {
+  kind: "settlementRoad";
+  settlementId: string;
+  segments: Array<{ strands: number; from: WorldPoint; to: WorldPoint }>;
 }
 
 export interface TerritoryOutlineEdgeNode {
