@@ -479,9 +479,11 @@ function paintMouthWedge(ctx: CanvasRenderingContext2D, node: RiverHexNode): voi
     ctx.fill();
   };
   quad(depth, half, depth * 0.55, (half + edgeHalf) / 2, 0.85);
-  // The opaque stage overhangs a hair past the rim so it also covers the
-  // shared-edge hex stroke of both tiles; the lake water sits flush.
-  quad(depth * 0.55, (half + edgeHalf) / 2, -3, edgeHalf, 1);
+  // Stops at the rim (a hair inside it, to bury the shared-edge hex stroke
+  // without crossing into the neighbour): painting past the rim made the
+  // wedge cover the neighbour tile's fog veil, so the river showed through
+  // the fog on the very tile it pours into.
+  quad(depth * 0.55, (half + edgeHalf) / 2, 1, edgeHalf, 1);
 }
 
 export function paintRiverHex(ctx: CanvasRenderingContext2D, node: RiverHexNode, deps: Paint2DDep): void {
