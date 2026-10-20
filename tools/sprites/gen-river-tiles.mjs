@@ -60,21 +60,34 @@ function blend(buf, x, y, rgb, alpha) {
   buf.px[i + 3] = Math.round(outA * 255);
 }
 
-/** Stamp one circle of the given radius: core, dark bank rim, soft alpha edge. */
+/** Stamp one circle: opaque core fading to translucent banks, then a thin
+ * translucent dark edge and a soft spill. The outer water is only partway
+ * opaque, so the biome underneath tints the banks instead of reading as a
+ * hard hex-edge tray. */
 function stamp(buf, cx, cy, r) {
-  const rMin = Math.floor(cx - r - 2);
-  const rMax = Math.ceil(cx + r + 2);
-  const cMin = Math.floor(cy - r - 2);
-  const cMax = Math.ceil(cy + r + 2);
+  const rMin = Math.floor(cx - r - 4);
+  const rMax = Math.ceil(cx + r + 4);
+  const cMin = Math.floor(cy - r - 4);
+  const cMax = Math.ceil(cy + r + 4);
   for (let y = cMin; y <= cMax; y++) {
     for (let x = rMin; x <= rMax; x++) {
       const d = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
-      if (d < r - 1.5) blend(buf, x, y, WATER, 240);
-      else if (d < r) blend(buf, x, y, WATER_DK, 255);
-      else if (d < r + 2) {
-        const t = (r + 2 - d) / 2; // 1 -> 0 across the soft edge
-        blend(buf, x, y, WATER, Math.round(170 * t));
+      let alpha = 0;
+      let rgb = WATER;
+      if (d < r * 0.55) {
+        alpha = 235;
+      } else if (d < r * 0.9) {
+        const t = (r * 0.9 - d) / (r * 0.35); // 1 -> 0
+        alpha = Math.round(235 - 140 * (1 - t));
+      } else if (d < r) {
+        const t = (r - d) / (r * 0.1); // 1 -> 0
+        rgb = WATER_DK;
+        alpha = Math.round(110 * t);
+      } else if (d < r + 3) {
+        const t = (r + 3 - d) / 3; // 1 -> 0
+        alpha = Math.round(80 * t);
       }
+      if (alpha > 0) blend(buf, x, y, rgb, alpha);
     }
   }
 }
@@ -140,7 +153,7 @@ function meander(a, b, wiggle) {
 }
 
 function template(name, size) {
-  const r = size === "wide" ? 11 : 7;
+  const r = size === "wide" ? 9 : 7;
   const pts =
     name === "straight"
       ? meander(EDGE_W, EDGE_E, [-2.5, 3, -2])

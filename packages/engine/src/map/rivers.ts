@@ -372,8 +372,12 @@ function boundaryBonus(
  */
 function bakeBridges(riverTiles: RiverTile[], rng: () => number): void {
   if (riverTiles.length === 0) return;
+  // Keep at least two cells of plain water at each end so a bridge never
+  // sits where the river pours into its lake.
+  const first = 2;
+  const last = riverTiles.length - 3;
   const straight: number[] = [];
-  for (let i = 1; i < riverTiles.length - 1; i++) {
+  for (let i = first; i <= last; i++) {
     const prev = riverTiles[i - 1];
     const next = riverTiles[i + 1];
     if (prev.q === next.q || prev.r === next.r) straight.push(i);
@@ -394,7 +398,7 @@ function bakeBridges(riverTiles: RiverTile[], rng: () => number): void {
   if (placedCount < want) {
     const middle = riverTiles
       .map((_, i) => i)
-      .filter((i) => i >= 1 && i <= riverTiles.length - 2 && !riverTiles[i].bridge);
+      .filter((i) => i >= first && i <= last && !riverTiles[i].bridge);
     choose(middle);
   }
 }
