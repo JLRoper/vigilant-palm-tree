@@ -147,25 +147,30 @@ export async function generateAndInsertTiles(
   const rs = new Array<number>(total);
   const terrains = new Array<string>(total);
   const resources = new Array<string | null>(total);
+  const rivers = new Array<string | null>(total);
+  const bridges = new Array<boolean>(total);
   let i = 0;
   for (let r = 0; r < map.height; r++) {
     for (let q = 0; q < map.width; q++) {
       const t = map.get(q, r);
       const res = map.resourceTileAt(q, r);
+      const river = map.riverAt(q, r);
       qs[i] = q;
       rs[i] = r;
       terrains[i] = t ?? "grass";
       resources[i] = res?.resource ?? null;
+      rivers[i] = river?.kind ?? null;
+      bridges[i] = river?.bridge === true;
       i++;
     }
   }
   const suffix =
     onConflict === "upsert"
-      ? `ON CONFLICT (game_id, q, r) DO UPDATE SET terrain = EXCLUDED.terrain, resource = EXCLUDED.resource`
+      ? `ON CONFLICT (game_id, q, r) DO UPDATE SET terrain = EXCLUDED.terrain, resource = EXCLUDED.resource, river = EXCLUDED.river, bridge = EXCLUDED.bridge`
       : `ON CONFLICT (game_id, q, r) DO NOTHING`;
   await client.query(
-    `INSERT INTO tiles (game_id, q, r, terrain, resource) SELECT $1, u.q, u.r, u.terrain, u.resource FROM UNNEST($2::int[], $3::int[], $4::text[], $5::text[]) AS u(q, r, terrain, resource) ${suffix}`,
-    [gameId, qs, rs, terrains, resources]
+    `INSERT INTO tiles (game_id, q, r, terrain, resource, river, bridge) SELECT $1, u.q, u.r, u.terrain, u.resource, u.river, u.bridge FROM UNNEST($2::int[], $3::int[], $4::text[], $5::text[], $6::text[], $7::boolean[]) AS u(q, r, terrain, resource, river, bridge) ${suffix}`,
+    [gameId, qs, rs, terrains, resources, rivers, bridges]
   );
 }
 
@@ -680,7 +685,7 @@ router.get("/games/:name/tiles", async (req, res) => {
     );
   }
   const tiles = await pool.query<TileRow>(
-    "SELECT q, r, terrain, resource FROM tiles WHERE game_id = $1 ORDER BY r ASC, q ASC",
+    "SELECT q, r, terrain, resource, river, bridge FROM tiles WHERE game_id = $1 ORDER BY r ASC, q ASC",
     [gameRow.id]
   );
   res.json(tiles.rows);

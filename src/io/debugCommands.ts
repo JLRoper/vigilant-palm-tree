@@ -1,6 +1,5 @@
 import type { HeroId } from "@heroes/contracts";
 import { findPath } from "../map/pathfinding";
-import { TERRAIN_COST } from "../map/terrain";
 import { axialToPixel } from "../core/hex";
 import type { EventLog, LogEntry, LogQuery, LogStats } from "../debug/eventLog";
 import type { DevConsoleHandle } from "../debug/devConsole";
@@ -144,8 +143,7 @@ export function attachDebugApi(engine: AttachDebugApiEngine): void {
 
       let cumulative = 0, reachableIdx = 0, actualCost = 0;
       for (let i = 0; i < newPath.length; i++) {
-        const t = gm.get(newPath[i].q, newPath[i].r);
-        const stepCost = t ? (TERRAIN_COST as Record<string, number>)[t] : 1;
+        const stepCost = gm.cost(newPath[i].q, newPath[i].r);
         if (!Number.isFinite(stepCost) || stepCost <= 0) break;
         if (cumulative >= hero.movementRemaining) break;
         cumulative += stepCost;

@@ -31,6 +31,12 @@ function terrainLine(terrain: NonNullable<TileInfo["terrain"]>): string {
   return passable ? `${label} · move cost ${cost}` : `${label} · impassable`;
 }
 
+function riverLine(river: NonNullable<TileInfo["river"]>): string {
+  if (river.kind === "small") return "Small river — crossing takes a full day";
+  if (river.bridge) return "Bridge over the wide river";
+  return "Wide river — impassable without a bridge";
+}
+
 function depositLine(deposit: NonNullable<TileInfo["deposit"]>): string {
   const label = deposit.resource.charAt(0).toUpperCase() + deposit.resource.slice(1);
   if (deposit.workedBy) {
@@ -68,6 +74,7 @@ function signatureFor(info: TileInfo): string {
 function renderLines(info: TileInfo): HTMLElement[] {
   if (!info.terrain) return [makeLine("Unexplored", { dim: true })];
   const lines: HTMLElement[] = [makeLine(terrainLine(info.terrain))];
+  if (info.river) lines.push(makeLine(riverLine(info.river)));
   if (info.fogged) lines.push(makeLine("Unexplored", { dim: true }));
   if (info.deposit) lines.push(makeLine(depositLine(info.deposit)));
   if (info.settlement) lines.push(makeLine(settlementLine(info.settlement), { bold: info.settlement.owned }));

@@ -18,7 +18,7 @@ export function createTileRepo(db: Queryable): TileRepo {
     async loadAllForGame(gameName) {
       const gameId = await resolveGameId(db, gameName);
       const r = await db.query<TileRow>(
-        `SELECT q, r, terrain, resource FROM tiles WHERE game_id = $1 ORDER BY r ASC, q ASC`,
+        `SELECT q, r, terrain, resource, river, bridge FROM tiles WHERE game_id = $1 ORDER BY r ASC, q ASC`,
         [gameId],
       );
       return r.rows;
