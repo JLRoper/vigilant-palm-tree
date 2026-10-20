@@ -52,6 +52,8 @@ export type ClickIntent =
   | { kind: "none"; reason: string; debugPath?: Axial[]; movementRemaining?: number }
   | { kind: "select-hero"; heroId: HeroId }
   | { kind: "select-settlement"; settlementId: string }
+  | { kind: "deselect-hero"; heroId: HeroId }
+  | { kind: "deselect-settlement"; settlementId: string }
   | { kind: "open-charter"; targetQ: number; targetR: number }
   | ({ kind: "attack" } & MoveIntentBase)
   | ({ kind: "move"; debugPath: Axial[] } & MoveIntentBase);
@@ -67,6 +69,12 @@ export interface ClickIntentInput {
   validCharterHexes: Set<string> | null;
   localSeat: PlayerId | null;
   visibleHexes?: Set<string> | null;
+  /**
+   * `MouseEvent.detail`: 1 for a single click, 2 on the second click of a
+   * double-click. Only the first click of a gesture may toggle a selection off
+   * -- double-clicking a settlement is the city-entry gesture.
+   */
+  clickCount?: number;
 }
 
 export function resolveAdventureClick(input: ClickIntentInput): ClickIntent {
@@ -92,10 +100,16 @@ export function resolveAdventureClick(input: ClickIntentInput): ClickIntent {
   if (!input.isPlayerTurn) return { kind: "none", reason: "not_player_turn" };
   if (!t) return { kind: "none", reason: "no hover" };
 
+  // A click on a hero is a toggle: select it, move it, click it again to put it
+  // down. Clicking a different one of your heroes switches selection instead.
+  const singleClick = (input.clickCount ?? 1) <= 1;
   const clickedHero = Object.values(heroes).find(
     (h) => h.tile.q === t.q && h.tile.r === t.r
   );
   if (clickedHero && clickedHero.ownerId === seat) {
+    if (singleClick && state.selectedHeroId === clickedHero.id) {
+      return { kind: "deselect-hero", heroId: clickedHero.id as HeroId };
+    }
     return { kind: "select-hero", heroId: clickedHero.id as HeroId };
   }
 
@@ -160,10 +174,20 @@ export function resolveAdventureClick(input: ClickIntentInput): ClickIntent {
     (s) => s.q === t.q && s.r === t.r
   );
   if (clickedSettlement && !selectedId) {
+    if (singleClick && state.selectedSettlementId === clickedSettlement.id) {
+      return { kind: "deselect-settlement", settlementId: clickedSettlement.id };
+    }
     return { kind: "select-settlement", settlementId: clickedSettlement.id };
   }
 
-  if (!selectedId) return { kind: "none", reason: "no selection" };
+  if (!selectedId) {
+    // Nothing selected but a settlement: clicking empty ground puts it down
+    // instead of asking for a hero the player never picked.
+    if (state.selectedSettlementId) {
+      return { kind: "deselect-settlement", settlementId: state.selectedSettlementId };
+    }
+    return { kind: "none", reason: "no selection" };
+  }
   if (!startTile) return { kind: "none", reason: "no hero" };
 
   const newPath = findPath(map, { q: startTile.q, r: startTile.r }, t, occupiedHexes);

@@ -10,6 +10,19 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.26.0] - 2026-10-20
+
+### Click a hero or settlement again to put it down
+
+A map click is a toggle. Clicking your hero selects it (the hero panel opens); clicking that same hero again clears the selection and closes the panel -- including after moving it, which is the
+gesture the playtest asked for: select, move, click it once more. Same for a settlement: click to select, click again to deselect. Clicking a different hero or settlement switches selection, and
+with only a settlement selected, a click on empty ground puts it down instead of toasting "Select a hero first".
+
+The deselect goes through `TurnController.clearSelection()` / `clearSettlementSelection()` -- the same reducers the panels' own `onClose` runs -- so a click and a close cannot leave different state behind.
+The resolver takes `clickCount` (`MouseEvent.detail`) and only toggles on the first click: the second click of a double-click must not deselect, because double-clicking a settlement is the city-entry gesture.
+
+Tests: six cases in `test/screens/adventure/clickIntent.test.ts` (toggle, switch, double-click guard for both surfaces, empty-ground deselect); `makeState` gained a `selectedSettlementId` override.
+
 ## [0.25.0] - 2026-10-20
 
 ### Escape closes every panel, from one place

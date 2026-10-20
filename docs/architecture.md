@@ -657,6 +657,15 @@ Every floating menu/panel now carries the shared corner resize grip, not just th
 
 `FloatingPanel.enableResize(key)` is the one entry point (the constructor's `resizeable`/`resizeKey` options route through it), so a surface built by a helper can opt in without a second implementation. `setLayout` hides the grip when a rail panel docks and drops the explicit height there; popping back out re-applies the remembered size (`applyStoredSize`). Confirm prompts and small forms (New Game, Load Game, Sign In, Settings, Multiplayer Lobby, Assault confirm) deliberately keep their fixed layout — a stretched two-button prompt buys nothing.
 
+### Click a hero or settlement again to deselect (2026-10-20)
+
+A map click is a toggle in `resolveAdventureClick`: `deselect-hero` / `deselect-settlement` join the `ClickIntent` union, and `AdventureView.applyClickIntent` routes them to `TurnController.clearSelection()` /
+`clearSettlementSelection()` -- the same reducers the panels' own `onClose` runs, so a click and a close can never leave different state. Clicking a different hero/settlement still switches rather than toggling, and with only a settlement selected, a click on
+empty ground deselects instead of toasting "Select a hero first".
+
+The resolver takes `clickCount` (`MouseEvent.detail`) and only toggles when it is 1: the second click of a double-click must not deselect, because double-clicking a settlement is the city-entry gesture (and a foreign settlement's refused entry would otherwise
+leave it deselected). Six cases in `test/screens/adventure/clickIntent.test.ts` pin the toggle, the switch, the double-click guard for both surfaces, and the empty-ground deselect.
+
 ### One panel manager owns Escape; one panel vocabulary (2026-10-20)
 
 Every floating surface is now one concept with one owner. Naming first, because the codebase had four words for the same thing (`PopupMenu`, `*Menu`, `*Panel`, `*Modal`): a **panel** is a draggable surface with a title bar (`FloatingPanel`), a **dialog** is a panel shown centred over a dimmed backdrop (`openDialog`), and **menu** is reserved for an actual command list, which is also the ARIA meaning — none of these surfaces is one. "Module" is not a UI term at all, and "popup" is a transient anchored bubble (the logistics tooltips are the only real popups).

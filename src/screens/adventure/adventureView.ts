@@ -627,6 +627,7 @@ export class AdventureView {
       validCharterHexes: this.opts.getValidCharterHexes?.() ?? null,
       localSeat,
       visibleHexes: computeVisionFromState(this.state, localSeat ?? 0),
+      clickCount: e.detail,
     });
     this.applyClickIntent(intent);
   }
@@ -656,6 +657,19 @@ export class AdventureView {
       this.opts.onStateChanged?.();
       this.lastClickDebug.moved = false;
       this.lastClickDebug.reason = "settlement_select";
+      this.opts.onHudUpdate();
+      return;
+    }
+
+    // Clicking the selected hero/settlement again puts it down. The panel's own
+    // × takes the same route (its onClose clears the selection), so a click and
+    // a close cannot leave different state behind.
+    if (intent.kind === "deselect-hero" || intent.kind === "deselect-settlement") {
+      if (intent.kind === "deselect-hero") tc.clearSelection();
+      else tc.clearSettlementSelection();
+      this.opts.onStateChanged?.();
+      this.lastClickDebug.moved = false;
+      this.lastClickDebug.reason = intent.kind === "deselect-hero" ? "deselect" : "settlement_deselect";
       this.opts.onHudUpdate();
       return;
     }
