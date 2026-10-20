@@ -15,7 +15,6 @@ import {
   type RecruitSource,
 } from "../settlement/recruitUnits";
 import { buildingDraftMax } from "../buildingRegistry";
-import { TERRAIN_COST } from "../map/terrain";
 import { RESOURCES } from "../map/resourceTiles";
 import { computeSettlementRates, generateSettlementName } from "../economy/settlementRates";
 import { evaluateCharterRequirements, validCharterHexes } from "../charter/requirements";
@@ -414,10 +413,8 @@ export function pickAiMove(
 }
 
 function firstStepCost(hero: HeroState, map: GameMap, firstStep: Axial): AiMove | null {
-  const t = map.get(firstStep.q, firstStep.r);
-  if (!t) return null;
-  const cost = TERRAIN_COST[t];
-  if (cost === Infinity || cost <= 0) return null;
+  const cost = map.cost(firstStep.q, firstStep.r);
+  if (!Number.isFinite(cost) || cost <= 0) return null;
   if (cost > hero.movementRemaining) return null;
   return { toTile: firstStep, cost };
 }

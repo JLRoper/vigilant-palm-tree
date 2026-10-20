@@ -54,6 +54,7 @@ import type {
   HoverHighlightNode,
   PathSegmentNode,
   ResourceIconNode,
+  RiverHexNode,
   SceneNode,
   SelectedTileHighlightNode,
   TerrainDecorationNode,
@@ -238,6 +239,9 @@ export function paintScene(
       case "terrainHex":
         paintTerrainHex(ctx, node, deps);
         break;
+      case "riverHex":
+        paintRiverHex(ctx, node, deps);
+        break;
       case "terrainDecoration":
         paintTerrainDecoration(ctx, node, deps);
         break;
@@ -390,6 +394,145 @@ export function paintTerrainHex(ctx: CanvasRenderingContext2D, node: TerrainHexN
   ctx.fill();
   ctx.stroke();
   void deps;
+}
+
+// River overlay geometry: the engine's NEIGHBOR_DIRS order is E, NE, NW, W,
+// SW, SE; on screen (y down) those edges sit at the angles below, and the
+// baked tiles are authored with their exit edge at 0 degrees. Rotating a
+// tile by `rotationDeg` aligns it to the real neighbour direction.
+const RIVER_DIR_ANGLE_DEG = [0, 300, 240, 180, 120, 60];
+const RIVER_EDGE_DIST = HEX_SIZE * (Math.sqrt(3) / 2);
+const RIVER_ART_SIZE = 88;
+
+export interface RiverMaskInfo {
+  template: "end" | "straight" | "curveC" | "curveCC" | "curve120C" | "curve120CC";
+  rotationDeg: number;
+}
+
+/** Map a six-bit neighbour mask to the baked tile shape + its rotation.
+ * Two-exit masks resolve by their directed separation: opposite = straight,
+ * 60 degrees = curveC (down-wind) / curveCC (up-wind), and 120 degrees =
+ * curve120C / curve120CC. Every pair is covered. */
+export function riverMaskInfo(mask: number): RiverMaskInfo {
+  const dirs: number[] = [];
+  for (let d = 0; d < 6; d++) if (mask & (1 << d)) dirs.push(d);
+  if (dirs.length === 0) return { template: "end", rotationDeg: 0 };
+  const a = dirs[0];
+  if (dirs.length === 1) return { template: "end", rotationDeg: RIVER_DIR_ANGLE_DEG[a] };
+  const b = dirs[1];
+  const diff = (RIVER_DIR_ANGLE_DEG[b] - RIVER_DIR_ANGLE_DEG[a] + 360) % 360;
+  const template =
+    diff === 180 ? ("straight" as const)
+      : diff === 60 ? ("curveC" as const)
+        : diff === 300 ? ("curveCC" as const)
+          : diff === 120 ? ("curve120C" as const)
+            : ("curve120CC" as const);
+  return { template, rotationDeg: RIVER_DIR_ANGLE_DEG[a] };
+}
+
+function paintRiverBandFallback(
+  ctx: CanvasRenderingContext2D,
+  node: RiverHexNode,
+  info: RiverMaskInfo,
+): void {
+  const { x, y } = node.world;
+  const wide = node.size === "wide";
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate((info.rotationDeg * Math.PI) / 180);
+  ctx.lineCap = "round";
+  const stroke = (w: number, color: string, extra: number): void => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    if (info.template === "straight") {
+      ctx.moveTo(-RIVER_EDGE_DIST, 0);
+      ctx.lineTo(RIVER_EDGE_DIST, 0);
+    } else if (info.template === "curveC") {
+      ctx.moveTo(RIVER_EDGE_DIST, 0);
+      ctx.quadraticCurveTo(RIVER_EDGE_DIST + 4, RIVER_EDGE_DIST * 0.45, RIVER_EDGE_DIST * 0.5, RIVER_EDGE_DIST * Math.sin(Math.PI / 3));
+    } else if (info.template === "curveCC") {
+      ctx.moveTo(RIVER_EDGE_DIST, 0);
+      ctx.quadraticCurveTo(RIVER_EDGE_DIST + 4, -RIVER_EDGE_DIST * 0.45, RIVER_EDGE_DIST * 0.5, -RIVER_EDGE_DIST * Math.sin(Math.PI / 3));
+    } else {
+      ctx.moveTo(RIVER_EDGE_DIST, 0);
+      ctx.lineTo(8, 0);
+      void extra;
+      ctx.stroke();
+      // source pool
+      ctx.beginPath();
+      ctx.arc(6, 0, (wide ? 11 : 8) + extra, 0, Math.PI * 2);
+      ctx.stroke();
+      return;
+    }
+    void extra;
+    ctx.stroke();
+  };
+  stroke((wide ? 20 : 12) + 2, "#1d3f66", 0);
+  stroke(wide ? 20 : 12, "#2a5a8a", 0);
+  ctx.restore();
+}
+
+/**
+ * Endpoint pass-throughs: a short wedge on the water-facing exit, painted in
+ * the exact body colour (TERRAIN_COLORS.water.fill). Opaque at the shared
+ * edge, fading inward, it flares the band to the full hex edge: the band's
+ * abrupt bank-line cut, the angular gap and the shade patch between band
+ * blues all disappear under it, and the river visibly pours into the water.
+ */
+function paintMouthWedge(ctx: CanvasRenderingContext2D, node: RiverHexNode): void {
+  if (node.mouthDir === undefined) return;
+  const theta = (RIVER_DIR_ANGLE_DEG[node.mouthDir] * Math.PI) / 180;
+  const nx = Math.cos(theta);
+  const ny = Math.sin(theta);
+  const ex = Math.sin(theta);
+  const ey = -Math.cos(theta);
+  const midX = node.world.x + RIVER_EDGE_DIST * nx;
+  const midY = node.world.y + RIVER_EDGE_DIST * ny;
+  const depth = 22;
+  const half = (node.size === "wide" ? 11 : 9) * (HEX_SIZE / RIVER_ART_SIZE) + 1;
+  const edgeHalf = HEX_SIZE * 0.5;
+  const quad = (d1: number, s1: number, d2: number, s2: number, alpha: number): void => {
+    ctx.beginPath();
+    ctx.moveTo(midX - nx * d1 + ex * s1, midY - ny * d1 + ey * s1);
+    ctx.lineTo(midX - nx * d1 - ex * s1, midY - ny * d1 - ey * s1);
+    ctx.lineTo(midX - nx * d2 - ex * s2, midY - ny * d2 - ey * s2);
+    ctx.lineTo(midX - nx * d2 + ex * s2, midY - ny * d2 + ey * s2);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(42, 90, 138, ${alpha})`;
+    ctx.fill();
+  };
+  quad(depth, half, depth * 0.55, (half + edgeHalf) / 2, 0.85);
+  // Stops at the rim (a hair inside it, to bury the shared-edge hex stroke
+  // without crossing into the neighbour): painting past the rim made the
+  // wedge cover the neighbour tile's fog veil, so the river showed through
+  // the fog on the very tile it pours into.
+  quad(depth * 0.55, (half + edgeHalf) / 2, 1, edgeHalf, 1);
+}
+
+export function paintRiverHex(ctx: CanvasRenderingContext2D, node: RiverHexNode, deps: Paint2DDep): void {
+  const info = riverMaskInfo(node.mask);
+  const mask = node.bridge && node.size === "wide" ? "bridge" : info.template;
+  const r = deps.sprite.resolveRiverSprite?.(node.size, mask as "end" | "straight" | "curveC" | "curveCC" | "curve120C" | "curve120CC" | "bridge");
+  if (r && r.ready) {
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(node.world.x, node.world.y);
+    ctx.rotate((info.rotationDeg * Math.PI) / 180);
+    // The art maps 1:1 to logical px (hex radius 32 on an 88px canvas).
+    ctx.drawImage(
+      r.drawable,
+      -RIVER_ART_SIZE / 2,
+      -RIVER_ART_SIZE / 2,
+      RIVER_ART_SIZE,
+      RIVER_ART_SIZE,
+    );
+    ctx.restore();
+    paintMouthWedge(ctx, node);
+    return;
+  }
+  paintRiverBandFallback(ctx, node, info);
+  paintMouthWedge(ctx, node);
 }
 
 export function paintTerrainDecoration(ctx: CanvasRenderingContext2D, node: TerrainDecorationNode, deps: Paint2DDep): void {

@@ -7,7 +7,7 @@ import type { RenderOptions, CaravanMarkerSpec } from "../../renderTypes";
 import { computeVision, isVisible } from "../../fog";
 import { computeReachableSplit } from "../../overlays/pathOverlay";
 import type { BuildingDef } from "@heroes/contracts";
-import { controlledPositions, findPath, isDistrictBlockedByHero, resolveControllingSettlement, territoryBoundaryEdges } from "@heroes/engine";
+import { controlledPositions, findPath, isDistrictBlockedByHero, resolveControllingSettlement, territoryBoundaryEdges, NEIGHBOR_DIRS } from "@heroes/engine";
 import type { EntityMirror } from "../entityMirror";
 import type {
   SceneNode,
@@ -54,6 +54,74 @@ export function districtTierForCount(count: number): 1 | 2 | 3 {
   return 1;
 }
 
+// Screen angles of the six edge midpoints, NEIGHBOR_DIRS (E, NE, NW, W, SW,
+// SE) order. Mirrors the rotation table in the painter.
+const RIVER_MASK_ANGLE_DEG = [0, 300, 240, 180, 120, 60];
+
+/** For an endpoint cell (exactly one river neighbour): the water/swamp
+ * neighbour direction the pass-through exit was chosen toward, or -1.
+ * Priority mirrors riverMaskAt (straight out, then the 60-degree bend,
+ * then the 120-degree sharp bend). */
+export function riverMouthAt(map: GameMap, q: number, r: number): number {
+  let mask = 0;
+  let bits = 0;
+  for (let d = 0; d < 6; d++) {
+    if (map.riverAt(q + NEIGHBOR_DIRS[d].q, r + NEIGHBOR_DIRS[d].r)) {
+      mask |= 1 << d;
+      bits++;
+    }
+  }
+  if (bits !== 1) return -1;
+  const riverDir = 0 | Math.log2(mask);
+  let curve = -1;
+  let sharp = -1;
+  for (let d = 0; d < 6; d++) {
+    const t = map.get(q + NEIGHBOR_DIRS[d].q, r + NEIGHBOR_DIRS[d].r);
+    if (t !== "water" && t !== "swamp") continue;
+    let da = Math.abs(RIVER_MASK_ANGLE_DEG[d] - RIVER_MASK_ANGLE_DEG[riverDir]) % 360;
+    da = Math.min(da, 360 - da);
+    if (da === 180) return d;
+    if (da === 60 && curve < 0) curve = d;
+    if (da === 120 && sharp < 0) sharp = d;
+  }
+  if (curve >= 0) return curve;
+  if (sharp >= 0) return sharp;
+  return -1;
+}
+
+/** The six-direction bitmask of river neighbours (NEIGHBOR_DIRS order),
+ * plus one water-facing exit at endpoints: exactly-one-neighbour end cells
+ * extend their channel through the hex toward an adjacent water/swamp body,
+ * so the river visually pours into its sink instead of stubbing out one
+ * tile short of it. The exit keeps to the baked art shapes (opposite =
+ * straight, 60 degrees = curve, 120 degrees = the sharp bend). */
+export function riverMaskAt(map: GameMap, q: number, r: number): number {
+  let mask = 0;
+  let bits = 0;
+  for (let d = 0; d < 6; d++) {
+    if (map.riverAt(q + NEIGHBOR_DIRS[d].q, r + NEIGHBOR_DIRS[d].r)) {
+      mask |= 1 << d;
+      bits++;
+    }
+  }
+  if (bits !== 1) return mask;
+  const riverDir = 0 | Math.log2(mask);
+  let curve = -1;
+  let sharp = -1;
+  for (let d = 0; d < 6; d++) {
+    const t = map.get(q + NEIGHBOR_DIRS[d].q, r + NEIGHBOR_DIRS[d].r);
+    if (t !== "water" && t !== "swamp") continue;
+    let da = Math.abs(RIVER_MASK_ANGLE_DEG[d] - RIVER_MASK_ANGLE_DEG[riverDir]) % 360;
+    da = Math.min(da, 360 - da);
+    if (da === 180) return mask | (1 << d);
+    if (da === 60 && curve < 0) curve = d;
+    if (da === 120 && sharp < 0) sharp = d;
+  }
+  if (curve >= 0) return mask | (1 << curve);
+  if (sharp >= 0) return mask | (1 << sharp);
+  return mask;
+}
+
 export function settlementFullnessForCount(count: number): 1 | 2 | 3 | 4 | 5 {
   if (count >= 13) return 5;
   if (count >= 10) return 4;
@@ -82,12 +150,34 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
       const terrain = map.get(q, r);
       if (!terrain) continue;
       const world = axialToPixel(q, r);
+      const seen = isVisible(visible, q, r);
       nodes.push({ kind: "terrainHex", q, r, world, terrain });
-      if (terrain !== "grass" && terrain !== "dirt") {
+      const river = map.riverAt(q, r);
+      // Rivers dim through the translucent fog exactly like the terrain, but
+      // stay off a tile that is uncharted (never revealed while the map was
+      // hidden): opaque black must not carry a hidden water hint.
+      const uncharted = !seen && revealed !== null && !revealed.has(`${q},${r}`);
+      if (river && !uncharted) {
+        // The water overlay replaces the biome's own decoration on a river
+        // cell (no trees/ripples poking through the water). Emitted here, in
+        // tile order, so it paints after this tile's fill but before the fog
+        // nodes (the veil dims it in place).
+        const mouthDir = riverMouthAt(map, q, r);
+        nodes.push({
+          kind: "riverHex",
+          q,
+          r,
+          world,
+          size: river.kind,
+          mask: riverMaskAt(map, q, r),
+          ...(river.bridge ? { bridge: true } : {}),
+          ...(mouthDir >= 0 ? { mouthDir } : {}),
+        });
+      } else if (terrain !== "grass" && terrain !== "dirt") {
         nodes.push({ kind: "terrainDecoration", q, r, world, terrain });
       }
-      if (!isVisible(visible, q, r)) {
-        if (revealed && !revealed.has(`${q},${r}`)) {
+      if (!seen) {
+        if (uncharted) {
           nodes.push({ kind: "unchartedHex", q, r, world });
         } else {
           nodes.push({ kind: "fogHex", q, r, world });

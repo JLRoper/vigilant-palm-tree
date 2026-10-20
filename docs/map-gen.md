@@ -46,6 +46,10 @@ generated before it are byte-identical to a v1–v3 map of the same seed; v4 onl
 - Impassable (`TERRAIN_COST.denseForest = Infinity`) and excluded from resource
   placement like water and mountain.
 
+## River generation
+
+A standalone overlay layer (`placeRivers` in `packages/engine/src/map/rivers.ts`, appended after all terrain passes). Bodies of water = water ∪ swamp cells, grouped by flood fill into bodies; a river = a path from a shore of one body to a shore of a different body. Baked at every map-gen version from **v5** up; the v1–v4 grid is untouched. Implementation details and crossing rules: see [map.md](./map.md#rivers-map-gen-v5-overlay-layer).
+
 ## Alternatives, ranked by complexity
 
 ### 1. Biome regions (simplest upgrade)

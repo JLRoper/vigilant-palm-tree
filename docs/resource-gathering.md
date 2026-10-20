@@ -27,7 +27,7 @@ Stockpiles are **capped, softly** (`packages/engine/src/settlement/capacity.ts`)
 
 [`packages/engine/src/map/resourceTiles.ts`](../packages/engine/src/map/resourceTiles.ts):
 
-- Each passable tile rolls once against a **per-terrain density table** (`RESOURCE_DENSITY`). Water, mountain and dense forest are excluded entirely — an impassable tile never carries a deposit.
+- Each passable tile rolls once against a **per-terrain density table** (`RESOURCE_DENSITY`). Water, mountain and dense forest are excluded entirely — an impassable tile never carries a deposit. River cells (the map-gen v5 overlay layer) are skipped too: a deposit never spawns in the water itself.
 - **Mountain spillover:** a passable tile adjacent to a mountain gets its stone and iron density boosted ×1.5 (caps 0.2 / 0.15) — mountains themselves can't hold tiles, so ore "spills" onto their borders.
 - Per-tile yields (`RESOURCE_YIELD`): **gold 20, wood 15, stone 12, iron 8, arcane 5, food 10**.
 - **Food's world-map density is 0 on every terrain**, so food resource tiles never spawn. Food is nevertheless live: city food spots drive farm-building cell multipliers, and farms, farmhouses, and granaries produce it (§8–10). `RESOURCE_YIELD.food = 10` is not a world-map food source.

@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS tiles (
   r           INTEGER NOT NULL,
   terrain     TEXT NOT NULL,
   resource    TEXT,
+  river       TEXT,
+  bridge      BOOLEAN NOT NULL DEFAULT FALSE,
   UNIQUE (game_id, q, r)
 );
 

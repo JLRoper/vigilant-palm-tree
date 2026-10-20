@@ -1,6 +1,5 @@
 import { Axial } from "../../core/hex";
 import { GameMap } from "../../map/gameMap";
-import { TERRAIN_COST } from "../../map/terrain";
 import type { MinimapGeometry } from "../renderTypes";
 import type { MinimapCamera } from "../minimapCamera";
 
@@ -34,8 +33,7 @@ export function computeReachableSplitDetailed(
   let totalCost = 0;
   let index = path.length;
   for (let i = 0; i < path.length; i++) {
-    const t = map.get(path[i].q, path[i].r);
-    const stepCost = t ? TERRAIN_COST[t] : Infinity;
+    const stepCost = map.cost(path[i].q, path[i].r);
     if (!Number.isFinite(stepCost) || stepCost <= 0) {
       if (index === path.length) index = i;
       break;

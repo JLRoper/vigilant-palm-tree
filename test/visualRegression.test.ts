@@ -35,7 +35,10 @@ const WEB_URL = `http://localhost:${WEB_PORT}`;
 const BASELINE_DIR = resolve(process.cwd(), "test", "visual-baselines");
 const UPDATE_BASELINES = shouldUpdateBaselines();
 
-const SEED = 90210;
+// Seed 13 (not 90210): its map puts a wide river along the spawn's north edge
+// and a small river just south-east, both inside the initial hero vision, so
+// the adventure/charter baselines actually pin the river overlay art.
+const SEED = 13;
 const RNG_SEED = 424242;
 const GAME_NAME = process.env.VISUAL_GAME_NAME_TAG
   ? `visual-regression-149-${process.env.VISUAL_GAME_NAME_TAG}`

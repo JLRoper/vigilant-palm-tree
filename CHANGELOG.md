@@ -10,6 +10,13 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.29.0] - 2026-10-20
+
+- **Rivers on the adventure map** (map-gen **v5**) — procedural rivers run between two bodies of water (lakes or swamps), drawn as water over the biome underneath, not as a terrain value. Two kinds: **small** (crossable, costs a full day — all 7 movement points) and **wide** (impassable except at baked bridges, cost 1), with ~one bridge every 8 cells. The A*-guided meander walk descends a distance-to-sink field with a momentum term (no U-turns, soft turns cheap) plus a slight biome-boundary bias, and never self-touches, merges, or forms more than a 3-way junction.
+- **Everywhere a hero moves respects rivers** — pathfinding, AI, charters, the path preview's reachable split, the tile popup's effective cost, and castle placement reachability; resources and castle candidates skip river cells.
+- **Water is baked once, tinted by the biome** — overlay tiles (end/straight/curveC/curveCC/curve120C/curve120CC for small and wide, plus a wide bridge) rasterised deterministically by tools/sprites/gen-river-tiles.mjs (byte-stable, no API) with anti-aliased alpha banks that pick up grass/sand/snow underneath; the painter auto-tiles them from the six-bit neighbour mask, pours each end into its body of water through a mouth wedge, and hides the water under uncharted black while letting it dim through released fog. The minimap draws the river line with a bridge tick.
+- **Map-gen v5 keeps v1–v4 maps intact** — rivers append after every terrain pass, so a saved v4 game keeps its exact terrain while fresh games rebuild with rivers; MapGenVersion gained 5 and the stored-version unions now reuse the shared type.
+
 ## [0.28.0] - 2026-10-20
 
 Farm plots: two model-refined styles join the per-cell rotation

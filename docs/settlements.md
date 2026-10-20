@@ -6,7 +6,7 @@ The player's claim on the world. Settlements come in two forms: **initial castle
 
 ## Initial castles
 
-At game start, castles are placed on the map (configurable via `castleSeed`/`castleCount`; `defaultCastleCountForMap` and `maxCastleCountForMap` in `packages/engine/src/map/castlePlacement.ts` scale the default and maximum castle counts by $\sqrt{N/432}$ on maps larger than `24×18` — up to 18 default / 45 max on `huge` 72×54 and 30 default / 75 max on `epic` 120×90 — and `generateCastles` verifies passable BFS connectivity via `buildReachableMask` so castles never spawn in isolated pockets). Each faction gets one. These are Level 1–3 settlements with pre-computed resource rates, city spots, and mines.
+At game start, castles are placed on the map (configurable via `castleSeed`/`castleCount`; `defaultCastleCountForMap` and `maxCastleCountForMap` in `packages/engine/src/map/castlePlacement.ts` scale the default and maximum castle counts by $\sqrt{N/432}$ on maps larger than `24×18` — up to 18 default / 45 max on `huge` 72×54 and 30 default / 75 max on `epic` 120×90 — and `generateCastles` verifies passable BFS connectivity via `buildReachableMask` so castles never spawn in isolated pockets). Castle candidates also skip river cells (every kind), so a castle never blocks or floods on a riverbank. Each faction gets one. These are Level 1–3 settlements with pre-computed resource rates, city spots, and mines.
 
 ## Charter settlements (✅ implemented)
 

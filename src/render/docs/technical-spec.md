@@ -1046,6 +1046,8 @@ The former `painter/*` classes and separate resource/territory overlay painters 
 
 6. **Deterministic terrain decoration**: Terrain decorations (trees, snow caps, sand ripples) use a seeded pseudo-random function `decorationSeed(q, r) = sin(q * 91.71 + r * 43.17) * 43758.5453` so the same map tile always gets the same decoration regardless of rendering order.
 
+7. **River overlay (map-gen v5)**: `riverHex` nodes paint after the terrain fill and before the fog layers. The biome stays painted underneath; the baked water tile (`resources/rivers/`, alpha banks) composites over it, rotated to the river's exit direction by `riverMaskInfo`, so the terrain's own colour tints the banks and unseen rivers stay hidden under fog like the terrain.
+
 ---
 
 ## 7. Scene Graph Seam (Phase 5 Track B)

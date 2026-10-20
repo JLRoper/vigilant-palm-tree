@@ -1,5 +1,6 @@
 import { Terrain, TERRAIN_COST } from "./terrain";
 import { placeResourceTiles, ResourceTile } from "./resourceTiles";
+import { placeRivers, RIVER_BRIDGE_CROSS_COST, RIVER_SMALL_CROSS_COST, type RiverKind, type RiverTile } from "./rivers";
 import type { Axial } from "@heroes/contracts";
 import { mulberry32 } from "../rng";
 import { NEIGHBOR_DIRS } from "./directions";
@@ -27,6 +28,8 @@ export type TileRow = {
   r: number;
   terrain: Terrain;
   resource: string | null;
+  river?: RiverKind | null;
+  bridge?: boolean;
 };
 
 // The map-size ladder, smallest first. The type is derived from this array so
@@ -44,7 +47,7 @@ export const MAP_SIZE_ORDER = [
 ] as const;
 
 export type MapSize = (typeof MAP_SIZE_ORDER)[number];
-export type MapGenVersion = 1 | 2 | 3 | 4;
+export type MapGenVersion = 1 | 2 | 3 | 4 | 5;
 
 /**
  * The map-gen version every NEW game is created at. Both the generated grid and
@@ -52,7 +55,7 @@ export type MapGenVersion = 1 | 2 | 3 | 4;
  * be built on one map and re-generated on another when the client reloads.
  * Saved games keep the version they were created with (v1-v3 render unchanged).
  */
-export const CURRENT_MAP_GEN_VERSION: MapGenVersion = 4;
+export const CURRENT_MAP_GEN_VERSION: MapGenVersion = 5;
 
 // Dense forest (v4): a rarer, impassable second forest biome. It is grown OUT
 // of the normal forest's edge -- seeded on a non-forest neighbour of a forest
@@ -92,21 +95,40 @@ export class GameMap {
   tiles: Terrain[] = [];
   resourceTiles: (ResourceTile | undefined)[] = [];
   placedResourceTiles: readonly ResourceTile[] = [];
+  rivers: (RiverTile | undefined)[] = [];
+  placedRivers: readonly RiverTile[] = [];
 
   constructor(seed = 1, mapSize?: MapSize, version: MapGenVersion = 3) {
     if (mapSize && MAP_SIZES[mapSize]) {
       this.width = MAP_SIZES[mapSize].width;
       this.height = MAP_SIZES[mapSize].height;
     }
+    const rng = mulberry32(seed);
     this.tiles =
       version === 1
-        ? generateTerrainLegacy(mulberry32(seed), this.width, this.height)
-        : generateTerrain(mulberry32(seed), this.width, this.height, version >= 3, version >= 4);
+        ? generateTerrainLegacy(rng, this.width, this.height)
+        : generateTerrain(rng, this.width, this.height, version >= 3, version >= 4);
     if (!this.isPassable(HERO_SPAWN.q, HERO_SPAWN.r)) {
       this.tiles[this.index(HERO_SPAWN.q, HERO_SPAWN.r)] = "grass";
     }
-    const resourceRng = mulberry32(((seed ^ 0x72657375) >>> 0));
-    const placed = placeResourceTiles(this, resourceRng);
+    if (version >= 5) {
+      this.placedRivers = placeRivers(rng, this.tiles, this.width, this.height, version >= 3);
+      this.rivers = new Array<RiverTile | undefined>(this.width * this.height);
+      for (const t of this.placedRivers) {
+        this.rivers[this.index(t.q, t.r)] = t;
+      }
+      // The spawn is forced passable above; a wide river baked onto it would
+      // otherwise re-block it, so drop any river the spawn cell inherited.
+      const spawnIdx = this.index(HERO_SPAWN.q, HERO_SPAWN.r);
+      if (this.rivers[spawnIdx]) {
+        this.rivers[spawnIdx] = undefined;
+        this.placedRivers = this.placedRivers.filter(
+          (t) => t.q !== HERO_SPAWN.q || t.r !== HERO_SPAWN.r,
+        );
+      }
+    }
+    const resourceRng = mulberry32((seed ^ 0x72657375) >>> 0);
+    const placed = placeResourceTiles(this, resourceRng).filter((t) => !this.riverAt(t.q, t.r));
     this.placedResourceTiles = placed;
     this.resourceTiles = new Array<ResourceTile | undefined>(this.width * this.height);
     for (const t of placed) {
@@ -123,6 +145,11 @@ export class GameMap {
     return this.tiles[this.index(q, r)];
   }
 
+  riverAt(q: number, r: number): RiverTile | undefined {
+    if (q < 0 || q >= this.width || r < 0 || r >= this.height) return undefined;
+    return this.rivers[this.index(q, r)];
+  }
+
   resourceTileAt(q: number, r: number): ResourceTile | undefined {
     if (q < 0 || q >= this.width || r < 0 || r >= this.height) return undefined;
     const idx = this.index(q, r);
@@ -132,13 +159,19 @@ export class GameMap {
   isPassable(q: number, r: number): boolean {
     const t = this.get(q, r);
     if (!t) return false;
+    const river = this.riverAt(q, r);
+    if (river && river.kind === "wide" && !river.bridge) return false;
     return TERRAIN_COST[t] !== Infinity;
   }
 
   cost(q: number, r: number): number {
     const t = this.get(q, r);
     if (!t) return Infinity;
-    return TERRAIN_COST[t];
+    if (TERRAIN_COST[t] === Infinity) return Infinity;
+    const river = this.riverAt(q, r);
+    if (!river) return TERRAIN_COST[t];
+    if (river.kind === "wide") return river.bridge ? RIVER_BRIDGE_CROSS_COST : Infinity;
+    return RIVER_SMALL_CROSS_COST;
   }
 
   static fromTiles(rows: ReadonlyArray<TileRow>): GameMap {
@@ -151,22 +184,35 @@ export class GameMap {
     const width = maxQ + 1;
     const height = maxR + 1;
     const map = Object.create(GameMap.prototype) as GameMap;
-    map.width = width;
-    map.height = height;
-    map.tiles = new Array<Terrain>(width * height);
-    map.resourceTiles = new Array<ResourceTile | undefined>(width * height);
-    const placed: ResourceTile[] = [];
-    for (const row of rows) {
-      const idx = map.index(row.q, row.r);
-      map.tiles[idx] = row.terrain;
-      if (row.resource) {
-        const rt: ResourceTile = { q: row.q, r: row.r, resource: row.resource as any };
-        map.resourceTiles[idx] = rt;
-        placed.push(rt);
-      }
-    }
-    map.placedResourceTiles = placed;
-    return map;
+        map.width = width;
+        map.height = height;
+        map.tiles = new Array<Terrain>(width * height);
+        map.resourceTiles = new Array<ResourceTile | undefined>(width * height);
+        map.rivers = new Array<RiverTile | undefined>(width * height);
+        const placed: ResourceTile[] = [];
+        const rivers: RiverTile[] = [];
+        for (const row of rows) {
+          const idx = map.index(row.q, row.r);
+          map.tiles[idx] = row.terrain;
+          if (row.resource) {
+            const rt: ResourceTile = { q: row.q, r: row.r, resource: row.resource as any };
+            map.resourceTiles[idx] = rt;
+            placed.push(rt);
+          }
+          if (row.river) {
+            const rt: RiverTile = {
+              q: row.q,
+              r: row.r,
+              kind: row.river,
+              ...(row.bridge ? { bridge: true } : {}),
+            };
+            map.rivers[idx] = rt;
+            rivers.push(rt);
+          }
+        }
+        map.placedResourceTiles = placed;
+        map.placedRivers = rivers;
+        return map;
   }
 }
 
@@ -181,6 +227,7 @@ export function resolveMapGenVersion(version?: number | null): MapGenVersion {
   if (version === 1) return 1;
   if (version === 2) return 2;
   if (version === 4) return 4;
+  if (version === 5) return 5;
   return 3;
 }
 
@@ -188,6 +235,7 @@ export function resolveSavedMapGenVersion(version?: number | null): MapGenVersio
   if (version === 2) return 2;
   if (version === 3) return 3;
   if (version === 4) return 4;
+  if (version === 5) return 5;
   return 1;
 }
 

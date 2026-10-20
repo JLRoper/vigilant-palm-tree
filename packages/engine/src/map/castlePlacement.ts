@@ -34,6 +34,7 @@ function listCandidates(map: GameMap): { left: CandidateTile[]; right: Candidate
       const t = map.get(q, r);
       if (!t || !isPassable(t)) continue;
       if (map.resourceTileAt(q, r)) continue;
+      if (map.riverAt(q, r)) continue;
       const tile: CandidateTile = { q, r };
       any.push(tile);
       if (q < midpoint) left.push(tile);

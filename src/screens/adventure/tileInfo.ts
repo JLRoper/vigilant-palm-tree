@@ -2,7 +2,6 @@ import type { Axial } from "../../core/hex";
 import { hexDistance } from "../../core/hex";
 import type { GameMap } from "../../map/gameMap";
 import type { Terrain } from "../../map/terrain";
-import { TERRAIN_COST, isPassable } from "../../map/terrain";
 import type { ResourceType } from "../../map/resourceTiles";
 import { RESOURCE_YIELD } from "../../map/resourceTiles";
 import type { Hero } from "../../entities/hero";
@@ -19,6 +18,13 @@ export interface TileInfo {
   r: number;
   fogged: boolean;
   terrain: { kind: Terrain; label: string; cost: number; passable: boolean } | null;
+  river: {
+    kind: "small" | "wide";
+    bridge: boolean;
+    label: string;
+    cost: number;
+    passable: boolean;
+  } | null;
   deposit: {
     resource: ResourceType;
     yield: number;
@@ -205,6 +211,7 @@ export function describeTile(input: {
   if (!kind) return null;
 
   const fogged = !isTileVisibleTo(heroes, castles, viewPlayerId, tile.q, tile.r);
+  const river = map.riverAt(tile.q, tile.r);
 
   return {
     q: tile.q,
@@ -212,7 +219,25 @@ export function describeTile(input: {
     fogged,
     terrain: fogged
       ? null
-      : { kind, label: terrainLabel(kind), cost: TERRAIN_COST[kind], passable: isPassable(kind) },
+      : {
+          kind,
+          label: terrainLabel(kind),
+          // Effective values: the river overlay may change what entering the
+          // tile really costs even though the biome underneath stays the same.
+          cost: map.cost(tile.q, tile.r),
+          passable: map.isPassable(tile.q, tile.r),
+        },
+    river:
+      fogged || !river
+        ? null
+        : {
+            kind: river.kind,
+            bridge: river.bridge === true,
+            label:
+              river.kind === "small" ? "Small river" : river.bridge ? "Bridge" : "Wide river",
+            cost: map.cost(tile.q, tile.r),
+            passable: map.isPassable(tile.q, tile.r),
+          },
     deposit: fogged ? null : describeDeposit(map, castles, tile.q, tile.r),
     settlement: describeSettlement(state, tile.q, tile.r, fogged, viewPlayerId),
     district: describeDistrict(state, castles, heroes, tile.q, tile.r, fogged, viewPlayerId),
