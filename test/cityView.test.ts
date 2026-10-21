@@ -1186,7 +1186,8 @@ async function testFirstTouchAutoCrew(page: Page, settlementId: string): Promise
   const clicked = await page.evaluate(() => {
     const panel = Array.from(document.body.children).find((el) => (el.textContent ?? "").startsWith("Workforce"));
     if (!panel) return false;
-    const rows = Array.from(panel.querySelectorAll("div")).filter((d) => d.querySelectorAll("button").length === 2);
+    const body = panel.querySelector("[data-panel-body]") ?? panel;
+    const rows = Array.from(body.querySelectorAll("div")).filter((d) => d.querySelectorAll("button").length === 2);
     const plus = rows[0]?.querySelectorAll("button")[1] as HTMLButtonElement | undefined;
     if (!plus || plus.disabled) return false;
     plus.click();
@@ -1235,7 +1236,8 @@ async function testWorkforceSurvivesCityClose(page: Page, settlementId: string):
   const clicked = await page.evaluate(() => {
     const panel = Array.from(document.body.children).find((el) => (el.textContent ?? "").startsWith("Workforce"));
     if (!panel) return false;
-    const rows = Array.from(panel.querySelectorAll("div")).filter((d) => d.querySelectorAll("button").length === 2);
+    const body = panel.querySelector("[data-panel-body]") ?? panel;
+    const rows = Array.from(body.querySelectorAll("div")).filter((d) => d.querySelectorAll("button").length === 2);
     const plus = rows[1]?.querySelectorAll("button")[1] as HTMLButtonElement | undefined;
     if (!plus || plus.disabled) return false;
     plus.click();
