@@ -78,14 +78,21 @@ const FOG_EDGE = "rgba(8, 10, 16, 0.55)";
 const HOVER_STROKE = "#ffcc00";
 const SELECTED_TILE_STROKE = "#ffffff";
 
-// District road tracks: a worn-earth rut, deliberately low contrast so a road
-// reads as ground rather than as an overlay. The band widens with the track
-// count but saturates, so a fully staffed district reads as a broad trodden
-// lane instead of a marker.
-const ROAD_TRACK = "rgba(74, 62, 48, 0.42)";
-const ROAD_TRACK_WIDTH = 1;
-const ROAD_TRACK_GAP = 1.7;
-const ROAD_BAND_MAX = 17;
+// District road tracks: a pale gravel surface between two dark earth edges, so
+// the band reads as a made road on light terrain (desert, snow) and on dark
+// terrain (forest, swamp) alike -- a single dark rut measured only a ~20-point
+// luminance drop on desert and read as a shadow between two sprites.
+const ROAD_EDGE = "rgba(46, 38, 28, 0.55)";
+const ROAD_SURFACE = "rgba(198, 180, 148, 0.5)";
+const ROAD_RUT = "rgba(64, 54, 40, 0.5)";
+const ROAD_EDGE_OVERHANG = 1.5;
+const ROAD_WIDTH_BASE = 2.5;
+const ROAD_WIDTH_PER_STRAND = 0.5;
+const ROAD_WIDTH_MAX = 13;
+// Above this track count the ruts cannot stay side by side in a sane width, so
+// the road is drawn as its surface alone -- the count still reads as width.
+const ROAD_RUT_MAX = 8;
+const ROAD_RUT_SPACING = 1.9;
 
 const PARALLAX_SPEEDS: Record<number, number[]> = {
   2: [0.1, 1.0],
@@ -764,23 +771,20 @@ export function paintDistrict(ctx: CanvasRenderingContext2D, node: DistrictNode,
 }
 
 /**
- * District roads: one worn track per WORKFORCE_PER_ROAD points of the
- * district's workforce, running parallel to the edge, centred on the line
- * between the two tile centres. The tracks tighten together as the count
- * grows (band capped at ROAD_BAND_MAX) so a fully staffed district reads as a
- * broad trodden lane rather than a stripe leaving the hex grid.
+ * District roads: a pale gravel surface with dark earth edges, one rut per
+ * workforce track while the tracks still fit side by side, widening with the
+ * count up to ROAD_WIDTH_MAX. Districts are always adjacent to the parent they
+ * grew out from, so the band runs from tile centre to tile centre and the two
+ * sprites clip its ends -- that is what makes it read as joining them.
  *
- * Roads sit on the ground under every entity layer, so nothing here strokes an
- * outline or a highlight -- a road that announced itself would fight the
- * castle, district and hero art it leads to.
+ * Roads sit on the ground under every entity layer, so nothing here strokes a
+ * highlight: the surface is the only thing that announces the road.
  */
 export function paintSettlementRoad(ctx: CanvasRenderingContext2D, node: SettlementRoadNode, deps: Paint2DDep): void {
   if (node.segments.length === 0) return;
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.strokeStyle = ROAD_TRACK;
-  ctx.lineWidth = ROAD_TRACK_WIDTH;
   for (const segment of node.segments) {
     const dx = segment.to.x - segment.from.x;
     const dy = segment.to.y - segment.from.y;
@@ -789,18 +793,37 @@ export function paintSettlementRoad(ctx: CanvasRenderingContext2D, node: Settlem
     const nx = -dy / length;
     const ny = dx / length;
     const strands = Math.max(1, Math.floor(segment.strands));
-    const band = Math.min(ROAD_BAND_MAX, (strands - 1) * ROAD_TRACK_GAP);
-    const step = strands > 1 ? band / (strands - 1) : 0;
-    for (let i = 0; i < strands; i++) {
-      const offset = (i - (strands - 1) / 2) * step;
-      ctx.beginPath();
-      ctx.moveTo(segment.from.x + nx * offset, segment.from.y + ny * offset);
-      ctx.lineTo(segment.to.x + nx * offset, segment.to.y + ny * offset);
-      ctx.stroke();
+    const width = Math.min(ROAD_WIDTH_MAX, ROAD_WIDTH_BASE + strands * ROAD_WIDTH_PER_STRAND);
+    strokeRoadBand(ctx, segment.from, segment.to, nx, ny, 0, width + ROAD_EDGE_OVERHANG, ROAD_EDGE);
+    strokeRoadBand(ctx, segment.from, segment.to, nx, ny, 0, width, ROAD_SURFACE);
+    if (strands <= ROAD_RUT_MAX) {
+      const span = Math.min(ROAD_RUT_SPACING, (width - 1) / Math.max(1, strands - 1));
+      for (let i = 0; i < strands; i++) {
+        strokeRoadBand(ctx, segment.from, segment.to, nx, ny, (i - (strands - 1) / 2) * span, 1, ROAD_RUT);
+      }
     }
   }
   ctx.restore();
   void deps;
+}
+
+/** One straight stroke of the road, offset along the edge's normal. */
+function strokeRoadBand(
+  ctx: CanvasRenderingContext2D,
+  from: WorldPoint,
+  to: WorldPoint,
+  nx: number,
+  ny: number,
+  offset: number,
+  lineWidth: number,
+  style: string,
+): void {
+  ctx.strokeStyle = style;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+  ctx.moveTo(from.x + nx * offset, from.y + ny * offset);
+  ctx.lineTo(to.x + nx * offset, to.y + ny * offset);
+  ctx.stroke();
 }
 
 export function paintCharterOverlay(ctx: CanvasRenderingContext2D, node: CharterOverlayNode, deps: Paint2DDep): void {
