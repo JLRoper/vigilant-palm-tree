@@ -128,6 +128,7 @@ export class BuildingSelectionMenu {
       clickToFront: true,
       resizeable: true,
       resizeKey: "buildingSelection",
+      stackable: true,
       onClose: () => { this.menu = null; },
     });
 
