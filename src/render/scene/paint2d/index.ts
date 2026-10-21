@@ -82,17 +82,17 @@ const SELECTED_TILE_STROKE = "#ffffff";
 // the band reads as a made road on light terrain (desert, snow) and on dark
 // terrain (forest, swamp) alike -- a single dark rut measured only a ~20-point
 // luminance drop on desert and read as a shadow between two sprites.
-const ROAD_EDGE = "rgba(46, 38, 28, 0.55)";
-const ROAD_SURFACE = "rgba(198, 180, 148, 0.5)";
-const ROAD_RUT = "rgba(64, 54, 40, 0.5)";
-const ROAD_EDGE_OVERHANG = 1.5;
-const ROAD_WIDTH_BASE = 2.5;
-const ROAD_WIDTH_PER_STRAND = 0.5;
-const ROAD_WIDTH_MAX = 13;
-// Above this track count the ruts cannot stay side by side in a sane width, so
-// the road is drawn as its surface alone -- the count still reads as width.
-const ROAD_RUT_MAX = 8;
-const ROAD_RUT_SPACING = 1.9;
+//
+// Scale: the band is sized against the adventure-map sprites, not against the
+// hex, so it is a hairline -- a fifth of what a hex-wide road would be. At this
+// width individual cart ruts are sub-pixel and cannot be drawn, so the width
+// alone carries the workforce reading.
+const ROAD_EDGE = "rgba(46, 38, 28, 0.5)";
+const ROAD_SURFACE = "rgba(206, 190, 162, 0.55)";
+const ROAD_EDGE_OVERHANG = 0.8;
+const ROAD_WIDTH_BASE = 0.8;
+const ROAD_WIDTH_PER_STRAND = 0.09;
+const ROAD_WIDTH_MAX = 2.6;
 
 const PARALLAX_SPEEDS: Record<number, number[]> = {
   2: [0.1, 1.0],
@@ -771,14 +771,16 @@ export function paintDistrict(ctx: CanvasRenderingContext2D, node: DistrictNode,
 }
 
 /**
- * District roads: a pale gravel surface with dark earth edges, one rut per
- * workforce track while the tracks still fit side by side, widening with the
- * count up to ROAD_WIDTH_MAX. Districts are always adjacent to the parent they
- * grew out from, so the band runs from tile centre to tile centre and the two
- * sprites clip its ends -- that is what makes it read as joining them.
+ * District roads: a hairline pale gravel surface with a dark earth edge
+ * underneath, sized against the adventure-map sprites rather than the hex, so
+ * it stays a road and not a stripe. Width carries the workforce reading
+ * (ROAD_WIDTH_BASE + ROAD_WIDTH_PER_STRAND per track, capped at
+ * ROAD_WIDTH_MAX) -- at this scale individual ruts are sub-pixel, so the count
+ * is expressed as width rather than as separate lines.
  *
- * Roads sit on the ground under every entity layer, so nothing here strokes a
- * highlight: the surface is the only thing that announces the road.
+ * Districts are always adjacent to the parent they grew out from, so the band
+ * runs from tile centre to tile centre and the two sprites clip its ends --
+ * that is what makes it read as joining them.
  */
 export function paintSettlementRoad(ctx: CanvasRenderingContext2D, node: SettlementRoadNode, deps: Paint2DDep): void {
   if (node.segments.length === 0) return;
@@ -796,12 +798,6 @@ export function paintSettlementRoad(ctx: CanvasRenderingContext2D, node: Settlem
     const width = Math.min(ROAD_WIDTH_MAX, ROAD_WIDTH_BASE + strands * ROAD_WIDTH_PER_STRAND);
     strokeRoadBand(ctx, segment.from, segment.to, nx, ny, 0, width + ROAD_EDGE_OVERHANG, ROAD_EDGE);
     strokeRoadBand(ctx, segment.from, segment.to, nx, ny, 0, width, ROAD_SURFACE);
-    if (strands <= ROAD_RUT_MAX) {
-      const span = Math.min(ROAD_RUT_SPACING, (width - 1) / Math.max(1, strands - 1));
-      for (let i = 0; i < strands; i++) {
-        strokeRoadBand(ctx, segment.from, segment.to, nx, ny, (i - (strands - 1) / 2) * span, 1, ROAD_RUT);
-      }
-    }
   }
   ctx.restore();
   void deps;
