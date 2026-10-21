@@ -803,7 +803,7 @@ function strokesOf(calls: Array<{ name: string }>): number {
   return calls.filter((c) => c.name === "stroke").length;
 }
 
-test("paintSettlementRoad: a low-workforce district is a few ruts on a two-tone band", () => {
+test("paintSettlementRoad: a hairline track -- dark edge under a pale surface", () => {
   const { ctx, calls } = makeRecordingCtx();
   paintSettlementRoad(
     ctx,
@@ -811,48 +811,43 @@ test("paintSettlementRoad: a low-workforce district is a few ruts on a two-tone 
     makeNoopPaint2DDep(),
   );
 
-  // Edge + surface + one rut per strand.
-  assert.equal(strokesOf(calls), 5);
-  const styles = calls.filter((c) => c.name === "set:strokeStyle").map((c) => c.args[0]);
-  assert.deepEqual(styles, [
-    "rgba(46, 38, 28, 0.55)",
-    "rgba(198, 180, 148, 0.5)",
-    "rgba(64, 54, 40, 0.5)",
-    "rgba(64, 54, 40, 0.5)",
-    "rgba(64, 54, 40, 0.5)",
-  ], "dark edge, pale surface, then the ruts");
-  const widths = calls.filter((c) => c.name === "set:lineWidth").map((c) => c.args[0]);
-  assert.deepEqual(widths, [5.5, 4, 1, 1, 1], "the edge overhangs the 4px surface; ruts are 1px");
-
-  // A horizontal edge's normal is vertical: the ruts straddle the centre line.
-  const rutOffsets = calls.filter((c) => c.name === "moveTo").map((c) => c.args[1] as number).slice(2);
-  assert.deepEqual(rutOffsets, [-1.5, 0, 1.5]);
-  const rutXs = calls.filter((c) => c.name === "lineTo").map((c) => c.args[0] as number).slice(2);
-  assert.deepEqual(rutXs, [20, 20, 20]);
-});
-
-test("paintSettlementRoad: one track rides the centre line", () => {
-  const { ctx, calls } = makeRecordingCtx();
-  paintSettlementRoad(
-    ctx,
-    roadNode([{ strands: 1, from: { x: 0, y: 0 }, to: { x: 0, y: 20 } }]),
-    makeNoopPaint2DDep(),
+  assert.equal(strokesOf(calls), 2, "one dark edge stroke under one pale surface stroke");
+  assert.deepEqual(
+    calls.filter((c) => c.name === "set:strokeStyle").map((c) => c.args[0]),
+    ["rgba(46, 38, 28, 0.5)", "rgba(206, 190, 162, 0.55)"],
   );
-  assert.equal(strokesOf(calls), 3, "edge, surface, one rut");
-  const last = calls.filter((c) => c.name === "moveTo").at(-1);
-  assert.deepEqual(last?.args, [0, 0], "a single rut is not offset at all");
+  const widths = calls.filter((c) => c.name === "set:lineWidth").map((c) => c.args[0] as number);
+  assert.equal(widths.length, 2);
+  assert.ok(Math.abs(widths[1] - 1.07) < 1e-9, `surface is 0.8 + 3 x 0.09 wide, got ${widths[1]}`);
+  assert.ok(Math.abs(widths[0] - (widths[1] + 0.8)) < 1e-9, "the edge overhangs the surface by 0.8");
+
+  // Both strokes ride the edge's centre line -- no parallel ruts at this scale.
+  const offsets = calls.filter((c) => c.name === "moveTo").map((c) => c.args[1] as number);
+  assert.deepEqual(offsets, [0, 0]);
 });
 
-test("paintSettlementRoad: a busy district is its surface alone, capped in width", () => {
+test("paintSettlementRoad: a busy district is only a little wider, sized against the sprites", () => {
   const { ctx, calls } = makeRecordingCtx();
   paintSettlementRoad(
     ctx,
     roadNode([{ strands: 20, from: { x: 0, y: 0 }, to: { x: 20, y: 0 } }]),
     makeNoopPaint2DDep(),
   );
-  assert.equal(strokesOf(calls), 2, "past ROAD_RUT_MAX the ruts cannot stay apart: surface only");
-  const widths = calls.filter((c) => c.name === "set:lineWidth").map((c) => c.args[0]);
-  assert.deepEqual(widths, [14, 12.5], "20 tracks cap the surface at 12.5px, edge at 14px");
+  const widths = calls.filter((c) => c.name === "set:lineWidth").map((c) => c.args[0] as number);
+  assert.equal(widths.length, 2);
+  assert.ok(Math.abs(widths[1] - 2.6) < 1e-9, `full workforce caps the surface at 2.6px, got ${widths[1]}`);
+  assert.ok(widths[1] < 3 && widths[0] < 4, "a hairline, not a stripe: a fifth of the sprite-scale band");
+});
+
+test("paintSettlementRoad: a low-workforce track is thinner than a busy one", () => {
+  const quiet = makeRecordingCtx();
+  paintSettlementRoad(quiet.ctx, roadNode([{ strands: 1, from: { x: 0, y: 0 }, to: { x: 20, y: 0 } }]), makeNoopPaint2DDep());
+  const busy = makeRecordingCtx();
+  paintSettlementRoad(busy.ctx, roadNode([{ strands: 12, from: { x: 0, y: 0 }, to: { x: 20, y: 0 } }]), makeNoopPaint2DDep());
+  const quietWidth = quiet.calls.filter((c) => c.name === "set:lineWidth").at(-1)?.args[0] as number;
+  const busyWidth = busy.calls.filter((c) => c.name === "set:lineWidth").at(-1)?.args[0] as number;
+  assert.ok(Math.abs(quietWidth - 0.89) < 1e-9, `one track is 0.89px, got ${quietWidth}`);
+  assert.ok(busyWidth > quietWidth * 1.4, `12 tracks (${busyWidth}) must read wider than 1 track (${quietWidth})`);
 });
 
 test("paintSettlementRoad: an empty network emits nothing", () => {
