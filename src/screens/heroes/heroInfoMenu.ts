@@ -354,6 +354,7 @@ export class HeroInfoMenu {
       // Long-lived: show()/hide() reuse the same DOM, so Escape (and ×) hide
       // it instead of destroying the panel the game keeps re-showing.
       hideOnDismiss: true,
+      stackable: true,
       onMove: (pos) => {
         this.docked.markUserMoved();
         savePanelGeometry("heroInfo", pos);

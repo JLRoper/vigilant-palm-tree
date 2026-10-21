@@ -7,6 +7,19 @@ import {
 } from "./panelManager";
 import { attachPanelResize } from "./panelResize";
 import { loadPanelGeometry, loadPanelSize, savePanelGeometry, type PanelGeometryKey } from "./panelLayout";
+import {
+  beginStackDrag,
+  dragStackGroup,
+  endStackDrag,
+  hoverStackDrop,
+  isPanelLocked,
+  registerStackPanel,
+  resizeStackedPanel,
+  scheduleStackLayout,
+  unregisterStackPanel,
+  type StackSlot,
+  type StackablePanel,
+} from "./panelTiling";
 
 // One floating panel: the title bar, the scrolling body, drag, resize,
 // click-to-front, and Escape (owned by panelManager -- a panel is
@@ -120,9 +133,13 @@ export interface FloatingPanelOptions {
    * consume the key and stay open.
    */
   onEscape?: () => boolean;
+  stackable?: boolean;
 }
 
-export class FloatingPanel implements ManagedPanel {
+let nextStackId = 1;
+
+export class FloatingPanel implements ManagedPanel, StackablePanel {
+  readonly stackId = nextStackId++;
   readonly root: HTMLDivElement;
   readonly header: HTMLDivElement;
   readonly titleEl: HTMLDivElement;
@@ -133,6 +150,7 @@ export class FloatingPanel implements ManagedPanel {
 
   private layout: PanelMode = "floating";
   private closeBtn: HTMLButtonElement | null = null;
+  private moveBtn: HTMLButtonElement | null = null;
   private draggable: boolean;
   private dragOffset: { dx: number; dy: number } | null = null;
   private pos: { x: number; y: number };
@@ -140,6 +158,10 @@ export class FloatingPanel implements ManagedPanel {
   private onEscape?: () => boolean;
   private resizeGrip: HTMLDivElement | null = null;
   private resizeKey?: PanelGeometryKey;
+  private stackable: boolean;
+  private stackSlot: StackSlot | null = null;
+  private userHeight: number | null = null;
+  private heightLock: number | null = null;
 
   constructor(private opts: FloatingPanelOptions) {
     this.draggable = opts.draggable ?? true;
@@ -147,6 +169,7 @@ export class FloatingPanel implements ManagedPanel {
     this.onEscape = opts.onEscape;
     this.escapeClosable = opts.escapeClosable ?? true;
     this.pos = opts.initialPosition ?? { x: 0, y: 0 };
+    this.stackable = opts.stackable ?? false;
 
     this.root = document.createElement("div");
     Object.assign(this.root.style, {
@@ -225,6 +248,7 @@ export class FloatingPanel implements ManagedPanel {
     }
 
     this.body = document.createElement("div");
+    this.body.dataset.panelBody = "true";
     Object.assign(this.body.style, {
       padding: "12px 14px",
       display: "flex",
@@ -242,6 +266,7 @@ export class FloatingPanel implements ManagedPanel {
     this.root.appendChild(this.body);
 
     if (this.draggable) this.attachDrag();
+    if (this.stackable && this.draggable) this.addMoveHandle();
 
     if (this.opts.clickToFront) {
       this.root.addEventListener(
@@ -258,6 +283,7 @@ export class FloatingPanel implements ManagedPanel {
 
     if (opts.resizeable) this.enableResize(opts.resizeKey);
     registerPanel(this);
+    if (this.stackable) registerStackPanel(this);
   }
 
   setTitle(text: string): void {
@@ -306,6 +332,8 @@ export class FloatingPanel implements ManagedPanel {
 
   setLayout(mode: PanelMode): void {
     this.layout = mode;
+    this.clearStackSlot();
+    if (this.stackable) scheduleStackLayout();
     if (mode === "docked") {
       Object.assign(this.root.style, {
         position: "static",
@@ -352,8 +380,107 @@ export class FloatingPanel implements ManagedPanel {
   setPosition(x: number, y: number): void {
     this.pos = { x, y };
     this.root.style.left = `${x}px`;
-    this.root.style.top = `${y}px`;
+    this.root.style.top = `${this.stackSlot ? this.stackSlot.y : y}px`;
     this.fitToViewport();
+    if (this.stackable) scheduleStackLayout();
+  }
+
+  moveTo(x: number, y: number): void {
+    this.setPosition(x, y);
+    this.opts.onMove?.({ x, y });
+  }
+
+  isStacked(): boolean {
+    return this.stackSlot !== null;
+  }
+
+  getStackSlot(): StackSlot | null {
+    return this.stackSlot;
+  }
+
+  stackMinTop(): number {
+    return this.opts.minTop?.() ?? 0;
+  }
+
+  isStackEligible(): boolean {
+    return (
+      this.layout === "floating" &&
+      this.root.isConnected &&
+      this.root.style.position === "absolute" &&
+      this.isPanelVisible()
+    );
+  }
+
+  naturalHeight(): number {
+    const room = Math.max(120, window.innerHeight - this.stackMinTop() - VIEWPORT_MARGIN);
+    const fixed = this.heightLock ?? this.userHeight;
+    if (fixed !== null) return Math.min(fixed, room);
+    const frame = this.root.offsetHeight - this.root.clientHeight;
+    return Math.min(Math.ceil(this.header.offsetHeight + this.body.scrollHeight + frame), room);
+  }
+
+  setStackSlot(slot: StackSlot | null): void {
+    const prev = this.stackSlot;
+    if (!prev && !slot) return;
+    if (prev && slot && prev.y === slot.y && prev.h === slot.h) return;
+    if (!slot) {
+      this.clearStackSlot();
+      this.root.style.top = `${this.pos.y}px`;
+      this.applyOwnHeight();
+      this.fitToViewport();
+      return;
+    }
+    this.stackSlot = slot;
+    this.root.dataset.panelStacked = "true";
+    const frame = this.root.style.boxSizing === "border-box"
+      ? 0
+      : this.root.offsetHeight - this.root.clientHeight;
+    this.root.style.top = `${slot.y}px`;
+    this.root.style.height = `${Math.max(0, slot.h - frame)}px`;
+    this.root.style.maxHeight = "none";
+  }
+
+  getHeightLock(): number | null {
+    return this.heightLock;
+  }
+
+  toggleHeightLock(): void {
+    if (this.heightLock !== null) {
+      this.heightLock = null;
+    } else {
+      this.heightLock = Math.round(this.stackSlot?.h ?? this.root.getBoundingClientRect().height);
+    }
+    if (!this.stackSlot) this.applyOwnHeight();
+    this.syncGripHighlight();
+    if (this.stackable) scheduleStackLayout();
+  }
+
+  private applyOwnHeight(): void {
+    const fixed = this.heightLock ?? this.userHeight;
+    this.root.style.boxSizing = fixed !== null ? "border-box" : this.root.style.boxSizing;
+    this.root.style.height = fixed !== null ? `${fixed}px` : "";
+  }
+
+  private syncGripHighlight(): void {
+    if (!this.resizeGrip) return;
+    const locked = this.heightLock !== null;
+    this.resizeGrip.style.background = locked
+      ? "linear-gradient(135deg, transparent 52%, rgba(230,190,90,0.95) 52%)"
+      : "linear-gradient(135deg, transparent 52%, rgba(255,255,255,0.30) 52%)";
+    this.resizeGrip.title = locked
+      ? "Height locked - click to unlock, drag to resize"
+      : "Click to lock this panel's height, drag to resize";
+  }
+
+  private clearStackSlot(): void {
+    this.stackSlot = null;
+    delete this.root.dataset.panelStacked;
+  }
+
+  savedSize(): { w: number; h: number } {
+    const rect = this.root.getBoundingClientRect();
+    const h = this.stackSlot ? this.userHeight ?? this.naturalHeight() : rect.height;
+    return { w: Math.round(rect.width), h: Math.round(h) };
   }
 
   /**
@@ -362,7 +489,7 @@ export class FloatingPanel implements ManagedPanel {
    * the screen (where its scrollbar is unreachable).
    */
   fitToViewport(): void {
-    if (this.layout !== "floating") return;
+    if (this.layout !== "floating" || this.stackSlot) return;
     const top = this.pos.y;
     const available = window.innerHeight - top - VIEWPORT_MARGIN;
     this.root.style.maxHeight = `${Math.max(120, Math.round(available))}px`;
@@ -375,9 +502,19 @@ export class FloatingPanel implements ManagedPanel {
     // reopen re-applied a content-box width and the panel crept 2px wider.
     this.root.style.boxSizing = "border-box";
     this.root.style.width = `${Math.round(width)}px`;
-    this.root.style.height = `${Math.round(height)}px`;
-    this.fitToViewport();
     this.body.style.overflowY = "auto";
+    if (this.stackSlot) {
+      const wasLocked = this.heightLock !== null;
+      this.heightLock = null;
+      resizeStackedPanel(this, height);
+      if (wasLocked) this.heightLock = this.stackSlot?.h ?? Math.round(height);
+      return;
+    }
+    this.userHeight = Math.round(height);
+    if (this.heightLock !== null) this.heightLock = this.userHeight;
+    this.root.style.height = `${this.userHeight}px`;
+    this.fitToViewport();
+    if (this.stackable) scheduleStackLayout();
   }
 
   getSize(): { w: number; h: number } {
@@ -398,6 +535,7 @@ export class FloatingPanel implements ManagedPanel {
       this,
     );
     this.syncResizeGrip();
+    this.syncGripHighlight();
   }
 
   /**
@@ -454,6 +592,7 @@ export class FloatingPanel implements ManagedPanel {
       return;
     }
     this.root.style.display = "none";
+    if (this.stackable) scheduleStackLayout();
     this.onClose?.();
   }
 
@@ -464,6 +603,7 @@ export class FloatingPanel implements ManagedPanel {
   setDraggable(value: boolean): void {
     this.draggable = value;
     this.header.style.cursor = value ? "move" : "default";
+    if (this.moveBtn) this.moveBtn.style.display = value ? "" : "none";
   }
 
   setPanelZ(z: number): void {
@@ -476,52 +616,90 @@ export class FloatingPanel implements ManagedPanel {
     // placement) and rely on the pre-close DOM. root.remove() afterwards is
     // idempotent for callbacks that already detached it.
     unregisterPanel(this);
+    if (this.stackable) unregisterStackPanel(this);
     this.onClose?.();
     this.root.remove();
   }
 
+  private addMoveHandle(): void {
+    const btn = document.createElement("button");
+    btn.dataset.panelMoveHandle = "true";
+    btn.title = "Drag to move just this panel (it stays locked to its column)";
+    btn.innerHTML =
+      '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5v13M1.5 8h13"/>' +
+      '<path d="M6 3.5 8 1.5l2 2M6 12.5l2 2 2-2M3.5 6 1.5 8l2 2M12.5 6l2 2-2 2"/></svg>';
+    Object.assign(btn.style, {
+      display: "flex",
+      alignItems: "center",
+      background: "transparent",
+      color: "rgba(255,255,255,0.7)",
+      border: "none",
+      padding: "0 4px",
+      cursor: "move",
+    });
+    btn.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+      this.startDrag(e, true);
+    });
+    btn.addEventListener("click", (e) => e.stopPropagation());
+    this.actions.insertBefore(btn, this.actions.firstChild);
+    this.moveBtn = btn;
+  }
+
   private attachDrag(): void {
-    const onDown = (e: MouseEvent) => {
-      if (!this.draggable) return;
-      if (e.button !== 0) return;
-      if (this.closeBtn && e.target === this.closeBtn) return;
-      e.preventDefault();
-      const rect = this.root.getBoundingClientRect();
-      // Centred dialogs sit in normal flex flow so CSS can keep them centred.
-      // Dragging one means taking it out of flow, pinned where it currently is.
-      if (this.root.style.position !== "absolute") {
-        const origin = (this.root.offsetParent as HTMLElement | null)?.getBoundingClientRect();
-        this.root.style.position = "absolute";
-        this.setPosition(rect.left - (origin?.left ?? 0), rect.top - (origin?.top ?? 0));
-      }
-      this.dragOffset = {
-        dx: e.clientX - rect.left,
-        dy: e.clientY - rect.top,
-      };
-      const onMove = (ev: MouseEvent) => {
-        if (!this.dragOffset) return;
-        // Clamp both edges so a panel can never be dragged out of reach.
-        const { width, height } = this.root.getBoundingClientRect();
-        const minY = this.opts.minTop?.() ?? 0;
-        const x = clamp(ev.clientX - this.dragOffset.dx, 0, Math.max(0, window.innerWidth - width));
-        const y = clamp(ev.clientY - this.dragOffset.dy, minY, Math.max(minY, window.innerHeight - height));
-        this.setPosition(x, y);
-        this.opts.onMove?.({ x, y });
-      };
-      const onUp = () => {
-        this.dragOffset = null;
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+    this.header.addEventListener("mousedown", (e) => this.startDrag(e, false));
+  }
+
+  private startDrag(e: MouseEvent, solo: boolean): void {
+    if (!this.draggable) return;
+    if (e.button !== 0) return;
+    if (this.closeBtn && e.target === this.closeBtn) return;
+    e.preventDefault();
+    const grouped = !solo && this.stackable && isPanelLocked(this);
+    if (!grouped && this.stackSlot) this.pos = { x: this.pos.x, y: this.stackSlot.y };
+    if (this.stackable) beginStackDrag(this, solo);
+    const start = { x: e.clientX, y: e.clientY };
+    const rect = this.root.getBoundingClientRect();
+    // Centred dialogs sit in normal flex flow so CSS can keep them centred.
+    // Dragging one means taking it out of flow, pinned where it currently is.
+    if (this.root.style.position !== "absolute") {
+      const origin = (this.root.offsetParent as HTMLElement | null)?.getBoundingClientRect();
+      this.root.style.position = "absolute";
+      this.setPosition(rect.left - (origin?.left ?? 0), rect.top - (origin?.top ?? 0));
+    }
+    this.dragOffset = {
+      dx: e.clientX - rect.left,
+      dy: e.clientY - rect.top,
     };
-    this.header.addEventListener("mousedown", onDown);
+    const onMove = (ev: MouseEvent) => {
+      if (!this.dragOffset) return;
+      if (grouped) {
+        dragStackGroup(ev.clientX - start.x, ev.clientY - start.y);
+        return;
+      }
+      // Clamp both edges so a panel can never be dragged out of reach.
+      const { width, height } = this.root.getBoundingClientRect();
+      const minY = this.opts.minTop?.() ?? 0;
+      const x = clamp(ev.clientX - this.dragOffset.dx, 0, Math.max(0, window.innerWidth - width));
+      const y = clamp(ev.clientY - this.dragOffset.dy, minY, Math.max(minY, window.innerHeight - height));
+      this.setPosition(x, y);
+      this.opts.onMove?.({ x, y });
+      if (this.stackable) hoverStackDrop(ev.clientX, ev.clientY);
+    };
+    const onUp = (ev: MouseEvent) => {
+      this.dragOffset = null;
+      if (this.stackable) endStackDrag(ev.clientX, ev.clientY);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   }
 }
 
 export function clampPanelIntoView(panel: FloatingPanel, minTop = 0): void {
-  if (panel.root.style.position !== "absolute") return;
+  if (panel.root.style.position !== "absolute" || panel.isStacked()) return;
   const rect = panel.root.getBoundingClientRect();
   const pos = panel.getPosition();
   const x = clamp(pos.x, 0, Math.max(0, window.innerWidth - rect.width));
@@ -538,6 +716,7 @@ export function clampPanelIntoView(panel: FloatingPanel, minTop = 0): void {
 // The caller must have the panel displayed before calling: a `display: none`
 // element measures 0x0, and an anchor derived from that silently does nothing.
 export function anchorPanelToBottom(panel: FloatingPanel, x: number, minTop = 0): void {
+  if (panel.isStacked()) return;
   // The shared FLOATING_MAX_HEIGHT cap is measured against the whole viewport
   // and knows nothing about the space reserved at the top for the toolbar.
   // Without narrowing it here, a panel that grows to the full cap still hangs
@@ -578,12 +757,14 @@ export function createPanel(spec: PanelSpec): FloatingPanel {
     persistPosition = true,
     resizable,
     onMove,
+    stackable = true,
     ...rest
   } = spec;
   const stored = key ? loadPanelGeometry(key) : null;
   const resizeable = resizable ?? key !== undefined;
   return new FloatingPanel({
     ...rest,
+    stackable,
     initialPosition: stored ?? defaultPosition ?? DEFAULT_PANEL_POSITION,
     clickToFront: true,
     onMove: (pos) => {

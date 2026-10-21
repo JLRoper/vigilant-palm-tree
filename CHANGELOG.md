@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.30.0] - 2026-10-21
+
+Floating panels tile when they overlap: equal sections with their own scrollbars, draggable seams, per-seam padlocks that lock panels into columns, height locks on the corner grip, a column-length handle and a per-panel move handle.
+
 ## [0.29.0] - 2026-10-20
 
 - **Rivers on the adventure map** (map-gen **v5**) — procedural rivers run between two bodies of water (lakes or swamps), drawn as water over the biome underneath, not as a terrain value. Two kinds: **small** (crossable, costs a full day — all 7 movement points) and **wide** (impassable except at baked bridges, cost 1), with ~one bridge every 8 cells. The A*-guided meander walk descends a distance-to-sink field with a momentum term (no U-turns, soft turns cheap) plus a slight biome-boundary bias, and never self-touches, merges, or forms more than a 3-way junction.

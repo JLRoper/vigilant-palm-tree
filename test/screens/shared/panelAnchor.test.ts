@@ -40,6 +40,7 @@ function makeMenu(
     },
     getPosition: () => ({ ...state.pos }),
     setPosition: (x: number, y: number) => { state.pos = { x, y }; },
+    isStacked: () => false,
   };
 }
 

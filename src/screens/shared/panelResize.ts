@@ -9,6 +9,7 @@ const MIN_WIDTH = 220;
 const MIN_HEIGHT = 140;
 const VIEWPORT_MARGIN = 8;
 const GRIP_PX = 14;
+const CLICK_SLOP = 3;
 
 export interface PanelResizeOptions {
   /** Remembers the last size under this key (same store as panel geometry). */
@@ -28,6 +29,8 @@ export interface ResizeTarget {
   element: HTMLElement;
   /** Applies width/height (a FloatingPanel mirrors them onto its own state). */
   apply: (width: number, height: number) => void;
+  measure?: () => { w: number; h: number };
+  onClick?: () => void;
 }
 
 export function attachPanelResizeTo(target: ResizeTarget, opts: PanelResizeOptions = {}): HTMLDivElement {
@@ -59,7 +62,7 @@ export function attachPanelResizeTo(target: ResizeTarget, opts: PanelResizeOptio
   });
   host.appendChild(grip);
 
-  let drag: { startX: number; startY: number; startW: number; startH: number } | null = null;
+  let drag: { startX: number; startY: number; startW: number; startH: number; moved: boolean } | null = null;
 
   const clamp = (w: number, h: number): { w: number; h: number } => ({
     w: Math.max(minW, Math.min(w, window.innerWidth - VIEWPORT_MARGIN * 2)),
@@ -68,17 +71,25 @@ export function attachPanelResizeTo(target: ResizeTarget, opts: PanelResizeOptio
 
   const onMove = (e: MouseEvent): void => {
     if (!drag) return;
+    if (!drag.moved && Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) < CLICK_SLOP) return;
+    drag.moved = true;
     const next = clamp(drag.startW + (e.clientX - drag.startX), drag.startH + (e.clientY - drag.startY));
     target.apply(next.w, next.h);
   };
 
   const onUp = (): void => {
     if (!drag) return;
+    const moved = drag.moved;
     drag = null;
     window.removeEventListener("mousemove", onMove, true);
     window.removeEventListener("mouseup", onUp, true);
+    if (!moved) {
+      target.onClick?.();
+      return;
+    }
     const rect = host.getBoundingClientRect();
-    if (key) savePanelSize(key, { w: Math.round(rect.width), h: Math.round(rect.height) });
+    const size = target.measure?.() ?? { w: rect.width, h: rect.height };
+    if (key) savePanelSize(key, { w: Math.round(size.w), h: Math.round(size.h) });
   };
 
   grip.addEventListener("mousedown", (e) => {
@@ -86,7 +97,7 @@ export function attachPanelResizeTo(target: ResizeTarget, opts: PanelResizeOptio
     e.preventDefault();
     e.stopPropagation();
     const rect = host.getBoundingClientRect();
-    drag = { startX: e.clientX, startY: e.clientY, startW: rect.width, startH: rect.height };
+    drag = { startX: e.clientX, startY: e.clientY, startW: rect.width, startH: rect.height, moved: false };
     window.addEventListener("mousemove", onMove, true);
     window.addEventListener("mouseup", onUp, true);
   });
@@ -97,12 +108,19 @@ export function attachPanelResizeTo(target: ResizeTarget, opts: PanelResizeOptio
 /** Convenience wrapper for the common case: a FloatingPanel's own root. */
 export function attachPanelResize(
   opts: PanelResizeOptions,
-  menu: { root: HTMLElement; setSize: (w: number, h: number) => void },
+  menu: {
+    root: HTMLElement;
+    setSize: (w: number, h: number) => void;
+    savedSize?: () => { w: number; h: number };
+    toggleHeightLock?: () => void;
+  },
 ): HTMLDivElement {
   return attachPanelResizeTo(
     {
       element: menu.root,
       apply: (w, h) => menu.setSize(w, h),
+      measure: menu.savedSize?.bind(menu),
+      onClick: menu.toggleHeightLock?.bind(menu),
     },
     opts,
   );

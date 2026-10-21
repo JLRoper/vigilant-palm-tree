@@ -189,6 +189,7 @@ export class BuildingMenu {
       clickToFront: true,
       resizeable: true,
       resizeKey: "buildingMenu",
+      stackable: true,
       onClose: () => {
         this.menu = null;
         this.onMenuClosed?.();
