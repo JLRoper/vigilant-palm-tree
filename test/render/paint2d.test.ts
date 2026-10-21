@@ -790,16 +790,20 @@ test("paintBattleFloatingText: emits a strokeText + fillText pair with the alpha
   assert.equal(fill?.args[0], "rgba(255,214,102,0.8)", "float fill should match the live gold-tinted alpha");
 });
 
-// District roads: one thin track per strand, laid parallel to the edge and
-// centred on the line between the two tile centres. The tracks sit on the
-// ground under every entity layer, so the painter stays low-contrast (no
-// outline, no highlight) and only its geometry is worth pinning.
+// District roads: a pale gravel surface with dark earth edges, one rut per
+// workforce track while the ruts still fit side by side, widening with the
+// count up to a cap. The road sits on the ground under every entity layer, so
+// its geometry and its two-tone palette are what is worth pinning.
 
 function roadNode(segments: SettlementRoadNode["segments"]): SettlementRoadNode {
   return { kind: "settlementRoad", settlementId: "s0", segments };
 }
 
-test("paintSettlementRoad: one track per strand, spread across the road and centred on it", () => {
+function strokesOf(calls: Array<{ name: string }>): number {
+  return calls.filter((c) => c.name === "stroke").length;
+}
+
+test("paintSettlementRoad: a low-workforce district is a few ruts on a two-tone band", () => {
   const { ctx, calls } = makeRecordingCtx();
   paintSettlementRoad(
     ctx,
@@ -807,43 +811,48 @@ test("paintSettlementRoad: one track per strand, spread across the road and cent
     makeNoopPaint2DDep(),
   );
 
-  const moves = calls.filter((c) => c.name === "moveTo");
-  const lines = calls.filter((c) => c.name === "lineTo");
-  assert.equal(moves.length, 3, "3 strands is 3 tracks");
-  assert.equal(lines.length, 3);
-  // A horizontal edge's normal is vertical, so the tracks differ in y only and
-  // straddle the centre line: -1.7, 0, +1.7.
-  assert.deepEqual(moves.map((c) => c.args[1]), [-1.7, 0, 1.7]);
-  assert.deepEqual(lines.map((c) => c.args[1]), [-1.7, 0, 1.7]);
-  assert.deepEqual(moves.map((c) => c.args[0]), [0, 0, 0]);
-  assert.deepEqual(lines.map((c) => c.args[0]), [20, 20, 20]);
-  assert.equal(calls.filter((c) => c.name === "stroke").length, 3, "each track is its own stroke");
+  // Edge + surface + one rut per strand.
+  assert.equal(strokesOf(calls), 5);
+  const styles = calls.filter((c) => c.name === "set:strokeStyle").map((c) => c.args[0]);
+  assert.deepEqual(styles, [
+    "rgba(46, 38, 28, 0.55)",
+    "rgba(198, 180, 148, 0.5)",
+    "rgba(64, 54, 40, 0.5)",
+    "rgba(64, 54, 40, 0.5)",
+    "rgba(64, 54, 40, 0.5)",
+  ], "dark edge, pale surface, then the ruts");
+  const widths = calls.filter((c) => c.name === "set:lineWidth").map((c) => c.args[0]);
+  assert.deepEqual(widths, [5.5, 4, 1, 1, 1], "the edge overhangs the 4px surface; ruts are 1px");
+
+  // A horizontal edge's normal is vertical: the ruts straddle the centre line.
+  const rutOffsets = calls.filter((c) => c.name === "moveTo").map((c) => c.args[1] as number).slice(2);
+  assert.deepEqual(rutOffsets, [-1.5, 0, 1.5]);
+  const rutXs = calls.filter((c) => c.name === "lineTo").map((c) => c.args[0] as number).slice(2);
+  assert.deepEqual(rutXs, [20, 20, 20]);
 });
 
-test("paintSettlementRoad: a single track rides the centre line", () => {
+test("paintSettlementRoad: one track rides the centre line", () => {
   const { ctx, calls } = makeRecordingCtx();
   paintSettlementRoad(
     ctx,
     roadNode([{ strands: 1, from: { x: 0, y: 0 }, to: { x: 0, y: 20 } }]),
     makeNoopPaint2DDep(),
   );
-  const moves = calls.filter((c) => c.name === "moveTo");
-  assert.equal(moves.length, 1);
-  // A vertical edge offsets in x; one track is not offset at all.
-  assert.deepEqual(moves[0].args, [0, 0]);
+  assert.equal(strokesOf(calls), 3, "edge, surface, one rut");
+  const last = calls.filter((c) => c.name === "moveTo").at(-1);
+  assert.deepEqual(last?.args, [0, 0], "a single rut is not offset at all");
 });
 
-test("paintSettlementRoad: a fully staffed district's band saturates instead of scaling with the count", () => {
+test("paintSettlementRoad: a busy district is its surface alone, capped in width", () => {
   const { ctx, calls } = makeRecordingCtx();
   paintSettlementRoad(
     ctx,
     roadNode([{ strands: 20, from: { x: 0, y: 0 }, to: { x: 20, y: 0 } }]),
     makeNoopPaint2DDep(),
   );
-  const offsets = calls.filter((c) => c.name === "moveTo").map((c) => c.args[1] as number);
-  assert.equal(offsets.length, 20, "20 strands is 20 tracks");
-  assert.ok(Math.max(...offsets) <= 8.5 && Math.min(...offsets) >= -8.5, "the band stays capped at 17px wide");
-  assert.ok(new Set(offsets).size === 20, "no two tracks collapse onto each other");
+  assert.equal(strokesOf(calls), 2, "past ROAD_RUT_MAX the ruts cannot stay apart: surface only");
+  const widths = calls.filter((c) => c.name === "set:lineWidth").map((c) => c.args[0]);
+  assert.deepEqual(widths, [14, 12.5], "20 tracks cap the surface at 12.5px, edge at 14px");
 });
 
 test("paintSettlementRoad: an empty network emits nothing", () => {
@@ -859,5 +868,5 @@ test("paintSettlementRoad: a zero-length segment is skipped rather than stroked 
     roadNode([{ strands: 4, from: { x: 5, y: 5 }, to: { x: 5, y: 5 } }]),
     makeNoopPaint2DDep(),
   );
-  assert.equal(calls.filter((c) => c.name === "stroke").length, 0);
+  assert.equal(strokesOf(calls), 0);
 });
