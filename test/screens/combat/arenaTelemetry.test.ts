@@ -148,7 +148,10 @@ test("attackFromTarget streams one attack row when the engine applies it", () =>
 test("retreat and surrender stream their own phase rows with side context", () => {
   const retreated = makeState();
   const retreatSpy = spy();
-  retreatAction(retreated, "attacker", retreatSpy.emit);
+  assert.equal(retreatAction(retreated, "attacker", retreatSpy.emit), false, "round 1: retreat not open yet");
+  assert.deepEqual(retreatSpy.rows, [], "a refused retreat streams nothing");
+  retreated.round = 2;
+  assert.equal(retreatAction(retreated, "attacker", retreatSpy.emit), true);
   assert.deepEqual(
     retreatSpy.rows.map((r) => r.phase),
     ["retreat"],

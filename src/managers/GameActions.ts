@@ -3,13 +3,14 @@ import { SessionManager } from "./SessionManager";
 import { showToast } from "@screens/shared/toast";
 import type { ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
 import type { BattleActionPhase } from "@screens/combat/arena/state";
-import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, settlementStacks, spellLoadoutForHero, type BattleResult } from "@heroes/engine";
+import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, settlementStacks, spellLoadoutForHero, SETTLEMENT_BATTLE_MIN_RETREAT_ROUND, type BattleResult } from "@heroes/engine";
 import type { GameState, HeroBattleVerdict, HeroState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
 import { catalogFailed, cachedUnitTypes, loadUnitCatalog } from "../data/unitCatalog";
 import type { UnitType } from "../state/units";
 import { submitBattleResult, submitSettlementBattleResult, type SubmitBattleResultResult, type SubmitSettlementBattleResultResult } from "../io/commands";
+import { sendWithRetry } from "../io/commandRetry";
 import { isServerDriven } from "../io/serverDrivenGames";
 import { consumeResolveBattleVerdicts, mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../game/turnHooks";
 import {
@@ -143,19 +144,24 @@ export class GameActions {
       if (choice === "fight") {
         const fought = await this.fightInArena(gameName, attackerId, defenderId, localIsAttacker ? attacker : defender, localIsAttacker ? defender : attacker);
         if (fought.kind === "applied") {
-          this.state.replaceState(fought.state);
-          this.captureAfterBattleIfNeeded(attackerId);
-          const { showBattleResultCard } = await import("@screens/combat/battleResultCard");
-          showBattleResultCard({
-            result: fought.result,
-            attackerLabel: `Hero ${attackerName}`,
-            defenderLabel: `Hero ${defenderName}`,
-            onCarryOn: fought.closeArena,
-            attackerVerdict: fought.attackerVerdict,
-            defenderVerdict: fought.defenderVerdict,
-            attackerSettlementName: fought.attackerSettlementName,
-            defenderSettlementName: fought.defenderSettlementName,
-          });
+          try {
+            this.state.replaceState(fought.state);
+            this.captureAfterBattleIfNeeded(attackerId);
+            const { showBattleResultCard } = await import("@screens/combat/battleResultCard");
+            showBattleResultCard({
+              result: fought.result,
+              attackerLabel: `Hero ${attackerName}`,
+              defenderLabel: `Hero ${defenderName}`,
+              onCarryOn: fought.closeArena,
+              attackerVerdict: fought.attackerVerdict,
+              defenderVerdict: fought.defenderVerdict,
+              attackerSettlementName: fought.attackerSettlementName,
+              defenderSettlementName: fought.defenderSettlementName,
+            });
+          } catch (err) {
+            fought.closeArena();
+            throw err;
+          }
           return;
         }
         if (fought.kind === "done") {
@@ -174,7 +180,7 @@ export class GameActions {
       } else if (choice === "quickResolve") {
         battle = await tc.resolveCurrentBattle();
       } else {
-        tc.cancelMove(attackerId);
+        tc.abandonBattle(attackerId);
       }
       this.state.replaceState(tc.getState());
       this.captureAfterBattleIfNeeded(attackerId);
@@ -305,6 +311,41 @@ export class GameActions {
       closeArena = handle.close;
     });
 
+    // Only the "applied" result hands the open arena to the caller (its result
+    // card's Carry On closes it). Every other exit -- phase gone, rejected or
+    // failed submission, or a throw -- must close it here, or the full-screen
+    // overlay strands the player on a finished battlefield
+    // (plan/2026-10-21-battle-retreat-rules.md §1).
+    let handedOff = false;
+    try {
+      const applied = await this.applyArenaOutcome(gameName, attackerId, defenderId, humanHero, outcome, closeArena);
+      handedOff = applied.kind === "applied";
+      return applied;
+    } finally {
+      if (!handedOff) closeArena();
+    }
+  }
+
+  private async applyArenaOutcome(
+    gameName: string | null,
+    attackerId: string,
+    defenderId: string,
+    humanHero: HeroState,
+    outcome: ManualBattleOutcome,
+    closeArena: () => void,
+  ): Promise<
+    | {
+        kind: "applied";
+        state: GameState;
+        result: BattleResult;
+        closeArena: () => void;
+        attackerVerdict?: HeroBattleVerdict;
+        defenderVerdict?: HeroBattleVerdict;
+        attackerSettlementName?: string;
+        defenderSettlementName?: string;
+      }
+    | { kind: "done" }
+  > {
     // Re-grab the controller after the arena: a multiplayerSync poll may
     // have replaceState()'d underneath the overlay while the fight played
     // out, and the pre-battle tc reference would be stale.
@@ -312,27 +353,30 @@ export class GameActions {
     const current = tc.getState();
     if (current.phase.kind !== "BATTLE") return { kind: "done" };
 
-    const server = await submitBattleResult(gameName ?? "", {
-      actor: humanHero.ownerId,
-      attackerId,
-      defenderId,
-      outcome: outcome.outcome,
-      attackerStacks: outcome.attackerSurvivors,
-      defenderStacks: outcome.defenderSurvivors,
-      ...(outcome.surrenderedGold > 0 ? { surrenderedGold: outcome.surrenderedGold } : {}),
-      rounds: outcome.result.rounds,
-      obstacleSeed: outcome.result.obstacleSeed,
-    }).catch((err: unknown): SubmitBattleResultResult | null => {
-      // Server rejected or the request failed: no authoritative result to
-      // apply. Restore the pre-battle position (same as Flee) so the game
-      // is not stuck in the BATTLE phase, and surface the failure the same
-      // way failed commands do.
-      bus.emit({ type: "command:rejected", action: "SubmitBattleResult", reason: String(err) });
-      tc.cancelMove(attackerId);
+    const sent = await sendWithRetry(() =>
+      submitBattleResult(gameName ?? "", {
+        actor: humanHero.ownerId,
+        attackerId,
+        defenderId,
+        outcome: outcome.outcome,
+        attackerStacks: outcome.attackerSurvivors,
+        defenderStacks: outcome.defenderSurvivors,
+        ...(outcome.surrenderedGold > 0 ? { surrenderedGold: outcome.surrenderedGold } : {}),
+        rounds: outcome.result.rounds,
+        obstacleSeed: outcome.result.obstacleSeed,
+      }),
+    );
+    if (!sent.ok) {
+      // No authoritative result to apply. Restore the pre-battle position
+      // (same as Flee) so the game is not stuck in the BATTLE phase, and tell
+      // the player why the battle they just fought did not count.
+      bus.emit({ type: "command:rejected", action: "SubmitBattleResult", reason: sent.reason });
+      tc.abandonBattle(attackerId);
       this.state.replaceState(tc.getState());
-      return null;
-    });
-    if (!server) return { kind: "done" };
+      await this.showSubmitFailed(sent.reason);
+      return { kind: "done" };
+    }
+    const server: SubmitBattleResultResult = sent.value;
 
     // Mirror resolveCurrentBattle()'s post-server application: authoritative
     // heroes in (absent = defeated → removed locally, heroIds pruned,
@@ -371,6 +415,11 @@ export class GameActions {
       attackerSettlementName: await verdictSettlementName(next, attackerId, server.attackerVerdict),
       defenderSettlementName: await verdictSettlementName(next, defenderId, server.defenderVerdict),
     };
+  }
+
+  private async showSubmitFailed(reason: string): Promise<void> {
+    const { showBattleSubmitFailedCard } = await import("@screens/combat/battleSubmitFailedCard");
+    showBattleSubmitFailedCard({ reason, onReturnToMap: () => {} });
   }
 
   /**
@@ -467,7 +516,7 @@ export class GameActions {
       const catalog = await loadUnitCatalog();
       if (catalogFailed() || catalog.length === 0) {
         const tc = this.state.getTurnController();
-        tc.cancelMove(attackerId);
+        tc.abandonBattle(attackerId);
         this.state.replaceState(tc.getState());
         return;
       }
@@ -533,68 +582,83 @@ export class GameActions {
             telemetry,
             defenderLabel,
             title: `Assault on ${settlement.name}`,
+            minRetreatRound: SETTLEMENT_BATTLE_MIN_RETREAT_ROUND,
           },
         );
         closeArena = handle.close;
       });
 
-      // Re-grab the controller after the arena: a multiplayerSync poll may
-      // have replaceState()'d underneath the overlay while the fight played
-      // out. The phase must still be THIS attacker-vs-settlement pair.
-      const tc = this.state.getTurnController();
-      const current = tc.getState();
-      const phase = current.phase;
-      if (phase.kind !== "SETTLEMENT_BATTLE" || phase.attackerId !== attackerId || phase.settlementId !== settlementId) {
-        return;
+      // Same arena-ownership rule as fightInArena: only the result card's
+      // Carry On may close the arena, and only once the card is up -- every
+      // earlier exit (phase gone, failed submission, a throw) closes it here.
+      let handedOff = false;
+      try {
+        // Re-grab the controller after the arena: a multiplayerSync poll may
+        // have replaceState()'d underneath the overlay while the fight played
+        // out. The phase must still be THIS attacker-vs-settlement pair.
+        const tc = this.state.getTurnController();
+        const current = tc.getState();
+        const phase = current.phase;
+        if (phase.kind !== "SETTLEMENT_BATTLE" || phase.attackerId !== attackerId || phase.settlementId !== settlementId) {
+          return;
+        }
+
+        const sent = await sendWithRetry(() =>
+          submitSettlementBattleResult(gameName ?? "", {
+            actor: attacker.ownerId,
+            attackerId,
+            settlementId,
+            outcome: outcome.outcome,
+            attackerStacks: outcome.attackerSurvivors,
+            defenderStacks: outcome.defenderSurvivors,
+            ...(outcome.surrenderedGold > 0 ? { surrenderedGold: outcome.surrenderedGold } : {}),
+            rounds: outcome.result.rounds,
+            obstacleSeed: outcome.result.obstacleSeed,
+          }),
+        );
+        if (!sent.ok) {
+          bus.emit({ type: "command:rejected", action: "SubmitSettlementBattleResult", reason: sent.reason });
+          tc.abandonBattle(attackerId);
+          this.state.replaceState(tc.getState());
+          await this.showSubmitFailed(sent.reason);
+          return;
+        }
+        const server: SubmitSettlementBattleResultResult = sent.value;
+
+        // Mirror the hero-battle outcome rules (2026-09-29 hero outcomes): a
+        // defeated attacker is absent from the result — drop their outstanding
+        // charter while the row is still readable, then remove the hero
+        // locally (heroIds prune + selection clear via the shared merge);
+        // retreat/surrender come back already relocated server-side and merge
+        // as a plain row replace.
+        let next = current;
+        if (!server.attackerHero) next = cleanupDefeatedHeroCharters(next, attackerId);
+        next = mergeBattleOutcomeHero(next, attackerId, server.attackerHero);
+        next = endBattlePhase({
+          ...next,
+          settlements: { ...next.settlements, [settlementId]: server.settlement },
+        });
+        this.state.replaceState(next);
+        bus.emit({
+          type: "battle:resolved",
+          attackerId,
+          defenderId: settlementId,
+          attackerSurvived: platoonsHaveTroops(server.attackerHero?.stacks ?? []),
+        });
+        const attackerSettlementName = await verdictSettlementName(next, attackerId, server.attackerVerdict);
+        const { showBattleResultCard } = await import("@screens/combat/battleResultCard");
+        showBattleResultCard({
+          result: outcome.result,
+          attackerLabel: `Hero ${attacker.name}`,
+          defenderLabel,
+          onCarryOn: closeArena,
+          attackerVerdict: server.attackerVerdict,
+          attackerSettlementName,
+        });
+        handedOff = true;
+      } finally {
+        if (!handedOff) closeArena();
       }
-
-      const server = await submitSettlementBattleResult(gameName ?? "", {
-        actor: attacker.ownerId,
-        attackerId,
-        settlementId,
-        outcome: outcome.outcome,
-        attackerStacks: outcome.attackerSurvivors,
-        defenderStacks: outcome.defenderSurvivors,
-        ...(outcome.surrenderedGold > 0 ? { surrenderedGold: outcome.surrenderedGold } : {}),
-        rounds: outcome.result.rounds,
-        obstacleSeed: outcome.result.obstacleSeed,
-      }).catch((err: unknown): SubmitSettlementBattleResultResult | null => {
-        bus.emit({ type: "command:rejected", action: "SubmitSettlementBattleResult", reason: String(err) });
-        tc.cancelMove(attackerId);
-        this.state.replaceState(tc.getState());
-        return null;
-      });
-      if (!server) return;
-
-      // Mirror the hero-battle outcome rules (2026-09-29 hero outcomes): a
-      // defeated attacker is absent from the result — drop their outstanding
-      // charter while the row is still readable, then remove the hero
-      // locally (heroIds prune + selection clear via the shared merge);
-      // retreat/surrender come back already relocated server-side and merge
-      // as a plain row replace.
-      let next = current;
-      if (!server.attackerHero) next = cleanupDefeatedHeroCharters(next, attackerId);
-      next = mergeBattleOutcomeHero(next, attackerId, server.attackerHero);
-      next = endBattlePhase({
-        ...next,
-        settlements: { ...next.settlements, [settlementId]: server.settlement },
-      });
-      this.state.replaceState(next);
-      bus.emit({
-        type: "battle:resolved",
-        attackerId,
-        defenderId: settlementId,
-        attackerSurvived: platoonsHaveTroops(server.attackerHero?.stacks ?? []),
-      });
-      const { showBattleResultCard } = await import("@screens/combat/battleResultCard");
-      showBattleResultCard({
-        result: outcome.result,
-        attackerLabel: `Hero ${attacker.name}`,
-        defenderLabel,
-        onCarryOn: closeArena,
-        attackerVerdict: server.attackerVerdict,
-        attackerSettlementName: await verdictSettlementName(next, attackerId, server.attackerVerdict),
-      });
     } finally {
       this.battleInFlight = false;
     }
@@ -610,6 +674,14 @@ export class GameActions {
   private captureAfterBattleIfNeeded(heroId: string): void {
     const tc = this.state.getTurnController();
     const before = tc.getState();
+    // On a server-driven game the server already applied any post-battle
+    // capture for an AI attacker (applyPostBattleCapture), and a client
+    // CaptureSettlement on that AI seat's behalf is refused outright
+    // (ai_seat_command_forbidden) -- the capture reaches this client
+    // through sync instead.
+    const gameName = this.session.getActiveGameName() ?? "";
+    const owner = before.players.find((p) => p.id === before.heroes[heroId]?.ownerId);
+    if (owner?.faction === "ai" && isServerDriven(gameName)) return;
     tc.captureAfterBattleIfNeeded(heroId);
     const after = tc.getState();
     if (after !== before) {

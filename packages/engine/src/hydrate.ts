@@ -177,6 +177,7 @@ function backfillHero(h: Partial<HeroState> & { id: HeroId; ownerId: number; q: 
     ...(h.wagons !== undefined ? { wagons: h.wagons } : {}),
     ...(h.treasuryWagons !== undefined ? { treasuryWagons: h.treasuryWagons } : {}),
     ...(h.resources !== undefined ? { resources: h.resources } : {}),
+    ...(h.movementLockedThroughDay !== undefined ? { movementLockedThroughDay: h.movementLockedThroughDay } : {}),
     id: h.id,
     name: h.name ?? h.id,
     ownerId: h.ownerId,

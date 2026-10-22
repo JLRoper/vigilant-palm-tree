@@ -21,7 +21,8 @@ export function applyEndOfTurn(state: GameState, opts?: ApplyEndOfTurnOptions): 
 
 export function applyEndOfTurnDetailed(state: GameState, opts?: ApplyEndOfTurnOptions): ApplyEndOfTurnResult {
   const playerId = state.activePlayerId;
-  const newHeroes: Record<HeroId, HeroState> = resetHeroMovement(state.heroes, playerId);
+  // The movement granted here is next used on the following day.
+  const newHeroes: Record<HeroId, HeroState> = resetHeroMovement(state.heroes, playerId, state.day + 1);
   // 1. Produce resources for ALL settlements (tile rates + producer mines)
   let newSettlements: Record<SettlementId, SettlementState> = produceSettlementResources(
     state.settlements,

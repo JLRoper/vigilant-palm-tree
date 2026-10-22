@@ -1,6 +1,8 @@
 import type { Command, GameState, HeroBattleVerdict, HeroId, Platoon, Player, SettlementId } from "@heroes/contracts";
 import {
+  AI_RETREAT_STRENGTH_RATIO,
   GARRISON_BACKOFF_ROUNDS,
+  SETTLEMENT_BATTLE_MIN_RETREAT_ROUND,
   detectAdjacentEnemy,
   evaluateTradeNeeds,
   findPath,
@@ -16,6 +18,7 @@ import {
   readPendingBattle,
   resolveBattle,
   resolveSavedMapGenVersion,
+  settlementOutcomeFromBattle,
   settlementStacks,
   type MapGenVersion,
   type MapSize,
@@ -568,10 +571,6 @@ function aiStillActive(state: GameState, seat: number): boolean {
   );
 }
 
-function settlementBattleOutcome(winner: "attacker" | "defender" | "draw"): SettlementBattleOutcome {
-  return winner === "attacker" ? "attackerWon" : winner === "defender" ? "defenderWon" : "draw";
-}
-
 function battleInputsKnown(
   catalog: Record<string, UnitType>,
   stackLists: readonly Platoon[][],
@@ -666,8 +665,13 @@ async function runWalkInGates(
     const battle = resolveBattle(normalizePlatoons(hero.stacks), garrison, {
       obstacleSeed,
       unitTypes: ctx.catalog,
+      attackerRetreatPolicy: {
+        kind: "outmatched",
+        strengthRatio: AI_RETREAT_STRENGTH_RATIO,
+        minRetreatRound: SETTLEMENT_BATTLE_MIN_RETREAT_ROUND,
+      },
     });
-    const outcome = settlementBattleOutcome(battle.winner);
+    const outcome: SettlementBattleOutcome = settlementOutcomeFromBattle(battle);
     const submitted = await dispatch(ctx, {
       kind: "SubmitSettlementBattleResult",
       gameName: ctx.gameName,

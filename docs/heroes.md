@@ -1,6 +1,6 @@
 # Heroes
 
-<!-- docs:verified 2026-10-14 -->
+<!-- docs:verified 2026-10-21 -->
 
 The actors on the map. Heroes move tile-to-tile, claim [settlements](./settlements.md), lead armies, and can found new settlements via charter expeditions.
 
@@ -12,7 +12,7 @@ The actors on the map. Heroes move tile-to-tile, claim [settlements](./settlemen
 - An ID, name, owner, and movement animation state.
 - A personal **gold purse** (persists with the hero; captured on defeat).
 - A set of **army stacks** (unit types + counts). Recruits land in the source settlement's **garrison** first; a hero pulls them onto its platoons with `TransferUnits` while standing on that settlement — see [army.md](./army.md).
-- Movement points per turn (7 base, refreshed each `advanceRound`).
+- Movement points per turn (7 base, refreshed each `advanceRound`; 0 while a retreat stun is active — see [Combat](#combat)).
 - A **trail** of visited hexes.
 - **Chartering** state (`isChartering`, `charterId`) — see below.
 
@@ -48,7 +48,7 @@ The game operates on a **round-based** cycle:
 - Selected hero's gold/resources are shown in the hero info panel.
 - Chartering heroes auto-move at turn start (no manual input).
 - AI heroes move automatically during `AI_TURN` via the engine brain. New games with AI enemies are server-driven; only unflagged legacy games use the primary client's tick — see [Enemy heroes](#enemy-heroes).
-- After all players act, `advanceRound` runs: day increments, all heroes reset movement, settlements produce resources, morale decays, charters advance — and every 7th day the weekly upkeep applies: **caravan maintenance first** (`wagons × (1g + 1 food)` per trade route, `economy/caravanUpkeep.ts`), then the per-unit catalog bill for heroes (gold from the purse, food from the larder + the settlement physically under the hero — see [army.md](./army.md) → Upkeep) and garrisons (treasury + warehouse).
+- After all players act, `advanceRound` runs: day increments, all heroes reset movement (retreat-stunned heroes get 0), settlements produce resources, morale decays, charters advance — and every 7th day the weekly upkeep applies: **caravan maintenance first** (`wagons × (1g + 1 food)` per trade route, `economy/caravanUpkeep.ts`), then the per-unit catalog bill for heroes (gold from the purse, food from the larder + the settlement physically under the hero — see [army.md](./army.md) → Upkeep) and garrisons (treasury + warehouse).
 
 ## Hero gold & economy
 
@@ -76,11 +76,12 @@ When a hero moves adjacent to an enemy hero, battle triggers:
   | Verdict | How it happens | Hero on the map | Troops | Purse |
   |---|---|---|---|---|
   | **Defeated** | side wiped to zero troops (`lost_all_troops`) | **Removed** from the adventure map — state record, owner's `heroIds`, `hero_platoons` rows | gone | looted by the winner (wagon-capped, cargo included) |
-  | **Retreated** | manual-arena retreat | Respawn at the nearest **owned** settlement; with none owned, stays at the cancelled position (edge D1) | **all lost** (stacks zeroed server-side — the arena's 15% pre-loss is subsumed) | kept |
-  | **Surrendered** | manual-arena surrender | Teleport to the nearest **owned** settlement (same D1 edge) | kept | pays the surrender cost, rest kept |
+  | **Retreated** | hero retreat — manual arena, or the auto-resolver's `outmatched` policy (2026-10-21) | Respawn at the nearest **owned** settlement; with none owned, stays at the cancelled position (edge D1). **0 movement** for the rest of the day and **stunned** through the next day (`movementLockedThroughDay`) | only platoons on the side's **starting edge column** escape, intact; every other platoon is **left behind** and lost | kept |
+  | **Surrendered** | manual-arena surrender | Teleport to the nearest **owned** settlement (same D1 edge); **0 movement** for the rest of the day, no stun | kept | pays the surrender cost, rest kept |
   | **Stood** | won / survived (stalemate) | unchanged | survivors | kept |
 
-- The auto-resolver never concedes (no retreat policies are passed server-side), so AI-involved battles only ever **remove** a loser or leave both standing — retreat/surrender are manual-arena actions.
+- **Retreat rules** (2026-10-21, [`plan/2026-10-21-battle-retreat-rules.md`](../plan/2026-10-21-battle-retreat-rules.md)): retreat opens at battle round **2** for hero battles (`HERO_BATTLE_MIN_RETREAT_ROUND`) and round **3** for settlement assaults (`SETTLEMENT_BATTLE_MIN_RETREAT_ROUND`); before that the arena's Retreat button is disabled ("Retreat opens in round N."). Only platoons standing on their side's starting edge column escape (no 15% loss); the rest are logged `left_behind` and lost. Relocation (both concessions) leaves 0 movement today; a retreat also sets `movementLockedThroughDay = day + RETREAT_MOVEMENT_LOCK_DAYS` (1), so `resetHeroMovement` grants 0 the next day and drops the field once it has passed — a defender who retreats on the enemy's turn misses their own next turn. Shared by server and settlement reducer via `applyHeroConcession` (`packages/engine/src/combat/battleOutcome.ts`); persisted in the nullable `heroes.movement_locked_through_day` column (migration 032).
+- The auto-resolver (Quick Resolve, AI hero battles, AI settlement assaults) concedes under the `outmatched` retreat policy: once retreat is open, a side whose remaining total health is below `AI_RETREAT_STRENGTH_RATIO` (0.4) of the enemy's retreats its hero. Auto-resolved platoons never move, so one counts as off its edge once it has made melee contact. Surrender remains a manual-arena action.
 - A defeated hero's charter is cancelled (costs forfeited); retreating/surrendering heroes keep theirs (see [Chartering](#chartering-implemented)).
 - **Flee** is not an outcome: it cancels the attack before the battle starts.
 - Verdicts ride the `BattleResolved` event and both command results (heroes are optional in results — absence means the hero was removed); the result card and AI toasts speak them ("slain" / "retreated to \<name\>" / "surrendered to \<name\>").

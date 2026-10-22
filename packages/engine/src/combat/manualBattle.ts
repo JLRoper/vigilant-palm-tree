@@ -12,9 +12,10 @@
 import { type Axial, axialRound, HEX_DIRECTIONS, hexDistance } from "@heroes/contracts";
 import type { Platoon, PlatoonEntry, UnitType } from "../units";
 import { unitRange } from "../units";
-import { PLATOON_RETREAT_LOSS, SPELL_BUFF_DURATION_ROUNDS, SPELL_BUFF_MULTIPLIER } from "../combatConfig";
+import { HERO_BATTLE_MIN_RETREAT_ROUND, PLATOON_RETREAT_LOSS, SPELL_BUFF_DURATION_ROUNDS, SPELL_BUFF_MULTIPLIER } from "../combatConfig";
 import { applyRetreatLoss, applyCasualties } from "./damage";
-import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT, makeBattleGrid } from "./grid";
+import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT, isOnStartingEdge, makeBattleGrid } from "./grid";
+import { retreatOpen, retreatSideByEdge } from "./retreat";
 import {
   applyAllyDeathMorale,
   applyCasualtyMorale,
@@ -63,10 +64,18 @@ export interface ManualBattleOptions {
   // casts in v1 (locked decision), so production threads only the human
   // side's loadout; the engine still models both for symmetry.
   heroSpells?: Partial<Record<BattleSide, HeroSpellLoadout>>;
+  // First round a hero retreat is allowed (plan/2026-10-21-battle-retreat-
+  // rules.md): HERO_BATTLE_MIN_RETREAT_ROUND by default, the settlement
+  // assault passes SETTLEMENT_BATTLE_MIN_RETREAT_ROUND.
+  minRetreatRound?: number;
 }
 
 export interface ManualBattleState {
   grid: BattleGrid;
+  // Which role deployed on the left column — fixes each side's starting
+  // edge for the retreat rule.
+  sideChoice: BattleSide;
+  minRetreatRound: number;
   attacker: Combatant[];
   defender: Combatant[];
   attackerOriginalPlatoons: Platoon[];
@@ -145,6 +154,8 @@ export function startManualBattle(
 
   return {
     grid,
+    sideChoice,
+    minRetreatRound: options.minRetreatRound ?? HERO_BATTLE_MIN_RETREAT_ROUND,
     attacker,
     defender,
     attackerOriginalPlatoons: attackerPlatoons,
@@ -709,21 +720,57 @@ export function runAiTurn(state: ManualBattleState, side: BattleSide): void {
   executeAiPlan(state, side, plan);
 }
 
-// Voluntary side concession triggered by the player (Retreat / Surrender
-// footer buttons in the manual-fight arena). Retreat applies the standard
-// PLATOON_RETREAT_LOSS to every still-living platoon on the side before
-// pulling them off the field; surrender skips the loss and just yields
-// immediately. Either way the side ends up in `sidesRetreated` so
-// finalizeManualBattle can tag the outcome as `retreated_hero` rather than
-// the misleading `lost_all_troops`.
-export interface RetreatHeroOptions {
-  applyLoss?: boolean;
+// Whether `side`'s hero may retreat right now: the battle's retreat gate has
+// opened and it is still running.
+export function canRetreat(state: ManualBattleState): boolean {
+  return !state.over && !isBattleOver(state) && retreatOpen(state.round, state.minRetreatRound);
 }
 
-export function retreatHero(state: ManualBattleState, side: BattleSide, options: RetreatHeroOptions = {}): void {
-  const applyLoss = options.applyLoss ?? true;
+// The living platoons a retreat by `side` would save (on its starting edge
+// column) and abandon (everyone else) — the confirm dialog's preview, and
+// exactly the split retreatHero({ edgeOnly: true }) applies.
+export function retreatPreview(
+  state: ManualBattleState,
+  side: BattleSide,
+): { escaping: Combatant[]; leftBehind: Combatant[] } {
+  const escaping: Combatant[] = [];
+  const leftBehind: Combatant[] = [];
+  for (const c of livingCombatants(combatantsFor(state, side))) {
+    (isOnStartingEdge(c.position, side, state.grid, state.sideChoice) ? escaping : leftBehind).push(c);
+  }
+  return { escaping, leftBehind };
+}
+
+// Voluntary side concession triggered by the player (Retreat / Surrender
+// in the manual-fight arena). A hero retreat ({ edgeOnly: true }) applies the
+// starting-edge rule (plan/2026-10-21-battle-retreat-rules.md) and is refused
+// (returns false, nothing mutated) before the battle's retreat gate opens;
+// surrender ({ applyLoss: false }) yields with every platoon intact. The
+// legacy default applies PLATOON_RETREAT_LOSS to every living platoon.
+// Either way the side ends up in `sidesRetreated` so finalizeManualBattle
+// can tag the outcome as `retreated_hero` rather than the misleading
+// `lost_all_troops`.
+export interface RetreatHeroOptions {
+  applyLoss?: boolean;
+  edgeOnly?: boolean;
+}
+
+export function retreatHero(state: ManualBattleState, side: BattleSide, options: RetreatHeroOptions = {}): boolean {
   const round = state.round;
   const combatants = side === "attacker" ? state.attacker : state.defender;
+  if (options.edgeOnly) {
+    if (!canRetreat(state)) return false;
+    retreatSideByEdge(
+      combatants,
+      side,
+      (c) => isOnStartingEdge(c.position, side, state.grid, state.sideChoice),
+      round,
+      state.log,
+    );
+    concede(state, side);
+    return true;
+  }
+  const applyLoss = options.applyLoss ?? true;
   for (const c of combatants) {
     if (c.retreated || c.entries.every((e) => e.count <= 0)) continue;
     if (applyLoss) {
@@ -734,6 +781,11 @@ export function retreatHero(state: ManualBattleState, side: BattleSide, options:
     c.retreated = true;
   }
   state.log.push({ round, kind: "hero_retreat", side });
+  concede(state, side);
+  return true;
+}
+
+function concede(state: ManualBattleState, side: BattleSide): void {
   state.sidesRetreated.add(side);
   if (side === "attacker") state.unactedAttacker.clear();
   else state.unactedDefender.clear();

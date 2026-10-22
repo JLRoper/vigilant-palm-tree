@@ -50,6 +50,7 @@ interface HeroRow {
   upkeep_unpaid_since_day: number | null;
   upkeep_unpaid_troops: number;
   upkeep_unpaid_gold: number;
+  movement_locked_through_day: number | null;
 }
 
 interface PlatoonRow {
@@ -60,7 +61,7 @@ interface PlatoonRow {
 }
 
 const HERO_COLUMNS =
-  "id, name, owner_id, q, r, movement_remaining, previous_q, previous_r, previous_movement_remaining, trail, gold, troops, is_chartering, charter_id, horse_variant, wagons, resources, treasury_wagons, morale, upkeep_unpaid_since_day, upkeep_unpaid_troops, upkeep_unpaid_gold";
+  "id, name, owner_id, q, r, movement_remaining, previous_q, previous_r, previous_movement_remaining, trail, gold, troops, is_chartering, charter_id, horse_variant, wagons, resources, treasury_wagons, morale, upkeep_unpaid_since_day, upkeep_unpaid_troops, upkeep_unpaid_gold, movement_locked_through_day";
 
 function toHeroState(row: HeroRow, stacks: Platoon[]): HeroState {
   // The heroes table predates spellcasting v1 and has no spell columns (the
@@ -101,6 +102,10 @@ function toHeroState(row: HeroRow, stacks: Platoon[]): HeroState {
     upkeepUnpaidSinceDay: row.upkeep_unpaid_since_day ?? null,
     upkeepUnpaidTroops: row.upkeep_unpaid_troops ?? 0,
     upkeepUnpaidGold: row.upkeep_unpaid_gold ?? 0,
+    // Retreat stun (migration 032): NULL = absent = no stun.
+    ...(row.movement_locked_through_day !== null && row.movement_locked_through_day !== undefined
+      ? { movementLockedThroughDay: row.movement_locked_through_day }
+      : {}),
   });
 }
 
@@ -176,8 +181,8 @@ await db.query(
                                 previous_r, previous_movement_remaining, trail, gold, troops,
                                 is_chartering, charter_id, horse_variant, wagons, resources,
                                 treasury_wagons, morale, upkeep_unpaid_since_day, upkeep_unpaid_troops,
-                                upkeep_unpaid_gold)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23)
+                                upkeep_unpaid_gold, movement_locked_through_day)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23,$24)
            ON CONFLICT (game_id, id) DO UPDATE SET
               name = EXCLUDED.name,
               owner_id = EXCLUDED.owner_id,
@@ -199,7 +204,8 @@ await db.query(
               morale = EXCLUDED.morale,
               upkeep_unpaid_since_day = EXCLUDED.upkeep_unpaid_since_day,
               upkeep_unpaid_troops = EXCLUDED.upkeep_unpaid_troops,
-              upkeep_unpaid_gold = EXCLUDED.upkeep_unpaid_gold`,
+              upkeep_unpaid_gold = EXCLUDED.upkeep_unpaid_gold,
+              movement_locked_through_day = EXCLUDED.movement_locked_through_day`,
           [
             hero.id,
             gameId,
@@ -231,6 +237,7 @@ await db.query(
             hero.upkeepUnpaidSinceDay,
             hero.upkeepUnpaidTroops,
             hero.upkeepUnpaidGold,
+            hero.movementLockedThroughDay ?? null,
           ],
         );
 

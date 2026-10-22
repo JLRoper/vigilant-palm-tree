@@ -231,8 +231,23 @@ export function deploymentPosition(
   sideChoice: BattleSide = "attacker",
 ): Axial {
   const r = Math.round((slotIndex * (grid.rows - 1)) / (ARMY_STACK_SLOTS - 1));
-  const onLeft = side === sideChoice;
-  const col = onLeft ? 0 : grid.cols - 1;
+  const col = startingEdgeColumn(side, grid, sideChoice);
   // Column → axial, matching the offset rows makeBattleGrid generates.
   return { q: col - rowShift(r), r };
+}
+
+// The outer column `side` deployed on — its retreat edge: a hero retreat
+// saves exactly the platoons standing on it (plan/2026-10-21-battle-retreat-
+// rules.md). Same sideChoice convention as deploymentPosition.
+export function startingEdgeColumn(side: BattleSide, grid: BattleGrid, sideChoice: BattleSide = "attacker"): number {
+  return side === sideChoice ? 0 : grid.cols - 1;
+}
+
+export function isOnStartingEdge(
+  position: Axial,
+  side: BattleSide,
+  grid: BattleGrid,
+  sideChoice: BattleSide = "attacker",
+): boolean {
+  return columnOf(position) === startingEdgeColumn(side, grid, sideChoice);
 }

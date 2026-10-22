@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.31.0] - 2026-10-22
+
+Battle retreat rework: edge-column escape, round-gated retreat, one-day retreat stun, AI retreats when outmatched; fix arena stuck on a failed battle submission
+
 ## [0.30.0] - 2026-10-21
 
 Floating panels tile when they overlap: equal sections with their own scrollbars, draggable seams, per-seam padlocks that lock panels into columns, height locks on the corner grip, a column-length handle and a per-panel move handle.
