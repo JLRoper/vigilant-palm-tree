@@ -1,0 +1,34 @@
+,,,
+monk,300,mageGuild,{ arcane: 1 }
+mage,500,mageGuild,{ arcane: 2 }
+swordsman,200,barracks,
+pikeman,250,barracks,{ iron: 3 }
+crusader,500,barracks,{ iron: 5 }
+peasant,25,farmhouse,
+archer,250,archeryRange,{ wood: 2 }
+crossbowman,350,archeryRange,{ iron: 2 }
+cavalry,400,stables,{ iron: 2 }
+warhound,180,huntingLodge,
+giant_eagle,1400,eyrie,{ arcane: 2 }
+eagle_prince,2400,eyrie,{ arcane: 4 }
+ghoul,40,crypt,
+bone_archer,260,ossuary,{ wood: 2 }
+bone_pikeman,260,ossuary,{ iron: 3 }
+wraith,380,wraithBarrows,{ arcane: 2 }
+blood_knight,480,wraithBarrows,{ iron: 2 }
+vampire_lord,850,spireOfAsh,{ arcane: 4 }
+lich,1900,spireOfAsh,{ arcane: 5 }
+dwarf_axeman,220,forgeHall,
+shield_bearer,280,forgeHall,{ iron: 2 }
+hand_gunner,380,gunnersRedoubt,{ iron: 2 }
+ironsworn,550,golemFoundry,{ iron: 4 }
+iron_golem,1200,golemFoundry,{ stone: 4; iron: 4 }
+runesmith,550,deepAnvil,{ arcane: 3 }
+forge_lord,2200,deepAnvil,{ iron: 6; arcane: 2 }
+forest_scout,180,groveSanctum,{ wood: 1 }
+thorn_archer,280,groveSanctum,{ wood: 2 }
+briar_warden,260,warrenLodge,{ wood: 2 }
+warbeast,300,warrenLodge,
+elk_rider,450,sylvanStables,{ wood: 2 }
+stag_knight,2000,sylvanStables,{ arcane: 3 }
+treant_elder,900,worldrootGrove,{ wood: 3 }

@@ -283,6 +283,11 @@ export class UIManager {
     const getLocalSeat = this.cityViewLocalSeat;
     const view = new CityView({
       provider: this.spriteProvider,
+      getSettlementFaction: (settlementId) => {
+        const gs = getStateMgr().getState();
+        const ownerId = gs.settlements[settlementId]?.ownerId;
+        return gs.players.find((p) => p.id === ownerId)?.factionId;
+      },
       isUnitRecruitable: getLocalSeat
         ? (unitTypeId) => {
             const gs = getStateMgr().getState();

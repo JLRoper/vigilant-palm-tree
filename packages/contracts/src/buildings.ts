@@ -37,7 +37,14 @@ export type BuildingKind =
   | "groveSanctum"
   | "warrenLodge"
   | "sylvanStables"
-  | "worldrootGrove";
+  | "worldrootGrove"
+  | "blackChapel"
+  | "dragonBoneyard"
+  | "delversHall"
+  | "hearthTemple"
+  | "ramPens"
+  | "seedlingGrove"
+  | "druidCircle";
 
 export interface BuildingDef {
   gx: number;

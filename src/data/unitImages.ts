@@ -47,7 +47,38 @@ import elkRider from "../resources/units/icons/elk_rider.png?url";
 import treantElder from "../resources/units/icons/treant_elder.png?url";
 import stagKnight from "../resources/units/icons/stag_knight.png?url";
 
+import axeThrower from "../resources/units/icons/axe_thrower.png?url";
+import boneDragon from "../resources/units/icons/bone_dragon.png?url";
+import brambleBlade from "../resources/units/icons/bramble_blade.png?url";
+import darkAcolyte from "../resources/units/icons/dark_acolyte.png?url";
+import druid from "../resources/units/icons/druid.png?url";
+import graveHound from "../resources/units/icons/grave_hound.png?url";
+import hearthPriest from "../resources/units/icons/hearth_priest.png?url";
+import necromancer from "../resources/units/icons/necromancer.png?url";
+import ramRider from "../resources/units/icons/ram_rider.png?url";
+import skeletonWarrior from "../resources/units/icons/skeleton_warrior.png?url";
+import sproutling from "../resources/units/icons/sproutling.png?url";
+import tunnelLevy from "../resources/units/icons/tunnel_levy.png?url";
+import ursineGuardian from "../resources/units/icons/ursine_guardian.png?url";
+import warBoar from "../resources/units/icons/war_boar.png?url";
+import wildwoodRanger from "../resources/units/icons/wildwood_ranger.png?url";
+
 const KNOWN: Record<string, string> = {
+  axe_thrower: axeThrower,
+  bone_dragon: boneDragon,
+  bramble_blade: brambleBlade,
+  dark_acolyte: darkAcolyte,
+  druid,
+  grave_hound: graveHound,
+  hearth_priest: hearthPriest,
+  necromancer,
+  ram_rider: ramRider,
+  skeleton_warrior: skeletonWarrior,
+  sproutling,
+  tunnel_levy: tunnelLevy,
+  ursine_guardian: ursineGuardian,
+  war_boar: warBoar,
+  wildwood_ranger: wildwoodRanger,
   peasant,
   archer,
   crossbowman,

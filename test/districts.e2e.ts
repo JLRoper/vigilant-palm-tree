@@ -329,8 +329,15 @@ async function run(): Promise<void> {
     const daysBefore = Object.fromEntries((farmDistrict!.buildings ?? [])
       .filter((b) => b.construction)
       .map((b) => [`${b.kind}@${b.gx},${b.gy}`, b.construction!.daysRemaining]));
+    const dayBefore = await page.evaluate(() =>
+      (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getState().day as number,
+    );
     await page.locator("button", { hasText: "End Turn" }).first().click();
-    await wait(4500);
+    await page.waitForFunction((day) => {
+      const state: { day: number; activePlayerId: number; phase: { kind: string } } =
+        (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getState();
+      return state.day > day && state.activePlayerId === 0 && state.phase.kind === "PLAYER_TURN";
+    }, dayBefore, { timeout: 60_000 });
     const afterTurn = await settleSnapshot(page, home.id);
     const turnedDistrict = afterTurn!.districts?.[key] as DistrictRow | undefined;
     assert(turnedDistrict?.buildings.length === 2, "district did not survive the End Turn round wrap");

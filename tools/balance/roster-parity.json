@@ -1,0 +1,248 @@
+{
+ "ghoul": {
+  "attack": 2,
+  "defence": 1,
+  "health": 4,
+  "speed": 5
+ },
+ "grave_hound": {
+  "factionId": "ashen",
+  "attack": 4,
+  "defence": 2,
+  "health": 7,
+  "speed": 7,
+  "range": 1,
+  "advantageType": "monster",
+  "tier": 3,
+  "price": 200
+ },
+ "skeleton_warrior": {
+  "factionId": "ashen",
+  "attack": 5,
+  "defence": 4,
+  "health": 9,
+  "speed": 4,
+  "range": 1,
+  "advantageType": "infantry",
+  "tier": 2,
+  "price": 200
+ },
+ "dark_acolyte": {
+  "factionId": "ashen",
+  "attack": 5,
+  "defence": 3,
+  "health": 12,
+  "speed": 4,
+  "range": 4,
+  "advantageType": "ranged",
+  "tier": 6,
+  "price": 420
+ },
+ "necromancer": {
+  "factionId": "ashen",
+  "attack": 9,
+  "defence": 2,
+  "health": 8,
+  "speed": 4,
+  "range": 6,
+  "advantageType": "ranged",
+  "tier": 6,
+  "price": 500
+ },
+ "bone_dragon": {
+  "factionId": "ashen",
+  "attack": 12,
+  "defence": 7,
+  "health": 28,
+  "speed": 7,
+  "range": 1,
+  "advantageType": "monster",
+  "tier": 7,
+  "price": 1500
+ },
+ "tunnel_levy": {
+  "factionId": "ironmark",
+  "attack": 1,
+  "defence": 2,
+  "health": 4,
+  "speed": 2,
+  "range": 1,
+  "advantageType": "infantry",
+  "tier": 1,
+  "price": 30
+ },
+ "war_boar": {
+  "factionId": "ironmark",
+  "attack": 3,
+  "defence": 4,
+  "health": 9,
+  "speed": 5,
+  "range": 1,
+  "advantageType": "monster",
+  "tier": 3,
+  "price": 180
+ },
+ "axe_thrower": {
+  "factionId": "ironmark",
+  "attack": 4,
+  "defence": 3,
+  "health": 6,
+  "speed": 3,
+  "range": 4,
+  "advantageType": "ranged",
+  "tier": 4,
+  "price": 270
+ },
+ "hearth_priest": {
+  "factionId": "ironmark",
+  "attack": 4,
+  "defence": 5,
+  "health": 15,
+  "speed": 3,
+  "range": 4,
+  "advantageType": "ranged",
+  "tier": 6,
+  "price": 400
+ },
+ "ram_rider": {
+  "factionId": "ironmark",
+  "attack": 7,
+  "defence": 7,
+  "health": 17,
+  "speed": 5,
+  "range": 1,
+  "advantageType": "cavalry",
+  "tier": 5,
+  "price": 470
+ },
+ "sproutling": {
+  "factionId": "verdant",
+  "attack": 1,
+  "defence": 1,
+  "health": 3,
+  "speed": 4,
+  "range": 1,
+  "advantageType": "infantry",
+  "tier": 1,
+  "price": 25
+ },
+ "bramble_blade": {
+  "factionId": "verdant",
+  "attack": 4,
+  "defence": 5,
+  "health": 9,
+  "speed": 5,
+  "range": 1,
+  "advantageType": "infantry",
+  "tier": 2,
+  "price": 200
+ },
+ "wildwood_ranger": {
+  "factionId": "verdant",
+  "attack": 6,
+  "defence": 2,
+  "health": 7,
+  "speed": 5,
+  "range": 6,
+  "advantageType": "ranged",
+  "tier": 4,
+  "price": 360
+ },
+ "druid": {
+  "factionId": "verdant",
+  "attack": 8,
+  "defence": 3,
+  "health": 9,
+  "speed": 4,
+  "range": 5,
+  "advantageType": "ranged",
+  "tier": 6,
+  "price": 420
+ },
+ "ursine_guardian": {
+  "factionId": "verdant",
+  "attack": 8,
+  "defence": 8,
+  "health": 22,
+  "speed": 4,
+  "range": 1,
+  "advantageType": "monster",
+  "tier": 5,
+  "price": 625
+ },
+ "archer": {
+  "health": 6
+ },
+ "pikeman": {
+  "attack": 4,
+  "health": 16
+ },
+ "mage": {
+  "attack": 9,
+  "health": 8,
+  "price": 500
+ },
+ "swordsman": {
+  "attack": 4,
+  "health": 9
+ },
+ "warhound": {
+  "attack": 3,
+  "health": 8
+ },
+ "giant_eagle": {
+  "attack": 11,
+  "health": 28
+ },
+ "bone_archer": {
+  "health": 6
+ },
+ "bone_pikeman": {
+  "attack": 4,
+  "health": 17,
+  "defence": 7
+ },
+ "wraith": {
+  "attack": 7,
+  "health": 8
+ },
+ "vampire_lord": {
+  "attack": 11,
+  "health": 26
+ },
+ "shield_bearer": {
+  "attack": 4,
+  "health": 17
+ },
+ "dwarf_axeman": {
+  "health": 9
+ },
+ "hand_gunner": {
+  "health": 7
+ },
+ "runesmith": {
+  "attack": 7,
+  "health": 15
+ },
+ "ironsworn": {
+  "health": 22
+ },
+ "forge_lord": {
+  "attack": 15,
+  "health": 44
+ },
+ "briar_warden": {
+  "health": 12
+ },
+ "warbeast": {
+  "attack": 5,
+  "health": 12
+ },
+ "treant_elder": {
+  "price": 1250
+ },
+ "stag_knight": {
+  "attack": 14,
+  "health": 38
+ }
+}

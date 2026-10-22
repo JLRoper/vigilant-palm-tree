@@ -15,7 +15,7 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
     label: "The Crownlands",
     motto: "The crown endures.",
     description:
-      "Today's single roster: the 12 purchasable units of the Crownlands, from peasant militias to the Eagle Princes of the realm's eyries.",
+      "A versatile host of twelve units, from peasant militias to the realm's swift Eagle Princes; balanced arms backed by iron and arcane power.",
     palette: { primary: "#d4af37", secondary: "#a31621", accent: "#f2e8c9" },
     roster: [
       "peasant",
@@ -37,7 +37,7 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
     label: "The Ashen Court",
     motto: "What death releases, the Court reclaims.",
     description:
-      "A necropolis-confederacy that raises its levies from the barrow fields: cheap fast infantry swarms, spectral ranged, and an elite undead aristocracy. No living soldiers — even its bowmen are revenants.",
+      "A necropolis-confederacy that raises its levies from the barrow fields: fast, fragile attackers, spectral casters, and an elite undead aristocracy backed by bone dragons. No living soldiers — even its bowmen are revenants.",
     palette: { primary: "#2b2b33", secondary: "#e8e0d0", accent: "#ff6b35" },
     roster: [
       "ghoul",
@@ -47,6 +47,11 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
       "blood_knight",
       "vampire_lord",
       "lich",
+      "skeleton_warrior",
+      "grave_hound",
+      "dark_acolyte",
+      "necromancer",
+      "bone_dragon",
     ],
   },
   ironmark: {
@@ -54,7 +59,7 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
     label: "The Ironmark Holds",
     motto: "The mountain remembers every debt.",
     description:
-      "Clan-holds carved under the Ironmark peaks: everything armored, expensive, and nearly immobile — grind them down or be ground. Ranged comes from gunpowder, elites from runeforged tradition.",
+      "Clan-holds carved under the Ironmark peaks: slow, resilient shield lines, hardy beasts, and iron-forged elites — grind them down or be ground. Ranged comes from gunpowder, elites from runeforged tradition.",
     palette: { primary: "#3f5c78", secondary: "#6b7280", accent: "#e0a526" },
     roster: [
       "dwarf_axeman",
@@ -64,6 +69,11 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
       "iron_golem",
       "runesmith",
       "forge_lord",
+      "tunnel_levy",
+      "war_boar",
+      "axe_thrower",
+      "hearth_priest",
+      "ram_rider",
     ],
   },
   verdant: {
@@ -71,7 +81,7 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
     label: "The Verdant Wild",
     motto: "The forest keeps what the forest grows.",
     description:
-      "Beastkin lodges and grove-wardens: the cheapest ranged and beast units in the game, the fastest cavalry, and two walking natural disasters at the top. Builds in wood, pays in favors.",
+      "Beastkin lodges and grove-wardens: swift woodland troops, long-range archers, and mighty beasts guarded by ancient forest spirits. Builds in wood, pays in favors.",
     palette: { primary: "#3f6212", secondary: "#5c4033", accent: "#d4a017" },
     roster: [
       "forest_scout",
@@ -81,6 +91,11 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
       "elk_rider",
       "treant_elder",
       "stag_knight",
+      "sproutling",
+      "bramble_blade",
+      "wildwood_ranger",
+      "druid",
+      "ursine_guardian",
     ],
   },
   neutral: {

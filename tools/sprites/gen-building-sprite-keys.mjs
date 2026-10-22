@@ -45,6 +45,20 @@ const FILE_PATTERN = /^building-pixel-([A-Za-z][A-Za-z0-9]*)-(\d+)(-alt)?\.png$/
 // Kept here (not in the generated file's data) so the generator owns the
 // exceptions to the filename grammar.
 const ALIASES = {
+  "pixel.blackChapel.2": "pixel.blackChapel.1",
+  "pixel.blackChapel.3": "pixel.blackChapel.1",
+  "pixel.dragonBoneyard.2": "pixel.dragonBoneyard.1",
+  "pixel.dragonBoneyard.3": "pixel.dragonBoneyard.1",
+  "pixel.delversHall.2": "pixel.delversHall.1",
+  "pixel.delversHall.3": "pixel.delversHall.1",
+  "pixel.hearthTemple.2": "pixel.hearthTemple.1",
+  "pixel.hearthTemple.3": "pixel.hearthTemple.1",
+  "pixel.ramPens.2": "pixel.ramPens.1",
+  "pixel.ramPens.3": "pixel.ramPens.1",
+  "pixel.seedlingGrove.2": "pixel.seedlingGrove.1",
+  "pixel.seedlingGrove.3": "pixel.seedlingGrove.1",
+  "pixel.druidCircle.2": "pixel.druidCircle.1",
+  "pixel.druidCircle.3": "pixel.druidCircle.1",
   // Legacy saves hold the generic non-buildable `mine` kind; its L1-L3 levels
   // render with the stoneMine art.
   "pixel.mine.1": "pixel.stoneMine.1",

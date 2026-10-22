@@ -1,8 +1,10 @@
 # Current Module Map
 
-<!-- docs:verified 2026-10-17 -->
+<!-- docs:verified 2026-10-22 -->
 
 This is the current code map, verified against the repository on 2026-10-17. The executed layout plan in [`architecture.md`](./architecture.md) is historical. Shared boundary types live in `packages/contracts/`, game rules/economy in `packages/engine/`, and browser UI in `src/screens/`.
+
+Faction content is shared through `packages/engine/src/factionRegistry.ts` (twelve units per playable faction) and `buildingRegistry.ts` (recruit entries, faction tags and `buildingAllowedForFaction`). `settlement/starterLayout.ts` selects each faction's starter troop building for `init.ts` and empty-city opening. `settlement/placeBuildings.ts` rejects new foreign kinds with `wrong_faction`, while preserving existing foreign buildings. The client build palette uses the same helper with the owning seat's faction. AI garrison recruitment in `packages/engine/src/ai/aiBrain.ts` passes the owning seat's faction and unit catalog to `eligibleRecruitSources`, so it plans only recruits the faction gate admits; callers without a faction retain legacy behavior. Migration `server/migrations/032_roster_parity.sql` supplies the fifteen new catalog rows and balance stats; registry entries supply recruitment prices. See [army.md](./army.md) for the roster and costs.
 
 ## Data Flow
 

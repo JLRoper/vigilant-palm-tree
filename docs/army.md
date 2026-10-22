@@ -1,12 +1,12 @@
 # Army & Tactical Battlefield
 
-<!-- docs:verified 2026-10-18 -->
+<!-- docs:verified 2026-10-22 -->
 
 **Combat status:** hero-vs-hero collisions on the adventure map open the **manual arena** by default (the 2026-09-27 wiring: `GameActions.startBattleFlow` → Fight / Quick Resolve / Flee modal → `src/screens/combat/arena/`, driven by [`packages/engine/src/combat/manualBattle.ts`](../packages/engine/src/combat/manualBattle.ts); Quick Resolve falls back to the server auto-resolver at [`packages/engine/src/combat/resolveBattle.ts`](../packages/engine/src/combat/resolveBattle.ts) via the `ResolveBattle` command). **AI-defender battle choice (2026-10-04):** a battle the AI *offers* you no longer auto-resolves — the server's driver dispatches `EnterBattle` (`games.lobby.pendingBattle` + the `BattleOffered` event) and you resolve it from your own seat via the Fight/Quick-Resolve modal (no Flee — see Combat resolution below). Settlements with troops also **defend themselves**: walking a hero onto an enemy — or neutral — settlement with a non-empty garrison enters the `SETTLEMENT_BATTLE` phase. A local-human attacker confirms in the assault modal first (Assault / Auto-resolve / Cancel — 2026-09-29 follow-ups, B5; Cancel leaves the hero on the tile with the garrison holding), then plays out in the same arena — attacker vs *"<name> Garrison"* (title bar: "Assault on \<name\>") — resolved via `SubmitSettlementBattleResult`. Since the 2026-09-29 capture/garrison wave the settlement battle applies the same hero outcomes as a hero battle (defeat removes the hero, retreat/surrender relocate — see Combat resolution below), and a settlement battle whose attacker is not the local human still auto-resolves instead of opening the arena. The unit-recruitment/garrison milestone added the original 13-unit catalog, building-gated recruitment into settlement garrisons, hero↔garrison transfer, and weekly garrison upkeep. The simple ±20% swing auto-resolve formula at the bottom of this doc was the original v1 plan, was never implemented, and is kept only as a historical design note.
 
 ## Unit roster (✅ live catalog)
 
-The `unit_types` table is the authoritative roster — **37 units** after migrations `015_unit_catalog_v1` (the `tier` / `upkeep_gold` / `upkeep_food` / `range` columns + the 13th unit, **mage**: 6 atk / 3 def / 6 hp / 4 spd, ranged, arcane specialty ×1.2), `020_faction_ladder_units` (**warhound**, **giant_eagle**, **eagle_prince** + the tier redefinition below), `024_ashen_court` (the seven Ashen Court units below), `025_ironmark_holds` (the seven Ironmark units below), and `026_verdant_wild` (the seven Verdant Wild units below). The client caches it via [`src/data/unitCatalog.ts`](../src/data/unitCatalog.ts) (`GET /api/units`). Migration 020 also **redefined `tier`**: it is no longer "lowest building level offering the unit" (that's the registry's per-entry `minLevel` on building levels 1–3) but the unit's faction power-band classification, 1–7.
+The `unit_types` table is the authoritative roster: **52 units**, comprising **12 recruitable units per playable faction** and four neutral monsters. Migration `032_roster_parity.sql` adds five units each to Ashen Court, Ironmark Holds and Verdant Wild, and is the source of truth for the existing-unit balance stats it updates on every boot. The client caches the catalog via [`src/data/unitCatalog.ts`](../src/data/unitCatalog.ts) (`GET /api/units`). Migration 020 redefined `tier` as the unit's faction power band (1-7), distinct from each registry recruit entry's building `minLevel` (1-3).
 
 Purchasable units (building-gated; `minLevel` = lowest building level offering the unit):
 
@@ -19,7 +19,7 @@ Purchasable units (building-gated; `minLevel` = lowest building level offering t
 | Pikeman | 3 | Barracks | 250g, 3i | 2 | 1 |
 | Crossbowman | 4 | Archery Range | 350g, 2i | 2 | 6 |
 | Cavalry | 5 | Stables | 400g, 2i | 1 | 1 |
-| Mage | 6 | Mage Guild | 500g, 2a | 2 | 6 |
+| Mage | 6 | Mage Guild | 400g, 2a | 2 | 6 |
 | Crusader | 2 | Barracks | 500g, 5i | 3 | 1 |
 | Warhound | 3 | Hunting Lodge | 180g | 1 | 1 |
 | Giant Eagle | 7 | Eagle Eyrie | 1400g, 2a | 1 | 1 |
@@ -29,7 +29,7 @@ Purchasable units (building-gated; `minLevel` = lowest building level offering t
 
 ### The Ironmark Holds roster (✅ migration `025`, 2026-10-02)
 
-The mountain-hold dwarves — slow, armored, gold/stone/iron-heavy, the anti-thesis of fast swarms. Ranged comes from gunpowder (the faction's one innovation), elites from runeforged tradition. All seven are tagged `faction_id = 'ironmark'`, so only an ironmark seat can recruit them (the `RecruitUnits` gate); the faction's banner is `faction-banner-ironmark.png`.
+The mountain-hold dwarves — slow, armored, gold/stone/iron-heavy, the anti-thesis of fast swarms. Ranged comes from gunpowder (the faction's one innovation), elites from runeforged tradition. All twelve are tagged `faction_id = 'ironmark'`, so only an ironmark seat can recruit them (the `RecruitUnits` gate); the faction's banner is `faction-banner-ironmark.png`.
 
 | Unit | Tier | Recruited at | Cost | Min level | Range |
 |------|------|--------------|------|-----------|-------|
@@ -39,29 +39,29 @@ The mountain-hold dwarves — slow, armored, gold/stone/iron-heavy, the anti-the
 | Ironsworn | 5 | Golem Foundry | 550g, 4i | 1 | 1 |
 | Iron Golem | 6 | Golem Foundry | 1200g, 4s, 4i | 2 | 1 |
 | Runesmith | 6 | Deep Anvil | 550g, 3a | 1 | 4 |
-| Forge Lord | 7 | Deep Anvil | 2200g, 6i, 2a | 2 | 1 |
+| Forge Lord | 7 | Deep Anvil | 2350g, 6i, 2a | 2 | 1 |
 
-(`s`=stone) Notes: `iron_golem` rides the **monster advantage type** (`advantage_type = 'monster'`, the always-advantaged attacker per `005_unit_counters.sql`) — deliberate for a construct, and consistent with how `warhound`/`giant_eagle` already ride it inside the Crownlands roster. Upkeep is the roster-wide flat 1g + 1f per troop per week.
+(`s`=stone) Notes: `iron_golem` rides the **monster advantage type** (`advantage_type = 'monster'`, the always-advantaged attacker per `005_unit_counters.sql`) — deliberate for a construct, and consistent with how `warhound`/`giant_eagle` already ride it inside the Crownlands roster. Upkeep follows the tier-scaled catalog values described below.
 
 The other four catalog entries — **griffin, hydra, wisp, black_dragon** — are **monsters**: catalog-only neutral content with a **NULL tier** (outside the 1–7 faction ladder since migration 020), never offered by any building's `recruits` list, range 1. Griffin deliberately remains non-recruitable.
 
-**Roster factions (2026-10-02 foundation).** Migration `006_faction_rosters.sql` adds `unit_types.faction_id` — the roster-faction tag from the `FactionId` union (`human | ashen | ironmark | verdant | neutral`, CHECK-constrained): the 12 purchasable units are tagged `human` (the Crownlands roster), the four monsters `neutral` (DEFAULT `'neutral'` is fail-safe — an untagged future unit is recruitable by nobody, not by everyone), the seven Ashen Court units `ashen` (migration 024), the seven Ironmark units `ironmark` (migration 025), and the seven Verdant Wild units `verdant` (migration 026). Do **not** confuse it with `advantage_type`: that column is the combat triangle (`infantry/cavalry/ranged/monster`, unchanged) — a Pikeman is `infantry` on the triangle and `human` on the roster, a Warhound is `monster` on the triangle but a Crownlands ladder-3 unit on the roster, and the Iron Golem is `monster` on the triangle but an Ironmark ladder-6 unit on the roster. The engine-side registry is `packages/engine/src/factionRegistry.ts` (`FACTION_REGISTRY`: label/motto/palette/roster per faction — ashen, ironmark, and verdant all ship their seven-unit rosters, so a seat only leaves the human roster when a creator assigns it a faction). Seats pick a faction via `Player.factionId` (optional; absent = human) and the `RecruitUnits` command gates on it through `eligibleRecruitSources`' faction seam — active for all three content factions since migrations 024/025/026 (a human seat recruiting `ghoul`, `dwarf_axeman`, or `forest_scout` is rejected `unit_not_in_seat_faction`). The parity test `test/data/unitCatalogParity.test.ts` pins rosters ↔ the DB column and requires a banner file per non-neutral faction.
+**Roster factions (2026-10-02 foundation).** Migration `006_faction_rosters.sql` adds `unit_types.faction_id` — the roster-faction tag from the `FactionId` union (`human | ashen | ironmark | verdant | neutral`, CHECK-constrained): the 12 purchasable units are tagged `human` (the Crownlands roster), the four monsters `neutral` (DEFAULT `'neutral'` is fail-safe — an untagged future unit is recruitable by nobody, not by everyone), the twelve Ashen Court units `ashen`, the twelve Ironmark units `ironmark`, and the twelve Verdant Wild units `verdant` (migrations 024-026 and 032). Do **not** confuse it with `advantage_type`: that column is the combat triangle (`infantry/cavalry/ranged/monster`, unchanged) — a Pikeman is `infantry` on the triangle and `human` on the roster, a Warhound is `monster` on the triangle but a Crownlands ladder-3 unit on the roster, and the Iron Golem is `monster` on the triangle but an Ironmark ladder-6 unit on the roster. The engine-side registry is `packages/engine/src/factionRegistry.ts` (`FACTION_REGISTRY`: label/motto/palette/roster per faction — all four playable factions ship twelve-unit rosters, so a seat only leaves the human roster when a creator assigns it a faction). Seats pick a faction via `Player.factionId` (optional; absent = human) and the `RecruitUnits` command gates on it through `eligibleRecruitSources`' faction seam — active for all three content factions since migrations 024/025/026 (a human seat recruiting `ghoul`, `dwarf_axeman`, or `forest_scout` is rejected `unit_not_in_seat_faction`). The parity test `test/data/unitCatalogParity.test.ts` pins rosters ↔ the DB column and requires a banner file per non-neutral faction.
 
-**The Ashen Court (2026-10-02, the game's second playable faction).** Migration `024_ashen_court.sql` fills the `ashen` roster with seven undead units — the catalog grows to **23 units** — and `FACTION_REGISTRY.ashen` ships its roster ("What death releases, the Court reclaims."): a necropolis-confederacy of cheap fast infantry swarms, spectral ranged, and an elite undead aristocracy; even its bowmen are revenants. A seat playing `ashen` sees **only** these units in its recruit lists (the `unitAllowedForSeatFaction` gate, active on both the server's `RecruitUnits` command and the client's building menu), and a `human` seat can neither see nor recruit any of them:
+**The Ashen Court (2026-10-02, expanded 2026-10-22).** Migrations `024_ashen_court.sql` and `032_roster_parity.sql` fill the `ashen` roster with twelve undead units. A seat playing `ashen` sees **only** Ashen units in its recruit lists (the `unitAllowedForSeatFaction` gate, active on both the server's `RecruitUnits` command and the client's building menu), and a `human` seat can neither see nor recruit any of them:
 
 | Unit | Tier | Recruited at | Cost | Min level | Range |
 |------|------|--------------|------|-----------|-------|
 | Ghoul | 1 | Crypt | 40g | 1 | 1 |
 | Bone Pikeman | 3 | Ossuary | 260g, 3i | 2 | 1 |
 | Bone Archer | 4 | Ossuary | 260g, 2w | 1 | 5 |
-| Wraith | 4 | Wraith Barrows | 380g, 2a | 1 | 4 |
+| Wraith | 4 | Wraith Barrows | 350g, 2a | 1 | 4 |
 | Blood Knight | 5 | Wraith Barrows | 480g, 2i | 2 | 1 |
 | Vampire Lord | 6 | Spire of Ash | 850g, 4a | 1 | 1 |
 | Lich | 7 | Spire of Ash | 1900g, 5a | 2 | 6 |
 
-The Court's four recruit buildings are **Crypt** (150g + 4w, 2 days, `defenseBonus: 1`), **Ossuary** (300g + 10w + 6s, 4 days, `defenseBonus: 1`), **Wraith Barrows** (350g + 8w + 6s + 1a, 5 days, `defenseBonus: 2`), and **Spire of Ash** (500g + 12w + 8s + 2a, 6 days, `defenseBonus: 1`) — all 1×1 footprints, buildable by anyone but only recruiting for an `ashen` seat. All seven units ship at the roster-flat upkeep 1/1, on the same 1–7 ladder tiers as the Crownlands (ghoul 1, bone_pikeman 3, bone_archer/wraith 4, blood_knight 5, vampire_lord 6, lich 7). Seats choose their faction on New Game ("Your faction" chip row; options = registry factions with non-empty rosters); only the creator's seat 0 takes the pick in v1 — AI seats and other human seats stay `human` for roster selection only; server-driven AI chartering is live. Picking `human` sends no `seatFactions` at all so the legacy game shape is unchanged.
+The Court's original four recruit buildings are **Crypt** (150g + 4w, 2 days, `defenseBonus: 1`), **Ossuary** (300g + 10w + 6s, 4 days, `defenseBonus: 1`), **Wraith Barrows** (350g + 8w + 6s + 1a, 5 days, `defenseBonus: 2`), and **Spire of Ash** (500g + 12w + 8s + 2a, 6 days, `defenseBonus: 1`) — all 1x1 footprints, restricted to Ashen placement and recruitment. Black Chapel and Dragon Boneyard complete the six-building roster. Crypt now supplies +2 food/turn and +20 population with two worker slots, retaining its +1 defence and 150g + 4w placement cost. Upkeep follows the tier-scaled catalog values below. Seats choose their faction on New Game ("Your faction" chip row; options = registry factions with non-empty rosters); only the creator's seat 0 takes the pick in v1 — AI seats and other human seats stay `human` for roster selection only; server-driven AI chartering is live. Picking `human` sends no `seatFactions` at all so the legacy game shape is unchanged.
 
-**The Verdant Wild (✅ migration `026_verdant_wild.sql`).** The forest faction's seven-unit roster, tiers 2–7, all tagged `faction_id = 'verdant'` — recruitable only by a seat whose `Player.factionId` is `verdant` (the `RecruitUnits` faction gate). Speed is the identity: elk_rider (spd 8) and stag_knight (spd 9) are the fastest units in the game, and the costs are wood-forward (only the stag_knight pays arcane). `warbeast`/`treant_elder` are `monster` on the combat triangle, the same ladder pattern as the Crownlands' warhound.
+**The Verdant Wild (✅ migration `026_verdant_wild.sql`).** The forest faction's twelve-unit roster, tiers 1-7 after migration 032, all tagged `faction_id = 'verdant'` — recruitable only by a seat whose `Player.factionId` is `verdant` (the `RecruitUnits` faction gate). Speed is the identity: elk_rider (spd 8) and stag_knight (spd 9) are the fastest units in the game, and the costs are wood-forward (only the stag_knight pays arcane). `warbeast`/`treant_elder` are `monster` on the combat triangle, the same ladder pattern as the Crownlands' warhound.
 
 | Unit | Tier | Recruited at | Cost | Min level | Range |
 |------|------|--------------|------|-----------|-------|
@@ -70,19 +70,69 @@ The Court's four recruit buildings are **Crypt** (150g + 4w, 2 days, `defenseBon
 | Warbeast | 3 | Warren Lodge | 300g | 2 | 1 |
 | Thorn Archer | 4 | Grove Sanctum | 280g, 2w | 2 | 5 |
 | Elk Rider | 5 | Sylvan Stables | 450g, 2w | 1 | 1 |
-| Treant Elder | 6 | Worldroot Grove | 900g, 3w | 1 | 1 |
+| Treant Elder | 6 | Worldroot Grove | 1220g, 3w | 1 | 1 |
 | Stag Knight | 7 | Sylvan Stables | 2000g, 3a | 2 | 1 |
 
-All seven ship hero-panel icon busts and arena idle/attack/move poses. The arena registry discovers pose files automatically; mage remains the known catalog-art gap.
+The original seven ship hero-panel icon busts and arena idle/attack/move poses. The five additions have copied icon and idle placeholders pending dedicated art. The arena registry discovers pose files automatically; mage remains the known catalog-art gap.
 
-**Upkeep is billed from the per-unit catalog** (`upkeep_gold`/`upkeep_food`, all currently shipping at 1, so 1 gold + 1 food per troop per week) and the engine now consumes those columns. How a shortfall is punished is *not* a flat trim — see [Upkeep](#upkeep-implemented-per-unit-catalog-bill) below.
+**Upkeep is billed from the per-unit catalog** (`upkeep_gold = tier`, `upkeep_food = clamp(ceil(tier/2), 1, 3)` for faction units; neutral units use tier 8 for upkeep) and the engine now consumes those columns. How a shortfall is punished is *not* a flat trim — see [Upkeep](#upkeep-implemented-per-unit-catalog-bill) below.
+
+The 15 migration-032 additions below complete the existing tables above. Prices include the listed resources; A/D/H means attack/defence/health, s speed, and r range.
+
+| Faction | id | Name | A/D/H | s | r | advantage_type | specialty (priority) | tier | Price | Building @ level |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ashen | `skeleton_warrior` | Skeleton Warrior | 5/4/9 | 4 | 1 | infantry | sword (1.0) | 2 | 200g | crypt @ L2 |
+| ashen | `grave_hound` | Grave Hound | 4/2/7 | 7 | 1 | monster | monster (1.0) | 3 | 200g | crypt @ L3 |
+| ashen | `dark_acolyte` | Dark Acolyte | 5/3/12 | 4 | 4 | ranged | prayer (1.2) | 6 | 320g + 2 arcane | blackChapel @ L1 |
+| ashen | `necromancer` | Necromancer | 9/2/8 | 4 | 6 | ranged | arcane (1.2) | 6 | 400g + 2 arcane | blackChapel @ L2 |
+| ashen | `bone_dragon` | Bone Dragon | 12/7/28 | 7 | 1 | monster | monster (1.0) | 7 | 1400g + 2 arcane | dragonBoneyard @ L1 |
+| ironmark | `tunnel_levy` | Tunnel Levy | 1/2/4 | 2 | 1 | infantry | militia (1.0) | 1 | 30g | delversHall @ L1 |
+| ironmark | `war_boar` | War Boar | 3/4/9 | 5 | 1 | monster | monster (1.0) | 3 | 180g | delversHall @ L2 |
+| ironmark | `axe_thrower` | Axe Thrower | 4/3/6 | 3 | 4 | ranged | archery (1.0) | 4 | 250g + 2 wood | forgeHall @ L3 |
+| ironmark | `hearth_priest` | Hearth Priest | 4/5/15 | 3 | 4 | ranged | prayer (1.2) | 6 | 300g + 4 iron | hearthTemple @ L1 |
+| ironmark | `ram_rider` | Ram Rider | 7/7/17 | 5 | 1 | cavalry | cavalry (1.0) | 5 | 420g + 2 iron | ramPens @ L1 |
+| verdant | `sproutling` | Sproutling | 1/1/3 | 4 | 1 | infantry | militia (1.0) | 1 | 25g | seedlingGrove @ L1 |
+| verdant | `bramble_blade` | Bramble Blade | 4/5/9 | 5 | 1 | infantry | sword (1.0) | 2 | 200g | seedlingGrove @ L2 |
+| verdant | `wildwood_ranger` | Wildwood Ranger | 6/2/7 | 5 | 6 | ranged | archery (1.0) | 4 | 340g + 2 wood | groveSanctum @ L3 |
+| verdant | `druid` | Druid | 8/3/9 | 4 | 5 | ranged | arcane (1.2) | 6 | 400g + 2 wood | druidCircle @ L1 |
+| verdant | `ursine_guardian` | Ursine Guardian | 8/8/22 | 4 | 1 | monster | monster (1.0) | 5 | 600g + 2 wood | warrenLodge @ L3 |
+
+Migration 032 also applies these existing-unit changes. The four price changes live in `buildingRegistry.ts`; unchanged speed, range, specialty and tier values remain intact.
+
+| Faction | Unit | Before | After |
+|---|---|---|---|
+| human | archer | 4/2/5 | **4/2/6** |
+| human | warhound | 4/3/9 s7 | **3/3/8** s7 |
+| human | swordsman | 5/6/10 | **4/6/9** |
+| human | pikeman | 3/8/12 | **4/8/16** |
+| human | mage | 6/3/6 · 500g + 2 arcane | **9/3/8** · **400g** + 2 arcane |
+| ashen | ghoul | 3/1/5 s5 | **2/1/4** s5 |
+| ashen | bone_archer | 4/2/5 | **4/2/6** |
+| ashen | bone_pikeman | 3/8/12 | **4/7/17** |
+| ashen | wraith | 6/3/7 · 380g + 2 arcane | **7/3/8** · **350g** + 2 arcane |
+| ironmark | dwarf_axeman | 5/6/10 | **5/6/9** |
+| ironmark | shield_bearer | 3/9/14 | **4/9/17** |
+| ironmark | hand_gunner | 7/3/6 | **7/3/7** |
+| ironmark | runesmith | 6/6/14 | **7/6/15** |
+| ironmark | ironsworn | 8/9/20 | **8/9/22** |
+| ironmark | forge_lord | 14/13/40 · 2200g + 6 iron + 2 arcane | **15/13/44** · **2350g** + 6 iron + 2 arcane |
+| verdant | briar_warden | 4/7/11 | **4/7/12** |
+| verdant | warbeast | 6/4/16 s6 | **5/4/12** s6 |
+| verdant | treant_elder | 900g + 3 wood | **1220g** + 3 wood (stats unchanged) |
+| verdant | stag_knight | 13/10/34 s9 | **14/10/38** s9 |
+
+The seven new 1x1 buildings are Black Chapel, Dragon Boneyard, Delvers' Hall, Hearth Temple, Ram Pens, Seedling Grove and Druid Circle. Crypt additionally offers Skeleton Warrior at L2 and Grave Hound at L3; Forge Hall offers Axe Thrower at L3.
+
+Faction starter layouts use Farmhouse (human), Crypt (ashen), Delvers' Hall (ironmark), or Seedling Grove (verdant). Undefined and neutral factions keep the farmhouse layout. All four starters provide +2 food/turn, +20 population, two worker slots, a draft cap of 3 and base daily refill of 0.25; Crypt retains its +1 defence. Delvers' Hall and Seedling Grove otherwise copy the farmhouse economy and 80g + 4w placement cost.
+
+Recruit buildings carry faction tags. `buildingAllowedForFaction` permits shared untagged buildings and legacy callers with no faction; the build palette hides other factions' kinds, and placement rejects new foreign buildings with `wrong_faction`. Existing foreign buildings remain in saved layouts; foreign farmhouses still offer no recruits to their owner. There is no saved-game conversion. Placeholder image provenance is recorded in [roster-parity-placeholder-art.md](../design/arena-unit-sprites/roster-parity-placeholder-art.md).
 
 ## Recruitment (✅ implemented)
 
 - **Building-gated, garrison-first.** The `RecruitUnits` command (`buildingKind` + `gx`/`gy` + `unitTypeId` + `count`) validates against the building's `recruits` entries in the registry (unit offered? settlement level ≥ `minLevel`? affordable from the settlement treasury/warehouse?) and lands the units in the **settlement garrison** (`SettlementState.stacks`), not directly on a hero. Engine: `recruitUnits` + `depositIntoGarrison` in `packages/engine/src/settlement/recruitUnits.ts`.
 - **Draft pools (2026-10-17; tier-scaled recharge 2026-10-18).** Every recruit building keeps a per-unitTypeId **draft pool** (`draftMax` 3; `draft` undefined = full pool — legacy). A request larger than `floor` of the pool is rejected `draft_pool_empty`; successful recruits consume the pool. Pools recharge daily on the round wrap at `draftPerDay (0.25) × (1 + staffing effort) × tierDraftRechargeMultiplier(unit tier)` — higher-tier units refill slower: tiers 1–7 scale ×1 / ×0.8 / ×0.65 / ×0.5 / ×0.4 / ×0.3 / ×0.2 (`TIER_DRAFT_RECHARGE_MULTIPLIER`, `packages/engine/src/units.ts`; catalog-less callers → ×1). Recruitment itself is never staffing-gated — a 0-worker building still recruits what's in its pool; staffing only sets the refill rate.
 - **Hunting Lodge** and **Eagle Eyrie** are the newest Crownlands recruit buildings (2026-09-30 roster expansion): the lodge is 250g + 8 wood over 3 days (recruits warhound 180g, `defenseBonus: 1`); the eyrie is 500g + 12 wood + 8 stone over 6 days (giant_eagle 1400g + 2 arcane at L1, eagle_prince 2400g + 4 arcane at L2).
-- **The four Verdant Wild recruit buildings** (2026-10-02, migration 026): **Grove Sanctum** 300g + 8w + 5s over 4 days (forest_scout L1, thorn_archer L2), **Warren Lodge** 250g + 8w over 3 days (briar_warden L1, warbeast L2), **Sylvan Stables** 350g + 10w + 5s over 4 days (elk_rider L1, stag_knight L2), **Worldroot Grove** 500g + 12w + 8s over 6 days (treant_elder L1) — all 1×1, all `defenseBonus: 1`, wood-forward placement costs as the faction's economic flavor.
+- **The four original Verdant Wild recruit buildings** (2026-10-02, migration 026): **Grove Sanctum** 300g + 8w + 5s over 4 days (forest_scout L1, thorn_archer L2, wildwood_ranger L3), **Warren Lodge** 250g + 8w over 3 days (briar_warden L1, warbeast L2, ursine_guardian L3), **Sylvan Stables** 350g + 10w + 5s over 4 days (elk_rider L1, stag_knight L2), **Worldroot Grove** 500g + 12w + 8s over 6 days (treant_elder L1) — all 1×1, all `defenseBonus: 1`, wood-forward placement costs as the faction's economic flavor.
 - **Transfer to hero.** `TransferUnits` (`toHero`/`toGarrison`, per unit type + count) moves stacks between the garrison and a hero's platoons — the hero **must stand on the settlement**. Engine: `packages/engine/src/settlement/transferUnits.ts`.
 - **UI:** the settlement info panel's **Garrison** accordion, and the same section inside the recruitment panel, are one shared **drag-and-drop grid of square tiles** — `src/screens/shared/squadGrid.ts`, one 4×2 grid over the settlement's eight stack slots mounted beside the hero's own army grid. Dragging a tile **within** a grid swaps those two slots (`ReorderGarrison`, the garrison-side twin of `ReorderStack`); dragging **between** the two grids moves that platoon into the dropped slot through `TransferUnits` with the dropped tile as `toSlot` (a hero-army tile onto the garrison grid, or the reverse). The hero info panel's **Army** accordion is the very same `SquadGrid` (`gridId: "hero-army"`, see `src/screens/heroes/armySection.ts`), so every army/garrison surface in the UI reads one representation. The building menu still renders generic recruit rows for any registry building with `recruits` (minLevel-filtered, quantity picker, live cost check). The city view's **recruitment panel** (⚔ Recruit in the City Design box, or `r`) is the consolidated surface: rows are grouped **by building kind** — one FARMHOUSE block however many farmhouses exist, with that kind's ready/ceiling totals, a `+N/wk` refill rate and resource-cost icon chips per unit — and each kind carries a **Buy all** that recruits everything the pools and the treasury allow, drawn from the most-stocked building of that kind first and round-robining between them once the pools level out. Each unit row is the **parent**: its image accordions down one line per building that trains that unit (collapsed by default), the parent's **worker stepper** staffs every one of those buildings at once (`−`/`+` moves one worker per building, peasant sprite, `n/max` or `Auto`, `AssignWorkers` district-true under the workforce panel's own rules) and its `+` buys across all of them, with the rate following that staffing. Only a nested building line opens that building's own menu. The panel also mounts the settlement panel's **Garrison** section — the same `GarrisonView` component, not a copy — so both surfaces show identical tiles and a drag made on either lands on both immediately (`src/screens/settlements/garrisonView.ts`, mounted by `settlementInfoMenu.ts` and `recruitmentPanel.ts` over the DOM-free model `src/screens/settlements/recruitmentPanelModel.ts`). The panel's building list scrolls inside the panel and the panel itself is **resizable** by the grip in its corner (size remembered; since 2026-10-19 every floating panel and menu carries the same grip — see [architecture.md](./architecture.md)).
 - No build queue, no town screen — recruitment is instant.

@@ -1,0 +1,1 @@
+FOLLOW-UP ART BRIEF: hearthTemple level-one faction troop building. Match existing isometric pixel buildings, 1x1 footprint, transparent 1024x1024 canvas and established ground-plane alignment. Current shipped asset is a copied placeholder based on deepAnvil; see ../roster-parity-placeholder-art.md for provenance.

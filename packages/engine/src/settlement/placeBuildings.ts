@@ -7,6 +7,7 @@ import type {
   SettlementState,
 } from "@heroes/contracts";
 import {
+  buildingAllowedForFaction,
   buildingBuildDays,
   buildingFootprintFromRegistry,
   buildingPlacementCost,
@@ -127,6 +128,15 @@ export function applyPlaceBuildings(
   if (!s) return { ok: false, state, reason: "no_settlement" };
   if (s.ownerId !== actor) return { ok: false, state, reason: "forbidden_not_your_settlement" };
 
+  const factionId = state.players.find((p) => p.id === s.ownerId)?.factionId;
+  const previous = district ? s.districts?.[districtKey(district.q, district.r)]?.buildings ?? [] : s.buildings;
+  if (buildings.some((b) =>
+    !previous.some((p) => p.gx === b.gx && p.gy === b.gy && p.kind === b.kind) &&
+    !buildingAllowedForFaction(b.kind, factionId)
+  )) {
+    return { ok: false, state, reason: "wrong_faction" };
+  }
+
   const newPlacementWorkers = hasExplicitStaffing(s) ? 0 : undefined;
 
   if (district) {
@@ -227,7 +237,7 @@ export function applyPlaceBuildings(
   }
 
   // A previously-empty settlement's starter set (buildStarterLayout's town
-  // hall + farm + 2 houses + 2 wood producers + stone mine + farmhouse) is
+  // hall + farm + 2 houses + 2 wood producers + stone mine + faction troop producer) is
   // free by design and arrives ALREADY CONSTRUCTED — no build timers, no cost. Any later
   // commit pays full net cost and stamps timers on the genuinely new
   // placements only.

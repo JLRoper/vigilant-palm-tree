@@ -1,6 +1,6 @@
 # Technical Specifications — heroes-js
 
-<!-- docs:verified 2026-10-18 -->
+<!-- docs:verified 2026-10-22 -->
 
 A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. This document captures the **tech stack** as it currently exists in the repository. Game design documentation lives under [`docs/`](./docs/README.md); the render module has its own authoritative spec at [`src/render/docs/technical-spec.md`](./src/render/docs/technical-spec.md).
 
@@ -71,7 +71,7 @@ The former top-level `shared/` directory **no longer exists** — its contents w
 
 ### SQL
 - [`server/schema.sql`](./server/schema.sql) — baseline schema.
-- [`server/migrations/`](./server/migrations) — 30 ordered migrations, `001` through `030`; `006_faction_rosters` is present. Recent additions include SSE notifications (`017`), bank/wagon storage (`022`–`023`), faction content (`024`–`026`), numeric precision (`027`), treasury-wagon backfill (`028`), settlement districts (`029`), and workforce staffing (`030`).
+- [`server/migrations/`](./server/migrations) — 32 ordered migrations, `001` through `032`; `006_faction_rosters` is present. Recent additions include SSE notifications (`017`), bank/wagon storage (`022`–`023`), faction content (`024`–`026`), numeric precision (`027`), treasury-wagon backfill (`028`), settlement districts (`029`), workforce staffing (`030`), rivers (`031`), and roster parity with first-boot tier upkeep (`032`).
 - Applied at startup by `initSchema()` in [`server/db.ts`](./server/db.ts:1).
 
 ---

@@ -110,13 +110,14 @@ function normalizeStaffing(settlement: SettlementState): SettlementState {
 // job left. Inert kinds are never auto-filled -- parking there is a manual
 // choice.
 const AUTO_JOB_ORDER: readonly BuildingDef["kind"][] = [
-  "farmField", "farmhouse", "granary",
+  "farmField", "farmhouse", "crypt", "delversHall", "seedlingGrove", "granary",
   "woodcutterHut", "stoneMine", "mine", "ironMine", "arcaneFont", "goldMine",
   "market",
   "barracks", "archeryRange", "stables", "huntingLodge", "eyrie", "smithy",
-  "mageGuild", "crypt", "ossuary", "wraithBarrows", "spireOfAsh", "forgeHall",
+  "mageGuild", "ossuary", "wraithBarrows", "spireOfAsh", "forgeHall",
   "gunnersRedoubt", "golemFoundry", "deepAnvil", "groveSanctum", "warrenLodge",
   "sylvanStables", "worldrootGrove",
+  "blackChapel", "dragonBoneyard", "hearthTemple", "ramPens", "druidCircle",
   "townHall",
 ];
 const AUTO_HOUSING_ORDER: readonly BuildingDef["kind"][] = ["house", "apartment"];
