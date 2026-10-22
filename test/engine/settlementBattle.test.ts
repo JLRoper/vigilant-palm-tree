@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applySettlementBattleResult, normalizePlatoons, startSettlementBattle, CAPTURE_GOLD_REWARD } from "@heroes/engine";
-import { MOVEMENT_PER_TURN } from "@heroes/contracts";
 import { makeHero, makeSettlement, makeState } from "../charter/_helpers";
 
 function stack(unitTypeId: string, count: number) {
@@ -209,8 +208,9 @@ test("a draw that wipes the attacker removes them; a draw with survivors bounces
   assert.deepEqual(stalemate.removedHeroIds, []);
 });
 
-test("retreat zeroes the stacks and relocates to the nearest OWNED settlement", () => {
-  const result = applySettlementBattleResult(bouncedAttackerState(), {
+test("retreat keeps its escapees, relocates to the nearest OWNED settlement and stuns the hero", () => {
+  const before = bouncedAttackerState();
+  const result = applySettlementBattleResult(before, {
     attackerId: "h0",
     settlementId: "s2",
     outcome: "retreat",
@@ -224,14 +224,20 @@ test("retreat zeroes the stacks and relocates to the nearest OWNED settlement", 
   assert.deepEqual(result.removedHeroIds, []);
   assert.equal(hero.q, 0, "relocated to the owner's nearest settlement (s0)");
   assert.equal(hero.r, 0);
-  assert.equal(hero.movementRemaining, MOVEMENT_PER_TURN, "fresh-turn movement at the relocation hex");
+  assert.equal(hero.movementRemaining, 0, "the retreat ends the hero's day");
+  assert.equal(hero.movementLockedThroughDay, before.day + 1, "stunned through the next day");
   assert.deepEqual(hero.trail, [{ q: 0, r: 0 }], "trail reseeded at the settlement");
-  assert.deepEqual(hero.stacks, normalizePlatoons([]), "retreat loses ALL troops");
-  assert.equal(hero.troops, 0, "the denormalized troops counter zeroes with the stacks");
+  assert.deepEqual(hero.stacks, normalizePlatoons(stack("swordsman", 3)), "the submitted edge escapees survive");
+  assert.equal(hero.troops, 3, "the denormalized troops counter follows the stacks");
   assert.equal(result.state.settlements["s2"]?.ownerId, null, "the garrison keeps the settlement");
+  assert.deepEqual(
+    result.state.settlements["s2"]?.stacks,
+    normalizePlatoons(stack("swordsman", 3)),
+    "the garrison keeps its battle losses",
+  );
 });
 
-test("retreat with no owned settlement stays at the post-cancel position (D1) with stacks zeroed", () => {
+test("retreat with no owned settlement stays at the post-cancel position (D1) with no movement left", () => {
   const state = bouncedAttackerState();
   state.settlements["s0"] = makeSettlement("s0", null, 0, 0);
 
@@ -248,8 +254,8 @@ test("retreat with no owned settlement stays at the post-cancel position (D1) wi
   assert.equal(result.attackerVerdict, "retreated");
   assert.equal(hero.q, 4, "stays at the cancelled pre-move hex");
   assert.equal(hero.r, 5);
-  assert.equal(hero.movementRemaining, 7, "cancelMove's movement restoration stands");
-  assert.deepEqual(hero.stacks, normalizePlatoons([]), "troops are still lost");
+  assert.equal(hero.movementRemaining, 0, "the retreat ends the hero's day even without a relocation");
+  assert.deepEqual(hero.stacks, normalizePlatoons(stack("swordsman", 3)), "the edge escapees survive");
 });
 
 test("surrender relocates to the nearest OWNED settlement keeping stacks, after the gold debit", () => {

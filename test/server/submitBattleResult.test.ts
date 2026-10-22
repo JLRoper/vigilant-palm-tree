@@ -218,7 +218,7 @@ test("attackerWon loots the wiped defender's purse, then REMOVES the defender (h
   assert.equal(result.defenderVerdict, "defeated");
 });
 
-test("retreat empties the conceding hero's stacks and relocates them to the nearest OWNED settlement", async () => {
+test("retreat keeps the conceding hero's edge escapees, relocates them to the nearest OWNED settlement and stuns them", async () => {
   const row = makeBattleRow({ stacks: [stack("swordsman", 4)] }, { stacks: [stack("swordsman", 2)] });
   const { gameRepo, eventRepo, deps } = makeDeps(row);
   const result = await handleCommand(
@@ -238,12 +238,13 @@ test("retreat empties the conceding hero's stacks and relocates them to the near
   // cancelMove-restored position is overwritten by the relocation.
   assert.equal(saved.h0.q, 0);
   assert.equal(saved.h0.r, 0);
-  assert.equal(saved.h0.movementRemaining, MOVEMENT_PER_TURN);
+  assert.equal(saved.h0.movementRemaining, 0, "the retreat ends the hero's day");
+  assert.equal(saved.h0.movementLockedThroughDay, row.day + 1, "stunned through the next day");
   assert.equal(saved.h0.previousQ, null);
   assert.deepEqual(saved.h0.trail, [{ q: 0, r: 0 }]);
   assert.equal(saved.h0.gold, 100, "no loot on a retreat");
-  assert.deepEqual(saved.h0.stacks, normalizePlatoons([]));
-  assert.equal(saved.h0.troops, 0, "the denormalized troops counter is zeroed along with the stacks");
+  assert.deepEqual(saved.h0.stacks, normalizePlatoons([stack("swordsman", 3)]), "the submitted edge escapees survive");
+  assert.equal(saved.h0.troops, 3, "the denormalized troops counter follows the stacks");
   // The defender stood: survivors and purse untouched at the collision hex.
   assert.equal(saved.h1.q, 3);
   assert.deepEqual(saved.h1.stacks, normalizePlatoons([stack("swordsman", 2)]));
@@ -261,7 +262,7 @@ test("retreat empties the conceding hero's stacks and relocates them to the near
   assert.equal(result.attackerVerdict, "retreated");
 });
 
-test("retreat with no owned settlement keeps the hero at the cancelled position with empty stacks (D1)", async () => {
+test("retreat with no owned settlement keeps the hero at the cancelled position with its escapees (D1)", async () => {
   const row = makeBattleRow({ stacks: [stack("swordsman", 4)] }, { stacks: [stack("swordsman", 2)] });
   // Seat 0 holds nothing: s0 belongs to the AI, so relocation has nothing to
   // respawn to -- the hero stays where cancelMove put it, troops still lost.
@@ -285,8 +286,8 @@ test("retreat with no owned settlement keeps the hero at the cancelled position 
   assert.equal(saved.h0.q, 2, "stays at the cancelMove-restored position");
   assert.equal(saved.h0.r, 2);
   assert.equal(saved.h0.previousQ, null, "the cancel itself still applies");
-  assert.deepEqual(saved.h0.stacks, normalizePlatoons([]), "troops still lost without a relocation target");
-  assert.equal(saved.h0.troops, 0, "troops counter zeroed even on the D1 stay-put edge");
+  assert.deepEqual(saved.h0.stacks, normalizePlatoons([stack("swordsman", 3)]), "escapees kept without a relocation target");
+  assert.equal(saved.h0.movementRemaining, 0, "the retreat ends the hero's day on the D1 stay-put edge too");
 });
 
 test("surrender deducts the paid gold from the CONCEDING hero and relocates them, keeping their army", async () => {
@@ -454,6 +455,22 @@ test("survivor stacks naming a unit outside the server's catalog are rejected", 
   );
   assert.equal(result.ok, false);
   assert.equal(result.reason, "unknown_unit_type");
+});
+
+test("survivors that out-number the army that walked in are refused (a retreat keeps its submitted escapees)", async () => {
+  const { gameRepo, deps } = makeDeps(makeBattleRow());
+  const before = JSON.stringify(gameRepo.rows["test-game"].heroes);
+  const result = await handleCommand(
+    submitCommand({
+      outcome: "retreat",
+      attackerStacks: [stack("swordsman", 50)],
+      defenderStacks: [],
+    }),
+    deps,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "survivors_exceed_army");
+  assert.equal(JSON.stringify(gameRepo.rows["test-game"].heroes), before, "nothing persisted");
 });
 
 test("a wiped chartering defender gets their charters cleaned up, same as the auto-resolver", async () => {

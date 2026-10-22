@@ -26,6 +26,18 @@ export const TYPE_DISADVANTAGE_MULTIPLIER = 2 - TYPE_ADVANTAGE_MULTIPLIER;
 export const PLATOON_RETREAT_LOSS = 0.15;
 export const HERO_RETREAT_PENALTY = 0.5;
 
+// Hero retreat (plan/2026-10-21-battle-retreat-rules.md): only platoons
+// standing on their side's starting edge column escape, intact; every other
+// platoon is lost. Retreat opens at these battle rounds (hero battles /
+// settlement assaults), and the auto-resolver retreats a side once retreat
+// is open and its remaining total health falls below AI_RETREAT_STRENGTH_RATIO
+// of the enemy's. A retreating hero gets 0 movement for the rest of the day
+// plus RETREAT_MOVEMENT_LOCK_DAYS more days.
+export const HERO_BATTLE_MIN_RETREAT_ROUND = 2;
+export const SETTLEMENT_BATTLE_MIN_RETREAT_ROUND = 3;
+export const AI_RETREAT_STRENGTH_RATIO = 0.4;
+export const RETREAT_MOVEMENT_LOCK_DAYS = 1;
+
 // Flat gold price the hero pays to surrender a battle. If they can't cover
 // it, the surrender modal (see manualBattleArena.ts) opens a "Leave Behind"
 // picker that lets them sacrifice units at SURRENDER_UNIT_VALUE_GOLD each

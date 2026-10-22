@@ -15,6 +15,14 @@
 >    resolver: `packages/engine/src/combat/resolveBattle.ts` now deploys
 >    platoons onto a battle grid with rounds, damage, retreats, and obstacles
 >    (see `combat/grid.ts`, `combat/damage.ts`, `combatConfig.ts`).
+> 3. **Hero retreat superseded (2026-10-21).** The "full hero retreat at
+>    50% Renown/morale, all remaining platoons pulled out" design below was
+>    replaced by the shipped rule in
+>    [`plan/2026-10-21-battle-retreat-rules.md`](../plan/2026-10-21-battle-retreat-rules.md):
+>    retreat opens at round 2 (round 3 for settlement assaults), only
+>    platoons on the side's starting edge column escape (intact), the rest
+>    are lost, and the hero relocates stunned through the next day. The
+>    per-platoon 15% self-retreat remains a resolver-only policy.
 >
 > Read every `resolve-battle` mention below as "the ResolveBattle command
 > path". The design target (hex tactical grid as primary, `docs/army.md`

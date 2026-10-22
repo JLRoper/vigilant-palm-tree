@@ -733,8 +733,14 @@ test("SubmitBattleResult over HTTP returns the per-hero verdicts and both heroes
     assert.equal(body.events?.[0]?.type, "BattleResolved");
     assert.equal(body.attackerHero?.q, 2, "the retreated attacker relocated to the nearest owned settlement");
     assert.equal(body.attackerHero?.r, 2);
-    assert.deepEqual(body.attackerHero?.stacks, normalizePlatoons([]), "retreat empties the stacks server-side");
-    assert.equal(body.attackerHero?.troops, 0, "the denormalized troops counter is zeroed with the stacks");
+    assert.deepEqual(
+      body.attackerHero?.stacks,
+      normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 3 }] }]),
+      "the retreat keeps the submitted edge escapees",
+    );
+    assert.equal(body.attackerHero?.troops, 3, "the denormalized troops counter follows the stacks");
+    assert.equal(body.attackerHero?.movementRemaining, 0, "the retreat ends the hero's day");
+    assert.ok(body.attackerHero?.movementLockedThroughDay !== undefined, "the retreating hero is stunned");
     assert.deepEqual(
       body.defenderHero?.stacks,
       normalizePlatoons([{ entries: [{ unitTypeId: "swordsman", count: 2 }] }]),

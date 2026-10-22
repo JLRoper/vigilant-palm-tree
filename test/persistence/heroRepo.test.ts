@@ -53,6 +53,22 @@ test("heroRepo.upsertMany writes a hero and loadAllForGame reads it back (incl. 
   });
 });
 
+test("heroRepo round-trips the retreat stun (032) and keeps an absent stun absent", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedGame(client, name);
+    const repo = createHeroRepo(client);
+    const stunned = { ...makeHero("h0", 0, 3, 4, { movementRemaining: 0 }), movementLockedThroughDay: 6 };
+    const free = makeHero("h1", 0, 5, 4);
+
+    await repo.upsertMany(name, { h0: stunned, h1: free });
+    const loaded = Object.fromEntries((await repo.loadAllForGame(name)).map((h) => [h.id, h]));
+
+    assert.equal(loaded.h0.movementLockedThroughDay, 6);
+    assert.equal("movementLockedThroughDay" in loaded.h1, false, "NULL column reads back as an absent key");
+  });
+});
+
 test("heroRepo.upsertMany leaves an absent treasuryWagons ABSENT: the 023 column is NULL, not a materialized default", async () => {
   await withRollback(async (client) => {
     const name = uniqueName();

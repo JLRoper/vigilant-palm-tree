@@ -2,6 +2,7 @@ export * from "./types";
 export * from "./battleOutcome";
 export * from "./damage";
 export * from "./grid";
+export * from "./retreat";
 export * from "./spells";
 export {
   resolveBattle,

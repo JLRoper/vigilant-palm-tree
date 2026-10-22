@@ -96,17 +96,24 @@ export function detectAdjacentEnemy(state: GameState, moverId: HeroId): HeroId |
 // Resets movementRemaining/trail/previous-move bookkeeping for a new turn.
 // When ownerId is omitted, every hero is reset (advanceRound's new-day case);
 // when provided, only that owner's heroes are reset (applyEndOfTurnDetailed's
-// single-player case).
+// single-player case). `forDay` is the day the granted movement is for: a
+// retreat-stunned hero (movementLockedThroughDay >= forDay) gets 0, and the
+// stun is dropped once forDay has passed it. Omitted, no stun applies.
 export function resetHeroMovement(
   heroes: Record<HeroId, HeroState>,
   ownerId?: PlayerId,
+  forDay?: number,
 ): Record<HeroId, HeroState> {
   const newHeroes: Record<HeroId, HeroState> = { ...heroes };
   for (const hero of Object.values(newHeroes)) {
     if (ownerId !== undefined && hero.ownerId !== ownerId) continue;
+    const { movementLockedThroughDay, ...rest } = hero;
+    const locked = movementLockedThroughDay !== undefined && forDay !== undefined && movementLockedThroughDay >= forDay;
+    const keepLock = movementLockedThroughDay !== undefined && (forDay === undefined || movementLockedThroughDay >= forDay);
     newHeroes[hero.id] = {
-      ...hero,
-      movementRemaining: MOVEMENT_PER_TURN,
+      ...rest,
+      ...(keepLock ? { movementLockedThroughDay } : {}),
+      movementRemaining: locked ? 0 : MOVEMENT_PER_TURN,
       previousQ: null,
       previousR: null,
       previousMovementRemaining: null,

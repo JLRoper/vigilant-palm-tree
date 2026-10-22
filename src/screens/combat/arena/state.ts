@@ -131,13 +131,15 @@ export function endPlatoonTurnAction(
   endPlatoonTurn(state, side, slotIndex);
 }
 
-// Retreat applies the standard 15% self-retreat loss to every still-living
-// platoon and pulls the whole side off the field.
-export function retreatAction(state: ManualBattleState, side: BattleSide, emit?: BattleActionEmit): void {
-  retreatHero(state, side, { applyLoss: true });
+// Retreat applies the starting-edge rule (plan/2026-10-21-battle-retreat-
+// rules.md): edge-column platoons escape intact, the rest are lost. Refused
+// (false, nothing mutated or streamed) before the battle's retreat round.
+export function retreatAction(state: ManualBattleState, side: BattleSide, emit?: BattleActionEmit): boolean {
+  if (!retreatHero(state, side, { edgeOnly: true })) return false;
   if (emit) {
     safeEmit(emit, { phase: "retreat", payload: { ...actionContext(state), side } });
   }
+  return true;
 }
 
 // Surrender skips the loss and yields immediately. Same engine call as retreat

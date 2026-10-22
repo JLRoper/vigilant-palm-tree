@@ -1,6 +1,6 @@
 import type { GameState, HeroBattleVerdict, HeroId, Platoon, SettlementId } from "@heroes/contracts";
 import { cleanupDefeatedHeroCharters } from "../charter/cleanup";
-import { nearestOwnedSettlement, relocateHeroToSettlement } from "../combat/battleOutcome";
+import { applyHeroConcession } from "../combat/battleOutcome";
 import { cancelMove } from "../hero/move";
 import { endBattlePhase } from "../turn/phases";
 import { normalizePlatoons, platoonsHaveTroops, settlementStacks } from "../units";
@@ -46,6 +46,17 @@ export interface SettlementBattleResultOptions {
   attackerStacks: Platoon[];
   defenderStacks: Platoon[];
   surrenderedGold?: number;
+}
+
+// Settlement-battle outcome of an auto-resolved assault: an attacker hero
+// retreat (the "outmatched" policy) is a "retreat", otherwise the winner
+// decides. The garrison never retreats.
+export function settlementOutcomeFromBattle(battle: {
+  winner: "attacker" | "defender" | "draw";
+  attackerOutcome: string;
+}): SettlementBattleOutcome {
+  if (battle.attackerOutcome === "retreated_hero") return "retreat";
+  return battle.winner === "attacker" ? "attackerWon" : battle.winner === "defender" ? "defenderWon" : "draw";
 }
 
 // Attacker verdict for the settlement-battle outcome, hero-outcomes parity
@@ -103,7 +114,9 @@ export function applySettlementBattleResult(
     const capture = captureSettlement(next, opts.attackerId, opts.settlementId);
     next = capture.state;
     captured = capture.captured;
-  } else if (opts.outcome === "defenderWon" || opts.outcome === "draw") {
+  } else {
+    // Every non-capture outcome keeps the garrison's survivors — including a
+    // retreat/surrender, where the garrison still took the battle's losses.
     next = {
       ...next,
       settlements: {
@@ -111,8 +124,6 @@ export function applySettlementBattleResult(
         [opts.settlementId]: { ...settlement, stacks: normalizePlatoons(opts.defenderStacks) },
       },
     };
-    next = cancelMove(next, opts.attackerId);
-  } else {
     next = cancelMove(next, opts.attackerId);
     const surrenderedGold = opts.surrenderedGold ?? 0;
     if (opts.outcome === "surrender" && surrenderedGold > 0) {
@@ -131,10 +142,10 @@ export function applySettlementBattleResult(
 
   // Hero-outcome application (same rules as the hero-battle path): a wiped
   // attacker is removed from the record (owner heroIds pruned, outstanding
-  // charter folded while the hero row is still readable); a retreat loses
-  // ALL troops and relocates to the nearest owned settlement (staying at the
-  // post-cancel position when the owner holds none, plan D1); a surrender
-  // relocates keeping its stacks (gold debit already applied above).
+  // charter folded while the hero row is still readable); a retreat keeps
+  // only its starting-edge escapees (already the submitted stacks) and a
+  // surrender keeps its stacks (gold debit already applied above) — both
+  // relocate via applyHeroConcession, and a retreat stuns the hero.
   const attackerVerdict = settlementAttackerVerdict(opts.outcome, attackerStacks);
   let removedHeroIds: HeroId[] = [];
   const afterBattle = next.heroes[opts.attackerId];
@@ -153,15 +164,9 @@ export function applySettlementBattleResult(
     };
     removedHeroIds = [opts.attackerId];
   } else if (afterBattle && (attackerVerdict === "retreated" || attackerVerdict === "surrendered")) {
-    const battleHero =
-      attackerVerdict === "retreated"
-        ? { ...afterBattle, stacks: normalizePlatoons([]), troops: 0 }
-        : afterBattle;
-    const nearest = nearestOwnedSettlement(next, battleHero);
-    const settled = nearest ? relocateHeroToSettlement(battleHero, nearest) : battleHero;
     next = {
       ...next,
-      heroes: { ...next.heroes, [opts.attackerId]: settled },
+      heroes: { ...next.heroes, [opts.attackerId]: applyHeroConcession(afterBattle, attackerVerdict, next, next.day) },
     };
   }
   next = endBattlePhase(next);
