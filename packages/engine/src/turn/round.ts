@@ -72,8 +72,8 @@ export function advanceRound(
 ): GameState {
   // New day: movement resets and hero mana fully refills (spellcasting v1 —
   // locked decision: the day tick is the mana-regen cadence).
-  const newHeroes: Record<HeroId, HeroState> = regenerateHeroMana(resetHeroMovement(state.heroes));
   const nextDay = state.day + 1;
+  const newHeroes: Record<HeroId, HeroState> = regenerateHeroMana(resetHeroMovement(state.heroes, undefined, nextDay));
   let withDay: GameState = {
     ...state,
     round: state.round + 1,

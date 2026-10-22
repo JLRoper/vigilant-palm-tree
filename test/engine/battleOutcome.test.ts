@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { deriveHeroVerdict, nearestOwnedSettlement, relocateHeroToSettlement } from "@heroes/engine";
-import { MOVEMENT_PER_TURN } from "@heroes/contracts";
 import { makeHero, makeSettlement, makeState } from "../charter/_helpers";
 
 test("deriveHeroVerdict truth table", () => {
@@ -86,12 +85,12 @@ test("relocateHeroToSettlement nulls the previous-move bookkeeping", () => {
   assert.equal(moved.previousMovementRemaining, null);
 });
 
-test("relocateHeroToSettlement seeds the trail at the settlement and refills movement", () => {
+test("relocateHeroToSettlement seeds the trail at the settlement and ends the hero's day (no movement left)", () => {
   const hero = retreatHero();
   const moved = relocateHeroToSettlement(hero, { q: 4, r: 2 });
 
   assert.deepEqual(moved.trail, [{ q: 4, r: 2 }]);
-  assert.equal(moved.movementRemaining, MOVEMENT_PER_TURN);
+  assert.equal(moved.movementRemaining, 0, "a concession is never a free teleport home with a full move");
 });
 
 test("relocateHeroToSettlement preserves stacks and mutates nothing", () => {

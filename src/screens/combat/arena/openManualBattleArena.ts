@@ -23,6 +23,7 @@
 
 import { SURRENDER_COST_GOLD, SURRENDER_UNIT_VALUE_GOLD } from "@heroes/engine";
 import {
+  canRetreat,
   finalizeManualBattle,
   getCombatant,
   getMovementPath,
@@ -31,9 +32,11 @@ import {
   getValidMeleeTargets,
   getValidSpellTargets,
   isBattleOver,
+  isOnStartingEdge,
   pickTarget,
   platoonRange,
   platoonSpeed,
+  retreatPreview,
   SPELL_CATALOG,
   spellDef,
   defaultSpellLoadout,
@@ -131,6 +134,10 @@ export interface ManualBattleArenaOptions {
   // "Assault on <Settlement name>" so a real fight is never titled like the
   // dev sandbox.
   title?: string;
+  // First round the human may retreat (plan/2026-10-21-battle-retreat-
+  // rules.md). Defaults to HERO_BATTLE_MIN_RETREAT_ROUND; the settlement
+  // assault passes SETTLEMENT_BATTLE_MIN_RETREAT_ROUND.
+  minRetreatRound?: number;
 }
 
 export function openManualBattleArena(
@@ -157,6 +164,7 @@ export function openManualBattleArena(
     obstacleSeed: Math.floor(Math.random() * 1_000_000),
     sideChoice: plan.leftColumnSide,
     heroSpells: heroSpell ? (humanSide === "attacker" ? { attacker: heroSpell } : { defender: heroSpell }) : {},
+    ...(options.minRetreatRound !== undefined ? { minRetreatRound: options.minRetreatRound } : {}),
   });
 
   // Gold the human hero brings into this battle. Defaults to a low value
@@ -701,6 +709,10 @@ const FLOAT_MS = 800;
     if (entry.kind === "hero_retreat") {
       return `R${entry.round} · ${sideName(entry.side)} hero left the field`;
     }
+    if (entry.kind === "left_behind") {
+      const lost = entry.casualties.reduce((sum, c) => sum + c.count, 0);
+      return `R${entry.round} · ${sideName(entry.side)} P${entry.slotIndex + 1} left behind · ${lost} lost`;
+    }
     if (entry.kind === "morale_change") {
       const parts: string[] = [];
       if (entry.moraleDelta !== 0) parts.push(`morale ${entry.moraleDelta > 0 ? "+" : "−"}${Math.abs(entry.moraleDelta)} → ${entry.morale}`);
@@ -765,28 +777,56 @@ const FLOAT_MS = 800;
 
   applyLogHeight();
 
-  // Voluntary concession — Retreat applies the standard 15% self-retreat
-  // loss to every still-living platoon and pulls the whole side off the
-  // field; Surrender skips the loss and yields immediately. Both finalize
-  // the battle as `retreated_hero` for the conceding side (see retreatHero
-  // + finalizeManualBattle in shared/combat/manualBattle.ts).
+  // Voluntary concession — Retreat (plan/2026-10-21-battle-retreat-rules.md)
+  // opens at the battle's retreat round and saves only the platoons standing
+  // on the human's starting edge column, intact; every other platoon is
+  // left behind and lost. Surrender yields immediately with every platoon
+  // intact. Both finalize the battle as `retreated_hero` for the conceding
+  // side (see retreatHero + finalizeManualBattle in combat/manualBattle.ts).
   const retreatBtn = document.createElement("button");
   retreatBtn.textContent = "Retreat";
   styleButton(retreatBtn);
-  retreatBtn.title = "Withdraw your hero from the fight (each surviving platoon takes a 15% loss before leaving)";
+  function describePlatoons(list: Combatant[]): string {
+    return list
+      .map((c) => `P${c.slotIndex + 1} ${c.entries.map((e) => `${state.unitTypes[e.unitTypeId]?.name ?? e.unitTypeId} x${e.count}`).join(", ")}`)
+      .join("\n");
+  }
   retreatBtn.addEventListener("click", () => {
-    if (isBattleOver(state)) return;
-    openConfirmDialog({
+    if (!canRetreat(state)) return;
+    const preview = retreatPreview(state, humanSide);
+    // Light the escape column with the move-range highlight while the
+    // prompt is up, so "on the edge" is visible rather than described.
+    const savedSelection = selectedSlot;
+    const savedRange = moveRange;
+    const savedAttackTargets = attackTargets;
+    selectedSlot = null;
+    attackTargets = [];
+    moveRange = state.grid.hexes.filter((h) => !h.impassable && isOnStartingEdge(h, humanSide, state.grid, state.sideChoice));
+    refresh();
+    const dialog = openConfirmDialog({
       title: "Retreat?",
-      message: "Withdraw your hero from this battle?\n\nEvery surviving platoon takes a 15% loss before leaving the field, and you lose the engagement.",
+      message:
+        "Withdraw your hero from this battle? You lose the engagement.\n\n" +
+        "Only platoons on your starting edge (highlighted) escape, with no losses.\n\n" +
+        `Escaping:\n${preview.escaping.length > 0 ? describePlatoons(preview.escaping) : "none"}\n\n` +
+        `Left behind and lost:\n${preview.leftBehind.length > 0 ? describePlatoons(preview.leftBehind) : "none"}\n\n` +
+        "Your hero can't move for the rest of today or tomorrow.",
       confirmLabel: "Retreat",
       destructive: true,
       onConfirm: () => {
-        debugLog(`player retreats as ${humanSide}`);
+        debugLog(`player retreats as ${humanSide}: ${preview.escaping.length} escape, ${preview.leftBehind.length} left behind`);
         concession = "retreat";
+        moveRange = [];
         retreatAction(state, humanSide, emit);
         finishBattle();
       },
+    });
+    dialog.setOnClose(() => {
+      if (concession === "retreat") return;
+      selectedSlot = savedSelection;
+      moveRange = savedRange;
+      attackTargets = savedAttackTargets;
+      refresh();
     });
   });
   // Not appended to actionRow — moved into the human's hero panel, directly
@@ -877,6 +917,14 @@ const FLOAT_MS = 800;
     humanCastBtn.style.display = showHumanActions ? "" : "none";
     retreatBtn.style.display = showHumanActions ? "" : "none";
     surrenderBtn.style.display = showHumanActions ? "" : "none";
+    const retreatable = showHumanActions && canRetreat(state);
+    retreatBtn.disabled = !retreatable;
+    retreatBtn.style.opacity = retreatable ? "1" : "0.4";
+    retreatBtn.style.cursor = retreatable ? "pointer" : "not-allowed";
+    retreatBtn.title =
+      state.round < state.minRetreatRound
+        ? `Retreat opens in round ${state.minRetreatRound}.`
+        : "Withdraw your hero. Only platoons on your starting edge escape; the rest are lost.";
 
     // The cast button is enabled exactly when the hero's mana covers the
     // spell's cost and something legal is on the board to target — real

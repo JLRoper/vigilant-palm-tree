@@ -255,7 +255,7 @@ Test inventory: new suites `test/ai/aiBrain.test.ts` (`test:unit` glob extended 
 
 ### Hero battle outcomes (2026-09-29)
 
-Plan: [`.kilo/plan/2026-09-29-hero-outcomes.md`](../.kilo/plan/2026-09-29-hero-outcomes.md) — battles now end in per-hero verdicts instead of leaving a wiped loser standing with empty stacks. **Defeat** (side wiped to zero troops) **removes** the hero from the adventure map entirely (state heroes record + `player.heroIds` + `hero_platoons` rows); arena **retreat** respawns at the nearest **owned** settlement with all troops lost (stacks zeroed server-side — the arena's 15% pre-loss is subsumed; purse kept); **surrender** teleports there keeping troops (the surrender gold deduction is unchanged); with no owned settlement a retreating/surrendering hero stays at its post-cancel position (plan edge D1); a stalemate leaves both standing; modal **Flee** is unchanged (pre-battle cancel). The auto-resolver is run with no retreat policies, so AI-involved losses are always removals. Charter cleanup now runs for every **removed** hero (attacker or defender); retreating/surrendering heroes keep active charters and their auto-travel resumes from the relocated position.
+Plan: [`.kilo/plan/2026-09-29-hero-outcomes.md`](../.kilo/plan/2026-09-29-hero-outcomes.md) — battles now end in per-hero verdicts instead of leaving a wiped loser standing with empty stacks. **Defeat** (side wiped to zero troops) **removes** the hero from the adventure map entirely (state heroes record + `player.heroIds` + `hero_platoons` rows); arena **retreat** respawns at the nearest **owned** settlement with all troops lost (stacks zeroed server-side — the arena's 15% pre-loss is subsumed; purse kept); **surrender** teleports there keeping troops (the surrender gold deduction is unchanged); with no owned settlement a retreating/surrendering hero stays at its post-cancel position (plan edge D1); a stalemate leaves both standing; modal **Flee** is unchanged (pre-battle cancel). The auto-resolver is run with no retreat policies, so AI-involved losses are always removals. (Retreat rules amended 2026-10-21 — see [Battle retreat rules + stuck-arena fix](#battle-retreat-rules--stuck-arena-fix-2026-10-21).) Charter cleanup now runs for every **removed** hero (attacker or defender); retreating/surrendering heroes keep active charters and their auto-travel resumes from the relocated position.
 
 | Module | Purpose |
 |---|---|
@@ -714,7 +714,7 @@ Test inventory: `test/screens/shared/panelManager.test.ts` (12 cases: stacking o
 
 ### Faction roster parity and starter recruitment (2026-10-22)
 
-Each playable faction now has twelve units. Migration `032_roster_parity.sql` inserts fifteen units, assigns their faction/tier/range/specialty, reapplies migration 021's tier upkeep formulas for first-boot correctness, and overrides the selected existing-unit stats on every boot. Recruitment prices remain registry data; the catalog totals 52 rows including four neutral monsters.
+Each playable faction now has twelve units. Migration `033_roster_parity.sql` inserts fifteen units, assigns their faction/tier/range/specialty, reapplies migration 021's tier upkeep formulas for first-boot correctness, and overrides the selected existing-unit stats on every boot. Recruitment prices remain registry data; the catalog totals 52 rows including four neutral monsters.
 
 | Area | Responsibility |
 |---|---|
@@ -726,6 +726,27 @@ Each playable faction now has twelve units. Migration `032_roster_parity.sql` in
 
 All faction starters preserve farmhouse food, population, staffing and draft economics. Crypt retains +1 defence and its 150g + 4w cost; the two new starter kinds cost 80g + 4w. Existing foreign farmhouses remain in saved games and cannot recruit for another faction. The full unit, cost and building-level tables are in [army.md](./army.md).
 
+### Battle retreat rules + stuck-arena fix (2026-10-21)
+
+Plan: [`plan/2026-10-21-battle-retreat-rules.md`](../plan/2026-10-21-battle-retreat-rules.md). Amends the retreat half of [Hero battle outcomes (2026-09-29)](#hero-battle-outcomes-2026-09-29): retreat no longer wipes the army, and the auto-resolver now concedes.
+
+| Path | What it carries |
+|---|---|
+| `packages/engine/src/combatConfig.ts` | `HERO_BATTLE_MIN_RETREAT_ROUND = 2`, `SETTLEMENT_BATTLE_MIN_RETREAT_ROUND = 3`, `AI_RETREAT_STRENGTH_RATIO = 0.4`, `RETREAT_MOVEMENT_LOCK_DAYS = 1`. |
+| `packages/engine/src/combat/retreat.ts` | **New.** `retreatSideByEdge` (platoons on the side's starting edge column escape intact, no 15% loss; every other platoon is zeroed and logged as the new `left_behind` `BattleLogEntry`), `retreatOpen`, `isOutmatched`. |
+| `packages/engine/src/combat/grid.ts` | `startingEdgeColumn` / `isOnStartingEdge` — the column `deploymentPosition` deploys on, per `sideChoice`. |
+| `packages/engine/src/combat/manualBattle.ts` | `ManualBattleOptions.minRetreatRound`; `canRetreat`, `retreatPreview`; `retreatHero({ edgeOnly: true })` applies the edge rule and returns `false` before the gate. |
+| `packages/engine/src/combat/resolveBattle.ts` + `types.ts` | New `RetreatPolicy` kind `outmatched` `{ strengthRatio, minRetreatRound }`: once retreat is open, a side whose remaining health is below `strengthRatio` of the enemy's retreats its hero. Auto-resolved platoons never move, so `Combatant.engaged` (set on melee contact) stands in for "off the edge". |
+| `packages/engine/src/combat/battleOutcome.ts` | `relocateHeroToSettlement` grants 0 movement (was a fresh `MOVEMENT_PER_TURN`); new `applyHeroConcession` (relocate both concessions; a retreat also sets `movementLockedThroughDay = day + RETREAT_MOVEMENT_LOCK_DAYS`), shared by the server and the settlement reducer. |
+| `packages/engine/src/hero/move.ts` + `turn/endTurn.ts` + `turn/round.ts` | `resetHeroMovement(heroes, owner?, forDay?)` grants 0 while `movementLockedThroughDay >= forDay` and drops the field once passed; both callers pass `state.day + 1`. |
+| `packages/engine/src/settlement/battle.ts` | `settlementOutcomeFromBattle` maps an attacker hero retreat to `retreat`; every non-capture outcome (retreat/surrender included) now keeps the garrison's survivors instead of healing it. |
+| `packages/contracts/src/gameState.ts` + `server/migrations/032_hero_movement_lock.sql` + `server/persistence/repositories/heroRepo.ts` | `HeroState.movementLockedThroughDay?`; nullable `heroes.movement_locked_through_day` (NULL = absent). |
+| `server/app/commandHandler.ts` | `ResolveBattle` runs both sides under `outmatched` (an attacker retreat cancels the move and skips capture); the retreated verdict keeps the submitted escapees; `SubmitBattleResult` / `SubmitSettlementBattleResult` reject survivors exceeding the pre-battle army per unit type (`survivors_exceed_army`). |
+| `server/app/aiDriver.ts` + `src/state/turnController.ts` | AI settlement assaults (server) and client auto-resolved assaults run the attacker under `outmatched` with the round-3 gate. `TurnController.abandonBattle(attackerId)` = `cancelMove` + close the `BATTLE`/`SETTLEMENT_BATTLE` phase (re-mapped to `AI_TURN` on an AI turn); `clearSettlementBattlePhase` renamed `closeBattlePhase`. |
+| `src/managers/GameActions.ts` + `src/io/commandRetry.ts` + `src/screens/combat/battleSubmitFailedCard.ts` | The arena closes on every exit except the success hand-off to the result card. Arena submits go through `sendWithRetry` (network/5xx retried at 400 ms / 1200 ms, 4xx fails fast); a final failure calls `abandonBattle` and shows the "Couldn't record this battle" card with **Return to map**. Flee and the catalog-unavailable settlement path also use `abandonBattle`. |
+| `src/screens/combat/arena/openManualBattleArena.ts` + `arena/state.ts` | Retreat disabled before the gate ("Retreat opens in round N."); the confirm dialog highlights the edge column and lists escaping vs left-behind platoons; `retreatAction` returns `false` when refused. |
+
+Test inventory: new `test/combat/retreatRules.test.ts` and `test/io/commandRetry.test.ts`; extended `test/engine/battleOutcome.test.ts`, `test/engine/settlementBattle.test.ts`, `test/persistence/heroRepo.test.ts`, `test/server/submitBattleResult.test.ts`, `test/server/submitSettlementBattleResult.test.ts`, `test/server/commandsRoute.test.ts`, `test/state/turnController.test.ts`, `test/screens/combat/arenaTelemetry.test.ts`.
 
 ## See also
 

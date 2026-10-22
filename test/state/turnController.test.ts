@@ -1214,7 +1214,7 @@ test("settlement battle merge applies a relocated retreat/surrender attacker: po
   assert.equal(merged.heroes["h0"]?.q, 2, "position merged at the settlement hex");
   assert.equal(merged.heroes["h0"]?.r, 2);
   assert.deepEqual(merged.heroes["h0"]?.trail, [{ q: 2, r: 2 }], "trail reseeded at the settlement");
-  assert.equal(merged.heroes["h0"]?.movementRemaining, MOVEMENT_PER_TURN);
+  assert.equal(merged.heroes["h0"]?.movementRemaining, 0, "the concession ended the hero's day");
   assert.deepEqual(merged.players[0]?.heroIds, ["h0"], "heroIds keep the retreated hero");
   assert.equal(merged.selectedHeroId, "h0", "a surviving selected hero keeps client-local selection");
   assert.equal(merged.settlements, initial.settlements, "settlements untouched by the hero merge");
@@ -1931,6 +1931,26 @@ test("cancelSettlementBattle ends the phase with the hero on the tile, the garri
     "SETTLEMENT_BATTLE",
     "re-selecting the hero re-runs tryCaptureAt and re-opens the assault flow",
   );
+});
+
+test("abandonBattle bounces the attacker AND closes an AI-turn BATTLE phase back to AI_TURN", () => {
+  // The AI (seat 1) walked h1 from (6,4) next to h0 and the human defender's
+  // fought result could not be recorded: the bounce must also end the phase,
+  // or the AI turn never advances (plan/2026-10-21-battle-retreat-rules.md).
+  const attacker = { ...makeHero("h1", 1, 3, 2), previousQ: 6, previousR: 4, previousMovementRemaining: 7, movementRemaining: 3 };
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 2, 2), attacker],
+    activePlayerId: 1,
+    phase: { kind: "BATTLE", attackerId: "h1", defenderId: "h0" },
+  });
+  const controller = new TurnController(initial, buildHooks(initial));
+
+  controller.abandonBattle("h1");
+  const after = controller.getState();
+  assert.deepEqual(after.phase, { kind: "AI_TURN", playerId: 1 });
+  assert.equal(after.heroes["h1"]?.q, 6, "attacker back on its pre-move hex");
+  assert.equal(after.heroes["h1"]?.r, 4);
+  assert.equal(after.heroes["h1"]?.movementRemaining, 7);
 });
 
 test("cancelSettlementBattle is a no-op outside SETTLEMENT_BATTLE", () => {

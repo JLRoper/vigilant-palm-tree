@@ -28,7 +28,7 @@ after(() => pool.end());
 
 test("roster parity seeds full first-boot metadata and tier upkeep, and reruns safely", async () => {
   await initSchema();
-  const sql = await readFile(new URL("../../server/migrations/032_roster_parity.sql", import.meta.url), "utf8");
+  const sql = await readFile(new URL("../../server/migrations/033_roster_parity.sql", import.meta.url), "utf8");
   await withRollback(async (client) => {
     await client.query("DELETE FROM unit_types WHERE id = ANY($1::text[])", [newIds]);
     await client.query(sql);

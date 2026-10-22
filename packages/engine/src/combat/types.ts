@@ -41,6 +41,10 @@ export interface Combatant {
   // boundaries by the manual battle engine; applied inside resolveAttack.
   activeEffects: ActiveSpellEffect[];
   retreated: boolean;
+  // Auto-resolver only: set once the platoon has been in melee contact. The
+  // auto-resolver never moves platoons, so this stands in for "left its
+  // starting edge" when a hero retreat decides who escapes.
+  engaged?: boolean;
 }
 
 // One timed spell buff on a Combatant (the locked v1 shape from the
@@ -119,6 +123,9 @@ export type BattleLogEntry =
   | ({ round: number } & CombatEffect)
   | { round: number; kind: "self_retreat"; side: BattleSide; slotIndex: number; casualties: PlatoonEntry[] }
   | { round: number; kind: "hero_retreat"; side: BattleSide }
+  // A platoon that was off its starting edge column when its hero retreated:
+  // abandoned on the field, every unit it held counted as lost.
+  | { round: number; kind: "left_behind"; side: BattleSide; slotIndex: number; casualties: PlatoonEntry[] }
   // Every morale/fatigue mutation, carrying the signed deltas applied this
   // event plus the resulting (clamped) values — the battle log alone is
   // enough to replay both stats (roadmap coordination rule 2).
@@ -182,9 +189,14 @@ export interface BattleResult {
 // HP-percentage thresholds; "custom" hands control to the caller (e.g. a
 // future battle-screen UI) so a human can choose retreats interactively by
 // re-invoking resolveBattle round-by-round. "fight" (default) never retreats.
+// "outmatched" is the production AI / Quick Resolve policy: the hero retreats
+// once the next round is at least minRetreatRound and the side's remaining
+// health is below strengthRatio of the enemy's. Every hero retreat applies the
+// starting-edge rule (only edge-column platoons escape).
 export type RetreatPolicy =
   | { kind: "fight" }
   | { kind: "auto"; selfRetreatHpPct: number; heroRetreatHpPct: number }
+  | { kind: "outmatched"; strengthRatio: number; minRetreatRound: number }
   | { kind: "custom"; decide: (snapshot: BattleSnapshot, side: BattleSide) => RetreatDecision[] };
 
 export interface RetreatDecision {

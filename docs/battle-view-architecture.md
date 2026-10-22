@@ -127,7 +127,7 @@ flowchart TB
     E --> F
     F -->|"'fight' — default"| R
     F -->|"'quickResolve'"| X["TurnController.resolveCurrentBattle()"]
-    F -->|"'flee' — attacker only"| Y["TurnController.cancelMove(attackerId)"]
+    F -->|"'flee' — attacker only"| Y["TurnController.abandonBattle(attackerId)"]
     I0 -->|"AI move adjacent to a<br/>HUMAN-defended hero: EnterBattle,<br/>then waiting_for_defender —<br/>no EndTurn while pending"| I3
     I3 -->|"BattleOffered (apply-class delta;<br/>garrisonEventBridge flips the<br/>defender's phase to BATTLE)"| D
     I3 --> J
@@ -222,7 +222,8 @@ flowchart TB
    local defender** gets `showBattleModal()`
    (`src/screens/combat/battleModal.ts`) — **Fight** (primary, the tactical
    arena), **Quick Resolve** (the server auto-resolver) — plus **Flee**
-   (cancels the attacker's move via `tc.cancelMove(attackerId)`) for the
+   (cancels the attacker's move and closes the battle phase via
+   `tc.abandonBattle(attackerId)`) for the
    **attacker only**; the defender's modal hides Flee (`hideFlee`, since
    fleeing is not a defender choice). For a server-offered battle the
    opening call is the `state:committed` listener's
@@ -244,7 +245,14 @@ flowchart TB
    the local player in their phase role, and awaits the played-out
    `ManualBattleOutcome` via the arena's `onComplete`. The arena stays open
    under the result card; the caller closes it via the returned
-   `{ close }` handle on Carry On.
+   `{ close }` handle on Carry On. Every other exit (phase gone, rejected or
+   failed submission, a throw) closes it in a `finally` (2026-10-21), so the
+   full-screen overlay can never strand the player on a finished battle.
+   The arena's **Retreat** is disabled until the battle's retreat round
+   (`minRetreatRound` option: `HERO_BATTLE_MIN_RETREAT_ROUND` = 2 by default,
+   `SETTLEMENT_BATTLE_MIN_RETREAT_ROUND` = 3 for assaults; tooltip "Retreat
+   opens in round N."); its confirm dialog highlights the human's starting
+   edge column and lists escaping vs left-behind platoons (`retreatPreview`).
 5. **Action stream (4b).** While the fight plays out, every applied action
    posts a `battle_actions` row through `api.postBattleAction` —
    `POST /api/games/:name/battle-actions`, telemetry-style
@@ -258,16 +266,26 @@ flowchart TB
    command kind): submitted survivor stacks per side, the outcome
    (`attackerWon` / `defenderWon` / `retreat` / `surrender` / `draw`), the
    gold actually paid to surrender, and the arena's rounds + obstacle seed.
+   The POST goes through `sendWithRetry` (`src/io/commandRetry.ts`):
+   network errors and 5xx are retried with the identical payload (delays
+   400 ms / 1200 ms), a 4xx fails fast. On final failure the client runs
+   `TurnController.abandonBattle(attackerId)` (cancel the move **and** close
+   the battle phase, re-mapped to `AI_TURN` on an AI turn) and shows the
+   "Couldn't record this battle" card (`battleSubmitFailedCard.ts`) with
+   **Return to map**. The settlement-assault submit follows the same rules.
 7. **Server apply.** The `commandHandler.ts` `SubmitBattleResult` case
    re-derives the live-collision precondition (adjacency — the server never
    persists a BATTLE phase), validates survivor unit ids against the same
-   catalog the auto-resolver uses, then runs the **same shared post-battle
+   catalog the auto-resolver uses, rejects survivors that exceed the
+   pre-battle army per unit type (`survivors_exceed_army`), then runs the **same shared post-battle
    helpers** as `ResolveBattle` (`buildPostBattleHeroes` +
    `applyHeroBattleOutcomes` + `persistBattleOutcome`): loot-on-wipe
    (purse + cargo, wagon-capped), per-side hero verdicts applied — defeat
    **deletes** the hero from the record and prunes their owner's `heroIds`;
    retreat/surrender relocate to the nearest owned settlement (none → the
-   hero stays at its cancelled position, plan edge D1) — charter cleanup
+   hero stays at its cancelled position, plan edge D1) with 0 movement
+   today, a retreat keeping its submitted starting-edge escapees and
+   stunned through the next day (`applyHeroConcession`) — charter cleanup
    for **every removed hero** (attacker included), legacy-gold accounting,
    granular dual-write, players persisted on every outcome (so the
    `heroIds` prune can't dangle). Retreat and surrender additionally cancel
@@ -297,8 +315,10 @@ flowchart TB
    `ResolveBattle` command) → server runs
    `resolveBattleEngine(...)` inside a PG transaction, loots the wiped
    defender, applies the same hero outcomes as step 7 (a defeated hero is
-   absent from the returned record; retreat/surrender can't occur here —
-   the auto-resolver is run with no retreat policies), and returns the new
+   absent from the returned record; since 2026-10-21 both sides fight
+   under the `outmatched` retreat policy, so a side can retreat here — only
+   its starting-edge platoons survive, and an attacker retreat cancels the
+   move and skips capture; surrender can't occur), and returns the new
    state + `BattleResult`. Same shared post-battle helpers as step 7.
 
 ### Test Battle (sandbox)
@@ -333,8 +353,9 @@ streams nothing.
    platoon.
 4. **Finish.** `finalizeManualBattle()` ends the fight →
    `showBattleResultCard()`. "Carry On" closes the card and returns to
-   the setup modal. **Retreat** and **Surrender** exit early via
-   `retreatHero` (with and without loss respectively).
+   the setup modal. **Retreat** (from round 2, starting-edge rule —
+   `retreatHero({ edgeOnly: true })`) and **Surrender** (`applyLoss: false`)
+   exit early via `retreatHero`.
 
 ---
 
@@ -451,7 +472,7 @@ used):
 | Module | Layer | Role |
 |---|---|---|
 | `src/state/gameState.ts` | Reducer | `phase.kind === "BATTLE"`; re-exports the engine's `endBattlePhase` / `cleanupDefeatedHeroCharters` |
-| `src/state/turnController.ts` | Orchestrator | `enterBattle` (mover = attacker), `resolveCurrentBattle` (Quick Resolve), `cancelMove` (Flee) |
+| `src/state/turnController.ts` | Orchestrator | `enterBattle` (mover = attacker), `resolveCurrentBattle` (Quick Resolve), `abandonBattle` (Flee and every unrecorded-battle exit: `cancelMove` + close the battle phase) |
 | `src/managers/GameActions.ts` | Orchestrator | `maybeAutoResolveBattle` (who resolves is `resolveBattleChoice`'s call, 2026-10-04), `startBattleFlow`, `fightInArena` (Fight path: arena → `SubmitBattleResult` → merge → end phase; a defender-fought battle re-maps the phase back to `AI_TURN` when the AI holds the turn — `endBattlePhase` unconditionally reopens `PLAYER_TURN`); gates re-entry with `battleInFlight` |
 | `src/screens/combat/battleChoicePolicy.ts` | Policy (pure) | `resolveBattleChoice({ localIsAttacker, localIsDefender, serverDriven })` → `spectate` \| `modal { hideFlee }` \| `autoResolve` — the single who-resolves decision (2026-10-04), unit-tested without a DOM |
 | `src/screens/combat/battleModal.ts` | UI (DOM) | Fight / Quick Resolve / Flee prompt before anything is resolved; `hideFlee` (2026-10-04) omits the Flee button and the flee sentence for a defending seat. Deliberately non-dismissible (2026-10-05): `openDialog(..., closeable: false)` — no × button, because a dismissed choice would leave `battleInFlight` set and stall the AI turn until the 300 s force-resolve; `test/aiDefender.e2e.ts` scenario A covers the auto-open + Quick Resolve path |
@@ -471,20 +492,21 @@ used):
 | `src/io/commands.ts` | Network | `resolveBattle()` + `submitBattleResult()` (`SubmitBattleResult`) POST wrappers |
 | `src/io/api.ts` | Network | `postBattleAction` — fire-and-forget `battle_actions` POST (short timeout, swallows failures) |
 | `src/core/eventBus.ts` | Telemetry | `battle:resolved` emission is dev-log telemetry only (EventLog whitelist); production result cards/toasts consume command return data + `consumeResolveBattleVerdicts`, not the bus |
-| `packages/engine/src/combat/grid.ts` | Engine | `makeBattleGrid` (odd-r offset), `deploymentPosition`, `columnOf` |
+| `packages/engine/src/combat/grid.ts` | Engine | `makeBattleGrid` (odd-r offset), `deploymentPosition`, `columnOf`, `startingEdgeColumn` / `isOnStartingEdge` (the retreat edge) |
+| `packages/engine/src/combat/retreat.ts` | Engine | `retreatSideByEdge` (escapees keep their entries; the rest are zeroed and logged `left_behind`), `retreatOpen`, `isOutmatched` (the `outmatched` policy trigger) |
 | `packages/engine/src/combat/damage.ts` | Engine | Damage math (attacker fatigue/morale scale `effAttack`, defender fatigue scales `effDefense`) + `totalHealth` / `estimateWinChance` estimators |
 | `packages/engine/src/combat/resolveBattle.ts` | Engine | Auto-resolver turn loop; `resolveAttack` (the shared fatigue/morale seam), `effectiveSelfRetreatHpPct` (low morale routs earlier) |
-| `packages/engine/src/combat/manualBattle.ts` | Engine | Interactive engine; `platoonRange` (min per-unit `range` stat across the platoon's entries — the single source of attack-range truth), `getApproachHexes`, `attackFromHex`, `castSpell`, `getValidSpellTargets`, `planAiTurn`, `retreatHero`, `finalizeManualBattle`, `timeOfDayForRound` |
+| `packages/engine/src/combat/manualBattle.ts` | Engine | Interactive engine; `platoonRange` (min per-unit `range` stat across the platoon's entries — the single source of attack-range truth), `getApproachHexes`, `attackFromHex`, `castSpell`, `getValidSpellTargets`, `planAiTurn`, `retreatHero` (`edgeOnly` starting-edge retreat, refused before `minRetreatRound`), `canRetreat`, `retreatPreview`, `finalizeManualBattle`, `timeOfDayForRound` |
 | `packages/engine/src/combat/spells.ts` | Engine | Spell catalog (Magic Arrow, Bless), `maxManaFor`/`spellDamageFor`, `regenerateHeroMana` (day-tick refill), `activeEffectMultiplier`/`pruneExpiredEffects`, `spellLoadoutForHero` backfill |
 | `packages/engine/src/combat/types.ts` | Engine | `BattleResult`, `Combatant` (incl. `morale`/`fatigue`/`activeEffects`), `CombatEffect` (`damage`/`spell_damage`/`spell_buff`), `BattleLogEntry` (incl. `morale_change`/`spell_cast`), `BattleSnapshot` |
-| `packages/engine/src/combatConfig.ts` | Engine | All combat tunables: type advantage, retreat loss, the morale/fatigue block, spell costs/power/buff duration |
+| `packages/engine/src/combatConfig.ts` | Engine | All combat tunables: type advantage, retreat loss, retreat gates (`HERO_BATTLE_MIN_RETREAT_ROUND` / `SETTLEMENT_BATTLE_MIN_RETREAT_ROUND`, `AI_RETREAT_STRENGTH_RATIO`, `RETREAT_MOVEMENT_LOCK_DAYS`), the morale/fatigue block, spell costs/power/buff duration |
 | `packages/contracts/src/commands/submitBattleResult.ts` | Contracts | The 15th command kind: submitted outcome + survivor stacks + rounds/obstacleSeed |
 | `packages/contracts/src/commands/enterBattle.ts` | Contracts | The 25th command kind (2026-10-04): `{ kind, gameName, actor, attackerId, defenderId }` — the AI driver's battle offer to a human defender; dispatched only by the trusted in-process driver (the command route rejects AI-seat actors on server-driven games), so a browser can never forge an offer |
 | `packages/engine/src/events/applyEvent.ts` + `packages/engine/src/hydrate.ts` | Engine | `BattleOffered` — sync class `"apply"` (the union is 25 variants: 12 apply / 7 resync / 6 ignore); its replay runs `startBattle` (same-pair replay = `noop`, drift = resync). `PendingBattleMarker` + `readPendingBattle(lobby)` — `hydrateGameState` re-derives the `BATTLE` phase from a valid `games.lobby.pendingBattle` marker (the phase is still never persisted as a phase); malformed markers fall back to the faction-derived phase |
 | `src/io/hydrateClientGame.ts` | Client hydrate | **New (2026-10-05).** `hydrateClientGame(game)` maps the nested `game.lobby.pendingBattle` onto the engine hydrate's top-level `pendingBattle` (via engine `readPendingBattle`) for `GameSessionManager.loadGame` and `multiplayerSync.resync()` — a reload/resync mid-offer re-derives the `BATTLE` phase and re-opens the modal; `GameLobbyState` (`src/io/api.ts`) carries the optional marker field. Unit-tested in `test/io/hydrateClientGame.test.ts` |
 | `server/app/commandHandler.ts` (`ResolveBattle` + `SubmitBattleResult` + `EnterBattle` via `POST /games/:name/commands`) | Server | Loads DB row + `unit_types`; runs `resolveBattleEngine` or applies the submitted outcome — both through the shared `buildPostBattleHeroes`/`applyHeroBattleOutcomes`/`persistBattleOutcome` helpers (verdict application: defeat deletes the hero, retreat/surrender relocate; plan `2026-09-29-hero-outcomes.md`). The `EnterBattle` case (2026-10-04) re-derives adjacency server-side, requires a human defender (`defender_not_human` otherwise), is idempotent on a same-pair re-offer, rejects a different pending pair (`battle_already_pending`), then stamps `games.lobby.pendingBattle` + appends `BattleOffered`. The generic turn-ownership guard **exempts the battle pair** — `ResolveBattle`/`SubmitBattleResult` may be submitted by the owner of either named combatant (the defender resolves from its own seat during the AI's turn); `EnterBattle` and `EndTurn` still require the active player. The marker clears when the battle resolves and on the permanent rejections (stale-offer self-heal); an `EndTurn` clears any marker that survived into the next turn |
 | `server/app/aiDriver.ts` | Server | The defender-offer wait (2026-10-04): a pass finding `lobby.pendingBattle` live returns `waiting_for_defender` — no `EndTurn` while the offer stands; past `AI_DEFENDER_WAIT_TIMEOUT_MS` (300 s) it force-resolves via `ResolveBattle` (unbudgeted/unpaced, the exhaustion-EndTurn pattern) and appends the `ai_defender_wait_expired` audit, so a closed defender browser cannot stall the AI turn. 2026-10-05: an adjacent defender hero whose owner player is missing from the snapshot no longer falls through to a doomed `ResolveBattle` — the pass warns, appends the `ai_defender_owner_missing` audit, and drops the collision for the pass (pinned in `test/server/aiDriver.test.ts`) |
-| `packages/engine/src/combat/battleOutcome.ts` | Engine (pure) | `deriveHeroVerdict(sideOutcome, conceded?)` → `defeated`/`retreated`/`surrendered`/`stood`; `nearestOwnedSettlement` (hexDistance min; null when the owner holds nothing — the D1 stay-put edge); `relocateHeroToSettlement` (q/r set, previous*/trail reset) |
+| `packages/engine/src/combat/battleOutcome.ts` | Engine (pure) | `deriveHeroVerdict(sideOutcome, conceded?)` → `defeated`/`retreated`/`surrendered`/`stood`; `nearestOwnedSettlement` (hexDistance min; null when the owner holds nothing — the D1 stay-put edge); `relocateHeroToSettlement` (q/r set, previous*/trail reset, 0 movement); `applyHeroConcession` (relocation + the retreat stun, shared by server and settlement reducer) |
 | `server/http/routes/battleActions.ts` | Server | `POST /games/:name/battle-actions` — telemetry-style insert into `battle_actions` (seat stamped from the session) |
 | `server/migrations/012_battle_actions.sql` | Schema | `battle_actions` table + per-battle replay index |
 
@@ -507,8 +529,9 @@ Test inventory (2026-10-05): `test/io/hydrateClientGame.test.ts` (nested-marker 
   (`lost_all_troops`) is removed from the heroes record, pruned from their
   owner's `heroIds`, and their `hero_platoons` rows swept (`heroRepo`'s
   NOT-IN cleanup); winner-takes-loot and charter cleanup apply to every
-  removed hero. The auto path never passes retreat policies, so
-  AI-involved losers are always removals. The capture/ransom plan stays
+  removed hero. Since 2026-10-21 the auto path runs the `outmatched`
+  retreat policy, so an outmatched side may retreat instead of being
+  wiped. The capture/ransom plan stays
   out of scope, superseded by these outcomes.
 - **`battleInFlight` re-entry guard** in `GameActions` prevents the modal
   being opened twice if the tick fires again before the promise resolves —
@@ -527,9 +550,9 @@ Test inventory (2026-10-05): `test/io/hydrateClientGame.test.ts` (nested-marker 
   option omits the button (and the flee sentence) whenever the local seat
   is the defender; a server-offered battle's modal is opened by the
   `state:committed` listener's `maybeAutoResolveBattle()` call (step 2),
-  not the loop tick. The arena's retreat/surrender remain attacker actions
-  too — the defender's played-out outcomes are the same removal/relocation
-  rules the auto path applies.
+  not the loop tick. The arena's retreat/surrender belong to the human
+  side, attacker or defender — a defender who retreats on the enemy's turn
+  is stunned through the next day, so misses their own next turn.
 - **The battle modal is non-dismissible.** (2026-10-05.)
   `showBattleModal` opens with `closeable: false` (no × button): a battle
   choice is blocking, and dismissing without choosing would leave
@@ -549,8 +572,9 @@ Test inventory (2026-10-05): `test/io/hydrateClientGame.test.ts` (nested-marker 
   client (`tc.cancelMove`) and server (`cancelMove` on the submitted
   command) restore the mover's pre-collision position — decision 3 of the
   wiring plan — and the server's `applyHeroBattleOutcomes` then relocates
-  the conceder to the nearest settlement their owner holds (retreat with
-  stacks zeroed, surrender keeping them); with none owned, the hero
+  the conceder to the nearest settlement their owner holds (retreat
+  keeping only its starting-edge escapees and stunned through the next
+  day, surrender keeping its stacks; both with 0 movement today); with none owned, the hero
   remains at the cancelled position (2026-09-29 hero outcomes, plan edge
   D1).
 - **The two engines never mix.** `resolveBattle.ts` is the only resolver

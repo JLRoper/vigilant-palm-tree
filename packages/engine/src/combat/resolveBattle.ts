@@ -16,6 +16,7 @@ import {
 import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_OBSTACLE_COUNT, deploymentPosition, makeBattleGrid } from "./grid";
 import { activeEffectMultiplier } from "./spells";
 import { applyCasualties, applyRetreatLoss, computeDamage, totalHealth } from "./damage";
+import { isMeleePlatoon, isOutmatched, retreatOpen, retreatSideByEdge } from "./retreat";
 import type {
   BattleGrid,
   BattleLogEntry,
@@ -217,11 +218,13 @@ export function resolveAttack(
 }
 
 // Evaluates one side's retreat policy at the end of a round. Returns true if
-// the whole side (hero) retreats; mutates `combatants` in place to apply any
+// the whole side (hero) retreats — the caller then applies the starting-edge
+// rule via retreatSideByEdge; mutates `combatants` in place to apply any
 // per-platoon self-retreats.
 function applyRetreatPolicy(
   side: BattleSide,
   combatants: Combatant[],
+  enemies: Combatant[],
   policy: RetreatPolicy,
   unitTypes: Record<string, UnitType>,
   round: number,
@@ -235,6 +238,14 @@ function applyRetreatPolicy(
   let decisions: RetreatDecision[] = [];
   if (policy.kind === "custom") {
     decisions = policy.decide(snapshot, side);
+  } else if (policy.kind === "outmatched") {
+    // Evaluated at the end of `round`, i.e. before round + 1 is played.
+    if (
+      retreatOpen(round + 1, policy.minRetreatRound) &&
+      isOutmatched(living, livingCombatants(enemies), unitTypes, policy.strengthRatio)
+    ) {
+      decisions = [{ slotIndex: -1, scope: "hero" }];
+    }
   } else {
     const totalMax = combatants.reduce((sum, c) => sum + c.maxHealth, 0);
     const totalCurrent = living.reduce((sum, c) => sum + totalHealth(c.entries, unitTypes), 0);
@@ -252,7 +263,6 @@ function applyRetreatPolicy(
   for (const d of decisions) {
     if (d.scope === "hero") {
       heroRetreat = true;
-      log.push({ round, kind: "hero_retreat", side });
       continue;
     }
     const c = combatants.find((x) => x.slotIndex === d.slotIndex && !x.retreated);
@@ -361,6 +371,10 @@ export function resolveBattle(
       for (;;) {
         const modifier = current.side === "attacker" ? attackerMod : defenderMod;
         resolveAttack(current, opponent, unitTypes, modifier, isCounter, round, log);
+        if (isMeleePlatoon(current.entries, unitTypes)) {
+          current.engaged = true;
+          opponent.engaged = true;
+        }
         if (livingCombatants(attacker).length === 0 || livingCombatants(defender).length === 0) break;
         const opponentSurvived = opponent.entries.some((e) => e.count > 0);
         if (!opponentSurvived) {
@@ -379,13 +393,16 @@ export function resolveBattle(
       attacker: attacker.map(cloneCombatant),
       defender: defender.map(cloneCombatant),
     };
-    if (applyRetreatPolicy("attacker", attacker, attackerPolicy, unitTypes, round, log, snapshot)) {
+    // Platoons never move here, so "still on the starting edge" is read as
+    // "never made melee contact" (see Combatant.engaged).
+    const escapes = (c: Combatant): boolean => !c.engaged;
+    if (applyRetreatPolicy("attacker", attacker, defender, attackerPolicy, unitTypes, round, log, snapshot)) {
       attackerHeroRetreated = true;
-      attacker.forEach((c) => (c.retreated = true));
+      retreatSideByEdge(attacker, "attacker", escapes, round, log);
     }
-    if (applyRetreatPolicy("defender", defender, defenderPolicy, unitTypes, round, log, snapshot)) {
+    if (!attackerHeroRetreated && applyRetreatPolicy("defender", defender, attacker, defenderPolicy, unitTypes, round, log, snapshot)) {
       defenderHeroRetreated = true;
-      defender.forEach((c) => (c.retreated = true));
+      retreatSideByEdge(defender, "defender", escapes, round, log);
     }
     if (attackerHeroRetreated || defenderHeroRetreated) break;
   }

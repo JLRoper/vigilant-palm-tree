@@ -1,5 +1,5 @@
 -- Idempotent roster parity migration. Because migrations rerun in filename order,
--- 032 is the source of truth for the existing-unit balance stats below.
+-- 033 is the source of truth for the existing-unit balance stats below.
 -- New rows reapply 021 upkeep formulas after their tier is assigned on first boot.
 
 INSERT INTO unit_types (id, name, attack, defence, health, speed, description, advantage_type) VALUES

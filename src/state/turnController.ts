@@ -13,6 +13,9 @@ import {
   foodBiasForTerrain,
   requestBankWithdrawal,
   resolveBattle,
+  settlementOutcomeFromBattle,
+  AI_RETREAT_STRENGTH_RATIO,
+  SETTLEMENT_BATTLE_MIN_RETREAT_ROUND,
   rollbackCaptureSettlement,
   assignWorkers as assignWorkersReducer,
 } from "@heroes/engine";
@@ -538,6 +541,18 @@ export class TurnController {
     this.state = cancelMoveReducer(this.state, heroId);
   }
 
+  // Bounce the attacker back to its pre-move hex AND close the battle phase
+  // (BATTLE or SETTLEMENT_BATTLE) with nothing resolved -- the flee path and
+  // every "the fought battle could not be recorded" exit. cancelMove alone
+  // left the phase open, so an AI turn could never advance past it
+  // (plan/2026-10-21-battle-retreat-rules.md §1).
+  abandonBattle(attackerId: HeroId): void {
+    this.state = cancelMoveReducer(this.state, attackerId);
+    if (this.state.phase.kind === "BATTLE" || this.state.phase.kind === "SETTLEMENT_BATTLE") {
+      this.closeBattlePhase();
+    }
+  }
+
   // A rejected MoveHero persist leaves the client's optimistic move
   // un-landed server-side: every later command in the turn would fail the
   // server's position gates (hero_not_at_fromTile / hero_not_at_settlement)
@@ -555,7 +570,7 @@ export class TurnController {
     });
     const phase = this.state.phase;
     if (phase.kind === "SETTLEMENT_BATTLE" && phase.attackerId === heroId) {
-      this.clearSettlementBattlePhase();
+      this.closeBattlePhase();
     }
     this.state = cancelMoveReducer(this.state, heroId);
   }
@@ -1054,7 +1069,8 @@ export class TurnController {
   // Settlement-garrison twin of resolveCurrentBattle(): resolves the
   // client-local SETTLEMENT_BATTLE phase with the engine auto-resolver (the
   // same resolveBattle() call the server's ResolveBattle command runs, with
-  // no retreat policies, so a conceded verdict never occurs), applies it via
+  // the attacker under the "outmatched" retreat policy -- the garrison never
+  // retreats), applies it via
   // applySettlementBattleResult (capture on a win, bounced attacker with the
   // submitted garrison otherwise, full hero outcomes), POSTs the result
   // fire-and-forget for server persistence, and re-maps the phase back to
@@ -1081,12 +1097,12 @@ export class TurnController {
     const attacker = pre.heroes[attackerId];
     const settlement = pre.settlements[settlementId];
     if (!attacker || !settlement) {
-      this.clearSettlementBattlePhase();
+      this.closeBattlePhase();
       return null;
     }
     if (!unitTypes || Object.keys(unitTypes).length === 0) {
       this.state = cancelMoveReducer(pre, attackerId);
-      this.clearSettlementBattlePhase();
+      this.closeBattlePhase();
       this.hooks.logEvent({
         type: "settlement_battle_unresolved",
         payload: { attackerId, settlementId, reason: "unit_catalog_unavailable" },
@@ -1096,9 +1112,13 @@ export class TurnController {
     const battle = resolveBattle(normalizePlatoons(attacker.stacks), normalizePlatoons(settlementStacks(settlement)), {
       unitTypes,
       obstacleSeed: Math.floor(this.hooks.rng() * 0x1_0000_0000) >>> 0,
+      attackerRetreatPolicy: {
+        kind: "outmatched",
+        strengthRatio: AI_RETREAT_STRENGTH_RATIO,
+        minRetreatRound: SETTLEMENT_BATTLE_MIN_RETREAT_ROUND,
+      },
     });
-    const outcome: SettlementBattleOutcome =
-      battle.winner === "attacker" ? "attackerWon" : battle.winner === "defender" ? "defenderWon" : "draw";
+    const outcome: SettlementBattleOutcome = settlementOutcomeFromBattle(battle);
     const applied = applySettlementBattleResult(pre, {
       attackerId,
       settlementId,
@@ -1183,7 +1203,7 @@ export class TurnController {
     };
   }
 
-  private clearSettlementBattlePhase(): void {
+  private closeBattlePhase(): void {
     let closed = endBattlePhaseReducer(this.state);
     if (closed.phase.kind === "PLAYER_TURN") {
       const active = closed.players.find((p) => p.id === closed.activePlayerId);
@@ -1197,7 +1217,7 @@ export class TurnController {
   cancelSettlementBattle(): boolean {
     if (this.state.phase.kind !== "SETTLEMENT_BATTLE") return false;
     const { attackerId, settlementId } = this.state.phase;
-    this.clearSettlementBattlePhase();
+    this.closeBattlePhase();
     this.hooks.logEvent({
       type: "settlement_battle_cancelled",
       payload: { attackerId, settlementId },

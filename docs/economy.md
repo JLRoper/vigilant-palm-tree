@@ -1,6 +1,6 @@
 # Economy
 
-<!-- docs:verified 2026-10-18 -->
+<!-- docs:verified 2026-10-21 -->
 
 The per-turn loop that ties [resources](./resources.md), [settlements](./settlements.md), and [heroes](./heroes.md) together.
 
@@ -28,7 +28,7 @@ Implementation: the canonical reducers live in [`packages/engine/src/`](../packa
 ## Resource pools
 
 Gold is held in two separate pools:
-- **Hero purse** (`hero.gold`) — moves with the hero; **capped by treasury carts** (`heroGoldCap = treasuryWagons × 500`, a slot separate from the army wagons — migration 023); spent on chartering (2500g); looted by the winner **on defeat** (wiped in battle — the hero is then removed from the map, 2026-09-29 outcomes). A retreat keeps the purse (loses its troops instead); a surrender pays its gold cost and keeps the rest
+- **Hero purse** (`hero.gold`) — moves with the hero; **capped by treasury carts** (`heroGoldCap = treasuryWagons × 500`, a slot separate from the army wagons — migration 023); spent on chartering (2500g); looted by the winner **on defeat** (wiped in battle — the hero is then removed from the map, 2026-09-29 outcomes). A retreat keeps the purse; a surrender pays its gold cost and keeps the rest
 - **Settlement treasury** (`settlement.gold`) — funds recruitment, building, and caravan loading; grows from morale-scaled tax and building gold — a `goldMine` producer's output and the `market`'s flat `goldPerTurn`, both **scaled by staffing effort** (F2 resolved; building income credited by End Turn since 2026-10-18).
 
 > **Vocabulary (canonical, per the designer).** The **treasury** is the *gold store* — a settlement's `gold`, or a hero's purse — raised by `treasury`/`bank` buildings (and treasury carts on a hero). The **larder** is the *food store* — a settlement's `warehouse.food`, or the food in a hero's wagon cargo — raised by the `granary`. Hero upkeep and caravan bills are quoted in exactly these terms: gold from the treasury/purse, food from the larder/warehouse. Both bills are weekly, not per-turn: the charge runs only on `day % 7 === 0`, so a larder refilled between charge days is never charged at all, which is why the hero panel's food row now states its cadence (next charge in N days, weeks of coverage) instead of leaving it to be inferred.

@@ -50,8 +50,9 @@ transferGold,
   updateTradeRoute as updateTradeRouteReducer,
   routeOwnerId,
   deriveHeroVerdict,
-  nearestOwnedSettlement,
-  relocateHeroToSettlement,
+  applyHeroConcession,
+  AI_RETREAT_STRENGTH_RATIO,
+  HERO_BATTLE_MIN_RETREAT_ROUND,
   readPendingBattle,
   visionKeysForPlayer,
   visionKeysAroundPoints,
@@ -393,23 +394,26 @@ async function dualWriteEntities(
 //                    player.heroIds. The granular heroes upsert is a full sync,
 //                    so the row (and, with heroRepo's platoon NOT-IN sweep, its
 //                    hero_platoons rows) falls out of the DB for free.
-//   "retreated"   -> stacks emptied server-side regardless of what the arena
-//                    submitted (retreat loses ALL troops; the arena's
-//                    pre-submitted 15%-loss stacks are subsumed), then the
-//                    hero relocated to the nearest settlement their owner
-//                    holds -- or left at the post-battle position (post-
-//                    cancelMove for the manual path) when the owner holds
-//                    none (plan D1).
-//   "surrendered" -> same relocation, keeping the submitted stacks (the
-//                    surrender gold deduction is the caller's, applied before
-//                    this helper so the relocated copy carries it).
+//   "retreated"   -> keeps its battle survivors -- the starting-edge escapees
+//                    (plan/2026-10-21-battle-retreat-rules.md) -- relocated to
+//                    the nearest settlement their owner holds, or left at the
+//                    post-battle position (post-cancelMove for the manual
+//                    path) when the owner holds none (plan D1); 0 movement
+//                    today and stunned through the next day.
+//   "surrendered" -> same relocation without the stun, keeping the submitted
+//                    stacks (the surrender gold deduction is the caller's,
+//                    applied before this helper so the relocated copy
+//                    carries it).
 //   "stood"       -> untouched.
+// Both concessions go through the engine's applyHeroConcession, the same
+// helper the settlement-battle reducer uses.
 // The returned players array carries the heroIds prune so persistBattleOutcome
 // can always save players.
 function applyHeroBattleOutcomes(
   battleHeroes: Record<HeroId, HeroState>,
   players: Player[],
   settlements: Record<SettlementId, SettlementState>,
+  day: number,
   verdicts: {
     attackerId: HeroId;
     defenderId: HeroId;
@@ -440,21 +444,28 @@ function applyHeroBattleOutcomes(
       return;
     }
     if (verdict === "retreated" || verdict === "surrendered") {
-      // Zero the denormalized troops counter along with the stacks: a
-      // retreat must not leave hero.troops reading its pre-battle total
-      // while stacks are empty.
-      const postBattleHero =
-        verdict === "retreated" ? { ...hero, stacks: normalizePlatoons([]), troops: 0 } : hero;
-      const nearest = nearestOwnedSettlement({ settlements }, postBattleHero);
-      heroes = {
-        ...heroes,
-        [heroId]: nearest ? relocateHeroToSettlement(postBattleHero, nearest) : postBattleHero,
-      };
+      const enemyId = heroId === verdicts.attackerId ? verdicts.defenderId : verdicts.attackerId;
+      const enemy = heroes[enemyId];
+      const avoid = enemy ? [{ q: enemy.q, r: enemy.r }] : [];
+      heroes = { ...heroes, [heroId]: applyHeroConcession(hero, verdict, { settlements }, day, avoid) };
     }
   };
   apply(verdicts.attackerId, verdicts.attackerVerdict);
   apply(verdicts.defenderId, verdicts.defenderVerdict);
   return { heroes, players: nextPlayers, removedHeroIds };
+}
+
+// True when `survivors` holds more of any unit type than `army` did -- a
+// submitted battle result can only ever shrink an army.
+function survivorsExceedArmy(army: readonly Platoon[], survivors: readonly Platoon[]): boolean {
+  const before = new Map<string, number>();
+  for (const p of army) for (const e of p.entries) before.set(e.unitTypeId, (before.get(e.unitTypeId) ?? 0) + e.count);
+  const after = new Map<string, number>();
+  for (const p of survivors) for (const e of p.entries) after.set(e.unitTypeId, (after.get(e.unitTypeId) ?? 0) + e.count);
+  for (const [unitTypeId, count] of after) {
+    if (count > (before.get(unitTypeId) ?? 0)) return true;
+  }
+  return false;
 }
 
 // Charter cleanup for EVERY removed hero (plan/2026-09-29-hero-outcomes.md
@@ -1075,44 +1086,52 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // variant for why this now gets persisted instead of only existing
       // transiently on the HTTP response.
       const obstacleSeed = Math.floor(deps.ctx.rng() * 0x1_0000_0000) >>> 0;
+      // Both sides fight under the "outmatched" retreat policy
+      // (plan/2026-10-21-battle-retreat-rules.md): once retreat opens, a side
+      // whose remaining strength drops below AI_RETREAT_STRENGTH_RATIO of the
+      // enemy's pulls its hero out, keeping only its starting-edge platoons.
+      const retreatPolicy = {
+        kind: "outmatched" as const,
+        strengthRatio: AI_RETREAT_STRENGTH_RATIO,
+        minRetreatRound: HERO_BATTLE_MIN_RETREAT_ROUND,
+      };
       const battle: BattleResult = resolveBattleEngine(attackerPlatoons, defenderPlatoons, {
         obstacleSeed,
         unitTypes,
+        attackerRetreatPolicy: retreatPolicy,
+        defenderRetreatPolicy: retreatPolicy,
       });
+      // An attacker retreat cancels the attacker's move, exactly like the
+      // manual arena's retreat (SubmitBattleResult below).
+      const attackerRetreated = battle.attackerOutcome === "retreated_hero";
+      const baseState = attackerRetreated ? cancelMove(state, command.attackerId) : state;
       // Post-battle application is the shared helper both battle commands
       // run (see its header above) -- the auto path and the manual arena's
       // SubmitBattleResult path must stay rule-identical.
       const defenderLostAllTroops = battle.defenderOutcome === "lost_all_troops";
       const { heroes: newHeroes, lootedGold } = buildPostBattleHeroes(
-        state.heroes,
-        attackerHero,
+        baseState.heroes,
+        baseState.heroes[command.attackerId] ?? attackerHero,
         defenderHero,
         battle.attackerPlatoons,
         battle.defenderPlatoons,
         defenderLostAllTroops,
       );
-      // The auto-resolver never passes retreat policies (D4 in
-      // plan/2026-09-29-hero-outcomes.md), so a concession verdict can't
-      // occur here -- only defeated (hero removed) or stood. A retreated_self
-      // outcome (self-retreat policy, not wired server-side today) would
-      // still relocate via applyHeroBattleOutcomes' general retreat rule.
       const attackerVerdict = deriveHeroVerdict(battle.attackerOutcome);
       const defenderVerdict = deriveHeroVerdict(battle.defenderOutcome);
-      const outcome = applyHeroBattleOutcomes(newHeroes, state.players, state.settlements, {
+      const outcome = applyHeroBattleOutcomes(newHeroes, state.players, state.settlements, state.day, {
         attackerId: command.attackerId,
         defenderId: command.defenderId,
         attackerVerdict,
         defenderVerdict,
       });
       // Post-verdict: a removed attacker can't capture (they're gone), and a
-      // relocated one no longer stands on the collision hex. The capture is
+      // retreated one no longer stands on the collision hex. The capture is
       // fed the pruned players so its SettlementCaptured players output
       // carries the heroIds prune too.
-      const capture = applyPostBattleCapture(
-        { ...state, players: outcome.players },
-        command.attackerId,
-        outcome.heroes,
-      );
+      const capture = attackerRetreated
+        ? null
+        : applyPostBattleCapture({ ...state, players: outcome.players }, command.attackerId, outcome.heroes);
       await persistBattleOutcome(
         deps,
         command.gameName,
@@ -1575,6 +1594,15 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       if (unknownUnit) {
         return { ok: false, reason: "unknown_unit_type", events: [] };
       }
+      // A battle only ever loses units: a retreat now keeps its submitted
+      // escapees (plan/2026-10-21-battle-retreat-rules.md), so the survivors
+      // may not out-number the army that walked in, per unit type.
+      if (
+        survivorsExceedArmy(attackerHero.stacks, command.attackerStacks) ||
+        survivorsExceedArmy(defenderHero.stacks, command.defenderStacks)
+      ) {
+        return { ok: false, reason: "survivors_exceed_army", events: [] };
+      }
       // Who conceded on retreat/surrender is derivable, not carried: only
       // the arena's human side can retreat/surrender, and the human is the
       // combatant owned by the submitting seat (see the ownership check
@@ -1655,7 +1683,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // conceder's owner holds a settlement; with none they stay at the
       // cancelled position (plan D1). A wiped (defeated) side is deleted
       // from the record here, after buildPostBattleHeroes' loot transfer.
-      const outcome = applyHeroBattleOutcomes(newHeroes, state.players, state.settlements, {
+      const outcome = applyHeroBattleOutcomes(newHeroes, state.players, state.settlements, state.day, {
         attackerId: command.attackerId,
         defenderId: command.defenderId,
         attackerVerdict,
@@ -2278,6 +2306,12 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       );
       if (unknownUnit) {
         return { ok: false, reason: "unknown_unit_type", events: [] };
+      }
+      if (
+        survivorsExceedArmy(attackerHero.stacks, command.attackerStacks) ||
+        survivorsExceedArmy(settlementStacks(settlement), command.defenderStacks)
+      ) {
+        return { ok: false, reason: "survivors_exceed_army", events: [] };
       }
       // Surrender's priced gold, capped by the attacker's actual purse --
       // same rule (and same rejection reason) as SubmitBattleResult.

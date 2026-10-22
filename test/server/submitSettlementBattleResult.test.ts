@@ -267,13 +267,13 @@ test("a defeat removes a chartering attacker's outstanding charter (granular cha
   assert.equal(gameRepo.rows["test-game"].heroes.h0, undefined, "the chartering attacker is removed outright");
 });
 
-test("retreat zeroes the stacks and relocates the attacker to their nearest OWNED settlement", async () => {
+test("retreat keeps the edge escapees, relocates to the nearest OWNED settlement and stuns the attacker", async () => {
   const { gameRepo, eventRepo, deps } = makeDeps(makeSettlementBattleRow());
   const result = await handleCommand(
     settlementBattleCommand({
       outcome: "retreat",
       attackerStacks: [stack("swordsman", 3)],
-      defenderStacks: [stack("swordsman", 2)],
+      defenderStacks: [stack("swordsman", 1)],
     }),
     deps,
   );
@@ -282,18 +282,19 @@ test("retreat zeroes the stacks and relocates the attacker to their nearest OWNE
   const saved = gameRepo.rows["test-game"];
   assert.deepEqual(
     saved.settlements.s1.stacks,
-    normalizePlatoons([stack("swordsman", 2)]),
-    "a retreat never touches the garrison",
+    normalizePlatoons([stack("swordsman", 1)]),
+    "the garrison keeps the losses it took before the retreat",
   );
   assert.equal(saved.settlements.s1.ownerId, 1);
   const retreated = saved.heroes.h0;
   assert.ok(retreated, "a retreat keeps the hero");
   assert.equal(retreated.q, 0, "relocated to the owner's nearest settlement (s0 at 0,0)");
   assert.equal(retreated.r, 0);
-  assert.equal(retreated.movementRemaining, MOVEMENT_PER_TURN, "fresh-turn movement at the relocation hex");
+  assert.equal(retreated.movementRemaining, 0, "the retreat ends the hero's day");
+  assert.equal(retreated.movementLockedThroughDay, 2, "retreated on day 1, stunned through day 2");
   assert.deepEqual(retreated.trail, [{ q: 0, r: 0 }], "trail reseeded at the settlement");
-  assert.deepEqual(retreated.stacks, normalizePlatoons([]), "retreat loses ALL troops");
-  assert.equal(retreated.troops, 0);
+  assert.deepEqual(retreated.stacks, normalizePlatoons([stack("swordsman", 3)]), "the submitted edge escapees survive");
+  assert.equal(retreated.troops, 3);
   assert.equal(result.attackerVerdict, "retreated");
   assert.deepEqual(result.attackerHero, retreated);
   assert.equal(eventRepo.events[0].payload.captured, false);
@@ -318,8 +319,8 @@ test("retreat with no owned settlement stays at the post-cancel position (D1)", 
   assert.ok(retreated, "D1 keeps the hero in the record");
   assert.equal(retreated.q, 4, "stays at the cancelled pre-move hex");
   assert.equal(retreated.r, 5);
-  assert.equal(retreated.movementRemaining, 7, "cancelMove's movement restoration stands");
-  assert.deepEqual(retreated.stacks, normalizePlatoons([]), "troops are still lost");
+  assert.equal(retreated.movementRemaining, 0, "the retreat ends the hero's day without a relocation too");
+  assert.deepEqual(retreated.stacks, normalizePlatoons([stack("swordsman", 3)]), "the edge escapees survive");
   assert.equal(result.attackerVerdict, "retreated");
 });
 

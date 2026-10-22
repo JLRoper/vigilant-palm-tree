@@ -10,9 +10,13 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.31.0] - 2026-10-22
+## [0.32.0] - 2026-10-22
 
 Give every faction twelve units, faction troop buildings and starter recruitment; enforce faction building placement.
+
+## [0.31.0] - 2026-10-22
+
+Battle retreat rework: edge-column escape, round-gated retreat, one-day retreat stun, AI retreats when outmatched; fix arena stuck on a failed battle submission
 
 ## [0.30.0] - 2026-10-21
 

@@ -1,6 +1,6 @@
 # Player Guide
 
-<!-- docs:verified 2026-10-18 -->
+<!-- docs:verified 2026-10-21 -->
 
 ## Start a Game
 
@@ -25,7 +25,8 @@ Wagons carry physical caravan cargo between compatible routes. New games do not 
 - As the human attacker in a hero battle, choose **Fight**, **Quick Resolve**, or **Flee**.
 - As the human defender of an AI-offered battle, choose **Fight** or **Quick Resolve**; **Flee** is unavailable because the AI move is already committed.
 - Against a non-empty settlement garrison, the human attacker chooses **Assault**, **Auto-resolve**, or **Cancel**. Cancel leaves the hero on the settlement tile and does not submit a battle result.
-- Defeat removes a hero; retreat relocates the hero with troops lost; surrender relocates the hero with troops retained. Settlement battles use the same hero outcome rules.
+- Defeat removes a hero; surrender relocates the hero with troops retained. Retreat opens in battle round 2 (round 3 when assaulting a settlement): only platoons standing on your starting edge column escape, the rest are lost, and the hero relocates and cannot move until the day after next. Both retreat and surrender end the hero's movement for the day. Settlement battles use the same hero outcome rules.
+- If a battle result cannot be recorded (after automatic retries on network errors), a "Couldn't record this battle" card offers **Return to map**, which restores the hero's pre-battle position.
 
 ## Keyboard and Mouse
 

@@ -54,6 +54,11 @@ export interface HeroState {
   previousQ: number | null;
   previousR: number | null;
   previousMovementRemaining: number | null;
+  // Retreat stun (plan/2026-10-21-battle-retreat-rules.md): the hero gets no
+  // movement on any day up to and including this one. Absent = no stun. Set
+  // by a battle retreat to the retreat day + 1; resetHeroMovement grants 0
+  // while it holds and drops the field once the day has passed.
+  movementLockedThroughDay?: number;
   trail: { q: number; r: number }[];
   gold: number;
   troops: number;
