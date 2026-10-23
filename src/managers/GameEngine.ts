@@ -173,6 +173,9 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
         this.ui.setInspectedTile(tile);
         this.fullFrame();
       },
+      // Walking a hero onto a friendly hero's square opens the field-trade
+      // panel for the pair (a click, never a move: heroes cannot stack).
+      onWalkIntoTrade: (heroId, partnerId) => this.ui.openHeroTrade(heroId, partnerId),
       isCityOpen: () => this.ui.getCityView()?.isOpen() ?? false,
       getLocalSeat: () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""),
       getCaravans: () => this.state.getCaravanMarkers(),

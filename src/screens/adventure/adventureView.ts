@@ -56,6 +56,12 @@ export interface AdventureViewOptions {
   setCharterMode?: (v: boolean) => void;
   getValidCharterHexes?: () => Set<string> | null;
   onTileInspect?: (tile: Axial | null) => void;
+  /**
+   * A hero was walked into a friendly hero's square: open the field-trade
+   * panel for that pair (the click never becomes a move -- heroes cannot share
+   * a tile -- so this is the trade's map entry point).
+   */
+  onWalkIntoTrade?: (heroId: string, partnerId: string) => void;
   isCityOpen?: () => boolean;
   getLocalSeat?: () => PlayerId | null;
   /** Live caravan marker specs (visual-tracker positions) for pointer hit-testing. */
@@ -670,6 +676,16 @@ export class AdventureView {
       this.opts.onStateChanged?.();
       this.lastClickDebug.moved = false;
       this.lastClickDebug.reason = intent.kind === "deselect-hero" ? "deselect" : "settlement_deselect";
+      this.opts.onHudUpdate();
+      return;
+    }
+
+    if (intent.kind === "trade") {
+      // The map's trade gesture: the acting hero stays selected (it is the one
+      // who "walked into" the partner), so nothing about the selection moves.
+      this.opts.onWalkIntoTrade?.(intent.heroId, intent.partnerId);
+      this.lastClickDebug.moved = false;
+      this.lastClickDebug.reason = "trade";
       this.opts.onHudUpdate();
       return;
     }

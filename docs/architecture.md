@@ -748,6 +748,25 @@ Plan: [`plan/2026-10-21-battle-retreat-rules.md`](../plan/2026-10-21-battle-retr
 
 Test inventory: new `test/combat/retreatRules.test.ts` and `test/io/commandRetry.test.ts`; extended `test/engine/battleOutcome.test.ts`, `test/engine/settlementBattle.test.ts`, `test/persistence/heroRepo.test.ts`, `test/server/submitBattleResult.test.ts`, `test/server/submitSettlementBattleResult.test.ts`, `test/server/commandsRoute.test.ts`, `test/state/turnController.test.ts`, `test/screens/combat/arenaTelemetry.test.ts`.
 
+### Hero field trading (2026-10-23)
+
+Two heroes of one seat hand gold, cargo and whole platoons to each other on **adjacent** hexes (heroes can never share a tile), committed as ONE `TradeHeroes` command so the swap applies whole or not at all.
+
+| Module | Purpose |
+|---|---|
+| `packages/contracts/src/commands/tradeHeroes.ts` | `HeroTradeOffer` (optional `gold` / `resources` / `units`), `HeroTradeRequest` (`heroId`, `partnerId`, `give`, `take`), `TradeHeroesCommand`. |
+| `packages/engine/src/hero/tradeHeroes.ts` | `tradeHeroes()` — validates ownership, exactly-one-hex adjacency, affordability and BOTH receivers' headroom (purse via treasury carts, per-resource cargo via wagons, army slots via `depositIntoGarrison`) before writing; capacity refusals carry a `partner_` prefix so the caller can name the hero at fault. Units are removed from each side before the incoming ones land, so a same-type swap both ways cannot report a false `platoon_full`. Also `canTradeHeroes` / `tradePartnersFor` / `HERO_TRADE_RANGE`. |
+| `packages/engine/src/units.ts` | `removeUnitsByType()` extracted from `settlement/transferUnits.ts`'s private `removeByType` so the garrison transfer and the hero trade trim identically. |
+| `packages/contracts/src/events/engineEvent.ts` + `packages/engine/src/events/applyEvent.ts` | `HeroesTraded` (both offers verbatim), sync class **apply** — a straight reducer re-run; any refusal on replay is a resync. |
+| `server/app/commandHandler.ts` | The `TradeHeroes` case: both heroes must exist and belong to the acting seat (the generic turn guard already pinned the actor), then the standard reducer → save → dual-write → event → append ladder. |
+| `server/http/routes/commands.ts` | `parseCommand`'s `TradeHeroes` branch + `parseTradeOffer` (non-negative integers, known resource keys, bounded unit entries) — without it the POST is a 400 before the handler ever sees it. |
+| `src/state/turnController.ts` + `src/game/turnHooks.ts` + `src/io/commands.ts` | `tradeHeroes()` on the controller (optimistic local apply, `onTradeHeroes` fire-and-forget POST), mirroring `transferUnits`. |
+| `src/screens/heroes/heroTradePanel.ts` + `heroTradeModel.ts` | The two-column drag panel (a `createPanel` floating panel, geometry key `heroTrade`) and its DOM-free model: holdings, staging, `−`/`+` stepping, the compacted request and the failure-reason sentences. |
+| `src/screens/adventure/clickIntent.ts` + `adventureView.ts` | The **walk-in trade**: with one of your heroes selected, a click on the hex an adjacent same-seat hero stands on resolves to a `trade` intent (the engine's `canTradeHeroes` is the rule, so the click cannot offer a trade the command would refuse) and `AdventureViewOptions.onWalkIntoTrade` hands the pair to `UIManager.openHeroTrade`. Out of range, the click stays a plain selection change. |
+| `src/screens/heroes/heroInfoMenu.ts` + `src/managers/UIManager.ts` | The hero panel's **Trade with `<name>`…** button — live-gated on an adjacent same-seat hero — and the lazy `HeroTradePanel` wiring, refreshed from the existing dirty-keyed `menusKey` pass (which also closes it once the pair can no longer trade). |
+
+Test inventory: new `test/engine/tradeHeroes.test.ts` (swap/refusals/atomicity/caps/adjacency), `test/screens/heroes/heroTradeModel.test.ts` (holdings, staging, steps, request compaction, failure text), `test/screens/adventure/clickIntent.test.ts` (the walk-in gesture resolves to `trade` from all six neighbours, never for a hero out of range, never for an enemy, and still a plain select when nothing is selected) and `test/heroTrade.e2e.ts` (registered as the `heroTrade` runner entry, `npm run test:heroTrade`): Playwright clicks the partner's real hex on the map and asserts the panel opens with the acting hero still selected (then that a far own hero only selects), drives the REAL mouse drags on the live client, asserts the staged offers, then the single Confirm's server row and client state, and finally that an unaffordable trade is a 409 with the row untouched.
+
 ## See also
 
 - [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) — current module-by-module dependency map for `src/`, `server/`, `shared/`, `test/`, `tools/`, `scripts/`. This doc (`architecture.md`) is the executed **plan** that established the layout; the dependency map is the maintained **current state** and reflects any drift since the move.

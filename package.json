@@ -1,7 +1,7 @@
 {
   "name": "heroes-js",
   "private": true,
-"version": "0.32.0",
+"version": "0.33.4",
   "type": "module",
   "engines": {
     "node": ">=22 <23"
@@ -26,6 +26,7 @@
     "test:districts": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs districts --auto-close",
     "test:uncharted": "tsx scripts/allocate-ports.ts && tsx --env-file=.env --env-file=.env.test test/unchartedMode.e2e.ts",
     "test:heroVariants": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs heroVariants --auto-close",
+    "test:heroTrade": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs heroTrade --auto-close",
     "test:aiDefender": "tsx scripts/allocate-ports.ts && tsx --env-file=.env --env-file=.env.test test/aiDefender.e2e.ts",
     "test:aiCharter": "tsx scripts/allocate-ports.ts && tsx --env-file=.env --env-file=.env.test test/aiCharter.e2e.ts",
     "test:logpanel": "tsx scripts/allocate-ports.ts && node --no-deprecation tools/run-test.mjs logpanel --auto-close",

@@ -1,6 +1,7 @@
 import type { Axial } from "../geometry";
 import type { CharterId, HeroId, HorseVariantId, PlayerSeat, SettlementId } from "../ids";
 import type { TransferDirection, TradeRouteEndpoint, TradeRoutePayload } from "../gameState";
+import type { HeroTradeOffer } from "../commands/tradeHeroes";
 
 // Per-hero battle verdict (hero-outcomes plan W1): how a hero finished a
 // battle. Declared here because contracts is the single source (engine
@@ -222,6 +223,14 @@ export type EngineEvent =
         direction: "toHero" | "toGarrison";
         unitTypeId: string;
         count: number;
+      }
+    | {
+        type: "HeroesTraded";
+        actor: PlayerSeat;
+        heroId: HeroId;
+        partnerId: HeroId;
+        give: HeroTradeOffer;
+        take: HeroTradeOffer;
       }
     | {
         type: "SettlementBattleResolved";

@@ -13,6 +13,7 @@ export type PanelGeometryKey =
   | "logPanel"
   | "hotkeys"
   | "logistics"
+  | "heroTrade"
   | "battleResult"
   | "battleOutcome"
   | "testBattle";
@@ -41,6 +42,7 @@ const ALLOWED: ReadonlySet<string> = new Set<PanelGeometryKey>([
   "logPanel",
   "hotkeys",
   "logistics",
+  "heroTrade",
   "battleResult",
   "battleOutcome",
   "testBattle",

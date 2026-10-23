@@ -36,7 +36,7 @@ const GAME_SEED = 424242;
 const DIRECTIONS = ["n", "ne", "e", "se", "s", "sw", "w", "nw"] as const;
 
 /** How a variant's generated palette must differ from its base sprite set. */
-type PaletteSignal = "reddened" | "corrupted" | "cooled" | "darkened";
+type PaletteSignal = "reddened" | "corrupted" | "cooled" | "darkened" | "gilded" | "regeared";
 
 interface VariantSpec {
   id: string;
@@ -52,6 +52,8 @@ const VARIANTS: VariantSpec[] = [
   { id: "stormrider", label: "Storm Rider", base: "ranger", signal: "cooled" },
   { id: "blackdragon", label: "Black Dragon Rider", base: "drake", signal: "darkened" },
   { id: "reddragon", label: "Red Dragon Rider", base: "drake", signal: "reddened" },
+  { id: "griffin", label: "Griffin Rider", base: "drake", signal: "gilded" },
+  { id: "nomad", label: "Desert Nomad Rider", base: "ranger", signal: "regeared" },
 ];
 
 // The paladin predates the generated waves; its descriptor set is the control
@@ -205,6 +207,7 @@ interface CropDiff {
   darkened: number;
   cooled: number;
   greened: number;
+  gilded: number;
 }
 
 // Same tile, same camera, only the hero's variant differs between the two
@@ -214,7 +217,7 @@ interface CropDiff {
 function diffCrops(before: Crop, after: Crop): CropDiff {
   assert.equal(after.width, before.width, "crop width changed between loads");
   assert.equal(after.height, before.height, "crop height changed between loads");
-  let changed = 0, reddened = 0, darkened = 0, cooled = 0, greened = 0;
+  let changed = 0, reddened = 0, darkened = 0, cooled = 0, greened = 0, gilded = 0;
   for (let i = 0; i < before.data.length; i += 4) {
     const r1 = before.data[i], g1 = before.data[i + 1], b1 = before.data[i + 2];
     const r2 = after.data[i], g2 = after.data[i + 1], b2 = after.data[i + 2];
@@ -225,8 +228,11 @@ function diffCrops(before: Crop, after: Crop): CropDiff {
     if ((r1 + g1 + b1) - (r2 + g2 + b2) > 90) darkened++;
     if (b2 - b1 > 25 && b2 > r2 + 8) cooled++;
     if (g2 - g1 > 20 && g2 > r2 + 10 && g2 > b2 + 10) greened++;
+    // A gilded pixel is one the repaint turned from a cool/green hue into warm
+    // gold: the red channel gained and now dominates both other channels.
+    if (r2 - r1 > 30 && r2 > g2 + 20 && r2 > b2 + 50) gilded++;
   }
-  return { pixels: before.data.length / 4, changed, reddened, darkened, cooled, greened };
+  return { pixels: before.data.length / 4, changed, reddened, darkened, cooled, greened, gilded };
 }
 
 interface VariantReport {
@@ -326,6 +332,25 @@ function assertSignal(variant: VariantSpec, diff: CropDiff): void {
       `${variant.id}: expected the green drake's scales to go black/indigo ` +
       `(${diff.darkened} darkened + ${diff.cooled} cooled of ${diff.changed})`,
     );
+  } else if (variant.signal === "gilded") {
+    // The Griffin Rider turns the same green drake's scales and the rider's
+    // gold armour into tawny gold, so the shift lands in the gilded bucket
+    // (450/1293 changed pixels measured).
+    assert(
+      diff.gilded > diff.changed * 0.1,
+      `${variant.id}: expected the green drake to turn warm gold ` +
+      `(${diff.gilded} gilded of ${diff.changed})`,
+    );
+  } else if (variant.signal === "regeared") {
+    // The Desert Nomad Rider re-gears the ranger rather than recolouring one
+    // palette: the indigo robes and head wrap land in the cooled bucket and
+    // the darker horse legs/hooves in the darkened one, with the pale sand
+    // coat taking the rest of the change (291/842 changed pixels measured).
+    assert(
+      diff.cooled + diff.darkened > diff.changed * 0.3,
+      `${variant.id}: expected indigo robes over a sand horse ` +
+      `(${diff.cooled} cooled + ${diff.darkened} darkened of ${diff.changed})`,
+    );
   } else {
     assert(
       diff.cooled > diff.changed * 0.12,
@@ -370,7 +395,8 @@ async function variantsAreWired(browser: Browser): Promise<void> {
     const diff = diffCrops(baseCrops.get(variant.base)!, crop);
     console.log(
       `>> [A] ${variant.id} vs ${variant.base}: ${diff.changed}/${diff.pixels} px changed, ` +
-      `${diff.reddened} reddened, ${diff.darkened} darkened, ${diff.cooled} cooled, ${diff.greened} greened`,
+      `${diff.reddened} reddened, ${diff.darkened} darkened, ${diff.cooled} cooled, ` +
+      `${diff.greened} greened, ${diff.gilded} gilded`,
     );
     assertSignal(variant, diff);
 

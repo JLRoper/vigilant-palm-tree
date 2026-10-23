@@ -29,7 +29,7 @@ const REQUEST_MAX_AGE_MS = 30_000;
 
 export interface TestRequest {
   runId: string;
-  entry: "smoke" | "multiplayer" | "cityview" | "settlements" | "districts" | "aiDefender" | "aiCharter" | "logisticsCaravan" | "uncharted" | "heroVariants" | "visual" | "logpanel";
+  entry: "smoke" | "multiplayer" | "cityview" | "settlements" | "districts" | "aiDefender" | "aiCharter" | "logisticsCaravan" | "uncharted" | "heroVariants" | "heroTrade" | "visual" | "logpanel";
   apiPort: number;
   clientPort: number;
   autoClose: boolean;

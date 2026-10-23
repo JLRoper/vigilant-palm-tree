@@ -24,6 +24,7 @@ import type { UpdateTradeRouteCommand } from "./updateTradeRoute";
 import type { RecruitUnitsCommand } from "./recruitUnits";
 import type { AssignWorkersCommand } from "./assignWorkers";
 import type { TransferUnitsCommand } from "./transferUnits";
+import type { TradeHeroesCommand } from "./tradeHeroes";
 import type { SubmitSettlementBattleResultCommand } from "./submitSettlementBattleResult";
 
 export * from "./moveHero";
@@ -52,6 +53,7 @@ export * from "./updateTradeRoute";
 export * from "./recruitUnits";
 export * from "./assignWorkers";
 export * from "./transferUnits";
+export * from "./tradeHeroes";
 export * from "./submitSettlementBattleResult";
 
 // Grows with each command port. Week 1 of Phase 3 Track 3.A shipped
@@ -106,5 +108,6 @@ export type Command =
   | RecruitUnitsCommand
   | AssignWorkersCommand
   | TransferUnitsCommand
+  | TradeHeroesCommand
   | SubmitSettlementBattleResultCommand
   | EnterBattleCommand;

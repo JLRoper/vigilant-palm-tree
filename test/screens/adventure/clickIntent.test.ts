@@ -418,6 +418,91 @@ test("clicking another of your own heroes switches selection instead of deselect
   assert.deepEqual(intent, { kind: "select-hero", heroId: "h2" });
 });
 
+// The walk-in trade: with one of your heroes selected, clicking the square an
+// ADJACENT hero of yours stands on opens the field-trade panel for that pair.
+// It is a click, never a move (heroes cannot share a tile), and the selected
+// hero stays the acting one.
+test("walking into an adjacent friendly hero opens the field trade", () => {
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 2, 2), makeHero("h2", 0, 3, 2)],
+    selectedHeroId: "h0",
+  });
+  const intent = resolve({
+    state,
+    heroes: { h0: stubHero("h0", 0, 2, 2), h2: stubHero("h2", 0, 3, 2) },
+    hover: { q: 3, r: 2 },
+  });
+  assert.deepEqual(intent, { kind: "trade", heroId: "h0", partnerId: "h2" });
+});
+
+test("the walk-in trade works from every one of the six neighbours", () => {
+  const dirs = [
+    { q: 1, r: 0 }, { q: 0, r: 1 }, { q: -1, r: 1 },
+    { q: -1, r: 0 }, { q: 0, r: -1 }, { q: 1, r: -1 },
+  ];
+  for (const d of dirs) {
+    const q = 6 + d.q;
+    const r = 6 + d.r;
+    const state = makeState({
+      heroes: [makeHero("h0", 0, 6, 6), makeHero("h2", 0, q, r)],
+      selectedHeroId: "h0",
+    });
+    const intent = resolve({
+      state,
+      heroes: { h0: stubHero("h0", 0, 6, 6), h2: stubHero("h2", 0, q, r) },
+      hover: { q, r },
+    });
+    assert.deepEqual(intent, { kind: "trade", heroId: "h0", partnerId: "h2" }, `neighbour ${d.q},${d.r}`);
+  }
+});
+
+test("a friendly hero too far away to trade is still a plain selection change", () => {
+  // Two hexes: the trade rule (one hex, exactly) refuses it, so the click stays
+  // the selection switch it has always been.
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 2, 2), makeHero("h2", 0, 4, 2)],
+    selectedHeroId: "h0",
+  });
+  const intent = resolve({
+    state,
+    heroes: { h0: stubHero("h0", 0, 2, 2), h2: stubHero("h2", 0, 4, 2) },
+    hover: { q: 4, r: 2 },
+  });
+  assert.deepEqual(intent, { kind: "select-hero", heroId: "h2" });
+});
+
+test("a walk-in needs a hero selected: clicking a friendly hero with nothing selected just selects it", () => {
+  // h0 sits next to h2 but no hero is selected, so there is no acting hero to
+  // trade with -- the click selects h2 as before.
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 2, 2), makeHero("h2", 0, 3, 2)],
+    selectedHeroId: null,
+  });
+  const intent = resolve({
+    state,
+    heroes: { h0: stubHero("h0", 0, 2, 2), h2: stubHero("h2", 0, 3, 2) },
+    hover: { q: 3, r: 2 },
+  });
+  assert.deepEqual(intent, { kind: "select-hero", heroId: "h2" });
+});
+
+test("an adjacent ENEMY hero is still an attack, never a trade", () => {
+  const state = makeState({
+    players: [
+      makePlayer(0, "player", ["h0"], ["s0"]),
+      makePlayer(1, "ai", ["h1"], ["s1"]),
+    ],
+    heroes: [makeHero("h0", 0, 2, 2), makeHero("h1", 1, 3, 2)],
+    selectedHeroId: "h0",
+  });
+  const intent = resolve({
+    state,
+    heroes: { h0: stubHero("h0", 0, 2, 2), h1: stubHero("h1", 1, 3, 2) },
+    hover: { q: 3, r: 2 },
+  });
+  assert.equal(intent.kind, "attack");
+});
+
 test("the second click of a double-click never deselects a hero", () => {
   const state = makeState({ heroes: [makeHero("h0", 0, 2, 2)], selectedHeroId: "h0" });
   const intent = resolve({

@@ -13,6 +13,49 @@ the version has not already been bumped in that changeset.
 ## [0.32.0] - 2026-10-22
 
 Give every faction twelve units, faction troop buildings and starter recruitment; enforce faction building placement.
+## [0.33.3] - 2026-10-23
+
+Two heroes can now start a trade by walking at each other.
+
+**Click the hex the other hero is standing on.** With one of your heroes selected, a click on the square an **adjacent** hero of yours stands on used to just switch selection. It now opens the Trade panel for the pair — the "walk into him" gesture, which is as literal as it gets: heroes can never share a tile (`startMove` refuses an occupied destination), so trying to walk into a friend is exactly the moment to trade with him. The acting hero stays selected, so the panel opens with him on the give side and the partner on the other.
+
+The gesture only fires when the two really are adjacent. The click resolver asks the engine's `canTradeHeroes` — the same rule the `TradeHeroes` command enforces — so the click can never offer a trade the command would refuse: a hero of yours two or more hexes away is out of trade range and clicking him still switches selection, an adjacent **enemy** hero is still an attack, and clicking your own selected hero still puts it down. The hero panel's `Trade with <name>…` button is unchanged and remains the other way in (it is the only way in when you would rather not move the mouse across the map).
+
+Implementation: a new `trade` click intent in `src/screens/adventure/clickIntent.ts` (which is where the "same square" logic lives), dispatched by `adventureView.ts` through a new `onWalkIntoTrade` option wired in `GameEngine` → `UIManager.openHeroTrade` (now public). No command, event, server or database change: this is purely a client gesture for an existing feature.
+
+Tests: `clickIntent.test.ts` gains five cases (the walk-in from all six neighbours, a hero out of range, nothing selected, an adjacent enemy, and the unchanged deselect toggle), and the `heroTrade` Playwright suite now opens the panel by clicking the partner's real hex on the map — asserting the resolver's reason is `trade`, that the acting hero stays selected, and that clicking a far own hero opens nothing and only selects.
+
+## [0.33.2] - 2026-10-23
+
+Two follow-ups to hero field trading, both from the same playtest.
+
+**A hero can no longer be unloaded to zero troops either.** The hero-to-hero trade guard from 0.33.1 had a twin on the settlement side: dragging a hero's last platoon into a city garrison moved it and left an army-less hero. `transferUnits` (direction `toGarrison`) now checks the hero's POST-transfer stacks and refuses with the same `would_be_left_without_troops`, so the whole army can only ever be *moved*, never deleted. The garrison itself can still be emptied (a walk-in capture depends on it), and unloading everything *but* the last troop still lands. In the garrison grid the refused tile simply snaps back, like the grid's other refusals.
+
+**The Trade window's buttons no longer scroll out of reach.** The status line, Clear and **Confirm trade** moved out of the panel's scrolling body into a pinned footer on the panel root, so on a short window the two hero columns scroll and the buttons stay put. The panel also stops going through the panel tiler: it opens beside the docked hero panel (geometry key `heroTrade`), then measures itself and clamps into the viewport, so Confirm is inside the window instead of below the fold.
+
+Tests: `transferUnits.test.ts` gains the refusal case (whole army, and the second step of a two-type unload) and three existing cases that emptied the hero were retargeted; `applyEvent.test.ts` pins the replay of an army-emptying transfer as a resync rather than a partial move. The `heroTrade` Playwright suite now also asserts the footer is NOT inside the panel body and that Confirm measures inside the 800px viewport.
+
+## [0.33.1] - 2026-10-23
+
+Hero field trading no longer lets a hero be traded out of its whole army. A swap whose POST-trade army would be empty on either side is refused (`would_be_left_without_troops` / `partner_would_be_left_without_troops`) instead of producing an army-less hero that cannot fight or defend itself. The rule is checked on the result, so sending your last platoon in exchange for one back stays legal, and it is unconditional: a hero that somehow holds no troops must be given some before it can hand goods over.
+
+The trade panel mirrors the guard rather than waiting for the rejection: staging a platoon that would empty a hero greys out **Confirm trade** and the status line names the hero that would be left with none. The panel also keeps the last commit's message ("Traded." / the engine's refusal) on screen until the table changes, instead of losing it to the next refresh.
+
+Tests: three new engine cases (either side emptied, a both-ways platoon exchange and a last-platoon-for-troops swap both still allowed, an army-less hero refused even for goods-only) and a model case for the panel's mirror; the `heroTrade` Playwright suite now stages a whole army, asserts Confirm is refused with the hero named, unstages it, and checks the server answers `409 would_be_left_without_troops` with the row untouched.
+
+## [0.33.0] - 2026-10-23
+
+Field trading between heroes, out in the field. Two heroes of one seat standing on **adjacent** hexes (heroes can never share a tile) hand each other gold, cargo and whole platoons, committed as ONE all-or-nothing `TradeHeroes` command: both sides' affordability and both receivers' headroom (purse via treasury carts, per-resource cargo via wagons, army slots via `depositIntoGarrison`) are validated before anything moves, so a refused trade writes nothing. Capacity refusals name the hero at fault with a `partner_` prefix, each side's units are removed before the incoming ones land (a same-type swap both ways is not a false `platoon_full`), and the new `HeroesTraded` event replays as an applied delta.
+
+UI: a hero standing next to a friendly hero now shows **Trade with NAMEs...** in its info panel. That opens a two-column **Trade** panel -- both heroes' live purse, the five cargo resources (the bubbly pile sprites the settlement panel uses) and their 4x2 army grids (the shared `SquadGrid`) -- where a chip or platoon tile **dragged** across the middle is staged as that hero's offer (drag it back, or press its x, to take it off the table), a staged row's -/+ trims a tenth of the holding (one unit for troops), and one **Confirm trade** sends both offers. The panel is a normal floating panel (geometry key `heroTrade`), reads live state on every refresh, and closes itself once the pair is no longer adjacent.
+
+Also extracted `removeUnitsByType` into `packages/engine/src/units.ts` so the garrison transfer and the hero trade trim platoons through one implementation.
+
+Tests: `test/engine/tradeHeroes.test.ts` and the DOM-free model's `test/screens/heroes/heroTradeModel.test.ts` cover the swap, every refusal, atomicity, the caps and the staging arithmetic; the new Playwright suite `test/heroTrade.e2e.ts` (`npm run test:heroTrade`, runner entry `heroTrade`) drives the real mouse drags on the live client, then asserts the staged offers, the server row and client state after one Confirm, and a 409 with the row untouched on an unaffordable trade.
+
+## [0.32.0] - 2026-10-23
+
+Two new mounted hero types, both generated with OpenRouter `google/gemini-3-pro-image` (the endpoint pinned to `google-vertex/global`) and wired end to end: the **Griffin Rider** (an eagle-headed, feathered, lion-hindquartered griffin in tawny gold, ivory beak and talons, under a white-and-gold rider with a turquoise cape) repainted from the `drake`, and the **Desert Nomad Rider** (a pale sand-gold horse under an indigo-robed, head-wrapped rider with a curved scimitar and a hide shield) repainted from the `ranger`. Both ship all eight headings at 512px plus a 320x100 roster banner, are recruitable with no UI change (registry entry, contracts union, descriptors, `HERO_BANNERS` and the hero-name pool), and are pinned by `test/render/griffinNomadArt.test.ts` and the `heroVariants` e2e (same-tile A/B diff against their source variant, plus an all-eight-descriptors and banner fetch). The griffin needed no correction pass; the nomad's first `ne` came back mirrored and was regenerated from the rear reference with an explicit composition rule.
 
 ## [0.31.0] - 2026-10-22
 

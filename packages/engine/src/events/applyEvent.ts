@@ -12,6 +12,7 @@ import { transferGold } from "../economy/transfer";
 import { depositIntoBank, requestBankWithdrawal } from "../economy/bank";
 import { setAutoTrade } from "../settlement/autoTrade";
 import { reorderStack } from "../hero/stacks";
+import { tradeHeroes } from "../hero/tradeHeroes";
 import { reorderGarrisonStacks } from "../settlement/reorderGarrison";
 import { captureSettlement } from "../settlement/capture";
 import { startTownHallUpgrade } from "../settlement/upgradeTownHall";
@@ -83,6 +84,7 @@ export const ENGINE_EVENT_SYNC_CLASS: Record<EngineEvent["type"], EngineEventSyn
   TradeRouteRemoved: "ignore",
   UnitsRecruited: "apply",
   UnitsTransferred: "apply",
+  HeroesTraded: "apply",
   SettlementBattleResolved: "resync",
   WorkersAssigned: "ignore",
 };
@@ -425,6 +427,21 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
         event.unitTypeId,
         event.count,
       );
+
+    case "HeroesTraded": {
+      // A straight re-run of the reducer: the event carries both offers
+      // verbatim, and the trade is all-or-nothing, so a rejection here means
+      // the replay no longer applies (a hero moved off, spent the goods, or
+      // is gone) and the resync boundary is the honest answer.
+      const result = tradeHeroes(state, {
+        heroId: event.heroId,
+        partnerId: event.partnerId,
+        give: event.give,
+        take: event.take,
+      });
+      if (!result.ok) return resync(state);
+      return { state: result.state, outcome: "applied" };
+    }
 
     case "TradeRouteCreated": {
       // Rows persisted before the endpoint/payload model carry the legacy

@@ -33,4 +33,6 @@ export type HorseVariantId =
   | "stormrider"
   | "blackdragon"
   | "reddragon"
+  | "griffin"
+  | "nomad"
   | "hero";

@@ -81,6 +81,7 @@ export class EntityMirror {
       case "TradeRouteRemoved":
       case "UnitsRecruited":
       case "UnitsTransferred":
+      case "HeroesTraded":
       case "SettlementBattleResolved":
       case "BattleOffered":
       case "WorkersAssigned":
