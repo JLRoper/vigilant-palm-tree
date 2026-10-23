@@ -1,0 +1,16 @@
+Repaint the attached game-hero sprite as a NEW mounted hero: the DESERT NOMAD RIDER. The attached image is the authoritative reference for ART STYLE, POSE, SILHOUETTE, FRAMING and SCALE — keep all of those identical.
+
+{{POSE}}
+
+ART STYLE (copy the reference exactly): chunky hand-drawn pixel art, crisp hard-edged square pixels, a limited palette, a thin dark pixel outline around the silhouette, the same pixel scale, the same level of detail, and the same dithering and highlight habits as the reference. Not a smooth painted illustration, not airbrushed, not a 3D render, not a photograph.
+
+KEEP FROM THE REFERENCE, unchanged: the horse's body build, head shape, ears, mane, tail, leg positions and walking gait, the saddle, girth and bridle, the rider's upright posture and both hands on the reins, and the exact same silhouette and framing.
+
+NEW COLOUR SCHEME — "Desert Nomad Rider":
+- Horse: pale sand-gold coat with a cream-white mane and tail, dark grey lower legs and hooves, and a dark muzzle.
+- Rider: layered desert robes instead of leathers — a long sand-coloured tunic over loose trousers, a billowing deep-indigo cloak, a dark indigo head wrap covering the lower face with the hood up, a leather bandolier and belt with brass fittings, a curved scimitar sheathed at the left hip, and a small round hide shield slung on the back. No plate armour, no helmet, no bow.
+- Highlights read warm sand and deep indigo; no green anywhere on the rider or the horse.
+
+BACKGROUND: one flat uniform light-grey colour (#c9c7c4) filling the entire canvas — absolutely no checkerboard pattern anywhere, no gradient, no ground, no cast shadow, no horizon line, no text, no border, no watermark. A single isolated figure, centred, occupying the canvas vertically like the reference.
+
+COMPOSITION RULE for this rear diagonal — the previous attempt came out as the WRONG SIDE, so follow this exactly: the reference is a straight-behind view. Turn the horse so that it is walking away from the viewer toward the UPPER-RIGHT of the image, with the horse's head and neck on the RIGHT-hand side of the image and its hindquarters toward the lower-left and nearest the camera. The rider must still be seen from behind (the back of the hood and the indigo cloak facing us), and the tail must be visible on the near side. The horse's head must NOT be on the left of the image.

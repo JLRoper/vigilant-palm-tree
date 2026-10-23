@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.32.0] - 2026-10-23
+
+Two new mounted hero types, both generated with OpenRouter `google/gemini-3-pro-image` (the endpoint pinned to `google-vertex/global`) and wired end to end: the **Griffin Rider** (an eagle-headed, feathered, lion-hindquartered griffin in tawny gold, ivory beak and talons, under a white-and-gold rider with a turquoise cape) repainted from the `drake`, and the **Desert Nomad Rider** (a pale sand-gold horse under an indigo-robed, head-wrapped rider with a curved scimitar and a hide shield) repainted from the `ranger`. Both ship all eight headings at 512px plus a 320x100 roster banner, are recruitable with no UI change (registry entry, contracts union, descriptors, `HERO_BANNERS` and the hero-name pool), and are pinned by `test/render/griffinNomadArt.test.ts` and the `heroVariants` e2e (same-tile A/B diff against their source variant, plus an all-eight-descriptors and banner fetch). The griffin needed no correction pass; the nomad's first `ne` came back mirrored and was regenerated from the rear reference with an explicit composition rule.
+
 ## [0.31.0] - 2026-10-22
 
 Battle retreat rework: edge-column escape, round-gated retreat, one-day retreat stun, AI retreats when outmatched; fix arena stuck on a failed battle submission

@@ -1,0 +1,18 @@
+Repaint the attached game-hero sprite as a NEW mounted hero: the GRIFFIN RIDER. The attached image is the authoritative reference for ART STYLE, POSE, SILHOUETTE, FRAMING and SCALE — keep all of those identical.
+
+{{POSE}}
+
+ART STYLE (copy the reference exactly): chunky hand-drawn pixel art, crisp hard-edged square pixels, a limited palette, a thin dark pixel outline around the silhouette, the same pixel scale, the same level of detail, and the same dithering and highlight habits as the reference. Not a smooth painted illustration, not airbrushed, not a 3D render, not a photograph.
+
+KEEP FROM THE REFERENCE, unchanged: the winged quadruped's body build and standing stance, the swept wing shape and span rising off the shoulders, the four-legged gait with the legs at the same angles, the long tail behind, the saddle, harness and reins, and the rider's upright posture with both hands on the reins — the same silhouette, the same framing and the same rider seat.
+
+CHANGE THE SPECIES — it is no longer a dragon, it is a GRIFFIN: the head becomes a great eagle's head with a hooked golden-ivory beak and a fierce dark eye, with a white feather ruff around the neck; the neck, chest and body are covered in layered feathers instead of scales; the wings are broad feathered wings with long primary feathers; the hindquarters and hind legs are a lion's with tawny fur and a long tufted tail; the forelegs end in ivory eagle talons. No horns, no dragon snout, no scales anywhere.
+
+NEW COLOUR SCHEME — "Griffin Rider":
+- Griffin: tawny golden-brown feathers with cream highlights on the chest and wing coverts, darker umber wing tips and back, a white head and neck ruff, an ivory-gold hooked beak, amber eyes, and warm sand-gold lion fur with a darker tufted tail.
+- Rider: polished white-and-gold plate armour with a gold-trimmed turquoise cape, a gold-chased helm with a turquoise plume, and a brown leather saddle with brass buckles.
+- Highlights read warm gold and turquoise; no green anywhere on the griffin.
+
+BACKGROUND: one flat uniform light-grey colour (#c9c7c4) filling the entire canvas — absolutely no checkerboard pattern anywhere, no gradient, no ground, no cast shadow, no horizon line, no text, no border, no watermark. A single isolated figure, centred, occupying the canvas vertically like the reference.
+
+COMPOSITION RULE for this diagonal: this must read as a THREE-QUARTER view, not a side profile. The griffin's head MUST be on the {{HEAD_SIDE}} side of the image, its chest angled toward the viewer, and its near foreleg planted toward the lower-{{HEAD_SIDE}}. Show both the chest and the flank. If the result looks like a pure side view, turn the body further toward the camera.

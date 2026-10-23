@@ -85,6 +85,12 @@ const HERO_NAMES: readonly string[] = [
   "Sable Cinderwing",
   "Pyra Ashenclaw",
   "Vex Shadowmaw",
+  "Aeris Talonwind",
+  "Corin Skyfeather",
+  "Halcyon Goldbeak",
+  "Zahra Sandswept",
+  "Kadir Duneveil",
+  "Leila Sunward",
 ];
 
 let usedNames: Set<string> | null = null;
