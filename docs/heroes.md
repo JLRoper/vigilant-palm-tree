@@ -54,17 +54,27 @@ The game operates on a **round-based** cycle:
 
 Each hero carries their own gold purse (`hero.gold`), capped by **treasury carts**: `heroGoldCap = treasuryWagons × 500` (`packages/engine/src/settlement/capacity.ts`; soft default 5 carts, migration `023_treasury_wagons.sql`). The carts are a separate slot from the army `wagons` that cap cargo at ×50 per resource — `BuyWagons`/`AssignWagons` take `slot: "cargo" | "treasury"`, and `recruitHero` allocates 5 + 5 from the player's two pools. The cap clamps all three gold landing sites (loot, capture reward, treasury withdrawal — excess stays put, nothing destroyed).
 
-The designer's three ways gold reaches a purse:
+The designer's four ways gold reaches a purse:
 
 - **Pick up at a city** — deposit/withdraw against a settlement treasury (`transferGold`, same-hex only).
 - **Battle or find on the map** — defeating a hero loots their purse (wagon-capped, cargo included); capturing a settlement pays a reward, clamped to `heroGoldCap`.
 - **Treasure caravans** — a trade route with payload `{ kind: "gold" }` (`wagons × 500` per load, headroom-clamped) delivers into the destination purse or treasury; see [economy.md](./economy.md) → Trade routes & caravans.
+- **Hand it to another hero in the field** — `TradeHeroes` moves gold, cargo and whole platoons between two adjacent heroes of the same seat in one swap (below).
 
 Purse gold is spent on chartering (2500g cost from hero purse). Settlements track gold separately in their treasury (`settlement.gold`).
 
 ### Feeding the army (larder & the weekly bill)
 
 The hero info panel's food row is the hero's larder (food in its wagon cargo) and its tooltip states the cadence in the player's terms — the weekly bill, in-game days until the next charge, and weeks of larder coverage (`heroLarderTitle`, [`src/screens/shared/heroUpkeepCost.ts`](../src/screens/shared/heroUpkeepCost.ts)). The bill is charged weekly only (`day % 7 === 0`), so a larder refilled between charge days is never charged. The panel's upkeep badge — like the End Turn "unfed troops" toast — reads the persisted unpaid-streak fields and is now suppressed while the hero is currently affordable (purse + larder, plus the settlement physically under the hero); a streak stamped on an earlier charge day stops warning once the larder is restocked. The streak itself, the morale bleed and the desertion ladder are unchanged (see [army.md](./army.md) → Upkeep).
+
+## Trading in the field (✅ implemented)
+
+Two heroes of the **same seat** hand gold, cargo and troops to each other where they stand — no settlement, no caravan, no trip home. Heroes can never share a hex (`startMove` refuses `occupied`), so a trade is between **adjacent** heroes, and it is **all-or-nothing**: the whole offer is validated (both sides hold what they give, both have room for what they receive) before anything moves, so a refused trade writes nothing rather than moving a partial amount. That is deliberately unlike `TransferResources`' clamp-to-headroom, which has no counterparty to shortchange.
+
+- **Command.** `TradeHeroes { heroId, partnerId, give, take }` (`packages/contracts/src/commands/tradeHeroes.ts`). Each side is a `HeroTradeOffer`: optional `gold`, optional per-resource `resources`, optional `units` (`{ unitTypeId, count }` pairs, duplicate types summed). `give` leaves `heroId`, `take` leaves `partnerId`. The server checks both heroes exist and belong to the acting seat (the generic turn guard already pinned the actor to the active player); ownership, `not_adjacent` (exactly one hex — the same six directions `detectAdjacentEnemy` walks), affordability, and capacity are the engine reducer's own gates.
+- **Engine.** `tradeHeroes` in `packages/engine/src/hero/tradeHeroes.ts`. Capacity refusals name the side that failed with a `partner_` prefix — `not_enough_gold_space` / `not_enough_cargo_space` / `not_enough_unit_space` (and `partner_…` twins), against `heroGoldCap` (treasury carts × 500) and `heroResourceCap` (cargo wagons × 50 per resource). Units are removed from each side **before** the incoming ones are deposited, so a same-type swap both ways is not a false `platoon_full`. `canTradeHeroes` / `tradePartnersFor` are the read-only halves the UI gates on.
+- **Event.** `HeroesTraded` (`actor`, both hero ids, both offers) — the client's sync class is **applied**, a straight re-run of the reducer; a replay that no longer applies (a hero moved off, spent the goods, or died) falls back to the `TurnEnded` resync boundary. See [event-system.md](./event-system.md) §5.1.
+- **UI.** A hero standing next to a friendly hero gets a **Trade with `<name>`…** button in its info panel. It opens the **Trade** panel (`src/screens/heroes/heroTradePanel.ts`) — the two heroes side by side with their live purse, the five cargo resources (the same bubbly pile sprites the settlement panel uses) and their 4×2 army grids (the shared `SquadGrid`). **Drag** a chip or platoon tile from one column onto the other and it is staged as THAT hero's offer; drag it back onto its own column (or press the row's `×`) to take it off the table. A staged row's `−`/`+` steps the amount (a tenth of the holding, one unit for troops) so a partial handover is `wood 250 → 25` rather than all-or-nothing at the chip level, and **Confirm trade** commits both offers as one command. Everything verbal lives in tooltips; the panel closes itself the moment the pair stops being adjacent (a hero walked off or died), because there is nothing left to trade. Pure client surface: it reads live state through `getState()` and commits through `TurnController.tradeHeroes` → `TradeHeroes` (the DOM-free model is `src/screens/heroes/heroTradeModel.ts`).
 
 ## Combat
 

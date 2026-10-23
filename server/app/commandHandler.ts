@@ -17,6 +17,7 @@ transferGold,
   recruitUnits,
   assignWorkers,
   transferUnits,
+  tradeHeroes,
   unitAllowedForSeatFaction,
   playerFactionId,
   applySettlementBattleResult,
@@ -206,6 +207,8 @@ export interface CommandResult {
   // (src/io/api.ts) keep that even though the command's own authoritative
   // record of "what changed" is the events array.
   hero?: HeroState;
+  // The other half of a TradeHeroes swap (both heroes are the acting seat's).
+  partner?: HeroState;
   settlement?: SettlementState;
   // EndTurn touches every hero/settlement (movement reset, production,
   // upgrades, upkeep), not just one -- these carry the full post-turn
@@ -2225,6 +2228,58 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         lastEventId,
         hero: result.state.heroes[command.heroId],
         settlement: result.state.settlements[command.settlementId],
+      };
+    }
+    case "TradeHeroes": {
+      // The TransferUnits hero ladder, doubled: BOTH heroes must exist and
+      // belong to the acting seat (the generic turn guard above already
+      // proved the actor holds the turn). The engine's tradeHeroes() then
+      // gates adjacency and the all-or-nothing swap, so a rejected trade
+      // writes nothing at all.
+      const hero = row.heroes[command.heroId];
+      if (!hero) {
+        return { ok: false, reason: "no_hero", events: [] };
+      }
+      if (hero.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_hero", events: [] };
+      }
+      const partner = row.heroes[command.partnerId];
+      if (!partner) {
+        return { ok: false, reason: "no_partner_hero", events: [] };
+      }
+      if (partner.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_partner", events: [] };
+      }
+      const result = tradeHeroes(state, {
+        heroId: command.heroId,
+        partnerId: command.partnerId,
+        give: command.give,
+        take: command.take,
+      });
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "HeroesTraded",
+        actor: command.actor,
+        heroId: command.heroId,
+        partnerId: command.partnerId,
+        give: command.give,
+        take: command.take,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return {
+        ok: true,
+        events: [event],
+        lastEventId,
+        hero: result.state.heroes[command.heroId],
+        partner: result.state.heroes[command.partnerId],
       };
     }
     case "AssignWorkers": {

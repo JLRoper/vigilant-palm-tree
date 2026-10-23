@@ -5,6 +5,7 @@ import type {
   BuildingUpgradeRequest,
   HeroBattleVerdict,
   HeroState,
+  HeroTradeOffer,
   HorseVariantId,
   Platoon,
   Player,
@@ -552,4 +553,21 @@ export async function transferUnits(
   }
 ): Promise<void> {
   await postCommand(name, { kind: "TransferUnits", ...payload });
+}
+
+// Two-sided field trade between two adjacent heroes of the acting seat.
+// Fire-and-forget like transferUnits above -- src/game/turnHooks.ts calls it
+// right after the local engine reducer already applied the swap, so the
+// response body is unused.
+export async function tradeHeroes(
+  name: string,
+  payload: {
+    actor: number;
+    heroId: string;
+    partnerId: string;
+    give: HeroTradeOffer;
+    take: HeroTradeOffer;
+  }
+): Promise<void> {
+  await postCommand(name, { kind: "TradeHeroes", ...payload });
 }

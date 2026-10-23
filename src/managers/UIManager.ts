@@ -16,6 +16,8 @@ import { RESOURCE_PILE_SMOL_SPRITES } from "../render/assetDescriptors";
 import type { CityView, CitySelectionSnapshot } from "@screens/settlements/cityView/cityView";
 import type { WorkforcePanel } from "@screens/settlements/cityView/workforcePanel";
 import type { RecruitmentPanel } from "@screens/settlements/cityView/recruitmentPanel";
+import type { HeroTradePanel } from "@screens/heroes/heroTradePanel";
+import { tradePartnerOf } from "@screens/heroes/heroTradeModel";
 import { settleNet } from "@screens/settlements/cityView/netCost";
 import { recordBuildCommit } from "../game/buildCommitLedger";
 import { GameState, calendarFromDay, monthName } from "../state/gameState";
@@ -97,6 +99,8 @@ export class UIManager {
   private workforcePanelPromise: Promise<WorkforcePanel> | null = null;
   private recruitmentPanel?: RecruitmentPanel;
   private recruitmentPanelPromise: Promise<RecruitmentPanel> | null = null;
+  private heroTradePanel?: HeroTradePanel;
+  private heroTradePanelPromise: Promise<HeroTradePanel> | null = null;
   private gameStateManager?: GameStateManager;
   private viewManager?: ViewManager;
   private lastMapWidth = -1;
@@ -187,6 +191,11 @@ export class UIManager {
       parent: document.body,
       onTransfer,
       onReorder,
+      // Field trading: the hero panel's Trade button is live-gated on an
+      // ADJACENT same-seat hero (heroes cannot share a tile), and opens the
+      // two-hero trade panel for that pair.
+      getTradePartner: (heroId) => tradePartnerOf(this.gameStateManager?.getState(), heroId),
+      onTrade: (heroId, partnerId) => this.openHeroTrade(heroId, partnerId),
       onClose: () => {
         if (this.gameStateManager) {
           const tc = this.gameStateManager.getTurnController();
@@ -604,6 +613,42 @@ export class UIManager {
   }
 
   /**
+   * The field-trade panel (TradeHeroes): two adjacent heroes of the acting
+   * seat, side by side, drag to stage both offers and confirm once. Lazy like
+   * the other floating panels -- the module is imported on the first open.
+   */
+  private openHeroTrade(heroId: string, partnerId: string): void {
+    void this.ensureHeroTradePanel()
+      .then((panel) => panel.open(heroId, partnerId))
+      .catch((err) => console.error("[ui] hero trade panel failed to open", err));
+  }
+
+  private async ensureHeroTradePanel(): Promise<HeroTradePanel> {
+    if (!this.heroTradePanelPromise) {
+      this.heroTradePanelPromise = (async () => {
+        const { HeroTradePanel } = await import("@screens/heroes/heroTradePanel");
+        const panel = new HeroTradePanel({
+          parent: document.body,
+          getState: () => this.gameStateManager?.getState(),
+          onTrade: (heroId, partnerId, give, take) => {
+            if (!this.gameStateManager) return { ok: false, reason: "no_game" };
+            const tc = this.gameStateManager.getTurnController();
+            const result = tc.tradeHeroes(heroId, partnerId, give, take);
+            if (result.ok) this.gameStateManager.replaceState(tc.getState());
+            return result;
+          },
+        });
+        this.heroTradePanel = panel;
+        return panel;
+      })().catch((err) => {
+        this.heroTradePanelPromise = null;
+        throw err;
+      });
+    }
+    return this.heroTradePanelPromise;
+  }
+
+  /**
    * Recruitment panel building row -> that building's own menu, exactly as if
    * its cell had been clicked on the city grid (same menu, same placement at
    * the building, plus a ring on it until the menu closes). A row whose building
@@ -726,6 +771,10 @@ export class UIManager {
       // panel, so it refreshes from the same dirty-keyed pass -- a transfer
       // made on either surface shows on both immediately.
       if (this.recruitmentPanel?.isOpen()) this.recruitmentPanel.refreshGarrison(gameState);
+      // The trade panel shows both heroes' live holdings, so it refreshes off
+      // the same dirty-keyed pass (and closes itself once the pair can no
+      // longer trade).
+      if (this.heroTradePanel?.isOpen()) this.heroTradePanel.refresh(gameState);
       this.toolbar?.refresh();
     }
 

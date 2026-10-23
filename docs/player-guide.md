@@ -20,6 +20,8 @@ Hover only the bold settlement name in the Logistics panel to show stockpiles in
 
 Wagons carry physical caravan cargo between compatible routes. New games do not teleport resources through shared storage; deliveries wait for destination capacity. Hero and garrison upkeep is charged weekly, so check food stocks and income before the charge.
 
+Resources are moved between your own agents by dragging, not by menus. Two heroes of yours standing next to each other can **trade** in the field: select one and click **Trade with `<name>`…** in its hero panel, and the **Trade** window opens with both heroes side by side — their gold purse, the five cargo resources and their 4×2 army grids. Drag anything from one column onto the other to offer it (drag it back, or click its `×`, to take it off the table), use a staged row's `−`/`+` to hand over only part of a stack (a tenth of it per click, one unit for troops), and click **Confirm trade** to hand both sides over **at once**. A trade never happens in halves: if either hero cannot pay or has no room to receive, nothing moves and the window says why. The window closes itself once the two heroes are no longer on adjacent hexes.
+
 ## Battles
 
 - As the human attacker in a hero battle, choose **Fight**, **Quick Resolve**, or **Flee**.
