@@ -10,6 +10,16 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.33.2] - 2026-10-23
+
+Two follow-ups to hero field trading, both from the same playtest.
+
+**A hero can no longer be unloaded to zero troops either.** The hero-to-hero trade guard from 0.33.1 had a twin on the settlement side: dragging a hero's last platoon into a city garrison moved it and left an army-less hero. `transferUnits` (direction `toGarrison`) now checks the hero's POST-transfer stacks and refuses with the same `would_be_left_without_troops`, so the whole army can only ever be *moved*, never deleted. The garrison itself can still be emptied (a walk-in capture depends on it), and unloading everything *but* the last troop still lands. In the garrison grid the refused tile simply snaps back, like the grid's other refusals.
+
+**The Trade window's buttons no longer scroll out of reach.** The status line, Clear and **Confirm trade** moved out of the panel's scrolling body into a pinned footer on the panel root, so on a short window the two hero columns scroll and the buttons stay put. The panel also stops going through the panel tiler: it opens beside the docked hero panel (geometry key `heroTrade`), then measures itself and clamps into the viewport, so Confirm is inside the window instead of below the fold.
+
+Tests: `transferUnits.test.ts` gains the refusal case (whole army, and the second step of a two-type unload) and three existing cases that emptied the hero were retargeted; `applyEvent.test.ts` pins the replay of an army-emptying transfer as a resync rather than a partial move. The `heroTrade` Playwright suite now also asserts the footer is NOT inside the panel body and that Confirm measures inside the 800px viewport.
+
 ## [0.33.1] - 2026-10-23
 
 Hero field trading no longer lets a hero be traded out of its whole army. A swap whose POST-trade army would be empty on either side is refused (`would_be_left_without_troops` / `partner_would_be_left_without_troops`) instead of producing an army-less hero that cannot fight or defend itself. The rule is checked on the result, so sending your last platoon in exchange for one back stays legal, and it is unconditional: a hero that somehow holds no troops must be given some before it can hand goods over.

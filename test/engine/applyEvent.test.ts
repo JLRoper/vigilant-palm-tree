@@ -478,7 +478,7 @@ test("UnitsTransferred toHero moves the units from garrison to hero stacks", () 
 
 test("UnitsTransferred toGarrison moves the units from hero stacks to the garrison", () => {
   const state = makeState({
-    heroes: [makeHero("h1", 1, 8, 8, { stacks: [{ entries: [{ unitTypeId: "pikeman", count: 6 }] }] })],
+    heroes: [makeHero("h1", 1, 8, 8, { stacks: [{ entries: [{ unitTypeId: "pikeman", count: 7 }] }] })],
     settlements: [{ ...makeSettlement("s1", 1, 8, 8) }],
   });
   const result = applyEngineEvent(state, {
@@ -492,8 +492,29 @@ test("UnitsTransferred toGarrison moves the units from hero stacks to the garris
   });
 
   assert.equal(result.outcome, "applied");
-  assert.equal(garrisonTotal(result.state.heroes.h1.stacks), 0);
+  assert.equal(garrisonTotal(result.state.heroes.h1.stacks), 1);
   assert.equal(garrisonTotal(result.state.settlements.s1.stacks ?? []), 6);
+});
+
+test("UnitsTransferred toGarrison that would empty the hero resyncs instead of applying", () => {
+  // The engine refuses an army-emptying unload, so the replayed event is not
+  // applicable: the honest answer is the resync boundary, never a partial move.
+  const state = makeState({
+    heroes: [makeHero("h1", 1, 8, 8, { stacks: [{ entries: [{ unitTypeId: "pikeman", count: 6 }] }] })],
+    settlements: [{ ...makeSettlement("s1", 1, 8, 8) }],
+  });
+  const result = applyEngineEvent(state, {
+    type: "UnitsTransferred",
+    actor: 1,
+    heroId: "h1",
+    settlementId: "s1",
+    direction: "toGarrison",
+    unitTypeId: "pikeman",
+    count: 6,
+  });
+
+  assert.equal(result.outcome, "resync");
+  assert.equal(garrisonTotal(result.state.heroes.h1.stacks), 6, "nothing moved locally");
 });
 
 test("UnitsTransferred against drifted positions resyncs untouched", () => {

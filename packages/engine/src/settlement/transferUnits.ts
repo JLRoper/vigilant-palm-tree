@@ -3,6 +3,7 @@ import {
   ARMY_STACK_SLOTS,
   MAX_PLATOON_ENTRIES,
   normalizePlatoons,
+  platoonsHaveTroops,
   removeUnitsByType,
   settlementStacks,
 } from "../units";
@@ -111,12 +112,21 @@ export function transferUnits(
       if (!deposit.ok) return { state, ok: false, reason: "garrison_full" };
       updatedGarrison = deposit.stacks;
     }
+    // A garrison can be emptied (a walk-in capture depends on it), but a HERO
+    // cannot: unloading its last troops into a city would leave an army-less
+    // hero that cannot fight or defend itself, so the whole transfer is
+    // refused (same rule as the hero-to-hero trade's
+    // would_be_left_without_troops).
+    const nextHeroStacks = removeUnitsByType(heroStacks, opts.unitTypeId, opts.count);
+    if (!platoonsHaveTroops(nextHeroStacks)) {
+      return { state, ok: false, reason: "would_be_left_without_troops" };
+    }
     return {
       state: {
         ...state,
         heroes: {
           ...state.heroes,
-          [hero.id]: { ...hero, stacks: removeUnitsByType(heroStacks, opts.unitTypeId, opts.count) },
+          [hero.id]: { ...hero, stacks: nextHeroStacks },
         },
         settlements: { ...state.settlements, [settlement.id]: { ...settlement, stacks: updatedGarrison } },
         dirty: true,
