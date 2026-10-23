@@ -88,6 +88,28 @@ export function settlementStacks(s: { stacks?: Platoon[] } | undefined): Platoon
   return normalizePlatoons(s?.stacks);
 }
 
+// Remove `count` units of one type, highest slot index first (mirrors
+// trimPlatoonsFromEnd's ordering, scoped to a single type); emptied entries
+// are dropped and the slot count is preserved. Shared by the settlement
+// garrison transfer and the hero-to-hero field trade so both sides of a move
+// trim the same way.
+export function removeUnitsByType(stacks: Platoon[], unitTypeId: string, count: number): Platoon[] {
+  const out = stacks.map((p) => ({ entries: p.entries.map((e) => ({ ...e })) }));
+  let remaining = count;
+  for (let i = out.length - 1; i >= 0 && remaining > 0; i--) {
+    const entries = out[i].entries;
+    for (let j = entries.length - 1; j >= 0 && remaining > 0; j--) {
+      const e = entries[j];
+      if (e.unitTypeId !== unitTypeId) continue;
+      const take = Math.min(e.count, remaining);
+      e.count -= take;
+      remaining -= take;
+      if (e.count === 0) entries.splice(j, 1);
+    }
+  }
+  return out;
+}
+
 export function platoonsHaveTroops(platoons: readonly Platoon[]): boolean {
   return platoons.some((p) => p.entries.some((e) => e.count > 0));
 }

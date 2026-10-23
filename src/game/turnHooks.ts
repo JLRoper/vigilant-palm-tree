@@ -24,6 +24,7 @@ import {
   recruitUnits as recruitUnitsCommand,
   assignWorkers as assignWorkersCommand,
   transferUnits as transferUnitsCommand,
+  tradeHeroes as tradeHeroesCommand,
   bankGold as bankGoldCommand,
   submitSettlementBattleResult,
 } from "../io/commands";
@@ -36,6 +37,7 @@ import type {
   HeroBattleVerdict,
   HeroId,
   HeroState,
+  HeroTradeOffer,
   PlayerId,
   SettlementId,
   TradeRouteEndpoint,
@@ -541,6 +543,21 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await transferUnitsCommand(name, { actor, heroId, settlementId, direction, unitTypeId, count, toSlot });
       } catch (e) {
         reportCommandFailure("Transfer units", e);
+      }
+    },
+    onTradeHeroes: async (
+      actor: number,
+      heroId: HeroId,
+      partnerId: HeroId,
+      give: HeroTradeOffer,
+      take: HeroTradeOffer,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await tradeHeroesCommand(name, { actor, heroId, partnerId, give, take });
+      } catch (e) {
+        reportCommandFailure("Trade heroes", e);
       }
     },
     onBankGold: async (

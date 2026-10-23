@@ -41,6 +41,10 @@ export interface HeroInfoMenuOptions {
   onTransfer?: TransferHandler;
   onReorder?: ReorderHandler;
   onClose?: () => void;
+  /** The adjacent same-seat hero this hero could trade with (null = none). */
+  getTradePartner?: (heroId: string) => HeroState | null;
+  /** Opens the field-trade panel for this hero and its partner. */
+  onTrade?: (heroId: string, partnerId: string) => void;
 }
 
 interface HeroPanelDom {
@@ -52,6 +56,7 @@ interface HeroPanelDom {
   transferRow: HTMLDivElement;
   withdrawBtn: HTMLButtonElement;
   depositBtn: HTMLButtonElement;
+  tradeBtn: HTMLButtonElement;
   movementFill: HTMLElement;
   movementLabel: HTMLElement;
   troopsEl: HTMLElement;
@@ -168,6 +173,23 @@ function buildHeroPanelDom(
   depositBtn.addEventListener("click", () => onTransferClick("deposit"));
   transferRow.appendChild(depositBtn);
   body.appendChild(transferRow);
+
+  // Field trading (TradeHeroes): one button per hero, live-gated on an
+  // ADJACENT same-seat hero existing. Both gold transfer buttons above need a
+  // friendly settlement underfoot; this one needs a friendly hero next door.
+  const tradeRow = document.createElement("div");
+  Object.assign(tradeRow.style, { display: "flex", marginTop: "4px" });
+  const tradeBtn = document.createElement("button");
+  tradeBtn.textContent = "Trade\u2026";
+  tradeBtn.dataset.heroTradeOpen = "true";
+  Object.assign(tradeBtn.style, {
+    flex: "1",
+    padding: "5px 6px",
+    fontSize: "11px",
+    cursor: "pointer",
+  });
+  tradeRow.appendChild(tradeBtn);
+  body.appendChild(tradeRow);
 
   const movementSection = document.createElement("div");
   Object.assign(movementSection.style, {
@@ -310,6 +332,7 @@ function buildHeroPanelDom(
     transferRow,
     withdrawBtn,
     depositBtn,
+    tradeBtn,
     movementFill,
     movementLabel,
     troopsEl,
@@ -333,9 +356,13 @@ export class HeroInfoMenu {
 
   private onTransfer?: TransferHandler;
   private settlementAtTile: SettlementState | null = null;
+  private getTradePartner?: (heroId: string) => HeroState | null;
+  private onTrade?: (heroId: string, partnerId: string) => void;
 
   constructor(opts: HeroInfoMenuOptions) {
     this.onTransfer = opts.onTransfer;
+    this.getTradePartner = opts.getTradePartner;
+    this.onTrade = opts.onTrade;
 
     this.menu = new FloatingPanel({
       parent: opts.parent,
@@ -374,6 +401,7 @@ export class HeroInfoMenu {
     });
 
     this.dom = buildHeroPanelDom(this.menu.body, (direction) => this.handleTransfer(direction), () => this.reposition());
+    this.dom.tradeBtn.addEventListener("click", () => this.handleTrade());
     this.menu.body.appendChild(this.army.element);
 
     this.menu.root.style.display = "none";
@@ -490,6 +518,7 @@ export class HeroInfoMenu {
     this.dom.depositBtn.style.opacity = this.dom.depositBtn.disabled ? "0.4" : "1";
     this.dom.withdrawBtn.style.cursor = this.dom.withdrawBtn.disabled ? "default" : "pointer";
     this.dom.depositBtn.style.cursor = this.dom.depositBtn.disabled ? "default" : "pointer";
+    this.updateTradeButton(hero);
     this.army.render(hero.stacks);
     this.renderStats(hero);
   }
@@ -581,5 +610,27 @@ export class HeroInfoMenu {
     if (!result.ok) {
       console.warn("[heroInfoMenu] transfer failed:", result.reason);
     }
+  }
+
+  // Field trading needs a friendly hero on an ADJACENT hex (heroes cannot
+  // share a tile). The button is live-gated every update: it names the partner
+  // it would trade with, and explains itself in the tooltip when there is none.
+  private updateTradeButton(hero: Hero): void {
+    const partner = this.getTradePartner?.(hero.id) ?? null;
+    const enabled = partner !== null && this.onTrade !== undefined;
+    this.dom.tradeBtn.disabled = !enabled;
+    this.dom.tradeBtn.textContent = partner ? `Trade with ${partner.name}\u2026` : "Trade\u2026";
+    this.dom.tradeBtn.title = partner
+      ? `Open the trade panel: hand gold, cargo and troops to ${partner.name} on the adjacent hex`
+      : "Move another hero to an adjacent hex to trade";
+    this.dom.tradeBtn.style.opacity = enabled ? "1" : "0.4";
+    this.dom.tradeBtn.style.cursor = enabled ? "pointer" : "default";
+  }
+
+  private handleTrade(): void {
+    if (!this.currentHeroId || !this.onTrade) return;
+    const partner = this.getTradePartner?.(this.currentHeroId) ?? null;
+    if (!partner) return;
+    this.onTrade(this.currentHeroId, partner.id);
   }
 }

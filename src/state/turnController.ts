@@ -1,5 +1,5 @@
 import type { GameState, HeroId, PlayerId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload, TradeRouteEndpoint, TradeRoutePayload } from "./gameState";
-import type { BuildingDef, BuildingKind, HeroBattleVerdict, HeroState, Platoon, Player, SettlementState, TradeRouteState } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, HeroBattleVerdict, HeroState, HeroTradeOffer, Platoon, Player, SettlementState, TradeRouteState } from "@heroes/contracts";
 import { platoonsHaveTroops, platoonTroopTotal, settlementStacks, normalizePlatoons } from "./units";
 import type { GameMap } from "../map/gameMap";
 import {
@@ -51,6 +51,7 @@ import {
   updateTradeRoute as updateTradeRouteReducer,
   recruitUnits as recruitUnitsReducer,
   transferUnits as transferUnitsReducer,
+  tradeHeroes as tradeHeroesReducer,
   startSettlementBattle as startSettlementBattleReducer,
   type BuildingUpgradeRequest,
 } from "./gameState";
@@ -194,6 +195,16 @@ export interface TurnControllerHooks {
     unitTypeId: string,
     count: number,
     toSlot?: number,
+  ): Promise<void>;
+  // Two-sided field trade between two adjacent heroes of the acting seat
+  // (TradeHeroes). Same fire-and-forget shape as the rest of this block: the
+  // local engine reducer has already applied the swap by the time this runs.
+  onTradeHeroes(
+    actor: number,
+    heroId: HeroId,
+    partnerId: HeroId,
+    give: HeroTradeOffer,
+    take: HeroTradeOffer,
   ): Promise<void>;
   // A bank pot moved (treasury -> pot, or pot -> a 7-day pending withdrawal).
   // Same fire-and-forget shape as the rest of this block: the local
@@ -839,6 +850,48 @@ export class TurnController {
       hookLabel: "onTransferUnits",
     });
     return true;
+  }
+
+  /**
+   * Swaps the two offers between two adjacent heroes of the acting seat
+   * (TradeHeroes). Returns the reducer's own reason so the trade panel can
+   * show why nothing moved instead of clicking a dead button; `ok: true`
+   * means the local state already swapped and the POST is in flight.
+   */
+  tradeHeroes(
+    heroId: HeroId,
+    partnerId: HeroId,
+    give: HeroTradeOffer,
+    take: HeroTradeOffer,
+  ): { ok: boolean; reason: string } {
+    const result = tradeHeroesReducer(this.state, { heroId, partnerId, give, take });
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.commit(result.state, {
+      events: [
+        {
+          type: "economy:goldChanged",
+          entityId: heroId,
+          entityType: "hero",
+          amount: result.state.heroes[heroId]?.gold ?? 0,
+        },
+        {
+          type: "economy:goldChanged",
+          entityId: partnerId,
+          entityType: "hero",
+          amount: result.state.heroes[partnerId]?.gold ?? 0,
+        },
+      ],
+      log: {
+        type: "heroes_traded",
+        payload: { heroId, partnerId, give, take },
+      },
+      hook: () => {
+        const actor = result.state.heroes[heroId]?.ownerId ?? result.state.activePlayerId;
+        return this.hooks.onTradeHeroes(actor, heroId, partnerId, give, take);
+      },
+      hookLabel: "onTradeHeroes",
+    });
+    return { ok: true, reason: "" };
   }
 
   /**

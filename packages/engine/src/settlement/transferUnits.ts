@@ -3,6 +3,7 @@ import {
   ARMY_STACK_SLOTS,
   MAX_PLATOON_ENTRIES,
   normalizePlatoons,
+  removeUnitsByType,
   settlementStacks,
 } from "../units";
 import { depositIntoGarrison } from "./recruitUnits";
@@ -15,26 +16,6 @@ function totalOfType(stacks: Platoon[], unitTypeId: string): number {
     }
   }
   return total;
-}
-
-// Remove `count` units of one type, highest slot index first (mirrors
-// trimPlatoonsFromEnd's ordering, scoped to a single type); emptied entries
-// are dropped.
-function removeByType(stacks: Platoon[], unitTypeId: string, count: number): Platoon[] {
-  const out = stacks.map((p) => ({ entries: p.entries.map((e) => ({ ...e })) }));
-  let remaining = count;
-  for (let i = out.length - 1; i >= 0 && remaining > 0; i--) {
-    const entries = out[i].entries;
-    for (let j = entries.length - 1; j >= 0 && remaining > 0; j--) {
-      const e = entries[j];
-      if (e.unitTypeId !== unitTypeId) continue;
-      const take = Math.min(e.count, remaining);
-      e.count -= take;
-      remaining -= take;
-      if (e.count === 0) entries.splice(j, 1);
-    }
-  }
-  return out;
 }
 
 export function transferUnits(
@@ -93,7 +74,7 @@ export function transferUnits(
         heroes: { ...state.heroes, [hero.id]: { ...hero, stacks: updated } },
         settlements: {
           ...state.settlements,
-          [settlement.id]: { ...settlement, stacks: removeByType(garrison, opts.unitTypeId, opts.count) },
+          [settlement.id]: { ...settlement, stacks: removeUnitsByType(garrison, opts.unitTypeId, opts.count) },
         },
         dirty: true,
       },
@@ -135,7 +116,7 @@ export function transferUnits(
         ...state,
         heroes: {
           ...state.heroes,
-          [hero.id]: { ...hero, stacks: removeByType(heroStacks, opts.unitTypeId, opts.count) },
+          [hero.id]: { ...hero, stacks: removeUnitsByType(heroStacks, opts.unitTypeId, opts.count) },
         },
         settlements: { ...state.settlements, [settlement.id]: { ...settlement, stacks: updatedGarrison } },
         dirty: true,

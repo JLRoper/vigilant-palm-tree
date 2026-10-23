@@ -32,6 +32,7 @@ export {
 export {
   recruitUnits,
   transferUnits,
+  tradeHeroes,
   reorderGarrisonStacks,
   startSettlementBattle,
 } from "@heroes/engine";
@@ -78,6 +79,7 @@ export { MOVEMENT_PER_TURN, WAREHOUSE_RESOURCES } from "@heroes/contracts";
 export type {
   Player,
   HeroState,
+  HeroTradeOffer,
   GamePhase,
   GameState,
   CalendarParts,

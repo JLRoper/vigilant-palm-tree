@@ -1,5 +1,6 @@
 import { Router, type Request } from "express";
-import type { BuildingDef, BuildingKind, BuildingUpgradeRequest, Command, Platoon } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, BuildingUpgradeRequest, Command, HeroTradeOffer, Platoon, WarehouseResource } from "@heroes/contracts";
+import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import { ARMY_STACK_SLOTS, VALID_HORSE_VARIANTS, isTradeRouteEndpoint, isTradeRoutePayload } from "@heroes/engine";
 import { handleCommandTransactional, createLiveCommandDeps, type LiveCommandDeps } from "../../app/commandHandler";
 import { touchSeat } from "../../app/dropPolicy";
@@ -142,6 +143,44 @@ function isSurvivorStacks(v: unknown): v is Platoon[] {
 
 function isNonNegativeInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= 0;
+}
+
+// TradeHeroes' per-side offer: same shape the engine's normalizeOffer reads,
+// validated here so a malformed body is a 400 rather than a reducer reject.
+// An absent offer is legal (a one-sided gift); a present one must be exact.
+const MAX_TRADE_UNIT_ENTRIES = 64;
+function parseTradeOffer(v: unknown): HeroTradeOffer | null {
+  if (v === undefined || v === null) return {};
+  if (typeof v !== "object") return null;
+  const offer = v as { gold?: unknown; resources?: unknown; units?: unknown };
+  const out: HeroTradeOffer = {};
+  if (offer.gold !== undefined) {
+    if (!isNonNegativeInt(offer.gold)) return null;
+    if (offer.gold > 0) out.gold = offer.gold;
+  }
+  if (offer.resources !== undefined) {
+    if (typeof offer.resources !== "object" || offer.resources === null) return null;
+    const resources: Partial<Record<WarehouseResource, number>> = {};
+    for (const [key, value] of Object.entries(offer.resources as Record<string, unknown>)) {
+      if (!WAREHOUSE_RESOURCES.includes(key as WarehouseResource)) return null;
+      if (!isNonNegativeInt(value)) return null;
+      if (value > 0) resources[key as WarehouseResource] = value;
+    }
+    if (Object.keys(resources).length > 0) out.resources = resources;
+  }
+  if (offer.units !== undefined) {
+    if (!Array.isArray(offer.units) || offer.units.length > MAX_TRADE_UNIT_ENTRIES) return null;
+    const units: { unitTypeId: string; count: number }[] = [];
+    for (const raw of offer.units) {
+      if (!raw || typeof raw !== "object") return null;
+      const entry = raw as { unitTypeId?: unknown; count?: unknown };
+      if (typeof entry.unitTypeId !== "string" || entry.unitTypeId.length === 0) return null;
+      if (typeof entry.count !== "number" || !Number.isInteger(entry.count) || entry.count <= 0) return null;
+      units.push({ unitTypeId: entry.unitTypeId, count: entry.count });
+    }
+    if (units.length > 0) out.units = units;
+  }
+  return out;
 }
 
 // BankGold's per-move gold ceiling (see its parseCommand branch). Generous
@@ -834,6 +873,27 @@ export function parseCommand(body: unknown, gameName: string): Command | null {
       unitTypeId: b.unitTypeId,
       count: b.count,
       ...(hasSlot ? { toSlot } : {}),
+    };
+  }
+
+  if (b.kind === "TradeHeroes") {
+    // Field trade between two adjacent heroes of the acting seat. Both offers
+    // must be well-formed: non-negative integer gold, non-negative integer
+    // per-resource amounts, and unit entries with a type id and a positive
+    // integer count. An ABSENT offer is legal (a one-sided gift) but a
+    // present-but-malformed one is a 400, not a reducer round-reject.
+    if (typeof b.heroId !== "string" || typeof b.partnerId !== "string") return null;
+    const give = parseTradeOffer(b.give);
+    const take = parseTradeOffer(b.take);
+    if (!give || !take) return null;
+    return {
+      kind: "TradeHeroes",
+      gameName,
+      actor: b.actor,
+      heroId: b.heroId,
+      partnerId: b.partnerId,
+      give,
+      take,
     };
   }
 
