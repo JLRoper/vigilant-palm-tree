@@ -616,8 +616,13 @@ export class UIManager {
    * The field-trade panel (TradeHeroes): two adjacent heroes of the acting
    * seat, side by side, drag to stage both offers and confirm once. Lazy like
    * the other floating panels -- the module is imported on the first open.
+   *
+   * Reached two ways, both public: the hero panel's `Trade with <name>` button
+   * (a deliberate open) and the map's walk-in gesture -- clicking the square an
+   * adjacent hero of yours stands on (see AdventureViewOptions.
+   * onWalkIntoTrade).
    */
-  private openHeroTrade(heroId: string, partnerId: string): void {
+  openHeroTrade(heroId: string, partnerId: string): void {
     void this.ensureHeroTradePanel()
       .then((panel) => panel.open(heroId, partnerId))
       .catch((err) => console.error("[ui] hero trade panel failed to open", err));

@@ -15,6 +15,10 @@ import type { GameDebugApi } from "../src/io/debugCommands";
 // chip and an army tile dragged across the two columns, then one Confirm that
 // must land BOTH offers on the server in a single command.
 //
+//  (A0) the map's own entry point: with the hero selected, a real CLICK on the
+//      hex an adjacent hero of yours stands on ("walking into" him) opens the
+//      panel for the pair and leaves the acting hero selected -- while a click
+//      on an own hero two-plus hexes away stays a plain selection change;
 //  (A) two adjacent heroes of one seat: the hero panel's Trade button names
 //      the partner and opens the panel with both heroes side by side;
 //  (B) drag wood from the left hero onto the right column -> staged as that
@@ -35,6 +39,13 @@ const GAME_NAME = "hero-field-trade-e2e";
 const GAME_SEED = 909090;
 const HERO_ID = "p0-hero";
 const PARTNER_ID = "p0-hero2";
+const FAR_ID = "p0-hero3";
+/** Axial distance (cube metric) between two hexes. */
+function axialDistance(a: Axial, b: Axial): number {
+  const dq = a.q - b.q;
+  const dr = a.r - b.r;
+  return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+}
 
 interface Axial { q: number; r: number }
 interface Tile extends Axial { terrain: string }
@@ -167,11 +178,35 @@ async function seedFieldPair(name: string): Promise<{ gameId: string; partnerTil
   assert(seat0, "seat 0 missing");
   seat0.heroIds = [...(seat0.heroIds ?? []), PARTNER_ID];
 
+  // A third hero of the same seat, well outside trade range: clicking ITS square
+  // has to stay a plain selection change (the walk-in trade is adjacency only).
+  const far = (await tilesOf(name)).find(
+    (t) =>
+      axialDistance({ q: hero.q, r: hero.r }, t) >= 2 &&
+      axialDistance({ q: hero.q, r: hero.r }, t) <= 4 &&
+      !IMPASSABLE.has(t.terrain) &&
+      !occupied.has(`${t.q},${t.r}`) &&
+      !(t.q === neighbour.q && t.r === neighbour.r),
+  );
+  assert(far, "no passable tile 2-4 hexes from the starting hero");
+  heroes[FAR_ID] = {
+    ...heroes[HERO_ID],
+    id: FAR_ID,
+    name: "Farin",
+    q: far.q,
+    r: far.r,
+    trail: [{ q: far.q, r: far.r }],
+    gold: 300,
+    resources: { wood: 10, stone: 0, iron: 0, arcane: 0, food: 0 },
+    stacks: [{ entries: [{ unitTypeId: "peasant", count: 2 }] }],
+  };
+  seat0.heroIds = [...(seat0.heroIds ?? []), FAR_ID];
+
   await db.query(
     `UPDATE games SET heroes = $1::jsonb, players = $2::jsonb, updated_at = now() WHERE name = $3`,
     [JSON.stringify(heroes), JSON.stringify(players), name],
   );
-  return { gameId: created.json.id, partnerTile: { q: neighbour.q, r: neighbour.r } };
+  return { gameId: created.json.id, partnerTile: { q: neighbour.q, r: neighbour.r }, farTile: { q: far.q, r: far.r } };
 }
 
 // Open the game in the browser (the Load Game flow, then the map). Copied from
@@ -249,6 +284,39 @@ async function clientHeroes(page: Page): Promise<Record<string, HeroRow>> {
   });
 }
 
+/**
+ * A real click on a map hex: hover there first (the click resolver reads the
+ * hovered tile), then press and release without moving -- a click, not a drag.
+ */
+async function clickHex(page: Page, tile: Axial): Promise<void> {
+  const pt = await page.evaluate(
+    (t) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.screenFor(t.q, t.r),
+    tile,
+  );
+  await page.mouse.move(pt.x, pt.y, { steps: 4 });
+  await wait(80);
+  await page.mouse.click(pt.x, pt.y);
+  await wait(350);
+}
+
+async function selectedHeroIdOf(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const s = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getState() as
+      | { selectedHeroId?: string | null }
+      | undefined;
+    return s?.selectedHeroId ?? null;
+  });
+}
+
+async function lastClickReason(page: Page): Promise<string | undefined> {
+  return page.evaluate(() => {
+    const c = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.lastClick as
+      | { reason?: string }
+      | null;
+    return c?.reason;
+  });
+}
+
 async function main(): Promise<void> {
   const name = GAME_NAME;
   children.push(spawnLogged("api", "npx", ["tsx", "server/index.ts"], { API_PORT: String(API_PORT) }));
@@ -259,16 +327,57 @@ async function main(): Promise<void> {
     await waitForApiHealth(API_URL);
     console.log(">> api + web up");
 
-    const { gameId } = await seedFieldPair(name);
+    const { gameId, partnerTile, farTile } = await seedFieldPair(name);
 
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
       await openGame(page, name, gameId);
 
-      // (A) Select the hero: the hero panel's Trade button names the adjacent
-      // partner hero and opens the two-hero panel.
+      // (A0) The map's own entry point: with the hero selected, CLICKING THE HEX
+      // an adjacent hero of yours stands on is "walking into" him -- heroes can
+      // never share a tile, so that click opens the trade panel for the pair
+      // instead of just re-selecting. The acting hero stays selected.
       await page.evaluate((id) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero(id), HERO_ID);
+      await wait(400);
+      await clickHex(page, partnerTile);
+      await page.locator('[data-trade-column="give"]').first().waitFor({ state: "visible", timeout: 15000 });
+      const walkReason = await lastClickReason(page);
+      assert.equal(walkReason, "trade", `the walk-in click must resolve to the trade gesture, got "${walkReason}"`);
+      assert.equal(await selectedHeroIdOf(page), HERO_ID, "the acting hero stays selected through the walk-in");
+      const walkGive = await page.locator('[data-trade-column="give"]').first().locator("div").first().innerText();
+      assert.equal(walkGive, (await clientHeroes(page))[HERO_ID]?.name, "the walk-in puts the selected hero on the give side");
+      console.log(">> clicking the partner's hex opened the trade panel (walk-in gesture)");
+
+      await page.keyboard.press("Escape");
+      await wait(400);
+      assert.equal(
+        await page.locator('[data-trade-column="give"]').count(),
+        0,
+        "Escape closes the panel the walk-in opened",
+      );
+
+      // ...but a hero of yours OUT of trade range is not a walk-in: that click
+      // stays the plain selection change it has always been, and no panel opens.
+      await clickHex(page, farTile);
+      assert.equal(
+        await page.locator('[data-trade-column="give"]').count(),
+        0,
+        "clicking an own hero two-plus hexes away must not open the trade panel",
+      );
+      assert.equal(await selectedHeroIdOf(page), FAR_ID, "clicking a far own hero selects it");
+      assert.equal(await lastClickReason(page), "select", "the far click is a plain select");
+      console.log(">> a far own hero is still just selected: no panel");
+
+      // (A) Select the hero: the hero panel's Trade button names the adjacent
+      // partner hero and opens the two-hero panel. (Through another hero first,
+      // so the hero panel is rebuilt even if Escape closed it above.)
+      await page.evaluate((ids) => {
+        const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
+        dbg.setSelectedHero(ids[0]);
+        dbg.setSelectedHero(ids[1]);
+      }, [FAR_ID, HERO_ID]);
+      await wait(300);
       const tradeOpen = page.locator("[data-hero-trade-open]").first();
       await tradeOpen.waitFor({ state: "visible", timeout: 15000 });
       await page.waitForFunction(
