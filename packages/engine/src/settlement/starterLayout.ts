@@ -1,4 +1,4 @@
-import type { BuildingDef, BuildingKind, GenerationStyle, Platoon } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, FactionId, GenerationStyle, Platoon } from "@heroes/contracts";
 import { buildingFootprintFromRegistry, buildingSettlementEffects } from "../buildingRegistry";
 import { evaluateTroopUpkeep, UPKEEP_CHARGE_DAYS } from "../economy/troopUpkeep";
 import { pickStyleForBuilding } from "../styleResolver";
@@ -8,7 +8,7 @@ import { CELL_MULTIPLIER_PEAK } from "./cityMultipliers";
 
 // The starter city of a brand-new settlement: town hall, farm, two houses,
 // two wood producers, one stone producer, and the troop producer (the
-// farmhouse). This is the ONE definition of that set -- init.ts seeds EVERY
+// faction starter). This is the ONE definition of that set -- init.ts seeds EVERY
 // settlement with it at game creation, and the city view's empty-settlement
 // commit calls the same function rather than re-deriving a layout of its own.
 //
@@ -105,9 +105,8 @@ export const STARTER_WOOD_PRODUCER: BuildingKind = "woodcutterHut";
 export const STARTER_STONE_PRODUCER: BuildingKind = "stoneMine";
 
 /**
- * The starter set's troop producer -- the registry's lowest-tier one
- * (buildingRegistry.ts: the farmhouse recruits the tier-1 peasant at 25g,
- * minLevel 1), so every settlement the game creates -- player keep, AI castle,
+ * The starter set's faction troop producer -- each offers a levy at level 1,
+ * so every settlement the game creates -- player keep, AI castle,
  * chartered town -- can raise garrison troops from the moment it exists.
  * Recruits flow through the same RecruitUnits gate the AI garrison planner
  * shops from (eligibleRecruitSources), so this one entry turns on player AND
@@ -115,7 +114,17 @@ export const STARTER_STONE_PRODUCER: BuildingKind = "stoneMine";
  * + 0 stone upkeep at L1) and a small food producer (+2 food/turn at L1), so
  * it feeds the food line it taxes nothing.
  */
-export const STARTER_TROOP_BUILDING: BuildingKind = "farmhouse";
+export const STARTER_TROOP_BUILDING_BY_FACTION: Record<FactionId, BuildingKind> = {
+  human: "farmhouse",
+  ashen: "crypt",
+  ironmark: "delversHall",
+  verdant: "seedlingGrove",
+  neutral: "farmhouse",
+};
+
+export function starterTroopBuilding(factionId?: FactionId): BuildingKind {
+  return STARTER_TROOP_BUILDING_BY_FACTION[factionId ?? "human"];
+}
 
 /** The starter set's producer kinds, in commit order: the wood producer twice, then stone. */
 export const STARTER_PRODUCER_KINDS: readonly BuildingKind[] = [
@@ -124,14 +133,14 @@ export const STARTER_PRODUCER_KINDS: readonly BuildingKind[] = [
   STARTER_WOOD_PRODUCER,
 ];
 
-/** The base set's contents, in commit order, at STARTER_BASE_FARMS. Farm before the houses so a footprint clash resolves onto a house cell, not the field; the producers come last for the same reason (they are 1x1, so they are the cheapest thing to displace), and the troop building after the producers (also 1x1 -- a footprint change can only ever displace a producer or the troop building). A food-hungry settlement repeats the farmField entry `farms - STARTER_BASE_FARMS` more times; derive the set with buildStarterLayout rather than from this list. */
+/** The Crownlands default base set's contents, in commit order, at STARTER_BASE_FARMS. Farm before the houses so a footprint clash resolves onto a house cell, not the field; the producers come last for the same reason (they are 1x1, so they are the cheapest thing to displace), and the troop building after the producers (also 1x1 -- a footprint change can only ever displace a producer or the troop building). A food-hungry settlement repeats the farmField entry `farms - STARTER_BASE_FARMS` more times; derive the set with buildStarterLayout rather than from this list. */
 export const STARTER_BUILDING_KINDS: readonly BuildingKind[] = [
   "townHall",
   "farmField",
   "house",
   "house",
   ...STARTER_PRODUCER_KINDS,
-  STARTER_TROOP_BUILDING,
+  starterTroopBuilding(),
 ];
 
 export interface StarterLayoutOptions {
@@ -141,6 +150,7 @@ export interface StarterLayoutOptions {
   style: GenerationStyle;
   /** Farm fields in the set. Defaults to STARTER_BASE_FARMS (1). */
   farms?: number;
+  factionId?: FactionId;
 }
 
 /** Farm fields in the base starter set: the one every starter city carries, on top of any pool its owner allocated. */
@@ -270,6 +280,7 @@ export function starterCityOnOpen(input: {
   size: CityViewSize;
   style: GenerationStyle;
   farms?: number;
+  factionId?: FactionId;
   /** The settlement's persisted buildings, if it has any. */
   existing: BuildingDef[] | undefined;
 }): StarterCityOnOpen {
@@ -277,7 +288,7 @@ export function starterCityOnOpen(input: {
     return { buildings: input.existing, free: false };
   }
   return {
-    buildings: buildStarterLayout({ size: input.size, style: input.style, farms: input.farms }),
+    buildings: buildStarterLayout({ size: input.size, style: input.style, farms: input.farms, factionId: input.factionId }),
     free: true,
   };
 }
@@ -286,7 +297,7 @@ export function starterCityOnOpen(input: {
  * The free, already-constructed starting city of a settlement: one level-1 town
  * hall on the centre cell, `farms` 2x2 farm fields around it, two houses above
  * it, two wood producers + one stone producer, and the troop producer (the
- * farmhouse). Legal on every city size
+ * faction starter). Legal on every city size
  * (5/10/15), non-overlapping, and byte-identical on every call for a given
  * `farms`.
  *
@@ -339,7 +350,7 @@ export function buildStarterLayout(options: StarterLayoutOptions): BuildingDef[]
   // is taken it degrades to the first free cell deterministically (placeAt's
   // fallback). A registry footprint change can only displace a producer or
   // this building -- never a farm or a house.
-  placeAt(buildings, size, style, STARTER_TROOP_BUILDING, center + 2, center);
+  placeAt(buildings, size, style, starterTroopBuilding(options.factionId), center + 2, center);
   return buildings;
 }
 

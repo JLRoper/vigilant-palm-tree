@@ -1,6 +1,6 @@
 import { cityLayout, coversCell as reCoversCell, screenToGridCell } from "../../../core/cityGrid";
 import type { CityViewSize } from "@heroes/engine";
-import type { BuildingDef, BuildingKind } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, FactionId } from "@heroes/contracts";
 import { FloatingPanel, styleButton, panelTheme, createPanel } from "@screens/shared/panel";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import {
@@ -64,6 +64,7 @@ export class BuildingPlacer {
   valid = false;
   buildings: BuildingDef[] = [];
 
+  private factionId?: FactionId;
   private size: CityViewSize = 5;
   private center: { gx: number; gy: number } | null = { gx: 2, gy: 2 };
   private isDistrict = false;
@@ -80,8 +81,9 @@ export class BuildingPlacer {
   /** Net cost already committed server-side since the view opened; canAfford gates only the uncommitted remainder. */
   private committedNet: Partial<Record<ResourceType, number>> = {};
 
-  init(size: CityViewSize, center: { gx: number; gy: number } | null, initialBuildings: BuildingDef[], isDistrict = false, districtTerrain: string | null = null): void {
+  init(size: CityViewSize, center: { gx: number; gy: number } | null, initialBuildings: BuildingDef[], isDistrict = false, districtTerrain: string | null = null, factionId?: FactionId): void {
     this.size = size;
+    this.factionId = factionId;
     this.center = center;
     this.isDistrict = isDistrict;
     this.districtTerrain = isDistrict ? districtTerrain : null;
@@ -379,7 +381,7 @@ export class BuildingPlacer {
       padding: "2px",
     });
 
-    const sections = buildListSections();
+    const sections = buildListSections(this.factionId);
 
     for (const { title: sectionTitle, kinds } of sections) {
       if (kinds.length === 0) continue;

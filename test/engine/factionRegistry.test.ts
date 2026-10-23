@@ -46,7 +46,7 @@ test("FACTION_REGISTRY is exhaustive over FactionId and every entry's id matches
   }
 });
 
-test("ashen ships its seven-unit roster (The Ashen Court content plan)", () => {
+test("ashen ships its twelve-unit roster", () => {
   assert.deepEqual(FACTION_REGISTRY.ashen.roster, [
     "ghoul",
     "bone_pikeman",
@@ -55,10 +55,15 @@ test("ashen ships its seven-unit roster (The Ashen Court content plan)", () => {
     "blood_knight",
     "vampire_lord",
     "lich",
+    "skeleton_warrior",
+    "grave_hound",
+    "dark_acolyte",
+    "necromancer",
+    "bone_dragon",
   ]);
 });
 
-test("ironmark ships The Ironmark Holds' 7-unit roster (025_ironmark_holds)", () => {
+test("ironmark ships its twelve-unit roster", () => {
   assert.deepEqual(FACTION_REGISTRY.ironmark.roster, [
     "dwarf_axeman",
     "shield_bearer",
@@ -67,10 +72,15 @@ test("ironmark ships The Ironmark Holds' 7-unit roster (025_ironmark_holds)", ()
     "iron_golem",
     "runesmith",
     "forge_lord",
+    "tunnel_levy",
+    "war_boar",
+    "axe_thrower",
+    "hearth_priest",
+    "ram_rider",
   ]);
 });
 
-test("FACTION_REGISTRY.verdant carries the shipped Verdant Wild roster (026_verdant_wild)", () => {
+test("verdant ships its twelve-unit roster", () => {
   assert.deepEqual(FACTION_REGISTRY.verdant.roster, [
     "forest_scout",
     "briar_warden",
@@ -79,6 +89,11 @@ test("FACTION_REGISTRY.verdant carries the shipped Verdant Wild roster (026_verd
     "elk_rider",
     "treant_elder",
     "stag_knight",
+    "sproutling",
+    "bramble_blade",
+    "wildwood_ranger",
+    "druid",
+    "ursine_guardian",
   ]);
   assert.notEqual(FACTION_REGISTRY.verdant.description, "", "the placeholder description is replaced by real content");
 });
@@ -136,4 +151,16 @@ test("neutral units are never eligible for a seat faction", () => {
       `a ${seat} seat must not recruit the neutral griffin`,
     );
   }
+});
+test("each playable faction has twelve unique units without roster overlap", () => {
+  const allIds = new Set<string>();
+  for (const faction of ["human", "ashen", "ironmark", "verdant"] as const) {
+    const roster = FACTION_REGISTRY[faction].roster;
+    assert.equal(roster.length, 12);
+    for (const id of roster) {
+      assert.equal(allIds.has(id), false, `${id} belongs to only one faction`);
+      allIds.add(id);
+    }
+  }
+  assert.equal(allIds.size, 48);
 });

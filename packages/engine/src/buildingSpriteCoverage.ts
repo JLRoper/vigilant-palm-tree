@@ -87,6 +87,13 @@ export const BUILDING_SPRITE_COVERAGE: Readonly<Record<BuildingKind, BuildingSpr
   warrenLodge: full("warrenLodge"),
   sylvanStables: full("sylvanStables"),
   worldrootGrove: full("worldrootGrove"),
+  blackChapel: full("blackChapel"),
+  dragonBoneyard: full("dragonBoneyard"),
+  delversHall: full("delversHall"),
+  hearthTemple: full("hearthTemple"),
+  ramPens: full("ramPens"),
+  seedlingGrove: full("seedlingGrove"),
+  druidCircle: full("druidCircle"),
 };
 
 export const BUILDING_SPRITE_LEVELS: readonly BuildingSpriteLevel[] = [1, 2, 3];

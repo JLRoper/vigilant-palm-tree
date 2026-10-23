@@ -46,6 +46,21 @@ export const UNIT_CATALOG_IDS = [
   "elk_rider",
   "treant_elder",
   "stag_knight",
+  "skeleton_warrior",
+  "grave_hound",
+  "dark_acolyte",
+  "necromancer",
+  "bone_dragon",
+  "tunnel_levy",
+  "war_boar",
+  "axe_thrower",
+  "hearth_priest",
+  "ram_rider",
+  "sproutling",
+  "bramble_blade",
+  "wildwood_ranger",
+  "druid",
+  "ursine_guardian",
 ] as const;
 
 export type UnitCatalogId = (typeof UNIT_CATALOG_IDS)[number];

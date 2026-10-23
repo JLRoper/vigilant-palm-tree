@@ -7,7 +7,7 @@ import { createSkyboxProvider } from "../../../render/skybox";
 import type { Paint2DDep } from "../../../render/scene/paint2d/deps";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { SpriteProvider } from "../../../render/assets";
-import type { BuildingDef, BuildingKind, GenerationStyle } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, FactionId, GenerationStyle } from "@heroes/contracts";
 import { buildingFootprint, coversCell } from "../../../core/cityGrid";
 import { districtKey, hasLegacyStaffing, starterCityOnOpen } from "@heroes/engine";
 import {
@@ -101,6 +101,7 @@ export class CityView {
   private mapSeed: number | null = null;
   /** True when the city view handed a previously-empty settlement its free starter set (buildStarterLayout). */
   private freeInitialLayout = false;
+  private getSettlementFaction: (settlementId: string) => FactionId | undefined;
   private committedInitialLayout = false;
   // One dep for the lifetime of the view: the skybox provider owns the decoded
   // image + parallax layer-canvas caches, so rebuilding it per frame would
@@ -172,7 +173,7 @@ export class CityView {
    * menu closes, so "which one did I just click" is answerable at a glance. */
   private menuHighlight: { gx: number; gy: number } | null = null;
 
-  constructor(opts: BuildingMenuOptions & { onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null, district?: { q: number; r: number }) => boolean; onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean, district?: { q: number; r: number }) => boolean; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[], district?: { q: number; r: number }) => { ok: boolean; reason: string }; getSelection?: () => CitySelectionSnapshot; getFloatingPanelRects?: () => Array<PanelRect | null> }) {
+  constructor(opts: BuildingMenuOptions & { getSettlementFaction?: (settlementId: string) => FactionId | undefined; onClose: (settlementId: string, buildings: BuildingDef[], netCost: Partial<Record<ResourceType, number>>, final: boolean, preCitySelection: CitySelectionSnapshot | null, district?: { q: number; r: number }) => boolean; onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean, district?: { q: number; r: number }) => boolean; provider: SpriteProvider; getSettlement: () => SettlementState | undefined; onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[], district?: { q: number; r: number }) => { ok: boolean; reason: string }; getSelection?: () => CitySelectionSnapshot; getFloatingPanelRects?: () => Array<PanelRect | null> }) {
     this.paint2d = createPaint2DDep({
       spriteProvider: opts.provider,
       skybox: createSkyboxProvider(),
@@ -202,6 +203,7 @@ export class CityView {
       },
     });
     this.placer = new BuildingPlacer();
+    this.getSettlementFaction = opts.getSettlementFaction ?? (() => undefined);
     this.selectionMenu = new BuildingSelectionMenu({
       onUpgrade: (combined) => this.commitUpgrade(combined),
     });
@@ -278,17 +280,18 @@ export class CityView {
     this.selectionAnchor = null;
     this.preCitySelection = this.getSelection?.() ?? null;
 
+    const factionId = this.getSettlementFaction(settlementId);
     if (district) {
       const initialBuildings = buildings ? [...buildings] : [];
       this.freeInitialLayout = false;
       this.committedInitialLayout = false;
-      this.placer.init(5, null, initialBuildings, true, districtTerrain ?? null);
+      this.placer.init(5, null, initialBuildings, true, districtTerrain ?? null, factionId);
     } else {
-      const starter = starterCityOnOpen({ size: this.size, style: "pixel" as GenerationStyle, existing: buildings });
+      const starter = starterCityOnOpen({ size: this.size, style: "pixel" as GenerationStyle, existing: buildings, factionId });
       const initialBuildings = starter.buildings;
       this.freeInitialLayout = starter.free;
       this.committedInitialLayout = false;
-      this.placer.init(size, { gx: Math.floor(size / 2), gy: Math.floor(size / 2) }, initialBuildings, false);
+      this.placer.init(size, { gx: Math.floor(size / 2), gy: Math.floor(size / 2) }, initialBuildings, false, null, factionId);
     }
     this.refreshAffordability();
     this.placer.setOnConfirm(() => this.persistBuildings());

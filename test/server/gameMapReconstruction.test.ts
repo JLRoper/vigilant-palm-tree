@@ -114,7 +114,7 @@ test("new GameMap(42, 'epic') generates 10,800 tiles in under 20 ms with bitset 
   assert.ok(elapsedMs < 20, `expected epic map generation < 20ms, took ${elapsedMs.toFixed(2)}ms`);
 });
 
-test("generateAndInsertTiles on an epic map issues a single UNNEST query with 5 params of length 10,800", async () => {
+test("generateAndInsertTiles on an epic map issues a single UNNEST query with 7 params and six columns of length 10,800", async () => {
   const queries: Array<{ sql: string; params: unknown[] }> = [];
   const client = {
     query: async (sql: string, params: unknown[]) => {
@@ -127,9 +127,9 @@ test("generateAndInsertTiles on an epic map issues a single UNNEST query with 5 
 
   assert.equal(queries.length, 1);
   assert.match(queries[0].sql, /UNNEST/);
-  assert.equal(queries[0].params.length, 5);
+  assert.equal(queries[0].params.length, 7);
   assert.equal(queries[0].params[0], 7);
-  for (let idx = 1; idx <= 4; idx++) {
+  for (let idx = 1; idx <= 6; idx++) {
     const col = queries[0].params[idx];
     assert.ok(Array.isArray(col));
     assert.equal(col.length, 10_800);

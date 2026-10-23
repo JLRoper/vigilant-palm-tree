@@ -24,7 +24,7 @@ import {
   STARTER_FARM_VARIANCE_HEADROOM,
   STARTER_PRODUCER_KINDS,
   STARTER_STONE_PRODUCER,
-  STARTER_TROOP_BUILDING,
+  starterTroopBuilding,
   STARTER_WOOD_PRODUCER,
   starterCityOnOpen,
   starterFarmsNeeded,
@@ -108,7 +108,7 @@ test("a previously-empty settlement's free starter commit is townHall + farm + 2
     STARTER_WOOD_PRODUCER,
     STARTER_STONE_PRODUCER,
     STARTER_WOOD_PRODUCER,
-    STARTER_TROOP_BUILDING,
+    starterTroopBuilding(),
   ]);
   assert.deepEqual(
     after.buildings.map((b) => b.level),
@@ -122,7 +122,7 @@ test("a previously-empty settlement's free starter commit is townHall + farm + 2
   assert.equal(countOf(after.buildings, "farmField"), 1);
   assert.equal(countOf(after.buildings, STARTER_WOOD_PRODUCER), 2);
   assert.equal(countOf(after.buildings, STARTER_STONE_PRODUCER), 1);
-  assert.equal(countOf(after.buildings, STARTER_TROOP_BUILDING), 1);
+  assert.equal(countOf(after.buildings, starterTroopBuilding()), 1);
 });
 
 test("the starter set costs nothing and arrives already constructed", () => {
@@ -186,7 +186,7 @@ test("the starter set carries two wood producers and one stone producer", () => 
   assert.equal(producerBasePerTurn("farmhouse", 1, "food"), 2);
   // The troop building doubles as a small food producer, so it shows up in the
   // producing set below -- its point is the peasant recruit entry, not the food.
-  assert.equal(isProducerKind(STARTER_TROOP_BUILDING), true);
+  assert.equal(isProducerKind(starterTroopBuilding()), true);
 
   // The producers are the cheapest dedicated source for their resource in the
   // registry, and the arithmetic per settlement at the median cell (x1.0):
@@ -208,7 +208,7 @@ test("the starter set carries two wood producers and one stone producer", () => 
     STARTER_WOOD_PRODUCER,
     STARTER_STONE_PRODUCER,
     STARTER_WOOD_PRODUCER,
-    STARTER_TROOP_BUILDING,
+    starterTroopBuilding(),
   ]);
 });
 
@@ -432,7 +432,7 @@ test("a food-hungry settlement's set is town hall + its farms + the same two hou
     "house",
     "house",
     ...STARTER_PRODUCER_KINDS,
-    STARTER_TROOP_BUILDING,
+    starterTroopBuilding(),
   ]);
 });
 
@@ -464,7 +464,7 @@ test("a multi-farm set is legal, deterministic, and costs no upkeep beyond the b
       assert.equal(countOf(set, STARTER_STONE_PRODUCER), 1, `stoneMine survives size ${size} farms ${farms}`);
       assert.equal(countOf(set, "house"), 2, `both houses survive size ${size} farms ${farms}`);
       assert.equal(countOf(set, "townHall"), 1, `the town hall survives size ${size} farms ${farms}`);
-      assert.equal(countOf(set, STARTER_TROOP_BUILDING), 1, `the farmhouse survives size ${size} farms ${farms} (1x1 fits at every combination)`);
+      assert.equal(countOf(set, starterTroopBuilding()), 1, `the farmhouse survives size ${size} farms ${farms} (1x1 fits at every combination)`);
     }
   }
   // farmField upkeep is 0 wood / 0 stone, so extra farmland is free to run.
@@ -526,8 +526,8 @@ test("the starter city can recruit garrison troops from turn 0", () => {
     assert.equal("construction" in b, false, `${b.kind} arrives constructed, so the eligibility gate passes immediately`);
   }
 
-  const gx = starter.find((b) => b.kind === STARTER_TROOP_BUILDING)?.gx;
-  const gy = starter.find((b) => b.kind === STARTER_TROOP_BUILDING)?.gy;
+  const gx = starter.find((b) => b.kind === starterTroopBuilding())?.gx;
+  const gy = starter.find((b) => b.kind === starterTroopBuilding())?.gy;
   assert.ok(gx !== undefined && gy !== undefined, "the starter set carries the troop building");
 
   const sources = eligibleRecruitSources(state.settlements.s0);

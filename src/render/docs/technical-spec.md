@@ -1,6 +1,6 @@
 # Render Module — Technical Specification
 
-<!-- docs:verified 2026-10-18 -->
+<!-- docs:verified 2026-10-22 -->
 
 ## Overview
 
@@ -95,6 +95,8 @@ graph TD
 ## 1. Asset Pipeline
 
 ### 1.1 SpriteKey System
+
+Roster parity (2026-10-22) adds fifteen unit icons and arena idle PNGs plus seven level-1 building PNGs. These are byte-for-byte copies of existing project art pending dedicated replacements; the [placeholder provenance](../../../design/arena-unit-sprites/roster-parity-placeholder-art.md) records every source. `src/data/unitImages.ts` maps the new icons explicitly. Building and arena descriptors discover the PNGs by glob; generated building sprite-key and anchor tables include the new kinds. Their level-2 and level-3 keys alias the level-1 placeholder, keeping upgraded buildings visible. Replacement-art prompt briefs are not evidence of generated artwork.
 
 `assetDescriptors.ts` defines a union type `SpriteKey` that covers every sprite the game can reference:
 

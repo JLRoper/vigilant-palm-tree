@@ -1,4 +1,4 @@
-import type { BuildingKind, ResourceType, WarehouseResource } from "@heroes/contracts";
+import type { BuildingKind, FactionId, ResourceType, WarehouseResource } from "@heroes/contracts";
 
 export interface RecruitEntry {
   unitTypeId: string;
@@ -10,6 +10,7 @@ export interface RecruitEntry {
 
 export interface BuildingEffect {
   kind: BuildingKind;
+  faction?: FactionId;
   label: string;
   description: string;
   footprint: { w: number; h: number };
@@ -85,6 +86,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   mageGuild: {
     kind: "mageGuild",
+    faction: "human",
     label: "Mage Guild",
     description: "Arcane research and spellcraft. Recruits monks and mages.",
     footprint: { w: 1, h: 1 },
@@ -93,7 +95,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     upkeepPerLevel: { wood: 1, stone: 1 },
     recruits: [
       { unitTypeId: "monk", goldCost: 300, resourceCost: { arcane: 1 }, minLevel: 1 },
-      { unitTypeId: "mage", goldCost: 500, resourceCost: { arcane: 2 }, minLevel: 2 },
+      { unitTypeId: "mage", goldCost: 400, resourceCost: { arcane: 2 }, minLevel: 2 },
     ],
     maxWorkers: 3,
     draftMax: 3,
@@ -155,6 +157,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   barracks: {
     kind: "barracks",
+    faction: "human",
     label: "Barracks",
     description: "Trains melee infantry. Recruits swordsmen.",
     footprint: { w: 1, h: 1 },
@@ -213,6 +216,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   farmhouse: {
     kind: "farmhouse",
+    faction: "human",
     label: "Farmhouse",
     description: "A small rural home.",
     footprint: { w: 1, h: 1 },
@@ -228,6 +232,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   archeryRange: {
     kind: "archeryRange",
+    faction: "human",
     label: "Archery Range",
     description: "Train and recruit ranged units. Recruits archers.",
     footprint: { w: 1, h: 2 },
@@ -246,6 +251,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   stables: {
     kind: "stables",
+    faction: "human",
     label: "Stables",
     description: "Mounts and trains cavalry.",
     footprint: { w: 1, h: 1 },
@@ -261,6 +267,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   huntingLodge: {
     kind: "huntingLodge",
+    faction: "human",
     label: "Hunting Lodge",
     description: "Kennels and hunting grounds; raises fierce warhounds for the crown.",
     footprint: { w: 1, h: 1 },
@@ -276,6 +283,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   eyrie: {
     kind: "eyrie",
+    faction: "human",
     label: "Eagle Eyrie",
     description: "Cliffside aeries where the realm's giant eagles nest; a bonded prince leads the eyerie.",
     footprint: { w: 1, h: 1 },
@@ -414,21 +422,27 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   crypt: {
     kind: "crypt",
+    faction: "ashen",
     label: "Crypt",
     description: "Bone-cellared vaults where the Court's levies sleep standing up; raises ghouls for the barrow levy.",
     footprint: { w: 1, h: 1 },
     buildDays: 2,
     placementCost: { gold: 150, wood: 4 },
     upkeepPerLevel: { wood: 1, stone: 0 },
-    recruits: [{ unitTypeId: "ghoul", goldCost: 40, minLevel: 1 }],
-    maxWorkers: 4,
+    recruits: [
+      { unitTypeId: "ghoul", goldCost: 40, minLevel: 1 },
+      { unitTypeId: "skeleton_warrior", goldCost: 200, minLevel: 2 },
+      { unitTypeId: "grave_hound", goldCost: 200, minLevel: 3 },
+    ],
+    maxWorkers: 2,
     draftMax: 3,
     draftPerDay: 0.25,
-    settlementEffects: { defenseBonus: 1 },
+    settlementEffects: { foodPerTurn: 2, populationBonus: 20, defenseBonus: 1 },
     playerEffects: {},
   },
   ossuary: {
     kind: "ossuary",
+    faction: "ashen",
     label: "Ossuary",
     description: "Sorted bone-houses where revenant ranks are wired and drilled; bowmen above, pikemen below.",
     footprint: { w: 1, h: 1 },
@@ -447,6 +461,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   wraithBarrows: {
     kind: "wraithBarrows",
+    faction: "ashen",
     label: "Wraith Barrows",
     description: "Grave-mounds where grief pools and hardens into form; wraiths drift from the barrows and dread knights stable beneath them.",
     footprint: { w: 1, h: 1 },
@@ -454,7 +469,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     placementCost: { gold: 350, wood: 8, stone: 6, arcane: 1 },
     upkeepPerLevel: { wood: 2, stone: 1 },
     recruits: [
-      { unitTypeId: "wraith", goldCost: 380, resourceCost: { arcane: 2 }, minLevel: 1 },
+      { unitTypeId: "wraith", goldCost: 350, resourceCost: { arcane: 2 }, minLevel: 1 },
       { unitTypeId: "blood_knight", goldCost: 480, resourceCost: { iron: 2 }, minLevel: 2 },
     ],
     maxWorkers: 4,
@@ -465,6 +480,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   spireOfAsh: {
     kind: "spireOfAsh",
+    faction: "ashen",
     label: "Spire of Ash",
     description: "The Court's cold crown: a cinder-black spire whose halls seat the long night's aristocracy and its magisters.",
     footprint: { w: 1, h: 1 },
@@ -483,6 +499,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   forgeHall: {
     kind: "forgeHall",
+    faction: "ironmark",
     label: "Forge Hall",
     description: "The hold's ringing heart, where clan axemen are mustered and shield bearers are fitted for the wall.",
     footprint: { w: 1, h: 1 },
@@ -492,6 +509,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     recruits: [
       { unitTypeId: "dwarf_axeman", goldCost: 220, minLevel: 1 },
       { unitTypeId: "shield_bearer", goldCost: 280, resourceCost: { iron: 2 }, minLevel: 2 },
+      { unitTypeId: "axe_thrower", goldCost: 250, resourceCost: { wood: 2 }, minLevel: 3 },
     ],
     maxWorkers: 4,
     draftMax: 3,
@@ -501,6 +519,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   gunnersRedoubt: {
     kind: "gunnersRedoubt",
+    faction: "ironmark",
     label: "Gunners' Redoubt",
     description: "A powder-scarred bastion where the Holds' hand gunners drill thunder into the mountain's echo.",
     footprint: { w: 1, h: 1 },
@@ -516,6 +535,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   golemFoundry: {
     kind: "golemFoundry",
+    faction: "ironmark",
     label: "Golem Foundry",
     description: "A rune-etched casting pit that arms the ironsworn and raises obedient golems from the hold's best ore.",
     footprint: { w: 1, h: 1 },
@@ -534,6 +554,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   deepAnvil: {
     kind: "deepAnvil",
+    faction: "ironmark",
     label: "Deep Anvil",
     description: "The oldest forge under the peaks, where runesmiths sing to hot metal and forge lords are crowned.",
     footprint: { w: 1, h: 1 },
@@ -542,7 +563,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     upkeepPerLevel: { wood: 2, stone: 1 },
     recruits: [
       { unitTypeId: "runesmith", goldCost: 550, resourceCost: { arcane: 3 }, minLevel: 1 },
-      { unitTypeId: "forge_lord", goldCost: 2200, resourceCost: { iron: 6, arcane: 2 }, minLevel: 2 },
+      { unitTypeId: "forge_lord", goldCost: 2350, resourceCost: { iron: 6, arcane: 2 }, minLevel: 2 },
     ],
     maxWorkers: 4,
     draftMax: 3,
@@ -552,6 +573,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   groveSanctum: {
     kind: "groveSanctum",
+    faction: "verdant",
     label: "Grove Sanctum",
     description: "A living-wood shrine where the Wild's scouts and thorn archers learn to read the canopy.",
     footprint: { w: 1, h: 1 },
@@ -561,6 +583,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     recruits: [
       { unitTypeId: "forest_scout", goldCost: 180, resourceCost: { wood: 1 }, minLevel: 1 },
       { unitTypeId: "thorn_archer", goldCost: 280, resourceCost: { wood: 2 }, minLevel: 2 },
+      { unitTypeId: "wildwood_ranger", goldCost: 340, resourceCost: { wood: 2 }, minLevel: 3 },
     ],
     maxWorkers: 4,
     draftMax: 3,
@@ -570,6 +593,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   warrenLodge: {
     kind: "warrenLodge",
+    faction: "verdant",
     label: "Warren Lodge",
     description: "A den-mound hall of the beastkin lodges; wardens stand watch and the warbeasts den below.",
     footprint: { w: 1, h: 1 },
@@ -579,6 +603,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     recruits: [
       { unitTypeId: "briar_warden", goldCost: 260, resourceCost: { wood: 2 }, minLevel: 1 },
       { unitTypeId: "warbeast", goldCost: 300, minLevel: 2 },
+      { unitTypeId: "ursine_guardian", goldCost: 600, resourceCost: { wood: 2 }, minLevel: 3 },
     ],
     maxWorkers: 4,
     draftMax: 3,
@@ -588,6 +613,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   sylvanStables: {
     kind: "sylvanStables",
+    faction: "verdant",
     label: "Sylvan Stables",
     description: "Living-wood paddocks where the great elk are saddled; the forest's cavalry musters here.",
     footprint: { w: 1, h: 1 },
@@ -606,20 +632,155 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   worldrootGrove: {
     kind: "worldrootGrove",
+    faction: "verdant",
     label: "Worldroot Grove",
     description: "A vaulted hall grown through the world's oldest roots; the elder treants answer from it.",
     footprint: { w: 1, h: 1 },
     buildDays: 6,
     placementCost: { gold: 500, wood: 12, stone: 8 },
     upkeepPerLevel: { wood: 2, stone: 1 },
-    recruits: [{ unitTypeId: "treant_elder", goldCost: 900, resourceCost: { wood: 3 }, minLevel: 1 }],
+    recruits: [{ unitTypeId: "treant_elder", goldCost: 1220, resourceCost: { wood: 3 }, minLevel: 1 }],
     maxWorkers: 4,
     draftMax: 3,
     draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
     playerEffects: {},
   },
+  blackChapel: {
+    kind: "blackChapel",
+    faction: "ashen",
+    label: "Black Chapel",
+    description: "A candleless chapel where dark acolytes tend the dead and necromancers master their craft.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 6,
+    placementCost: { gold: 400, wood: 5, stone: 8, arcane: 2 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [
+      { unitTypeId: "dark_acolyte", goldCost: 320, resourceCost: { arcane: 2 }, minLevel: 1 },
+      { unitTypeId: "necromancer", goldCost: 400, resourceCost: { arcane: 2 }, minLevel: 2 },
+    ],
+    maxWorkers: 3,
+    draftMax: 3,
+    draftPerDay: 0.25,
+    settlementEffects: {},
+    playerEffects: {},
+  },
+  dragonBoneyard: {
+    kind: "dragonBoneyard",
+    faction: "ashen",
+    label: "Dragon Boneyard",
+    description: "Ancient dragon bones rise again beneath the watch of the Court.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 6,
+    placementCost: { gold: 500, wood: 12, stone: 8 },
+    upkeepPerLevel: { wood: 2, stone: 1 },
+    recruits: [
+      { unitTypeId: "bone_dragon", goldCost: 1400, resourceCost: { arcane: 2 }, minLevel: 1 },
+    ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
+    settlementEffects: {},
+    playerEffects: {},
+  },
+  delversHall: {
+    kind: "delversHall",
+    faction: "ironmark",
+    label: "Delvers' Hall",
+    description: "A communal hall where tunnel levies gather and the hold raises its war boars.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 2,
+    placementCost: { gold: 80, wood: 4 },
+    upkeepPerLevel: { wood: 1, stone: 0 },
+    recruits: [
+      { unitTypeId: "tunnel_levy", goldCost: 30, minLevel: 1 },
+      { unitTypeId: "war_boar", goldCost: 180, minLevel: 2 },
+    ],
+    maxWorkers: 2,
+    draftMax: 3,
+    draftPerDay: 0.25,
+    settlementEffects: { foodPerTurn: 2, populationBonus: 20 },
+    playerEffects: {},
+  },
+  hearthTemple: {
+    kind: "hearthTemple",
+    faction: "ironmark",
+    label: "Hearth Temple",
+    description: "A warm mountain shrine where hearth priests tend the clans.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 6,
+    placementCost: { gold: 400, wood: 5, stone: 8, iron: 2 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [
+      { unitTypeId: "hearth_priest", goldCost: 300, resourceCost: { iron: 4 }, minLevel: 1 },
+    ],
+    maxWorkers: 3,
+    draftMax: 3,
+    draftPerDay: 0.25,
+    settlementEffects: {},
+    playerEffects: {},
+  },
+  ramPens: {
+    kind: "ramPens",
+    faction: "ironmark",
+    label: "Ram Pens",
+    description: "Stone-walled pens where mountain rams are trained for the charge.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 4,
+    placementCost: { gold: 350, wood: 10, stone: 5 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [
+      { unitTypeId: "ram_rider", goldCost: 420, resourceCost: { iron: 2 }, minLevel: 1 },
+    ],
+    maxWorkers: 4,
+    draftMax: 3,
+    draftPerDay: 0.25,
+    settlementEffects: {},
+    playerEffects: {},
+  },
+  seedlingGrove: {
+    kind: "seedlingGrove",
+    faction: "verdant",
+    label: "Seedling Grove",
+    description: "A young living grove that shelters sproutlings and trains bramble blades.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 2,
+    placementCost: { gold: 80, wood: 4 },
+    upkeepPerLevel: { wood: 1, stone: 0 },
+    recruits: [
+      { unitTypeId: "sproutling", goldCost: 25, minLevel: 1 },
+      { unitTypeId: "bramble_blade", goldCost: 200, minLevel: 2 },
+    ],
+    maxWorkers: 2,
+    draftMax: 3,
+    draftPerDay: 0.25,
+    settlementEffects: { foodPerTurn: 2, populationBonus: 20 },
+    playerEffects: {},
+  },
+  druidCircle: {
+    kind: "druidCircle",
+    faction: "verdant",
+    label: "Druid Circle",
+    description: "An ancient woodland circle where druids gather the forest's magic.",
+    footprint: { w: 1, h: 1 },
+    buildDays: 6,
+    placementCost: { gold: 400, wood: 10, stone: 5 },
+    upkeepPerLevel: { wood: 1, stone: 1 },
+    recruits: [
+      { unitTypeId: "druid", goldCost: 400, resourceCost: { wood: 2 }, minLevel: 1 },
+    ],
+    maxWorkers: 3,
+    draftMax: 3,
+    draftPerDay: 0.25,
+    settlementEffects: {},
+    playerEffects: {},
+  },
 };
+
+export function buildingAllowedForFaction(kind: BuildingKind, factionId?: FactionId): boolean {
+  const faction = REGISTRY[kind].faction;
+  return factionId === undefined || faction === undefined || faction === factionId;
+}
 
 export function getBuildingEffect(kind: BuildingKind): BuildingEffect {
   return REGISTRY[kind];
