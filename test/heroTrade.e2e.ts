@@ -380,6 +380,42 @@ async function main(): Promise<void> {
       assert.equal(after.heroes[PARTNER_ID].gold, 0, "a refused trade must not move anything (partner)");
       console.log(">> unaffordable trade refused, row untouched");
 
+      // (E) A swap that would strip a hero of its whole army is refused — in
+      // the panel (before Confirm is even clickable) and by the server.
+      const giverName = (await clientHeroes(page))[HERO_ID]?.name ?? "";
+      await dragOnto(page, '[data-trade-army="give"] > div:nth-child(1)', '[data-trade-army="take"] > div:nth-child(1)');
+      assert.equal(await stagedAmount(page, "give", "unit:archer"), 4, "the hero's whole army is staged");
+      assert.equal(
+        await page.locator("[data-trade-confirm]").first().isDisabled(),
+        true,
+        "Confirm is refused while the trade would leave an army-less hero",
+      );
+      const blocked = await page.locator("[data-trade-status]").first().innerText();
+      assert.match(blocked, /no troops/i, `the panel explains the army rule, got "${blocked}"`);
+      assert.ok(blocked.includes(giverName), `the reason names the hero, got "${blocked}"`);
+      await page.locator('[data-trade-staged="unit:archer"][data-trade-side="give"] [data-trade-unstage]').first().click();
+      assert.equal(await page.locator("[data-trade-staged]").count(), 0, "the staged platoon came off the table again");
+      const cleared = await page.locator("[data-trade-status]").first().innerText();
+      assert.doesNotMatch(cleared, /no troops/i, `the warning clears with the staging, got "${cleared}"`);
+
+      const emptied = await api("POST", `/api/games/${name}/commands`, {
+        kind: "TradeHeroes",
+        actor: 0,
+        heroId: HERO_ID,
+        partnerId: PARTNER_ID,
+        give: { units: [{ unitTypeId: "archer", count: 4 }] },
+        take: {},
+      });
+      assert.equal(emptied.status, 409, `army-emptying trade -> ${emptied.status}`);
+      assert.equal(
+        emptied.json?.error,
+        "would_be_left_without_troops",
+        "server reason for an army-emptying trade",
+      );
+      const afterEmpty = await gameRow(name);
+      assert.equal(unitsByType(afterEmpty.heroes[HERO_ID]).archer, 4, "a refused army-emptying trade moves nothing");
+      console.log(">> army-emptying trade refused by both the panel and the server");
+
       // A malformed body (a fractional amount) is a transport-level 400.
       const malformed = await api("POST", `/api/games/${name}/commands`, {
         kind: "TradeHeroes",

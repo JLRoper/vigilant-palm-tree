@@ -11,7 +11,7 @@ import type { HeroTradeOffer, HeroTradeRequest } from "@heroes/contracts";
 import { depositIntoGarrison } from "../settlement/recruitUnits";
 import { heroCargo, heroGoldCap, heroResourceCap, warehouseHeadroom } from "../settlement/capacity";
 import { hexDistance } from "../map/pathfinding";
-import { normalizePlatoons, removeUnitsByType } from "../units";
+import { normalizePlatoons, platoonsHaveTroops, removeUnitsByType } from "../units";
 
 // Field trading between two heroes (docs/heroes.md "Trading in the field").
 // Heroes never share a tile (startMove rejects "occupied"), so a trade
@@ -186,6 +186,17 @@ export function tradeHeroes(state: GameState, request: HeroTradeRequest): HeroTr
   if (!nextGiverStacks) return { ok: false, state, reason: "not_enough_unit_space" };
   const nextTakerStacks = depositOffered(removeOffered(takerStacks, take.units), give.units);
   if (!nextTakerStacks) return { ok: false, state, reason: "partner_not_enough_unit_space" };
+  // Neither hero may be traded out of its whole army: an army-less hero cannot
+  // fight or defend itself, so the swap is refused rather than producing one.
+  // Checked on the POST-trade stacks (a swap sends troops both ways and is
+  // therefore fine), and unconditionally -- a hero that somehow starts empty
+  // still cannot trade goods for goods until it holds at least one troop.
+  if (!platoonsHaveTroops(nextGiverStacks)) {
+    return { ok: false, state, reason: "would_be_left_without_troops" };
+  }
+  if (!platoonsHaveTroops(nextTakerStacks)) {
+    return { ok: false, state, reason: "partner_would_be_left_without_troops" };
+  }
 
   const nextGiver: HeroState = {
     ...giver,

@@ -285,6 +285,10 @@ export function tradeFailureText(reason: string, names: TradeNames): string {
       return `${who} has no room in the cargo wagons.`;
     case "not_enough_unit_space":
       return `${who} has no room in the army (every slot is full).`;
+    case "would_be_left_without_troops":
+      return `${who} would be left with no troops — a hero always keeps at least one.`;
+    case "partner_would_be_left_without_troops":
+      return `${who} would be left with no troops — a hero always keeps at least one.`;
     default:
       return `Trade refused: ${reason}.`;
   }
@@ -302,4 +306,38 @@ export function tradeCaps(hero: HeroState | undefined): { gold: number; resource
 export function tradePartnerOf(state: GameState | undefined, heroId: HeroId | null | undefined): HeroState | null {
   if (!state || !heroId) return null;
   return tradePartnersFor(state, heroId)[0] ?? null;
+}
+
+/** Total troops a hero's army carries right now (every platoon entry summed). */
+export function troopTotal(hero: HeroState | undefined): number {
+  return holdingsOf(hero)
+    .filter((h) => h.kind === "unit")
+    .reduce((sum, h) => sum + h.amount, 0);
+}
+
+/** The other column's side key (the panel renders "give" left, "take" right). */
+export function otherSide(side: TradeSide): TradeSide {
+  return side === "give" ? "take" : "give";
+}
+
+/**
+ * The mirror of tradeHeroes' army guard for the panel: true when the staged
+ * swap would leave THIS hero with no troops at all -- the troops it stages
+ * leave, the ones the OTHER hero stages arrive. `tradeHeroes` stays the
+ * authority; this only lets the panel refuse before the player clicks Confirm,
+ * so the rule is visible instead of a rejection.
+ */
+export function sideWouldLoseAllTroops(
+  hero: HeroState | undefined,
+  partner: HeroState | undefined,
+  staging: TradeStaging,
+  side: TradeSide,
+): boolean {
+  const leaving = holdingsOf(hero)
+    .filter((h) => h.kind === "unit")
+    .reduce((sum, h) => sum + stagedAmount(staging, side, h.key), 0);
+  const arriving = holdingsOf(partner)
+    .filter((h) => h.kind === "unit")
+    .reduce((sum, h) => sum + stagedAmount(staging, otherSide(side), h.key), 0);
+  return troopTotal(hero) - leaving + arriving <= 0;
 }

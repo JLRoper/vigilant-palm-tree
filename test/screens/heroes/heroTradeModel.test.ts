@@ -10,6 +10,7 @@ import {
   requestFromStaging,
   resourceKey,
   sideIsEmpty,
+  sideWouldLoseAllTroops,
   stageAll,
   stageAmount,
   stagedAmount,
@@ -19,6 +20,7 @@ import {
   tradeFailureText,
   tradePartnerOf,
   tradeStep,
+  troopTotal,
   unstage,
   unitKey,
 } from "../../../src/screens/heroes/heroTradeModel";
@@ -145,6 +147,14 @@ test("tradeFailureText: names the hero the reason belongs to", () => {
     tradeFailureText("partner_not_enough_unit_space", names),
     "Boris has no room in the army (every slot is full).",
   );
+  assert.equal(
+    tradeFailureText("would_be_left_without_troops", names),
+    "Anna would be left with no troops — a hero always keeps at least one.",
+  );
+  assert.equal(
+    tradeFailureText("partner_would_be_left_without_troops", names),
+    "Boris would be left with no troops — a hero always keeps at least one.",
+  );
   assert.equal(tradeFailureText("weird_new_reason", names), "Trade refused: weird_new_reason.");
 });
 
@@ -153,6 +163,37 @@ test("tradeCaps: the purse and cargo caps come from the hero's carts and wagons"
   assert.equal(caps.gold, 4 * 500);
   assert.equal(caps.resources.wood, 3 * 50);
   assert.equal(tradeCaps(undefined).gold, 0);
+});
+
+test("sideWouldLoseAllTroops: mirrors the engine's army guard for the panel", () => {
+  // `hero` holds 6 troops (archer 3 + swordsman 1, archer 2).
+  assert.equal(troopTotal(hero), 6);
+  const partner = makeHero("h1", 0, 6, 5, { stacks: platoons([[{ unitTypeId: "pikeman", count: 2 }]]) });
+  assert.equal(troopTotal(partner), 2);
+
+  // Nothing staged: both keep their armies.
+  assert.equal(sideWouldLoseAllTroops(hero, partner, emptyStaging(), "give"), false);
+  assert.equal(sideWouldLoseAllTroops(partner, hero, emptyStaging(), "take"), false);
+
+  // Handing over every troop with nothing coming back empties the hero...
+  let staging = stageAll(emptyStaging(), "give", unitKey("archer"), 5);
+  staging = stageAll(staging, "give", unitKey("swordsman"), 1);
+  assert.equal(sideWouldLoseAllTroops(hero, partner, staging, "give"), true);
+  // ...and the same stage on the other side is the partner's problem, not the hero's.
+  assert.equal(sideWouldLoseAllTroops(partner, hero, staging, "take"), false);
+
+  // One troop kept back is enough, and one arriving from the partner also is.
+  const keptBack = stageAll(emptyStaging(), "give", unitKey("archer"), 4);
+  assert.equal(sideWouldLoseAllTroops(hero, partner, keptBack, "give"), false);
+  const covered = stageAll(staging, "take", unitKey("pikeman"), 1);
+  assert.equal(sideWouldLoseAllTroops(hero, partner, covered, "give"), false);
+
+  // An army-less hero is refused even with nothing staged (the engine's rule
+  // is unconditional on the post-trade army).
+  const empty = makeHero("h2", 0, 7, 5, { stacks: platoons([]) });
+  assert.equal(troopTotal(empty), 0);
+  assert.equal(sideWouldLoseAllTroops(empty, partner, emptyStaging(), "give"), true);
+  assert.equal(sideWouldLoseAllTroops(empty, partner, stageAll(emptyStaging(), "take", unitKey("pikeman"), 1), "give"), false);
 });
 
 test("tradePartnerOf: the first adjacent same-seat hero, null when there is none", () => {

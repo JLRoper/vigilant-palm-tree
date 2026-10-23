@@ -13,6 +13,8 @@ import {
   emptyStaging,
   holdingFor,
   holdingsOf,
+  otherSide,
+  sideWouldLoseAllTroops,
   requestFromStaging,
   resourceKey,
   stageAll,
@@ -125,6 +127,9 @@ export class HeroTradePanel {
   private staging: TradeStaging = emptyStaging();
   private columns: Record<TradeSide, SideColumn> | null = null;
   private statusEl: HTMLDivElement | null = null;
+  /** The last commit's own message ("Traded." / the engine's refusal), which
+   * outlives the renders until the player changes what is on the table. */
+  private commitStatus: { text: string; error: boolean } | null = null;
   private confirmBtn: HTMLButtonElement | null = null;
   private clearBtn: HTMLButtonElement | null = null;
 
@@ -155,6 +160,7 @@ export class HeroTradePanel {
     this.heroId = heroId;
     this.partnerId = partnerId;
     this.staging = emptyStaging();
+    this.commitStatus = null;
 
     const menu = createPanel({
       parent: this.parent,
@@ -209,8 +215,7 @@ export class HeroTradePanel {
     this.clearBtn.dataset.tradeClear = "true";
     styleButton(this.clearBtn);
     this.clearBtn.addEventListener("click", () => {
-      this.staging = emptyStaging();
-      this.render();
+      this.stage(emptyStaging());
     });
     footer.appendChild(this.clearBtn);
 
@@ -442,13 +447,11 @@ export class HeroTradePanel {
     const hero = this.hero(side, state);
     const holding = holdingFor(hero, key);
     if (!holding || holding.amount <= 0) return;
-    this.staging = stageAll(this.staging, side, key, holding.amount);
-    this.render(state);
+    this.stage(stageAll(this.staging, side, key, holding.amount), state);
   }
 
   private unstageKey(side: TradeSide, key: string): void {
-    this.staging = unstage(this.staging, side, key);
-    this.render();
+    this.stage(unstage(this.staging, side, key));
   }
 
   /** Stages every unit of one whole platoon slot as that side's offer. */
@@ -463,8 +466,7 @@ export class HeroTradePanel {
       if (!entry || entry.count <= 0) continue;
       next = stageAll(next, side, unitKey(entry.unitTypeId), holdingFor(hero, unitKey(entry.unitTypeId))?.amount ?? 0);
     }
-    this.staging = next;
-    this.render(state);
+    this.stage(next, state);
   }
 
   private clearDropHighlight(): void {
@@ -486,14 +488,23 @@ export class HeroTradePanel {
     const result = this.onTrade(request.heroId, request.partnerId, request.give, request.take);
     if (!result.ok) {
       const names = { hero: this.heroName("give", state), partner: this.heroName("take", state) };
-      this.setStatus(tradeFailureText(result.reason, names), true);
+      this.commitStatus = { text: tradeFailureText(result.reason, names), error: true };
+      this.render();
       return;
     }
     this.staging = emptyStaging();
-    this.setStatus("Traded.", false);
+    this.commitStatus = { text: "Traded.", error: false };
     // Re-read live state: the commit replaced it, so the captured `state`
     // above is the pre-trade snapshot and would repaint the old holdings.
     this.render();
+  }
+
+  /** Every staging change goes through here: replace the staging, drop the
+   * last commit's message (it described the previous table), repaint. */
+  private stage(next: TradeStaging, state?: GameState): void {
+    this.staging = next;
+    this.commitStatus = null;
+    this.render(state);
   }
 
   private setStatus(text: string, isError = false): void {
@@ -522,12 +533,15 @@ export class HeroTradePanel {
 
     if (this.confirmBtn) {
       const empty = stagingIsEmpty(this.staging);
-      this.confirmBtn.disabled = !valid || empty;
+      const blocker = this.armyBlocker(live);
+      this.confirmBtn.disabled = !valid || empty || blocker !== null;
       this.confirmBtn.title = !valid
         ? "Those heroes can no longer trade (they must stand on adjacent hexes)"
-        : empty
-          ? "Drag something across first"
-          : "Hand both offers over in one swap";
+        : blocker
+          ? `${blocker} would end up with no troops`
+          : empty
+            ? "Drag something across first"
+            : "Hand both offers over in one swap";
       this.confirmBtn.style.opacity = this.confirmBtn.disabled ? "0.4" : "1";
       this.confirmBtn.style.cursor = this.confirmBtn.disabled ? "default" : "pointer";
     }
@@ -539,7 +553,29 @@ export class HeroTradePanel {
       this.setStatus("Those heroes can no longer trade — they must stand on adjacent hexes.", true);
     } else if (!give || !take) {
       this.setStatus("That hero is gone.", true);
+    } else if (this.commitStatus) {
+      this.setStatus(this.commitStatus.text, this.commitStatus.error);
+    } else if (this.armyBlocker(live)) {
+      this.setStatus(
+        `${this.armyBlocker(live)} would end up with no troops — a hero always keeps at least one.`,
+        true,
+      );
+    } else {
+      this.setStatus("");
     }
+  }
+
+  /**
+   * The hero (if either) whose army the staged swap would empty. Mirrors
+   * tradeHeroes' own guard so the panel refuses BEFORE Confirm: the engine
+   * stays the authority, this only makes the rule visible.
+   */
+  private armyBlocker(state: GameState): string | null {
+    const give = this.hero("give", state);
+    const take = this.hero("take", state);
+    if (sideWouldLoseAllTroops(give, take, this.staging, "give")) return give?.name ?? "That hero";
+    if (sideWouldLoseAllTroops(take, give, this.staging, "take")) return take?.name ?? "That hero";
+    return null;
   }
 
   private renderColumn(column: SideColumn, side: TradeSide, state: GameState, valid: boolean): void {
@@ -616,8 +652,7 @@ export class HeroTradePanel {
     const step = (delta: number) => {
       const state = this.getState();
       if (!state) return;
-      this.staging = adjustStaged(this.staging, side, holding.key, delta, holdingFor(this.hero(side, state), holding.key));
-      this.render(state);
+      this.stage(adjustStaged(this.staging, side, holding.key, delta, holdingFor(this.hero(side, state), holding.key)), state);
     };
     const down = document.createElement("button");
     down.textContent = "−";
@@ -660,6 +695,3 @@ export class HeroTradePanel {
   }
 }
 
-function otherSide(side: TradeSide): TradeSide {
-  return side === "give" ? "take" : "give";
-}

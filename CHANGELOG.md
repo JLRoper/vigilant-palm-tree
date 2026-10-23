@@ -10,6 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.33.1] - 2026-10-23
+
+Hero field trading no longer lets a hero be traded out of its whole army. A swap whose POST-trade army would be empty on either side is refused (`would_be_left_without_troops` / `partner_would_be_left_without_troops`) instead of producing an army-less hero that cannot fight or defend itself. The rule is checked on the result, so sending your last platoon in exchange for one back stays legal, and it is unconditional: a hero that somehow holds no troops must be given some before it can hand goods over.
+
+The trade panel mirrors the guard rather than waiting for the rejection: staging a platoon that would empty a hero greys out **Confirm trade** and the status line names the hero that would be left with none. The panel also keeps the last commit's message ("Traded." / the engine's refusal) on screen until the table changes, instead of losing it to the next refresh.
+
+Tests: three new engine cases (either side emptied, a both-ways platoon exchange and a last-platoon-for-troops swap both still allowed, an army-less hero refused even for goods-only) and a model case for the panel's mirror; the `heroTrade` Playwright suite now stages a whole army, asserts Confirm is refused with the hero named, unstages it, and checks the server answers `409 would_be_left_without_troops` with the row untouched.
+
 ## [0.33.0] - 2026-10-23
 
 Field trading between heroes, out in the field. Two heroes of one seat standing on **adjacent** hexes (heroes can never share a tile) hand each other gold, cargo and whole platoons, committed as ONE all-or-nothing `TradeHeroes` command: both sides' affordability and both receivers' headroom (purse via treasury carts, per-resource cargo via wagons, army slots via `depositIntoGarrison`) are validated before anything moves, so a refused trade writes nothing. Capacity refusals name the hero at fault with a `partner_` prefix, each side's units are removed before the incoming ones land (a same-type swap both ways is not a false `platoon_full`), and the new `HeroesTraded` event replays as an applied delta.
