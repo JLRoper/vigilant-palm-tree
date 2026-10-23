@@ -66,7 +66,10 @@ test("tradeHeroes: swaps gold, resources and units between two adjacent heroes",
 });
 
 test("tradeHeroes: one-sided gifts work (an empty take), and nothing moves on the refusal path", () => {
-  const state = tradeState({ giver: { gold: 300 }, taker: { gold: 0 } });
+  const state = tradeState({
+    giver: { gold: 300, stacks: platoons([[{ unitTypeId: "swordsman", count: 2 }]]) },
+    taker: { gold: 0, stacks: platoons([[{ unitTypeId: "archer", count: 1 }]]) },
+  });
   const gift = tradeHeroes(state, { ...swap, give: { gold: 300 }, take: {} });
   assert.equal(gift.ok, true);
   assert.equal(gift.state.heroes.h0.gold, 0);
@@ -232,4 +235,83 @@ test("canTradeHeroes/tradePartnersFor: only adjacent same-seat heroes are partne
     tradePartnersFor(state, "h0").map((h) => h.id),
     ["h1"],
   );
+});
+
+test("tradeHeroes: a trade that would leave either hero without troops is refused", () => {
+  // The giver hands over its only platoon and receives goods only: the hero
+  // would end up army-less, so nothing moves.
+  const state = tradeState({
+    giver: { gold: 10, stacks: platoons([[{ unitTypeId: "swordsman", count: 5 }]]) },
+    taker: { gold: 200, stacks: platoons([[{ unitTypeId: "archer", count: 4 }]]) },
+  });
+  const emptied = tradeHeroes(state, {
+    ...swap,
+    give: { gold: 10, units: [{ unitTypeId: "swordsman", count: 5 }] },
+    take: {},
+  });
+  assert.equal(emptied.ok, false);
+  assert.equal(emptied.reason, "would_be_left_without_troops");
+  assert.equal(emptied.state, state, "a refused trade moves nothing");
+
+  // The same rule names the PARTNER when the partner's army would empty.
+  const partnerEmptied = tradeHeroes(state, {
+    ...swap,
+    give: {},
+    take: { units: [{ unitTypeId: "archer", count: 4 }] },
+  });
+  assert.equal(partnerEmptied.ok, false);
+  assert.equal(partnerEmptied.reason, "partner_would_be_left_without_troops");
+  assert.equal(partnerEmptied.state, state);
+});
+
+test("tradeHeroes: troops swapped both ways is fine, and so is a last platoon sent for troops", () => {
+  const state = tradeState({
+    giver: { stacks: platoons([[{ unitTypeId: "swordsman", count: 5 }]]) },
+    taker: { stacks: platoons([[{ unitTypeId: "archer", count: 4 }]]) },
+  });
+  // Both armies move across: neither ends empty.
+  const exchange = tradeHeroes(state, {
+    ...swap,
+    give: { units: [{ unitTypeId: "swordsman", count: 5 }] },
+    take: { units: [{ unitTypeId: "archer", count: 4 }] },
+  });
+  assert.equal(exchange.ok, true, exchange.reason);
+  assert.deepEqual(exchange.state.heroes.h0.stacks[0].entries, [{ unitTypeId: "archer", count: 4 }]);
+  assert.deepEqual(exchange.state.heroes.h1.stacks[0].entries, [{ unitTypeId: "swordsman", count: 5 }]);
+
+  // Giving everything away is fine when troops come back the other way.
+  const partial = tradeHeroes(state, {
+    ...swap,
+    give: { units: [{ unitTypeId: "swordsman", count: 5 }] },
+    take: { units: [{ unitTypeId: "archer", count: 1 }] },
+  });
+  assert.equal(partial.ok, true, partial.reason);
+  assert.deepEqual(partial.state.heroes.h0.stacks[0].entries, [{ unitTypeId: "archer", count: 1 }]);
+  assert.deepEqual(partial.state.heroes.h1.stacks[0].entries, [
+    { unitTypeId: "archer", count: 3 },
+    { unitTypeId: "swordsman", count: 5 },
+  ]);
+});
+
+test("tradeHeroes: an army-less hero cannot trade goods for goods either", () => {
+  // Unconditional on the POST-trade army: a hero with no troops has to be
+  // given troops before it can hand anything over.
+  const state = tradeState({
+    giver: { gold: 500, stacks: [] },
+    taker: { gold: 10, stacks: platoons([[{ unitTypeId: "archer", count: 2 }]]) },
+  });
+  const refused = tradeHeroes(state, { ...swap, give: { gold: 100 }, take: { gold: 10 } });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.reason, "would_be_left_without_troops");
+
+  // ...and receiving troops unblocks it.
+  const rescued = tradeHeroes(state, {
+    ...swap,
+    give: { gold: 100 },
+    take: { gold: 10, units: [{ unitTypeId: "archer", count: 1 }] },
+  });
+  assert.equal(rescued.ok, true, rescued.reason);
+  assert.equal(rescued.state.heroes.h0.gold, 410);
+  assert.deepEqual(rescued.state.heroes.h0.stacks[0].entries, [{ unitTypeId: "archer", count: 1 }]);
+  assert.deepEqual(rescued.state.heroes.h1.stacks[0].entries, [{ unitTypeId: "archer", count: 1 }]);
 });
