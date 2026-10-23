@@ -282,6 +282,26 @@ async function main(): Promise<void> {
       await page.locator('[data-trade-column="give"]').first().waitFor({ state: "visible", timeout: 15000 });
       console.log(">> trade panel open with both heroes side by side");
 
+      // (A2) The footer (status + Clear + Confirm) is a child of the panel ROOT,
+      // not of its scrolling body, and the panel places itself inside the
+      // viewport: Confirm is never below the fold on a short window.
+      assert.equal(
+        await page.locator("[data-panel-body] [data-trade-confirm]").count(),
+        0,
+        "Confirm must not live inside the scrolling body",
+      );
+      assert.equal(
+        await page.locator("[data-trade-footer] [data-trade-confirm]").count(),
+        1,
+        "the pinned footer owns Confirm",
+      );
+      const confirmBox = await page.locator("[data-trade-confirm]").first().boundingBox();
+      assert(confirmBox, "Confirm has a measurable box");
+      assert(
+        confirmBox!.y + confirmBox!.height <= 800 && confirmBox!.y >= 0,
+        `Confirm must sit inside the 800px viewport (y ${confirmBox!.y}, bottom ${confirmBox!.y + confirmBox!.height})`,
+      );
+
       const names = await clientHeroes(page);
       const giveName = await page.locator('[data-trade-column="give"]').first().locator("div").first().innerText();
       const takeName = await page.locator('[data-trade-column="take"]').first().locator("div").first().innerText();

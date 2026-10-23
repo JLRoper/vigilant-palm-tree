@@ -120,13 +120,47 @@ test("transferUnits toGarrison: removes from the topmost slot first and lands in
 
 test("transferUnits toGarrison: merges into an existing same-type garrison entry", () => {
   const state = transferState({
-    heroStacks: platoons([[{ unitTypeId: "swordsman", count: 3 }]]),
+    heroStacks: platoons([[{ unitTypeId: "swordsman", count: 4 }]]),
     garrisonStacks: [{ entries: [{ unitTypeId: "swordsman", count: 2 }] }],
   });
   const result = transferUnits(state, move({ direction: "toGarrison", unitTypeId: "swordsman", count: 3 }));
   assert.equal(result.ok, true);
-  assert.deepEqual(result.state.heroes.h0.stacks[0].entries, []);
+  assert.deepEqual(result.state.heroes.h0.stacks[0].entries, [{ unitTypeId: "swordsman", count: 1 }]);
   assert.deepEqual(settlementStacks(result.state.settlements.s0)[0].entries, [{ unitTypeId: "swordsman", count: 5 }]);
+});
+
+test("transferUnits toGarrison: unloading the hero's whole army is refused", () => {
+  // A garrison can be emptied; a hero cannot. The last troop stays with the
+  // hero, so the transfer moves nothing at all.
+  const state = transferState({
+    heroStacks: platoons([[{ unitTypeId: "swordsman", count: 3 }]]),
+    garrisonStacks: [{ entries: [{ unitTypeId: "swordsman", count: 2 }] }],
+  });
+  const whole = transferUnits(state, move({ direction: "toGarrison", unitTypeId: "swordsman", count: 3 }));
+  assert.equal(whole.ok, false);
+  assert.equal(whole.reason, "would_be_left_without_troops");
+  assert.equal(whole.state, state, "a refused transfer moves nothing");
+
+  // ...and the same transfer of all BUT the last troop still lands.
+  const almost = transferUnits(state, move({ direction: "toGarrison", unitTypeId: "swordsman", count: 2 }));
+  assert.equal(almost.ok, true);
+  assert.deepEqual(almost.state.heroes.h0.stacks[0].entries, [{ unitTypeId: "swordsman", count: 1 }]);
+  assert.deepEqual(settlementStacks(almost.state.settlements.s0)[0].entries, [{ unitTypeId: "swordsman", count: 4 }]);
+
+  // A hero whose LAST troop is a different type is protected the same way: the
+  // first step may take the swordsmen while the archer holds the army, and the
+  // second step -- the one that would leave nothing -- is refused.
+  const mixed = transferState({
+    heroStacks: platoons([[{ unitTypeId: "swordsman", count: 2 }, { unitTypeId: "archer", count: 1 }]]),
+  });
+  const takeSwordsmen = transferUnits(mixed, move({ direction: "toGarrison", unitTypeId: "swordsman", count: 2 }));
+  assert.equal(takeSwordsmen.ok, true, "the archer still holds the army");
+  const takeLastArcher = transferUnits(
+    takeSwordsmen.state,
+    move({ direction: "toGarrison", unitTypeId: "archer", count: 1 }),
+  );
+  assert.equal(takeLastArcher.ok, false);
+  assert.equal(takeLastArcher.reason, "would_be_left_without_troops");
 });
 
 test("transferUnits: a count above the source pool is refused in both directions", () => {
@@ -147,7 +181,7 @@ test("transferUnits: a count above the source pool is refused in both directions
 
 test("transferUnits toGarrison with toSlot: deposits into the named garrison slot", () => {
   const state = transferState({
-    heroStacks: platoons([[{ unitTypeId: "swordsman", count: 4 }]]),
+    heroStacks: platoons([[{ unitTypeId: "swordsman", count: 5 }]]),
     garrisonStacks: [
       { entries: [{ unitTypeId: "peasant", count: 2 }] },
       { entries: [{ unitTypeId: "archer", count: 1 }] },
@@ -155,7 +189,7 @@ test("transferUnits toGarrison with toSlot: deposits into the named garrison slo
   });
   const result = transferUnits(state, move({ direction: "toGarrison", unitTypeId: "swordsman", count: 4, toSlot: 5 }));
   assert.equal(result.ok, true);
-  assert.deepEqual(result.state.heroes.h0.stacks[0].entries, []);
+  assert.deepEqual(result.state.heroes.h0.stacks[0].entries, [{ unitTypeId: "swordsman", count: 1 }]);
   const garrison = settlementStacks(result.state.settlements.s0);
   assert.deepEqual(garrison[5].entries, [{ unitTypeId: "swordsman", count: 4 }], "landed in slot 5");
   assert.deepEqual(garrison[0].entries, [{ unitTypeId: "peasant", count: 2 }], "other slots untouched");
@@ -164,7 +198,7 @@ test("transferUnits toGarrison with toSlot: deposits into the named garrison slo
 
 test("transferUnits toGarrison with toSlot: merges a same-type entry in that slot only", () => {
   const state = transferState({
-    heroStacks: platoons([[{ unitTypeId: "swordsman", count: 3 }]]),
+    heroStacks: platoons([[{ unitTypeId: "swordsman", count: 4 }]]),
     garrisonStacks: [
       { entries: [{ unitTypeId: "swordsman", count: 1 }] },
       { entries: [{ unitTypeId: "swordsman", count: 7 }] },

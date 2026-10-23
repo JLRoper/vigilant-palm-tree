@@ -1,7 +1,7 @@
 import type { GameState, HeroState, HeroTradeOffer, WarehouseResource } from "../../state/gameState";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import { canTradeHeroes } from "@heroes/engine";
-import { createPanel, styleButton, type FloatingPanel } from "@screens/shared/panel";
+import { clampPanelIntoView, createPanel, styleButton, type FloatingPanel } from "@screens/shared/panel";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import { SquadGrid, activeSquadDrag } from "@screens/shared/squadGrid";
 import { RESOURCE_PILE_BUBBLY_SPRITES } from "../../render/assetDescriptors";
@@ -167,7 +167,13 @@ export class HeroTradePanel {
       title: "Trade",
       key: PANEL_GEOMETRY_KEY,
       width: PANEL_WIDTH,
-      defaultPosition: { x: 220, y: 120 },
+      // Placed beside the docked hero panel (x 16..256) rather than under it,
+      // and NOT run through the panel tiler: this is a two-hero surface the
+      // player opens for a moment, so where it opens must be predictable and
+      // fully on screen (clampPanelIntoView below), not slotted into a column
+      // that can put the Confirm button past the bottom edge.
+      defaultPosition: { x: 288, y: 96 },
+      stackable: false,
       minTop: toolbarHeight,
       zIndex: 76,
       closeable: true,
@@ -185,6 +191,9 @@ export class HeroTradePanel {
       },
     });
     this.menu = menu;
+    // The body is the flex row that shrinks and scrolls; letting it grow keeps
+    // the footer pinned to the panel's bottom edge after a manual resize.
+    Object.assign(menu.body.style, { flex: "1 1 auto" });
 
     const root = document.createElement("div");
     Object.assign(root.style, { display: "flex", gap: "10px", padding: "2px" });
@@ -195,15 +204,19 @@ export class HeroTradePanel {
     root.appendChild(take.root);
     menu.appendContent(root);
 
-    const divider = document.createElement("div");
-    Object.assign(divider.style, {
-      borderTop: "1px solid rgba(255,255,255,0.12)",
-      margin: "8px 0 6px",
-    });
-    menu.appendContent(divider);
-
+    // The footer (status + Clear + Confirm) is a child of the panel ROOT, not
+    // of its scrolling body: on a short window the body scrolls and the
+    // buttons stay put, so Confirm is never below the fold.
     const footer = document.createElement("div");
-    Object.assign(footer.style, { display: "flex", alignItems: "center", gap: "8px" });
+    footer.dataset.tradeFooter = "true";
+    Object.assign(footer.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      padding: "6px 10px",
+      borderTop: "1px solid rgba(255,255,255,0.12)",
+      background: "rgba(0,0,0,0.25)",
+    });
 
     this.statusEl = document.createElement("div");
     Object.assign(this.statusEl.style, { flex: "1", fontSize: "11px", opacity: "0.75" });
@@ -226,10 +239,13 @@ export class HeroTradePanel {
     this.confirmBtn.addEventListener("click", () => this.commit());
     footer.appendChild(this.confirmBtn);
 
-    menu.appendContent(footer);
+    menu.root.appendChild(footer);
 
     this.columns = { give, take };
     this.render();
+    // Measured AFTER the first paint: a display-none element measures 0x0, and
+    // the panel's height depends on the two armies it found.
+    clampPanelIntoView(menu, toolbarHeight());
   }
 
   close(): void {
