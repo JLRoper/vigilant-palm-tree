@@ -10,6 +10,18 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.33.3] - 2026-10-23
+
+Two heroes can now start a trade by walking at each other.
+
+**Click the hex the other hero is standing on.** With one of your heroes selected, a click on the square an **adjacent** hero of yours stands on used to just switch selection. It now opens the Trade panel for the pair — the "walk into him" gesture, which is as literal as it gets: heroes can never share a tile (`startMove` refuses an occupied destination), so trying to walk into a friend is exactly the moment to trade with him. The acting hero stays selected, so the panel opens with him on the give side and the partner on the other.
+
+The gesture only fires when the two really are adjacent. The click resolver asks the engine's `canTradeHeroes` — the same rule the `TradeHeroes` command enforces — so the click can never offer a trade the command would refuse: a hero of yours two or more hexes away is out of trade range and clicking him still switches selection, an adjacent **enemy** hero is still an attack, and clicking your own selected hero still puts it down. The hero panel's `Trade with <name>…` button is unchanged and remains the other way in (it is the only way in when you would rather not move the mouse across the map).
+
+Implementation: a new `trade` click intent in `src/screens/adventure/clickIntent.ts` (which is where the "same square" logic lives), dispatched by `adventureView.ts` through a new `onWalkIntoTrade` option wired in `GameEngine` → `UIManager.openHeroTrade` (now public). No command, event, server or database change: this is purely a client gesture for an existing feature.
+
+Tests: `clickIntent.test.ts` gains five cases (the walk-in from all six neighbours, a hero out of range, nothing selected, an adjacent enemy, and the unchanged deselect toggle), and the `heroTrade` Playwright suite now opens the panel by clicking the partner's real hex on the map — asserting the resolver's reason is `trade`, that the acting hero stays selected, and that clicking a far own hero opens nothing and only selects.
+
 ## [0.33.2] - 2026-10-23
 
 Two follow-ups to hero field trading, both from the same playtest.

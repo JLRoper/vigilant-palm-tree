@@ -2,6 +2,8 @@ import type { Axial } from "../../core/hex";
 import type { GameMap } from "../../map/gameMap";
 import type { Hero } from "../../entities/hero";
 import type { GameState, HeroId, PlayerId } from "../../state/gameState";
+import { canTradeHeroes } from "@heroes/engine";
+import type { HeroState } from "@heroes/contracts";
 import { computePathCost, findPath, NEIGHBOR_DIRS } from "../../map/pathfinding";
 import { computeReachableSplitDetailed } from "../../render/overlays/pathOverlay";
 import type { ToastKind } from "../shared/toast";
@@ -55,8 +57,28 @@ export type ClickIntent =
   | { kind: "deselect-hero"; heroId: HeroId }
   | { kind: "deselect-settlement"; settlementId: string }
   | { kind: "open-charter"; targetQ: number; targetR: number }
+  // The walk-in trade gesture: one hero of yours is selected and the player
+  // clicked the square another of your heroes stands on, one hex away. The
+  // panel opens for the pair instead of the click just re-selecting.
+  | { kind: "trade"; heroId: HeroId; partnerId: HeroId }
   | ({ kind: "attack" } & MoveIntentBase)
   | ({ kind: "move"; debugPath: Axial[] } & MoveIntentBase);
+
+/**
+ * A hero in the shape the engine's trade rule reads (id/owner/q/r).
+ * `canTradeHeroes` is the single source of truth for "can these two trade",
+ * so the click path cannot drift from what the command itself will accept.
+ *
+ * Two hero shapes meet here: the clicked hero comes from the entity map (a
+ * client `Hero`, position on `.tile`) while `state.heroes` holds engine-shaped
+ * `HeroState` rows (position on `.q`/`.r`).
+ */
+function tradeHeroOf(hero: Hero | HeroState): HeroState {
+  const tile = (hero as Hero).tile;
+  const q = tile ? tile.q : (hero as HeroState).q;
+  const r = tile ? tile.r : (hero as HeroState).r;
+  return { id: hero.id, ownerId: hero.ownerId, q, r } as unknown as HeroState;
+}
 
 export interface ClickIntentInput {
   map: GameMap;
@@ -107,6 +129,20 @@ export function resolveAdventureClick(input: ClickIntentInput): ClickIntent {
     (h) => h.tile.q === t.q && h.tile.r === t.r
   );
   if (clickedHero && clickedHero.ownerId === seat) {
+    // Walking into a friend: with one of your heroes selected, clicking the
+    // square another of your own heroes stands on IS the trade gesture -- the
+    // two are one hex apart (the only distance a field trade allows) and the
+    // panel opens for that pair. A hero further away is not a trade, so that
+    // click still just switches selection, and clicking the selected hero's
+    // own square still puts it down.
+    const selectedBefore = state.selectedHeroId;
+    if (selectedBefore && selectedBefore !== clickedHero.id) {
+      const selected = state.heroes[selectedBefore];
+      if (selected && selected.id !== clickedHero.id &&
+        canTradeHeroes(tradeHeroOf(selected), tradeHeroOf(clickedHero))) {
+        return { kind: "trade", heroId: selectedBefore as HeroId, partnerId: clickedHero.id as HeroId };
+      }
+    }
     if (singleClick && state.selectedHeroId === clickedHero.id) {
       return { kind: "deselect-hero", heroId: clickedHero.id as HeroId };
     }
