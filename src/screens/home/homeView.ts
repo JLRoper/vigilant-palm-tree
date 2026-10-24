@@ -14,7 +14,7 @@ import { openDialog } from "@screens/shared/dialog";
 import type { MapSize } from "../../map/gameMap";
 import { openSettingsMenu } from "./settingsMenu";
 import { createNewGameScreen } from "./newGameScreen";
-import type { FactionId } from "@heroes/contracts";
+import type { FactionId, GameMode } from "@heroes/contracts";
 
 export interface HomeViewOptions {
   onEnterGame: () => void;
@@ -29,6 +29,8 @@ export interface HomeViewOptions {
     enemyCount?: number;
     factionId?: FactionId;
     uncharted?: boolean;
+    /** The game mode the Create Game form picked (SETTLERS-PLAN.md §4 W4). */
+    gameMode?: GameMode;
   }) => Promise<void>;
   onLoadGame: (game: Game) => Promise<void>;
   isBackendOk: () => boolean;
@@ -242,6 +244,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
             enemyCount: values.enemyCount,
             factionId: values.factionId,
             uncharted: values.uncharted,
+            gameMode: values.gameMode,
           });
           rememberGameEntry(values.name);
           screen.destroy();

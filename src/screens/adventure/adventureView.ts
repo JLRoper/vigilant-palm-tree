@@ -55,6 +55,16 @@ export interface AdventureViewOptions {
   getCharterMode?: () => boolean;
   setCharterMode?: (v: boolean) => void;
   getValidCharterHexes?: () => Set<string> | null;
+  /**
+   * The settlers mode's founding gesture (SETTLERS-PLAN.md §4 W4): the player
+   * clicked the highlighted hex its own covered wagon stands on. Returns
+   * whether the founding was accepted, so the view can keep the gesture armed
+   * on a refusal (the toast carries the reason).
+   */
+  onFoundSettlement?: (founderId: string, targetQ: number, targetR: number) => boolean;
+  getFoundMode?: () => boolean;
+  setFoundMode?: (v: boolean) => void;
+  getValidFoundHexes?: () => Set<string> | null;
   onTileInspect?: (tile: Axial | null) => void;
   /**
    * A hero was walked into a friendly hero's square: open the field-trade
@@ -631,6 +641,8 @@ export class AdventureView {
       isPlayerTurn: this.isPlayerTurn(),
       charterMode: this.opts.getCharterMode?.() ?? false,
       validCharterHexes: this.opts.getValidCharterHexes?.() ?? null,
+      foundMode: this.opts.getFoundMode?.() ?? false,
+      validFoundHexes: this.opts.getValidFoundHexes?.() ?? null,
       localSeat,
       visibleHexes: computeVisionFromState(this.state, localSeat ?? 0),
       clickCount: e.detail,
@@ -710,6 +722,24 @@ export class AdventureView {
         },
       });
       this.lastClickDebug.reason = "charter_modal_opened";
+      return;
+    }
+
+    if (intent.kind === "found-settlement") {
+      // The founding gesture fires the command directly: nothing to ask the
+      // player (the engine names the town and derives its stockpile), and no
+      // modal to close. A refusal -- the engine gate here or the server's own
+      // rule a moment later -- keeps the gesture armed and surfaces through
+      // the toast, which is the ONE vocabulary's sentence.
+      const ok = this.opts.onFoundSettlement?.(intent.founderId, intent.targetQ, intent.targetR) ?? false;
+      if (ok) {
+        this.lastClickDebug.reason = "settlement_founded";
+        this.opts.setFoundMode?.(false);
+        this.opts.onStateChanged?.();
+        this.opts.onHudUpdate();
+      } else {
+        this.lastClickDebug.reason = "found_refused";
+      }
       return;
     }
 

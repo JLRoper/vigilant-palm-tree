@@ -227,6 +227,14 @@ export interface HeroNode {
   scaleY: number;
   /** Which run-cycle pose to draw while moving; absent/0 = base sprite. Derived from moveProgress by the scene builder. */
   runFrame?: 0 | 1;
+  /**
+   * Settlers mode's covered wagon (SETTLERS-PLAN.md §4 W4): a hero-shaped
+   * entity that is not a hero. Derived by the scene builder from the entity id
+   * (`p<seat>-wagon`, contracts' isCoveredWagonId), never stored on the entity
+   * -- the mode may not add a column, and an id is what survives a reload.
+   * Absent on every recruited hero and on every classic game.
+   */
+  wagon?: true;
   color: string;
   selected: boolean;
   /** Fade-in alpha for a non-own hero newly revealed from fog; absent = 1. */

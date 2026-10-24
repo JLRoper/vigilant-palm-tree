@@ -6,11 +6,20 @@
 
 New Game supports **1–4 human players**, **0–3 AI enemies**, and eight map sizes (**Small** 24×18, **Medium** 36×27, **Large** 48×36, **Huge** 72×54, **Epic** 120×90, **Colossal** 180×135, **Titanic** 240×180, **Gigantic** 300×225). Pick one of the playable registry factions: Human, Ashen, Ironmark, or Verdant. Neutral monsters are not a selectable player faction. AI seats are not lobby seats; games with AI enemies are driven by the server. The optional **Uncharted mode** toggle starts the map hidden: never-explored tiles render fully dark, and explored tiles stay revealed for your seat as you move. A new game now defaults to **one human seat, one AI enemy, a Medium map, and Uncharted mode on** -- every field stays editable before you create it.
 
+**Game mode** is the second thing that changes a new game's opening position, and both creation surfaces (the home screen's Create a New Game panel and the toolbar's New Game dialog) offer it:
+
+- **Classic** — a castle, a commander and a town per seat; expand by **chartering** new settlements (the long-standing rules).
+- **Settlers** — no castle or town: every seat starts with **one covered wagon** in the wilderness, carrying a starting stockpile. A wagon **founds** a settlement where it stands; founding consumes the wagon, so the wagon pool is your expansion budget.
+
+The form opens on the mode you last created a game with (a stored preference; picking a mode for one game does not change it), and the mode is fixed for that game's lifetime.
+
 ## Move and Found Settlements
 
 Select your hero, then click a destination to preview and request a path. The route preview shows reachable movement for the current turn; terrain changes movement costs. A click is a toggle: click a hero or settlement to select it (its panel opens), and click that same hero or settlement again to put it down - after moving a hero, click it once more to deselect it. Clicking a different hero or settlement switches selection instead, and with only a settlement selected, a click on empty ground also puts it down. Double-clicking a settlement still enters its city view. Double-click a settlement to enter its city view. The settlement panel's banner is the same door — double-click it too, and a row in the **⌂ Settlements** roster opens it the same way (the map is centred on that settlement first). Either way the city opens only for your own settlement on your own turn: a foreign or neutral settlement's banner shows no zoom cursor and does nothing.
 
 To charter a settlement, use a selected hero on your turn and meet the visible requirements: a **2,500 gold** hero purse, **20 wood** and **15 stone** in the friendly provisioning settlement's warehouse, a valid passable target at least **4 hexes** from existing settlements, and no conflicting active charter. The hero travels to the target and construction takes **10 days**. The server-driven AI uses the same charter requirements and travel rules.
+
+In a **settlers** game that button reads **⛺ Found Settlement** and does something else: select your covered wagon (a wagon can carry no army, but it moves and reveals fog like a hero), press it, and the hex your wagon stands on is highlighted — click it to plant the settlement. Founding is immediate and consumes the wagon; the town inherits the wagon's cargo, gets a name, its own rates and city spots derived from where it stands, and starts with no free buildings (the city view's own first-open starter layout is the only grant). A wagon must stand at least **3 hexes** from every settlement, neutral castles included, on ground a settlement can occupy. The button refuses before you click if any of that fails, and says why; the server re-checks the same rule, so a refusal after the click reads with the same sentence.
 
 ## Settlements and Logistics
 

@@ -509,6 +509,57 @@ test("paintHero: passes node.runFrame through to the sprite resolver", () => {
   assert.deepEqual(baseFrames, [undefined], "an absent runFrame passes undefined, not 0");
 });
 
+test("paintHero: a wagon draws the caravan wagon sprite by heading, never the horse variant", () => {
+  // SETTLERS-PLAN.md §4 W4: the covered wagon is a hero-shaped entity, so the
+  // hero node is where it is painted -- and it must resolve the map's existing
+  // wagon art (the caravan family) rather than a horse.
+  const deps = makeNoopPaint2DDep();
+  const caravanCalls: Array<Parameters<NonNullable<Paint2DSpriteResolver["resolveSpriteForCaravan"]>>> = [];
+  let heroCalls = 0;
+  deps.sprite.resolveSpriteForCaravan = (...args) => {
+    caravanCalls.push(args);
+    return undefined;
+  };
+  deps.sprite.resolveSpriteForHero = () => {
+    heroCalls++;
+    return undefined;
+  };
+  const { ctx, calls } = makeRecordingCtx();
+  paintHero(
+    ctx,
+    { kind: "hero", heroId: "p0-wagon", ownerId: 0, world: { x: 0, y: 0 }, markerWorld: { x: 0, y: 0 }, facingDirection: "se", horseVariant: "hero", faction: "player", scaleY: 1.06, wagon: true, color: "#fff", selected: false },
+    deps,
+  );
+
+  assert.equal(heroCalls, 0, "a wagon never asks for a horse");
+  assert.deepEqual(caravanCalls, [["resource", "se"]], "the wagon resolves the caravan wagon for its heading");
+  assert.ok(!calls.some((c) => c.name === "scale"), "a wagon is not a person on foot, so no walk-cycle squash");
+  assert.ok(calls.some((c) => c.name === "arc"), "the owner dot still marks it as an owned entity");
+});
+
+test("paintHero: without the wagon flag the hero path is exactly as before", () => {
+  const deps = makeNoopPaint2DDep();
+  let caravanCalls = 0;
+  const heroCalls: Array<Parameters<Paint2DSpriteResolver["resolveSpriteForHero"]>> = [];
+  deps.sprite.resolveSpriteForCaravan = () => {
+    caravanCalls++;
+    return undefined;
+  };
+  deps.sprite.resolveSpriteForHero = (...args) => {
+    heroCalls.push(args);
+    return undefined;
+  };
+  const { ctx } = makeRecordingCtx();
+  paintHero(
+    ctx,
+    { kind: "hero", heroId: "p0-hero", ownerId: 0, world: { x: 0, y: 0 }, markerWorld: { x: 0, y: 0 }, facingDirection: "e", horseVariant: "drake", faction: "player", scaleY: 1, color: "#fff", selected: false },
+    deps,
+  );
+  assert.equal(caravanCalls, 0);
+  assert.equal(heroCalls.length, 1);
+  assert.equal(heroCalls[0][2], "drake");
+});
+
 test("paintCitySkybox: without skybox provider, falls back to the CITY_BG fillRect", () => {
   const { ctx, calls } = makeRecordingCtx();
   paintCitySkybox(ctx, { kind: "citySkybox", viewportW: 800, viewportH: 600, spriteVariant: 1, parallaxEnabled: false, parallaxLayerCount: 4, offsetX: 0, offsetY: 0 }, makeNoopPaint2DDep(), { viewportW: 800, viewportH: 600 });

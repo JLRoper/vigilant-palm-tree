@@ -1,6 +1,7 @@
 import { FloatingPanel, createPanel } from "@screens/shared/panel";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import type { TileInfo } from "./tileInfo";
+import { foundSettlementRefusalToast } from "./clickIntent";
 
 export interface TileInfoPanelOptions {
   parent: HTMLElement;
@@ -67,6 +68,18 @@ function territoryLine(territory: NonNullable<TileInfo["territory"]>): string {
   return `Territory of ${territory.settlementName} (${territory.ownerName})`;
 }
 
+// The founding line reuses the refusal table's own sentence (clickIntent), so
+// the panel, the toast and the server's refusal all say the same thing.
+function foundingLine(founding: NonNullable<TileInfo["founding"]>): { text: string; dim: boolean } {
+  if (founding.canFound) {
+    return { text: `${founding.wagonName} — can found a settlement here`, dim: false };
+  }
+  return {
+    text: `${founding.wagonName} — cannot found here: ${foundSettlementRefusalToast(founding.refusal ?? "").message}`,
+    dim: true,
+  };
+}
+
 function signatureFor(info: TileInfo): string {
   return JSON.stringify(info);
 }
@@ -81,6 +94,10 @@ function renderLines(info: TileInfo): HTMLElement[] {
   if (info.district) lines.push(makeLine(districtLine(info.district)));
   for (const hero of info.heroes) lines.push(makeLine(heroLine(hero), { bold: hero.owned }));
   if (info.charter) lines.push(makeLine(charterLine(info.charter)));
+  if (info.founding) {
+    const line = foundingLine(info.founding);
+    lines.push(makeLine(line.text, { dim: line.dim, bold: info.founding.canFound }));
+  }
   if (info.territory) lines.push(makeLine(territoryLine(info.territory), { dim: true }));
   return lines;
 }

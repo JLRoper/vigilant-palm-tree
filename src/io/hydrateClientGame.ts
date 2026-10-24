@@ -1,4 +1,4 @@
-import { hydrateGameState, readPendingBattle } from "@heroes/engine";
+import { hydrateGameState, readGameMode, readPendingBattle } from "@heroes/engine";
 import type { GameState } from "@heroes/contracts";
 import type { Game } from "./api";
 
@@ -10,6 +10,19 @@ import type { Game } from "./api";
 // so the mapping cannot drift. Without it, a reload/resync during an
 // offered battle hydrates a faction-derived phase and the defender's
 // battle modal never re-fires.
+//
+// `gameMode` gets the same treatment for the same reason (SETTLERS-PLAN.md
+// §4 W4): it is stored as `games.lobby.gameMode` and read by the engine's
+// rules off the TOP-LEVEL `gameMode` field, so without this mapping a
+// client-side settlers game would hydrate as classic and its own local
+// founding reducer would refuse with `not_settlers_mode` while the server
+// accepted the command. Read through the engine's own `readGameMode` (the
+// `readPendingBattle` shape) so absent/junk stays absent rather than
+// fabricating a mode.
 export function hydrateClientGame(game: Game): GameState {
-  return hydrateGameState({ ...game, pendingBattle: readPendingBattle(game.lobby) });
+  return hydrateGameState({
+    ...game,
+    pendingBattle: readPendingBattle(game.lobby),
+    gameMode: readGameMode(game.lobby),
+  });
 }

@@ -1,9 +1,10 @@
 import { CASTLE_COUNT_MAX } from "../../map/castlePlacement";
 import { panelTheme, styleButton, styleInput } from "./panel";
 import { openDialog } from "./dialog";
-import type { FactionId } from "@heroes/contracts";
+import type { FactionId, GameMode } from "@heroes/contracts";
 import { seatFactionChoices } from "./factionChoices";
 import { MAP_SIZE_ORDER, mapSizeLabel, resolveMapSize, type MapSize } from "../../map/gameMap";
+import { gameModeHint, gameModeOptions, settings } from "../../state/settings";
 
 export type NewGameHandler = (opts: {
   name: string;
@@ -14,6 +15,8 @@ export type NewGameHandler = (opts: {
   enemyCount?: 0 | 1 | 2 | 3;
   factionId?: FactionId;
   uncharted?: boolean;
+  /** The game mode the form picked (SETTLERS-PLAN.md §4 W4). */
+  gameMode?: GameMode;
 }) => void | Promise<void>;
 
 export interface NewGameModalOptions {
@@ -106,6 +109,59 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
   }
   sizeSelect.value = "medium";
   content.appendChild(sizeSelect);
+
+  // Game mode (SETTLERS-PLAN.md §4 W4): the same chip row as the enemy-count
+  // selector, driven by the settings store's own option list so the two
+  // new-game surfaces cannot offer different modes. The initial pick is the
+  // STORED default -- the store's gameMode key is what makes "pre-select the
+  // player's last choice" true, and this row never writes the store (a mode
+  // picked for one game is not a preference until it is set as one).
+  const modeLabel = document.createElement("label");
+  modeLabel.textContent = "Game mode";
+  modeLabel.style.opacity = "0.7";
+  content.appendChild(modeLabel);
+
+  const modeWrap = document.createElement("div");
+  modeWrap.style.display = "flex";
+  modeWrap.style.gap = "8px";
+  let mode: GameMode = settings().gameMode;
+  const modeButtons: Array<{ value: GameMode; btn: HTMLButtonElement }> = [];
+  function refreshModes(): void {
+    for (const { value, btn } of modeButtons) {
+      const active = value === mode;
+      btn.style.background = active
+        ? "linear-gradient(180deg, #c9a227 0%, #a6801a 100%)"
+        : "#1a1a1a";
+      btn.style.color = active ? "#241a05" : "#eee";
+      btn.style.borderColor = active ? "#e9cf7d" : "#444";
+      btn.style.fontWeight = active ? "700" : "400";
+    }
+  }
+  for (const choice of gameModeOptions()) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.mode = choice.value;
+    btn.textContent = choice.label;
+    btn.title = gameModeHint(choice.value);
+    Object.assign(btn.style, {
+      flex: "1",
+      padding: "8px",
+      fontSize: "12px",
+      border: "1px solid #444",
+      borderRadius: "4px",
+      backgroundColor: "#1a1a1a",
+      color: "#eee",
+      cursor: "pointer",
+    });
+    btn.addEventListener("click", () => {
+      mode = choice.value;
+      refreshModes();
+    });
+    modeButtons.push({ value: choice.value, btn });
+    modeWrap.appendChild(btn);
+  }
+  content.appendChild(modeWrap);
+  refreshModes();
 
   const enemyLabel = document.createElement("label");
   enemyLabel.textContent = "AI enemies";
@@ -300,7 +356,7 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
     cancel.disabled = true;
     errorLine.textContent = "Creating…";
     try {
-      await opts.onNew({ name, seed, castleSeed, castleCount, mapSize, enemyCount, factionId, uncharted });
+      await opts.onNew({ name, seed, castleSeed, castleCount, mapSize, enemyCount, factionId, uncharted, gameMode: mode });
       modal.close();
     } catch (e) {
       confirm.disabled = false;

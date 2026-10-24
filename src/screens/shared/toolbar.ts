@@ -30,6 +30,10 @@ const BUTTON_TRANSITION =
   "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, filter 120ms ease, transform 80ms ease";
 
 const SECONDARY_SHADOW = "var(--tb-shadow-control, inset 0 1px 0 rgba(255,255,255,0.05))";
+
+// The settle button's classic-mode label, the default the mode-aware copy
+// falls back to (SETTLERS-PLAN.md §4 W4).
+const CHARTER_BUTTON_LABEL = "⚒ Charter Settlement";
 // The ready ring is the header's "it's your turn" affordance: it only shows
 // while End Turn is actionable, so a disabled button never glows.
 const PRIMARY_READY_SHADOW =
@@ -122,6 +126,13 @@ export interface ToolbarCallbacks {
   getMapInfo?: () => MapInfo | null;
   onStartCharter?: () => void;
   canStartCharter?: () => boolean;
+  /**
+   * The settle button's own copy for the ACTIVE game's mode (SETTLERS-PLAN.md
+   * §4 W4): settlers mode founds a settlement with a wagon where chartering
+   * does not exist, so the button renames itself. Absent (or null) keeps the
+   * classic charter copy.
+   */
+  charterButtonCopy?: () => { label: string; title: string } | null;
 }
 
 export interface ToolbarOptions {
@@ -155,6 +166,7 @@ export class Toolbar {
   private settlementsBtn: HTMLButtonElement;
   private logisticsBtn: HTMLButtonElement;
   private charterBtn: HTMLButtonElement;
+  private charterBtnLabel?: HTMLSpanElement;
   private calendarActiveEl: HTMLElement;
   private dateEl: HTMLElement;
   private swatchEl: HTMLElement;
@@ -330,7 +342,13 @@ export class Toolbar {
     withGhostHover(this.loadBtn);
     makeGroup(false).append(this.saveBtn, this.loadBtn);
 
-    this.charterBtn = this.makeButton("⚒ Charter Settlement", "secondary");
+    this.charterBtn = this.makeButton("", "secondary");
+    // The label lives in its own span so the mode's copy (settlers mode calls
+    // this button "Found Settlement") can be swapped on every refresh without
+    // wiping the "C" hotkey hint that is the button's second child.
+    this.charterBtnLabel = document.createElement("span");
+    this.charterBtnLabel.textContent = CHARTER_BUTTON_LABEL;
+    this.charterBtn.appendChild(this.charterBtnLabel);
     this.charterBtn.appendChild(makeKbdHint("C"));
     this.charterBtn.addEventListener("click", () => {
       if (this.busy) return;
@@ -524,11 +542,22 @@ export class Toolbar {
     if (this.charterBtn) {
       const canOpen = hasGameState && !this.busy && (this.opts.callbacks.canStartCharter?.() ?? false);
       this.setEnabled(this.charterBtn, canOpen);
+      // The mode names this button (SETTLERS-PLAN.md §4 W4): a settlers game
+      // founds a settlement where its wagon stands, so calling it "Charter
+      // Settlement" there would describe an action the mode does not have.
+      // The label provider is ABSENT for a classic game, which keeps today's
+      // copy byte-identical.
+      const copy = this.opts.callbacks.charterButtonCopy?.() ?? null;
+      if (this.charterBtnLabel) {
+        this.charterBtnLabel.textContent = copy?.label ?? CHARTER_BUTTON_LABEL;
+      }
       this.charterBtn.title = !hasGameState
         ? "No active game"
-        : canOpen
-          ? "Charter a new settlement — 2500g + 20 wood + 15 stone"
-          : "Requires a selected hero on your turn";
+        : copy
+          ? copy.title
+          : canOpen
+            ? "Charter a new settlement — 2500g + 20 wood + 15 stone"
+            : "Requires a selected hero on your turn";
     }
 
     this.newBtn.title = !ok ? "Backend unavailable" : active ? "New game (current game will be lost)" : "Start a new game";

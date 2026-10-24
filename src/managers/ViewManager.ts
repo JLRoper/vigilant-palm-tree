@@ -31,7 +31,7 @@ export class ViewManager {
   }
 
   initializeAdventureView(
-    opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw" | "getPathPreviewLock" | "setPathPreviewLock" | "onStartCharter" | "getCharterMode" | "setCharterMode" | "getValidCharterHexes" | "onTileInspect" | "onWalkIntoTrade" | "isCityOpen" | "getLocalSeat" | "getCaravans">,
+    opts: Pick<AdventureViewOptions, "heroes" | "getGameState" | "getTurnController" | "onStateChanged" | "onHudUpdate" | "onRedraw" | "getPathPreviewLock" | "setPathPreviewLock" | "onStartCharter" | "getCharterMode" | "setCharterMode" | "getValidCharterHexes" | "onFoundSettlement" | "getFoundMode" | "setFoundMode" | "getValidFoundHexes" | "onTileInspect" | "onWalkIntoTrade" | "isCityOpen" | "getLocalSeat" | "getCaravans">,
   ): void {
     if (this.view) {
       this.view.detach();
