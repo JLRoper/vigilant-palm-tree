@@ -114,3 +114,35 @@ export const GAME_MODE_SETTINGS: Record<GameMode, GameModeSettings> = {
 export function gameModeSettings(mode?: string | null): GameModeSettings {
   return GAME_MODE_SETTINGS[resolveGameMode(mode)];
 }
+
+// ── The mode's starting entity: the covered wagon ──────────────────────────
+//
+// In settlers mode a seat does not start with a castle and a commander; it
+// starts with ONE covered wagon in the wilderness, carrying the mode's
+// `wagonSupplies`, and founding a settlement consumes it (design answer 1).
+//
+// The wagon is a HeroState -- the only entity the persistence layer has a home
+// for (`games.heroes`, mirrored by the granular heroes table, and `players.
+// heroIds`), and the reason "wagon movement and fog reveal like a hero" costs
+// no new movement/vision code: the hero rules ARE its rules. Its identity is
+// carried by its id, `p<seat>-wagon`, because the granulated heroes table has
+// fixed columns and the mode may not add one (§2.5: no schema migration for
+// the mode), so a per-entity boolean would not survive a reload. Every
+// consumer -- the engine's placers, the server's founding case, the client's
+// wagon rendering -- reads the id through these two functions rather than
+// re-spelling the suffix.
+export const COVERED_WAGON_ID_SUFFIX = "-wagon";
+
+/** The id of the covered wagon of seat `seat` (0-based player id). */
+export function coveredWagonIdFor(seat: number): string {
+  return `p${seat}${COVERED_WAGON_ID_SUFFIX}`;
+}
+
+/**
+ * True when `id` is a covered wagon's id rather than a recruited hero's
+ * (`p<seat>-hero`). Suffix-based and deliberately total: it is a naming
+ * convention, not a lookup, so it cannot throw on a legacy id.
+ */
+export function isCoveredWagonId(id: string): boolean {
+  return id.endsWith(COVERED_WAGON_ID_SUFFIX);
+}

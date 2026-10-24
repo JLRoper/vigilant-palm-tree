@@ -1,10 +1,33 @@
-import { hexDistance, type GameState, type SettlementId } from "@heroes/contracts";
+import type {
+  GameState,
+  Player,
+  SettlementId,
+  SettlementState,
+} from "@heroes/contracts";
+import { gameModeSettings, hexDistance, resolveGameMode } from "@heroes/contracts";
+import type { GameMap } from "../map/gameMap";
+import { isPassable } from "../map/terrain";
+import { cleanupDefeatedHeroCharters } from "../charter/cleanup";
+import {
+  computeSettlementRates,
+  defaultPopulation,
+  generateSettlementName,
+  SETTLEMENT_GOLD_TAX,
+} from "../economy/settlementRates";
+import { cityViewSizeFor, foodBiasForTerrain, generateCitySpots } from "../settlement/citySpots";
+import { settlersStreamRng } from "./startPlacement";
+import {
+  carriedSupplies,
+  foundedSettlementBuildings,
+  hasStock,
+} from "./supplies";
 
 // Founding a settlement in settlers mode (SETTLERS-PLAN.md §2, §4 W2).
 //
-// Phase 0 lands the SEAM only: the types, the ONE refusal vocabulary the
-// engine, the server and the UI sentence all share, and two signature-only
-// stubs that throw. No rule is implemented here.
+// This is the mode's own path, NOT a rewrite of the charter path: charters keep
+// their rules (gold, warehouse, travel, construction days) untouched. Here the
+// founding entity is a covered wagon that is already standing where it wants to
+// settle, and founding is immediate.
 
 /**
  * Why founding was refused. ONE vocabulary: the engine returns these strings,
@@ -43,6 +66,15 @@ export interface FoundSettlementRequest {
   /** The target hex. */
   q: number;
   r: number;
+  /**
+   * The game's map, so the rule can see terrain -- without it `tile_impassable`
+   * is unanswerable and the new settlement would have no terrain-derived rates
+   * or city spots. Added as an OPTIONAL field so the phase-0 seam's call shape
+   * stays valid for a caller that has no map (a pure state-level test), but
+   * every authoritative caller passes one: server/app/commandHandler.ts
+   * reconstructs it exactly as its StartCharter case does.
+   */
+  map?: GameMap;
 }
 
 export type FoundSettlementResult =
@@ -62,33 +94,169 @@ export type FoundSettlementResult =
  * so neither re-derives the rule (the distance check is `hexDistance`, the
  * same metric map/castlePlacement.ts spaces castles with).
  *
- * Signature-only in phase 0: throws rather than answering `ok: true`, because
- * a predicate that guesses is worse than one that is missing -- it would let
- * the UI offer a founding the rule then refuses.
+ * Checked in this order, cheapest and most fundamental first: the mode, then
+ * the founder's position, then the target hex's occupancy and terrain, then the
+ * spacing rule. A missing founder reads as `founder_not_at_tile` -- the
+ * vocabulary has no "no such entity", and the server's own case refuses a
+ * missing or foreign founder with `no_hero` / `forbidden_not_your_hero` before
+ * this rule is ever consulted.
  */
 export function canFoundSettlement(
   request: FoundSettlementRequest,
 ): { ok: true } | { ok: false; reason: FoundSettlementRefusal } {
-  void request;
-  void hexDistance;
-  throw new Error(
-    "settlers founding is not implemented yet (phase 0 is signature-only -- SETTLERS-PLAN.md §5)",
-  );
+  const { state, founderId, q, r } = request;
+  const mode = resolveGameMode(state.gameMode);
+  if (mode !== "settlers") return { ok: false, reason: "not_settlers_mode" };
+
+  const founder = state.heroes[founderId];
+  if (!founder || founder.q !== q || founder.r !== r) {
+    return { ok: false, reason: "founder_not_at_tile" };
+  }
+
+  const settlements = Object.values(state.settlements);
+  if (settlements.some((s) => s.q === q && s.r === r)) {
+    return { ok: false, reason: "occupied" };
+  }
+
+  const map = request.map;
+  if (map) {
+    const tile = map.get(q, r);
+    if (!tile || !isPassable(tile) || map.riverAt(q, r) || map.resourceTileAt(q, r)) {
+      return { ok: false, reason: "tile_impassable" };
+    }
+  }
+
+  const minDistance = gameModeSettings(mode).minFoundingDistance;
+  if (minDistance > 0) {
+    for (const s of settlements) {
+      if (hexDistance({ q, r }, { q: s.q, r: s.r }) < minDistance) {
+        return { ok: false, reason: "too_close_to_settlement" };
+      }
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * The stream a founded settlement's own derived content is drawn from.
+ *
+ * `state.castleSeed` rather than the map seed because GameState carries no map
+ * seed (the map seed is a creation-time input, and the start placement that
+ * owns it takes it as a parameter). It is itself derived from the map seed
+ * (hydrate.ts's defaultCastleSeedFromMapSeed) and persisted in the row, so it
+ * is stable across a reload and a replay -- and it is a DIFFERENT stream from
+ * every entity's start stream, so founding cannot move a start.
+ */
+function foundingStream(state: GameState, founderId: string, purpose: string): () => number {
+  return settlersStreamRng(state.castleSeed, `${founderId}:${purpose}`);
 }
 
 /**
  * Found a settlement at `(q, r)`: the settlers-mode twin of the charter path,
  * not a rewrite of it. Consumes the founder when the mode's
- * `wagonConsumedOnFounding` says so, writes `wagonSupplies` into the new
+ * `wagonConsumedOnFounding` says so, writes the founder's cargo into the new
  * settlement's warehouse, and leaves the starter layout to the existing
  * `freeStarterBuildings` rule.
  *
- * Signature-only in phase 0: it throws rather than returning a state, so a
- * caller cannot ship a founding whose rules were never written.
+ * Everything the new settlement contains is derived here, from the state, the
+ * map and the founder's own streams -- never from a client payload: the id is
+ * `s<nextSettlementId>` (the StartCharter allocation rule), the name and the
+ * city spots come from `settlers:<castleSeed>:<founderId>:*`, and the stock is
+ * the founder's cargo. Two foundings by the same wagon therefore reproduce
+ * identical content, and a replay cannot invent it.
  */
 export function foundSettlement(request: FoundSettlementRequest): FoundSettlementResult {
-  void request;
-  throw new Error(
-    "settlers founding is not implemented yet (phase 0 is signature-only -- SETTLERS-PLAN.md §5)",
-  );
+  const check = canFoundSettlement(request);
+  if (!check.ok) return { ok: false, state: request.state, reason: check.reason };
+
+  const { state, founderId, q, r, map } = request;
+  const founder = state.heroes[founderId];
+  const mode = resolveGameMode(state.gameMode);
+  const settings = gameModeSettings(mode);
+
+  const settlementId = `s${state.nextSettlementId}`;
+  const population = defaultPopulation(1);
+  const name = generateSettlementName(foundingStream(state, founderId, "name"), founder.ownerId);
+  // The terrain-derived half needs the map; without one (a state-level caller)
+  // the town is founded with no rates yet rather than with invented ones -- the
+  // same "do not guess" rule the seam's stubs followed.
+  const computed = map
+    ? computeSettlementRates(map, q, r, 1)
+    : { rates: {} as SettlementState["resourceRates"], foundedOn: null };
+  const spots = map
+    ? generateCitySpots(cityViewSizeFor(1), foundingStream(state, founderId, "city"), {
+        foodBias: foodBiasForTerrain(map.get(q, r) ?? ""),
+      })
+    : { spots: [], mines: [] };
+  const warehouse = carriedSupplies(founder);
+
+  const settlement: SettlementState = {
+    id: settlementId,
+    name,
+    ownerId: founder.ownerId,
+    q,
+    r,
+    level: 1,
+    population,
+    goldTax: SETTLEMENT_GOLD_TAX[1],
+    resourceRates: computed.rates,
+    foundedOnResource: computed.foundedOn,
+    // The wagon's own purse moves into the treasury with it: founding is a
+    // settlement being planted, not the wagon's gold going up in smoke.
+    gold: founder.gold,
+    warehouse,
+    citySpots: spots.spots,
+    cityMines: spots.mines,
+    morale: 100,
+    // Upkeep shortfall fields: a fresh town starts paid up (makeSettlements'
+    // own starting values).
+    garrisonUnpaidSinceDay: null,
+    garrisonUnpaidTroops: 0,
+    garrisonUnpaidGold: 0,
+    // New settlements run their food through the caravan recommender, not the
+    // legacy instant auto-trade (POST /games writes the same false for new
+    // games).
+    autoTrade: false,
+    // Deterministic, not drawn: the wagon founds a plain tier-1 town, and a
+    // random castle sprite is a draw this stream must not spend.
+    castleVariant: 0,
+    buildings: foundedSettlementBuildings(mode, population),
+  };
+
+  const consumedFounder = settings.wagonConsumedOnFounding;
+  const heroes = { ...state.heroes };
+  if (consumedFounder) delete heroes[founderId];
+
+  const players: Player[] = state.players.map((p) => {
+    if (p.id !== founder.ownerId) return p;
+    return {
+      ...p,
+      settlementIds: [...p.settlementIds, settlementId],
+      // A consumed founder leaves the seat's roster: the wagon IS the
+      // settlement now, and playerHeroId-style lookups must not resolve to a
+      // hero that no longer exists.
+      heroIds: consumedFounder ? p.heroIds.filter((id) => id !== founderId) : p.heroIds,
+    };
+  });
+
+  // A consumed founder takes its charter with it, the same rule the battle
+  // path applies to a defeated hero -- otherwise activeCharters would keep an
+  // entry naming a hero that is gone.
+  const folded =
+    consumedFounder ? cleanupDefeatedHeroCharters(state, founderId) : state;
+
+  return {
+    ok: true,
+    state: {
+      ...folded,
+      heroes,
+      settlements: { ...state.settlements, [settlementId]: settlement },
+      players,
+      nextSettlementId: state.nextSettlementId + 1,
+      dirty: true,
+    },
+    settlementId,
+    consumedFounder,
+    suppliesGranted: hasStock(warehouse),
+  };
 }

@@ -2,6 +2,7 @@ import type {
   BuildingDef,
   CastleVariant,
   FactionId,
+  GameMode,
   GameState,
   GenerationStyle,
   HeroId,
@@ -14,8 +15,17 @@ import type {
   SettlementId,
   SettlementState,
 } from "@heroes/contracts";
-import { MOVEMENT_PER_TURN } from "@heroes/contracts";
-import type { GameMap } from "./map/gameMap";
+import {
+  DEFAULT_GAME_MODE,
+  MOVEMENT_PER_TURN,
+  coveredWagonIdFor,
+  gameModeSettings,
+  resolveGameMode,
+} from "@heroes/contracts";
+import type { GameMap, MapSize } from "./map/gameMap";
+import { MAP_SIZE_ORDER, MAP_SIZES } from "./map/gameMap";
+import { placeSettlersStarts, type SettlersStart } from "./settlers/startPlacement";
+import { wagonSuppliesFor } from "./settlers/supplies";
 import { defaultCastleSeedFromMapSeed } from "./hydrate";
 import { generateCastles, defaultCastleCountForMap } from "./map/castlePlacement";
 import {
@@ -77,6 +87,24 @@ export interface BuildInitialOptions {
    * false keeps the legacy path byte-identical (no key anywhere).
    */
   uncharted?: boolean;
+  /**
+   * The game's mode (SETTLERS-PLAN.md §1). Absent/unreadable reads as classic,
+   * so every caller that predates the mode seeds today's entities
+   * byte-for-byte. On "settlers" the seats are NOT given castles or heroes:
+   * each one starts with a single covered wagon in the wilderness, carrying
+   * the mode's wagonSupplies, placed by settlers/startPlacement.ts.
+   */
+  gameMode?: GameMode;
+  /**
+   * The game's MAP seed, used by exactly one pass: the settlers start
+   * placement, whose wagons draw from
+   * `mulberry32(hashString("settlers:<mapSeed>:p<seat>-wagon"))`. Deliberately
+   * NOT `castleSeed` (§2.3: the stream is the map seed's, not the castle
+   * seed's), and deliberately separate from the shared `rng` the callers pass,
+   * so no settlers draw can move an existing seed's names, horse variants,
+   * city spots or castle positions. Ignored on the classic path.
+   */
+  mapSeed?: number;
 }
 
 function clampPlayerCount(n: number | undefined): number {
@@ -211,6 +239,7 @@ function makePlayers(
   playerCount: number,
   humanSeatCount: number,
   seatFactions?: readonly FactionId[],
+  wagonSeats: readonly PlayerId[] = [],
 ): Player[] {
   const out: Player[] = [];
   for (let i = 0; i < playerCount; i++) {
@@ -223,7 +252,9 @@ function makePlayers(
       faction,
       name,
       color: PLAYER_COLORS[i] ?? "#cccccc",
-      heroIds: [heroIdFor(i)],
+      // A settlers seat's roster entry is its WAGON, not a commander: the
+      // wagon is the only entity it owns until it founds (see makeWagons).
+      heroIds: [wagonSeats.includes(i) ? coveredWagonIdFor(i) : heroIdFor(i)],
       settlementIds: settlementIds[`p${i}`] ?? [],
       // Wagon pool (docs/wagons-stockpiles-trade-routes-plan.md §5.1): the
       // 5 starting wagons are already assigned to the starting hero.
@@ -351,6 +382,114 @@ function makeHeroes(
     });
   }
   return heroes;
+}
+
+/**
+ * The castles a mode actually seeds entities from.
+ *
+ * Classic: exactly what generateCastles produced, untouched.
+ *
+ * Settlers (§2.1: pre-existing towns are ENTITY seeding, not terrain): a seat
+ * starts with a wagon in the wilderness, so every OWNED castle is dropped --
+ * the seats get no starting town, no starting hero and no starting settlement
+ * list. The neutrals stay (design answer 4: they are still capture objectives
+ * and AI charter targets) unless the mode's own `neutralCastles` key says
+ * otherwise, and that suppression is a FILTER over the generated list, never a
+ * change to castlePlacement.ts's candidate scan or draw order -- changing the
+ * scan would move every neutral's position and, with it, every name/horse
+ * variant drawn after it (§2.4's pin).
+ *
+ * generateCastles runs on its own seed-derived stream (never the caller's
+ * `rng`), so dropping entries here cannot shift a single draw.
+ */
+function modeCastles(
+  map: GameMap,
+  castleSeed: number,
+  playerCount: number,
+  castleCount: number,
+  mode: GameMode,
+): PlacedCastle[] {
+  const placed = generateCastles(map, {
+    castleSeed,
+    playerCount,
+    castleCount: Math.max(castleCount, playerCount),
+  });
+  if (mode !== "settlers") return placed;
+  const neutralCastles = gameModeSettings(mode).neutralCastles;
+  // `neutralCastles: false` (a reader who answers §3's question 4 with "no")
+  // empties the filter's output -- the suppression §3 itself describes.
+  return placed.filter((c) => c.ownerId === null && neutralCastles);
+}
+
+/** The display name of a seat's starting wagon. */
+export const COVERED_WAGON_NAME = "Covered Wagon";
+
+/**
+ * The one horse-variant id a wagon carries. It is a REQUIRED HeroState field
+ * and has nothing to draw from that this mode owns (drawing one would spend a
+ * stream the mode's own placement uses), so a wagon names the generic "hero"
+ * variant: no wagon art exists yet, and the client tells a wagon from a
+ * commander by its id (coveredWagonIdFor), not by its variant.
+ */
+const COVERED_WAGON_VARIANT = "hero" as const;
+
+/**
+ * One covered wagon per placed start.
+ *
+ * The wagon IS a HeroState, which is what makes "wagon movement and fog reveal
+ * like a hero" true for free: the movement reset (turn/round.ts) reads
+ * `movementRemaining`, and reveal.ts's vision ring is computed from the heroes
+ * record -- there is no second movement or fog system to keep in step.
+ *
+ * It carries no army: it is a wagon, and founding is what it is for. Its
+ * supplies ride as CARGO (`resources`), which is exactly what founding moves
+ * into the new town's warehouse, and they fit the 5-wagon cargo cap
+ * (settlement/capacity.ts: 5 x 50 = 250 per resource vs the mode's 200 max).
+ * No rng draw happens here -- the start itself was drawn by the placement pass.
+ */
+function makeWagons(starts: readonly SettlersStart[], mode: GameMode): HeroState[] {
+  return starts.map((start) => {
+    const manaPool = maxManaFor(DEFAULT_HERO_INTELLIGENCE);
+    return {
+      id: coveredWagonIdFor(start.playerId),
+      name: COVERED_WAGON_NAME,
+      ownerId: start.playerId,
+      q: start.q,
+      r: start.r,
+      movementRemaining: MOVEMENT_PER_TURN,
+      previousQ: null,
+      previousR: null,
+      previousMovementRemaining: null,
+      trail: [{ q: start.q, r: start.r }],
+      gold: 0,
+      troops: 0,
+      stacks: [],
+      isChartering: false,
+      charterId: null,
+      horseVariant: COVERED_WAGON_VARIANT,
+      arcane: DEFAULT_HERO_ARCANE,
+      intelligence: DEFAULT_HERO_INTELLIGENCE,
+      heroMana: manaPool,
+      heroMaxMana: manaPool,
+      heroSpell: DEFAULT_HERO_SPELL,
+      morale: 100,
+      upkeepUnpaidSinceDay: null,
+      upkeepUnpaidTroops: 0,
+      upkeepUnpaidGold: 0,
+      wagons: DEFAULT_HERO_WAGONS,
+      treasuryWagons: DEFAULT_TREASURY_WAGONS,
+      resources: wagonSuppliesFor(mode),
+    };
+  });
+}
+
+/** The map tier a built map is, for the settlers request's own `size` field. */
+function mapSizeOf(map: GameMap): MapSize {
+  for (const size of MAP_SIZE_ORDER) {
+    const dims = MAP_SIZES[size];
+    if (dims.width === map.width && dims.height === map.height) return size;
+  }
+  return "small";
 }
 
 function makeSettlements(
@@ -504,6 +643,67 @@ function splitByOwner(settlements: SettlementState[]): Record<string, string[]> 
   return out;
 }
 
+/**
+ * The entity seeding pass -- the ONE place a game mode changes what a game
+ * starts with (§2.1: pre-existing towns and castles are entity seeding, not
+ * terrain; §2.2: no MapGenVersion and no generation pass is touched).
+ *
+ * Classic runs today's sequence exactly: generateCastles -> makeSettlements ->
+ * makePlayers -> makeHeroes, sharing the one `rng` the caller brought.
+ *
+ * Settlers replaces the seats' castles with wagons:
+ *   - `modeCastles` drops every owned castle (and the neutrals only if the
+ *     mode's own key says so), so makeSettlements seeds the wilderness alone
+ *     and makeHeroes has no owner to spawn a commander for;
+ *   - the wagon hexes come from `placeSettlersStarts`, which draws ONLY from
+ *     the settlers streams (`settlers:<mapSeed>:p<seat>-wagon`, §2.3) and
+ *     spends no draw of the shared `rng` at all -- the reason a settlers game
+ *     cannot move an existing seed's names, variants or spots (§2.4);
+ *   - one wagon per seat is built by `makeWagons`, and the seat's roster entry
+ *     points at it instead of at a commander.
+ */
+function seedEntities(
+  map: GameMap,
+  rng: () => number,
+  opts: BuildInitialOptions | undefined,
+  playerCount: number,
+  humanSeatCount: number,
+  castleCount: number,
+  mapSeed: number,
+  castleSeed: number,
+): { mode: GameMode; settlements: SettlementState[]; players: Player[]; heroes: HeroState[] } {
+  const mode = resolveGameMode(opts?.gameMode);
+  const castles = modeCastles(map, castleSeed, playerCount, castleCount, mode);
+  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes, castleSeed);
+  // A start never lands on an existing settlement: the neutrals are on the
+  // board before the wagons are placed, so a wagon can always found where it
+  // stands (see settlers/found.ts's distance rule).
+  const starts =
+    mode === "settlers"
+      ? placeSettlersStarts({
+          seed: mapSeed,
+          size: mapSizeOf(map),
+          playerCount,
+          humanSeatCount,
+          mode,
+          map,
+          occupied: settlements.map((s) => ({ q: s.q, r: s.r })),
+        })
+      : [];
+  const players = makePlayers(
+    splitByOwner(settlements),
+    playerCount,
+    humanSeatCount,
+    opts?.seatFactions,
+    starts.map((s) => s.playerId),
+  );
+  const heroes =
+    mode === "settlers"
+      ? makeWagons(starts, mode)
+      : makeHeroes(castles, playerCount, rng, humanSeatCount);
+  return { mode, settlements, players, heroes };
+}
+
 export function buildInitialGameState(
   map: GameMap,
   rng: () => number,
@@ -515,25 +715,32 @@ export function buildInitialGameState(
   const humanSeatCount = clampHumanSeatCount(opts?.humanSeatCount, playerCount);
   const castleCount = opts?.castleCount ?? defaultCastleCountForMap(playerCount, map.width, map.height);
 
-  const castles = generateCastles(map, {
-    castleSeed,
+  const seeded = seedEntities(
+    map,
+    rng,
+    opts,
     playerCount,
-    castleCount: Math.max(castleCount, playerCount),
-  });
-
-  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes, castleSeed);
-  const settlementIds = splitByOwner(settlements);
-  const players = makePlayers(settlementIds, playerCount, humanSeatCount, opts?.seatFactions);
-  const heroes = makeHeroes(castles, playerCount, rng, humanSeatCount);
-  return createInitialState({
-    seedPlayers: opts?.uncharted === true ? seedInitialReveal(players, heroes, settlements, humanSeatCount) : players,
-    seedHeroes: heroes,
-    seedSettlements: settlements,
+    humanSeatCount,
+    castleCount,
+    opts?.mapSeed ?? mapSeed,
+    castleSeed,
+  );
+  const state = createInitialState({
+    seedPlayers:
+      opts?.uncharted === true
+        ? seedInitialReveal(seeded.players, seeded.heroes, seeded.settlements, humanSeatCount)
+        : seeded.players,
+    seedHeroes: seeded.heroes,
+    seedSettlements: seeded.settlements,
     seedRound: 1,
     seedActivePlayerId: 0,
     seedCastleSeed: castleSeed,
     seedCastleCount: Math.max(castleCount, playerCount),
   });
+  // Absent on a classic game (the DEFAULT_GAME_MODE) so a pre-mode caller's
+  // state object is unchanged key-for-key; present on a settlers game, which
+  // is what every mode-dependent rule reads.
+  return seeded.mode === DEFAULT_GAME_MODE ? state : { ...state, gameMode: seeded.mode };
 }
 
 export interface InitialStatePayload {
@@ -556,24 +763,31 @@ export function makeInitialStatePayload(
   const humanSeatCount = clampHumanSeatCount(opts?.humanSeatCount, playerCount);
   const castleCount = opts?.castleCount ?? defaultCastleCountForMap(playerCount, map.width, map.height);
 
-  const castles = generateCastles(map, {
-    castleSeed,
+  // Same seeding pass as buildInitialGameState -- one implementation of "what
+  // a mode starts with", so the server's creation payload and an offline
+  // buildInitialGameState can never disagree (the settlement-count trap that
+  // would otherwise hide a mode difference).
+  const seeded = seedEntities(
+    map,
+    rng,
+    opts,
     playerCount,
-    castleCount: Math.max(castleCount, playerCount),
-  });
-  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes, castleSeed);
-  const settlementIds = splitByOwner(settlements);
-  const players = makePlayers(settlementIds, playerCount, humanSeatCount, opts?.seatFactions);
-  const heroes = makeHeroes(castles, playerCount, rng, humanSeatCount);
+    humanSeatCount,
+    castleCount,
+    opts?.mapSeed ?? mapSeed,
+    castleSeed,
+  );
   const seededPlayers =
-    opts?.uncharted === true ? seedInitialReveal(players, heroes, settlements, humanSeatCount) : players;
+    opts?.uncharted === true
+      ? seedInitialReveal(seeded.players, seeded.heroes, seeded.settlements, humanSeatCount)
+      : seeded.players;
   return {
     round: 1,
     day: 1,
     active_player_id: 0,
     players: seededPlayers,
-    heroes: Object.fromEntries(heroes.map((h) => [h.id, h])),
-    settlements: Object.fromEntries(settlements.map((s) => [s.id, s])),
+    heroes: Object.fromEntries(seeded.heroes.map((h) => [h.id, h])),
+    settlements: Object.fromEntries(seeded.settlements.map((s) => [s.id, s])),
   };
 }
 

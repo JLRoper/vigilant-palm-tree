@@ -929,6 +929,34 @@ export function parseCommand(body: unknown, gameName: string): Command | null {
     };
   }
 
+  if (b.kind === "FoundSettlement") {
+    // The settlers mode's founding command. Like StartCharter, the payload is
+    // only WHERE and WHO: the settlement's id, name, stockpile, rates and city
+    // spots are the engine's own derivations (settlers/found.ts), so there is
+    // nothing else here to validate. Integers are required because the target
+    // is an axial tile; whether that tile can hold a settlement is the engine's
+    // refusal to make (tile_impassable / occupied / too_close_to_settlement),
+    // surfaced by the handler as a 409 rather than a 400.
+    if (
+      typeof b.founderId !== "string" ||
+      b.founderId.length === 0 ||
+      typeof b.q !== "number" ||
+      !Number.isInteger(b.q) ||
+      typeof b.r !== "number" ||
+      !Number.isInteger(b.r)
+    ) {
+      return null;
+    }
+    return {
+      kind: "FoundSettlement",
+      gameName,
+      actor: b.actor,
+      founderId: b.founderId,
+      q: b.q,
+      r: b.r,
+    };
+  }
+
   return null;
 }
 

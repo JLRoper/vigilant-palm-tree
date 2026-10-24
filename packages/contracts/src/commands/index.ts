@@ -26,6 +26,7 @@ import type { AssignWorkersCommand } from "./assignWorkers";
 import type { TransferUnitsCommand } from "./transferUnits";
 import type { TradeHeroesCommand } from "./tradeHeroes";
 import type { SubmitSettlementBattleResultCommand } from "./submitSettlementBattleResult";
+import type { FoundSettlementCommand } from "./foundSettlement";
 
 export * from "./moveHero";
 export * from "./transferGold";
@@ -55,6 +56,7 @@ export * from "./assignWorkers";
 export * from "./transferUnits";
 export * from "./tradeHeroes";
 export * from "./submitSettlementBattleResult";
+export * from "./foundSettlement";
 
 // Grows with each command port. Week 1 of Phase 3 Track 3.A shipped
 // MoveHero/TransferGold; EndTurn followed in Week 2
@@ -110,4 +112,5 @@ export type Command =
   | TransferUnitsCommand
   | TradeHeroesCommand
   | SubmitSettlementBattleResultCommand
-  | EnterBattleCommand;
+  | EnterBattleCommand
+  | FoundSettlementCommand;

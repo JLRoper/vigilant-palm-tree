@@ -1,4 +1,4 @@
-import { hydrateGameState, readPendingBattle } from "@heroes/engine";
+import { hydrateGameState, readGameMode, readPendingBattle } from "@heroes/engine";
 import type { HydratableGameRow } from "@heroes/engine";
 import type { CharterState, GameState, HeroState, SettlementState } from "@heroes/contracts";
 import { createGameRepo } from "./repositories/gameRepo";
@@ -86,7 +86,14 @@ export async function hydrateFromRepos(
   if (heroes.length === 0 || settlements.length === 0) {
     logHydrateFallback(gameName);
     return {
-      state: hydrateGameState({ ...row, pendingBattle: readPendingBattle(row.lobby) }),
+      state: hydrateGameState({
+        ...row,
+        pendingBattle: readPendingBattle(row.lobby),
+        // The mode rides the same lobby bag (SETTLERS-PLAN.md §2.5): read on
+        // BOTH paths, so a settlers game's rules do not depend on which one
+        // answered. Absent/unreadable stays undefined = classic.
+        gameMode: readGameMode(row.lobby),
+      }),
       source: "jsonb",
     };
   }
@@ -97,6 +104,7 @@ export async function hydrateFromRepos(
     heroes: byId(heroes),
     settlements: byId(settlements),
     pendingBattle: readPendingBattle(row.lobby),
+    gameMode: readGameMode(row.lobby),
   });
   return { state: { ...state, activeCharters: charters }, source: "granular" };
 }

@@ -68,11 +68,11 @@ export * from "./settlement/upgradeSettlement";
 export * from "./settlement/advance";
 export * from "./settlement/populationGrowth";
 export * from "./settlement/produceResources";
-// Settlers game mode (SETTLERS-PLAN.md §4 W2): start placement + founding.
-// Both are signature-only in phase 0 -- the exported RNG stream
-// (settlersStreamRng) is the real seam, the rules throw.
+// Settlers game mode (SETTLERS-PLAN.md §4 W2): start placement, founding, and
+// the supplies a wagon carries into the settlement it founds.
 export * from "./settlers/startPlacement";
 export * from "./settlers/found";
+export * from "./settlers/supplies";
 export * from "./hero/move";
 export * from "./ai/aiBrain";
 export * from "./hero/recruit";

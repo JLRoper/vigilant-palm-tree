@@ -19,11 +19,13 @@ import {
 } from "@heroes/engine";
 import type {
   FactionId,
+  GameMode,
   HeroState,
   Player,
   SettlementState,
   TradeRouteState,
 } from "@heroes/contracts";
+import { GAME_MODES, isGameMode, resolveGameMode } from "@heroes/contracts";
 import type { PoolClient } from "pg";
 
 // The map generation version every NEW game is created with -- one constant,
@@ -130,6 +132,13 @@ export interface LobbyState {
   // server/app/commandHandler.ts to gate per-command reveal merging.
   uncharted?: boolean;
   mapGenVersion?: MapGenVersion;
+  /**
+   * The game's mode (SETTLERS-PLAN.md §1/§2.5), written explicitly on every
+   * game this route creates -- the `uncharted`/`legacyAutoTrade` discipline, so
+   * an absent key can never be read as anything but what was actually chosen.
+   * Absent on every pre-mode row, which reads as classic.
+   */
+  gameMode?: GameMode;
 }
 
 export async function generateAndInsertTiles(
@@ -424,13 +433,27 @@ router.post("/games", async (req, res) => {
       legacyAutoTrade: legacyAutoTradeOptIn,
       uncharted,
       seatFactions,
+      gameMode,
     } = req.body ?? {};
     if (typeof name !== "string" || !name) {
       res.status(400).json({ error: "name required" });
       return;
     }
     const storedMapSize = isMapSize(mapSize) ? mapSize : "small";
-    console.log(`[api] POST /games name=${name} hero=(${hero_q},${hero_r}) mapSize=${storedMapSize}`);
+    // The game's mode (SETTLERS-PLAN.md §1): a stored, per-game value carried
+    // in the lobby jsonb exactly as `uncharted`/`legacyAutoTrade` are -- no
+    // column, no migration (§2.5). A value that is PRESENT but not a known mode
+    // is a 400 (the seatFactions precedent): silently resolving a typo to
+    // classic would hand the player a game they did not ask for. Absent (and
+    // every pre-mode client) reads as the default.
+    if (gameMode !== undefined && !isGameMode(gameMode)) {
+      res.status(400).json({ error: `gameMode must be one of ${GAME_MODES.join(", ")}` });
+      return;
+    }
+    const resolvedGameMode: GameMode = resolveGameMode(gameMode);
+    console.log(
+      `[api] POST /games name=${name} hero=(${hero_q},${hero_r}) mapSize=${storedMapSize} gameMode=${resolvedGameMode}`,
+    );
     const map = getOrCreateGameMap(seed, storedMapSize as MapSize, NEW_GAME_MAP_GEN_VERSION);
     const topHumanSlots = Number.isInteger(humanSlots) ? (humanSlots as number) : null;
     const lobbyObj = lobby && typeof lobby === "object" ? lobby : null;
@@ -479,6 +502,12 @@ router.post("/games", async (req, res) => {
       ...initOptsBase,
       unitTypes: initUnitTypes,
       uncharted: uncharted === true,
+      // The mode drives which entities a new game starts with (§2.1: it is
+      // entity seeding, never terrain -- no MapGenVersion here, by design), and
+      // the map seed is what the settlers start placement draws its wagons'
+      // own stream from (§2.3).
+      gameMode: resolvedGameMode,
+      mapSeed: seed,
       ...(seatFactionsSafe ? { seatFactions: seatFactionsSafe } : {}),
     };
     const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179), initOpts);
@@ -491,6 +520,10 @@ router.post("/games", async (req, res) => {
       legacyAutoTrade: legacyAutoTradeOptIn === true,
       mapGenVersion: NEW_GAME_MAP_GEN_VERSION,
       uncharted: uncharted === true,
+      // Written on every new game, the uncharted precedent: the mode is the
+      // one value every mode-dependent rule reads, and an explicit write means
+      // a fresh row can never be misread as a mode nobody chose.
+      gameMode: resolvedGameMode,
     };
     const explicitSeats =
       lobbyObj && Number.isInteger(lobbyObj.seats) ? (lobbyObj.seats as number) : null;
@@ -505,6 +538,10 @@ router.post("/games", async (req, res) => {
         claimed: {},
         mapGenVersion: NEW_GAME_MAP_GEN_VERSION,
         uncharted: uncharted === true,
+        // The mode must ride the lobby rebuild too, for the same reason the
+        // uncharted flag does: a humanSlots game that dropped it would be a
+        // classic game on the next read.
+        gameMode: resolvedGameMode,
       };
     }
     if (lobbyState.humanSlots !== undefined && lobbyState.humanSlots < 1) {

@@ -278,4 +278,23 @@ export type EngineEvent =
         gy: number;
         workers: number;
         district?: { q: number; r: number };
+      }
+    | {
+        // A settlers-mode covered wagon founded a settlement (SETTLERS-PLAN.md
+        // §4 W1). Classified "resync" in ENGINE_EVENT_SYNC_CLASS, the
+        // CharterStarted rule: the new settlement's terrain-derived rates,
+        // food-biased city spots, stream-derived name and starter stockpile
+        // are the engine's own draws (it needs the map to make them), so a
+        // replaying client refetches instead of guessing at them.
+        type: "SettlementFounded";
+        actor: PlayerSeat;
+        founderId: HeroId;
+        /** The id the new settlement was allocated (s<nextSettlementId>). */
+        settlementId: SettlementId;
+        /** The settlement's terrain-derived name, for the event log. */
+        name: string;
+        q: number;
+        r: number;
+        /** True when the founder was consumed (design answer 1). */
+        consumedFounder: boolean;
       };

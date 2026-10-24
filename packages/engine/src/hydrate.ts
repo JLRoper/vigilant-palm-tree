@@ -1,6 +1,7 @@
 import type {
   CaravanState,
   DistrictState,
+  GameMode,
   GameState,
   HeroId,
   HeroState,
@@ -11,7 +12,7 @@ import type {
   TradeRouteState,
   WarehouseResource,
 } from "@heroes/contracts";
-import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+import { DEFAULT_GAME_MODE, WAREHOUSE_RESOURCES, isGameMode, resolveGameMode } from "@heroes/contracts";
 import { defaultPopulation, SETTLEMENT_GOLD_TAX } from "./economy/settlementRates";
 import { endpointOwner } from "./logistics";
 import { VALID_HORSE_VARIANTS } from "./horseVariants";
@@ -99,6 +100,13 @@ export interface HydratableGameRow {
    * phase rather than throwing.
    */
   pendingBattle?: PendingBattleMarker | null;
+  /**
+   * games.lobby.gameMode (SETTLERS-PLAN.md §1), normalized into the state by
+   * hydrateGameState. Optional + read through readGameMode below: an absent or
+   * unreadable value is a classic game, never an error, so every pre-mode row
+   * and every caller that predates the mode keeps working unchanged.
+   */
+  gameMode?: GameMode;
 }
 
 // A pending-battle marker as persisted in games.lobby.pendingBattle.
@@ -127,6 +135,24 @@ export function readPendingBattle(lobby: unknown): PendingBattleMarker | null {
   if (typeof marker.defenderId !== "string" || marker.defenderId.length === 0) return null;
   if (typeof marker.since !== "number" || !Number.isFinite(marker.since)) return null;
   return { attackerId: marker.attackerId, defenderId: marker.defenderId, since: marker.since };
+}
+
+/**
+ * Structural read of `games.lobby.gameMode` (SETTLERS-PLAN.md §1/§2.5) -- the
+ * `readPendingBattle` shape, next to it because both read one key out of the
+ * same untyped jsonb bag.
+ *
+ * Returns the mode the row carries, or `undefined` when it carries none (a
+ * pre-mode row) or carries junk (a hand-edited lobby bag, a typo'd write):
+ * "absent reads as classic" is then `resolveGameMode`'s job at the call site,
+ * and the absent-vs-explicit distinction survives -- which is what keeps a
+ * classic game's hydrated state key-for-key what it was before the mode
+ * existed.
+ */
+export function readGameMode(lobby: unknown): GameMode | undefined {
+  if (!lobby || typeof lobby !== "object") return undefined;
+  const raw = (lobby as { gameMode?: unknown }).gameMode;
+  return isGameMode(raw) ? raw : undefined;
 }
 
 function warnMissing(path: string, field: string): void {
@@ -425,6 +451,11 @@ export function hydrateGameState(
   // the active player's faction would imply is not the truth. Malformed /
   // absent -> the faction-derived behavior below, unchanged.
   const pendingBattle = readPendingBattle(row);
+  // The game's mode (SETTLERS-PLAN.md §1): absent/unreadable reads as classic,
+  // so nothing below changes for a pre-mode row. Only a NON-default mode is
+  // written into the state, which keeps a classic state key-for-key identical
+  // to what it was before the mode existed.
+  const gameMode = resolveGameMode(readGameMode(row));
   // Trade routes normalize per record (either persisted generation), and
   // the id counter derives from the normalized ids -- see
   // normalizeTradeRoute/deriveNextTradeRouteId above. Route ownership is
@@ -476,5 +507,6 @@ export function hydrateGameState(
     // (a completed charter's settlement is already counted in both), so
     // this never diverges from a plain read in the steady state.
     nextSettlementId: Math.max(row.next_settlement_id ?? 0, settlementCount),
+    ...(gameMode !== DEFAULT_GAME_MODE ? { gameMode } : {}),
   };
 }
