@@ -712,6 +712,20 @@ Creation boilerplate collapsed into `createPanel({ key, defaultPosition, ... })`
 
 Test inventory: `test/screens/shared/panelManager.test.ts` (12 cases: stacking order and the four Escape rules — topmost only, hidden skipped, opt-out skipped, nested state consumed), `test/screens/shared/dialogDismiss.test.ts` (backdrop only; Escape is the manager's), `test/screens/shared/panelAnchor.test.ts`, and the existing `assaultConfirmModal` / `logisticsModal` suites now assert Escape through the manager.
 
+### Faction roster parity and starter recruitment (2026-10-22)
+
+Each playable faction now has twelve units. Migration `033_roster_parity.sql` inserts fifteen units, assigns their faction/tier/range/specialty, reapplies migration 021's tier upkeep formulas for first-boot correctness, and overrides the selected existing-unit stats on every boot. Recruitment prices remain registry data; the catalog totals 52 rows including four neutral monsters.
+
+| Area | Responsibility |
+|---|---|
+| `packages/engine/src/buildingRegistry.ts` | Seven new troop-building kinds, expanded recruits and prices, starter economy parity, optional faction tags, and `buildingAllowedForFaction`. Untagged kinds and missing-faction callers remain allowed. |
+| `packages/engine/src/settlement/starterLayout.ts`, `packages/engine/src/init.ts` | Owner-faction selection: human farmhouse, ashen crypt, ironmark delversHall, verdant seedlingGrove; neutral/undefined retain farmhouse. Empty-city opening uses the same starter layout. |
+| `packages/engine/src/settlement/placeBuildings.ts` | Rejects newly placed foreign kinds with `wrong_faction`, preserving existing foreign buildings at their saved coordinates. No saved-game conversion is applied. |
+| `src/screens/settlements/cityView/buildListSections.ts` | Filters the build palette with the same faction helper. |
+| `src/data/unitImages.ts`, generated sprite keys and anchors | Registers placeholder icons and discovers copied building/arena PNGs; [provenance](../design/arena-unit-sprites/roster-parity-placeholder-art.md) records the existing source art. |
+
+All faction starters preserve farmhouse food, population, staffing and draft economics. Crypt retains +1 defence and its 150g + 4w cost; the two new starter kinds cost 80g + 4w. Existing foreign farmhouses remain in saved games and cannot recruit for another faction. The full unit, cost and building-level tables are in [army.md](./army.md).
+
 ### Battle retreat rules + stuck-arena fix (2026-10-21)
 
 Plan: [`plan/2026-10-21-battle-retreat-rules.md`](../plan/2026-10-21-battle-retreat-rules.md). Amends the retreat half of [Hero battle outcomes (2026-09-29)](#hero-battle-outcomes-2026-09-29): retreat no longer wipes the army, and the auto-resolver now concedes.

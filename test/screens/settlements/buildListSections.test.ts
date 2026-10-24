@@ -66,7 +66,7 @@ test("the food producers are Production (granary is a producer+storage hybrid)",
 
 test("exact section membership in BUILDABLE_KINDS order", () => {
   const sections = buildListSections();
-  assert.deepEqual(sections[0]?.kinds, ["archeryRange", "barracks", "mageGuild", "farmhouse", "stables", "huntingLodge", "eyrie", "crypt", "ossuary", "wraithBarrows", "spireOfAsh", "forgeHall", "gunnersRedoubt", "golemFoundry", "deepAnvil", "groveSanctum", "warrenLodge", "sylvanStables", "worldrootGrove"]);
+  assert.deepEqual(sections[0]?.kinds, ["archeryRange", "barracks", "mageGuild", "farmhouse", "stables", "huntingLodge", "eyrie", "blackChapel", "dragonBoneyard", "delversHall", "hearthTemple", "ramPens", "seedlingGrove", "druidCircle", "crypt", "ossuary", "wraithBarrows", "spireOfAsh", "forgeHall", "gunnersRedoubt", "golemFoundry", "deepAnvil", "groveSanctum", "warrenLodge", "sylvanStables", "worldrootGrove"]);
   assert.deepEqual(sections[1]?.kinds, ["goldMine", "woodcutterHut", "stoneMine", "ironMine", "arcaneFont", "farmField", "granary"]);
   assert.deepEqual(sections[2]?.kinds, [
     "townHall", "house", "tower", "smithy", "market", "apartment", "warehouse", "bank", "treasury", "shipyard",
@@ -131,4 +131,24 @@ test("sections come back in the fixed title order", () => {
     buildListSections().map((s) => s.title),
     ["Troop Buildings", "Production", "Civilian"],
   );
+});
+
+
+test("each faction palette includes its recruits and shared buildings", () => {
+  const expected = {
+    human: ["farmhouse", "barracks", "archeryRange", "mageGuild", "stables", "huntingLodge", "eyrie"],
+    ashen: ["crypt", "ossuary", "wraithBarrows", "spireOfAsh", "blackChapel", "dragonBoneyard"],
+    ironmark: ["delversHall", "forgeHall", "gunnersRedoubt", "golemFoundry", "deepAnvil", "hearthTemple", "ramPens"],
+    verdant: ["seedlingGrove", "groveSanctum", "warrenLodge", "sylvanStables", "worldrootGrove", "druidCircle"],
+  } as const;
+  for (const faction of Object.keys(expected) as (keyof typeof expected)[]) {
+    const sections = buildListSections(faction);
+    assert.deepEqual(new Set(sections[0].kinds), new Set(expected[faction]), faction);
+    const kinds = sections.flatMap((section) => section.kinds);
+    for (const shared of ["house", "farmField", "townHall", "shipyard", "tower"] as const) {
+      assert.ok(kinds.includes(shared), `${faction}: ${shared}`);
+    }
+  }
+  assert.equal(buildListSections("neutral")[0].kinds.length, 0);
+  assert.equal(buildListSections()[0].kinds.length, 26);
 });

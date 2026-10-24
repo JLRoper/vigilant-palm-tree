@@ -14,7 +14,6 @@ import type {
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
 import { normalizePlatoons } from "@heroes/engine";
 import { handleCommand } from "../../server/app/commandHandler";
-import type { UnitType } from "@heroes/engine";
 import {
   createMockCharterRepo,
   createMockEventRepo,
@@ -430,3 +429,35 @@ test("RecruitUnits: the gate is symmetric — a verdant seat cannot recruit huma
   assert.equal(result.reason, "unit_not_in_seat_faction");
   assert.equal(eventRepo.events.length, 0);
 });
+
+for (const [factionId, buildingKind, unitTypeId, price] of [
+  ["human", "farmhouse", "peasant", 25],
+  ["ashen", "crypt", "ghoul", 40],
+  ["ironmark", "delversHall", "tunnel_levy", 30],
+  ["verdant", "seedlingGrove", "sproutling", 25],
+] as const) {
+  test(`RecruitUnits recruits ${unitTypeId} from the ${factionId} starter and persists its draft and payment`, async () => {
+    const row = recruitRow({ buildings: [building(buildingKind, 2, 3)] });
+    row.players = [{ ...PLAYERS[0], factionId }, PLAYERS[1]];
+    const { deps, eventRepo, settlementRepo } = makeDeps(row, [catalogUnit(unitTypeId, factionId)]);
+    const result = await handleCommand(recruitCommand({ buildingKind, unitTypeId, count: 1 }), deps);
+    assert.equal(result.ok, true);
+    assert.equal(result.settlement?.gold, 1000 - price);
+    assert.deepEqual(result.settlement?.stacks[0].entries, [{ unitTypeId, count: 1 }]);
+    assert.equal(result.settlement?.buildings[0].draft?.[unitTypeId], 2);
+    assert.equal(settlementRepo.calls.length, 1);
+    assert.equal(settlementRepo.calls[0].value.s0.gold, 1000 - price);
+    assert.equal(eventRepo.events[0].payload.unitTypeId, unitTypeId);
+  });
+
+  test(`RecruitUnits rejects ${unitTypeId} from an existing ${buildingKind} belonging to another faction`, async () => {
+    const row = recruitRow({ buildings: [building(buildingKind, 2, 3)] });
+    row.players = [{ ...PLAYERS[0], factionId: factionId === "human" ? "ashen" : "human" }, PLAYERS[1]];
+    const { deps, eventRepo, settlementRepo } = makeDeps(row, [catalogUnit(unitTypeId, factionId)]);
+    const result = await handleCommand(recruitCommand({ buildingKind, unitTypeId, count: 1 }), deps);
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "unit_not_in_seat_faction");
+    assert.equal(eventRepo.events.length, 0);
+    assert.equal(settlementRepo.calls.length, 0);
+  });
+}

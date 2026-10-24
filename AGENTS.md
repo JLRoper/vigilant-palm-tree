@@ -39,7 +39,7 @@ Incident-driven rules. Full detail lives in the `multi-agent-workspace` skill's 
 
 ## Pre-commit / pre-PR gate (automatic)
 Before ANY `git commit`, `git switch -c`, `gh pr create`, or `gh repo create`:
-1. Invoke the `precommit-checker` subagent (it runs `npm run build` + `npm run lint:deps` + the `docs:check` documentation gate scoped to changed modules + `npm run test:all`).
+1. Invoke the `precommit-checker` subagent (it runs `npm run build` + `npm run lint:deps` + the `docs:check` documentation gate scoped to changed modules + `npm run test:all`). Tests run only when the changeset touches game code: `npm run test:scope -- --changed-from origin/main` (`tools/test-scope.mjs`) reports `TESTS SKIPPED` when every changed file is documentation or agent tooling (`*.md`, `docs/`, `.kilo/`, `.claude/`, `.github/agents|hooks|prompts|skills/`, etc.), and the PR workflow `validate-game.yml` applies the same rule to its boot check and smoke test. Unknown paths fail safe to running tests.
 2. If it fails, do not commit/push/PR. Report the failure and ask the user how to proceed.
 The `/precommit` and `/pre-pr` slash commands are manual equivalents you can offer the user.
 
@@ -77,6 +77,10 @@ The `/precommit` and `/pre-pr` slash commands are manual equivalents you can off
 - `/version-bump [patch|minor|major] [--pr <N>] [--check]` — only for changes to game code (`src/`, `packages/`, `server/`, `index.html`, excluding tests and `.md`; agents, skills, docs and tooling never bump): check whether the current branch or a PR already bumps the version against its base; if not, decide patch vs minor and apply it with `scripts/bump-version.mjs` (on a PR, as a pushed `chore(release)` commit).
 - `/precommit` — run the build + deps + docs + test gate on demand.
 - `/pre-pr` — same as `/precommit`, plus a quick doc sanity sweep.
+
+## Claude Code agents (user-level, `~/.claude/agents/`)
+These definitions are not in the repo; they live in the user's `~/.claude/agents/`, so they work in every worktree on that machine and are absent elsewhere.
+- `playtester` — plays the game through the browser against this worktree's local dev env, cross-checks `window.__gameDebug` state and the event log, and writes a findings report to `reviews/playtests/<date>-<focus>.md`. Give it a focus and optional turn budget. It refuses to run when `.env` points `PGHOST` at the gameserver, never deletes games, and never edits code.
 
 ## Standard workflow (shape reminder)
 

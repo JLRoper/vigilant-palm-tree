@@ -47,9 +47,9 @@ test("tileRepo.loadAllForGame reads tiles back ordered by r then q, resource nul
     const loaded = await repo.loadAllForGame(name);
 
     assert.deepEqual(loaded, [
-      { q: 0, r: 0, terrain: "forest", resource: "wood" },
-      { q: 1, r: 0, terrain: "grass", resource: null },
-      { q: 0, r: 1, terrain: "dirt", resource: null },
+      { q: 0, r: 0, terrain: "forest", resource: "wood", river: null, bridge: false },
+      { q: 1, r: 0, terrain: "grass", resource: null, river: null, bridge: false },
+      { q: 0, r: 1, terrain: "dirt", resource: null, river: null, bridge: false },
     ]);
   });
 });

@@ -428,3 +428,32 @@ test("GET /games/:name/tiles backfills a v2 save on a large map with v2 terrain 
     await cleanupGame(name);
   }
 });
+
+for (const [factionId, starterKind] of [
+  ["human", "farmhouse"],
+  ["ashen", "crypt"],
+  ["ironmark", "delversHall"],
+  ["verdant", "seedlingGrove"],
+] as const) {
+  test(`POST /games persists ${starterKind} for ${factionId} human and AI settlements`, async () => {
+    const name = uniqueName();
+    try {
+      const { row } = await createGame({ name, humanSlots: 1, enemySlots: 1, seatFactions: [factionId, factionId] });
+      const persisted = await pool.query<{ settlements: Record<string, { ownerId: number | null; buildings: { kind: string }[] }> }>(
+        "SELECT settlements FROM games WHERE name = $1", [name],
+      );
+      const settlements = Object.values(persisted.rows[0].settlements);
+      const starterKinds = new Set(["farmhouse", "crypt", "delversHall", "seedlingGrove"]);
+      for (const player of row.players) {
+        assert.equal(player.factionId, factionId);
+        const owned = settlements.filter((settlement) => settlement.ownerId === player.id);
+        assert.ok(owned.length > 0);
+        for (const settlement of owned) {
+          assert.deepEqual(settlement.buildings.filter((entry) => starterKinds.has(entry.kind)).map((entry) => entry.kind), [starterKind]);
+        }
+      }
+    } finally {
+      await cleanupGame(name);
+    }
+  });
+}

@@ -1,0 +1,1 @@
+FOLLOW-UP ART BRIEF: Verdant woodland ranger with a longbow. Match existing faction arena pixel-art scale and idle stance, full body, transparent background, feet aligned with existing unit sprites. Current shipped asset is a copied placeholder; see ../roster-parity-placeholder-art.md for provenance.

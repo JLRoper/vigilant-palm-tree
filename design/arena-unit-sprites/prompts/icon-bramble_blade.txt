@@ -1,0 +1,1 @@
+FOLLOW-UP ART BRIEF: Verdant thorn-armored sword fighter. Match the existing faction pixel-art portrait icon style, tight readable bust crop, transparent background. Current shipped asset is a copied placeholder; see ../roster-parity-placeholder-art.md for provenance.

@@ -1,6 +1,6 @@
 # Technical Specifications — heroes-js
 
-<!-- docs:verified 2026-10-18 -->
+<!-- docs:verified 2026-10-22 -->
 
 A turn-based, hex-grid adventure game inspired by *Heroes of Might & Magic*. This document captures the **tech stack** as it currently exists in the repository. Game design documentation lives under [`docs/`](./docs/README.md); the render module has its own authoritative spec at [`src/render/docs/technical-spec.md`](./src/render/docs/technical-spec.md).
 
@@ -71,7 +71,7 @@ The former top-level `shared/` directory **no longer exists** — its contents w
 
 ### SQL
 - [`server/schema.sql`](./server/schema.sql) — baseline schema.
-- [`server/migrations/`](./server/migrations) — 30 ordered migrations, `001` through `030`; `006_faction_rosters` is present. Recent additions include SSE notifications (`017`), bank/wagon storage (`022`–`023`), faction content (`024`–`026`), numeric precision (`027`), treasury-wagon backfill (`028`), settlement districts (`029`), and workforce staffing (`030`).
+- [`server/migrations/`](./server/migrations) — 32 ordered migrations, `001` through `032`; `006_faction_rosters` is present. Recent additions include SSE notifications (`017`), bank/wagon storage (`022`–`023`), faction content (`024`–`026`), numeric precision (`027`), treasury-wagon backfill (`028`), settlement districts (`029`), workforce staffing (`030`), rivers (`031`), and roster parity with first-boot tier upkeep (`032`).
 - Applied at startup by `initSchema()` in [`server/db.ts`](./server/db.ts:1).
 
 ---
@@ -160,6 +160,7 @@ Port allocation is OS-native and cross-platform (`scripts/allocate-ports.ts` use
 | `test:wrapper` | `node --no-deprecation tools/run-test.mjs` | Direct access to the test wrapper |
 | `lint:deps` | `depcruise src server packages --config dependency-cruiser.cjs` | Static check of cross-boundary imports (cycles + layering, incl. the workspace packages) |
 | `validate-assets` | `node tools/sprites/validate-assets.mjs` | Validate legacy manifest, generated building keys/anchors, and horse run-frame gates |
+| `test:scope` | `node tools/test-scope.mjs` | Decide whether a changeset (`--changed <path>` / `--changed-from <git-spec>`) needs tests; prints `TESTS SKIPPED` for docs/agent-only changes, else `TESTS REQUIRED`, and writes `run_tests` to `$GITHUB_OUTPUT` in CI |
 | `docs:check` | `node tools/docs-check.mjs` | Check maintained Markdown links/source paths in every mode; `docs:verified` marker age in full mode, or scoped via `DOC_OWNERSHIP` globs in selective mode (`--changed <path>` / `--changed-from <git-spec>`) (no DB) |
 | `sprites:generate` | `node tools/sprites/pixel-gen.mjs` | Render pixel-art sprites into `src/resources/` |
 | `sprites:preview` | `node tools/sprites/generate-preview.mjs` | Build a sprite contact-sheet preview |
@@ -286,7 +287,7 @@ API conventions:
 
 ### CI (GitHub Actions)
 
-[`.github/workflows/validate-game.yml`](./.github/workflows/validate-game.yml:1) runs on every PR (`concurrency` group cancels superseded runs): Node 22.x on `ubuntu-latest` with a Postgres 16 service container. Steps: `npm install` → `docs:check (freshness scoped to changed modules; BASE_REF vs PR base, full on dispatch)` → `npx playwright install chromium --with-deps` → boot check (`npm run dev` in the background; waits up to 60 s for `CLIENT_PORT`/`API_PORT` in `.env`, then polls `/api/health` + client) → dump boot log → `rm -f .env` (fresh allocation for the smoke run) → `npm run build` → `npm test` → upload `test/*.log` + `test/*.png` artifacts. The whole pipeline is Linux-native; `scripts/allocate-ports.ts` needs no OS-specific handling.
+[`.github/workflows/validate-game.yml`](./.github/workflows/validate-game.yml:1) runs on every PR (`concurrency` group cancels superseded runs): Node 22.x on `ubuntu-latest` with a Postgres 16 service container. Steps: `npm install` → `docs:check (freshness scoped to changed modules; BASE_REF vs PR base, full on dispatch)` → test scope (`tools/test-scope.mjs` against the PR base; docs/agent-only PRs skip the Playwright install, boot check and smoke test) → `npx playwright install chromium --with-deps` → boot check (`npm run dev` in the background; waits up to 60 s for `CLIENT_PORT`/`API_PORT` in `.env`, then polls `/api/health` + client) → dump boot log → `rm -f .env` (fresh allocation for the smoke run) → `npm run build` → `npm test` → upload `test/*.log` + `test/*.png` artifacts. The whole pipeline is Linux-native; `scripts/allocate-ports.ts` needs no OS-specific handling.
 
 ---
 

@@ -9,7 +9,7 @@
 // building-classic-*/building-blocky-*/*-raw/*-variant* files in that folder
 // are deliberately not registered.
 
-/** Sprite key -> on-disk filename, one entry per building-pixel-*.png (116 files). */
+/** Sprite key -> on-disk filename, one entry per building-pixel-*.png (123 files). */
 export const BUILDING_SPRITE_FILES: Readonly<Record<string, string>> = {
   "pixel-alt.farmField.1": "building-pixel-farmField-1-alt.png",
   "pixel.apartment.1": "building-pixel-apartment-1.png",
@@ -27,12 +27,16 @@ export const BUILDING_SPRITE_FILES: Readonly<Record<string, string>> = {
   "pixel.barracks.1": "building-pixel-barracks-1.png",
   "pixel.barracks.2": "building-pixel-barracks-2.png",
   "pixel.barracks.3": "building-pixel-barracks-3.png",
+  "pixel.blackChapel.1": "building-pixel-blackChapel-1.png",
   "pixel.crypt.1": "building-pixel-crypt-1.png",
   "pixel.crypt.2": "building-pixel-crypt-2.png",
   "pixel.crypt.3": "building-pixel-crypt-3.png",
   "pixel.deepAnvil.1": "building-pixel-deepAnvil-1.png",
   "pixel.deepAnvil.2": "building-pixel-deepAnvil-2.png",
   "pixel.deepAnvil.3": "building-pixel-deepAnvil-3.png",
+  "pixel.delversHall.1": "building-pixel-delversHall-1.png",
+  "pixel.dragonBoneyard.1": "building-pixel-dragonBoneyard-1.png",
+  "pixel.druidCircle.1": "building-pixel-druidCircle-1.png",
   "pixel.eyrie.1": "building-pixel-eyrie-1.png",
   "pixel.eyrie.2": "building-pixel-eyrie-2.png",
   "pixel.eyrie.3": "building-pixel-eyrie-3.png",
@@ -65,6 +69,7 @@ export const BUILDING_SPRITE_FILES: Readonly<Record<string, string>> = {
   "pixel.gunnersRedoubt.1": "building-pixel-gunnersRedoubt-1.png",
   "pixel.gunnersRedoubt.2": "building-pixel-gunnersRedoubt-2.png",
   "pixel.gunnersRedoubt.3": "building-pixel-gunnersRedoubt-3.png",
+  "pixel.hearthTemple.1": "building-pixel-hearthTemple-1.png",
   "pixel.house.1": "building-pixel-house-1.png",
   "pixel.house.2": "building-pixel-house-2.png",
   "pixel.house.3": "building-pixel-house-3.png",
@@ -83,6 +88,8 @@ export const BUILDING_SPRITE_FILES: Readonly<Record<string, string>> = {
   "pixel.ossuary.1": "building-pixel-ossuary-1.png",
   "pixel.ossuary.2": "building-pixel-ossuary-2.png",
   "pixel.ossuary.3": "building-pixel-ossuary-3.png",
+  "pixel.ramPens.1": "building-pixel-ramPens-1.png",
+  "pixel.seedlingGrove.1": "building-pixel-seedlingGrove-1.png",
   "pixel.shipyard.1": "building-pixel-shipyard-1.png",
   "pixel.shipyard.2": "building-pixel-shipyard-2.png",
   "pixel.shipyard.3": "building-pixel-shipyard-3.png",
@@ -137,11 +144,25 @@ export const BUILDING_SPRITE_FILES: Readonly<Record<string, string>> = {
 export const BUILDING_SPRITE_ALIASES: Readonly<Record<string, string>> = {
   "pixel-alt.farmField.2": "pixel-alt.farmField.1",
   "pixel-alt.farmField.3": "pixel-alt.farmField.1",
+  "pixel.blackChapel.2": "pixel.blackChapel.1",
+  "pixel.blackChapel.3": "pixel.blackChapel.1",
+  "pixel.delversHall.2": "pixel.delversHall.1",
+  "pixel.delversHall.3": "pixel.delversHall.1",
+  "pixel.dragonBoneyard.2": "pixel.dragonBoneyard.1",
+  "pixel.dragonBoneyard.3": "pixel.dragonBoneyard.1",
+  "pixel.druidCircle.2": "pixel.druidCircle.1",
+  "pixel.druidCircle.3": "pixel.druidCircle.1",
   "pixel.farmField.2": "pixel.farmField.1",
   "pixel.farmField.3": "pixel.farmField.1",
+  "pixel.hearthTemple.2": "pixel.hearthTemple.1",
+  "pixel.hearthTemple.3": "pixel.hearthTemple.1",
   "pixel.mine.1": "pixel.stoneMine.1",
   "pixel.mine.2": "pixel.stoneMine.2",
   "pixel.mine.3": "pixel.stoneMine.3",
+  "pixel.ramPens.2": "pixel.ramPens.1",
+  "pixel.ramPens.3": "pixel.ramPens.1",
+  "pixel.seedlingGrove.2": "pixel.seedlingGrove.1",
+  "pixel.seedlingGrove.3": "pixel.seedlingGrove.1",
   "pixel.woodcutterHut.3": "pixel.woodcutterHut.2",
 };
 

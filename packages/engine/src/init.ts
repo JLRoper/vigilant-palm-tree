@@ -499,6 +499,7 @@ function makeSettlements(
   _playerCount: number,
   unitTypes: Record<string, UnitType> = {},
   castleSeed = 0,
+  seatFactions?: readonly FactionId[],
 ): SettlementState[] {
   const settlements = castles.map((c) => {
     const computed = computeSettlementRates(map, c.tile.q, c.tile.r, c.level);
@@ -536,7 +537,7 @@ function makeSettlements(
       buildings: [] as BuildingDef[],
     };
   });
-  return seedStartupDistrictPass(map, seedStarterBuildings(settlements, starterHeroStacks(castles), unitTypes), castleSeed);
+  return seedStartupDistrictPass(map, seedStarterBuildings(settlements, starterHeroStacks(castles), unitTypes, seatFactions), castleSeed);
 }
 
 /**
@@ -605,6 +606,7 @@ function seedStarterBuildings(
   settlements: readonly SettlementState[],
   heroStacks: ReadonlyMap<PlayerId, Platoon[]>,
   unitTypes: Record<string, UnitType>,
+  seatFactions?: readonly FactionId[],
 ): SettlementState[] {
   // The settlement each seat's starting hero stands on: that owner's FIRST
   // castle in generation order -- the same pick makeHeroes makes via
@@ -628,6 +630,7 @@ function seedStarterBuildings(
         size: cityViewSizeFor(s.level),
         style: "pixel" as GenerationStyle,
         farms: starterFarmsNeeded(bill),
+        factionId: s.ownerId === null ? undefined : seatFactions?.[s.ownerId],
       }),
     };
   });
@@ -674,7 +677,7 @@ function seedEntities(
 ): { mode: GameMode; settlements: SettlementState[]; players: Player[]; heroes: HeroState[] } {
   const mode = resolveGameMode(opts?.gameMode);
   const castles = modeCastles(map, castleSeed, playerCount, castleCount, mode);
-  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes, castleSeed);
+  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes, castleSeed, opts?.seatFactions);
   // A start never lands on an existing settlement: the neutrals are on the
   // board before the wagons are placed, so a wagon can always found where it
   // stands (see settlers/found.ts's distance rule).

@@ -10,25 +10,9 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.34.0] - 2026-10-24
+## [0.32.0] - 2026-10-22
 
-Settlers game mode (phase 0): game-mode vocabulary and the shared seams
-
-- `@heroes/contracts` gains the game-mode vocabulary: `GAME_MODES` / `GameMode`,
-  `DEFAULT_GAME_MODE` (`classic`), `isGameMode` / `resolveGameMode`, the mode's
-  settings keys (`GameModeSettings`) and their exported default constants
-  (`CLASSIC_MODE_DEFAULTS`, `SETTLERS_MODE_DEFAULTS`, `gameModeSettings`).
-  `GameState` carries an optional `gameMode`; absent reads as classic, so every
-  existing save keeps today's rules.
-- The settings store gains the new-game default mode key and bumps
-  `SETTINGS_SCHEMA_VERSION` to 3, so a store written before the key existed
-  follows along to the default exactly once.
-- `SETTLERS-PLAN.md` splits the mode into seven workstreams across five groups
-  with disjoint file ownership, and records the hard constraints and the four
-  design answers the rules must honour.
-- No gameplay rule changes yet: the mode's start placement and founding land in
-  phase 1.
-
+Give every faction twelve units, faction troop buildings and starter recruitment; enforce faction building placement.
 ## [0.33.3] - 2026-10-23
 
 Two heroes can now start a trade by walking at each other.
