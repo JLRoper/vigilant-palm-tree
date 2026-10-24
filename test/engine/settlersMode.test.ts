@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  CLASSIC_MODE_DEFAULTS,
   DEFAULT_GAME_MODE,
   MOVEMENT_PER_TURN,
   SETTLERS_MODE_DEFAULTS,
@@ -10,6 +11,7 @@ import {
   hexDistance,
   isGameMode,
   resolveGameMode,
+  type GameModeSettings,
 } from "@heroes/contracts";
 import {
   CURRENT_MAP_GEN_VERSION,
@@ -18,6 +20,7 @@ import {
   buildInitialGameState,
   canFoundSettlement,
   createInitialState,
+  foundedSettlementBuildings,
   foundSettlement,
   getOrCreateGameMap,
   hashString,
@@ -27,6 +30,7 @@ import {
   placeSettlersStarts,
   settlersStreamKey,
   settlersStreamRng,
+  wagonSuppliesFor,
   type MapSize,
 } from "@heroes/engine";
 
@@ -493,4 +497,205 @@ test("a founded settlement's content is derived from the founder's own streams, 
     second.state.settlements[second.settlementId],
     "the same founder on the same hex founds the same town, byte for byte",
   );
+});
+
+// ── 6. Every mode key flips its own rule (W7 deliverable #4) ──
+//
+// SETTLERS-PLAN.md §3's four answers ARE these keys, and the mode's whole
+// behaviour is meant to move with them (packages/contracts/src/gameMode.ts:
+// "flipping one here (plus its assertion) is the whole change when the reader
+// answers differently"). W7's finding M1 was that only
+// `wagonConsumedOnFounding` had a flip test -- the one above -- while the other
+// keys were only READ inside assertions, so the assertion moved with the
+// constant and proved nothing about the rule. Each test below mutates the key,
+// runs the RULE, and asserts the outcome flipped, restoring the constant in a
+// `finally`.
+
+/** The six keys, in one list: a new key without a flip test goes red here. */
+const MODE_KEYS = [
+  "wagonConsumedOnFounding",
+  "minFoundingDistance",
+  "wagonSupplies",
+  "freeStarterBuildings",
+  "neutralCastles",
+  "monsterLairs",
+] as const;
+
+/** Run `fn` with one mode key replaced, always restoring it. */
+function flipModeKey<T>(key: keyof GameModeSettings, value: unknown, fn: () => T): T {
+  const settings = SETTLERS_MODE_DEFAULTS as unknown as Record<string, unknown>;
+  const original = settings[key];
+  try {
+    settings[key] = value;
+    return fn();
+  } finally {
+    settings[key] = original;
+  }
+}
+
+test("the key set is exactly the pinned list, on both modes", () => {
+  assert.deepEqual(
+    Object.keys(SETTLERS_MODE_DEFAULTS).sort(),
+    [...MODE_KEYS].sort(),
+    "a settlers key appeared or vanished without a flip test",
+  );
+  assert.deepEqual(
+    Object.keys(CLASSIC_MODE_DEFAULTS).sort(),
+    [...MODE_KEYS].sort(),
+    "classic and settlers must declare the same keys (the neutral values are what a mode-blind rule falls back to)",
+  );
+});
+
+test("flipping minFoundingDistance flips founding AND start spacing (L2's boundary)", () => {
+  const { map, state } = settlersState();
+  const wagon = state.heroes[coveredWagonIdFor(0)];
+  const neutral = Object.values(state.settlements).find((s) => s.ownerId === null);
+  assert.ok(neutral, "the fixture map must hold a neutral castle");
+
+  // A passable hex inside the default dead zone of a neutral castle.
+  let inside: { q: number; r: number } | undefined;
+  for (let r = 0; r < map.height && !inside; r++) {
+    for (let q = 0; q < map.width && !inside; q++) {
+      const d = hexDistance({ q, r }, { q: neutral.q, r: neutral.r });
+      if (d > 0 && d < 3 && map.isPassable(q, r)) inside = { q, r };
+    }
+  }
+  assert.ok(inside, "the fixture map must have a hex inside a neutral's dead zone");
+  const onInside = withFounderAt(state, wagon.id, inside.q, inside.r);
+
+  assert.deepEqual(
+    canFoundSettlement({ state: onInside, founderId: wagon.id, q: inside.q, r: inside.r, map }),
+    { ok: false, reason: "too_close_to_settlement" },
+    "the default (3) refuses the dead zone",
+  );
+
+  const request = {
+    seed: SEED,
+    size: "small" as const,
+    playerCount: 1,
+    humanSeatCount: HUMANS,
+    mode: "settlers" as const,
+    map,
+  };
+
+  flipModeKey("minFoundingDistance", 0, () => {
+    assert.deepEqual(
+      canFoundSettlement({ state: onInside, founderId: wagon.id, q: inside.q, r: inside.r, map }),
+      { ok: true },
+      "flipping the key to 0 must make the too-close founding legal",
+    );
+    // The PLACEMENT's own read of the same key (W7's L2): 0 means "no spacing
+    // rule", NOT "spacing clamped to 1". At 0 a start may land on a hex that is
+    // in the blocked list, so re-running with its own hex blocked reproduces it
+    // exactly -- at 1 the same hex is refused and the scan moves on.
+    const free = placeSettlersStarts(request);
+    const blockedByItself = placeSettlersStarts({
+      ...request,
+      occupied: [{ q: free[0].q, r: free[0].r }],
+    });
+    assert.deepEqual(
+      blockedByItself,
+      free,
+      "at 0 the spacing rule is off: a start may land on a blocked hex",
+    );
+  });
+
+  flipModeKey("minFoundingDistance", 1, () => {
+    const free = placeSettlersStarts(request);
+    const blockedByItself = placeSettlersStarts({
+      ...request,
+      occupied: [{ q: free[0].q, r: free[0].r }],
+    });
+    assert.notDeepEqual(
+      blockedByItself,
+      free,
+      "at 1 the same blocked hex is skipped -- so 0 is genuinely unclamped, not 1",
+    );
+  });
+
+  assert.throws(
+    () =>
+      flipModeKey("minFoundingDistance", 999, () =>
+        placeSettlersStarts({ ...request, playerCount: PLAYERS }),
+      ),
+    /no legal starting hex/,
+    "an unreachable spacing rule must stop the placement, not silently pack the seats together",
+  );
+});
+
+test("flipping wagonSupplies flips the wagon's cargo and the founded warehouse", () => {
+  const empty = { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
+  assert.deepEqual(wagonSuppliesFor("settlers"), SETTLERS_MODE_DEFAULTS.wagonSupplies);
+  flipModeKey("wagonSupplies", empty, () => {
+    for (const wagon of Object.values(settlersPayload().heroes)) {
+      assert.deepEqual(wagon.resources, empty, "a flipped key must empty the starting cargo");
+    }
+    const { map, state } = settlersState();
+    const wagon = state.heroes[coveredWagonIdFor(0)];
+    const result = foundSettlement({ state, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.suppliesGranted, false, "an empty cargo is not a granted stockpile");
+    assert.deepEqual(result.state.settlements[result.settlementId].warehouse, empty);
+  });
+});
+
+test("flipping freeStarterBuildings hands the founded town the starter city", () => {
+  assert.deepEqual(
+    foundedSettlementBuildings("settlers", 1),
+    [],
+    "the mode's answer is NO: the city view's own starter commit is the only grant",
+  );
+  flipModeKey("freeStarterBuildings", true, () => {
+    const buildings = foundedSettlementBuildings("settlers", 1);
+    assert.ok(buildings.length > 0, "flipping the key must grant the starter layout");
+    const { map, state } = settlersState();
+    const wagon = state.heroes[coveredWagonIdFor(0)];
+    const result = foundSettlement({ state, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(
+      result.state.settlements[result.settlementId].buildings,
+      buildings,
+      "the founded town carries exactly the layout the flipped key grants",
+    );
+  });
+});
+
+test("flipping neutralCastles empties the wilderness, and leaves classic alone", () => {
+  assert.equal(
+    Object.values(settlersPayload().settlements).length,
+    NEUTRAL_PIN,
+    "the default keeps the neutral castles (design answer 4)",
+  );
+  flipModeKey("neutralCastles", false, () => {
+    assert.deepEqual(
+      Object.values(settlersPayload().settlements),
+      [],
+      "suppressing the neutrals is a filter over the generated castles: the board is left bare",
+    );
+    assert.equal(
+      Object.values(seedPayload(SEED).settlements).filter((s) => s.ownerId === null).length,
+      NEUTRAL_PIN,
+      "the classic seeding does not read the settlers key",
+    );
+  });
+});
+
+test("monsterLairs is read by no rule yet: flipping it moves nothing", () => {
+  // SETTLERS-PLAN.md §3's answer 4 is forward-looking -- no lair generator
+  // exists in the codebase, so the key is declared and unread. This is the
+  // honest flip test for it: the key exists on both modes, and flipping it
+  // changes no seeded board. A lair generator that starts reading it fails
+  // here, which is the point.
+  assert.equal(SETTLERS_MODE_DEFAULTS.monsterLairs, true);
+  assert.equal(CLASSIC_MODE_DEFAULTS.monsterLairs, true);
+  const before = digest(settlersPayload());
+  flipModeKey("monsterLairs", false, () => {
+    assert.equal(
+      digest(settlersPayload()),
+      before,
+      "no rule reads monsterLairs yet, so flipping it must not move the seeded board",
+    );
+  });
 });
