@@ -4,6 +4,7 @@ import type { MapSize, MapGenVersion } from "../map/gameMap";
 import type {
   ClientTelemetryReport,
   FactionId,
+  GameMode,
   HeroState,
   NetworkTopologySnapshot,
   Player,
@@ -52,6 +53,10 @@ export type GameLobbyState = {
   mapGenVersion?: MapGenVersion;
   // Uncharted mode flag written at creation; absent on legacy games.
   uncharted?: boolean;
+  // The game's mode (SETTLERS-PLAN.md §1), written at creation by POST /games
+  // as `lobby.gameMode`; absent on every pre-mode row, which reads as classic
+  // (@heroes/contracts resolveGameMode). Mirrors server LobbyState.
+  gameMode?: GameMode;
 };
 
 export type Game = {
@@ -192,12 +197,16 @@ export const api = {
     enemySlots: number = 0,
     seatFactions?: FactionId[],
     uncharted?: boolean,
+    // The game's mode (SETTLERS-PLAN.md §4 W3/W4). Always sent: the server
+    // treats an absent field as classic, and an EXPLICIT classic keeps the
+    // request honest about what the player picked in the form.
+    gameMode?: GameMode,
   ) => {
-    console.log("[api] createGame mapSize:", mapSize);
+    console.log("[api] createGame mapSize:", mapSize, "gameMode:", gameMode);
     return fetchWithTimeout(`${BASE}/games`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize, humanSlots, enemySlots, seatFactions, uncharted }),
+      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize, humanSlots, enemySlots, seatFactions, uncharted, gameMode }),
     }).then((r) => json<Game>(r));
   },
   claimLobbySeat: (name: string, seat: number, handle: string) =>

@@ -209,6 +209,55 @@ test("charter overlay and valid-charter-hex nodes respect visibility and skip ma
   assert.equal(validHexNodes[0].r, 0);
 });
 
+// ── The settlers mode's wagon and founding highlight (SETTLERS-PLAN.md §4 W4) ──
+
+test("a covered wagon's hero node is flagged as a wagon; every recruited hero is not", () => {
+  const map = makeGrassMap(4, 1);
+  const wagon = new Hero("p0-wagon", "Wagon", 0, 0, "player", 0);
+  const recruited = new Hero("p0-hero", "Hero", 1, 0, "player", 0);
+  const opts = makeRenderOptions({ viewPlayerId: 0 });
+
+  const nodes = buildAdventureScene({ map, heroes: [wagon, recruited], castles: [], path: [], hover: null, opts });
+  const heroes = nodesOfKind<HeroNode>(nodes, "hero");
+  const wagonNode = heroes.find((n) => n.heroId === "p0-wagon");
+  const heroNode = heroes.find((n) => n.heroId === "p0-hero");
+
+  assert.equal(wagonNode?.wagon, true, "the id convention is what makes it a wagon");
+  assert.equal(heroNode?.wagon, undefined, "a recruited hero keeps the horse variant");
+  assert.equal(Object.prototype.hasOwnProperty.call(heroNode, "wagon"), false, "and grows no key at all");
+});
+
+test("the armed founding highlight emits the settlement-hex marker for its own hex only", () => {
+  const map = makeGrassMap(5, 1);
+  const wagon = new Hero("p0-wagon", "Wagon", 2, 0, "player", 0);
+  const opts = makeRenderOptions({
+    viewPlayerId: 0,
+    validFoundHexes: new Set(["2,0", "bogus", "9,9"]),
+  });
+
+  const nodes = buildAdventureScene({ map, heroes: [wagon], castles: [], path: [], hover: null, opts });
+  const marked = nodesOfKind<ValidCharterHexNode>(nodes, "validCharterHex");
+  assert.equal(marked.length, 1, "an out-of-map or malformed key emits nothing");
+  assert.equal(marked[0].q, 2);
+  assert.equal(marked[0].r, 0);
+});
+
+test("without an armed founding gesture the render is unchanged: no marker, no wagon flag", () => {
+  const map = makeGrassMap(5, 1);
+  const wagon = new Hero("p0-wagon", "Wagon", 2, 0, "player", 0);
+  // A classic game's render options carry neither field at all, which is the
+  // byte-identical claim for every existing baseline.
+  const nodes = buildAdventureScene({
+    map,
+    heroes: [wagon],
+    castles: [],
+    path: [],
+    hover: null,
+    opts: makeRenderOptions({ viewPlayerId: 0 }),
+  });
+  assert.equal(nodesOfKind<ValidCharterHexNode>(nodes, "validCharterHex").length, 0);
+});
+
 test("castles: owner color/dashed-border mapping and per-castle visibility gating", () => {
   const map = makeGrassMap(6, 1);
   const ownHero = new Hero("h0", "Hero", 0, 0, "player", 0);

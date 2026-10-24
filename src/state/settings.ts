@@ -183,6 +183,21 @@ export function gameModeOptions(): readonly { value: GameMode; label: string }[]
   ];
 }
 
+/**
+ * The one-line explanation of a mode, used as a chip's tooltip on both
+ * new-game surfaces (the panel own its prose; verbs live in `title`, not in
+ * the form). Keyed by the mode union so a new mode is a compile error here
+ * rather than a silently missing hint.
+ */
+const GAME_MODE_HINTS: Record<GameMode, string> = {
+  classic: "Start with a castle, a commander and a town; expand by chartering new settlements",
+  settlers: "Start with one covered wagon in the wilderness; plant your settlement where it stands, once per wagon",
+};
+
+export function gameModeHint(mode: GameMode): string {
+  return GAME_MODE_HINTS[resolveGameMode(mode)];
+}
+
 export function clampBgOffset(v: number): number {
   if (!Number.isFinite(v)) return DEFAULT_BG_OFFSET;
   return Math.max(MIN_BG_OFFSET, Math.min(MAX_BG_OFFSET, Math.round(v)));

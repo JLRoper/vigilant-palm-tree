@@ -372,6 +372,20 @@ export async function startCharter(
   await postCommand(name, { kind: "StartCharter", ...payload });
 }
 
+// FoundSettlement (SETTLERS-PLAN.md §4 W1/W4): the settlers mode's founding
+// command. Same fire-and-forget shape as startCharter above -- the caller
+// (src/game/turnHooks.ts's onFoundSettlement) has already applied the engine's
+// own reducer locally, so the response body is unused here too. The payload is
+// only WHO founds and WHERE: the settlement's id, name, stock, rates and city
+// spots are the engine's derivations, and a client that could name a
+// settlement could invent one.
+export async function foundSettlement(
+  name: string,
+  payload: { actor: number; founderId: string; q: number; r: number }
+): Promise<void> {
+  await postCommand(name, { kind: "FoundSettlement", ...payload });
+}
+
 // UpgradeBuilding / UpgradeSettlement
 // (plan/2026-08-17-issue-88-remaining-command-ports.md): same fire-and-forget
 // shape as the functions above, closing the last two gaps issue #88's

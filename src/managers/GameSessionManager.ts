@@ -10,12 +10,13 @@ import { loadUnitCatalog } from "../data/unitCatalog";
 import { MAP_SEED } from "@screens/adventure/adventureView";
 import type { Game } from "../io/api";
 import { hydrateClientGame } from "../io/hydrateClientGame";
-import type { FactionId } from "@heroes/contracts";
+import type { FactionId, GameMode } from "@heroes/contracts";
 import { notePersisted } from "../io/commands";
 import { setInMemoryLocalPlayerId } from "../players/localPlayer";
 import { getMultiplayerSync, getEntityMirror } from "../io/multiplayerSync";
 import { clearServerDriven, syncServerDrivenFromGame } from "../io/serverDrivenGames";
 import { setUncharted } from "../io/unchartedGames";
+import { clearGameMode, setGameMode } from "../io/gameModes";
 import { getCachedAuth } from "../io/authStorage";
 import { resetReveal } from "../render/reveal";
 
@@ -58,9 +59,18 @@ export class GameSessionManager {
     // drops the previous game's entry.
     if (this.currentGameName !== null && this.currentGameName !== loaded.name) {
       clearServerDriven(this.currentGameName);
+      // The mode registry is per game like the server-driven flag: a switch
+      // drops the previous game's entry rather than leaving a stale mode for a
+      // name this session no longer holds.
+      clearGameMode(this.currentGameName);
     }
     syncServerDrivenFromGame(loaded);
     setUncharted(loaded.name, loaded.lobby?.uncharted === true);
+    // The active game's mode (SETTLERS-PLAN.md §4 W4): fed from the same
+    // game-bearing response the rest of this pass reads, so the client-side
+    // gate (the toolbar's founding button, the map gesture) answers without
+    // walking the game state. An absent field is a classic game.
+    setGameMode(loaded.name, loaded.lobby?.gameMode);
     this.syncMetadata(loaded.name, loaded.seed, resolvedSize);
     this.setGameMap(map);
     this.state.setGameMap(map);
@@ -99,7 +109,7 @@ export class GameSessionManager {
     }
   }
 
-  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: MapSize; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number; enemyCount?: number; factionId?: FactionId; uncharted?: boolean }): Promise<void> {
+  async handleNewGame(opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: MapSize; playerCount?: 1 | 2 | 3 | 4; humanSeatCount?: number; enemyCount?: number; factionId?: FactionId; uncharted?: boolean; gameMode?: GameMode }): Promise<void> {
     const uncharted = opts.uncharted === true;
     const effectiveCastleSeed =
       typeof opts.castleSeed === "number" && Number.isFinite(opts.castleSeed)
@@ -129,7 +139,11 @@ export class GameSessionManager {
     const enemyPositions = aiCastles.length
       ? aiCastles.map((c) => ({ q: c.tile.q, r: c.tile.r }))
       : [{ q: 14, r: 8 }, { q: 17, r: 9 }];
-    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount, enemyCount, seatFactions, uncharted);
+    // The mode the form picked (SETTLERS-PLAN.md §4 W4). Undefined stays
+    // undefined -- the server reads an absent field as classic, which is what
+    // the internal starter path below relies on; this layer never consults the
+    // settings store, the FORM preselects from it.
+    const created = await this.session.createGame(opts.name, opts.seed, heroQ, heroR, enemyPositions, opts.mapSize, humanSeatCount, enemyCount, seatFactions, uncharted, opts.gameMode);
     // Issue #179: same self-claim as createFreshStarter() below -- the "New
     // Game" toolbar flow loads straight into the game rather than routing
     // through the multiplayer lobby UI. Claiming is optional (sign-in is

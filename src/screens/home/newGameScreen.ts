@@ -9,9 +9,10 @@
 // Map size stays a dropdown, driven by the engine's MAP_SIZE_ORDER ladder.
 
 import { styleButton } from "@screens/shared/panel";
-import type { FactionId } from "@heroes/contracts";
+import type { FactionId, GameMode } from "@heroes/contracts";
 import { seatFactionChoices } from "@screens/shared/factionChoices";
 import { MAP_SIZE_ORDER, mapSizeLabel, resolveMapSize, type MapSize } from "../../map/gameMap";
+import { gameModeHint, gameModeOptions, settings } from "../../state/settings";
 
 export type NewGameFormValues = {
   name: string;
@@ -21,6 +22,8 @@ export type NewGameFormValues = {
   enemyCount: 0 | 1 | 2 | 3;
   factionId: FactionId;
   uncharted?: boolean;
+  /** The game mode the form picked (SETTLERS-PLAN.md §4 W4). */
+  gameMode: GameMode;
 };
 
 export interface NewGameScreenOptions {
@@ -298,6 +301,57 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
   unchartedWrap.appendChild(unchartedHint);
   unchartedField.control.appendChild(unchartedWrap);
 
+  // Game mode (SETTLERS-PLAN.md §4 W4): the same two chips as the toolbar's
+  // New Game dialog, from the SAME option list (settings.gameModeOptions), and
+  // preselected from the store so both surfaces open on the player's stored
+  // default. Picking one here does not write the store: the mode is a property
+  // of the game about to be created, not a preference.
+  const modeField = makeFieldRow("Game mode");
+  const modeChoices = gameModeOptions();
+  let selectedMode: GameMode = settings().gameMode;
+  const modeButtons = new Map<GameMode, HTMLButtonElement>();
+  const refreshModes = (): void => {
+    for (const choice of modeChoices) {
+      const b = modeButtons.get(choice.value);
+      if (!b) continue;
+      const active = choice.value === selectedMode;
+      b.style.background = active
+        ? "linear-gradient(180deg, #c9a227 0%, #a6801a 100%)"
+        : "rgba(20, 33, 69, 0.85)";
+      b.style.color = active ? "#241a05" : "#f1e4c3";
+      b.style.borderColor = active ? "#e9cf7d" : "rgba(201,162,39,0.45)";
+      b.style.fontWeight = active ? "700" : "400";
+    }
+  };
+  const modeWrap = document.createElement("div");
+  Object.assign(modeWrap.style, { display: "flex", gap: "6px" });
+  for (const choice of modeChoices) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.mode = choice.value;
+    b.textContent = choice.label;
+    b.title = gameModeHint(choice.value);
+    Object.assign(b.style, {
+      flex: "1",
+      padding: "8px 10px",
+      fontSize: "13px",
+      fontFamily: "Georgia, 'Times New Roman', serif",
+      background: "rgba(20, 33, 69, 0.85)",
+      color: "#f1e4c3",
+      border: "1px solid rgba(201,162,39,0.45)",
+      borderRadius: "3px",
+      cursor: "pointer",
+    });
+    b.addEventListener("click", () => {
+      selectedMode = choice.value;
+      refreshModes();
+    });
+    modeButtons.set(choice.value, b);
+    modeWrap.appendChild(b);
+  }
+  refreshModes();
+  modeField.control.appendChild(modeWrap);
+
   const sizeField = makeFieldRow("Map size");
   const sizeSelect = document.createElement("select");
   Object.assign(sizeSelect.style, {
@@ -431,6 +485,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
       enemyCount: selectedEnemies,
       factionId: selectedFaction,
       uncharted: selectedUncharted,
+      gameMode: selectedMode,
     });
   });
 
@@ -451,6 +506,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
     playersRow.setDisabled(value);
     enemiesRow.setDisabled(value);
     factionRow.setDisabled(value);
+    for (const b of modeButtons.values()) b.disabled = value;
     unchartedCheck.disabled = value;
     createBtn.style.opacity = value ? "0.6" : "1";
     createBtn.textContent = value ? "Creating…" : "Create Game";
