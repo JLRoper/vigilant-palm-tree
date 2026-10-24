@@ -1,5 +1,5 @@
-import type { SettlementState, Warehouse } from "@heroes/contracts";
-import { buildingUpkeep } from "../buildingRegistry";
+import type { BuildingKind, FactionId, SettlementState, Warehouse } from "@heroes/contracts";
+import { buildingUpkeep, getBuildingEffect, normalizeFactionId } from "../buildingRegistry";
 import { settlementTreasuryCap, treasuryHeadroom } from "../settlement/capacity";
 
 export const FOOD_PER_POPULATION = 100;
@@ -71,10 +71,62 @@ export function moraleDecay(s: SettlementState): number {
   return decay + lowMoraleBoost;
 }
 
-export function effectiveIncome(s: SettlementState): number {
-  const morale = clamp(s.morale ?? 100, 0, 100);
+// ── Occupation morale penalty (faction-construction plan, section 8) ──
+// A settlement "foreign-occupied" relative to its current owner reads worse
+// at income time than its stored morale alone would say, WITHOUT touching
+// the stored, decaying/recovering `morale` field itself: they are different
+// causes with different cures. Stored morale recovers from being fed
+// (applyMoraleDecay above); this one only resolves by changing the building
+// tally -- building more of your own faction's buildings, or demolishing
+// the foreign ones (DemolishBuilding, section 5). Recomputed fresh every
+// read from the CURRENT buildings array; never persisted.
+export const OCCUPATION_PENALTY_PER_BUILDING = 5;
+export const OCCUPATION_PENALTY_MAX = 40;
+
+/** Count of faction-TAGGED buildings only (main + districts), by faction. Untagged (economy) buildings never count. */
+export function settlementFactionTally(s: SettlementState): Partial<Record<FactionId, number>> {
+  const tally: Partial<Record<FactionId, number>> = {};
+  const bump = (kind: BuildingKind): void => {
+    const faction = getBuildingEffect(kind).faction;
+    if (faction === undefined) return;
+    tally[faction] = (tally[faction] ?? 0) + 1;
+  };
+  for (const b of s.buildings) bump(b.kind);
+  for (const d of Object.values(s.districts ?? {})) {
+    for (const b of d.buildings) bump(b.kind);
+  }
+  return tally;
+}
+
+/**
+ * The occupation penalty subtracted from stored morale AT INCOME-READ TIME
+ * only (effectiveIncome below). A settlement is "foreign-occupied" when it
+ * has >=1 foreign-tagged building and the owner's own-faction tally does not
+ * exceed the largest foreign tally; the penalty scales with how far behind
+ * the owner's own tally is (`imbalance`), capped at OCCUPATION_PENALTY_MAX.
+ * `ownerFactionId` defaults "human" the same way the rest of the faction
+ * plumbing does (normalizeFactionId "neutral"->"human", absent stays absent
+ * -> "human" here since a settlement always has a real effective faction at
+ * income time).
+ */
+export function occupationMoralePenalty(s: SettlementState, ownerFactionId?: FactionId): number {
+  const ownFaction = normalizeFactionId(ownerFactionId) ?? "human";
+  const tally = settlementFactionTally(s);
+  const ownTally = tally[ownFaction] ?? 0;
+  let foreignMaxTally = 0;
+  for (const [faction, count] of Object.entries(tally) as [FactionId, number][]) {
+    if (faction === ownFaction) continue;
+    if (count > foreignMaxTally) foreignMaxTally = count;
+  }
+  if (foreignMaxTally === 0 || ownTally > foreignMaxTally) return 0;
+  const imbalance = Math.max(0, foreignMaxTally - ownTally);
+  return Math.min(OCCUPATION_PENALTY_MAX, OCCUPATION_PENALTY_PER_BUILDING * imbalance);
+}
+
+export function effectiveIncome(s: SettlementState, ownerFactionId?: FactionId): number {
+  const effectiveMorale = clamp((s.morale ?? 100) - occupationMoralePenalty(s, ownerFactionId), 0, 100);
   const base = (s.population ?? 0) * (s.goldTax ?? 0);
-  return Math.round((base * morale) / MORALE_TAX_INCOME_DIVISOR);
+  return Math.round((base * effectiveMorale) / MORALE_TAX_INCOME_DIVISOR);
 }
 
 export function clampMorale(value: number): number {
@@ -125,8 +177,8 @@ export function applyMoraleDecay(s: SettlementState): SettlementState {
   return { ...s, morale: clampMorale(Math.round(next)) };
 }
 
-export function applyEffectiveIncome(s: SettlementState): SettlementState {
-  const inc = effectiveIncome(s);
+export function applyEffectiveIncome(s: SettlementState, ownerFactionId?: FactionId): SettlementState {
+  const inc = effectiveIncome(s, ownerFactionId);
   const headroom = treasuryHeadroom(s.gold, settlementTreasuryCap(s));
   return { ...s, gold: Math.round(s.gold + Math.min(inc, headroom)) };
 }

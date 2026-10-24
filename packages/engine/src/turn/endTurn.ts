@@ -32,6 +32,9 @@ export function applyEndOfTurnDetailed(state: GameState, opts?: ApplyEndOfTurnOp
   // 2. Auto-trade for active player's settlements (legacy gate: absent → on)
   const autoTrade = runAutoTrade(newSettlements, playerId, opts?.legacyAutoTrade ?? true);
   newSettlements = autoTrade.settlements;
+  // Occupation morale penalty (section 8): read once per player turn, not
+  // per settlement -- every settlement checked below shares the same owner.
+  const ownerFactionId = state.players.find((p) => p.id === playerId)?.factionId;
   // 3. Morale decay + consumption + daily wages + effective income for active player's settlements
   for (const s of Object.values(newSettlements)) {
     if (s.ownerId !== playerId) continue;
@@ -41,7 +44,7 @@ export function applyEndOfTurnDetailed(state: GameState, opts?: ApplyEndOfTurnOp
     const moraleAfter = applyMoraleDecay(s);
     const consumed = applySettlementConsumption(moraleAfter);
     const paid = applySettlementWages(consumed);
-    newSettlements[s.id] = applyEffectiveIncome(paid);
+    newSettlements[s.id] = applyEffectiveIncome(paid, ownerFactionId);
   }
   return {
     state: { ...state, heroes: newHeroes, settlements: newSettlements, dirty: true },
