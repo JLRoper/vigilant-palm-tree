@@ -292,9 +292,45 @@ chain a change needs, so these are recorded rather than reverted:
   (the engine slice created `test/server/foundSettlement.test.ts` and
   `test/server/settlersGameModeRoute.test.ts`, and edited
   `test/engine/settlersMode.test.ts` and `test/engine/syncClassification.test.ts`).
-  **OPEN** — the reader decides whether a production slice may land its own
-  fixtures or must hand them to W6; until that is decided those files stay W6's.
+  **RESOLVED by W6 on 2026-10-24 — see §7.1.**
 
 Nothing here reassigns ownership: §4 W6 still owns `package.json`'s version,
 `CHANGELOG.md` and the phase's single version bump, and this section changes no
 §2 constraint, no §3 design answer and no §5 exit condition.
+
+### 7.1 `test/**` ownership — the §4 contradiction, resolved
+
+W7's M3 was that §4 W2 says a workstream "must not touch … any `test/**` file",
+§4 W5 names `test/ai/*.test.ts` and `test/server/aiDriver.test.ts` as *its own*
+test layer, and §6 hands `test/**` to W6 — while both production slices wrote
+tests anyway. The rule below is the resolution, and it reads the plan's own
+"Test layer" bullets as the ownership lists they already are:
+
+1. **`test/**` is SHARED, not fenced.** A workstream owns the test files its own
+   "Test layer" bullet names, plus any fixture it creates while implementing its
+   slice. A slice lands with the evidence that pins it, in the same commit: the
+   author of a rule is the one who can write its pin without a hand-off, and a
+   fixture written by the workstream that wrote the code is not a breach — the
+   engine slice's `test/server/foundSettlement.test.ts` and the AI slice's
+   additions to `test/server/aiDriver.test.ts` are legitimate on this rule.
+2. **W6 owns what no single workstream's change is the subject of:** the mode's
+   own suites (`test/settlers.e2e.ts` and the `test/engine/settlers*.test.ts`
+   pin-and-rule files) and the mode's creation-route coverage
+   (`test/server/settlersGameModeRoute.test.ts` today, whatever §4 W3's bullet
+   names later), the flip tests for §3's answers, and the shared fixture files
+   two workstreams would otherwise both
+   edit (e.g. `test/engine/syncClassification.test.ts`, whose counts follow the
+   event contract). It also owns the registration and release plumbing: this
+   file's `Test layer` bullets name them exactly — `tools/run-test.mjs`,
+   `test/_request.ts`, `package.json`'s scripts and version, `CHANGELOG.md`.
+3. **§4 W2's "must not touch any `test/**` file" is amended** to: must not touch
+   a test file another workstream owns, and must not weaken, delete or retarget
+   a failing assertion to make its own code pass. A red suite is reported to the
+   owner of the test that is red, with the failing test names — which is what W6
+   does with a red production suite, and what a production workstream does with
+   a red W6 suite.
+4. **W7's ownership check (§4 W7 deliverable 1) judges a `test/**` path against
+   the workstream whose "Test layer" bullet names it, falling back to W6 when no
+   bullet does.** A `test/**` path in a slice's diff is therefore not a finding
+   by itself; a test file edited by a workstream that neither owns it nor added
+   it is.
