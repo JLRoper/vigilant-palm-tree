@@ -10,9 +10,7 @@ import type { FactionId, UnitType } from "@heroes/contracts";
 import {
   FACTION_REGISTRY,
   playerFactionId,
-  unitAllowedForSeatFaction,
   unitFactionId,
-  type RecruitFactionGate,
 } from "@heroes/engine";
 
 function unit(id: string, factionId?: FactionId): UnitType {
@@ -31,10 +29,6 @@ function unit(id: string, factionId?: FactionId): UnitType {
   };
 }
 
-function gate(unitTypes: Record<string, UnitType>, seatFactionId: FactionId): RecruitFactionGate {
-  return { unitTypes, seatFactionId };
-}
-
 test("FACTION_REGISTRY is exhaustive over FactionId and every entry's id matches its key", () => {
   assert.deepEqual(
     Object.keys(FACTION_REGISTRY).sort(),
@@ -46,7 +40,7 @@ test("FACTION_REGISTRY is exhaustive over FactionId and every entry's id matches
   }
 });
 
-test("ashen ships its twelve-unit roster", () => {
+test("ashen ships its twelve-unit combat roster plus its Construction Worker", () => {
   assert.deepEqual(FACTION_REGISTRY.ashen.roster, [
     "ghoul",
     "bone_pikeman",
@@ -60,10 +54,11 @@ test("ashen ships its twelve-unit roster", () => {
     "dark_acolyte",
     "necromancer",
     "bone_dragon",
+    "construction_worker_ashen",
   ]);
 });
 
-test("ironmark ships its twelve-unit roster", () => {
+test("ironmark ships its twelve-unit combat roster plus its Construction Worker", () => {
   assert.deepEqual(FACTION_REGISTRY.ironmark.roster, [
     "dwarf_axeman",
     "shield_bearer",
@@ -77,10 +72,11 @@ test("ironmark ships its twelve-unit roster", () => {
     "axe_thrower",
     "hearth_priest",
     "ram_rider",
+    "construction_worker_ironmark",
   ]);
 });
 
-test("verdant ships its twelve-unit roster", () => {
+test("verdant ships its twelve-unit combat roster plus its Construction Worker", () => {
   assert.deepEqual(FACTION_REGISTRY.verdant.roster, [
     "forest_scout",
     "briar_warden",
@@ -94,6 +90,7 @@ test("verdant ships its twelve-unit roster", () => {
     "wildwood_ranger",
     "druid",
     "ursine_guardian",
+    "construction_worker_verdant",
   ]);
   assert.notEqual(FACTION_REGISTRY.verdant.description, "", "the placeholder description is replaced by real content");
 });
@@ -110,57 +107,27 @@ test("playerFactionId defaults absent seats to human", () => {
   assert.equal(playerFactionId({ factionId: "ironmark" }), "ironmark");
 });
 
-test("the gate no-ops without opts and with either half missing", () => {
-  const humanUnit = unit("swordsman", "human");
-  const ashenUnit = unit("revenant", "ashen");
-  const catalog = { swordsman: humanUnit, revenant: ashenUnit };
-  assert.equal(unitAllowedForSeatFaction("swordsman"), true, "no opts = today's behavior");
-  assert.equal(unitAllowedForSeatFaction("revenant", { seatFactionId: "human" }), true, "no unitTypes = gate cannot act");
-  assert.equal(
-    unitAllowedForSeatFaction("swordsman", { unitTypes: catalog }),
-    true,
-    "no seatFactionId = gate cannot act",
-  );
-});
+// The seat-faction recruit gate (unitAllowedForSeatFaction/RecruitFactionGate)
+// was deleted (construction-worker-gated faction-building feature, section
+// 2): every recruit building's roster is already faction-pure, so gating on
+// the owning building already enforces it and the seat-level gate's own
+// tests (no-op semantics, symmetry, the D3 unknown-id fallback, neutral
+// exclusion) no longer apply to anything that exists. See
+// packages/engine/src/settlement/recruitUnits.ts's header comment.
 
-test("the gate is symmetric: a seat sees only its own faction's units", () => {
-  const catalog = {
-    swordsman: unit("swordsman", "human"),
-    revenant: unit("revenant", "ashen"),
-    golem: unit("golem", "ironmark"),
-  };
-  assert.equal(unitAllowedForSeatFaction("swordsman", gate(catalog, "human")), true);
-  assert.equal(unitAllowedForSeatFaction("revenant", gate(catalog, "human")), false);
-  assert.equal(unitAllowedForSeatFaction("revenant", gate(catalog, "ashen")), true);
-  assert.equal(unitAllowedForSeatFaction("swordsman", gate(catalog, "ashen")), false);
-  assert.equal(unitAllowedForSeatFaction("golem", gate(catalog, "ironmark")), true);
-});
-
-test("unknown unit ids default human inside the gate (D3 fallback)", () => {
-  const catalog: Record<string, UnitType> = {};
-  assert.equal(unitAllowedForSeatFaction("anything", gate(catalog, "human")), true);
-  assert.equal(unitAllowedForSeatFaction("anything", gate(catalog, "ashen")), false);
-});
-
-test("neutral units are never eligible for a seat faction", () => {
-  const catalog = { griffin: unit("griffin", "neutral") };
-  for (const seat of ["human", "ashen", "ironmark", "verdant"] as const) {
-    assert.equal(
-      unitAllowedForSeatFaction("griffin", gate(catalog, seat)),
-      false,
-      `a ${seat} seat must not recruit the neutral griffin`,
-    );
-  }
-});
-test("each playable faction has twelve unique units without roster overlap", () => {
+test("each playable faction has twelve combat units plus its Construction Worker, without roster overlap", () => {
+  // 13 per faction since the Construction Worker landed (faction-
+  // construction plan, section 3): the 12-unit combat roster parity from
+  // PR #252 is untouched, plus one non-combat construction_worker_<faction>
+  // unit recruited from the same faction's starter troop building.
   const allIds = new Set<string>();
   for (const faction of ["human", "ashen", "ironmark", "verdant"] as const) {
     const roster = FACTION_REGISTRY[faction].roster;
-    assert.equal(roster.length, 12);
+    assert.equal(roster.length, 13);
     for (const id of roster) {
       assert.equal(allIds.has(id), false, `${id} belongs to only one faction`);
       allIds.add(id);
     }
   }
-  assert.equal(allIds.size, 48);
+  assert.equal(allIds.size, 52);
 });

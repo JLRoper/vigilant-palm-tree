@@ -383,7 +383,7 @@ test("POST /games seatFactions [\"ironmark\"] stamps the seat with the Ironmark 
 test("POST /games rejects seatFactions entries outside the registry", async () => {
   const name = uniqueName();
   try {
-    for (const seatFactions of [["elves"], ["human", 42], "ashen", ["human", "ELVES"]]) {
+    for (const seatFactions of [["elves"], ["human", 42], "ashen", ["human", "ELVES"], ["neutral"], ["human", "neutral"]]) {
       const res = await fetch(`${baseUrl}/games`, {
         method: "POST",
         headers: { "content-type": "application/json" },

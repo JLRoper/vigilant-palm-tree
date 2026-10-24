@@ -1,5 +1,5 @@
 import type { BuildingKind, FactionId } from "@heroes/contracts";
-import { buildingAllowedForFaction, getBuildingEffect, isProducerKind } from "@heroes/engine";
+import { buildingAllowedForFaction, getBuildingEffect, isProducerKind, normalizeFactionId } from "@heroes/engine";
 
 export const BUILDABLE_KINDS: readonly BuildingKind[] = [
   "townHall", "house",
@@ -24,8 +24,9 @@ export function buildListSections(factionId?: FactionId): BuildListSection[] {
   const troop: BuildingKind[] = [];
   const production: BuildingKind[] = [];
   const civilian: BuildingKind[] = [];
+  const normalizedFactionId = normalizeFactionId(factionId);
   for (const kind of BUILDABLE_KINDS) {
-    if (!buildingAllowedForFaction(kind, factionId)) continue;
+    if (!buildingAllowedForFaction(kind, normalizedFactionId)) continue;
     if (getBuildingEffect(kind).recruits.length > 0) troop.push(kind);
     else if (isProducerKind(kind)) production.push(kind);
     else civilian.push(kind);

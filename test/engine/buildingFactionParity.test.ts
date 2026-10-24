@@ -14,11 +14,14 @@ const factionBuildings: Record<Exclude<FactionId, "neutral">, BuildingKind[]> = 
   verdant: ["seedlingGrove", "groveSanctum", "warrenLodge", "sylvanStables", "worldrootGrove", "druidCircle"],
 };
 
-test("each faction has twelve distinct recruits and cannot build another faction's troop buildings", () => {
+test("each faction has twelve combat recruits plus its Construction Worker, and cannot build another faction's troop buildings", () => {
+  // 13, not 12, since the Construction Worker landed (section 3): the
+  // starter troop building (farmhouse/crypt/delversHall/seedlingGrove)
+  // gained one extra recruit entry for its own faction's worker.
   for (const [faction, kinds] of Object.entries(factionBuildings)) {
     const recruits = kinds.flatMap((kind) => getBuildingEffect(kind).recruits.map((entry) => entry.unitTypeId));
-    assert.equal(new Set(recruits).size, 12, faction);
-    assert.equal(recruits.length, 12, faction);
+    assert.equal(new Set(recruits).size, 13, faction);
+    assert.equal(recruits.length, 13, faction);
     for (const kind of kinds) {
       assert.equal(getBuildingEffect(kind).faction, faction);
       assert.equal(buildingAllowedForFaction(kind), true);

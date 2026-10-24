@@ -248,14 +248,14 @@ function cryptCommand(): Extract<Command, { kind: "RecruitUnits" }> {
   return recruitCommand({ buildingKind: "crypt", gx: 1, gy: 2, unitTypeId: "ghoul", count: 1 });
 }
 
-test("RecruitUnits rejects the ashen ghoul for a human seat even with a built crypt", async () => {
+test("RecruitUnits admits the ashen ghoul for a human seat too, with an owned built crypt (the seat-faction gate is gone)", async () => {
   const { gameRepo, eventRepo, deps } = makeDeps(cryptRow("human"));
   deps.ctx.catalog.unitTypes = [ghoulCatalogUnit()];
   const result = await handleCommand(cryptCommand(), deps);
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "unit_not_in_seat_faction");
-  assert.equal(eventRepo.events.length, 0);
-  assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 1000, "nothing persisted on rejection");
+  assert.equal(result.ok, true);
+  assert.equal(result.settlement?.gold, 960, "1 ghoul at 40g");
+  assert.equal(gameRepo.rows["test-game"].settlements.s0.gold, 960);
+  assert.equal(eventRepo.events.length, 1);
 });
 
 test("RecruitUnits admits the ashen ghoul for an ashen seat and charges the crypt's 40g", async () => {
@@ -330,17 +330,23 @@ test("RecruitUnits lets an ironmark seat recruit dwarf_axeman from a forgeHall",
   assert.equal(eventRepo.events[0].payload.unitTypeId, "dwarf_axeman");
 });
 
-test("RecruitUnits rejects an ironmark-tagged unit for a human seat (unit_not_in_seat_faction)", async () => {
+test("RecruitUnits: a human seat can also recruit dwarf_axeman from an owned forgeHall (the seat-faction gate is gone)", async () => {
+  // Construction-worker-gated faction-building feature (section 2): the
+  // server's unitAllowedForSeatFaction pre-check is deleted. Every recruit
+  // building's roster is already faction-pure, so owning the building is
+  // the only gate left -- which is also what makes a CAPTURED forgeHall
+  // finally worth capturing (recruiting from it used to be
+  // unit_not_in_seat_faction forever for a non-ironmark owner).
   const { deps, eventRepo } = makeDeps(forgeHallRow(), [ironmarkCatalogUnit("dwarf_axeman")]);
   const result = await handleCommand(forgeHallCommand(), deps);
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "unit_not_in_seat_faction");
-  assert.equal(eventRepo.events.length, 0);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.settlement?.stacks[0]?.entries, [{ unitTypeId: "dwarf_axeman", count: 2 }]);
+  assert.equal(eventRepo.events.length, 1);
 });
 
-// ── Seat-faction gate (026_verdant_wild): the server path pins ──
-// commandHandler checks unitAllowedForSeatFaction on the requested unit
-// BEFORE the reducer, so a seat never recruits another faction's roster.
+// ── Building-ownership-only gating (026_verdant_wild buildings, now
+// re-pinned for the seat-faction gate's removal): the server path owns no
+// faction pre-check any more -- owning the recruit building is the gate.
 
 function catalogUnit(id: string, factionId: FactionId): UnitType {
   return {
@@ -387,7 +393,7 @@ const FACTION_CATALOG: UnitType[] = [
   catalogUnit("stag_knight", "verdant"),
 ];
 
-test("RecruitUnits: a verdant seat recruits elk_rider from sylvanStables (its own faction passes the gate)", async () => {
+test("RecruitUnits: a verdant seat recruits elk_rider from its own sylvanStables", async () => {
   const { deps, eventRepo } = makeDeps(factionRow("verdant"), FACTION_CATALOG);
   const result = await handleCommand(
     recruitCommand({
@@ -405,7 +411,11 @@ test("RecruitUnits: a verdant seat recruits elk_rider from sylvanStables (its ow
   assert.equal(eventRepo.events.length, 1);
 });
 
-test("RecruitUnits: a human (default) seat cannot recruit the verdant roster — unit_not_in_seat_faction", async () => {
+test("RecruitUnits: a human (default) seat can ALSO recruit elk_rider from an owned sylvanStables (the seat-faction gate is gone)", async () => {
+  // Same building-ownership-only gating as the forgeHall pin above: this
+  // used to be unit_not_in_seat_faction before the seat-faction recruit
+  // gate was deleted (section 2) -- a captured sylvanStables is now usable
+  // by its new owner instead of permanently dead weight.
   const { deps, eventRepo } = makeDeps(factionRow(), FACTION_CATALOG);
   const result = await handleCommand(
     recruitCommand({
@@ -417,17 +427,16 @@ test("RecruitUnits: a human (default) seat cannot recruit the verdant roster —
     }),
     deps,
   );
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "unit_not_in_seat_faction");
-  assert.equal(eventRepo.events.length, 0);
+  assert.equal(result.ok, true);
+  assert.equal(result.settlement?.gold, 5000 - 450, "1 elk rider at 450g");
+  assert.equal(eventRepo.events.length, 1);
 });
 
-test("RecruitUnits: the gate is symmetric — a verdant seat cannot recruit human units", async () => {
+test("RecruitUnits: a verdant seat can also recruit human-rostered swordsman from its own barracks", async () => {
   const { deps, eventRepo } = makeDeps(factionRow("verdant"), FACTION_CATALOG);
   const result = await handleCommand(recruitCommand({ unitTypeId: "swordsman", count: 1 }), deps);
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "unit_not_in_seat_faction");
-  assert.equal(eventRepo.events.length, 0);
+  assert.equal(result.ok, true);
+  assert.equal(eventRepo.events.length, 1);
 });
 
 for (const [factionId, buildingKind, unitTypeId, price] of [
@@ -450,14 +459,14 @@ for (const [factionId, buildingKind, unitTypeId, price] of [
     assert.equal(eventRepo.events[0].payload.unitTypeId, unitTypeId);
   });
 
-  test(`RecruitUnits rejects ${unitTypeId} from an existing ${buildingKind} belonging to another faction`, async () => {
+  test(`RecruitUnits allows ${unitTypeId} from an existing ${buildingKind} even when the seat plays another faction (ownership-only gating)`, async () => {
     const row = recruitRow({ buildings: [building(buildingKind, 2, 3)] });
     row.players = [{ ...PLAYERS[0], factionId: factionId === "human" ? "ashen" : "human" }, PLAYERS[1]];
     const { deps, eventRepo, settlementRepo } = makeDeps(row, [catalogUnit(unitTypeId, factionId)]);
     const result = await handleCommand(recruitCommand({ buildingKind, unitTypeId, count: 1 }), deps);
-    assert.equal(result.ok, false);
-    assert.equal(result.reason, "unit_not_in_seat_faction");
-    assert.equal(eventRepo.events.length, 0);
-    assert.equal(settlementRepo.calls.length, 0);
+    assert.equal(result.ok, true);
+    assert.equal(result.settlement?.gold, 1000 - price);
+    assert.equal(eventRepo.events.length, 1);
+    assert.equal(settlementRepo.calls.length, 1);
   });
 }

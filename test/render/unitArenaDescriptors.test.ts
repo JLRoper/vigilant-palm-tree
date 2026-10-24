@@ -17,8 +17,18 @@ const ARENA_DIR = resolve(process.cwd(), "src", "resources", "units", "arena");
 const DESCRIPTORS_SOURCE = resolve(process.cwd(), "src", "render", "assetDescriptors.ts");
 
 // The known, deliberate art gap: mage has no arena poses (45 sprites for 15
-// ids); the painter falls back to circle rendering for it.
-const EXPECTED_ARENA_GAPS: readonly string[] = ["mage"];
+// ids); the painter falls back to circle rendering for it. The four
+// Construction Worker ids (034_construction_workers.sql, faction-
+// construction plan section 3) join it for the same reason: shipped in this
+// first-draft PR with no art pipeline run. Follow-up: commission arena
+// sprites for the four and drop them from this list.
+const EXPECTED_ARENA_GAPS: readonly string[] = [
+  "mage",
+  "construction_worker_human",
+  "construction_worker_ashen",
+  "construction_worker_ironmark",
+  "construction_worker_verdant",
+];
 
 const UNIT_CATALOG_IDS_WITH_ART = UNIT_CATALOG_IDS.filter(
   (id) => !EXPECTED_ARENA_GAPS.includes(id),

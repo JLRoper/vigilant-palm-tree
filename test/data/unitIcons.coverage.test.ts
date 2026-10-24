@@ -13,8 +13,16 @@ import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { UNIT_CATALOG_IDS } from "../helpers/unitIds";
 
-// No deliberate gaps: every unit-catalog id must ship its dedicated icon bust.
-const EXPECTED_ICON_GAPS: readonly string[] = [];
+// Deliberate gap: the four Construction Worker ids (034_construction_workers.sql,
+// faction-construction plan section 3) shipped in this first-draft PR without
+// a dedicated icon bust -- no art pipeline was run as part of this change.
+// Follow-up: commission the four icons and drop this exemption.
+const EXPECTED_ICON_GAPS: readonly string[] = [
+  "construction_worker_human",
+  "construction_worker_ashen",
+  "construction_worker_ironmark",
+  "construction_worker_verdant",
+];
 
 const UNIT_ICON_IDS = UNIT_CATALOG_IDS.filter(
   (id) => !EXPECTED_ICON_GAPS.includes(id),
