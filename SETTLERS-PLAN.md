@@ -252,3 +252,49 @@ SETTLERS-PLAN.md                             W7 (this file's owner-of-record;
 Forbidden for every workstream: `packages/engine/src/map/gameMap.ts`'s
 versioning surface, `packages/engine/src/map/castlePlacement.ts`'s draw order,
 any new `MapGenVersion`, and any migration for the mode.
+
+## 7. As-built record — SHA pins, and the ownership exceptions actually taken
+
+Added by the integration pass on 2026-10-24. §4's branch names are **not stable
+handles**: the worktree panel renames a finished worktree's branch *and* its
+directory after the thread slug, so `wtgui/settlers-engine`,
+`wtgui/settlers-client-ui` and `wtgui/settlers-ai` (the name W5's report uses)
+do not resolve today. Pin the work by commit. The feature branch is
+`wtgui/implement-settlers-engine-slice-from-pla-1e8b31`, seven commits above
+local `main` at `9506422`, with `github/main` at `965b681` merged into it:
+
+| Step | Commit | Subject |
+|---|---|---|
+| plan | `bb750e4` | docs(settlers): plan the game mode into disjoint workstreams |
+| phase 0 | `cf81632` | the game-mode vocabulary and the new-game default-mode setting |
+| phase 0 | `bef0b87` | the start-placement and founding stubs, and the determinism pin |
+| W1+W2+W3 | `23c72a0` | the engine, contracts and server slice |
+| merge | `dea9b27` | merge `github/main` into the feature branch |
+| W5 | `ce48e05` | the AI seat founds through the engine's own founding rules |
+| W4 | `8591d713` | the client UI slice |
+| feature tip | `eee9c98` | both slice merges landed — the commit to review |
+
+Files a workstream touched although §4 or §6 assigns them elsewhere. The
+ownership lists are a sketch of each workstream's files, not a fence around the
+chain a change needs, so these are recorded rather than reverted:
+
+- `src/render/scene/entityMirror.ts` — §6 gives `src/render/**` to W4; the engine
+  slice adds the `SettlementFounded` case to an exhaustive switch, which `tsc`
+  requires. W4's slice is cut from that commit, so it inherits the case.
+- `packages/engine/src/events/applyEvent.ts` and `docs/event-system.md` — owned
+  by no workstream in §4 or in §6: the event's sync classification and the §5.1
+  counts. `docs:check` covers the doc through its `packages/contracts/**` +
+  `packages/engine/src/events/**` globs, so the omission is a plan gap, not a
+  doc-gate failure.
+- `test/**` — §4 W2 forbids the engine workstream from touching any test file,
+  §4 W5 names `test/ai/*.test.ts` and `test/server/aiDriver.test.ts` as its own
+  test layer, and §6 gives `test/**` to W6. Both production slices wrote tests
+  (the engine slice created `test/server/foundSettlement.test.ts` and
+  `test/server/settlersGameModeRoute.test.ts`, and edited
+  `test/engine/settlersMode.test.ts` and `test/engine/syncClassification.test.ts`).
+  **OPEN** — the reader decides whether a production slice may land its own
+  fixtures or must hand them to W6; until that is decided those files stay W6's.
+
+Nothing here reassigns ownership: §4 W6 still owns `package.json`'s version,
+`CHANGELOG.md` and the phase's single version bump, and this section changes no
+§2 constraint, no §3 design answer and no §5 exit condition.

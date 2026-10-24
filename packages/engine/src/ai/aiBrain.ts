@@ -363,8 +363,19 @@ function canFoundAt(
  * Deterministic and bounded: FOUNDING_SEARCH_RADIUS around the wagon, ties
  * broken by hex distance, then record order (q, then r), then the first
  * candidate with a path.
+ *
+ * `obstacles` is the set the caller will STEP with. Passing it matters: probe
+ * and step must agree on what is impassable, or a candidate reachable only
+ * THROUGH a blocked hex passes here and then fails at `stepToward` -- the wagon
+ * wastes the attempt and falls back to wandering (W7 review, L5). Omitted, the
+ * probe falls back to the other heroes' hexes alone.
  */
-export function pickFoundingHex(state: GameState, heroId: HeroId, map: GameMap): Axial | null {
+export function pickFoundingHex(
+  state: GameState,
+  heroId: HeroId,
+  map: GameMap,
+  obstacles?: ReadonlySet<string>,
+): Axial | null {
   const hero = state.heroes[heroId];
   if (!hero) return null;
   const qMin = Math.max(0, hero.q - FOUNDING_SEARCH_RADIUS);
@@ -381,9 +392,11 @@ export function pickFoundingHex(state: GameState, heroId: HeroId, map: GameMap):
   }
   if (legal.length === 0) return null;
   legal.sort((a, b) => hexDistance(hero, a) - hexDistance(hero, b) || a.q - b.q || a.r - b.r);
-  const occupied = new Set<string>();
-  for (const [otherId, other] of Object.entries(state.heroes)) {
-    if (otherId !== heroId) occupied.add(`${other.q},${other.r}`);
+  const occupied = new Set<string>(obstacles ?? []);
+  if (!obstacles) {
+    for (const [otherId, other] of Object.entries(state.heroes)) {
+      if (otherId !== heroId) occupied.add(`${other.q},${other.r}`);
+    }
   }
   for (const candidate of legal.slice(0, FOUNDING_PATH_ATTEMPTS)) {
     if (findPath(map, hero, candidate, occupied).length > 0) return candidate;
@@ -460,13 +473,17 @@ export function pickAiMove(
   // given an army-only target -- no enemy hero, no garrison assault, no walk-in
   // capture -- because every one of those bands ends in a command a wagon
   // cannot legally issue. This is the belt to pickSettlersWagonAction's braces:
-  // ANY caller of pickAiMove (the browser tick of an unflagged game included)
-  // gets a founding-bound step from a wagon, never an army's errand. Every
-  // settlement hex is a path obstacle for a wagon as well, so its route never
-  // crosses a town it could not legally do anything about.
-  if (isCoveredWagonId(heroId)) {
+  // ANY caller of pickAiMove in a SETTLERS game (the browser tick of an
+  // unflagged game included) gets a founding-bound step from a wagon, never an
+  // army's errand. Every settlement hex is a path obstacle for a wagon as well,
+  // so its route never crosses a town it could not legally do anything about.
+  // Both halves of the gate are read here -- the id AND the mode -- exactly as
+  // the server's own driver branch does (server/app/aiDriver.ts): an id alone
+  // must never divert a mover, so a classic game whose entity happens to be
+  // named `p<i>-wagon` takes the ordinary army path (W7 review, M7).
+  if (resolveGameMode(state.gameMode) === "settlers" && isCoveredWagonId(heroId)) {
     for (const s of Object.values(state.settlements)) blocked.add(`${s.q},${s.r}`);
-    const founding = pickFoundingHex(state, heroId, map);
+    const founding = pickFoundingHex(state, heroId, map, blocked);
     if (founding) {
       const step = stepToward(hero, founding, map, blocked);
       if (step) return step;

@@ -124,7 +124,11 @@ export function placeSettlersStarts(request: SettlersStartRequest): SettlersStar
     getOrCreateGameMap(request.seed, request.size, CURRENT_MAP_GEN_VERSION);
   if (seats === 0) return [];
 
-  const minDistance = Math.max(1, gameModeSettings(request.mode).minFoundingDistance);
+  // The mode's OWN spacing rule, read at the same boundary the founding rule
+  // reads it at (found.ts skips the check when the constant is <= 0), so
+  // flipping `minFoundingDistance` to 0 really does flip the start spacing to
+  // zero here instead of being clamped back to 1 (W7 review, L2).
+  const minDistance = Math.max(0, gameModeSettings(request.mode).minFoundingDistance);
   const blocked = request.occupied ?? [];
   const candidates = startCandidates(map);
   if (candidates.length === 0) {

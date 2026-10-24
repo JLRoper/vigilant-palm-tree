@@ -483,13 +483,22 @@ function makeWagons(starts: readonly SettlersStart[], mode: GameMode): HeroState
   });
 }
 
-/** The map tier a built map is, for the settlers request's own `size` field. */
+/**
+ * The map tier a built map is, for the settlers request's own `size` field.
+ *
+ * Throws for a map whose dimensions match no tier rather than falling back to
+ * `small`: a silent fallback would put a value in the request that is simply
+ * wrong, and every map this codebase builds comes from `MAP_SIZES` (W7 review,
+ * L1).
+ */
 function mapSizeOf(map: GameMap): MapSize {
   for (const size of MAP_SIZE_ORDER) {
     const dims = MAP_SIZES[size];
     if (dims.width === map.width && dims.height === map.height) return size;
   }
-  return "small";
+  throw new Error(
+    `settlers start placement: the ${map.width}x${map.height} map matches no map-size tier`,
+  );
 }
 
 function makeSettlements(
