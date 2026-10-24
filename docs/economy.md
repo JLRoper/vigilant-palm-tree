@@ -1,6 +1,6 @@
 # Economy
 
-<!-- docs:verified 2026-10-21 -->
+<!-- docs:verified 2026-10-24 -->
 
 The per-turn loop that ties [resources](./resources.md), [settlements](./settlements.md), and [heroes](./heroes.md) together.
 
@@ -105,6 +105,8 @@ Growth rate is player-configurable in Settings. The upgrade population gate is n
 Morale ranges 0–100 and is evaluated on **pre-consumption** state, so a settlement holding exactly its food requirement is not charged decay. It decays when food or building upkeep can't be met from warehouse stocks — `(foodDeficitRatio + suppliesDeficitRatio) × 10`, with `+1` extra while morale < 50, where each ratio is `(needed − have) / max(1, needed)`. `suppliesDeficitRatio` is per-resource (`max(wood, stone)`), so a surplus in one material cannot mask a total shortfall in the other.
 
 **Morale recovers** (+4 per turn, `MORALE_RECOVERY_PER_SUPPLIED_TURN`) whenever there is no food and no supplies shortfall — falling behind is meant to be recoverable, not permanent. Charter settlements start at 50 (lower initial morale). Morale affects effective gold income linearly.
+
+**Occupation morale penalty (✅ 2026-10-24, faction-construction plan) — a SEPARATE modifier, read only at income time, never stored.** `settlementFactionTally` (`packages/engine/src/economy/consumption.ts`) counts faction-TAGGED buildings only (main + districts), by faction; untagged buildings never count. A settlement is "foreign-occupied" relative to its owner's seat faction when it has ≥1 foreign-tagged building and the owner's own-faction tally does not exceed the largest foreign tally. `occupationMoralePenalty` then charges `OCCUPATION_PENALTY_PER_BUILDING` (5) per building of imbalance (`foreignMaxTally − ownTally`), capped at `OCCUPATION_PENALTY_MAX` (40). `effectiveIncome`/`applyEffectiveIncome` subtract it from the stored `morale` field ONLY at the moment income is computed (`effectiveMorale = clamp(morale − penalty, 0, 100)`) — the stored, decaying/recovering `morale` field above is never touched, because the two have different cures: supply-shortfall morale recovers from being fed; occupation morale only resolves by changing the building tally (build more of your own faction, or `DemolishBuilding` the foreign ones — [settlements.md](./settlements.md) → Construction & demolition). Recomputed fresh from the current buildings array on every read, never persisted.
 
 ## Storage buildings
 

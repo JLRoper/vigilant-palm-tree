@@ -1,6 +1,6 @@
 # Settlements
 
-<!-- docs:verified 2026-10-21 -->
+<!-- docs:verified 2026-10-24 -->
 
 The player's claim on the world. Settlements come in two forms: **initial castles** (pre-placed at game start via `castlePlacement`) and **charter-founded settlements** (created by heroes via expedition).
 
@@ -147,7 +147,7 @@ A hero walking onto an enemy settlement tile captures it — **only if the garri
 - A player can recapture their own settlements by walking their hero back onto them (same garrison gate).
 - **Active upgrades survive capture.** If a settlement is mid-upgrade, construction continues under the new owner.
 
-✅ **Locked:** no other form of destruction. Settlements are permanent until captured — no spells, no demolition, no decay.
+✅ **Locked:** no other form of SETTLEMENT destruction. Settlements are permanent until captured — no spells, no decay. (`DemolishBuilding`, 2026-10-24, removes one BUILDING inside a settlement you own — see **Construction & demolition** below — it never touches the settlement itself.)
 
 ## Garrison (✅ implemented)
 
@@ -157,9 +157,16 @@ Every settlement can hold troops: `SettlementState.stacks?: Platoon[]` — the s
 - **Out:** `TransferUnits` with `"toHero"` loads the hero's platoons — the hero **must stand on the settlement**.
 - **Upkeep:** weekly (inside `applyWeeklyUpkeep`) via `applyGarrisonUpkeep` (`packages/engine/src/settlement/garrisonUpkeep.ts`) — the same `resolveTroopUpkeep` rule heroes run (per-unit catalog gold/food bill, gold from the treasury and food from the warehouse, shortfall taken as a morale bleed then weighted desertion after a 2-week grace). Full rule: [army.md](./army.md) → Upkeep.
 - **Defense:** a non-empty garrison must be defeated before capture succeeds — in the manual arena for a local-human attacker (behind the assault-confirm modal), auto-resolved otherwise (see Capture above); since the 2026-09-29 capture/garrison wave the losing attacker suffers the hero-battle outcomes (defeat removes the hero, retreat/surrender relocate).
-- **AI-held garrisons (2026-09-29 follow-ups, B1):** AI seats spend their own treasuries on garrison troops during their turns — threat-sized (`pickGarrisonRecruitment`: target power = 1.0 × nearby enemy-hero power within reach 8, floor 4, gold reserve 100), bought through the same `RecruitUnits` path and building gates as a player's recruits. An AI town left alone grows a garrison instead of falling to the first walk-in.
+- **AI-held garrisons (2026-09-29 follow-ups, B1):** AI seats spend their own treasuries on garrison troops during their turns — threat-sized (`pickGarrisonRecruitment`: target power = 1.0 × nearby enemy-hero power within reach 8, floor 4, gold reserve 100), bought through the same `RecruitUnits` path and building gates as a player's recruits (excluding the four Construction Worker ids — see [army.md](./army.md) → Construction Workers — the AI never spends its garrison budget on one). An AI town left alone grows a garrison instead of falling to the first walk-in.
 
 Buildings gate what a settlement can recruit; the newest are **huntingLodge** (placement 250g + 8 wood; recruits warhound for 180g; `defenseBonus: 1`) and **eyrie** (placement 500g + 12 wood + 8 stone; recruits giant_eagle 1400g + 2 arcane at L1, eagle_prince 2400g + 4 arcane at L2). The full building→unit table lives in [army.md](./army.md).
+
+## Construction & demolition (✅ 2026-10-24, faction-construction plan)
+
+- **Placing a faction-tagged building now needs a Construction Worker.** `applyPlaceBuildings` no longer compares the settlement owner's seat faction against a new building's tag (`wrong_faction` is gone). Instead, placing a NEW building tagged faction F requires an F Construction Worker currently standing in the settlement's garrison/stacks — `buildingConstructionGate` in `packages/engine/src/settlement/constructionWorkers.ts`; failure reason `missing_construction_worker`. Untagged (economy) buildings are unaffected. The worker is a standing requirement, never consumed. See [army.md](./army.md) → Construction Workers for the unit itself, pricing, and transport.
+- **Every owned settlement starts with one.** `init.ts`'s `seedStarterBuildings` deposits one Construction Worker of the settlement's own founding faction into its garrison at game creation (owned settlements only — a neutral settlement gets none, so an undefended neutral settlement's walk-in capture is unaffected); the city view's free starter-layout commit does the same for a settlement founded later by a charter. Both are exempt from the gate above (it is the town's pre-built starting state, not new construction).
+- **`DemolishBuilding`** (new command, `packages/engine/src/settlement/demolishBuilding.ts`) removes one building (main city or a district) that you own — no faction gate, so you can tear down a foreign-tagged building you captured, which is also how you fight back against the occupation morale penalty ([economy.md](./economy.md)). No resource refund (a tuning knob, not a locked decision) — distinct from `PlaceBuildings`' own cart-based removal (50% refund). The town hall cannot be demolished.
+- **Per-turn construction cap.** `SettlementState.constructionActionUsedThisTurn` is set by whichever of `PlaceBuildings` or `DemolishBuilding` commits FIRST for a settlement in a turn; the other is refused (`construction_action_already_used_this_turn`) until the next day. Reset in `turn/round.ts`'s `advanceRound`. The free starter-layout commit does not consume it.
 
 ## Building roster — the newest and the storage roles
 
