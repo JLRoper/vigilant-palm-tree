@@ -1,7 +1,7 @@
-import { Axial } from "@heroes/contracts";
+import { Axial, isCoveredWagonId, resolveGameMode } from "@heroes/contracts";
 import { findPath, NEIGHBOR_DIRS, hexDistance } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
-import type { BuildingDef, BuildingKind, FactionId, GameState, HeroState, SettlementState } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, FactionId, GameState, HeroId, HeroState, SettlementState } from "@heroes/contracts";
 import {
   platoonPower,
   platoonTroopTotal,
@@ -18,13 +18,14 @@ import { buildingDraftMax } from "../buildingRegistry";
 import { RESOURCES } from "../map/resourceTiles";
 import { computeSettlementRates, generateSettlementName } from "../economy/settlementRates";
 import { evaluateCharterRequirements, validCharterHexes } from "../charter/requirements";
+import { canFoundSettlement } from "../settlers/found";
 
 export interface AiMove {
   toTile: Axial;
   cost: number;
 }
 
-type TargetKind = "enemy" | "garrisoned_settlement" | "enemy_settlement" | "neutral_settlement" | "resource" | "wander";
+type TargetKind = "enemy" | "garrisoned_settlement" | "enemy_settlement" | "neutral_settlement" | "resource" | "founding" | "wander";
 
 interface Target {
   kind: TargetKind;
@@ -259,6 +260,15 @@ export function pickCharterAction(
   map: GameMap,
   rng: () => number,
 ): CharterAction | null {
+  // Settlers mode does not charter (SETTLERS-PLAN.md §4 W5): its founding is a
+  // SEPARATE path (settlers/found.ts), reached with the FoundSettlement command
+  // by pickSettlersWagonAction's caller -- the charter path's own rules
+  // (charter/**) are not rewritten. Returning null here is the ONE place the
+  // AI's charter decision is suppressed, so both drivers are covered: the
+  // server actor (server/app/aiDriver.ts) and the browser tick of an unflagged
+  // legacy game (src/state/turnController.ts). A classic game -- the default
+  // mode, and every game created before the feature -- reads exactly as before.
+  if (resolveGameMode(state.gameMode) === "settlers") return null;
   if (!evaluateCharterRequirements(state, heroId).canStart) return null;
   const hero = state.heroes[heroId];
   if (!hero) return null;
@@ -293,6 +303,120 @@ export function pickCharterAction(
     targetR: best.r,
     settlementName: generateSettlementName(rng, hero.ownerId),
   };
+}
+
+// ── Settlers mode: what a covered wagon decides (SETTLERS-PLAN.md §4 W5) ───
+//
+// In settlers mode a seat owns no castle and no commander: it owns one covered
+// wagon (contracts' coveredWagonIdFor / isCoveredWagonId), and founding a
+// settlement is what that wagon is for. Two consequences shape this section:
+//
+//  1. The RULE is the engine's, not the brain's. Every hex a wagon considers is
+//     asked about through canFoundSettlement (settlers/found.ts) -- the same
+//     predicate the client's founding gesture gates on -- so the mode's
+//     spacing, terrain and occupancy answers stay in one place, the AI can
+//     never found where a human could not, and no mode tunable is restated
+//     here (the numbers are read from gameModeSettings inside the rule).
+//  2. A wagon has NO army, so it may never be ordered into an army-only action:
+//     no enemy hero, no garrison assault, no settlement capture, no battle. Its
+//     whole decision set is "found on the hex I stand on" and "walk toward the
+//     hex I would found on".
+
+/** How far from its own hex a wagon looks for a hex it may found on. */
+const FOUNDING_SEARCH_RADIUS = 12;
+
+/**
+ * How many of the nearest legal founding hexes are path-probed before the
+ * wagon gives up for the turn: a legal hex behind water or off an island is
+ * not a destination, and the probe is what keeps "nearest legal" from meaning
+ * "unreachable".
+ */
+const FOUNDING_PATH_ATTEMPTS = 16;
+
+export type SettlersWagonAction =
+  | { kind: "found"; heroId: HeroId; q: number; r: number }
+  | { kind: "move"; heroId: HeroId; toTile: Axial; cost: number };
+
+/**
+ * Whether the engine would let this founder found on (q, r).
+ *
+ * The founder is relocated in a shallow copy before the predicate is asked:
+ * canFoundSettlement refuses a mover that is not standing on the request's hex
+ * (`founder_not_at_tile`), and relocating is what lets ONE implementation
+ * answer for the hex the wagon would WALK to as well as the one it stands on.
+ * Nothing else about the rule is restated here.
+ */
+function canFoundAt(
+  state: GameState,
+  heroId: HeroId,
+  hero: HeroState,
+  q: number,
+  r: number,
+  map: GameMap,
+): boolean {
+  const relocated: GameState = { ...state, heroes: { ...state.heroes, [heroId]: { ...hero, q, r } } };
+  return canFoundSettlement({ state: relocated, founderId: heroId, q, r, map }).ok;
+}
+
+/**
+ * The nearest hex this wagon may found on and can actually reach, or null.
+ * Deterministic and bounded: FOUNDING_SEARCH_RADIUS around the wagon, ties
+ * broken by hex distance, then record order (q, then r), then the first
+ * candidate with a path.
+ */
+export function pickFoundingHex(state: GameState, heroId: HeroId, map: GameMap): Axial | null {
+  const hero = state.heroes[heroId];
+  if (!hero) return null;
+  const qMin = Math.max(0, hero.q - FOUNDING_SEARCH_RADIUS);
+  const qMax = Math.min(map.width - 1, hero.q + FOUNDING_SEARCH_RADIUS);
+  const rMin = Math.max(0, hero.r - FOUNDING_SEARCH_RADIUS);
+  const rMax = Math.min(map.height - 1, hero.r + FOUNDING_SEARCH_RADIUS);
+  const legal: Axial[] = [];
+  for (let r = rMin; r <= rMax; r++) {
+    for (let q = qMin; q <= qMax; q++) {
+      if (hexDistance(hero, { q, r }) > FOUNDING_SEARCH_RADIUS) continue;
+      if (!canFoundAt(state, heroId, hero, q, r, map)) continue;
+      legal.push({ q, r });
+    }
+  }
+  if (legal.length === 0) return null;
+  legal.sort((a, b) => hexDistance(hero, a) - hexDistance(hero, b) || a.q - b.q || a.r - b.r);
+  const occupied = new Set<string>();
+  for (const [otherId, other] of Object.entries(state.heroes)) {
+    if (otherId !== heroId) occupied.add(`${other.q},${other.r}`);
+  }
+  for (const candidate of legal.slice(0, FOUNDING_PATH_ATTEMPTS)) {
+    if (findPath(map, hero, candidate, occupied).length > 0) return candidate;
+  }
+  return null;
+}
+
+/**
+ * The whole decision set of a settlers seat's wagon, taken from the engine's
+ * own rules: found where it stands when the engine admits it (no rng draw, so
+ * a founding never moves a stream), else one move step toward the hex it would
+ * found on -- and, when no hex it may found on is reachable from here, the same
+ * deterministic wander step every other hero's empty target list falls back to
+ * (pickAiMove's own last resort, never a military target).
+ *
+ * Null for anything that is not a wagon (isCoveredWagonId), a wagon that is
+ * gone, a wagon with no movement left, and -- through canFoundSettlement's own
+ * mode gate -- a wagon in a classic game.
+ */
+export function pickSettlersWagonAction(
+  state: GameState,
+  heroId: HeroId,
+  map: GameMap,
+  rng: () => number,
+): SettlersWagonAction | null {
+  if (!isCoveredWagonId(heroId)) return null;
+  const hero = state.heroes[heroId];
+  if (!hero) return null;
+  if (canFoundSettlement({ state, founderId: heroId, q: hero.q, r: hero.r, map }).ok) {
+    return { kind: "found", heroId, q: hero.q, r: hero.r };
+  }
+  const move = pickAiMove(state, heroId, map, rng);
+  return move ? { kind: "move", heroId, toTile: move.toTile, cost: move.cost } : null;
 }
 
 export function pickAiMove(
@@ -330,6 +454,24 @@ export function pickAiMove(
     if (!attackerBeatsGarrison(attackerPower, s, unitTypes)) {
       blocked.add(`${s.q},${s.r}`);
     }
+  }
+
+  // A covered wagon has no army (see the settlers section above): it is never
+  // given an army-only target -- no enemy hero, no garrison assault, no walk-in
+  // capture -- because every one of those bands ends in a command a wagon
+  // cannot legally issue. This is the belt to pickSettlersWagonAction's braces:
+  // ANY caller of pickAiMove (the browser tick of an unflagged game included)
+  // gets a founding-bound step from a wagon, never an army's errand. Every
+  // settlement hex is a path obstacle for a wagon as well, so its route never
+  // crosses a town it could not legally do anything about.
+  if (isCoveredWagonId(heroId)) {
+    for (const s of Object.values(state.settlements)) blocked.add(`${s.q},${s.r}`);
+    const founding = pickFoundingHex(state, heroId, map);
+    if (founding) {
+      const step = stepToward(hero, founding, map, blocked);
+      if (step) return step;
+    }
+    return pickWanderStep(hero, map, rng, blocked);
   }
 
   const targets: Target[] = [];

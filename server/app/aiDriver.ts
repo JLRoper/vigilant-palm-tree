@@ -1,3 +1,4 @@
+import { isCoveredWagonId, resolveGameMode } from "@heroes/contracts";
 import type { Command, GameState, HeroBattleVerdict, HeroId, Platoon, Player, SettlementId } from "@heroes/contracts";
 import {
   AI_RETREAT_STRENGTH_RATIO,
@@ -13,6 +14,7 @@ import {
   pickAiMove,
   pickCharterAction,
   pickGarrisonRecruitment,
+  pickSettlersWagonAction,
   platoonsHaveTroops,
   platoonTroopTotal,
   readPendingBattle,
@@ -722,6 +724,12 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
   }
   if (!aiStillActive(snap.state, candidate.active_player_id)) return "turn_lost";
   const seat = snap.state.activePlayerId;
+  // The mode is a per-game STORED value (games.lobby.gameMode / contracts'
+  // resolveGameMode) and cannot change mid-pass, so it is read once, off the
+  // top-of-pass hydration, and every mode-dependent branch below reads this
+  // local. Classic (the default, and every game created before the feature)
+  // reaches none of them.
+  const mode = resolveGameMode(snap.state.gameMode);
 
   // A battle this pass (or a previous one) offered a HUMAN defender is still
   // pending: wait for their Fight/Auto-resolve choice instead of driving on.
@@ -956,6 +964,72 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
         const hero = snap.state.heroes[heroId];
         if (!hero) break;
         const map = getOrCreateGameMap(snap.seed, snap.mapSize, snap.mapGenVersion);
+        // Settlers mode (SETTLERS-PLAN.md §4 W5): the seat's only entity is a
+        // covered wagon, and founding IS its turn. The decision comes from the
+        // engine brain -- pickSettlersWagonAction, which asks the engine's own
+        // canFoundSettlement about every hex it considers -- and the dispatch
+        // below is the same FoundSettlement command a human's gesture sends, so
+        // the AI cannot found where a human could not. Found-where-it-stands
+        // happens as soon as the engine admits it (the wagon is then consumed,
+        // which ends this hero's loop on the next hydration); otherwise the
+        // wagon takes one step toward the nearest hex it may found on (or the
+        // ordinary wander step when no such hex is reachable), and re-decides
+        // each step, so arriving and founding land in one turn.
+        // A wagon has no army: this branch deliberately bypasses the walk-in
+        // gates, the adjacency battle, the charter travel and every capture --
+        // the army-only commands a wagon must never be given -- and the brain
+        // never offers it a military target.
+        if (mode === "settlers" && isCoveredWagonId(heroId)) {
+          const wagonAction = pickSettlersWagonAction(snap.state, heroId, map, mem.rng);
+          if (!wagonAction) break;
+          if (wagonAction.kind === "found") {
+            const founded = await dispatch(ctx, {
+              kind: "FoundSettlement",
+              gameName,
+              actor: seat,
+              founderId: heroId,
+              q: wagonAction.q,
+              r: wagonAction.r,
+            });
+            if ("stop" in founded) {
+              if (founded.stop === "turn_lost") return "turn_lost";
+              exhausted = founded.stop;
+              break sweep;
+            }
+            if (!founded.outcome.ok) {
+              console.info(
+                `[aiDriver] "${gameName}" FoundSettlement for ${heroId} rejected (${founded.outcome.reason}); dropping the action for this pass`,
+              );
+              skippedHeroes.add(heroId);
+              break;
+            }
+            movedThisSweep += 1;
+            break;
+          }
+          const stepped = await dispatch(ctx, {
+            kind: "MoveHero",
+            gameName,
+            actor: seat,
+            heroId,
+            fromTile: { q: hero.q, r: hero.r },
+            toTile: wagonAction.toTile,
+            cost: wagonAction.cost,
+          });
+          if ("stop" in stepped) {
+            if (stepped.stop === "turn_lost") return "turn_lost";
+            exhausted = stepped.stop;
+            break sweep;
+          }
+          if (!stepped.outcome.ok) {
+            console.info(
+              `[aiDriver] "${gameName}" MoveHero for wagon ${heroId} rejected (${stepped.outcome.reason}); dropping the action for this pass`,
+            );
+            skippedHeroes.add(heroId);
+            break;
+          }
+          movedThisSweep += 1;
+          continue;
+        }
         // B3b: a chartering hero travels its charter's route instead of
         // taking a pickAiMove move -- startMove rejects is_chartering, so the
         // two branches are mutually exclusive per hero and a chartering hero

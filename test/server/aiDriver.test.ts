@@ -11,7 +11,9 @@ import {
   evaluateTradeNeeds,
   buyWagons,
   computeSettlementRates,
+  canFoundSettlement,
   findPath,
+  foundSettlement,
   startCharter,
   stepTravelCharter,
   CHARTER_GOLD_COST,
@@ -21,7 +23,7 @@ import {
   type PendingBattleMarker,
   type UnitType,
 } from "@heroes/engine";
-import { hexDistance, HEX_DIRECTIONS, MOVEMENT_PER_TURN } from "@heroes/contracts";
+import { hexDistance, HEX_DIRECTIONS, MOVEMENT_PER_TURN, coveredWagonIdFor, gameModeSettings } from "@heroes/contracts";
 import type { Axial, CharterState, Command, HeroId } from "@heroes/contracts";
 import {
   AI_DEFENDER_OWNER_MISSING_AUDIT_KIND,
@@ -261,6 +263,30 @@ function installHarness(
         // turn back to the AI seat (the handler's behavior on success).
         world.pendingBattle = null;
         world.state.phase = { kind: "AI_TURN", playerId: world.state.activePlayerId };
+        return { ok: true };
+      }
+      if (command.kind === "FoundSettlement") {
+        // The handler's case (server/app/commandHandler.ts): the founder rails
+        // first (existence, ownership), then the engine's own founding rule
+        // against the reconstructed map. Applying the real reducer here is what
+        // makes the settlers-mode driver pins below honest -- a wagon that
+        // founds is consumed by the same rule the server runs.
+        const founder = world.state.heroes[command.founderId];
+        if (!founder) return { ok: false, reason: "no_hero" };
+        if (founder.ownerId !== command.actor) return { ok: false, reason: "forbidden_not_your_hero" };
+        const map = new GameMap(world.seed, world.mapSize);
+        const result = foundSettlement({
+          state: world.state,
+          founderId: command.founderId,
+          q: command.q,
+          r: command.r,
+          map,
+        });
+        if (!result.ok) return { ok: false, reason: result.reason };
+        world.state.heroes = result.state.heroes;
+        world.state.settlements = result.state.settlements;
+        world.state.players = result.state.players;
+        world.state.nextSettlementId = result.state.nextSettlementId;
         return { ok: true };
       }
       if (command.kind === "StartCharter") {
@@ -2184,6 +2210,240 @@ test("B3 handler mirror: a second hero on the same settlement is refused by the 
 });
 
 // ---------------------------------------------------------------------------
+// W5 (SETTLERS-PLAN.md §4): the AI slice.
+//
+// In settlers mode the seat's entity is a covered wagon whose whole job is
+// founding. The decision is the engine brain's (pickSettlersWagonAction, which
+// asks the engine's own canFoundSettlement about every hex it considers) and
+// the command is the same FoundSettlement a human's gesture sends -- so an AI
+// seat can never found where a human could not. A wagon has no army, so no
+// army-only command may ever appear in its stream. The classic half of this
+// section pins the pre-feature command stream byte-for-byte.
+// ---------------------------------------------------------------------------
+
+const WAGON = coveredWagonIdFor(1);
+
+// The wagon's starting hex: passable, river-free, resource-free and off seat
+// 0's fixture hero -- exactly the filter settlers/startPlacement.ts places a
+// start with. With no settlement on the board a wagon there may found where it
+// stands, which is the mode's own start guarantee.
+const WAGON_TILE = (() => {
+  const map = new GameMap(SEED, MAP_SIZE);
+  const tile = passableTiles(SEED).find((t) => !map.riverAt(t.q, t.r) && !(t.q === 22 && t.r === 16));
+  assert.ok(tile, "the fixture seed must offer a river-free passable wagon tile");
+  return tile;
+})();
+
+// A neighbouring in-bounds hex, for the "boxed in" fixtures: a settlement one
+// hex away is inside the mode's spacing rule, so the wagon must walk.
+const WAGON_NEIGHBOUR = (() => {
+  const map = new GameMap(SEED, MAP_SIZE);
+  for (const dir of HEX_DIRECTIONS) {
+    const q = WAGON_TILE.q + dir.q;
+    const r = WAGON_TILE.r + dir.r;
+    if (q >= 0 && q < map.width && r >= 0 && r < map.height) return { q, r };
+  }
+  throw new Error("the fixture seed must offer an in-bounds neighbour hex");
+})();
+
+// The mode's OWN spacing answer, read from the mode's settings (never
+// re-declared in the test either): what the wagon must keep from a settlement.
+const MIN_FOUNDING_DISTANCE = gameModeSettings("settlers").minFoundingDistance;
+
+interface SettlersWorldOptions {
+  settlements?: ReturnType<typeof makeSettlement>[];
+  tile?: Axial;
+  movementRemaining?: number;
+  cargo?: Parameters<typeof emptyWarehouse>[0];
+}
+
+function settlersWagonWorld(opts?: SettlersWorldOptions): AiDriverGameSnapshot {
+  const tile = opts?.tile ?? WAGON_TILE;
+  const world = aiTurnWorld(
+    [
+      makeHero(WAGON, 1, tile.q, tile.r, {
+        // A wagon has no army: no troops, no stacks -- what init.ts's
+        // makeWagons builds for every seat, AI seats included.
+        troops: 0,
+        stacks: [],
+        movementRemaining: opts?.movementRemaining ?? MOVEMENT_PER_TURN,
+        resources: emptyWarehouse(opts?.cargo ?? { wood: 200, stone: 100, iron: 50, food: 50 }),
+      }),
+    ],
+    { settlements: opts?.settlements ?? [] },
+  );
+  world.state.gameMode = "settlers";
+  return world;
+}
+
+// Every command kind this slice's slice of the driver may never dispatch for a
+// wagon: a garrison assault, a battle, a walk-in capture, a charter start and
+// its travel are all army (or commander) actions, and a wagon has neither.
+const ARMY_ONLY_KINDS = [
+  "CaptureSettlement",
+  "ResolveBattle",
+  "EnterBattle",
+  "SubmitSettlementBattleResult",
+  "StartCharter",
+  "AdvanceCharterTravel",
+  "RecruitUnits",
+] as const;
+
+function armyOnlyCommands(commands: Command[]): Command[] {
+  return commands.filter((c) => (ARMY_ONLY_KINDS as readonly string[]).includes(c.kind));
+}
+
+test("W5 settlers: the seat's wagon founds where it stands with the same FoundSettlement command a human gesture sends", async () => {
+  const world = settlersWagonWorld();
+  const harness = installHarness(world);
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+  const map = new GameMap(SEED, MAP_SIZE);
+
+  const legal = canFoundSettlement({ state: world.state, founderId: WAGON, q: WAGON_TILE.q, r: WAGON_TILE.r, map });
+  assert.equal(legal.ok, true, "the fixture wagon stands where the engine admits it (the mode's start guarantee)");
+
+  await scanOnce();
+
+  const founds = commandsOfKind(harness.commands, "FoundSettlement");
+  assert.equal(founds.length, 1, "the seat's whole turn is one founding");
+  assert.equal(founds[0].founderId, WAGON, "the wagon is the founder");
+  assert.equal(founds[0].actor, 1, "the AI seat is the actor, exactly as its commands are");
+  assert.deepEqual({ q: founds[0].q, r: founds[0].r }, WAGON_TILE, "founding where it stands, no wandering first");
+  assert.deepEqual(
+    harness.commands.map((c) => c.kind),
+    ["FoundSettlement", "EndTurn"],
+    "the command stream is the founding and the terminating EndTurn -- nothing else",
+  );
+
+  // The engine's rule did the work (the scripted handler runs the real
+  // foundSettlement): the settlement exists, owned by the seat, holding the
+  // wagon's own cargo.
+  const created = Object.values(world.state.settlements).find((s) => s.ownerId === 1);
+  assert.ok(created, "the settlement the engine's founding created");
+  assert.equal(hexDistance(created, WAGON_TILE), 0, "it stands on the wagon's hex");
+  assert.equal(created.warehouse.wood, 200, "the wagon's cargo moved into the new town's warehouse");
+  assert.equal(created.warehouse.food, 50);
+  assert.equal(world.state.heroes[WAGON], undefined, "founding consumed the wagon (the mode's wagonConsumedOnFounding)");
+  const seat = world.state.players.find((p) => p.id === 1);
+  assert.ok(seat);
+  assert.ok(!seat.heroIds.includes(WAGON), "the consumed wagon left the seat's roster");
+  assert.ok(seat.settlementIds.includes(created.id), "the new town is on the seat's list");
+  assert.equal(harness.endTurns.length, 1, "the turn ends normally");
+  assert.equal(cap.captured[0], "ended_turn");
+  assert.equal(armyOnlyCommands(harness.commands).length, 0, "a wagon is never given an army-only command");
+  assert.equal(harness.audits.length, 0, "no budget/deadline audit");
+});
+
+test("W5 settlers: a wagon boxed in by a settlement walks to a legal hex and founds there in the same pass", async () => {
+  const neutral = makeSettlement("s-neutral", null, WAGON_NEIGHBOUR.q, WAGON_NEIGHBOUR.r, {
+    warehouse: emptyWarehouse(),
+  });
+  const world = settlersWagonWorld({ settlements: [neutral] });
+  const harness = installHarness(world);
+  const map = new GameMap(SEED, MAP_SIZE);
+  assert.equal(
+    canFoundSettlement({ state: world.state, founderId: WAGON, q: WAGON_TILE.q, r: WAGON_TILE.r, map }).ok,
+    false,
+    `a settlement ${hexDistance(WAGON_TILE, WAGON_NEIGHBOUR)} hex away is inside the mode's ${MIN_FOUNDING_DISTANCE}-hex rule, so the wagon cannot found where it stands`,
+  );
+
+  await scanOnce();
+
+  const moves = commandsOfKind(harness.commands, "MoveHero");
+  const founds = commandsOfKind(harness.commands, "FoundSettlement");
+  assert.ok(moves.length >= 1, "the wagon walks toward a legal hex");
+  assert.equal(founds.length, 1, "and founds once it arrives");
+  assert.equal(
+    harness.commands[harness.commands.length - 2]?.kind,
+    "FoundSettlement",
+    "the founding closes the pass (walking first, then the founding, then EndTurn)",
+  );
+  for (const move of moves) {
+    assert.equal(move.heroId, WAGON);
+    assert.equal(move.actor, 1);
+    assert.equal(hexDistance(move.fromTile, move.toTile), 1, "one hex per dispatched step");
+  }
+  for (let i = 1; i < moves.length; i++) {
+    assert.deepEqual(moves[i].fromTile, moves[i - 1].toTile, "each step leaves from the previous step's tile");
+  }
+  for (const move of moves) {
+    assert.notDeepEqual(move.toTile, { q: neutral.q, r: neutral.r }, "a wagon never steps onto a settlement's hex");
+  }
+
+  const created = Object.values(world.state.settlements).find((s) => s.ownerId === 1);
+  assert.ok(created);
+  assert.ok(
+    hexDistance(created, neutral) >= MIN_FOUNDING_DISTANCE,
+    "the founded hex honours the mode's own spacing (read from gameModeSettings, never re-declared)",
+  );
+  assert.equal(world.state.settlements["s-neutral"].ownerId, null, "the neutral settlement was never captured");
+  assert.equal(world.state.heroes[WAGON], undefined, "the wagon was consumed by the founding it walked to");
+  assert.equal(armyOnlyCommands(harness.commands).length, 0, "no army-only command for a wagon");
+  assert.equal(harness.endTurns.length, 1);
+});
+
+test("W5 settlers: a wagon adjacent to an armed enemy hero neither fights it nor is offered a battle", async () => {
+  // The trap: the driver's post-move ladder offers EnterBattle for a hero
+  // standing beside an armed enemy. A wagon must never reach that ladder (its
+  // army is empty), so the pass ends with the founding and NO battle command --
+  // not even the waiting_for_defender stall an offer would produce.
+  const neutral = makeSettlement("s-neutral", null, WAGON_NEIGHBOUR.q, WAGON_NEIGHBOUR.r, {
+    warehouse: emptyWarehouse(),
+  });
+  const world = settlersWagonWorld({ settlements: [neutral] });
+  world.state.heroes["h0"] = makeHero("h0", 0, WAGON_NEIGHBOUR.q, WAGON_NEIGHBOUR.r, {
+    troops: 5,
+    stacks: troopStacks("swordsman", 5),
+    movementRemaining: 0,
+  });
+  const harness = installHarness(world);
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  await scanOnce();
+
+  assert.equal(armyOnlyCommands(harness.commands).length, 0, "no army-only command anywhere in the wagon's stream");
+  assert.notEqual(cap.captured[0], "waiting_for_defender", "a wagon never offers a battle");
+  assert.equal(world.state.heroes["h0"].stacks[0].entries[0].count, 5, "the armed hero was never attacked");
+  assert.equal(commandsOfKind(harness.commands, "FoundSettlement").length, 1, "the wagon did its own job instead");
+  assert.equal(world.state.heroes[WAGON], undefined, "and was consumed by it");
+});
+
+// The classic-mode pin. Recorded on the base commit (23c72a0, before any W5
+// change) by running this exact fixture with this exact harness: the whole
+// dispatched command stream, serialized. A W5 change that moved so much as a
+// coordinate, a cost or a command's order in CLASSIC mode fails here.
+const CLASSIC_STREAM_FIXTURE =
+  `[{"kind":"RecruitUnits","gameName":"drv-test","actor":1,"settlementId":"s-b","buildingKind":"barracks","gx":2,"gy":2,"unitTypeId":"swordsman","count":1},{"kind":"BuyWagons","gameName":"drv-test","actor":1,"settlementId":"s-a","count":1},{"kind":"CreateTradeRoute","gameName":"drv-test","actor":1,"from":{"kind":"settlement","id":"s-a"},"to":{"kind":"settlement","id":"s-low"},"payload":{"kind":"resource","resource":"food"},"wagons":1},{"kind":"StartCharter","gameName":"drv-test","actor":1,"heroId":"h1","targetQ":4,"targetR":4,"settlementName":"Dawn hold"},{"kind":"AdvanceCharterTravel","gameName":"drv-test","actor":1,"heroId":"h1","fromTile":{"q":0,"r":0},"toTile":{"q":0,"r":1},"cost":1},{"kind":"AdvanceCharterTravel","gameName":"drv-test","actor":1,"heroId":"h1","fromTile":{"q":0,"r":1},"toTile":{"q":0,"r":2},"cost":1},{"kind":"AdvanceCharterTravel","gameName":"drv-test","actor":1,"heroId":"h1","fromTile":{"q":0,"r":2},"toTile":{"q":1,"r":2},"cost":1},{"kind":"AdvanceCharterTravel","gameName":"drv-test","actor":1,"heroId":"h1","fromTile":{"q":1,"r":2},"toTile":{"q":2,"r":2},"cost":1},{"kind":"AdvanceCharterTravel","gameName":"drv-test","actor":1,"heroId":"h1","fromTile":{"q":2,"r":2},"toTile":{"q":3,"r":2},"cost":1},{"kind":"AdvanceCharterTravel","gameName":"drv-test","actor":1,"heroId":"h1","fromTile":{"q":3,"r":2},"toTile":{"q":3,"r":3},"cost":1},{"kind":"AdvanceCharterTravel","gameName":"drv-test","actor":1,"heroId":"h1","fromTile":{"q":3,"r":3},"toTile":{"q":4,"r":3},"cost":2},{"kind":"EndTurn","gameName":"drv-test","actor":1}]`;
+
+test("W5 classic: the AI's decisions and command stream are byte-identical to the base commit's", async () => {
+  const world = charterStartWorld(CHARTER_GEOMETRY, CHARTER_GOLD_COST, 25, { movementRemaining: MOVEMENT_PER_TURN });
+  const harness = installHarness(world, { override: charterTradeOverride(world) });
+
+  await scanOnce();
+
+  assert.equal(
+    JSON.stringify(harness.commands),
+    CLASSIC_STREAM_FIXTURE,
+    "the classic stream is byte-identical (recruit -> trade -> charter -> charter travel -> EndTurn)",
+  );
+  assert.equal(commandsOfKind(harness.commands, "FoundSettlement").length, 0, "a classic game never founds through the mode's path");
+  assert.equal(commandsOfKind(harness.commands, "StartCharter").length, 1, "and still charters exactly as before");
+});
+
+test("W5 classic: a mode-blind wagon-shaped id changes nothing -- the classic brain still charters", () => {
+  // The other half of byte-identity: nothing in the classic path is gated on
+  // an id or a mode value beyond the mode's own default. A classic state whose
+  // hero happens to be named `p1-wagon` still charters (the wagon predicate is
+  // id-based, but classic games' ids are `p<i>-hero`, so it is never taken).
+  const world = charterSoloWorld(CHARTER_GOLD_COST, CHARTER_WAREHOUSE_COST.wood);
+  assert.ok(world.state.gameMode === undefined, "a classic fixture carries no mode at all");
+  const action = pickCharterAction(world.state, "h1", CHARTER_MAP, mulberry32(1));
+  assert.ok(action, "an absent mode reads as classic and charters");
+});
+
+
 // Default-seam coverage (real Postgres): the candidate scan SQL + the
 // loadGame hydration against a real row.
 // ---------------------------------------------------------------------------

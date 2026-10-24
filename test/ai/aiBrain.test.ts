@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CHARTER_TARGET_REACH, GARRISON_BACKOFF_ROUNDS, pickAiMove, pickCharterAction, pickGarrisonRecruitment } from "../../src/ai/aiBrain";
+import { CHARTER_TARGET_REACH, GARRISON_BACKOFF_ROUNDS, pickAiMove, pickCharterAction, pickGarrisonRecruitment, pickSettlersWagonAction } from "../../src/ai/aiBrain";
 import { GameMap, type TileRow } from "../../src/map/gameMap";
 import type { Terrain } from "../../src/map/terrain";
 import { hexDistance } from "../../src/core/hex";
-import { CHARTER_GOLD_COST, mulberry32, normalizePlatoons, platoonTroopTotal, settlementStacks, type UnitType } from "@heroes/engine";
+import { CHARTER_GOLD_COST, canFoundSettlement, mulberry32, normalizePlatoons, platoonTroopTotal, settlementStacks, type UnitType } from "@heroes/engine";
 import type { BuildingKind } from "@heroes/contracts";
+import { coveredWagonIdFor, gameModeSettings } from "@heroes/contracts";
 import { makeHero, makeSettlement, makeState, emptyWarehouse } from "../charter/_helpers";
 
 const POWER_UNITS: Record<string, UnitType> = {
@@ -597,6 +598,135 @@ test("an excluded EMPTY enemy settlement is dropped from the walk-in capture cla
 test("GARRISON_BACKOFF_ROUNDS is the expiry contract the TurnController records against", () => {
   assert.equal(GARRISON_BACKOFF_ROUNDS, 2);
 });
+
+// ---------------------------------------------------------------------------
+// W5 (SETTLERS-PLAN.md §4): the AI slice -- the covered wagon's decisions.
+//
+// In settlers mode a seat owns no commander: it owns one covered wagon, and
+// founding is what the wagon is for. Every hex the brain considers is asked
+// about through the engine's own canFoundSettlement, so the AI can never found
+// where a human could not; and because a wagon has NO army, the brain never
+// offers it a military target at all.
+// ---------------------------------------------------------------------------
+
+/** The mode's own spacing answer, read here too -- never re-declared. */
+const MIN_FOUNDING_DISTANCE = gameModeSettings("settlers").minFoundingDistance;
+
+/** A covered wagon: a HeroState with no army, exactly what init.ts builds. */
+function wagon(q: number, r: number, opts: HeroOpts = {}) {
+  return makeHero(coveredWagonIdFor(1), 1, q, r, { troops: 0, stacks: [], ...opts });
+}
+
+const WAGON_ID = coveredWagonIdFor(1);
+
+function settlersTurnState(
+  heroes: ReturnType<typeof makeHero>[],
+  settlements: ReturnType<typeof makeSettlement>[] = [],
+) {
+  const state = aiTurnState(heroes, settlements);
+  state.gameMode = "settlers";
+  return state;
+}
+
+test("settlers: a wagon on a hex the engine admits founds where it stands, and the decision draws no rng", () => {
+  const map = grassMap(16, 16);
+  const state = settlersTurnState([wagon(8, 8)]);
+  const rng = seededRng(3);
+
+  const action = pickSettlersWagonAction(state, WAGON_ID, map, rng.rng);
+
+  assert.deepEqual(action, { kind: "found", heroId: WAGON_ID, q: 8, r: 8 }, "found here");
+  assert.equal(
+    canFoundSettlement({ state, founderId: WAGON_ID, q: 8, r: 8, map }).ok,
+    true,
+    "…which is exactly what the engine's own predicate says about that hex",
+  );
+  assert.equal(rng.draws(), 0, "a founding decision never advances an rng stream");
+});
+
+test("settlers: a wagon inside the mode's spacing walks to a hex the engine admits and founds there", () => {
+  const map = grassMap(16, 16);
+  const neutral = makeSettlement("s-neutral", null, 8, 8);
+  const state = settlersTurnState([wagon(8, 9)], [neutral]);
+  const rng = seededRng(5);
+
+  assert.equal(
+    canFoundSettlement({ state, founderId: WAGON_ID, q: 8, r: 9, map }).ok,
+    false,
+    `a settlement ${hexDistance({ q: 8, r: 9 }, { q: 8, r: 8 })} hex away is inside the ${MIN_FOUNDING_DISTANCE}-hex rule`,
+  );
+
+  let hero = state.heroes[WAGON_ID];
+  let steps = 0;
+  let action = pickSettlersWagonAction(state, WAGON_ID, map, rng.rng);
+  while (action?.kind === "move") {
+    assert.equal(hexDistance(action.toTile, { q: hero.q, r: hero.r }), 1, "one hex per decision");
+    assert.notDeepEqual(action.toTile, { q: 8, r: 8 }, "a wagon never steps onto a settlement's hex");
+    hero = { ...hero, q: action.toTile.q, r: action.toTile.r };
+    state.heroes[WAGON_ID] = hero;
+    steps += 1;
+    assert.ok(steps <= 12, "the wagon converges on a legal hex instead of walking forever");
+    action = pickSettlersWagonAction(state, WAGON_ID, map, rng.rng);
+  }
+
+  assert.ok(action, "the wagon reaches a hex it may found on");
+  assert.equal(action!.kind, "found");
+  assert.ok(
+    hexDistance({ q: hero.q, r: hero.r }, { q: 8, r: 8 }) >= MIN_FOUNDING_DISTANCE,
+    "…and it honours the mode's own spacing",
+  );
+  assert.equal(rng.draws(), 0, "walking to a founding hex draws nothing");
+});
+
+test("settlers: a wagon is offered no army target -- the empty castle next door is a commander's business", () => {
+  const map = grassMap(16, 16);
+  const castle = makeSettlement("s-neutral", null, 8, 8);
+  const state = settlersTurnState([wagon(8, 9)], [castle]);
+  const rng = seededRng(11);
+
+  const wagonStep = pickAiMove(state, WAGON_ID, map, rng.rng);
+  assert.ok(wagonStep, "the wagon still moves -- toward the hex it may found on");
+  assert.notDeepEqual(wagonStep!.toTile, { q: 8, r: 8 }, "never onto the castle: capturing is an army action");
+
+  // The control: the SAME board with an armed commander standing there does
+  // walk onto the empty castle, so the fixture really is a capture target and
+  // the difference above is the wagon, not the board.
+  const classic = aiTurnState([
+    makeHero("h1", 1, 8, 9, { stacks: normalizePlatoons([{ entries: [{ unitTypeId: "militia", count: 3 }] }]) }),
+  ], [makeSettlement("s-neutral", null, 8, 8)]);
+  const commanderStep = pickAiMove(classic, "h1", map, seededRng(11).rng);
+  assert.ok(commanderStep);
+  assert.deepEqual(commanderStep!.toTile, { q: 8, r: 8 }, "the same board is a walk-in capture for a commander");
+});
+
+test("settlers: the AI never charters -- pickCharterAction is mode-gated and consumes no rng", () => {
+  const map = isolatedResourceMap(16, 16, [[4, 4, "gold"]]);
+  const rng = seededRng(1);
+  const settlers = charterState();
+  settlers.gameMode = "settlers";
+
+  assert.equal(pickCharterAction(settlers, "h1", map, rng.rng), null, "settlers founds, it does not charter");
+  assert.equal(rng.draws(), 0, "the gate failure draws nothing");
+
+  const classicRng = seededRng(1);
+  assert.ok(pickCharterAction(charterState(), "h1", map, classicRng.rng), "the identical classic state still charters");
+  assert.equal(classicRng.draws(), 2, "…and draws its name exactly as before");
+});
+
+test("settlers: pickSettlersWagonAction is a no-op for anything that is not a wagon", () => {
+  const map = grassMap(16, 16);
+  const state = settlersTurnState([makeHero("h1", 1, 8, 8)]);
+
+  assert.equal(pickSettlersWagonAction(state, "h1", map, seededRng(1).rng), null, "a commander is not a wagon");
+  assert.equal(pickSettlersWagonAction(state, "p9-wagon", map, seededRng(1).rng), null, "and a wagon that is gone is nothing to decide");
+
+  // A wagon in a classic game: the engine's own mode gate refuses the founding,
+  // so the brain has nothing to offer but a walk -- and never an army errand.
+  const classic = aiTurnState([wagon(8, 8)], [makeSettlement("s-neutral", null, 8, 8)]);
+  const action = pickSettlersWagonAction(classic, WAGON_ID, map, seededRng(2).rng);
+  assert.notEqual(action?.kind, "found", "a classic game never founds through the mode's path");
+});
+
 
 // ---------------------------------------------------------------------------
 // B3: pickCharterAction (plans/20261002-1900_ai-actor-phase-3.md, B3 spec §3)
