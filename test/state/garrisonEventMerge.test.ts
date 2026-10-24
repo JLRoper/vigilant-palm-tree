@@ -35,6 +35,8 @@ function stubHooks(): TurnControllerHooks {
     onTransferUnits: noop,
     onSettlementBattleSubmitted: noop,
     onPlaceBuildings: noop,
+    onDemolishBuilding: noop,
+    onStartWorkerTransit: noop,
     onTransferResources: noop,
     onAssignWagons: noop,
     onBuyWagons: noop,

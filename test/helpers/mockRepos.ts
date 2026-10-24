@@ -6,6 +6,7 @@ import type {
   SettlementId,
   SettlementState,
   TradeRouteState,
+  WorkerTransitState,
 } from "@heroes/contracts";
 import type { HydratableGameRow } from "@heroes/engine";
 import type { CharterRepo, EventRepo, GameRepo, HeroRepo, SettlementRepo } from "../../server/app/commandHandler";
@@ -60,6 +61,9 @@ export function createMockGameRepo(
         next_charter_id?: number;
         next_settlement_id?: number;
         trade_routes?: TradeRouteState[];
+        worker_transits?: WorkerTransitState[];
+        next_worker_transit_id?: number;
+        roaded_tiles?: string[];
       },
     ): Promise<void> {
       const row = rows[name];
@@ -76,6 +80,9 @@ export function createMockGameRepo(
         ...(extra?.next_charter_id !== undefined ? { next_charter_id: extra.next_charter_id } : {}),
         ...(extra?.next_settlement_id !== undefined ? { next_settlement_id: extra.next_settlement_id } : {}),
         ...(extra?.trade_routes !== undefined ? { trade_routes: extra.trade_routes } : {}),
+        ...(extra?.worker_transits !== undefined ? { worker_transits: extra.worker_transits } : {}),
+        ...(extra?.next_worker_transit_id !== undefined ? { next_worker_transit_id: extra.next_worker_transit_id } : {}),
+        ...(extra?.roaded_tiles !== undefined ? { roaded_tiles: extra.roaded_tiles } : {}),
       };
     },
     async saveLobby(name: string, lobby: unknown): Promise<void> {

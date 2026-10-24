@@ -50,6 +50,8 @@ import {
   createTradeRoute as createTradeRouteReducer,
   updateTradeRoute as updateTradeRouteReducer,
   recruitUnits as recruitUnitsReducer,
+  applyDemolishBuilding as demolishBuildingReducer,
+  startWorkerTransit as startWorkerTransitReducer,
   transferUnits as transferUnitsReducer,
   tradeHeroes as tradeHeroesReducer,
   startSettlementBattle as startSettlementBattleReducer,
@@ -142,6 +144,24 @@ export interface TurnControllerHooks {
   // the server's EndTurn pipeline is what ticks BuildingDef.construction,
   // so a raced PlaceBuildings means frozen construction stages.
   onPlaceBuildings(actor: number, settlementId: SettlementId, buildings: BuildingDef[], initialLayout?: boolean, district?: { q: number; r: number }): Promise<void>;
+  // DemolishBuilding (faction-construction plan, section 5): same
+  // fire-and-forget shape as the rest of this block.
+  onDemolishBuilding(
+    actor: number,
+    settlementId: SettlementId,
+    gx: number,
+    gy: number,
+    buildingKind: BuildingKind,
+    district?: { q: number; r: number },
+  ): Promise<void>;
+  // StartWorkerTransit (faction-construction plan, section 6): same
+  // fire-and-forget shape as the rest of this block.
+  onStartWorkerTransit(
+    actor: number,
+    originSettlementId: SettlementId,
+    destinationSettlementId: SettlementId,
+    buildRoads?: boolean,
+  ): Promise<void>;
   onTransferResources(
     actor: number,
     heroId: HeroId,
@@ -791,6 +811,65 @@ export class TurnController {
       hookLabel: "onRecruitUnits",
     });
     return true;
+  }
+
+  // DemolishBuilding (faction-construction plan, section 5): same
+  // local-reducer-then-fire-and-forget-hook shape as recruitUnits above.
+  // No cost refund -- a separate, simpler command from placeBuildings'
+  // own cart-based removal.
+  demolishBuilding(
+    settlementId: SettlementId,
+    gx: number,
+    gy: number,
+    buildingKind: BuildingKind,
+    district?: { q: number; r: number },
+  ): { ok: boolean; reason: string } {
+    const result = demolishBuildingReducer(this.state, settlementId, this.state.activePlayerId, {
+      gx,
+      gy,
+      kind: buildingKind,
+      ...(district ? { district } : {}),
+    });
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.commit(result.state, {
+      log: {
+        type: "building_demolished",
+        payload: { settlementId, gx, gy, buildingKind, ...(district ? { district } : {}) },
+      },
+      hook: () => this.hooks.onDemolishBuilding(result.state.activePlayerId, settlementId, gx, gy, buildingKind, district),
+      hookLabel: "onDemolishBuilding",
+    });
+    return { ok: true, reason: "" };
+  }
+
+  // StartWorkerTransit (faction-construction plan, section 6): same
+  // local-reducer-then-fire-and-forget-hook shape as recruitUnits above.
+  // Needs the GameMap (this.hooks.getMap()) to compute the walking path,
+  // same as placeBuildings' district spots do.
+  startWorkerTransit(
+    originSettlementId: SettlementId,
+    destinationSettlementId: SettlementId,
+    buildRoads = false,
+  ): { ok: boolean; reason: string } {
+    const result = startWorkerTransitReducer(
+      this.state,
+      this.state.activePlayerId,
+      originSettlementId,
+      destinationSettlementId,
+      this.hooks.getMap(),
+      { buildRoads },
+    );
+    if (!result.ok) return { ok: false, reason: result.reason };
+    this.commit(result.state, {
+      log: {
+        type: "worker_transit_started",
+        payload: { originSettlementId, destinationSettlementId, buildRoads },
+      },
+      hook: () =>
+        this.hooks.onStartWorkerTransit(result.state.activePlayerId, originSettlementId, destinationSettlementId, buildRoads),
+      hookLabel: "onStartWorkerTransit",
+    });
+    return { ok: true, reason: "" };
   }
 
   // Workforce staffing (AssignWorkers): same shape as recruitUnits above --

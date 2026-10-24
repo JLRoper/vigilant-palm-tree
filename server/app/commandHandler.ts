@@ -18,8 +18,6 @@ transferGold,
   assignWorkers,
   transferUnits,
   tradeHeroes,
-  unitAllowedForSeatFaction,
-  playerFactionId,
   applySettlementBattleResult,
   settlementStacks,
   platoonsHaveTroops,
@@ -43,6 +41,8 @@ transferGold,
   startBuildingUpgrade,
   startSettlementUpgrade,
   applyPlaceBuildings,
+  applyDemolishBuilding,
+  startWorkerTransit,
   transferResources,
   assignWagons,
   transferCargoLoot,
@@ -75,6 +75,7 @@ import type {
   SettlementId,
   SettlementState,
   StartCharterPayload,
+  WorkerTransitState,
 } from "@heroes/contracts";
 import { runEndTurn, clampGrowthRate, removedTradeRouteIds } from "./turnService";
 import { pool } from "../persistence/db";
@@ -134,6 +135,9 @@ export interface GameRepo {
         next_charter_id?: number;
         next_settlement_id?: number;
         trade_routes?: TradeRouteState[];
+        worker_transits?: WorkerTransitState[];
+        next_worker_transit_id?: number;
+        roaded_tiles?: string[];
       },
     ): Promise<void>;
   saveLobby(name: string, lobby: unknown): Promise<void>;
@@ -222,6 +226,9 @@ export interface CommandResult {
   // EndTurn + PlaceBuildings/CreateTradeRoute/UpdateTradeRoute: the full
   // post-change routes array (caravans move on EndTurn's round wrap).
   tradeRoutes?: TradeRouteState[];
+  // StartWorkerTransit (section 6): the full post-change transit list,
+  // same "whole array" convention as tradeRoutes above.
+  workerTransits?: WorkerTransitState[];
   // ResolveBattle/SubmitBattleResult: both combatants plus the full engine
   // BattleResult the client's battle UI needs (log, grid, per-round detail) --
   // none of that is reconstructable from the summary fields on the persisted
@@ -1909,6 +1916,74 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
       return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
     }
+    case "DemolishBuilding": {
+      const result = applyDemolishBuilding(state, command.settlementId, command.actor, {
+        gx: command.gx,
+        gy: command.gy,
+        kind: command.buildingKind,
+        ...(command.district ? { district: command.district } : {}),
+      });
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "BuildingDemolished",
+        actor: command.actor,
+        settlementId: command.settlementId,
+        gx: command.gx,
+        gy: command.gy,
+        buildingKind: command.buildingKind,
+        ...(command.district ? { district: command.district } : {}),
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return { ok: true, events: [event], lastEventId, settlement: result.state.settlements[command.settlementId] };
+    }
+    case "StartWorkerTransit": {
+      const map = getOrCreateGameMap(row.seed, row.map_size as MapSize | undefined, resolveSavedMapGenVersion(row.lobby?.mapGenVersion));
+      const result = startWorkerTransit(
+        state,
+        command.actor,
+        command.originSettlementId,
+        command.destinationSettlementId,
+        map,
+        { buildRoads: command.buildRoads === true },
+      );
+      if (!result.ok) {
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+        {
+          worker_transits: result.state.workerTransits,
+          next_worker_transit_id: result.state.nextWorkerTransitId,
+        },
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "WorkerTransitStarted",
+        actor: command.actor,
+        transitId: result.transit!.id,
+        originSettlementId: command.originSettlementId,
+        destinationSettlementId: command.destinationSettlementId,
+        buildRoads: result.transit!.buildRoads,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return {
+        ok: true,
+        events: [event],
+        lastEventId,
+        settlement: result.state.settlements[command.originSettlementId],
+        workerTransits: result.state.workerTransits,
+      };
+    }
     case "TransferResources": {
       const result = transferResources(state, command.actor, command.heroId, command.settlementId, command.direction, command.amounts);
       if (!result.ok) {
@@ -2132,22 +2207,12 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       if (settlement.ownerId !== command.actor) {
         return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
       }
-      // Faction gate (faction-registry foundation, D5): the server enforces
-      // the acting seat's roster and never trusts the client. Deliberately
-      // checked on the requested unit alone, BEFORE the reducer, so the
-      // reducer's own building/level/construction/cost reason codes stay
-      // exactly as they are. Dormant today: every seat defaults "human"
-      // (playerFactionId), every recruitable unit is human-tagged, and an
-      // unknown catalog id also defaults "human" — so nothing is rejected
-      // until a non-human faction's units exist.
-      if (
-        !unitAllowedForSeatFaction(command.unitTypeId, {
-          unitTypes: Object.fromEntries(deps.ctx.catalog.unitTypes.map((u) => [u.id, u])),
-          seatFactionId: playerFactionId(row.players.find((p) => p.id === command.actor)),
-        })
-      ) {
-        return { ok: false, reason: "unit_not_in_seat_faction", events: [] };
-      }
+      // The seat-faction recruit gate is gone (construction-worker-gated
+      // faction-building feature): every recruit building's roster is
+      // already faction-pure (buildingFactionParity.test.ts), so gating on
+      // the OWNING building already enforces it -- a seat recruits whatever
+      // its owned buildings (built OR captured) currently offer. See
+      // packages/engine/src/settlement/recruitUnits.ts's header comment.
       const result = recruitUnits(state, {
         settlementId: command.settlementId,
         buildingKind: command.buildingKind,

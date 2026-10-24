@@ -521,6 +521,38 @@ export async function recruitUnits(
   await postCommand(name, { kind: "RecruitUnits", ...payload });
 }
 
+// Removes one building the actor owns (faction-construction plan, section
+// 5): a separate command from PlaceBuildings' own cart-based removal, with
+// no cost refund. Same fire-and-forget shape as recruitUnits above.
+export async function demolishBuilding(
+  name: string,
+  payload: {
+    actor: number;
+    settlementId: string;
+    gx: number;
+    gy: number;
+    buildingKind: BuildingKind;
+    district?: { q: number; r: number };
+  }
+): Promise<void> {
+  await postCommand(name, { kind: "DemolishBuilding", ...payload });
+}
+
+// Sends one Construction Worker of the origin settlement's own founding
+// faction walking alone toward another settlement (faction-construction
+// plan, section 6). Same fire-and-forget shape as recruitUnits above.
+export async function startWorkerTransit(
+  name: string,
+  payload: {
+    actor: number;
+    originSettlementId: string;
+    destinationSettlementId: string;
+    buildRoads?: boolean;
+  }
+): Promise<void> {
+  await postCommand(name, { kind: "StartWorkerTransit", ...payload });
+}
+
 // Explicit workforce staffing of one building (AssignWorkers): same
 // fire-and-forget shape as recruitUnits above -- called from
 // src/game/turnHooks.ts right after the local engine reducer already
