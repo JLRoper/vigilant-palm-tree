@@ -160,6 +160,7 @@ Port allocation is OS-native and cross-platform (`scripts/allocate-ports.ts` use
 | `test:wrapper` | `node --no-deprecation tools/run-test.mjs` | Direct access to the test wrapper |
 | `lint:deps` | `depcruise src server packages --config dependency-cruiser.cjs` | Static check of cross-boundary imports (cycles + layering, incl. the workspace packages) |
 | `validate-assets` | `node tools/sprites/validate-assets.mjs` | Validate legacy manifest, generated building keys/anchors, and horse run-frame gates |
+| `test:scope` | `node tools/test-scope.mjs` | Decide whether a changeset (`--changed <path>` / `--changed-from <git-spec>`) needs tests; prints `TESTS SKIPPED` for docs/agent-only changes, else `TESTS REQUIRED`, and writes `run_tests` to `$GITHUB_OUTPUT` in CI |
 | `docs:check` | `node tools/docs-check.mjs` | Check maintained Markdown links/source paths in every mode; `docs:verified` marker age in full mode, or scoped via `DOC_OWNERSHIP` globs in selective mode (`--changed <path>` / `--changed-from <git-spec>`) (no DB) |
 | `sprites:generate` | `node tools/sprites/pixel-gen.mjs` | Render pixel-art sprites into `src/resources/` |
 | `sprites:preview` | `node tools/sprites/generate-preview.mjs` | Build a sprite contact-sheet preview |
@@ -286,7 +287,7 @@ API conventions:
 
 ### CI (GitHub Actions)
 
-[`.github/workflows/validate-game.yml`](./.github/workflows/validate-game.yml:1) runs on every PR (`concurrency` group cancels superseded runs): Node 22.x on `ubuntu-latest` with a Postgres 16 service container. Steps: `npm install` → `docs:check (freshness scoped to changed modules; BASE_REF vs PR base, full on dispatch)` → `npx playwright install chromium --with-deps` → boot check (`npm run dev` in the background; waits up to 60 s for `CLIENT_PORT`/`API_PORT` in `.env`, then polls `/api/health` + client) → dump boot log → `rm -f .env` (fresh allocation for the smoke run) → `npm run build` → `npm test` → upload `test/*.log` + `test/*.png` artifacts. The whole pipeline is Linux-native; `scripts/allocate-ports.ts` needs no OS-specific handling.
+[`.github/workflows/validate-game.yml`](./.github/workflows/validate-game.yml:1) runs on every PR (`concurrency` group cancels superseded runs): Node 22.x on `ubuntu-latest` with a Postgres 16 service container. Steps: `npm install` → `docs:check (freshness scoped to changed modules; BASE_REF vs PR base, full on dispatch)` → test scope (`tools/test-scope.mjs` against the PR base; docs/agent-only PRs skip the Playwright install, boot check and smoke test) → `npx playwright install chromium --with-deps` → boot check (`npm run dev` in the background; waits up to 60 s for `CLIENT_PORT`/`API_PORT` in `.env`, then polls `/api/health` + client) → dump boot log → `rm -f .env` (fresh allocation for the smoke run) → `npm run build` → `npm test` → upload `test/*.log` + `test/*.png` artifacts. The whole pipeline is Linux-native; `scripts/allocate-ports.ts` needs no OS-specific handling.
 
 ---
 

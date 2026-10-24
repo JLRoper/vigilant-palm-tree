@@ -22,9 +22,11 @@ branch-creation call.** A WIP commit never touches `package.json` or `CHANGELOG.
 1. `npm run build` — capture full output. If it fails, return immediately with the failing file/line and the last ~30 lines of output.
 2. If build passes, `npm run lint:deps` — same. Documented exceptions in `dependency-cruiser.cjs` are warnings; new violations are the gate.
 3. If lint:deps passes, `node tools/docs-check.mjs --changed-from origin/main` — same. Selective mode: link and source-path checks always run for every maintained doc, but the `docs:verified` marker age is enforced only for the docs that own the changed files (the `DOC_OWNERSHIP` globs in `tools/docs-check.mjs`) plus any maintained doc itself present in the changeset. The failure list names the docs to update.
-4. If docs:check passes, `npm run test:all` — same. (`pretest` runs `scripts/allocate-ports.ts` automatically, so don't worry about port setup.)
+4. If docs:check passes, `node tools/test-scope.mjs --changed-from origin/main` to decide whether tests are needed. It prints `TESTS REQUIRED` when any changed file is game code, and `TESTS SKIPPED` when every changed file is documentation or agent tooling (`*.md`, `docs/`, `.kilo/`, `.claude/`, `.github/agents|hooks|prompts|skills/`, `sessionTracking/`, `reviews/`, `analysis/`, `feature-plans/`, `local/`, `scripts/hooks/`; a `package.json` diff that only touches the `"version"` line also counts as non-game). Unknown paths, a failed diff, or an empty changeset all fail safe to `TESTS REQUIRED`.
+   - `TESTS REQUIRED` → `npm run test:all` — same as step 1 on failure. (`pretest` runs `scripts/allocate-ports.ts` automatically, so don't worry about port setup.)
+   - `TESTS SKIPPED` → do not run `test:all`; record the skip line in the report and continue.
 5. **Version gate** — decide the bump yourself (rule below), and apply it only if it has not already been applied in this changeset.
-6. All passed → return "PASS" plus the test summary and the version decision.
+6. All passed → return "PASS" plus the test summary (or the `TESTS SKIPPED` line) and the version decision.
 
 ## The version gate
 
@@ -97,7 +99,7 @@ tree. Bump only the version line (the script does exactly that), and never run
 `git add` or `git checkout` on paths you were not asked to touch.
 
 ## Rules
-- Run sequentially. Build must pass before lint:deps, which must pass before docs:check, which must pass before tests, which must pass before the version gate.
+- Run sequentially. Build must pass before lint:deps, which must pass before docs:check, which must pass before the test-scope check and (when it says `TESTS REQUIRED`) tests, which must pass before the version gate.
 - Don't try to fix failures. The primary agent decides how to proceed.
 - Don't run `db:down` or `cleanup` as part of this gate.
 - Don't commit, tag, or push — you prepare the version, the primary agent commits.
@@ -113,6 +115,7 @@ git commit
 
 **Integration path** — final candidate about to be merged into local main:
 ```
-npm run build && npm run test:all && npm run lint:deps
+npm run build && npm run lint:deps && node tools/docs-check.mjs --changed-from origin/main
+node tools/test-scope.mjs --changed-from origin/main   # TESTS REQUIRED -> npm run test:all
 # then the version decision, ONCE, at integration time
 ```
