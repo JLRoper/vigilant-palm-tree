@@ -22,6 +22,8 @@ import {
   updateTradeRoute as updateTradeRouteCommand,
   advanceCharterTravel,
   recruitUnits as recruitUnitsCommand,
+  demolishBuilding as demolishBuildingCommand,
+  startWorkerTransit as startWorkerTransitCommand,
   assignWorkers as assignWorkersCommand,
   transferUnits as transferUnitsCommand,
   tradeHeroes as tradeHeroesCommand,
@@ -501,6 +503,48 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         });
       } catch (e) {
         reportCommandFailure("Recruit units", e);
+      }
+    },
+    onDemolishBuilding: async (
+      actor: number,
+      settlementId: SettlementId,
+      gx: number,
+      gy: number,
+      buildingKind: BuildingKind,
+      district?: { q: number; r: number },
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await demolishBuildingCommand(name, {
+          actor,
+          settlementId,
+          gx,
+          gy,
+          buildingKind,
+          ...(district ? { district } : {}),
+        });
+      } catch (e) {
+        reportCommandFailure("Demolish building", e);
+      }
+    },
+    onStartWorkerTransit: async (
+      actor: number,
+      originSettlementId: SettlementId,
+      destinationSettlementId: SettlementId,
+      buildRoads?: boolean,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await startWorkerTransitCommand(name, {
+          actor,
+          originSettlementId,
+          destinationSettlementId,
+          ...(buildRoads !== undefined ? { buildRoads } : {}),
+        });
+      } catch (e) {
+        reportCommandFailure("Start worker transit", e);
       }
     },
     onAssignWorkers: async (

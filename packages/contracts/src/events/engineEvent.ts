@@ -1,4 +1,5 @@
 import type { Axial } from "../geometry";
+import type { BuildingKind } from "../buildings";
 import type { CharterId, HeroId, HorseVariantId, PlayerSeat, SettlementId } from "../ids";
 import type { TransferDirection, TradeRouteEndpoint, TradeRoutePayload } from "../gameState";
 import type { HeroTradeOffer } from "../commands/tradeHeroes";
@@ -278,4 +279,29 @@ export type EngineEvent =
         gy: number;
         workers: number;
         district?: { q: number; r: number };
+      }
+    | {
+        // DemolishBuilding (faction-construction plan, section 5). Minimal
+        // payload like BuildingsPlaced: the resulting buildings array rides
+        // the TurnEnded/poll resync boundary for remote seats.
+        type: "BuildingDemolished";
+        actor: PlayerSeat;
+        settlementId: SettlementId;
+        gx: number;
+        gy: number;
+        buildingKind: BuildingKind;
+        district?: { q: number; r: number };
+      }
+    | {
+        // StartWorkerTransit (faction-construction plan, section 6). Minimal
+        // payload like TradeRouteCreated's sibling events -- the full
+        // transit (path, pathIndex, etc.) rides the TurnEnded/poll resync
+        // boundary for remote seats, same "ignore" classification as
+        // BuildingsPlaced/BuildingDemolished.
+        type: "WorkerTransitStarted";
+        actor: PlayerSeat;
+        transitId: string;
+        originSettlementId: SettlementId;
+        destinationSettlementId: SettlementId;
+        buildRoads: boolean;
       };

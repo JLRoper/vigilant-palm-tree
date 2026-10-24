@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { eligibleRecruitSources, recruitUnits, settlementStacks, type UnitType } from "@heroes/engine";
-import type { BuildingDef, FactionId, GameState, Platoon, SettlementState } from "@heroes/contracts";
+import { eligibleRecruitSources, recruitUnits, settlementStacks } from "@heroes/engine";
+import type { BuildingDef, GameState, Platoon, SettlementState } from "@heroes/contracts";
 import { emptyWarehouse, makeSettlement, makeState } from "../charter/_helpers";
 
 const STOCK_WAREHOUSE = emptyWarehouse({ wood: 20, stone: 10, iron: 10, arcane: 10 });
@@ -163,125 +163,34 @@ test("recruitUnits: a recruit entry without resourceCost (farmhouse peasant) wor
   assert.deepEqual(settlementStacks(after)[0].entries, [{ unitTypeId: "peasant", count: 3 }]);
 });
 
-// ── Faction gate seam (faction-registry foundation, D5) ──
+// ── Building-ownership-only gating (construction-worker-gated faction
+// building feature, section 2): the seat-faction recruit gate
+// (unitAllowedForSeatFaction/RecruitFactionGate, opts.seatFactionId) is
+// deleted. Every recruit building's roster is already faction-pure
+// (buildingFactionParity.test.ts), so eligibleRecruitSources now lists
+// EVERY recruit of every constructed, level-eligible building with no
+// faction filter at all -- a seat recruits whatever its owned buildings
+// (built or captured, any faction) currently offer. ──
 
-function catalogUnit(id: string, factionId: FactionId): UnitType {
-  return {
-    id,
-    name: id,
-    attack: 1,
-    defence: 1,
-    health: 1,
-    speed: 1,
-    description: "",
-    advantageType: "infantry",
-    specialty: "",
-    specialtyPriority: 0,
-    factionId,
-  };
-}
-
-function sourcesOf(state: GameState, opts?: Parameters<typeof eligibleRecruitSources>[1]) {
-  return eligibleRecruitSources(state.settlements.s0, opts)
+function sourcesOf(state: GameState) {
+  return eligibleRecruitSources(state.settlements.s0)
     .map((s) => s.entry.unitTypeId)
     .sort();
 }
 
-test("eligibleRecruitSources without opts lists today's roster (the dormant gate)", () => {
+test("eligibleRecruitSources lists every recruit of every constructed, level-eligible building", () => {
   const state = recruitState({}, [building("barracks", BARRACKS.gx, BARRACKS.gy, 3), building("archeryRange", 4, 4, 2)]);
   assert.deepEqual(sourcesOf(state), ["archer", "crossbowman", "crusader", "pikeman", "swordsman"]);
 });
 
-test("eligibleRecruitSources with a human gate lists the same roster (byte-identical today)", () => {
-  const state = recruitState({}, [building("barracks", BARRACKS.gx, BARRACKS.gy, 3), building("archeryRange", 4, 4, 2)]);
-  const catalog = {
-    swordsman: catalogUnit("swordsman", "human"),
-    pikeman: catalogUnit("pikeman", "human"),
-    crusader: catalogUnit("crusader", "human"),
-    archer: catalogUnit("archer", "human"),
-    crossbowman: catalogUnit("crossbowman", "human"),
-  };
-  assert.deepEqual(sourcesOf(state, { unitTypes: catalog, seatFactionId: "human" }), [
-    "archer",
-    "crossbowman",
-    "crusader",
-    "pikeman",
-    "swordsman",
-  ]);
-});
-
-test("eligibleRecruitSources filters entries outside the seat's faction", () => {
-  const state = recruitState({}, [building("barracks", BARRACKS.gx, BARRACKS.gy, 3), building("archeryRange", 4, 4, 2)]);
-  const catalog = {
-    swordsman: catalogUnit("swordsman", "ashen"),
-    pikeman: catalogUnit("pikeman", "human"),
-    crusader: catalogUnit("crusader", "human"),
-    archer: catalogUnit("archer", "neutral"),
-    crossbowman: catalogUnit("crossbowman", "human"),
-  };
-  assert.deepEqual(sourcesOf(state, { unitTypes: catalog, seatFactionId: "human" }), [
-    "crossbowman",
-    "crusader",
-    "pikeman",
-  ], "ashen swordsman and neutral archer are gated out for a human seat");
-  assert.deepEqual(sourcesOf(state, { unitTypes: catalog, seatFactionId: "ashen" }), [
-    "swordsman",
-  ], "an ashen seat sees only the ashen-tagged entry");
-  assert.deepEqual(
-    sourcesOf(state, { unitTypes: catalog, seatFactionId: "neutral" }),
-    ["archer"],
-    "the symmetric rule: a neutral-tagged entry matches only a neutral seat",
-  );
-});
-
-test("eligibleRecruitSources with unknown catalog ids keeps the human default per entry", () => {
-  const state = recruitState({}, [building("barracks", BARRACKS.gx, BARRACKS.gy, 3)]);
-  assert.deepEqual(
-    sourcesOf(state, { unitTypes: {}, seatFactionId: "human" }),
-    ["crusader", "pikeman", "swordsman"],
-    "catalog misses default human, so a human seat keeps the full roster",
-  );
-  assert.deepEqual(
-    sourcesOf(state, { unitTypes: {}, seatFactionId: "ashen" }),
-    [],
-    "an ashen seat gets nothing from the default-human fallback",
-  );
-});
-
-// ── Ashen Court content pins (024): the crypt's ghoul is an ashen-roster
-// unit, so the gate splits the seam's answers by seat faction. ──
-
-test("eligibleRecruitSources: a human seat cannot see the built crypt's ghoul; an ashen seat can", () => {
+test("eligibleRecruitSources: the crypt's ghoul (and its own Construction Worker) is listed regardless of the recruiting seat's own faction", () => {
   const state = recruitState({}, [building("crypt", 1, 2)]);
-  const catalog = { ghoul: catalogUnit("ghoul", "ashen") };
-  assert.deepEqual(
-    sourcesOf(state, { unitTypes: catalog, seatFactionId: "human" }),
-    [],
-    "a human seat must not recruit the ashen ghoul even with a built crypt",
-  );
-  assert.deepEqual(
-    sourcesOf(state, { unitTypes: catalog, seatFactionId: "ashen" }),
-    ["ghoul"],
-    "an ashen seat sees its own roster",
-  );
+  assert.deepEqual(sourcesOf(state), ["construction_worker_ashen", "ghoul"], "building ownership alone gates the roster now");
 });
 
-test("eligibleRecruitSources: without gate opts the crypt lists its ghoul (the dormant seam)", () => {
-  const state = recruitState({}, [building("crypt", 1, 2)]);
-  assert.deepEqual(sourcesOf(state), ["ghoul"]);
-});
-
-// ── Ironmark Holds roster gating (025_ironmark_holds) ──
-
-const IRONMARK_CATALOG: Record<string, UnitType> = {
-  dwarf_axeman: catalogUnit("dwarf_axeman", "ironmark"),
-  shield_bearer: catalogUnit("shield_bearer", "ironmark"),
-  hand_gunner: catalogUnit("hand_gunner", "ironmark"),
-  ironsworn: catalogUnit("ironsworn", "ironmark"),
-  iron_golem: catalogUnit("iron_golem", "ironmark"),
-  runesmith: catalogUnit("runesmith", "ironmark"),
-  forge_lord: catalogUnit("forge_lord", "ironmark"),
-};
+// ── Ironmark Holds roster (025_ironmark_holds): still faction-pure by
+// construction, now surfaced unconditionally once the holding seat owns
+// the building -- including a captured one. ──
 
 function ironmarkHoldState(): GameState {
   return recruitState(
@@ -295,43 +204,21 @@ function ironmarkHoldState(): GameState {
   );
 }
 
-test("an ironmark seat recruits the Holds' roster from the four new buildings", () => {
+test("the Holds' roster is recruitable from the four new buildings by whoever owns them", () => {
   assert.deepEqual(
-    sourcesOf(ironmarkHoldState(), { unitTypes: IRONMARK_CATALOG, seatFactionId: "ironmark" }),
+    sourcesOf(ironmarkHoldState()),
     ["dwarf_axeman", "forge_lord", "hand_gunner", "iron_golem", "ironsworn", "runesmith", "shield_bearer"],
   );
 });
 
-test("a human seat cannot recruit dwarf_axeman; an ironmark seat can", () => {
-  const state = recruitState({}, [building("forgeHall", 1, 1)]);
-  assert.deepEqual(
-    sourcesOf(state, { unitTypes: IRONMARK_CATALOG, seatFactionId: "human" }),
-    [],
-    "the forgeHall recruits are ironmark-tagged, so a human seat sees none of them",
-  );
-  assert.deepEqual(
-    sourcesOf(state, { unitTypes: IRONMARK_CATALOG, seatFactionId: "ironmark" }),
-    ["dwarf_axeman"],
-  );
-});
-
-test("iron_golem (monster-advantage, faction-rostered) is recruitable only by ironmark", () => {
+test("iron_golem (monster-advantage, faction-rostered) is listed once the golemFoundry is owned, by any seat", () => {
   const state = recruitState({}, [building("golemFoundry", 3, 3, 2)]);
-  assert.deepEqual(
-    sourcesOf(state, { unitTypes: IRONMARK_CATALOG, seatFactionId: "ironmark" }),
-    ["iron_golem", "ironsworn"],
-  );
-  for (const seat of ["human", "ashen", "verdant", "neutral"] as const) {
-    assert.deepEqual(
-      sourcesOf(state, { unitTypes: IRONMARK_CATALOG, seatFactionId: seat }),
-      [],
-      `a ${seat} seat must not recruit the ironmark-tagged iron_golem`,
-    );
-  }
+  assert.deepEqual(sourcesOf(state), ["iron_golem", "ironsworn"]);
 });
 
 // ── The Verdant Wild roster (026_verdant_wild): the sylvan buildings offer
-// their units to a verdant seat and to nobody else. ──
+// their units to whichever seat owns them -- a captured grove is finally
+// worth capturing instead of permanently dead weight. ──
 
 const SYLVAN_BUILDINGS: BuildingDef[] = [
   building("groveSanctum", 4, 4, 2),
@@ -340,52 +227,21 @@ const SYLVAN_BUILDINGS: BuildingDef[] = [
   building("worldrootGrove", 7, 7, 1),
 ];
 
-const VERDANT_CATALOG = {
-  swordsman: catalogUnit("swordsman", "human"),
-  forest_scout: catalogUnit("forest_scout", "verdant"),
-  thorn_archer: catalogUnit("thorn_archer", "verdant"),
-  briar_warden: catalogUnit("briar_warden", "verdant"),
-  warbeast: catalogUnit("warbeast", "verdant"),
-  elk_rider: catalogUnit("elk_rider", "verdant"),
-  stag_knight: catalogUnit("stag_knight", "verdant"),
-  treant_elder: catalogUnit("treant_elder", "verdant"),
-};
-
-test("eligibleRecruitSources: a verdant seat sees the full sylvan roster", () => {
+test("eligibleRecruitSources: the full sylvan roster is listed once those buildings are owned", () => {
   const state = recruitState({}, [building("barracks", BARRACKS.gx, BARRACKS.gy, 3), ...SYLVAN_BUILDINGS]);
   assert.deepEqual(
-    sourcesOf(state, { unitTypes: VERDANT_CATALOG, seatFactionId: "verdant" }),
+    sourcesOf(state),
     [
       "briar_warden",
+      "crusader",
       "elk_rider",
       "forest_scout",
+      "pikeman",
       "stag_knight",
+      "swordsman",
       "thorn_archer",
       "treant_elder",
       "warbeast",
     ],
-  );
-});
-
-test("eligibleRecruitSources: human, ashen, and ironmark seats cannot recruit the sylvan roster", () => {
-  const state = recruitState({}, [building("barracks", BARRACKS.gx, BARRACKS.gy, 3), ...SYLVAN_BUILDINGS]);
-  for (const seat of ["human", "ashen", "ironmark"] as const) {
-    const seen = sourcesOf(state, { unitTypes: VERDANT_CATALOG, seatFactionId: seat });
-    for (const id of [
-      "forest_scout",
-      "briar_warden",
-      "warbeast",
-      "thorn_archer",
-      "elk_rider",
-      "treant_elder",
-      "stag_knight",
-    ]) {
-      assert.ok(!seen.includes(id), `a ${seat} seat must not see the sylvan ${id}`);
-    }
-  }
-  assert.deepEqual(
-    sourcesOf(state, { unitTypes: VERDANT_CATALOG, seatFactionId: "human" }),
-    ["crusader", "pikeman", "swordsman"],
-    "a human seat keeps its own roster (pikeman/crusader default human via the D3 fallback)",
   );
 });

@@ -1,7 +1,7 @@
 import { Axial } from "@heroes/contracts";
 import { findPath, NEIGHBOR_DIRS, hexDistance } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
-import type { BuildingDef, BuildingKind, FactionId, GameState, HeroState, SettlementState } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, GameState, HeroState, SettlementState } from "@heroes/contracts";
 import {
   platoonPower,
   platoonTroopTotal,
@@ -14,7 +14,16 @@ import {
   eligibleRecruitSources,
   type RecruitSource,
 } from "../settlement/recruitUnits";
-import { buildingDraftMax } from "../buildingRegistry";
+import { CONSTRUCTION_WORKER_UNIT_BY_FACTION, buildingDraftMax } from "../buildingRegistry";
+
+// Every Construction Worker id (section 3): never a garrison-defense
+// candidate for the AI planner below. It contributes almost no combat
+// power for a 650g purchase (deliberately -- it is a construction-unlock
+// unit, not a soldier), so the AI would otherwise happily spend its
+// garrison-floor budget on one once the cheap combat units' draft pools
+// ran dry, which is not what a human player would want their AI-run
+// settlements doing with gold the player can't see spent.
+const CONSTRUCTION_WORKER_IDS: ReadonlySet<string> = new Set(Object.values(CONSTRUCTION_WORKER_UNIT_BY_FACTION));
 import { RESOURCES } from "../map/resourceTiles";
 import { computeSettlementRates, generateSettlementName } from "../economy/settlementRates";
 import { evaluateCharterRequirements, validCharterHexes } from "../charter/requirements";
@@ -123,7 +132,7 @@ export function pickGarrisonRecruitment(
     const targetPower = Math.max(GARRISON_POWER_FLOOR, GARRISON_TARGET_RATIO * threat);
     const deficit = targetPower - platoonPower(settlementStacks(settlement), unitTypes);
     if (deficit <= 0) continue;
-    out.push(...garrisonPurchases(settlement, settlementId, deficit, unitTypes, state.players.find((player) => player.id === seat)?.factionId));
+    out.push(...garrisonPurchases(settlement, settlementId, deficit, unitTypes));
   }
   return out;
 }
@@ -155,10 +164,9 @@ function garrisonPurchases(
   settlementId: string,
   deficit: number,
   unitTypes: Record<string, UnitType>,
-  factionId?: FactionId,
 ): GarrisonRecruitment[] {
-  const candidates = eligibleRecruitSources(settlement, { unitTypes, seatFactionId: factionId })
-    .filter((source) => source.entry.goldCost > 0)
+  const candidates = eligibleRecruitSources(settlement)
+    .filter((source) => source.entry.goldCost > 0 && !CONSTRUCTION_WORKER_IDS.has(source.entry.unitTypeId))
     .sort(
       (a, b) =>
         powerPerGold(b, unitTypes) - powerPerGold(a, unitTypes) ||

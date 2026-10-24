@@ -7,15 +7,19 @@ import type {
   SettlementState,
 } from "@heroes/contracts";
 import {
-  buildingAllowedForFaction,
   buildingBuildDays,
   buildingFootprintFromRegistry,
   buildingPlacementCost,
+  constructionWorkerUnitId,
+  normalizeFactionId,
 } from "../buildingRegistry";
+import { buildingConstructionGate } from "./constructionWorkers";
 import { districtKey } from "../control";
 import { disconnectedDistrictKeys } from "./districtConnectivity";
 import { type CitySpot } from "./citySpots";
 import { hasExplicitStaffing } from "./workforce";
+import { depositIntoGarrison } from "./recruitUnits";
+import { settlementStacks } from "../units";
 
 // The server-side (and optimistic client-side) commit of the city view's
 // working cart -- the F4 gap closer. Mirrors the client's own net-cost model
@@ -128,13 +132,44 @@ export function applyPlaceBuildings(
   if (!s) return { ok: false, state, reason: "no_settlement" };
   if (s.ownerId !== actor) return { ok: false, state, reason: "forbidden_not_your_settlement" };
 
-  const factionId = state.players.find((p) => p.id === s.ownerId)?.factionId;
+  const ownerFactionId = normalizeFactionId(state.players.find((p) => p.id === s.ownerId)?.factionId) ?? "human";
   const previous = district ? s.districts?.[districtKey(district.q, district.r)]?.buildings ?? [] : s.buildings;
-  if (buildings.some((b) =>
-    !previous.some((p) => p.gx === b.gx && p.gy === b.gy && p.kind === b.kind) &&
-    !buildingAllowedForFaction(b.kind, factionId)
-  )) {
-    return { ok: false, state, reason: "wrong_faction" };
+  // A previously-empty settlement's free starter-layout commit (below) is a
+  // pre-built starting state, not a player action -- district placements are
+  // never free, only the main-city starter set is.
+  const freeInitialLayout = !district && initialLayout && s.buildings.length === 0;
+
+  // Construction-worker-gated faction-building feature (section 4): this
+  // REPLACES PR #252's pure seat-vs-building-tag check
+  // (buildingAllowedForFaction(b.kind, ownerFactionId)), which is what let a
+  // "neutral"-faction seat's own free starter commit reject itself forever
+  // (buildingRegistry.ts's normalizeFactionId comment has the bug history).
+  // Placing a NEW building tagged faction F now requires an F Construction
+  // Worker currently present in THIS settlement's garrison/stacks --
+  // independent of the owner's own seat faction (buildingConstructionGate).
+  // Untagged (economy) buildings are always allowed, same as before. The
+  // free starter commit is exempt, same reasoning as the cost/timer
+  // exemptions below: it is the town the player starts with, not new work.
+  if (!freeInitialLayout) {
+    for (const b of buildings) {
+      if (previous.some((p) => p.gx === b.gx && p.gy === b.gy && p.kind === b.kind)) continue;
+      const gate = buildingConstructionGate(b.kind, s);
+      if (!gate.ok) return { ok: false, state, reason: gate.reason ?? "missing_construction_worker" };
+    }
+  }
+
+  // Per-settlement, per-turn construction cap (section 5): a settlement may
+  // commit at most one PlaceBuildings OR DemolishBuilding per turn --
+  // whichever happens first blocks the other until the next turn (reset in
+  // turn/round.ts's advanceRound, alongside the other per-day resets). This
+  // is the "cap concurrent construction per settlement" option the spec
+  // for this feature cited from a "docs/income-rebalancing-plan.md" --
+  // that file does not exist in this repository; see
+  // SettlementState.constructionActionUsedThisTurn's own comment and the
+  // PR description for the full note. The free starter commit is exempt
+  // for the same reason as the construction-worker gate above.
+  if (!freeInitialLayout && s.constructionActionUsedThisTurn) {
+    return { ok: false, state, reason: "construction_action_already_used_this_turn" };
   }
 
   const newPlacementWorkers = hasExplicitStaffing(s) ? 0 : undefined;
@@ -223,6 +258,9 @@ export function applyPlaceBuildings(
         arcane: Math.max(0, s.warehouse.arcane - (net.arcane ?? 0)),
         food: s.warehouse.food,
       },
+      // District commits are never the free initial layout -- always consume
+      // the per-turn cap.
+      constructionActionUsedThisTurn: true,
     };
 
     return {
@@ -240,8 +278,8 @@ export function applyPlaceBuildings(
   // hall + farm + 2 houses + 2 wood producers + stone mine + faction troop producer) is
   // free by design and arrives ALREADY CONSTRUCTED — no build timers, no cost. Any later
   // commit pays full net cost and stamps timers on the genuinely new
-  // placements only.
-  const freeInitialLayout = initialLayout && s.buildings.length === 0;
+  // placements only. (freeInitialLayout is computed above, shared with the
+  // construction-worker gate and the per-turn cap.)
   const net: CityBuildNetCost = freeInitialLayout ? {} : cityBuildNetCost(s.buildings, buildings);
 
   if ((net.gold ?? 0) > s.gold) return { ok: false, state, reason: "not_enough_gold" };
@@ -250,11 +288,22 @@ export function applyPlaceBuildings(
   }
 
   const sanitized = buildings.map((b) => sanitize(s.buildings, b, !freeInitialLayout, newPlacementWorkers));
+  // Starter Construction Worker seeding, extended to the free starter commit
+  // (not just world-gen's seedStarterBuildings in init.ts): without one, a
+  // settlement founded mid-game by a charter could never place a second
+  // faction building either (buildingConstructionGate above would reject
+  // its very first one). One worker of the settlement's OWNER's own faction,
+  // deposited straight into the garrison -- never consumed, just standing
+  // proof of residence.
+  const seededStacks = freeInitialLayout
+    ? depositIntoGarrison(settlementStacks(s), constructionWorkerUnitId(ownerFactionId), 1).stacks
+    : s.stacks;
   const newSettlements: Record<SettlementId, SettlementState> = {
     ...state.settlements,
     [settlementId]: {
       ...s,
       buildings: sanitized,
+      stacks: seededStacks,
       gold: s.gold - (net.gold ?? 0),
       warehouse: {
         ...s.warehouse,
@@ -264,6 +313,7 @@ export function applyPlaceBuildings(
         arcane: Math.max(0, s.warehouse.arcane - (net.arcane ?? 0)),
         food: s.warehouse.food,
       },
+      constructionActionUsedThisTurn: freeInitialLayout ? s.constructionActionUsedThisTurn : true,
     },
   };
   return {

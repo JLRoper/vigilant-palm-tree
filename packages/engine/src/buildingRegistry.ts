@@ -1,5 +1,32 @@
 import type { BuildingKind, FactionId, ResourceType, WarehouseResource } from "@heroes/contracts";
 
+// Construction Worker ids/price (faction-construction plan). Declared here,
+// not in settlement/constructionWorkers.ts, so the four starter troop
+// buildings' own `recruits` literals below can reference them directly
+// without constructionWorkers.ts importing FROM this file and this file
+// importing back (a cycle) -- constructionWorkers.ts imports these, not the
+// other way around.
+export const CONSTRUCTION_WORKER_UNIT_BY_FACTION: Record<FactionId, string> = {
+  human: "construction_worker_human",
+  ashen: "construction_worker_ashen",
+  ironmark: "construction_worker_ironmark",
+  verdant: "construction_worker_verdant",
+  neutral: "construction_worker_human",
+};
+
+export function constructionWorkerUnitId(factionId: FactionId): string {
+  return CONSTRUCTION_WORKER_UNIT_BY_FACTION[factionId] ?? CONSTRUCTION_WORKER_UNIT_BY_FACTION.human;
+}
+
+/**
+ * A mid-tier (tier 4-5) purchase, not a starter levy: a Construction Worker
+ * unlocks new faction-building construction wherever it stands, which is a
+ * real strategic spend, not something to stockpile casually. Named constant
+ * so the price lives in one place; server/migrations/034_construction_workers.sql's
+ * seed values and this constant must be read together if either is retuned.
+ */
+export const CONSTRUCTION_WORKER_GOLD_COST = 650;
+
 export interface RecruitEntry {
   unitTypeId: string;
   goldCost: number;
@@ -223,7 +250,10 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     buildDays: 2,
     placementCost: { gold: 80, wood: 4 },
     upkeepPerLevel: { wood: 1, stone: 0 },
-    recruits: [{ unitTypeId: "peasant", goldCost: 25, minLevel: 1 }],
+    recruits: [
+      { unitTypeId: "peasant", goldCost: 25, minLevel: 1 },
+      { unitTypeId: constructionWorkerUnitId("human"), goldCost: CONSTRUCTION_WORKER_GOLD_COST, minLevel: 1 },
+    ],
     maxWorkers: 2,
     draftMax: 3,
     draftPerDay: 0.25,
@@ -433,6 +463,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
       { unitTypeId: "ghoul", goldCost: 40, minLevel: 1 },
       { unitTypeId: "skeleton_warrior", goldCost: 200, minLevel: 2 },
       { unitTypeId: "grave_hound", goldCost: 200, minLevel: 3 },
+      { unitTypeId: constructionWorkerUnitId("ashen"), goldCost: CONSTRUCTION_WORKER_GOLD_COST, minLevel: 1 },
     ],
     maxWorkers: 2,
     draftMax: 3,
@@ -695,6 +726,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     recruits: [
       { unitTypeId: "tunnel_levy", goldCost: 30, minLevel: 1 },
       { unitTypeId: "war_boar", goldCost: 180, minLevel: 2 },
+      { unitTypeId: constructionWorkerUnitId("ironmark"), goldCost: CONSTRUCTION_WORKER_GOLD_COST, minLevel: 1 },
     ],
     maxWorkers: 2,
     draftMax: 3,
@@ -750,6 +782,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     recruits: [
       { unitTypeId: "sproutling", goldCost: 25, minLevel: 1 },
       { unitTypeId: "bramble_blade", goldCost: 200, minLevel: 2 },
+      { unitTypeId: constructionWorkerUnitId("verdant"), goldCost: CONSTRUCTION_WORKER_GOLD_COST, minLevel: 1 },
     ],
     maxWorkers: 2,
     draftMax: 3,
@@ -780,6 +813,23 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
 export function buildingAllowedForFaction(kind: BuildingKind, factionId?: FactionId): boolean {
   const faction = REGISTRY[kind].faction;
   return factionId === undefined || faction === undefined || faction === factionId;
+}
+
+// Bug fix (roster-parity follow-up): "neutral" is the monsters/unowned tag in
+// FACTION_REGISTRY, never a real seat's playable faction -- but nothing before
+// this stopped a direct API caller from assigning it to one (the UI picker in
+// src/screens/shared/factionChoices.ts merely filters it out of its own list).
+// A "neutral" seat's starterTroopBuilding already resolves to "farmhouse"
+// (tagged "human"), so comparing the SEAT faction "neutral" against that tag
+// with the pre-fix buildingAllowedForFaction read false forever -- the exact
+// bug this normalizes away at every remaining caller that still compares a
+// seat's factionId against a building tag (server/routes.ts's seatFactions
+// validation closes the other half, at the source). Deliberately leaves
+// `undefined` alone: that is the dormant "no gate" value many callers rely on
+// (buildingAllowedForFaction(kind) with no second argument must keep
+// returning true for every kind), not a faction that needs normalizing.
+export function normalizeFactionId(factionId?: FactionId): FactionId | undefined {
+  return factionId === "neutral" ? "human" : factionId;
 }
 
 export function getBuildingEffect(kind: BuildingKind): BuildingEffect {

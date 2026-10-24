@@ -30,6 +30,7 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
       "warhound",
       "giant_eagle",
       "eagle_prince",
+      "construction_worker_human",
     ],
   },
   ashen: {
@@ -52,6 +53,7 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
       "dark_acolyte",
       "necromancer",
       "bone_dragon",
+      "construction_worker_ashen",
     ],
   },
   ironmark: {
@@ -74,6 +76,7 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
       "axe_thrower",
       "hearth_priest",
       "ram_rider",
+      "construction_worker_ironmark",
     ],
   },
   verdant: {
@@ -96,6 +99,7 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
       "wildwood_ranger",
       "druid",
       "ursine_guardian",
+      "construction_worker_verdant",
     ],
   },
   neutral: {

@@ -48,6 +48,8 @@ export {
   startSettlementUpgrade,
   SETTLEMENT_UPGRADE_COSTS,
   applyPlaceBuildings,
+  applyDemolishBuilding,
+  startWorkerTransit,
 } from "@heroes/engine";
 
 export {

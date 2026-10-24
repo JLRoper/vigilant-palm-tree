@@ -67,6 +67,12 @@ const CATALOG: Record<string, UnitType> = {
   cavalry: tierUnit("cavalry", 5),
   crossbowman: tierUnit("crossbowman", 4),
   griffin: tierUnit("griffin", 8),
+  // Zero ongoing upkeep by design (034_construction_workers.sql's own
+  // deviation from the tier formula) -- buildInitialGameState's
+  // seedStarterBuildings seeds one into the keep's garrison from turn 1
+  // (faction-construction plan, section 4), and it must not silently add
+  // to this file's pinned weekly food/gold charges.
+  construction_worker_human: { ...tierUnit("construction_worker_human", 5), upkeepGold: 0, upkeepFood: 0 },
 };
 
 const OPTIONS: HeroUpkeepOptions = { unitTypes: CATALOG, round: 1, castleSeed: 7 };

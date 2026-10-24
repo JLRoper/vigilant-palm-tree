@@ -193,6 +193,34 @@ export interface TradeRouteState {
   unpaidSinceDay?: number | null;
 }
 
+export type WorkerTransitId = string;
+
+/**
+ * A Construction Worker walking ALONE (not merged into a hero's stack)
+ * between two settlements (faction-construction plan, section 6). Mirrors
+ * CaravanState's shape deliberately (`path`/`pathIndex`) -- see that type's
+ * own comment above -- rather than reusing it directly: a lone worker has
+ * no cargo, carries exactly one unit, and optionally halves its own speed
+ * to pave the road behind it (section 7), none of which fit CaravanState's
+ * fields cleanly. The pure movement/ambush-eligibility logic lives in
+ * @heroes/engine's settlement/workerTransit.ts, which imports this shape
+ * rather than redeclaring it (contracts is the zero-dependency leaf).
+ */
+export interface WorkerTransitState {
+  id: WorkerTransitId;
+  ownerId: PlayerId;
+  factionId: FactionId;
+  unitTypeId: string;
+  originSettlementId: SettlementId;
+  destinationSettlementId: SettlementId;
+  /** Remaining path, next tile first (findPath's own convention). */
+  path: { q: number; r: number }[];
+  /** Tiles of `path` already consumed. The worker occupies path[pathIndex - 1] (or the origin settlement at 0). */
+  pathIndex: number;
+  /** "Build roads along the way" toggle for this trip: costs ROAD_BUILD_GOLD_COST_PER_TILE gold per tile and halves movement speed while active. */
+  buildRoads: boolean;
+}
+
 export interface GameState {
   round: number;
   day: number;
@@ -212,6 +240,21 @@ export interface GameState {
   /** Optional + defaulted ([]) so legacy saves and old JSONB rows stay valid. */
   tradeRoutes?: TradeRouteState[];
   nextTradeRouteId?: number;
+  /** Optional + defaulted ([]) so legacy saves and old JSONB rows stay valid (section 6). */
+  workerTransits?: WorkerTransitState[];
+  nextWorkerTransitId?: number;
+  /**
+   * Road-building side action (faction-construction plan, section 7):
+   * sorted "q,r" keys of every tile a Construction Worker has paved.
+   * Read by map/pathfinding.ts's findPath/computePathCost (ROAD_COST_MULTIPLIER)
+   * as an optional ReadonlySet -- absent/empty is "no roads", backward
+   * compatible with every existing caller. This field and
+   * settlement/workerTransit.ts's WorkerTransitState are the engine-only
+   * data model this PR ships for sections 6/7; neither is wired into a
+   * command, event, or server persistence path yet (see that module's
+   * header comment for the scoping rationale).
+   */
+  roadedTiles?: readonly string[];
 }
 
 export interface CalendarParts {

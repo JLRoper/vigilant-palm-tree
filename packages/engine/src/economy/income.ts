@@ -1,4 +1,4 @@
-import type { GameState, PlayerId, SettlementState } from "@heroes/contracts";
+import type { FactionId, GameState, PlayerId, SettlementState } from "@heroes/contracts";
 import { buildingSettlementEffects } from "../buildingRegistry";
 import { isDistrictBlockedByHero } from "../settlement/producers";
 import { effortFraction } from "../settlement/workforce";
@@ -54,8 +54,9 @@ export function playerPopulation(state: GameState, playerId: PlayerId): number {
 export function effectiveSettlementIncome(
   s: SettlementState,
   heroes?: Iterable<{ ownerId: PlayerId; q: number; r: number }> | Record<string, { ownerId: PlayerId; q: number; r: number }>,
+  ownerFactionId?: FactionId,
 ): number {
-  let total = effectiveIncome(s);
+  let total = effectiveIncome(s, ownerFactionId);
   for (const b of s.buildings) {
     if (b.construction) continue;
     total += Math.round(buildingSettlementEffects(b.kind, b.level).goldPerTurn * effortFraction(b) * 100) / 100;
@@ -76,9 +77,10 @@ export function effectiveSettlementIncome(
  * actually pay per turn (morale-scaled tax + building income).
  */
 export function playerEffectiveSettlementIncome(state: GameState, playerId: PlayerId): number {
+  const ownerFactionId = state.players.find((p) => p.id === playerId)?.factionId;
   let total = 0;
   for (const s of Object.values(state.settlements)) {
-    if (s.ownerId === playerId) total += effectiveSettlementIncome(s, state.heroes);
+    if (s.ownerId === playerId) total += effectiveSettlementIncome(s, state.heroes, ownerFactionId);
   }
   return total;
 }

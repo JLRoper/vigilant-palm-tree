@@ -149,6 +149,10 @@ test("each faction palette includes its recruits and shared buildings", () => {
       assert.ok(kinds.includes(shared), `${faction}: ${shared}`);
     }
   }
-  assert.equal(buildListSections("neutral")[0].kinds.length, 0);
+  // Bug fix: "neutral" normalizes to "human" before the faction-tag check
+  // (buildingRegistry.ts's normalizeFactionId), so a "neutral"-faction seat's
+  // build list reads exactly like a human seat's -- not empty. See
+  // buildingAllowedForFaction's bug-fix comment for why.
+  assert.deepEqual(new Set(buildListSections("neutral")[0].kinds), new Set(expected.human));
   assert.equal(buildListSections()[0].kinds.length, 26);
 });

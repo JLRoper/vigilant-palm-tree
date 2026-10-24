@@ -1,6 +1,6 @@
 # Heroes
 
-<!-- docs:verified 2026-10-21 -->
+<!-- docs:verified 2026-10-24 -->
 
 The actors on the map. Heroes move tile-to-tile, claim [settlements](./settlements.md), lead armies, and can found new settlements via charter expeditions.
 
@@ -103,7 +103,7 @@ When a hero moves adjacent to an enemy hero, battle triggers:
 Enemy heroes exist when the game was created with AI enemies — New Game supports 0–3; `playerCount = humans + enemies` (clamped to the player limit). AI seats spawn castles and **"Warlord"** heroes. New games with `enemySlots > 0` are flagged `lobby.aiDriver: "server"`; the server scanner owns their turns and the browser is a spectator. Only unflagged legacy games retain the primary-client tick:
 
 - AI picks a move target via `pickAiMove` (`packages/engine/src/ai/aiBrain.ts`; `src/ai/aiBrain.ts` is a compatibility re-export): reachable enemies, beatable garrisons, empty settlements, and resources are prioritized before wandering.
-- **AI garrisons its own settlements** (2026-09-29 follow-ups, B1): at the start of each AI turn the tick submits a threat-sized garrison shopping list (`pickGarrisonRecruitment` — target power = 1.0 × nearby enemy-hero power, floor 4, gold reserve 100) through the existing `RecruitUnits` command path, so an unattended AI town holds troops instead of falling to the first walk-in.
+- **AI garrisons its own settlements** (2026-09-29 follow-ups, B1): at the start of each AI turn the tick submits a threat-sized garrison shopping list (`pickGarrisonRecruitment` — target power = 1.0 × nearby enemy-hero power, floor 4, gold reserve 100) through the existing `RecruitUnits` command path, so an unattended AI town holds troops instead of falling to the first walk-in. **2026-10-24:** the shopping list explicitly excludes the four Construction Worker ids (`packages/engine/src/buildingRegistry.ts`'s `CONSTRUCTION_WORKER_UNIT_BY_FACTION`) — a 650g non-combat unit is never a garrison-defense candidate, even once the seat-faction recruit gate's removal made it technically eligible. See [army.md](./army.md) → Construction Workers.
 - **Lost assaults back off** (2026-09-29 follow-ups, I1): after a non-win settlement assault the hero leaves that settlement alone for `GARRISON_BACKOFF_ROUNDS = 2` rounds (in-memory on the primary client, surviving controller rebuilds via `AiTurnMemory`).
 - Walking onto an empty enemy/neutral settlement captures it (existing rule); since the 2026-09-29 capture/garrison wave, walking onto a garrisoned settlement it can beat ends the path there and starts a settlement battle (auto-resolved), while an unfavorable garrison is still refused as a step. AI walk-in captures serialize behind the move persist like the human path's.
 - Post-move adjacency starts a battle — AI-vs-AI auto-resolves; a battle against **you** is now *offered* to you instead (`EnterBattle` → `BattleOffered`, see [Combat](#combat)); a walk-in settlement battle still resolves the same silent way via `TurnController.resolveSettlementBattle`, with the result card/toast instead of the arena. While an offer is pending the driver's pass sits in `waiting_for_defender` (no `EndTurn`), force-resolving after the 300 s wait deadline.

@@ -87,6 +87,8 @@ export const ENGINE_EVENT_SYNC_CLASS: Record<EngineEvent["type"], EngineEventSyn
   HeroesTraded: "apply",
   SettlementBattleResolved: "resync",
   WorkersAssigned: "ignore",
+  BuildingDemolished: "ignore",
+  WorkerTransitStarted: "ignore",
 };
 
 function resync(state: GameState): ApplyEngineEventResult {
@@ -484,6 +486,8 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
     case "TradeRouteUpdated":
     case "TradeRouteRemoved":
     case "WorkersAssigned":
+    case "BuildingDemolished":
+    case "WorkerTransitStarted":
     // SettlementBattleResolved carries only winner/captured -- the resulting
     // stacks, gold, and attacker relocation/removal are battle-internal and
     // not derivable from the payload, so the caller refetches.

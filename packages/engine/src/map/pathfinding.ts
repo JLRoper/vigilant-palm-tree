@@ -43,7 +43,31 @@ export function hexDistance(a: Axial, b: Axial): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) + Math.abs(a.q + a.r - b.q - b.r)) / 2;
 }
 
-export function findPath(map: GameMap, start: Axial, goal: Axial, blockedHexes?: Set<string>): Axial[] {
+/**
+ * Road-building side action (faction-construction plan, section 7): a paved
+ * tile costs this fraction of its normal movement cost for ANY unit (hero,
+ * Construction Worker, caravan) crossing it afterward. Backward compatible
+ * by construction -- `roadedTiles` is an optional extra parameter that
+ * defaults to "no tile is roaded", so every existing findPath caller is
+ * byte-identical. The roaded-tile set itself is not persisted anywhere by
+ * this engine-only building block (see settlement/workerTransit.ts's header
+ * comment for the scope this shipped at).
+ */
+export const ROAD_COST_MULTIPLIER = 0.5;
+
+function roadedCost(map: GameMap, q: number, r: number, roadedTiles?: ReadonlySet<string>): number {
+  const base = map.cost(q, r);
+  if (!roadedTiles || roadedTiles.size === 0) return base;
+  return roadedTiles.has(`${q},${r}`) ? base * ROAD_COST_MULTIPLIER : base;
+}
+
+export function findPath(
+  map: GameMap,
+  start: Axial,
+  goal: Axial,
+  blockedHexes?: Set<string>,
+  roadedTiles?: ReadonlySet<string>,
+): Axial[] {
   if (start.q === goal.q && start.r === goal.r) return [];
   if (!map.isPassable(goal.q, goal.r)) return [];
   if (blockedHexes?.has(`${goal.q},${goal.r}`)) return [];
@@ -51,7 +75,7 @@ export function findPath(map: GameMap, start: Axial, goal: Axial, blockedHexes?:
   const width = map.width;
   const height = map.height;
   if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
-    return findPathUnbounded(map, start, goal, blockedHexes);
+    return findPathUnbounded(map, start, goal, blockedHexes, roadedTiles);
   }
   if (
     start.q < 0 ||
@@ -65,6 +89,12 @@ export function findPath(map: GameMap, start: Axial, goal: Axial, blockedHexes?:
   ) {
     return [];
   }
+
+  // Precomputed once, outside the hot neighbor-relaxation loop below, so
+  // the overwhelmingly common case (no roadedTiles argument at all) adds
+  // zero per-edge overhead: `hasRoads && roadedTiles.has(...)` short-circuits
+  // without ever building the tile-key string or calling .has().
+  const hasRoads = !!roadedTiles && roadedTiles.size > 0;
 
   ensureBuffers(width * height);
   searchGen = (searchGen + 1) >>> 0;
@@ -193,7 +223,9 @@ export function findPath(map: GameMap, start: Axial, goal: Axial, blockedHexes?:
       if (blockedGenBuf[nIdx] === gen) continue;
       if (!map.isPassable(nq, nr)) continue;
 
-      const tentative = cg + map.cost(nq, nr);
+      const edgeCost = map.cost(nq, nr);
+      const tentative =
+        cg + (hasRoads && roadedTiles!.has(`${nq},${nr}`) ? edgeCost * ROAD_COST_MULTIPLIER : edgeCost);
       const isSeen = seenGenBuf[nIdx] === gen;
       if (!isSeen || tentative < gScoreBuf[nIdx]) {
         cameFromBuf[nIdx] = currentIdx;
@@ -216,7 +248,13 @@ export function findPath(map: GameMap, start: Axial, goal: Axial, blockedHexes?:
   return [];
 }
 
-function findPathUnbounded(map: GameMap, start: Axial, goal: Axial, blockedHexes?: Set<string>): Axial[] {
+function findPathUnbounded(
+  map: GameMap,
+  start: Axial,
+  goal: Axial,
+  blockedHexes?: Set<string>,
+  roadedTiles?: ReadonlySet<string>,
+): Axial[] {
   const key = (a: Axial) => `${a.q},${a.r}`;
   const open: Axial[] = [start];
   const cameFrom = new Map<string, string>();
@@ -247,7 +285,7 @@ function findPathUnbounded(map: GameMap, start: Axial, goal: Axial, blockedHexes
       if (!map.isPassable(nq, nr)) continue;
       const nKey = `${nq},${nr}`;
       if (blockedHexes?.has(nKey)) continue;
-      const tentative = (gScore.get(key(current)) ?? Infinity) + map.cost(nq, nr);
+      const tentative = (gScore.get(key(current)) ?? Infinity) + roadedCost(map, nq, nr, roadedTiles);
       if (tentative < (gScore.get(nKey) ?? Infinity)) {
         cameFrom.set(nKey, key(current));
         gScore.set(nKey, tentative);
@@ -262,10 +300,10 @@ function findPathUnbounded(map: GameMap, start: Axial, goal: Axial, blockedHexes
   return [];
 }
 
-export function computePathCost(map: GameMap, path: readonly Axial[]): number {
+export function computePathCost(map: GameMap, path: readonly Axial[], roadedTiles?: ReadonlySet<string>): number {
   let cost = 0;
   for (let i = 1; i < path.length; i++) {
-    const c = map.cost(path[i].q, path[i].r);
+    const c = roadedCost(map, path[i].q, path[i].r, roadedTiles);
     cost += Number.isFinite(c) ? c : Infinity;
   }
   return Number.isFinite(cost) ? cost : 0;

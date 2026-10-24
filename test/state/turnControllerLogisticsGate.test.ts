@@ -28,6 +28,8 @@ function buildHooks(): TurnControllerHooks {
     onUpgradeSettlement: noop,
     onAdvanceCharterTravel: noop,
     onPlaceBuildings: noop,
+    onDemolishBuilding: noop,
+    onStartWorkerTransit: noop,
     onTransferResources: noop,
     onAssignWagons: noop,
     onBuyWagons: noop,

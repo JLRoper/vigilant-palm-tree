@@ -61,6 +61,15 @@ export const UNIT_CATALOG_IDS = [
   "wildwood_ranger",
   "druid",
   "ursine_guardian",
+  // Construction Worker, one per faction (034_construction_workers.sql,
+  // faction-construction plan section 3): non-combat, recruited from the
+  // faction's starter troop building (farmhouse/crypt/delversHall/
+  // seedlingGrove), not part of that faction's 12-unit combat roster count
+  // but still a real unit_types row and FACTION_REGISTRY.roster member.
+  "construction_worker_human",
+  "construction_worker_ashen",
+  "construction_worker_ironmark",
+  "construction_worker_verdant",
 ] as const;
 
 export type UnitCatalogId = (typeof UNIT_CATALOG_IDS)[number];

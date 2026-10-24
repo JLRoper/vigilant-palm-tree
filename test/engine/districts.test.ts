@@ -316,8 +316,17 @@ test("applyPlaceBuildings in district mode: allows (2,2), forbids townHall, vali
   assert.equal(overlap2x2.ok, false);
   assert.equal(overlap2x2.reason, "invalid_district_placement");
 
-  // Removing all buildings from a district deletes districts["q,r"] and omits settlement.districts
-  const cleared = applyPlaceBuildings(placeCenter.state, "s0", 0, [], false, target);
+  // Removing all buildings from a district deletes districts["q,r"] and omits settlement.districts.
+  // A fresh commit, not a continuation of placeCenter's turn -- clear the
+  // per-turn construction cap (section 5) so it does not mask this check.
+  const clearedTurnState = {
+    ...placeCenter.state,
+    settlements: {
+      ...placeCenter.state.settlements,
+      s0: { ...placeCenter.state.settlements.s0, constructionActionUsedThisTurn: undefined },
+    },
+  };
+  const cleared = applyPlaceBuildings(clearedTurnState, "s0", 0, [], false, target);
   assert.equal(cleared.ok, true);
   const updatedSettlement = cleared.state.settlements.s0;
   assert.equal(updatedSettlement.districts, undefined);
@@ -753,12 +762,18 @@ test("handleCommand: PlaceBuildings, BankGold, UpgradeBuilding, and RecruitUnits
   }
   assert.equal(found, true, "found passable center and adjacent hex on small map");
 
-  const s0 = makeSettlement("s0", 0, centerQ, centerR, {
-    level: 1,
-    gold: 5000,
-    warehouse: emptyWarehouse({ wood: 100, stone: 100, iron: 50, arcane: 50 }),
-    buildings: [makeBuilding("townHall", 2, 2, 1)],
-  });
+  const s0: SettlementState = {
+    ...makeSettlement("s0", 0, centerQ, centerR, {
+      level: 1,
+      gold: 5000,
+      warehouse: emptyWarehouse({ wood: 100, stone: 100, iron: 50, arcane: 50 }),
+      buildings: [makeBuilding("townHall", 2, 2, 1)],
+    }),
+    // A human Construction Worker, standing in from turn 0 the way
+    // init.ts's seedStarterBuildings seeds one for real games -- the
+    // district farmhouse placed below needs one present (section 4).
+    stacks: [{ entries: [{ unitTypeId: "construction_worker_human", count: 1 }] }],
+  };
   const h0 = makeHero("h0", 0, centerQ, centerR);
   const row = {
     name: "test-districts",

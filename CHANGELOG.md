@@ -10,6 +10,18 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.34.0] - 2026-10-24
+
+Faction-construction plan: fixes the PR #252 "neutral"-seat starter-layout bug, replaces seat-faction recruiting with building-ownership-only gating, and adds Construction Workers, demolition, and an occupation morale penalty.
+
+- fix(factions): normalize "neutral" to "human" before any faction-tag check, and reject "neutral" as an assignable seat faction server-side — closes the bug where a neutral-faction seat's free starter-layout commit rejected itself forever
+- feat(factions): delete the seat-faction `RecruitUnits` gate — a seat now recruits whatever its owned buildings (built or captured, any faction) currently offer, so a captured foreign building is finally worth capturing
+- feat(buildings): add the Construction Worker, one non-combat unit per playable faction (650g, zero upkeep by design), recruited from each faction's starter troop building
+- feat(buildings): placing a NEW faction-tagged building now requires that faction's Construction Worker present in the settlement's garrison, replacing the old seat-vs-building-tag check; every owned settlement seeds one worker from turn 1
+- feat(settlements): add the `DemolishBuilding` command (remove one owned building, no refund) and a shared per-settlement per-turn construction cap with `PlaceBuildings`
+- feat(economy): add an occupation morale penalty, read fresh at income time from the current building-faction tally, separate from the stored/recovering `morale` field
+- feat(logistics): engine support for a lone Construction Worker transit (`StartWorkerTransit` command) and an optional road-building side action that discounts future movement cost on paved tiles — server/persistence wired end to end; the player-facing map UI (select a worker, pick a destination, toggle road-building) is a follow-up
+
 ## [0.32.0] - 2026-10-22
 
 Give every faction twelve units, faction troop buildings and starter recruitment; enforce faction building placement.

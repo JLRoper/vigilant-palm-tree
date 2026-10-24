@@ -8,6 +8,7 @@ import type {
   TradeRouteState,
   Warehouse,
   WarehouseResource,
+  WorkerTransitState,
 } from "@heroes/contracts";
 import { toNumericColumn } from "../integerColumns";
 
@@ -68,6 +69,9 @@ export interface GameRow {
   next_charter_id: number;
   next_settlement_id: number;
   trade_routes: TradeRouteState[] | null;
+  worker_transits: WorkerTransitState[];
+  next_worker_transit_id: number;
+  roaded_tiles: string[];
   // TIMESTAMPTZ columns - node-postgres returns these as Date, not string.
   created_at: Date;
   updated_at: Date;
@@ -86,7 +90,7 @@ export class GameNotFoundError extends Error {
 // omitted trade_routes/next_charter_id/next_settlement_id, so every GET
 // returned games without them and the client hydrated tradeRoutes: [].
 export const GAME_COLUMNS =
-  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, next_charter_id, next_settlement_id, trade_routes, created_at, updated_at";
+  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, next_charter_id, next_settlement_id, trade_routes, worker_transits, next_worker_transit_id, roaded_tiles, created_at, updated_at";
 
 export interface SaveHeroesAndSettlementsExtra {
   players?: Player[];
@@ -108,6 +112,12 @@ export interface SaveHeroesAndSettlementsExtra {
   // that touches routes must pass the full array here or the next writer
   // clobbers it with the previous value.
   trade_routes?: TradeRouteState[];
+  // Worker transits + paved roads (faction-construction plan, sections
+  // 6/7): same "always read/written whole per game" contract as
+  // trade_routes above.
+  worker_transits?: WorkerTransitState[];
+  next_worker_transit_id?: number;
+  roaded_tiles?: string[];
 }
 
 // One row per settlement snapshot, matching the columns the now-dead
@@ -215,6 +225,18 @@ export function createGameRepo(db: Queryable): GameRepo {
       if (extra?.trade_routes !== undefined) {
         sets.push(`trade_routes = $${i++}::jsonb`);
         vals.push(JSON.stringify(extra.trade_routes));
+      }
+      if (extra?.worker_transits !== undefined) {
+        sets.push(`worker_transits = $${i++}::jsonb`);
+        vals.push(JSON.stringify(extra.worker_transits));
+      }
+      if (extra?.next_worker_transit_id !== undefined) {
+        sets.push(`next_worker_transit_id = $${i++}`);
+        vals.push(extra.next_worker_transit_id);
+      }
+      if (extra?.roaded_tiles !== undefined) {
+        sets.push(`roaded_tiles = $${i++}::jsonb`);
+        vals.push(JSON.stringify(extra.roaded_tiles));
       }
       sets.push("updated_at = now()");
       vals.push(name);

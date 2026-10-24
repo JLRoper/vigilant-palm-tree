@@ -12,13 +12,20 @@ test("every declared EngineEvent variant is classified exactly once", () => {
   // garrison grid's drag-and-drop swaps two of a settlement's stack slots.
   // 27 -> 28 (2026-10-23): HeroesTraded added -- two adjacent heroes of one
   // seat swap gold/cargo/platoons in a single TradeHeroes command.
-  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 28);
+  // 28 -> 29 (faction-construction plan, section 5): BuildingDemolished
+  // added -- the new DemolishBuilding command's own event, classified
+  // "ignore" like its BuildingsPlaced sibling (minimal payload, resync
+  // boundary carries the resulting buildings array).
+  // 29 -> 30 (faction-construction plan, section 6): WorkerTransitStarted
+  // added -- the new StartWorkerTransit command's own event, same "ignore"
+  // classification (the full transit rides the resync boundary).
+  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 30);
 });
 
-test("classification counts: 14 apply, 7 resync, 7 ignore", () => {
+test("classification counts: 14 apply, 7 resync, 9 ignore", () => {
   const counts = { apply: 0, resync: 0, ignore: 0 };
   for (const cls of Object.values(ENGINE_EVENT_SYNC_CLASS)) counts[cls] += 1;
-  assert.deepEqual(counts, { apply: 14, resync: 7, ignore: 7 });
+  assert.deepEqual(counts, { apply: 14, resync: 7, ignore: 9 });
 });
 
 test("class agrees with the reducer: GarrisonReordered swaps two garrison slots", () => {

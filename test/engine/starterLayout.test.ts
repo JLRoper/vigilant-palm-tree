@@ -531,7 +531,7 @@ test("the starter city can recruit garrison troops from turn 0", () => {
   assert.ok(gx !== undefined && gy !== undefined, "the starter set carries the troop building");
 
   const sources = eligibleRecruitSources(state.settlements.s0);
-  assert.equal(sources.length, 1, "the farmhouse is the starter set's only recruit source");
+  assert.equal(sources.length, 2, "the farmhouse is the starter set's only recruit source, offering its starter levy and its own faction's Construction Worker");
   assert.equal(sources[0].buildingKind, "farmhouse");
   assert.equal(sources[0].gx, gx);
   assert.equal(sources[0].gy, gy);
