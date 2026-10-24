@@ -28,7 +28,9 @@ import { foodRequiredForPopulation } from "./economy/consumption";
 import { DEFAULT_HERO_ARCANE, DEFAULT_HERO_INTELLIGENCE } from "./combatConfig";
 import { DEFAULT_HERO_SPELL, maxManaFor } from "./combat/spells";
 import { DEFAULT_HERO_WAGONS, DEFAULT_TREASURY_WAGONS } from "./settlement/capacity";
-import { demoPlatoonsForPlayer, normalizePlatoons, platoonTroopTotal, type UnitType } from "./units";
+import { demoPlatoonsForPlayer, normalizePlatoons, platoonTroopTotal, settlementStacks, type UnitType } from "./units";
+import { constructionWorkerUnitId, normalizeFactionId } from "./buildingRegistry";
+import { depositIntoGarrison } from "./settlement/recruitUnits";
 import { MAX_PLAYERS, PLAYER_COLORS } from "./playerColors";
 import { cityViewSizeFor, foodBiasForTerrain, generateCitySpots } from "./settlement/citySpots";
 import { seedStartupDistricts } from "./settlement/districtSeed";
@@ -485,14 +487,36 @@ function seedStarterBuildings(
     const bill =
       foodRequiredForPopulation(s.population) +
       (heroStacksForOwner ? heroFoodPerTurn(heroStacksForOwner, unitTypes) : 0);
+    const factionId = s.ownerId === null ? undefined : seatFactions?.[s.ownerId];
+    // Starter Construction Worker (faction-construction plan, section 4):
+    // every OWNED settlement a brand-new game creates gets one worker of
+    // its own founding faction standing in its garrison from turn 1 --
+    // otherwise no new game could ever place a SECOND faction building
+    // anywhere (buildingConstructionGate requires one to be present
+    // already). Scoped to owned settlements only (s.ownerId !== null):
+    // a neutral settlement has no seat trying to build anything until it
+    // is captured, and seeding a unit into its garrison would turn every
+    // undefended neutral settlement's walk-in capture into a forced
+    // battle -- a cross-cutting change to early-game expansion this
+    // feature never intended (test/server/unchartedReveal.test.ts's own
+    // "garrison_not_defeated" pin on a neutral walk-in capture is what
+    // caught this). This also matches the spec's own note on capture: a
+    // settlement's new owner starts with ZERO of their own faction's
+    // workers present and must transport one in -- true of a CAPTURED
+    // neutral settlement exactly as it is of a captured enemy one.
+    const workerFactionId = s.ownerId === null ? null : normalizeFactionId(factionId) ?? "human";
     return {
       ...s,
       buildings: buildStarterLayout({
         size: cityViewSizeFor(s.level),
         style: "pixel" as GenerationStyle,
         farms: starterFarmsNeeded(bill),
-        factionId: s.ownerId === null ? undefined : seatFactions?.[s.ownerId],
+        factionId,
       }),
+      stacks:
+        workerFactionId === null
+          ? s.stacks
+          : depositIntoGarrison(settlementStacks(s), constructionWorkerUnitId(workerFactionId), 1).stacks,
     };
   });
 }

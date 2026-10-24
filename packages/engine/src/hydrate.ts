@@ -10,6 +10,7 @@ import type {
   TradeRoutePayload,
   TradeRouteState,
   WarehouseResource,
+  WorkerTransitState,
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import { defaultPopulation, SETTLEMENT_GOLD_TAX } from "./economy/settlementRates";
@@ -90,6 +91,16 @@ export interface HydratableGameRow {
    * generation at read time.
    */
   trade_routes?: readonly unknown[] | null;
+  /**
+   * games.worker_transits / games.roaded_tiles JSONB (faction-construction
+   * plan, section 6/7, server/migrations/035_worker_transits.sql). Unlike
+   * trade_routes, there is no legacy pre-endpoint shape to normalize --
+   * this field only ever existed in the current WorkerTransitState shape,
+   * so it is read as-is.
+   */
+  worker_transits?: readonly WorkerTransitState[] | null;
+  next_worker_transit_id?: number;
+  roaded_tiles?: readonly string[] | null;
   /**
    * games.lobby.pendingBattle (a server-offered battle awaiting its human
    * defender, stamped by the server's EnterBattle handling). The BATTLE
@@ -247,6 +258,13 @@ function backfillSettlement(s: Partial<SettlementState> & { id: string; q: numbe
     // assembly. Absent stays absent -- readers go through settlementStacks(),
     // which treats undefined as 8 empty platoons.
     ...(s.stacks !== undefined ? { stacks: normalizePlatoons(s.stacks) } : {}),
+    // Per-turn construction cap passthrough (faction-construction plan,
+    // section 5): absent/false reads as "not yet used this turn" via
+    // applyPlaceBuildings/applyDemolishBuilding's own `s.constructionActionUsedThisTurn`
+    // check, so there is nothing to default here -- only forward it when present.
+    ...(s.constructionActionUsedThisTurn !== undefined
+      ? { constructionActionUsedThisTurn: s.constructionActionUsedThisTurn }
+      : {}),
   };
 }
 
@@ -476,5 +494,8 @@ export function hydrateGameState(
     // (a completed charter's settlement is already counted in both), so
     // this never diverges from a plain read in the steady state.
     nextSettlementId: Math.max(row.next_settlement_id ?? 0, settlementCount),
+    workerTransits: [...(row.worker_transits ?? [])],
+    nextWorkerTransitId: Math.max(row.next_worker_transit_id ?? 0, (row.worker_transits ?? []).length),
+    roadedTiles: [...(row.roaded_tiles ?? [])],
   };
 }

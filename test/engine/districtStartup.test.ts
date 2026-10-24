@@ -357,17 +357,25 @@ test("applyPlaceBuildings: a floating district is refused, and stranding an exis
   // (3, 2) touches the settlement itself -> allowed.
   const touching = applyPlaceBuildings(state, "s0", 0, [makeBuilding("house", 1, 1)], false, { q: 3, r: 2, citySpots: spots });
   assert.equal(touching.ok, true);
+  // Each scenario below is its own independent commit, not a sequence
+  // within one turn -- clear the per-turn construction cap (section 5)
+  // between them so it does not mask the district-connectivity checks
+  // this test is actually pinning.
+  const freshTurn = (s: typeof touching.state) => ({
+    ...s,
+    settlements: { ...s.settlements, s0: { ...s.settlements.s0, constructionActionUsedThisTurn: undefined } },
+  });
 
   // Clearing the water district's shipyard would cut (4, 3) off -> refused.
-  const stranded = applyPlaceBuildings(touching.state, "s0", 0, [], false, { q: 3, r: 3 });
+  const stranded = applyPlaceBuildings(freshTurn(touching.state), "s0", 0, [], false, { q: 3, r: 3 });
   assert.equal(stranded.ok, false);
   assert.equal(stranded.reason, "district_not_connected");
 
   // ...but replacing it with nothing while ALSO clearing the far district is
   // fine: nothing is left floating.
-  const both = applyPlaceBuildings(touching.state, "s0", 0, [], false, { q: 4, r: 3 });
+  const both = applyPlaceBuildings(freshTurn(touching.state), "s0", 0, [], false, { q: 4, r: 3 });
   assert.equal(both.ok, true);
-  const cleared = applyPlaceBuildings(both.state, "s0", 0, [], false, { q: 3, r: 3 });
+  const cleared = applyPlaceBuildings(freshTurn(both.state), "s0", 0, [], false, { q: 3, r: 3 });
   assert.equal(cleared.ok, true, "removing a bridge is fine once the far side is gone");
 });
 

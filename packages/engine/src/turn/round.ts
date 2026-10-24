@@ -1,4 +1,4 @@
-import type { GameState, HeroId, HeroState } from "@heroes/contracts";
+import type { GameState, HeroId, HeroState, SettlementId, SettlementState } from "@heroes/contracts";
 import type { UnitType } from "../units";
 import { resetHeroMovement } from "../hero/move";
 import { applySuppliedHeroUpkeep } from "../hero/upkeep";
@@ -9,6 +9,7 @@ import { advanceSettlementUpgrades, advanceBuildingConstructions } from "../sett
 import { applyDraftRecharge } from "../settlement/draftRecharge";
 import { upgradeAccelEffort } from "../settlement/workforce";
 import { advanceTradeRoutes } from "../logistics";
+import { advanceWorkerTransits } from "../settlement/workerTransit";
 import { applyCaravanUpkeep } from "../economy/caravanUpkeep";
 import { accrueBankInterest, matureBankWithdrawals } from "../economy/bank";
 import type { GameMap } from "../map/gameMap";
@@ -64,6 +65,24 @@ export function applyWeeklyUpkeep(
   return { ...withBankInterest, dirty: true };
 }
 
+// Per-turn construction cap reset (section 5): a new day clears every
+// settlement's constructionActionUsedThisTurn flag, same per-day reset
+// cadence as advanceBuildingConstructions/applyDraftRecharge above. No-op
+// (identity, no new object) when nothing is set, matching this file's other
+// resets' "only touch state that changed" convention.
+function resetConstructionActionCap(state: GameState): GameState {
+  let changed = false;
+  const settlements: Record<SettlementId, SettlementState> = { ...state.settlements };
+  for (const s of Object.values(state.settlements)) {
+    if (!s.constructionActionUsedThisTurn) continue;
+    const { constructionActionUsedThisTurn: _drop, ...rest } = s;
+    settlements[s.id] = rest;
+    changed = true;
+  }
+  if (!changed) return state;
+  return { ...state, settlements, dirty: true };
+}
+
 export function advanceRound(
   state: GameState,
   growthRate: number,
@@ -87,6 +106,7 @@ export function advanceRound(
   withDay = advanceCharters(withDay);
   withDay = advanceSettlementUpgrades(withDay, { accel: upgradeAccelEffort });
   withDay = advanceBuildingConstructions(withDay);
+  withDay = resetConstructionActionCap(withDay);
   const rechargedSettlements = applyDraftRecharge(withDay.settlements, unitTypes);
   if (rechargedSettlements !== withDay.settlements) {
     withDay = { ...withDay, settlements: rechargedSettlements, dirty: true };
@@ -94,6 +114,11 @@ export function advanceRound(
   // Caravans need the (deterministically rebuilt) map for A*; without one
   // they simply wait at their current stop (docs plan §5.2).
   withDay = advanceTradeRoutes(withDay, map);
+  // Worker transits (faction-construction plan, section 6): lone
+  // Construction Worker walks, map-independent (advanceWorkerTransit only
+  // consumes a precomputed path), so unlike caravans it does not wait for
+  // a map object.
+  withDay = advanceWorkerTransits(withDay);
   // Bank withdrawal maturity is a COUNTDOWN, so it runs every day, not on the
   // weekly branch: a 7-day request must land on its own day. state.day has
   // already been incremented above (nextDay), which is deliberate --

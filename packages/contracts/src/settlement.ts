@@ -75,4 +75,17 @@ export interface SettlementState {
   // Garrison platoons defending this settlement. Optional + helper-accessed
   // so legacy saves and old JSONB rows stay valid (HeroState.stacks precedent).
   stacks?: Platoon[];
+  // ── Per-turn construction cap (faction-construction plan, section 5) ──
+  // Set true by whichever of PlaceBuildings/DemolishBuilding commits FIRST
+  // in a turn for this settlement; the other is refused until the next
+  // turn. Reset every day in turn/round.ts's advanceRound, alongside the
+  // other per-day resets. Optional so legacy saves stay valid (absent =
+  // not yet used this turn). This is the "cap concurrent construction per
+  // settlement" option named in the faction-construction plan's spec as an
+  // open question from a "docs/income-rebalancing-plan.md" -- that file
+  // does not actually exist in this repository (checked at implementation
+  // time); flagged in the PR description rather than fabricating one. This
+  // field and its two call sites (placeBuildings.ts, demolishBuilding.ts)
+  // are the authoritative record of the decision.
+  constructionActionUsedThisTurn?: boolean;
 }
