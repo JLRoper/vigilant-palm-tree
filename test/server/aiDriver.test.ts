@@ -2575,3 +2575,34 @@ test("default watchdog SQL: a stale-beat foreign row is adopted via the real CAS
     await cleanupRow(stale);
   }
 });
+
+test("the driver plans on the saved mapGenVersion's terrain, not the current generator's", async () => {
+  const legacy = 1;
+  const probe = (() => {
+    for (let seed = 1; seed < 2000; seed++) {
+      const v1 = new GameMap(seed, MAP_SIZE, legacy);
+      const cur = new GameMap(seed, MAP_SIZE);
+      for (let r = 0; r < v1.height; r++) {
+        for (let q = 0; q < v1.width; q++) {
+          if (!v1.isPassable(q, r) || !cur.isPassable(q, r) || v1.resourceTileAt(q, r) || cur.resourceTileAt(q, r)) continue;
+          const open = HEX_DIRECTIONS.map((d) => ({ q: q + d.q, r: r + d.r })).filter((n) => v1.isPassable(n.q, n.r));
+          if (open.length > 0 && open.every((n) => !cur.isPassable(n.q, n.r))) return { seed, q, r, open };
+        }
+      }
+    }
+    return null;
+  })();
+  assert.ok(probe, "a seed whose v1 and current maps disagree around a tile exists");
+  const world = aiTurnWorld(
+    [makeHero("h1", 1, probe.q, probe.r, { movementRemaining: 1, troops: 5, stacks: troopStacks("swordsman", 5) })],
+    { seed: probe.seed },
+  );
+  world.mapGenVersion = legacy;
+  const harness = installHarness(world);
+
+  await scanOnce();
+
+  const moves = commandsOfKind(harness.commands, "MoveHero");
+  assert.ok(moves.length > 0, "the hero moves onto terrain that exists only in the saved (v1) map");
+  assert.ok(moves.every((m) => probe.open.some((n) => n.q === m.toTile.q && n.r === m.toTile.r)));
+});
