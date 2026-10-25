@@ -2456,11 +2456,20 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         row.map_size as MapSize | undefined,
         resolveSavedMapGenVersion(row.lobby?.mapGenVersion),
       );
+      // FOUNDING IS IN PLACE: the mode has no tile-selection step, so a command
+      // that carries no hex founds on the hex the founder stands on -- derived
+      // HERE, from the founder's own row, rather than asked of the client. An
+      // explicit hex is still honoured (the AI driver sends the one its brain
+      // chose; a replay sends what was recorded), and the engine refuses any
+      // hex the founder is not standing on, so accepting one cannot widen the
+      // rule.
+      const q = command.q ?? founder.q;
+      const r = command.r ?? founder.r;
       const result = foundSettlement({
         state,
         founderId: command.founderId,
-        q: command.q,
-        r: command.r,
+        q,
+        r,
         map,
       });
       if (!result.ok) {
@@ -2496,8 +2505,8 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         founderId: command.founderId,
         settlementId: result.settlementId,
         name: founded.name,
-        q: command.q,
-        r: command.r,
+        q,
+        r,
         consumedFounder: result.consumedFounder,
       };
       const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
