@@ -29,6 +29,17 @@ export {
   stepTravelCharter,
 } from "@heroes/engine";
 
+// The settlers mode's founding rule (SETTLERS-PLAN.md §2/§4 W2), re-exported
+// beside startCharter: TurnController.foundSettlement runs the same engine
+// reducer the server's commandHandler case runs, so the local apply and the
+// authoritative one cannot disagree about what a founding does.
+export {
+  canFoundSettlement,
+  foundSettlement,
+  FOUND_SETTLEMENT_REFUSALS,
+  type FoundSettlementRefusal,
+} from "@heroes/engine";
+
 export {
   recruitUnits,
   transferUnits,

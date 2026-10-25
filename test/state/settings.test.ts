@@ -7,11 +7,15 @@ import {
   clampArenaMoveMsPerHex,
   clampCityBackdrop,
   clampEnemyMoveDurationMs,
+  clampGameMode,
   enemyMoveDurationBounds,
+  gameModeOptions,
+  readStoredSettings,
   settings,
   subscribeSettings,
   updateSettings,
 } from "../../src/state/settings";
+import { DEFAULT_GAME_MODE, SETTLERS_MODE_DEFAULTS, gameModeSettings } from "@heroes/contracts";
 import {
   clampToolbarStyle,
   DEFAULT_TOOLBAR_STYLE,
@@ -164,4 +168,119 @@ test("updateSettings clamps an out-of-range enemyMoveDurationMs patch", () => {
   } finally {
     updateSettings({ enemyMoveDurationMs: 220, moveDurationMs: 220 });
   }
+});
+
+// ── New-game default mode (SETTLERS-PLAN.md §1/§4 W4) ──
+//
+// The store's gameMode key is the mode the New Game form pre-selects. It is a
+// PREFERENCE, not any game's mode: a game's own mode lives in games.lobby and
+// this key never rewrites it. The schema bump (v2 -> v3) is what makes a store
+// written before the key existed follow along exactly once.
+
+const STORE_KEY = "heroesJs.settings";
+
+function installFakeStorage(initial?: Record<string, string>): {
+  stored: Map<string, string>;
+  restore: () => void;
+} {
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const stored = new Map<string, string>(Object.entries(initial ?? {}));
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+    },
+  });
+  return {
+    stored,
+    restore: () => {
+      if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage);
+      else Reflect.deleteProperty(globalThis, "localStorage");
+    },
+  };
+}
+
+test("the stored new-game mode defaults to classic and unknown values normalize to it", () => {
+  assert.equal(DEFAULT_SETTINGS.gameMode, "classic");
+  assert.equal(DEFAULT_GAME_MODE, "classic");
+  assert.equal(clampGameMode("settlers"), "settlers");
+  assert.equal(clampGameMode("classic"), "classic");
+  assert.equal(clampGameMode("sandbox"), "classic");
+  assert.equal(clampGameMode(null), "classic");
+  assert.equal(clampGameMode(7), "classic");
+  assert.deepEqual(
+    gameModeOptions().map((o) => o.value),
+    ["classic", "settlers"],
+    "both new-game surfaces offer exactly the two modes",
+  );
+});
+
+test("updateSettings round-trips the mode and writes the bumped schema version", () => {
+  const { stored, restore } = installFakeStorage();
+  try {
+    updateSettings({ gameMode: "settlers" });
+    assert.equal(settings().gameMode, "settlers");
+    updateSettings({ gameMode: "not-a-mode" as never });
+    assert.equal(settings().gameMode, "classic", "junk falls back to the default mode");
+    updateSettings({ gameMode: "settlers" });
+    const persisted = JSON.parse(stored.get(STORE_KEY) ?? "{}");
+    assert.equal(persisted.gameMode, "settlers");
+    assert.equal(persisted.schemaVersion, 3);
+  } finally {
+    updateSettings({ gameMode: DEFAULT_GAME_MODE });
+    restore();
+  }
+});
+
+test("a store written before the mode key existed follows along exactly once", () => {
+  // A v2 store: at v2 the key's meaning did not exist yet, so even a
+  // hand-written value is not a choice -- it follows along to the default.
+  const migrated = readStoredSettings(
+    JSON.stringify({
+      schemaVersion: 2,
+      resourceStyle: "iso-bubbly",
+      toolbarStyle: "modern",
+      gameMode: "settlers",
+    }),
+  );
+  assert.equal(
+    migrated.gameMode,
+    DEFAULT_GAME_MODE,
+    "the v2 -> v3 migration lands the default mode",
+  );
+  assert.equal(migrated.resourceStyle, "iso-bubbly", "the other stored keys are untouched");
+
+  // The same blob at v3 IS a choice: the migration must not run again, which
+  // is what "exactly once" means.
+  assert.equal(
+    readStoredSettings(JSON.stringify({ schemaVersion: 3, gameMode: "settlers" })).gameMode,
+    "settlers",
+  );
+
+  // And a blob the store itself writes is v3, so a reload keeps the pick.
+  const { stored, restore } = installFakeStorage();
+  try {
+    updateSettings({ gameMode: "settlers" });
+    const written = stored.get(STORE_KEY) ?? "";
+    assert.equal(JSON.parse(written).schemaVersion, 3);
+    assert.equal(readStoredSettings(written).gameMode, "settlers");
+  } finally {
+    updateSettings({ gameMode: DEFAULT_GAME_MODE });
+    restore();
+  }
+});
+
+test("the mode's settings keys come from the contracts constants, not a second literal", () => {
+  assert.equal(gameModeSettings("settlers"), SETTLERS_MODE_DEFAULTS);
+  assert.equal(gameModeSettings("classic").wagonConsumedOnFounding, false);
+  assert.equal(gameModeSettings(undefined), gameModeSettings("classic"));
+  assert.equal(gameModeSettings("sandbox"), gameModeSettings("classic"));
+  assert.deepEqual(SETTLERS_MODE_DEFAULTS.wagonSupplies, {
+    wood: 200,
+    stone: 100,
+    iron: 50,
+    arcane: 0,
+    food: 50,
+  });
 });

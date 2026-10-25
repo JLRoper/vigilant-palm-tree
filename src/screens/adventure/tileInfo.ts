@@ -8,7 +8,8 @@ import type { Hero } from "../../entities/hero";
 import type { Castle } from "../../entities/settlement";
 import type { GameState, PlayerId } from "../../state/gameState";
 import type { CharterPhase } from "@heroes/contracts";
-import { districtKey, isDistrictBlockedByHero, resolveControllingSettlement, settlementRateRadius, platoonTroopTotal } from "@heroes/engine";
+import { isCoveredWagonId, resolveGameMode } from "@heroes/contracts";
+import { canFoundSettlement, districtKey, isDistrictBlockedByHero, resolveControllingSettlement, settlementRateRadius, platoonTroopTotal, type FoundSettlementRefusal } from "@heroes/engine";
 import { colorForOwner } from "../../state/playerColors";
 import { isTileVisibleTo } from "../../render/fog";
 import { districtVariantForBuildings } from "../../render/scene/sceneBuilder/adventureScene";
@@ -55,6 +56,19 @@ export interface TileInfo {
   }>;
   charter: { name: string; phase: CharterPhase; daysRemaining: number } | null;
   territory: { settlementName: string; ownerName: string } | null;
+  /**
+   * The settlers mode's founding read for this tile (SETTLERS-PLAN.md §4 W4):
+   * the viewing seat's own covered wagon standing here, if any, and what the
+   * engine's own rule answers about planting on this hex. Absent in a classic
+   * game, where founding is the charter flow's business -- so the panel says
+   * nothing new to a classic player.
+   */
+  founding?: {
+    wagonName: string;
+    canFound: boolean;
+    /** The engine's refusal code when `canFound` is false -- the same vocabulary the server relays. */
+    refusal: FoundSettlementRefusal | null;
+  } | null;
 }
 
 function terrainLabel(kind: Terrain): string {
@@ -177,6 +191,41 @@ function describeDistrict(
   return null;
 }
 
+/**
+ * The settlers-mode founding read for a tile (SETTLERS-PLAN.md §4 W4). Only
+ * ever answers for the VIEWER's own wagon standing here: an enemy wagon is not
+ * the player's to found with, and a classic game has no wagons at all
+ * (`resolveGameMode(state.gameMode)` gates the whole thing, so a classic panel
+ * is byte-identical to before).
+ *
+ * The verdict is the ENGINE's (`canFoundSettlement`) with the same map the
+ * command handler will build, so the panel cannot promise a hex the command
+ * refuses -- and the refusal code it returns is the one the server relays, so
+ * the sentence the player reads comes from the same vocabulary.
+ */
+function describeFounding(
+  state: GameState,
+  map: GameMap,
+  q: number,
+  r: number,
+  fogged: boolean,
+  viewPlayerId: PlayerId,
+): TileInfo["founding"] {
+  if (resolveGameMode(state.gameMode) !== "settlers") return undefined;
+  if (fogged) return null;
+  for (const hero of Object.values(state.heroes)) {
+    if (hero.ownerId !== viewPlayerId) continue;
+    if (!isCoveredWagonId(hero.id)) continue;
+    const tile = (hero as unknown as { tile?: Axial }).tile;
+    const hq = tile?.q ?? hero.q;
+    const hr = tile?.r ?? hero.r;
+    if (hq !== q || hr !== r) continue;
+    const check = canFoundSettlement({ state, founderId: hero.id, q, r, map });
+    return { wagonName: hero.name, canFound: check.ok, refusal: check.ok ? null : check.reason };
+  }
+  return null;
+}
+
 function describeTerritory(
   state: GameState,
   castles: readonly Castle[],
@@ -212,6 +261,10 @@ export function describeTile(input: {
 
   const fogged = !isTileVisibleTo(heroes, castles, viewPlayerId, tile.q, tile.r);
   const river = map.riverAt(tile.q, tile.r);
+  // Classically absent rather than present-and-undefined: a classic TileInfo
+  // keeps exactly its previous keys, which is what every existing panel test
+  // and every stored signature depends on.
+  const founding = describeFounding(state, map, tile.q, tile.r, fogged, viewPlayerId);
 
   return {
     q: tile.q,
@@ -243,6 +296,7 @@ export function describeTile(input: {
     district: describeDistrict(state, castles, heroes, tile.q, tile.r, fogged, viewPlayerId),
     heroes: describeHeroes(state, heroes, tile.q, tile.r, fogged, viewPlayerId),
     charter: describeCharter(state, tile.q, tile.r, fogged),
+    ...(founding !== undefined ? { founding } : {}),
     territory: describeTerritory(state, castles, tile.q, tile.r, fogged, viewPlayerId, map.width, map.height),
   };
 }

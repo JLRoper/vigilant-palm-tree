@@ -40,9 +40,16 @@ import type { GameDebugApi } from "../src/io/debugCommands";
 // Every assertion reads server state (the games row, the charters table, the
 // game_events log), because the browser is closed by design.
 //
-// Seed 777 puts the AI hero's best charter target 6 hexes / 9.2 movement away,
-// so travel needs two AI turns -- enough to prove multi-turn advancement
-// instead of a single-turn hop.
+// Seed 7 puts the AI hero's best charter target 7 hexes / 12 movement away, so
+// travel needs two AI turns -- enough to prove multi-turn advancement instead
+// of a single-turn hop. The fixture's original seed 777 no longer does: the
+// brain's own choice for it is now 4 hexes / 4 movement away (reachable inside
+// one turn's 7), so the "travel costs two turns" assertion at the end of
+// section B failed there. That is a stale premise, not a rule change -- the
+// same probe of `pickCharterAction` prints hero 16,8 -> target 16,4 / cost 4
+// both at github/main 9506422 and at this branch. The replacement was picked
+// from a sweep of seeds 1..400 by the brain's own target choice, keeping the
+// travel cost above MOVEMENT_PER_TURN.
 
 // Env-first ports: the prescribed direct command loads .env (fresh after
 // allocate-ports); tools/run-test.mjs additionally exports API_PORT/CLIENT_PORT
@@ -54,7 +61,7 @@ const API_PORT = Number(process.env.API_PORT) || getApiPort(3001);
 const WEB_PORT = Number(process.env.CLIENT_PORT) || getClientPort(5173);
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
-const GAME_SEED = 777;
+const GAME_SEED = 7;
 const HUMAN_SEAT = 0;
 const AI_SEAT = 1;
 const AI_HERO_ID = "p1-hero";

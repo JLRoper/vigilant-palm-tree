@@ -1043,8 +1043,9 @@ export function paintHero(ctx: CanvasRenderingContext2D, node: HeroNode, deps: P
   }
   const variant = node.horseVariant;
   // The walk-cycle vertical squash applies to the on-foot hero sprite only --
-  // drawHorseSprite() never took a scaleY. Mounted heroes bob but don't squash.
-  const needsScale = variant === "hero" && Math.abs(node.scaleY - 1.0) > 1e-6;
+  // drawHorseSprite() never took a scaleY. Mounted heroes bob but don't squash,
+  // and neither does a wagon: it is not a person on foot.
+  const needsScale = !node.wagon && variant === "hero" && Math.abs(node.scaleY - 1.0) > 1e-6;
   if (needsScale) {
     const anchorY = node.world.y + HEX_SIZE * 0.5;
     ctx.save();
@@ -1052,7 +1053,16 @@ export function paintHero(ctx: CanvasRenderingContext2D, node: HeroNode, deps: P
     ctx.scale(1, node.scaleY);
     ctx.translate(-node.world.x, -anchorY);
   }
-  const r = deps.sprite.resolveSpriteForHero(node.faction, node.facingDirection, variant, node.runFrame);
+  // A covered wagon (settlers mode) is a hero-shaped entity that is NOT a
+  // horse, so it draws the map's existing wagon art -- the trade-route caravan
+  // family a player already reads as "a wagon" on this map -- resolved per
+  // heading exactly as a caravan marker is (SETTLERS-PLAN.md §4 W4: the wagon
+  // renders as a wagon rather than the generic hero variant). Reusing that
+  // family is deliberate: a second wagon asset would be a parallel source of
+  // the same object.
+  const r = node.wagon
+    ? deps.sprite.resolveSpriteForCaravan?.("resource", node.facingDirection)
+    : deps.sprite.resolveSpriteForHero(node.faction, node.facingDirection, variant, node.runFrame);
   if (r && r.ready) {
     drawWithDescriptor(ctx, r.drawable, r.descriptor, node.world.x, node.world.y, HEX_SIZE);
   }

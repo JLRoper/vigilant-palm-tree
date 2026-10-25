@@ -7,6 +7,7 @@ import { GameMap, type TileRow } from "../../../src/map/gameMap";
 import { RESOURCE_YIELD } from "../../../src/map/resourceTiles";
 import { describeTile } from "../../../src/screens/adventure/tileInfo";
 import { computeVision, isTileVisibleTo, isVisible } from "../../../src/render/fog";
+import { makeHero } from "../../charter/_helpers";
 
 function makeGrassMap(width: number, height: number, resources: Array<{ q: number; r: number; resource: string }> = []): GameMap {
   const resourceAt = new Map(resources.map((r) => [`${r.q},${r.r}`, r.resource]));
@@ -246,4 +247,90 @@ test("isTileVisibleTo agrees with computeVision(...).has(...) across a small map
       );
     }
   }
+});
+
+// ── The settlers mode's founding read (SETTLERS-PLAN.md §4 W4) ─────────────
+//
+// The tile panel's settlers-only line: the viewer's own covered wagon standing
+// on the inspected hex, and the ENGINE's verdict on planting there. A classic
+// game must not grow the key at all -- the panel's signature and every classic
+// expectation stay exactly as they were.
+
+test("a classic game's TileInfo carries no founding key at all", () => {
+  const map = makeGrassMap(3, 3);
+  const hero = new Hero("p0-wagon", "Wagon", 0, 0, "player", 0);
+  const info = describeTile({
+    map,
+    state: makeState({ heroes: { "p0-wagon": makeHero("p0-wagon", 0, 0, 0) } }),
+    heroes: [hero],
+    castles: [],
+    viewPlayerId: 0,
+    tile: { q: 0, r: 0 },
+  });
+  assert.ok(info);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(info, "founding"),
+    false,
+    "a classic panel says nothing about founding",
+  );
+});
+
+test("a settlers wagon on its own hex reports that it can found here", () => {
+  const map = makeGrassMap(9, 9);
+  const hero = new Hero("p0-wagon", "Wagon", 4, 4, "player", 0);
+  const state = makeState({
+    gameMode: "settlers",
+    heroes: { "p0-wagon": makeHero("p0-wagon", 0, 4, 4) },
+  });
+  const info = describeTile({ map, state, heroes: [hero], castles: [], viewPlayerId: 0, tile: { q: 4, r: 4 } });
+  assert.ok(info);
+  assert.deepEqual(info!.founding, { wagonName: "p0-wagon", canFound: true, refusal: null });
+
+  // An unsettled, empty hex nearby: there is no wagon standing on it, so the
+  // key is present for the mode but empty.
+  const empty = describeTile({ map, state, heroes: [hero], castles: [], viewPlayerId: 0, tile: { q: 5, r: 4 } });
+  assert.equal(empty!.founding, null);
+});
+
+test("a settlers wagon too close to a settlement reports the engine's own refusal", () => {
+  const map = makeGrassMap(9, 9);
+  const hero = new Hero("p0-wagon", "Wagon", 4, 4, "player", 0);
+  const { state: settlement, castle } = makeSettlement("s1", 4, 2, 3, 0, "Ironhold");
+  const info = describeTile({
+    map,
+    state: makeState({
+      gameMode: "settlers",
+      heroes: { "p0-wagon": makeHero("p0-wagon", 0, 4, 4) },
+      settlements: { s1: settlement },
+    }),
+    heroes: [hero],
+    castles: [castle],
+    viewPlayerId: 0,
+    tile: { q: 4, r: 4 },
+  });
+  assert.ok(info);
+  assert.equal(info!.founding!.canFound, false);
+  assert.equal(
+    info!.founding!.refusal,
+    "too_close_to_settlement",
+    "the code is the engine's, so the panel sentence and the server sentence share it",
+  );
+});
+
+test("an enemy wagon's hex is not a founding read for the viewer", () => {
+  const map = makeGrassMap(9, 9);
+  const enemyWagon = new Hero("p1-wagon", "Enemy wagon", 4, 4, "enemy", 1);
+  const info = describeTile({
+    map,
+    state: makeState({
+      gameMode: "settlers",
+      heroes: { "p1-wagon": makeHero("p1-wagon", 1, 4, 4) },
+    }),
+    heroes: [enemyWagon],
+    castles: [],
+    viewPlayerId: 0,
+    tile: { q: 4, r: 4 },
+  });
+  assert.ok(info);
+  assert.equal(info!.founding, null, "only the view seat's own wagon is offered as a founder");
 });

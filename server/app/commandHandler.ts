@@ -58,6 +58,7 @@ transferGold,
   visionKeysForPlayer,
   visionKeysAroundPoints,
   mergePlayerReveal,
+  foundSettlement,
 } from "@heroes/engine";
 import type { EngineCtx, HydratableGameRow, UnitType, BattleResult, MapSize, MapGenVersion, PendingBattleMarker } from "@heroes/engine";
 import { hexDistance } from "@heroes/contracts";
@@ -2432,6 +2433,81 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         attackerHero: result.state.heroes[command.attackerId],
         settlement: result.state.settlements[command.settlementId],
         attackerVerdict: result.attackerVerdict,
+      };
+    }
+    case "FoundSettlement": {
+      // The settlers mode's founding path (SETTLERS-PLAN.md §4 W2/W3). The
+      // authority checks that are the server's (does this founder exist, is it
+      // this seat's) live here; the RULE -- the mode gate, founder position,
+      // occupancy, terrain and the spacing answer -- lives in @heroes/engine's
+      // foundSettlement, which is why the map is reconstructed and passed: its
+      // terrain half needs the same map StartCharter's case builds, from the
+      // row.seed/row.map_size generateAndInsertTiles used at creation time
+      // (pinned by test/server/gameMapReconstruction.test.ts).
+      const founder = row.heroes[command.founderId];
+      if (!founder) {
+        return { ok: false, reason: "no_hero", events: [] };
+      }
+      if (founder.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_hero", events: [] };
+      }
+      const map = getOrCreateGameMap(
+        row.seed,
+        row.map_size as MapSize | undefined,
+        resolveSavedMapGenVersion(row.lobby?.mapGenVersion),
+      );
+      const result = foundSettlement({
+        state,
+        founderId: command.founderId,
+        q: command.q,
+        r: command.r,
+        map,
+      });
+      if (!result.ok) {
+        // The engine's refusal vocabulary IS the client's sentence
+        // (found.ts's one-vocabulary rule), so it is relayed verbatim as a 409.
+        return { ok: false, reason: result.reason, events: [] };
+      }
+      // Uncharted reveal: the new settlement is the actor's the moment it
+      // exists, and visionKeysForPlayer reads the settlements record, so its
+      // controlRange ring needs no extra path points (the CaptureSettlement
+      // rule, one case up).
+      let next = result.state;
+      if (uncharted && isHuman(next, founder.ownerId)) {
+        next = revealForPlayer(next, founder.ownerId);
+      }
+      const founded = next.settlements[result.settlementId];
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        next.heroes,
+        next.settlements,
+        {
+          players: next.players,
+          // The counter must move atomically with the settlement, or a second
+          // founding in the same game before a reload reuses this id (the
+          // StartCharter counter-persistence gap).
+          next_settlement_id: next.nextSettlementId,
+        },
+      );
+      await dualWriteEntities(deps, command.gameName, state, next);
+      const event: EngineEvent = {
+        type: "SettlementFounded",
+        actor: command.actor,
+        founderId: command.founderId,
+        settlementId: result.settlementId,
+        name: founded.name,
+        q: command.q,
+        r: command.r,
+        consumedFounder: result.consumedFounder,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return {
+        ok: true,
+        events: [event],
+        lastEventId,
+        settlement: founded,
+        settlements: next.settlements,
+        players: next.players,
       };
     }
   }

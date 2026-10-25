@@ -12,6 +12,7 @@ import {
   captureSettlement,
   CommandError,
   startCharter,
+  foundSettlement as foundSettlementCommand,
   upgradeBuilding,
   upgradeSettlement,
   placeBuildings as placeBuildingsCommand,
@@ -47,7 +48,9 @@ import type {
 } from "@heroes/contracts";
 import type { TurnController, TurnControllerHooks } from "../state/turnController";
 import type { BattleResult } from "@heroes/engine";
-import { deriveNextTradeRouteId } from "@heroes/engine";
+import { deriveNextTradeRouteId, FOUND_SETTLEMENT_REFUSALS, type FoundSettlementRefusal } from "@heroes/engine";
+import { foundSettlementRefusalToast } from "@screens/adventure/clickIntent";
+import { showToast } from "@screens/shared/toast";
 import { pickAiMove as pickAiMoveBrain, pickGarrisonRecruitment } from "../ai/aiBrain";
 import { cachedUnitTypes } from "../data/unitCatalog";
 import type { GameMap } from "../map/gameMap";
@@ -368,6 +371,34 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
         await startCharter(name, { actor, heroId, targetQ, targetR, settlementName });
       } catch (e) {
         reportCommandFailure("Start charter", e);
+      }
+    },
+    // The settlers mode's founding POST (SETTLERS-PLAN.md §4 W4). Its refusal
+    // is the mode's own vocabulary, relayed by the server as a 409 whose
+    // `error` is a FOUND_SETTLEMENT_REFUSALS code -- so the player reads the
+    // sentence that vocabulary maps to (clickIntent's one table) instead of the
+    // generic "<Action> failed: <code>". Any other failure (a network error, a
+    // 403) still goes through reportCommandFailure, which shows its own text.
+    onFoundSettlement: async (
+      actor: number,
+      founderId: HeroId,
+      q: number,
+      r: number,
+    ): Promise<void> => {
+      const name = opts.gameName();
+      if (!name) return;
+      try {
+        await foundSettlementCommand(name, { actor, founderId, q, r });
+      } catch (e) {
+        const reason = e instanceof CommandError ? e.reason : null;
+        if (reason && FOUND_SETTLEMENT_REFUSALS.includes(reason as FoundSettlementRefusal)) {
+          console.warn("[turnHooks] founding refused:", reason);
+          const toast = foundSettlementRefusalToast(reason);
+          showToast(toast.message, toast.kind);
+          throw e;
+        }
+        reportCommandFailure("Found settlement", e);
+        throw e;
       }
     },
     onAdvanceCharterTravel: async (

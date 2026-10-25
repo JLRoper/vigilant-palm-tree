@@ -31,10 +31,10 @@ import { SessionManager } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
 import type { MapInfo } from "@screens/home/settingsMenu";
-import type { DistrictState, FactionId, BuildingKind } from "@heroes/contracts";
+import type { DistrictState, FactionId, BuildingKind, GameMode } from "@heroes/contracts";
 
 type ToolbarCallbacks = {
-  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: MapSize; enemyCount?: number; factionId?: FactionId }) => void;
+  onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: MapSize; enemyCount?: number; factionId?: FactionId; uncharted?: boolean; gameMode?: GameMode }) => void;
   onLoad: (loaded: import("../io/api").Game, tiles?: import("../io/api").TileRow[]) => void;
   onSave: () => void;
   onEndTurn: () => void;
@@ -42,6 +42,8 @@ type ToolbarCallbacks = {
   getMapInfo?: () => MapInfo | null;
   onStartCharter?: () => void;
   canStartCharter?: () => boolean;
+  /** The settle button's mode-aware copy (SETTLERS-PLAN.md §4 W4). */
+  charterButtonCopy?: () => { label: string; title: string } | null;
 };
 
 // The settlement panel's outward hooks the engine supplies: entering a
@@ -163,6 +165,7 @@ export class UIManager {
         getMapInfo: callbacks.getMapInfo,
         onStartCharter: callbacks.onStartCharter,
         canStartCharter: callbacks.canStartCharter,
+        charterButtonCopy: callbacks.charterButtonCopy,
         onOpenLogistics: () => this.openLogisticsModal(),
       },
     });

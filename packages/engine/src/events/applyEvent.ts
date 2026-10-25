@@ -87,6 +87,11 @@ export const ENGINE_EVENT_SYNC_CLASS: Record<EngineEvent["type"], EngineEventSyn
   HeroesTraded: "apply",
   SettlementBattleResolved: "resync",
   WorkersAssigned: "ignore",
+  // Settlers founding (SETTLERS-PLAN.md §4 W1): the created settlement's name,
+  // terrain-derived rates, city spots and stock are the engine's own draws
+  // (its rule needs the map to make them), so the client refetches rather than
+  // guessing -- the CharterStarted rule.
+  SettlementFounded: "resync",
 };
 
 function resync(state: GameState): ApplyEngineEventResult {
@@ -488,6 +493,11 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
     // stacks, gold, and attacker relocation/removal are battle-internal and
     // not derivable from the payload, so the caller refetches.
     case "SettlementBattleResolved":
+    // SettlementFounded's payload names the founder and the new settlement but
+    // not what the town was stocked or rated with (the engine derives those
+    // from the map and the founder's own streams), so the caller refetches --
+    // the CharterStarted precedent, one line below it.
+    case "SettlementFounded":
       return resync(state);
 
     default: {

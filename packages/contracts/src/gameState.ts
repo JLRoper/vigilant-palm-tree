@@ -1,5 +1,6 @@
 import type { BuildingKind } from "./buildings";
 import type { FactionId } from "./factions";
+import type { GameMode } from "./gameMode";
 import type { CharterId, Faction, HeroId, HorseVariantId, PlayerId, SettlementId } from "./ids";
 import type { ResourceType, Warehouse, WarehouseResource } from "./resources";
 import type { CharterState, SettlementState } from "./settlement";
@@ -209,6 +210,14 @@ export interface GameState {
   activeCharters: CharterState[];
   nextCharterId: number;
   nextSettlementId: number;
+  /**
+   * The game's mode (SETTLERS-PLAN.md §1). "settlers" on a game created with
+   * it; ABSENT on every classic game and on every legacy save, so a
+   * mode-dependent rule reads `resolveGameMode(state.gameMode)` and gets
+   * classic. Carried in games.lobby (lobby.gameMode) and parsed on load by
+   * engine hydrate's readGameMode -- optional, never a migration.
+   */
+  gameMode?: GameMode;
   /** Optional + defaulted ([]) so legacy saves and old JSONB rows stay valid. */
   tradeRoutes?: TradeRouteState[];
   nextTradeRouteId?: number;

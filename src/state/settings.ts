@@ -1,4 +1,5 @@
 import { HORSE_VARIANT_REGISTRY, type HorseVariantId, VALID_HORSE_VARIANTS } from "@heroes/engine";
+import { DEFAULT_GAME_MODE, resolveGameMode, type GameMode } from "@heroes/contracts";
 import { clampToolbarStyle, DEFAULT_TOOLBAR_STYLE, type ToolbarStyle } from "./toolbarThemes";
 
 export type HorseVariant = HorseVariantId;
@@ -37,6 +38,11 @@ export interface GameSettings {
   showLogPanel: boolean;
   toolbarStyle: ToolbarStyle;
   maxZoomOutHexesWide: number;
+  // New-game default mode (SETTLERS-PLAN.md §1/§4 W4): what the New Game form
+  // pre-selects. A stored preference, NOT the mode of any existing game --
+  // a game's own mode is stored per game (games.lobby.gameMode) and this key
+  // never changes it.
+  gameMode: GameMode;
 }
 
 const STORAGE_KEY = "heroesJs.settings";
@@ -108,6 +114,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   showLogPanel: false,
   toolbarStyle: DEFAULT_TOOLBAR_STYLE,
   maxZoomOutHexesWide: DEFAULT_MAX_ZOOM_OUT_HEXES_WIDE,
+  gameMode: DEFAULT_GAME_MODE,
 };
 
 let current: GameSettings = loadFromStorage();
@@ -159,6 +166,36 @@ export function clampSpriteVariant(v: unknown): number {
 
 export function clampCityBackdrop(v: unknown): CityBackdropMode {
   return v === "skybox" ? "skybox" : "diorama";
+}
+
+// The one normalizer for the stored mode key. Delegates to the contracts
+// vocabulary (isGameMode/resolveGameMode) so the store, the wire and the
+// engine share ONE list of modes -- an unknown value reads as the default
+// instead of silently persisting a typo'd mode the server would reject.
+export function clampGameMode(v: unknown): GameMode {
+  return resolveGameMode(typeof v === "string" ? v : null);
+}
+
+export function gameModeOptions(): readonly { value: GameMode; label: string }[] {
+  return [
+    { value: "classic", label: "Classic (charter founding)" },
+    { value: "settlers", label: "Settlers (wagon founding)" },
+  ];
+}
+
+/**
+ * The one-line explanation of a mode, used as a chip's tooltip on both
+ * new-game surfaces (the panel own its prose; verbs live in `title`, not in
+ * the form). Keyed by the mode union so a new mode is a compile error here
+ * rather than a silently missing hint.
+ */
+const GAME_MODE_HINTS: Record<GameMode, string> = {
+  classic: "Start with a castle, a commander and a town; expand by chartering new settlements",
+  settlers: "Start with one covered wagon in the wilderness; plant your settlement where it stands, once per wagon",
+};
+
+export function gameModeHint(mode: GameMode): string {
+  return GAME_MODE_HINTS[resolveGameMode(mode)];
 }
 
 export function clampBgOffset(v: number): number {
@@ -235,6 +272,7 @@ export function updateSettings(patch: Partial<GameSettings>): GameSettings {
       : current.showLogPanel,
     toolbarStyle: clampToolbarStyle(patch.toolbarStyle ?? current.toolbarStyle),
     maxZoomOutHexesWide: clampMaxZoomOutHexesWide(patch.maxZoomOutHexesWide ?? current.maxZoomOutHexesWide),
+    gameMode: clampGameMode(patch.gameMode ?? current.gameMode),
   };
   current = next;
   try {
@@ -277,19 +315,33 @@ export function growthRateBounds(): { min: number; max: number; default: number 
  * Bumped when a stored setting's meaning changes. v2 moved the default map
  * resource sprite from the rune stone to the iso pile, so a store written by v1
  * still holds the old default (not a deliberate choice) and follows along once.
+ *
+ * v3 added the new-game default mode key (gameMode). A store written before it
+ * existed has no deliberate choice in it, so it follows along to the classic
+ * default ONCE, at load -- and only once: from v3 on, whatever the store holds
+ * (including a player's own pick of "settlers") is read back verbatim, so the
+ * migration can never overwrite a choice a later session made.
  */
-const SETTINGS_SCHEMA_VERSION = 2;
+const SETTINGS_SCHEMA_VERSION = 3;
 
-function loadFromStorage(): GameSettings {
-  if (typeof localStorage === "undefined") return { ...DEFAULT_SETTINGS };
+/**
+ * A stored blob -> a GameSettings, with the schema migrations applied exactly
+ * once (the version gate below). Pure and exported so the migrations are
+ * testable: the store's `current` is initialized at import time, so a test
+ * cannot re-run loadFromStorage without re-importing the module.
+ */
+export function readStoredSettings(raw: string | null): GameSettings {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
     const parsed = JSON.parse(raw) as Partial<GameSettings> & { schemaVersion?: number };
     const schemaVersion = typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : 1;
     const storedStyle = clampResourceStyle(parsed.resourceStyle);
     const resourceStyle =
       schemaVersion < 2 && storedStyle === "rune-stone" ? DEFAULT_RESOURCE_STYLE : storedStyle;
+    // v3's one-time follow-along: a store written before the mode key existed
+    // gets the default mode once. From v3 on the stored value wins, so a
+    // player's own pick is never overwritten by this migration.
+    const gameMode = schemaVersion < 3 ? DEFAULT_GAME_MODE : clampGameMode(parsed.gameMode);
     return {
       moveDurationMs: clampMoveDurationMs(parsed.moveDurationMs ?? DEFAULT_MOVE_MS),
       enemyMoveDurationMs: clampEnemyMoveDurationMs(parsed.enemyMoveDurationMs ?? DEFAULT_ENEMY_MOVE_MS),
@@ -314,7 +366,17 @@ function loadFromStorage(): GameSettings {
         : false,
       toolbarStyle: clampToolbarStyle(parsed.toolbarStyle),
       maxZoomOutHexesWide: clampMaxZoomOutHexesWide(parsed.maxZoomOutHexesWide),
+      gameMode,
     };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function loadFromStorage(): GameSettings {
+  if (typeof localStorage === "undefined") return { ...DEFAULT_SETTINGS };
+  try {
+    return readStoredSettings(localStorage.getItem(STORAGE_KEY));
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

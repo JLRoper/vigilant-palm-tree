@@ -12,13 +12,16 @@ test("every declared EngineEvent variant is classified exactly once", () => {
   // garrison grid's drag-and-drop swaps two of a settlement's stack slots.
   // 27 -> 28 (2026-10-23): HeroesTraded added -- two adjacent heroes of one
   // seat swap gold/cargo/platoons in a single TradeHeroes command.
-  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 28);
+  // 28 -> 29 (2026-10-24): SettlementFounded added -- a settlers-mode covered
+  // wagon plants a settlement and is consumed by it (resync class: the town's
+  // rates, spots and stock are the engine's map-derived draws).
+  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 29);
 });
 
-test("classification counts: 14 apply, 7 resync, 7 ignore", () => {
+test("classification counts: 14 apply, 8 resync, 7 ignore", () => {
   const counts = { apply: 0, resync: 0, ignore: 0 };
   for (const cls of Object.values(ENGINE_EVENT_SYNC_CLASS)) counts[cls] += 1;
-  assert.deepEqual(counts, { apply: 14, resync: 7, ignore: 7 });
+  assert.deepEqual(counts, { apply: 14, resync: 8, ignore: 7 });
 });
 
 test("class agrees with the reducer: GarrisonReordered swaps two garrison slots", () => {

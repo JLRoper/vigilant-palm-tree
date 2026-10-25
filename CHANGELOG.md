@@ -10,6 +10,20 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.34.0] - 2026-10-24
+
+Settlers mode: a seat now starts with one covered wagon in the wilderness and founds its own settlements instead of chartering them.
+
+**Choose the mode when you create a game.** Both new-game surfaces offer it and pre-select the mode your settings store holds, and `POST /games` takes a `gameMode` field (`classic` or `settlers`) that rides the game's lobby record -- no new column, no migration, and every game created before this feature still reads as classic. A classic game's seeded map, rules and AI decisions are byte-identical to before: the mode changes what entities a seat starts with, never the terrain.
+
+**A settlers seat starts with one covered wagon**, carrying a starter stockpile (200 wood / 100 stone / 50 iron / 50 food) and no castle or commander, with one wagon per seat. Founding is the wagon's job: select it, press the toolbar's **Found Settlement** button, and click the highlighted hex it stands on. The town consumes the wagon it came from, so the wagon pool is your expansion budget, and the new settlement keeps at least 3 hexes from every settlement, neutral castles included.
+
+**No charter, no construction days, no modal.** The engine's own rule decides -- mode, founder position, occupancy, terrain and the spacing answer -- so the client can never offer a founding the server refuses, and every refusal is surfaced with that rule's own sentence ("Too close to another settlement -- keep 3 hexes between them"). The wilds keep their neutral castles as capture objectives.
+
+**The AI plays the mode too**: its seat places its start and founds settlements through the same engine functions a human uses, and never issues a command the mode forbids. The charter path is untouched and keeps its rules in a classic game.
+
+Tests: the mode's own pins (`test/engine/settlersMode.test.ts`, including one flip test per settings key), the creation route against real Express + Postgres, and a new browser suite -- `npm run test:settlers` (`test/settlers.e2e.ts`) -- that drives the founding gesture with real mouse clicks: select the wagon by clicking its hex, arm the gesture from the toolbar, click the hex again, and assert the town on both the client state and the server row.
+
 ## [0.32.0] - 2026-10-22
 
 Give every faction twelve units, faction troop buildings and starter recruitment; enforce faction building placement.

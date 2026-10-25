@@ -2,8 +2,9 @@ import type { Axial } from "../../core/hex";
 import type { GameMap } from "../../map/gameMap";
 import type { Hero } from "../../entities/hero";
 import type { GameState, HeroId, PlayerId } from "../../state/gameState";
-import { canTradeHeroes } from "@heroes/engine";
+import { canFoundSettlement, canTradeHeroes, type FoundSettlementRefusal } from "@heroes/engine";
 import type { HeroState } from "@heroes/contracts";
+import { gameModeSettings, isCoveredWagonId } from "@heroes/contracts";
 import { computePathCost, findPath, NEIGHBOR_DIRS } from "../../map/pathfinding";
 import { computeReachableSplitDetailed } from "../../render/overlays/pathOverlay";
 import type { ToastKind } from "../shared/toast";
@@ -35,9 +36,99 @@ export function clickRejectionToast(reason: string, movementRemaining?: number):
       return { message: "No path there", kind: "info" };
     case "charter_invalid":
       return { message: "Pick a highlighted hex for the new settlement", kind: "info" };
+    case "found_invalid":
+      return { message: "Pick the highlighted hex — a wagon founds where it stands", kind: "info" };
     default:
       return null;
   }
+}
+
+/**
+ * The sentences for the settlers mode's founding refusals (SETTLERS-PLAN.md §4
+ * W4). ONE table, keyed by the engine's own `FOUND_SETTLEMENT_REFUSALS`
+ * vocabulary: the server relays a refusal verbatim (a 409 whose `error` is one
+ * of those codes -- server/app/commandHandler.ts's FoundSettlement case), and
+ * this is what the player reads, so the panel and the rule can never drift
+ * into two different stories.
+ *
+ * An unknown code is NOT swallowed: it falls through to a message that shows
+ * the code, because a refusal the client cannot explain is a bug to see rather
+ * than a silence to hide.
+ */
+export function foundSettlementRefusalToast(reason: string): ClickRejectionToast {
+  switch (reason) {
+    case "not_settlers_mode":
+      return { message: "This is a classic game — settlements are founded by charter", kind: "error" };
+    case "founder_not_at_tile":
+      return { message: "A settlement is planted where its founder stands", kind: "error" };
+    case "tile_impassable":
+      return { message: "That ground cannot hold a settlement", kind: "error" };
+    case "occupied":
+      return { message: "A settlement already stands there", kind: "error" };
+    case "too_close_to_settlement": {
+      // The radius is the mode's own key, never a second literal: the sentence
+      // moves with the rule the server just applied.
+      const min = gameModeSettings("settlers").minFoundingDistance;
+      return {
+        message: `Too close to another settlement — keep ${min} hexes between them`,
+        kind: "error",
+      };
+    }
+    default:
+      return { message: `Founding refused: ${reason}`, kind: "error" };
+  }
+}
+
+/**
+ * What founding a settlement at `(q, r)` would do RIGHT NOW, per the engine's
+ * own rule: the hex set the map should highlight while the founding gesture is
+ * armed, plus the reason it is empty when it is.
+ *
+ * The engine's `canFoundSettlement` is the only decider -- this function never
+ * re-derives passability, occupancy or spacing, so the highlight cannot
+ * promise a hex the command will refuse. Candidates are limited to the
+ * founder's own hex because the rule already refuses every other hex
+ * (`founder_not_at_tile`): a wagon plants a settlement where it stands, and
+ * highlighting the whole map for a one-hex action would lie about the
+ * gesture.
+ */
+export function foundSettlementTarget(
+  state: GameState,
+  map: GameMap,
+  founderId: HeroId | null | undefined,
+): { hexes: Set<string>; refusal: FoundSettlementRefusal | null; founderId: HeroId | null } {
+  if (!founderId) return { hexes: new Set(), refusal: "founder_not_at_tile", founderId: null };
+  const founder = state.heroes[founderId];
+  if (!founder) return { hexes: new Set(), refusal: "founder_not_at_tile", founderId: null };
+  const q = (founder as unknown as { tile?: Axial }).tile?.q ?? founder.q;
+  const r = (founder as unknown as { tile?: Axial }).tile?.r ?? founder.r;
+  const check = canFoundSettlement({ state, founderId, q, r, map });
+  if (!check.ok) return { hexes: new Set(), refusal: check.reason, founderId };
+  return { hexes: new Set([`${q},${r}`]), refusal: null, founderId };
+}
+
+/**
+ * The id of the seat's own covered wagon standing on `(q, r)`, if any -- the
+ * founding gesture's subject. Read through contracts' `isCoveredWagonId` (the
+ * engine, the server and the renderer share one convention) rather than
+ * re-spelling the `p<seat>-wagon` suffix, and scoped to the VIEWER's seat so
+ * an enemy wagon's hex is never a founding candidate.
+ */
+export function coveredWagonAt(
+  state: GameState,
+  viewSeat: PlayerId,
+  q: number,
+  r: number,
+): HeroId | null {
+  for (const hero of Object.values(state.heroes)) {
+    if (hero.ownerId !== viewSeat) continue;
+    if (!isCoveredWagonId(hero.id)) continue;
+    const tile = (hero as unknown as { tile?: Axial }).tile;
+    const hq = tile?.q ?? hero.q;
+    const hr = tile?.r ?? hero.r;
+    if (hq === q && hr === r) return hero.id;
+  }
+  return null;
 }
 
 export interface MoveIntentBase {
@@ -57,6 +148,12 @@ export type ClickIntent =
   | { kind: "deselect-hero"; heroId: HeroId }
   | { kind: "deselect-settlement"; settlementId: string }
   | { kind: "open-charter"; targetQ: number; targetR: number }
+  // The settlers mode's founding gesture (SETTLERS-PLAN.md §4 W4): the
+  // toolbar's Settle button armed the gesture and the player clicked the
+  // highlighted hex the selected wagon stands on. Unlike a charter there is no
+  // modal and no name to ask for -- the engine derives the town -- so this
+  // intent's only job is to carry WHO and WHERE to the command.
+  | { kind: "found-settlement"; founderId: HeroId; targetQ: number; targetR: number }
   // The walk-in trade gesture: one hero of yours is selected and the player
   // clicked the square another of your heroes stands on, one hex away. The
   // panel opens for the pair instead of the click just re-selecting.
@@ -89,6 +186,14 @@ export interface ClickIntentInput {
   isPlayerTurn: boolean;
   charterMode: boolean;
   validCharterHexes: Set<string> | null;
+  /**
+   * The settlers mode's founding gesture is armed (SETTLERS-PLAN.md §4 W4).
+   * Its `validFoundHexes` is the hex set the engine's own rule accepts -- see
+   * foundSettlementTarget; null/empty means the gesture has nothing to offer
+   * and the click keeps its ordinary meaning.
+   */
+  foundMode?: boolean;
+  validFoundHexes?: Set<string> | null;
   localSeat: PlayerId | null;
   visibleHexes?: Set<string> | null;
   /**
@@ -121,6 +226,23 @@ export function resolveAdventureClick(input: ClickIntentInput): ClickIntent {
   if (input.movedDuringDrag) return { kind: "none", reason: "movedDuringDrag" };
   if (!input.isPlayerTurn) return { kind: "none", reason: "not_player_turn" };
   if (!t) return { kind: "none", reason: "no hover" };
+
+  if (input.foundMode && input.validFoundHexes) {
+    // Armed founding gesture (SETTLERS-PLAN.md §4 W4). Its position in the
+    // pipeline is deliberate: after the drag and turn guards (panning the map
+    // with the gesture armed, or clicking during another seat's turn, must not
+    // plant a settlement where the pointer happened to let go) but BEFORE the
+    // select/deselect toggle below -- the wagon stands on the very hex the
+    // gesture targets, so the toggle would otherwise put it down and eat the
+    // founding. The hex set comes from the engine's own rule
+    // (foundSettlementTarget), so a hex this branch accepts is a hex the
+    // command accepts.
+    const founderId = state.selectedHeroId;
+    if (founderId && input.validFoundHexes.has(`${t.q},${t.r}`)) {
+      return { kind: "found-settlement", founderId, targetQ: t.q, targetR: t.r };
+    }
+    return { kind: "none", reason: "found_invalid" };
+  }
 
   // A click on a hero is a toggle: select it, move it, click it again to put it
   // down. Clicking a different one of your heroes switches selection instead.
