@@ -324,6 +324,16 @@ export function foundSettlement(request: FoundSettlementRequest): FoundSettlemen
           ),
         };
 
+  // The selection follows the entity, exactly as the defeat path's
+  // `endBattlePhase` clears it: a converted founder keeps its selection under
+  // its new id (the panel must not print "the selected hero no longer exists"
+  // about the town's own first hero), and a consumed one drops the selection
+  // because there is nothing left to select. Any other selection is untouched.
+  const selectedHeroId =
+    state.selectedHeroId !== founderId
+      ? state.selectedHeroId
+      : convertedId ?? null;
+
   return {
     ok: true,
     state: {
@@ -331,6 +341,7 @@ export function foundSettlement(request: FoundSettlementRequest): FoundSettlemen
       heroes,
       settlements: { ...state.settlements, [settlementId]: settlement },
       players,
+      selectedHeroId,
       nextSettlementId: state.nextSettlementId + 1,
       dirty: true,
     },

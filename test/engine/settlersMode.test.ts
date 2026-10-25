@@ -627,6 +627,37 @@ test("founding in place turns the wagon into the town's first hero instead of de
   assert.equal(again.ok === false && again.reason, "occupied");
 });
 
+test("the founding keeps the selection on the entity it converts, and clears it when the founder is consumed", () => {
+  const { map, state } = settlersState();
+  const wagon = state.heroes[coveredWagonIdFor(0)];
+  const selected: GameState = { ...state, selectedHeroId: wagon.id };
+
+  const converted = foundSettlement({ state: selected, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+  assert.equal(converted.ok, true);
+  if (!converted.ok) return;
+  assert.equal(
+    converted.state.selectedHeroId,
+    seatHeroIdFor(0),
+    "the selection follows the wagon into its new id -- the panel must never report a hero that no longer exists",
+  );
+
+  // A selection that was somebody else is left alone.
+  const other: GameState = { ...state, selectedHeroId: coveredWagonIdFor(1) };
+  const untouched = foundSettlement({ state: other, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+  assert.equal(untouched.ok, true);
+  if (!untouched.ok) return;
+  assert.equal(untouched.state.selectedHeroId, coveredWagonIdFor(1), "another seat's selection is untouched");
+
+  // A CONSUMED founder leaves nothing to select, so the selection is dropped --
+  // the same rule the defeat path's endBattlePhase applies.
+  flipModeKey("wagonBecomesFirstHero", false, () => {
+    const consumed = foundSettlement({ state: selected, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+    assert.equal(consumed.ok, true);
+    if (!consumed.ok) return;
+    assert.equal(consumed.state.selectedHeroId, null, "a consumed founder drops the selection with it");
+  });
+});
+
 test("the converted founder survives a reload as the settlement's first hero", () => {
   const { map, state } = settlersState();
   const wagon = state.heroes[coveredWagonIdFor(0)];
