@@ -12,6 +12,7 @@ import {
   buildingFootprintFromRegistry,
   buildingPlacementCost,
 } from "../buildingRegistry";
+import { gameModeSettings } from "@heroes/contracts";
 import { districtKey } from "../control";
 import { disconnectedDistrictKeys } from "./districtConnectivity";
 import { type CitySpot } from "./citySpots";
@@ -241,7 +242,15 @@ export function applyPlaceBuildings(
   // free by design and arrives ALREADY CONSTRUCTED — no build timers, no cost. Any later
   // commit pays full net cost and stamps timers on the genuinely new
   // placements only.
-  const freeInitialLayout = initialLayout && s.buildings.length === 0;
+  //
+  // The mode gates it, and it is the ENGINE's gate on purpose: the client's own
+  // free commit (cityView -> starterCityOnOpen) sends this flag, so a mode whose
+  // `freeStarterBuildings` is false -- settlers -- must refuse it HERE too, or a
+  // spoofed (or stale) client could hand a founded town the classic starter city
+  // for free. Only settlements in a mode that grants the starter city at all
+  // reach the free path.
+  const freeInitialLayout =
+    initialLayout && s.buildings.length === 0 && gameModeSettings(state.gameMode).freeStarterBuildings;
   const net: CityBuildNetCost = freeInitialLayout ? {} : cityBuildNetCost(s.buildings, buildings);
 
   if ((net.gold ?? 0) > s.gold) return { ok: false, state, reason: "not_enough_gold" };

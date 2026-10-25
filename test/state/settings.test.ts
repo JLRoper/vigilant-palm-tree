@@ -273,7 +273,7 @@ test("a store written before the mode key existed follows along exactly once", (
 
 test("the mode's settings keys come from the contracts constants, not a second literal", () => {
   assert.equal(gameModeSettings("settlers"), SETTLERS_MODE_DEFAULTS);
-  assert.equal(gameModeSettings("classic").wagonConsumedOnFounding, false);
+  assert.equal(gameModeSettings("classic").wagonBecomesFirstHero, false);
   assert.equal(gameModeSettings(undefined), gameModeSettings("classic"));
   assert.equal(gameModeSettings("sandbox"), gameModeSettings("classic"));
   assert.deepEqual(SETTLERS_MODE_DEFAULTS.wagonSupplies, {

@@ -513,6 +513,29 @@ test("starterCityOnOpen: an empty settlement gets the free set, one with buildin
   assert.equal(builtOpen.buildings, built);
 });
 
+test("starterCityOnOpen: a settlers settlement is handed nothing, free or otherwise", () => {
+  for (const existing of [undefined, []]) {
+    const onOpen = starterCityOnOpen({ size: 5, style: "classic", existing, mode: "settlers" });
+    assert.deepEqual(
+      onOpen,
+      { buildings: [], free: false },
+      "the mode's freeStarterBuildings key gates this commit too: a founded town is never handed a city for free",
+    );
+  }
+  // An already-built settlement still gets its own buildings back untouched --
+  // the pre-existing rule, which the mode does not change. (The free commit is
+  // what would double a city; handing back what is already there cannot.)
+  const built: BuildingDef[] = [{ gx: 1, gy: 1, kind: "house", level: 1, style: "classic" }];
+  assert.deepEqual(
+    starterCityOnOpen({ size: 5, style: "classic", existing: built, mode: "settlers" }),
+    { buildings: built, free: false },
+  );
+  // Classic keeps both halves of its behaviour.
+  const classicOpen = starterCityOnOpen({ size: 5, style: "classic", existing: [], mode: "classic" });
+  assert.equal(classicOpen.free, true);
+  assert.deepEqual(kindsOf(classicOpen.buildings), [...STARTER_BUILDING_KINDS]);
+});
+
 test("the starter city can recruit garrison troops from turn 0", () => {
   const starter = buildStarterLayout({ size: 5, style: "classic" });
   const settlement = makeSettlement("s0", 0, 2, 2, {

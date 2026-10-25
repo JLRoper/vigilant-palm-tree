@@ -23,7 +23,7 @@ import {
   type PendingBattleMarker,
   type UnitType,
 } from "@heroes/engine";
-import { hexDistance, HEX_DIRECTIONS, MOVEMENT_PER_TURN, coveredWagonIdFor, gameModeSettings } from "@heroes/contracts";
+import { hexDistance, HEX_DIRECTIONS, MOVEMENT_PER_TURN, coveredWagonIdFor, gameModeSettings, seatHeroIdFor } from "@heroes/contracts";
 import type { Axial, CharterState, Command, HeroId } from "@heroes/contracts";
 import {
   AI_DEFENDER_OWNER_MISSING_AUDIT_KIND,
@@ -2324,10 +2324,19 @@ test("W5 settlers: the seat's wagon founds where it stands with the same FoundSe
   assert.equal(hexDistance(created, WAGON_TILE), 0, "it stands on the wagon's hex");
   assert.equal(created.warehouse.wood, 200, "the wagon's cargo moved into the new town's warehouse");
   assert.equal(created.warehouse.food, 50);
-  assert.equal(world.state.heroes[WAGON], undefined, "founding consumed the wagon (the mode's wagonConsumedOnFounding)");
+  assert.equal(world.state.heroes[WAGON], undefined, "founding leaves the wagon's own id behind (the mode's wagonBecomesFirstHero renames it to p<seat>-hero)");
   const seat = world.state.players.find((p) => p.id === 1);
   assert.ok(seat);
-  assert.ok(!seat.heroIds.includes(WAGON), "the consumed wagon left the seat's roster");
+  assert.ok(!seat.heroIds.includes(WAGON), "the wagon's own id left the seat's roster");
+  // The wagon BECAME the town's first hero: the same entity, renamed to the
+  // seat's hero id and still on the roster (design answer 1).
+  assert.deepEqual(seat.heroIds, [seatHeroIdFor(1)], "the seat's roster names the town's first hero");
+  assert.ok(world.state.heroes[seatHeroIdFor(1)], "…and the hero record is the wagon's, renamed");
+  assert.deepEqual(
+    { q: world.state.heroes[seatHeroIdFor(1)].q, r: world.state.heroes[seatHeroIdFor(1)].r },
+    WAGON_TILE,
+    "it stands where the wagon did",
+  );
   assert.ok(seat.settlementIds.includes(created.id), "the new town is on the seat's list");
   assert.equal(harness.endTurns.length, 1, "the turn ends normally");
   assert.equal(cap.captured[0], "ended_turn");

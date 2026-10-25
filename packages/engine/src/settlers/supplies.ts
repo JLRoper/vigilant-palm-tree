@@ -55,6 +55,17 @@ export function hasStock(warehouse: Warehouse): boolean {
 }
 
 /**
+ * An all-zero stockpile, every key materialized.
+ *
+ * The town's warehouse when the cargo stays aboard the surviving founder
+ * (`cargoStaysWithFounderHero`): one load cannot be in two places, so whichever
+ * end keeps it, the other end starts empty.
+ */
+export function emptyWarehouse(): Warehouse {
+  return concrete(undefined);
+}
+
+/**
  * The buildings a founded settlement starts with. `freeStarterBuildings` is the
  * mode's key: settlers mode answers NO (the city view's existing free starter
  * commit on first open is the only grant, so a founder cannot plant a fully
