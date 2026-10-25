@@ -141,7 +141,7 @@ export const BUILDING_ANCHOR_OVERRIDES: Readonly<Record<string, number>> = {
   "pixel.tower.1": 11,
   "pixel.tower.2": 7,
   "pixel.tower.3": 7,
-  "pixel.townHall.1": 9,
+  "pixel.townHall.1": 0,
   "pixel.townHall.2": 9,
   "pixel.townHall.3": 6,
   "pixel.treasury.1": 5,
