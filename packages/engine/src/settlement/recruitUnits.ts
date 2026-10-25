@@ -2,14 +2,13 @@ import type {
   BuildingDef,
   BuildingKind,
   DistrictState,
-  FactionId,
   GameState,
   SettlementId,
   SettlementState,
   Warehouse,
 } from "@heroes/contracts";
-import type { Platoon, UnitType } from "../units";
-import { MAX_PLATOON_ENTRIES, normalizePlatoons, settlementStacks, unitFactionId } from "../units";
+import type { Platoon } from "../units";
+import { MAX_PLATOON_ENTRIES, normalizePlatoons, settlementStacks } from "../units";
 import { buildingDraftMax, getBuildingEffect, type RecruitEntry } from "../buildingRegistry";
 import { districtKey } from "../control";
 
@@ -26,34 +25,22 @@ export interface RecruitSource {
   district?: { q: number; r: number };
 }
 
-// The faction gate's inputs (faction-registry foundation, D5). Both halves
-// must be present for the gate to act — when either is absent the filter
-// no-ops, which is what keeps every existing caller (AI planner, client
-// paths) byte-identical until factions exist.
-export interface RecruitFactionGate {
-  unitTypes?: Record<string, UnitType>;
-  seatFactionId?: FactionId;
-}
-
-// Whether one unit id may be recruited by a seat of `opts.seatFactionId`.
-// Unknown unit ids default to "human" (unitFactionId's D3 rule), so a
-// catalog-less comparison never blocks anything. Absent/incomplete opts =
-// allowed (the dormant gate).
-export function unitAllowedForSeatFaction(unitTypeId: string, opts?: RecruitFactionGate): boolean {
-  if (!opts?.unitTypes || !opts.seatFactionId) return true;
-  return unitFactionId(opts.unitTypes[unitTypeId]) === opts.seatFactionId;
-}
-
-export function eligibleRecruitSources(
-  settlement: SettlementState,
-  opts?: RecruitFactionGate,
-): RecruitSource[] {
+// The seat-faction recruit gate (faction-registry foundation, D5) is gone:
+// every recruit-bearing building's `recruits` list is already faction-pure
+// by construction (a crypt only ever lists ashen units, forgeHall only
+// ironmark, etc. — see buildingRegistry.ts's per-faction building
+// definitions), so gating on the OWNING building already enforces faction
+// purity with no second check needed. A seat now recruits whatever its
+// owned buildings (built or captured) currently offer, which is also what
+// makes a captured enemy building worth capturing: before this, a human
+// seat that took an ashen crypt could never draft from it
+// (unit_not_in_seat_faction), so the building sat as dead weight.
+export function eligibleRecruitSources(settlement: SettlementState): RecruitSource[] {
   const out: RecruitSource[] = [];
   for (const building of settlement.buildings) {
     if (building.construction) continue;
     for (const entry of getBuildingEffect(building.kind).recruits) {
       if ((entry.minLevel ?? 1) > building.level) continue;
-      if (!unitAllowedForSeatFaction(entry.unitTypeId, opts)) continue;
       out.push({ buildingKind: building.kind, gx: building.gx, gy: building.gy, entry });
     }
   }
@@ -62,7 +49,6 @@ export function eligibleRecruitSources(
       if (building.construction) continue;
       for (const entry of getBuildingEffect(building.kind).recruits) {
         if ((entry.minLevel ?? 1) > building.level) continue;
-        if (!unitAllowedForSeatFaction(entry.unitTypeId, opts)) continue;
         out.push({
           buildingKind: building.kind,
           gx: building.gx,

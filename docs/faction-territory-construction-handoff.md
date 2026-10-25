@@ -24,6 +24,14 @@ smaller, independently-reviewable pieces.
 
 ## Phase 1 — Recruit-gate fix + the neutral-seat bug
 
+**Status: ✅ landed 2026-10-25.** The seat-faction recruit gate is deleted
+and the `"neutral"`-seat validation gap is closed server-side (see
+`docs/architecture.md`'s "Recruit-gate removal + the neutral-seat bug fix"
+section for the file-by-file breakdown). The engine-side defensive
+normalization called out below was **not** done — only the server-side
+`routes.ts` validation fix — a deliberate "pick one" per this phase's own
+callout, not an oversight.
+
 **Scope:** Delete the seat-faction check from recruiting
 (`unitAllowedForSeatFaction`'s use in `eligibleRecruitSources` /
 `recruitUnits.ts` / `commandHandler.ts`'s `RecruitUnits` path /

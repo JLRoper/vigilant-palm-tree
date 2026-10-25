@@ -472,9 +472,17 @@ router.post("/games", async (req, res) => {
     // the seat count are never read by makePlayers, which is the clamp.
     let seatFactionsSafe: FactionId[] | undefined;
     if (seatFactions !== undefined) {
+      // "neutral" stays a valid FACTION_REGISTRY key (the monsters/unowned
+      // tag elsewhere in the registry) but is never an assignable SEAT
+      // faction -- same exclusion the UI faction picker already applies
+      // (src/screens/shared/factionChoices.ts). A direct API caller could
+      // otherwise hand a real seat "neutral" and permanently brick its
+      // starter-layout commit (farmhouse is tagged "human", so
+      // buildingAllowedForFaction rejects it for a "neutral" owner); reject
+      // it at the source instead of relying on normalization downstream.
       if (
         !Array.isArray(seatFactions) ||
-        seatFactions.some((f) => typeof f !== "string" || !(f in FACTION_REGISTRY))
+        seatFactions.some((f) => typeof f !== "string" || !(f in FACTION_REGISTRY) || f === "neutral")
       ) {
         res.status(400).json({ error: "seatFactions must be an array of faction ids" });
         return;

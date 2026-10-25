@@ -1,7 +1,7 @@
 import { Axial, isCoveredWagonId, resolveGameMode } from "@heroes/contracts";
 import { findPath, NEIGHBOR_DIRS, hexDistance } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
-import type { BuildingDef, BuildingKind, FactionId, GameState, HeroId, HeroState, SettlementState } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, GameState, HeroId, HeroState, SettlementState } from "@heroes/contracts";
 import {
   platoonPower,
   platoonTroopTotal,
@@ -124,7 +124,7 @@ export function pickGarrisonRecruitment(
     const targetPower = Math.max(GARRISON_POWER_FLOOR, GARRISON_TARGET_RATIO * threat);
     const deficit = targetPower - platoonPower(settlementStacks(settlement), unitTypes);
     if (deficit <= 0) continue;
-    out.push(...garrisonPurchases(settlement, settlementId, deficit, unitTypes, state.players.find((player) => player.id === seat)?.factionId));
+    out.push(...garrisonPurchases(settlement, settlementId, deficit, unitTypes));
   }
   return out;
 }
@@ -156,9 +156,8 @@ function garrisonPurchases(
   settlementId: string,
   deficit: number,
   unitTypes: Record<string, UnitType>,
-  factionId?: FactionId,
 ): GarrisonRecruitment[] {
-  const candidates = eligibleRecruitSources(settlement, { unitTypes, seatFactionId: factionId })
+  const candidates = eligibleRecruitSources(settlement)
     .filter((source) => source.entry.goldCost > 0)
     .sort(
       (a, b) =>

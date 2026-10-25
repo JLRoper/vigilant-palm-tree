@@ -115,7 +115,10 @@ for (const factionId of Object.keys(starterUnits) as (keyof typeof starterUnits)
     const state = committed.state;
     state.heroes = {};
     const unitTypeId = starterUnits[factionId];
-    const sources = eligibleRecruitSources(state.settlements.s0, { unitTypes, seatFactionId: factionId });
+    // eligibleRecruitSources takes no faction opts any more (the
+    // seat-faction recruit gate is deleted): building ownership alone is
+    // the gate now.
+    const sources = eligibleRecruitSources(state.settlements.s0);
     assert.deepEqual(sources.map((source) => source.entry.unitTypeId), [unitTypeId]);
     const source = sources[0];
     const recruited = recruitUnits(state, {
@@ -129,11 +132,18 @@ for (const factionId of Object.keys(starterUnits) as (keyof typeof starterUnits)
   });
 }
 
-test("AI excludes a saved foreign farmhouse and still recruits from its faction starter", () => {
+test("AI can now also recruit the owned foreign-tagged farmhouse's peasant, in addition to its own crypt's ghoul", () => {
+  // The seat-faction recruit gate is deleted: an ashen seat that happens to
+  // OWN a human-tagged farmhouse (a saved foreign building) can now recruit
+  // its peasant too, not just its own crypt's ghoul.
   const state = placementFixture("ashen", [
     { gx: 0, gy: 0, kind: "farmhouse", level: 1 },
     { gx: 1, gy: 0, kind: "crypt", level: 1 },
   ]);
   state.heroes = {};
-  assert.deepEqual(pickGarrisonRecruitment(state, 0, unitTypes).map((purchase) => purchase.unitTypeId), ["ghoul"]);
+  const purchased = pickGarrisonRecruitment(state, 0, unitTypes).map((purchase) => purchase.unitTypeId);
+  assert.ok(purchased.length > 0, "the AI still buys something toward its garrison floor");
+  for (const id of purchased) {
+    assert.ok(id === "peasant" || id === "ghoul", `${id}: expected only the two cheap starter levies as candidates`);
+  }
 });

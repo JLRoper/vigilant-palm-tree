@@ -25,8 +25,7 @@ import type { HeroId, HeroState, SettlementState } from "../state/gameState";
 import type { Axial } from "../core/hex";
 import { Hero } from "../entities/hero";
 import { SpriteProvider } from "../render/assets";
-import { cachedUnitTypes } from "../data/unitCatalog";
-import { districtKey, generateDistrictSpots, playerFactionId, playerIncome, playerWealth, playerEffectiveSettlementIncome, touchesTerrain, unitAllowedForSeatFaction, type CitySpot } from "@heroes/engine";
+import { districtKey, generateDistrictSpots, playerIncome, playerWealth, playerEffectiveSettlementIncome, touchesTerrain, type CitySpot } from "@heroes/engine";
 import { SessionManager } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
@@ -96,7 +95,6 @@ export class UIManager {
   private cityView: CityView | null = null;
   private cityViewPromise: Promise<CityView> | null = null;
   private cityViewState?: () => GameStateManager;
-  private cityViewLocalSeat?: () => PlayerId | null;
   private workforcePanel?: WorkforcePanel;
   private workforcePanelPromise: Promise<WorkforcePanel> | null = null;
   private recruitmentPanel?: RecruitmentPanel;
@@ -260,14 +258,17 @@ export class UIManager {
   initCityView(
     state: () => GameStateManager,
     viewManager: ViewManager,
-    getLocalSeat?: () => PlayerId | null,
+    // The seat-faction recruit gate this used to feed (isUnitRecruitable)
+    // is gone, so this is no longer stored -- kept as an accepted (ignored)
+    // parameter so existing call sites don't need to change their argument
+    // list.
+    _getLocalSeat?: () => PlayerId | null,
   ): void {
     // Lazy: CityView (and its skybox/sprite/asset chain) is imported and
     // constructed on the first open() -- a settlement double-click -- not at
     // boot. Everything it needs is stashed here for constructCityView().
     this.viewManager = viewManager;
     this.cityViewState = state;
-    this.cityViewLocalSeat = getLocalSeat;
   }
 
   // Single construction point, reached only from the open path. The promise
@@ -292,7 +293,6 @@ export class UIManager {
     }
     const { CityView } = await import("@screens/settlements/cityView/cityView");
     const getStateMgr = () => state();
-    const getLocalSeat = this.cityViewLocalSeat;
     const view = new CityView({
       provider: this.spriteProvider,
       getSettlementFaction: (settlementId) => {
@@ -300,17 +300,11 @@ export class UIManager {
         const ownerId = gs.settlements[settlementId]?.ownerId;
         return gs.players.find((p) => p.id === ownerId)?.factionId;
       },
-      isUnitRecruitable: getLocalSeat
-        ? (unitTypeId) => {
-            const gs = getStateMgr().getState();
-            const seat = getLocalSeat();
-            const player = seat !== null ? gs.players.find((p) => p.id === seat) : undefined;
-            return unitAllowedForSeatFaction(unitTypeId, {
-              unitTypes: cachedUnitTypes(),
-              seatFactionId: playerFactionId(player),
-            });
-          }
-        : undefined,
+      // The seat-faction recruit gate is gone: every recruit building's
+      // roster is already faction-pure, so the owning building's own
+      // ownership already enforces it -- no client-side unit-id filter is
+      // needed any more. See packages/engine/src/settlement/recruitUnits.ts.
+      isUnitRecruitable: undefined,
       onUpgradeTownHall: () => {
         const openId = this.cityView?.getOpenSettlementId();
         if (!openId) return;
