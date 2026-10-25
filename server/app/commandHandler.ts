@@ -18,8 +18,6 @@ transferGold,
   assignWorkers,
   transferUnits,
   tradeHeroes,
-  unitAllowedForSeatFaction,
-  playerFactionId,
   applySettlementBattleResult,
   settlementStacks,
   platoonsHaveTroops,
@@ -2123,31 +2121,19 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
     }
     case "RecruitUnits": {
       // Ladder mirrors UpgradeTownHall's: settlement existence, then
-      // ownership, then the seat's faction roster (the gate above the
-      // reducer), then the engine reducer's own building/level/construction/
-      // catalog/cost/garrison-capacity checks.
+      // ownership, then the engine reducer's own building/level/
+      // construction/catalog/cost/garrison-capacity checks. The seat-faction
+      // recruit gate is gone: every recruit building's roster is already
+      // faction-pure, so owning the building is the only gate -- a seat
+      // recruits whatever its owned buildings (built or captured) currently
+      // offer. See packages/engine/src/settlement/recruitUnits.ts's header
+      // comment.
       const settlement = row.settlements[command.settlementId];
       if (!settlement) {
         return { ok: false, reason: "no_settlement", events: [] };
       }
       if (settlement.ownerId !== command.actor) {
         return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
-      }
-      // Faction gate (faction-registry foundation, D5): the server enforces
-      // the acting seat's roster and never trusts the client. Deliberately
-      // checked on the requested unit alone, BEFORE the reducer, so the
-      // reducer's own building/level/construction/cost reason codes stay
-      // exactly as they are. Dormant today: every seat defaults "human"
-      // (playerFactionId), every recruitable unit is human-tagged, and an
-      // unknown catalog id also defaults "human" — so nothing is rejected
-      // until a non-human faction's units exist.
-      if (
-        !unitAllowedForSeatFaction(command.unitTypeId, {
-          unitTypes: Object.fromEntries(deps.ctx.catalog.unitTypes.map((u) => [u.id, u])),
-          seatFactionId: playerFactionId(row.players.find((p) => p.id === command.actor)),
-        })
-      ) {
-        return { ok: false, reason: "unit_not_in_seat_faction", events: [] };
       }
       const result = recruitUnits(state, {
         settlementId: command.settlementId,

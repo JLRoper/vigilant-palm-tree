@@ -785,6 +785,18 @@ Test inventory: new `test/engine/tradeHeroes.test.ts` (swap/refusals/atomicity/c
 
 Test inventory: new `test/io/gameModes.test.ts`, `test/screens/shared/newGameModeChoice.test.ts` and `test/screens/home/newGameModeChoice.test.ts` (both surfaces: options, pre-selection from the store, the picked mode reaching the create handler, the store left alone), plus `test/screens/adventure/clickIntent.test.ts` (the armed gesture, its guard ordering, `foundSettlementTarget`/`coveredWagonAt`, and every refusal code's sentence), `test/screens/adventure/tileInfo.test.ts` (the classic key's absence, a wagon's own hex, the spacing refusal, an enemy wagon) and `test/render/adventureScene.test.ts` + `test/render/paint2d.test.ts` (the wagon flag and the caravan-sprite resolution).
 
+### Recruit-gate removal + the neutral-seat bug fix (2026-10-25)
+
+Phase 1 of the faction-territory-construction plan (`docs/faction-territory-construction-handoff.md`): captured enemy recruit buildings (crypt, forgeHall, sylvanStables, ...) were permanently dead weight because `RecruitUnits` gated on the *seat's* roster faction, not the *building's*. Deleted that gate outright, and fixed the confirmed PR #252 bug where a `"neutral"`-factionId seat could brick its own starter-layout commit.
+
+| Area | Responsibility |
+|---|---|
+| `packages/engine/src/settlement/recruitUnits.ts` | `unitAllowedForSeatFaction`/`RecruitFactionGate` **deleted**: `eligibleRecruitSources(settlement)` takes no faction opts any more — every recruit building's roster is already faction-pure, so owning the building is the only gate. |
+| `packages/engine/src/ai/aiBrain.ts`, `src/managers/UIManager.ts`, `server/app/commandHandler.ts` | The three remaining seat-faction-gate call sites removed (`RecruitUnits` server pre-check, the client building menu's `isUnitRecruitable`, the AI planner's `seatFactionId` plumbing into `eligibleRecruitSources`). |
+| `server/routes.ts` | `seatFactions` validation now rejects `"neutral"` as an assignable seat value outright (same exclusion `src/screens/shared/factionChoices.ts`'s UI picker already applied) — a direct API caller could otherwise brick a settlement's starter-layout commit the way PR #252's code review found. |
+
+This is deliberately scoped to recruiting only: placement's own `wrong_faction` check (`buildingAllowedForFaction` in `packages/engine/src/settlement/placeBuildings.ts`) is untouched — a captured foreign-tagged building can now be recruited from, but *placing a new* foreign-tagged building is unaffected here (see the handoff doc's later phases).
+
 ## See also
 
 - [module-documentation-and-relationships.md](./module-documentation-and-relationships.md) — current module-by-module dependency map for `src/`, `server/`, `shared/`, `test/`, `tools/`, `scripts/`. This doc (`architecture.md`) is the executed **plan** that established the layout; the dependency map is the maintained **current state** and reflects any drift since the move.

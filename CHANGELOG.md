@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.34.1] - 2026-10-25
+
+fix(factions): delete the seat-faction recruit gate and reject neutral as an assignable seat
+
 ## [0.34.0] - 2026-10-24
 
 Settlers mode: a seat now starts with one covered wagon in the wilderness and founds its own settlements instead of chartering them.
