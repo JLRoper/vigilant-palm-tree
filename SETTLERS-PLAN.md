@@ -65,42 +65,64 @@ literal anywhere (a form default, an AI threshold, a test fixture) is a bug.
 
 Asked one at a time, each with its recommended default first. **The reader's
 answer is authoritative over the default**; this table records what the rules
-were written against.
+are written against.
 
-> **Status of these four answers: UNCONFIRMED.** The `clarify` tool is not
-> available in this execution context (`Clarify tool is not available in this
-> execution context` — the transport is the API server, which has no
-> interactive form), so the questions could not be put to the reader in this
-> session. The recommended defaults below therefore stand as the working
-> answers, and are the values `SETTLERS_MODE_DEFAULTS` currently carries. Each
-> one is a one-line change to that constant plus its test when the reader
-> answers — nothing else in the seams depends on which way they go.
+> **Status of these answers: CONFIRMED (2026-10-25), and the shipped constants
+> now carry them.** The four questions were first recorded here as **UNCONFIRMED**
+> working defaults, because the `clarify` tool was not available when phase 0
+> landed. The mode was then audited against the reader's locked answers (the
+> panel's job store, thread `wtgui-investigate-the-settlers-mod-07e33b`), and
+> three of the four defaults were wrong: the wilderness is bare (no neutral
+> castles), the wagon is not spent (it becomes the town's first hero), and
+> nothing hands a founded town a city (the city view's free commit is gated
+> too). A fourth rule the questions never asked — that founding has **no
+> tile-selection step** — is now recorded beside them. The key set moved with
+> the answers: `wagonConsumedOnFounding` became `wagonBecomesFirstHero`, and
+> `cargoStaysWithFounderHero` was added to make the cargo's fate a decision
+> rather than a side effect of the rename.
 
-| # | Question | Standing answer (default) | Key in `SETTLERS_MODE_DEFAULTS` |
+| # | Question | Confirmed answer | Key in `SETTLERS_MODE_DEFAULTS` |
 |---|---|---|---|
-| 1 | Is the starting wagon consumed when it founds the settlement? | Yes — the wagon is consumed; one wagon founds exactly one settlement | `wagonConsumedOnFounding: true` |
+| 1 | Is the starting wagon consumed when it founds the settlement? | **No — it BECOMES the settlement's first hero**: the same entity, renamed `p<seat>-wagon` → `p<seat>-hero`, still the seat's mobile unit. One wagon still buys exactly one settlement, because the rule is wagon-only: a converted founder is refused (`founder_not_a_wagon`) | `wagonBecomesFirstHero: true` |
 | 2 | Does founding require a minimum distance from other settlements, and how far? | Yes — at least **3** hexes (axial `hexDistance`) from every settlement, own or foreign | `minFoundingDistance: 3` |
-| 3 | What supplies does the wagon carry, and does the new settlement also get free buildings? | The wagon carries a starter stockpile (200 wood / 100 stone / 50 iron / 0 arcane / 50 food) and the settlement gets **no** extra free buildings — the city view's existing free starter commit on first open is the only grant | `wagonSupplies`, `freeStarterBuildings: false` |
-| 4 | Do neutral castles and monster lairs still spawn in the wilderness? | Yes — neutral castles spawn exactly as today (entity seeding untouched, still capture objectives and AI charter targets); monster lairs are not implemented in the codebase yet, so this is a forward-looking yes for them too | `neutralCastles: true`, `monsterLairs: true` |
+| 3 | What supplies does the wagon carry, does the new settlement get free buildings, and who keeps the cargo? | The wagon carries a starter stockpile (200 wood / 100 stone / 50 iron / 0 arcane / 50 food), and founding **moves it into the town's warehouse** (the hero rides on empty-handed — one stockpile, in the town). The settlement gets **no** free buildings: neither at founding nor from the city view, whose free starter commit the same key gates | `wagonSupplies`, `cargoStaysWithFounderHero: false`, `freeStarterBuildings: false` |
+| 4 | Do neutral castles and monster lairs still spawn in the wilderness? | **No neutral castles** — a settlers game is bare wilderness: no neutral town, settlement, castle or building. Monster lairs are not implemented in the codebase at all, so that key is still a forward-looking yes read by no rule | `neutralCastles: false`, `monsterLairs: true` |
+| 5 | Does founding take a second gesture — arm the rule, then click a highlighted hex? | **No — founding happens IN PLACE**, on the hex the wagon already stands on: the toolbar's action is the whole action, the wire command carries no hex (the server derives it from the founder's row), and the engine's rule admits no other hex | (no key: the rule has no reach to tune) |
 
-Consequences the rules must respect, whichever way the answers land:
+Consequences the rules must respect:
 
-- **Answer 1 = consumed** means founding removes the wagon entity and the
-  player's wagon pool is the expansion budget. `foundSettlement` must report
-  the removal in its result so the client can reconcile without a reload.
+- **Answer 1 = convert** means founding keeps the entity and changes its
+  identity: `foundSettlement` renames the record and rewrites the seat's
+  `heroIds`, and the id is the only carrier that survives a reload (the
+  granular heroes table has fixed columns, §2.5). It also means the engine's
+  rule is **wagon-only** — `canFoundSettlement` refuses a founder that is not
+  `isCoveredWagonId`, or the converted hero could found a second town. The
+  selection follows the rename in the same apply, so no panel reports a hero
+  that no longer exists.
 - **Answer 2** is measured with `hexDistance` from `@heroes/contracts`
   (`packages/contracts/src/geometry.ts`) — the same metric `castlePlacement.ts`
   uses — against **every** settlement, neutral ones included, so a neutral
-  castle blocks a start exactly like a rival's town.
-- **Answer 3's** supplies are written into the new settlement's
-  `warehouse`; `freeStarterBuildings: false` leaves
-  `buildStarterLayout`/`starterCityOnOpen` (`packages/engine/src/settlement/`)
-  to do what they already do, so the new town is not handed a free city.
-- **Answer 4 = yes** keeps `generateCastles` untouched. If the reader says no,
-  the suppression is a **filter applied to the returned `PlacedCastle[]`**
-  after generation (in `init.ts`), never a change to `castlePlacement.ts`'s
-  candidate scan or draw order — otherwise the neutrals' positions and every
-  downstream settlement/horse-variant draw move and constraint 4 fails.
+  castle would block a start exactly like a rival's town (a bare wilderness has
+  none to block).
+- **Answer 3's** supplies are written into the new settlement's `warehouse`;
+  `freeStarterBuildings: false` now gates BOTH grants — the founding-time
+  layout (`foundedSettlementBuildings`) and `starterCityOnOpen`'s free commit
+  when the city view first opens — with `placeBuildings.ts` refusing a spoofed
+  `initialLayout` in a mode whose key says no. Nothing in the chain may read a
+  second literal.
+- **Answer 4 = no neutrals** keeps `generateCastles` untouched: the
+  suppression is a **filter applied to the returned `PlacedCastle[]`** after
+  generation (in `init.ts`'s `modeCastles`), never a change to
+  `castlePlacement.ts`'s candidate scan or draw order — otherwise the neutrals'
+  positions and every downstream settlement/horse-variant draw move and
+  constraint 4 fails. The neutral towns, their seeded starter buildings and
+  their districts disappear with the castle list they are downstream of, so one
+  constant is the whole change.
+- **Answer 5** removes the gesture rather than relabelling it: the click
+  pipeline keeps no founding branch, no armed hex set and no highlighted hex,
+  and `server/http/routes/commands.ts` accepts a `FoundSettlement` payload with
+  no `q`/`r` (deriving them in `commandHandler.ts` from the founder's own row).
+
 
 ## 4. Workstreams
 

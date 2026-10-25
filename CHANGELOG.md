@@ -10,6 +10,36 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.35.0] - 2026-10-25
+
+Settlers mode is fixed against its four confirmed intentions (`SETTLERS-PLAN.md`
+§3; the as-built record is `SETTLERS-ACCEPTANCE.md`). Terrain is untouched — the
+mode gates ENTITY seeding only, so `MapGenVersion` and every generation pass stay
+as they are.
+
+- **Bare wilderness.** A settlers game seeds no settlement at all: no seat castle
+  and no neutral castle, so the neutral towns, their seeded starter buildings and
+  their startup districts disappear with the castle list they hang off
+  (`neutralCastles: false`). The mode has no pre-existing objective until a rival
+  founds one.
+- **Never a prebuilt city.** `freeStarterBuildings: false` now gates BOTH grants —
+  the founding-time layout and the city view's free starter commit on first open —
+  and `placeBuildings` refuses a spoofed `initialLayout` in a mode whose key says
+  no. A founded town opens on an empty plot; the free town hall is the player's
+  first placement and everything else is paid for.
+- **Founding is one click, in place.** The toolbar's Found Settlement action is
+  the whole action: no armed gesture, no highlighted hex, no map click that can
+  found, and no hex on the wire (the server derives `(q, r)` from the founder's
+  own row). The armed-gesture code, its render option, its click intent and
+  `foundSettlementTarget` are deleted rather than left dead.
+- **The wagon becomes the town's first hero.** `wagonConsumedOnFounding` is
+  replaced by `wagonBecomesFirstHero`: the same entity, renamed `p<seat>-wagon` →
+  `p<seat>-hero`, still on the seat's roster and still selected (the repro's
+  "The selected hero no longer exists" is fixed). The rule is wagon-only
+  (`founder_not_a_wagon`), so one wagon still buys exactly one settlement, and
+  `cargoStaysWithFounderHero` (default false) makes the cargo explicit: the town
+  takes the load, one stockpile, in the town.
+
 ## [0.34.0] - 2026-10-24
 
 Settlers mode: a seat now starts with one covered wagon in the wilderness and founds its own settlements instead of chartering them.

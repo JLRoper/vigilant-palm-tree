@@ -7,18 +7,26 @@ import {
   MOVEMENT_PER_TURN,
   SETTLERS_MODE_DEFAULTS,
   coveredWagonIdFor,
+  coveredWagonHeroIdFor,
+  coveredWagonSeatOf,
   gameModeSettings,
   hexDistance,
   isGameMode,
   resolveGameMode,
+  seatHeroIdFor,
   type GameModeSettings,
+  type GameState,
+  type SettlementState,
 } from "@heroes/contracts";
 import {
   CURRENT_MAP_GEN_VERSION,
   FOUND_SETTLEMENT_REFUSALS,
   SETTLERS_STREAM_PREFIX,
+  applyPlaceBuildings,
   buildInitialGameState,
+  buildStarterLayout,
   canFoundSettlement,
+  cityViewSizeFor,
   createInitialState,
   foundedSettlementBuildings,
   foundSettlement,
@@ -30,14 +38,27 @@ import {
   placeSettlersStarts,
   settlersStreamKey,
   settlersStreamRng,
+  starterCityOnOpen,
   wagonSuppliesFor,
+  type GameMap,
   type MapSize,
 } from "@heroes/engine";
 
 // The settlers game mode's pin (SETTLERS-PLAN.md §2.3, §2.4) plus the phase-1
-// rules that ride it.
+// rules that ride it -- now including the four CONFIRMED intentions the mode
+// was audited against:
 //
-// Two guarantees, both about NOT moving what already exists:
+//   1. a settlers game is bare wilderness: no neutral town, settlement, castle
+//      or building anywhere, and a founded settlement never comes with
+//      prebuilt buildings (not at founding, not when its city view opens);
+//   2. founding happens IN PLACE, on the hex the wagon already stands on --
+//      there is no separate tile-selection step, and the rule admits no other
+//      hex;
+//   3. the wagon BECOMES the settlement's first hero (the same entity, renamed
+//      `p<seat>-wagon` -> `p<seat>-hero`) instead of being deleted, and the
+//      renamed hero can never found again.
+//
+// Two guarantees about NOT moving what already exists, unchanged by any of it:
 //
 //   1. an existing seed's grid and its seeded entities are byte-identical
 //      (terrain, rivers, resource deposits, castle/neutral positions, names,
@@ -49,11 +70,13 @@ import {
 // The classic-mode digests below are the baseline every later phase is
 // measured against: if a later edit moves them, that edit re-rolled every save
 // in flight and must be redesigned (add a pass for the new version, never
-// mutate an existing one).
+// mutate an existing one). The mode gates ENTITY seeding only.
 
 function digest(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
 }
+
+const EMPTY_WAREHOUSE = { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
 
 // ── 1. Existing seeds are untouched ──
 
@@ -91,6 +114,7 @@ function seedPayload(seed: number, size: MapSize = "small") {
 }
 
 const ENTITY_PIN = "f33d24e92e845b36";
+/** The classic seeding's neutral count for seed 42: entity seeding, not terrain. */
 const NEUTRAL_PIN = 2;
 
 test("the seeded entities of an existing seed are byte-identical", () => {
@@ -106,16 +130,30 @@ test("the seeded entities of an existing seed are byte-identical", () => {
   assert.deepEqual(seedPayload(42), payload, "two builds of one seed must be identical");
 });
 
-test("neutral castles still spawn in the wilderness (design answer 4)", () => {
+test("neutral castles are classic seeding: the classic board keeps them, a settlers board has none", () => {
   const neutrals = Object.values(seedPayload(42).settlements).filter((s) => s.ownerId === null);
   assert.equal(
     neutrals.length,
     NEUTRAL_PIN,
-    "the wilderness must still hold its neutral castles: they are entity seeding, and settlers mode does not suppress them",
+    "a classic game must still hold its neutral castles: they are entity seeding",
   );
   assert.ok(
     neutrals.every((s) => s.ownerId === null && typeof s.q === "number" && typeof s.r === "number"),
     "a neutral castle is a settlement with no owner, at a real hex",
+  );
+  assert.ok(
+    neutrals.every((s) => s.buildings.length > 0),
+    "…and a seeded castle still comes with its own buildings (classic is untouched)",
+  );
+
+  // Settlers: BARE wilderness -- no neutral castle, so no neutral town, no
+  // seeded starter buildings and no startup districts either (all three are
+  // downstream of the castle list). This is `neutralCastles: false` plus
+  // init.ts's modeCastles filter; no generation pass is involved.
+  assert.deepEqual(
+    Object.values(settlersPayload(42).settlements),
+    [],
+    "a settlers game seeds no settlement at all -- owned or neutral, with buildings or without",
   );
 });
 
@@ -180,10 +218,23 @@ test("the founding refusal vocabulary is one pinned list", () => {
   assert.deepEqual([...FOUND_SETTLEMENT_REFUSALS], [
     "not_settlers_mode",
     "founder_not_at_tile",
+    "founder_not_a_wagon",
     "tile_impassable",
     "occupied",
     "too_close_to_settlement",
   ]);
+});
+
+test("the wagon id convention names a seat, and the hero id it converts to", () => {
+  assert.equal(coveredWagonIdFor(0), "p0-wagon");
+  assert.equal(seatHeroIdFor(0), "p0-hero");
+  assert.equal(coveredWagonSeatOf("p0-wagon"), 0);
+  assert.equal(coveredWagonSeatOf("p12-wagon"), 12);
+  assert.equal(coveredWagonSeatOf("p0-hero"), null, "a hero id is not a wagon");
+  assert.equal(coveredWagonSeatOf("p-wagon"), null, "no seat digits, no wagon");
+  assert.equal(coveredWagonSeatOf("p1-wagonx"), null, "the suffix must be the whole tail");
+  assert.equal(coveredWagonHeroIdFor("p2-wagon"), "p2-hero");
+  assert.equal(coveredWagonHeroIdFor("h3"), null, "a recruited hero converts to nothing");
 });
 
 // ── 4. Start placement: one wagon per seat, wilderness bare of seat towns ──
@@ -202,27 +253,45 @@ function settlersPayload(seed = SEED, playerCount = PLAYERS, humanSeatCount = HU
   });
 }
 
-test("a settlers game seeds bare wilderness: no seat owns a town, and the neutrals remain", () => {
+/** The fixture map every founding test measures against. */
+function fixtureMap(): GameMap {
+  return getOrCreateGameMap(SEED, "small", CURRENT_MAP_GEN_VERSION);
+}
+
+test("a settlers game seeds bare wilderness: no castle, town, settlement or building at all", () => {
   const payload = settlersPayload();
-  const seatSettlements = Object.values(payload.settlements).filter((s) => s.ownerId !== null);
   assert.deepEqual(
-    seatSettlements.map((s) => s.id),
+    Object.values(payload.settlements),
     [],
-    "a settlers seat must start with no pre-existing town, settlement or castle (§2.1: this is entity seeding, not terrain)",
+    "a settlers board holds no settlement: no seat town, no neutral castle, and therefore no seeded starter buildings or districts",
   );
-  const neutrals = Object.values(payload.settlements).filter((s) => s.ownerId === null);
-  assert.equal(neutrals.length, NEUTRAL_PIN, "the neutral castles are still capture objectives (answer 4)");
-  // The classic seeding of the SAME seed still has its seat castles -- the mode
-  // is a gate on the entity pass, not a change to the map or to classic.
-  const classicOwned = Object.values(seedPayload(SEED).settlements).filter((s) => s.ownerId !== null);
+  assert.equal(
+    Object.keys(payload.settlements).length,
+    0,
+    "…and no settlement id, so the first founded town is s0",
+  );
+
+  // The classic seeding of the SAME seed is untouched: the mode is a gate on
+  // the entity pass, never a change to the map or to classic.
+  const classic = Object.values(seedPayload(SEED).settlements);
+  const classicOwned = classic.filter((s) => s.ownerId !== null);
   assert.ok(
     classicOwned.length > 0,
     "classic mode still seeds starting castles owned by the seats",
+  );
+  assert.equal(
+    classic.filter((s) => s.ownerId === null).length,
+    NEUTRAL_PIN,
+    "…and its neutral castles",
   );
   assert.deepEqual(
     [...new Set(classicOwned.map((s) => s.ownerId))].sort(),
     [0, 1, 2],
     "every seat owns at least one starting castle in classic mode",
+  );
+  assert.ok(
+    classicOwned.every((s) => s.buildings.length > 0),
+    "…and each of them keeps the starter city classic has always seeded",
   );
 });
 
@@ -245,15 +314,16 @@ test("a settlers game seeds one covered wagon per seat, carrying the starter sup
 });
 
 test("a settlers start is bare terrain, spaced apart, and reproducible from (mapSeed, seat)", () => {
-  const map = getOrCreateGameMap(SEED, "small", CURRENT_MAP_GEN_VERSION);
-  const starts = placeSettlersStarts({
+  const map = fixtureMap();
+  const request = {
     seed: SEED,
-    size: "small",
+    size: "small" as const,
     playerCount: PLAYERS,
     humanSeatCount: HUMANS,
-    mode: "settlers",
+    mode: "settlers" as const,
     map,
-  });
+  };
+  const starts = placeSettlersStarts(request);
   assert.equal(starts.length, PLAYERS);
   assert.deepEqual(
     starts.map((s) => s.streamId),
@@ -275,41 +345,27 @@ test("a settlers start is bare terrain, spaced apart, and reproducible from (map
         "seats start at least minFoundingDistance apart",
       );
     }
-    for (const neutral of Object.values(settlersPayload().settlements)) {
+  }
+  // A settlers board carries no settlement, so the "also clear of the existing
+  // towns" half of the rule is asserted against a board that HAS objectives:
+  // the classic seeding's own castle hexes, handed to the placement as its
+  // blocked list. Every start must still keep minFoundingDistance from them.
+  const objectives = Object.values(seedPayload(SEED).settlements).map((s) => ({ q: s.q, r: s.r }));
+  assert.ok(objectives.length > 0, "the classic fixture must have objectives to avoid");
+  for (const start of placeSettlersStarts({ ...request, occupied: objectives })) {
+    for (const o of objectives) {
       assert.ok(
-        hexDistance({ q: a.q, r: a.r }, { q: neutral.q, r: neutral.r }) >= minDistance,
-        "a start is never inside the founding dead zone of a neutral castle",
+        hexDistance({ q: start.q, r: start.r }, o) >= minDistance,
+        "a start is never inside the founding dead zone of a settlement already on the board",
       );
     }
   }
   // Replaying is exact, and one seat's start does not depend on how many seats
   // follow it (the stream is per-entity, not a shared cursor).
-  const replay = placeSettlersStarts({
-    seed: SEED,
-    size: "small",
-    playerCount: PLAYERS,
-    humanSeatCount: HUMANS,
-    mode: "settlers",
-    map,
-  });
-  assert.deepEqual(replay, starts);
-  const solo = placeSettlersStarts({
-    seed: SEED,
-    size: "small",
-    playerCount: 1,
-    humanSeatCount: 1,
-    mode: "settlers",
-    map,
-  });
+  assert.deepEqual(placeSettlersStarts(request), starts);
+  const solo = placeSettlersStarts({ ...request, playerCount: 1, humanSeatCount: 1 });
   assert.deepEqual(solo[0], starts[0], "seat 0's start is (mapSeed, seat 0)'s alone");
-  const otherSeed = placeSettlersStarts({
-    seed: SEED + 1,
-    size: "small",
-    playerCount: PLAYERS,
-    humanSeatCount: HUMANS,
-    mode: "settlers",
-    map,
-  });
+  const otherSeed = placeSettlersStarts({ ...request, seed: SEED + 1 });
   assert.notDeepEqual(otherSeed, starts, "another map seed, another placement");
 });
 
@@ -327,8 +383,57 @@ function settlersState(seed = SEED) {
 }
 
 /** The same state, with the founder relocated (for the position/terrain refusals). */
-function withFounderAt(state: ReturnType<typeof settlersState>["state"], founderId: string, q: number, r: number) {
+function withFounderAt(state: GameState, founderId: string, q: number, r: number): GameState {
   return { ...state, heroes: { ...state.heroes, [founderId]: { ...state.heroes[founderId], q, r } } };
+}
+
+/**
+ * A neutral castle, synthesized: a settlers board has none (that is the
+ * point), but the SPACING and OCCUPANCY halves of the rule are measured
+ * against settlements, so the refusal cases need a board that has one.
+ */
+function makeNeutral(id: string, q: number, r: number): SettlementState {
+  return {
+    id,
+    name: id,
+    ownerId: null,
+    q,
+    r,
+    level: 2,
+    population: 0,
+    goldTax: 0,
+    resourceRates: {},
+    foundedOnResource: null,
+    gold: 0,
+    warehouse: { ...EMPTY_WAREHOUSE },
+    citySpots: [],
+    cityMines: [],
+    morale: 100,
+    garrisonUnpaidSinceDay: null,
+    garrisonUnpaidTroops: 0,
+    garrisonUnpaidGold: 0,
+    autoTrade: true,
+    castleVariant: 0,
+    buildings: [],
+  };
+}
+
+function withNeutralAt(state: GameState, neutral: SettlementState): GameState {
+  return { ...state, settlements: { ...state.settlements, [neutral.id]: neutral } };
+}
+
+/** A passable, dry, resource-free hex, at least `minDist` from every `avoid` hex. */
+function findOpenHex(map: GameMap, avoid: Array<{ q: number; r: number }>, minDist = 4): { q: number; r: number } {
+  for (let r = 0; r < map.height; r++) {
+    for (let q = 0; q < map.width; q++) {
+      if (!map.isPassable(q, r)) continue;
+      if (map.riverAt(q, r)) continue;
+      if (map.resourceTileAt(q, r)) continue;
+      if (avoid.some((a) => hexDistance({ q, r }, a) < minDist)) continue;
+      return { q, r };
+    }
+  }
+  throw new Error("findOpenHex: no legal founding hex on this fixture map");
 }
 
 test("hydration carries the mode, and a row without one stays a classic state key-for-key", () => {
@@ -351,9 +456,8 @@ test("hydration carries the mode, and a row without one stays a classic state ke
   // And the hydrated settlers state can actually found: the mode is not just a
   // label on the state, it is what canFoundSettlement gates on.
   const wagon = settlers.heroes[coveredWagonIdFor(0)];
-  const map = getOrCreateGameMap(SEED, "small", CURRENT_MAP_GEN_VERSION);
   assert.deepEqual(
-    canFoundSettlement({ state: settlers, founderId: wagon.id, q: wagon.q, r: wagon.r, map }),
+    canFoundSettlement({ state: settlers, founderId: wagon.id, q: wagon.q, r: wagon.r, map: fixtureMap() }),
     { ok: true },
   );
 });
@@ -371,13 +475,17 @@ test("founding is refused off the founder's own hex, on occupied, impassable and
   const { map, state } = settlersState();
   const wagon = state.heroes[coveredWagonIdFor(0)];
 
+  // IN PLACE: the founder's own hex is the only hex the rule ever admits --
+  // there is no reach, so one hex off is `founder_not_at_tile` even on perfect
+  // ground.
+  const away = findOpenHex(map, [{ q: wagon.q, r: wagon.r }]);
   assert.deepEqual(
-    canFoundSettlement({ state, founderId: wagon.id, q: 3, r: 3, map }),
+    canFoundSettlement({ state, founderId: wagon.id, q: away.q, r: away.r, map }),
     { ok: false, reason: "founder_not_at_tile" },
   );
 
-  const neutral = Object.values(state.settlements).find((s) => s.ownerId === null)!;
-  const onNeutral = withFounderAt(state, wagon.id, neutral.q, neutral.r);
+  const neutral = makeNeutral("n0", 3, 3);
+  const onNeutral = withFounderAt(withNeutralAt(state, neutral), wagon.id, neutral.q, neutral.r);
   assert.deepEqual(
     canFoundSettlement({ state: onNeutral, founderId: wagon.id, q: neutral.q, r: neutral.r, map }),
     { ok: false, reason: "occupied" },
@@ -409,14 +517,36 @@ test("founding is refused off the founder's own hex, on occupied, impassable and
     }
   }
   assert.ok(tooClose, "the fixture map must have a hex inside a neutral's dead zone");
-  const onTooClose = withFounderAt(state, wagon.id, tooClose.q, tooClose.r);
+  const onTooClose = withFounderAt(withNeutralAt(state, neutral), wagon.id, tooClose.q, tooClose.r);
   assert.deepEqual(
     canFoundSettlement({ state: onTooClose, founderId: wagon.id, q: tooClose.q, r: tooClose.r, map }),
     { ok: false, reason: "too_close_to_settlement" },
   );
 });
 
-test("founding consumes the wagon and plants the settlement holding its supplies", () => {
+test("only a covered wagon founds: a recruited hero standing on legal ground is refused", () => {
+  const { map, state } = settlersState();
+  const wagon = state.heroes[coveredWagonIdFor(0)];
+  const legal = findOpenHex(map, [{ q: wagon.q, r: wagon.r }]);
+  const withRecruit: GameState = {
+    ...state,
+    heroes: {
+      ...state.heroes,
+      h9: { ...wagon, id: "h9", name: "Recruit", ownerId: 0, q: legal.q, r: legal.r },
+    },
+    players: state.players.map((p) => (p.id === 0 ? { ...p, heroIds: [...p.heroIds, "h9"] } : p)),
+  };
+  assert.deepEqual(
+    canFoundSettlement({ state: withRecruit, founderId: "h9", q: legal.q, r: legal.r, map }),
+    { ok: false, reason: "founder_not_a_wagon" },
+    "the rule is wagon-only: the client's gesture, the brain and the driver are not the only thing keeping a recruited hero out",
+  );
+  const refused = foundSettlement({ state: withRecruit, founderId: "h9", q: legal.q, r: legal.r, map });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.ok === false && refused.reason, "founder_not_a_wagon");
+});
+
+test("founding in place turns the wagon into the town's first hero instead of deleting it", () => {
   const { map, state } = settlersState();
   const wagon = state.heroes[coveredWagonIdFor(0)];
   const seatsBefore = state.players[0].settlementIds.length;
@@ -425,27 +555,45 @@ test("founding consumes the wagon and plants the settlement holding its supplies
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(result.consumedFounder, true, "answer 1: one wagon founds exactly one settlement");
+  assert.equal(result.consumedFounder, false, "the wagon is NOT spent: it becomes the town's first hero");
   assert.equal(result.suppliesGranted, true);
 
+  // The town lands on the wagon's own hex -- the in-place rule.
   const settlement = result.state.settlements[result.settlementId];
   assert.ok(settlement, "the settlement exists at the returned id");
   assert.equal(settlement.ownerId, wagon.ownerId);
-  assert.equal(settlement.q, wagon.q);
+  assert.equal(settlement.q, wagon.q, "the town is planted where the wagon stood");
   assert.equal(settlement.r, wagon.r);
   assert.equal(settlement.level, 1);
   assert.deepEqual(settlement.warehouse, SETTLERS_MODE_DEFAULTS.wagonSupplies);
   assert.deepEqual(
     settlement.buildings,
     [],
-    "answer 3: no free starter buildings; the city view's own starter commit is the only grant",
+    "no prebuilt buildings: the founding-time grant is off and the city view's free commit is off too",
   );
   assert.ok(Object.keys(settlement.resourceRates).length > 0, "the town's rates come from its terrain");
   assert.equal(settlement.name.length > 0, true);
 
-  // The wagon is gone, the seat's roster drops it, and the new town is listed.
-  assert.equal(result.state.heroes[wagon.id], undefined, "the consumed wagon is removed");
-  assert.deepEqual(result.state.players[0].heroIds, [], "the seat's roster no longer names the wagon");
+  // The identity change: one entity, renamed. Everything else about the record
+  // -- position, trail, gold, name, movement -- is the wagon's own.
+  const heroId = seatHeroIdFor(wagon.ownerId);
+  assert.equal(result.state.heroes[wagon.id], undefined, "the wagon's own id is gone");
+  const hero = result.state.heroes[heroId];
+  assert.ok(hero, "the seat's hero id is the wagon");
+  assert.equal(hero.ownerId, wagon.ownerId);
+  assert.equal(hero.q, wagon.q);
+  assert.equal(hero.r, wagon.r);
+  assert.deepEqual(hero.trail, wagon.trail, "the same record: only its id moved");
+  assert.equal(hero.movementRemaining, wagon.movementRemaining);
+  assert.deepEqual(hero.stacks, [], "still no army");
+  assert.deepEqual(
+    hero.resources,
+    EMPTY_WAREHOUSE,
+    "the cargo went into the town's warehouse -- ONE stockpile, in the town (cargoStaysWithFounderHero false)",
+  );
+
+  // The roster follows the rename and names the new town.
+  assert.deepEqual(result.state.players[0].heroIds, [heroId], "the seat's roster names the town's first hero");
   assert.deepEqual(
     result.state.players[0].settlementIds,
     [...state.players[0].settlementIds, result.settlementId],
@@ -453,9 +601,20 @@ test("founding consumes the wagon and plants the settlement holding its supplies
   assert.equal(result.state.players[0].settlementIds.length, seatsBefore + 1);
   assert.equal(result.state.nextSettlementId, state.nextSettlementId + 1, "the id counter moves with it");
   assert.equal(result.state.dirty, true);
+  assert.deepEqual(result.state.players[1].heroIds, [coveredWagonIdFor(1)], "the other seats are untouched");
+  assert.ok(result.state.heroes[coveredWagonIdFor(1)], "…and so are their wagons");
 
-  // A second founding there is refused: the hex is now occupied, whatever
-  // founder tries it (seat 1's wagon, walked onto the new town's hex).
+  // The converted hero can never found again (the rule is wagon-only): standing
+  // it on fresh legal ground is still refused.
+  const elsewhere = findOpenHex(map, [settlement, { q: wagon.q, r: wagon.r }]);
+  const moved = withFounderAt(result.state, heroId, elsewhere.q, elsewhere.r);
+  assert.deepEqual(
+    canFoundSettlement({ state: moved, founderId: heroId, q: elsewhere.q, r: elsewhere.r, map }),
+    { ok: false, reason: "founder_not_a_wagon" },
+    "one wagon, one settlement",
+  );
+
+  // And the hex it already holds is occupied for anyone else.
   const onTown = withFounderAt(result.state, coveredWagonIdFor(1), wagon.q, wagon.r);
   const again = foundSettlement({
     state: onTown,
@@ -468,21 +627,157 @@ test("founding consumes the wagon and plants the settlement holding its supplies
   assert.equal(again.ok === false && again.reason, "occupied");
 });
 
-test("the founding rule reads the mode's keys: consumption and supplies", () => {
+test("the founding keeps the selection on the entity it converts, and clears it when the founder is consumed", () => {
   const { map, state } = settlersState();
   const wagon = state.heroes[coveredWagonIdFor(0)];
-  const original = SETTLERS_MODE_DEFAULTS.wagonConsumedOnFounding;
-  try {
-    SETTLERS_MODE_DEFAULTS.wagonConsumedOnFounding = false;
-    const result = foundSettlement({ state, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
-    assert.equal(result.ok, true);
-    if (!result.ok) return;
-    assert.equal(result.consumedFounder, false, "flipping the key flips the rule");
-    assert.ok(result.state.heroes[wagon.id], "the wagon survives when the mode says so");
-    assert.deepEqual(result.state.players[0].heroIds, [wagon.id]);
-  } finally {
-    SETTLERS_MODE_DEFAULTS.wagonConsumedOnFounding = original;
+  const selected: GameState = { ...state, selectedHeroId: wagon.id };
+
+  const converted = foundSettlement({ state: selected, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+  assert.equal(converted.ok, true);
+  if (!converted.ok) return;
+  assert.equal(
+    converted.state.selectedHeroId,
+    seatHeroIdFor(0),
+    "the selection follows the wagon into its new id -- the panel must never report a hero that no longer exists",
+  );
+
+  // A selection that was somebody else is left alone.
+  const other: GameState = { ...state, selectedHeroId: coveredWagonIdFor(1) };
+  const untouched = foundSettlement({ state: other, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+  assert.equal(untouched.ok, true);
+  if (!untouched.ok) return;
+  assert.equal(untouched.state.selectedHeroId, coveredWagonIdFor(1), "another seat's selection is untouched");
+
+  // A CONSUMED founder leaves nothing to select, so the selection is dropped --
+  // the same rule the defeat path's endBattlePhase applies.
+  flipModeKey("wagonBecomesFirstHero", false, () => {
+    const consumed = foundSettlement({ state: selected, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+    assert.equal(consumed.ok, true);
+    if (!consumed.ok) return;
+    assert.equal(consumed.state.selectedHeroId, null, "a consumed founder drops the selection with it");
+  });
+});
+
+test("the converted founder survives a reload as the settlement's first hero", () => {
+  const { map, state } = settlersState();
+  const wagon = state.heroes[coveredWagonIdFor(0)];
+  const founded = foundSettlement({ state, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+  assert.equal(founded.ok, true);
+  if (!founded.ok) return;
+
+  // The row a save writes, read back the way every command reads it.
+  const reloaded = hydrateGameState({
+    seed: SEED,
+    round: 1,
+    day: 1,
+    active_player_id: 0,
+    players: founded.state.players,
+    heroes: founded.state.heroes,
+    settlements: founded.state.settlements,
+    gameMode: "settlers",
+  });
+  const heroId = seatHeroIdFor(0);
+  assert.ok(reloaded.heroes[heroId], "the town's first hero is in the reloaded heroes record");
+  assert.equal(reloaded.heroes[wagon.id], undefined, "…and the wagon id is not");
+  assert.deepEqual(reloaded.players[0].heroIds, [heroId], "the persisted roster names it");
+  assert.deepEqual(reloaded.players[0].settlementIds, [founded.settlementId]);
+  assert.deepEqual(
+    reloaded.settlements[founded.settlementId].buildings,
+    [],
+    "a reloaded town is still building-free",
+  );
+  assert.equal(
+    reloaded.settlements[founded.settlementId].warehouse.wood,
+    SETTLERS_MODE_DEFAULTS.wagonSupplies.wood,
+    "…and still holds the cargo the wagon carried",
+  );
+  // The reloaded hero is still not a founder, and still the seat's own.
+  assert.deepEqual(
+    canFoundSettlement({ state: reloaded, founderId: heroId, q: wagon.q, r: wagon.r, map }),
+    { ok: false, reason: "founder_not_a_wagon" },
+  );
+  assert.equal(reloaded.heroes[heroId].ownerId, 0);
+});
+
+test("a founded settlers town is never handed a prebuilt city", () => {
+  const { map, state } = settlersState();
+  const wagon = state.heroes[coveredWagonIdFor(0)];
+  const founded = foundSettlement({ state, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+  assert.equal(founded.ok, true);
+  if (!founded.ok) return;
+  const settlement = founded.state.settlements[founded.settlementId];
+
+  // 1. The founding-time grant is off (`freeStarterBuildings: false`).
+  assert.deepEqual(settlement.buildings, []);
+  assert.deepEqual(
+    foundedSettlementBuildings("settlers", settlement.population),
+    [],
+    "the mode's founding-time answer is NO",
+  );
+
+  // 2. The city view's own free commit -- the path that handed a founded town
+  //    the classic starter city the moment its city view opened -- is off too.
+  for (const existing of [undefined, []]) {
+    const onOpen = starterCityOnOpen({
+      size: cityViewSizeFor(1),
+      style: "classic",
+      existing,
+      mode: "settlers",
+    });
+    assert.deepEqual(
+      onOpen,
+      { buildings: [], free: false },
+      "opening a settlers town's city view commits nothing, and nothing for free",
+    );
   }
+  // An already-built settlers town is handed its own buildings back untouched
+  // (the pre-existing rule, unchanged), never a second city.
+  const built = buildStarterLayout({ size: 5, style: "classic" });
+  assert.deepEqual(
+    starterCityOnOpen({ size: 5, style: "classic", existing: built, mode: "settlers" }),
+    { buildings: built, free: false },
+  );
+
+  // 3. Classic is untouched: an empty classic settlement still gets its free set.
+  const classicOpen = starterCityOnOpen({ size: 5, style: "classic", existing: [], mode: "classic" });
+  assert.equal(classicOpen.free, true, "a classic settlement keeps the free starter commit");
+  assert.equal(classicOpen.buildings.length > 0, true);
+  const modeBlind = starterCityOnOpen({ size: 5, style: "classic", existing: undefined });
+  assert.equal(modeBlind.free, true, "an absent mode reads as classic (a mode-blind caller keeps today's behaviour)");
+
+  // 4. And the ENGINE refuses a spoofed free commit, so a stale or hostile
+  //    client cannot hand a settlers town the classic city for nothing: the
+  //    same call that is free in a classic game is charged here.
+  const rich = {
+    ...founded.state,
+    settlements: {
+      ...founded.state.settlements,
+      [settlement.id]: {
+        ...settlement,
+        gold: 5000,
+        warehouse: { wood: 5000, stone: 5000, iron: 5000, arcane: 5000, food: 0 },
+      },
+    },
+  };
+  const spoofed = applyPlaceBuildings(rich, settlement.id, 0, classicOpen.buildings, true);
+  assert.equal(spoofed.ok, true, "the town can afford the spoofed set, so it is placed");
+  assert.ok(
+    spoofed.state.settlements[settlement.id].warehouse.wood < rich.settlements[settlement.id].warehouse.wood,
+    "…and it is CHARGED: initialLayout cannot buy a free city in a mode whose key says no",
+  );
+  const freeInClassic = applyPlaceBuildings(
+    { ...rich, gameMode: "classic" },
+    settlement.id,
+    0,
+    classicOpen.buildings,
+    true,
+  );
+  assert.equal(freeInClassic.ok, true);
+  assert.equal(
+    freeInClassic.state.settlements[settlement.id].warehouse.wood,
+    rich.settlements[settlement.id].warehouse.wood,
+    "the classic path is still free -- the mode gate is the only new thing",
+  );
 });
 
 test("a founded settlement's content is derived from the founder's own streams, not from a payload", () => {
@@ -501,21 +796,17 @@ test("a founded settlement's content is derived from the founder's own streams, 
 
 // ── 6. Every mode key flips its own rule (W7 deliverable #4) ──
 //
-// SETTLERS-PLAN.md §3's four answers ARE these keys, and the mode's whole
-// behaviour is meant to move with them (packages/contracts/src/gameMode.ts:
-// "flipping one here (plus its assertion) is the whole change when the reader
-// answers differently"). W7's finding M1 was that only
-// `wagonConsumedOnFounding` had a flip test -- the one above -- while the other
-// keys were only READ inside assertions, so the assertion moved with the
-// constant and proved nothing about the rule. Each test below mutates the key,
-// runs the RULE, and asserts the outcome flipped, restoring the constant in a
-// `finally`.
+// SETTLERS-PLAN.md §3's answers ARE these keys, and the mode's whole behaviour
+// is meant to move with them (packages/contracts/src/gameMode.ts). Each test
+// below mutates the key, runs the RULE, and asserts the outcome flipped,
+// restoring the constant in a `finally`.
 
-/** The six keys, in one list: a new key without a flip test goes red here. */
+/** The seven keys, in one list: a new key without a flip test goes red here. */
 const MODE_KEYS = [
-  "wagonConsumedOnFounding",
+  "wagonBecomesFirstHero",
   "minFoundingDistance",
   "wagonSupplies",
+  "cargoStaysWithFounderHero",
   "freeStarterBuildings",
   "neutralCastles",
   "monsterLairs",
@@ -544,15 +835,78 @@ test("the key set is exactly the pinned list, on both modes", () => {
     [...MODE_KEYS].sort(),
     "classic and settlers must declare the same keys (the neutral values are what a mode-blind rule falls back to)",
   );
+  // The confirmed intentions, as the constants the rules read.
+  assert.equal(SETTLERS_MODE_DEFAULTS.neutralCastles, false, "bare wilderness: no neutral castle");
+  assert.equal(SETTLERS_MODE_DEFAULTS.freeStarterBuildings, false, "no prebuilt city, ever");
+  assert.equal(SETTLERS_MODE_DEFAULTS.wagonBecomesFirstHero, true, "the wagon becomes the town's first hero");
+  assert.equal(SETTLERS_MODE_DEFAULTS.minFoundingDistance, 3, "founding is in place whatever this is");
+  assert.equal(CLASSIC_MODE_DEFAULTS.neutralCastles, true, "classic keeps its neutrals");
+  assert.equal(CLASSIC_MODE_DEFAULTS.freeStarterBuildings, true, "classic keeps its free starter city");
+});
+
+test("flipping wagonBecomesFirstHero flips who the founder becomes", () => {
+  const { map, state } = settlersState();
+  const wagon = state.heroes[coveredWagonIdFor(0)];
+  const result = foundSettlement({ state, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.consumedFounder, false, "the default keeps the founder as the town's first hero");
+  assert.ok(result.state.heroes[seatHeroIdFor(0)], "…under the seat's hero id");
+
+  flipModeKey("wagonBecomesFirstHero", false, () => {
+    const consumed = foundSettlement({ state, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+    assert.equal(consumed.ok, true);
+    if (!consumed.ok) return;
+    assert.equal(consumed.consumedFounder, true, "flipping the key spends the wagon instead");
+    assert.equal(consumed.state.heroes[wagon.id], undefined, "the wagon is gone");
+    assert.equal(consumed.state.heroes[seatHeroIdFor(0)], undefined, "…and no hero took its place");
+    assert.deepEqual(consumed.state.players[0].heroIds, [], "the roster drops it");
+    // The town is identical either way: who the founder becomes does not change
+    // a byte of the settlement.
+    assert.deepEqual(
+      consumed.state.settlements[consumed.settlementId],
+      result.state.settlements[result.settlementId],
+    );
+  });
+});
+
+test("flipping cargoStaysWithFounderHero leaves the load aboard the surviving founder", () => {
+  const { map, state } = settlersState();
+  const wagon = state.heroes[coveredWagonIdFor(0)];
+  const founded = foundSettlement({ state, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+  assert.equal(founded.ok, true);
+  if (!founded.ok) return;
+  assert.deepEqual(
+    founded.state.settlements[founded.settlementId].warehouse,
+    SETTLERS_MODE_DEFAULTS.wagonSupplies,
+    "the default moves the cargo into the town",
+  );
+
+  flipModeKey("cargoStaysWithFounderHero", true, () => {
+    const kept = foundSettlement({ state, founderId: wagon.id, q: wagon.q, r: wagon.r, map });
+    assert.equal(kept.ok, true);
+    if (!kept.ok) return;
+    assert.deepEqual(
+      kept.state.settlements[kept.settlementId].warehouse,
+      EMPTY_WAREHOUSE,
+      "the town starts empty: the load is still the crew's",
+    );
+    assert.equal(kept.suppliesGranted, false);
+    assert.deepEqual(
+      kept.state.heroes[seatHeroIdFor(0)].resources,
+      SETTLERS_MODE_DEFAULTS.wagonSupplies,
+      "…and the surviving hero rides on with it",
+    );
+  });
 });
 
 test("flipping minFoundingDistance flips founding AND start spacing (L2's boundary)", () => {
   const { map, state } = settlersState();
   const wagon = state.heroes[coveredWagonIdFor(0)];
-  const neutral = Object.values(state.settlements).find((s) => s.ownerId === null);
-  assert.ok(neutral, "the fixture map must hold a neutral castle");
+  const neutral = makeNeutral("n0", 3, 3);
+  const withNeutral = withNeutralAt(state, neutral);
 
-  // A passable hex inside the default dead zone of a neutral castle.
+  // A passable hex inside the default dead zone of the neutral castle.
   let inside: { q: number; r: number } | undefined;
   for (let r = 0; r < map.height && !inside; r++) {
     for (let q = 0; q < map.width && !inside; q++) {
@@ -561,7 +915,7 @@ test("flipping minFoundingDistance flips founding AND start spacing (L2's bounda
     }
   }
   assert.ok(inside, "the fixture map must have a hex inside a neutral's dead zone");
-  const onInside = withFounderAt(state, wagon.id, inside.q, inside.r);
+  const onInside = withFounderAt(withNeutral, wagon.id, inside.q, inside.r);
 
   assert.deepEqual(
     canFoundSettlement({ state: onInside, founderId: wagon.id, q: inside.q, r: inside.r, map }),
@@ -624,11 +978,10 @@ test("flipping minFoundingDistance flips founding AND start spacing (L2's bounda
 });
 
 test("flipping wagonSupplies flips the wagon's cargo and the founded warehouse", () => {
-  const empty = { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
   assert.deepEqual(wagonSuppliesFor("settlers"), SETTLERS_MODE_DEFAULTS.wagonSupplies);
-  flipModeKey("wagonSupplies", empty, () => {
+  flipModeKey("wagonSupplies", EMPTY_WAREHOUSE, () => {
     for (const wagon of Object.values(settlersPayload().heroes)) {
-      assert.deepEqual(wagon.resources, empty, "a flipped key must empty the starting cargo");
+      assert.deepEqual(wagon.resources, EMPTY_WAREHOUSE, "a flipped key must empty the starting cargo");
     }
     const { map, state } = settlersState();
     const wagon = state.heroes[coveredWagonIdFor(0)];
@@ -636,15 +989,20 @@ test("flipping wagonSupplies flips the wagon's cargo and the founded warehouse",
     assert.equal(result.ok, true);
     if (!result.ok) return;
     assert.equal(result.suppliesGranted, false, "an empty cargo is not a granted stockpile");
-    assert.deepEqual(result.state.settlements[result.settlementId].warehouse, empty);
+    assert.deepEqual(result.state.settlements[result.settlementId].warehouse, EMPTY_WAREHOUSE);
   });
 });
 
-test("flipping freeStarterBuildings hands the founded town the starter city", () => {
+test("flipping freeStarterBuildings hands the town the starter city, at founding and at the city view", () => {
   assert.deepEqual(
     foundedSettlementBuildings("settlers", 1),
     [],
-    "the mode's answer is NO: the city view's own starter commit is the only grant",
+    "the mode's answer is NO: no founding grant",
+  );
+  assert.deepEqual(
+    starterCityOnOpen({ size: 5, style: "classic", existing: [], mode: "settlers" }),
+    { buildings: [], free: false },
+    "…and no free city-view commit",
   );
   flipModeKey("freeStarterBuildings", true, () => {
     const buildings = foundedSettlementBuildings("settlers", 1);
@@ -659,20 +1017,31 @@ test("flipping freeStarterBuildings hands the founded town the starter city", ()
       buildings,
       "the founded town carries exactly the layout the flipped key grants",
     );
+    assert.equal(
+      starterCityOnOpen({ size: 5, style: "classic", existing: [], mode: "settlers" }).free,
+      true,
+      "the same key gates the city view's free commit",
+    );
   });
 });
 
-test("flipping neutralCastles empties the wilderness, and leaves classic alone", () => {
+test("flipping neutralCastles fills the wilderness, and leaves classic alone", () => {
   assert.equal(
     Object.values(settlersPayload().settlements).length,
-    NEUTRAL_PIN,
-    "the default keeps the neutral castles (design answer 4)",
+    0,
+    "the default is BARE wilderness: no neutral castle at all",
   );
-  flipModeKey("neutralCastles", false, () => {
-    assert.deepEqual(
-      Object.values(settlersPayload().settlements),
-      [],
-      "suppressing the neutrals is a filter over the generated castles: the board is left bare",
+  flipModeKey("neutralCastles", true, () => {
+    const settlements = Object.values(settlersPayload().settlements);
+    assert.equal(
+      settlements.length,
+      NEUTRAL_PIN,
+      "putting the neutrals back is a filter over the generated castles, and it returns exactly the ones classic seeds",
+    );
+    assert.ok(settlements.every((s) => s.ownerId === null), "…as neutrals");
+    assert.ok(
+      settlements.every((s) => s.buildings.length > 0),
+      "…with the buildings and districts the seeding pass gives them",
     );
     assert.equal(
       Object.values(seedPayload(SEED).settlements).filter((s) => s.ownerId === null).length,

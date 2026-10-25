@@ -209,7 +209,12 @@ test("charter overlay and valid-charter-hex nodes respect visibility and skip ma
   assert.equal(validHexNodes[0].r, 0);
 });
 
-// ── The settlers mode's wagon and founding highlight (SETTLERS-PLAN.md §4 W4) ──
+// ── The settlers mode's wagon (SETTLERS-PLAN.md §4 W4) ──
+//
+// The founding itself paints NOTHING: it happens in place from the toolbar, so
+// the scene builder carries no founding hex set at all (the `validFoundHexes`
+// option is gone with the armed gesture). The only settlers-specific thing left
+// in the scene is the wagon flag on the hero node.
 
 test("a covered wagon's hero node is flagged as a wagon; every recruited hero is not", () => {
   const map = makeGrassMap(4, 1);
@@ -227,26 +232,12 @@ test("a covered wagon's hero node is flagged as a wagon; every recruited hero is
   assert.equal(Object.prototype.hasOwnProperty.call(heroNode, "wagon"), false, "and grows no key at all");
 });
 
-test("the armed founding highlight emits the settlement-hex marker for its own hex only", () => {
+test("a map render marks no settlement-planting hex unless a charter is armed", () => {
   const map = makeGrassMap(5, 1);
   const wagon = new Hero("p0-wagon", "Wagon", 2, 0, "player", 0);
-  const opts = makeRenderOptions({
-    viewPlayerId: 0,
-    validFoundHexes: new Set(["2,0", "bogus", "9,9"]),
-  });
-
-  const nodes = buildAdventureScene({ map, heroes: [wagon], castles: [], path: [], hover: null, opts });
-  const marked = nodesOfKind<ValidCharterHexNode>(nodes, "validCharterHex");
-  assert.equal(marked.length, 1, "an out-of-map or malformed key emits nothing");
-  assert.equal(marked[0].q, 2);
-  assert.equal(marked[0].r, 0);
-});
-
-test("without an armed founding gesture the render is unchanged: no marker, no wagon flag", () => {
-  const map = makeGrassMap(5, 1);
-  const wagon = new Hero("p0-wagon", "Wagon", 2, 0, "player", 0);
-  // A classic game's render options carry neither field at all, which is the
-  // byte-identical claim for every existing baseline.
+  // A settlers game's render options carry no founding hex set: the wagon
+  // founds where it stands, from the toolbar, and nothing on the map has to
+  // advertise that. This is the byte-identical claim for every baseline.
   const nodes = buildAdventureScene({
     map,
     heroes: [wagon],

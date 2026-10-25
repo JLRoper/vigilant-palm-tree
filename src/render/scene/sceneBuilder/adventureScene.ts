@@ -227,21 +227,6 @@ export function buildAdventureScene(input: AdventureSceneInput): SceneNode[] {
     }
   }
 
-  // The settlers mode's founding gesture highlights the hex its wagon stands on
-  // (SETTLERS-PLAN.md §4 W4) with the SAME node kind as a charter target: both
-  // mean "a settlement may be planted here", so one marker serves both and the
-  // painter needs no second case.
-  if (opts.validFoundHexes && opts.validFoundHexes.size > 0) {
-    for (let r = bounds.rMin; r <= bounds.rMax; r++) {
-      const { qMin: rowQMin, qMax: rowQMax } = getRowQBounds(bounds, r);
-      for (let q = rowQMin; q <= rowQMax; q++) {
-        if (!isVisible(visible, q, r)) continue;
-        if (!opts.validFoundHexes.has(`${q},${r}`)) continue;
-        nodes.push({ kind: "validCharterHex", q, r, world: axialToPixel(q, r) });
-      }
-    }
-  }
-
   for (const c of castles) {
     const canSee = c.ownerId === opts.viewPlayerId || isVisible(visible, c.tile.q, c.tile.r);
     if (!canSee) continue;

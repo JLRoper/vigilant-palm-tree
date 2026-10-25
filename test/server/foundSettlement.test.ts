@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Command, HeroState, Player, SettlementState } from "@heroes/contracts";
-import { SETTLERS_MODE_DEFAULTS, coveredWagonIdFor, hexDistance } from "@heroes/contracts";
+import { SETTLERS_MODE_DEFAULTS, coveredWagonIdFor, hexDistance, seatHeroIdFor } from "@heroes/contracts";
 import { GameMap, resolveSavedMapGenVersion } from "@heroes/engine";
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
 import { handleCommand } from "../../server/app/commandHandler";
@@ -148,7 +148,7 @@ function findOpenHex(map: GameMap, avoid: Array<{ q: number; r: number }>, minDi
 
 const SETTLERS_LOBBY = { gameMode: "settlers", mapGenVersion: resolveSavedMapGenVersion() };
 
-test("FoundSettlement plants the settlement with the wagon's supplies and consumes the wagon", async () => {
+test("FoundSettlement founds in place and turns the wagon into the town's first hero", async () => {
   const neutral = { q: 3, r: 3 };
   const row = makeRow([makeWagon(0, 0, 0), makeWagon(1, 0, 0)], [makeNeutral("n0", neutral.q, neutral.r)], {
     lobby: SETTLERS_LOBBY,
@@ -176,16 +176,29 @@ test("FoundSettlement plants the settlement with the wagon's supplies and consum
   assert.equal(settlement.q, target.q);
   assert.equal(settlement.r, target.r);
   assert.deepEqual(settlement.warehouse, SETTLERS_MODE_DEFAULTS.wagonSupplies);
-  assert.deepEqual(settlement.buildings, []);
+  assert.deepEqual(
+    settlement.buildings,
+    [],
+    "no prebuilt buildings: the mode never hands a founded town a city",
+  );
 
-  // Persisted: the settlement is in the row, the wagon is gone from the row's
-  // heroes, and the seat's rosters moved with it.
+  // Persisted: the settlement is in the row, the wagon's id is RENAMED to the
+  // seat's hero id (one entity, not a delete-plus-create), and the seat's
+  // rosters moved with it.
   const persisted = gameRepo.rows["test-game"];
   assert.ok(persisted.settlements[settlement.id], "the settlement is persisted");
-  assert.equal(persisted.heroes[coveredWagonIdFor(0)], undefined, "the consumed wagon is deleted");
+  const heroId = seatHeroIdFor(0);
+  assert.equal(persisted.heroes[coveredWagonIdFor(0)], undefined, "the wagon's own id is gone");
+  assert.ok(persisted.heroes[heroId], "the seat's hero id carries the wagon");
+  assert.equal(persisted.heroes[heroId].ownerId, 0);
+  assert.deepEqual(
+    { q: persisted.heroes[heroId].q, r: persisted.heroes[heroId].r },
+    { q: target.q, r: target.r },
+    "the town's first hero stands where the wagon did",
+  );
   assert.ok(persisted.heroes[coveredWagonIdFor(1)], "the other seat's wagon is untouched");
   const seat0 = (persisted.players ?? []).find((p) => p.id === 0);
-  assert.deepEqual(seat0?.heroIds, []);
+  assert.deepEqual(seat0?.heroIds, [heroId], "the roster follows the rename");
   assert.deepEqual(seat0?.settlementIds, [settlement.id]);
   // The counter moves atomically with the settlement: hydrated as the
   // pre-existing settlement count (1 neutral here), +1 for the founding.
@@ -196,7 +209,11 @@ test("FoundSettlement plants the settlement with the wagon's supplies and consum
   assert.equal(eventRepo.events[0].actorSeat, 0);
   const event = result.events[0];
   assert.equal(event.type, "SettlementFounded");
-  assert.equal(event.type === "SettlementFounded" && event.consumedFounder, true);
+  assert.equal(
+    event.type === "SettlementFounded" && event.consumedFounder,
+    false,
+    "the founder was not consumed: it became the town's first hero",
+  );
   assert.equal(event.type === "SettlementFounded" && event.name, settlement.name);
 });
 
@@ -282,4 +299,66 @@ test("FoundSettlement relays the engine's spacing refusal inside a settlement's 
   assert.equal(result.ok, false);
   assert.equal(result.reason, "too_close_to_settlement");
   assert.deepEqual(eventRepo.events, []);
+});
+
+test("FoundSettlement with no hex on the wire founds where the founder stands", async () => {
+  const neutral = { q: 3, r: 3 };
+  const row = makeRow([makeWagon(0, 0, 0), makeWagon(1, 0, 0)], [makeNeutral("n0", neutral.q, neutral.r)], {
+    lobby: SETTLERS_LOBBY,
+  });
+  const map = mapFor(row);
+  const target = findOpenHex(map, [neutral]);
+  row.heroes[coveredWagonIdFor(0)] = makeWagon(0, target.q, target.r);
+  const { gameRepo, deps } = makeDeps(row);
+
+  // FOUNDING IS IN PLACE: no q, no r. The handler derives them from the
+  // founder's own row, which is what lets the client's single toolbar gesture
+  // work -- and the engine still requires the integers, so the derivation is
+  // the only place a hex can come from.
+  const result = await handleCommand(
+    { kind: "FoundSettlement", gameName: "test-game", actor: 0, founderId: coveredWagonIdFor(0) },
+    deps,
+  );
+  assert.equal(result.ok, true, result.ok ? "" : result.reason);
+  const settlement = result.settlement;
+  assert.ok(settlement);
+  assert.deepEqual(
+    { q: settlement.q, r: settlement.r },
+    { q: target.q, r: target.r },
+    "the town lands on the hex the founder stood on",
+  );
+  const persisted = gameRepo.rows["test-game"];
+  assert.deepEqual(
+    { q: persisted.heroes[seatHeroIdFor(0)].q, r: persisted.heroes[seatHeroIdFor(0)].r },
+    { q: target.q, r: target.r },
+  );
+  assert.deepEqual(result.events[0].type === "SettlementFounded" && {
+    q: result.events[0].q,
+    r: result.events[0].r,
+  }, { q: target.q, r: target.r }, "the event records the derived hex, not an absent one");
+});
+
+test("FoundSettlement refuses a recruited hero: only a covered wagon founds", async () => {
+  const neutral = { q: 3, r: 3 };
+  const row = makeRow([makeWagon(0, 0, 0)], [makeNeutral("n0", neutral.q, neutral.r)], {
+    lobby: SETTLERS_LOBBY,
+  });
+  const map = mapFor(row);
+  const target = findOpenHex(map, [neutral]);
+  // A recruited hero of the same seat, standing on legal ground.
+  row.heroes.h9 = makeWagon(0, target.q, target.r, { id: "h9", name: "Recruit" });
+  const { gameRepo, eventRepo, deps } = makeDeps(row);
+
+  const result = await handleCommand(
+    { kind: "FoundSettlement", gameName: "test-game", actor: 0, founderId: "h9" },
+    deps,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "founder_not_a_wagon", "the engine's wagon-only gate, relayed verbatim");
+  assert.deepEqual(eventRepo.events, [], "a refused founding appends nothing");
+  assert.deepEqual(
+    Object.keys(gameRepo.rows["test-game"].settlements),
+    ["n0"],
+    "…and the board is untouched: no settlement was planted",
+  );
 });

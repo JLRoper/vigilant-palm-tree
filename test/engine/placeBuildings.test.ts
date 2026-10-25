@@ -132,6 +132,34 @@ test("applyPlaceBuildings: initialLayout is ignored for a settlement that alread
   assert.equal(result.state.settlements.s0.buildings.length, 1);
 });
 
+test("applyPlaceBuildings: initialLayout cannot hand a settlers town a free city", () => {
+  const starter = buildStarterLayout({ size: 5, style: "classic" });
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    gold: 5000,
+    warehouse: { wood: 5000, stone: 5000, iron: 5000, arcane: 5000, food: 0 },
+  });
+  const game = makeState({ settlements: [settlement] });
+  const settlers = { ...game, gameMode: "settlers" } as typeof game;
+
+  // Classic: the free starter commit lands uncharged -- today's behaviour.
+  const free = applyPlaceBuildings(game, "s0", 0, starter, true);
+  assert.equal(free.ok, true);
+  assert.equal(free.state.settlements.s0.warehouse.wood, 5000, "classic: the starter commit is free");
+  assert.equal(free.state.settlements.s0.buildings.length, starter.length);
+
+  // Settlers: the SAME call is charged. The client's own free commit
+  // (cityView -> starterCityOnOpen) is off for the mode, and this is the
+  // engine-side gate underneath it, so a stale or spoofed client cannot buy a
+  // free city either.
+  const charged = applyPlaceBuildings(settlers, "s0", 0, starter, true);
+  assert.equal(charged.ok, true, charged.ok ? "" : charged.reason);
+  assert.ok(
+    charged.state.settlements.s0.warehouse.wood < 5000,
+    "settlers: the same initialLayout commit is CHARGED -- the mode's key says no free city",
+  );
+  assert.equal(charged.state.settlements.s0.buildings.length, starter.length);
+});
+
 test("applyPlaceBuildings: strips forged workers/draft on new placements", () => {
   const settlement = makeSettlement("s0", 0, 2, 2, {
     gold: 1000,

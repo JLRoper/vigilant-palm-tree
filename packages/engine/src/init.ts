@@ -21,6 +21,7 @@ import {
   coveredWagonIdFor,
   gameModeSettings,
   resolveGameMode,
+  seatHeroIdFor,
 } from "@heroes/contracts";
 import type { GameMap, MapSize } from "./map/gameMap";
 import { MAP_SIZE_ORDER, MAP_SIZES } from "./map/gameMap";
@@ -55,7 +56,10 @@ const STARTING_WAREHOUSE: SettlementState["warehouse"] = { wood: 300, stone: 300
 const MANA_POOL_V1 = maxManaFor(DEFAULT_HERO_INTELLIGENCE);
 
 function heroIdFor(playerIdx: number): HeroId {
-  return `p${playerIdx}-hero`;
+  // One definition of `p<seat>-hero` for the whole codebase: contracts'
+  // seatHeroIdFor is also what a founding wagon is renamed to
+  // (coveredWagonHeroIdFor), so the two can never spell it differently.
+  return seatHeroIdFor(playerIdx);
 }
 
 export interface BuildInitialOptions {

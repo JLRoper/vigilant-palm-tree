@@ -129,7 +129,13 @@ export interface TurnControllerHooks {
   // rejects a founding the server disagrees with (`occupied`,
   // `too_close_to_settlement`), so foundSettlement() rolls its own optimistic
   // apply back when this rejects.
-  onFoundSettlement(actor: number, founderId: HeroId, q: number, r: number): Promise<void>;
+  /**
+   * The settlers mode's founding POST (SETTLERS-PLAN.md §4 W4). It carries WHO
+   * and nothing else: founding is IN PLACE, so the server derives the hex from
+   * the founder's own row (server/app/commandHandler.ts) instead of trusting a
+   * client's idea of where its wagon stands.
+   */
+  onFoundSettlement(actor: number, founderId: HeroId): Promise<void>;
   // #152 (R5 remainder): fired once per hex-step from advanceAutoTravel()'s
   // loop, same fire-and-forget shape as onHumanMove -- the local
   // stepTravelCharterReducer() call already ran and this.state already
@@ -1009,10 +1015,19 @@ export class TurnController {
    * persist, it is a rule disagreement (`occupied`, `too_close_to_settlement`
    * -- another seat settled there first). The rejected hook therefore undoes
    * this apply, and only while this apply is still the current state.
+   *
+   * The hex is not a parameter. Founding is IN PLACE: the wagon plants its town
+   * on the hex it stands on, which is exactly the hex the server derives when
+   * the command carries none -- so the optimistic apply and the persisted fact
+   * cannot disagree about WHERE.
    */
-  foundSettlement(founderId: HeroId, q: number, r: number): { ok: boolean; reason?: string; settlementId?: string } {
+  foundSettlement(founderId: HeroId): { ok: boolean; reason?: string; settlementId?: string } {
     const before = this.state;
     const actor = this.state.activePlayerId;
+    const founder = this.state.heroes[founderId];
+    if (!founder) return { ok: false, reason: "founder_not_at_tile" };
+    const q = founder.q;
+    const r = founder.r;
     const result = foundSettlementReducer({ state: this.state, founderId, q, r, map: this.hooks.getMap() });
     if (!result.ok) return { ok: false, reason: result.reason };
 
@@ -1024,7 +1039,7 @@ export class TurnController {
       },
       hook: async () => {
         try {
-          await this.hooks.onFoundSettlement(actor, founderId, q, r);
+          await this.hooks.onFoundSettlement(actor, founderId);
         } catch (e) {
           if (this.state === result.state) {
             this.state = before;

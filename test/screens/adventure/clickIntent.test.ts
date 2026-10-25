@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { GameMap } from "../../../src/map/gameMap";
 import type { Hero } from "../../../src/entities/hero";
 import { makeHero, makePlayer, makeSettlement, makeState } from "../../charter/_helpers";
-import { clickRejectionToast, coveredWagonAt, foundSettlementRefusalToast, foundSettlementTarget, resolveAdventureClick } from "../../../src/screens/adventure/clickIntent";
+import { clickRejectionToast, coveredWagonAt, foundSettlementRefusalToast, resolveAdventureClick } from "../../../src/screens/adventure/clickIntent";
 import { FOUND_SETTLEMENT_REFUSALS } from "@heroes/engine";
 import { gameModeSettings } from "@heroes/contracts";
 
@@ -543,30 +543,15 @@ test("empty ground with only a settlement selected puts it down instead of askin
   assert.deepEqual(intent, { kind: "deselect-settlement", settlementId: "s0" });
 });
 
-// ── The settlers mode's founding gesture (SETTLERS-PLAN.md §4 W4) ──────────
+// ── The settlers mode's founding (SETTLERS-PLAN.md §4 W4) ─────────────────
 //
-// The gesture is armed from the toolbar's Settle button and its hex set comes
-// from the engine's own rule (foundSettlementTarget). These cases pin the
-// click-intent half: what a click means while it is armed, and that the
-// refusal vocabulary has exactly one set of sentences.
-
-/**
- * A map stub that can answer the engine's founding rule. The engine's
- * `canFoundSettlement` asks for the TERRAIN via `map.get` (its own
- * `isPassable(terrain)`), the river overlay and the resource layer -- so a
- * blocking stub hex is impassable terrain, not merely an impassable tile.
- */
-function stubFoundMap(water: Set<string> = new Set()): GameMap {
-  return {
-    isPassable: (q: number, r: number) => !water.has(`${q},${r}`),
-    cost: () => 1,
-    get: (q: number, r: number) => (water.has(`${q},${r}`) ? "water" : "grass"),
-    riverAt: () => null,
-    resourceTileAt: () => null,
-    width: 30,
-    height: 20,
-  } as unknown as GameMap;
-}
+// There is no founding GESTURE on the map any more: the toolbar's "Found
+// Settlement" action plants the town on the hex its wagon already stands on
+// (GameEngine.openFoundFlow -> turnController.foundSettlement), so the click
+// resolver has no founding branch, no armed hex set and no `found_invalid`
+// reason. What the click path still owns is the wagon lookup the button's own
+// gate uses -- coveredWagonAt -- and the ONE sentence table for the engine's
+// refusal vocabulary, both pinned below.
 
 /** A seat-0 covered wagon (`p0-wagon`, contracts' id convention) on (6,6). */
 function wagonState(overrides: Record<string, unknown> = {}) {
@@ -579,150 +564,21 @@ function wagonState(overrides: Record<string, unknown> = {}) {
   return { ...state, gameMode: "settlers" } as unknown as Parameters<typeof resolveAdventureClick>[0]["state"];
 }
 
-test("the armed founding gesture over the wagon's own hex yields the founding intent", () => {
+test("a drag that crossed the move threshold is never a click", () => {
   const state = wagonState();
   const intent = resolve({
     state,
-    map: stubFoundMap(),
-    heroes: { "p0-wagon": stubHero("p0-wagon", 0, 6, 6) },
-    hover: { q: 6, r: 6 },
-    foundMode: true,
-    validFoundHexes: new Set(["6,6"]),
-  });
-  assert.deepEqual(intent, { kind: "found-settlement", founderId: "p0-wagon", targetQ: 6, targetR: 6 });
-});
-
-test("the gesture is resolved before the select/deselect toggle: its hex never puts the wagon down", () => {
-  // Without the gesture this exact click is a deselect (the wagon is the
-  // selected entity standing on the clicked hex), which would eat the founding.
-  const state = wagonState();
-  const intent = resolve({
-    state,
-    map: stubFoundMap(),
-    heroes: { "p0-wagon": stubHero("p0-wagon", 0, 6, 6) },
-    hover: { q: 6, r: 6 },
-    foundMode: true,
-    validFoundHexes: new Set(["6,6"]),
-  });
-  assert.equal(intent.kind, "found-settlement");
-  assert.equal(intent.kind === "found-settlement" && intent.founderId, "p0-wagon");
-});
-
-test("the armed gesture over a hex outside its set is refused with found_invalid", () => {
-  const state = wagonState();
-  const intent = resolve({
-    state,
-    map: stubFoundMap(),
-    heroes: { "p0-wagon": stubHero("p0-wagon", 0, 6, 6) },
-    hover: { q: 9, r: 9 },
-    foundMode: true,
-    validFoundHexes: new Set(["6,6"]),
-  });
-  assert.equal(intent.kind, "none");
-  assert.equal(intent.kind === "none" && intent.reason, "found_invalid");
-  assert.deepEqual(clickRejectionToast("found_invalid"), {
-    message: "Pick the highlighted hex — a wagon founds where it stands",
-    kind: "info",
-  });
-});
-
-test("a drag that crossed the move threshold still swallows the founding click", () => {
-  const state = wagonState();
-  const intent = resolve({
-    state,
-    map: stubFoundMap(),
+    map: stubMap(new Set()),
     heroes: { "p0-wagon": stubHero("p0-wagon", 0, 6, 6) },
     hover: { q: 6, r: 6 },
     movedDuringDrag: true,
-    foundMode: true,
-    validFoundHexes: new Set(["6,6"]),
   });
-  // Panning the map with the gesture armed must not plant a settlement where
-  // the pointer happened to let go, so the drag guard outranks the gesture.
+  // Panning the map must never be read as an action on the hex the pointer
+  // happened to let go over.
   assert.equal(intent.kind, "none");
   assert.equal(intent.kind === "none" && intent.reason, "movedDuringDrag");
 });
 
-test("the armed gesture is swallowed during another seat's turn", () => {
-  const state = wagonState();
-  const intent = resolve({
-    state,
-    map: stubFoundMap(),
-    heroes: { "p0-wagon": stubHero("p0-wagon", 0, 6, 6) },
-    hover: { q: 6, r: 6 },
-    isPlayerTurn: false,
-    foundMode: true,
-    validFoundHexes: new Set(["6,6"]),
-  });
-  assert.equal(intent.kind, "none");
-  assert.equal(intent.kind === "none" && intent.reason, "not_player_turn");
-});
-
-test("an armed gesture with no hex set falls through to the ordinary pipeline", () => {
-  const state = wagonState();
-  const intent = resolve({
-    state,
-    map: stubFoundMap(),
-    heroes: { "p0-wagon": stubHero("p0-wagon", 0, 6, 6) },
-    hover: { q: 6, r: 6 },
-    foundMode: true,
-    validFoundHexes: null,
-  });
-  assert.deepEqual(intent, { kind: "deselect-hero", heroId: "p0-wagon" });
-});
-
-test("the unarmed gesture changes nothing: foundMode false is today's pipeline", () => {
-  const state = wagonState();
-  const intent = resolve({
-    state,
-    map: stubFoundMap(),
-    heroes: { "p0-wagon": stubHero("p0-wagon", 0, 6, 6) },
-    hover: { q: 6, r: 6 },
-    foundMode: false,
-    validFoundHexes: new Set(["6,6"]),
-  });
-  assert.deepEqual(intent, { kind: "deselect-hero", heroId: "p0-wagon" });
-});
-
-test("foundSettlementTarget is the engine's verdict, not a re-derived one", () => {
-  const state = wagonState();
-  const ok = foundSettlementTarget(state, stubFoundMap(), "p0-wagon");
-  assert.deepEqual([...ok.hexes], ["6,6"]);
-  assert.equal(ok.refusal, null);
-
-  // An impassable hex: the engine refuses, so the highlight is empty and says
-  // which refusal it was.
-  const blocked = foundSettlementTarget(state, stubFoundMap(new Set(["6,6"])), "p0-wagon");
-  assert.equal(blocked.hexes.size, 0);
-  assert.equal(blocked.refusal, "tile_impassable");
-});
-
-test("foundSettlementTarget refuses a classic game with the mode's own refusal", () => {
-  const classic = makeState({
-    heroes: [makeHero("p0-wagon", 0, 6, 6)],
-    settlements: [],
-    selectedHeroId: "p0-wagon",
-  });
-  const target = foundSettlementTarget(classic, stubFoundMap(), "p0-wagon");
-  assert.equal(target.hexes.size, 0);
-  assert.equal(target.refusal, "not_settlers_mode", "the state's mode is what the rule reads");
-});
-
-test("foundSettlementTarget refuses a hex the founder is not standing on", () => {
-  const state = wagonState({
-    heroes: [makeHero("p0-wagon", 0, 6, 6), makeHero("h9", 0, 9, 9)],
-    selectedHeroId: "h9",
-  });
-  const target = foundSettlementTarget(state, stubFoundMap(), "h9");
-  assert.equal(target.refusal, null, "h9 stands on its own hex, so its own hex is valid");
-  assert.deepEqual([...target.hexes], ["9,9"]);
-
-  // And a founder that does not exist at all has no candidate hex.
-  const missing = foundSettlementTarget(state, stubFoundMap(), "nobody");
-  assert.equal(missing.hexes.size, 0);
-  assert.equal(missing.refusal, "founder_not_at_tile");
-  assert.equal(foundSettlementTarget(state, stubFoundMap(), null).refusal, "founder_not_at_tile");
-});
 
 test("coveredWagonAt finds the viewer's own wagon and ignores every other entity", () => {
   const state = wagonState({
@@ -746,6 +602,10 @@ test("the refusal sentences cover the engine's whole vocabulary, keyed by its ow
   });
   assert.deepEqual(foundSettlementRefusalToast("founder_not_at_tile"), {
     message: "A settlement is planted where its founder stands",
+    kind: "error",
+  });
+  assert.deepEqual(foundSettlementRefusalToast("founder_not_a_wagon"), {
+    message: "Only a covered wagon can plant a settlement",
     kind: "error",
   });
   assert.deepEqual(foundSettlementRefusalToast("tile_impassable"), {

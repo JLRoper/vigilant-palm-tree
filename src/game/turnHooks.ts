@@ -382,13 +382,11 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     onFoundSettlement: async (
       actor: number,
       founderId: HeroId,
-      q: number,
-      r: number,
     ): Promise<void> => {
       const name = opts.gameName();
       if (!name) return;
       try {
-        await foundSettlementCommand(name, { actor, founderId, q, r });
+        await foundSettlementCommand(name, { actor, founderId });
       } catch (e) {
         const reason = e instanceof CommandError ? e.reason : null;
         if (reason && FOUND_SETTLEMENT_REFUSALS.includes(reason as FoundSettlementRefusal)) {

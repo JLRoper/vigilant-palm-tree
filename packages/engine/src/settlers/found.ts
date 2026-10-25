@@ -1,10 +1,17 @@
 import type {
   GameState,
+  HeroState,
   Player,
   SettlementId,
   SettlementState,
 } from "@heroes/contracts";
-import { gameModeSettings, hexDistance, resolveGameMode } from "@heroes/contracts";
+import {
+  coveredWagonHeroIdFor,
+  gameModeSettings,
+  hexDistance,
+  isCoveredWagonId,
+  resolveGameMode,
+} from "@heroes/contracts";
 import type { GameMap } from "../map/gameMap";
 import { isPassable } from "../map/terrain";
 import { cleanupDefeatedHeroCharters } from "../charter/cleanup";
@@ -18,6 +25,7 @@ import { cityViewSizeFor, foodBiasForTerrain, generateCitySpots } from "../settl
 import { settlersStreamRng } from "./startPlacement";
 import {
   carriedSupplies,
+  emptyWarehouse,
   foundedSettlementBuildings,
   hasStock,
 } from "./supplies";
@@ -27,7 +35,9 @@ import {
 // This is the mode's own path, NOT a rewrite of the charter path: charters keep
 // their rules (gold, warehouse, travel, construction days) untouched. Here the
 // founding entity is a covered wagon that is already standing where it wants to
-// settle, and founding is immediate.
+// settle, founding is immediate, and the WAGON BECOMES the settlement's first
+// hero (design answer 1) -- the same entity, renamed from `p<seat>-wagon` to
+// `p<seat>-hero`, never deleted.
 
 /**
  * Why founding was refused. ONE vocabulary: the engine returns these strings,
@@ -38,6 +48,12 @@ import {
  *   charter path instead.
  * - `founder_not_at_tile` -- the founding wagon/hero is not standing on the
  *   target hex.
+ * - `founder_not_a_wagon` -- the founder is a recruited/starting hero, not a
+ *   covered wagon: only a wagon founds in this mode. Unreachable from any
+ *   shipped surface (the client offers the gesture for a selected wagon, the
+ *   brain only for wagon ids), and the reason the rule is safe to hand a
+ *   CONVERTED hero -- a wagon that already founded is `p<seat>-hero` and must
+ *   never found again.
  * - `tile_impassable` -- the target hex cannot hold a settlement (water,
  *   dense forest, a river, a resource deposit's own rules).
  * - `occupied` -- a settlement already stands on the target hex.
@@ -47,6 +63,7 @@ import {
 export const FOUND_SETTLEMENT_REFUSALS = [
   "not_settlers_mode",
   "founder_not_at_tile",
+  "founder_not_a_wagon",
   "tile_impassable",
   "occupied",
   "too_close_to_settlement",
@@ -59,11 +76,17 @@ export type FoundSettlementRefusal = (typeof FOUND_SETTLEMENT_REFUSALS)[number];
 export interface FoundSettlementRequest {
   state: GameState;
   /**
-   * The founding entity (the wagon/hero), by id. Also the id its start was
-   * placed with, so `settlersStreamRng(seed, founderId)` replays it.
+   * The founding entity (the wagon), by id. Also the id its start was placed
+   * with, so `settlersStreamRng(seed, founderId)` replays it.
    */
   founderId: string;
-  /** The target hex. */
+  /**
+   * The target hex. There is no tile-selection step in this mode -- the only
+   * hex the rule admits is the one the founder stands on -- so a server
+   * caller derives these from the founder's own row when the command carries
+   * none (server/app/commandHandler.ts). Integers here, always: the engine
+   * refuses a non-hex before anything else.
+   */
   q: number;
   r: number;
   /**
@@ -82,7 +105,11 @@ export type FoundSettlementResult =
       ok: true;
       state: GameState;
       settlementId: SettlementId;
-      /** True when the founder was consumed (design answer 1). */
+      /**
+       * True when the founder was CONSUMED (the mode's `wagonBecomesFirstHero`
+       * false). False -- the shipped settlers rule -- means the wagon survived
+       * as the settlement's first hero, under `settlerHeroIdFor(seat)`.
+       */
       consumedFounder: boolean;
       /** The supplies written into the new settlement's warehouse (answer 3). */
       suppliesGranted: boolean;
@@ -95,11 +122,15 @@ export type FoundSettlementResult =
  * same metric map/castlePlacement.ts spaces castles with).
  *
  * Checked in this order, cheapest and most fundamental first: the mode, then
- * the founder's position, then the target hex's occupancy and terrain, then the
- * spacing rule. A missing founder reads as `founder_not_at_tile` -- the
- * vocabulary has no "no such entity", and the server's own case refuses a
- * missing or foreign founder with `no_hero` / `forbidden_not_your_hero` before
- * this rule is ever consulted.
+ * the founder's identity and position, then the target hex's occupancy and
+ * terrain, then the spacing rule. A missing founder reads as
+ * `founder_not_at_tile` -- the vocabulary has no "no such entity", and the
+ * server's own case refuses a missing or foreign founder with `no_hero` /
+ * `forbidden_not_your_hero` before this rule is ever consulted.
+ *
+ * "Founding happens in place" is expressed here and nowhere else: the only hex
+ * this rule admits is the founder's OWN hex, so there is no reach to tune and
+ * no second tile-selection gesture a client could ask for.
  */
 export function canFoundSettlement(
   request: FoundSettlementRequest,
@@ -111,6 +142,14 @@ export function canFoundSettlement(
   const founder = state.heroes[founderId];
   if (!founder || founder.q !== q || founder.r !== r) {
     return { ok: false, reason: "founder_not_at_tile" };
+  }
+
+  // Wagon-only. Without this a recruited hero (or a converted founder that has
+  // already planted its town) standing on a legal hex would be admitted, and
+  // the mode's whole promise -- one wagon, one settlement, and the wagon is the
+  // town's first hero -- would be one command away from a second free town.
+  if (!isCoveredWagonId(founder.id)) {
+    return { ok: false, reason: "founder_not_a_wagon" };
   }
 
   const settlements = Object.values(state.settlements);
@@ -153,10 +192,13 @@ function foundingStream(state: GameState, founderId: string, purpose: string): (
 
 /**
  * Found a settlement at `(q, r)`: the settlers-mode twin of the charter path,
- * not a rewrite of it. Consumes the founder when the mode's
- * `wagonConsumedOnFounding` says so, writes the founder's cargo into the new
- * settlement's warehouse, and leaves the starter layout to the existing
- * `freeStarterBuildings` rule.
+ * not a rewrite of it. The wagon is renamed into the seat's hero id (design
+ * answer 1, `wagonBecomesFirstHero`) and stays the seat's mobile entity; its
+ * cargo becomes the new town's warehouse (unless `cargoStaysWithFounderHero`
+ * says the crew keeps it aboard), and the starter layout is left to the
+ * existing `freeStarterBuildings` rule -- which is false for this mode, so a
+ * founded town starts empty and is not handed a city at founding or by its
+ * city view (settlement/starterLayout.ts, settlement/placeBuildings.ts).
  *
  * Everything the new settlement contains is derived here, from the state, the
  * map and the founder's own streams -- never from a client payload: the id is
@@ -188,7 +230,15 @@ export function foundSettlement(request: FoundSettlementRequest): FoundSettlemen
         foodBias: foodBiasForTerrain(map.get(q, r) ?? ""),
       })
     : { spots: [], mines: [] };
-  const warehouse = carriedSupplies(founder);
+
+  // The cargo fork, in one place: ONE stockpile in the town (the default) or
+  // the crew rides on with it. Everything that reads it below -- the town's
+  // warehouse, the surviving founder's own `resources` -- comes from these two
+  // locals, so the two can never disagree about who holds the load.
+  const cargoStaysAboard = settings.cargoStaysWithFounderHero;
+  const founderCargo = carriedSupplies(founder);
+  const warehouse = cargoStaysAboard ? emptyWarehouse() : founderCargo;
+  const founderResources = cargoStaysAboard ? founderCargo : emptyWarehouse();
 
   const settlement: SettlementState = {
     id: settlementId,
@@ -220,30 +270,69 @@ export function foundSettlement(request: FoundSettlementRequest): FoundSettlemen
     // Deterministic, not drawn: the wagon founds a plain tier-1 town, and a
     // random castle sprite is a draw this stream must not spend.
     castleVariant: 0,
+    // freeStarterBuildings is false for this mode: a founded settlement never
+    // comes with prebuilt buildings.
     buildings: foundedSettlementBuildings(mode, population),
   };
 
-  const consumedFounder = settings.wagonConsumedOnFounding;
-  const heroes = { ...state.heroes };
-  if (consumedFounder) delete heroes[founderId];
+  // The founder's own fate: the wagon BECOMES the town's first hero. The two
+  // are the same entity -- the record is a HeroState either way -- so this is a
+  // rename plus the roster rewrite, not a delete and a create. The id is the
+  // only carrier that survives a reload (the granular heroes table has fixed
+  // columns and the mode may not add one, §2.5), and the conversion is
+  // collision-free: `p<seat>-hero` is allocated only by init.ts's makeHeroes,
+  // which never runs in this mode.
+  const consumedFounder = !settings.wagonBecomesFirstHero;
+  const convertedId = consumedFounder ? null : coveredWagonHeroIdFor(founderId);
+  const heroes: Record<string, HeroState> = { ...state.heroes };
+  if (convertedId) {
+    delete heroes[founderId];
+    heroes[convertedId] = { ...founder, id: convertedId, resources: founderResources };
+  } else {
+    delete heroes[founderId];
+  }
 
   const players: Player[] = state.players.map((p) => {
     if (p.id !== founder.ownerId) return p;
     return {
       ...p,
       settlementIds: [...p.settlementIds, settlementId],
-      // A consumed founder leaves the seat's roster: the wagon IS the
-      // settlement now, and playerHeroId-style lookups must not resolve to a
-      // hero that no longer exists.
-      heroIds: consumedFounder ? p.heroIds.filter((id) => id !== founderId) : p.heroIds,
+      // The seat's roster follows the entity: it names the town's first hero
+      // after a conversion, and drops the founder entirely when it was
+      // consumed. Either way `playerHeroId`-style lookups never resolve to an
+      // id that no longer exists.
+      heroIds: consumedFounder
+        ? p.heroIds.filter((id) => id !== founderId)
+        : p.heroIds.map((id) => (id === founderId ? convertedId ?? id : id)),
     };
   });
 
-  // A consumed founder takes its charter with it, the same rule the battle
-  // path applies to a defeated hero -- otherwise activeCharters would keep an
-  // entry naming a hero that is gone.
-  const folded =
-    consumedFounder ? cleanupDefeatedHeroCharters(state, founderId) : state;
+  // Charters: a founder that was CONSUMED takes its charter with it, the same
+  // rule the battle path applies to a defeated hero -- otherwise
+  // activeCharters would keep an entry naming a hero that is gone. A CONVERTED
+  // founder is alive, so its charter follows the rename instead (a wagon
+  // cannot charter in this mode today, which is why this is belt to that
+  // brace rather than the point).
+  const folded: GameState = consumedFounder
+    ? cleanupDefeatedHeroCharters(state, founderId)
+    : convertedId === null
+      ? state
+      : {
+          ...state,
+          activeCharters: state.activeCharters.map((c) =>
+            c.heroId === founderId ? { ...c, heroId: convertedId } : c,
+          ),
+        };
+
+  // The selection follows the entity, exactly as the defeat path's
+  // `endBattlePhase` clears it: a converted founder keeps its selection under
+  // its new id (the panel must not print "the selected hero no longer exists"
+  // about the town's own first hero), and a consumed one drops the selection
+  // because there is nothing left to select. Any other selection is untouched.
+  const selectedHeroId =
+    state.selectedHeroId !== founderId
+      ? state.selectedHeroId
+      : convertedId ?? null;
 
   return {
     ok: true,
@@ -252,6 +341,7 @@ export function foundSettlement(request: FoundSettlementRequest): FoundSettlemen
       heroes,
       settlements: { ...state.settlements, [settlementId]: settlement },
       players,
+      selectedHeroId,
       nextSettlementId: state.nextSettlementId + 1,
       dirty: true,
     },

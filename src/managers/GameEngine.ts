@@ -26,7 +26,7 @@ import { createFrameErrorLog } from "../core/frameErrors";
 import { shouldDriveAi } from "../io/serverDrivenGames";
 import { isUnchartedGame } from "../io/unchartedGames";
 import { isSettlersGame } from "../io/gameModes";
-import { foundSettlementRefusalToast, foundSettlementTarget } from "@screens/adventure/clickIntent";
+import { foundSettlementRefusalToast } from "@screens/adventure/clickIntent";
 import { isCoveredWagonId, type HeroId } from "@heroes/contracts";
 import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
@@ -61,12 +61,6 @@ export class GameEngine {
   private lastTime = performance.now();
   private charterPlacementMode = false;
   private validCharterHexes: Set<string> | null = null;
-  // The settlers mode's founding gesture (SETTLERS-PLAN.md §4 W4): the armed
-  // state and the hexes the engine's own rule accepts while it is armed. Both
-  // live beside the charter's, because they are the same idea for two modes --
-  // a hex the player must click to plant a settlement.
-  private foundPlacementMode = false;
-  private validFoundHexes: Set<string> | null = null;
   public eventLog: EventLog | null = null;
   public consoleHandle: DevConsoleHandle | null = null;
   private logPanelEnsured = false;
@@ -177,12 +171,6 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       getCharterMode: () => this.charterPlacementMode,
       setCharterMode: (v: boolean) => { this.charterPlacementMode = v; if (!v) this.validCharterHexes = null; },
       getValidCharterHexes: () => this.validCharterHexes,
-      // The founding gesture (SETTLERS-PLAN.md §4 W4): the same shape, aimed
-      // at one hex -- the one the selected wagon stands on.
-      onFoundSettlement: (founderId: string, targetQ: number, targetR: number) => this.handleFoundSettlement(founderId, targetQ, targetR),
-      getFoundMode: () => this.foundPlacementMode,
-      setFoundMode: (v: boolean) => { this.foundPlacementMode = v; if (!v) this.validFoundHexes = null; },
-      getValidFoundHexes: () => this.validFoundHexes,
       onTileInspect: (tile) => {
         if (this.ui.getCityView()?.isOpen()) return;
         this.ui.setInspectedTile(tile);
@@ -391,6 +379,14 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     const gs = this.state.getState();
     const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
     if (!gs || gs.phase.kind !== "PLAYER_TURN" || gs.activePlayerId !== localId) return false;
+    // Settlers mode: the button IS the founding action (one gesture, in place),
+    // so it is live exactly when that action can run -- the seat's own covered
+    // wagon selected. A converted founder is `p<seat>-hero`, which can never
+    // found again, so the button goes quiet the moment its town exists instead
+    // of offering an action the rule refuses.
+    if (isSettlersGame(this.session.getActiveGameName())) {
+      return this.selectedWagonId(gs) != null;
+    }
     const selectedId = gs.selectedHeroId;
     return selectedId != null && gs.heroes[selectedId] != null;
   }
@@ -432,14 +428,17 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
     return validCharterHexes(gs, this.gameMap);
   }
 
-  // ==========================================================================
-  // The settlers mode's founding gesture (SETTLERS-PLAN.md §4 W4)
-  // ==========================================================================
-  //
-  // One button, two modes: the settle button enters the charter flow in a
-  // classic game and arms the founding gesture in a settlers one. Which mode
-  // is active comes from the per-game registry (io/gameModes), fed on load --
-  // never from a hardcoded game name or a build flag.
+  /**
+   * The settlers mode's founding action (SETTLERS-PLAN.md §4 W4) lives OUTSIDE
+   * this view: the toolbar's Found Settlement button plants the town on the hex
+   * its wagon already stands on (GameEngine.openFoundFlow), so there is no
+   * armed gesture and no founding hex for the click pipeline to resolve.
+   *
+   * One button, two modes: the settle button enters the charter flow in a
+   * classic game and founds in place in a settlers one. Which mode is active
+   * comes from the per-game registry (io/gameModes), fed on load -- never from
+   * a hardcoded game name or a build flag.
+   */
   private openSettlementAction(): void {
     if (isSettlersGame(this.session.getActiveGameName())) {
       this.openFoundFlow();
@@ -450,24 +449,26 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
 
   /**
    * The button's own copy for the active game's mode, or null for the classic
-   * copy the toolbar already carries.
+   * copy the toolbar already carries. ONE action, one sentence: the button
+   * founds the selected wagon's settlement where the wagon stands, so there is
+   * no armed state left to describe.
    */
   private settleButtonCopy(): { label: string; title: string } | null {
     if (!isSettlersGame(this.session.getActiveGameName())) return null;
-    const armed = this.foundPlacementMode;
     return {
       label: "⛺ Found Settlement",
-      title: armed
-        ? "Click your wagon's highlighted hex to plant its settlement"
-        : "Select your covered wagon, then plant its settlement where it stands (one per wagon)",
+      title: "Plant your covered wagon's settlement where it stands (one per wagon)",
     };
   }
 
   /**
-   * Arm the gesture for the SELECTED covered wagon: highlight the hex the
-   * engine's own rule accepts (foundSettlementTarget -- the wagon's own hex, or
-   * none) and, when there is none, say why in the refusal's own sentence
-   * instead of arming a gesture that cannot complete.
+   * Found the SELECTED covered wagon's settlement, IN PLACE (SETTLERS-PLAN.md
+   * §4 W4). One gesture, because the mode has no tile-selection step: the
+   * engine's own rule (`canFoundSettlement`, through the turn controller) is
+   * asked about the hex the wagon already stands on, and when it refuses, the
+   * refusal's own sentence is the toast. Nothing is asked of the player -- the
+   * engine names the town and derives its stock -- so there is no second click
+   * and no modal.
    */
   private openFoundFlow(): void {
     const gs = this.state.getState();
@@ -477,25 +478,14 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       showToast("Select one of your covered wagons first", "info");
       return;
     }
-    const target = foundSettlementTarget(gs, this.gameMap, founderId);
-    if (target.hexes.size === 0) {
-      const toast = foundSettlementRefusalToast(target.refusal ?? "founder_not_at_tile");
-      console.warn("[settlers] founding refused:", target.refusal);
-      showToast(toast.message, toast.kind);
-      return;
-    }
-    this.foundPlacementMode = true;
-    this.validFoundHexes = target.hexes;
-    this.fullFrame();
-    this.ui.getToolbar()?.refresh();
+    this.handleFoundSettlement(founderId);
   }
 
   /**
-   * The seat's own covered wagon, when it is the selected entity. The gesture
-   * is wagon-only on purpose: the wagon is the mode's starting entity and the
-   * thing the mode's copy talks about, and a recruited hero founding (which
-   * the engine's rule would allow -- see the engine slice's open question 3)
-   * is not something this client offers.
+   * The seat's own covered wagon, when it is the selected entity. Wagon-only on
+   * purpose: the wagon is the mode's starting entity and the thing the mode's
+   * copy talks about, and the engine refuses a non-wagon founder
+   * (`founder_not_a_wagon`), so this gate and the rule agree.
    */
   private selectedWagonId(gs: import("../state/gameState").GameState): string | null {
     const heroId = gs.selectedHeroId;
@@ -507,14 +497,13 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
   }
 
   /**
-   * The gesture fired: found the settlement through the turn controller (the
-   * engine's own reducer, then the command). A refusal keeps the gesture armed
-   * so the player can see the highlighted hex they were aiming at, and the
-   * toast carries the sentence the refusal's own vocabulary maps to.
+   * Found the settlement through the turn controller (the engine's own reducer,
+   * then the command), on the hex the wagon stands on. A refusal surfaces
+   * through the toast the refusal's own vocabulary maps to and changes nothing.
    */
-  private handleFoundSettlement(founderId: string, targetQ: number, targetR: number): boolean {
+  private handleFoundSettlement(founderId: string): boolean {
     const tc = this.state.getTurnController();
-    const result = tc.foundSettlement(founderId as HeroId, targetQ, targetR);
+    const result = tc.foundSettlement(founderId as HeroId);
     if (!result.ok) {
       const toast = foundSettlementRefusalToast(result.reason ?? "unknown");
       console.warn("[settlers] founding refused:", result.reason);
@@ -522,8 +511,8 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
       return false;
     }
     this.state.replaceState(tc.getState());
-    this.foundPlacementMode = false;
-    this.validFoundHexes = null;
+    this.fullFrame();
+    this.ui.getToolbar()?.refresh();
     return true;
   }
 
@@ -621,11 +610,6 @@ const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cache
         gameName,
         uncharted: isUnchartedGame(gameName),
         revealedTiles: gs.players[localId]?.revealedTiles ?? [],
-        // The founding gesture's own highlight: the hex the engine's rule
-        // accepts for the armed wagon (SETTLERS-PLAN.md §4 W4). Rides the
-        // options object rather than a positional argument, so the render
-        // layer needs no new parameter to carry it.
-        validFoundHexes: this.validFoundHexes,
       },
       gs.activeCharters,
       this.validCharterHexes,

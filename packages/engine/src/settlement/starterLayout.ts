@@ -1,4 +1,5 @@
-import type { BuildingDef, BuildingKind, FactionId, GenerationStyle, Platoon } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, FactionId, GameMode, GenerationStyle, Platoon } from "@heroes/contracts";
+import { gameModeSettings } from "@heroes/contracts";
 import { buildingFootprintFromRegistry, buildingSettlementEffects } from "../buildingRegistry";
 import { evaluateTroopUpkeep, UPKEEP_CHARGE_DAYS } from "../economy/troopUpkeep";
 import { pickStyleForBuilding } from "../styleResolver";
@@ -283,9 +284,21 @@ export function starterCityOnOpen(input: {
   factionId?: FactionId;
   /** The settlement's persisted buildings, if it has any. */
   existing: BuildingDef[] | undefined;
+  /**
+   * The game's mode. Absent reads as classic (contracts' resolveGameMode), so
+   * a mode-blind caller keeps today's behaviour; settlers mode hands back
+   * NOTHING, because its `freeStarterBuildings` key is false -- a founded town
+   * starts empty and the free commit would otherwise hand it the classic
+   * starter city the moment its city view opened (the defect this parameter
+   * exists to close).
+   */
+  mode?: GameMode;
 }): StarterCityOnOpen {
   if (input.existing && input.existing.length > 0) {
     return { buildings: input.existing, free: false };
+  }
+  if (!gameModeSettings(input.mode).freeStarterBuildings) {
+    return { buildings: [], free: false };
   }
   return {
     buildings: buildStarterLayout({ size: input.size, style: input.style, farms: input.farms, factionId: input.factionId }),
