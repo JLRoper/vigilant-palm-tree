@@ -31,14 +31,6 @@ export interface RenderOptions {
   activeCharters?: readonly CharterState[];
   /** Valid hexes for charter placement mode. */
   validCharterHexes?: Set<string> | null;
-  /**
-   * Valid hexes for the settlers mode's founding gesture (SETTLERS-PLAN.md §4
-   * W4) -- in practice the one hex the armed wagon stands on. Painted with the
-   * same marker as `validCharterHexes`: to the player both mean "a settlement
-   * may be planted here", and a second marker family for the same idea would
-   * be a copy that drifts.
-   */
-  validFoundHexes?: Set<string> | null;
   /** The clicked/inspected tile driving the tile info panel, if any. Drawn as a persistent selection ring, even through fog. */
   inspectedTile?: Axial;
   /** Trade-route id of the caravan currently under the pointer (if any); drives the map hover ring and the own-seat route preview. */

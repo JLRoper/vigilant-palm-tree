@@ -300,6 +300,11 @@ export class UIManager {
         const ownerId = gs.settlements[settlementId]?.ownerId;
         return gs.players.find((p) => p.id === ownerId)?.factionId;
       },
+      // The game's mode, straight off the engine state the rules read: the city
+      // view needs it to know whether an empty settlement may be handed the
+      // free starter city on open, which settlers mode forbids
+      // (settlement/starterLayout.ts's starterCityOnOpen).
+      getGameMode: () => getStateMgr().getState().gameMode,
       isUnitRecruitable: getLocalSeat
         ? (unitTypeId) => {
             const gs = getStateMgr().getState();

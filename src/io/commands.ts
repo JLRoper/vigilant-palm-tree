@@ -376,12 +376,14 @@ export async function startCharter(
 // command. Same fire-and-forget shape as startCharter above -- the caller
 // (src/game/turnHooks.ts's onFoundSettlement) has already applied the engine's
 // own reducer locally, so the response body is unused here too. The payload is
-// only WHO founds and WHERE: the settlement's id, name, stock, rates and city
-// spots are the engine's derivations, and a client that could name a
-// settlement could invent one.
+// only WHO founds: founding is IN PLACE, so the server derives the hex from the
+// founder's own row (the mode has no tile-selection step, and a client's idea
+// of where its wagon stands is not authority), and the settlement's id, name,
+// stock, rates and city spots are the engine's derivations -- a client that
+// could name a settlement could invent one.
 export async function foundSettlement(
   name: string,
-  payload: { actor: number; founderId: string; q: number; r: number }
+  payload: { actor: number; founderId: string }
 ): Promise<void> {
   await postCommand(name, { kind: "FoundSettlement", ...payload });
 }
