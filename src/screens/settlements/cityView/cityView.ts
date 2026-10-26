@@ -29,6 +29,7 @@ import { BuildingMenu, type BuildingMenuOptions, type BuildingMenuWorkforce } fr
 import { BuildingPlacer } from "./buildingPlacer";
 import { BuildingSelectionMenu, type SelectedBuildingEntry } from "./buildingSelectionMenu";
 import { openConfirmDialog } from "@screens/shared/confirmDialog";
+import { bus } from "../../../core/eventBus";
 import { claimEscapeBeforePanels } from "@screens/shared/panelManager";
 import { loadPanelGeometry } from "@screens/shared/panelLayout";
 import { resolvePanelPlacement, type PanelRect } from "@screens/shared/panelPlacement";
@@ -355,6 +356,16 @@ export class CityView {
     }, this.getFloatingPanelRects);
 
     window.addEventListener("keydown", this.onKeyDown);
+
+    // A turn (or any committed state) moves the treasury while the city -- and
+    // its palette -- stay open, and the palette renders its rows FROM that
+    // snapshot, so a treasury that refilled under it has to reach it. off()
+    // first so a context switch that opens the view again cannot stack
+    // listeners.
+    bus.off("turn:ended", this.syncAffordability);
+    bus.off("state:committed", this.syncAffordability);
+    bus.on("turn:ended", this.syncAffordability);
+    bus.on("state:committed", this.syncAffordability);
 
     // The city owns Escape ordering while it is open, because the settlement
     // info panel deliberately stays visible over the city (user request,
@@ -1061,6 +1072,11 @@ export class CityView {
   }
 
   private openBuildPalette(): void {
+    // The palette renders its rows from the affordability snapshot, so the
+    // snapshot has to be current BEFORE the list is built: a treasury that
+    // refilled while the city view was open used to leave every row dimmed at
+    // "have 0" and a silent no-op.
+    this.refreshAffordability();
     const stored = loadPanelGeometry("buildPalette");
     const desired = stored ?? { x: 12, y: Math.max(20, window.innerHeight - PALETTE_H) };
     const occupied = this.collectOccupiedRects();
@@ -1166,6 +1182,16 @@ export class CityView {
     }
   }
 
+  /**
+   * The treasury moved under an open city view (a turn ended, or any state was
+   * committed): re-read it, which re-renders the palette's rows when one is
+   * open. Bound once per open so a closed view does not keep listening.
+   */
+  private syncAffordability = (): void => {
+    if (!this.isOpen()) return;
+    this.refreshAffordability();
+  };
+
   private updateBuildButton(): void {
     this.designBox.setBuildPaletteOpen(this.placer.isPaletteOpen());
   }
@@ -1197,6 +1223,8 @@ export class CityView {
       this.closeRecruitmentPanel?.();
       this.designBox.hide();
       window.removeEventListener("keydown", this.onKeyDown);
+      bus.off("turn:ended", this.syncAffordability);
+      bus.off("state:committed", this.syncAffordability);
       this.releaseEscapeClaim?.();
       this.releaseEscapeClaim = null;
       this.endWorkerDrag();
