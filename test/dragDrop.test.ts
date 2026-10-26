@@ -8,6 +8,7 @@
 import { spawn, ChildProcess } from "node:child_process";
 import { chromium } from "playwright";
 import type { GameDebugApi } from "../src/io/debugCommands";
+import { nodeToolCommand } from "../tools/resolve-tool-entry.mjs";
 
 const WEB_PORT = Number(process.env.CLIENT_PORT) || 4173;
 const API_PORT = Number(process.env.API_PORT) || 3001;
@@ -18,10 +19,13 @@ const GAME_NAME = "dragdrop-test";
 const browserLogs: string[] = [];
 
 function startApi(): ChildProcess {
-  const child = spawn("npx", ["tsx", "server/index.ts"], {
+  // Shell-free (node + tsx's CLI entry): `shell: true` here means a cmd.exe
+  // child, which allocates a console window when it does not inherit one.
+  const api = nodeToolCommand("tsx", ["server/index.ts"]);
+  const child = spawn(api.cmd, api.args, {
     env: { ...process.env, API_PORT: String(API_PORT) },
     stdio: ["ignore", "pipe", "pipe"],
-    shell: true,
+    windowsHide: true,
   });
   child.stdout?.on("data", (d) => process.stdout.write(`[api] ${d}`));
   child.stderr?.on("data", (d) => process.stderr.write(`[api err] ${d}`));
@@ -32,10 +36,11 @@ function startWeb(): ChildProcess {
   // Dev server (not `vite preview`): the production bundle's auto-starter
   // flow 500s against preview, so create the game explicitly instead (same
   // bootstrap as test/visualRegression.test.ts).
-  const child = spawn("npx", ["vite", "--port", String(WEB_PORT), "--strictPort"], {
+  const web = nodeToolCommand("vite", ["--port", String(WEB_PORT), "--strictPort"]);
+  const child = spawn(web.cmd, web.args, {
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
-    shell: true,
+    windowsHide: true,
   });
   child.stdout?.on("data", (d) => process.stdout.write(`[web] ${d}`));
   child.stderr?.on("data", (d) => process.stderr.write(`[web err] ${d}`));
