@@ -588,7 +588,7 @@ The city grid floor is transparent: `paintCityCell` draws only the diamond outli
 3. Resource spots: colored diamonds with rune icon (attempts sprite first, falls back to `RESOURCE_PAL` procedural shape). **A spot may be `food`** since 2026-10-01 — a city spot is the only tile a farm building can exploit for the 3.0 multiplier, and the vestigial `isMineable` filter that hid them was removed from `GameEngine.handleDblClick`
 4. Mines: isometric boxes (walls + roof) with resource palette, level number label, and resource spot icon behind
 5. Buildings: sorted by `gx + gy` (painter's algorithm), each drawn via `drawBuilding()`
-6. Ghost building: transparent preview (green = valid, red = invalid) at the hovered cell
+6. Ghost building: transparent preview (green = valid, red = invalid) at the hovered cell; an invalid ghost also carries the refusing rule **in words** under its footprint (`CityGhostBuildingNode.reason`, painted by `paintCityGhostBuilding`, 2026-10-26) — the colour alone could not say that the 5x5 grid's centre cell is reserved
 7. Name label (top-left, 14px white, shifted down by `CitySceneInput.labelOffsetY` — `CityView` passes the fixed toolbar's height because the render path must not measure the DOM; 2026-09-29, labels used to hide under the toolbar)
 8. Info overlay: tier label + style label + pattern name (top-left below name, 11px, 70% opacity, same `labelOffsetY`)
 
