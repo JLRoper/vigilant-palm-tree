@@ -1,0 +1,15 @@
+Isometric pixel art game asset for a medieval city-builder, matching the SECOND attached image exactly in style: the same chunky pixel size (large visible pixels, no fine-grained noise), the same thick dark-brown outline around every shape, the same warm brown/tan palette, the same lighting from the upper left, a square 1:1 canvas, one single centred asset.
+
+The FIRST attached image is the asset to redraw: the settlement's TOWN CENTRE on its square lot. Keep its composition, its size on the canvas and its silhouette family.
+
+GEOMETRY, exact: the lot is a flat isometric diamond of sandy ground. It is exactly HALF as tall as it is wide (a 2:1 dimetric diamond whose four edges descend at 26.57 degrees - visibly FLATTER than a 30 degree isometric diamond, which is taller and steeper). Its widest points span 85 percent of the canvas width and its lowest corner sits 110 pixels above the bottom edge of the canvas, on the vertical centre line. The magenta diamond drawn over the FIRST image marks exactly that lot: keep its four corners, fill the sand to its edge, draw the ground with edges parallel to the magenta guide, and leave no magenta pixel behind.
+
+THE LOT IS A FLAT PLANE, NOT A SLAB. Do not draw any vertical face, side wall, thickness, cake-edge, rim, kerb, platform or pedestal underneath the sand - not even 3 pixels of it. Along the diamond's two lower edges the sand simply ends in a 2-pixel dark-brown outline and then nothing but the background. Also no drop shadow under the lot.
+
+The building stands ON that flat lot: its lowest edge rests on the sand with no gap, nothing floats, and nothing is cut off by the bottom edge of the canvas.
+
+Subject: a well-kept medieval town hall. A stone-founded lower storey with a plank door on iron hinges and a stone threshold, a jettied plastered upper storey with visible dark timber framing and two leaded windows with wooden shutters, a steep dark-brown tiled roof drawn as rows of individual tiles, a small wooden bell cote holding a brass bell on the ridge, a stone chimney at the gable. In the yard: a wooden bench, two barrels, a stack of crates, cobblestones and grass tufts scattered on the sand.
+
+Rich detail everywhere: plank grain in the timber framing, roof tiles as separate rows, weathered stone joints, iron hinges and studs, individual cobblestones. Crisp pixel-art shading, no anti-aliasing halos, no text, no watermark, no border, no scenery.
+
+Background: plain uniform solid light-gray (#c8c8c8) with absolutely no checkerboard pattern anywhere on the canvas.

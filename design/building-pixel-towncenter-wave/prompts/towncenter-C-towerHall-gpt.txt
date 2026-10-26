@@ -1,0 +1,13 @@
+Isometric pixel art game asset for a medieval city-builder, matching the FIRST attached image exactly in style: the same chunky pixel size (large visible pixels, no fine-grained noise), the same thick dark-brown outline around every shape, the same warm brown/tan palette, the same lighting from the upper left, a square 1:1 canvas.
+
+The SECOND attached image is a screenshot of a game; ignore its gray map background, but note how a building of this kind reads at small size, and match the chunky pixel scale of the trees and the small camp in it.
+
+Subject: the settlement's TOWN CENTRE - a grander medieval town hall than a cottage: a square stone corner tower on the front-left corner carrying a conical slate turret roof with a small flag, a steep tiled hip roof over the main hall with rows of individual tiles and a stone chimney, arched stone-mullioned windows on the ground floor, timber-framed plastered upper floor, a plank door on iron hinges with a stone staircase up to it, and a walled yard with barrels, crates, a hay bale and a wooden cart wheel leaning on the wall.
+
+Plot: the hall stands on a square lot shown as a FLAT isometric diamond of sandy ground with darker speckles, a few cobblestones, grass tufts and a couple of stepping stones leading to the door. The two lower edges of that diamond descend at exactly 2 vertical to 1 horizontal (26.57 degrees, a clean 2:1 dimetric diamond - NOT a 30 degree isometric one); its width is about 85% of the canvas and its lowest corner sits about 110 pixels above the bottom edge of the canvas.
+
+THE LOT IS FLAT. NO side wall, NO soil slab, NO thick plinth, NO pedestal, NO raised rim, NO cast shadow: along the diamond's two lower edges the sandy ground simply ends in a 2-pixel dark-brown outline and then nothing. Nothing floats above the ground and nothing is cut off by the bottom edge of the canvas.
+
+Background: plain uniform solid light-gray (#c8c8c8) with absolutely no checkerboard pattern anywhere on the canvas. No text, no watermark, no border, no scenery.
+
+Rich detail everywhere: separate roof tiles, weathered stone joints, plank grain, iron hinges, cloth awnings. Crisp pixel-art shading, no anti-aliasing halos.

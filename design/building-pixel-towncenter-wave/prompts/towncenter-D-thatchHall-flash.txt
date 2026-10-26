@@ -1,0 +1,11 @@
+Isometric pixel art game asset for a medieval city-builder, matching the SECOND attached image exactly in style: the same chunky pixel size (large visible pixels, no fine-grained noise), the same thick dark-brown outline around every shape, the same warm brown/tan palette, the same lighting from the upper left, a square 1:1 canvas.
+
+The FIRST image is the asset to redraw: the settlement's TOWN CENTRE on a square lot. The magenta diamond drawn over it is a measuring guide and it is the EXACT lot the new ground must occupy: its two lower edges descend at 2 vertical to 1 horizontal (26.57 degrees, a clean 2:1 dimetric diamond, NOT a 30 degree one), and its four corners must stay where they are. The sandy ground fills that diamond edge to edge, nothing crosses it, and no magenta pixel survives.
+
+THE LOT IS FLAT. NO side wall, NO soil slab, NO thick plinth, NO pedestal, NO raised rim, NO cast shadow: along the two lower edges the sandy ground ends in a 2-pixel dark-brown outline and then nothing.
+
+Subject: a long single-storey mead-hall style town centre - a long timber building with a very thick golden thatch roof, deep overhanging eaves with a carved plank fascia, crossed poles at the ridge, a carved dragon-head gable post, a wide low plank door with iron studs, two small square windows with shutters, a lean-to porch, and a stone footing course under the timber walls. The roof thatch is drawn as layered straw courses with darker bundles and green moss along the ridge. In the yard: a barrel, a firewood stack, a bench, a water trough, a few chickens and a stack of crates on the sandy ground with cobblestones and grass tufts.
+
+The building stands ON the lot: its lowest edge rests on the sandy surface with no gap, nothing floats above the ground, nothing is cut off by the bottom edge of the canvas. Rich, hand-drawn-looking pixel detail everywhere - separate straw bundles, plank grain, iron studs, weathered stone. Crisp shading, no anti-aliasing halos.
+
+Background: plain uniform solid light-gray (#c8c8c8) with absolutely no checkerboard pattern anywhere on the canvas. No text, no watermark, no border, no scenery.
