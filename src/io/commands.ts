@@ -571,6 +571,25 @@ export async function transferUnits(
   await postCommand(name, { kind: "TransferUnits", ...payload });
 }
 
+// A hero picks the resources off the tile it is standing on. The payload names
+// the hero and the tile only -- how much moves is the engine's call
+// (min of what is left on the floor and the hero's remaining cargo room), so a
+// partial pickup is a normal success and the rest stays on the tile. Fire and
+// forget like the other hero commands, but the response carries the tile's new
+// remaining amount AND the hero, which the caller merges so the acting client
+// shows the take immediately.
+export type PickupResourceResult = {
+  hero?: HeroState;
+  resourceDeposits?: Record<string, number>;
+};
+
+export async function pickupResource(
+  name: string,
+  payload: { actor: number; heroId: string; q: number; r: number }
+): Promise<PickupResourceResult> {
+  return postCommand<PickupResourceResult>(name, { kind: "PickupResource", ...payload });
+}
+
 // Two-sided field trade between two adjacent heroes of the acting seat.
 // Fire-and-forget like transferUnits above -- src/game/turnHooks.ts calls it
 // right after the local engine reducer already applied the swap, so the

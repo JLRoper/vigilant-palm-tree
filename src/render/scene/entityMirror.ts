@@ -86,6 +86,12 @@ export class EntityMirror {
       case "BattleOffered":
       case "WorkersAssigned":
       case "SettlementFounded":
+      // A pickup changes a hero's cargo and a tile's remaining amount -- neither
+      // is a mirrored entity's position or owner, so the mirror has nothing to
+      // do; the hero's own panel reads the state (ResourcePickedUp is
+      // classified "apply", so the state is already updated by the time this
+      // runs).
+      case "ResourcePickedUp":
         return false;
       default: {
         const exhaustive: never = event;

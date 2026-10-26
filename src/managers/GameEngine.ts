@@ -229,7 +229,10 @@ export class GameEngine {
           ? this.enterDistrictCityView(settlementId, district.q, district.r)
           : this.enterSettlementCityView(settlementId),
     });
-    this.ui.initTileInfo();
+    // The tile panel's pickup verb: GameActions runs the engine rule locally
+    // and its hook POSTs the command, so the button and the server agree by
+    // construction (the same summarizes-and-toasts shape the helper lists use).
+    this.ui.initTileInfo((heroId, q, r) => this.actions.pickupResource(heroId, q, r));
     this.ui.initCityView(() => this.state, this.view, () => getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? ""));
   }
 

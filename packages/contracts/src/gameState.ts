@@ -221,6 +221,17 @@ export interface GameState {
   /** Optional + defaulted ([]) so legacy saves and old JSONB rows stay valid. */
   tradeRoutes?: TradeRouteState[];
   nextTradeRouteId?: number;
+  /**
+   * What is still on the floor of each resource tile a hero has picked from,
+   * keyed `"<q>,<r>"` (games.resource_deposits JSONB -- the tradeRoutes
+   * pattern: always read/written whole per game). Sparse by design: a tile
+   * nobody has touched is ABSENT, and its remaining amount is the seed-derived
+   * pristine one (`@heroes/engine`'s resourceAmountFor/resourceRemainingOn),
+   * which is why the map itself never carries a pickup. Optional so legacy
+   * saves and old JSONB rows stay valid -- absent reads as "nothing picked
+   * anywhere".
+   */
+  resourceDeposits?: Record<string, number>;
 }
 
 export interface CalendarParts {

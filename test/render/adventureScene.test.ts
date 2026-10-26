@@ -4,6 +4,7 @@ import type { CharterState } from "@heroes/contracts";
 import { Hero } from "../../src/entities/hero";
 import { Castle } from "../../src/entities/settlement";
 import { GameMap, type TileRow } from "../../src/map/gameMap";
+import { resourceAmountFor } from "@heroes/engine";
 import type { Terrain } from "../../src/map/terrain";
 import { EntityMirror } from "../../src/render/scene/entityMirror";
 import { axialToPixel, type Axial } from "../../src/core/hex";
@@ -914,8 +915,10 @@ test("GameMap constructor and GameMap.fromTiles populate placedResourceTiles mat
     { q: 1, r: 0, resource: "gold" },
     { q: 3, r: 1, resource: "iron" },
   ]);
+  // fromTiles carries no seed, so a row's pristine amount comes from the
+  // default (seed 1) -- the same hash the generator would use for that seed.
   assert.deepEqual(fromRows.placedResourceTiles, [
-    { q: 1, r: 0, resource: "gold" },
-    { q: 3, r: 1, resource: "iron" },
+    { q: 1, r: 0, resource: "gold", amount: resourceAmountFor(1, 1, 0, "gold") },
+    { q: 3, r: 1, resource: "iron", amount: resourceAmountFor(1, 3, 1, "iron") },
   ]);
 });

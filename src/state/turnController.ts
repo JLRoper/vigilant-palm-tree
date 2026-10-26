@@ -53,6 +53,7 @@ import {
   recruitUnits as recruitUnitsReducer,
   transferUnits as transferUnitsReducer,
   tradeHeroes as tradeHeroesReducer,
+  pickupResource as pickupResourceReducer,
   startSettlementBattle as startSettlementBattleReducer,
   type BuildingUpgradeRequest,
 } from "./gameState";
@@ -220,6 +221,12 @@ export interface TurnControllerHooks {
     give: HeroTradeOffer,
     take: HeroTradeOffer,
   ): Promise<void>;
+  // A hero picking the resources off the tile it stands on. Fire-and-forget
+  // like the rest of this block -- pickupResource() below already applied the
+  // same reduction locally -- but the response is merged when it lands (the
+  // AssignWagons shape), so the tile's remaining amount and the hero's cargo
+  // both end at the server's numbers.
+  onPickupResource(actor: number, heroId: HeroId, q: number, r: number): Promise<void>;
   // A bank pot moved (treasury -> pot, or pot -> a 7-day pending withdrawal).
   // Same fire-and-forget shape as the rest of this block: the local
   // depositIntoBank/requestBankWithdrawal call has already applied, which is
@@ -298,6 +305,10 @@ export interface LogisticsCommandMerge {
   players?: Player[];
   hero?: HeroState;
   settlement?: SettlementState;
+  // PickupResource: the full post-change remaining-amount map, so the acting
+  // client's tile panel shows the server's number for the tile rather than its
+  // own optimistic one.
+  resourceDeposits?: Record<string, number>;
 }
 
 export interface SettlementBattleResolution {
@@ -488,6 +499,9 @@ export class TurnController {
     if (result.hero) next = { ...next, heroes: { ...next.heroes, [result.hero.id]: result.hero } };
     if (result.settlement) {
       next = { ...next, settlements: { ...next.settlements, [result.settlement.id]: result.settlement } };
+    }
+    if (result.resourceDeposits) {
+      next = { ...next, resourceDeposits: result.resourceDeposits };
     }
     if (next !== this.state) this.state = next;
   }
@@ -1579,6 +1593,53 @@ export class TurnController {
       hookLabel: "onPlaceBuildings",
     });
     return { ok: true, reason: "" };
+  }
+
+  /**
+   * A hero picks the resources off the resource tile it is standing on. The
+   * engine's own rule decides everything (the hero must be ON the tile, what
+   * moves is min(remaining, cargo room), the rest stays on the floor), and the
+   * same read drives the tile panel's button -- see screens/adventure/
+   * tileInfo.ts, which previews through the identical engine helper -- so a
+   * refusal here is a refusal the player was already shown the reason for.
+   *
+   * Returns the outcome's own numbers so the caller can say what happened in
+   * the log/toast: what was taken, and what was left behind.
+   */
+  pickupResource(
+    heroId: HeroId,
+    q: number,
+    r: number,
+  ): { ok: boolean; reason: string; taken: number; remaining: number; resource: string | null } {
+    if (this.logisticsTurnGateBlocked()) {
+      return { ok: false, reason: "not_your_turn", taken: 0, remaining: 0, resource: null };
+    }
+    const result = pickupResourceReducer(this.state, this.hooks.getMap(), { heroId, q, r });
+    if (!result.ok) {
+      return { ok: false, reason: result.reason, taken: 0, remaining: result.remaining, resource: result.resource };
+    }
+    this.commit(result.state, {
+      log: {
+        type: "resource_picked_up",
+        payload: {
+          heroId,
+          q,
+          r,
+          resource: result.resource,
+          amount: result.taken,
+          remaining: result.remaining,
+        },
+      },
+      hook: () => this.hooks.onPickupResource(result.state.activePlayerId, heroId, q, r),
+      hookLabel: "onPickupResource",
+    });
+    return {
+      ok: true,
+      reason: "",
+      taken: result.taken,
+      remaining: result.remaining,
+      resource: result.resource,
+    };
   }
 
   transferResources(

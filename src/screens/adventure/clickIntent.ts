@@ -80,6 +80,36 @@ export function foundSettlementRefusalToast(reason: string): ClickRejectionToast
 }
 
 /**
+ * The sentences for a refused resource pickup, keyed by the engine's own
+ * ResourcePickupRefusal vocabulary (packages/engine/src/hero/pickupResource.ts)
+ * -- the foundSettlementRefusalToast table, one verb over. The tile panel
+ * disables its button with this sentence and the command's rejection toast
+ * shows the same one, so the player reads ONE story for one refusal: a
+ * too-small hold is named as such ("nothing fits"), never a silent no-op.
+ *
+ * An unknown code falls through to a message that shows it, because a refusal
+ * the client cannot explain is a bug to see rather than a silence to hide.
+ */
+export function pickupRefusalToast(reason: string): ClickRejectionToast {
+  switch (reason) {
+    case "not_enough_cargo_space":
+      return { message: "The hero's wagons are full — nothing fits on this trip", kind: "error" };
+    case "not_enough_gold_space":
+      return { message: "The hero's purse is full — nothing fits on this trip", kind: "error" };
+    case "not_on_resource_tile":
+      return { message: "A hero picks up only from the hex it stands on", kind: "error" };
+    case "deposit_depleted":
+      return { message: "There is nothing left on this deposit", kind: "info" };
+    case "no_resource_tile":
+      return { message: "There is no deposit on this hex", kind: "info" };
+    case "no_hero":
+      return { message: "That hero is no longer in the field", kind: "error" };
+    default:
+      return { message: `Pickup refused: ${reason}`, kind: "error" };
+  }
+}
+
+/**
  * The id of the seat's own covered wagon standing on `(q, r)`, if any -- the
  * founding gesture's subject. Read through contracts' `isCoveredWagonId` (the
  * engine, the server and the renderer share one convention) rather than

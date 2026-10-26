@@ -47,6 +47,7 @@ transferGold,
   assignWagons,
   transferCargoLoot,
   buyWagons,
+  pickupResource,
   createTradeRoute as createTradeRouteReducer,
   updateTradeRoute as updateTradeRouteReducer,
   routeOwnerId,
@@ -135,6 +136,9 @@ export interface GameRepo {
         next_charter_id?: number;
         next_settlement_id?: number;
         trade_routes?: TradeRouteState[];
+        // Resource-tile pickups: the full remaining-amount map for the game
+        // (games.resource_deposits), read/written whole like trade_routes.
+        resource_deposits?: Record<string, number>;
         // Leave the settlements JSONB column untouched (M-MAJOR-2): the battle
         // cases set it when no capture changed a settlement, so the column the
         // fight wrote is the one the reload reads.
@@ -227,6 +231,10 @@ export interface CommandResult {
   // EndTurn + PlaceBuildings/CreateTradeRoute/UpdateTradeRoute: the full
   // post-change routes array (caravans move on EndTurn's round wrap).
   tradeRoutes?: TradeRouteState[];
+  // PickupResource: the full post-change remaining-amount map, so the acting
+  // client reconciles the tile's new number from the response instead of
+  // waiting for a resync (the tradeRoutes rule).
+  resourceDeposits?: Record<string, number>;
   // ResolveBattle/SubmitBattleResult: both combatants plus the full engine
   // BattleResult the client's battle UI needs (log, grid, per-round detail) --
   // none of that is reconstructable from the summary fields on the persisted
@@ -2239,6 +2247,70 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         lastEventId,
         hero: result.state.heroes[command.heroId],
         settlement: result.state.settlements[command.settlementId],
+      };
+    }
+    case "PickupResource": {
+      // A hero picks the resources off the tile it stands on. Same
+      // existence-then-ownership ladder the other hero commands use (the
+      // generic turn guard above already proved the actor holds the turn); the
+      // engine's pickupResource then owns the rule itself -- the hero must be
+      // ON the requested tile, the tile must still hold something, and what
+      // moves is min(remaining, the hero's cargo room). A partial pickup is a
+      // SUCCESS: what does not fit stays on the floor, so this command writes
+      // exactly what the engine took and never more.
+      const hero = row.heroes[command.heroId];
+      if (!hero) {
+        return { ok: false, reason: "no_hero", events: [] };
+      }
+      if (hero.ownerId !== command.actor) {
+        return { ok: false, reason: "forbidden_not_your_hero", events: [] };
+      }
+      // Same map the terrain pass generates (seed + size + the SAVED map gen
+      // version), so the pristine amounts here are the ones the client derives
+      // from the same seed.
+      const pickupMap = getOrCreateGameMap(
+        Number(row.seed) || 1,
+        row.map_size as MapSize | undefined,
+        resolveSavedMapGenVersion(row.lobby?.mapGenVersion),
+      );
+      const result = pickupResource(
+        state,
+        pickupMap,
+        { heroId: command.heroId, q: command.q, r: command.r },
+      );
+      if (!result.ok || !result.resource) {
+        // A refusal writes NOTHING: the tile keeps its amount, the hero its
+        // cargo, and no event is appended.
+        return { ok: false, reason: result.reason || "no_resource_tile", events: [] };
+      }
+      const deposits = result.state.resourceDeposits ?? {};
+      await deps.gameRepo.saveHeroesAndSettlements(
+        command.gameName,
+        result.state.heroes,
+        result.state.settlements,
+        // Only the hero's cargo and the tile's remaining amount changed, so the
+        // settlements column is left exactly as loaded (M-MAJOR-2's rule;
+        // pickupResource keeps the record's own reference).
+        { skipSettlements: true, resource_deposits: deposits },
+      );
+      await dualWriteEntities(deps, command.gameName, state, result.state);
+      const event: EngineEvent = {
+        type: "ResourcePickedUp",
+        actor: command.actor,
+        heroId: command.heroId,
+        q: command.q,
+        r: command.r,
+        resource: result.resource,
+        amount: result.taken,
+        remaining: result.remaining,
+      };
+      const lastEventId = await deps.eventRepo.append(command.gameName, event.type, event, command.actor);
+      return {
+        ok: true,
+        events: [event],
+        lastEventId,
+        hero: result.state.heroes[command.heroId],
+        resourceDeposits: deposits,
       };
     }
     case "TradeHeroes": {

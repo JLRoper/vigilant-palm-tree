@@ -4,6 +4,8 @@ import type { GameMap } from "../../map/gameMap";
 import type { Terrain } from "../../map/terrain";
 import type { ResourceType } from "../../map/resourceTiles";
 import { RESOURCE_YIELD } from "../../map/resourceTiles";
+import { previewResourcePickup, resourceRemainingOn, type ResourcePickupRefusal } from "@heroes/engine";
+import type { HeroId } from "@heroes/contracts";
 import type { Hero } from "../../entities/hero";
 import type { Castle } from "../../entities/settlement";
 import type { GameState, PlayerId } from "../../state/gameState";
@@ -30,6 +32,35 @@ export interface TileInfo {
     resource: ResourceType;
     yield: number;
     workedBy: { name: string; ownerId: PlayerId | null } | null;
+    /**
+     * What is still on the floor of this tile: the seed-derived pristine
+     * amount minus everything heroes have picked up here
+     * (`GameState.resourceDeposits`). The resource TYPE and the `yield` above
+     * are unaffected by a pickup -- only this number moves -- so the
+     * settlement working the tile keeps its per-turn income.
+     */
+    remaining: number;
+    /** The tile's starting amount, for the "N of M left" reading. */
+    pristine: number;
+  } | null;
+  /**
+   * The pickup on offer for this tile, present only when the VIEWER owns a
+   * hero standing here and the tile still holds something. Every field comes
+   * from the engine's own read (previewResourcePickup), so the panel cannot
+   * offer an amount the command would refuse; `ok: false` with a `reason` is a
+   * refusal the panel shows in words instead of a dead button.
+   */
+  pickup?: {
+    heroId: HeroId;
+    heroName: string;
+    resource: ResourceType;
+    /** What a pickup right now would take (min of remaining and cargo room). */
+    amount: number;
+    /** Room left in the carrying hero's hold for this resource. */
+    room: number;
+    remaining: number;
+    ok: boolean;
+    reason: ResourcePickupRefusal | "";
   } | null;
   settlement: {
     name: string;
@@ -87,6 +118,7 @@ function visibleOrOwned(fogged: boolean, ownerId: PlayerId | null, viewPlayerId:
 
 function describeDeposit(
   map: GameMap,
+  state: GameState,
   castles: readonly Castle[],
   q: number,
   r: number,
@@ -101,7 +133,58 @@ function describeDeposit(
       break;
     }
   }
-  return { resource: rt.resource, yield: RESOURCE_YIELD[rt.resource], workedBy };
+  // The engine's own remaining read, so the panel and the command agree on the
+  // number even for a tile nothing has ever picked from (absent key = the
+  // pristine amount).
+  const remaining = resourceRemainingOn(state, q, r, rt.amount);
+  return {
+    resource: rt.resource,
+    yield: RESOURCE_YIELD[rt.resource],
+    workedBy,
+    remaining,
+    pristine: rt.amount,
+  };
+}
+
+/**
+ * The pickup this hex offers the VIEWER, or null when it offers none.
+ *
+ * Null covers every case the panel should stay quiet about: no hero of the
+ * viewer's standing here, nothing left on the tile (a tile is only empty once
+ * its amount reaches 0), or no deposit at all. A hero standing here with a
+ * full hold is NOT null -- it comes back ok:false with the engine's refusal,
+ * which is what turns "nothing happens when I click" into a sentence.
+ */
+function describePickup(
+  map: GameMap,
+  state: GameState,
+  q: number,
+  r: number,
+  fogged: boolean,
+  viewPlayerId: PlayerId,
+): TileInfo["pickup"] {
+  if (fogged) return null;
+  const tile = map.resourceTileAt(q, r);
+  if (!tile) return null;
+  const heroIds = Object.keys(state.heroes)
+    .filter((id) => state.heroes[id].ownerId === viewPlayerId && state.heroes[id].q === q && state.heroes[id].r === r)
+    .sort();
+  for (const heroId of heroIds) {
+    const preview = previewResourcePickup(state, map, { heroId, q, r });
+    if (!preview) continue;
+    if (preview.remaining <= 0) continue;
+    return {
+      heroId,
+      heroName: state.heroes[heroId].name,
+      resource: preview.resource,
+      amount: preview.amount,
+      room: preview.room,
+      remaining: preview.remaining,
+      ok: preview.ok,
+      reason: preview.reason,
+    };
+  }
+  return null;
 }
 
 function describeSettlement(
@@ -265,6 +348,7 @@ export function describeTile(input: {
   // keeps exactly its previous keys, which is what every existing panel test
   // and every stored signature depends on.
   const founding = describeFounding(state, map, tile.q, tile.r, fogged, viewPlayerId);
+  const pickup = describePickup(map, state, tile.q, tile.r, fogged, viewPlayerId);
 
   return {
     q: tile.q,
@@ -291,12 +375,13 @@ export function describeTile(input: {
             cost: map.cost(tile.q, tile.r),
             passable: map.isPassable(tile.q, tile.r),
           },
-    deposit: fogged ? null : describeDeposit(map, castles, tile.q, tile.r),
+    deposit: fogged ? null : describeDeposit(map, state, castles, tile.q, tile.r),
     settlement: describeSettlement(state, tile.q, tile.r, fogged, viewPlayerId),
     district: describeDistrict(state, castles, heroes, tile.q, tile.r, fogged, viewPlayerId),
     heroes: describeHeroes(state, heroes, tile.q, tile.r, fogged, viewPlayerId),
     charter: describeCharter(state, tile.q, tile.r, fogged),
     ...(founding !== undefined ? { founding } : {}),
+    ...(pickup !== undefined ? { pickup } : {}),
     territory: describeTerritory(state, castles, tile.q, tile.r, fogged, viewPlayerId, map.width, map.height),
   };
 }

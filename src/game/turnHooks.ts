@@ -17,6 +17,7 @@ import {
   upgradeSettlement,
   placeBuildings as placeBuildingsCommand,
   transferResources as transferResourcesCommand,
+  pickupResource as pickupResourceCommand,
   assignWagons as assignWagonsCommand,
   buyWagons as buyWagonsCommand,
   createTradeRoute as createTradeRouteCommand,
@@ -441,6 +442,21 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       await transferResourcesCommand(name, { actor, heroId, settlementId, direction, amounts });
     } catch (e) {
       reportCommandFailure("Transfer resources", e);
+    }
+  },
+  // The pickup POST. Its response carries the authoritative hero AND the full
+  // remaining-amount map, so the merge below is what leaves the acting client
+  // showing the server's numbers for the tile it just picked from -- without
+  // it the optimistic local reduction would be the only record until the next
+  // resync (and a rejection would leave a phantom reduced tile on screen).
+  onPickupResource: async (actor: number, heroId: HeroId, q: number, r: number): Promise<void> => {
+    const name = opts.gameName();
+    if (!name) return;
+    try {
+      const result = await pickupResourceCommand(name, { actor, heroId, q, r });
+      opts.getController?.()?.mergeCommandResult(result);
+    } catch (e) {
+      reportCommandFailure("Pick up resources", e);
     }
   },
   onAssignWagons: async (actor: number, heroId: HeroId, delta: number, slot?: "cargo" | "treasury"): Promise<void> => {

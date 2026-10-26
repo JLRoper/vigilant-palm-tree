@@ -78,6 +78,7 @@ export * from "./ai/aiBrain";
 export * from "./hero/recruit";
 export * from "./hero/stacks";
 export * from "./hero/tradeHeroes";
+export * from "./hero/pickupResource";
 export * from "./hero/upkeep";
 export * from "./calendar";
 export * from "./turn/phases";

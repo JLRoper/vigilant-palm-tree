@@ -91,6 +91,13 @@ export type Game = {
   // survived, which is C-BLOCKER-1's permanently locked hero. Absent on the
   // list route and on POST /games' create response (both read as none).
   charters?: CharterState[];
+  // What is still on the floor of each resource tile a hero has picked from,
+  // keyed "<q>,<r>" (games.resource_deposits, migration 034). Rides the row
+  // because GET /games/:name selects GAME_COLUMNS; @heroes/engine's
+  // hydrateGameState maps it onto GameState.resourceDeposits, which is what
+  // the tile panel reads for the remaining amount. Absent on a game nobody has
+  // picked in, and on the list route.
+  resource_deposits?: Record<string, number> | null;
 };
 
 // One row of GET /games/:name/events. Raw DB shape (snake_case, id and

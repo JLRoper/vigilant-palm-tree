@@ -1,5 +1,6 @@
 import type { Axial } from "../geometry";
 import type { CharterId, HeroId, HorseVariantId, PlayerSeat, SettlementId } from "../ids";
+import type { ResourceType } from "../resources";
 import type { TransferDirection, TradeRouteEndpoint, TradeRoutePayload } from "../gameState";
 import type { HeroTradeOffer } from "../commands/tradeHeroes";
 
@@ -297,4 +298,24 @@ export type EngineEvent =
         r: number;
         /** True when the founder was consumed (design answer 1). */
         consumedFounder: boolean;
+      }
+    | {
+        // A hero picked resources off the tile it stands on. Classified
+        // "apply" in ENGINE_EVENT_SYNC_CLASS: the payload is everything a
+        // replay needs -- the amount taken, what is left on the tile, and the
+        // tile itself -- and none of it requires the map, so a replaying
+        // client re-runs the same targeted construction the server did
+        // rather than guessing or refetching.
+        type: "ResourcePickedUp";
+        actor: PlayerSeat;
+        heroId: HeroId;
+        q: number;
+        r: number;
+        /** The tile's resource TYPE, which a pickup never changes. */
+        resource: ResourceType;
+        /** How much moved into the hero's hold. Never 0 (a pickup that fits
+         *  nothing is refused instead of evented). */
+        amount: number;
+        /** What is still on the floor of that tile afterwards. */
+        remaining: number;
       };
