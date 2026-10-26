@@ -86,14 +86,14 @@ function parseArgs(argv) {
 }
 
 function gitLines(gitArgs) {
-  const out = execFileSync("git", gitArgs, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  const out = execFileSync("git", gitArgs, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
   return out.split(/\r?\n/).map((line) => line.trim().replaceAll("\\", "/")).filter(Boolean);
 }
 
 function isVersionOnlyDiff(file, specs) {
   try {
     const lines = specs.flatMap((spec) =>
-      execFileSync("git", ["diff", "-U0", spec, "--", file], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split(/\r?\n/),
+      execFileSync("git", ["diff", "-U0", spec, "--", file], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).split(/\r?\n/),
     );
     const edits = lines.filter((line) => /^[+-]/.test(line) && !/^(\+\+\+|---) /.test(line));
     return edits.length > 0 && edits.every((line) => /^[+-]\s*"version"\s*:/.test(line));

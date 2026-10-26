@@ -46,7 +46,7 @@ function sh(cmd, args) {
   // No shell: on Windows `shell: true` concatenates the args unquoted, which
   // splits git's `--pretty=format:- %s (%h)` and silently kills the changelog
   // body. git.exe/docker.exe resolve through PATH without one.
-  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8" });
+  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", windowsHide: true });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() };
 }
 
