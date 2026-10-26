@@ -84,22 +84,44 @@ function signatureFor(info: TileInfo): string {
   return JSON.stringify(info);
 }
 
-function renderLines(info: TileInfo): HTMLElement[] {
-  if (!info.terrain) return [makeLine("Unexplored", { dim: true })];
-  const lines: HTMLElement[] = [makeLine(terrainLine(info.terrain))];
-  if (info.river) lines.push(makeLine(riverLine(info.river)));
-  if (info.fogged) lines.push(makeLine("Unexplored", { dim: true }));
-  if (info.deposit) lines.push(makeLine(depositLine(info.deposit)));
-  if (info.settlement) lines.push(makeLine(settlementLine(info.settlement), { bold: info.settlement.owned }));
-  if (info.district) lines.push(makeLine(districtLine(info.district)));
-  for (const hero of info.heroes) lines.push(makeLine(heroLine(hero), { bold: hero.owned }));
-  if (info.charter) lines.push(makeLine(charterLine(info.charter)));
+/** The panel's title bar: the inspected hex's coordinates, and nothing else. */
+export function tilePanelTitle(info: TileInfo): string {
+  return `Tile ${info.q}, ${info.r}`;
+}
+
+/** One line of the panel: the exact text plus how it is emphasised. */
+export interface TilePanelLine {
+  text: string;
+  dim?: boolean;
+  bold?: boolean;
+}
+
+/**
+ * The panel's lines for a tile, as data rather than DOM. The strings are the
+ * whole player-visible surface of the panel (an unrevealed hex is exactly
+ * "Unexplored", a seen one leads with its terrain and move cost), so they are
+ * readable -- and testable -- without a document.
+ */
+export function tilePanelLines(info: TileInfo): TilePanelLine[] {
+  if (!info.terrain) return [{ text: "Unexplored", dim: true }];
+  const lines: TilePanelLine[] = [{ text: terrainLine(info.terrain) }];
+  if (info.river) lines.push({ text: riverLine(info.river) });
+  if (info.fogged) lines.push({ text: "Unexplored", dim: true });
+  if (info.deposit) lines.push({ text: depositLine(info.deposit) });
+  if (info.settlement) lines.push({ text: settlementLine(info.settlement), bold: info.settlement.owned });
+  if (info.district) lines.push({ text: districtLine(info.district) });
+  for (const hero of info.heroes) lines.push({ text: heroLine(hero), bold: hero.owned });
+  if (info.charter) lines.push({ text: charterLine(info.charter) });
   if (info.founding) {
     const line = foundingLine(info.founding);
-    lines.push(makeLine(line.text, { dim: line.dim, bold: info.founding.canFound }));
+    lines.push({ text: line.text, dim: line.dim, bold: info.founding.canFound });
   }
-  if (info.territory) lines.push(makeLine(territoryLine(info.territory), { dim: true }));
+  if (info.territory) lines.push({ text: territoryLine(info.territory), dim: true });
   return lines;
+}
+
+function renderLines(info: TileInfo): HTMLElement[] {
+  return tilePanelLines(info).map((line) => makeLine(line.text, { dim: line.dim, bold: line.bold }));
 }
 
 export class TileInfoPanel {
@@ -165,7 +187,7 @@ export class TileInfoPanel {
     const signature = signatureFor(info);
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
-    this.menu.setTitle(`Tile ${info.q}, ${info.r}`);
+    this.menu.setTitle(tilePanelTitle(info));
     this.bodyEl.replaceChildren(...renderLines(info));
   }
 }
