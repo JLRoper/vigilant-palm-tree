@@ -865,8 +865,8 @@ async function combatAiPersistence(browser: Browser): Promise<void> {
 // from another worktree gets that worktree's path and branch.
 function gitBranchLine(): string {
   try {
-    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: CHECKOUT_ROOT, encoding: "utf8" }).trim();
-    const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: CHECKOUT_ROOT, encoding: "utf8" }).trim();
+    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: CHECKOUT_ROOT, encoding: "utf8", windowsHide: true }).trim();
+    const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: CHECKOUT_ROOT, encoding: "utf8", windowsHide: true }).trim();
     return `${branch} @ ${sha}`;
   } catch {
     return "(unknown — git unavailable)";

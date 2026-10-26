@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { nodeToolCommand } from "../../tools/resolve-tool-entry.mjs";
 
 test("dependency-cruiser paint2d rule catches forbidden render imports from paint2d/ (regression test for the regex bug)", () => {
   const probeDir = "src/render/scene/paint2d/__barrel_probe__";
@@ -31,11 +32,15 @@ test("dependency-cruiser paint2d rule catches forbidden render imports from pain
   );
 
   try {
-    const result = spawnSync(
-      "npx",
-      ["depcruise", "src", "--config", "dependency-cruiser.cjs"],
-      { encoding: "utf8", shell: true },
-    );
+    const depcruise = nodeToolCommand("dependency-cruiser", [
+      "src",
+      "--config",
+      "dependency-cruiser.cjs",
+    ]);
+    const result = spawnSync(depcruise.cmd, depcruise.args, {
+      encoding: "utf8",
+      windowsHide: true,
+    });
     const out = (result.stdout || "") + (result.stderr || "");
     assert.ok(
       out.includes("paint2d-cannot-import-asset-descriptors"),

@@ -6,6 +6,7 @@ import { spawn, ChildProcess } from "node:child_process";
 import { chromium } from "playwright";
 import { writeFileSync } from "node:fs";
 import type { GameDebugApi } from "../src/io/debugCommands";
+import { nodeToolCommand } from "../tools/resolve-tool-entry.mjs";
 
 const WEB_PORT = 4174;
 const API_PORT = 3002;
@@ -13,10 +14,14 @@ const WEB_URL = `http://localhost:${WEB_PORT}`;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 
 function startApi(): ChildProcess {
-  const child = spawn("npx", ["tsx", "server/index.ts"], {
+  // Shell-free (node + tsx's CLI entry): a `shell: true` child on Windows is
+  // run by cmd.exe, which allocates a console window when it does not inherit
+  // one -- the popup this suite used to cause.
+  const api = nodeToolCommand("tsx", ["server/index.ts"]);
+  const child = spawn(api.cmd, api.args, {
     env: { ...process.env, API_PORT: String(API_PORT) },
     stdio: ["ignore", "pipe", "pipe"],
-    shell: true,
+    windowsHide: true,
   });
   child.stdout?.on("data", (d) => process.stdout.write(`[api] ${d}`));
   child.stderr?.on("data", (d) => process.stderr.write(`[api err] ${d}`));
@@ -24,10 +29,11 @@ function startApi(): ChildProcess {
 }
 
 function startWeb(): ChildProcess {
-  const child = spawn("npx", ["vite", "preview", "--port", String(WEB_PORT)], {
+  const web = nodeToolCommand("vite", ["preview", "--port", String(WEB_PORT)]);
+  const child = spawn(web.cmd, web.args, {
     env: { ...process.env, API_PORT: String(API_PORT) },
     stdio: ["ignore", "pipe", "pipe"],
-    shell: true,
+    windowsHide: true,
   });
   child.stdout?.on("data", (d) => process.stdout.write(`[web] ${d}`));
   child.stderr?.on("data", (d) => process.stderr.write(`[web err] ${d}`));
