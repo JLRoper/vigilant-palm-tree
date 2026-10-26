@@ -418,3 +418,61 @@ test("hydrateFromRepos derives the BATTLE phase from the lobby marker on both pa
   const plain = await hydrateFromRepos(withoutMarker, repos, "test-game");
   assert.deepEqual(plain.state.phase, { kind: "AI_TURN", playerId: 1 });
 });
+
+// ---------------------------------------------------------------------------
+// M-BLOCKER-1 / M-BLOCKER-2 acceptance: the end-to-end sequence the playthrough
+// ran -- a server-offered battle, the human defender Quick Resolves it, then the
+// game is saved and reloaded. Acceptance: the reloaded phase is PLAYER_TURN with
+// activePlayerId 0, NOT BATTLE; the lobby carries no marker; and the settlement
+// JSONB written by the resolution is unchanged by the reload.
+// ---------------------------------------------------------------------------
+
+test("a resolved combat survives save + reload: no marker, no BATTLE resurrection, and the turn hands back as PLAYER_TURN/0 (M-BLOCKER-1/M-BLOCKER-2)", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const { row } = makeDefenderRow();
+  const { gameRepo, deps } = makeDeps(row, UNIT_TYPES);
+  const repos = {
+    heroRepo: createMockHeroRepo(),
+    settlementRepo: createMockSettlementRepo(),
+    charterRepo: createMockCharterRepo(),
+  };
+
+  // 1. The AI driver offers the battle to the human defender.
+  const offer = await handleCommand(enterBattle(1, "h1", "h0"), deps);
+  assert.equal(offer.ok, true);
+  const duringOffer = await hydrateFromRepos(gameRepo.rows["test-game"], repos, "test-game");
+  assert.deepEqual(duringOffer.state.phase, { kind: "BATTLE", attackerId: "h1", defenderId: "h0" });
+
+  // 2. The defender Quick Resolves it from their own seat.
+  const resolved = await handleCommand(
+    { kind: "ResolveBattle", gameName: "test-game", actor: 0, attackerId: "h1", defenderId: "h0" },
+    deps,
+  );
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.battle?.winner, "attacker", "the fixture's defender is wiped");
+
+  // 3. Save + reload MID-TURN: the marker is gone, so the reload is the AI's
+  //    live turn rather than a BATTLE with nothing left to fight. This is the
+  //    half M-BLOCKER-1 reports ("expected PLAYER_TURN/0, hydrated BATTLE/0").
+  const midTurn = await hydrateFromRepos(gameRepo.rows["test-game"], repos, "test-game");
+  assert.notEqual(midTurn.state.phase.kind, "BATTLE", "a resolved battle must not reload as BATTLE");
+  assert.deepEqual(midTurn.state.phase, { kind: "AI_TURN", playerId: 1 });
+  assert.equal("pendingBattle" in lobbyOf(gameRepo), false, "the marker did not survive the resolution");
+
+  // The settlement state the resolution persisted -- the JSONB the reporter
+  // compared across the reload (M-MAJOR-2).
+  const settlementsBeforeReload = JSON.parse(JSON.stringify(gameRepo.rows["test-game"].settlements));
+
+  // 4. The AI's turn then ends. After that handback the game must reload as
+  //    PLAYER_TURN/0 -- the exact acceptance value the finding asks for.
+  const ended = await handleCommand({ kind: "EndTurn", gameName: "test-game", actor: 1 }, deps);
+  assert.equal(ended.ok, true);
+  const reloaded = await hydrateFromRepos(gameRepo.rows["test-game"], repos, "test-game");
+  assert.deepEqual(reloaded.state.phase, { kind: "PLAYER_TURN", playerId: 0 }, "phase after combat reload");
+  assert.equal(reloaded.state.activePlayerId, 0);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(reloaded.state.settlements)),
+    settlementsBeforeReload,
+    "the reload leaves games.settlements JSONB byte-identical (M-MAJOR-2)",
+  );
+});

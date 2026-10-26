@@ -14,6 +14,7 @@ import type {
 } from "@heroes/contracts";
 import { DEFAULT_GAME_MODE, WAREHOUSE_RESOURCES, isGameMode, resolveGameMode } from "@heroes/contracts";
 import { defaultPopulation, SETTLEMENT_GOLD_TAX } from "./economy/settlementRates";
+import { hexDistance } from "./map/pathfinding";
 import { endpointOwner } from "./logistics";
 import { VALID_HORSE_VARIANTS } from "./horseVariants";
 import { normalizePlatoons } from "./units";
@@ -54,6 +55,35 @@ export function normalizeDistricts(raw: unknown): Record<string, DistrictState> 
 
 export function defaultCastleSeedFromMapSeed(mapSeed: number): number {
   return ((mapSeed ^ 0x63617374) >>> 0) || 1;
+}
+
+/**
+ * Is this pending-battle marker still a battle that can be fought?
+ *
+ * Both named heroes must be present and stand on adjacent hexes -- the same
+ * precondition the server re-derives before every battle command
+ * (detectAdjacentEnemy in server/app/commandHandler.ts's ResolveBattle /
+ * SubmitBattleResult cases, and EnterBattle's own write-time check). The BATTLE
+ * phase is not a stored value: it is re-derived from this marker on every load,
+ * so without the check a marker left behind by a battle that has ENDED (the
+ * loser removed, the attacker bounced back to its pre-move hex by cancelMove,
+ * the pair separated since) resurrects a phase nothing can leave -- the client
+ * parks in BATTLE and every command gated on PLAYER_TURN is refused. That is
+ * M-BLOCKER-1 / M-BLOCKER-2 (a reload after a resolved combat landing in BATTLE
+ * instead of PLAYER_TURN).
+ *
+ * Adjacency, not "does the offer look expired": a live offer legitimately sits
+ * unanswered for as long as the defender takes to choose, and the AI driver's
+ * own deadline (defenderWaitTimeoutMs) is the expiry policy for that.
+ */
+export function isLiveCollision(
+  heroes: Record<HeroId, HeroState>,
+  marker: PendingBattleMarker,
+): boolean {
+  const attacker = heroes[marker.attackerId];
+  const defender = heroes[marker.defenderId];
+  if (!attacker || !defender) return false;
+  return hexDistance({ q: attacker.q, r: attacker.r }, { q: defender.q, r: defender.r }) === 1;
 }
 
 export interface HydrateOptions {
@@ -467,7 +497,19 @@ export function hydrateGameState(
   // game is mid-battle-offer (the defender must choose), so the turn state
   // the active player's faction would imply is not the truth. Malformed /
   // absent -> the faction-derived behavior below, unchanged.
-  const pendingBattle = readPendingBattle(row);
+  //
+  // Only a marker that still names a LIVE collision counts (isLiveCollision
+  // above): a marker surviving a resolved battle must not resurrect BATTLE,
+  // which is exactly M-BLOCKER-1/M-BLOCKER-2 -- a save+reload after the combat
+  // landed the game in BATTLE with no fight left to fight, and every
+  // PLAYER_TURN-gated command refused.
+  const pendingMarker = readPendingBattle(row);
+  const pendingBattle = pendingMarker && isLiveCollision(heroesRecord, pendingMarker) ? pendingMarker : null;
+  if (pendingMarker && !pendingBattle) {
+    console.warn(
+      `[hydrateGameState] dropping stale pendingBattle marker (${pendingMarker.attackerId} vs ${pendingMarker.defenderId}): the pair is no longer a live collision`,
+    );
+  }
   // The game's mode (SETTLERS-PLAN.md §1): absent/unreadable reads as classic,
   // so nothing below changes for a pre-mode row. Only a NON-default mode is
   // written into the state, which keeps a classic state key-for-key identical

@@ -1321,6 +1321,40 @@ test("resolved defender battle: a snapshot without the marker resumes the normal
   assert.equal(harness.audits.length, 0);
 });
 
+// M-BLOCKER-1 / M-BLOCKER-2, the driver half: after a human defender ANSWERS an
+// offer and both heroes survive, the same attack must not be re-offered. While
+// it was, the pass returned waiting_for_defender before reaching any EndTurn, so
+// an AI hero standing next to a living human defender kept the game in BATTLE
+// forever and every reload reopened the defender's modal. Acceptance: one
+// EnterBattle in total, and the AI's turn ends (EndTurn dispatched).
+test("a defender who answered the offer is not offered it again: the AI's turn ends instead of looping in BATTLE", async () => {
+  const world = humanDefenderWorld();
+  const harness = installHarness(world);
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  // Pass 1: the approach move chains into the offer, and the pass stops to wait.
+  await scanOnce();
+  assert.equal(cap.captured[0], "waiting_for_defender");
+  assert.equal(commandsOfKind(harness.commands, "EnterBattle").length, 1);
+  assert.equal(harness.endTurns.length, 0, "no EndTurn while an offer is pending");
+
+  // The defender answers (Quick Resolve, both heroes surviving): exactly what
+  // the handler does -- the marker is cleared and the pair is still adjacent.
+  world.pendingBattle = null;
+
+  // Pass 2: the attack is spent for this turn, so the sweep finishes and the
+  // AI's turn hands back -- no second offer chasing the same defender.
+  await scanOnce();
+  assert.equal(
+    commandsOfKind(harness.commands, "EnterBattle").length,
+    1,
+    "the answered attack is not offered a second time",
+  );
+  assert.equal(cap.captured[1], "ended_turn", "the AI's turn completes instead of looping");
+  assert.equal(harness.endTurns.length, 1);
+});
+
 test("AI defender regression: an adjacent AI-seat defender still auto-resolves via ResolveBattle", async () => {
   const world = defenderApproachWorld();
   world.state.players = [...world.state.players, makePlayer(2, "ai", ["d2"], [])];

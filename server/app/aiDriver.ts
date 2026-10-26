@@ -207,6 +207,18 @@ interface GameDriverMemory {
    * another rich hero's attempt.
    */
   charterTurns: Set<string>;
+  /**
+   * `${round}:${seat}:${attackerId}:${defenderId}` keys this pass has already
+   * offered a human defender (M-BLOCKER-1/M-BLOCKER-2). Once the defender has
+   * answered an offer, re-offering the same attack asks the same question again
+   * -- and since the pass returns waiting_for_defender before it can reach
+   * either EndTurn, an AI whose hero stays adjacent to a living human defender
+   * could never end its turn: the game sat in BATTLE forever (the report's
+   * "stuck in BATTLE after combat resolution + reload", with the defender's
+   * modal re-opening on every reload). The entry is scoped to the turn, so
+   * next round the same pair can be attacked again.
+   */
+  battleOffers: Set<string>;
 }
 
 const memory = new Map<string, GameDriverMemory>();
@@ -507,6 +519,7 @@ function syncMemory(gameName: string, gameId: number): GameDriverMemory {
     recruitedTurns: new Set(),
     tradeRouteTurns: new Set(),
     charterTurns: new Set(),
+    battleOffers: new Set(),
   };
   memory.set(gameName, fresh);
   return fresh;
@@ -1174,6 +1187,19 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
             // break) exits driveGameTurn entirely, so neither the
             // exhaustion EndTurn below nor the termination EndTurn can run
             // while an offer is pending.
+            //
+            // One offer per pair per turn (M-BLOCKER-1/M-BLOCKER-2): if this
+            // attack was already offered and answered, both heroes surviving,
+            // re-offering it would ask the same question forever -- and because
+            // the return below skips every EndTurn, the AI's turn could never
+            // end and the game stayed in BATTLE (the reported "stuck in BATTLE
+            // after combat resolution + reload"). The attack is spent for this
+            // turn instead; the sweep moves on and ends the turn normally.
+            const offerKey = `${adj.state.round}:${seat}:${heroId}:${defenderId}`;
+            if (mem.battleOffers.has(offerKey)) {
+              skippedHeroes.add(heroId);
+              break;
+            }
             const offered = await dispatch(ctx, {
               kind: "EnterBattle",
               gameName,
@@ -1193,6 +1219,7 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
               skippedHeroes.add(heroId);
               break;
             }
+            mem.battleOffers.add(offerKey);
             return "waiting_for_defender";
           }
           const resolved = await dispatch(ctx, {

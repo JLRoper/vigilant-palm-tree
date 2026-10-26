@@ -28,7 +28,9 @@ function apiGame(lobby: unknown, activeFaction: "player" | "ai" = "player"): Gam
     day: 9,
     active_player_id: activeFaction === "ai" ? 1 : 0,
     players: [makePlayer(0, "player", ["h0"], ["s0"]), makePlayer(1, "ai", ["h1"], [])],
-    heroes: { h0: makeHero("h0", 0, 2, 2), h1: makeHero("h1", 1, 18, 4) },
+    // h1 adjacent to h0 (3,2 is a neighbour of 2,2): the shape a real marker
+    // always has, since EnterBattle re-derives adjacency before persisting it.
+    heroes: { h0: makeHero("h0", 0, 2, 2), h1: makeHero("h1", 1, 3, 2) },
     settlements: { s0: makeSettlement("s0", 0, 2, 2) },
     lobby: lobby as Game["lobby"],
   };
@@ -135,4 +137,30 @@ test("an absent charters field hydrates as [] and unlocks the hero it left flagg
   assert.deepEqual(state.activeCharters, []);
   assert.equal(state.heroes.h0.isChartering, false, "the orphaned charter flag is cleared, not honoured");
   assert.equal(state.heroes.h0.charterId, null);
+});
+
+// ---------------------------------------------------------------------------
+// M-BLOCKER-1 / M-BLOCKER-2 on the CLIENT path: the payload's lobby marker must
+// not park the browser in BATTLE once the battle is over. Acceptance: after F5
+// + Load Game on a game whose last battle resolved, the hydrated phase is
+// PLAYER_TURN with activePlayerId 0 -- not BATTLE.
+// ---------------------------------------------------------------------------
+
+test("a lobby marker whose pair is no longer adjacent does not re-open the battle after F5 (M-BLOCKER-1/M-BLOCKER-2)", (t) => {
+  t.mock.method(console, "warn", () => {});
+  const game = apiGame({ pendingBattle: validMarker });
+  // The battle resolved: the AI attacker was bounced off the collision hex, so
+  // the persisted pair is no longer adjacent.
+  game.heroes.h1 = makeHero("h1", 1, 9, 9);
+
+  const state = hydrateClientGame(game);
+
+  assert.equal(state.phase.kind, "PLAYER_TURN");
+  assert.equal(state.activePlayerId, 0);
+  assert.deepEqual(state.phase, { kind: "PLAYER_TURN", playerId: 0 });
+});
+
+test("a live offered battle still re-opens the modal after F5 (the case the marker exists for)", () => {
+  const state = hydrateClientGame(apiGame({ pendingBattle: validMarker }));
+  assert.deepEqual(state.phase, { kind: "BATTLE", attackerId: "h1", defenderId: "h0" });
 });
