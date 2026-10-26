@@ -336,6 +336,8 @@ export interface CityGhostBuildingNode {
   halfHeight: number;
   ownerColor: string;
   valid: boolean;
+  /** Why the footprint is refused, in words, drawn under it when it is invalid. */
+  reason?: string | null;
 }
 
 /** Staffed-building person cluster. `center` is the front-bottom anchor of the

@@ -485,6 +485,14 @@ export class CityView {
     const cell = screenToGridCell(layout, this.size, viewportW, canvasX, canvasY);
 
     if (!cell) {
+      // While a building is held, an off-grid click is a placement attempt that
+      // cannot land: the placer says so in words instead of the click clearing
+      // the selection and leaving the player to guess (playthrough finding 1).
+      if (this.placer.isActive()) {
+        this.placer.placeAt(canvasX, canvasY, viewportW, viewportH);
+        this.updateBuildButton();
+        return;
+      }
       this.buildingMenu.hide();
       if (!modifier?.ctrlKey && !modifier?.metaKey) this.clearSelection();
       return;
@@ -502,7 +510,10 @@ export class CityView {
 
     // placement mode: place building
     if (this.placer.isActive()) {
-      this.placer.place();
+      // The snap comes from the CLICK's own coordinates, not from whatever a
+      // previous mousemove left behind: a click on the grid must place, and a
+      // click that cannot must say why (playthrough findings 1 and 2).
+      this.placer.placeAt(canvasX, canvasY, viewportW, viewportH);
       this.updateBuildButton();
       return;
     }

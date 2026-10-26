@@ -1375,6 +1375,22 @@ export function paintCityGhostBuilding(ctx: CanvasRenderingContext2D, node: City
     node.halfHeight * 2,
   );
   ctx.restore();
+
+  // The red outline says "no"; this says WHY, under the footprint so it never
+  // covers the sprite the player is aiming with. Same ink and shadow as the
+  // city's own labels so it reads on any backdrop.
+  if (!node.valid && node.reason) {
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.shadowColor = "rgba(0,0,0,0.75)";
+    ctx.shadowBlur = 3;
+    ctx.fillStyle = CITY_GHOST_INVALID_STROKE;
+    ctx.font = `11px ${deps.fontFamily}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText(node.reason, node.center.x, node.center.y + node.halfHeight + 4);
+    ctx.restore();
+  }
 }
 
 export function paintCityPerson(ctx: CanvasRenderingContext2D, node: CityPersonNode, deps: Paint2DDep): void {

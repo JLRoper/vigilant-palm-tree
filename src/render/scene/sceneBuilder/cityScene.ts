@@ -28,7 +28,7 @@ export interface CitySceneInput {
   citySpots: Array<{ cell: { x: number; y: number }; resource: ResourceType; vein: string }>;
   cityMines: Array<{ cell: { x: number; y: number }; resource: ResourceType; level: number }>;
   buildings: BuildingDef[];
-  ghost?: { gx: number; gy: number; kind: BuildingKind; w: number; h: number; valid: boolean } | null;
+  ghost?: { gx: number; gy: number; kind: BuildingKind; w: number; h: number; valid: boolean; reason?: string | null } | null;
   selectedKeys?: ReadonlySet<string>;
   /** CSS px top overlay inset (fixed toolbar height); the grid fits below `topInset + CITY_VIEW_MARGIN`. */
   topInset?: number;
@@ -226,6 +226,9 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
       halfHeight: fp.hh,
       ownerColor,
       valid: ghost.valid,
+      // Only carried when there is something to say: a valid ghost's node stays
+      // byte-identical to the pre-reason shape.
+      ...(ghost.reason ? { reason: ghost.reason } : {}),
     });
   }
 

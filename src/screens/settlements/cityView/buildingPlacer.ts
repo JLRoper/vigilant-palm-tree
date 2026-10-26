@@ -84,6 +84,8 @@ export class BuildingPlacer {
   /** The palette's scrollable build list, kept so its offset survives the re-render every selection and placement does. */
   private buildListEl: HTMLElement | null = null;
   private listScrollTop = 0;
+  /** Why the last click could not place anything, shown in the palette; null once a placement lands. */
+  private notice: string | null = null;
 
   init(size: CityViewSize, center: { gx: number; gy: number } | null, initialBuildings: BuildingDef[], isDistrict = false, districtTerrain: string | null = null, factionId?: FactionId): void {
     this.size = size;
@@ -118,6 +120,7 @@ export class BuildingPlacer {
     this.h = fp.h;
     this.hoverCell = null;
     this.valid = false;
+    this.notice = null;
     this.refreshPaletteSelection();
   }
 
@@ -144,6 +147,7 @@ export class BuildingPlacer {
       return false;
     }
     this.onPlaced?.();
+    this.notice = null;
     this.renderPaletteBody();
     return true;
   }
@@ -153,6 +157,7 @@ export class BuildingPlacer {
     this.selectedKind = null;
     this.hoverCell = null;
     this.valid = false;
+    this.notice = null;
   }
 
   // ─── net cost calculation for shopping cart model ────────────────────
@@ -236,6 +241,7 @@ export class BuildingPlacer {
     // re-render of the OPEN palette carries a scroll offset.
     this.buildListEl = null;
     this.listScrollTop = 0;
+    this.notice = null;
 
     const palette = createPanel({
       parent,
@@ -312,6 +318,24 @@ export class BuildingPlacer {
         borderRadius: "3px",
       });
       this.palette.appendContent(summaryDiv);
+    }
+
+    // Why the last click did nothing, in words. The ghost's colour says "no";
+    // this says which rule said it (playthrough finding 2).
+    if (this.notice) {
+      const noticeDiv = document.createElement("div");
+      noticeDiv.dataset.testid = "palette-notice";
+      noticeDiv.textContent = this.notice;
+      Object.assign(noticeDiv.style, {
+        fontSize: "10px",
+        color: CART_TONE_COLORS.over,
+        marginTop: "6px",
+        padding: "3px 6px",
+        background: "rgba(0,0,0,0.3)",
+        borderRadius: "3px",
+        lineHeight: "1.3",
+      });
+      this.palette.appendContent(noticeDiv);
     }
 
     const actionRow = document.createElement("div");
@@ -581,26 +605,81 @@ export class BuildingPlacer {
     this.valid = this.canPlaceAt(cell.gx, cell.gy);
   }
 
-  canPlaceAt(gx: number, gy: number): boolean {
-    if (gx < 0 || gy < 0 || gx + this.w > this.size || gy + this.h > this.size) return false;
-    if (this.isDistrict && this.active === "townHall") return false;
-    if (this.isDistrict && this.active && districtTerrainBlock(this.districtTerrain, this.active) !== null) return false;
-    if (this.active === "townHall" && this.buildings.some((b) => b.kind === "townHall")) return false;
+  /**
+   * Why a footprint anchored at (gx, gy) cannot take the held building, in
+   * words; null when it can. The SINGLE source of truth for the rule: the
+   * boolean gate (`canPlaceAt`) and the sentence the player reads beside the
+   * ghost both come from here, so a new rule can never reach one and miss the
+   * other. The sentences match the palette's own blocking copy (buildEntryStatus)
+   * wherever the same rule is already stated there.
+   */
+  placementBlockReason(gx: number, gy: number): string | null {
+    if (gx < 0 || gy < 0 || gx + this.w > this.size || gy + this.h > this.size) {
+      return "That footprint runs off the edge of the grid.";
+    }
+    if (this.isDistrict && this.active === "townHall") return "A town hall can only be built in the main settlement.";
+    if (this.isDistrict && this.active) {
+      const terrainNote = districtTerrainBlock(this.districtTerrain, this.active);
+      if (terrainNote) return terrainNote;
+    }
+    if (this.active === "townHall" && this.buildings.some((b) => b.kind === "townHall")) {
+      return "This settlement already has a town hall.";
+    }
     for (let dx = 0; dx < this.w; dx++) {
       for (let dy = 0; dy < this.h; dy++) {
         const cx = gx + dx;
         const cy = gy + dy;
-        if (!this.isDistrict && this.center && cx === this.center.gx && cy === this.center.gy) return false;
-        if (this.buildings.some((b) => reCoversCell(b, cx, cy))) return false;
+        if (!this.isDistrict && this.center && cx === this.center.gx && cy === this.center.gy) {
+          return "The center cell is reserved.";
+        }
+        if (this.buildings.some((b) => reCoversCell(b, cx, cy))) return "A building already stands there.";
       }
     }
-    return true;
+    return null;
+  }
+
+  canPlaceAt(gx: number, gy: number): boolean {
+    return this.placementBlockReason(gx, gy) === null;
+  }
+
+  /** Why the cell under the pointer is refused, or null (nothing held, a free cell, or no hover yet). */
+  hoverBlockReason(): string | null {
+    if (!this.active || !this.hoverCell) return null;
+    return this.placementBlockReason(this.hoverCell.gx, this.hoverCell.gy);
   }
 
   // ─── place / remove ─────────────────────────────────────────────────
 
+  /**
+   * Place the held building on the cell the CLICK landed on. The snap is
+   * derived from the click's own coordinates, so a click never depends on a
+   * mousemove having set `hoverCell` first -- a bare click used to return null
+   * with no request, no status and no words (playthrough finding 1). A click
+   * that cannot place says why, in words, in the palette.
+   */
+  placeAt(canvasX: number, canvasY: number, viewportW: number, viewportH: number): BuildingDef | null {
+    if (!this.active) return null;
+    this.computeSnap(canvasX, canvasY, viewportW, viewportH);
+    const block = this.hoverCell
+      ? this.placementBlockReason(this.hoverCell.gx, this.hoverCell.gy)
+      : "That is not a cell of the grid.";
+    if (block) {
+      this.notice = block;
+      this.renderPaletteBody();
+      return null;
+    }
+    this.notice = null;
+    return this.place();
+  }
+
   place(): BuildingDef | null {
     if (!this.active || !this.hoverCell || !this.valid) return null;
+    // `valid` is the result of the LAST computeSnap, so it can be stale (a row
+    // click resets the snap; a resize moves the grid under a stationary
+    // pointer). Re-checking the cell is what keeps one cell out of the cart
+    // twice: an unvalidated push puts two identical entries on the wire and the
+    // server rejects the whole commit (duplicate key on gx,gy).
+    if (this.placementBlockReason(this.hoverCell.gx, this.hoverCell.gy) !== null) return null;
     return this.confirmPlacement() ? this.buildings[this.buildings.length - 1] : null;
   }
 
@@ -640,7 +719,7 @@ export class BuildingPlacer {
 
   // ─── snapshot for rendering ─────────────────────────────────────────
 
-  ghostSnapshot(): { gx: number; gy: number; kind: BuildingKind; w: number; h: number; valid: boolean } | null {
+  ghostSnapshot(): { gx: number; gy: number; kind: BuildingKind; w: number; h: number; valid: boolean; reason: string | null } | null {
     if (!this.active || !this.hoverCell) return null;
     return {
       gx: this.hoverCell.gx,
@@ -649,6 +728,9 @@ export class BuildingPlacer {
       w: this.w,
       h: this.h,
       valid: this.valid,
+      // The sentence the ghost carries when it is red: a colour is not a
+      // reason, and "the center cell is reserved" is not guessable from one.
+      reason: this.hoverBlockReason(),
     };
   }
 }
