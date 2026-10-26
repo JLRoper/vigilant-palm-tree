@@ -99,14 +99,20 @@ export async function hydrateFromRepos(
   }
 
   const charters = await repos.charterRepo.loadAllForGame(gameName);
+  // The charters go INTO the hydrate call rather than being spread on
+  // afterwards (they used to be): hydrateGameState uses them to decide whether
+  // a hero's persisted isChartering flag still has a charter behind it, so a
+  // post-hoc assignment would unlock every chartering hero on this path
+  // (C-BLOCKER-1, in the other direction).
   const state = hydrateGameState({
     ...row,
     heroes: byId(heroes),
     settlements: byId(settlements),
     pendingBattle: readPendingBattle(row.lobby),
     gameMode: readGameMode(row.lobby),
+    activeCharters: charters,
   });
-  return { state: { ...state, activeCharters: charters }, source: "granular" };
+  return { state, source: "granular" };
 }
 
 // Standalone convenience wrapper for callers that only have a Queryable +

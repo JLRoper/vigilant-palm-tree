@@ -335,6 +335,19 @@ export class TurnController {
   // 409 hero_not_at_settlement server-side, and the optimistic capture
   // becomes a phantom until reload.
   private lastMovePersist: Promise<void> | null = null;
+  // Charter travel steps are POSTed one at a time, in route order
+  // (C-MAJOR-1): the server validates every step's fromTile against the hero's
+  // persisted hex, so a burst of fire-and-forget steps arrives scrambled and
+  // all but the one matching the server's position are rejected 409
+  // hero_not_at_fromTile. This chain is the previous step's POST; the tail is
+  // what trackCommand registers, so endCurrentTurn still drains the whole
+  // route. See queueCharterTravelStep().
+  private charterTravelChain: Promise<unknown> = Promise.resolve();
+  // Charters whose chain hit a rejection: the remaining steps of the burst
+  // resolve without POSTing (the server's position no longer matches what the
+  // queue assumed), and the next advanceAutoTravel() call re-derives from the
+  // hydrated state.
+  private readonly haltedCharterTravel = new Set<string>();
   // I1 + B1 per-controller AI state lives in one shared AiTurnMemory whose
   // OWNER is GameStateManager: it hands the SAME instance to every controller
   // it builds, so the rebuild on every full-state replaceState (auto-resolve
@@ -1060,6 +1073,9 @@ export class TurnController {
     if (this.state.phase.kind !== "PLAYER_TURN") return;
     const playerId = this.state.activePlayerId;
     const map = this.hooks.getMap();
+    // A new burst starts from the state this call derives its route from, so
+    // any halt left by the previous burst (a rejected step) no longer applies.
+    this.haltedCharterTravel.clear();
     let changed = true;
 
     while (changed) {
@@ -1121,7 +1137,14 @@ export class TurnController {
         // last step of a charter's route could race ahead of this POST and
         // have EndTurn's response silently revert it.
         this.trackCommand(
-          this.hooks.onAdvanceCharterTravel(hero.ownerId, hero.id, fromTile, { q: nextStep.q, r: nextStep.r }, cost),
+          this.queueCharterTravelStep(
+            hero.ownerId,
+            hero.id,
+            charter.id,
+            fromTile,
+            { q: nextStep.q, r: nextStep.r },
+            cost,
+          ),
           "onAdvanceCharterTravel",
         );
 
@@ -1137,6 +1160,55 @@ export class TurnController {
         changed = true;
       }
     }
+  }
+
+  /**
+   * Queues one AdvanceCharterTravel POST behind the previous one (C-MAJOR-1).
+   *
+   * The route walk itself stays synchronous -- the optimistic state has to move
+   * in one pass so the map, the toolbar and the hero's trail all agree -- but
+   * the POSTs must NOT be fire-and-forget concurrently. The server validates
+   * every step's `fromTile` against the hero's persisted hex
+   * (server/app/commandHandler.ts's AdvanceCharterTravel staleness guard), so a
+   * burst arrives out of order and every step except the one matching the
+   * server's current position is rejected 409 `hero_not_at_fromTile` -- the
+   * desync C-MAJOR-1 recorded (4 POSTs fired, 1 accepted), which left the
+   * client showing `constructing` while the server still had `traveling`.
+   * Chaining each step's POST onto the previous step's response makes the
+   * arrival order the route's own order, so each step is accepted in turn.
+   *
+   * The returned promise is this step's POST (what the caller tracks, so
+   * endCurrentTurn's drain still waits for the whole route); the chain field
+   * only ever holds a settled-with-nothing-to-report tail, so one rejected step
+   * can never poison the steps after it.
+   *
+   * A rejection halts the REST of this burst for that charter: those closures
+   * resolve without POSTing, because after a rejected step the server's position
+   * no longer matches what the queued fromTiles assume (the old burst would have
+   * fired them all at a position the server never held). The next
+   * advanceAutoTravel() call re-derives the route from the hydrated state, and
+   * the day tick's own travel pass (packages/engine/src/charter/advance.ts)
+   * moves the charter server-side meanwhile.
+   */
+  private queueCharterTravelStep(
+    actor: number,
+    heroId: HeroId,
+    charterId: string,
+    fromTile: { q: number; r: number },
+    toTile: { q: number; r: number },
+    cost: number,
+  ): Promise<void> {
+    const step = this.charterTravelChain.then(async () => {
+      if (this.haltedCharterTravel.has(charterId)) return;
+      try {
+        await this.hooks.onAdvanceCharterTravel(actor, heroId, fromTile, toTile, cost);
+      } catch (e) {
+        this.haltedCharterTravel.add(charterId);
+        throw e;
+      }
+    });
+    this.charterTravelChain = step.catch(() => {});
+    return step;
   }
 
   async resolveCurrentBattle(): Promise<BattleResult | null> {

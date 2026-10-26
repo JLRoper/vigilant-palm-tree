@@ -84,6 +84,17 @@ export interface HydratableGameRow {
   next_charter_id?: number;
   next_settlement_id?: number;
   /**
+   * The game's in-flight charters (games' `charters` table, assembled by
+   * server/persistence/hydrate.ts's granular path and by the API's
+   * GET /games/:name payload, which is where the CLIENT gets them). Optional
+   * and defaulted to [] -- a pre-charter row, a JSONB-fallback read and a
+   * mock fixture all legitimately carry none -- but see
+   * unlockOrphanedCharteringHeroes() below for what that default must do to a
+   * hero still flagged isChartering: leaving the flag set with no charter to
+   * advance is exactly C-BLOCKER-1's permanently locked, starving hero.
+   */
+  activeCharters?: GameState["activeCharters"];
+  /**
    * games.trade_routes JSONB (docs/wagons-stockpiles-trade-routes-plan.md
    * §5.2). Deliberately untyped: rows written before the endpoint/payload
    * model carry the legacy flat shape (`fromSettlementId`/`toSettlementId`/
@@ -445,6 +456,12 @@ export function hydrateGameState(
       r: raw.r,
     });
   }
+  // In-flight charters: the `charters` table on the granular path, the
+  // GET /games/:name payload on the client's path, [] for a row that predates
+  // charters. A hero left flagged isChartering with no charter record behind
+  // it is unlocked in the same pass -- see unlockOrphanedCharteringHeroes.
+  const charters = row.activeCharters ?? [];
+  unlockOrphanedCharteringHeroes(heroesRecord, charters);
   const settlementCount = Object.keys(settlementsRecord).length;
   // A valid pendingBattle marker overrides the faction-derived phase: the
   // game is mid-battle-offer (the defender must choose), so the turn state
@@ -491,7 +508,7 @@ export function hydrateGameState(
     castleSeed: opts?.castleSeed ?? defaultCastleSeedFromMapSeed(row.seed),
     castleCount: opts?.castleCount ?? CASTLE_COUNT_DEFAULT,
     tradeRoutes,
-    activeCharters: (row as unknown as { activeCharters?: GameState["activeCharters"] }).activeCharters ?? [],
+    activeCharters: charters,
     nextCharterId: row.next_charter_id ?? 0,
     // Derived, not persisted (see deriveNextTradeRouteId): hydrated past
     // the highest existing "route<n>" id so a freshly created route can
@@ -509,4 +526,39 @@ export function hydrateGameState(
     nextSettlementId: Math.max(row.next_settlement_id ?? 0, settlementCount),
     ...(gameMode !== DEFAULT_GAME_MODE ? { gameMode } : {}),
   };
+}
+
+/**
+ * Unlocks heroes whose `isChartering` flag has no charter behind it.
+ *
+ * `isChartering`/`charterId` persist on the hero (heroRepo's columns, and the
+ * legacy JSONB), while the charter itself lives in its own `charters` table
+ * with no JSONB fallback: that asymmetry is C-BLOCKER-1. A read path that
+ * simply doesn't have the charters (the JSONB fallback; any payload that
+ * predates the field; a charter row removed by cleanupDefeatedHeroCharters,
+ * which filters activeCharters and never touches the flag) then hands back a
+ * hero who is flagged as chartering with nothing that can ever advance or
+ * complete it -- unselectable (turnController.selectHero bails on
+ * isChartering), forever unpaid, and starving.
+ *
+ * A chartering hero with no matching charter record is therefore treated as
+ * NOT chartering: that is the only reading under which the state is
+ * recoverable, and the flag is bookkeeping, not a rule in its own right
+ * (startCharter sets it; completeCharter clears it). Mutates the passed record
+ * and never invents a charter -- a hero with a real charter row is untouched,
+ * byte-for-byte.
+ */
+export function unlockOrphanedCharteringHeroes(
+  heroes: Record<HeroId, HeroState>,
+  charters: readonly GameState["activeCharters"][number][],
+): void {
+  const ids = new Set(charters.map((c) => c.id));
+  for (const [id, hero] of Object.entries(heroes)) {
+    if (!hero.isChartering) continue;
+    if (hero.charterId !== null && ids.has(hero.charterId)) continue;
+    console.warn(
+      `[hydrateGameState] heroes.${id} isChartering with no ${hero.charterId === null ? "charterId" : `charter ${hero.charterId}`}; unlocking the hero`,
+    );
+    heroes[id] = { ...hero, isChartering: false, charterId: null };
+  }
 }

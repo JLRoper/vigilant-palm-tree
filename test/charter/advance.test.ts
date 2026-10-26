@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { advanceCharters, CHARTER_SETTLEMENT_POPULATION } from "@heroes/engine";
+import type { GameMap } from "@heroes/engine";
 import { MOVEMENT_PER_TURN } from "@heroes/contracts";
 import { makeCharter, makeHero, makeState } from "./_helpers";
 
@@ -119,4 +120,103 @@ test("advanceCharters handles a mix of counting-down and completing charters ind
   assert.equal(next.activeCharters[0].daysRemaining, 3);
   assert.ok(next.settlements["s-fast"], "the finished charter's settlement exists");
   assert.equal(next.settlements["s-slow"], undefined, "the still-counting-down charter has not created a settlement");
+});
+
+// ---------------------------------------------------------------------------
+// C-BLOCKER-1: the day tick must be able to move (and finish) a traveling
+// charter on its own. Before this, a `traveling` charter was advanced ONLY by
+// the client's hex-by-hex AdvanceCharterTravel commands, so a charter whose
+// client never sent them -- the reload that hydrated activeCharters: [] while
+// heroes.<id>.isChartering survived -- could never arrive, never found, and
+// left the hero locked and unpaid forever.
+// ---------------------------------------------------------------------------
+
+// A fully open, uniform-cost map: these cases are about the day tick's
+// traveling pass, not terrain or pathfinding (both covered by the map tests).
+const OPEN_MAP = { isPassable: () => true, cost: () => 1 } as unknown as GameMap;
+
+test("advanceCharters moves a traveling charter one hex toward its target per day and flips it to constructing on arrival", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 0, 0, { isChartering: true, charterId: "c0" })],
+    activeCharters: [
+      makeCharter({
+        id: "c0",
+        heroId: "h0",
+        ownerId: 0,
+        phase: "traveling",
+        daysRemaining: 10,
+        targetQ: 3,
+        targetR: 0,
+        settlementId: "s-new",
+      }),
+    ],
+  });
+
+  const day1 = advanceCharters(s, OPEN_MAP);
+  assert.equal(day1.heroes.h0.q, 1, "day 1: one hex step toward the target");
+  assert.equal(day1.heroes.h0.r, 0);
+  assert.equal(day1.heroes.h0.isChartering, true, "still chartering while traveling");
+  assert.equal(day1.activeCharters.length, 1);
+  assert.equal(day1.activeCharters[0].phase, "traveling", "not on the target yet");
+  assert.equal(
+    day1.activeCharters[0].daysRemaining,
+    10,
+    "the construction countdown does not run while the hero is still traveling",
+  );
+
+  const day2 = advanceCharters(day1, OPEN_MAP);
+  assert.equal(day2.heroes.h0.q, 2);
+
+  const day3 = advanceCharters(day2, OPEN_MAP);
+  assert.equal(day3.heroes.h0.q, 3, "arrived on the target hex");
+  assert.equal(day3.activeCharters[0].phase, "constructing", "arrival flips the phase");
+  assert.equal(
+    day3.activeCharters[0].daysRemaining,
+    10,
+    "the arrival day does not also burn a construction day",
+  );
+
+  // And the countdown then runs, founding the settlement on day 13 with no
+  // client command anywhere in the sequence.
+  let cur = day3;
+  for (let i = 0; i < 10; i += 1) cur = advanceCharters(cur, OPEN_MAP);
+  assert.equal(cur.activeCharters.length, 0, "the charter completed");
+  const founded = cur.settlements["s-new"];
+  assert.ok(founded, "the charter founded its settlement");
+  assert.equal(founded.ownerId, 0);
+  assert.equal(founded.q, 3);
+  assert.equal(founded.r, 0);
+  assert.equal(founded.level, 1);
+  assert.equal(founded.population, CHARTER_SETTLEMENT_POPULATION);
+  assert.equal(cur.heroes.h0.isChartering, false, "the chartering hero is unlocked by the founding");
+  assert.equal(cur.heroes.h0.charterId, null);
+});
+
+test("advanceCharters without a map leaves a traveling charter where it is (map-less callers keep the old no-op)", () => {
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 0, 0, { isChartering: true, charterId: "c0" })],
+    activeCharters: [
+      makeCharter({ id: "c0", heroId: "h0", ownerId: 0, phase: "traveling", targetQ: 3, targetR: 0 }),
+    ],
+  });
+
+  const next = advanceCharters(s);
+  assert.equal(next.heroes.h0.q, 0, "no map, no path, no step");
+  assert.equal(next.heroes.h0.r, 0);
+  assert.equal(next.activeCharters[0].phase, "traveling");
+});
+
+test("a traveling charter with an unreachable target is left alone rather than throwing or teleporting", () => {
+  const walledMap = { isPassable: () => false, cost: () => 1 } as unknown as GameMap;
+  const s = makeState({
+    heroes: [makeHero("h0", 0, 0, 0, { isChartering: true, charterId: "c0" })],
+    activeCharters: [
+      makeCharter({ id: "c0", heroId: "h0", ownerId: 0, phase: "traveling", targetQ: 3, targetR: 0 }),
+    ],
+  });
+
+  const next = advanceCharters(s, walledMap);
+  assert.equal(next.heroes.h0.q, 0);
+  assert.equal(next.heroes.h0.r, 0);
+  assert.equal(next.activeCharters.length, 1);
 });

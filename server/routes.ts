@@ -39,6 +39,7 @@ const NEW_GAME_MAP_GEN_VERSION: MapGenVersion = CURRENT_MAP_GEN_VERSION;
 // the client hydrated tradeRoutes: [] on reload. Duplicate column lists
 // drift; this import is the fix and the prevention.
 import { GAME_COLUMNS } from "./persistence/repositories/gameRepo";
+import { createCharterRepo } from "./persistence/repositories/charterRepo";
 import { assetRouter } from "./assetRoutes";
 import { authRouter, attachAuth } from "./auth";
 import { invalidateMembershipCache } from "./middleware/attachPlayerSeat";
@@ -281,7 +282,15 @@ router.get("/games/:name", async (req, res) => {
     .filter((n) => !claimed[String(n)])
     .sort((a, b) => a - b);
   const seatTotal = row.lobby?.seats ?? row.players.length;
-  res.json({ ...row, availableSeats, seatTotal });
+  // In-flight charters ride the payload (C-BLOCKER-1): a charter's state lives
+  // in its own `charters` table with no JSONB column behind it, so without this
+  // the client hydrated `activeCharters: []` on every load while
+  // `heroes.<id>.isChartering` survived -- a hero who could never be selected
+  // again, and a charter nothing could advance. The granular engine hydration
+  // path (server/persistence/hydrate.ts) reads the same table; this is the
+  // client's half of that one source.
+  const charters = await createCharterRepo(pool).loadAllForGame(req.params.name);
+  res.json({ ...row, charters, availableSeats, seatTotal });
 });
 
 router.get("/games/:name/validate", async (req, res) => {

@@ -411,3 +411,88 @@ test("a newly created game's seeded starter set reaches hydrated live state on B
     assertLiveState(persisted.source, persisted.state.settlements);
   });
 });
+
+// ---------------------------------------------------------------------------
+// C-BLOCKER-1: the charter round-trip. A charter lives in its own table with no
+// JSONB fallback, while `isChartering`/`charterId` persist on the hero, so a
+// read path that loses the charters hands back a hero nothing can ever unlock.
+// ---------------------------------------------------------------------------
+
+test("hydrateGame surfaces the charters table as activeCharters, and the payload path carries the same charter (C-BLOCKER-1)", async () => {
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    const heroes: Record<HeroId, HeroState> = {
+      h0: makeHero("h0", 0, 12, 7, { isChartering: true, charterId: "ch0", gold: 0 }),
+    };
+    const settlements: Record<SettlementId, SettlementState> = { s0: makeSettlement("s0", 0, 4, 2) };
+    await seedLegacyGame(client, name, heroes, settlements);
+    await createHeroRepo(client).upsertMany(name, heroes);
+    await createSettlementRepo(client).upsertMany(name, settlements);
+    const charter = makeCharter({
+      id: "ch0",
+      heroId: "h0",
+      ownerId: 0,
+      phase: "traveling",
+      daysRemaining: 10,
+      targetQ: 12,
+      targetR: 4,
+      settlementId: "s7",
+    });
+    await createCharterRepo(client).upsertMany(name, [charter]);
+
+    // Path 1: the granular server-side hydration (what every command runs on).
+    const hydrated = await hydrateGame(client, name);
+    assert.equal(hydrated.source, "granular");
+    assert.deepEqual(hydrated.state.activeCharters, [charter], "the in-flight charter survives the reload");
+    assert.equal(hydrated.state.activeCharters.length, 1, "activeCharters length after reload");
+    assert.equal(hydrated.state.activeCharters[0].phase, "traveling");
+    assert.equal(hydrated.state.heroes.h0.isChartering, true, "a hero with a real charter row stays chartering");
+
+    // Path 2: the CLIENT payload path -- GET /games/:name attaches the same
+    // rows as `charters`, and hydrateClientGame passes them in as
+    // `activeCharters`. Same charter, same hero flag.
+    const row = await createGameRepo(client).load(name);
+    const viaPayload = hydrateGameState({
+      ...row,
+      heroes: { h0: { ...heroes.h0 } },
+      activeCharters: [charter],
+    });
+    assert.deepEqual(viaPayload.activeCharters, [charter]);
+    assert.equal(viaPayload.heroes.h0.isChartering, true);
+  });
+});
+
+test("a hero left flagged isChartering with no charter row behind it is unlocked by hydration, not left locked forever (C-BLOCKER-1)", async (t) => {
+  // This is the state C-BLOCKER-1 measured (day 37 in the DB: `charters` still
+  // says traveling, the client hydrated activeCharters: []): nothing can ever
+  // advance or complete that charter, so the flag is bookkeeping with no
+  // backing fact. Left alone the hero can never be selected again
+  // (turnController.selectHero bails on isChartering) and starves.
+  t.mock.method(console, "warn", () => {});
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    const heroes: Record<HeroId, HeroState> = {
+      h0: makeHero("h0", 0, 12, 7, { isChartering: true, charterId: "ch0" }),
+    };
+    const settlements: Record<SettlementId, SettlementState> = { s0: makeSettlement("s0", 0, 4, 2) };
+    await seedLegacyGame(client, name, heroes, settlements);
+    await createHeroRepo(client).upsertMany(name, heroes);
+    await createSettlementRepo(client).upsertMany(name, settlements);
+    // Note the absence: no charterRepo row for ch0.
+
+    const hydrated = await hydrateGame(client, name);
+    assert.equal(hydrated.source, "granular");
+    assert.deepEqual(hydrated.state.activeCharters, []);
+    assert.equal(hydrated.state.heroes.h0.isChartering, false, "the orphaned flag is cleared");
+    assert.equal(hydrated.state.heroes.h0.charterId, null);
+
+    // The JSONB fallback path (which can never see the charters table at all)
+    // must reach the same conclusion.
+    const held = await createHeroRepo(client).loadAllForGame(name);
+    assert.equal(held[0].isChartering, true, "the hero row itself still carries the flag");
+    const row = await createGameRepo(client).load(name);
+    const viaJsonb = hydrateGameState({ ...row, heroes: { h0: held[0] } });
+    assert.equal(viaJsonb.heroes.h0.isChartering, false);
+    assert.equal(viaJsonb.heroes.h0.charterId, null);
+  });
+});
