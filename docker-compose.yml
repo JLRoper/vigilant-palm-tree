@@ -1,14 +1,33 @@
+# docker-compose.yml -- the shared stack (db/api/web/adminer) AND the template
+# for per-run pods.
+#
+# Shared stack (today's behaviour, unchanged): `npm run db:up`,
+# `npm run docker:deploy`. Every POD_* value below is unset, so the defaults
+# resolve to exactly the names/ports/database this file has always used:
+# game_db / game_api / game_web / game_adminer, 5432 / 3001 / 5173 / 8080,
+# database game_poc.
+#
+# Pods: `npm run pod:up` (scripts/pods.ts) runs this file as ONE compose
+# project per pod -- `docker compose -p heroes-pod-<name> -f docker-compose.yml
+# -f docker/docker-compose.pod.yml up -d db api web` -- with the POD_* values
+# set. Project scoping renames the network and volume per pod
+# (heroes-pod-<name>_heroes-network, heroes-pod-<name>_game_db_data) and the
+# POD_* values below give each pod its own container names, host ports,
+# database and image tags, so `docker compose -p heroes-pod-<name> ... down -v`
+# removes exactly that pod and nothing else. The pod identity labels live in
+# docker/docker-compose.pod.yml (they must be ABSENT for the shared stack, and
+# compose cannot express a conditional label).
 services:
   db:
     image: postgres:16-alpine
-    container_name: game_db
+    container_name: "${POD_CONTAINER_PREFIX:-game}_db"
     restart: unless-stopped
     environment:
-      POSTGRES_DB: game_poc
+      POSTGRES_DB: ${POD_DB_NAME:-game_poc}
       POSTGRES_USER: gameuser
       POSTGRES_PASSWORD: gamepass
     ports:
-      - "5432:5432"
+      - "${POD_DB_PORT:-5432}:5432"
     volumes:
       - game_db_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,6 +39,9 @@ services:
       - heroes-network
 
   api:
+    # Parameterized tag: a pod builds/uses its OWN api image so it never
+    # retags the shared stack's heroes-js-api out from under game_api.
+    image: ${POD_API_IMAGE:-heroes-js-api}
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -29,18 +51,18 @@ services:
       # resolves it from git) rather than a bare `docker compose build`.
       args:
         VITE_COMMIT_HASH: ${VITE_COMMIT_HASH:-dev}
-    container_name: game_api
+    container_name: "${POD_CONTAINER_PREFIX:-game}_api"
     restart: unless-stopped
     environment:
       PGHOST: db
       PGPORT: 5432
       PGUSER: gameuser
       PGPASSWORD: gamepass
-      PGDATABASE: game_poc
+      PGDATABASE: ${POD_DB_NAME:-game_poc}
       API_PORT: 3001
       LAN_HOST: 1
     ports:
-      - "3001:3001"
+      - "${POD_API_PORT:-3001}:3001"
     depends_on:
       db:
         condition: service_healthy
@@ -54,13 +76,14 @@ services:
       retries: 3
 
   web:
+    image: ${POD_WEB_IMAGE:-heroes-js-web}
     build:
       context: .
       dockerfile: docker/Dockerfile
       target: web-runtime
       args:
         VITE_COMMIT_HASH: ${VITE_COMMIT_HASH:-dev}
-    container_name: game_web
+    container_name: "${POD_CONTAINER_PREFIX:-game}_web"
     restart: unless-stopped
     depends_on:
       api:
@@ -70,7 +93,7 @@ services:
     # then `docker compose up -d --remove-orphans api web` so any legacy
     # `game_gateway` container is removed before `game_web` binds host port 5173.
     ports:
-      - "5173:80"
+      - "${POD_WEB_PORT:-5173}:80"
     networks:
       - heroes-network
     healthcheck:
@@ -82,13 +105,13 @@ services:
 
   adminer:
     image: adminer:latest
-    container_name: game_adminer
+    container_name: "${POD_CONTAINER_PREFIX:-game}_adminer"
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${POD_ADMINER_PORT:-8080}:8080"
     networks:
       - heroes-network
 
