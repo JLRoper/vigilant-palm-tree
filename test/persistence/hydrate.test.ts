@@ -496,3 +496,159 @@ test("a hero left flagged isChartering with no charter row behind it is unlocked
     assert.equal(viaJsonb.heroes.h0.charterId, null);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M-MAJOR-2: `games.settlements` JSONB must be a fixed point across a save +
+// reload. The read path is granular (settlementRepo) while the write path is
+// the JSONB column, so hydrate -> persist -> hydrate -> persist has to converge:
+// otherwise every combat save rewrites the column into a slightly different
+// shape, which is what the playthrough measured by comparing the column before
+// the fight and after the reload.
+// ---------------------------------------------------------------------------
+
+async function readSettlementsJsonb(client: PoolClient, name: string): Promise<unknown> {
+  const r = await client.query<{ settlements: unknown }>("SELECT settlements FROM games WHERE name = $1", [name]);
+  return r.rows[0].settlements;
+}
+
+test("games.settlements JSONB is byte-identical across a save + reload cycle (M-MAJOR-2)", async () => {
+  // The real creation payload: seeded buildings, districts, garrisons, spots and
+  // rates -- the shapes the reporter's game actually carried into the fight.
+  const payload = makeInitialStatePayload(new GameMap(424242, "small"), mulberry32(424242), {
+    castleSeed: 424242,
+    enemyCount: 0,
+    humanSeatCount: 1,
+  });
+
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedLegacyGame(client, name, payload.heroes, payload.settlements);
+    await createHeroRepo(client).upsertMany(name, payload.heroes);
+    await createSettlementRepo(client).upsertMany(name, payload.settlements);
+
+    // Cycle 1: hydrate (granular) and persist -- exactly what a combat command
+    // does to the row.
+    const first = await hydrateGame(client, name);
+    assert.equal(first.source, "granular");
+    await createGameRepo(client).saveHeroesAndSettlements(name, first.state.heroes, first.state.settlements);
+    const afterFirstSave = await readSettlementsJsonb(client, name);
+
+    // Cycle 2: reload what cycle 1 wrote and persist again.
+    const second = await hydrateGame(client, name);
+    await createGameRepo(client).saveHeroesAndSettlements(name, second.state.heroes, second.state.settlements);
+    const afterSecondSave = await readSettlementsJsonb(client, name);
+
+    assert.deepEqual(
+      afterSecondSave,
+      afterFirstSave,
+      "the settlements JSONB must not drift between a save and the next reload",
+    );
+  });
+});
+
+test("a combat save that touches no settlement leaves games.settlements JSONB byte-identical (M-MAJOR-2)", async () => {
+  // The reporter's own comparison: the column before the fight vs after the
+  // reload. Before this fix the combat persist rewrote the column from the
+  // GRANULAR read path, whose shape is normalized on the way in -- a settlement
+  // the fight never touched came back with its platoon array padded to
+  // ARMY_STACK_SLOTS, so the two reads of the column disagreed.
+  const payload = makeInitialStatePayload(new GameMap(424242, "small"), mulberry32(424242), {
+    castleSeed: 424242,
+    enemyCount: 0,
+    humanSeatCount: 1,
+  });
+  const id = Object.keys(payload.settlements)[0];
+
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedLegacyGame(client, name, payload.heroes, payload.settlements);
+
+    // A garrison in the column that the granular read path will normalize: a
+    // four-slot platoon array (the padding to 8 happens inside hydrate).
+    const column = {
+      ...payload.settlements,
+      [id]: {
+        ...payload.settlements[id],
+        stacks: [
+          { entries: [{ unitTypeId: "swordsman", count: 3 }] },
+          { entries: [] },
+          { entries: [] },
+          { entries: [] },
+        ],
+      },
+    };
+    await client.query("UPDATE games SET settlements = $1::jsonb WHERE name = $2", [JSON.stringify(column), name]);
+    const beforeCombat = await readSettlementsJsonb(client, name);
+    assert.equal(
+      ((beforeCombat as Record<string, { stacks: unknown[] }>)[id].stacks ?? []).length,
+      4,
+      "the column starts with a four-slot platoon array",
+    );
+
+    await createHeroRepo(client).upsertMany(name, payload.heroes);
+    await createSettlementRepo(client).upsertMany(name, column);
+
+    // The combat: the hero record changes, the settlement record does not (the
+    // handler signals that with reference equality -> skipSettlements).
+    const hydrated = await hydrateGame(client, name);
+    assert.equal(hydrated.source, "granular");
+    const heroId = Object.keys(hydrated.state.heroes)[0];
+    const afterCombat = {
+      ...hydrated.state.heroes,
+      [heroId]: { ...hydrated.state.heroes[heroId], gold: 123 },
+    };
+    await createGameRepo(client).saveHeroesAndSettlements(name, afterCombat, hydrated.state.settlements, {
+      skipSettlements: true,
+    });
+
+    const afterCombatColumn = await readSettlementsJsonb(client, name);
+    assert.deepEqual(
+      afterCombatColumn,
+      beforeCombat,
+      "games.settlements JSONB equality across the combat save",
+    );
+
+    // And a reload of that row still describes the same settlements.
+    const reloaded = await hydrateGame(client, name);
+    assert.equal(reloaded.state.settlements[id].name, column[id].name);
+    assert.deepEqual(reloaded.state.settlements[id].buildings, column[id].buildings);
+  });
+});
+
+test("the settlements JSONB a hydrate+persist cycle writes still describes the same settlements", async () => {
+  const payload = makeInitialStatePayload(new GameMap(424242, "small"), mulberry32(424242), {
+    castleSeed: 424242,
+    enemyCount: 0,
+    humanSeatCount: 1,
+  });
+
+  await withRollback(async (client) => {
+    const name = uniqueName();
+    await seedLegacyGame(client, name, payload.heroes, payload.settlements);
+    await createHeroRepo(client).upsertMany(name, payload.heroes);
+    await createSettlementRepo(client).upsertMany(name, payload.settlements);
+
+    const hydrated = await hydrateGame(client, name);
+    await createGameRepo(client).saveHeroesAndSettlements(name, hydrated.state.heroes, hydrated.state.settlements);
+
+    const reloaded = await hydrateGame(client, name);
+    // Load-bearing fields survive the round trip: identity, position, owner,
+    // level, and the built city (a starter set must not be lost by a save).
+    for (const [id, before] of Object.entries(hydrated.state.settlements)) {
+      const after = reloaded.state.settlements[id];
+      assert.ok(after, `settlement ${id} survived the save + reload`);
+      assert.equal(after.name, before.name);
+      assert.equal(after.ownerId, before.ownerId);
+      assert.equal(after.q, before.q);
+      assert.equal(after.r, before.r);
+      assert.equal(after.level, before.level);
+      assert.equal(after.population, before.population);
+      assert.equal(after.goldTax, before.goldTax);
+      assert.equal(after.gold, before.gold);
+      assert.equal(after.morale, before.morale);
+      assert.deepEqual(after.warehouse, before.warehouse);
+      assert.deepEqual(after.buildings, before.buildings, `settlement ${id}: buildings survive byte-for-byte`);
+      assert.deepEqual(after.citySpots, before.citySpots, `settlement ${id}: city spots survive`);
+    }
+  });
+});

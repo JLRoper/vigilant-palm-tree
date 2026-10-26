@@ -192,7 +192,13 @@ test("MoveHero rejects a move onto a tile already occupied by another hero", asy
 
 test("MoveHero rejects a move by a hero that is currently chartering", async () => {
   const row = makeRow([makeHero("h0", 0, 2, 2, { isChartering: true, charterId: "c0" })], [makeSettlement("s0", 0, 2, 2)]);
-  const { deps } = makeDeps(row);
+  const { charterRepo, deps } = makeDeps(row);
+  // The charter the hero is carrying has to exist: hydration unlocks a hero
+  // whose isChartering flag has no charter row behind it (C-BLOCKER-1), so a
+  // fixture that only sets the flag is no longer a chartering hero at all.
+  charterRepo.rows["test-game"] = [
+    makeCharterRow({ id: "c0", heroId: "h0", ownerId: 0, targetQ: 10, targetR: 10 }),
+  ];
   const command: Command = {
     kind: "MoveHero",
     gameName: "test-game",

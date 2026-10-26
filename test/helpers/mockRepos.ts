@@ -60,6 +60,7 @@ export function createMockGameRepo(
         next_charter_id?: number;
         next_settlement_id?: number;
         trade_routes?: TradeRouteState[];
+        skipSettlements?: boolean;
       },
     ): Promise<void> {
       const row = rows[name];
@@ -67,7 +68,7 @@ export function createMockGameRepo(
       rows[name] = {
         ...row,
         heroes,
-        settlements,
+        ...(extra?.skipSettlements ? {} : { settlements }),
         ...(extra?.players !== undefined ? { players: extra.players } : {}),
         ...(extra?.round !== undefined ? { round: extra.round } : {}),
         ...(extra?.day !== undefined ? { day: extra.day } : {}),

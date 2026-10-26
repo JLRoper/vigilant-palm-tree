@@ -444,12 +444,19 @@ test("a resolved combat survives save + reload: no marker, no BATTLE resurrectio
   assert.deepEqual(duringOffer.state.phase, { kind: "BATTLE", attackerId: "h1", defenderId: "h0" });
 
   // 2. The defender Quick Resolves it from their own seat.
+  const settlementsBeforeCombat = JSON.parse(JSON.stringify(gameRepo.rows["test-game"].settlements));
+  const settlementsRecordBeforeCombat = gameRepo.rows["test-game"].settlements;
   const resolved = await handleCommand(
     { kind: "ResolveBattle", gameName: "test-game", actor: 0, attackerId: "h1", defenderId: "h0" },
     deps,
   );
   assert.equal(resolved.ok, true);
   assert.equal(resolved.battle?.winner, "attacker", "the fixture's defender is wiped");
+  assert.equal(
+    gameRepo.rows["test-game"].settlements,
+    settlementsRecordBeforeCombat,
+    "a resolution that changed no settlement must not rewrite the settlements record (M-MAJOR-2)",
+  );
 
   // 3. Save + reload MID-TURN: the marker is gone, so the reload is the AI's
   //    live turn rather than a BATTLE with nothing left to fight. This is the
@@ -459,20 +466,21 @@ test("a resolved combat survives save + reload: no marker, no BATTLE resurrectio
   assert.deepEqual(midTurn.state.phase, { kind: "AI_TURN", playerId: 1 });
   assert.equal("pendingBattle" in lobbyOf(gameRepo), false, "the marker did not survive the resolution");
 
-  // The settlement state the resolution persisted -- the JSONB the reporter
-  // compared across the reload (M-MAJOR-2).
-  const settlementsBeforeReload = JSON.parse(JSON.stringify(gameRepo.rows["test-game"].settlements));
+  // M-MAJOR-2: the combat persist left games.settlements byte-identical -- the
+  // column the playthrough compared before the fight and after the reload.
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(gameRepo.rows["test-game"].settlements)),
+    settlementsBeforeCombat,
+    "the combat save must not rewrite games.settlements",
+  );
 
-  // 4. The AI's turn then ends. After that handback the game must reload as
-  //    PLAYER_TURN/0 -- the exact acceptance value the finding asks for.
+  // 4. The AI's turn then ends (the day tick legitimately changes settlements,
+  //    so the byte-identity claim above is scoped to the combat save). After
+  //    that handback the game must reload as PLAYER_TURN/0 -- the exact
+  //    acceptance value the finding asks for.
   const ended = await handleCommand({ kind: "EndTurn", gameName: "test-game", actor: 1 }, deps);
   assert.equal(ended.ok, true);
   const reloaded = await hydrateFromRepos(gameRepo.rows["test-game"], repos, "test-game");
   assert.deepEqual(reloaded.state.phase, { kind: "PLAYER_TURN", playerId: 0 }, "phase after combat reload");
   assert.equal(reloaded.state.activePlayerId, 0);
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(reloaded.state.settlements)),
-    settlementsBeforeReload,
-    "the reload leaves games.settlements JSONB byte-identical (M-MAJOR-2)",
-  );
 });
