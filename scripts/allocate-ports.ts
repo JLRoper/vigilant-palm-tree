@@ -17,17 +17,28 @@
 //
 // Usage:
 //   tsx scripts/allocate-ports.ts
+//
+// `pickPort`/`pickFreePorts` are exported for callers that need free ports
+// WITHOUT a worktree .env: scripts/pods.ts asks for a pod's db/api/web host
+// ports here rather than keeping a second allocator. Importing this module
+// does NOT write any .env -- the writer only runs when this file is the
+// entry point (see the guard at the bottom).
 
 import { createServer, type Server } from "node:net";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { invokedDirectly } from "./lib/entry";
 
 const ENV_FILE = join(process.cwd(), ".env");
 
 const KEYS = ["API_PORT", "CLIENT_PORT", "WS_PORT"] as const;
 
-function pickPort(): Promise<number> {
+// Asks the kernel for a free port on the loopback interface. Anything already
+// bound -- including the shared stack's published 5432/3001/5173 -- is
+// therefore never handed back, which is what keeps a pod off the shared
+// stack's ports.
+export function pickPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server: Server = createServer();
     server.once("error", reject);
@@ -42,6 +53,18 @@ function pickPort(): Promise<number> {
       server.close(() => resolve(port));
     });
   });
+}
+
+export async function pickFreePorts(count: number): Promise<number[]> {
+  const picked = new Set<number>();
+  let attempts = 0;
+  while (picked.size < count) {
+    if (attempts++ > count * 20) {
+      throw new Error(`could not find ${count} distinct free TCP ports`);
+    }
+    picked.add(await pickPort());
+  }
+  return [...picked];
 }
 
 function readEnvFile(): Record<string, string> {
@@ -92,11 +115,11 @@ async function main(): Promise<void> {
   }
 
   const branch = (() => {
-    try {
-      return execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf8" }).trim();
-    } catch {
-      return "(detached)";
-    }
+    const r = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    return r.status === 0 && r.stdout ? r.stdout.trim() : "(detached)";
   })();
   console.log(`Worktree: ${branch}  (${process.cwd()})`);
   for (const key of KEYS) {
@@ -108,7 +131,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error("allocate-ports failed:", err);
-  process.exit(1);
-});
+if (invokedDirectly(import.meta.url)) {
+  main().catch((err) => {
+    console.error("allocate-ports failed:", err);
+    process.exit(1);
+  });
+}

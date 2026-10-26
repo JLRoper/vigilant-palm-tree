@@ -8,46 +8,63 @@
 //   npm run docker:build              # builds api + web with the current SHA
 //   npm run docker:build -- web       # just web
 //   VITE_COMMIT_HASH=abc1234 npm run docker:build   # override
+//
+// `resolveCommitHash` is exported for scripts/pods.ts, which builds a pod's
+// OWN api/web images and must stamp the same hash the deploy path stamps.
+// Importing this module does not build anything (see the guard at the bottom).
 
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { invokedDirectly } from "./lib/entry";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-function gitShortHead(): string | null {
-  const r = spawnSync("git", ["rev-parse", "--short", "HEAD"], { cwd: ROOT, encoding: "utf8" });
+export function resolveCommitHash(root: string = ROOT): string | null {
+  const provided = process.env.VITE_COMMIT_HASH?.trim();
+  if (provided) return provided;
+  const r = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true,
+  });
   if (r.status !== 0 || !r.stdout) return null;
-  return r.stdout.trim();
+  return r.stdout.trim() || null;
 }
 
-const provided = process.env.VITE_COMMIT_HASH?.trim();
-const sha = provided || gitShortHead();
+function main(): void {
+  const sha = resolveCommitHash();
 
-if (!sha) {
-  console.error(
-    "docker-build: could not resolve a commit hash (not a git repo?) and VITE_COMMIT_HASH is unset.\n" +
-      "The client build would stamp the literal \"dev\". Set VITE_COMMIT_HASH to override.",
-  );
-  process.exit(1);
+  if (!sha) {
+    console.error(
+      "docker-build: could not resolve a commit hash (not a git repo?) and VITE_COMMIT_HASH is unset.\n" +
+        "The client build would stamp the literal \"dev\". Set VITE_COMMIT_HASH to override.",
+    );
+    process.exit(1);
+  }
+
+  const forwarded = process.argv.slice(2).filter((a) => a.trim().length > 0);
+  const services = forwarded.filter((a) => !a.startsWith("-"));
+  const flags = forwarded.filter((a) => a.startsWith("-"));
+  const args = ["compose", "build", ...(services.length > 0 ? services : ["api", "web"]), ...flags];
+
+  console.log(`>> docker compose ${args.slice(2).join(" ")} (VITE_COMMIT_HASH=${sha})`);
+
+  const r = spawnSync("docker", args, {
+    cwd: ROOT,
+    stdio: "inherit",
+    windowsHide: true,
+    env: { ...process.env, VITE_COMMIT_HASH: sha },
+  });
+
+  if (r.error) {
+    console.error(`docker-build: failed to launch docker: ${String(r.error)}`);
+    process.exit(1);
+  }
+
+  process.exit(r.status ?? 1);
 }
 
-const forwarded = process.argv.slice(2).filter((a) => a.trim().length > 0);
-const services = forwarded.filter((a) => !a.startsWith("-"));
-const flags = forwarded.filter((a) => a.startsWith("-"));
-const args = ["compose", "build", ...(services.length > 0 ? services : ["api", "web"]), ...flags];
-
-console.log(`>> docker compose ${args.slice(2).join(" ")} (VITE_COMMIT_HASH=${sha})`);
-
-const r = spawnSync("docker", args, {
-  cwd: ROOT,
-  stdio: "inherit",
-  env: { ...process.env, VITE_COMMIT_HASH: sha },
-});
-
-if (r.error) {
-  console.error(`docker-build: failed to launch docker: ${String(r.error)}`);
-  process.exit(1);
+if (invokedDirectly(import.meta.url)) {
+  main();
 }
-
-process.exit(r.status ?? 1);
