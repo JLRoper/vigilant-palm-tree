@@ -7,6 +7,7 @@ import {
   districtPopulationBonus,
   getBuildingEffect,
   POP_BY_LEVEL,
+  settlementPopulationCap,
 } from "@heroes/engine";
 import { emptyWarehouse, makeSettlement } from "../charter/_helpers";
 
@@ -100,4 +101,51 @@ test("applyPopulationGrowth clamps a house-fed settlement at POP_BY_LEVEL + the 
 
 test("POP_BY_LEVEL is untouched: the settlement cap stays 500 / 1500 / 5000", () => {
   assert.deepEqual(POP_BY_LEVEL, { 1: 500, 2: 1500, 3: 5000 });
+});
+
+/**
+ * C-MINOR-2: the cap the player is shown must be the cap the engine uses. The
+ * finding's three samples, re-measured here: Silver crest (L1, two MAIN-city
+ * Houses) pinned at 500, Raven hold (L2, one district House) at 1,800, and a
+ * neutral L3 castle (two district farmhouses) at 5,040.
+ */
+test("C-MINOR-2: settlementPopulationCap is the level base plus district housing only", () => {
+  const silverCrest = makeSettlement("s0", 0, 2, 2, {
+    level: 1,
+    population: 500,
+    buildings: [house("house", 0, 0, 1), house("house", 1, 0, 1)],
+  });
+  assert.equal(settlementPopulationCap(silverCrest), 500, "main-city housing raises no cap");
+  assert.equal(districtPopulationBonus(silverCrest), 0);
+
+  const ravenHold = settlementWithDistrictHousing(1, { level: 2, population: 1500 });
+  assert.equal(settlementPopulationCap(ravenHold), 1800, "1,500 base + one L1 district House (+300)");
+
+  const neutralCastle: SettlementState = {
+    ...makeSettlement("s0", null, 4, 4, { level: 3, population: 5000 }),
+    districts: {
+      "5,4": { q: 5, r: 4, citySpots: [], buildings: [house("farmhouse", 0, 0, 1)] },
+      "4,5": { q: 4, r: 5, citySpots: [], buildings: [house("farmhouse", 1, 0, 1)] },
+    },
+  };
+  assert.equal(districtPopulationBonus(neutralCastle), 40, "two L1 farmhouses at +20 each");
+  assert.equal(settlementPopulationCap(neutralCastle), 5040);
+});
+
+test("C-MINOR-2: growth clamps to exactly settlementPopulationCap", () => {
+  const districtHouse = settlementWithDistrictHousing(1, { population: 690 });
+  assert.equal(settlementPopulationCap(districtHouse), 800);
+  // growth = ceil((690 + 300) * 0.1) = 99 -> 789, still under the 800 cap.
+  assert.equal(applyPopulationGrowth({ s0: districtHouse }, 0.1).s0.population, 789);
+  // 795 + ceil(1095 * 0.1) = 795 + 110 clamps at the cap.
+  const nearCap = settlementWithDistrictHousing(1, { population: 795 });
+  assert.equal(applyPopulationGrowth({ s0: nearCap }, 0.1).s0.population, 800);
+});
+
+test("C-MINOR-2: the panel's own cap accessor equals the engine's growth ceiling", () => {
+  const s = settlementWithDistrictHousing(3, { level: 2, population: 2000 });
+  // Whatever the row prints as `/ cap` is the number growth stops at.
+  assert.equal(settlementPopulationCap(s), 3000);
+  const grown = applyPopulationGrowth({ s0: s }, 0.1).s0;
+  assert.ok(grown.population <= settlementPopulationCap(s));
 });
