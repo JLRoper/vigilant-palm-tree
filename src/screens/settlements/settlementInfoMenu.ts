@@ -13,10 +13,10 @@ import { liveSettlementUpkeepUnfed } from "@screens/shared/heroUpkeepCost";
 import { RESOURCE_PILE_BUBBLY_SPRITES, settlementBannerUrl } from "../../render/assetDescriptors";
 import { bankRejectionMessage, bankRowModel, treasuryRowModel, type BankGoldDirection, type BankRowModel } from "./bankRows";
 import { TREASURY_CAP_AMBER, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
-import { dailyRateTitle, foodBalanceTitle, formatDailyRate, resourceLabel, settlementDailyRates } from "./panelRates";
+import { dailyRateTitle, foodBalanceTitle, formatDailyRate, populationCapTitle, resourceLabel, settlementDailyRates } from "./panelRates";
 import type { HorseVariant } from "../../state/settings";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
-import { POP_BY_LEVEL, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, settlementTreasuryCap, workforcePool, assignedWorkersExplicit, hasLegacyStaffing } from "@heroes/engine";
+import { districtPopulationBonus, POP_BY_LEVEL, settlementPopulationCap, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, settlementTreasuryCap, workforcePool, assignedWorkersExplicit, hasLegacyStaffing } from "@heroes/engine";
 import { pickHeroName } from "../../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 
@@ -464,7 +464,18 @@ export class SettlementInfoMenu {
     this.bannerEl.style.cursor = canEnterCityView ? "zoom-in" : "default";
     this.bannerEl.title = canEnterCityView ? "Double-click to enter the city view" : "";
     this.levelBadge.textContent = `L${settlement.level}`;
-    this.populationEl.textContent = settlement.population.toLocaleString();
+    // C-MINOR-2: the population row states the ceiling it is filling and what
+    // that ceiling is made of, both read from the engine's own cap function --
+    // a bare "500" could not say "you are capped, and why".
+    const populationCap = settlementPopulationCap(settlement);
+    const districtBonus = districtPopulationBonus(settlement);
+    this.populationEl.textContent = `${settlement.population.toLocaleString()} / ${populationCap.toLocaleString()}`;
+    this.populationEl.title = populationCapTitle(
+      settlement.population,
+      populationCap,
+      populationCap - districtBonus,
+      districtBonus,
+    );
     const pool = workforcePool(settlement);
     const assigned = assignedWorkersExplicit(settlement);
     this.workforceEl.textContent = hasLegacyStaffing(settlement)

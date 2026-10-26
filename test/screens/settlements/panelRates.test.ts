@@ -8,6 +8,7 @@ import {
   foodBalanceTitle,
   formatDailyRate,
   formatRate,
+  populationCapTitle,
   resourceLabel,
   settlementDailyRates,
 } from "../../../src/screens/settlements/panelRates";
@@ -242,4 +243,24 @@ test("the food tooltip answers 'made vs eaten' in one unit and then the verdict"
 test("the same inputs give the same numbers twice (the panel is not a moving target)", () => {
   const s = settlement({ resourceRates: { wood: 10, stone: 4 }, buildings: [building("woodcutterHut")] });
   assert.deepEqual(settlementDailyRates(s, SEED), settlementDailyRates(s, SEED));
+});
+
+// C-MINOR-2: the Population row prints the engine's real cap and a tooltip that
+// names where the ceiling comes from. Before this the row printed a bare
+// population, so a capped town had no way to say why it was not growing.
+test("C-MINOR-2: populationCapTitle states the cap, its source, and the verdict", () => {
+  const capped = populationCapTitle(500, 500, 500, 0);
+  assert.match(capped, /^Population 500 of 500 — 500 from the settlement's level cap/);
+  assert.match(capped, /housing inside the main city adds nothing/);
+  assert.match(capped, /At the cap: population grows no further until the settlement's level rises or more housing is built in a district\./);
+
+  const withDistrictHousing = populationCapTitle(1680, 1800, 1500, 300);
+  assert.match(withDistrictHousing, /^Population 1,680 of 1,800 — 1,500 from the settlement's level cap plus 300 from housing in its districts\./);
+  assert.match(withDistrictHousing, /Grows weekly while the warehouse can feed it, and stops at the cap\./);
+  assert.doesNotMatch(withDistrictHousing, /At the cap/);
+
+  // The 5,040 neutral castle from the finding: two L1 district farmhouses.
+  const castle = populationCapTitle(5040, 5040, 5000, 40);
+  assert.match(castle, /^Population 5,040 of 5,040 — 5,000 from the settlement's level cap plus 40/);
+  assert.match(castle, /At the cap/);
 });

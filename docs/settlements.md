@@ -52,11 +52,13 @@ If the hero is defeated during travel or construction, all costs are forfeited.
 
 ✅ **Locked.** Three levels ship in v1 UI. Level scales both resource yield and gold tax (population × tax = base gold income), and unlocks a larger city-view grid.
 
-| Level | Tier label | Population cap | Gold tax/turn | City grid |
-|-------|------------|----------------|---------------|-----------|
-| 1     | Settlement | 500            | 1g/head       | 5×5       |
-| 2     | Town       | 1,500          | 2g/head       | 10×10     |
-| 3     | Castle     | 5,000          | 3g/head       | 15×15     |
+| Level | Tier label | Population cap (level base) | Gold tax/turn | City grid |
+|-------|------------|-----------------------------|---------------|-----------|
+| 1     | Settlement | 500                         | 1g/head       | 5×5       |
+| 2     | Town       | 1,500                       | 2g/head       | 10×10     |
+| 3     | Castle     | 5,000                       | 3g/head       | 15×15     |
+
+These figures are the **level base** cap (`POP_BY_LEVEL`, `packages/engine/src/economy/settlementRates.ts`). The cap a settlement actually grows to is the level base **plus** the population every completed house / farmhouse / apartment standing in its **districts** grants (+300 / +1,000 / +1,500 for a House at L1/L2/L3, `populationByLevel` in the building registry) — `settlementPopulationCap` in `packages/engine/src/settlement/populationGrowth.ts`, the same function the settlement panel prints and the weekly growth clamps to. Housing inside the **main city grid** raises no cap: `districtPopulationBonus` walks `s.districts` only. So a level-1 town is capped at 500 with an empty district and at 800 with a single house in one.
 
 Charter-founded settlements always start at Level 1 with population 50 (not 500).
 
@@ -69,7 +71,7 @@ Settlements grow naturally each week, provided they have enough food to sustain 
 - **Schedule:** Weekly during `applyWeeklyUpkeep` (day % 7 === 0)
 - **Condition:** `warehouse.food >= foodRequired(s)` — growth only occurs when food is met
 - **Formula:** `growth = max(1, ceil(population × growthRate))`
-- **Cap:** Level's maximum population (500 / 1,500 / 5,000)
+- **Cap:** `settlementPopulationCap(s)` — the level's base cap (500 / 1,500 / 5,000) **plus** the population granted by housing standing in the settlement's districts (+300 per L1 House, +1,000 at L2, +1,500 at L3; farmhouses +20 × level, apartments +100 × level). Housing in the main city grid contributes nothing. The settlement panel prints exactly this number as `Population <now> / <cap>`, with the breakdown in its tooltip (`populationCapTitle`, `src/screens/settlements/panelRates.ts`), so a capped town says so on screen (C-MINOR-2).
 - **No growth penalty:** When food is short, population simply doesn't grow (morale decay handles the penalty separately)
 
 The growth rate is configurable in Settings; the upgrade population gate is **not** player-configurable — it is the engine-owned constant `UPGRADE_POPULATION_GATE` (85%, `packages/engine/src/settlement/upgradeSettlement.ts`, issue #153):
@@ -94,7 +96,7 @@ Settlements can be upgraded to the next tier through an active construction proc
 | Iron | 20 | 50 |
 | Arcane | — | 20 |
 | Construction | 15 days | 25 days |
-| Req: population | ≥ 85% of level cap | ≥ 85% of level cap |
+| Req: population | ≥ 85% of the level base cap | ≥ 85% of the level base cap |
 | Req: Town Hall level | ≥ 2 | ≥ 3 |
 
 ### Town Hall upgrade costs
@@ -108,7 +110,7 @@ Settlements can be upgraded to the next tier through an active construction proc
 
 ### Process
 
-1. **Pre-requisite check:** Population must meet the gate threshold (85% of level cap — the engine constant `UPGRADE_POPULATION_GATE`, not player-configurable), and Town Hall must be at or above the target level.
+1. **Pre-requisite check:** Population must meet the gate threshold (85% of the level **base** cap — the engine constant `UPGRADE_POPULATION_GATE` applied to `POP_BY_LEVEL`, not the district-boosted `settlementPopulationCap`; upgradeSettlement.ts), and Town Hall must be at or above the target level.
 2. **Initiation:** Player clicks the upgrade button in the settlement info panel. Costs are deducted immediately from the settlement treasury and warehouse.
 3. **Construction:** `daysRemaining` counts down each `advanceRound` — by **`1 + upgradeAccelEffort` days** (2026-10-17) when the settlement's `townHall` or `mageGuild` is **explicitly staffed** (max effort across the two kinds, so up to 2× with a full crew; unassigned/legacy buildings earn no acceleration). Settlement operates normally during construction (production, income, growth continue).
 4. **Completion:** When `daysRemaining` reaches 0:
