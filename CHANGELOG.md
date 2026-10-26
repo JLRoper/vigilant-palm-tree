@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.36.1] - 2026-10-26
+
+The adventure map's tile info panel now follows the pointer: pointing at a hex inspects it exactly as clicking one does (the same onTileInspect channel), so an unrevealed hex reads "Unexplored" and the hex a hero has landed on shows its terrain without a click that would also select, move or attack. Fixes the two map display findings of the movement playthrough (M-MINOR-1, M-MINOR-2) — both were one defect: the panel was click-driven, so hovering produced no panel at all.
+
 ## [0.36.0] - 2026-10-26
 
 Two engine rules for buildings.

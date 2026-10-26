@@ -1,6 +1,6 @@
 # Player Guide
 
-<!-- docs:verified 2026-10-21 -->
+<!-- docs:verified 2026-10-26 -->
 
 ## Start a Game
 
@@ -15,7 +15,7 @@ The form opens on the mode you last created a game with (a stored preference; pi
 
 ## Move and Found Settlements
 
-Select your hero, then click a destination to preview and request a path. The route preview shows reachable movement for the current turn; terrain changes movement costs. A click is a toggle: click a hero or settlement to select it (its panel opens), and click that same hero or settlement again to put it down - after moving a hero, click it once more to deselect it. Clicking a different hero or settlement switches selection instead, and with only a settlement selected, a click on empty ground also puts it down. Double-clicking a settlement still enters its city view. Double-click a settlement to enter its city view. The settlement panel's banner is the same door — double-click it too, and a row in the **⌂ Settlements** roster opens it the same way (the map is centred on that settlement first). Either way the city opens only for your own settlement on your own turn: a foreign or neutral settlement's banner shows no zoom cursor and does nothing.
+Select your hero, then click a destination to preview and request a path. The route preview shows reachable movement for the current turn; terrain changes movement costs. A click is a toggle: click a hero or settlement to select it (its panel opens), and click that same hero or settlement again to put it down - after moving a hero, click it once more to deselect it. Clicking a different hero or settlement switches selection instead, and with only a settlement selected, a click on empty ground also puts it down. Double-clicking a settlement still enters its city view. Double-click a settlement to enter its city view. The settlement panel's banner is the same door — double-click it too, and a row in the **⌂ Settlements** roster opens it the same way (the map is centred on that settlement first). Either way the city opens only for your own settlement on your own turn: a foreign or neutral settlement's banner shows no zoom cursor and does nothing. Pointing at a hex opens the **tile panel** for it, and clicking a hex inspects it the same way: the title is the hex's coordinates, then its terrain and move cost, then whatever stands there — a resource deposit (worked or unclaimed), a settlement, a district, a hero, an in-flight charter, the territory it belongs to — and a hex you have not seen yet says **Unexplored** and nothing else. The panel and the dashed ring around the inspected hex always describe the same hex, and the panel stays on the last hex you pointed at until you point at another one (its × closes it until you do).
 
 To charter a settlement, use a selected hero on your turn and meet the visible requirements: a **2,500 gold** hero purse, **20 wood** and **15 stone** in the friendly provisioning settlement's warehouse, a valid passable target at least **4 hexes** from existing settlements, and no conflicting active charter. The hero travels to the target and construction takes **10 days**. The server-driven AI uses the same charter requirements and travel rules.
 
