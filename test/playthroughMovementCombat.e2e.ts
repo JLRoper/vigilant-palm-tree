@@ -8,9 +8,10 @@ import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import "../server/persistence/pgTypes";
 import {
-  getApiPort, getClientPort, spawnLogged, waitForApiHealth, waitForUrl,
+  spawnLogged, waitForApiHealth, waitForUrl,
   waitForPortReleased, treeKill, reapPreviousRunPids, clearRegisteredPids,
 } from "./_request";
+import { requireRunTargets } from "./_envGuard";
 import type { GameDebugApi } from "../src/io/debugCommands";
 
 // PLAYTHROUGH driver: movement + fog reveal, resource-tile interaction,
@@ -22,23 +23,39 @@ import type { GameDebugApi } from "../src/io/debugCommands";
 // records, so it must never run as part of the default suite or the
 // "Build + smoke test" gate -- it does nothing unless PLAYTHROUGH=1.
 //
-//   cd <worktree> && PLAYTHROUGH=1 PGDATABASE=game_play_<hex> \
-//     npx tsx --env-file=.env test/playthroughMovementCombat.e2e.ts
+//   cd <worktree> && PLAYTHROUGH=1 PGDATABASE=game_poc_<branch-slug> \
+//     API_PORT=57601 CLIENT_PORT=57602 npx tsx test/playthroughMovementCombat.e2e.ts
 //
-// Pass --env-file=.env (or API_PORT/CLIENT_PORT) explicitly: without it the
-// ports fall back to 3001/5173, which on a shared box is the Docker stack, so
-// the driver would drive the deployed api against the wrong database.
+// The target must be explicit: with API_PORT / CLIENT_PORT / PGDATABASE unset
+// (and no fresh local/.test-request.json from tools/run-test.mjs) the driver
+// exits 2 before its first side effect, instead of falling back to 3001/5173 --
+// on a shared box the Docker stack -- and to game_play_bf69b3, which is
+// another worktree's playthrough database. See test/_envGuard.ts.
 //
 // Report paths are env-overridable (PLAYTHROUGH_REPORT_DIR, -REPORT_SLUG,
 // -SHOTS_DIR) and otherwise derived from this file's own checkout, never
 // hardcoded to one machine's directory.
 
-const API_PORT = Number(process.env.API_PORT) || getApiPort(3001);
-const WEB_PORT = Number(process.env.CLIENT_PORT) || getClientPort(5173);
+const ENTRY = "playthroughMovementCombat.e2e";
+
+// Opt-in gate FIRST, environment guard second. A driver nobody asked for exits
+// 0 so an accidental registration can never fail a suite; only PLAYTHROUGH=1
+// reaches the guard, which then refuses to guess a target. Both sit above the
+// first side effect -- no server is spawned, no report is written.
+if (process.env.PLAYTHROUGH !== "1") {
+  console.log(
+    `${ENTRY}: skipped (opt-in driver) — set PLAYTHROUGH=1 to run it. It then requires ` +
+    "API_PORT, CLIENT_PORT and PGDATABASE explicitly; unset values are refused, not guessed.",
+  );
+  process.exit(0);
+}
+const TARGETS = requireRunTargets(ENTRY);
+const API_PORT = TARGETS.apiPort;
+const WEB_PORT = TARGETS.clientPort;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 const GAME_SEED = 424242;
-const DB_NAME = process.env.PGDATABASE ?? "game_play_bf69b3";
+const DB_NAME = TARGETS.database;
 
 // The report belongs beside the CALLER's checkout: a worktree
 // (<repo>/.worktrees/<branch>) shares the panel's report directory with its
@@ -943,22 +960,16 @@ async function main(): Promise<void> {
   }
 }
 
-// Opt-in: refusing to run must be a clean exit 0, so an accidental
-// registration of this file can never fail a suite (see the header).
-if (process.env.PLAYTHROUGH !== "1") {
-  console.log(
-    "playthroughMovementCombat: skipped (opt-in driver) — set PLAYTHROUGH=1 to run it:\n" +
-    "  PLAYTHROUGH=1 PGDATABASE=game_play_<hex> npx tsx --env-file=.env test/playthroughMovementCombat.e2e.ts",
-  );
-} else {
-  main().then(
-    () => process.exit(0),
-    (err) => {
-      console.error("PLAYTHROUGH FAILED:", err);
-      try { writeReport(false); } catch { /* best effort */ }
-      for (const n of createdGames) void deleteGame(n);
-      cleanup();
-      process.exit(1);
-    },
-  );
-}
+// The opt-in gate and the environment guard already ran at the top of this
+// module (see the header): reaching this call means PLAYTHROUGH=1 was set and
+// API_PORT / CLIENT_PORT / PGDATABASE were given explicitly.
+main().then(
+  () => process.exit(0),
+  (err) => {
+    console.error("PLAYTHROUGH FAILED:", err);
+    try { writeReport(false); } catch { /* best effort */ }
+    for (const n of createdGames) void deleteGame(n);
+    cleanup();
+    process.exit(1);
+  },
+);
