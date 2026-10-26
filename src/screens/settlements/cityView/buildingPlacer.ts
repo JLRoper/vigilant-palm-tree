@@ -150,6 +150,13 @@ export class BuildingPlacer {
     // would leave a building on screen that was never paid for.
     if (!this.canAfford()) {
       this.buildings.pop();
+      // ... and it says why. The ghost's colour comes from the GEOMETRY rule
+      // alone, so an unaffordable cell draws a buildable-looking ghost and the
+      // click vanished without a word anywhere (playthrough finding 4); the
+      // sentence joins the geometry ones on the palette notice, the surface
+      // this gate already shares with them.
+      this.notice = this.affordabilityRefusal() ?? "The settlement cannot cover this placement.";
+      this.renderPaletteBody();
       return false;
     }
     this.onPlaced?.();
@@ -652,6 +659,26 @@ export class BuildingPlacer {
   hoverBlockReason(): string | null {
     if (!this.active || !this.hoverCell) return null;
     return this.placementBlockReason(this.hoverCell.gx, this.hoverCell.gy);
+  }
+
+  /**
+   * Why the held building could not be PAID FOR, in the palette's own words
+   * ("Not enough gold (need 100, have 0)"), or null when the cart covers it.
+   *
+   * Derived without staging the building -- the push/canAfford/pop in
+   * confirmPlacement decides the same thing -- so the sentence can be asked for
+   * before anything is mutated, and no random farm style is drawn for a
+   * placement that is not going to happen. This is the cart's half of the
+   * refusal, the half the ghost's geometry colour cannot express.
+   */
+  private affordabilityRefusal(): string | null {
+    if (!this.affordability || !this.active) return null;
+    const staged: Partial<Record<ResourceType, number>> = { ...this.computeNetCost() };
+    for (const [r, v] of Object.entries(buildingPlacementCost(this.active))) {
+      staged[r as ResourceType] = (staged[r as ResourceType] ?? 0) + v;
+    }
+    const status = buildConfirmStatus({ net: staged, charged: this.committedNet, affordability: this.affordability });
+    return status.reasons.length > 0 ? status.reasons.join("\n") : null;
   }
 
   // ─── place / remove ─────────────────────────────────────────────────
