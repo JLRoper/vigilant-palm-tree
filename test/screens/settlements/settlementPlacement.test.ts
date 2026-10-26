@@ -54,6 +54,7 @@ registerHooks({
 
 const { CityView } = await import("../../../src/screens/settlements/cityView/cityView");
 const { BuildingPlacer } = await import("../../../src/screens/settlements/cityView/buildingPlacer");
+const { cartCommitSignature } = await import("../../../src/screens/settlements/cityView/commitSignature");
 const { toolbarHeight } = await import("../../../src/screens/shared/panelRail");
 const { buildCityScene } = await import("../../../src/render/scene/sceneBuilder/cityScene");
 const { paintCityGhostBuilding } = await import("../../../src/render/scene/paint2d");
@@ -502,5 +503,77 @@ test("refusal: the reason is carried exactly when the ghost is refused, never on
 });
 
 // ── finding 3 ─────────────────────────────────────────────────────────
-// (confirm idempotence: added with the fix that closes it)
+
+test("confirm: a second confirm of the same cart writes nothing", () => {
+  const rig = makeRig();
+  rig.body = (globalThis as { document: { body: MockElement } }).document.body;
+  openPalette(rig, "Town Hall");
+
+  clickCell(rig, 0, 0);
+  assert.equal(rig.writes.length, 1, "the placement itself commits");
+  assert.equal(rig.closeCalls, 1);
+
+  const confirm = buttonLabelled(rig.body, "Confirm");
+  assert.ok(confirm, "the palette must carry a Confirm button");
+  confirm.dispatchEvent("click");
+
+  assert.equal(rig.writes.length, 1, "Confirm must not re-send the cart the placement already sent");
+  assert.equal(rig.closeCalls, 1, "and must not re-apply the same commit either");
+});
+
+test("confirm: a real change after the placement still commits, and the next confirm is quiet again", () => {
+  const rig = makeRig();
+  rig.body = (globalThis as { document: { body: MockElement } }).document.body;
+  openPalette(rig, "Town Hall");
+
+  clickCell(rig, 0, 0);
+  assert.equal(rig.writes.length, 1);
+
+  // A different building on a free cell is a real change: the fingerprint
+  // moves, so the commit must go through.
+  const houseRow = buttonLabelled(rig.body, "House");
+  assert.ok(houseRow, "the palette must list a house");
+  houseRow.dispatchEvent("click");
+  clickCell(rig, 3, 3);
+  assert.equal(rig.writes.length, 2, "a real change must still be committed");
+  assert.equal(rig.writes[1].buildings.length, 2);
+
+  const confirm = buttonLabelled(rig.body, "Confirm");
+  assert.ok(confirm);
+  confirm.dispatchEvent("click");
+  assert.equal(rig.writes.length, 2, "and the confirm that follows is quiet again");
+});
+
+test("confirm: the free starter layout is not re-sent by a confirm either", () => {
+  // Classic mode: an empty settlement is handed its free starter city on open,
+  // and that commit must not be repeated by the palette's Confirm.
+  const rig = makeRig("classic");
+  rig.body = (globalThis as { document: { body: MockElement } }).document.body;
+  rig.view.open(SETTLEMENT_ID, "Test hold", 5, "#d62828", [], [], [], 31144237);
+  assert.equal(rig.writes.length, 1, "the starter layout commits once, at open");
+  assert.equal(rig.writes[0].initialLayout, true);
+
+  const build = buttonLabelled(rig.body, "Build");
+  assert.ok(build);
+  build.dispatchEvent("click");
+  const confirm = buttonLabelled(rig.body, "Confirm");
+  assert.ok(confirm);
+  confirm.dispatchEvent("click");
+
+  assert.equal(rig.writes.length, 1, "Confirm must not re-send the starter layout");
+});
+
+test("commit signature: identical carts collide, a real difference does not", () => {
+  const cart: BuildingDef[] = [{ gx: 0, gy: 0, kind: "townHall", level: 1, style: "pixel", w: 2, h: 2 }];
+  const settled = cartCommitSignature(cart, false, undefined, {});
+  assert.equal(cartCommitSignature([...cart], false, undefined, {}), settled);
+  assert.notEqual(cartCommitSignature(cart, false, undefined, { gold: 150 }), settled, "an unpaid charge is a different write");
+  assert.notEqual(cartCommitSignature(cart, true, undefined, {}), settled, "the initial layout is a different write");
+  assert.notEqual(cartCommitSignature(cart, false, { q: 4, r: 4 }, {}), settled, "a district is a different write");
+  assert.notEqual(
+    cartCommitSignature([...cart, { gx: 3, gy: 3, kind: "house", level: 1, w: 1, h: 1 }], false, undefined, {}),
+    settled,
+    "a second building is a different write",
+  );
+});
 
