@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { BuildingDef } from "@heroes/contracts";
+import {
+  buildingSettlementEffects,
+  effectiveSettlementIncome,
+  playerEffectiveSettlementIncome,
+} from "@heroes/engine";
 import { updateHud, type PathCostReadout } from "../../../src/screens/shared/hud";
 import { emptyWarehouse, makeHero, makeSettlement, makeState } from "../../charter/_helpers";
 
@@ -117,4 +122,89 @@ test("hud: no owned settlements degrades to a plain explanation", () => {
       "Upkeep: troops 0g + 0 food/wk (hero purse; larder first, then your own settlements' food while standing on one)\n" +
       "Wealth: 0g — 0g on heroes + 0g in settlement treasuries",
   );
+});
+
+// ── C-POLISH-3: the INCOME pill must be a function of the loaded state ──
+//
+// A playthrough reported the HUD's INCOME "moving 40g with no intervening
+// command" (3540 -> 3500 after selecting a hero). It was not a recomputation
+// artefact: 3540 was the client's boot/starter world (500x1 + 1500x2 pop-tax
+// plus a district market's 40g) and 3500 was the game the player then created
+// (the same two seats, whose district holds a granary and a house instead).
+// The two renders below pin both halves of that: the pill cannot drift while
+// the state stands still, and the 40g really does belong to a building in the
+// state, so any future move of that number is attributable to the state.
+
+const SEAT_TAX_TOTAL = 500 * 1 + 1500 * 2;
+
+function twoSeatState(overrides: Parameters<typeof makeState>[0] = {}) {
+  return makeState({
+    settlements: [
+      makeSettlement("castle-1-11-8", 0, 11, 8, { population: 500, goldTax: 1 }),
+      makeSettlement("castle-2-18-13", 0, 18, 13, { population: 1500, goldTax: 2 }),
+    ],
+    heroes: [makeHero("p0-hero", 0, 11, 8)],
+    ...overrides,
+  });
+}
+
+test("hud: two consecutive renders with no command in between are identical, and match the engine's income", () => {
+  const state = twoSeatState();
+  const first = render(state);
+  const second = render(state);
+  assert.equal(first.income.textContent, String(SEAT_TAX_TOTAL));
+  assert.equal(second.income.textContent, first.income.textContent, "an idle state must not move the income pill");
+
+  // Same world, different object (the reducer's normal shape): still the same
+  // figure, i.e. the pill reads the state and not a hidden accumulator.
+  const copy = JSON.parse(JSON.stringify(state)) as ReturnType<typeof makeState>;
+  assert.equal(render(copy).income.textContent, first.income.textContent);
+  assert.equal(
+    first.income.textContent,
+    String(playerEffectiveSettlementIncome(state, 0)),
+    "the pill is the engine's own figure for the loaded state",
+  );
+});
+
+test("hud: the pill is the empire total, so it never equals one settlement's own Income/turn row", () => {
+  const state = twoSeatState();
+  const h = render(state);
+  const ownRow = effectiveSettlementIncome(state.settlements["castle-1-11-8"], state.heroes);
+  assert.equal(h.income.textContent, String(SEAT_TAX_TOTAL));
+  assert.equal(ownRow, 500, "the settlement panel's Income/turn row is that settlement alone");
+  assert.notEqual(h.income.textContent, String(ownRow), "the HUD sums every owned settlement");
+});
+
+test("hud: the 40g a district market adds is the state's, and the pill follows it", () => {
+  const market = buildingSettlementEffects("market", 1).goldPerTurn;
+  const withMarket = twoSeatState({
+    settlements: [
+      makeSettlement("castle-1-11-8", 0, 11, 8, { population: 500, goldTax: 1 }),
+      {
+        ...makeSettlement("castle-2-18-13", 0, 18, 13, { population: 1500, goldTax: 2 }),
+        districts: { "18,12": { q: 18, r: 12, citySpots: [], buildings: [{ gx: 0, gy: 0, kind: "market", level: 1, style: "classic" }] } },
+      },
+    ],
+  });
+  const plain = render(twoSeatState());
+  const district = render(withMarket);
+  assert.equal(Number(district.income.textContent) - Number(plain.income.textContent), market);
+  assert.equal(district.income.textContent, String(SEAT_TAX_TOTAL + market));
+});
+
+test("hud: a round advance re-reads the state, so a real income change does show", () => {
+  const before = render(twoSeatState());
+  const after = render(twoSeatState({ round: 2, day: 1, selectedHeroId: "p0-hero" }));
+  assert.equal(after.income.textContent, before.income.textContent, "moving the selection is not an economy change");
+
+  const taxed = render(
+    twoSeatState({
+      round: 2,
+      settlements: [
+        makeSettlement("castle-1-11-8", 0, 11, 8, { population: 500, goldTax: 2 }),
+        makeSettlement("castle-2-18-13", 0, 18, 13, { population: 1500, goldTax: 2 }),
+      ],
+    }),
+  );
+  assert.equal(taxed.income.textContent, String(500 * 2 + 1500 * 2), "a real tax change is reported");
 });

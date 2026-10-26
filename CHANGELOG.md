@@ -10,6 +10,28 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.36.3] - 2026-10-26
+
+Four city-UI findings from the consolidated playthrough report. No engine or economy
+code changed: every one is what the client renders.
+
+- **The Build palette's "Cart:" line is a charge, not a running total.** It printed the
+  cart's internal net (a placement counts positive) tinted green whenever the settlement
+  could afford it, so spending read as income; and it kept accumulating against the
+  palette-open baseline after the placement had already been paid for. It now shows what
+  the cart still owes -- a cost signed negative in the cost amber, a destroy refund
+  positive in green, red only for a charge the treasury cannot cover -- and clears once
+  the charge has landed (`buildingPlacer.ts`, `netCost.ts`).
+- **The palette list keeps its scroll offset** across a selection and a placement. Both
+  re-render the list, which replaced the scrolling element and threw the viewer back to
+  the top, so the Production and Civilian rows were a scroll away after every placement.
+- **The Load Game row reads the round, not `games.turn`.** That column is written once at
+  creation and never advances, so a game on round 37 advertised itself as "turn 1"
+  (`loadGameModal.ts`).
+- **The HUD's INCOME pill is pinned to the loaded state.** The reported "40g with no
+  intervening command" was the client swapping its boot starter world for the game the
+  player then created; the readout is now asserted to be the engine's own figure for the
+  state on screen (`hud.test.ts`).
 ## [0.36.2] - 2026-10-26
 
 Three settlement-economy fixes from the classic playthrough findings.
